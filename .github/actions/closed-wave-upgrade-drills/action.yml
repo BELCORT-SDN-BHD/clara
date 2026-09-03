@@ -295,12 +295,14 @@ runs:
     # on disk; `drop database if exists` no-ops harmlessly otherwise). NOTE: this
     # step's own shared kit (tests/x42-split-upgrade-kit.mjs `freshDb()`) ALSO calls
     # `migrate({ dir: MIG_DIR })` at the real frontier, inside a two-reset sequence
-    # whose ORDER is explicitly load-bearing (its own comment) — found while folding
-    # #518 but NOT given an in-file sweep in this round (the file's own ordering
-    # complexity makes a rushed addition here riskier than the WO's five already-
-    # verified files); flagged as a follow-up in the PR body, not fixed here. The
-    # between-step cleanup below still protects it against CROSS-step contamination
-    # from whichever drill ran before it in this job.
+    # whose ORDER is explicitly load-bearing (its own comment). That kit DOES sweep
+    # in-file: review-518-r2 F1 put a `sweepChainMintedRoles()` after EACH of its two
+    # `reset()`s, before each `migrate()` — so this step is protected inside the file
+    # as well as between steps, and adding a sweep here would be a no-op. (Corrected
+    # 2026-09-03: this note previously said the kit had been left unswept as a
+    # follow-up, which UNDERSTATED the protection and invited a redundant sweep.)
+    # The between-step cleanup below still protects it against CROSS-step
+    # contamination from whichever drill ran before it in this job.
     - name: Cluster cleanup — drop clara_x42_split_upgrade_ci + sweep chain-minted roles
       if: always()
       working-directory: packages/db
@@ -359,10 +361,12 @@ runs:
     # mechanism, this step's own database. NOTE: this drill's shared kit
     # (tests/hrd-b-upgrade-kit.mjs `freshBaseline()`) copies every successor migration
     # ABOVE 0147 (unbounded — reaches the real frontier) and is called once per test
-    # cell in tests/hrd-b-upgrade-drill.test.mjs (several cells, one process) — found
-    # while folding #518 but NOT given an in-file sweep in this round (out of scope,
-    # same reasoning as the x42-split kit above); flagged as a follow-up in the PR
-    # body. The between-step cleanup below still protects it against CROSS-step
+    # cell in tests/hrd-b-upgrade-drill.test.mjs (several cells, one process). That kit
+    # DOES sweep in-file: review-518-r2 F1 put a `sweepChainMintedRoles()` between its
+    # `reset()` and its `migrate()`, so EVERY cell starts on a swept cluster and a
+    # sweep here would be a no-op. (Corrected 2026-09-03: this note previously said the
+    # kit had been left unswept as a follow-up, which UNDERSTATED the protection.)
+    # The between-step cleanup below still protects it against CROSS-step
     # contamination from whichever drill ran before it in this job.
     - name: Cluster cleanup — drop clara_hrd_b_upgrade_ci + sweep chain-minted roles
       if: always()

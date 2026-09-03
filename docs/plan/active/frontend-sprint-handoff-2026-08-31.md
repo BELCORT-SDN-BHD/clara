@@ -197,7 +197,11 @@ full-suite gates.
 ## 8 · Design law, and every resource you must consume (the owner's standing question)
 
 **The design authority is the repo github.com/BELCORT-SDN-BHD/clarabook-frontend** (PR #1 merged
-2026-08-26, `a7709883`; one open PR #2 on the brand guideline — re-fetch at FS-9). Owner rulings
+2026-08-26, `a7709883`; one open PR #2 on the brand guideline — ~~re-fetch at FS-9~~ **the FS-9
+re-fetch is DONE**: its result — the authority's tip and PR #2's state, both measured with `gh` —
+is stamped in the conformance record's sign-off banner,
+[`clarabook-conformance-pass-3-2026-09-02.md`](clarabook-conformance-pass-3-2026-09-02.md), and is
+read there rather than copied here, so this line cannot go stale behind it). Owner rulings
 Q1/Q4 (`mohe-grill-rulings-2026-08-27.md`): its output is **DESIGN LAW + prototype evidence**; the
 production app is `apps/web` in THIS repo; the design system, brand, routing IA and screens are
 **PORTED, never redesigned** — "no redesign should be needed" is the standard you are held to, and a
