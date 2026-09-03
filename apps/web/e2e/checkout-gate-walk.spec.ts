@@ -148,9 +148,20 @@ test("THE WHOLE JOURNEY: confirm → DPA → checkout → success → the firm o
   expect(wallCall.authorization).toBe("Bearer e2e-auth-wall-service-token");
   // M1: the address `apps/web`'s OWN edge observed, forwarded for the C2 limb
   // — never the Origin header, which is one value for the whole deployment.
+  //
+  // THE NEEDLE FOLLOWS THE ORIGIN, and the reason is the same class as the
+  // hardcoded `APP_ORIGIN` two dozen lines up (rev-lane-b r3, N-1). This read
+  // `"127.0.0.1:3100"` as a literal: on any port but 3100 that string can never
+  // appear in ANY value, so the assertion held for every input and the cell that
+  // exists to catch M1 stopped catching it. The reviewer proved it — with the
+  // defect injected (`const clientIp = proof.origin`) the browser leg stayed
+  // 55/0 on their range, while the unit layer caught it at 2280/2.
+  //
+  // A needle spelled against one deployment is not a needle. Derived from
+  // APP_ORIGIN so it moves with the range and the assertion keeps discriminating.
   expect(wallCall.clientIp, "no client address was forwarded to the wall").toBeTruthy();
   expect(wallCall.clientIp).not.toContain("clarabook");
-  expect(wallCall.clientIp).not.toContain("127.0.0.1:3100");
+  expect(wallCall.clientIp).not.toContain(new URL(APP_ORIGIN).host);
 
   // ── ④ the DPA step ────────────────────────────────────────────────────────
   await scan(page, "the DPA step");
