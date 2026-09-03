@@ -29,7 +29,8 @@ one deploy stale (`packages/runtime/README.md`'s "SERVING … v16" lines, correc
 
 1. **Merge state.** `#511` merged to `main` at `344f7ad8` (`gh pr view` / `git log`).
 2. **Build proof before deploy.** `pnpm --filter @clara/runtime build` exit 0. Local bundle proof
-   (before the remote build, on this host, commit `344f7ad8`): `.output/server/index.mjs` —
+   (before the remote build, on this host, commit `344f7ad8`): the built bundle at
+   packages/runtime/.output/server/index.mjs (build output, untracked) —
    **8,772,097 bytes**, sha256 `4582a5ca…`. Binary-safe grep of the built file (`grep -ac` for
    matching lines, `grep -oa | wc -l` for occurrences — plain `grep -c`/`grep -o` misclassify
    this file as binary and undercount, which is where an earlier pass's arithmetically
@@ -78,7 +79,8 @@ build prints three `ERROR failed to read input source map … @ai-sdk/*/dist/ind
   also `ok`, not separately narrated here). `ready: true` carries two `warnings` alongside it:
   `held_outbox` 119 and the wake-engine lag (see §6 below for the wakeEngine detail); both are a
   standing, pre-existing state, not new from this deploy.
-- **Served bundle**, read-only `fly ssh console` grep of `/app/.output/server/index.mjs`,
+- **Served bundle**, read-only `fly ssh console` grep of the served bundle at
+  /app/.output/server/index.mjs on the machine (a container path, untracked),
   binary-safe (`grep -ac` / `grep -oa | wc -l`), read at **13:52 MYT** by the lead:
   `chatTurn_v17` **9 lines / 14 occurrences**, the Stripe-webhook route **2 lines / 2
   occurrences** — identical counts to the local build in §2. **The served bundle is NOT the
