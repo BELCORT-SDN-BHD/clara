@@ -150,7 +150,15 @@ against the live pool constructors before trusting ≈27**): runtime pool 5 + re
 pool 5 + WDK engine 5 + control/router LISTEN 2 + the six consumer-lane leader
 sessions (matcher, autodraft, local_facts, sst_watch, facts_gate,
 classify) 6 + the write pool 2 + **the freeform pool 2**
-(`CLARA_FREEFORM_POOL_MAX`, default 2). The Gate-G1 bank pool's 2 sit outside this
+(`CLARA_FREEFORM_POOL_MAX`, default 2) + **FS-4 C-5's two checkout-gate pools, +4**:
+the Stripe webhook pool 2 (`CLARA_STRIPE_WEBHOOK_POOL_MAX`, default 2,
+`clara_stripe_webhook_login`) and the pre-session auth-wall pool 2
+(`CLARA_AUTH_WALL_POOL_MAX`, default 2, `clara_auth_wall_login`) — so the arithmetic
+above now reads **≈31**, and it is still the UNMEASURED ceiling the paragraph opens
+with. **Both C-5 pools are LAZY** (their logins ship NOLOGIN and gain a DSN at a
+ceremony that follows the migration), so they hold zero sessions until that ceremony —
+the same carve-out the bank pool has, counted here rather than omitted because they
+WILL be live at the Wave-G reset. The Gate-G1 bank pool's 2 sit outside this
 count until its own ceremony gives `clara_wake_bank_login` a password. Document
 intake and extraction reuse short checkouts from the existing runtime pool; no DB
 connection is held while streaming, scanning, uploading, downloading, or calling
@@ -199,6 +207,9 @@ bookkeeper+ authority, never a firm-wide grant.
 | `CLARA_WRITE_POOL_MAX` | Write-pool size (default 2). |
 | `CLARA_FREEFORM_DATABASE_URL` | **F-A6 PR-2.** The `clara_freeform_login` DSN (member of `clara_freeform_ro` alone). REQUIRED in production — **fail-closed boot assert**, and `scripts/serve.mjs:22` *and* `scripts/worker.mjs:17` BOTH call it before importing the built server, so a pre-ceremony deploy takes the **server AND the worker** down, not merely the freeform read. `CLARA_START_WORLD=0` does not exempt you. **Deploy order:** `0131` creates the login NOLOGIN; the operator ceremony gives it LOGIN+password and sets this secret — it must be present before the `chatTurn_v15` image boots. |
 | `CLARA_FREEFORM_POOL_MAX` | Freeform-pool size (default 2). Read when the pool is CREATED. |
+| `CLARA_STATEMENT_TIMEOUT_MS` | Estate-wide per-session `statement_timeout` (default `30000`). **FS-4 C-5 widened its blast radius:** the two checkout-gate pools read it too (`lib/checkout-pools.mjs:52`), so this knob now bounds the Stripe webhook and the pre-session auth wall as well as the lanes it already governed. A change here touches the MONEY lane — a value below a webhook's own round trip makes the door refuse under load, and the refusal is Stripe-visible. |
+| `CLARA_IDLE_IN_TXN_TIMEOUT_MS` | Estate-wide `idle_in_transaction_session_timeout` (default `15000`), read by the same two checkout-gate pools (`lib/checkout-pools.mjs:53`). Same note: it now binds the money lane. |
+| `CLARA_CONNECT_TIMEOUT_MS` | Estate-wide connection-acquisition bound (default `5000`), read by the same two checkout-gate pools (`lib/checkout-pools.mjs:54`). Both C-5 pools are LAZY, so this is first felt at the ceremony that gives their logins a DSN, not at boot. |
 | `CLARA_FREEFORM_STATEMENT_TIMEOUT_MS` | The H-4 backstop: a session `statement_timeout` the POOL sets before calling `wake_freeform_read`, because PostgreSQL arms the statement timer once and a `SET LOCAL` inside the verb cannot bound a single stalled FETCH. Default `15000`. **CLAMPED, not trusted:** anything that is not a whole number of milliseconds strictly greater than the verb's own 5000 ms in-loop deadline falls back to the default with a warning naming the variable and the value — `0` means UNLIMITED in PostgreSQL and would delete the wall, and anything at or below 5000 would fire before the in-loop deadline and destroy the receipt that deadline exists to commit. **There is no upper limit**: raise it freely if you mean to. |
 | (invoice-facts attempt cap) | Owned by the **database** — hard-coded to 3 in `0009`'s enqueue/claim path. There is **no** runtime env var (an env override would be a no-op); Tier B is the honest permanent fallback once the cap is reached. |
 | `CLARA_CLAMD_MIN_BACKOFF_MS` / `CLARA_CLAMD_MAX_BACKOFF_MS` | clamd self-heal backoff (PIN-AB-2): a clamd exit is non-fatal; intake fails closed honestly (`503 scanner_unavailable`) while it restarts. |
