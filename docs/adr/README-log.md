@@ -205,3 +205,25 @@ re-reading find?"
 > committed blob — following the `-09-01` → `-09-01-pm` precedent. 裁-129…131 stay in the `-09-02`
 > file because that is where they landed (#506). §15's rows, law 28's and law 38's "amended by"
 > lines and `AGENTS.md`'s ledger chain all name the file each ruling actually lives in.
+
+## 2026-09-03 — 裁-114 gets the §15 row it was owed, carrying 裁-142's errata
+
+> **裁-114** (2026-09-02 morning — PRD §6's split-trust corollary re-stated to "the wall that
+> actually holds", and invariant 16 split into 16(a) document/OCR egress and 16(b) trace export)
+> **was never given a §15 row**, unlike 裁-111/125/129/131/133/135/139/141: measured
+> `git grep -c 裁-114 docs/adr/README.md docs/adr/README-log.md` = 0 in both, and neither
+> "split-trust" nor "the wall that actually holds" appeared here under any other law name, so there
+> was no existing row to amend — the ruling was executed in the law documents (§6's "Split-trust
+> corollary" and ARCHITECTURE §1's runtime line both cite the number) while the digest that
+> indexes it stayed silent.
+> Added now per 裁-140, in §15's own row shape, with the ledger entry as the source of truth and
+> **carrying 裁-142's amended-by note** (2026-09-03): the premise's example named
+> `STRIPE_WEBHOOK_SECRET`, which is runtime/Fly env rather than `apps/web`'s — 裁-126 routes the
+> `whsec_` value to Fly secrets and 裁-93 had already ruled the webhook to `packages/runtime`
+> before 裁-114 was written; `apps/web`'s real FS-4 credential is `STRIPE_SECRET_KEY`. **The ruling
+> stands**: a wrong illustration does not move the wall it illustrates. The two law documents
+> inherited the same wrong example and were **corrected by #526 (裁-142, owner 2026-09-03; MERGED
+> `5d70b8dd`)** — the owner's ruling, not a lead's errata, which is why they waited: PRD §6's
+> Split-trust corollary now reads "example corrected by 裁-142" and names `STRIPE_SECRET_KEY`, and
+> ARCHITECTURE §1 names `SUPABASE_SERVICE_ROLE_KEY` and `STRIPE_SECRET_KEY` while marking
+> `STRIPE_WEBHOOK_SECRET` as RUNTIME env. This minute records the missing row, not a new decision.

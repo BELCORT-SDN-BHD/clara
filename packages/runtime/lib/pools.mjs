@@ -49,6 +49,12 @@ import { connConfig, assertNoTargetSplit } from "./relay.mjs";
 // before the call, a DISCARD ALL release, and no callback seam at all), and lib/freeform-read.mjs
 // states each. This file keeps the ONE boot door and the ONE shutdown door by calling into it.
 import { assertFreeformPoolConfig, endFreeformPool } from "./freeform-read.mjs";
+// FS-4 C-5: the SIXTH and SEVENTH logins (clara_stripe_webhook_login, clara_auth_wall_login)
+// and their four verbs live in their own module for the same reason freeform-read.mjs does —
+// each group role holds ZERO relation privileges and EXACTLY TWO executable routines, and a
+// money lane's whole reachable surface has to be readable in one place. This file keeps the ONE
+// boot door and the ONE shutdown door by calling into it.
+import { assertCheckoutPoolConfig, endCheckoutPools } from "./checkout-pools.mjs";
 
 const TEST_MODE = process.env.RELAY_TEST_MODE === "1";
 
@@ -134,6 +140,14 @@ export function assertProductionPoolConfig() {
   // its own PR merging; F-A6 PR-1 is merged and ceremonied already). The assert itself lives
   // beside the pool it guards, with both names as its own constants.
   assertFreeformPoolConfig();
+  // FS-4 C-5. DELIBERATELY the bank pool's LAZY posture, not the write/freeform floors' eager
+  // one, and the reason is deploy ordering: both checkout logins ship NOLOGIN (0160/0161) and
+  // 0161's own tail REFUSES `rolcanlogin`, so flipping them is an out-of-band ceremony that can
+  // only run after the migrations reach the live project. An eager assert would refuse to boot
+  // chat, intake and the durable engine from the moment this image ships until that ceremony
+  // ran. This call WARNS and names the two variables; the pools themselves still fail closed at
+  // first use.
+  assertCheckoutPoolConfig();
 }
 
 function loginConfig(which) {
@@ -551,4 +565,5 @@ export async function endPools() {
   if (write) await write.end().catch(() => {});
   if (bank) await bank.end().catch(() => {});
   await endFreeformPool(); // F-A6: the fifth login's pool, owned by lib/freeform-read.mjs.
+  await endCheckoutPools(); // FS-4 C-5: the sixth and seventh, owned by lib/checkout-pools.mjs.
 }

@@ -1,5 +1,80 @@
 # ClaraBook conformance pass — 2026-09-02 (third pass, FS-9, P6's entry gate)
 
+## SIGNED OFF — 2026-09-03 @ `5d70b8dd`
+
+**19 lines MET · 3 OWED (owner) · 2 deferred by ruling · 3 carried open (non-gating) · 2 not
+FS-9's (FS-10/FS-11).** FS-9 (裁-9; `docs/plan/active/frontend-sprint-handoff-2026-08-31-orders.md`
+§FS-9) is CLOSED as P6's entry gate. Every verdict in the table was **re-measured on this tip**
+with the instrument named beside it — never read off an earlier mark. **This table supersedes the
+inline marks in §3 and §5 wherever the two differ:** those were taken at `dfe9406c`, and thirteen
+commits have landed since — including **#519** (P6-5, merge `1697714b`), which closes rows §3's
+re-measure could not see. There are **four** such divergences and §3's own banner enumerates every
+one of them by name: two are #519 landing after `dfe9406c`, two are wordings this sign-off found
+too wide (rows 12 and 22). The earlier marks stay as the honest record of what was true at their
+own tips, never corrected in place.
+
+**The re-fetch condition, discharged today.** FS-9's mandate opens "re-fetch … at `main` (PR #1
+merged `a7709883`; one open PR #2 on the brand guideline)". Measured 2026-09-03 through
+`gh api repos/BELCORT-SDN-BHD/clarabook-frontend/commits/main`: the authority's `main` is
+`a770988350c56ca666b38f6ce06128815e0cfda2` (short `a7709883`), committed 2026-08-26T16:15:38Z —
+**unmoved** — and `gh pr list --state all` returns **PR #2 still OPEN, unmerged**. The commit this
+record pins IS the authority's tip today; no brand-guideline delta was read stale.
+
+| # | FS-9 line | Verdict | Evidence, re-measured at `5d70b8dd` |
+|---|---|---|---|
+| 1 | The authority re-fetched at `main`; its DESCRIPTIVE resources read as the parity reference for every built surface | **MET**, scope stated | The two `gh` reads above. Scope this pass can and did claim: STRUCTURAL parity (routes · components · props · copy). A component-by-component VISUAL diff is line 28, not this one — §7 says so in its own words |
+| 2 | Deviations recorded by ruling, never absorbed | **MET** | §2's ten rows, each with its ruling cite; 裁-137 carried with its live site `apps/web/components/entry/brand-lockup.tsx:133` |
+| 3 | The record filed — consumed / diverged-by-ruling / owed | **MET** | §1 / §2 / §3 of this file; filed by #506 (`18aba67d`), re-measured by #523 (`c54954fa`) |
+| 4 | P6-6 ① Ledger Fold ported | **MET** | `git ls-files apps/web/public/brand` → `apps/web/public/brand/logo/clarabook-ledger-fold-brand-ink-v1.0.png` (7 tracked files: 2 brand PNGs, 3 `.ttf`, 2 licences). #514 (`e24865a9`) |
+| 5 | P6-6 ② mascot ported | **MET** | same census → `apps/web/public/brand/clara/clara-quiet-clerk-neutral-v1.0.png`. #514 |
+| 6 | P6-6 ③ the ClaraBook copy pass | **MET** | 13 `ClaraBook` occurrences in `apps/web/messages/en.json`; `apps/web/lib/members/invite-mail.ts:154-158` reads "on ClaraBook"/"invited to ClaraBook". The 裁-137 half is pinned by a named browser cell — `apps/web/e2e/identity-finish.spec.ts:84`, *"裁-137: the wordmark is COMPOSITED lowercase, and its text is still ClaraBook"*, reading `text-transform` off the live element at `:94`. #514 + 裁-137 |
+| 7 | P6-3 ② the four ruled-but-unbuilt token/a11y debts | **MET** | The class ring-ring/50 has **0** hits across `apps/web/app`, `apps/web/components` and `apps/web/lib`; `apps/web/components/ui/button.tsx:35` carries `focus-visible:ring-ring/70 focus-visible:ring-offset-2 focus-visible:ring-offset-background`; `apps/web/app/globals.css:304` is `--input: #8b8981;`; 裁-13's floor is `--target-min: 24px` (`globals.css:382`) READ by `apps/web/test/a11yRules.ts:50` (`TARGET_MIN_PX`, which throws if the token is absent), 24 cells in `apps/web/test/a11yRules.test.ts`. #515 (`af08c75e`); 裁-138 accepted all four visible changes on measured before/after screenshots |
+| 8 | The five a11y adds found this pass (DS-01…DS-05) | **MET** | **14** `motion-safe:`-gated utilities across the **2** class strings in `apps/web/components/ui/dropdown-menu.tsx` (`:87`, `:192`) — the raw grep returns 3 LINES and 15 occurrences, one of which is the explanatory comment at `:79`, so the honest count is of gated utilities, not of matching lines; `apps/web/components/common/skip-link.tsx` wired at `apps/web/app/(firm)/layout.tsx:75`; `aria-busy` renders at `apps/web/components/clara/ClaraThreadView.tsx:253` and `apps/web/components/clara/InterviewRunCard.tsx:284`; the live region moved off the scroll container; the drafts-queue halo carried by the global 70 % recut. #515 |
+| 9 | DS-09 — per-field validation association | **OPEN**, non-gating (this pass's own "candidate") | Unchanged on this tip: **2** rendered `aria-invalid={…}` sites (`apps/web/components/common/money-input.tsx:113`, `apps/web/components/reports/ArtifactRow.tsx:184`) and **70** `confirmDisabled=` sites of which **4 are test call-sites** (`apps/web/components/close/close-t1-hold-receipts.test.tsx` ×1, `apps/web/components/reports/reports-snapshots-seeding-keyboard.test.tsx` ×3), so **66** are production. Form-level errors still announce correctly via `StateBanner`'s `role="alert"` |
+| 10 | P6-4 / task #14 — the float-hook money parsers | **MET** | The three named files are **0** hits in `git ls-files`; `apps/web/components/common/money-input.tsx:75,86` delegates to the shared `parseMoneyInput`. #505 (`77660e34`), with `apps/web/e2e/money-input.spec.ts` as its built-app leg |
+| 11 | 裁-128 — the onboarding checklist's apply-standard-chart button | **MET** | `apps/web/components/clara/ApplyStandardChartControl.tsx` + `apps/web/lib/onboarding/coa.ts`, offered only when `coa_chart_state` reads `pending`. #519 (`1697714b`) — **landed after §3's re-measure tip, which is why §3 still reads it open** |
+| 12 | ⌘K reaching a NAMED client from firm altitude | **OPEN**, unhomed — see the decision note below | `apps/web/lib/command/routes.ts` still gates `CLIENT_ROUTES` on `resolveClientIdFromPathname`, and `apps/web/components/command/command-palette.tsx:118-125` renders `clientMatches` only when a `clientId` resolves. **The absence claim, with its instrument and scope** (rev-528 N-3): the roster census walks the **11 tracked files** under `apps/web/components/command` + `apps/web/lib/command` and reads the **19 declared route rows** (10 `FIRM_ROUTES` + 9 `CLIENT_ROUTES`) — **0** index a client NAME. Its positive control is row 18's own subject: the same census DOES report `adminMembers` and `clientRegister` as firm-altitude rows, so the instrument is not blind to the thing it reports missing. **Narrowed by that census:** ⌘K DOES reach the client REGISTER from firm altitude (the `clientRegister` row, `href: "/clients"`, `scope: "firm"`) — the residue is a jump to a client BY NAME. "Ordered nowhere" carries its own scope: the ten `docs/plan/active/mohe-grill-rulings-*.md` ledgers plus `PROGRESS.md`, needles *client name* · *client-name* · *by name* → 3 hits, all unrelated (an s.44(6) donation, "ruled below by name", "client named read"). 裁-37/裁-141 govern the "Do" half only |
+| 13 | P6-6 ④ the entry-face finish | **MET** | `apps/web/app/(entry)/layout.tsx:49` renders `<BrandLockup />`. #514 |
+| 14 | task #15 — the rail inset | **MET** | `apps/web/components/clara/ClaraRail.tsx:62` is `sticky top-0 flex h-dvh w-80 shrink-0`, and `<RailMount />` sits INSIDE the layout's flex row (`apps/web/app/(firm)/layout.tsx:105`). #507 (`cea3da39`); browser cell `apps/web/e2e/parity-holes.spec.ts:49` |
+| 15 | task #15 — the rail state bleed | **MET** | `apps/web/components/clara/rail-mount.tsx:57` — `<ClaraRail key={clientId ?? "firm"} …>`. The boundary moved UP to the mount, strictly subsuming #507's view-level key; `apps/web/components/clara/rail-boundary.test.tsx` drives the REAL mount point. #519 — **after §3's re-measure tip** |
+| 16 | task #15 — IA-10, the client/thread mismatch on the escalated route | **MET** | `apps/web/app/(full)/clients/[clientId]/clara/[threadId]/page.tsx:29-30` — `sessionBelongsToClient(session, clientId)` → `notFound()`. Browser cell `apps/web/e2e/parity-holes.spec.ts:75` ("indistinguishable from not found") |
+| 17 | task #15 — IA-06, the thread re-point to a colleague's shared thread | **MET** | `apps/web/lib/clara/useActiveThread.ts:15-24` — `selectOwnSession` scopes on `session.created_by === callerSubject`. `git log -S"selectOwnSession"` names #507 (`cea3da39`); browser cell `apps/web/e2e/parity-holes.spec.ts:24` ("chooses the caller's own thread") |
+| 18 | task #16 — nav wiring + the reverse-direction nav gate | **MET** | `adminMembers` is a `FIRM_ROUTES` id (`apps/web/lib/command/routes.ts:142`); the gate ships WITH its positive control — `apps/web/lib/command/routes.test.ts:261` ("REVERSE GATE positive control: a planted firm page … is reported as an orphan"), `:287` the gate itself, `:298` the /admin/members row. #504 (`c72459f4`); `apps/web/e2e/firm-navigation-walk.spec.ts` |
+| 19 | 裁-117 (b) — the client's name in the workspace header | **MET** | `apps/web/app/(firm)/clients/[clientId]/layout.tsx:44` renders `t("clientHeader", { clientName: client.name })` in the header, above `ClientScopeProvider`. #507 |
+| 20 | 裁-117 (c) — route-level error boundaries | **MET** | `apps/web/app/(entry)/error.tsx`, `apps/web/app/(firm)/error.tsx`, `apps/web/app/(full)/error.tsx`. #507; browser cell `apps/web/e2e/parity-holes.spec.ts:142` (a THROWN page, not a spelling check) |
+| 21 | 裁-117 (d) — password recovery | **MET** | `apps/web/components/entry/password-recovery-form.tsx` · `apps/web/components/entry/password-reset-form.tsx` · `apps/web/components/entry/password-reset-route.tsx` · `apps/web/app/(entry)/forgot-password/page.tsx` · `apps/web/tests/password-recovery-handler.test.ts`; browser cells `apps/web/e2e/parity-holes.spec.ts:82,126`. #507. The owner's console half (redirect URL · reset template · password policy) was done 2026-09-02 (`PROGRESS.md`) |
+| 22 | DS-07 — the control-height §5.2 question | **OWED — an owner DECISION, not a build** | Still open, still upstream-inherited: **no `--control-*` token exists** in `apps/web/app/globals.css`; `apps/web/components/ui/button.tsx:61-66` ships h-6/h-7/h-8/h-9 (24/28/32/36 px, default 32) and `apps/web/components/ui/input.tsx:12` a single h-8, where contract §5.2 (`g5-design-system/docs/01-TOKEN-CONTRACT.md:138`, rows `:142-144`) specifies 32/36/40. **Upstream-inherited, narrowed to what is actually identical** (rev-528 N-1 — the whole files are NOT: blob `e890edb2` vs `b0336017`, 97 vs 58 lines, and the authority still carries ring-ring/50 where rows 7 and 25 record the recut to /70): the SIZE-VARIANT BLOCK is byte-identical both sides — md5 `6f29955ea9f9f080f7e602149d6a4aa6` over `apps/web/components/ui/button.tsx:61-73` and the authority's `button.tsx:22-34` — and the authority's own `globals.css` has **0** `--control-` occurrences. That block identity is the only identity this argument needs: the heights were ported, not authored here, and §5.2 was implemented in NEITHER repo. Grepping `control-height` / `--control-` / `DS-07` across `docs/plan/active/` and `PROGRESS.md` returns **0 hits outside this file**: it has no home. NOT beta-gating — 裁-13's gate passes at the 24 px floor. See the decision note below |
+| 23 | DS-15 — the five "PORT DRIFT, CONFORMED" recuts carry no 裁/R/Q number | **OPEN**, governance hygiene, non-gating | The file carries **four** "PORT DRIFT, CONFORMED" comments — `apps/web/app/globals.css:97` (contract §6), `:121` (§4.2), `:338` (§7) and `:395` (§7) — over the five recuts §1 enumerates; §1's older citation range `96-118,129,217-372` reaches only the first three, so the four line numbers are the citation from here. The VALUES are not in dispute (裁-138 accepted the four visible ones on measured screenshots); what is missing is a ruling number |
+| 24 | 裁-64② — the `--input` recut PR to the authority repo | **OWED — OWNER** | The value is set here lawfully (#515, `apps/web/app/globals.css:304`); the companion PR to `clarabook-frontend` is outside any lane's write boundary. `PROGRESS.md` already carries it as a launch-sitting item |
+| 25 | R3 §9 — the focus-ring recut PR to the authority repo | **OWED — OWNER** | Same shape, same row in `PROGRESS.md`. 裁-138 restates it: "the two design-authority recut PRs (裁-64② / R3 §9) stay the owner's" |
+| 26 | The ten §2 deviations (Q2 · Q3 · Q5 · R7 · 裁-95 · R3/裁-1 · 裁-64③ · 裁-2 4c · 裁-117 · 裁-137) | **DEFERRED BY RULING** | §2. Each is a deliberate departure marked at its own site — recorded, never absorbed, which is exactly what FS-9 asked for |
+| 27 | The as-built token/component EXTRACTION into `docs/design/DESIGN_SYSTEM.md` | **DEFERRED BY RULING** — Wave G (owner ruling Q7-B) | That file (as re-cut by #523) states the split in its own banner: the authority is `clarabook-frontend@a7709883`, the implementation is `apps/web/app/globals.css`, and "any deviation from the authority is recorded by ruling in the FS-9 conformance record" — i.e. here |
+| 28 | The component-by-component VISUAL parity diff against the g6 prototype | **NOT FS-9's — FS-10** | §7 records the limit honestly (the prototype's source tree was cloned, not diffed visually). The visual pass has a home: FS-10's preview-URL walk, route by route, BEFORE the DNS change. Each P6 train already walked its own journey in a real browser on the built app (裁-86) — 11 specs under `apps/web/e2e` |
+| 29 | The ported surfaces walked end to end on real data | **NOT FS-9's — FS-11** | The sixteen-step walk on the reset estate, driven in a real browser, with its as-run in `docs/plan/completed/` |
+
+**The decision note (line 22, and its neighbour line 12) — put here rather than closed silently.**
+Two items leave FS-9 with no owner and no row, and a sign-off that swallowed them would be the
+"absence is not evidence" failure in its cheapest form:
+
+- **DS-07, the control heights.** The question is not "re-map the cva" — it is **which artifact is
+  authoritative**: the token contract's `--control-sm` · `--control-md` · `--control-lg` at
+  32/36/40 px, or the 24/28/32/36 px that `apps/web` carries in a size-variant block that is
+  **byte-identical to the design authority's own** (md5 `6f29955ea9f9f080f7e602149d6a4aa6`; the two
+  FILES diverge elsewhere, and row 22 names where). Re-mapping `apps/web` alone would desynchronise
+  that block from the port it came from, which is the one thing Q1/Q4 forbid. It is an owner ruling of the same kind as 裁-137 (contract vs. reference), and
+  it belongs beside the two recut PRs at the launch sitting.
+- **Line 12, the ⌘K by-name client jump.** Ordered nowhere — and that absence names its instrument
+  and scope in row 12 rather than asserting itself: a 19-row roster census over the 11 files of the
+  ⌘K surface, carrying its own positive control, plus a needle scan of the ten ruling ledgers and
+  `PROGRESS.md`. 裁-37/裁-141 reach only the "Do" half. Post-beta by shape (the same family as the
+  firm-threads switcher 裁-117 deferred), but it needs to be SAID, not assumed.
+
+Both, plus line 9 and line 23, still owe a `PROGRESS.md` Backlog or Known-issues row — ADR-0075 §6
+is explicit that a deferral's only lawful home is such a row, and this record is not one. That is
+this sign-off's single carried obligation, and it is handed to the harness lane, not left here.
+
+---
+
 *Run to answer FS-9's mandate (`docs/plan/active/frontend-sprint-handoff-2026-08-31-orders.md`
 §FS-9, 裁-9): re-read the clarabook-frontend design authority as the parity reference for every
 built surface in `apps/web`, and record every deviation by ruling, never absorb it. This is the
@@ -103,6 +178,17 @@ authority, marked at its own site, not silently absorbed):
 2026-09-02 against the tip of that day; several are now DONE. Marks added inline; unmarked rows
 are unchanged and still open.
 
+> **Superseded, where they differ, by the SIGN-OFF table at the head of this file (`5d70b8dd`).**
+> **Four divergences, named so a reader never has to find them:** (1) and (2) — `dfe9406c` predates
+> #519, so two rows below still read open that the sign-off measured closed: 裁-128's
+> apply-standard-chart button (P6-5) and task #15's rail state bleed. (3) — the P6-5 paragraph's
+> "⌘K cannot reach a client from firm altitude" is too wide; **row 12** narrows it to a by-NAME jump
+> and carries the pointer at its own site. (4) — the control-height paragraph's "byte-identical"
+> claim about the authority's `button.tsx`/`input.tsx` is FALSE at the FILE level (different blobs,
+> 97 vs 58 lines); **row 22** narrows it to the size-variant BLOCK, which is byte-identical, and
+> that block is all the argument needs. This banner's marks are kept as the record of what was true
+> at `dfe9406c`, never corrected in place.
+
 Each row: file:line · the contract row it fails · the train that owns it · the gating ruling.
 
 ### P6-3 — the four ruled-but-unbuilt token/a11y debts — **DONE, #515**
@@ -159,6 +245,10 @@ render only when the URL already resolves a `clientId`; no row indexes client na
 "one way in, from anywhere" for the client register. 裁-37 governs the "Do" half into P6-5;
 the firm-altitude client-reachability half is unordered anywhere. `apps/web/lib/command/routes.ts:150`;
 `mohe-grill-rulings-2026-08-29.md:256`; IA-15.
+**→ Superseded by row 12 of the sign-off table.** The bolded sentence above is too wide: ⌘K DOES
+reach the client REGISTER from firm altitude (the `clientRegister` row, `href: "/clients"`,
+`scope: "firm"`). What is missing is the jump to a client BY NAME. The finding survives, narrowed;
+the wording is corrected there rather than rewritten here.
 
 ### P6-6 — identity, 4/4 owed (not 3/4) — **DONE, #514**
 
