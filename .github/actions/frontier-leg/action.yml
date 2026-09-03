@@ -200,14 +200,57 @@ runs:
         echo "--- contracts at the ${{ inputs.slice }} frontier: $PASS pass / $FAIL fail ---"
         test "$FAIL" = "0" || { echo "a cross-slice contract is RED at the ${{ inputs.slice }} frontier"; exit 1; }
 
+    # (3d) CLUSTER CLEANUP BEFORE THE ISOLATED DRILL (review-518 follow-up, #518 fold —
+    # the gate reached a SECOND action). Steps (2)/(3)/(3c) above migrated the job's own
+    # `clara_ci` (the postgres:17 service's default database) up to this slice's frontier,
+    # which — same as any 0001->frontier replay — mints the chain roles below migration
+    # 0121 idempotently (`create role ... if not exists`) AND grants them privileges on
+    # clara_ci's own schema objects. `clara_ci` is not read by anything after this point in
+    # the leg. Measured directly (frontier-leg's own step sequence, one throwaway
+    # postgres:17, d-b3): granting CLARA_RIG_ALLOW_ROLE_SWEEP=1 to step (4) ALONE is not
+    # enough — its drill's sweep still throws `role "clara_fn_owner" cannot be dropped
+    # because some objects depend on it` (2BP01), because DROP ROLE consults pg_shdepend
+    # ACROSS EVERY DATABASE in the cluster and clara_ci still holds the grants. Dropping
+    # clara_ci here first, then sweeping, leaves the cluster role-free — the isolated
+    # drill's own migrate() then re-mints the roles fresh, scoped to its own database, the
+    # same shape every closed-wave-upgrade-drills step already relies on. Both operations
+    # are gated the same way that action gates them (CLARA_ALLOW_DESTRUCTIVE +
+    # CLARA_RIG_ALLOW_ROLE_SWEEP, `if: always()` so a failed test-list or contracts step
+    # above still leaves this cleanup running). `clara_ci` matches the disposable-name
+    # guard (`EPHEMERAL_DB` — ends in `_ci`), so `dropDatabase` accepts it.
+    - name: Cluster cleanup — drop clara_ci + sweep chain-minted roles (before the isolated drill)
+      if: always() && steps.gate.outputs.ready == 'true'
+      working-directory: packages/db
+      shell: bash -e {0}
+      env:
+        CLARA_ALLOW_DESTRUCTIVE: "1"
+        CLARA_RIG_ALLOW_ROLE_SWEEP: "1"
+      run: |
+        PGDATABASE=postgres node tests/rig-cluster-reset.mjs --drop-database=clara_ci --sweep-roles
+
     # (4) the slice's OWN deploy drill, alone, in its own throwaway database.
     # DB NAME FROM `dbtag`: `clara_d-b0_upgrade_ci` is not a legal identifier.
+    #
+    # CLARA_RIG_ALLOW_ROLE_SWEEP (review-518 follow-up, #518 fold): the shared kit this
+    # drill calls (`x42-split-upgrade-kit.mjs`'s `freshDb()`, imported by every
+    # x42-NNNN-<dbtag>-upgrade.test.mjs) calls `sweepChainMintedRoles()` TWICE per run —
+    # the same cluster-wide role-survival sweep the closed-wave-upgrade-drills action
+    # grants, for the same reason (migration 0154's exact cluster-wide role census would
+    # otherwise misfire on roles a PRIOR step's replay minted). This job's matrix gives
+    # each leg its OWN hosted runner VM and its OWN ephemeral postgres:17 service
+    # container (declared per-job above, torn down with the job) — so the drop this
+    # grants is CLUSTER-wide only within THIS leg's throwaway cluster, never shared with
+    # a sibling leg or with closed-wave-drills' own container. Scoped to this ONE step,
+    # not the job env block, exactly like the closed-wave-drills action scopes it
+    # per-step rather than per-job. On its own this grant is NOT sufficient — see step
+    # (3d) above, which clears clara_ci's own grants on the same roles first.
     - name: ${{ inputs.slice }} upgrade drill (isolated DB)
       if: steps.gate.outputs.ready == 'true'
       working-directory: packages/db
       shell: bash -e {0}
       env:
         CLARA_MIGRATIONS_DIR: ${{ steps.chain.outputs.dir }}
+        CLARA_RIG_ALLOW_ROLE_SWEEP: "1"
       run: |
         PGDATABASE=postgres psql -v ON_ERROR_STOP=1 -c 'create database clara_x42_${{ inputs.dbtag }}_upgrade_ci'
         PGDATABASE=clara_x42_${{ inputs.dbtag }}_upgrade_ci CLARA_RIG_ALLOW_RESET=1 \

@@ -63,12 +63,12 @@ OFF.
 
 ## 2 · v1 — the seeded beta placeholder
 
-This is the body currently seeded by the FS-4 C-1 cohort migration (PR #478, branch
-coa/fs4-c1-dpa — not yet on main, which is why the migration's filename is spelled out in the SQL
-block below rather than linked), under version key `clara-beta-2026-08-a`, with `effective_from`
-`2026-08-31 00:00:00+08` and `source_path` naming this file. Quoted **verbatim**: one line, no
-trailing newline (the SQL literal's doubled apostrophes are un-escaped here, which is what the
-stored bytes are):
+This is the body currently seeded by
+[`packages/db/migrations/0158_checkout_gate_c1_dpa.sql`](../../../packages/db/migrations/0158_checkout_gate_c1_dpa.sql)
+(PR #478, **merged 2026-09-01**), under version key `clara-beta-2026-08-a`, with
+`effective_from` `2026-08-31 00:00:00+08` and `source_path` naming this file. Quoted
+**verbatim**: one line, no trailing newline (the SQL literal's doubled apostrophes are
+un-escaped here, which is what the stored bytes are):
 
 <!-- clara-dpa-body:begin version=v1 seeded=yes -->
 ```text
@@ -79,9 +79,12 @@ This is Clara's beta data-processing agreement, pending review by the owner's la
 sha256 of those bytes: `6d1c97a5cf8a22994b12dcb1b113c53bc2b1edb282f5c1237ff1ef12c679c7b3` (99 bytes).
 
 **Byte-identity proven, not asserted.** The same digest was computed independently from the
-migration's own SQL literal — `git show origin/coa/fs4-c1-dpa:<the C-1 migration>` piped through a
-reader that un-escapes the doubled apostrophes — and it matches this file's block exactly. Whoever
-re-seeds or supersedes this row should repeat that comparison rather than eyeball the text.
+migration's own SQL literal — `git show origin/main:packages/db/migrations/0158_checkout_gate_c1_dpa.sql`
+piped through a reader that un-escapes the doubled apostrophes — and it matches this file's block
+exactly. **Re-derived independently again 2026-09-03, from merged main:** 99 bytes,
+`6d1c97a5…c679c7b3`, byte-identical. The proof command works today only because the branch
+survives — that is luck, not law, now that the migration is merged; whoever re-seeds or
+supersedes this row should repeat the comparison rather than eyeball the text.
 
 Reproduce both digests from this file, from the repo root:
 

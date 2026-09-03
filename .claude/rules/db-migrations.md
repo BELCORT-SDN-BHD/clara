@@ -9,7 +9,9 @@ description: How to author a migration here — the conventions and the standing
 to land: the repo frontier moves under you while you build, and two branches that both claimed
 early will collide. This is also why the README's migration ledger is a snapshot rather than an
 authority — `select count(*), max(version) from clara.schema_migrations` is the authority for
-live, and `ls packages/db/migrations/` for the repo.
+live, and `ls packages/db/migrations/` for the repo. **And until the number is claimed the
+runner silently skips the file** (`MIGRATION_LIKE` in `scripts/migrate.mjs` requires a leading
+digit) — a green `pnpm db:migrate` proves nothing about an `UNNUMBERED_*.sql` (裁-108).
 
 **Rig-validate on a throwaway before anything live.** Baseline a scratch Postgres from `0001`,
 apply your file, then apply it again against an already-migrated database — the
