@@ -1,7 +1,12 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
-const APP_ORIGIN = "https://127.0.0.1:3100";
+// Read from the environment, matching `signup-confirm-pending.spec.ts` and the
+// Playwright config. A hardcoded origin here silently defeats the lane's
+// assigned port range: the browser follows `baseURL` and passes, while this
+// file's own `page.request` calls keep dialling 3100 and refuse the connection.
+// Measured the hard way on ports 3220-3222 — five cells, one cause.
+const APP_ORIGIN = process.env.CLARA_E2E_APP_ORIGIN ?? "https://127.0.0.1:3100";
 const CONTROL = `${APP_ORIGIN}/e2e-supabase/e2e-control`;
 const WCAG_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"];
 const CODE = "654321";
