@@ -37,52 +37,60 @@ const PG_IDENTITY_VARS = [
 ];
 
 /** The DSN URL var, if any (DATABASE_URL wins over WORKFLOW_POSTGRES_URL). */
-function urlVar() {
-  return process.env.DATABASE_URL || process.env.WORKFLOW_POSTGRES_URL;
+function urlVar(env = process.env) {
+  return env.DATABASE_URL || env.WORKFLOW_POSTGRES_URL;
 }
 
 /**
  * Resolve the ONE canonical connection target from exactly one source: a DSN URL
  * var when present, otherwise the libpq PG* vars. Returns host/port/db plus the
  * USER (never a password). Throws on an unparseable URL.
+ *
+ * `env` defaults to `process.env` — pass an explicit env (e.g. a `sourceEnv`
+ * captured by `childEnvForExternalTools()` before a caller redirects
+ * `process.env` elsewhere) to resolve THAT target instead of whatever the
+ * ambient ENVIRONMENT currently names (rev-498 M2: a guard call must evaluate
+ * the SAME env object its caller is about to act on, not assume the two agree).
+ * @param {NodeJS.ProcessEnv} [env]
  * @returns {{ source: "url" | "pg", host: string, port: string, db: string, user: string }}
  */
-export function resolveTarget() {
-  const url = urlVar();
+export function resolveTarget(env = process.env) {
+  const url = urlVar(env);
   if (url) {
     const u = new URL(url); // throws on garbage — caller surfaces it
     const db = decodeURIComponent((u.pathname || "").replace(/^\//, "")) || "postgres";
     const user = u.username ? decodeURIComponent(u.username) : "";
     return { source: "url", host: (u.hostname || "").toLowerCase(), port: u.port || "5432", db, user };
   }
-  const host = (process.env.PGHOST || "localhost").toLowerCase();
-  const port = process.env.PGPORT || "5432";
-  const db = process.env.PGDATABASE || process.env.PGUSER || "postgres";
-  return { source: "pg", host, port, db, user: process.env.PGUSER || "" };
+  const host = (env.PGHOST || "localhost").toLowerCase();
+  const port = env.PGPORT || "5432";
+  const db = env.PGDATABASE || env.PGUSER || "postgres";
+  return { source: "pg", host, port, db, user: env.PGUSER || "" };
 }
 
 /**
  * Throw when a DSN URL var is set AND ambient PG* point at a DIFFERENT
  * host/port/db (a "target split"): the node client would use the URL while
  * pg_dump/psql would use PG*. Returns the resolved canonical target.
+ * @param {NodeJS.ProcessEnv} [env] Defaults to `process.env` — see `resolveTarget()`.
  * @returns {{ source: "url" | "pg", host: string, port: string, db: string }}
  */
-export function assertNoTargetSplit() {
-  const url = urlVar();
-  const target = resolveTarget();
+export function assertNoTargetSplit(env = process.env) {
+  const url = urlVar(env);
+  const target = resolveTarget(env);
   if (!url) return target; // PG*-only: the external tools and node client agree by construction
   const mismatches = [];
-  const ph = process.env.PGHOST;
-  const pp = process.env.PGPORT;
-  const pd = process.env.PGDATABASE;
+  const ph = env.PGHOST;
+  const pp = env.PGPORT;
+  const pd = env.PGDATABASE;
   if (ph && ph.toLowerCase() !== target.host) mismatches.push(`PGHOST=${ph} != url host ${target.host}`);
   if (pp && pp !== target.port) mismatches.push(`PGPORT=${pp} != url port ${target.port}`);
   if (pd && pd !== target.db) mismatches.push(`PGDATABASE=${pd} != url db ${target.db}`);
   // A service file / hostaddr can silently redirect the child to another server;
   // when a URL is authoritative we cannot verify they agree, so refuse.
-  if (process.env.PGSERVICE) mismatches.push(`PGSERVICE=${process.env.PGSERVICE} set alongside a DSN URL (cannot verify it targets the URL host)`);
-  if (process.env.PGHOSTADDR && process.env.PGHOSTADDR.toLowerCase() !== target.host)
-    mismatches.push(`PGHOSTADDR=${process.env.PGHOSTADDR} set alongside a DSN URL`);
+  if (env.PGSERVICE) mismatches.push(`PGSERVICE=${env.PGSERVICE} set alongside a DSN URL (cannot verify it targets the URL host)`);
+  if (env.PGHOSTADDR && env.PGHOSTADDR.toLowerCase() !== target.host)
+    mismatches.push(`PGHOSTADDR=${env.PGHOSTADDR} set alongside a DSN URL`);
   if (mismatches.length) {
     throw new Error(
       `DB target split: a DSN URL var and libpq PG* env point at DIFFERENT targets — ${mismatches.join("; ")}. ` +
@@ -136,10 +144,13 @@ export function makeClient(overrides = {}) {
   return new pg.Client(connConfig(overrides));
 }
 
-/** Human-readable target (host:port/db) with NO password, for logs. */
-export function targetLabel() {
+/**
+ * Human-readable target (host:port/db) with NO password, for logs.
+ * @param {NodeJS.ProcessEnv} [env] Defaults to `process.env` — see `resolveTarget()`.
+ */
+export function targetLabel(env = process.env) {
   try {
-    const t = resolveTarget();
+    const t = resolveTarget(env);
     return `${t.host}:${t.port}/${t.db}`;
   } catch {
     return "(unparseable DATABASE_URL)";
@@ -154,10 +165,11 @@ export function targetLabel() {
  * and could not distinguish a scratch project from the live one. A guard keyed on the
  * plain label would therefore accept a destructive op aimed at the WRONG project.
  * Falls back to the plain label when no user is resolvable (nothing to disambiguate).
+ * @param {NodeJS.ProcessEnv} [env] Defaults to `process.env` — see `resolveTarget()`.
  */
-export function destructiveTargetLabel() {
+export function destructiveTargetLabel(env = process.env) {
   try {
-    const t = resolveTarget();
+    const t = resolveTarget(env);
     const base = `${t.host}:${t.port}/${t.db}`;
     return t.user ? `${t.user}@${base}` : base;
   } catch {

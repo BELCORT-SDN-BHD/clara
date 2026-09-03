@@ -19,10 +19,6 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import pg from "pg";
 import * as rig from "./rig.mjs";
 import {
@@ -38,6 +34,14 @@ import {
   endPool as endDbFixturePool,
 } from "../../db/tests/f-a5-reporting-agency-pr2-fixtures.mjs";
 import { childEnvForExternalTools } from "../../db/lib/pg.mjs";
+import {
+  connectionConfig,
+  disposableDatabaseName,
+  setDatabaseEnv,
+  cloneAmbientDatabase,
+  createDisposableDatabase,
+  dropDisposableDatabase,
+} from "../../db/tests/migrate-harness.mjs";
 
 const { register } = await import("tsx/esm/api");
 register();
@@ -137,111 +141,52 @@ let fixture;
 // 0154 collision too -- it does not share this file's clone-based fix. Left
 // untouched here: a different file, a different (closed-wave) CI leg, and a
 // bigger redesign than this PR's own CI-red scope covers.
+// FOLD 2026-09-02 (PR #498, cross-package hardening): this file's disposable-database
+// lifecycle used to be its own local reimplementation of the same
+// create/clone/point-env/drop idiom PR #498's own relay-taxonomy.test.mjs independently
+// converged on -- two unguarded, un-exported spellings of one destructive helper. Now
+// both files share ONE gated spelling (packages/db/tests/migrate-harness.mjs):
+// `disposableDatabaseName`, `connectionConfig`, `createDisposableDatabase` (CREATE
+// DATABASE, guarded by `assertDestructiveAllowed()` the same way `reset.mjs`/`seed.mjs`
+// et al. already are), `cloneAmbientDatabase` (pg_dump | psql, also guarded, first
+// statement), `setDatabaseEnv` (the redirect -- this ALSO deletes `PGDATABASE` on the
+// DATABASE_URL branch, a fix this file's own local `pointDbEnvAt()` never carried,
+// closing a dormant instance of the M2 phantom-PG*-target class on a DSN-configured dev
+// machine), and `dropDisposableDatabase` (best-effort, unguarded by design -- teardown
+// must never mask the real failure it is cleaning up after). No local reimplementation
+// remains in this file.
 let privateDbName = null;
 let restoreDbEnv = null;
 
-function disposableDbName() {
-  const name = `fs7v17_${Date.now().toString(36)}_${randomUUID().slice(0, 8)}`;
-  if (!/^[a-z][a-z0-9_]*$/.test(name)) throw new Error(`refusing a non-bare disposable db name: ${name}`);
-  return name;
-}
-
-/** A one-off connection to the CURRENT (ambient) target -- for CREATE/DROP DATABASE only, never schema work. */
-function adminClientConfig() {
-  const raw = process.env.DATABASE_URL || process.env.WORKFLOW_POSTGRES_URL;
-  return raw ? { connectionString: raw } : {};
-}
-
 async function createPrivateDatabase() {
-  const name = disposableDbName();
-  const client = new pg.Client(adminClientConfig());
+  const name = disposableDatabaseName("fs7v17");
+  const client = new pg.Client(connectionConfig());
   await client.connect();
   try {
-    await client.query(`create database ${name}`);
+    await createDisposableDatabase(client, name);
   } finally {
     await client.end();
   }
   return name;
 }
 
-/**
- * Clone the AMBIENT (already fully-migrated) database into `targetDb` via
- * pg_dump | psql -- see the file-header "CI FIX 2026-09-02" note above for why
- * this replaces a second migrate() replay. `sourceEnv` must be captured BEFORE
- * `pointDbEnvAt` redirects this process's DATABASE_URL / WORKFLOW_POSTGRES_URL
- * / PGDATABASE, or it would clone the private database from itself. Credentials
- * travel only via env (never argv), matching packages/db/lib/pg.mjs's
- * childEnvForExternalTools() convention (constraint 4).
- */
-function cloneAmbientDatabase(sourceEnv, targetDb) {
-  const dumpDir = mkdtempSync(join(tmpdir(), "fs7v17-clone-"));
-  const dumpFile = join(dumpDir, "estate.sql");
-  try {
-    const pgDumpBin = process.env.PG_DUMP || "pg_dump";
-    const dump = spawnSync(pgDumpBin, ["--no-comments", "--file", dumpFile], {
-      env: sourceEnv,
-      stdio: ["ignore", "inherit", "inherit"],
-    });
-    if (dump.error) throw new Error(`pg_dump failed to start (${dump.error.message})`);
-    if (dump.status !== 0) throw new Error(`pg_dump exited ${dump.status} cloning the ambient database`);
-
-    const psqlBin = process.env.PSQL || "psql";
-    const targetEnv = { ...sourceEnv, PGDATABASE: targetDb };
-    const restore = spawnSync(
-      psqlBin,
-      ["-X", "-v", "ON_ERROR_STOP=1", "--single-transaction", "-f", dumpFile, "--dbname", targetDb],
-      { env: targetEnv, stdio: ["ignore", "inherit", "inherit"] },
-    );
-    if (restore.error) throw new Error(`psql failed to start (${restore.error.message})`);
-    if (restore.status !== 0) throw new Error(`psql exited ${restore.status} restoring into ${targetDb}`);
-  } finally {
-    rmSync(dumpDir, { recursive: true, force: true });
-  }
-}
-
-/** Point every env var this file's pool chain reads at `name`; returns the restorer. */
-function pointDbEnvAt(name) {
-  const saved = {
-    DATABASE_URL: process.env.DATABASE_URL,
-    WORKFLOW_POSTGRES_URL: process.env.WORKFLOW_POSTGRES_URL,
-    PGDATABASE: process.env.PGDATABASE,
-  };
-  if (process.env.DATABASE_URL) {
-    const url = new URL(process.env.DATABASE_URL);
-    url.pathname = `/${name}`;
-    process.env.DATABASE_URL = url.toString();
-  }
-  if (process.env.WORKFLOW_POSTGRES_URL) {
-    const url = new URL(process.env.WORKFLOW_POSTGRES_URL);
-    url.pathname = `/${name}`;
-    process.env.WORKFLOW_POSTGRES_URL = url.toString();
-  }
-  process.env.PGDATABASE = name;
-  return () => {
-    for (const [key, value] of Object.entries(saved)) {
-      if (value === undefined) delete process.env[key];
-      else process.env[key] = value;
-    }
-  };
-}
-
 async function dropPrivateDatabase(name) {
-  const client = new pg.Client(adminClientConfig());
+  const client = new pg.Client(connectionConfig());
   await client.connect();
   try {
-    await client.query(`drop database if exists ${name} with (force)`);
+    await dropDisposableDatabase(client, name);
   } finally {
     await client.end();
   }
 }
 
 before(async () => {
-  // Captured BEFORE createPrivateDatabase()/pointDbEnvAt() touch anything -- this
+  // Captured BEFORE createPrivateDatabase()/setDatabaseEnv() touch anything -- this
   // is the ambient (estate) target's pg_dump/psql env, the clone SOURCE.
   const sourceChildEnv = childEnvForExternalTools();
   privateDbName = await createPrivateDatabase();
   cloneAmbientDatabase(sourceChildEnv, privateDbName);
-  restoreDbEnv = pointDbEnvAt(privateDbName);
+  restoreDbEnv = setDatabaseEnv(privateDbName);
 
   assert.equal(await pr2Ready(), true, "F-A5 PR-2 wrappers, grants and interactive allowlist rows must be present");
   // The estate's own migrate+seed leaves evaluate_metric v1 DARK by design (0060's
