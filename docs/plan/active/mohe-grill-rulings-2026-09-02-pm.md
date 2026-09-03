@@ -264,9 +264,10 @@ deliberately hidden security table to application roles, and costs a migration p
 ### 裁-142 — B1: the wrong secret in 裁-114's example, corrected in all three carriers (owner, 2026-09-03 ~11:50 MYT)
 
 **The question** (B1 of the harness scan, put 09:58 MYT on the "Clara Beta Runway" page §9, 大白话): 裁-114's ruling
-stands; its ILLUSTRATION names the wrong secret — "FS-4's Stripe webhook signing secret" as an apps/web-held
-credential. `STRIPE_WEBHOOK_SECRET` is runtime/Fly env (`checkout-gate-design-part3.md:181`; 裁-93 ruled the webhook
-to `packages/runtime` before 裁-114 was written; 裁-126 routes `whsec_` to Fly secrets; every site of it in the
+stands; its premise (`mohe-grill-rulings-2026-09-02.md` :36-37 — "the owner-ruled FS-4 design (裁-81/89) puts the
+Stripe webhook signing secret in `apps/web` too") names the wrong secret as an apps/web-held credential.
+`STRIPE_WEBHOOK_SECRET` is runtime/Fly env (`checkout-gate-design-part3.md:181`; 裁-93 ruled the webhook to
+`packages/runtime` before 裁-114 was written; 裁-126 routes `whsec_` to Fly secrets; every site of it in the
 still-unmerged #511 (branch runtime/fs4-c5-webhook-courier) sits under `packages/runtime/`). `apps/web`'s real FS-4
 credential is `STRIPE_SECRET_KEY` (`checkout-gate-design-part3.md:180`). The same wrong example was copied into PRD
 §6's split-trust corollary (:176) and ARCHITECTURE §1 (:45).
@@ -277,15 +278,19 @@ ADR — a digest "amended by" note on 裁-114's law, in the 裁-140 shape.
 
 **Ruling:** *"B1 照建議."*
 
-**Alignment.** Shipped in this PR: the errata note beside 裁-114 (`mohe-grill-rulings-2026-09-02.md`) is re-cut to
-point at this ruling instead of carrying the correction inline; `PRD.md` §6 :176 and `ARCHITECTURE.md` §1 :45 both
-now read `STRIPE_SECRET_KEY` for `apps/web`'s checkout-route credential and state `STRIPE_WEBHOOK_SECRET` as runtime
-env. **`docs/adr/README.md` carries no digest row for 裁-114 at all** (grepped: zero hits for "114" in that file and
-in `README-log.md`) — 裁-114 never got the 裁-140-shape row that 裁-111/125/129/131/133/135/139/141 have, so there is
-no existing "amended by" anchor to append to; this PR adds nothing to the ADR digest and flags the gap for the
-owner/lead to decide whether 裁-114 (and this correction) should get one. Cost stated: one docs edit. Not fixing:
-the owner's webhook act would have followed three law texts into the wrong vendor's store; the Fly route would
-answer `signing_secret_absent` on every event and no paid firm would be born.
+**Alignment.** Shipped in **#526**: the errata note beside 裁-114 (`mohe-grill-rulings-2026-09-02.md`) is re-cut to
+state the corrected fact directly — `STRIPE_WEBHOOK_SECRET` is RUNTIME env; `apps/web`'s real FS-4 credential is
+`STRIPE_SECRET_KEY` — instead of pointing at an inline explanation; the premise line itself (:36-37) stays
+byte-identical, a deliberate historical record, so a reader now lands on the right fact from the errata alone.
+`PRD.md` §6 :176 and `ARCHITECTURE.md` §1 :45 both now read `STRIPE_SECRET_KEY` for `apps/web`'s checkout-route
+credential and state `STRIPE_WEBHOOK_SECRET` as runtime env. **`docs/adr/README.md` gets no edit in #526**:
+measured — zero hits for "114" in that file and in `README-log.md`, so 裁-114 never received the 裁-140-shape §15
+row that 裁-111/125/129/131/133/135/139/141 have, and was not folded under another law's row either. The morning
+truing PR (**truing-3**, the harness-sync scan) is the one minting §15 rows from scratch for this ledger's
+un-digested rulings; it carries the new row for 裁-114 with this ruling's "amended by 裁-142 (2026-09-03): the
+example corrected — `STRIPE_WEBHOOK_SECRET` is runtime env" note, so the digest act lands there, not in #526. Cost
+stated: one docs edit. Not fixing: the owner's webhook act would have followed three law texts into the wrong
+vendor's store; the Fly route would answer `signing_secret_absent` on every event and no paid firm would be born.
 
 **Second thing raised in the same message, answered as a FACT (no ruling needed):** live is 148/`0153` by 裁-67
 until the Wave-G reset, so C-5's roles (`clara_stripe_webhook_login` 0160, `clara_auth_wall_login` 0163) do not

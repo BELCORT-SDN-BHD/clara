@@ -53,7 +53,7 @@ Cost stated at the ask: zero code lines, riding the truing PR's one-opus-review 
 classifier scores that PR CODE — see the header note; not ADR-0069's lane). Both texts are truings of
 already-ruled decisions, not new policy — the DECISION here is that the law documents say so.
 
-> **ERRATA — corrected by 裁-142 (owner, 2026-09-03): the premise's example named the wrong secret; the ruling stands.**
+> **ERRATA — corrected by 裁-142 (owner, 2026-09-03): the premise's example above names the wrong secret — `STRIPE_WEBHOOK_SECRET` is RUNTIME env and `apps/web`'s real FS-4 credential is `STRIPE_SECRET_KEY`; the ruling stands.**
 
 ---
 
