@@ -53,7 +53,7 @@ function gate(t) {
     return true;
   }
   assert.fail(
-    "checkout-gate C-6 is required for a focused run: apply UNNUMBERED_checkout_gate_c6_web_reads.sql (or its numbered suite copy)",
+    "checkout-gate C-6 is required for a focused run: apply 0164_checkout_gate_c6_web_reads.sql (or its numbered suite copy)",
   );
 }
 

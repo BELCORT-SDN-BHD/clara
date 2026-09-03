@@ -84,7 +84,7 @@ export type CheckoutSessionRequest = {
    * the DURABLE retry identity rather than from a per-request value.
    *
    * WHY IT IS NOT AN OP KEY, and this comment used to say the opposite of what
-   * the code did. `0161`'s own comment makes the durable identity "the
+   * the code did. `0163`'s own comment makes the durable identity "the
    * applicant's one locked, unstamped CURRENT-plan intent" — an op key minted
    * per POST is a fresh value on every retry, so two POSTs landing on the SAME
    * intent would mint TWO Sessions, and `record_checkout_session` refuses the
@@ -112,7 +112,7 @@ export type CheckoutSessionRequest = {
  * checkout died BETWEEN Stripe returning and `record_checkout_session`
  * stamping, and was retried a day later — because once the intent is stamped,
  * `open_checkout_intent` opens a NEW intent and the key changes with it.
- * `clara.checkout_intents` carries no `expires_at` and `0161` rotates nothing
+ * `clara.checkout_intents` carries no `expires_at` and `0163` rotates nothing
  * on expiry (measured: no `expires_at`, `expiry` or `expire` anywhere in that
  * migration), so nothing here can rotate it either. Filed as a Wave-G item in
  * the PR body rather than answered with a rotation this lane would be

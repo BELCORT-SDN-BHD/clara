@@ -14,8 +14,10 @@ v2.1; `docs/ARCHITECTURE.md` §4 + Appendix A; migration
   `workflow/nitro` compiler module (Appendix A).
 - **The chat loop** (versioned `workflows/chatTurn.vN.ts` files, each with its
   FROZEN closure `chatTurn.vN.impl.ts` / `.prompt.ts` / `.tools.ts`; the registry
-  in `workflows/registry.ts` pins the LIVE version — **`chatTurn_v16` since
-  2026-08-31, serving on Fly machine version 70**; earlier versions stay frozen +
+  in `workflows/registry.ts` pins **`chatTurn_v17`** since #485 (`60ffbfb0`, 2026-09-02
+  18:18 +0800; `registry.ts:616` records v16→v17). **The registry pin is not the serving
+  bundle**: the SERVING Fly bundle is still machine version 70 (deployed 2026-08-31), carrying
+  v16, until the next deploy; earlier versions stay frozen +
   reachable for parked runs per Appendix A): a coding-capable advisor with the `draft_journal_entry` write
   tool plus the four Wave-E authoring tools (metric preview/draft, report-spec
   draft, report preview — the last a named structural refusal until the OBO
@@ -30,8 +32,12 @@ v2.1; `docs/ARCHITECTURE.md` §4 + Appendix A; migration
   principal + own-OR-firm-shared session predicate (indistinguishable 404).
 - **Control listener** (`lib/control.mjs`): leased clarify delivery + cancel
   settlement. **Leader loop** (`lib/leader.mjs`): routing + drain (`lib/drain.mjs`)
-  + reconcile (`lib/reconciler.mjs`; the daily `clara.reconcile_autopost_rules()`
-  sweep RETIRED with F-A2 PR-3, along with the rest of the rules-execution tier).
+  + reconcile (`lib/reconciler.mjs`; the DB function `clara.reconcile_autopost_rules()`
+  and the rest of the rules-execution tier RETIRED with F-A2 PR-3 at `0118`, but the
+  reconciler's belt caller was never unwired — `reconciler.mjs:673` still fires it every
+  cycle behind a bare try/catch with no `to_regprocedure` feature-detect, so the call fails
+  and retries every poll in the deployed path; unwire per
+  `docs/plan/active/f-a2-annexes-1-estate.md:95`).
   **Consumer lanes**, each on its OWN dedicated connection + advisory lock:
   matcher (`lib/matcher.mjs`),
   autodraft (`lib/autodraft.mjs`), local_facts (`lib/local-facts.mjs`),
@@ -41,7 +47,17 @@ v2.1; `docs/ARCHITECTURE.md` §4 + Appendix A; migration
   retired with F-A2 PR-3.) **Supervisor** (`scripts/serve.mjs`):
   one crash-only process group.
 - **HTTP** (`src/index.ts`): chat sessions/messages/turns, an SSE stream that
-  survives detach, and `/health` + `/ready` (fail-vs-warn matrix, §4.7).
+  survives detach, and `/health` + `/ready` (fail-vs-warn matrix, §4.7). Ten more routes are
+  mounted unconditionally alongside these — **20 at `08de89f6` (2026-09-03); count
+  `src/index.ts` + its sub-routers, not this line, since a merge can add one (#512's
+  `reportRoutes.ts` just did)**: `GET /workflows`, the five `/api/interview/*` verbs
+  (firm/start, client/start, answer, cancel, state), `POST /api/opening/parse-targets`,
+  `POST /api/seeding/prepare`, and the two authenticated bytes-**EGRESS** doors,
+  `GET /api/documents/:id/bytes` and `GET /api/artifacts/:id/bytes` — both now documented
+  in their own "The two human BYTE-READ routes" table below (#512 closed the gap this line
+  used to flag: they were missing from the Slice-5 write-up, which documents only the
+  inbound (upload) half of "the complete evidence-byte
+  path").
 - **Workflow-versioning**: `registry.ts` names the newest version enqueue sites
   target; the CI freeze-lint golden-hashes every frozen body + its import
   closure. Prompt + tools live INSIDE the frozen closure by design (§4.9).
@@ -84,6 +100,25 @@ There is deliberately no runtime status route. Human status reads use migration
 0007's masked PostgREST views and the authenticated JWT lane. CORS is confined to
 `/api/intake/*` and accepts only exact origins from the allowlist below.
 
+### The two human BYTE-READ routes
+
+Separate from intake, and the only two places raw bytes leave the runtime to a person. Both take a
+human session JWT, resolve the live principal, call a definer read granted to `clara_runtime` and to
+nothing else, and stream from Storage with the runtime's own custody credential. **No signed URL is
+ever minted and the browser never holds a Storage credential** (裁-96②).
+
+| Route | Definer read | Disposition |
+|---|---|---|
+| `GET /api/documents/:id/bytes` | `clara.get_document_for_human_read` | `inline` — the doc_review split-view displays it |
+| `GET /api/artifacts/:id/bytes` | `clara.get_artifact_for_human_read` | `attachment` — a report artifact or sandbox export is SAVED |
+
+The artifact route serves BOTH artifact families through ONE database gate
+(`clara._artifact_download_core`) and re-verifies the object's content address en route, so a
+substituted object is a 502 rather than a file the browser saves. Its refusals are not collapsed to
+one status the way the document route's are: `CLR11` is a 404 whose body is byte-identical for a
+malformed id, an unknown id and a foreign-firm id; `CLR04` is 403 and `CLR10` is 409, both carrying
+the database's own typed reason for the surface to render verbatim.
+
 ### Document environment contract
 
 | Variable | Required behavior |
@@ -112,7 +147,15 @@ against the live pool constructors before trusting ≈27**): runtime pool 5 + re
 pool 5 + WDK engine 5 + control/router LISTEN 2 + the six consumer-lane leader
 sessions (matcher, autodraft, local_facts, sst_watch, facts_gate,
 classify) 6 + the write pool 2 + **the freeform pool 2**
-(`CLARA_FREEFORM_POOL_MAX`, default 2). The Gate-G1 bank pool's 2 sit outside this
+(`CLARA_FREEFORM_POOL_MAX`, default 2) + **FS-4 C-5's two checkout-gate pools, +4**:
+the Stripe webhook pool 2 (`CLARA_STRIPE_WEBHOOK_POOL_MAX`, default 2,
+`clara_stripe_webhook_login`) and the pre-session auth-wall pool 2
+(`CLARA_AUTH_WALL_POOL_MAX`, default 2, `clara_auth_wall_login`) — so the arithmetic
+above now reads **≈31**, and it is still the UNMEASURED ceiling the paragraph opens
+with. **Both C-5 pools are LAZY** (their logins ship NOLOGIN and gain a DSN at a
+ceremony that follows the migration), so they hold zero sessions until that ceremony —
+the same carve-out the bank pool has, counted here rather than omitted because they
+WILL be live at the Wave-G reset. The Gate-G1 bank pool's 2 sit outside this
 count until its own ceremony gives `clara_wake_bank_login` a password. Document
 intake and extraction reuse short checkouts from the existing runtime pool; no DB
 connection is held while streaming, scanning, uploading, downloading, or calling
@@ -120,10 +163,13 @@ Azure.
 
 ## Slice-6 coding floor (`chatTurn_v2` + the write floor + invoice facts)
 
-`chatTurn_v2` (Slice 6) added the narrow WRITE capability. **TRUED 2026-09-02: the
-registry pins `chatTurn: chatTurn_v16`** (the P6-1/裁-9 repoint, registry.ts's own inline
-comment records v15→v16) — repo frontier is 155 migration files through `0160`
-(a NUMBER, not a count — the numbering has gaps), live DB applied through `0153`. **The
+`chatTurn_v2` (Slice 6) added the narrow WRITE capability. **TRUED 2026-09-03: the
+registry pins `chatTurn: chatTurn_v17`** (#485, `60ffbfb0`, 2026-09-02 18:18 +0800;
+`registry.ts:616` records v16→v17 — superseding the prior "TRUED 2026-09-02" v16 stamp,
+which was itself written hours before this repoint) — repo frontier is **158 migration files
+through `0163`, measured at `265a8ee7` (#493 merged; count `packages/db/migrations/`, not this
+line — the numbering has gaps and this number moves every merge)**, live DB applied through
+`0153`. **The
 SERVING Fly bundle is machine version 70, deployed 2026-08-31 08:21Z, carrying
 `chatTurn_v16` — bundle-proven by grep on the served container** (`PROGRESS.md`'s deploy
 record). *(The 2026-08-29 truing this replaces read v15 pinned / v13 serving / frontier 0147 —
@@ -158,6 +204,9 @@ bookkeeper+ authority, never a firm-wide grant.
 | `CLARA_WRITE_POOL_MAX` | Write-pool size (default 2). |
 | `CLARA_FREEFORM_DATABASE_URL` | **F-A6 PR-2.** The `clara_freeform_login` DSN (member of `clara_freeform_ro` alone). REQUIRED in production — **fail-closed boot assert**, and `scripts/serve.mjs:22` *and* `scripts/worker.mjs:17` BOTH call it before importing the built server, so a pre-ceremony deploy takes the **server AND the worker** down, not merely the freeform read. `CLARA_START_WORLD=0` does not exempt you. **Deploy order:** `0131` creates the login NOLOGIN; the operator ceremony gives it LOGIN+password and sets this secret — it must be present before the `chatTurn_v15` image boots. |
 | `CLARA_FREEFORM_POOL_MAX` | Freeform-pool size (default 2). Read when the pool is CREATED. |
+| `CLARA_STATEMENT_TIMEOUT_MS` | Estate-wide per-session `statement_timeout` (default `30000`). **FS-4 C-5 widened its blast radius:** the two checkout-gate pools read it too (`lib/checkout-pools.mjs:52`), so this knob now bounds the Stripe webhook and the pre-session auth wall as well as the lanes it already governed. A change here touches the MONEY lane — a value below a webhook's own round trip makes the door refuse under load, and the refusal is Stripe-visible. |
+| `CLARA_IDLE_IN_TXN_TIMEOUT_MS` | Estate-wide `idle_in_transaction_session_timeout` (default `15000`), read by the same two checkout-gate pools (`lib/checkout-pools.mjs:53`). Same note: it now binds the money lane. |
+| `CLARA_CONNECT_TIMEOUT_MS` | Estate-wide connection-acquisition bound (default `5000`), read by the same two checkout-gate pools (`lib/checkout-pools.mjs:54`). Both C-5 pools are LAZY, so this is first felt at the ceremony that gives their logins a DSN, not at boot. |
 | `CLARA_FREEFORM_STATEMENT_TIMEOUT_MS` | The H-4 backstop: a session `statement_timeout` the POOL sets before calling `wake_freeform_read`, because PostgreSQL arms the statement timer once and a `SET LOCAL` inside the verb cannot bound a single stalled FETCH. Default `15000`. **CLAMPED, not trusted:** anything that is not a whole number of milliseconds strictly greater than the verb's own 5000 ms in-loop deadline falls back to the default with a warning naming the variable and the value — `0` means UNLIMITED in PostgreSQL and would delete the wall, and anything at or below 5000 would fire before the in-loop deadline and destroy the receipt that deadline exists to commit. **There is no upper limit**: raise it freely if you mean to. |
 | (invoice-facts attempt cap) | Owned by the **database** — hard-coded to 3 in `0009`'s enqueue/claim path. There is **no** runtime env var (an env override would be a no-op); Tier B is the honest permanent fallback once the cap is reached. |
 | `CLARA_CLAMD_MIN_BACKOFF_MS` / `CLARA_CLAMD_MAX_BACKOFF_MS` | clamd self-heal backoff (PIN-AB-2): a clamd exit is non-fatal; intake fails closed honestly (`503 scanner_unavailable`) while it restarts. |
@@ -190,6 +239,17 @@ pnpm --filter @clara/runtime typecheck   # tsc --noEmit
 pnpm --filter @clara/runtime build       # nitro build (compiles the WDK directives)
 pnpm --filter @clara/runtime start       # boot the built server (reads .env if present)
 ```
+
+### The test suite needs a version-matched `pg_dump`/`psql` on PATH
+
+Two files (`tests/relay-taxonomy.test.mjs`, `tests/fs7-v17-chatturn-db.test.mjs`) give
+themselves a private database by cloning the ambient one (`pg_dump | psql`, via
+`packages/db/tests/migrate-harness.mjs`'s `cloneAmbientDatabase()`) instead of replaying
+migrations — see that helper's own header for why. The `pg_dump` binary MUST match the
+server's major version (Postgres 17), the same convention `packages/db/scripts/backup.mjs`
+documents: on a machine whose PATH `pg_dump`/`psql` are older, point `PG_DUMP`/`PSQL` at a
+matching binary (e.g. `PG_DUMP=/path/to/pg17/bin/pg_dump`). CI's `db-estate` job installs
+one via `./.github/actions/pg17-client`; without a match, both files fail to LOAD.
 
 For a health/ready check, boot with DB env set and `CLARA_START_WORLD` unset:
 

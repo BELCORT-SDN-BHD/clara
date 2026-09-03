@@ -1,4 +1,4 @@
-// The C-6 migration is authored as UNNUMBERED_checkout_gate_c6_web_reads.sql and
+// The C-6 migration is authored as 0164_checkout_gate_c6_web_reads.sql and
 // is therefore deliberately skipped by the normal migration runner until merge
 // prep, where it claims its number under 裁-108. Package-wide CI preloads this
 // module so the C-6 battery skips LOUDLY on a chain that has not applied it.

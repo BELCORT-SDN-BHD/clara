@@ -1,6 +1,6 @@
 // FS-4 checkout gate, PR C-3. Design of record:
 // docs/plan/active/checkout-gate-design{,-part2,-part3}.md.
-// Every cell is independently gated so the pre-0161 integration run skips loudly rather than
+// Every cell is independently gated so the pre-0163 integration run skips loudly rather than
 // calling an absent cohort green. The numbered authoring suite exercises every cell.
 
 import { after, before, test } from "node:test";
@@ -34,6 +34,7 @@ const OPEN_CHECKOUT_INTENT_PROSRC_SHA12 = "4b89b80d4710";
 let live = false;
 let executed = 0;
 let admissionBaseline = null;
+let admissionRowBaseline = null;
 let operatorOwner = null;
 
 async function cohortApplied() {
@@ -49,16 +50,64 @@ async function cohortApplied() {
   return present.length === TABLES.length;
 }
 
+// W-E3's static half: the table's own shape. Deterministic from the migrations, so it is safe to
+// compare across the whole file.
+//
+// The `rows` COUNT that used to live here has been REMOVED, and deliberately not replaced with a
+// looser count. It was a suite-order- and concurrency-dependent signal: CI's db-estate job runs
+// `pnpm -r --if-present test`, so packages/db and packages/runtime execute CONCURRENTLY against ONE
+// shared postgres, and packages/runtime/tests/relay-fixtures.mjs' seedAdmission() COMMITS a row
+// into this same estate-global table (`note = 'relay rig admission'`) for every buildFirm() — 184
+// call sites, none of them cleaned up. Any of those landing between this file's `before()` and
+// c3.54 moves the count for reasons that have nothing to do with C-3 (measured on hosted run
+// 33639102205: 112 actual vs 107 expected, five rows, every other cell green). This is the #497
+// class on a fourth table.
+//
+// A count was also the WEAKEST possible reading of what W-E3 claims: it cannot see an admission
+// being CONSUMED at all, because consuming stamps `consumed_at` and leaves the count alone. The two
+// assertions in c3.54 replace it with strictly stronger, order-independent ones.
 async function admissionShape() {
   const shape = await rootQuery(
     `select
        (select string_agg(attname,',' order by attnum) from pg_attribute
          where attrelid='clara.firm_admissions'::regclass and attnum>0 and not attisdropped) as columns,
        (select coalesce(jsonb_agg(pg_get_indexdef(indexrelid) order by indexrelid),'[]'::jsonb)
-          from pg_index where indrelid='clara.firm_admissions'::regclass) as indexes,
-       (select count(*)::int from clara.firm_admissions) as rows`,
+          from pg_index where indrelid='clara.firm_admissions'::regclass) as indexes`,
   );
   return shape.rows[0];
+}
+
+/**
+ * W-E3's row half, as an identity MAP rather than a count: every admission row that existed when
+ * this file started, fingerprinted whole. A concurrent writer's NEW rows are simply absent from
+ * this map and cannot move it, while anything the C-3 chain did to a PRE-EXISTING row — deleting
+ * it, or stamping `consumed_at` to consume an admission — changes or removes its entry.
+ */
+async function admissionRowFingerprints() {
+  const rows = await rootQuery(
+    "select id::text as id, md5(to_jsonb(t)::text) as hash from clara.firm_admissions t",
+  );
+  return new Map(rows.rows.map((r) => [r.id, r.hash]));
+}
+
+// W-E3's closed-world half. The claim "the folded C-3 chain never touches firm_admissions" is a
+// CAPABILITY claim, and the catalog answers it exactly: `create_firm` is the only body in the whole
+// clara schema that can reach the table, and the C-3 doors do not call it (the folded claim goes
+// through `_create_firm_core`). Same comment-stripped census idiom as c3.53's money-store set.
+// Fold this list only with a reviewed reason: a new entry means a second body can now consume or
+// mint an admission.
+const ADMISSION_TOUCHING_BODIES = ["clara.create_firm(text,uuid,text)"];
+async function admissionTouchingBodies() {
+  const rows = await rootQuery(
+    `with stripped as (
+       select p.oid::regprocedure::text as sig,
+              lower(regexp_replace(regexp_replace(p.prosrc, '/\\*[\\s\\S]*?\\*/', '', 'g'), '--[^\\n]*', '', 'g')) as code
+         from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+        where n.nspname='clara'
+     )
+     select sig from stripped where position('firm_admissions' in code)>0 order by sig`,
+  );
+  return rows.rows.map((r) => r.sig);
 }
 
 async function monotonicSnapshot() {
@@ -106,7 +155,10 @@ async function assertMonotonic(beforeSnapshot, label) {
 
 before(async () => {
   live = await cohortApplied();
-  if (live) admissionBaseline = await admissionShape();
+  if (live) {
+    admissionBaseline = await admissionShape();
+    admissionRowBaseline = await admissionRowFingerprints();
+  }
 });
 after(async () => {
   if (live) await clearOperator();
@@ -116,12 +168,12 @@ after(async () => {
 function gate(t) {
   if (live) return false;
   if (process.env.CLARA_ALLOW_MISSING_CHECKOUT_GATE_C3 === "1") {
-    console.warn("SKIP checkout-gate-c3: the 0161 C-3 cohort is not applied (explicit pre-integration run).");
-    t.skip("checkout-gate C-3 cohort absent -- explicit pre-0161 run");
+    console.warn("SKIP checkout-gate-c3: the 0163 C-3 cohort is not applied (explicit pre-integration run).");
+    t.skip("checkout-gate C-3 cohort absent -- explicit pre-0163 run");
     return true;
   }
   assert.fail(
-    "checkout-gate C-3 is required for a focused run: apply 0161_checkout_gate_c3_folded_door.sql",
+    "checkout-gate C-3 is required for a focused run: apply 0163_checkout_gate_c3_folded_door.sql",
   );
 }
 
@@ -1939,7 +1991,7 @@ cell("c3.52c unconsumed-payment read -- an operator-firm bookkeeper is refused",
 // RULED: the right question for open_checkout_intent specifically is "was this body altered",
 // which a prosrc SHA answers completely (case tricks, comment poisoning, Unicode escapes, and
 // anything not yet invented all change the hash) -- the SAME idiom this migration already uses
-// twice for create_firm's W-E3 pin (0161_checkout_gate_c3_folded_door.sql, the prestate/tail
+// twice for create_firm's W-E3 pin (0163_checkout_gate_c3_folded_door.sql, the prestate/tail
 // pair pinning it to sha12 59fa533d9c03). Pinning accepts the same cost the estate already pays
 // there: every legitimate future edit to this body must update the pinned hash, deliberately --
 // correct for a body that should be frozen from here.
@@ -1972,15 +2024,15 @@ cell("c3.53 folded set equality -- the money-store body roster is closed; open_c
     // WIDENED BY FS-4 C-6 (#517), deliberately and with the reason recorded here rather than
     // discovered during a merge-prep conflict. `clara.get_own_checkout_progress` is C-6's
     // self-scoped web read door, and it reads `clara.firm_registration_payments` BY DESIGN
-    // (UNNUMBERED_checkout_gate_c6_web_reads.sql, the `paid_unconsumed` arm): `/pending`'s two
+    // (0164_checkout_gate_c6_web_reads.sql, the `paid_unconsumed` arm): `/pending`'s two
     // 裁-74 arms and `/checkout/success`'s `claimable` arm have no other read path, because that
     // table grants every application role nothing, permanently (design part 2 §1). It is a
     // STABLE reader — it writes nothing and consumes no payment — so it widens the roster
     // without widening the money surface.
     //
     // THIS CENSUS DID ITS JOB. It is the cell that caught the widening on the merged tree when
-    // C-6's own rig could not (that rig had 0161's SQL but none of these cells), and the
-    // standard it sits under is `0161`'s own comment on `open_checkout_intent`: "hiding a real
+    // C-6's own rig could not (that rig had C-3's SQL but none of these cells), and the
+    // standard it sits under is `0163`'s own comment on `open_checkout_intent`: "hiding a real
     // dependency from a catalog census on a money surface is the wrong kind of clever." Adding
     // a name here is a reviewed act; the SHA pin above is what actually guards this door's body.
     "get_own_checkout_progress",
@@ -1995,8 +2047,24 @@ cell("c3.53 folded set equality -- the money-store body roster is closed; open_c
   assert.equal(retired.rows[0].n, 0);
 });
 
-cell("c3.54 W-E3 -- firm_admissions columns, indexes and rows remain byte-shape identical", async () => {
+cell("c3.54 W-E3 -- firm_admissions shape identical, every pre-existing row untouched, and create_firm the only body that can reach it", async () => {
   assert.deepEqual(await admissionShape(), admissionBaseline);
+
+  // (1) Nothing the C-3 chain did reached a row that already existed. Reported by ID so a failure
+  // names the rows instead of a count delta.
+  const now = await admissionRowFingerprints();
+  const drifted = [...admissionRowBaseline]
+    .filter(([id, hash]) => now.get(id) !== hash)
+    .map(([id, hash]) => ({ id, was: hash, is: now.get(id) ?? "(row is gone)" }));
+  assert.deepEqual(drifted, [],
+    "the C-3 chain must not delete an admission row or stamp consumed_at on one -- a row count "
+    + "could never have seen a consume, which is why this replaced it");
+
+  // (2) No C-3 door can reach the table AT ALL. This is the claim W-E3 actually makes, and unlike a
+  // row count it is unmoved by another package committing its own fixture rows concurrently.
+  assert.deepEqual(await admissionTouchingBodies(), ADMISSION_TOUCHING_BODIES,
+    "exactly one clara body may reference firm_admissions; if the folded claim path (or anything "
+    + "it calls) grew a reference, W-E3 is broken and this list must not simply be widened");
 });
 
 cell("c3.55 event taxonomy and final structural census -- one paired type, no BYPASSRLS", async () => {

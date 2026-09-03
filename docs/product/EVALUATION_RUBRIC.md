@@ -149,5 +149,9 @@ derived state is not evidence**; (3) **spelling is not identity**.
   on any collision.
 - **SG-4 — Accessibility is a shipping gate** (Q7): `apps/web/scripts/check-token-contrast.mjs`
   proves token-level OKLCH contrast, `apps/web/test/a11yRules.ts` runs the WCAG-mapped rule engine,
-  and `apps/web/test/keyboardWalk.ts` walks the approve/review/close journeys. **OWED per 裁-13:**
-  the WCAG 2.2 target-size gate joins `a11yRules.ts` in the P6 polish wave.
+  and `apps/web/test/keyboardWalk.ts` walks the approve/review/close journeys, and
+  `apps/web/test/a11yRules.ts` enforces 裁-13's WCAG 2.2 SC 2.5.8 target-size floor read from the
+  `--target-min` token (`app/globals.css:382`, 24px), with the reasoned
+  `data-target-size-exception` escape and a mutant panel at `a11yRules.test.ts:158-276` — **a
+  source-level shortfall gate, not a computed-geometry conformance proof** (`a11yRules.ts:219-221`);
+  the built-app leg is `apps/web/e2e/a11y-finish-walk.spec.ts` (landed #515 `af08c75e`, 2026-09-02).

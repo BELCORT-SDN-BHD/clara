@@ -76,7 +76,7 @@ export const TRUSTED_HEADER_VAR = "CLARA_TRUSTED_CLIENT_IP_HEADER";
 export const PEPPER_VAR = "CLARA_RATE_WALL_PEPPER";
 
 /** Both doors raise `CLR10 a digest is required` on any other length
- *  (`0161`'s `open_checkout_intent` and `claim_confirmation_attempt` each
+ *  (`0163`'s `open_checkout_intent` and `claim_confirmation_attempt` each
  *  check `octet_length(...) <> 32`). */
 export const DIGEST_BYTES = 32;
 

@@ -367,6 +367,19 @@ export function enableDomInspection(): void {
   // off `globalThis` under BOTH names, is enough for that fallback path to
   // resolve instead of throwing on first render of any page carrying a
   // <Link> (components/firm/needs-you-row.tsx's client link, among others).
+  // cmdk (the ⌘K palette's list primitive) constructs a `ResizeObserver` in its own layout
+  // effect to keep the list's height in step with its filtered contents. There is no layout
+  // engine here, so an INERT observer is the honest stub: it accepts an observe/unobserve/
+  // disconnect and never fires. Without it, merely RENDERING the palette throws
+  // "ResizeObserver is not defined" — a crash in the harness, not a finding about the
+  // component. It never invents a size, and nothing in this repo asserts on one.
+  if (typeof g.ResizeObserver !== "function") {
+    g.ResizeObserver = class {
+      observe(): void {}
+      unobserve(): void {}
+      disconnect(): void {}
+    } as unknown;
+  }
   if (typeof g.self === "undefined") g.self = globalThis as unknown;
   if (typeof g.requestIdleCallback !== "function") {
     g.requestIdleCallback = ((cb: (deadline: { didTimeout: boolean; timeRemaining: () => number }) => void) =>

@@ -184,7 +184,7 @@ export async function handleCheckoutPost(
   // put to the owner was: refuse here, or defer beside A-M4 with a PR-body note
   // only. The ruling is to refuse at ⑤, before Stripe is called, with a typed
   // flash kind and a unit cell proving zero Stripe calls and zero door calls.
-  // A-M4's operator read door (shipped in `0161`) is untouched by this; the
+  // A-M4's operator read door (shipped in `0163`) is untouched by this; the
   // refusal is additive and turns nobody away that the folded door could serve.
   // SYMMETRY NOTE (#517 review r2, NIT 4 — a note, not a hole). This predicate
   // and `holdingStateFrom` agree exactly on the POSITIVE case: `context.ok ===
@@ -231,7 +231,7 @@ export async function handleCheckoutPost(
     // would build a Session at one plan's price with another plan's collection
     // mode. Refuse rather than pick a winner — a retry opens a fresh intent
     // wholly on the new plan (`open_checkout_intent` reuses only a CURRENT-plan
-    // unstamped intent, `0161`'s own money-surface rule).
+    // unstamped intent, `0163`'s own money-surface rule).
     if (plan.localKey !== intent.priceLocalKey) {
       return checkoutRefusal(proof.origin, { kind: "plan_rotated" });
     }

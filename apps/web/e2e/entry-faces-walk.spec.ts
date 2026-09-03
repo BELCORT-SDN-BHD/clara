@@ -1,5 +1,7 @@
 import { expect, test } from "@playwright/test";
 
+import { ensureRealFocus } from "./helpers";
+
 /**
  * FS-2's 裁-86 e2e leg for #461 — the entry group's pre-auth faces, walked in
  * a real browser against the built app. This spec encodes the walk an
@@ -86,7 +88,11 @@ test("the login face renders on the identity canvas with no console errors", asy
   await page.goto("/login");
   await expect(page.getByRole("heading", { name: "Sign in" })).toBeVisible();
   await expect(page.locator("main.bg-identity-canvas")).toBeVisible();
-  await expect(page.getByText("ClaraBook")).toBeVisible();
+  // `exact: true` since P6-6's copy pass: the face now says the product name
+  // twice — once as the lockup's wordmark and once inside "Sign in to your
+  // ClaraBook account." — and a substring match resolves to both. The wordmark
+  // is the one this cell is about.
+  await expect(page.getByText("ClaraBook", { exact: true })).toBeVisible();
   expect(errors).toEqual([]);
 });
 
@@ -95,7 +101,11 @@ test("login keyboard pass: tab order is Email -> Password -> Sign in, with a vis
   // A freshly navigated page is not guaranteed OS-level window focus yet; an
   // unfocused page silently drops the first keyboard event rather than
   // erroring, which reads as a wrong tab order instead of what it really is.
-  await page.bringToFront();
+  // `ensureRealFocus` (./helpers.ts) anchors on the browser's own
+  // `document.hasFocus()` -- a positive precondition, not a sleep -- see that
+  // file's header for the measured race this closes (PR #510: 6/10 base-side
+  // failures, all at this exact FIRST Tab, all "Received: inactive").
+  await ensureRealFocus(page);
 
   await page.keyboard.press("Tab");
   await expect(page.getByLabel("Email")).toBeFocused();
@@ -158,8 +168,8 @@ test("signup client-side validation refuses an empty submit and an invalid email
 
 test("signup keyboard pass: tab order is Email -> Password -> Create account, Enter submits", async ({ page }) => {
   await page.goto("/signup");
-  // Same OS-focus caveat as the login keyboard pass above.
-  await page.bringToFront();
+  // Same OS-focus caveat as the login keyboard pass above -- same helper.
+  await ensureRealFocus(page);
 
   await page.keyboard.press("Tab");
   await expect(page.getByLabel("Email")).toBeFocused();

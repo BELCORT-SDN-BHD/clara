@@ -138,13 +138,25 @@ cell("c1.1 catalog -- the four tables have the exact C-1 column shapes", async (
   for (const row of rows.rows) assert.equal(row.columns, expected.get(row.relname), row.relname);
 });
 
-cell("c1.2 beta seed -- exact body, source and DB-recomputed sha are current", async () => {
+// SCOPED to the CURRENT document (round-4 fold on #493). This read used to be unscoped and to
+// assert "exactly one row" over the WHOLE table, which silently made the cell depend on no other
+// test file having superseded a document before it ran. That is not a property C-1 owns:
+// `clara.dpa_documents` is an append-only LEDGER (`t_dpa_documents_append_only` refuses a DELETE
+// with CLR08, so the residue cannot be cleaned at source), and C-3's cells legitimately write
+// superseded documents to prove the current-DPA filter excludes them. On a run where
+// `checkout-gate-c3` executed first this cell therefore reddened with a count that said nothing
+// about C-1 — measured, seven rows where one was expected, six of them C-3's own non-current
+// documents. Node's directory order is the platform's readdir order, so which file runs first is
+// not ours to rely on. The claim C-1 actually makes is that exactly ONE document is CURRENT and it
+// is the beta one; that is what the WHERE now says, and the reader is the only lawful place to say
+// it. Same class as c3.54's global admissions count in the same PR.
+cell("c1.2 beta seed -- exactly one CURRENT document, with exact body, source and DB-recomputed sha", async () => {
   const row = await rootQuery(
     `select version,body,source_path,effective_to,octet_length(body_sha256) as sha_bytes,
             body_sha256 = sha256(convert_to(body,'UTF8')) as sha_matches
-       from clara.dpa_documents order by created_at,version`,
+       from clara.dpa_documents where effective_to is null order by created_at,version`,
   );
-  assert.equal(row.rowCount, 1, "C-1 ships exactly one beta document row");
+  assert.equal(row.rowCount, 1, "exactly one CURRENT beta document row");
   assert.deepEqual(
     row.rows[0],
     {

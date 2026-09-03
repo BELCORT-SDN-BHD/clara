@@ -31,7 +31,7 @@ const DEV_COOKIE_NAME = "clara-checkout-flash";
 
 const MAX_AGE_SECONDS = 180;
 /** A refusal sentence longer than this is not a door sentence — the longest
- *  `0161` raises is well under it. Bounded so a cookie cannot be grown into a
+ *  `0163` raises is well under it. Bounded so a cookie cannot be grown into a
  *  storage channel, and so a malformed payload fails closed rather than
  *  rendering an arbitrary blob. */
 const MAX_MESSAGE_CHARS = 400;

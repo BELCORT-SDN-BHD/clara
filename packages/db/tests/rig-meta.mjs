@@ -403,6 +403,26 @@ const F_A5B_PR1_WAKE_FNS = ["wake_mint_sandbox_view", "wake_request_sandbox_expo
 const F_A5B_PR1_RUNTIME_FNS = ["sandbox_export_payload", "complete_sandbox_export", "fail_sandbox_export"];
 const F_A5B_PR1_HUMAN_FNS = ["register_export_recipient", "supersede_export_recipient", "list_sandbox_exports"];
 export const F_A5B_PR1_COHORT = [...F_A5B_PR1_WAKE_FNS, ...F_A5B_PR1_RUNTIME_FNS, ...F_A5B_PR1_HUMAN_FNS];
+// FS-7 ECHELON 2 [the ONE generic artifact download door, 裁-96② / 裁-118]: TWO granted names and a
+// THIRD that is deliberately granted to nobody.
+//
+// The split is the whole design, so the roster is where it has to be legible. The BYTE door
+// (get_artifact_for_human_read) returns a `storage_key` and is clara_runtime ONLY — the
+// clara.get_document_for_human_read idiom exactly (WAVE_A_RUNTIME_FNS above): the trusted-ingress
+// route validates a human session JWT and passes the resolved subject, and the DATABASE decides
+// what that subject may see. Putting it on clara_authenticated would hand a storage path to the
+// browser, which is the thing 裁-96② forbids.
+//
+// The OFFER door (list_downloadable_artifacts) is clara_authenticated ONLY and returns NO
+// storage_key ever — it is what tells the Reports tab whether a Download control may appear, so the
+// control is never a dead link. Bookkeeper floor, body-enforced, like every human reporting read.
+//
+// clara._artifact_download_core — the GATE both doors call — appears in NEITHER list and in no
+// cohort, because it is granted to nothing at all. The migration's own tail censuses that
+// positively (its EXECUTE grantee set must read exactly `clara_fn_owner`), and this roster's
+// expected-false sweep is the second, independent proof of the same fact.
+const FS7_E2_DOWNLOAD_RUNTIME_FNS = ["get_artifact_for_human_read"];
+const FS7_E2_DOWNLOAD_HUMAN_FNS = ["list_downloadable_artifacts"];
 // F-A5b CARD 1 [Wave-F Track A, the substitution seam]: TWO grant tiers, and no human one — card 1
 // mints no new human door. The wake tier is the stage-(b) preview composer; the runtime tier is the
 // sandbox job family's claim/dispatch/reap quartet, which PR-1 deliberately did not ship (its own
@@ -1161,7 +1181,7 @@ export const CHECKOUT_GATE_C2_COHORT = [
   ...CHECKOUT_GATE_C2_HUMAN_FNS, ...CHECKOUT_GATE_C2_WEBHOOK_FNS,
 ];
 
-// FS-4 C-6 (`UNNUMBERED_checkout_gate_c6_web_reads` — number claimed at merge prep): the TWO
+// FS-4 C-6 (`0164_checkout_gate_c6_web_reads` — number claimed at merge prep): the TWO
 // read doors `apps/web`'s entry faces cannot render truthfully without. Both are
 // clara_authenticated ONLY, both are STABLE SECURITY DEFINER, and neither has a wake sibling —
 // there is no agent path to "which plan is current" or "how far along is MY checkout", by the
@@ -1425,6 +1445,9 @@ export const ALLOWED = {
     ...F_A5B_PR1_HUMAN_FNS, // [Wave-F Track A, F-A5b PR-1] register/supersede_export_recipient
     // (admin+) + list_sandbox_exports (bookkeeper+) — clara_authenticated ONLY, every floor
     // body-enforced; agent + both wake roles gain ZERO (covered_clients IS the coverage wall)
+    ...FS7_E2_DOWNLOAD_HUMAN_FNS, // [FS-7 echelon 2, 裁-96②] list_downloadable_artifacts — the
+    // OFFER door: bookkeeper floor, and it returns NO storage_key, so the browser learns THAT it
+    // may download and never WHERE the object lives (see the block above)
     // F-A3/PR-1b [bank-agency agent limb] the one human door: set_bank_agency_hold, a
     // bookkeeper-floor idempotent upsert on the client's own hold row (body-enforced floor;
     // agent + both wake roles gain ZERO — the hold is a human brake on the agent lane, never
@@ -1594,6 +1617,10 @@ export const ALLOWED = {
     ...CARD1_SEAM_RUNTIME_FNS, // [Wave-F Track A, F-A5b card 1] the sandbox job family's
     // claim/dispatch/reap quartet, mirroring render_jobs' own verbs (0081) retargeted — the half
     // PR-1 registered as a gap and without which no worker ever transitions a claimable row
+    ...FS7_E2_DOWNLOAD_RUNTIME_FNS, // [FS-7 echelon 2, 裁-96②] get_artifact_for_human_read — the
+    // BYTE door over BOTH artifact families, the get_document_for_human_read idiom: the resolved
+    // principal comes IN and the live active membership decides. clara_runtime ONLY, so a
+    // storage_key never crosses to a browser (see the block above)
   ]),
 };
 // RLS policy helpers are legitimately callable broadly (a policy expression runs

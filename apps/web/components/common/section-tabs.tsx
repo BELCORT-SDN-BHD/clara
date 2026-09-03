@@ -63,7 +63,7 @@ export function SectionTabs<T extends string>({
               // The focus treatment is the SHADCN RING, not the global
               // `:focus-visible` outline in globals.css: every Button, Input,
               // Textarea and Badge in this product focuses with a 3px
-              // `ring-ring/50` halo, and a raw <button> falling through to a
+              // `ring-ring/70` halo, and a raw <button> falling through to a
               // hard 2px outline put two different focus looks on one page.
               // The global outline stays as the net for anything not yet a
               // primitive; it is not the idiom. This is a RECORDED
@@ -74,7 +74,7 @@ export function SectionTabs<T extends string>({
               // Input/NativeSelect idiom) lifts the indicator's own contrast
               // above WCAG 2.2 SC 1.4.11's 3:1 floor — the translucent ring
               // alone measured under it.
-              "motion-fast -mb-px rounded-t-md border-b-2 px-2.5 pt-1 pb-2 text-sm font-medium transition-colors outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50",
+              "motion-fast -mb-px rounded-t-md border-b-2 px-2.5 pt-1 pb-2 text-sm font-medium transition-colors outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/70",
               active
                 ? "border-primary text-foreground"
                 : "border-transparent text-muted-foreground hover:text-foreground",

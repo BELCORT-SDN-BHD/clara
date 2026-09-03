@@ -878,7 +878,7 @@ const COA_TEMPLATE_PR_B_CLOCK_NAMES = ["apply_coa_template"];
 // not pick up a one-name bare-token roster drift.
 const CHECKOUT_GATE_C2_CLOCK_NAMES = ["resolve_stripe_event_problem"];
 
-// FS-4 C-3 is live-numbered as 0161. THREE bodies lawfully read the bare timestamp
+// FS-4 C-3 is live-numbered as 0163. THREE bodies lawfully read the bare timestamp
 // clock: open_checkout_intent evaluates a rolling 24-hour rate window; claim_paid_firm stamps the
 // registration decision/payment consumption; settle_confirmation_attempt stamps the OTP outcome.
 // claim_confirmation_attempt is deliberately absent: attempted_at is a COLUMN DEFAULT and its

@@ -302,7 +302,9 @@ resolution still visible · the seventh kind asserted against the live CHECK's o
 **Skills: `impeccable`, `frontend-design`, `emil-design-eng`, `animate`, `apple-design`.**
 
 **① 裁-14 · the Clara mascot.** `apps/web/public/` holds **five font files and nothing else** —
-there is no mascot asset. Port it and implement **under the token contract's §7 rules exactly**:
+there is no mascot asset *(superseded 2026-09-02 by #514 — `apps/web/public/brand/clara/` now
+carries the mascot PNG; this line is a dated order, not a live measurement)*. Port it and
+implement **under the token contract's §7 rules exactly**:
 **empty states and rare welcome moments only, NEVER a loader**, and `prefers-reduced-motion`
 honoured with its own arm (the codebase already carries four such blocks — match that idiom).
 

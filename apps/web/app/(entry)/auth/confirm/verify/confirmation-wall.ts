@@ -62,7 +62,7 @@
 // `LOCKED_MAX_WAIT_SECONDS = 900` and `REMAINING_MAX = 5` rode the assumption
 // that C1/C2's window is 15 minutes and its ceiling 5, and warned that a
 // genuine lockout outside those bounds would render as a mystery "invalid".
-// That is discharged, against `0161`'s shipped body rather than against the
+// That is discharged, against `0163`'s shipped body rather than against the
 // design prose:
 //
 //   · `retry_after_seconds` — the door computes each limb's own wait and

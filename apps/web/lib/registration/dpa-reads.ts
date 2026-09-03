@@ -1,5 +1,5 @@
 // THE CURRENT DPA DOCUMENT — repointed by FS-4 C-6 Lane B from a relation read
-// onto the real door, `clara.get_current_dpa_document()` (`0161`).
+// onto the real door, `clara.get_current_dpa_document()` (`0163`).
 //
 // WHAT LANE A MEASURED, AND WHY THE RELATION READ COULD NEVER HAVE WORKED.
 // C-1 (`0158`) creates `clara.dpa_documents` with RLS enabled AND forced, one
@@ -9,7 +9,7 @@
 // (design part 2 §1), so `getRows("dpa_documents")` was not waiting for a
 // grant that was coming; it was reading a relation that would never answer.
 // C-3 healed the acknowledged build-order drift by adding the door, and the
-// door is what this module now calls. `0161`'s own comment names this file as
+// door is what this module now calls. `0163`'s own comment names this file as
 // the door's frontend home.
 //
 // A READ THAT RIDES `callDoor`, LABELLED AS ONE (apps/web/AGENTS.md: "A

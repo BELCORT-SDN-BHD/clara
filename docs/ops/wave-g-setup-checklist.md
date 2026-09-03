@@ -27,7 +27,7 @@ that PROVES it — read this before the Wave-G factory reset + estate e2e, not a
       just confirm it is set, confirm the fail-closed behaviour under a deliberately-unset probe
       first.
 - [ ] Flip `clara_auth_wall_login` to `LOGIN` out of band and set
-      `CLARA_AUTH_WALL_DATABASE_URL` in the runtime environment only; migration `0161` deliberately
+      `CLARA_AUTH_WALL_DATABASE_URL` in the runtime environment only; migration `0163` deliberately
       ships and tail-proves the role as `NOLOGIN`, so this is a deploy ceremony, never repo-held DDL.
 
 ### FS-4 C-6 — the four `apps/web` variables, and the one that carries two correct values
@@ -60,8 +60,11 @@ runtime. Secrets move env-to-env and are never printed.
       it is read by `POST /checkout` alone and never bundled.
 - [ ] Proof for the pepper and the service token: compare a **hash** of each value across the two
       environments, never the values themselves.
-- [ ] Proof: `vercel env ls` / the deploy platform's env listing (values redacted), each of the
-      required names present, no value ever pasted into chat, a PR, or a log.
+- [ ] Proof: **`wrangler secret list` for the `clara-web` Worker** (values redacted; all four
+      names are `apps/web`-only — `git grep` over `apps/dashboard` and `packages/runtime` = 0
+      hits). ADR-024 dropped Vercel; `apps/web/wrangler.jsonc:3` names the Worker `clara-web`.
+      **Caveat:** `wrangler.jsonc` currently declares no `vars` block, so `CLARA_PUBLIC_ORIGINS`
+      has no declared home on the Workers deploy — worth its own look before Wave-G.
 
 ## Invite-link log redaction — 裁-65 / P4-4 round 3 item 75
 
@@ -74,8 +77,12 @@ runtime. Secrets move env-to-env and are never printed.
 
 - [ ] Supabase Auth → "Allow new users to sign up" is **ON**, for the tier-3 self-serve path
       (sign up → pay through Stripe → start; no approval queue, 裁-43/裁-68).
-- [ ] Auth → Redirect URLs contains exactly `<origin>/signup` and `<origin>/auth/confirm`; **no
-      wildcard** entry.
+- [ ] Auth → Redirect URLs contains exactly **`<origin>/auth/confirm`** and **`<origin>/auth/recover`**;
+      **no wildcard** entry. (Whole-tree census of tracked source, 2026-09-03: exactly two
+      redirect call sites — `signup-account-form.tsx:182` sends `emailRedirectTo` to the
+      /auth/confirm route, `password-recovery-form.tsx:42` sends `redirectTo` to the /auth/recover
+      route; nothing passes `/signup`. The companion *Reset password* template box lives in the
+      pending FS-10 notes — do not double-file it here.)
 - [ ] Email confirmation is **ON** and autoconfirm is **OFF**. Per 裁-92's CODE flow (superseding
       this checklist's earlier token_hash link-form instruction — `apps/web/README.md` §4), the
       "Confirm signup" template emits the bare code and nothing to click: `{{ .Token }}` — never
@@ -103,6 +110,12 @@ runtime. Secrets move env-to-env and are never printed.
 - [ ] A Stripe account exists, with **Stripe Tax** configured for Malaysian service tax (switched
       on only once BELCORT's own SST registration status says so — no tax line before
       registration).
+- [ ] `clara.stripe_object_map` carries `('product','clara-beta-2026','prod_VBS7ZUaIFPedCs')` and
+      `('price','clara-beta-2026','price_1UB5DZHD90w0k86XNfkgYPWq')` — an OPS ACT run **after**
+      the reset applies `0160` and `0163_checkout_gate_c3_folded_door.sql` (#493, **MERGED**
+      `265a8ee7`, 2026-09-03). Proof: the as-run's `select object_kind, local_key, stripe_id`
+      plus one `open_checkout_intent` call that does NOT raise `CLR10`. Without this seed a beta
+      signup dies at `CLR10 no stripe price is mapped for this plan`.
 - [ ] **The Wave-G walk exercises checkout in Stripe TEST mode at a non-zero test price**, with
       test cards — this is the 裁-58 dissent's mitigation: the real-money charge path is not
       exercised before launch, so the charge/webhook/invoice path must be proven in test mode
@@ -147,6 +160,32 @@ runtime. Secrets move env-to-env and are never printed.
       runtime's emittable kinds, re-checked at every future `_vN` bump.
 - [ ] Every proof artifact from this checklist and the Wave-G walk is retained in the Wave-G
       as-run (裁-122).
+
+## The first REAL sealed artifact — 裁-136
+
+裁-136 (owner, 2026-09-02) changed the gate-3 extraction mode from `-layout` to `-raw` so that
+`extracted_text_sha256` covers the watermark burned into the page background. `-layout` drops
+rotated text entirely, so before this ruling neither the claim scan nor the sealed hash could see
+it. **The ruling was taken at the only hash-migration-free moment**: `clara.report_artifacts` was
+empty on the live project, so no sealed artifact's hash had to be migrated and none ever will be.
+
+That guarantee holds only until the first real seal, which lands at Wave-G. From then on the mode
+is load-bearing history.
+
+- [ ] Before the first real seal, confirm the deployed `clara-render` image carries the `-raw`
+      extractor — read it off the artifact, not off the source: the mode is pinned in
+      `packages/reporting-render/lib/extract.mjs`'s `EXTRACT_FLAGS`, and it also rides in the
+      manifest's own `extraction_tool` string, so the FIRST sealed artifact's manifest is the
+      positive read. A manifest whose `extraction_tool` does not name `-raw` means the machine ran
+      an older image and the seal must be redone.
+- [ ] Record, in the Wave-G as-run, that `clara.report_artifacts` was empty immediately before the
+      first seal — this is the last moment that fact is checkable, and it is what makes "no hash
+      migration is owed" a measurement rather than a memory.
+- [ ] **After the first real seal, a change to the extraction mode is a HASH MIGRATION**, not a
+      flag edit: every sealed `extracted_text_sha256` was computed under the old mode and
+      `clara.report_artifacts` is insert-once with UPDATE trigger-blocked. Any future change needs
+      its own owner ruling and a re-derivation plan; 裁-136 is not a precedent for a second free
+      change.
 
 ## Data safety — hard constraint 14 / DR.md
 

@@ -53,6 +53,8 @@ Cost stated at the ask: zero code lines, riding the truing PR's one-opus-review 
 classifier scores that PR CODE — see the header note; not ADR-0069's lane). Both texts are truings of
 already-ruled decisions, not new policy — the DECISION here is that the law documents say so.
 
+> **ERRATA — corrected by 裁-142 (owner, 2026-09-03): the premise's example above names the wrong secret — `STRIPE_WEBHOOK_SECRET` is RUNTIME env and `apps/web`'s real FS-4 credential is `STRIPE_SECRET_KEY`; the ruling stands.**
+
 ---
 
 # The 2026-09-02 checkpoint sitting (morning, ~08:00–10:30 MYT) — 裁-115 … 裁-128
@@ -61,8 +63,9 @@ already-ruled decisions, not new policy — the DECISION here is that the law do
 > 21:16:59Z (05:17 MYT) as `33e94855`, one merge behind `#484`/`0160` and therefore carrying four rows
 > that call #484 an open red gate — trued by the checkpoint PR this sitting produced. The sitting
 > opened on a 17-lane read-only scan (111 agents; every BLOCKER/MATERIAL finding refuted-first by an
-> independent opus verifier; a completeness critic) whose owner-facing artifact is the "Clara Beta
-> Runway" page (claude.ai artifact `ff4b0d54-e247-49c5-a3c5-bccd845f2ae1`). Every question below was
+> independent opus verifier; a completeness critic) whose owner-facing artifact is **the owner page
+> "Clara beta runway 0902"** (a claude.ai artifact; its id changes on every terminal re-login — the
+> current link is handed to the owner at each checkpoint, never recorded here). Every question below was
 > put ONE AT A TIME with the recommendation first and the cost stated (the grill protocol). Each entry
 > names whether the owner followed or overrode the recommendation. Landed the same day in
 > `docs/plan/active/clarabook-conformance-pass-3-2026-09-02.md` (FS-9, pre-run by the scan),
@@ -211,8 +214,7 @@ is the owner's dashboard act once C-5's route is deployed (`whsec_` → Fly secr
 **Receipt — objects created through the session's Stripe connector from the `billing_plans` seed
 row (`local_key='clara-beta-2026'`, MYR 0, `amounts_ruled=false`), never hand-authored:**
 Product `prod_VBS7ZUaIFPedCs` ("Clara Beta"), Price `price_1UB5DZHD90w0k86XNfkgYPWq` (MYR 0 /
-month, recurring); both carry the local key and the ruling numbers in metadata; C-5 seeds them
-into `clara.stripe_object_map`. Stripe Tax stays off per 裁-54 until BELCORT's SST registration
+month, recurring); both carry the local key and the ruling numbers in metadata. **The ids are written into `clara.stripe_object_map` by an OPS ACT run as `clara_fn_owner` from merged `main` after C-5 deploys — NOT by C-5, which carries no migration and only READS the map** (trued 2026-09-03 from #511's own file set: 23 files, all under `packages/runtime/`, its only map writes being a test fixture). Stripe Tax stays off per 裁-54 until BELCORT's SST registration
 status says otherwise.
 
 ## 裁-127 · The five open owner-batch items are POST-BETA, each with a Backlog row (owner: "这些会影响 beta 吗? 没有的话就跟 recommendation")
@@ -310,3 +312,13 @@ genesis, superseded here); the FS-11 Management-API receipt reads `mailer_otp_ex
 no migration. **Sequencing clause (from the #506 review's note):** the wall this ruling leans on is
 C-5's attempt wall — on the 2026-09-02 tip the confirmation seam is still the honest-refusing stub —
 so the 60-minute value is set only after C-5 is live; the checklist line says so.
+
+---
+
+**裁-132 onward live in [`mohe-grill-rulings-2026-09-02-pm.md`](mohe-grill-rulings-2026-09-02-pm.md)**
+— the afternoon and night of the same day (裁-132…141: streaming text post-beta · native lanes only ·
+the CI cap and the owner's public-repo override · the watermark in the sealed hash · the wordmark ·
+P6-3's four look changes · the member refused at checkout · how a sprint ruling reaches the ADR
+system · the ⌘K allowlist shape and its drift guard). This file was split there at the 09-02 pm/night
+truing, at the repo's 500-line document ceiling; 裁-129…131 stay here because that is where they
+landed (#506). **The `-pm` file is the NEWEST ledger — read it, not this one, for the day's close.**

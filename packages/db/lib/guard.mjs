@@ -25,8 +25,11 @@
 
 import { targetLabel, destructiveTargetLabel, assertNoTargetSplit } from "./pg.mjs";
 
-// Disposable database-name shapes (suffix or whole-name).
-const EPHEMERAL_DB = /(^|[._-])(ci|test|tmp|temp|scratch|ephemeral)$/i;
+// Disposable database-name shapes (suffix or whole-name). Exported so a caller that
+// drops a NAMED database by argument (rather than acting on its own connection target)
+// can hold the database it is about to drop to the SAME disposability bar this file
+// already reasons about (tests/rig-cluster-reset.mjs's dropDatabase — review-518-r2 F3).
+export const EPHEMERAL_DB = /(^|[._-])(ci|test|tmp|temp|scratch|ephemeral)$/i;
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "::1", "0.0.0.0"]);
 
 /** Split "host:port/db" (from targetLabel) into { host, db }. */
@@ -38,7 +41,16 @@ function parseLabel(label) {
   return { host: host.toLowerCase(), db };
 }
 
-/** True when the resolved target looks disposable (safe to drop). */
+/**
+ * True when the resolved target looks disposable (safe to drop).
+ *
+ * **Necessary, not sufficient** (rev-498 review, #518 D3): this is a HOST/NAME
+ * shape check, not a content check. ANY loopback host (`127.0.0.1`, `localhost`,
+ * `::1`, `0.0.0.0`) is authorised regardless of the database name on it —
+ * measured, `127.0.0.1/clara_production_copy` passes this check. It closes the
+ * remote-live-cluster footgun (an arbitrary ambient DSN pointing at a real
+ * project); it does NOT prove a local Postgres holds only disposable data.
+ */
 export function targetIsEphemeral(label = targetLabel()) {
   const { host, db } = parseLabel(label);
   return LOCAL_HOSTS.has(host) || EPHEMERAL_DB.test(db);
@@ -47,22 +59,27 @@ export function targetIsEphemeral(label = targetLabel()) {
 /**
  * Throw unless the destructive op is explicitly authorized against a disposable
  * or explicitly-named target.
- * @param {{ action: string }} opts
+ * @param {{ action: string, env?: NodeJS.ProcessEnv }} opts `env` defaults to
+ *   `process.env` — pass the SAME env object the caller is about to act on (e.g.
+ *   a `sourceEnv` captured before a redirect) so the guard evaluates the target
+ *   it will actually touch, not whatever `process.env` happens to be at call
+ *   time (rev-498 M2: the two can diverge for a future caller even though they
+ *   agree for every caller today).
  */
-export function assertDestructiveAllowed({ action }) {
+export function assertDestructiveAllowed({ action, env = process.env }) {
   // Resolve ONE canonical target first: refuse if a DSN URL var and PG* disagree
   // (finding 1) — otherwise the guard could clear one DB while pg_dump/psql (which
   // read PG*) operate on another.
-  assertNoTargetSplit();
-  const label = targetLabel(); // host:port/db — the ephemeral shape check
-  const identity = destructiveTargetLabel(); // user@host:port/db — the confirmation
-  if (process.env.CLARA_ALLOW_DESTRUCTIVE !== "1") {
+  assertNoTargetSplit(env);
+  const label = targetLabel(env); // host:port/db — the ephemeral shape check
+  const identity = destructiveTargetLabel(env); // user@host:port/db — the confirmation
+  if (env.CLARA_ALLOW_DESTRUCTIVE !== "1") {
     throw new Error(
       `${action} is destructive and REFUSED. Target ${identity}. Set CLARA_ALLOW_DESTRUCTIVE=1 to authorize, and run only against a disposable target.`,
     );
   }
   if (targetIsEphemeral(label)) return; // disposable target + sentinel is enough
-  const named = process.env.CLARA_DESTRUCTIVE_TARGET;
+  const named = env.CLARA_DESTRUCTIVE_TARGET;
   if (named && named === identity) return; // explicit, exact-target confirmation
   throw new Error(
     `${action} REFUSED for non-ephemeral target ${identity}. This is not a *_ci/*_test/localhost database, so confirm you mean this EXACT database by setting CLARA_DESTRUCTIVE_TARGET="${identity}" (guards against the ambient-DSN footgun). NOTE the user@ prefix: on a managed pooler every project in a region shares one host and the \`postgres\` database, so the username is what identifies the project — a host-only match could authorize the WRONG project. Refusing.`,

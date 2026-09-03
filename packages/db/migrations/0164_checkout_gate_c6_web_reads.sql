@@ -1,7 +1,7 @@
 -- FS-4 checkout gate, PR C-6 (apps/web): the TWO reads the entry faces cannot be built truthfully
--- without, plus the one plan column design part 3 §2 requires and `0161` did not carry.
+-- without, plus the one plan column design part 3 §2 requires and `0163` did not carry.
 -- UNNUMBERED at authoring; the number is claimed at merge prep under 裁-108, and it MUST sort
--- after `0161_checkout_gate_c3_folded_door.sql` — every object below depends on C-3's.
+-- after `0163_checkout_gate_c3_folded_door.sql` — every object below depends on C-3's.
 --
 -- WHY A MIGRATION IS IN A FRONTEND PR AT ALL. Two facts design part 1 §2.1 and part 3 §2 require
 -- the browser to render are, as C-3 shipped, unreachable from `apps/web` — measured, not assumed:
@@ -30,7 +30,7 @@
 -- a real column rather than a generated one so the pricing sitting can set it directly (the
 -- billing brief's configurability law, which part 3 §2 cites by name).
 --
--- REPORTED, NOT RESOLVED (hard constraint 1). `0161` labels `billing_plans` "MINIMAL G2 BILLING
+-- REPORTED, NOT RESOLVED (hard constraint 1). `0163` labels `billing_plans` "MINIMAL G2 BILLING
 -- DECLARATION. Billing PR-1 owns later rotation/widening", and this column is a widening of that
 -- table by another train. It is additive, defaulted and CHECK-bounded, and the PR body puts the
 -- alternative (leave the Session's collection mode unset and accept Stripe's `'always'`) to the
@@ -40,12 +40,12 @@
 -- reads `clara.firm_registration_payments`, so it joins the closed-world roster C-3's own cell
 -- `c3.53` pins (`packages/db/tests/checkout-gate-c3.test.mjs`, "the money-store body roster is
 -- closed"). That cell is widened in the SAME PR, with the reason written beside the name. This
--- migration does not hide the dependency and could not: `0161`'s own comment on
+-- migration does not hide the dependency and could not: `0163`'s own comment on
 -- `open_checkout_intent` sets the standard — "hiding a real dependency from a catalog census on
 -- a money surface is the wrong kind of clever." The door is a STABLE reader; it writes nothing
 -- and consumes no payment.
 --
--- NO BODY IS REPLACED. Nothing here is a `create or replace` of a `0161` function: this cohort is
+-- NO BODY IS REPLACED. Nothing here is a `create or replace` of a `0163` function: this cohort is
 -- purely additive (one column, two new doors), so it cannot overwrite a sibling PR's body while
 -- that PR is still in fold. D1 INVENTORY: EMPTY.
 
@@ -63,7 +63,7 @@ begin
      or to_regclass('clara.checkout_intents') is null
      or to_regclass('clara.firm_registration_payments') is null
      or to_regclass('clara.firm_registration_requests') is null then
-    raise exception 'checkout C-6 prestate: C-3 relations are absent — this migration sorts AFTER 0161'
+    raise exception 'checkout C-6 prestate: C-3 relations are absent — this migration sorts AFTER 0163'
       using errcode='CLR10';
   end if;
   if to_regprocedure('clara.jwt_sub()') is null then
@@ -274,5 +274,5 @@ begin
       using errcode='CLR10';
   end if;
 
-  raise notice 'checkout C-6 tail: OK -- plan collection mode derived from amount_cents/amounts_ruled on every row and CHECK-bounded; two stable definer doors at exact signatures, clara_authenticated-only, PUBLIC refused; zero application-role table grants on billing_plans/checkout_intents/firm_registration_payments; no 0161 body recut (D1 inventory empty).';
+  raise notice 'checkout C-6 tail: OK -- plan collection mode derived from amount_cents/amounts_ruled on every row and CHECK-bounded; two stable definer doors at exact signatures, clara_authenticated-only, PUBLIC refused; zero application-role table grants on billing_plans/checkout_intents/firm_registration_payments; no 0163 body recut (D1 inventory empty).';
 end $tail$;

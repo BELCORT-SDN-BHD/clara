@@ -70,7 +70,7 @@ test("NIT-5: the DOOR's own return columns are the drift tripwire, once C-3 land
   // this module actually consumes is `clara.get_current_dpa_document()`'s
   // `returns table(...)` list, so that is what must not drift under it.
   //
-  // A DOCUMENTED NO-OP UNTIL C-3 (#493, `0161`) IS ON THIS TREE — and it ARMS
+  // A DOCUMENTED NO-OP UNTIL C-3 (#493, `0163`) IS ON THIS TREE — and it ARMS
   // ITSELF the moment it is (裁-108: a migration's arrival is what arms the
   // cells that read it). The scan is content-based rather than path-based
   // because migration numbers are claimed at merge (constraint 10), so the

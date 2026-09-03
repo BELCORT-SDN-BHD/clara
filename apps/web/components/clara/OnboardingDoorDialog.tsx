@@ -35,6 +35,7 @@ export function OnboardingDoorDialog({
   busy,
   confirmDisabled,
   onConfirm,
+  onOpen,
   children,
 }: {
   triggerLabel: string;
@@ -52,6 +53,10 @@ export function OnboardingDoorDialog({
    *  outcome — the caller's own hydrated-part state (err/clr) is the source
    *  of truth for what happened, rendered outside this dialog. */
   onConfirm: () => Promise<void>;
+  /** Fired when the dialog OPENS — for a body whose contents need a read the card should
+   *  not make for every row on every render (裁-27's revision trail). Never fired on close,
+   *  and never on a re-render: `onOpenChange` only reports transitions. */
+  onOpen?: () => void;
   /** Extra confirmation-time fields (a name input, a reason textarea, an
    *  attestation input). */
   children?: ReactNode;
@@ -66,7 +71,13 @@ export function OnboardingDoorDialog({
   const guardRef = useRef(createSingleFireGuard());
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        setOpen(next);
+        if (next) onOpen?.();
+      }}
+    >
       <DialogTrigger render={<Button variant={triggerVariant} size="sm" />}>{triggerLabel}</DialogTrigger>
       <DialogContent>
         <DialogHeader>

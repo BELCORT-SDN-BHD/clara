@@ -16,6 +16,10 @@ import { handleAuthWallMock, handleCheckoutMock } from "./fs4-checkout-mock.mjs"
 // other spec's surface changes. See that file's header for what it does and does not
 // prove.
 import { handleChatParityApp, handleChatParitySupabase, startMockRuntime } from "./chat-parity-mock.mjs";
+// P6-5's own lane, the same file-disjoint shape, consulted through the two hooks below.
+// Every branch inside is scoped to ITS OWN ids and falls through otherwise, so it can run
+// beside the chat-parity lane without either starving the other's fixtures.
+import { P6_5_SESSIONS, handleP6_5App, handleP6_5Supabase } from "./agentic-finish-mock.mjs";
 
 const e2eRoot = dirname(fileURLToPath(import.meta.url));
 const webRoot = resolve(e2eRoot, "..");
@@ -103,6 +107,13 @@ const sessions = [
   { id: COLLEAGUE_THREAD_A, firm_id: FIRM_ID, client_id: CLIENT_A, created_by: "44444444-4444-4444-8444-444444444444", visibility: "firm", title: "Colleague thread", created_at: "2026-09-02T02:00:00.000Z" },
   { id: THREAD_A, firm_id: FIRM_ID, client_id: CLIENT_A, created_by: SUBJECT, visibility: "private", title: "Own A", created_at: "2026-09-02T01:00:00.000Z" },
   { id: THREAD_B, firm_id: FIRM_ID, client_id: CLIENT_B, created_by: SUBJECT, visibility: "private", title: "Own B", created_at: "2026-09-02T01:00:00.000Z" },
+  // P6-5's three threads live in the SAME list rather than in a second one. There is exactly
+  // one `/api/chat/sessions` response per server, and a lane that claimed it for itself
+  // starved the parity-holes walk of its own thread — `selectOwnSession` then resolved a
+  // different session and #507's cell went red. Appending is safe in both directions: every
+  // row here carries `created_by: SUBJECT` and its OWN client id, and both walks select by
+  // (created_by, client_id), so neither can see the other's.
+  ...P6_5_SESSIONS,
 ];
 
 function confirmedUser() {
@@ -358,6 +369,7 @@ async function handleSupabase(request, response, url) {
   // starved the chat-parity thread of its `chat_sessions` row, which #507's new
   // client/thread pairing check turns into a 404.
   if (await handleChatParitySupabase(request, response, path, url, sendJson, cors)) return;
+  if (await handleP6_5Supabase(request, response, path, url, sendJson, cors)) return;
 
   if (request.method === "GET" && path === "/rest/v1/clients") {
     const filter = url.searchParams.get("id");
@@ -454,7 +466,12 @@ const httpsServer = createHttpsServer(
     // the chat-parity thread's transcript with a canned assistant message, where a PARKED
     // task must have an empty one (`clara.settle_chat_turn` is what writes the assistant
     // row, and it cancels the pending interruption in the same breath).
+    // P6-5's lane sits between them, for the SAME reason and with the same property: its
+    // `/messages` handlers match three exact thread ids and nothing else, and it claims the
+    // shared `/api/chat/sessions` list only after the chat-parity mock has declined it (that
+    // walk navigates straight to its own thread and never reads a list).
     handleChatParityApp(request, response, url)
+      .then((handled) => handled || handleP6_5App(request, response, url))
       .then((handled) => {
         if (handled) return;
         if (url.pathname === "/api/chat/sessions" || url.pathname.startsWith("/api/chat/sessions/")) {

@@ -68,7 +68,7 @@ test("a malformed, unknown or over-long payload fails closed", () => {
   ]) {
     assert.equal(parseCheckoutFlash(raw, NONCE), null, raw.slice(0, 60));
   }
-  // The bounds admit the real thing: the longest sentence `0161` raises is far
+  // The bounds admit the real thing: the longest sentence `0163` raises is far
   // inside them, and a 400-character message still parses.
   assert.ok(parseCheckoutFlash(wrap({ kind: "refused", code: "CLR09", message: "x".repeat(400) }), NONCE));
 });

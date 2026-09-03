@@ -6,9 +6,12 @@ import { chatRoutes } from "./chatRoutes.js";
 import { intakeRoutes } from "./intakeRoutes.js";
 import { streamRoutes } from "./streamRoute.js";
 import { documentRoutes } from "./documentRoutes.js";
+import { reportRoutes } from "./reportRoutes.js";
 import { interviewRoutes } from "./interviewRoutes.js";
 import { openingRoutes } from "./openingRoutes.js";
 import { seedingRoutes } from "./seedingRoutes.js";
+import { stripeWebhookRoutes } from "./stripeRoutes.js";
+import { authWallRoutes } from "./authWallRoutes.js";
 
 // Clara agent-runtime HTTP surface (Slice 4). The durable chat loop, SSE, and the
 // admission/turn routes ride on top of the WDK Postgres world (started by
@@ -52,6 +55,15 @@ app.use((req, res, next) => {
 // stream. Mount it before the global JSON parser so no middleware can consume it.
 app.use(intakeRoutes());
 
+// FS-4 C-5. The Stripe webhook verifies an HMAC over the RAW request bytes, so it MUST be
+// mounted here, before the global JSON parser: a parser that re-serialises the body changes the
+// bytes and every legitimate signature fails, silently, with the source still reading correctly
+// (design part 3 §1; cell W-C). The pre-session auth wall rides beside it — not for a raw-body
+// reason, but because both routers own their own body parsing and neither may depend on
+// middleware mounted below this line.
+app.use(stripeWebhookRoutes());
+app.use(authWallRoutes());
+
 app.use(express.json({ limit: "1mb" }));
 
 // Liveness — is the process up? No dependencies.
@@ -92,5 +104,10 @@ app.use(seedingRoutes());
 // Document bytes for the doc_review split-view (PIN-DELTA-4) — human JWT -> definer read ->
 // Storage stream with the runtime custody credential; the browser never holds a credential.
 app.use(documentRoutes());
+// Sealed-artifact bytes for the Reports tab (FS-7 echelon 2, 裁-96②) — the SAME trusted-ingress
+// shape over the OTHER two relations: human JWT -> clara.get_artifact_for_human_read -> Storage
+// stream, content address re-verified en route, served as an attachment. No signed URL is ever
+// minted, and no agent role can reach the door behind it.
+app.use(reportRoutes());
 
 export default app;

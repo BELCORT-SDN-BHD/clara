@@ -12,10 +12,20 @@ Cloudflare Workers, replacing apps/dashboard at cutover. Full reference: `README
   (`lib/session-accessor.ts`) — never a per-render accessor object literal (the 4GB-heap-OOM
   lesson, that file's own header).
 - The Clara rail (`RailMount`) mounts OUTSIDE `ClientScopeProvider`'s keyed subtree, so
-  client-owned rail state does not reset on a client switch by construction — every new piece
-  of client-owned rail state ships its own reset on `clientId` change plus a scope cell (A→B
-  and A→firm), until P6-5 lands the structural boundary (#507 the thread, #508 the attachments
-  each paid for this sentence).
+  client-owned rail state would not reset on a client switch by construction. **P6-5 landed
+  the structural boundary: `RailMount` keys `<ClaraRail>` on `clientId ?? "firm"`**, so the
+  whole rail subtree is rebuilt on every switch and no new piece of client-owned rail state
+  needs its own `clientId` reset **on the rail**. Three things this does NOT cover, and all
+  three still bind you: (a) **the full-screen escalation route** — `ClaraFullScreenThread`
+  mounts `ClaraThreadView` from `app/(full)/clients/[clientId]/clara/[threadId]`, and the App
+  Router reuses a page component across a params-only change, so state shared with that
+  component still needs its own `clientId` reset (the composer attachment tray keeps
+  exactly that, and its scope cell is what proves it); (b) state keyed on something other
+  than the client (a `threadId`-scoped tray keeps its own reset); (c) anything living
+  OUTSIDE React — the module-level `claraThreadStore` survives the remount deliberately,
+  because a running turn's SSE attachment is not React state and must not die on a switch.
+  **The scope cells stay** (A→B and A→firm) — they are the proof, not scaffolding for the
+  resets they were written beside.
 - The UI never invents a number, verb, receipt, or link. A missing backend verb renders
   honestly "not built yet" (the ⌘K "Do" precedent) — never a fake control.
 - Every string routes through next-intl; semantic Tailwind tokens only (no raw hex, no `dark:`

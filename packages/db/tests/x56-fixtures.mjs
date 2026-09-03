@@ -38,6 +38,36 @@ export async function hasB3() {
   return r.rows[0].n === 1;
 }
 
+/** Q-D6's close-seal wall (`migrations/0161_qd6_close_seal_wall.sql`) — the FIFTEENTH
+ *  gate-catalog row, drawer 1. Read from the LIVE CATALOG, never a filename and never a
+ *  schema_migrations row, so a renumber cannot move it.
+ *
+ *  WHY EVERY CATALOG-ROSTER ASSERTION IN THIS SUITE BRANCHES ON IT (裁-108): the migration
+ *  shipped UNNUMBERED until the `0161` claim at merge prep, and `scripts/migrate.mjs`'s file
+ *  filter (`/^\d+.*\.sql$/`, migrate.mjs:59)
+ *  skips anything that does not start with four digits — silently. So on CI, and on any rig
+ *  migrated before the number is claimed at merge prep, the catalog is FOURTEEN rows; after
+ *  the claim it is fifteen. A bare count would be red on one side or the other. The roster is
+ *  still asserted EXACTLY on both branches — this witness chooses which roster, never whether
+ *  one is checked.
+ *
+ *  THIS WITNESS READS THE ROW; THE WALL'S OWN BATTERY ARMS OFF THE BODY, and the split is
+ *  deliberate (#509 review, N9). `qd6-close-seal-wall.test.mjs` gates on
+ *  `to_regprocedure('clara._close_gate_deferred_opening(uuid,uuid)')`, because for THAT file a
+ *  dropped catalog row has to be a RED and not a skip — gating it on the row once made
+ *  "somebody deleted the gate" indistinguishable from "the migration is not applied yet", and
+ *  the mutant that deletes the row skipped the whole battery instead of reddening it. For the
+ *  census cells that import THIS helper the question is the opposite one — WHICH roster to
+ *  expect — and the row IS the roster. Measured under that same mutant rather than derived:
+ *  with the row dropped these four census files take their 14-row branch and stay green
+ *  (35/35) while the qd6 battery reds 9 of 11. */
+export const QD6_GATE_KEY = "deferred_opening_resolved";
+export async function hasQd6Wall() {
+  const r = await rootQuery(
+    "select exists(select 1 from clara.close_gate_checks where check_key=$1) as present", [QD6_GATE_KEY]);
+  return r.rows[0].present;
+}
+
 /** The reopen verb's LIVE signature. B3 appends p_attestation (defaulted) and drops the 4-arg
  *  form, so anything probing by regprocedure has to ask rather than hard-code. */
 export async function reopenSig() {

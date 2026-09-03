@@ -184,7 +184,7 @@ test("THE HAPPY PATH: door → plan → Stripe → stamp → 303 to Stripe, in t
 test("M1: the Stripe idempotency key is the INTENT's, so a retry replays one Session", async () => {
   // THE DEFECT THIS CELL EXISTS FOR (review M1). A per-request op key meant two
   // POSTs from one applicant — a double-click, a retry — landed on the SAME
-  // intent (`0161` reuses the applicant's one unstamped current-plan intent)
+  // intent (`0163` reuses the applicant's one unstamped current-plan intent)
   // with DIFFERENT idempotency keys, so Stripe minted a SECOND Session and
   // `record_checkout_session` refused it `CLR09 checkout session already
   // recorded`. Nothing reddened, because the only cell reading the key pinned a

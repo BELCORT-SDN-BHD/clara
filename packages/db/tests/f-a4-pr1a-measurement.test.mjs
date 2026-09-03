@@ -41,6 +41,7 @@ import * as wb from "./wave-b/wb-fixtures.mjs";
 import {
   has0056, caught, cleanCloseableFY, beginClose, attestClose, finalizeClose,
   getCloseReadiness, plainEntry, bookToday, addDaysStr, BANK1, REVN,
+  hasQd6Wall, QD6_GATE_KEY,
 } from "./x56-fixtures.mjs";
 import { latestGates, fyStatus, detailOf } from "./er9-corpus-fixtures.mjs";
 
@@ -184,18 +185,24 @@ const firmOfClient = async (client) =>
 // =====================================================================================
 // CENSUS C15 -- the catalog is FOURTEEN rows and the fourteenth is the one PR-1a added.
 // =====================================================================================
-test("f-a4.pr1a.C15 census: the gate catalog carries FOURTEEN checks, six in drawer 2, and undated_documents is the ADDED key -- every one of the thirteen pre-existing keys still present, named individually", async (t) => {
+test("f-a4.pr1a.C15 census: the gate catalog carries the thirteen pre-existing checks plus undated_documents as the ADDED drawer-2 key -- every pre-existing key still present, named individually", async (t) => {
   if (gate(t)) return;
+  // Q-D6's close-seal wall adds a FIFTEENTH row in drawer 1. Its migration ships UNNUMBERED
+  // and migrate.mjs skips it by filename until the number is claimed (裁-108), so the roster
+  // this cell expects is chosen by a LIVE CATALOG witness -- and it is still an EXACT roster
+  // on both branches, never a relaxed superset.
+  const qd6 = await hasQd6Wall();
   const rows = (await rootQuery(
     "select check_key, drawer, title, evaluator_fn, applies_when from clara.close_gate_checks order by check_key")).rows;
-  assert.equal(rows.length, 14, "census C15: the catalog is fourteen rows");
+  assert.equal(rows.length, qd6 ? 15 : 14, "census C15: the catalog is fourteen rows, fifteen once Q-D6 lands");
   const keys = rows.map((r) => r.check_key);
   for (const k of PRE_KEYS) {
     assert.ok(keys.includes(k), `the pre-existing key ${k} survives PR-1a -- the catalog is append-only and nothing may be lost`);
   }
-  assert.deepEqual([...keys].sort(), [...PRE_KEYS, NEW_KEY].sort(),
-    "the catalog is EXACTLY the thirteen pre-existing keys plus undated_documents -- no other key arrived");
-  assert.equal(rows.filter((r) => r.drawer === 1).length, 6, "six drawer-1 identities, unmoved");
+  assert.deepEqual([...keys].sort(), [...PRE_KEYS, NEW_KEY, ...(qd6 ? [QD6_GATE_KEY] : [])].sort(),
+    "the catalog is EXACTLY the thirteen pre-existing keys plus undated_documents (plus Q-D6's wall once applied) -- no other key arrived");
+  assert.equal(rows.filter((r) => r.drawer === 1).length, qd6 ? 7 : 6,
+    "six drawer-1 identities, seven once Q-D6's close-seal wall lands");
   assert.equal(rows.filter((r) => r.drawer === 2).length, 6, "drawer 2 grows from five to six");
   assert.equal(rows.filter((r) => r.drawer === 3).length, 2, "two drawer-3 advisory checks, unmoved");
   const nu = rows.find((r) => r.check_key === NEW_KEY);
@@ -232,7 +239,7 @@ test("f-a4.pr1a.C15b the catalog is still APPEND-ONLY after PR-1a's insert -- th
   assert.ok(del, "a DELETE on the catalog must refuse");
   assert.match(del.message, /append-only/i, `expected the append-only refusal (got ${del.message})`);
   const still = (await rootQuery("select count(*)::int as n from clara.close_gate_checks")).rows[0].n;
-  assert.equal(still, 14, "and the catalog is untouched by the two refusals");
+  assert.equal(still, (await hasQd6Wall()) ? 15 : 14, "and the catalog is untouched by the two refusals");
 });
 
 // =====================================================================================
@@ -258,7 +265,7 @@ test("f-a4.pr1a.A-3 digest equivalence: on one fixture close over one set of fac
   const fx = await cleanCloseableFY(owner, { tag: "fa4a3", prepSub: prep, startsOn: `${thisYear}-01-01` });
   const begun = await beginClose(owner, { fy: fx.fy });
   const now = new Map((begun.gates ?? []).map((g) => [g.check_key, g]));
-  assert.equal(now.size, 14, "the recut engine measured all fourteen catalog rows");
+  assert.equal(now.size, (await hasQd6Wall()) ? 15 : 14, "the recut engine measured EVERY catalog row");
 
   // (3) THE SAME facts, measured by the PRE-migration body -- THROUGH THE SAME HUMAN SESSION
   // that ran begin_close. That is not a formality: `clara.fa_register_tie` (the
@@ -534,9 +541,10 @@ test("f-a4.pr1a.dry-run clara._close_dry_run_core measures all fourteen gates on
 
   const dry = (await rootQuery("select clara._close_dry_run_core($1,$2) as r", [fx.client, fx.fy])).rows[0].r;
   assert.equal(dry.dry_run, true);
-  assert.equal(dry.checks.length, 14, "the dry run measures the whole catalog, applies_when included");
+  const qd6 = await hasQd6Wall();
+  assert.equal(dry.checks.length, qd6 ? 15 : 14, "the dry run measures the whole catalog, applies_when included");
   const byKey = new Map(dry.checks.map((c) => [c.check_key, c]));
-  assert.deepEqual([...byKey.keys()].sort(), [...PRE_KEYS, NEW_KEY].sort());
+  assert.deepEqual([...byKey.keys()].sort(), [...PRE_KEYS, NEW_KEY, ...(qd6 ? [QD6_GATE_KEY] : [])].sort());
 
   // NOTHING WAS ARMED AND NOTHING WAS RECORDED.
   assert.equal(await fyStatus(fx.fy), "open", "fiscal_years.status is untouched -- no CLR19 was armed");
@@ -596,7 +604,7 @@ test("f-a4.pr1a.dry-run clara._close_dry_run_core measures all fourteen gates on
     "and it is DRAWER 3 -- advisory. An error here refuses nothing: drawer 3 carries no admission power and design §3.2's rung B3 tests only the measurable drawer-1 set");
 });
 
-test("f-a4.pr1a.human-ctx-census EXACTLY ONE of the fourteen gate evaluators opens a human context, and it is the drawer-3 advisory one -- the closed-world read that makes the dry run's single divergence a named fact rather than a tolerance", async (t) => {
+test("f-a4.pr1a.human-ctx-census EXACTLY ONE gate evaluator in the whole catalog opens a human context, and it is the drawer-3 advisory one -- the closed-world read that makes the dry run's single divergence a named fact rather than a tolerance", async (t) => {
   if (gate(t)) return;
   // A CLOSED-WORLD CENSUS, read off the catalog: every evaluator the dispatch can reach is
   // asked whether its body opens `_human_ctx`. If a future gate joins that set, THIS cell
@@ -607,9 +615,10 @@ test("f-a4.pr1a.human-ctx-census EXACTLY ONE of the fourteen gate evaluators ope
   // LABEL rather than a function name ("finalize_close (in-body)"). Feeding those to
   // to_regprocedure raises a syntax error rather than returning NULL, so the resolution is
   // done by proname against pg_proc -- signature-agnostic, and it cannot raise on a label.
+  const qd6 = await hasQd6Wall();
   const catalog = (await rootQuery(
     "select check_key, drawer, evaluator_fn from clara.close_gate_checks order by check_key")).rows;
-  assert.equal(catalog.length, 14, "the census covers the whole catalog");
+  assert.equal(catalog.length, qd6 ? 15 : 14, "the census covers the whole catalog");
   const bodies = new Map((await rootQuery(
     `select p.proname, bool_or(position('_human_ctx' in p.prosrc) > 0) as opens
        from pg_proc p where p.pronamespace = 'clara'::regnamespace group by p.proname`
@@ -619,8 +628,8 @@ test("f-a4.pr1a.human-ctx-census EXACTLY ONE of the fourteen gate evaluators ope
     resolved: r.evaluator_fn.startsWith("clara.") && bodies.has(r.evaluator_fn.slice(6)),
     opens_human_ctx: r.evaluator_fn.startsWith("clara.") && bodies.get(r.evaluator_fn.slice(6)) === true,
   }));
-  assert.equal(rows.filter((r) => r.resolved).length, 12,
-    "twelve of the fourteen catalog rows name a real evaluator function; the other two are the in-body labels");
+  assert.equal(rows.filter((r) => r.resolved).length, qd6 ? 13 : 12,
+    "every catalog row but the two in-body labels names a real evaluator function -- twelve of fourteen, thirteen of fifteen once Q-D6's wall lands");
   const needsHuman = rows.filter((r) => r.opens_human_ctx).map((r) => r.check_key);
   assert.deepEqual(needsHuman, ["fa_register_tie_view"],
     "exactly one gate evaluator opens a human context. If this list grew, a dry run from the wake lane would start reading `error` on a gate the ladder DOES weigh, and design §3.5's honest-limit list would need re-cutting");

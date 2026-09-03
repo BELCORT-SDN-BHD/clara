@@ -26,7 +26,7 @@
 // NO REGISTRATION ID CROSSES THE WIRE. Each caller below is handed a
 // registration the SERVER read from the caller's own session
 // (`server-reads.ts`), never a form field. The doors would refuse a foreign
-// one anyway (`CLR04 not your registration request`, `0161`) — the DB is the
+// one anyway (`CLR04 not your registration request`, `0163`) — the DB is the
 // wall, as always — but a money surface that never accepts the identifier at
 // all cannot be probed for which identifiers exist, and it matches NIT-6's
 // discipline on the success page ("the registration is the authority, and no
@@ -35,7 +35,7 @@
 import { callDoor } from "@/lib/doors";
 import type { SessionTokenAccessor } from "@/lib/session";
 
-/** `clara.open_checkout_intent(uuid,bytea,text)`'s jsonb return (`0161`). */
+/** `clara.open_checkout_intent(uuid,bytea,text)`'s jsonb return (`0163`). */
 export type OpenCheckoutIntentResult = {
   readonly intentId: string;
   readonly priceLocalKey: string;
@@ -48,7 +48,7 @@ export type CurrentCheckoutPlan = {
   readonly paymentMethodCollection: "if_required" | "always";
 };
 
-/** `clara.claim_paid_firm(uuid,text)`'s jsonb return (`0161`). */
+/** `clara.claim_paid_firm(uuid,text)`'s jsonb return (`0163`). */
 export type ClaimPaidFirmResult = {
   readonly firmId: string;
   readonly planId: string;
@@ -75,7 +75,7 @@ function requireString(value: unknown, field: string, fn: string): string {
  * `CLR10 an origin digest is required` for anything that is not 32 bytes, so
  * a mangled round trip refuses rather than keying the wall on a short value.
  *
- * `opKey` is validated by the door but is NOT the retry identity here: `0161`
+ * `opKey` is validated by the door but is NOT the retry identity here: `0163`
  * makes the durable identity "the applicant's one locked, unstamped
  * current-plan intent", and its own comment says so. A retry therefore lands
  * on the same intent whatever key it carries.
