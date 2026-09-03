@@ -15,12 +15,14 @@ RUN corepack enable
 WORKDIR /app
 
 # 1. Workspace manifests ONLY (this layer re-runs only when a manifest/lockfile
-#    changes). A --frozen-lockfile install validates against EVERY workspace member,
-#    so all three package.json files must be present.
+#    changes). The install is FILTERED to @clara/runtime and its dependency
+#    closure, so only that closure's manifests need to be present — apps/web is a
+#    workspace member and has never been copied here. The `apps/dashboard`
+#    manifest that used to sit beside these was deleted with that app at P6-X;
+#    leaving the COPY behind would fail the image build on a missing path.
 COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
 COPY packages/db/package.json ./packages/db/package.json
 COPY packages/runtime/package.json ./packages/runtime/package.json
-COPY apps/dashboard/package.json ./apps/dashboard/package.json
 RUN pnpm install --filter @clara/runtime... --frozen-lockfile
 
 # 2. Runtime source — deliberately NOT .env / node_modules / .output / tests / .swc.

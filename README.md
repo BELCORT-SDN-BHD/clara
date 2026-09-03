@@ -32,11 +32,13 @@ is the rebuild from the Gate-1 audit + Gate-2 blueprint. **Product law → `docs
   durable runtime — the chat loop, the coding floor, document intake, the
   consumer lanes and daily belts (`packages/runtime/README.md`).
 - **Web (`apps/web`)** — **Next.js 16.3.3** + **`@opennextjs/cloudflare`** on
-  Cloudflare **Workers** — the production frontend, replacing `apps/dashboard`
-  at the FS-10 cutover.
-- **Dashboard** — **Next.js 15** on **Cloudflare Pages** (`app.clarabook.com`;
-  Vercel dropped, ADR-024), dashboard-direct on the Supabase session JWT
-  (`apps/dashboard`) — **legacy, retiring at the P6/FS-10 cutover.**
+  Cloudflare **Workers** — the production frontend, and since the P6-X source
+  delete the ONLY frontend in this repo.
+- **Dashboard** — the legacy Next.js 15 app. **Its source was deleted at P6-X**
+  (this repo no longer builds it). The **Cloudflare Pages** project still SERVES
+  its last build at app.clarabook.com (Vercel dropped, ADR-024) until the FS-10
+  ceremony retires the project and repoints DNS at the Worker — a separate act,
+  run from merged `main`, not part of the source delete.
 
 ## Monorepo map
 
@@ -46,7 +48,6 @@ packages/runtime/     the Clara durable runtime (WDK substrate; chat + coding la
 packages/reporting-render/  the sealed-render worker (pinned Typst; the clara-render Fly app)
 packages/backup/      the clara-backup Fly service (daily DR bundle to R2; docs/ops/DR.md)
 apps/web/             Next.js 16.3.3 + @opennextjs/cloudflare on Workers — the production frontend
-apps/dashboard/       Next.js 15 dashboard — legacy, retiring at the P6/FS-10 cutover
 scripts/              repo governance gates (freeze-lint, leak-scan, harness-links, …) + hooks/
 docs/                 PRD, architecture, plan, design, audit (source of truth)
 spike/                the frozen Slice-0 runtime spike (NOT a workspace member)
@@ -75,14 +76,13 @@ export PGHOST=... PGPORT=5432 PGUSER=... PGPASSWORD=... PGDATABASE=postgres
 
 pnpm typecheck                       # tsc across TS packages
 pnpm lint                            # freeze-lint · leak-scan · wiki · binding · harness-links · pinned-ids · eslint
-pnpm build                           # nitro (runtime) + apps/web (production) + apps/dashboard (legacy)
+pnpm build                           # nitro (runtime) + apps/web (production)
 
 pnpm db:migrate && pnpm db:seed      # apply migrations + synthetic seed
 pnpm --filter @clara/db test         # migrate -> seed -> assert
 pnpm db:reset                        # drop the clara schema (scoped, safe)
 
 pnpm --filter @clara/web dev         # apps/web (production frontend) at http://localhost:3000
-pnpm --filter @clara/dashboard dev   # dashboard (legacy) at http://localhost:3000
 ```
 
 ## How CI works (the anti-"misleading-green" gate)

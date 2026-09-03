@@ -50,12 +50,24 @@
 //   (3) packages/db/tests/ninth-rowkind-seeding-proposal.test.mjs's FULL_ROW_KEYS array,
 //   (4) components/firm/needs-you-affordances.tsx's NEEDS_YOU_AFFORDANCES registry +
 //       needs-you-affordances.test.ts's by-name resolution cases,
-//   (5) messages/en.json's `NeedsYou.rowKind.*` label map,
-//   (6) apps/dashboard/app/shared/queueKindCatalog.ts's QUEUE_KIND_CATALOG +
-//       queueKindCatalog.test.tsx's DB-free "known row_kind set" literal array,
-//   (7) apps/dashboard/app/shared/dbSeamCensus.bindings.ts's `list_review_queue`
-//       unconsumed-keys ledger line (its own [rig] test PRINTS the exact
-//       replacement line on drift — never hand-derive it).
+//   (5) messages/en.json's `NeedsYou.rowKind.*` label map.
+//
+// FIVE PINS, NOT SEVEN, SINCE P6-X. Two more lived in the legacy dashboard —
+// its `queueKindCatalog.ts` catalog + DB-free literal array, and its
+// `dbSeamCensus.bindings.ts` `list_review_queue` unconsumed-keys ledger line —
+// and both were DELETED with that tree at the P6-X source delete. Do not hunt
+// for them; they are gone, not moved.
+//
+// WHAT WENT WITH THEM, SO THE NEXT READER DOES NOT ASSUME IT IS STILL COVERED:
+// the dashboard's rig-gated cell read `pg_get_functiondef` on the DEPLOYED
+// `list_review_queue`, parsed its `row_kind` literals, and failed closed if any
+// projection site was not a parsed literal. That was the only JOIN between the
+// DB's emitted set and this file's hand-written array. Nothing asserts that
+// join today: pin (1) here and pin (3)'s FULL_ROW_KEYS are two hand rosters
+// that happen to agree, and a kind added through a CAST or computed expression
+// would satisfy both while rendering here with no label and no affordance.
+// Re-homing that probe is the open item — see the P6-X PR body's disposition
+// of `queueKindCatalog.test.tsx` (class ②) and `dbSeamCensus.test.ts` (class ④).
 //
 // p_scope: `{}` for the firm-wide, cross-client read this page wants, or
 // `{ client_id: "<uuid>" }` to scope to one client (own-firm only; the RPC itself

@@ -132,8 +132,10 @@ runtime. Secrets move env-to-env and are never printed.
 - [ ] Proof for the pepper and the service token: compare a **hash** of each value across the two
       environments, never the values themselves.
 - [ ] Proof: **`wrangler secret list` for the `clara-web` Worker** (values redacted; all four
-      names are `apps/web`-only — `git grep` over `apps/dashboard` and `packages/runtime` = 0
-      hits). ADR-024 dropped Vercel; `apps/web/wrangler.jsonc:3` names the Worker `clara-web`.
+      names are `apps/web`-only — `git grep` over `packages/runtime` = 0 hits; the second half of
+      that grep named the legacy dashboard tree, which the P6-X source delete removed, so there is
+      nothing left to grep there). ADR-024 dropped Vercel; `apps/web/wrangler.jsonc:3` names the
+      Worker `clara-web`.
       **Caveat:** `wrangler.jsonc` currently declares no `vars` block, so `CLARA_PUBLIC_ORIGINS`
       has no declared home on the Workers deploy — worth its own look before Wave-G.
 
@@ -294,6 +296,15 @@ never worked around by touching a mechanism (hard constraint 14). Every route an
       deploy or the DNS change (measured 2026-08-31: the Pages project builds on every PR and
       every push to `main`, so an undisconnected integration re-deploys the OLD dashboard on
       every docs merge).
+      **CHANGED BY THE P6-X SOURCE DELETE (裁-158) — read this before running the step.** That
+      build no longer has a source tree: the dashboard's app and its `package.json` are gone from
+      `main`, so from the P6-X merge onward every Pages build FAILS instead of re-deploying. The
+      step is therefore MORE urgent, not less — a still-connected integration turns each merge to
+      `main` into a failed build and a standing alarm. What it does NOT do is take the site down:
+      Cloudflare Pages keeps serving the last SUCCESSFUL deployment, so `app.clarabook.com` goes
+      on serving the final pre-delete dashboard build until the DNS line below is walked. Expect a
+      red build list on arrival and do not read it as the cutover having already happened —
+      **confirm what is being served by fetching the origin, never by reading the build status.**
 - [ ] The preview URL walked route by route, before the DNS change.
 - [ ] `app.clarabook.com` DNS moved from the Pages project to the Worker.
 - [ ] The Pages project retired after the proof (repoint first, prove, delete second).
