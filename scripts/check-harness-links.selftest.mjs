@@ -17,7 +17,7 @@ import { join } from "node:path";
 import { execFileSync } from "node:child_process";
 import {
   checkHarnessLinks, extractPathReferences, resolveReference, looksLikePath, NON_PATH_ALLOWLIST,
-  findUnterminatedFence, isHopContentExempt, discoverAgentEntryPoints,
+  findUnterminatedFence, isHopContentExempt, discoverAgentEntryPoints, main,
 } from "./check-harness-links.mjs";
 
 let failures = 0;
@@ -290,6 +290,59 @@ console.log("\ndiscovered scan roots (D4 — apps/*/AGENTS.md, packages/*/AGENTS
       throw new Error(`recursion must stop at one hop even when rooted at a discovered entry:\n${result.findings.join("\n")}`);
     }
   });
+  rm(root);
+}
+
+// ---------------------------------------------------------------------------
+// (D4-WIRING, rev-532 R-1) main() ITSELF — not a copy of its composition. The cases above all
+// call checkHarnessLinks() directly with a hand-composed entryList — that never proves main()
+// actually builds the discovered list and threads it through. A refactor dropping that one
+// `entryList` argument in main()'s own call would leave every case above green while silently
+// reopening the D4 gap and printing a banner claiming the files were scanned — the false-
+// evidence shape the standing review laws are written against ("a cell that proves a gate
+// discriminates must execute the gate, never a copy of its predicate"). Drives main({ repoRoot })
+// end to end, against a fixture satisfying STRICT (all four ENTRY_LIST files present, clean) so
+// only the discovered apps/x/AGENTS.md's own content can flip the exit code.
+// ---------------------------------------------------------------------------
+console.log("\nmain() itself is wired to the discovered entry list (rev-532 R-1):");
+
+{
+  const root = freshFixture();
+  // STRICT=true is main()'s default (it never overrides strict), so every ENTRY_LIST-pinned
+  // file must exist and be clean or a MISSING-ENTRY-FILE finding would flip main()'s exit code
+  // for a reason unrelated to the property under test here.
+  write(root, "AGENTS.md", "# entry\nnothing broken here.\n");
+  write(root, "PROGRESS.md", "# progress\nnothing broken here.\n");
+  write(root, "docs/adr/README.md", "# adr index\nnothing broken here.\n"); // also makes docs/adr/ exist, so the bidirectional check has nothing orphaned to report
+  write(root, "docs/plan/index.md", "# plan index\nnothing broken here.\n");
+
+  const appsXAgents = "apps/x/AGENTS.md";
+  const badPath = "apps/x/lib/rev532-does-not-exist.ts";
+
+  // Silence main()'s own console banner/summary for this cell — only the return code is asserted.
+  const realLog = console.log, realWarn = console.warn, realError = console.error;
+  function silence() { console.log = console.warn = console.error = () => {}; }
+  function unsilence() { console.log = realLog; console.warn = realWarn; console.error = realError; }
+  function runMain() {
+    silence();
+    try { return main({ repoRoot: root }); } finally { unsilence(); }
+  }
+
+  write(root, appsXAgents, `# apps/x agent notes\na bad backtick path: \`${badPath}\`.\n`);
+  testCase("main({ repoRoot }) returns 1 when a DISCOVERED apps/*/AGENTS.md carries a broken backtick path", () => {
+    const code = runMain();
+    if (code !== 1) throw new Error(`expected main() to catch the D4 gap and return 1, got ${code}`);
+  });
+
+  // Same fixture, same file, only the referenced path made real — isolating the change to
+  // exactly the property under test (this is the MUST-NOT-RED control for the pair above).
+  write(root, "apps/x/lib/rev532-does-not-exist.ts", "// made real for the good arm\n");
+  write(root, appsXAgents, `# apps/x agent notes\na now-good backtick path: \`${badPath}\`.\n`);
+  testCase("main({ repoRoot }) returns 0 once that same discovered path resolves", () => {
+    const code = runMain();
+    if (code !== 0) throw new Error(`expected main() to return 0 once the path resolves, got ${code}`);
+  });
+
   rm(root);
 }
 
