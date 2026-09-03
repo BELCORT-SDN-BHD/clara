@@ -37,10 +37,11 @@ v2.1; `docs/ARCHITECTURE.md` §4 + Appendix A; migration
   reconciler's belt caller was RETIRED WITH IT, closing the gap a first pass at PR-3
   left open (the caller kept firing the dropped call every poll, invisible in
   `beltErrors`, until this fix; `docs/plan/active/f-a2-annexes-1-estate.md` §B.1 names
-  the artifact's disposition as "RETIRE — drop the verb", both DB and caller halves).
-  **Merged, NOT SERVING until the next runtime deploy** (the SERVING Fly bundle is
-  machine version 70 today; this fix rides `v72`, not the already-queued `v71` — same
-  "the registry pin is not the serving bundle" law as the chatTurn version above).
+  the artifact's disposition as "RETIRE (drop the verb)", both DB and caller halves).
+  **Merged, NOT SERVING until the next runtime deploy (`v72`)** — v71 (deployed
+  2026-09-03 04:51Z from `344f7ad8`) predates this fix and still carries the wired
+  caller (same "the registry pin is not the serving bundle" law as the chatTurn
+  version above).
   **Consumer lanes**, each on its OWN dedicated connection + advisory lock:
   matcher (`lib/matcher.mjs`),
   autodraft (`lib/autodraft.mjs`), local_facts (`lib/local-facts.mjs`),

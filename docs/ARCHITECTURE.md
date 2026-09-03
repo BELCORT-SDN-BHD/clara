@@ -93,11 +93,12 @@ invisible in `beltErrors`, until it was unwired in full. Unlike the FA/adjustmen
 DB surface arrives AFTER the runtime image by design, so a `to_regprocedure` feature-detect
 boots them dormant until their migration lands), this belt's DB half is gone for good — there
 is no future migration to wait for, so the call path was removed rather than feature-detected
-(`docs/plan/active/f-a2-annexes-1-estate.md` §B.1: "RETIRE — drop the verb"). **Merged, NOT
-SERVING until the next runtime deploy** — this is the repo's source of record; the SERVING Fly
-bundle rides `v72`, not the already-queued `v71` (`packages/runtime/README.md`'s own "the
-registry pin is not the serving bundle" law). The separate,
-later BANK-rules machine retired WHOLE at `0129` (F-A3 PR-3, 2026-08-26 ceremony) the same way.
+(`docs/plan/active/f-a2-annexes-1-estate.md` §B.1: "RETIRE (drop the verb)"). **Merged, NOT
+SERVING until the next runtime deploy (`v72`)** — v71 (deployed 2026-09-03 04:51Z from
+`344f7ad8`) predates this fix and still carries the wired caller
+(`packages/runtime/README.md`'s own "the registry pin is not the serving bundle" law). The
+separate, later BANK-rules machine retired WHOLE at `0129` (F-A3 PR-3, 2026-08-26 ceremony)
+the same way.
 The four survivors: `sst_watch` (above, `0016`) · the per-client **wiki-lint** belt (Wave B) · the
 **FA depreciation-run** belt (Wave D-a, `0041`, `to_regprocedure`-guarded) · the
 **recurring-adjustment** belt (Wave D-b2, `0045`, `to_regprocedure`-guarded). Each belt is

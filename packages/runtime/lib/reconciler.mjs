@@ -512,8 +512,9 @@ export async function reconcileAutoDraftTasks(client, deps) {
 // wait for, so a feature-detect here would misstate a permanent retirement as a
 // dormant one. The belt caller is retired the same way its sibling execute_rule_post
 // caller was (rule-post.mjs, deleted whole in the same PR) — see leader.mjs's own
-// header and packages/runtime/README.md §2.2 for the caller-side half of this
-// retirement. This caller was missed in the original PR-3 commit (it only touched a
+// header and packages/runtime/README.md's "What is wired now" (the Leader loop
+// bullet, :33-44) for the caller-side half of this retirement. This caller was
+// missed in the original PR-3 commit (it only touched a
 // comment here) and re-fired `select clara.reconcile_autopost_rules()` on every
 // ~2s poll from 0118 until this fix, its "does not exist" error swallowed and
 // invisible in beltErrors (this function caught before belt() ever saw a throw).
