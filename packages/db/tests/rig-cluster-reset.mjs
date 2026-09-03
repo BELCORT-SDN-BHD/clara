@@ -121,7 +121,7 @@ function isValidPrefix(foundNames) {
 export async function sweepChainMintedRoles({ log = () => {} } = {}) {
   if (process.env.CLARA_RIG_ALLOW_ROLE_SWEEP !== "1") {
     throw new RoleSweepRefused(
-      "sweepChainMintedRoles refused: CLARA_RIG_ALLOW_ROLE_SWEEP=1 is required. This drops roles CLUSTER-WIDE (every database sees the change), one level broader than CLARA_RIG_ALLOW_RESET or CLARA_ALLOW_DESTRUCTIVE alone authorize. Set it only in the closed-wave-drills CI action, or as a rig operator who means it.",
+      "sweepChainMintedRoles refused: CLARA_RIG_ALLOW_ROLE_SWEEP=1 is required. Roles are CLUSTER-GLOBAL (every database sees the same role), but the GRANTS a migration issues land in whichever database ran it — so this drops roles CLUSTER-WIDE, one level broader than CLARA_RIG_ALLOW_RESET or CLARA_ALLOW_DESTRUCTIVE alone authorize. Set it only in the CI drill actions that run this sweep between from-scratch migrates on a shared cluster (closed-wave-upgrade-drills, wave-e-contract-drills, frontier-leg), or as a rig operator who means it.",
     );
   }
   assertDestructiveAllowed({ action: "sweep the chain-minted clara roles (cluster-wide)" });
