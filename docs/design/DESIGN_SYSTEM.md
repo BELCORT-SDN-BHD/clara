@@ -1,22 +1,23 @@
 # Clara — Design System
 
 > **Skeleton + pointer, per the owner's Q7-B ruling (harness refactor, 2026-08-12): real content
-> lands at Wave G.** **No documented design system exists yet.** Phase 4 has shipped real UI
-> surfaces (the review queue, `je_review`/`clarify`/`doc_review`, `/bank`, `/aging`,
-> `/assets`, `/clients/plan`, and more — see `apps/dashboard`) but they were built directly
-> surface by surface, with no separately authored token set, component library, or pattern
-> documentation behind them. **`apps/dashboard` is what is currently deployed and its as-built
-> code is the only reference for what ships today, but per the Pointer section below it is not the
-> design system of record — `apps/web` is.**
+> lands at Wave G.** This file stays deliberately thin between now and then, but it is not
+> pointerless: the design **authority** is `clarabook-frontend@a7709883`
+> (`g5-design-system/docs/` — 01-TOKEN-CONTRACT … 05-HANDOFF-BOUNDARY), ratified as DESIGN LAW
+> per Q1(a)/Q4 of `docs/plan/active/mohe-grill-rulings-2026-08-27.md:13,37-44`; the
+> **implementation** is `apps/web/app/globals.css`, which carries the ported token map with
+> cited provenance; any deviation from the authority is recorded by ruling in the FS-9
+> conformance record. What Wave G still owes is the **EXTRACTION** of the as-built set into this
+> file — a documented, self-contained token/component/pattern reference derived from
+> `apps/web`, not invented fresh and not a second copy of the authority.
 >
 > **[TRUED 2026-08-23] The "built against shadcn/Tailwind primitives" clause was FALSE and is
 > removed.** At the bytes, `apps/dashboard/package.json` declares exactly four dependencies —
 > `next`, `pdfjs-dist`, `react`, `react-dom` (plus type/TS devDeps) — and **no `tailwind*` or
 > `shadcn*` package or config exists anywhere in the tree**. The surfaces are **plain CSS
-> Modules**. Nothing was built on a design system that was never installed. **The Codex frontend
-> build decides the system** (owner ruling 2026-08-23: the new app package lands in this repo on
-> its own branch and replaces `apps/dashboard` at cutover), so a token set adopted here now would
-> be superseded before it was used.
+> Modules**. Nothing was built on a design system that was never installed. **`apps/web`
+> (on `main`, not a branch — see the Pointer section below) carries the system**, so a token
+> set adopted here now would duplicate, not replace, the authority.
 
 ## Why this is empty on purpose
 

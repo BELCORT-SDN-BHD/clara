@@ -42,11 +42,47 @@ owns the shared config — `testDir: "./e2e"`, one shared `webServer`, one brows
 - `chat-parity-mock.mjs` — that walk's own mock lane, a file-disjoint sibling of
   `serve-built.mjs` (the same shape `live-stack/serve-live.mjs` takes), reached through three
   small hooks so no other spec's surface changes.
+- `parity-holes.spec.ts` — closes the prototype parity holes (#507, 裁-117): client A-to-B
+  clears the draft and never paints A under B, the docked rail owns its width without
+  covering the workbench, a client/thread mismatch is indistinguishable from not-found, the
+  full password-recovery keyboard/refusal/success/callback/policy walk, the reset face's
+  sessionless refusal, and a thrown entry page's route error boundary with a safe digest.
+- `identity-finish.spec.ts` — P6-6's 裁-86 browser leg (#514): the Ledger Fold mark on every
+  entry face (R1), the Clara mascot in the docked rail's welcome state (裁-14), the §7
+  reduced-motion arm, and axe over every face touched — proving what only a browser can (the
+  asset bytes actually arrived, the composited CSS resolves real values).
+- `a11y-finish-walk.spec.ts` — P6-3's 裁-86 browser leg (#515): axe-core's real `target-size`
+  rule (裁-13) with its spacing exception, the skip link reaching focus past the sidebar
+  (DS-02), the dropdown genuinely stopping under reduced motion (DS-01), and the recut ring +
+  `--input` reaching the browser as computed style rather than class strings (裁-1).
+- `reports-download-walk.spec.ts` — FS-7 echelon 2's mandatory browser leg (#512, 裁-96②): a
+  signed-in member clicks Download on a real sandbox export and receives the sealed bytes,
+  hashed on disk against what the database sealed, through a real same-origin proxy + real
+  runtime + real Postgres/RLS (`run-reports-download-walk.mjs` provisions the fixtures); a
+  second case proves an UNFINISHED export shows the door's own refusal and no control. What it
+  does NOT prove: the door/route logic itself (`packages/db/tests/fs7-e2-artifact-download.test.mjs`
+  and the runtime battery own that) — only that a human, in a browser, gets the file.
+- `agentic-finish-walk.spec.ts` — P6-5's 裁-86 browser leg (#519): five journeys against the
+  BUILT app — ⌘K "Do" present/absent by the caller's real DB-ranked admin floor (two personas,
+  the allowlist changing in the database with nothing redeployed), a reload re-attaching a
+  parked clarify, a client switch across the structural rail boundary (A→B and A→firm), an
+  amend on a settled onboarding item, and the apply-standard-chart button (裁-128). What it does
+  NOT prove: Postgres is not in this walk (`agentic-finish-mock.mjs`), so no refusal, floor or
+  RLS policy is actually exercised — only the calls made and what the surface does with the
+  mocked answers; the verbatim DoorRefusal rendering is proved in the node suite instead
+  (`components/command/command-do.test.tsx`).
 - `run.mjs`, `serve-built.mjs` — the build-then-serve harness; see their own headers. The two
   INTERNAL ports are overridable — `CLARA_E2E_NEXT_PORT` (default 3101) and
   `CLARA_E2E_RUNTIME_PORT` (default 3102), alongside the public `CLARA_E2E_APP_ORIGIN` — so a
   second lane can run the harness while another already holds the defaults. Specs read the
   origin from `CLARA_E2E_APP_ORIGIN` rather than re-hardcoding it.
+- `helpers.ts` — shared spec-level instruments, ONE spelling each. Today: `ensureRealFocus(page)`
+  (PR #510), the positive precondition every keyboard-first walk anchors on instead of a bare
+  `bringToFront()` or a sleep — see its own header for the race it closes. `entry-faces-walk.spec.ts`'s
+  login and signup keyboard-pass cells and `parity-holes.spec.ts`'s password-recovery keyboard-pass
+  cell all call it; any new keyboard-driven walk (a fresh `page.goto()` immediately followed by a
+  `page.keyboard.press(...)`, with no real click or `locator.focus()` establishing focus first)
+  should too.
 
 ## Why these specs are NOT in `apps/web/test/manifest.txt`
 

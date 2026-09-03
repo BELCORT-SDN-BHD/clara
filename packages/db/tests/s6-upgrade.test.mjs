@@ -97,7 +97,13 @@ test("probe 1 (fresh): reset → migrate ALL (0001→0009) compiles clean; the A
   if (skipUnlessReset(t)) return;
   const { reset } = await import("../scripts/reset.mjs");
   const { migrate } = await import("../scripts/migrate.mjs");
+  const { sweepChainMintedRoles } = await import("./rig-cluster-reset.mjs");
+  // Cluster-wide role survival across this file's own multiple reset()+migrate()
+  // cycles, PLUS whatever a prior closed-wave-drills CI step left on the shared
+  // cluster (review-518 D1/D2 — see tests/rig-cluster-reset.mjs's header).
+  // Requires CLARA_RIG_ALLOW_ROLE_SWEEP=1 (set by the action on this step).
   await reset({ log: () => {} });
+  await sweepChainMintedRoles({ log: () => {} });
   await migrate({ dir: MIG_DIR, log: () => {} });
   await assertSurfaceClean();
 });
@@ -110,7 +116,13 @@ test("probe 1 (upgrade): 0001→0008 with a filed doc + a single open draft → 
   if (skipUnlessReset(t)) return;
   const { reset } = await import("../scripts/reset.mjs");
   const { migrate } = await import("../scripts/migrate.mjs");
+  const { sweepChainMintedRoles } = await import("./rig-cluster-reset.mjs");
+  // Cluster-wide role survival across this file's own multiple reset()+migrate()
+  // cycles, PLUS whatever a prior closed-wave-drills CI step left on the shared
+  // cluster (review-518 D1/D2 — see tests/rig-cluster-reset.mjs's header).
+  // Requires CLARA_RIG_ALLOW_ROLE_SWEEP=1 (set by the action on this step).
   await reset({ log: () => {} });
+  await sweepChainMintedRoles({ log: () => {} });
   await migrate({ dir: exportPre0009(), log: () => {} });
 
   const prefix = `s6up_${Date.now().toString(36)}_${randomUUID().slice(0, 6)}`;
@@ -134,7 +146,13 @@ test("probe 1 (upgrade pre-flight): a filing carrying TWO open drafts at 0008 AB
   if (skipUnlessReset(t)) return;
   const { reset } = await import("../scripts/reset.mjs");
   const { migrate } = await import("../scripts/migrate.mjs");
+  const { sweepChainMintedRoles } = await import("./rig-cluster-reset.mjs");
+  // Cluster-wide role survival across this file's own multiple reset()+migrate()
+  // cycles, PLUS whatever a prior closed-wave-drills CI step left on the shared
+  // cluster (review-518 D1/D2 — see tests/rig-cluster-reset.mjs's header).
+  // Requires CLARA_RIG_ALLOW_ROLE_SWEEP=1 (set by the action on this step).
   await reset({ log: () => {} });
+  await sweepChainMintedRoles({ log: () => {} });
   await migrate({ dir: exportPre0009(), log: () => {} });
 
   const prefix = `s6ab_${Date.now().toString(36)}_${randomUUID().slice(0, 6)}`;
@@ -165,7 +183,13 @@ test("probe 1 (upgrade legacy-state correction): approved cite + one open draft 
   if (skipUnlessReset(t)) return;
   const { reset } = await import("../scripts/reset.mjs");
   const { migrate } = await import("../scripts/migrate.mjs");
+  const { sweepChainMintedRoles } = await import("./rig-cluster-reset.mjs");
+  // Cluster-wide role survival across this file's own multiple reset()+migrate()
+  // cycles, PLUS whatever a prior closed-wave-drills CI step left on the shared
+  // cluster (review-518 D1/D2 — see tests/rig-cluster-reset.mjs's header).
+  // Requires CLARA_RIG_ALLOW_ROLE_SWEEP=1 (set by the action on this step).
   await reset({ log: () => {} });
+  await sweepChainMintedRoles({ log: () => {} });
   await migrate({ dir: exportPre0009(), log: () => {} });
 
   const prefix = `s6leg_${Date.now().toString(36)}_${randomUUID().slice(0, 6)}`;

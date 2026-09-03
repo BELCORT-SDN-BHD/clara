@@ -620,6 +620,7 @@ cell("c2.12 settled-payment gate -- unsettled refuses before metadata; settled r
 cell("c2.13 consumed rows are excluded before LIMIT and cannot starve a fresh event", async () => {
   const appliedEvents = [stripeEventId("starvea"), stripeEventId("starveb")];
   const freshEvent = stripeEventId("starvez");
+  const appliedProjections = [];
   const projection = () => ({
     livemode: false,
     session_id: `cs_starve_${randomUUID()}`,
@@ -631,7 +632,9 @@ cell("c2.13 consumed rows are excluded before LIMIT and cannot starve a fresh ev
     session_status: "complete",
   });
   for (const eventId of appliedEvents) {
-    await recordEvent(eventId, "checkout.session.completed", projection());
+    const projected = projection();
+    appliedProjections.push(projected);
+    await recordEvent(eventId, "checkout.session.completed", projected);
   }
   await recordEvent(freshEvent, "checkout.session.completed", projection());
 
@@ -643,21 +646,48 @@ cell("c2.13 consumed rows are excluded before LIMIT and cannot starve a fresh ev
   assert.deepEqual(ordered.rows.map((row) => row.event_id), [...appliedEvents, freshEvent],
     "the fresh event is behind a LIMIT-sized consumed prefix");
 
-  // 42703 coupling: this stub proves only that stripe_event_id exists BY NAME. If C-3 renames
-  // that column, the dynamic applier query fails at runtime; this is not full schema compatibility.
-  await rootQuery("create table clara.firm_registration_payments(stripe_event_id text primary key)");
+  const c3Applied = (await rootQuery(
+    "select to_regclass('clara.firm_registration_payments') is not null as applied",
+  )).rows[0].applied;
+  // Before C-3, the catalog-gated stub proves the dynamic name coupling. After C-3, populate the
+  // real table with composite-FK-valid payment rows and never create/drop the owned cohort.
+  if (!c3Applied) {
+    await rootQuery("create table clara.firm_registration_payments(stripe_event_id text primary key)");
+  }
   try {
-    await rootQuery("alter table clara.firm_registration_payments owner to clara_fn_owner");
-    await rootQuery("alter table clara.firm_registration_payments enable row level security");
-    await rootQuery("alter table clara.firm_registration_payments force row level security");
-    await rootQuery(
-      `create policy p_frp_stub_owner on clara.firm_registration_payments for all to clara_fn_owner
-       using (true) with check (true)`,
-    );
-    await rootQuery(
-      "insert into clara.firm_registration_payments(stripe_event_id) select unnest($1::text[])",
-      [appliedEvents],
-    );
+    if (!c3Applied) {
+      await rootQuery("alter table clara.firm_registration_payments owner to clara_fn_owner");
+      await rootQuery("alter table clara.firm_registration_payments enable row level security");
+      await rootQuery("alter table clara.firm_registration_payments force row level security");
+      await rootQuery(
+        `create policy p_frp_stub_owner on clara.firm_registration_payments for all to clara_fn_owner
+         using (true) with check (true)`,
+      );
+      await rootQuery(
+        "insert into clara.firm_registration_payments(stripe_event_id) select unnest($1::text[])",
+        [appliedEvents],
+      );
+    } else {
+      for (let i = 0; i < appliedEvents.length; i += 1) {
+        const projected = appliedProjections[i];
+        await rootQuery(
+          `insert into clara.users(id,display_name,email,is_agent)
+           values ($1,$2,$3,false)`,
+          [projected.applicant, `c2_starve_${i}`, `c2_starve_${randomUUID()}@rig.test`],
+        );
+        await rootQuery(
+          `insert into clara.firm_registration_requests(id,applicant,firm_name,note,op_key)
+           values ($1,$2,$3,'C-2 starvation compatibility',$4)`,
+          [projected.registration_id, projected.applicant, `c2_starve_${randomUUID()}`, opk("c2starve")],
+        );
+        await rootQuery(
+          `insert into clara.firm_registration_payments(
+             registration_id,applicant,stripe_event_id,stripe_session_id)
+           values ($1,$2,$3,$4)`,
+          [projected.registration_id, projected.applicant, appliedEvents[i], projected.session_id],
+        );
+      }
+    }
     const result = await roleQuery(
       "clara_stripe_webhook", "select clara.apply_stripe_events(2) as result",
     );
@@ -668,7 +698,7 @@ cell("c2.13 consumed rows are excluded before LIMIT and cannot starve a fresh ev
     );
     assert.deepEqual(problem.rows, [{ problem: "intent_not_found" }]);
   } finally {
-    await rootQuery("drop table if exists clara.firm_registration_payments");
+    if (!c3Applied) await rootQuery("drop table if exists clara.firm_registration_payments");
   }
 });
 

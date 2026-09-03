@@ -50,6 +50,46 @@ runs:
         PGDATABASE=clara_delta_contract_ci CLARA_RIG_DB=1 \
           node --test --test-concurrency=1 tests/delta-contract.test.mjs tests/delta-context-pack-residual.test.mjs
 
+    # CLUSTER CLEANUP BEFORE THE NEXT FROM-SCRATCH MIGRATE (review-518 follow-up,
+    # extends #524's frontier-leg fix to this THIRD action — same class, different
+    # shape). This job (`closed-wave-drills`) runs `closed-wave-upgrade-drills`
+    # immediately before this action, on the SAME shared throwaway postgres:17 —
+    # that action's own last step already leaves the cluster role-free. But the four
+    # steps in THIS file then run back-to-back with NO cleanup between them, and
+    # EACH does its own from-scratch 0001->frontier `pnpm migrate` (the full on-disk
+    # chain, never slice-scoped) into its OWN fresh database. Roles are cluster-wide,
+    # not database-scoped, and grants a migration issues land in whichever database
+    # ran it — so this step's migrate above mints all 16 chain-minted roles
+    # cluster-wide AND grants them privileges on clara_delta_contract_ci's own
+    # objects; the NEXT step's from-scratch migrate, on ITS OWN fresh database,
+    # then reaches migration 0154 with 16 chain roles already on the cluster instead
+    # of the 14 a genuinely fresh replay shows at that position — 0154's absolute
+    # role-count pin refuses (errcode CLR10). Measured live: sweep run 33681113121,
+    # closed-wave-drills job 100417651404, the θ step ("theta-close-plan") died
+    # exactly there ("the clara role count moved from 14 to 16 -- this file mints no
+    # role and owes no roles-bootstrap twin") while this step's own δ battery had
+    # already passed. Same fix shape as #524's frontier-leg step (3d): drop this
+    # step's own now-finished database, then sweep the cluster clean, so the next
+    # step's from-scratch migrate starts from the same pristine-cluster state every
+    # closed-wave-upgrade-drills step already gets between its own steps. `if:
+    # always()` — a failed drill above still leaves its role-minting migrations
+    # committed (each runs in its own transaction), so cleanup must run regardless
+    # of this step's outcome; if a future on-failure diagnostic/dump step is ever
+    # added for these drills, it MUST be inserted BEFORE this cleanup (which drops
+    # the database), never after. PGDATABASE=postgres is explicit here (the job's
+    # own env sets PGDATABASE=clara_ci — the wrong connection target for this
+    # step's OWN drop-then-sweep, which must connect to a database it is not about
+    # to drop).
+    - name: Cluster cleanup — drop clara_delta_contract_ci + sweep chain-minted roles
+      if: always()
+      working-directory: packages/db
+      shell: bash -e {0}
+      env:
+        CLARA_ALLOW_DESTRUCTIVE: "1"
+        CLARA_RIG_ALLOW_ROLE_SWEEP: "1"
+      run: |
+        PGDATABASE=postgres node tests/rig-cluster-reset.mjs --drop-database=clara_delta_contract_ci --sweep-roles
+
     # Wave-E θ contract drill (the same anti-misleading-green wiring as the δ drill above,
     # the identical hazard shape: the package sweep preloads the wave gate (--import
     # tests/theta-preintegration-gate.mjs), which sets CLARA_ALLOW_MISSING_WAVE_E_THETA for
@@ -87,6 +127,19 @@ runs:
         unset CLARA_ALLOW_MISSING_WAVE_E_THETA
         PGDATABASE=clara_theta_contract_ci CLARA_RIG_DB=1 \
           node --test --test-concurrency=1 tests/theta-close-plan.test.mjs
+
+    # See the δ step's cleanup comment above — same reason, same mechanism, this
+    # step's own database. This is the step whose OWN from-scratch migrate 0154
+    # failure this PR fixes.
+    - name: Cluster cleanup — drop clara_theta_contract_ci + sweep chain-minted roles
+      if: always()
+      working-directory: packages/db
+      shell: bash -e {0}
+      env:
+        CLARA_ALLOW_DESTRUCTIVE: "1"
+        CLARA_RIG_ALLOW_ROLE_SWEEP: "1"
+      run: |
+        PGDATABASE=postgres node tests/rig-cluster-reset.mjs --drop-database=clara_theta_contract_ci --sweep-roles
 
     # Wave-E ε contract drill — the δ drill's shape, for the same hazard on the reporting lane.
     # The package sweep preloads tests/epsilon-preintegration-gate.mjs, which sets
@@ -127,6 +180,18 @@ runs:
         unset CLARA_ALLOW_MISSING_WAVE_E_EPSILON
         PGDATABASE=clara_epsilon_contract_ci CLARA_RIG_DB=1 \
           node --test --test-concurrency=1 tests/epsilon-contract.test.mjs
+
+    # See the δ step's cleanup comment above — same reason, same mechanism, this
+    # step's own database.
+    - name: Cluster cleanup — drop clara_epsilon_contract_ci + sweep chain-minted roles
+      if: always()
+      working-directory: packages/db
+      shell: bash -e {0}
+      env:
+        CLARA_ALLOW_DESTRUCTIVE: "1"
+        CLARA_RIG_ALLOW_ROLE_SWEEP: "1"
+      run: |
+        PGDATABASE=postgres node tests/rig-cluster-reset.mjs --drop-database=clara_epsilon_contract_ci --sweep-roles
 
     # Wave-E η contract drill — the ε drill's shape, for the same hazard on the authoring lane.
     # The package sweep preloads tests/eta-preintegration-gate.mjs, which sets
@@ -173,3 +238,19 @@ runs:
         unset CLARA_ALLOW_MISSING_WAVE_E_ETA
         PGDATABASE=clara_eta_contract_ci CLARA_RIG_DB=1 \
           node --test --test-concurrency=1 tests/eta-contract.test.mjs
+
+    # See the δ step's cleanup comment above — same reason, same mechanism, this
+    # step's own database. This is the LAST step in this action; nothing after it
+    # reads clara_eta_contract_ci or the cluster's role census, but this cleanup
+    # still runs (matching closed-wave-upgrade-drills' own convention of cleaning
+    # up after ITS last step too) so the cluster is never left role-laden for
+    # whatever the job or sweep runs next.
+    - name: Cluster cleanup — drop clara_eta_contract_ci + sweep chain-minted roles
+      if: always()
+      working-directory: packages/db
+      shell: bash -e {0}
+      env:
+        CLARA_ALLOW_DESTRUCTIVE: "1"
+        CLARA_RIG_ALLOW_ROLE_SWEEP: "1"
+      run: |
+        PGDATABASE=postgres node tests/rig-cluster-reset.mjs --drop-database=clara_eta_contract_ci --sweep-roles

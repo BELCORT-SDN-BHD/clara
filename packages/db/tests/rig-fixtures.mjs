@@ -68,10 +68,29 @@ export async function createClient(sub, { name, opKey }) {
 
 /** [R3-F2 bridge] Post-0017 the legacy creator births an ONBOARDING client with
  *  a plan (no Gate-O bypass). Fixture worlds need operational clients, so drive
- *  the birth to 'active' THROUGH the audited plan+commit verbs: a deferred
- *  carry-down item, then a committer DISTINCT from every contributor (or the
- *  sole-admin attestation path). Pre-fix (client born 'active') this no-ops, so
- *  every suite stays bimodal-green. */
+ *  the birth to 'active' THROUGH the audited plan+commit verbs: an opening-position
+ *  answer, then a committer DISTINCT from every contributor (or the sole-admin
+ *  attestation path). Pre-fix (client born 'active') this no-ops, so every suite
+ *  stays bimodal-green.
+ *
+ *  THE OPENING ARM WAS TRUED FOR Q-D6 (the close-seal wall). It used to be a single
+ *  `carry_down_deferred` / `deferred` item — the cheapest of `commit_client_onboarding`'s
+ *  three opening arms (0017:2812-2822), chosen for its brevity and never because it
+ *  modelled anything. That made every fixture client in the estate look, to the DB, like a
+ *  playbook-③/④ client activated on an UNCAPTURED opening, which the Q-D6 drawer-1 gate
+ *  then correctly refused to let seal. Both items below are individually true of a
+ *  synthetic client that has no prior books, and they agree with each other:
+ *    - `first_year_zero_opening` ANSWERED — the opening position IS zero, which is the
+ *      arm these clients should always have taken (0017:2814-2815);
+ *    - `carry_down_deferred` RESOLVED — there is nothing to carry down, so the todo is
+ *      settled rather than outstanding. It is RETAINED (rather than dropped) because
+ *      `bootstrap_client_plan`'s already-bootstrapped branch (0017:2594-2599) keys on a
+ *      `carry_down_deferred` todo in state deferred|resolved, and the x56 seed-arm cells
+ *      call that door on a bridge-born client.
+ *  The web surface reads the same precedence — `first_year_zero_opening` wins over
+ *  `carry_down_deferred` (opening-position-gate.tsx:83-85) — so a bridge client renders
+ *  the first-year-zero state and NOT the deferred banner, which is exactly what the gate
+ *  now measures. */
 async function activateLegacyClient(sub, client) {
   const c = (await rootQuery("select status, firm_id from clara.clients where id = $1", [client])).rows[0];
   if (c?.status !== "onboarding") return;
@@ -79,10 +98,16 @@ async function activateLegacyClient(sub, client) {
     "select id, revision_token from clara.onboarding_plans where client_id=$1 and state='open' order by created_at desc limit 1",
     [client])).rows[0];
   if (!plan) throw new Error("legacy bridge: onboarding client without an open plan");
+  const basis = { source: "rig legacy-activation bridge", note: "synthetic client, no prior books" };
   await roleQuery(ROLES.runtime,
     "select clara.update_onboarding_plan(p_plan => $1, p_expected_revision => $2, p_items => $3::jsonb, p_answered_by => $4, p_op_key => $5)",
     [plan.id, plan.revision_token,
-      JSON.stringify([{ item_kind: "todo", item_key: "carry_down_deferred", state: "deferred" }]),
+      JSON.stringify([
+        { item_kind: "must_ask", item_key: "first_year_zero_opening", state: "answered",
+          question: "Opening position?", answer: { ...basis, opening_position: "first_year_zero" } },
+        { item_kind: "todo", item_key: "carry_down_deferred", state: "resolved",
+          question: "Carry down the opening position", answer: { ...basis, carry_down: "nothing_to_carry" } },
+      ]),
       sub, opk("bridge")]);
   const rev = (await rootQuery("select revision_token from clara.onboarding_plans where id=$1", [plan.id])).rows[0].revision_token;
   // [R3-F2/F3 repair, PROBED] the eligible-checker population counts

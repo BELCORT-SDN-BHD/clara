@@ -20,6 +20,7 @@ import * as nextImageModule from "next/image";
 
 import { renderComponent } from "../test/hookHarness";
 import { enableDomInspection } from "../test/domInspect";
+import { checkAccessibility } from "../test/a11yRules";
 import messages from "../messages/en.json";
 import { BrandLockup, LEDGER_FOLD_MARK_SRC } from "./entry/brand-lockup";
 import { ClaraWelcome, CLARA_MASCOT_SRC } from "./clara/ClaraWelcome";
@@ -297,8 +298,23 @@ test("§7's welcome tier exists in globals.css WITH its own reduced-motion arm",
 const THREAD = "11111111-1111-4111-8111-111111111111";
 const auth: SessionTokenAccessor = { getAccessToken: async () => "tok" };
 
+/** THE `<h1>` IS PART OF THE FIXTURE, not decoration, and it arrived with the a11y scan the
+ *  welcome cell now runs. `ClaraWelcome`'s heading is `SectionHeader level={2}`, and BOTH
+ *  production mount points give it a valid parent — that component's own header says so: the
+ *  rail sits inside a firm page whose `PageHeader` owns the `<h1>`, and the escalated route
+ *  owns its own in `ClaraFullScreenThread`. Mounting the view bare put an `<h2>` at document
+ *  root, so the scan reported a `heading-order` jump that is the FIXTURE's, not the welcome's
+ *  — and asserting `[]` against that would have been asserting a defect this app does not
+ *  have. Every sibling component suite in this repo wraps its mount the same way. */
 function threadApp() {
-  return App(createElement(ClaraThreadView, { auth, threadId: THREAD, variant: "rail" }));
+  return App(
+    createElement(
+      "div",
+      null,
+      createElement("h1", null, "Clara test context"),
+      createElement(ClaraThreadView, { auth, threadId: THREAD, variant: "rail" }),
+    ),
+  );
 }
 
 async function withFetch(impl: typeof fetch, run: () => Promise<void>): Promise<void> {
@@ -330,6 +346,23 @@ test("a loaded, empty transcript paints the welcome INSIDE the real thread view"
       for (let i = 0; i < 5; i++) await h.settle();
       assert.equal(imagesIn(h).length, 1, "the mascot is mounted by the thread view itself — deleting the mount line reds THIS, not ClaraWelcome's own cells");
       assert.match(h.text(), /I'm Clara\./);
+
+      // AN INSTRUMENT, WHERE A HUMAN READ USED TO STAND (#515 round 4). ClaraThreadView's
+      // own comment beside this mount says ClaraWelcome "declares no live region of its
+      // own (checked, not assumed)" — but nothing CHECKED it: this cell rendered the
+      // welcome and never ran the a11y rules over it, so the reviewer could give
+      // ClaraWelcome a `role="status"` and the whole suite stayed green. That is a
+      // nested live region inside the log's own `role="log" aria-live="polite"`, which is
+      // exactly the DS-04 defect P6-3 exists to remove.
+      //
+      // The scan runs HERE rather than in ClaraWelcome's own cells on purpose: nesting is
+      // a property of the TREE, and a component rendered alone has nothing to nest in.
+      // Mutant: `role="status"` on ClaraWelcome's root -> RED naming `nested-live-region`.
+      assert.deepEqual(
+        checkAccessibility(h.container as never),
+        [],
+        "the welcome renders INSIDE the transcript's live region, so it must declare none of its own",
+      );
     } finally {
       await h.unmount();
     }
@@ -361,18 +394,25 @@ test("NEVER A LOADER, at the seam: a FAILED read paints no mascot", async () => 
     try {
       for (let i = 0; i < 5; i++) await h.settle();
       assert.equal(imagesIn(h).length, 0, "a failed read is not an empty conversation");
-      // WHAT THIS SURFACE ACTUALLY SHOWS, recorded rather than asserted as if
-      // it were right: a failed FIRST load renders the LOADING sentence, not
-      // the error banner. `claraThreadStore.hydrateFailed` sets `loadError`
-      // and leaves `messagesLoaded` false (threadStore.ts:110-112), while
-      // ClaraThreadView's banner is gated on `state.loadError &&
-      // state.messagesLoaded` — so the two never coincide on a first read and
-      // the person is left on "Loading the conversation…" indefinitely. That
-      // is a PRE-EXISTING defect, found by this cell and reported in the PR
-      // body; P6-6 does not fix it (it is thread-state behaviour, not
-      // identity), and this assertion pins today's truth so a later fix has
-      // to come here and say so.
-      assert.match(h.text(), /Loading the conversation…/);
+      // THE FIX CAME HERE, AND SAYS SO — as this cell's previous body asked it to.
+      //
+      // What this recorded before P6-5: a failed FIRST load rendered the LOADING sentence
+      // indefinitely. `claraThreadStore.hydrateFailed` sets `loadError` and leaves
+      // `messagesLoaded` false, while ClaraThreadView's error banner was gated on
+      // `state.loadError && state.messagesLoaded` — the two could never coincide on a first
+      // read, so the only branch that could report the failure required the flag only a
+      // SUCCESS sets. P6-6 pinned that truth rather than asserting it was right, and named it
+      // a pre-existing defect for a later train.
+      //
+      // P6-5 is that train. The loading arm is now "no error and nothing loaded yet", the
+      // error arm no longer requires `messagesLoaded`, and the failure carries a retry that
+      // re-arms the once-per-thread guard. This cell's own subject — no mascot under a failed
+      // read — is unchanged and still holds; what changed is what the person sees INSTEAD, and
+      // it is now the honest thing. The RED-before evidence lives in
+      // `components/clara/thread-rehydrate.test.tsx`, whose mutant M1 puts `messagesLoaded`
+      // back on the error arm and reds it.
+      assert.match(h.text(), /Could not load the conversation/, "the failure is REPORTED, not hidden behind a spinner");
+      assert.doesNotMatch(h.text(), /Loading the conversation…/, "and the loading sentence is gone with it");
     } finally {
       await h.unmount();
     }

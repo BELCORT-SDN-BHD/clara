@@ -403,6 +403,26 @@ const F_A5B_PR1_WAKE_FNS = ["wake_mint_sandbox_view", "wake_request_sandbox_expo
 const F_A5B_PR1_RUNTIME_FNS = ["sandbox_export_payload", "complete_sandbox_export", "fail_sandbox_export"];
 const F_A5B_PR1_HUMAN_FNS = ["register_export_recipient", "supersede_export_recipient", "list_sandbox_exports"];
 export const F_A5B_PR1_COHORT = [...F_A5B_PR1_WAKE_FNS, ...F_A5B_PR1_RUNTIME_FNS, ...F_A5B_PR1_HUMAN_FNS];
+// FS-7 ECHELON 2 [the ONE generic artifact download door, 裁-96② / 裁-118]: TWO granted names and a
+// THIRD that is deliberately granted to nobody.
+//
+// The split is the whole design, so the roster is where it has to be legible. The BYTE door
+// (get_artifact_for_human_read) returns a `storage_key` and is clara_runtime ONLY — the
+// clara.get_document_for_human_read idiom exactly (WAVE_A_RUNTIME_FNS above): the trusted-ingress
+// route validates a human session JWT and passes the resolved subject, and the DATABASE decides
+// what that subject may see. Putting it on clara_authenticated would hand a storage path to the
+// browser, which is the thing 裁-96② forbids.
+//
+// The OFFER door (list_downloadable_artifacts) is clara_authenticated ONLY and returns NO
+// storage_key ever — it is what tells the Reports tab whether a Download control may appear, so the
+// control is never a dead link. Bookkeeper floor, body-enforced, like every human reporting read.
+//
+// clara._artifact_download_core — the GATE both doors call — appears in NEITHER list and in no
+// cohort, because it is granted to nothing at all. The migration's own tail censuses that
+// positively (its EXECUTE grantee set must read exactly `clara_fn_owner`), and this roster's
+// expected-false sweep is the second, independent proof of the same fact.
+const FS7_E2_DOWNLOAD_RUNTIME_FNS = ["get_artifact_for_human_read"];
+const FS7_E2_DOWNLOAD_HUMAN_FNS = ["list_downloadable_artifacts"];
 // F-A5b CARD 1 [Wave-F Track A, the substitution seam]: TWO grant tiers, and no human one — card 1
 // mints no new human door. The wake tier is the stage-(b) preview composer; the runtime tier is the
 // sandbox job family's claim/dispatch/reap quartet, which PR-1 deliberately did not ship (its own
@@ -1161,6 +1181,19 @@ export const CHECKOUT_GATE_C2_COHORT = [
   ...CHECKOUT_GATE_C2_HUMAN_FNS, ...CHECKOUT_GATE_C2_WEBHOOK_FNS,
 ];
 
+// FS-4 C-3 (checkout-gate design part 2 §1.3 and part 3 §2.1): six authenticated pre-firm/
+// operator-support doors plus the auth-wall lane's exact two-verb, pre-session OTP surface.
+const CHECKOUT_GATE_C3_HUMAN_FNS = [
+  "get_current_dpa_document", "sign_dpa", "open_checkout_intent",
+  "record_checkout_session", "claim_paid_firm", "list_unconsumed_registration_payments",
+];
+const CHECKOUT_GATE_C3_AUTH_WALL_FNS = [
+  "claim_confirmation_attempt", "settle_confirmation_attempt",
+];
+export const CHECKOUT_GATE_C3_COHORT = [
+  ...CHECKOUT_GATE_C3_HUMAN_FNS, ...CHECKOUT_GATE_C3_AUTH_WALL_FNS,
+];
+
 // 裁-21 PR-a (`coa_template_pr_a` — number claimed at merge prep): the firm-level standard
 // chart of accounts, TEMPLATE half. NINE human doors, clara_authenticated ONLY — agent + both
 // wake roles + clara_runtime gain ZERO, and that is the design's own claim rather than an
@@ -1398,6 +1431,9 @@ export const ALLOWED = {
     ...F_A5B_PR1_HUMAN_FNS, // [Wave-F Track A, F-A5b PR-1] register/supersede_export_recipient
     // (admin+) + list_sandbox_exports (bookkeeper+) — clara_authenticated ONLY, every floor
     // body-enforced; agent + both wake roles gain ZERO (covered_clients IS the coverage wall)
+    ...FS7_E2_DOWNLOAD_HUMAN_FNS, // [FS-7 echelon 2, 裁-96②] list_downloadable_artifacts — the
+    // OFFER door: bookkeeper floor, and it returns NO storage_key, so the browser learns THAT it
+    // may download and never WHERE the object lives (see the block above)
     // F-A3/PR-1b [bank-agency agent limb] the one human door: set_bank_agency_hold, a
     // bookkeeper-floor idempotent upsert on the client's own hold row (body-enforced floor;
     // agent + both wake roles gain ZERO — the hold is a human brake on the agent lane, never
@@ -1428,6 +1464,9 @@ export const ALLOWED = {
     // FS-4 C-2: the operator firm's Stripe-problem reconciliation queue; owner+operator wall
     // body-enforced. The webhook ingest/sweep verbs live on their dedicated role below.
     ...CHECKOUT_GATE_C2_HUMAN_FNS,
+    // FS-4 C-3: DPA, checkout and folded paid-registration claim doors. Every identity and
+    // ownership floor is body-enforced; the pre-session OTP pair lives on its isolated role.
+    ...CHECKOUT_GATE_C3_HUMAN_FNS,
     // 裁-18b PR-1 the four human binding doors — see the block above.
     ...BINDING_PROPOSAL_PR1_HUMAN_FNS,
     // 裁-21 PR-a [the firm-level standard chart of accounts, TEMPLATE half] the seven admin
@@ -1496,6 +1535,10 @@ export const ALLOWED = {
   // roles makes the catalog-wide effective-EXECUTE census cover both sides of that membership.
   "clara_stripe_webhook": new Set(CHECKOUT_GATE_C2_WEBHOOK_FNS),
   "clara_stripe_webhook_login": new Set(CHECKOUT_GATE_C2_WEBHOOK_FNS),
+  // FS-4 C-3's isolated pre-session OTP wall. The NOLOGIN member shell inherits the same exact
+  // effective set, so both sides of the membership are catalog-censused.
+  "clara_auth_wall": new Set(CHECKOUT_GATE_C3_AUTH_WALL_FNS),
+  "clara_auth_wall_login": new Set(CHECKOUT_GATE_C3_AUTH_WALL_FNS),
   // Slice-4 runtime surface (contract v2.1 §3.0/3.6/3.7/3.8): runtime lane only.
   [ROLES.runtime]: new Set([
     "mint_wake_credential", "revoke_wake_credential",
@@ -1556,6 +1599,10 @@ export const ALLOWED = {
     ...CARD1_SEAM_RUNTIME_FNS, // [Wave-F Track A, F-A5b card 1] the sandbox job family's
     // claim/dispatch/reap quartet, mirroring render_jobs' own verbs (0081) retargeted — the half
     // PR-1 registered as a gap and without which no worker ever transitions a claimable row
+    ...FS7_E2_DOWNLOAD_RUNTIME_FNS, // [FS-7 echelon 2, 裁-96②] get_artifact_for_human_read — the
+    // BYTE door over BOTH artifact families, the get_document_for_human_read idiom: the resolved
+    // principal comes IN and the live active membership decides. clara_runtime ONLY, so a
+    // storage_key never crosses to a browser (see the block above)
   ]),
 };
 // RLS policy helpers are legitimately callable broadly (a policy expression runs
@@ -1604,6 +1651,11 @@ export const SUBLEDGER_0037_TABLES = ["open_items", "open_item_allocations"];
 // green while a partially applied C-2 migration is itself a named failure.
 export const CHECKOUT_GATE_C2_TABLES = [
   "stripe_events", "stripe_event_problems", "stripe_object_map",
+];
+
+// FS-4 C-3's minimal billing declaration, payment evidence and OTP-attempt evidence.
+export const CHECKOUT_GATE_C3_TABLES = [
+  "billing_plans", "firm_registration_payments", "confirmation_attempts",
 ];
 
 // The ONLY clara base tables that legitimately carry no RLS (migration bookkeeping + the
@@ -1682,7 +1734,8 @@ export async function grantMatrixFailures() {
   const roles = live.rows.filter((r) => r.ok).map((r) => r.rolname);
   const absent = live.rows.filter((r) => !r.ok).map((r) => r.rolname);
   const failures = [];
-  if (absent.length && absent.some((r) => !r.startsWith("clara_freeform") && !r.startsWith("clara_stripe_webhook"))) {
+  if (absent.length && absent.some((r) => !r.startsWith("clara_freeform")
+      && !r.startsWith("clara_stripe_webhook") && !r.startsWith("clara_auth_wall"))) {
     failures.push(`ALLOWED names role(s) that do not exist on this database: ${absent.join(", ")}`);
   }
   for (const f of fns.rows) {
@@ -1780,6 +1833,7 @@ export async function grantMatrixFailures() {
   }
   failures.push(...cohortFailures("P4 tranche 2 registration + operator approval", P4T2_COHORT, liveNames));
   failures.push(...cohortFailures("FS-4 C-2 projected Stripe store", CHECKOUT_GATE_C2_COHORT, liveNames));
+  failures.push(...cohortFailures("FS-4 C-3 folded checkout door", CHECKOUT_GATE_C3_COHORT, liveNames));
   // 裁-21 PR-a — frontier-tolerant by cohortFailures' own rule: a cohort that is entirely
   // absent (every pre-PR-a chain) returns no failure, while a PARTIAL cohort — one of the
   // thirteen retired or renamed without truing this roster — is caught by name.
@@ -1850,10 +1904,19 @@ export async function governedRlsFailures() {
       + "A closed roster must not accumulate dead entries: either C-2 applied (all three tables) or it did not.",
     );
   }
+  const c3Live = CHECKOUT_GATE_C3_TABLES.filter((t) => present.has(t));
+  if (c3Live.length !== 0 && c3Live.length !== CHECKOUT_GATE_C3_TABLES.length) {
+    problems.push(
+      `FS-4 C-3 folded checkout table cohort is PARTIAL — present: ${c3Live.join(", ") || "(none)"}; `
+      + `missing: ${CHECKOUT_GATE_C3_TABLES.filter((t) => !present.has(t)).join(", ")}. `
+      + "A closed roster must not accumulate dead entries: either C-3 applied (all three tables) or it did not.",
+    );
+  }
   const roster = [
     ...GOVERNED_TABLES,
     ...(cohortLive.length === SUBLEDGER_0037_TABLES.length ? SUBLEDGER_0037_TABLES : []),
     ...(c2Live.length === CHECKOUT_GATE_C2_TABLES.length ? CHECKOUT_GATE_C2_TABLES : []),
+    ...(c3Live.length === CHECKOUT_GATE_C3_TABLES.length ? CHECKOUT_GATE_C3_TABLES : []),
   ];
   // (a) every governed table must EXIST and be RLS-forced.
   for (const tbl of roster) {

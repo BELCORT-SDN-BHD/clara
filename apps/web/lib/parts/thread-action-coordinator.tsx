@@ -6,6 +6,13 @@
 // only after an exact-one, fully shaped `clara.caller_context` read;
 // ../../components/parts/v16-action-round2.test.tsx:282 pins `limit=2` so an
 // ambiguous context remains observable instead of being truncated into one.
+//
+// P6-5: the read, the shape guard and the `limit=2` exact-one rule now live in
+// lib/identity/caller-context.ts, shared with the ⌘K "Do" allowlist. Two independently
+// typed copies of an identity guard is the failure review law 3 exists to catch — one
+// widens, the other does not, and the one that widened is the one that grants an act.
+// Nothing about this provider's behaviour changed: same relation, same select, same
+// `limit=2`, same exact-one-or-null verdict.
 
 import {
   createContext,
@@ -17,46 +24,10 @@ import {
   type ReactNode,
 } from "react";
 
-import { getRows } from "@/lib/read";
+import { exactlyOneCallerContext, loadCallerContextRows } from "@/lib/identity/caller-context";
 import type { SessionTokenAccessor } from "@/lib/session";
 import { useHydratedPart } from "./hooks";
 import { createSingleFireGuard, runOnce as runSingleFire } from "./single-fire-guard";
-
-const CALLER_CONTEXT_SELECT = "user_id,firm_id,firm_name,role,role_rank,is_operator";
-const FIRM_ROLES = ["viewer", "bookkeeper", "admin", "owner"] as const;
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-type CallerContextRow = {
-  user_id: string;
-  firm_id: string;
-  firm_name: string;
-  role: string;
-  role_rank: number | null;
-  is_operator: boolean;
-};
-
-function isCallerContextRow(row: unknown): row is CallerContextRow {
-  if (typeof row !== "object" || row === null) return false;
-  const value = row as Record<string, unknown>;
-  return typeof value.user_id === "string"
-    && UUID_RE.test(value.user_id)
-    && typeof value.firm_id === "string"
-    && UUID_RE.test(value.firm_id)
-    && typeof value.firm_name === "string"
-    && value.firm_name.length > 0
-    && typeof value.role === "string"
-    && (FIRM_ROLES as readonly string[]).includes(value.role)
-    && (value.role_rank === null || Number.isInteger(value.role_rank))
-    && typeof value.is_operator === "boolean";
-}
-
-function loadCallerContext(session: SessionTokenAccessor): Promise<CallerContextRow[]> {
-  return getRows<CallerContextRow>("caller_context", {
-    select: CALLER_CONTEXT_SELECT,
-    limit: 2,
-    session,
-  });
-}
 
 type ThreadActionCoordinator = {
   busy: boolean;
@@ -79,12 +50,11 @@ export function ThreadActionCoordinatorProvider({
   session: SessionTokenAccessor;
   children: ReactNode;
 }) {
-  const caller = useHydratedPart(session, loadCallerContext);
+  const caller = useHydratedPart(session, loadCallerContextRows);
   const guardRef = useRef(createSingleFireGuard());
   const [busy, setBusy] = useState(false);
 
-  const row = caller.data?.[0];
-  const callerId = caller.data?.length === 1 && isCallerContextRow(row) ? row.user_id : null;
+  const callerId = exactlyOneCallerContext(caller.data ?? [])?.user_id ?? null;
 
   const runOnce = useCallback(
     (fn: (trustedCallerId: string) => Promise<void>) => {

@@ -25,8 +25,11 @@
 
 import { targetLabel, destructiveTargetLabel, assertNoTargetSplit } from "./pg.mjs";
 
-// Disposable database-name shapes (suffix or whole-name).
-const EPHEMERAL_DB = /(^|[._-])(ci|test|tmp|temp|scratch|ephemeral)$/i;
+// Disposable database-name shapes (suffix or whole-name). Exported so a caller that
+// drops a NAMED database by argument (rather than acting on its own connection target)
+// can hold the database it is about to drop to the SAME disposability bar this file
+// already reasons about (tests/rig-cluster-reset.mjs's dropDatabase — review-518-r2 F3).
+export const EPHEMERAL_DB = /(^|[._-])(ci|test|tmp|temp|scratch|ephemeral)$/i;
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "::1", "0.0.0.0"]);
 
 /** Split "host:port/db" (from targetLabel) into { host, db }. */

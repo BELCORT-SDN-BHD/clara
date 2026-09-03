@@ -185,7 +185,20 @@ table itself lists fifteen names, an arithmetic defect preserved explicitly in �
 
 ### 1.5 What the ClaraBook conformance audit still owes
 
-From [`clarabook-resource-audit-2026-08-28.md`](clarabook-resource-audit-2026-08-28.md) §3/§4 and
+**Re-measured 2026-09-03 — nearly everything below is DONE; what remains is owner-owed, not
+build-owed.** DONE: the **Clara mascot** + **Ledger Fold** mark + **ClaraBook product-name copy
+pass** (#514 — `git ls-files apps/web/public` = 7 files including both brand PNGs) · the
+**`--input` recut VALUE** (#515, `apps/web/app/globals.css:304`, `--input: #8b8981;`) · the
+**third conformance pass** (FILED #506,
+[`clarabook-conformance-pass-3-2026-09-02.md`](clarabook-conformance-pass-3-2026-09-02.md)).
+**Still owed, and owed to the OWNER, not a lane** — #515's own "Owner lines owed" section states
+this plainly: 裁-64②'s `--input` recut PR to the `clarabook-frontend` design-authority repo (the
+value is set here in apps/web, lawfully, but the companion recut PR the ruling also called for was
+never opened — outside the lane's write boundary) and R3 §9's focus-ring recut PR to that same
+repo. Neither PR is a `main`-side build; both are re-assigned to the owner.
+
+The original finding follows, for the record: from
+[`clarabook-resource-audit-2026-08-28.md`](clarabook-resource-audit-2026-08-28.md) §3/§4 and
 R1: the **Clara mascot** asset (`apps/web/public/` holds five font files and nothing else) · the
 **Ledger Fold** mark port · the **ClaraBook product-name copy pass** · the **focus-ring recut PR
 owed to the `clarabook-frontend` repo** (R3/裁-1) · the **`--input` recut**, ruled to originate in

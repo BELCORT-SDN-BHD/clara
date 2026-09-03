@@ -171,6 +171,20 @@ export const CLARA_ROLE_ROSTER = [
       + "clara_stripe_webhook, itself NOLOGIN and without BYPASSRLS.",
   },
   {
+    role: "clara_auth_wall",
+    stem: "checkout_gate_c3_folded_door",
+    applied: fnExists("clara.claim_confirmation_attempt(bytea,bytea)"),
+    why: "FS-4 checkout-gate design part 3 §2.1: the pre-session OTP wall's NOLOGIN group role, "
+      + "holding exactly the claim/settle EXECUTE surface and no table grants.",
+  },
+  {
+    role: "clara_auth_wall_login",
+    stem: "checkout_gate_c3_folded_door",
+    applied: roleExists("clara_auth_wall"),
+    why: "FS-4 checkout-gate design part 3 §2.1: the INHERIT test login-member shell for "
+      + "clara_auth_wall, itself NOLOGIN and without BYPASSRLS.",
+  },
+  {
     role: "clara_wake_filing",
     stem: "f_a7_beta_filing_verb",
     applied: fnExists("clara.wake_file_document(uuid,uuid,jsonb,text,jsonb,uuid,text)"),
