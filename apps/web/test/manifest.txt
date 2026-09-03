@@ -33,6 +33,9 @@
 #
 # Blank lines and lines starting with # are ignored by both scripts above.
 
+
+
+
 components/admin/invite-dialog-a11y.test.tsx
 components/admin/invite-dialog-keyboard.test.tsx
 components/admin/members-a11y.test.tsx
@@ -53,18 +56,22 @@ components/clara/composer-attachment-scope.test.tsx
 components/clara/composer-attachment.test.tsx
 components/clara/interview-run-a11y.test.tsx
 components/clara/interview-run-keyboard.test.tsx
+components/clara/onboarding-amend-and-chart.test.tsx
 components/clara/onboarding-begin-keyboard.test.tsx
 components/clara/onboarding-checklist-a11y.test.tsx
 components/clara/onboarding-checklist-keyboard.test.tsx
 components/clara/onboarding-checklist.test.tsx
+components/clara/rail-boundary.test.tsx
 components/clara/thread-live-clarify.test.tsx
 components/clara/thread-live-regions.test.tsx
+components/clara/thread-rehydrate.test.tsx
 components/close/close-a11y.test.tsx
 components/close/close-components.test.tsx
 components/close/close-keyboard.test.tsx
 components/close/close-t1-hold-receipts.test.tsx
 components/close/close-t1-opener.test.tsx
 components/close/close-t1-proposal-readiness.test.tsx
+components/command/command-do.test.tsx
 components/common/money-input.journals.test.tsx
 components/common/money-input.opening.test.tsx
 components/common/money-input.staff-advance.test.tsx
@@ -101,6 +108,7 @@ components/firm/compliance-watch-affordance.test.tsx
 components/firm/needs-you-a11y.test.tsx
 components/firm/needs-you-affordances.test.ts
 components/firm/needs-you-gaps.test.tsx
+components/firm/onboarding-proposal.test.tsx
 components/firm/open-question-detail.test.tsx
 components/firm/staff-advance-incomplete-affordance.test.tsx
 components/firm/sweep-status-panel.test.tsx
@@ -149,6 +157,7 @@ components/reports/reports-offer-refusal.test.tsx
 components/reports/reports-snapshots-seeding-a11y.test.tsx
 components/reports/reports-snapshots-seeding-keyboard.test.tsx
 components/tax/tax-a11y.test.tsx
+e2e/e2e-fixture-ownership.test.ts
 lib/bank/agency-doors.test.ts
 lib/bank/doors.test.ts
 lib/bank/error-kind.test.ts
@@ -163,12 +172,15 @@ lib/bank/reload-on-change.test.ts
 lib/bank/table-reads.test.ts
 lib/business-date.test.ts
 lib/clara/liveClarify.test.ts
+lib/clara/turnRun.test.ts
 lib/clara/useActiveThread.test.ts
 lib/clara/welcomeState.test.ts
 lib/close/api.test.ts
 lib/coding/doors.test.ts
 lib/coding/loaders.test.ts
 lib/coding/reads.test.ts
+lib/command/do-action-floors.test.ts
+lib/command/do-actions.test.ts
 lib/command/routes.test.ts
 lib/documents/bytes.test.ts
 lib/documents/copy.test.ts
@@ -185,6 +197,7 @@ lib/firm-admin/compliance.test.ts
 lib/firm-admin/settings.test.ts
 lib/firm-admin/vendor-bindings.test.ts
 lib/firm/needs-you-gaps.test.ts
+lib/firm/needs-you-links.test.ts
 lib/firm/needs-you.test.ts
 lib/firm/reads.test.ts
 lib/firm/use-async-read.test.ts
@@ -203,6 +216,7 @@ lib/journals/governance-doors.test.ts
 lib/journals/use-journals-workbench.test.ts
 lib/members/members-doors.test.ts
 lib/onboarding/api.test.ts
+lib/onboarding/resolution-history.test.ts
 lib/parts/catalog.test.tsx
 lib/parts/hooks.test.ts
 lib/parts/single-fire-guard.test.ts
