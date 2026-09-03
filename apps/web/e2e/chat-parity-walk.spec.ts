@@ -21,6 +21,7 @@ import { expect, test, type Page } from "@playwright/test";
 const CLIENT_ID = "55555555-5555-4555-8555-555555555555";
 const THREAD_ID = "66666666-6666-4666-8666-666666666666";
 const DOCUMENT_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+const TASK_ID = "77777777-7777-4777-8777-777777777777";
 const QUESTION = "Which client owns this invoice?";
 
 /** The repo's own axe scope (interview-walk.spec.ts:39): WCAG 2.0/2.1 A and AA, not
@@ -60,7 +61,32 @@ async function openThread(page: Page): Promise<void> {
   await expect(page.getByLabel(COMPOSER)).toBeVisible();
 }
 
+/**
+ * Every chat/stream request the BROWSER made, plus the content-type the stream attach
+ * came back with. This is the FS-10 launch-blocker's own instrument: the fix is
+ * "the chat lane addresses this app's own origin at `/api/runtime/*`", and the only place
+ * that is observable is the wire the browser actually put bytes on.
+ */
+function watchChatWire(page: Page): { urls: string[]; streamContentType: () => string | null } {
+  const urls: string[] = [];
+  let streamContentType: string | null = null;
+  page.on("request", (request) => {
+    const path = new URL(request.url()).pathname;
+    // The optional `runtime/` group is deliberate: this collector must see the PRE-fix
+    // shape too, or a regression would collect nothing and the assertions below would
+    // fail on an empty list instead of on the wrong path.
+    if (/^\/api\/(runtime\/)?(chat|tasks)\//.test(path)) urls.push(path);
+  });
+  page.on("response", (response) => {
+    if (new URL(response.url()).pathname.endsWith("/stream")) {
+      streamContentType = response.headers()["content-type"] ?? null;
+    }
+  });
+  return { urls, streamContentType: () => streamContentType };
+}
+
 test("a parked clarify is answered inline, in the thread, and the card shows the answered state", async ({ page }) => {
+  const wire = watchChatWire(page);
   await openThread(page);
 
   await page.getByLabel(COMPOSER).fill("Code this invoice");
@@ -72,6 +98,28 @@ test("a parked clarify is answered inline, in the thread, and the card shows the
   // durable WDK step boundaries after the chunk is written). Before the fold this walk
   // was green only because the mock answered that read from a `pending` seed.
   await expect(page.getByText(QUESTION)).toBeVisible();
+
+  // THE FS-10 LAUNCH-BLOCKER PROOF, and the reason it sits HERE. The question above is on
+  // screen only because an SSE `chunk` event arrived and `liveClarify` folded it — so by
+  // this line a stream has demonstrably attached and delivered at least one event END TO
+  // END. What that alone does not say is WHERE, and "where" is the whole defect: with the
+  // pre-fix code these requests went to `/api/chat/*` and `/api/tasks/*` on this app's own
+  // origin (404 on the deployed Worker) or cross-origin to the runtime (CORS-blocked).
+  // They must now be same-origin proxy paths, and the harness answers them only through
+  // `next start` → the firm-scope guard → app/api/runtime/[...path]/route.ts.
+  expect(wire.urls, "the browser must have made chat/stream calls at all").not.toEqual([]);
+  expect(wire.urls).toContain(`/api/runtime/tasks/${TASK_ID}/stream`);
+  expect(wire.urls).toContain(`/api/runtime/chat/${THREAD_ID}/turns`);
+  for (const path of wire.urls) {
+    expect(path, `${path} is not a same-origin runtime-proxy path`).toMatch(/^\/api\/runtime\//);
+    expect(path, `${path} double-prefixes /api`).not.toContain("/api/api/");
+  }
+  // And the streamed body survived the proxy AS a stream: the proxy allow-lists
+  // `content-type` on the way back (route.ts:113-114), so a dropped header here would
+  // mean the SSE reader was parsing something the browser no longer knew was a stream.
+  expect(wire.streamContentType(), "the SSE attach must come back as text/event-stream through the proxy")
+    .toContain("text/event-stream");
+
   // The honest interim state, never a claim the question settled.
   await expect(page.getByText("No open question has been recorded")).toHaveCount(0);
   const answerField = page.getByLabel("Your answer");

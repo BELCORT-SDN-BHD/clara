@@ -55,10 +55,13 @@ function json(body: unknown, status = 200): Response {
 function withFetch(impl: (url: string, init?: RequestInit) => Response, run: (calls: Call[]) => Promise<void>): Promise<void> {
   const originalFetch = globalThis.fetch;
   const originalUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const originalRuntime = process.env.NEXT_PUBLIC_CLARA_RUNTIME_URL;
   const calls: Call[] = [];
   process.env.NEXT_PUBLIC_SUPABASE_URL = "https://example.supabase.co";
-  delete process.env.NEXT_PUBLIC_CLARA_RUNTIME_URL;
+  // NO runtime-base variable is deleted here any more. It used to be: the chat lane read
+  // a browser-exposed base URL, and every suite had to unset it to make the URLs below
+  // app-relative — which is exactly why nothing caught that both of its states were dead
+  // on a deployed origin. The lane is same-origin now (lib/clara/api.ts's header), so
+  // there is no variable left to neutralise; `lib/clara/api.test.ts` pins the strings.
   globalThis.fetch = (async (input, init) => {
     const url = String(input);
     let body: unknown = null;
@@ -72,15 +75,13 @@ function withFetch(impl: (url: string, init?: RequestInit) => Response, run: (ca
     globalThis.fetch = originalFetch;
     if (originalUrl === undefined) delete process.env.NEXT_PUBLIC_SUPABASE_URL;
     else process.env.NEXT_PUBLIC_SUPABASE_URL = originalUrl;
-    if (originalRuntime === undefined) delete process.env.NEXT_PUBLIC_CLARA_RUNTIME_URL;
-    else process.env.NEXT_PUBLIC_CLARA_RUNTIME_URL = originalRuntime;
   });
 }
 
 /** Every leg the walk needs: the transcript read, the whole intake+filing sequence, the
  *  turn post and a stream that opens and terminates immediately. */
 function router(url: string, init?: RequestInit): Response {
-  if (url.includes(`/api/chat/sessions/${THREAD_ID}/messages`)) return json({ messages: [] });
+  if (url.includes(`/api/runtime/chat/sessions/${THREAD_ID}/messages`)) return json({ messages: [] });
   if (url.includes("/rest/v1/clients")) {
     return json([
       { id: CLIENT_A, name: "ROME PROPERTIES", status: "active", created_at: "2026-01-01T00:00:00Z" },
@@ -101,8 +102,8 @@ function router(url: string, init?: RequestInit): Response {
   }
   if (url.includes("/rest/v1/rpc/record_client_resolution")) return json({ resolution_id: "resolution-1" });
   if (url.includes("/rest/v1/rpc/file_document")) { void init; return json(null); }
-  if (url === `/api/chat/${THREAD_ID}/turns`) return json({ task_id: "task-1" }, 202);
-  if (url === "/api/tasks/task-1/stream") {
+  if (url === `/api/runtime/chat/${THREAD_ID}/turns`) return json({ task_id: "task-1" }, 202);
+  if (url === "/api/runtime/tasks/task-1/stream") {
     return new Response(
       `event: message\ndata: ${JSON.stringify({ taskId: "task-1", status: "completed", parts: [] })}\n\nevent: done\ndata: ${JSON.stringify({ taskId: "task-1", status: "completed" })}\n\n`,
       { status: 200, headers: { "content-type": "text/event-stream" } },
@@ -154,8 +155,8 @@ async function sendAndReadTheWire(h: Awaited<ReturnType<typeof renderComponent>>
   const form = h.find((node) => node.tagName === "FORM");
   assert.ok(form);
   await h.fireEvent(form, "submit");
-  await settleUntil(h, () => calls.some((call) => call.url === `/api/chat/${THREAD_ID}/turns`), "the turn");
-  const turn = calls.find((call) => call.url === `/api/chat/${THREAD_ID}/turns`);
+  await settleUntil(h, () => calls.some((call) => call.url === `/api/runtime/chat/${THREAD_ID}/turns`), "the turn");
+  const turn = calls.find((call) => call.url === `/api/runtime/chat/${THREAD_ID}/turns`);
   assert.ok(turn);
   return (turn.body as { parts: unknown[] }).parts;
 }

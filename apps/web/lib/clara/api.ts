@@ -14,6 +14,37 @@
 // HUMAN-lane governance RPCs (`answer_interruption`, `cancel_agent_task`,
 // `share_chat_session`, …) are deliberately NOT ported here — they ride PostgREST via
 // `lib/wire.ts`, which is out of this lane's scope by the work order.
+//
+// EVERY CALL BELOW IS SAME-ORIGIN, THROUGH `app/api/runtime/[...path]/route.ts`.
+// It was not always: this file used to prefix each path with a `runtimeBase()` read
+// off the browser-exposed `NEXT_PUBLIC_CLARA_RUNTIME_URL`, and the FS-10 cutover prep
+// measured that BOTH of that variable's states are broken on a deployed origin —
+//   UNSET → `runtimeBase()` is "" → the browser asks apps/web's own origin for
+//           `/api/chat/…` and `/api/tasks/…`, which this app has no Route Handler
+//           for: a 404 on every chat call and every stream attach.
+//   SET   → a cross-origin browser call to the Fly runtime, whose CORS middleware is
+//           mounted on `/api/intake` ONLY (`packages/runtime/src/intakeRoutes.ts:60-82`;
+//           `chatRoutes`/`streamRoutes` are mounted separately at `index.ts:94-95` and
+//           inherit nothing), so the response carries no `Access-Control-Allow-Origin`
+//           and the browser blocks it — while re-freezing a URL into the bundle at
+//           build time and putting the Supabase JWT back on a direct browser→Fly wire,
+//           the two shapes the 2026-08-27 review (F1/F2/F3) and the 2026-07-26 intake
+//           incident were about.
+// So the chat lane now does what `lib/documents/intake.ts` and `lib/interview/api.ts`
+// already did: it asks its OWN origin, and the proxy reads the (server-side-only)
+// `CLARA_RUNTIME_URL` at REQUEST time and attaches the guard-verified session bearer
+// itself (`lib/runtime/outbound.ts:123-131` defaults every unclassified leg to
+// `session`; `:196-198` writes it). `NEXT_PUBLIC_CLARA_RUNTIME_URL` is gone from this
+// app entirely — there is no dev-only override, because an override is exactly how the
+// broken shape came back.
+//
+// THE PATH ARITHMETIC, because getting it wrong is silent. The proxy maps
+// `/api/runtime/<p…>` → `${CLARA_RUNTIME_URL}/api/<p…>` (`route.ts:53`) — it re-adds
+// the runtime's own `/api/` itself. The browser path is therefore the runtime path
+// with its `/api` prefix REPLACED by `/api/runtime`, never with `/api/runtime` glued
+// in front of it: `/api/runtime` + `/api/chat/sessions` would arrive at the runtime as
+// `/api/api/chat/sessions` and 404 there. `lib/clara/api.test.ts` pins the exact
+// string every call site below sends.
 
 import type { SessionTokenAccessor } from "@/lib/session";
 
@@ -53,10 +84,6 @@ export function limitBanner(message: string, resetCopy: string | null): string {
   return [message, resetCopy].filter((s): s is string => typeof s === "string" && s.trim().length > 0).join(" ");
 }
 
-export function runtimeBase(): string {
-  return (process.env.NEXT_PUBLIC_CLARA_RUNTIME_URL ?? "").replace(/\/+$/, "");
-}
-
 function asString(v: unknown): string | null {
   return typeof v === "string" && v.length > 0 ? v : null;
 }
@@ -70,10 +97,21 @@ async function requireToken(auth: SessionTokenAccessor): Promise<string> {
   return token;
 }
 
+/** `path` is the SAME-ORIGIN proxy path (`/api/runtime/…`), never a runtime-absolute
+ *  one — see this module's header for the arithmetic.
+ *
+ *  `redirect: "manual"` is not cosmetic now that these calls are same-origin: `proxy.ts`
+ *  is this app's ONLY auth gate and its matcher covers `/api/…`, so an expired or missing
+ *  cookie session answers a 307 to `/login`. Followed (the fetch default) that becomes a
+ *  200 `text/html` login page — `expectJson` would try to parse it, and a STREAM attach
+ *  would read it as SSE, see no events, and enter the reattach loop. Manual, it surfaces
+ *  as an `opaqueredirect` (`status: 0`, `ok: false`) and is classified honestly, exactly
+ *  as `lib/documents/runtime-wire.ts:45-54` already does for the intake legs. */
 async function runtimeFetch(path: string, token: string, init?: RequestInit): Promise<Response> {
-  return fetch(`${runtimeBase()}${path}`, {
+  return fetch(path, {
     ...init,
     cache: "no-store",
+    redirect: "manual",
     headers: {
       authorization: `Bearer ${token}`,
       ...(init?.body ? { "content-type": "application/json" } : {}),
@@ -82,7 +120,16 @@ async function runtimeFetch(path: string, token: string, init?: RequestInit): Pr
   });
 }
 
+/** The one shape a `redirect: "manual"` fetch can return that a status read cannot
+ *  describe: an opaque-redirect response reports `status: 0`, so "failed (0)" would be
+ *  the honest-looking wrong answer. Named here so both readers below say the same thing —
+ *  and EXPORTED so `lib/clara/stream.ts`'s attach says it too rather than keeping a second
+ *  copy that drifts. The two lanes hit the identical 307 from the identical gate; a reader
+ *  who learns the phrase from one must recognise it from the other. */
+export const REDIRECTED = "redirected (the session cookie is likely missing or expired)";
+
 async function expectJson<T>(res: Response, what: string): Promise<T> {
+  if (res.type === "opaqueredirect") throw new Error(`${what} failed: ${REDIRECTED}`);
   if (!res.ok) {
     const body = await res.text().catch(() => "");
     throw new Error(`${what} failed (${res.status}): ${body.slice(0, 300)}`);
@@ -114,7 +161,7 @@ export function callerSubjectFromAccessToken(token: string): string | null {
 
 export async function listSessions(auth: SessionTokenAccessor): Promise<SessionRow[]> {
   const token = await requireToken(auth);
-  const res = await runtimeFetch("/api/chat/sessions", token);
+  const res = await runtimeFetch("/api/runtime/chat/sessions", token);
   const body = await expectJson<{ sessions: SessionRow[] }>(res, "list sessions");
   return body.sessions ?? [];
 }
@@ -126,7 +173,7 @@ export async function listSessionsForCaller(
   const token = await requireToken(auth);
   const callerSubject = callerSubjectFromAccessToken(token);
   if (callerSubject === null) throw new Error("session identity is unavailable");
-  const res = await runtimeFetch("/api/chat/sessions", token);
+  const res = await runtimeFetch("/api/runtime/chat/sessions", token);
   const body = await expectJson<{ sessions: SessionRow[] }>(res, "list sessions");
   return { sessions: body.sessions ?? [], callerSubject };
 }
@@ -136,7 +183,7 @@ export async function createSession(
   opts: { title?: string; clientId?: string } = {},
 ): Promise<string> {
   const token = await requireToken(auth);
-  const res = await runtimeFetch("/api/chat/sessions", token, {
+  const res = await runtimeFetch("/api/runtime/chat/sessions", token, {
     method: "POST",
     body: JSON.stringify({ title: opts.title || undefined, clientId: opts.clientId || undefined }),
   });
@@ -146,7 +193,7 @@ export async function createSession(
 
 export async function getMessages(auth: SessionTokenAccessor, sessionId: string): Promise<MessageRow[]> {
   const token = await requireToken(auth);
-  const res = await runtimeFetch(`/api/chat/sessions/${encodeURIComponent(sessionId)}/messages`, token);
+  const res = await runtimeFetch(`/api/runtime/chat/sessions/${encodeURIComponent(sessionId)}/messages`, token);
   const body = await expectJson<{ messages: MessageRow[] }>(res, "load messages");
   return body.messages ?? [];
 }
@@ -170,13 +217,16 @@ export async function postTurn(
   }
   let res: Response;
   try {
-    res = await runtimeFetch(`/api/chat/${encodeURIComponent(sessionId)}/turns`, token, {
+    res = await runtimeFetch(`/api/runtime/chat/${encodeURIComponent(sessionId)}/turns`, token, {
       method: "POST",
       body: JSON.stringify({ turnKey, parts: [{ type: "text", text }, ...attachments] }),
     });
   } catch (err) {
     return { kind: "error", message: `network error: ${(err as Error).message}` };
   }
+  // BEFORE the status reads: an opaque-redirect response reports `status: 0`, which is
+  // none of the four cases below and would fall through to `0: request failed`.
+  if (res.type === "opaqueredirect") return { kind: "error", message: `post turn failed: ${REDIRECTED}` };
   const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
   if (res.status === 202) return { kind: "accepted", taskId: String(body.task_id) };
   if (res.status === 409)
@@ -192,7 +242,14 @@ export async function postTurn(
 }
 
 /** Resolves the bearer token for `lib/clara/stream.ts` (which is not itself an AGENT-
- *  lane wire function — it opens the stream directly against `runtimeBase()`). */
-export async function resolveStreamAuth(auth: SessionTokenAccessor): Promise<{ token: string; runtimeBase: string }> {
-  return { token: await requireToken(auth), runtimeBase: runtimeBase() };
+ *  lane wire function — it opens the stream itself, same-origin, on the proxy path it
+ *  owns).
+ *
+ *  IT NO LONGER HANDS OUT A BASE URL. It used to return `runtimeBase()` beside the
+ *  token, and that pair was the whole mechanism by which the SSE attach inherited the
+ *  build-time browser URL — deleting the field is what makes the old shape
+ *  unreachable rather than merely unused. The token stays because a signed-out attach
+ *  must fail HERE, loudly, rather than as a proxy 403 the reattach loop would retry. */
+export async function resolveStreamAuth(auth: SessionTokenAccessor): Promise<{ token: string }> {
+  return { token: await requireToken(auth) };
 }

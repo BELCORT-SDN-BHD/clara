@@ -67,9 +67,8 @@ function attachClaraStream(
   taskId: string,
   onOpen?: () => void,
 ): Promise<void> {
-  return resolveStreamAuth(auth).then(({ token, runtimeBase }) =>
+  return resolveStreamAuth(auth).then(({ token }) =>
     runClaraTaskStream({
-      runtimeBase,
       token,
       taskId,
       signal: new AbortController().signal,

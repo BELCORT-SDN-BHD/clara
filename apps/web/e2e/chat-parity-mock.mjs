@@ -6,10 +6,11 @@
 // WHAT IT MOCKS, AND WHAT THAT LEAVES REAL. The browser, the built Next bundle, the
 // SAME-ORIGIN runtime proxy route (`app/api/runtime/[...path]/route.ts`, firm-scope
 // guard and header allow-list included) and every line of client code under test are
-// REAL. What is faked is what sits BEHIND them: the runtime's three intake legs (a
-// tiny HTTP server this module starts, reached through the real proxy via
-// CLARA_RUNTIME_URL), the chat/stream legs the browser calls same-origin, and
-// PostgREST. It therefore proves the JOURNEY and the client's own wire shapes. It
+// REAL. What is faked is what sits BEHIND them: the runtime's three intake legs AND —
+// since the chat/SSE repoint — its chat and task-stream legs, all of them served by the
+// tiny HTTP server this module starts and all of them reached THROUGH the real proxy via
+// CLARA_RUNTIME_URL, plus PostgREST. It therefore proves the JOURNEY and the client's own
+// wire shapes. It
 // proves NOTHING about whether Postgres or the runtime would accept those shapes —
 // `clara._tf_validate_chat_attachments`, `clara.open_interruption`'s linearization and
 // `clara.answer_interruption` are not exercised here, only the calls made to them.
@@ -206,10 +207,27 @@ export async function handleChatParitySupabase(request, response, path, url, sen
   return false;
 }
 
-/** The same-origin chat legs. `lib/clara/api.ts`'s `runtimeBase()` is empty in this
- *  harness (no NEXT_PUBLIC_CLARA_RUNTIME_URL), so the browser calls these paths on the
- *  app origin directly — they never reach `next start`. */
-export async function handleChatParityApp(request, response, url) {
+/**
+ * The chat legs, AS THE RUNTIME SEES THEM — behind the real same-origin proxy.
+ *
+ * THIS USED TO BE AN APP-ORIGIN HANDLER, and that is precisely why nothing in CI caught
+ * the launch blocker this train fixes. Its own comment said it: `runtimeBase()` was empty
+ * in this harness, so the browser asked THIS server for `/api/chat/*` and `/api/tasks/*`
+ * and "they never reach `next start`" — the suite was green because a mock, not
+ * `apps/web`, served the paths, on an origin the deployed Worker does not have. The
+ * browser now asks for `/api/runtime/chat/*` and `/api/runtime/tasks/*`, which traverse
+ * `next start` → the firm-scope guard → `app/api/runtime/[...path]/route.ts` → here, so
+ * the walk is the LOCAL proof that a turn and a live SSE attach survive the proxy.
+ *
+ * The paths below are unchanged, and that is the point: the proxy maps
+ * `/api/runtime/<p…>` → `${CLARA_RUNTIME_URL}/api/<p…>` (route.ts:53), so what arrives
+ * here is exactly what the real runtime would be asked for.
+ *
+ * WHAT IT STILL DOES NOT PROVE: whether a Route Handler's streamed body survives
+ * OpenNext-on-Workers. `next start` is Node, the Worker is workerd; nothing in this repo
+ * can answer that, and the FS-10 preview walk (step S14) is the instrument that does.
+ */
+export async function handleChatParityRuntime(request, response, url) {
   const path = url.pathname;
 
   if (request.method === "GET" && path === `/api/chat/sessions/${CHAT_PARITY.threadId}/messages`) {
@@ -258,8 +276,10 @@ export async function handleChatParityApp(request, response, url) {
  * The ONE mock runtime origin. `serve-built.mjs` points `CLARA_RUNTIME_URL`
  * here, so every lane's runtime route has to be reachable from it — hence
  * `delegate`, an optional handler tried before the 404. FS-4 C-6 passes C-5's
- * `POST /api/auth-wall/confirm` in that way rather than standing up a second
- * runtime origin the app could not be pointed at twice.
+ * `POST /api/auth-wall/confirm` in that way, and since the chat/SSE repoint
+ * `serve-built.mjs` composes the chat legs of all three lanes into the same
+ * delegate, rather than standing up a second runtime origin the app could not
+ * be pointed at twice.
  *
  * @param {number} port
  * @param {(request: import("node:http").IncomingMessage, response: import("node:http").ServerResponse, url: URL) => Promise<boolean>} [delegate]

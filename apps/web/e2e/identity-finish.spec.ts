@@ -159,26 +159,32 @@ const E2E_THREAD = "eeeeeeee-1111-4111-8111-eeeeeeeeeeee";
 /**
  * The rail's whole chat surface, stubbed at the network edge.
  *
- * WHY NOT USE THE SHARED HARNESS FIXTURE. `serve-built.mjs` answers
- * `GET /api/chat/sessions` with three sessions owned by ONE fixed subject and
- * always returns exactly one message per thread — so this persona resolves no
- * own session, falls through to `createSession`, and hits a route the mock does
- * not implement (`POST /api/chat/sessions` → 404). Stubbing here rather than
- * teaching the shared server a fourth persona keeps this walk self-contained
- * and changes nothing for the four other specs sharing that server.
+ * WHY NOT USE THE SHARED HARNESS FIXTURE. `serve-built.mjs` answers the session
+ * list with three sessions owned by ONE fixed subject and always returns exactly
+ * one message per thread — so this persona resolves no own session, falls through
+ * to `createSession`, and hits a route the mock does not implement (a POST to the
+ * session list → 404). Stubbing here rather than teaching the shared server a
+ * fourth persona keeps this walk self-contained and changes nothing for the four
+ * other specs sharing that server.
+ *
+ * THE GLOBS ARE THE SAME-ORIGIN PROXY PATHS since the chat/SSE repoint. These are
+ * BROWSER-side interceptions, so they must match what the browser asks for —
+ * `/api/runtime/chat/…` — not what the runtime is eventually handed. A stale glob
+ * here would not fail loudly: the request would sail past the stub to the shared
+ * harness fixture and this persona would silently resolve someone else's thread.
  *
  * `transcript: "never"` leaves the messages read in flight for the life of the
  * test — the only way to hold the rail in its loading state on purpose.
  */
 async function stubChat(page: Page, transcript: unknown[] | "never"): Promise<void> {
-  await page.route("**/api/chat/sessions", (route) =>
+  await page.route("**/api/runtime/chat/sessions", (route) =>
     route.request().method() === "POST"
       ? route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ session_id: E2E_THREAD }) })
       : route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ sessions: [] }) }),
   );
   // Registered second, so it wins for the `/messages` sub-path (Playwright
   // matches routes in reverse registration order).
-  await page.route("**/api/chat/sessions/*/messages", (route) => {
+  await page.route("**/api/runtime/chat/sessions/*/messages", (route) => {
     if (transcript === "never") return;
     return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ messages: transcript }) });
   });

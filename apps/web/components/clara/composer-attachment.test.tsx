@@ -47,10 +47,10 @@ function App(clientId: string | null = CLIENT_ID): ReactElement {
 function withFetch(impl: (url: string, init?: RequestInit) => Promise<Response> | Response, run: (calls: Call[]) => Promise<void>): Promise<void> {
   const originalFetch = globalThis.fetch;
   const originalUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const originalRuntime = process.env.NEXT_PUBLIC_CLARA_RUNTIME_URL;
   const calls: Call[] = [];
   process.env.NEXT_PUBLIC_SUPABASE_URL = "https://example.supabase.co";
-  delete process.env.NEXT_PUBLIC_CLARA_RUNTIME_URL;
+  // The chat lane no longer reads a browser-exposed runtime base URL, so there is no
+  // longer a variable to unset here — see lib/clara/api.ts's header and api.test.ts.
   globalThis.fetch = (async (input, init) => {
     const url = String(input);
     let body: unknown = null;
@@ -66,13 +66,11 @@ function withFetch(impl: (url: string, init?: RequestInit) => Promise<Response> 
     globalThis.fetch = originalFetch;
     if (originalUrl === undefined) delete process.env.NEXT_PUBLIC_SUPABASE_URL;
     else process.env.NEXT_PUBLIC_SUPABASE_URL = originalUrl;
-    if (originalRuntime === undefined) delete process.env.NEXT_PUBLIC_CLARA_RUNTIME_URL;
-    else process.env.NEXT_PUBLIC_CLARA_RUNTIME_URL = originalRuntime;
   });
 }
 
 function baseRouter(url: string): Response | null {
-  if (url.includes(`/api/chat/sessions/${THREAD_ID}/messages`)) return json({ messages: [] });
+  if (url.includes(`/api/runtime/chat/sessions/${THREAD_ID}/messages`)) return json({ messages: [] });
   if (url.includes("/rest/v1/clients")) {
     return json([{ id: CLIENT_ID, name: "ROME PROPERTIES", status: "active", created_at: "2026-01-01T00:00:00Z" }]);
   }
@@ -256,12 +254,12 @@ test("a FAILED upload does not brick the composer: a plain-text turn still sends
   // typed refusal, and `clearDone` does not sweep it, so the turn goes without it VISIBLY.
   await withFetch(
     (url) => {
-      if (url.includes(`/api/chat/sessions/${THREAD_ID}/messages`)) return json({ messages: [] });
+      if (url.includes(`/api/runtime/chat/sessions/${THREAD_ID}/messages`)) return json({ messages: [] });
       const base = baseRouter(url);
       if (base) return base;
       if (url === "/api/runtime/intake/documents") return json({ error: "bad_request", message: "bad request" }, 400);
-      if (url === `/api/chat/${THREAD_ID}/turns`) return json({ task_id: "task-1" }, 202);
-      if (url === "/api/tasks/task-1/stream") {
+      if (url === `/api/runtime/chat/${THREAD_ID}/turns`) return json({ task_id: "task-1" }, 202);
+      if (url === "/api/runtime/tasks/task-1/stream") {
         return new Response(
           `event: message\ndata: ${JSON.stringify({ taskId: "task-1", status: "completed", parts: [] })}\n\nevent: done\ndata: ${JSON.stringify({ taskId: "task-1", status: "completed" })}\n\n`,
           { status: 200, headers: { "content-type": "text/event-stream" } },
@@ -295,8 +293,8 @@ test("a FAILED upload does not brick the composer: a plain-text turn still sends
         const form = h.find((node) => node.tagName === "FORM");
         assert.ok(form);
         await h.fireEvent(form, "submit");
-        await settleUntil(h, () => calls.some((call) => call.url === `/api/chat/${THREAD_ID}/turns`), "the text-only turn");
-        const turn = calls.find((call) => call.url === `/api/chat/${THREAD_ID}/turns`);
+        await settleUntil(h, () => calls.some((call) => call.url === `/api/runtime/chat/${THREAD_ID}/turns`), "the text-only turn");
+        const turn = calls.find((call) => call.url === `/api/runtime/chat/${THREAD_ID}/turns`);
         assert.ok(turn);
         assert.deepEqual(
           (turn.body as { parts: unknown[] }).parts,
@@ -321,7 +319,7 @@ test("ready attachment is filed to the activated client and rides the sent turn 
   const attachment = { type: "attachment", intake_id: INTAKE_ID, document_id: DOCUMENT_ID } as const;
   await withFetch(
     (url, init) => {
-      if (url.includes(`/api/chat/sessions/${THREAD_ID}/messages`)) {
+      if (url.includes(`/api/runtime/chat/sessions/${THREAD_ID}/messages`)) {
         messageReads += 1;
         return json({
           messages: messageReads === 1 ? [] : [{
@@ -339,8 +337,8 @@ test("ready attachment is filed to the activated client and rides the sent turn 
       if (base) return base;
       const intake = intakeRouter(url, init, (body) => { filedBody = body; });
       if (intake) return intake;
-      if (url === `/api/chat/${THREAD_ID}/turns`) return json({ task_id: "task-1" }, 202);
-      if (url === "/api/tasks/task-1/stream") {
+      if (url === `/api/runtime/chat/${THREAD_ID}/turns`) return json({ task_id: "task-1" }, 202);
+      if (url === "/api/runtime/tasks/task-1/stream") {
         const sse = [
           `event: message\ndata: ${JSON.stringify({ taskId: "task-1", status: "completed", parts: [] })}\n\n`,
           `event: done\ndata: ${JSON.stringify({ taskId: "task-1", status: "completed" })}\n\n`,
@@ -390,7 +388,7 @@ test("ready attachment is filed to the activated client and rides the sent turn 
         assert.equal("client_id" in (begin.body as Record<string, unknown>), false, "client identity never rides the caller-shaped intake body");
         assert.equal((filedBody as { p_client?: string } | null)?.p_client, CLIENT_ID, "filing is scoped by the activated client prop");
 
-        const turn = calls.find((call) => call.url === `/api/chat/${THREAD_ID}/turns`);
+        const turn = calls.find((call) => call.url === `/api/runtime/chat/${THREAD_ID}/turns`);
         assert.ok(turn);
         const turnBody = turn.body as { parts: unknown[] };
         assert.deepEqual(turnBody.parts, [{ type: "text", text: "Read this invoice" }, attachment]);
