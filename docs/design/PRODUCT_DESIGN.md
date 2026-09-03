@@ -90,6 +90,6 @@ Status marks read as of the F6–F9 close (2026-08-09): ✅ built · ◐ part-bu
 1. ✅ The typed `parts[]` transcript + tool chips + attachment lifecycle chips (the streaming spine).
 2. ✅ `je_review` + `clarify` + `doc_review` (side-by-side evidence with region overlays) — the daily loop.
 3. ✅ The review queue (List model: sections, fuzzy filter, trust-badge accessories, split-view).
-4. ◐ Plan-as-document for close/onboarding — the ONBOARDING half is built (`/clients/plan`); the CLOSE half rides Wave E.
+4. ◐ Plan-as-document for close/onboarding — the ONBOARDING half is built (`/clients/plan`); the CLOSE half rides Wave E. *(trued 2026-09-03: `/clients/plan` is the dashboard-era route — in apps/web the capability is the in-thread `OnboardingChecklistCard.tsx`/`InterviewRunCard.tsx`, rated SAME in `dashboard-web-capability-diff-2026-09-02.md:135`; the close half is ALSO built — `apps/web/app/(firm)/clients/[clientId]/close/page.tsx` + `apps/web/components/close/ClosePlanPanel.tsx` reading `get_close_plan` (landed #364, 2026-08-27) — with one residual: the "Clara proposes close" adopt surface, named as an honest not-built note in the page itself.)*
 5. ◐ ⌘K Ask/Do/Go + object ActionPanels; URL-as-truth wiring *(trued 2026-09-02: the palette IS built in apps/web — Go navigates live, Ask hands off to the Clara rail, Do is a deliberate disabled placeholder; object ActionPanels remain unbuilt)*.
 6. – The verification lane + diffs (legs before/after; doc↔entry).

@@ -81,14 +81,18 @@ Three new event-stream consumers join the existing five loops (Wave A2.1, ADR-02
 
 **The reconciler now carries FIVE daily belts, not one** (as-built 2026-08-06, all on the
 leader's daily flag — `opts.autopostRules` / `sstWatches` / `lintBelt` / `faRuns` / `adjRuns` —
-all feature-detecting their own DB surface so a runtime image can boot before its migration
+some feature-detecting their own DB surface so a runtime image can boot before its migration
 lands): the **autopost-rule expiry/nudge** sweep (Wave A2.1, `0015`, WA2-R10 never-auto-renew —
-**its reconciler belt function, `reconcile_autopost_rules()`, and the whole CODING-rules
-EXECUTION tier RETIRED at `0118` (F-A2 PR-3, 2026-08-25 ceremony); the separate, later
-BANK-rules machine retired WHOLE at `0129` (F-A3 PR-3, 2026-08-26 ceremony)**) ·
-`sst_watch` (above, `0016`) · the per-client **wiki-lint** belt (Wave B) · the **FA
-depreciation-run** belt (Wave D-a, `0041`) · the **recurring-adjustment** belt (Wave D-b2,
-`0045`). Each belt is **failure-isolated** — an error logs and retries next cycle rather than
+**DB-RETIRED / RUNTIME-STILL-WIRED: the DB function `reconcile_autopost_rules()` and the whole
+CODING-rules EXECUTION tier were RETIRED at `0118` (F-A2 PR-3, 2026-08-25 ceremony), but the
+reconciler's belt caller was never unwired — `reconciler.mjs:673` still fires it every cycle
+behind a bare try/catch (no `to_regprocedure` feature-detect), so the call fails and the belt
+retries every poll in the deployed path; unwire per `docs/plan/active/f-a2-annexes-1-estate.md:95`.
+The separate, later BANK-rules machine retired WHOLE at `0129` (F-A3 PR-3, 2026-08-26
+ceremony)**) · `sst_watch` (above, `0016`) · the per-client **wiki-lint** belt (Wave B) · the
+**FA depreciation-run** belt (Wave D-a, `0041`, `to_regprocedure`-guarded) · the
+**recurring-adjustment** belt (Wave D-b2, `0045`, `to_regprocedure`-guarded). Each belt is
+**failure-isolated** — an error logs and retries next cycle rather than
 starving the sweepers behind it. The last one is architecturally new in kind: it is the product's
 **first calendar-triggered poster** — until `0045` nothing in Clara posted on a schedule, only
 in response to an event or a human. Its autonomy is bounded by one authority doctrine shared
@@ -300,7 +304,7 @@ The Slice-0 spike ran against the fresh hosted Supabase project (`spike/RESULTS.
 3. **No run pinning on self-hosted WDK** (T6, the hazard): an in-place edit to a workflow body **silently changes the semantics of the un-executed remainder of every in-flight run** — no error, no old-semantics preservation. A silent-correctness hazard for accounting workflows. **Mitigation proven:** name-versioned workflows — old parked runs completed on pure V1 semantics while new enqueues rode V2.
 4. **BINDING VERSIONING POLICY (from T6):** (a) a deployed workflow body is immutable once any run can be in flight; every behavioral change ships as a new exported workflow (`_v2`, `_v3`, …), the old export retained until zero non-terminal runs reference it; (b) enqueue sites always target the newest version; a CI freeze-lint (golden-hash per frozen workflow) forbids editing frozen bodies; (c) renaming/deleting an export with in-flight runs is forbidden (workflowName derives from path+export — a rename strands parked runs); (d) in-place hotfixes only for provably pre-park-idempotent step-body bugs.
 
-**Freeze-lint coverage (as built, finding 11):** the CI freeze-lint golden-hashes each `@frozen` workflow **and its transitive relative-import closure**, requires every `"use workflow"` file to be frozen + registered, compares append-only vs `origin/main` (fail-closed if the base ref is missing under CI), and **rejects a workspace-package / path-alias import inside a frozen closure** (such a first-party import would escape the closure and change a frozen body while its hash stayed green). **No longer deferred — both are BUILT and enforced** (verified 2026-08-06 in `scripts/check-frozen-workflows.mjs`, which delegates to `freeze-lint-checks.mjs`): **registry-version monotonicity** — the lint parses `packages/runtime/workflows/registry.ts` at HEAD and at the base ref, so a class may only keep or *increase* its version and a class removed vs base is a hard reject — and **enqueue-site provenance** — every WDK enqueue in `packages/runtime` (tests and the registry itself excluded) must receive a workflow reference whose import provenance traces to the registry. Policy (b) is therefore machine-checked, not convention. Handles: `scripts/check-frozen-workflows.mjs`, the manifest `frozen-workflows.json` (**228** entries at the 2026-09-02 truing — the count grows with every frozen closure; read the file, not this line), regenerated only via `pnpm freeze:update` (refused under CI).
+**Freeze-lint coverage (as built, finding 11):** the CI freeze-lint golden-hashes each `@frozen` workflow **and its transitive relative-import closure**, requires every `"use workflow"` file to be frozen + registered, compares append-only vs `origin/main` (fail-closed if the base ref is missing under CI), and **rejects a workspace-package / path-alias import inside a frozen closure** (such a first-party import would escape the closure and change a frozen body while its hash stayed green). **No longer deferred — both are BUILT and enforced** (verified 2026-08-06 in `scripts/check-frozen-workflows.mjs`, which delegates to `freeze-lint-checks.mjs`): **registry-version monotonicity** — the lint parses `packages/runtime/workflows/registry.ts` at HEAD and at the base ref, so a class may only keep or *increase* its version and a class removed vs base is a hard reject — and **enqueue-site provenance** — every WDK enqueue in `packages/runtime` (tests and the registry itself excluded) must receive a workflow reference whose import provenance traces to the registry. Policy (b) is therefore machine-checked, not convention. Handles: `scripts/check-frozen-workflows.mjs`, the manifest `frozen-workflows.json` (**233** entries at the 2026-09-03 truing — the count grows with every frozen closure; read the file, not this line), regenerated only via `pnpm freeze:update` (refused under CI).
 4a. **The parallel EVALUATOR freeze (invariant 1's enforcement machinery, mirroring the
 workflow freeze above):** `frozen-evaluators.json` is the manifest; `scripts/check-frozen-
 evaluators.mjs` is its lint (with its own `--lock-deployed` ceremony flag, refused under CI);

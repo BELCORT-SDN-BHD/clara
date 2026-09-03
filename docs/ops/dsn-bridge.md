@@ -169,7 +169,9 @@ again before trusting an older PR's evidence at ceremony time.
 - **Windows-native spawn is unsupported as a ceremony surface.** `dsn-pipe.mjs` runs fine on
   native Windows for authoring and testing (this PR was built there), but every documented
   ceremony recipe assumes a POSIX shell (`fly ssh console | node ... -- ...`); WSL2 is the actual
-  ceremony home (`AGENTS.md`'s CI runners are WSL2 for the same reason). Don't adapt a recipe to
+  ceremony home — the owner's ceremony shell on Windows, on its own POSIX-shell terms (裁-135
+  keeps WSL2 for the lanes' rigs; CI itself is GitHub-hosted `ubuntu-latest` since 2026-09-02 and
+  no longer the reason WSL2 lives here — see `docs/ops/ci-runner.md`). Don't adapt a recipe to
   `cmd.exe`/PowerShell piping without re-proving the argv/disk cells there first.
 - **A DSN's `options=` parameter can be mangled by `+`-encoding.** `URLSearchParams.toString()`
   (used internally by `withVerifyFull()`) encodes a literal space as `+` — the web-form query

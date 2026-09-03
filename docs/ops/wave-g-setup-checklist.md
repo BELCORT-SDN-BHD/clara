@@ -29,8 +29,11 @@ that PROVES it — read this before the Wave-G factory reset + estate e2e, not a
 - [ ] Flip `clara_auth_wall_login` to `LOGIN` out of band and set
       `CLARA_AUTH_WALL_DATABASE_URL` in the runtime environment only; migration `0163` deliberately
       ships and tail-proves the role as `NOLOGIN`, so this is a deploy ceremony, never repo-held DDL.
-- [ ] Proof: `vercel env ls` / the deploy platform's env listing (values redacted), each of the
-      required names present, no value ever pasted into chat, a PR, or a log.
+- [ ] Proof: **`wrangler secret list` for the `clara-web` Worker** (values redacted; all four
+      names are `apps/web`-only — `git grep` over `apps/dashboard` and `packages/runtime` = 0
+      hits). ADR-024 dropped Vercel; `apps/web/wrangler.jsonc:3` names the Worker `clara-web`.
+      **Caveat:** `wrangler.jsonc` currently declares no `vars` block, so `CLARA_PUBLIC_ORIGINS`
+      has no declared home on the Workers deploy — worth its own look before Wave-G.
 
 ## Invite-link log redaction — 裁-65 / P4-4 round 3 item 75
 
@@ -43,8 +46,12 @@ that PROVES it — read this before the Wave-G factory reset + estate e2e, not a
 
 - [ ] Supabase Auth → "Allow new users to sign up" is **ON**, for the tier-3 self-serve path
       (sign up → pay through Stripe → start; no approval queue, 裁-43/裁-68).
-- [ ] Auth → Redirect URLs contains exactly `<origin>/signup` and `<origin>/auth/confirm`; **no
-      wildcard** entry.
+- [ ] Auth → Redirect URLs contains exactly **`<origin>/auth/confirm`** and **`<origin>/auth/recover`**;
+      **no wildcard** entry. (Whole-tree census of tracked source, 2026-09-03: exactly two
+      redirect call sites — `signup-account-form.tsx:182` sends `emailRedirectTo` to the
+      /auth/confirm route, `password-recovery-form.tsx:42` sends `redirectTo` to the /auth/recover
+      route; nothing passes `/signup`. The companion *Reset password* template box lives in the
+      pending FS-10 notes — do not double-file it here.)
 - [ ] Email confirmation is **ON** and autoconfirm is **OFF**. Per 裁-92's CODE flow (superseding
       this checklist's earlier token_hash link-form instruction — `apps/web/README.md` §4), the
       "Confirm signup" template emits the bare code and nothing to click: `{{ .Token }}` — never
@@ -72,6 +79,12 @@ that PROVES it — read this before the Wave-G factory reset + estate e2e, not a
 - [ ] A Stripe account exists, with **Stripe Tax** configured for Malaysian service tax (switched
       on only once BELCORT's own SST registration status says so — no tax line before
       registration).
+- [ ] `clara.stripe_object_map` carries `('product','clara-beta-2026','prod_VBS7ZUaIFPedCs')` and
+      `('price','clara-beta-2026','price_1UB5DZHD90w0k86XNfkgYPWq')` — an OPS ACT run **after**
+      the reset applies `0160` and `0163_checkout_gate_c3_folded_door.sql` (#493, **MERGED**
+      `265a8ee7`, 2026-09-03). Proof: the as-run's `select object_kind, local_key, stripe_id`
+      plus one `open_checkout_intent` call that does NOT raise `CLR10`. Without this seed a beta
+      signup dies at `CLR10 no stripe price is mapped for this plan`.
 - [ ] **The Wave-G walk exercises checkout in Stripe TEST mode at a non-zero test price**, with
       test cards — this is the 裁-58 dissent's mitigation: the real-money charge path is not
       exercised before launch, so the charge/webhook/invoice path must be proven in test mode

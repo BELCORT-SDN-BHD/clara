@@ -46,14 +46,13 @@ The evidence shape is the DPA's existing one, reused: bind the **version key** a
 recording "they agreed to beta-terms v1" proves nothing about what v1 said on that day; recording
 the digest does.
 
-### F.3 · One document kind or two? — the recommendation, and the byte-identity consequence
+### F.3 · One document kind or two? — **RULED: two kinds (裁-129)**
 
-The storage question the owner has to settle: does the terms text become a **second body inside
-the DPA's existing row** (one combined "Beta Agreement", zero schema change), or a **second
-document kind in the same store** (`kind in ('dpa','terms')`, one additive migration)?
-
-**Recommendation: two document kinds. Do not combine the bodies.** Three reasons, the first of
-which is the one that decides it.
+The storage question this section once put to the owner: does the terms text become a **second
+body inside the DPA's existing row** (one combined "Beta Agreement", zero schema change), or a
+**second document kind in the same store** (`kind in ('dpa','terms')`, one additive migration)?
+**Ruled 2026-09-02 (裁-129): two document kinds.** The three reasons below are why, kept for the
+record — they are not open for re-litigation, only the build note that follows them still binds.
 
 1. **A consent and a contract must be separately withdrawable, and one body makes that
    impossible.** PDPA consent is withdrawable at any time; the DPA text already promises exactly

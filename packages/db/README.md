@@ -69,7 +69,7 @@ scripts/restore-full.mjs   full DR restore: roles-bootstrap -> restore -> ceremo
 scripts/dr-selftest.mjs    real dump+restore round-trip in a throwaway schema
 scripts/dr-verify.mjs      full-profile restore verification battery (source<->target)
 scripts/dr-verify-util.mjs · dr-verify-checks.mjs   the battery's helpers + §4 probes
-deploy/roles-bootstrap.sql idempotent recreation of 18 schema-lane roles + the Storage role (DR step 1; FRESH-TARGET-ONLY)
+deploy/roles-bootstrap.sql idempotent recreation of the clara-custom roles it enumerates — 19 at `265a8ee7` (11 group + 7 login shells + clara_storage_docs, #493 added clara_auth_wall/clara_auth_wall_login); count the file, not this line (DR step 1; FRESH-TARGET-ONLY)
 deploy/read-logins-ceremony.sql  runtime + read-pool LOGIN ceremony (post-restore; mirrors write-login)
 deploy/acl-baseline.sql    HIGH-10 public-schema ACL baseline (ceremony; post-restore re-apply)
 tests/pipeline.test.mjs    migrate -> seed -> assert (node --test)
@@ -145,6 +145,19 @@ just loudly, rather than silently).
   `workflow`, `graphile_worker`, or any Supabase-managed schema. (On the shared
   project the Slice-0 spike still holds a live parked run in `workflow` /
   `graphile_worker` — this is why the pipeline is schema-scoped.)
+- **The filename filter has two branches, and only one of them is loud.** A filename with **no
+  leading digit** (the `UNNUMBERED_*.sql` an author lands with, before 裁-108's number claim at
+  merge prep) is **silently skipped** — `MIGRATION_LIKE = /^\d+.*\.sql$/` (`scripts/migrate.mjs:59`),
+  `if (!MIGRATION_LIKE.test(file)) continue;` (`:262`), no log line, and the run summary at `:524`
+  (`migrate: N new migration(s) applied · M total`) counts only files that passed the filter — so
+  a green `pnpm db:migrate` proves nothing about a file still named `UNNUMBERED_*.sql`. A
+  leading-digit name that is **not** fixed-width `NNNN_name.sql` is the other branch and throws
+  loudly instead (`:263-265`). No CI job covers the silent branch today. **The convention is
+  live whenever an open PR carries an `UNNUMBERED_*.sql` file — count it on the PRs' branches
+  (`git ls-tree origin/<branch> packages/db/migrations/ | grep UNNUMBERED`), never this line.**
+  At `0b8bb58c` (2026-09-03) that was **#517 alone** — #509 and #512 had already merged with
+  claimed numbers (0161, 0162). Cite 裁-108 ("the number claim at merge prep ARMS the tests")
+  whenever you review one.
 
 ## Deploy contract (writer-body migrations) — rule D1
 
