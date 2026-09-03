@@ -59,6 +59,67 @@ export function turnLimitPayload(message: string | undefined): {
   };
 }
 
+/**
+ * FS-4 C-5 item 12 — THE TURN ROUTE'S COMPLETE REFUSAL MAP, censused rather than guessed.
+ *
+ * THE DEFECT (found by the chat-parity lane on PR #508). This route mapped CLR14, CLR13, 23505,
+ * CLR11 and CLR04 and nothing else, so a six-attachment turn or a malformed `parts` array
+ * reached the caller as a bare `{"error":"internal"}` 500 — an operator-visible incident for
+ * what is an ordinary client mistake, and a client with no way to tell "fix your request" from
+ * "the server is broken".
+ *
+ * THE CENSUS IS OF THE LIVE CATALOG, NOT OF MIGRATION TEXT, AND IT INCLUDES THE TRIGGERS. A
+ * prosrc call-graph walk over `clara.begin_chat_turn` finds NO called clara function — it names
+ * only `agent_tasks` and `chat_messages` — which would have made this look like a five-code
+ * surface. The refusals that actually bite live in the TRIGGERS on those two relations, which no
+ * call-graph walk can see. Measured on a 0161 rig, the reachable set is:
+ *
+ *   CLR04  begin_chat_turn — author is not a live active member of the session firm
+ *   CLR08  _tf_append_only / _tf_no_truncate / _tf_agent_task_update — immutability refusals
+ *   CLR10  begin_chat_turn (turn_key required) · _tf_agent_task_insert (11 shape refusals) ·
+ *          _tf_chat_message_insert (3) · _tf_validate_chat_attachments (parts not an array;
+ *          "a chat turn may contain at most five attachments")  ← the reported defect
+ *   CLR11  begin_chat_turn (unknown session / session not found) ·
+ *          _tf_validate_chat_attachments (attachment is not an adopted intake for this author
+ *          and firm; attachment admission context is invalid)
+ *   CLR13  begin_chat_turn (a turn is already live) · _tf_agent_task_update (illegal transition)
+ *   CLR14  begin_chat_turn (concurrent compute-run cap)
+ *
+ * plus PostgreSQL's own `23505` on a unique violation. `tests/c5-chat-clr-census-db.test.mjs`
+ * re-runs that census against the live catalog and fails if any reachable code is missing from
+ * the map below — so a future migration that adds a code cannot slip through as a 500.
+ *
+ * NO CATCH-ALL, AND CLR08 IS MAPPED HONESTLY. CLR08 is raised only by UPDATE/DELETE/TRUNCATE
+ * triggers, and this route's admission path only INSERTs, so it is NOT reachable here today.
+ * It is mapped anyway, to 409, as a fail-safe for a future writer — and this sentence is the
+ * whole of the claim: the mapping exists, the reachability does not (裁-112).
+ *
+ * Exported so a cell drives THIS function rather than a copy of its predicate (裁-107).
+ */
+export function turnErrorStatus(code: string | undefined): number | null {
+  switch (code) {
+    case "CLR14":
+      return 429; // the concurrent compute-run floor
+    case "CLR13":
+    case "23505":
+    case "CLR08":
+      return 409; // a live turn, a duplicate key, or an immutability refusal
+    case "CLR11":
+      return 404; // unknown / foreign-private session, or an attachment that is not the author's
+    case "CLR04":
+      return 403;
+    case "CLR10":
+      return 400; // a malformed request: no turn_key, bad parts shape, >5 attachments
+    default:
+      return null;
+  }
+}
+
+/** Every CLR code `turnErrorStatus` claims to map. The census cell compares this with the live
+ *  catalog's reachable set in BOTH directions — a code here that nothing raises is as much a lie
+ *  as a raised code that is missing. */
+export const TURN_MAPPED_CODES = Object.freeze(["CLR04", "CLR08", "CLR10", "CLR11", "CLR13", "CLR14", "23505"]);
+
 function sendAuthError(res: express.Response, err: unknown): boolean {
   if (err instanceof AuthError) {
     res.status(err.status).json({ error: err.code, message: err.status === 404 ? "not found" : err.message });
@@ -186,21 +247,34 @@ export function chatRoutes(): express.Router {
     } catch (err) {
       if (sendAuthError(res, err)) return;
       const code = (err as { code?: string })?.code;
-      if (code === "CLR14") {
+      const status = turnErrorStatus(code);
+      if (status === 429) {
         res.status(429).json(turnLimitPayload((err as Error).message));
         return;
       }
-      if (code === "CLR13" || code === "23505") {
+      if (status === 409) {
         res.status(409).json({ error: "conflict", message: "this session already has a turn in progress" });
         return;
       }
-      if (code === "CLR11") {
-        // unknown / foreign-private session — indistinguishable not-found.
+      if (status === 404) {
+        // unknown / foreign-private session, or an attachment that is not this author's
+        // adopted intake — indistinguishable not-found either way (§3.2's masked-view law).
         res.status(404).json({ error: "not_found", message: "not found" });
         return;
       }
-      if (code === "CLR04") {
+      if (status === 403) {
         res.status(403).json({ error: "forbidden", message: "not permitted" });
+        return;
+      }
+      if (status === 400) {
+        // CLR10 — the request itself is wrong (no turn_key, a bad parts shape, more than five
+        // attachments). The DOOR'S OWN MESSAGE is surfaced: it already names the live limit
+        // ("a chat turn may contain at most five attachments") and it is not an existence
+        // oracle — every CLR10 in the censused set describes the caller's own payload, never
+        // whether some other tenant's object exists. Still logged, because a client sending
+        // malformed turns is worth seeing.
+        console.error("[clara-runtime] turn refused (CLR10):", (err as Error)?.message ?? err);
+        res.status(400).json({ error: "bad_request", message: (err as Error)?.message ?? "bad request" });
         return;
       }
       console.error("[clara-runtime] turn error:", (err as Error)?.message ?? err);
