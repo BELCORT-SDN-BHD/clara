@@ -42,7 +42,9 @@ Postgres (fresh Supabase project)  ── THE SINGLE SOURCE OF TRUTH
   ▲
 Agent runtime (Clara) on Fly  ── long-lived Node service; durable runs/tasks/checkpoints; holder of the standing service credentials
   (裁-114: no service credential ever reaches a browser; apps/web's SERVER-ONLY Route Handlers are a second, browser-isolated holder
-   where a flow requires it — the invite mailer's service_role use, FS-4's Stripe webhook signing secret)
+   where a flow requires it — the invite mailer's `SUPABASE_SERVICE_ROLE_KEY` (`apps/web/lib/members/invite-mail.ts`) and
+   FS-4's `STRIPE_SECRET_KEY` for the checkout route, which needs a `clara_authenticated` session no runtime identity can
+   take; `STRIPE_WEBHOOK_SECRET` is RUNTIME env (`checkout-gate-design-part3.md:181`, C-5/#511))
 ```
 
 - **Fresh Supabase project** + the **`packages/db` migration rig** for day-to-day dev — migrations are validated on a throwaway Postgres (CI's `postgres:17` service, or a scratch schema), never hand-applied to a live project. *(A local Supabase CLI stack was the original intent; it needs Docker, which is unavailable here, so the rig is the as-built target — see `PROGRESS.md`.)* Every schema change is a versioned migration in the repo from day one; seed scripts produce synthetic data. The old project stays frozen (read-only) until Phase-5 decommission sign-off.
