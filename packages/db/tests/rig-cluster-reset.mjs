@@ -41,16 +41,117 @@
 // also matches that pattern; it is minted only by `deploy/storage-provision.sql` /
 // `deploy/roles-bootstrap.sql` (a DR/deploy ceremony this pipeline never runs) and NO
 // migration ever recreates it — a wildcard sweep would delete it permanently on any
-// cluster where storage was ever provisioned. The roster below is exactly the roles
-// the CURRENT migration chain mints, verified by reading each file (never a bare
-// `create role` grep on trust): 6 (0002) + 2 (0006) + 1 (0009) + 2 (0121) + 1 (0126) +
-// 2 (0131) + 2 (0160) = 16, matching the live census `0154_binding_proposal_pr_1.sql`
-// asserts (14, before 0160's two) and `deploy/roles-bootstrap.sql`'s own inventory.
-// A migration that mints a NEW clara-role in the future must add it here in the same
-// PR (roles-bootstrap.sql already carries this "same-commit twin" convention).
+// cluster where storage was ever provisioned.
+//
+// D6 CLASS (sweep run 33707608346, 2026-09-03): a HAND-COPIED roster is a closed
+// enumeration that rots the moment a migration mints a new role. Migration
+// 0163_checkout_gate_c3_folded_door.sql minted clara_auth_wall/_login and added them
+// to `deploy/roles-bootstrap.sql`'s own inventory (the "same-commit twin" convention
+// that file's header already names) — but CHAIN_MINTED_ROLES below went unedited. The
+// sweep only WARNED about the two orphans instead of refusing, so they survived every
+// between-step cleanup and poisoned the NEXT from-scratch migrate's 0154 role census
+// (14 -> 16) one step later, far from the actual cause. Two fixes, both below: (1) the
+// MEMBERSHIP of this roster is now cross-checked against `deploy/roles-bootstrap.sql`
+// — the single source of truth for "which roles exist" — at MODULE LOAD, so a future
+// same drift throws immediately and loudly instead of warning once and refusing at
+// 0154; (2) `sweepChainMintedRoles()` now FAILS CLOSED on any clara%-prefixed role it
+// finds on the live cluster that neither this roster nor roles-bootstrap.sql
+// recognises (a role created by hand, or by a migration that skipped BOTH files).
+//
+// WHY THE ORDER STAYS A HAND-MAINTAINED LITERAL (not also derived from the migrations
+// themselves). The prefix check below (`isValidPrefix`) needs a true MIGRATION-ORDER
+// sequence, and the migrations mint these roles through TWO different idioms: six
+// files (0009, 0121 x2, 0126, 0160 x2, 0163 x2) carry a literal
+// `create role clara_x nologin [inherit];` DDL line naming the role directly, but
+// three (0002, 0006, 0131) mint theirs through a `foreach r in array array[...] loop`
+// whose `execute format('create role %I nologin', r)` never spells the name at the
+// call site — the names live in a SEPARATE array literal a few lines above. A regex
+// parser robust to both idioms (and to comments that use the phrase "create role"
+// without meaning it — 0126 has three) is real parsing work for a property this file
+// can verify structurally instead: see the drift guard immediately below, which
+// proves this literal's MEMBERSHIP matches deploy/roles-bootstrap.sql exactly, and
+// `tests/chain-minted-roles-drift-guard.test.mjs`, which independently re-derives the
+// full role set from every migration file's own text (handling both idioms) and
+// proves membership there too. A future stale ORDER (not membership) fails differently
+// but no less loudly: `isValidPrefix` throws "NOT a migration-order prefix" rather than
+// silently accepting an out-of-order cluster state.
+//
+// A migration that mints a NEW clara-role must add it to `deploy/roles-bootstrap.sql`'s
+// `grp`/`logins` arrays AND to CHAIN_MINTED_ROLES below (in migration order) IN THE SAME
+// COMMIT. The drift guard below enforces the first half of that; nothing enforces the
+// commit-atomicity except review — the guard only fires once BOTH edits should already
+// have landed and one didn't.
 
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { makeClient, targetLabel, isMain } from "../lib/pg.mjs";
 import { assertDestructiveAllowed, EPHEMERAL_DB } from "../lib/guard.mjs";
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+export const ROLES_BOOTSTRAP_FILE = join(HERE, "..", "deploy", "roles-bootstrap.sql");
+
+/**
+ * Parse a `varName text[] := array[ 'a', 'b', ... ];` declaration out of
+ * roles-bootstrap.sql's own text — never a live psql read (this module has no
+ * connection yet), and never re-typed by hand: the FILE is the single source of
+ * truth for "which roles a fresh-target DR restore recreates" (its own header),
+ * so reading IT is what keeps this roster from being a second, silently-drifting
+ * copy of that inventory.
+ * @param {string} sql
+ * @param {string} varName
+ * @returns {string[]}
+ */
+function extractRoleArray(sql, varName) {
+  const re = new RegExp(`\\b${varName}\\s+text\\[\\]\\s*:=\\s*array\\s*\\[([\\s\\S]*?)\\]\\s*;`, "m");
+  const m = re.exec(sql);
+  if (!m) {
+    throw new Error(
+      `rig-cluster-reset: could not find "${varName} text[] := array[...]" in ${ROLES_BOOTSTRAP_FILE} — its shape changed; update this parser (or restore the file's shape).`,
+    );
+  }
+  const names = [...m[1].matchAll(/'(clara_[a-z0-9_]+)'/g)].map((x) => x[1]);
+  if (names.length === 0) {
+    throw new Error(`rig-cluster-reset: the "${varName}" array in ${ROLES_BOOTSTRAP_FILE} parsed to zero role names`);
+  }
+  return names;
+}
+
+/**
+ * The Storage JWT role (`deploy/storage-provision.sql` / this file's own storage
+ * do-block) — created by roles-bootstrap.sql for a fresh-target DR restore, but
+ * NEVER by a migration, and NEVER swept (see the header comment above). Parsed
+ * from its own literal `create role clara_x nologin noinherit;` line — the ONLY
+ * such line in the file (every grp/logins role is created via `execute
+ * format(...)`, never a bare literal `create role`) — so it is RECOGNISED
+ * (never flagged as drift) without joining the droppable roster.
+ * @param {string} sql
+ * @returns {string}
+ */
+function extractStorageRole(sql) {
+  const m = /create role (clara_[a-z0-9_]+) nologin noinherit;/.exec(sql);
+  if (!m) {
+    throw new Error(
+      `rig-cluster-reset: could not find the storage role's "create role ... noinherit" line in ${ROLES_BOOTSTRAP_FILE}`,
+    );
+  }
+  return m[1];
+}
+
+const ROLES_BOOTSTRAP_SQL = readFileSync(ROLES_BOOTSTRAP_FILE, "utf8");
+const BOOTSTRAP_GROUP_ROLES = extractRoleArray(ROLES_BOOTSTRAP_SQL, "grp");
+const BOOTSTRAP_LOGIN_ROLES = extractRoleArray(ROLES_BOOTSTRAP_SQL, "logins");
+
+/** The Storage JWT role — recognised, but never chain-minted and never swept (see above). */
+export const STORAGE_ROLE = extractStorageRole(ROLES_BOOTSTRAP_SQL);
+
+/**
+ * The DERIVED set of chain-minted role names — read from `deploy/roles-bootstrap.sql`
+ * at module load, never hand-copied. This is that file's own `grp` + `logins`
+ * inventory (the storage role is excluded — see `extractStorageRole`'s docstring).
+ * Exported so a test can re-derive it without re-implementing this parser.
+ */
+export const BOOTSTRAP_ROSTER = Object.freeze([...BOOTSTRAP_GROUP_ROLES, ...BOOTSTRAP_LOGIN_ROLES]);
 
 export const CHAIN_MINTED_ROLES = Object.freeze([
   // 0002_foundation.sql — the six group roles
@@ -76,12 +177,39 @@ export const CHAIN_MINTED_ROLES = Object.freeze([
   // 0160_checkout_gate_c2_stripe_events.sql — the Stripe webhook sweep lane
   "clara_stripe_webhook",
   "clara_stripe_webhook_login",
+  // 0163_checkout_gate_c3_folded_door.sql — the confirmation-attempt wall (the D6 fix)
+  "clara_auth_wall",
+  "clara_auth_wall_login",
 ]);
 
 /** A defense-in-depth check on the literal roster's own shape (never trust a hand-typed list blindly). */
 for (const name of CHAIN_MINTED_ROLES) {
   if (!/^clara_[a-z0-9_]+$/.test(name)) {
     throw new Error(`rig-cluster-reset: CHAIN_MINTED_ROLES contains a malformed entry: ${JSON.stringify(name)}`);
+  }
+}
+
+/**
+ * THE DRIFT GUARD (D6 class — see the header comment above): CHAIN_MINTED_ROLES'
+ * MEMBERSHIP must exactly match deploy/roles-bootstrap.sql's own BOOTSTRAP_ROSTER, in
+ * both directions, at MODULE LOAD — before any test, any drill, any CLI invocation
+ * runs. This is what turns "a migration minted a role and roles-bootstrap.sql got it
+ * but this file didn't" from a silent warning (the defect that just cost a cryptic
+ * 0154 refusal one step removed from its cause) into an immediate, named, load-time
+ * throw.
+ */
+for (const name of BOOTSTRAP_ROSTER) {
+  if (!CHAIN_MINTED_ROLES.includes(name)) {
+    throw new Error(
+      `rig-cluster-reset: deploy/roles-bootstrap.sql mints "${name}" but CHAIN_MINTED_ROLES in this file (packages/db/tests/rig-cluster-reset.mjs) does not list it. Add it there, in migration order, in the SAME commit that added it to roles-bootstrap.sql.`,
+    );
+  }
+}
+for (const name of CHAIN_MINTED_ROLES) {
+  if (!BOOTSTRAP_ROSTER.includes(name)) {
+    throw new Error(
+      `rig-cluster-reset: CHAIN_MINTED_ROLES lists "${name}" but deploy/roles-bootstrap.sql's grp/logins arrays do not. Either roles-bootstrap.sql is missing its own "same-commit twin" entry, or this literal has a stale or typo'd entry — fix whichever is wrong.`,
+    );
   }
 }
 
@@ -129,18 +257,36 @@ export async function sweepChainMintedRoles({ log = () => {} } = {}) {
   const client = makeClient();
   await client.connect();
   try {
-    // Purely informational (review-518-r2, §2c's cosmetic note): every `clara`-prefixed
-    // role NOT in the literal roster — e.g. `clara_storage_docs` — is never selected,
-    // never dropped, and previously never mentioned either. Name it in the log so an
-    // operator reading the cleanup output sees it was deliberately left alone, not
-    // silently missed. This query's result plays NO part in what gets dropped below.
+    // Every `clara`-prefixed role NOT in the literal roster is examined against
+    // STORAGE_ROLE (the one deliberate, recognised exclusion — see its own docstring
+    // above) before deciding what to do with it. `clara_storage_docs` is never
+    // selected, never dropped, and its presence is purely informational: name it in
+    // the log so an operator reading the cleanup output sees it was deliberately left
+    // alone, not silently missed.
+    //
+    // ANYTHING ELSE unrecognised FAILS CLOSED (D6 class, sweep run 33707608346): this
+    // clause used to log-and-continue for every non-roster role, which is exactly how
+    // clara_auth_wall/_login survived every cleanup after 0163 minted them without a
+    // CHAIN_MINTED_ROLES update — the failure then surfaced one step later, at 0154's
+    // absolute role census, far from its actual cause. The module-load drift guard
+    // above already makes "roles-bootstrap.sql and this roster disagree" impossible to
+    // reach this far — so a role that reaches this branch and is NOT the storage role
+    // exists on the LIVE CLUSTER without being declared in either file: hand-created,
+    // or minted by a migration that skipped BOTH same-commit twins. That is the one
+    // case this sweep must never silently paper over.
     const allClaraPrefixed = await client.query("select rolname from pg_roles where rolname like 'clara%'");
     const unrecognized = allClaraPrefixed.rows.map((r) => r.rolname).filter((n) => !CHAIN_MINTED_ROLES.includes(n));
-    if (unrecognized.length) {
+    if (unrecognized.includes(STORAGE_ROLE)) {
       log(
-        `role sweep: leaving ${unrecognized.length} unrecognized clara%-prefixed role(s) untouched (not in CHAIN_MINTED_ROLES): ${unrecognized
+        `role sweep: leaving the storage role (${STORAGE_ROLE}) untouched — minted only by deploy/storage-provision.sql / this file's storage do-block, never by a migration, never swept.`,
+      );
+    }
+    const trulyUnrecognized = unrecognized.filter((n) => n !== STORAGE_ROLE);
+    if (trulyUnrecognized.length) {
+      throw new RoleSweepRefused(
+        `sweepChainMintedRoles refused: found ${trulyUnrecognized.length} clara%-prefixed role(s) on ${targetLabel()} that neither CHAIN_MINTED_ROLES nor deploy/roles-bootstrap.sql recognises: ${trulyUnrecognized
           .sort()
-          .join(", ")}`,
+          .join(", ")}. A role minted by a migration must join deploy/roles-bootstrap.sql's grp/logins arrays AND CHAIN_MINTED_ROLES in packages/db/tests/rig-cluster-reset.mjs in the SAME commit. Update both files (or drop this role by hand if it should not exist), then retry.`,
       );
     }
 
