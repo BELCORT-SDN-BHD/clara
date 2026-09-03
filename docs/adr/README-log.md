@@ -227,3 +227,49 @@ re-reading find?"
 > Split-trust corollary now reads "example corrected by 裁-142" and names `STRIPE_SECRET_KEY`, and
 > ARCHITECTURE §1 names `SUPABASE_SERVICE_ROLE_KEY` and `STRIPE_SECRET_KEY` while marking
 > `STRIPE_WEBHOOK_SECRET` as RUNTIME env. This minute records the missing row, not a new decision.
+
+## 2026-09-03 — 裁-146: Supabase Auth's SMTP is pointed at Resend, and "Mail" becomes a launch gate
+
+> **裁-146** (owner, ≈15:51 MYT by the shell clock, on B5 of the same §9 sitting that produced
+> 裁-143/144/145 — *"B5照建议"*): the harness now states **who sends what**. **Signup confirmation and
+> password reset** are sent by **Supabase Auth's own mailer over CUSTOM SMTP pointed at Resend** —
+> host smtp.resend.com, username the literal string `resend`, password a Resend API key the owner
+> enters at Authentication → SMTP Settings or through the Management API,
+> PATCH /v1/projects/{ref}/config/auth, with his personal access token at FS-11; never in the repo,
+> never printed. **Invitations** are sent by the **Resend API from the server-only invite route**. The
+> **sender** is a no-reply mailbox on **mail.clarabook.com** — read out of the owner's Resend
+> dashboard on 2026-09-03, where it is the ONE entry and its status is Verified — which is also the
+> domain `INVITE_MAIL_FROM` must carry, so the estate has ONE verified sending identity. The repo
+> pins no domain (that variable ships blank in `apps/web/.env.example`), and the sending subdomain is
+> deliberately not the app origin app.clarabook.com.
+> **The premise, from the official auth-smtp guide (re-read 2026-09-03 via Context7):** the DEFAULT
+> Supabase mailer refuses every address outside the project's organisation team (*Email address not
+> authorized*), sends **2 messages per hour**, carries **no SLA**, and is documented as "not meant for
+> production". The failure mode is silent from the app's side — `supabase.auth.signUp` resolves
+> normally and the UI paints "check your email" — so it cannot be found by testing with the team's own
+> mailboxes, which is exactly what a default-mailer project can deliver to.
+> **The repo half, measured on `d4881052`:** the confirmation mail is triggered by
+> `supabase.auth.signUp` at `apps/web/components/entry/signup-account-form.tsx:167`; password reset by
+> `resetPasswordForEmail` at `apps/web/components/entry/password-recovery-form.tsx:41`; invitations by
+> `apps/web/app/api/invite/route.ts` through `apps/web/lib/members/invite-mail.ts`. **This CORROBORATES a point of
+> fact in the 裁-145 minute above** rather than correcting it: that minute first named
+> `supabase.auth.resend` as the confirmation path, and #535's own review fold has since corrected it
+> in all three of its carriers (measured on that PR's head `303f8586`), so in either merge order
+> nothing is left to correct. No live code calls resend — `requestConfirmationResend`
+> (`apps/web/lib/registration/confirmation-resend.ts:52`) returns `{kind:"unavailable"}`
+> unconditionally; `git grep` finds the string in three files under `apps/` (two modules plus a
+> README line) and seven repo-wide, the rest being documents. 裁-145's ruling and its conclusion were
+> never in question.
+> **The gate, which is the operative half:** Wave-G's "Mail" line certifies **only after a real signup
+> confirmation is sent to and received at a NON-team address through the custom SMTP** — not on a
+> settings screenshot, and not on a message delivered to a team address, which is what the default
+> mailer would also have done. The owner act is placed BEFORE the walk in
+> `docs/ops/wave-g-setup-checklist.md`, and it has two steps, not one: configure the SMTP, then raise
+> the auth mail rate limit, which Supabase sets to **30 messages/hour** the moment custom SMTP is
+> saved (the same guide). From there the delivery cap is the **Resend plan's**, never Supabase's
+> 2/hour.
+> Recorded per 裁-140 (a §15 row plus this dated line, no new ADR). The ledger entry in
+> `docs/plan/active/mohe-grill-rulings-2026-09-03.md` — the NINTH ledger, opened at the `-09-02-pm`
+> file's 500-line ceiling — is the source of truth and governs on any divergence. **裁-102 is NOT
+> closed by this**: the server-side wall on the signup send path remains unbuilt, and
+> `docs/plan/active/security-pass-2026-09-02.md` item 6 says so in its re-cut form.

@@ -562,10 +562,19 @@ FS-10 acceptance line itself; 5–10 are what this pass adds.
    does **not** prove the absence of `public`-schema reach — measured on a migrations-only rig,
    `clara_auth_wall` still holds `public` USAGE. The baseline (widened to eleven confined roles by
    this PR) is what revokes it.
-6. [ ] **`/signup`'s `supabase.auth.signUp` send path is walled server-side**, or the Supabase
-   project's own email rate limits are configured and accepted in writing as the wall. Today the
-   browser calls Supabase directly with a typed address and no wall of ours. **(裁-102, still
-   open.)**
+6. [ ] **The /signup page's `supabase.auth.signUp` send path is walled server-side**, or the
+   Supabase project's own email rate limits are configured and accepted in writing as the wall.
+   Today the browser calls Supabase directly with a typed address and no wall of ours. **(裁-102,
+   still open — this ruling does not close it.)** **Re-cut 2026-09-03 by 裁-146:** the second
+   branch used to read as though "Supabase's own mail quota" were a standing arrangement one could
+   launch behind. It is not — the DEFAULT mailer delivers only to the project's organisation-team
+   addresses at 2 messages/hour with no SLA (the official auth-smtp guide). Under 裁-146 the project
+   runs **CUSTOM SMTP pointed at Resend**, so the quota that branch means is the **Resend plan's**,
+   with Supabase's own auth rate limit in front of it — 30 messages/hour on enabling custom SMTP,
+   raised on the Rate Limits page. Both knobs are named in the Wave-G Mail step
+   (`docs/ops/wave-g-setup-checklist.md`), and the standing description of who sends what is
+   `docs/ARCHITECTURE.md` §1a. Accepting the rate limits as the wall therefore means accepting
+   THOSE two numbers in writing, not the default mailer's.
 7. [ ] **A web PR has repointed the DPA read at `get_current_dpa_document()`** and the paid walk
    has been completed end to end at least once in TEST mode. Otherwise the journey dead-ends at
    the DPA step.

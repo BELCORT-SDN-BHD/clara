@@ -68,6 +68,42 @@ the C-2/C-3 migrations; the design packet is `docs/plan/active/checkout-gate-des
 owner-role-only policies, SECURITY DEFINER doors. The webhook's principal is its own
 NOLOGIN + `_login` role pair granted EXECUTE on exactly its two functions.
 
+**Mail — who sends what (裁-146, 2026-09-03).** Two senders, ONE provider. **Signup confirmation and
+password reset are sent by Supabase Auth's own mailer, over CUSTOM SMTP pointed at Resend** — host
+smtp.resend.com, username the literal string `resend`, password a Resend API key the owner enters in
+the dashboard (Authentication → SMTP Settings) or sets through the Management API
+(PATCH /v1/projects/{ref}/config/auth) with his personal access token; never in the repo, never
+printed. Custom SMTP is not optional: Supabase's **default** mailer delivers only to the project's
+organisation-team addresses (*Email address not authorized* for everyone else), at 2 messages/hour,
+with no SLA and explicitly "not meant for production" (the official auth-smtp guide) — so on the
+default mailer every real beta applicant's confirmation code silently goes nowhere while
+`supabase.auth.signUp` (`apps/web/components/entry/signup-account-form.tsx:167`, the call that
+triggers the mail) resolves normally. **Invitations are sent by the Resend API directly**, from the
+server-only invite route (`apps/web/app/api/invite/route.ts` → `apps/web/lib/members/courier.ts` →
+`apps/web/lib/members/invite-mail.ts`); on that arm Supabase sends nothing, the token being minted by
+`generateLink`. **Configured 2026-09-03 ≈16:08 MYT** — the owner enabled custom SMTP and read the
+form back (Enable custom SMTP ON, host smtp.resend.com, sender no-reply@mail.clarabook.com, sender
+name Clara); the port, username and password fields were below the fold and are not recorded as read.
+That is the ARRANGEMENT standing up, not the gate closing: Wave-G's "Mail" line still certifies only
+on a received message. **The sender** is **no-reply@mail.clarabook.com** — on the one domain
+verified in the Resend dashboard (owner's reading, 2026-09-03: exactly one domain, status Verified),
+a sending subdomain distinct from the app origin app.clarabook.com. The same address serves both
+senders, so the estate has ONE verified sending identity. It reaches the code only through the
+`INVITE_MAIL_FROM` environment variable, which `apps/web/.env.example` ships BLANK behind a
+placeholder — **the repo pins no domain**, so "both senders on mail.clarabook.com" is a deployment
+instruction here, never a measured repo fact. **Templates:** the *Confirm signup* template stays Supabase's six-digit
+code, `{{ .Token }}` with nothing to click (裁-92), because the confirmation card reads a numeric
+one-time code (`apps/web/components/entry/email-confirmation-card.tsx`); the *Reset password* template
+keeps a LINK, because that arm redirects to /auth/recover and spends a `?code=` through
+`exchangeCodeForSession` (`apps/web/app/(entry)/auth/recover/handler.ts`) — it has no code field.
+**Expiry:** the one Email OTP expiry setting is 60 minutes for both the confirmation code and the
+staff-invite token (裁-131), set only once C-5's attempt wall is live. **The cap** is the Resend
+plan's, never Supabase's 2/hour — with Supabase's own auth rate limit in front of it, which starts at
+30 messages/hour the moment custom SMTP is saved and is raised on the Rate Limits page as part of the
+same owner act. Wave-G's "Mail" line certifies only on a REAL confirmation received at a NON-team
+address (`docs/ops/wave-g-setup-checklist.md`); the standing ledger entry is
+`docs/plan/active/mohe-grill-rulings-2026-09-03.md`.
+
 ## 2. The event-driven accounting state layer (the North-Star spine)
 
 Fixes A-1..A-7 (no event layer, no context pack, no freshness). This is the biggest net-new subsystem.

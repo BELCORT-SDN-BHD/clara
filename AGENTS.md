@@ -132,9 +132,10 @@ opus-5 xhigh for builds where judgement, security or ambiguity dominate, and for
 Fable orchestrates.** Speed is the point — no capacity outages, no resume rounds. Inspect every
 result before accepting it. *Codex lane, for when it resumes — learned the hard way:* the
 `codex:rescue` companion queue is unreliable (it has stalled for hours at "starting") — prefer a
-direct `codex exec` via Bash, backgrounded with a file-watcher on the output. Ledger: `docs/plan/active/mohe-grill-rulings-2026-09-02-pm.md` (**newest** — 裁-132…141; the chain runs
-`-08-31` → `-09-01` → `-09-01-pm` → `-09-02` → `-09-02-pm`, the earlier files carrying the session
-state bridges, and each `-pm` file continuing its own day at that day's 500-line ceiling).
+direct `codex exec` via Bash, backgrounded with a file-watcher on the output. Ledger: `docs/plan/active/mohe-grill-rulings-2026-09-03.md` (**newest** — 裁-146…; the chain runs
+`-08-31` → `-09-01` → `-09-01-pm` → `-09-02` → `-09-02-pm` → `-09-03`, the earlier files carrying the
+session state bridges, and each file continuing at the previous one's 500-line ceiling —
+`docs/plan/active/mohe-grill-rulings-2026-09-02-pm.md` holds everything from 裁-132 up to this file).
 
 **Ground before you build.** On a new or compacted session, and before answering any
 architecture question or changing code: query the graph for structure (the

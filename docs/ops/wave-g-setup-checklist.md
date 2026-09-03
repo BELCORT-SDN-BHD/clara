@@ -4,16 +4,70 @@
 `docs/plan/active/mohe-grill-rulings-2026-08-30.md`). Every line below names the file or command
 that PROVES it — read this before the Wave-G factory reset + estate e2e, not after.*
 
-## Mail (Resend) — 裁-65
+## Mail (Resend) — 裁-65 / 裁-146
+
+*Who sends what, in one line (裁-146, 2026-09-03; the standing description is `docs/ARCHITECTURE.md`
+§1a): **signup confirmation + password reset** = Supabase Auth's own mailer over **custom SMTP pointed
+at Resend**; **invitations** = the Resend API from the server-only invite route. One provider, one
+verified sending domain, one no-reply sender.*
 
 - [ ] Resend account created, with a **verified sending domain** (not the shared test domain).
+      **Measured in the owner's Resend dashboard, 2026-09-03: exactly ONE domain, mail.clarabook.com,
+      status Verified** — a sending subdomain distinct from the app origin app.clarabook.com. The repo
+      pins no domain (`INVITE_MAIL_FROM` ships blank in `apps/web/.env.example`), so this line is what
+      fixes it.
 - [ ] The API key scope is `sending_access` **only** — domain-restricted to the verified domain.
 - [ ] **Message storage OFF** in the Resend dashboard (the invite link's `?ct=` bearer token sits
       in the request body; do not let Resend retain it).
 - [ ] Team log access **restricted** — the Logs API/dashboard is the same body-and-ingress
       exposure named at P4-4 round 3 (H1); narrow who can read it.
-- [ ] Proof: screenshot or export of the key's scope + domain restriction, and the storage/log
-      settings, attached to the Wave-G as-run.
+- [x] **OWNER ACT, BEFORE THE WALK — configure Supabase Auth's CUSTOM SMTP (裁-146). DONE
+      2026-09-03 ≈16:08 MYT** — the owner enabled it and read the form back (screenshot): **Enable
+      custom SMTP ON**, sender **no-reply@mail.clarabook.com**, sender name **Clara**, host
+      **smtp.resend.com**. **Read only that far:** the port, username and password fields sit below
+      the screenshot's fold and are NOT verified — check the username is the literal string `resend`
+      rather than a mailbox address before the walk. **This tick does NOT certify the section** —
+      the three boxes below are still open, and the last of them is the gate. Without custom SMTP
+      Supabase's default mailer delivers **only to the project's organisation-team addresses**
+      (*Email address not authorized* for everyone else), at **2 messages/hour**, with no SLA and
+      explicitly "not meant for production" (the official auth-smtp guide) — so every real applicant's
+      confirmation code goes nowhere while the app shows "check your email". Where it is set: the
+      dashboard (Authentication → SMTP Settings) or the Management API
+      (PATCH /v1/projects/{ref}/config/auth) with the owner's personal access token. **The full value
+      set — HOST, SENDER and SENDER NAME were read back on 2026-09-03; PORT, USERNAME and PASSWORD
+      were NOT (below the fold), so verify those three before the walk:** host smtp.resend.com,
+      port **587 — a TARGET VALUE, verify it** (Supabase's own auth-smtp example uses 587; 465 is the
+      implicit-TLS alternative, and this field is one of the three that were not read back),
+      **username the literal string
+      `resend`** — never a mailbox address, whatever the dashboard autofills — password **a Resend
+      API key entered by the owner**, never in the repo and never printed; **sender
+      no-reply@mail.clarabook.com**, sender name **Clara** — the invites' domain, measured in the
+      owner's Resend dashboard 2026-09-03 as the one Verified entry, and the same domain
+      `INVITE_MAIL_FROM` must carry, so both senders share ONE verified identity.
+      **Two template rules go with the SMTP change, and only one of them is a token:** the
+      *Confirm signup* template stays the six-digit CODE template — `{{ .Token }}` with nothing to
+      click (裁-92; the Signup-gate section below owns that box) — because the confirmation card reads
+      a numeric one-time code; the *Reset password* template stays a **LINK** template, UNCHANGED,
+      because that arm redirects to /auth/recover and spends a `?code=` there, so a bare token would
+      dead-end it. Its box is the pending FS-10 note, not a new one here (see the Signup-gate
+      section's own "do not double-file it here"), and /auth/recover must be in Auth → Redirect URLs —
+      already a Signup-gate line.
+- [ ] **Then raise the auth mail rate limit.** Saving custom SMTP applies an initial **30 messages
+      per hour** to the project's auth mail (the same official guide); set "emails sent per hour" on
+      Authentication → Rate Limits to the beta's expected signup volume. From here the delivery cap is
+      the **Resend plan's**, never Supabase's 2/hour.
+- [ ] Confirm the *Confirm signup* template still emits `{{ .Token }}` with nothing to click after
+      the SMTP change (the Signup-gate section below owns that line; 裁-92), and that the Email OTP
+      expiry is the 裁-131 value — 60 minutes, once C-5's attempt wall is live.
+- [ ] **CERTIFICATION — a launch gate, not a wording item (裁-146 point 3).** This section certifies
+      **only after a REAL signup confirmation is sent to and received at a NON-team address through
+      the custom SMTP** — an address that is not a member of the project's Supabase organisation —
+      with the six-digit code arriving within about a minute and verifying on the confirm page. A
+      settings screenshot does not certify this line; a message delivered to a team address does not
+      either, because that is exactly what the default mailer would also have done.
+- [ ] Proof: screenshot or export of the key's scope + domain restriction, the storage/log settings,
+      a Management API read of the SMTP configuration and the rate limit (values redacted), and the
+      received non-team confirmation message with its timestamp — all attached to the Wave-G as-run.
 
 ## Environment variables — 裁-65 / P4-4 round 3 item 79
 
