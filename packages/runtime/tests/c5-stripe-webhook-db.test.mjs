@@ -354,10 +354,14 @@ test("c5db.5 the ACCEPTANCE WALK — signed event to a minted firm, end to end",
   assert.equal(delivered.status, 200);
   assert.equal(delivered.json.recorded, true);
 
-  // The applier — called explicitly rather than waiting on the route's best-effort fire, so
-  // this cell measures the SWEEP (step 6, the real guarantee) and not a race with step 5.
-  const swept = await applyStripeEvents(100);
-  assert.ok(Number(swept.examined) >= 1, `the sweep examined nothing: ${JSON.stringify(swept)}`);
+  // The applier, called explicitly so the walk never depends on the route's best-effort fire
+  // having finished. Its COUNTERS are deliberately not asserted: the route's step 5 fires for
+  // exactly this event type, and when it wins it consumes the event, so this sweep examines 0
+  // because nothing is left to do. An empty sweep IS step 5's success case, and `examined >= 1`
+  // asserted that step 5 had LOST — a race on the scheduler, green here and red on a faster
+  // runner (CI 33709269430). The evidence is the payment row and consumed marker below, which
+  // are identical whichever path wrote them.
+  await applyStripeEvents(100);
 
   const payment = await rig.rootQuery(
     "select id,stripe_event_id,consumed_at from clara.firm_registration_payments where registration_id=$1",
