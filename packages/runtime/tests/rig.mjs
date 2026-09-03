@@ -37,6 +37,61 @@ export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // structural fix, not a second hardcoded string left to drift out of sync by hand.
 export const WAKE_ENGINE_TEST_PREFIX = "g1_test_";
 
+/**
+ * Claim `firm` as the estate's sole operator via uq_firms_one_operator (0133:274), waiting out
+ * any current holder rather than assuming there is none. Mirrors
+ * packages/db/tests/rig-helpers.mjs's export of the SAME name BY VALUE — a different package,
+ * no cross-package import, but the identical contract (opus review round on PR #501, the
+ * new-MEDIUM fix): the singleton has FOUR takers across three files and two packages
+ * (g1-wake-engine.test.mjs's before(), p4t2-fixtures.mjs's markOperator — both db-side, both
+ * routed through THEIR shared copy — and this cell) with no ordering guarantee under CI's
+ * concurrent `pnpm -r --if-present test`; a bare, unprotected take anywhere in that set was a
+ * chance to crash whichever OTHER taker was mid-critical-section with a raw, uncaught
+ * unique_violation instead of a bounded wait.
+ *
+ * Retries ONLY on uq_firms_one_operator's OWN violation, matched by NAME (`err.constraint`,
+ * MEASURED populated for this bare `CREATE UNIQUE INDEX ... WHERE` violation against a live rig
+ * — never assumed) rather than by `err.code` alone, so a genuinely different failure (a future
+ * second unique index, an audit trigger) is never silently retried as contention. A successful
+ * claim is confirmed by `rowCount === 1`, never merely "the UPDATE did not throw" — a vanished
+ * or mistyped firm id matches zero rows without raising anything either. Bounded: an exhausted
+ * wait throws loud, naming the current holder.
+ *
+ * ACCEPTED CONSEQUENCE, by design: a process that dies between claiming and releasing leaks the
+ * flag until something scoped to what IT claimed clears it, or the rig resets — no lease/expiry.
+ * The estate-wide clear this replaced (an earlier version of markOperator, PR #501 finding F1)
+ * would have silently RECLAIMED a leaked flag instead, which is worse: it could steal a
+ * DIFFERENT, live claimant's flag out from under it. This cannot persist on CI (a fresh
+ * container per job); on a reused local rig it can, and the fix is a manual
+ * `update clara.firms set is_operator=false where id='<the stuck id>'`, once.
+ *
+ * @param {string} firm
+ * @param {{timeoutMs?: number, pollMs?: number}} [opts]
+ */
+export async function claimOperatorFirm(firm, { timeoutMs = 90_000, pollMs = 250 } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    let result;
+    try {
+      result = await fx.rootQuery("update clara.firms set is_operator = true where id = $1", [firm]);
+    } catch (err) {
+      if (err.constraint !== "uq_firms_one_operator") throw err; // a genuine failure — surface it
+      if (Date.now() >= deadline) {
+        const holder = await fx.rootQuery("select id from clara.firms where is_operator");
+        throw new Error(
+          `claimOperatorFirm(${firm}): the rig still has an operator firm (id=${holder.rows[0]?.id ?? "unknown"}) after waiting ${timeoutMs}ms — this would otherwise collide with uq_firms_one_operator; a legitimate concurrent holder should have released it well within this window`,
+        );
+      }
+      await sleep(pollMs);
+      continue;
+    }
+    if (result.rowCount !== 1) {
+      throw new Error(`claimOperatorFirm(${firm}): UPDATE matched ${result.rowCount} row(s), not 1 — no such firm id, or it matched more than expected`);
+    }
+    return; // claimed — self-evidenced by rowCount, not merely "did not throw"
+  }
+}
+
 /** SKIP the whole file cleanly when 0006 is absent (probe once per process). */
 export async function runtimeReady() {
   const r = await fx.rootQuery(

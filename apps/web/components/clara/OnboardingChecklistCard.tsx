@@ -54,8 +54,11 @@ import {
   resolveOnboardingPlanItem,
 } from "@/lib/onboarding/api";
 import { isDoorRefusal } from "@/lib/doors";
+import { COA_CHART_APPLY_ITEM_KEY } from "@/lib/onboarding/coa";
+import { loadPlanRevisions, supersededResolutions, type PlanRevisionRow } from "@/lib/onboarding/resolution-history";
 import type { SessionTokenAccessor } from "@/lib/session";
 import type { OnboardingClientRow, OnboardingPlanItemRow, OnboardingPlanRow } from "@/lib/onboarding/types";
+import { ApplyStandardChartControl } from "./ApplyStandardChartControl";
 import { InterviewRunCard } from "./InterviewRunCard";
 import { OnboardingDoorDialog } from "./OnboardingDoorDialog";
 import { OnboardingItemRow } from "./OnboardingItemRow";
@@ -161,6 +164,16 @@ function ClientOnboardingCard({ clientId, session }: { clientId: string; session
   const [cancelReason, setCancelReason] = useState("");
   const [attestation, setAttestation] = useState("");
   const [interviewRunActive, setInterviewRunActive] = useState(false);
+  // 裁-27 — the revision trail, read LAZILY when an amend dialog opens. `null` is "not read
+  // yet" and is rendered as such; an empty array after a successful read is the different,
+  // positive fact "this answer has never been amended". A failed read stays `null` too, and
+  // the dialog's "still loading" line is the honest thing to say about a trail we do not
+  // have — it never claims there were no prior answers.
+  //
+  // The RAW snapshots are held once per plan and projected per item at render — one read
+  // covers every row's amend dialog, and the projection lives in one tested function rather
+  // than being re-derived per row.
+  const [planRevisions, setPlanRevisions] = useState<PlanRevisionRow[] | null>(null);
 
   if (!data) {
     return err ? <StateBanner tone="error" code={clr ? `${clr.code}${clr.reason ? ` · ${clr.reason}` : ""}` : undefined}>{err}</StateBanner> : <LoadingState>{t("loading")}</LoadingState>;
@@ -246,10 +259,35 @@ function ClientOnboardingCard({ clientId, session }: { clientId: string; session
               item={item}
               busy={busy}
               planOpen={planOpen}
+              priorResolutions={planRevisions === null ? null : supersededResolutions(planRevisions, item.item_key)}
+              onRequestHistory={() => {
+                if (planRevisions !== null) return;
+                void loadPlanRevisions(plan.id, { session })
+                  .then(setPlanRevisions)
+                  // Fail-quiet: the dialog's "still loading" line is the honest thing to say
+                  // about a trail we do not have. It never becomes "there were none".
+                  .catch(() => {});
+              }}
               onResolve={(resolution, onOk) =>
                 act(async () => {
                   await resolveOnboardingPlanItem(plan.id, item.item_key, resolution, { session });
+                  // The amend just appended a revision; the cached trail is now one behind.
+                  setPlanRevisions(null);
                 }, onOk)
+              }
+              extraControls={
+                // 裁-128 — the row the interview minted for the chart decision gets the door
+                // that decision implies. Keyed on the item_key the interview actually writes
+                // (`coa_chart_apply`, interview.v3.questions.ts:89), never on the question
+                // text, which is prose and can be re-worded by a later `_vN`.
+                item.item_key === COA_CHART_APPLY_ITEM_KEY ? (
+                  <ApplyStandardChartControl
+                    clientId={clientId}
+                    planOpen={planOpen}
+                    session={session}
+                    onApplied={reload}
+                  />
+                ) : null
               }
             />
           ))}

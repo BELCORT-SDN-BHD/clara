@@ -1,6 +1,8 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
+import { ensureRealFocus } from "./helpers";
+
 /**
  * P6-3 · THE BROWSER LEG (裁-86). Every claim below needs the three things the
  * unit harness does not have: real layout geometry, a real focus manager, and a
@@ -95,6 +97,12 @@ test("DS-02: one Tab reaches the skip link, and activating it moves focus past t
   // Tab is genuinely the first focusable element in DOM order, which is the
   // fact this test is about.
   await page.goto("/");
+  // Same fresh-page focus-grant race entry-faces-walk.spec.ts's keyboard-pass
+  // cells close (PR #510). `ensureRealFocus` does not click or programmatically
+  // focus any DOM node -- it only confirms the BROWSER itself has been granted
+  // input focus -- so it cannot disturb the "no click anywhere" precondition
+  // this test's own first-Tab-from-top-of-document claim depends on.
+  await ensureRealFocus(page);
   await page.keyboard.press("Tab");
 
   const skip = page.getByRole("link", { name: "Skip to main content" });

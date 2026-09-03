@@ -8,12 +8,30 @@ const WEB_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const read = (path: string): string => readFileSync(join(WEB_ROOT, path), "utf8");
 
 describe("裁-117 prototype-parity wiring", () => {
-  it("keys the rail thread view by altitude and selects the caller's own session", () => {
+  // P6-5 MOVED THE KEY, SO THIS PIN MOVES WITH IT — and it is a stronger pin now, not a
+  // relocated one. #507 keyed `<ClaraThreadView>` INSIDE `ClaraRail`, which fenced that one
+  // component; the structural boundary keys `<ClaraRail>` at `RailMount`, the single mount
+  // point for the whole rail subtree, so the composer, the attachment tray, the interview
+  // card and everything a later feature adds are inside the fence too. Same altitude key,
+  // one level up — pinning the OLD site would now pin a boundary that no longer exists and
+  // pass while the real one rotted.
+  //
+  // `claraThreadStore.reset(` is DELIBERATELY NO LONGER PINNED, and its absence is the
+  // point: that call deleted the outgoing thread's store entry on an altitude change, which
+  // is the one thing that could destroy a RUNNING turn's SSE state on a switch away and
+  // back. The wall it was standing in for is `visibleThreadForAltitude` (pinned below) plus
+  // the mount-level key — both structural, neither a delete. See useActiveThread.ts's own
+  // note. A pin asserting the call still exists would now be a pin AGAINST the fix.
+  it("keys the whole rail subtree by altitude and selects the caller's own session", () => {
+    const mount = read("components/clara/rail-mount.tsx");
     const rail = read("components/clara/ClaraRail.tsx");
     const active = read("lib/clara/useActiveThread.ts");
-    assert.match(rail, /<ClaraThreadView\s+key=\{clientId \?\? ["']firm["']\}/);
+    assert.match(mount, /<ClaraRail\s+key=\{clientId \?\? ["']firm["']\}/);
     assert.match(active, /created_by\s*===\s*callerSubject/);
-    assert.match(active, /claraThreadStore\.reset\(/);
+    // The altitude fence that keeps a resolution for one altitude off another's screen.
+    assert.match(active, /resolved\.altitude === altitude/);
+    // And the rail still hands the view its own altitude, so the fence has something to fence.
+    assert.match(rail, /useActiveThreadId\(auth, clientId\)/);
   });
 
   it("checks the addressed session before mounting a client full-screen thread", () => {
