@@ -122,8 +122,11 @@ async function runtimeFetch(path: string, token: string, init?: RequestInit): Pr
 
 /** The one shape a `redirect: "manual"` fetch can return that a status read cannot
  *  describe: an opaque-redirect response reports `status: 0`, so "failed (0)" would be
- *  the honest-looking wrong answer. Named here so both readers below say the same thing. */
-const REDIRECTED = "redirected (the session cookie is likely missing or expired)";
+ *  the honest-looking wrong answer. Named here so both readers below say the same thing —
+ *  and EXPORTED so `lib/clara/stream.ts`'s attach says it too rather than keeping a second
+ *  copy that drifts. The two lanes hit the identical 307 from the identical gate; a reader
+ *  who learns the phrase from one must recognise it from the other. */
+export const REDIRECTED = "redirected (the session cookie is likely missing or expired)";
 
 async function expectJson<T>(res: Response, what: string): Promise<T> {
   if (res.type === "opaqueredirect") throw new Error(`${what} failed: ${REDIRECTED}`);

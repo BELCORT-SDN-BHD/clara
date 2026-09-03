@@ -72,7 +72,10 @@ function watchChatWire(page: Page): { urls: string[]; streamContentType: () => s
   let streamContentType: string | null = null;
   page.on("request", (request) => {
     const path = new URL(request.url()).pathname;
-    if (/^\/api\/(runtime\/)?(chat|tasks)\//.test(path) || path === "/api/runtime/chat/sessions") urls.push(path);
+    // The optional `runtime/` group is deliberate: this collector must see the PRE-fix
+    // shape too, or a regression would collect nothing and the assertions below would
+    // fail on an empty list instead of on the wrong path.
+    if (/^\/api\/(runtime\/)?(chat|tasks)\//.test(path)) urls.push(path);
   });
   page.on("response", (response) => {
     if (new URL(response.url()).pathname.endsWith("/stream")) {

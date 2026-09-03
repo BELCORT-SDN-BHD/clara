@@ -128,13 +128,46 @@ test("a non-ok response throws with the status in the message", async () => {
   await assert.rejects(
     () =>
       runClaraTaskStream({
-            token: "tok",
+        token: "tok",
         taskId: "t1",
         signal: new AbortController().signal,
         fetchImpl: async () => new Response(null, { status: 404 }),
         onEvent: () => {},
       }),
     /stream attach failed \(404\)/,
+  );
+});
+
+test("an opaque-redirect attach is classified, never reported as status 0", async () => {
+  // `proxy.ts` gates `/api/…` and answers a 307 to /login on a missing cookie session;
+  // with `redirect: "manual"` the browser hands back an opaque-redirect response, whose
+  // `status` is 0. The generic throw would say "stream attach failed (0)" — a number
+  // describing nothing. This asserts the SAME phrase the JSON lane uses (`lib/clara/
+  // api.ts`'s exported `REDIRECTED`), because it is the same gate and the same 307.
+  //
+  // Neither field is settable through the constructor (0 is outside undici's legal
+  // status range and `type` has no setter), so both are defined onto the instance: this
+  // fixture is the browser's shape, not a Response you can build.
+  await assert.rejects(
+    () =>
+      runClaraTaskStream({
+        token: "tok",
+        taskId: "t1",
+        signal: new AbortController().signal,
+        fetchImpl: async () => {
+          const res = new Response(null, { status: 204 });
+          Object.defineProperty(res, "type", { value: "opaqueredirect" });
+          Object.defineProperty(res, "status", { value: 0 });
+          Object.defineProperty(res, "ok", { value: false });
+          return res;
+        },
+        onEvent: () => {},
+      }),
+    // Both halves: the phrase must be there AND the bare "(0)" must not — a message that
+    // said both would still be the unhelpful one.
+    (err) =>
+      /stream attach failed: redirected \(the session cookie is likely missing or expired\)/.test(err.message)
+      && !/\(0\)/.test(err.message),
   );
 });
 

@@ -28,6 +28,7 @@
 //      (and tests that want to prove the reattach loop end-to-end) never have to monkey-
 //      patch `globalThis.fetch`.
 
+import { REDIRECTED } from "./api";
 import type { ClaraPart } from "./api";
 
 // ---------------------------------------------------------------------------
@@ -242,14 +243,31 @@ export interface OpenTaskStreamOptions {
  *  the runtime route above (`/api/runtime/tasks/…` → `<runtime>/api/tasks/…`, route.ts:53
  *  — see `lib/clara/api.ts`'s header for the whole finding and the `/api/api` hazard).
  *  It streams by construction rather than by hope: the proxy returns
- *  `new Response(res.body, …)` (`route.ts:121`) with `content-type` and `cache-control`
- *  on its response allow-list (`:113-114`), so the runtime's `text/event-stream` and
- *  `no-cache, no-transform` (`packages/runtime/src/streamRoute.ts:47-53`) survive, and
- *  `signal: req.signal` (`:80`) carries the abort onward. The one header the outbound
- *  allow-list drops, `accept`, is not read by `streamRoute.ts` — it sets the SSE headers
- *  unconditionally. The remaining unknown is whether a Route Handler's streamed body
- *  survives OpenNext-on-Workers; nothing in this repo can answer that, and the FS-10
- *  preview walk (step S14) is the instrument that does.
+ *  `new Response(res.body, …)` (`route.ts:121`) — the body is passed through, never
+ *  buffered — and `signal: req.signal` (`:80`) carries the abort onward.
+ *
+ *  WHICH HEADERS ACTUALLY REACH THE BROWSER, measured there rather than reasoned from
+ *  the allow-list (an earlier version of this comment got the second one wrong):
+ *    - `content-type: text/event-stream` — the runtime sets it
+ *      (`packages/runtime/src/streamRoute.ts:49`), the proxy copies it (`route.ts:113-114`),
+ *      and it arrives intact. That is the one this reader depends on, and the
+ *      chat-parity walk asserts it off the real response.
+ *    - `cache-control` — NOT the runtime's `no-cache, no-transform`. The proxy copies
+ *      that value, and then this app's own auth floor overwrites it: every response
+ *      leaving `proxy.ts` gets `private, no-store` (`lib/supabase/response-state.ts:44`,
+ *      the `AUTH_RESPONSE_CACHE_CONTROL` constant at `lib/supabase/cookie-options.ts:69`).
+ *      So the browser sees `cache-control: private, no-store`. That is FINE, and not a
+ *      compromise: `no-store` is strictly stronger than `no-cache` for caching, and the
+ *      `no-transform` half is not load-bearing here — Cloudflare does not transform
+ *      `text/event-stream`. Recorded because a reader chasing a buffering bug would
+ *      otherwise look for a header that is not on the wire.
+ *    - `x-accel-buffering: no` (`streamRoute.ts:52`) is NOT on the proxy's response
+ *      allow-list and does not reach the browser. It is an nginx hint and means nothing
+ *      on workerd — do not add it to the allow-list to "fix" a buffering symptom.
+ *  The one header the OUTBOUND allow-list drops, `accept`, is not read by
+ *  `streamRoute.ts` — it sets the SSE headers unconditionally. The remaining unknown is
+ *  whether a Route Handler's streamed body survives OpenNext-on-Workers; nothing in this
+ *  repo can answer that, and the FS-10 preview walk (step S14) is the instrument that does.
  *
  *  `redirect: "manual"` for the reason `lib/clara/api.ts`'s `runtimeFetch` carries it,
  *  and it matters MOST here: an unauthenticated 307 to `/login`, followed, is a 200
@@ -263,6 +281,12 @@ export async function openTaskStream(opts: OpenTaskStreamOptions): Promise<Async
     redirect: "manual",
     signal: opts.signal,
   });
+  // BEFORE the `!res.ok` throw, and for the same reason `api.ts`'s `expectJson` checks it
+  // first: an opaque-redirect response reports `status: 0`, so the generic throw below
+  // would say "stream attach failed (0)" — a number that describes nothing and sends the
+  // next reader hunting for a runtime error that never happened. Same gate, same 307, so
+  // the same phrase, imported rather than re-typed.
+  if (res.type === "opaqueredirect") throw new Error(`stream attach failed: ${REDIRECTED}`);
   if (!res.ok || !res.body) throw new Error(`stream attach failed (${res.status})`);
   return readSseEvents(res.body);
 }
