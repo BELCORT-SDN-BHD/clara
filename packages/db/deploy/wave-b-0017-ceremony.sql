@@ -2,7 +2,18 @@
 -- migration — applied manually in the ceremony window per the runbook
 -- docs/ops/wave-b-ceremony-runbook.md, AFTER the atomic 0017 apply).
 --
--- Part A — serializable RPC pinning (settled dashboard plan F10). PostgREST honors a
+-- Part A — serializable RPC pinning (settled dashboard plan F10).
+--
+-- SUPERSEDED ON THE MIGRATE PATH (DB-A, 2026-09-04, CB-AE2E-004): this pin now rides a
+-- FORWARD MIGRATION, so any database that takes the chain already carries it and this Part is
+-- a NO-OP there -- `alter function ... set` is idempotent, so re-running it is harmless. It is
+-- kept, not deleted, because a database restored from a dump that predates that migration
+-- still needs it, and because the runbook's live probe (step 7) is still the right check.
+-- The standing DETECTOR is the absolute, target-only §4.11 cell in
+-- packages/db/scripts/dr-verify-checks-isolation.mjs, which FAILS -- never skips -- when
+-- either regprocedure lacks the pin.
+--
+-- PostgREST honors a
 -- function's proconfig default_transaction_isolation when opening the RPC transaction
 -- (postgrest docs references/transactions.md); both approval fns ASSERT serializable
 -- in-body, so without this pin every dashboard approval refuses not_serializable.

@@ -48,6 +48,18 @@
 -- plus a 'source' key naming the door that closed it, so the timeline reads identically
 -- whichever door did the closing and a reader can still tell which one that was.
 --
+-- THE LOCK ORDER ADDS NO NEW EDGE, which is why no lock-order census gains a row. This body
+-- already took clara.documents FOR UPDATE at 0123:1980 ("ADV-R4#6: locked -- serialized
+-- against the classifier writer"), and the block below then takes clara.document_filings FOR
+-- SHARE (through clara._active_document_filing) and clara.open_questions FOR UPDATE. Those
+-- last two, in that order, are exactly what clara.resolve_open_question already takes on a
+-- document-scoped question (0011:2023-2030) -- so the pair is a pre-existing edge in the
+-- estate and this verb now joins it rather than inventing one. No body was found that takes
+-- them in the reverse order (open_questions before document_filings), so no cycle is
+-- introduced. 0041's tail-13 census is a different instrument -- it proves ADVISORY-lock
+-- positioning around the fa-roles leaf, not row-lock ordering -- so it is not the home for
+-- this note and is left unmoved.
+--
 -- D1 WRITE-QUIESCE IS OWED. clara.set_document_kind IS an audited writer, and this file
 -- replaces its body. PostgreSQL runs an in-flight PL/pgSQL call to completion on the body it
 -- STARTED with, so a set_document_kind call that spans the deploy runs the OLD body and
@@ -122,10 +134,11 @@ set role clara_fn_owner;
 -- =====================================================================================
 -- S1 -- clara.set_document_kind.
 --
--- 0123:1949's body VERBATIM plus ONE block, placed immediately after the kind flip and
--- before the task retirement, and TWO keys on the returned jsonb. Every guard, every comment
--- and every other statement is unmoved, so a reviewer diffs two bodies rather than reading a
--- rewrite.
+-- 0123:1949's body VERBATIM plus, exactly: TWO declare variables (`q`, `v_resolved`), ONE
+-- block placed immediately after the kind flip and before the task retirement, ONE added key
+-- on the audit payload (`resolved_questions`) and TWO on the op result
+-- (`resolved_questions`, `resolved_question_count`). Every guard, every comment and every
+-- other statement is unmoved, so a reviewer diffs two bodies rather than reading a rewrite.
 -- =====================================================================================
 create or replace function clara.set_document_kind(p_document uuid, p_kind text, p_reason text, p_op_key text)
   returns jsonb
@@ -205,6 +218,19 @@ begin
               and oq.status='open' and oq.firm_id=c.firm
             order by oq.opened_at, oq.id
               for update loop
+    -- THE SAME PROVENANCE PREDICATE clara.resolve_open_question applies to a document-scoped
+    -- question (0011:2023-2025), called rather than re-derived: the (document, client) pair
+    -- must still carry a LIVE filing whose bytes are verified, and the call takes that
+    -- filing's `for share` lock. Without it this verb would record "answered" on a question
+    -- whose subject filing has since been retired -- a resolution about nothing.
+    --
+    -- IT RAISES CLR02 AND THE WHOLE CALL REFUSES, and that is the stated consequence rather
+    -- than an accident: a document whose filing was retired while its classification question
+    -- stayed open can no longer have its kind set until the filing is sorted out. The
+    -- alternative -- skipping the question quietly -- is H-22's original defect wearing a new
+    -- hat. An UNFILED document reaches no iteration at all (classify_document mints these
+    -- questions per active filing), so the ordinary human re-kind is untouched.
+    perform clara._active_document_filing(q.document_id, d.sha256, q.client_id, true);
     update clara.open_questions
        set status='resolved', resolved_by=c.actor, resolved_at=now(),
            resolution_text='Classified as '||p_kind||' — '||btrim(p_reason)
@@ -322,6 +348,11 @@ begin
     raise exception 'dba5 tail: the open_question.resolved event is absent or does not name its source door'
       using errcode = 'CLR10';
   end if;
+  -- THE PROVENANCE PREDICATE, called and not re-derived, with its lock argument true.
+  if position('clara._active_document_filing(q.document_id, d.sha256, q.client_id, true)' in v_src) = 0 then
+    raise exception 'dba5 tail: the resolution block does not apply clara._active_document_filing -- it would record an answer on a question whose filing may be retired'
+      using errcode = 'CLR10';
+  end if;
 
-  raise notice 'dba5 tail: OK -- clara.set_document_kind CoR''d from its 0123:1949 pre-image (sha-pinned in the prestate), still VOLATILE SECURITY DEFINER, search_path-pinned, clara_fn_owner-owned, executable by clara_authenticated and by NOBODY else (agent_ro, runtime and PUBLIC all refused). All five carried guards re-read from the INSTALLED body: the agent wall, the CLR28 consent wall, the live-bank-statement pin, the clara-classify-human:v1 extraction and the skipped_kind re-kind retirement. The new block resolves ONLY origin=''classification'' AND status=''open'' AND this firm''s rows, under FOR UPDATE, appends clara.resolve_open_question''s own open_question.resolved event with source=set_document_kind, and never dismisses. The resolved ids ride both the audit payload and the op result (resolved_questions / resolved_question_count), so a caller can see what the verb closed on its behalf. NO BACKFILL: questions left open by past calls are untouched, because retro-resolving them would assert an answer no human gave. No table in workflow/graphile_worker/spike touched. D1 WRITE-QUIESCE IS OWED -- this is an audited writer body replacement, one door, one window.';
+  raise notice 'dba5 tail: OK -- clara.set_document_kind CoR''d from its 0123:1949 pre-image (sha-pinned in the prestate), still VOLATILE SECURITY DEFINER, search_path-pinned, clara_fn_owner-owned, executable by clara_authenticated and by NOBODY else (agent_ro, runtime and PUBLIC all refused). All five carried guards re-read from the INSTALLED body: the agent wall, the CLR28 consent wall, the live-bank-statement pin, the clara-classify-human:v1 extraction and the skipped_kind re-kind retirement. The new block resolves ONLY origin=''classification'' AND status=''open'' AND this firm''s rows, under FOR UPDATE, appends clara.resolve_open_question''s own open_question.resolved event with source=set_document_kind, and never dismisses. It applies clara._active_document_filing(..., true) -- resolve_open_question''s OWN provenance predicate for a document-scoped question, called rather than re-derived -- so a question whose filing has been retired refuses CLR02 instead of being recorded as answered; the lock order documents(update) -> document_filings(share) -> open_questions(update) adds NO new edge, its last two being exactly the pair resolve_open_question already takes in that order. The resolved ids ride both the audit payload and the op result (resolved_questions / resolved_question_count), so a caller can see what the verb closed on its behalf. NO BACKFILL: questions left open by past calls are untouched, because retro-resolving them would assert an answer no human gave. No table in workflow/graphile_worker/spike touched. D1 WRITE-QUIESCE IS OWED -- this is an audited writer body replacement, one door, one window.';
 end $dba5_tail$;

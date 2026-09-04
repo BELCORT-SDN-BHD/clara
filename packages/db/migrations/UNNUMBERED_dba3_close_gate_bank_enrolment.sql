@@ -37,9 +37,33 @@
 -- professional signs a statement that is TRUE ("I could not measure this") instead of one
 -- that is false ("there is nothing outstanding here").
 --
+-- THIS FILE ALSO MAKES TWO POPULATIONS SMALLER, and both are fail->pass moves that nobody
+-- asked for, so they are named rather than discovered later. Under the OLD statement-derived
+-- universe an account with statements got twelve month-slots regardless of when it existed;
+-- under the registry-derived one, (a) an account DEACTIVATED before the year began and
+-- (b) an account CREATED after the year ended both drop out of the universe entirely and
+-- contribute no gaps. That is correct -- neither owed a statement for a year it did not
+-- operate in -- but it is a gate reading `pass` where it used to read `fail`, which is the
+-- direction that deserves to be stated out loud.
+--
+-- THE LIFETIME PREDICATE READS deactivated_at; THE REGISTRY ARM READS active. Those are two
+-- different columns answering two different questions, and the file relies on them agreeing.
+-- clara._bank_registry_ledger_state's arm (a) reads `ba.active` (0121:4784) to find a flagged
+-- COA account with no live binding; this file's window reads `ba.deactivated_at` because it
+-- needs WHEN, not merely WHETHER. Congruence between the two is kept by the VERBS
+-- (clara.deactivate_bank_account and clara.reactivate_bank_account, 0038:2848 and :2909, which
+-- set the pair together) and NOT by a CHECK: ck_bank_accounts_deactivation (0038:332) only
+-- couples deactivated_at with deactivated_by and the reason -- it says nothing about `active`.
+-- So a row hand-written past the doors with active=false and deactivated_at NULL would be
+-- outside this window's reach while the registry arm still saw it. Recorded as a RELIANCE, not
+-- a proof; the estate's EXECUTE-only grants are what keep the hand-written row out.
+--
 -- D1: a STABLE SECURITY DEFINER reader. No audited writer body is replaced, so no
 -- write-quiesce window is owed. accounts_basis and unmatched_lines_basis both move, which is
--- what makes a measured_digest taken before this deploy distinguishable from one after.
+-- what makes a measured_digest taken before this deploy distinguishable from one after --
+-- and note that a MOVED digest is itself an obligation on any live close run attested against
+-- this gate: finalize_close raises CLR41 close_attestation_stale (0128:218-224) until the
+-- professional re-signs against the fresh measurement.
 -- =====================================================================================
 
 -- Precautionary, not load-bearing: one CREATE OR REPLACE and one new helper, no data moved.
@@ -260,6 +284,35 @@ end $function$;
 reset role;
 
 alter function clara._bank_enrolled_fy_months(uuid, date, date) owner to clara_fn_owner;
+
+-- =====================================================================================
+-- RED-FLIP CENSUS (0104:811-830's precedent) -- run BEFORE the tail plants anything, so it
+-- measures the DATABASE and not this file's own probe.
+-- =====================================================================================
+do $dba3_census$
+declare v_probe record; v_fys int := 0; v_n int := 0; v_flips text := '';
+begin
+  -- This file turns `pass` into `unknown`
+  -- on a real population, so the deploy MEASURES which clients flip on the database it is
+  -- being applied to rather than leaving the operator to find out from a close that stops.
+  -- On a database with no fiscal years this loop runs zero times and SAYS SO -- absence
+  -- stated, never a fabricated clean bill.
+  for v_probe in
+    select fy.id, fy.client_id, fy.label, clara._close_gate_bank_items(fy.client_id, fy.id) as g
+      from clara.fiscal_years fy order by fy.client_id, fy.ordinal loop
+    v_fys := v_fys + 1;
+    if (v_probe.g ->> 'not_measurable')::boolean then
+      v_n := v_n + 1;
+      v_flips := v_flips || format(' [fy %s "%s": %s account(s)]', v_probe.id, v_probe.label,
+        jsonb_array_length(v_probe.g -> 'no_statements'));
+    end if;
+  end loop;
+  raise notice 'dba3 MEASURED -- the pass->unknown flip on THIS database: of % fiscal year(s), % now read `unknown` on open_bank_recon_items because an enrolled account holds no statement inside the year.%',
+    v_fys, v_n,
+    case when v_fys = 0 then ' THERE ARE ZERO FISCAL YEARS HERE, so this census measured nothing -- it is not a clean bill of health, and the battery is what proves the gate on a rig that mints its own year through the real door.'
+         when v_n = 0 then ' ZERO -- a measured zero, not an unasked question.' else v_flips end;
+
+end $dba3_census$;
 
 -- =====================================================================================
 -- TAIL CENSUS

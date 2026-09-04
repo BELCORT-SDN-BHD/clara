@@ -19,8 +19,14 @@
 -- classified) and a kind this table does not name (a future twenty-first) read CODEABLE.
 -- Getting this backwards is the expensive direction: a gate that hides a filing it does not
 -- recognise false-PASSES a close, silently. A gate that shows one it should not is visible,
--- attestable (uncoded_documents is drawer 2) and costs a person one look. The DRIFT GUARD in
--- this file's tail, and its rig cell, make the unknown case LOUD rather than merely safe.
+-- attestable (uncoded_documents is drawer 2) and costs a person one look.
+--
+-- THE `true` DEFAULT IS THE PROTECTION; THE DRIFT GUARD IS ONLY THE ALARM, and the two are not
+-- interchangeable. This file's tail guard and its rig cell fire ONCE each -- at apply, and on
+-- whatever database the suite runs against -- so neither is standing cover for a kind added
+-- between them. What actually protects a twenty-first kind is clara._is_codeable_kind's
+-- `coalesce(..., true)`: an unrecognised kind is WORK from the instant it exists, with nobody
+-- having to notice. The guard's job is to make the omission loud SOON, not to make it safe.
 --
 -- THE SEED IS DERIVED, NOT TYPED. The kind roster comes out of
 -- documents_document_kind_check's own live definition (0123:2054-2061, twenty values), and
@@ -112,7 +118,10 @@ create function clara._document_kind_roster() returns text[]
     from pg_constraint con
     join pg_class c on c.oid = con.conrelid
     join pg_namespace n on n.oid = c.relnamespace
-    cross join lateral regexp_matches(pg_get_constraintdef(con.oid), '''([a-z_]+)''::text', 'g') m
+    -- [a-z0-9_]+, not [a-z_]+: a kind carrying a digit (an `e_invoice_xml_2` say) would
+    -- otherwise be split rather than matched, and the roster would silently disagree with the
+    -- CHECK it is derived from -- in the one instrument whose whole job is to catch that.
+    cross join lateral regexp_matches(pg_get_constraintdef(con.oid), '''([a-z0-9_]+)''::text', 'g') m
    where n.nspname = 'clara' and c.relname = 'documents'
      and con.contype = 'c' and con.conname = 'documents_document_kind_check';
 $fn$;
@@ -127,9 +136,12 @@ reset role;
 -- S1 -- clara.document_kind_codeability : THE TABLE.
 --
 -- FIRM-LESS BY CONSTRUCTION. Whether an invoice owes a journal entry is not a property of a
--- tenant; it is a property of double-entry bookkeeping. The 0153 sst_rate_schedule posture is
--- the precedent for a firm-independent reference table in this schema: forced RLS with an
--- owner policy, and grants named one at a time rather than assumed.
+-- tenant; it is a property of double-entry bookkeeping. The precedent is clara.close_gate_checks
+-- (0056:382-388): forced RLS, an owner policy, a `for select to clara_authenticated using (true)`
+-- policy and a matching table grant, with its own comment calling it "a GLOBAL catalog, like
+-- client_fact_keys". That is this table's posture exactly. (NOT 0153's sst_rate_schedule, which
+-- an earlier draft of this header cited: that table grants NOTHING to any app role -- 0153:241-243
+-- says so out loud -- so it is the precedent for a CLOSED reference table, which this is not.)
 --
 -- `basis` IS NOT DECORATION. It is the sentence a professional reads when the gate does or
 -- does not name their document, and it is what makes a row the owner flips an informed
