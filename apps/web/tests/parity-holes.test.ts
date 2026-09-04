@@ -119,10 +119,23 @@ describe("裁-117 prototype-parity wiring", () => {
     assert.match(mount, /<ClaraRailChrome>/);
     assert.match(chrome, /lg:contents/);
 
-    // THE NARROW ARM IS the fixed overlay this cell used to forbid outright.
-    assert.match(chrome, /fixed inset-y-0 right-0 z-40/);
-    // …and it costs the workbench nothing, because the overlay classes apply
-    // only while open and the wide arm collapses them to `contents`.
-    assert.match(chrome, /open \? "fixed inset-y-0 right-0 z-40 flex outline-none lg:contents" : "contents"/);
+    // THE NARROW ARM IS the fixed overlay this cell used to forbid outright, and
+    // the wide arm collapses it to `contents` so the panel is a direct flex child
+    // of the shell row exactly as before.
+    assert.match(chrome, /className="fixed inset-y-0 right-0 z-40 flex outline-none lg:contents"/);
+
+    // …AND THE OVERLAY CLASSES ARE NOT CONDITIONAL. This is the pin, and it is
+    // written as a prohibition because the defect was a plausible-looking
+    // `open ? "fixed …" : "contents"`: `ClaraRail` keeps its aside MOUNTED for one
+    // --motion-duration-panel after `open` goes false, so a wrapper keyed on
+    // `open` handed the still-mounted 320px panel back to the flex row for the
+    // whole exit and the workbench was squeezed and released. Keyed on nothing,
+    // the property holds by construction. The browser leg samples it per frame.
+    const wrapper = chrome.slice(chrome.indexOf("<div"), chrome.indexOf("onKeyDown"));
+    assert.doesNotMatch(
+      wrapper,
+      /open\s*\?/,
+      "the overlay wrapper is keyed on `open` again — it must not be: the panel outlives `open` by one exit",
+    );
   });
 });

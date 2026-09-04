@@ -113,6 +113,32 @@ describe("only real framework/static namespaces are exempt", () => {
     assert.equal(matches("/clients/apple-icon.png"), true);
     assert.equal(matches("/clients/icon.png/bank"), true);
   });
+
+  it("the three EXACT files are END-ANCHORED — a path that merely BEGINS with one is still gated", () => {
+    // The latent half of the same class, caught in review. The lookahead had no
+    // `$`, so `/icon.png.evil` and `/icon.png/anything` skipped the app's ONLY
+    // auth gate. Not exploitable on this tree — there is no root-level dynamic or
+    // catch-all segment for such a path to resolve to, and next.config.ts declares
+    // no rewrites — but "not reachable today" is a property of the ROUTE TREE, and
+    // the route tree is exactly the thing the next train changes. `favicon.ico`
+    // gained the anchor in the same edit; it never had one either.
+    for (const pathname of [
+      "/icon.png.evil",
+      "/icon.png/x",
+      "/icon.pngfoo",
+      "/apple-icon.png.evil",
+      "/apple-icon.png/x",
+      "/favicon.ico.evil",
+      "/favicon.ico/x",
+    ]) {
+      assert.equal(matches(pathname), true, `${pathname} skipped the auth gate`);
+    }
+    // …and the exact files are still exempt, so the anchor did not simply close
+    // the door on the icons this train shipped.
+    for (const pathname of ["/favicon.ico", "/icon.png", "/apple-icon.png"]) {
+      assert.equal(matches(pathname), false, `${pathname} lost its exemption`);
+    }
+  });
 });
 
 /**

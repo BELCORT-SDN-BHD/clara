@@ -60,6 +60,62 @@ async function expectReflows(page: Page, face: string): Promise<void> {
   ).toBeGreaterThanOrEqual(320);
 }
 
+/**
+ * Sample the reflow invariants ON EVERY ANIMATION FRAME while `run()` plays out.
+ *
+ * WHY A REST MEASUREMENT IS NOT ENOUGH, and this is the whole reason the cell
+ * exists: the two worst defects this train produced were both TRANSIENT. The
+ * shell row gained 72px of horizontal scroll for the 200ms of the rail's exit
+ * (a translated in-flow panel sticking out past the row), and the workbench was
+ * squeezed and released across that same window (a wrapper keyed on `open` while
+ * the panel stayed mounted on `presence`). A `boundingBox()` before and after
+ * sees neither: both ends are clean and the middle is the bug. So the sampler
+ * runs inside the page across the whole transition and reports the WORST frame.
+ */
+async function sampleAcross(
+  page: Page,
+  label: string,
+  run: () => Promise<void>,
+): Promise<void> {
+  await page.evaluate(() => {
+    const w = window as unknown as { __clara: { over: number; minPane: number; frames: number } };
+    w.__clara = { over: 0, minPane: Number.POSITIVE_INFINITY, frames: 0 };
+    const tick = () => {
+      const doc = document.documentElement;
+      const pane = document.querySelector("[data-firm-workbench]");
+      w.__clara.over = Math.max(w.__clara.over, doc.scrollWidth - doc.clientWidth);
+      if (pane) w.__clara.minPane = Math.min(w.__clara.minPane, pane.getBoundingClientRect().width);
+      w.__clara.frames += 1;
+      requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  });
+
+  await run();
+  // Past the full --motion-duration-panel plus a margin, so the sampler has
+  // certainly covered the transition rather than stopping inside it.
+  await expect
+    .poll(async () => page.evaluate(() => (window as unknown as { __clara: { frames: number } }).__clara.frames), {
+      timeout: 5000,
+    })
+    .toBeGreaterThan(30);
+
+  const worst = await page.evaluate(
+    () => (window as unknown as { __clara: { over: number; minPane: number; frames: number } }).__clara,
+  );
+  // The sampler RAN — without this the two assertions below pass trivially on a
+  // page where requestAnimationFrame never fired.
+  expect(worst.frames, `${label}: the frame sampler never ran`).toBeGreaterThan(30);
+  expect(
+    worst.over,
+    `${label}: the document scrolled sideways by ${worst.over}px during the transition`,
+  ).toBeLessThanOrEqual(1);
+  expect(
+    worst.minPane,
+    `${label}: the workbench narrowed to ${worst.minPane}px mid-transition — it was squeezed and released`,
+  ).toBeGreaterThanOrEqual(320);
+}
+
 test("at 640 CSS px the workbench keeps 320px and the page never scrolls sideways", async ({ page }) => {
   // THE ACCEPTANCE, on the two altitudes with different chrome. Before this
   // train the firm shell spent 224 + 320 + 64 = 608px on chrome unconditionally,
@@ -311,6 +367,154 @@ test("SectionTabs is ONE tab stop and the arrow keys move between tabs — the r
   const after = await page.evaluate(() => document.activeElement?.textContent ?? "");
   expect(after, "ArrowRight did not move focus — the tablist is still not roving").not.toBe(before);
   expect(await page.evaluate(() => document.activeElement?.getAttribute("role"))).toBe("tab");
+});
+
+test("the rail's EXIT never squeezes the workbench and never scrolls the page — sampled per frame", async ({ page }) => {
+  // The regression guard for the two transient defects. Both were invisible to a
+  // before/after measurement and both were shipped once.
+  await page.setViewportSize(NARROW);
+  await signInTo(page, `/clients/${CLIENT_A}`);
+  await page.locator("[data-clara-rail-launcher]").click();
+  await expect(page.locator("[data-clara-rail]")).toBeVisible();
+
+  await sampleAcross(page, "the overlay rail's exit", async () => {
+    await page.getByRole("button", { name: "Collapse Clara" }).click();
+    await expect(page.locator("[data-clara-rail]")).toHaveCount(0);
+  });
+
+  // …and the ENTER too, which is where the horizontal overflow originally came
+  // from: `dock-panel`'s `@starting-style` translates the panel in by its own
+  // width, and that has always been true — nothing had ever measured it.
+  await sampleAcross(page, "the overlay rail's enter", async () => {
+    await page.locator("[data-clara-rail-launcher]").click();
+    await expect(page.locator("[data-clara-rail]")).toBeVisible();
+  });
+});
+
+test("the DOCKED rail's transition is clean too — the wide arm is sampled, not assumed", async ({ page }) => {
+  await page.setViewportSize(WIDE);
+  await signInTo(page, `/clients/${CLIENT_A}`);
+  await expect(page.locator("[data-clara-rail]")).toBeVisible();
+  await sampleAcross(page, "the docked rail's exit", async () => {
+    await page.getByRole("button", { name: "Collapse Clara" }).click();
+    await expect(page.locator("[data-clara-rail]")).toHaveCount(0);
+  });
+});
+
+test("the firm drawer is 224 CSS px at 640, not the vendored sheet's 384", async ({ page }) => {
+  // MEASURED, because the class string lies about this on its own. The vendored
+  // sheet's `data-[side=left]:w-3/4` and `data-[side=left]:sm:max-w-sm` are
+  // (0,2,0) selectors and beat a bare `.w-56` / `.max-w-[85vw]` at (0,1,0), so
+  // the drawer shipped at 384px with the 85vw cap never binding, under a comment
+  // that said 224px. Only a computed read catches that.
+  await page.setViewportSize(NARROW);
+  await signInTo(page, "/");
+  await page.getByRole("button", { name: "Menu" }).click();
+  const panel = page.locator("[data-slot=sheet-content]");
+  await expect(panel).toBeVisible();
+  await expect
+    .poll(async () => page.evaluate(() => document.getAnimations().filter((a) => a.playState === "running").length))
+    .toBe(0);
+
+  const width = await panel.evaluate((el) => el.getBoundingClientRect().width);
+  expect(width, `the drawer is ${width}px — it should be the rail's own 224`).toBeCloseTo(224, 0);
+  // …and it is not merely narrow by accident: 85vw of this viewport is 544, so a
+  // drawer that had lost the width entirely and was only being capped would read
+  // 544 here, not 224.
+  expect(width).toBeLessThan(NARROW.width * 0.85);
+});
+
+test("the SectionTabs strip is not pinned at 32px — six tabs at 640 do not wrap through their own rule", async ({ page }) => {
+  // `tabsListVariants` carries `group-data-horizontal/tabs:h-8`, and a bare
+  // `h-auto` in the skin does NOT beat it: both are (0,1,0) and the h-8 rule is
+  // emitted later. The strip was a fixed 32px box with `flex-wrap`, so a six-tab
+  // workbench at this width wrapped its second row straight through the list's
+  // `border-b`. The height is the discriminating read; the class string is not.
+  await page.setViewportSize(NARROW);
+  await signInTo(page, `/clients/${CLIENT_A}`);
+
+  const candidates = ["registers", "bank", "documents", "journals"] as const;
+  let face: string | null = null;
+  for (const candidate of candidates) {
+    await page.goto(`/clients/${CLIENT_A}/${candidate}`);
+    await page.waitForLoadState("networkidle");
+    if ((await page.getByRole("tab").count()) > 1) {
+      face = candidate;
+      break;
+    }
+  }
+  expect(face, `none of ${candidates.join(", ")} rendered a SectionTabs under the e2e mock`).not.toBeNull();
+
+  const list = page.getByRole("tablist").first();
+  const box = await list.evaluate((el) => {
+    const rect = el.getBoundingClientRect();
+    const tabs = [...el.querySelectorAll('[role="tab"]')].map((t) => t.getBoundingClientRect());
+    return {
+      height: rect.height,
+      bottom: rect.bottom,
+      tabCount: tabs.length,
+      // A tab whose bottom sits past the list's own bottom edge is a wrapped row
+      // painting outside the strip — the visible symptom of the 32px pin.
+      overflowing: tabs.filter((t) => t.bottom > rect.bottom + 1).length,
+      rows: new Set(tabs.map((t) => Math.round(t.top))).size,
+    };
+  });
+
+  expect(box.tabCount, `${face}: expected a multi-tab strip`).toBeGreaterThan(1);
+  expect(
+    box.overflowing,
+    `${face}: ${box.overflowing} of ${box.tabCount} tabs paint below the tablist's own box — the strip is height-pinned`,
+  ).toBe(0);
+  // If the strip wrapped to a second row it is TALLER than 32px, which is the
+  // honest assertion: the fix is that the box grows to fit, not that it never wraps.
+  if (box.rows > 1) {
+    expect(box.height, `${face}: ${box.rows} rows of tabs inside a ${box.height}px strip`).toBeGreaterThan(32);
+  }
+});
+
+test("DS-01 extended: the SHEET drops its slide under prefers-reduced-motion and keeps its fade", async ({ page }) => {
+  // The fifth motion family. Its four side translates compiled with no enclosing
+  // at-rule, so the drawer travelled for a user who had asked for less motion —
+  // read out of the built stylesheet, and now read back as computed style.
+  await page.setViewportSize(NARROW);
+  await signInTo(page, "/");
+  await page.emulateMedia({ reducedMotion: "reduce" });
+
+  await page.getByRole("button", { name: "Menu" }).click();
+  const panel = page.locator("[data-slot=sheet-content]");
+  await expect(panel).toBeVisible();
+
+  const style = await panel.evaluate((el) => {
+    const s = getComputedStyle(el);
+    return {
+      translate: s.translate,
+      transform: s.transform,
+      opacity: s.opacity,
+      duration: s.transitionDuration,
+      property: s.transitionProperty,
+    };
+  });
+  // NO MOVEMENT: `motion-safe:` compiles to
+  // `@media (prefers-reduced-motion: no-preference)`, so under `reduce` the side
+  // translate is simply not applied and the panel sits where it belongs.
+  expect(
+    style.translate === "none" || style.translate === "" || style.translate === "0px",
+    `the sheet still translates under reduced motion: ${style.translate}`,
+  ).toBe(true);
+  expect(style.transform === "none" || style.transform === "matrix(1, 0, 0, 1, 0, 0)").toBe(true);
+  // …AND THE FADE REMAINS, which is the half the contract insists on ("opacity
+  // and explicit state copy REMAIN"). A blanket motion-killer would read 0s here
+  // and would be just as wrong as the slide.
+  //
+  // The fade is asserted as a DECLARATION plus a settled endpoint, not as an
+  // instantaneous opacity: this cell first read `opacity` right after
+  // `toBeVisible()` and measured 0.0855 — the fade caught mid-flight, which is
+  // the correct behaviour failing a badly-shaped assertion. Reading the declared
+  // property and duration proves the fade exists; polling to 1 proves it
+  // completes and leaves the panel readable.
+  expect(style.duration).toMatch(/0\.2s/);
+  expect(style.property, "the sheet declares no opacity transition under reduce").toMatch(/opacity/);
+  await expect.poll(async () => panel.evaluate((el) => getComputedStyle(el).opacity)).toBe("1");
 });
 
 test("H-31: the favicon and the App Router icon actually 200", async ({ page }) => {

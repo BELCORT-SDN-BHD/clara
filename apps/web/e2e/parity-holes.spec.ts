@@ -23,11 +23,24 @@ async function expectAccessible(page: Page, face: string): Promise<void> {
 
 test("client A to B clears the draft, never paints A under B, and chooses the caller's own thread", async ({ page }) => {
   await signInTo(page, `/clients/${CLIENT_A}`);
-  // CB-AE2E-019: the client's name became a real `<h1>`, and Next's own route
-  // announcer (`#__next-route-announcer__`, an aria-live region) reads the first
-  // h1 — so this string is now legitimately in the document TWICE and a
-  // `getByText` resolves to two elements. Located by ROLE + LEVEL, which is the
-  // stronger locator anyway: it asserts the heading exists as a heading.
+  // CB-AE2E-019: the client's name became a real `<h1>`, and this string is now
+  // legitimately in the document TWICE, so a `getByText` trips strict mode.
+  //
+  // THE SECOND ELEMENT IS NEXT'S ROUTE ANNOUNCER, and the mechanism is worth
+  // stating correctly because the first version of this comment got it half
+  // right. `#__next-route-announcer__` does NOT simply "read the first h1":
+  // node_modules/next/dist/client/components/app-router-announcer.js prefers
+  // `document.title` and falls back to `document.querySelector('h1')` only when
+  // the title is empty. This app sets a CONSTANT title ("ClaraBook",
+  // app/layout.tsx's generateMetadata) with no route-level override anywhere under
+  // (firm) — and the failure this locator was changed for showed the announcer
+  // carrying "Client: Rome Properties", i.e. it took the h1 FALLBACK, because
+  // `document.title` was empty at the commit the announcer's effect ran on.
+  // Measured, not reasoned: the strict-mode error named the announcer div and its
+  // contents verbatim.
+  //
+  // Located by ROLE + LEVEL, which is the stronger locator regardless: it asserts
+  // the heading exists AS a heading, which is the thing CB-AE2E-019 changed.
   await expect(page.getByRole("heading", { name: "Client: Rome Properties", level: 1 })).toBeVisible();
   await expect(page.getByText("Own message for client A")).toBeVisible();
   await expect(page.getByText("Colleague message must not auto-open")).toHaveCount(0);

@@ -32,6 +32,16 @@ type Stub = Record<string, unknown>;
 const WEB_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const read = (path: string): string => readFileSync(join(WEB_ROOT, path), "utf8");
 
+/** Source with block and line comments removed — see the h1-census cell for why
+ *  a count over the raw file is wrong in this repo specifically. */
+const codeOf = (path: string): string =>
+  read(path)
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/\{\/\*[\s\S]*?\*\/\}/g, "")
+    .replace(/^\s*\/\/.*$/gm, "");
+
+const h1Count = (path: string): number => (codeOf(path).match(/<h1[\s>]/g) ?? []).length;
+
 const attr = (node: Stub, name: string): string | null => {
   const get = node.getAttribute as ((n: string) => string | null) | undefined;
   return get ? get.call(node, name) : null;
@@ -237,10 +247,37 @@ test("every chrome column declares a breakpoint arm — the measured absence CB-
   }
 });
 
-test("the client name is a real <h1> — the client altitude had no level-1 heading at all", () => {
+test("the client name is a real HEADING, and the h1 census on a client route is pinned at two", () => {
+  // WHAT THE AUDIT ACTUALLY COMPLAINED OF: "the client's identity is a
+  // non-heading paragraph", so it was absent from the heading list entirely.
   const layout = read("app/(firm)/clients/[clientId]/layout.tsx");
   assert.match(layout, /<h1[^>]*>\s*\{t\("clientHeader"/);
   assert.doesNotMatch(layout, /<p[^>]*>\s*\{t\("clientHeader"/);
+
+  // …AND THE PART THE FIRST VERSION OF THIS CELL MISSED. Its comment claimed the
+  // altitude "had no level-1 heading at all", which was false: PageHeader renders
+  // one on every route-level surface. So a client route has TWO h1s, and that is
+  // now a PINNED number rather than an accident — see the layout's own note for
+  // why neither alternative was taken (a leading h2 reds test/a11yRules.ts:547's
+  // heading-order rule; a `level` prop on PageHeader is 26 files or a hook this
+  // component is contractually not allowed to hold).
+  // COUNTED OVER CODE, NOT OVER THE FILE. Both of these files DESCRIBE `<h1` in
+  // their comments — page-shell.tsx's header quotes the very markup five lanes
+  // duplicated — and a naive `match(/<h1/g)` reads two in a file that renders
+  // one. That is the same class of error as reading a class string out of a
+  // comment, and it cost this cell one red before it was written correctly.
+  assert.equal(h1Count("components/common/page-shell.tsx"), 1, "PageShell no longer renders exactly one h1");
+  assert.equal(h1Count("app/(firm)/clients/[clientId]/layout.tsx"), 1, "the client layout renders more than one h1");
+  assert.equal(
+    h1Count("components/common/page-shell.tsx") + h1Count("app/(firm)/clients/[clientId]/layout.tsx"),
+    2,
+    "a client route must carry exactly two h1s: the workspace identity and the surface",
+  );
+
+  // The FIRM altitude is unaffected and still has exactly one: its layout adds no
+  // heading of its own. This is the arm that would catch the client layout's h1
+  // being hoisted somewhere shared.
+  assert.equal(h1Count("app/(firm)/layout.tsx"), 0);
 });
 
 test("the narrow header sits OUTSIDE #main-content, so the skip link still skips navigation", () => {

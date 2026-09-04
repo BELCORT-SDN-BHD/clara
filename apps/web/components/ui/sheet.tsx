@@ -31,6 +31,22 @@
 //     literally the "sheet" in that sentence). No ad-hoc durations
 //     (apps/web/AGENTS.md motion law). The backdrop's `duration-150` became
 //     `motion-fast` for the same reason.
+//  5. REDUCED MOTION, and this one was MEASURED in the built stylesheet rather
+//     than assumed. The vendored popup slides in and out on all four sides via
+//     `data-[side=…]:data-starting-style:translate-…` / `…data-ending-style:…`,
+//     and those compile UNCONDITIONALLY: in
+//     `.next/static/chunks/*.css` the rule
+//     `.data-\[side\=left\]\:data-ending-style\:translate-x-\[-2\.5rem\][data-side=left][data-ending-style]`
+//     sits inside `@layer utilities` with NO enclosing at-rule at all, so it ran
+//     for a user who had asked the system for less motion. `app/globals.css`'s
+//     own PORT-DRIFT note is the law here — "each motion utility carries its own
+//     `@media (prefers-reduced-motion: reduce)` arm that drops MOVEMENT and keeps
+//     the fade" — and its enumeration of conforming families did not yet include
+//     this one, because this file post-dates it. All eight side translates are
+//     now `motion-safe:` (which compiles to
+//     `@media (prefers-reduced-motion: no-preference)`), so under `reduce` the
+//     panel keeps its opacity fade and simply does not travel. The enumeration in
+//     globals.css is trued to five families in the same commit.
 //
 // WHY IT IS HERE: CB-AE2E-019's firm-rail drawer. Below `lg` the 224px sidebar
 // stops being a row participant and becomes this sheet — and the focus trap, the
@@ -92,7 +108,7 @@ function SheetContent({
         data-slot="sheet-content"
         data-side={side}
         className={cn(
-          "motion-panel fixed z-50 flex flex-col gap-4 bg-popover bg-clip-padding text-sm text-popover-foreground shadow-lg transition ease-in-out data-ending-style:opacity-0 data-starting-style:opacity-0 data-[side=bottom]:inset-x-0 data-[side=bottom]:bottom-0 data-[side=bottom]:h-auto data-[side=bottom]:border-t data-[side=bottom]:data-ending-style:translate-y-[2.5rem] data-[side=bottom]:data-starting-style:translate-y-[2.5rem] data-[side=left]:inset-y-0 data-[side=left]:left-0 data-[side=left]:h-full data-[side=left]:w-3/4 data-[side=left]:border-r data-[side=left]:data-ending-style:translate-x-[-2.5rem] data-[side=left]:data-starting-style:translate-x-[-2.5rem] data-[side=right]:inset-y-0 data-[side=right]:right-0 data-[side=right]:h-full data-[side=right]:w-3/4 data-[side=right]:border-l data-[side=right]:data-ending-style:translate-x-[2.5rem] data-[side=right]:data-starting-style:translate-x-[2.5rem] data-[side=top]:inset-x-0 data-[side=top]:top-0 data-[side=top]:h-auto data-[side=top]:border-b data-[side=top]:data-ending-style:translate-y-[-2.5rem] data-[side=top]:data-starting-style:translate-y-[-2.5rem] data-[side=left]:sm:max-w-sm data-[side=right]:sm:max-w-sm",
+          "motion-panel fixed z-50 flex flex-col gap-4 bg-popover bg-clip-padding text-sm text-popover-foreground shadow-lg transition ease-in-out data-ending-style:opacity-0 data-starting-style:opacity-0 data-[side=bottom]:inset-x-0 data-[side=bottom]:bottom-0 data-[side=bottom]:h-auto data-[side=bottom]:border-t motion-safe:data-[side=bottom]:data-ending-style:translate-y-[2.5rem] motion-safe:data-[side=bottom]:data-starting-style:translate-y-[2.5rem] data-[side=left]:inset-y-0 data-[side=left]:left-0 data-[side=left]:h-full data-[side=left]:w-3/4 data-[side=left]:border-r motion-safe:data-[side=left]:data-ending-style:translate-x-[-2.5rem] motion-safe:data-[side=left]:data-starting-style:translate-x-[-2.5rem] data-[side=right]:inset-y-0 data-[side=right]:right-0 data-[side=right]:h-full data-[side=right]:w-3/4 data-[side=right]:border-l motion-safe:data-[side=right]:data-ending-style:translate-x-[2.5rem] motion-safe:data-[side=right]:data-starting-style:translate-x-[2.5rem] data-[side=top]:inset-x-0 data-[side=top]:top-0 data-[side=top]:h-auto data-[side=top]:border-b motion-safe:data-[side=top]:data-ending-style:translate-y-[-2.5rem] motion-safe:data-[side=top]:data-starting-style:translate-y-[-2.5rem] data-[side=left]:sm:max-w-sm data-[side=right]:sm:max-w-sm",
           className,
         )}
         {...props}

@@ -55,6 +55,15 @@ export const config = {
      * Adding a new always-public static path means adding its NAMESPACE here
      * and extending tests/proxy-matcher.test.ts, which asserts both arms.
      */
-    "/((?!_next/static|_next/image|favicon\\.ico|icon\\.png|apple-icon\\.png|brand/).*)",
+    // THE THREE EXACT FILES ARE END-ANCHORED; the two NAMESPACES are not.
+    // Without the `$` the lookahead exempts any path merely BEGINNING with the
+    // name — `/icon.png.evil`, `/icon.png/anything`, `/favicon.ico/x` — which is
+    // the shape of finding 3 all over again, one alternation later. It was not
+    // exploitable on this tree (no root-level dynamic or catch-all segment, and
+    // next.config.ts declares no rewrites), so it is a LATENT hole rather than an
+    // open one; it is closed here because the comment above calls these "exact
+    // file" and a matcher should mean what its comment says. `favicon.ico` gains
+    // the anchor too — it never had one.
+    "/((?!(?:favicon\\.ico|icon\\.png|apple-icon\\.png)$|_next/static|_next/image|brand/).*)",
   ],
 };

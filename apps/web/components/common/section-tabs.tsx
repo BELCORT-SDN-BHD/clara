@@ -71,10 +71,29 @@ export function SectionTabs<T extends string>({
       onValueChange={(next) => onSelect(next as T)}
       className={cn("gap-0", className)}
     >
+      {/*
+        `group-data-horizontal/tabs:h-auto`, NOT a bare `h-auto`, and this was
+        measured in the BUILT stylesheet after a plain `h-auto` shipped and did
+        nothing. `tabsListVariants`' base carries `group-data-horizontal/tabs:h-8`;
+        the two utilities are in the same tailwind-merge group but under DIFFERENT
+        variants, so `cn()` keeps both and the cascade decides. In
+        `.next/static/chunks/*.css` they compile to `.h-auto{height:auto}` at byte
+        12218 and
+        `.group-data-horizontal\/tabs\:h-8:is(:where(.group\/tabs):where([data-orientation=horizontal]) *)`
+        at byte 39025 — `:where()` contributes ZERO specificity and `*` is zero, so
+        both are (0,1,0) and the LATER one wins. The tablist was a fixed 32px box
+        with `flex-wrap`, so at 640 CSS px a six-tab strip (Bank, Registers) wrapped
+        its second row straight through the list's own `border-b`.
+
+        Matching the variant makes tailwind-merge dedupe rather than making the
+        cascade adjudicate — the same reason the drawer below matches
+        `data-[side=left]:`. No `!important` anywhere: a caller that has to shout
+        over a primitive is a caller that will be shouted over by the next one.
+      */}
       <TabsList
         variant="line"
         aria-label={label}
-        className="h-auto w-full flex-wrap justify-start gap-1 rounded-none border-b border-border p-0"
+        className="group-data-horizontal/tabs:h-auto w-full flex-wrap justify-start gap-1 rounded-none border-b border-border p-0"
       >
         {items.map((item) => (
           <TabsTrigger

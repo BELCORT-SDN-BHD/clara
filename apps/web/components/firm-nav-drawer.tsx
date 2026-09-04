@@ -95,10 +95,27 @@ export function FirmNavDrawer() {
       <SheetContent
         id={panelId}
         side="left"
-        // The rail's own width above `lg`, so the drawer is the same nav at the
-        // same measure rather than a second layout of it — capped at 85vw so it
-        // never becomes the whole viewport on the narrowest phone.
-        className="w-56 max-w-[85vw] gap-4 bg-sidebar p-4"
+        // THE WIDTH, AND WHY IT IS SPELLED THIS WAY. The intent is the rail's own
+        // 224px above `lg`, so the drawer is the same nav at the same measure
+        // rather than a second layout of it, capped at 85vw so it never becomes
+        // the whole viewport on the narrowest phone.
+        //
+        // A plain `w-56 max-w-[85vw]` shipped first and did NEITHER — measured in
+        // the built stylesheet, where the vendored sheet's own arms are
+        // `.data-\[side\=left\]\:w-3\/4[data-side=left]{width:75%}` and
+        // `.data-\[side\=left\]\:sm\:max-w-sm[data-side=left]{max-width:var(--container-sm)}`
+        // (the latter inside `@media (min-width:40rem)`). Those are (0,2,0) —
+        // class plus attribute — against (0,1,0) for a bare `.w-56` / `.max-w-[85vw]`,
+        // so the drawer computed to 384px at a 640px viewport and the 85vw cap
+        // never bound at all.
+        //
+        // Matching the vendored variant EXACTLY is what fixes it, and it fixes it
+        // one layer earlier than the cascade: same modifier, same utility group,
+        // so tailwind-merge drops the primitive's class before it is ever emitted
+        // and there is no specificity contest left to lose. `!important` would
+        // also have worked and is worse — it wins this round and loses the next
+        // one to whoever shouts louder.
+        className="data-[side=left]:w-56 max-w-[85vw] data-[side=left]:sm:max-w-[85vw] gap-4 bg-sidebar p-4"
         finalFocus={triggerRef}
       >
         <SheetHeader className="p-0">

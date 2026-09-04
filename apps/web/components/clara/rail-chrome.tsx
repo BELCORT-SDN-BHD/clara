@@ -31,13 +31,30 @@ import { RAIL_EXIT_MS } from "@/lib/clara/useRailPresence";
  *                        at 200% zoom, WCAG 2.2 SC 1.4.10's case) the rail was
  *                        eating half the viewport while open by default.
  *
- * WHY THE WRAPPER IS `contents` WHEN THE RAIL IS CLOSED, IN BOTH ARMS. A closed
- * rail renders `ClaraRailLauncher`, which is itself `fixed` to the viewport. If
- * this wrapper stayed a `fixed inset-y-0 right-0 z-40` box around it, the page
- * would carry an invisible full-height element at the right edge in the one
- * state where the rail is meant to be out of the way. It has zero width, so it
- * would not intercept a pointer — but "probably harmless" is not a reason to
- * leave a phantom in the layout.
+ * WHY THE OVERLAY CLASSES ARE UNCONDITIONAL BELOW `lg`, AND NOT KEYED ON `open`.
+ *
+ * They were keyed on `open` first, and that was a real defect: `ClaraRail` keeps
+ * its `<aside>` MOUNTED for one `--motion-duration-panel` after `open` goes false
+ * (that is what `useRailPresence` is for), so a wrapper keyed on `open` flipped to
+ * `contents` at the START of the exit and handed the still-mounted 320px panel
+ * back to the flex row as an in-flow item. For 200ms the workbench was squeezed
+ * and then released — the exact opposite of the sentence above it, and visible as
+ * a shudder on every close at a narrow width.
+ *
+ * Keying on the MOUNTED state would also fix it, and this is stronger: the
+ * property "the panel is never an in-flow row participant below `lg`" now holds
+ * BY CONSTRUCTION rather than by two independent latches agreeing about when the
+ * exit ended. There is nothing left to desynchronise.
+ *
+ * The cost, stated rather than waved past: when the rail is closed the wrapper is
+ * still a `fixed inset-y-0 right-0` box below `lg`. Its only child is
+ * `ClaraRailLauncher`, which is itself `fixed` and therefore out of flow, so the
+ * box computes to ZERO width — it paints nothing, occupies no layout, and cannot
+ * intercept a pointer event. An earlier version of this file rejected exactly that
+ * phantom on the principle that "probably harmless is not a reason to leave one".
+ * That principle is right in general and wrong here: an inert zero-width box is a
+ * smaller price than a workbench that shudders on every close, and unlike the
+ * shudder it can be reasoned about in one sentence.
  *
  * THE OVERLAY IS NOT MODAL, DELIBERATELY. No `aria-modal`, no focus trap, no
  * inert workbench: the rail is a `complementary` panel and the workbench behind
@@ -170,11 +187,14 @@ export function ClaraRailChrome({ children }: { children: React.ReactNode }) {
         // paints regardless. What confirms the move to a keyboard user is the
         // next Tab landing inside the rail — which the browser leg asserts.
         tabIndex={-1}
-        className={
-          open ? "fixed inset-y-0 right-0 z-40 flex outline-none lg:contents" : "contents"
-        }
+        className="fixed inset-y-0 right-0 z-40 flex outline-none lg:contents"
         onKeyDown={(event) => {
           if (event.key !== "Escape") return;
+          // The SAME guard the two effects above use, for the same reason: a
+          // partial `window` stub has the object and not the method, and a bare
+          // `window.matchMedia(...)` throws there. It was missing here only
+          // because this handler was written after them.
+          if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
           if (!window.matchMedia(NARROW_QUERY).matches) return;
           event.stopPropagation();
           claraThreadStore.setRailOpen(false);
