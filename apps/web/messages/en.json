@@ -667,12 +667,53 @@
     },
     "status": {
       "draft": "Draft",
-      "approved": "Approved",
+      "approved": "Posted",
       "withdrawn": "Withdrawn"
+    },
+    "origin": {
+      "manual": "Manual",
+      "document": "Document",
+      "agent": "Clara",
+      "reversal": "Reversal"
+    },
+    "legend": {
+      "summary": "What these statuses mean",
+      "draft": "Draft — not in the books yet. Only a draft can be approved, revised or withdrawn.",
+      "approved": "Posted — approved and in the books. A posted entry is never deleted; it is corrected by reversing it, which writes a new mirror entry.",
+      "withdrawn": "Withdrawn — the draft was abandoned. This is the end of the road for it, and a reason was required.",
+      "rbac": "Anyone at bookkeeper level or above can approve and post. Some entries still ask for a second checker or a written attestation — the refusal says which. Every governed click is receipted on the Activity timeline."
     },
     "section": {
       "needs_review": "Needs review",
       "needs_you": "Needs you"
+    },
+    "table": {
+      "tableLabel": "Journal entries",
+      "colDate": "Posting date",
+      "colReference": "Reference (system id)",
+      "colDescription": "Description",
+      "colDebit": "Debit (presentation sum)",
+      "colCredit": "Credit (presentation sum)",
+      "colStatus": "Status",
+      "colSource": "Source",
+      "colActions": "Actions",
+      "viewDetail": "View",
+      "hideDetail": "Hide",
+      "noLines": "No lines were read for this entry.",
+      "filterStatus": "Status",
+      "filterSource": "Source",
+      "filterFrom": "Posted from",
+      "filterTo": "Posted to",
+      "filterAny": "All",
+      "clearFilters": "Clear filters",
+      "noMatches": "No entries match these filters.",
+      "showingOf": "Showing {shown} of {total} entries.",
+      "pageOf": "Page {page} of {pages} · {total} entries",
+      "pageSize": "Rows",
+      "previousPage": "Previous",
+      "nextPage": "Next",
+      "entriesTruncated": "This client has more journal entries than could be safely read at once — this table shows only the first page of that read, so the last page here is not the end of the books.",
+      "linesTruncated": "This client has more lines than could be safely read at once — the debit and credit totals cannot be verified and are withheld."
     },
     "linesEditor": {
       "account": "Account",
@@ -688,7 +729,7 @@
     "compose": {
       "trigger": "New journal entry",
       "title": "New journal entry",
-      "description": "A manual entry — recorded via record_client_resolution + draft_entry, the DB's own manual-compose ceremony.",
+      "description": "Record a journal entry by hand. Clara books it against this client and leaves it as a draft — nothing posts until it is approved.",
       "postingDate": "Posting date",
       "memo": "Memo",
       "submit": "Create draft",
@@ -696,7 +737,8 @@
     },
     "drafts": {
       "empty": "No drafts are waiting for review.",
-      "showingOf": "Showing {shown} of {total} drafts — some may be hidden behind a large backlog in another category. Narrow the queue to see the rest.",
+      "showingOf": "Showing {shown} of {total} drafts — the rest are behind a large backlog in another category on this page. This tab cannot page past them.",
+      "showingOfLink": "Open Needs you, which pages through the whole queue",
       "highStakes": "High stakes",
       "noMemo": "(no memo)",
       "entryUnavailable": "This entry could not be read — it may have changed since the queue was last loaded.",
@@ -707,10 +749,13 @@
       "presentationSumLabel": "Totals (presentation sum)",
       "presentationSumUnavailable": "Totals unavailable — too many lines to verify",
       "linesTruncated": "This client has more lines than could be safely read at once — the totals below cannot be verified and are withheld.",
-      "attestation": "Attestation (optional)",
-      "attestationPlaceholder": "Optional attestation note…",
+      "attestation": "Attestation",
+      "attestationPlaceholder": "Write the attestation this refusal asks for…",
+      "attestationRevealed": "This entry cannot be posted without a written attestation — the refusal above says so. Write one and approve again.",
       "approve": "Approve",
+      "approveAgain": "Approve with attestation",
       "revise": "Revise",
+      "reviseNotBuilt": "Revise is not available for a coded draft yet. clara.revise_entry refuses a supplier bill, sales invoice or sales credit note unless the call also carries a counterparty proposal and a cited evidence array, and this editor collects neither. Withdraw the draft, or ask Clara to re-code it.",
       "saveRevision": "Save revision",
       "cancel": "Cancel"
     },
@@ -2278,15 +2323,14 @@
       "revisionsEmpty": "This draft has never been revised.",
       "revisionNo": "Revision {n}",
       "revisionBy": "by {actor}",
-      "revisionActorUnknown": "an unknown actor"
-    },
-    "approveRoutine": {
-      "trigger": "Approve (routine)"
+      "revisionActorUnknown": "an unknown actor",
+      "valueNone": "none",
+      "valueDetails": "{kind} — show the value"
     },
     "withdraw": {
       "trigger": "Withdraw",
       "title": "Withdraw this draft",
-      "description": "Abandons the draft entirely (clara.withdraw_draft) — distinct from reversing a posted entry. A reason is required.",
+      "description": "Abandons this draft for good — nothing is posted and it leaves the review queue. Reversing a posted entry is a different act. A reason is required and is kept with the entry.",
       "confirm": "Withdraw draft",
       "reasonLabel": "Withdrawal reason",
       "reasonPlaceholder": "Reason for withdrawing this draft (required)…"
@@ -2295,7 +2339,8 @@
       "empty": "No pending clarifications from Clara.",
       "firmWideNote": "Firm-wide — not filtered to this client (clarifications carry no client scope).",
       "questionOpaque": "Clara is asking for a clarification.",
-      "answerLabel": "Your answer",
+      "expiresLabel": "Answer by",
+      "answerLabel": "Your answer (Journals clarifications)",
       "answerPlaceholder": "Type your answer…",
       "answerSubmit": "Answer"
     },
@@ -2318,7 +2363,7 @@
     "reextraction": {
       "trigger": "Request re-extraction",
       "title": "Request re-extraction",
-      "description": "Re-queues this document for a fresh extraction attempt (clara.request_reextraction). A reason is required — this changes the evidence a posted entry may rest on.",
+      "description": "Re-queues this document for a fresh extraction attempt, replacing what Clara read from it before. A reason is required — this changes the evidence a posted entry may rest on.",
       "confirm": "Request re-extraction",
       "reasonLabel": "Re-extraction reason",
       "reasonPlaceholder": "Why does this document need to be re-extracted (required)…",
@@ -2336,7 +2381,7 @@
     "consentEvidence": {
       "trigger": "Classify as consent evidence",
       "title": "Classify as consent evidence",
-      "description": "Marks this document as the client's cross-border-transfer consent evidence (clara.classify_consent_evidence_document). Owner-level action — the DB refuses honestly if your session doesn't hold it. A reason is required.",
+      "description": "Records this document as the client's written consent to transfer their data across a border. Only the firm owner can do this, and the refusal says so plainly if your account cannot. A reason is required.",
       "confirm": "Classify as consent evidence",
       "reasonLabel": "Reason",
       "reasonPlaceholder": "Why this document is the client's consent evidence (required)…",
@@ -2346,7 +2391,7 @@
     "autodraft": {
       "trigger": "Request autodraft",
       "title": "Request autodraft",
-      "description": "Asks Clara to draft a journal entry from this filing (clara.request_autodraft) — a one-click admission; the agent still runs under the same coding-lane and budget walls as the unattended sweep.",
+      "description": "Asks Clara to draft a journal entry from this filing. Nothing posts — you still review the draft, and Clara still runs under the same coding-lane and daily budget limits as her unattended sweep.",
       "confirm": "Request autodraft",
       "outcome": {
         "admitted": "Admitted — Clara will draft this filing.",
