@@ -29,6 +29,49 @@ const rev = (n: number, items: Parameters<typeof snap>[0], createdAt = `2026-09-
 
 const OTHER = { item_key: "fye", state: "answered", answer: "31 December", answered_at: "2026-09-01T00:00:00Z" };
 
+// ---------------------------------------------------------------------------
+// H-26 — the trail agrees with the row: object answers read as text, not JSON.
+// ---------------------------------------------------------------------------
+
+test("an OBJECT answer on the trail renders as ordered key: value text, never JSON", () => {
+  const revisions = [
+    rev(1, [{ item_key: "coa_chart_apply", state: "deferred", answer: { chart: "firm_template", applied: false }, answered_at: "2026-09-01T00:00:00Z" }]),
+    rev(2, [{ item_key: "coa_chart_apply", state: "answered", answer: { chart: "firm_template", applied: true }, answered_at: "2026-09-02T00:00:00Z" }]),
+    rev(3, [{ item_key: "coa_chart_apply", state: "answered", answer: "hand-corrected", answered_at: "2026-09-03T00:00:00Z" }]),
+  ];
+  const chain = supersededResolutions(revisions, "coa_chart_apply");
+  assert.equal(chain.length, 2, "two superseded answers, the standing one dropped");
+  for (const entry of chain) {
+    assert.doesNotMatch(entry.answerText, /[{}]/, `the trail must never render JSON; got: ${entry.answerText}`);
+    assert.doesNotMatch(entry.answerText, /\[object Object\]/, `got: ${entry.answerText}`);
+  }
+  assert.equal(chain[0]!.answerText, "chart: firm_template · applied: false");
+  assert.equal(chain[1]!.answerText, "chart: firm_template · applied: true");
+});
+
+test("TWO DIFFERENT objects still de-duplicate correctly — the change is detected on the rendered text", () => {
+  // The de-dup compares rendered text, so this is the cell that proves the new renderer did
+  // not collapse two genuinely different answers into one (which would DELETE a real
+  // supersession from a governed trail) or split one unchanged answer into many (a fabricated
+  // history — the defect this whole file exists for).
+  const unchanged = { registration: "202401047756", form: "unified", format_verified: true };
+  const revisions = [
+    rev(1, [{ item_key: "ssm", state: "answered", answer: unchanged, answered_at: "2026-09-01T00:00:00Z" }, OTHER]),
+    rev(2, [{ item_key: "ssm", state: "answered", answer: { ...unchanged }, answered_at: "2026-09-01T00:00:00Z" }, OTHER]),
+    rev(3, [{ item_key: "ssm", state: "answered", answer: { registration: "1593602-X", form: "rob", format_verified: true }, answered_at: "2026-09-02T00:00:00Z" }, OTHER]),
+    rev(4, [{ item_key: "ssm", state: "answered", answer: { registration: "202401047756 (1593602-X)", form: "combined", format_verified: true }, answered_at: "2026-09-03T00:00:00Z" }, OTHER]),
+  ];
+  const chain = supersededResolutions(revisions, "ssm");
+  assert.deepEqual(
+    chain.map((c) => c.answerText),
+    [
+      "registration: 202401047756 · form: unified · format_verified: true",
+      "registration: 1593602-X · form: rob · format_verified: true",
+    ],
+    "two entries: the unchanged repeat collapsed, the two real changes kept, the standing answer dropped",
+  );
+});
+
 test("the standing answer is not listed as its own supersession", () => {
   const revisions = [
     rev(1, [{ item_key: "banks", state: "pending", answer: null, answered_at: null }]),
@@ -89,8 +132,13 @@ test("an interview-written object answer is rendered, not dropped, and never re-
     rev(1, [{ item_key: "coa_chart_apply", state: "deferred", answer: { chart: "firm_template", applied: false }, answered_at: "2026-09-01T00:00:00Z" }]),
     rev(2, [{ item_key: "coa_chart_apply", state: "resolved", answer: "applied by hand", answered_at: "2026-09-02T00:00:00Z" }]),
   ];
+  // H-26 — this line USED to pin `'{"chart":"firm_template","applied":false}'`, i.e. the
+  // defect: the amend dialog's "earlier answers" list rendered raw JSON for exactly the
+  // answers the row above it now renders in words. The pin moves to the new rendering; what it
+  // is still pinning is the same two properties — the object is RENDERED rather than dropped,
+  // and it is not re-parsed into a shape this module invents.
   assert.deepEqual(supersededResolutions(revisions, "coa_chart_apply"), [
-    { revisionN: 1, at: "2026-09-01T00:00:00Z", state: "deferred", answerText: '{"chart":"firm_template","applied":false}' },
+    { revisionN: 1, at: "2026-09-01T00:00:00Z", state: "deferred", answerText: "chart: firm_template · applied: false" },
   ]);
 });
 

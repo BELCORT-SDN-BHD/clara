@@ -15,6 +15,7 @@ import { useRef, useState, type ReactNode } from "react";
 import { useTranslations } from "next-intl";
 import {
   Dialog,
+  DialogBody,
   DialogClose,
   DialogContent,
   DialogDescription,
@@ -79,12 +80,18 @@ export function OnboardingDoorDialog({
       }}
     >
       <DialogTrigger render={<Button variant={triggerVariant} size="sm" />}>{triggerLabel}</DialogTrigger>
-      <DialogContent>
+      {/* H-30 — this is the door dialog whose body is DB-sized: `ApplyStandardChartControl`
+          renders one checkbox row per template family, and the family count comes from
+          `get_coa_template`. Before this, a template with enough families pushed Confirm off
+          the bottom of a centred, unconstrained popup with nothing to scroll — the human
+          could not reach the button at all. `scrollBody` + `DialogBody` keep the title and
+          the footer fixed and scroll only the middle. */}
+      <DialogContent scrollBody>
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           {description ? <DialogDescription>{description}</DialogDescription> : null}
         </DialogHeader>
-        {children}
+        <DialogBody>{children}</DialogBody>
         <DialogFooter>
           <DialogClose render={<Button variant="ghost" disabled={busy} />}>{t("cancel")}</DialogClose>
           <Button
