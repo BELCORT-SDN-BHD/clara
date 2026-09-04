@@ -60,7 +60,16 @@
 // A COLD CACHE READS `pending`, NEVER BLOCKS, AND NEVER FAILS READINESS. A fresh boot has no
 // evidence of a problem, so the first /ready before the first cycle settles reports
 // `checks.pools = {pending: true}` with no warnings — and, critically, `runtimeLaneFailed` is
-// FALSE while pending, so an unmeasured lane can never 503 a healthy machine.
+// FALSE while pending, so an unmeasured lane can never 503 a healthy machine. A SINGLE pending
+// sample is therefore NOT a statement that the lanes are healthy; it says only that they have
+// not been measured yet. Read the second poll.
+//
+// AND `pending` IS NOT LEFT AMBIGUOUS FOREVER. A cycle that blows its hard bound resets the
+// verdict to null, i.e. back to `pending` — so a loop that keeps timing out would have read
+// identically to "not measured yet", indefinitely, with /ready saying nothing (review-558 r2:
+// absence is not evidence). `laneProbeHealth()` therefore also reports `stalled`, true once the
+// loop has run more than TWO intervals with no settled cycle, and /ready turns that into a
+// WARNING — never a readiness failure, because a stalled INSTRUMENT is not a broken lane.
 //
 // THE STALENESS THIS BUYS IS BOUNDED AND ALREADY THE HOUSE CONTRACT. A cached runtime-lane
 // failure can flip `ready` false on a reading up to one interval old — the same shape the
@@ -265,38 +274,80 @@ let intervalHandle = null;
 let inFlight = null;
 let busy = false;
 let probeOverride = null; // test seam only; production is always null
+let loopStartedAt = 0;
+let lastSettledAt = 0;
 
 async function refreshOnce() {
-  if (busy) return;
+  // NEVER a fresh no-op promise while a cycle is running (review-558 r2 NIT): returning the
+  // IN-FLIGHT one keeps `inFlight` pointing at real work, so a waiter cannot await a promise
+  // that resolves immediately and then read a verdict the cycle has not written yet.
+  if (busy) return inFlight;
   busy = true;
   try {
     const run = () => probeLanes(probeOverride ? { probe: probeOverride } : {});
     // A cycle that blows its own hard bound reports every lane as unknown rather than freezing
     // the previous verdict: a stale green is the one answer worse than "not measured".
-    cachedLanes = await withHardTimeout(run, cycleMs(), null);
+    const result = await withHardTimeout(run, cycleMs(), null);
+    cachedLanes = result;
+    if (Array.isArray(result)) lastSettledAt = Date.now();
   } finally {
     busy = false;
   }
+  return undefined;
 }
 
 function ensureStarted() {
   if (intervalHandle) return;
+  loopStartedAt = Date.now();
   inFlight = refreshOnce();
   intervalHandle = setInterval(() => {
-    inFlight = refreshOnce();
+    const started = refreshOnce();
+    // Only re-point `inFlight` at a cycle we actually STARTED; a skipped tick returns the
+    // in-flight promise, and clobbering with it would be harmless but reassigning a resolved
+    // no-op would not be. Keep the invariant explicit rather than incidental.
+    if (started !== undefined) inFlight = started;
   }, intervalMs());
   intervalHandle.unref?.();
 }
 
 /**
  * SYNCHRONOUS — the last known verdict, ~0ms, no I/O on the calling path. Starts the background
- * loop lazily on first use. `pending` is true until the first cycle settles.
- * @returns {{pending:boolean, lanes:Array<{lane:string}>}}
+ * loop lazily on first use.
+ *
+ * `stalled` CLOSES AN ABSENCE-IS-NOT-EVIDENCE HOLE (review-558 r2). A cycle that blows its hard
+ * bound sets `cachedLanes` back to null, i.e. back to `pending` — so a probe that keeps timing
+ * out read EXACTLY like "not measured yet", forever, and /ready said nothing either way. A
+ * reader could not tell an unmeasured lane from a wedged loop. `stalled` is true once the loop
+ * has been running for more than TWO intervals with no settled cycle, which /ready turns into a
+ * WARNING (never a readiness failure — a stalled INSTRUMENT is not a broken lane).
+ * @returns {{pending:boolean, lanes:Array<{lane:string}>, stalled:boolean, since_ms:number|null}}
  */
 export function laneProbeHealth() {
   ensureStarted();
-  if (!Array.isArray(cachedLanes)) return { pending: true, lanes: [] };
-  return { pending: false, lanes: cachedLanes.map((l) => Object.assign({}, l)) };
+  const now = Date.now();
+  if (!Array.isArray(cachedLanes)) {
+    const waiting = now - loopStartedAt;
+    const stalled = waiting > 2 * intervalMs();
+    return { pending: true, lanes: [], stalled, since_ms: stalled ? waiting : null };
+  }
+  return {
+    pending: false,
+    lanes: cachedLanes.map((l) => Object.assign({}, l)),
+    stalled: false,
+    since_ms: lastSettledAt ? now - lastSettledAt : null,
+  };
+}
+
+/** Test-only: the resolved timing knobs, so a cell can assert the floor and the bounds it
+ *  actually runs under rather than re-deriving them from the env. */
+export function _laneProbeTimingForTest() {
+  return { intervalMs: intervalMs(), cycleMs: cycleMs(), probeTimeoutMs: PROBE_TIMEOUT_MS };
+}
+
+/** Test-only: run ONE cycle directly, bypassing the interval, so the `busy` non-overlap guard
+ *  can be driven deterministically. Returns whatever refreshOnce returned. */
+export function _refreshOnceForTest() {
+  return refreshOnce();
 }
 
 /** Test-only: full reset (cache + interval + in-flight + override). */
@@ -307,6 +358,8 @@ export function _resetLaneProbeCacheForTest() {
   busy = false;
   cachedLanes = null;
   probeOverride = null;
+  loopStartedAt = 0;
+  lastSettledAt = 0;
 }
 
 /** Test-only: drive the background loop with an injected prober, so a cell can arm a lane that

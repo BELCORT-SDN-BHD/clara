@@ -358,7 +358,16 @@ export async function checkReadiness() {
   const laneProbe = laneProbeHealth();
   const lanes = laneProbe.pending ? null : laneProbe.lanes;
   if (lanes === null) {
-    checks.pools = { pending: true };
+    checks.pools = { pending: true, stalled: laneProbe.stalled };
+    // A STALLED loop is not the same fact as "not measured yet", and until r2 it read as one:
+    // a cycle that blows its hard bound resets the verdict to pending, so a probe that kept
+    // timing out was indistinguishable from a fresh boot, silently, forever. That is the
+    // absence-is-not-evidence shape. It WARNS rather than fails — a stalled INSTRUMENT is not
+    // a broken lane, and taking chat traffic down because a health probe wedged would be the
+    // feature causing the outage it exists to report.
+    if (laneProbe.stalled) {
+      warnings.push(`per-lane pool probe has not settled a cycle in ${Math.round(laneProbe.since_ms)}ms (the probe loop is stalled, not the lanes)`);
+    }
   } else {
     checks.pools = lanes;
     for (const lane of lanes) {

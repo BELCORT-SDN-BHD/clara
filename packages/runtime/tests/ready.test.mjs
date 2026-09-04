@@ -22,6 +22,14 @@ import {
   _waitForLaneProbeSettleForTest,
 } from "../lib/lane-probe.mjs";
 
+// A synthetic lane DSN whose every component is a RECOGNISABLE token, assembled piecewise
+// because a DSN carrying an inline credential is the shape scripts/check-leaks.mjs refuses
+// in a tracked file. Its whole job is to be findable: if any of these turns up in the
+// /ready payload or a warning line, the probe leaked a DSN onto an UNAUTHENTICATED endpoint.
+// Order: user, credential, host, database.
+const LEAK_TOKENS = Object.freeze(["l9leakuser", "l9leaksecret", "l9leakhost.invalid", "l9leakdb"]);
+const LEAK_DSN = ["postgres:/", "/", LEAK_TOKENS[0], ":", LEAK_TOKENS[1], "@", LEAK_TOKENS[2], ":1", "/", LEAK_TOKENS[3]].join("");
+
 // fly.toml's own /ready check timeout — the number the MAJOR-1 cells defend. Kept as a named
 // constant so a reader sees WHICH budget the assertion is about, not a bare 5000.
 const FLY_READY_TIMEOUT_MS = 5000;
@@ -245,7 +253,11 @@ test("ready MAJOR-1: a BLACK-HOLED lane leaves /ready far inside fly's 5s timeou
     assert.ok(elapsed < FLY_READY_TIMEOUT_MS, `/ready must settle inside fly's ${FLY_READY_TIMEOUT_MS}ms (was ${elapsed}ms)`);
     assert.ok(elapsed < 2000, `and with real margin, not merely inside it (was ${elapsed}ms)`);
     assert.equal(r.ready, true, "an UNMEASURED lane never 503s a healthy machine");
-    assert.deepEqual(r.checks.pools, { pending: true }, "a cold cache reports pending, never a fabricated verdict");
+    assert.deepEqual(
+      r.checks.pools,
+      { pending: true, stalled: false },
+      "a cold cache reports pending and NOT-yet-stalled, never a fabricated verdict",
+    );
     assert.ok(
       !r.warnings.some((x) => /pool lane/.test(x)),
       `a pending probe warns about nothing; got: ${JSON.stringify(r.warnings)}`,
@@ -301,6 +313,84 @@ test("ready MAJOR-1: the lane WARNING still surfaces once the background probe s
     );
   } finally {
     _resetLaneProbeCacheForTest();
+    if (prev === undefined) delete process.env.CLARA_START_WORLD;
+    else process.env.CLARA_START_WORLD = prev;
+  }
+});
+
+test("ready r2: a STALLED probe loop WARNS on /ready and never fails readiness (H-48)", { skip }, async () => {
+  // Until r2 a wedged loop was silent: a cycle that blows its bound resets the verdict to
+  // pending, which read identically to "not measured yet", forever. /ready now says so.
+  const prev = process.env.CLARA_START_WORLD;
+  const prevInterval = process.env.CLARA_LANE_PROBE_INTERVAL_MS;
+  const prevCycle = process.env.CLARA_LANE_PROBE_CYCLE_MS;
+  process.env.CLARA_START_WORLD = "1";
+  process.env.CLARA_LANE_PROBE_INTERVAL_MS = "1000";
+  process.env.CLARA_LANE_PROBE_CYCLE_MS = "30";
+  _resetLaneProbeCacheForTest();
+  try {
+    await setBeat("world", "now()");
+    await setBeat("control", "now()");
+    _setLaneProbeForTest(() => new Promise(() => {})); // every cycle exceeds cycleMs
+
+    const fresh = await checkReadiness();
+    assert.equal(fresh.checks.pools.stalled, false, "a fresh loop is pending, NOT yet stalled");
+    assert.ok(!fresh.warnings.some((x) => /probe loop is stalled/.test(x)), "and warns about nothing yet");
+
+    await new Promise((r) => setTimeout(r, 2100)); // past two intervals
+    const stalled = await checkReadiness();
+    assert.equal(stalled.ready, true, "a stalled INSTRUMENT is not a broken lane — never a 503");
+    assert.equal(stalled.checks.pools.stalled, true, "the stall is reported in checks");
+    assert.ok(
+      stalled.warnings.some((x) => /probe loop is stalled, not the lanes/.test(x)),
+      `expected the stalled WARN, got: ${JSON.stringify(stalled.warnings)}`,
+    );
+  } finally {
+    _resetLaneProbeCacheForTest();
+    if (prevInterval === undefined) delete process.env.CLARA_LANE_PROBE_INTERVAL_MS;
+    else process.env.CLARA_LANE_PROBE_INTERVAL_MS = prevInterval;
+    if (prevCycle === undefined) delete process.env.CLARA_LANE_PROBE_CYCLE_MS;
+    else process.env.CLARA_LANE_PROBE_CYCLE_MS = prevCycle;
+    if (prev === undefined) delete process.env.CLARA_START_WORLD;
+    else process.env.CLARA_START_WORLD = prev;
+  }
+});
+
+test("ready r2: NO DSN component reaches the /ready payload or a warning line (H-48)", { skip }, async () => {
+  // END-TO-END, through the REAL probeLane — not an injected stub, because the leak this
+  // defends against would live in the real one. A lane is pointed at a synthetic DSN whose
+  // user, credential, host and database are all recognisable tokens; /ready must carry none of
+  // them, in checks or in warnings. It is an unauthenticated endpoint.
+  const prev = process.env.CLARA_START_WORLD;
+  const prevRead = process.env.CLARA_READ_DATABASE_URL;
+  process.env.CLARA_START_WORLD = "1";
+  process.env.CLARA_READ_DATABASE_URL = LEAK_DSN;
+  _resetLaneProbeCacheForTest();
+  try {
+    await setBeat("world", "now()");
+    await setBeat("control", "now()");
+    await _waitForLaneProbeSettleForTest(); // a REAL cycle: the read lane genuinely fails to connect
+
+    const r = await checkReadiness();
+    const readLane = r.checks.pools.find((l) => l.lane === "read");
+    assert.ok(readLane, "the read lane is reported");
+    assert.equal(readLane.ok, false, "mandatory setup: the synthetic DSN really did fail to connect");
+    assert.equal(r.ready, true, "a dead READ lane is a warning, not a 503");
+    assert.ok(
+      r.warnings.some((x) => /pool lane 'read' unreachable/.test(x)),
+      `expected the read-lane WARN, got: ${JSON.stringify(r.warnings)}`,
+    );
+    const payload = JSON.stringify(r);
+    for (const token of LEAK_TOKENS) {
+      assert.ok(!payload.includes(token), `the DSN component '${token}' must never reach the /ready payload`);
+      for (const w of r.warnings) {
+        assert.ok(!w.includes(token), `the DSN component '${token}' must never reach a warning line`);
+      }
+    }
+  } finally {
+    _resetLaneProbeCacheForTest();
+    if (prevRead === undefined) delete process.env.CLARA_READ_DATABASE_URL;
+    else process.env.CLARA_READ_DATABASE_URL = prevRead;
     if (prev === undefined) delete process.env.CLARA_START_WORLD;
     else process.env.CLARA_START_WORLD = prev;
   }

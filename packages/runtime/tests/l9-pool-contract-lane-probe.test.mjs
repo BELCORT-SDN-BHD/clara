@@ -24,6 +24,8 @@ import {
   _resetLaneProbeCacheForTest,
   _setLaneProbeForTest,
   _waitForLaneProbeSettleForTest,
+  _laneProbeTimingForTest,
+  _refreshOnceForTest,
 } from "../lib/lane-probe.mjs";
 import { POOLS_LANE_DESCRIPTORS } from "../lib/pools.mjs";
 
@@ -282,6 +284,103 @@ test("H-48: the background loop SETTLES and the verdict then appears", async () 
     assert.equal(cycles, LANE_ROSTER.length, "reads are free; only the interval re-probes");
   } finally {
     _resetLaneProbeCacheForTest();
+  }
+});
+
+test("H-48 r2: a cycle that BLOWS its hard bound returns the verdict to pending", async () => {
+  // withHardTimeout's timeout branch — the one that resets a good verdict — was unexercised.
+  // A short cycle bound plus a prober that outlives it drives exactly that path.
+  const prevCycle = process.env.CLARA_LANE_PROBE_CYCLE_MS;
+  process.env.CLARA_LANE_PROBE_CYCLE_MS = "60";
+  _resetLaneProbeCacheForTest();
+  try {
+    assert.equal(_laneProbeTimingForTest().cycleMs, 60, "the knob is read, not ignored");
+    // First: a good cycle, so there IS a verdict to lose.
+    _setLaneProbeForTest(async (d) => ({ lane: d.lane, ok: true }));
+    const good = await _waitForLaneProbeSettleForTest();
+    assert.equal(good.pending, false, "mandatory setup: a settled verdict exists");
+    // Then a cycle that outlives the bound. The verdict must go back to pending, NOT freeze —
+    // a stale green is the one answer worse than "not measured".
+    _setLaneProbeForTest(() => new Promise((r) => setTimeout(() => r({ lane: "x", ok: true }), 5000)));
+    await _refreshOnceForTest();
+    const after = laneProbeHealth();
+    assert.equal(after.pending, true, "a blown cycle discards the stale verdict");
+    assert.deepEqual(after.lanes, []);
+  } finally {
+    _resetLaneProbeCacheForTest();
+    if (prevCycle === undefined) delete process.env.CLARA_LANE_PROBE_CYCLE_MS;
+    else process.env.CLARA_LANE_PROBE_CYCLE_MS = prevCycle;
+  }
+});
+
+test("H-48 r2: the interval FLOOR rejects a sub-1000ms value", () => {
+  // The floor exists because this value feeds setInterval: a smaller one would be a sustained
+  // connection hot loop driven by a health check.
+  const prev = process.env.CLARA_LANE_PROBE_INTERVAL_MS;
+  try {
+    process.env.CLARA_LANE_PROBE_INTERVAL_MS = "5";
+    assert.equal(_laneProbeTimingForTest().intervalMs, 30_000, "below the floor falls back to the default");
+    process.env.CLARA_LANE_PROBE_INTERVAL_MS = "not-a-number";
+    assert.equal(_laneProbeTimingForTest().intervalMs, 30_000, "junk falls back too");
+    process.env.CLARA_LANE_PROBE_INTERVAL_MS = "1500";
+    assert.equal(_laneProbeTimingForTest().intervalMs, 1500, "a value at or above the floor is honoured");
+  } finally {
+    if (prev === undefined) delete process.env.CLARA_LANE_PROBE_INTERVAL_MS;
+    else process.env.CLARA_LANE_PROBE_INTERVAL_MS = prev;
+  }
+});
+
+test("H-48 r2: the busy guard runs ONE cycle when two overlap, and never hands back a no-op", async () => {
+  _resetLaneProbeCacheForTest();
+  try {
+    let cycles = 0;
+    let release;
+    const gate = new Promise((r) => { release = r; });
+    _setLaneProbeForTest(async (d) => {
+      cycles += 1;
+      await gate;
+      return { lane: d.lane, ok: true };
+    });
+    const first = _refreshOnceForTest();   // starts a cycle and parks on the gate
+    const second = _refreshOnceForTest();  // must NOT start a second one
+    assert.equal(cycles, LANE_ROSTER.length, "exactly one cycle's worth of probes were started");
+    // The NIT: a skipped tick returns the IN-FLIGHT promise, never a fresh resolved no-op, so a
+    // waiter cannot await nothing and then read a verdict the cycle has not written.
+    assert.notEqual(second, undefined, "the skipped call hands back the in-flight promise");
+    release();
+    await Promise.all([first, second]);
+    assert.equal(cycles, LANE_ROSTER.length, "still one cycle after both settle");
+    assert.equal(laneProbeHealth().pending, false, "and awaiting the returned promise DID mean the verdict is written");
+  } finally {
+    _resetLaneProbeCacheForTest();
+  }
+});
+
+test("H-48 r2: a loop that never settles reports STALLED past two intervals, not merely pending", async () => {
+  // The absence-is-not-evidence hole: a wedged loop resets to pending, so it read exactly like
+  // a fresh boot forever. `stalled` is what makes the two distinguishable.
+  const prevInterval = process.env.CLARA_LANE_PROBE_INTERVAL_MS;
+  const prevCycle = process.env.CLARA_LANE_PROBE_CYCLE_MS;
+  process.env.CLARA_LANE_PROBE_INTERVAL_MS = "1000"; // the floor
+  process.env.CLARA_LANE_PROBE_CYCLE_MS = "30";
+  _resetLaneProbeCacheForTest();
+  try {
+    _setLaneProbeForTest(() => new Promise(() => {})); // never resolves: every cycle blows its bound
+    const fresh = laneProbeHealth();
+    assert.equal(fresh.pending, true);
+    assert.equal(fresh.stalled, false, "a FRESH loop is pending but not yet stalled — different facts");
+    assert.equal(fresh.since_ms, null);
+    await new Promise((r) => setTimeout(r, 2100)); // past two intervals
+    const stalled = laneProbeHealth();
+    assert.equal(stalled.pending, true);
+    assert.equal(stalled.stalled, true, "past two intervals with no settled cycle, the loop is STALLED");
+    assert.ok(stalled.since_ms >= 2000, `and says how long (${stalled.since_ms}ms)`);
+  } finally {
+    _resetLaneProbeCacheForTest();
+    if (prevInterval === undefined) delete process.env.CLARA_LANE_PROBE_INTERVAL_MS;
+    else process.env.CLARA_LANE_PROBE_INTERVAL_MS = prevInterval;
+    if (prevCycle === undefined) delete process.env.CLARA_LANE_PROBE_CYCLE_MS;
+    else process.env.CLARA_LANE_PROBE_CYCLE_MS = prevCycle;
   }
 });
 

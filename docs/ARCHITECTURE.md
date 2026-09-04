@@ -258,6 +258,8 @@ In-context: the current doctrine pack (regenerated fresh against the real regist
 
 The contract itself lives in `packages/runtime/lib/pool-error-contract.mjs`; the per-lane boot probe that measures each of the seven logins is `packages/runtime/lib/lane-probe.mjs`.
 
+**Reading that probe's `/ready` output.** It runs on a background interval and `/ready` reads the last verdict from memory, so **a single `pending` sample is not a statement that the lanes are healthy** — it says only that no cycle has settled yet, which is the normal state for the first poll after a boot or a deploy. Read the second poll. A loop that stays `pending` past two intervals reports `stalled` and raises its own warning, so a wedged probe is distinguishable from an unmeasured one rather than silent.
+
 **A correction to 裁-149's premise, recorded because the ruling text says otherwise.** Clause 2 states that the relay module attaches no listener "nor to the leader's dedicated `makeClient()` session", i.e. that the leader is crash-loud. It is not, and was not when the ruling was written: `packages/runtime/scripts/relay.mjs:139-141` and `packages/runtime/lib/leader.mjs:177-179` both attach one, record into `connErr`, and rethrow at the top of the next poll. The **failover** the ruling wanted is unaffected — the lock is released by the backend when the session ends — and the as-built adds that the surviving process re-acquires without a machine restart. The leader was therefore left byte-untouched; only the pool half of the ruling was built.
 
 ---
