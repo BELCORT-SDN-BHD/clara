@@ -27,6 +27,7 @@ import { renderComponent, textOf, setFieldValue } from "../../test/hookHarness";
 import { enableDomInspection } from "../../test/domInspect";
 import { checkAccessibility } from "../../test/a11yRules";
 import { configureSessionTokenSource, resetSessionTokenSource } from "../../lib/session-accessor";
+import { recalledSignupEmail } from "../../lib/registration/signup-email-storage";
 import messages from "../../messages/en.json";
 import { SignupAccountForm, type SignupAuthClient } from "./signup-account-form";
 import { SignupFirmForm } from "./signup-firm-form";
@@ -88,6 +89,48 @@ function findIn(root: Node, predicate: (n: Node) => boolean): Node | null {
 const byLabelledField = (label: RegExp) => (n: Node) =>
   (n.tagName === "INPUT" || n.tagName === "TEXTAREA") && label.test(textOf((n.parentNode ?? {}) as never));
 
+/**
+ * A REAL in-memory `sessionStorage`, installed for one cell and removed after.
+ *
+ * The harness's `window` carries no storage at all, so `rememberSignupEmail`'s
+ * own try/catch swallows the write and every prefill reads back `null` — three
+ * identical nulls, which is exactly the vacuous green the enumeration cell must
+ * not be allowed to have. This gives the production module something to write
+ * to, so the read-back is a measurement rather than an absence.
+ */
+async function withSessionStorage(run: () => Promise<void>): Promise<void> {
+  const w = globalThis.window as unknown as Record<string, unknown>;
+  const had = Object.prototype.hasOwnProperty.call(w, "sessionStorage");
+  const previous = w.sessionStorage;
+  const store = new Map<string, string>();
+  w.sessionStorage = {
+    getItem: (k: string) => (store.has(k) ? store.get(k) as string : null),
+    setItem: (k: string, v: string) => { store.set(k, String(v)); },
+    removeItem: (k: string) => { store.delete(k); },
+  };
+  try {
+    await run();
+  } finally {
+    if (had) w.sessionStorage = previous;
+    else delete w.sessionStorage;
+  }
+}
+
+/** Every `href` in the tree, in DOM order — the instrument H-35's cell reads,
+ *  because a route is decided by where the anchor POINTS, not by its label. */
+function collectAnchors(root: Node): string[] {
+  const out: string[] = [];
+  (function walk(n: Node) {
+    if (n.tagName === "A") {
+      const href = (n as unknown as { getAttribute?: (k: string) => string | null })
+        .getAttribute?.("href");
+      if (typeof href === "string") out.push(href);
+    }
+    for (const c of n.childNodes ?? []) walk(c);
+  })(root);
+  return out;
+}
+
 test("the account step has zero a11y violations", async () => {
   await withEnv(async () => jsonResponse({}), async () => {
     const h = await renderComponent(App(createElement(SignupAccountForm, { createSupabaseClient: authClient() })));
@@ -143,7 +186,22 @@ test("a non-enumerating AUTH-ERROR state keeps the provider message and has zero
   });
 });
 
-test("NEW: fresh, identities-empty, and duplicate responses have indistinguishable public copy and timing shape", async () => {
+test("NEW: fresh, identities-empty, and duplicate responses have indistinguishable public copy, timing shape AND prefill state", async () => {
+  // REVIEW-544 WIDENED THIS CELL, and the reason is the whole point of the
+  // widening: this card now carries a CONTROL, so "the three shapes render the
+  // same text" stopped being sufficient. The /auth/confirm link leads to a form
+  // that prefills from this browser's remembered address, and a version that
+  // wrote the address on the fresh arm only would have handed the person an
+  // oracle one click past the screen this cell was watching — prefilled means
+  // new, blank means existing. A copy-only assertion could never see it.
+  //
+  // So the observation moves to the CHANNEL. A real in-memory `sessionStorage`
+  // is installed on `window`, the production `signup-email-storage.ts` writes
+  // through it, and the address is read back through `recalledSignupEmail()` —
+  // the same function `EmailConfirmationCard`'s mount effect calls. What is
+  // asserted is the prefill the next screen will actually perform, not that
+  // some function was called.
+  const TYPED = "aisyah@example.com";
   const responses: Array<Awaited<ReturnType<SignupAuthClient["auth"]["signUp"]>>> = [
     {
       data: { user: { id: "new-user", identities: [{ id: "email-identity" }] }, session: null },
@@ -159,32 +217,53 @@ test("NEW: fresh, identities-empty, and duplicate responses have indistinguishab
     },
   ];
   const publicCopies: string[] = [];
+  const prefills: Array<string | null> = [];
 
   await withEnv(async () => jsonResponse({}), async () => {
     for (const response of responses) {
-      const h = await renderComponent(
-        App(createElement(SignupAccountForm, {
-          createSupabaseClient: authClient({ signUp: async () => response }),
-        })),
-      );
-      try {
-        for (let i = 0; i < 3; i++) await h.settle();
-        const form = findIn(h.container as never, (node) => node.tagName === "FORM");
-        await h.fireEvent(form as never, "submit");
-        // Every shape crosses one awaited signUp and the same six settlement
-        // turns before observation; no duplicate-only intermediate state.
-        for (let i = 0; i < 6; i++) await h.settle();
-        const copy = textOf(h.container as never);
-        assert.match(copy, /Confirm your email/);
-        assert.doesNotMatch(copy, /User already registered/i);
-        publicCopies.push(copy);
-      } finally {
-        await h.unmount();
-      }
+      await withSessionStorage(async () => {
+        const h = await renderComponent(
+          App(createElement(SignupAccountForm, {
+            createSupabaseClient: authClient({ signUp: async () => response }),
+          })),
+        );
+        try {
+          for (let i = 0; i < 3; i++) await h.settle();
+          // The address has to be TYPED for this to mean anything: the arm
+          // under test writes whatever is in the field, so a cell that left it
+          // empty would compare three empty prefills and pass on any build.
+          const email = findIn(h.container as never, byLabelledField(/Email/));
+          const password = findIn(h.container as never, byLabelledField(/Password/));
+          assert.ok(email && password, "both fields must render");
+          await h.act(() => {
+            setFieldValue(email as never, TYPED);
+            setFieldValue(password as never, "correct horse battery staple");
+          });
+          const form = findIn(h.container as never, (node) => node.tagName === "FORM");
+          await h.fireEvent(form as never, "submit");
+          // Every shape crosses one awaited signUp and the same six settlement
+          // turns before observation; no duplicate-only intermediate state.
+          for (let i = 0; i < 6; i++) await h.settle();
+          const copy = textOf(h.container as never);
+          assert.match(copy, /Confirm your email/);
+          assert.doesNotMatch(copy, /User already registered/i);
+          publicCopies.push(copy);
+          prefills.push(recalledSignupEmail());
+        } finally {
+          await h.unmount();
+        }
+      });
     }
   });
 
   assert.equal(new Set(publicCopies).size, 1, "the public response disclosed which account shape occurred");
+  // THE DESTINATION IS IDENTICAL TOO. Every arm that reaches the check-email
+  // card left the same address behind for the code form to prefill.
+  assert.deepEqual(
+    prefills,
+    [TYPED, TYPED, TYPED],
+    "the arms disagree about what /auth/confirm will prefill — that difference IS the enumeration oracle",
+  );
 });
 
 test("the CHECK-YOUR-EMAIL state has zero a11y violations", async () => {
@@ -196,6 +275,59 @@ test("the CHECK-YOUR-EMAIL state has zero a11y violations", async () => {
       await h.fireEvent(form as never, "submit");
       for (let i = 0; i < 6; i++) await h.settle();
       assert.match(textOf(h.container as never), /Confirm your email/, "the confirmation state must have rendered");
+      assert.deepEqual(checkAccessibility(h.container as never), []);
+    } finally {
+      await h.unmount();
+    }
+  });
+});
+
+test("H-35 — THE CHECK-EMAIL CARD RENDERS A ROUTE TO /auth/confirm, and promises no resend", async () => {
+  // THE DEFECT. The mail carries a six-digit code and nothing to click (裁-92),
+  // and this card carried no link either — its only anchor went to /login. The
+  // person's sole route to the code form was typing the URL. The banner
+  // meanwhile promised "the next screen", which is copy naming a control the
+  // render omits.
+  //
+  // Asserted on the ANCHOR, not on the label: a cell matching the button text
+  // would stay green if the href moved, and the href is the part that decides
+  // whether the person can get there.
+  await withEnv(async () => jsonResponse({}), async () => {
+    const h = await renderComponent(App(createElement(SignupAccountForm, { createSupabaseClient: authClient() })));
+    try {
+      for (let i = 0; i < 3; i++) await h.settle();
+      const form = findIn(h.container as never, (n) => n.tagName === "FORM");
+      await h.fireEvent(form as never, "submit");
+      for (let i = 0; i < 6; i++) await h.settle();
+      const text = textOf(h.container as never);
+      assert.match(text, /Confirm your email/, "the confirmation state must have rendered");
+
+      const anchors = collectAnchors(h.container as never);
+      assert.ok(
+        anchors.includes("/auth/confirm"),
+        `the check-email card offers no route to the code form (hrefs: ${anchors.join(", ") || "none"})`,
+      );
+      // The sign-in line survives as the SECONDARY route, so this cell cannot
+      // pass by the primary control having replaced it.
+      assert.ok(anchors.includes("/login"), "the 'already confirmed' route was lost");
+
+      // NOTHING INSTRUCTS A RESEND while `confirmation-resend.ts`'s production
+      // default refuses every one. The distinction is deliberate and is the
+      // whole shape of the honest fix: the card MAY say a code cannot be
+      // resent (it does, and that sentence is the recovery path), and it may
+      // NOT tell the person to ask for one. So the matcher hunts the
+      // INSTRUCTION, not the word.
+      const RESEND_INSTRUCTION = /request a new (one|code)|send me a new|resend (it|your|the)|we'?ll (re)?send you another/i;
+      assert.doesNotMatch(text, RESEND_INSTRUCTION,
+        "the check-email card tells the person to ask for a resend this build refuses");
+      // VACUITY CONTROL: the matcher fires on the sentences it hunts — both
+      // the ones this fix removed from ConfirmEmail's own copy.
+      assert.match("Request a new one below.", RESEND_INSTRUCTION);
+      assert.match("Wait about 5 minutes, or request a new code.", RESEND_INSTRUCTION);
+      assert.match("Send me a new code", RESEND_INSTRUCTION);
+      // And the honest sentence is NOT what it fires on — otherwise the cell
+      // would forbid saying the true thing.
+      assert.doesNotMatch("We can't resend one from here in this build.", RESEND_INSTRUCTION);
       assert.deepEqual(checkAccessibility(h.container as never), []);
     } finally {
       await h.unmount();

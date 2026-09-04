@@ -116,7 +116,10 @@ components/firm/sweep-status-panel.test.tsx
 components/invite-accept-a11y.test.tsx
 components/invite-accept-form.test.tsx
 components/invite-accept-keyboard.test.tsx
+components/journals/journal-entries-table.test.tsx
 components/journals/journals-a11y.test.tsx
+components/journals/journals-approve-legend.test.tsx
+components/journals/journals-clarifications.test.tsx
 components/journals/journals-governance-a11y.test.tsx
 components/journals/journals-governance-keyboard.test.tsx
 components/journals/journals-keyboard.test.tsx
@@ -129,6 +132,7 @@ components/parts/v16-act-cards.test.tsx
 components/parts/v16-action-round2.test.tsx
 components/parts/v16-cards-a11y.test.tsx
 components/parts/v16-read-cards.test.tsx
+components/password-policy.test.tsx
 components/registers/EnrolAccountDialog.test.ts
 components/registers/accounts-a11y.test.tsx
 components/registers/accounts-keyboard.test.tsx
@@ -217,6 +221,7 @@ lib/journals/api-compose.test.ts
 lib/journals/api.test.ts
 lib/journals/balance.test.ts
 lib/journals/diff-reads.test.ts
+lib/journals/entries-table.test.ts
 lib/journals/governance-doors.test.ts
 lib/journals/use-journals-workbench.test.ts
 lib/members/members-doors.test.ts

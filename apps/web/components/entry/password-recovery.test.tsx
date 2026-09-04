@@ -36,6 +36,7 @@ const labelledInput = (label: RegExp) => (node: Node) =>
 const RECOVERY_SESSION: ServerSession = {
   accessToken: "recovery-token",
   subject: "11111111-1111-4111-8111-111111111111",
+  email: null,
 };
 
 describe("password recovery entry faces", () => {

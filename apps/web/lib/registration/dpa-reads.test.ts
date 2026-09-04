@@ -134,7 +134,7 @@ test("VACUITY CONTROL: a resolved session with no dpa read override still degrad
   delete (process.env as Record<string, string | undefined>).NEXT_PUBLIC_SUPABASE_URL;
   try {
     const state = await loadCurrentDpaDocumentState({
-      resolveSession: async () => ({ accessToken: "tok", subject: "11111111-1111-1111-1111-111111111111" }),
+      resolveSession: async () => ({ accessToken: "tok", subject: "11111111-1111-1111-1111-111111111111", email: null }),
     });
     assert.deepEqual(state, { kind: "unavailable" });
   } finally {

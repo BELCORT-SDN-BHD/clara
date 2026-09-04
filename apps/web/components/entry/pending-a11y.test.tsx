@@ -264,6 +264,99 @@ test("THE CHECKOUT PATH IS OFFERED on the pending state, with no amount anywhere
   }
 });
 
+test("PR 541 stage 7 — NO STATE SAYS 'nothing more to do' BESIDE ITS OWN NEXT-STEP CONTROL", async () => {
+  // THE DEFECT THIS CLOSES. `pending` and `checkout_open` both rendered "There's
+  // nothing more for you to do yet." directly above the control that IS the
+  // person's next step — a "Continue to checkout" link and a "Resume checkout"
+  // POST. The description said the ball was in Clara's court; the button between
+  // it and the trial note said the opposite. `paid` had it right ("One step is
+  // left, and it's yours to take below."), which is what makes this a stale-copy
+  // class rather than a design position.
+  //
+  // THE ROSTER IS DERIVED FROM THE RENDER, not hand-typed, so a state added
+  // later with a control is covered the day it lands rather than the day
+  // somebody remembers this file. The derivation: render every state, collect
+  // its keyboard-operable controls, and treat as CHROME whatever appears in
+  // EVERY state — today that is the logout button, which is deliberately the
+  // one control every state shares (this file's own header). A state "carries a
+  // next-step control" exactly when it has a control outside that intersection.
+  // Nothing here names logout, so renaming or restyling it cannot silently
+  // empty the roster.
+  const controlsByState = new Map<string, Set<string>>();
+  for (const { state } of STATES) {
+    const label = state.kind === "rejected" && state.reason === null ? "rejected (no reason)" : state.kind;
+    const h = await renderComponent(App(createElement(HoldingCard, { state })));
+    try {
+      for (let i = 0; i < 2; i++) await h.settle();
+      controlsByState.set(
+        label,
+        new Set(focusableElements(h.container as never).map((n) => textOf(n as never).trim())),
+      );
+    } finally {
+      await h.unmount();
+    }
+  }
+  const all = [...controlsByState.values()];
+  const chrome = new Set(
+    [...(all[0] ?? new Set<string>())].filter((c) => all.every((s) => s.has(c))),
+  );
+
+  const NOTHING_MORE = /nothing more (for you )?to do/i;
+  const withControls: string[] = [];
+  for (const { state } of STATES) {
+    const label = state.kind === "rejected" && state.reason === null ? "rejected (no reason)" : state.kind;
+    const own = [...(controlsByState.get(label) ?? new Set<string>())].filter((c) => !chrome.has(c));
+    if (own.length === 0) continue;
+    withControls.push(label);
+    const h = await renderComponent(App(createElement(HoldingCard, { state })));
+    try {
+      for (let i = 0; i < 2; i++) await h.settle();
+      assert.doesNotMatch(
+        textOf(h.container as never),
+        NOTHING_MORE,
+        `${label} tells the person there is nothing to do beside its own control (${own.join(", ")})`,
+      );
+    } finally {
+      await h.unmount();
+    }
+  }
+
+  // TWO VACUITY CONTROLS, because this cell has two ways to pass for the wrong
+  // reason. (1) The derivation must actually find the three FS-4 C-6 arms —
+  // an intersection bug that swallowed every control would leave the roster
+  // empty and the loop above would assert nothing at all.
+  assert.deepEqual(
+    withControls.sort(),
+    ["checkout_open", "paid", "pending"],
+    "the derived roster is not the three states that carry a next-step control",
+  );
+  // (2) The matcher must be able to fire. Absence of a match is evidence only
+  // if the matcher can produce one (review law 2, pointed at an instrument).
+  assert.match("There's nothing more for you to do yet.", NOTHING_MORE);
+  assert.match("there is nothing more to do", NOTHING_MORE);
+});
+
+test("PR 541 stage 7 — the checkout_open banner does not promise payment completes on its own", async () => {
+  // The compounding half of the same defect: "You'll be able to sign in once
+  // payment completes" reads as passive waiting, and payment will not complete
+  // unless the person presses Resume. Asserted as the POSITIVE property (the
+  // card says the step is theirs) rather than by banning a phrasing, so a
+  // reword that keeps the meaning keeps this green.
+  const h = await renderComponent(
+    App(createElement(HoldingCard, { state: { kind: "checkout_open", firmName: "ROME PROPERTIES" } })),
+  );
+  try {
+    for (let i = 0; i < 2; i++) await h.settle();
+    const text = textOf(h.container as never);
+    assert.match(text, /won't complete on its own|isn't finished|pick it back up/i,
+      "the checkout_open card still reads as passive waiting");
+    // And the control it points at is really there.
+    assert.ok(query(h.container)('form[action="/checkout"]'));
+  } finally {
+    await h.unmount();
+  }
+});
+
 test("THE TWO PAID-ROAD ARMS carry REAL controls, and the firm-creating one is not a GET", async () => {
   // The discriminating property: `checkout_open` must POST (a GET to /checkout
   // would let a prefetch open a Stripe Session and spend a rate-wall attempt),

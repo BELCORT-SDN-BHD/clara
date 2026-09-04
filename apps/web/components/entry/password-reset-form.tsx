@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { PASSWORD_MIN_LENGTH } from "@/lib/auth/password-policy";
 import { createClient } from "@/lib/supabase/client";
 
 export interface PasswordResetAuthClient {
@@ -45,6 +46,8 @@ export function PasswordResetForm({
   createSupabaseClient?: () => PasswordResetAuthClient;
 }) {
   const t = useTranslations("PasswordReset");
+  /** The shared password-policy sentence — see `lib/auth/password-policy.ts`. */
+  const tAuth = useTranslations("Auth");
   const [password, setPassword] = useState("");
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -98,11 +101,23 @@ export function PasswordResetForm({
         <form className="flex flex-col gap-6" onSubmit={submit}>
           <div className="grid gap-1.5">
             <Label htmlFor="new-password">{t("passwordLabel")}</Label>
+            {/* THE RULE, BEFORE THE TYPING (PR 541 stage 2). This face used to
+                be the only one that stated the policy, and it stated it in the
+                CardDescription — one surface's prose rather than a fact the
+                other two could share. It is a hint beside the field here, from
+                the same constant and the same string the signup and invite
+                faces render. See `lib/auth/password-policy.ts`, including why
+                the breached-password clause that used to live in that
+                description is GONE rather than moved. */}
+            <p id="new-password-policy" className="text-xs text-muted-foreground">
+              {tAuth("passwordPolicy", { min: PASSWORD_MIN_LENGTH })}
+            </p>
             <Input
               id="new-password"
               type="password"
               autoComplete="new-password"
-              minLength={12}
+              minLength={PASSWORD_MIN_LENGTH}
+              aria-describedby="new-password-policy"
               required
               value={password}
               onChange={(event) => setPassword(event.target.value)}
