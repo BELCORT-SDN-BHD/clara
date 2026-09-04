@@ -356,6 +356,54 @@ test("H-48 r2: the busy guard runs ONE cycle when two overlap, and never hands b
   }
 });
 
+test("H-48 r3: the stall clock runs from the LAST SETTLE, not from loop start", async () => {
+  // The r2 panel's gap. Keyed on loopStartedAt, a loop that had been healthy for hours would
+  // be reported STALLED on the very next /ready after ONE blown cycle, with a line claiming no
+  // cycle had settled in hours — false about a loop that settled seconds earlier. Here the loop
+  // settles first, THEN a cycle blows, and the clock must restart from that settle.
+  const prevInterval = process.env.CLARA_LANE_PROBE_INTERVAL_MS;
+  const prevCycle = process.env.CLARA_LANE_PROBE_CYCLE_MS;
+  process.env.CLARA_LANE_PROBE_INTERVAL_MS = "1000"; // the floor
+  process.env.CLARA_LANE_PROBE_CYCLE_MS = "30";
+  _resetLaneProbeCacheForTest();
+  try {
+    // Age the loop well past two intervals BEFORE it ever settles — this is the state that used
+    // to poison the verdict, so the cell would pass vacuously without it.
+    _setLaneProbeForTest(() => new Promise(() => {}));
+    laneProbeHealth();
+    await new Promise((r) => setTimeout(r, 2100));
+    assert.equal(laneProbeHealth().stalled, true, "mandatory setup: the loop IS stalled before the good cycle");
+
+    // A good cycle lands. The clock restarts from it.
+    _setLaneProbeForTest(async (d) => ({ lane: d.lane, ok: true }));
+    await _refreshOnceForTest();
+    const settled = laneProbeHealth();
+    assert.equal(settled.pending, false);
+    assert.equal(settled.stalled, false, "a settled loop is never stalled");
+    assert.ok(settled.since_ms < 500, `and its clock runs from THAT settle (${settled.since_ms}ms), not from loop start`);
+
+    // Now ONE cycle blows. Pending again — but NOT stalled, because the loop spoke seconds ago.
+    _setLaneProbeForTest(() => new Promise(() => {}));
+    await _refreshOnceForTest();
+    const blown = laneProbeHealth();
+    assert.equal(blown.pending, true, "a blown cycle discards the verdict");
+    assert.equal(blown.stalled, false, "ONE blown cycle after a healthy one is NOT a stall — this is the r3 fix");
+    assert.ok(blown.since_ms < 1000, `and since_ms is measured from the last settle (${blown.since_ms}ms), not the hours-old loop start`);
+
+    // Only after two intervals PAST that settle does it become a stall.
+    await new Promise((r) => setTimeout(r, 2100));
+    const stalled = laneProbeHealth();
+    assert.equal(stalled.stalled, true, "two intervals past the last settle IS a stall");
+    assert.ok(stalled.since_ms >= 2000, `and the reported age is honest (${stalled.since_ms}ms)`);
+  } finally {
+    _resetLaneProbeCacheForTest();
+    if (prevInterval === undefined) delete process.env.CLARA_LANE_PROBE_INTERVAL_MS;
+    else process.env.CLARA_LANE_PROBE_INTERVAL_MS = prevInterval;
+    if (prevCycle === undefined) delete process.env.CLARA_LANE_PROBE_CYCLE_MS;
+    else process.env.CLARA_LANE_PROBE_CYCLE_MS = prevCycle;
+  }
+});
+
 test("H-48 r2: a loop that never settles reports STALLED past two intervals, not merely pending", async () => {
   // The absence-is-not-evidence hole: a wedged loop resets to pending, so it read exactly like
   // a fresh boot forever. `stalled` is what makes the two distinguishable.
@@ -369,7 +417,7 @@ test("H-48 r2: a loop that never settles reports STALLED past two intervals, not
     const fresh = laneProbeHealth();
     assert.equal(fresh.pending, true);
     assert.equal(fresh.stalled, false, "a FRESH loop is pending but not yet stalled — different facts");
-    assert.equal(fresh.since_ms, null);
+    assert.ok(fresh.since_ms !== null && fresh.since_ms < 500, `before the first settle the clock runs from loop start (${fresh.since_ms}ms)`);
     await new Promise((r) => setTimeout(r, 2100)); // past two intervals
     const stalled = laneProbeHealth();
     assert.equal(stalled.pending, true);

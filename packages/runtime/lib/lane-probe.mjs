@@ -67,9 +67,12 @@
 // AND `pending` IS NOT LEFT AMBIGUOUS FOREVER. A cycle that blows its hard bound resets the
 // verdict to null, i.e. back to `pending` — so a loop that keeps timing out would have read
 // identically to "not measured yet", indefinitely, with /ready saying nothing (review-558 r2:
-// absence is not evidence). `laneProbeHealth()` therefore also reports `stalled`, true once the
-// loop has run more than TWO intervals with no settled cycle, and /ready turns that into a
-// WARNING — never a readiness failure, because a stalled INSTRUMENT is not a broken lane.
+// absence is not evidence). `laneProbeHealth()` therefore also reports `stalled`, true once
+// TWO intervals have passed since the loop LAST SETTLED a cycle (or since it started, before
+// the first one), and /ready turns that into a WARNING — never a readiness failure, because a
+// stalled INSTRUMENT is not a broken lane. The reference point matters: measured from loop
+// START, a single blown cycle after hours of healthy ones would report a stall that never
+// happened (review-558 r3).
 //
 // THE STALENESS THIS BUYS IS BOUNDED AND ALREADY THE HOUSE CONTRACT. A cached runtime-lane
 // failure can flip `ready` false on a reading up to one interval old — the same shape the
@@ -325,17 +328,24 @@ function ensureStarted() {
 export function laneProbeHealth() {
   ensureStarted();
   const now = Date.now();
+  // THE STALL CLOCK KEYS ON THE LAST SETTLED CYCLE, falling back to loop start only before the
+  // first one (review-558 r3). Keying it on `loopStartedAt` alone was wrong in a way that would
+  // have printed a false statement: after hours of healthy cycles, ONE blown cycle nulls the
+  // verdict, and the loop would have been reported stalled on the very next /ready with a line
+  // claiming no cycle had settled in hours — about a loop that settled seconds earlier. The
+  // question `stalled` answers is "how long since this loop last told me anything", and the
+  // answer is measured from the last time it did.
+  const reference = lastSettledAt || loopStartedAt;
+  const sinceMs = reference ? now - reference : null;
   if (!Array.isArray(cachedLanes)) {
-    const waiting = now - loopStartedAt;
-    const stalled = waiting > 2 * intervalMs();
-    return { pending: true, lanes: [], stalled, since_ms: stalled ? waiting : null };
+    return {
+      pending: true,
+      lanes: [],
+      stalled: sinceMs !== null && sinceMs > 2 * intervalMs(),
+      since_ms: sinceMs,
+    };
   }
-  return {
-    pending: false,
-    lanes: cachedLanes.map((l) => Object.assign({}, l)),
-    stalled: false,
-    since_ms: lastSettledAt ? now - lastSettledAt : null,
-  };
+  return { pending: false, lanes: cachedLanes.map((l) => Object.assign({}, l)), stalled: false, since_ms: sinceMs };
 }
 
 /** Test-only: the resolved timing knobs, so a cell can assert the floor and the bounds it
