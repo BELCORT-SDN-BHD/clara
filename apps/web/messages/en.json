@@ -2937,7 +2937,6 @@
         "unknown": "This client's chart state reads \"{state}\", which this build does not recognise."
       },
       "planClosedNote": "The onboarding plan is closed. Applying the standard chart is a separate act and is still available.",
-      "undecidedWhileOpenNote": "If the interview has already asked about the chart of accounts, the answer is on this plan — the database reads that decision only once onboarding is committed, so it is reported here after the commit, not before.",
       "noTemplates": "Your firm has no published chart-of-accounts template to apply.",
       "applyTrigger": "Apply the standard chart",
       "applyTitle": "Apply the firm's standard chart of accounts",

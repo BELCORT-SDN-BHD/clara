@@ -126,13 +126,13 @@ export function SettledOnboardingCard({
         <dd className="text-card-foreground">{plan.revision_n}</dd>
       </dl>
 
-      {/* THE CHART CONTROL STAYS REACHABLE, and this is the arm where it actually WORKS.
+      {/* THE CHART CONTROL STAYS REACHABLE — a requirement of THIS item, not a fix for H-29.
           `ApplyStandardChartControl` is the only surface for `clara.apply_coa_template` in the
-          whole estate, its own prop doc records that the apply does NOT need an open plan, and
-          `clara.coa_chart_state` reads the seed decision out of the latest COMMITTED plan
-          (0156_coa_apply_template.sql:1080-1088) — so it can only report `pending` AFTER the
-          commit. Collapsing the item list without surfacing this row would have hidden the one
-          control the commit unlocks. See H-29 in the PR body for the open-plan half. */}
+          whole estate, and its own prop doc records that the apply does NOT need an open plan.
+          Collapsing the item list without surfacing this row would have hidden the one control
+          a commit unlocks, which is the reason the receipt hosts it rather than burying it in
+          the disclosure. What `clara.coa_chart_state` reports for an OPEN plan is the DB-A
+          lane's subject (0156_coa_apply_template.sql:1082) and is untouched here. */}
       {chartItem ? (
         <div className="flex flex-col gap-2 rounded-lg border border-border bg-muted/40 p-2">
           <p className="text-xs font-medium text-card-foreground">{chartItem.question ?? chartItem.item_key}</p>
