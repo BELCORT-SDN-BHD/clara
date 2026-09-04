@@ -462,15 +462,31 @@ returns table(
   -- relation with no application-role grant, so it must borrow the owner's rights to see anything
   -- at all. This one does not: `firm_timeline_visible` is SELECT-granted to clara_authenticated
   -- and does its own scoping, so running as the caller lets the VIEW's own predicate bind rather
-  -- than being bypassed and re-implemented. `_human_ctx` is itself a definer, so the bookkeeper
-  -- floor still refuses below rank; what changes is that this function gains no privilege it does
-  -- not need.
+  -- than being bypassed and re-implemented, and the function borrows no privilege it does not need.
+  --
+  -- AND THAT IS WHY THE FLOOR IS INLINE RATHER THAN `_human_ctx`. Measured on the rig: an INVOKER
+  -- body cannot call `clara._human_ctx(int)` — it is an internal helper with no application-role
+  -- EXECUTE grant, so the call raises `permission denied for function _human_ctx` for exactly the
+  -- caller this door serves. The three checks below are `_human_ctx`'s own, written against the
+  -- helpers that ARE granted to the app roles (`0004:760` grants jwt_sub / jwt_firm /
+  -- actor_role_rank / role_rank), with the same CLR04 refusals in the same order. This is the one
+  -- place in the file where a predicate is restated rather than delegated, and the reason is
+  -- structural: delegation is not reachable from an invoker body.
   language plpgsql stable security invoker set search_path=clara,pg_temp as $$
 declare
   c record;
   v_limit int;
 begin
-  c:=clara._human_ctx(clara.role_rank('bookkeeper'));
+  select clara.jwt_sub() as actor, clara.jwt_firm() as firm into c;
+  if c.actor is null then
+    raise exception 'no authenticated actor' using errcode='CLR04';
+  end if;
+  if c.firm is null then
+    raise exception 'actor has no active membership' using errcode='CLR04';
+  end if;
+  if coalesce(clara.actor_role_rank(),-1) < clara.role_rank('bookkeeper') then
+    raise exception 'insufficient role' using errcode='CLR04';
+  end if;
   -- CLAMPED, NOT REFUSED. A page size is a transport preference, not a judgement, and a caller
   -- that asks for a million rows should get a page rather than an error. The ceiling is the DB's
   -- and the caller cannot raise it.
