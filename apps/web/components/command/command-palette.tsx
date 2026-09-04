@@ -23,7 +23,7 @@ import {
 import { DO_ACTIONS, permittedDoActions, type DoActionEnv, type DoActionSpec } from "@/lib/command/do-actions";
 import { loadDoEnv, runDoAction } from "@/lib/command/do-dispatch";
 import { isDoorRefusal } from "@/lib/doors";
-import { hasNavigationAccess } from "@/lib/firm/navigation";
+import { visibleAdminNavigation, visibleFirmNavigation } from "@/lib/firm/navigation";
 import { loadClientRegister, type ClientRow } from "@/lib/firm/reads";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
 import type { SessionTokenAccessor } from "@/lib/session";
@@ -196,16 +196,44 @@ export function CommandPalette({ onNavigate, session = sessionTokenAccessor }: C
   // is legibility, and the destination's RLS policy or governed door remains the
   // wall. A caller who types the URL still meets it.
   const goScope = doState.phase === "ready" ? doState.env.ctx : null;
+
+  // THE SIDEBAR'S OWN OUTPUT, not a parallel computation over the same inputs.
+  // `visibleFirmNavigation`/`visibleAdminNavigation` are the functions
+  // `components/firm-nav.tsx` renders from, so what they return IS the sidebar —
+  // filtered by `hasNavigationAccess` inside, and RANK-SHAPED on the way out
+  // (裁-187 rewrites the Admin entry's `messageKey` to "firm" for a caller who
+  // administers nothing). Calling them instead of re-applying the predicate here
+  // buys the second half for free: the ⌘K row and the sidebar row for one href
+  // cannot disagree about whether it is offered OR about what it is called.
+  const navByHref = React.useMemo(() => {
+    if (goScope === null) return null;
+    return new Map(
+      [...visibleFirmNavigation(goScope), ...visibleAdminNavigation(goScope)].map((entry) => [
+        entry.href,
+        "messageKey" in entry ? entry.messageKey : entry.navMessageKey,
+      ]),
+    );
+  }, [goScope]);
+
+  /** The ⌘K label id for a row, following the sidebar's rank-shaped rename. */
+  const labelIdFor = React.useCallback(
+    (route: (typeof FIRM_ROUTES)[number]) => {
+      const navKey = navByHref?.get(route.href);
+      return (navKey && route.rankLabels?.[navKey]) ?? route.id;
+    },
+    [navByHref],
+  );
+
   const firmMatches = React.useMemo(
     () =>
-      goScope === null
+      navByHref === null
         ? []
         : FIRM_ROUTES.filter(
             (route) =>
-              hasNavigationAccess(goScope, route) &&
-              matchesQuery([tGoRoutes(route.id), ...(route.keywords ?? [])], query),
+              navByHref.has(route.href) &&
+              matchesQuery([tGoRoutes(labelIdFor(route)), ...(route.keywords ?? [])], query),
           ),
-    [goScope, query, tGoRoutes],
+    [navByHref, labelIdFor, query, tGoRoutes],
   );
 
   // ── C-43, GAP B: A CLIENT IS REACHABLE BY NAME ─────────────────────────────
@@ -316,7 +344,7 @@ export function CommandPalette({ onNavigate, session = sessionTokenAccessor }: C
                 value={route.id}
                 onSelect={() => goTo(route.href)}
               >
-                <span>{tGoRoutes(route.id)}</span>
+                <span>{tGoRoutes(labelIdFor(route))}</span>
                 {route.status === "planned" && (
                   <Badge variant="outline" className="ml-auto">
                     {t("go.plannedBadge")}

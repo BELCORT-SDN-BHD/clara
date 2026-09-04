@@ -119,6 +119,17 @@ function dialogNode(predicate: (n: { tagName?: string }) => boolean): unknown {
   return walk(document.body as never);
 }
 
+/** The OPEN commit dialog's own Confirm control, or null when the dialog is shut. Distinct from
+ *  the trigger BY IDENTITY (the exclusion idiom the keyboard battery already uses: both carry
+ *  the same text). Reads only — it clicks NOTHING, so a cell can ask "is the dialog still
+ *  standing?" without changing the answer. */
+function commitDialogConfirm(h: { container: unknown }): unknown {
+  const trigger = buttonsLabelled(h.container, "Commit onboarding")[0];
+  return dialogNode(
+    (n) => n.tagName === "BUTTON" && textOf(n as never) === "Commit onboarding" && (n as unknown) !== trigger,
+  );
+}
+
 /** Opens the Commit dialog and returns its own Confirm control, distinct from the trigger by
  *  IDENTITY (the exclusion idiom the keyboard battery already uses: both carry the same text). */
 async function openCommitDialog(h: { container: unknown; settle: () => Promise<void> }): Promise<unknown> {
@@ -126,7 +137,7 @@ async function openCommitDialog(h: { container: unknown; settle: () => Promise<v
   assert.ok(trigger, "the Commit trigger must still RENDER on a live plan (gating shapes, never hides)");
   await clickButton(trigger as never);
   for (let i = 0; i < 4; i++) await h.settle();
-  const confirm = dialogNode((n) => n.tagName === "BUTTON" && textOf(n as never) === "Commit onboarding" && (n as unknown) !== trigger);
+  const confirm = commitDialogConfirm(h);
   assert.ok(confirm, "the dialog's own Confirm control must render, distinct from the trigger");
   return confirm;
 }
@@ -418,7 +429,14 @@ test("裁-187 — a CLR05 'self_attestation' refusal REVEALS the field beside th
         for (let i = 0; i < 6; i++) await h.settle();
         // The refusal renders VERBATIM either way — that half never depended on the token.
         assert.match(h.text(), /solo onboarding commit requires an attestation/, `got: ${h.text()}`);
-        await openCommitDialog(h);
+        // MERGE-FORWARD, #549 x #546: this cell used to RE-OPEN the dialog here, because on main
+        // a refused confirm CLOSED it. CB-AE2E-004 fixes exactly that, so re-opening would click
+        // an already-open dialog's trigger and toggle it SHUT — which is how this cell reported
+        // the merge. The field is read where the human reads it: in the dialog that never left.
+        assert.ok(
+          commitDialogConfirm(h),
+          "CB-AE2E-004: a refused commit leaves the dialog STANDING — the human keeps the refusal and their input",
+        );
         assert.equal(Boolean(attestationField()), shouldReveal, `details=${details} should ${shouldReveal ? "" : "NOT "}reveal the attestation field`);
       } finally {
         await h.unmount();

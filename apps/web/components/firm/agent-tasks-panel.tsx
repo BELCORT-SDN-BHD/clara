@@ -42,6 +42,7 @@ import { EmptyState, LoadingState } from "@/components/common/state";
 import { CodingActionRefusal } from "@/components/documents/coding-action-refusal";
 import { Badge } from "@/components/parts/PartBadge";
 import { CodingDoorDialog } from "@/components/documents/CodingDoorDialog";
+import { AgentTaskDetail } from "./agent-task-detail";
 
 const KNOWN_KINDS: readonly AgentTaskKind[] = ["chat_turn", "wake", "autodraft", "close_prep"];
 const KNOWN_STATUSES: readonly AgentTaskStatus[] = [
@@ -91,22 +92,33 @@ export function AgentTasksPanel() {
                   <span className="text-xs text-muted-foreground">{businessDateTime(task.created_at)}</span>
                 </div>
                 {actingId === task.id && !rowVanished && err ? <CodingActionRefusal err={err} clr={clr} /> : null}
-                {AGENT_TASK_CANCELLABLE_STATUSES.has(task.status) ? (
-                  <CodingDoorDialog
-                    triggerLabel={t("cancelTrigger")}
-                    triggerVariant="destructive"
-                    title={t("cancelTitle")}
-                    description={t("cancelDescription")}
-                    confirmLabel={t("cancelConfirm")}
-                    busy={busy}
-                    onConfirm={() => {
-                      setActingId(task.id);
-                      return act(async () => { await cancelAgentTask(task.id, { session: sessionTokenAccessor }); });
-                    }}
+                {/* E-2 (CB-AE2E-018): the row offered exactly one verb and
+                    showed three of its eleven read columns. Cancel is unchanged
+                    and stays where it was; Details opens the other seven, which
+                    were being read on every load and discarded. */}
+                <div className="flex flex-wrap items-center gap-2">
+                  <AgentTaskDetail
+                    task={task}
+                    kindLabel={kindLabel(task.kind)}
+                    statusLabel={statusLabel(task.status)}
                   />
-                ) : (
-                  <p className="text-xs text-muted-foreground">{t("cancelRequestedNote")}</p>
-                )}
+                  {AGENT_TASK_CANCELLABLE_STATUSES.has(task.status) ? (
+                    <CodingDoorDialog
+                      triggerLabel={t("cancelTrigger")}
+                      triggerVariant="destructive"
+                      title={t("cancelTitle")}
+                      description={t("cancelDescription")}
+                      confirmLabel={t("cancelConfirm")}
+                      busy={busy}
+                      onConfirm={() => {
+                        setActingId(task.id);
+                        return act(async () => { await cancelAgentTask(task.id, { session: sessionTokenAccessor }); });
+                      }}
+                    />
+                  ) : (
+                    <p className="text-xs text-muted-foreground">{t("cancelRequestedNote")}</p>
+                  )}
+                </div>
               </li>
             ))}
           </ul>

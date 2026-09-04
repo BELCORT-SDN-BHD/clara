@@ -2,6 +2,7 @@ import { useTranslations } from "next-intl";
 
 import type { ClaraPart } from "../../lib/parts/types";
 import { isStatusResolverType } from "../../lib/parts/catalog";
+import { toolStatusTone, type ToolCallStatus } from "../../lib/parts/toolStatus";
 import { Badge } from "./PartBadge";
 import { StateBanner } from "../common/state";
 import { PartSummaryCard, type SummaryRow } from "./PartSummaryCard";
@@ -77,13 +78,35 @@ type Translate = (key: string) => string;
 function summaryOf(
   part: Extract<ClaraPart, { type: SummaryPartType }>,
   t: Translate,
-): { title: string; rows: SummaryRow[]; note?: string | null } {
+): { title: string; rows: SummaryRow[]; note?: string | null; link?: { href: string; label: string } | null } {
   switch (part.type) {
     case "je_review":
+      // C6 — THE ONE UPGRADE THIS BRANCH CAN HONESTLY TAKE TODAY: a way out of the
+      // thread. The card is ids-only by contract (PartSummaryCard renders no figure),
+      // so a human reading "a journal entry was drafted" had the entry id and no route
+      // to a single line or amount. The link is the SAME destination and the SAME
+      // "no client, no link" guard `EntryPostedCard` already uses (./V14ReceiptCards.tsx):
+      // the emitter can construct a part before `client_id` is filled, and
+      // `/clients//journals` is a 404 dressed as an affordance.
+      //
+      // WHAT IS DELIBERATELY NOT BUILT HERE — a HYDRATED je_review card. Its own type
+      // says it should "re-derive authoritative state via get_draft_review on hydrate"
+      // (../../lib/parts/types.ts), and there is no such reader: `get_draft_review` has
+      // ZERO implementations in apps/web, only three comments naming it. What DOES
+      // exist is client-wide and bounded — `listJournalEntries` / `listJournalLines`
+      // fetch every entry and every line for a client under `FETCH_CAP`, and that
+      // module's own header warns a truncation "can drop lines from ANY entry", so a
+      // card built on it could show a PARTIAL entry as if it were whole. And the
+      // obvious content — debits, credits, a total — would be a figure this UI summed,
+      // which hard constraint 2 forbids outright. A read-only link to the workbench
+      // that holds the live read is the honest ceiling until a per-entry reader exists.
       return {
         title: t("jeReview"),
         rows: [[t("entry"), part.entry_id], [t("document"), part.document_id], [t("client"), part.client_id], [t("provenance"), part.provenance_tier]],
         note: part.exception ? t("amountException") : part.uncertainty?.note,
+        link: part.client_id
+          ? { href: `/clients/${encodeURIComponent(part.client_id)}/journals`, label: t("jeReviewLink") }
+          : null,
       };
     case "doc_review":
       return { title: t("docReview"), rows: [[t("document"), part.document_id], [t("entry"), part.entry_id], [t("client"), part.client_id]] };
@@ -109,6 +132,7 @@ export function PartRenderer({
   taskId,
   session,
   clarifyAnswerable = false,
+  toolStatus,
 }: {
   part: ClaraPart;
   /** The task that emitted this part (`MessageRow.task_id`, or the live stream's
@@ -116,6 +140,11 @@ export function PartRenderer({
    *  `agent_interruptions` row. */
   taskId?: string | null;
   session?: SessionTokenAccessor | null;
+  /** C6 — a `tool_call`'s resolved outcome, composed by the caller from THIS
+   *  message's sibling `tool_result`/`tool_error` parts (`ClaraMessageBubble` +
+   *  `lib/parts/toolStatus.ts`). Undefined means no caller composed one; the chip
+   *  then renders the bare tool name exactly as before, never a guessed status. */
+  toolStatus?: ToolCallStatus;
   /** Set by ClaraThreadView for the LAST clarify part of the LIVE stream fold, and
    *  nothing else — see ClarifyCard's own header for why every other clarify is
    *  read-only rather than merely un-styled. */
@@ -127,6 +156,7 @@ export function PartRenderer({
   const tSummary = useTranslations("Clara.parts.summary");
   const tAttachment = useTranslations("Clara.parts.attachment");
   const tClarify = useTranslations("Clara.parts.clarify");
+  const tToolCall = useTranslations("Clara.parts.toolCall");
 
   if (part.type === "text") {
     return part.text.trim() ? <p className="max-w-prose text-sm text-foreground">{part.text}</p> : null;
@@ -154,11 +184,32 @@ export function PartRenderer({
   }
 
   if (part.type === "tool_call") {
-    // A standalone renderer has no view of sibling tool_result/tool_error parts, so
-    // it names the tool honestly without inventing a running/ok/error status — the
-    // chat-list composition that resolves that status (mirroring
-    // apps/dashboard/app/chat/parts.tsx's toolStatuses) is a later lane's wiring.
-    return <Badge tone="neutral">{part.tool}</Badge>;
+    // C6 — THE CHIP NOW CARRIES ITS OUTCOME, and it still never invents one. This
+    // renderer is handed ONE part and cannot see siblings, which is why its previous
+    // body called the resolution "a later lane's wiring"; the composition moved up to
+    // `ClaraMessageBubble`, the only altitude that holds the sibling set, and arrives
+    // here as `toolStatus`. Absent (no caller composed one, or the transcript records
+    // no outcome) it falls back to exactly the old bare name chip.
+    //
+    // WHAT THIS FIXES CONCRETELY: `tool_result` and `tool_error` render `null` (they
+    // are the catalog's two STATUS_RESOLVER_TYPES), so a tool that FAILED and a tool
+    // that SUCCEEDED were the same grey chip — and fourteen of chatTurn_v17's tools
+    // have no promotion arm at all, so that chip plus the model's prose was their
+    // entire visible output.
+    return (
+      <Badge tone={toolStatus ? toolStatusTone(toolStatus) : "neutral"}>
+        <span>{part.tool}</span>
+        {toolStatus ? (
+          // The tool NAME is the DB/runtime's own token and stays verbatim; the
+          // OUTCOME word is this app's copy and routes through next-intl.
+          // The separator is an EXPLICIT string, not the Badge's flex `gap-1`: the gap
+          // is a visual space only, so without this the accessible text ran the two
+          // together as "trial_balance· done". Same `·` idiom the refusal banner uses
+          // for code · reason.
+          <span className="font-normal">{" · "}{tToolCall(`status.${toolStatus}`)}</span>
+        ) : null}
+      </Badge>
+    );
   }
 
   if (part.type === "clarify") {
@@ -201,8 +252,8 @@ export function PartRenderer({
   }
 
   if (isSummaryPart(part.type)) {
-    const { title, rows, note } = summaryOf(part as Extract<ClaraPart, { type: SummaryPartType }>, tSummary);
-    return <PartSummaryCard title={title} rows={rows} note={note} />;
+    const { title, rows, note, link } = summaryOf(part as Extract<ClaraPart, { type: SummaryPartType }>, tSummary);
+    return <PartSummaryCard title={title} rows={rows} note={note} link={link} />;
   }
 
   // The four chatTurn_v14 receipt kinds (MBB-4). Each has a REAL card of its own in

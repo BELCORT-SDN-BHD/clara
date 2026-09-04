@@ -186,12 +186,39 @@ export const PART_CATALOG = {
       // subject_id is nullable on the wire (chatTurn.v14.bank.ts:77) — an act with
       // no single subject (a reconciliation complete, say) must still render.
       { type: "bank_act", verb: "complete_bank_reconciliation", subject_id: null, op_key: "op-2020", result: {} },
+      // C6 — THE SHAPE THE LEDGER ACTUALLY RETURNS, beside the two invented ones
+      // above. `result` is `_agent_match_bank_line_core`'s own `v_res`, passed through
+      // verbatim by `classifyBankResult` (chatTurn.v14.bank.ts); 0121 returns the
+      // delegate's row, whose identifier for this verb is `match_id`. The card renders
+      // string/boolean leaves and drops numerals — lib/parts/bankPayload.ts's header
+      // says why — so this fixture carries one of each to exercise both sides.
+      {
+        type: "bank_act",
+        verb: "match_bank_line",
+        subject_id: "line-2626",
+        op_key: "bank-match_bank_line:task-1:0:{}",
+        result: { match_id: "match-2626", status: "live", matched_cents: 125_00 },
+      },
     ],
   },
   bank_pack: {
     renderBranch: true,
     fixtures: [
       { type: "bank_pack", bank_account_id: "acct-2121", digest: "sha256:2121deadbeef", pack: { lines: 12 } },
+      // C6 — the VERSIONED shape `clara._agent_get_bank_pack_core` builds
+      // (0121_f_a3_pr1b_agent_limb.sql): the `clara.bank-pack/v1` token plus a `budget`
+      // whose two counts Postgres computed with `jsonb_array_length`. The fixture above
+      // it is deliberately KEPT — it is not this shape, and it is what proves the card
+      // falls back to identifiers instead of guessing at an unrecognised payload.
+      {
+        type: "bank_pack",
+        bank_account_id: "acct-2727",
+        digest: "sha256:2727deadbeef",
+        pack: {
+          schema: "clara.bank-pack/v1",
+          budget: { lines: 12, candidates: 4, truncated: false },
+        },
+      },
     ],
   },
 

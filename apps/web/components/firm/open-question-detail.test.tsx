@@ -61,7 +61,19 @@ test("OpenQuestionDetail: no fetch until 'View details' is clicked, then the REA
         for (let i = 0; i < 4; i++) await h.settle();
 
         assert.equal(calls, 1, "clicking must fire exactly one get_open_question call");
-        assert.match(h.text(), /classification/, "the question's real origin must render");
+        // INVERTED 2026-09-04. This line used to require the RAW token
+        // `classification` on screen, which is precisely the defect: the
+        // fixture's `origin` is the DB's enum value and a professional was
+        // reading it. It now requires the LABEL for that same fixture value —
+        // the proof that the fetched question reached the screen is unchanged,
+        // only the spelling it must arrive in. The absence of the raw token is
+        // pinned in ./open-question-detail-labels.test.tsx, together with the
+        // unknown-value arm and the vocabulary parse.
+        assert.match(
+          h.text(),
+          /Clara could not classify the document/,
+          "the question's real origin must render — in words, not as its DB enum value",
+        );
         assert.match(h.text(), /5100/, "the spawned rule's real account_code must render — proving rule data, not just question data, was fetched and shown");
       } finally {
         await h.unmount();

@@ -137,9 +137,13 @@ test("WALL: removing the last owner renders the same CLR09 through the confirm d
 
         const after = textOf(body as never);
         assert.match(after, /cannot demote\/remove the last active owner/);
-        // The refusal renders OUTSIDE the dialog, so it survives the close — a
-        // message that vanished with the dialog would be a refusal nobody read.
-        assert.ok(!/Remove Tao Lim from this firm\?/.test(after), "the dialog closed and the refusal stayed");
+        // CB-AE2E-004 (2026-09-04): the refusal now renders INSIDE the dialog, which
+        // STAYS OPEN. The old assertion here was the mirror image — "the dialog closed
+        // and the refusal stayed" — and it held only because the refusal painted on the
+        // page behind a dialog that had just been thrown away. A modal that closes on a
+        // refusal hides nothing today only because this panel happens to have no fields;
+        // the law is one law for all fifteen wrappers.
+        assert.match(after, /Remove Tao Lim from this firm\?/, "the dialog must STAY OPEN, carrying the refusal the human has to read");
       } finally {
         await h.unmount();
       }
@@ -151,17 +155,19 @@ test("WALL: removing the last owner renders the same CLR09 through the confirm d
 // WALL 2 — the role ceiling
 // ---------------------------------------------------------------------------
 
-test("WALL: an ADMIN promoting to owner gets CLR04 verbatim, and all four roles stayed on offer", async () => {
-  // NOT VACUOUS ANY MORE (independent review of #455, MEDIUM-6). This cell used
-  // to mount the OWNER fixture and pick `owner` — a selection no ceiling refuses
-  // — against a mock that answered CLR04 on the strength of the URL alone. It
-  // stayed green whatever arguments the panel sent, including none.
+test("SHAPED: an ADMIN is not offered Owner at all (0157:277-279), and the three roles they MAY assign still send exactly what was clicked", async () => {
+  // INVERTED 2026-09-04 (review-550, 裁-187 / ADR-0078 decision 2). This cell used
+  // to require that "all four roles stayed on offer" and then drive an ADMIN into
+  // `set_member_role`'s CLR04 ceiling. Under the ruling that control is not
+  // rendered at all: `0157:277-279` refuses the assignment on RANK ALONE, which
+  // this page positively reads, so offering "Owner" to an admin was offering a
+  // control that could only refuse.
   //
-  // Now: a positively-read ADMIN caller (rank 2) picks `owner` (rank 3), which is
-  // the exact situation `0145:603` exists for; and THE MOCK READS THE REQUEST. It
-  // refuses only for this membership and this role, and answers a plain receipt
-  // for anything else — so a panel that sent the wrong row, or the wrong role,
-  // gets no refusal at all and this cell goes red.
+  // The cell keeps everything that made it non-vacuous (independent review of
+  // #455, MEDIUM-6) and moves it onto a role the admin MAY assign. THE MOCK
+  // STILL READS THE REQUEST: it refuses the owner promotion — which must now be
+  // unreachable — and answers a receipt for anything else, so the arguments the
+  // panel actually sends are measured, not mocked into existence.
   const seen: Record<string, unknown>[] = [];
   const impl = (async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const url = String(input);
@@ -188,23 +194,27 @@ test("WALL: an ADMIN promoting to owner gets CLR04 verbatim, and all four roles 
       );
 
       await openRoleMenu(h, body, "Siti Rahman");
-      // The proof that nothing was filtered: `owner` is offered to an admin whose
-      // own door will refuse them for asking.
+      // THE LADDER IS TRUNCATED AT THE CALLER'S OWN RANK. An admin sees three
+      // items, not four — and the assertion is on the WHOLE list, so an
+      // over-filter (hiding "Admin" too) reds it just as loudly as an under-filter.
       const offered = findAll(body, (n) => attrOf(n, "role") === "menuitemradio").map((n) => textOf(n as never).trim());
-      assert.deepEqual(offered, ["Viewer", "Bookkeeper", "Admin", "Owner"]);
-      await pickRole(h, body, "Owner");
+      assert.deepEqual(offered, ["Viewer", "Bookkeeper", "Admin"]);
 
-      // WHAT WAS ACTUALLY SENT, field by field. Mutating either one in the
-      // component sends arguments this mock answers with a receipt, and the
-      // refusal assertions below then find nothing.
+      // …and a role they MAY assign still sends exactly what was clicked. This
+      // half is what keeps the cell a measurement: mutate the row or the role in
+      // the component and the mock answers a refusal instead of a receipt.
+      await pickRole(h, body, "Bookkeeper");
       assert.equal(seen.length, 1, "exactly one governed call");
       assert.equal(seen[0]!.p_membership, "m-book", "the act named the row it was activated on");
-      assert.equal(seen[0]!.p_role, "owner", "…and the role that was actually clicked");
+      assert.equal(seen[0]!.p_role, "bookkeeper", "…and the role that was actually clicked");
       assert.equal(typeof seen[0]!.p_op_key, "string", "…under an op key the door requires");
 
       const after = textOf(body as never);
-      assert.match(after, /cannot assign a role above your own rank/);
-      assert.match(after, /CLR04/);
+      assert.doesNotMatch(
+        after,
+        /cannot assign a role above your own rank/,
+        "the ceiling is now unreachable from this control, so its refusal must never render here",
+      );
     } finally {
       await h.unmount();
     }

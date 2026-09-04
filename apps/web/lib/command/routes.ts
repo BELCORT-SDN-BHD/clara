@@ -70,6 +70,9 @@ export interface FirmCommandRoute extends CommandRouteBase {
    */
   minimumRole: MemberRole;
   operatorOnly?: true;
+  /** ⌘K label ids keyed by the sidebar's rank-shaped `messageKey`. See
+   *  `FIRM_ROUTE_PRESENTATION` for why the two catalogues are joined. */
+  rankLabels?: Readonly<Record<string, string>>;
 }
 
 export interface ClientCommandRoute extends CommandRouteBase {
@@ -116,6 +119,23 @@ const FIRM_ROUTE_PRESENTATION: readonly {
   href: string;
   status: CommandRouteStatus;
   keywords: string[];
+  /**
+   * C-43, second order: a ⌘K label that follows the SIDEBAR'S RANK-SHAPED one.
+   *
+   * `visibleFirmNavigation` rewrites an entry's `messageKey` for some callers —
+   * today the Admin entry becomes "Firm" for anyone who cannot actually
+   * administer the firm's people (裁-187), because "a bookkeeper reads 'Admin',
+   * finds nothing administrative, and reasonably concludes the product is
+   * offering them something they cannot use". ⌘K's labels are a SEPARATE
+   * catalogue on purpose ("Firm home" here, "Home" in the sidebar), so that
+   * rename did not reach this row — and a bookkeeper would have read "Firm" in
+   * the sidebar and "Admin" in ⌘K for one href. That is precisely the drift C-43
+   * exists to end, so the two are joined here rather than left to agree by luck:
+   * a key in this map is chosen when the rank-shaped entry's `messageKey`
+   * matches it. Data, not a branch in the render path, so the next such rename is
+   * one line.
+   */
+  rankLabels?: Readonly<Record<string, string>>;
 }[] = [
   {
     id: "firmHome",
@@ -160,6 +180,8 @@ const FIRM_ROUTE_PRESENTATION: readonly {
     href: "/admin",
     status: "built",
     keywords: ["admin", "firm controls", "tiers", "metering"],
+    // 裁-187: the sidebar calls this "Firm" for a caller who administers nothing.
+    rankLabels: { firm: "adminAsFirm" },
   },
   {
     // T10 (port-wave plan §4 T10): the compliance register, under /admin.
@@ -191,12 +213,15 @@ const FIRM_ROUTE_PRESENTATION: readonly {
     keywords: ["registrations", "approvals", "operator", "queue"],
   },
   {
-    // FS-8 PR-2 (裁-97): the firm-settings surface, under /admin — the
-    // high-stakes threshold control + the capabilities honest note.
+    // FS-8 PR-2 (裁-97): the firm-settings surface, under /admin. Built around
+    // the high-stakes threshold control until 裁-187 retired that control
+    // outright; the keywords lost "threshold" and "high stakes" with it, so the
+    // palette cannot advertise a destination by a control it no longer holds.
+    // What is there now: the approvals note and the capabilities honest note.
     id: "adminSettings",
     href: "/admin/settings",
     status: "built",
-    keywords: ["settings", "threshold", "high stakes", "capabilities", "owner"],
+    keywords: ["settings", "approvals", "capabilities", "owner"],
   },
 ];
 
@@ -235,6 +260,7 @@ export const FIRM_ROUTES: FirmCommandRoute[] = FIRM_ROUTE_PRESENTATION.map((row)
     href: row.href,
     status: row.status,
     keywords: row.keywords,
+    rankLabels: row.rankLabels,
     ...floor,
   };
 });

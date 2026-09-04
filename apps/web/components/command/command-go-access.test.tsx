@@ -205,6 +205,60 @@ test("a BOOKKEEPER sees Activity but not Members or Firm registrations — the s
   );
 });
 
+test("the Go row's LABEL follows the sidebar's rank-shaped rename — a bookkeeper reads 'Firm', not 'Admin'", async () => {
+  // 裁-187 renamed the Admin entry to "Firm" for a caller who administers
+  // nothing, and it rides `messageKey` on `visibleFirmNavigation` so the sidebar
+  // needed no change. ⌘K's labels are a SEPARATE catalogue by design, so the
+  // rename did NOT reach this row — and a bookkeeper read "Firm" in the sidebar
+  // and "Admin" in ⌘K for the same href. That is the exact drift C-43 exists to
+  // end, arriving from a sibling train after C-43 was written, which is why the
+  // palette now takes the registry's rank-shaped OUTPUT rather than re-applying
+  // its predicate.
+  await withFetch(
+    (url) => {
+      if (url.includes("/rest/v1/caller_context")) return json(ctxRow("bookkeeper", 1));
+      if (url.includes("/rest/v1/clients")) return json(CLIENTS);
+      throw new Error(`unexpected fetch: ${url}`);
+    },
+    async () => {
+      const h = await renderComponent(App());
+      try {
+        await settleUntil(h, () => h.text().includes("Firm activity"), "the Go rows", h.text);
+        const text = h.text();
+        // The row is OFFERED — it is viewer-floor, and a bookkeeper really can
+        // reach its children — but it is not called "Admin".
+        assert.ok(findRowByText(h.container, "Firm"), "the /admin row is missing for a bookkeeper");
+        assert.equal(findRowByText(h.container, "Admin"), null, "⌘K still calls it 'Admin' for a bookkeeper");
+        assert.doesNotMatch(text, /\bAdmin\b/);
+      } finally {
+        await h.unmount();
+      }
+    },
+  );
+});
+
+test("…and an ADMIN still reads 'Admin' — the rename is rank-shaped, not a blanket rewrite", async () => {
+  // The discriminating other half. Without it, "the label is Firm" would pass
+  // just as happily if the row had simply been renamed for everyone, which is a
+  // different (and wrong) product.
+  await withFetch(
+    (url) => {
+      if (url.includes("/rest/v1/caller_context")) return json(ctxRow("admin", 2));
+      if (url.includes("/rest/v1/clients")) return json(CLIENTS);
+      throw new Error(`unexpected fetch: ${url}`);
+    },
+    async () => {
+      const h = await renderComponent(App());
+      try {
+        await settleUntil(h, () => h.text().includes("Members"), "the admin's Go rows", h.text);
+        assert.ok(findRowByText(h.container, "Admin"), "an admin should still read 'Admin'");
+      } finally {
+        await h.unmount();
+      }
+    },
+  );
+});
+
 test("an OWNER on the OPERATOR firm sees every row, including the operator-only queue", async () => {
   await withFetch(
     (url) => {

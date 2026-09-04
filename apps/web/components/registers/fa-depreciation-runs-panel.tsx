@@ -18,14 +18,28 @@ import { fmtCents } from "@/lib/registers/money";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
 import { FaDoorDialog } from "./FaDoorDialog";
 
-export function DepreciationRunsPanel({ clientId, hasLiveAuthority }: { clientId: string; hasLiveAuthority: boolean }) {
+export function DepreciationRunsPanel({
+  clientId,
+  hasLiveAuthority,
+  onPosted,
+}: {
+  clientId: string;
+  hasLiveAuthority: boolean;
+  /** Fired ONLY after a run the DB accepted (sweep addendum item 1). A manual run
+   *  posts real journal entries, so the fixed-asset table's own cost/accumulated/NBV
+   *  and the register↔GL tie both move — and both live in SIBLING components with
+   *  their own hooks, which this panel's `act()` cannot reach. Rides `act`'s `onOk`
+   *  channel (lib/parts/hooks.ts), which fires before the follow-up reload and never
+   *  on the catch path, so a refused run refreshes nothing. */
+  onPosted?: () => void;
+}) {
   const t = useTranslations("FixedAssetsDepreciation.runs");
   const tc = useTranslations("Common");
   const { data: runs, loading, err, clr, busy, act } = useHydratedPart(sessionTokenAccessor, (s) => listDepreciationRuns(s, clientId));
 
   return (
     <div className="flex flex-col gap-2">
-      <SectionHeader level={3} action={hasLiveAuthority ? <RunDialog clientId={clientId} busy={busy} act={act} /> : undefined}>
+      <SectionHeader level={3} action={hasLiveAuthority ? <RunDialog clientId={clientId} busy={busy} act={act} onPosted={onPosted} /> : undefined}>
         {t("heading")}
       </SectionHeader>
       {runs && err ? (
@@ -65,7 +79,19 @@ export function DepreciationRunsPanel({ clientId, hasLiveAuthority }: { clientId
   );
 }
 
-function RunDialog({ clientId, busy, act }: { clientId: string; busy: boolean; act: (fn: () => Promise<void>) => Promise<void> }) {
+function RunDialog({
+  clientId,
+  busy,
+  act,
+  onPosted,
+}: {
+  clientId: string;
+  busy: boolean;
+  /** `useHydratedPart`'s own `act`, INCLUDING its `onOk` parameter — the previous
+   *  one-argument prop type erased the channel this fix needs. */
+  act: (fn: () => Promise<void>, onOk?: () => void) => Promise<boolean>;
+  onPosted?: () => void;
+}) {
   const t = useTranslations("FixedAssetsDepreciation.runs");
   const [periodStart, setPeriodStart] = useState("");
   const [periodEnd, setPeriodEnd] = useState("");
@@ -78,7 +104,7 @@ function RunDialog({ clientId, busy, act }: { clientId: string; busy: boolean; a
       confirmLabel={t("runTrigger")}
       busy={busy}
       confirmDisabled={!periodStart || !periodEnd}
-      onConfirm={() => act(async () => { await runDepreciationManual(sessionTokenAccessor, { clientId, periodStart, periodEnd }); })}
+      onConfirm={() => act(async () => { await runDepreciationManual(sessionTokenAccessor, { clientId, periodStart, periodEnd }); }, onPosted)}
     >
       <div className="grid gap-2 sm:grid-cols-2">
         <div className="grid gap-1.5">

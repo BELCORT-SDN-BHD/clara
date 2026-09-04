@@ -77,7 +77,7 @@ async function expandedDraft(over: {
         onApprove: (...args: unknown[]) => { calls.approve.push(args); },
         onRevise: () => {},
         onApproveRoutine: (...args: unknown[]) => { calls.routine.push(args); },
-        onWithdraw: async () => {},
+        onWithdraw: async () => true,
       }),
     ),
   );

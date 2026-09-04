@@ -15,13 +15,21 @@ import { NativeSelect } from "@/components/common/native-select";
 import { SectionHeader } from "@/components/common/section-header";
 import { Label } from "@/components/ui/label";
 import { useHydratedPart } from "@/lib/parts/hooks";
+import { useFirmScope } from "@/components/firm-scope-provider";
+import { firmCapabilities, type FirmCapabilities } from "@/lib/firm/capabilities";
 import { loadClientRegister } from "@/lib/firm/reads";
 import { listVendorBindings, loadVendorCounterparties } from "@/lib/firm-admin/vendor-bindings";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
 import { VendorBindingRowActions, ProposeBindingDialog } from "./vendor-binding-ceremony";
 
+// E-7 (裁-187): the capabilities come from the FIRM LAYOUT's own positively-read
+// caller context, handed down by `FirmScopeProvider` — no second read of
+// `clara.caller_context` is issued for this. `firmCapabilities` denies on a NULL
+// `role_rank`, which is the fail-closed reading the ruling asks for.
+
 export function VendorBindingsPanel() {
   const t = useTranslations("FirmAdminCompliance.vendorBindings");
+  const capabilities = firmCapabilities(useFirmScope());
   const clientsState = useHydratedPart(sessionTokenAccessor, (session) => loadClientRegister(session));
   const [clientId, setClientId] = useState<string>("");
 
@@ -46,12 +54,22 @@ export function VendorBindingsPanel() {
           </NativeSelect>
         )}
       </div>
-      {clientId ? <ClientVendorBindings key={clientId} clientId={clientId} /> : <EmptyState>{t("noClientSelected")}</EmptyState>}
+      {clientId ? (
+        <ClientVendorBindings key={clientId} clientId={clientId} capabilities={capabilities} />
+      ) : (
+        <EmptyState>{t("noClientSelected")}</EmptyState>
+      )}
     </div>
   );
 }
 
-function ClientVendorBindings({ clientId }: { clientId: string }) {
+function ClientVendorBindings({
+  clientId,
+  capabilities,
+}: {
+  clientId: string;
+  capabilities: FirmCapabilities;
+}) {
   const t = useTranslations("FirmAdminCompliance.vendorBindings");
   const { data: bindings, err, clr, busy, act } = useHydratedPart(sessionTokenAccessor, (session) => listVendorBindings(session, clientId));
   const counterpartiesState = useHydratedPart(sessionTokenAccessor, (session) => loadVendorCounterparties(session, clientId));
@@ -64,7 +82,14 @@ function ClientVendorBindings({ clientId }: { clientId: string }) {
         // is ALWAYS rendered now — see ProposeBindingDialog's own header for
         // why passing the FULL counterparties state (not just `.data`) is
         // what lets it show a real read failure + retry instead of vanishing.
-        action={<ProposeBindingDialog clientId={clientId} counterpartiesState={counterpartiesState} busy={busy} act={act} />}
+        // E-7 (裁-187): `clara.propose_vendor_identity_binding` floors at
+        // bookkeeper (`0154_binding_proposal_pr_1.sql:2506`). A viewer, and a
+        // caller whose rank could not be read, get no trigger at all.
+        action={
+          capabilities.canProposeVendorBinding ? (
+            <ProposeBindingDialog clientId={clientId} counterpartiesState={counterpartiesState} busy={busy} act={act} />
+          ) : null
+        }
       >
         {t("heading")}
       </SectionHeader>
@@ -87,7 +112,14 @@ function ClientVendorBindings({ clientId }: { clientId: string }) {
           ) : null}
           <ul className="flex flex-col rounded-lg border border-border">
             {bindings.map((b) => (
-              <VendorBindingRowActions key={b.binding_id} binding={b} busy={busy} act={act} />
+              <VendorBindingRowActions
+                key={b.binding_id}
+                binding={b}
+                busy={busy}
+                canSign={capabilities.canSignVendorBinding}
+                canRevoke={capabilities.canRevokeVendorBinding}
+                act={act}
+              />
             ))}
           </ul>
         </>

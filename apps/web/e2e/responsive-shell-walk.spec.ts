@@ -554,7 +554,12 @@ test("C-43: ⌘K's Go list is rank-shaped — a bookkeeper sees exactly what the
   // Establish the ORACLE from the sidebar itself rather than from a list this
   // test typed: the claim is that the two agree, so one of them has to be read.
   await expect(nav.getByRole("link", { name: "Activity", exact: true })).toBeVisible();
-  await nav.getByRole("link", { name: "Admin", exact: true }).click();
+  // 裁-187 (arrived on main from a sibling train): the section entry is still
+  // there — its destinations really are reachable at this rank — but it no
+  // longer calls itself "Admin", because a bookkeeper administers nothing under
+  // it. `e2e/firm-navigation-walk.spec.ts` pins the same pair.
+  await expect(nav.getByRole("link", { name: "Admin", exact: true })).toHaveCount(0);
+  await nav.getByRole("link", { name: "Firm", exact: true }).click();
   await expect(nav.getByRole("link", { name: "Members", exact: true })).toHaveCount(0);
 
   await ensureRealFocus(page);
@@ -564,6 +569,12 @@ test("C-43: ⌘K's Go list is rank-shaped — a bookkeeper sees exactly what the
   // HIDDEN, matching the sidebar. Before C-43 all three of these rendered.
   await expect(page.getByRole("option", { name: "Members", exact: true })).toHaveCount(0);
   await expect(page.getByRole("option", { name: "Firm registrations" })).toHaveCount(0);
+  // …AND THE LABEL AGREES TOO, not just the visibility. This is the half the
+  // merge exposed: ⌘K kept its own catalogue and went on saying "Admin" while
+  // the sidebar said "Firm" for the same href. Both halves of the agreement are
+  // now asserted against the sidebar read above, in one persona.
+  await expect(page.getByRole("option", { name: "Firm", exact: true })).toBeVisible();
+  await expect(page.getByRole("option", { name: "Admin", exact: true })).toHaveCount(0);
 });
 
 test("裁-13: target-size is clean at the NARROW viewport too, where the new controls live", async ({ page }) => {

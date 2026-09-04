@@ -102,7 +102,7 @@ test("readErrorKind: resets to null after a subsequent successful reload", async
         await h.settle();
         assert.equal(h.current.readErrorKind, "forbidden");
         fail = false;
-        await h.act(() => h.current.reload());
+        await h.act(async () => { await h.current.reload(); });
         assert.equal(h.current.readErrorKind, null);
       } finally {
         await h.unmount();
@@ -203,7 +203,7 @@ test("approve(): calls approve_entry then re-reads (a fresh loader round after t
       try {
         await h.settle();
         const readsBeforeApprove = seen.filter((s) => s === "read").length;
-        await h.act(() => h.current.approve("e1", "rev-1", null));
+        await h.act(async () => { await h.current.approve("e1", "rev-1", null); });
         assert.ok(seen.includes("approve"), "the door itself was called");
         const readsAfterApprove = seen.filter((s) => s === "read").length;
         assert.ok(readsAfterApprove > readsBeforeApprove, "act() re-reads after the write — no optimistic UI");
@@ -228,7 +228,7 @@ test("reverse(): a CLR10 refusal from reverse_entry is captured as a sticky clr,
       const h = await renderHook(() => useJournalsWorkbench(CLIENT_ID, sess));
       try {
         await h.settle();
-        await h.act(() => h.current.reverse("e1", "duplicate"));
+        await h.act(async () => { await h.current.reverse("e1", "duplicate"); });
         assert.equal(h.current.clr?.code, "CLR10");
         assert.match(h.current.err ?? "", /entry already reversed/);
         // FIX-2 / N1: the failing action's identity is attributed, so a caller
@@ -261,12 +261,12 @@ test("actingId: distinguishes which row a refusal belongs to across two differen
       const h = await renderHook(() => useJournalsWorkbench(CLIENT_ID, sess));
       try {
         await h.settle();
-        await h.act(() => h.current.reverse("entry-a", "duplicate"));
+        await h.act(async () => { await h.current.reverse("entry-a", "duplicate"); });
         assert.equal(h.current.actingId, "entry-a");
         assert.equal(h.current.clr?.code, "CLR10");
 
         shouldRefuse = false;
-        await h.act(() => h.current.reverse("entry-b", "duplicate"));
+        await h.act(async () => { await h.current.reverse("entry-b", "duplicate"); });
         assert.equal(h.current.actingId, "entry-b", "actingId moved to the NEW acting row");
         assert.equal(h.current.err, null, "a successful action on B clears the error B's own act() call set");
       } finally {
@@ -289,9 +289,9 @@ test("compose(): sets actingId to the COMPOSE_ACTING_ID sentinel, never a real r
       const h = await renderHook(() => useJournalsWorkbench(CLIENT_ID, sess));
       try {
         await h.settle();
-        await h.act(() =>
-          h.current.compose({ postingDate: "2026-08-27", memo: "x", lines: [] }),
-        );
+        await h.act(async () => {
+          await h.current.compose({ postingDate: "2026-08-27", memo: "x", lines: [] });
+        });
         assert.equal(h.current.actingId, "compose");
         assert.equal(h.current.clr?.code, "CLR04");
       } finally {
@@ -324,16 +324,16 @@ test("compose(): a successful two-call ceremony re-reads afterward", async () =>
       try {
         await h.settle();
         seen.length = 0; // drop the mount reload's own reads before asserting call order
-        await h.act(() =>
-          h.current.compose({
+        await h.act(async () => {
+          await h.current.compose({
             postingDate: "2026-08-27",
             memo: "manual test entry",
             lines: [
               { account_code: "1000", debit_cents: 500, credit_cents: 0 },
               { account_code: "3000", debit_cents: 0, credit_cents: 500 },
             ],
-          }),
-        );
+          });
+        });
         assert.deepEqual(seen.slice(0, 2), ["resolution", "draft"]);
         assert.equal(h.current.err, null);
       } finally {
@@ -361,7 +361,7 @@ test("approveRoutine(): calls approve_routine_entry then re-reads", async () => 
       try {
         await h.settle();
         const before = seen.filter((s) => s === "read").length;
-        await h.act(() => h.current.approveRoutine("e1", "rev-1"));
+        await h.act(async () => { await h.current.approveRoutine("e1", "rev-1"); });
         assert.ok(seen.includes("approve_routine"));
         assert.ok(seen.filter((s) => s === "read").length > before, "act() re-reads after the write");
         assert.equal(h.current.actingId, "e1");
@@ -385,7 +385,7 @@ test("withdraw(): a CLR22 refusal (reason required) is captured verbatim, attrib
       const h = await renderHook(() => useJournalsWorkbench(CLIENT_ID, sess));
       try {
         await h.settle();
-        await h.act(() => h.current.withdraw("e1", "", "rev-1"));
+        await h.act(async () => { await h.current.withdraw("e1", "", "rev-1"); });
         assert.equal(h.current.clr?.code, "CLR22");
         assert.equal(h.current.actingId, "e1");
       } finally {
@@ -412,7 +412,7 @@ test("answerClarify(): calls answer_interruption then re-reads (including the in
       try {
         await h.settle();
         const before = seen.filter((s) => s === "interruptions").length;
-        await h.act(() => h.current.answerClarify("i1", { text: "cash account" }));
+        await h.act(async () => { await h.current.answerClarify("i1", { text: "cash account" }); });
         assert.ok(seen.includes("answer"));
         assert.ok(seen.filter((s) => s === "interruptions").length > before, "act() re-reads interruptions too — no optimistic UI");
         assert.equal(h.current.actingId, "i1");
@@ -446,7 +446,7 @@ test("promoteClarify(): posts promote_clarify_to_question with scope_kind='clien
       try {
         await h.settle();
         const before = seen.filter((s) => s === "interruptions").length;
-        await h.act(() => h.current.promoteClarify("i1", "client-9"));
+        await h.act(async () => { await h.current.promoteClarify("i1", "client-9"); });
         assert.ok(seen.includes("promote"));
         assert.equal(seenBody.p_interruption, "i1");
         assert.equal(seenBody.p_scope_kind, "client");

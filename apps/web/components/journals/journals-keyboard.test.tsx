@@ -51,7 +51,7 @@ function App() {
       queueRows: [QUEUE_ROW], queueCounts: { open_drafts: 1 }, entries: [DRAFT_ENTRY], lines: DRAFT_LINES,
       linesTruncated: false, accounts: ACCOUNTS, busy: false, err: null, clr: null, actingId: null,
       onApprove: () => {}, onRevise: () => {},
-      onApproveRoutine: () => {}, onWithdraw: async () => {},
+      onApproveRoutine: () => {}, onWithdraw: async () => true,
     }),
   });
 }
