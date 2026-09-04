@@ -1,0 +1,277 @@
+// 裁-117 — the thread menu, driven through the REAL rail and the REAL wire client.
+//
+// THE THINGS THIS PROVES, each with a post-condition that is false before it:
+//   1. MOUNTING CREATES NOTHING. The rail used to mint a `clara.chat_sessions` row on
+//      every altitude it had never seen (a mount effect), and that row can never be
+//      archived or deleted (0006's `_tf_chat_session_update` raises CLR08 on DELETE and
+//      on every non-visibility UPDATE). The router below THROWS on an unexpected call,
+//      so a regression is a hard failure and not just a count that drifted.
+//   2. AN EMPTY ALTITUDE OFFERS, IT DOES NOT SPIN. The state that could not exist while
+//      resolving also created; under the old loader condition it would have read
+//      "Finding your conversation with Clara…" forever.
+//   3. NEW THREAD CREATES AND SELECTS. One POST, and the rail is then showing the NEW
+//      thread's own transcript — not the old one with a new id behind it.
+//   4. SWITCHING SELECTS WITHOUT CREATING, and the switcher lists the caller's OWN
+//      threads only, though the wire also delivers colleagues' firm-shared ones.
+//   5. ARCHIVE IS NAMED AS NOT BUILT, and CLEAR/DELETE do not exist at all.
+//
+// The instrument is `ClaraRail` itself, because the menu lives in its header and the
+// creator/selector are the hook's own returns threaded through it. `rail-boundary.test.tsx`
+// owns the altitude-key half and keeps its own mount point (`RailMount`) for that reason.
+
+import assert from "node:assert/strict";
+import { test } from "node:test";
+import { createElement, type ReactElement } from "react";
+import { NextIntlClientProvider } from "next-intl";
+
+import { ClaraRail } from "./ClaraRail";
+import { clickButton, renderComponent, textOf } from "../../test/hookHarness";
+import { enableDomInspection } from "../../test/domInspect";
+import messages from "../../messages/en.json";
+
+enableDomInspection();
+
+type Stub = Record<string, unknown>;
+
+const THREAD_NEW = "aaaaaaaa-1111-4111-8111-111111111111";
+const THREAD_OLD = "bbbbbbbb-1111-4111-8111-111111111111";
+const THREAD_MINTED = "cccccccc-1111-4111-8111-111111111111";
+const THREAD_SHARED = "dddddddd-1111-4111-8111-111111111111";
+const CALLER = "99999999-9999-4999-8999-999999999999";
+const COLLEAGUE = "88888888-8888-4888-8888-888888888888";
+
+const TOKEN = `x.${Buffer.from(JSON.stringify({ sub: CALLER })).toString("base64url")}.y`;
+
+/** THE PER-ALTITUDE SELECTION IS MODULE-LEVEL AND OUTLIVES A CELL, so every cell gets
+ *  its own altitude key rather than scrubbing a shared one — a choice one cell made
+ *  would otherwise steer the next cell's resolve, which is the same cross-fixture bleed
+ *  `../../e2e/e2e-fixture-ownership.test.ts` exists to stop in the e2e lane. */
+let altitudeSeq = 0;
+function freshClient(): string {
+  altitudeSeq += 1;
+  return `22222222-2222-4222-8222-2222222222${String(altitudeSeq).padStart(2, "0")}`;
+}
+
+function json(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+}
+
+type Row = { id: string; title: string | null; client_id: string; visibility: string; created_by: string; created_at: string };
+
+const row = (clientId: string, id: string, createdAt: string, createdBy = CALLER, visibility = "private"): Row =>
+  ({ id, title: null, client_id: clientId, visibility, created_by: createdBy, created_at: createdAt });
+
+const transcript = (threadId: string, text: string) => ({
+  messages: [{ id: `m-${threadId}`, role: "assistant", parts: [{ type: "text", text }], turn_key: null, task_id: null, seq: 1, created_at: "2026-09-02T00:00:00Z" }],
+});
+
+type Wire = { clientId: string; posts: number; sessions: Row[] };
+
+function makeRouter(wire: Wire) {
+  return async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    const url = String(input);
+    const method = (init?.method ?? "GET").toUpperCase();
+    if (url.endsWith("/api/runtime/chat/sessions")) {
+      if (method === "POST") {
+        wire.posts += 1;
+        wire.sessions = [row(wire.clientId, THREAD_MINTED, "2026-09-04T00:00:00Z"), ...wire.sessions];
+        return json({ session_id: THREAD_MINTED }, 201);
+      }
+      return json({ sessions: wire.sessions });
+    }
+    if (url.includes(`/chat/sessions/${THREAD_NEW}/messages`)) return json(transcript(THREAD_NEW, "NEWEST OWN TRANSCRIPT"));
+    if (url.includes(`/chat/sessions/${THREAD_OLD}/messages`)) return json(transcript(THREAD_OLD, "OLDER OWN TRANSCRIPT"));
+    if (url.includes(`/chat/sessions/${THREAD_MINTED}/messages`)) return json(transcript(THREAD_MINTED, "MINTED TRANSCRIPT"));
+    if (url.includes("agent_tasks_visible")) return json([]);
+    if (url.includes("/rest/v1/clients")) return json([]);
+    if (url.includes("/rest/v1/onboarding_plans")) return json([]);
+    if (url.includes("caller_context")) return json([]);
+    throw new Error(`unexpected fetch: ${method} ${url}`);
+  };
+}
+
+function withFetch(wire: Wire, run: () => Promise<void>): Promise<void> {
+  const originalFetch = globalThis.fetch;
+  const originalUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  process.env.NEXT_PUBLIC_SUPABASE_URL = "https://example.supabase.co";
+  globalThis.fetch = makeRouter(wire) as typeof fetch;
+  return run().finally(() => {
+    globalThis.fetch = originalFetch;
+    if (originalUrl === undefined) delete process.env.NEXT_PUBLIC_SUPABASE_URL;
+    else process.env.NEXT_PUBLIC_SUPABASE_URL = originalUrl;
+  });
+}
+
+function rail(clientId: string): ReactElement {
+  return createElement(NextIntlClientProvider, {
+    locale: "en", messages, timeZone: "Asia/Kuala_Lumpur",
+    children: createElement("div", null,
+      createElement("h1", null, "Thread menu"),
+      createElement(ClaraRail, { auth: { getAccessToken: async () => TOKEN }, clientId }),
+    ),
+  });
+}
+
+async function settleUntil(h: { settle: () => Promise<void> }, condition: () => boolean, label: string): Promise<void> {
+  const deadline = Date.now() + 8_000;
+  while (!condition()) {
+    if (Date.now() >= deadline) throw new Error(`timed out waiting for ${label}`);
+    await h.settle();
+  }
+}
+
+/** `RenderHarness` exposes `find` (first match) but no all-matches walk, so this walks
+ *  the mount root itself — the escape hatch its own `container` doc comment names. */
+function findAll(node: Stub, predicate: (n: Stub) => boolean): Stub[] {
+  const out: Stub[] = predicate(node) ? [node] : [];
+  for (const child of (node.childNodes as Stub[] | undefined) ?? []) out.push(...findAll(child, predicate));
+  return out;
+}
+
+function attr(node: Stub, name: string): string | null {
+  return typeof node.getAttribute === "function" ? (node.getAttribute as (a: string) => string | null)(name) : null;
+}
+
+/** By ACCESSIBLE NAME — `aria-label` first, then the button's own text — which is what
+ *  a human and a screen reader both address the control by. */
+function buttonNamed(h: { container: Stub }, name: string): Stub | undefined {
+  return findAll(h.container, (n) => n.tagName === "BUTTON").find(
+    (n) => attr(n, "aria-label") === name || textOf(n).trim() === name,
+  );
+}
+
+test("MOUNTING THE RAIL CREATES NOTHING — a chat session is an act now, not a side effect", async () => {
+  const clientId = freshClient();
+  const wire: Wire = { clientId, posts: 0, sessions: [row(clientId, THREAD_NEW, "2026-09-03T00:00:00Z")] };
+  await withFetch(wire, async () => {
+    const h = await renderComponent(rail(clientId));
+    try {
+      await settleUntil(h, () => /NEWEST OWN TRANSCRIPT/.test(h.text()), "the resolved thread");
+      // The router THROWS on an unexpected call, so this count is a second reading of
+      // the same fact rather than the only one.
+      assert.equal(wire.posts, 0, "resolving an altitude must not mint a chat_sessions row");
+    } finally {
+      await h.unmount();
+    }
+  });
+});
+
+test("AN ALTITUDE WITH NO THREAD OFFERS ONE — it never sits on the resolving loader", async () => {
+  const clientId = freshClient();
+  const wire: Wire = { clientId, posts: 0, sessions: [] };
+  await withFetch(wire, async () => {
+    const h = await renderComponent(rail(clientId));
+    try {
+      await settleUntil(h, () => /No conversation here yet/.test(h.text()), "the empty-altitude offer");
+      assert.equal(wire.posts, 0, "the offer is an offer — nothing is minted until it is taken");
+      assert.doesNotMatch(h.text(), /Finding your conversation with Clara/, "the loader must not survive a finished read");
+
+      const create = buttonNamed(h, "New conversation");
+      assert.ok(create, "the empty state must carry the create act");
+      await h.act(() => clickButton(create));
+      await settleUntil(h, () => /MINTED TRANSCRIPT/.test(h.text()), "the minted thread's transcript");
+      assert.equal(wire.posts, 1, "exactly one session is created, by the act");
+    } finally {
+      await h.unmount();
+    }
+  });
+});
+
+test("NEW THREAD from the menu creates exactly one session and shows it", async () => {
+  const clientId = freshClient();
+  const wire: Wire = { clientId, posts: 0, sessions: [row(clientId, THREAD_NEW, "2026-09-03T00:00:00Z")] };
+  await withFetch(wire, async () => {
+    const h = await renderComponent(rail(clientId));
+    try {
+      await settleUntil(h, () => /NEWEST OWN TRANSCRIPT/.test(h.text()), "the resolved thread");
+
+      const toggle = buttonNamed(h, "Conversations");
+      assert.ok(toggle, "the rail header must carry the thread menu toggle");
+      assert.equal(attr(toggle, "aria-expanded"), "false", "the disclosure state is on the control, not only in the pixels");
+      await h.act(() => clickButton(toggle));
+      assert.equal(attr(toggle, "aria-expanded"), "true");
+
+      const create = buttonNamed(h, "New conversation");
+      assert.ok(create, "the open menu must offer New conversation");
+      await h.act(() => clickButton(create));
+
+      // DISCRIMINATING: the MINTED thread's own transcript, which only a create plus a
+      // select can put on screen. A create that did not select would still be showing
+      // NEWEST OWN TRANSCRIPT here.
+      await settleUntil(h, () => /MINTED TRANSCRIPT/.test(h.text()), "the minted thread's transcript");
+      assert.equal(wire.posts, 1, "one act, one session — never two");
+      assert.doesNotMatch(h.text(), /NEWEST OWN TRANSCRIPT/, "the new thread replaces the old one on screen");
+    } finally {
+      await h.unmount();
+    }
+  });
+});
+
+test("SWITCHING selects an existing thread, creates nothing, and never offers a colleague's shared one", async () => {
+  const clientId = freshClient();
+  const wire: Wire = {
+    clientId,
+    posts: 0,
+    sessions: [
+      row(clientId, THREAD_NEW, "2026-09-03T00:00:00Z"),
+      row(clientId, THREAD_OLD, "2026-09-01T00:00:00Z"),
+      // A colleague's firm-shared thread IS on this wire (chatRoutes.ts selects
+      // `visibility = 'firm' or created_by = $2`). It must not be offered as a thread
+      // this human's next turn would land in.
+      row(clientId, THREAD_SHARED, "2026-09-03T12:00:00Z", COLLEAGUE, "firm"),
+    ],
+  };
+  await withFetch(wire, async () => {
+    const h = await renderComponent(rail(clientId));
+    try {
+      await settleUntil(h, () => /NEWEST OWN TRANSCRIPT/.test(h.text()), "the newest own thread");
+      await h.act(() => clickButton(buttonNamed(h, "Conversations")!));
+
+      const rows = findAll(h.container, (n) => n.tagName === "LI");
+      assert.equal(rows.length, 2, "the switcher lists the caller's OWN threads only");
+
+      // The active row says so accessibly, not only by its fill.
+      const current = rows.filter((r) => findAll(r, (n) => attr(n, "aria-current") === "true").length > 0);
+      assert.equal(current.length, 1, "exactly one row is marked as the thread on screen");
+
+      // Rows are labelled from the DB's own `created_at` (the runtime writes no title),
+      // newest first, so the older thread is the second row.
+      const olderButton = findAll(rows[1]!, (n) => n.tagName === "BUTTON")[0];
+      assert.ok(olderButton);
+      await h.act(() => clickButton(olderButton));
+
+      await settleUntil(h, () => /OLDER OWN TRANSCRIPT/.test(h.text()), "the older thread's transcript");
+      assert.equal(wire.posts, 0, "switching is a selection, never a create");
+      assert.doesNotMatch(h.text(), /NEWEST OWN TRANSCRIPT/);
+    } finally {
+      await h.unmount();
+    }
+  });
+});
+
+test("the menu names ARCHIVE as not built and offers no clear or delete at all", async () => {
+  const clientId = freshClient();
+  const wire: Wire = { clientId, posts: 0, sessions: [row(clientId, THREAD_NEW, "2026-09-03T00:00:00Z")] };
+  await withFetch(wire, async () => {
+    const h = await renderComponent(rail(clientId));
+    try {
+      await settleUntil(h, () => /NEWEST OWN TRANSCRIPT/.test(h.text()), "the resolved thread");
+      await h.act(() => clickButton(buttonNamed(h, "Conversations")!));
+
+      // Archive is a real backend gap and says so, rather than shipping a control that
+      // would refuse: the table has no `archived_at` and the only lawful mutation is
+      // `clara.share_chat_session`.
+      assert.match(h.text(), /Archiving a conversation/);
+      assert.match(h.text(), /Not built yet/);
+
+      // And CLEAR/DELETE are absent entirely — not disabled, not "coming soon". The
+      // transcript is the audit record and `_tf_chat_session_update` refuses a DELETE
+      // outright, so a control for it must never exist.
+      for (const forbidden of ["Clear", "Delete", "Clear conversation", "Delete conversation"]) {
+        assert.equal(buttonNamed(h, forbidden), undefined, `${forbidden} must not be a control anywhere in the menu`);
+      }
+    } finally {
+      await h.unmount();
+    }
+  });
+});

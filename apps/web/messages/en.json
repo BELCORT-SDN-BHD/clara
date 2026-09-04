@@ -332,7 +332,18 @@
       "escalate": "Open full screen",
       "escalateShort": "⤢",
       "collapse": "Collapse Clara",
-      "collapseShort": "×"
+      "collapseShort": "×",
+      "threads": "Conversations",
+      "threadsShort": "≣",
+      "menu": {
+        "newThread": "New conversation",
+        "creating": "Starting…",
+        "switchHeading": "Your conversations here",
+        "untitled": "Started {started}",
+        "noThreads": "No conversation here yet.",
+        "archiveHeading": "Archiving a conversation",
+        "archiveNote": "Not built yet. A chat session cannot be archived, renamed or deleted — clara.chat_sessions has no archived_at column and the only lawful change is sharing it with your firm. The transcript is the audit record, so there will never be a “clear”. Archiving needs a new column and an author-only door."
+      }
     },
     "fullScreen": {
       "title": "Clara",
@@ -351,6 +362,10 @@
       "connectionLost": "Connection lost.",
       "retry": "Retry",
       "retryLoad": "Try again",
+      "noThread": "No conversation here yet. Start one and Clara will pick up from this page.",
+      "newThread": "New conversation",
+      "creatingThread": "Starting…",
+      "noThreadUnavailable": "This conversation could not be opened.",
       "turnProgress": {
         "running": "Clara has been working on this for {elapsed}.",
         "parked": "Clara has been waiting on your answer for {elapsed}."
@@ -387,6 +402,13 @@
       }
     },
     "parts": {
+      "toolCall": {
+        "status": {
+          "done": "done",
+          "failed": "failed",
+          "unresolved": "no outcome recorded"
+        }
+      },
       "attachment": {
         "title": "Attached document",
         "documentLabel": "document",
@@ -428,12 +450,17 @@
         "verbLabel": "verb",
         "subjectLabel": "subject",
         "opKeyLabel": "op key",
+        "resultLabel": "The ledger's own answer",
         "note": "The act's own outcome is on the ledger's receipt — open the client's Bank tab to read it live."
       },
       "bankPack": {
         "title": "Bank pack read",
         "accountLabel": "bank account",
         "digestLabel": "digest",
+        "budgetLabel": "What this pack held",
+        "linesCount": "{count, plural, one {# unmatched line} other {# unmatched lines}}",
+        "candidatesCount": "{count, plural, one {# match candidate} other {# match candidates}}",
+        "truncated": "The ledger reported this pack as truncated — it does not hold everything for this account.",
         "note": "The digest every bank act in this conversation had to cite. A read only — nothing in the books changed."
       },
       "common": {
@@ -448,6 +475,7 @@
       },
       "summary": {
         "jeReview": "Journal entry review",
+        "jeReviewLink": "Open the journals workbench",
         "docReview": "Document review",
         "diff": "Entry diff",
         "openQuestion": "Open question",

@@ -11,12 +11,14 @@
 // needed (P2 fold round 3). `auth` defaults to the blessed `sessionTokenAccessor`
 // singleton (`@/lib/session-accessor`); a caller (tests included) may still override it.
 
+import { useId, useState } from "react";
 import { usePathname } from "next/navigation";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
 
 import { Button, buttonVariants } from "@/components/ui/button";
 import { ClaraThreadView } from "@/components/clara/ClaraThreadView";
+import { ClaraThreadMenu } from "@/components/clara/ClaraThreadMenu";
 import { useActiveThreadId } from "@/lib/clara/useActiveThread";
 import type { SessionTokenAccessor } from "@/lib/session";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
@@ -27,7 +29,9 @@ export function ClaraRail({ auth = sessionTokenAccessor, clientId }: { auth?: Se
   const t = useTranslations("Clara.rail");
   const open = useClaraRailOpen();
   const pathname = usePathname();
-  const { threadId, error } = useActiveThreadId(auth, clientId);
+  const { threadId, error, resolving, threads, createThread, creating, selectThread } = useActiveThreadId(auth, clientId);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuId = useId();
   useFocusRailSubscription(); // P2 FOLD SEAM C: ⌘K "Ask" -> this rail's composer
 
   const escalateBase = clientId ? `/clients/${clientId}/clara/${threadId}` : `/clara/${threadId}`;
@@ -65,6 +69,23 @@ export function ClaraRail({ auth = sessionTokenAccessor, clientId }: { auth?: Se
       <header className="flex items-center justify-between border-b border-border p-2">
         <span className="text-sm font-semibold text-clara">{t("title")}</span>
         <div className="flex gap-1">
+          {/* 裁-117 — the thread menu. A plain DISCLOSURE, not a portaled menu:
+              the list is small by ruling (one thread per altitude is the beta
+              shape, with a switcher rather than a sidebar), the rail is 320px
+              wide, and an inline panel keeps the whole control inside
+              `data-clara-rail` where the a11y scan and the keyboard walk already
+              reach it. `aria-expanded`/`aria-controls` carry the state. */}
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            aria-label={t("threads")}
+            aria-expanded={menuOpen}
+            aria-controls={menuId}
+            onClick={() => setMenuOpen((v) => !v)}
+          >
+            {t("threadsShort")}
+          </Button>
           {threadId && (
             <Link
               href={escalateHref}
@@ -84,13 +105,41 @@ export function ClaraRail({ auth = sessionTokenAccessor, clientId }: { auth?: Se
           </Button>
         </div>
       </header>
+      {menuOpen ? (
+        <ClaraThreadMenu
+          id={menuId}
+          threads={threads}
+          activeThreadId={threadId}
+          creating={creating}
+          onCreate={async () => {
+            const created = await createThread();
+            // The panel closes only on a thread this altitude actually got. A failed
+            // create leaves it open with the rail's own error banner below it, rather
+            // than dismissing the control that produced the failure.
+            if (created) setMenuOpen(false);
+          }}
+          onSelect={(id) => {
+            selectThread(id);
+            setMenuOpen(false);
+          }}
+        />
+      ) : null}
       <div className="min-h-0 flex-1">
         {/* P6-5: the `key={clientId ?? "firm"}` #507 put HERE moved up to `RailMount`, which
             is the one mount point for this whole subtree — see that file's own note. Same
             law, one level higher, so it now covers the composer, the attachment tray and
             everything a later feature adds, not just this view. A key here as well would be
             a second copy of the same boundary with nothing extra to fence. */}
-        <ClaraThreadView auth={auth} threadId={threadId} resolveError={error} variant="rail" clientId={clientId} />
+        <ClaraThreadView
+          auth={auth}
+          threadId={threadId}
+          resolveError={error}
+          variant="rail"
+          clientId={clientId}
+          resolving={resolving}
+          onCreateThread={createThread}
+          creatingThread={creating}
+        />
       </div>
     </aside>
   );

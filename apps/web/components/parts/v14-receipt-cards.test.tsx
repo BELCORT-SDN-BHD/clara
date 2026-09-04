@@ -207,10 +207,138 @@ test("bank_pack renders the read receipt with the account and the grounding dige
     assert.match(text, /Bank pack read/);
     assert.match(text, /e4402f19-account/, "bank_account_id must render");
     assert.match(text, /sha256:9f2c11ab77/, "the digest is the whole point of this receipt — it must render");
-    // `pack` is an open Record<string, unknown>; the card deliberately does not
-    // walk it, so nothing from inside it may leak out as a rendered claim.
+    // C6 NARROWED THIS, AND THIS FIXTURE IS NOW THE FAIL-CLOSED CONTROL. The card
+    // reads a pack that DECLARES `schema: "clara.bank-pack/v1"` (the cell below);
+    // this payload declares nothing, so it must still render identifiers only and
+    // leak no count out of an unrecognised shape.
     assert.doesNotMatch(text, /\[object Object\]/);
-    assert.doesNotMatch(text, /12/, "the card must not render a count it read out of the open `pack` payload");
+    assert.doesNotMatch(text, /12/, "an UNDECLARED pack payload must not have a count read out of it");
+  } finally {
+    await h.unmount();
+  }
+});
+
+// --- C6: the payloads that were already on the wire and were being dropped ----
+
+test("bank_act renders the LEDGER's own string and boolean result fields, keyed by the DB's field names", async () => {
+  // `_agent_match_bank_line_core` returns the delegate's own row and
+  // `classifyBankResult` passes it through verbatim (chatTurn.v14.bank.ts), so
+  // `match_id` and `status` are the ledger's, not this UI's.
+  const h = await renderComponent(App({
+    ...ACT,
+    verb: "match_bank_line",
+    result: { match_id: "match-9911", status: "live", reversed: false },
+  }));
+  try {
+    await h.settle();
+    const text = h.text();
+    assert.match(text, /The ledger's own answer/, "the block is labelled, so a reader knows whose words these are");
+    assert.match(text, /match_id/, "the DB's own field name is the label");
+    assert.match(text, /match-9911/, "and its value is the DB's own token");
+    assert.match(text, /status/);
+    assert.match(text, /live/);
+    assert.match(text, /reversed/);
+    assert.match(text, /false/, "a boolean verdict renders as the DB's own value");
+    assert.doesNotMatch(text, new RegExp(FALLBACK_UNSUPPORTED_PREFIX));
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("bank_act NEVER renders a numeral out of its unversioned result payload", async () => {
+  // The structural half of hard constraint 2 for this card: `result` carries no
+  // version token, so nothing here can vouch for a figure inside it. A cents amount
+  // is exactly the value a bookkeeper would read as authoritative.
+  const h = await renderComponent(App({
+    ...ACT,
+    verb: "match_bank_line",
+    result: { match_id: "match-9911", matched_cents: 125000, line_count: 3 },
+  }));
+  try {
+    await h.settle();
+    const text = h.text();
+    assert.match(text, /match-9911/, "the identifier still renders — this is a refusal to print FIGURES, not the payload");
+    assert.doesNotMatch(text, /125000/, "a cents figure out of an unversioned payload must never reach the screen");
+    assert.doesNotMatch(text, /matched_cents/, "and neither must its label, which would imply a hidden amount");
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("bank_act never walks a nested result value into `[object Object]`", async () => {
+  const h = await renderComponent(App({
+    ...ACT,
+    result: { rung_vector: { m11: "pass" }, entries: ["e-1"], match_id: "match-77" },
+  }));
+  try {
+    await h.settle();
+    const text = h.text();
+    assert.match(text, /match-77/);
+    assert.doesNotMatch(text, /\[object Object\]/);
+    assert.doesNotMatch(text, /rung_vector/);
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("bank_pack renders the DB's OWN counts when the pack declares clara.bank-pack/v1", async () => {
+  // Postgres computed both with `jsonb_array_length` in the same statement that built
+  // the pack this digest hashes (0121_f_a3_pr1b_agent_limb.sql).
+  const h = await renderComponent(App({
+    ...PACK,
+    pack: { schema: "clara.bank-pack/v1", budget: { lines: 12, candidates: 4, truncated: false } },
+  }));
+  try {
+    await h.settle();
+    const text = h.text();
+    assert.match(text, /What this pack held/);
+    assert.match(text, /12 unmatched lines/, "the DB's own line count, printed as handed over");
+    assert.match(text, /4 match candidates/);
+    assert.match(text, /sha256:9f2c11ab77/, "the digest still renders — the new block is additive");
+    assert.doesNotMatch(text, /truncated/i, "a pack the DB reported COMPLETE must not carry a truncation warning");
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("bank_pack warns when the LEDGER said the pack was truncated, and stays silent when it did not say", async () => {
+  const truncated = await renderComponent(App({
+    ...PACK,
+    pack: { schema: "clara.bank-pack/v1", budget: { lines: 200, candidates: 40, truncated: true } },
+  }));
+  try {
+    await truncated.settle();
+    assert.match(truncated.text(), /reported this pack as truncated/, "the human deciding on this act has to know it is partial");
+  } finally {
+    await truncated.unmount();
+  }
+
+  // ABSENCE IS NOT EVIDENCE: no flag is not a claim of completeness, and it is not a
+  // claim of truncation either. Nothing is said.
+  const unknown = await renderComponent(App({
+    ...PACK,
+    pack: { schema: "clara.bank-pack/v1", budget: { lines: 5, candidates: 1 } },
+  }));
+  try {
+    await unknown.settle();
+    const text = unknown.text();
+    assert.match(text, /5 unmatched lines/);
+    assert.doesNotMatch(text, /truncated/i);
+  } finally {
+    await unknown.unmount();
+  }
+});
+
+test("bank_pack singularises from the DB's own count rather than printing a bare number", async () => {
+  const h = await renderComponent(App({
+    ...PACK,
+    pack: { schema: "clara.bank-pack/v1", budget: { lines: 1, candidates: 1, truncated: false } },
+  }));
+  try {
+    await h.settle();
+    const text = h.text();
+    assert.match(text, /1 unmatched line[^s]/, "one line, not '1 unmatched lines'");
+    assert.match(text, /1 match candidate[^s]/);
   } finally {
     await h.unmount();
   }

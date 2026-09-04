@@ -20,6 +20,9 @@ import { expect, test, type Page } from "@playwright/test";
 
 const CLIENT_ID = "55555555-5555-4555-8555-555555555555";
 const THREAD_ID = "66666666-6666-4666-8666-666666666666";
+/** C6 — this lane's SETTLED thread; its ids mirror `CHAT_PARITY` in chat-parity-mock.mjs. */
+const PARTS_THREAD_ID = "66666666-6666-4666-8666-666666666667";
+const MATCH_ID = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
 const DOCUMENT_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const TASK_ID = "77777777-7777-4777-8777-777777777777";
 const QUESTION = "Which client owns this invoice?";
@@ -55,6 +58,15 @@ async function signIn(page: Page): Promise<void> {
  *  it is the merged, canonical one, and `parity-holes.spec.ts` already reads it. */
 const COMPOSER = "Ask Clara";
 
+/** The created-thread marker the e2e harness serves for a session it minted. Reading it
+ *  off the screen keeps this walk independent of how many threads other specs created
+ *  first — the ordinal is the server's, not this file's. */
+function markerIn(text: string | null): string {
+  const found = text?.match(/CREATED THREAD \d+/)?.[0];
+  expect(found, "the rail must be showing a created thread's own transcript").toBeTruthy();
+  return found!;
+}
+
 async function openThread(page: Page): Promise<void> {
   await signIn(page);
   await page.goto(`/clients/${CLIENT_ID}/clara/${THREAD_ID}`);
@@ -89,8 +101,18 @@ test("a parked clarify is answered inline, in the thread, and the card shows the
   const wire = watchChatWire(page);
   await openThread(page);
 
+  // H-24 — THE FIRST TURN IS SENT WITH THE KEYBOARD, not the mouse, and the negative
+  // comes first so the positive cannot be read as "something happened eventually".
+  // The composer is a raw <textarea>, which (unlike a single-line input) does NOT submit
+  // its form on Enter, so before this train the key did nothing at all and the human's
+  // only way to send was the button.
   await page.getByLabel(COMPOSER).fill("Code this invoice");
-  await page.getByRole("button", { name: "Send", exact: true }).click();
+  await page.getByLabel(COMPOSER).press("Shift+Enter");
+  expect(wire.urls.filter((p) => p.includes("/turns")), "Shift+Enter must not post a turn").toEqual([]);
+  // And it typed a newline into the box rather than being swallowed.
+  await expect(page.getByLabel(COMPOSER)).toHaveValue(/Code this invoice\n/);
+
+  await page.getByLabel(COMPOSER).press("Enter");
 
   // The parked question arrives on the live stream and is answerable there — and the
   // mock withholds the `agent_interruptions` row until after the chunk AND after a first
@@ -168,4 +190,94 @@ test("the firm altitude says why there is no attach affordance instead of just n
   await expect(page.getByLabel(COMPOSER)).toBeVisible();
   await expect(page.getByRole("button", { name: "Attach document" })).toHaveCount(0);
   await expect(page.getByText("Open a client's workspace to attach a document")).toBeVisible();
+});
+
+test("C6: a settled transcript renders the bank act's ledger fields, the pack's DB counts, and a tool chip that says how it went", async ({ page }) => {
+  // The SETTLED thread, not the parked one: a parked task has no assistant row at all
+  // (`clara.settle_chat_turn` writes it), so this is the only place a persisted part can
+  // be read off a real screen. Its parts are the emitter's own shapes — see
+  // `SETTLED_PARTS` in chat-parity-mock.mjs for the citation on each.
+  await signIn(page);
+  await page.goto(`/clients/${CLIENT_ID}/clara/${PARTS_THREAD_ID}`);
+  await expect(page.getByLabel(COMPOSER)).toBeVisible();
+
+  // (a) THE BANK ACT'S RESULT. `verb` and `subject_id` rendered before this train;
+  // `part.result` was on the wire and dropped, so the human saw a governed act with no
+  // trace of what the ledger answered.
+  // `exact`: the bank_pack card's own note sentence contains the words "bank act", and
+  // a substring match resolves two nodes.
+  await expect(page.getByText("Bank act", { exact: true })).toBeVisible();
+  // `exact` again: the op_key row is `bank-match_bank_line:task-e2e:0:{}`, so a substring
+  // match on the verb resolves the verb row AND the op-key row.
+  await expect(page.getByText("match_bank_line", { exact: true })).toBeVisible();
+  await expect(page.getByText("The ledger's own answer")).toBeVisible();
+  await expect(page.getByText("match_id", { exact: true })).toBeVisible();
+  await expect(page.getByText(MATCH_ID)).toBeVisible();
+
+  // (b) THE PACK'S DB-COMPUTED COUNTS, printed as Postgres handed them over
+  // (`jsonb_array_length` in 0121). The digest still renders — the block is additive.
+  await expect(page.getByText("What this pack held")).toBeVisible();
+  await expect(page.getByText("12 unmatched lines")).toBeVisible();
+  await expect(page.getByText("4 match candidates")).toBeVisible();
+  await expect(page.getByText("sha256:e2e0bankpack")).toBeVisible();
+
+  // (c) THE TOOL CHIPS, RESOLVED. Two calls in one message: one answered, one errored.
+  // Before this train both were the same bare grey name chip, so the assertion that
+  // they DIFFER is the discriminating one.
+  await expect(page.getByText("get_bank_pack · done")).toBeVisible();
+  await expect(page.getByText("trial_balance · failed")).toBeVisible();
+
+  await scan(page, "settled transcript face");
+});
+
+test("裁-117: the rail creates a thread only when asked, and its menu switches between them", async ({ page }) => {
+  // THE RAIL, not the full-screen route — the menu lives in the rail's header, and
+  // `(full)` sits outside the layout that mounts it.
+  await signIn(page);
+  await page.goto(`/clients/${CLIENT_ID}`);
+
+  const rail = page.locator("[data-clara-rail]");
+  await expect(rail).toBeVisible();
+
+  // NOTHING WAS CREATED BY ARRIVING. This altitude has no thread in the shared session
+  // list, and before this train merely landing here minted a `clara.chat_sessions` row
+  // that could never be archived or deleted. The offer is the proof it did not, and the
+  // resolving loader must be gone — it used to be the arm this state fell into.
+  await expect(rail.getByText("No conversation here yet")).toBeVisible();
+  await expect(page.getByText("Finding your conversation with Clara")).toHaveCount(0);
+
+  await rail.getByRole("button", { name: "New conversation" }).click();
+  // The marker is minted per create by the harness (serve-built.mjs), so the walk reads
+  // it off the screen rather than hard-coding an ordinal that another spec's creates
+  // would shift.
+  await expect(rail.getByText(/CREATED THREAD \d+/)).toBeVisible();
+  const firstMarker = markerIn(await rail.textContent());
+
+  // A SECOND thread from the menu. The marker CHANGES, which only a create plus a
+  // select can do — a create that failed to select would still show the first one.
+  await rail.getByRole("button", { name: "Conversations" }).click();
+  await rail.getByRole("button", { name: "New conversation" }).click();
+  // The first marker leaves the screen the moment the thread id changes, which is BEFORE
+  // the new transcript arrives — so waiting on its absence alone reads an empty rail.
+  await expect(rail.getByText(firstMarker)).toHaveCount(0);
+  await expect(rail.getByText(/CREATED THREAD \d+/)).toBeVisible();
+  const secondMarker = markerIn(await rail.textContent());
+  expect(secondMarker).not.toEqual(firstMarker);
+
+  // SWITCH BACK. The rows are newest-first, so the first thread is the second row, and
+  // its transcript coming back is the post-condition a re-render alone cannot produce.
+  await rail.getByRole("button", { name: "Conversations" }).click();
+  const rows = rail.getByRole("listitem");
+  await expect(rows).toHaveCount(2);
+  await rows.nth(1).getByRole("button").click();
+  await expect(rail.getByText(firstMarker)).toBeVisible();
+  await expect(rail.getByText(secondMarker)).toHaveCount(0);
+
+  // ARCHIVE is named as a backend gap; CLEAR and DELETE do not exist at all, because
+  // `_tf_chat_session_update` refuses a DELETE and the transcript is the audit record.
+  await rail.getByRole("button", { name: "Conversations" }).click();
+  await expect(rail.getByText("Archiving a conversation")).toBeVisible();
+  await expect(rail.getByRole("button", { name: /^(Clear|Delete)/ })).toHaveCount(0);
+
+  await scan(page, "rail thread menu face");
 });

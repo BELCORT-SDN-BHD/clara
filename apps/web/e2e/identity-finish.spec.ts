@@ -1,5 +1,5 @@
 import AxeBuilder from "@axe-core/playwright";
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 
 /**
  * P6-6's 裁-86 browser leg — the identity finish, walked in a real browser
@@ -160,12 +160,17 @@ const E2E_THREAD = "eeeeeeee-1111-4111-8111-eeeeeeeeeeee";
  * The rail's whole chat surface, stubbed at the network edge.
  *
  * WHY NOT USE THE SHARED HARNESS FIXTURE. `serve-built.mjs` answers the session
- * list with three sessions owned by ONE fixed subject and always returns exactly
- * one message per thread — so this persona resolves no own session, falls through
- * to `createSession`, and hits a route the mock does not implement (a POST to the
- * session list → 404). Stubbing here rather than teaching the shared server a
- * fourth persona keeps this walk self-contained and changes nothing for the four
- * other specs sharing that server.
+ * list with sessions owned by ONE fixed subject and returns one canned message per
+ * thread — this persona resolves no own session at all. Stubbing here rather than
+ * teaching the shared server a fourth persona keeps this walk self-contained and
+ * changes nothing for the other specs sharing that server.
+ *
+ * 裁-117 — THE EMPTY LIST NO LONGER RESOLVES A THREAD BY ITSELF, and each cell below
+ * therefore takes the explicit act first. The rail used to CREATE a session on any
+ * altitude it had never seen (a mount effect), which is why an empty list used to be
+ * enough to reach a transcript here; creation is now the human's own "New conversation"
+ * act (lib/clara/useActiveThread.ts's header explains why a mount must not mint an
+ * un-archivable row). The POST stub below is what that act reaches.
  *
  * THE GLOBS ARE THE SAME-ORIGIN PROXY PATHS since the chat/SSE repoint. These are
  * BROWSER-side interceptions, so they must match what the browser asks for —
@@ -190,12 +195,21 @@ async function stubChat(page: Page, transcript: unknown[] | "never"): Promise<vo
   });
 }
 
+/** 裁-117 — the explicit act that gives this persona a thread. The rail offers it when
+ *  a finished session read found nothing at this altitude; before that ruling the rail
+ *  minted one on mount and no cell had to ask. */
+async function startConversation(rail: Locator): Promise<void> {
+  await expect(rail.getByText("No conversation here yet")).toBeVisible();
+  await rail.getByRole("button", { name: "New conversation" }).click();
+}
+
 test("裁-14: an empty conversation shows the mascot welcome in the docked rail", async ({ page }) => {
   await stubChat(page, []);
   await signIn(page);
 
   const rail = page.locator("[data-clara-rail]");
   await expect(rail).toBeVisible();
+  await startConversation(rail);
   await expect(rail.getByText("I'm Clara.")).toBeVisible();
 
   const size = await loadedIntrinsicSize(page, MASCOT);
@@ -218,6 +232,7 @@ test("裁-14, the negative: a conversation WITH messages shows no mascot", async
 
   const rail = page.locator("[data-clara-rail]");
   await expect(rail).toBeVisible();
+  await startConversation(rail);
   await expect(rail.getByText("The May close is open.")).toBeVisible();
   await expect(page.locator(`img[src*="${MASCOT}"]`)).toHaveCount(0);
   await expect(rail.getByText("I'm Clara.")).toHaveCount(0);
@@ -232,6 +247,7 @@ test("裁-14: the mascot never stands in for a loading state", async ({ page }) 
 
   const rail = page.locator("[data-clara-rail]");
   await expect(rail).toBeVisible();
+  await startConversation(rail);
   await expect(rail.getByText("Loading the conversation…")).toBeVisible();
   await expect(page.locator(`img[src*="${MASCOT}"]`)).toHaveCount(0);
 });

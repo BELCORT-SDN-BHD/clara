@@ -103,6 +103,11 @@ const clients = [
   { id: CLIENT_B, name: "Bee Creative Solution", status: "active", created_at: "2026-02-01T00:00:00.000Z" },
 ];
 
+/** Sessions minted at RUNTIME by the create handler below, and the marker transcript each
+ *  one serves. Kept beside the list they are appended to. */
+let createdSessions = 0;
+const createdTranscripts = new Map();
+
 const sessions = [
   { id: COLLEAGUE_THREAD_A, firm_id: FIRM_ID, client_id: CLIENT_A, created_by: "44444444-4444-4444-8444-444444444444", visibility: "firm", title: "Colleague thread", created_at: "2026-09-02T02:00:00.000Z" },
   { id: THREAD_A, firm_id: FIRM_ID, client_id: CLIENT_A, created_by: SUBJECT, visibility: "private", title: "Own A", created_at: "2026-09-02T01:00:00.000Z" },
@@ -422,9 +427,49 @@ async function handleChat(request, response, url) {
     sendJson(response, 200, { sessions });
     return true;
   }
+
+  // 裁-117 — CREATE, beside the list it appends to, because there is exactly ONE session
+  // list per server and a second one would starve every walk that reads this one. The
+  // row is minted the way `packages/runtime/src/chatRoutes.ts:137-157` mints it: always
+  // `private`, `client_id` from the body, `created_by` from the caller.
+  //
+  // THE CLIENT PIN IS THE OWNERSHIP WALL, and it is the reason this is safe to add to a
+  // shared list. `e2e-fixture-ownership.test.ts`'s N4 forbids a FIRM-ALTITUDE row
+  // carrying the shared SUBJECT, because `selectOwnSession` resolves on
+  // `(created_by, client_id)` and every walk's firm rail would then land on it. A row
+  // created here carries the requesting walk's OWN client id, so no other altitude can
+  // resolve it — the same property that lets three lanes' client rows already share
+  // this array. A create with NO clientId is refused for exactly that reason.
+  if (request.method === "POST" && url.pathname === "/api/chat/sessions") {
+    const body = await readJson(request);
+    if (!body.clientId) {
+      sendJson(response, 400, { error: "e2e: a firm-altitude session would be resolved by EVERY walk's rail — see e2e-fixture-ownership.test.ts N4" });
+      return true;
+    }
+    createdSessions += 1;
+    const id = `e2e0${String(createdSessions).padStart(4, "0")}-0000-4000-8000-000000000000`;
+    createdTranscripts.set(id, `CREATED THREAD ${createdSessions}`);
+    sessions.unshift({
+      id, firm_id: FIRM_ID, client_id: body.clientId, created_by: SUBJECT,
+      visibility: "private", title: null, created_at: new Date().toISOString(),
+    });
+    sendJson(response, 201, { session_id: id });
+    return true;
+  }
+
   const match = /^\/api\/chat\/sessions\/([^/]+)\/messages$/.exec(url.pathname);
   if (request.method === "GET" && match) {
     const threadId = decodeURIComponent(match[1]);
+    const created = createdTranscripts.get(threadId);
+    if (created) {
+      // A distinguishable transcript per created thread, so a walk can prove it SWITCHED
+      // rather than merely re-rendered. Production would serve an empty list here; the
+      // marker is the instrument, and it exists only for ids this handler minted.
+      sendJson(response, 200, {
+        messages: [{ id: `message-${threadId}`, role: "assistant", parts: [{ type: "text", text: created }], turn_key: null, task_id: null, seq: 1, created_at: "2026-09-04T00:00:00Z" }],
+      });
+      return true;
+    }
     const text = threadId === THREAD_A
       ? "Own message for client A"
       : threadId === THREAD_B
