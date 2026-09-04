@@ -1195,6 +1195,46 @@ export const CHECKOUT_GATE_C2_COHORT = [
 const CHECKOUT_GATE_C6_HUMAN_FNS = ["get_current_checkout_plan", "get_own_checkout_progress"];
 
 export const CHECKOUT_GATE_C6_COHORT = [...CHECKOUT_GATE_C6_HUMAN_FNS];
+
+// 裁-190 web reads and small doors (`UNNUMBERED_web_reads_and_small_doors.sql` +
+// `UNNUMBERED_stmt_witness_totals_and_institution_code.sql` — numbers claimed at merge prep):
+// the seven backend gaps the repair-session web lanes are blocked on, plus the statement lane's
+// institution resolver. Every one of the five human doors exists for the SAME reason: the
+// relation that owns the fact is `force row level security` with a single clara_fn_owner policy
+// and no application-role grant, so a door is the only lawful read path and a table grant would
+// be the wrong fix.
+//   get_own_dpa_signature        — the caller's OWN signatures, jwt_sub()-scoped and NEVER
+//     parameterised (a p_user argument would be a consent oracle on a pre-firm surface).
+//   client_egress_state          — one row per ratified typed egress purpose plus the legacy
+//     blanket consent; bookkeeper+ READ only. The four WRITE doors stay owner-floored.
+//   list_firm_timeline           — the keyset page of clara.firm_timeline_visible; bookkeeper+,
+//     matching /activity's own minimumRole and audit_log's floor.
+//   archive_chat_session         — author-only, one-way, audited; modelled on share_chat_session,
+//     the only other lawful mutation this table has.
+//   set_counterparty_identifiers — admin floor; the first and only writer of registration/tin on
+//     an EXISTING counterparty (create_counterparty's INSERT was the sole producer).
+// NO WAKE OR AGENT SIBLING FOR ANY OF THEM, and that is the design rather than an omission:
+// nothing here is an agent act. The runtime lane gains exactly two, both below.
+const WEB_READS_DOORS_HUMAN_FNS = [
+  "get_own_dpa_signature", "client_egress_state", "list_firm_timeline",
+  "archive_chat_session", "set_counterparty_identifiers",
+];
+// clara_runtime ONLY, and both are underscore-free-by-intent EXCEPT _stmt_institution_code,
+// which keeps the statement lane's own `_stmt_*` family prefix (its siblings _stmt_header_norm /
+// _stmt_lines_norm) because it is a lane-internal normaliser rather than a product verb. That
+// makes it the one granted `_`-prefixed name in the estate, so it is written down HERE and in
+// the two sibling censuses that treat an underscore prefix as "app-callable by nobody".
+//   build_frontier          — {count, max_version} over clara.schema_migrations for the runtime
+//     /build-info route. A definer rather than a table grant: the ledger is the migration
+//     runner's own and a broad SELECT on it is a schema-history oracle nobody asked for.
+//   _stmt_institution_code  — printed bank name/code -> the clara.bank_institutions roster code.
+//     clara_runtime holds ZERO grant on that roster (0038:224-231), so the statement lane could
+//     not map a printed name at all; PR #545's frozen in-workflow mirror is what this retires.
+const WEB_READS_DOORS_RUNTIME_FNS = ["build_frontier", "_stmt_institution_code"];
+
+export const WEB_READS_DOORS_COHORT = [
+  ...WEB_READS_DOORS_HUMAN_FNS, ...WEB_READS_DOORS_RUNTIME_FNS,
+];
 // FS-4 C-3 (checkout-gate design part 2 §1.3 and part 3 §2.1): six authenticated pre-firm/
 // operator-support doors plus the auth-wall lane's exact two-verb, pre-session OTP surface.
 const CHECKOUT_GATE_C3_HUMAN_FNS = [
@@ -1482,6 +1522,9 @@ export const ALLOWED = {
     // mode, and the applicant's OWN checkout progress (self-scoped on jwt_sub). See the block
     // above for why each is a door rather than a table grant.
     ...CHECKOUT_GATE_C6_HUMAN_FNS,
+    // 裁-190: the five web read/write doors over walled relations — see the block above for why
+    // each is a door rather than a table grant, and why none has a wake or agent sibling.
+    ...WEB_READS_DOORS_HUMAN_FNS,
     // FS-4 C-3: DPA, checkout and folded paid-registration claim doors. Every identity and
     // ownership floor is body-enforced; the pre-session OTP pair lives on its isolated role.
     ...CHECKOUT_GATE_C3_HUMAN_FNS,
@@ -1572,6 +1615,9 @@ export const ALLOWED = {
     ...FA_0041_SHARED_FNS, // 0041 the due probe
     ...ADJ_0045_RUNTIME_FNS, // 0045 [D-b2] the adjustment sweep's run verb (runtime lane ONLY)
     ...ADJ_0045_SHARED_FNS, // 0045 [D-b2] the due probe
+    // 裁-190: the migration frontier read for /build-info, and the statement lane's institution
+    // resolver. clara_runtime ONLY — see the block above; neither table gains a grant.
+    ...WEB_READS_DOORS_RUNTIME_FNS,
     // [F-A2 PR-2, GM-10] the withdrawal re-admit door — clara_runtime ONLY (the consumer's
     // sole caller); proves the event->entry->attempt->task->filing chain then delegates to
     // 0053's one_click exception. Declared here so any wider grant FAILS the matrix.
@@ -1853,6 +1899,10 @@ export async function grantMatrixFailures() {
   failures.push(...cohortFailures("FS-4 C-2 projected Stripe store", CHECKOUT_GATE_C2_COHORT, liveNames));
   failures.push(...cohortFailures("FS-4 C-6 apps/web read doors", CHECKOUT_GATE_C6_COHORT, liveNames));
   failures.push(...cohortFailures("FS-4 C-3 folded checkout door", CHECKOUT_GATE_C3_COHORT, liveNames));
+  // 裁-190 — frontier-tolerant like every cohort above: entirely absent on a chain that has not
+  // applied the two UNNUMBERED files (which is every CI chain until merge prep, 裁-108), and a
+  // PARTIAL cohort is caught by name.
+  failures.push(...cohortFailures("裁-190 web reads and small doors", WEB_READS_DOORS_COHORT, liveNames));
   // 裁-21 PR-a — frontier-tolerant by cohortFailures' own rule: a cohort that is entirely
   // absent (every pre-PR-a chain) returns no failure, while a PARTIAL cohort — one of the
   // thirteen retired or renamed without truing this roster — is caught by name.

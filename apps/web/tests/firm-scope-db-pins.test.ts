@@ -195,6 +195,27 @@ const REVIEWED_DYNAMIC_SQL_BARRIERS = new Map<string, ReviewedDynamicSqlBarrier>
       sha256: "f6d093e5b5e6037386522581ec07fab6ad955b4944f3871fc5a31b2635173b7b",
     },
   ],
+  // The two 裁-190 web-reads/doors files. They are UNNUMBERED until merge prep (裁-108), and an
+  // uppercase 'U' sorts AFTER every digit, so both land at the END of the corpus walk — hence
+  // their position here: this Map's key order is compared to the census's file-sorted
+  // `blockedAt`, so the entries must appear in the same order the corpus does.
+  // AT MERGE PREP THESE TWO KEYS ARE RENAMED WITH THEIR CLAIMED NUMBERS, which also moves them
+  // ahead of nothing and behind everything numbered below them — re-sort this list then, and
+  // re-stamp both sha256 values, because the number lives in the filename and not in the bytes.
+  [
+    "UNNUMBERED_stmt_witness_totals_and_institution_code.sql",
+    {
+      reason: "Reviewed pg_get_functiondef splice recuts ONE named function, clara._persist_statement_core_v2(...), read by its exact oid; it returns jsonb and emits no view definition, so neither P4 scope view is reachable. Its postcheck additionally proves the legacy sibling core is byte-untouched by sha256.",
+      sha256: "015bbd0c44302ba3ca3f67274e58971d1fd0967001aaae045a9de32446e8a132",
+    },
+  ],
+  [
+    "UNNUMBERED_web_reads_and_small_doors.sql",
+    {
+      reason: "Reviewed pg_get_functiondef splices recut exactly two TRIGGER functions by name — clara._tf_chat_session_update() and clara._tf_counterparty_update_0011(). Both are `returns trigger`, so neither can emit a view definition of any kind, let alone either P4 scope view; each splice re-reads its own single oid and postchecks the installed body. The file's only other object creation is static DDL the lexer inspects directly.",
+      sha256: "4c3e82af9e5001c47d674b6ec1f56bb5d684c75c3ac59f9a00e0e41defd6c6c8",
+    },
+  ],
 ]);
 
 /**

@@ -263,6 +263,13 @@ async function hrdAFamily() {
 test("debt-BAR1 · 裁-15 estate census — EVERY member of the catalog-derived same-shape family (fourteen since the firm timeline landed) carries security_barrier, and the reloption is proven to buy pushdown-ordering, not target-list masking", async (t) => {
   if (gate(t)) return;
   const family = await hrdAFamily();
+  // firm_timeline_visible ships in an UNNUMBERED file until merge prep (裁-108), and the runner
+  // SILENTLY SKIPS such a file — so on CI's chain the view is simply absent and the roster is
+  // thirteen. Gated on the LIVE CATALOG, exactly like every other member would be: the census is
+  // catalog-derived on the left-hand side, so pinning a hardcoded fourteen on the right would make
+  // this cell fail for the one reason it must not — the cohort not being applied.
+  const timelineLanded = (await rootQuery(
+    "select to_regclass('clara.firm_timeline_visible') is not null as ok")).rows[0].ok;
   assert.deepEqual(family, [
     "agent_receipts_visible", "agent_tasks_visible", "caller_context",
     "client_identifier_promotions_visible", "coding_tasks_visible",
@@ -270,9 +277,9 @@ test("debt-BAR1 · 裁-15 estate census — EVERY member of the catalog-derived 
     "document_intakes_visible", "document_processing_tasks_visible",
     "firm_invites_visible", "firm_members_visible", "firm_open_questions_visible",
     "firm_registration_requests_visible",
-    "firm_timeline_visible",
+    ...(timelineLanded ? ["firm_timeline_visible"] : []),
     "users_visible",
-  ], "the catalog-derived family must be exactly the fourteen expected members, closed-world -- P4 tranche-2 (0145) landed both firm_registration_requests_visible (anticipated by this file's own header comment) and counterparty_aliases_visible (a round-4 addition this file's author could not have known about -- 裁-11's masked-view mechanism was chosen AFTER this file merged, to satisfy wave-a-shape's fn-fronted-only invariant), and CB-AE2E-018 / 裁-190 landed firm_timeline_visible (the bookkeeper+ activity feed over clara.domain_events -- a FOURTEENTH member this census caught on its author's first estate run, which is the derivation working: the family is read from the catalog, so a new same-shape view joins it whether or not anyone remembered 裁-15)");
+  ], "the catalog-derived family must be exactly the expected members, closed-world -- P4 tranche-2 (0145) landed both firm_registration_requests_visible (anticipated by this file's own header comment) and counterparty_aliases_visible (a round-4 addition this file's author could not have known about -- 裁-11's masked-view mechanism was chosen AFTER this file merged, to satisfy wave-a-shape's fn-fronted-only invariant), and CB-AE2E-018 / 裁-190 landed firm_timeline_visible (the bookkeeper+ activity feed over clara.domain_events -- a FOURTEENTH member this census caught on its author's first estate run, which is the derivation working: the family is read from the catalog, so a new same-shape view joins it whether or not anyone remembered 裁-15)");
 
   const r = await rootQuery(
     `select c.relname, c.reloptions
