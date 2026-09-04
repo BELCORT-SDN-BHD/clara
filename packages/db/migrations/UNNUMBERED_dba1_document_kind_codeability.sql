@@ -181,9 +181,16 @@ grant select on clara.document_kind_codeability to clara_authenticated;
 -- (attest_close_exception) while a FALSE PASS is a year closed over an unposted bill and
 -- nobody ever asked again -- the date scope makes that miss permanent. So every genuinely
 -- arguable kind is seeded CODEABLE.
+--
+-- 裁-191 (owner, 2026-09-04) RULED THAT DIRECTION EXPLICITLY, 宁可误报、不可漏报 -- better a
+-- false alarm than a missed one -- and applied it to the two rows this file had seeded the
+-- other way: tax_correspondence and agreement_contract are BOTH codeable. A Notice of
+-- Assessment and a hire-purchase or finance lease each create a bookable liability, and the
+-- traffic that owes nothing (acknowledgement letters, supply contracts) shows as uncoded
+-- until a human dismisses it. The split is 12 codeable / 8 not.
 -- =====================================================================================
 insert into clara.document_kind_codeability(kind, codeable, basis) values
-  -- ---------------------------------------------------------------- CODEABLE (10 of 20)
+  -- ---------------------------------------------------------------- CODEABLE (12 of 20)
   ('invoice', true,
    'A sales or purchase invoice is the primary source document for a revenue or expense entry. If it is filed and dated in the year, the books owe an entry for it.'),
   ('receipt', true,
@@ -204,21 +211,23 @@ insert into clara.document_kind_codeability(kind, codeable, basis) values
    'ARGUABLE, SEEDED THE VISIBLE WAY. In Malaysian SME practice a handwritten slip is often a real bill or receipt from a small vendor. Treated as work until a person says otherwise, because the alternative hides a genuine unposted cost.'),
   ('other', true,
    'Classified, but into no kind at all. That is not evidence the document owes nothing -- it is an unanswered question, and the lane is where unanswered questions belong.'),
-  -- ------------------------------------------------------------ NOT CODEABLE (10 of 20)
+  -- 裁-191 (owner, 2026-09-04): the two kinds this table was seeded the OTHER way on, ruled
+  -- CODEABLE under 宁可误报、不可漏报 -- better a false alarm than a missed one.
+  ('tax_correspondence', true,
+   'A Notice of Assessment creates a bookable liability; acknowledgement traffic shows as uncoded until a human dismisses it (裁-191, owner, 2026-09-04).'),
+  ('agreement_contract', true,
+   'A hire-purchase or finance lease creates a liability and an asset at inception; supply contracts show as uncoded until dismissed (裁-191, owner, 2026-09-04).'),
+  -- ------------------------------------------------------------- NOT CODEABLE (8 of 20)
   ('bank_statement', false,
    'A statement is reconciliation evidence, not a transaction. Its LINES post through the bank-reconciliation lane against their own matched entries; the statement document itself never carries one. This kind is also the sharpest instance of the defect: ingest_bank_statement stamps documents.financial_date = period_end UNCONDITIONALLY (0038:1846), so before this table every filed statement landed inside the fiscal year and failed uncoded_documents permanently for that year.'),
   ('consent_evidence', false,
    'Egress consent evidence. 0014 makes it structurally exempt from facts extraction and set_document_kind refuses the kind outright (0123:1990, CLR28), so no entry will ever exist for it. Leaving it in the lane asked a professional for work that cannot be done.'),
   ('ssm_company_doc', false,
    'A statutory registry document -- constitution, Form 24/44/49, a company search. It records who the company is, not what it transacted.'),
-  ('agreement_contract', false,
-   'A contract creates an obligation, not a transaction. The invoices raised under it post; the contract itself does not, and booking from it would anticipate revenue or cost that has not been earned or incurred.'),
   ('identity_document', false,
    'KYC identity evidence -- an IC, a passport, a directors'' register extract. No monetary content of any kind.'),
   ('knowledge_artifact', false,
    'A firm knowledge note or working paper. Reference material, not a source document.'),
-  ('tax_correspondence', false,
-   'LHDN and RMCD letters, acknowledgements, reminders and EA forms are correspondence. THE ARGUABLE ONE, AND THE FIRST ROW TO REVISIT: a Notice of Assessment does create a liability that must be booked, and if the notice is the only document filed for it this row hides that from the gate. Seeded FALSE because the overwhelming majority of this kind is acknowledgement traffic that would otherwise block every close; flip it if the firm files assessments here.'),
   ('management_account', false,
    'A management report is DERIVED from the books. Posting from it would double-count the entries it was produced from.'),
   ('opening_balance_doc', false,

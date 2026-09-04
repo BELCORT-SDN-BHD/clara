@@ -21,7 +21,7 @@ import {
   waveAEnsureReady, filedDocument,
 } from "./wave-a-fixtures.mjs";
 import * as wb from "./wave-b/wb-fixtures.mjs";
-import { has0056, cleanCloseableFY } from "./x56-fixtures.mjs";
+import { has0056, caught, cleanCloseableFY, beginClose, attestClose } from "./x56-fixtures.mjs";
 
 let ready = false, world = null;
 
@@ -106,6 +106,28 @@ test("dba.1b the predicate fails toward VISIBLE on both unknowns: a NULL kind an
   assert.equal(row.invoice, true, "an invoice owes an entry");
   assert.equal(row.statement, false, "a bank statement never carries a journal entry on the document itself");
   assert.equal(row.consent, false, "and consent evidence is structurally exempt from facts extraction");
+});
+
+test("dba.1b2 裁-191: tax_correspondence and agreement_contract are BOTH codeable, and the split is 12 / 8", async (t) => {
+  if (gate(t)) return;
+  const r = await rootQuery(
+    `select clara._is_codeable_kind('tax_correspondence') as tax,
+            clara._is_codeable_kind('agreement_contract') as contract,
+            (select count(*) filter (where codeable)::int from clara.document_kind_codeability) as yes,
+            (select count(*) filter (where not codeable)::int from clara.document_kind_codeability) as no,
+            (select basis from clara.document_kind_codeability where kind='tax_correspondence') as tax_basis,
+            (select basis from clara.document_kind_codeability where kind='agreement_contract') as contract_basis`);
+  const row = r.rows[0];
+  assert.equal(row.tax, true,
+    "a Notice of Assessment creates a bookable liability — 裁-191 ruled this kind codeable, 宁可误报、不可漏报");
+  assert.equal(row.contract, true,
+    "a hire-purchase or finance lease creates a liability and an asset at inception — 裁-191 ruled this kind codeable too");
+  assert.equal(row.yes, 12, "twelve kinds owe an entry");
+  assert.equal(row.no, 8, "and eight never do");
+  // The BASIS is what makes a future flip an informed change rather than a guess, so it is
+  // pinned to the ruling rather than left to drift into a one-word note.
+  assert.match(row.tax_basis, /Notice of Assessment/, "the basis names why, in the owner's own terms");
+  assert.match(row.contract_basis, /hire-purchase|finance lease/, "same for the contract row");
 });
 
 test("dba.1c the vocabulary is DATA the owner can change without a migration, and no app role can change it", async (t) => {
@@ -317,6 +339,100 @@ test("dba.3b the enrolled window is per account: a January registration owes 12 
   assert.equal(byCode["981-DBA3"], 12, "an account registered on day one of the year owes every month of it");
   assert.equal(byCode["982-DBA3"], 6,
     "an account registered in July owes July to December — a universe that ignored the registration date would false-FAIL every mid-year account");
+});
+
+test("dba.3d the unmeasurable account is an OUTSTANDING ITEM a professional can name — and drawer 1 independently refuses the same shape, so this was a dead end rather than an unsafe seal", async (t) => {
+  if (gate(t)) return;
+  const owner = world.users.alice, prep = world.users.bob;
+  const fx = await cleanCloseableFY(owner, { tag: "dba3d", prepSub: prep });
+  const firm = await firmOfClient(fx.client);
+  const b = await fyBounds(fx.fy);
+  const yr = b.s.slice(0, 4);
+
+  // TWO enrolled accounts. Account A is covered January-November, so it carries exactly ONE
+  // enumerated finding (December's gap). Account B holds no statement at all, so it is the
+  // UNMEASURABLE population dba3 added and dba8 makes outstanding.
+  await rootQuery(
+    `insert into clara.bank_institutions(code, name) select 'DBARIGBANK','DB-A rig institution'
+      where not exists (select 1 from clara.bank_institutions where code='DBARIGBANK')`);
+  const acct = {};
+  for (const [tag, code, num] of [["A", "990-DBAD", "70009001"], ["B", "991-DBAD", "70009002"]]) {
+    await rootQuery(
+      `insert into clara.coa_accounts(client_id, firm_id, account_code, name, account_type, is_active, is_bank_account)
+         values ($1,$2,$3,'DB-A rig bank','asset', true, true)`, [fx.client, firm, code]);
+    acct[tag] = (await rootQuery(
+      `insert into clara.bank_accounts(firm_id, client_id, bank_code, bank_name_display, account_number,
+          account_number_normalized, coa_account_code, created_by, created_at)
+         values ($1,$2,'DBARIGBANK','DB-A rig institution',$3,$3,$4,$5,($6::date)::timestamptz) returning id`,
+      [firm, fx.client, num, code, owner, b.s])).rows[0].id;
+  }
+  for (let m = 1; m <= 11; m++) {
+    const mm = String(m).padStart(2, "0");
+    const last = new Date(Number(yr), m, 0).getDate();
+    const doc = await filedDocument(prep, { firm, client: fx.client, kind: "bank_statement", financialDate: `${yr}-${mm}-${last}` });
+    await rootQuery(
+      `insert into clara.bank_statements(firm_id, client_id, bank_account_id, document_id, source_doc_sha256,
+          filing_id, facts_hash, period_start, period_end, statement_date, opening_cents, closing_cents,
+          line_count, ingest_mode)
+         values ($1,$2,$3,$4,$5,$6,'\\x00'::bytea,($7)::date,($8)::date,($8)::date,0,0,0,'structured')`,
+      [firm, fx.client, acct.A, doc.documentId, doc.sha256, doc.filingId, `${yr}-${mm}-01`, `${yr}-${mm}-${last}`]);
+  }
+
+  const g = await bankGate(fx.client, fx.fy);
+  assert.equal(g.state, "fail", "mandatory setup: a measured gap outranks, so the gate reads fail");
+  assert.deepEqual(g.statement_gaps.map((x) => x.month), [`${yr}-12`],
+    "exactly ONE enumerated finding — account A's December");
+  assert.deepEqual(g.no_statements.map((x) => x.bank_account_id), [acct.B],
+    "and account B is the unmeasurable population");
+
+  // (1) THE ITEM LIST is what every drawer-2 consumer reads. Before dba8 it named the gap
+  // ALONE, so account B was in NO consumer's list and could not be attested by name.
+  const items = (await rootQuery(
+    "select clara._gate_outstanding_items('open_bank_recon_items', $1::jsonb) as r", [JSON.stringify(g)])).rows[0].r;
+  assert.ok(items.includes(`${acct.B}:no_statements`),
+    "the unmeasurable account is an OUTSTANDING ITEM — the gate now carries its own population into the one list its consumers read");
+  assert.ok(items.includes(`${acct.A}:${yr}-12`), "beside the gap, whose key shape is unchanged");
+  assert.equal(items.length, 2, "two outstanding items, and the two key shapes do not collide");
+
+  // (2) THE PROFESSIONAL CAN NAME IT, through the real door. attest_close_exception derives
+  // its accepted key domain from that same list (0120:979-994), so this is the user-facing
+  // half of the repair: before dba8 this exact call refused `attest_item_unknown`.
+  const begun = await beginClose(owner, { fy: fx.fy });
+  const att = await attestClose(owner, {
+    closeRun: begun.close_run_id, checkKey: "open_bank_recon_items",
+    reason: "dba3d: account B holds no statement for the year, accepted and recorded",
+    itemKey: `${acct.B}:no_statements`,
+  });
+  assert.ok(att, "the account is attestable BY NAME");
+  const stored = await rootQuery(
+    `select item_key from clara.close_attestations
+      where close_run_id=$1 and check_key='open_bank_recon_items' and superseded_at is null`,
+    [begun.close_run_id]);
+  assert.deepEqual(stored.rows.map((x) => x.item_key), [`${acct.B}:no_statements`],
+    "and the attestation is recorded against that item, never as a blanket");
+
+  // (3) MUST-NOT-GO-GREEN: a key this gate does NOT name is still refused, so (2) proves an
+  // enumeration and not a widening of what may be attested.
+  const bad = await caught(() => attestClose(owner, {
+    closeRun: begun.close_run_id, checkKey: "open_bank_recon_items",
+    reason: "dba3d: an account that is not outstanding", itemKey: `${acct.A}:no_statements`,
+  }));
+  assert.ok(bad, "an account that is NOT in the unmeasurable population cannot be attested");
+  assert.equal(JSON.parse(bad.detail ?? "{}").reason, "attest_item_unknown",
+    "and it is refused as attest_item_unknown, by the door's own typed reason");
+
+  // (4) THE HONEST BOUND ON THE CLAIM. This shape was never an unsafe SEAL: the DRAWER-1
+  // bank_recon_identity gate enumerates from the same registry and answers `unknown` /
+  // no_statements_loaded for a statement-less account, and a drawer-1 unknown refuses
+  // absolutely with no attestation path. Measured here so nobody reads (1)-(3) as "the close
+  // was sealing" — and asserted, so if that neighbour ever stops refusing, this cell says so.
+  const identity = (await rootQuery(
+    "select clara.bank_recon_close_state($1,$2) as r", [fx.client, fx.fy])).rows[0].r;
+  assert.equal(identity.state, "unknown",
+    "drawer-1 bank_recon_identity independently refuses this shape today");
+  const bRow = (identity.accounts ?? []).find((x) => x.bank_account_id === acct.B);
+  assert.equal(bRow?.strict?.reason, "no_statements_loaded",
+    "naming the same account for the same reason — which is why the drawer-2 enumeration had to be fixed rather than leaned on");
 });
 
 test("dba.3c the gap arm still measures: an account WITH statements reports its missing months as a FAIL, not an unknown", async (t) => {
