@@ -188,9 +188,16 @@ test("[N1] clearing the highlight passes NULL, and the overlay ends with no row 
   // be false. The prop is `string | null` now and the caller passes null.
   //
   // Asserted at the OVERLAY, which is the only caller that selects, and by
-  // BEHAVIOUR rather than by type: select a fact, clear it, and no row is
-  // marked. A fixture with an artificially empty region id would have proved a
-  // defect that cannot occur instead of the one that did.
+  // BEHAVIOUR rather than by type: select a fact, clear it, and both the mark
+  // and the control go. A fixture with an artificially empty region id would
+  // have proved a defect that cannot occur instead of the one that did.
+  //
+  // THE TWO HALVES DIFFER, and only one of them catches the sentinel. The
+  // aria-selected assertion does NOT: `"" === region.id` is false for every
+  // real uuid, so the mark clears either way. The CONTROL assertion does: the
+  // button renders on `selectedId !== null`, which an empty string satisfies,
+  // so the sentinel leaves a "Clear the highlight" button standing over
+  // nothing. The mutant panel is what separated them.
   //
   // The byte fetch has no server here, so the page pane renders its honest
   // failure arm — irrelevant to this cell, and itself a state worth mounting.
@@ -219,6 +226,17 @@ test("[N1] clearing the highlight passes NULL, and the overlay ends with no row 
       h.find((n) => n.tagName === "TR" && (n as { getAttribute?: (k: string) => unknown }).getAttribute?.("aria-selected") === "true"),
       null,
       "after clearing, no row may remain marked",
+    );
+
+    // AND THE CONTROL ITSELF RETIRES. This is the half that discriminates: the
+    // clear button renders on `selectedId !== null`, so an empty-string
+    // sentinel leaves it standing forever — a control offering to clear a
+    // selection that is already gone. The aria half above cannot see the
+    // sentinel (no region id is ever ""), but this can.
+    assert.equal(
+      h.find((n) => n.tagName === "BUTTON" && textOf(n).includes("Clear the highlight")),
+      null,
+      "the clear control must retire with the selection it clears",
     );
   } finally {
     await h.unmount();
