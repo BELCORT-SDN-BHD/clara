@@ -42,6 +42,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/parts/PartBadge";
 import { businessDateTime } from "@/lib/business-date";
 import { OnboardingDoorDialog } from "./OnboardingDoorDialog";
+import { formatPlanItemAnswer, type AnswerTranslator, type FormattedAnswer } from "@/lib/onboarding/answer-format";
 import type { ItemResolution } from "@/lib/onboarding/resolution-history";
 import type { OnboardingPlanItemRow } from "@/lib/onboarding/types";
 
@@ -51,6 +52,28 @@ const STATE_GLYPH: Record<OnboardingPlanItemRow["state"], string> = {
   resolved: "✓",
   deferred: "◐",
 };
+
+/** H-26 — the settled answer, said out loud, plus the acknowledged-warning lines and the
+ *  UNVERIFIED badge. Rendered in TWO places (the row, and the amend dialog's "answer standing
+ *  now"), so it is one component rather than two copies that could drift apart on exactly the
+ *  capture whose formatting is a professional-liability signal. */
+function SettledAnswer({ formatted, unverifiedLabel }: { formatted: FormattedAnswer; unverifiedLabel: string }) {
+  return (
+    <div className="flex flex-col gap-1">
+      <div className="flex flex-wrap items-center gap-2">
+        <p className="text-xs text-muted-foreground">{formatted.text}</p>
+        {/* WARNING-TONED, in BOTH places (the open question the map raised, answered the
+            careful way): a registration the product did not recognise and did not check is
+            the one capture a reader must not mistake for a verified identity, and the amend
+            dialog is precisely where someone decides whether to correct it. */}
+        {formatted.unverified ? <Badge tone="warning">{unverifiedLabel}</Badge> : null}
+      </div>
+      {formatted.warnings.map((line) => (
+        <p key={line} className="text-xs text-warning">{line}</p>
+      ))}
+    </div>
+  );
+}
 
 export function OnboardingItemRow({
   item,
@@ -87,6 +110,11 @@ export function OnboardingItemRow({
   extraControls?: ReactNode;
 }) {
   const t = useTranslations("ClientOnboarding.item");
+  // H-26 — the answer namespace, narrowed to the shape `formatPlanItemAnswer` takes. The cast
+  // is to next-intl's key-literal typing only: every key this resolves is asserted to EXIST in
+  // messages/en.json by `answer-format.test.ts`, which walks the real catalog rather than
+  // trusting this line.
+  const tAnswer = useTranslations("ClientOnboarding.answer") as unknown as AnswerTranslator;
   const [resolution, setResolution] = useState("");
   const [amendment, setAmendment] = useState("");
   const isPending = item.state === "pending";
@@ -94,6 +122,8 @@ export function OnboardingItemRow({
   // 裁-27: the amend is offered for a SETTLED item on an OPEN plan — the exact complement of
   // the resolve trigger's own gate, so between them every state has one honest control.
   const canAmend = !isPending && planOpen;
+  const hasAnswer = item.answer !== null && item.answer !== undefined;
+  const formatted = hasAnswer ? formatPlanItemAnswer(item.item_key, item.answer, tAnswer) : null;
 
   return (
     <li className="enter-content flex flex-col gap-2 rounded-lg border border-border bg-card p-3 text-sm">
@@ -103,8 +133,12 @@ export function OnboardingItemRow({
         <Badge tone={isPending ? "neutral" : "info"}>{t(`state.${item.state}`)}</Badge>
         {item.required_for_commit ? <Badge tone="warning">{t("requiredForCommit")}</Badge> : null}
       </div>
-      {!isPending && item.answer !== null && item.answer !== undefined ? (
-        <p className="text-xs text-muted-foreground">{String(item.answer)}</p>
+      {/* H-26 — was `String(item.answer)`, which read "[object Object]" for every
+          interview-written answer (all of them are jsonb objects; only a human resolution is
+          a string). The formatter names the shape it recognises and falls back to ordered
+          `key: value` lines for one it does not — never JSON, never a blob. */}
+      {!isPending && formatted !== null ? (
+        <SettledAnswer formatted={formatted} unverifiedLabel={t("unverifiedBadge")} />
       ) : null}
       <OnboardingDoorDialog
         triggerLabel={t("resolveTrigger")}
@@ -149,9 +183,11 @@ export function OnboardingItemRow({
               append-only revision trail. Neither is edited by this dialog. */}
           <div className="flex flex-col gap-1 rounded-lg border border-border bg-muted/40 p-2">
             <p className="text-xs font-medium text-card-foreground">{t("amendCurrentLabel")}</p>
-            <p className="text-xs text-muted-foreground">
-              {item.answer === null || item.answer === undefined ? t("amendNoCurrent") : String(item.answer)}
-            </p>
+            {formatted === null ? (
+              <p className="text-xs text-muted-foreground">{t("amendNoCurrent")}</p>
+            ) : (
+              <SettledAnswer formatted={formatted} unverifiedLabel={t("unverifiedBadge")} />
+            )}
           </div>
           {priorResolutions === null || priorResolutions === undefined ? (
             <p className="text-xs text-muted-foreground">{t("amendHistoryLoading")}</p>

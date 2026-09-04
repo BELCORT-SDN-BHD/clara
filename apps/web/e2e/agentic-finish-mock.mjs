@@ -26,6 +26,8 @@ export const P6_5 = {
   threadA: "a0a0a0a0-1111-4111-8111-111111111111",
   threadB: "b0b0b0b0-2222-4222-8222-222222222222",
   planA: "d1d1d1d1-1111-4111-8111-111111111111",
+  /** CB-AE2E-023 — client B's COMMITTED plan, the settled-receipt fixture. */
+  planB: "d2d2d2d2-2222-4222-8222-222222222222",
   taskA: "e1e1e1e1-1111-4111-8111-111111111111",
   interruptionA: "e2e2e2e2-2222-4222-8222-222222222222",
   templateId: "70707070-7777-4777-8777-777777777777",
@@ -84,7 +86,11 @@ async function readJson(request) {
 
 const CLIENTS = () => [
   { id: P6_5.clientA, name: "ROME PROPERTIES", status: "onboarding", created_at: "2026-01-01T00:00:00.000Z" },
-  { id: P6_5.clientB, name: "ROME SECRETARY", status: "onboarding", created_at: "2026-01-02T00:00:00.000Z" },
+  // CB-AE2E-023 — client B is the SETTLED fixture: its onboarding was committed, so its
+  // status is what `commit_client_onboarding` leaves behind (`status='active'`,
+  // 0017_wave_b.sql:2825). A committed plan on an "onboarding" client would be a state the
+  // database cannot produce, and a walk built on one proves nothing about the real face.
+  { id: P6_5.clientB, name: "ROME SECRETARY", status: "active", created_at: "2026-01-02T00:00:00.000Z" },
 ];
 
 const PLAN = () => ({
@@ -111,6 +117,45 @@ const ITEMS = () => ([
     answer: { chart: "firm_template", applied: false }, state: "deferred",
     required_for_commit: false, answered_by: P6_5.userId, answered_at: "2026-09-01T00:00:00.000Z",
     created_at: "2026-09-01T00:00:00.000Z", updated_at: "2026-09-01T00:00:00.000Z",
+  },
+]);
+
+/** CB-AE2E-023 — client B's COMMITTED plan and its items. A separate plan id and a separate
+ *  client id, so every handler below stays scoped exactly as it was: client A's live-plan
+ *  arms are untouched and this fixture is reachable only through client B's own filters. */
+const PLAN_B = () => ({
+  id: P6_5.planB, firm_id: P6_5.firmId, scope_kind: "client", client_id: P6_5.clientB,
+  state: "committed", revision_token: "rev-b-9", revision_n: 9,
+  committed_at: "2026-09-03T02:00:00.000Z", committed_by: P6_5.userId,
+  review_maker: null, reviewed_at: null, contributors: [P6_5.userId],
+  commit_attestation: "Sole practitioner — reviewed against the SSM certificate.",
+  cancelled_at: null, cancelled_by: null, cancel_reason: null,
+  created_at: "2026-09-01T00:00:00.000Z", updated_at: "2026-09-03T02:00:00.000Z",
+  opened_by_agent: false, opener_model: null, opened_from_question: null,
+});
+
+const ITEMS_B = () => ([
+  // The internal binding row the interview writes (clientOnboarding.v4.ts:102). It must be
+  // neither rendered nor counted — H-28.
+  {
+    id: "item-b-run", plan_id: P6_5.planB, firm_id: P6_5.firmId, item_kind: "capture",
+    item_key: "interview_run", question: null, answer: { run_id: "run-b-1" }, state: "answered",
+    required_for_commit: false, answered_by: P6_5.userId, answered_at: "2026-09-01T00:00:00.000Z",
+    created_at: "2026-09-01T00:00:00.000Z", updated_at: "2026-09-01T00:00:00.000Z",
+  },
+  {
+    id: "item-b-ssm", plan_id: P6_5.planB, firm_id: P6_5.firmId, item_kind: "must_ask",
+    item_key: "ssm", question: "What is the client's business registration number?",
+    answer: { registration: "202401047756", normalized: "202401047756", form: "unified", format_verified: true },
+    state: "answered", required_for_commit: true, answered_by: P6_5.userId,
+    answered_at: "2026-09-01T01:00:00.000Z", created_at: "2026-09-01T00:00:00.000Z", updated_at: "2026-09-01T01:00:00.000Z",
+  },
+  {
+    id: "item-b-open", plan_id: P6_5.planB, firm_id: P6_5.firmId, item_kind: "must_ask",
+    item_key: "first_year_zero_opening", question: "Opening position",
+    answer: { opening: "zero" }, state: "answered", required_for_commit: true,
+    answered_by: P6_5.userId, answered_at: "2026-09-01T02:00:00.000Z",
+    created_at: "2026-09-01T00:00:00.000Z", updated_at: "2026-09-01T02:00:00.000Z",
   },
 ]);
 
@@ -177,18 +222,18 @@ export async function handleP6_5Supabase(request, response, path, url, sendJson,
     // CLIENT-SCOPED, and falling through rather than answering `[]` for someone else's
     // client: an empty answer is still an ANSWER, and it would tell another walk's card that
     // its client has no plan.
-    if (clientFilter !== `eq.${P6_5.clientA}`) return false;
-    sendJson(response, 200, [PLAN()], cors);
-    return true;
+    if (clientFilter === `eq.${P6_5.clientA}`) { sendJson(response, 200, [PLAN()], cors); return true; }
+    if (clientFilter === `eq.${P6_5.clientB}`) { sendJson(response, 200, [PLAN_B()], cors); return true; }
+    return false;
   }
 
   // PLAN-SCOPED. Both reads carry `plan_id=eq.<id>`, so this lane answers only for its own
-  // plan and every other walk's checklist card is untouched.
+  // plans and every other walk's checklist card is untouched.
   const planFilter = url.searchParams.get("plan_id");
   if (request.method === "GET" && path === "/rest/v1/onboarding_plan_items") {
-    if (planFilter !== `eq.${P6_5.planA}`) return false;
-    sendJson(response, 200, ITEMS(), cors);
-    return true;
+    if (planFilter === `eq.${P6_5.planA}`) { sendJson(response, 200, ITEMS(), cors); return true; }
+    if (planFilter === `eq.${P6_5.planB}`) { sendJson(response, 200, ITEMS_B(), cors); return true; }
+    return false;
   }
 
   if (request.method === "GET" && path === "/rest/v1/onboarding_plan_revisions") {
@@ -198,7 +243,7 @@ export async function handleP6_5Supabase(request, response, path, url, sendJson,
   }
 
   if (request.method === "GET" && path === "/rest/v1/opening_seed_registry") {
-    if (planFilter !== `eq.${P6_5.planA}`) return false;
+    if (planFilter !== `eq.${P6_5.planA}` && planFilter !== `eq.${P6_5.planB}`) return false;
     sendJson(response, 200, [], cors);
     return true;
   }
@@ -247,11 +292,41 @@ export async function handleP6_5Supabase(request, response, path, url, sendJson,
 
   if (request.method === "POST" && path === "/rest/v1/rpc/get_coa_template") {
     if ((await readJson(request)).p_template !== P6_5.templateId) return false;
+    // H-30 — THE ROSTER IS LONG ON PURPOSE, and the length is the instrument. The apply
+    // dialog renders one checkbox row per family, so its height is DB-driven: with two
+    // families the defect (a centred, uncapped popup whose Confirm falls off the bottom of a
+    // 1280x720 viewport with nothing to scroll) is not reachable at all, and a walk against a
+    // two-family template would have proved nothing either way. Every family after the first
+    // is `by_industry`, so the DB plan's `keep: ["core_ledger"]` still selects exactly one and
+    // 裁-128's own receipt cell ("across 1 families") is unaffected.
+    //
+    // THE COUNT WAS MEASURED, NOT GUESSED. Fifteen extra families still fit inside 1280x720,
+    // so the walk passed against a DELIBERATELY BROKEN dialog — the fixture was not tall
+    // enough to reproduce the defect and the cell was proving nothing. Forty overflows a
+    // 720px viewport comfortably, and the spec's own positive control asserts the overflow
+    // before it asserts the button's position, so a fixture that quietly shrinks again reds
+    // there instead of going quietly green.
+    const extraFamilies = [
+      "retail", "wholesale", "manufacturing", "construction", "professional_services",
+      "food_and_beverage", "transport", "property", "agriculture", "education",
+      "healthcare", "hospitality", "logistics", "information_technology", "financial_services",
+      "printing", "textiles", "furniture", "chemicals", "plastics",
+      "metals", "machinery", "electronics", "automotive", "marine",
+      "mining", "utilities", "telecoms", "media", "advertising",
+      "insurance", "leasing", "security_services", "cleaning_services", "recruitment",
+      "travel_agency", "sports_and_leisure", "repair_services", "waste_management", "research",
+    ].map((key, i) => ({
+      family_key: key,
+      label: key.replace(/_/g, " ").replace(/^\w/, (c) => c.toUpperCase()),
+      inclusion: "by_industry",
+      basis: `msic ${40 + i}`,
+      sort_ordinal: i + 2,
+    }));
     sendJson(response, 200, {
       template_id: P6_5.templateId,
       families: [
         { family_key: "core_ledger", label: "Core ledger", inclusion: "core", basis: "always", sort_ordinal: 1 },
-        { family_key: "retail", label: "Retail trade", inclusion: "by_industry", basis: "msic 47", sort_ordinal: 2 },
+        ...extraFamilies,
       ],
       accounts: [],
     }, cors);

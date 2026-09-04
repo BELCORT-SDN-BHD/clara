@@ -182,6 +182,24 @@ export function ApplyStandardChartControl({
             ? t(`state.${stateKey}`, { accounts: chart.accounts ?? 0 })
             : t("state.unknown", { state: chart.state })}
         </EmptyState>
+        {/* H-29 — THE HONEST NOTE ON THE ONE STATE THAT MISLEADS.
+            `clara.coa_chart_state`'s `dec` CTE reads the seed decision out of the client's
+            latest COMMITTED plan (`p2.state = 'committed'`,
+            packages/db/migrations/0156_coa_apply_template.sql:1080-1088 — checked live: exactly
+            one CREATE, no CREATE OR REPLACE and no splice after it). While onboarding is in
+            progress the plan is OPEN, so `dec` matches nothing, `dec.seed` is NULL and the
+            CASE falls to its final `else 'undecided'`. The interview has ALREADY asked and the
+            answer IS on the plan — but this function is structurally unable to say so until
+            commit, and the bare "undecided" copy reads as though nobody had been asked.
+            `readCoaChartState` is faithful and the verdict is DB-computed, so there is nothing
+            to fix in apps/web: widening that CTE is a migration, and WHICH way to widen it is
+            an owner ruling (裁-23 Q5's "after the client is created" is ambiguous between
+            `begin_` and `commit_`). Until then this line says what is true — the decision is
+            read at commit — rather than leaving a professional to conclude the interview lost
+            their answer. See H-29 in the PR body. */}
+        {stateKey === "undecided" && planOpen ? (
+          <p className="text-xs text-muted-foreground">{t("undecidedWhileOpenNote")}</p>
+        ) : null}
         {stateKey === "adopted" ? (
           <>
             {/* GATE 1 disposition (P6-X exit gate, 2026-09-03): `clara.get_coa_template_adoption`

@@ -348,14 +348,35 @@ async function openCommitDialog(h: Awaited<ReturnType<typeof mount>>["h"], body:
   return { trigger: trigger as Node, confirmButton: confirmButton as Node };
 }
 
-test("COMMIT gate — plan_not_open blocks: the dialog's own Confirm is disabled, the reason renders, the door is never called", async () => {
+test("COMMIT gate — plan_not_open: a settled plan offers NO commit door at all, and the door is never called", async () => {
+  // CB-AE2E-023 CHANGED WHAT THIS CELL CAN PROVE, and strengthened it. This used to open the
+  // commit dialog on a COMMITTED plan and assert its Confirm was DISABLED with the
+  // `plan_not_open` reason rendered inside. There is no such dialog any more: a non-open plan
+  // routes to the settled RECEIPT, which renders no Commit and no Cancel trigger — so the
+  // dialog that could only ever be refused is not reachable, rather than reachable-and-inert.
+  //
+  // `commitBlockReason`'s own `plan_not_open` arm STAYS in the card. It is unreachable from
+  // this face now, and it is kept deliberately: it mirrors the live door's ORDERED arms, and
+  // its sibling `client_not_onboarding` is only correct because `plan_not_open` is tested
+  // first (0018_gate_k_domain.sql SS4's site-2 split pins that precedence). Its unit-level
+  // proof lives in this file's remaining three gate cells, which all still open a real dialog.
   const { impl, commitCalls } = buildMock({ plan: COMMITTED_PLAN, items: [SETTLED_ITEM], client: CLIENT_ONBOARDING, seed: FINALIZED_SEED });
   await withMockedEnv(impl, async () => {
     const { h, body } = await mount();
     try {
-      const { confirmButton } = await openCommitDialog(h, body as never);
-      assert.equal((confirmButton as unknown as { disabled: boolean }).disabled, true, "plan_not_open must disable the dialog's own Confirm");
-      assert.match(textOf(body as never), /This plan is no longer open — it cannot be committed again\./, "the plan_not_open reason must render inside the open dialog");
+      assert.equal(
+        h.find((n) => n.tagName === "BUTTON" && textOf(n) === "Commit onboarding"),
+        null,
+        "a committed plan must offer no Commit trigger — the dialog behind it can only be refused",
+      );
+      assert.equal(
+        h.find((n) => n.tagName === "BUTTON" && textOf(n) === "Cancel onboarding"),
+        null,
+        "and no Cancel trigger either (cancel_client_onboarding refuses on p.state<>'open', 0017:2857)",
+      );
+      // The receipt is what stands in its place — DISCRIMINATING: this line exists only on the
+      // settled face.
+      assert.match(textOf(body as never), /Plan revision/, "the settled receipt renders in its place");
       assert.equal(commitCalls.length, 0, "the door must never be called while this conjunct is false");
     } finally {
       await h.unmount();

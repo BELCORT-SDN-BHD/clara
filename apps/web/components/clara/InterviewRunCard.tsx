@@ -19,6 +19,8 @@ import { SectionHeader } from "@/components/common/section-header";
 import { StateBanner } from "@/components/common/state";
 import { cn } from "@/lib/utils";
 import { cancelClientOnboarding } from "@/lib/onboarding/api";
+import { formatPlanItemAnswer, type AnswerTranslator } from "@/lib/onboarding/answer-format";
+import type { AnswerEcho } from "@/lib/interview/thread";
 import { queueStateLabelKey } from "@/lib/documents/copy";
 import {
   useUploadQueue,
@@ -61,8 +63,22 @@ export function InterviewRunCard({
   const [draft, setDraft] = useState("");
   const [cancelReason, setCancelReason] = useState("");
   const syncedTerminalRef = useRef<string | null>(null);
+  // H-28 — the last park index this card has already told the checklist about. `null` is "no
+  // park observed yet on this run", which is a DIFFERENT fact from park 0 and is why the very
+  // first observation does not fire a reload (see the effect below).
+  const syncedParkRef = useRef<number | null>(null);
 
-  const run = useInterviewRun({ session, scope: "client", runId, planId });
+  // H-27 — the thread's "you" bubbles read as prose rather than as the raw jsonb the plan
+  // stores. `useTranslations` returns a stable function for a given namespace, and the
+  // formatter is read through a ref inside the hook, so this closure's identity cannot re-arm
+  // the poll even if it changed.
+  const tAnswer = useTranslations("ClientOnboarding.answer") as unknown as AnswerTranslator;
+  const echoAnswer = useCallback<AnswerEcho>(
+    (itemKey, answer) => formatPlanItemAnswer(itemKey, answer, tAnswer).text,
+    [tAnswer],
+  );
+
+  const run = useInterviewRun({ session, scope: "client", runId, planId, echoAnswer });
   const active = Boolean(runId && (!run.state || !TERMINAL_CHIPS.has(run.state.chip)));
 
   // NIT-2 (review round 2, RULED SKIPPED — known and accepted, no product
@@ -86,6 +102,55 @@ export function InterviewRunCard({
     syncedTerminalRef.current = terminalKey;
     void onPlanChanged();
   }, [run.state?.terminal?.outcome, runId, onPlanChanged]);
+
+  // A new run starts from no observed park — otherwise the previous run's index would decide
+  // whether this run's first answer counts as progress.
+  useEffect(() => {
+    syncedParkRef.current = null;
+  }, [runId]);
+
+  // ============================================================================
+  // H-28 — THE CHECKLIST FOLLOWS THE INTERVIEW, off the poll that already exists.
+  // ============================================================================
+  // TWO CLOCKS, and only one of them was ticking. This card polls `/state` every POLL_MS and
+  // rebuilds its thread; the checklist reads through `useHydratedPart`, whose mount effect is
+  // stable by construction, so its item list — and therefore the N/N header — was whatever the
+  // database held when the card mounted. Meanwhile `clientOnboarding_v4` writes one plan CAS
+  // per confirmed segment across ~18 segments. `onPlanChanged` existed but fired in exactly
+  // two places: the run's TERMINAL, and the two-step cancel. Nothing fired per answered
+  // segment, so the header sat at its mount snapshot for the whole interview.
+  //
+  // THE SIGNAL IS NOT A NEW ONE. `pendingPark.parkIndex` advances exactly once per answered
+  // park, and `classifyDeliveryBody` (lib/interview/api.ts) already treats a STRICTLY HIGHER
+  // index as the estate's proof that an answer landed. This reads the same fact the same way.
+  //
+  // WHY NOT MAKE `useHydratedPart` POLL. Its own header is explicit that its dependency shape
+  // exists to prevent exactly the busy-poll class. This adds AT MOST one plan read per
+  // existing 3s poll, and only while a park is actually moving.
+  //
+  // THE FIRST OBSERVATION DOES NOT FIRE. On mount both halves read the same database at the
+  // same moment, so the first park index is not news — reloading on it would be one wasted
+  // read per run. Only a STRICTLY HIGHER index than one already seen counts, which also means
+  // a re-render, an unchanged park across polls, and a park index that goes backwards (a
+  // resumed run re-reporting an earlier park) all fire nothing.
+  useEffect(() => {
+    const parkIndex = run.state?.pendingPark?.parkIndex;
+    if (!runId || typeof parkIndex !== "number" || !onPlanChanged) return;
+    const seen = syncedParkRef.current;
+    // BELT, AND LABELLED AS ONE (the `toggle` / `isDoActionPermitted` precedent in this repo:
+    // a non-discriminating mutant is said out loud rather than dressed up as a cell). The
+    // EQUAL half of `<=` cannot be reached today — this effect's dependency array already ends
+    // at `parkIndex`, so React does not re-run it for an unchanged index at all, and the fold
+    // round's mutant panel measured exactly that: relaxing `<=` to `<` left every cell green.
+    // What the comparison DOES discriminate is a park index that goes BACKWARDS (a resumed run
+    // re-reporting an earlier park), which does change the dependency and is guarded by both
+    // halves — that arm has its own cell. The `<=` stays for the day this effect gains a
+    // dependency that can re-fire it at the same park.
+    if (seen !== null && parkIndex <= seen) return;
+    syncedParkRef.current = parkIndex;
+    if (seen === null) return;
+    void onPlanChanged();
+  }, [run.state?.pendingPark?.parkIndex, runId, onPlanChanged]);
 
   async function startOrContinue() {
     setStarting(true);
