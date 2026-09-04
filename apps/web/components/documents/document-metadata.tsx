@@ -95,12 +95,18 @@ export function DocumentMetadata({
           return;
         }
         setOpenState("error");
+        // FOUND BY THE BROWSER LEG: `openError` holds a FINISHED SENTENCE, and
+        // the banner below used to wrap it in `openDocumentFailed` a SECOND
+        // time — the page read "Could not open this document: Could not open
+        // this document: document bytes failed". Only one of the two writers
+        // may apply the template, and it is this one, because the catch arm
+        // below carries a bare `Error.message` that needs framing too.
         setOpenError(result.reason === "popup_blocked" ? t("openDocumentPopupBlocked") : t("openDocumentFailed", { message: result.message }));
       })
       .catch((e: unknown) => {
         if (e instanceof Error && e.name === "AbortError") return; // unmounted mid-fetch — no state left to update
         setOpenState("error");
-        setOpenError(e instanceof Error ? e.message : String(e));
+        setOpenError(t("openDocumentFailed", { message: e instanceof Error ? e.message : String(e) }));
       });
   };
 
@@ -112,7 +118,9 @@ export function DocumentMetadata({
           {openState === "loading" ? t("openingDocument") : t("openDocument")}
         </Button>
       </div>
-      {openError ? <StateBanner tone="error" className="text-xs">{t("openDocumentFailed", { message: openError })}</StateBanner> : null}
+      {/* `openError` is already a finished sentence (see the two setters above) —
+          rendered VERBATIM, never re-wrapped in its own template. */}
+      {openError ? <StateBanner tone="error" className="text-xs">{openError}</StateBanner> : null}
       {notViewableMime ? (
         <StateBanner tone="neutral" className="text-xs">
           <span className="flex flex-wrap items-center gap-2">

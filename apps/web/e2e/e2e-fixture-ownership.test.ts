@@ -30,6 +30,7 @@ import { P6_5_SESSIONS } from "./agentic-finish-mock.mjs";
 const E2E_DIR = dirname(fileURLToPath(import.meta.url));
 const SERVE_BUILT = join(E2E_DIR, "serve-built.mjs");
 const LANE_MOCK = join(E2E_DIR, "agentic-finish-mock.mjs");
+const DOCUMENTS_LANE_MOCK = join(E2E_DIR, "documents-viewer-mock.mjs");
 
 /** The subject every walk signs in as, read from `serve-built.mjs` rather than re-typed here —
  *  a re-typed constant is a second copy that drifts, and this cell exists because of drift. */
@@ -65,8 +66,8 @@ test("N4 · no lane fixture may claim the FIRM ALTITUDE for the shared subject",
 
 /** Every `path === "/rest/v1/..."` or `path === "/api/..."` handler in the lane's mock, with
  *  whether its block contains a `return false` — the fall-through that makes it scoped. */
-function handlerCensus(): { path: string; scoped: boolean }[] {
-  const source = readFileSync(LANE_MOCK, "utf8");
+function handlerCensus(file: string = LANE_MOCK): { path: string; scoped: boolean }[] {
+  const source = readFileSync(file, "utf8");
   const lines = source.split("\n");
   const out: { path: string; scoped: boolean }[] = [];
   for (let i = 0; i < lines.length; i += 1) {
@@ -133,4 +134,49 @@ test("N5 · every lane handler either scopes by the request's own subject, or is
   assert.ok(scoped.length >= 10, `the census recognised only ${scoped.length} scoped handlers — it is not reading the guards`);
   assert.equal(unscoped.length, UNSCOPEABLE.size, "and it still sees the two that genuinely cannot scope");
   assert.equal(scoped.filter((p) => UNSCOPEABLE.has(p)).length, 0, "no handler is counted both ways");
+});
+
+// --- THE DOCUMENTS-VIEWER LANE (C-07 / D2 / D3) -------------------------------
+//
+// A SECOND lane, measured by the SAME instrument. The rule this file exists for
+// is not about one mock — it is about every lane sharing one server, so a new
+// lane that is not measured here is exactly the gap the rule was written after.
+
+test("N5 · the documents-viewer lane scopes every handler by its own ids", () => {
+  const census = handlerCensus(DOCUMENTS_LANE_MOCK);
+  assert.ok(census.length >= 8, `the census found ${census.length} handlers in the documents lane — too few to be reading the file`);
+  for (const row of census) {
+    console.log(`  ${row.scoped ? "scoped  " : "UNSCOPED"} ${row.path}`);
+  }
+
+  // This lane has NO unscopeable handler and needs no allowlist: every request
+  // it answers names either its own client, its own document or its own
+  // extraction. The RPC block guards on `p_client`/`p_document`/`p_candidate`
+  // before it dispatches at all.
+  assert.deepEqual(
+    census.filter((r) => !r.scoped).map((r) => r.path),
+    [],
+    "an unscoped handler in this lane would answer for a client it does not own",
+  );
+
+  // THE POSITIVE CONTROL, same shape as the cell above: an empty unscoped list
+  // means nothing unless the instrument can produce a non-empty scoped one.
+  assert.ok(census.filter((r) => r.scoped).length >= 8, "the census is not reading this lane's guards");
+});
+
+test("N4 · the documents-viewer lane does NOT claim the shared client register", () => {
+  // The sharpest failure this file records is a lane claiming
+  // `/rest/v1/clients` outright, which took away another walk's navigation
+  // link. This lane answers only the by-id form for its own client; the census
+  // above proves the handler falls through, and this reads the guard itself so
+  // the two cells cannot both be satisfied by a handler that returns early for
+  // the wrong reason.
+  const source = readFileSync(DOCUMENTS_LANE_MOCK, "utf8");
+  const block = /path === "\/rest\/v1\/clients"\) \{([\s\S]*?)\n  \}/.exec(source);
+  assert.ok(block, "the documents lane must still declare a /rest/v1/clients handler for this cell to measure");
+  assert.match(
+    block[1]!,
+    /if \(eqParam\(url, "id"\) !== DOCS\.clientId\) return false;/,
+    "the clients handler must fall through on any id but this lane's own",
+  );
 });

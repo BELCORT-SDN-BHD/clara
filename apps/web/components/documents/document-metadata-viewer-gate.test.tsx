@@ -182,3 +182,31 @@ test("VACUITY CONTROL: a PDF still opens — the gate refuses a TYPE, it does no
     }
   });
 });
+
+test("[found by the browser leg] a genuine byte-fetch failure renders its sentence ONCE, not nested inside itself", async () => {
+  // The page read "Could not open this document: Could not open this document:
+  // document bytes failed" — `openError` already held the finished sentence and
+  // the banner wrapped it in its own template a second time. The count is the
+  // assertion: a `toContain` check would have passed on the doubled string.
+  const originalFetch = globalThis.fetch;
+  const originalCreate = URL.createObjectURL;
+  URL.createObjectURL = () => "blob:fake-url";
+  globalThis.fetch = (async () => new Response("nope", { status: 500 })) as typeof fetch;
+  configureSessionTokenSource(async () => "tok");
+  const tab = fakeTab();
+  const h = await renderComponent(App(createElement(DocumentMetadata, { document: DOCUMENT, tasks: [] })));
+  const undo = installWindowOpen(tab);
+  try {
+    await clickButton(h.find((n) => n.tagName === "BUTTON" && textOf(n).includes("Open document"))!);
+    for (let i = 0; i < 6; i++) await h.settle();
+    const text = h.text();
+    const occurrences = text.split("Could not open this document").length - 1;
+    assert.equal(occurrences, 1, `the failure sentence must appear exactly once, not nested — saw ${occurrences} in: ${text}`);
+  } finally {
+    undo();
+    await h.unmount();
+    globalThis.fetch = originalFetch;
+    URL.createObjectURL = originalCreate;
+    resetSessionTokenSource();
+  }
+});

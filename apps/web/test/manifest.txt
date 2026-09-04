@@ -81,6 +81,7 @@ components/documents/document-metadata-viewer-gate.test.tsx
 components/documents/documents-a11y.test.tsx
 components/documents/documents-governance-a11y.test.tsx
 components/documents/documents-governance-keyboard.test.tsx
+components/documents/documents-workbench-refresh.test.tsx
 components/documents/lint-finding-detail.test.tsx
 components/e2e/money-input-harness-route.test.tsx
 components/entry/email-confirmation-origin.test.tsx

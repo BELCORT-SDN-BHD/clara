@@ -60,7 +60,16 @@ export function DocumentEvidence({
         </Button>
       </div>
 
-      {regions.length === 0 ? (
+      {/* ONE facts table on screen at a time, and that is a correctness point
+          rather than a tidiness one. The overlay carries its OWN facts table —
+          it has to, because clicking a fact there moves the page highlight, and
+          the two tables are built from two DIFFERENT reads (this section's
+          regions carry no locator; the overlay's do). Rendering both would put
+          the same figures on screen twice from two sources, which is exactly
+          the shape a reader cannot audit. */}
+      {showOverlay ? (
+        <DocumentPageOverlay documentId={documentId} clientId={clientId} mimeType={mimeType} />
+      ) : regions.length === 0 ? (
         <EmptyState>{t("evidenceEmpty")}</EmptyState>
       ) : (
         <>
@@ -74,10 +83,6 @@ export function DocumentEvidence({
           ) : null}
         </>
       )}
-
-      {showOverlay ? (
-        <DocumentPageOverlay documentId={documentId} clientId={clientId} mimeType={mimeType} />
-      ) : null}
     </section>
   );
 }
