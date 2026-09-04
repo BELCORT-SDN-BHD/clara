@@ -27,6 +27,7 @@ import { renderComponent, textOf, setFieldValue } from "../../test/hookHarness";
 import { enableDomInspection } from "../../test/domInspect";
 import { focusableElements, checkKeyboardWalk } from "../../test/keyboardWalk";
 import { configureSessionTokenSource, resetSessionTokenSource } from "../../lib/session-accessor";
+import { PASSWORD_MIN_LENGTH } from "../../lib/auth/password-policy";
 import { AUTH_COOKIE_NAME } from "../../lib/supabase/cookie-options";
 import messages from "../../messages/en.json";
 import { SignupAccountForm, type SignupAuthClient } from "./signup-account-form";
@@ -179,7 +180,20 @@ test("THE ACCOUNT STEP IS KEYBOARD-OPERABLE, and a keyboard-only run creates the
   });
 });
 
-test("N1: emailRedirectTo is the exact origin /auth/confirm URL and ignores the query string", async () => {
+test("N1, RETIRED BY H-35: signUp passes NO redirect at all, so no URL can be sourced from anywhere", async () => {
+  // WHAT THIS CELL USED TO ASSERT, and why the change is a strengthening
+  // rather than a deletion of coverage. N1 guarded that `emailRedirectTo` was
+  // built from `window.location.origin` and never from the query string — a
+  // real open-redirect concern while the mail carried a link. 裁-92 replaced
+  // that link with a six-digit code (the deployed Confirm-signup template
+  // emits `{{ .Token }}` and nothing to click), so the option had been INERT
+  // for a while under a comment describing the retired journey. PR 541 deletes
+  // it, and the property to hold is now stronger and simpler: there is no
+  // redirect URL in the call for an attacker to influence.
+  //
+  // The hostile query string is still planted, so this is not merely "the
+  // field is absent" — it is "the field is absent WHILE a caller-controlled
+  // value is sitting in `location.search` waiting to be picked up".
   type SignupCredentials = Parameters<SignupAuthClient["auth"]["signUp"]>[0];
   let captured: SignupCredentials | null = null;
   const client: () => SignupAuthClient = () => ({
@@ -205,12 +219,18 @@ test("N1: emailRedirectTo is the exact origin /auth/confirm URL and ignores the 
       try {
         for (let i = 0; i < 3; i++) await h.settle();
         await submitAcceptedAccount(h);
+        assert.ok(captured, "signUp was never called");
         assert.equal(
-          captured?.options?.emailRedirectTo,
-          "https://app.clarabook.example/auth/confirm",
-          "the confirmation target was sourced from caller-controlled query input",
+          (captured as SignupCredentials).options,
+          undefined,
+          "signUp still carries an options bag — the dead emailRedirectTo is back",
         );
-        assert.doesNotMatch(captured?.options?.emailRedirectTo ?? "", /evil\.example/);
+        // The two fields that DO travel are unchanged, so this cell cannot
+        // pass because the whole call collapsed.
+        assert.equal(typeof (captured as SignupCredentials).email, "string");
+        assert.equal(typeof (captured as SignupCredentials).password, "string");
+        // And nothing anywhere in the call carries the planted value.
+        assert.doesNotMatch(JSON.stringify(captured), /evil\.example/);
       } finally {
         await h.unmount();
       }
@@ -322,7 +342,15 @@ test("NEW-2: auto-confirm containment deletes the persisted auth cookie", async 
   });
 });
 
-test("LOW-3: the signup password field carries the same 8-character courtesy floor as invite", async () => {
+test("LOW-3, moved to the shared constant (PR 541 stage 2): the signup password field carries PASSWORD_MIN_LENGTH", async () => {
+  // WHAT MOVED AND WHY THE NUMBER IS NOT RE-TYPED. This cell used to pin the
+  // literal 8 — "the same courtesy floor as invite" — which was true and was
+  // the problem: both entry surfaces sat four characters below the hosted
+  // policy the reset face already stated, and a cell asserting its own
+  // spelling could never notice. It now reads the SHARED CONSTANT, so the pin
+  // moves with the policy and cannot disagree with what ships (review law 3).
+  // The estate-wide version of this — every new-password surface, plus the
+  // sign-in field that must NOT carry it — is `components/password-policy.test.tsx`.
   await withEnv(async () => jsonResponse({}), async () => {
     const h = await renderComponent(
       App(createElement(SignupAccountForm, { createSupabaseClient: () => ({ auth: { signUp: async () => ({ data: { user: null, session: null }, error: null }), signOut: async () => ({ error: null }) } }) }), { replaced: [] }),
@@ -333,7 +361,7 @@ test("LOW-3: the signup password field carries the same 8-character courtesy flo
       assert.ok(password, "the signup password field did not render");
       const propsKey = Object.keys(password).find((key) => key.startsWith("__reactProps"));
       assert.ok(propsKey, "the password field's live React props were not observable");
-      assert.equal((password[propsKey] as { minLength?: number }).minLength, 8);
+      assert.equal((password[propsKey] as { minLength?: number }).minLength, PASSWORD_MIN_LENGTH);
     } finally {
       await h.unmount();
     }

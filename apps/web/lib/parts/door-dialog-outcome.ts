@@ -51,12 +51,21 @@ export function closeOnConfirmedOk(outcome: DoorConfirmOutcome): boolean {
  * The wrapper resets the count when the dialog opens, so a refusal from an earlier
  * visit does not paint on a fresh one either.
  *
- * IT IS NOT A CLAIM OF AUTHORSHIP, and must not be read as one: if two dialogs have
- * each settled a confirm, both will show the panel's latest refusal. The narrower
- * fix — a refusal object per dialog — needs `act()` to return the failure rather than
- * only a boolean, which is a wider change than this item; this predicate removes the
- * case that actually misleads (a dialog the human never confirmed) and the residue is
- * recorded here rather than papered over.
+ * IT IS NOT A CLAIM OF AUTHORSHIP, and must not be read as one: if two dialogs have each
+ * settled a confirm, both will show the panel's latest refusal.
+ *
+ * WHY THAT RESIDUE IS UNREACHABLE TODAY, and what would make it reachable. Every door dialog
+ * in this app is MODAL — `components/ui/dialog.tsx` renders a `DialogOverlay` and Base UI traps
+ * focus — so exactly one is open at a time, and the wrapper resets its attempt count on each
+ * OPEN. A dialog therefore cannot be looking at a refusal it did not itself just cause: to
+ * reach the residue you would have to see two dialogs at once, each having confirmed since it
+ * opened, which modality forbids.
+ *
+ * So the guard is complete for the product as it stands, and it becomes incomplete the day a
+ * NON-MODAL door dialog appears — an inline panel, a drawer that leaves its siblings live. That
+ * is the condition to watch, and it is a design change someone would make on purpose, not a
+ * regression that could creep in. The narrow fix for that day is a refusal object per dialog,
+ * which needs `act()` to return the failure rather than only a boolean.
  */
 export function refusalForThisDialog<T>(refusal: T | undefined, attempt: number): T | undefined {
   return attempt > 0 ? refusal : undefined;

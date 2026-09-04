@@ -35,7 +35,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createElement } from "react";
@@ -228,31 +228,67 @@ test("refusalForThisDialog: a panel-level refusal is withheld until THIS dialog 
 // THE CENSUS: no wrapper may grow a hand-copy of the predicate again. This is the arm
 // that actually covers the other fourteen — a source read, because the defect it guards
 // against is one file drifting, which no rendered tree of one component can see.
+/**
+ * THE ROSTER, DERIVED (review-549 nit b). A hand-typed list of fifteen paths is a second copy
+ * of a fact that lives in the source, and it rots the way every hand-list rots: a SIXTEENTH
+ * wrapper could be written tomorrow, hand-copy the predicate, and this census would not know
+ * to look at it — which is the same "a new file appeared and nobody noticed" failure the e2e
+ * ownership gate exists to prevent one directory over.
+ *
+ * A door-dialog wrapper IS a component that imports `runOnce` from the single-fire guard. That
+ * is the definition, and it is read from disk rather than asserted.
+ */
+function doorDialogWrappers(): string[] {
+  const found: string[] = [];
+  (function walk(dir: string) {
+    for (const entry of readdirSync(join(WEB_ROOT, dir), { withFileTypes: true })) {
+      const rel = `${dir}/${entry.name}`;
+      if (entry.isDirectory()) {
+        if (entry.name === "node_modules" || entry.name.startsWith(".")) continue;
+        walk(rel);
+      } else if (/\.tsx?$/.test(entry.name) && !entry.name.includes(".test.")) {
+        const src = readFileSync(join(WEB_ROOT, rel), "utf8");
+        if (src.includes('from "@/lib/parts/single-fire-guard"')) found.push(rel);
+      }
+    }
+  })("components");
+  return found.sort();
+}
+
+/**
+ * The TWO importers that are not door dialogs, each named with its reason. Both use the guard
+ * for a MENU action rather than a dialog confirm, so there is no dialog to close and no
+ * outcome to read: `invite-dialog.tsx`'s resend and `member-row-menu.tsx`'s role pick.
+ *
+ * `SweepReceiptCard` and `V16ActCards` are deliberately NOT here. They call `actions.runOnce`
+ * from `lib/parts/thread-action-coordinator.tsx` and never import the guard directly, so they
+ * are structurally absent from the scan above — listing them would be a dead entry, and a dead
+ * allowlist entry is how an allowlist stops being read.
+ */
+const NOT_DOOR_DIALOGS = [
+  "components/admin/invite-dialog.tsx",
+  "components/admin/member-row-menu.tsx",
+];
+
 test("MAJOR 2 census: every door-dialog wrapper calls the SHARED predicate — none re-implements it", () => {
-  const wrappers = [
-    "components/admin/members-confirm-dialog.tsx",
-    "components/admin/registrations-queue.tsx",
-    "components/clara/OnboardingDoorDialog.tsx",
-    "components/close/CloseDoorDialog.tsx",
-    "components/documents/CodingDoorDialog.tsx",
-    "components/documents/DocumentsDoorDialog.tsx",
-    "components/firm-admin/FirmAdminDoorDialog.tsx",
-    "components/journals/JournalsDoorDialog.tsx",
-    "components/registers/AdjustmentDoorDialog.tsx",
-    "components/registers/ArApCounterpartyDoorDialog.tsx",
-    "components/registers/FaDoorDialog.tsx",
-    "components/registers/MergeCounterpartiesDialog.tsx",
-    "components/registers/OpeningDoorDialog.tsx",
-    "components/registers/StaffAdvanceDoorDialog.tsx",
-    "components/reports/DoorDialog.tsx",
-  ];
+  const importers = doorDialogWrappers();
+  const wrappers = importers.filter((f) => !NOT_DOOR_DIALOGS.includes(f));
+
+  for (const named of NOT_DOOR_DIALOGS) {
+    assert.ok(
+      importers.includes(named),
+      `${named} is declared a non-door-dialog importer but no longer imports the guard — retire the entry`,
+    );
+  }
+  assert.equal(wrappers.length, 15, `the scan found ${wrappers.length} wrappers:\n${wrappers.join("\n")}`);
+
   const missing: string[] = [];
   const handRolled: string[] = [];
   for (const file of wrappers) {
     const src = readFileSync(join(WEB_ROOT, file), "utf8");
     if (!src.includes("closeOnConfirmedOk(outcome)")) missing.push(file);
-    // The hand-copy, in either polarity — a comment mentioning them is stripped first, so
-    // prose about the defect does not read as the defect.
+    // The hand-copy, in either polarity — comments are stripped first, so prose ABOUT the
+    // defect does not read as the defect.
     const code = src
       .replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, " "))
       .replace(/(^|[^:])\/\/[^\n]*/g, (m, p1: string) => p1 + " ".repeat(m.length - p1.length));
@@ -260,7 +296,6 @@ test("MAJOR 2 census: every door-dialog wrapper calls the SHARED predicate — n
       handRolled.push(file);
     }
   }
-  assert.equal(wrappers.length, 15, "the census must cover every wrapper the class fix touched");
   assert.deepEqual(missing, [], "these wrappers do not call the shared close predicate");
   assert.deepEqual(handRolled, [], "these wrappers re-implement the predicate inline — the exact drift MAJOR 2 named");
 });

@@ -20,9 +20,13 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 
 import {
-  runStatementWitnessTextRead,
+  runStatementWitnessTextRead as runTextReadV2,
   classifyStatementWitnessFailure,
 } from "../workflows/statementFacts.v2.behavior.mjs";
+import {
+  runStatementWitnessTextRead as runTextReadV3,
+  classifyStatementWitnessFailure as classifyStatementWitnessFailureV3,
+} from "../workflows/statementFacts.v3.behavior.mjs";
 import { STATEMENT_WITNESS_ENGINE_SNAPSHOT } from "../workflows/statementFacts.v2.services.mjs";
 
 // The registry and the workflow modules are TypeScript, so they are reached through the SAME
@@ -32,6 +36,17 @@ register();
 const registryMod = await import("../workflows/registry.ts");
 const statementV1Mod = await import("../workflows/statementFacts.v1.ts");
 const statementV2Mod = await import("../workflows/statementFacts.v2.ts");
+const statementV3Mod = await import("../workflows/statementFacts.v3.ts");
+
+/** The provenance guard is BYTE-CARRIED from v2 into v3 (H-02/H-03/H-05 touch the prompts, the
+ *  header transforms and the persist arm — never the pre-egress stamp check). Every in-flight
+ *  cell below therefore runs against BOTH bodies: v3 because it is what live traffic reaches,
+ *  v2 because it stays exported and frozen for parked runs and a rollback. A guard proven on
+ *  only one of two reachable bodies is a guard proven on the wrong one half the time. */
+const BODIES = [
+  ["v3 (the live pointer)", runTextReadV3],
+  ["v2 (still frozen and reachable)", runTextReadV2],
+];
 
 /** The literal the RETIRING vendor read stamped, and the one the pre-window backlog carries.
  *  Written out rather than imported: the whole point of the guard is that the task's stamp and
@@ -46,24 +61,33 @@ after(() => {
 // THE REPOINT — the one line that takes live traffic
 // ---------------------------------------------------------------------------
 
-test("repoint: `statementFacts:` IS statementFacts_v2 — object identity, not a name", () => {
+test("repoint: `statementFacts:` IS statementFacts_v3 — object identity, not a name", () => {
   // A registry entry is the routing for a LIVE lane: `statement_facts` tasks are minted today,
   // so this key decides which body claims them the moment the image deploys. Compared by
   // reference against the module's own export, because a name-shaped check would pass against a
   // re-export that pointed anywhere.
-  assert.equal(registryMod.workflows.statementFacts, statementV2Mod.statementFacts_v2);
+  assert.equal(registryMod.workflows.statementFacts, statementV3Mod.statementFacts_v3);
+  assert.notEqual(registryMod.workflows.statementFacts, statementV2Mod.statementFacts_v2,
+    "v2 must no longer be the pointer");
   assert.notEqual(registryMod.workflows.statementFacts, statementV1Mod.statementFacts_v1,
     "v1 must no longer be the pointer");
 });
 
-test("repoint: statementFacts_v1 stays EXPORTED and reachable — parked runs are never stranded", () => {
-  // Policy (c): a repoint must never make the old body unreachable, and here it is not merely
-  // legacy — v2 reaches v1's own claim+process steps for the `statement_parse` (csv/ofx) lane.
-  // Read off the REGISTRY module's re-export, which is the surface policy (c) is about.
+test("repoint: statementFacts_v1 AND v2 stay EXPORTED and reachable — parked runs are never stranded", () => {
+  // Policy (c): a repoint must never make an older body unreachable. v1 is not merely legacy
+  // here — v3 reaches v1's own claim+process steps for the `statement_parse` (csv/ofx) lane —
+  // and v2's parks are the ordinary kind, since the defect v3 fixes (H-05) is precisely a run
+  // that keeps retrying a persist against a task nobody settled. Read off the REGISTRY module's
+  // re-exports, which is the surface policy (c) is about.
   assert.equal(typeof registryMod.statementFacts_v1, "function", "the v1 re-export must still resolve");
-  assert.equal(typeof registryMod.statementFacts_v2, "function");
-  assert.notEqual(statementV1Mod.statementFacts_v1, statementV2Mod.statementFacts_v2,
-    "two distinct bodies, both reachable");
+  assert.equal(typeof registryMod.statementFacts_v2, "function", "the v2 re-export must still resolve");
+  assert.equal(typeof registryMod.statementFacts_v3, "function");
+  const bodies = new Set([
+    statementV1Mod.statementFacts_v1,
+    statementV2Mod.statementFacts_v2,
+    statementV3Mod.statementFacts_v3,
+  ]);
+  assert.equal(bodies.size, 3, "three distinct bodies, all three reachable");
 });
 
 // ---------------------------------------------------------------------------
@@ -127,10 +151,11 @@ const DOC = Object.freeze({
   lane: "statement_facts",
 });
 
-test("in-flight: a PRE-window Azure-stamped task claimed by the repointed image WAITS — it does not egress", async () => {
+for (const [label, runStatementWitnessTextRead] of BODIES) {
+test(`in-flight [${label}]: a PRE-window Azure-stamped task claimed by the repointed image WAITS — it does not egress`, async () => {
   // The exact population §3 names: enqueued before the router re-key, still queued when the
-  // window closes, claimed afterwards by statementFacts_v2 (the registry points the whole lane
-  // at v2 regardless of any one task's own stamp).
+  // window closes, claimed afterwards by the pointed body (the registry points the whole lane at
+  // one version regardless of any one task's own stamp).
   const calls = [];
   const client = scriptedClient({ taskEngineId: AZURE_STATEMENT_ENGINE_ID });
   const withRuntime = (fn) => fn(client);
@@ -165,15 +190,7 @@ test("in-flight: a PRE-window Azure-stamped task claimed by the repointed image 
   assert.equal(sqls.filter((s) => s.includes("prepare_egress_dispatch")).length, 0);
 });
 
-test("in-flight: the WAIT is classified RETRY by the frozen taxonomy — the task is not ended", () => {
-  // Asked of the real judge (evidence law 3): `internal` is NOT in this lane's RETRYABLE set, so
-  // only the claraRetry marker keeps the task alive. A regression that dropped the marker would
-  // silently convert every window-straddling task into a terminal failure.
-  const wait = Object.assign(new Error("stamped"), { code: "internal", claraRetry: true });
-  assert.deepEqual(classifyStatementWitnessFailure(wait), { retry: true, code: "internal" });
-});
-
-test("in-flight: a task stamped with the POST-window witness literal proceeds past the guard", async () => {
+test(`in-flight [${label}]: a task stamped with the POST-window witness literal proceeds past the guard`, async () => {
   // The negative twin. Without it, the cell above would pass just as well against a guard that
   // refused EVERYTHING — an assertion that can only say NO proves nothing about the YES.
   const calls = [];
@@ -196,7 +213,7 @@ test("in-flight: a task stamped with the POST-window witness literal proceeds pa
   assert.deepEqual(calls, [], "the surface gate still stops the egress — no call was made");
 });
 
-test("in-flight: an image carrying NO engine snapshot refuses to egress at all", async () => {
+test(`in-flight [${label}]: an image carrying NO engine snapshot refuses to egress at all`, async () => {
   // Fail-closed on absence (evidence law 2): a services bundle with no snapshot cannot CHECK
   // provenance, and "cannot check" must never read as "check passed".
   const calls = [];
@@ -213,4 +230,16 @@ test("in-flight: an image carrying NO engine snapshot refuses to egress at all",
     },
   );
   assert.deepEqual(calls, []);
+});
+}
+
+test("in-flight: the WAIT is classified RETRY by BOTH reachable taxonomies — the task is not ended", () => {
+  // Asked of the real judges (evidence law 3): `internal` is NOT in this lane's RETRYABLE set,
+  // so only the claraRetry marker keeps the task alive. A regression that dropped the marker
+  // would silently convert every window-straddling task into a terminal failure. Asked of v3's
+  // classifier as well as v2's, because v3 rewrote the code MAPPER underneath it (it now reads
+  // a raised verdict's DETAIL token) and a rewrite is exactly when a marker gets lost.
+  const wait = Object.assign(new Error("stamped"), { code: "internal", claraRetry: true });
+  assert.deepEqual(classifyStatementWitnessFailure(wait), { retry: true, code: "internal" });
+  assert.deepEqual(classifyStatementWitnessFailureV3(wait), { retry: true, code: "internal" });
 });

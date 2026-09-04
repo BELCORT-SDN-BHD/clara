@@ -17,6 +17,7 @@ import { useRef, useState, type ReactNode } from "react";
 import { useTranslations } from "next-intl";
 import {
   Dialog,
+  DialogBody,
   DialogClose,
   DialogContent,
   DialogDescription,
@@ -104,13 +105,29 @@ export function OnboardingDoorDialog({
       }}
     >
       <DialogTrigger render={<Button variant={triggerVariant} size="sm" />}>{triggerLabel}</DialogTrigger>
-      <DialogContent>
+      {/* H-30 — this is the door dialog whose body is DB-sized: `ApplyStandardChartControl`
+          renders one checkbox row per template family, and the family count comes from
+          `get_coa_template`. Before this, a template with enough families pushed Confirm off
+          the bottom of a centred, unconstrained popup with nothing to scroll — the human
+          could not reach the button at all. `scrollBody` + `DialogBody` keep the title and
+          the footer fixed and scroll only the middle. */}
+      <DialogContent scrollBody>
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           {description ? <DialogDescription>{description}</DialogDescription> : null}
         </DialogHeader>
-        {children}
-        <DoorDialogRefusal refusal={refusalForThisDialog(refusal, attempt)} attempt={attempt} />
+        {/* KEEP BOTH (#549 x #546). #546's `scrollBody` lays the popup out as an explicit
+            THREE-row grid — `grid-rows-[auto_minmax(0,1fr)_auto]`, header / scrolling body /
+            pinned footer (components/ui/dialog.tsx:103) — so a fourth child between the body
+            and the footer would land in an implicit row and break the pinned footer that
+            H-30 exists to guarantee. #549's refusal banner therefore goes INSIDE `DialogBody`,
+            as its FIRST child: the three rows are untouched, the banner sits at the top of the
+            scroll region, and `DoorDialogRefusal`'s own focus() brings it into view when it
+            appears. Both fixes keep their guarantee; neither is layered on top of the other. */}
+        <DialogBody>
+          <DoorDialogRefusal refusal={refusalForThisDialog(refusal, attempt)} attempt={attempt} />
+          {children}
+        </DialogBody>
         <DialogFooter>
           <DialogClose render={<Button variant="ghost" disabled={busy} />}>{t("cancel")}</DialogClose>
           <Button

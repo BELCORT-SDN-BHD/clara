@@ -421,7 +421,7 @@ describe("the door and the firm read run on the CALLER'S OWN session", () => {
       {
         resolveSession: async (): Promise<ServerSession | null> => {
           resolutions += 1;
-          return { accessToken: resolutions === 1 ? A : B, subject: "s-1" };
+          return { accessToken: resolutions === 1 ? A : B, subject: "s-1", email: null };
         },
       },
     );
@@ -445,7 +445,7 @@ describe("the door and the firm read run on the CALLER'S OWN session", () => {
     const { deps: d, calls, firmReads } = deps(
       obs,
       { resolve: OK_RECEIPT },
-      { resolveSession: async (): Promise<ServerSession | null> => ({ accessToken: other, subject: "s-2" }) },
+      { resolveSession: async (): Promise<ServerSession | null> => ({ accessToken: other, subject: "s-2", email: null }) },
     );
     await handleInviteRequest(post({ email: "a@b.test", role: "admin" }), d);
 

@@ -107,10 +107,12 @@ export default definePlugin(() => {
   // F-A1 PR-4 (design SS3.7): the `statement_facts` WITNESS PAIR's own bundle — the canonical
   // download plus the ONE model adapter both channels call. A SEPARATE global from the bundle
   // above: `__claraStatementFactsServices` keeps serving the `statement_parse` lane via the
-  // imported v1 step (statementFacts.v2.impl.ts) UNCHANGED, and this bundle is additive rather
+  // imported v1 step (statementFacts.v3.impl.ts) UNCHANGED, and this bundle is additive rather
   // than a replacement. Kept OUT of the frozen closure so a model id, a timeout or a provider
   // content shape is config rather than a workflow version (AB-16); the PROMPTS are the
-  // deliberate exception and live inside statementFacts.v2's closure (design M8, inherited).
+  // deliberate exception and live inside the ACTIVE closure, statementFacts.v3's (design M8,
+  // inherited). The MODULE this bundle is built from keeps its v2 filename on purpose: it is
+  // shared unchanged by v2 and v3, and renaming it would move a frozen hash for no behaviour.
   (globalThis as unknown as { __claraStatementWitnessServices?: unknown }).__claraStatementWitnessServices = makeStatementWitnessServices();
   // F-A1: the witness lane's own bundle — the canonical download plus the ONE model adapter both
   // channels call. Kept OUT of the frozen closure so a model id, a timeout or a provider content

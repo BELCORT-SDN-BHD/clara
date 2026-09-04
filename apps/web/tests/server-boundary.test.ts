@@ -40,9 +40,33 @@ import { stripComments } from "../test/sourceOracle";
 
 const WEB_ROOT = join(fileURLToPath(new URL(".", import.meta.url)), "..");
 
-/** The two modules that must never be reachable from a browser bundle: one holds
- *  the service-role key, the other holds Clara's plaintext invite token. */
-const SERVER_ONLY = ["lib/members/invite-mail.ts", "lib/members/courier.ts"];
+/**
+ * The modules that must never be reachable from a browser bundle: one holds the
+ * service-role key, one holds Clara's plaintext invite token, and one holds
+ * `STRIPE_SECRET_KEY` and runs a module-scope configuration check.
+ *
+ * THE THIRD ENTRY IS REVIEW-544's NIT 9, ANSWERED THROUGH THIS FILE RATHER THAN
+ * `import "server-only"`. The review asked for that import on
+ * `lib/checkout/stripe-session.ts` because it now has a module-scope side
+ * effect. The package is NOT INSTALLED in this workspace (measured: absent from
+ * the root and the app's `node_modules`, and absent from the pnpm store) and a
+ * lane may not run `pnpm install` — this file's own header records that ruling
+ * and names this walk as the estate's mechanism for the identical question. So
+ * the import would have added an unresolvable dependency and reddened every
+ * gate instead of protecting anything.
+ *
+ * What lands here is strictly stronger anyway. `import "server-only"` fails a
+ * BUILD when a client component reaches the module; this walk proves the same
+ * property from a root set DISCOVERED in the tree, follows dynamic imports and
+ * re-export barrels, and says so by name in `pnpm test` with no bundler
+ * involved. Today the only importer is `app/(entry)/checkout/handler.ts`, a
+ * route handler.
+ */
+const SERVER_ONLY = [
+  "lib/members/invite-mail.ts",
+  "lib/members/courier.ts",
+  "lib/checkout/stripe-session.ts",
+];
 
 type Tree = {
   /** Every source file in the tree, as repo-relative POSIX paths. */
@@ -275,6 +299,34 @@ describe("N6: no Client Component in the tree reaches a server-only module", () 
     assert.ok(reached.has("lib/members/invite-mail.ts"), "the walk cannot see a one-hop edge");
     assert.ok(reached.has("lib/same-origin.ts"), "…nor a second one");
     assert.ok(reached.has("lib/firm/caller-context.ts"), "…nor the preflight's own read");
+  });
+
+  test("VACUITY CONTROL: every SERVER_ONLY path is a real file the walk can actually reach", () => {
+    // WITHOUT THIS, A TYPO POLICES NOTHING. `reached.has(forbidden)` is false
+    // for a path that does not exist, so a misspelled entry makes the cells
+    // above pass for every input — the absence-from-the-wrong-instrument class,
+    // and precisely the way review-544's NIT 9 could have been "answered" while
+    // guarding nothing. Two proofs per entry: the file EXISTS in the tree the
+    // walk enumerates, and the walk REACHES it from its real server-side
+    // importer, so the string is the same spelling `closureOf` produces.
+    const reachedFrom: Record<string, string> = {
+      "lib/members/invite-mail.ts": "lib/members/courier.ts",
+      "lib/members/courier.ts": "app/api/invite/route.ts",
+      "lib/checkout/stripe-session.ts": "app/(entry)/checkout/handler.ts",
+    };
+    assert.deepEqual(
+      Object.keys(reachedFrom).sort(),
+      [...SERVER_ONLY].sort(),
+      "a SERVER_ONLY module has no reachability control — add its real importer",
+    );
+    for (const [forbidden, importer] of Object.entries(reachedFrom)) {
+      assert.ok(ALL_FILES.includes(forbidden), `${forbidden} is not a file in the walked tree`);
+      assert.ok(ALL_FILES.includes(importer), `${importer} is not a file in the walked tree`);
+      assert.ok(
+        closureOf(realTree, importer).has(forbidden),
+        `the walk cannot reach ${forbidden} from ${importer} — the guard above is vacuous for it`,
+      );
+    }
   });
 });
 

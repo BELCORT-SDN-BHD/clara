@@ -198,6 +198,12 @@ test("SandboxExportsPanel states only what is reachable: NO lane in this build c
   // would forbid the true sentence along with the false one.
   assert.doesNotMatch(html, /minted by Clara.{0,8}s unattended lane/, "the second overclaim, pinned as an absence");
   assert.match(html, /no unattended lane can mint one either/, "…and its correction, pinned as a presence");
+  // review-549, third cut: the panel renders `queued`, `running`, `done` AND `failed`
+  // (SandboxExportsPanel.tsx:24-29 defines a badge variant for each, and the list at :88-95
+  // filters only by client). "Finished exports appear below" described a subset as if it were
+  // the list.
+  assert.match(html, /Every sandbox export touching this client is listed below with its state/);
+  assert.doesNotMatch(html, /Finished exports appear below/, "the subset claim, pinned as an absence");
   assert.doesNotMatch(html, /Ask Clara/, "and the panel must not route a human to an affordance that does not exist");
 });
 
