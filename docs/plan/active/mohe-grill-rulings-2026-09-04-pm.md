@@ -208,7 +208,7 @@ review-551 MEASURED that `apply_coa_template` (`0156:726-910`) never consults th
 it settles 裁-23 Q5's ambiguity rather than reversing it. No separate ruling file — this entry is the text
 of record.
 
-### 裁-194 — the 裁-149 clause-2 PREMISE CORRECTION is ACCEPTED; the leader stays byte-untouched (owner, 2026-09-05 ≈02:50 MYT, `AskUserQuestion` option (a) of 2)
+### 裁-194 — the 裁-149 clause-2 PREMISE CORRECTION is ACCEPTED; the leader stays byte-untouched (owner, 2026-09-05 ≈02:50 MYT, `AskUserQuestion` option (a) of 2; recommendation followed)
 
 **Context.** 裁-149 clause 2 kept the leader's dedicated session **crash-loud** on the stated premise that
 it carries no `'error'` listener, so an idle-client error becomes an `uncaughtException`, the process dies
@@ -227,7 +227,7 @@ a one-line erratum written at this clock-out. Clause 1 (the general pool logs, c
 flag) is untouched and still owed. **Amends** 裁-149's clause-2 REASONING only, never its outcome. No
 separate ruling file.
 
-### 裁-195 — REQUEUE-ONCE: a human's real ANSWER to a coder-opened `sweep_refusal` question un-parks the registry and re-mints the draft (owner, 2026-09-05 ≈02:50 MYT, option (a) of 3)
+### 裁-195 — REQUEUE-ONCE: a human's real ANSWER to a coder-opened `sweep_refusal` question un-parks the registry and re-mints the draft (owner, 2026-09-05 ≈02:50 MYT, option (a) of 3; recommendation followed)
 
 **Ruled (a).** An ANSWER is the human act that un-parks a twice-failed autodraft registry and re-mints the
 draft, once. **A DISMISSAL does not re-mint** — closing a question without answering it is not the human

@@ -65,8 +65,9 @@ what did the re-reading find?"
 
 > **2026-09-05 ≈02:50 MYT — the small-hours block (裁-194 · 195 · 196 · 197).** Digest re-read against the
 > four rulings in [`mohe-grill-rulings-2026-09-04-pm.md`](../plan/active/mohe-grill-rulings-2026-09-04-pm.md);
-> **none of them amends a standing law and none mints an ADR** under 裁-140. **194** is the first ERRATUM
-> this register has carried: 裁-149's clause-2 PREMISE was wrong when ruled — the leader session always had
+> **none of them amends a standing law and none mints an ADR** under 裁-140. **194** is the first PREMISE erratum
+> this register has carried — row 86 already carries 裁-142's correction of an EXAMPLE inside a premise,
+> which is a narrower thing: 裁-149's clause-2 PREMISE was wrong when ruled — the leader session always had
 > an error listener and a reconnect loop — so the reasoning is corrected while the OUTCOME stands and the
 > leader is byte-untouched; row 90 carries the erratum line, and the corrected contract is owed to
 > `docs/ARCHITECTURE.md` §4.3, which does not exist yet. **195** names a new human act (an ANSWER, never a
