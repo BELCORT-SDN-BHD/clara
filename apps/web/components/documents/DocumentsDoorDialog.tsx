@@ -22,6 +22,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { createSingleFireGuard, runOnce } from "@/lib/parts/single-fire-guard";
+import { closeOnConfirmedOk, refusalForThisDialog } from "@/lib/parts/door-dialog-outcome";
 import { DoorDialogRefusal, type DialogRefusal } from "@/components/common/dialog-refusal";
 
 export function DocumentsDoorDialog({
@@ -69,7 +70,16 @@ export function DocumentsDoorDialog({
   const [attempt, setAttempt] = useState(0);
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+      // review-549 MAJOR 1: a fresh OPEN starts with no settled confirm of its own, so
+      // the panel's standing refusal (which may belong to a sibling dialog, or to this
+      // one's previous visit) is not shown until this dialog settles a confirm again.
+        if (next) setAttempt(0);
+        setOpen(next);
+      }}
+    >
       <DialogTrigger render={<Button variant={triggerVariant} size={triggerSize} />}>
         {triggerLabel}
       </DialogTrigger>
@@ -79,7 +89,7 @@ export function DocumentsDoorDialog({
           {description ? <DialogDescription>{description}</DialogDescription> : null}
         </DialogHeader>
         {children}
-        <DoorDialogRefusal refusal={refusal} attempt={attempt} />
+        <DoorDialogRefusal refusal={refusalForThisDialog(refusal, attempt)} attempt={attempt} />
         <DialogFooter>
           <DialogClose render={<Button variant="ghost" disabled={busy} />}>{t("cancel")}</DialogClose>
           <Button
@@ -93,7 +103,7 @@ export function DocumentsDoorDialog({
               // with the refusal — and whatever the human typed — standing.
               const outcome = await runOnce(guardRef.current, onConfirm);
               if (outcome.ran) setAttempt((n) => n + 1);
-              if (outcome.value === true) setOpen(false);
+              if (closeOnConfirmedOk(outcome)) setOpen(false);
             }}
           >
             {busy ? t("working") : confirmLabel}

@@ -17,23 +17,43 @@
 //      and calls nothing twice — the MUST-NOT-RED control, since the naive
 //      "close unless false" repair would have broken it.
 //
-// The wrapper under test is components/close/CloseDoorDialog.tsx, chosen because
-// its family carries the sharpest instance (finalize's CLR41
-// close_self_attestation_required names a field that lives INSIDE the dialog). All
-// fifteen share the same three lines, so what is proven here is the contract, not
-// one domain's copy of it.
+// THE WRAPPER-LEVEL CELLS mount components/close/CloseDoorDialog.tsx, chosen because its
+// family carries the sharpest instance (finalize's CLR41 close_self_attestation_required
+// names a field that lives INSIDE the dialog).
+//
+// review-549 MAJOR 2: mounting ONE wrapper does not pin fifteen. The first cut of this
+// fix hand-copied the predicate into every file, and `outcome.ran` and
+// `outcome.value === true` both compile — so a wrapper quietly reverted to the wrong one
+// stayed green here, because this file can only mount one at a time. The predicate is now
+// hoisted into lib/parts/door-dialog-outcome.ts and every wrapper CALLS it, which gives a
+// mutant exactly one place to land; the first three cells below pin that function
+// directly, and a census cell asserts no wrapper has grown a hand-copy again.
+//
+// Two families that had no refusal cell of their own — journals and documents — get one
+// at the end of this file, so the shared contract is also observed through a second and
+// third wrapper rather than argued from one.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { createElement } from "react";
 import { NextIntlClientProvider } from "next-intl";
 
 import { renderComponent, textOf, setFieldValue, clickButton } from "../../test/hookHarness";
 import { enableDomInspection } from "../../test/domInspect";
 import { CloseDoorDialog } from "../close/CloseDoorDialog";
+import { CloseDoors } from "../close/CloseDoors";
+import type { ClosePlan } from "@/lib/close/types";
+import { JournalsDoorDialog } from "../journals/JournalsDoorDialog";
+import { DocumentsDoorDialog } from "../documents/DocumentsDoorDialog";
+import { closeOnConfirmedOk, refusalForThisDialog } from "@/lib/parts/door-dialog-outcome";
 import messages from "../../messages/en.json";
 
 enableDomInspection();
+
+const WEB_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
 type Node = { tagName?: string; value?: string; childNodes?: Node[] };
 
@@ -176,6 +196,229 @@ test("CB-AE2E-004: with no `refusal` passed, a refused act still keeps the dialo
     assert.ok(confirmIn(body, trigger), "the close decision reads the OUTCOME, never the presence of a refusal prop");
     // …and nothing is invented in place of the refusal the caller did not hand it.
     assert.equal(findAllIn(body, (n) => n.tagName === "BUTTON" && textOf(n as never) === "Abandon").length, 1);
+  } finally {
+    await detach(h);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// THE PREDICATE ITSELF (review-549 MAJOR 2) — pinned once, for all fifteen.
+// ---------------------------------------------------------------------------
+
+test("closeOnConfirmedOk: ONLY an explicit true closes — a refusal, a dropped click and a silent handler all keep the dialog", () => {
+  assert.equal(closeOnConfirmedOk({ ran: true, value: true }), true, "the door accepted");
+  assert.equal(closeOnConfirmedOk({ ran: true, value: false }), false, "the door REFUSED — the case the whole item exists for");
+  assert.equal(closeOnConfirmedOk({ ran: false, value: undefined }), false, "a concurrent click the guard dropped: nothing happened");
+  assert.equal(closeOnConfirmedOk({ ran: true, value: undefined }), false, "a handler that reported nothing — fail closed");
+  // The two facts are not interchangeable, which is the whole defect in one line.
+  assert.notEqual(
+    closeOnConfirmedOk({ ran: true, value: false }),
+    { ran: true, value: false }.ran,
+    "`ran` says the click was not dropped; it never said the act succeeded",
+  );
+});
+
+test("refusalForThisDialog: a panel-level refusal is withheld until THIS dialog has settled a confirm", () => {
+  const clr = { code: "CLR41", reason: "close_not_in_progress" };
+  assert.equal(refusalForThisDialog(clr, 0), undefined, "before this dialog confirms anything, the panel's refusal is somebody else's news");
+  assert.equal(refusalForThisDialog(clr, 1), clr, "after it settles one, the standing refusal is its own to show");
+  assert.equal(refusalForThisDialog(undefined, 3), undefined, "and nothing is invented when the caller passed none");
+});
+
+// THE CENSUS: no wrapper may grow a hand-copy of the predicate again. This is the arm
+// that actually covers the other fourteen — a source read, because the defect it guards
+// against is one file drifting, which no rendered tree of one component can see.
+test("MAJOR 2 census: every door-dialog wrapper calls the SHARED predicate — none re-implements it", () => {
+  const wrappers = [
+    "components/admin/members-confirm-dialog.tsx",
+    "components/admin/registrations-queue.tsx",
+    "components/clara/OnboardingDoorDialog.tsx",
+    "components/close/CloseDoorDialog.tsx",
+    "components/documents/CodingDoorDialog.tsx",
+    "components/documents/DocumentsDoorDialog.tsx",
+    "components/firm-admin/FirmAdminDoorDialog.tsx",
+    "components/journals/JournalsDoorDialog.tsx",
+    "components/registers/AdjustmentDoorDialog.tsx",
+    "components/registers/ArApCounterpartyDoorDialog.tsx",
+    "components/registers/FaDoorDialog.tsx",
+    "components/registers/MergeCounterpartiesDialog.tsx",
+    "components/registers/OpeningDoorDialog.tsx",
+    "components/registers/StaffAdvanceDoorDialog.tsx",
+    "components/reports/DoorDialog.tsx",
+  ];
+  const missing: string[] = [];
+  const handRolled: string[] = [];
+  for (const file of wrappers) {
+    const src = readFileSync(join(WEB_ROOT, file), "utf8");
+    if (!src.includes("closeOnConfirmedOk(outcome)")) missing.push(file);
+    // The hand-copy, in either polarity — a comment mentioning them is stripped first, so
+    // prose about the defect does not read as the defect.
+    const code = src
+      .replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, " "))
+      .replace(/(^|[^:])\/\/[^\n]*/g, (m, p1: string) => p1 + " ".repeat(m.length - p1.length));
+    if (/if \(outcome\.value === true\)|if \(outcome\.ran\) (?:setOpen|onOpenChange|resetAndClose)/.test(code)) {
+      handRolled.push(file);
+    }
+  }
+  assert.equal(wrappers.length, 15, "the census must cover every wrapper the class fix touched");
+  assert.deepEqual(missing, [], "these wrappers do not call the shared close predicate");
+  assert.deepEqual(handRolled, [], "these wrappers re-implement the predicate inline — the exact drift MAJOR 2 named");
+});
+
+// ---------------------------------------------------------------------------
+// The two families that had no refusal cell of their own.
+// ---------------------------------------------------------------------------
+
+/** The same three assertions, driven through a DIFFERENT wrapper — so the contract is
+ *  observed in the journals and documents families rather than inferred from close. */
+async function refusedConfirmKeepsDialogOpen(
+  Wrapper: typeof JournalsDoorDialog | typeof DocumentsDoorDialog,
+  labels: { trigger: string; confirm: string },
+): Promise<void> {
+  const h = await renderComponent(
+    createElement(NextIntlClientProvider, {
+      locale: "en",
+      messages,
+      children: createElement(
+        Wrapper as typeof JournalsDoorDialog,
+        {
+          triggerLabel: labels.trigger,
+          title: labels.trigger,
+          confirmLabel: labels.confirm,
+          busy: false,
+          refusal: { err: "the entry is already approved", clr: { code: "CLR23", reason: "entry_not_draft" } },
+          onConfirm: async () => false,
+        },
+        createElement("textarea", { "aria-label": "reason", defaultValue: "" }),
+      ),
+    }),
+  );
+  const body = bodyOf();
+  try {
+    (body as unknown as { appendChild: (c: unknown) => void }).appendChild(h.container);
+    for (let i = 0; i < 2; i++) await h.settle();
+    const trigger = h.find((n) => n.tagName === "BUTTON" && textOf(n).includes(labels.trigger));
+    assert.ok(trigger, `${labels.trigger}: the trigger must render`);
+    await h.fireEvent(trigger as never, "click");
+    for (let i = 0; i < 6; i++) await h.settle();
+
+    const reason = findIn(body, (n) => n.tagName === "TEXTAREA");
+    assert.ok(reason, "the in-dialog field must be reachable");
+    await h.act(() => setFieldValue(reason as never, "the client sent a correction"));
+    for (let i = 0; i < 2; i++) await h.settle();
+
+    const confirm = findIn(
+      body,
+      (n) => n.tagName === "BUTTON" && textOf(n as never) === labels.confirm && (n as unknown) !== trigger,
+    );
+    assert.ok(confirm, "the dialog's own Confirm must be reachable");
+    await h.act(() => clickButton(confirm as never));
+    for (let i = 0; i < 6; i++) await h.settle();
+
+    assert.ok(
+      findIn(body, (n) => n.tagName === "BUTTON" && textOf(n as never) === labels.confirm && (n as unknown) !== trigger),
+      "a refused act must NOT close this family's dialog either",
+    );
+    assert.equal(
+      (findIn(body, (n) => n.tagName === "TEXTAREA") as unknown as { value: string }).value,
+      "the client sent a correction",
+      "and the typed input survives",
+    );
+    const text = textOf(body as never);
+    assert.match(text, /CLR23/, "the DB's own code renders verbatim inside the dialog");
+    assert.match(text, /the entry is already approved/);
+  } finally {
+    await detach(h);
+  }
+}
+
+test("MAJOR 2: the JOURNALS family obeys the shared contract — refused, open, input intact, refusal inside", async () => {
+  await refusedConfirmKeepsDialogOpen(JournalsDoorDialog, { trigger: "Withdraw draft", confirm: "Withdraw" });
+});
+
+test("MAJOR 2: the DOCUMENTS family obeys the shared contract — refused, open, input intact, refusal inside", async () => {
+  await refusedConfirmKeepsDialogOpen(DocumentsDoorDialog, { trigger: "Archive document", confirm: "Archive" });
+});
+
+// ---------------------------------------------------------------------------
+// MAJOR 1 — one refusal object, several coexisting dialogs.
+// ---------------------------------------------------------------------------
+//
+// A panel's `err`/`clr` is PANEL-scoped: ONE hydrated part serves every door on it. While a
+// close run is in progress Finalize and Abandon are both mounted, and handing that single
+// object to both painted a refusal RAISED BY FINALIZE inside Abandon's modal — and, because
+// the banner takes focus when it appears, moved focus to a message about something the human
+// had not just done. The same shape sat on every gate row's attest dialog and on the four
+// coexisting opening dialogs.
+//
+// The cell drives the real thing: refuse Finalize, then open Abandon and read ITS modal.
+
+function inProgressPlan(): ClosePlan {
+  return {
+    fiscal_year: { id: "fy1", client_id: "c1", label: "FY2025", ordinal: 1, starts_on: "2025-01-01", ends_on: "2025-12-31", status: "closing", fy_end_source: "asserted" },
+    close_run: { state: "present", close_run_id: "r1", run_state: "in_progress", started_by: "u1", started_at: "t", ended_by: null, ended_at: null, end_reason: null },
+    checks: [],
+    receipt: { state: "absent" },
+  };
+}
+
+test("MAJOR 1: a refusal raised by FINALIZE does not paint inside ABANDON's modal", async () => {
+  const h = await renderComponent(
+    createElement(NextIntlClientProvider, {
+      locale: "en",
+      messages,
+      children: createElement(CloseDoors, {
+        plan: inProgressPlan(),
+        busy: false,
+        // The panel's standing refusal — exactly what ClosePlanPanel hands down, and the
+        // object every door on the panel used to receive unconditionally.
+        refusal: { code: "CLR41", reason: "close_self_attestation_required" },
+        refusalMessage: "a solo close needs a written self-attestation",
+        onFinalize: async () => false,
+        onBegin: async () => true,
+        onAbandon: async () => true,
+        onReopen: async () => true,
+      }),
+    }),
+  );
+  const body = bodyOf();
+  try {
+    (body as unknown as { appendChild: (c: unknown) => void }).appendChild(h.container);
+    for (let i = 0; i < 3; i++) await h.settle();
+
+    // 1. Refuse FINALIZE, through its own dialog.
+    const finalizeTrigger = h.find((n) => n.tagName === "BUTTON" && textOf(n).includes("Finalize close"));
+    assert.ok(finalizeTrigger, "the Finalize trigger must render on an in-progress run");
+    await h.fireEvent(finalizeTrigger as never, "click");
+    for (let i = 0; i < 6; i++) await h.settle();
+    const finalizeConfirm = findIn(body, (n) => n.tagName === "BUTTON" && textOf(n as never) === "Finalize");
+    assert.ok(finalizeConfirm, "Finalize's own Confirm must be reachable");
+    await h.act(() => clickButton(finalizeConfirm as never));
+    for (let i = 0; i < 6; i++) await h.settle();
+    assert.match(textOf(body as never), /CLR41/, "Finalize's own modal carries the refusal — the control half");
+
+    // 2. Leave Finalize, open ABANDON.
+    const cancel = findIn(body, (n) => n.tagName === "BUTTON" && textOf(n as never) === "Cancel");
+    assert.ok(cancel, "Finalize's Cancel must be reachable");
+    await h.act(() => clickButton(cancel as never));
+    for (let i = 0; i < 6; i++) await h.settle();
+
+    const abandonTrigger = h.find((n) => n.tagName === "BUTTON" && textOf(n).includes("Abandon close"));
+    assert.ok(abandonTrigger, "the Abandon trigger must render");
+    await h.fireEvent(abandonTrigger as never, "click");
+    for (let i = 0; i < 6; i++) await h.settle();
+
+    // 3. THE DISCRIMINATING POST-CONDITION. Abandon's modal is open (its own reason field
+    //    proves it), and the panel's standing CLR41 is NOT in it — this dialog has settled
+    //    no confirm of its own, so that refusal is not its news to carry.
+    const abandonReason = findIn(body, (n) => n.tagName === "TEXTAREA");
+    assert.ok(abandonReason, "Abandon's own reason field must be reachable — its modal really is open");
+    assert.doesNotMatch(
+      textOf(body as never),
+      /CLR41/,
+      "the panel's refusal belongs to Finalize; painting it here tells the human the wrong door refused, and steals focus to it",
+    );
+    assert.doesNotMatch(textOf(body as never), /a solo close needs a written self-attestation/);
   } finally {
     await detach(h);
   }

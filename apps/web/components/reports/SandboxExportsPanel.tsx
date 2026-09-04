@@ -53,8 +53,8 @@ export function SandboxExportsPanel({ clientId, session }: { clientId: string; s
             have the panel imply a request affordance that does not exist — an overclaim in the
             opposite direction from the one echelon 2 came to fix.
 
-            H-16 — THE COPY ITSELF was re-cut. Its second half used to say "Ask Clara, in the
-            rail, to build a sandbox view or request an export", which is a CLAIM about the chat
+            H-16 — THE COPY ITSELF was re-cut, TWICE. Its second half used to say "Ask Clara, in
+            the rail, to build a sandbox view or request an export", which is a CLAIM about the chat
             agent's tools, and the claim was false: the registry pins `chatTurn: chatTurn_v17`
             (packages/runtime/workflows/registry.ts:86), and buildToolsV17 is buildToolsV15 plus
             exactly three report tools — open_report_run, assess_report_claim, seal_report_dataset
@@ -62,7 +62,15 @@ export function SandboxExportsPanel({ clientId, session }: { clientId: string; s
             `grep -rn "mint_sandbox|request_sandbox|request_export" packages/runtime/workflows/`
             returns zero hits. So the note was avoiding one overclaim by making another, aimed the
             other way. A chat-lane sandbox request would be a new `_v18` export plus a registry
-            repoint (hard constraint 9), never an edit to v17 — a runtime lane, not a copy fix. */}
+            repoint (hard constraint 9), never an edit to v17 — a runtime lane, not a copy fix.
+
+            THE SECOND CUT (review-549 MAJOR 6) fixed a claim this lane's own first cut introduced:
+            it said the exports "are minted by Clara's unattended lane", and no unattended lane can
+            mint one either. MEASURED in 0132: the allowlist rows are `('interactive', …)` for both
+            verbs (`:1231-1232`), the EXECUTE grant is to `clara_wake_interactive` alone
+            (`:1207-1216`), and the file's own posture note says "never unattended" (`:1197-1199`).
+            So the honest statement is that nothing in this build can request one — not a control
+            here, not the rail, and not an unattended sweep. */}
         <NotBuiltNote className="text-xs">{t("requestNotice")}</NotBuiltNote>
 
         {/* The OFFER door's refusal, verbatim — the same reachable viewer case the statutory panel

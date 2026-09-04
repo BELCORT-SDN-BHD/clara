@@ -29,11 +29,31 @@ import { P6_5_SESSIONS } from "./agentic-finish-mock.mjs";
 
 const E2E_DIR = dirname(fileURLToPath(import.meta.url));
 const SERVE_BUILT = join(E2E_DIR, "serve-built.mjs");
+/**
+ * THE LANE MOCKS THIS GATE CENSUSES. The rule is a rule for the SERVER, not for one lane,
+ * and a guard that only ever read one file was one file away from the class recurring.
+ *
+ * The written list is checked against one DERIVED from `serve-built.mjs` below — a
+ * hand-kept list and its guard living in the same file could both forget the same mock.
+ */
+const LANE_MOCKS = [
+  "agentic-finish-mock.mjs",
+  "bank-close-registers-mock.mjs",
+] as const;
+
 const LANE_MOCK = join(E2E_DIR, "agentic-finish-mock.mjs");
-// L7 (bank/close/registers) is the second lane mock this census reads. The rule is a
-// rule for the SERVER, not for one lane, and a guard that only ever read one file was
-// one file away from the class recurring.
 const L7_MOCK = join(E2E_DIR, "bank-close-registers-mock.mjs");
+
+/**
+ * The lane mocks `serve-built.mjs` actually imports, read from its source the same way
+ * `sharedSubject()` reads its `SUBJECT` — a re-typed constant is a second copy that drifts,
+ * and this whole file exists because of drift. The pattern matches the module SPECIFIER, not
+ * an identifier or a comment: a lane mock IS a `./<name>-mock.mjs` sibling the server consults.
+ */
+function derivedLaneMocks(): string[] {
+  const source = readFileSync(SERVE_BUILT, "utf8");
+  return [...new Set([...source.matchAll(/from "\.\/([a-z0-9-]+-mock\.mjs)"/g)].map((m) => m[1]!))].sort();
+}
 
 /** The subject every walk signs in as, read from `serve-built.mjs` rather than re-typed here —
  *  a re-typed constant is a second copy that drifts, and this cell exists because of drift. */
@@ -69,12 +89,38 @@ test("N4 · no lane fixture may claim the FIRM ALTITUDE for the shared subject",
 
 /** Every `path === "/rest/v1/..."` or `path === "/api/..."` handler in the lane's mock, with
  *  whether its block contains a `return false` — the fall-through that makes it scoped. */
+/**
+ * EVERY WAY A HANDLER OPENS, as one expression — used by the census AND by its independent
+ * positive control, so the two can never disagree about what a handler even is.
+ *
+ * review-549 MAJOR 8: the first cut recognised only `path === "/rest/…"`. The L7 mock
+ * dispatches its RPC half on `verb === "…"` after slicing the prefix once
+ * (`bank-close-registers-mock.mjs`), so FIVE of its ten handlers were invisible to a gate
+ * whose whole job is to see them — and an unscoped one among them would have passed
+ * silently. A census that cannot see a handler cannot report it unscoped, which is the
+ * failure mode this file was written to prevent, one level up.
+ */
+const HANDLER_OPENER = /(?:path === "(\/(?:rest|api)\/[^"]+)"|verb === "([a-z0-9_]+)")/;
+const HANDLER_OPENER_G = new RegExp(HANDLER_OPENER.source, "g");
+
+/** The label a census row carries, so an RPC-verb handler reads like the route it answers. */
+function openerLabel(m: RegExpExecArray): string {
+  return m[1] ?? `/rest/v1/rpc/${m[2]}`;
+}
+
+/** An independent count of the handler openers in a file, used as the positive control on the
+ *  scan below: a loop that walks the wrong lines, or stops early, disagrees with this. Written
+ *  as a whole-source match rather than a per-line walk on purpose — two techniques, one fact. */
+function openerCount(file: string): number {
+  return (readFileSync(file, "utf8").match(HANDLER_OPENER_G) ?? []).length;
+}
+
 function handlerCensus(mock: string = LANE_MOCK): { path: string; scoped: boolean }[] {
   const source = readFileSync(mock, "utf8");
   const lines = source.split("\n");
   const out: { path: string; scoped: boolean }[] = [];
   for (let i = 0; i < lines.length; i += 1) {
-    const opened = /path === "(\/(?:rest|api)\/[^"]+)"/.exec(lines[i]!);
+    const opened = HANDLER_OPENER.exec(lines[i]!);
     if (!opened) continue;
     // The block runs to ITS OWN closing brace — tracked by brace DEPTH, not by "the
     // next handler opener or a column-0 `}`".
@@ -98,7 +144,7 @@ function handlerCensus(mock: string = LANE_MOCK): { path: string; scoped: boolea
       }
       if (j > i && depth <= 0) break;
     }
-    out.push({ path: opened[1]!, scoped });
+    out.push({ path: openerLabel(opened), scoped });
   }
   return out;
 }
@@ -116,6 +162,16 @@ const UNSCOPEABLE = new Set(["/rest/v1/rpc/list_coa_templates", "/rest/v1/rpc/be
 
 test("N5 · every lane handler either scopes by the request's own subject, or is a NAMED exception", () => {
   const census = handlerCensus();
+  // COMPLETENESS, not sufficiency (review-549 MAJOR 8). `>= 10` only says the walk found
+  // SOME handlers; it cannot notice a shape the opener does not recognise. The equality
+  // against an independent whole-source match is what does: if the file grows a dispatch
+  // form this census cannot see, the two counts diverge and this reds — which is the only
+  // way a gate can report on handlers it does not know how to find.
+  assert.equal(
+    census.length,
+    openerCount(LANE_MOCK),
+    `the line walk found ${census.length} handlers, the source match ${openerCount(LANE_MOCK)} — the census is not seeing every dispatch form in this file`,
+  );
   assert.ok(census.length >= 10, `the census found ${census.length} handlers — too few to be reading the file`);
 
   for (const row of census) {
@@ -161,7 +217,22 @@ const L7_UNSCOPEABLE = new Set(["/rest/v1/close_gate_checks", "/rest/v1/report_a
 
 test("N5 (L7) · every bank/close/registers handler scopes by the request's own subject, or is a NAMED exception", () => {
   const census = handlerCensus(L7_MOCK);
-  assert.ok(census.length >= 4, `the census found ${census.length} handlers in the L7 mock — too few to be reading the file`);
+  // The same completeness equality, and it is what this lane's own MAJOR was: this mock
+  // dispatches its RPC half on `verb === "…"` after slicing the prefix once, so before the
+  // opener learned that form FIVE of its ten handlers were invisible here.
+  assert.equal(
+    census.length,
+    openerCount(L7_MOCK),
+    `the line walk found ${census.length} handlers, the source match ${openerCount(L7_MOCK)} — the census is not seeing every dispatch form in this file`,
+  );
+  assert.ok(census.length >= 10, `the census found ${census.length} handlers in the L7 mock — too few to be reading the file`);
+  // The verb-dispatched half, named: an absence assertion above cannot prove they were seen.
+  for (const verb of ["list_fiscal_years", "get_close_plan", "get_close_readiness", "list_agent_act_receipts", "abandon_close"]) {
+    assert.ok(
+      census.some((r) => r.path === `/rest/v1/rpc/${verb}`),
+      `the census must see the verb-dispatched handler for ${verb} — five of this mock's ten handlers open that way`,
+    );
+  }
   for (const row of census) console.log(`  ${row.scoped ? "scoped  " : "UNSCOPED"} ${row.path}`);
 
   const unscoped = census.filter((r) => !r.scoped).map((r) => r.path);
@@ -188,4 +259,25 @@ test("N4 (L7) · the hold fixture's held_by IS the shared subject — otherwise 
     subject,
     "serve-built.mjs's firm_members_visible publishes exactly the shared SUBJECT, so a DIFFERENT held_by would resolve to null and the walk would be asserting the shortened-id fallback while claiming to assert the name",
   );
+});
+
+test("N6 · the census reads EVERY lane mock serve-built.mjs consults — a third one cannot arrive uncensused", () => {
+  const derived = derivedLaneMocks();
+  console.log(`  serve-built.mjs consults: ${derived.join(", ")}`);
+  const censused = [...LANE_MOCKS].sort();
+
+  // `fs4-checkout-mock.mjs` and `chat-parity-mock.mjs` are consulted too. They are NOT in
+  // LANE_MOCKS yet and this cell says so out loud rather than asserting equality it cannot
+  // honestly claim: censusing them belongs to whoever owns those files, and #548 is widening
+  // this same list in parallel. What this asserts is the ONE-WAY rule that actually protects
+  // the gate — every file this census claims to read must really be a lane mock the server
+  // consults, so a stale entry (a renamed or deleted mock) reds here instead of silently
+  // censusing nothing.
+  for (const mock of censused) {
+    assert.ok(
+      derived.includes(mock),
+      `${mock} is censused by this gate but serve-built.mjs no longer consults it — retire the entry or fix the import`,
+    );
+  }
+  assert.ok(derived.length >= censused.length, "the derived list is read from the server, never from this file");
 });

@@ -153,6 +153,7 @@ function faMock(seen: Record<string, number>, opts: { runRefuses?: boolean; slow
       return jsonResponse({ run_id: "r1", charged_cents: 100000, entries: 1 });
     }
     if (url.includes("/rest/v1/coa_accounts")) { bump("coa"); return jsonResponse([{ account_code: "1500", name: "Motor vehicles", account_type: "asset", account_class: null, special_acc_type: null, is_active: true }]); }
+    if (url.includes("/rest/v1/rpc/upsert_fa_account_profile")) { bump("upsert_profile"); return jsonResponse({ id: "p1", asset_account_code: "1500" }); }
     if (url.includes("/rest/v1/fa_account_profiles")) { bump("profiles"); return jsonResponse([]); }
     if (url.includes("/rpc/complete_fixed_asset_particulars") || url.includes("/rpc/revise_fixed_asset_particulars")) {
       bump("revise");
@@ -390,6 +391,51 @@ test("addendum 3: completing an advance's particulars re-reads the per-account S
   });
 });
 
+// review-549 MAJOR 9(b): `onActed={bumpRefresh}` on FaAccountProfilesPanel had no cell at
+// all — nothing in this file opened an enrol or retire door. It is the wiring that matters
+// most of the three, because enrolling or retiring an account changes the very UNIVERSE
+// `clara.fa_register_tie` walks (`fa_account_profiles WHERE active UNION fixed_assets`,
+// 0041:4276-4283), so the tie beside it is not merely stale — it is answering about a
+// different set of accounts than the one now enrolled.
+test("addendum 2 (b): enrolling an account profile re-reads the register↔GL tie beside it", async () => {
+  const seen = counters();
+  await withMockedEnv(faMock(seen), async () => {
+    const h = await renderComponent(App(createElement(FixedAssetsRegister, { clientId: "c1" })));
+    const body = bodyOf();
+    (body as unknown as { appendChild: (c: unknown) => void }).appendChild(h.container);
+    try {
+      for (let i = 0; i < 8; i++) await h.settle();
+      const tieBefore = seen.tie ?? 0;
+      assert.ok(tieBefore > 0, "the tie read must have run at mount");
+
+      const trigger = h.find((n) => n.tagName === "BUTTON" && textOf(n).includes("Enrol / update profile"));
+      assert.ok(trigger, "the profiles panel's own enrol trigger must render");
+      await h.fireEvent(trigger as never, "click");
+      for (let i = 0; i < 6; i++) await h.settle();
+
+      // The cost-account picker is the dialog's only required field.
+      const select = findIn(body, (n) => n.tagName === "SELECT");
+      assert.ok(select, "the cost-account picker must be reachable inside the dialog");
+      await h.act(() => { setFieldValue(select as never, "1500"); });
+      for (let i = 0; i < 2; i++) await h.settle();
+
+      const confirm = findIn(body, (n) => n.tagName === "BUTTON" && textOf(n as never) === "Enrol / update profile" && (n as unknown) !== (trigger as unknown));
+      assert.ok(confirm, "the dialog's own Confirm must be reachable, distinct from the trigger");
+      await h.act(() => clickButton(confirm as never));
+      for (let i = 0; i < 10; i++) await h.settle();
+
+      assert.equal(seen.upsert_profile, 1, "exactly one governed upsert");
+      assert.ok(
+        (seen.tie ?? 0) > tieBefore,
+        `the tie must re-read after a settled profile write (${tieBefore} -> ${seen.tie})`,
+      );
+    } finally {
+      await h.unmount();
+      for (let i = 0; i < 4; i++) await h.settle();
+    }
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Item 5 runs LAST, deliberately.
 // ---------------------------------------------------------------------------
@@ -410,6 +456,8 @@ test("addendum 5: the table is NOT replaced by a loading placeholder while an ac
     try {
       for (let i = 0; i < 8; i++) await h.settle();
       assert.match(h.text(), /Delivery van/, "the table must have loaded once");
+      const tieBeforeRevise = seen.tie ?? 0;
+      assert.ok(tieBeforeRevise > 0, "the tie read must have run at mount");
 
       const trigger = h.find((n) => n.tagName === "BUTTON" && textOf(n).includes("Revise"));
       assert.ok(trigger, "an active, complete row offers Revise");
@@ -427,7 +475,14 @@ test("addendum 5: the table is NOT replaced by a loading placeholder while an ac
       // Fire the confirm WITHOUT awaiting it to completion, then let React commit the
       // in-flight render. The reload is deliberately slow (see the mock), so this is
       // the middle of the act, not the end of it.
-      const inFlight = h.act(() => clickButton(confirm as never));
+      //
+      // `clickButton` is called DIRECTLY rather than through `h.act(...)`: an un-awaited
+      // `h.act` leaves its own act() scope open across the `h.settle()` calls below, which
+      // each open one too — and a nested scope swallowed the state update this cell exists
+      // to observe (measured: the epoch never left 0, so the tie never re-read, while the
+      // same wiring driven with an awaited click worked). `h.settle()` wraps in act() by
+      // itself, so every commit still flushes.
+      const inFlight = clickButton(confirm as never);
       for (let i = 0; i < 3; i++) await h.settle();
 
       // THE DISCRIMINATING POST-CONDITION, and the only one that separates the fixed
@@ -439,7 +494,10 @@ test("addendum 5: the table is NOT replaced by a loading placeholder while an ac
       assert.doesNotMatch(h.text(), /Loading the fixed-asset register|Loading…/, "…and no loading placeholder stands in its place");
 
       await inFlight;
-      for (let i = 0; i < 12; i++) await h.settle();
+      // The mocked reload deliberately eats six real macrotask turns (see faMock), and the
+      // tie's own re-read is a THIRD hop behind it: act() settles -> the epoch bumps -> the
+      // banner's effect fires -> its own fetch. Settle well past all three.
+      for (let i = 0; i < 30; i++) await h.settle();
 
       // After it settles: the refusal is verbatim, the dialog is still open
       // (CB-AE2E-004), and the typed value survived — because its parent never went away.
@@ -447,6 +505,16 @@ test("addendum 5: the table is NOT replaced by a loading placeholder while an ac
       const effAfter = findIn(body, (n) => (n as unknown as { id?: string }).id?.startsWith("fa-revise-eff") === true);
       assert.ok(effAfter, "the dialog is still open");
       assert.equal((effAfter as unknown as { value: string }).value, "2026-05-01", "and what the human typed is still there");
+
+      // review-549 MAJOR 9: `act={actAndRefresh}` on the ROW ACTIONS was unpinned — this cell
+      // drove Revise and never looked at the tie. A row write moves the register, so the tie
+      // banner (a sibling with its own read) must re-derive; the epoch bumps on SETTLE, so a
+      // refusal counts too — the DB may have moved even when the door said no, and
+      // re-deriving is never the wrong answer.
+      assert.ok(
+        (seen.tie ?? 0) > tieBeforeRevise,
+        `the register↔GL tie must re-read after a settled row action (${tieBeforeRevise} -> ${seen.tie})`,
+      );
     } finally {
       await h.unmount();
       for (let i = 0; i < 4; i++) await h.settle();

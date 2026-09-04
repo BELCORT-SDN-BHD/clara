@@ -24,6 +24,7 @@ import { NativeSelect } from "@/components/common/native-select";
 import { LoadingState, StateBanner } from "@/components/common/state";
 import { CounterpartyMergePreviewCard } from "./CounterpartyMergePreviewCard";
 import { createSingleFireGuard, runOnce } from "@/lib/parts/single-fire-guard";
+import { closeOnConfirmedOk } from "@/lib/parts/door-dialog-outcome";
 
 type Step = "pick" | "preview";
 type PreviewState = { loading: boolean; data: CounterpartyMergePreview | null; error: unknown };
@@ -190,7 +191,7 @@ export function MergeCounterpartiesDialog({
                   // lib/parts/single-fire-guard.ts). `ran` meant "not dropped as
                   // re-entrant", never "the merge was accepted".
                   const outcome = await runOnce(guardRef, () => onConfirm(survivorId, mergedId, reason));
-                  if (outcome.value === true) resetAndClose();
+                  if (closeOnConfirmedOk(outcome)) resetAndClose();
                 }}
               >
                 {busy ? t("working") : t("confirm")}

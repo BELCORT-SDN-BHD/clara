@@ -41,6 +41,7 @@ import { DataTableCard } from "@/components/common/data-table-card";
 import { EmptyState, LoadingState, StateBanner } from "@/components/common/state";
 import { useHydratedPart } from "@/lib/parts/hooks";
 import { createSingleFireGuard, runOnce } from "@/lib/parts/single-fire-guard";
+import { closeOnConfirmedOk } from "@/lib/parts/door-dialog-outcome";
 import { isCallerContextRow, loadCallerContext } from "@/lib/firm/caller-context";
 import {
   approveFirmRegistration,
@@ -197,7 +198,7 @@ function OperatorQueue({ callerId }: { callerId: string }) {
         await rejectFirmRegistration(sessionTokenAccessor, row.id, reason, opKey);
       }, onOk),
     );
-    return outcome.value === true;
+    return closeOnConfirmedOk(outcome);
   }
 
   // FOLD (Codex LOW-4, amended round-2): before the first successful

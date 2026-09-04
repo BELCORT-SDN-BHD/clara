@@ -23,7 +23,7 @@
 // That is Height's own copy pattern in the Mobbin grounding (§3 takeaway 4), and
 // it is a MISCLICK guard, not an authority guard: nothing here pre-empts a wall.
 
-import { useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useTranslations } from "next-intl";
 
 import {
@@ -37,6 +37,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { createSingleFireGuard, runOnce } from "@/lib/parts/single-fire-guard";
+import { closeOnConfirmedOk, refusalForThisDialog } from "@/lib/parts/door-dialog-outcome";
 import { DoorDialogRefusal, type DialogRefusal } from "@/components/common/dialog-refusal";
 
 export function MembersConfirmDialog({
@@ -80,6 +81,11 @@ export function MembersConfirmDialog({
   // CB-AE2E-004: bumped on every settled confirm so a repeated, byte-identical
   // refusal still re-announces and re-takes focus.
   const [attempt, setAttempt] = useState(0);
+  // review-549 MAJOR 1, the CONTROLLED variant: this dialog's `open` is a prop, so
+  // there is no local setter to hang the reset on — the effect is the same rule.
+  useEffect(() => {
+    if (open) setAttempt(0);
+  }, [open]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -89,7 +95,7 @@ export function MembersConfirmDialog({
           {description ? <DialogDescription>{description}</DialogDescription> : null}
         </DialogHeader>
         {children}
-        <DoorDialogRefusal refusal={refusal} attempt={attempt} />
+        <DoorDialogRefusal refusal={refusalForThisDialog(refusal, attempt)} attempt={attempt} />
         <DialogFooter>
           <DialogClose render={<Button variant="ghost" disabled={busy} />}>{t("cancel")}</DialogClose>
           <Button
@@ -104,7 +110,7 @@ export function MembersConfirmDialog({
               // with the refusal — and whatever the human typed — standing.
               const outcome = await runOnce(guardRef.current, onConfirm);
               if (outcome.ran) setAttempt((n) => n + 1);
-              if (outcome.value === true) onOpenChange(false);
+              if (closeOnConfirmedOk(outcome)) onOpenChange(false);
             }}
           >
             {busy ? t("working") : confirmLabel}

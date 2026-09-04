@@ -1368,7 +1368,7 @@
     "sandbox": {
       "heading": "Analysis sandbox",
       "subheading": "Watermarked, never sealed (0132) — structurally unreachable by the seal chain.",
-      "requestNotice": "Sandbox exports are minted by Clara's unattended lane. There is no human \"request export\" control here, and the chat rail has no tool for it either — the mint and request verbs are granted to the agent lane alone. Finished exports appear below, each with its own download offer.",
+      "requestNotice": "There is no way to request a sandbox export in this build. The mint and request verbs are wake verbs allowlisted to the INTERACTIVE lane alone and granted only to clara_wake_interactive, so no unattended lane can mint one either — and the chat rail has no tool for it. Finished exports appear below with their download offer once a later lane mints them.",
       "loading": "Loading sandbox exports…",
       "error": "Could not load sandbox exports: {message}",
       "empty": "No sandbox exports yet touching this client.",

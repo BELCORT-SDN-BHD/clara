@@ -16,10 +16,17 @@ import { ExportRecipientsPanel } from "./ExportRecipientsPanel";
 import { Button } from "@/components/ui/button";
 import type { DownloadableArtifact, ReportArtifactRow } from "@/lib/reports/types";
 import type { SessionTokenAccessor } from "@/lib/session";
+import type { MemberNameResolver } from "@/lib/members/use-member-names";
 
 function render(el: ReactElement): string {
   return renderToStaticMarkup(createElement(NextIntlClientProvider, { locale: "en", messages, children: el }));
 }
+
+/** review-549 MAJOR 7: the member-name resolver is the PANEL's now (one roster read for
+ *  the whole list), so a ROW-level cell hands one in. An empty roster is the honest
+ *  default here — these cells render a row, not a firm — and it exercises the
+ *  fail-open-to-honesty arm: an unresolvable `sealed_by` renders its shortened raw id. */
+const NO_MEMBERS: MemberNameResolver = { resolve: () => null, members: [], loading: false, error: null };
 
 function noSession(): SessionTokenAccessor {
   return { getAccessToken: async () => null };
@@ -36,7 +43,7 @@ function artifact(overrides: Partial<ReportArtifactRow>): ReportArtifactRow {
 }
 
 test("ArtifactRow: a pre_sign row offers Issue + Archive, and no longer claims that no download door exists", () => {
-  const html = render(createElement(ArtifactRow, { artifact: artifact({}), offer: null, session: noSession(), busy: false, act: async (fn) => { await fn(); return true; } }));
+  const html = render(createElement(ArtifactRow, { artifact: artifact({}), offer: null, session: noSession(), busy: false, act: async (fn) => { await fn(); return true; }, memberNames: NO_MEMBERS }));
   assert.match(html, /Issue for approval/);
   assert.match(html, /Archive signed original/);
   // THE RETIRED CLAIM, asserted ABSENT rather than quietly dropped: this sentence was true through
@@ -61,14 +68,14 @@ function offerRow(overrides: Partial<DownloadableArtifact> = {}): DownloadableAr
 }
 
 test("DOWNLOAD: no control at all until the offer door has answered (a pending read is not a NO)", () => {
-  const html = render(createElement(ArtifactRow, { artifact: artifact({}), offer: null, session: noSession(), busy: false, act: async (fn) => { await fn(); return true; } }));
+  const html = render(createElement(ArtifactRow, { artifact: artifact({}), offer: null, session: noSession(), busy: false, act: async (fn) => { await fn(); return true; }, memberNames: NO_MEMBERS }));
   assert.doesNotMatch(html, />Download</, "a null offer renders neither a control nor a refusal");
   assert.doesNotMatch(html, /Not downloadable/);
 });
 
 test("DOWNLOAD: the control appears ONLY when the door says downloadable", () => {
   const yes = render(createElement(ArtifactRow, {
-    artifact: artifact({}), offer: offerRow(), session: noSession(), busy: false, act: async (fn) => { await fn(); return true; },
+    artifact: artifact({}), offer: offerRow(), session: noSession(), busy: false, act: async (fn) => { await fn(); return true; }, memberNames: NO_MEMBERS,
   }));
   assert.match(yes, />Download</);
   assert.doesNotMatch(yes, /Not downloadable/);
@@ -78,7 +85,7 @@ test("DOWNLOAD: a refused artifact renders the DATABASE's typed reason and NO co
   for (const reason of ["artifact_superseded", "artifact_watermark_unproven", "sandbox_export_not_complete"]) {
     const html = render(createElement(ArtifactRow, {
       artifact: artifact({}), offer: offerRow({ downloadable: false, refusal_reason: reason, sha256: null, byte_size: null, content_type: null, filename: null }),
-      session: noSession(), busy: false, act: async (fn) => { await fn(); return true; },
+      session: noSession(), busy: false, act: async (fn) => { await fn(); return true; }, memberNames: NO_MEMBERS,
     }));
     assert.doesNotMatch(html, />Download</, `a refused artifact (${reason}) must not offer a control`);
     assert.match(html, new RegExp(`Not downloadable . ${reason}`), `the door's own reason must render verbatim (${reason})`);
@@ -87,7 +94,7 @@ test("DOWNLOAD: a refused artifact renders the DATABASE's typed reason and NO co
 
 test("DOWNLOAD: the control's accessible name names the FILE, so two rows are tellable apart by a screen reader", () => {
   const html = render(createElement(ArtifactRow, {
-    artifact: artifact({}), offer: offerRow(), session: noSession(), busy: false, act: async (fn) => { await fn(); return true; },
+    artifact: artifact({}), offer: offerRow(), session: noSession(), busy: false, act: async (fn) => { await fn(); return true; }, memberNames: NO_MEMBERS,
   }));
   assert.match(html, /aria-label="Download clara-report-pre_sign-dddddddddddd\.pdf"/);
 });
@@ -115,7 +122,7 @@ test("the trigger-enabled probe can still say NO (positive control)", () => {
 });
 
 test("BLOCKER: Issue and Archive triggers are ENABLED before their in-dialog fields are filled", () => {
-  const html = render(createElement(ArtifactRow, { artifact: artifact({}), offer: null, session: noSession(), busy: false, act: async (fn) => { await fn(); return true; } }));
+  const html = render(createElement(ArtifactRow, { artifact: artifact({}), offer: null, session: noSession(), busy: false, act: async (fn) => { await fn(); return true; }, memberNames: NO_MEMBERS }));
   assert.ok(triggerIsEnabled(html, "Issue for approval"), "the reason field is inside the dialog this trigger opens");
   assert.ok(triggerIsEnabled(html, "Archive signed original"), "sha/byte-size/signer are inside the dialog this trigger opens");
 });
@@ -127,7 +134,7 @@ test("BLOCKER: the Register-recipient trigger is ENABLED before its in-dialog fi
 
 test("ArtifactRow: a signed_original row offers Retrieve, never Issue/Archive", () => {
   const html = render(
-    createElement(ArtifactRow, { artifact: artifact({ kind: "signed_original" }), offer: null, session: noSession(), busy: false, act: async (fn) => { await fn(); return true; } }),
+    createElement(ArtifactRow, { artifact: artifact({ kind: "signed_original" }), offer: null, session: noSession(), busy: false, act: async (fn) => { await fn(); return true; }, memberNames: NO_MEMBERS }),
   );
   assert.match(html, />Retrieve</);
   assert.doesNotMatch(html, /Issue for approval/);
@@ -135,13 +142,13 @@ test("ArtifactRow: a signed_original row offers Retrieve, never Issue/Archive", 
 });
 
 test("ArtifactRow shows the agent_prepared / claim_removed / uncertified bands only when true", () => {
-  const plain = render(createElement(ArtifactRow, { artifact: artifact({}), offer: null, session: noSession(), busy: false, act: async (fn) => { await fn(); return true; } }));
+  const plain = render(createElement(ArtifactRow, { artifact: artifact({}), offer: null, session: noSession(), busy: false, act: async (fn) => { await fn(); return true; }, memberNames: NO_MEMBERS }));
   assert.doesNotMatch(plain, /agent-prepared/);
 
   const flagged = render(
     createElement(ArtifactRow, {
       artifact: artifact({ prepared_by_agent: true, claim_removed: true, uncertified: true }),
-      offer: null, session: noSession(), busy: false, act: async (fn) => { await fn(); return true; },
+      offer: null, session: noSession(), busy: false, act: async (fn) => { await fn(); return true; }, memberNames: NO_MEMBERS,
     }),
   );
   assert.match(flagged, /agent-prepared/);
@@ -151,7 +158,7 @@ test("ArtifactRow shows the agent_prepared / claim_removed / uncertified bands o
 
 // LOW (independent review): kind renders VERBATIM, never a `_` → ` ` relabel.
 test("ArtifactRow renders artifact.kind verbatim, never relabelled", () => {
-  const html = render(createElement(ArtifactRow, { artifact: artifact({ kind: "pre_sign" }), offer: null, session: noSession(), busy: false, act: async (fn) => { await fn(); return true; } }));
+  const html = render(createElement(ArtifactRow, { artifact: artifact({ kind: "pre_sign" }), offer: null, session: noSession(), busy: false, act: async (fn) => { await fn(); return true; }, memberNames: NO_MEMBERS }));
   assert.match(html, />pre_sign</);
   assert.doesNotMatch(html, />pre sign</);
 });
@@ -176,14 +183,22 @@ test("L3: isValidByteSize accepts digits-only, rejects blank/whitespace/non-digi
 // seal_report_dataset (chatTurn.v17.tools.ts:36-38, :156-157). MEASURED absence:
 // `grep -rn "mint_sandbox|request_sandbox|request_export" packages/runtime/workflows/`
 // returns zero hits.
-test("SandboxExportsPanel states only what is reachable: minted by the unattended lane, and NOT by the chat rail", () => {
+test("SandboxExportsPanel states only what is reachable: NO lane in this build can request one", () => {
   const html = render(createElement(SandboxExportsPanel, { clientId: "c1", session: noSession() }));
   assert.match(html, /Analysis sandbox/);
-  assert.match(html, /minted by Clara&#x27;s unattended lane|minted by Clara's unattended lane/);
-  assert.match(html, /the chat rail has no tool for it either/);
-  // The overclaim itself, pinned as an ABSENCE: no copy on this panel may send a
-  // human to the rail for a sandbox view or an export.
-  assert.doesNotMatch(html, /Ask Clara/, "the panel must not route a human to an affordance that does not exist");
+  assert.match(html, /There is no way to request a sandbox export in this build/);
+  assert.match(html, /the chat rail has no tool for it/);
+  // review-549 MAJOR 6: the first re-cut swapped one overclaim for another, saying the
+  // exports "are minted by Clara's unattended lane". 0132 allowlists both verbs to the
+  // INTERACTIVE lane only (`:1231-1232`), grants them to `clara_wake_interactive` alone
+  // (`:1207-1216`), and its own posture note says "never unattended" (`:1197-1199`).
+  assert.match(html, /INTERACTIVE lane alone/);
+  // The banned CLAIM, not the banned WORD: the copy legitimately says "no unattended
+  // lane can mint one either", which is the negation. A bare /unattended lane/ absence
+  // would forbid the true sentence along with the false one.
+  assert.doesNotMatch(html, /minted by Clara.{0,8}s unattended lane/, "the second overclaim, pinned as an absence");
+  assert.match(html, /no unattended lane can mint one either/, "…and its correction, pinned as a presence");
+  assert.doesNotMatch(html, /Ask Clara/, "and the panel must not route a human to an affordance that does not exist");
 });
 
 test("FreeformReadsPanel honestly states there is no human 'run a freeform read' door", () => {
