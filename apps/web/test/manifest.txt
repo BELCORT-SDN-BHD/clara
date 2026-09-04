@@ -72,6 +72,7 @@ components/close/close-t1-hold-receipts.test.tsx
 components/close/close-t1-opener.test.tsx
 components/close/close-t1-proposal-readiness.test.tsx
 components/command/command-do.test.tsx
+components/command/command-go-access.test.tsx
 components/common/door-dialog-outcome.test.tsx
 components/common/money-input.journals.test.tsx
 components/common/money-input.opening.test.tsx
@@ -176,6 +177,7 @@ components/reports/reports-components.test.tsx
 components/reports/reports-offer-refusal.test.tsx
 components/reports/reports-snapshots-seeding-a11y.test.tsx
 components/reports/reports-snapshots-seeding-keyboard.test.tsx
+components/shell-responsive.test.tsx
 components/tax/tax-a11y.test.tsx
 e2e/e2e-fixture-ownership.test.ts
 lib/bank/agency-doors.test.ts
@@ -196,6 +198,7 @@ lib/checkout/stripe-session.test.ts
 lib/checkout/success-state.test.ts
 lib/clara/api.test.ts
 lib/clara/liveClarify.test.ts
+lib/clara/rail-presence.test.ts
 lib/clara/thread-resolution.test.ts
 lib/clara/turnRun.test.ts
 lib/clara/useActiveThread.test.ts
@@ -286,6 +289,7 @@ lib/wire.test.ts
 test/a11yRules.test.ts
 test/keyboardWalk.test.ts
 tests/apiLimitBanner.test.mjs
+tests/app-icons.test.ts
 tests/checkout-claim-route.test.ts
 tests/checkout-route.test.ts
 tests/client-scope.test.ts
@@ -306,6 +310,7 @@ tests/parity-holes.test.ts
 tests/password-recovery-handler.test.ts
 tests/proxy-matcher.test.ts
 tests/public-key.test.ts
+tests/reduced-motion-contract.test.ts
 tests/reports-download.test.ts
 tests/require-firm-scope.test.ts
 tests/response-state.test.ts
