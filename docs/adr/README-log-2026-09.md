@@ -49,5 +49,6 @@ what did the re-reading find?"
 > two rulings in [`mohe-grill-rulings-2026-09-04-pm.md`](../plan/active/mohe-grill-rulings-2026-09-04-pm.md).
 > **191** is a DATA ruling — two rows of `clara.document_kind_codeability` (PR #551) flip to codeable; it amends
 > no law (digest law 16's spirit: facts in tables). **192** AMENDS 裁-86 and law 85's browser-leg clause: the
-> Playwright smoke on the built app becomes a REQUIRED per-PR CI job beside the per-train acceptance walk;
-> ADR-0077 carries the "amended by" line; digest row 99. No new ADR under 裁-140.
+> Playwright smoke on the built app becomes a REQUIRED per-PR CI job beside the per-train acceptance walk,
+> once the two known `checkout-gate-walk.spec.ts` flakes are fixed at their cause (the job is not built
+> yet); ADR-0077 and law 85 carry the "amended by" line; digest row 99. No new ADR under 裁-140.

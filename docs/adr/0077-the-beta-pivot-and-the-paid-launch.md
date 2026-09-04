@@ -38,8 +38,10 @@ says additions land as ADR entries and the digest is re-trued when one does).
    opus-review split is the cross-model pass, and a native-built money/auth/webhook/tenant-creation
    surface adds a Codex read-only leg; **every frontend train walks its journey in a real browser
    (Playwright) on the built app**, the axe scan riding the walk *(AMENDED by 裁-192, owner,
-   2026-09-04: the smoke walk on the built app is ALSO a required per-PR CI job under the `ci`
-   meta-gate — gate and acceptance, no longer acceptance only; digest row 99)*. ADR-061's uniformity is
+   2026-09-04: the smoke walk on the built app BECOMES a required per-PR CI job under the `ci`
+   meta-gate — gate and acceptance, no longer acceptance only — once the two known
+   `checkout-gate-walk.spec.ts` flakes are fixed at their cause; the job is not built yet;
+   digest row 99)*. ADR-061's uniformity is
    unchanged. *(裁-84's cross-session reading and the orchestrator's dissent to it are moot.)*
 9. **A reduced Wave G stays in front of beta** (裁-83): factory reset · apply `0155` · the
    sixteen-step happy-path walk · as-run.
