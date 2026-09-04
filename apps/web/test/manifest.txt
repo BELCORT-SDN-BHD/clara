@@ -253,6 +253,7 @@ lib/wire.test.ts
 test/a11yRules.test.ts
 test/keyboardWalk.test.ts
 tests/apiLimitBanner.test.mjs
+tests/build-info-route.test.ts
 tests/checkout-claim-route.test.ts
 tests/checkout-route.test.ts
 tests/client-scope.test.ts

@@ -496,7 +496,11 @@ describe("MEDIUM-3 — every route leaf is classified, or this suite reds", () =
   });
 
   it("VACUITY CONTROL: the three registries are non-empty and their files exist", () => {
-    assert.equal(SCOPE_ENTRANCES.length, 3);
+    // FOUR since CB-AE2E-035 (2026-09-04): `app/api/build-info/route.ts` joined the entrances.
+    // This is an ABSOLUTE pin, so it is moved deliberately and with the reason recorded — the
+    // both-ways assertion below is the instrument that proves the registry IS the tree; this
+    // number is the vacuity control that keeps that assertion from passing over an empty set.
+    assert.equal(SCOPE_ENTRANCES.length, 4);
     assert.ok(SCOPE_EXEMPT_SURFACES.length >= 2);
     assert.ok(SCOPE_UNSCOPED_SURFACES.length >= 3);
     for (const s of SCOPE_UNSCOPED_SURFACES) {
@@ -516,7 +520,7 @@ describe("MEDIUM-3 — every route leaf is classified, or this suite reds", () =
   });
 });
 
-describe("the spine has ONE implementation and exactly three entrances", () => {
+describe("the spine has ONE implementation and exactly four entrances", () => {
   const appFiles = walkSources(APP_DIR).map(webRelative);
   const libFiles = walkSources(join(WEB_ROOT, "lib")).map(webRelative);
   const componentFiles = walkSources(join(WEB_ROOT, "components")).map(webRelative);
@@ -533,7 +537,8 @@ describe("the spine has ONE implementation and exactly three entrances", () => {
   it("the app tree's spine callers ARE the registry, both ways", () => {
     const found = appFiles.filter(callsSpine).sort();
     assert.deepEqual(found, SCOPE_ENTRANCES.map((e) => e.path).sort());
-    assert.equal(SCOPE_ENTRANCES.length, 3);
+    // FOUR since CB-AE2E-035 — see the vacuity control above for why this absolute moved.
+    assert.equal(SCOPE_ENTRANCES.length, 4);
   });
 
   it("EVERY execution root of every entrance calls the spine, bare", () => {
