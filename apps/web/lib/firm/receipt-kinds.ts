@@ -70,10 +70,14 @@ export function isKnownAgentReceiptKind(kind: string): kind is AgentReceiptKind 
  * page — the feed used to promise "what the agent did across every client"
  * over a union five of whose nine arms could not emit a row; four still cannot.
  *
- * Each entry names the migration whose `create view clara._agent_receipt_src_*`
- * body replaced 0103's stub. Censused by grepping every migration for each
- * shim's own definition and counting the results — one definition means the
- * 0103 stub still stands.
+ * Each entry names the migration that OWNS its shim's live body. Censused by
+ * grepping every migration for that shim's own definition — but the state is
+ * PER-SHIM, not a row count: a 0103 stub with no later definition is unwired,
+ * while a shim born by its own migration is wired. Counting alone would be
+ * wrong for `f_a7b` (`onboarding_agent`, `0142`) and `pb_binding`
+ * (`binding_agent`, `0154`), which never passed through an unwired phase and
+ * so have exactly ONE definition that is not 0103's. The test asserts the real
+ * rule — a single definition counts as unwired only when it is 0103's.
  */
 export const WIRED_AGENT_RECEIPT_KINDS = [
   "freeform_read", // 0131_f_a6_freeform_read.sql
