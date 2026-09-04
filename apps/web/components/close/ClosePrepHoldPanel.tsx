@@ -18,10 +18,15 @@ import type { SessionTokenAccessor } from "@/lib/session";
 import { EmptyState, LoadingState, StateBanner } from "@/components/common/state";
 import { businessDateTime } from "@/lib/business-date";
 import { CloseDoorDialog } from "./CloseDoorDialog";
+import { MemberName } from "@/components/common/member-name";
+import { useMemberNames } from "@/lib/members/use-member-names";
 
 export function ClosePrepHoldPanel({ clientId, session }: { clientId: string; session: SessionTokenAccessor }) {
   const t = useTranslations("ClientClose.closePrep");
   const hold = useHydratedPart(session, (s) => getLiveClosePrepHold(clientId, { session: s }));
+  // CB-AE2E-028: `close_prep_holds.held_by` is `uuid not null references
+  // clara.users(id)` (0138:575) and was printed raw beside the words "held by".
+  const memberNames = useMemberNames(session);
 
   return (
     <div className="flex flex-col gap-2">
@@ -53,7 +58,7 @@ export function ClosePrepHoldPanel({ clientId, session }: { clientId: string; se
         <div className="flex flex-wrap items-center gap-2">
           <Badge variant="secondary">{t("held")}</Badge>
           <span className="text-xs text-muted-foreground">
-            {t("heldBy")}: {hold.data.held_by} · {businessDateTime(hold.data.held_at)}
+            {t("heldBy")}: <MemberName userId={hold.data.held_by} resolver={memberNames} /> · {businessDateTime(hold.data.held_at)}
           </span>
           <span className="text-xs text-muted-foreground">{hold.data.reason}</span>
           <ReleaseDialog busy={hold.busy} onConfirm={(reason) => hold.act(async () => { await releaseClosePrep(clientId, reason, { session }); })} />
@@ -68,7 +73,7 @@ export function ClosePrepHoldPanel({ clientId, session }: { clientId: string; se
   );
 }
 
-function HoldDialog({ busy, onConfirm }: { busy: boolean; onConfirm: (reason: string) => Promise<void> }) {
+function HoldDialog({ busy, onConfirm }: { busy: boolean; onConfirm: (reason: string) => Promise<boolean> }) {
   const t = useTranslations("ClientClose.closePrep.hold");
   const [reason, setReason] = useState("");
   return (
@@ -87,7 +92,7 @@ function HoldDialog({ busy, onConfirm }: { busy: boolean; onConfirm: (reason: st
   );
 }
 
-function ReleaseDialog({ busy, onConfirm }: { busy: boolean; onConfirm: (reason: string) => Promise<void> }) {
+function ReleaseDialog({ busy, onConfirm }: { busy: boolean; onConfirm: (reason: string) => Promise<boolean> }) {
   const t = useTranslations("ClientClose.closePrep.release");
   const [reason, setReason] = useState("");
   return (

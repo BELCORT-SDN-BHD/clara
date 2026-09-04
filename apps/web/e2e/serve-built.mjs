@@ -20,6 +20,8 @@ import { handleChatParityRuntime, handleChatParitySupabase, startMockRuntime } f
 // Every branch inside is scoped to ITS OWN ids and falls through otherwise, so it can run
 // beside the chat-parity lane without either starving the other's fixtures.
 import { P6_5_SESSIONS, handleP6_5App, handleP6_5Runtime, handleP6_5Supabase } from "./agentic-finish-mock.mjs";
+// L7 (bank/close/registers). ID-scoped like its siblings, hooked in ONE place below.
+import { handleL7Supabase } from "./bank-close-registers-mock.mjs";
 
 const e2eRoot = dirname(fileURLToPath(import.meta.url));
 const webRoot = resolve(e2eRoot, "..");
@@ -370,6 +372,7 @@ async function handleSupabase(request, response, url) {
   // client/thread pairing check turns into a 404.
   if (await handleChatParitySupabase(request, response, path, url, sendJson, cors)) return;
   if (await handleP6_5Supabase(request, response, path, url, sendJson, cors)) return;
+  if (await handleL7Supabase(request, response, path, url, sendJson, cors)) return;
 
   if (request.method === "GET" && path === "/rest/v1/clients") {
     const filter = url.searchParams.get("id");

@@ -30,6 +30,10 @@ import { P6_5_SESSIONS } from "./agentic-finish-mock.mjs";
 const E2E_DIR = dirname(fileURLToPath(import.meta.url));
 const SERVE_BUILT = join(E2E_DIR, "serve-built.mjs");
 const LANE_MOCK = join(E2E_DIR, "agentic-finish-mock.mjs");
+// L7 (bank/close/registers) is the second lane mock this census reads. The rule is a
+// rule for the SERVER, not for one lane, and a guard that only ever read one file was
+// one file away from the class recurring.
+const L7_MOCK = join(E2E_DIR, "bank-close-registers-mock.mjs");
 
 /** The subject every walk signs in as, read from `serve-built.mjs` rather than re-typed here —
  *  a re-typed constant is a second copy that drifts, and this cell exists because of drift. */
@@ -65,24 +69,34 @@ test("N4 · no lane fixture may claim the FIRM ALTITUDE for the shared subject",
 
 /** Every `path === "/rest/v1/..."` or `path === "/api/..."` handler in the lane's mock, with
  *  whether its block contains a `return false` — the fall-through that makes it scoped. */
-function handlerCensus(): { path: string; scoped: boolean }[] {
-  const source = readFileSync(LANE_MOCK, "utf8");
+function handlerCensus(mock: string = LANE_MOCK): { path: string; scoped: boolean }[] {
+  const source = readFileSync(mock, "utf8");
   const lines = source.split("\n");
   const out: { path: string; scoped: boolean }[] = [];
   for (let i = 0; i < lines.length; i += 1) {
     const opened = /path === "(\/(?:rest|api)\/[^"]+)"/.exec(lines[i]!);
     if (!opened) continue;
-    // The block runs to the next handler opener, or to the end of the function.
+    // The block runs to ITS OWN closing brace — tracked by brace DEPTH, not by "the
+    // next handler opener or a column-0 `}`".
+    //
+    // ROUND-2 FIX, found by the L7 lane's own census: the first cut kept scanning past
+    // the LAST handler's closing brace and picked up the function's own trailing
+    // `return false;` fall-through, reporting that handler as SCOPED when it is not.
+    // That is the direction that matters — an over-reporting instrument hides exactly
+    // the unscoped handler this census exists to name. Depth counting cannot make that
+    // mistake, and the two positive controls below still hold.
     let scoped = false;
-    for (let j = i + 1; j < lines.length; j += 1) {
-      if (/path === "(\/(?:rest|api)\/[^"]+)"/.test(lines[j]!)) break;
-      // `return false;` ANYWHERE on the line, not only at its start: the scoping guard is
-      // usually written as a one-line `if (…) return false;`. The first cut anchored at the
-      // line start and reported thirteen scoped handlers as UNSCOPED — an instrument that
-      // over-reports is still a broken instrument, and the positive control below is what
-      // caught it.
-      if (/\breturn false;/.test(lines[j]!)) { scoped = true; break; }
-      if (/^\}/.test(lines[j]!)) break;
+    let depth = 0;
+    for (let j = i; j < lines.length; j += 1) {
+      const line = lines[j]!;
+      // `return false;` ANYWHERE on the line, not only at its start: the scoping guard
+      // is usually written as a one-line `if (…) return false;`.
+      if (j > i && /\breturn false;/.test(line)) { scoped = true; break; }
+      for (const ch of line) {
+        if (ch === "{") depth += 1;
+        else if (ch === "}") depth -= 1;
+      }
+      if (j > i && depth <= 0) break;
     }
     out.push({ path: opened[1]!, scoped });
   }
@@ -133,4 +147,45 @@ test("N5 · every lane handler either scopes by the request's own subject, or is
   assert.ok(scoped.length >= 10, `the census recognised only ${scoped.length} scoped handlers — it is not reading the guards`);
   assert.equal(unscoped.length, UNSCOPEABLE.size, "and it still sees the two that genuinely cannot scope");
   assert.equal(scoped.filter((p) => UNSCOPEABLE.has(p)).length, 0, "no handler is counted both ways");
+});
+
+// ---------------------------------------------------------------------------
+// The SAME rule, applied to L7's mock lane (bank/close/registers).
+// ---------------------------------------------------------------------------
+
+/** L7's own two unscopeable handlers, each argued in that file beside itself: the
+ *  gate CATALOG is firm-wide and carries no filter, and the close page's receipt
+ *  panel reads `report_agent_receipts` unfiltered. Both are reachable only from
+ *  `/clients/:id/close`, and only this lane's walk opens that route. */
+const L7_UNSCOPEABLE = new Set(["/rest/v1/close_gate_checks", "/rest/v1/report_agent_receipts"]);
+
+test("N5 (L7) · every bank/close/registers handler scopes by the request's own subject, or is a NAMED exception", () => {
+  const census = handlerCensus(L7_MOCK);
+  assert.ok(census.length >= 4, `the census found ${census.length} handlers in the L7 mock — too few to be reading the file`);
+  for (const row of census) console.log(`  ${row.scoped ? "scoped  " : "UNSCOPED"} ${row.path}`);
+
+  const unscoped = census.filter((r) => !r.scoped).map((r) => r.path);
+  const undeclared = unscoped.filter((p) => !L7_UNSCOPEABLE.has(p));
+  assert.deepEqual(
+    undeclared,
+    [],
+    "an unscoped handler answers for subjects this lane does not own — scope it, or add it to L7_UNSCOPEABLE with its reason in source",
+  );
+
+  // The allowlist must not rot: every entry still has to BE an unscoped handler here.
+  for (const declared of L7_UNSCOPEABLE) {
+    assert.ok(unscoped.includes(declared), `${declared} is declared unscopeable but is no longer an unscoped handler in the L7 mock — retire the entry`);
+  }
+});
+
+test("N4 (L7) · the hold fixture's held_by IS the shared subject — otherwise the name-resolution journey proves only the fallback", () => {
+  const subject = sharedSubject();
+  const source = readFileSync(L7_MOCK, "utf8");
+  const match = /heldBy: "([0-9a-f-]+)"/.exec(source);
+  assert.ok(match, "the L7 mock must declare heldBy");
+  assert.equal(
+    match[1],
+    subject,
+    "serve-built.mjs's firm_members_visible publishes exactly the shared SUBJECT, so a DIFFERENT held_by would resolve to null and the walk would be asserting the shortened-id fallback while claiming to assert the name",
+  );
 });

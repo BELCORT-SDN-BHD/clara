@@ -68,7 +68,7 @@ function UpsertDialog({
   clientId: string;
   accounts: AccountRow[];
   busy: boolean;
-  act: (fn: () => Promise<void>) => Promise<void>;
+  act: (fn: () => Promise<void>) => Promise<boolean>;
 }) {
   const t = useTranslations("FixedAssetsDepreciation.profiles");
   const [assetAccount, setAssetAccount] = useState("");
@@ -129,7 +129,7 @@ function RetireDialog({
   clientId: string;
   assetAccount: string;
   busy: boolean;
-  act: (fn: () => Promise<void>) => Promise<void>;
+  act: (fn: () => Promise<void>) => Promise<boolean>;
 }) {
   const t = useTranslations("FixedAssetsDepreciation.profiles");
   return (

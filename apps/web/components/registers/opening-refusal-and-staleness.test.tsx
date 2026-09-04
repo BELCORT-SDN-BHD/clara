@@ -202,14 +202,19 @@ test("F6: a refused draft_opening_item does NOT wipe the typed item key — reop
       for (let i = 0; i < 8; i++) await h.settle();
 
       assert.match(textOf(body as never), /opening item is malformed/, "the refusal must render");
-      const closedConfirm = buttonsLabelled(body as never, "Draft opening item");
-      assert.equal(closedConfirm.length, 1, "the dialog must have closed (only the trigger remains)");
 
-      // Reopen — the typed value must still be there.
-      const triggerAgain = h.find((n) => n.tagName === "BUTTON" && textOf(n).includes("Draft opening item"));
-      await h.fireEvent(triggerAgain as never, "click");
-      for (let i = 0; i < 4; i++) await h.settle();
+      // CB-AE2E-004 (2026-09-04) — THE LAW CHANGED, and this cell changed with it.
+      // It used to assert `closedConfirm.length === 1`, i.e. that the dialog had
+      // CLOSED on the refusal, and then reopened it to look for the typed value.
+      // Closing on a refusal was the class defect: `runOnce` reported only that
+      // the handler had run, `act()` catches every refusal and resolves, so the
+      // wrapper closed on failure and success alike — taking the field the refusal
+      // was asking the human to correct with it. The dialog now STAYS open.
+      const stillOpen = buttonsLabelled(body as never, "Draft opening item");
+      assert.equal(stillOpen.length, 2, "the dialog must STAY OPEN on a refusal — trigger AND confirm are both in the tree");
+
       const keyFieldAfter = findIn(body as never, (n) => (n as unknown as { id?: string }).id === "opening-draft-key");
+      assert.ok(keyFieldAfter, "the field the human typed into is still mounted");
       assert.equal((keyFieldAfter as unknown as { value: string }).value, "typed-before-refusal", "F6: the typed item key must SURVIVE a refusal — it must not have been wiped by an unconditional reset");
     } finally {
       await h.unmount();
@@ -257,10 +262,13 @@ test("F6-2: a refused record_opening_target does NOT wipe the typed line key —
 
       assert.match(textOf(body as never), /opening target is malformed/, "the refusal must render");
 
-      const triggerAgain = h.find((n) => n.tagName === "BUTTON" && textOf(n).includes("Add target line"));
-      await h.fireEvent(triggerAgain as never, "click");
-      for (let i = 0; i < 4; i++) await h.settle();
+      // CB-AE2E-004: the dialog STAYS OPEN on a refusal — no reopen step, because
+      // there is nothing to reopen. See the F6 cell above for the full reasoning.
+      const stillOpen = buttonsLabelled(body as never, "Add target line");
+      assert.equal(stillOpen.length, 2, "the dialog must STAY OPEN on a refusal");
+
       const lineKeyFieldAfter = findIn(body as never, (n) => (n as unknown as { id?: string }).id === "opening-target-key");
+      assert.ok(lineKeyFieldAfter, "the field the human typed into is still mounted");
       assert.equal((lineKeyFieldAfter as unknown as { value: string }).value, "typed-target-before-refusal", "F6-2: the typed line key must SURVIVE a refusal");
     } finally {
       await h.unmount();

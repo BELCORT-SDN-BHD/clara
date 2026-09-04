@@ -26,11 +26,17 @@ import { businessDateTime } from "@/lib/business-date";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
 import { DataState } from "./data-state";
 import { Badge } from "@/components/parts/PartBadge";
+import { MemberName } from "@/components/common/member-name";
+import { useMemberNames, type MemberNameResolver } from "@/lib/members/use-member-names";
 
 export function FirmActivityFeed() {
   const t = useTranslations("FirmActivity");
   const { data, loading, error } = useAsyncRead(() => loadFirmActivity(sessionTokenAccessor));
   const rows = data ?? [];
+  // CB-AE2E-027 (same class): `agent_receipts_visible.acting_actor` is a uuid
+  // (0103:261, contract ordinal 6 "who acted"). ONE roster read for the whole
+  // feed, held here and passed down — never one per row.
+  const memberNames = useMemberNames(sessionTokenAccessor);
 
   return (
     // `subheading` moved up into the page header (app/(firm)/activity/page.tsx)
@@ -43,7 +49,7 @@ export function FirmActivityFeed() {
         <p className="max-w-prose text-xs text-muted-foreground">{t("showingRecent")}</p>
         <ul className="mt-2 flex flex-col gap-2">
           {rows.map((row) => (
-            <ReceiptRow key={row.receipt_id} row={row} />
+            <ReceiptRow key={row.receipt_id} row={row} memberNames={memberNames} />
           ))}
         </ul>
       </DataState>
@@ -61,7 +67,7 @@ const RECEIPT_KIND_KEYS: Record<string, "receiptKinds.entry_post" | "receiptKind
   web_fetch: "receiptKinds.web_fetch",
 };
 
-function ReceiptRow({ row }: { row: AgentReceiptRow }) {
+function ReceiptRow({ row, memberNames }: { row: AgentReceiptRow; memberNames: MemberNameResolver }) {
   const t = useTranslations("FirmActivity");
   const key = RECEIPT_KIND_KEYS[row.receipt_kind];
   // A checked lookup, not a cast (FIX-1's exact discipline): only a KNOWN
@@ -91,7 +97,7 @@ function ReceiptRow({ row }: { row: AgentReceiptRow }) {
       </div>
       <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
         <dt className="text-muted-foreground">{t("columnActor")}</dt>
-        <dd className="truncate text-card-foreground">{row.acting_actor}</dd>
+        <dd className="truncate text-card-foreground"><MemberName userId={row.acting_actor} resolver={memberNames} /></dd>
         <dt className="text-muted-foreground">{t("columnBasis")}</dt>
         <dd className="text-card-foreground">{row.rationale ?? t("noRationale")}</dd>
       </dl>

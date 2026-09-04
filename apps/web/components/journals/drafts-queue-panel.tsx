@@ -71,7 +71,7 @@ export function DraftsQueuePanel({
    *  a high-stakes entry (governance-doors.ts's own header). */
   onApproveRoutine: (entryId: string, expectedRevision: string) => void;
   /** T6: clara.withdraw_draft — abandons the draft entirely. */
-  onWithdraw: (entryId: string, reason: string, expectedRevision: string, onOk: () => void) => Promise<void>;
+  onWithdraw: (entryId: string, reason: string, expectedRevision: string, onOk: () => void) => Promise<boolean>;
 }) {
   const t = useTranslations("JournalsWorkbench.drafts");
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -177,7 +177,7 @@ function DraftDetail({
   onApproveRoutine: (entryId: string, expectedRevision: string) => void;
   /** Returns act()'s own Promise (never rejects — hooks.ts's own contract) so
    *  JournalsDoorDialog can await it to know when the attempt SETTLED. */
-  onWithdraw: (entryId: string, reason: string, expectedRevision: string, onOk: () => void) => Promise<void>;
+  onWithdraw: (entryId: string, reason: string, expectedRevision: string, onOk: () => void) => Promise<boolean>;
 }) {
   const t = useTranslations("JournalsWorkbench.drafts");
   // FIX-5 (independent review): this whole component is now KEYED on
@@ -321,7 +321,7 @@ function DraftGovernanceRow({
   entry: JournalEntryRow;
   busy: boolean;
   onApproveRoutine: (entryId: string, expectedRevision: string) => void;
-  onWithdraw: (entryId: string, reason: string, expectedRevision: string, onOk: () => void) => Promise<void>;
+  onWithdraw: (entryId: string, reason: string, expectedRevision: string, onOk: () => void) => Promise<boolean>;
 }) {
   const t = useTranslations("DraftsDocumentGovernance");
   const [showDiff, setShowDiff] = useState(false);

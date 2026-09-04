@@ -36,7 +36,7 @@ export function EnrolAccountDialog({
 }: {
   accounts: AccountRow[];
   busy: boolean;
-  onSubmit: (accountCode: string, personLabel: string, confirmDedicated: boolean, attestation: string) => Promise<void>;
+  onSubmit: (accountCode: string, personLabel: string, confirmDedicated: boolean, attestation: string) => Promise<boolean>;
 }) {
   const t = useTranslations("StaffAdvances.enrolAccount");
   const candidates = staffAdvanceEnrolCandidates(accounts);

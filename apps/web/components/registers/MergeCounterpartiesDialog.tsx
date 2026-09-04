@@ -48,7 +48,11 @@ export function MergeCounterpartiesDialog({
    *  against a retired/cross-kind/cross-client target, verbatim). */
   candidates: CounterpartyRow[];
   busy: boolean;
-  onConfirm: (survivorId: string, mergedId: string, reason: string) => Promise<void>;
+  /** Performs exactly one governed merge and RESOLVES ITS OUTCOME: `true` only
+   *  when the door accepted (CB-AE2E-004 — `useHydratedPart`'s `act()` returns
+   *  exactly this). Anything else keeps this dialog open with the chosen pair and
+   *  the typed reason intact. */
+  onConfirm: (survivorId: string, mergedId: string, reason: string) => Promise<boolean>;
 }) {
   const t = useTranslations("ArApCounterparty.merge");
   const tMergePreview = useTranslations("ArApCounterparty.mergePreview");
@@ -182,8 +186,11 @@ export function MergeCounterpartiesDialog({
                 variant="destructive"
                 disabled={busy || preview.loading || !preview.data}
                 onClick={async () => {
-                  const ran = await runOnce(guardRef, () => onConfirm(survivorId, mergedId, reason));
-                  if (ran) resetAndClose();
+                  // CB-AE2E-004 — close ONLY on an explicit success (see
+                  // lib/parts/single-fire-guard.ts). `ran` meant "not dropped as
+                  // re-entrant", never "the merge was accepted".
+                  const outcome = await runOnce(guardRef, () => onConfirm(survivorId, mergedId, reason));
+                  if (outcome.value === true) resetAndClose();
                 }}
               >
                 {busy ? t("working") : t("confirm")}

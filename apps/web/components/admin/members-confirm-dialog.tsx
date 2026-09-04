@@ -23,7 +23,7 @@
 // That is Height's own copy pattern in the Mobbin grounding (§3 takeaway 4), and
 // it is a MISCLICK guard, not an authority guard: nothing here pre-empts a wall.
 
-import { useRef, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { useTranslations } from "next-intl";
 
 import {
@@ -37,6 +37,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { createSingleFireGuard, runOnce } from "@/lib/parts/single-fire-guard";
+import { DoorDialogRefusal, type DialogRefusal } from "@/components/common/dialog-refusal";
 
 export function MembersConfirmDialog({
   open,
@@ -45,6 +46,7 @@ export function MembersConfirmDialog({
   description,
   confirmLabel,
   busy,
+  refusal,
   onConfirm,
   children,
 }: {
@@ -54,11 +56,20 @@ export function MembersConfirmDialog({
   description?: string;
   confirmLabel: string;
   busy: boolean;
-  /** Performs exactly one governed call. This component never inspects the
-   *  outcome — the panel's own hydrated state (err/clr) is the source of truth
-   *  for what happened, and it renders OUTSIDE this dialog so a refusal survives
-   *  the close. */
-  onConfirm: () => Promise<void>;
+  /** The caller's OWN standing failure (a hydrated part's `err`/`clr`), rendered
+   *  VERBATIM inside this dialog. CB-AE2E-004: the dialog now stays open on a
+   *  refusal, and the caller's page-level banner is behind the modal backdrop —
+   *  so the refusal the human must read has to travel in here with them. Omit it
+   *  and nothing extra renders; the dialog still stays open. */
+  refusal?: DialogRefusal;
+  /** Performs exactly one governed call and RESOLVES ITS OUTCOME: `true` only
+   *  when the door accepted. `useHydratedPart`'s `act()` already returns exactly
+   *  this, so `onConfirm={() => act(...)}` is the whole contract; a handler that
+   *  cannot know (or a dropped re-entrant click) answers anything but `true` and
+   *  this dialog stays open. CB-AE2E-004: the previous `Promise<void>` contract
+   *  made a refusal indistinguishable from a success, and every wrapper closed on
+   *  both — destroying the input the refusal was asking the human to correct. */
+  onConfirm: () => Promise<boolean>;
   children?: ReactNode;
 }) {
   const t = useTranslations("Members.dialog");
@@ -66,6 +77,9 @@ export function MembersConfirmDialog({
   // a cosmetic affordance, not a correctness guard — two fast clicks would
   // otherwise send two governed calls. See lib/parts/single-fire-guard.ts.
   const guardRef = useRef(createSingleFireGuard());
+  // CB-AE2E-004: bumped on every settled confirm so a repeated, byte-identical
+  // refusal still re-announces and re-takes focus.
+  const [attempt, setAttempt] = useState(0);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -75,14 +89,22 @@ export function MembersConfirmDialog({
           {description ? <DialogDescription>{description}</DialogDescription> : null}
         </DialogHeader>
         {children}
+        <DoorDialogRefusal refusal={refusal} attempt={attempt} />
         <DialogFooter>
           <DialogClose render={<Button variant="ghost" disabled={busy} />}>{t("cancel")}</DialogClose>
           <Button
             variant="destructive"
             disabled={busy}
             onClick={async () => {
-              const ran = await runOnce(guardRef.current, onConfirm);
-              if (ran) onOpenChange(false);
+              // CB-AE2E-004 — close ONLY on an explicit success. `outcome.ran`
+              // says the click was not dropped as re-entrant; it says NOTHING
+              // about whether the door accepted, because `act()`
+              // (lib/parts/hooks.ts) catches every refusal and resolves. A
+              // refused act now resolves `false`, and this dialog stays open
+              // with the refusal — and whatever the human typed — standing.
+              const outcome = await runOnce(guardRef.current, onConfirm);
+              if (outcome.ran) setAttempt((n) => n + 1);
+              if (outcome.value === true) onOpenChange(false);
             }}
           >
             {busy ? t("working") : confirmLabel}

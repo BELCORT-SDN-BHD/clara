@@ -113,19 +113,23 @@ describe("focus-ring contract — 裁-1's 70% is declared once and obeyed everyw
     );
   });
 
-  it("VACUITY CONTROL: the scan actually finds the carriers — twelve component files, twelve class strings", () => {
+  it("VACUITY CONTROL: the scan actually finds the carriers — thirteen component files, thirteen class strings", () => {
     // Without this arm the assertion above passes trivially the day the scan
     // walks the wrong directory or the regex stops matching. The count is the
-    // 2026-09-02 re-census (the P6-3 order's list of eleven was one file stale:
-    // components/admin/admin-hub.tsx had joined it). Exactly one class string
-    // per file, now that comments are stripped — see ringCarrierHits's header
-    // for why the thirteenth "occurrence" was never a carrier.
+    // 2026-09-04 re-census: the 2026-09-02 list of twelve gained
+    // components/common/dialog-refusal.tsx, whose banner is focused
+    // PROGRAMMATICALLY when a governed door refuses inside an open dialog
+    // (CB-AE2E-004) — never in the tab order, but a sighted keyboard user still
+    // has to see where focus landed, so it carries the same ring idiom. Exactly
+    // one class string per file, now that comments are stripped — see
+    // ringCarrierHits's header for why a prose "occurrence" was never a carrier.
     const hits = ringCarrierHits();
     const files = [...new Set(hits.map((h) => h.file))].sort();
-    assert.equal(hits.length, 12, JSON.stringify(hits, null, 2));
+    assert.equal(hits.length, 13, JSON.stringify(hits, null, 2));
     assert.deepEqual(files, [
       "components/admin/admin-hub.tsx",
       "components/clara/ClaraThreadView.tsx",
+      "components/common/dialog-refusal.tsx",
       "components/common/native-select.tsx",
       "components/common/section-tabs.tsx",
       "components/firm/compliance-watch-affordance.tsx",

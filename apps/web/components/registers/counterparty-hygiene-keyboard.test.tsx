@@ -401,13 +401,17 @@ test("F15: a governed refusal (rename_counterparty) renders verbatim in the hygi
       await h.act(() => { clickButton(confirmButton as never); });
       for (let i = 0; i < 8; i++) await h.settle();
 
-      // The dialog auto-closes on every confirm attempt regardless of
-      // outcome — its own Cancel control is the closed signal.
+      // CB-AE2E-004 (2026-09-04): the dialog stays open on a REFUSAL. It used to
+      // close on every settled attempt regardless of outcome, which is the class
+      // defect — the name the human typed vanished with the dialog the refusal was
+      // asking them to correct it in. Its own Cancel control is the open signal.
       const cancelStillThere = findIn(body as never, (n) => n.tagName === "BUTTON" && textOf(n as never) === "Cancel");
-      assert.equal(cancelStillThere, null, "the dialog must have closed after the confirm attempt settled");
+      assert.ok(cancelStillThere, "the dialog must STAY OPEN after a refused confirm");
+      const nameAfter = findIn(dialogContent as never, (n) => n.tagName === "INPUT");
+      assert.equal((nameAfter as unknown as { value: string }).value, "Lost Invention Holdings", "the typed name survives the refusal");
 
-      assert.match(h.text(), /CLR23/, "the CLR code must render, verbatim, in the panel's own persistent banner");
-      assert.match(h.text(), /collides with an existing identity/, "the DB's own message must render, verbatim — never re-worded");
+      assert.match(textOf(body as never), /CLR23/, "the CLR code must render, verbatim");
+      assert.match(textOf(body as never), /collides with an existing identity/, "the DB's own message must render, verbatim — never re-worded");
     } finally {
       await h.unmount();
       for (let i = 0; i < 5; i++) await h.settle();

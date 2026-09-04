@@ -395,7 +395,10 @@ function BeginOnboardingCard({ session }: { session: SessionTokenAccessor }) {
   const [clr, setClr] = useState<{ code: string; reason: string | null } | null>(null);
   const [result, setResult] = useState<{ client_id: string; plan_id: string } | null>(null);
 
-  async function onConfirm() {
+  // CB-AE2E-004: resolves the outcome — this card keeps its OWN err/clr rather
+  // than a hydrated part's, so it reports success itself and the dialog closes
+  // only on the path where the door accepted.
+  async function onConfirm(): Promise<boolean> {
     setBusy(true);
     setErr(null);
     setClr(null);
@@ -409,6 +412,7 @@ function BeginOnboardingCard({ session }: { session: SessionTokenAccessor }) {
       const out = await beginClientOnboarding(name.trim(), { session });
       setResult(out);
       setName("");
+      return true;
     } catch (e) {
       if (isDoorRefusal(e)) {
         // N7 nit: the SAME code-slot composition ClientOnboardingCard's own
@@ -419,6 +423,7 @@ function BeginOnboardingCard({ session }: { session: SessionTokenAccessor }) {
       } else {
         setErr(e instanceof Error ? e.message : String(e));
       }
+      return false;
     } finally {
       setBusy(false);
     }

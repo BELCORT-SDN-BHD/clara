@@ -137,9 +137,13 @@ test("WALL: removing the last owner renders the same CLR09 through the confirm d
 
         const after = textOf(body as never);
         assert.match(after, /cannot demote\/remove the last active owner/);
-        // The refusal renders OUTSIDE the dialog, so it survives the close — a
-        // message that vanished with the dialog would be a refusal nobody read.
-        assert.ok(!/Remove Tao Lim from this firm\?/.test(after), "the dialog closed and the refusal stayed");
+        // CB-AE2E-004 (2026-09-04): the refusal now renders INSIDE the dialog, which
+        // STAYS OPEN. The old assertion here was the mirror image — "the dialog closed
+        // and the refusal stayed" — and it held only because the refusal painted on the
+        // page behind a dialog that had just been thrown away. A modal that closes on a
+        // refusal hides nothing today only because this panel happens to have no fields;
+        // the law is one law for all fifteen wrappers.
+        assert.match(after, /Remove Tao Lim from this firm\?/, "the dialog must STAY OPEN, carrying the refusal the human has to read");
       } finally {
         await h.unmount();
       }

@@ -104,7 +104,7 @@ function SnapshotRow({ snapshot, session }: { snapshot: { id: string; period_sta
   );
 }
 
-function MintDialog({ clientId, busy, act }: { clientId: string; busy: boolean; act: (fn: () => Promise<void>) => Promise<void> }) {
+function MintDialog({ clientId, busy, act }: { clientId: string; busy: boolean; act: (fn: () => Promise<void>) => Promise<boolean> }) {
   const t = useTranslations("ReportsSnapshotsSeeding.snapshots.mint");
   const [monthStart, setMonthStart] = useState(() => `${businessToday().slice(0, 7)}-01`);
   // RULING F9 (independent review; TRUED at re-verify — see lib/reports/

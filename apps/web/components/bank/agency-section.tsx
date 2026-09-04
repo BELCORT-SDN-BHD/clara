@@ -100,7 +100,7 @@ export function AgencySection({ clientId }: { clientId: string }) {
         </CardHeader>
         <CardContent className="flex flex-col gap-2">
           {proposals.data !== null && <ActionRefusal err={proposals.err} clr={proposals.clr} />}
-          <ReadState hasData={proposals.data !== null} err={proposals.err} errKind={proposalsKind.kind} isEmpty={proposals.data?.length === 0} onRetry={() => void proposals.reload()}>
+          <ReadState hasData={proposals.data !== null} err={proposals.err} errKind={proposalsKind.kind} isEmpty={proposals.data?.length === 0} emptyCopy={t("emptyProposals")} onRetry={() => void proposals.reload()}>
             <ul className="flex flex-col gap-2">
               {(proposals.data ?? []).map((p) => (
                 <li key={p.id} className="enter-content flex items-center justify-between gap-3 rounded-lg border border-border bg-card p-3 text-sm">

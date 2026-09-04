@@ -155,7 +155,10 @@ export async function listDownloadableArtifacts(
  *  panel. Firm-scoped; not client-filtered (a recipient's `covered_clients` is
  *  itself the per-client fact, when kind='external'). */
 export async function listExportRecipients(opts: Opts = {}): Promise<ExportRecipientRow[]> {
-  return getRows<ExportRecipientRow>("export_recipients", { order: "registered_by.asc", ...opts });
+  // CB-AE2E-027: ordered by the label a human can SEE. The previous sort key was
+  // `registered_by` — a uuid the panel never renders — so the list came back in an
+  // order nobody could account for.
+  return getRows<ExportRecipientRow>("export_recipients", { order: "display_name.asc", ...opts });
 }
 
 /** clara.register_export_recipient — admin+ (0132:1051-1106). Refusals (role too

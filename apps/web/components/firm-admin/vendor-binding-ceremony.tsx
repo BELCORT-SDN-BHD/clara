@@ -117,7 +117,7 @@ export function VendorBindingRowActions({
 }: {
   binding: VendorBindingRow;
   busy: boolean;
-  act: (fn: () => Promise<void>) => Promise<void>;
+  act: (fn: () => Promise<void>) => Promise<boolean>;
 }) {
   const t = useTranslations("FirmAdminCompliance.vendorBindings");
   return (
@@ -165,7 +165,7 @@ function RevokeDialog({
 }: {
   bindingId: string;
   busy: boolean;
-  act: (fn: () => Promise<void>) => Promise<void>;
+  act: (fn: () => Promise<void>) => Promise<boolean>;
 }) {
   const t = useTranslations("FirmAdminCompliance.vendorBindings");
   const [reason, setReason] = useState("");
@@ -207,7 +207,7 @@ export function ProposeBindingDialog({
   clientId: string;
   counterpartiesState: PartHydrationState<VendorCounterpartyRow[]>;
   busy: boolean;
-  act: (fn: () => Promise<void>) => Promise<void>;
+  act: (fn: () => Promise<void>) => Promise<boolean>;
 }) {
   const t = useTranslations("FirmAdminCompliance.vendorBindings");
   const tc = useTranslations("Common");

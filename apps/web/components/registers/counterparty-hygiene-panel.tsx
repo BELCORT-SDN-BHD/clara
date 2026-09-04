@@ -19,7 +19,7 @@
 // so it is not offered as a control at all rather than as a dead one. Filed
 // as a new backend-read finding, separate from the plan's own OQ-4.
 
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { useTranslations } from "next-intl";
 import { useHydratedPart } from "@/lib/parts/hooks";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
@@ -40,9 +40,25 @@ import { RenameCounterpartyDialog } from "./RenameCounterpartyDialog";
 import { MergeCounterpartiesDialog } from "./MergeCounterpartiesDialog";
 import type { SessionTokenAccessor } from "@/lib/session";
 
-async function loadHygieneData(session: SessionTokenAccessor, clientId: string, kind: CounterpartyKind) {
-  const counterparties = await loadCounterparties(session, clientId, kind);
-  return { counterparties };
+// H-34 — BOTH kinds, always. `loadCounterparties` sends `kind: eq.<kind>`
+// (lib/registers/counterparty.ts:87), so a single-kind read makes the other kind's
+// rows structurally unreachable — and the empty branch then claimed something about
+// the CLIENT ("No counterparties recorded yet for this client") that the read never
+// asked. Worse in place: this panel is nested inside AgingRegister, whose own domain
+// state defaults to "ar" = receivables = CUSTOMERS, so on first paint the aging table
+// above showed customer aging while the panel below said there were no counterparties
+// at all.
+//
+// Two calls of the SAME function — no new read, no new grant — and the kind toggle
+// becomes self-evidencing: each button carries its own count, so a human never reads
+// "none" while the other toggle shows a number. It also retires the kind-change reload
+// effect entirely.
+async function loadHygieneData(session: SessionTokenAccessor, clientId: string) {
+  const [vendor, customer] = await Promise.all([
+    loadCounterparties(session, clientId, "vendor"),
+    loadCounterparties(session, clientId, "customer"),
+  ]);
+  return { vendor, customer };
 }
 
 function statusBadge(t: ReturnType<typeof useTranslations>, row: CounterpartyRow, all: CounterpartyRow[]) {
@@ -57,16 +73,7 @@ function statusBadge(t: ReturnType<typeof useTranslations>, row: CounterpartyRow
 export function CounterpartyHygienePanel({ clientId }: { clientId: string }) {
   const t = useTranslations("ArApCounterparty");
   const [kind, setKind] = useState<CounterpartyKind>("vendor");
-  const { data, busy, err, clr, act, reload } = useHydratedPart(sessionTokenAccessor, (s) => loadHygieneData(s, clientId, kind));
-
-  const mounted = useRef(false);
-  useEffect(() => {
-    if (!mounted.current) {
-      mounted.current = true;
-      return;
-    }
-    void reload();
-  }, [kind, reload]);
+  const { data, busy, err, clr, act } = useHydratedPart(sessionTokenAccessor, (s) => loadHygieneData(s, clientId));
 
   // F4 (independent review, fix-required): the sibling shape
   // (staff-advances-register.tsx) — before the FIRST successful load,
@@ -77,6 +84,8 @@ export function CounterpartyHygienePanel({ clientId }: { clientId: string }) {
   if (!data) {
     return err ? <StateBanner tone="error">{err}</StateBanner> : <LoadingState>{t("loading")}</LoadingState>;
   }
+
+  const shown = data[kind];
 
   return (
     <div className="flex flex-col gap-4">
@@ -100,23 +109,25 @@ export function CounterpartyHygienePanel({ clientId }: { clientId: string }) {
         {(["vendor", "customer"] as const).map((k) => (
           <Button key={k} type="button" size="sm" variant={kind === k ? "default" : "outline"} aria-pressed={kind === k} onClick={() => setKind(k)}>
             {t(k === "vendor" ? "kindVendorPlural" : "kindCustomerPlural")}
+            <span className="ml-1.5 opacity-70">{data[k].length}</span>
           </Button>
         ))}
       </div>
 
-      {data.counterparties.length === 0 ? (
-        <EmptyState>{t("empty")}</EmptyState>
+      {shown.length === 0 ? (
+        // The sentence now names the kind the read actually asked for.
+        <EmptyState>{t(kind === "vendor" ? "emptyVendor" : "emptyCustomer")}</EmptyState>
       ) : (
         <ul className="flex flex-col gap-3">
-          {data.counterparties.map((row) => {
+          {shown.map((row) => {
             const isLive = row.merged_into === null && row.retired_at === null;
-            const mergeCandidates = data.counterparties.filter((c) => c.id !== row.id && c.merged_into === null && c.retired_at === null);
+            const mergeCandidates = shown.filter((c) => c.id !== row.id && c.merged_into === null && c.retired_at === null);
             return (
               <li key={row.id} className="flex flex-col gap-2 rounded-lg border p-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div className="flex items-center gap-2">
                     <span className="font-medium">{row.name}</span>
-                    {statusBadge(t, row, data.counterparties)}
+                    {statusBadge(t, row, [...data.vendor, ...data.customer])}
                   </div>
                   {isLive && (
                     <div className="flex flex-wrap items-center gap-1.5">

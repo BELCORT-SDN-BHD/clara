@@ -65,7 +65,7 @@ export function DepreciationRunsPanel({ clientId, hasLiveAuthority }: { clientId
   );
 }
 
-function RunDialog({ clientId, busy, act }: { clientId: string; busy: boolean; act: (fn: () => Promise<void>) => Promise<void> }) {
+function RunDialog({ clientId, busy, act }: { clientId: string; busy: boolean; act: (fn: () => Promise<void>) => Promise<boolean> }) {
   const t = useTranslations("FixedAssetsDepreciation.runs");
   const [periodStart, setPeriodStart] = useState("");
   const [periodEnd, setPeriodEnd] = useState("");

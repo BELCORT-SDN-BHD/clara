@@ -19,6 +19,7 @@ import { SectionHeader } from "@/components/common/section-header";
 import { DataState, ErrorMessage } from "@/components/firm/data-state";
 import { OpeningSeedBadge, CancelOpeningSeedDialog, ReopenOpeningSeedDialog } from "./opening-seed-lifecycle";
 import { OpeningDryrunStrip } from "./opening-dryrun-strip";
+import { toDialogRefusal } from "@/components/common/dialog-refusal";
 import { OpeningItemsPanel } from "./opening-items-panel";
 import { OpeningTargetKeyedPanel } from "./opening-target-keyed-panel";
 import { OpeningFixedAssetDialog } from "./opening-fixed-asset-dialog";
@@ -72,6 +73,12 @@ export function OpeningSeedWorkbench({
     return ok;
   };
 
+  // CB-AE2E-004 / 裁-187: ONE conversion of this workbench's sticky failure into
+  // the shape every governed dialog below reads — it renders verbatim inside the
+  // dialog (which now stays open on a refusal) and it is the only thing that
+  // reveals an attestation field.
+  const dialogRefusal = toDialogRefusal(error);
+
   const items = data?.items ?? [];
   const draftItems = items.filter((i) => i.state === "active");
   const correctionItems = items; // the door itself selects which drafts qualify (opening-approve-dialogs.tsx)
@@ -92,13 +99,13 @@ export function OpeningSeedWorkbench({
               it outright"). Render-and-shape: the trigger is reachable on
               any open seed; the door refuses CLR31 `registry_not_open` on a
               non-empty one, surfaced verbatim like any other refusal. */}
-          {seed.state === "open" ? <CancelOpeningSeedDialog seed={seed} busy={busy} act={act} /> : null}
-          {seed.state === "finalized" ? <ReopenOpeningSeedDialog seed={seed} busy={busy} act={act} /> : null}
-          {seed.state === "open" ? <ApproveOpeningSeedDialog seed={seed} draftItems={draftItems} busy={busy} act={act} /> : null}
+          {seed.state === "open" ? <CancelOpeningSeedDialog seed={seed} busy={busy} refusal={dialogRefusal} act={act} /> : null}
+          {seed.state === "finalized" ? <ReopenOpeningSeedDialog seed={seed} busy={busy} refusal={dialogRefusal} act={act} /> : null}
+          {seed.state === "open" ? <ApproveOpeningSeedDialog seed={seed} draftItems={draftItems} busy={busy} refusal={dialogRefusal} act={act} /> : null}
           {seed.state === "open" && items.some((i) => i.supersedes_item_id !== null) ? (
-            <ApproveOpeningCorrectionDialog seed={seed} correctionItems={correctionItems} busy={busy} act={act} />
+            <ApproveOpeningCorrectionDialog seed={seed} correctionItems={correctionItems} busy={busy} refusal={dialogRefusal} act={act} />
           ) : null}
-          {seed.state === "open" ? <OpeningFixedAssetDialog clientId={clientId} seed={seed} accounts={accounts} keyedResolutionId={keyedResolutionId} busy={busy} act={act} /> : null}
+          {seed.state === "open" ? <OpeningFixedAssetDialog clientId={clientId} seed={seed} accounts={accounts} keyedResolutionId={keyedResolutionId} busy={busy} refusal={dialogRefusal} act={act} /> : null}
         </div>
       </div>
 
@@ -126,7 +133,7 @@ export function OpeningSeedWorkbench({
                 act-epoch above bumps on every settled write on this seed,
                 remounting (and re-fetching) the strip regardless of whether
                 the write added, updated, or left the row count unchanged. */}
-            <OpeningDryrunStrip key={`${seed.id}:${actEpoch}`} seedId={seed.id} />
+            <OpeningDryrunStrip key={`${seed.id}:${actEpoch}`} seedId={seed.id} targets={data?.targets ?? []} />
 
             {!seed.tie_document_id ? (
               <OpeningTargetKeyedPanel clientId={clientId} seed={seed} targets={data.targets} keyedResolutionId={keyedResolutionId} accounts={accounts} busy={busy} act={act} />

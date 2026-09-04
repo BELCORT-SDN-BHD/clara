@@ -101,11 +101,18 @@ test("Cancel-seed dialog: a real CLR31 refusal closes the dialog and surfaces VE
         await h.act(() => clickButton(confirmButton as never));
         for (let i = 0; i < 6; i++) await h.settle();
 
-        // The dialog closes (act() never rethrows — it records the failure internally).
+        // CB-AE2E-004 (2026-09-04): the dialog STAYS OPEN on a refusal. `act()` still
+        // never rethrows — it records the failure internally and resolves `false` —
+        // and that `false` is now what the wrapper reads. This cell used to assert
+        // the opposite (`confirmAfter === null`, "gone once it closes"), which is
+        // precisely the behaviour that destroyed the typed reason.
         const confirmAfter = findIn(body as never, (n) => n.tagName === "BUTTON" && textOf(n as never).includes("Cancel seed") && (n as unknown) !== (trigger as unknown));
-        assert.equal(confirmAfter, null, "the dialog's Confirm button must be gone once it closes");
+        assert.ok(confirmAfter, "the dialog's Confirm button must STILL be there — a refusal does not close the dialog");
+        const reasonAfter = findIn(body as never, (n) => n.tagName === "TEXTAREA");
+        assert.equal((reasonAfter as unknown as { value: string }).value, "duplicate seed", "the typed reason survives the refusal");
 
-        // The refusal renders VERBATIM in the banner OUTSIDE the (now closed) dialog.
+        // The refusal renders VERBATIM — and now INSIDE the still-open dialog, where
+        // the human can read it (the panel's own banner is behind the modal backdrop).
         assert.match(textOf(body as never), /CLR31/, "the refusal code must render verbatim");
         assert.match(textOf(body as never), /only an empty open seed may be cancelled/, "the refusal message must render verbatim, never re-worded");
       } finally {

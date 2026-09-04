@@ -182,11 +182,15 @@ test("COMMIT refusal: a real click on Confirm (clickButton) closes the dialog, a
       // "Commit onboarding" button (the one this test just proved distinct
       // from the trigger, above) must be GONE — the same identity-exclusion
       // idiom the CANCEL test below already uses correctly.
+      // CB-AE2E-004 (2026-09-04) flips this assertion. It used to demand the
+      // dialog's own Confirm be GONE, i.e. that a REFUSAL closed the dialog — that
+      // was the class defect, and the identity-exclusion idiom below is still the
+      // discriminating instrument, only pointed at the correct post-condition.
       const confirmStillThere = findIn(
         body as never,
         (n) => n.tagName === "BUTTON" && textOf(n as never) === "Commit onboarding" && (n as unknown) !== (trigger as unknown),
       );
-      assert.equal(confirmStillThere, null, "the dialog's own Confirm control must be GONE after Confirm settles — the dialog genuinely closed");
+      assert.ok(confirmStillThere, "the dialog's own Confirm control must STILL be there — a refusal keeps the dialog open");
 
       const bodyText = textOf(body as never);
       assert.match(bodyText, /CLR05/, "the CLR code must render, verbatim, in the card's persistent banner");
@@ -291,24 +295,21 @@ test("RESOLVE refusal: the typed resolution SURVIVES a refusal — only a SUCCES
       assert.match(bodyText, /CLR04/, "the refusal must render verbatim (this half already worked before the fix)");
       assert.match(bodyText, /bookkeeper role or higher/, "the DB's own message, verbatim");
 
-      // RE-OPEN the SAME row's dialog (it closed on settle, per
-      // OnboardingDoorDialog's own "closes once the attempt SETTLES" law)
-      // and read the field back — the discriminating proof.
+      // CB-AE2E-004 (2026-09-04): there is no RE-OPEN step any more — the dialog
+      // never closed. OnboardingDoorDialog's "closes once the attempt SETTLES" law is
+      // gone; it closes only on a confirmed success. The field is read IN PLACE,
+      // which is a strictly stronger proof of the same N13 claim: the human is still
+      // looking at the text they typed, beside the refusal that is asking them to
+      // change it.
       const triggerAgain = h.find((n) => n.tagName === "BUTTON" && textOf(n) === "Resolve");
       assert.ok(triggerAgain, "the Resolve trigger must still render after a refusal — the item is still pending");
-      await h.fireEvent(triggerAgain!, "click");
-      for (let i = 0; i < 6; i++) await h.settle();
 
-      // Read the value React itself last rendered onto the REOPENED
-      // (freshly-mounted, per base-ui's own unmount-on-close default)
-      // textarea's own props — the SAME `__reactProps$...` mechanism
-      // `setFieldValue`/`clickButton` already rely on — rather than the raw
-      // DOM property, which a fresh stub node's own value-tracking quirks
-      // make an unreliable read in this harness (the exact precedent
-      // `components/documents/coding-lane-keyboard.test.tsx`'s own
-      // "vendor could not be matched" refusal-survives-reopen test uses).
+      // Read the value React itself last rendered onto the textarea's own props —
+      // the SAME `__reactProps$...` mechanism `setFieldValue`/`clickButton` already
+      // rely on — rather than the raw DOM property, whose value-tracking quirks make
+      // it an unreliable read in this harness.
       const reopenedField = findIn(body as never, (n) => n.tagName === "TEXTAREA") as unknown as Record<string, unknown> | null;
-      assert.ok(reopenedField, "the resolution field must be reachable again");
+      assert.ok(reopenedField, "the resolution field must still be reachable"); 
       const propsKey = Object.keys(reopenedField!).find((k) => k.startsWith("__reactProps"));
       const reactValue = propsKey ? (reopenedField![propsKey] as { value?: string }).value : undefined;
       assert.equal(reactValue, typed, "N13: a REFUSED act must KEEP the typed text — it must not have been silently discarded");

@@ -34,7 +34,7 @@ function RunNowDialog({
 }: {
   templates: AdjustmentTemplateRow[];
   busy: boolean;
-  onSubmit: (templateId: string, periodStart: string, periodEnd: string) => Promise<void>;
+  onSubmit: (templateId: string, periodStart: string, periodEnd: string) => Promise<boolean>;
 }) {
   const t = useTranslations("AdjustmentsAccounts.runNow");
   const liveTemplates = templates.filter((tpl) => tpl.status === "live");
@@ -81,7 +81,7 @@ function RunNowDialog({
   );
 }
 
-function ReversePairDialog({ busy, onSubmit }: { busy: boolean; onSubmit: (reason: string) => Promise<void> }) {
+function ReversePairDialog({ busy, onSubmit }: { busy: boolean; onSubmit: (reason: string) => Promise<boolean> }) {
   const t = useTranslations("AdjustmentsAccounts.reversePair");
   const [reason, setReason] = useState("");
   return (
@@ -114,8 +114,8 @@ export function AdjustmentRunHistoryPanel({
   templates: AdjustmentTemplateRow[];
   runs: AdjustmentRunWithCorrection[];
   busy: boolean;
-  onRunNow: (templateId: string, periodStart: string, periodEnd: string) => Promise<void>;
-  onReversePair: (occurrenceEntryId: string, reason: string) => Promise<void>;
+  onRunNow: (templateId: string, periodStart: string, periodEnd: string) => Promise<boolean>;
+  onReversePair: (occurrenceEntryId: string, reason: string) => Promise<boolean>;
 }) {
   const t = useTranslations("AdjustmentsAccounts.runHistory");
   const tc = useTranslations("Common");

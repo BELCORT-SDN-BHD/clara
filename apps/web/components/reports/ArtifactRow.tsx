@@ -21,6 +21,8 @@ import { issueReportForApproval, archiveSignedOriginal, retrieveSignedOriginal, 
 import { DownloadArtifactButton } from "./DownloadArtifactButton";
 import type { DownloadableArtifact, ReportArtifactRow } from "@/lib/reports/types";
 import type { SessionTokenAccessor } from "@/lib/session";
+import { MemberName } from "@/components/common/member-name";
+import { useMemberNames } from "@/lib/members/use-member-names";
 
 /** LOW (independent review, L3): `Number(byteSize)` on a malformed string
  *  (empty, whitespace, non-digits) silently becomes NaN, which
@@ -43,9 +45,12 @@ export function ArtifactRow({
   offer: DownloadableArtifact | null;
   session: SessionTokenAccessor;
   busy: boolean;
-  act: (fn: () => Promise<void>) => Promise<void>;
+  act: (fn: () => Promise<void>) => Promise<boolean>;
 }) {
   const t = useTranslations("ClientReports.statutory");
+  // CB-AE2E-027 (same class): `report_artifacts.sealed_by` was rendered as a raw
+  // uuid in a monospace cell.
+  const memberNames = useMemberNames(session);
   const [copied, setCopied] = useState(false);
 
   const copyKey = () => {
@@ -80,7 +85,7 @@ export function ArtifactRow({
         <dt className="text-muted-foreground">{t("bytesLabel")}</dt>
         <dd className="font-mono text-card-foreground">{artifact.byte_size.toLocaleString()}</dd>
         <dt className="text-muted-foreground">{t("sealedBy")}</dt>
-        <dd className="font-mono text-card-foreground">{artifact.sealed_by} · {artifact.sealed_at}</dd>
+        <dd className="text-card-foreground"><MemberName userId={artifact.sealed_by} resolver={memberNames} showRole={false} /> <span className="font-mono">· {artifact.sealed_at}</span></dd>
       </dl>
       {artifact.kind === "pre_sign" ? (
         <div className="flex flex-wrap gap-2">
@@ -102,7 +107,7 @@ function IssueDialog({
   artifact: ReportArtifactRow;
   session: SessionTokenAccessor;
   busy: boolean;
-  act: (fn: () => Promise<void>) => Promise<void>;
+  act: (fn: () => Promise<void>) => Promise<boolean>;
 }) {
   const t = useTranslations("ClientReports.statutory.issue");
   const [reason, setReason] = useState("");
@@ -141,7 +146,7 @@ function ArchiveDialog({
   artifact: ReportArtifactRow;
   session: SessionTokenAccessor;
   busy: boolean;
-  act: (fn: () => Promise<void>) => Promise<void>;
+  act: (fn: () => Promise<void>) => Promise<boolean>;
 }) {
   const t = useTranslations("ClientReports.statutory.archive");
   const [sha, setSha] = useState("");
