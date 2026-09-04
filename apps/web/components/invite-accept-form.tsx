@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
 
+import { PASSWORD_MIN_LENGTH } from "@/lib/auth/password-policy";
 import { cn } from "@/lib/utils";
 
 import {
@@ -247,6 +248,8 @@ export function InviteAcceptForm({
   createSupabaseClient?: () => InviteAuthClient;
 }) {
   const t = useTranslations("Invite");
+  /** The shared password-policy sentence — see `lib/auth/password-policy.ts`. */
+  const tAuth = useTranslations("Auth");
   const router = useRouter();
   const [stage, setStage] = useState<Stage>("confirm");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -543,18 +546,19 @@ export function InviteAcceptForm({
           </div>
           <div className="grid gap-1.5">
             <Label htmlFor="password">{t("passwordLabel")}</Label>
-            {/*
-              `minLength` is a UI convenience ONLY — a direct SDK/Auth API call
-              bypasses it entirely. The authoritative password policy lives in
-              hosted Supabase Auth and is an owner/deploy obligation recorded
-              in README.md ("Security posture"), review finding 10.
-            */}
+            {/* THE RULE, BEFORE THE TYPING (PR 541 stage 2) — the same constant
+                and the same sentence the other two password surfaces render.
+                See `lib/auth/password-policy.ts` for why this is one site. */}
+            <p id="invite-password-policy" className="text-xs text-muted-foreground">
+              {tAuth("passwordPolicy", { min: PASSWORD_MIN_LENGTH })}
+            </p>
             <Input
               id="password"
               type="password"
               autoComplete="new-password"
               required
-              minLength={8}
+              minLength={PASSWORD_MIN_LENGTH}
+              aria-describedby="invite-password-policy"
               value={password}
               onChange={(event) => setPassword(event.target.value)}
             />

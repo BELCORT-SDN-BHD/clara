@@ -217,6 +217,18 @@ const REVIEWED_OBJECT_SPREAD_SITES = [
   ["packages/runtime/workflows/statementFacts.v1.engine.mjs","normalizeAzureBankStatement","...typedHeader","54e9fbbcffc1e59b1afc5ebe861559b64d66615253e46cfe37caba6fb7ecf38c","0"],
   ["packages/runtime/workflows/statementFacts.v2.behavior.mjs","withMeteredStatementChannel","...(out.usage ?? {})","eb1f116bd1e79af670968f3ac7d4aa7a81fc29a8475d9b136a3ab0fbc23c06c9","0"],
   ["packages/runtime/workflows/statementFacts.v2.behavior.mjs","withMeteredStatementChannel","...out","6d340dfea25133a71c60f9fb625992d27930b6f9eb8abf205fee061488bb59cd","0"],
+  // statementFacts_v3 (H-02/H-03/H-05). The two behaviour sites are the v2 statements carried
+  // over UNCHANGED — their statement fingerprints are byte-identical to the v2 rows directly
+  // above, which is the evidence that the metered-channel wrapper did not move in this version.
+  // The four header sites are the new deterministic transforms: a roster index build and three
+  // object merges over a header this file never assigns a `type` to. None of the six is a Clara
+  // part construction; this closure emits no `parts[]` entry at all.
+  ["packages/runtime/workflows/statementFacts.v3.behavior.mjs","withMeteredStatementChannel","...(out.usage ?? {})","eb1f116bd1e79af670968f3ac7d4aa7a81fc29a8475d9b136a3ab0fbc23c06c9","0"],
+  ["packages/runtime/workflows/statementFacts.v3.behavior.mjs","withMeteredStatementChannel","...out","6d340dfea25133a71c60f9fb625992d27930b6f9eb8abf205fee061488bb59cd","0"],
+  ["packages/runtime/workflows/statementFacts.v3.header.mjs","ROSTER_INDEX","...row","4370d1d83330bbb71dbd508d68bcedd4078d7450d6b0a0ea0df72a9e0e1376f6","0"],
+  ["packages/runtime/workflows/statementFacts.v3.header.mjs","deriveStatementPeriod","...asIs","27d26f3548b1ae65af183a256c1496cacab289385e3e54ce0ad1cada467c4b5e","0"],
+  ["packages/runtime/workflows/statementFacts.v3.header.mjs","deriveStatementPeriod","...asIs","2fe599f351fe67e04dd8becfba4ad76336d52dc6575f28a0f24bad1f0f823253","0"],
+  ["packages/runtime/workflows/statementFacts.v3.header.mjs","normalizeStatementHeaderV3","...source","e11871d6f19f8ecdc74e388c15feb9f0489a28d77c7a25eb18cd33f72728e614","0"],
   ["packages/runtime/workflows/witnessFacts.v1.behavior.mjs","withMeteredChannel","...(out.usage ?? {})","eb1f116bd1e79af670968f3ac7d4aa7a81fc29a8475d9b136a3ab0fbc23c06c9","0"],
   ["packages/runtime/workflows/witnessFacts.v1.behavior.mjs","withMeteredChannel","...out","6d340dfea25133a71c60f9fb625992d27930b6f9eb8abf205fee061488bb59cd","0"],
   ["packages/runtime/workflows/witnessFacts.v1.prompts.mjs","normalizeAnswer","...answer","d61b0936253c4b3c18a86fe85ab81b1b922063a2a7944a751ea72dc5c76980bf","0"],

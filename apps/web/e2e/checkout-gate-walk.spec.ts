@@ -128,6 +128,13 @@ async function reachDpaStep(page: Page, email: string) {
   await page.getByRole("button", { name: "Register my firm" }).click();
   await expect(page).toHaveURL(`${APP_ORIGIN}/pending`, NAV);
 
+  // PR 541 stage 7, IN A REAL BROWSER: the holding card must not tell the
+  // person there is nothing to do while its own next-step control is on
+  // screen beside the sentence. The unit cell derives the roster from the
+  // render; this proves the rendered page a real applicant sees.
+  await expect(page.getByText(/nothing more for you to do/i)).toHaveCount(0);
+  await expect(page.getByText(/it's yours to take below/i)).toBeVisible();
+
   await page.getByRole("link", { name: "Continue to checkout" }).click();
   await expect(page.getByRole("heading", { name: "One more thing before checkout" })).toBeVisible();
 }

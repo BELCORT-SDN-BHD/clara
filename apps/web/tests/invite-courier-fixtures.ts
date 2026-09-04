@@ -82,6 +82,7 @@ export const ADMIN_ROWS: unknown[] = [callerRow("admin")];
 export const liveSession = async (): Promise<ServerSession | null> => ({
   accessToken: CALLER_BYTES,
   subject: CALLER_SUBJECT,
+  email: null,
 });
 export const deadSession = async (): Promise<ServerSession | null> => null;
 
