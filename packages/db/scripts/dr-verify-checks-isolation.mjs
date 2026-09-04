@@ -46,7 +46,30 @@ export const ISOLATION_PIN_SETTING = "default_transaction_isolation=serializable
 // §4.11 function-level transaction-isolation pins (TARGET, ABSOLUTE — FAIL, never SKIP).
 // ---------------------------------------------------------------------------
 export async function checkIsolationPins(ctx) {
-  const { tgt, record } = ctx;
+  const { tgt, STRICT, record } = ctx;
+
+  // THE SUCCESSION GATE (.claude/rules/db-tests.md). This cell asserts a state that a target
+  // acquires in one of two ways: the forward migration that carries the pin, or the manual
+  // ceremony. A target whose CHAIN predates that migration can only have it from the ceremony
+  // — and a throwaway CI database has never run one, so an unconditional FAIL there would be
+  // reporting a difference of vintage as a defect.
+  //
+  // The witness is the migration's STABLE STEM in clara.schema_migrations, never its number
+  // (numbers are claimed at merge) and never a filename. Present → the pin is MANDATORY and
+  // its absence is drift, asserted absolutely below. Absent → the target predates the
+  // migration, and the verdict splits on STRICT: a live drill (CLARA_DR_STRICT=1) still FAILS,
+  // because a real estate must carry the pin however it got it; an ordinary run records INFO
+  // naming why, which is the same shape checkCanary uses for its own vintage-dependent probe.
+  let chainCarriesPin = false;
+  try {
+    chainCarriesPin = (await tgt.query(
+      "select count(*)::int n from clara.schema_migrations where version ~ 'opening_approval_isolation_pin$'"
+    )).rows[0].n > 0;
+  } catch (e) {
+    record("4.11", "opening-approval isolation-pin succession witness", "FAIL",
+      `could not read clara.schema_migrations on the target: ${e.message}`);
+    return;
+  }
   const name = "opening-approval serializable proconfig pin (target, absolute)";
   let rows;
   try {
@@ -86,11 +109,19 @@ export async function checkIsolationPins(ctx) {
     return;
   }
   if (unpinned.length > 0) {
-    record("4.11", name, "FAIL",
-      `${unpinned.length} of ${rows.length} lack ${ISOLATION_PIN_SETTING}: ${unpinned.join(", ")}`
+    const detail = `${unpinned.length} of ${rows.length} lack ${ISOLATION_PIN_SETTING}: ${unpinned.join(", ")}`
       + " — every opening approval through PostgREST will refuse CLR31 not_serializable on this target."
       + " Remedy: apply the forward migration that carries the pin, or"
-      + " packages/db/deploy/wave-b-0017-ceremony.sql Part A.");
+      + " packages/db/deploy/wave-b-0017-ceremony.sql Part A.";
+    if (chainCarriesPin) {
+      record("4.11", name, "FAIL", `${detail} The chain HAS taken the pin migration, so this is drift.`);
+    } else if (STRICT) {
+      record("4.11", name, "FAIL",
+        `${detail} The chain predates the pin migration, so the ceremony was the only path — and in a live drill it must have been walked.`);
+    } else {
+      record("4.11", name, "INFO",
+        `${detail} The target's chain PREDATES the pin migration (no opening_approval_isolation_pin row in clara.schema_migrations) and the ceremony is the only other path, so this is a vintage difference rather than drift. Re-run with CLARA_DR_STRICT=1 to make it a failure.`);
+    }
     return;
   }
   record("4.11", name, "PASS",
