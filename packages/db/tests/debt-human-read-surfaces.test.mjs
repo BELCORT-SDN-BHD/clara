@@ -252,6 +252,13 @@ test("debt-C2 · users_visible: exactly id + display_name -- email is not just p
 // It was built on counterparty_aliases_visible's own shape deliberately, so it matches the
 // predicate above and joins this family rather than escaping it: a new firm-scoped human read
 // that did NOT show up here would be the finding, not the one that did.
+//
+// AND THE FOURTEENTH IS BIMODAL, WHICH IS 裁-108 REACHING THIS FILE. H-19's migration is
+// UNNUMBERED until merge, so the runner SKIPS it: CI's estate chain carries THIRTEEN members and
+// a numbered chain carries FOURTEEN. A static roster is wrong on one of the two, so the
+// expectation below is keyed on a POSITIVE catalog read of the view. That is not a softening —
+// the roster stays exactly closed on whichever chain it runs, and any OTHER new member still
+// reds. At merge, when the number is claimed, both chains become the fourteen-member one.
 // ---------------------------------------------------------------------------------------
 
 const HRD_A_FAMILY_PREDICATE = `
@@ -268,19 +275,33 @@ async function hrdAFamily() {
   return r.rows.map((x) => x.relname);
 }
 
-test("debt-BAR1 · 裁-15 estate census — EVERY member of the catalog-derived same-shape family (fourteen since H-19 landed the sales-lane read) carries security_barrier, and the reloption is proven to buy pushdown-ordering, not target-list masking", async (t) => {
+test("debt-BAR1 · 裁-15 estate census — EVERY member of the catalog-derived same-shape family (thirteen, or fourteen once H-19’s sales-lane read applies) carries security_barrier, and the reloption is proven to buy pushdown-ordering, not target-list masking", async (t) => {
   if (gate(t)) return;
   const family = await hrdAFamily();
-  assert.deepEqual(family, [
+  // The thirteen present at every frontier from 0145 onward.
+  const base = [
     "agent_receipts_visible", "agent_tasks_visible", "caller_context",
     "client_identifier_promotions_visible", "coding_tasks_visible",
     "counterparty_aliases_visible",
     "document_intakes_visible", "document_processing_tasks_visible",
     "firm_invites_visible", "firm_members_visible", "firm_open_questions_visible",
     "firm_registration_requests_visible",
-    "firm_sales_lane_visible",
     "users_visible",
-  ], "the catalog-derived family must be exactly the fourteen expected members, closed-world -- P4 tranche-2 (0145) landed both firm_registration_requests_visible (anticipated by this file's own header comment) and counterparty_aliases_visible (a round-4 addition this file's author could not have known about -- 裁-11's masked-view mechanism was chosen AFTER this file merged, to satisfy wave-a-shape's fn-fronted-only invariant), and H-19 landed firm_sales_lane_visible -- the read the owner-floored sales-lane control re-reads after its act, built on counterparty_aliases_visible's own shape, which is why it joins this family rather than escaping it");
+  ];
+  // H-19's fourteenth member is BIMODAL, and it has to be: its migration is UNNUMBERED until
+  // merge, so the runner SKIPS it (裁-108) and CI's estate chain carries THIRTEEN while a
+  // numbered chain carries FOURTEEN. A static fourteen is simply wrong on one of the two. The
+  // expectation is therefore keyed on a POSITIVE catalog read of the view itself — never on
+  // tolerating unknown members: the roster stays exactly closed on whichever chain it runs, so
+  // any OTHER new family member still reds here, which is the whole point of the cell.
+  const laneRead = await rootQuery(
+    "select to_regclass('clara.firm_sales_lane_visible') is not null as present");
+  const expected = laneRead.rows[0].present
+    ? [...base, "firm_sales_lane_visible"].sort()
+    : base;
+  assert.deepEqual(family, expected,
+    `the catalog-derived family must be exactly the ${expected.length} expected members for THIS chain `
+    + `(firm_sales_lane_visible present: ${laneRead.rows[0].present}), closed-world -- P4 tranche-2 (0145) landed both firm_registration_requests_visible (anticipated by this file's own header comment) and counterparty_aliases_visible (a round-4 addition this file's author could not have known about -- 裁-11's masked-view mechanism was chosen AFTER this file merged, to satisfy wave-a-shape's fn-fronted-only invariant), and H-19 landed firm_sales_lane_visible -- the read the owner-floored sales-lane control re-reads after its act, built on counterparty_aliases_visible's own shape, which is why it joins this family rather than escaping it`);
 
   const r = await rootQuery(
     `select c.relname, c.reloptions
