@@ -30,7 +30,6 @@
 // not a firm browser. A colleague's firm-shared thread is excluded by
 // `ownSessionsForAltitude`, not by this component — see that function's own note.
 
-import { useEffect, useRef } from "react";
 import { useTranslations } from "next-intl";
 
 import { Button } from "@/components/ui/button";
@@ -44,46 +43,37 @@ export function ClaraThreadMenu({
   threads,
   activeThreadId,
   creating,
-  resolving,
+  canCreate,
   onCreate,
   onSelect,
-  onDismiss,
 }: {
   id: string;
   threads: readonly ThreadRow[];
   activeThreadId: string | null;
   creating: boolean;
-  /** TRUE while the session read is in flight. New is refused for the duration: a create
-   *  that races the first read has no list to land in, and the row it mints can never be
-   *  archived or deleted if it goes astray. */
-  resolving: boolean;
+  /** FALSE while a create could not land anywhere the human would see it — the read is
+   *  still in flight, or it settled without a caller projection. New is refused for the
+   *  duration, because a session minted into that state is listed by nothing and can
+   *  never be archived or deleted. See `useActiveThreadId`'s own note. */
+  canCreate: boolean;
   onCreate: () => void | Promise<void>;
   onSelect: (threadId: string) => void;
-  /** Escape, and the panel's own request to close. The caller returns focus to the
-   *  toggle — see `ClaraRail`'s handler for why the ref lives there. */
-  onDismiss: () => void;
 }) {
   const t = useTranslations("Clara.rail.menu");
-  const panelRef = useRef<HTMLDivElement>(null);
 
-  // ESCAPE CLOSES IT. A disclosure that traps a keyboard user with no way back is the
-  // defect; the listener is on the panel rather than the document so it cannot swallow
-  // an Escape meant for a dialog opened over it.
-  useEffect(() => {
-    const node = panelRef.current;
-    if (!node) return;
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      event.stopPropagation();
-      onDismiss();
-    };
-    node.addEventListener("keydown", onKeyDown);
-    return () => node.removeEventListener("keydown", onKeyDown);
-  }, [onDismiss]);
+  // ESCAPE IS NOT HANDLED HERE, and the first cut's attempt to is the reason this note
+  // exists. It attached a keydown listener to this panel's own node — but the TOGGLE
+  // that opens the panel lives in the rail's `<header>`, and the panel is a SIBLING of
+  // that header, so an Escape pressed with focus still on the toggle (the overwhelmingly
+  // common case: open the menu, change your mind) bubbled to the `<aside>` and never
+  // reached this element at all. The cell that "proved" it invoked this listener
+  // directly, which is a test of the implementation rather than of the behaviour. The
+  // handler now sits on the rail root, the one ancestor BOTH the toggle and this panel
+  // bubble through — see `ClaraRail`'s `onKeyDown`.
 
-  const createDisabled = creating || resolving;
+  const createDisabled = creating || !canCreate;
   return (
-    <div ref={panelRef} id={id} className="enter-content flex flex-col gap-2 border-b border-border bg-card p-2">
+    <div id={id} className="enter-content flex flex-col gap-2 border-b border-border bg-card p-2">
       <Button type="button" size="xs" variant="outline" className="w-full" disabled={createDisabled} onClick={() => void onCreate()}>
         {creating ? t("creating") : t("newThread")}
       </Button>

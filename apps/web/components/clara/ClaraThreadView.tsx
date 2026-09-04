@@ -35,6 +35,7 @@ export function ClaraThreadView({
   resolving = false,
   onCreateThread,
   creatingThread = false,
+  canCreateThread = true,
 }: {
   auth?: SessionTokenAccessor;
   threadId: string | null;
@@ -53,6 +54,10 @@ export function ClaraThreadView({
    *  full-screen mount, where there is nothing to create. */
   onCreateThread?: () => Promise<string | null>;
   creatingThread?: boolean;
+  /** See `ClaraThreadResolveState`'s own note — the offer refuses a create that could
+   *  not be listed, for the same reason the rail's menu does. Defaults TRUE so the
+   *  full-screen mount, which offers nothing, needs no change. */
+  canCreateThread?: boolean;
   /** T11 (port-wave plan §4 T11): threads onto `OnboardingChecklistCard`
    *  below — present when this thread is mounted under a client workspace
    *  (ClaraRail's own `clientId` prop; ClaraFullScreenThread's client-scoped
@@ -222,6 +227,7 @@ export function ClaraThreadView({
             resolving={resolving}
             onCreateThread={onCreateThread}
             creatingThread={creatingThread}
+            canCreate={canCreateThread}
           />
         )}
         {threadId && notSignedIn && <StateBanner tone="info">{t("signInRequired")}</StateBanner>}

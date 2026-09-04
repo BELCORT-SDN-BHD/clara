@@ -157,9 +157,14 @@ test("N5 · every lane handler either scopes by the request's own subject, or is
 /** The session rows `serve-built.mjs` declares statically, parsed out of its own source
  *  rather than imported — the module starts an HTTPS server and a `next start` child on
  *  import, which a unit cell must not do. Each row is read as a field map, so a row that
- *  grows a field this cell does not know about is still censused. */
-function serveBuiltSessions(): { clientId: string | null; createdBy: string | null }[] {
-  const source = readFileSync(SERVE_BUILT, "utf8");
+ *  grows a field this cell does not know about is still censused.
+ *
+ *  `source` IS A PARAMETER so the positive control below can run this PARSER over a
+ *  doctored file rather than re-applying the caller's filter to a hand-built array. The
+ *  first cut did the latter, which only ever proved that a `.filter(...)` written twice
+ *  behaves the same way twice — it could not have caught a parser that silently stopped
+ *  matching rows, which is the failure this census actually has. */
+function serveBuiltSessions(source: string = readFileSync(SERVE_BUILT, "utf8")): { clientId: string | null; createdBy: string | null }[] {
   const start = source.indexOf("const sessions = [");
   assert.ok(start >= 0, "serve-built.mjs must still declare the shared `sessions` array this cell censuses");
   const end = source.indexOf("\n];", start);
@@ -216,14 +221,24 @@ test("N6 · serve-built's shared session list claims no firm altitude, and its C
   const pushAt = handler.indexOf("sessions.unshift(");
   assert.ok(pushAt > refusalAt, "the guard must precede the push, or it fences nothing");
 
-  // POSITIVE CONTROL ON THE INSTRUMENT. A cell that only ever looks for absence proves
-  // nothing unless it can also SEE a violation — so the same census is run over a source
-  // with one firm-altitude row spliced in, and must report it.
-  const violating = rows.concat([{ clientId: null, createdBy: "SUBJECT" }]);
-  assert.equal(
-    violating.filter((r) => r.clientId === null && (r.createdBy === "SUBJECT" || r.createdBy === subject)).length,
-    1,
-    "the census must be able to SEE a firm-altitude claim, or its empty result means nothing",
+  // POSITIVE CONTROL ON THE INSTRUMENT — through the PARSER, not around it. A cell that
+  // only ever looks for absence proves nothing unless it can also SEE a violation, and
+  // the thing that has to see it is `serveBuiltSessions` itself: if that function stopped
+  // matching rows (a reformat, a renamed field, a changed quote style) the real assertion
+  // above would go quietly green on an empty census. So the row is spliced into the
+  // ARRAY LITERAL of a copy of the file, and the parser is run over that.
+  const doctored = source.replace(
+    "const sessions = [",
+    'const sessions = [\n  { id: FAKE, firm_id: FIRM_ID, client_id: null, created_by: SUBJECT, visibility: "private", title: "planted", created_at: "2026-01-01T00:00:00.000Z" },',
   );
+  assert.notEqual(doctored, source, "the control must actually have planted its row");
+  const censusOfDoctored = serveBuiltSessions(doctored);
+  assert.equal(
+    censusOfDoctored.length,
+    rows.length + 1,
+    "the parser must see the planted row at all — a census that shrank is not reading the file",
+  );
+  const seen = censusOfDoctored.filter((r) => r.clientId === null && (r.createdBy === "SUBJECT" || r.createdBy === subject));
+  assert.equal(seen.length, 1, "the census must REPORT a firm-altitude claim, or its empty result above means nothing");
 });
 

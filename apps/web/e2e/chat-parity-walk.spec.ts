@@ -275,9 +275,22 @@ test("裁-117: the rail creates a thread only when asked, and its menu switches 
 
   // ARCHIVE is named as a backend gap; CLEAR and DELETE do not exist at all, because
   // `_tf_chat_session_update` refuses a DELETE and the transcript is the audit record.
-  await rail.getByRole("button", { name: "Conversations" }).click();
+  const menuToggle = rail.getByRole("button", { name: "Conversations" });
+  await menuToggle.click();
   await expect(rail.getByText("Archiving a conversation")).toBeVisible();
   await expect(rail.getByRole("button", { name: /^(Clear|Delete)/ })).toHaveCount(0);
+
+  // R1 — ESCAPE FROM THE TOGGLE, in a real browser, which is the only instrument that
+  // settles it. The handler sits on the rail root because the toggle lives in the
+  // header and the panel is that header's SIBLING; a listener on the panel (the first
+  // cut) was never reached by a keydown on the toggle at all. Focus has not moved since
+  // the click, so this is the ordinary "open the menu, change your mind" path.
+  await expect(menuToggle).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(rail.getByText("Archiving a conversation")).toHaveCount(0);
+  await expect(menuToggle).toHaveAttribute("aria-expanded", "false");
+  // And focus is still somewhere a keyboard user can act from.
+  await expect(menuToggle).toBeFocused();
 
   await scan(page, "rail thread menu face");
 });

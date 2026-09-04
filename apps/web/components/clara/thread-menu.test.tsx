@@ -81,6 +81,9 @@ type Wire = {
   /** Fold round: hold the FIRST list read open until this resolves, so a cell can act
    *  while the rail is still resolving. */
   gate?: Promise<void>;
+  /** Fold round 2: fail EVERY list read, including the first. That settles the rail with
+   *  `resolving: false` AND no caller projection — the state R2 found New reachable in. */
+  failAllLists?: boolean;
 };
 
 function makeRouter(wire: Wire) {
@@ -95,6 +98,7 @@ function makeRouter(wire: Wire) {
       }
       wire.lists += 1;
       if (wire.lists === 1 && wire.gate) await wire.gate;
+      if (wire.failAllLists) return json({ error: "unavailable" }, 503);
       if (wire.failListsAfter !== undefined && wire.lists > wire.failListsAfter) {
         return json({ error: "unavailable" }, 503);
       }
@@ -175,6 +179,26 @@ async function openMenu(h: { container: Stub; act: (fn: () => void | Promise<voi
   if (attr(toggle, "aria-expanded") === "true") return;
   await h.act(() => clickButton(toggle));
   assert.equal(attr(toggle, "aria-expanded"), "true", "the toggle must report the panel it just opened");
+}
+
+/** Drive a React `onKeyDown` committed on `node`, with `target` set to where the key was
+ *  actually pressed — the shape a real bubble delivers. Read off `__reactProps$…` for the
+ *  same measured reason `clickButton` does: this harness's `fireEvent` dispatches only
+ *  through the container's own delegated listener. */
+async function pressEscape(
+  h: { act: (fn: () => void | Promise<void>) => Promise<void> },
+  node: Stub,
+  target: Stub,
+  key = "Escape",
+): Promise<void> {
+  const propsKey = Object.keys(node).find((k) => k.startsWith("__reactProps"));
+  const onKeyDown = propsKey
+    ? (node as Record<string, { onKeyDown?: (e: unknown) => unknown }>)[propsKey]?.onKeyDown
+    : undefined;
+  assert.ok(onKeyDown, "the node must carry the keydown handler this cell is about");
+  await h.act(async () => {
+    await onKeyDown({ type: "keydown", key, target, currentTarget: node, stopPropagation() {}, preventDefault() {} });
+  });
 }
 
 test("MOUNTING THE RAIL CREATES NOTHING — a chat session is an act now, not a side effect", async () => {
@@ -336,9 +360,11 @@ test("FOLD 2 - a CREATE is confirmed by a read, so the row carries the LEDGER's 
       // could only have come from this hook's own composition.
       assert.ok(wire.lists > listsBefore, "a create must be confirmed by a read of the list");
 
-      // The harness's row for the minted thread carries `2026-09-04T00:00:00Z`, so the
-      // menu shows the LEDGER's date. This browser's own clock must not appear anywhere
-      // in the panel.
+      // The harness's row for the minted thread carries `MINTED_LEDGER_TIME`
+      // (2019-03-14, deliberately far from any day this suite runs on), so the menu shows
+      // the LEDGER's date. This browser's own clock must not appear anywhere in the
+      // panel — and the assertion below first checks the two genuinely differ, so a
+      // fixture dated today could never make that check vacuous.
       await openMenu(h);
       const panel = h.text();
       const ledgerDay = new Intl.DateTimeFormat("en-MY", { timeZone: "Asia/Kuala_Lumpur", dateStyle: "medium" }).format(new Date(MINTED_LEDGER_TIME));
@@ -459,26 +485,86 @@ test("FOLD 5 - Escape closes the thread menu and returns focus to the toggle", a
       assert.equal(attr(toggle, "aria-expanded"), "true");
       assert.ok(buttonNamed(h, "New conversation"), "the panel is open");
 
-      // The listener is on the PANEL's own node (the component attaches it there rather
-      // than on the document, so it cannot swallow an Escape meant for a dialog opened
-      // over it). This harness's stub nodes carry `__listeners` rather than a real
-      // `dispatchEvent`, so the captured listener is invoked directly - the same
-      // mechanism `clickButton` uses to reach a committed `onClick`. The panel is found
-      // by the control it holds, not by a class name a restyle would move.
-      const panel = findAll(h.container, (n) =>
-        n.tagName === "DIV"
-        && findAll(n, (c) => c.tagName === "BUTTON" && textOf(c).trim() === "New conversation").length === 1)
-        .slice(-1)[0];
-      assert.ok(panel, "the disclosure panel must be findable to drive its own listener");
-      const keydown = (panel.__listeners as Record<string, ((e: unknown) => void)[]> | undefined)?.keydown ?? [];
-      assert.equal(keydown.length, 1, "the panel must carry exactly one keydown listener - its own");
-      await h.act(() => { keydown[0]!({ type: "keydown", key: "Escape", stopPropagation() {} }); });
+      // ESCAPE IS PRESSED WITH FOCUS STILL ON THE TOGGLE — the commonest case there is
+      // (open the menu, change your mind), and the one the first cut got wrong. The
+      // handler lives on the rail ROOT, so the event reaches it by bubbling from the
+      // toggle; this cell therefore drives the ROOT's `onKeyDown` with the toggle as the
+      // event target, which is exactly what a real bubble delivers. Driving the panel's
+      // own node instead — as the first cut did — could not tell a working Escape from
+      // one the toggle can never reach, because the panel is the toggle's SIBLING.
+      const rail = findAll(h.container, (n) => attr(n, "data-clara-rail") !== null)[0];
+      assert.ok(rail, "the rail root carries the handler both the toggle and the panel bubble to");
+      await pressEscape(h, rail, toggle);
 
       assert.equal(buttonNamed(h, "New conversation"), undefined, "Escape closes the panel");
       assert.equal(attr(toggle, "aria-expanded"), "false");
       // Focus returns to the control that opened it - a disclosure that drops a keyboard
       // user at the top of the document is the defect this closes.
       assert.equal(activeElement(), toggle, "focus returns to the toggle, not to the document");
+    } finally {
+      await h.unmount();
+    }
+  });
+});
+
+// --- FOLD ROUND 2 (review-547 residuals) ---------------------------------------------
+
+test("R1 negative — a key that is not Escape leaves the menu open, and Escape with the menu CLOSED is not swallowed", async () => {
+  // The counter-half of the cell above. Without it, "Escape closes the menu" is also
+  // satisfied by a handler that closes on every keystroke, and the `menuOpen` guard —
+  // which is what keeps the rail from eating an Escape it has no use for — is unproven.
+  const clientId = freshClient();
+  const wire: Wire = { clientId, posts: 0, lists: 0, sessions: [row(clientId, THREAD_NEW, "2026-09-03T00:00:00Z")] };
+  await withFetch(wire, async () => {
+    const h = await renderComponent(rail(clientId));
+    try {
+      await settleUntil(h, () => /NEWEST OWN TRANSCRIPT/.test(h.text()), "the resolved thread");
+      const toggle = buttonNamed(h, "Conversations")!;
+      const railRoot = findAll(h.container, (n) => attr(n, "data-clara-rail") !== null)[0]!;
+
+      // CLOSED: the guard must decline, so an Escape meant for something else survives.
+      let swallowed = false;
+      const propsKey = Object.keys(railRoot).find((k) => k.startsWith("__reactProps"));
+      const onKeyDown = (railRoot as Record<string, { onKeyDown?: (e: unknown) => unknown }>)[propsKey!]?.onKeyDown;
+      await h.act(async () => {
+        await onKeyDown!({ type: "keydown", key: "Escape", target: toggle, currentTarget: railRoot, stopPropagation() { swallowed = true; }, preventDefault() {} });
+      });
+      assert.equal(swallowed, false, "with the menu closed the rail must not stop an Escape it has no use for");
+
+      // OPEN, wrong key: still open.
+      await openMenu(h);
+      await pressEscape(h, railRoot, toggle, "a");
+      assert.ok(buttonNamed(h, "New conversation"), "only Escape closes the panel");
+      assert.equal(attr(toggle, "aria-expanded"), "true");
+    } finally {
+      await h.unmount();
+    }
+  });
+});
+
+test("R2 — after a FAILED session read New is REFUSED, so no session is minted that nothing could list", async () => {
+  // THE STATE THE FIRST GATE MISSED. `resolving` alone was not enough: a failed read
+  // settles with `resolving: false` and `callerSubject: null`. The rail shows its error
+  // banner, but the thread menu is not part of that ladder — so New stayed enabled, and a
+  // create from here succeeds at the runtime and can then be listed by nothing, because
+  // `ownSessionsForAltitude` has no caller projection to match on. That row can never be
+  // archived or deleted, which is the class this train exists to abolish.
+  const clientId = freshClient();
+  const wire: Wire = { clientId, posts: 0, lists: 0, failAllLists: true, sessions: [] };
+  await withFetch(wire, async () => {
+    const h = await renderComponent(rail(clientId));
+    try {
+      // The read has SETTLED and it failed — not still in flight.
+      await settleUntil(h, () => wire.lists > 0 && /Could not load the conversation/.test(h.text()), "the failed resolve");
+      assert.doesNotMatch(h.text(), /Finding your conversation with Clara/, "this is the settled arm, not the loading one");
+
+      await openMenu(h);
+      const create = buttonNamed(h, "New conversation");
+      assert.ok(create, "the control is present — this cell is about the GATE, not the affordance");
+      // ASSERT THE GATE, THEN ACT: `clickButton` refuses a disabled node, so the zero
+      // below cannot be manufactured by clicking through it.
+      assert.equal((create as { disabled?: boolean }).disabled, true, "New must be refused when a create could not be listed");
+      assert.equal(wire.posts, 0, "and nothing was minted");
     } finally {
       await h.unmount();
     }

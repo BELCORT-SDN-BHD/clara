@@ -36,11 +36,17 @@ export function ClaraThreadResolveState({
   resolving,
   onCreateThread,
   creatingThread,
+  canCreate,
 }: {
   resolveError: string | null;
   resolving: boolean;
   onCreateThread?: () => Promise<string | null>;
   creatingThread: boolean;
+  /** The same gate the menu's New reads. The offer is reached only on the settled arm,
+   *  so this is belt-and-braces for `resolving` — but NOT for the other half: a settled
+   *  read with no caller projection lands on the error banner above, and a later edit
+   *  reordering these arms would otherwise hand this button a state it cannot serve. */
+  canCreate: boolean;
 }) {
   const t = useTranslations("Clara.thread");
 
@@ -52,7 +58,7 @@ export function ClaraThreadResolveState({
   return (
     <div className="flex flex-col items-start gap-2 rounded-lg border border-border bg-card p-3 text-sm">
       <p className="text-muted-foreground">{t("noThread")}</p>
-      <Button type="button" size="sm" disabled={creatingThread} onClick={() => void onCreateThread()}>
+      <Button type="button" size="sm" disabled={creatingThread || !canCreate} onClick={() => void onCreateThread()}>
         {creatingThread ? t("creatingThread") : t("newThread")}
       </Button>
     </div>

@@ -29,7 +29,7 @@ export function ClaraRail({ auth = sessionTokenAccessor, clientId }: { auth?: Se
   const t = useTranslations("Clara.rail");
   const open = useClaraRailOpen();
   const pathname = usePathname();
-  const { threadId, error, resolving, threads, createThread, creating, selectThread } = useActiveThreadId(auth, clientId);
+  const { threadId, error, resolving, threads, createThread, creating, canCreate, selectThread } = useActiveThreadId(auth, clientId);
   const [menuOpen, setMenuOpen] = useState(false);
   const menuId = useId();
   // FOCUS RETURNS TO THE CONTROL THAT OPENED THE PANEL. The ref lives here, not in the
@@ -73,6 +73,22 @@ export function ClaraRail({ auth = sessionTokenAccessor, clientId }: { auth?: Se
       data-clara-rail
       className="enter-panel sticky top-0 flex h-dvh w-80 shrink-0 flex-col border-l border-border bg-card shadow-lg"
       aria-label={t("title")}
+      // ESCAPE CLOSES THE THREAD MENU, FROM ANYWHERE INSIDE THE RAIL — and it has to be
+      // here rather than on the panel, which is where the first cut put it. The toggle
+      // lives in the `<header>` below and the panel is that header's SIBLING, so a
+      // keydown on the toggle bubbles up through the header to this element and never
+      // enters the panel: Escape did nothing in the commonest case of all (open the menu,
+      // change your mind, press Escape without having moved focus). This root is the one
+      // ancestor both the toggle and the panel bubble through.
+      //
+      // GUARDED ON `menuOpen`, so the rail swallows no Escape it has no use for. A dialog
+      // opened from inside the rail is portalled to `document.body` by Base UI and is not
+      // a descendant of this element, so its own Escape never reaches here either way.
+      onKeyDown={(event) => {
+        if (!menuOpen || event.key !== "Escape") return;
+        event.stopPropagation();
+        closeMenu();
+      }}
     >
       <header className="flex items-center justify-between border-b border-border p-2">
         <span className="text-sm font-semibold text-clara">{t("title")}</span>
@@ -120,7 +136,7 @@ export function ClaraRail({ auth = sessionTokenAccessor, clientId }: { auth?: Se
           threads={threads}
           activeThreadId={threadId}
           creating={creating}
-          resolving={resolving}
+          canCreate={canCreate}
           onCreate={async () => {
             const created = await createThread();
             // The panel closes only on a thread this altitude actually got. A failed
@@ -132,7 +148,6 @@ export function ClaraRail({ auth = sessionTokenAccessor, clientId }: { auth?: Se
             selectThread(id);
             closeMenu();
           }}
-          onDismiss={closeMenu}
         />
       ) : null}
       <div className="min-h-0 flex-1">
@@ -150,6 +165,7 @@ export function ClaraRail({ auth = sessionTokenAccessor, clientId }: { auth?: Se
           resolving={resolving}
           onCreateThread={createThread}
           creatingThread={creating}
+          canCreateThread={canCreate}
         />
       </div>
     </aside>

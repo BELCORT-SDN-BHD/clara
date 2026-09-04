@@ -3,11 +3,14 @@
 // ../../components/clara/thread-menu.test.tsx; these are the decisions underneath it.
 
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, it, test } from "node:test";
 
 import type { SessionRow } from "./api";
 import { claraThreadStore } from "./threadStore";
-import { ownSessionsForAltitude, resolveOwnThread, selectOwnSession, useActiveThreadId } from "./useActiveThread";
+import { canCreateThreadIn, ownSessionsForAltitude, resolveOwnThread, selectOwnSession, useActiveThreadId } from "./useActiveThread";
 import { renderHook } from "../../test/hookHarness";
 
 const ME = "11111111-1111-1111-1111-111111111111";
@@ -130,10 +133,17 @@ describe("claraThreadStore selection", () => {
 // --- FOLD ROUND (review-547): the silent-orphan arm, driven at the hook ---------------
 //
 // `createThread`'s fallback refuses to SELECT a row it could not LIST. The fold-round
-// mutant panel found that arm uncovered: with the confirming read in place there is no
-// journey through the rail that reaches it, because the only state with a null caller
-// projection is the one New is now gated against. So it is driven here, at the hook,
-// where the state can be produced on purpose.
+// mutant panel found that arm uncovered, and the sentence that stood here was WRONG about
+// why: it claimed no journey through the rail could reach it, when at the time New was
+// gated on `resolving` alone and a FAILED read settles with `resolving: false` AND no
+// caller projection — a state the menu's New was still enabled in. The review caught that
+// (residual R2); `canCreate` now gates on both halves, and
+// `../../components/clara/thread-menu.test.tsx`'s own R2 cell proves the control refuses
+// there.
+//
+// So the arm is UNREACHABLE THROUGH THE UI BY CONSTRUCTION rather than by luck, which is
+// exactly why it is driven here instead: at the hook the state can be produced on purpose,
+// and the guard keeps its own cell rather than resting on a gate one layer above it.
 //
 // WHY THE ARM EXISTS AT ALL. `resolveOwnThread` honours a selection only for an id in
 // this altitude's own list. Writing a selection for a row that is not in the list is not
@@ -196,3 +206,73 @@ test("a create whose caller projection is unreadable does NOT select the row it 
     else process.env.NEXT_PUBLIC_SUPABASE_URL = originalUrl;
   }
 });
+
+// --- FOLD ROUND 2 (residual R2): the create gate, and the coupling that makes its ----
+// --- redundancy safe -----------------------------------------------------------------
+
+describe("canCreateThreadIn", () => {
+  // Typed explicitly: `typeof settled` inferred from a literal narrows `callerSubject` to
+  // `string`, and the table below needs the null arm — which is the whole point of it.
+  type GateState = Parameters<typeof canCreateThreadIn>[0];
+  const settled: GateState = { forThisAltitude: true, resolving: false, callerSubject: "u-1" };
+
+  it("admits a create only when the read has SETTLED and produced an identity", () => {
+    assert.equal(canCreateThreadIn(settled), true);
+  });
+
+  it("refuses every other combination — the table, exhaustively", () => {
+    // Four inputs, and only the all-true row may pass. Enumerated rather than spot-checked
+    // because a permissive gate here mints a row nothing can list and nothing can delete.
+    const rows: { state: GateState; why: string }[] = [
+      { state: { ...settled, resolving: true }, why: "a read in flight has no list for the row to land in" },
+      { state: { ...settled, callerSubject: null }, why: "a FAILED read settles with no identity to file it under — the state review found open" },
+      { state: { ...settled, resolving: true, callerSubject: null }, why: "both halves absent" },
+      { state: { ...settled, forThisAltitude: false }, why: "a resolution for another altitude is not this rail's to create into" },
+    ];
+    for (const { state, why } of rows) {
+      assert.equal(canCreateThreadIn(state), false, why);
+    }
+  });
+});
+
+test("R2 coupling — EVERY producer of `resolving: true` clears the caller projection with it", () => {
+  // WHY THIS IS A SOURCE PIN AND NOT A BEHAVIOURAL ONE. `canCreateThreadIn` states two
+  // conditions, and the round-3 mutant panel found that dropping the first changes no
+  // cell: every state with `resolving: true` also has `callerSubject: null` today, so no
+  // behaviour can distinguish them. That is a property of the states this hook CONSTRUCTS,
+  // not of the gate — and it is the property that makes the redundancy safe. If a later
+  // change kept a previous read's projection across a re-resolve (a reasonable thing to
+  // want, to stop the menu flickering on an altitude switch), the projection half would go
+  // true mid-read and New would open in exactly the state FOLD 3 exists to close.
+  //
+  // TWO SITES ESTABLISH IT, not one — the `useState` seed and the effect's own reset — and
+  // the pin counts rather than spot-checking, so a THIRD producer added later without the
+  // projection reset goes red instead of hiding behind the two that comply.
+  const source = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "useActiveThread.ts"), "utf8");
+
+  const producers = source.match(/resolving:\s*true/g) ?? [];
+  const compliant = source.match(/callerSubject:\s*null,\s*resolving:\s*true/g) ?? [];
+  console.log(`  producers of resolving:true = ${producers.length}; of those, clearing callerSubject = ${compliant.length}`);
+
+  assert.ok(producers.length >= 2, `expected at least the seed and the effect reset; found ${producers.length}`);
+  assert.equal(
+    compliant.length,
+    producers.length,
+    "every construction of an in-flight state must clear `callerSubject` with it — canCreateThreadIn's first half is redundant only while they all do",
+  );
+
+  // POSITIVE CONTROL on the pin: it must be able to SEE a non-compliant producer, or the
+  // equality above says nothing about what the file contains. One producer is stripped of
+  // its projection reset — the exact drift this cell exists to catch.
+  const doctored = source.replace(/callerSubject:\s*null,\s*resolving:\s*true/, "resolving: true");
+  assert.notEqual(doctored, source, "the control must actually have doctored a producer");
+  const doctoredCompliant = (doctored.match(/callerSubject:\s*null,\s*resolving:\s*true/g) ?? []).length;
+  const doctoredProducers = (doctored.match(/resolving:\s*true/g) ?? []).length;
+  assert.equal(doctoredProducers, producers.length, "the control must not change how many producers there are");
+  assert.equal(
+    doctoredCompliant,
+    compliant.length - 1,
+    "the pin must count one fewer compliant producer once one stops clearing the projection",
+  );
+});
+

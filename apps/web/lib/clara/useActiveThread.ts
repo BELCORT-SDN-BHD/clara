@@ -98,6 +98,38 @@ export type ThreadRow = Omit<SessionRow, "created_at"> & {
   provisional?: true;
 };
 
+/**
+ * WHETHER A CREATE COULD LAND SOMEWHERE THE HUMAN WILL SEE IT.
+ *
+ * Pure, exported and driven by its own cells, because it is the whole of a refusal branch
+ * (review law 1) and because the conjunction below is easy to get wrong in exactly one
+ * direction — too permissive.
+ *
+ * BOTH HALVES, and the second is the one review found missing. `!resolving` alone leaves
+ * a FAILED read open: that settles with `resolving: false` AND `callerSubject: null`, the
+ * rail shows its error banner, and the thread menu — which is not part of that ladder —
+ * would still offer New. A create from there succeeds at the runtime and is then listed
+ * by nothing, because `ownSessionsForAltitude` has no caller projection to match on, and
+ * the row can never be archived or deleted (`_tf_chat_session_update` raises CLR08 on a
+ * DELETE). That is the un-removable-row class 裁-117 exists to abolish.
+ *
+ * THE TWO HALVES OVERLAP TODAY and the redundancy is deliberate. `useActiveThreadId`'s
+ * resolve effect clears `callerSubject` in the same commit that sets `resolving`, so no
+ * state can currently distinguish them — a mutant dropping `!resolving` changes no cell,
+ * which is reported rather than smoothed over. The conjunction stays because that
+ * implication is a property of that ONE effect, not of this gate: keeping a previous
+ * read's projection across a re-resolve (a reasonable thing to want, to stop the menu
+ * flickering on an altitude switch) would make the projection half go true mid-read and
+ * re-open the hole. `./thread-resolution.test.ts` pins the coupling separately.
+ */
+export function canCreateThreadIn(state: {
+  forThisAltitude: boolean;
+  resolving: boolean;
+  callerSubject: string | null;
+}): boolean {
+  return state.forThisAltitude && !state.resolving && state.callerSubject !== null;
+}
+
 type ResolvedThread = {
   altitude: string;
   sessions: ThreadRow[];
@@ -120,6 +152,9 @@ export type ActiveThread = {
    *  create failed (the error is surfaced through `error`). */
   createThread: () => Promise<string | null>;
   creating: boolean;
+  /** Whether a create could land somewhere the human will see it — `canCreateThreadIn`
+   *  above holds the reasoning and its own cells. */
+  canCreate: boolean;
   /** Point this altitude at one of `threads`. A no-op for an id this altitude does
    *  not own — the switcher can only offer what it listed, and a caller that got the
    *  id from somewhere else must not be able to steer the rail with it. */
@@ -288,9 +323,16 @@ export function useActiveThreadId(auth: SessionTokenAccessor, clientId?: string)
     }
   }, [altitude, auth, clientId]);
 
+  const canCreate = canCreateThreadIn({
+    forThisAltitude,
+    resolving: resolved.resolving,
+    callerSubject: resolved.callerSubject,
+  });
+
   return {
     threadId: visible.threadId,
     error: visible.error,
+    canCreate,
     // A resolution for ANOTHER altitude reads as "still resolving", never as "there is
     // no thread here": the read for THIS altitude is genuinely still in flight, and the
     // empty-state offer must not flash over a rail mid-navigation.
