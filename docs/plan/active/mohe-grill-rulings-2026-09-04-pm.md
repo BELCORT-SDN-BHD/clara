@@ -145,6 +145,43 @@ suspended in the spirit of 裁-133 — it was offered now that beta is live (裁
 declined on the ground of three capacity deaths in ninety minutes on 2026-09-02. The owner may resume it
 at any turn. No separate ruling file.
 
+### 裁-191 — two arguable document kinds are CODEABLE: a Notice of Assessment and a hire-purchase / finance-lease contract create liabilities the close gate must see (owner, 2026-09-04 ≈12:30 MYT, `AskUserQuestion` option (a) of 3, 「照建議」)
+
+**Context.** PR #551 (the DB lane for the close gates) ships `clara.document_kind_codeability`, a 20-row TABLE
+— data, not code — deciding which filed document kinds the `uncoded_documents` close gate and the coding lane
+treat as "must be journalised" (H-12 / H-53 / H-55: the gate used to count a filed bank statement as uncoded,
+a false FAIL on every close). The file's own safe-direction rule: a false FAIL is visible and cheap, a false
+PASS closes a year over an unposted liability, so every arguable kind is seeded codeable. The fresh-context
+review found two rows seeded AGAINST that rule: `tax_correspondence` (a Notice of Assessment creates a bookable
+liability) and `agreement_contract` (a hire-purchase or finance-lease contract creates a liability and an asset
+at inception — MPERS s.20; an ordinary Malaysian SME shape). **Briefed in plain language** with the failure
+example (an NoA filed, never journalised, the gate reads green, the year closes with the tax liability off the
+books) and the cost stated (LHDN acknowledgement letters and supply contracts show in the uncoded list until a
+human dismisses them — which no longer blocks a one-click close under 裁-187).
+**Options as put:** (a) both codeable — recommended; (b) keep both not codeable; (c) tax correspondence only.
+**Ruled (a).** The table reads 12 codeable / 8 not. Because it is data, any row flips without a migration.
+**Amends** nothing — a seed value under the spirit of digest law 16 (facts live in effective-dated tables,
+never in prose). No separate ruling file — this entry is the text of record.
+
+### 裁-192 — the browser smoke becomes a REQUIRED per-PR CI gate (owner, 2026-09-04 ≈12:40 MYT, `AskUserQuestion` option (a) of 3 after one 「不懂，再解釋」 re-brief; AMENDS 裁-86)
+
+**Context.** The audit's CB-AE2E-036: the Playwright suite (thirteen specs on the built app at the ruling)
+runs only when a lane invokes it, so a PR that never walks a browser can break a page while every CI check
+stays green. 裁-86 (2026-08-31) made that walk a per-train ACCEPTANCE instrument — deliberately not a gate.
+**Briefed in plain language:** a gate is forced by the machine, an acceptance instrument depends on a lane
+remembering; the failure example (a backend field rename, typecheck and lint green, the login page broken).
+**Options as put:** (a) one required `web-e2e-smoke` job, ≈10 minutes, on the built app with the mocked stack,
+an explicit smoke spec list, unexpected console or network errors red it, `retries: 0` — recommended;
+(b) keep 裁-86 as is; (c) non-required first, flipped to required once the flake rate is measured.
+Costs stated: ≈10 minutes more per code PR, more hosted CI minutes.
+**Ruled (a).** The per-train acceptance walk STAYS beside it as the lane's own instrument; the gate is the
+floor, not the ceiling. **Two known flakes are fixed at their cause BEFORE the gate is made required** — a
+required gate with a known flake blocks every PR: `apps/web/e2e/checkout-gate-walk.spec.ts` at `:223`/`:230`
+(an axe colour-contrast scan fired against a transitioning button) and at `:286` (the fail-closed client-IP
+arm's navigation race), each seen once in roughly six runs by two lanes on 2026-09-04 with no related diff.
+**Amends** 裁-86 and digest law 85's browser-leg clause (gate AND acceptance, where it read acceptance only);
+a digest row and an "amended by" line on ADR-0077 under 裁-140, no new ADR. No separate ruling file.
+
 ---
 
 **What follows in this session, so the next reader can find it:** the unified defect register built from
