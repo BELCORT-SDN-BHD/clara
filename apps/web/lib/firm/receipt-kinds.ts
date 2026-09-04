@@ -25,14 +25,16 @@
 // a database-free `apps/web` test can do, and it is strictly better than the
 // hand roster it replaces.
 //
-// COVERAGE IS NOT THE SAME AS CONTENT, and the feed says so separately. FOUR of
+// COVERAGE IS NOT THE SAME AS CONTENT, and the feed says so separately. FIVE of
 // the nine arms project real rows — f_a6 (`0131:1507`), f_a7 (`0126:773`), f_a7b
-// (`0142:319`) and pb_binding (`0154:999`). The other FIVE — f_a2 `entry_post`,
-// f_a3 `bank_agent`, f_a4 `agent_act`, f_a5 `report_agent` and f_a8 `web_fetch`
+// (`0142:319`), pb_binding (`0154:999`) and, since 裁-190 / CB-AE2E-018, f_a4
+// `agent_act` over `clara.agent_act_receipts` (`0138:338`), which puts the close
+// lane's agent acts on this feed for the first time. The other FOUR — f_a2
+// `entry_post`, f_a3 `bank_agent`, f_a5 `report_agent` and f_a8 `web_fetch`
 // — are still the `0103:311-372` typed-empty stubs (`select null::… where
-// false`), censused 2026-09-04: `_agent_receipt_src_f_a2/3/4/5/8` each have
+// false`), censused 2026-09-04: `_agent_receipt_src_f_a2/3/5/8` each have
 // EXACTLY ONE definition across every migration, and it is 0103's. Posting an
-// entry, a bank-agent act, a generic agent act, a report-agent act and a web
+// entry, a bank-agent act, a report-agent act and a web
 // fetch therefore produce NOTHING in this feed by construction. That is a
 // DATABASE gap (its own lane), not a web one — the web's duty is to stop the
 // page claiming otherwise.
@@ -63,10 +65,10 @@ export function isKnownAgentReceiptKind(kind: string): kind is AgentReceiptKind 
 }
 
 /**
- * The four arms whose shim is a REAL projection today, and therefore the only
+ * The five arms whose shim is a REAL projection today, and therefore the only
  * kinds this feed can currently show. Used for one honest sentence on the
  * page — the feed used to promise "what the agent did across every client"
- * over a union five of whose nine arms cannot emit a row.
+ * over a union five of whose nine arms could not emit a row; four still cannot.
  *
  * Each entry names the migration whose `create view clara._agent_receipt_src_*`
  * body replaced 0103's stub. Censused by grepping every migration for each
@@ -78,15 +80,21 @@ export const WIRED_AGENT_RECEIPT_KINDS = [
   "agent_filing", // 0126_f_a7_beta_filing_verb.sql
   "onboarding_agent", // 0142_fa7b_pr_a_client_onboarding_open.sql
   "binding_agent", // 0154_binding_proposal_pr_1.sql
+  // 裁-190 / CB-AE2E-018: the f_a4 shim repointed onto clara.agent_act_receipts
+  // (0138:338). The member TABLE had existed since the close agent limb landed —
+  // only the shim was never re-cut — so close-lane acts were absent from this feed
+  // for no reason but an unwritten statement. UNNUMBERED at authoring; the number
+  // is claimed at merge prep under 裁-108, which is why this comment names the
+  // MEMBER migration rather than the one that re-cuts the shim.
+  "agent_act", // UNNUMBERED_web_reads_and_small_doors.sql -> clara.agent_act_receipts
 ] as const satisfies readonly AgentReceiptKind[];
 
-/** The five whose shim is still 0103's typed-empty stub. The two lists are
+/** The four whose shim is still 0103's typed-empty stub. The two lists are
  *  disjoint and together cover AGENT_RECEIPT_KINDS — asserted by the test, so
  *  neither can silently fall out of step with the roster above. */
 export const UNWIRED_AGENT_RECEIPT_KINDS = [
   "entry_post",
   "bank_agent",
-  "agent_act",
   "report_agent",
   "web_fetch",
 ] as const satisfies readonly AgentReceiptKind[];
