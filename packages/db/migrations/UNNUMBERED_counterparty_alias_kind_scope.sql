@@ -292,16 +292,27 @@ begin
   return new;
 end $$;
 
--- THE REVOKE IS NOT DECORATION, AND THIS ONE WAS MEASURED THE HARD WAY. 0004:752 declares
--- `alter default privileges for role clara_fn_owner in schema clara revoke execute on functions
--- from public`, and the first cut of this file relied on it. Applied through psql under an
--- explicit `set role`, the function landed with `{clara_fn_owner=X/clara_fn_owner}` and PUBLIC
--- held nothing. Applied through the MIGRATION RUNNER -- which is the path a real deploy takes --
--- the same statement produced a NULL proacl, so PUBLIC held EXECUTE on a SECURITY DEFINER body,
--- and `clara_stripe_webhook`'s closed-world routine census (checkout-gate-c2 cell c2.8) and C-3's
--- caught it on a fresh estate run. Default privileges are an assumption about the session; an
--- explicit revoke is a fact about the object. Every other function in this chain writes it out,
--- and so does this one. The tail asserts it rather than trusting these two lines.
+-- THE REVOKE IS NOT DECORATION, AND ITS ABSENCE WAS A REAL DEFECT HERE. The first cut of this
+-- file carried no revoke and leaned on 0004:752 / 0009:2889 / 0011:4010's `alter default
+-- privileges for role clara_fn_owner in schema clara revoke execute on functions from public`.
+-- Applied through the MIGRATION RUNNER -- the path a real deploy takes -- this function landed
+-- with a NULL `proacl`, which IS PUBLIC, on a SECURITY DEFINER body; `clara_stripe_webhook`'s
+-- closed-world routine census (checkout-gate-c2 cell c2.8) and C-3's c3.1 caught it on a fresh
+-- estate run.
+--
+-- AND THE REASON IS ALREADY WRITTEN DOWN IN THIS REPO, in rig-isolation.test.mjs's T17b: "ALTER
+-- DEFAULT PRIVILEGES ... REVOKE EXECUTE FROM PUBLIC is a confirmed NO-OP for that hardwired
+-- default (verified on PG16/17: it materializes no pg_default_acl entry)". Measured again here:
+-- `pg_default_acl` is EMPTY on a fully migrated database. So that declaration could never have
+-- done this job, in any path -- an explicit revoke is the only mechanism, which is why every
+-- other function in this chain writes one out, and so does this one now.
+--
+-- (A hand-applied psql run of the first cut DID leave `{clara_fn_owner=X/clara_fn_owner}` on
+-- this function. That rig had a full estate suite run against it afterwards, so the cause is not
+-- pinned and is deliberately NOT claimed here; what is claimed is the runner measurement above
+-- and T17b's mechanism, both of which point the same way.)
+--
+-- The tail asserts the outcome rather than trusting this line, and cell ak.22 reads the object.
 revoke all on function clara._tf_counterparty_alias_kind() from public;
 
 create trigger t_counterparty_aliases_kind_derive before insert on clara.counterparty_aliases
