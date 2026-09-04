@@ -287,23 +287,41 @@ end $stmt_splice$;
 -- 3. `period_basis` — NOT ADDED, AND THE MEASURED REASON.
 -- ==============================================================================================
 -- The order asked this file to confirm whether a first-class `period_basis` column belongs on the
--- statement header, on the premise that "today the basis rides `corroboration_claimed`". THE
--- PREMISE DOES NOT HOLD AS READ, and the answer is therefore NO — not here, not yet.
+-- statement header. RE-MEASURED after merging `origin/main` at `a2d098f2`, which landed lane L4's
+-- PR #545 (statementFacts v3) an hour after the order was written and CHANGED the answer's
+-- premises. The answer is still NO FOR THIS PR — but for measured reasons, and with a concrete
+-- recommendation rather than a shrug.
 --
--- WHAT I MEASURED, with the instrument named. `grep -rn "period_basis"` across `packages/`,
--- `apps/` and `docs/plan/active/` returns exactly two hits, both in a DIFFERENT subject: F-A4's
--- prepayment limb (`0140:848`, refusal token `service_period_basis_missing`, and its cell at
--- `packages/db/tests/f-a4-pr2a-carrier.test.mjs:154`). There is no `period_basis` anywhere on the
--- statement lane. `corroboration_claimed` in `0098:475,484,565,575,588,597` is not a basis at all:
--- it is `p_payload->'corroboration'` stored verbatim into the extraction envelope — an opaque
--- claim the reader made, not a typed period basis.
+-- WHAT IS TRUE NOW, with the instrument named. At my branch point there was no `period_basis`
+-- anywhere on the statement lane and no roster of basis tokens to CHECK against — `grep -rn
+-- "period_basis"` reached only F-A4's unrelated prepayment limb (`0140:848`). `a2d098f2` changed
+-- that: `packages/runtime/workflows/statementFacts.v3.header.mjs:254-271` now derives a period
+-- band from a statement date and records a basis, and its token roster is closed and explicit —
+-- `printed` | `printed_incomplete` | `derived_from_statement_date_month` | `unreadable`. So a
+-- roster now exists, and the order's premise that "the basis rides `corroboration_claimed`" is
+-- also now literally true (`statementFacts.v3.header.mjs:276-285` says so in its own words).
 --
--- SO THERE IS NO ROSTER OF "RATIFIED BASIS TOKENS" TO WRITE A CHECK AGAINST. Adding a column with
--- a token list invented here would be a model minting product law — the exact shape hard
--- constraint 2 forbids. This is reported to the owner and to lane L4 in the PR body rather than
--- guessed at: if a period basis IS a fact the statement header should carry, the tokens are a
--- product ruling first and a nullable CHECK-bounded column second, in that order, and the column
--- is a five-line additive migration once the roster exists.
+-- WHY IT STILL DOES NOT BELONG IN THIS FILE. Three reasons, in order of weight:
+--   1. THE TOKENS ARE A WORKFLOW'S VOCABULARY, NOT YET PRODUCT LAW. They were minted in a frozen
+--      workflow body that merged today. A CHECK-bounded column adopting them freezes them on BOTH
+--      sides of the wire and makes a workflow's private spelling into schema. That is an owner
+--      ruling first and a column second, in that order (hard constraint 2).
+--   2. IT IS NOT A COLUMN ADDITION — IT IS A WRITER-BODY CHANGE. `_stmt_header_norm` builds its
+--      output from a FIXED field list (`0038:1259-1272`), so a `period_basis` on the wire header
+--      is dropped on the floor; the value would have to be routed out of `corroboration` inside
+--      `_persist_statement_core_v2` and stamped onto `clara.bank_statements`. That is a second D1
+--      window on the statement writer, in a file whose whole point is to keep that window narrow.
+--   3. v3 DELIBERATELY DID NOT SEND IT AS A HEADER KEY, and said why: "sending answer vocabulary
+--      the DB does not verify is the mistake". Adding a DB column the workflow does not populate
+--      as a header field would create exactly the mismatch that note exists to avoid.
+--
+-- THE RECOMMENDATION, so this is a finding and not a deferral. YES, eventually, and the shape is:
+-- a nullable `period_basis text` on `clara.bank_statements` CHECK-bounded to the four ratified
+-- tokens, stamped by the core from `corroboration_claimed` in the same transaction that writes
+-- the statement — because a period band that was DERIVED rather than PRINTED closes on the
+-- statement date rather than on month-end, and a close or a reconciliation reading that band
+-- should be able to see which it is without parsing an opaque jsonb. It needs the owner to ratify
+-- the four tokens and a D1 window on the writer; both are in the PR body.
 
 reset role;
 

@@ -189,11 +189,25 @@ test("NOG-6 an UNFLAGGED client's customer CAN be enriched -- the scope is the f
 });
 
 // ---------------------------------------------------------------------------
-// NOG-7..9 -- THE UPDATE ARM. Today clara._tf_counterparty_update_0011's whitelist already
-// refuses every UPDATE of these columns, for every client. The guard covers UPDATE anyway (that
-// whitelist has widened once already), and it is named to sort BEFORE the 0011 trigger so its
-// specific reason is the one a caller sees. These cells drive the UPDATE directly as root,
-// because no product verb can reach this path -- that is the finding, not a shortcut.
+// NOG-7..9 -- THE UPDATE ARM.
+//
+// TRUED 2026-09-04 (H-09 / 裁-190, UNNUMBERED_web_reads_and_small_doors.sql). This block's
+// original comment read: "Today clara._tf_counterparty_update_0011's whitelist already refuses
+// every UPDATE of these columns, for every client ... no product verb can reach this path -- that
+// is the finding, not a shortcut." BOTH halves of that have now changed, and they changed BY
+// DESIGN rather than by drift, which is why the cells move with them (.claude/rules/db-tests.md:
+// a floor pinned to a catalog object a later migration retires is trued IN THE SAME PR):
+//   * the non-merge whitelist widened a SECOND time -- exactly the possibility the old comment
+//     itself flagged -- and now admits registration_no / registration_normalized / tin, so the
+//     0011 immutability wall no longer refuses these UPDATEs for an unflagged client;
+//   * a product verb DOES now reach this path: clara.set_counterparty_identifiers (admin floor).
+// WHAT DID NOT CHANGE, and is what these cells are actually for: 0062's guard is still the wall
+// for a FLAGGED client, it still sorts BEFORE the 0011 trigger, and its named reason is still the
+// one a caller sees. The AUTHORIZATION wall was never this trigger and still is not -- no
+// application role holds UPDATE on clara.counterparties (0009:2879 grants SELECT and nothing
+// else), which NOG-8 now asserts positively instead of leaning on the immutability refusal.
+// These cells still drive the UPDATE directly as root, because root is the only principal that
+// can reach the raw statement at all.
 // ---------------------------------------------------------------------------
 
 test("NOG-7 UPDATE enriching a flagged client's existing customer is refused BY THIS GUARD", async (t) => {
@@ -214,7 +228,7 @@ test("NOG-7 UPDATE enriching a flagged client's existing customer is refused BY 
   assert.equal(row.registration_no, null, "NOG-7: the row is unchanged");
 });
 
-test("NOG-8 UPDATE enriching an UNFLAGGED client's customer is refused by 0011, NOT by this guard", async (t) => {
+test("NOG-8 UPDATE enriching an UNFLAGGED client's customer is NOT refused by this guard, and no application role can reach the statement", async (t) => {
   if (gate(t)) return;
   const receipt = await createCounterparty(owner, {
     client: unflagged, kind: "customer", name: `NOG8 BUYER ${tag()} SDN BHD`,
@@ -225,10 +239,30 @@ test("NOG-8 UPDATE enriching an UNFLAGGED client's customer is refused by 0011, 
       where id = $1`,
     [receipt.counterparty_id],
   ));
-  // The pre-existing wall must be untouched by this file: same refusal, same code, as before.
-  assertNotThisGuard(err, "NOG-8");
-  assert.equal(err.code, "CLR08",
-    `NOG-8: expected 0011's CLR08 immutability wall (got ${err.code} -- ${err.message})`);
+  // THE ONE PROPERTY THIS CELL HAS ALWAYS BEEN FOR: whatever happens to an UNFLAGGED client's
+  // customer, it is not THIS guard's doing. That is asserted first and is unchanged.
+  if (err) assertNotThisGuard(err, "NOG-8");
+  // And since H-09 widened the whitelist, the write LANDS -- which makes the cell discriminating
+  // in a way the old CLR08 assertion no longer could: a guard that had started firing on
+  // unflagged clients would now show up as a refusal here rather than as a differently-spelled
+  // refusal that still looked like the wall doing its job.
+  assert.equal(err, null,
+    `NOG-8: an unflagged client's customer may be enriched (got ${err?.code} -- ${err?.message})`);
+  const row = await counterpartyRow(receipt.counterparty_id);
+  assert.equal(row.registration_no, "202501099008", "NOG-8: the registration landed");
+
+  // THE AUTHORIZATION WALL, ASSERTED POSITIVELY. The immutability whitelist was never what kept
+  // an application role out of this statement, and now that it admits the column the distinction
+  // has to be proven rather than implied: clara.counterparties carries SELECT and nothing else
+  // for every non-owner role, so the only reachable writer is a SECURITY DEFINER door.
+  const grants = await rootQuery(
+    `select grantee, privilege_type from information_schema.role_table_grants
+      where table_schema = 'clara' and table_name = 'counterparties'
+        and grantee not in ('clara_fn_owner', 'postgres')
+        and privilege_type <> 'SELECT'`,
+  );
+  assert.equal(grants.rowCount, 0,
+    `NOG-8: an application role gained a non-SELECT grant on clara.counterparties: ${JSON.stringify(grants.rows)}`);
 });
 
 test("NOG-9 an ordinary RENAME of a flagged client's customer still succeeds", async (t) => {
@@ -270,17 +304,33 @@ test("NOG-10 on an already-enriched customer: CHANGING the registration is refus
   ));
   assertNameOnly(changed, "NOG-10(a)");
 
-  // (b) value -> NULL is the REMEDY, not an enrichment. It cannot be shown succeeding end to
-  // end, because 0011's whitelist refuses the column write for its own unrelated reason -- so
-  // this asserts exactly what is true and no more: whatever stopped it, it was not this guard.
+  // (b) value -> NULL is the REMEDY, not an enrichment. TRUED 2026-09-04 (H-09 / 裁-190): this
+  // limb used to be able to assert only "whatever stopped it, it was not this guard", because
+  // 0011's whitelist refused the column write for its own unrelated reason. The whitelist now
+  // admits the three identifier columns, so the remedy can be shown SUCCEEDING END TO END --
+  // which is what the limb always wanted to prove and could not. A cleared registration is the
+  // fix for a mistyped one, and a guard that blocked the fix would strand the very rows it
+  // protects.
   const cleared = await caught(() => rootQuery(
     "update clara.counterparties set registration_no = null, registration_normalized = null where id = $1",
     [born.counterparty_id],
   ));
-  if (cleared) assertNotThisGuard(cleared, "NOG-10(b)");
+  assert.equal(cleared, null,
+    `NOG-10(b): clearing is the remedy and must land (got ${cleared?.code} -- ${cleared?.message})`);
+  const cleanedRow = await counterpartyRow(born.counterparty_id);
+  assert.equal(cleanedRow.registration_no, null, "NOG-10(b): the registration is cleared");
+  assert.equal(cleanedRow.registration_normalized, null, "NOG-10(b): the normalized form is cleared too");
 
-  const row = await counterpartyRow(born.counterparty_id);
-  assert.equal(row.registration_no, "202501099010", "NOG-10: the row's original registration is untouched");
+  // (c) AND THE GUARD IS STILL ARMED ON THE SAME ROW. Clearing must not be a way to launder a
+  // flagged client's customer into an enrichable state: re-introducing an identifier on the very
+  // row just cleared is refused by name.
+  const reIntroduced = await caught(() => rootQuery(
+    `update clara.counterparties
+        set registration_no = '202501099011', registration_normalized = '202501099011'
+      where id = $1`,
+    [born.counterparty_id],
+  ));
+  assertNameOnly(reIntroduced, "NOG-10(c)");
 });
 
 // ---------------------------------------------------------------------------

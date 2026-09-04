@@ -321,13 +321,19 @@ begin
         on a.consent_id=t.id and a.firm_id=c.firm and a.client_id=p_client and a.purpose=t.purpose
      order by t.purpose, (a.deactivated_at is null) desc nulls last, a.activated_at desc nulls last
   ),
+  -- The legacy row is anchored on a one-row VALUES exactly as the typed rows are anchored on
+  -- `purposes`, so it is present whether or not a legacy consent exists. A LEFT JOIN rather than
+  -- a bare SELECT: without the anchor the row simply vanished when nothing had been granted, and
+  -- "the blanket consent is absent" would then have been indistinguishable from "the read does
+  -- not report blanket consent at all".
   legacy as (
     select distinct on (1)
            null::text as purpose, l.id, l.granted_at, l.revoked_at, l.scope_note,
            l.evidence_document_id
-      from clara.client_egress_consents l
-     where l.client_id=p_client and l.firm_id=c.firm
-     order by 1, (l.revoked_at is null) desc, l.granted_at desc
+      from (values (1)) anchor(one)
+      left join clara.client_egress_consents l
+        on l.client_id=p_client and l.firm_id=c.firm
+     order by 1, (l.revoked_at is null) desc nulls last, l.granted_at desc nulls last
   ),
   rows_out as (
     select t.purpose, t.id as consent_id, t.granted_at, t.revoked_at, t.scope_note,
@@ -351,7 +357,10 @@ begin
          end as state
     from rows_out r
     left join clara.documents d on d.id=r.evidence_document_id and d.firm_id=c.firm
-   order by (r.purpose is null), r.purpose;
+   -- The blanket (legacy) row LEADS: it is the broader grant and a panel reads it first. The
+   -- typed rows then follow in name order. Ordering is part of the contract because apps/web
+   -- renders the rows in the order it receives them.
+   order by (r.purpose is not null), r.purpose;
 end $$;
 revoke all on function clara.client_egress_state(uuid) from public;
 grant execute on function clara.client_egress_state(uuid) to clara_authenticated;

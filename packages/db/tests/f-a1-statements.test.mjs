@@ -233,8 +233,18 @@ test("f-a1s.b the refusal ORDER matches the live ladder, pinned by payloads that
       "f-a1s.b(5) chain_broken before continuity_mismatch");
   }
 
-  // totals_unreadable fires when EITHER channel omits a printed total — mandatory on the
-  // two-read lane (0038:1488-1498).
+  // THE WITNESS LANE'S PRINTED TOTALS — TRUED 2026-09-04 (裁-190,
+  // UNNUMBERED_stmt_witness_totals_and_institution_code.sql). This block used to assert
+  // `totals_unreadable` here, because 0098 folded 'witness' into `v_two` and `v_two` was also the
+  // flag the MANDATORY printed totals keyed on. That made a statement whose PAPER prints no
+  // TOTAL DEBIT / TOTAL CREDIT block — the common Malaysian shape — pass the structured lane and
+  // fail the witness one, i.e. a refusal about the document rather than about the read. The
+  // mandate is now keyed on `p_ingest_mode = 'ocr'`, so the witness lane's totals rule equals the
+  // structured lane's: checked when present, never mandatory. Both directions are pinned here,
+  // because "admits NULL totals" must not be readable as "stops checking".
+  //
+  // (totals-a) ONE channel states a total and the other does not. Still a WALL — the header
+  // agreement block refuses it, now by its own accurate name.
   {
     const acct = await registerAccount(sub, client);
     const { periodStart, periodEnd } = ymBounds(2026, 10);
@@ -243,9 +253,32 @@ test("f-a1s.b the refusal ORDER matches the live ladder, pinned by payloads that
     const h2 = { ...h1 }; delete h2.total_debit_cents;
     const doc = await filedStatementDoc(sub, client);
     const { taskId, engineId } = await statementWitnessTask(firm, doc.documentId);
-    await assertRaisesReason(CLR10, "totals_unreadable",
+    await assertRaisesReason(CLR10, "readers_disagree",
       () => persistV2(taskId, witnessReaders(engineId, h1, ch.lines.map((l) => ({ ...l })), h2, ch.lines.map((l) => ({ ...l })))),
-      "f-a1s.b(totals) totals_unreadable when either channel omits a printed total");
+      "f-a1s.b(totals-a) an ASYMMETRIC printed total is still a wall — the two readers disagree about it");
+  }
+
+  // (totals-b) BOTH channels state NEITHER total — the ONLY newly-admitted shape, and the one the
+  // re-cut exists for. The chain still has to close and every per-row printed running balance is
+  // still mandatory on this lane, so the statement is corroborated; what is no longer required is
+  // a totals block the paper never printed. A cell that only proved the refusal above would leave
+  // the whole point of the change unproven.
+  {
+    const acct = await registerAccount(sub, client);
+    const { periodStart, periodEnd } = ymBounds(2026, 11);
+    const ch = witnessChain(periodStart, periodEnd, 100000, [50000, -20000]);
+    const h = stmtHeader({ accountDigits: acct.digits, periodStart, periodEnd, ch });
+    delete h.total_debit_cents; delete h.total_credit_cents;
+    const doc = await filedStatementDoc(sub, client);
+    const { taskId, engineId } = await statementWitnessTask(firm, doc.documentId);
+    const settled = await persistV2(taskId, agreeingWitnessPayload(engineId, h, ch));
+    assert.equal(settled?.status, "done",
+      `f-a1s.b(totals-b) a witness statement printing NO totals block must be admitted (got ${JSON.stringify(settled)})`);
+    // DISCRIMINATING, not merely non-throwing: the statement is really on the books, with both
+    // witness channels persisted — a `done` that had bound nothing would prove nothing.
+    assert.ok(settled?.statement_id, "f-a1s.b(totals-b) a statement row was written");
+    assert.ok(settled?.reader1_extraction_id && settled?.reader2_extraction_id,
+      "f-a1s.b(totals-b) both witness channels persisted — the two-read ladder is intact");
   }
 });
 
