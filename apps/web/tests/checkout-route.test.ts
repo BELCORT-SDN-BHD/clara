@@ -14,11 +14,18 @@ import { NextResponse } from "next/server";
 
 import { handleCheckoutPost, openRegistrationFrom } from "../app/(entry)/checkout/handler";
 import { checkoutFlashCookie } from "@/lib/checkout/checkout-flash";
-import { StripeSessionError, type CheckoutSessionRequest } from "@/lib/checkout/stripe-session";
+import {
+  checkoutIdempotencyKey,
+  StripeSessionError,
+  type CheckoutSessionRequest,
+} from "@/lib/checkout/stripe-session";
 import { PEPPER_VAR, TRUSTED_HEADER_VAR } from "@/lib/rate-wall-courier";
 import type { OwnRegistrationResult } from "@/lib/registration/server-reads";
 
 const SUBJECT = "22222222-2222-2222-2222-222222222222";
+/** The `email` claim of the SAME token `SUBJECT` is the `sub` of — H-38's whole
+ *  point is that these two travel together or not at all. */
+const APPLICANT_EMAIL = "aisyah@example.test";
 const REGISTRATION = "11111111-1111-1111-1111-111111111111";
 const ORIGIN = "https://app.clarabook.example";
 const SESSION_URL = "https://checkout.stripe.com/c/pay/cs_test_123";
@@ -79,13 +86,16 @@ function deps(
   rec: Recorder,
   over: {
     registration?: () => Promise<OwnRegistrationResult>;
-    session?: () => Promise<{ accessToken: string; subject: string } | null>;
+    session?: () => Promise<{ accessToken: string; subject: string; email: string | null } | null>;
     createSession?: (r: CheckoutSessionRequest) => Promise<{ id: string; url: string }>;
     env?: Record<string, string | undefined>;
   } = {},
 ) {
   return {
-    resolveSession: over.session ?? (async () => ({ accessToken: "tok", subject: SUBJECT })),
+    // The default caller CARRIES an address (H-38), so every existing cell
+    // drives the arm the shipped route actually takes; the null arm has its own
+    // cell below rather than being the fixture's silent default.
+    resolveSession: over.session ?? (async () => ({ accessToken: "tok", subject: SUBJECT, email: APPLICANT_EMAIL })),
     loadRegistration: over.registration ?? (async () => openRegistration()),
     createSession:
       over.createSession ??
@@ -170,6 +180,9 @@ test("THE HAPPY PATH: door → plan → Stripe → stamp → 303 to Stripe, in t
   assert.equal(sent.intentId, "int-1");
   assert.equal(sent.successUrl, `${ORIGIN}/checkout/success`);
   assert.equal(sent.cancelUrl, `${ORIGIN}/pending`);
+  // H-38 — the address comes from the RESOLVED SESSION, which is the verified
+  // JWT's own claim, and travels beside the subject it is bound to.
+  assert.equal(sent.customerEmail, APPLICANT_EMAIL);
 
   // THE DIGEST IS 32 BYTES ON THE WIRE, in PostgREST's bytea spelling. The
   // door raises CLR10 for anything else, so a mangled round trip refuses
@@ -217,7 +230,10 @@ test("M1: the Stripe idempotency key is the INTENT's, so a retry replays one Ses
   assert.equal(keys[0], keys[1], "the two POSTs carried DIFFERENT idempotency keys");
   assert.equal(minted, 1, "a second Checkout Session was minted for one intent");
   // And the key is built from the durable identity, not from either op key.
-  assert.equal(keys[0], "int-1:if_required");
+  // DERIVED, never re-typed: the route must build the key the module's own
+  // builder builds. A literal here would assert this test's spelling and would
+  // have to be edited every time the parameter shape moves (review law 3).
+  assert.equal(keys[0], checkoutIdempotencyKey("int-1", "if_required"));
   for (const key of keys) assert.doesNotMatch(key, /op-key-/, "an op key leaked into the key");
 
   // The second stamp is the door's replay branch: same intent, SAME session id.
@@ -250,8 +266,43 @@ test("M1: the collection mode is IN the key, so a mode flip cannot 400 on same-k
       () => handleCheckoutPost(postRequest(), deps(rec, { createSession })),
     );
   }
-  assert.deepEqual(keys, ["int-1:if_required", "int-1:always"]);
+  assert.deepEqual(keys, [
+    checkoutIdempotencyKey("int-1", "if_required"),
+    checkoutIdempotencyKey("int-1", "always"),
+  ]);
+  // The intent is still IN the key — a builder that dropped it would make the
+  // two derived expectations above agree with a route that had also dropped it.
+  for (const key of keys) assert.match(key, /int-1/);
   assert.notEqual(keys[0], keys[1], "a mode flip reused the key and would 400 at Stripe");
+});
+
+test("H-38: the address is the SESSION's, never the registration's, and a tokenless one is null", async () => {
+  // TWO PROPERTIES, and the first is the security one. The applicant's row in
+  // `open_checkout_intent`'s world carries no address the route may trust; the
+  // ONLY address bound to the principal the doors ran as is the claim on this
+  // request's token. So the cell drives a session whose email differs from
+  // anything else in the fixture and asserts THAT value reached Stripe.
+  const rec = recorder();
+  await withDoors(rec, HAPPY_DOORS, () =>
+    handleCheckoutPost(postRequest(), deps(rec, {
+      session: async () => ({ accessToken: "tok", subject: SUBJECT, email: "someone-else@example.test" }),
+    })),
+  );
+  assert.equal(rec.stripeCalls[0]!.customerEmail, "someone-else@example.test");
+
+  // And a session with no address yields null — never "", which Stripe 400s,
+  // and never a value invented from the registration row.
+  const noEmail = recorder();
+  await withDoors(noEmail, HAPPY_DOORS, () =>
+    handleCheckoutPost(postRequest(), deps(noEmail, {
+      session: async () => ({ accessToken: "tok", subject: SUBJECT, email: null }),
+    })),
+  );
+  assert.equal(noEmail.stripeCalls[0]!.customerEmail, null);
+  // MUST-NOT-RED CONTROL: the tokenless-address arm still completes the
+  // checkout. A route that refused without an address would strand a caller
+  // over a field Stripe treats as optional.
+  assert.equal(noEmail.doorCalls.filter((c) => c.fn === "record_checkout_session").length, 1);
 });
 
 test("W-G: a cross-origin POST is 403 before ANY door, Stripe call or session read", async () => {
@@ -267,7 +318,7 @@ test("W-G: a cross-origin POST is 403 before ANY door, Stripe call or session re
     const response = await withDoors(rec, HAPPY_DOORS, () =>
       handleCheckoutPost(postRequest(headers), {
         ...deps(rec),
-        resolveSession: async () => { sessionReads += 1; return { accessToken: "tok", subject: SUBJECT }; },
+        resolveSession: async () => { sessionReads += 1; return { accessToken: "tok", subject: SUBJECT, email: APPLICANT_EMAIL }; },
       }),
     );
     assert.equal(response.status, 403, JSON.stringify(headers));

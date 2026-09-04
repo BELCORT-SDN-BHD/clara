@@ -268,24 +268,25 @@ told rather than infer.)*
 
 ### 1. Password policy must be set in Supabase Auth (review finding 10, LOW)
 
-The only constraints this repo can see are the `minLength={8}` courtesies on BOTH password
-surfaces: `components/invite-accept-form.tsx` and
-`components/entry/signup-account-form.tsx`. A direct SDK or Auth API call bypasses either
-entirely. The authoritative policy lives in the hosted project.
+The only constraint this repo can see is `PASSWORD_MIN_LENGTH` in `lib/auth/password-policy.ts`
+— **one constant read by all three password surfaces** (signup, invite-accept, password reset),
+each rendering the shared `Auth.passwordPolicy` sentence beside the field. A direct SDK or Auth
+API call bypasses it; the authoritative policy lives in the hosted project.
 
 - **Configure:** Supabase Dashboard → Authentication → Providers → Email → *Password
   requirements*. Set a minimum length of **at least 12** and require lower + upper +
   digit + symbol; enable **leaked-password protection** (HaveIBeenPwned) — a Pro-plan
   feature. Docs: `supabase.com/docs/guides/auth/password-security`.
 - **Verify (receipt):** with the project's Management API token,
-  `GET /v1/projects/{ref}/config/auth` and read back
-  `password_min_length`, `password_required_characters`,
-  `password_hibp_enabled`. Keep the JSON response with the deploy record — a screenshot is
-  not a receipt. Re-run it after any project restore.
-- **Keep aligned:** if the server minimum moves, move `minLength` in BOTH
-  `components/invite-accept-form.tsx` and
-  `components/entry/signup-account-form.tsx` with it. The UI values are courtesies, never
-  the wall.
+  `GET /v1/projects/{ref}/config/auth` and read back `password_min_length`,
+  `password_required_characters`, `password_hibp_enabled`. Keep the JSON response with the
+  deploy record — a screenshot is not a receipt. Re-run it after any project restore.
+- **Last read (2026-09-03, FS-11 Wave-G step 18):** `password_min_length` **12** — which is
+  why the constant is 12 — and `password_hibp_enabled` **false**, an open owner decision
+  (handover H-40). **The UI states no breached-password claim while that is false;** re-add
+  it in the same change that flips HIBP and records the read-back.
+- **Keep aligned:** if the server minimum moves, move `PASSWORD_MIN_LENGTH` — the single site
+  — with it; `components/password-policy.test.tsx` reds if an input carries its own number.
 
 ### 2. Access-JWT revocation window (review finding 5, MEDIUM)
 

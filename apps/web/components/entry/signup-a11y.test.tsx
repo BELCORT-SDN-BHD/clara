@@ -88,6 +88,21 @@ function findIn(root: Node, predicate: (n: Node) => boolean): Node | null {
 const byLabelledField = (label: RegExp) => (n: Node) =>
   (n.tagName === "INPUT" || n.tagName === "TEXTAREA") && label.test(textOf((n.parentNode ?? {}) as never));
 
+/** Every `href` in the tree, in DOM order — the instrument H-35's cell reads,
+ *  because a route is decided by where the anchor POINTS, not by its label. */
+function collectAnchors(root: Node): string[] {
+  const out: string[] = [];
+  (function walk(n: Node) {
+    if (n.tagName === "A") {
+      const href = (n as unknown as { getAttribute?: (k: string) => string | null })
+        .getAttribute?.("href");
+      if (typeof href === "string") out.push(href);
+    }
+    for (const c of n.childNodes ?? []) walk(c);
+  })(root);
+  return out;
+}
+
 test("the account step has zero a11y violations", async () => {
   await withEnv(async () => jsonResponse({}), async () => {
     const h = await renderComponent(App(createElement(SignupAccountForm, { createSupabaseClient: authClient() })));
@@ -196,6 +211,59 @@ test("the CHECK-YOUR-EMAIL state has zero a11y violations", async () => {
       await h.fireEvent(form as never, "submit");
       for (let i = 0; i < 6; i++) await h.settle();
       assert.match(textOf(h.container as never), /Confirm your email/, "the confirmation state must have rendered");
+      assert.deepEqual(checkAccessibility(h.container as never), []);
+    } finally {
+      await h.unmount();
+    }
+  });
+});
+
+test("H-35 — THE CHECK-EMAIL CARD RENDERS A ROUTE TO /auth/confirm, and promises no resend", async () => {
+  // THE DEFECT. The mail carries a six-digit code and nothing to click (裁-92),
+  // and this card carried no link either — its only anchor went to /login. The
+  // person's sole route to the code form was typing the URL. The banner
+  // meanwhile promised "the next screen", which is copy naming a control the
+  // render omits.
+  //
+  // Asserted on the ANCHOR, not on the label: a cell matching the button text
+  // would stay green if the href moved, and the href is the part that decides
+  // whether the person can get there.
+  await withEnv(async () => jsonResponse({}), async () => {
+    const h = await renderComponent(App(createElement(SignupAccountForm, { createSupabaseClient: authClient() })));
+    try {
+      for (let i = 0; i < 3; i++) await h.settle();
+      const form = findIn(h.container as never, (n) => n.tagName === "FORM");
+      await h.fireEvent(form as never, "submit");
+      for (let i = 0; i < 6; i++) await h.settle();
+      const text = textOf(h.container as never);
+      assert.match(text, /Confirm your email/, "the confirmation state must have rendered");
+
+      const anchors = collectAnchors(h.container as never);
+      assert.ok(
+        anchors.includes("/auth/confirm"),
+        `the check-email card offers no route to the code form (hrefs: ${anchors.join(", ") || "none"})`,
+      );
+      // The sign-in line survives as the SECONDARY route, so this cell cannot
+      // pass by the primary control having replaced it.
+      assert.ok(anchors.includes("/login"), "the 'already confirmed' route was lost");
+
+      // NOTHING INSTRUCTS A RESEND while `confirmation-resend.ts`'s production
+      // default refuses every one. The distinction is deliberate and is the
+      // whole shape of the honest fix: the card MAY say a code cannot be
+      // resent (it does, and that sentence is the recovery path), and it may
+      // NOT tell the person to ask for one. So the matcher hunts the
+      // INSTRUCTION, not the word.
+      const RESEND_INSTRUCTION = /request a new (one|code)|send me a new|resend (it|your|the)|we'?ll (re)?send you another/i;
+      assert.doesNotMatch(text, RESEND_INSTRUCTION,
+        "the check-email card tells the person to ask for a resend this build refuses");
+      // VACUITY CONTROL: the matcher fires on the sentences it hunts — both
+      // the ones this fix removed from ConfirmEmail's own copy.
+      assert.match("Request a new one below.", RESEND_INSTRUCTION);
+      assert.match("Wait about 5 minutes, or request a new code.", RESEND_INSTRUCTION);
+      assert.match("Send me a new code", RESEND_INSTRUCTION);
+      // And the honest sentence is NOT what it fires on — otherwise the cell
+      // would forbid saying the true thing.
+      assert.doesNotMatch("We can't resend one from here in this build.", RESEND_INSTRUCTION);
       assert.deepEqual(checkAccessibility(h.container as never), []);
     } finally {
       await h.unmount();

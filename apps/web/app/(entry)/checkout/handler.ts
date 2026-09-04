@@ -245,6 +245,13 @@ export async function handleCheckoutPost(
       registrationId: registration,
       applicant: session.subject,
       intentId: intent.intentId,
+      // H-38 — the address from THIS request's verified token, resolved once
+      // alongside the subject the doors above ran as (`server-session.ts`).
+      // Never the request body (this route reads none), never a DB read (a
+      // second source that can disagree with the token). `null` when the
+      // token carries no address, and `checkoutSessionForm` then omits the
+      // field rather than sending an empty one.
+      customerEmail: session.email,
       // NOT the op key: the durable retry identity is the INTENT, which two
       // POSTs from one applicant share. See `checkoutIdempotencyKey`'s own
       // comment for why an op key here mints a second Session that

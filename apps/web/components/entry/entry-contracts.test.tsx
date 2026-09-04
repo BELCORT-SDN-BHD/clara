@@ -285,7 +285,18 @@ test("MED-3/LOW-3 (superseded by FS-4 C-6 / 裁-92): the deploy obligations cove
   assert.doesNotMatch(readme, /\{\{ \.RedirectTo \}\}\?token_hash=\{\{ \.TokenHash \}\}&type=email/);
   assert.doesNotMatch(readme, /replace the default `ConfirmationURL` link with exactly/i);
   assert.match(readme, /disable_signup[\s\S]*false[\s\S]*mailer_autoconfirm[\s\S]*false/i);
-  assert.match(readme, /components\/invite-accept-form\.tsx[\s\S]*components\/entry\/signup-account-form\.tsx/);
+  // PR 541 stage 2 — THIS PIN MOVED WITH THE THING IT POLICES. It used to
+  // require README §1 to name the two component paths that each carried their
+  // own `minLength`, in order, so a "keep aligned" instruction could not lose
+  // one of its two sites. There is now ONE site — `lib/auth/password-policy.ts`
+  // — so naming two component paths would be the stale half of the fix. The
+  // property is unchanged: the deploy obligation must name where the courtesy
+  // actually lives, and README must say so.
+  assert.match(readme, /### 1\.[\s\S]*lib\/auth\/password-policy\.ts/);
+  assert.match(readme, /### 1\.[\s\S]*PASSWORD_MIN_LENGTH/);
+  // And it must not go back to naming the retired per-component sites as the
+  // place to move the number.
+  assert.doesNotMatch(readme, /move `?minLength`? in BOTH/i);
 });
 
 test("NEW-4 (superseded by 裁-92): the GET-query log-control residual is recorded as RESOLVED, and C1/C2's own gap is named", () => {
