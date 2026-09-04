@@ -96,10 +96,10 @@ function readFlash(response: Response): Record<string, unknown> {
 }
 
 const deps = (over: Partial<{
-  resolveSession: () => Promise<{ accessToken: string; subject: string } | null>;
+  resolveSession: () => Promise<{ accessToken: string; subject: string; email: string | null } | null>;
   loadRegistration: () => Promise<OwnRegistrationResult>;
 }> = {}) => ({
-  resolveSession: over.resolveSession ?? (async () => ({ accessToken: "tok", subject: SUBJECT })),
+  resolveSession: over.resolveSession ?? (async () => ({ accessToken: "tok", subject: SUBJECT, email: "aisyah@example.test" })),
   loadRegistration: over.loadRegistration ?? (async () => registrationResult()),
   newOpKey: () => "op-key-fixture",
 });
@@ -133,7 +133,7 @@ test("cross-origin is 403 BEFORE the door, the session, or the registration read
     let registrationReads = 0;
     const response = await withDoor(calls, () => json({}), () =>
       handleClaimPaidFirmPost(postRequest(headers), {
-        resolveSession: async () => { sessionReads += 1; return { accessToken: "t", subject: SUBJECT }; },
+        resolveSession: async () => { sessionReads += 1; return { accessToken: "t", subject: SUBJECT, email: "aisyah@example.test" }; },
         loadRegistration: async () => { registrationReads += 1; return registrationResult(); },
       }),
     );

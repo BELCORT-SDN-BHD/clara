@@ -285,7 +285,29 @@ test("MED-3/LOW-3 (superseded by FS-4 C-6 / 裁-92): the deploy obligations cove
   assert.doesNotMatch(readme, /\{\{ \.RedirectTo \}\}\?token_hash=\{\{ \.TokenHash \}\}&type=email/);
   assert.doesNotMatch(readme, /replace the default `ConfirmationURL` link with exactly/i);
   assert.match(readme, /disable_signup[\s\S]*false[\s\S]*mailer_autoconfirm[\s\S]*false/i);
-  assert.match(readme, /components\/invite-accept-form\.tsx[\s\S]*components\/entry\/signup-account-form\.tsx/);
+  // PR 541 stage 2 — THIS PIN MOVED WITH THE THING IT POLICES. It used to
+  // require README §1 to name the two component paths that each carried their
+  // own `minLength`, in order, so a "keep aligned" instruction could not lose
+  // one of its two sites. There is now ONE site — `lib/auth/password-policy.ts`
+  // — so naming two component paths would be the stale half of the fix. The
+  // property is unchanged: the deploy obligation must name where the courtesy
+  // actually lives, and README must say so.
+  // SLICED, NOT GREEDY (review-544 NIT). `/### 1\.[\s\S]*needle/` is satisfied
+  // by a needle ANYWHERE after section 1's heading — including in sections 2-5,
+  // which is most of the document. The pin would then survive section 1 losing
+  // the sentence entirely. Section 1's own body is the scope of the claim, so
+  // it is the scope of the assertion.
+  const s1 = readme.split(/\n### /)[1] ?? "";
+  assert.match(s1, /^1\. Password policy/, "the first ### section is not the password-policy one");
+  assert.match(s1, /lib\/auth\/password-policy\.ts/, "README §1 does not name the single site");
+  assert.match(s1, /PASSWORD_MIN_LENGTH/, "README §1 does not name the constant");
+  // And the slice really is a SLICE — if the split stopped working and handed
+  // back the whole document, the two assertions above would go greedy again.
+  assert.ok(s1.length < readme.length / 2, "the section slice is not a slice");
+  assert.doesNotMatch(s1, /### 2\./, "the slice ran past section 1");
+  // And it must not go back to naming the retired per-component sites as the
+  // place to move the number.
+  assert.doesNotMatch(readme, /move `?minLength`? in BOTH/i);
 });
 
 test("NEW-4 (superseded by 裁-92): the GET-query log-control residual is recorded as RESOLVED, and C1/C2's own gap is named", () => {
