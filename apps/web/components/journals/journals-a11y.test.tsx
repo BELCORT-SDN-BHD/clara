@@ -22,6 +22,11 @@ import type { JournalEntryRow, JournalLineRow, ReviewQueueRow, CoaAccountRow } f
 
 enableDomInspection();
 
+/** The subset of the live-mounted stub node this file reads — `getAttribute`
+ *  and `querySelectorAll` come from test/domInspect.ts's `enhanceElement`,
+ *  which the call above installs. */
+type El = { getAttribute(name: string): string | null; querySelectorAll(selector: string): El[] };
+
 const ACCOUNTS: CoaAccountRow[] = [
   { client_id: "c1", account_code: "1000", name: "Cash", account_type: "asset", is_active: true },
   { client_id: "c1", account_code: "5000", name: "Expenses", account_type: "expense", is_active: true },
@@ -104,19 +109,55 @@ test("journals drafts queue EXPANDED (approve/revise detail visible) has zero vi
   }
 });
 
+function postedPanel() {
+  return createElement(PostedPanel, {
+    clientId: "c1",
+    entries: [POSTED_ENTRY], lines: POSTED_LINES, linesTruncated: false, entriesTruncated: false,
+    accounts: ACCOUNTS, busy: false, err: null, clr: null, actingId: null, onReverse: () => {},
+  });
+}
+
 test("journals posted panel has zero violations", async () => {
-  const h = await renderComponent(
-    App(
-      createElement(PostedPanel, {
-        entries: [POSTED_ENTRY], lines: POSTED_LINES, linesTruncated: false, busy: false, err: null,
-        clr: null, actingId: null, onReverse: () => {},
-      }),
-    ),
-  );
+  const h = await renderComponent(App(postedPanel()));
   try {
     for (let i = 0; i < 2; i++) await h.settle();
     const violations = checkAccessibility(h.container as never);
     assert.deepEqual(violations, [], JSON.stringify(violations));
+  } finally {
+    await h.unmount();
+  }
+});
+
+// The FIRST aria-sort in the product (measured while building the table: a grep
+// for aria-sort across apps/web returned only test/a11yRules.ts's attribute
+// allow-list), so it gets its own cell rather than riding on the scan above —
+// the scan checks that attributes are KNOWN and well-formed, never that the
+// one this table depends on is present at all.
+test("the entries table names itself and marks its sorted column with aria-sort", async () => {
+  const h = await renderComponent(App(postedPanel()));
+  try {
+    for (let i = 0; i < 2; i++) await h.settle();
+
+    const table = h.find((n) => n.tagName === "TABLE") as El | null;
+    assert.ok(table, "the posted tab must render a real <table>");
+    assert.equal(table!.getAttribute("aria-label"), "Journal entries", "the table carries an accessible name");
+
+    const headers = (h.container as unknown as El).querySelectorAll("th");
+    const sortStates = headers.map((th) => th.getAttribute("aria-sort"));
+    // Exactly ONE column is the active sort, and it is the default the table
+    // opens on (posting_date, descending) — the fix for the read ordering by
+    // created_at while the panel rendered posting_date.
+    assert.equal(sortStates.filter((s) => s === "descending").length, 1, JSON.stringify(sortStates));
+    assert.equal(sortStates.filter((s) => s === "ascending").length, 0, JSON.stringify(sortStates));
+    const active = headers.find((th) => th.getAttribute("aria-sort") === "descending");
+    assert.match(textOf(active as never), /Posting date/);
+
+    // Every sortable header holds a real button, so it is a tab stop.
+    const sortable = headers.filter((th) => th.getAttribute("aria-sort") !== null);
+    assert.ok(sortable.length >= 4, `expected several sortable headers, saw ${sortable.length}`);
+    for (const th of sortable) {
+      assert.ok(th.querySelectorAll("button").length === 1, `sortable header ${textOf(th as never)} must hold exactly one <button>`);
+    }
   } finally {
     await h.unmount();
   }

@@ -126,7 +126,17 @@ function mkNode(tag: string, doc: Stub): Stub {
     // this app reads a data-* attribute back through `dataset`.
     dataset: {},
     ownerDocument: doc,
-    appendChild(c: Stub) { children.push(c); c.parentNode = node; return c; },
+    // Detach-then-append, per the DOM spec: `appendChild` on a node that is
+    // ALREADY a child MOVES it to the end. See `insertBefore` below for the
+    // measurement — react-dom reaches BOTH methods when it reorders keyed
+    // siblings, and this is the one a plain two-row swap actually takes.
+    appendChild(c: Stub) {
+      const existing = children.indexOf(c);
+      if (existing >= 0) children.splice(existing, 1);
+      children.push(c);
+      c.parentNode = node;
+      return c;
+    },
     removeChild(c: Stub) { const i = children.indexOf(c); if (i >= 0) children.splice(i, 1); return c; },
     // BUG FIX (found chasing the matching-section interaction test): this
     // ALWAYS appended, ignoring `ref` — react-dom calls insertBefore to
@@ -140,7 +150,23 @@ function mkNode(tag: string, doc: Stub): Stub {
     // object reference, not by this array's order) — the exact kind of bug
     // that only a real interaction test, never a renderHook-only one,
     // could ever have surfaced.
+    // SECOND BUG FIX (found chasing the journals entries-table sort test,
+    // 裁-190): `insertBefore` on a node that is ALREADY a child of this parent
+    // must MOVE it — the DOM spec removes the node from its current position
+    // first — and this stub only ever inserted, leaving a duplicate behind.
+    // React reorders keyed siblings by moving exactly those nodes whose old
+    // index falls below its running `lastPlacedIndex`, so a plain two-row
+    // swap ([A,B] -> [B,A]) reaches this method as `insertBefore(A, null)`.
+    // Without the detach the children array became [A, B, A]: react's own
+    // reconciliation was unaffected (it tracks children by object reference,
+    // never by this array), but every DOM-ORDER read — `textOf`'s
+    // document-order walk, `querySelectorAll`, an ordinal `find()` — saw the
+    // OLD order with a phantom third row. A sort control's whole
+    // post-condition is the order, so this was the difference between a test
+    // that proves a re-sort and one that cannot see it at all.
     insertBefore(c: Stub, ref: Stub | null) {
+      const existing = children.indexOf(c);
+      if (existing >= 0) children.splice(existing, 1);
       const i = ref ? children.indexOf(ref) : -1;
       if (i >= 0) children.splice(i, 0, c); else children.push(c);
       c.parentNode = node;
