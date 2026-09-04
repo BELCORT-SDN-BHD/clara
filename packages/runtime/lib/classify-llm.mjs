@@ -66,8 +66,23 @@ const SYSTEM_PROMPT = [
   "- credit_note: a seller-issued REDUCTION of a prior invoice (return, overcharge, discount),",
   "  referencing the original invoice.",
   "- debit_note: an upward adjustment INCREASING a prior invoice/charge, referencing the original.",
-  "- bank_statement: a bank's periodic account statement — opening/closing balance, dated",
-  "  debit/credit lines, an account number.",
+  "- bank_statement: a bank's periodic account statement — a named financial institution's",
+  "  letterhead, an account number in the header, dated transaction rows, and a RUNNING or",
+  "  CLOSING BALANCE.",
+  "  CRITICAL: a bank statement is NEVER a management_account and NEVER an opening_balance_doc.",
+  "  The discriminators, which survive OCR flattening even when the columns collapse into a wall",
+  "  of numbers: (1) a named BANK or financial institution on the page — Maybank, CIMB, Public",
+  "  Bank, RHB, Hong Leong, AmBank, Alliance, Bank Islam, OCBC, UOB, HSBC, Standard Chartered,",
+  "  Affin, MBSB, Agrobank, BSN; (2) an ACCOUNT NUMBER, often 10-16 digits, near the header;",
+  "  (3) rows each carrying a DATE and a BALANCE — a per-row running balance chain is the single",
+  "  strongest signal, and no management account has one; (4) Malay statement vocabulary:",
+  "  'PENYATA AKAUN', 'TARIKH PENYATA', 'NOMBOR AKAUN', 'BAKI', 'BAKI AKHIR', 'DEBIT', 'KREDIT',",
+  "  'URUSNIAGA'. A management_account instead lists ACCOUNT NAMES with amounts and has NO",
+  "  per-row date and NO per-row balance chain; an opening_balance_doc states brought-forward",
+  "  balances at a single date, with no transaction rows at all.",
+  "  A statement that prints a STATEMENT DATE but no from-to period is still a bank_statement —",
+  "  many Malaysian banks print only 'TARIKH PENYATA / STATEMENT DATE'. Missing period bounds",
+  "  are NOT a reason to answer 'other'.",
   "- payment_voucher: an INTERNAL authorization to pay (cheque/transfer requisition) — payee,",
   "  amount, approval signatures; the firm's own disbursement record, NOT a supplier's invoice.",
   "- claim_form: an employee expense-reimbursement claim — claimant, itemized expenses, a claim total.",
@@ -97,11 +112,53 @@ const SYSTEM_PROMPT = [
   "act) is NOT one of the kinds above — a separate consent path owns those documents. Answer",
   "'other' for one; never try to label it.",
   "",
+  "",
+  "EXAMPLES (OCR layout text, flattened and noisy, as you will receive it):",
+  "",
+  "<example>",
+  "PENYATA AKAUN / STATEMENT OF ACCOUNT",
+  "NOMBOR AKAUN 514487003061 TARIKH PENYATA / STATEMENT DATE : 30/06/25",
+  "TARIKH URUSNIAGA DEBIT KREDIT BAKI",
+  "02/06 IBG TRANSFER 1,250.00 48,110.22",
+  "07/06 CHEQUE DEPOSIT 3,000.00 51,110.22",
+  "BAKI AKHIR 51,110.22",
+  "answer: bank_statement, confidence 0.95",
+  "</example>",
+  "",
+  "<example>",
+  "STATEMENT OF ACCOUNT 12345678901234 01 APR 2025 - 30 APR 2025",
+  "DATE DESCRIPTION WITHDRAWAL DEPOSIT BALANCE",
+  "03 APR SALARY CR 8 200 00 19 447 63",
+  "11 APR DUITNOW 450 00 18 997 63",
+  "(columns garbled, several rows unreadable)",
+  "answer: bank_statement, confidence 0.88  (a named account number, dated rows and a running",
+  "balance chain are legible; noisy columns do NOT make this 'other')",
+  "</example>",
+  "",
+  "<example>",
+  "MANAGEMENT ACCOUNTS FOR THE YEAR ENDED 31 DECEMBER 2025",
+  "STATEMENT OF FINANCIAL POSITION",
+  "Property, plant and equipment 412,880",
+  "Trade receivables 96,441",
+  "Cash and bank balances 51,110",
+  "answer: management_account, confidence 0.93  (account NAMES with amounts; no per-row date,",
+  "no running balance chain)",
+  "</example>",
+  "",
   "Report an HONEST, calibrated confidence in [0,1]. If you are uncertain, report a confidence",
   "BELOW 0.8 — a low-confidence document is routed to a human for review, which is the correct,",
-  "safe outcome. NEVER inflate confidence to force a verdict. The text is OCR layout text and",
-  "may be TRUNCATED or noisy; classify from what is legible and lower your confidence accordingly.",
+  "safe outcome. NEVER inflate confidence to force a verdict.",
+  "The text is OCR layout text and may be TRUNCATED or noisy. NOISE IS NOT UNCERTAINTY: judge on",
+  "the discriminators that ARE legible, not on how much of the page is unreadable. If a document",
+  "carries a legible institution name and a balance column, it is a bank_statement at 0.85 or",
+  "above even when half its rows are garbled. Answer 'other' only when the LEGIBLE content fits",
+  "no kind above — never merely because the scan is poor.",
 ].join("\n");
+
+/** The prompt text, exported so a measurement harness can stamp its sha256 on every run.
+ *  A prompt change is otherwise provenance-invisible — see scripts/measure-classify-recall.mjs
+ *  and the engine-id note in lib/classify.mjs. */
+export { SYSTEM_PROMPT };
 
 const MAX_TEXT_CHARS = 24000;
 // A bounded provider call. runClassifyCycle awaits its tasks SEQUENTIALLY and the loop's
@@ -120,10 +177,14 @@ function resolveModel(modelId) {
  * Classify one document's OCR layout text into {kind, confidence, rationale}. `text` is the
  * concatenated region text in reading order; it is capped at ~24k chars (with a truncation
  * note to the model). Deterministic in tests via the __claraModelForTest override.
- * @param {{text:string, modelId:string, timeoutMs?:number, abortSignal?:AbortSignal}} args
+ * `systemOverride` is a MEASUREMENT SEAM and nothing else: `scripts/measure-classify-recall.mjs`
+ * replays a stored input set through the BASELINE prompt and the current one in a single run, so
+ * the delta is measured on identical input rather than asserted. No production call site passes
+ * it — `lib/classify.mjs` calls this function with `{text, modelId}` only, and a cell pins that.
+ * @param {{text:string, modelId:string, timeoutMs?:number, abortSignal?:AbortSignal, systemOverride?:string}} args
  * @returns {Promise<{kind:string, confidence:number, rationale:string}>}
  */
-export async function classifyDocumentText({ text, modelId, timeoutMs, abortSignal }) {
+export async function classifyDocumentText({ text, modelId, timeoutMs, abortSignal, systemOverride }) {
   const truncated = String(text ?? "").length > MAX_TEXT_CHARS;
   const body = String(text ?? "").slice(0, MAX_TEXT_CHARS);
   const prompt = [
@@ -140,6 +201,7 @@ export async function classifyDocumentText({ text, modelId, timeoutMs, abortSign
   const budget = Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : TIMEOUT_MS;
   const timer = AbortSignal.timeout(budget);
   const signal = abortSignal ? AbortSignal.any([abortSignal, timer]) : timer;
-  const { object } = await generateObject({ model: resolveModel(modelId), schema, system: SYSTEM_PROMPT, prompt, abortSignal: signal });
+  const system = typeof systemOverride === "string" && systemOverride.length > 0 ? systemOverride : SYSTEM_PROMPT;
+  const { object } = await generateObject({ model: resolveModel(modelId), schema, system, prompt, abortSignal: signal });
   return object;
 }
