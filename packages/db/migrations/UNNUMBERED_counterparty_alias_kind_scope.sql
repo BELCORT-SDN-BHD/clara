@@ -13,18 +13,13 @@
 -- widened from ('vendor') to ('vendor','customer') at 0015:160, and `clara._resolve_counterparty`
 -- is kind-scoped at every arm (`cp.kind=v_kind`, live body 0015:1128-1235).
 --
--- MEASURED ON A RIG, NOT REASONED ABOUT. On a chain migrated to 0164, one client can hold a
--- VENDOR and a CUSTOMER of the same normalised name -- the counterparties uniques admit it, which
--- is correct -- and the moment either identity's former or trade name is written as an ALIAS the
--- two collide across kinds on this index. The probe that showed it also showed what PostgreSQL
--- puts in the error's `constraint` field, which is the fact the runtime's new error map is keyed
--- on (autoDraft.v10.uniques.ts):
---
---   uq_counterparties_client_unregistered_name            -> 23505, constraint reported verbatim
---   uq_counterparties_client_registration                 -> 23505, constraint reported verbatim
---   cross-kind customer of the same name                  -> ADMITTED (kind-scoped, correct)
---   uq_counterparty_aliases_live_name, SAME kind          -> 23505 (correct; it must still refuse)
---   uq_counterparty_aliases_live_name, CROSS kind         -> 23505 (THE HOLE)
+-- MEASURED ON A RIG, NOT REASONED ABOUT. On a chain migrated to 0164 one client can hold a VENDOR
+-- and a CUSTOMER of the same normalised name -- the counterparties uniques admit it, correctly --
+-- and the moment either identity's former or trade name is written as an ALIAS the two collide
+-- across kinds on this index (SAME-kind 23505 correct; CROSS-kind 23505 = THE HOLE). The probe
+-- also showed what PostgreSQL puts in the error's `constraint` field, which is what the runtime's
+-- new error map is keyed on (autoDraft.v10.uniques.ts); the pair of cells is
+-- packages/db/tests/counterparty-alias-kind.test.mjs ak.6-ak.10.
 --
 -- The three sites that write an alias each pre-check KIND-BLIND and so inherit the hole:
 -- `rename_counterparty` (0011:1801-1810, refuses CLR23 alias_collision), `merge_counterparties`
@@ -33,25 +28,36 @@
 --
 -- WHAT THIS FILE DOES NOT CLAIM. The autoDraft DRAFT path writes no alias: `wake_draft_entry` ->
 -- `_draft_entry_core` calls `_resolve_counterparty`, which only READS, and the counterparty BIRTH
--- happens on APPROVE (`_approve_entry_core`, 0037:1866-1878, which inserts into `counterparties`).
--- So this index is not what refused the beta walk's sales invoice; it is the wall behind the
--- masked message, and the runtime half of this PR is what makes whichever wall fires readable.
--- The handover row H-17 states its own diagnosis was made by code reading, and that stands.
+-- happens on APPROVE (`_approve_entry_core`, 0037:1866-1878). So this index is not what refused
+-- the beta walk's sales invoice; it is the wall behind the masked message, and the runtime half of
+-- this PR is what makes whichever wall fires readable. H-17 states its own diagnosis was made by
+-- code reading, and that stands.
 --
 -- THE CHOSEN SHAPE, AND THE ONE IT BEAT. A generated column cannot reference another table, so
 -- `kind` is a real column with (a) a BEFORE INSERT trigger that DERIVES it from the parent, so no
 -- existing writer changes, and (b) a composite FOREIGN KEY `(counterparty_id, kind)` ->
 -- `counterparties(id, kind)`, so congruence is STRUCTURAL rather than trigger-maintained. The
--- alternative the map raised -- leave the index alone and widen the three sites' pre-checks -- was
--- rejected: three pre-checks are three chances to drift, and the index is the only thing that
--- binds a writer nobody has written yet.
+-- alternative -- leave the index alone and widen the three sites' pre-checks -- was rejected:
+-- three pre-checks are three chances to drift, and the index is the only thing that binds a
+-- writer nobody has written yet.
 --
--- CONGRUENCE CANNOT DRIFT, AND THAT IS READ OFF A LIVE BODY RATHER THAN ASSUMED.
--- `clara._tf_counterparty_update_0011` is a positive column WHITELIST, and its live body admits
--- only {name, name_normalized, payment_terms_days, updated_at} on the non-merge arm and
--- {merged_into, retired_at, updated_at} on the merge arm. `kind` is in NEITHER, so a
--- counterparty's kind is immutable after birth and an alias's copy can never fall out of step.
--- The FK's NO ACTION is a second wall behind that one, not the first.
+-- CONGRUENCE CANNOT DRIFT, READ OFF A LIVE BODY RATHER THAN ASSUMED.
+-- `clara._tf_counterparty_update_0011` is a positive column WHITELIST admitting only
+-- {name, name_normalized, payment_terms_days, updated_at} / {merged_into, retired_at,
+-- updated_at}. `kind` is in NEITHER, so a counterparty's kind is immutable after birth and an
+-- alias's copy can never fall out of step. Prestate P5 re-derives that at apply time. The FK's
+-- NO ACTION is the second wall behind it, not the first.
+--
+-- `0062`'s NAME-ONLY GUARD IS UNTOUCHED AND STILL RAISES ON ITS OWN (review-556 item 3).
+-- `t_counterparties_name_only_guard` (0062:252-255) is a BEFORE INSERT OR UPDATE trigger on
+-- `clara.counterparties`, named so it sorts BEFORE `t_counterparties_update_0011` (0062's S4.2
+-- asserts that ordering from the catalog). This file adds NO trigger to `counterparties` -- only
+-- to `counterparty_aliases` -- so that ordering is unaffected, and the one thing it does add to
+-- `counterparties` is a UNIQUE constraint, which is not in the trigger namespace at all. The
+-- guard's own subject is disjoint from this file's: it refuses a REGISTRATION or TIN on a
+-- customer of a `name_only` client (token `customer_identity_name_only`); this file touches
+-- neither identifier, and `kind` is the column the guard READS to decide it applies -- never one
+-- it may see change, since 0011's whitelist above forbids that.
 --
 -- ==============================================================================================
 -- PART B -- H-19, THE SALES-LANE FLIP HAS NO HUMAN DOOR
@@ -63,30 +69,29 @@
 -- the owner/deploy connection.
 --
 -- This file does NOT grant that signature -- doing so would red 0046's cell, correctly. It adds a
--- NEW owner-floored wrapper that takes no firm at all: the firm comes from `_human_ctx`, so a
--- caller cannot name someone else's. The original stays ungranted and unwalled, and its cell stays
--- green; the wrapper is the only human path.
+-- NEW owner-floored wrapper that takes no firm at all (the firm comes from `_human_ctx`, so a
+-- caller cannot name someone else's) plus the READ that control re-reads (section 8). The
+-- original stays ungranted and unwalled and its cell stays green; the wrapper is the only human
+-- path.
 --
 -- DELIBERATE DEVIATION FROM THE ORDER'S SIGNATURE, STATED RATHER THAN QUIETLY MADE. The order
 -- names `set_firm_sales_lane_activation(p_active, p_watermark, p_op_key)`. `p_reason` is added,
--- because the inner verb REQUIRES a non-blank reason (CLR10) and 0046:5.4's own header gives the
+-- because the inner verb REQUIRES a non-blank reason (CLR10) and 0046 §5.4's own header gives the
 -- reason for the reason: "who turned the unattended sales drafter on, when, and why is a question
--- this product will be asked". A three-argument wrapper could only satisfy that by inventing a
+-- this product will be asked". A three-argument wrapper could satisfy that only by INVENTING a
 -- reason string, and a fabricated sentence in an append-only audit log is worse than an extra
--- parameter. Flagged in the PR body for the owner to overrule if that is wrong.
+-- parameter. Flagged in the PR body for the owner to overrule.
 --
--- FRONTEND HOME (.claude/rules/db-migrations.md). The firm Settings panel -- the owner-only
--- section of `apps/web`'s firm settings journey, alongside the other firm-level switches; a later
--- web lane builds it. The control is an ordinary `lib/doors.ts` `callDoor` with a REQUIRED reason
--- field, a verbatim DoorRefusal render, and a re-read of the firm_limits row after the act. It is
--- owner-only in the UI because it is owner-only here, not the other way round (ADR-0078 decision
--- 2: owner alone holds the operator-tier acts).
+-- FRONTEND HOME (.claude/rules/db-migrations.md): the firm Settings panel, owner-only section; a
+-- later web lane builds it. An ordinary `lib/doors.ts` `callDoor` with a REQUIRED reason field, a
+-- verbatim DoorRefusal render, and a re-read of `clara.firm_sales_lane_visible` (section 8) after
+-- the act. Owner-only in the UI because it is owner-only here, not the other way round (ADR-0078
+-- decision 2: owner alone holds the operator-tier acts).
 --
--- D1 INVENTORY: EMPTY. No `create or replace` of any existing body; every object below is new or
--- an additive ALTER. LOCK PROFILE, stated because it is not free: the ADD COLUMN, the two ADD
--- CONSTRAINTs and the index re-key each take ACCESS EXCLUSIVE on their table for the length of
--- the statement, so this file wants a brief write pause on `counterparty_aliases` and
--- `counterparties` on a live book -- a lock window, not a D1 body-replacement quiesce.
+-- D1 INVENTORY: EMPTY -- no `create or replace` of any existing body. LOCK PROFILE, stated because
+-- it is not free: the ADD COLUMN, the two ADD CONSTRAINTs and the index re-key each take ACCESS
+-- EXCLUSIVE on their table for the length of the statement, so this file wants a brief write
+-- pause on `counterparty_aliases` and `counterparties` -- a lock window, not a D1 quiesce.
 
 set local statement_timeout = '10min';   -- precautionary: the index rebuild is the only heavy
                                           -- statement and today's estate is small. Load-bearing
@@ -292,27 +297,15 @@ begin
   return new;
 end $$;
 
--- THE REVOKE IS NOT DECORATION, AND ITS ABSENCE WAS A REAL DEFECT HERE. The first cut of this
--- file carried no revoke and leaned on 0004:752 / 0009:2889 / 0011:4010's `alter default
--- privileges for role clara_fn_owner in schema clara revoke execute on functions from public`.
--- Applied through the MIGRATION RUNNER -- the path a real deploy takes -- this function landed
--- with a NULL `proacl`, which IS PUBLIC, on a SECURITY DEFINER body; `clara_stripe_webhook`'s
--- closed-world routine census (checkout-gate-c2 cell c2.8) and C-3's c3.1 caught it on a fresh
--- estate run.
---
--- AND THE REASON IS ALREADY WRITTEN DOWN IN THIS REPO, in rig-isolation.test.mjs's T17b: "ALTER
--- DEFAULT PRIVILEGES ... REVOKE EXECUTE FROM PUBLIC is a confirmed NO-OP for that hardwired
--- default (verified on PG16/17: it materializes no pg_default_acl entry)". Measured again here:
--- `pg_default_acl` is EMPTY on a fully migrated database. So that declaration could never have
--- done this job, in any path -- an explicit revoke is the only mechanism, which is why every
--- other function in this chain writes one out, and so does this one now.
---
--- (A hand-applied psql run of the first cut DID leave `{clara_fn_owner=X/clara_fn_owner}` on
--- this function. That rig had a full estate suite run against it afterwards, so the cause is not
--- pinned and is deliberately NOT claimed here; what is claimed is the runner measurement above
--- and T17b's mechanism, both of which point the same way.)
---
--- The tail asserts the outcome rather than trusting this line, and cell ak.22 reads the object.
+-- THE REVOKE IS NOT DECORATION, AND ITS ABSENCE WAS A REAL DEFECT HERE. The first cut leaned on
+-- 0004:752 / 0009:2889 / 0011:4010's `alter default privileges ... revoke execute on functions
+-- from public`; through the MIGRATION RUNNER this function landed with a NULL `proacl`, which IS
+-- PUBLIC, on a SECURITY DEFINER body -- caught by two closed-world routine censuses
+-- (checkout-gate-c2 c2.8, c3.1) on a fresh estate run. The reason is already written down in
+-- rig-isolation.test.mjs's T17b: that declaration is "a confirmed NO-OP for [PostgreSQL's]
+-- hardwired default (verified on PG16/17: it materializes no pg_default_acl entry)" -- measured
+-- again here, `pg_default_acl` is EMPTY on a migrated database. An explicit revoke is the only
+-- mechanism. The tail asserts the outcome and cell ak.22 reads the object.
 revoke all on function clara._tf_counterparty_alias_kind() from public;
 
 create trigger t_counterparty_aliases_kind_derive before insert on clara.counterparty_aliases
@@ -340,6 +333,14 @@ begin
   -- at owner and nothing lower; 0046 §5.4 calls this switch an emergency de-activation control
   -- once the lane is open, which is not a bookkeeper's act and not an admin's.
   c := clara._human_ctx(clara.role_rank('owner'));
+  -- THE HOUSE op_key GUARD, in the sibling's own position and wording (0046:1874, the backfill
+  -- door in this same file). Without it a null or blank key reaches `clara._reserve_op`, whose
+  -- op_receipts key is NOT NULL -- so the caller would get a constraint error instead of the
+  -- typed CLR10 every other door gives for the same mistake, and a blank key would be a REAL
+  -- key that every future blank-key call replays. Review-556 item 1.
+  if p_op_key is null or btrim(p_op_key)='' then
+    raise exception 'op_key is required' using errcode='CLR10';
+  end if;
   v_reason := nullif(btrim(coalesce(p_reason,'')),'');
   if v_reason is null then
     raise exception 'a reason is required to move the sales-lane activation'
@@ -366,6 +367,58 @@ end $$;
 
 revoke all on function clara.set_firm_sales_lane_activation(boolean,timestamptz,text,text) from public;
 grant execute on function clara.set_firm_sales_lane_activation(boolean,timestamptz,text,text) to clara_authenticated;
+
+-- ==============================================================================================
+-- 8. H-19's READ -- the row the Settings control re-reads after the act. Review-556 item 2.
+--
+-- IT WAS MISSING, AND THE CLAIM THAT NEEDED IT WAS ALREADY IN THIS FILE'S HEADER. Measured:
+-- `clara.firm_limits` carries NO grant and NO view anywhere, and `apps/web` names neither
+-- `firm_limits` nor `sales_lane_active` -- so the promised re-read had nothing to read. A door
+-- whose receipt the caller cannot verify is the no-optimistic-UI law's own failure case, so the
+-- read lands beside the door rather than being owed to a later lane.
+--
+-- THE PATTERN IS CITED, NOT INVENTED: `clara.counterparty_aliases_visible` (0145:960-964) --
+-- `create view ... with (security_barrier)`, the firm scope as a predicate on `clara.jwt_firm()`,
+-- `grant select ... to clara_authenticated`, nothing else widened. The floor is INLINED as that
+-- predicate and is NOT a `clara._human_ctx` call: a view's predicate evaluates in the CALLER's
+-- session and `_human_ctx` holds no application-role grant, so calling it here would be 42501 for
+-- every human reader. `clara.jwt_firm()` IS granted to clara_authenticated (measured), which is
+-- why the sibling view can rely on it.
+--
+-- FORCE RLS IS WHY THE OWNER MATTERS. `firm_limits` is `force row level security` with a single
+-- `p_firm_limits_owner` policy (`for all to clara_fn_owner using (true)`), and force RLS binds the
+-- table owner too -- so this view works only because it is created under `set role clara_fn_owner`
+-- and therefore reads under a role that policy admits. Measured, not assumed; cell ak.23 reads it
+-- as a real human rather than trusting this paragraph.
+--
+-- IT PROJECTS THE LANE FIELDS AND NOTHING ELSE -- `firm_limits` also carries the concurrency and
+-- sweep governors, a different subject with a different audience.
+--
+-- `limits_updated_at` IS DELIBERATELY NOT "when the lane changed". `firm_limits.updated_at` moves
+-- on ANY write to the row, so a UI labelling it "activated at" would assert what the column does
+-- not say. WHO moved the lane and WHEN is on the Activity timeline (one `clara._audit` row per
+-- act, plus the inner verb's own before/after row, 0046:1859-1861). ZERO ROWS is a real answer,
+-- not an error: a firm that never touched the lane has no row, and the face renders "never
+-- activated". Both shapes are celled.
+-- ==============================================================================================
+create view clara.firm_sales_lane_visible with (security_barrier) as
+  select fl.firm_id,
+         fl.sales_lane_active,
+         fl.sales_admission_watermark,
+         fl.updated_at as limits_updated_at
+    from clara.firm_limits fl
+   where fl.firm_id = clara.jwt_firm();
+grant select on clara.firm_sales_lane_visible to clara_authenticated;
+
+comment on view clara.firm_sales_lane_visible is
+  'H-19: the CURRENT sales-lane state for the caller''s own firm, and nothing else. The read the
+   firm Settings control re-reads after calling clara.set_firm_sales_lane_activation. Scoped by
+   clara.jwt_firm() in the view predicate (the clara.counterparty_aliases_visible idiom, 0145:960),
+   never by a _human_ctx call -- a view evaluates in the caller''s session and _human_ctx holds no
+   application-role grant. limits_updated_at is firm_limits.updated_at, which moves on ANY write to
+   that row: it is NOT "when the lane changed". Who moved the lane and when is on the Activity
+   timeline (one clara._audit row per act, plus the inner verb''s own before/after row). No row
+   means the firm has never touched the lane, which the face renders as "never activated".';
 
 reset role;
 
@@ -484,8 +537,35 @@ begin
     end if;
   end loop;
 
+  -- (T6) H-19's READ. The view exists, projects the lane fields and NOTHING else, is reachable by
+  -- clara_authenticated alone, PUBLIC holds nothing, and the base table gained NO grant -- the
+  -- view is the only widening. Review-556 item 2.
+  select string_agg(column_name, ',' order by ordinal_position) into v_def
+    from information_schema.columns
+   where table_schema='clara' and table_name='firm_sales_lane_visible';
+  if v_def is distinct from 'firm_id,sales_lane_active,sales_admission_watermark,limits_updated_at' then
+    raise exception 'alias-kind tail: firm_sales_lane_visible does not project exactly the lane fields (found: %)', coalesce(v_def,'ABSENT');
+  end if;
+  if not has_table_privilege('clara_authenticated','clara.firm_sales_lane_visible','select') then
+    raise exception 'alias-kind tail: clara_authenticated cannot SELECT the sales-lane read';
+  end if;
+  for r in select unnest(array['clara_runtime','clara_agent_ro','clara_wake_interactive',
+                              'clara_wake_proactive','clara_freeform_ro']) as role
+  loop
+    if has_table_privilege(r.role,'clara.firm_sales_lane_visible','select') then
+      raise exception 'alias-kind tail: % can SELECT the sales-lane read -- it is the human lane alone', r.role;
+    end if;
+  end loop;
+  if has_table_privilege('public','clara.firm_sales_lane_visible','select') then
+    raise exception 'alias-kind tail: PUBLIC holds SELECT on the sales-lane read';
+  end if;
+  select coalesce(relacl::text,'(none)') into v_def from pg_class where oid='clara.firm_limits'::regclass;
+  if v_def <> '(none)' then
+    raise exception 'alias-kind tail: clara.firm_limits itself gained a grant (%) -- the VIEW is the only widening', v_def;
+  end if;
+
   select string_agg(distinct kind, ',' order by kind) into v_kinds from clara.counterparty_aliases;
-  raise notice 'alias-kind tail: OK -- uq_counterparty_aliases_live_name is now (client_id, kind, alias_normalized) WHERE retired_at IS NULL; % alias row(s) carry a kind (distinct kinds: %) and NONE disagrees with its parent; t_counterparty_aliases_update is enabled again; the derive trigger and the composite FK (counterparty_id, kind) -> counterparties(id, kind) are installed; the NEW wrapper set_firm_sales_lane_activation(boolean,timestamptz,text,text) is executable by clara_authenticated ONLY, PUBLIC is refused, and the ORIGINAL set_sales_lane_activation(uuid,...) is still reachable from no application role.',
+  raise notice 'alias-kind tail: OK -- uq_counterparty_aliases_live_name is now (client_id, kind, alias_normalized) WHERE retired_at IS NULL; % alias row(s) carry a kind (distinct kinds: %) and NONE disagrees with its parent; t_counterparty_aliases_update is enabled again; the derive trigger and the composite FK (counterparty_id, kind) -> counterparties(id, kind) are installed; the NEW wrapper set_firm_sales_lane_activation(boolean,timestamptz,text,text) is executable by clara_authenticated ONLY, PUBLIC is refused, and the ORIGINAL set_sales_lane_activation(uuid,...) is still reachable from no application role; the READ clara.firm_sales_lane_visible projects exactly (firm_id, sales_lane_active, sales_admission_watermark, limits_updated_at), is SELECTable by clara_authenticated alone with PUBLIC refused, and clara.firm_limits itself gained NO grant.',
     (select count(*) from clara.counterparty_aliases), coalesce(v_kinds, '(none -- table empty)');
 end
 $tail$;

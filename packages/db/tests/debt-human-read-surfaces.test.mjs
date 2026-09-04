@@ -244,6 +244,14 @@ test("debt-C2 · users_visible: exactly id + display_name -- email is not just p
 // tranche-2 is expected to add firm_registration_requests_visible later, already designed as
 // security_barrier) is exactly what THIS file would then require too, correctly, once it
 // lands -- not silently missed.
+//
+// AND THAT IS EXACTLY WHAT KEEPS HAPPENING, WHICH IS THE MECHANISM WORKING. The roster below is
+// now FOURTEEN: P4 tranche-2 landed two (the anticipated firm_registration_requests_visible and
+// the unanticipated counterparty_aliases_visible), and H-19 landed a fourteenth --
+// firm_sales_lane_visible, the read the owner-floored sales-lane control re-reads after its act.
+// It was built on counterparty_aliases_visible's own shape deliberately, so it matches the
+// predicate above and joins this family rather than escaping it: a new firm-scoped human read
+// that did NOT show up here would be the finding, not the one that did.
 // ---------------------------------------------------------------------------------------
 
 const HRD_A_FAMILY_PREDICATE = `
@@ -260,7 +268,7 @@ async function hrdAFamily() {
   return r.rows.map((x) => x.relname);
 }
 
-test("debt-BAR1 · 裁-15 estate census — EVERY member of the catalog-derived same-shape family (thirteen once P4 tranche-2 lands) carries security_barrier, and the reloption is proven to buy pushdown-ordering, not target-list masking", async (t) => {
+test("debt-BAR1 · 裁-15 estate census — EVERY member of the catalog-derived same-shape family (fourteen since H-19 landed the sales-lane read) carries security_barrier, and the reloption is proven to buy pushdown-ordering, not target-list masking", async (t) => {
   if (gate(t)) return;
   const family = await hrdAFamily();
   assert.deepEqual(family, [
@@ -270,8 +278,9 @@ test("debt-BAR1 · 裁-15 estate census — EVERY member of the catalog-derived 
     "document_intakes_visible", "document_processing_tasks_visible",
     "firm_invites_visible", "firm_members_visible", "firm_open_questions_visible",
     "firm_registration_requests_visible",
+    "firm_sales_lane_visible",
     "users_visible",
-  ], "the catalog-derived family must be exactly the thirteen expected members, closed-world -- P4 tranche-2 (0145) landed both firm_registration_requests_visible (anticipated by this file's own header comment) and counterparty_aliases_visible (a round-4 addition this file's author could not have known about -- 裁-11's masked-view mechanism was chosen AFTER this file merged, to satisfy wave-a-shape's fn-fronted-only invariant)");
+  ], "the catalog-derived family must be exactly the fourteen expected members, closed-world -- P4 tranche-2 (0145) landed both firm_registration_requests_visible (anticipated by this file's own header comment) and counterparty_aliases_visible (a round-4 addition this file's author could not have known about -- 裁-11's masked-view mechanism was chosen AFTER this file merged, to satisfy wave-a-shape's fn-fronted-only invariant), and H-19 landed firm_sales_lane_visible -- the read the owner-floored sales-lane control re-reads after its act, built on counterparty_aliases_visible's own shape, which is why it joins this family rather than escaping it");
 
   const r = await rootQuery(
     `select c.relname, c.reloptions

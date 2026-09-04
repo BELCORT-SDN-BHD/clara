@@ -215,6 +215,57 @@ test("h17.15 repoint: autoDraft_v9 stays EXPORTED and reachable — parked runs 
   assert.notEqual(v9Mod.autoDraft_v9, v10Mod.autoDraft_v10, "two distinct bodies, both reachable");
 });
 
+// ============================================================================================
+// 6. THE RETRY'S SECOND HALF (review-556 item 4) — what the model DOES with a retryable arm
+//
+// Cells 2-13 prove the vocabulary. These two prove the consequence, through the SAME reducer the
+// workflow settles from. NOTE ON A NAME: review-556 called it `parseAutoDraftOutcome`; the actual
+// export is `toAutoDraftOutcome` (autoDraft.v9.prompt.ts:381), which v10 reuses unchanged —
+// spelling is not identity, so this file drives the real one.
+// ============================================================================================
+
+const draftResult = (output) => ({ type: "tool-result", toolName: prompt.DRAFT_TOOL, output });
+const aliasRefusal = () => map10(u(ALIAS));
+const jeReview = (entryId) => ({
+  type: "je_review", entry_id: entryId, revision_token: "rt-1", client_id: "c-1",
+  document_id: "d-1", provenance_tier: "verified",
+});
+
+test("h17.17 an alias_collision followed by a successful draft settles DRAFTED — the retry lands", () => {
+  // The whole point of making the arm retryable: the model is told to re-resolve against the
+  // existing record and draft against THAT one, and when it does, the run settles `drafted`.
+  const outcome = prompt.toAutoDraftOutcome([
+    draftResult({ ok: false, refusal: aliasRefusal() }),
+    draftResult({ ok: true, je_review: jeReview("entry-abc") }),
+  ]);
+  assert.equal(outcome.kind, "drafted");
+  assert.equal(outcome.entryId, "entry-abc");
+  // And the DISCRIMINATOR: under v9 the same first result was a question-shaped CLR23, so the
+  // reducer's `refusedQuestionShaped` slot filled — yet `drafted` still outranks it. What v9
+  // actually cost was the OPEN QUESTION on the give-up path below, not this ordering.
+  const v9Same = prompt.toAutoDraftOutcome([
+    draftResult({ ok: false, refusal: map9(u(ALIAS)) }),
+    draftResult({ ok: true, je_review: jeReview("entry-abc") }),
+  ]);
+  assert.equal(v9Same.kind, "drafted", "precedence is byte-carried; the vocabulary is what moved");
+});
+
+test("h17.18 a GIVE-UP run settles refused and, under v10, never reaches openSweepQuestionStep", () => {
+  // autoDraft.v10.ts:179-180 opens a scoped human question only when `isQuestionShaped(refusal)`.
+  // The alias arm is the reason that line now stays quiet: same reducer, same outcome kind, and
+  // the ONE thing that changed is whether the workflow asks a person something they cannot answer.
+  const outcome = prompt.toAutoDraftOutcome([draftResult({ ok: false, refusal: aliasRefusal() })]);
+  assert.equal(outcome.kind, "refused");
+  assert.equal(outcome.refusal.reason, "alias_collision");
+  assert.equal(isQuestionShaped(outcome.refusal), false,
+    "v10: the give-up path settles failed with a durable reason and opens NO question");
+
+  const v9Outcome = prompt.toAutoDraftOutcome([draftResult({ ok: false, refusal: map9(u(ALIAS)) })]);
+  assert.equal(v9Outcome.kind, "refused");
+  assert.equal(isQuestionShaped(v9Outcome.refusal), true,
+    "v9: the identical give-up path DID open a question — this is the H-17 defect, one line apart");
+});
+
 test("h17.16 the v9 closure is untouched: its errors module still answers the OLD way", () => {
   // The freeze manifest is the real guard (append-only vs origin/main); this is the behavioural
   // twin of it, so a reviewer can see that "v9 is frozen" is a fact about behaviour, not only

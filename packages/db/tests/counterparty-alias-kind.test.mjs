@@ -22,7 +22,7 @@ import {
   opk, rootQuery, seedAdmission,
 } from "./rig-fixtures.mjs";
 
-const EXPECTED_CELLS = 22;
+const EXPECTED_CELLS = 28;
 
 let live = false;
 let executed = 0;
@@ -44,16 +44,17 @@ async function cohortApplied() {
                 and conname='fk_counterparty_aliases_kind') as kind_fk,
        exists (select 1 from pg_trigger where tgrelid='clara.counterparty_aliases'::regclass
                 and tgname='t_counterparty_aliases_kind_derive') as derive_trigger,
-       to_regprocedure('clara.set_firm_sales_lane_activation(boolean,timestamptz,text,text)') is not null as wrapper`,
+       to_regprocedure('clara.set_firm_sales_lane_activation(boolean,timestamptz,text,text)') is not null as wrapper,
+       to_regclass('clara.firm_sales_lane_visible') is not null as lane_read`,
   );
-  const { kind_column, kind_fk, derive_trigger, wrapper } = rows.rows[0];
-  const present = [kind_column, kind_fk, derive_trigger, wrapper].filter(Boolean).length;
-  if (present !== 0 && present !== 4) {
+  const { kind_column, kind_fk, derive_trigger, wrapper, lane_read } = rows.rows[0];
+  const present = [kind_column, kind_fk, derive_trigger, wrapper, lane_read].filter(Boolean).length;
+  if (present !== 0 && present !== 5) {
     throw new Error(
-      `alias-kind cohort is PARTIAL: kind_column=${kind_column} kind_fk=${kind_fk} derive_trigger=${derive_trigger} wrapper=${wrapper}`,
+      `alias-kind cohort is PARTIAL: kind_column=${kind_column} kind_fk=${kind_fk} derive_trigger=${derive_trigger} wrapper=${wrapper} lane_read=${lane_read}`,
     );
   }
-  return present === 4;
+  return present === 5;
 }
 
 before(async () => { live = await cohortApplied(); });
@@ -431,4 +432,109 @@ cell("ak.22 ACL: the derive trigger function is reachable by NOBODY — not PUBL
   assert.equal(acl.public_execute, false, "PUBLIC must hold no EXECUTE on a SECURITY DEFINER body");
   assert.equal(acl.roles_that_can, null,
     `no application role may EXECUTE the derive trigger function, found: ${acl.roles_that_can}`);
+});
+
+// =============================================================================================
+// E. THE op_key CONTRACT (review-556 item 1) — the guard, and the replay it exists to make safe
+// =============================================================================================
+
+const auditRows = async (firm) => (await rootQuery(
+  "select count(*)::int n from clara.audit_log where firm_id=$1 and fn='set_firm_sales_lane_activation'",
+  [firm],
+)).rows[0].n;
+
+cell("ak.23 a null or blank op_key is refused CLR10, and nothing is written", async () => {
+  const w = await firmWithRoles("opkey");
+  for (const key of [null, "", "   "]) {
+    await assertRaises("CLR10", () => flip(w.owner, true, null, "trying a bad key", key),
+      `op_key ${JSON.stringify(key)}`);
+  }
+  assert.equal(await limitsOf(w.firm), null, "a refused call must precede every write");
+  assert.equal(await auditRows(w.firm), 0, "and must leave no audit row");
+});
+
+cell("ak.24 REPLAY: the door called TWICE under one op_key returns the stored result and audits ONCE", async () => {
+  // This is what the guard in ak.23 protects. `_reserve_op` keys on (firm, fn, op_key), so a
+  // blank key would be a REAL key that every later blank-key call replays — a second, different
+  // flip would silently return the FIRST one's receipt. The two halves belong together.
+  const w = await firmWithRoles("replay");
+  const key = opk("sl-replay");
+  const first = await flip(w.owner, true, "2026-05-01T00:00:00Z", "opening for the pilot", key);
+  const second = await flip(w.owner, true, "2026-05-01T00:00:00Z", "opening for the pilot", key);
+  assert.deepEqual(second.rows[0].r, first.rows[0].r, "the replay must return the STORED result");
+  assert.equal(await auditRows(w.firm), 1, "the replayed call must not write a second audit row");
+  const row = await limitsOf(w.firm);
+  assert.equal(row.sales_lane_active, true);
+  assert.equal(new Date(row.sales_admission_watermark).toISOString(), "2026-05-01T00:00:00.000Z");
+});
+
+// =============================================================================================
+// F. H-19's READ (review-556 item 2) — clara.firm_sales_lane_visible
+// =============================================================================================
+
+const readLane = (sub) => humanQuery(sub, "select * from clara.firm_sales_lane_visible");
+
+cell("ak.25 a firm member reads their OWN lane row, and it carries the act's watermark", async () => {
+  const w = await firmWithRoles("read-own");
+  const mark = "2026-04-02T09:30:00Z";
+  await flip(w.owner, true, mark, "opening for the read cell", opk("sl"));
+  // Read as the BOOKKEEPER, not the owner: the door is owner-floored, the READ is not — every
+  // member of the firm may see the lane's current state, which is what a Settings face shows.
+  const r = await readLane(w.keeper);
+  assert.equal(r.rowCount, 1, "a member must see exactly their own firm's row");
+  assert.equal(r.rows[0].firm_id, w.firm);
+  assert.equal(r.rows[0].sales_lane_active, true);
+  assert.equal(new Date(r.rows[0].sales_admission_watermark).toISOString(), new Date(mark).toISOString());
+  assert.ok(r.rows[0].limits_updated_at instanceof Date, "limits_updated_at must be a real timestamp");
+});
+
+cell("ak.26 a member of ANOTHER firm reads NOTHING — scope, proven against a populated table", async () => {
+  // The discriminating half: firm B is flipped too, so the table is NOT empty when A's member
+  // reads it. An empty-table pass would prove nothing about scoping.
+  const a = await firmWithRoles("read-a");
+  const b = await firmWithRoles("read-b");
+  await flip(a.owner, true, null, "firm A opens", opk("sl"));
+  await flip(b.owner, true, null, "firm B opens", opk("sl"));
+  assert.equal((await rootQuery("select count(*)::int n from clara.firm_limits")).rows[0].n >= 2, true,
+    "both firms must have a row for this cell to discriminate");
+  const seen = await readLane(a.keeper);
+  assert.equal(seen.rowCount, 1, "A's member sees exactly one row");
+  assert.equal(seen.rows[0].firm_id, a.firm, "and it is A's own, never B's");
+});
+
+cell("ak.27 zero rows is the honest answer for a firm that has never touched the lane", async () => {
+  const w = await firmWithRoles("read-none");
+  assert.equal(await limitsOf(w.firm), null, "precondition: no firm_limits row yet");
+  const r = await readLane(w.owner);
+  assert.equal(r.rowCount, 0, "the face renders 'never activated' from an empty read, not an error");
+});
+
+cell("ak.28 the view projects ONLY the lane fields, and only clara_authenticated may select it", async () => {
+  const cols = await rootQuery(
+    `select column_name from information_schema.columns
+      where table_schema='clara' and table_name='firm_sales_lane_visible' order by ordinal_position`,
+  );
+  assert.deepEqual(cols.rows.map((c) => c.column_name),
+    ["firm_id", "sales_lane_active", "sales_admission_watermark", "limits_updated_at"],
+    "firm_limits' concurrency and sweep governors are a different subject and must not leak here");
+  const roles = ["clara_authenticated", "clara_runtime", "clara_agent_ro", "clara_wake_interactive",
+    "clara_wake_proactive", "clara_freeform_ro", "clara_stripe_webhook"];
+  const r = await rootQuery(
+    `select role, has_table_privilege(role, 'clara.firm_sales_lane_visible', 'select') as can
+       from unnest($1::text[]) as role`, [roles],
+  );
+  const byRole = Object.fromEntries(r.rows.map((x) => [x.role, x.can]));
+  assert.equal(byRole.clara_authenticated, true, "the human lane needs the read");
+  for (const role of roles.filter((x) => x !== "clara_authenticated")) {
+    assert.equal(byRole[role], false, `${role} must not reach the lane read`);
+  }
+  const pub = await rootQuery(
+    `select coalesce(has_table_privilege('public', 'clara.firm_sales_lane_visible', 'select'), false) as leaked`,
+  );
+  assert.equal(pub.rows[0].leaked, false, "PUBLIC must hold no SELECT on the view");
+  // And the base table stays ungranted — the view is the ONLY widening.
+  const base = await rootQuery(
+    "select coalesce(relacl::text,'(none)') as acl from pg_class where oid='clara.firm_limits'::regclass",
+  );
+  assert.equal(base.rows[0].acl, "(none)", "clara.firm_limits itself must gain no grant");
 });
