@@ -19,6 +19,7 @@ import {
 import { classifyDocument, setDocumentKind } from "./a21-helpers.mjs";
 import { claimTask } from "./s6-fixtures.mjs";
 import * as wb from "./wave-b/wb-fixtures.mjs";
+import { caught } from "./x56-fixtures.mjs";
 
 let ready = false, world = null;
 
@@ -29,9 +30,10 @@ async function hasDbaCodingLane() {
        (position('_is_codeable_kind' in (select prosrc from pg_proc where oid='clara.list_uncoded_filings(uuid)'::regprocedure)) > 0) as lane,
        (position('_is_codeable_kind' in (select prosrc from pg_proc where oid='clara.list_review_queue(jsonb,jsonb,integer)'::regprocedure)) > 0) as queue,
        (position('open_questions' in (select prosrc from pg_proc where oid='clara.set_document_kind(uuid,text,text,text)'::regprocedure)) > 0) as kind,
-       (position('seed_decision_plan_state' in (select prosrc from pg_proc where oid='clara.coa_chart_state(uuid)'::regprocedure)) > 0) as coa`);
+       (position('seed_decision_plan_state' in (select prosrc from pg_proc where oid='clara.coa_chart_state(uuid)'::regprocedure)) > 0) as coa,
+       (position('onboarding_plan_open' in (select prosrc from pg_proc where oid='clara.apply_coa_template(uuid,uuid,text[],text)'::regprocedure)) > 0) as apply`);
   const x = r.rows[0];
-  return x.lane && x.queue && x.kind && x.coa;
+  return x.lane && x.queue && x.kind && x.coa && x.apply;
 }
 
 before(async () => {
@@ -251,6 +253,13 @@ test("dba.5c the filing leaves needs_you on that ground: the lane no longer repo
 // DBA-6 (H-29) -- THE CoA CHART STATE.
 // =====================================================================================
 
+async function applyTemplate(sub, { client, template, opKey }) {
+  const r = await humanQuery(sub,
+    "select clara.apply_coa_template(p_client => $1, p_template => $2, p_families => null, p_op_key => $3) as r",
+    [client, template, opKey]);
+  return r.rows[0].r;
+}
+
 async function plantPlan(firm, client, { state, seed, committedAt = null, user }) {
   const p = await rootQuery(
     `insert into clara.onboarding_plans(firm_id, client_id, scope_kind, state, committed_at, committed_by)
@@ -266,7 +275,7 @@ async function plantPlan(firm, client, { state, seed, committedAt = null, user }
 const chartState = async (client) =>
   (await rootQuery("select clara.coa_chart_state($1) as r", [client])).rows[0].r;
 
-test("dba.6a H-29: an OPEN plan's answered coa_seed_decision is READ — and the read says the decision is only open", async (t) => {
+test("dba.6a 裁-193: an OPEN plan REPORTS seed_decision_plan_state=open and changes nothing else — the card can say 'decided in the interview' without the read claiming it is settled", async (t) => {
   if (gate(t)) return;
   const owner = world.users.alice;
   const { firm, client } = await freshClient("6a");
@@ -278,14 +287,19 @@ test("dba.6a H-29: an OPEN plan's answered coa_seed_decision is READ — and the
 
   await plantPlan(firm, client, { state: "open", seed: "firm_template", user: owner });
   const now = await chartState(client);
-  assert.equal(now.seed_decision, "firm_template",
-    "the decision the interview recorded is visible while the plan is still open — it read 'undecided' before");
-  assert.equal(now.state, "pending", "so the card can offer the apply instead of saying nobody decided");
   assert.equal(now.seed_decision_plan_state, "open",
-    "AND it says the decision is not committed — an open answer is a real answer but not a settled fact");
+    "the read SAYS a decision was made in the interview — the card can stop claiming 'undecided'");
+  // 裁-193's CONTAINMENT, and it is the point of the ruling: an open plan changes exactly ONE
+  // key. If it reached seed_decision or the six-state `state`, the card would offer an apply
+  // that clara.apply_coa_template refuses.
+  assert.equal(now.state, "undecided", "the six-state verdict is UNCHANGED from main");
+  assert.equal(now.seed_decision, null, "and no decision value leaks out of the open plan");
+  // NULL, not false: seed_wants_template is `dec.seed in (…)` over the COMMITTED CTE, and a
+  // three-valued NULL is exactly what main returns when no committed decision exists.
+  assert.equal(now.seed_wants_template, null, "nor a template intent");
 });
 
-test("dba.6b the precedence control: a COMMITTED decision outranks an OPEN one carrying a different answer", async (t) => {
+test("dba.6b the committed decision reads through, and outranks an open plan sitting beside it", async (t) => {
   if (gate(t)) return;
   const owner = world.users.alice;
   const { firm, client } = await freshClient("6b");
@@ -297,17 +311,19 @@ test("dba.6b the precedence control: a COMMITTED decision outranks an OPEN one c
 
   const r = await chartState(client);
   assert.equal(r.seed_decision, "manual",
-    "the COMMITTED answer wins — widening the read must never demote a committed fact to a draft one");
-  assert.equal(r.seed_decision_plan_state, "committed");
-  assert.equal(r.state, "declined", "and the six-state CASE reads off the committed decision");
+    "the COMMITTED answer reads through — 裁-193 changed the plan-state key, never the decision read");
+  assert.equal(r.seed_decision_plan_state, "committed",
+    "and committed outranks the open plan sitting beside it");
+  assert.equal(r.state, "declined", "the six-state CASE reads off the committed decision");
 });
 
-test("dba.6c a CANCELLED plan's answer is not a decision", async (t) => {
+test("dba.6c a CANCELLED plan is not an onboarding in progress — it reports no plan state at all", async (t) => {
   if (gate(t)) return;
   const owner = world.users.alice;
   const { firm, client } = await freshClient("6c");
   const plan = await plantPlan(firm, client, { state: "open", seed: "firm_template", user: owner });
-  assert.equal((await chartState(client)).state, "pending", "mandatory setup: the open answer reads first");
+  assert.equal((await chartState(client)).seed_decision_plan_state, "open",
+    "mandatory setup: the open plan is reported before it is cancelled");
 
   await rootQuery(
     `update clara.onboarding_plans set state='cancelled', committed_at=null, committed_by=null,
@@ -315,7 +331,54 @@ test("dba.6c a CANCELLED plan's answer is not a decision", async (t) => {
   const r = await chartState(client);
   assert.equal(r.state, "undecided", "a withdrawn onboarding's answer is not a decision anybody stands behind");
   assert.equal(r.seed_decision, null);
-  assert.equal(r.seed_decision_plan_state, null);
+  assert.equal(r.seed_decision_plan_state, null,
+    "and a cancelled plan does not even report a plan state — it is not an onboarding in progress");
+});
+
+// =====================================================================================
+// DBA-9 (裁-193) -- THE WALL. The face is dba6; this is the door.
+// =====================================================================================
+
+test("dba.9a 裁-193: apply_coa_template REFUSES onboarding_plan_open while the plan is open, and admits once it is committed", async (t) => {
+  if (gate(t)) return;
+  const owner = world.users.alice;
+  const { firm, client } = await freshClient("9a");
+  const tpl = (await rootQuery(
+    "select id from clara.coa_templates where scope='platform' and state='published' order by version desc limit 1")).rows[0];
+  assert.ok(tpl, "mandatory setup: the platform starter template is published");
+
+  const plan = await plantPlan(firm, client, { state: "open", seed: "firm_template", user: owner });
+  const refused = await caught(() => applyTemplate(owner, { client, template: tpl.id, opKey: `dba9a-open-${client}` }));
+  assert.ok(refused, "the door REFUSES while the interview is still open — a UI that merely hid the button would not");
+  assert.equal(JSON.parse(refused.detail ?? "{}").reason, "onboarding_plan_open",
+    "by its own typed reason, not a generic error");
+  assert.equal((await rootQuery(
+    "select count(*)::int n from clara.coa_accounts where client_id=$1", [client])).rows[0].n, 0,
+    "and nothing was planted — the rung refuses before the first write");
+
+  // COMMIT the plan, and the SAME call now goes through. Without this the refusal could be
+  // unconditional and the cell above would still pass.
+  await rootQuery(
+    `update clara.onboarding_plans set state='committed', committed_at=now(), committed_by=$2 where id=$1`,
+    [plan, owner]);
+  const ok = await applyTemplate(owner, { client, template: tpl.id, opKey: `dba9a-committed-${client}` });
+  assert.ok(ok, "once committed, the apply proceeds exactly as before");
+  assert.ok((await rootQuery(
+    "select count(*)::int n from clara.coa_accounts where client_id=$1", [client])).rows[0].n > 0,
+    "and the chart is planted");
+});
+
+test("dba.9b a client with NO plan at all is unaffected — the rung refuses an open interview, never an absent one", async (t) => {
+  if (gate(t)) return;
+  const owner = world.users.alice;
+  const { client } = await freshClient("9b");
+  const tpl = (await rootQuery(
+    "select id from clara.coa_templates where scope='platform' and state='published' order by version desc limit 1")).rows[0];
+  const ok = await applyTemplate(owner, { client, template: tpl.id, opKey: `dba9b-${client}` });
+  assert.ok(ok, "no plan, no refusal");
+  assert.ok((await rootQuery(
+    "select count(*)::int n from clara.coa_accounts where client_id=$1", [client])).rows[0].n > 0,
+    "the chart is planted");
 });
 
 // =====================================================================================

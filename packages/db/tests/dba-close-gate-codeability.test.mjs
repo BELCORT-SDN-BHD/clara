@@ -271,13 +271,10 @@ test("dba.3a H-55: an ENROLLED bank account with zero statements reads UNKNOWN a
   await rootQuery(
     `insert into clara.coa_accounts(client_id, firm_id, account_code, name, account_type, is_active, is_bank_account)
        values ($1,$2,'980-DBA3','DB-A rig bank','asset', true, true)`, [fx.client, firm]);
-  await rootQuery(
-    `insert into clara.bank_institutions(code, name) select 'DBARIGBANK','DB-A rig institution'
-      where not exists (select 1 from clara.bank_institutions where code='DBARIGBANK')`);
   const acct = (await rootQuery(
     `insert into clara.bank_accounts(firm_id, client_id, bank_code, bank_name_display, account_number,
         account_number_normalized, coa_account_code, created_by, created_at)
-       values ($1,$2,'DBARIGBANK','DB-A rig institution','70001234','70001234','980-DBA3',$3,
+       values ($1,$2,'MBB','Malayan Banking Berhad (Maybank)','70001234','70001234','980-DBA3',$3,
                ($4::date)::timestamptz) returning id`,
     [firm, fx.client, owner, b.s])).rows[0].id;
 
@@ -316,9 +313,6 @@ test("dba.3b the enrolled window is per account: a January registration owes 12 
   const b = await fyBounds(fx.fy);
   const july = `${b.s.slice(0, 4)}-07-10`;
 
-  await rootQuery(
-    `insert into clara.bank_institutions(code, name) select 'DBARIGBANK','DB-A rig institution'
-      where not exists (select 1 from clara.bank_institutions where code='DBARIGBANK')`);
   for (const [code, num, when] of [["981-DBA3", "70002001", b.s], ["982-DBA3", "70002002", july]]) {
     await rootQuery(
       `insert into clara.coa_accounts(client_id, firm_id, account_code, name, account_type, is_active, is_bank_account)
@@ -326,7 +320,7 @@ test("dba.3b the enrolled window is per account: a January registration owes 12 
     await rootQuery(
       `insert into clara.bank_accounts(firm_id, client_id, bank_code, bank_name_display, account_number,
           account_number_normalized, coa_account_code, created_by, created_at)
-         values ($1,$2,'DBARIGBANK','DB-A rig institution',$3,$3,$4,$5,($6::date)::timestamptz)`,
+         values ($1,$2,'MBB','Malayan Banking Berhad (Maybank)',$3,$3,$4,$5,($6::date)::timestamptz)`,
       [firm, fx.client, num, code, owner, when]);
   }
   const r = await rootQuery(
@@ -352,9 +346,6 @@ test("dba.3d the unmeasurable account is an OUTSTANDING ITEM a professional can 
   // TWO enrolled accounts. Account A is covered January-November, so it carries exactly ONE
   // enumerated finding (December's gap). Account B holds no statement at all, so it is the
   // UNMEASURABLE population dba3 added and dba8 makes outstanding.
-  await rootQuery(
-    `insert into clara.bank_institutions(code, name) select 'DBARIGBANK','DB-A rig institution'
-      where not exists (select 1 from clara.bank_institutions where code='DBARIGBANK')`);
   const acct = {};
   for (const [tag, code, num] of [["A", "990-DBAD", "70009001"], ["B", "991-DBAD", "70009002"]]) {
     await rootQuery(
@@ -363,7 +354,7 @@ test("dba.3d the unmeasurable account is an OUTSTANDING ITEM a professional can 
     acct[tag] = (await rootQuery(
       `insert into clara.bank_accounts(firm_id, client_id, bank_code, bank_name_display, account_number,
           account_number_normalized, coa_account_code, created_by, created_at)
-         values ($1,$2,'DBARIGBANK','DB-A rig institution',$3,$3,$4,$5,($6::date)::timestamptz) returning id`,
+         values ($1,$2,'MBB','Malayan Banking Berhad (Maybank)',$3,$3,$4,$5,($6::date)::timestamptz) returning id`,
       [firm, fx.client, num, code, owner, b.s])).rows[0].id;
   }
   for (let m = 1; m <= 11; m++) {
@@ -446,13 +437,10 @@ test("dba.3c the gap arm still measures: an account WITH statements reports its 
   await rootQuery(
     `insert into clara.coa_accounts(client_id, firm_id, account_code, name, account_type, is_active, is_bank_account)
        values ($1,$2,'983-DBA3','DB-A rig bank','asset', true, true)`, [fx.client, firm]);
-  await rootQuery(
-    `insert into clara.bank_institutions(code, name) select 'DBARIGBANK','DB-A rig institution'
-      where not exists (select 1 from clara.bank_institutions where code='DBARIGBANK')`);
   const acct = (await rootQuery(
     `insert into clara.bank_accounts(firm_id, client_id, bank_code, bank_name_display, account_number,
         account_number_normalized, coa_account_code, created_by, created_at)
-       values ($1,$2,'DBARIGBANK','DB-A rig institution','70003001','70003001','983-DBA3',$3,
+       values ($1,$2,'MBB','Malayan Banking Berhad (Maybank)','70003001','70003001','983-DBA3',$3,
                ($4::date)::timestamptz) returning id`,
     [firm, fx.client, owner, b.s])).rows[0].id;
 

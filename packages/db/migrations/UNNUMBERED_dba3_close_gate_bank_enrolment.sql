@@ -394,12 +394,15 @@ begin
   insert into clara.coa_accounts(client_id, firm_id, account_code, name, account_type,
       is_active, is_bank_account)
     values (v_client, v_firm, '900-DBA3', 'dba3 tail bank', 'asset', true, true);
-  insert into clara.bank_institutions(code, name)
-    select 'DBA3BANK', 'dba3 tail institution'
-     where not exists (select 1 from clara.bank_institutions where code = 'DBA3BANK');
+  -- THE INSTITUTION IS 0038'S OWN, NEVER A NEW ONE. clara.bank_institutions is a seeded
+  -- roster with a FROZEN MIRROR in packages/runtime/workflows/statementFacts.v3.header.mjs,
+  -- and packages/runtime's drift guard scans the migration FILES for any that seed it --
+  -- asserting exactly one, 0038. A probe fixture that inserted its own row would make THIS
+  -- file read as a second seeding migration and force that frozen workflow body to a v4,
+  -- which is not what a close-gate migration is entitled to do.
   insert into clara.bank_accounts(firm_id, client_id, bank_code, bank_name_display,
       account_number, account_number_normalized, coa_account_code, created_by, created_at)
-    values (v_firm, v_client, 'DBA3BANK', 'dba3 tail institution', '11112222', '11112222',
+    values (v_firm, v_client, 'MBB', 'Malayan Banking Berhad (Maybank)', '11112222', '11112222',
       '900-DBA3', v_user, timestamptz '2026-01-05 00:00+08')
     returning id into v_acct;
   v_g := clara._close_gate_bank_items(v_client, v_fy);
@@ -432,7 +435,7 @@ begin
     values (v_client, v_firm, '901-DBA3', 'dba3 tail bank 2', 'asset', true, true);
   insert into clara.bank_accounts(firm_id, client_id, bank_code, bank_name_display,
       account_number, account_number_normalized, coa_account_code, created_by, created_at)
-    values (v_firm, v_client, 'DBA3BANK', 'dba3 tail institution', '33334444', '33334444',
+    values (v_firm, v_client, 'MBB', 'Malayan Banking Berhad (Maybank)', '33334444', '33334444',
       '901-DBA3', v_user, timestamptz '2026-07-10 00:00+08');
   select count(*)::int into v_n
     from clara._bank_enrolled_fy_months(v_client, date '2026-01-01', date '2026-12-31')

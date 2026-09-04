@@ -1,46 +1,38 @@
 -- =====================================================================================
--- DB-A / 6 of 7 -- clara.coa_chart_state READS AN OPEN PLAN'S ANSWERED DECISION (H-29).
+-- DB-A / 6 of 9 -- clara.coa_chart_state REPORTS THE OPEN PLAN'S STATE, and reads only
+-- committed ones (H-29, as ruled by 裁-193).
 --
 -- THE DEFECT, and the reported cause is NOT it. The handover reads "the CoA apply row says
--- undecided while the plan is open" and the apps/web helper was suspected. The web helper is
--- faithful: apps/web/lib/onboarding/coa.ts:89 maps r.seed_decision, the row's own key is
--- seed_decision, the interview writes answer:{seed} and the DB reads i.answer->>'seed'. The
--- field names agree. The verdict is DB-computed and the cause is a STATE PREDICATE inside
--- clara.coa_chart_state's `dec` CTE (0156:1080-1088, the only definition -- nothing later
--- re-cuts it, and a full 0001->0164 rig replay pins the sha in the prestate below):
---     where p2.client_id = p_client and p2.scope_kind = 'client'
---       and p2.state = 'committed'
--- While onboarding is IN PROGRESS the plan is `open`, so `dec` returns no row, dec.seed is
--- NULL, and the CASE falls to its final `else 'undecided'`.
+-- undecided while the plan is open" and blames the apps/web helper. The helper is faithful:
+-- lib/onboarding/coa.ts:89 maps r.seed_decision, the row's own key is seed_decision, the
+-- interview writes answer:{seed} and the DB reads i.answer->>'seed'. The verdict is
+-- DB-computed, and its cause is the state predicate in clara.coa_chart_state's `dec` CTE
+-- (0156:1080-1088, the only definition; a full replay to the frontier pins the sha below):
+-- while onboarding is in progress the plan is `open`, `dec` returns no row, and the CASE
+-- falls to `else 'undecided'` -- on a client who HAS decided.
 --
--- WHY IT SHOWS UP AT ALL: the apply control is mounted as an extraControl on the
--- coa_chart_apply row INSIDE the live onboarding checklist
--- (apps/web/components/clara/OnboardingChecklistCard.tsx:283-290), and the interview mints
--- that row while the plan is still open. So on the HAPPY PATH the row is on screen, the
--- decision IS answered, and the DB is structurally unable to say so until commit. 0156's own
--- header states the intent -- "reads the item BY NAME out of the client's latest COMMITTED
--- plan" -- so this is a genuine collision between 0156's read and the control's placement,
--- not a typo.
+-- 裁-193 (owner, 2026-09-04 ≈16:45 MYT) SETTLED WHAT THAT SHOULD MEAN. 裁-23 Q5's "after the
+-- client is created" means AFTER commit_client_onboarding, not after begin_. So the chart is
+-- not appliable while the plan is open, and the fix is NOT to widen the decision read --
+-- an earlier draft of this file did widen it, and that widening is GONE.
 --
--- THE FIX IS A WIDENING WITH A PRECEDENCE, NOT A LOOSENING. A COMMITTED decision still
--- OUTRANKS an open one for the same client, always: the ORDER BY sorts committed first and
--- only then by recency, so a client who committed one answer and later re-opened a plan with
--- a different one still reads the committed answer. An open plan's decision is used ONLY
--- when no committed one exists.
+-- WHAT THIS FILE DOES, THEREFORE, IS SMALLER AND HONEST: every existing key reads exactly as
+-- it does on main (`dec` is byte-identical to 0156's committed-only CTE), and ONE key is
+-- added -- seed_decision_plan_state, fed by its own second CTE -- so the card can say
+-- "decided in the interview -- applies after commit" instead of the false "undecided".
+--   'committed'  a committed decision exists (committed WINS whenever both are true)
+--   'open'       only an OPEN plan has answered coa_seed_decision
+--   NULL         neither has
 --
--- A CANCELLED PLAN IS NOT READ. `state in ('committed','open')` deliberately excludes
--- 'cancelled' (onboarding_plans_state_check admits exactly those three): a withdrawn
--- onboarding's answer is not a decision anybody stands behind.
+-- THE WALL IS NOT HERE. A face that merely declines to offer the apply is a UI-only
+-- predicate, and PRD §6 puts the wall in the DB. clara.apply_coa_template never consulted the
+-- plan at all (0156:726-910 -- op_key, family nulls, client-in-firm, template visible and
+-- published, empty chart, no adopted adoption, and nothing else, read this session), so the
+-- refusal is minted in the SIBLING file dba9, which is where 裁-193 is actually enforced.
+-- This file is the face's half and says so.
 --
--- AN OPEN-PLAN DECISION IS NOT THE SAME FACT AS A COMMITTED ONE, and the read says so rather
--- than quietly presenting one as the other. seed_decision_plan_state joins the payload
--- carrying 'committed' or 'open' (or NULL when there is no decision at all), so the card can
--- render "decided in the interview, not yet committed" instead of asserting a settled state.
--- THAT KEY IS THE HONESTY HALF OF THIS CHANGE and the web lane owes it a sentence -- the same
--- discipline 0156's own header applies to lhdn_mpers_standard.
---
--- SIGNATURE, VOLATILITY, LANGUAGE AND ACL ARE ALL UNCHANGED, so the clara_authenticated
--- grant at 0156:1232 is preserved by construction (CREATE OR REPLACE keeps the ACL).
+-- SIGNATURE, VOLATILITY, LANGUAGE AND ACL ARE ALL UNCHANGED, so the clara_authenticated grant
+-- at 0156:1232 is preserved by construction (CREATE OR REPLACE keeps the ACL).
 --
 -- D1: a STABLE SQL reader, not an audited writer. No write-quiesce window owed.
 -- =====================================================================================
@@ -106,27 +98,35 @@ set role clara_fn_owner;
 create or replace function clara.coa_chart_state(p_client uuid) returns jsonb
   language sql stable set search_path = clara, pg_temp as $$
   with cl as (select c.id, c.name from clara.clients c where c.id = p_client),
+  -- 裁-193 (owner, 2026-09-04): THE CHART APPLIES ONLY AFTER COMMIT, so this CTE is
+  -- COMMITTED-ONLY -- byte-identical to 0156:1080-1088 -- and every answer built from it
+  -- (seed_decision, seed_decision_at, seed_wants_template and the six-state `state`) reads
+  -- exactly as it does on main. An earlier draft of this file widened it to open plans; the
+  -- owner ruled the other way and that widening is GONE, not merely re-ordered.
   dec as (
-    -- H-29 (handover 2026-09-04): COMMITTED FIRST, THEN OPEN -- never open INSTEAD OF
-    -- committed. The apply control is mounted inside the live onboarding checklist, so on
-    -- the happy path the decision is answered while the plan is still `open`; the old
-    -- `p2.state = 'committed'` predicate made the DB structurally unable to say so and the
-    -- card read `undecided` on a client who had just decided.
-    --
-    -- THE ORDER BY IS THE PRECEDENCE and it is load-bearing: (p2.state = 'committed') desc
-    -- puts every committed row ahead of every open one, so a client who committed one answer
-    -- and later re-opened a plan with a different one still reads the COMMITTED answer. An
-    -- open plan's decision is used only when no committed one exists.
-    --
-    -- 'cancelled' is deliberately NOT admitted: a withdrawn onboarding's answer is not a
-    -- decision anybody stands behind.
-    select i.answer->>'seed' as seed, p2.committed_at, p2.state as plan_state
+    select i.answer->>'seed' as seed, p2.committed_at
       from clara.onboarding_plans p2
       join clara.onboarding_plan_items i on i.plan_id = p2.id
-     where p2.client_id = p_client and p2.scope_kind = 'client'
-       and p2.state in ('committed', 'open')
+     where p2.client_id = p_client and p2.scope_kind = 'client' and p2.state = 'committed'
        and i.item_key = 'coa_seed_decision' and i.state in ('answered','resolved')
-     order by (p2.state = 'committed') desc, p2.committed_at desc nulls last, i.answered_at desc
+     order by p2.committed_at desc, i.answered_at desc
+     limit 1),
+  -- H-29's REMAINING HALF, and the ONLY thing this file adds. The interview answers
+  -- coa_seed_decision while the plan is still `open`, and the card read `undecided` -- which
+  -- is false: a decision was made, it simply is not committed yet. This CTE exists so the
+  -- card can say "decided in the interview -- applies after commit".
+  --
+  -- IT FEEDS ONE KEY AND ONE KEY ONLY: seed_decision_plan_state. It must never reach
+  -- seed_decision, seed_decision_at, seed_wants_template or `state`, because under 裁-193 an
+  -- open plan's answer does not make the chart appliable and a reader that saw it in those
+  -- fields would act on it. The apply door enforces the same rule for real (its own
+  -- onboarding_plan_open refusal); this is the FACE's half, and a face is not a wall.
+  dec_open as (
+    select 1 as present
+      from clara.onboarding_plans p3
+      join clara.onboarding_plan_items i2 on i2.plan_id = p3.id
+     where p3.client_id = p_client and p3.scope_kind = 'client' and p3.state = 'open'
+       and i2.item_key = 'coa_seed_decision' and i2.state in ('answered','resolved')
      limit 1),
   ad as (
     select a.id, a.state, a.template_id, a.template_version, a.families, a.adopted_at
@@ -139,10 +139,13 @@ create or replace function clara.coa_chart_state(p_client uuid) returns jsonb
     'client_id', cl.id,
     'seed_decision', dec.seed,
     'seed_decision_at', dec.committed_at,
-    -- H-29's HONESTY HALF: 'committed' or 'open' (NULL when there is no decision at all).
-    -- An open-plan decision is a real answer but not a settled fact, and a reader that
-    -- presented the two identically would be asserting a commitment nobody made.
-    'seed_decision_plan_state', dec.plan_state,
+    -- 裁-193's honesty key: 'committed' when a committed decision exists, 'open' when only an
+    -- OPEN plan has answered, NULL when neither has. Committed wins whenever both are true --
+    -- a settled decision is not re-described as provisional because onboarding re-opened.
+    'seed_decision_plan_state',
+      case when dec.seed is not null then 'committed'
+           when dec_open.present is not null then 'open'
+           else null end,
     'seed_wants_template', dec.seed in ('firm_template','lhdn_mpers_standard'),
     'accounts', ch.accounts,
     'adoption_id', ad.id, 'adoption_state', ad.state,
@@ -154,7 +157,7 @@ create or replace function clara.coa_chart_state(p_client uuid) returns jsonb
       when dec.seed = 'manual' then 'declined'
       when dec.seed in ('firm_template','lhdn_mpers_standard') then 'pending'
       else 'undecided' end)
-    from cl cross join ch left join dec on true left join ad on true;
+    from cl cross join ch left join dec on true left join dec_open on true left join ad on true;
 $$;
 
 reset role;
@@ -184,10 +187,25 @@ begin
     raise exception 'dba6 tail: coa_chart_state became PUBLIC-callable' using errcode = 'CLR10';
   end if;
   select p.prosrc into v_src from pg_proc p where p.oid = 'clara.coa_chart_state(uuid)'::regprocedure;
-  if position('p2.state in (''committed'', ''open'')' in v_src) = 0
-     or position('(p2.state = ''committed'') desc' in v_src) = 0
-     or position('seed_decision_plan_state' in v_src) = 0 then
-    raise exception 'dba6 tail: the widening, its precedence, or the plan-state key is missing from the installed body'
+  -- 裁-193: `dec` stays COMMITTED-ONLY, and the new key comes from its own CTE.
+  if position('p2.state = ''committed''' in v_src) = 0 then
+    raise exception 'dba6 tail: the decision CTE is no longer committed-only -- 裁-193 says the chart applies only after commit'
+      using errcode = 'CLR10';
+  end if;
+  if position('dec_open' in v_src) = 0 or position('seed_decision_plan_state' in v_src) = 0 then
+    raise exception 'dba6 tail: the open-plan CTE or the plan-state key is missing from the installed body'
+      using errcode = 'CLR10';
+  end if;
+  -- THE CONTAINMENT THAT MATTERS: dec_open must feed the plan-state key and nothing else. If
+  -- it ever reached seed_decision or seed_wants_template, an open plan's answer would make the
+  -- card offer an apply the door refuses.
+  if position('''seed_decision'', dec.seed' in v_src) = 0
+     or position('''seed_wants_template'', dec.seed in' in v_src) = 0 then
+    raise exception 'dba6 tail: seed_decision / seed_wants_template no longer read the COMMITTED CTE alone'
+      using errcode = 'CLR10';
+  end if;
+  if position('dec_open.seed' in v_src) <> 0 then
+    raise exception 'dba6 tail: the open-plan CTE leaks a decision value into the payload -- it may feed the plan-state key ONLY'
       using errcode = 'CLR10';
   end if;
   -- Read IN CODE, never raw: this file's own header explains why 'cancelled' is excluded, so
@@ -224,13 +242,19 @@ begin
     values (v_plan, v_firm, 'must_ask', 'coa_seed_decision', 'dba6 probe', 'answered',
       '{"seed":"firm_template"}'::jsonb, v_user, now());
   v_r := clara.coa_chart_state(v_client);
-  if v_r ->> 'state' <> 'pending' or v_r ->> 'seed_decision' <> 'firm_template' then
-    raise exception 'dba6 tail (arm 2): an OPEN plan''s answered decision reads state=% / seed=% -- H-29 is not fixed (payload %)',
-      v_r ->> 'state', v_r ->> 'seed_decision', v_r using errcode = 'CLR10';
-  end if;
+  -- 裁-193: the OPEN plan changes exactly ONE key. Everything else must read as it did before
+  -- the plan existed -- undecided, with no decision value.
   if v_r ->> 'seed_decision_plan_state' <> 'open' then
-    raise exception 'dba6 tail (arm 2): the read does not say the decision is only OPEN (plan_state=%) -- an uncommitted answer would be presented as settled', v_r ->> 'seed_decision_plan_state'
-      using errcode = 'CLR10';
+    raise exception 'dba6 tail (arm 2): an OPEN plan''s answered decision does not report plan_state=open (got %) -- the card cannot say "decided in the interview" (payload %)',
+      v_r ->> 'seed_decision_plan_state', v_r using errcode = 'CLR10';
+  end if;
+  -- seed_wants_template is `dec.seed in (...)`, which is NULL -- not false -- when there is no
+  -- COMMITTED decision (0156's own three-valued shape). NULL is therefore what "unchanged from
+  -- main" means here, and asserting false would have been asserting a value main never returns.
+  if v_r ->> 'state' <> 'undecided' or v_r ->> 'seed_decision' is not null
+     or v_r ->> 'seed_wants_template' is not null then
+    raise exception 'dba6 tail (arm 2) CONTAINMENT: an OPEN plan leaked into state/seed_decision/seed_wants_template (state=%, seed=%, wants=%) -- under 裁-193 only the plan-state key may move',
+      v_r ->> 'state', v_r ->> 'seed_decision', v_r ->> 'seed_wants_template' using errcode = 'CLR10';
   end if;
 
   -- ARM 3 -- PRECEDENCE. A COMMITTED plan carrying a DIFFERENT answer must outrank the open
@@ -246,7 +270,7 @@ begin
       '{"seed":"manual"}'::jsonb, v_user, now() - interval '1 day');
   v_r := clara.coa_chart_state(v_client);
   if v_r ->> 'seed_decision' <> 'manual' or v_r ->> 'seed_decision_plan_state' <> 'committed' then
-    raise exception 'dba6 tail (arm 3) CONTROL: a COMMITTED decision did not outrank an OPEN one (seed=%, plan_state=%) -- the widening demoted a committed fact',
+    raise exception 'dba6 tail (arm 3) CONTROL: a COMMITTED decision did not read through, or committed did not outrank the open plan beside it (seed=%, plan_state=%)',
       v_r ->> 'seed_decision', v_r ->> 'seed_decision_plan_state' using errcode = 'CLR10';
   end if;
   if v_r ->> 'state' <> 'declined' then
@@ -266,7 +290,7 @@ begin
       v_r ->> 'state', v_r ->> 'seed_decision' using errcode = 'CLR10';
   end if;
 
-  raise notice 'dba6 tail: OK -- clara.coa_chart_state CoR''d from its 0156:1076 pre-image (sha-pinned in the prestate), still a STABLE sql body, search_path-pinned, clara_fn_owner-owned, executable by clara_authenticated and not by PUBLIC; signature, language and volatility all unmoved so the 0156:1232 ACL is preserved by construction. BEHAVIOURALLY EXERCISED on all four arms: a client with NO decision still reads undecided with a NULL plan state (the absence arm did not become ''pending''); an OPEN plan''s answered coa_seed_decision now reads pending/firm_template and SAYS seed_decision_plan_state=open, where it read undecided before; a COMMITTED decision carrying a different answer OUTRANKS the open one and reads declined/manual/committed (the precedence control -- without the ORDER BY''s first term this arm would have demoted a committed fact); and a CANCELLED plan''s answer is not read at all. THE WEB LANE OWES seed_decision_plan_state A SENTENCE: an open-plan decision is a real answer but not a settled one, and the card must say so rather than presenting it as committed. No table in workflow/graphile_worker/spike touched. D1: a STABLE reader, no write-quiesce window owed.';
+  raise notice 'dba6 tail: OK -- clara.coa_chart_state CoR''d from its 0156:1076 pre-image (sha-pinned in the prestate), still a STABLE sql body, search_path-pinned, clara_fn_owner-owned, executable by clara_authenticated and not by PUBLIC; signature, language and volatility all unmoved so the 0156:1232 ACL is preserved by construction. BEHAVIOURALLY EXERCISED on all four arms: a client with NO decision still reads undecided with a NULL plan state (the absence arm did not become ''pending''); an OPEN plan''s answered coa_seed_decision now reports seed_decision_plan_state=open while state/seed_decision/seed_wants_template read EXACTLY as they do on main (undecided/null/false) -- 裁-193''s containment, asserted rather than assumed; a COMMITTED decision reads through and outranks an open plan beside it; and a CANCELLED plan is not read at all. THE WEB LANE OWES seed_decision_plan_state A SENTENCE: "decided in the interview -- applies after commit", never an offer to apply, because the apply door itself refuses on an open plan (the sibling file dba9). No table in workflow/graphile_worker/spike touched. D1: a STABLE reader, no write-quiesce window owed.';
 
   raise exception using errcode = 'CLR00', message = 'dba6 tail probe rollback';
 exception when sqlstate 'CLR00' then

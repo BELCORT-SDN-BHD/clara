@@ -195,6 +195,16 @@ const REVIEWED_DYNAMIC_SQL_BARRIERS = new Map<string, ReviewedDynamicSqlBarrier>
       sha256: "f6d093e5b5e6037386522581ec07fab6ad955b4944f3871fc5a31b2635173b7b",
     },
   ],
+  // MERGE-TIME OBLIGATION: this key is the FILENAME, and this file is renamed when its
+  // migration number is claimed. Re-key the entry to the numbered name at merge; the sha256
+  // does not move, because a rename changes no bytes.
+  [
+    "UNNUMBERED_dba4_coding_lane_kind_exclusion.sql",
+    {
+      reason: "Reviewed pg_get_functiondef splices recut exactly two FUNCTIONS — clara.list_uncoded_filings(uuid) and clara.list_review_queue(jsonb,jsonb,integer) — each read at a literal signature and re-installed with one appended WHERE conjunct; the block emits no view definition at all, so neither P4 scope view can be a target. Same family as 0146's splice of the same queue function.",
+      sha256: "c6f3b99a27f554650982893bc6288f7de33953824e5b930fc862f02c1e42b8d4",
+    },
+  ],
 ]);
 
 /**
