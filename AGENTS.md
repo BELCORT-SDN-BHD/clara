@@ -115,7 +115,8 @@ leaked credential, a stranded run, a cross-tenant read. Everything else is judge
 orchestrator — plan, delegate, synthesize, verify, own the state; **the session's opening document is
 `docs/plan/active/beta-handover-2026-09-04.md` (+ its part 2) — beta went LIVE, CLOSED, on 2026-09-04
 under 裁-185, and 裁-150 closed that session: the repo is the handover and no lane runs until the
-owner asks.** The sprint's own opening document,
+owner asks. The owner asked on 2026-09-04 ≈09:00: the repair session is OPEN (裁-186…190,
+`docs/plan/active/mohe-grill-rulings-2026-09-04-pm.md`).** The sprint's own opening document,
 `docs/plan/active/frontend-sprint-handoff-2026-08-31.md` (+ its orders), is now history. **Lanes by
 fit (裁-85, 2026-08-31):** the most effective, suitable and economical model that does not
 sacrifice quality — Codex `gpt-5.6-sol` xhigh (direct `codex exec`, its own worktree) for
@@ -125,7 +126,9 @@ substituted for that leg, builds included, and the PR body says so. **The lean l
 ADR-0077 signed 2026-08-31, 裁-93):** every code PR gets ONE fresh-context opus read-only review,
 and every frontend train walks its journey in a real browser (Playwright) on the built app;
 docs-only PRs take the single-lane review (ADR-0069). **NO CODEX LANE OF ANY KIND
-UNTIL BETA LIVE LAUNCH — native lanes only (裁-133, owner, 2026-09-02).** The cross-family Codex
+UNTIL BETA LIVE LAUNCH — native lanes only (裁-133, owner, 2026-09-02).** **Beta went live
+2026-09-04 (裁-185); 裁-190 keeps the 2026-09-04 repair session native-only — the owner may resume
+Codex at any turn.** The cross-family Codex
 adversarial REVIEW leg was suspended first (裁-111, owner, 2026-09-01); 裁-133 suspends the BUILD
 lane beside it after three capacity/kill failures in ninety minutes cost three rounds. Neither is
 repealed — both are time-boxed and resume at beta live unless the owner rules otherwise; law 28 is
@@ -135,8 +138,10 @@ opus-5 xhigh for builds where judgement, security or ambiguity dominate, and for
 Fable orchestrates.** Speed is the point — no capacity outages, no resume rounds. Inspect every
 result before accepting it. *Codex lane, for when it resumes — learned the hard way:* the
 `codex:rescue` companion queue is unreliable (it has stalled for hours at "starting") — prefer a
-direct `codex exec` via Bash, backgrounded with a file-watcher on the output. Ledger: `docs/plan/active/mohe-grill-rulings-2026-09-04.md` (**the NEWEST — 裁-151…185, the launch night**; the chain
-runs `-08-31` → `-09-01` → `-09-01-pm` → `-09-02` → `-09-02-pm` → `-09-03` → `-09-04`, the earlier
+direct `codex exec` via Bash, backgrounded with a file-watcher on the output. Ledger: `docs/plan/active/mohe-grill-rulings-2026-09-04-pm.md` (**the NEWEST — 裁-186…190, the repair
+session's opening**; 裁-151…185, the launch night, are the tenth ledger
+`docs/plan/active/mohe-grill-rulings-2026-09-04.md`; the chain
+runs `-08-31` → `-09-01` → `-09-01-pm` → `-09-02` → `-09-02-pm` → `-09-03` → `-09-04` → `-09-04-pm`, the earlier
 files carrying the session state bridges, and each file continuing at the previous one's 500-line
 ceiling. **The TEXT OF RECORD for 裁-151…177 is one file each under
 `docs/plan/completed/owner-rulings-151-177-2026-09-03/`, which governs on any divergence.**)

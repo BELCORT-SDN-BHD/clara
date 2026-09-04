@@ -113,6 +113,7 @@ These conventions governed the append-only log and still govern this directory:
 | [0075](0075-test-data-authority-widened.md) | TEST-DATA AUTHORITY WIDENED: no real client exists before go-live; data is free, gates are walked by the delegate, mechanisms never move | 2026-08-23 | standing | Owner ruling (Tao, 2026-08-23, the alignment grill), amending **ADR-060**'s data authority and widening the 2026-08-22 identity grant. **(1)** Every client in the estate is TEST DATA authorised by its owner — BELCORT's ROME PROPERTIES · ROME SECRETARY · BEE CREATIVE SOLUTION, the synthetic ROME PUBLIC ADVISORY, the Alara/Borneo RLS fixtures — all factory-reset and re-run at the Wave-G e2e. **(2) DATA is free:** delete, reseed, reverse, re-run any client's data, documents, consents and close state, **live DB included**, without asking; the corpus is the owner's three folders and **no oracle exists beyond them or is required**. **(3) GATES are walked by the agent as the owner's DELEGATE** through the REAL audited doors, receipted — law-71 human acts, consent signatures, capability grants, password-bearing acts (secrets env-to-env, **never printed**); **e-filing excluded by nature**. **(4) MECHANISMS never move** — RLS, the attribution walls, receipts, roles/grants, the generic name-only wall are the product under test; weakening one for testing convenience is forbidden (the NARROW reading, owner-confirmed, and the operative clause on any collision). **(5) No client-specific mechanism or documentation for a test client:** hard constraint **12 RETIRED as a named constraint** (the GENERIC "a client may be flagged name-only, never enriched" wall stays — `0062`/`0063` untouched), constraint **13 REWRITTEN** (BELCORT is the operator firm; every other firm/client is a resettable test fixture; never repurpose the synthetic sandbox as a real firm), constraint **14's "expires at beta" STANDS**. **(6)** Every wave's validation still runs in full; nothing is deferred to the e2e except what is e2e by nature, and a Known-issues or Backlog row is the only lawful home for a deferral. Folds as digest **law 82** (§12). |
 | [0076](0076-g1-universal-wake-execution-engine.md) | GATE G1 RULED: the universal wake-execution engine closes the stranded-row defect — one engine on the existing `kind='wake'` held projection, `close_prep` GRANDFATHERED as a second registered carrier shape | 2026-08-25 | standing | Owner ruling (Tao, 2026-08-25) on the cross-item register escalated by `bank-agency-gate-record.md` §6 item 1 (blocker B2), shared with F-A4/F-A5/F-A7. A `kind='wake'` `agent_task` is a HELD PROJECTION nothing can execute (`held→cancelled` its only legal transition) — one stranded row per cadence tick per client with no legal exit but a human cancel. **Mechanism (a) — heard, OVERRULED:** a dedicated `agent_tasks.kind` per source (the autodraft/`close_prep` precedent), paying a D1 trigger recut per item, forever. **Mechanism (b) — CHOSEN:** one universal engine on the held-wake projection, matrix delta paid once, `wake_engine_sources` a rows-only registry for every future source; `close_prep`'s already-shipped (`0120`) matrix is GRANDFATHERED, not retrofitted, and folds in as a SECOND, closed-world `direct_queue` carrier — never a third. Mechanism: migration `0133`, merged + W4-ceremonied 2026-08-26 (#349). `wake_engine_sources` ships EMPTY (`bank_agent`/`close_prep` seed rows `enabled=false`). **NARROWED in substance by 裁-40/裁-44/裁-59:** one combined G1 ceremony opens three switches (`bank_agent` · `close_prep` · binding-expiry); `tax_prep` is separated to its own later sitting. An ADR minute is owed for that narrowing. Folds as digest **law 83** (§13). |
 | [0077](0077-the-beta-pivot-and-the-paid-launch.md) | THE BETA PIVOT: a paid launch at RM0, tax inert at launch, the cutover re-scoped, the G1 clocks deferred, Codex leads and reviews | 2026-08-31 | standing · **SIGNED 2026-08-31 evening (裁-93)** | Minutes the product-law rulings of the 2026-08-30 evening and 2026-08-31 morning sittings (裁-57 · 58 · 62 · 68 · 72→75 · 76 · 82 · 84): paid beta with no free tier, every plan RM0/"trial" until the pricing sitting, the standard-SaaS firm-creation path (Checkout → signed webhook → `firm_admissions` → `create_firm`), tax inert at beta, the cutover waiting on the measured residual + honest notes + the interview runner, the G1 three-switch ceremony post-beta (the 0076 narrowing minuted here), the seat kept in the Claude Code session with lanes chosen by fit (裁-82 → 裁-85), and the lean ladder — one fresh-context opus review leg plus a real-browser Playwright e2e leg on every frontend train, **law 28 kept** by the Codex-build/opus-review split (裁-84 → 裁-86). Folds as digest laws **84–85** (§14); the signature landed at the 2026-08-31 evening sitting (裁-93). |
+| [0078](0078-consent-declaration-attestations-abolished-rbac.md) | THE BETA SIMPLIFICATION: a firm-level consent declaration at the DPA stage, every attestation ceremony and maker-checker wall abolished, basic RBAC the only human gate, automatic receipts kept | 2026-09-04 | standing · **ruled by the owner 2026-09-04 ≈09:15–09:22 MYT (裁-186 · 裁-187)** | Minuted under 裁-140's own test — both rulings contradict standing ADR text outright and permanently. **(1)** Client AI consent becomes ONE firm-level declaration signed with the DPA (its own versioned, hashed receipt); the database admits it as an evidence kind for the client-egress grant and the onboarding commit auto-mints each client's consent and activates every purpose citing it — a per-client letter later is an evidence UPGRADE, never a second consent (裁-186, AGAINST the recommendation, dissent on file). **(2)** Every attestation ceremony and maker-checker wall is abolished — no typed declaration, no tick, no second confirm, no distinct-approver rule, no high-stakes threshold, no reopener≠closer wall, no adoption attestation, no solo-firm exception; the gate is the caller's rank on the existing four-rank ladder, and every governed click still writes an automatic receipt naming actor, time and the gate states it covered (裁-187, its RBAC matrix AGAINST the recommendation, dissent on file). Amends digest laws **4 · 25 · 57 · 58 · 69 · 71 · 78's rider**, PRD §1/§2/§6 item 9 and ARCHITECTURE §0/§3.4. Ledger: [`mohe-grill-rulings-2026-09-04-pm.md`](../plan/active/mohe-grill-rulings-2026-09-04-pm.md), which governs on divergence. |
 
 **Note on `0042a`.** The source archive carries one interstitial entry that is *not* an
 ADR — `### Ruling batch WB-R28..R30`, sitting between ADR-042 and ADR-043. It holds real
@@ -129,7 +130,7 @@ entries through ADR-0070, not a mechanical extraction. On any divergence, the ci
 governs.
 
 > **SIGNED OFF — Tao (BELCORT), 2026-08-12.** Laws 1-67 below are ratified as the current standing set at the ADR-0069 harness refactor. Additions or supersessions land as new ADR entries; this digest is re-trued whenever one does.
-> **Dated re-truing minutes live in [`README-log.md`](README-log.md)** — split out 2026-08-23 at this file's 500-line ceiling, verbatim and append-only. Fifteen minutes so far (2026-08-16 · 08-18 · 08-20 · 08-21 · 08-22 · 08-23 ×2 · 08-27 · 09-02 · 09-03 · **09-04 ×5, the launch night**). **The laws below govern; the log records when each was re-read and what the reading found.**
+> **Dated re-truing minutes live in [`README-log.md`](README-log.md)** — split out 2026-08-23 at this file's 500-line ceiling, verbatim and append-only. Fifteen minutes so far (2026-08-16 · 08-18 · 08-20 · 08-21 · 08-22 · 08-23 ×2 · 08-27 · 09-02 · 09-03 · **09-04 ×5, the launch night**). **The laws below govern; the log records when each was re-read and what the reading found.** **CONTINUED at that file's own 500-line ceiling in [`README-log-2026-09.md`](README-log-2026-09.md)** — the 2026-09-04 ≈09:22 minute (ADR-0078, 裁-186…190) and every minute after it are written there.
 
 ## 1 · Product law (the cardinal invariants)
 
@@ -156,7 +157,7 @@ governs.
    HUMAN lane keeps all of this unchanged; the agentic lane's unattended writes route
    to no human checker at any amount, and "never satisfy a human sign-off" narrows to
    the surviving human acts — close keys ②③, `except_bank_line`, opening-seed
-   approval, statutory wording, `canonical` definitions, capability grants, e-filing.)*
+   approval, statutory wording, `canonical` definitions, capability grants, e-filing.)* **ABOLISHED by ADR-0078 (裁-187, owner, 2026-09-04): no distinct-approver gate, no high-stakes threshold, no solo-firm attestation — maker and checker identities stay RECORDED on the automatic receipt; the gate is RBAC (bookkeeper approves/posts any amount, close is admin+).**
 5. ~~**Auto-approve is scoped, not forbidden:** no *unbounded or agent-initiated*
    auto-approve. A human-signed rule IS the posting authority.~~ *(0025 — SUPERSEDED
    by 0071/G1: the agent's own judgement is the unattended posting authority, under
@@ -233,7 +234,7 @@ governs.
     firm-configurable authorization list (default owner-only, partners by explicit audited
     grant). *(0065/E-R2, E-R11. AMENDED by 0071/G2: key ① — begin/abandon + the whole
     preparation surface — is agent-holdable; keys ②③ stay owner/partner human acts and
-    B3's segregation wall stands. "Structurally key-less" now describes keys ②③ only.)*
+    B3's segregation wall stands. "Structurally key-less" now describes keys ②③ only.)* **AMENDED by ADR-0078 (裁-187): keys ②③ are one-click admin+ acts with an automatic receipt; the drawer-2 gates are evaluated and recorded, never refused for want of an attestation; B3's reopener≠closer wall is gone.**
 
 ## 3 · Review and evidence law
 
@@ -356,11 +357,11 @@ governs.
 57. **Tracing stays in Clara-controlled storage.** Vendor trace export ships OFF and is
     enabled only after an executed DPA, firm-facing client authorization (MIA By-Laws
     require *specific* authority), a documented PDPA cross-border basis, short retention,
-    tested deletion and field-level minimization. *(0011 — the C6 checklist is still open)*
+    tested deletion and field-level minimization. *(0011 — the C6 checklist is still open)* **RELAXED by ADR-0078 (裁-186): the per-client evidence rung is satisfied by the firm-level declaration signed at the DPA stage; purpose scoping survives.**
 58. **OCR egress is a two-tier gate**, and consent is **typed and purpose-scoped**,
     re-checked at the dispatch boundary — a grant alone does not authorize. A
     locally-parsed document skips the cross-border hold (no egress occurs). *(0018,
-    0025/WA2-R14, 0037/WB-R23, 0040)*
+    0025/WA2-R14, 0037/WB-R23, 0040)* **RELAXED by ADR-0078 (裁-186): the per-client evidence rung is satisfied by the firm-level declaration signed at the DPA stage; purpose scoping survives.**
 59. **THE ENRICHMENT TRAP.** ROME SECRETARY's customers are NAME-ONLY (11 customers / 0
     registrations) because no RS invoice prints a buyer registration. **Never enrich them
     with registration numbers or TINs** — it would strand every subsequent invoice at
@@ -400,7 +401,7 @@ governs.
     NULL proposer) is approvable only as an ADOPTION through a recorded attestation —
     never frictionless; maker/checker measures the DIRECTING human with standing re-read
     at approval time. The same arms extend to any later act that mints-and-approves in
-    one call (B3's reopen applied them reopener-vs-closer). *(0070 §11; 0084; 0085)*
+    one call (B3's reopen applied them reopener-vs-closer). *(0070 §11; 0084; 0085)* **ABOLISHED by ADR-0078 (裁-187): an orphaned proposal is approved by rank; the receipt records the adoption.**
 70. **The isolation pin + requeue-re-derives.** Migration isolation is a checksum-keyed
     PER-MIGRATION runner pin, MEASURED post-BEGIN by read-back (blanket raises refused,
     0019/CLR32); and a human requeue of a failed render RE-DERIVES pinned inputs
@@ -417,7 +418,7 @@ governs.
     RESERVATION**: close keys ②③ · `except_bank_line` · opening-seed approval · statutory wording ·
     `canonical` definitions · capability grants · e-filing. *(0071/G1-G3. **AMENDED by 0074/TA-P1,
     RATIFIED 2026-08-22 (owner) — the enumeration is a RESERVATION, not a census; law 78, which carries
-    the rider R-TA-P1-walls.** Dissent on file.)*
+    the rider R-TA-P1-walls.** Dissent on file.)* **RESERVATION SHRUNK by ADR-0078 (裁-187): the surviving human acts are the RBAC-floored ones — statutory wording, `canonical` definitions, capability grants, e-filing, legal signatures; close keys ②③ and opening-seed approval stay human but are one-click admin+ acts with an automatic receipt.**
 72. **The LLM witness pair.** Unattended amounts require two independent LLM reads —
     the stored OCR raw text and the original image, same provider, two channels —
     agreeing to the sen under a versioned deterministic DB predicate (the model never
@@ -468,7 +469,7 @@ governs.
     the agent's, adding one is an owner ruling, new authority arrives as a wake SIBLING verb (never a live-body rewrite),
     capabilities default-on, no per-firm dial. **Rider R-TA-P1-walls (2026-08-22): the open register ships WALLED — a run with a
     live `close_attestations` row cannot be abandoned by Clara (B6), a re-freeze refuses while a reopen's correction is in flight
-    (B14), and every entrance's wall stays at its own door (the entrance seam); F-A5/F-A6/F-A7 inherit this scope.** *(0074/TA-P1; dissent on file)*
+    (B14), and every entrance's wall stays at its own door (the entrance seam); F-A5/F-A6/F-A7 inherit this scope.** *(0074/TA-P1; dissent on file)* **B6/B14 have no subject after ADR-0078 (the attestation row they read no longer gates).**
 79. **Attribution is JUDGEMENT under walls.** Invariant (a) is satisfied by a human click, an exact identifier match, or her own judgement
     — walled by a hard-number contradiction refusal, a name-family collision guard, a correction path raising a named misrouted-egress
     event, and a firm-scoped carrier for the unattributable document. **Unsure → she asks**; a model never scores itself (law 72).

@@ -1,0 +1,151 @@
+# The 2026-09-04 repair-session rulings — consent at the firm level, attestations and maker-checker abolished, the session's lanes (裁-186…190)
+
+> **The ELEVENTH ledger**, continuing [`mohe-grill-rulings-2026-09-04.md`](mohe-grill-rulings-2026-09-04.md)
+> (裁-151…185) at that file's ceiling — it stood at 480 lines, and one ruling entry would have put the
+> next writer against the 500-line PreToolUse hook. **The chain:** `-08-31` → `-09-01` → `-09-01-pm` →
+> `-09-02` → `-09-02-pm` → `-09-03` → `-09-04` → **this file, the newest.**
+>
+> **How the session opened.** The owner opened the repair session at ≈09:00 MYT on 2026-09-04 with
+> three sources and one instruction — 「我要在这个session 去修并处理这些bugs … 去吧」: **(1)** his own
+> UIUX flaws file (`C:\Users\zhant\Desktop\MY OWN UIUX Flaws.txt`, a workstation file, its items
+> carried into the register this session builds); **(2)** GitHub issue **#541**, the authenticated
+> production e2e audit of 2026-09-04 (36 defects `CB-AE2E-001…036`, NO-GO for public beta, evidence
+> commit `3aeef952`); **(3)** the shared artifact "Clara Beta Handover", which is a verbatim render of
+> [`beta-handover-2026-09-04.md`](beta-handover-2026-09-04.md) and its parts 2 and 3 — read through a
+> browser tab and confirmed as such at ≈09:10, so the repo copy is the source. The five rulings below
+> were grilled through `AskUserQuestion`, one briefing per question in plain language, the
+> recommendation first and the cost stated, before any build lane opened.
+>
+> **Two went AGAINST the recommendation** — 186 and 187's RBAC matrix — each with its dissent filed
+> once here and not relitigated. **ADR-0078** minutes 186 and 187 because both contradict standing
+> ADR text outright and permanently (裁-140's own test for minting a new ADR).
+
+---
+
+### 裁-186 — client AI consent is a FIRM-level declaration made once at the DPA stage; every client of the firm is consented automatically (owner, 2026-09-04 ≈09:15 MYT, `AskUserQuestion` option (b) of 3, AGAINST the recommendation)
+
+**Owner's words, verbatim (the flaws file):** 「(UIUX 全部集中在DPA那个阶段一次过处理, firm同意后, 所有client
+在firm 的级数下全部认同).」 **His answer to the question:** (b).
+
+**The briefing as put.** The coding lane refuses `no_consent` until a live `clara.client_egress_consents`
+row exists for the client; the path to one is (1) upload the client's authorization letter, (2) classify it
+as consent evidence (a web button exists), (3) `grant_client_egress` (**no web surface**), (4)
+`activate_client_egress_purpose` per purpose (none either) — handover row **H-18**, 裁-182. MIA By-Law
+R114.3(b) requires the CLIENT's written authorization before client data goes to an external party; the DPA
+is the firm↔Clara contract and cannot stand in for it. **The options:** **(a) — recommended** — collect the
+letter (or a "held, will upload" tick) inside the onboarding interview and grant + activate on commit: one
+act per client, no dark door, no wall weakened, ≈2 lane-units; **(b)** a firm-level declaration at the DPA
+stage that consents every client automatically — smoothest UX, but the per-client evidence rung of the egress
+wall is relaxed, the exposure sits with the firm, and the lawyer pass will likely reopen it; **(c)** both,
+not recommended. A concrete failure of (b) was stated: a client who never signed a letter has invoices
+processed by the AI provider, complains, and the firm holds only its own tick-box declaration.
+
+**Ruled: (b).** Executed as the sharpened variant of the owner's choice, so the audit trail survives:
+
+1. The DPA page gains **one firm-level declaration** — the firm holds, or will hold before processing,
+   each client's written authorization for AI processing — signed once with the DPA (a receipt row, its
+   own version and hash, appended like the DPA's).
+2. The database accepts that declaration as the **evidence** for `grant_client_egress`: a firm-level
+   declaration row becomes an admissible evidence kind beside a verified per-client letter, and the
+   onboarding commit's successor door **auto-mints the client's consent and activates every purpose**
+   citing it. Existing consents and the per-purpose activation shape are untouched; the receipt names the
+   evidence kind, so a per-client letter uploaded later is an **evidence upgrade**, never a second consent.
+3. The compliance register shows every client's consent state and its evidence kind.
+
+**Dissent, filed once.** The obligation is per client and written; a firm-level declaration is the
+firm's representation, not the client's authorization, so the exposure moves to the firm and Clara now
+processes on a representation it cannot verify. The declaration's wording joins the lawyer pass (裁-166),
+and the lead recommends the per-client evidence rung be revisited before 上市.
+
+**Amends:** digest laws 57 and 58 (the "specific authority" and "a grant alone does not authorize" texts —
+purpose scoping SURVIVES, the per-client evidence rung is relaxed), handover **H-18**'s fix shape and
+裁-182's rider. **ADR-0078 decision 1.** No separate ruling file — this entry is the text of record.
+
+### 裁-187 — every attestation CEREMONY and every maker-checker wall is ABOLISHED; basic RBAC is the only human gate; automatic receipts stay (owner, 2026-09-04 ≈09:18–09:22 MYT; permanent)
+
+**Owner's words, verbatim**, answering the maker-checker question (which offered (a) keep the threshold
+policy and disclose it — recommended, (b) a distinct approver for every manual journal):
+
+> 我要废除所有attestation机制, 实际作用下发现没有用, 用UIUX最优的方案做, user 按什么就是什么, 不用做多余的东西and
+> 废除所有marker checker 机制, 只有基本的RBAC的权限划分. 你觉得呢? 有ambigious or 不妥就 /grillme
+
+**The lead's view, as given.** Agree on the ceremonies (the extra dialog, the typed declaration, the
+tick, the second confirm — all friction) and on the walls (the RM100,000 distinct-approver threshold and
+the B3 reopener≠closer wall only produce refusals in a small firm). Two things had to be settled before
+it was buildable: **the RBAC matrix** (otherwise a bookkeeper drafts, approves, posts and closes alone
+with the owner reading about it a week later — the failure example put), and **the automatic receipt**
+(who clicked, when, and what every gate read at that moment — written by the door with zero user action,
+because it is the only evidence in front of MIA, an auditor or LHDN later). Cost stated: an XL database
+lane re-cutting a dozen live door bodies and dozens of test cells, plus an ADR.
+
+**Sub-rulings, by `AskUserQuestion`:**
+
+- **RBAC — option (b), AGAINST the recommendation (a):** **viewer** reads · **bookkeeper** uploads,
+  drafts, matches, answers Clara, **and approves and posts ANY amount, own drafts included** ·
+  **admin+** additionally begins, finalizes and abandons a close, approves the opening seed, and holds
+  firm settings · **owner only:** members, legal signatures (DPA, terms, the 裁-186 declaration) and
+  the operator-tier acts. The four-rank roster is `0002_foundation.sql:215` and `role_rank`
+  (viewer 0 · bookkeeper 1 · admin 2 · owner 3) — nothing new is minted, floors move.
+- **Receipts — option (a) after 「不是很清楚,解释下」 and a plain-language re-brief:** kept, fully automatic,
+  zero ceremony — one row per governed click naming actor, time and the gate states it covered; visible
+  only on the Activity timeline.
+
+**Scope, by census on `main` at `877a4fd7` (what "attestation" and "maker-checker" mean in this codebase):**
+`_approve_entry_core`'s `segregation_mode` / `self_approval_attestation` / `self_approved` rungs and every
+`p_attestation` parameter on the drafting, allocation, settlement and bank-line cores (66 + 38 + 17 sites
+across the migrations and their tests, `0015` → `0121`) · `firms.high_stakes_amount_cents`
+(`0002_foundation.sql:204`) and `set_firm_high_stakes_threshold` with the Admin "Change threshold" control ·
+`finalize_close(p_self_attestation)` (`0128`), `close_attestations` and `attest_close_exception` (the
+drawer-2 per-item attestation, E-R2), `reopen_fiscal_year(p_attestation)` and B3's reopener≠closer wall ·
+the adoption attestation (ADR-0070 §11) · the onboarding commit's attestation and the opening-seed
+approval's attestation dialog · the 41 `attest`-keyed strings in `apps/web/messages/en.json`.
+**Flagged as OUT of scope by the lead's reading, for the owner to pull in if he disagrees:**
+`sst_future_attestations` / `record_future_attestation` — a captured SST fact about a future method, not
+a maker-checker ceremony.
+
+**Executed as:** **(1)** ADR-0078 (per 裁-140 — 187 contradicts ADR-0003 law 4, ADR-0065 law 25 / E-R2,
+ADR-0070 law 69, ADR-0071 law 71's reservation, PRD §2 "Segregation of duties" and §6 item 9, and
+ARCHITECTURE §3.4 outright and permanently); **(2)** the frontend removes every attestation ceremony as
+the UIUX lanes reach each surface — the click is the act, the dialog shows only a door refusal if one
+comes back; **(3)** the wall-removal database lane (裁-188) replaces each wall with the automatic
+receipt: `p_attestation` parameters become optional-and-ignored where the signature can stay, the
+segregation and high-stakes rungs are removed, `finalize_close` records the gate states itself, the
+threshold verb and its control retire, and every cell that pinned a wall is re-cut to pin the receipt.
+
+**Dissent, filed once.** Segregation of duties is the control every auditor expects; under (b) a
+bookkeeper can post any amount alone, and the receipt makes that visible afterwards, never preventable.
+Accepted by the owner as the beta's operating risk. **Amends:** digest laws 4, 25, 69, 71, 78's rider;
+PRD §1's "concentrates at the statutory boundary" parenthetical, §2 "Segregation of duties", §6 item 9;
+ARCHITECTURE §0's drawer-2 exception sentence and §3.4. **ADR-0078 decision 2.** No separate ruling file.
+
+### 裁-188 — the wall-removal database lane runs THIS session, after the P0 block (owner, ≈09:22, option (a) of 3, 「照建议」)
+
+The UIUX lanes are not blocked on it: they hide the ceremonies now, the walls come down in their own
+lane — one migration set, one fresh-context opus review, CI on the throwaway rig — ≈2–3 lane-units.
+Options declined: (b) do it first (the UIUX fixes would wait), (c) rule now and leave the database to the
+next session (a hidden ceremony over a standing wall shows refusals). No separate ruling file.
+
+### 裁-189 — the production deploy ceremonies (the runtime image v75 and the web Worker) are run by the lead as the owner's delegate, receipted (owner, ≈09:22, option (a) of 3)
+
+Both are outward-facing acts, so they were asked before any lane opened. Each runs from merged `main`
+through its own runbook (the runtime recipe pattern
+`docs/ops/runtime-deploy-2026-09-03-v71-chatturn-v17-c5.md`; the Worker through `wrangler versions` — there
+is no repoint rollback since 裁-156, a broken Worker is fixed forward by re-promoting a walked version),
+with a positive read that the running release carries the merged commit (law 46). No separate ruling
+file.
+
+### 裁-190 — native lanes only for this session (owner, ≈09:22, option (a) of 2)
+
+Sonnet-5 xhigh for bounded, mechanical, objectively testable work; opus-5 xhigh where judgement,
+security or ambiguity dominate, and for every review; Fable orchestrates. The Codex build lane stays
+suspended in the spirit of 裁-133 — it was offered now that beta is live (裁-133's own time box) and
+declined on the ground of three capacity deaths in ninety minutes on 2026-09-02. The owner may resume it
+at any turn. No separate ruling file.
+
+---
+
+**What follows in this session, so the next reader can find it:** the unified defect register built from
+the three sources (every item anchored to code on `main` by a mapping workflow before any lane opened),
+the P0 block first, then the owner's UIUX list and the walk's P1 rows in parallel lanes, the wall-removal
+lane (裁-188), and the two deploy ceremonies (裁-189). `PROGRESS.md` carries the lanes as they open and
+close.
