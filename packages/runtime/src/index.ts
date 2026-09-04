@@ -12,6 +12,7 @@ import { openingRoutes } from "./openingRoutes.js";
 import { seedingRoutes } from "./seedingRoutes.js";
 import { stripeWebhookRoutes } from "./stripeRoutes.js";
 import { authWallRoutes } from "./authWallRoutes.js";
+import { buildInfoRoutes } from "./buildInfoRoutes.js";
 
 // Clara agent-runtime HTTP surface (Slice 4). The durable chat loop, SSE, and the
 // admission/turn routes ride on top of the WDK Postgres world (started by
@@ -89,6 +90,12 @@ app.get("/ready", async (_req, res) => {
 app.get("/workflows", (_req, res) => {
   res.json({ registered: workflowNames });
 });
+
+// CB-AE2E-035 — what is actually serving: the baked commit, the image ref, the workflow
+// exports, and the database's migration frontier. SESSION-GATED and mounted under /api (so it
+// rides the web's same-origin proxy), unlike the three root endpoints above, which are the
+// load balancer's and carry no build identity at all. See src/buildInfoRoutes.ts.
+app.use(buildInfoRoutes());
 
 // Chat: sessions, messages, turns (admission + enqueue), and the SSE stream.
 app.use(chatRoutes());

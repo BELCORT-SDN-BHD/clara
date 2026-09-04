@@ -8,12 +8,29 @@ import { initOpenNextCloudflareForDev } from "@opennextjs/cloudflare";
 const moneyInputHarnessEnabled = process.env.CLARA_E2E_MONEY_INPUT_HARNESS === "1";
 const routeErrorProbeEnabled = process.env.CLARA_E2E_ROUTE_ERROR_PROBE === "1";
 
+// CB-AE2E-035. Resolved ONCE, at `next build`, from whichever commit variable the builder sets:
+// an explicit `CLARA_BUILD_SHA` first (so a deploy can state it), then Cloudflare's own CI
+// variables. Empty when NONE resolves — a local build has no honest sha, and the route reports
+// null rather than inventing one.
+const webBuildSha =
+  process.env.CLARA_BUILD_SHA ||
+  process.env.WORKERS_CI_COMMIT_SHA ||
+  process.env.CF_PAGES_COMMIT_SHA ||
+  "";
+
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   // Freeze the test-harness switch into the emitted bundles. The route module
   // and both auth-wall registries must agree on one build-time decision.
   env: {
     CLARA_E2E_MONEY_INPUT_HARNESS: moneyInputHarnessEnabled ? "1" : "0",
+    // CB-AE2E-035: the commit this bundle was built from, read server-side by
+    // app/api/build-info/route.ts. Deliberately NOT `NEXT_PUBLIC_` (never inlined
+    // into the browser bundle) and deliberately NOT a `wrangler.jsonc` var — that
+    // block is replaced on every upload, so a hand-edited sha there is exactly the
+    // drift this endpoint exists to detect. Empty when nothing resolved; the route
+    // reports null rather than a placeholder, because a fabricated sha is believed.
+    CLARA_WEB_BUILD_SHA: webBuildSha,
   },
   // pnpm dependencies can be junctioned into a nested worktree. Turbopack 16
   // refuses a linked dependency outside its inferred root, so anchor the root

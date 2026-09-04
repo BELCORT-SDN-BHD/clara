@@ -257,6 +257,12 @@ export const SCOPE_ENTRANCES: ReadonlyArray<{
   { path: "app/(firm)/layout.tsx", onDenial: "redirect" },
   { path: "app/(full)/layout.tsx", onDenial: "redirect" },
   { path: "app/api/runtime/[...path]/route.ts", onDenial: "403" },
+  // CB-AE2E-035 — the web build-info read. A DATA request, so 403 and never a redirect, for the
+  // same reason the proxy above is. It reads no firm-scoped relation at all (a build-time sha
+  // and the configured runtime origin), and it is still an ENTRANCE rather than an unscoped
+  // surface: a deployment's commit identity is not an anonymous-readable fact about a running
+  // system, and the spine is what makes "authenticated" mean "has a firm" here.
+  { path: "app/api/build-info/route.ts", onDenial: "403" },
 ];
 
 /**

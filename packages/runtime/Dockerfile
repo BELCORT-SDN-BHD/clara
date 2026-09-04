@@ -72,6 +72,25 @@ COPY --from=builder /app/packages/runtime/scripts ./scripts
 COPY --from=builder /app/packages/runtime/lib ./lib
 COPY --from=builder /app/packages/runtime/package.json ./package.json
 
+# H-43: the Supabase pooler CA. `ca-certificates` above is the ~150-root PUBLIC Mozilla store,
+# and the pooler's root is SELF-SIGNED — so `sslmode=verify-full` cannot resolve without this
+# file. Copied from the REPO ROOT (the build context is the repo root, the same reason
+# `COPY tsconfig.base.json ./` works above). A trust anchor is the OPPOSITE of a secret: it is
+# published precisely so clients can pin it (docs/ops/dsn-bridge.md, "why committing it is
+# lawful"). THIS PATH IS BAKED INTO EVERY LANE DSN SECRET as
+# `sslrootcert=/app/ops/tls/pooler-ca.crt` — changing it later is another secrets ceremony
+# across all six DSNs, so it is fixed here and in lib/tls-ca.mjs's IN_IMAGE_CA_PATH, with a
+# drift cell pinning both. CEREMONY ORDER IS FAIL-CLOSED IN THE WRONG DIRECTION IF REVERSED:
+# ship this image FIRST, verify it boots, THEN move the secrets — a secret carrying
+# `sslrootcert` before the file exists makes every lane throw at readFileSync.
+COPY ops/tls/pooler-ca.crt /app/ops/tls/pooler-ca.crt
+
+# CB-AE2E-035: the commit this image was built from, for GET /api/build-info. Passed at deploy
+# (`fly deploy --build-arg CLARA_BUILD_SHA=$(git rev-parse HEAD)`) and UNSET when it is not —
+# the route reports null rather than a guess, because a fabricated sha is worse than no sha.
+ARG CLARA_BUILD_SHA=""
+ENV CLARA_BUILD_SHA=$CLARA_BUILD_SHA
+
 EXPOSE 3200
 
 # The crash-only supervisor: HTTP + world + control listener + leader loop. The
