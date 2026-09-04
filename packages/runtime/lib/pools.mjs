@@ -55,6 +55,10 @@ import { assertFreeformPoolConfig, endFreeformPool } from "./freeform-read.mjs";
 // money lane's whole reachable surface has to be readable in one place. This file keeps the ONE
 // boot door and the ONE shutdown door by calling into it.
 import { assertCheckoutPoolConfig, endCheckoutPools } from "./checkout-pools.mjs";
+// H-43: the DSN TLS-posture assert. Its own module for the same reason the two above are —
+// the fingerprint pin, the ported structural checks and the ceremony's ordering rule are one
+// subject, and the runtime must carry them itself because scripts/ops/ is not in the image.
+import { assertLaneDsnTlsPosture } from "./tls-ca.mjs";
 
 const TEST_MODE = process.env.RELAY_TEST_MODE === "1";
 
@@ -168,6 +172,12 @@ export function assertProductionPoolConfig() {
   // ran. This call WARNS and names the two variables; the pools themselves still fail closed at
   // first use.
   assertCheckoutPoolConfig();
+  // H-43. Beside the DSN-PRESENCE loop above, the DSN TLS POSTURE assert: a DSN that pins a CA
+  // must pin a valid one (fail closed — a pinned-but-broken CA otherwise fails per-connection
+  // at readFileSync with a confusing error), and a production deployment that pins nothing gets
+  // a loud WARN naming the ceremony. lib/tls-ca.mjs states in full why this is DSN-driven
+  // rather than an unconditional "the CA must be in the image" check.
+  assertLaneDsnTlsPosture();
 }
 
 function loginConfig(which) {

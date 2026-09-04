@@ -372,6 +372,42 @@ rolling *back* past this image strands any run parked on `chatTurn_v15`.
 `CLARA_START_WORLD=1` and `PORT` live in `fly.toml [env]`, not secrets. The
 world runs ONLY in the deployed app.
 
+### Lane DSN TLS posture (H-43)
+
+**The DSN string is the only place TLS is decided.** `loginConfig` and `connConfig` pass the
+connection string through unchanged and set no `ssl` key — deliberately, and it means TLS is a
+secrets fact, not a code fact.
+
+**`sslmode=require` here is NOT libpq's `sslmode=require`.** At `pg-connection-string` 2.14,
+without `uselibpqcompat=true` in the DSN, the non-libpq branch maps modes onto Node TLS options:
+`verify-full` becomes `rejectUnauthorized: true`, and Node then validates against its ~150-root
+DEFAULT store **unless `ssl.ca` is set**. `ssl.ca` is populated from **`sslrootcert` only**, by
+reading that path. Supabase's pooler root is SELF-SIGNED and is not in the default store, so a
+DSN carrying `sslmode=verify-full` **without** `sslrootcert` fails the handshake, and one
+carrying `sslrootcert=<missing path>` throws inside `readFileSync` at connect time. Neither is
+verify-full working — which is how two earlier live ceremonies ended up at `sslmode=no-verify`.
+
+So every lane DSN carries **both**:
+
+```
+?sslmode=verify-full&sslrootcert=/app/ops/tls/pooler-ca.crt
+```
+
+That path is where the runner stage copies `ops/tls/pooler-ca.crt`, and it is **baked into every
+DSN secret** — changing it is a secrets ceremony across all of them, so it is fixed in the
+Dockerfile and in `lib/tls-ca.mjs`'s `IN_IMAGE_CA_PATH`, with a drift cell pinning both together.
+
+**Boot posture.** `assertProductionPoolConfig` calls `assertLaneDsnTlsPosture`: a DSN that pins
+a CA must pin a **valid** one — readable, one PEM CERTIFICATE block, `CA:TRUE`, inside its
+validity window, and matching the pinned sha256 fingerprint — or the runtime refuses to start.
+A production deployment that pins **nothing** gets a loud WARN naming the ceremony rather than a
+refusal, because refusing would brick the very deploy that puts the CA in the image.
+
+**Ceremony order — IMAGE FIRST, SECRETS SECOND**, or every lane throws. The runbook, including
+the live `openssl` leg to run before trusting the committed certificate, is
+`docs/ops/runtime-tls-verify-full-ceremony.md`; the bridge those ceremonies pipe DSNs through is
+`docs/ops/dsn-bridge.md`.
+
 ### Deploy
 
 From the **repo root** (so the Docker build context is the pnpm workspace root):
