@@ -76,7 +76,7 @@ export function DocumentFilingsHistory({
                     triggerSize="xs"
                     title={tg("autodraft.title")}
                     description={tg("autodraft.description")}
-                    diagnostic={tg("autodraft.diagnostic")}
+                    diagnostic={t("doorDiagnostic.autodraft")}
                     confirmLabel={tg("autodraft.confirm")}
                     busy={busy}
                     onConfirm={() => {

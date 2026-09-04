@@ -778,6 +778,11 @@
     "openDocumentNotViewable": "This file type ({mime}) can't be shown in a browser tab — only PDFs and page images can. Read what was extracted from it instead.",
     "openDocumentShowExtraction": "Show what was extracted",
     "openDocumentUnknownType": "type not declared",
+    "doorDiagnostic": {
+      "reextraction": "clara.request_reextraction(document, reason)",
+      "consentEvidence": "clara.classify_consent_evidence_document(document, reason)",
+      "autodraft": "clara.request_autodraft(filing)"
+    },
     "legalHoldReason": "Hold reason: {reason}",
     "badgeExtraction": "extraction: {status}",
     "badgePageCount": "{count} pages",
@@ -2313,8 +2318,7 @@
     "reextraction": {
       "trigger": "Request re-extraction",
       "title": "Request re-extraction",
-      "description": "Queues this document to be read again from scratch. The new reading replaces the current one, and a posted entry may rest on what it finds — so a reason is required.",
-      "diagnostic": "clara.request_reextraction(document, reason)",
+      "description": "Re-queues this document for a fresh extraction attempt (clara.request_reextraction). A reason is required — this changes the evidence a posted entry may rest on.",
       "confirm": "Request re-extraction",
       "reasonLabel": "Re-extraction reason",
       "reasonPlaceholder": "Why does this document need to be re-extracted (required)…",
@@ -2332,8 +2336,7 @@
     "consentEvidence": {
       "trigger": "Classify as consent evidence",
       "title": "Classify as consent evidence",
-      "description": "Records this document as the client's written consent to transfer their data across borders. Only an owner can do this, and a reason is required.",
-      "diagnostic": "clara.classify_consent_evidence_document(document, reason)",
+      "description": "Marks this document as the client's cross-border-transfer consent evidence (clara.classify_consent_evidence_document). Owner-level action — the DB refuses honestly if your session doesn't hold it. A reason is required.",
       "confirm": "Classify as consent evidence",
       "reasonLabel": "Reason",
       "reasonPlaceholder": "Why this document is the client's consent evidence (required)…",
@@ -2343,8 +2346,7 @@
     "autodraft": {
       "trigger": "Request autodraft",
       "title": "Request autodraft",
-      "description": "Asks Clara to draft a journal entry from this filing now, instead of waiting for the overnight sweep. Nothing is posted: you review the draft. Clara can still decline — the same coding-lane and daily-budget limits apply either way.",
-      "diagnostic": "clara.request_autodraft(filing)",
+      "description": "Asks Clara to draft a journal entry from this filing (clara.request_autodraft) — a one-click admission; the agent still runs under the same coding-lane and budget walls as the unattended sweep.",
       "confirm": "Request autodraft",
       "outcome": {
         "admitted": "Admitted — Clara will draft this filing.",
