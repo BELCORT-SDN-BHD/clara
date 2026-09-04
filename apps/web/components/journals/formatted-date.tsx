@@ -42,6 +42,22 @@ export function FormattedDate({ value }: { value: string | null }) {
  * `Date.parse` handles the ISO-8601 offset PostgREST returns; an
  * unparseable value renders verbatim rather than as a fabricated date, the
  * same fail-closed arm `FormattedDate` takes.
+ *
+ * IT PINS NO `timeZone` ON PURPOSE, and the asymmetry with its sibling above is
+ * the point rather than an oversight. `FormattedDate` pins UTC because a `date`
+ * column has no instant to place — the zone is the very thing that would
+ * corrupt it. An instant DOES have one, and the correct zone for a deadline is
+ * the reader's, which is what `useFormatter` resolves from the ambient
+ * environment when no override is given.
+ *
+ * There is no hydration hazard in leaving it ambient here. Every caller is a
+ * client component whose data arrives from a browser-side read — the journals
+ * workbench's own hydration cycle — so the server render that Next ships has no
+ * row to format and this component is first reached AFTER hydration, in the
+ * viewer's own environment. A `timeZone` pinned in `i18n/request.ts` would fix
+ * one zone for the WHOLE product, including every `FormattedDate` and every
+ * other surface's dates, which is a product-wide decision and a much larger
+ * blast radius than this component's own question.
  */
 export function FormattedDateTime({ value }: { value: string | null }) {
   const format = useFormatter();

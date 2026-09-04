@@ -65,12 +65,20 @@ export const NO_FILTERS: EntriesFilters = { status: ANY, origin: ANY, from: "", 
 
 export type EntryTableRow = {
   entry: JournalEntryRow;
-  /** Client-side presentation sums over this entry's own lines — see the
-   *  module header. Both are 0 for an entry whose lines were not in the
-   *  (possibly truncated) line read; the caller withholds them entirely when
-   *  `linesTruncated`, exactly as posted-panel.tsx did. */
-  debitCents: number;
-  creditCents: number;
+  /**
+   * Client-side presentation sums over this entry's own lines — see the module header.
+   *
+   * NULL, NOT ZERO, when the line read returned no line for this entry at all. Zero is a
+   * FIGURE: rendered through `<Money>` it reads "RM 0.00", which tells a professional this
+   * entry has no debits — a claim this read never established. The honest answer to "what does
+   * it total" when no line was seen is "—", and `<Money>`'s own null arm already renders
+   * exactly that. Absence is not evidence, and a derived zero is not a measurement.
+   *
+   * The two are also the SORT keys for those columns, and null sorts last in both directions
+   * (`sortEntryRows`), so an entry with nothing to total never leads a money order either.
+   */
+  debitCents: number | null;
+  creditCents: number | null;
   /** `reversed_by is not null` — this entry has already been reversed. */
   reversed: boolean;
   /** `origin === 'reversal'` — this entry IS a reversal (0003_books_core.sql:108). */
@@ -86,11 +94,13 @@ export function buildEntryRows(entries: JournalEntryRow[], lines: JournalLineRow
     byEntry.set(line.entry_id, acc);
   }
   return entries.map((entry) => {
-    const sums = byEntry.get(entry.id) ?? { debit: 0, credit: 0 };
+    // `undefined` here means NO LINE for this entry was in the read — distinct from an entry
+    // whose lines happen to sum to zero, which keeps its real 0.
+    const sums = byEntry.get(entry.id);
     return {
       entry,
-      debitCents: sums.debit,
-      creditCents: sums.credit,
+      debitCents: sums ? sums.debit : null,
+      creditCents: sums ? sums.credit : null,
       reversed: entry.reversed_by !== null,
       isReversal: entry.origin === "reversal",
     };
@@ -211,6 +221,23 @@ export function pageOf(rows: EntryTableRow[], page: number, pageSize: number): P
   return { page: clamped, pageCount, rows: rows.slice(start, start + pageSize) };
 }
 
-export function filtersActive(filters: EntriesFilters): boolean {
-  return filters.status !== ANY || filters.origin !== ANY || filters.from !== "" || filters.to !== "";
+/**
+ * Has the READER changed anything, compared against the state the tab OPENED on?
+ *
+ * NOT "is any filter set". The Posted tab opens with `status: "approved"` — that is the tab's
+ * own contract, not something a reader did — so a bare "is any filter non-empty" test was true
+ * on arrival, which made the Clear control appear over an untouched table AND made clearing it
+ * WIDEN the Posted tab into drafts and withdrawn entries. A control named "Clear filters" that
+ * shows a reader MORE than the tab promised is doing the opposite of what it says.
+ *
+ * `initial` is the caller's own opening state, so the same function serves a future tab that
+ * opens on a different status without another copy of this rule.
+ */
+export function filtersActive(filters: EntriesFilters, initial: EntriesFilters = NO_FILTERS): boolean {
+  return (
+    filters.status !== initial.status ||
+    filters.origin !== initial.origin ||
+    filters.from !== initial.from ||
+    filters.to !== initial.to
+  );
 }

@@ -154,8 +154,12 @@ export function JournalEntriesTable({
   const ts = useTranslations("JournalsWorkbench.status");
   const to = useTranslations("JournalsWorkbench.origin");
 
+  // The state the tab OPENS on, and what "Clear filters" returns to. Clearing to NO_FILTERS
+  // would widen the Posted tab into drafts and withdrawn entries — a control named "Clear"
+  // showing MORE than the tab promised.
+  const initialFilters = useMemo<EntriesFilters>(() => ({ ...NO_FILTERS, status: defaultStatus }), [defaultStatus]);
   const [sort, setSort] = useState<EntriesSort>(DEFAULT_SORT);
-  const [filters, setFilters] = useState<EntriesFilters>({ ...NO_FILTERS, status: defaultStatus });
+  const [filters, setFilters] = useState<EntriesFilters>(initialFilters);
   const [pageSize, setPageSize] = useState<number>(PAGE_SIZES[0]);
   const [page, setPage] = useState(1);
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -211,14 +215,18 @@ export function JournalEntriesTable({
         <FilterField id="je-filter-to" label={t("filterTo")}>
           <Input id="je-filter-to" type="date" value={filters.to} onChange={(e) => update({ to: e.target.value })} className="w-40" />
         </FilterField>
-        {filtersActive(filters) && (
-          <Button type="button" size="sm" variant="outline" onClick={() => update(NO_FILTERS)}>
+        {filtersActive(filters, initialFilters) && (
+          <Button type="button" size="sm" variant="outline" onClick={() => update(initialFilters)}>
             {t("clearFilters")}
           </Button>
         )}
       </div>
 
-      {filtersActive(filters) && (
+      {/* The count line rides on a FACT, not on whether the reader touched anything: rows are
+          being hidden, whoever hid them. On arrival that is the tab's own status filter, and
+          the select beside it reads "Posted", so the line is never orphaned. The Clear control
+          above is the half that keys on the reader's own edits. */}
+      {filtered.length !== all.length && (
         <p className="text-sm text-muted-foreground">{t("showingOf", { shown: filtered.length, total: all.length })}</p>
       )}
 

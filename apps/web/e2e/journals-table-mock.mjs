@@ -24,8 +24,32 @@
 // instead: this module answers only that exact read, and falls through for the
 // task-scoped and by-id reads the chat rail makes. Measured: the firm-wide read
 // has exactly ONE caller in the app (lib/journals/governance-doors.ts's
-// `listPendingInterruptions`, used only by lib/journals/use-journals-workbench.ts),
-// and no other spec in this suite loads that tab.
+// `listPendingInterruptions`, used only by lib/journals/use-journals-workbench.ts).
+//
+// A SECOND SPEC DOES REACH IT, and saying otherwise was the first draft's
+// mistake: `a11y-finish-walk.spec.ts:28` lists `/clients/<CLIENT_A>/journals`
+// among its four faces, so its workbench mount fires this read too. THE
+// COUPLING IS BENIGN, and here is the whole chain rather than an assurance.
+// `loadJournalsWorkbenchWithInterruptions` (lib/journals/use-journals-workbench.ts)
+// runs the interruptions read CONCURRENTLY with `loadJournalsWorkbench` inside
+// one `Promise.all`, so the read fires even when its sibling is doomed — and
+// for CLIENT_A it is doomed, because `journal_entries?client_id=eq.<CLIENT_A>`
+// falls through every lane mock to `serve-built.mjs`'s 404 fallback. The
+// Promise.all rejects, `readFailure` takes the whole component, and the render
+// is a StateBanner: no SectionTabs, no Clarifications tab, no card. So this
+// row is never RENDERED on that walk, and that walk only runs axe and
+// target-size over the banner. It has no assertion this handler can move.
+//
+// FIRST POSITION AMONG THE THREE LANE HOOKS ALSO REMOVES A COLLISION THAT
+// PREDATES THIS LANE. Before it, that same read from the a11y walk fell into
+// `chat-parity-mock.mjs:133-145`, whose `agent_interruptions` branch returns
+// false only when a `task_id` filter is present and does NOT match — a
+// filterless read reaches its body, hits the `wantsPending && !rowExistsYet()`
+// arm at :155-157 and increments `state.emptyReads`. That counter is the
+// chat-parity walk's own park TIMER (`ROW_APPEARS_AFTER_EMPTY_READS` at :47,
+// consumed by `rowExistsYet()` at :64-66), so a foreign walk was quietly
+// spending it. Running this module first takes the filterless read out of that
+// path entirely.
 
 export const JOURNALS = {
   clientId: "e6e6e6e6-6666-4666-8666-666666666666",

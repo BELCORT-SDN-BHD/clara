@@ -92,6 +92,10 @@ export function EntryRows({
           {entry.id.slice(0, 8)}
         </TableCell>
         <TableCell className="max-w-xs whitespace-normal">{entry.memo ?? tp("noMemo")}</TableCell>
+        {/* TWO ways these read "—", and they are different facts. `linesTruncated` says the
+            LINE READ was incomplete, so every total derived from it is unverifiable. A NULL
+            `debitCents` says no line for THIS entry was in the read at all — `<Money>`'s own
+            null arm renders the dash, so a zero is never printed for an absence. */}
         <TableCell className="text-right">{linesTruncated ? "—" : <Money cents={row.debitCents} />}</TableCell>
         <TableCell className="text-right">{linesTruncated ? "—" : <Money cents={row.creditCents} />}</TableCell>
         <TableCell>

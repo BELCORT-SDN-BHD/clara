@@ -73,19 +73,28 @@ test("a filter narrows the table, and the status filter is the only route to a W
   await signInTo(page, JOURNALS_URL);
   await openPostedTab(page);
 
-  // Three posted rows out of four entries; the draft is behind the filter.
+  // Three posted rows out of four entries; the draft is behind the filter. The count line
+  // states the hidden rows as a FACT, and there is nothing to "clear" yet — the tab opening on
+  // its own status is the tab's contract, not something the reader did.
   await expect(page.locator("table tbody tr")).toHaveCount(3);
   await expect(page.getByText("Showing 3 of 4 entries")).toBeVisible();
   await expect(page.getByText("DRAFT office supplies")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Clear filters" })).toHaveCount(0);
 
   await page.getByLabel("Source").selectOption("document");
   await expect(page.locator("table tbody tr")).toHaveCount(1);
   await expect(firstRow(page)).toContainText("RECENT April utilities");
   await expect(page.getByText("Showing 1 of 4 entries")).toBeVisible();
 
+  // Clearing returns to what the TAB promised, never past it: a control named "Clear filters"
+  // that widened Posted into drafts and withdrawn entries would show more than the tab says it
+  // holds.
   await page.getByRole("button", { name: "Clear filters" }).click();
-  await expect(page.locator("table tbody tr")).toHaveCount(4);
+  await expect(page.locator("table tbody tr")).toHaveCount(3);
+  await expect(page.getByText("DRAFT office supplies")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Clear filters" })).toHaveCount(0);
 
+  // The draft is still REACHABLE — the status filter is live, it is just not what Clear does.
   await page.getByLabel("Status").selectOption("draft");
   await expect(page.locator("table tbody tr")).toHaveCount(1);
   await expect(firstRow(page)).toContainText("DRAFT office supplies");

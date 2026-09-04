@@ -18,6 +18,7 @@ import {
   pageOf,
   sortEntryRows,
   statusOptions,
+  type EntriesFilters,
 } from "./entries-table";
 import type { JournalEntryRow, JournalLineRow } from "./types";
 
@@ -62,16 +63,30 @@ test("sorting ascending flips it, and a null posting_date sorts LAST in both dir
   assert.deepEqual(asc.map((r) => r.entry.id), ["b", "a", "c"]);
 });
 
-test("buildEntryRows sums each entry's OWN lines and leaves an entry with no read lines at zero", () => {
+test("buildEntryRows sums each entry's OWN lines, and an entry with NO read lines totals NULL, never zero", () => {
   const rows = buildEntryRows(
-    [entry({ id: "a" }), entry({ id: "b" })],
+    [entry({ id: "a" }), entry({ id: "b" }), entry({ id: "nolines" })],
     [line("a", 10_000, 0), line("a", 0, 10_000), line("b", 500, 0)],
   );
   const byId = Object.fromEntries(rows.map((r) => [r.entry.id, r]));
   assert.deepEqual(
     [byId.a!.debitCents, byId.a!.creditCents, byId.b!.debitCents, byId.b!.creditCents],
     [10_000, 10_000, 500, 0],
+    "an entry WITH lines keeps its real sums, including a genuine 0 on the side that has none",
   );
+  // Zero is a FIGURE — rendered it reads "RM 0.00" and tells a professional this entry has no
+  // debits, which this read never established. Null is the honest answer, and `<Money>`'s own
+  // null arm renders "—".
+  assert.deepEqual([byId.nolines!.debitCents, byId.nolines!.creditCents], [null, null]);
+});
+
+test("a NULL-total row sorts LAST on a money column in both directions — nothing to total never leads", () => {
+  const rows = buildEntryRows(
+    [entry({ id: "a" }), entry({ id: "b" }), entry({ id: "nolines" })],
+    [line("a", 10_000, 0), line("b", 500, 0)],
+  );
+  assert.deepEqual(sortEntryRows(rows, { key: "debit", dir: "desc" }, true).map((r) => r.entry.id), ["a", "b", "nolines"]);
+  assert.deepEqual(sortEntryRows(rows, { key: "debit", dir: "asc" }, true).map((r) => r.entry.id), ["b", "a", "nolines"]);
 });
 
 // THE WITHHELD-NUMBER RULE. `linesTruncated` means the line read was
@@ -135,6 +150,22 @@ test("the three filters narrow independently, and filtersActive reports whether 
 
   // `ANY` on both enum filters is the do-not-filter sentinel.
   assert.equal(filterEntryRows(rows, { status: ANY, origin: ANY, from: "", to: "" }).length, 3);
+});
+
+// The Posted tab OPENS on `status: "approved"`. That is the tab's contract, not something the
+// reader did — so a bare "is any filter set" test made "Clear filters" appear over an untouched
+// table, and clearing it WIDENED Posted into drafts and withdrawn entries.
+test("filtersActive compares against the tab's OPENING state, not against emptiness", () => {
+  const opensOnPosted: EntriesFilters = { ...NO_FILTERS, status: "approved" };
+
+  assert.equal(filtersActive(opensOnPosted, opensOnPosted), false, "an untouched Posted tab offers nothing to clear");
+  assert.equal(filtersActive(opensOnPosted), true, "…while the old emptiness test called that very state 'filtered'");
+
+  assert.equal(filtersActive({ ...opensOnPosted, status: "draft" }, opensOnPosted), true);
+  assert.equal(filtersActive({ ...opensOnPosted, status: ANY }, opensOnPosted), true, "widening to All is itself a change");
+  assert.equal(filtersActive({ ...opensOnPosted, origin: "manual" }, opensOnPosted), true);
+  assert.equal(filtersActive({ ...opensOnPosted, from: "2026-01-01" }, opensOnPosted), true);
+  assert.equal(filtersActive({ ...opensOnPosted, to: "2026-12-31" }, opensOnPosted), true);
 });
 
 // ABSENCE IS NOT EVIDENCE: a row with no posting_date cannot be PROVEN to be

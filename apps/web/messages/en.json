@@ -680,7 +680,7 @@
       "draft": "Draft — not in the books yet. Only a draft can be approved, revised or withdrawn.",
       "approved": "Posted — approved and in the books. A posted entry is never deleted; it is corrected by reversing it, which writes a new mirror entry.",
       "withdrawn": "Withdrawn — the draft was abandoned. This is the end of the road for it, and a reason was required.",
-      "rbac": "Anyone at bookkeeper level or above can approve and post. Every governed click is receipted on the Activity timeline."
+      "rbac": "Anyone at bookkeeper level or above can approve and post. Some entries still ask for a second checker or a written attestation — the refusal says which. Every governed click is receipted on the Activity timeline."
     },
     "section": {
       "needs_review": "Needs review",
@@ -2285,9 +2285,6 @@
       "revisionActorUnknown": "an unknown actor",
       "valueNone": "none",
       "valueDetails": "{kind} — show the value"
-    },
-    "approveRoutine": {
-      "trigger": "Approve (routine)"
     },
     "withdraw": {
       "trigger": "Withdraw",

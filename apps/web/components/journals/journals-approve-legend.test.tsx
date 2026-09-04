@@ -226,6 +226,37 @@ test("the state legend lists every status in the DB's CHECK domain, and Posted i
   }
 });
 
+/**
+ * THE PRE-裁-188 WINDOW, pinned so the legend cannot get ahead of the database.
+ *
+ * 裁-187 / ADR-0078 abolished the maker-checker walls, but the DOOR BODIES STILL CARRY THE
+ * RUNGS: `_approve_entry_core`'s three CLR05 arms are live and byte-untouched behind 0106's
+ * agent fence (`0016_a21_compliance_watch.sql:1424-1442`, the distinct-checker raise at
+ * :1433-1436), and docs/ARCHITECTURE.md §3.4 says so in one sentence. A legend promising the
+ * post-裁-188 world would tell a bookkeeper a rule the database does not yet obey, and they
+ * would meet a refusal this very screen had said could not happen.
+ *
+ * WHEN 裁-188 LANDS, this cell inverts rather than being deleted quietly: assert the caveat is
+ * GONE, and drop the second sentence of `JournalsWorkbench.legend.rbac` with it.
+ */
+test("the legend keeps the second-checker caveat while the door bodies still raise CLR05", async () => {
+  const h = await renderComponent(App(createElement(JournalStatusLegend)));
+  try {
+    for (let i = 0; i < 2; i++) await h.settle();
+    const text = h.text();
+    assert.match(text, /bookkeeper level or above can approve and post/, "裁-187's RBAC rule is stated");
+    assert.match(
+      text,
+      /second checker or a written attestation/,
+      "…and so is the window we are actually in — the walls are still standing until 裁-188",
+    );
+    assert.match(text, /the refusal says which/, "and the reader is told where the answer comes from: the door, not this screen");
+    assert.match(text, /receipted on the Activity timeline/);
+  } finally {
+    await h.unmount();
+  }
+});
+
 test("a jsonb revision delta renders its value, never the string [object Object]", async () => {
   const h = await renderComponent(
     App(

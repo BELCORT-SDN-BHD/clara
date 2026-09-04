@@ -29,6 +29,28 @@ import { P6_5_SESSIONS } from "./agentic-finish-mock.mjs";
 
 const E2E_DIR = dirname(fileURLToPath(import.meta.url));
 const SERVE_BUILT = join(E2E_DIR, "serve-built.mjs");
+
+/**
+ * EVERY LANE MOCK, not one (裁-190 fold).
+ *
+ * This gate shipped censusing a single hard-coded file, so the rule it enforces —
+ * "a lane handler scopes by the request's own subject, or it is a named exception" —
+ * applied to whichever lane happened to be named here and to nobody else. Two more
+ * lane mocks were already sitting beside it, unmeasured, and a third arrived with the
+ * journals table. A gate that watches one of four files is not a gate.
+ *
+ * WHAT A LANE MOCK IS, so this list is maintainable rather than a place things fall out
+ * of: a file-disjoint sibling of `serve-built.mjs` that `serve-built.mjs` consults
+ * through a hook and that answers PostgREST paths from its own fixtures. Adding a
+ * fourth means adding a row here; the count assertion below is what makes forgetting
+ * visible instead of silent.
+ */
+const LANE_MOCKS = [
+  "agentic-finish-mock.mjs",
+  "chat-parity-mock.mjs",
+  "journals-table-mock.mjs",
+] as const;
+
 const LANE_MOCK = join(E2E_DIR, "agentic-finish-mock.mjs");
 
 /** The subject every walk signs in as, read from `serve-built.mjs` rather than re-typed here —
@@ -63,10 +85,10 @@ test("N4 · no lane fixture may claim the FIRM ALTITUDE for the shared subject",
   assert.equal(own.length, 2, "the lane's two CLIENT threads are still the caller's own");
 });
 
-/** Every `path === "/rest/v1/..."` or `path === "/api/..."` handler in the lane's mock, with
+/** Every `path === "/rest/v1/..."` or `path === "/api/..."` handler in ONE lane mock, with
  *  whether its block contains a `return false` — the fall-through that makes it scoped. */
-function handlerCensus(): { path: string; scoped: boolean }[] {
-  const source = readFileSync(LANE_MOCK, "utf8");
+function handlerCensus(file: string = LANE_MOCK): { path: string; scoped: boolean }[] {
+  const source = readFileSync(file, "utf8");
   const lines = source.split("\n");
   const out: { path: string; scoped: boolean }[] = [];
   for (let i = 0; i < lines.length; i += 1) {
@@ -90,47 +112,97 @@ function handlerCensus(): { path: string; scoped: boolean }[] {
 }
 
 /**
- * The TWO handlers that cannot be scoped, each with the reason recorded in source beside it.
+ * TWO DECLARATIONS PER LANE MOCK, and they are deliberately different KINDS.
  *
- * An allowlist is only honest when it is short, named and argued. Both of these are RPCs whose
- * request carries no SUBJECT: `list_coa_templates()` takes no arguments at all, and
- * `begin_client_onboarding` takes a free-text name rather than an id — keying on this lane's own
- * string would be scoping by a label, which is the "spelling is not identity" mistake applied to
- * a fixture. Both are measured to have no other caller in `apps/web/e2e`.
+ * `unscopeable` — a handler that CANNOT be scoped, with the reason recorded in source beside
+ * it. An allowlist is only honest when it is short, named and argued. The two on the P6-5 lane
+ * are RPCs whose request carries no SUBJECT: `list_coa_templates()` takes no arguments at all,
+ * and `begin_client_onboarding` takes a free-text name rather than an id — keying on this lane's
+ * own string would be scoping by a label, the "spelling is not identity" mistake applied to a
+ * fixture. Both are measured to have no other caller in `apps/web/e2e`.
+ *
+ * `debt` — a handler that COULD be scoped and simply is not. Recording those as "unscopeable"
+ * would be writing a false reason into a gate, so they get their own name. All three sit on the
+ * chat-parity lane and each carries a discriminant its handler ignores: `answer_interruption`
+ * and `record_client_resolution` are POSTs whose body has an id, and
+ * `document_intakes_visible` is a GET that can filter. They predate this gate's widening
+ * (裁-190), they are recorded rather than fixed because that file belongs to another lane's
+ * scope, and the assertions below hold the count EXACTLY — so this list can shrink but a fourth
+ * entry cannot appear quietly.
+ *
+ * The journals lane declares NEITHER, which is the shape a new lane mock should aim for.
  */
-const UNSCOPEABLE = new Set(["/rest/v1/rpc/list_coa_templates", "/rest/v1/rpc/begin_client_onboarding"]);
+const LANE_DECLARATIONS: Record<string, { unscopeable: string[]; debt: string[] }> = {
+  "agentic-finish-mock.mjs": {
+    unscopeable: ["/rest/v1/rpc/list_coa_templates", "/rest/v1/rpc/begin_client_onboarding"],
+    debt: [],
+  },
+  "chat-parity-mock.mjs": {
+    unscopeable: [],
+    debt: [
+      "/rest/v1/rpc/answer_interruption",
+      "/rest/v1/document_intakes_visible",
+      "/rest/v1/rpc/record_client_resolution",
+    ],
+  },
+  "journals-table-mock.mjs": { unscopeable: [], debt: [] },
+};
 
 test("N5 · every lane handler either scopes by the request's own subject, or is a NAMED exception", () => {
-  const census = handlerCensus();
-  assert.ok(census.length >= 10, `the census found ${census.length} handlers — too few to be reading the file`);
-
-  for (const row of census) {
-    console.log(`  ${row.scoped ? "scoped  " : "UNSCOPED"} ${row.path}`);
-  }
-
-  const unscoped = census.filter((r) => !r.scoped).map((r) => r.path);
-  const undeclared = unscoped.filter((p) => !UNSCOPEABLE.has(p));
+  // THE LIST ITSELF IS PINNED. Without this, adding a lane mock and forgetting to declare it
+  // makes the gate silently smaller — the exact failure the widening exists to end.
   assert.deepEqual(
-    undeclared,
-    [],
-    "an unscoped handler answers for subjects this lane does not own — scope it, or add it to UNSCOPEABLE with its reason in source",
+    Object.keys(LANE_DECLARATIONS).sort(),
+    [...LANE_MOCKS].sort(),
+    "every lane mock needs a declaration row, and every row needs a lane mock",
   );
 
-  // The allowlist must not rot into a place things are parked: every entry has to still BE a
-  // handler in the file, and still be unscoped. An exception that quietly became scoped, or
-  // disappeared, should leave the list.
-  for (const allowed of UNSCOPEABLE) {
-    const row = census.find((r) => r.path === allowed);
-    assert.ok(row, `${allowed} is allowlisted but is no longer a handler — drop it from UNSCOPEABLE`);
-    assert.equal(row.scoped, false, `${allowed} is allowlisted but now scopes — drop it from UNSCOPEABLE`);
+  let totalScoped = 0;
+
+  for (const mock of LANE_MOCKS) {
+    const { unscopeable, debt } = LANE_DECLARATIONS[mock]!;
+    const declared = new Set([...unscopeable, ...debt]);
+    const census = handlerCensus(join(E2E_DIR, mock));
+
+    console.log(`\n  ${mock}`);
+    assert.ok(census.length >= 5, `${mock}: the census found ${census.length} handlers — it is not reading the file`);
+    for (const row of census) {
+      console.log(`    ${row.scoped ? "scoped  " : "UNSCOPED"} ${row.path}`);
+    }
+
+    const unscoped = census.filter((r) => !r.scoped).map((r) => r.path);
+    const scoped = census.filter((r) => r.scoped).map((r) => r.path);
+    totalScoped += scoped.length;
+
+    assert.deepEqual(
+      unscoped.filter((p) => !declared.has(p)),
+      [],
+      `${mock}: an unscoped handler answers for subjects this lane does not own — scope it, or declare it (unscopeable, with its reason in source) or record it as debt`,
+    );
+
+    // Neither list may rot into a place things are parked: every entry has to still BE a
+    // handler in this file, and still be unscoped. One that quietly became scoped, or
+    // disappeared, should leave the list.
+    for (const allowed of declared) {
+      const row = census.find((r) => r.path === allowed);
+      assert.ok(row, `${mock}: ${allowed} is declared but is no longer a handler — drop it`);
+      assert.equal(row.scoped, false, `${mock}: ${allowed} is declared but now SCOPES — drop it`);
+    }
+
+    // The per-file tail, replacing the single global count. EXACT, not `>=`: a new unscoped
+    // handler has to be argued for in source before this goes green again.
+    assert.equal(
+      unscoped.length,
+      declared.size,
+      `${mock}: expected exactly ${declared.size} undeclared-free unscoped handlers, saw ${unscoped.length} (${unscoped.join(", ")})`,
+    );
+    assert.equal(scoped.filter((p) => declared.has(p)).length, 0, `${mock}: no handler is counted both ways`);
   }
 
-  // THE POSITIVE CONTROL ON THE CENSUS ITSELF. An `unscoped` list that is empty proves nothing
-  // unless the instrument can tell the two apart — and it could not on its first cut, which
-  // anchored `return false;` at the line start and reported every one-line guard as UNSCOPED.
-  // Both classes must be non-empty and disjoint.
-  const scoped = census.filter((r) => r.scoped).map((r) => r.path);
-  assert.ok(scoped.length >= 10, `the census recognised only ${scoped.length} scoped handlers — it is not reading the guards`);
-  assert.equal(unscoped.length, UNSCOPEABLE.size, "and it still sees the two that genuinely cannot scope");
-  assert.equal(scoped.filter((p) => UNSCOPEABLE.has(p)).length, 0, "no handler is counted both ways");
+  // THE POSITIVE CONTROL ON THE CENSUS ITSELF. An empty `unscoped` list proves nothing unless
+  // the instrument can tell the two apart — and it could not on its first cut, which anchored
+  // `return false;` at the line start and reported every one-line guard as UNSCOPED. Across the
+  // three files the SCOPED class must stay large, or the reader is broken rather than the
+  // fixtures clean.
+  assert.ok(totalScoped >= 20, `the census recognised only ${totalScoped} scoped handlers across ${LANE_MOCKS.length} files — it is not reading the guards`);
 });

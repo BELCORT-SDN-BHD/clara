@@ -22,9 +22,28 @@
 // approve_routine_entry; draft -> withdrawn is withdraw_draft (reason
 // required); approved -> a NEW mirror entry is reverse_entry, with the
 // original gaining `reversed_by` and nothing ever deleted (LAW 6, the note
-// posted-panel.tsx has carried since P3). The RBAC line is 裁-187/ADR-0078:
-// bookkeeper and above approve and post any amount, own drafts included, and
-// the receipt — not a wall — is what makes it accountable afterwards.
+// posted-panel.tsx has carried since P3).
+//
+// THE RBAC LINE DESCRIBES THE WINDOW WE ARE IN, NOT THE DESTINATION, and its
+// middle sentence is load-bearing until exactly one lane lands. 裁-187 /
+// ADR-0078 abolished the maker-checker walls and the attestation ceremonies —
+// bookkeeper and above approve and post any amount, own drafts included, with
+// the RECEIPT rather than a wall making it accountable afterwards. But the
+// DOOR BODIES STILL CARRY THE RUNGS: `_approve_entry_core`'s three CLR05 arms
+// are live and byte-untouched behind 0106's agent fence
+// (`0016_a21_compliance_watch.sql:1424-1442`, the distinct-checker raise at
+// :1433-1436), and docs/ARCHITECTURE.md §3.4 records the same in one sentence
+// — "The bodies still carry the rungs until the 裁-188 wall-removal lane
+// lands." A legend that promised the post-裁-188 world would be telling a
+// bookkeeper a rule the database does not yet obey, and they would meet a
+// refusal this screen had just said could not happen.
+//
+// 裁-188 IS THE LANE THAT DELETES THE MIDDLE SENTENCE. When that migration set
+// removes the segregation and high-stakes rungs, drop
+// `JournalsWorkbench.legend.rbac`'s second sentence ("Some entries still ask
+// for a second checker…") and this note with it; the first and third sentences
+// survive unchanged. The attestation reveal in drafts-queue-panel.tsx is the
+// same window's other half and retires on the same lane.
 
 import { useTranslations } from "next-intl";
 

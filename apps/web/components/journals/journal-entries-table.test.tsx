@@ -91,6 +91,23 @@ function firstRowText(container: unknown): string {
   return textOf(row as never);
 }
 
+/**
+ * `\s`, NOT a literal space, between the symbol and the digits.
+ *
+ * `<Money>` formats through `Intl.NumberFormat` with `currencyDisplay: "narrowSymbol"`, which
+ * separates "RM" from the number with a NARROW NO-BREAK SPACE (U+202F), not U+0020. A literal
+ * `/RM 0\.00/` therefore never matches a rendered amount — which makes an `assert.doesNotMatch`
+ * against it VACUOUS: it would have gone green over a real "RM 0.00" on screen, proving the
+ * opposite of what it claims. Caught by the must-not-red half of the cell below, which is the
+ * whole reason a positive control sits beside every absence assertion.
+ */
+const MONEY_ZERO = /RM\s0\.00/;
+const MONEY_ONE = /RM\s1\.00/;
+
+function buttonsNamed(container: unknown, name: RegExp): unknown[] {
+  return (container as El).querySelectorAll("button").filter((n) => name.test(textOf(n as never)));
+}
+
 function headerNamed(container: unknown, name: RegExp): El {
   const th = (container as El).querySelectorAll("th").find((n) => name.test(textOf(n as never)));
   assert.ok(th, `no column header matched ${name}`);
@@ -160,6 +177,54 @@ test("the source filter narrows by the DB's own origin, labelled but never relab
     await h.settle();
     assert.match(h.text(), /DOCUMENT february/);
     assert.doesNotMatch(h.text(), /RECENT april/);
+  } finally {
+    await h.unmount();
+  }
+});
+
+// The Posted tab opens on `status: "approved"` because that is what the tab promises. A "Clear
+// filters" control over an untouched table would, on being clicked, WIDEN Posted into drafts
+// and withdrawn entries — showing a reader MORE than the tab said it holds.
+test("an untouched Posted tab offers nothing to clear, and clearing returns to the tab's own status", async () => {
+  const h = await renderComponent(panel({ entries: [BACKDATED, RECENT, WITHDRAWN] }));
+  try {
+    for (let i = 0; i < 2; i++) await h.settle();
+    assert.equal(buttonsNamed(h.container, /^Clear filters$/).length, 0, "nothing to clear on arrival");
+    // The count line is a FACT about hidden rows and does still render.
+    assert.match(h.text(), /Showing 2 of 3 entries/);
+
+    const statusSelect = h.find((n) => n.tagName === "SELECT" && (n as unknown as El).getAttribute("id") === "je-filter-status");
+    await h.fireEvent(statusSelect!, "change", (n) => { (n as unknown as { value: string }).value = "withdrawn"; });
+    await h.settle();
+    assert.equal(buttonsNamed(h.container, /^Clear filters$/).length, 1, "the reader's own change is what offers the control");
+
+    await h.act(async () => { await clickButton(buttonsNamed(h.container, /^Clear filters$/)[0] as never); });
+    await h.settle();
+    assert.match(h.text(), /RECENT april/);
+    assert.doesNotMatch(h.text(), /ABANDONED march/, "clearing returns to Posted, it does not widen past the tab");
+    assert.equal(buttonsNamed(h.container, /^Clear filters$/).length, 0);
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("an entry with NO lines in an untruncated read shows '—', never RM 0.00", async () => {
+  const noLines = entry({ id: "e0000000-0000-4000-8000-000000000000", posting_date: "2026-05-01", memo: "NOLINES may" });
+  const h = await renderComponent(panel({ entries: [noLines, RECENT], lines: LINES }));
+  try {
+    for (let i = 0; i < 2; i++) await h.settle();
+    const rows = (h.container as unknown as El).querySelectorAll("tbody")[0]!.querySelectorAll("tr");
+    const row = rows.find((r) => /NOLINES may/.test(textOf(r as never)));
+    assert.ok(row, "the no-lines entry must render");
+    const text = textOf(row as never);
+    assert.doesNotMatch(text, MONEY_ZERO, `a zero is a FIGURE, and this read never saw one: ${text}`);
+    assert.match(text, /—/, "the honest answer to 'what does it total' when no line was read is a dash");
+
+    // MUST-NOT-RED half: the entry that DOES have lines still shows its money. This half is
+    // also what caught the regex bug — a literal `RM 0.00` never matches the rendered string,
+    // so the doesNotMatch above would have passed over a real zero. See MONEY_ZERO's note.
+    const withLines = rows.find((r) => /RECENT april/.test(textOf(r as never)));
+    assert.match(textOf(withLines as never), MONEY_ONE);
   } finally {
     await h.unmount();
   }
