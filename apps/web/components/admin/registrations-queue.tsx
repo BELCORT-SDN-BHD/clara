@@ -106,7 +106,7 @@ export function RegistrationsQueuePanel() {
   // `ctxState.data.length > 1` catches the ambiguous case explicitly,
   // rather than folding "exactly one" into the lookup itself. Equivalent
   // truth table, different phrasing.
-  // E-7 (裁-190): the eligibility judgement now comes from the ONE capability
+  // E-7 (裁-187): the eligibility judgement now comes from the ONE capability
   // object (lib/firm/capabilities.ts), which composes the very same
   // `isOperatorConsoleEligible` predicate this file used and folds the
   // zero-rows/more-than-one-row/null-rank cases into the same denial. The truth

@@ -162,7 +162,7 @@ test("/admin/compliance page composition (PageHeader + the real ComplianceRegist
 
 // --- shadow of app/(firm)/admin/vendor-bindings/page.tsx --------------------
 
-// E-7 (裁-190): the vendor-bindings panel now shapes its own controls from the
+// E-7 (裁-187): the vendor-bindings panel now shapes its own controls from the
 // firm layout's positively-read caller context, so these mounts supply the
 // provider the real tree always has. ADMIN rank is the fixture, because that is
 // the rank every pre-existing cell here was implicitly exercising when the
@@ -252,8 +252,24 @@ test("/admin/settings page composition (PageHeader + the real SettingsPanel) has
         // no trigger, no amount, and no sentence claiming a second approver.
         assert.doesNotMatch(pageText, /Change threshold/, "the Change threshold control is retired outright, not hidden");
         assert.doesNotMatch(pageText, /RM ?[\d,]+\.\d\d/, "no threshold amount may render — the number no longer governs anything");
-        assert.doesNotMatch(pageText, /second person's approval/, "the maker-checker claim is abolished and must not survive in copy");
-        assert.match(pageText, /no approval threshold/i, "the page must say plainly that approval needs no threshold");
+        assert.doesNotMatch(
+          pageText,
+          /the amount above which a posting needs a second person's approval/,
+          "the retired control's own description must not survive in copy",
+        );
+        // THE COPY MUST BE TRUE FOR THE PRE-裁-188 WINDOW, which is a narrower
+        // claim than "there is no threshold" — see settings-panel.tsx's header.
+        // `_approve_entry_core` (LIVE, 0016:1425-1443) still raises CLR05 on a
+        // solo high-stakes approval, so the page says the CONTROL is retired and
+        // that the refusal is still there. When 裁-188's lane deletes that
+        // refusal it deletes the last sentence of `approvalsNote` in the SAME
+        // change, and this assertion pair moves with it.
+        assert.match(pageText, /Change-threshold control is retired/, "the page must say the control is gone");
+        assert.match(
+          pageText,
+          /still refuses a solo approval on a high-stakes entry/,
+          "…and must NOT claim the database's own second-approver refusal is gone with it — it is not, yet",
+        );
         const violations = checkAccessibility(h.container as never);
         assert.deepEqual(violations, [], JSON.stringify(violations));
       } finally {

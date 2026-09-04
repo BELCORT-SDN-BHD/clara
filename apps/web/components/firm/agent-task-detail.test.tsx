@@ -17,6 +17,7 @@ import { createElement } from "react";
 import { NextIntlClientProvider } from "next-intl";
 import { renderComponent, textOf, clickButton } from "../../test/hookHarness";
 import { enableDomInspection } from "../../test/domInspect";
+import { checkKeyboardWalk, focusableElements, isKeyboardOperable } from "../../test/keyboardWalk";
 import { configureSessionTokenSource, resetSessionTokenSource } from "../../lib/session-accessor";
 import { AgentTasksPanel } from "./agent-tasks-panel";
 import messages from "../../messages/en.json";
@@ -165,6 +166,48 @@ test("an error_code outside the CHECK renders its RAW value, never a next-intl k
         const after = textOf(body as never);
         assert.match(after, /some_future_code/, "the unknown code must still reach the human");
         assert.doesNotMatch(after, /errorCodes\./, "and must never render as a key path");
+      } finally {
+        await h.unmount();
+      }
+    },
+  );
+});
+
+test("the drawer walks cleanly while open and RETURNS the trigger when it closes", async () => {
+  // The house escape-path pattern (`members-keyboard.test.tsx:127-135`): closing
+  // must not strand focus on a removed node. A drawer that opens is half the
+  // affordance; one a keyboard user cannot leave is a trap.
+  await withMockedEnv(
+    async (u) => {
+      const url = String(u);
+      if (url.includes("/rest/v1/agent_tasks_visible")) return jsonResponse([TASK]);
+      throw new Error(`unexpected fetch: ${url}`);
+    },
+    async () => {
+      const { h, body } = await mountPanel(TASK);
+      try {
+        const trigger = findIn(body, (n) => n.tagName === "BUTTON" && textOf(n as never).trim() === "Details");
+        assert.ok(trigger, "the Details trigger must render");
+        await h.act(async () => { await clickButton(trigger as never); });
+        for (let i = 0; i < 3; i++) await h.settle();
+
+        assert.match(textOf(body as never), /Agent task detail/, "the drawer must be open before its walk means anything");
+        assert.deepEqual(checkKeyboardWalk(body as never), [], "no keyboard-walk violations while the drawer is open");
+
+        const close = findIn(body, (n) => n.tagName === "BUTTON" && textOf(n as never).trim() === "Close");
+        assert.ok(close, "Close must be a real <button>, not a div");
+        assert.equal(isKeyboardOperable(close as never), true);
+        await h.act(async () => { await clickButton(close as never); });
+        for (let i = 0; i < 4; i++) await h.settle();
+
+        // THE ESCAPE PATH.
+        const after = findIn(body, (n) => n.tagName === "BUTTON" && textOf(n as never).trim() === "Details");
+        assert.ok(after, "the row's own trigger must still exist after the drawer closes");
+        assert.ok(
+          focusableElements(h.container as never).includes(after as never),
+          "…and must be keyboard-reachable again",
+        );
+        assert.doesNotMatch(textOf(body as never), /Agent task detail/, "the drawer must actually be gone");
       } finally {
         await h.unmount();
       }

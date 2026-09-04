@@ -16,11 +16,30 @@
 //
 // SO THE CONTROL IS REMOVED OUTRIGHT, not hidden and not disabled. A threshold
 // that gates nothing is worse than absent: a number still on screen, still
-// editable, still described as "the amount above which a posting needs a second
-// person's approval", would be this surface asserting a wall the database is in
-// the middle of taking down. The panel now says what is true — approval depends
-// on rank alone — and reads NOTHING, because the value it used to read no longer
-// governs anything a person can act on here.
+// editable, would be this surface asserting authority over a wall the database
+// is in the middle of taking down. The panel reads NOTHING now, because the
+// value it used to read is no longer settable from anywhere.
+//
+// **THE COPY DESCRIBES THE PRE-裁-188 WINDOW, AND IT MUST.** An earlier cut of
+// `approvalsNote` said "There is no approval threshold … the amount involved
+// does not change who may act". That was FALSE against the live database and was
+// caught in review. The threshold's CONTROL is retired; the WALL is not, and the
+// two are removed by different lanes:
+//   · every firm still carries `firms.high_stakes_amount_cents`
+//     (`0002_foundation.sql:204`);
+//   · `clara.is_high_stakes` (LIVE at `0009_coding_floor.sql:1513-1521`) fires on
+//     an opening balance, a year-end entry, a tax-affecting entry, a stamped
+//     `amount_override` OR the summed debits reaching that amount — so the amount
+//     is not even the only trigger;
+//   · `clara._approve_entry_core` (LIVE at
+//     `0016_a21_compliance_watch.sql:1425-1443`) still raises **CLR05** "high-stakes
+//     entry needs a distinct checker" / "solo high-stakes approval requires an
+//     attestation".
+// **裁-188's wall-removal database lane is the one that deletes that refusal**,
+// and the last sentence of `approvalsNote` comes out in the SAME change — not
+// before it, or this page starts lying in the other direction. The two cells
+// that pin the sentence are `e2e/firm-navigation-walk.spec.ts` and
+// `firm-admin-pages-a11y.test.tsx`.
 //
 // WHAT IS DELIBERATELY NOT DONE HERE. The verb itself still exists in the
 // database until 裁-188's wall-removal lane lands, and `lib/firm-admin/

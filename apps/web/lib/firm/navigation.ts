@@ -133,7 +133,7 @@ export function hasNavigationAccess(
 
 /**
  * "ADMIN" IS THE WRONG WORD BELOW ADMIN RANK, so below admin rank it is not the
- * word (E-7 / CB-AE2E-014, 裁-190). The section's READ floor stays `viewer` and
+ * word (E-7 / CB-AE2E-014, 裁-187). The section's READ floor stays `viewer` and
  * is not touched: a viewer legitimately reaches the compliance register and the
  * firm settings under it, and a bookkeeper the vendor bindings too, so hiding
  * the entry would remove destinations that ARE theirs. Only the LABEL was

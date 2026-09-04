@@ -120,13 +120,12 @@
       "laneNeedsReview": "Clara has prepared this and a person has to check it before it counts.",
       "laneReady": "Clara has everything it needs for this one; it is listed so nothing goes through unseen.",
       "sectionNeedsYou": "This kind always waits on a person — Clara never settles it unattended.",
-      "sectionNeedsReview": "This is queued for review. Nothing else is blocked while it waits."
+      "sectionNeedsReview": "This is queued for review."
     },
     "whyChip": {
       "auto": "Clara raised this unattended",
       "ruleBacked": "A saved coding rule already matched"
     },
-    "tierLabel": "State",
     "tier": {
       "compliance_watch": {
         "monitored": "Monitored — below the threshold",
@@ -223,7 +222,7 @@
     "firmScopeNoClient": "Firm-wide (no client)",
     "noRationale": "No stated rationale.",
     "timelineHeading": "Everything that happened",
-    "timelineNotBuilt": "A firm-wide timeline of who did what — the people's acts as well as the agent's — is not built. The database ships no read for it (there is no clara.firm_timeline_visible), so this page can only show the agent receipts below. Approving an entry, resolving a question or changing a member's role leaves no trace on this page today.",
+    "timelineNotBuilt": "A firm-wide timeline of who did what — the people's acts as well as the agent's — is not built here yet. It needs the clara.list_firm_timeline read, which this build does not call, so this page can only show the agent receipts below. Approving an entry, resolving a question or changing a member's role leaves no trace on this page today.",
     "receiptKinds": {
       "entry_post": "Journal entry posted",
       "bank_agent": "Bank agent act",
@@ -2921,7 +2920,7 @@
       "pageDescription": "Firm-wide authority controls.",
       "approvalsHeading": "Approvals",
       "approvalsSubheading": "Who may approve and post work in this firm.",
-      "approvalsNote": "There is no approval threshold. A bookkeeper or above can approve and post any amount, including their own drafts, and every approval is receipted automatically with who did it and when. The amount involved does not change who may act — only the person's role does.",
+      "approvalsNote": "The Change-threshold control is retired: nobody sets an amount here any more. Who may approve is decided by a person's role, and every approval is receipted automatically with who did it and when. One rule has not been removed yet — the database still refuses a solo approval on a high-stakes entry, and asks for a second person or a written reason. That refusal is being taken out in its own lane; until it is, you may still meet it.",
       "capabilitiesHeading": "Signing capabilities",
       "capabilitiesSubheading": "Per-member close-and-attest and reopen authority.",
       "capabilitiesNotBuilt": "Granting or revoking a member's close-and-attest or reopen capability has no surface here yet — grant_firm_capability and revoke_firm_capability are live, firm-owner-only doors (migration 0056) with no UI."

@@ -1,4 +1,4 @@
-// THE CAPABILITY PINS (E-7 / CB-AE2E-014 / CB-AE2E-033, 裁-190).
+// THE CAPABILITY PINS (E-7 / CB-AE2E-014 / CB-AE2E-033, 裁-187).
 //
 // Two jobs, and the first is the one that matters most: every floor
 // `lib/firm/capabilities.ts` mirrors is PARSED OUT OF THE MIGRATION IT CITES,
@@ -8,27 +8,41 @@
 // below offers a control that can only refuse, which is the exact defect the
 // owner reported.
 //
-// THE CITATION IS PROVEN LIVE, not merely present. For each row the test also
-// requires that the cited migration is the LAST file in packages/db/migrations
-// that creates that door — the "chase the LIVE body" law (apps/web/AGENTS.md),
-// mechanised. `set_member_role` alone has FOUR creations across 0004/0005/0145/
-// 0157, and citing any but the last would be citing a superseded wall.
+// THE CITATION IS PROVEN LIVE, not merely present — and "live" has to mean
+// SURVIVING, not merely last-created. `set_member_role` alone has four creations
+// across 0004/0005/0145/0157, and citing any but the last would cite a
+// superseded wall; worse, `sign_vendor_identity_binding`'s two-argument body was
+// DROPPED outright at `0154:2725` and replaced by a three-argument one, so its
+// last CREATE-of-that-overload is a body no caller can reach. This file cited
+// exactly that dead body until review-550 caught it.
+//
+// So the live-body check walks `test/sqlFunctionCensus.ts`'s
+// `semanticFunctionOperations` — every define AND drop of the name, in migration
+// order, with dynamic `EXECUTE` splices rendered rather than skipped — and takes
+// the survivors, exactly as `lib/command/do-action-floors.test.ts:57-66` and
+// `lib/members/members-doors.test.ts` already do. Reusing that instrument rather
+// than hand-rolling a third regex census is the no-second-implementation law;
+// the mutant panel points a citation at the dropped body and requires this file
+// to go red.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
   FIRM_CAPABILITY_CONJUNCTS,
   FIRM_CAPABILITY_FLOORS,
+  assignableRoles,
+  canActOnMemberOfRole,
   capabilityScopeFromRows,
   firmCapabilities,
   firmCapabilitiesFromRows,
   type FirmCapabilities,
 } from "./capabilities";
 import type { CallerContextRow } from "./caller-context";
+import { semanticFunctionOperations } from "../../test/sqlFunctionCensus";
 
 const MIGRATIONS_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "..", "packages", "db", "migrations");
 
@@ -63,7 +77,9 @@ function migrationLines(file: string): string[] {
   return lines;
 }
 
-const ALL_MIGRATIONS = readdirSync(MIGRATIONS_DIR).filter((f) => f.endsWith(".sql")).sort();
+// (The hand-rolled migration walk that used to live here went with the
+// `creationSites` helper it fed — `semanticFunctionOperations` does the walking
+// now, drops included.)
 
 test("FIRM_CAPABILITY_FLOORS: every cited line declares the role the capability mirrors", () => {
   assert.ok(FIRM_CAPABILITY_FLOORS.length >= 9, "the mirror table must not have been emptied");
@@ -94,54 +110,83 @@ test("FIRM_CAPABILITY_FLOORS: each cited floor line belongs to the door it names
   }
 });
 
-/** Every `create [or replace] function clara.<door>(` site across the estate, as
- *  `{ file, line }`, with the ROLE its body floors at — the first
- *  `_human_ctx(role_rank('…'))` between that CREATE and the next one. */
-function creationSites(door: string): { file: string; line: number; role: string | null }[] {
-  const createRe = new RegExp(`^create\\s+(?:or\\s+replace\\s+)?function\\s+clara\\.${door}\\s*\\(`, "i");
-  const anyCreateRe = /^create\s+(?:or\s+replace\s+)?function\s+/i;
-  const floorRe = /clara\._human_ctx\(clara\.role_rank\('([a-z]+)'\)\)/;
-  const sites: { file: string; line: number; role: string | null }[] = [];
-  for (const file of ALL_MIGRATIONS) {
-    const lines = migrationLines(file);
-    for (let i = 0; i < lines.length; i += 1) {
-      if (!createRe.test((lines[i] ?? "").trim())) continue;
-      let role: string | null = null;
-      for (let j = i + 1; j < lines.length; j += 1) {
-        const text = lines[j] ?? "";
-        if (anyCreateRe.test(text.trim())) break;
-        const m = floorRe.exec(text);
-        if (m) { role = m[1] ?? null; break; }
-      }
-      sites.push({ file, line: i + 1, role });
+/** Every SURVIVING define of `clara.<door>`, in migration order — a DROP clears
+ *  the list, so this answers "what is live", not "how many times the name ever
+ *  appeared". The exact shape `lib/command/do-action-floors.test.ts:57-66` uses,
+ *  reading the same shared census. */
+function liveDefines(door: string): { file: string; definition: string; offset: number }[] {
+  const out: { file: string; definition: string; offset: number }[] = [];
+  for (const operation of semanticFunctionOperations(MIGRATIONS_DIR, door)) {
+    if (operation.kind === "drop") { out.length = 0; continue; }
+    if (operation.definition !== null) {
+      out.push({ file: operation.file, definition: operation.definition, offset: operation.offset });
     }
   }
-  return sites;
+  return out;
 }
 
-test("FIRM_CAPABILITY_FLOORS: EVERY body of a cited door floors at the same role, and the citation is one of them", () => {
-  // A TOTAL CENSUS, not a "last creator" guess, because two of these doors carry
-  // OVERLOADS rather than a plain supersession chain: `sign_vendor_identity_binding`
-  // exists as `(uuid,text)` (0028, replaced by 0144) AND as
-  // `(uuid,text,text default null)` (0154:2727), and both are callable. Asserting
-  // only the last file would have picked the three-argument body this surface
-  // never calls. Requiring that EVERY body agrees on the rank is stronger: the
-  // mirrored floor is then right whichever overload PostgREST resolves, and a
-  // future migration that floors one overload differently reds here.
+/** The 1-based line an offset falls on, in the same file the census read. */
+function lineAt(file: string, offset: number): number {
+  return readFileSync(join(MIGRATIONS_DIR, file), "utf8").slice(0, offset).split("\n").length;
+}
+
+const FLOOR_RE = /clara\._human_ctx\(clara\.role_rank\('([a-z]+)'\)\)/;
+
+test("FIRM_CAPABILITY_FLOORS: every citation names a SURVIVING body, and every surviving body floors at the mirrored role", () => {
+  // Two independent claims, and the first is the one review-550 caught this file
+  // failing: the cited (file, line) must sit inside a define that a later DROP
+  // did NOT remove. `sign_vendor_identity_binding`'s two-argument body is
+  // dropped at 0154:2725; a citation into it points at code no caller reaches.
+  //
+  // The second claim — every SURVIVING overload floors at the same role — is
+  // what makes the mirrored rank right whichever overload PostgREST resolves.
   for (const row of FIRM_CAPABILITY_FLOORS) {
-    const sites = creationSites(row.door);
-    assert.ok(sites.length > 0, `no migration creates clara.${row.door}`);
-    const roles = new Set(sites.map((s) => s.role));
+    const defines = liveDefines(row.door);
+    assert.ok(defines.length > 0, `clara.${row.door} has no surviving definition`);
+
+    const roles = new Set(defines.map((d) => FLOOR_RE.exec(d.definition)?.[1] ?? null));
     assert.deepEqual(
       [...roles],
       [row.role],
-      `clara.${row.door} does not floor uniformly at '${row.role}' — ${sites.map((s) => `${s.file}:${s.line}=${s.role}`).join(", ")}`,
+      `clara.${row.door} does not floor uniformly at '${row.role}' across its LIVE bodies — ` +
+        defines.map((d) => `${d.file}:${lineAt(d.file, d.offset)}=${FLOOR_RE.exec(d.definition)?.[1] ?? "none"}`).join(", "),
     );
+
+    const cited = defines.find((d) => {
+      if (d.file !== row.migration) return false;
+      const start = lineAt(d.file, d.offset);
+      return row.line >= start && row.line < start + d.definition.split("\n").length;
+    });
     assert.ok(
-      sites.some((s) => s.file === row.migration && s.line <= row.line),
-      `the cited ${row.migration}:${row.line} is not inside any creation of clara.${row.door} (sites: ${sites.map((s) => `${s.file}:${s.line}`).join(", ")})`,
+      cited,
+      `${row.migration}:${row.line} is not inside any SURVIVING body of clara.${row.door} — live bodies are ` +
+        defines.map((d) => `${d.file}:${lineAt(d.file, d.offset)}`).join(", "),
     );
   }
+});
+
+test("THE INSTRUMENT WORKS: the census really does honour a DROP", () => {
+  // A guard is judgement logic and gets its own positive control. If this ever
+  // returns the two-argument body, every "live body" verdict above is worthless.
+  const defines = liveDefines("sign_vendor_identity_binding");
+  assert.equal(defines.length, 1, `expected exactly one surviving body, got ${defines.map((d) => d.file).join(", ")}`);
+  assert.equal(defines[0]?.file, "0154_binding_proposal_pr_1.sql", "the survivor is 0154's three-argument body");
+  assert.match(
+    defines[0]?.definition ?? "",
+    /p_attestation text default null/,
+    "…and it is the THREE-argument one: the two-argument overload was dropped at 0154:2725",
+  );
+  // And the dropped body really was defined earlier, so the census had something
+  // to drop — an empty history would make the assertion above vacuous.
+  const everyOperation = semanticFunctionOperations(MIGRATIONS_DIR, "sign_vendor_identity_binding");
+  assert.ok(
+    everyOperation.some((o) => o.kind === "drop"),
+    "the census must SEE the drop, not merely fail to find the old body",
+  );
+  assert.ok(
+    everyOperation.filter((o) => o.kind === "define").length >= 3,
+    "0028, 0144 and 0154 all define this name — the census must see all three",
+  );
 });
 
 test("FIRM_CAPABILITY_CONJUNCTS: the operator conjunct's cited lines really test the caller's OWN firm", () => {
@@ -165,7 +210,7 @@ const ALL_FALSE: FirmCapabilities = {
   canSignVendorBinding: false,
 };
 
-test("firmCapabilities: the four unknown-rank shapes ALL deny — the gate fails CLOSED (裁-190)", () => {
+test("firmCapabilities: the four unknown-rank shapes ALL deny — the gate fails CLOSED (裁-187)", () => {
   assert.deepEqual(firmCapabilities(null), ALL_FALSE, "no scope at all denies");
   assert.deepEqual(firmCapabilities({ role_rank: null, is_operator: true }), ALL_FALSE, "a NULL role_rank denies");
   assert.deepEqual(firmCapabilitiesFromRows(null), ALL_FALSE, "a read that has not landed denies");
@@ -191,6 +236,43 @@ test("firmCapabilities: each capability turns on at exactly its own floor, and n
   assert.deepEqual(at(2).canRevokeInvite, true, "an admin may revoke an invite");
   assert.deepEqual(at(2).canDecideFirmRegistrations, false, "an admin may NOT decide registrations — that door is owner+");
   assert.deepEqual(at(3).canDecideFirmRegistrations, true, "an owner of an operator firm may");
+});
+
+// --- the two rank-only walls inside the members doors -----------------------
+// Added in the review-550 fold. The mutant panel is what demanded them: deleting
+// the `canActOnMemberOfRole` comparison outright reddened NOTHING, which meant
+// the derivation had shipped with no cell of its own. An untested guard is an
+// assumption wearing a function's clothes.
+
+test("assignableRoles: the ladder is truncated at the caller's OWN rank (0157:277-279)", () => {
+  const at = (rank: number | null) => assignableRoles(rank === null ? null : { role_rank: rank, is_operator: false });
+  assert.deepEqual(at(0), ["viewer"], "a viewer may assign only viewer");
+  assert.deepEqual(at(1), ["viewer", "bookkeeper"]);
+  assert.deepEqual(at(2), ["viewer", "bookkeeper", "admin"], "an ADMIN may not assign owner — the defect this closes");
+  assert.deepEqual(at(3), ["viewer", "bookkeeper", "admin", "owner"], "an owner may assign the whole ladder");
+  // FAIL CLOSED, both shapes.
+  assert.deepEqual(at(null), [], "no scope offers nothing");
+  assert.deepEqual(assignableRoles({ role_rank: null, is_operator: true }), [], "a NULL rank offers nothing");
+});
+
+test("canActOnMemberOfRole: mirrors 0157:320-321's `>` — equal ranks are ALLOWED, higher is not", () => {
+  const admin = { role_rank: 2, is_operator: false };
+  assert.equal(canActOnMemberOfRole(admin, "viewer"), true);
+  assert.equal(canActOnMemberOfRole(admin, "bookkeeper"), true);
+  // THE `>` NOT `>=` HALF: the door allows admin-on-admin, so the UI must too.
+  // Tightening this to `<` would hide a control the database would have honoured
+  // — the same defect as offering one it refuses, pointed the other way.
+  assert.equal(canActOnMemberOfRole(admin, "admin"), true, "admin-on-admin is allowed by the door and must be offered");
+  assert.equal(canActOnMemberOfRole(admin, "owner"), false, "…and acting on a SUPERIOR is the wall");
+  assert.equal(canActOnMemberOfRole({ role_rank: 3, is_operator: false }, "owner"), true, "owner-on-owner likewise");
+  // FAIL CLOSED on an unreadable caller AND on an unrankable member.
+  assert.equal(canActOnMemberOfRole(null, "viewer"), false);
+  assert.equal(canActOnMemberOfRole({ role_rank: null, is_operator: false }, "viewer"), false);
+  assert.equal(
+    canActOnMemberOfRole(admin, "some_future_role"),
+    false,
+    "a role outside the ladder cannot be ranked, so the UI reasons about it by offering nothing",
+  );
 });
 
 test("firmCapabilities: registrations need the OPERATOR conjunct as well as owner rank", () => {

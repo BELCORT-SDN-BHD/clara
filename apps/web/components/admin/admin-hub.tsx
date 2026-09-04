@@ -24,7 +24,7 @@ export function AdminHub() {
 
 /**
  * The page's own h1 and orientation line, rank-aware for the same reason
- * `lib/firm/navigation.ts`'s sidebar label is (E-7 / CB-AE2E-014, 裁-190): a
+ * `lib/firm/navigation.ts`'s sidebar label is (E-7 / CB-AE2E-014, 裁-187): a
  * bookkeeper who follows a link that says "Firm" must not land on a page titled
  * "Admin". It is a CLIENT component so it can read the scope the layout already
  * provided; the page stays a Server Component and calls `requireFirmScope()`

@@ -4,28 +4,35 @@
 // vendored for (design annex 2 §E; P4-4's file list).
 //
 // THIS MENU IS NOT RENDERED AT ALL BELOW ADMIN, as of 2026-09-04 (E-7 /
-// CB-AE2E-014 / CB-AE2E-033, 裁-190). `components/admin/members-tables.tsx`
+// CB-AE2E-014 / CB-AE2E-033, 裁-187). `components/admin/members-tables.tsx`
 // mounts it only when `capabilities.canManageMembers` is true, mirroring
 // `clara.set_member_role`'s and `clara.remove_member`'s own admin floor
 // (`0157_member_door_rank_walls.sql:252` and `:350`) and failing closed on an
 // unreadable rank. A bookkeeper who types the URL now sees the roster with no
 // per-row control, rather than a four-role menu that can only answer CLR04.
 //
-// INSIDE THE MENU, THE FOUR ROLES ARE STILL ALL OFFERED, and that is now a
-// NARROWER claim than it used to be. `set_member_role` refuses **CLR04 'cannot
-// assign a role above your own rank'** (`0157:274`+, the F2 ceiling) against the
-// caller's own rank, and the last-owner trigger refuses **CLR09 'cannot
-// demote/remove the last active owner'** (`0003:423`) when this row is the
-// firm's last active non-agent owner. Neither is pre-empted here: greying out
-// the last owner's demotion would be the UI guessing a fact only the DB can
-// count (plan §2 rule (b); design §4 D says that wall is "not pre-empted in the
-// UI" in those words).
+// INSIDE THE MENU, THE LADDER IS NOW FILTERED TO THE CALLER'S OWN RANK, and the
+// row is dropped entirely for a member ranked above them. Both walls refuse on
+// RANK ALONE, which is what makes them derivable here rather than the door's
+// alone to answer:
+//   · `0157_member_door_rank_walls.sql:277-279` — 'cannot assign a role above
+//     your own rank' (CLR04). An admin offered "Owner" is offered a control
+//     that can only refuse.
+//   · `0157:320-321` — 'cannot act on a member ranked above you' (CLR04,
+//     `cannot_act_on_superior`). `>` not `>=`, so admin-on-admin and
+//     owner-on-owner stay allowed; the derivation mirrors that comparison
+//     exactly rather than tightening it.
+// The derivations are `assignableRoles` / `canActOnMemberOfRole` in
+// `lib/firm/capabilities.ts`, beside the floors, with those citations.
 //
-// **RESIDUE, NAMED RATHER THAN HIDDEN:** an ADMIN still sees the "Owner" item
-// and still meets the CLR04 ceiling on clicking it. 裁-190's order gated the
-// MENU at admin+ and did not reach inside it, so this lane did not filter the
-// ladder to the caller's own rank. It is the same class of finding one rung
-// smaller, and it is the owner's call whether the ruling extends there.
+// **THE LAST-OWNER WALL IS STILL NOT PRE-EMPTED, and must not be.**
+// `clara._tf_guard_last_owner` (`0003:415`) refuses **CLR09 'cannot
+// demote/remove the last active owner'** on a COUNT of the firm's active
+// non-agent owners. No client-side read holds that count, so the click happens
+// and the DB's own message renders verbatim, above the table (plan §2 rule (b);
+// design §4 D says that wall is "not pre-empted in the UI" in those words).
+// That is the line: a wall that reads a RANK this page already knows is
+// shaped here; a wall that reads a FACT only the database can count is not.
 //
 // THE CURRENT ROLE IS CHECK-MARKED rather than removed — the Mobbin grounding's
 // own shape (§3 takeaway 2, TheyDo/Tailscale: a single-select list with the
@@ -78,17 +85,23 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
 import { createSingleFireGuard, runOnce } from "@/lib/parts/single-fire-guard";
-import { ROLE_LADDER, type MemberRole } from "@/lib/members/reads";
+import { type MemberRole } from "@/lib/members/reads";
 
 export function MemberRowMenu({
   name,
   currentRole,
+  assignableRoles,
   busy,
   onPickRole,
   onRemove,
 }: {
   name: string;
   currentRole: string;
+  /** The roles this caller may assign — `lib/firm/capabilities.ts`'s
+   *  `assignableRoles`, mirroring 0157:277-279. The CURRENT role is always
+   *  rendered even when it is above the caller's rank, because it is the
+   *  trigger's own label and a check-marked state, not an act. */
+  assignableRoles: readonly MemberRole[];
   busy: boolean;
   /** Performs exactly one governed call and RESOLVES WHEN IT HAS SETTLED. The
    *  returned promise is this component's only signal that an act is in flight;
@@ -134,7 +147,7 @@ export function MemberRowMenu({
             semantics for a single-select set. */}
         <DropdownMenuGroup>
           <DropdownMenuLabel>{t("roleGroupLabel")}</DropdownMenuLabel>
-          {ROLE_LADDER.map((role) => (
+          {assignableRoles.map((role) => (
             // A plain `DropdownMenuItem` carrying `role="menuitemradio"` +
             // `aria-checked`, rather than the vendored `DropdownMenuRadioGroup`:
             // the group primitive reports its choice through `onValueChange` on

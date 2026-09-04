@@ -22,7 +22,7 @@ import { listVendorBindings, loadVendorCounterparties } from "@/lib/firm-admin/v
 import { sessionTokenAccessor } from "@/lib/session-accessor";
 import { VendorBindingRowActions, ProposeBindingDialog } from "./vendor-binding-ceremony";
 
-// E-7 (裁-190): the capabilities come from the FIRM LAYOUT's own positively-read
+// E-7 (裁-187): the capabilities come from the FIRM LAYOUT's own positively-read
 // caller context, handed down by `FirmScopeProvider` — no second read of
 // `clara.caller_context` is issued for this. `firmCapabilities` denies on a NULL
 // `role_rank`, which is the fail-closed reading the ruling asks for.
@@ -82,7 +82,7 @@ function ClientVendorBindings({
         // is ALWAYS rendered now — see ProposeBindingDialog's own header for
         // why passing the FULL counterparties state (not just `.data`) is
         // what lets it show a real read failure + retry instead of vanishing.
-        // E-7 (裁-190): `clara.propose_vendor_identity_binding` floors at
+        // E-7 (裁-187): `clara.propose_vendor_identity_binding` floors at
         // bookkeeper (`0154_binding_proposal_pr_1.sql:2506`). A viewer, and a
         // caller whose rank could not be read, get no trigger at all.
         action={

@@ -89,6 +89,12 @@ function topLevelStatements(sql: string): string {
   return out;
 }
 
+/** Every top-level INSERT into the register, whatever its shape. Split from the
+ *  VALUES parser on purpose: an `INSERT … SELECT`, or a tuple with a different
+ *  arity, must be SEEN and refused rather than silently contributing zero rows
+ *  while `rows.length >= 9` still passes (review-550's own finding — the parser
+ *  was blind to any statement it could not destructure). */
+const ANY_INSERT_RE = /insert\s+into\s+clara\.agent_receipt_surfaces\b[\s\S]*?;/gi;
 const INSERT_RE = /insert\s+into\s+clara\.agent_receipt_surfaces\s*\([^)]*\)\s*values\s*([\s\S]*?);/gi;
 const TUPLE_RE = /\(\s*'([^']*)'\s*,\s*'([^']*)'\s*,\s*'([^']*)'\s*,\s*'([^']*)'\s*\)/g;
 
@@ -98,8 +104,37 @@ function registeredSurfaces(): SurfaceRow[] {
   const rows: SurfaceRow[] = [];
   for (const file of readdirSync(MIGRATIONS_DIR).filter((f) => f.endsWith(".sql")).sort()) {
     const sql = topLevelStatements(readFileSync(join(MIGRATIONS_DIR, file), "utf8"));
-    for (const stmt of sql.matchAll(INSERT_RE)) {
-      for (const t of (stmt[1] ?? "").matchAll(TUPLE_RE)) {
+
+    // FAIL CLOSED ON A SHAPE THIS PARSER CANNOT READ. Every top-level INSERT is
+    // counted first, then the VALUES-shaped ones are destructured; a mismatch
+    // means a statement contributed nothing while the census still returned a
+    // plausible number. An `INSERT … SELECT`, or a fifth column, would be
+    // exactly that — and the roster pin downstream would silently stop covering
+    // whatever it registered. Throwing is the honest answer: the parser must be
+    // taught the new shape, not quietly out-voted by it.
+    const everyInsert = [...sql.matchAll(ANY_INSERT_RE)];
+    const valuesInserts = [...sql.matchAll(INSERT_RE)];
+    if (everyInsert.length !== valuesInserts.length) {
+      throw new Error(
+        `${file}: ${everyInsert.length} top-level INSERT(s) into clara.agent_receipt_surfaces but only ` +
+          `${valuesInserts.length} in the VALUES shape this census parses — teach it the other shape ` +
+          "rather than letting the row(s) vanish from the register pin",
+      );
+    }
+
+    for (const stmt of valuesInserts) {
+      const body = stmt[1] ?? "";
+      const tuples = [...body.matchAll(TUPLE_RE)];
+      // Same reasoning one level down: a VALUES list whose tuples this regex
+      // cannot read (a different arity, a non-literal) must not read as zero.
+      const tupleCount = (body.match(/\(/g) ?? []).length;
+      if (tuples.length !== tupleCount) {
+        throw new Error(
+          `${file}: a VALUES list holds ${tupleCount} tuple(s) but ${tuples.length} matched the ` +
+            "four-literal shape — the register carries a row this census cannot read",
+        );
+      }
+      for (const t of tuples) {
         rows.push({ item: t[1] ?? "", receipt_kind: t[2] ?? "", shim: t[3] ?? "", source: t[4] ?? "", file });
       }
     }

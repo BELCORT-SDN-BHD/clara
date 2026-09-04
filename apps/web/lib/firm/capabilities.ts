@@ -1,5 +1,8 @@
-// THE ONE CAPABILITY DERIVATION for firm-altitude controls (裁-190, under the
-// owner's UIUX steer on E-7 / CB-AE2E-014 / CB-AE2E-033).
+// THE ONE CAPABILITY DERIVATION for firm-altitude controls — **裁-187, minuted
+// as ADR-0078 decision 2**, applied to E-7 / CB-AE2E-014 / CB-AE2E-033 under the
+// owner's UIUX steer. (Cited as 裁-190 in this lane's first cut, which is the
+// LANE-MODEL ruling — "native lanes only" — and has nothing to say about what a
+// screen renders. Corrected in review-550, everywhere.)
 //
 // WHAT CHANGED, AND WHY IT IS A RULING RATHER THAN A BUG FIX. Until this module
 // the build deliberately rendered EVERY governed control to EVERY rank and let
@@ -35,9 +38,22 @@
 // fails now sees no member controls. That is a visible, recoverable state (the
 // panel's own error banner renders the read failure) rather than a control that
 // looks live and answers CLR04 — and it is the direction the ruling asks for.
+//
+// THESE FLOORS MIRROR THE LIVE DATABASE, WHICH IS NOT YET THE ADR-0078 MATRIX,
+// and the divergence is deliberate rather than an oversight. **裁-187's RBAC
+// sub-ruling reserves MEMBERS to the OWNER** ("owner only: members, legal
+// signatures and the operator-tier acts"), while every members door in the
+// database today floors at ADMIN — `set_member_role` (`0157:252`),
+// `remove_member` (`0157:350`), `invite_member` (`0147:376`),
+// `revoke_invite` (`0157:424`). Mirroring the ADR instead of the live floors
+// would hide a control from an admin the database still admits, which is the
+// same defect this module exists to fix, pointed the other way: a person told
+// "no" by a screen that the door would have said "yes" to. **裁-188's
+// wall-removal lane moves those floors**; this table moves in the SAME change,
+// and the parity cell is what makes that a red test rather than a memo.
 
 import { isOperatorConsoleEligible } from "../registration/doors";
-import { roleRank, type MemberRole } from "../members/reads";
+import { ROLE_LADDER, roleRank, type MemberRole } from "../members/reads";
 import type { CallerContextRow } from "./caller-context";
 
 /** The only input this module accepts: a rank and the operator flag, or `null`
@@ -71,9 +87,14 @@ export type FirmCapabilities = {
  *
  * `lib/firm/capabilities.test.ts` PARSES those migration lines and requires each
  * to declare the role written here (review law 3: a floor retyped from memory is
- * a projection of the DB's rule, not the rule). It also proves each cited
- * migration is the LAST one in `packages/db/migrations` that creates that door,
- * so a citation cannot rot behind a later `CREATE OR REPLACE`.
+ * a projection of the DB's rule, not the rule). It also proves the cited body is
+ * the LIVE one — the last surviving define across every define AND drop in
+ * migration order, via `test/sqlFunctionCensus.ts`'s `semanticFunctionOperations`
+ * (the shared instrument `lib/command/do-action-floors.test.ts` and
+ * `lib/members/members-doors.test.ts` already use). A "last CREATE" check is not
+ * enough here and this file is the proof: `sign_vendor_identity_binding`'s
+ * two-argument body was DROPPED outright at `0154:2725`, so the last CREATE of
+ * that overload is a body no caller can reach.
  */
 export const FIRM_CAPABILITY_FLOORS = [
   {
@@ -133,21 +154,30 @@ export const FIRM_CAPABILITY_FLOORS = [
     line: 903,
   },
   {
-    // THE LIVE BODY IS 0144, NOT 0028 — caught by this module's own parity cell
-    // on its first run, and worth recording because a sibling module still says
-    // otherwise. `lib/firm-admin/vendor-bindings.ts`'s header censused these
-    // five doors on 2026-08-28 against the then-frontier 0140 and concluded
-    // 0028 was "LIVE-UNTOUCHED"; `0144_db_hardening_a_barrier_signer_wall.sql`
-    // and `0154_binding_proposal_pr_1.sql` both landed after that census. The
-    // web posts TWO arguments (`p_binding`, `p_op_key`), so PostgREST resolves
-    // the two-argument overload, whose live body is 0144:333. 0154:2727 is a
-    // THIRD-argument overload (`p_attestation`) this surface never calls — and
-    // it floors at admin too, which the parity cell proves rather than assumes.
+    // THE LIVE BODY IS 0154, AND THE TWO-ARGUMENT ONE NO LONGER EXISTS. This
+    // citation has now been wrong twice, in two different ways, which is the
+    // whole argument for the census the test uses:
+    //   · 0028 was the first cut. `lib/firm-admin/vendor-bindings.ts`'s header
+    //     censused these five doors on 2026-08-28 against the then-frontier 0140
+    //     and called 0028 "LIVE-UNTOUCHED" — 0144 and 0154 both landed after it.
+    //   · 0144:333 replaced the TWO-argument body, and this row cited it. Also
+    //     dead: `0154_binding_proposal_pr_1.sql:2725` is a hard
+    //     `drop function clara.sign_vendor_identity_binding(uuid,text)`, and
+    //     0154:2727 creates a THREE-argument body with
+    //     `p_attestation text default null` in its place (a signature change
+    //     cannot ride CREATE OR REPLACE, so the old overload had to go or stay
+    //     shadow-reachable — 0154's own note says exactly that).
+    // The web still posts TWO arguments; PostgREST resolves them against the
+    // three-argument body through its default. So the live floor is 0154:2742.
+    // A "last file that mentions the name" census would have picked this up;
+    // a "last file that CREATES it" census would too — but only a census that
+    // also honours DROPs can tell a live overload from a dead one, which is why
+    // capabilities.test.ts now walks `semanticFunctionOperations`.
     capability: "canSignVendorBinding",
     door: "sign_vendor_identity_binding",
     role: "admin",
-    migration: "0144_db_hardening_a_barrier_signer_wall.sql",
-    line: 344,
+    migration: "0154_binding_proposal_pr_1.sql",
+    line: 2742,
   },
 ] as const satisfies readonly {
   capability: keyof FirmCapabilities;
@@ -237,4 +267,64 @@ export function capabilityScopeFromRows(rows: readonly CallerContextRow[] | null
 /** Convenience for the common shape: read rows -> scope -> capabilities. */
 export function firmCapabilitiesFromRows(rows: readonly CallerContextRow[] | null): FirmCapabilities {
   return firmCapabilities(capabilityScopeFromRows(rows));
+}
+
+// ---------------------------------------------------------------------------
+// THE TWO RANK-ONLY WALLS INSIDE `set_member_role`/`remove_member`
+//
+// The floors above decide whether a caller may reach the members doors AT ALL.
+// These two decide, for a caller who may, WHICH rows and WHICH roles the doors
+// will accept — and both refuse on RANK ALONE, with no reference to who the
+// actor is, so both are honestly derivable from the caller context this page
+// already read. That is what puts them inside 裁-187's ruling rather than
+// behind the person-wall exception:
+//
+//   · THE ASSIGNED-ROLE CEILING — `0157_member_door_rank_walls.sql:277-279`:
+//     `if clara.role_rank(p_role) > clara.role_rank(v_actor_role) then raise …
+//     'cannot assign a role above your own rank' (CLR04)`. So an admin offered
+//     the "Owner" item is offered a control that can only refuse.
+//   · THE SUPERIOR WALL — `0157:320-321`: `if clara.role_rank(m.role) >
+//     clara.role_rank(v_actor_role) then raise … 'cannot act on a member ranked
+//     above you' (CLR04, reason `cannot_act_on_superior`)`. `>` not `>=`, so
+//     admin-on-admin and owner-on-owner stay allowed — the derivation below
+//     mirrors that comparison exactly rather than tightening it.
+//
+// WHAT IS STILL NOT PRE-EMPTED, and must not be: the LAST-OWNER trigger
+// (`clara._tf_guard_last_owner`, `0003:415`) refuses CLR09 on a COUNT of the
+// firm's active non-agent owners. No client-side read has that count, so the
+// click happens and the DB's own message renders verbatim.
+//
+// **A THIRD RANK-ONLY CEILING IS DELIBERATELY LEFT UNSHAPED, and it is named
+// here rather than left for the next reviewer to find.** `invite_member` carries
+// the same shape at `0147_db_hardening_b_hash_only_bearer_tokens.sql:386` —
+// 'cannot invite to a role above your own rank' (CLR04) — so by the reasoning
+// above the InviteDialog's role select could be truncated too. It is not, for
+// one reason: that control already TEACHES the ceiling in words
+// (`Members.inviteDialog.ceilingNote`, "You can invite someone at your own rank
+// or below. The firm refuses anything higher."), which is the affordance the
+// row menu lacked and the reason the row menu was the defect. Making the two
+// uniform is a product call, not a mechanical one, and it is the owner's:
+// either the select is filtered and the note retires with it, or the note stays
+// and the row menu arguably should have kept its full ladder. This lane changed
+// the one the owner actually reported.
+// ---------------------------------------------------------------------------
+
+/** The roles this caller may ASSIGN — the ladder truncated at their own rank,
+ *  mirroring 0157:277-279. Empty on an unreadable rank (fail closed). */
+export function assignableRoles(scope: CapabilityScope | null): readonly MemberRole[] {
+  const rank = scope?.role_rank;
+  if (typeof rank !== "number") return [];
+  return ROLE_LADDER.filter((role) => roleRank(role)! <= rank);
+}
+
+/** May this caller act on a member currently holding `memberRole`? Mirrors
+ *  0157:320-321's `>` comparison. Fails closed on an unreadable caller rank AND
+ *  on a member role outside the ladder — an unrankable row is one the UI cannot
+ *  reason about, so it offers nothing. */
+export function canActOnMemberOfRole(scope: CapabilityScope | null, memberRole: string): boolean {
+  const callerRank = scope?.role_rank;
+  if (typeof callerRank !== "number") return false;
+  const targetRank = roleRank(memberRole);
+  if (targetRank === null) return false;
+  return targetRank <= callerRank;
 }

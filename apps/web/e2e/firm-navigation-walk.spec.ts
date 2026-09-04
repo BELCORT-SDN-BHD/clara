@@ -46,7 +46,7 @@ test("bookkeeper sidebar shows viewer/bookkeeper reads and hides admin- and owne
   await signIn(page, "bookkeeper@example.test");
   const nav = page.getByRole("navigation", { name: "Firm navigation" });
 
-  // E-7 (裁-190): the section entry is still THERE — its destinations really are
+  // E-7 (裁-187): the section entry is still THERE — its destinations really are
   // reachable at this rank — but it no longer calls itself "Admin", because a
   // bookkeeper administers nothing under it.
   await expect(nav.getByRole("link", { name: "Firm", exact: true })).toBeVisible();
@@ -108,9 +108,13 @@ test("the high-stakes threshold control is GONE from /admin/settings for every r
     // so neither a live trigger nor a leftover label may survive anywhere.
     await expect(page.getByRole("button", { name: "Change threshold", exact: true })).toHaveCount(0);
     await expect(page.getByText("Change threshold")).toHaveCount(0);
-    await expect(page.getByText(/second person's approval/)).toHaveCount(0);
-    // …and the page says plainly what replaced it, rather than going silent.
-    await expect(page.getByText(/There is no approval threshold/)).toBeVisible();
+    await expect(page.getByText(/the amount above which a posting needs a second person's approval/)).toHaveCount(0);
+    // …and the page says what replaced it, rather than going silent — but only
+    // as much as is TRUE in the pre-裁-188 window. `_approve_entry_core` (LIVE,
+    // 0016:1425-1443) still raises CLR05 on a solo high-stakes approval, so the
+    // page names the retirement of the CONTROL and the survival of the WALL.
+    await expect(page.getByText(/Change-threshold control is retired/)).toBeVisible();
+    await expect(page.getByText(/still refuses a solo approval on a high-stakes entry/)).toBeVisible();
 
     const result = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
     expect(result.violations, `/admin/settings as ${email}`).toEqual([]);

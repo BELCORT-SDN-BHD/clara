@@ -56,7 +56,7 @@ function withMockedEnv(impl: typeof fetch, run: () => Promise<void>): Promise<vo
   });
 }
 
-// E-7 (裁-190): the vendor-bindings panel now shapes its own controls from the
+// E-7 (裁-187): the vendor-bindings panel now shapes its own controls from the
 // firm layout's positively-read caller context, so these mounts supply the
 // provider the real tree always has. ADMIN rank is the fixture, because that is
 // the rank every pre-existing cell here was implicitly exercising when the

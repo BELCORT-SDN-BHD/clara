@@ -44,7 +44,7 @@
 // or a revoke re-reads the invite list.
 //
 // AFFORDANCE SHAPING IS NOT A WALL, AND IT NOW FAILS CLOSED — reversed on
-// 2026-09-04 (E-7 / CB-AE2E-014 / CB-AE2E-033, 裁-190). This paragraph used to
+// 2026-09-04 (E-7 / CB-AE2E-014 / CB-AE2E-033, 裁-187). This paragraph used to
 // say a failed/empty/multi-row/NULL-rank read left the invite trigger ENABLED
 // "so a failed courtesy read must never strand a real admin". The owner
 // reported the consequence — a bookkeeper offered the role menu, Remove and
@@ -65,7 +65,7 @@
 // file when this one crossed the 500-line ceiling; the rule is unchanged and is
 // now structural.
 
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useTranslations } from "next-intl";
 
 import { Button } from "@/components/ui/button";
@@ -74,7 +74,12 @@ import { StateBanner } from "@/components/common/state";
 import { useHydratedPart, type PartClr } from "@/lib/parts/hooks";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
 import { loadCallerContext } from "@/lib/firm/caller-context";
-import { firmCapabilitiesFromRows } from "@/lib/firm/capabilities";
+import {
+  assignableRoles,
+  canActOnMemberOfRole,
+  capabilityScopeFromRows,
+  firmCapabilities,
+} from "@/lib/firm/capabilities";
 import {
   loadFirmInvites,
   loadFirmMembers,
@@ -127,7 +132,13 @@ export function MembersPanel() {
   // all deny — the fold that used to live here as a hand-written `callerRank`
   // now lives in `capabilityScopeFromRows`, so the three surfaces this ruling
   // touches cannot each get the cardinality judgement slightly differently.
-  const capabilities = useMemo(() => firmCapabilitiesFromRows(context.data), [context.data]);
+  const scope = useMemo(() => capabilityScopeFromRows(context.data), [context.data]);
+  const capabilities = useMemo(() => firmCapabilities(scope), [scope]);
+  // The two rank-only walls inside the members doors (0157:277-279 and
+  // 0157:320-321) — derived once here, never inside the table, so the whole
+  // ruling has exactly one implementation. See lib/firm/capabilities.ts.
+  const roles = useMemo(() => assignableRoles(scope), [scope]);
+  const canActOnMember = useCallback((memberRole: string) => canActOnMemberOfRole(scope, memberRole), [scope]);
 
   async function submitInvite(email: string, role: MemberRole): Promise<void> {
     setCourier(null);
@@ -173,6 +184,8 @@ export function MembersPanel() {
           failed={roster.err !== null}
           busy={roster.busy}
           canManageMembers={capabilities.canManageMembers}
+          assignableRoles={roles}
+          canActOnMember={canActOnMember}
           onPickRole={(row, role) =>
             // RETURNED, not `void`-ed. `useHydratedPart`'s `act()` resolves only
             // after the call AND its unconditional re-read have finished, so this
@@ -190,7 +203,7 @@ export function MembersPanel() {
         <SectionHeader
           level={2}
           action={
-            // E-7 (裁-190): ABSENT below admin, not disabled-with-a-reason. The
+            // E-7 (裁-187): ABSENT below admin, not disabled-with-a-reason. The
             // `issueBlocked` copy ("Admin or owner can invite someone") was the
             // old disabled label and is retired with the trigger it labelled.
             capabilities.canInviteMember ? (

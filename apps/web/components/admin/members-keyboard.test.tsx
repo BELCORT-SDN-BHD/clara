@@ -141,7 +141,7 @@ test("members: the remove dialog traps into its own controls and ESCAPES back to
 });
 
 // THESE TWO CELLS WERE INVERTED ON 2026-09-04 (E-7 / CB-AE2E-014 /
-// CB-AE2E-033, 裁-190), and the inversion is the whole point of the ruling —
+// CB-AE2E-033, 裁-187), and the inversion is the whole point of the ruling —
 // they are not relaxed, they now pin the OPPOSITE behaviour with the same rigour.
 //   · The first used to require the invite trigger DISABLED, present, and
 //     labelled "Admin or owner can invite someone" for a bookkeeper. The owner
@@ -156,7 +156,7 @@ test("members: the remove dialog traps into its own controls and ESCAPES back to
 //     lib/firm/capabilities.ts's header: a genuine admin whose courtesy read
 //     fails sees no member controls until it succeeds.
 
-test("members: a below-admin caller is offered NO invite trigger at all (裁-190) — not a disabled one", async () => {
+test("members: a below-admin caller is offered NO invite trigger at all (裁-187) — not a disabled one", async () => {
   await withMockedEnv(
     async (u) => {
       const url = String(u);
@@ -184,7 +184,7 @@ test("members: a below-admin caller is offered NO invite trigger at all (裁-190
   );
 });
 
-test("members: an UNREADABLE caller context renders NO invite trigger — the gate now fails CLOSED (裁-190)", async () => {
+test("members: an UNREADABLE caller context renders NO invite trigger — the gate now fails CLOSED (裁-187)", async () => {
   await withMockedEnv(
     async (u) => {
       const url = String(u);
@@ -207,7 +207,7 @@ test("members: an UNREADABLE caller context renders NO invite trigger — the ga
   );
 });
 
-test("members: a below-admin caller is offered NO row menu — role change and remove are admin-floor doors (裁-190)", async () => {
+test("members: a below-admin caller is offered NO row menu — role change and remove are admin-floor doors (裁-187)", async () => {
   await withMockedEnv(
     async (u) => {
       const url = String(u);

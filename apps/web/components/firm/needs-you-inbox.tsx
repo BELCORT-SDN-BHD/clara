@@ -77,7 +77,13 @@ export function NeedsYouInbox() {
   // A SEPARATE, NON-BLOCKING READ. Its failure is not the queue's failure: the
   // rows still render, each naming its client by short id. Nothing here retries
   // and nothing here blocks.
+  // THE ONE FIRM-WIDE REGISTER READ ON THIS PAGE. `NeedsYouGaps` used to issue
+  // its own beside this one, so `/needs-you` called `clara.clients` twice on
+  // every load; it now takes the rows as props (review-550). One read, two
+  // consumers, one judgement about what a failure means.
   const register = useAsyncRead(() => loadClientRegister(sessionTokenAccessor));
+  const clientRows = register.data ?? [];
+  const clientsUnavailable = register.data === null && register.error !== null;
   const clientNames = useMemo(() => {
     const names = new Map<string, string>();
     for (const client of register.data ?? []) names.set(client.id, client.name);
@@ -148,7 +154,7 @@ export function NeedsYouInbox() {
           </Button>
         ) : null}
       </DataState>
-      <NeedsYouGaps />
+      <NeedsYouGaps clients={clientRows} clientsUnavailable={clientsUnavailable} />
       {/* T7 (port-wave plan §4/§5) — the sweep-runs state, from the SAME
           envelope `counts`/`rows` above already read; zero extra call. Moved
           BELOW the queue (E-3): it is context about an unattended pass, not the

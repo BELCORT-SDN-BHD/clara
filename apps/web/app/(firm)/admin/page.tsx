@@ -6,7 +6,7 @@ import { PageHeader, PageShell } from "@/components/common/page-shell";
  * caller context the parent layout already read. A typed URL still meets the
  * destination's own RLS policy or governed door; this page grants nothing.
  *
- * THE TITLE IS RANK-AWARE (E-7 / CB-AE2E-014, 裁-190) and therefore comes from a
+ * THE TITLE IS RANK-AWARE (E-7 / CB-AE2E-014, 裁-187) and therefore comes from a
  * client component rather than `getTranslations` here: the sidebar entry reads
  * "Firm" below admin rank, and a page titled "Admin" underneath it would put the
  * two words at odds. `PageHeader` takes a `ReactNode` for both slots, so the h1

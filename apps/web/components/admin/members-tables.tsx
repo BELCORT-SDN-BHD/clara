@@ -75,6 +75,8 @@ export function RosterTable({
   failed,
   busy,
   canManageMembers,
+  assignableRoles,
+  canActOnMember,
   onPickRole,
   onRemove,
 }: {
@@ -82,12 +84,19 @@ export function RosterTable({
   loading: boolean;
   failed: boolean;
   busy: boolean;
-  /** E-7 (裁-190): the row menu is the role-change and remove control, both
-   *  admin-floor doors. FALSE hides it entirely rather than rendering it
-   *  disabled — see lib/firm/capabilities.ts for the ruling and the mirrored
-   *  floors. A removed membership still renders its role as plain text, which
-   *  is what it did before and is not a control. */
+  /** E-7 (裁-187 / ADR-0078 decision 2): the row menu is the role-change and
+   *  remove control, both admin-floor doors. FALSE hides it entirely rather than
+   *  rendering it disabled — see lib/firm/capabilities.ts for the ruling and the
+   *  mirrored floors. A removed membership still renders its role as plain text,
+   *  which is what it did before and is not a control. */
   canManageMembers: boolean;
+  /** The roles this caller may assign (0157:277-279) — passed rather than
+   *  derived here so the one derivation stays in lib/firm/capabilities.ts. */
+  assignableRoles: readonly MemberRole[];
+  /** Whether this caller may act on a member holding the given role at all
+   *  (0157:320-321, the superior wall). A row it answers FALSE for carries no
+   *  menu: both of the menu's acts would refuse CLR04. */
+  canActOnMember: (memberRole: string) => boolean;
   /** RETURNS THE ACT'S OWN PROMISE. `MemberRowMenu` disables its items and holds
    *  its single-fire guard until this settles; a `void`-ing caller would leave
    *  the double-fire window open (independent review of #455, MEDIUM-4). */
@@ -144,20 +153,26 @@ export function RosterTable({
                   </TableCell>
                   <TableCell className="text-muted-foreground">{day(row.created_at)}</TableCell>
                   <TableCell>
-                    {row.status === "active" && canManageMembers ? (
+                    {row.status === "active" && canManageMembers && canActOnMember(row.role) ? (
                       <MemberRowMenu
                         name={row.display_name}
                         currentRole={row.role}
+                        assignableRoles={assignableRoles}
                         busy={busy}
                         onPickRole={(role) => onPickRole(row, role)}
                         onRemove={() => onRemove(row)}
                       />
                     ) : (
-                      // Two causes, one rendering, and neither is a control. A
-                      // REMOVED membership has no verb at all: `set_member_role`
-                      // and `remove_member` both refuse CLR11 'membership is not
-                      // active' (`0157:346`+, `0005:743`). A caller below admin
-                      // has no verb either (E-7). Both read the role as text.
+                      // THREE causes, one rendering, and none of them is a
+                      // control. A REMOVED membership has no verb at all:
+                      // `set_member_role` and `remove_member` both refuse CLR11
+                      // 'membership is not active' (`0157:346`+, `0005:743`). A
+                      // caller below admin has no verb either. And a caller
+                      // acting on a member ranked ABOVE them meets CLR04
+                      // `cannot_act_on_superior` (`0157:320-321`) on both acts,
+                      // so the menu would offer two controls that can only
+                      // refuse. All three read the role as plain text — the
+                      // information stays, the control goes.
                       <span className="text-sm text-muted-foreground">{tRoles(row.role as MemberRole)}</span>
                     )}
                   </TableCell>
@@ -185,7 +200,7 @@ export function InvitesTable({
   loading: boolean;
   failed: boolean;
   busy: boolean;
-  /** E-7 (裁-190): `clara.revoke_invite` floors at admin (`0157:424`). Below it
+  /** E-7 (裁-187): `clara.revoke_invite` floors at admin (`0157:424`). Below it
    *  the Actions column carries nothing — the column header stays so the table
    *  shape is stable across ranks. */
   canRevokeInvite: boolean;
