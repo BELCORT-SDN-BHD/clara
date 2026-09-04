@@ -167,7 +167,7 @@ export function ClientWorkspaceOverview({ clientId }: { clientId: string }) {
             <div className="@container">
               <div className="grid grid-cols-1 gap-6 @3xl:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
                 <div className="flex min-w-0 flex-col gap-6">
-                  <ClientNeedsYou queue={queue} />
+                  <ClientNeedsYou queue={queue} clientName={client.data.name} />
                   <ClientDocsBacklog clientId={clientId} />
                 </div>
                 <div className="flex min-w-0 flex-col gap-6">

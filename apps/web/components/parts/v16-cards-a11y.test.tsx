@@ -127,6 +127,39 @@ async function scanCard(part: ClaraPart, openAct?: string): Promise<void> {
   }
 }
 
+/** C6 — the same two gates over a card that takes the `toolStatus` prop. The prop is
+ *  composed by `ClaraMessageBubble` from a message's sibling parts, so `App` above
+ *  (which renders one part with no siblings) cannot reach this arm at all. */
+async function scanCardWithToolStatus(part: ClaraPart, toolStatus: "done" | "failed" | "unresolved"): Promise<void> {
+  const element = createElement(NextIntlClientProvider, {
+    locale: "en",
+    messages,
+    timeZone: "Asia/Kuala_Lumpur",
+    children: createElement(ThreadActionCoordinatorProvider, {
+      session: sessionTokenAccessor,
+      children: createElement(PartRenderer, { part, toolStatus }),
+    }),
+  });
+  const h = await renderComponent(element);
+  const body = documentBody();
+  body.appendChild(h.container);
+  try {
+    for (let i = 0; i < 5; i++) await h.settle();
+    assert.ok(h.text().trim().length > 0, "the chip must have rendered something to scan");
+    // Non-vacuity, and the discriminating half: the OUTCOME WORD is on screen, so a
+    // reader who cannot perceive the tone still gets the status.
+    assert.match(h.text(), new RegExp(toolStatus === "failed" ? "failed" : toolStatus === "done" ? "done" : "no outcome recorded"));
+
+    const violations = checkAccessibility(body as never);
+    assert.deepEqual(violations, [], `gate (b) structural scan: ${JSON.stringify(violations)}`);
+    const keyboard = checkKeyboardWalk(body as never);
+    assert.deepEqual(keyboard, [], `gate (c) keyboard walk: ${JSON.stringify(keyboard)}`);
+  } finally {
+    await h.unmount();
+    for (let i = 0; i < 3; i++) await h.settle();
+  }
+}
+
 // --- fixtures (the same rows the behavioural suites use) ---------------------
 
 const RECEIPT_ROW = {
@@ -230,5 +263,47 @@ test("sweep_receipt card (裁-20) with the acknowledge control live: zero a11y v
   await withMockedEnv(
     () => jsonResponse({ run: SWEEP_RUN, items: SWEEP_ITEMS }),
     () => scanCard({ type: "sweep_receipt", run_id: "run-3c88" }),
+  );
+});
+
+// --- C6: the arms this train added to two EXISTING cards and to the tool chip ----
+// Same gates, same zero, same non-vacuity assertion. These render no act form, so
+// each is scanned once — there is no second state to reach.
+
+test("bank_act with the ledger's own result fields rendered: zero a11y violations and a clean keyboard walk", async () => {
+  await withMockedEnv(
+    () => jsonResponse([]),
+    () => scanCard({
+      type: "bank_act",
+      verb: "match_bank_line",
+      subject_id: "line-9911",
+      op_key: "op-9911",
+      result: { match_id: "match-9911", status: "live", reversed: false },
+    }),
+  );
+});
+
+test("bank_pack with the DB's own counts and a truncation warning: zero from both gates", async () => {
+  await withMockedEnv(
+    () => jsonResponse([]),
+    () => scanCard({
+      type: "bank_pack",
+      bank_account_id: "acct-9911",
+      digest: "sha256:9911deadbeef",
+      // The truncated arm is the one that adds a WARNING-toned chip, so it is the
+      // state worth scanning: a colour that carries meaning must not be the only
+      // thing carrying it, and the chip's own text is what proves it is not.
+      pack: { schema: "clara.bank-pack/v1", budget: { lines: 200, candidates: 40, truncated: true } },
+    }),
+  );
+});
+
+test("a tool_call chip carrying its resolved outcome: zero from both gates", async () => {
+  await withMockedEnv(
+    () => jsonResponse([]),
+    // The FAILED arm, for the same reason as above: it is the one that paints an
+    // error tone, and the outcome word beside the tool name is what a reader who
+    // cannot see the tone relies on.
+    () => scanCardWithToolStatus({ type: "tool_call", tool: "trial_balance", tool_call_id: "call-1", input: {} }, "failed"),
   );
 });

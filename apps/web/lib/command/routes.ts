@@ -154,13 +154,16 @@ export const FIRM_ROUTES: FirmCommandRoute[] = [
     keywords: ["registrations", "approvals", "operator", "queue"],
   },
   {
-    // FS-8 PR-2 (裁-97): the firm-settings surface, under /admin — the
-    // high-stakes threshold control + the capabilities honest note.
+    // FS-8 PR-2 (裁-97): the firm-settings surface, under /admin. Built around
+    // the high-stakes threshold control until 裁-187 retired that control
+    // outright; the keywords lost "threshold" and "high stakes" with it, so the
+    // palette cannot advertise a destination by a control it no longer holds.
+    // What is there now: the approvals note and the capabilities honest note.
     id: "adminSettings",
     scope: "firm",
     href: "/admin/settings",
     status: "built",
-    keywords: ["settings", "threshold", "high stakes", "capabilities", "owner"],
+    keywords: ["settings", "approvals", "capabilities", "owner"],
   },
 ];
 

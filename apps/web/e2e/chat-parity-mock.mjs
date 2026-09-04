@@ -25,12 +25,47 @@ import { createServer as createHttpServer } from "node:http";
 export const CHAT_PARITY = {
   clientId: "55555555-5555-4555-8555-555555555555",
   threadId: "66666666-6666-4666-8666-666666666666",
+  // C6 — a SECOND thread of this lane's own, carrying a SETTLED transcript. The
+  // parked thread above deliberately serves an empty message list (a parked task has no
+  // assistant row — `clara.settle_chat_turn` writes one and cancels the interruption in
+  // the same breath), so there is nowhere in it to render a persisted part. This one is
+  // the settled counterpart, and every id below is this lane's own, so both stay
+  // ID-SCOPED and neither claims a shared endpoint.
+  partsThreadId: "66666666-6666-4666-8666-666666666667",
   taskId: "77777777-7777-4777-8777-777777777777",
   interruptionId: "88888888-8888-4888-8888-888888888888",
   intakeId: "99999999-9999-4999-8999-999999999999",
   documentId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
   question: "Which client owns this invoice?",
+  bankAccountId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+  matchId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
 };
+
+/** The settled transcript's parts, built from the LIVE emitter's own shapes:
+ *  `toTypedParts_v10` (chatTurn.v10.prompt.ts) for the tool call/result/error triple,
+ *  `chatTurn.v14.bank.ts:77-79` for the two bank kinds, and
+ *  `clara._agent_get_bank_pack_core` (0121_f_a3_pr1b_agent_limb.sql) for the pack's own
+ *  `clara.bank-pack/v1` envelope and its Postgres-computed `budget`. */
+const SETTLED_PARTS = [
+  { type: "text", text: "I read the bank pack and matched one line." },
+  { type: "tool_call", tool: "get_bank_pack", tool_call_id: "call-pack", input: {} },
+  { type: "tool_result", tool: "get_bank_pack", tool_call_id: "call-pack", output: {} },
+  { type: "tool_call", tool: "trial_balance", tool_call_id: "call-tb", input: {} },
+  { type: "tool_error", tool: "trial_balance", tool_call_id: "call-tb", error: "CLR11 not visible" },
+  {
+    type: "bank_pack",
+    bank_account_id: CHAT_PARITY.bankAccountId,
+    digest: "sha256:e2e0bankpack",
+    pack: { schema: "clara.bank-pack/v1", budget: { lines: 12, candidates: 4, truncated: false } },
+  },
+  {
+    type: "bank_act",
+    verb: "match_bank_line",
+    subject_id: "line-e2e",
+    op_key: "bank-match_bank_line:task-e2e:0:{}",
+    result: { match_id: CHAT_PARITY.matchId, status: "live" },
+  },
+];
 
 /** THE PRODUCTION WRITE ORDER, modelled (fold round, review B1). The runtime writes the
  *  clarify tool-call chunk inside `runModelSegmentStepV16` and INSERTs the
@@ -117,9 +152,17 @@ export async function handleChatParitySupabase(request, response, path, url, sen
   // lib/clara/thread-scope.ts), so the chat-parity thread has to be a positively-seen
   // session at its own client's altitude — the walk 404s otherwise.
   if (request.method === "GET" && path === "/rest/v1/chat_sessions") {
-    if (url.searchParams.get("id") !== `eq.${CHAT_PARITY.threadId}`) return false;
+    // STILL ID-SCOPED, now over this lane's TWO thread ids: the parked one and the
+    // settled one. Anything else falls through, so no other walk is starved.
+    const wanted = url.searchParams.get("id");
+    const sessionId = wanted === `eq.${CHAT_PARITY.threadId}`
+      ? CHAT_PARITY.threadId
+      : wanted === `eq.${CHAT_PARITY.partsThreadId}`
+        ? CHAT_PARITY.partsThreadId
+        : null;
+    if (sessionId === null) return false;
     sendJson(response, 200, [{
-      id: CHAT_PARITY.threadId,
+      id: sessionId,
       firm_id: "33333333-3333-3333-3333-333333333333",
       client_id: CHAT_PARITY.clientId,
       created_by: "11111111-1111-1111-1111-111111111111",
@@ -236,6 +279,25 @@ export async function handleChatParityRuntime(request, response, url) {
     // interruption in the same breath.
     response.writeHead(200, { "content-type": "application/json" });
     response.end(JSON.stringify({ messages: [] }));
+    return true;
+  }
+
+  if (request.method === "GET" && path === `/api/chat/sessions/${CHAT_PARITY.partsThreadId}/messages`) {
+    // The SETTLED counterpart: one assistant row whose `parts` are the emitter's own
+    // shapes. This is the only place in the suite where a persisted `bank_act`,
+    // `bank_pack` or resolved `tool_call` chip can be read off a real screen.
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify({
+      messages: [{
+        id: "message-settled",
+        role: "assistant",
+        parts: SETTLED_PARTS,
+        turn_key: null,
+        task_id: null,
+        seq: 1,
+        created_at: "2026-09-04T00:00:00.000Z",
+      }],
+    }));
     return true;
   }
 

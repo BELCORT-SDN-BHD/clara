@@ -39,11 +39,15 @@ import { useState } from "react";
 
 export function ClientNeedsYou({
   queue,
+  clientName,
 }: {
   /** The page owns the hook, because the Tax-tab-style `sweep`/`counts` fields and the rows all
    *  come from ONE envelope — a second `useReviewQueue` here would be a second RPC for data the
    *  page already has. */
   queue: ReviewQueueState;
+  /** This client's own name, from the page's `loadClientById` read. `null` while that read is
+   *  in flight — `NeedsYouRow` then falls back to the short id, never a guessed name. */
+  clientName: string | null;
 }) {
   const t = useTranslations("ClientWorkspace");
   const tny = useTranslations("NeedsYou");
@@ -72,15 +76,17 @@ export function ClientNeedsYou({
           {queue.rows.map((row) => {
             const key = reviewQueueRowKey(row);
             return (
-              // MERGE-FORWARD NOTE (PR #550, lane L5): that PR re-cuts `NeedsYouRow` with a
-              // REQUIRED `clientName` prop, merged by the caller from the firm-wide register.
-              // This branch is cut from origin/main, where the prop does not exist yet, so
-              // passing it here would not compile. When #550 lands, this call site gains exactly
-              // one line — `clientName={client.name}` — and nothing else changes: every row on
-              // this tab is about the ONE client whose workspace it is, so the name is already
-              // on screen in the page's own h1.
+              // #550's `clientName`, supplied as the seam note said it would be — one line, and
+              // nothing else changed. It is the CLIENT WHOSE WORKSPACE THIS IS, passed down
+              // from the page's own `loadClientById` read rather than merged from the firm-wide
+              // register the way the cross-client inbox does it: every row here is about that
+              // one client by construction (the queue is scoped `{client_id}`), so a register
+              // read would be a second network call to learn a name already on screen in the
+              // page's `h1`. `null` only while that read is still in flight, which is the same
+              // "not known yet" the prop's own contract documents — never a guessed name.
               <NeedsYouRow
                 key={key}
+                clientName={clientName}
                 row={row}
                 busy={queue.busy}
                 error={actingKey === key ? queue.error : null}
