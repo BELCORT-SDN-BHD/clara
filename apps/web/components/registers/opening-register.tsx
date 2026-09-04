@@ -75,7 +75,16 @@ export function OpeningRegister({ clientId }: { clientId: string }) {
     <div className="flex flex-col gap-6">
       <SectionHeader level={2}>{t("heading")}</SectionHeader>
       {hasSeedsData && seedsRead.error ? <ErrorMessage error={seedsRead.error} /> : null}
-      <DataState loading={seedsRead.loading} error={hasSeedsData ? null : seedsRead.error} isEmpty={false} emptyMessage="">
+      {/* (5) THE LOADING GATE UNMOUNTS THE PANEL THAT OWNS THE ACT — the same defect
+          fixed_assets-register.tsx carries, and the same one ClosePrepHoldPanel's
+          FIX-1 fixed for one panel without sweeping to its siblings. `DataState`
+          renders its LoadingState INSTEAD of children while `loading` is true, and
+          every `act()` flips `loading` on the reload it always fires, so a refused
+          governed write tore down the whole workbench — the open dialog, the typed
+          item key, the keyed target amounts — at the exact moment CB-AE2E-004 was
+          working to keep them. Once real data has loaded ONCE, a later `loading` is a
+          refresh; the `error` prop beside it already reads that way. */}
+      <DataState loading={!hasSeedsData && seedsRead.loading} error={hasSeedsData ? null : seedsRead.error} isEmpty={false} emptyMessage="">
         {liveSeed ? (
           <OpeningSeedWorkbench
             key={liveSeed.id}

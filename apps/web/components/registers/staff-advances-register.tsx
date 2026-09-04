@@ -43,9 +43,22 @@ export function StaffAdvancesRegister({ clientId }: { clientId: string }) {
   const tReg = useTranslations("ClientRegisters.staffAdvances");
   const tc = useTranslations("Common");
   const asOf = businessToday();
-  const { data, busy, err, clr, act } = useHydratedPart(sessionTokenAccessor, (s) =>
+  const { data, busy, err, clr, act: rawAct } = useHydratedPart(sessionTokenAccessor, (s) =>
     loadStaffAdvancesWorkbench(s, clientId, asOf),
   );
+
+  // SIBLING-STALENESS (sweep addendum item 3). StaffAdvanceStatementPanel below owns
+  // its own read and re-reads only when the SELECTED ACCOUNT changes — which no write
+  // here does. One epoch, bumped on every settled act, is what tells it.
+  const [refreshToken, setRefreshToken] = useState(0);
+  // `onOk` is FORWARDED, not dropped: the book dialog threads its own receipt through
+  // that channel (see its call site's F2 note), and it must keep firing only on this
+  // call's success. The epoch bump is separate and fires on SETTLE.
+  const act = async (fn: () => Promise<void>, onOk?: () => void): Promise<boolean> => {
+    const ok = await rawAct(fn, onOk);
+    setRefreshToken((n) => n + 1);
+    return ok;
+  };
   // F2 (independent review, fix-required): book_staff_advance_application's
   // own receipt names a real branch — a high-stakes entry lands `status:
   // 'drafted'` (a distinct checker approves it elsewhere, T6's door) rather
@@ -203,7 +216,7 @@ export function StaffAdvancesRegister({ clientId }: { clientId: string }) {
 
       <section className="flex flex-col gap-2">
         <SectionHeader level={2}>{t("statementHeading")}</SectionHeader>
-        <StaffAdvanceStatementPanel clientId={clientId} accountCodes={accountCodes} />
+        <StaffAdvanceStatementPanel clientId={clientId} accountCodes={accountCodes} refreshToken={refreshToken} />
       </section>
     </div>
   );

@@ -70,10 +70,28 @@ function statusBadge(t: ReturnType<typeof useTranslations>, row: CounterpartyRow
   return <Badge variant="outline">{t("statusLive")}</Badge>;
 }
 
-export function CounterpartyHygienePanel({ clientId }: { clientId: string }) {
+export function CounterpartyHygienePanel({
+  clientId,
+  onActed,
+}: {
+  clientId: string;
+  /** Fired on every SETTLED act here (sweep addendum item 4). This panel is nested
+   *  INSIDE AgingRegister, and renaming or merging a counterparty changes the name —
+   *  and, for a merge, the ROWS — the aging table above it is showing. The sibling
+   *  CounterpartyStatementPanel four lines up in aging-register.tsx already takes this
+   *  exact prop; this panel was the one that did not. */
+  onActed?: () => void;
+}) {
   const t = useTranslations("ArApCounterparty");
   const [kind, setKind] = useState<CounterpartyKind>("vendor");
-  const { data, busy, err, clr, act } = useHydratedPart(sessionTokenAccessor, (s) => loadHygieneData(s, clientId));
+  const { data, busy, err, clr, act: rawAct } = useHydratedPart(sessionTokenAccessor, (s) => loadHygieneData(s, clientId));
+  const act = async (fn: () => Promise<void>): Promise<boolean> => {
+    const ok = await rawAct(fn);
+    // On SETTLE, not on success: a refused merge may still have moved something the
+    // aging read would report differently, and re-deriving is never the wrong answer.
+    onActed?.();
+    return ok;
+  };
 
   // F4 (independent review, fix-required): the sibling shape
   // (staff-advances-register.tsx) — before the FIRST successful load,

@@ -6,6 +6,7 @@
 // banner, never a UI-computed number"): `tie`/every `*_diff_cents` column is
 // the DB's own comparison, rendered verbatim.
 
+import { useEffect } from "react";
 import { useTranslations } from "next-intl";
 import { useAsyncRead } from "@/lib/firm/use-async-read";
 import { faRegisterTie } from "@/lib/registers/fixed-assets";
@@ -18,12 +19,31 @@ import { TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/compon
 import { StateBanner } from "@/components/common/state";
 import { DataState } from "@/components/firm/data-state";
 
-export function FaRegisterTieBanner({ clientId }: { clientId: string }) {
+export function FaRegisterTieBanner({ clientId, refreshToken = 0 }: { clientId: string; refreshToken?: number }) {
   const t = useTranslations("FixedAssetsDepreciation.tie");
   const tc = useTranslations("Common");
   const asOf = businessToday();
-  const { data, loading, error } = useAsyncRead(() => faRegisterTie(sessionTokenAccessor, clientId, asOf));
+  const { data, loading, error, reload } = useAsyncRead(() => faRegisterTie(sessionTokenAccessor, clientId, asOf));
   const notEvaluated = data !== null && data.accounts.length === 0;
+
+  // SIBLING-STALENESS (sweep addendum item 2). `useAsyncRead`'s mount effect fires
+  // exactly ONCE, and this banner destructured no `reload` at all — so the tie it
+  // showed was whatever the DB said when the page first painted. Every write that can
+  // move it happens in a SIBLING that owns its own hook: a row's
+  // complete/revise/dispose, an account profile enrolled or retired, and above all a
+  // depreciation run, which posts entries straight into the accumulated-depreciation
+  // accounts this comparison walks. A human could enrol an account and watch a tie
+  // that no longer described the books.
+  //
+  // `refreshToken` is the caller's own epoch, bumped on every SETTLED act (success or
+  // refusal — the DB may have partially applied, and hydrate-never-trust means we
+  // re-derive either way). The `> 0` guard keeps the mount read single: the token
+  // starts at 0 and only a real act moves it. This is the `actEpoch` precedent from
+  // opening-seed-workbench.tsx, as a prop rather than a remount key, so the banner
+  // does not flash empty on every write.
+  useEffect(() => {
+    if (refreshToken > 0) void reload();
+  }, [refreshToken, reload]);
 
   return (
     <div className="flex flex-col gap-2">
