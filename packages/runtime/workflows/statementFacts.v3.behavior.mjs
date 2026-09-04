@@ -16,10 +16,8 @@
 // v2's `withStatementTerminalSettle` wrapped ONLY the two read channels; the persist issued a
 // BARE `callWriter` (v2:354-358) and its step had neither a try/catch nor the
 // `rethrowStatementWitness` shaping the read steps got. So EVERY verdict
-// `clara.persist_statement_facts_v2` / `_persist_statement_core_v2` RAISES — header_unreadable,
-// totals_unreadable, readers_disagree, chain_broken, continuity_mismatch, duplicate_period,
-// overlapping_period, non_myr_statement, period_invalid, line_date_out_of_period,
-// statement_multi_client — rolled its transaction back and left
+// `clara.persist_statement_facts_v2` / `_persist_statement_core_v2` RAISES — the whole design
+// §4.3 taxonomy listed in `FAILURE_CODES` below — rolled its transaction back and left
 // `document_processing_tasks.status = 'running'` FOREVER, with no card, no failure event and no
 // refund. (The two account-binding verdicts escaped this because they are RETURNED, not raised,
 // and the wrapper settles them itself inside the same transaction, 0098:756-793.) v3 wraps the
@@ -28,76 +26,72 @@
 //
 // AND THE REASON CODE HAD TO LEARN TO READ `detail`. `statementWitnessFailureCode` reads
 // `err.code`, which for a raised plpgsql exception is the SQLSTATE (`CLR10`) — not a member of
-// `FAILURE_CODES`, so it clamped to `internal` and the whole design §4.3 taxonomy would have
-// been lost on the way to `clara.fail_statement_facts`. `statementPersistFailureCode` below
-// reads the DETAIL token the DB actually raises with. A settle is only useful if the human sees
-// WHY. And a TRANSIENT database fault is not a verdict about the document at all: a dropped
-// connection or a deadlock is converted to a retryable `engine_error` before the settle wrapper
-// can see it. The persist verb is idempotent on replay (its `status = 'done'` branch returns the
-// stored receipt), so a retry after a committed write that lost its answer is safe.
+// `FAILURE_CODES`, so it clamped to `internal` and the whole design §4.3 taxonomy would have been
+// lost on the way to `clara.fail_statement_facts`. `statementPersistFailureCode` below reads the
+// DETAIL token the DB actually raises with. A TRANSIENT fault is not a verdict about the document
+// at all and becomes a retryable `engine_error` before the settle wrapper sees it; the persist
+// verb is idempotent on replay, so a retry after a committed write that lost its answer is safe.
 //
 // H-03 — THE PRINTED INSTITUTION IS RESOLVED TO THE ROSTER CODE before the persist, by
-// `normalizeStatementHeaderV3`. v2 relayed the model's string verbatim into a column the DB
-// binds against `clara.bank_institutions.code` (PK check `^[A-Z0-9]{2,10}$`, 0038:183), so a
-// perfectly-read "ALLIANCE BANK" was `header_unreadable` for the whole bank. A name that
-// resolves to no single roster row REFUSES here — fail closed, with the printed string and the
-// candidate codes in the message.
+// `normalizeStatementHeaderV3`. v2 relayed the model's string into a column the DB binds against
+// `clara.bank_institutions.code` (PK check `^[A-Z0-9]{2,10}$`, 0038:183), so a perfectly-read
+// "ALLIANCE BANK" was `header_unreadable` for the whole bank. A name that resolves to no single
+// roster row REFUSES here — fail closed, with the printed string and the candidates named.
 //
 // H-02 — THE PERIOD BAND CARRIES A STATED BASIS. A statement that prints only a statement date
-// (the Maybank corporate current-account shape) gets its band derived from that date's calendar
-// month, and the basis is recorded. A statement that prints neither refuses exactly as v2 does.
+// (the Maybank shape) gets its band derived from that date's calendar month and the basis
+// recorded; one that prints neither refuses exactly as v2 does.
 //
 // WHERE THE BASIS LIVES, AND WHY NOT ON THE HEADER. `clara._stmt_header_norm` builds its return
 // object from a fixed field list (0038:1259-1272) — an extra `period_basis` key on the wire
 // header would be dropped on the floor, silently. `corroboration` IS stored verbatim, as
 // `corroboration_claimed`, on BOTH reader extraction envelopes (0098:475,484), so that is where
-// both bases ride. A DB-side `period_basis` would need `_stmt_header_norm` widened, and that
-// function is `immutable` and shared by the structured / human / ocr / witness lanes — moving
-// it moves all four. Named in this PR's body as a DB-lane item; NOT widened here.
+// both bases ride. A DB-side `period_basis` would need `_stmt_header_norm` widened — it is
+// `immutable` and shared by four lanes, so moving it moves all four. A DB-lane item, not this one.
 //
 // NOTHING BELOW DECIDES A NUMBER. Hard constraint 2 is unchanged: the two transforms are an
 // identity projection and a deterministic restatement of a date the reader printed, both
-// receipted, and `_persist_statement_core_v2` still runs every wall afterwards — the two-reader
-// header agreement, the line-skeleton compare, the chain walk, `period_invalid`,
-// `line_date_out_of_period`, `continuity_mismatch`, and the live-roster check itself.
+// receipted, and the DB still runs the two-reader header agreement, the line-skeleton compare
+// and the chain walk afterwards.
+//
+// BUT DO NOT CLAIM THE PERIOD WALLS STILL DECIDE — ON A DERIVED BAND THEY CANNOT. `period_invalid`
+// is UNREACHABLE by construction for that whole class, and `line_date_out_of_period` inherits the
+// derived year rather than checking it. The full argument, with the migration line numbers and
+// the one control that does still stand, is in `statementFacts.v3.header.mjs`'s H-02 header —
+// read it before writing anything that relies on either refusal for this lane.
 // ============================================================================
 //
 // THE `statement_facts` LANE NAME DOES NOT CHANGE, and this version is reached by REPOINTING the
 // class (registry.ts) rather than relabelling the task: `_invoice_fact_state` keys the witness
 // regime on `lane='llm_witness'`, so a statement sitting there would be resolved as an INVOICE.
 //
-// EACH MODEL CALL IS ITS OWN MEMOIZED STEP (witnessFacts.v1's own §3.1 reasoning): a step's
-// return value is memoized by the durable engine, so a persist retry REPLAYS the stored
-// text/vision envelopes instead of re-calling a model already paid for. The download lives
-// INSIDE the vision step for the identical reason witnessFacts.v1 states it does — a path does
-// not survive a cross-process replay, and storage is not egress.
+// EACH MODEL CALL IS ITS OWN MEMOIZED STEP (witnessFacts.v1's §3.1): a step's return value is
+// memoized by the durable engine, so a persist retry REPLAYS the stored envelopes instead of
+// re-calling a model already paid for — which is what makes retrying a transient persist fault
+// free. The download lives INSIDE the vision step because a temp-file path does not survive a
+// cross-process replay, and storage is not egress.
 //
-// EGRESS, TWICE, ONE PURPOSE (design §3.7, reusing witnessFacts.v1's OQ-2 answer:
-// `witness_extraction`). `prepare`/`consume` wrap EACH channel's model call, `consume` in its
-// OWN committed transaction immediately before the call, so a deactivation that committed since
-// prepare refuses HERE and the bytes never leave.
+// EGRESS, TWICE, ONE PURPOSE (design §3.7, witnessFacts.v1's OQ-2 answer: `witness_extraction`).
+// `consume` runs in its OWN committed transaction immediately before each call, so a
+// deactivation that committed since `prepare` refuses HERE and the bytes never leave.
 //
-// AUDIT-TRAIL HONESTY, inherited from both statementFacts.v1 and witnessFacts.v1 and never to
-// be softened: the typed authorization covers THESE two witness reads and nothing earlier. The
-// kind-blind intake OCR pass that produced the very regions the text channel reads egressed
-// under the GLOBAL switch and the engagement-letter consent, before any typed gate could see
-// the document's kind. Nothing here may assert otherwise.
+// AUDIT-TRAIL HONESTY, inherited and never to be softened: the typed authorization covers THESE
+// two witness reads and nothing earlier. The kind-blind intake OCR pass that produced the very
+// regions the text channel reads egressed under the GLOBAL switch and the engagement-letter
+// consent, before any typed gate could see the document's kind. Nothing here may assert otherwise.
 //
-// TWO POSTURES THAT ARE THE DELIBERATE OPPOSITE OF witnessFacts.v1's (full reasoning in
-// statementFacts.v3.prompts.mjs's header): currency absence reads MYR (never a refusal), and
-// descriptions are never load-bearing and never enter a refusal or an agreement test.
+// TWO POSTURES THAT ARE THE DELIBERATE OPPOSITE OF witnessFacts.v1's (reasoning in
+// statementFacts.v3.prompts.mjs): currency absence reads MYR, and descriptions decide nothing.
 //
 // NO SHAPE COUPLING TO ANOTHER WORKFLOW FAMILY (the chatTurn_v8 law). `ownsStatementWitnessLane`
 // is written locally rather than imported from witnessFacts.v1's `ownsWitnessLane`. The DB-verb
 // plumbing IS imported from statementFacts.v2.dispatch.mjs — a SAME-FAMILY, cross-VERSION reuse
-// (the chatTurn.v10->v11 precedent), lawful because not one byte of it changes in v3: same
-// verbs, same arities, same settle door.
+// (the chatTurn.v10->v11 precedent), lawful because not one byte of it changes in v3.
 //
-// WHAT THIS FILE STILL DOES NOT DO: compute a corroboration VERDICT. `_persist_statement_core`
-// is repo law's "ONE CORE" for statement validation, and re-implementing the two-reader
-// agreement/chain check here would be exactly the second implementation that header forbids.
-// `corroboration` stays EVIDENCE — method, channels, and now the two header bases — never
-// authority.
+// WHAT THIS FILE STILL DOES NOT DO: compute a corroboration VERDICT. `_persist_statement_core` is
+// repo law's "ONE CORE" for statement validation, and a second agreement/chain check here is
+// exactly what that header forbids. `corroboration` stays EVIDENCE — method, channels, and now
+// the two header bases — never authority.
 
 import { FatalError } from "workflow";
 import {
@@ -155,6 +149,23 @@ const TRANSIENT_DB_CODES = new Set([
   "ECONNRESET", "ECONNREFUSED", "EPIPE", "ETIMEDOUT", "ENOTFOUND", "EAI_AGAIN",
 ]);
 
+/** THE CODELESS TRANSIENT FAULTS, AND WHY A MESSAGE MATCH IS THE ONLY THING THAT CAN SEE THEM.
+ *  The three faults a pooled runtime meets most often are constructed by the driver as BARE
+ *  `new Error(...)` with no `code` property at all:
+ *    `pg@8.20.0/lib/client.js:180`  — "Connection terminated unexpectedly" (a dropped socket,
+ *                                     handed to every in-flight query by `_errorAllQueries`);
+ *    `pg@8.20.0/lib/client.js:678`  — "Client has encountered a connection error and is not
+ *                                     queryable";
+ *    `pg-pool@3.14.0/index.js:224`  — "timeout exceeded when trying to connect", and `:276`
+ *                                     "Connection terminated due to connection timeout".
+ *  A code-only test reads all four as `internal`, which is NOT retryable — so a pooler blink
+ *  would settle a perfectly good statement `failed` and no retry would ever re-buy the persist.
+ *  That is strictly WORSE than v2, which never settled the persist arm at all and let the
+ *  durable engine retry. Matching the message is unlovely and it is the only signal the driver
+ *  gives; the alternative is a regression. Kept deliberately narrow, and anchored by a
+ *  MUST-NOT-RED cell that drives these exact strings. */
+const TRANSIENT_DB_MESSAGES = /connection terminated|timeout exceeded when trying to connect|client has encountered a connection error/i;
+
 /** A refusal: terminal by nature, never retried into a second egress attempt. */
 function statementWitnessRefusal(code, message) {
   return Object.assign(new FatalError(`statement witness read refused (${code}): ${message}`), { code, statementWitnessRefusal: true });
@@ -201,8 +212,8 @@ export function statementPersistFailureCode(err) {
 
 function isTransientDbFault(err) {
   const code = String(err?.code ?? "");
-  if (!code) return false;
-  return code.startsWith("08") || TRANSIENT_DB_CODES.has(code);
+  if (code) return code.startsWith("08") || TRANSIENT_DB_CODES.has(code);
+  return TRANSIENT_DB_MESSAGES.test(String(err?.message ?? ""));
 }
 
 /**

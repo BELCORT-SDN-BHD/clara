@@ -10,10 +10,10 @@
 // institution name -> the roster code the DB binds on) or a DETERMINISTIC RESTATEMENT of a date
 // the reader itself printed (a statement date -> the calendar month it falls in). Both record a
 // STATED BASIS on the non-authoritative `corroboration` receipt, so a human reading the stored
-// extraction can always see HOW a bound or a code was obtained. Nothing here suppresses a DB
-// verdict: `_persist_statement_core_v2`'s `period_invalid`, `line_date_out_of_period`,
-// `continuity_mismatch`, the two-reader header-agreement rung and the live-roster check at
-// 0038:1557-1566 all still run afterwards and all still decide.
+// extraction can always see HOW a bound or a code was obtained. The institution side keeps every
+// DB verdict it had: the live-roster check at 0038:1557-1566 and the two-reader agreement on
+// `institution_code` still run and still decide. The PERIOD side does NOT — see "WHICH WALLS
+// SURVIVE A DERIVED BAND" below, which is the correction that matters most in this file.
 //
 // ---------------------------------------------------------------------------------------
 // H-03 — WHY THE ROSTER IS A FROZEN LITERAL HERE AND NOT A DB READ.
@@ -31,9 +31,14 @@
 //       code-for-code and name-for-name — it reds the moment a migration grows the catalog, so
 //       a stale mirror cannot ship quietly;
 //   (2) a printed value that is ALREADY CODE-SHAPED (`^[A-Z0-9]{2,10}$`, the table's own PK
-//       check) is passed through VERBATIM even when this mirror does not know it — so a bank
-//       added by a later migration keeps working with no runtime change at all, and this file
-//       can never become the reason a live roster entry is refused;
+//       check) is relayed even when this mirror does not know it — UPPER-CASED to the table's
+//       own code form, which is the one normalisation the DB itself performs anyway
+//       (`_stmt_header_norm` does `upper(btrim(...))`, 0038:1188), and otherwise untouched. So
+//       a bank added by a later migration keeps working with no runtime change AS LONG AS ITS
+//       STATEMENT PRINTS A CODE. That carve-out is the honest limit of this bullet: a bank
+//       added after this image was built whose statement prints only its NAME refuses here
+//       until the mirror is re-cut as a v4 (or the DB-side resolver lands). The drift-guard
+//       cell is what makes that a scheduled re-cut rather than a surprise;
 //   (3) a printed NAME that resolves to zero or to more than one roster row is REFUSED
 //       (fail closed), with the printed string and the candidate codes on the receipt.
 //
@@ -75,6 +80,38 @@
 // SHARED_RULES 1 and 3 forbade inferring and guessing); v3's prompt tells the reader to answer
 // both bounds null when no band is printed, and the derivation moved HERE, where it is
 // deterministic, replayable from the same statement_date, and covered by cells.
+//
+// ---------------------------------------------------------------------------------------
+// WHICH WALLS SURVIVE A DERIVED BAND — AND THE TWO THAT DO NOT.
+//
+// It would be comfortable to say the DB's period walls still decide. They do not, and saying so
+// would be the kind of claim that gets believed for a year.
+//
+//   * `period_invalid` is UNREACHABLE by construction on this class. It is exactly two
+//     predicates (0038:1646-1656): `period_start > period_end`, and
+//     `statement_date < period_start`. A band derived as first-of-month(sd) .. sd satisfies
+//     NEITHER, ever. That matters because the migration's own comment says the second predicate
+//     exists precisely to catch a wrong period YEAR — "Maybank line dates print DD/MM with no
+//     year and the year comes from the period, so a wrong period year has to be caught here or
+//     every line date inherits it." For a derived band that catch is vacuous.
+//   * `line_date_out_of_period` (0038:1705-1710) then compares each line date against that SAME
+//     derived band. Since the corpus prints line dates as DD/MM and takes the year FROM the
+//     period, a misread year is inherited on both sides of the comparison and cannot show up.
+//     It still catches a line in the wrong MONTH or DAY, which is worth having; it cannot
+//     contradict the year.
+//
+// SO WHAT DOES STAND, on a two-digit printed year like `TARIKH PENYATA : 30/06/25`? The
+// TWO-READER AGREEMENT on `statement_date` (0038:1511) — the text channel and the vision channel
+// must independently read the same date off the page, and the band is a pure function of that
+// date. That is the control. The duplicate / overlap / continuity rungs (0038:1663-1679,
+// 1743-1754) can also expose a wrong year, but ONLY when a live neighbouring statement already
+// exists on the same account; continuity in particular keys on strict contiguity
+// (`period_end = period_start - 1`), so on an empty or gapped history none of the three fires.
+//
+// THE MISSING WALL, named as a DB-lane item rather than built here: `bank_statements` declares
+// `period_start` and `period_end` as bare `date not null` with NO plausibility bound at all
+// (0038:380-381). A CHECK rejecting a band outside a sane window would close this class at the
+// only layer that can see every lane. Not this lane's to add.
 
 /** The `clara.bank_institutions` seed, MIRRORED (0038:189-209). Codes are the PK; names are
  *  the seed's own display names, byte-for-byte. Pinned by the drift-guard cell in
@@ -154,7 +191,7 @@ export function statementInstitutionCodes() {
  * exact `header_unreadable` this item exists to remove. So a whole-name match always wins.
  *
  * @returns {{ code: string|null, printed: string|null, basis: string, candidates: string[] }}
- *   `basis` is one of `roster_name` | `roster_code` | `printed_verbatim` | `absent` |
+ *   `basis` is one of `roster_name` | `roster_code` | `printed_code` | `absent` |
  *   `unknown_name` | `ambiguous_name`. A null `code` is a REFUSAL for the caller to raise; it
  *   is never silently dropped.
  */
@@ -183,11 +220,14 @@ export function resolveInstitutionCode(printed) {
     return { code: byCode[0].code, printed: raw, basis: "roster_code", candidates: [byCode[0].code] };
   }
 
-  // CODE-SHAPED BUT UNKNOWN TO THIS MIRROR: relay it untouched. The live roster is the DB's,
-  // and a bank added by a migration after this image was built must not be refused HERE — the
-  // DB refuses it at 0038:1557-1566 if it really is not seeded, with its own message.
+  // CODE-SHAPED BUT UNKNOWN TO THIS MIRROR: relay it, UPPER-CASED to the table's own code form
+  // and otherwise unchanged — `_stmt_header_norm` applies the same `upper(btrim(...))` at
+  // 0038:1188, so this is the DB's normalisation, not a second one. The live roster is the DB's,
+  // and a bank added by a migration after this image was built must not be refused HERE — the DB
+  // refuses it at 0038:1557-1566 if it really is not seeded, with its own message. The basis
+  // token says `printed_code` and not "verbatim" on purpose: the case DID change.
   if (STATEMENT_INSTITUTION_CODE_RE.test(upper)) {
-    return { code: upper, printed: raw, basis: "printed_verbatim", candidates: [] };
+    return { code: upper, printed: raw, basis: "printed_code", candidates: [] };
   }
 
   return { code: null, printed: raw, basis: "unknown_name", candidates: [] };

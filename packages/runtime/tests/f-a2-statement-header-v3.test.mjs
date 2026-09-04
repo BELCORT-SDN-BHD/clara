@@ -82,7 +82,7 @@ test("institution: NAME beats CODE-SHAPE — 'MAYBANK' is not a code, it is a na
   // row is `MBB` — reproducing the very `header_unreadable` this item removes.
   const r = resolveInstitutionCode("MAYBANK");
   assert.equal(r.code, "MBB");
-  assert.notEqual(r.basis, "printed_verbatim");
+  assert.notEqual(r.basis, "printed_code");
 });
 
 test("institution: an UNKNOWN printed name REFUSES — it is never relayed and never guessed", () => {
@@ -109,13 +109,19 @@ test("institution: an AMBIGUOUS letterhead refuses and NAMES the candidates it m
   assert.deepEqual([...r.candidates].sort(), ["CIMB", "MBB"]);
 });
 
-test("institution: a code-shaped string this MIRROR does not know is RELAYED to the DB, not refused", () => {
+test("institution: a code-shaped string this MIRROR does not know is relayed UPPER-CASED, not refused", () => {
   // The staleness escape hatch, and it is load-bearing: `clara.bank_institutions` grows
   // additively by migration, and an image built before that migration must not become the reason
-  // a live roster entry is refused. The DB decides at 0038:1557-1566.
+  // a live roster entry is refused — as long as the statement prints a CODE. The DB decides at
+  // 0038:1557-1566. It is relayed UPPER-CASED, not verbatim: `_stmt_header_norm` applies the
+  // same `upper(btrim(...))` at 0038:1188, so the case change is the DB's own normalisation and
+  // the lower-case cell below is what proves this arm performs it rather than assuming it.
   const r = resolveInstitutionCode("NEWBANK1");
   assert.equal(r.code, "NEWBANK1");
-  assert.equal(r.basis, "printed_verbatim");
+  assert.equal(r.basis, "printed_code");
+  assert.equal(resolveInstitutionCode("newbank1").code, "NEWBANK1", "the case IS changed");
+  assert.equal(resolveInstitutionCode("newbank1").printed, "newbank1",
+    "…and the receipt still carries what the page printed, which is the half that IS verbatim");
 });
 
 test("institution: an ABSENT institution is a refusal with its own basis, never an empty code", () => {
@@ -251,9 +257,14 @@ test("header: a non-object wire header does not throw — it becomes an empty, r
 // THE DRIFT GUARD — the frozen mirror IS the migration's seed
 // ---------------------------------------------------------------------------
 
+/** The seed statement, matched as SQL rather than as a SPELLING: `INSERT INTO` and
+ *  `insert  into` are the same statement, and a guard that reads one exact rendering of it
+ *  would go quietly blind the day someone reformatted the migration (review law 3). */
+const SEED_INSERT_RE = /insert\s+into\s+clara\.bank_institutions\b/i;
+
 /** Parse `insert into clara.bank_institutions (code, name) values (...)` out of a migration. */
 function seededInstitutions(sql) {
-  const start = sql.indexOf("insert into clara.bank_institutions");
+  const start = sql.search(SEED_INSERT_RE);
   if (start < 0) return null;
   const end = sql.indexOf(";", start);
   assert.notEqual(end, -1, "the seed insert must terminate");
@@ -267,7 +278,7 @@ function seededInstitutions(sql) {
 
 test("drift guard: the frozen roster IS clara.bank_institutions' seed, code-for-code and name-for-name", () => {
   const files = readdirSync(MIGRATIONS_DIR).filter((f) => f.endsWith(".sql"));
-  const seeding = files.filter((f) => readFileSync(join(MIGRATIONS_DIR, f), "utf8").includes("insert into clara.bank_institutions"));
+  const seeding = files.filter((f) => SEED_INSERT_RE.test(readFileSync(join(MIGRATIONS_DIR, f), "utf8")));
   // A CENSUS, not a lookup: the roster grows additively by migration, so a SECOND seeding file
   // is exactly the event this guard has to catch. Enumerated, never counted by grep.
   assert.deepEqual(seeding, ["0038_wave_c_b_bank.sql"],
@@ -284,7 +295,7 @@ test("drift guard: the frozen roster IS clara.bank_institutions' seed, code-for-
 
 test("drift guard: every code this resolver can EMIT is a seeded code", () => {
   // The other direction. The cell above proves the mirror is not missing a bank; this one proves
-  // the resolver cannot answer with a code the DB has never heard of — the `printed_verbatim`
+  // the resolver cannot answer with a code the DB has never heard of — the `printed_code`
   // rung is excluded on purpose, because relaying an unknown code TO the DB is its whole job.
   const seeded = new Set(
     seededInstitutions(readFileSync(join(MIGRATIONS_DIR, "0038_wave_c_b_bank.sql"), "utf8")).map((r) => r.code),

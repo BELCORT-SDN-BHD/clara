@@ -157,12 +157,29 @@ test("settle: the reason mapper reads the DB's DETAIL, not the SQLSTATE — the 
 // MUST NOT RED — a transient fault is not a verdict about the document
 // ---------------------------------------------------------------------------
 
+/** The faults node-postgres raises with NO `code` property at all. These are the ones a pooled
+ *  runtime actually meets, and a code-only transient test is blind to every one of them:
+ *  pg@8.20.0/lib/client.js:180 and :678, pg-pool@3.14.0/index.js:224 and :276. Written as the
+ *  driver writes them — a bare Error, nothing attached — because the whole point is that there
+ *  is nothing to key on but the message. */
+const CODELESS_TRANSIENT = [
+  "Connection terminated unexpectedly",
+  "Client has encountered a connection error and is not queryable",
+  "timeout exceeded when trying to connect",
+  "Connection terminated due to connection timeout",
+];
+
 test("transient: a dropped connection on the persist does NOT settle — it retries", async () => {
   // The control that makes the whole file honest. A wrapper that settled everything would pass
   // every cell above and would terminally fail a perfectly good statement the first time the
-  // pooler blinked.
-  for (const code of ["08006", "08003", "57P01", "40P01", "ECONNRESET"]) {
-    const h = harness({ persistFails: Object.assign(new Error(`transient ${code}`), { code }) });
+  // pooler blinked — which would be STRICTLY WORSE than v2, where the persist never settled at
+  // all and the durable engine simply retried.
+  for (const code of ["08006", "08003", "57P01", "40P01", "ECONNRESET", ...CODELESS_TRANSIENT]) {
+    const isCodeless = CODELESS_TRANSIENT.includes(code);
+    const persistFails = isCodeless
+      ? new Error(code) // exactly as the driver constructs it: no `code`, no `detail`
+      : Object.assign(new Error(`transient ${code}`), { code });
+    const h = harness({ persistFails });
     const { textRead, visionRead } = reads();
     await assert.rejects(
       persistStatementWitnessPair(SERVICES, h.withRuntime, h.task.id, textRead, visionRead),
@@ -175,6 +192,23 @@ test("transient: a dropped connection on the persist does NOT settle — it retr
     assert.equal(h.task.status, "running", `${code} must leave the task claimable`);
     assert.deepEqual(h.settleCalls(), [], `${code} must issue no settle at all`);
   }
+});
+
+test("transient: a CODELESS error that is NOT a connection fault still settles — the message test discriminates", async () => {
+  // The negative twin of the loop above, and it is what stops the message match from quietly
+  // becoming "retry everything codeless". A bare Error carrying a real defect must still end the
+  // task, exactly as it did before the codeless arm existed.
+  const h = harness({ persistFails: new Error("syntax error at or near \"slect\"") });
+  const { textRead, visionRead } = reads();
+  await assert.rejects(
+    persistStatementWitnessPair(SERVICES, h.withRuntime, h.task.id, textRead, visionRead),
+    (err) => {
+      assert.notEqual(err.claraRetry, true, "a codeless DEFECT is not a codeless BLINK");
+      return true;
+    },
+  );
+  assert.equal(h.task.status, "failed");
+  assert.equal(h.task.error_code, "internal");
 });
 
 test("transient: the ratified RETRYABLE codes still mean retry on the persist arm", async () => {
