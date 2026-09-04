@@ -2,6 +2,8 @@
 // it FAILS (503) only on conditions where routing traffic here would be wrong —
 //
 //   * DB unreachable            (nothing works)
+//   * the RUNTIME LANE's probe   (H-48 — the same "nothing works" condition, measured through
+//                                the dedicated login rather than only through the pool)
 //   * world dead                (when CLARA_START_WORLD=1 — no engine to run turns)
 //   * control listener dead     (parked clarifies would never resume)
 //   * taxonomy HALT             (the relay cannot route — an un-routable state)
@@ -9,8 +11,9 @@
 // A dead relay LEADER is handled by the supervisor's fail-fast (S4-ND5), not here.
 // Relay lag / dead-letters / backlog are WARNINGS only (degraded, still serving) —
 // surfaced from clara.relay_health(). The storage write probe (R9, below) joins this
-// same WARN-only class: a broken document lane is not "nothing works." Everything is
-// bounded + sanitized: /ready must never hang and never leak raw DB text.
+// same WARN-only class: a broken document lane is not "nothing works." The six NON-runtime
+// pool lanes (H-48) and the relay pool's background-error counters (裁-149) join that same
+// class. Everything is bounded + sanitized: /ready must never hang and never leak raw DB text.
 
 import { withRuntime } from "./pools.mjs";
 import { scannerReachable } from "./scan.mjs";
@@ -24,6 +27,8 @@ import { factsGateHealth } from "./facts-gate.mjs";
 import { classifyHealth } from "./classify.mjs";
 import { wikiProjectionHealth } from "./wiki-projection-ops.mjs";
 import { storageProbeHealth } from "./storage-probe.mjs";
+import { relayPoolHealth } from "./pool-error-contract.mjs";
+import { probeLanes, READINESS_CRITICAL_LANE } from "./lane-probe.mjs";
 
 const READY_DEADLINE_MS = Number(process.env.CLARA_READY_DEADLINE_MS || 5000);
 const HEARTBEAT_STALE_MS = Number(process.env.CLARA_HEARTBEAT_STALE_MS || 30000);
@@ -315,6 +320,47 @@ export async function checkReadiness() {
   checks.storage = storage;
   if (!storage.ok) warnings.push(`storage write probe failed: ${storage.reason || (storage.pending ? "first probe still pending" : "unknown")}`);
 
+  // 裁-149 clause 1 — the relay pool's background-error counters. WARN-ONLY and deliberately
+  // so: the affected client is already out of the pool and the next checkout opens a fresh
+  // connection, so a background error is an AVAILABILITY SIGNAL, not a reason to take chat
+  // traffic down. The counter is monotonic since process start; `errors > 0` therefore means
+  // "this process has seen N of them", which is exactly what an operator needs to correlate
+  // against a pooler restart. It never touches `failed` below.
+  const relayPool = relayPoolHealth();
+  checks.relay_pool = relayPool;
+  if (relayPool.errors > 0) {
+    warnings.push(`relay pool background error(s) since boot: ${relayPool.errors} (last ${relayPool.last_error_code} at ${relayPool.last_error_at})`);
+  }
+
+  // H-48 — the per-lane probe. Seven logins, one `select 1` each AFTER its own SET ROLE, run
+  // concurrently under ONE bounded() so the whole set costs one timeout of fly's /ready budget
+  // rather than seven (the concern health.mjs:308-311 already states for its three sequential
+  // round trips). Unconfigured lazy lanes report `skipped` and are NOT warnings — the bank and
+  // the two checkout lanes are lazy by ruling because their ceremonies are gated on later
+  // events. Only the RUNTIME lane's failure joins the readiness failure set, and it joins the
+  // one that already existed (`checks.db`); every other lane WARNS with its lane name — never
+  // its DSN, never raw DB text.
+  const lanes = await bounded(() => probeLanes(), null);
+  if (lanes === null) {
+    checks.pools = { ok: false, error: "lane_probe_timeout" };
+    warnings.push("per-lane pool probe unavailable (timed out)");
+  } else {
+    checks.pools = lanes;
+    for (const lane of lanes) {
+      if (lane.skipped) continue;
+      if (lane.ok) continue;
+      if (lane.lane === READINESS_CRITICAL_LANE) continue; // folded into `failed` below, not a warning
+      warnings.push(`pool lane '${lane.lane}' unreachable (${lane.error})`);
+    }
+  }
+  // The runtime lane is the ONE lane whose failure is a readiness failure. It is kept as its own
+  // conjunct rather than folded into `checks.db` on purpose: `checks.db` reports what the main
+  // bounded round trip actually saw, and overwriting it with a probe's verdict would make the
+  // response lie about which instrument failed. A SKIPPED runtime lane is not a failure (that is
+  // a test-mode rig with no base source), only an explicit ok:false is.
+  const runtimeLane = Array.isArray(lanes) ? lanes.find((l) => l.lane === READINESS_CRITICAL_LANE) : null;
+  const runtimeLaneFailed = Boolean(runtimeLane && runtimeLane.skipped !== true && runtimeLane.ok === false);
+
   if (!result || result.ok !== true) {
     // DB unreachable or the whole check timed out.
     checks.db = { ok: false, error: result?.timeout ? "db_timeout" : "db_unreachable" };
@@ -323,6 +369,7 @@ export async function checkReadiness() {
 
   const failed =
     checks.db?.ok === false ||
+    runtimeLaneFailed ||
     (worldEnabled() && (checks.world?.ok === false || checks.control?.ok === false || checks.taxonomy?.ok === false));
 
   return { ready: !failed, checks, warnings };

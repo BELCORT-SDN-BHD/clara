@@ -108,6 +108,26 @@ function poolMaxFor(which) {
 }
 
 /**
+ * H-48 — this file's four lanes, DERIVED from the same three private functions the pools
+ * themselves use (`dsnVarFor`, `LOGIN_NAMES`, and the roles named in the `with*` wrappers
+ * below), so the boot probe can never drift into reading a SECOND hand-typed copy of the
+ * mapping. `lib/lane-probe.mjs` composes this with the freeform lane's and the two checkout
+ * lanes' own exported constants; nothing here reaches into another module's names.
+ *
+ * `eager` mirrors `assertProductionPoolConfig` exactly: the three DSNs that function REQUIRES
+ * are eager, and the bank lane is lazy for the deploy-ordering reason its own comment states.
+ * The probe must honour that — probing an unconfigured lazy lane as a FAILURE would turn
+ * /ready red the moment this ships, which is the exact outcome the lazy posture exists to
+ * prevent.
+ */
+export const POOLS_LANE_DESCRIPTORS = Object.freeze([
+  Object.freeze({ lane: "runtime", dsnVar: dsnVarFor("runtime"), login: LOGIN_NAMES.runtime, role: "clara_runtime", eager: true }),
+  Object.freeze({ lane: "read", dsnVar: dsnVarFor("read"), login: LOGIN_NAMES.read, role: "clara_agent_ro", eager: true }),
+  Object.freeze({ lane: "write", dsnVar: dsnVarFor("write"), login: LOGIN_NAMES.write, role: "clara_wake_interactive", eager: true }),
+  Object.freeze({ lane: "bank", dsnVar: dsnVarFor("bank"), login: LOGIN_NAMES.bank, role: "clara_wake_bank", eager: false }),
+]);
+
+/**
  * Assert the production pool config is present — call once at boot (serve.mjs). In
  * production (RELAY_TEST_MODE !== '1') ALL FOUR dedicated login DSNs are REQUIRED;
  * the runtime must never fall back to a shared/base identity (S4-AB8, fail-closed).

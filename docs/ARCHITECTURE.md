@@ -246,6 +246,20 @@ Integration shape (detail in the research file §6): engine schemas (`workflow_*
 ### 4.2 Grounding (G2)
 In-context: the current doctrine pack (regenerated fresh against the real registry — fixes the wrong-OCR-vendor drift), the active skill, tool schemas, and the fresh context pack. Retrievable: the full PRD/architecture, the client wiki, historical data via typed reads. The exact in-context/retrievable split is documented and token-budgeted.
 
+### 4.3 What a background client error does to the process, per connection (裁-149)
+
+**The contract.** `pg` emits `'error'` on a Pool when an *idle* client's backend dies with nobody awaiting it — a pooler restart, a failover, a maintenance kill. An `EventEmitter` `'error'` with **no listener throws**, and the supervisor `packages/runtime/scripts/serve.mjs`'s crash-only policy turns that into process death. Every connection the runtime opens therefore declares one of two postures, and the table below is the whole census — a ninth pool site without a listener is a defect, pinned by a drift-guard cell.
+
+| connection | posture on a background error | why |
+|---|---|---|
+| relay pool (`packages/runtime/lib/relay.mjs`, `makePool`) | **log + COUNT + recycle**; surfaced on `/ready` as a WARNING that never flips `ready` false | it is the runner's real connection pool, so repeated errors there are an availability signal, not a fault (裁-149 clause 1) |
+| the four `packages/runtime/lib/pools.mjs` pools, `packages/runtime/lib/freeform-read.mjs`, the two `packages/runtime/lib/checkout-pools.mjs` pools, `packages/runtime/lib/db.ts` | log + recycle (as they already did) | the affected client is already out of the pool; the next checkout opens a fresh connection |
+| the relay **leader**'s dedicated session (`packages/runtime/scripts/relay.mjs`, `packages/runtime/lib/leader.mjs`) | record → **rethrow into the caller's own reconnect loop** | the dead session releases its session-level advisory lock, so a standby takes over *immediately*; the surviving process then re-acquires rather than dying |
+
+The contract itself lives in `packages/runtime/lib/pool-error-contract.mjs`; the per-lane boot probe that measures each of the seven logins is `packages/runtime/lib/lane-probe.mjs`.
+
+**A correction to 裁-149's premise, recorded because the ruling text says otherwise.** Clause 2 states that the relay module attaches no listener "nor to the leader's dedicated `makeClient()` session", i.e. that the leader is crash-loud. It is not, and was not when the ruling was written: `packages/runtime/scripts/relay.mjs:139-141` and `packages/runtime/lib/leader.mjs:177-179` both attach one, record into `connErr`, and rethrow at the top of the next poll. The **failover** the ruling wanted is unaffected — the lock is released by the backend when the session ends — and the as-built adds that the surviving process re-acquires without a machine restart. The leader was therefore left byte-untouched; only the pool half of the ruling was built.
+
 ---
 
 ## 5. The knowledge layer — two-layer Karpathy wiki (Gate-1 B)
