@@ -20,6 +20,10 @@ import { handleChatParityRuntime, handleChatParitySupabase, startMockRuntime } f
 // Every branch inside is scoped to ITS OWN ids and falls through otherwise, so it can run
 // beside the chat-parity lane without either starving the other's fixtures.
 import { P6_5_SESSIONS, handleP6_5App, handleP6_5Runtime, handleP6_5Supabase } from "./agentic-finish-mock.mjs";
+// The Home boards' fixture lane. Consulted LAST, after every other hook and after this file's
+// own generic fixtures — see that module's header for why answering with honest EMPTIES cannot
+// starve a lane that owns one of the same routes for its own ids.
+import { handleHomeBoardSupabase } from "./home-board-mock.mjs";
 
 const e2eRoot = dirname(fileURLToPath(import.meta.url));
 const webRoot = resolve(e2eRoot, "..");
@@ -370,6 +374,11 @@ async function handleSupabase(request, response, url) {
   // client/thread pairing check turns into a 404.
   if (await handleChatParitySupabase(request, response, path, url, sendJson, cors)) return;
   if (await handleP6_5Supabase(request, response, path, url, sendJson, cors)) return;
+  // AFTER both lane hooks, BEFORE the generic fixtures — see home-board-mock.mjs's header. It
+  // has to precede the generic `/rest/v1/clients` branch below to serve its ONE id-scoped
+  // client row (a SERVER-side layout read `page.route` cannot reach), and it falls through for
+  // every other id, so the unfiltered register stays exactly as this file has it.
+  if (await handleHomeBoardSupabase(request, response, path, url, sendJson, cors)) return;
 
   if (request.method === "GET" && path === "/rest/v1/clients") {
     const filter = url.searchParams.get("id");
@@ -400,10 +409,17 @@ async function handleSupabase(request, response, url) {
   }
 
   if (request.method === "POST" && path === "/rest/v1/rpc/list_review_queue") {
+    // TRUED 2026-09-04 (裁-190). Three of the eight count keys were not the contract's:
+    // `drafts`/`uncoded_filings` for `open_drafts`/`open_tasks`, and `open_tasks` was absent
+    // entirely (lib/firm/needs-you.ts's `ReviewQueueCounts`, grounded on the live body's own
+    // jsonb_build_object). Nothing read them before Firm Home rendered the eight chips, so the
+    // drift was invisible; with the scoreboard live, two chips would have printed `undefined`.
+    // `compliance` likewise carries its real EMPTY shape rather than `null` — the firm-admin
+    // register and the Tax tab both treat an absent envelope as a wire fault, deliberately.
     sendJson(response, 200, {
-      counts: { needs_you: 0, needs_review: 0, ready: 0, drafts: 0, uncoded_filings: 0, open_questions: 0, compliance_watches: 0, lint_findings: 0 },
+      counts: { ready: 0, needs_review: 0, needs_you: 0, open_drafts: 0, open_questions: 0, open_tasks: 0, compliance_watches: 0, lint_findings: 0 },
       sweep: null,
-      compliance: null,
+      compliance: { stale_evaluator: false, clients: [] },
       lint: null,
       rows: [],
       next_cursor: null,

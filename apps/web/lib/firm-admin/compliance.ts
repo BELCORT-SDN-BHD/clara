@@ -76,20 +76,24 @@ function isComplianceClientWatch(v: unknown): v is ComplianceClientWatch {
   return typeof r.client_id === "string" && typeof r.service_group === "string" && typeof r.state === "string";
 }
 
-/** Reads `list_review_queue`'s `compliance` envelope object only — `p_limit:
- *  1` because this module never consumes the paginated `rows[]`, and the live
- *  body computes `counts`/`compliance`/`lint` over the full population
- *  independent of `p_limit` (0016_a21_compliance_watch.sql:4558-4729's
- *  `counts`/`sweep` CTEs read `all_rows`, never `page`). A malformed or
- *  absent `compliance` object THROWS rather than rendering an empty register
- *  — review law 2: absence is not evidence of "no watches", and a shape
- *  drift on the wire must fail loud, not paint a false all-clear. */
-export async function loadComplianceRegister(
-  session: SessionTokenAccessor,
-  scope: ReviewQueueScope = {},
-): Promise<ComplianceRegister> {
-  const env = await listReviewQueue(session, scope, null, 1);
-  const c = env.compliance as { stale_evaluator?: unknown; clients?: unknown } | undefined;
+/**
+ * The `compliance` envelope object's VALIDATION, as a pure function over an already-read
+ * envelope.
+ *
+ * EXTRACTED, NOT COPIED (the client Tax tab, 裁-190 / CB-AE2E-032). A second caller now needs
+ * this same object for ONE client, alongside that client's `compliance_watch` ROW — which
+ * carries the `watch_id` the three governed acts address and which the `compliance.clients`
+ * aggregate does not carry. Reading `list_review_queue` twice for two halves of one envelope
+ * would be a second RPC for data the first call already returned; re-typing the validator in
+ * the second caller would be two shapes free to drift from one wire contract. So the read stays
+ * one call at each site and the CHECK lives here, once.
+ *
+ * A malformed or absent `compliance` object THROWS rather than yielding an empty register —
+ * review law 2: absence is not evidence of "no watches", and a shape drift on the wire must
+ * fail loud rather than paint a false all-clear on a tax surface.
+ */
+export function parseComplianceEnvelope(envelope: { compliance?: unknown }): ComplianceRegister {
+  const c = envelope.compliance as { stale_evaluator?: unknown; clients?: unknown } | undefined;
   if (!c || typeof c !== "object" || typeof c.stale_evaluator !== "boolean" || !Array.isArray(c.clients)) {
     throw new Error("list_review_queue: malformed or absent `compliance` envelope object");
   }
@@ -98,6 +102,18 @@ export async function loadComplianceRegister(
     throw new Error("list_review_queue: a compliance.clients row did not match the expected shape");
   }
   return { staleEvaluator: c.stale_evaluator, clients };
+}
+
+/** Reads `list_review_queue`'s `compliance` envelope object only — `p_limit:
+ *  1` because this module never consumes the paginated `rows[]`, and the live
+ *  body computes `counts`/`compliance`/`lint` over the full population
+ *  independent of `p_limit` (0016_a21_compliance_watch.sql:4558-4729's
+ *  `counts`/`sweep` CTEs read `all_rows`, never `page`). */
+export async function loadComplianceRegister(
+  session: SessionTokenAccessor,
+  scope: ReviewQueueScope = {},
+): Promise<ComplianceRegister> {
+  return parseComplianceEnvelope(await listReviewQueue(session, scope, null, 1));
 }
 
 /** clara.ack_compliance_watch — a fresh op_key per call (never reused across a

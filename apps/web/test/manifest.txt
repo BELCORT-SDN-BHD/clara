@@ -102,7 +102,9 @@ components/firm-admin/vendor-binding-ceremony.test.tsx
 components/firm-nav.test.tsx
 components/firm/agent-tasks-a11y.test.tsx
 components/firm/agent-tasks-keyboard.test.tsx
+components/firm/client-workspace-overview.test.tsx
 components/firm/compliance-watch-affordance.test.tsx
+components/firm/firm-home/firm-home-board.test.tsx
 components/firm/needs-you-a11y.test.tsx
 components/firm/needs-you-affordances.test.ts
 components/firm/needs-you-gaps.test.tsx
@@ -199,10 +201,12 @@ lib/firm-admin/chat-sharing.test.ts
 lib/firm-admin/compliance.test.ts
 lib/firm-admin/settings.test.ts
 lib/firm-admin/vendor-bindings.test.ts
+lib/firm/home-facts.test.ts
 lib/firm/needs-you-gaps.test.ts
 lib/firm/needs-you-links.test.ts
 lib/firm/needs-you.test.ts
 lib/firm/reads.test.ts
+lib/firm/timeline.test.ts
 lib/firm/use-async-read.test.ts
 lib/firm/use-review-queue.test.ts
 lib/identity/doors.test.ts

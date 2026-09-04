@@ -1,25 +1,20 @@
-import { getTranslations } from "next-intl/server";
-
-import { PageHeader, PageShell } from "@/components/common/page-shell";
+import { FirmHomeBoard } from "@/components/firm/firm-home/firm-home-board";
 
 /**
- * Firm-altitude home ("/") — still an honest empty state: a title and an
- * orientation line, no summary of its own.
+ * Firm-altitude home ("/") — the roll-up over the four firm surfaces.
  *
- * TRUED 2026-08-29 (MBB-6). The four firm-altitude surfaces the IA ruling
- * names (docs/plan/active/mohe-grill-rulings-2026-08-27.md Q3) — the
- * Needs-you inbox, the client register, firm activity, admin — are BUILT and
- * each has its own page, reachable from the sidebar (components/firm-nav.tsx)
- * and from ⌘K. What is still absent is a firm-home ROLL-UP over them, which
- * is why this page renders a header and nothing else. The old copy said the
- * surfaces themselves were "built in P3/P4"; P3 shipped 2026-08-27.
+ * TRUED 2026-09-04 (map item E-1, 裁-190). The old body rendered a `PageHeader` and nothing
+ * else, with an in-file note explaining that the roll-up "was never built". It is built: the
+ * board below reads `clara.caller_context`, `clara.list_review_queue`, `clara.clients`,
+ * `clara.agent_tasks_visible` and the firm timeline contract, and every tile links into the
+ * surface that owns its verb. The note that said otherwise is deleted rather than softened —
+ * a stale not-built claim is the same class of lie as a premature built one.
+ *
+ * The board is a CLIENT component and owns its own `PageShell`/`PageHeader`, the shape
+ * `components/tax/TaxWorkbenchPage.tsx` already establishes for a workbench that must name its
+ * page from a read. Nothing is fetched here: the firm's name is a browser read like every other
+ * number on the page, so it fails, loads and retries under the same rules as its neighbours.
  */
 export default async function FirmHomePage() {
-  const t = await getTranslations("FirmHome");
-
-  return (
-    <PageShell>
-      <PageHeader title={t("heading")} description={t("body")} />
-    </PageShell>
-  );
+  return <FirmHomeBoard />;
 }
