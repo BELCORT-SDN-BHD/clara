@@ -75,25 +75,28 @@ export function OnboardingChecklistCard({
   return <ClientOnboardingCard clientId={clientId} session={session} />;
 }
 
-type PlanShape = {
+/** The rows BOTH arms hold. `openingSeedFinalized` is deliberately NOT here — see `Loaded`. */
+type PlanRows = {
   client: OnboardingClientRow | null;
   plan: OnboardingPlanRow;
   items: OnboardingPlanItemRow[];
-  /** F2 fix — see lib/onboarding/api.ts's `hasFinalizedOpeningSeed` doc
-   *  comment for why this read exists. */
-  openingSeedFinalized: boolean;
 };
 
 type Loaded =
   | { kind: "no_client" }
   | { kind: "no_plan"; client: OnboardingClientRow }
-  /** The plan is OPEN — the live checklist, its doors, and the interview. */
-  | ({ kind: "plan" } & PlanShape)
-  /** CB-AE2E-023 — the plan is COMMITTED or CANCELLED. Same reads, a different face: a
-   *  receipt of what was settled, with the item list collapsed and no door that could only
-   *  refuse. See `SettledOnboardingCard` for why this is a variant rather than an inline
-   *  branch. */
-  | ({ kind: "settled" } & PlanShape);
+  /** The plan is OPEN — the live checklist, its doors, and the interview. This arm ALONE
+   *  carries `openingSeedFinalized`, because this arm alone made the read: the settled arm
+   *  skips it (see `loadClientOnboarding`), and a shape that carried the field on both would
+   *  have to fill it with a fabricated `false` there — a value no read ever returned, sitting
+   *  in a field whose whole meaning is "a read positively saw a finalized seed". Review law 2
+   *  is a TYPE here, not a convention: the settled arm cannot state the fact because it cannot
+   *  hold it. */
+  | ({ kind: "plan"; openingSeedFinalized: boolean } & PlanRows)
+  /** CB-AE2E-023 — the plan is COMMITTED or CANCELLED. Same rows, a different face: a receipt
+   *  of what was settled, with the item list collapsed and no door that could only refuse. See
+   *  `SettledOnboardingCard` for why this is a variant rather than an inline branch. */
+  | ({ kind: "settled" } & PlanRows);
 
 async function loadClientOnboarding(clientId: string, s: SessionTokenAccessor): Promise<Loaded> {
   const client = await getOnboardingClient(clientId, { session: s });
@@ -122,7 +125,13 @@ async function loadClientOnboarding(clientId: string, s: SessionTokenAccessor): 
     // cannot prove is warranted). Awaiting it here meant an unreadable `opening_seed_registry`
     // withdrew the whole RECEIPT into an error state over a value the receipt never uses —
     // a read that can only lose. The live arm below still reads it, and still propagates.
-    return { kind: "settled", client, plan, items, openingSeedFinalized: false };
+    //
+    // AND NO VALUE IS INVENTED FOR IT. This used to return `openingSeedFinalized: false` to
+    // satisfy a shared shape — a fabricated answer standing where no read happened, in the one
+    // field whose entire meaning is "a read positively SAW a finalized seed". The `settled`
+    // variant no longer carries the field at all, so this branch cannot state it: review law 2
+    // enforced by the type rather than by remembering.
+    return { kind: "settled", client, plan, items };
   }
   const openingSeedFinalized = await hasFinalizedOpeningSeed(clientId, plan.id, { session: s });
   return { kind: "plan", client, plan, items, openingSeedFinalized };

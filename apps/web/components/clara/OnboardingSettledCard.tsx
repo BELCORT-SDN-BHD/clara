@@ -18,14 +18,19 @@ import type { OnboardingClientRow, OnboardingPlanItemRow, OnboardingPlanRow } fr
 import { ApplyStandardChartControl } from "./ApplyStandardChartControl";
 import { OnboardingItemRow } from "./OnboardingItemRow";
 
-/** The rows the checklist card already read. Structurally identical to its own `PlanShape`;
- *  declared here so this module imports no value from its sibling and the two cannot form an
- *  import cycle. */
+/** The rows the checklist card already read — structurally its `PlanRows`, declared here so
+ *  this module imports no value from its sibling and the two cannot form an import cycle.
+ *
+ *  IT DOES NOT CARRY `openingSeedFinalized`, and the omission is the point. That field means
+ *  "a read positively saw a finalized `opening_seed_registry` row", and the settled path does
+ *  not make that read at all (the receipt has no commit gate to compute, and the read throws
+ *  by design). Carrying the field here would have forced a fabricated `false` at the call
+ *  site — a stated fact behind an absent read, which is exactly what review law 2 forbids.
+ *  The type is where that is enforced, so it cannot be reintroduced by forgetting. */
 export type SettledPlanShape = {
   client: OnboardingClientRow | null;
   plan: OnboardingPlanRow;
   items: OnboardingPlanItemRow[];
-  openingSeedFinalized: boolean;
 };
 
 /** The card's own N/N rule, applied to the settled list — see `completedCount`'s doc comment

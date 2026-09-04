@@ -312,12 +312,22 @@ test("CB-AE2E-023 — the CANCELLED receipt offers NO chart panel, where the com
 
   // THE PAIR IS THE POINT — an absence on the cancelled arm proves nothing unless the same
   // fixture positively PRODUCES the panel on the committed one.
+  //
+  // AND THE CONTROL ASSERTS THE PANEL'S OWN COPY, not the item's question. A first cut opened
+  // the disclosure and matched "Apply the firm's standard chart of accounts to this client" —
+  // which is `chartItem.question`, and `OnboardingItemRow` renders that same string for the row
+  // itself. It was therefore satisfiable with the panel entirely absent: the control could not
+  // fail, so the pair was really only half a measurement. This asserts the EXACT sentence the
+  // cancelled half asserts is missing, and asserts it on the collapsed card, where the item
+  // list is not rendered at all.
   await withMockedEnv(withChart(COMMITTED_PLAN), async () => {
     const h = await mount("c1");
     try {
-      await clickButton(h.find((n) => (n as { tagName?: string }).tagName === "BUTTON" && /Show the 1 recorded answer/.test(textOf(n)))!);
-      await h.settle();
-      assert.match(h.text(), /Apply the firm's standard chart of accounts to this client/, `positive control: the committed receipt hosts the panel; got: ${h.text()}`);
+      assert.match(
+        h.text(),
+        /No chart-of-accounts decision has been recorded yet/,
+        `positive control: the committed receipt hosts the panel, and this is the PANEL's own copy; got: ${h.text()}`,
+      );
     } finally {
       await h.unmount();
     }
