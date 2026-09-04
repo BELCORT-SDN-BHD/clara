@@ -1,6 +1,7 @@
 import { type NextRequest } from "next/server";
 
 import { updateSession } from "@/lib/supabase/proxy";
+import { CSP_HEADER_NAME, contentSecurityPolicyReportOnly } from "@/lib/security/csp";
 
 /**
  * Next.js 16 renamed the `middleware.ts` file convention to `proxy.ts`
@@ -15,9 +16,29 @@ import { updateSession } from "@/lib/supabase/proxy";
  * unauthenticated request to `/login` (see lib/supabase/proxy.ts for the
  * public-path allowlist and the session-refresh mechanics). Page and layout
  * code never re-implements this check — one authority, one place.
+ *
+ * C-07 / 裁-175, ROW B: it is also the ONE place a security header reaches every
+ * document this app serves. The Content-Security-Policy is set HERE rather than
+ * in `next.config.ts`'s `headers()` because `lib/supabase/proxy.ts`'s own
+ * `Vary` comment records the measurement that Next 16.3.3 overwrites some
+ * headers this app sets through `headers()` for dynamic routes, proven by e2e
+ * AND by a bare curl — so the framework hook is the weaker of the two writers on
+ * this stack. The matcher below exempts only `_next/static`, `_next/image`,
+ * `favicon.ico` and `brand/`, none of which is an HTML document, so every page
+ * that can execute script is covered. The header is REPORT-ONLY: it breaks
+ * nothing and exists to measure what an enforcing policy would cost
+ * (`lib/security/csp.ts` carries the full reasoning and the open question).
  */
 export async function proxy(request: NextRequest) {
-  return await updateSession(request);
+  const response = await updateSession(request);
+  // Applied to BOTH branches `updateSession` can return — the pass-through and
+  // the redirect to /login. A redirect body is not a document, but setting it
+  // unconditionally means there is no path through this function that forgets.
+  response.headers.set(
+    CSP_HEADER_NAME,
+    contentSecurityPolicyReportOnly(process.env.NEXT_PUBLIC_SUPABASE_URL),
+  );
+  return response;
 }
 
 export const config = {

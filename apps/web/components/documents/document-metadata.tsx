@@ -49,10 +49,22 @@ function badgeKey(badge: DocumentBadge): string {
  *  PIN-DELTA-4) + the extraction/processing task list. Every badge names a REAL
  *  DB-owned field (lib/documents/copy.ts); the byte fetch is honest about failure —
  *  it never leaves a dead link on click. */
-export function DocumentMetadata({ document: doc, tasks }: { document: DocumentRow; tasks: ProcessingTaskRow[] }) {
+export function DocumentMetadata({
+  document: doc, tasks, onShowExtraction,
+}: {
+  document: DocumentRow;
+  tasks: ProcessingTaskRow[];
+  /** C-07 / 裁-175 — the honest alternative offered when the viewer gate refuses
+   *  this document's type. Opens the SAME structured extraction view that lives
+   *  further down this panel (document-detail.tsx owns its open state), rather
+   *  than leaving the human at a refusal with nowhere to go. Optional: a caller
+   *  with no such view renders the reason alone, never a dead control. */
+  onShowExtraction?: () => void;
+}) {
   const t = useTranslations("ClientDocuments");
   const [openState, setOpenState] = useState<"idle" | "loading" | "error">("idle");
   const [openError, setOpenError] = useState<string | null>(null);
+  const [notViewableMime, setNotViewableMime] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => () => abortRef.current?.abort(), []);
@@ -60,6 +72,7 @@ export function DocumentMetadata({ document: doc, tasks }: { document: DocumentR
   const openDocument = () => {
     setOpenState("loading");
     setOpenError(null);
+    setNotViewableMime(null);
 
     const controller = new AbortController();
     abortRef.current = controller;
@@ -71,6 +84,16 @@ export function DocumentMetadata({ document: doc, tasks }: { document: DocumentR
     void openDocumentInNewTab(doc.id, { signal: controller.signal })
       .then((result) => {
         if (result.ok) { setOpenState("idle"); return; }
+        // C-07 / 裁-175: `not_viewable` is NOT an error — nothing failed. The
+        // gate refused a type a browser tab cannot show inertly, and the honest
+        // answer names the type and points at the view that CAN show it. It
+        // therefore gets its own state and its own tone, never the red
+        // "could not open" banner, which would be a lie about the cause.
+        if (result.reason === "not_viewable") {
+          setOpenState("idle");
+          setNotViewableMime(result.mime || t("openDocumentUnknownType"));
+          return;
+        }
         setOpenState("error");
         setOpenError(result.reason === "popup_blocked" ? t("openDocumentPopupBlocked") : t("openDocumentFailed", { message: result.message }));
       })
@@ -90,6 +113,18 @@ export function DocumentMetadata({ document: doc, tasks }: { document: DocumentR
         </Button>
       </div>
       {openError ? <StateBanner tone="error" className="text-xs">{t("openDocumentFailed", { message: openError })}</StateBanner> : null}
+      {notViewableMime ? (
+        <StateBanner tone="neutral" className="text-xs">
+          <span className="flex flex-wrap items-center gap-2">
+            <span>{t("openDocumentNotViewable", { mime: notViewableMime })}</span>
+            {onShowExtraction ? (
+              <Button type="button" size="xs" variant="outline" onClick={onShowExtraction}>
+                {t("openDocumentShowExtraction")}
+              </Button>
+            ) : null}
+          </span>
+        </StateBanner>
+      ) : null}
 
       <div className="flex flex-wrap gap-1.5">
         {documentBadges(doc).map((badge) => (

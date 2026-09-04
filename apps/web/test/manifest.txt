@@ -257,6 +257,7 @@ tests/checkout-claim-route.test.ts
 tests/checkout-route.test.ts
 tests/client-scope.test.ts
 tests/confirm-flash.test.ts
+tests/csp-report-only.test.ts
 tests/firm-scope-db-pins.test.ts
 tests/firm-scope-fourth-entrance.test.ts
 tests/firm-scope-surfaces.test.ts
