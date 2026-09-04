@@ -189,6 +189,26 @@ test("E — bank: the label is the LATEST STATEMENT per account and never 'cover
   });
 });
 
+// ADDED BY THE MUTANT PANEL (M16). Flipping `unreadable: true` to `false` in the per-account
+// catch — turning "this account's statements could not be read" into "this account has no
+// statement" — left the whole suite GREEN, so nothing was pinning the one branch on this board
+// where absence is most easily mistaken for evidence. The account list still resolves, so the
+// SECTION cannot report the failure; only the row can.
+test("E — bank: an account whose OWN statement read failed says so, and never claims the account has no statement", async () => {
+  await withMockedEnv(
+    wire({ "/rpc/list_bank_statements": () => jsonResponse({ message: "boom" }, 500) }),
+    async () => {
+      const h = await mount();
+      try {
+        assert.match(h.text(), /Maybank \*\*\*\*4021/, "the account itself still renders — its own read succeeded");
+        assert.match(h.text(), /Statements could not be read for this account/);
+        assert.doesNotMatch(h.text(), /No statement recorded/, "a failed read must never be reported as an empty one");
+        assert.doesNotMatch(h.text(), /No bank accounts recorded/, "and it must not blank the section either");
+      } finally { await h.unmount(); }
+    },
+  );
+});
+
 test("F — close: the gate tally counts only PASSING gates out of gates the DB RETURNED, and the year end carries its basis", async () => {
   await withMockedEnv(wire(), async () => {
     const h = await mount();
