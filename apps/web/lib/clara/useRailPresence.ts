@@ -54,8 +54,13 @@ export function useRailPresence(open: boolean): RailPresence {
       return;
     }
     if (!present) return;
-    const timer = window.setTimeout(() => setPresent(false), RAIL_EXIT_MS);
-    return () => window.clearTimeout(timer);
+    // The BARE globals, not `window.setTimeout`. An effect never runs on the
+    // server, so there is nothing to guard against there; reaching through
+    // `window` only adds a way to fail on any host whose `window` is a partial
+    // stub — which is exactly what the node harness provides, and it is how this
+    // line was first written and first went red.
+    const timer = setTimeout(() => setPresent(false), RAIL_EXIT_MS);
+    return () => clearTimeout(timer);
   }, [open, present]);
 
   if (open) return "open";

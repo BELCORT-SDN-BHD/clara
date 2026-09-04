@@ -89,7 +89,13 @@ export function ClaraRailChrome({ children }: { children: React.ReactNode }) {
     // arms are pure CSS), so there is nothing to keep in sync across a resize
     // and no hydration mismatch to introduce by guessing a viewport on the
     // server.
-    if (typeof window === "undefined" || !window.matchMedia(NARROW_QUERY).matches) return;
+    // Guarded on the METHOD, not on `window` itself: a partial `window` stub (a
+    // node test harness, a non-DOM renderer) has the object and not the method,
+    // and reaching straight through would throw where the honest answer is "this
+    // host cannot tell me the arm, so do nothing". Both LAYOUT arms are pure CSS
+    // and unaffected either way; only the focus and Escape extras live here.
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
+    if (!window.matchMedia(NARROW_QUERY).matches) return;
 
     if (open) {
       wrapperRef.current?.focus();
@@ -100,13 +106,13 @@ export function ClaraRailChrome({ children }: { children: React.ReactNode }) {
     // one --motion-duration-panel), so this containment check is a real read of
     // where focus is, not a guess about where it was.
     if (!wrapperRef.current?.contains(document.activeElement)) return;
-    const timer = window.setTimeout(() => {
+    const timer = setTimeout(() => {
       // One frame past the unmount, so the launcher has actually rendered.
       window.requestAnimationFrame(() => {
         document.querySelector<HTMLElement>("[data-clara-rail-launcher]")?.focus();
       });
     }, RAIL_EXIT_MS);
-    return () => window.clearTimeout(timer);
+    return () => clearTimeout(timer);
   }, [open]);
 
   return (

@@ -77,15 +77,52 @@ describe("裁-117 prototype-parity wiring", () => {
     assert.doesNotMatch(runner, /CLARA_E2E_TRIGGER_ROUTE_ERROR/);
   });
 
-  it("mounts the open rail as a width-owning sibling instead of a fixed overlay", () => {
+  // CB-AE2E-019 RE-SCOPED THIS CELL TO THE WIDE ARM AND ADDED THE NARROW ONE.
+  // It is NOT relaxed: every claim it made still holds where it was true, and the
+  // arm that did not exist before now has its own claim. The panel's class string
+  // moved from ClaraRail.tsx to rail-chrome.tsx's `RAIL_PANEL_CLASS` when the
+  // rail's chrome was split from its content, so this reads it at its new home
+  // AND asserts ClaraRail consumes it — a pin on the constant alone would pass
+  // while the rail rendered something else entirely (spelling is not identity).
+  it("mounts the open rail as a width-owning sibling at lg and above, and as a fixed overlay below it", () => {
     const layout = read("app/(firm)/layout.tsx");
     const rail = read("components/clara/ClaraRail.tsx");
+    const chrome = read("components/clara/rail-chrome.tsx");
+    const mount = read("components/clara/rail-mount.tsx");
+
+    // THE ROW POSITION — unchanged, and still the thing that makes the wide arm
+    // a sibling of the workbench rather than something floating over it.
     const contentAt = layout.indexOf("data-firm-workbench");
     const railAt = layout.indexOf("<RailMount />");
     const rowCloseAt = layout.indexOf("</div>", railAt);
-    assert.ok(contentAt >= 0 && railAt > contentAt && rowCloseAt > railAt, "rail is not inside the shell flex row after the workbench");
+    assert.ok(
+      contentAt >= 0 && railAt > contentAt && rowCloseAt > railAt,
+      "rail is not inside the shell flex row after the workbench",
+    );
+
+    // THE PANEL still owns width and is still not fixed — the original claim,
+    // asserted against the constant that now carries it.
     assert.match(rail, /data-clara-rail/);
-    assert.doesNotMatch(rail, /enter-panel fixed/);
-    assert.match(rail, /h-dvh w-80 shrink-0/);
+    assert.match(chrome, /RAIL_PANEL_CLASS\s*=[\s\S]{0,200}h-dvh w-80 max-w-\[85vw\] shrink-0/);
+    assert.doesNotMatch(
+      chrome.slice(chrome.indexOf("RAIL_PANEL_CLASS ="), chrome.indexOf("export function ClaraRailChrome")),
+      /\bfixed\b/,
+      "the rail PANEL must never be fixed — its chrome is what floats, in the narrow arm only",
+    );
+    // …and the rail actually wears it.
+    assert.match(rail, /className=\{RAIL_PANEL_CLASS\}/);
+    assert.match(rail, /RAIL_PANEL_CLASS.*from "@\/components\/clara\/rail-chrome"/);
+
+    // THE WIDE ARM HAS NO WRAPPER BOX AT ALL. `lg:contents` is the mechanism —
+    // not "a wrapper that happens to be transparent", but no generated box, so
+    // the panel is a direct flex child of the shell row exactly as before.
+    assert.match(mount, /<ClaraRailChrome>/);
+    assert.match(chrome, /lg:contents/);
+
+    // THE NARROW ARM IS the fixed overlay this cell used to forbid outright.
+    assert.match(chrome, /fixed inset-y-0 right-0 z-40/);
+    // …and it costs the workbench nothing, because the overlay classes apply
+    // only while open and the wide arm collapses them to `contents`.
+    assert.match(chrome, /open \? "fixed inset-y-0 right-0 z-40 flex outline-none lg:contents" : "contents"/);
   });
 });

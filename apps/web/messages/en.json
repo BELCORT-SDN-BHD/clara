@@ -570,6 +570,13 @@
     "go": {
       "heading": "Go",
       "clientHeading": "This client",
+      "clientsHeading": "Clients",
+      "loading": "Checking what you can open…",
+      "readError": "Couldn't check what you can open: {message}",
+      "noAccessContext": "Couldn't read your access, so no pages are listed here. Reload, or use the sidebar.",
+      "clientsLoading": "Loading your clients…",
+      "clientsReadError": "Couldn't read your client register, so no clients are listed here. Open the client register from Go instead.",
+      "clientsTruncated": "Showing {shown} of {total} — type to narrow.",
       "empty": "No matching pages for “{query}”",
       "plannedBadge": "Not built yet",
       "routes": {

@@ -120,6 +120,17 @@ describe("focus-ring contract — 裁-1's 70% is declared once and obeyed everyw
     // components/admin/admin-hub.tsx had joined it). Exactly one class string
     // per file, now that comments are stripped — see ringCarrierHits's header
     // for why the thirteenth "occurrence" was never a carrier.
+    //
+    // RE-CENSUSED 2026-09-04 (CB-AE2E-019). Still TWELVE files and twelve class
+    // strings; ONE MOVED. `components/common/section-tabs.tsx` stopped being a
+    // carrier and `components/ui/tabs.tsx` became one, because SectionTabs is now
+    // a skin over the vendored Base UI Tabs primitive and the focus treatment
+    // moved down with the control that draws it. That is the RIGHT direction for
+    // this census — a ring on a primitive is inherited by every future consumer,
+    // where a ring on one composed widget is not — and the count is unchanged, so
+    // nothing was lost in the move. The vendored file shipped `ring-ring/50`,
+    // which this very gate is what caught; it was recut to /70 in the same commit
+    // as the add (see that file's provenance header, hand edit 3).
     const hits = ringCarrierHits();
     const files = [...new Set(hits.map((h) => h.file))].sort();
     assert.equal(hits.length, 12, JSON.stringify(hits, null, 2));
@@ -127,7 +138,6 @@ describe("focus-ring contract — 裁-1's 70% is declared once and obeyed everyw
       "components/admin/admin-hub.tsx",
       "components/clara/ClaraThreadView.tsx",
       "components/common/native-select.tsx",
-      "components/common/section-tabs.tsx",
       "components/firm/compliance-watch-affordance.tsx",
       "components/journals/drafts-queue-panel.tsx",
       "components/ui/badge.tsx",
@@ -135,6 +145,7 @@ describe("focus-ring contract — 裁-1's 70% is declared once and obeyed everyw
       "components/ui/input-group.tsx",
       "components/ui/input.tsx",
       "components/ui/select.tsx",
+      "components/ui/tabs.tsx",
       "components/ui/textarea.tsx",
     ]);
   });

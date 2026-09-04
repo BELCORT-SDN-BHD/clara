@@ -46,7 +46,25 @@ test("client A to B clears the draft, never paints A under B, and chooses the ca
   await expect(page.getByText("Own message for client B")).toBeVisible();
 });
 
-test("the docked rail owns width in the shell row and never covers the workbench", async ({ page }) => {
+test("the docked rail owns width in the shell row and never covers the workbench (WIDE arm)", async ({ page }) => {
+  // CB-AE2E-019 RE-SCOPED THIS CELL. Every measurement below is unchanged and
+  // every one of them still holds — but they now describe ONE ARM of a
+  // responsive shell rather than the shell, so the viewport is stated here
+  // rather than inherited from playwright.config.ts's `Desktop Chrome` default.
+  //
+  // This is deliberately NOT a relaxation: the assertions kept their exact
+  // numbers (a 320px column, recovered to within ±2px on collapse). What changed
+  // is that the claim is now scoped to where it is true. The NARROW arm — where
+  // the rail is a fixed overlay that costs the workbench nothing — is proved
+  // separately in `responsive-shell-walk.spec.ts`, which also asserts the ARM
+  // SELECTION itself at 1280 so a breakpoint typo cannot make both specs measure
+  // the same arm and agree with each other.
+  //
+  // Setting the viewport EXPLICITLY also removes a silent dependency: if the
+  // config's default ever moved below `lg` (1024px), this cell would have begun
+  // measuring the overlay and failed for a reason that has nothing to do with
+  // the docked rail.
+  await page.setViewportSize({ width: 1280, height: 720 });
   await signInTo(page, `/clients/${CLIENT_A}`);
   await expect(page.locator("[data-clara-rail]")).toBeVisible();
 
