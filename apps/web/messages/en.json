@@ -2561,8 +2561,27 @@
       "loadingDetail": "Loading the question's full detail…",
       "detailNotReachable": "This question's detail could not be read.",
       "originLabel": "Origin",
+      "origins": {
+        "clarify_promotion": "Promoted from a clarification Clara asked in a thread",
+        "rule_proposal": "Clara proposed a coding rule",
+        "rule_conflict": "Two coding rules disagreed",
+        "sweep_refusal": "An unattended sweep refused to draft this",
+        "manual": "Someone raised it by hand",
+        "classification": "Clara could not classify the document",
+        "onboarding": "Raised while onboarding the client",
+        "bank_ambiguity": "A bank line could not be matched to one entry"
+      },
+      "originUnknown": "Recorded as {origin}, which this version has no description for",
       "openedAtLabel": "Opened",
-      "spawnedRuleLabel": "Spawned rule"
+      "spawnedRuleLabel": "Spawned rule",
+      "ruleStatuses": {
+        "proposed": "proposed, not yet signed",
+        "live": "live",
+        "declined": "declined",
+        "retired": "retired",
+        "suspended_pending_resignature": "suspended until someone signs it again"
+      },
+      "ruleStatusUnknown": "recorded as {status}, which this version has no description for"
     },
     "promoteClarify": {
       "trigger": "Promote to a durable question",

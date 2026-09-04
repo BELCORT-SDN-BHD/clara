@@ -109,6 +109,7 @@ components/firm/needs-you-affordances.test.ts
 components/firm/needs-you-gaps.test.tsx
 components/firm/needs-you-row-facts.test.tsx
 components/firm/onboarding-proposal.test.tsx
+components/firm/open-question-detail-labels.test.tsx
 components/firm/open-question-detail.test.tsx
 components/firm/staff-advance-incomplete-affordance.test.tsx
 components/firm/sweep-status-panel.test.tsx
