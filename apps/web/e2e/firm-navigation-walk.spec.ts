@@ -221,7 +221,10 @@ test("/activity opens the agent-task drawer and logs NO MISSING_MESSAGE", async 
 
   // The honest note for the firm-wide timeline the database does not ship.
   await expect(page.getByRole("heading", { name: "Everything that happened", level: 2 })).toBeVisible();
-  await expect(page.getByText(/no read for it/)).toBeVisible();
+  // The note names the READ it needs (`clara.list_firm_timeline`), not a
+  // relation that does not exist — review-550 nit 6, so the note cannot stay
+  // true-and-stale once #552 mints that read.
+  await expect(page.getByText(/clara\.list_firm_timeline/)).toBeVisible();
 
   // THE DRAWER. Discriminating: its fields must be absent before the click.
   await expect(page.getByText("Agent task detail")).toHaveCount(0);
