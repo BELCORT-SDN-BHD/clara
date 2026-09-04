@@ -321,42 +321,17 @@ test("the Tax tab is reachable by nav-click and by ⌘K, and its three honest no
   await expect(page).toHaveURL(new RegExp(`${taxHref.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`));
 });
 
-test("the firm settings surface is reachable via the Admin nav, and the threshold control renders for the owner fixture (FS-8 PR-2, 裁-97)", async ({ page }) => {
-  const target = fixture("COMPLETE");
-  test.skip(!target, "review/merge supplies the isolated COMPLETE client/thread fixture");
-  await establishSession(page);
-
-  // Nav: firm home -> Admin (FirmNav) -> Firm settings (the /admin index's
-  // own link, added this PR) -> /admin/settings. `establishSession` mints a
-  // JWT for the SAME sub `rig.buildFirm` created as the fixture's OWNER
-  // (createFirm(owner, ...)), so this session genuinely holds owner rank —
-  // the threshold control is expected to render fully, not just be visible-
-  // but-refused.
-  await page.goto("/");
-  await page.getByRole("navigation", { name: "Firm navigation" }).getByRole("link", { name: "Admin", exact: true }).click();
-  await expect(page).toHaveURL(/\/admin$/);
-  await page.getByRole("link", { name: "Firm settings", exact: true }).click();
-  await expect(page).toHaveURL(/\/admin\/settings$/);
-
-  await expect(page.getByRole("heading", { name: "High-stakes threshold", exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Change threshold", exact: true })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Signing capabilities", exact: true })).toBeVisible();
-  await expect(page.getByText("grant_firm_capability and revoke_firm_capability are live", { exact: false })).toBeVisible();
-
-  // N4 (independent review, PR #489): the arm above only proved the READ
-  // path. This walks the WRITE door for real, against the live stack:
-  // open -> type a genuinely new value -> confirm -> the panel's own
-  // re-read shows it. "RM 250,000.00" is deliberately distinct from the
-  // column's own default (1000000 cents = RM 10,000.00, clara.firms'
-  // `high_stakes_amount_cents` DEFAULT) — this fixture's firm has never had
-  // the threshold set explicitly, so any pre-existing value in the UI
-  // could only be that default, and a real write is the only way this
-  // exact string appears afterward.
-  await page.getByRole("button", { name: "Change threshold", exact: true }).click();
-  const dialog = page.getByRole("dialog", { name: "Change the high-stakes threshold" });
-  await expect(dialog).toBeVisible();
-  await dialog.getByLabel("New threshold (RM)").fill("250000.00");
-  await dialog.getByRole("button", { name: "Change threshold", exact: true }).click();
-  await expect(dialog).not.toBeVisible();
-  await expect(page.getByText("RM 250,000.00", { exact: false })).toBeVisible();
-});
+// THE FIRM-SETTINGS THRESHOLD WALK WAS DELETED HERE ON 2026-09-04 (裁-187,
+// owner, permanent — ADR-0078 decision 2). It walked /admin/settings, asserted
+// the "High-stakes threshold" heading and the "Change threshold" trigger, then
+// drove the write door end to end against the live stack. The ruling abolishes
+// every maker-checker wall and retires the threshold verb WITH its control, so
+// the panel renders neither, and the cell had nothing left to walk.
+//
+// This file belongs to the onboarding-interview lane, not to the lane that
+// removed the control (L5, PR for #541). It was edited only because leaving it
+// would have shipped a spec asserting a surface the same PR deletes; the
+// deletion is called out in that PR body. The rest of this file is untouched.
+// The /admin/settings surface keeps its coverage in
+// components/firm-admin/firm-admin-pages-a11y.test.tsx (which now pins the
+// ABSENCE of the control) and in e2e/firm-navigation-walk.spec.ts.
