@@ -22,7 +22,7 @@ import {
   opk, rootQuery, seedAdmission,
 } from "./rig-fixtures.mjs";
 
-const EXPECTED_CELLS = 21;
+const EXPECTED_CELLS = 22;
 
 let live = false;
 let executed = 0;
@@ -404,4 +404,31 @@ cell("ak.21 ACL: the WRAPPER is clara_authenticated's alone, and the ORIGINAL si
                                                          where a.grantee=0 and a.privilege_type='EXECUTE'))) as leaked`,
   );
   assert.equal(pub.rows[0].leaked, false, "PUBLIC must hold no EXECUTE on the wrapper");
+});
+
+cell("ak.22 ACL: the derive trigger function is reachable by NOBODY — not PUBLIC, not any app role", async () => {
+  // THIS CELL EXISTS BECAUSE THE FIRST CUT OF THE MIGRATION FAILED IT. The file relied on
+  // 0004:752's `alter default privileges … revoke execute on functions from public`; applied
+  // through psql under an explicit `set role` that held, and applied through the MIGRATION RUNNER
+  // it did NOT — the function landed with a NULL proacl, which IS PUBLIC, on a SECURITY DEFINER
+  // body. checkout-gate-c2's closed-world routine census caught it on a fresh estate run. A
+  // default-privileges assumption is about the session; the explicit revoke the migration now
+  // carries is about the object, and this cell reads the object.
+  const r = await rootQuery(
+    `select p.proacl is null as acl_null,
+            exists (select 1 from aclexplode(coalesce(p.proacl,'{}'::aclitem[])) a
+                     where a.grantee=0 and a.privilege_type='EXECUTE') as public_execute,
+            (select string_agg(role, ',' order by role) from unnest(array[
+               'clara_authenticated','clara_runtime','clara_agent_ro','clara_wake_interactive',
+               'clara_wake_proactive','clara_freeform_ro','clara_stripe_webhook']) as role
+              where has_function_privilege(role, p.oid, 'execute')) as roles_that_can
+       from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+      where n.nspname='clara' and p.proname='_tf_counterparty_alias_kind'`,
+  );
+  assert.equal(r.rowCount, 1, "the derive trigger function must exist");
+  const acl = r.rows[0];
+  assert.equal(acl.acl_null, false, "a NULL proacl IS PUBLIC — the explicit revoke must have run");
+  assert.equal(acl.public_execute, false, "PUBLIC must hold no EXECUTE on a SECURITY DEFINER body");
+  assert.equal(acl.roles_that_can, null,
+    `no application role may EXECUTE the derive trigger function, found: ${acl.roles_that_can}`);
 });

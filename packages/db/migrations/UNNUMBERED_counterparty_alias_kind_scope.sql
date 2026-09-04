@@ -292,6 +292,18 @@ begin
   return new;
 end $$;
 
+-- THE REVOKE IS NOT DECORATION, AND THIS ONE WAS MEASURED THE HARD WAY. 0004:752 declares
+-- `alter default privileges for role clara_fn_owner in schema clara revoke execute on functions
+-- from public`, and the first cut of this file relied on it. Applied through psql under an
+-- explicit `set role`, the function landed with `{clara_fn_owner=X/clara_fn_owner}` and PUBLIC
+-- held nothing. Applied through the MIGRATION RUNNER -- which is the path a real deploy takes --
+-- the same statement produced a NULL proacl, so PUBLIC held EXECUTE on a SECURITY DEFINER body,
+-- and `clara_stripe_webhook`'s closed-world routine census (checkout-gate-c2 cell c2.8) and C-3's
+-- caught it on a fresh estate run. Default privileges are an assumption about the session; an
+-- explicit revoke is a fact about the object. Every other function in this chain writes it out,
+-- and so does this one. The tail asserts it rather than trusting these two lines.
+revoke all on function clara._tf_counterparty_alias_kind() from public;
+
 create trigger t_counterparty_aliases_kind_derive before insert on clara.counterparty_aliases
   for each row execute function clara._tf_counterparty_alias_kind();
 
@@ -355,6 +367,7 @@ declare
   v_def text;
   v_n integer;
   v_kinds text;
+  v_names text;
   r record;
 begin
   -- (T1) The index is re-keyed, under the SAME name, with kind in the key.
@@ -437,12 +450,28 @@ begin
       raise exception 'alias-kind tail: % gained EXECUTE on the ORIGINAL set_sales_lane_activation -- 0046 acl 3 is red', r.role;
     end if;
   end loop;
-  if exists (select 1 from pg_proc p join pg_namespace n on n.oid=p.pronamespace
-              where n.nspname='clara' and p.proname='set_firm_sales_lane_activation'
-                and (p.proacl is null or exists (select 1 from aclexplode(p.proacl) a
-                                                  where a.grantee=0 and a.privilege_type='EXECUTE'))) then
-    raise exception 'alias-kind tail: PUBLIC holds EXECUTE on the sales-lane wrapper';
+  -- PUBLIC holds EXECUTE on NEITHER body this file creates. The trigger function is in this list
+  -- because leaving it out is precisely the defect a fresh estate run caught: a NULL proacl means
+  -- PUBLIC, and this body is SECURITY DEFINER. `proacl is null` IS the failing case, not a
+  -- shortcut for "no grants" -- reading it the other way is how the first cut passed.
+  select string_agg(p.proname, ', ' order by p.proname) into v_names
+    from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+   where n.nspname='clara'
+     and p.proname in ('set_firm_sales_lane_activation','_tf_counterparty_alias_kind')
+     and (p.proacl is null or exists (select 1 from aclexplode(p.proacl) a
+                                       where a.grantee=0 and a.privilege_type='EXECUTE'));
+  if v_names is not null then
+    raise exception 'alias-kind tail: PUBLIC holds EXECUTE on {%}', v_names;
   end if;
+  -- And the trigger function reaches no APPLICATION role either -- it is called by the trigger,
+  -- under the definer, and by nothing else.
+  for r in select unnest(array['clara_authenticated','clara_runtime','clara_agent_ro',
+                              'clara_wake_interactive','clara_wake_proactive','clara_freeform_ro']) as role
+  loop
+    if has_function_privilege(r.role, 'clara._tf_counterparty_alias_kind()'::regprocedure, 'execute') then
+      raise exception 'alias-kind tail: % can EXECUTE the alias-kind derive trigger function', r.role;
+    end if;
+  end loop;
 
   select string_agg(distinct kind, ',' order by kind) into v_kinds from clara.counterparty_aliases;
   raise notice 'alias-kind tail: OK -- uq_counterparty_aliases_live_name is now (client_id, kind, alias_normalized) WHERE retired_at IS NULL; % alias row(s) carry a kind (distinct kinds: %) and NONE disagrees with its parent; t_counterparty_aliases_update is enabled again; the derive trigger and the composite FK (counterparty_id, kind) -> counterparties(id, kind) are installed; the NEW wrapper set_firm_sales_lane_activation(boolean,timestamptz,text,text) is executable by clara_authenticated ONLY, PUBLIC is refused, and the ORIGINAL set_sales_lane_activation(uuid,...) is still reachable from no application role.',
