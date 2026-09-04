@@ -439,7 +439,7 @@ describe("the projections are the DB's own declared column contracts", () => {
 
 const APPLICANT = "44444444-4444-4444-8444-444444444444";
 const testSession: SessionTokenAccessor = { getAccessToken: async () => "test-token" };
-const SESSION: ServerSession = { accessToken: "test-token", subject: APPLICANT };
+const SESSION: ServerSession = { accessToken: "test-token", subject: APPLICANT, email: null };
 
 describe("what the two reads actually put on the wire", () => {
   const realFetch = globalThis.fetch;

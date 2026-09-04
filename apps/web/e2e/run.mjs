@@ -54,6 +54,15 @@ const env = {
   // Absent, the seam refuses `unconfigured` BEFORE any network call, which is
   // itself one of the design's own fail-closed arms (part 3 §3), and the
   // walk asserts the honest card and the unstamped intent that follow.
+  //
+  // CLARA_STRIPE_LIVEMODE IS ABSENT FOR THE SAME REASON, and its absence is
+  // not an oversight to "fix". The key-class gate (CB-AE2E-003) runs AFTER the
+  // absent-key check, so with no key at all the walk still reaches the same
+  // `unconfigured` refusal it always did and the card it asserts is unchanged.
+  // Setting the mode here would prove nothing the unit cells in
+  // `lib/checkout/stripe-session.test.ts` do not prove better: every arm of
+  // that gate is driven there, including both refusal directions, because
+  // reaching them in a browser would need a real key in the harness.
 };
 const pnpmCli = process.env.npm_execpath;
 if (!pnpmCli) {
