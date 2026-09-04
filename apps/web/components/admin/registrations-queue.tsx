@@ -41,6 +41,7 @@ import { DataTableCard } from "@/components/common/data-table-card";
 import { EmptyState, LoadingState, StateBanner } from "@/components/common/state";
 import { useHydratedPart } from "@/lib/parts/hooks";
 import { createSingleFireGuard, runOnce } from "@/lib/parts/single-fire-guard";
+import { closeOnConfirmedOk } from "@/lib/parts/door-dialog-outcome";
 import { isCallerContextRow, loadCallerContext } from "@/lib/firm/caller-context";
 import { firmCapabilitiesFromRows } from "@/lib/firm/capabilities";
 import {
@@ -196,14 +197,19 @@ function OperatorQueue({ callerId }: { callerId: string }) {
 
   async function handleReject(row: RegistrationRequestRow, reason: string, onOk: () => void): Promise<boolean> {
     setReceipt(null);
-    return runOnce(actionGuardRef.current, async () => {
-      await act(async () => {
+    // CB-AE2E-004: the boolean this returns is now the ACT's own outcome, not
+    // "the click was not dropped" — a refused reject leaves its dialog open with
+    // the typed reason intact. `outcome.ran === false` (a dropped concurrent
+    // click) also yields `false`, which is the same "do not close" answer.
+    const outcome = await runOnce(actionGuardRef.current, () =>
+      act(async () => {
         // ROUND 5: hashing belongs INSIDE both the page-wide synchronous
         // guard and `act()` so `busy` begins before this first await.
         const opKey = await rejectKeyFor(row.id, callerId, reason);
         await rejectFirmRegistration(sessionTokenAccessor, row.id, reason, opKey);
-      }, onOk);
-    });
+      }, onOk),
+    );
+    return closeOnConfirmedOk(outcome);
   }
 
   // FOLD (Codex LOW-4, amended round-2): before the first successful
@@ -444,11 +450,13 @@ function RejectDialog({
             variant="destructive"
             disabled={busy || normalizedLength === 0 || normalizedLength > REASON_MAX_LENGTH}
             onClick={async () => {
-              // ROUND 5: the parent acquires the ONE page-wide guard before
-              // starting `act()` and its digest. Its boolean preserves the
-              // rule that a dropped concurrent click never closes a dialog.
-              const ran = await onReject(normalized, () => setReason(""));
-              if (ran) setOpen(false);
+              // ROUND 5 / CB-AE2E-004: the parent acquires the ONE page-wide
+              // guard before starting `act()` and its digest. The boolean it
+              // returns is the ACT's outcome — a dropped concurrent click and a
+              // governed refusal both answer `false`, and neither closes this
+              // dialog or discards the typed reason.
+              const ok = await onReject(normalized, () => setReason(""));
+              if (ok) setOpen(false);
             }}
           >
             {busy ? t("working") : t("rejectConfirm")}

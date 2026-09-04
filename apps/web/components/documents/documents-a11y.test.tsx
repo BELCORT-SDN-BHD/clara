@@ -31,8 +31,9 @@ import type { DocumentRow, FilingRow, CandidateRow, RegionRow, ProcessingTaskRow
 
 enableDomInspection();
 
-const noopAct = async (fn: () => Promise<void>) => {
+const noopAct = async (fn: () => Promise<void>): Promise<boolean> => {
   void fn; // deliberately never called — a real door call is out of scope for a structural a11y scan
+  return false; // nothing was attempted, so nothing succeeded (CB-AE2E-004's contract)
 };
 
 const DOCUMENT: DocumentRow = {

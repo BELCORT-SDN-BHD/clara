@@ -17,7 +17,7 @@ export function CompleteParticularsDialog({
   onSubmit,
 }: {
   busy: boolean;
-  onSubmit: (purpose: string, reference: string) => Promise<void>;
+  onSubmit: (purpose: string, reference: string) => Promise<boolean>;
 }) {
   const t = useTranslations("StaffAdvances.completeParticulars");
   const [purpose, setPurpose] = useState("");

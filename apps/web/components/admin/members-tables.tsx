@@ -100,7 +100,7 @@ export function RosterTable({
   /** RETURNS THE ACT'S OWN PROMISE. `MemberRowMenu` disables its items and holds
    *  its single-fire guard until this settles; a `void`-ing caller would leave
    *  the double-fire window open (independent review of #455, MEDIUM-4). */
-  onPickRole: (row: FirmMemberRow, role: MemberRole) => Promise<void>;
+  onPickRole: (row: FirmMemberRow, role: MemberRole) => Promise<boolean>;
   onRemove: (row: FirmMemberRow) => void;
 }) {
   const t = useTranslations("Members.roster");

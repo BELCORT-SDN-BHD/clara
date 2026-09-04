@@ -15,6 +15,8 @@ import { useHydratedPart } from "@/lib/parts/hooks";
 import { listExportRecipients, registerExportRecipient } from "@/lib/reports/api";
 import { DoorDialog } from "./DoorDialog";
 import type { SessionTokenAccessor } from "@/lib/session";
+import { NativeSelect } from "@/components/common/native-select";
+import { useMemberNames } from "@/lib/members/use-member-names";
 
 export function ExportRecipientsPanel({ session }: { session: SessionTokenAccessor }) {
   const t = useTranslations("ClientReports.sandbox.recipients");
@@ -71,12 +73,23 @@ function RegisterDialog({
 }: {
   session: SessionTokenAccessor;
   busy: boolean;
-  act: (fn: () => Promise<void>) => Promise<void>;
+  act: (fn: () => Promise<void>) => Promise<boolean>;
 }) {
   const t = useTranslations("ClientReports.sandbox.recipients.register");
   const [userId, setUserId] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [basis, setBasis] = useState("");
+  // CB-AE2E-027: the first field used to be a free-text box whose placeholder was
+  // literally "Firm member user id (UUID)" — an admin had to go and find a
+  // colleague's uuid by hand. The roster this picker offers is
+  // clara.firm_members_visible (0141:512), the SAME read the members panel uses.
+  //
+  // The roster floors at bookkeeper+ (a viewer sees ZERO rows and therefore an
+  // empty picker), while the WRITE floors at admin+ (0132:1051-1106). That gap is
+  // deliberate and safe: the DB is the wall on the write, and an empty picker is an
+  // honest "you cannot read the roster", never a claim that the firm has no members.
+  const memberNames = useMemberNames(session);
+  const roster = memberNames.members.filter((m) => m.removed_at === null);
   return (
     <DoorDialog
       triggerLabel={t("trigger")}
@@ -98,7 +111,28 @@ function RegisterDialog({
       }
     >
       <div className="flex flex-col gap-2">
-        <Input aria-label={t("userIdPlaceholder")} placeholder={t("userIdPlaceholder")} value={userId} onChange={(e) => setUserId(e.target.value)} />
+        <NativeSelect
+          aria-label={t("memberLabel")}
+          value={userId}
+          onChange={(e) => {
+            const picked = roster.find((m) => m.user_id === e.target.value);
+            setUserId(e.target.value);
+            // Prefilled, never forced: register_export_recipient stores the
+            // RECIPIENT's own label (p_display_name, lib/reports/api.ts), which an
+            // admin may legitimately want to differ from the roster's name.
+            if (picked && displayName.trim().length === 0) setDisplayName(picked.display_name);
+          }}
+        >
+          <option value="">{memberNames.loading ? t("memberLoading") : t("memberChoose")}</option>
+          {roster.map((m) => (
+            <option key={m.user_id} value={m.user_id}>
+              {m.display_name} · {m.role}
+            </option>
+          ))}
+        </NativeSelect>
+        {!memberNames.loading && roster.length === 0 ? (
+          <p className="text-xs text-muted-foreground">{t("memberRosterUnreadable")}</p>
+        ) : null}
         <Input aria-label={t("displayNamePlaceholder")} placeholder={t("displayNamePlaceholder")} value={displayName} onChange={(e) => setDisplayName(e.target.value)} />
         <Input aria-label={t("basisPlaceholder")} placeholder={t("basisPlaceholder")} value={basis} onChange={(e) => setBasis(e.target.value)} />
       </div>

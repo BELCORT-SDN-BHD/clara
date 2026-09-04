@@ -18,7 +18,7 @@ export function CreateCounterpartyDialog({
   onSubmit,
 }: {
   busy: boolean;
-  onSubmit: (kind: CounterpartyKind, name: string, registrationNo: string | null, tin: string | null) => Promise<void>;
+  onSubmit: (kind: CounterpartyKind, name: string, registrationNo: string | null, tin: string | null) => Promise<boolean>;
 }) {
   const t = useTranslations("ArApCounterparty.create");
   const [kind, setKind] = useState<CounterpartyKind>("vendor");

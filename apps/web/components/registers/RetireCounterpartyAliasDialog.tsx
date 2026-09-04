@@ -19,7 +19,7 @@ export function RetireCounterpartyAliasDialog({
 }: {
   aliasDisplay: string;
   busy: boolean;
-  onSubmit: () => Promise<void>;
+  onSubmit: () => Promise<boolean>;
 }) {
   const t = useTranslations("ArApCounterparty.retireAlias");
 

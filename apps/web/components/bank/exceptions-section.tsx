@@ -106,7 +106,7 @@ export function ExceptionsSection({ clientId }: { clientId: string }) {
           <CardDescription>{t("proposalsAttribution")}</CardDescription>
         </CardHeader>
         <CardContent>
-          <ReadState hasData={proposals.data !== null} err={proposals.err} errKind={proposalsKind.kind} isEmpty={proposals.data?.length === 0} onRetry={() => void proposals.reload()}>
+          <ReadState hasData={proposals.data !== null} err={proposals.err} errKind={proposalsKind.kind} isEmpty={proposals.data?.length === 0} emptyCopy={t("emptyProposals")} onRetry={() => void proposals.reload()}>
             <ul className="flex flex-col gap-2">
               {(proposals.data ?? []).map((p) => (
                 <li key={p.id} className="enter-content flex items-center justify-between gap-3 rounded-lg border border-border bg-card p-3 text-sm">
@@ -156,7 +156,7 @@ export function ExceptionsSection({ clientId }: { clientId: string }) {
         </CardHeader>
         <CardContent className="flex flex-col gap-2">
           {exceptions.data !== null && <ActionRefusal err={exceptions.err} clr={exceptions.clr} />}
-          <ReadState hasData={exceptions.data !== null} err={exceptions.err} errKind={exceptionsKind.kind} isEmpty={exceptions.data?.length === 0} onRetry={() => void exceptions.reload()}>
+          <ReadState hasData={exceptions.data !== null} err={exceptions.err} errKind={exceptionsKind.kind} isEmpty={exceptions.data?.length === 0} emptyCopy={t("emptyExceptions")} onRetry={() => void exceptions.reload()}>
             <ul className="flex flex-col gap-2">
               {(exceptions.data ?? []).map((ex) => (
                 <li key={ex.id} className="enter-content flex flex-col gap-2 rounded-lg border border-border bg-card p-3 text-sm">

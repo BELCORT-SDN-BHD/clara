@@ -161,20 +161,19 @@ test("RenderJobQueuePanel: zero violations across the FULL drift journey — col
       for (let i = 0; i < 8; i++) await h.settle();
       assert.equal(requeueCalls, 1, "exactly one requeue attempt so far");
 
-      // DoorDialog closes on this resolved (though refused) attempt — the
-      // panel's own persistent banner now names the refusal.
-      assert.match(textOf(body as never), /the re-derived request differs from the one that failed/, "the refusal renders through the panel's persistent banner, not inside the (now-closed) dialog");
-      assert.deepEqual(checkAccessibility(body as never), [], "collapsed, after the refused first attempt");
+      // CB-AE2E-004 (2026-09-04): DoorDialog now STAYS OPEN on a refused attempt, and
+      // the refusal renders INSIDE it. That makes this journey shorter and stronger:
+      // the drift consent checkbox appears in place, beside the very refusal that
+      // revealed it, rather than only on a re-open the human had to think to perform.
+      assert.match(textOf(body as never), /the re-derived request differs from the one that failed/, "the refusal renders where the human is looking \u2014 inside the still-open dialog");
+      assert.match(textOf(body as never), /I understand this may render a different document/, "drift is now KNOWN, so the consent checkbox renders in place \u2014 F7's own target state");
+      assert.match(textOf(body as never), /superseded manifest sha256/i);
+      assert.match(textOf(body as never), new RegExp("b".repeat(16)), "the job's own, real manifest_sha256 renders \u2014 never a fabricated 'new' digest");
+      assert.deepEqual(checkAccessibility(body as never), [], "after the refused attempt, drift checkbox visible in the still-open dialog");
 
-      // --- Second open: drift is now KNOWN, and the checkbox renders. ---
+      // And the trigger is still there, unchanged, for a human who cancels out.
       trigger = h.find((n) => n.tagName === "BUTTON" && textOf(n).includes("Requeue"));
       assert.ok(trigger, "the Requeue trigger must still render after the refusal");
-      await h.fireEvent(trigger!, "click");
-      for (let i = 0; i < 6; i++) await h.settle();
-      assert.match(textOf(body as never), /I understand this may render a different document/, "the SECOND open shows the drift consent checkbox — F7's own target state");
-      assert.match(textOf(body as never), /superseded manifest sha256/i);
-      assert.match(textOf(body as never), new RegExp("b".repeat(16)), "the job's own, real manifest_sha256 renders — never a fabricated 'new' digest");
-      assert.deepEqual(checkAccessibility(body as never), [], "second open, drift checkbox visible");
     } finally {
       await h.unmount();
       for (let i = 0; i < 5; i++) await h.settle();

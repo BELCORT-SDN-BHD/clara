@@ -177,12 +177,17 @@ test("FiscalYearOpener: a REAL CLR38 refusal on Set-fiscal-year-end renders verb
 
         assert.equal(
           findAll(body, confirmButtons).length,
-          1,
-          "DISCRIMINATING POST-CONDITION: the dialog's own Confirm must be GONE from document.body after it settles — only the trigger remains",
+          2,
+          "DISCRIMINATING POST-CONDITION (CB-AE2E-004, 2026-09-04): a REFUSED confirm keeps the dialog open — trigger AND confirm are both still in document.body. This assertion used to demand the opposite (length 1, 'Confirm must be GONE'), which is the class defect: the month/day the human typed went with it.",
+        );
+        assert.equal(
+          (findById(body, "fy-end-month") as unknown as { value: string }).value,
+          "6",
+          "and what they typed is still in the field",
         );
 
         const bodyText = textOf(body as never);
-        assert.match(bodyText, /CLR38/, "the refusal code must render verbatim in the persistent banner");
+        assert.match(bodyText, /CLR38/, "the refusal code must render verbatim");
         assert.match(bodyText, /retire it before moving the financial-year end/, "the refusal message must render verbatim, never re-worded");
       } finally {
         await h.unmount();
@@ -335,20 +340,18 @@ test("N4: a real CLR10 fy_length_reason_required makes the length-reason field A
         assert.match(bodyText, /CLR10/, "the refusal code must render verbatim");
         assert.match(bodyText, /needs its length_reason stated/, "the refusal message must render verbatim");
 
-        // The dialog ALWAYS closes once the attempt settles (house pattern —
-        // CloseDoorDialog's own header), so the length-reason field's OWN
-        // appearance can only be observed by reopening: `refusal` is a PROP
-        // sourced from the PARENT's own `fyEnd.clr` (which persists reliably
-        // — the parent never unmounts), so a fresh mount of the dialog's
-        // content correctly reflects it — unlike a per-dialog LOCAL useState,
-        // this needs no state-preservation-across-remount guarantee at all.
+        // CB-AE2E-004 (2026-09-04): the dialog STAYS OPEN on a refusal, so the
+        // length-reason field's own appearance is observed IN PLACE — no reopen step.
+        // This is strictly better evidence than the old reopen: it proves the field
+        // appears beside the very refusal that named it, in the same dialog the human
+        // is still looking at. `refusal` is a PROP sourced from the PARENT's own
+        // `fyEnd.clr` (the parent never unmounts), so it needs no
+        // state-preservation-across-remount guarantee either way.
         const triggerAfterRefusal = h.find((n) => n.tagName === "BUTTON" && textOf(n).includes("Open fiscal year"));
         assert.ok(triggerAfterRefusal, "the Open-fiscal-year trigger must still render after the refusal");
-        await clickButton(triggerAfterRefusal as never);
-        for (let i = 0; i < 4; i++) await h.settle();
         assert.ok(
           findByAttr(body, "id", "fy-open-length-reason"),
-          "the length-reason field must NOW appear on reopen — the refusal named exactly this",
+          "the length-reason field must appear IN the still-open dialog — the refusal named exactly this",
         );
       } finally {
         await h.unmount();

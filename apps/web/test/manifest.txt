@@ -72,12 +72,14 @@ components/close/close-t1-hold-receipts.test.tsx
 components/close/close-t1-opener.test.tsx
 components/close/close-t1-proposal-readiness.test.tsx
 components/command/command-do.test.tsx
+components/common/door-dialog-outcome.test.tsx
 components/common/money-input.journals.test.tsx
 components/common/money-input.opening.test.tsx
 components/common/money-input.staff-advance.test.tsx
 components/common/money-input.test.tsx
 components/common/p6-3-a11y.test.tsx
 components/common/route-error.test.tsx
+components/common/table-scroll-region.test.tsx
 components/documents/coding-lane-a11y.test.tsx
 components/documents/coding-lane-keyboard.test.tsx
 components/documents/documents-a11y.test.tsx
@@ -151,7 +153,9 @@ components/registers/adjustments-keyboard.test.tsx
 components/registers/adjustments-render-states.test.tsx
 components/registers/counterparty-hygiene-a11y.test.tsx
 components/registers/counterparty-hygiene-keyboard.test.tsx
+components/registers/counterparty-hygiene-kinds.test.tsx
 components/registers/fa-particulars-fields.test.tsx
+components/registers/fa-register-tie.test.tsx
 components/registers/fixed-assets-a11y.test.tsx
 components/registers/fixed-assets-keyboard.test.tsx
 components/registers/opening-a11y.test.tsx
@@ -162,6 +166,8 @@ components/registers/opening-keyboard.test.tsx
 components/registers/opening-refusal-and-staleness.test.tsx
 components/registers/opening-register-fix-round.test.tsx
 components/registers/opening-register.test.tsx
+components/registers/opening-tie-gates.test.tsx
+components/registers/register-refresh-siblings.test.tsx
 components/registers/staff-advance-statement-panel.test.tsx
 components/registers/staff-advances-a11y.test.tsx
 components/registers/staff-advances-keyboard.test.tsx
@@ -239,6 +245,7 @@ lib/journals/entries-table.test.ts
 lib/journals/governance-doors.test.ts
 lib/journals/use-journals-workbench.test.ts
 lib/members/members-doors.test.ts
+lib/members/use-member-names.test.ts
 lib/onboarding/answer-format.test.ts
 lib/onboarding/api.test.ts
 lib/onboarding/resolution-history.test.ts

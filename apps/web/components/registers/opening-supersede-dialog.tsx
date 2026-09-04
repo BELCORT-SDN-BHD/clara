@@ -47,7 +47,7 @@ export function OpeningSupersedeDialog({
       confirmLabel={t("trigger")}
       busy={busy}
       confirmDisabled={isFixedAsset}
-      onConfirm={async () => { await act(async () => { await supersedeOpeningItem(sessionTokenAccessor, { item: item.id, replacement: null }); }); }}
+      onConfirm={() => act(async () => { await supersedeOpeningItem(sessionTokenAccessor, { item: item.id, replacement: null }); })}
     >
       {isFixedAsset ? (
         <p className="text-xs text-warning">{t("fixedAssetReplacementRequired")}</p>

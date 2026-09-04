@@ -142,7 +142,10 @@ export function VendorBindingRowActions({
   /** `clara.revoke_vendor_identity_binding` floors at bookkeeper — `0028:903`,
    *  which IS still the live body: no later migration defines or drops it. */
   canRevoke: boolean;
-  act: (fn: () => Promise<void>) => Promise<void>;
+  /** CB-AE2E-004 widened this from `Promise<void>`: the caller's dialogs close only on an
+   *  accepted act, and `act()` catches every refusal and RESOLVES, so the outcome has to be
+   *  readable or a refusal is indistinguishable from a success. */
+  act: (fn: () => Promise<void>) => Promise<boolean>;
 }) {
   const t = useTranslations("FirmAdminCompliance.vendorBindings");
   return (
@@ -192,7 +195,7 @@ function RevokeDialog({
 }: {
   bindingId: string;
   busy: boolean;
-  act: (fn: () => Promise<void>) => Promise<void>;
+  act: (fn: () => Promise<void>) => Promise<boolean>;
 }) {
   const t = useTranslations("FirmAdminCompliance.vendorBindings");
   const [reason, setReason] = useState("");
@@ -234,7 +237,7 @@ export function ProposeBindingDialog({
   clientId: string;
   counterpartiesState: PartHydrationState<VendorCounterpartyRow[]>;
   busy: boolean;
-  act: (fn: () => Promise<void>) => Promise<void>;
+  act: (fn: () => Promise<void>) => Promise<boolean>;
 }) {
   const t = useTranslations("FirmAdminCompliance.vendorBindings");
   const tc = useTranslations("Common");

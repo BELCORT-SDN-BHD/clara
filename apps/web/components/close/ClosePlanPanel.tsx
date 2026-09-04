@@ -60,8 +60,11 @@ export function ClosePlanPanel({
   // Wraps a door's own write in `act()` (which always reloads the plan, success
   // or failure) AND fires the picker's reload right alongside it — same
   // timing, same "always, regardless of outcome" discipline.
-  const actAndReloadYears = (fn: () => Promise<void>): Promise<void> =>
-    act(fn).then(() => Promise.all([reloadYears(), readiness.reload()]).then(() => undefined));
+  // CB-AE2E-004: the WRITE's own outcome is what this resolves — the follow-up
+  // reloads still run unconditionally, but their success is not evidence the door
+  // accepted, and it is the door's answer that decides whether a dialog closes.
+  const actAndReloadYears = (fn: () => Promise<void>): Promise<boolean> =>
+    act(fn).then((ok) => Promise.all([reloadYears(), readiness.reload()]).then(() => ok));
 
   // T1: CloseProposalPanel's own settle acts already reload via ITS OWN
   // hydrated part (proposals.act) — this is the follow-up reload for the
@@ -114,12 +117,13 @@ export function ClosePlanPanel({
         plan={plan}
         busy={busy}
         refusal={clr}
+        refusalMessage={err}
         onBegin={() => actAndReloadYears(async () => { await beginClose(fiscalYearId, { session }); })}
         onFinalize={(selfAttestation) => actAndReloadYears(async () => { await finalizeClose(fiscalYearId, selfAttestation, { session }); })}
         onAbandon={(reason) =>
           closeRunId
             ? actAndReloadYears(async () => { await abandonClose(closeRunId, reason, { session }); })
-            : Promise.resolve()
+            : Promise.resolve(false)
         }
         onReopen={(args: { reason: string; correctionTarget: ReopenCorrectionTarget; attestation?: string }) =>
           actAndReloadYears(async () => {
@@ -140,10 +144,12 @@ export function ClosePlanPanel({
                 check={check}
                 closeRunId={closeRunId}
                 busy={busy}
+                refusal={clr}
+                refusalMessage={err}
                 onAttest={({ checkKey, reason, itemKey }) =>
                   closeRunId
                     ? actAndReloadYears(async () => { await attestCloseException({ closeRunId, checkKey, reason, itemKey }, { session }); })
-                    : Promise.resolve()
+                    : Promise.resolve(false)
                 }
               />
             ))}

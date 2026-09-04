@@ -176,7 +176,7 @@ export function SettledOnboardingCard({
                 // `planOpen={false}` is the truth, and it is what makes every row's own resolve
                 // and amend door correctly unavailable — `resolve_onboarding_plan_item` refuses
                 // CLR10 on a non-open plan (0017:2722), so the receipt is the last word.
-                <OnboardingItemRow key={item.item_key} item={item} busy={false} planOpen={false} onResolve={async () => {}} />
+                <OnboardingItemRow key={item.item_key} item={item} busy={false} planOpen={false} onResolve={async () => false} />
               ))}
             </ul>
           ) : null}

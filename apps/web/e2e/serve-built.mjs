@@ -27,10 +27,14 @@ import { P6_5_SESSIONS, handleP6_5App, handleP6_5Runtime, handleP6_5Supabase } f
 // would burn its `emptyReads` budget. Every other handler in the module is client- or
 // id-scoped and falls through, so running first costs no sibling anything.
 import { handleJournalsTableSupabase } from "./journals-table-mock.mjs";
-// The Home boards' fixture lane (裁-190). Consulted LAST among the four lane hooks and BEFORE
-// this file's own generic fixtures — see that module's header for why answering with honest
-// EMPTIES cannot starve a lane that owns one of the same routes for its own ids, and why the
-// one id-scoped client row has to precede the generic `/rest/v1/clients` branch.
+// L7 (bank/close/registers). ID-scoped like its siblings, hooked in ONE place below, and
+// deliberately NOT first: it answers nothing the journals lane needs, and #548's ordering
+// note above is the one claim in this import block that is load-bearing.
+import { handleL7Supabase } from "./bank-close-registers-mock.mjs";
+// The Home boards' fixture lane (#557). Consulted LAST among the lane hooks and BEFORE this
+// file's own generic fixtures — see that module's header for why answering with honest EMPTIES
+// cannot starve a lane that owns one of the same routes for its own ids, and why its one
+// id-scoped client row has to precede the generic `/rest/v1/clients` branch.
 import { handleHomeBoardSupabase } from "./home-board-mock.mjs";
 
 const e2eRoot = dirname(fileURLToPath(import.meta.url));
@@ -397,10 +401,11 @@ async function handleSupabase(request, response, url) {
   if (await handleJournalsTableSupabase(request, response, path, url, sendJson, cors)) return;
   if (await handleChatParitySupabase(request, response, path, url, sendJson, cors)) return;
   if (await handleP6_5Supabase(request, response, path, url, sendJson, cors)) return;
-  // AFTER both lane hooks, BEFORE the generic fixtures — see home-board-mock.mjs's header. It
-  // has to precede the generic `/rest/v1/clients` branch below to serve its ONE id-scoped
-  // client row (a SERVER-side layout read `page.route` cannot reach), and it falls through for
-  // every other id, so the unfiltered register stays exactly as this file has it.
+  if (await handleL7Supabase(request, response, path, url, sendJson, cors)) return;
+  // LAST among the lane hooks, and still BEFORE the generic fixtures — see home-board-mock.mjs's
+  // header. It has to precede the generic `/rest/v1/clients` branch below to serve its ONE
+  // id-scoped client row (a SERVER-side layout read `page.route` cannot reach), and it falls
+  // through for every other id, so the unfiltered register stays exactly as this file has it.
   if (await handleHomeBoardSupabase(request, response, path, url, sendJson, cors)) return;
 
   if (request.method === "GET" && path === "/rest/v1/clients") {

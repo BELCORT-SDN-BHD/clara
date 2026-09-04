@@ -41,6 +41,8 @@ export function ReadState({
   errKind,
   hasData,
   isEmpty,
+  emptyCopy,
+  errCopy,
   onRetry,
   children,
 }: {
@@ -49,6 +51,18 @@ export function ReadState({
   /** `true` once the loader has EVER resolved (data !== null) — see header. */
   hasData: boolean;
   isEmpty?: boolean;
+  /** CB-AE2E-034 — the per-read empty sentence. Eight bank call sites shared one
+   *  six-word string ("Nothing here yet.") for eight distinct absences, and the
+   *  reconciliation tab stacked TWO of them inside one card, so a client with no
+   *  bank account read the identical sentence twice and neither said which read
+   *  was empty or what to do about it. Omitting this keeps the generic sentence,
+   *  so nothing regresses; the shared component simply gained the seam it lacked. */
+  emptyCopy?: ReactNode;
+  /** The same seam for the GENERIC read failure. The four typed wire kinds
+   *  (no_session/forbidden/not_found) keep their own one-size copy — those say
+   *  something true about the CALLER, not about which read failed — but the
+   *  fall-through "could not load" can name the read. */
+  errCopy?: (message: string) => ReactNode;
   onRetry?: () => void;
   children: ReactNode;
 }) {
@@ -60,7 +74,7 @@ export function ReadState({
         errKind === "no_session" ? t("noSession")
         : errKind === "forbidden" ? t("forbidden")
         : errKind === "not_found" ? t("notFoundRelation")
-        : t("genericError", { message: err });
+        : (errCopy?.(err) ?? t("genericError", { message: err }));
       return (
         <StateBanner
           tone={(errKind && KIND_TONE[errKind]) ?? "error"}
@@ -80,7 +94,7 @@ export function ReadState({
   }
 
   if (isEmpty) {
-    return <EmptyState>{t("empty")}</EmptyState>;
+    return <EmptyState>{emptyCopy ?? t("empty")}</EmptyState>;
   }
 
   return <>{children}</>;

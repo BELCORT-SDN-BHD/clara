@@ -29,11 +29,17 @@
 //
 // P2 · object-object-and-raw-json (the verified sweep, 2026-09-04): the Actor
 // cell rendered `acting_actor` RAW, a full uuid, as the answer to "who did
-// this". It is now the house `shortId(...)` in a `font-mono` span. A real
-// display name is NOT invented here: `lib/members/use-member-names.ts` (lane L7)
-// is the resolver that would supply one and is not on `main` at the time of
-// writing, so this lane takes the short id and leaves the upgrade to a
-// one-import change rather than guessing a name.
+// this". #550 made it the house `shortId(...)` in a `font-mono` span and left
+// this note: the real display name would come from `lib/members/use-member-names.ts`
+// (lane L7), which was not on `main` at the time of writing, so the upgrade was
+// left as "a one-import change rather than guessing a name".
+//
+// THAT UPGRADE HAS LANDED (#549, CB-AE2E-027/028). The cell renders `<MemberName>`,
+// which resolves the uuid against `clara.firm_members_visible` and — when it cannot,
+// for any of the reasons `use-member-names.ts` enumerates — falls back to EXACTLY
+// #550's treatment, `shortId` in `font-mono`. So the honest floor #550 set is the
+// floor still; it is just no longer the ceiling. `shortId` is imported by
+// `MemberName` now, not here.
 //
 // THE REACT KEY IS THE PAIR, NOT THE ID. `agent_receipts_visible` is a UNION of
 // nine per-item shims, and `clara.agent_receipt_contract` ordinal 2 (0103:260)
@@ -49,15 +55,20 @@ import { useAsyncRead } from "@/lib/firm/use-async-read";
 import { loadFirmActivity, type AgentReceiptRow } from "@/lib/firm/reads";
 import { isKnownAgentReceiptKind } from "@/lib/firm/receipt-kinds";
 import { businessDateTime } from "@/lib/business-date";
-import { shortId } from "@/lib/registers/money";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
 import { DataState } from "./data-state";
 import { Badge } from "@/components/parts/PartBadge";
+import { MemberName } from "@/components/common/member-name";
+import { useMemberNames, type MemberNameResolver } from "@/lib/members/use-member-names";
 
 export function FirmActivityFeed() {
   const t = useTranslations("FirmActivity");
   const { data, loading, error } = useAsyncRead(() => loadFirmActivity(sessionTokenAccessor));
   const rows = data ?? [];
+  // CB-AE2E-027 (same class): `agent_receipts_visible.acting_actor` is a uuid
+  // (0103:261, contract ordinal 6 "who acted"). ONE roster read for the whole
+  // feed, held here and passed down — never one per row.
+  const memberNames = useMemberNames(sessionTokenAccessor);
 
   return (
     // `subheading` moved up into the page header (app/(firm)/activity/page.tsx)
@@ -76,7 +87,7 @@ export function FirmActivityFeed() {
         <p className="max-w-prose text-xs text-muted-foreground">{t("showingRecent")}</p>
         <ul className="mt-2 flex flex-col gap-2">
           {rows.map((row) => (
-            <ReceiptRow key={`${row.receipt_kind}:${row.receipt_id}`} row={row} />
+            <ReceiptRow key={`${row.receipt_kind}:${row.receipt_id}`} row={row} memberNames={memberNames} />
           ))}
         </ul>
       </DataState>
@@ -84,7 +95,11 @@ export function FirmActivityFeed() {
   );
 }
 
-function ReceiptRow({ row }: { row: AgentReceiptRow }) {
+// `RECEIPT_KIND_KEYS` used to live here — a hand-typed literal map from receipt_kind to a
+// message key. #550 replaced its one caller with `isKnownAgentReceiptKind` below, which reads
+// the closed world from `lib/firm/receipt-kinds.ts` instead of restating it, so the map is gone
+// with its last use rather than left as a second copy nobody calls.
+function ReceiptRow({ row, memberNames }: { row: AgentReceiptRow; memberNames: MemberNameResolver }) {
   const t = useTranslations("FirmActivity");
   // A checked lookup, not a cast (FIX-1's exact discipline): only a KNOWN
   // receipt_kind ever reaches t() with a literal, statically-valid key — an
@@ -115,9 +130,10 @@ function ReceiptRow({ row }: { row: AgentReceiptRow }) {
       </div>
       <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
         <dt className="text-muted-foreground">{t("columnActor")}</dt>
-        {/* P2 fix: a short id in `font-mono`, never a raw uuid — and never a
-            display name this module inferred. See the header. */}
-        <dd className="font-mono text-card-foreground">{shortId(row.acting_actor)}</dd>
+        {/* The upgrade #550's own header invited (see this file's header). `MemberName` names
+            the member when the roster resolves and falls back to EXACTLY #550's treatment —
+            `shortId` in `font-mono` — when it does not, so nothing is ever guessed. */}
+        <dd className="truncate text-card-foreground"><MemberName userId={row.acting_actor} resolver={memberNames} /></dd>
         <dt className="text-muted-foreground">{t("columnBasis")}</dt>
         <dd className="text-card-foreground">{row.rationale ?? t("noRationale")}</dd>
       </dl>

@@ -37,7 +37,7 @@ export function AuthorityCeremony({
   clientId: string;
   data: FaDepreciationAuthorityEnvelope;
   busy: boolean;
-  act: (fn: () => Promise<void>) => Promise<void>;
+  act: (fn: () => Promise<void>) => Promise<boolean>;
 }) {
   const t = useTranslations("FixedAssetsDepreciation.authority");
   const au = data.authority;
@@ -69,7 +69,7 @@ export function AuthorityCeremony({
   );
 }
 
-function ProposeDialog({ clientId, busy, act }: { clientId: string; busy: boolean; act: (fn: () => Promise<void>) => Promise<void> }) {
+function ProposeDialog({ clientId, busy, act }: { clientId: string; busy: boolean; act: (fn: () => Promise<void>) => Promise<boolean> }) {
   const t = useTranslations("FixedAssetsDepreciation.authority");
   const [cadence, setCadence] = useState<"monthly" | "annual">("monthly");
   return (
@@ -92,7 +92,7 @@ function ProposeDialog({ clientId, busy, act }: { clientId: string; busy: boolea
   );
 }
 
-function SignDialog({ clientId, authorityId, busy, act }: { clientId: string; authorityId: string; busy: boolean; act: (fn: () => Promise<void>) => Promise<void> }) {
+function SignDialog({ clientId, authorityId, busy, act }: { clientId: string; authorityId: string; busy: boolean; act: (fn: () => Promise<void>) => Promise<boolean> }) {
   const t = useTranslations("FixedAssetsDepreciation.authority");
   return (
     <FaDoorDialog
@@ -106,7 +106,7 @@ function SignDialog({ clientId, authorityId, busy, act }: { clientId: string; au
   );
 }
 
-function RetireDialog({ clientId, authorityId, busy, act }: { clientId: string; authorityId: string; busy: boolean; act: (fn: () => Promise<void>) => Promise<void> }) {
+function RetireDialog({ clientId, authorityId, busy, act }: { clientId: string; authorityId: string; busy: boolean; act: (fn: () => Promise<void>) => Promise<boolean> }) {
   const t = useTranslations("FixedAssetsDepreciation.authority");
   const [reason, setReason] = useState("");
   return (

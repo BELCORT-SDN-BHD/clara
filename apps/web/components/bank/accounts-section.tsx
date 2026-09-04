@@ -74,7 +74,7 @@ export function AccountsSection({ clientId }: { clientId: string }) {
           <CardDescription>{t("proposalsDescription")}</CardDescription>
         </CardHeader>
         <CardContent>
-          <ReadState hasData={proposals.data !== null} err={proposals.err} errKind={proposalsKind.kind} isEmpty={proposals.data?.length === 0} onRetry={() => void proposals.reload()}>
+          <ReadState hasData={proposals.data !== null} err={proposals.err} errKind={proposalsKind.kind} isEmpty={proposals.data?.length === 0} emptyCopy={t("emptyProposals")} onRetry={() => void proposals.reload()}>
             <ul className="flex flex-col gap-2">
               {(proposals.data ?? []).map((p) => (
                 <li key={p.id} className="enter-content flex items-center justify-between gap-3 rounded-lg border border-border bg-card p-3 text-sm">
@@ -131,7 +131,7 @@ export function AccountsSection({ clientId }: { clientId: string }) {
         </CardHeader>
         <CardContent className="flex flex-col gap-2">
           {accounts.data !== null && <ActionRefusal err={accounts.err} clr={accounts.clr} />}
-          <ReadState hasData={accounts.data !== null} err={accounts.err} errKind={accountsKind.kind} isEmpty={accounts.data?.length === 0} onRetry={() => void accounts.reload()}>
+          <ReadState hasData={accounts.data !== null} err={accounts.err} errKind={accountsKind.kind} isEmpty={accounts.data?.length === 0} emptyCopy={t("emptyAccounts")} onRetry={() => void accounts.reload()}>
             <ul className="flex flex-col gap-2">
               {(accounts.data ?? []).map((a) => (
                 <li key={a.id} className="enter-content flex items-center justify-between gap-3 rounded-lg border border-border bg-card p-3 text-sm">

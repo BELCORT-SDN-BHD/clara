@@ -113,7 +113,7 @@ export function SettleLineForm({ clientId, lineId, onDone }: { clientId: string;
           <option value="customer">{t("kindCustomer")}</option>
           <option value="vendor">{t("kindVendor")}</option>
         </NativeSelect>
-        <ReadState hasData={counterparties.data !== null} err={counterparties.err} errKind={cpKind.kind} isEmpty={counterparties.data?.length === 0} onRetry={() => void counterparties.reload()}>
+        <ReadState hasData={counterparties.data !== null} err={counterparties.err} errKind={cpKind.kind} isEmpty={counterparties.data?.length === 0} emptyCopy={t("emptyCounterparties")} onRetry={() => void counterparties.reload()}>
           <NativeSelect
             id={`counterparty-${lineId}`}
             aria-label={t("counterpartyLabel")}
@@ -128,7 +128,7 @@ export function SettleLineForm({ clientId, lineId, onDone }: { clientId: string;
       </div>
 
       {counterpartyId && (
-        <ReadState hasData={itemsLoadedOnce} err={items.err} errKind={itemsKind.kind} isEmpty={items.data?.length === 0} onRetry={() => void items.reload()}>
+        <ReadState hasData={itemsLoadedOnce} err={items.err} errKind={itemsKind.kind} isEmpty={items.data?.length === 0} emptyCopy={t("emptyOpenItems")} onRetry={() => void items.reload()}>
           <ul className="flex flex-col gap-1">
             {(items.data ?? []).map((it) => (
               <li key={it.id} className="flex items-center justify-between gap-2 text-xs">
