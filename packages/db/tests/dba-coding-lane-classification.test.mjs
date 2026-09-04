@@ -260,11 +260,16 @@ async function applyTemplate(sub, { client, template, opKey }) {
   return r.rows[0].r;
 }
 
-async function plantPlan(firm, client, { state, seed, committedAt = null, user }) {
+// createdAt is explicit wherever a cell plants MORE THAN ONE plan for a client: the column
+// defaults to now(), which is transaction-stable, so plans written close together can tie on it
+// and any ordering-sensitive reading then resolves by physical luck. That defect red 0173's own
+// tail on CI; these cells do not rely on ordering, and they do not leave it to chance either.
+async function plantPlan(firm, client, { state, seed, committedAt = null, createdAt = null, user }) {
   const p = await rootQuery(
-    `insert into clara.onboarding_plans(firm_id, client_id, scope_kind, state, committed_at, committed_by)
-       values ($1,$2,'client',$3,$4,$5) returning id`,
-    [firm, client, state, committedAt, state === "committed" ? user : null]);
+    `insert into clara.onboarding_plans(firm_id, client_id, scope_kind, state, committed_at, committed_by,
+        created_at)
+       values ($1,$2,'client',$3,$4,$5, coalesce($6::timestamptz, now())) returning id`,
+    [firm, client, state, committedAt, state === "committed" ? user : null, createdAt]);
   await rootQuery(
     `insert into clara.onboarding_plan_items(plan_id, firm_id, item_kind, item_key, question, state,
         answer, answered_by, answered_at)
@@ -368,7 +373,7 @@ test("dba.9a 裁-193: apply_coa_template REFUSES onboarding_plan_open while the 
     "and the chart is planted");
 });
 
-test("dba.9c the rung refuses ONLY 'open': a CANCELLED plan is admitted, and a committed one beside it still wins", async (t) => {
+test("dba.9c the rung refuses ONLY 'open': a CANCELLED plan is admitted and its chart is planted", async (t) => {
   if (gate(t)) return;
   const owner = world.users.alice;
   const { firm, client } = await freshClient("9c");
@@ -391,6 +396,34 @@ test("dba.9c the rung refuses ONLY 'open': a CANCELLED plan is admitted, and a c
   assert.ok((await rootQuery(
     "select count(*)::int n from clara.coa_accounts where client_id=$1", [client])).rows[0].n > 0,
     "and the chart is planted");
+});
+
+test("dba.9d the rung is NOT recency-sensitive: a client who committed and later re-opened a plan is refused even when the open plan is backdated behind the committed one", async (t) => {
+  if (gate(t)) return;
+  const owner = world.users.alice;
+  const { firm, client } = await freshClient("9d");
+  const tpl = (await rootQuery(
+    "select id from clara.coa_templates where scope='platform' and state='published' order by version desc limit 1")).rows[0];
+
+  // The committed plan is the NEWER of the two. The predicate this rung replaced read the
+  // client's most recent plan, so here it would read 'committed' and ADMIT — planting a chart
+  // for a client whose interview is open again. This is the one case where the two readings
+  // genuinely disagree, which is why it is the cell that proves the behaviour changed and not
+  // merely the spelling.
+  await plantPlan(firm, client, {
+    state: "committed", seed: "firm_template", user: owner,
+    committedAt: new Date(Date.now() - 3600_000).toISOString(),
+    createdAt: new Date(Date.now() - 3600_000).toISOString() });
+  await plantPlan(firm, client, {
+    state: "open", seed: "firm_template", user: owner,
+    createdAt: new Date(Date.now() - 86_400_000).toISOString() });
+
+  const refused = await caught(() => applyTemplate(owner, { client, template: tpl.id, opKey: `dba9d-${client}` }));
+  assert.equal(JSON.parse(refused?.detail ?? "{}").reason, "onboarding_plan_open",
+    "an open interview refuses no matter which plan happens to be most recent");
+  assert.equal((await rootQuery(
+    "select count(*)::int n from clara.coa_accounts where client_id=$1", [client])).rows[0].n, 0,
+    "and no chart was planted behind the refusal");
 });
 
 test("dba.9b a client with NO plan at all is unaffected — the rung refuses an open interview, never an absent one", async (t) => {

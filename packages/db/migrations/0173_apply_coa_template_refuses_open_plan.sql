@@ -101,14 +101,21 @@ begin
   -- precedence, so no caller's typed reason changes and no existing cell moves. It still
   -- refuses before the family list is resolved and before the first write.
   --
-  -- THE PREDICATE IS THE CLIENT'S MOST RECENT client-scope plan, per the ruled mechanism. A
-  -- COMMITTED or ABSENT plan passes exactly as today, and a CANCELLED one passes too -- a
-  -- withdrawn onboarding is not an onboarding in progress. Recorded rather than assumed: an
-  -- `exists (... state = 'open')` reading would be STRICTER, refusing a client who committed
-  -- once and later re-opened a plan, and that is not what was ruled.
-  if (select p4.state from clara.onboarding_plans p4
-       where p4.client_id = p_client and p4.scope_kind = 'client'
-       order by p4.created_at desc, p4.id desc limit 1) = 'open' then
+  -- THE PREDICATE IS `exists (... state = 'open')` -- NOT a recency read. The first cut read
+  -- the client's MOST RECENT client-scope plan, and that predicate is NONDETERMINISTIC:
+  -- clara.onboarding_plans.created_at defaults to now() (0017_wave_b.sql:1015), which is
+  -- transaction-stable, so two plans written in ONE transaction TIE on it, and the tie fell
+  -- through to `id desc` over a gen_random_uuid() (0017_wave_b.sql:996) -- physical-order luck.
+  -- A door's refusal decided by coin flip. It red this file's own tail arm (5d) on CI run
+  -- 33910144663 after passing the identical rig locally, which is how a 50/50 predicate
+  -- presents. Re-cut to a deterministic one carrying the ruling's intent: a client with ANY
+  -- open client-scope plan is mid-onboarding, and is refused. ABSENT, COMMITTED and CANCELLED
+  -- all pass -- a withdrawn onboarding is not an onboarding in progress. This is STRICTER than
+  -- the recency reading in exactly one case, a client who committed once and later re-opened a
+  -- plan, and that is the accounting-safe direction (裁-191, 宁可误报、不可漏报).
+  if exists (select 1 from clara.onboarding_plans p4
+              where p4.client_id = p_client and p4.scope_kind = 'client'
+                and p4.state = 'open') then
     raise exception 'this client''s onboarding plan is still open; the standard chart is applied once the interview is committed'
       using errcode = 'CLR10', detail = '{"reason":"onboarding_plan_open"}';
   end if;
@@ -197,14 +204,21 @@ begin
   -- precedence, so no caller's typed reason changes and no existing cell moves. It still
   -- refuses before the family list is resolved and before the first write.
   --
-  -- THE PREDICATE IS THE CLIENT'S MOST RECENT client-scope plan, per the ruled mechanism. A
-  -- COMMITTED or ABSENT plan passes exactly as today, and a CANCELLED one passes too -- a
-  -- withdrawn onboarding is not an onboarding in progress. Recorded rather than assumed: an
-  -- `exists (... state = 'open')` reading would be STRICTER, refusing a client who committed
-  -- once and later re-opened a plan, and that is not what was ruled.
-  if (select p4.state from clara.onboarding_plans p4
-       where p4.client_id = p_client and p4.scope_kind = 'client'
-       order by p4.created_at desc, p4.id desc limit 1) = 'open' then
+  -- THE PREDICATE IS `exists (... state = 'open')` -- NOT a recency read. The first cut read
+  -- the client's MOST RECENT client-scope plan, and that predicate is NONDETERMINISTIC:
+  -- clara.onboarding_plans.created_at defaults to now() (0017_wave_b.sql:1015), which is
+  -- transaction-stable, so two plans written in ONE transaction TIE on it, and the tie fell
+  -- through to `id desc` over a gen_random_uuid() (0017_wave_b.sql:996) -- physical-order luck.
+  -- A door's refusal decided by coin flip. It red this file's own tail arm (5d) on CI run
+  -- 33910144663 after passing the identical rig locally, which is how a 50/50 predicate
+  -- presents. Re-cut to a deterministic one carrying the ruling's intent: a client with ANY
+  -- open client-scope plan is mid-onboarding, and is refused. ABSENT, COMMITTED and CANCELLED
+  -- all pass -- a withdrawn onboarding is not an onboarding in progress. This is STRICTER than
+  -- the recency reading in exactly one case, a client who committed once and later re-opened a
+  -- plan, and that is the accounting-safe direction (裁-191, 宁可误报、不可漏报).
+  if exists (select 1 from clara.onboarding_plans p4
+              where p4.client_id = p_client and p4.scope_kind = 'client'
+                and p4.state = 'open') then
     raise exception 'this client''s onboarding plan is still open; the standard chart is applied once the interview is committed'
       using errcode = 'CLR10', detail = '{"reason":"onboarding_plan_open"}';
   end if;
@@ -393,9 +407,10 @@ begin
   end if;
 
   -- (5) BEHAVIOURAL, on a planted fixture -- every sibling file in this set proves its change
-  -- by exercising it, and a source proof is not a behaviour proof. All THREE plan states are
+  -- by exercising it, and a source proof is not a behaviour proof. All FOUR plan states are
   -- walked, because the header claims a cancelled plan passes and an unwitnessed claim is the
-  -- thing this set keeps refusing to ship.
+  -- thing this set keeps refusing to ship. Arm (5e) additionally pins the predicate's SHAPE:
+  -- it fails if the reading ever becomes recency-sensitive again.
   v_user := gen_random_uuid();
   insert into clara.users(id, display_name) values (v_user, 'dba9 tail probe');
   insert into clara.firms(id, name) values (gen_random_uuid(), 'dba9 tail firm ' || gen_random_uuid())
@@ -406,19 +421,20 @@ begin
     values (v_firm, 'dba9 tail client', 'active') returning id into v_client;
 
   -- (5a) NO PLAN -> the rung is silent. Proven by reading the predicate on a real client
-  -- rather than by trusting that `= 'open'` is false on a NULL.
-  if (select p5.state from clara.onboarding_plans p5
-       where p5.client_id = v_client and p5.scope_kind = 'client'
-       order by p5.created_at desc, p5.id desc limit 1) = 'open' then
+  -- rather than by trusting that an absent row reads as absent.
+  if exists (select 1 from clara.onboarding_plans p5
+              where p5.client_id = v_client and p5.scope_kind = 'client' and p5.state = 'open') then
     raise exception 'dba9 tail (5a): a client with NO plan reads as open' using errcode = 'CLR10';
   end if;
 
-  -- (5b) OPEN -> refused.
-  insert into clara.onboarding_plans(firm_id, client_id, scope_kind, state)
-    values (v_firm, v_client, 'client', 'open') returning id into v_plan;
-  if (select p5.state from clara.onboarding_plans p5
-       where p5.client_id = v_client and p5.scope_kind = 'client'
-       order by p5.created_at desc, p5.id desc limit 1) <> 'open' then
+  -- (5b) OPEN -> refused. Every plan below carries an EXPLICIT, DISTINCT created_at. now() is
+  -- transaction-stable, so defaulted rows planted here would all TIE on it -- the exact defect
+  -- that red this arm's sibling (5d) on CI. The rung no longer orders by anything, but the
+  -- fixture must still discriminate if a later hand re-introduces an ordering.
+  insert into clara.onboarding_plans(firm_id, client_id, scope_kind, state, created_at)
+    values (v_firm, v_client, 'client', 'open', now() - interval '3 hours') returning id into v_plan;
+  if not exists (select 1 from clara.onboarding_plans p5
+                  where p5.client_id = v_client and p5.scope_kind = 'client' and p5.state = 'open') then
     raise exception 'dba9 tail (5b): an OPEN plan is not seen by the rung''s predicate' using errcode = 'CLR10';
   end if;
 
@@ -428,23 +444,43 @@ begin
      set state = 'cancelled', cancelled_at = now(), cancelled_by = v_user,
          cancel_reason = 'dba9 tail probe cancel'
    where id = v_plan;
-  if (select p5.state from clara.onboarding_plans p5
-       where p5.client_id = v_client and p5.scope_kind = 'client'
-       order by p5.created_at desc, p5.id desc limit 1) = 'open' then
+  if exists (select 1 from clara.onboarding_plans p5
+              where p5.client_id = v_client and p5.scope_kind = 'client' and p5.state = 'open') then
     raise exception 'dba9 tail (5c): a CANCELLED plan still reads as open -- the rung would strand this client''s chart'
       using errcode = 'CLR10';
   end if;
 
-  -- (5d) COMMITTED -> passes, and it OUTRANKS the cancelled one by recency.
-  insert into clara.onboarding_plans(firm_id, client_id, scope_kind, state, committed_at, committed_by)
-    values (v_firm, v_client, 'client', 'committed', now(), v_user);
-  if (select p5.state from clara.onboarding_plans p5
-       where p5.client_id = v_client and p5.scope_kind = 'client'
-       order by p5.created_at desc, p5.id desc limit 1) <> 'committed' then
-    raise exception 'dba9 tail (5d): the most-recent read did not pick the COMMITTED plan' using errcode = 'CLR10';
+  -- (5d) COMMITTED, beside the cancelled one -> still passes.
+  insert into clara.onboarding_plans(firm_id, client_id, scope_kind, state, committed_at, committed_by, created_at)
+    values (v_firm, v_client, 'client', 'committed', now(), v_user, now() - interval '2 hours');
+  if exists (select 1 from clara.onboarding_plans p5
+              where p5.client_id = v_client and p5.scope_kind = 'client' and p5.state = 'open') then
+    raise exception 'dba9 tail (5d): a COMMITTED plan beside a CANCELLED one reads as open'
+      using errcode = 'CLR10';
   end if;
 
-  raise notice 'dba9 tail: OK -- clara.apply_coa_template CoR''d from its 0156:726 pre-image (sha-pinned in the prestate), still VOLATILE SECURITY DEFINER, search_path-pinned, clara_fn_owner-owned, executable by clara_authenticated and by NOBODY else. The ruled rung refuses onboarding_plan_open when the client''s MOST RECENT client-scope plan is open; a committed, cancelled or absent plan passes exactly as before. INSERT-ONLY PROVEN BY SUBTRACTION: the rung occurs once and removing it reproduces the pinned pre-image BYTE FOR BYTE, so none of the six named refusals moved. The rung sits LAST among the guards and BEFORE the family resolution, so every pre-existing typed refusal keeps its precedence and nothing is built before it fires. The body contains NO dynamic EXECUTE, so this file adds no barrier to apps/web''s successor census. No table in workflow/graphile_worker/spike touched. BEHAVIOURALLY EXERCISED on a planted fixture across all FOUR plan states -- absent, open, cancelled and committed -- so the header''s claim that a cancelled plan passes is witnessed rather than asserted, and the most-recent read is proven to pick the committed plan over the cancelled one beside it. D1 WRITE-QUIESCE IS OWED -- a granted audited writer, one door, one window.';
+  -- (5e) THE DISCRIMINATING ARM -- where the re-cut predicate DIFFERS from the recency reading
+  -- it replaced, so this file proves it changed the behaviour and not merely the spelling. A
+  -- client who committed an onboarding and later RE-OPENED a plan is mid-onboarding again.
+  -- First planted NEWEST, where both readings agree and refuse.
+  insert into clara.onboarding_plans(firm_id, client_id, scope_kind, state, created_at)
+    values (v_firm, v_client, 'client', 'open', now() - interval '1 hour') returning id into v_plan;
+  if not exists (select 1 from clara.onboarding_plans p5
+                  where p5.client_id = v_client and p5.scope_kind = 'client' and p5.state = 'open') then
+    raise exception 'dba9 tail (5e): a RE-OPENED plan beside a committed one does not read as open'
+      using errcode = 'CLR10';
+  end if;
+  -- Then backdated BEHIND the committed row, where the two readings genuinely disagree: the
+  -- recency reading picks 'committed' and ADMITS, stranding an open interview; `exists` still
+  -- refuses. This assertion fails if anyone re-introduces an ordering-sensitive predicate.
+  update clara.onboarding_plans set created_at = now() - interval '9 hours' where id = v_plan;
+  if not exists (select 1 from clara.onboarding_plans p5
+                  where p5.client_id = v_client and p5.scope_kind = 'client' and p5.state = 'open') then
+    raise exception 'dba9 tail (5e): an OPEN plan OLDER than the committed one is missed -- the predicate is recency-sensitive again'
+      using errcode = 'CLR10';
+  end if;
+
+  raise notice 'dba9 tail: OK -- clara.apply_coa_template CoR''d from its 0156:726 pre-image (sha-pinned in the prestate), still VOLATILE SECURITY DEFINER, search_path-pinned, clara_fn_owner-owned, executable by clara_authenticated and by NOBODY else. The ruled rung refuses onboarding_plan_open when the client has ANY open client-scope plan; a committed, cancelled or absent plan passes exactly as before. The predicate is a deterministic exists(), NOT a recency read -- the recency cut it replaces tied on a transaction-stable created_at and broke the tie on a random uuid, deciding this door by coin flip. INSERT-ONLY PROVEN BY SUBTRACTION: the rung occurs once and removing it reproduces the pinned pre-image BYTE FOR BYTE, so none of the six named refusals moved. The rung sits LAST among the guards and BEFORE the family resolution, so every pre-existing typed refusal keeps its precedence and nothing is built before it fires. The body contains NO dynamic EXECUTE, so this file adds no barrier to apps/web''s successor census. No table in workflow/graphile_worker/spike touched. BEHAVIOURALLY EXERCISED on a planted fixture across all FOUR plan states -- absent, open, cancelled and committed, each with an EXPLICIT distinct created_at -- so the header''s claim that a cancelled plan passes is witnessed rather than asserted. Arm (5e) is the discriminating one: a client who committed and later RE-OPENED a plan is refused even when the open row is BACKDATED behind the committed one, which is precisely the case the replaced recency reading admitted. D1 WRITE-QUIESCE IS OWED -- a granted audited writer, one door, one window.';
 
   -- The fixture is EVIDENCE, not state.
   raise exception using errcode = 'CLR00', message = 'dba9 tail probe rollback';
