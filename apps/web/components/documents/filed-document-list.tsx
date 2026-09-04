@@ -43,7 +43,15 @@ export function FiledDocumentList({
             key={filing.id}
             role="button"
             tabIndex={0}
-            aria-selected={selectedId === document.id}
+            // `aria-current`, NOT `aria-selected` — found by this train's own
+            // axe scan on the built app (aria-allowed-attr, CRITICAL, on BOTH
+            // the selected and unselected rows). `role="button"` REPLACES the
+            // row's implicit `row` role, and `aria-selected` is not a supported
+            // attribute of `button`; a screen reader is entitled to ignore it,
+            // so the one signal saying which document is open was reaching
+            // nobody. `aria-current` is a global attribute — valid on any role —
+            // and "the current item in a set" is exactly what this row is.
+            aria-current={selectedId === document.id ? "true" : undefined}
             onClick={() => onSelect(document.id)}
             onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") onSelect(document.id); }}
             className={cn("cursor-pointer", selectedId === document.id && "bg-muted")}

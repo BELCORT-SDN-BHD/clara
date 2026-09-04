@@ -841,6 +841,7 @@
     "overlayPageLoading": "Loading the page…",
     "overlayPageFailed": "The page couldn't be loaded: {message}",
     "overlayPageAlt": "Page {page} of this document",
+    "overlayPageRegionLabel": "Page {page}, scrollable — use the arrow keys to move around it",
     "overlayNoRegionsOnPage": "Nothing was extracted from page {page}, so there is nothing to outline on it.",
     "overlayNoPageSize": "This page can be shown, but not outlined: the extraction recorded no page size, so Clara cannot place the regions without guessing.",
     "overlayNoDrawableGeometry": "The extracted regions on this page carry no usable outline, so none is drawn.",

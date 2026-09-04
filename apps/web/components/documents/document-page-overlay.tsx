@@ -291,7 +291,20 @@ function PageWithOverlay({
 
   return (
     <div className="flex flex-col gap-2">
-      <div ref={scrollerRef} className="max-h-[32rem] overflow-auto rounded-md border border-border bg-muted p-2">
+      {/* FOCUSABLE, and axe on the built app is what caught that it was not
+          (scrollable-region-focusable, SERIOUS). A capped `overflow-auto` box
+          whose only content is a canvas and an aria-hidden <svg> holds NOTHING
+          a keyboard can reach, so a keyboard-only user could see the top of a
+          page and had no way to scroll to the rest of it. `tabIndex={0}` makes
+          the region itself the scroll target; `role="group"` plus a name is
+          what stops a bare focusable div from being an unlabelled stop. */}
+      <div
+        ref={scrollerRef}
+        tabIndex={0}
+        role="group"
+        aria-label={t("overlayPageRegionLabel", { page })}
+        className="max-h-[32rem] overflow-auto rounded-md border border-border bg-muted p-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      >
         <div ref={hostRef} className="relative mx-auto w-full">
           {state.kind === "loading" || state.kind === "idle" ? (
             <LoadingState>{t("overlayPageLoading")}</LoadingState>
