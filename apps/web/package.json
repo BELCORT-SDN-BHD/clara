@@ -10,7 +10,7 @@
     "start": "next start",
     "e2e": "node e2e/run.mjs",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint . && node scripts/check-token-contrast.mjs && node scripts/check-test-manifest.mjs && node scripts/check-test-manifest.selftest.mjs",
+    "lint": "eslint . && node scripts/check-token-contrast.mjs && node scripts/check-test-manifest.mjs && node scripts/check-test-manifest.selftest.mjs && node scripts/check-message-keys.mjs && node scripts/check-message-keys.selftest.mjs",
     "test": "node scripts/run-tests.mjs",
     "check:public-key": "node scripts/check-public-key.mjs",
     "cf:build": "node scripts/check-public-key.mjs && opennextjs-cloudflare build",

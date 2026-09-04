@@ -41,6 +41,10 @@ const PROMOTION: IdentifierPromotionRow = {
  *  see once the row's status leaves 'open'/'proposed'. `refuseDismiss`/
  *  `refuseDecline` let one test prove that door's refusal path without
  *  touching the others. */
+/** What the caller's ONE `loadClientRegister` read returns, handed to this panel
+ *  as a prop exactly as `needs-you-inbox.tsx` hands it in (review-550). */
+const CLIENTS = [{ id: "c1", name: "Acme Sdn Bhd", status: "active", created_at: "2026-01-01T00:00:00Z" }];
+
 function makeFetch(opts: { refuseDismiss?: boolean; refuseDecline?: boolean } = {}) {
   let questionOpen = true;
   let promotionOpen = true;
@@ -49,8 +53,12 @@ function makeFetch(opts: { refuseDismiss?: boolean; refuseDecline?: boolean } = 
     const u = String(url);
     if (u.includes("/rest/v1/firm_open_questions_visible")) return jsonResponse(questionOpen ? [QUESTION] : []);
     if (u.includes("/rest/v1/client_identifier_promotions_visible")) return jsonResponse(promotionOpen ? [PROMOTION] : []);
+    // review-550: this panel no longer reads `clara.clients` itself — the caller
+    // does, once, and passes the rows down. The handler stays as a REFUTER: if a
+    // future change re-adds the read here, `/needs-you` is back to two calls and
+    // this throws rather than quietly answering.
     if (u.includes("/rest/v1/clients")) {
-      return jsonResponse([{ id: "c1", name: "Acme Sdn Bhd", status: "active", created_at: "2026-01-01T00:00:00Z" }]);
+      throw new Error("NeedsYouGaps must not read clara.clients — the caller hoisted that read (review-550)");
     }
     if (u.includes("/rpc/resolve_firm_question")) {
       bodies.resolve = JSON.parse(String(init?.body));
@@ -95,7 +103,14 @@ function withMockedEnv(impl: typeof fetch, run: () => Promise<void>): Promise<vo
 
 function render() {
   return renderComponent(
-    createElement(NextIntlClientProvider, { locale: "en", messages, children: createElement(NeedsYouGaps) }),
+    createElement(NextIntlClientProvider, {
+      locale: "en",
+      messages,
+      // review-550: the client register is READ BY THE CALLER now
+      // (needs-you-inbox.tsx) and passed down, so `/needs-you` no longer issues
+      // `clara.clients` twice. The fixture supplies what that one read returns.
+      children: createElement(NeedsYouGaps, { clients: CLIENTS, clientsUnavailable: false }),
+    }),
   );
 }
 

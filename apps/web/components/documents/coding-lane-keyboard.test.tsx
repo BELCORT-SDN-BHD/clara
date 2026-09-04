@@ -80,7 +80,7 @@ test("OPEN CODING TASK journey: the dialog opens, its reason field and Confirm/C
       const h = await renderComponent(
         App(createElement(UncodedFilingActions, {
           clientId: "c1", documentId: "d1", filingId: "f1", busy: false,
-          act: async (fn: () => Promise<void>) => { calls += 1; await fn(); },
+          act: async (fn: () => Promise<void>) => { calls += 1; await fn(); return true; },
         })),
       );
       const b = body();
@@ -127,7 +127,7 @@ test("ASK QUESTION journey: the dialog opens, its question field and Confirm/Can
   const h = await renderComponent(
     App(createElement(UncodedFilingActions, {
       clientId: "c1", documentId: "d1", filingId: "f1", busy: false,
-      act: async (fn: () => Promise<void>) => { await fn(); },
+      act: async (fn: () => Promise<void>) => { await fn(); return true; },
     })),
   );
   const b = body();
@@ -157,7 +157,7 @@ test("RESOLVE LINT FINDING journey: the dialog opens, its conclusion select + no
   const h = await renderComponent(
     App(createElement(LintFindingActions, {
       findingId: "lf1", busy: false,
-      act: async (fn: () => Promise<void>) => { await fn(); },
+      act: async (fn: () => Promise<void>) => { await fn(); return true; },
     })),
   );
   const b = body();
@@ -212,7 +212,7 @@ test("COMPLETE CODING TASK journey: the dialog opens, its (async-fetched) entry 
       const h = await renderComponent(
         App(createElement(CodingTaskActions, {
           taskId: "t1", filingId: "f1", busy: false,
-          act: async (fn: () => Promise<void>) => { await fn(); },
+          act: async (fn: () => Promise<void>) => { await fn(); return true; },
         })),
       );
       const b = body();
@@ -245,7 +245,7 @@ test("DISMISS CODING TASK journey: the dialog opens, its reason field and Confir
   const h = await renderComponent(
     App(createElement(CodingTaskActions, {
       taskId: "t1", filingId: "f1", busy: false,
-      act: async (fn: () => Promise<void>) => { await fn(); },
+      act: async (fn: () => Promise<void>) => { await fn(); return true; },
     })),
   );
   const b = body();
@@ -296,7 +296,7 @@ test("OPEN CODING TASK journey: a REFUSED confirm does not clear the typed reaso
           // both honor (they catch internally and never reject; that is
           // what lets `onConfirm` reach its own `if (succeeded)` check
           // instead of throwing past it).
-          act: async (fn: () => Promise<void>) => { try { await fn(); } catch { /* swallowed, matching the real act() */ } },
+          act: async (fn: () => Promise<void>) => { try { await fn(); return true; } catch { /* swallowed, matching the real act() */ return false; } },
         })),
       );
       const b = body();
@@ -313,16 +313,15 @@ test("OPEN CODING TASK journey: a REFUSED confirm does not clear the typed reaso
         await h.act(() => { clickButton(confirmButton as never); });
         for (let i = 0; i < 6; i++) await h.settle();
         assert.equal(refusalCalls, 1, "the refusal must actually have been reached exactly once");
-        assert.doesNotMatch(textOf(b as never), /Open a coding task/, "the dialog closes regardless of outcome");
+        // CB-AE2E-004 (2026-09-04): the dialog STAYS OPEN on a refusal. The old
+        // assertion here was `doesNotMatch(/Open a coding task/)` — "the dialog closes
+        // regardless of outcome" — which is exactly the class defect this fix retires.
+        assert.match(textOf(b as never), /Open a coding task/, "the dialog must STAY OPEN on a refusal");
 
-        await h.fireEvent(trigger!, "click");
-        for (let i = 0; i < 6; i++) await h.settle();
-        // Read the value react itself last rendered onto the REOPENED
-        // (freshly-mounted, per base-ui's own unmount-on-close default)
-        // textarea's own props — the same `__reactProps$...` mechanism
-        // setFieldValue already relies on — rather than the raw DOM
-        // property, which a fresh stub node's own value-tracking quirks
-        // make an unreliable read in this harness.
+        // No reopen step: the field is read IN PLACE. The value react itself last
+        // rendered onto the textarea's own props — the same `__reactProps$...`
+        // mechanism setFieldValue already relies on — rather than the raw DOM
+        // property, whose value-tracking quirks make it unreliable in this harness.
         const reopenedField = findIn(b, (n) => n.tagName === "TEXTAREA") as unknown as Record<string, unknown>;
         const propsKey = Object.keys(reopenedField).find((k) => k.startsWith("__reactProps"));
         const reactValue = propsKey ? (reopenedField[propsKey] as { value?: string }).value : undefined;
@@ -351,7 +350,7 @@ test("COMPLETE CODING TASK journey: a FAILED entry-picker read renders the error
       const h = await renderComponent(
         App(createElement(CodingTaskActions, {
           taskId: "t1", filingId: "f1", busy: false,
-          act: async (fn: () => Promise<void>) => { await fn(); },
+          act: async (fn: () => Promise<void>) => { await fn(); return true; },
         })),
       );
       const b = body();

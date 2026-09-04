@@ -55,7 +55,7 @@ export function WikiCurationPanel({ clientId, session }: { clientId: string; ses
   );
 }
 
-function WikiPageRowView({ page, busy, act }: { page: WikiPageRow; busy: boolean; act: (fn: () => Promise<void>) => Promise<void> }) {
+function WikiPageRowView({ page, busy, act }: { page: WikiPageRow; busy: boolean; act: (fn: () => Promise<void>) => Promise<boolean> }) {
   const t = useTranslations("ReportsSnapshotsSeeding.wiki");
   return (
     <div className="enter-content flex flex-col gap-2 rounded-lg border border-border bg-card p-3 text-sm">
@@ -74,7 +74,7 @@ function WikiPageRowView({ page, busy, act }: { page: WikiPageRow; busy: boolean
   );
 }
 
-function RetireDialog({ pageId, busy, act }: { pageId: string; busy: boolean; act: (fn: () => Promise<void>) => Promise<void> }) {
+function RetireDialog({ pageId, busy, act }: { pageId: string; busy: boolean; act: (fn: () => Promise<void>) => Promise<boolean> }) {
   const t = useTranslations("ReportsSnapshotsSeeding.wiki.retire");
   const [reason, setReason] = useState("");
   return (

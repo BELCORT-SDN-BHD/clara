@@ -316,34 +316,16 @@ test.describe("documents viewer — the MIME gate, the page overlay and the CSP"
 
     const results = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]).analyze();
 
-    // ONE KNOWN VIOLATION IS ADMITTED, NAMED, AND NOTHING ELSE IS — the rule
-    // stays ON rather than being disabled, so a NEW instance anywhere on this
-    // page still reds this cell.
+    // NO CARVE-OUT. It is deleted with #549 (`90b59cc1`), which fixed
+    // `components/ui/table.tsx` at the source — its scroll container now takes
+    // `tabIndex={0}`, plus `role="region"` and a name when one is given. This
+    // train raised that finding and admitted exactly one violation for it while
+    // it stood; the admission goes now that the cause has, which is what the
+    // carve-out's own note said would happen.
     //
-    // THE FINDING (raised by this train, owned by nobody's fence here):
-    // `components/ui/table.tsx:10`'s `data-slot="table-container"` is
-    // `overflow-x-auto` with no `tabIndex`, so ANY table whose cells hold no
-    // focusable content is a scroll region a keyboard cannot reach — axe's
-    // `scrollable-region-focusable`, impact SERIOUS. It is a property of the
-    // shared, vendored primitive and therefore of every read-only table in the
-    // app, not of this train's tables: the overlay's own facts table passes,
-    // because its rows carry buttons. The one-line fix (`tabIndex={0}` on that
-    // container) belongs to whoever owns the primitive; editing it from here,
-    // while three lanes are building tables, is how a merge takes out a design
-    // system. Reported to the lead as its own row.
-    //
-    // This train DID fix the other violation the same scan found, because that
-    // one was in its own file: `filed-document-list.tsx` put `aria-selected` on
-    // a `role="button"` row (aria-allowed-attr, CRITICAL) — now `aria-current`.
-    const known = results.violations.filter(
-      (v) => v.id === "scrollable-region-focusable"
-        && v.nodes.every((n) => n.html.includes('data-slot="table-container"')),
-    );
-    const rest = results.violations.filter((v) => !known.includes(v));
-    expect(rest, JSON.stringify(rest, null, 2)).toEqual([]);
-    expect(
-      known.length,
-      "the shared table primitive's known scroll-region finding must still be exactly one violation — if it is gone, delete this carve-out",
-    ).toBeLessThanOrEqual(1);
+    // The OTHER violation this scan found was this train's own and was fixed
+    // here: `filed-document-list.tsx` put `aria-selected` on a `role="button"`
+    // row (aria-allowed-attr, CRITICAL) — now `aria-current`.
+    expect(results.violations, JSON.stringify(results.violations, null, 2)).toEqual([]);
   });
 });

@@ -48,7 +48,7 @@ const DOCUMENT: DocumentRow = {
 
 test("RE-EXTRACTION journey: the dialog opens, its reason field and Confirm/Cancel are keyboard-reachable, Confirm gated until a reason is typed", async () => {
   const h = await renderComponent(
-    App(createElement(DocumentAdmin, { document: DOCUMENT, busy: false, act: async (fn) => { await fn(); }, onCorrect: () => {} })),
+    App(createElement(DocumentAdmin, { document: DOCUMENT, busy: false, act: async (fn) => { await fn(); return true; }, onCorrect: () => {} })),
   );
   const b = body();
   (b as unknown as { appendChild: (c: unknown) => void }).appendChild(h.container);
@@ -111,7 +111,7 @@ test("RE-EXTRACTION journey: the dialog opens, its reason field and Confirm/Canc
 
 test("CONSENT EVIDENCE journey: the dialog opens, its reason field and Confirm/Cancel are keyboard-reachable", async () => {
   const h = await renderComponent(
-    App(createElement(DocumentAdmin, { document: DOCUMENT, busy: false, act: async (fn) => { await fn(); }, onCorrect: () => {} })),
+    App(createElement(DocumentAdmin, { document: DOCUMENT, busy: false, act: async (fn) => { await fn(); return true; }, onCorrect: () => {} })),
   );
   const b = body();
   (b as unknown as { appendChild: (c: unknown) => void }).appendChild(h.container);
@@ -160,7 +160,7 @@ const FILING: FilingRow = {
 
 test("AUTODRAFT journey: the dialog opens with no fields of its own, and Confirm/Cancel are keyboard-reachable", async () => {
   const h = await renderComponent(
-    App(createElement(DocumentFilingsHistory, { filings: [FILING], busy: false, act: async (fn) => { await fn(); } })),
+    App(createElement(DocumentFilingsHistory, { filings: [FILING], busy: false, act: async (fn) => { await fn(); return true; } })),
   );
   const b = body();
   (b as unknown as { appendChild: (c: unknown) => void }).appendChild(h.container);

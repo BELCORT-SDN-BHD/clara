@@ -42,8 +42,10 @@ export function ChartOfAccountsRegister({ clientId }: { clientId: string }) {
   const tc = useTranslations("Common");
   const { data, error, busy, act } = useAsyncRead(() => loadChartOfAccounts(sessionTokenAccessor, clientId));
 
-  async function submitUpsert(input: Omit<UpsertAccountInput, "clientId">): Promise<void> {
-    await act(() => upsertAccount(sessionTokenAccessor, { ...input, clientId }).then(() => undefined));
+  async function submitUpsert(input: Omit<UpsertAccountInput, "clientId">): Promise<boolean> {
+    // CB-AE2E-004: the door's own answer, returned — UpsertAccountDialog closes
+    // only on `true`, so a refusal keeps the code/name the human typed.
+    return act(() => upsertAccount(sessionTokenAccessor, { ...input, clientId }).then(() => undefined));
   }
 
   // Nothing renders — not the empty state, not the write trigger — until a

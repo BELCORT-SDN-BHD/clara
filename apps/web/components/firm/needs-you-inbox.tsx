@@ -35,9 +35,32 @@
 // banner whenever the acting row is no longer attached, not only when nothing
 // was acted on.
 
-import { useState } from "react";
+// P2 · dialog-close-polarity (the verified sweep, 2026-09-04). `DataState`'s
+// `loading` prop unmounted the WHOLE affordance list on every reload — including
+// the reload an act's own `act()` triggers — so a refusal destroyed the inline
+// form the human had just typed into. `ClosePrepHoldPanel`'s FIX-1 settled the
+// shape: gate ONLY on "no data has ever arrived". A reload over data that is
+// already on screen leaves the list mounted, and the per-row error attribution
+// above is what tells the human what happened.
+//
+// E-3 (CB-AE2E-026): the queue is CROSS-CLIENT, and until this train no row
+// named its client. The register read below is the same firm-wide
+// `loadClientRegister` NeedsYouGaps already performs (needs-you-gaps.tsx:34) —
+// merged CLIENT-SIDE onto `row.client_id`, the join lib/firm/reads.ts's own
+// header sanctions. A client absent from the register renders as its short id,
+// never a guessed name, and the queue never waits on this read: rows render
+// with their ids the moment the queue lands.
+//
+// E-3: the sweep panel now sits BELOW the queue. It is context about an
+// unattended pass, not the queue itself, and it was the first thing under the
+// counts chips — above the work.
+
+import { useMemo, useState } from "react";
 import { useTranslations } from "next-intl";
 import { useReviewQueue } from "@/lib/firm/use-review-queue";
+import { useAsyncRead } from "@/lib/firm/use-async-read";
+import { loadClientRegister } from "@/lib/firm/reads";
+import { sessionTokenAccessor } from "@/lib/session-accessor";
 import { reviewQueueRowKey, shouldShowQueueErrorBanner } from "@/lib/firm/needs-you";
 import { Button } from "@/components/ui/button";
 import { DataState, ErrorMessage } from "./data-state";
@@ -50,6 +73,22 @@ export function NeedsYouInbox() {
   const t = useTranslations("NeedsYou");
   const { rows, counts, sweep, loading, loadingMore, busy, error, hasMore, act, loadMore } = useReviewQueue({});
   const [actingKey, setActingKey] = useState<string | null>(null);
+
+  // A SEPARATE, NON-BLOCKING READ. Its failure is not the queue's failure: the
+  // rows still render, each naming its client by short id. Nothing here retries
+  // and nothing here blocks.
+  // THE ONE FIRM-WIDE REGISTER READ ON THIS PAGE. `NeedsYouGaps` used to issue
+  // its own beside this one, so `/needs-you` called `clara.clients` twice on
+  // every load; it now takes the rows as props (review-550). One read, two
+  // consumers, one judgement about what a failure means.
+  const register = useAsyncRead(() => loadClientRegister(sessionTokenAccessor));
+  const clientRows = register.data ?? [];
+  const clientsUnavailable = register.data === null && register.error !== null;
+  const clientNames = useMemo(() => {
+    const names = new Map<string, string>();
+    for (const client of register.data ?? []) names.set(client.id, client.name);
+    return names;
+  }, [register.data]);
 
   const hasData = counts !== null;
 
@@ -73,12 +112,12 @@ export function NeedsYouInbox() {
   return (
     <div className="flex flex-col gap-4">
       {counts ? <NeedsYouCounts counts={counts} /> : null}
-      {/* T7 (port-wave plan §4/§5) — the sweep-runs state, from the SAME
-          envelope `counts`/`rows` above already read; zero extra call. */}
-      <SweepStatusPanel sweep={sweep} />
       {showBanner ? <ErrorMessage error={error} /> : null}
       <DataState
-        loading={loading}
+        // P2 fix: `!hasData && loading`, never a bare `loading`. See this file's
+        // header — a reload over data already on screen must not unmount the
+        // affordances, because one of them is mid-edit whenever an act refuses.
+        loading={!hasData && loading}
         error={hasData ? null : error}
         isEmpty={rows.length === 0}
         emptyMessage={t("emptyMessage")}
@@ -90,6 +129,7 @@ export function NeedsYouInbox() {
               <NeedsYouRow
                 key={rowKey}
                 row={row}
+                clientName={row.client_id === null ? null : (clientNames.get(row.client_id) ?? null)}
                 busy={busy}
                 error={actingKey === rowKey ? error : null}
                 onAct={(fn) => handleAct(rowKey, fn)}
@@ -114,7 +154,12 @@ export function NeedsYouInbox() {
           </Button>
         ) : null}
       </DataState>
-      <NeedsYouGaps />
+      <NeedsYouGaps clients={clientRows} clientsUnavailable={clientsUnavailable} />
+      {/* T7 (port-wave plan §4/§5) — the sweep-runs state, from the SAME
+          envelope `counts`/`rows` above already read; zero extra call. Moved
+          BELOW the queue (E-3): it is context about an unattended pass, not the
+          work, and it used to sit between the counts chips and the first row. */}
+      <SweepStatusPanel sweep={sweep} />
     </div>
   );
 }

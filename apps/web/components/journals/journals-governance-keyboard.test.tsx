@@ -63,7 +63,7 @@ test("WITHDRAW journey: from an expanded draft, the Withdraw dialog opens, its r
         clientId: "c1",
         queueRows: [QUEUE_ROW], queueCounts: { open_drafts: 1 }, entries: [DRAFT_ENTRY], lines: DRAFT_LINES,
         linesTruncated: false, accounts: ACCOUNTS, busy: false, err: null, clr: null, actingId: null,
-        onApprove: () => {}, onRevise: () => {}, onApproveRoutine: () => {}, onWithdraw: async () => {},
+        onApprove: () => {}, onRevise: () => {}, onApproveRoutine: () => {}, onWithdraw: async () => true,
       }),
     ),
   );
@@ -164,7 +164,7 @@ test("WITHDRAW confirm: a real click on Confirm calls onWithdraw and closes the 
         queueRows: [QUEUE_ROW], queueCounts: { open_drafts: 1 }, entries: [DRAFT_ENTRY], lines: DRAFT_LINES,
         linesTruncated: false, accounts: ACCOUNTS, busy: false, err: null, clr: null, actingId: null,
         onApprove: () => {}, onRevise: () => {}, onApproveRoutine: () => {},
-        onWithdraw: async (entryId, reason, expectedRevision, onOk) => { calls.push({ entryId, reason, expectedRevision }); onOk(); },
+        onWithdraw: async (entryId, reason, expectedRevision, onOk) => { calls.push({ entryId, reason, expectedRevision }); onOk(); return true; },
       }),
     ),
   );
@@ -252,7 +252,7 @@ test("PROMOTE journey: the dialog opens (only once a client_id genuinely resolve
     App(createElement(InterruptionsPanel, {
       interruptions: [INTERRUPTION], busy: false, err: null, clr: null, actingId: null, onAnswer: () => {},
       clientIdByTaskId: { t1: "client-9" },
-      onPromote: async (interruptionId, scopeId) => { calls.push({ interruptionId, scopeId }); },
+      onPromote: async (interruptionId, scopeId) => { calls.push({ interruptionId, scopeId }); return true; },
     })),
   );
   const body = (globalThis as unknown as { document: { body: { appendChild: (c: unknown) => void } } }).document.body;
@@ -289,7 +289,7 @@ test("PROMOTE journey: with no resolved client id for this task, the promote con
     App(createElement(InterruptionsPanel, {
       interruptions: [INTERRUPTION], busy: false, err: null, clr: null, actingId: null, onAnswer: () => {},
       clientIdByTaskId: {},
-      onPromote: async () => {},
+      onPromote: async () => true,
     })),
   );
   try {

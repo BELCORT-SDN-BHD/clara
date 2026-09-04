@@ -73,7 +73,7 @@ export function DraftsQueuePanel({
    *  a high-stakes entry (governance-doors.ts's own header). */
   onApproveRoutine: (entryId: string, expectedRevision: string) => void;
   /** T6: clara.withdraw_draft — abandons the draft entirely. */
-  onWithdraw: (entryId: string, reason: string, expectedRevision: string, onOk: () => void) => Promise<void>;
+  onWithdraw: (entryId: string, reason: string, expectedRevision: string, onOk: () => void) => Promise<boolean>;
 }) {
   const t = useTranslations("JournalsWorkbench.drafts");
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -232,7 +232,7 @@ function DraftDetail({
   onApproveRoutine: (entryId: string, expectedRevision: string) => void;
   /** Returns act()'s own Promise (never rejects — hooks.ts's own contract) so
    *  JournalsDoorDialog can await it to know when the attempt SETTLED. */
-  onWithdraw: (entryId: string, reason: string, expectedRevision: string, onOk: () => void) => Promise<void>;
+  onWithdraw: (entryId: string, reason: string, expectedRevision: string, onOk: () => void) => Promise<boolean>;
 }) {
   const t = useTranslations("JournalsWorkbench.drafts");
   // FIX-5 (independent review): this whole component is now KEYED on
@@ -435,7 +435,11 @@ function DraftGovernanceRow({
   clientId: string;
   entry: JournalEntryRow;
   busy: boolean;
-  onWithdraw: (entryId: string, reason: string, expectedRevision: string, onOk: () => void) => Promise<void>;
+  // KEEP BOTH (#549 x #548). #548 retired `onApproveRoutine` with the second approval
+  // button (CB-AE2E-021 part A) — that prop is gone, and the destructure above already
+  // reflects it. #549's `Promise<boolean>` return stays: the withdraw dialog closes only
+  // on an explicit true (CB-AE2E-004), so the type must carry the outcome.
+  onWithdraw: (entryId: string, reason: string, expectedRevision: string, onOk: () => void) => Promise<boolean>;
 }) {
   const t = useTranslations("DraftsDocumentGovernance");
   const [showDiff, setShowDiff] = useState(false);

@@ -308,12 +308,31 @@ export async function handleDocumentsViewerSupabase(request, response, path, url
 
   if (request.method === "POST" && path.startsWith("/rest/v1/rpc/")) {
     const verb = path.slice("/rest/v1/rpc/".length);
-    const body = await readJson(request);
-    if (body.p_client !== DOCS.clientId && body.p_document !== DOCS.docPdf && body.p_candidate !== DOCS.candidate) {
-      return false;
-    }
+    // THE BODY IS READ INSIDE A MATCHED VERB, NEVER IN THIS PRELUDE, and that is
+    // a cross-lane rule rather than a style choice.
+    //
+    // `readJson` CONSUMES the request stream. A lane that parses the body and
+    // then falls through hands every lane after it an empty object, and an
+    // id-scoped guard reading `body.p_candidate` on `{}` refuses its own walk's
+    // traffic — measured, not theorised: `bank-close-registers-mock.mjs:204-246`
+    // parses on every `/rest/v1/rpc/` POST and returns false for verbs that are
+    // not its own, which is what made this lane's confirm-and-file arrive as
+    // "unhandled e2e Supabase route" the first time the two ran together.
+    //
+    // Reading lazily means this lane cannot do that to anyone, wherever it sits
+    // in the chain. It also keeps ONE spelling of "which verbs are mine" — the
+    // `if (verb === …)` blocks themselves — rather than a second list beside
+    // them that would drift.
+    //
+    // EACH HANDLER ALSO SCOPES ITSELF on its own discriminant. #549's widened
+    // census reads each `verb === "…"` as its own handler and looks for the
+    // fall-through INSIDE it, so a shared prelude guard reads as several
+    // unscoped handlers — and it deserves to, because a verb added below would
+    // silently inherit a guard written for the others.
 
     if (verb === "get_document_extract") {
+      const body = await readJson(request);
+      if (body.p_document !== DOCS.docPdf && body.p_document !== DOCS.docXml) return false;
       if (body.p_document !== DOCS.docPdf) return json(sendJson, response, null, cors);
       return json(sendJson, response, {
         document: {
@@ -334,11 +353,26 @@ export async function handleDocumentsViewerSupabase(request, response, path, url
     }
 
     if (verb === "confirm_attribution_candidate") {
+      const body = await readJson(request);
+      if (body.p_candidate !== DOCS.candidate) return false;
       state.candidateOpen = false;
       return json(sendJson, response, { candidate: DOCS.candidate, disposition: "confirmed" }, cors);
     }
 
-    if (verb === "list_uncoded_filings" || verb === "list_coding_lanes") {
+    // ONE VERB PER HANDLER, ONE HANDLER PER LINE. #549's widened ownership
+    // census recognises `verb === "…"` as a handler opener and cross-checks a
+    // per-line walk against a whole-source match; two verbs sharing a line made
+    // those two techniques disagree (14 vs 15), which is that gate's own
+    // positive control telling the truth — the walk would have attributed both
+    // verbs to one census row, so the second one's scoping was invisible to it.
+    if (verb === "list_uncoded_filings") {
+      const body = await readJson(request);
+      if (body.p_client !== DOCS.clientId) return false;
+      return json(sendJson, response, [], cors);
+    }
+    if (verb === "list_coding_lanes") {
+      const body = await readJson(request);
+      if (body.p_client !== DOCS.clientId) return false;
       return json(sendJson, response, [], cors);
     }
   }

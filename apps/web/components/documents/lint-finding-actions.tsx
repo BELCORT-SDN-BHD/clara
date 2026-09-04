@@ -22,7 +22,7 @@ export function LintFindingActions({
 }: {
   findingId: string;
   busy: boolean;
-  act: (fn: () => Promise<void>) => Promise<unknown>;
+  act: (fn: () => Promise<void>) => Promise<boolean>;
 }) {
   const t = useTranslations("CodingQuestionsSignals.lintFinding");
   const [conclusion, setConclusion] = useState<LintFindingConclusion | "">("");
@@ -43,6 +43,7 @@ export function LintFindingActions({
           let succeeded = false;
           await act(async () => { await resolveLintFinding(findingId, conclusion, note.trim()); succeeded = true; });
           if (succeeded) { setConclusion(""); setNote(""); }
+          return succeeded;
         }}
       >
         <NativeSelect

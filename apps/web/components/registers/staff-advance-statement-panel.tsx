@@ -55,7 +55,20 @@ function movementLabel(t: ReturnType<typeof useTranslations>, r: StaffAdvanceSta
   return `${kindLabel} (${appLabel})`;
 }
 
-export function StaffAdvanceStatementPanel({ clientId, accountCodes }: { clientId: string; accountCodes: string[] }) {
+export function StaffAdvanceStatementPanel({
+  clientId,
+  accountCodes,
+  refreshToken = 0,
+}: {
+  clientId: string;
+  accountCodes: string[];
+  /** The register's own epoch, bumped on every SETTLED write above this panel (sweep
+   *  addendum item 3). Booking an application, completing particulars, enrolling or
+   *  retiring an account all move `get_staff_advance_statement`'s answer, and none of
+   *  them changes `accountCode` — the only thing this panel's reload effect watched.
+   *  So the statement a human read after booking was the one from before it. */
+  refreshToken?: number;
+}) {
   const t = useTranslations("StaffAdvances.statement");
   const tc = useTranslations("Common");
   const [accountCode, setAccountCode] = useState(accountCodes[0] ?? "");
@@ -81,7 +94,9 @@ export function StaffAdvanceStatementPanel({ clientId, accountCodes }: { clientI
       return;
     }
     void reload();
-  }, [accountCode, reload]);
+    // `refreshToken` is a REAL dependency, not a convenience: without it the effect
+    // only re-fires when the SELECTED ACCOUNT changes, which a write never does.
+  }, [accountCode, refreshToken, reload]);
 
   if (accountCodes.length === 0) {
     return <p className="text-sm text-muted-foreground">{t("noAccounts")}</p>;

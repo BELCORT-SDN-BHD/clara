@@ -177,7 +177,7 @@ test("DocumentAdmin has zero violations with the re-extraction outcome banner ac
     async () => jsonResponse({ task_id: "task-2", document_id: "doc-1", version_n: 2, status: "queued", reused: false, admission: "reextraction" }),
     async () => {
       const h = await renderComponent(
-        App(ambient(createElement(DocumentAdmin, { document: DOCUMENT, busy: false, act: async (fn) => { await fn(); }, onCorrect: () => {} }))),
+        App(ambient(createElement(DocumentAdmin, { document: DOCUMENT, busy: false, act: async (fn) => { await fn(); return true; }, onCorrect: () => {} }))),
       );
       const b = body();
       (b as unknown as { appendChild: (c: unknown) => void }).appendChild(h.container);
@@ -217,7 +217,7 @@ test("DocumentAdmin has zero violations with the consent-evidence outcome banner
     async () => jsonResponse({ document_id: "doc-1", document_kind: "consent_evidence", prior_kind: "other" }),
     async () => {
       const h = await renderComponent(
-        App(ambient(createElement(DocumentAdmin, { document: DOCUMENT, busy: false, act: async (fn) => { await fn(); }, onCorrect: () => {} }))),
+        App(ambient(createElement(DocumentAdmin, { document: DOCUMENT, busy: false, act: async (fn) => { await fn(); return true; }, onCorrect: () => {} }))),
       );
       const b = body();
       (b as unknown as { appendChild: (c: unknown) => void }).appendChild(h.container);
@@ -257,7 +257,7 @@ test("DocumentAdmin has zero violations with the consent-evidence outcome banner
     async () => jsonResponse({ document_id: "doc-1", document_kind: "consent_evidence", prior_kind: null }),
     async () => {
       const h = await renderComponent(
-        App(ambient(createElement(DocumentAdmin, { document: DOCUMENT, busy: false, act: async (fn) => { await fn(); }, onCorrect: () => {} }))),
+        App(ambient(createElement(DocumentAdmin, { document: DOCUMENT, busy: false, act: async (fn) => { await fn(); return true; }, onCorrect: () => {} }))),
       );
       const b = body();
       (b as unknown as { appendChild: (c: unknown) => void }).appendChild(h.container);
@@ -294,7 +294,7 @@ test("DocumentFilingsHistory has zero violations with the autodraft outcome bann
     async () => jsonResponse({ outcome: "admitted", task_id: "task-1" }),
     async () => {
       const h = await renderComponent(
-        App(ambient(createElement(DocumentFilingsHistory, { filings: [FILING], busy: false, act: async (fn) => { await fn(); } }))),
+        App(ambient(createElement(DocumentFilingsHistory, { filings: [FILING], busy: false, act: async (fn) => { await fn(); return true; } }))),
       );
       const b = body();
       (b as unknown as { appendChild: (c: unknown) => void }).appendChild(h.container);

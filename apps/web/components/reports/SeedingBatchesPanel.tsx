@@ -64,9 +64,11 @@ export function SeedingBatchesPanel({ clientId, session }: { clientId: string; s
   // Batch-scoped acts (cancel/complete) reload proposals too — a completed
   // batch's stats are DERIVED from proposal state, so the two reads travel
   // together even though a batch act writes no proposal row of its own.
-  const actBatch = async (fn: () => Promise<void>) => {
-    await batches.act(fn);
+  const actBatch = async (fn: () => Promise<void>): Promise<boolean> => {
+    // CB-AE2E-004: the batch WRITE's own outcome is what the dialogs read.
+    const ok = await batches.act(fn);
     await proposals.reload();
+    return ok;
   };
   // F5 (independent review): proposal-scoped acts (tick/decline) ride
   // proposals' OWN act()-and-reload cycle (part2 §7.1(2)) directly — never a
@@ -128,8 +130,8 @@ function BatchGroup({
   batch: SeedingBatchRow;
   proposals: SeedingProposalRow[];
   busy: boolean;
-  actBatch: (fn: () => Promise<void>) => Promise<void>;
-  actProposal: (fn: () => Promise<void>) => Promise<void>;
+  actBatch: (fn: () => Promise<void>) => Promise<boolean>;
+  actProposal: (fn: () => Promise<void>) => Promise<boolean>;
 }) {
   const t = useTranslations("ReportsSnapshotsSeeding.seeding");
   const openCount = proposals.filter((p) => p.state === "proposed").length;
@@ -162,7 +164,7 @@ function BatchGroup({
   );
 }
 
-function CancelBatchDialog({ batchId, busy, act }: { batchId: string; busy: boolean; act: (fn: () => Promise<void>) => Promise<void> }) {
+function CancelBatchDialog({ batchId, busy, act }: { batchId: string; busy: boolean; act: (fn: () => Promise<void>) => Promise<boolean> }) {
   const t = useTranslations("ReportsSnapshotsSeeding.seeding.cancelBatch");
   const [reason, setReason] = useState("");
   return (
@@ -176,7 +178,7 @@ function CancelBatchDialog({ batchId, busy, act }: { batchId: string; busy: bool
   );
 }
 
-function CompleteBatchDialog({ batchId, busy, act }: { batchId: string; busy: boolean; act: (fn: () => Promise<void>) => Promise<void> }) {
+function CompleteBatchDialog({ batchId, busy, act }: { batchId: string; busy: boolean; act: (fn: () => Promise<void>) => Promise<boolean> }) {
   const t = useTranslations("ReportsSnapshotsSeeding.seeding.completeBatch");
   return (
     <DoorDialog
@@ -199,7 +201,7 @@ function ProposalRow({
   // every sibling door in this file already uses — a refusal's CLR code +
   // reason now surfaces through the panel's own top banner (loadErr/loadClr
   // above), never a hand-rolled local err that drops the code.
-  act: (fn: () => Promise<void>) => Promise<void>;
+  act: (fn: () => Promise<void>) => Promise<boolean>;
 }) {
   return (
     <li className="flex flex-col gap-1 rounded-md border border-border/60 p-2">
@@ -218,7 +220,7 @@ function ProposalRow({
   );
 }
 
-function TickDialog({ proposalId, busy, act }: { proposalId: string; busy: boolean; act: (fn: () => Promise<void>) => Promise<void> }) {
+function TickDialog({ proposalId, busy, act }: { proposalId: string; busy: boolean; act: (fn: () => Promise<void>) => Promise<boolean> }) {
   const t = useTranslations("ReportsSnapshotsSeeding.seeding.tick");
   return (
     <DoorDialog
@@ -228,7 +230,7 @@ function TickDialog({ proposalId, busy, act }: { proposalId: string; busy: boole
   );
 }
 
-function DeclineDialog({ proposalId, busy, act }: { proposalId: string; busy: boolean; act: (fn: () => Promise<void>) => Promise<void> }) {
+function DeclineDialog({ proposalId, busy, act }: { proposalId: string; busy: boolean; act: (fn: () => Promise<void>) => Promise<boolean> }) {
   const t = useTranslations("ReportsSnapshotsSeeding.seeding.decline");
   const [reason, setReason] = useState("");
   return (

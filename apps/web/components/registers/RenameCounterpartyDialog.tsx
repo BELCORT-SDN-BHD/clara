@@ -20,7 +20,7 @@ export function RenameCounterpartyDialog({
 }: {
   currentName: string;
   busy: boolean;
-  onSubmit: (newName: string) => Promise<void>;
+  onSubmit: (newName: string) => Promise<boolean>;
 }) {
   const t = useTranslations("ArApCounterparty.rename");
   const [newName, setNewName] = useState(currentName);

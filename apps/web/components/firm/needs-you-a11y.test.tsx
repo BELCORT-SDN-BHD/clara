@@ -122,6 +122,50 @@ function buttonInRowNamed(h: Awaited<ReturnType<typeof renderComponent>>, label:
   return match!;
 }
 
+test("firm needs-you inbox: the firm-wide client register is read EXACTLY ONCE for the whole page", async () => {
+  // review-550, major 5. `NeedsYouInbox` began reading `loadClientRegister` when
+  // the queue rows started naming their client — and `NeedsYouGaps`, its own
+  // child, was already reading it for the resolve form's select. Two identical
+  // firm-wide reads fired on every load of `/needs-you`. The read is hoisted to
+  // the one component that mounts both, and passed down.
+  //
+  // COUNTED, not inspected. A structural assertion ("the child takes a prop")
+  // would survive the child quietly re-adding its own read; the number of
+  // requests that actually left is the thing that matters, so that is what this
+  // measures. The mutant panel duplicates the read and requires this to red.
+  const clientReads: string[] = [];
+  await withMockedEnv(
+    async (u) => {
+      const url = String(u);
+      if (url.includes("/rest/v1/clients")) clientReads.push(url);
+      return mockGapsAndQueueFetch(url);
+    },
+    async () => {
+      const h = await renderComponent(
+        createElement(NextIntlClientProvider, {
+          locale: "en",
+          messages,
+          children: createElement("div", null, createElement("h1", null, "Needs you"), createElement(NeedsYouInbox)),
+        }),
+      );
+      try {
+        for (let i = 0; i < 5; i++) await h.settle();
+        // NOT VACUOUS: the page really did load, and really did consume the
+        // register — a zero-request page would otherwise pass "exactly one".
+        assert.match(h.text(), /Which account should this fee post to/, "the queue must have loaded");
+        assert.match(h.text(), /Acme Sdn Bhd/, "…and something on the page must actually USE the register");
+        assert.equal(
+          clientReads.length,
+          1,
+          `clara.clients must be read once for the page, not once per consumer — saw ${clientReads.length}:\n${clientReads.join("\n")}`,
+        );
+      } finally {
+        await h.unmount();
+      }
+    },
+  );
+});
+
 test("firm needs-you inbox (queue + the two 0137 gap lists) has zero violations", async () => {
   await withMockedEnv(
     async (u) => mockGapsAndQueueFetch(String(u)),

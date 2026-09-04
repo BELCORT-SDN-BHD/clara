@@ -1,5 +1,7 @@
 import { getTranslations } from "next-intl/server";
 import { PageHeader, PageShell } from "@/components/common/page-shell";
+import { NotBuiltNote } from "@/components/common/not-built-note";
+import { SectionHeader } from "@/components/common/section-header";
 import { FirmActivityFeed } from "@/components/firm/firm-activity-feed";
 import { AgentTasksPanel } from "@/components/firm/agent-tasks-panel";
 
@@ -21,6 +23,17 @@ export default async function FirmActivityPage() {
       {/* T7 (port-wave plan §4/§5) — cancel_agent_task's own control over the
           LIVE task queue, above the receipts history below it. */}
       <AgentTasksPanel />
+      {/* E-2 / CB-AE2E-018: the TIMELINE this page should lead with — every act
+          in the firm, human as well as agent — is a DATABASE gap, not a web one.
+          `clara.domain_events` and `clara.audit_log` both exist and are granted,
+          but no read joins them into a firm-wide timeline and apps/web reads
+          neither; the honest shape is a dashed note naming the absence, and the
+          note goes away the day the read lands. Nothing fake is wired behind
+          it. */}
+      <section className="flex flex-col gap-2">
+        <SectionHeader level={2}>{t("timelineHeading")}</SectionHeader>
+        <NotBuiltNote className="text-xs">{t("timelineNotBuilt")}</NotBuiltNote>
+      </section>
       <FirmActivityFeed />
     </PageShell>
   );

@@ -18,7 +18,7 @@ export function RetireAccountDialog({
 }: {
   accountCode: string;
   busy: boolean;
-  onSubmit: (reason: string) => Promise<void>;
+  onSubmit: (reason: string) => Promise<boolean>;
 }) {
   const t = useTranslations("StaffAdvances.retireAccount");
   const [reason, setReason] = useState("");

@@ -21,7 +21,7 @@ import {
   declineIdentifierPromotion,
   shouldShowGapErrorBanner,
 } from "@/lib/firm/needs-you-gaps";
-import { loadClientRegister } from "@/lib/firm/reads";
+import type { ClientRow } from "@/lib/firm/reads";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
 import { SectionHeader } from "@/components/common/section-header";
 import { NotBuiltNote } from "@/components/common/not-built-note";
@@ -29,9 +29,24 @@ import { DataState, ErrorMessage } from "./data-state";
 import { FirmQuestionRow } from "./firm-question-row";
 import { IdentifierPromotionRow } from "./identifier-promotion-row";
 
-export function NeedsYouGaps() {
+export function NeedsYouGaps({
+  clients,
+  clientsUnavailable,
+}: {
+  /** The firm-wide client register, READ BY THE CALLER. It used to be read here
+   *  as well, which meant `/needs-you` issued `clara.clients` TWICE on every
+   *  load once the queue rows began naming their client: this panel is a child
+   *  of `needs-you-inbox.tsx`, and both were calling `loadClientRegister`. The
+   *  read is hoisted to the one component that mounts both, and passed down —
+   *  the same shape this panel always consumed. */
+  clients: ClientRow[];
+  /** True only when the register read FAILED, never when it merely has no rows:
+   *  the resolve form says "you can still resolve without naming a client"
+   *  rather than pretending the firm has none. Derived by the caller from the
+   *  one read, so the distinction cannot drift between the two consumers. */
+  clientsUnavailable: boolean;
+}) {
   const t = useTranslations("NeedsYou");
-  const clients = useAsyncRead(() => loadClientRegister(sessionTokenAccessor));
   const questions = useAsyncRead(() => loadFirmOpenQuestions(sessionTokenAccessor));
   const promotions = useAsyncRead(() => loadIdentifierPromotions(sessionTokenAccessor));
   const [actingQuestion, setActingQuestion] = useState<string | null>(null);
@@ -89,8 +104,8 @@ export function NeedsYouGaps() {
                 row={row}
                 busy={questions.busy}
                 error={actingQuestion === row.id ? questions.error : null}
-                clients={clients.data ?? []}
-                clientsUnavailable={clients.data === null && clients.error !== null}
+                clients={clients}
+                clientsUnavailable={clientsUnavailable}
                 onResolve={handleResolve}
                 onDismiss={handleDismiss}
               />

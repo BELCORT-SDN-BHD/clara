@@ -29,7 +29,7 @@ export function ApplyOpenItemsDialog({
    *  just-read aging row). */
   items: AgingItem[];
   busy: boolean;
-  onSubmit: (sourceItemId: string, targetItemId: string, amountCents: number, reason: string) => Promise<void>;
+  onSubmit: (sourceItemId: string, targetItemId: string, amountCents: number, reason: string) => Promise<boolean>;
 }) {
   const t = useTranslations("ArApCounterparty.applyOpenItems");
   const tc = useTranslations("Common");
@@ -62,7 +62,7 @@ export function ApplyOpenItemsDialog({
       // already gates whether this can fire, but TS cannot see that from
       // here; this narrows `amountCents` to `number` for real instead of
       // asserting it.
-      onConfirm={() => (amountCents === null ? Promise.resolve() : onSubmit(sourceItemId, targetItemId, amountCents, reason))}
+      onConfirm={() => (amountCents === null ? Promise.resolve(false) : onSubmit(sourceItemId, targetItemId, amountCents, reason))}
     >
       {items.length < 2 ? (
         <p className="text-sm text-muted-foreground">{t("noCandidateItems")}</p>

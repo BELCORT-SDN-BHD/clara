@@ -49,6 +49,7 @@ const DOCUMENTS_LANE_MOCK = join(E2E_DIR, "documents-viewer-mock.mjs");
  */
 const LANE_MOCKS = [
   "agentic-finish-mock.mjs",
+  "bank-close-registers-mock.mjs",
   "chat-parity-mock.mjs",
   "documents-viewer-mock.mjs",
   "fs4-checkout-mock.mjs",
@@ -103,26 +104,44 @@ test("N4 · no lane fixture may claim the FIRM ALTITUDE for the shared subject",
   assert.equal(own.length, 2, "the lane's two CLIENT threads are still the caller's own");
 });
 
+/**
+ * EVERY WAY A HANDLER OPENS, as ONE expression — shared by the census and by its independent
+ * positive control, so the two can never disagree about what a handler even is.
+ *
+ * #549 MAJOR 8: this recognised only `path === "/rest/…"`. `bank-close-registers-mock.mjs`
+ * slices the `/rest/v1/rpc/` prefix once and then dispatches its RPC half on `verb === "…"`,
+ * so FIVE of its ten handlers were invisible to a gate whose whole job is to see them — and an
+ * unscoped one among them would have passed in silence. A census that cannot see a handler
+ * cannot report it unscoped, which is this file's own failure mode, one level up.
+ */
+const HANDLER_OPENER = /(?:path === "(\/(?:rest|api)\/[^"]+)"|verb === "([a-z0-9_]+)")/;
+const HANDLER_OPENER_G = new RegExp(HANDLER_OPENER.source, "g");
+
+/** The label a census row carries, so a verb-dispatched handler reads like the route it answers. */
+function openerLabel(m: RegExpExecArray): string {
+  return m[1] ?? `/rest/v1/rpc/${m[2]}`;
+}
+
 /** An independent count of the handler openers in a file, used as the positive control on the
  *  scan below: a loop that walks the wrong lines, or stops early, disagrees with this. Written
  *  as a whole-source match rather than a per-line walk on purpose — two techniques, one fact. */
 function openerCount(file: string): number {
-  return (readFileSync(file, "utf8").match(/path === "\/(?:rest|api)\/[^"]+"/g) ?? []).length;
+  return (readFileSync(file, "utf8").match(HANDLER_OPENER_G) ?? []).length;
 }
 
-/** Every `path === "/rest/v1/..."` or `path === "/api/..."` handler in ONE lane mock, with
- *  whether its block contains a `return false` — the fall-through that makes it scoped. */
+/** Every handler in ONE lane mock — `path === "…"` or `verb === "…"` — with whether its block
+ *  contains a `return false`, the fall-through that makes it scoped. */
 function handlerCensus(file: string): { path: string; scoped: boolean }[] {
   const source = readFileSync(file, "utf8");
   const lines = source.split("\n");
   const out: { path: string; scoped: boolean }[] = [];
   for (let i = 0; i < lines.length; i += 1) {
-    const opened = /path === "(\/(?:rest|api)\/[^"]+)"/.exec(lines[i]!);
+    const opened = HANDLER_OPENER.exec(lines[i]!);
     if (!opened) continue;
     // The block runs to the next handler opener, or to the end of the function.
     let scoped = false;
     for (let j = i + 1; j < lines.length; j += 1) {
-      if (/path === "(\/(?:rest|api)\/[^"]+)"/.test(lines[j]!)) break;
+      if (HANDLER_OPENER.test(lines[j]!)) break;
       // `return false;` ANYWHERE on the line, not only at its start: the scoping guard is
       // usually written as a one-line `if (…) return false;`. The first cut anchored at the
       // line start and reported thirteen scoped handlers as UNSCOPED — an instrument that
@@ -146,7 +165,7 @@ function handlerCensus(file: string): { path: string; scoped: boolean }[] {
       if (/^\s{1,2}\}\s*$/.test(lines[j]!)) break;
       if (/^\}/.test(lines[j]!)) break;
     }
-    out.push({ path: opened[1]!, scoped });
+    out.push({ path: openerLabel(opened), scoped });
   }
   return out;
 }
@@ -214,6 +233,18 @@ const LANE_DECLARATIONS: Record<string, { unscopeable: string[]; debt: string[] 
   // `p_candidate` before it dispatches at all — so there is nothing to declare in either
   // column, which is the state a lane mock should be in.
   "documents-viewer-mock.mjs": { unscopeable: [], debt: [] },
+  "bank-close-registers-mock.mjs": {
+    // The gate CATALOG is firm-wide and its read carries no filter AT ALL —
+    // `lib/close/api.ts:320-322` sends only `select` and `order`. There is no discriminant in
+    // the request to scope on, which is what makes this one genuinely unscopeable rather than
+    // merely unscoped.
+    unscopeable: ["/rest/v1/close_gate_checks"],
+    // DEBT, and #549's own fold had it wrong: it was declared unscopeable, and it is not.
+    // `lib/reports/api.ts:251-256` sends `client_id=eq.<id>` on the wire, so the discriminant
+    // is right there in the request and this handler ignores it. Same shape as the chat-parity
+    // rows above — it COULD scope, which is exactly why it is not called unscopeable.
+    debt: ["/rest/v1/report_agent_receipts"],
+  },
 };
 
 test("N5 · every lane handler either scopes by the request's own subject, or is a NAMED exception", () => {
@@ -322,5 +353,135 @@ test("N4 · the documents-viewer lane does NOT claim the shared client register"
     block[1]!,
     /if \(eqParam\(url, "id"\) !== DOCS\.clientId\) return false;/,
     "the clients handler must fall through on any id but this lane's own",
+  );
+});
+
+// --- N6 -----------------------------------------------------------------------------
+//
+// THE SAME RULE, OVER THE SHARED SERVER ITSELF. N4 and N5 read the P6-5 lane's fixtures
+// and its mock; neither reaches `serve-built.mjs`, which owns the ONE session list every
+// walk's rail resolves against. 裁-117 gave that file a CREATE handler, and with it the
+// ability to grow the list at runtime — so the ownership rule now has a second place it
+// can be broken, and it gets its own cell rather than a paragraph, exactly as N4 and N5
+// did.
+//
+// TWO HALVES, because either alone is satisfiable by doing nothing:
+//   (a) no STATIC row in that file claims the firm altitude for the shared subject;
+//   (b) the create handler REFUSES the no-clientId case — the only shape that could add
+//       such a row at runtime.
+//
+// (b) is a deliberate divergence from the real ingress, which DOES accept a firm-altitude
+// create (`packages/runtime/src/chatRoutes.ts` inserts `body.clientId ?? null`). That is
+// the point of pinning it: a reader who finds the mock stricter than the server should
+// find the reason next to the assertion, not have to reconstruct it.
+
+/** The session rows `serve-built.mjs` declares statically, parsed out of its own source
+ *  rather than imported — the module starts an HTTPS server and a `next start` child on
+ *  import, which a unit cell must not do. Each row is read as a field map, so a row that
+ *  grows a field this cell does not know about is still censused.
+ *
+ *  `source` IS A PARAMETER so the positive control below can run this PARSER over a
+ *  doctored file rather than re-applying the caller's filter to a hand-built array. The
+ *  first cut did the latter, which only ever proved that a `.filter(...)` written twice
+ *  behaves the same way twice — it could not have caught a parser that silently stopped
+ *  matching rows, which is the failure this census actually has. */
+function serveBuiltSessions(source: string = readFileSync(SERVE_BUILT, "utf8")): { clientId: string | null; createdBy: string | null }[] {
+  const start = source.indexOf("const sessions = [");
+  assert.ok(start >= 0, "serve-built.mjs must still declare the shared `sessions` array this cell censuses");
+  const end = source.indexOf("\n];", start);
+  assert.ok(end > start, "the `sessions` array must be terminated — the census cannot read a truncated literal");
+  const block = source.slice(start, end);
+
+  const rows: { clientId: string | null; createdBy: string | null }[] = [];
+  for (const line of block.split("\n")) {
+    if (!line.includes("client_id:")) continue;
+    const clientMatch = /client_id:\s*([A-Za-z0-9_]+|null)/.exec(line);
+    const createdMatch = /created_by:\s*("[0-9a-f-]+"|[A-Za-z0-9_]+)/.exec(line);
+    if (!clientMatch || !createdMatch) continue;
+    rows.push({
+      clientId: clientMatch[1] === "null" ? null : clientMatch[1]!,
+      // A literal id is compared as itself; a CONSTANT is compared by name, and `SUBJECT`
+      // is the one name that matters — the shared subject every walk signs in as.
+      createdBy: createdMatch[1]!.replace(/"/g, ""),
+    });
+  }
+  assert.ok(rows.length >= 3, `the census parsed ${rows.length} static rows — it is not reading the array`);
+  return rows;
+}
+
+test("N6 · serve-built's shared session list claims no firm altitude, and its CREATE cannot mint one", () => {
+  const subject = sharedSubject();
+  const rows = serveBuiltSessions();
+  for (const row of rows) {
+    console.log(`  client_id=${row.clientId ?? "null"} created_by=${row.createdBy}`);
+  }
+
+  // (a) THE STATIC HALF. `SUBJECT` appears as a bare identifier in that file, so a row
+  // written as `created_by: SUBJECT` matches by name and one written with the literal
+  // matches by value — both are the shared subject and both are forbidden at the firm
+  // altitude.
+  const claimsFirm = rows.filter((r) => r.clientId === null && (r.createdBy === "SUBJECT" || r.createdBy === subject));
+  assert.deepEqual(claimsFirm, [], "a firm-altitude row with the shared subject is resolved by EVERY walk's rail");
+
+  // The counter-half, so deleting every row would not satisfy the assertion above.
+  const ownClientRows = rows.filter((r) => r.clientId !== null && r.createdBy === "SUBJECT");
+  assert.ok(ownClientRows.length >= 2, "the shared list must still carry the caller's own CLIENT threads");
+
+  // (b) THE RUNTIME HALF. The handler exists, and it refuses exactly the shape that would
+  // add a firm-altitude row — asserted against the guard's own source, not against a
+  // comment claiming it.
+  const source = readFileSync(SERVE_BUILT, "utf8");
+  const createAt = source.indexOf('request.method === "POST" && url.pathname === "/api/chat/sessions"');
+  assert.ok(createAt >= 0, "serve-built.mjs must still own the CREATE beside the ONE session list");
+  const handler = source.slice(createAt, createAt + 900);
+  assert.match(handler, /if\s*\(!body\.clientId\)/, "the create must refuse a session with no client pin");
+  assert.match(handler, /sendJson\(response,\s*400/, "and refuse it as a 400, not by silently minting something else");
+  // The refusal must be the FIRST thing that happens to a clientId-less body: a guard
+  // that ran after the row was pushed would fence nothing.
+  const refusalAt = handler.indexOf("if (!body.clientId)");
+  const pushAt = handler.indexOf("sessions.unshift(");
+  assert.ok(pushAt > refusalAt, "the guard must precede the push, or it fences nothing");
+
+  // POSITIVE CONTROL ON THE INSTRUMENT — through the PARSER, not around it. A cell that
+  // only ever looks for absence proves nothing unless it can also SEE a violation, and
+  // the thing that has to see it is `serveBuiltSessions` itself: if that function stopped
+  // matching rows (a reformat, a renamed field, a changed quote style) the real assertion
+  // above would go quietly green on an empty census. So the row is spliced into the
+  // ARRAY LITERAL of a copy of the file, and the parser is run over that.
+  const doctored = source.replace(
+    "const sessions = [",
+    'const sessions = [\n  { id: FAKE, firm_id: FIRM_ID, client_id: null, created_by: SUBJECT, visibility: "private", title: "planted", created_at: "2026-01-01T00:00:00.000Z" },',
+  );
+  assert.notEqual(doctored, source, "the control must actually have planted its row");
+  const censusOfDoctored = serveBuiltSessions(doctored);
+  assert.equal(
+    censusOfDoctored.length,
+    rows.length + 1,
+    "the parser must see the planted row at all — a census that shrank is not reading the file",
+  );
+  const seen = censusOfDoctored.filter((r) => r.clientId === null && (r.createdBy === "SUBJECT" || r.createdBy === subject));
+  assert.equal(seen.length, 1, "the census must REPORT a firm-altitude claim, or its empty result above means nothing");
+});
+
+// ---------------------------------------------------------------------------
+// #549's own fixture claim, in the same spirit as N4 above.
+// ---------------------------------------------------------------------------
+//
+// The bank/close/registers walk asserts that a close-prep hold renders the MEMBER'S NAME
+// rather than the raw `clara.users(id)` uuid it carries (CB-AE2E-028). That claim is only
+// worth anything if the fixture's `held_by` is an id the roster can actually resolve —
+// `serve-built.mjs`'s own `/rest/v1/firm_members_visible` publishes exactly the shared
+// SUBJECT. A different id would resolve to null, the surface would render its shortened-id
+// FALLBACK, and the walk would pass while proving the opposite of what it says.
+test("N4 (L7) · the close-prep hold fixture's held_by IS the shared subject — otherwise the walk proves the fallback", () => {
+  const subject = sharedSubject();
+  const source = readFileSync(join(E2E_DIR, "bank-close-registers-mock.mjs"), "utf8");
+  const match = /heldBy: "([0-9a-f-]+)"/.exec(source);
+  assert.ok(match, "the L7 mock must declare heldBy");
+  console.log(`  shared SUBJECT = ${subject}, L7 heldBy = ${match[1]}`);
+  assert.equal(
+    match[1],
+    subject,
+    "a held_by outside the published roster resolves to null, and the walk would then be asserting the shortened-id fallback while claiming to assert the name",
   );
 });

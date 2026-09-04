@@ -82,13 +82,18 @@ function withoutOpKey(body: Record<string, unknown>): Record<string, unknown> {
   return rest;
 }
 
-test("StatementsSection sends exact signed header and line cents", async () => {
+// H-06 — THE WIRE CELL. The doors-level cell (lib/bank/doors.test.ts) proves the
+// TYPE carries institution_code/account_number; only this one proves the FORM fills
+// them, and fills them from the row the human actually picked. It also pins the
+// no-account-selected refusal, which is what the picker's new explicit-empty first
+// option makes reachable.
+test("StatementsSection sends exact signed header and line cents, with the selected account's institution/account pair", async () => {
   const enterBodies: Record<string, unknown>[] = [];
   await withMockedEnv(
     (async (request: RequestInfo | URL, init?: RequestInit) => {
       const url = String(request);
       if (url.includes("/rpc/list_bank_accounts")) {
-        return jsonResponse([{ id: "acc1", bank_code: "MBB", bank_name_display: "Maybank", account_number: "123" }]);
+        return jsonResponse([{ id: "acc1", bank_code: "MBB", bank_name_display: "Maybank", account_number: "12-3456-7" }]);
       }
       if (url.includes("/rpc/list_bank_statements")) return jsonResponse([]);
       if (url.includes("/rpc/enter_bank_statement")) {
@@ -105,8 +110,16 @@ test("StatementsSection sends exact signed header and line cents", async () => {
         const lineAmount = byId(root, "statement-line-amount-1");
         assert.equal(reactProps(lineAmount).placeholder, "-0.00", "signed statement lines advertise their polarity");
 
+        // The account is now an EXPLICIT choice — the picker opens on an empty
+        // option, so nothing is filed against a defaulted account.
+        const picker = findAll(root, (c) => c.tagName === "SELECT")[0];
+        assert.ok(picker, "the account picker renders");
+        await h.act(() => { setFieldValue(picker as never, "acc1"); });
+        for (let i = 0; i < 4; i++) await h.settle();
+
         await h.act(() => {
           setFieldValue(byId(root, "document-id") as never, "doc1");
+          setFieldValue(byId(root, "statement-date") as never, "2026-01-31");
           setFieldValue(byId(root, "period-start") as never, "2026-01-01");
           setFieldValue(byId(root, "period-end") as never, "2026-01-31");
           setFieldValue(byId(root, "opening") as never, "1,234.56");
@@ -131,9 +144,13 @@ test("StatementsSection sends exact signed header and line cents", async () => {
     p_bank_account: "acc1",
     p_document: "doc1",
     p_header: {
+      // THE PAIR, from the selected row: bank_code and the account number AS
+      // PRINTED (hyphens intact — 0038:1190-1196's two coexisting normalizers).
+      institution_code: "MBB",
+      account_number: "12-3456-7",
       period_start: "2026-01-01",
       period_end: "2026-01-31",
-      statement_date: null,
+      statement_date: "2026-01-31",
       opening_cents: 123456,
       closing_cents: -9905,
       total_debit_cents: null,

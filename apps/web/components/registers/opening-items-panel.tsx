@@ -150,6 +150,8 @@ function DraftItemDialog({
             setItem(EMPTY_ITEM);
             setLines([]);
           }
+          // CB-AE2E-004: the outcome is also what closes (or keeps) the dialog.
+          return ok;
         })
       }
     >

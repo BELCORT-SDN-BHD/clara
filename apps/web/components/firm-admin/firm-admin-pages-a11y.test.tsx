@@ -24,6 +24,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createElement } from "react";
 import { useTranslations, NextIntlClientProvider } from "next-intl";
+import { FirmScopeProvider } from "@/components/firm-scope-provider";
 import { renderComponent, textOf } from "../../test/hookHarness";
 import { activeElement, enableDomInspection } from "../../test/domInspect";
 import { checkAccessibility } from "../../test/a11yRules";
@@ -161,13 +162,21 @@ test("/admin/compliance page composition (PageHeader + the real ComplianceRegist
 
 // --- shadow of app/(firm)/admin/vendor-bindings/page.tsx --------------------
 
+// E-7 (裁-187): the vendor-bindings panel now shapes its own controls from the
+// firm layout's positively-read caller context, so these mounts supply the
+// provider the real tree always has. ADMIN rank is the fixture, because that is
+// the rank every pre-existing cell here was implicitly exercising when the
+// controls were rendered unconditionally — the BELOW-admin cases are new cells
+// of their own, not a silent change of what these ones prove.
+const ADMIN_SCOPE = { role_rank: 2, is_operator: false };
+
 function AdminVendorBindingsPageShadow() {
   const t = useTranslations("FirmAdminCompliance.vendorBindings");
   return createElement(
     PageShell,
     null,
     createElement(PageHeader, { title: t("pageHeading"), description: t("pageDescription") }),
-    createElement(VendorBindingsPanel),
+    createElement(FirmScopeProvider, { scope: ADMIN_SCOPE, children: createElement(VendorBindingsPanel) }),
   );
 }
 
@@ -223,14 +232,13 @@ function AdminSettingsPageShadow() {
   );
 }
 
-const FIRM_SETTINGS_ROW = [{ id: "f1", high_stakes_amount_cents: 10000000 }];
-
-test("/admin/settings page composition (PageHeader + the real SettingsPanel) has zero a11y violations", async () => {
+test("/admin/settings page composition (PageHeader + the real SettingsPanel) has zero a11y violations, and carries NO threshold control (裁-187)", async () => {
   await withMockedEnv(
+    // 裁-187: the panel reads NOTHING now. The threshold was its only read, and
+    // a value that governs nothing must not be on screen. Any fetch at all from
+    // this page is therefore a regression, and this mock says so by throwing.
     async (u) => {
-      const url = String(u);
-      if (url.includes("/rest/v1/firms")) return jsonResponse(FIRM_SETTINGS_ROW);
-      throw new Error(`unexpected fetch: ${url}`);
+      throw new Error(`the settings page must issue no reads; got: ${String(u)}`);
     },
     async () => {
       const h = await renderComponent(withMessages(createElement(AdminSettingsPageShadow)));
@@ -238,9 +246,30 @@ test("/admin/settings page composition (PageHeader + the real SettingsPanel) has
         for (let i = 0; i < 3; i++) await h.settle();
         const pageText = textOf(h.container as never);
         assert.match(pageText, /Firm settings/, "the page's own h1 must render");
-        assert.match(pageText, /RM 100,000\.00/, "the current threshold must render, read from the DB verbatim");
         assert.match(pageText, /Signing capabilities/, "the capabilities section must render");
         assert.match(pageText, /grant_firm_capability and revoke_firm_capability are live/, "the honest capabilities note must name both verbs");
+        // THE DISCRIMINATING HALF (裁-187 abolished every maker-checker wall):
+        // no trigger, no amount, and no sentence claiming a second approver.
+        assert.doesNotMatch(pageText, /Change threshold/, "the Change threshold control is retired outright, not hidden");
+        assert.doesNotMatch(pageText, /RM ?[\d,]+\.\d\d/, "no threshold amount may render — the number no longer governs anything");
+        assert.doesNotMatch(
+          pageText,
+          /the amount above which a posting needs a second person's approval/,
+          "the retired control's own description must not survive in copy",
+        );
+        // THE COPY MUST BE TRUE FOR THE PRE-裁-188 WINDOW, which is a narrower
+        // claim than "there is no threshold" — see settings-panel.tsx's header.
+        // `_approve_entry_core` (LIVE, 0016:1425-1443) still raises CLR05 on a
+        // solo high-stakes approval, so the page says the CONTROL is retired and
+        // that the refusal is still there. When 裁-188's lane deletes that
+        // refusal it deletes the last sentence of `approvalsNote` in the SAME
+        // change, and this assertion pair moves with it.
+        assert.match(pageText, /Change-threshold control is retired/, "the page must say the control is gone");
+        assert.match(
+          pageText,
+          /still refuses a solo approval on a high-stakes entry/,
+          "…and must NOT claim the database's own second-approver refusal is gone with it — it is not, yet",
+        );
         const violations = checkAccessibility(h.container as never);
         assert.deepEqual(violations, [], JSON.stringify(violations));
       } finally {
