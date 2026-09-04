@@ -125,6 +125,29 @@ test("THE FALLBACK ALSO CATCHES A KNOWN KEY WHOSE PAYLOAD DRIFTED — it never a
   assert.equal(unknownSeed.text, "seed: some_future_seed", `got: ${unknownSeed.text}`);
 });
 
+test("THE STATUTORY BASIS IS READ, NOT ASSUMED: a drifted `test` value never gets the CA 2016 s.244 wording", () => {
+  // FOLD (review-546 major 2). The three `mpersEligibility.*` sentences NAME a statute, and the
+  // writer records which test produced the determination in a SEPARATE field
+  // (`interview.v2.segments.ts:383-386`) precisely because a later segment may decide
+  // eligibility on a different limb. Emitting the s.244 wording off `determination` alone was
+  // this module asserting a legal basis it never looked at — a wrong citation on a client's
+  // permanent onboarding record, which is the most expensive thing in this table to get wrong.
+  const drifted = formatPlanItemAnswer("mpers_eligibility", { determination: "eligible", test: "some_later_statutory_test" }, t);
+  assert.doesNotMatch(drifted.text, /s\.244/, `a different test must not borrow s.244's sentence; got: ${drifted.text}`);
+  assert.doesNotMatch(drifted.text, /private entity/, `got: ${drifted.text}`);
+  // It still says everything the row holds, verbatim — falling through is not going silent.
+  assert.equal(drifted.text, "determination: eligible · test: some_later_statutory_test", `got: ${drifted.text}`);
+
+  // An ABSENT test is the same answer, for the same reason (review law 2).
+  const noTest = formatPlanItemAnswer("mpers_eligibility", { determination: "ineligible" }, t);
+  assert.doesNotMatch(noTest.text, /s\.244/, `got: ${noTest.text}`);
+  assert.equal(noTest.text, "determination: ineligible", `got: ${noTest.text}`);
+
+  // POSITIVE CONTROL: the real capture — determination AND the s.244 test — still reads as prose.
+  const real = formatPlanItemAnswer("mpers_eligibility", { determination: "eligible", test: "ca2016_s244_private_entity" }, t);
+  assert.match(real.text, /A private entity under CA 2016 s\.244/, `got: ${real.text}`);
+});
+
 test("the UNVERIFIED flag is read POSITIVELY — only `format_verified: false` sets it", () => {
   assert.equal(formatPlanItemAnswer("ssm", { registration: "X", normalized: "x", form: "unrecognized", format_verified: false }, t).unverified, true);
   assert.equal(formatPlanItemAnswer("ssm", { registration: "X", normalized: "x", form: "unified", format_verified: true }, t).unverified, false);

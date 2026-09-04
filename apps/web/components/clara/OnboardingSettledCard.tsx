@@ -126,14 +126,25 @@ export function SettledOnboardingCard({
         <dd className="text-card-foreground">{plan.revision_n}</dd>
       </dl>
 
-      {/* THE CHART CONTROL STAYS REACHABLE — a requirement of THIS item, not a fix for H-29.
+      {/* THE CHART CONTROL STAYS REACHABLE ON THE **COMMITTED** ARM ONLY.
           `ApplyStandardChartControl` is the only surface for `clara.apply_coa_template` in the
           whole estate, and its own prop doc records that the apply does NOT need an open plan.
           Collapsing the item list without surfacing this row would have hidden the one control
-          a commit unlocks, which is the reason the receipt hosts it rather than burying it in
-          the disclosure. What `clara.coa_chart_state` reports for an OPEN plan is the DB-A
-          lane's subject (0156_coa_apply_template.sql:1082) and is untouched here. */}
-      {chartItem ? (
+          a commit unlocks, which is why the receipt hosts it.
+
+          IT IS WRONG ON THE CANCELLED ARM, and that is the `plan.state` test below.
+          `clara.coa_chart_state`'s `dec` CTE reads the seed decision out of the client's latest
+          COMMITTED plan (`p2.state='committed'`, 0156_coa_apply_template.sql:1082). A CANCELLED
+          plan never becomes committed, so for a cancelled onboarding that read can only ever
+          answer `undecided` — and the panel would then say "No chart-of-accounts decision has
+          been recorded yet — the onboarding interview asks for it" directly beneath a receipt
+          saying the plan was cancelled with the interview's answers listed under it. Two false
+          sentences side by side on a governed record. The cancelled receipt offers no panel.
+
+          (The panel's own copy for an OPEN plan is DB-A's subject: #551 returns a
+          `seed_decision_plan_state` key and the live checklist row should then say "decided in
+          the interview, not yet committed". #551 is still open — see the PR body's carry-over.) */}
+      {plan.state === "committed" && chartItem ? (
         <div className="flex flex-col gap-2 rounded-lg border border-border bg-muted/40 p-2">
           <p className="text-xs font-medium text-card-foreground">{chartItem.question ?? chartItem.item_key}</p>
           <ApplyStandardChartControl clientId={clientId} planOpen={false} session={session} onApplied={onApplied} />

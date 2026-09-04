@@ -137,15 +137,23 @@ export function InterviewRunCard({
     const parkIndex = run.state?.pendingPark?.parkIndex;
     if (!runId || typeof parkIndex !== "number" || !onPlanChanged) return;
     const seen = syncedParkRef.current;
-    // BELT, AND LABELLED AS ONE (the `toggle` / `isDoActionPermitted` precedent in this repo:
-    // a non-discriminating mutant is said out loud rather than dressed up as a cell). The
-    // EQUAL half of `<=` cannot be reached today — this effect's dependency array already ends
-    // at `parkIndex`, so React does not re-run it for an unchanged index at all, and the fold
-    // round's mutant panel measured exactly that: relaxing `<=` to `<` left every cell green.
-    // What the comparison DOES discriminate is a park index that goes BACKWARDS (a resumed run
-    // re-reporting an earlier park), which does change the dependency and is guarded by both
-    // halves — that arm has its own cell. The `<=` stays for the day this effect gains a
-    // dependency that can re-fire it at the same park.
+    // THE COMPARISON GUARDS TWO CASES, and only one of them is falsifiable today. Said plainly
+    // because the first version of this comment was not: it claimed the BACKWARD arm
+    // discriminated `<=` from `<`, and it does not.
+    //
+    //   * A LOWER index (a resumed run re-reporting an earlier park) is a real, reachable case
+    //     and it is guarded — but BOTH `<=` and `<` reject it, so no cell can tell them apart
+    //     here. `onboarding-progress-sync.test.tsx` proves the CASE (with a real `/state` read
+    //     reporting an index below the watermark); it does not, and cannot, prove the operator.
+    //   * The EQUAL index is what `<=` adds over `<`, and it cannot be reached at all: this
+    //     effect's dependency array ends at `parkIndex`, so React does not re-run it for an
+    //     unchanged index. The fold round's mutant panel measured exactly that — relaxing `<=`
+    //     to `<` leaves every cell green.
+    //
+    // So `<=` is a BELT behind React's own dependency comparison, labelled as one (the
+    // `toggle` / `isDoActionPermitted` precedent in this repo: a non-discriminating mutant is
+    // said out loud rather than dressed up as a cell). It stays for the day this effect gains
+    // a dependency that can re-fire it at the same park.
     if (seen !== null && parkIndex <= seen) return;
     syncedParkRef.current = parkIndex;
     if (seen === null) return;

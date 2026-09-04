@@ -128,7 +128,24 @@ function AddClientControl({ onCreated }: { onCreated: () => void }) {
           setRefusal(null);
           try {
             const result = await runDoAction(spec, doEnv, sessionTokenAccessor);
-            if (result.kind === "refused") return;
+            if (result.kind === "refused") {
+              // `runDoAction` re-evaluates `isDoActionPermitted` against the same env before it
+              // touches the door (裁-107a's third check). Returning silently made that
+              // indistinguishable from a click that did nothing, on a governed act — so it says
+              // so, and says the door was never called, which is the part that matters.
+              //
+              // BELT, AND LABELLED AS ONE — no cell, and the reason is measurable rather than
+              // lazy. This Confirm is `disabled` on exactly `!isDoActionPermitted(spec, doEnv)`,
+              // `clickButton` refuses a disabled node, and `doEnv` cannot change between the
+              // click and the re-check (it is rebuilt per render from the same `env.data` and
+              // the same typed `name`). So a `refused` result is unreachable from THIS surface
+              // today, and the fold round's mutant panel measured that: deleting this line
+              // leaves every cell green. It stays because the predicate is deliberately asked
+              // three times and the third answer must never be swallowed — the day an env can
+              // change under an open dialog, this is the arm that speaks.
+              setRefusal({ message: t("addClientNotPermitted"), code: null });
+              return;
+            }
             setName("");
             // Hydrate-never-trust: the register RE-READS rather than splicing in a row built
             // from the door's own reply. The navigation is to the id the DATABASE returned.

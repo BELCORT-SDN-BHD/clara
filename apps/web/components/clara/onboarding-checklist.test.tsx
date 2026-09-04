@@ -275,6 +275,62 @@ test("CB-AE2E-023 — the settled receipt COLLAPSES the item list behind a discl
       await h.settle();
       // DISCRIMINATING: this answer text exists nowhere on the collapsed card.
       assert.match(h.text(), /Rome Public Advisory/, `got: ${h.text()}`);
+
+      // FOLD (review-546 nit 9). A receipt's rows sit on a CLOSED plan, so the resolve dialog
+      // must not tell a professional to "close this and use Amend resolution" — that trigger is
+      // absent on these rows and the door behind it refuses CLR10 on any non-open plan
+      // (0017:2722). BOTH sentences live INSIDE the dialog, so the assertion has to open one:
+      // a first cut asserted on the card's own text and passed vacuously, because neither
+      // string is on the page until the dialog is.
+      const resolveTrigger = buttonsLabelled(h.container, "Resolve")[0];
+      assert.ok(resolveTrigger, "every row still renders its Resolve trigger — gating shapes, never hides");
+      await clickButton(resolveTrigger as never);
+      for (let i = 0; i < 3; i++) await h.settle();
+      const dialogText = textOf(document.body as never);
+      assert.match(dialogText, /The onboarding plan is no longer open/, `the closed-plan sentence; got: ${dialogText}`);
+      assert.doesNotMatch(dialogText, /use Amend resolution/, `must not point at a control that is not on the screen; got: ${dialogText}`);
+    } finally {
+      await h.unmount();
+    }
+  });
+});
+
+test("CB-AE2E-023 — the CANCELLED receipt offers NO chart panel, where the committed one does", async () => {
+  // FOLD (review-546 major 1). The panel was hosted on any settled arm. On a CANCELLED plan
+  // `clara.coa_chart_state` can only ever answer `undecided` — its `dec` CTE reads the latest
+  // COMMITTED plan (0156_coa_apply_template.sql:1082) and a cancelled plan never becomes one —
+  // so the panel rendered "No chart-of-accounts decision has been recorded yet" directly under
+  // a receipt saying the plan was cancelled with the interview's answers listed below it.
+  const chartItem = { ...ITEMS_2_OF_5[0]!, id: "i-coa", item_key: "coa_chart_apply", question: "Apply the firm's standard chart of accounts to this client", answer: { chart: "firm_template", applied: false }, state: "deferred" };
+  const chartState = { client_id: "c1", state: "undecided", seed_decision: null, seed_wants_template: false, accounts: 0, template_id: null, template_version: null, adoption_state: null };
+
+  const withChart = (planOverride: Record<string, unknown>) => (async (url: RequestInfo | URL) => {
+    const u = String(url);
+    if (u.includes("/rpc/coa_chart_state")) return jsonResponse(chartState);
+    return mockFetch([chartItem], planOverride)(url as never);
+  }) as typeof fetch;
+
+  // THE PAIR IS THE POINT — an absence on the cancelled arm proves nothing unless the same
+  // fixture positively PRODUCES the panel on the committed one.
+  await withMockedEnv(withChart(COMMITTED_PLAN), async () => {
+    const h = await mount("c1");
+    try {
+      await clickButton(h.find((n) => (n as { tagName?: string }).tagName === "BUTTON" && /Show the 1 recorded answer/.test(textOf(n)))!);
+      await h.settle();
+      assert.match(h.text(), /Apply the firm's standard chart of accounts to this client/, `positive control: the committed receipt hosts the panel; got: ${h.text()}`);
+    } finally {
+      await h.unmount();
+    }
+  });
+
+  const cancelled = { ...PLAN, state: "cancelled", cancelled_at: "2026-09-04T03:00:00Z", cancelled_by: "u-canceller", cancel_reason: "Client withdrew" };
+  await withMockedEnv(withChart(cancelled), async () => {
+    const h = await mount("c1");
+    try {
+      const text = h.text();
+      assert.match(text, /Client withdrew/, "the cancelled receipt still renders");
+      assert.doesNotMatch(text, /No chart-of-accounts decision has been recorded yet/, `the panel's own copy must not appear beside a cancellation; got: ${text}`);
+      assert.doesNotMatch(text, /Apply the standard chart/, "and no apply trigger either");
     } finally {
       await h.unmount();
     }

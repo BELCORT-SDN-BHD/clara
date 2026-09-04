@@ -217,8 +217,11 @@ const SHAPES: Record<string, Shape> = {
     if (registration === null) return null;
     const verified = bool(r.format_verified);
     if (verified === null) return null;
+    // `form` is NOT passed: `ssm.verified` does not interpolate it, so handing it over was a
+    // value with no placeholder — dead weight that reads like the message shows the form when
+    // it does not. The registration itself is the only substitution either arm makes.
     return verified
-      ? phrase(t, { key: "ssm.verified", values: { registration, form: str(r.form) ?? "" } })
+      ? phrase(t, { key: "ssm.verified", values: { registration } })
       : phrase(t, { key: "ssm.unverified", values: { registration } });
   },
 
@@ -253,6 +256,16 @@ const SHAPES: Record<string, Shape> = {
     // The three determinations the writer can produce. Anything else is a shape this table
     // does not know, and falls through to rule 1 rather than being folded into one of these.
     if (determination !== "eligible" && determination !== "ineligible" && determination !== "parent_unknown") return null;
+    // THE STATUTORY BASIS IS READ, NOT ASSUMED. These sentences name CA 2016 s.244, and the
+    // writer records WHICH test produced the determination in `test`
+    // (`interview.v2.segments.ts:383-386`) — a separate field precisely because a later
+    // segment may decide eligibility on a different limb. Rendering the s.244 wording off
+    // `determination` alone would be this module asserting a legal basis it never looked at,
+    // which is rule 2's whole point and the one place in this table where getting it wrong
+    // puts a wrong statutory citation on a client's permanent onboarding record. A different
+    // (or absent) test falls through to the generic `key: value` rendering, which still shows
+    // the determination and the test verbatim and claims nothing about the statute.
+    if (str(r.test) !== "ca2016_s244_private_entity") return null;
     return phrase(t, { key: `mpersEligibility.${determination}` });
   },
 

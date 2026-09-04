@@ -113,9 +113,19 @@ async function loadClientOnboarding(clientId: string, s: SessionTokenAccessor): 
   // is `required_for_commit: false` and none of those keys — so removing it here cannot make
   // this card claim a gate the DB would not.
   const items = rows.filter((row) => !isInternalItemKey(row.item_key));
+  if (plan.state !== "open") {
+    // THE SEED READ IS SKIPPED ON A SETTLED PLAN, and that is not a micro-optimisation.
+    // `hasFinalizedOpeningSeed` exists for ONE consumer — `commitBlockReason`'s
+    // `opening_position_required` arm — and the settled card has no commit gate to compute.
+    // It also THROWS BY DESIGN rather than degrading to a boolean (see its own doc comment in
+    // lib/onboarding/api.ts: a `false` fallback would disable Confirm on a gate this card
+    // cannot prove is warranted). Awaiting it here meant an unreadable `opening_seed_registry`
+    // withdrew the whole RECEIPT into an error state over a value the receipt never uses —
+    // a read that can only lose. The live arm below still reads it, and still propagates.
+    return { kind: "settled", client, plan, items, openingSeedFinalized: false };
+  }
   const openingSeedFinalized = await hasFinalizedOpeningSeed(clientId, plan.id, { session: s });
-  const shape: PlanShape = { client, plan, items, openingSeedFinalized };
-  return plan.state === "open" ? { kind: "plan", ...shape } : { kind: "settled", ...shape };
+  return { kind: "plan", client, plan, items, openingSeedFinalized };
 }
 
 /** `resolve_onboarding_plan_item` counts an item "completed" toward Q9's
@@ -152,25 +162,36 @@ function openingPositionCaptured(items: OnboardingPlanItemRow[], openingSeedFina
 /** F2 fix (rev-t11 finding): the card's ONE piece of judgement logic, now
  *  covering every commit_client_onboarding CLR10 arm this card can HONESTLY
  *  compute from data it already holds — in the LIVE body's OWN precedence
- *  order (0018_gate_k_domain.sql SS4's site-2 split: `plan_not_open` wins
- *  over `client_not_onboarding` when both are true; `questions_unresolved`
+ *  order (0018_gate_k_domain.sql SS4's site-2 split; `questions_unresolved`
  *  and `opening_position_required` follow, in body order). Returns the
- *  FIRST blocking reason, or `null` once none of the four hold — deliberately
+ *  FIRST blocking reason, or `null` once none of them hold — deliberately
  *  NOT the CLR05 checker arms (`checker_required`/`distinct_checker`/
  *  `self_attestation`): this card never guesses whether a distinct checker
  *  exists, and CLR06 `stale_plan` is inherently a race only the DB can
  *  resolve. Every reason this function returns null for is not a claim the
  *  door will succeed — only that this card found no reason of its own to
- *  block the attempt. */
-type CommitBlockReason = "plan_not_open" | "client_not_onboarding" | "questions_unresolved" | "opening_position_required";
+ *  block the attempt.
+ *
+ *  THE `plan_not_open` ARM IS GONE, and this is where that is recorded rather
+ *  than only in a test. It mirrored the live body's first CLR10 arm, and while
+ *  the card rendered its doors for a plan in ANY state it was the arm that
+ *  disabled Confirm on a settled plan. CB-AE2E-023 made it unreachable: a
+ *  non-open plan now routes to `SettledOnboardingCard` before this function is
+ *  ever called (see `loadClientOnboarding`'s own return), so the door that
+ *  could only be refused is not rendered at all — a stronger guarantee than a
+ *  disabled button, and one that leaves no state for this arm to test. It is
+ *  deleted rather than left as a dead branch beside live ones, which would
+ *  read as a claim that both are reachable. `client_not_onboarding` below is
+ *  therefore now the first arm, and it is still correct on its own: the live
+ *  body's precedence only mattered while BOTH could be true here, and the
+ *  plan-state half can no longer arrive. */
+type CommitBlockReason = "client_not_onboarding" | "questions_unresolved" | "opening_position_required";
 
 function commitBlockReason(
   client: OnboardingClientRow | null,
-  plan: OnboardingPlanRow,
   items: OnboardingPlanItemRow[],
   openingSeedFinalized: boolean,
 ): CommitBlockReason | null {
-  if (plan.state !== "open") return "plan_not_open";
   if (client && client.status !== "onboarding") return "client_not_onboarding";
   if (hasUnresolvedRequiredItem(items)) return "questions_unresolved";
   if (!openingPositionCaptured(items, openingSeedFinalized)) return "opening_position_required";
@@ -332,7 +353,7 @@ function ClientOnboardingCard({ clientId, session }: { clientId: string; session
         // full, ordered `commitBlockReason`; Cancel's by `plan.state`
         // check cancel_client_onboarding's own body makes (0017:2862-2864:
         // `cl.status<>'onboarding' or p.state<>'open'`).
-        const blockReason = commitBlockReason(data.client, plan, items, data.openingSeedFinalized);
+        const blockReason = commitBlockReason(data.client, items, data.openingSeedFinalized);
         const cancelBlocked = plan.state !== "open";
         // ============================================================================
         // 裁-187 (owner, 2026-09-04) — ATTESTATION CEREMONIES ARE ABOLISHED.

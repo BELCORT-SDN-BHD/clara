@@ -355,11 +355,12 @@ test("COMMIT gate — plan_not_open: a settled plan offers NO commit door at all
   // routes to the settled RECEIPT, which renders no Commit and no Cancel trigger — so the
   // dialog that could only ever be refused is not reachable, rather than reachable-and-inert.
   //
-  // `commitBlockReason`'s own `plan_not_open` arm STAYS in the card. It is unreachable from
-  // this face now, and it is kept deliberately: it mirrors the live door's ORDERED arms, and
-  // its sibling `client_not_onboarding` is only correct because `plan_not_open` is tested
-  // first (0018_gate_k_domain.sql SS4's site-2 split pins that precedence). Its unit-level
-  // proof lives in this file's remaining three gate cells, which all still open a real dialog.
+  // `commitBlockReason`'s own `plan_not_open` arm is GONE (fold, review-546 nit 4), and so is
+  // its message key. It was unreachable the moment a non-open plan stopped reaching this
+  // function at all, and a dead branch beside live ones reads as a claim that both are
+  // reachable — the card's own doc comment now records why, rather than only this test. The
+  // remaining three gate arms are proved by this file's other cells, which all open a real
+  // dialog on a genuinely open plan.
   const { impl, commitCalls } = buildMock({ plan: COMMITTED_PLAN, items: [SETTLED_ITEM], client: CLIENT_ONBOARDING, seed: FINALIZED_SEED });
   await withMockedEnv(impl, async () => {
     const { h, body } = await mount();

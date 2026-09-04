@@ -192,11 +192,38 @@ test("H-28 — an UNCHANGED park across repeated polls provokes NO extra plan re
       for (let i = 0; i < 12; i++) await h.settle();
       assert.equal(itemReads.length, readsBefore, `an unchanged park is not news; saw ${itemReads.length - readsBefore} extra read(s)`);
 
-      // And a park that goes BACKWARDS (a resumed run re-reporting an earlier index) is not
-      // progress either — it must not fire, and it must not lower the watermark.
-      runtime.parkIndex = 0;
+      // ==============================================================================
+      // A park that goes BACKWARDS — a resumed run re-reporting an earlier index.
+      // ==============================================================================
+      // THIS BLOCK USED TO BE VACUOUS, and the fold round caught it. It set
+      // `runtime.parkIndex = 0` and then settled: but settling is a 0 ms hop and the poll is
+      // POLL_MS = 3000, so nothing re-read `/state` at all. The mock's new value was never
+      // fetched, the effect never re-ran, and "no extra read" was true because NOTHING
+      // happened — an absence measured on an instrument that was switched off. Worse, both
+      // `InterviewRunCard`'s comment and the PR body cited this cell as the arm that justifies
+      // `<=` over `<`.
+      //
+      // It now drives a REAL read, through the same product path the cell above uses. First a
+      // genuine advance, so the watermark is 2 rather than 1 and the backward step is
+      // unambiguous; then the runtime is wound back so its answer handler's `+= 1` lands on 0,
+      // and `submitAnswer`'s own `refresh()` fetches a `/state` that really does report 0.
+      await answerCurrentPark(h, "ROME PUBLIC ADVISORY");
       for (let i = 0; i < 8; i++) await h.settle();
-      assert.equal(itemReads.length, readsBefore, "a lower index is not an advance");
+      const readsAtWatermark2 = itemReads.length;
+      assert.equal(readsAtWatermark2, readsBefore + 1, "positive control: the advance to park 2 DID provoke a read");
+
+      runtime.parkIndex = -1; // the answer handler's `+= 1` makes the next reported park 0
+      await answerCurrentPark(h, "ROME PUBLIC ADVISORY AGAIN");
+      for (let i = 0; i < 8; i++) await h.settle();
+
+      // The read genuinely happened and genuinely reported a LOWER index — proved here rather
+      // than assumed, so this can never silently go back to measuring nothing.
+      assert.equal(runtime.parkIndex, 0, "the runtime really did report a park BELOW the watermark of 2");
+      assert.equal(
+        itemReads.length,
+        readsAtWatermark2,
+        `a lower index is not an advance; saw ${itemReads.length - readsAtWatermark2} extra read(s)`,
+      );
     } finally {
       await h.unmount();
       for (let i = 0; i < 3; i++) await h.settle();

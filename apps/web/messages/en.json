@@ -166,6 +166,7 @@
     "addClientConfirm": "Begin onboarding",
     "addClientNameLabel": "Client name",
     "addClientNamePlaceholder": "Legal or trading name",
+    "addClientNotPermitted": "Clara re-checked what your role may do before calling the door, and this dispatch is no longer permitted. Nothing was sent.",
     "addClientAuthorityUnreadable": "Clara could not read what your role is allowed to do, so the Add client control is not offered. This is a failed read, not a decision about your role.",
     "statuses": {
       "active": "Active",
@@ -2984,7 +2985,6 @@
       "commitDescription": "This activates {client} and closes the plan ({completed} of {total} items settled). The client can then be worked in its own workspace.",
       "commitConfirm": "Commit onboarding",
       "commitBlocked": {
-        "plan_not_open": "This plan is no longer open — it cannot be committed again.",
         "client_not_onboarding": "This client's status is no longer \"onboarding\".",
         "questions_unresolved": "A required item is still pending — resolve it before committing.",
         "opening_position_required": "An opening position is required before activation — settle or defer it first."
@@ -3001,7 +3001,7 @@
       "receiptCancelledAt": "Cancelled",
       "receiptCancelledBy": "Cancelled by",
       "receiptRevision": "Plan revision",
-      "receiptShowAnswers": "Show the {count} recorded answers",
+      "receiptShowAnswers": "Show the {count, plural, one {# recorded answer} other {# recorded answers}}",
       "receiptHideAnswers": "Hide the recorded answers",
       "continueOnboarding": "Continue onboarding with Clara",
       "continueOnboardingBody": "This client is still being onboarded. Clara has the interview and the checklist — open the full-screen thread to carry on.",

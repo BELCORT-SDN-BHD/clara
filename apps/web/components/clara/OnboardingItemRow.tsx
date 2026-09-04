@@ -158,8 +158,15 @@ export function OnboardingItemRow({
           onChange={(e) => setResolution(e.target.value)}
           disabled={!canResolve}
         />
-        {!isPending ? <p className="text-xs text-muted-foreground">{t("alreadySettledAmendable")}</p> : null}
-        {isPending && !planOpen ? <p className="text-xs text-muted-foreground">{t("planNotOpen")}</p> : null}
+        {/* "close this and use Amend resolution" is only true where that trigger EXISTS.
+            `canAmend` is `!isPending && planOpen`, so on a settled receipt's rows (planOpen
+            false) the old unconditional line told a professional to use a control that is not
+            on the screen and could not be — `resolve_onboarding_plan_item` refuses CLR10 on any
+            non-open plan (0017:2722). Each arm now says the thing that is true of its own row:
+            an amendable settled item points at the amend door; anything on a closed plan says
+            the plan is closed, pending or not. */}
+        {!isPending && planOpen ? <p className="text-xs text-muted-foreground">{t("alreadySettledAmendable")}</p> : null}
+        {!planOpen ? <p className="text-xs text-muted-foreground">{t("planNotOpen")}</p> : null}
       </OnboardingDoorDialog>
 
       {/* 裁-27 — the amend. Rendered only for a settled item, and only while the plan is
