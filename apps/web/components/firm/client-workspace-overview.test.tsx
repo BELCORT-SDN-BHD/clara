@@ -365,8 +365,13 @@ test("a client this session cannot see renders the not-found message and NO sect
         for (const c of ((n as { childNodes?: unknown[] }).childNodes ?? [])) walk(c);
       };
       walk(h.container);
+      // ONE h1 IN THIS FIXTURE, and the number is a property of the fixture rather than of the
+      // route. This mounts the BOARD alone; the real page also carries the workspace-identity
+      // h1 from `app/(firm)/clients/[clientId]/layout.tsx`, which #553 made a real heading on
+      // purpose and `components/shell-responsive.test.tsx` pins as the second of exactly two.
+      // The browser leg is where that pair is asserted, because only the browser mounts both.
       assert.equal(headings.filter((t) => t === "H1").length, 1, `exactly one h1 on the not-found arm; got ${headings.join(",")}`);
-      assert.equal(headings[0], "H1", `and the document opens on it; got ${headings.join(",")}`);
+      assert.equal(headings[0], "H1", `and the board opens on it; got ${headings.join(",")}`);
     } finally { await h.unmount(); }
   });
 });
