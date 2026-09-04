@@ -230,7 +230,12 @@ test("/activity opens the agent-task drawer and logs NO MISSING_MESSAGE", async 
   const result = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
   expect(result.violations, "/activity with the task drawer open").toEqual([]);
 
-  await page.getByRole("button", { name: "Close", exact: true }).click();
+  // Escape, not a click on "Close": `DialogContent` ships its own icon-only
+  // dismiss whose accessible name is ALSO "Close", so a role+name click is a
+  // strict-mode violation between the footer button and the corner X (measured
+  // — this is what the first run of this walk failed on). Escape drives the
+  // dialog's real dismiss path and needs no disambiguation.
+  await page.keyboard.press("Escape");
   await expect(page.getByText("Agent task detail")).toHaveCount(0);
 
   // H-25: the walk that minted this saw MISSING_MESSAGE four times on this
