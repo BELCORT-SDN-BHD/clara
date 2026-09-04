@@ -11,7 +11,7 @@ import assert from "node:assert/strict";
 import { createElement } from "react";
 import { NextIntlClientProvider } from "next-intl";
 import { FirmScopeProvider } from "@/components/firm-scope-provider";
-import { renderComponent, textOf, clickButton, setFieldValue } from "../../test/hookHarness";
+import { renderComponent, textOf } from "../../test/hookHarness";
 import { enableDomInspection, activeElement } from "../../test/domInspect";
 import { focusableElements, checkKeyboardWalk } from "../../test/keyboardWalk";
 import { configureSessionTokenSource, resetSessionTokenSource } from "../../lib/session-accessor";
@@ -32,14 +32,11 @@ function findIn(root: Node, predicate: (n: Node) => boolean): Node | null {
   return null;
 }
 
-/** M5 (independent review, PR #489): counts non-overlapping occurrences of
- *  `needle` in `haystack` — used to prove a SECOND rendering of a string
- *  appeared (the panel's own line was ALREADY on the page before a dialog
- *  opened; a plain `assert.match` after the click is true both before and
- *  after it and proves nothing about the dialog itself having rendered). */
-function countOccurrences(haystack: string, needle: string): number {
-  return haystack.split(needle).length - 1;
-}
+// `countOccurrences` (M5, PR #489) lived here to prove a SECOND rendering of a
+// string had appeared inside an opened dialog. Its only callers were the three
+// high-stakes-threshold cells, which 裁-187 retired with the control they drove
+// — see the note at the foot of this file. Removed rather than left unused; the
+// idiom itself is not lost, it is described in that note and in PR #489.
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
@@ -71,11 +68,10 @@ function App(children: unknown, heading: string) {
   return createElement(NextIntlClientProvider, {
     locale: "en",
     messages,
-    children: createElement(
-      FirmScopeProvider,
-      { scope: ADMIN_SCOPE },
-      createElement("div", null, createElement("h1", null, heading), children as never),
-    ),
+    children: createElement(FirmScopeProvider, {
+      scope: ADMIN_SCOPE,
+      children: createElement("div", null, createElement("h1", null, heading), children as never),
+    }),
   });
 }
 

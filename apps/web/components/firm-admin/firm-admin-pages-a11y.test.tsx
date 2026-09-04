@@ -176,7 +176,7 @@ function AdminVendorBindingsPageShadow() {
     PageShell,
     null,
     createElement(PageHeader, { title: t("pageHeading"), description: t("pageDescription") }),
-    createElement(FirmScopeProvider, { scope: ADMIN_SCOPE }, createElement(VendorBindingsPanel)),
+    createElement(FirmScopeProvider, { scope: ADMIN_SCOPE, children: createElement(VendorBindingsPanel) }),
   );
 }
 

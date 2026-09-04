@@ -64,11 +64,10 @@ function App(children: unknown, heading: string) {
   return createElement(NextIntlClientProvider, {
     locale: "en",
     messages,
-    children: createElement(
-      FirmScopeProvider,
-      { scope: ADMIN_SCOPE },
-      createElement("div", null, createElement("h1", null, heading), children as never),
-    ),
+    children: createElement(FirmScopeProvider, {
+      scope: ADMIN_SCOPE,
+      children: createElement("div", null, createElement("h1", null, heading), children as never),
+    }),
   });
 }
 

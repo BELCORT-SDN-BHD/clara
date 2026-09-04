@@ -35,6 +35,7 @@
 components/admin/invite-dialog-a11y.test.tsx
 components/admin/invite-dialog-keyboard.test.tsx
 components/admin/members-a11y.test.tsx
+components/admin/members-dates.test.tsx
 components/admin/members-keyboard.test.tsx
 components/admin/members-single-fire.test.tsx
 components/admin/members-walls.test.tsx
@@ -99,12 +100,14 @@ components/firm-admin/firm-admin-keyboard.test.tsx
 components/firm-admin/firm-admin-pages-a11y.test.tsx
 components/firm-admin/vendor-binding-ceremony.test.tsx
 components/firm-nav.test.tsx
+components/firm/agent-task-detail.test.tsx
 components/firm/agent-tasks-a11y.test.tsx
 components/firm/agent-tasks-keyboard.test.tsx
 components/firm/compliance-watch-affordance.test.tsx
 components/firm/needs-you-a11y.test.tsx
 components/firm/needs-you-affordances.test.ts
 components/firm/needs-you-gaps.test.tsx
+components/firm/needs-you-row-facts.test.tsx
 components/firm/onboarding-proposal.test.tsx
 components/firm/open-question-detail.test.tsx
 components/firm/staff-advance-incomplete-affordance.test.tsx
@@ -198,10 +201,12 @@ lib/firm-admin/compliance.test.ts
 lib/firm-admin/settings.test.ts
 lib/firm-admin/vendor-bindings.test.ts
 lib/firm/capabilities.test.ts
+lib/firm/navigation-label.test.ts
 lib/firm/needs-you-gaps.test.ts
 lib/firm/needs-you-links.test.ts
 lib/firm/needs-you.test.ts
 lib/firm/reads.test.ts
+lib/firm/receipt-kinds.test.ts
 lib/firm/use-async-read.test.ts
 lib/firm/use-review-queue.test.ts
 lib/identity/doors.test.ts

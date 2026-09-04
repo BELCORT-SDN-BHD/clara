@@ -92,11 +92,10 @@ async function mount(scope?: { role_rank: number | null; is_operator: boolean })
     createElement(NextIntlClientProvider, {
       locale: "en",
       messages,
-      children: createElement(
-        FirmScopeProvider,
-        { scope: scope ?? ADMIN_SCOPE },
-        createElement("div", null, createElement("h1", null, "Vendor identity bindings"), createElement(VendorBindingsPanel)),
-      ),
+      children: createElement(FirmScopeProvider, {
+        scope: scope ?? ADMIN_SCOPE,
+        children: createElement("div", null, createElement("h1", null, "Vendor identity bindings"), createElement(VendorBindingsPanel)),
+      }),
     }),
   );
   const body = (globalThis as unknown as { document: { body: { appendChild: (c: unknown) => void } } }).document.body;
