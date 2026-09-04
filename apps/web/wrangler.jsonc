@@ -57,6 +57,25 @@
     // lib/same-origin.ts compares the browser's Origin against this list rather than
     // trusting X-Forwarded-Host, which is written by whoever spoke to us.
     "CLARA_PUBLIC_ORIGINS": "https://app.clarabook.com",
+    // The Stripe mode this deployment declares, read at REQUEST time by
+    // lib/checkout/stripe-session.ts, which refuses to create a Checkout Session
+    // when the class of STRIPE_SECRET_KEY (sk_live_/rk_live_ vs sk_test_/rk_test_)
+    // disagrees with it — in either direction. Unset ⇒ checkout refuses, because
+    // "the deployment has not stated its mode" must never mean "accept anything"
+    // on a money surface.
+    //
+    // NOT A SECRET (it is a public fact about this deployment), which is why it
+    // lives here and not with `wrangler secret put` — the key itself stays a
+    // secret. THE SAME NAME AND THE SAME CLOSED VOCABULARY the runtime's webhook
+    // route already gates on (packages/runtime/lib/stripe-livemode.mjs), so both
+    // arms of one deployment read one fact; the value is spelled the way the
+    // runtime's own deploy env spells it.
+    //
+    // `test` FOR THE WHOLE BETA (裁-126/148): Stripe stays on the BELCORT sandbox
+    // account until the real-money switch, which is a deliberate, owner-run act —
+    // flipping this to `live` is one step of that ceremony (with KYB and the
+    // non-zero checkout walk), never a drive-by edit.
+    "CLARA_STRIPE_LIVEMODE": "test",
     // On apps/web this is CF-Connecting-IP — the header THIS app's own Cloudflare edge
     // sets. Never X-Forwarded-For: any client can send it, and a wall keyed on a
     // client-settable header is a form field the attacker fills in. The RUNTIME's

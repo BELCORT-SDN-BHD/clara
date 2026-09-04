@@ -29,6 +29,7 @@ import { documentIngest_v2 } from "./documentIngest.v2.js";
 import { invoiceFacts_v1 } from "./invoiceFacts.v1.js";
 import { statementFacts_v1 } from "./statementFacts.v1.js";
 import { statementFacts_v2 } from "./statementFacts.v2.js";
+import { statementFacts_v3 } from "./statementFacts.v3.js";
 import { witnessFacts_v1 } from "./witnessFacts.v1.js";
 import { witnessFacts_v2 } from "./witnessFacts.v2.js";
 import { witnessFacts_v3 } from "./witnessFacts.v3.js";
@@ -94,7 +95,14 @@ export const workflows = {
   // lands inside the SAME quiesce window as that migration, with the machine held stopped
   // between them — a witness-stamped task claimed by the OLD v1 image has NO DB-side guard (the
   // mirror gap does: v2 WAITS on an Azure-stamped task rather than egressing).
-  statementFacts: statementFacts_v2,
+  // H-02/H-03/H-05: REPOINTED v2 -> v3 (period band derived from a printed statement date with
+  // a STATED basis; printed institution name resolved to the bank roster code; a failed persist
+  // settles its task instead of stranding it 'running'). UNLIKE the v1->v2 repoint above this
+  // one carries NO coupled migration and NO deploy-order obligation: v3 sends the same wire
+  // vocabulary to the same unchanged verb under v2's own engine snapshot and services bundle,
+  // so a v3 task's DB-stamped engine_id matches this image the moment this line deploys, and a
+  // rollback to v2 is fail-closed for free. statementFacts_v2 stays exported and frozen.
+  statementFacts: statementFacts_v3,
   // F-A2 openers ①②: REPOINTED v1 -> v2. Unlike PR-4's statementFacts hold-back, this repoint is
   // the intended act — `llm_witness` tasks are minted by a router literal this window's DB
   // migration moves to `:v2` in the same ceremony, and the frozen behaviour WAITS (never
@@ -488,8 +496,15 @@ export const workflowsByName: Readonly<Record<string, (input: any) => Promise<un
 // a pre-widened `clara._witness_answers_ok` refuses with CLR10, which would wedge the invoice
 // lane. Rollback is fail-closed for free (a v1 envelope simply carries no SST answer and no
 // receipt, so the arm never fires). The v1 body stays frozen, built and EXPORTED (policy (c)).
+//
+// H-02/H-03/H-05 ADD `statementFacts_v3` and repoint `statementFacts:` at it. statementFacts_v2
+// stops being the pointer and must stay EXPORTED — policy (c). Its parks are the ordinary kind
+// (a persist that raised used to leave its run retrying against a task nobody had settled), so
+// a run resuming into the frozen v2 body after the cutover is the expected case, and it must
+// find its own body and the SAME `__claraStatementWitnessServices` bundle v3 reads.
 export { statementFacts_v1 };
 export { statementFacts_v2 };
+export { statementFacts_v3 };
 // F-A2 openers ①②: witnessFacts_v1 stops being the `witnessFacts:` pointer and must stay
 // EXPORTED — policy (c). The `llm_witness` lane's parks are the deployment-window kind (the
 // behaviour WAITS on an engine-stamp mismatch rather than failing), so a run still resuming into

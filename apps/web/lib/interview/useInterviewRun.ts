@@ -22,6 +22,7 @@ import {
   foldActivityThread,
   promptEntry,
   seedThread,
+  type AnswerEcho,
   type ThreadEntry,
 } from "./thread";
 
@@ -74,6 +75,12 @@ export function useInterviewRun(args: {
   scope: "client";
   runId: string | null;
   planId: string;
+  /** H-27 — how a durable plan item's stored answer becomes the "you" bubble's text. The
+   *  interview card passes the i18n-backed formatter; omitted, `seedThread` falls back to
+   *  `echoAnswer`'s translator-free rendering, which is still ordered `key: value` text and
+   *  never a JSON blob. Read through a ref (the `sessionRef` discipline above), so a caller
+   *  handing in a fresh closure every render cannot re-arm the poll. */
+  echoAnswer?: AnswerEcho;
 }) {
   const { session, scope, runId, planId } = args;
   const [state, setState] = useState<InterviewState | null>(null);
@@ -98,6 +105,8 @@ export function useInterviewRun(args: {
   // accessor is CURRENT at call time.
   const sessionRef = useRef(session);
   sessionRef.current = session;
+  const echoRef = useRef(args.echoAnswer);
+  echoRef.current = args.echoAnswer;
 
   const putError = useCallback((next: RunError | null) => {
     errorRef.current = next;
@@ -125,7 +134,7 @@ export function useInterviewRun(args: {
    *  item/activity echo. */
   const ingest = useCallback((s: InterviewState) => {
     setState(s);
-    let next = foldActivityThread(seedThread(s.items), s.activity);
+    let next = foldActivityThread(seedThread(s.items, echoRef.current), s.activity);
     if (s.pendingPark) next = appendUnique(next, promptEntry(s.pendingPark));
     setThread(next);
   }, []);

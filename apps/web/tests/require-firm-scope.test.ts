@@ -73,7 +73,7 @@ const MEMBER: CallerContextRow = {
   is_operator: true,
 };
 
-const SESSION: ServerSession = { accessToken: "token-A", subject: SUB };
+const SESSION: ServerSession = { accessToken: "token-A", subject: SUB, email: null };
 
 const withRows = (rows: unknown[]): ScopeDeps => ({
   resolveSession: async () => SESSION,
@@ -207,7 +207,7 @@ describe("resolveFirmScope — the one decision", () => {
       },
     };
     assert.equal((await resolveFirmScope(deps)).granted, true, "control: the first firm session grants");
-    session = { accessToken: "token-B", subject: SECOND_SUB };
+    session = { accessToken: "token-B", subject: SECOND_SUB, email: null };
     await assertDenied(resolveFirmScope, deps, "no_membership");
     assert.equal(reads, 2, "the second firm session reused a cached membership object");
   });
@@ -477,10 +477,44 @@ describe("lib/supabase/server-session — the deciding halves", () => {
     assert.deepEqual(serverSessionFrom({ access_token: "t" }, { sub: SUB }), {
       accessToken: "t",
       subject: SUB,
+      email: null,
     });
     assert.equal(serverSessionFrom({ access_token: "t" }, {}), null, "a token with no verified subject");
     assert.equal(serverSessionFrom(null, { sub: SUB }), null, "a subject with no token");
     assert.equal(serverSessionFrom(null, null), null);
+  });
+
+  it("H-38: the email is the SAME TOKEN's claim, and a missing one is null — never a refusal", () => {
+    // The address Stripe receives as `customer_email` has to be bound to the
+    // token the doors on that request run under; reading it anywhere else is
+    // the split-principal shape this module's header exists to describe. So
+    // it comes out of `serverSessionFrom`'s own claims argument, beside the
+    // subject, or not at all.
+    assert.deepEqual(
+      serverSessionFrom({ access_token: "t" }, { sub: SUB, email: "aisyah@example.test" }),
+      { accessToken: "t", subject: SUB, email: "aisyah@example.test" },
+    );
+    // A session with no address is a REAL session — refusing it here would
+    // strand every caller whose journey never needs one. Each shape that
+    // cannot yield a usable string folds to null, and the consumer decides.
+    for (const claims of [
+      { sub: SUB },
+      { sub: SUB, email: "" },
+      { sub: SUB, email: "   " },
+      { sub: SUB, email: 42 },
+      { sub: SUB, email: null },
+    ]) {
+      const resolved = serverSessionFrom({ access_token: "t" }, claims);
+      assert.ok(resolved, `${JSON.stringify(claims)} refused the whole session`);
+      assert.equal(resolved.email, null, JSON.stringify(claims));
+      assert.equal(resolved.subject, SUB, "the subject survived the missing email");
+    }
+    // Trimmed, because the one consumer that sends it onward takes a Stripe
+    // 400 on a padded or empty value.
+    assert.equal(
+      serverSessionFrom({ access_token: "t" }, { sub: SUB, email: "  aisyah@example.test  " })?.email,
+      "aisyah@example.test",
+    );
   });
 
   it("RED-before: a helper that trusts the claim verbatim fails the cell above", () => {
