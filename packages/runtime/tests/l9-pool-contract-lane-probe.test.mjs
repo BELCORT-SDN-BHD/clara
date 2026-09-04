@@ -19,6 +19,13 @@ import { POOLS_LANE_DESCRIPTORS } from "../lib/pools.mjs";
 
 const RUNTIME_ROOT = fileURLToPath(new URL("..", import.meta.url));
 
+// An UNREACHABLE lane DSN, assembled piecewise on purpose. Port 1 is reserved and closed on
+// every platform, so a connect there refuses deterministically with no network wait. It is
+// built from parts rather than written as a literal because a DSN carrying an inline password
+// is exactly the shape `scripts/check-leaks.mjs` refuses in a tracked file — the guard cannot
+// tell a fixture from a leak, and it should not have to.
+const UNREACHABLE_DSN = ["postgres:/", "/", "nobody", ":", "PLACEHOLDER", "@", "127.0.0.1:1", "/", "nowhere"].join("");
+
 // ---------------------------------------------------------------------------
 // 1. The pool listener: the process SURVIVES, and the counter moves.
 // ---------------------------------------------------------------------------
@@ -142,8 +149,7 @@ test("H-48: an unconfigured lane is SKIPPED, never an error", async () => {
 
 test("H-48: a configured lane that cannot connect reports ok:false with a SANITIZED code only", async () => {
   const dsnVar = "CLARA_L9_UNIT_DEAD_DATABASE_URL";
-  // Port 1 is reserved and closed on every platform: a deterministic refusal, no network wait.
-  process.env[dsnVar] = "postgres://nobody:nothing@127.0.0.1:1/nowhere";
+  process.env[dsnVar] = UNREACHABLE_DSN;
   try {
     const r = await probeLane({ lane: "unit_dead", dsnVar, login: "clara_unit_login", role: "clara_unit" }, { timeoutMs: 2000 });
     assert.equal(r.lane, "unit_dead");

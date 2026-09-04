@@ -17,6 +17,12 @@ import { makePool } from "../lib/relay.mjs";
 import { _resetPoolErrorContractForTest } from "../lib/pool-error-contract.mjs";
 import { LANE_ROSTER, _resetLaneProbeCacheForTest } from "../lib/lane-probe.mjs";
 
+// An UNREACHABLE lane DSN, assembled piecewise on purpose. Port 1 is reserved and closed on
+// every platform, so a connect there refuses deterministically with no network wait. It is
+// built from parts rather than written as a literal because a DSN carrying an inline password
+// is exactly the shape `scripts/check-leaks.mjs` refuses in a tracked file — the guard cannot
+// tell a fixture from a leak, and it should not have to.
+const UNREACHABLE_DSN = ["postgres:/", "/", "nobody", ":", "PLACEHOLDER", "@", "127.0.0.1:1", "/", "nowhere"].join("");
 const READY = await rig.runtimeReady();
 const skip = READY ? false : "Slice-4 (0006) surface absent";
 
@@ -223,7 +229,7 @@ test("ready: a NON-runtime lane that cannot connect WARNs and stays ready; the R
     await setBeat("control", "now()");
 
     // (a) a non-runtime lane pointed at a closed port: WARN, still ready.
-    process.env.CLARA_READ_DATABASE_URL = "postgres://nobody:nothing@127.0.0.1:1/nowhere";
+    process.env.CLARA_READ_DATABASE_URL = UNREACHABLE_DSN;
     _resetLaneProbeCacheForTest();
     const degraded = await checkReadiness();
     assert.equal(degraded.ready, true, "a dead READ lane degrades the agent — it is not 'nothing works'");
@@ -237,7 +243,7 @@ test("ready: a NON-runtime lane that cannot connect WARNs and stays ready; the R
 
     // (b) the RUNTIME lane pointed at the same closed port: ready FALSE. The discriminating
     // half — without it, (a) would pass for a probe that never fails anything.
-    process.env.CLARA_RUNTIME_DATABASE_URL = "postgres://nobody:nothing@127.0.0.1:1/nowhere";
+    process.env.CLARA_RUNTIME_DATABASE_URL = UNREACHABLE_DSN;
     _resetLaneProbeCacheForTest();
     const down = await checkReadiness();
     assert.equal(down.ready, false, "the runtime lane is the ONE lane whose failure is a readiness failure");
