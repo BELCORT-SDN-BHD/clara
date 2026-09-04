@@ -14,7 +14,7 @@ import { useTranslations } from "next-intl";
 import { LoadingState, StateBanner } from "@/components/common/state";
 import { SectionHeader } from "@/components/common/section-header";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { FormattedDate } from "./formatted-date";
+import { FormattedDateTime } from "./formatted-date";
 import type { DocEntryDiffResult, EntryDiffResult } from "@/lib/journals/types";
 
 type Bundle = { entryDiff: EntryDiffResult; docDiff: DocEntryDiffResult | null };
@@ -90,6 +90,46 @@ function DocDiffSection({ docDiff }: { docDiff: DocEntryDiffResult | null }) {
   );
 }
 
+/**
+ * ONE side of a revision delta, rendered honestly.
+ *
+ * `EntryDiffDelta.before`/`.after` are `unknown` — the DB builds them from a
+ * revision's own header snapshot (clara.get_entry_diff, live body
+ * 0011_daily_loop.sql:3652-3657), so a scalar field yields a scalar and a
+ * jsonb field yields an object. The previous cut did `String(d.before ?? "—")`,
+ * which renders every object as the literal `[object Object]`. That was
+ * reachable in production, not theoretical: `journal_entries.flags` is
+ * `jsonb NOT NULL default '{}'` with a `jsonb_typeof(flags) = 'object'` CHECK
+ * (0009_coding_floor.sql:851-852) — so it is ALWAYS an object, the `?? "—"`
+ * guard could never fire for it, and every `flags` delta printed
+ * `[object Object] → [object Object]`, the one shape that tells a reviewer
+ * nothing at all about what changed.
+ *
+ * Scalars pass through. `null`/`undefined` become the product's own "none".
+ * An object or array becomes a `<details>` disclosure over the pretty-printed
+ * JSON — the idiom components/firm/firm-question-row.tsx:88-91 already uses
+ * for an opaque agent-authored payload, so a reader meets ONE shape for
+ * "structured value you may open", not two.
+ */
+function DeltaValue({ value }: { value: unknown }) {
+  const t = useTranslations("DraftsDocumentGovernance.entryDiff");
+  if (value === null || value === undefined) return <span className="text-muted-foreground">{t("valueNone")}</span>;
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    return <>{String(value)}</>;
+  }
+  const kind = Array.isArray(value) ? "array" : typeof value;
+  return (
+    <details className="inline-block align-top">
+      {/* Bare <summary>: the global `:focus-visible` outline, matching
+          components/firm/firm-question-row.tsx:88's identical disclosure. */}
+      <summary className="cursor-pointer text-muted-foreground">{t("valueDetails", { kind })}</summary>
+      <pre className="mt-1 max-w-full overflow-x-auto rounded-md bg-muted p-2 wrap-anywhere whitespace-pre-wrap">
+        {JSON.stringify(value, null, 2)}
+      </pre>
+    </details>
+  );
+}
+
 function RevisionsSection({ entryDiff }: { entryDiff: EntryDiffResult }) {
   const t = useTranslations("DraftsDocumentGovernance.entryDiff");
   if (entryDiff.revisions.length === 0) {
@@ -108,7 +148,12 @@ function RevisionsSection({ entryDiff }: { entryDiff: EntryDiffResult }) {
           <li key={rev.revision_no} className="rounded-md border border-border p-2 text-sm">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <span className="font-medium text-foreground">{t("revisionNo", { n: rev.revision_no })}</span>
-              <span className="text-xs text-muted-foreground"><FormattedDate value={rev.created_at} /></span>
+              {/* `journal_entry_revisions.created_at` is an INSTANT, not a
+                  calendar date — two revisions made the same afternoon read as
+                  the same day under <FormattedDate>, which is the surface a
+                  reader uses to tell them apart. Same class as the H-32
+                  expiry, same fix. */}
+              <span className="text-xs text-muted-foreground"><FormattedDateTime value={rev.created_at} /></span>
             </div>
             <p className="text-xs text-muted-foreground">
               {t("revisionBy", { actor: rev.actor ?? t("revisionActorUnknown") })}
@@ -118,7 +163,7 @@ function RevisionsSection({ entryDiff }: { entryDiff: EntryDiffResult }) {
               <ul className="mt-1 flex flex-col gap-0.5">
                 {rev.deltas_vs_prev.map((d, i) => (
                   <li key={`${rev.revision_no}-${d.field}-${i}`} className="text-xs text-foreground">
-                    {d.field}: {String(d.before ?? "—")} → {String(d.after ?? "—")}
+                    {d.field}: <DeltaValue value={d.before} /> → <DeltaValue value={d.after} />
                     {d.delta_cents !== null ? ` (${d.delta_cents >= 0 ? "+" : ""}${(d.delta_cents / 100).toFixed(2)})` : ""}
                   </li>
                 ))}

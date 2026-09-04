@@ -523,6 +523,58 @@ test("N3 · 裁-44 row 23: 'not read yet' and 'read, never amended' are DIFFEREN
   });
 });
 
+// ===========================================================================================
+// H-30 — the dialog's height ceiling and its scrolling body.
+// ===========================================================================================
+//
+// A CLASS-PRESENCE PIN, and stated as one. jsdom lays nothing out, so this cell cannot see
+// whether Confirm is on screen — the DISCRIMINATING instrument for that is the Playwright leg
+// in `apps/web/e2e/agentic-finish-walk.spec.ts`, which opens this exact dialog at a real
+// viewport with a many-family template and asserts the button's box is inside it. What this
+// cell holds is the shape that fix depends on, so a later edit cannot quietly drop it and
+// leave the browser leg as the only thing that would notice.
+test("H-30: the apply-chart dialog's popup carries a height ceiling, and its BODY is the part that scrolls", async () => {
+  await withFetch(chartRouter(CHART_PENDING), async () => {
+    const h = await renderComponent(App());
+    const docBody = (globalThis as unknown as { document: { body: Stub } }).document.body;
+    (docBody.appendChild as (c: unknown) => void)(h.container);
+    try {
+      await settleUntil(h, () => h.find(buttonNamed("Apply the standard chart")) !== null, "the apply trigger");
+      await clickButton(h.find(buttonNamed("Apply the standard chart"))!);
+      for (let i = 0; i < 4; i++) await h.settle();
+
+      const findIn = (root: Stub, p: (n: Stub) => boolean): Stub | null => {
+        if (p(root)) return root;
+        for (const c of ((root.childNodes as Stub[]) ?? [])) {
+          const hit = findIn(c, p);
+          if (hit) return hit;
+        }
+        return null;
+      };
+      const bySlot = (slot: string) => (n: Stub) => (n.getAttribute as ((a: string) => string | null) | undefined)?.("data-slot") === slot;
+
+      const popup = findIn(docBody, bySlot("dialog-content"));
+      assert.ok(popup, "the open dialog's popup");
+      const popupClass = String((popup.getAttribute as (a: string) => string | null)("class") ?? "");
+      assert.match(popupClass, /max-h-\[calc\(100dvh-2rem\)\]/, `the popup must be capped — dvh, not vh, so mobile browser chrome cannot push the footer off; got: ${popupClass}`);
+      assert.match(popupClass, /grid-rows-\[auto_minmax\(0,1fr\)_auto\]/, `header / scrolling body / pinned footer; got: ${popupClass}`);
+
+      const body = findIn(docBody, bySlot("dialog-body"));
+      assert.ok(body, "the dialog body slot — the fix is inert without it, because a bare grid child's implicit row would grow past the ceiling");
+      const bodyClass = String((body.getAttribute as (a: string) => string | null)("class") ?? "");
+      assert.match(bodyClass, /overflow-y-auto/, `got: ${bodyClass}`);
+      assert.match(bodyClass, /min-h-0/, `min-h-0 is load-bearing: a grid item's default min-height:auto refuses to shrink, and nothing would scroll; got: ${bodyClass}`);
+
+      // The dismiss control must NOT be inside the scrolling region, or it scrolls away.
+      const close = findIn(popup, (n) => (n.getAttribute as ((a: string) => string | null) | undefined)?.("data-slot") === "dialog-close");
+      assert.ok(close, "the popup's own close control");
+      assert.equal(findIn(body, (n) => n === close), null, "the close button stays outside the body that scrolls");
+    } finally {
+      await h.unmount();
+    }
+  });
+});
+
 test("裁-128: a chart state this build does not recognise renders its own spelling, never a known arm", async () => {
   await withFetch(chartRouter({ ...CHART_PENDING, state: "some_seventh_state" }), async () => {
     const h = await renderComponent(App());

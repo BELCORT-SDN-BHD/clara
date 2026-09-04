@@ -19,11 +19,28 @@ import { cn } from "@/lib/utils";
  * `enter-content` from being forgotten on the seventh table — the motion is
  * a property of "a table of freshly-read rows", not of whoever wrote it.
  */
-export function DataTableCard({ children, className }: { children: ReactNode; className?: string }) {
+export function DataTableCard({
+  children,
+  className,
+  label,
+}: {
+  children: ReactNode;
+  className?: string;
+  /** ADDITIVE (裁-190, the journals table). An accessible name for the
+   *  `<table>` itself. A table whose only heading is a page-level <h1> two
+   *  landmarks up is announced by a screen reader as an unnamed table, and
+   *  the journals surface now shows two tables on one route (posted entries,
+   *  and a draft's own lines). Optional on purpose: every existing call site
+   *  keeps exactly the markup it shipped with, since a WRONG name is worse
+   *  than none and naming the other twenty tables is their own lanes' call. */
+  label?: string;
+}) {
   return (
     <Card className={cn(className)}>
       <CardContent>
-        <Table className="enter-content">{children}</Table>
+        <Table className="enter-content" aria-label={label}>
+          {children}
+        </Table>
       </CardContent>
     </Card>
   );

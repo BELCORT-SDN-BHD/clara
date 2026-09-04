@@ -72,9 +72,22 @@ interface ClaraStoreState {
   railOpen: boolean;
   composerFocusRequest: ComposerFocusRequest | null;
   threads: Record<string, ClaraThreadUiState>;
+  /** 裁-117 — THE HUMAN'S EXPLICIT THREAD CHOICE, per altitude (`clientId`, or
+   *  "firm"). Until the thread menu shipped, `useActiveThreadId` had no setter at
+   *  all: the rail resolved the newest own session for the altitude and there was
+   *  no way to reach any other one, so a switcher had nowhere to write.
+   *
+   *  KEYED BY ALTITUDE, NOT BY THREAD, and the two are genuinely different maps:
+   *  `threads` above holds per-CONVERSATION state (transcript, stream, run clock)
+   *  and a selection is per-PLACE — which conversation this altitude is currently
+   *  showing. Keeping the selection here rather than in `threads` is also what
+   *  lets a new thread be selected without touching the outgoing thread's entry,
+   *  which `useActiveThread.ts:52-73` records must never be deleted while a live
+   *  SSE turn is writing into it. */
+  selectedByAltitude: Record<string, string>;
 }
 
-let state: ClaraStoreState = { railOpen: true, composerFocusRequest: null, threads: {} };
+let state: ClaraStoreState = { railOpen: true, composerFocusRequest: null, threads: {}, selectedByAltitude: {} };
 const listeners = new Set<() => void>();
 
 function emit(): void {
@@ -117,6 +130,23 @@ export const claraThreadStore = {
 
   getComposerFocusRequest(): ComposerFocusRequest | null {
     return state.composerFocusRequest;
+  },
+
+  /** 裁-117 — record the human's explicit thread choice for one altitude. The
+   *  resolver consults this BEFORE falling back to the newest own session, so a
+   *  switch survives a re-render and a navigation back to the same altitude
+   *  within the tab. It writes nothing to `threads`: selecting away from a thread
+   *  must never disturb a turn still streaming into it. */
+  selectThreadForAltitude(altitude: string, threadId: string): void {
+    if (state.selectedByAltitude[altitude] === threadId) return;
+    state = { ...state, selectedByAltitude: { ...state.selectedByAltitude, [altitude]: threadId } };
+    emit();
+  },
+
+  /** `null` when this altitude has no explicit choice — the resolver then falls
+   *  back to the newest own session, which is the pre-menu behaviour unchanged. */
+  getSelectedThreadForAltitude(altitude: string): string | null {
+    return state.selectedByAltitude[altitude] ?? null;
   },
 
   /** Authoritative — replaces the whole message list from a fresh `getMessages` read,

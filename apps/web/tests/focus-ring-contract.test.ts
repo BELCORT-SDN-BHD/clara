@@ -113,16 +113,29 @@ describe("focus-ring contract — 裁-1's 70% is declared once and obeyed everyw
     );
   });
 
-  it("VACUITY CONTROL: the scan actually finds the carriers — twelve component files, twelve class strings", () => {
+  it("VACUITY CONTROL: the scan actually finds the carriers — thirteen component files, thirteen class strings", () => {
     // Without this arm the assertion above passes trivially the day the scan
     // walks the wrong directory or the regex stops matching. The count is the
     // 2026-09-02 re-census (the P6-3 order's list of eleven was one file stale:
-    // components/admin/admin-hub.tsx had joined it). Exactly one class string
-    // per file, now that comments are stripped — see ringCarrierHits's header
-    // for why the thirteenth "occurrence" was never a carrier.
+    // components/admin/admin-hub.tsx had joined it), plus ONE from the 裁-190
+    // journals table: components/journals/journal-entries-table.tsx's sortable
+    // column header is a raw <button>, the same shape as this list's other two
+    // raw-button carriers (section-tabs and the drafts row disclosure), so it
+    // takes the shadcn ring for the same reason they do.
+    //
+    // TWO NEW <details> DISCLOSURES FROM THAT SAME TRAIN ARE DELIBERATELY NOT
+    // HERE (the status legend, and the revision-delta value formatter): a bare
+    // <summary> takes the global :focus-visible outline, which is what the
+    // product's existing disclosure at components/firm/firm-question-row.tsx:88
+    // already does. Growing this list needs a reason each time; "a new file
+    // appeared" is not one.
+    //
+    // Exactly one class string per file, now that comments are stripped — see
+    // ringCarrierHits's header for why the thirteenth "occurrence" in the
+    // earlier census was never a carrier.
     const hits = ringCarrierHits();
     const files = [...new Set(hits.map((h) => h.file))].sort();
-    assert.equal(hits.length, 12, JSON.stringify(hits, null, 2));
+    assert.equal(hits.length, 13, JSON.stringify(hits, null, 2));
     assert.deepEqual(files, [
       "components/admin/admin-hub.tsx",
       "components/clara/ClaraThreadView.tsx",
@@ -130,6 +143,7 @@ describe("focus-ring contract — 裁-1's 70% is declared once and obeyed everyw
       "components/common/section-tabs.tsx",
       "components/firm/compliance-watch-affordance.tsx",
       "components/journals/drafts-queue-panel.tsx",
+      "components/journals/journal-entries-table.tsx",
       "components/ui/badge.tsx",
       "components/ui/button.tsx",
       "components/ui/input-group.tsx",
