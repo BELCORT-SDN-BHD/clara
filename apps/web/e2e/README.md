@@ -75,6 +75,21 @@ owns the shared config — `testDir: "./e2e"`, one shared `webServer`, one brows
   RLS policy is actually exercised — only the calls made and what the surface does with the
   mocked answers; the verbatim DoorRefusal rendering is proved in the node suite instead
   (`components/command/command-do.test.tsx`).
+- `bank-close-registers-walk.spec.ts` — L7's 裁-86 browser leg: three journeys on the
+  BUILT app, each proving something a node cell cannot. (1) CB-AE2E-004 — a REFUSED
+  door keeps its dialog open, with the reason the human typed still in the field and
+  the DB's own code + message readable INSIDE the dialog; before the fix the dialog
+  closed on any settled attempt, and once it closes the page-level banner is behind the
+  modal backdrop, which is exactly the part only a browser can show. (2) H-11 /
+  CB-AE2E-016 — a year whose latest close run was ABANDONED offers a door again,
+  labelled "Restart close", where the old predicate rendered an empty door row. (3)
+  CB-AE2E-028 — the close-prep hold names the member holding it rather than the raw
+  `clara.users(id)` uuid. Axe (WCAG 2.0/2.1 A+AA) on every face touched, including the
+  face with the refused dialog OPEN. Runs on `bank-close-registers-mock.mjs`.
+- `bank-close-registers-mock.mjs` — that walk's own mock lane, a file-disjoint sibling
+  of `chat-parity-mock.mjs` and `agentic-finish-mock.mjs`, reached through one hook in
+  `serve-built.mjs`. Its two unscopeable handlers are declared and argued in
+  `e2e-fixture-ownership.test.ts`, which now censuses BOTH lane mocks.
 - `run.mjs`, `serve-built.mjs` — the build-then-serve harness; see their own headers. The two
   INTERNAL ports are overridable — `CLARA_E2E_NEXT_PORT` (default 3101) and
   `CLARA_E2E_RUNTIME_PORT` (default 3102), alongside the public `CLARA_E2E_APP_ORIGIN` — so a

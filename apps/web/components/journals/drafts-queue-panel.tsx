@@ -8,7 +8,8 @@
 // journal_lines) the same combined loader already fetched — hydrate-never-trust
 // means BOTH reads land together on every mount and after every action.
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -16,6 +17,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Table, TableBody, TableCell, TableFooter, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { EmptyState, StateBanner } from "@/components/common/state";
+import { NotBuiltNote } from "@/components/common/not-built-note";
 import { Money } from "@/components/journals/money";
 import { EntryStatusBadge, QueueSectionBadge } from "@/components/journals/entry-status-badge";
 import { EntryLinesEditor } from "@/components/journals/entry-lines-editor";
@@ -71,7 +73,7 @@ export function DraftsQueuePanel({
    *  a high-stakes entry (governance-doors.ts's own header). */
   onApproveRoutine: (entryId: string, expectedRevision: string) => void;
   /** T6: clara.withdraw_draft — abandons the draft entirely. */
-  onWithdraw: (entryId: string, reason: string, expectedRevision: string, onOk: () => void) => Promise<void>;
+  onWithdraw: (entryId: string, reason: string, expectedRevision: string, onOk: () => void) => Promise<boolean>;
 }) {
   const t = useTranslations("JournalsWorkbench.drafts");
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -88,8 +90,20 @@ export function DraftsQueuePanel({
   return (
     <div className="flex flex-col gap-2">
       {queueRows.length < queueCounts.open_drafts && (
+        // The old copy ended "Narrow the queue to see the rest" and NO
+        // narrowing control existed anywhere on this tab — a dead-end CTA. The
+        // rest genuinely cannot be reached from here: this tab calls
+        // clara.list_review_queue with `p_cursor: null` hard-wired
+        // (lib/journals/api.ts:220) and does not paginate past `p_limit`. The
+        // one surface that DOES page through the same union is /needs-you,
+        // which threads the RPC's own `next_cursor` (components/firm/
+        // needs-you-inbox.tsx's Load more). So the sentence now states the
+        // fact and the link goes where the rest of the queue actually is.
         <p className="text-sm text-warning">
-          {t("showingOf", { shown: queueRows.length, total: queueCounts.open_drafts })}
+          {t("showingOf", { shown: queueRows.length, total: queueCounts.open_drafts })}{" "}
+          <Link href="/needs-you" className="underline underline-offset-2">
+            {t("showingOfLink")}
+          </Link>
         </p>
       )}
       {queueRows.map((row) => {
@@ -129,6 +143,7 @@ export function DraftsQueuePanel({
                   key={entry.revision_token}
                   clientId={clientId}
                   entry={entry}
+                  highStakes={row.high_stakes}
                   lines={entryLines}
                   linesTruncated={linesTruncated}
                   accounts={accounts}
@@ -150,9 +165,45 @@ export function DraftsQueuePanel({
   );
 }
 
+/**
+ * THE ATTESTATION TOKENS, transcribed from the LIVE `_approve_entry_core`
+ * body's three human arms — 0016_a21_compliance_watch.sql:1424-1442, carried
+ * verbatim into the fifth recut at 0037:1992-2010 and fenced-but-BYTE-
+ * UNTOUCHED by the ninth body at 0106_f_a2_posting_core.sql:1496-1503 (which
+ * only rewrites the head to `and not coalesce(v_is_agent,false)` for the agent
+ * lane, recording that "the three human arms below are byte-untouched").
+ *
+ * These are the only two refusals an ATTESTATION can answer. `distinct_checker`
+ * — the third arm — is deliberately ABSENT: it asks for a different PERSON, and
+ * revealing a text field beside it would offer a control that cannot clear it.
+ */
+const ATTESTATION_REFUSALS: ReadonlySet<string> = new Set(["attestation_required", "self_attestation"]);
+
+/**
+ * `revise_entry`'s CLR21 gates read `e.coding_kind in ('supplier_bill',
+ * 'sales_invoice','sales_credit_note')` — 0016_a21_compliance_watch.sql:4817-4826,
+ * still the live text (packages/db/tests/f-a2-post-world.mjs:83-84 cites those
+ * exact lines as current). For those three kinds the door demands a
+ * counterparty proposal AND a non-empty evidence array, and this workbench
+ * hardcodes BOTH to null (lib/journals/api.ts's `reviseEntry`), so Revise
+ * could never do anything but produce CLR21.
+ *
+ * NOT `coding_kind === null`: the CHECK domain is FIVE values since
+ * 0037_wave_c_a_subledger.sql:499-500 ('customer_receipt' and
+ * 'supplier_payment' joined the three above), and the door's gate names only
+ * three. Gating on "is it coded at all" would hide a working control on the
+ * other two. The predicate here IS the door's predicate.
+ */
+const REVISE_REFUSING_CODING_KINDS: ReadonlySet<string> = new Set([
+  "supplier_bill",
+  "sales_invoice",
+  "sales_credit_note",
+]);
+
 function DraftDetail({
   clientId,
   entry,
+  highStakes,
   lines,
   linesTruncated,
   accounts,
@@ -166,6 +217,10 @@ function DraftDetail({
 }: {
   clientId: string;
   entry: JournalEntryRow;
+  /** The QUEUE row's own flag (`ReviewQueueRow.high_stakes`, already rendered
+   *  as a chip on the collapsed row) — it decides which door the one Approve
+   *  button calls, and the DB arbitrates if the flag is stale. */
+  highStakes: boolean;
   lines: JournalLineRow[];
   linesTruncated: boolean;
   accounts: CoaAccountRow[];
@@ -177,7 +232,7 @@ function DraftDetail({
   onApproveRoutine: (entryId: string, expectedRevision: string) => void;
   /** Returns act()'s own Promise (never rejects — hooks.ts's own contract) so
    *  JournalsDoorDialog can await it to know when the attempt SETTLED. */
-  onWithdraw: (entryId: string, reason: string, expectedRevision: string, onOk: () => void) => Promise<void>;
+  onWithdraw: (entryId: string, reason: string, expectedRevision: string, onOk: () => void) => Promise<boolean>;
 }) {
   const t = useTranslations("JournalsWorkbench.drafts");
   // FIX-5 (independent review): this whole component is now KEYED on
@@ -194,6 +249,30 @@ function DraftDetail({
   const [draftLines, setDraftLines] = useState<EntryLineInput[]>(() => toInput(lines));
   const [attestation, setAttestation] = useState("");
   const balance = sumLines(lines);
+
+  // 裁-187 / ADR-0078: the attestation CEREMONY is abolished — the click is the
+  // act. The FIELD is not deleted outright only because the DB wall is still
+  // standing until the 裁-188 wall-removal lane lands, and a wall with no way
+  // to satisfy it is a dead end. So it is hidden by default and revealed ONLY
+  // beside a door refusal that actually asks for an attestation. Before this,
+  // it was collected unconditionally and DISCARDED for every routine entry:
+  // `v_attest` is assigned only inside the high-stakes arm while the UPDATE
+  // writes `self_approval_attestation=v_attest` regardless (0016:1424-1446), so
+  // a professional could type one, click Approve, get a success, and have the
+  // text silently dropped. A control that does nothing is worse than no
+  // control.
+  const attestationDemanded = clr !== null && ATTESTATION_REFUSALS.has(clr.reason ?? "");
+  const [attestationRevealed, setAttestationRevealed] = useState(false);
+  useEffect(() => {
+    // A LATCH, not a mirror: `act()` clears err/clr at the START of the next
+    // call (lib/parts/hooks.ts), so a plain `showAttestation = demanded` would
+    // unmount the field — and lose what was typed in it — the instant the
+    // second Approve fired.
+    if (attestationDemanded) setAttestationRevealed(true);
+  }, [attestationDemanded]);
+  const showAttestation = attestationRevealed || attestationDemanded;
+
+  const reviseRefused = entry.coding_kind !== null && REVISE_REFUSING_CODING_KINDS.has(entry.coding_kind);
 
   return (
     <div className="flex flex-col gap-2 border-t border-border pt-2">
@@ -269,59 +348,98 @@ function DraftDetail({
           </>
         ) : (
           <>
-            <Input
-              aria-label={t("attestation")}
-              placeholder={t("attestationPlaceholder")}
-              value={attestation}
-              onChange={(e) => setAttestation(e.target.value)}
-              className="max-w-xs"
-            />
+            {showAttestation && (
+              <Input
+                aria-label={t("attestation")}
+                placeholder={t("attestationPlaceholder")}
+                value={attestation}
+                onChange={(e) => setAttestation(e.target.value)}
+                className="max-w-xs"
+              />
+            )}
+            {/* ONE primary approval control (CB-AE2E-021 part A). There was a
+                second, "Approve (routine)", in the governance row below, and
+                nothing on screen ever said what "routine" meant or when it
+                would refuse. It was never a second KIND of approval:
+                clara.approve_routine_entry (0011_daily_loop.sql:3211-3230, the
+                sole definition) raises CLR05 `routine_refuses_high_stakes` on
+                a high-stakes entry and otherwise DELEGATES to
+                clara.approve_entry with a null attestation — the same door.
+                So one button, routed by the queue row's own flag:
+
+                  high_stakes false -> the GUARDED door. If the flag is stale
+                    the DB refuses CLR05 verbatim rather than posting
+                    something this client thought was routine; the reload that
+                    follows brings the fresh flag and the next click routes the
+                    other way. Fail closed, then correct.
+                  high_stakes true  -> approve_entry, carrying the attestation
+                    only if a refusal has already asked for one.
+
+                The DB stays the arbiter — this component still invents no
+                client-side rule about who may approve. */}
             <Button
               type="button"
               size="sm"
               disabled={busy}
-              onClick={() => onApprove(entry.id, entry.revision_token, attestation.trim() || null)}
+              onClick={() =>
+                highStakes
+                  ? onApprove(entry.id, entry.revision_token, attestation.trim() || null)
+                  : onApproveRoutine(entry.id, entry.revision_token)
+              }
             >
-              {t("approve")}
+              {showAttestation ? t("approveAgain") : t("approve")}
             </Button>
-            <Button type="button" size="sm" variant="outline" onClick={() => setEditing(true)}>
-              {t("revise")}
-            </Button>
+            {reviseRefused ? null : (
+              <Button type="button" size="sm" variant="outline" onClick={() => setEditing(true)}>
+                {t("revise")}
+              </Button>
+            )}
           </>
         )}
       </div>
-      {!editing && <DraftGovernanceRow clientId={clientId} entry={entry} busy={busy} onApproveRoutine={onApproveRoutine} onWithdraw={onWithdraw} />}
+      {!editing && showAttestation && <p className="text-sm text-muted-foreground">{t("attestationRevealed")}</p>}
+      {/* The Revise control is GATED, not disabled-and-hoped-about: for the
+          three coded kinds the door refuses CLR21 on every single call this
+          editor can make, so the honest shape is the product's own
+          "named, not delivered" note saying exactly which two inputs are
+          missing (components/common/not-built-note.tsx — naming the door's
+          own parameters verbatim is that component's documented idiom). */}
+      {!editing && reviseRefused && <NotBuiltNote>{t("reviseNotBuilt")}</NotBuiltNote>}
+      {!editing && <DraftGovernanceRow clientId={clientId} entry={entry} busy={busy} onWithdraw={onWithdraw} />}
     </div>
   );
 }
 
-/** T6: the routine quick-approve, the withdraw door, and the diff/history
- *  toggle ("the diff IS the decision", port-wave plan §5) — grouped below the
- *  P3-shipped approve/revise row rather than folded into it, so the two
- *  approve doors (approveEntry with an attestation, approveRoutineEntry
- *  without one) stay visually distinct: both are real, DB-gated doors, and
- *  the DB's own CLR05/CLR06 refusal is the arbiter of which one a given
- *  entry actually accepts — this component invents no client-side rule about
- *  which to prefer.
+/** T6: the withdraw door and the diff/history toggle ("the diff IS the
+ *  decision", port-wave plan §5) — grouped below the approve/revise row.
  *
- *  F5 (independent review, RATIFIED AS-CONDUCTED, 2026-08-28): approve-
- *  routine below is a BARE BUTTON, not a JournalsDoorDialog, deliberately
- *  mirroring its P3 sibling `approveEntry` (drafts-queue-panel.tsx's own
- *  "Approve" button, same file) rather than the plan §5 table's literal word
- *  "dialog". Conforming: §5's substance is one governed call + a verbatim
- *  refusal in the persistent banner + no composed batch — all three hold
- *  here exactly as they do for `approveEntry`. A no-field confirmation
- *  dialog around a single click that IS already the confirming act (the row
- *  is already expanded; the button already reads "Approve (routine)") would
- *  add friction without adding a real second confirmation step. */
+ *  THE SECOND APPROVE BUTTON IS GONE (CB-AE2E-021 part A). It used to sit
+ *  here as "Approve (routine)" beside the primary "Approve", on the reasoning
+ *  — recorded in this file's own prior comment — that the DB's CLR05/CLR06
+ *  refusal should arbitrate which door an entry accepts and the component
+ *  should invent no client-side rule. That mechanism reasoning was right and
+ *  is UNCHANGED: the routing now lives on the one button in DraftDetail,
+ *  which still lets the DB refuse rather than deciding anything itself. What
+ *  was wrong was the interface: two controls a professional could not tell
+ *  apart, for what is not two kinds of approval at all
+ *  (clara.approve_routine_entry delegates to clara.approve_entry for every
+ *  entry it does not refuse — 0011_daily_loop.sql:3211-3230).
+ *
+ *  BOTH DOORS STAY EXPORTED AND TESTED in lib/journals/governance-doors.ts.
+ *  The routine door is the right one for a future BATCH approve surface (the
+ *  shape packages/db/tests/wave-a-attest.test.mjs:105-119 exercises); this
+ *  removes a button from the single-draft surface, never a verb. */
 function DraftGovernanceRow({
-  clientId, entry, busy, onApproveRoutine, onWithdraw,
+  clientId, entry, busy, onWithdraw,
 }: {
   clientId: string;
   entry: JournalEntryRow;
   busy: boolean;
-  onApproveRoutine: (entryId: string, expectedRevision: string) => void;
-  onWithdraw: (entryId: string, reason: string, expectedRevision: string, onOk: () => void) => Promise<void>;
+  // KEEP BOTH (#549 x #548). #548 retired `onApproveRoutine` with the second approval
+  // button (CB-AE2E-021 part A) — that prop is gone, and the destructure above already
+  // reflects it. #549's `Promise<boolean>` return stays: the withdraw dialog closes only
+  // on an explicit true (CB-AE2E-004), so the type must carry the outcome.
+  onWithdraw: (entryId: string, reason: string, expectedRevision: string, onOk: () => void) => Promise<boolean>;
 }) {
   const t = useTranslations("DraftsDocumentGovernance");
   const [showDiff, setShowDiff] = useState(false);
@@ -330,15 +448,6 @@ function DraftGovernanceRow({
   return (
     <div className="flex flex-col gap-2 border-t border-dashed border-border pt-2">
       <div className="flex flex-wrap items-center gap-2">
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          disabled={busy}
-          onClick={() => onApproveRoutine(entry.id, entry.revision_token)}
-        >
-          {t("approveRoutine.trigger")}
-        </Button>
         <JournalsDoorDialog
           triggerLabel={t("withdraw.trigger")}
           triggerVariant="destructive"

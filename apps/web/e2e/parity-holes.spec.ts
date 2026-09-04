@@ -23,7 +23,25 @@ async function expectAccessible(page: Page, face: string): Promise<void> {
 
 test("client A to B clears the draft, never paints A under B, and chooses the caller's own thread", async ({ page }) => {
   await signInTo(page, `/clients/${CLIENT_A}`);
-  await expect(page.getByText("Client: Rome Properties")).toBeVisible();
+  // CB-AE2E-019: the client's name became a real `<h1>`, and this string is now
+  // legitimately in the document TWICE, so a `getByText` trips strict mode.
+  //
+  // THE SECOND ELEMENT IS NEXT'S ROUTE ANNOUNCER, and the mechanism is worth
+  // stating correctly because the first version of this comment got it half
+  // right. `#__next-route-announcer__` does NOT simply "read the first h1":
+  // node_modules/next/dist/client/components/app-router-announcer.js prefers
+  // `document.title` and falls back to `document.querySelector('h1')` only when
+  // the title is empty. This app sets a CONSTANT title ("ClaraBook",
+  // app/layout.tsx's generateMetadata) with no route-level override anywhere under
+  // (firm) — and the failure this locator was changed for showed the announcer
+  // carrying "Client: Rome Properties", i.e. it took the h1 FALLBACK, because
+  // `document.title` was empty at the commit the announcer's effect ran on.
+  // Measured, not reasoned: the strict-mode error named the announcer div and its
+  // contents verbatim.
+  //
+  // Located by ROLE + LEVEL, which is the stronger locator regardless: it asserts
+  // the heading exists AS a heading, which is the thing CB-AE2E-019 changed.
+  await expect(page.getByRole("heading", { name: "Client: Rome Properties", level: 1 })).toBeVisible();
   await expect(page.getByText("Own message for client A")).toBeVisible();
   await expect(page.getByText("Colleague message must not auto-open")).toHaveCount(0);
 
@@ -40,13 +58,31 @@ test("client A to B clears the draft, never paints A under B, and chooses the ca
   await expect(page).toHaveURL(/\/clients$/);
   await page.getByRole("link", { name: "Bee Creative Solution" }).click();
   await expect(page).toHaveURL(new RegExp(`/clients/${CLIENT_B}$`));
-  await expect(page.getByText("Client: Bee Creative Solution")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Client: Bee Creative Solution", level: 1 })).toBeVisible();
   await expect(page.getByLabel("Ask Clara")).toHaveValue("");
   await expect(page.getByText("Own message for client A")).toHaveCount(0);
   await expect(page.getByText("Own message for client B")).toBeVisible();
 });
 
-test("the docked rail owns width in the shell row and never covers the workbench", async ({ page }) => {
+test("the docked rail owns width in the shell row and never covers the workbench (WIDE arm)", async ({ page }) => {
+  // CB-AE2E-019 RE-SCOPED THIS CELL. Every measurement below is unchanged and
+  // every one of them still holds — but they now describe ONE ARM of a
+  // responsive shell rather than the shell, so the viewport is stated here
+  // rather than inherited from playwright.config.ts's `Desktop Chrome` default.
+  //
+  // This is deliberately NOT a relaxation: the assertions kept their exact
+  // numbers (a 320px column, recovered to within ±2px on collapse). What changed
+  // is that the claim is now scoped to where it is true. The NARROW arm — where
+  // the rail is a fixed overlay that costs the workbench nothing — is proved
+  // separately in `responsive-shell-walk.spec.ts`, which also asserts the ARM
+  // SELECTION itself at 1280 so a breakpoint typo cannot make both specs measure
+  // the same arm and agree with each other.
+  //
+  // Setting the viewport EXPLICITLY also removes a silent dependency: if the
+  // config's default ever moved below `lg` (1024px), this cell would have begun
+  // measuring the overlay and failed for a reason that has nothing to do with
+  // the docked rail.
+  await page.setViewportSize({ width: 1280, height: 720 });
   await signInTo(page, `/clients/${CLIENT_A}`);
   await expect(page.locator("[data-clara-rail]")).toBeVisible();
 

@@ -146,7 +146,10 @@ export function AgingRegister({ clientId }: { clientId: string }) {
         />
       ) : null}
 
-      <CounterpartyHygienePanel clientId={clientId} />
+      {/* Sweep addendum item 4: rename/merge change the name — and, for a merge, the
+          rows — this page's own aging table is showing. Same `onActed={reload}` the
+          statement panel above already takes. */}
+      <CounterpartyHygienePanel clientId={clientId} onActed={reload} />
     </div>
   );
 }

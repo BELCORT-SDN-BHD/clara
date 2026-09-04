@@ -15,7 +15,7 @@ import { sessionTokenAccessor } from "@/lib/session-accessor";
 import { AuthorityCeremony } from "./fa-authority-ceremony";
 import { DepreciationRunsPanel } from "./fa-depreciation-runs-panel";
 
-export function DepreciationAuthorityPanel({ clientId }: { clientId: string }) {
+export function DepreciationAuthorityPanel({ clientId, onPosted }: { clientId: string; onPosted?: () => void }) {
   const t = useTranslations("FixedAssetsDepreciation.authority");
   const { data, err, clr, busy, act } = useHydratedPart(sessionTokenAccessor, (s) => getDepreciationAuthority(s, clientId));
 
@@ -33,7 +33,7 @@ export function DepreciationAuthorityPanel({ clientId }: { clientId: string }) {
       ) : (
         <>
           <AuthorityCeremony clientId={clientId} data={data} busy={busy} act={act} />
-          <DepreciationRunsPanel clientId={clientId} hasLiveAuthority={data.authority?.status === "live"} />
+          <DepreciationRunsPanel clientId={clientId} hasLiveAuthority={data.authority?.status === "live"} onPosted={onPosted} />
         </>
       )}
     </div>

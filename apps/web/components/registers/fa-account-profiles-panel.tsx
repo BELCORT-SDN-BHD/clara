@@ -22,9 +22,27 @@ import { sessionTokenAccessor } from "@/lib/session-accessor";
 import { FaDoorDialog } from "./FaDoorDialog";
 import type { AccountRow } from "@/lib/registers/accounts";
 
-export function FaAccountProfilesPanel({ clientId, accounts }: { clientId: string; accounts: AccountRow[] }) {
+export function FaAccountProfilesPanel({
+  clientId,
+  accounts,
+  onActed,
+}: {
+  clientId: string;
+  accounts: AccountRow[];
+  /** Fired on every SETTLED enrol/retire (sweep addendum item 2). Enrolling or
+   *  retiring an account changes the UNIVERSE `clara.fa_register_tie` walks
+   *  (`fa_account_profiles WHERE active UNION fixed_assets`, 0041:4276-4283), so the
+   *  tie banner beside this panel is stale the moment either succeeds — and it owns
+   *  its own read, which this panel's `act()` cannot reach. */
+  onActed?: () => void;
+}) {
   const t = useTranslations("FixedAssetsDepreciation.profiles");
-  const { data: profiles, loading, err, clr, busy, act } = useHydratedPart(sessionTokenAccessor, (s) => loadFaAccountProfiles(s, clientId));
+  const { data: profiles, loading, err, clr, busy, act: rawAct } = useHydratedPart(sessionTokenAccessor, (s) => loadFaAccountProfiles(s, clientId));
+  const act = async (fn: () => Promise<void>): Promise<boolean> => {
+    const ok = await rawAct(fn);
+    onActed?.();
+    return ok;
+  };
 
   return (
     <div className="flex flex-col gap-2">
@@ -68,7 +86,7 @@ function UpsertDialog({
   clientId: string;
   accounts: AccountRow[];
   busy: boolean;
-  act: (fn: () => Promise<void>) => Promise<void>;
+  act: (fn: () => Promise<void>) => Promise<boolean>;
 }) {
   const t = useTranslations("FixedAssetsDepreciation.profiles");
   const [assetAccount, setAssetAccount] = useState("");
@@ -129,7 +147,7 @@ function RetireDialog({
   clientId: string;
   assetAccount: string;
   busy: boolean;
-  act: (fn: () => Promise<void>) => Promise<void>;
+  act: (fn: () => Promise<void>) => Promise<boolean>;
 }) {
   const t = useTranslations("FixedAssetsDepreciation.profiles");
   return (

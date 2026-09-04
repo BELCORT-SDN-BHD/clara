@@ -18,6 +18,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createElement } from "react";
 import { NextIntlClientProvider } from "next-intl";
+import { FirmScopeProvider } from "@/components/firm-scope-provider";
 import { renderComponent, textOf, clickButton } from "../../test/hookHarness";
 import { enableDomInspection } from "../../test/domInspect";
 import { configureSessionTokenSource, resetSessionTokenSource } from "../../lib/session-accessor";
@@ -78,12 +79,23 @@ const BINDING_DETAIL = {
   resolutions: [],
 };
 
-async function mount() {
+// E-7 (裁-187): the vendor-bindings panel now shapes its own controls from the
+// firm layout's positively-read caller context, so these mounts supply the
+// provider the real tree always has. ADMIN rank is the fixture, because that is
+// the rank every pre-existing cell here was implicitly exercising when the
+// controls were rendered unconditionally — the BELOW-admin cases are new cells
+// of their own, not a silent change of what these ones prove.
+const ADMIN_SCOPE = { role_rank: 2, is_operator: false };
+
+async function mount(scope?: { role_rank: number | null; is_operator: boolean }) {
   const h = await renderComponent(
     createElement(NextIntlClientProvider, {
       locale: "en",
       messages,
-      children: createElement("div", null, createElement("h1", null, "Vendor identity bindings"), createElement(VendorBindingsPanel)),
+      children: createElement(FirmScopeProvider, {
+        scope: scope ?? ADMIN_SCOPE,
+        children: createElement("div", null, createElement("h1", null, "Vendor identity bindings"), createElement(VendorBindingsPanel)),
+      }),
     }),
   );
   const body = (globalThis as unknown as { document: { body: { appendChild: (c: unknown) => void } } }).document.body;
@@ -101,7 +113,7 @@ async function mount() {
   return { h, body };
 }
 
-test("Sign refusal (CLR04, insufficient rank): a real click through the dialog's own Confirm button renders the CLR code + message VERBATIM in the panel's own banner, and the dialog closes rather than showing the refusal inside it", async () => {
+test("Sign refusal (CLR04, insufficient rank): a real click through the dialog's own Confirm button renders the CLR code + message VERBATIM, and the dialog STAYS OPEN carrying it (CB-AE2E-004)", async () => {
   const calls: { url: string }[] = [];
   const impl = (async (url: RequestInfo | URL) => {
     const u = String(url);
@@ -136,13 +148,14 @@ test("Sign refusal (CLR04, insufficient rank): a real click through the dialog's
       await h.act(() => { clickButton(confirmButton as never); });
       for (let i = 0; i < 8; i++) await h.settle();
 
-      // The dialog auto-closes on every confirm attempt (success or
-      // refusal) — its own Cancel control only exists while open.
+      // CB-AE2E-004 (2026-09-04): a REFUSED confirm keeps the dialog open, and the
+      // refusal renders inside it. Its own Cancel control exists only while open, so
+      // its presence is the open signal. The old assertion demanded the opposite.
       const cancelStillOpen = findIn(body as never, (n) => n.tagName === "BUTTON" && textOf(n as never) === "Cancel");
-      assert.equal(cancelStillOpen, null, "the dialog must have closed after the confirm attempt settled");
+      assert.ok(cancelStillOpen, "the dialog must STAY OPEN after a refused confirm");
 
       const bodyText = textOf(body as never);
-      assert.match(bodyText, /CLR04/, "the CLR code must render, verbatim, in the panel's own banner");
+      assert.match(bodyText, /CLR04/, "the CLR code must render, verbatim");
       assert.match(bodyText, /insufficient rank/, "the DB's own message must render, verbatim — never re-worded");
 
       const call = calls.find((c) => c.url.includes("/rpc/sign_vendor_identity_binding"));

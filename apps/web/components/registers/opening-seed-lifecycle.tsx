@@ -16,6 +16,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { OpeningDoorDialog } from "./OpeningDoorDialog";
+import type { DialogRefusal } from "@/components/common/dialog-refusal";
 import { createOpeningSeed, cancelOpeningSeed, reopenOpeningSeed } from "@/lib/registers/opening-doors";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
 import { businessToday } from "@/lib/business-date";
@@ -59,7 +60,7 @@ export function CreateOpeningSeedDialog({
         act(async () => {
           if (!planId) return;
           await createOpeningSeed(sessionTokenAccessor, { client: clientId, plan: planId, asOf, tieDocumentId: null, tieSha256: null });
-        }).then(() => {})
+        })
       }
     >
       <div className="grid gap-1.5">
@@ -71,7 +72,7 @@ export function CreateOpeningSeedDialog({
   );
 }
 
-export function CancelOpeningSeedDialog({ seed, busy, act }: { seed: OpeningSeedRow; busy: boolean; act: (fn: () => Promise<void>) => Promise<boolean> }) {
+export function CancelOpeningSeedDialog({ seed, busy, refusal, act }: { seed: OpeningSeedRow; busy: boolean; refusal?: DialogRefusal; act: (fn: () => Promise<void>) => Promise<boolean> }) {
   const t = useTranslations("OpeningCarryDown.seed");
   const [reason, setReason] = useState("");
 
@@ -84,7 +85,8 @@ export function CancelOpeningSeedDialog({ seed, busy, act }: { seed: OpeningSeed
       confirmLabel={t("cancelTrigger")}
       busy={busy}
       confirmDisabled={!reason.trim()}
-      onConfirm={async () => { await act(async () => { await cancelOpeningSeed(sessionTokenAccessor, { seed: seed.id, reason: reason.trim() }); }); }}
+      refusal={refusal}
+      onConfirm={() => act(async () => { await cancelOpeningSeed(sessionTokenAccessor, { seed: seed.id, reason: reason.trim() }); })}
     >
       <div className="grid gap-1.5">
         <Label htmlFor="opening-seed-cancel-reason">{t("reasonLabel")}</Label>
@@ -94,7 +96,7 @@ export function CancelOpeningSeedDialog({ seed, busy, act }: { seed: OpeningSeed
   );
 }
 
-export function ReopenOpeningSeedDialog({ seed, busy, act }: { seed: OpeningSeedRow; busy: boolean; act: (fn: () => Promise<void>) => Promise<boolean> }) {
+export function ReopenOpeningSeedDialog({ seed, busy, refusal, act }: { seed: OpeningSeedRow; busy: boolean; refusal?: DialogRefusal; act: (fn: () => Promise<void>) => Promise<boolean> }) {
   const t = useTranslations("OpeningCarryDown.seed");
   const [reason, setReason] = useState("");
 
@@ -106,7 +108,8 @@ export function ReopenOpeningSeedDialog({ seed, busy, act }: { seed: OpeningSeed
       confirmLabel={t("reopenTrigger")}
       busy={busy}
       confirmDisabled={!reason.trim()}
-      onConfirm={async () => { await act(async () => { await reopenOpeningSeed(sessionTokenAccessor, { seed: seed.id, reason: reason.trim() }); }); }}
+      refusal={refusal}
+      onConfirm={() => act(async () => { await reopenOpeningSeed(sessionTokenAccessor, { seed: seed.id, reason: reason.trim() }); })}
     >
       <div className="grid gap-1.5">
         <Label htmlFor="opening-seed-reopen-reason">{t("reasonLabel")}</Label>

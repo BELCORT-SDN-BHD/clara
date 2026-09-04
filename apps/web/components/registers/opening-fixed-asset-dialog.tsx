@@ -16,6 +16,7 @@ import { Label } from "@/components/ui/label";
 import { NativeSelect } from "@/components/common/native-select";
 import { MoneyInput } from "@/components/common/money-input";
 import { OpeningDoorDialog } from "./OpeningDoorDialog";
+import type { DialogRefusal } from "@/components/common/dialog-refusal";
 import { seedFixedAsset } from "@/lib/registers/opening-item-doors";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
 import type { OpeningFixedAssetInput } from "@/lib/registers/opening-types";
@@ -54,6 +55,7 @@ export function OpeningFixedAssetDialog({
   accounts,
   keyedResolutionId,
   busy,
+  refusal,
   act,
 }: {
   clientId: string;
@@ -63,6 +65,9 @@ export function OpeningFixedAssetDialog({
    *  own doc comment on the same prop for why an untied seed needs it. */
   keyedResolutionId: string | null;
   busy: boolean;
+  /** The workbench's standing failure, rendered verbatim inside this dialog
+   *  (CB-AE2E-004 — it now stays open on a refusal). */
+  refusal?: DialogRefusal;
   act: (fn: () => Promise<void>) => Promise<boolean>;
 }) {
   const t = useTranslations("OpeningCarryDown.fixedAsset");
@@ -83,16 +88,17 @@ export function OpeningFixedAssetDialog({
       confirmLabel={t("trigger")}
       busy={busy}
       confirmDisabled={!readyToSubmit(a) || untiedAndUnresolved}
-      onConfirm={async () => {
-        await act(async () => {
+      refusal={refusal}
+      onConfirm={() =>
+        act(async () => {
           await seedFixedAsset(sessionTokenAccessor, {
             client: clientId,
             seed: seed.id,
             asset: a,
             resolution: seed.tie_document_id ? null : keyedResolutionId,
           });
-        });
-      }}
+        })
+      }
     >
       <div className="flex flex-col gap-2">
         <div className="grid gap-2 sm:grid-cols-2">

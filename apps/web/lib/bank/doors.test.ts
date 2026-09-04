@@ -105,10 +105,24 @@ test("deactivateBankAccount / remapBankAccountCoa: post the named args verbatim"
   );
 });
 
-test("enterBankStatement: posts p_header/p_lines verbatim under enter_bank_statement", async () => {
+// H-06 — RE-CUT, not merely extended. The previous cell built a seven-key header
+// and asserted `deepEqual(seenBody.p_header, header)`, which made the DEFECT the
+// pin: the header it canonised carried neither `institution_code` nor
+// `account_number`, and `clara._stmt_header_norm` reads exactly that pair first and
+// raises CLR10 `header_unreadable` when either is absent (0038:1189-1200). A
+// deepEqual against a defective literal can only ever agree with itself. The cell
+// below still proves the body is posted VERBATIM, and additionally NAMES the pair,
+// so deleting either field from `BankStatementHeaderInput` (or dropping it on the
+// way to the wire) reds this test.
+test("enterBankStatement: posts p_header/p_lines verbatim, and the header NAMES the institution/account pair the DB normalizer reads first", async () => {
   let seenUrl = "";
   let seenBody: Record<string, unknown> = {};
-  const header = { period_start: "2026-04-01", period_end: "2026-04-30", statement_date: "2026-04-30", opening_cents: 0, closing_cents: -500, total_debit_cents: 500, total_credit_cents: 0, currency: null };
+  const header = {
+    institution_code: "MBBEMYKL",
+    account_number: "5141-2233-4455",
+    period_start: "2026-04-01", period_end: "2026-04-30", statement_date: "2026-04-30",
+    opening_cents: 0, closing_cents: -500, total_debit_cents: 500, total_credit_cents: 0, currency: null,
+  };
   const lines = [{ line_no: 1, entry_date: "2026-04-05", value_date: null, description: "fee", amount_cents: -500, running_balance_cents: -500 }];
   await withMockedFetch(
     async (u, init) => {
@@ -121,6 +135,19 @@ test("enterBankStatement: posts p_header/p_lines verbatim under enter_bank_state
       assert.ok(seenUrl.includes("/rpc/enter_bank_statement"));
       assert.deepEqual(seenBody.p_header, header);
       assert.deepEqual(seenBody.p_lines, lines);
+      // The pair, asserted BY NAME and non-empty — the deepEqual above would still
+      // pass against a header literal that omitted both.
+      const posted = seenBody.p_header as Record<string, unknown>;
+      assert.equal(posted.institution_code, "MBBEMYKL");
+      assert.equal(posted.account_number, "5141-2233-4455");
+      assert.ok(String(posted.institution_code ?? "").length > 0, "institution_code must reach the wire");
+      assert.ok(String(posted.account_number ?? "").length > 0, "account_number must reach the wire");
+      // The PRINTED spelling survives — hyphens included. add_bank_account's own
+      // normalizer preserves them (0038:1190-1196) and this door digit-strips what
+      // it is handed, so a caller must never "helpfully" pre-normalize.
+      assert.ok(String(posted.account_number).includes("-"), "the printed account number is sent, not a digits-only normalization");
+      // statement_date is REQUIRED by the same normalizer (0038:1211-1218).
+      assert.equal(posted.statement_date, "2026-04-30");
       assert.equal(out.statement_id, "s1");
     },
   );

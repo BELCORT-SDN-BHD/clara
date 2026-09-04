@@ -51,8 +51,15 @@ export function StatementsSection({ clientId }: { clientId: string }) {
     sessionTokenAccessor,
     useCallback((s) => accountsKind.wrap(() => listBankAccounts(clientId, { session: s })), [clientId, accountsKind]),
   );
+  // H-06 (the sibling finding): `bankAccountId || accounts.data?.[0]?.id` silently
+  // filed a hand-keyed statement against the FIRST account before the human had
+  // picked one — harmless while the header could never succeed, load-bearing the
+  // moment it can. The picker now opens on an explicit empty choice, and the
+  // enter-statement card names the account it resolved so the target is never
+  // implicit.
   const [bankAccountId, setBankAccountId] = useState("");
-  const activeAccountId = bankAccountId || accounts.data?.[0]?.id || "";
+  const activeAccountId = bankAccountId;
+  const selectedAccount = (accounts.data ?? []).find((a) => a.id === activeAccountId) ?? null;
 
   const statementsKind = useReadErrKind();
   const loadStatements = useCallback(
@@ -128,6 +135,18 @@ export function StatementsSection({ clientId }: { clientId: string }) {
   async function submitEnter(e: FormEvent) {
     e.preventDefault();
     setFormError(null);
+    // H-06: the header's institution_code/account_number pair comes from the
+    // SELECTED account row, so there must BE one — `_persist_statement_core`
+    // compares the pair back to the named account (0038:1580-1583) and there is
+    // nothing honest to send without it.
+    if (selectedAccount === null) {
+      setFormError(t("noAccountSelected"));
+      return;
+    }
+    if (!statementDate) {
+      setFormError(t("statementDateRequired"));
+      return;
+    }
     if (!openingValid || !closingValid || openingCents === null || closingCents === null) {
       setFormError(t("invalidAmount"));
       return;
@@ -150,7 +169,13 @@ export function StatementsSection({ clientId }: { clientId: string }) {
           {
             clientId, bankAccountId: activeAccountId, documentId,
             header: {
-              period_start: periodStart, period_end: periodEnd, statement_date: statementDate || null,
+              // The PAIR the DB normalizer reads first, taken from the selected
+              // account row itself — `bank_code` and the account number AS PRINTED
+              // (0038:1190-1196 documents why the printed form, not the normalized
+              // one, is what this door wants).
+              institution_code: selectedAccount.bank_code,
+              account_number: selectedAccount.account_number,
+              period_start: periodStart, period_end: periodEnd, statement_date: statementDate,
               opening_cents: openingCents, closing_cents: closingCents,
               total_debit_cents: null, total_credit_cents: null, currency: null,
             },
@@ -187,13 +212,14 @@ export function StatementsSection({ clientId }: { clientId: string }) {
           <SectionHeader level={2}>{t("accountPickerHeading")}</SectionHeader>
         </CardHeader>
         <CardContent>
-          <ReadState hasData={accounts.data !== null} err={accounts.err} errKind={accountsKind.kind} isEmpty={accounts.data?.length === 0} onRetry={() => void accounts.reload()}>
+          <ReadState hasData={accounts.data !== null} err={accounts.err} errKind={accountsKind.kind} isEmpty={accounts.data?.length === 0} emptyCopy={t("emptyAccounts")} onRetry={() => void accounts.reload()}>
             <NativeSelect
               aria-label={t("accountPickerHeading")}
               className="w-full"
               value={activeAccountId}
               onChange={(e) => setBankAccountId(e.target.value)}
             >
+              <option value="">{t("accountPickerChoose")}</option>
               {(accounts.data ?? []).map((a) => (
                 <option key={a.id} value={a.id}>{a.bank_name_display} · {a.account_number}</option>
               ))}
@@ -208,6 +234,13 @@ export function StatementsSection({ clientId }: { clientId: string }) {
         </CardHeader>
         <CardContent>
           <form onSubmit={submitEnter} className="flex flex-col gap-3">
+            <p className="text-sm text-muted-foreground">
+              {selectedAccount
+                ? t("enterTargetAccount", {
+                    account: `${selectedAccount.bank_name_display} · ${selectedAccount.account_number}`,
+                  })
+                : t("enterNoTargetAccount")}
+            </p>
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="grid gap-1.5">
                 <Label htmlFor="document-id">{t("documentIdLabel")}</Label>
@@ -215,7 +248,7 @@ export function StatementsSection({ clientId }: { clientId: string }) {
               </div>
               <div className="grid gap-1.5">
                 <Label htmlFor="statement-date">{t("statementDateLabel")}</Label>
-                <Input id="statement-date" type="date" value={statementDate} onChange={(e) => setStatementDate(e.target.value)} />
+                <Input id="statement-date" type="date" value={statementDate} onChange={(e) => setStatementDate(e.target.value)} required />
               </div>
               <div className="grid gap-1.5">
                 <Label htmlFor="period-start">{t("periodStartLabel")}</Label>
@@ -293,7 +326,7 @@ export function StatementsSection({ clientId }: { clientId: string }) {
         </CardHeader>
         <CardContent className="flex flex-col gap-2">
           {statements.data !== null && <ActionRefusal err={statements.err} clr={statements.clr} />}
-          <ReadState hasData={statements.data !== null} err={statements.err} errKind={statementsKind.kind} isEmpty={statements.data?.length === 0} onRetry={() => void statements.reload()}>
+          <ReadState hasData={statements.data !== null} err={statements.err} errKind={statementsKind.kind} isEmpty={statements.data?.length === 0} emptyCopy={t("emptyStatements")} onRetry={() => void statements.reload()}>
             <ul className="flex flex-col gap-2">
               {(statements.data ?? []).map((st) => (
                 <li key={st.id} className="enter-content flex flex-col gap-2 rounded-lg border border-border bg-card p-3 text-sm">
@@ -322,7 +355,7 @@ export function StatementsSection({ clientId }: { clientId: string }) {
                     </div>
                   </div>
                   {openStatementId === st.id && (
-                    <ReadState hasData={detailLoadedOnce} err={detail.err} errKind={detailKind.kind} onRetry={() => void detail.reload()}>
+                    <ReadState hasData={detailLoadedOnce} err={detail.err} errKind={detailKind.kind} errCopy={(message) => t("errStatementDetail", { message })} onRetry={() => void detail.reload()}>
                       {detail.data !== null && <ActionRefusal err={detail.err} clr={detail.clr} />}
                       {/* P3 polish: the last hand-rolled table in the product
                           (its own `w-full text-xs` with p-1 cells) onto the

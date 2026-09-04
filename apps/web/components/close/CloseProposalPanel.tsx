@@ -53,7 +53,10 @@ export function CloseProposalPanel({
 }) {
   const t = useTranslations("ClientClose.proposal");
   const proposals = useHydratedPart(session, (s) => (closeRunId ? listCloseProposalsForRun(closeRunId, { session: s }) : Promise.resolve([])));
-  const actAndReloadPlan = (fn: () => Promise<void>): Promise<void> => proposals.act(fn).then(() => reloadPlan());
+  // CB-AE2E-004: resolves the WRITE's outcome (the follow-up plan reload still
+  // runs either way) so a refused settle keeps its dialog and typed reason.
+  const actAndReloadPlan = (fn: () => Promise<void>): Promise<boolean> =>
+    proposals.act(fn).then((ok) => reloadPlan().then(() => ok));
 
   return (
     <section className="flex flex-col gap-2">
@@ -97,7 +100,7 @@ export function CloseProposalPanel({
 // authored attestation before it will adopt) — a title + a generic sentence
 // + Confirm, with the narrative/rationale/model/drafted-count sitting BEHIND
 // the modal, showed the human nothing of what they were actually approving.
-function AdoptDialog({ proposal, busy, onConfirm }: { proposal: CloseProposalRow; busy: boolean; onConfirm: () => Promise<void> }) {
+function AdoptDialog({ proposal, busy, onConfirm }: { proposal: CloseProposalRow; busy: boolean; onConfirm: () => Promise<boolean> }) {
   const t = useTranslations("ClientClose.proposal.adopt");
   return (
     <CloseDoorDialog triggerLabel={t("trigger")} title={t("title")} description={t("description")} confirmLabel={t("confirm")} busy={busy} onConfirm={onConfirm}>
@@ -113,7 +116,7 @@ function AdoptDialog({ proposal, busy, onConfirm }: { proposal: CloseProposalRow
   );
 }
 
-function WithdrawDialog({ busy, onConfirm }: { busy: boolean; onConfirm: (reason: string) => Promise<void> }) {
+function WithdrawDialog({ busy, onConfirm }: { busy: boolean; onConfirm: (reason: string) => Promise<boolean> }) {
   const t = useTranslations("ClientClose.proposal.withdraw");
   const [reason, setReason] = useState("");
   return (
