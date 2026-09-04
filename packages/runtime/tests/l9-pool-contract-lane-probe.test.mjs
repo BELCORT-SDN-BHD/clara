@@ -133,18 +133,19 @@ test("H-48: the readiness-critical lane is the runtime lane and nothing else", (
 test("H-48: an unconfigured lane is SKIPPED, never an error", async () => {
   const dsnVar = "CLARA_L9_UNIT_ABSENT_DATABASE_URL";
   delete process.env[dsnVar];
-  const prevTestMode = process.env.RELAY_TEST_MODE;
-  delete process.env.RELAY_TEST_MODE; // production posture: no base fallback, so genuinely unconfigured
-  try {
-    const descriptor = { lane: "unit_absent", dsnVar, login: "l", role: "r" };
-    assert.equal(laneConfigured(descriptor), false);
-    const r = await probeLane(descriptor);
-    assert.deepEqual(r, { lane: "unit_absent", skipped: true, reason: "dsn_not_configured" });
-    assert.equal(r.ok, undefined, "a skip is NOT an ok:false — /ready must not warn about a lazy lane");
-  } finally {
-    if (prevTestMode === undefined) delete process.env.RELAY_TEST_MODE;
-    else process.env.RELAY_TEST_MODE = prevTestMode;
-  }
+  // The PRODUCTION posture is reached through the explicit seam, NOT by deleting
+  // RELAY_TEST_MODE from the environment: lane-probe.mjs reads TEST_MODE at MODULE LOAD (the
+  // pools.mjs idiom), so a delete here changes nothing. An earlier draft did exactly that and
+  // passed when this file ran alone while FAILING inside the full suite, where tests/rig.mjs
+  // sets that variable before the module loads. Measured, and the seam is the fix.
+  const descriptor = { lane: "unit_absent", dsnVar, login: "l", role: "r" };
+  assert.equal(laneConfigured(descriptor, { testMode: false }), false);
+  const r = await probeLane(descriptor, { testMode: false });
+  assert.deepEqual(r, { lane: "unit_absent", skipped: true, reason: "dsn_not_configured" });
+  assert.equal(r.ok, undefined, "a skip is NOT an ok:false — /ready must not warn about a lazy lane");
+  // The other half of the branch: in TEST mode with a base source present, the same lane IS
+  // probed rather than skipped — otherwise a rig would report seven skips and prove nothing.
+  assert.equal(laneConfigured(descriptor, { testMode: true }), Boolean(process.env.PGHOST || process.env.DATABASE_URL || process.env.WORKFLOW_POSTGRES_URL || process.env.PGPORT || process.env.PGDATABASE || process.env.PGUSER));
 });
 
 test("H-48: a configured lane that cannot connect reports ok:false with a SANITIZED code only", async () => {

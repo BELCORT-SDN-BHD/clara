@@ -96,22 +96,30 @@ function hasBaseConnectionSource() {
 /**
  * Is this lane configured enough to be probed HONESTLY? Mirrors `loginConfig`'s own branching:
  * a lane DSN always counts; in test mode the base identity counts too.
+ *
+ * `opts.testMode` is an EXPLICIT seam because `TEST_MODE` is read at MODULE LOAD, as it is in
+ * pools.mjs. A cell that deleted `RELAY_TEST_MODE` from the environment to reach the production
+ * branch therefore changed nothing — and passed alone while failing inside the full suite,
+ * where `tests/rig.mjs` sets that variable before this module loads. Measured, not theorised.
+ * Production never passes it, so the production read is byte-unchanged.
  * @param {{dsnVar:string}} descriptor
+ * @param {{testMode?:boolean}} [opts]
  */
-export function laneConfigured(descriptor) {
+export function laneConfigured(descriptor, opts = {}) {
   if (process.env[descriptor.dsnVar]) return true;
-  return TEST_MODE && hasBaseConnectionSource();
+  const testMode = opts.testMode ?? TEST_MODE;
+  return testMode && hasBaseConnectionSource();
 }
 
 /**
  * Probe ONE lane. Never throws — every failure becomes a sanitized result, because a probe that
  * throws would take the readiness aggregation with it.
  * @param {{lane:string, dsnVar:string, login:string, role:string}} descriptor
- * @param {{timeoutMs?:number}} [opts]
+ * @param {{timeoutMs?:number, testMode?:boolean}} [opts]
  * @returns {Promise<{lane:string, ok?:boolean, latency_ms?:number, error?:string, skipped?:boolean, reason?:string}>}
  */
 export async function probeLane(descriptor, opts = {}) {
-  if (!laneConfigured(descriptor)) {
+  if (!laneConfigured(descriptor, opts)) {
     return { lane: descriptor.lane, skipped: true, reason: "dsn_not_configured" };
   }
   const budget = Number.isFinite(opts.timeoutMs) && opts.timeoutMs > 0 ? opts.timeoutMs : PROBE_TIMEOUT_MS;
