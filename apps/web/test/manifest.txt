@@ -128,6 +128,7 @@ components/parts/v16-act-cards.test.tsx
 components/parts/v16-action-round2.test.tsx
 components/parts/v16-cards-a11y.test.tsx
 components/parts/v16-read-cards.test.tsx
+components/password-policy.test.tsx
 components/registers/EnrolAccountDialog.test.ts
 components/registers/accounts-a11y.test.tsx
 components/registers/accounts-keyboard.test.tsx
