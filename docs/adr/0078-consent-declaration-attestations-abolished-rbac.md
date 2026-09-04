@@ -49,11 +49,11 @@ when a ruling contradicts an ADR's text outright AND permanently — both of the
 - **ADR-0011 / ADR-0018 · digest laws 57 and 58** ("firm-facing client authorization — MIA By-Laws require
   *specific* authority", "consent is typed and purpose-scoped … a grant alone does not authorize") — the
   purpose scoping SURVIVES; the per-client evidence rung is relaxed to the firm-level declaration by
-  decision 1.
-- **PRD §1's** "professional human control concentrates at the statutory boundary" parenthetical, **§2
+  decision 1, and **PRD §6 item 16(a)** carries the same relaxation.
+- **PRD §0's** "professional human control concentrates at the statutory boundary" parenthetical, **§2
   "Segregation of duties"** and **§6 item 9**; **ARCHITECTURE** §0's drawer-2 exception sentence and
-  **§3.4 Maker/checker** — each carries a strikethrough-and-supersession note pointing here, in the
-  same PR that lands this file.
+  **§3.4 Maker/checker** — each carries a supersession note pointing here — struck through where the
+  whole sentence dies, appended where only part is narrowed — in the same PR that lands this file.
 
 ## Mechanism (which lane builds what)
 
@@ -69,7 +69,10 @@ when a ruling contradicts an ADR's text outright AND permanently — both of the
   under 裁-90), the evidence-kind widening on the grant door, the auto-grant at onboarding commit, and the
   compliance register's per-client state.
 - **The UIUX lanes** remove every attestation ceremony from the web as they reach each surface — the
-  41 `attest`-keyed strings in `apps/web/messages/en.json`, the close, opening, onboarding-commit, journal
+  37 `attest`-keyed strings in `apps/web/messages/en.json` — 14 of them the OUT-of-scope SST
+  future-method surface (`ClientClose.futureAttestation.*`,
+  `FirmAdminCompliance.compliance.futureMethodStatuses.*`), leaving 23 in scope, plus 11 strings that
+  mention attestation only in their value — the close, opening, onboarding-commit, journal
   approval, bank settle and adoption dialogs — and the Admin "Change threshold" control.
 
 ## Dissents on file (each stated once, never relitigated)

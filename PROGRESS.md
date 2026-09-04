@@ -112,7 +112,7 @@ the beta-live e2e ran on 09-03/09-04, and every lane in the old table was `merge
 **that table was moved verbatim to
 [`docs/plan/completed/progress-archive-2026-08-part7.md`](docs/plan/completed/progress-archive-2026-08-part7.md)**
 (md5 `20a52f66ade141634b0fe9441d75e675`), which is the only place the per-lane build history of Wave F
-and the beta sprint is written down. The next session opens a lane when the owner asks for one.
+and the beta sprint is written down. That table is the beta sprint's closed lanes; the live lanes are in the table above.
 
 ## Next
 

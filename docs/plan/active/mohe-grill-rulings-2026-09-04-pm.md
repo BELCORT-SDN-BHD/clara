@@ -58,7 +58,7 @@ processes on a representation it cannot verify. The declaration's wording joins 
 and the lead recommends the per-client evidence rung be revisited before 上市.
 
 **Amends:** digest laws 57 and 58 (the "specific authority" and "a grant alone does not authorize" texts —
-purpose scoping SURVIVES, the per-client evidence rung is relaxed), handover **H-18**'s fix shape and
+purpose scoping SURVIVES, the per-client evidence rung is relaxed), **PRD §6 item 16(a)**, handover **H-18**'s fix shape and
 裁-182's rider. **ADR-0078 decision 1.** No separate ruling file — this entry is the text of record.
 
 ### 裁-187 — every attestation CEREMONY and every maker-checker wall is ABOLISHED; basic RBAC is the only human gate; automatic receipts stay (owner, 2026-09-04 ≈09:18–09:22 MYT; permanent)
@@ -98,7 +98,10 @@ across the migrations and their tests, `0015` → `0121`) · `firms.high_stakes_
 `finalize_close(p_self_attestation)` (`0128`), `close_attestations` and `attest_close_exception` (the
 drawer-2 per-item attestation, E-R2), `reopen_fiscal_year(p_attestation)` and B3's reopener≠closer wall ·
 the adoption attestation (ADR-0070 §11) · the onboarding commit's attestation and the opening-seed
-approval's attestation dialog · the 41 `attest`-keyed strings in `apps/web/messages/en.json`.
+approval's attestation dialog · the 37 `attest`-keyed strings in `apps/web/messages/en.json` — 14 of them
+the OUT-of-scope SST future-method surface (`ClientClose.futureAttestation.*`,
+`FirmAdminCompliance.compliance.futureMethodStatuses.*`), leaving 23 in scope, plus 11 strings that
+mention attestation only in their value.
 **Flagged as OUT of scope by the lead's reading, for the owner to pull in if he disagrees:**
 `sst_future_attestations` / `record_future_attestation` — a captured SST fact about a future method, not
 a maker-checker ceremony.
@@ -115,7 +118,7 @@ threshold verb and its control retire, and every cell that pinned a wall is re-c
 **Dissent, filed once.** Segregation of duties is the control every auditor expects; under (b) a
 bookkeeper can post any amount alone, and the receipt makes that visible afterwards, never preventable.
 Accepted by the owner as the beta's operating risk. **Amends:** digest laws 4, 25, 69, 71, 78's rider;
-PRD §1's "concentrates at the statutory boundary" parenthetical, §2 "Segregation of duties", §6 item 9;
+PRD §0's "concentrates at the statutory boundary" parenthetical, §2 "Segregation of duties", §6 item 9;
 ARCHITECTURE §0's drawer-2 exception sentence and §3.4. **ADR-0078 decision 2.** No separate ruling file.
 
 ### 裁-188 — the wall-removal database lane runs THIS session, after the P0 block (owner, ≈09:22, option (a) of 3, 「照建议」)
