@@ -447,7 +447,9 @@ comment on view clara.firm_timeline_visible is
 -- readers of this signature could reasonably read two ways.
 --
 -- IT REFUSES BELOW BOOKKEEPER RATHER THAN RETURNING ZERO ROWS. The view's own floor would make a
--- viewer's read look like an empty firm; `_human_ctx` makes it an honest CLR04 the UI renders.
+-- viewer's read look like an empty firm; the inline floor below makes it an honest CLR04 the UI
+-- renders. (The floor is written out rather than delegated to `clara._human_ctx` — see the note
+-- on the function's own header for why an invoker body cannot reach that helper.)
 create function clara.list_firm_timeline(p_after_seq bigint, p_limit int)
 returns table(
   seq               bigint,
@@ -494,11 +496,11 @@ begin
   -- IT READS THE VIEW, NOT THE BASE TABLE, and that is the one design decision in this door worth
   -- stating. Re-deriving the predicate here would leave two objects that MUST agree free to drift:
   -- a later change to the view's floor or tenant predicate would silently not reach the door, and
-  -- the page a caller gets would stop matching the surface it is a page OF. The view's own
-  -- `jwt_firm()` / `actor_role_rank()` still evaluate the CALLER's claims inside this definer —
-  -- they read `request.jwt.claims`, which is session state, not role state — so the rows are
-  -- identical either way and the floor ends up enforced twice, deliberately. `c.firm` is resolved
-  -- above only so a below-floor caller gets an honest CLR04 instead of an empty firm.
+  -- the page a caller gets would stop matching the surface it is a page OF. Under INVOKER the
+  -- view's own `jwt_firm()` / `actor_role_rank()` run as the caller and bind directly — which is
+  -- the point of the security mode, not a caveat to it — so the floor ends up enforced twice,
+  -- deliberately. `c.firm` is resolved above only so a below-floor caller gets an honest CLR04
+  -- instead of an empty firm; it is not used as a predicate here.
   return query
   select v.seq, v.event_type, v.event_description, v.client_id, v.actor, v.on_behalf_of,
          v.via_wake_kind, v.created_at
