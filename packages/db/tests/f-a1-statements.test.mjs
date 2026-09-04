@@ -243,8 +243,14 @@ test("f-a1s.b the refusal ORDER matches the live ladder, pinned by payloads that
   // structured lane's: checked when present, never mandatory. Both directions are pinned here,
   // because "admits NULL totals" must not be readable as "stops checking".
   //
-  // (totals-a) ONE channel states a total and the other does not. Still a WALL — the header
-  // agreement block refuses it, now by its own accurate name.
+  // COHORT-GATED on the CATALOG (.claude/rules/db-tests.md's succession pattern), by an EXACT
+  // signature from the SAME migration that re-cuts the core — never a bare name, and never a
+  // migration stem, which does not exist until the number is claimed at merge prep (裁-108).
+  // Both limbs keep their PRE-cohort assertion on the other branch rather than skipping.
+  const totalsRekeyed = (await rootQuery(
+    "select to_regprocedure('clara._stmt_institution_code(text)') is not null as ok")).rows[0].ok;
+
+  // (totals-a) ONE channel states a total and the other does not.
   {
     const acct = await registerAccount(sub, client);
     const { periodStart, periodEnd } = ymBounds(2026, 10);
@@ -253,9 +259,12 @@ test("f-a1s.b the refusal ORDER matches the live ladder, pinned by payloads that
     const h2 = { ...h1 }; delete h2.total_debit_cents;
     const doc = await filedStatementDoc(sub, client);
     const { taskId, engineId } = await statementWitnessTask(firm, doc.documentId);
-    await assertRaisesReason(CLR10, "readers_disagree",
+    // PRE-COHORT the v_two-keyed mandate catches it first as `totals_unreadable`; POST-COHORT the
+    // mandate no longer fires on this lane and the header-agreement block refuses it instead, by
+    // its own accurate name. It is a WALL either way — only the spelling of the refusal moves.
+    await assertRaisesReason(CLR10, totalsRekeyed ? "readers_disagree" : "totals_unreadable",
       () => persistV2(taskId, witnessReaders(engineId, h1, ch.lines.map((l) => ({ ...l })), h2, ch.lines.map((l) => ({ ...l })))),
-      "f-a1s.b(totals-a) an ASYMMETRIC printed total is still a wall — the two readers disagree about it");
+      "f-a1s.b(totals-a) an ASYMMETRIC printed total is a wall on both sides of the re-cut");
   }
 
   // (totals-b) BOTH channels state NEITHER total — the ONLY newly-admitted shape, and the one the
@@ -271,6 +280,14 @@ test("f-a1s.b the refusal ORDER matches the live ladder, pinned by payloads that
     delete h.total_debit_cents; delete h.total_credit_cents;
     const doc = await filedStatementDoc(sub, client);
     const { taskId, engineId } = await statementWitnessTask(firm, doc.documentId);
+    if (!totalsRekeyed) {
+      // PRE-COHORT: `witness` rides v_two, so a totals-less statement is refused for a property of
+      // the PAPER rather than of the read — the exact defect the re-cut exists to close.
+      await assertRaisesReason(CLR10, "totals_unreadable",
+        () => persistV2(taskId, agreeingWitnessPayload(engineId, h, ch)),
+        "f-a1s.b(totals-b) pre-re-cut, the witness lane still mandates a printed totals block");
+      return;
+    }
     const settled = await persistV2(taskId, agreeingWitnessPayload(engineId, h, ch));
     assert.equal(settled?.status, "done",
       `f-a1s.b(totals-b) a witness statement printing NO totals block must be admitted (got ${JSON.stringify(settled)})`);

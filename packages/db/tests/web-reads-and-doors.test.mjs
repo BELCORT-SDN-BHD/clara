@@ -378,6 +378,14 @@ cell("wr.10 list_firm_timeline refuses below bookkeeper, clamps its page, and pa
   assert.ok(huge.rows[0].n <= 200, `wr.10 the page ceiling is 200 (got ${huge.rows[0].n})`);
   const zero = await humanQuery(world.users.bob, "select count(*)::int as n from clara.list_firm_timeline(null, 0)");
   assert.equal(zero.rows[0].n, 1, "wr.10 a non-positive limit clamps to 1 rather than refusing");
+
+  // AND IT IS SECURITY INVOKER, alone among this cohort's doors. The view is granted and scopes
+  // itself, so the door borrows no privilege it does not need; asserting the mode here is what
+  // stops a later recut from silently promoting it and bypassing the view's own predicate.
+  const mode = await rootQuery(
+    "select prosecdef from pg_proc where oid='clara.list_firm_timeline(bigint,integer)'::regprocedure");
+  assert.equal(mode.rows[0].prosecdef, false,
+    "wr.10 list_firm_timeline is SECURITY INVOKER — the view's predicate binds, it is not re-implemented");
 });
 
 cell("wr.11 the timeline never crosses a firm boundary", async () => {
@@ -576,6 +584,39 @@ cell("wr.18 clearing to NULL is admitted, and a duplicate registration is refuse
     [null, null, null], "wr.18 all three columns are NULL after a clear");
 });
 
+cell("wr.18b clearing into an occupied unregistered-name slot refuses BY NAME, never a raw 23505", async () => {
+  // THE OTHER partial unique, which the door's own header names and which had no cell. Clearing a
+  // registration moves the row OUT of uq_counterparties_client_registration and INTO
+  // uq_counterparties_client_unregistered_name — so a same-name, same-kind party that already
+  // holds that slot is a collision the door must name. A typo in the index name inside the door
+  // would fall through to a bare 23505, which is exactly what this asserts against.
+  const stamp = Date.now();
+  const name = `WR18B VENDOR ${stamp} SDN BHD`;
+  // The squatter: born WITHOUT a registration, so it occupies the unregistered-name slot.
+  await newVendor(world.users.alice, world.clients.A1, name);
+  // The subject: same name and kind, but born WITH a registration, so it lives in the other index
+  // and the two coexist.
+  const withReg = await runAs(human(world.users.alice),
+    `select clara.create_counterparty(p_client => $1, p_kind => 'vendor', p_name => $2,
+       p_registration_no => $3, p_op_key => $4) as r`,
+    [world.clients.A1, name, `2025${stamp}`.slice(0, 12), opk("wr-cp18b")]);
+  const subject = withReg.rows[0].r.counterparty_id;
+  assert.notEqual(subject, null, "wr.18b the registered twin was born (the fixture, not the assertion)");
+
+  const err = await expectCode(CLR23,
+    () => runAs(human(world.users.alice),
+      `select clara.set_counterparty_identifiers(p_client => $1, p_counterparty => $2,
+         p_registration_no => null, p_tin => null, p_op_key => $3) as r`,
+      [world.clients.A1, subject, opk("wr-sci-18b")]),
+    "wr.18b clearing into an occupied unregistered-name slot");
+  assert.match(String(err.detail ?? err.message), /unregistered_name_collision/,
+    "wr.18b the refusal carries its own reason token, not a bare unique violation");
+  const row = await rootQuery(
+    "select registration_normalized from clara.counterparties where id=$1", [subject]);
+  assert.ok(row.rows[0].registration_normalized,
+    "wr.18b the refused clear left the registration in place");
+});
+
 cell("wr.19 the door refuses a foreign client, a retired party, and a registration with no alphanumerics", async () => {
   const cp = await newVendor(world.users.alice, world.clients.A1, `WR19 VENDOR ${Date.now()} SDN BHD`);
   await expectCode(CLR11,
@@ -711,6 +752,17 @@ stmtCell("wr.23 _stmt_institution_code resolves at every tier, refuses ambiguity
   assert.equal(await resolve("mbb"), "MBB", "wr.23 tier 1 is case- and punctuation-insensitive");
   assert.equal(await resolve("Public Bank Berhad"), "PBB", "wr.23 tier 2 — the full name");
   assert.equal(await resolve("Maybank"), "MBB", "wr.23 tier 3 — contained in the registered name");
+
+  // PARITY WITH THE MIRROR THIS DOOR RETIRES (`statementFacts.v3.header.mjs:149,156-160`), which
+  // drops the corporate-form noise tokens and splits parentheticals. A first cut of the door
+  // compared bare alphanumerics and would have raised institution_unknown on all four of these —
+  // one `Berhad` and one `Bhd` per direction, plus the two whose match only exists once a
+  // parenthetical is split off the seeded name.
+  assert.equal(await resolve("Maybank Berhad"), "MBB", "wr.23 a Berhad suffix on a parenthetical variant");
+  assert.equal(await resolve("Public Bank Bhd"), "PBB", "wr.23 a Bhd suffix where the roster says Berhad");
+  assert.equal(await resolve("CIMB Bank Bhd"), "CIMB", "wr.23 a Bhd suffix on a plain name");
+  assert.equal(await resolve("United Overseas Bank Berhad"), "UOB",
+    "wr.23 the roster's own name is 'United Overseas Bank (Malaysia) Bhd' — the parenthetical and both noise tokens must drop");
 
   for (const [printed, reason] of [["Bank", "institution_ambiguous"], ["Banco Fittizio", "institution_unknown"], ["", "institution_unknown"]]) {
     const err = await expectCode(CLR10, () => resolve(printed), `wr.23 refusal for "${printed}"`);

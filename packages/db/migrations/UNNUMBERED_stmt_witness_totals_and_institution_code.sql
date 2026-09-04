@@ -121,37 +121,95 @@ set role clara_fn_owner;
 --           That is the tier working, not failing.
 -- INACTIVE ROWS ARE NEVER RESOLVED. `active` exists so a retired institution stops being
 -- selectable; a resolver that ignored it would re-introduce the row it was meant to retire.
+-- THE NORMALISER MATCHES THE MIRROR'S, and that equality is the whole point of the retirement.
+-- A first cut stripped to bare alphanumerics and compared; the review measured that this is
+-- STRICTLY NARROWER than `statementFacts.v3.header.mjs:149,156-160`, which drops the noise tokens
+-- `berhad` / `bhd` / `malaysia` / `malaysian` and splits parentheticals. Four real printed forms
+-- resolved in the mirror and would have raised `institution_unknown` here — `Maybank Berhad`,
+-- `Public Bank Bhd`, `CIMB Bank Bhd`, `United Overseas Bank Berhad` (the last one because UOB is
+-- seeded as "United Overseas Bank (Malaysia) Bhd"). Replacing a working mirror with a narrower
+-- door would have turned a resolved statement into a refused one, which is a regression wearing
+-- a retirement's clothes. The two are now EQUIVALENT on recognition and this door is additionally
+-- safer on STALENESS: it reads the live roster, so a bank added by a later migration is matched
+-- here and invisible to a frozen copy.
 create function clara._stmt_institution_code(p_printed text) returns text
   language plpgsql stable security definer set search_path=clara,pg_temp as $$
 declare
-  v_in    text;
+  v_tight text;   -- alnum-only, for the tier-1 CODE probe (codes are ^[A-Z0-9]{2,10}$)
+  v_words text;   -- noise-dropped, for the tier-2/3 NAME probes
   v_code  text;
   v_n     int;
 begin
-  v_in := upper(regexp_replace(coalesce(p_printed,''),'[^A-Za-z0-9]','','g'));
-  if v_in='' then
+  v_tight := upper(regexp_replace(coalesce(p_printed,''),'[^A-Za-z0-9]','','g'));
+  -- The mirror's own normalisation: split on non-alphanumerics, DROP the corporate-form and
+  -- country noise tokens, rejoin. `malaysia` is safe to drop against THIS roster because no two
+  -- seeded rows differ only by it — the mirror states the same caveat and it is re-verified by
+  -- the tail's own resolutions.
+  select upper(coalesce(string_agg(w.tok,'' order by w.ord),'')) into v_words
+    from unnest(regexp_split_to_array(
+           lower(regexp_replace(coalesce(p_printed,''),'[^A-Za-z0-9]+',' ','g')),' '))
+         with ordinality as w(tok,ord)
+   where w.tok<>'' and w.tok not in ('berhad','bhd','malaysia','malaysian');
+
+  if v_tight='' then
     raise exception 'no institution was printed on the statement header'
       using errcode='CLR10',detail='{"reason":"institution_unknown"}';
   end if;
 
-  -- tier 1 — the code itself.
+  -- tier 1 — the code itself. A primary-key probe; it can never be ambiguous.
   select bi.code into v_code from clara.bank_institutions bi
-   where bi.active and bi.code=v_in;
+   where bi.active and bi.code=v_tight;
   if v_code is not null then return v_code; end if;
 
-  -- tier 2 — the full name, normalised.
-  select count(*), min(bi.code) into v_n, v_code from clara.bank_institutions bi
-   where bi.active and upper(regexp_replace(bi.name,'[^A-Za-z0-9]','','g'))=v_in;
+  -- Tiers 2 and 3 run against the roster's MATCHABLE VARIANTS, built the way the mirror builds
+  -- them: (a) the registered name with every parenthetical removed, and (b) each parenthetical's
+  -- own content — so "Malayan Banking Berhad (Maybank)" is reachable as both "MALAYANBANKING"
+  -- and "MAYBANK", and "United Overseas Bank (Malaysia) Bhd" as "UNITEDOVERSEASBANK". A variant
+  -- shorter than three characters is DROPPED ("AmBank (M) Berhad" would otherwise offer "M",
+  -- which would collide with half the roster on containment).
+  with variants as (
+    select bi.code, regexp_replace(bi.name,'\([^)]*\)',' ','g') as v
+      from clara.bank_institutions bi where bi.active
+    union all
+    select bi.code, (regexp_matches(bi.name,'\(([^)]*)\)','g'))[1]
+      from clara.bank_institutions bi where bi.active
+  ), normed as (
+    select x.code,
+           (select upper(coalesce(string_agg(w.tok,'' order by w.ord),''))
+              from unnest(regexp_split_to_array(
+                     lower(regexp_replace(x.v,'[^A-Za-z0-9]+',' ','g')),' '))
+                   with ordinality as w(tok,ord)
+             where w.tok<>'' and w.tok not in ('berhad','bhd','malaysia','malaysian')) as nv
+      from variants x
+  )
+  select count(distinct n.code), min(n.code) into v_n, v_code
+    from normed n where length(n.nv)>=3 and n.nv=v_words;
   if v_n=1 then return v_code; end if;
   if v_n>1 then
     raise exception 'the printed institution "%" names % registered institutions', p_printed, v_n
       using errcode='CLR10',detail='{"reason":"institution_ambiguous"}';
   end if;
 
-  -- tier 3 — contained in the normalised name.
-  select count(*), min(bi.code) into v_n, v_code from clara.bank_institutions bi
-   where bi.active
-     and position(v_in in upper(regexp_replace(bi.name,'[^A-Za-z0-9]','','g')))<>0;
+  -- tier 3 — the normalised input CONTAINED in a normalised variant. This is where a vague input
+  -- lands: "Bank" is inside almost every variant, matches many, and refuses. That is the tier
+  -- working, not failing.
+  with variants as (
+    select bi.code, regexp_replace(bi.name,'\([^)]*\)',' ','g') as v
+      from clara.bank_institutions bi where bi.active
+    union all
+    select bi.code, (regexp_matches(bi.name,'\(([^)]*)\)','g'))[1]
+      from clara.bank_institutions bi where bi.active
+  ), normed as (
+    select x.code,
+           (select upper(coalesce(string_agg(w.tok,'' order by w.ord),''))
+              from unnest(regexp_split_to_array(
+                     lower(regexp_replace(x.v,'[^A-Za-z0-9]+',' ','g')),' '))
+                   with ordinality as w(tok,ord)
+             where w.tok<>'' and w.tok not in ('berhad','bhd','malaysia','malaysian')) as nv
+      from variants x
+  )
+  select count(distinct n.code), min(n.code) into v_n, v_code
+    from normed n where length(n.nv)>=3 and position(v_words in n.nv)<>0;
   if v_n=1 then return v_code; end if;
   if v_n>1 then
     raise exception 'the printed institution "%" matches % registered institutions and is not decidable', p_printed, v_n
@@ -379,6 +437,27 @@ begin
     raise exception 'stmt tail: tier 2 resolved "Public Bank Berhad" to % (expected PBB)', v_code
       using errcode='CLR10';
   end if;
+  -- THE FOUR FORMS THE FIRST CUT WOULD HAVE REFUSED. Asserted in the migration's own tail, not
+  -- only in a cell, because parity with the mirror is the reason this door replaces it: a future
+  -- recut that drops the noise-token normalisation fails at APPLY time rather than at the next
+  -- suite run. Two `Berhad`, two `Bhd`, and one of each is a parenthetical variant.
+  v_code := clara._stmt_institution_code('Maybank Berhad');
+  if v_code<>'MBB' then
+    raise exception 'stmt tail: "Maybank Berhad" resolved to % (expected MBB)', v_code using errcode='CLR10';
+  end if;
+  v_code := clara._stmt_institution_code('Public Bank Bhd');
+  if v_code<>'PBB' then
+    raise exception 'stmt tail: "Public Bank Bhd" resolved to % (expected PBB)', v_code using errcode='CLR10';
+  end if;
+  v_code := clara._stmt_institution_code('CIMB Bank Bhd');
+  if v_code<>'CIMB' then
+    raise exception 'stmt tail: "CIMB Bank Bhd" resolved to % (expected CIMB)', v_code using errcode='CLR10';
+  end if;
+  v_code := clara._stmt_institution_code('United Overseas Bank Berhad');
+  if v_code<>'UOB' then
+    raise exception 'stmt tail: "United Overseas Bank Berhad" resolved to % (expected UOB -- seeded as "United Overseas Bank (Malaysia) Bhd")', v_code
+      using errcode='CLR10';
+  end if;
   -- AND IT REFUSES. Both refusal arms are exercised here so the tail proves a wall, not a lookup.
   begin
     v_code := clara._stmt_institution_code('Bank');
@@ -401,5 +480,5 @@ begin
     end if;
   end;
 
-  raise notice 'stmt tail: OK -- _stmt_institution_code is a stable definer, clara_runtime-only, PUBLIC refused, the roster gained no grant; it resolves MBB/Maybank/Public Bank Berhad at all three tiers and REFUSES both an ambiguous and an unregistered input by named reason; the v2 witness core admits NULL printed totals while the OCR lane keeps its mandate and every other two-read control; the legacy core is byte-untouched; no period_basis column was invented.';
+  raise notice 'stmt tail: OK -- _stmt_institution_code is a stable definer, clara_runtime-only, PUBLIC refused, the roster gained no grant; it resolves MBB/Maybank/Public Bank Berhad at all three tiers, matches the v3 mirror on the four corporate-form variants it would otherwise have refused (Maybank Berhad, Public Bank Bhd, CIMB Bank Bhd, United Overseas Bank Berhad), and REFUSES both an ambiguous and an unregistered input by named reason; the v2 witness core admits NULL printed totals while the OCR lane keeps its mandate and every other two-read control; the legacy core is byte-untouched; no period_basis column was invented.';
 end $tail$;

@@ -458,7 +458,14 @@ returns table(
   on_behalf_of      uuid,
   via_wake_kind     text,
   created_at        timestamptz)
-  language plpgsql stable security definer set search_path=clara,pg_temp as $$
+  -- SECURITY INVOKER, and it is the ONLY door in this file that is. Every other one reads a
+  -- relation with no application-role grant, so it must borrow the owner's rights to see anything
+  -- at all. This one does not: `firm_timeline_visible` is SELECT-granted to clara_authenticated
+  -- and does its own scoping, so running as the caller lets the VIEW's own predicate bind rather
+  -- than being bypassed and re-implemented. `_human_ctx` is itself a definer, so the bookkeeper
+  -- floor still refuses below rank; what changes is that this function gains no privilege it does
+  -- not need.
+  language plpgsql stable security invoker set search_path=clara,pg_temp as $$
 declare
   c record;
   v_limit int;
@@ -605,6 +612,18 @@ begin
   end if;
 end $chat_splice$;
 
+-- ARCHIVE IS LIST-LEVEL ONLY, AND THAT IS THE DECISION RATHER THAN AN OVERSIGHT (裁-190 NIT 8).
+-- `archived_at` is read by the session LIST and by nothing else: `authz.mjs:180-192` does not
+-- consult it, a running SSE stream is unaffected, and `chatRoutes.ts:214` still accepts a new turn
+-- on an archived thread. Kept deliberately for beta — an archived thread that quietly resumes when
+-- a late answer arrives is safer than one that refuses a person mid-conversation, and a refusal
+-- would have to be designed (which thread does the answer land in?) rather than merely added.
+--
+-- AUTHOR-ONLY AND ONE-WAY STANDS FOR BETA (裁-117's shape). A departed colleague's firm-shared
+-- thread therefore cannot be archived by anyone, and un-archive does not exist. Both are recorded
+-- as owner questions in the PR body rather than built: adding an un-archive arm later is additive,
+-- while removing one would not be.
+--
 -- Modelled on `clara.share_chat_session` (`0006:894`) in every respect: the same viewer floor
 -- (any active member may author a session, so any active member may archive their OWN), the same
 -- author-only wall, the same `_reserve_op`/`_audit`/`_finish_op` triad, the same idempotent
@@ -683,6 +702,16 @@ comment on function clara.archive_chat_session(uuid,text) is
 -- THE PARTIAL UNIQUES REFUSE BY NAME, never as a raw 23505:
 --   uq_counterparties_client_registration      (client_id,kind,registration_normalized) WHERE reg NOT NULL
 --   uq_counterparties_client_unregistered_name (client_id,kind,name_normalized)         WHERE reg NULL
+--
+-- AND THE CONSEQUENCE OF THAT PAIR, NAMED (裁-190 NIT 13). This door is the FIRST writer that can
+-- move a LIVE counterparty between those two indexes: setting a registration takes the row out of
+-- the unregistered-name index and into the registration one, and clearing it moves it back. That
+-- changes how `create_counterparty`'s create-or-get resolves for the same client afterwards — a
+-- later birth with the same NAME no longer collides once the row carries a registration, and a
+-- later birth with the same REGISTRATION starts colliding. Before this door the assignment was
+-- fixed at birth, so nothing could move; that is a real behavioural widening and it is stated here
+-- rather than discovered. The 0062 name-only guard is unaffected and still refuses the whole
+-- NAME-ONLY class (law 59) — the movement this door permits is between indexes, never around a wall.
 do $cp_splice$
 declare
   v_sig text := 'clara._tf_counterparty_update_0011()';
@@ -921,10 +950,14 @@ begin
       ('clara.build_frontier()'::regprocedure,                                 'clara_runtime')
     ) t(s,g)
   loop
+    -- OWNERSHIP is asserted for all six; SECURITY DEFINER for five. list_firm_timeline is
+    -- deliberately INVOKER (see its own header), and asserting that EXACTLY here is what stops a
+    -- later recut from silently promoting it to definer.
     select count(*) into v_n from pg_proc p
-     where p.oid=v_sig and p.prosecdef and pg_get_userbyid(p.proowner)='clara_fn_owner';
+     where p.oid=v_sig and pg_get_userbyid(p.proowner)='clara_fn_owner'
+       and p.prosecdef = (v_sig <> 'clara.list_firm_timeline(bigint,integer)'::regprocedure);
     if v_n<>1 then
-      raise exception 'web-reads tail: %. is not a SECURITY DEFINER owned by clara_fn_owner', v_sig
+      raise exception 'web-reads tail: %. is not owned by clara_fn_owner at its expected security mode', v_sig
         using errcode='CLR10';
     end if;
     select array_agg(distinct grantee order by grantee) into v_acl
@@ -1024,6 +1057,31 @@ begin
      and column_name='archived_at' and is_nullable='YES' and data_type='timestamp with time zone';
   if v_n<>1 then
     raise exception 'web-reads tail: chat_sessions.archived_at is not a nullable timestamptz'
+      using errcode='CLR10';
+  end if;
+  -- BOTH trigger facts, re-read from the LIVE body rather than trusted from the splice's own
+  -- postcheck: the widened allowed-column set AND the one-way archive rule. The splice asserted
+  -- them at splice time; this asserts them after privileges are final, which is what the tail is
+  -- for. The two pre-existing walls are re-read with them, so a widening that quietly opened more
+  -- than one column fails here.
+  select count(*) into v_n from pg_proc p
+   where p.oid='clara._tf_chat_session_update()'::regprocedure
+     and position($p$array['visibility','archived_at']$p$ in p.prosrc)<>0
+     and position('never un-archived' in p.prosrc)<>0
+     and position('chat sessions are not deleted' in p.prosrc)<>0
+     and position('a chat session may only go private->firm' in p.prosrc)<>0;
+  if v_n<>1 then
+    raise exception 'web-reads tail: the chat-session trigger is missing the widened column set, the one-way archive rule, or a pre-existing wall'
+      using errcode='CLR10';
+  end if;
+  -- And the counterparty whitelist, the same way and for the same reason.
+  select count(*) into v_n from pg_proc p
+   where p.oid='clara._tf_counterparty_update_0011()'::regprocedure
+     and position($p$'registration_no','registration_normalized','tin'$p$ in p.prosrc)<>0
+     and position($p$v_allowed:=array['merged_into','retired_at','updated_at'];$p$ in p.prosrc)<>0
+     and position('illegal counterparty mutation' in p.prosrc)<>0;
+  if v_n<>1 then
+    raise exception 'web-reads tail: the counterparty whitelist is missing the identifier columns, the frozen merge branch, or its refusal'
       using errcode='CLR10';
   end if;
 

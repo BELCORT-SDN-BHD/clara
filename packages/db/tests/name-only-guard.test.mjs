@@ -228,8 +228,21 @@ test("NOG-7 UPDATE enriching a flagged client's existing customer is refused BY 
   assert.equal(row.registration_no, null, "NOG-7: the row is unchanged");
 });
 
-test("NOG-8 UPDATE enriching an UNFLAGGED client's customer is NOT refused by this guard, and no application role can reach the statement", async (t) => {
+/** The H-09 cohort's CATALOG witness (.claude/rules/db-tests.md's succession pattern): an EXACT
+ *  signature via to_regprocedure, never a bare name — the door is UNNUMBERED until merge prep
+ *  (裁-108) and a migration-stem witness does not exist until the number is claimed, so the
+ *  catalog is the only stable half of the pattern available here. Both limbs below keep their
+ *  PRE-cohort assertion on the other branch rather than skipping, so this file says something
+ *  true on every chain instead of going quiet on half of them. */
+async function identifiersDoorLanded() {
+  const r = await rootQuery(
+    "select to_regprocedure('clara.set_counterparty_identifiers(uuid,uuid,text,text,text)') is not null as ok");
+  return r.rows[0].ok;
+}
+
+test("NOG-8 UPDATE enriching an UNFLAGGED client's customer is NOT refused by this guard — and on a pre-H-09 chain the 0011 wall is what stops it", async (t) => {
   if (gate(t)) return;
+  const landed = await identifiersDoorLanded();
   const receipt = await createCounterparty(owner, {
     client: unflagged, kind: "customer", name: `NOG8 BUYER ${tag()} SDN BHD`,
   });
@@ -239,13 +252,23 @@ test("NOG-8 UPDATE enriching an UNFLAGGED client's customer is NOT refused by th
       where id = $1`,
     [receipt.counterparty_id],
   ));
-  // THE ONE PROPERTY THIS CELL HAS ALWAYS BEEN FOR: whatever happens to an UNFLAGGED client's
-  // customer, it is not THIS guard's doing. That is asserted first and is unchanged.
+  // THE ONE PROPERTY THIS CELL HAS ALWAYS BEEN FOR, and it holds on BOTH branches: whatever
+  // happens to an UNFLAGGED client's customer, it is not THIS guard's doing.
   if (err) assertNotThisGuard(err, "NOG-8");
-  // And since H-09 widened the whitelist, the write LANDS -- which makes the cell discriminating
-  // in a way the old CLR08 assertion no longer could: a guard that had started firing on
-  // unflagged clients would now show up as a refusal here rather than as a differently-spelled
-  // refusal that still looked like the wall doing its job.
+
+  if (!landed) {
+    // PRE-COHORT: the 0011 immutability whitelist still refuses the column write outright.
+    assert.equal(err?.code, "CLR08",
+      `NOG-8: expected 0011's CLR08 immutability wall on a pre-H-09 chain (got ${err?.code} -- ${err?.message})`);
+    const row = await counterpartyRow(receipt.counterparty_id);
+    assert.equal(row.registration_no, null, "NOG-8: the row is unchanged on a pre-H-09 chain");
+    return;
+  }
+
+  // POST-COHORT: H-09 widened the whitelist, so the write LANDS — which makes the cell
+  // discriminating in a way the old CLR08 assertion no longer could: a guard that had started
+  // firing on unflagged clients would now show up as a refusal here rather than as a
+  // differently-spelled refusal that still looked like the wall doing its job.
   assert.equal(err, null,
     `NOG-8: an unflagged client's customer may be enriched (got ${err?.code} -- ${err?.message})`);
   const row = await counterpartyRow(receipt.counterparty_id);
@@ -315,6 +338,20 @@ test("NOG-10 on an already-enriched customer: CHANGING the registration is refus
     "update clara.counterparties set registration_no = null, registration_normalized = null where id = $1",
     [born.counterparty_id],
   ));
+  if (cleared) assertNotThisGuard(cleared, "NOG-10(b)");
+
+  if (!(await identifiersDoorLanded())) {
+    // PRE-COHORT: 0011's whitelist refuses the column write for its own unrelated reason, so the
+    // limb can assert exactly what it always could and no more — whatever stopped it, it was not
+    // this guard, and the row is untouched.
+    const row = await counterpartyRow(born.counterparty_id);
+    assert.equal(row.registration_no, "202501099010",
+      "NOG-10(b): on a pre-H-09 chain the original registration is untouched");
+    return;
+  }
+
+  // POST-COHORT: the whitelist now admits the three identifier columns, so the remedy can be
+  // shown SUCCEEDING END TO END — which is what this limb always wanted and could not prove.
   assert.equal(cleared, null,
     `NOG-10(b): clearing is the remedy and must land (got ${cleared?.code} -- ${cleared?.message})`);
   const cleanedRow = await counterpartyRow(born.counterparty_id);
