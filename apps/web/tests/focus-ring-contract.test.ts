@@ -113,25 +113,39 @@ describe("focus-ring contract — 裁-1's 70% is declared once and obeyed everyw
     );
   });
 
-  it("VACUITY CONTROL: the scan actually finds the carriers — thirteen component files, thirteen class strings", () => {
+  it("VACUITY CONTROL: the scan actually finds the carriers — fourteen component files, fourteen class strings", () => {
     // Without this arm the assertion above passes trivially the day the scan
     // walks the wrong directory or the regex stops matching. The count is the
     // 2026-09-02 re-census (the P6-3 order's list of eleven was one file stale:
-    // components/admin/admin-hub.tsx had joined it). Exactly one class string
-    // per file, now that comments are stripped — see ringCarrierHits's header
-    // for why the thirteenth "occurrence" was never a carrier.
+    // components/admin/admin-hub.tsx had joined it), plus ONE from the 裁-190
+    // journals table: components/journals/journal-entries-table.tsx's sortable
+    // column header is a raw <button>, the same shape as this list's other two
+    // raw-button carriers (section-tabs and the drafts row disclosure), so it
+    // takes the shadcn ring for the same reason they do.
     //
-    // TRUED 2026-09-04 (CB-AE2E-032): twelve -> thirteen. The Tax tab's turnover
-    // classification control carries a NATIVE `<input type="date">`, which is a custom control
-    // rather than a vendored primitive, so it wears the same ring class string
-    // `components/firm/compliance-watch-affordance.tsx`'s snooze date input already wears —
-    // the SAME idiom, in a second place, which is exactly what this roster exists to record.
-    // The two chip links added on the same train are deliberately NOT here: a plain link keeps
-    // the global `:focus-visible` outline (app/globals.css's FOCUS TREATMENT note) and never
-    // suppresses it to draw a ring.
+    // TWO NEW <details> DISCLOSURES FROM THAT SAME TRAIN ARE DELIBERATELY NOT
+    // HERE (the status legend, and the revision-delta value formatter): a bare
+    // <summary> takes the global :focus-visible outline, which is what the
+    // product's existing disclosure at components/firm/firm-question-row.tsx:88
+    // already does. Growing this list needs a reason each time; "a new file
+    // appeared" is not one.
+    //
+    // Exactly one class string per file, now that comments are stripped — see
+    // ringCarrierHits's header for why the thirteenth "occurrence" in the
+    // earlier census was never a carrier.
+    //
+    // MERGE RESOLUTION 2026-09-04 — thirteen -> FOURTEEN, the UNION of two trains that each
+    // took the census from twelve to thirteen and would otherwise have deleted the other's
+    // carrier. The second is the Tax tab's turnover-classification control (CB-AE2E-032): a
+    // NATIVE `<input type="date">`, a custom control rather than a vendored primitive, wearing
+    // the same ring class string `components/firm/compliance-watch-affordance.tsx`'s snooze
+    // date input already wears — the SAME idiom in a second place, which is exactly what this
+    // roster exists to record. The two CHIP LINKS added on that train are deliberately not
+    // here, for the same reason the two `<summary>` disclosures above are not: a plain link
+    // keeps the global `:focus-visible` outline and never suppresses it to draw a ring.
     const hits = ringCarrierHits();
     const files = [...new Set(hits.map((h) => h.file))].sort();
-    assert.equal(hits.length, 13, JSON.stringify(hits, null, 2));
+    assert.equal(hits.length, 14, JSON.stringify(hits, null, 2));
     assert.deepEqual(files, [
       "components/admin/admin-hub.tsx",
       "components/clara/ClaraThreadView.tsx",
@@ -139,6 +153,7 @@ describe("focus-ring contract — 裁-1's 70% is declared once and obeyed everyw
       "components/common/section-tabs.tsx",
       "components/firm/compliance-watch-affordance.tsx",
       "components/journals/drafts-queue-panel.tsx",
+      "components/journals/journal-entries-table.tsx",
       "components/tax/TurnoverClassificationPanel.tsx",
       "components/ui/badge.tsx",
       "components/ui/button.tsx",
