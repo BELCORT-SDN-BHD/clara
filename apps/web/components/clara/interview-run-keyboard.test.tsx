@@ -200,7 +200,18 @@ test("the active-run controls and typed cancel door follow DOM tab order and con
         assert.equal(runtimeCancelBodies.length, 1, "the runtime cancel is attempted exactly once");
         assert.equal(dbCancelBodies.length, 1, "runtime 409 is ignored and the idempotent DB cancellation still runs exactly once");
         assert.equal((dbCancelBodies[0] as { p_reason: string }).p_reason, "entered twice", "the typed reason reaches the governed DB door");
-        assert.match(textOf(body as never), /This interview was cancelled\./, "the terminal copy comes from the post-cancel state read");
+        // CB-AE2E-023 — this line USED to assert the INTERVIEW card's own terminal copy
+        // ("This interview was cancelled."). It no longer can, and the reason is the change,
+        // not a regression: once the DB cancel lands, the plan re-reads `cancelled` and the
+        // checklist routes to its settled RECEIPT, which does not mount the interview card at
+        // all. Mounting it there would offer "Start / continue interview" on a closed plan —
+        // a control the runtime's own start route refuses.
+        //
+        // The post-condition is still DISCRIMINATING, and it is now a stronger one: this
+        // sentence carries the reason the human TYPED, so it can only be on screen after the
+        // governed DB cancel actually landed and the card re-read it.
+        assert.match(textOf(body as never), /This onboarding plan was cancelled: entered twice/, "the terminal copy comes from the post-cancel plan read");
+        assert.doesNotMatch(textOf(body as never), /Start \/ continue interview/, "a closed plan must not offer a run the runtime would refuse to start");
       } finally {
         await h.unmount();
         for (let i = 0; i < 5; i++) await h.settle();

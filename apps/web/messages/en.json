@@ -160,6 +160,14 @@
     "factAbsent": "—",
     "factsUnavailable": "Could not be loaded",
     "factsUnavailableNote": "Entity type and MSIC could not be loaded for this list — the client register itself is unaffected.",
+    "addClientTrigger": "Add client",
+    "addClientTitle": "Open a new client file",
+    "addClientDescription": "Creates a new client record and its onboarding plan, then opens that client's workspace. Clara runs the onboarding interview from there.",
+    "addClientConfirm": "Begin onboarding",
+    "addClientNameLabel": "Client name",
+    "addClientNamePlaceholder": "Legal or trading name",
+    "addClientNotPermitted": "Clara re-checked what your role may do before calling the door, and this dispatch is no longer permitted. Nothing was sent.",
+    "addClientAuthorityUnreadable": "Clara could not read what your role is allowed to do, so the Add client control is not offered. This is a failed read, not a decision about your role.",
     "statuses": {
       "active": "Active",
       "archived": "Archived",
@@ -2915,7 +2923,57 @@
       "amendHistoryEntry": "{at} — {answer}",
       "amendHistoryNone": "This answer has not been amended before.",
       "amendHistoryLoading": "Reading this item's earlier answers…",
-      "amendAppendOnlyNote": "Amending records a NEW resolution. The answer above is superseded, never erased — every version stays on the plan's permanent revision trail."
+      "amendAppendOnlyNote": "Amending records a NEW resolution. The answer above is superseded, never erased — every version stays on the plan's permanent revision trail.",
+      "unverifiedBadge": "Format unverified"
+    },
+    "answer": {
+      "ssm": {
+        "verified": "Registration {registration} — format checked, not an SSM identity lookup",
+        "unverified": "Registration {registration} — recorded as given; this is not a format Clara recognises and it was NOT checked"
+      },
+      "framework": {
+        "base": "Reporting framework {framework}",
+        "edition": "edition {edition}",
+        "enteredAs": "entered as {entered}"
+      },
+      "accountingBasis": {
+        "base": "Accounting basis {basis}",
+        "observed": "records observed on {observed} today"
+      },
+      "mpersEligibility": {
+        "eligible": "A private entity under CA 2016 s.244 — MPERS is available",
+        "ineligible": "NOT a private entity under CA 2016 s.244 — MFRS applies",
+        "parent_unknown": "A subsidiary or associate — the parent has not been identified yet"
+      },
+      "coaSeed": {
+        "standard": "Start from the firm's standard chart of accounts",
+        "manual": "Build this client on its own chart, not the firm's standard"
+      },
+      "coaChartApply": {
+        "applied": "The firm's standard chart has been applied",
+        "notApplied": "The firm's standard chart is not applied yet",
+        "ownChart": "This client is on its own chart — nothing to apply"
+      },
+      "opening": {
+        "zero": "First year of trading — the opening position is zero",
+        "carryDownPending": "Ongoing client — the prior period's closing position still has to be carried down",
+        "carryDownCaptured": "Ongoing client — the prior period's closing position was carried down"
+      },
+      "fixedAssets": {
+        "straightLineOnly": "No fixed assets on a non-straight-line method",
+        "nonStraightLine": "Holds fixed assets on a non-straight-line method",
+        "pending": "Non-straight-line fixed assets still have to be captured",
+        "captured": "The non-straight-line fixed assets were captured"
+      },
+      "sampleInvoices": {
+        "attached": "Sample invoices were attached",
+        "none": "No sample invoices were attached"
+      },
+      "interviewRun": "Bound to interview run {runId}",
+      "warning": {
+        "line": "Warning recorded: {message}",
+        "acknowledged": "Warning acknowledged by {by}: {message}"
+      }
     },
     "chart": {
       "loading": "Reading this client's chart-of-accounts state…",
@@ -2977,13 +3035,28 @@
       "commitDescription": "This activates {client} and closes the plan ({completed} of {total} items settled). The client can then be worked in its own workspace.",
       "commitConfirm": "Commit onboarding",
       "commitBlocked": {
-        "plan_not_open": "This plan is no longer open — it cannot be committed again.",
         "client_not_onboarding": "This client's status is no longer \"onboarding\".",
         "questions_unresolved": "A required item is still pending — resolve it before committing.",
         "opening_position_required": "An opening position is required before activation — settle or defer it first."
       },
-      "attestationLabel": "Attestation (only needed if the DB asks for one)",
-      "attestationPlaceholder": "Only fill this in if a commit attempt asks for an attestation.",
+      "attestationLabel": "Attestation",
+      "attestationPlaceholder": "Record why you are approving your own work on this file.",
+      "attestationRequiredNote": "The database refused this commit and asked for an attestation: you contributed to this plan and your firm has no second eligible checker. Record why you are approving your own work, then commit again.",
+      "receiptClientStatus": "Client status",
+      "receiptCommittedAt": "Committed",
+      "receiptCommittedBy": "Committed by",
+      "receiptAttestation": "Attestation",
+      "receiptNoAttestation": "None recorded",
+      "receiptReviewMaker": "Review maker",
+      "receiptCancelledAt": "Cancelled",
+      "receiptCancelledBy": "Cancelled by",
+      "receiptRevision": "Plan revision",
+      "receiptShowAnswers": "Show the {count, plural, one {# recorded answer} other {# recorded answers}}",
+      "receiptHideAnswers": "Hide the recorded answers",
+      "continueOnboarding": "Continue onboarding with Clara",
+      "continueOnboardingBody": "This client is still being onboarded. Clara has the interview and the checklist — open the full-screen thread to carry on.",
+      "continueOnboardingResolving": "Opening this client's Clara thread…",
+      "continueOnboardingUnavailable": "This client's Clara thread could not be resolved, so there is no full-screen link to offer. Clara's rail on this page is still the way in.",
       "cancelTrigger": "Cancel onboarding",
       "cancelTitle": "Cancel this client's onboarding",
       "cancelDescription": "This archives {client}. A client record is never deleted — cancelling is the only way to undo an onboarding started in error.",

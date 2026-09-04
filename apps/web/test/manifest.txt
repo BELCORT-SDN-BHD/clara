@@ -57,6 +57,7 @@ components/clara/onboarding-begin-keyboard.test.tsx
 components/clara/onboarding-checklist-a11y.test.tsx
 components/clara/onboarding-checklist-keyboard.test.tsx
 components/clara/onboarding-checklist.test.tsx
+components/clara/onboarding-progress-sync.test.tsx
 components/clara/rail-boundary.test.tsx
 components/clara/thread-live-clarify.test.tsx
 components/clara/thread-live-regions.test.tsx
@@ -100,8 +101,10 @@ components/firm-admin/firm-admin-pages-a11y.test.tsx
 components/firm-admin/threshold-money-door.test.tsx
 components/firm-admin/vendor-binding-ceremony.test.tsx
 components/firm-nav.test.tsx
+components/firm/add-client-control.test.tsx
 components/firm/agent-tasks-a11y.test.tsx
 components/firm/agent-tasks-keyboard.test.tsx
+components/firm/client-scope-invalidation.test.tsx
 components/firm/compliance-watch-affordance.test.tsx
 components/firm/needs-you-a11y.test.tsx
 components/firm/needs-you-affordances.test.ts
@@ -222,6 +225,7 @@ lib/journals/entries-table.test.ts
 lib/journals/governance-doors.test.ts
 lib/journals/use-journals-workbench.test.ts
 lib/members/members-doors.test.ts
+lib/onboarding/answer-format.test.ts
 lib/onboarding/api.test.ts
 lib/onboarding/resolution-history.test.ts
 lib/parts/catalog.test.tsx

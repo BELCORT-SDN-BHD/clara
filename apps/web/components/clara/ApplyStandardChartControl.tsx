@@ -182,6 +182,14 @@ export function ApplyStandardChartControl({
             ? t(`state.${stateKey}`, { accounts: chart.accounts ?? 0 })
             : t("state.unknown", { state: chart.state })}
         </EmptyState>
+        {/* H-29 IS NOT THIS LANE'S, and this file deliberately carries no copy about it.
+            `clara.coa_chart_state`'s `dec` CTE filters `p2.state='committed'`
+            (packages/db/migrations/0156_coa_apply_template.sql:1082), so an OPEN plan's
+            answered `coa_seed_decision` returns no row and the CASE falls through to
+            'undecided'. `readCoaChartState` is NOT reading the wrong field. The DB-A lane is
+            re-cutting that read and adding a `seed_decision_plan_state` key, so the honest
+            wording for the open-plan case belongs with the shape that lane ships — a sentence
+            written here now would be falsified by its merge. */}
         {stateKey === "adopted" ? (
           <>
             {/* GATE 1 disposition (P6-X exit gate, 2026-09-03): `clara.get_coa_template_adoption`
