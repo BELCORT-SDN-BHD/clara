@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { DataTableCard } from "@/components/common/data-table-card";
 import { TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { extractionStatusKey, filingBasisKey, isEInvoice } from "@/lib/documents/copy";
+import { businessDate } from "@/lib/business-date";
 import type { FiledDocumentEntry } from "@/lib/documents/loaders";
 import { EmptyState } from "@/components/common/state";
 import { cn } from "@/lib/utils";
@@ -58,7 +59,13 @@ export function FiledDocumentList({
               </span>
             </TableCell>
             <TableCell className="text-muted-foreground">
-              {new Date(filing.filed_at).toLocaleDateString()} · {t(filingBasisKey(filing.basis))}
+              {/* THE ONE-CLOCK LAW (lib/business-date.ts). `toLocaleDateString()`
+                  renders in the VIEWER's timezone: a reviewer outside UTC+8 saw a
+                  filing date that could disagree with the DB's own business day by
+                  one, which is exactly the audit-trail hazard businessDate exists
+                  to prevent. `uncoded-filings-list.tsx:87` was already doing this
+                  correctly on the same tab. */}
+              {businessDate(new Date(filing.filed_at))} · {t(filingBasisKey(filing.basis))}
             </TableCell>
           </TableRow>
         ))}

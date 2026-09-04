@@ -27,7 +27,12 @@ import { DocumentEvidence } from "./document-evidence";
 import { DocumentEntries } from "./document-entries";
 import { DocumentFilingsHistory } from "./document-filings-history";
 import { DocumentAdmin } from "./document-admin";
-import type { DocumentRow, FilingRow, CandidateRow, RegionRow, ProcessingTaskRow, JournalEntryRow } from "../../lib/documents/types";
+import { DocumentExtractContent } from "./document-extract-panel";
+import { DocumentPageOverlayContent } from "./document-page-overlay";
+import type {
+  DocumentRow, FilingRow, CandidateRow, RegionRow, ProcessingTaskRow, JournalEntryRow,
+  DocumentExtractResult,
+} from "../../lib/documents/types";
 
 enableDomInspection();
 
@@ -132,10 +137,101 @@ test("documents workbench: DocumentMetadata + DocumentEvidence + DocumentEntries
       createElement("h1", null, "Documents"),
       createElement("h2", null, "Detail"),
       createElement(DocumentMetadata, { document: DOCUMENT, tasks: [TASK] }),
-      createElement(DocumentEvidence, { regions: [REGION] }),
+      createElement(DocumentEvidence, {
+        regions: [REGION],
+        documentId: "doc-1",
+        clientId: "client-1",
+        mimeType: "application/pdf",
+      }),
       createElement(DocumentEntries, { entries: [ENTRY] }),
       createElement(DocumentFilingsHistory, { filings: [FILING], busy: false, act: noopAct }),
       createElement(DocumentAdmin, { document: DOCUMENT, busy: false, act: noopAct, onCorrect: () => {} }),
+    ),
+  );
+  assert.deepEqual(violations, [], JSON.stringify(violations));
+});
+
+// --- D2 / D3 — the new evidence surfaces --------------------------------------
+
+/** One extraction envelope carrying real page boxes (egress.mjs:178's shape),
+ *  so the overlay fixture exercises the arm where geometry IS derivable rather
+ *  than only the honest-refusal arm. */
+const ENVELOPE = JSON.stringify({
+  schema_version: 1,
+  engine: { id: "azure-di:prebuilt-layout:2024-11-30", kind: "ocr", version_n: 1 },
+  content: "INVOICE\nAcme Sdn Bhd\nTotal RM 100.00",
+  pages: [{ page_number: 1, width: 8.5, height: 11, unit: "inch" }],
+  tables: [],
+});
+
+const EXTRACT: DocumentExtractResult = {
+  document: {
+    id: "doc-1", sha256: "abc123", original_filename: "invoice-april.pdf", mime_type: "application/pdf",
+    byte_size: 20480, bytes_verified_at: "2026-04-01T00:00:01Z", page_count: 1,
+    extraction_status: "done", document_kind: "invoice", financial_date: "2026-04-01",
+  },
+  unassigned: false,
+  filing: { id: "filing-1", client_id: "client-1", filed_at: "2026-04-02T00:00:00Z", basis: "human" },
+  extractions: [{
+    id: "ext-1", engine_id: "azure-di:prebuilt-layout:2024-11-30", engine_kind: "ocr", version_n: 1,
+    status: "done", page_count: 1, extracted_at: "2026-04-01T00:00:02Z",
+    envelope_text: ENVELOPE, raw_sha256: null, normalization_version: "1",
+  }],
+  regions: [
+    {
+      idx: 0, id: "r-fact", extraction_id: "ext-1", engine_kind: "ocr", version_n: 1,
+      extracted_at: "2026-04-01T00:00:02Z", locator_kind: "page_polygon",
+      locator: { page: 1, page_number: 1, polygon: [1, 2, 3, 2, 3, 2.4, 1, 2.4] },
+      field_path: "invoice.total", text_content: "RM 100.00", engine_confidence: 0.97,
+      monetary_raw: "100.00", monetary_cents: 10000,
+    },
+    {
+      idx: 1, id: "r-line", extraction_id: "ext-1", engine_kind: "ocr", version_n: 1,
+      extracted_at: "2026-04-01T00:00:02Z", locator_kind: "page_polygon",
+      locator: { page: 1, page_number: 1, polygon: [0.5, 0.5, 2, 0.5, 2, 0.8, 0.5, 0.8] },
+      field_path: "pages.1.lines.0", text_content: "INVOICE", engine_confidence: 0.99,
+      monetary_raw: null, monetary_cents: null,
+    },
+    {
+      // A region whose geometry is MALFORMED — the overlay must skip it, and
+      // the a11y scan must still pass with it present.
+      idx: 2, id: "r-broken", extraction_id: "ext-1", engine_kind: "ocr", version_n: 1,
+      extracted_at: "2026-04-01T00:00:02Z", locator_kind: "page_polygon",
+      locator: { page: 1, polygon: [1, 2, 3] },
+      field_path: "pages.1.lines.1", text_content: "Acme Sdn Bhd", engine_confidence: 0.95,
+      monetary_raw: null, monetary_cents: null,
+    },
+  ],
+  max_chars: 20000,
+};
+
+test("documents workbench: DocumentExtractContent's three tiers have zero violations", async () => {
+  const violations = await scan(
+    createElement(
+      "div",
+      null,
+      createElement("h1", null, "Documents"),
+      createElement("h2", null, "Detail"),
+      createElement("h3", null, "Extraction"),
+      createElement(DocumentExtractContent, { data: EXTRACT }),
+    ),
+  );
+  assert.deepEqual(violations, [], JSON.stringify(violations));
+});
+
+test("documents workbench: the page-overlay viewer has zero violations, with the page itself unloadable in this environment", async () => {
+  // There is no fetch stub here on purpose: the byte fetch fails, the page area
+  // renders its honest failure arm, and the FACT LIST beside it — the surface
+  // that actually has to be accessible, since the <svg> is aria-hidden
+  // decoration — renders regardless. That is the state worth scanning.
+  const violations = await scan(
+    createElement(
+      "div",
+      null,
+      createElement("h1", null, "Documents"),
+      createElement("h2", null, "Detail"),
+      createElement("h3", null, "Evidence"),
+      createElement(DocumentPageOverlayContent, { data: EXTRACT, documentId: "doc-1", mimeType: "application/pdf" }),
     ),
   );
   assert.deepEqual(violations, [], JSON.stringify(violations));

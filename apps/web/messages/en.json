@@ -15,7 +15,8 @@
     "cancel": "Cancel",
     "close": "Close",
     "retry": "Retry",
-    "centsUnsafe": "(amount out of range — verify in the ledger)"
+    "centsUnsafe": "(amount out of range — verify in the ledger)",
+    "technicalDetail": "Technical detail"
   },
   "MoneyInput": {
     "placeholder": "0.00",
@@ -836,6 +837,21 @@
     "evidenceUnlabeledField": "field",
     "evidenceNoValue": "—",
     "evidenceConfidenceValue": "confidence {value}",
+    "evidenceNoConfidence": "no confidence recorded",
+    "factsHeading": "Fields Clara read from this document",
+    "factsEmpty": "The engine recorded no named fields for this document — only page text.",
+    "colFactField": "Field",
+    "colFactValue": "Value",
+    "colFactConfidence": "Engine confidence",
+    "factLabel": {
+      "invoiceTotal": "Invoice total",
+      "invoiceAmountDue": "Amount due",
+      "invoiceCurrency": "Currency",
+      "invoiceVendorName": "Supplier name",
+      "invoiceInvoiceId": "Invoice number",
+      "invoiceInvoiceDate": "Invoice date",
+      "invoiceDeposit": "Deposit"
+    },
     "entriesHeading": "Journal entries filed to this client",
     "entriesEmpty": "No journal entries filed to this client cite this document yet.",
     "entryReversed": "reversed",
@@ -2273,15 +2289,20 @@
       "maxCharsNote": "Budgeted to {maxChars} characters — the same budget the agent reads under.",
       "extractionsHeading": "Extractions",
       "noExtractions": "No completed extraction for this document.",
-      "regionsHeading": "Regions",
-      "noRegions": "No extracted regions.",
+      "layoutHeading": "Page text",
+      "noLayoutText": "No page text was extracted.",
+      "layoutPage": "Page {page} — {count} lines",
+      "layoutPageless": "Table cells and unplaced text — {count} entries",
+      "rawEnvelopeSummary": "Raw engine output (JSON)",
+      "rawEnvelopeTruncated": "Shown exactly as received: the character budget above cut this envelope mid-value, so it is not valid JSON to re-format.",
       "envelopeEmpty": "(no envelope text)",
       "notAvailable": "This document's extraction text isn't available for this client."
     },
     "reextraction": {
       "trigger": "Request re-extraction",
       "title": "Request re-extraction",
-      "description": "Re-queues this document for a fresh extraction attempt (clara.request_reextraction). A reason is required — this changes the evidence a posted entry may rest on.",
+      "description": "Queues this document to be read again from scratch. The new reading replaces the current one, and a posted entry may rest on what it finds — so a reason is required.",
+      "diagnostic": "clara.request_reextraction(document, reason)",
       "confirm": "Request re-extraction",
       "reasonLabel": "Re-extraction reason",
       "reasonPlaceholder": "Why does this document need to be re-extracted (required)…",
@@ -2299,7 +2320,8 @@
     "consentEvidence": {
       "trigger": "Classify as consent evidence",
       "title": "Classify as consent evidence",
-      "description": "Marks this document as the client's cross-border-transfer consent evidence (clara.classify_consent_evidence_document). Owner-level action — the DB refuses honestly if your session doesn't hold it. A reason is required.",
+      "description": "Records this document as the client's written consent to transfer their data across borders. Only an owner can do this, and a reason is required.",
+      "diagnostic": "clara.classify_consent_evidence_document(document, reason)",
       "confirm": "Classify as consent evidence",
       "reasonLabel": "Reason",
       "reasonPlaceholder": "Why this document is the client's consent evidence (required)…",
@@ -2309,7 +2331,8 @@
     "autodraft": {
       "trigger": "Request autodraft",
       "title": "Request autodraft",
-      "description": "Asks Clara to draft a journal entry from this filing (clara.request_autodraft) — a one-click admission; the agent still runs under the same coding-lane and budget walls as the unattended sweep.",
+      "description": "Asks Clara to draft a journal entry from this filing now, instead of waiting for the overnight sweep. Nothing is posted: you review the draft. Clara can still decline — the same coding-lane and daily-budget limits apply either way.",
+      "diagnostic": "clara.request_autodraft(filing)",
       "confirm": "Request autodraft",
       "outcome": {
         "admitted": "Admitted — Clara will draft this filing.",
@@ -2445,7 +2468,14 @@
       "viewDetailsTrigger": "View details",
       "loadingDetail": "Loading the finding's full detail…",
       "detailNotReachable": "This finding's detail could not be read.",
-      "dedupeKeyLabel": "Dedupe key"
+      "noEvents": "Nothing has happened to this finding since it was raised.",
+      "eventKinds": {
+        "created": "Raised",
+        "superseded": "Superseded by a later check",
+        "resolved": "Resolved",
+        "recheck_opened": "Re-checked",
+        "evaluation": "Evaluated"
+      }
     },
     "sweep": {
       "heading": "Sweep runs",

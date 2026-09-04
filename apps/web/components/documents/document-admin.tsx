@@ -128,6 +128,7 @@ export function DocumentAdmin({
             triggerLabel={tg("reextraction.trigger")}
             title={tg("reextraction.title")}
             description={tg("reextraction.description")}
+            diagnostic={tg("reextraction.diagnostic")}
             confirmLabel={tg("reextraction.confirm")}
             busy={busy}
             confirmDisabled={!reextractReason.trim()}
@@ -169,6 +170,7 @@ export function DocumentAdmin({
             triggerLabel={tg("consentEvidence.trigger")}
             title={tg("consentEvidence.title")}
             description={tg("consentEvidence.description")}
+            diagnostic={tg("consentEvidence.diagnostic")}
             confirmLabel={tg("consentEvidence.confirm")}
             busy={busy}
             confirmDisabled={!consentReason.trim()}

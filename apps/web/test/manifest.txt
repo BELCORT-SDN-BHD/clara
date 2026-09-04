@@ -76,6 +76,8 @@ components/common/p6-3-a11y.test.tsx
 components/common/route-error.test.tsx
 components/documents/coding-lane-a11y.test.tsx
 components/documents/coding-lane-keyboard.test.tsx
+components/documents/document-facts-table.test.tsx
+components/documents/document-metadata-viewer-gate.test.tsx
 components/documents/documents-a11y.test.tsx
 components/documents/documents-governance-a11y.test.tsx
 components/documents/documents-governance-keyboard.test.tsx
@@ -188,10 +190,13 @@ lib/command/routes.test.ts
 lib/documents/bytes.test.ts
 lib/documents/copy.test.ts
 lib/documents/doors.test.ts
+lib/documents/extract-shape.test.ts
 lib/documents/intake.test.ts
 lib/documents/loaders.test.ts
 lib/documents/open-in-new-tab.test.ts
+lib/documents/pdf-worker-asset.test.ts
 lib/documents/reads.test.ts
+lib/documents/region-geometry.test.ts
 lib/documents/runtime-wire.test.ts
 lib/documents/useUploadQueue.test.ts
 lib/doors.test.ts

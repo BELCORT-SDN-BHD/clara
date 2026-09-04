@@ -58,7 +58,19 @@ test("RE-EXTRACTION journey: the dialog opens, its reason field and Confirm/Canc
     assert.ok(trigger, "the re-extraction trigger must render");
     await h.fireEvent(trigger!, "click");
     for (let i = 0; i < 6; i++) await h.settle();
-    assert.match(textOf(b as never), /Re-queues this document/, "opening the dialog must reach its own description");
+    assert.match(textOf(b as never), /read again from scratch/, "opening the dialog must reach its own description");
+
+    // CB-AE2E-022 — the description says what the act DOES; the DB verb it
+    // calls lives in the collapsed "Technical detail" disclosure beneath it.
+    // Both halves are asserted: a copy edit that merely deleted the verb would
+    // pass the first line alone, and the audit trail this product deliberately
+    // keeps would be gone.
+    const description = findIn(b, (n) => textOf(n as never).match(/read again from scratch/) !== null && n.tagName === "P");
+    assert.ok(description, "the description must render as its own paragraph");
+    assert.doesNotMatch(textOf(description as never), /clara\./, "no DB verb name may appear inside the sentence a professional reads before confirming");
+    const disclosure = findIn(b, (n) => n.tagName === "DETAILS" && textOf(n as never).includes("Technical detail"));
+    assert.ok(disclosure, "the technical-detail disclosure must render");
+    assert.match(textOf(disclosure as never), /clara\.request_reextraction/, "…and the verb must still be reachable there");
 
     const reasonField = findIn(b, (n) => n.tagName === "TEXTAREA");
     assert.ok(reasonField, "the reason field must render as a real <textarea>");
