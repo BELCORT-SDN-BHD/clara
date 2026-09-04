@@ -461,10 +461,9 @@ re-reading find?"
 > section with a launch-blocker weight on (a) and (b) — the walk then broke (a) and half of (b).
 > **165** ships beta on autonomy **layer 1 only**, the G1 cadence sources OFF, PR-2 before 上市.
 > **166** launches on the DPA alone and re-cuts PRD §9 item 3 from four live items to **three**, the
-> terms being the not-yet-live fourth. **167** settles the design authority as
-> what `clarabook-frontend` SHIPS (closing FS-9's DS-07 line); **168** defers its recut PRs to him.
-> **171** accepts the twenty knowingly-open items and keeps **裁-133 and 裁-111 SUSPENDED, not
-> repealed** — its item-by-item reading did NOT happen, so it is owed. Digest row 94.
+> terms being the fourth. **167** settles the design authority as what `clarabook-frontend` SHIPS
+> (closing FS-9's DS-07 line); **168** defers its recut PRs to him.
+> **171** accepts the twenty knowingly-open items and keeps **裁-133 and 裁-111 SUSPENDED, not repealed** — its item-by-item reading did NOT happen, so it is owed. Digest row 94.
 
 ## 2026-09-04 — 裁-175 · 176: the P6-X classification's two rulings (digest row 95)
 
@@ -479,10 +478,10 @@ re-reading find?"
 
 > **178**: two role passwords were echoed into the session transcript by a psql `-c`/`\set` mistake —
 > the ALTERs never ran, so the database never carried them, but the two Fly DSNs do — and the owner
-> ruled **no rotation**; the dissent (rotate before the first real client's data lands) is a
-> Known-issues row. **179**: a probe MEASURED four production lane DSNs carrying no `sslmode` at all,
-> crossing Fly → AWS **in plaintext**; ruled to re-import all six with
-> `uselibpqcompat=true&sslmode=require` and make **verify-full the first post-beta PR**. Digest row 96.
+> ruled **no rotation** (dissent: rotate before real client data). **179**: a probe MEASURED four
+> production lane DSNs carrying no `sslmode` at all, crossing Fly → AWS **in plaintext**; ruled to
+> re-import all six with `uselibpqcompat=true&sslmode=require` and make **verify-full the first
+> post-beta PR** — which 裁-175 also claims, resolved in the handover §E by the LEAD. Digest row 96.
 
 ## 2026-09-04 — 裁-180…185: the product walk, the delegate precedent, and GO (digest row 97)
 
@@ -494,6 +493,7 @@ re-reading find?"
 > is missing or defective, the lead walks the DOOR as the owner's delegate — real audited door, human
 > context, receipted, both recorded. It is not a licence to bypass a wall.** **184** bought the hour
 > that found nine of the fourteen P0 rows. **185** is **GO for a CLOSED beta** — live for BELCORT and
-> invited testers, with v72, the statement-lane fixes, the "Enter a statement" pair and DPA v2 owed
-> before the first EXTERNAL applicant — and it **DISCHARGES 裁-150's exit condition**: the session
-> closes, the repo is the handover, no next lanes. Digest row 97.
+> invited testers, with a NEW runtime image owed before the first EXTERNAL applicant (**v75 or
+> later**: v72–v74 are the night's secrets-import releases on the v71 image) beside the
+> statement-lane fixes, the "Enter a statement" pair and DPA v2 — and it **DISCHARGES 裁-150's exit
+> condition**: the session closes, the repo is the handover, no next lanes. Digest row 97.

@@ -448,7 +448,9 @@ mock e2e.** Every finding is a row in
 
 **The three options as they were put:** **(1) GO — 封閉 beta（建議）** — beta live for BELCORT and
 owner-invited testers only, with open applicants waiting for v72 + the statement-lane fixes + the
-"Enter a statement" form fix + DPA v2 · **(2) NO-GO — fix first** · **(3) GO — open beta**.
+"Enter a statement" form fix + DPA v2 *(the option was put in those words at 06:15; "v72" was
+CORRECTED at 06:21 — `fly releases --json` shows v72–v74 are the night's secrets-import releases on
+the v71 image, so a NEW image is owed and the next release is v75)* · **(2) NO-GO — fix first** · **(3) GO — open beta**.
 **The lead's recommendation was option 1**, on this ground: everything that gates a REAL outside
 applicant is either a wall that held or a defect that only bites on paths a closed tester group can
 be warned about, while the two genuine outsider blockers — the DPA v1 placeholder and the runtime↔DB
@@ -464,7 +466,8 @@ skew — are both fixable without touching a mechanism.
 1. **Beta is LIVE and CLOSED** — BELCORT plus owner-invited testers. Sign-ups are not disabled at the
    platform (`disable_signup: false`, read by Management API), so the closure is an OPERATING
    posture, not a technical wall: the owner controls who is given the address.
-2. **Before the first EXTERNAL applicant:** runtime **v72** (the `reconcile_autopost_rules` skew),
+2. **Before the first EXTERNAL applicant:** **a NEW runtime image from `ba8e7d35` or later — the next
+   release is v75** (v72–v74 are secrets-import releases on the v71 image) for the skew;
    the statement-lane fixes, the "Enter a statement" institution/account pair, and **DPA v2**.
 3. **This session CLOSES when the final truing PR merges** (裁-150). The repo is the handover; there
    are **no next lanes**; the next session starts on the owner's ask.

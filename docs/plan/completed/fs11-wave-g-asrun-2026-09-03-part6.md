@@ -147,8 +147,18 @@ opening_continuity pass · P&L roll pass · closing_stock unknown · depreciatio
 account, basis `exceptions_gaps_and_registry_v1b` · unapproved_drafts pass · **`uncoded_documents`
 FAIL — uncoded = [{filing `18d077b2…`, document `38c8fd49…` (the MBB statement), financial_date
 2025-06-30}]** · undated pass · two advisories. **結帳 verdict: FY2025 is NOT finalizable on this
-fixture (2 fail, 2 unknown) and the product says so. No attestation was made on the owner's behalf;
-the FY stays open. 16A.5's human half = PASS as a mechanism.**
+fixture (2 fail, 2 unknown) and the product says so. No attestation was made on the owner's behalf.
+16A.5's human half = PASS as a mechanism.**
+**RUN 2 WAS THEN LEFT `in_progress` FOR THE REST OF THE WALK — so FY2025 stood `closing` and the
+period wall was ON for every writer, which is what refused the first human settle at 05:38 — and it
+was ABANDONED through the Close tab's own "Abandon close" dialog at 23:55:11Z = 07:55 MYT
+2026-09-04, at the clock-out.** Reason as typed: *"FS-11 clock-out: close run 2 was begun (05:42)
+only to re-measure the gates after the bank settlement; abandoned so FY2025 is left OPEN and the
+period wall is not left on for the next session. The books are unchanged."* The tab then read
+"2025-01-01 – 2025-12-31 · open · fy_end: asserted", run state abandoned. **FY2025 is OPEN at the
+close: two close runs, both abandoned, no attestation and no finalize.** The H-11 finding held on
+the second look — after this abandon the Close tab STILL offered no "Begin close" button, a find
+over the main pane returning nothing.
 
 **Four observations for the sitting, from the gates themselves.** (a) `uncoded_documents` will fail
 EVERY close once a statement is filed — a bank-statement filing carries a financial date and never
@@ -236,9 +246,16 @@ NOT run** — "dsn-pipe: stdin was empty" — and the readings above are the las
 `fly status -a clara-runtime`: machine **`48ee715b763048`** started, **2/2 checks passing**,
 **VERSION 74** (the machine's config counter after the 裁-179 secret imports — **not** a new image;
 image `deployment-01M1JSJW8SW0EZ1SP8ZR48B1WZ`, still the v71 build from `344f7ad8`). `/ready` at
-22:19:30Z: **ready true**, db / world / control / taxonomy / relay ok, **`held_outbox` 6** (it was 0 at
-02:39 — six held outbox rows accrued during the walk; **a reading for the handover, cause not
-investigated**), `pending_intents` 0.
+22:19:30Z: **ready true**, db / world / control / taxonomy / relay ok, **`held_outbox` 6** (it was 0
+at 02:39), `pending_intents` 0. **READ AND EXPLAINED at 06:21, not left a mystery:** the full
+`/ready` shows `wakeEngine.heldForDisabledSource` **6** with the warning "6 held/queued wake-engine
+row(s) awaiting a disabled/unregistered source" — exactly what
+`docs/plan/active/g1-wake-engine-design.md:114` says a DISABLED source must produce, so it is
+裁-165's posture working loudly rather than a fault. The same 06:21 read settled the runtime
+identity: `fly releases --json` shows **v71, v72, v73 and v74 all carrying image
+`deployment-01M1JSJW8SW0EZ1SP8ZR48B1WZ`** — v72–v74 are the night's three `fly secrets import`
+releases (裁-179 ×2 plus the freeform password), **not new code** — so the served code is the v71
+build of `344f7ad8` and **the next real deploy is v75**.
 
 **FOREIGN MACHINE, named and not touched:** `clara-backup` also holds
 `codex-e2e-rate-wall-sleeper` (`d895474fe0e138`, started, created 2026-09-03T22:14:02Z = 06:14 MYT,

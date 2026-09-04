@@ -8,9 +8,11 @@ legal**, the harness notes, and an ordered pick-list.
 Written at the final clock-out truing under **裁-185** (the owner's GO, 2026-09-04 ≈06:15 MYT) and
 **裁-150** (after the e2e this session closes, the repo IS the handover, there are no next lanes).
 `PROGRESS.md` stays the state authority and carries short rows pointing at the ids below;
-**this file carries the detail.** Its sibling
-[`beta-handover-2026-09-04-part2.md`](beta-handover-2026-09-04-part2.md) carries the P2 rows and the
-whole CARRIED registry (everything that was already open before the launch night).
+**this file carries the detail.** Its siblings
+[`beta-handover-2026-09-04-part2.md`](beta-handover-2026-09-04-part2.md) and
+[`-part3.md`](beta-handover-2026-09-04-part3.md) carry the P2 rows, the whole CARRIED registry
+(everything already open before the launch night, C-17…C-88) and the documentation truings still
+owed.
 
 ---
 
@@ -31,9 +33,16 @@ posture — the owner controls who is given the address — not a technical wall
   fixed FORWARD by re-promoting a previously walked version (裁-156, the owner's ruling, dissent
   filed on it).
 - **The runtime** is Fly machine **`48ee715b763048`**, 2/2 checks, `/ready` **true**. Its `fly
-  status` VERSION reads **74**, but that is the machine's config counter after the 裁-179 secret
-  imports — **the IMAGE is still v71, built from `344f7ad8`.** `held_outbox` was **6** at the close
-  (0 at 02:39; six rows accrued during the walk, **cause not investigated** — row H-44).
+  status` VERSION reads **74** — and `fly releases --json` at 06:21 settled why: **v71, v72, v73 and
+  v74 ALL carry the same image `deployment-01M1JSJW8SW0EZ1SP8ZR48B1WZ`.** v72–v74 are the night's
+  three `fly secrets import` releases (裁-179's TLS re-import ×2 plus the freeform password), **not
+  new code**, so the served code is still the **v71** build of `344f7ad8` and **the next real deploy
+  is v75**. `held_outbox` was **6** at the close (0 at 02:39) — **read and explained, not a mystery**:
+  the 06:21 `/ready` shows `wakeEngine.heldForDisabledSource` **6** with the warning "6 held/queued
+  wake-engine row(s) awaiting a disabled/unregistered source", which is exactly what 裁-165's disabled
+  wake sources are supposed to produce (`docs/plan/active/g1-wake-engine-design.md:114` names that
+  counter and calls the loudness deliberate). Row **H-44** (part 2, §C.3) carries the one thing left
+  to do with it: verify the class when C-05 finally enables the sources.
 - **The database** was factory-reset and re-applied from scratch: **159 migrations,
   frontier `0164_checkout_gate_c6_web_reads`**, 19 `clara%` roles, the evaluator freeze reading
   `{"ok": true, "verified_deployed": 7, "verified_registered": 8}`.
@@ -41,15 +50,21 @@ posture — the owner controls who is given the address — not a technical wall
   `is_operator = true`, the only operator firm the unique index will ever admit) and clients
   Meridian Logistics · Sunrise Retail · Highland Coffee · ROME PROPERTIES `acb60b65…` ·
   **ROME SECRETARY `7a045c7f…`** — active, 86-account chart applied, one sales invoice posted, one
-  bank receipt settled, FY2025 open.
+  bank receipt settled, and **FY2025 OPEN with TWO close runs, both ABANDONED**: run 1
+  (`0f057658-78d6-4536-b68f-a396b61f0e67`) at 05:39 so the bank settlement could be booked, and run 2
+  (`db941c04-f78e-4595-9004-08df90be1631`, begun through the door 05:42:30 only to re-measure the
+  gates after that settlement) at **23:55:11Z = 07:55 MYT**, at the clock-out, so **the period wall is
+  not left on for the next session**. The Close tab then read "2025-01-01 – 2025-12-31 · open ·
+  fy_end: asserted", run state abandoned. **No attestation, no finalize.**
 - **`main` = `ba8e7d35`** (#540, the `apps/dashboard` source delete). The hand sweep
   **33781966143** on it came back **SUCCESS, 13 of 13 jobs**, ≈02:14 MYT.
 
 **The one thing that is merged and NOT serving: #533 `d9520061`, F-A2's reconciler unwire.** The
 database no longer defines `clara.reconcile_autopost_rules`, the v71 image still calls it, and the
 runtime logs `function clara.reconcile_autopost_rules() does not exist` **every ~2 seconds**. The
-autopost-rules reconcile belt is inert until **v72** is deployed from `ba8e7d35` or later. That is
-row **H-01** and it is the first thing to do.
+autopost-rules reconcile belt is inert until **a NEW runtime image built from `ba8e7d35` or later** is
+deployed — **the next release is v75**; v72, v73 and v74 are the night's secrets-import releases on
+the v71 image and carry no new code. That is row **H-01** and it is the first thing to do.
 
 **What is PROVEN, with its receipt.** The admission chain end to end on the real origin: signup →
 a six-digit emailed code → the C-5 confirmation door (one `clara.confirmation_attempts` row,
@@ -99,7 +114,7 @@ invented to reach it.*
 | 5 | client onboarded through the interview | **PASS** | `clientOnboarding_v4` 19:25:15.760Z → completed 19:48:38.5Z; plan 19/19 committed at revision 20; chart 86 accounts / 23 families |
 | 6 | documents posted **unattended** | **FAIL** — the chat path passed instead | `autoDraft_v9` admitted twice, refused itself twice with a MASKED `CLR23` (`agent_tasks` `failed · error_code internal`, `tokens: 0` — the model was never called). Row **H-17**. The same invoice WAS coded by `chatTurn_v17` and approved by the human |
 | 7 | bank matched in chat | **PARTIAL** | agent READ + PROPOSE **PASS**; agent WRITE **REFUSED** (`payer_identifier_contradiction`, receipt `a451fbfa…`, correct); human settle **PASS** (`e66e9531…`, `bank_matches` `a2409de1…`). **But no statement could be ingested by either AI path** — it entered through the human door |
-| 8 | fiscal year opened | **PASS** | `fiscal_years` `c6e02492…` FY2025, 21:21:48Z |
+| 8 | fiscal year opened | **PASS** | `fiscal_years` `c6e02492…` FY2025, 21:21:48Z. **Left OPEN at the clock-out** — two close runs were begun and BOTH abandoned (run 1 at 05:39 to book the bank settlement, run 2 at 23:55:11Z / 07:55 MYT so the period wall is not left on); no attestation, no finalize |
 | 9 | year-end closed with human keys | **NOT REACHED — deliberately** | begin/gates/abandon all PASS; finalize never attempted: run 2 came back 2 FAIL + 2 UNKNOWN. **No attestation was made on the owner's behalf** |
 | 10 | management-accounts PDF downloaded | **FAIL** | `report_templates` / `report_specs` / `report_artifacts` all **0**; no export tool in `chatTurn_v17`. Rows **H-15**, **H-16** |
 | 11 | FY2 opened | **NOT WALKED** | out of time; nothing blocks it |
@@ -134,17 +149,18 @@ one exists, and a **tier**:
 - **P0 — before the first EXTERNAL applicant.** 裁-185 opened beta CLOSED precisely so these can be
   done first.
 - **P1 — before 上市** (the official launch).
-- **P2 — hygiene.** Real, cheap, and nothing waits on it. **The P2 rows and the whole CARRIED
-  registry are in [part 2](beta-handover-2026-09-04-part2.md).**
+- **P2 — hygiene.** Real, cheap, and nothing waits on it. **The P2 rows and the CARRIED
+  registry are in [part 2](beta-handover-2026-09-04-part2.md) (C-17…C-76) and
+  [part 3](beta-handover-2026-09-04-part3.md) (C-77…C-88, plus §C.5's owed truings).**
 
 *A size guess is a guess. A row that says "not measured" means nobody measured it — that is a fact,
 not a hedge.*
 
-### C.1 · P0 — before the first external applicant (14 rows)
+### C.1 · P0 — before the first external applicant (15 rows)
 
 | id | area | what was measured · why it matters | fix shape · size · owner · ruling |
 |---|---|---|---|
-| **H-01** | runtime / ops | **The serving image and the schema disagree.** v71 (built from `344f7ad8`) calls `clara.reconcile_autopost_rules()`, which #533 `d9520061` removed from the DB; the runtime logs `function … does not exist` **every ~2 s** since the reset. The autopost-rules reconcile belt is DEAD and the log is a storm that will hide the next real error | **Deploy v72** from `ba8e7d35` or later, through the runtime deploy ceremony (`docs/ops/` recipe; the as-run pattern is `docs/ops/runtime-deploy-2026-09-03-v71-chatturn-v17-c5.md`). No migration, no quiesce. **0.3 unit** · owner: a runtime deploy lane · 裁-185 pt 2 |
+| **H-01** | runtime / ops | **The serving image and the schema disagree.** v71 (built from `344f7ad8`) calls `clara.reconcile_autopost_rules()`, which #533 `d9520061` removed from the DB; the runtime logs `function … does not exist` **every ~2 s** since the reset. The autopost-rules reconcile belt is DEAD and the log is a storm that will hide the next real error | **Deploy a NEW IMAGE** built from `ba8e7d35` or later — **the next release is v75** (v72–v74 are the night's three secrets-import releases on the v71 image, measured 06:21 by `fly releases --json`: all four carry `deployment-01M1JSJW8SW0EZ1SP8ZR48B1WZ`) — through the runtime deploy ceremony (`docs/ops/` recipe; the as-run pattern is `docs/ops/runtime-deploy-2026-09-03-v71-chatturn-v17-c5.md`). No migration, no quiesce. **0.3 unit** · owner: a runtime deploy lane · 裁-185 pt 2 |
 | **H-02** | runtime / db | **The statement lane refuses Maybank.** `statementFacts.v2`'s `persistStatementWitnessPairStep` failed twice: *"the statement header does not state readable ISO period bounds and a statement date"*. Read off the OCR: the Maybank corporate current-account header prints `TARIKH PENYATA / STATEMENT DATE : 30/06/25` and `NOMBOR AKAUN …` and **no period bounds at all** — Maybank does not print "from–to". **This is the most common Malaysian SME bank format**, so bank ingest is effectively unavailable | Derive the period from the statement date's month when the header states no bounds, **or** let the witness infer it with a STATED basis (never a silent guess). A frozen body ⇒ a **new `statementFacts.v3`** + registry repoint (`.claude/rules/runtime-workflows.md`). **1 unit** · owner: a runtime lane · 裁-185 pt 2 |
 | **H-03** | runtime | **The statement lane refuses Alliance for a different reason.** The two witness reads COMPLETED (the ALB header passes the bounds gate), then persist failed 3× on *"institution code ALLIANCE BANK is not a live entry in the bank institutions reference"*. **Corrected by measurement: the roster is NOT the gap** — `clara.bank_institutions` holds 17 live Malaysian banks **including `ALB · Alliance Bank Malaysia Berhad · active`**. The witness emits the printed NAME and the door expects the roster CODE | Normalise witness → roster inside `statementFacts_v2`'s successor (name → code lookup against `bank_institutions`, fail closed on no match). Rides H-02's new version. **+0.3 unit** · owner: the same lane · 裁-185 pt 2 |
 | **H-05** | runtime | **A failed statement step strands its task.** Both times the run died, the `statement_facts` task was left **`running`, attempt 1, never settled** — and the router refuses to re-mint while a running task exists, so the document is stuck for ever with no operator surface. Cleared by hand both times through `clara.fail_statement_facts(task,'engine_error')` as `clara_fn_owner` | A finally-branch (or a WDK failure handler) that settles the task on step failure, plus a cell that kills the step and asserts the task settles. Rides H-02's new version. **+0.3 unit** · owner: the same lane · ruling: none — measured tonight |
@@ -155,8 +171,9 @@ not a hedge.*
 | **H-36** | legal | **The live DPA is the v1 PLACEHOLDER.** `clara.dpa_documents` holds `clara-beta-2026-08-a`, **99 bytes**, sha `6d1c97a5…7b3`, matching `docs/ops/legal/clara-beta-dpa.md` §2 — so the byte-identity law (裁-90) HOLDS, but the body is a placeholder and the real bilingual v2 is still "proposed". BELCORT signing it is fine; an external firm signing a placeholder is not | Publish v2 as a NEW `dpa_documents` version (append-only; stamp v1's `effective_to`) — **zero code change**, and 裁-90's byte-identity law binds the new sha. **0.3 unit** · owner: the owner + the lawyer pass · 裁-90 / 裁-166 |
 | **H-37** | ops | **The Stripe checkout page shows internal ruling numbers to the customer.** The sandbox product description reads *"ClaraBook beta plan — paid beta at the ruled trial price (裁-57/58); amounts not yet ruled."* | Edit the product description in the Stripe dashboard. **Minutes** · owner: the owner · ruling: none — measured tonight |
 | **H-42** | ops / security | **Two role passwords were echoed into this session's transcript** by a psql `-c` / `\set` mistake (the ALTERs never ran, so the DATABASE never carried them; the two Fly DSNs imported at step 12 DO). **裁-178, owner, verbatim 「不用rotate le, I DONT CARE」 — NOT rotated, an accepted risk on the record.** The lead's dissent stands | Rotate `clara_auth_wall_login` and `clara_stripe_webhook_login`, then re-import the two DSNs env-to-env in one release. **0.2 unit** · owner: the owner · 裁-178 |
-| **H-43** | runtime / ops | **All six runtime lane DSNs use TLS with the certificate UNVERIFIED.** Measured on the machine: before tonight the four original lanes carried **no `sslmode` at all** and connected over a plain `Socket`, `encrypted=false` — **credentials and data crossed Fly (sin) → AWS (ap-southeast-1) in PLAINTEXT.** 裁-179 chose option (c): all six re-imported with `uselibpqcompat=true&sslmode=require` (encrypted, cert unverified), with verify-full named **the first post-beta code PR** | `COPY ops/tls/pooler-ca.crt` into the runner stage of the runtime Dockerfile (the image ships no CA today), then all six DSNs → `sslmode=verify-full&sslrootcert=/app/ops/tls/pooler-ca.crt`, a `fly deploy` and six re-imports. **0.7 unit** · owner: a runtime lane · 裁-179 |
+| **H-43** | runtime / ops | **All six runtime lane DSNs use TLS with the certificate UNVERIFIED.** Measured on the machine: before tonight the four original lanes carried **no `sslmode` at all** and connected over a plain `Socket`, `encrypted=false` — **credentials and data crossed Fly (sin) → AWS (ap-southeast-1) in PLAINTEXT.** 裁-179 chose option (c): all six re-imported with `uselibpqcompat=true&sslmode=require` (encrypted, cert unverified), with verify-full named **the first post-beta code PR** | `COPY ops/tls/pooler-ca.crt` into the runner stage of the runtime Dockerfile (the image ships no CA today), then all six DSNs → `sslmode=verify-full&sslrootcert=/app/ops/tls/pooler-ca.crt`, a `fly deploy` and six re-imports. **0.7 unit** · owner: a runtime lane · 裁-179. **ORDERING NOTE:** 裁-179's ledger entry calls this "the FIRST post-beta code item" (`:369`) and 裁-175 says the same of C-07 below; both sit in this P0 block and **putting TLS first is the LEAD's call, flagged for the owner to re-order at the next session's opening** |
 | **H-47** | ops / db | **A live re-migration silently flips every ceremonied role to NOLOGIN.** After the full re-apply, `pg_authid` showed **every `clara_%` role at `rolcanlogin = f`** with passwords intact, and the pooler's circuit breaker locked out every consumer (`ECIRCUITBREAKER`); the runtime was 503 for six minutes until four `alter role … login` flips. **No checklist or runbook mentions it.** Same class: `0154_binding_proposal_pr_1.sql:3788` asserts an ABSOLUTE 14-role `clara%` census, and a live cluster carries 15 (the deploy-minted `clara_storage_docs`), so the migration chain **cannot re-apply on a live cluster** without renaming that role past the checkpoint | Two documentation truings plus one guard: a "re-enable LOGIN on the ceremonied roles" step right after MIGRATE in `docs/ops/wave-g-setup-checklist.md` and `docs/ops/DR.md`; the rename recipe beside it; and `0154`'s census re-cut to a roster MAP derived from `packages/db/deploy/roles-bootstrap.sql` (the shape #525 already used for CI). **0.5 unit** · owner: an ops+db lane · ruling: none — measured tonight |
+| **C-07** | web (security) | **An uploaded XML executes script in `apps/web`'s OWN ORIGIN, under the session of whichever firm member opens it — and beta is now live, closed, with real uploads.** Measured at `9d5d844e`: `apps/web/lib/documents/bytes.ts` admits the MIME type application/xml, `fetchDocumentBytes` wraps the bytes in a `blob:` URL, `apps/web/lib/documents/open-in-new-tab.ts` navigates a new tab to it, and `apps/web/components/documents/document-metadata.tsx` calls that with **no MIME gate**; there is **no `Content-Security-Policy` anywhere in `apps/web`**. A `blob:` URL inherits the creating page's origin, so an XML carrying an inline stylesheet processing-instruction runs as that member. **MyInvois e-invoices ARE XML — an artifact a Malaysian firm will upload.** The owner ruled it post-beta (dissent filed) while beta was still unlaunched; it sits at P0 here because the closed beta now takes real documents | A MIME allowlist on open-in-new-tab (PDF + images), XML served as an attachment or through the structured view; **CSP is its own row**. **0.5 unit** · owner: a web lane · 裁-175. **ORDERING NOTE:** `ruling-175.md:21` calls this the "first post-beta code item" and 裁-179 says the same of H-43 above; **TLS first is the LEAD's ordering of two rulings that each named itself first, flagged for the owner to re-order at the next session's opening** |
 | **H-48** | runtime | **A lane whose credential is wrong is invisible until first use.** `CLARA_FREEFORM_DATABASE_URL`'s password did not match `clara_freeform_login`'s — a mismatch LATENT since the F-A6 ceremony, never surfaced because the lane is lazy and the boot assert checks env PRESENCE only. It only appeared because 裁-179's probe touched every lane | Probe each lane DSN with a `select 1` at boot or in `/ready`, and fail the readiness check loudly. Beside it, the pooler lesson: **after an `ALTER ROLE … PASSWORD` through Supavisor, wait ≥ 2 min before calling a lane dead** (the auth verifier is cached; `pgbouncer.get_auth` is not readable by `postgres`). **0.5 unit** · owner: a runtime lane · ruling: none — measured tonight |
 
 ### C.2 · P1 — before 上市
@@ -169,12 +186,12 @@ not a hedge.*
 | **H-07** | runtime | **The close-prep chat lane cannot read a close run.** Clara answered `CLR-FREEFORM-B: read_unavailable`. Traced by code read: the DB correctly refused the model's SELECT because the close tables are **not on the freeform door's enumerated relation list** — fail-closed and right, but it makes 裁-164(b)'s close-prep leg unreachable through the product | Add the close relations to the enumerated list, with the receipt naming them. A frozen body ⇒ a new `chatTurn` freeform version. **0.7 unit** · owner: a runtime lane · ruling: none |
 | **H-08** | runtime | **The refusal MISDESCRIBES its own cause.** `read_unavailable` is the COLLAPSED oracle token of `packages/runtime/workflows/chatTurn.v15.freeform.ts` (five reasons → one token, Annex D.2, deliberately oracle-safe), but its sentence is `readToolRefusalMessage({code:"42501"})`, which resolves to CLR03's *"This action needs an active bookkeeper (or higher) session for the firm."* The owner — who WAS the firm's owner and WAS signed in — was told to fix his session | Give the 42501 collapse its own oracle-safe wording ("this read is outside what the audited read door may see"), never CLR03's. Rides H-07. **+0.2 unit** · owner: the same lane · ruling: none |
 | **H-09** | web / product | **The agent's bank settle refuses on an identity rung the product gives no way to satisfy.** `settle_from_bank_line` returned `CLR-BANK-B: payer_identifier_contradiction = not_evaluable`; receipt `a451fbfa…` shows every other rung passing. The customer has no payer identifier on file and the bank line's `KONG CHENG RESTAURA*` is a name fragment — **names are not identity, at the bank ledger.** Correct behaviour; but there is no UI to record a payer identifier | (1) Explain the refusal in the product's own words on the receipt card; (2) build the surface to record a counterparty payer identifier. **0.7 unit** · owner: a web lane · ruling: none |
-| **H-11** | web | **After "Abandon close" the Close tab offers no "Begin close" button** — only the FY header and the abandoned run's gates. A second close run cannot be begun from the web; tonight's run 2 had to go through the door as the owner's delegate | Render "Begin close" whenever the FY is open and no run is in progress. **0.2 unit** · owner: a web lane · ruling: none |
+| **H-11** | web | **After "Abandon close" the Close tab offers no "Begin close" button** — only the FY header and the abandoned run's gates. A second close run cannot be begun from the web; tonight's run 2 had to go through the door as the owner's delegate. **FIELD PROOF, taken again at the clock-out:** after run 2 was abandoned through the Close tab's own dialog at 23:55:11Z, a find over the main pane for "Begin close" returned **nothing** — only the FY header and the abandoned run's gates rendered. The row stands as written | Render "Begin close" whenever the FY is open and no run is in progress. **0.2 unit** · owner: a web lane · ruling: none |
 | **H-12** | db | **The `uncoded_documents` close gate will FAIL every close once a statement is filed.** Run 2 measured `uncoded = [{filing 18d077b2…, document 38c8fd49… (the MBB statement), financial_date 2025-06-30}]` — a bank-statement filing carries a financial date and never gets a journal entry, so the gate reads it as uncoded. **A false fail on a blocking gate** | Exclude statement-kind filings from `_close_gate_uncoded`, or stop stamping a financial date on a statement filing. Pick one, with a cell for each direction. **0.5 unit** · owner: a db lane · ruling: none |
 | **H-15** | db / product | **No statutory report can render at all.** `report_templates` · `report_specs` · `report_spec_versions` · `report_artifacts` all read **0** on the fresh estate; `finalize_close` seals artifacts against a template VERSION and none is seeded | Seed at least one management-accounts template version (a data act with its own ceremony, not a migration), then re-walk milestone 10. **1 unit** · owner: a reporting lane · ruling: none |
 | **H-16** | web / runtime | **The Reports tab tells the user to ask for something the agent cannot do.** Its copy reads *"Ask Clara, in the rail, to build a sandbox view or request an export"*; `chatTurn_v17` carries no export tool, and Clara said so: *"no export tool is available."* A web↔runtime contract gap | Either give the chat an export tool (a new chatTurn version) or re-cut the copy to what exists today. Decide which; the honest copy is the cheap half. **0.3–1 unit** · owner: a web or runtime lane · ruling: none |
 | **H-21** | db | **The onboarding interview's captures are never projected.** `commit_client_onboarding` (`0017_wave_b.sql`) sets `clients.status='active'`, snapshots the plan, audits, and **projects nothing else, by design** — measured immediately after the commit: `client_facts` **0 rows for RS and 0 in the estate**, `clients.fy_end_month/day` **NULL despite `fye=12`**, `bank_accounts` **0** despite the banks answer, and **`client_identifiers` 0 despite the SSM being captured.** It bit four times in one night: the FY-end dialog re-asked, `closing_stock_present` came back UNKNOWN on `trade_nature_fact_absent`, no bank account existed, and — **the expensive one** — the client's own sales invoice sat `direction_unresolved` because `_direction_from_extraction` (`0049:872-951`) found no matching identifier and took the `CLR30` contradiction branch. **Every interview-onboarded client will hit that** | Project the captures at commit: SSM/TIN → `client_identifiers`, FYE → `clients.fy_end_month/day`, MSIC / trade nature / entity type → `client_facts`, the banks answer → a proposal (not a silent `bank_accounts` row). Each is an audited write through an existing door. **1.5 units** · owner: a db lane · ruling: none |
-| **H-19** | web / ops | **`set_sales_lane_activation` has no web surface.** `firm_limits.sales_lane_active` is false by default (BELCORT had no `firm_limits` row), and while it is false a sales document's counterparty reason is mislabelled `vendor_unresolved` and `tier_a_fails` never drops out. EXECUTE is held by `clara_fn_owner` only and there is no `_human_ctx` — an admission ceremony (F-T1) with no face | Either a documented operator ceremony (like the G1 operator-firm one) or an operator-floor control. Decide which; today it is walked by SQL. **0.5 unit** · owner: an ops or web lane · ruling: none |
+| **H-19** | web / ops | **`set_sales_lane_activation` has no web surface — and the walk had to FLIP it by SQL.** `firm_limits.sales_lane_active` is false by default (BELCORT had no `firm_limits` row at all), and while it is false a sales document's counterparty reason is mislabelled `vendor_unresolved` and `tier_a_fails` never drops out. **As run under 裁-183: the lane is now ACTIVE for BELCORT — `firm_limits.sales_lane_active = true`, watermark `2026-09-02T16:00Z`, audit `set_sales_lane_activation ok` at 20:43:16Z with `was_active false`** (the watermark was set deliberately BEFORE the walk's filings; the door's own copy warns that activating without one sets it at NOW, so **everything filed before a watermark is backlog by design and moves only through a recorded batch**). The defect is the door, not the state: EXECUTE is held by `clara_fn_owner` only, it carries no `_human_ctx`, and it was walked as clara_fn_owner by SQL because nothing in the product can reach it | Either a documented operator ceremony (like the G1 operator-firm one) or an operator-floor control — and a surface that shows a firm its sales-lane watermark. **0.5 unit** · owner: an ops or web lane · ruling: none |
 | **H-20** | web | **`clara.add_client_identifier` has no web surface** — the only web mention is a needs-you gap notice. With H-21 fixed this becomes a repair door rather than a routine one, but it is still needed | A control on the client's identity panel, bookkeeper-floored. **0.3 unit** · owner: a web lane · ruling: none |
 | **H-26** | web | **The onboarding checklist renders every structured answer as `[object Object]`** — the `interview_run` capture item shows the literal text, and so do ssm, mpers, framework, basis, coa, opening, fa and samples. Seen throughout the main onboarding journey | A reader for the capture item's answer shape. **0.3 unit** · owner: a web lane · ruling: none |
 | **H-27** | web | **The interview echoes RAW capture JSON back to the user.** The "You · ssm" line renders `{"form":"combined_unified_and_legacy","normalized":…,"format_verified":true}` instead of the registration string; the mpers step renders `{"test":"ca2016_s244_private_entity","determination":"eligible"}` | Render the human-facing value, not the capture envelope. Rides H-26. **+0.2 unit** · owner: the same lane · ruling: none |
@@ -182,14 +199,14 @@ not a hedge.*
 | **H-38** | runtime | **The checkout session does not carry the applicant's email**, so they retype it on Stripe's page and a typo births a Stripe customer under a different address than the registration | Pass `customer_email` into the session create inside `open_checkout_intent`'s caller. **0.3 unit** · owner: a runtime lane · ruling: none |
 | **H-39** | ops | **Two Stripe webhook endpoints point at the same URL.** #1 (API `2026-08-26.dahlia`, payload **snapshot**, 233 events) is the one the C-2 handler reads; #2 (no API version, payload **thin**, 24 events) double-delivers. The op_key idempotency absorbs it, but it is noise and a second signing secret nobody holds | Delete endpoint #2 in the Stripe dashboard. **Minutes** · owner: the owner · ruling: none |
 | **H-40** | ops | **Two Supabase auth settings disagree with the checklist and no decision was taken:** `jwt_exp` = **3600** where the checklist expects **900**, and `password_hibp_enabled` = **false** where the checklist says HIBP on. Both read through the Management API | Two owner decisions, then two dashboard changes and a read-back. **Minutes** · owner: the owner · ruling: none |
-| **H-44** | runtime | **`held_outbox` was 6 at the close** (it was 0 at 02:39 — six rows accrued during the walk). **Cause not investigated.** A held outbox row is work the relay has not projected | Read the six rows, classify them, and decide whether they need a drain or a fix. **0.2 unit to diagnose** · owner: a runtime lane · ruling: none |
 | **H-45** | ops | **裁-169's number 1 — the Resend plan's mail cap — was never read.** Number 2 is now on the record (`rate_limit_email_sent` = **100/hour**, Management API). Security-pass line 6 is ticked against one of its two operands | Read the cap from the Resend dashboard with the plan name and write both numbers into `docs/ops/wave-g-setup-checklist.md`. **Minutes** · owner: the owner · 裁-169 |
 | **H-46** | ops / legal | **The Mail gate (裁-146 pt 3) is not formally certified.** Two six-digit codes DID arrive: one at a **NON-team private Gmail** at FS-10 S21 (after the OTP-length fix) and one at `tools@belcort.com`, a **TEAM address**, at FS-11 step 13 (sent 18:56:25Z, verified 18:58:10Z). **Time-to-arrive and the From header were asked and are NOT recorded.** So the transport, the sender identity and the non-team delivery are all proven in substance; the ceremony's own certification line is not ticked | The owner rules whether the S21 Gmail code discharges 裁-146 pt 3; if not, one more send with the time and From recorded. **Minutes** · owner: the owner · 裁-146 |
 | **H-49** | ops / db | **DR STRICT probe `4.9` has lost its subject.** The parked S4-V2 canary's clara-side rows went with `DROP SCHEMA clara CASCADE` (裁-160, accepted), and `packages/db/scripts/dr-verify-checks.mjs` **hard-codes those ids at `:398-399` and `:414-415`** — so naming a replacement is a CODE change. **Recorded UNPROVEN IN THE FIELD from 2026-09-04**, never silently skipped | Re-point `4.9` at a post-reset durable run with both a `workflow.workflow_runs` row and a clara-side projection — candidates: the `clientOnboarding_v4` run of 19:25:15.760Z, the `witnessFacts_v3` run of 20:33:50Z, the walk's `autoDraft_v9` / `chatTurn_v17` runs. Prefer a DERIVED subject over a new hard-coded id. **0.5 unit** · owner: a db lane · 裁-172 |
 
 **Rows the walk did NOT find — already ruled, already owed, and still P1.** They are listed here
 with their ruling so the pick-list is complete; their full text is in
-[part 2](beta-handover-2026-09-04-part2.md) §C.4 unless noted.
+[part 2](beta-handover-2026-09-04-part2.md) §C.4 and its
+[part 3](beta-handover-2026-09-04-part3.md) continuation unless noted.
 
 | id | area | one line | ruling |
 |---|---|---|---|
@@ -199,7 +216,6 @@ with their ruling so the pick-list is complete; their full text is in
 | **C-04** | runtime | **The pool error contract** — `packages/runtime/lib/relay.mjs` attaches no `'error'` listener, so any idle-backend error becomes an `uncaughtException` and the process dies (Fly restarts it; durable runs resume). Ruled: the general pool logs + counts + raises a `/ready` flag; the LEADER stays crash-loud because losing its advisory lock is the designed failover; the behaviour becomes a CONTRACT in `docs/ARCHITECTURE.md`. ≈0.5 unit | 裁-149 |
 | **C-05** | db / runtime | **G1 PR-2** — the two producers, the eight deferred DB items and the `bank_agent_due_claims` retention path, then the 裁-40 flip through the G1 operator door. This is autonomy layer 2, OFF by ruling for beta | 裁-165 |
 | **C-06** | legal | **The beta Terms of Service** — a separate document kind from the DPA (never one combined signature): the `kind` discriminator + per-kind partial unique index + `sign_dpa`'s carrier gaining `kind`, 裁-90's byte-identity law extended, the RM 5,000 floor and the 27 `[LAWYER]` / 34 `[verify]` markers resolved with the lawyer | 裁-129 · 裁-166 |
-| **C-07** | web (security) | **XML documents open as `blob:` in a new tab with no MIME gate and no CSP** — `apps/web/lib/documents/bytes.ts` admits application/xml, `open-in-new-tab.ts` navigates to the blob, `document-metadata.tsx` calls it ungated; a `blob:` inherits the app origin, so an inline `<?xml-stylesheet?>` executes as the opening member. **MyInvois e-invoices ARE XML.** Fix = MIME allowlist + XML as attachment/structured view; CSP is its own row | 裁-175 (owner ruled post-beta; dissent filed) |
 | **C-08** | web | **The ten 裁-176 ports/fixes** — the adjustment template panel + model (incl. the all-zero "balanced" defect), `CounterpartyPicker`, `OpeningCeremony` (step 1 = read `0018`'s mixed-batch rule), `QueueRowView` (direction-aware noun + severity as colour AND shape), `SeedingProposalRow`, `adjustmentApi`, `advancesApi` (**a live defect**: `staff-advances-register.tsx:45` sends `businessToday()` where the DB must decide today), `agingApi` (envelope-shape guard), and `dbSeamCensus` (**REBUILD, flagged INFRASTRUCTURE, before 上市**) | 裁-176 (a)…(l) |
 | **C-09** | db / ops | **The checkout / webhook follow-ups before the real-money switch** — the postverify guard's hardcoded role list omitting the four checkout-gate roles; a durable trace for a DOOR refusal on the webhook path; and the RM0 relaxation's forward hazard (a NULL `payment_status` must be treated as NOT settled once the relaxation tightens) | 裁-57 · 裁-120 |
 | **C-10** | db | **`livemode` is stored and never read** (the webhook route gates on `CLARA_STRIPE_LIVEMODE`, fail-closed when unset); **and a paid applicant who then joins another firm strands their payment** — reachable only through the audited SQL door today. Both are zero-cost at MYR 0 and both are owed before the real-money switch | 裁-120 A-M5 / A-M4 |
@@ -217,7 +233,8 @@ with their ruling so the pick-list is complete; their full text is in
 **Clock in, in this order.**
 
 1. **`PROGRESS.md`** — posture, lanes, next, the short Backlog and Known-issues rows.
-2. **THIS FILE** and its [part 2](beta-handover-2026-09-04-part2.md) — the detail behind every row.
+2. **THIS FILE** and its [part 2](beta-handover-2026-09-04-part2.md) and
+   [part 3](beta-handover-2026-09-04-part3.md) — the detail behind every row.
 3. **[`docs/adr/README.md`](../../adr/README.md)** (the digest, the LAW) and its ruling rows, which
    now live in **[`docs/adr/README-rulings-2026-09.md`](../../adr/README-rulings-2026-09.md)** — the
    digest hit its 500-line ceiling on 2026-09-03 and every new row is written in the sibling. The
@@ -271,6 +288,27 @@ with their ruling so the pick-list is complete; their full text is in
   disabled. After merging a PR that touches a closed drill or the pipeline itself, run
   `gh workflow run ci.yml` **by hand** — and read a sweep's verdict from `gh run view`'s job list,
   never from a PR's colours.
+- **REMOVING A WORKTREE IS JUNCTION-UNSAFE ON THIS HOST — a law, paid for twice.** Never
+  `robocopy /mir` any worktree without `/XJ`: on 2026-09-01 a cleaner lane followed a junction out of
+  a reviewer worktree and filesystem-deleted **2000 tracked files** under the MAIN checkout's `apps/`
+  and `packages/` (git index untouched; `git restore` recovered everything). And
+  `git worktree remove --force` is **NOT** junction-safe either: on 2026-09-02 it followed a lane's
+  `apps/web/node_modules` junction into the main checkout's real install and emptied it (`next` gone,
+  `.pnpm` damaged; repaired by a link-aware remove plus `pnpm install --frozen-lockfile`).
+  `Remove-Item -Recurse` on a directory that still contains junctions is equally unsafe. **The
+  junction-safe primitive is: unlink every reparse point FIRST (`fs.rmdirSync` on the link itself),
+  re-walk to prove none remain, THEN remove the directory. Post-flight is `git status` on the MAIN
+  checkout plus `ls apps/web/node_modules/next`.**
+- **EVERY GIT-ACTIVE LANE RUNS IN ITS OWN WORKTREE — no docs-only exception** (two shared-tree
+  incidents in one night, 2026-08-23; the second put a landing commit on LOCAL `main`). A lane cannot
+  see another lane's checkout, so its own care is not the control — isolation is. Cut every branch
+  inside your worktree, print `git branch --show-current` INSIDE the commit command rather than
+  before it, and after any surprise resolve state against `git show origin/<branch>:<file>`, never
+  against a working tree. *(Related, archived rather than repeated here: MAX_PATH breaks git's own
+  RECOVERY verbs, so the practice is `git rebase --quit` → MIXED reset → `symbolic-ref`, never
+  abort-then-hard-reset — full text in `progress-archive-2026-08-part2.md`.)*
+- **Drive the db suite with libpq `PG*` vars plus `CLARA_ALLOW_DESTRUCTIVE=1`, NEVER `DATABASE_URL`**,
+  and cure a WSL split-brain with a full `wsl --shutdown` while runners are IDLE, then one keeper.
 - **Two instrument laws learned the hard way tonight.** Never pipe a long-running or MUTATING script
   to `head`/`grep` — a closing pipe kills it mid-run (it cost a half-finished Pages deletion). And a
   secret-prompt script is **dry-run against its own ERROR path, through the real pipe, with a dummy
@@ -279,7 +317,9 @@ with their ruling so the pick-list is complete; their full text is in
 **Owner-side acts nobody else can do:** the two `clarabook-frontend` recut PRs (裁-168); the Stripe
 product-description edit (H-37) and the duplicate webhook endpoint (H-39); the two Supabase auth
 decisions (H-40); the Resend cap read (H-45); the Mail-gate call (H-46); the elevated-shell removal
-of the locked worktree shells and the WSL `.vhdx` compaction (裁-173); and destroying his own
+of the LOCKED worktree shells and the WSL `.vhdx` compaction (裁-173) — **and that removal is
+junction-unsafe by default: see the law in §D, unlink every reparse point FIRST or it follows a
+junction into the main checkout, which has happened twice**; and destroying his own
 `codex-e2e-rate-wall-sleeper` machine on `clara-backup` when he is done with it.
 
 **One process item owed, not discharged:** 裁-171 ordered the twenty knowingly-open items read aloud
@@ -294,28 +334,35 @@ The list survives in full as the rows above and in part 2 — but the READING is
 block 4 is hygiene and can ride any lane that has the file open.
 
 1. **Open the door for outsiders — the P0 block.**
-   **(1)** H-01 deploy **v72** — one ceremony, retires the log storm and revives the belt.
+   **(1)** H-01 deploy a NEW IMAGE (**v75 or later**) — one ceremony, retires the log storm and
+   revives the belt.
    **(2)** H-06 the "Enter a statement" pair — one line, and it is the only bank ingest path that
    works today. **(3)** H-02 + H-03 + H-05 as ONE `statementFacts.v3` train — the period-bounds
    inference, the witness→roster normalisation, and the task settlement. **(4)** H-17
    `autoDraft_v10` — the kind-scoped counterparty birth and the un-masked error map. **(5)** H-18 the
    consent surface, built the owner's way (in the interview, granted on commit — 裁-182). **(6)**
    H-35 the confirm link. **(7)** H-36 DPA v2 + H-37 the Stripe copy — both owner acts, both minutes.
-   **(8)** H-43 verify-full TLS and **(9)** H-42 the two password rotations. **(10)** H-47 + H-48 —
-   the re-migration runbook truings and the per-lane boot probe.
-   *Rough total: **6–7 lane-units** plus a handful of owner minutes.*
+   **(8)** H-43 verify-full TLS, **(9)** C-07 the XML MIME gate, and **(10)** H-42 the two password
+   rotations. **(11)** H-47 + H-48 — the re-migration runbook truings and the per-lane boot probe.
+   **The order of (8) and (9) is the LEAD's, and it is flagged:** 裁-175 calls C-07 the "first
+   post-beta code item" (`ruling-175.md:21`) and 裁-179 says the same of H-43 (ledger `:369`). Both
+   sit in this P0 block because the P0 block IS the post-beta code queue; **TLS first is the lead's
+   call, and the owner should re-order it at the next session's opening if he disagrees.**
+   *Rough total: **7 lane-units** plus a handful of owner minutes.*
 2. **Make the product whole — the walk's P1 product rows.** H-21 (the capture projection — it
    unblocks four separate symptoms and is the highest-leverage single row in this list), then H-12,
    H-11, H-26/H-27, H-30, H-09, H-20, H-19, then H-07 + H-08 together, then H-15 + H-16, then H-04.
 3. **The pre-上市 roadmap (C-01), in its ruled order** — the pricing sitting (裁-58, the only thing
    everything downstream waits on) → the billing tier tranche + the AI usage ledger (C-02) → the
    lawyer's pass over the DPA, the terms and the consent text (C-06) → the real-money switch with KYB
-   and the non-zero checkout walk. Alongside it, at whatever pace suits: C-03, C-04, C-05, C-07,
-   C-08, C-09, C-10, C-11, C-12, C-13, C-15, C-16, and H-49.
-4. **Hygiene** — [part 2](beta-handover-2026-09-04-part2.md) §C.3 and §C.5. None of it blocks
+   and the non-zero checkout walk. Alongside it, at whatever pace suits: C-03, C-04, C-05, C-08,
+   C-09, C-10, C-11, C-12, C-13, C-15, C-16, and H-49. *(C-07 is no longer here — it moved into the
+   P0 block, above.)*
+4. **Hygiene** — [part 2](beta-handover-2026-09-04-part2.md) §C.3 and §C.4, and
+   [part 3](beta-handover-2026-09-04-part3.md)'s §C.4 continuation and §C.5. None of it blocks
    anything; most of it rides a lane that already has the file open.
 
-**A closing note on what tonight was worth.** Nine of the fourteen P0 rows, and most of the P1
+**A closing note on what tonight was worth.** Nine of the fifteen P0 rows, and most of the P1
 product rows, were found by walking the real product against real Malaysian documents on the live
 estate — the statement walls, the classifier's blindness, the stranded task, the web↔door gap, the
 masked autodraft refusal, the dark consent door, the capture-projection gap. **A mocked end-to-end

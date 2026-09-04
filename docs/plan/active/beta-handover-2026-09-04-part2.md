@@ -4,11 +4,17 @@
 the milestone tally, the P0 and P1 rows, the harness notes and the pick-list. **Read that first.***
 
 **Why this file exists.** `PROGRESS.md` was re-cut at the final clock-out truing to short rows
-pointing at ids, so the DETAIL of every still-open item lives here. **Every row that was in
-`PROGRESS.md`'s Backlog or Known issues before this truing and is still open is carried below** — and
-the original text of those two sections was moved BYTE-FOR-BYTE into
-[`progress-archive-2026-08-part8.md`](../completed/progress-archive-2026-08-part8.md) first, so the
-words as they stood are recoverable even where a row here is a compression of them.
+pointing at ids, so the DETAIL of every still-open item lives here. **Every row with an OPEN ACTION
+is carried below; rows that were superseded, historical, or a LESSON rather than a task stayed in
+the archive and are named here in one line each** (part 3's closing paragraph) — a law went to the
+handover's §D instead of a backlog row, and a done thing is said to be done. **The place to look for
+the words as they stood is
+[`progress-archive-2026-08-part8.md`](../completed/progress-archive-2026-08-part8.md)**, which holds
+the whole pre-truing `Backlog` and `Known issues` sections BYTE-FOR-BYTE.
+
+*The first cut of this file over-claimed — it said every open row was carried, and a fresh-context
+review found fourteen that were not. They are carried now, as C-77…C-88 and the closing paragraph.
+The claim above is the corrected one.*
 
 Tiers are the same as part 1: **P0** before the first external applicant · **P1** before 上市 ·
 **P2** hygiene.
@@ -38,6 +44,8 @@ Every one of these was seen on screen or in a console during the 裁-184 walk. N
 | **H-51** | web | **`/clients` has no "add a client" control** — onboarding starts only in the chat lane. A discoverability finding, recorded as such at the walk rather than as a build failure | An entry point on `/clients` that opens the same "Do" |
 | **H-52** | product | The interview still asks for an **SST number after `sst_regime = not_registered`**, and a `skip` is accepted without the confirmation echo every other capture gets | A small flow fix; rides 裁-181's normaliser work |
 | **H-53** | product | **Consent evidence sits in the coding lane.** After the authorization letter was filed it appeared as a third RS filing awaiting coding | Exclude `consent_evidence`-kind filings from the coding lane |
+| **H-44** | runtime | **`held_outbox` 6 at the close — READ AND EXPLAINED, not a defect.** It was 0 at 02:39 and 6 at 06:19; the 06:21 full `/ready` names the cause: **`wakeEngine.heldForDisabledSource` = 6**, with the warning "6 held/queued wake-engine row(s) awaiting a disabled/unregistered source". That counter exists precisely so a DISABLED source cannot accumulate an invisible backlog (`docs/plan/active/g1-wake-engine-design.md:114` — "a disabled source never silently accumulates an invisible backlog"), and 裁-165 ships beta with the G1 cadence sources OFF. **So the six rows are the designed posture being loud** | Nothing now. **When G1 PR-2 (C-05) enables the sources, VERIFY these six are the disabled-source class and that they drain** — a held row that is NOT of that class would be the real finding. **A check inside C-05, not a lane** · owner: whoever builds C-05 · 裁-165 |
+| **H-54** | docs / product | **A close run that is BEGUN turns the period wall ON for every writer** until it is finalized or abandoned — that is what refused the human bank settle at 05:38 (`CLR19 · write_into_closed_period`, correct), and it is why close run 2, begun 05:42:30 only to re-measure the gates, had to be ABANDONED at the clock-out (23:55:11Z) so FY2025 would be left OPEN. Nothing in the product says so | Say it in the Close tab's own copy and in the close runbook: beginning a close closes the period to writers |
 | **H-41** | design | The **two `clarabook-frontend` recut PRs** — 裁-64②'s `--input` token value and R3 §9's focus-ring founder amendment — are the owner's, in the design-authority repo, outside every lane's write boundary. Until they land the ClaraBook design law drifts from the shipped app and any future port re-imports the drift. 裁-167 rides the same row: if the design repo later implements token contract §5.2 (32/36/40), `apps/web` follows | Owner · 裁-168 |
 
 **Two practices minted by the walk, recorded so they are not re-learned:** a door reason typed
@@ -285,12 +293,24 @@ Grouped by area. **Nothing here was closed by the walk unless the row says so.**
   carried:** whether the browser-identity half of the original finding is fully answered, plus the
   `token_hash`-in-logs and single-use-replay siblings from the same law-28 leg. **P1, as a
   re-measurement.**
-- **C-64 · Host and worktree hygiene (owner's elevated shell).** Three locked worktree shells
-  (`agent-a9f6854ecb5fbc759`, `agent-ac1c38bc266b18dc1`, `agent-aae5e2c5571e21b91`) plus the corrupted
-  `agent-a13c9c7d877268370`; none holds anything, and removal needs an elevated shell after a Claude
-  Code restart, then `git worktree prune`. **VHDX compaction is owed again** — last measured
-  2026-09-02 at 66 GB with 16 GB used inside (~50 GB reclaimable); runners idle, `wsl --shutdown`
-  first, then the owner's elevated `diskpart`/`Optimize-VHD` (裁-173). **P2.**
+- **C-64 · Host and worktree hygiene — and the census is a WALK, never a list (裁-173).** **Measured
+  at 06:20 on 2026-09-04: TWELVE worktrees under the .claude/worktrees directory remain from merged lanes, three
+  of them LOCKED.** *(The three carried the ids `agent-a01d56452325f30d7`, `agent-a03968a61c707eb2c`
+  and `agent-a3dcc1396dada32f2` at that moment — **historical labels, not a resume mechanism**: they
+  are session-local and the next session's are different, so the resume step is
+  **`git worktree list`**, and the count above is a measurement with a date on it, not a roster to
+  work from.)* **Removal is junction-UNSAFE by default on this host and it has cost twice** — never
+  `robocopy /mir` a worktree without `/XJ` (2026-09-01: 2000 tracked files filesystem-deleted under
+  the MAIN checkout's `apps/` and `packages/`), and neither `git worktree remove --force` nor
+  `Remove-Item -Recurse` is junction-safe either (2026-09-02: the main checkout's
+  `apps/web/node_modules` emptied, `next` gone, `.pnpm` damaged). **The primitive: unlink every
+  reparse point FIRST (`fs.rmdirSync` on the link itself), re-walk to prove none remain, THEN remove;
+  post-flight is `git status` on the MAIN checkout plus `ls apps/web/node_modules/next`.** The law
+  itself lives in the handover's §D, because it binds every session, not just this cleanup. The
+  LOCKED ones additionally need an elevated shell after a Claude Code restart, then
+  `git worktree prune`. **VHDX compaction is owed again** — last measured 2026-09-02 at 66 GB with
+  16 GB used inside (~50 GB reclaimable); runners idle, `wsl --shutdown` first, then the owner's
+  elevated `diskpart`/`Optimize-VHD` (裁-173). **P2.**
 - **C-65 · The unresolved worktree incident (2026-08-31 ~02:50)** — an uncommitted
   `.claude/skills/orchestrator-fable/SKILL.md` edit vanished from the main checkout; content and
   cause unknown. Ask the owner; try editor history; add a post-lane main-status tripwire. **P2.**
@@ -366,34 +386,8 @@ Grouped by area. **Nothing here was closed by the walk unless the row says so.**
 
 ---
 
-## C.5 · The documentation truings the rulings ordered, and which are NOT yet executed
-
-**Stated plainly because several rulings say "executed at the final truing" and this truing did not
-do them:** the final truing's scope was the records, the ledger, the digest rows, the handover and
-`PROGRESS.md`. The lines below are owed to files this PR did not open, and each is a small docs edit
-for whichever lane next has the file.
-
-| where | what the line must say | ruling |
-|---|---|---|
-| `docs/ops/wave-g-setup-checklist.md` | the step **4b** purge line (auth users + Storage OBJECTS, never buckets or policies) | 裁-161 |
-| `docs/ops/wave-g-setup-checklist.md` | the pre-reset backup gate re-cut: *"for a TEST-DATA reset before beta live the gate is waived by ruling (裁-177); for any reset after beta live it binds in full"* | 裁-177 |
-| `docs/ops/wave-g-setup-checklist.md` | the signup-gate section gains **"OTP length = 6, read back by Management API (`mailer_otp_length`)"** — the live config was **8** and no document named the setting | 裁-92 · measured at S21 |
-| `docs/ops/wave-g-setup-checklist.md` | 裁-169's TWO read-back lines with their values (`rate_limit_email_sent` = 100/hour is now known; the Resend cap is H-45) | 裁-169 |
-| `docs/ops/wave-g-setup-checklist.md` | the dated fact that **BELCORT is not SST-registered**, so Stripe Tax stays off | 裁-170 |
-| `docs/ops/wave-g-setup-checklist.md` · `docs/ops/DR.md` | **"re-enable LOGIN on the ceremonied roles"** immediately after MIGRATE, plus the `0154` role-rename recipe (this is H-47) | measured at FS-11 step 9 |
-| `docs/ops/DR.md` | 裁-162's scope-and-expiry sentence: the owner-run classifier's supersession was FS-11-scoped and **has expired** | 裁-162 |
-| `docs/ops/DR-full-drill.md` · `packages/db/scripts/dr-verify-checks.mjs` | probe `4.9`'s replacement subject, or the honest UNPROVEN marker (this is H-49) | 裁-172 |
-| `apps/web/wrangler.jsonc` (comment) + the FS-10 rider | **T-K:** the claim that "every walled POST refuses on a workers.dev preview" is FALSE — `apps/web/lib/same-origin.ts:179-181` accepts an Origin whose host is the request's own host | measured at FS-10 S12 |
-| `apps/web/wrangler.jsonc` | move `INVITE_MAIL_FROM` from a secret into `vars` (it is not credential-bearing; "one name, one home") | FS-10 S8a |
-| the remote-walk instrument's README | two instrument-expectation rows are wrong (/auth/recover/password's anonymous landmark is the recovery-REQUEST form; `/money-input-harness` sits behind the auth gate), and **its `routes` mode must not POST a real invite** — the FS-10 walk created one on the live database | measured at FS-10 S12 |
-| `packages/runtime/README.md` + the checklist | the lane DSNs' TLS posture is documented **nowhere**, and neither is `pg-connection-string` 2.14's semantics (`sslmode=require` ≠ libpq's without `uselibpqcompat=true`) | 裁-179 |
-| eight files under `packages/runtime/` | fifteen citations of `0161` that mean C-3's auth-wall role pair, now `0163` — a docs-shaped edit inside runtime files scores CODE, so it rides the next runtime PR | 裁-108's discipline |
-| five active plan docs | *"six cadence gates / six daily belts"* where the leader now exports FIVE `*Due` predicates and the reconciler runs FOUR — a `(historical count; see ARCHITECTURE §2.2)` rider on each, never a re-guess | measured 2026-09-03 |
-| `packages/runtime/README.md` | the pointer chain terminates at a STATE sentence ("VERSION 71") rather than the law it demonstrates, which survives at `:182` | measured 2026-09-03 |
-| `docs/product/PRD.md` §9 item 3 | 裁-145's note says four of five are live; **three** are (the Beta terms are not) | 裁-166 |
-| `docs/ARCHITECTURE.md` | the per-pool background-client error CONTRACT (rides C-04's PR) | 裁-149 |
-
----
-
-*Written at the final clock-out truing, 2026-09-04, under 裁-185 and 裁-150. Every row names what was
-measured, and every row that says "not measured" means exactly that.*
+**§C.4 continues in [part 3](beta-handover-2026-09-04-part3.md)** with **C-77 … C-88** — the fourteen
+rows a fresh-context review found missing from the first cut — the note on what deliberately stayed
+in the archive, and **§C.5, the documentation truings the rulings ordered and this truing did not
+execute.** Part 3 was opened because this file reached the repo's 500-line ceiling, the same
+convention every other split in this repo follows.

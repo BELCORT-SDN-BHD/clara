@@ -79,7 +79,9 @@ the owner as a real question with a real NO-GO option, rather than reported as a
 **The question, put once through `AskUserQuestion` with the three options as follows:**
 
 1. **GO — 封閉 beta（建議）** — beta live for BELCORT and owner-invited testers only; open applicants
-   wait for v72, the statement-lane fixes, the "Enter a statement" form fix and DPA v2.
+   wait for v72, the statement-lane fixes, the "Enter a statement" form fix and DPA v2. *(The option
+   was put in those words; "v72" was corrected by the 06:21 `fly releases` read — v72–v74 are the
+   night's secrets-import releases on the v71 image, so the next real deploy is **v75**.)*
 2. **NO-GO — fix first** — hold the launch until the statement lane, the autodraft mask and the
    report path are repaired.
 3. **GO — open beta** — take outside applicants now.
@@ -100,7 +102,8 @@ runtime↔DB skew — are both fixable without touching a mechanism.
 1. **Beta is LIVE, CLOSED** — BELCORT plus owner-invited testers. Sign-ups are not disabled at the
    platform (`disable_signup: false`, read by Management API), so the closure is an OPERATING
    posture, not a technical wall — the owner controls who is given the address.
-2. **Before the first EXTERNAL applicant:** runtime **v72** (the `reconcile_autopost_rules` skew),
+2. **Before the first EXTERNAL applicant:** **a new runtime image, v75 or later** (the
+   `reconcile_autopost_rules` skew),
    the statement-lane fixes, the "Enter a statement" institution/account pair, and **DPA v2**.
 3. **This session CLOSES after the final truing merges** (裁-150). The repo is the handover; there
    are **no next lanes**; the next session starts on the owner's ask.
@@ -154,15 +157,21 @@ runtime↔DB skew — are both fixable without touching a mechanism.
   resolves).
 - **The runtime** is Fly machine **`48ee715b763048`**, 2/2 checks, `/ready` **true** at 22:19:30Z,
   **VERSION 74** (a config counter after the 裁-179 secret imports — **not a new image**: it is still
-  the **v71** build from `344f7ad8`). `held_outbox` **6** (was 0 at 02:39 — six rows accrued during
-  the walk; **cause not investigated**), `pending_intents` 0.
+  the **v71** build from `344f7ad8` — `fly releases --json` at 06:21 shows v71/v72/v73/v74 all on
+  `deployment-01M1JSJW8SW0EZ1SP8ZR48B1WZ`, so **the next real deploy is v75**). `held_outbox` **6**
+  (was 0 at 02:39) — **read and explained at 06:21**: `wakeEngine.heldForDisabledSource` 6 with the
+  warning "6 held/queued wake-engine row(s) awaiting a disabled/unregistered source", the designed
+  loudness of 裁-165's disabled wake sources. `pending_intents` 0.
 - **The database** is at **159 / `0164_checkout_gate_c6_web_reads`**, freshly re-applied from
   `0001`; 19 `clara%` roles; the evaluator freeze reads `{"ok": true, "verified_deployed": 7,
   "verified_registered": 8}`.
 - **The estate** holds firms Alara · Borneo · **BELCORT (`04daf86c…`, `is_operator` = true, the only
   operator firm ever)**, and clients Meridian Logistics · Sunrise Retail · Highland Coffee · ROME
   PROPERTIES `acb60b65…` · **ROME SECRETARY `7a045c7f…`** (active, chart applied, one invoice posted,
-  one bank receipt settled, FY2025 open).
+  one bank receipt settled, **FY2025 OPEN — two close runs, both ABANDONED**: run 1 at 05:39 to book
+  the settlement, run 2 `db941c04-f78e-4595-9004-08df90be1631` at **23:55:11Z = 07:55 MYT** at the
+  clock-out, so the period wall is not left on; the Close tab then read "2025-01-01 – 2025-12-31 ·
+  open · fy_end: asserted", run state abandoned; no attestation, no finalize).
 - **The FS-11 bridge sleeper `6834e7da567358` is DESTROYED.** A foreign machine
   `codex-e2e-rate-wall-sleeper` (`d895474fe0e138`) is running on `clara-backup` — the owner's, named
   and left alone.
