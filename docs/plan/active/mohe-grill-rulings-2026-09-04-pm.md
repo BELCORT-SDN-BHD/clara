@@ -1,4 +1,4 @@
-# The 2026-09-04 repair-session rulings — consent at the firm level, attestations and maker-checker abolished, the session's lanes (裁-186…190)
+# The 2026-09-04 repair-session rulings — consent at the firm level, attestations and maker-checker abolished, the session's lanes (裁-186…197)
 
 > **The ELEVENTH ledger**, continuing [`mohe-grill-rulings-2026-09-04.md`](mohe-grill-rulings-2026-09-04.md)
 > (裁-151…185) at that file's ceiling — it stood at 480 lines, and one ruling entry would have put the
@@ -187,6 +187,86 @@ client-IP test (`:293`). Two reviewers read that helper's waits differently, so 
 before it edits; line numbers here are of `main` at `a2d098f2`.
 **Amends** 裁-86 and digest law 85's browser-leg clause (gate AND acceptance, where it read acceptance only);
 a digest row and an "amended by" line on ADR-0077 under 裁-140, no new ADR. No separate ruling file.
+
+### 裁-193 — the chart of accounts may be applied only AFTER `commit_client_onboarding` (owner, 2026-09-04 ≈16:45 MYT, `AskUserQuestion` option (b) of 2, AGAINST the recommendation (a))
+
+**Context.** 裁-23 Q5 said the chart of accounts is applied "after the client is created", and the two
+readings differ by one door: after the onboarding interview MINTS the client, or after
+`commit_client_onboarding` closes the plan. **Ruled: after commit.**
+
+**Consequences, as stated at the ruling.** #551's `dba6` is re-cut to committed-only, plus a
+`seed_decision_plan_state` key carrying the card's copy; #546's settled receipt already hosts the apply
+control post-commit, so no new surface is owed. Handover row **H-29** closes as "the card says
+decided-applies-after-commit". **Dissent: none filed** — a taste call, no accounting risk either way.
+
+**MECHANISM (the lead's call, not the owner's, under house law PRD §6 "enforced in the DB, not the UI").**
+review-551 MEASURED that `apply_coa_template` (`0156:726-910`) never consults the onboarding plan, so
+"the door refuses on an open plan" was a GAP, not a fact. DB-A therefore adds the refusal INSIDE the door
+— a CREATE OR REPLACE on a granted writer, so it takes a prestate pin and a D1 quiesce window — and makes
+`dba6` two CTEs: a committed-only `dec`, and a separate open-plan lookup feeding only
+`seed_decision_plan_state`. #551's D1 list grows by `apply_coa_template`. **Amends** nothing in the digest;
+it settles 裁-23 Q5's ambiguity rather than reversing it. No separate ruling file — this entry is the text
+of record.
+
+### 裁-194 — the 裁-149 clause-2 PREMISE CORRECTION is ACCEPTED; the leader stays byte-untouched (owner, 2026-09-05 ≈02:50 MYT, `AskUserQuestion` option (a) of 2)
+
+**Context.** 裁-149 clause 2 kept the leader's dedicated session **crash-loud** on the stated premise that
+it carries no `'error'` listener, so an idle-client error becomes an `uncaughtException`, the process dies
+and a standby takes over. A later read found the premise wrong **when it was ruled**: the leader session
+has always had an error listener feeding a reconnect loop — `packages/runtime/scripts/relay.mjs`
+(`:139-153`) and `packages/runtime/lib/leader.mjs` (`:177-188`), each capturing the error into `connErr`
+and re-throwing it at the top of the poll loop to reconnect with backoff. The leader was never crash-loud,
+and **failover holds anyway**: the session-level advisory lock is released when the session drops, so a
+standby acquires it whether the process dies or the client reconnects.
+
+**Ruled (a): the correction is ACCEPTED and the leader is byte-untouched.** The behaviour 裁-149 wanted is
+the behaviour that already ships; only the reasoning was wrong. The record of the corrected contract is
+owed to `docs/ARCHITECTURE.md` §4.3 by the runtime-ops lane that builds 裁-149's clause 1 — **§4.3 does not
+exist yet on `main` at `6bad969b`, where §4 stops at §4.2** — and the rulings register's **row 90** carries
+a one-line erratum written at this clock-out. Clause 1 (the general pool logs, counts and raises a health
+flag) is untouched and still owed. **Amends** 裁-149's clause-2 REASONING only, never its outcome. No
+separate ruling file.
+
+### 裁-195 — REQUEUE-ONCE: a human's real ANSWER to a coder-opened `sweep_refusal` question un-parks the registry and re-mints the draft (owner, 2026-09-05 ≈02:50 MYT, option (a) of 3)
+
+**Ruled (a).** An ANSWER is the human act that un-parks a twice-failed autodraft registry and re-mints the
+draft, once. **A DISMISSAL does not re-mint** — closing a question without answering it is not the human
+act. **The lane, as scoped at the ruling:** copy `readmit_autodraft_after_withdrawal` (`0117:173-345`),
+reserving the op key AFTER the delegation; eligibility is `origin='sweep_refusal'` **and**
+`scope_kind='document'` **and** a parked registry **and** a terminal task; the op key is
+`'q-requeue:'||event`; the runtime arm sits beside `admitWithdrawalEvent`; four cells, including one
+proving a `'manual'`-origin question must NOT re-mint. ≈0.5 lane-unit. **Amends** nothing — it names a new
+human act inside an existing wall. No separate ruling file.
+
+### 裁-196 — four readiness and grant rulings, taken together; the dead-lane `/ready` failure goes AGAINST the recommendation (owner, 2026-09-05 ≈02:50 MYT, multi-select, ALL FOUR taken)
+
+- **(a)** production **REFUSES to boot** on a DSN carrying `sslmode=no-verify` — it warned before.
+- **(b)** **a dead NON-runtime DB lane FAILS `/ready`** — **AGAINST the lead's beta recommendation.**
+  **Dissent, filed once:** a 503 on a lane whose ceremony has not run would take chat down for a lane
+  nobody uses yet.
+- **(c)** the sales-lane switch keeps `p_reason`.
+- **(d)** `clara.sst_threshold_schedule` gains a firm-user read — a grant, or a definer read — so the Tax
+  tab's classification control can offer the statutory thresholds.
+
+**IMPLEMENTATION READING (the lead's, recorded to keep (b) safe).** Only a **CONFIGURED** lane — one whose
+DSN is present — that is unreachable fails readiness. An UNCONFIGURED lazy lane stays `skipped` and never
+fails; `pending` (unmeasured) never fails; a `stalled` probe loop never fails, because an instrument fault
+is not a lane fault. **Lanes:** (a)+(b) are one runtime lane (the L9 follow-up, ≈0.5 unit); (d) is the next
+DB lane (DB-D). No separate ruling file.
+
+### 裁-197 — three product tickets ENTER THE QUEUE after the nine (owner, 2026-09-05 ≈02:50 MYT, multi-select, ALL THREE taken)
+
+- **(i)** provisional streaming text in the rail (≈0.7 unit) — a grey provisional stream replaced by the
+  DB-persisted message. Not a durable artifact, so hard constraint 2 holds.
+- **(ii)** real readers for the nine ids-only part kinds (≈1 unit): `je_review`, `doc_review`, `diff`,
+  `open_question`, `bank_recon_receipt`, `fixed_asset`, `depreciation_run_receipt`,
+  `adjustment_run_receipt`, `staff_advance`.
+- **(iii)** chatTurn tools and cards for the five gaps (≈1.5 units): send a document into intake, start an
+  onboarding interview, add a fixed asset / set a depreciation method, recurring adjustments, and start a
+  period close.
+
+**Order among the three: (iii) → (ii) → (i)** unless the owner says otherwise — he listed (iii) first.
+They queue AFTER the nine lanes already ordered. No separate ruling file.
 
 ---
 
