@@ -70,7 +70,7 @@ what did the re-reading find?"
 > which is a narrower thing: 裁-149's clause-2 PREMISE was wrong when ruled — the leader session always had
 > an error listener and a reconnect loop — so the reasoning is corrected while the OUTCOME stands and the
 > leader is byte-untouched; row 90 carries the erratum line, and the corrected contract is owed to
-> `docs/ARCHITECTURE.md` §4.3, which does not exist yet. **195** names a new human act (an ANSWER, never a
+> `docs/ARCHITECTURE.md` §4.3, written by #558 as §4.3, carrying this corrected reading. **195** names a new human act (an ANSWER, never a
 > dismissal) inside an existing wall. **196** takes all four readiness and grant items, (b) AGAINST the
 > lead's recommendation with the dissent filed once, and the lead's implementation reading is recorded so a
 > lane cannot build a 503 out of an unconfigured or unmeasured lane. **197** queues three product tickets
