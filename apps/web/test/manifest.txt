@@ -83,9 +83,12 @@ components/common/route-error.test.tsx
 components/common/table-scroll-region.test.tsx
 components/documents/coding-lane-a11y.test.tsx
 components/documents/coding-lane-keyboard.test.tsx
+components/documents/document-facts-table.test.tsx
+components/documents/document-metadata-viewer-gate.test.tsx
 components/documents/documents-a11y.test.tsx
 components/documents/documents-governance-a11y.test.tsx
 components/documents/documents-governance-keyboard.test.tsx
+components/documents/documents-workbench-refresh.test.tsx
 components/documents/lint-finding-detail.test.tsx
 components/e2e/money-input-harness-route.test.tsx
 components/entry/email-confirmation-origin.test.tsx
@@ -210,10 +213,13 @@ lib/command/routes.test.ts
 lib/documents/bytes.test.ts
 lib/documents/copy.test.ts
 lib/documents/doors.test.ts
+lib/documents/extract-shape.test.ts
 lib/documents/intake.test.ts
 lib/documents/loaders.test.ts
 lib/documents/open-in-new-tab.test.ts
+lib/documents/pdf-worker-asset.test.ts
 lib/documents/reads.test.ts
+lib/documents/region-geometry.test.ts
 lib/documents/runtime-wire.test.ts
 lib/documents/useUploadQueue.test.ts
 lib/doors.test.ts
@@ -289,6 +295,7 @@ tests/checkout-claim-route.test.ts
 tests/checkout-route.test.ts
 tests/client-scope.test.ts
 tests/confirm-flash.test.ts
+tests/csp-report-only.test.ts
 tests/firm-scope-db-pins.test.ts
 tests/firm-scope-fourth-entrance.test.ts
 tests/firm-scope-surfaces.test.ts

@@ -22,6 +22,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { createSingleFireGuard, runOnce } from "@/lib/parts/single-fire-guard";
+import { TechnicalDetail } from "@/components/common/technical-detail";
 import { closeOnConfirmedOk, refusalForThisDialog } from "@/lib/parts/door-dialog-outcome";
 import { DoorDialogRefusal, type DialogRefusal } from "@/components/common/dialog-refusal";
 
@@ -31,6 +32,7 @@ export function DocumentsDoorDialog({
   triggerSize = "sm",
   title,
   description,
+  diagnostic,
   confirmLabel,
   busy,
   confirmDisabled,
@@ -43,6 +45,10 @@ export function DocumentsDoorDialog({
   triggerSize?: "sm" | "xs";
   title: string;
   description?: string;
+  /** CB-AE2E-022 — the DB verb this door calls, rendered UNDER the description
+   *  inside a collapsed disclosure (components/common/technical-detail.tsx),
+   *  never inside the sentence a professional reads before confirming. */
+  diagnostic?: string;
   confirmLabel: string;
   busy: boolean;
   confirmDisabled?: boolean;
@@ -87,6 +93,7 @@ export function DocumentsDoorDialog({
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           {description ? <DialogDescription>{description}</DialogDescription> : null}
+          {diagnostic ? <TechnicalDetail>{diagnostic}</TechnicalDetail> : null}
         </DialogHeader>
         {children}
         <DoorDialogRefusal refusal={refusalForThisDialog(refusal, attempt)} attempt={attempt} />

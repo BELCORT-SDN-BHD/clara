@@ -19,12 +19,55 @@ import type { SessionTokenAccessor } from "@/lib/session";
  *  otherwise report `ok:true` and open as if it were the document). Values only,
  *  mirrored deliberately (a literal list, not logic) rather than importing the
  *  runtime package — apps/web never depends on packages/runtime at build time. */
-const ALLOWED_BYTES_CONTENT_TYPES: ReadonlySet<string> = new Set([
+export const ALLOWED_BYTES_CONTENT_TYPES: ReadonlySet<string> = new Set([
   "application/pdf", "image/png", "image/jpeg", "image/webp", "image/tiff", "image/heic",
   "application/xml", "text/csv", "text/tab-separated-values", "application/x-ofx",
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
   "application/octet-stream",
+]);
+
+/** C-07 / 裁-175 — THE VIEWER GATE, and it is NOT the fetch gate above.
+ *
+ *  `ALLOWED_BYTES_CONTENT_TYPES` is a mirror of the runtime's INTAKE list: what
+ *  may be STORED. It was also, wrongly, the only check standing between an
+ *  uploaded file and `tab.location.href = blob:…` — and a `blob:` URL inherits
+ *  the CREATING page's origin, so an uploaded `application/xml` carrying an
+ *  `<?xml-stylesheet?>` with inline script executed as the opening firm member,
+ *  in apps/web's own origin, with their session. MyInvois e-invoices ARE XML.
+ *
+ *  This is the second, strictly narrower list: the types a browser renders
+ *  inline as a DOCUMENT and that carry no script vector — PDF (rendered by the
+ *  browser's own sandboxed viewer) and the three raster images. Deliberately
+ *  ABSENT, each for its own reason:
+ *    * `application/xml` — the vector itself (XSLT/stylesheet PI, inline script);
+ *    * `image/svg+xml` — not admitted at intake either, and named here so a
+ *      future widening of the intake list cannot silently reach this one: SVG is
+ *      an XML script host, never a "raster image";
+ *    * `image/tiff`, `image/heic` — no browser renders them inline; the tab is a
+ *      download prompt or a blank page, i.e. a dead link either way;
+ *    * `text/csv`, `text/tab-separated-values`, `application/x-ofx`, both OOXML
+ *      types — same: not inline-renderable;
+ *    * `application/octet-stream` — the bytes route's null-mime fallback. It is
+ *      the one entry that makes the FETCH list not a real type gate, so it can
+ *      never be the basis for a navigation.
+ *
+ *  Enforced in `openDocumentInNewTab` (open-in-new-tab.ts) BEFORE the tab is
+ *  navigated — in the LIBRARY, not in a component, so a second caller cannot
+ *  bypass it. `lib/documents/bytes.test.ts`'s drift cell pins all THREE lists
+ *  (this one, the fetch list, and the runtime's own intake table) against each
+ *  other in one place: the fetch list was already a hand-mirrored copy with no
+ *  guard on either side ("spelling is not identity").
+ *
+ *  NOT DONE IN THIS PASS, and named so the gap is visible: this keys on the
+ *  RESPONSE content-type, which the bytes route sets from the uploader-declared
+ *  `documents.mime_type`. No magic-byte sniff is performed here. The runtime
+ *  compares declared against detected at intake (packages/runtime/lib/
+ *  intake.mjs:44-47), so declared == detected at STORAGE time — that is the
+ *  property this gate leans on, and it is the property to re-verify before
+ *  widening this set. */
+export const VIEWABLE_IN_NEW_TAB: ReadonlySet<string> = new Set([
+  "application/pdf", "image/png", "image/jpeg", "image/webp",
 ]);
 
 export type DocumentBytes = { blobUrl: string; mime: string; revoke: () => void };
