@@ -23,3 +23,40 @@ export function FormattedDate({ value }: { value: string | null }) {
   const utcMidnight = new Date(Date.UTC(Number(y), Number(mo) - 1, Number(d)));
   return <>{format.dateTime(utcMidnight, { year: "numeric", month: "short", day: "numeric", timeZone: "UTC" })}</>;
 }
+
+/**
+ * The TIMESTAMPTZ twin — a SEPARATE component, deliberately, rather than a
+ * widening of `FormattedDate` (H-32).
+ *
+ * `FormattedDate` above exists to pin a CALENDAR DAY: it regex-matches the
+ * leading YYYY-MM-DD, rebuilds UTC midnight and formats in UTC so a `date`
+ * column never shifts a day under a viewer west of UTC. Applied to a
+ * `timestamptz` that is exactly wrong twice over — it DISCARDS the time of
+ * day, and it reports the instant in UTC rather than where the reader is. It
+ * was doing both to `agent_interruptions.expires_at`
+ * (packages/db/migrations/0006_runtime_core.sql:203, the 14-day clarify
+ * deadline), so a deadline rendered as a bare "Sep 17, 2026".
+ *
+ * An instant is formatted in the VIEWER'S OWN zone with the time shown,
+ * because that is the question a deadline answers ("have I still got today?").
+ * `Date.parse` handles the ISO-8601 offset PostgREST returns; an
+ * unparseable value renders verbatim rather than as a fabricated date, the
+ * same fail-closed arm `FormattedDate` takes.
+ */
+export function FormattedDateTime({ value }: { value: string | null }) {
+  const format = useFormatter();
+  if (!value) return <>—</>;
+  const ms = Date.parse(value);
+  if (!Number.isFinite(ms)) return <>{value}</>;
+  return (
+    <>
+      {format.dateTime(new Date(ms), {
+        year: "numeric",
+        month: "short",
+        day: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+      })}
+    </>
+  );
+}
