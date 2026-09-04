@@ -368,6 +368,31 @@ test("dba.9a 裁-193: apply_coa_template REFUSES onboarding_plan_open while the 
     "and the chart is planted");
 });
 
+test("dba.9c the rung refuses ONLY 'open': a CANCELLED plan is admitted, and a committed one beside it still wins", async (t) => {
+  if (gate(t)) return;
+  const owner = world.users.alice;
+  const { firm, client } = await freshClient("9c");
+  const tpl = (await rootQuery(
+    "select id from clara.coa_templates where scope='platform' and state='published' order by version desc limit 1")).rows[0];
+
+  const plan = await plantPlan(firm, client, { state: "open", seed: "firm_template", user: owner });
+  const refused = await caught(() => applyTemplate(owner, { client, template: tpl.id, opKey: `dba9c-open-${client}` }));
+  assert.equal(JSON.parse(refused?.detail ?? "{}").reason, "onboarding_plan_open",
+    "mandatory setup: the open plan really is what refuses");
+
+  // CANCELLED is not an onboarding in progress. If the rung refused here, a withdrawn
+  // onboarding would strand that client's chart permanently — the header claims it does not,
+  // and this is the cell that holds the claim to it.
+  await rootQuery(
+    `update clara.onboarding_plans set state='cancelled', committed_at=null, committed_by=null,
+        cancelled_at=now(), cancelled_by=$2, cancel_reason='dba9c cancel' where id=$1`, [plan, owner]);
+  const ok = await applyTemplate(owner, { client, template: tpl.id, opKey: `dba9c-cancelled-${client}` });
+  assert.ok(ok, "a CANCELLED plan is admitted — the rung refuses an interview in progress, not a withdrawn one");
+  assert.ok((await rootQuery(
+    "select count(*)::int n from clara.coa_accounts where client_id=$1", [client])).rows[0].n > 0,
+    "and the chart is planted");
+});
+
 test("dba.9b a client with NO plan at all is unaffected — the rung refuses an open interview, never an absent one", async (t) => {
   if (gate(t)) return;
   const owner = world.users.alice;

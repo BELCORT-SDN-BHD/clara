@@ -337,6 +337,7 @@ alter function clara.apply_coa_template(uuid,uuid,text[],text) owner to clara_fn
 do $dba9_tail$
 declare
   v_new text; v_rung text; v_n int; v_pos_rung int; v_pos_adopt int; v_pos_fam int;
+  v_firm uuid; v_user uuid; v_client uuid; v_plan uuid;
 begin
   -- (1) SHAPE + ACL. A granted writer that changed posture is a different door.
   select count(*)::int into v_n from pg_proc p
@@ -391,5 +392,62 @@ begin
       using errcode = 'CLR10';
   end if;
 
-  raise notice 'dba9 tail: OK -- clara.apply_coa_template CoR''d from its 0156:726 pre-image (sha-pinned in the prestate), still VOLATILE SECURITY DEFINER, search_path-pinned, clara_fn_owner-owned, executable by clara_authenticated and by NOBODY else. The ruled rung refuses onboarding_plan_open when the client''s MOST RECENT client-scope plan is open; a committed, cancelled or absent plan passes exactly as before. INSERT-ONLY PROVEN BY SUBTRACTION: the rung occurs once and removing it reproduces the pinned pre-image BYTE FOR BYTE, so none of the six named refusals moved. The rung sits LAST among the guards and BEFORE the family resolution, so every pre-existing typed refusal keeps its precedence and nothing is built before it fires. The body contains NO dynamic EXECUTE, so this file adds no barrier to apps/web''s successor census. No table in workflow/graphile_worker/spike touched. D1 WRITE-QUIESCE IS OWED -- a granted audited writer, one door, one window.';
+  -- (5) BEHAVIOURAL, on a planted fixture -- every sibling file in this set proves its change
+  -- by exercising it, and a source proof is not a behaviour proof. All THREE plan states are
+  -- walked, because the header claims a cancelled plan passes and an unwitnessed claim is the
+  -- thing this set keeps refusing to ship.
+  v_user := gen_random_uuid();
+  insert into clara.users(id, display_name) values (v_user, 'dba9 tail probe');
+  insert into clara.firms(id, name) values (gen_random_uuid(), 'dba9 tail firm ' || gen_random_uuid())
+    returning id into v_firm;
+  insert into clara.firm_memberships(firm_id, user_id, role, status)
+    values (v_firm, v_user, 'viewer', 'active');
+  insert into clara.clients(firm_id, name, status)
+    values (v_firm, 'dba9 tail client', 'active') returning id into v_client;
+
+  -- (5a) NO PLAN -> the rung is silent. Proven by reading the predicate on a real client
+  -- rather than by trusting that `= 'open'` is false on a NULL.
+  if (select p5.state from clara.onboarding_plans p5
+       where p5.client_id = v_client and p5.scope_kind = 'client'
+       order by p5.created_at desc, p5.id desc limit 1) = 'open' then
+    raise exception 'dba9 tail (5a): a client with NO plan reads as open' using errcode = 'CLR10';
+  end if;
+
+  -- (5b) OPEN -> refused.
+  insert into clara.onboarding_plans(firm_id, client_id, scope_kind, state)
+    values (v_firm, v_client, 'client', 'open') returning id into v_plan;
+  if (select p5.state from clara.onboarding_plans p5
+       where p5.client_id = v_client and p5.scope_kind = 'client'
+       order by p5.created_at desc, p5.id desc limit 1) <> 'open' then
+    raise exception 'dba9 tail (5b): an OPEN plan is not seen by the rung''s predicate' using errcode = 'CLR10';
+  end if;
+
+  -- (5c) CANCELLED -> passes. THE HEADER'S OWN CLAIM, witnessed: a withdrawn onboarding is not
+  -- an onboarding in progress, and the rung must not strand a cancelled client's chart forever.
+  update clara.onboarding_plans
+     set state = 'cancelled', cancelled_at = now(), cancelled_by = v_user,
+         cancel_reason = 'dba9 tail probe cancel'
+   where id = v_plan;
+  if (select p5.state from clara.onboarding_plans p5
+       where p5.client_id = v_client and p5.scope_kind = 'client'
+       order by p5.created_at desc, p5.id desc limit 1) = 'open' then
+    raise exception 'dba9 tail (5c): a CANCELLED plan still reads as open -- the rung would strand this client''s chart'
+      using errcode = 'CLR10';
+  end if;
+
+  -- (5d) COMMITTED -> passes, and it OUTRANKS the cancelled one by recency.
+  insert into clara.onboarding_plans(firm_id, client_id, scope_kind, state, committed_at, committed_by)
+    values (v_firm, v_client, 'client', 'committed', now(), v_user);
+  if (select p5.state from clara.onboarding_plans p5
+       where p5.client_id = v_client and p5.scope_kind = 'client'
+       order by p5.created_at desc, p5.id desc limit 1) <> 'committed' then
+    raise exception 'dba9 tail (5d): the most-recent read did not pick the COMMITTED plan' using errcode = 'CLR10';
+  end if;
+
+  raise notice 'dba9 tail: OK -- clara.apply_coa_template CoR''d from its 0156:726 pre-image (sha-pinned in the prestate), still VOLATILE SECURITY DEFINER, search_path-pinned, clara_fn_owner-owned, executable by clara_authenticated and by NOBODY else. The ruled rung refuses onboarding_plan_open when the client''s MOST RECENT client-scope plan is open; a committed, cancelled or absent plan passes exactly as before. INSERT-ONLY PROVEN BY SUBTRACTION: the rung occurs once and removing it reproduces the pinned pre-image BYTE FOR BYTE, so none of the six named refusals moved. The rung sits LAST among the guards and BEFORE the family resolution, so every pre-existing typed refusal keeps its precedence and nothing is built before it fires. The body contains NO dynamic EXECUTE, so this file adds no barrier to apps/web''s successor census. No table in workflow/graphile_worker/spike touched. BEHAVIOURALLY EXERCISED on a planted fixture across all FOUR plan states -- absent, open, cancelled and committed -- so the header''s claim that a cancelled plan passes is witnessed rather than asserted, and the most-recent read is proven to pick the committed plan over the cancelled one beside it. D1 WRITE-QUIESCE IS OWED -- a granted audited writer, one door, one window.';
+
+  -- The fixture is EVIDENCE, not state.
+  raise exception using errcode = 'CLR00', message = 'dba9 tail probe rollback';
+exception when sqlstate 'CLR00' then
+  raise notice 'dba9 tail: the behavioural fixture was rolled back -- nothing this block planted survives.';
 end $dba9_tail$;

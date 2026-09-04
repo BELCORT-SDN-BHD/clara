@@ -18,10 +18,17 @@
 //      PASS — a missing pin on both is invisible to a comparison.
 //   3. /ready DOES NOT PROBE IT at all.
 //
-// So this cell is deliberately ABSOLUTE and TARGET-ONLY. It asks what the target IS, not
-// whether it matches something else, and it FAILS rather than SKIPS on every negative path
-// (missing function, absent pin, unreadable catalog). A SKIP here would reproduce the exact
-// blind spot the cell exists to close — a check that goes quiet on the shape it is hunting.
+// So this cell is deliberately ABSOLUTE and TARGET-ONLY: it asks what the target IS, never
+// whether it matches a source. It NEVER SKIPS — a skip would reproduce the exact blind spot
+// the cell exists to close, a check that goes quiet on the shape it is hunting.
+//
+// It FAILS on every negative path but ONE: a missing function, an unreadable catalog, a lost
+// search_path pin, and an absent pin on a target whose chain HAS taken the pin migration are
+// all failures. The single exception is the VINTAGE arm — an absent pin on a target whose
+// chain PREDATES that migration, where the ceremony was the only path and a throwaway has
+// never run one. That records INFO rather than FAIL, and only outside a live drill: under
+// CLARA_DR_STRICT=1 it fails like everything else. The succession gate below is where that
+// branch is made, and checkCanary keys its own vintage-dependent probe the same way.
 //
 // The subject list is a single exported const so a third serializable-pinned body added
 // later is a one-line addition rather than a forgotten one.
