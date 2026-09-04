@@ -260,16 +260,18 @@ async function applyTemplate(sub, { client, template, opKey }) {
   return r.rows[0].r;
 }
 
-// createdAt is explicit wherever a cell plants MORE THAN ONE plan for a client: the column
-// defaults to now(), which is transaction-stable, so plans written close together can tie on it
-// and any ordering-sensitive reading then resolves by physical luck. That defect red 0173's own
-// tail on CI; these cells do not rely on ordering, and they do not leave it to chance either.
-async function plantPlan(firm, client, { state, seed, committedAt = null, createdAt = null, user }) {
+// createdAt and id are explicit wherever a cell plants MORE THAN ONE plan for a client. The
+// created_at column defaults to now(), which is transaction-stable, so plans written together
+// tie on it and the reading falls to its later ORDER BY terms; id defaults to a random uuid, so
+// a cell that leaves it unset cannot say which row a tie-break picked. That combination red
+// 0173's own tail on CI. Pinning both is what makes dba.9d's mutant deterministic.
+async function plantPlan(firm, client, { state, seed, committedAt = null, createdAt = null, id = null, user }) {
   const p = await rootQuery(
-    `insert into clara.onboarding_plans(firm_id, client_id, scope_kind, state, committed_at, committed_by,
+    `insert into clara.onboarding_plans(id, firm_id, client_id, scope_kind, state, committed_at, committed_by,
         created_at)
-       values ($1,$2,'client',$3,$4,$5, coalesce($6::timestamptz, now())) returning id`,
-    [firm, client, state, committedAt, state === "committed" ? user : null, createdAt]);
+       values (coalesce($7::uuid, gen_random_uuid()), $1,$2,'client',$3,$4,$5,
+               coalesce($6::timestamptz, now())) returning id`,
+    [firm, client, state, committedAt, state === "committed" ? user : null, createdAt, id]);
   await rootQuery(
     `insert into clara.onboarding_plan_items(plan_id, firm_id, item_kind, item_key, question, state,
         answer, answered_by, answered_at)
@@ -398,29 +400,42 @@ test("dba.9c the rung refuses ONLY 'open': a CANCELLED plan is admitted and its 
     "and the chart is planted");
 });
 
-test("dba.9d the rung is NOT recency-sensitive: a client who committed and later re-opened a plan is refused even when the open plan is backdated behind the committed one", async (t) => {
+test("dba.9d THE TIE: an open and a committed plan sharing one created_at refuse — the tie-break resolves toward open, and the mutant that deletes it reds every run", async (t) => {
   if (gate(t)) return;
   const owner = world.users.alice;
   const { firm, client } = await freshClient("9d");
   const tpl = (await rootQuery(
     "select id from clara.coa_templates where scope='platform' and state='published' order by version desc limit 1")).rows[0];
 
-  // The committed plan is the NEWER of the two. The predicate this rung replaced read the
-  // client's most recent plan, so here it would read 'committed' and ADMIT — planting a chart
-  // for a client whose interview is open again. This is the one case where the two readings
-  // genuinely disagree, which is why it is the cell that proves the behaviour changed and not
-  // merely the spelling.
+  // Both plans share ONE created_at, which is the case "most recent" cannot decide — and it is
+  // reachable in production, because now() is transaction-stable and a door that writes two
+  // plans in one transaction stamps them identically. The committed row is given the HIGHER
+  // uuid deliberately: `id desc` is the final ORDER BY term, so deleting `(state='open') desc`
+  // makes the read pick 'committed' and ADMIT on EVERY run, not on half of them. That is what
+  // makes this cell a deterministic mutant detector rather than a coin flip of its own.
+  const [lo, hi] = (await rootQuery("select gen_random_uuid() a, gen_random_uuid() b")).rows
+    .flatMap((r) => [r.a, r.b]).sort();
+  const tie = new Date(Date.now() - 3600_000).toISOString();
   await plantPlan(firm, client, {
-    state: "committed", seed: "firm_template", user: owner,
-    committedAt: new Date(Date.now() - 3600_000).toISOString(),
-    createdAt: new Date(Date.now() - 3600_000).toISOString() });
+    state: "committed", seed: "firm_template", user: owner, id: hi, committedAt: tie, createdAt: tie });
   await plantPlan(firm, client, {
-    state: "open", seed: "firm_template", user: owner,
-    createdAt: new Date(Date.now() - 86_400_000).toISOString() });
+    state: "open", seed: "firm_template", user: owner, id: lo, createdAt: tie });
+
+  // The fixture's own premise, asserted rather than assumed: the rows really do tie, and the
+  // committed one really does hold the higher id. Without this the mutant could pass vacuously.
+  // id::text collate "C" rather than max(id): uuid has no max() aggregate, and C collation is
+  // byte order — the same order Postgres uses for uuid, and the same JS .sort() gave us above.
+  const shape = (await rootQuery(
+    `select count(distinct created_at)::int ties,
+            (max(id::text collate "C") filter (where state='committed'))
+              > (max(id::text collate "C") filter (where state='open')) as committed_is_higher
+       from clara.onboarding_plans where client_id=$1 and scope_kind='client'`, [client])).rows[0];
+  assert.equal(shape.ties, 1, "mandatory setup: both plans share exactly one created_at");
+  assert.equal(shape.committed_is_higher, true, "mandatory setup: the committed row holds the higher uuid");
 
   const refused = await caught(() => applyTemplate(owner, { client, template: tpl.id, opKey: `dba9d-${client}` }));
   assert.equal(JSON.parse(refused?.detail ?? "{}").reason, "onboarding_plan_open",
-    "an open interview refuses no matter which plan happens to be most recent");
+    "a tie resolves toward the OPEN plan, so the door refuses rather than deciding at random");
   assert.equal((await rootQuery(
     "select count(*)::int n from clara.coa_accounts where client_id=$1", [client])).rows[0].n, 0,
     "and no chart was planted behind the refusal");
