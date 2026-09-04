@@ -458,14 +458,20 @@ begin
   -- that asks for a million rows should get a page rather than an error. The ceiling is the DB's
   -- and the caller cannot raise it.
   v_limit := least(greatest(coalesce(p_limit,50),1),200);
+  -- IT READS THE VIEW, NOT THE BASE TABLE, and that is the one design decision in this door worth
+  -- stating. Re-deriving the predicate here would leave two objects that MUST agree free to drift:
+  -- a later change to the view's floor or tenant predicate would silently not reach the door, and
+  -- the page a caller gets would stop matching the surface it is a page OF. The view's own
+  -- `jwt_firm()` / `actor_role_rank()` still evaluate the CALLER's claims inside this definer —
+  -- they read `request.jwt.claims`, which is session state, not role state — so the rows are
+  -- identical either way and the floor ends up enforced twice, deliberately. `c.firm` is resolved
+  -- above only so a below-floor caller gets an honest CLR04 instead of an empty firm.
   return query
-  select e.seq, e.event_type, t.description, e.client_id, e.actor, e.on_behalf_of,
-         e.via_wake_kind, e.created_at
-    from clara.domain_events e
-    join clara.event_types t on t.name=e.event_type
-   where e.firm_id=c.firm
-     and (p_after_seq is null or e.seq < p_after_seq)
-   order by e.seq desc
+  select v.seq, v.event_type, v.event_description, v.client_id, v.actor, v.on_behalf_of,
+         v.via_wake_kind, v.created_at
+    from clara.firm_timeline_visible v
+   where (p_after_seq is null or v.seq < p_after_seq)
+   order by v.seq desc
    limit v_limit;
 end $$;
 revoke all on function clara.list_firm_timeline(bigint,integer) from public;
