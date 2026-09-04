@@ -12,6 +12,9 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { createElement } from "react";
 import { NextIntlClientProvider } from "next-intl";
 
@@ -24,6 +27,8 @@ import { JournalStatusLegend } from "./status-legend";
 import type { CoaAccountRow, JournalEntryRow, JournalLineRow, ReviewQueueRow } from "../../lib/journals/types";
 
 enableDomInspection();
+
+const WEB_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
 const ACCOUNTS: CoaAccountRow[] = [
   { client_id: "c1", account_code: "1000", name: "Cash", account_type: "asset", is_active: true },
@@ -227,19 +232,67 @@ test("the state legend lists every status in the DB's CHECK domain, and Posted i
 });
 
 /**
- * THE PRE-裁-188 WINDOW, pinned so the legend cannot get ahead of the database.
+ * THE PRE-裁-188 WINDOW — the rendered copy AND the two sources that make it true.
  *
  * 裁-187 / ADR-0078 abolished the maker-checker walls, but the DOOR BODIES STILL CARRY THE
- * RUNGS: `_approve_entry_core`'s three CLR05 arms are live and byte-untouched behind 0106's
- * agent fence (`0016_a21_compliance_watch.sql:1424-1442`, the distinct-checker raise at
- * :1433-1436), and docs/ARCHITECTURE.md §3.4 says so in one sentence. A legend promising the
- * post-裁-188 world would tell a bookkeeper a rule the database does not yet obey, and they
- * would meet a refusal this very screen had said could not happen.
+ * RUNGS. A legend promising the post-裁-188 world would tell a bookkeeper a rule the database
+ * does not yet obey, and they would meet a refusal this very screen had said could not happen.
+ * A cell that reads only the rendered string would go on passing through exactly that.
  *
- * WHEN 裁-188 LANDS, this cell inverts rather than being deleted quietly: assert the caveat is
- * GONE, and drop the second sentence of `JournalsWorkbench.legend.rbac` with it.
+ * SO IT READS THE SOURCES TOO — and the two are NOT interchangeable, which is the whole design
+ * of this cell:
+ *
+ *   (a) `0016_a21_compliance_watch.sql`'s `distinct_checker` raise. This proves the CITATION
+ *       the legend's own comment makes is real rather than a stale reference. It does NOT fire
+ *       when the wall comes down, and assuming it would is the "spelling is not identity"
+ *       trap: 裁-188 lands as a NEW migration splicing `_approve_entry_core`'s live body, and
+ *       a migration already merged is immutable history — 0016 stays byte-identical forever.
+ *       A cell resting on (a) alone would stay green while the live door stopped raising.
+ *
+ *   (b) docs/ARCHITECTURE.md §3.4's sentence, which is the repo's own DECLARATION that the
+ *       window is open. That sentence is trued by the 裁-188 lane itself (ADR-0078 §3.4 names
+ *       the truing), so THIS is the arm that actually fires the day the walls fall, and the
+ *       red lands on the copy that has to change with it.
+ *
+ * WHEN 裁-188 LANDS this cell INVERTS rather than being deleted quietly: assert the caveat is
+ * GONE from both the copy and §3.4, and drop the second sentence of
+ * `JournalsWorkbench.legend.rbac` with it.
  */
+const DISTINCT_CHECKER_RAISE =
+  /raise exception 'high-stakes entry needs a distinct checker'\s*\n\s*using errcode='CLR05',detail='\{"reason":"distinct_checker"\}';/;
+const WINDOW_OPEN = /The bodies still carry the rungs until the 裁-188 wall-removal lane lands/;
+
 test("the legend keeps the second-checker caveat while the door bodies still raise CLR05", async () => {
+  const repoRoot = join(WEB_ROOT, "..", "..");
+
+  // (a) the citation is real — the arm the legend's comment points at is where it says it is.
+  const migration = readFileSync(join(repoRoot, "packages/db/migrations/0016_a21_compliance_watch.sql"), "utf8");
+  assert.match(migration, DISTINCT_CHECKER_RAISE, "0016's distinct-checker raise is the arm this legend's caveat exists for");
+
+  // (b) the repo still DECLARES the window open. This is the arm that reds when 裁-188 lands.
+  const architecture = readFileSync(join(repoRoot, "docs/ARCHITECTURE.md"), "utf8");
+  assert.match(
+    architecture,
+    WINDOW_OPEN,
+    "ARCHITECTURE §3.4 no longer says the walls are standing — invert this cell and drop the legend's caveat",
+  );
+
+  // POSITIVE CONTROLS ON BOTH MATCHERS. A `match` against a large file proves nothing unless
+  // the pattern can also say NO — a regex loosened into something the file always satisfies
+  // would go green forever. Neither source is mutated to prove this: a migration already
+  // merged is immutable history and must never be edited even briefly, so the control runs the
+  // same pattern against the same text with the fact REMOVED.
+  assert.doesNotMatch(
+    migration.replace(DISTINCT_CHECKER_RAISE, "-- removed"),
+    DISTINCT_CHECKER_RAISE,
+    "the migration matcher cannot tell present from absent — it is not a measurement",
+  );
+  assert.doesNotMatch(
+    architecture.replace(WINDOW_OPEN, "the walls are down"),
+    WINDOW_OPEN,
+    "the ARCHITECTURE matcher cannot tell present from absent — it is not a measurement",
+  );
+
   const h = await renderComponent(App(createElement(JournalStatusLegend)));
   try {
     for (let i = 0; i < 2; i++) await h.settle();
