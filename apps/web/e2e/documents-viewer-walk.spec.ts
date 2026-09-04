@@ -59,12 +59,27 @@ test.describe("documents viewer — the MIME gate, the page overlay and the CSP"
 
     await expect(page.getByRole("button", { name: "Open document" })).toBeVisible();
 
-    // THE MEASUREMENT: how many browsing contexts exist before the click, and
-    // whether any new one ever navigates. A `blob:` navigation in a popup is
-    // exactly what C-07 describes, so both are watched.
+    // THE MEASUREMENT: how many browsing contexts survive the click.
+    //
+    // N2, AND WHAT KILLING IT TAUGHT. The first cut also asserted that no popup
+    // was ever navigated to a `blob:` URL, collecting `p.url()` at the `page`
+    // event — vacuous, because a `window.open("about:blank")` popup reads
+    // "about:blank" there and the blob assignment happens afterwards. The
+    // second cut moved to `framenavigated` on the main frame, which looked
+    // right. A POSITIVE CONTROL on the PDF path — where a blob navigation
+    // certainly happens — then measured ZERO blob URLs there too: Chromium
+    // does not surface a navigation event for a `location.href = "blob:…"`
+    // assignment into an `about:blank` popup, so NO collector of that shape can
+    // discriminate, and an assertion over it is unfalsifiable however it is
+    // written.
+    //
+    // So the URL assertion is gone rather than rewritten a third time. What is
+    // left is the pair that genuinely discriminates, and it is the behavioural
+    // difference the gate actually creates: on a refusal the tab is CLOSED, so
+    // the context count returns to baseline (asserted here); on an admitted
+    // type it SURVIVES (asserted in the PDF cell below). Those two cells fail
+    // in opposite directions if the gate breaks either way.
     const pagesBefore = context.pages().length;
-    const opened: string[] = [];
-    context.on("page", (p) => { opened.push(p.url()); });
 
     await page.getByRole("button", { name: "Open document" }).click();
 
@@ -76,8 +91,6 @@ test.describe("documents viewer — the MIME gate, the page overlay and the CSP"
     await page.waitForTimeout(1000);
 
     expect(context.pages().length, "no browsing context may survive a refused open").toBe(pagesBefore);
-    expect(opened.filter((u) => u.startsWith("blob:")), "nothing may ever be navigated to a blob: URL for a non-viewable type").toEqual([]);
-
     // …and the refusal must not masquerade as either of the two failures it is not.
     await expect(page.getByText(/Could not open this document/)).toHaveCount(0);
     await expect(page.getByText(/blocked the new tab/)).toHaveCount(0);
@@ -161,6 +174,46 @@ test.describe("documents viewer — the MIME gate, the page overlay and the CSP"
     await page.getByRole("button", { name: "Supplier name" }).focus();
     await page.keyboard.press("Enter");
     await expect(factsRows).toContainText("Supplier name");
+  });
+
+  test("[MAJOR 1] the polygon layer stays on the page after a width change — the canvas is not pinned to a fixed pixel box", async ({ page }) => {
+    // THE DEFECT: `renderPdfPageToCanvas` used to set `canvas.style.width/height`
+    // inline, which beats the host's `w-full` class. The <svg> overlay is sized
+    // to the HOST (`absolute inset-0`), so the moment the host moved — most
+    // routinely when the vertical scrollbar appears in the `max-h-[32rem]`
+    // scroller, ~15px on classic scrollbars, every single time — the two boxes
+    // stopped agreeing and every polygon was drawn in the wrong place.
+    //
+    // The assertion is that the SVG's rendered width EQUALS the page element's,
+    // measured from the browser, before AND after a real viewport change. If
+    // the inline size ever comes back, the second pair diverges.
+    await signIn(page);
+    await page.goto(DOCUMENTS_URL);
+    await selectDocument(page, /invoice-april\.pdf/);
+    await page.getByRole("button", { name: "Show page overlay" }).click();
+    await expect(page.locator("canvas").first()).toBeVisible({ timeout: 30_000 });
+    await expect.poll(() => page.locator("svg[aria-hidden='true'] polygon").count(), { timeout: 20_000 }).toBeGreaterThan(0);
+
+    const widths = async () => page.evaluate(() => {
+      const svg = document.querySelector("svg[aria-hidden='true']");
+      const canvas = document.querySelector("canvas");
+      if (!svg || !canvas) return null;
+      return { svg: svg.getBoundingClientRect().width, page: canvas.getBoundingClientRect().width };
+    });
+
+    const before = await widths();
+    expect(before, "both the page element and its overlay must be on screen").not.toBeNull();
+    expect(Math.abs(before!.svg - before!.page), `svg ${before!.svg} vs canvas ${before!.page}`).toBeLessThanOrEqual(1);
+
+    // A real width change, not a simulated one.
+    await page.setViewportSize({ width: 900, height: 900 });
+    await expect.poll(async () => (await widths())?.page ?? 0, { timeout: 10_000 }).not.toBe(before!.page);
+
+    const after = await widths();
+    expect(
+      Math.abs(after!.svg - after!.page),
+      `after the resize the overlay drifted off the page: svg ${after!.svg} vs canvas ${after!.page}`,
+    ).toBeLessThanOrEqual(1);
   });
 
   test("D3: the extraction view is tiered — facts up front, page text and the raw envelope collapsed", async ({ page }) => {
@@ -251,6 +304,15 @@ test.describe("documents viewer — the MIME gate, the page overlay and the CSP"
     await page.locator("canvas").first().waitFor({ state: "visible", timeout: 30_000 }).catch(() => {});
     await page.getByRole("button", { name: "View extraction text" }).click();
     await expect(page.getByRole("heading", { name: "Page text" })).toBeVisible();
+
+    // OPEN THE RAW ENVELOPE BEFORE SCANNING. Its <pre> is a capped
+    // `overflow-auto` block — the same scrollable-region class this train
+    // already fixed on the page scroller — and while the <details> is closed it
+    // is not in the accessibility tree at all, so a scan here proved nothing
+    // about it. The fold's mutant panel is what caught that: removing the
+    // pre's `tabIndex` left every cell green.
+    await page.locator("details", { hasText: "Raw engine output (JSON)" }).first().locator("summary").click();
+    await expect(page.locator("pre", { hasText: "schema_version" })).toBeVisible();
 
     const results = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]).analyze();
 

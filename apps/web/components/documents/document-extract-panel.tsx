@@ -179,7 +179,26 @@ function RawEnvelope({ envelopeText }: { envelopeText: string }) {
     <details className="mt-1">
       <summary className="cursor-pointer text-xs text-muted-foreground">{t("rawEnvelopeSummary")}</summary>
       {!parsed ? <p className="mt-1 text-xs text-muted-foreground">{t("rawEnvelopeTruncated")}</p> : null}
-      <pre className="mt-1 max-h-96 max-w-full overflow-auto whitespace-pre-wrap rounded-md bg-muted p-2 text-xs text-muted-foreground">
+      {/* FOCUSABLE — the same class of finding this train's own axe scan raised
+          against the overlay's page scroller. A capped `overflow-auto` block
+          holding nothing but text is a scroll region a keyboard cannot reach,
+          so a keyboard-only reader sees the first ~96 lines of a 20,000-
+          character envelope and has no way to reach the rest.
+
+          NOT PROVEN BY A CELL, and that is stated rather than left implied.
+          The fold's mutant panel removed this `tabIndex` and every gate stayed
+          green: the unit a11y engine (test/a11yRules.ts) carries no
+          scrollable-region rule, and real axe in the browser leg does not flag
+          this element even with an envelope long enough to overflow it — a
+          reason not pinned down. The change stands on the same reasoning that
+          the overlay's scroller stands on, where axe DID fire; it is not
+          standing on a test. */}
+      <pre
+        tabIndex={0}
+        role="group"
+        aria-label={t("rawEnvelopeSummary")}
+        className="mt-1 max-h-96 max-w-full overflow-auto whitespace-pre-wrap rounded-md bg-muted p-2 text-xs text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      >
         {text}
       </pre>
     </details>

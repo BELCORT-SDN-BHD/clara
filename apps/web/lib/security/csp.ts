@@ -4,9 +4,14 @@
 // `wrangler.jsonc` declares no headers, and the only header writers in the app
 // are the runtime proxy's response allow-list and `lib/supabase/proxy.ts`'s
 // Referrer-Policy / Cache-Control. So the blob-origin hole C-07 names (an
-// uploaded XML executing script in apps/web's own origin) had NO second wall
-// behind the missing MIME gate. `VIEWABLE_IN_NEW_TAB` (lib/documents/bytes.ts)
-// is the first wall; this is the second.
+// uploaded XML executing script in apps/web's own origin) had no defence-in-depth
+// behind the missing MIME gate.
+//
+// THIS IS NOT A SECOND WALL, and calling it one would be the overclaim the
+// header below exists to avoid. `VIEWABLE_IN_NEW_TAB` (lib/documents/bytes.ts)
+// is the wall, and it is the only thing enforcing anything today. A REPORT-ONLY
+// policy stops nothing by definition: it is a MEASUREMENT of what an enforcing
+// policy would cost, and the enforcing header is its own costed row.
 //
 // WHY REPORT-ONLY, AND WHAT IT IS MEASURING. `Content-Security-Policy-Report-
 // Only` is evaluated and reported by the browser but never ENFORCED — nothing
@@ -16,7 +21,7 @@
 // nothing. The browser's own violation reports are therefore the instrument
 // that answers the open question the ruling left: does Next 16 on OpenNext /
 // Workers need `'unsafe-inline'` or a nonce for its bootstrap? The e2e leg
-// (`e2e/documents-viewer.spec.ts`) collects those reports off the BUILT app and
+// (`e2e/documents-viewer-walk.spec.ts`) collects those reports off the BUILT app and
 // the PR body records the measurement. Turning this into an ENFORCING header is
 // its own row and its own PR — do not flip the header name here without the
 // measurement in hand.

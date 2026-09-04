@@ -29,6 +29,7 @@
 // screen-reader user loses.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import dynamic from "next/dynamic";
 import { useTranslations } from "next-intl";
 import { useHydratedPart } from "@/lib/parts/hooks";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
@@ -40,6 +41,7 @@ import {
   locatorPage,
   scaleRegionPolygon,
   PDF_PAGE_MIME,
+  RASTER_PAGE_MIMES,
   type PageBox,
 } from "@/lib/documents/region-geometry";
 import { partitionRegions } from "@/lib/documents/extract-shape";
@@ -48,6 +50,13 @@ import { SectionHeader } from "@/components/common/section-header";
 import { LoadingState, StateBanner } from "@/components/common/state";
 import { DocumentFactsTable } from "./document-facts-table";
 import type { DocumentExtractRegion, DocumentExtractResult } from "@/lib/documents/types";
+
+/** THE ONLY IMPORTER OF pdfjs-dist, and it is loaded with `ssr: false` on
+ *  purpose (fold, MAJOR 2). That flag is what actually keeps the library out of
+ *  the server graph, and therefore out of the Worker script OpenNext builds —
+ *  an `await import()` inside an effect does not, which this PR measured the
+ *  hard way. `loading` renders the same honest line the raster path shows. */
+const DocumentPdfPage = dynamic(() => import("./document-pdf-page"), { ssr: false });
 
 /** Same non-null container idiom `DocumentExtractPanel` uses: it keeps "not yet
  *  loaded" (`data === null`) apart from "loaded, and the DB legitimately
@@ -151,8 +160,14 @@ export function DocumentPageOverlayContent({
 type PageState =
   | { kind: "idle" }
   | { kind: "loading" }
-  | { kind: "raster"; url: string; revoke: () => void }
-  | { kind: "canvas"; canvas: HTMLCanvasElement; cssWidth: number; cssHeight: number; revoke: () => void }
+  | { kind: "raster"; url: string }
+  | { kind: "pdf"; url: string }
+  /** N7: a type the byte gate handed over but this component cannot draw. It
+   *  gets its own state and its own sentence rather than falling into the
+   *  raster arm — an `<img src=blob:…>` pointed at an OFX file renders a broken
+   *  image icon, which reads as "the document is damaged" rather than "this
+   *  viewer does not draw that type". */
+  | { kind: "unrenderable"; mime: string }
   | { kind: "error"; message: string };
 
 /** The page element plus its polygon layer. Owns the byte fetch, the object-URL
@@ -172,13 +187,12 @@ function PageWithOverlay({
   regions: readonly DocumentExtractRegion[];
   boxesByExtraction: Map<string, Map<number, PageBox>>;
   selectedId: string | null;
-  onSelect: (id: string) => void;
+  onSelect: (id: string | null) => void;
 }) {
   const t = useTranslations("ClientDocuments");
   const [state, setState] = useState<PageState>({ kind: "idle" });
   const [size, setSize] = useState<{ width: number; height: number } | null>(null);
   const hostRef = useRef<HTMLDivElement | null>(null);
-  const canvasHostRef = useRef<HTMLDivElement | null>(null);
 
   // ONE effect owns the whole byte lifetime: fetch, render, revoke. `cancelled`
   // guards every setState after an await so an unmount mid-fetch cannot write
@@ -196,15 +210,17 @@ function PageWithOverlay({
         revoke = bytes.revoke;
         if (cancelled) { bytes.revoke(); return; }
 
+        // The RESPONSE's own content-type decides, never the row's declared
+        // one, and the branch is a CHECKED membership rather than an else
+        // (N7). `fetchDocumentBytes` admits a wider set than this viewer can
+        // draw — TIFF, HEIC, CSV, OFX, the OOXML pair — and every one of them
+        // would have landed in the raster arm as a broken <img>.
         if (bytes.mime === PDF_PAGE_MIME) {
-          const width = hostRef.current?.clientWidth ?? 640;
-          const { renderPdfPageToCanvas } = await import("@/lib/documents/pdf-page-render");
-          const rendered = await renderPdfPageToCanvas(bytes.blobUrl, page, Math.max(240, width));
-          if (cancelled) { bytes.revoke(); return; }
-          setState({ kind: "canvas", canvas: rendered.canvas, cssWidth: rendered.cssWidth, cssHeight: rendered.cssHeight, revoke: bytes.revoke });
-          setSize({ width: rendered.cssWidth, height: rendered.cssHeight });
+          setState({ kind: "pdf", url: bytes.blobUrl });
+        } else if (RASTER_PAGE_MIMES.has(bytes.mime)) {
+          setState({ kind: "raster", url: bytes.blobUrl });
         } else {
-          setState({ kind: "raster", url: bytes.blobUrl, revoke: bytes.revoke });
+          setState({ kind: "unrenderable", mime: bytes.mime });
         }
       } catch (e) {
         if (cancelled) return;
@@ -220,15 +236,18 @@ function PageWithOverlay({
     };
   }, [documentId, page]);
 
-  // Attach the rendered canvas into the DOM. React does not own this node —
-  // pdf.js painted it — so it is appended and removed by hand, and the host is
-  // emptied first so a re-render never stacks two pages.
-  useEffect(() => {
-    const host = canvasHostRef.current;
-    if (!host || state.kind !== "canvas") return;
-    host.replaceChildren(state.canvas);
-    return () => { host.replaceChildren(); };
-  }, [state]);
+  /** The PDF page's intrinsic size, taken ONCE as the first scale estimate.
+   *  `measure()` below overwrites it from the DOM as soon as the observer
+   *  fires, and owns it from then on — this is the value that lets the first
+   *  paint carry polygons instead of waiting a frame for the observer. Stable
+   *  identity, or the child's effect re-fires on every parent render. */
+  const onPdfSized = useCallback((width: number, height: number) => {
+    setSize((current) => current ?? { width, height });
+  }, []);
+
+  const onPdfFailed = useCallback((message: string) => {
+    setState({ kind: "error", message });
+  }, []);
 
   const measure = useCallback(() => {
     const host = hostRef.current;
@@ -322,8 +341,18 @@ function PageWithOverlay({
               className="block h-auto w-full"
               onLoad={measure}
             />
+          ) : state.kind === "unrenderable" ? (
+            <StateBanner tone="neutral" className="text-xs">
+              {t("overlayNoPageForType", { mime: state.mime })}
+            </StateBanner>
           ) : (
-            <div ref={canvasHostRef} className="[&>canvas]:block [&>canvas]:h-auto [&>canvas]:w-full" />
+            <DocumentPdfPage
+              blobUrl={state.url}
+              page={page}
+              targetWidth={Math.max(240, hostRef.current?.clientWidth ?? 640)}
+              onSized={onPdfSized}
+              onFailed={onPdfFailed}
+            />
           )}
 
           {polygons.length > 0 && size ? (
@@ -365,7 +394,7 @@ function PageWithOverlay({
       {/* A control the human can use when the polygons are the thing in the
           way — never a hidden state they cannot get out of. */}
       {selectedId !== null ? (
-        <Button type="button" size="xs" variant="ghost" onClick={() => onSelect("")}>
+        <Button type="button" size="xs" variant="ghost" onClick={() => onSelect(null)}>
           {t("overlayClearSelection")}
         </Button>
       ) : null}

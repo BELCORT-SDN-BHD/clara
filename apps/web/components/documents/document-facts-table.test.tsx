@@ -15,8 +15,15 @@ import { NextIntlClientProvider } from "next-intl";
 import { renderComponent, clickButton, textOf } from "../../test/hookHarness";
 import { KNOWN_FACT_PATHS } from "../../lib/documents/extract-shape";
 import { DocumentFactsTable, hasFactLabelArm } from "./document-facts-table";
+import { DocumentPageOverlayContent } from "./document-page-overlay";
+import { enableDomInspection } from "../../test/domInspect";
 import messages from "../../messages/en.json";
 import type { EvidenceRegion } from "../../lib/documents/extract-shape";
+import type { DocumentExtractResult } from "../../lib/documents/types";
+
+// The overlay cell below mounts @base-ui/react-backed primitives; without this
+// their floating-ui internals throw "Element is not defined" (test/domInspect.ts).
+enableDomInspection();
 
 function App(children: ReturnType<typeof createElement>) {
   return createElement(NextIntlClientProvider, { locale: "en", messages, children });
@@ -25,6 +32,32 @@ function App(children: ReturnType<typeof createElement>) {
 function region(over: Partial<EvidenceRegion> & { id: string }): EvidenceRegion {
   return { field_path: null, text_content: null, engine_confidence: null, monetary_cents: null, ...over };
 }
+
+/** One extraction with a real page box and two facts — enough for the overlay to
+ *  render its facts table and its selection controls. */
+const OVERLAY_FIXTURE = {
+  document: {
+    id: "doc-1", sha256: "a", original_filename: "invoice.pdf", mime_type: "application/pdf",
+    byte_size: 1, bytes_verified_at: null, page_count: 1, extraction_status: "done",
+    document_kind: "invoice", financial_date: null,
+  },
+  unassigned: false,
+  filing: null,
+  extractions: [{
+    id: "ext-1", engine_id: "e", engine_kind: "ocr", version_n: 1, status: "done",
+    page_count: 1, extracted_at: "2026-04-01T00:00:00Z",
+    envelope_text: JSON.stringify({ pages: [{ page_number: 1, width: 8.5, height: 11, unit: "inch" }] }),
+    raw_sha256: null, normalization_version: null,
+  }],
+  regions: [{
+    idx: 0, id: "r-total", extraction_id: "ext-1", engine_kind: "ocr", version_n: 1,
+    extracted_at: "2026-04-01T00:00:00Z", locator_kind: "page_polygon",
+    locator: { page: 1, polygon: [1, 1, 2, 1, 2, 2, 1, 2] },
+    field_path: "invoice.total", text_content: "RM 1.00", engine_confidence: 0.9,
+    monetary_raw: "1.00", monetary_cents: 100,
+  }],
+  max_chars: 20000,
+} satisfies DocumentExtractResult;
 
 test("DRIFT CELL: every known fact path has a label arm, and the arms cover nothing else", () => {
   for (const path of KNOWN_FACT_PATHS) {
@@ -142,6 +175,51 @@ test("an empty facts list renders the honest empty state, never an empty table",
     await h.settle();
     assert.match(h.text(), /recorded no named fields/);
     assert.equal(h.find((n) => n.tagName === "TABLE"), null, "an empty list must not render a headed table with no rows");
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("[N1] clearing the highlight passes NULL, and the overlay ends with no row selected", async () => {
+  // The overlay's "Clear the highlight" control used to call `onSelect("")`,
+  // because the prop was typed `(id: string) => void` and there was no way to
+  // say "nothing". An empty string is not an id; it only LOOKED harmless
+  // because every real region id is a uuid, so `"" === region.id` happened to
+  // be false. The prop is `string | null` now and the caller passes null.
+  //
+  // Asserted at the OVERLAY, which is the only caller that selects, and by
+  // BEHAVIOUR rather than by type: select a fact, clear it, and no row is
+  // marked. A fixture with an artificially empty region id would have proved a
+  // defect that cannot occur instead of the one that did.
+  //
+  // The byte fetch has no server here, so the page pane renders its honest
+  // failure arm — irrelevant to this cell, and itself a state worth mounting.
+  const h = await renderComponent(App(createElement(DocumentPageOverlayContent, {
+    data: OVERLAY_FIXTURE,
+    documentId: "doc-1",
+    mimeType: "application/pdf",
+  })));
+  try {
+    for (let i = 0; i < 4; i++) await h.settle();
+
+    const fact = h.find((n) => n.tagName === "BUTTON" && textOf(n).includes("Invoice total"));
+    assert.ok(fact, "the overlay's facts table must offer selectable rows");
+    await clickButton(fact!);
+    await h.settle();
+    assert.ok(
+      h.find((n) => n.tagName === "TR" && (n as { getAttribute?: (k: string) => unknown }).getAttribute?.("aria-selected") === "true"),
+      "control: clicking a fact must select its row, or the clear below proves nothing",
+    );
+
+    const clear = h.find((n) => n.tagName === "BUTTON" && textOf(n).includes("Clear the highlight"));
+    assert.ok(clear, "a standing selection must offer a way out of it");
+    await clickButton(clear!);
+    await h.settle();
+    assert.equal(
+      h.find((n) => n.tagName === "TR" && (n as { getAttribute?: (k: string) => unknown }).getAttribute?.("aria-selected") === "true"),
+      null,
+      "after clearing, no row may remain marked",
+    );
   } finally {
     await h.unmount();
   }

@@ -6,14 +6,29 @@
 //
 //   * the library is a separate client chunk, fetched the first time a human
 //     opens the overlay on a PDF and never on any other page of the app;
-//   * it is NEVER in the server graph, so it does not enter the Worker script
-//     OpenNext builds — the deployed Worker is unchanged in size by this file;
+//   * it is kept OUT OF THE SERVER GRAPH by its only importer
+//     (`components/documents/document-pdf-page.tsx`) being loaded through
+//     `next/dynamic(..., { ssr: false })`. That exclusion is the bundler's,
+//     not this file's: an earlier cut reached the library through an `await
+//     import()` inside an effect and claimed the same thing, and the
+//     measurement showed a 433,095-byte SSR chunk anyway. A runtime guard
+//     never moves a static graph — see that component's own header;
 //   * the worker script ships from `public/` (same origin, `/pdf.worker.min.mjs`),
 //     never from a CDN. `wrangler.jsonc`'s assets binding serves it, and the
 //     report-only CSP's `worker-src 'self' blob:` admits exactly that.
 //
-// THE MEASUREMENT is recorded in the PR body: the client chunk delta from
-// adding pdfjs-dist, taken from two real `next build` runs.
+// THE MEASUREMENT, from two real `next build` runs on the same tree, the only
+// difference being whether this module is reachable:
+//
+//     client .next/static   3,277,431 -> 3,711,472   (+434,041, one lazy chunk)
+//     server  (no maps)     7,075,653 -> 7,112,642   (+36,989, and ZERO pdfjs
+//                                                     chunks — verified by glob
+//                                                     AND by grep over the
+//                                                     emitted server JS)
+//
+// Before the `ssr: false` wrapper the server side carried a 433,095-byte pdfjs
+// chunk. That is the whole difference between the two shapes, and the reason
+// the claim above is now a measurement rather than an assumption.
 //
 // There is NO server-side page-image endpoint anywhere in packages/runtime —
 // `documentRoutes.ts:50` streams the ORIGINAL bytes and nothing else — so
@@ -73,8 +88,25 @@ export async function renderPdfPageToCanvas(
     canvas.height = Math.max(1, Math.round(viewport.height));
     const cssWidth = viewport.width / dpr;
     const cssHeight = viewport.height / dpr;
-    canvas.style.width = `${cssWidth}px`;
-    canvas.style.height = `${cssHeight}px`;
+    // NO INLINE CSS SIZE ON THE CANVAS, and this is a correctness rule rather
+    // than a style preference (fold, MAJOR 1).
+    //
+    // The polygon overlay is an <svg> sized to the page element's HOST
+    // (`absolute inset-0 h-full w-full`, `preserveAspectRatio="none"`), so the
+    // canvas and the host must be the same box or every polygon is drawn in
+    // the wrong place. An inline `style.width` beats the host's
+    // `[&>canvas]:w-full` class, which pinned the canvas to a fixed pixel box
+    // while the host moved underneath it. The host moves ROUTINELY: the
+    // vertical scrollbar that appears the moment a rendered page is taller
+    // than the `max-h-[32rem]` scroller takes ~15px off the width on any
+    // platform with classic scrollbars, every single time — invisible on
+    // macOS overlay scrollbars, which is why it survived the first cut. Any
+    // window resize or breakpoint flip does the same, grossly.
+    //
+    // Laid out by the class instead, the canvas follows its host and the
+    // caller's ResizeObserver owns the truth. `cssWidth`/`cssHeight` are still
+    // returned as the FIRST estimate, before that observer has measured
+    // anything — an estimate, never the standing value.
 
     const context = canvas.getContext("2d");
     if (!context) throw new Error("2d canvas context is unavailable");

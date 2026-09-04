@@ -48,7 +48,15 @@ export const DOCS = {
 const ENVELOPE = {
   schema_version: 1,
   engine: { id: "azure-di:prebuilt-layout:2024-11-30", kind: "ocr", version_n: 1 },
-  content: "INVOICE\nAcme Sdn Bhd\nTotal RM 1,234.50",
+  // LONG ON PURPOSE. A real envelope runs to the read's full 20,000-character
+  // budget, and the raw-envelope block is a capped `max-h-96 overflow-auto`
+  // <pre> — with a three-line fixture it never overflows, so axe's
+  // `scrollable-region-focusable` rule has nothing to fire on and the walk's
+  // a11y cell silently proved nothing about it. The fold's mutant panel is what
+  // exposed that: removing the pre's `tabIndex` left the axe cell GREEN.
+  content: ["INVOICE", "Acme Sdn Bhd", "Total RM 1,234.50"]
+    .concat(Array.from({ length: 400 }, (_, i) => `line ${i + 1}: an extracted line of page text, long enough that the raw envelope is a real scroll region`))
+    .join("\n"),
   pages: [{ page_number: 1, width: 8.5, height: 11, unit: "inch" }],
   tables: [],
 };
