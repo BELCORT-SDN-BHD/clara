@@ -1,13 +1,36 @@
 "use client";
 
-// SECTION F — close. The current fiscal year and its status, the year end with the BASIS it was
-// set on, the readiness gate tally, and a live close-prep hold if one stands.
+// SECTION F — close. The current fiscal year and its status, THAT YEAR's end date with the basis
+// the DB records for it, the readiness gate tally, and a live close-prep hold if one stands. The
+// client's own standing year end appears only when no fiscal year has been opened, and without a
+// basis word — see the next block for why those are two different facts.
 //
-// THE YEAR END CARRIES ITS SOURCE. `clara.clients.fy_end_month/day` is read through
-// `getClientFyEnd`, and `fy_end_source` on the fiscal year says whether the date was asserted by
-// a human, taken from a filed document, or defaulted to 31 December (lib/close/types.ts's
-// `FyEndSource`). A year end shown without that word is a date the reader would take as
-// established fact when it may be a default nobody has confirmed.
+// THE YEAR END CARRIES ITS SOURCE — AND IT IS THE FISCAL YEAR'S OWN DATE, NOT THE CLIENT'S.
+//
+// TWO DIFFERENT NUMBERS LIVE UNDER ONE ENGLISH PHRASE, and the first cut of this section paired
+// one with the other's provenance (review-557, MAJOR 2 — law 3, spelling is not identity):
+//
+//   `clara.fiscal_years.ends_on`      the END DATE OF THIS YEAR, and `fy_end_source` beside it
+//                                     provenances THAT date — asserted by the firm, taken from a
+//                                     filed document, or defaulted to 31 December
+//                                     (`0120:1335-1338`).
+//   `clara.clients.fy_end_month/day`  the client's STANDING year end, the fiscal-year opener's
+//                                     own precondition, written by a DIFFERENT door
+//                                     (`0041:3264`, `set_client_fy_end`).
+//
+// They routinely agree and are not the same fact: a short first period, a change of year end, or
+// a year opened before the pair was set all separate them. `fy_end_source` says nothing about
+// the client's pair, so printing the pair under that word was a provenance claim the database
+// never made.
+//
+// So: with an open fiscal year, this renders the YEAR's own `ends_on` with the YEAR's own
+// source — the pair the DB actually relates. The client's standing year end appears ONLY in the
+// no-fiscal-year arm, where it is the honest thing to show, and WITHOUT a basis word, because
+// no read provenances it.
+//
+// `ends_on` is rendered VERBATIM. It is a DATE the DB owns, not an instant, so there is no
+// timezone to resolve and nothing for this build to reformat — the one thing `businessDate`
+// exists to prevent is exactly what parsing it into a `Date` would reintroduce.
 //
 // THE GATE TALLY IS A COUNT OVER THE DB'S OWN VERDICTS, NOT A JUDGEMENT. `get_close_readiness`
 // returns one `state` per measured gate and deliberately computes NO overall "ready" boolean
@@ -89,18 +112,29 @@ export function ClientCloseSummary({ clientId }: { clientId: string }) {
             </dd>
             <dt className="text-muted-foreground">{t("closeYearEnd")}</dt>
             <dd className="text-foreground">
-              {fy && fy.fy_end_month !== null && fy.fy_end_day !== null
-                ? t("closeYearEndSource", {
-                    date: `${String(fy.fy_end_day).padStart(2, "0")}/${String(fy.fy_end_month).padStart(2, "0")}`,
-                    source: t(`closeYearEndBasis.${year.fy_end_source}`),
-                  })
-                : t("closeYearEndUnset")}
+              {t("closeYearEndSource", {
+                date: year.ends_on,
+                source: t(`closeYearEndBasis.${year.fy_end_source}`),
+              })}
             </dd>
             <dt className="text-muted-foreground">{t("closeReadinessLabel")}</dt>
             <dd className="text-foreground">{t("closeReadiness", { met, total })}</dd>
           </dl>
         ) : null}
       </DataState>
+      {/* The no-fiscal-year arm, and the ONLY place the client's standing pair is shown. It is
+          the honest thing to report for a client with no year opened yet — the opener's own
+          precondition — and it carries NO basis word, because nothing provenances it. */}
+      {!close.loading && !close.error && year === null && fy && fy.fy_end_month !== null && fy.fy_end_day !== null ? (
+        <p className="text-xs text-muted-foreground">
+          {t("closeYearEndOnFile", {
+            date: `${String(fy.fy_end_day).padStart(2, "0")}/${String(fy.fy_end_month).padStart(2, "0")}`,
+          })}
+        </p>
+      ) : null}
+      {!close.loading && !close.error && year === null && fy && (fy.fy_end_month === null || fy.fy_end_day === null) ? (
+        <p className="text-xs text-muted-foreground">{t("closeYearEndUnset")}</p>
+      ) : null}
       {fyEnd.error ? <ErrorMessage error={fyEnd.error} /> : null}
       {hold.error ? <ErrorMessage error={hold.error} /> : null}
       {hold.data ? <Badge tone="warning">{t("closeHold")}</Badge> : null}

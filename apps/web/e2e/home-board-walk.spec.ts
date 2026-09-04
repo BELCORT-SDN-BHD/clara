@@ -199,10 +199,30 @@ test("both boards reflow on the CONTAINER query at 1440 and at 1024 with the rai
   }
 });
 
-test("both boards are clean under the full WCAG 2.1 AA scan", async ({ page }) => {
-  for (const [face, url] of [["firm home", "/"], ["client home", `/clients/${CLIENT_ACTIVE}`]] as const) {
+// review-557's BLOCKER: the ONBOARDING client joined this loop. It was absent, and its absence
+// is exactly why the heading-order regression shipped — that arm is the only one rendering
+// #546's escalation card, whose own `<h2>` sat above the `<h1>` this train moved into the
+// identity band. A face that no scan mounts is a face with no a11y coverage at all.
+test("all three boards are clean under the full WCAG 2.1 AA scan", async ({ page }) => {
+  const FACES = [
+    ["firm home", "/"],
+    ["client home (active)", `/clients/${CLIENT_ACTIVE}`],
+    ["client home (onboarding)", `/clients/${CLIENT_ONBOARDING}`],
+  ] as const;
+  for (const [face, url] of FACES) {
     await signInTo(page, url);
     await settled(page);
+    // POSITIVE CONTROL on the onboarding face specifically: the card whose heading caused the
+    // regression must be on screen, or this scan proves nothing about the ordering it exists
+    // to check.
+    if (url.includes(CLIENT_ONBOARDING)) {
+      // BY ROLE, not by text: the card names itself twice — once as its `<h2>` and once on its
+      // rail-focus button — so a text locator is ambiguous. The HEADING is the right subject
+      // anyway; it is the element whose position above the `<h1>` was the violation.
+      await expect(
+        workbench(page).getByRole("heading", { name: "Continue onboarding with Clara", level: 2 }),
+      ).toBeVisible();
+    }
     const result = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
     expect(result.violations, `${face} axe violations`).toEqual([]);
   }

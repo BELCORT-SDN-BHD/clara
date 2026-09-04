@@ -6,6 +6,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createElement } from "react";
 import { NextIntlClientProvider } from "next-intl";
+import { AppRouterContext } from "next/dist/shared/lib/app-router-context.shared-runtime";
+import { PathnameContext } from "next/dist/shared/lib/hooks-client-context.shared-runtime";
 
 import { renderComponent } from "../../test/hookHarness";
 import { enableDomInspection } from "../../test/domInspect";
@@ -47,8 +49,13 @@ const ENVELOPE = {
   rows: [QUESTION_ROW], next_cursor: null,
 };
 
+// THE YEAR'S OWN END DATE DIFFERS FROM THE CLIENT'S STANDING PAIR ON PURPOSE (review-557,
+// MAJOR 2). `FY_END` above carries 31/12 — the client's standing year end, written by
+// `set_client_fy_end` — while this year ENDS on 30 June, a short period. The two are written by
+// different doors and `fy_end_source` provenances only the second. With identical dates the
+// cell below could not tell a correct render from the defect it was written to catch.
 const FISCAL_YEARS = [{
-  fiscal_year_id: "fy1", label: "FY 2026", ordinal: 2, starts_on: "2026-01-01", ends_on: "2026-12-31",
+  fiscal_year_id: "fy1", label: "FY 2026", ordinal: 2, starts_on: "2026-01-01", ends_on: "2026-06-30",
   status: "open", fy_end_source: "asserted", has_active_reopen_receipt: false,
 }];
 const READINESS = {
@@ -118,16 +125,43 @@ function wire(overrides: Record<string, () => Response> = {}): typeof fetch {
   };
 }
 
+/** #546's `ContinueOnboardingCard` uses `usePathname` to build its `?from=` return link, so the
+ *  onboarding arm needs the real navigation contexts rather than a stub of its own. Supplied for
+ *  every cell so the two arms differ only in the FIXTURE, never in the harness around them. */
 async function mount(clientId = CLIENT_ID) {
   const h = await renderComponent(
     createElement(NextIntlClientProvider, {
       locale: "en", messages,
-      children: createElement(ClientWorkspaceOverview, { clientId }),
+      children: createElement(
+        AppRouterContext.Provider as never,
+        { value: { replace: () => {}, refresh: () => {}, push: () => {}, back: () => {}, forward: () => {}, prefetch: () => {} } as never },
+        createElement(
+          PathnameContext.Provider as never,
+          { value: `/clients/${clientId}` as never },
+          createElement(ClientWorkspaceOverview, { clientId }),
+        ),
+      ),
     }),
   );
   for (let i = 0; i < 8; i++) await h.settle();
   return h;
 }
+
+/** The ONBOARDING arm's fixture, shared by the progress cell and the a11y cell below so the two
+ *  are measuring the same screen. A plan with two REQUIRED items (one answered) and one that is
+ *  not required, no finalized opening seed, and the empty session list that sends #546's
+ *  escalation card down its rail-focus arm. */
+const ONBOARDING_WIRE = {
+  "/rest/v1/clients": () => jsonResponse([{ ...CLIENT[0], status: "onboarding" }]),
+  "/rest/v1/onboarding_plans": () => jsonResponse([{ id: "p1", firm_id: "f1", scope_kind: "client", client_id: CLIENT_ID, state: "open", revision_token: "t", revision_n: 3, committed_at: null, committed_by: null, review_maker: null, reviewed_at: null, contributors: [], commit_attestation: null, cancelled_at: null, cancelled_by: null, cancel_reason: null, created_at: "2026-03-01T00:00:00Z", updated_at: "2026-03-01T00:00:00Z", opened_by_agent: false, opener_model: null, opened_from_question: null }]),
+  "/rest/v1/onboarding_plan_items": () => jsonResponse([
+    { id: "i1", plan_id: "p1", firm_id: "f1", item_kind: "must_ask", item_key: "a", question: null, answer: null, state: "answered", required_for_commit: true, answered_by: null, answered_at: null, created_at: "", updated_at: "" },
+    { id: "i2", plan_id: "p1", firm_id: "f1", item_kind: "must_ask", item_key: "b", question: null, answer: null, state: "pending", required_for_commit: true, answered_by: null, answered_at: null, created_at: "", updated_at: "" },
+    { id: "i3", plan_id: "p1", firm_id: "f1", item_kind: "todo", item_key: "c", question: null, answer: null, state: "pending", required_for_commit: false, answered_by: null, answered_at: null, created_at: "", updated_at: "" },
+  ]),
+  "/rest/v1/opening_seed_registry": () => jsonResponse([]),
+  "/api/runtime/chat/sessions": () => jsonResponse({ sessions: [] }),
+};
 
 test("A — identity: the h1 is the client's own name, the status badge carries its LABEL, and only LIVE facts render", async () => {
   await withMockedEnv(wire(), async () => {
@@ -217,7 +251,13 @@ test("F — close: the gate tally counts only PASSING gates out of gates the DB 
       // Two of three returned gates pass. A build counting `advisory` or unmeasured gates as
       // passing would print a different pair.
       assert.match(h.text(), /2 of 3 measured gates passing/);
-      assert.match(h.text(), /31\/12 \(stated by your firm\)/, "the year end without its basis would read as established fact");
+      // THE DISCRIMINATING PAIR (review-557, MAJOR 2). The basis word provenances the FISCAL
+      // YEAR's own `ends_on`, so that is the date it must sit beside. The client's standing
+      // 31/12 is a different fact written by a different door, and pairing it with this word
+      // would be a provenance claim the database never made.
+      assert.match(h.text(), /2026-06-30 \(stated by your firm\)/, "the YEAR's own end date carries the YEAR's own source");
+      assert.doesNotMatch(h.text(), /31\/12 \(stated by your firm\)/, "the client's standing pair must never wear this basis word");
+      assert.doesNotMatch(h.text(), /Year end on file/, "and the standing pair belongs only to the no-fiscal-year arm");
       assert.doesNotMatch(h.text(), /Close prep on hold/, "no live hold in this fixture");
     } finally { await h.unmount(); }
   });
@@ -236,6 +276,10 @@ test("F — close: a LIVE hold renders its badge; and a client with no fiscal ye
     try {
       assert.match(h.text(), /No fiscal years opened yet for this client\./);
       assert.doesNotMatch(h.text(), /0 of 0 measured gates/, "an absent year is not a zero-gate year");
+      // The ONE place the client's standing pair belongs — and it wears no basis word, because
+      // nothing provenances it (review-557, MAJOR 2).
+      assert.match(h.text(), /Year end on file: 31\/12/);
+      assert.doesNotMatch(h.text(), /stated by your firm/, "no read provenances the client's standing pair");
     } finally { await h.unmount(); }
   });
 });
@@ -247,26 +291,47 @@ test("B — onboarding: ABSENT for an active client with no plan, and PRESENT wi
       assert.doesNotMatch(h.text(), /Onboarding/, "an established client has no onboarding story — not even an empty card");
     } finally { await h.unmount(); }
   });
-  await withMockedEnv(
-    wire({
-      "/rest/v1/clients": () => jsonResponse([{ ...CLIENT[0], status: "onboarding" }]),
-      "/rest/v1/onboarding_plans": () => jsonResponse([{ id: "p1", firm_id: "f1", scope_kind: "client", client_id: CLIENT_ID, state: "open", revision_token: "t", revision_n: 3, committed_at: null, committed_by: null, review_maker: null, reviewed_at: null, contributors: [], commit_attestation: null, cancelled_at: null, cancelled_by: null, cancel_reason: null, created_at: "2026-03-01T00:00:00Z", updated_at: "2026-03-01T00:00:00Z", opened_by_agent: false, opener_model: null, opened_from_question: null }]),
-      "/rest/v1/onboarding_plan_items": () => jsonResponse([
-        { id: "i1", plan_id: "p1", firm_id: "f1", item_kind: "must_ask", item_key: "a", question: null, answer: null, state: "answered", required_for_commit: true, answered_by: null, answered_at: null, created_at: "", updated_at: "" },
-        { id: "i2", plan_id: "p1", firm_id: "f1", item_kind: "must_ask", item_key: "b", question: null, answer: null, state: "pending", required_for_commit: true, answered_by: null, answered_at: null, created_at: "", updated_at: "" },
-        { id: "i3", plan_id: "p1", firm_id: "f1", item_kind: "todo", item_key: "c", question: null, answer: null, state: "pending", required_for_commit: false, answered_by: null, answered_at: null, created_at: "", updated_at: "" },
-      ]),
-      "/rest/v1/opening_seed_registry": () => jsonResponse([]),
-    }),
-    async () => {
-      const h = await mount();
-      try {
-        // 1 of 2 REQUIRED — the third item is not required and must not enter either side.
-        assert.match(h.text(), /1 of 2 required answers recorded/);
-        assert.match(h.text(), /The opening position is not finalised yet\./);
-      } finally { await h.unmount(); }
-    },
-  );
+  await withMockedEnv(wire(ONBOARDING_WIRE), async () => {
+    const h = await mount();
+    try {
+      // 1 of 2 REQUIRED — the third item is not required and must not enter either side.
+      assert.match(h.text(), /1 of 2 required answers recorded/);
+      assert.match(h.text(), /The opening position is not finalised yet\./);
+    } finally { await h.unmount(); }
+  });
+});
+
+// review-557's BLOCKER. Every a11y scan on this board mounted an ACTIVE client, which is the one
+// arm that does NOT render #546's escalation card — and that card carries its own `<h2>`. With
+// the card above the `<h1>` this train moved into the identity band, the onboarding document
+// opened H2, H1, H2: a `heading-order` violation, and a regression against main, which rendered
+// the page header first. The defect was real and the suite could not see it, because no cell
+// ever mounted the arm that had it. This is that cell.
+test("the ONBOARDING arm is axe-clean too — the escalation card's h2 never precedes the client's h1", async () => {
+  await withMockedEnv(wire(ONBOARDING_WIRE), async () => {
+    const h = await mount();
+    try {
+      // POSITIVE CONTROL FIRST: the card and the section that surround the ordering claim must
+      // both actually be on screen, or a clean scan would be clean for the wrong reason.
+      assert.match(h.text(), /Continue onboarding with Clara/, "the escalation card must have rendered");
+      assert.match(h.text(), /1 of 2 required answers recorded/, "and so must the progress section");
+
+      // The ordering itself, read off the document rather than inferred: the FIRST heading in
+      // DOM order is the client's own h1.
+      const headings: string[] = [];
+      const walk = (n: unknown): void => {
+        const tag = (n as { tagName?: string }).tagName;
+        if (typeof tag === "string" && /^H[1-6]$/.test(tag)) headings.push(tag);
+        for (const c of ((n as { childNodes?: unknown[] }).childNodes ?? [])) walk(c);
+      };
+      walk(h.container);
+      assert.equal(headings[0], "H1", `the document must open on the client's own name; got ${headings.join(",")}`);
+      assert.equal(headings.filter((t) => t === "H1").length, 1, `exactly one h1; got ${headings.join(",")}`);
+
+      const violations = checkAccessibility(h.container as never);
+      assert.deepEqual(violations, [], JSON.stringify(violations));
+    } finally { await h.unmount(); }
+  });
 });
 
 test("ONE failed read does not blank the others — a dead bank read leaves identity, the queue and close standing", async () => {

@@ -391,7 +391,8 @@
       "reopened": "Reopened"
     },
     "closeYearEnd": "Year end",
-    "closeYearEndUnset": "Not set for this client",
+    "closeYearEndUnset": "No year end is on file for this client.",
+    "closeYearEndOnFile": "Year end on file: {date}",
     "closeYearEndSource": "{date} ({source})",
     "closeYearEndBasis": {
       "asserted": "stated by your firm",

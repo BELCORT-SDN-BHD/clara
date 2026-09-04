@@ -139,14 +139,6 @@ export function ClientWorkspaceOverview({ clientId }: { clientId: string }) {
 
   return (
     <div className="flex flex-col gap-6">
-      {/* #546's ask, kept exactly where it was and where this train's seam note said it would
-          land: ABOVE the identity band and above section B's progress report — the escalation
-          offer first, then the progress. Offered ONLY while the client is genuinely in
-          onboarding, read from the client's own DB-owned status rather than from the presence
-          of a plan. Section B deliberately carries no continue-affordance of its own, so this
-          stays the one entrance to a governed run. */}
-      {client.data?.status === "onboarding" ? <ContinueOnboardingCard clientId={clientId} /> : null}
-
       <DataState
         loading={client.loading}
         error={client.error}
@@ -156,6 +148,20 @@ export function ClientWorkspaceOverview({ clientId }: { clientId: string }) {
         {client.data ? (
           <div className="flex flex-col gap-6">
             <ClientIdentityBand clientId={clientId} client={client.data} />
+            {/* #546's escalation offer, BELOW the identity band — review-557's blocker, and the
+                fix is structural rather than cosmetic. The card carries its own
+                `SectionHeader level={2}`, and this train moved the page's `<h1>` down into the
+                identity band; above the band the document therefore opened H2, H1, H2 on the
+                onboarding arm, which is a `heading-order` violation and a regression against
+                main (where `page.tsx` rendered the `PageHeader` first). It was invisible
+                because every a11y scan in this train mounted an ACTIVE client — the arm that
+                never renders this card. Both are now scanned.
+                Inside the `DataState` for the same reason: the card's condition already reads
+                `client.data.status`, so it has nothing to say until the client record resolves,
+                and rendering it outside meant a card could precede a heading that had not
+                arrived yet. Section B still carries no continue-affordance of its own, so this
+                stays the ONE entrance to that governed run. */}
+            {client.data.status === "onboarding" ? <ContinueOnboardingCard clientId={clientId} /> : null}
             <ClientOnboardingProgress clientId={clientId} status={client.data.status} />
 
             <div className="@container">

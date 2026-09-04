@@ -149,29 +149,111 @@ test("CB-AE2E-032: no ClientTax string leaks a lane id, a migration number, a ru
   assert.deepEqual(control.sort(), ["ctl.a", "ctl.b"], "the leak detector must fire on known-bad strings");
 });
 
-test("the Tax tab keyboard walk: every focusable control belongs to the ONE live door on this tab", async () => {
+/** An element's accessible NAME, by the same precedence the house a11y rules use for form
+ *  controls: `aria-label`, else its own text. Tag names alone cannot express 裁-44's rule — a
+ *  computation grid and a governed door's reason box are both `TEXTAREA`. */
+function accessibleName(node: unknown): string {
+  const n = node as { getAttribute?: (a: string) => string | null; childNodes?: unknown[]; nodeValue?: string; nodeType?: number; textContent?: string };
+  const label = n.getAttribute?.("aria-label");
+  if (label) return label;
+  const text = (function read(x: unknown): string {
+    const s = x as { nodeType?: number; nodeValue?: string; childNodes?: unknown[]; textContent?: string };
+    if (s.nodeType === 3) return String(s.nodeValue ?? "");
+    const kids = s.childNodes ?? [];
+    if (kids.length > 0) return kids.map(read).join("");
+    return typeof s.textContent === "string" ? s.textContent : "";
+  })(node).trim();
+  return text;
+}
+
+/** Every descendant of `root` whose tag is in `tags`. */
+function allByTag(root: unknown, tags: readonly string[]): unknown[] {
+  const out: unknown[] = [];
+  const walk = (n: unknown): void => {
+    const tag = (n as { tagName?: string }).tagName;
+    if (typeof tag === "string" && tags.includes(tag)) out.push(n);
+    for (const c of ((n as { childNodes?: unknown[] }).childNodes ?? [])) walk(c);
+  };
+  walk(root);
+  return out;
+}
+
+// 裁-44's "never an input grid" guard, REINSTATED as a discriminating one (review-557, MAJOR 3).
+//
+// The original cell asserted ZERO focusable controls. That was the right rule stated in the only
+// way available while the tab was three static notes — but it cannot survive the tab acquiring
+// its first real door, and replacing it with a count of tag KINDS (my first cut) was not a
+// replacement at all: `["BUTTON","INPUT","SELECT","TEXTAREA"]` is exactly what a computation
+// form would also produce, so the guard had been deleted while a comment said it had not.
+//
+// The rule 裁-44 actually states is about WHICH controls exist, and there are two halves:
+//   1. the ROSTER is pinned by accessible NAME — every control on this tab belongs to a live
+//      governed door (the three compliance-watch triggers, and the turnover-classification
+//      door's own fields). A new control cannot appear without a human editing this list.
+//   2. every TEXT-ENTRY element lives inside the turnover-classification panel. This is the
+//      half that catches a computation grid specifically: R1-R10 rows would be inputs somewhere
+//      else on the page, and the roster alone could be satisfied by naming them.
+test("裁-44: the Tax tab's only controls are its live governed doors, and no text entry exists outside the one control", async () => {
   await withMockedEnv(HAPPY, async () => {
     const h = await renderTaxTab();
     try {
       for (let i = 0; i < 4; i++) await h.settle();
-      assert.match(h.text(), /Turnover classification/, "the fixture must have rendered real content before any count below means anything");
+      assert.match(h.text(), /Turnover classification/, "the fixture must have rendered real content before any census below means anything");
 
-      // TRUED, NOT RELAXED. The old cell asserted ZERO focusable controls, pinning 裁-44's
-      // "never an input grid". That rule is about the COMPUTATION — a professional must never
-      // type a tax computation into this tab — and it is still true: nothing below writes a
-      // computation. What this tab now has is the three compliance-watch triggers and the
-      // turnover-classification control, every one of them a LIVE governed door that existed
-      // before this train and had no surface. The cell now pins WHICH controls exist, which is
-      // a stronger claim than "none": a computation form appearing here still reds it.
-      const names = focusableElements(h.container as never)
-        .map((n) => (n as { tagName?: string }).tagName ?? "?")
-        .sort();
-      assert.ok(names.length > 0, "the live doors must be reachable");
+      const focusable = focusableElements(h.container as never);
+      const names = focusable.map(accessibleName).sort();
+      assert.deepEqual(names, [
+        "Account",                                                  // set_turnover_classification
+        "Acknowledge",                                              // ack_compliance_watch
+        "Effective from",                                           // set_turnover_classification
+        "Evidence, if you are lowering the account's treatment",    // set_turnover_classification
+        "Resolve",                                                  // resolve_compliance_watch
+        "Service group",                                            // set_turnover_classification
+        "Snooze",                                                   // snooze_compliance_watch
+        "Treatment",                                                // set_turnover_classification
+        "Why is this account treated this way?",                    // set_turnover_classification
+      ], JSON.stringify(names, null, 2));
+
+      // THE SUBMIT IS ABSENT FROM THAT ROSTER BECAUSE IT IS DISABLED, and that is asserted
+      // rather than left to be inferred from a shorter list. `set_turnover_classification`
+      // refuses CLR10 without an account, a reason and an effective date; the control does not
+      // offer a call the door would refuse on inputs the browser can see are missing. Silently
+      // omitting it from the roster would have made "the submit was deleted" and "the submit is
+      // correctly gated" the same green.
+      const submit = h.find((n) => (n as { tagName?: string }).tagName === "BUTTON" && accessibleName(n) === "Record classification");
+      assert.ok(submit, "the classification door's submit must exist");
+      assert.equal((submit as { disabled?: boolean }).disabled, true, "and be disabled until the door's own required inputs are present");
+
+      // THE INPUT-GRID HALF. Every text-entry element must sit inside the turnover panel — the
+      // one control on this tab that takes typed input, and a governed door with a live verb
+      // behind it. A computation the professional types would put inputs elsewhere.
+      const panel = h.find((n) => {
+        const el = n as { getAttribute?: (a: string) => string | null };
+        return el.getAttribute?.("aria-label") === "Account";
+      });
+      assert.ok(panel, "the classification control must be on screen for this claim to mean anything");
+      const card = (function ancestorCard(node: unknown): unknown {
+        // The vendored Card wrapping the panel — walk up from the account select to the nearest
+        // element carrying the card slot.
+        let cur: unknown = node;
+        for (let i = 0; i < 12 && cur; i += 1) {
+          if ((cur as { getAttribute?: (a: string) => string | null }).getAttribute?.("data-slot") === "card") return cur;
+          cur = (cur as { parentNode?: unknown }).parentNode;
+        }
+        return null;
+      })(panel);
+      assert.ok(card, "the classification control must sit inside its own Card");
+
+      const TEXT_ENTRY = ["INPUT", "TEXTAREA"] as const;
+      const everywhere = allByTag(h.container, TEXT_ENTRY);
+      const insidePanel = allByTag(card, TEXT_ENTRY);
+      assert.ok(everywhere.length > 0, "positive control: the scan finds text-entry elements at all");
       assert.deepEqual(
-        [...new Set(names)].sort(),
-        ["BUTTON", "INPUT", "SELECT", "TEXTAREA"],
-        JSON.stringify(names),
+        everywhere.filter((n) => !insidePanel.includes(n)).map(accessibleName),
+        [],
+        "裁-44: this tab is a proposal/receipt surface — no text entry may exist outside the one governed control",
       );
+
       const violations = checkKeyboardWalk(h.container as never);
       assert.deepEqual(violations, [], JSON.stringify(violations));
     } finally {
