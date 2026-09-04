@@ -37,6 +37,7 @@
     "clients": "Clients",
     "activity": "Activity",
     "admin": "Admin",
+    "firm": "Firm",
     "adminSections": {
       "members": "Members",
       "registrations": "Firm registrations",
@@ -72,7 +73,7 @@
     "sectionNeedsReview": "Needs review",
     "rowKind": {
       "draft": "Draft entry",
-      "uncoded_filing": "Uncoded filing",
+      "uncoded_filing": "Filing awaiting an entry",
       "open_question": "Open question",
       "coding_task": "Coding task",
       "compliance_watch": "Compliance watch",
@@ -110,6 +111,43 @@
     "highStakes": "high stakes",
     "amountLabel": "amount",
     "periodLabel": "period",
+    "clientLabel": "Client",
+    "clientFirmWide": "Firm-wide — no single client",
+    "clientUnnamed": "Client {id}",
+    "whyLabel": "Why this is here",
+    "why": {
+      "laneNeedsYou": "Clara could not settle this on its own, so it is waiting on a person.",
+      "laneNeedsReview": "Clara has prepared this and a person has to check it before it counts.",
+      "laneReady": "Clara has everything it needs for this one; it is listed so nothing goes through unseen.",
+      "sectionNeedsYou": "This kind always waits on a person — Clara never settles it unattended.",
+      "sectionNeedsReview": "This is queued for review."
+    },
+    "whyChip": {
+      "auto": "Clara raised this unattended",
+      "ruleBacked": "A saved coding rule already matched"
+    },
+    "tier": {
+      "compliance_watch": {
+        "monitored": "Monitored — below the threshold",
+        "early_warning": "Early warning — approaching the threshold",
+        "crossed": "Threshold crossed",
+        "overdue": "Registration overdue"
+      },
+      "lint_finding": {
+        "info": "Information",
+        "warn": "Warning",
+        "critical": "Critical"
+      }
+    },
+    "tierRaw": "{value}",
+    "nextLabel": "Next",
+    "whenLabel": "Waiting since",
+    "waitingDays": "Waiting {days, plural, =0 {less than a day} one {# day} other {# days}}",
+    "periodLabelFor": {
+      "draft": "posting date",
+      "uncoded_filing": "invoice date",
+      "compliance_watch": "watch window ends"
+    },
     "resolve": "Resolve",
     "dismiss": "Dismiss",
     "resolutionPlaceholder": "How was this resolved?",
@@ -179,7 +217,8 @@
     "body": "The firm-wide receipts and open-register feed.",
     "subheading": "A record of what the agent did across every client — not a queue of what awaits you. See Needs you for that.",
     "visibilityNote": "Receipts are visible to bookkeeper-and-above roles. A more limited role sees an empty feed for that reason, not because nothing happened.",
-    "showingRecent": "Showing the most recent 100 events.",
+    "coverageNote": "This feed can currently show four kinds of agent act: freeform reads, filings, client onboarding and vendor bindings. Posted entries, bank-agent acts, general agent acts, report-agent acts and web fetches are not recorded here yet, so an empty feed does not mean the agent has been idle.",
+    "showingRecent": "Showing the 100 most recent receipts. There is no paging past that, so older receipts are not reachable from this page.",
     "emptyMessage": "No agent activity has been recorded yet.",
     "columnAct": "Act",
     "columnActor": "Actor",
@@ -190,6 +229,8 @@
     "platformScope": "Platform-wide",
     "firmScopeNoClient": "Firm-wide (no client)",
     "noRationale": "No stated rationale.",
+    "timelineHeading": "Everything that happened",
+    "timelineNotBuilt": "A firm-wide timeline of who did what — the people's acts as well as the agent's — is not built here yet. It needs the clara.list_firm_timeline read, which this build does not call, so this page can only show the agent receipts below. Approving an entry, resolving a question or changing a member's role leaves no trace on this page today.",
     "receiptKinds": {
       "entry_post": "Journal entry posted",
       "bank_agent": "Bank agent act",
@@ -197,12 +238,16 @@
       "report_agent": "Report agent act",
       "freeform_read": "Freeform read",
       "agent_filing": "Agent filing",
-      "web_fetch": "Web fetch"
+      "web_fetch": "Web fetch",
+      "onboarding_agent": "Client onboarding proposed",
+      "binding_agent": "Vendor binding proposed"
     }
   },
   "Admin": {
     "heading": "Admin",
     "body": "Manage the people, compliance and identity controls that govern this firm.",
+    "firmHeading": "Firm",
+    "firmBody": "The firm-wide registers and controls your role can reach.",
     "sectionsLabel": "Firm admin sections",
     "noSections": "No admin sections are available at your rank.",
     "unbuiltNote": "The metering rollup, tier surfaces, and /admin/billing are not built yet; they remain in the post-beta Billing PR-1/PR-2 lane recorded in PROGRESS.md.",
@@ -225,13 +270,13 @@
       },
       "settings": {
         "title": "Firm settings",
-        "purpose": "Review firm controls and change the high-stakes threshold through its governed door."
+        "purpose": "Review the firm-wide authority controls."
       }
     }
   },
   "Members": {
     "pageHeading": "Members",
-    "pageDescription": "Everyone with access to this firm, and the invitations nobody has accepted yet.",
+    "pageDescription": "Who can reach this firm's books, and who has been asked to.",
     "dialog": {
       "cancel": "Cancel",
       "working": "Working…"
@@ -249,7 +294,7 @@
       "owner": "Owner — signs for the firm; a firm always keeps one"
     },
     "roster": {
-      "heading": "Members",
+      "heading": "Everyone with access",
       "description": "The roster is published to bookkeeper and above.",
       "loading": "Loading the member roster…",
       "empty": "No roster rows are visible here.",
@@ -285,7 +330,6 @@
       "statusRevoked": "Revoked",
       "revoke": "Revoke",
       "issue": "Invite someone",
-      "issueBlocked": "Admin or owner can invite someone",
       "issued": "The invitation to {email} was sent."
     },
     "inviteDialog": {
@@ -2529,17 +2573,48 @@
     },
     "sweep": {
       "heading": "Sweep runs",
+      "definition": "A sweep is one unattended pass Clara makes over this firm's filings inside a single time window. It records how many entries it expected to draft, how many it drafted, how many it skipped and how many it refused, and the run closes when it is finalized. A sweep never approves anything: everything it drafts still comes to a person.",
       "openRun": "A sweep run is currently open.",
       "noOpenRun": "No sweep run is currently open.",
       "lastFinalizedLabel": "Last finalized",
       "lastAckLabel": "Last acknowledged",
       "never": "Never",
-      "acknowledgeHome": "Acknowledging a finalized sweep run needs its run id, which only arrives with Clara's own sweep-receipt message in a thread. Open that message to see what the sweep did and acknowledge the run there."
+      "acknowledgeNotBuilt": "Acknowledging a finalized sweep run is not reachable yet. The door (clara.acknowledge_sweep_run) is live but needs a run id, and no surface in the product hands a person one: sweep runs cannot be listed, and the sweep-receipt message that was meant to carry the id is never produced by the agent runtime."
     },
     "agentTasks": {
       "heading": "Running agent tasks",
       "note": "Tasks the agent is currently queued, held, running, or awaiting your input on — cancellable here. Already-finished work is in the activity log below.",
+      "loading": "Loading running agent tasks…",
       "empty": "No running agent tasks right now.",
+      "detailTrigger": "Details",
+      "detailTitle": "Agent task detail",
+      "detailDescription": "Everything clara.agent_tasks_visible publishes about this task. Nothing here is derived.",
+      "detailClose": "Close",
+      "kindLabel": "Kind",
+      "statusLabel": "State",
+      "clientLabel": "Client",
+      "clientNone": "Firm-wide — no client on this task",
+      "clientLink": "Open the client",
+      "sessionLabel": "Chat thread",
+      "sessionNone": "This task did not come from a chat thread.",
+      "sessionNote": "Shown as an identifier rather than a link: chat threads are private to their author unless shared, and nothing on this row says whether you can open this one.",
+      "createdByLabel": "Started by",
+      "startedLabel": "Started",
+      "updatedLabel": "Last change",
+      "cancelledByLabel": "Cancelled by",
+      "cancelledAtLabel": "Cancelled at",
+      "errorLabel": "Error",
+      "errorNone": "No error was recorded.",
+      "errorCodes": {
+        "model_error": "The model returned an error — the task stopped before it changed anything.",
+        "tool_error": "A tool the agent called failed — the task stopped before it changed anything.",
+        "timeout": "The task ran past its time limit and was stopped.",
+        "engine_lost": "The engine running this task disappeared before it finished.",
+        "limit": "A budget or rate limit stopped this task.",
+        "internal": "The runtime failed internally on this task."
+      },
+      "errorCodeRaw": "The runtime recorded the code {code}, which this build has no sentence for.",
+      "receiptNotBuilt": "This task has no receipt to open. Receipts are written per agent ACT (clara.agent_receipts_visible, the feed below), not per task, and no read joins a task id to the receipts it produced.",
       "kinds": {
         "chat_turn": "Chat turn",
         "wake": "Wake",
@@ -2568,8 +2643,27 @@
       "loadingDetail": "Loading the question's full detail…",
       "detailNotReachable": "This question's detail could not be read.",
       "originLabel": "Origin",
+      "origins": {
+        "clarify_promotion": "Promoted from a clarification Clara asked in a thread",
+        "rule_proposal": "Clara proposed a coding rule",
+        "rule_conflict": "Two coding rules disagreed",
+        "sweep_refusal": "An unattended sweep refused to draft this",
+        "manual": "Someone raised it by hand",
+        "classification": "Clara could not classify the document",
+        "onboarding": "Raised while onboarding the client",
+        "bank_ambiguity": "A bank line could not be matched to one entry"
+      },
+      "originUnknown": "Recorded as {origin}, which this version has no description for",
       "openedAtLabel": "Opened",
-      "spawnedRuleLabel": "Spawned rule"
+      "spawnedRuleLabel": "Spawned rule",
+      "ruleStatuses": {
+        "proposed": "proposed, not yet signed",
+        "live": "live",
+        "declined": "declined",
+        "retired": "retired",
+        "suspended_pending_resignature": "suspended until someone signs it again"
+      },
+      "ruleStatusUnknown": "recorded as {status}, which this version has no description for"
     },
     "promoteClarify": {
       "trigger": "Promote to a durable question",
@@ -2906,17 +3000,10 @@
     },
     "settings": {
       "pageHeading": "Firm settings",
-      "pageDescription": "Firm-wide risk and authority controls. Every one below is owner-only — the door itself is the wall.",
-      "thresholdHeading": "High-stakes threshold",
-      "thresholdSubheading": "The amount above which a posting needs a second person's approval (clara.set_firm_high_stakes_threshold).",
-      "loading": "Loading the current threshold…",
-      "firmNotFound": "Your firm record could not be read.",
-      "changeTrigger": "Change threshold",
-      "changeTitle": "Change the high-stakes threshold",
-      "changeDescription": "Raising or lowering this changes what may be approved by one person firm-wide. Only the firm owner may confirm this — anyone else will see the DB's own refusal after Change.",
-      "currentValueLabel": "Current threshold",
-      "newValueLabel": "New threshold (RM)",
-      "amountPlaceholder": "e.g. 100000.00",
+      "pageDescription": "Firm-wide authority controls.",
+      "approvalsHeading": "Approvals",
+      "approvalsSubheading": "Who may approve and post work in this firm.",
+      "approvalsNote": "The Change-threshold control is retired: nobody sets an amount here any more. Who may approve is decided by a person's role, and every approval is receipted automatically with who did it and when. One rule has not been removed yet — the database still refuses a solo approval on a high-stakes entry, and asks for a second person or a written reason. That refusal is being taken out in its own lane; until it is, you may still meet it.",
       "capabilitiesHeading": "Signing capabilities",
       "capabilitiesSubheading": "Per-member close-and-attest and reopen authority.",
       "capabilitiesNotBuilt": "Granting or revoking a member's close-and-attest or reopen capability has no surface here yet — grant_firm_capability and revoke_firm_capability are live, firm-owner-only doors (migration 0056) with no UI."

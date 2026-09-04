@@ -13,6 +13,11 @@
 // relaxation for a single-admin firm; the refusal names both lawful ways out
 // in the OWNER'S OWN RULED WORDS (裁-18c: "let Clara propose it, or add a
 // second admin" — independent review, 2026-08-29). This component
+// NARROWED, 2026-09-04 (E-7 / CB-AE2E-014 / CB-AE2E-033, 裁-187): the RANK half
+// of each floor IS now gated client-side, because the caller's rank is
+// positively read and a control the rank cannot use is no longer rendered — see
+// lib/firm/capabilities.ts. What follows still holds for the PERSON half, which
+// no client-side read can decide. This file
 // still adds no client-side proposer≠signer gate — the DB's own wall is the
 // wall, matching the estate's standing convention (a DoorRefusal renders
 // verbatim, never pre-guessed client-side). The Sign trigger is NEVER
@@ -113,10 +118,30 @@ function VendorBindingDetailView({ bindingId }: { bindingId: string }) {
 export function VendorBindingRowActions({
   binding,
   busy,
+  canSign,
+  canRevoke,
   act,
 }: {
   binding: VendorBindingRow;
   busy: boolean;
+  /** E-7 (裁-187 / ADR-0078 decision 2): `clara.sign_vendor_identity_binding`
+   *  floors at ADMIN — `0154_binding_proposal_pr_1.sql:2742`, the LIVE body.
+   *  NOT 0028:809 and NOT 0144:344: `0154:2725` drops the two-argument overload
+   *  outright and 0154:2727 creates a three-argument one in its place, so both
+   *  earlier citations point at code no caller can reach. The floor is mirrored
+   *  from that live body by `lib/firm/capabilities.ts`, whose cell walks
+   *  defines AND drops to prove it.
+   *
+   *  Below that rank the trigger is ABSENT — this file's header used to argue
+   *  the opposite, and that argument is now narrowed, not deleted: the RANK is
+   *  derivable from the caller context and is gated here, while the PERSON wall
+   *  (signer ≠ proposer, 裁-18a) is NOT derivable client-side and is still left
+   *  entirely to the door, which refuses CLR04 with `reason=signer_is_proposer`
+   *  verbatim. */
+  canSign: boolean;
+  /** `clara.revoke_vendor_identity_binding` floors at bookkeeper — `0028:903`,
+   *  which IS still the live body: no later migration defines or drops it. */
+  canRevoke: boolean;
   act: (fn: () => Promise<void>) => Promise<void>;
 }) {
   const t = useTranslations("FirmAdminCompliance.vendorBindings");
@@ -139,7 +164,7 @@ export function VendorBindingRowActions({
       </p>
       {binding.status === "proposed" || binding.status === "live" ? (
         <div className="flex gap-2">
-          {binding.status === "proposed" ? (
+          {binding.status === "proposed" && canSign ? (
             <FirmAdminDoorDialog
               triggerLabel={t("signTrigger")}
               title={t("signTitle")}
@@ -151,7 +176,9 @@ export function VendorBindingRowActions({
               <VendorBindingDetailView bindingId={binding.binding_id} />
             </FirmAdminDoorDialog>
           ) : null}
-          {binding.status === "live" ? <RevokeDialog bindingId={binding.binding_id} busy={busy} act={act} /> : null}
+          {binding.status === "live" && canRevoke ? (
+            <RevokeDialog bindingId={binding.binding_id} busy={busy} act={act} />
+          ) : null}
         </div>
       ) : null}
     </li>

@@ -18,6 +18,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createElement } from "react";
 import { NextIntlClientProvider } from "next-intl";
+import { FirmScopeProvider } from "@/components/firm-scope-provider";
 import { renderComponent, textOf, clickButton } from "../../test/hookHarness";
 import { enableDomInspection } from "../../test/domInspect";
 import { configureSessionTokenSource, resetSessionTokenSource } from "../../lib/session-accessor";
@@ -78,12 +79,23 @@ const BINDING_DETAIL = {
   resolutions: [],
 };
 
-async function mount() {
+// E-7 (裁-187): the vendor-bindings panel now shapes its own controls from the
+// firm layout's positively-read caller context, so these mounts supply the
+// provider the real tree always has. ADMIN rank is the fixture, because that is
+// the rank every pre-existing cell here was implicitly exercising when the
+// controls were rendered unconditionally — the BELOW-admin cases are new cells
+// of their own, not a silent change of what these ones prove.
+const ADMIN_SCOPE = { role_rank: 2, is_operator: false };
+
+async function mount(scope?: { role_rank: number | null; is_operator: boolean }) {
   const h = await renderComponent(
     createElement(NextIntlClientProvider, {
       locale: "en",
       messages,
-      children: createElement("div", null, createElement("h1", null, "Vendor identity bindings"), createElement(VendorBindingsPanel)),
+      children: createElement(FirmScopeProvider, {
+        scope: scope ?? ADMIN_SCOPE,
+        children: createElement("div", null, createElement("h1", null, "Vendor identity bindings"), createElement(VendorBindingsPanel)),
+      }),
     }),
   );
   const body = (globalThis as unknown as { document: { body: { appendChild: (c: unknown) => void } } }).document.body;
