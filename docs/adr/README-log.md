@@ -443,3 +443,57 @@ re-reading find?"
 > then the post-beta product PRs already ruled (裁-147, 裁-149), then the day's technical rows. Two
 > truings remain: this afternoon's, and the final clock-out truing after the launch sitting. Digest
 > row 91.
+
+## 2026-09-04 — 裁-151…173: the 23-decision ceremony grill (digest rows 92 and 93)
+
+> Thirteen **operational** rulings (**151 · 152 · 153 · 154 · 155 · 157 · 159 · 160 · 162 · 169 · 170 ·
+> 172 · 173**), time-boxed to FS-10/FS-11 except where marked, are digest row 92; **six ruled AGAINST
+> the recommendation** (**156** no soak, switch and delete in one sitting · **158** the source delete
+> before beta live · **161** purge auth users AND Storage objects · **163** a local dump, superseded by
+> 177 · **174** open FS-10 tonight · **177** no dump and no restore-proof) are row 93, each with its
+> dissent filed once. Three leave PERMANENT residue: **155**'s standing rule (enable Workers Logs and
+> the `?ct=` decision is re-taken), **162**'s expiry (its supersession of `docs/ops/DR.md`'s owner-run
+> classifier was FS-11-scoped), and **169**'s substitution of 裁-102. Digest rows 92, 93.
+
+## 2026-09-04 — 裁-164…168 · 171: the walk's denominator, autonomy layer 1, the DPA alone (digest row 94)
+
+> **164** fixes the walk's denominator at the **ELEVEN enumerated milestones** and adds the AGENTIC
+> section with a launch-blocker weight on (a) and (b) — the walk then broke (a) and half of (b).
+> **165** ships beta on autonomy **layer 1 only**, the G1 cadence sources OFF, PR-2 before 上市.
+> **166** launches on the DPA alone and re-cuts PRD §9 item 3 from four live items to **three**, the
+> terms being the fourth. **167** settles the design authority as what `clarabook-frontend` SHIPS
+> (closing FS-9's DS-07 line); **168** defers its recut PRs to him.
+> **171** accepts the twenty knowingly-open items and keeps **裁-133 and 裁-111 SUSPENDED, not repealed** — its item-by-item reading did NOT happen, so it is owed. Digest row 94.
+
+## 2026-09-04 — 裁-175 · 176: the P6-X classification's two rulings (digest row 95)
+
+> **175** files the **XML `blob:`-open exposure** as a Known-issues row fixed after beta, against the
+> recommendation of a minimal MIME allowlist before it; the consequence — a crafted XML opened through
+> "open in new tab" runs in the app's origin as that member — was stated once, and the walk deliberately
+> did not exercise the door. **176** requires each of the **twelve ④ suites** to be ruled before #540
+> merges: all twelve landed by ≈00:58 MYT — 1 retire, 10 port/fix/rebuild (one of them, `advancesApi`,
+> a LIVE defect; one, `dbSeamCensus`, flagged INFRASTRUCTURE before 上市), 1 = 裁-175. Digest row 95.
+
+## 2026-09-04 — 裁-178 · 179: two security postures accepted on the record (digest row 96)
+
+> **178**: two role passwords were echoed into the session transcript by a psql `-c`/`\set` mistake —
+> the ALTERs never ran, so the database never carried them, but the two Fly DSNs do — and the owner
+> ruled **no rotation** (dissent: rotate before real client data). **179**: a probe MEASURED four
+> production lane DSNs carrying no `sslmode` at all, crossing Fly → AWS **in plaintext**; ruled to
+> re-import all six with `uselibpqcompat=true&sslmode=require` and make **verify-full the first
+> post-beta PR** — which 裁-175 also claims, resolved in the handover §E by the LEAD. Digest row 96.
+
+## 2026-09-04 — 裁-180…185: the product walk, the delegate precedent, and GO (digest row 97)
+
+> **180** the real Rome/BEE corpus is the walk's data. **181** the onboarding interview should PROPOSE
+> and still ask the human to confirm — a Backlog row. **182** the client-consent grant has no web
+> surface, so a real firm cannot enable AI processing for a client today; the owner wants it collected
+> once at the DPA stage, and the product should collect the per-client letter inside the interview.
+> **183** is the night's standing precedent, and it is narrow: **where a mechanism is live but its FACE
+> is missing or defective, the lead walks the DOOR as the owner's delegate — real audited door, human
+> context, receipted, both recorded. It is not a licence to bypass a wall.** **184** bought the hour
+> that found nine of the fourteen P0 rows. **185** is **GO for a CLOSED beta** — live for BELCORT and
+> invited testers, with a NEW runtime image owed before the first EXTERNAL applicant (**v75 or
+> later**: v72–v74 are the night's secrets-import releases on the v71 image) beside the
+> statement-lane fixes, the "Enter a statement" pair and DPA v2 — and it **DISCHARGES 裁-150's exit
+> condition**: the session closes, the repo is the handover, no next lanes. Digest row 97.
