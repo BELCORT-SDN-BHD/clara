@@ -20,9 +20,12 @@
 // Postgres is not in this walk, so no refusal, floor or RLS policy is exercised — only the
 // calls made to them and what the surface does with the answers.
 
+import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
 import { P6_5 } from "./agentic-finish-mock.mjs";
+
+const WCAG_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"];
 
 const CLIENT_A = `/clients/${P6_5.clientA}`;
 const CLIENT_B = `/clients/${P6_5.clientB}`;
@@ -207,6 +210,147 @@ test("裁-27 · an amend records a NEW resolution and shows what it supersedes",
   // whether the card ever re-read the database.
   await expect(banksRow.getByText("Maybank, CIMB and HSBC")).toBeVisible({ timeout: 15_000 });
   await expect(banksRow.getByText("Maybank only")).toHaveCount(0, { timeout: 15_000 });
+});
+
+// =============================================================================================
+// The onboarding train's own arms (H-26/27/28/30/50/51 · CB-AE2E-008/023/024).
+// =============================================================================================
+
+/** Nothing that reaches a person's eyes may be a wire artefact. Asserted on the WHOLE rendered
+ *  text of a face rather than on one element: the defect was a rendering DEFAULT, so a locator
+ *  scoped to the row that was known to be broken would have missed the next one. */
+async function assertNoWireArtefacts(page: Page, what: string): Promise<void> {
+  const body = await page.locator("body").innerText();
+  expect(body, `${what} must never render "[object Object]"`).not.toContain("[object Object]");
+  expect(body, `${what} must never render raw JSON`).not.toContain('{"');
+}
+
+test("CB-AE2E-008 · a structured answer reads as prose on the built app — no [object Object], no raw JSON", async ({ page }) => {
+  await signIn(page);
+  await page.goto(CLIENT_A);
+
+  // The `coa_chart_apply` row's stored answer is the OBJECT `{chart:"firm_template",
+  // applied:false}` — every interview-written answer is one, and this row rendered
+  // "[object Object]" before this train.
+  await expect(page.getByText("Apply the firm's standard chart of accounts to this client")).toBeVisible({ timeout: 20_000 });
+  // DISCRIMINATING: this sentence exists only because the formatter recognised the shape.
+  await expect(page.getByText("The firm's standard chart is not applied yet")).toBeVisible({ timeout: 20_000 });
+  await assertNoWireArtefacts(page, "the client A onboarding card");
+
+  const axe = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
+  expect(axe.violations, "client A workspace axe violations").toEqual([]);
+});
+
+test("CB-AE2E-023 · a COMMITTED plan renders a receipt, with no Commit or Cancel trigger and the answers collapsed", async ({ page }) => {
+  await signIn(page);
+  await page.goto(CLIENT_B);
+
+  await expect(page.getByRole("heading", { name: "Client onboarding" })).toBeVisible({ timeout: 20_000 });
+  // The receipt's own fields — every one of them read off the plan row.
+  await expect(page.getByText("This onboarding plan was committed on", { exact: false })).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText("Sole practitioner — reviewed against the SSM certificate.")).toBeVisible();
+  await expect(page.getByText("Plan revision", { exact: true })).toBeVisible();
+
+  // THE DOORS THAT COULD ONLY BE REFUSED ARE GONE — not disabled, gone.
+  await expect(page.getByRole("button", { name: "Commit onboarding", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Cancel onboarding", exact: true })).toHaveCount(0);
+  // And the interview is not offered on a closed plan either.
+  await expect(page.getByRole("button", { name: "Start / continue interview" })).toHaveCount(0);
+
+  // H-28 — the internal binding row is neither shown nor counted: two real items, both
+  // settled. Counting the binding row would read "3 / 3" over a list of three.
+  await expect(page.getByText("2 / 2", { exact: true })).toBeVisible();
+  await expect(page.getByText("interview_run")).toHaveCount(0);
+
+  // Collapsed, then opened — the answer text exists nowhere until the disclosure is used.
+  await expect(page.getByText("Registration 202401047756", { exact: false })).toHaveCount(0);
+  await page.getByRole("button", { name: /Show the 2 recorded answers/ }).click();
+  await expect(page.getByText("Registration 202401047756 — format checked", { exact: false })).toBeVisible({ timeout: 10_000 });
+  await assertNoWireArtefacts(page, "the settled onboarding receipt");
+
+  const axe = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
+  expect(axe.violations, "settled onboarding receipt axe violations").toEqual([]);
+});
+
+test("H-30 · the apply-chart dialog's Confirm stays inside a 1280x720 viewport with a many-family template", async ({ page }) => {
+  // THE ONLY INSTRUMENT THAT CAN SEE THIS DEFECT. jsdom lays nothing out, so the node suite
+  // can pin the classes and nothing more; whether the button is REACHABLE is a layout fact and
+  // needs a real engine at a real viewport.
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await signIn(page);
+  await page.goto(CLIENT_A);
+  await expect(page.getByText("Apply the firm's standard chart of accounts to this client")).toBeVisible({ timeout: 20_000 });
+
+  await page.getByRole("button", { name: "Apply the standard chart" }).click();
+  await page.getByLabel("Chart template").selectOption(P6_5.templateId);
+
+  // THE POSITIVE CONTROL ON THE FIXTURE ITSELF, and it is not optional. A first cut of this
+  // cell used a 15-family roster, which still FITS inside 1280x720 — so the walk passed
+  // against a deliberately un-fixed dialog and was measuring nothing. The premise is that the
+  // content genuinely overflows the popup; that is asserted here, before anything is claimed
+  // about where the button sits.
+  const boxes = page.getByRole("checkbox");
+  expect(await boxes.count(), "the fixture must carry a long family roster").toBeGreaterThan(30);
+  //
+  // MEASURED ON THE FIELDSET, deliberately — a fix-INDEPENDENT quantity. The popup's own
+  // `scrollHeight` is not the premise: with the fix it equals the capped `clientHeight`
+  // (the BODY scrolls, not the box), so asserting on it would red a correct build. The
+  // fieldset's laid-out height is the same either way, and it is what the content weighs.
+  const familiesHeight = await page.evaluate(() => {
+    const el = document.querySelector('[data-slot="dialog-content"] fieldset');
+    return el ? el.getBoundingClientRect().height : null;
+  });
+  expect(familiesHeight, "the family fieldset").not.toBeNull();
+  expect(
+    familiesHeight!,
+    "the family roster alone must be TALLER than the viewport, or this cell proves nothing",
+  ).toBeGreaterThan(720);
+
+  const confirm = page.getByRole("button", { name: "Apply the chart" });
+  await expect(confirm).toBeVisible();
+  const box = await confirm.boundingBox();
+  expect(box, "the Confirm button must have a box at all").not.toBeNull();
+  expect(box!.y, "Confirm must start inside the viewport, not below its bottom edge").toBeLessThan(720);
+  expect(box!.y + box!.height, "and its whole height must be inside it").toBeLessThanOrEqual(720);
+  expect(box!.y, "and it must not have run off the TOP either — a centred box overflows symmetrically").toBeGreaterThanOrEqual(0);
+
+  // The header stays put while the body scrolls — the property `scrollBody` buys over a
+  // blanket overflow on the whole popup.
+  const title = page.getByText("Apply the firm's standard chart of accounts", { exact: true }).last();
+  await expect(title).toBeVisible();
+
+  // Reachable means CLICKABLE, not merely on screen.
+  await expect(confirm).toBeEnabled();
+
+  const axe = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
+  expect(axe.violations, "apply-chart dialog axe violations").toEqual([]);
+});
+
+test("H-51 / CB-AE2E-024 · /clients offers Add client above the register, follows the DATABASE's floor, and dispatches the SAME flow ⌘K does", async ({ page }) => {
+  // ARM 1 — below the door's admin floor (0017:2497), the control is ABSENT. Not greyed: a
+  // caller is never offered a control they could not use.
+  await signIn(page, "bookkeeper@example.test");
+  await page.goto("/clients");
+  await expect(page.getByRole("heading", { name: "Clients", exact: true })).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByRole("button", { name: "Add client", exact: true })).toHaveCount(0);
+
+  // ARM 2 — a caller the DATABASE ranks above it. Nothing redeployed; `caller_context` was
+  // read again and followed.
+  await signIn(page, "owner@example.test");
+  await page.goto("/clients");
+  const addClient = page.getByRole("button", { name: "Add client", exact: true });
+  await expect(addClient).toBeVisible({ timeout: 20_000 });
+
+  const axe = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
+  expect(axe.violations, "/clients register axe violations").toEqual([]);
+
+  await addClient.click();
+  await page.getByLabel("Client name").fill("ROME PUBLIC ADVISORY");
+  await page.getByRole("button", { name: "Begin onboarding", exact: true }).click();
+
+  // THE SAME dispatch seam ⌘K uses — so the human lands on the client the DATABASE returned,
+  // exactly as the palette arm above proves for its own entry point.
+  await page.waitForURL(new RegExp(`/clients/${P6_5.newClientId}`), { timeout: 15_000 });
 });
 
 test("裁-128 · the apply-standard-chart button plants the confirmed families and shows the door's own receipt", async ({ page }) => {

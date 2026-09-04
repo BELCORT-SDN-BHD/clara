@@ -113,33 +113,51 @@ describe("focus-ring contract — 裁-1's 70% is declared once and obeyed everyw
     );
   });
 
-  it("VACUITY CONTROL: the scan actually finds the carriers — twelve component files, twelve class strings", () => {
+  it("VACUITY CONTROL: the scan actually finds the carriers — thirteen component files, thirteen class strings", () => {
     // Without this arm the assertion above passes trivially the day the scan
     // walks the wrong directory or the regex stops matching. The count is the
     // 2026-09-02 re-census (the P6-3 order's list of eleven was one file stale:
-    // components/admin/admin-hub.tsx had joined it). Exactly one class string
-    // per file, now that comments are stripped — see ringCarrierHits's header
-    // for why the thirteenth "occurrence" was never a carrier.
+    // components/admin/admin-hub.tsx had joined it), plus ONE from the 裁-190
+    // journals table: components/journals/journal-entries-table.tsx's sortable
+    // column header is a raw <button>, the same shape as this list's other
+    // raw-button carriers (the drafts row disclosure), so it takes the shadcn
+    // ring for the same reason they do.
     //
-    // RE-CENSUSED 2026-09-04 (CB-AE2E-019). Still TWELVE files and twelve class
-    // strings; ONE MOVED. `components/common/section-tabs.tsx` stopped being a
-    // carrier and `components/ui/tabs.tsx` became one, because SectionTabs is now
-    // a skin over the vendored Base UI Tabs primitive and the focus treatment
-    // moved down with the control that draws it. That is the RIGHT direction for
-    // this census — a ring on a primitive is inherited by every future consumer,
-    // where a ring on one composed widget is not — and the count is unchanged, so
-    // nothing was lost in the move. The vendored file shipped `ring-ring/50`,
-    // which this very gate is what caught; it was recut to /70 in the same commit
-    // as the add (see that file's provenance header, hand edit 3).
+    // TWO NEW <details> DISCLOSURES FROM THAT SAME TRAIN ARE DELIBERATELY NOT
+    // HERE (the status legend, and the revision-delta value formatter): a bare
+    // <summary> takes the global :focus-visible outline, which is what the
+    // product's existing disclosure at components/firm/firm-question-row.tsx:88
+    // already does. Growing this list needs a reason each time; "a new file
+    // appeared" is not one.
+    //
+    // AND ONE MOVED, from CB-AE2E-019 in the same merge:
+    // `components/common/section-tabs.tsx` stopped being a carrier and
+    // `components/ui/tabs.tsx` became one, because SectionTabs is now a skin over
+    // the vendored Base UI Tabs primitive and the focus treatment moved DOWN with
+    // the control that draws it. That is the right direction for this census — a
+    // ring on a primitive is inherited by every future consumer, where a ring on
+    // one composed widget is not. The vendored file shipped `ring-ring/50`, which
+    // this very gate is what caught; it was recut to /70 in the same commit as the
+    // add (see that file's provenance header, hand edit 3).
+    //
+    // SO THE ARITHMETIC OF THIS MERGE, stated because two trains moved the count
+    // in the same window and "13" on its own hides that: twelve before, minus
+    // section-tabs, plus ui/tabs (the move), plus journal-entries-table (the new
+    // carrier) = thirteen. Neither train alone would have produced this list.
+    //
+    // Exactly one class string per file, now that comments are stripped — see
+    // ringCarrierHits's header for why the thirteenth "occurrence" in the
+    // earlier census was never a carrier.
     const hits = ringCarrierHits();
     const files = [...new Set(hits.map((h) => h.file))].sort();
-    assert.equal(hits.length, 12, JSON.stringify(hits, null, 2));
+    assert.equal(hits.length, 13, JSON.stringify(hits, null, 2));
     assert.deepEqual(files, [
       "components/admin/admin-hub.tsx",
       "components/clara/ClaraThreadView.tsx",
       "components/common/native-select.tsx",
       "components/firm/compliance-watch-affordance.tsx",
       "components/journals/drafts-queue-panel.tsx",
+      "components/journals/journal-entries-table.tsx",
       "components/ui/badge.tsx",
       "components/ui/button.tsx",
       "components/ui/input-group.tsx",
