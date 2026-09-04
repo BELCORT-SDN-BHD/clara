@@ -31,7 +31,7 @@ export function UpsertAccountDialog({
   /** Absent for "add a new account"; present to pre-fill an edit of this row. */
   existing?: AccountRow;
   busy: boolean;
-  onSubmit: (input: Omit<UpsertAccountInput, "clientId">) => Promise<void>;
+  onSubmit: (input: Omit<UpsertAccountInput, "clientId">) => Promise<boolean>;
 }) {
   const t = useTranslations("AdjustmentsAccounts.upsertAccount");
   const [code, setCode] = useState(existing?.account_code ?? "");

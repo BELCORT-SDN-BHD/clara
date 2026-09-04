@@ -24,10 +24,12 @@ type RowActionsProps = {
   asset: FixedAssetRow;
   accounts: AccountRow[];
   busy: boolean;
-  /** useAsyncRead's own `act` — resolves `true`/`false` (never rejects); each
-   *  dialog below discards that boolean (FaDoorDialog's `onConfirm` contract
-   *  is `() => Promise<void>`) since the reload it triggers, not a local
-   *  branch, is what re-derives the register's real state. */
+  /** useAsyncRead's own `act` — resolves `true`/`false` (never rejects). Each
+   *  dialog below now RETURNS that boolean: FaDoorDialog's `onConfirm` contract
+   *  is `() => Promise<boolean>` and it closes only on `true` (CB-AE2E-004).
+   *  The reload `act` triggers is still what re-derives the register's real
+   *  state; the boolean decides only whether the dialog — and the particulars
+   *  the human typed into it — survives a refusal. */
   act: (fn: () => Promise<void>) => Promise<boolean>;
 };
 
@@ -45,11 +47,11 @@ export function CompleteParticularsDialog({ clientId, asset, busy, act }: RowAct
       confirmLabel={t("complete")}
       busy={busy}
       confirmDisabled={!particularsReadyToSubmit(particulars)}
-      onConfirm={async () => {
-        await act(async () => {
+      onConfirm={() =>
+        act(async () => {
           await completeFixedAssetParticulars(sessionTokenAccessor, { clientId, assetId: asset.id, particulars });
-        });
-      }}
+        })
+      }
     >
       <FaParticularsFields idPrefix={`fa-complete-${asset.id}`} value={particulars} onChange={setParticulars} />
     </FaDoorDialog>
@@ -82,11 +84,11 @@ export function ReviseParticularsDialog({ clientId, asset, busy, act }: RowActio
       confirmLabel={t("revise")}
       busy={busy}
       confirmDisabled={!effectiveFrom || !particularsReadyToSubmit(particulars)}
-      onConfirm={async () => {
-        await act(async () => {
+      onConfirm={() =>
+        act(async () => {
           await reviseFixedAssetParticulars(sessionTokenAccessor, { clientId, assetId: asset.id, particulars, effectiveFrom });
-        });
-      }}
+        })
+      }
     >
       <div className="flex flex-col gap-2">
         <div className="grid gap-1.5">
@@ -133,8 +135,8 @@ export function DisposeDialog({ clientId, asset, accounts, busy, act }: RowActio
       confirmLabel={t("dispose")}
       busy={busy}
       confirmDisabled={!disposalDate || !gainAccount || !lossAccount || !proceedsValid || !costPortionValid}
-      onConfirm={async () => {
-        await act(async () => {
+      onConfirm={() =>
+        act(async () => {
           await disposeFixedAsset(sessionTokenAccessor, {
             clientId,
             assetId: asset.id,
@@ -146,8 +148,8 @@ export function DisposeDialog({ clientId, asset, accounts, busy, act }: RowActio
             memo: memo || null,
             costPortionCents,
           });
-        });
-      }}
+        })
+      }
     >
       <div className="flex flex-col gap-2">
         <div className="grid gap-2 sm:grid-cols-2">

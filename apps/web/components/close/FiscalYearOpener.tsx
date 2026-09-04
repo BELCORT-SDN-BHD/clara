@@ -55,7 +55,10 @@ export function FiscalYearOpener({
   onOpened: () => Promise<void>;
 }) {
   const fyEnd = useHydratedPart(session, (s) => getClientFyEnd(clientId, { session: s }));
-  const actAndReload = (fn: () => Promise<void>): Promise<void> => fyEnd.act(fn).then(() => onOpened());
+  // CB-AE2E-004: resolves the WRITE's outcome; `onOpened()` still fires either
+  // way (the "always, regardless of outcome" reload discipline above).
+  const actAndReload = (fn: () => Promise<void>): Promise<boolean> =>
+    fyEnd.act(fn).then((ok) => onOpened().then(() => ok));
 
   return (
     <div className="flex flex-col gap-2">
@@ -104,7 +107,7 @@ function FyEndBadge({ row, loading, err }: { row: { fy_end_month: number | null;
   );
 }
 
-function SetFyEndDialog({ busy, onConfirm }: { busy: boolean; onConfirm: (month: number, day: number) => Promise<void> }) {
+function SetFyEndDialog({ busy, onConfirm }: { busy: boolean; onConfirm: (month: number, day: number) => Promise<boolean> }) {
   const t = useTranslations("ClientClose.opener.setFyEnd");
   const [month, setMonth] = useState("");
   const [day, setDay] = useState("");
@@ -148,7 +151,7 @@ function OpenFiscalYearDialog({
   session: SessionTokenAccessor;
   busy: boolean;
   refusal: PartClr;
-  onConfirm: (args: { label: string; startsOn: string; endsOn: string; lengthReason: string | null }) => Promise<void>;
+  onConfirm: (args: { label: string; startsOn: string; endsOn: string; lengthReason: string | null }) => Promise<boolean>;
 }) {
   const t = useTranslations("ClientClose.opener.open");
   const [label, setLabel] = useState("");

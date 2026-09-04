@@ -65,9 +65,14 @@ export function FutureAttestationPanel({ clientId, session }: { clientId: string
             )) as { id?: string } | null;
             setRefusal(null);
             setLastRecordedId(out?.id ?? null);
+            // CB-AE2E-004: this panel keeps its OWN refusal state rather than a
+            // hydrated part's, so it reports the outcome itself — the dialog
+            // closes only here, on the path where the door accepted.
+            return true;
           } catch (e) {
             setRefusal(isDoorRefusal(e) ? { code: e.code, reason: e.reason, message: e.message } : { code: null, reason: null, message: e instanceof Error ? e.message : String(e) });
             setLastRecordedId(null);
+            return false;
           } finally {
             setBusy(false);
           }

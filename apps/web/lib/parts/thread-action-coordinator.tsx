@@ -59,6 +59,9 @@ export function ThreadActionCoordinatorProvider({
   const runOnce = useCallback(
     (fn: (trustedCallerId: string) => Promise<void>) => {
       if (callerId === null) return Promise.resolve(false);
+      // CB-AE2E-004 widened `runOnce` to report `{ran, value}`; this coordinator's
+      // own contract is unchanged — it reports RE-ENTRANCY (`ran`), which is the
+      // only fact its callers (the thread action cards) read.
       return runSingleFire(guardRef.current, async () => {
         setBusy(true);
         try {
@@ -66,7 +69,7 @@ export function ThreadActionCoordinatorProvider({
         } finally {
           setBusy(false);
         }
-      });
+      }).then((outcome) => outcome.ran);
     },
     [callerId],
   );

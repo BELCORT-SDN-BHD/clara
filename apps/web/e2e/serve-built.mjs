@@ -21,12 +21,16 @@ import { handleChatParityRuntime, handleChatParitySupabase, startMockRuntime } f
 // beside the chat-parity lane without either starving the other's fixtures.
 import { P6_5_SESSIONS, handleP6_5App, handleP6_5Runtime, handleP6_5Supabase } from "./agentic-finish-mock.mjs";
 // 裁-190's journals-table lane, the same file-disjoint shape. Consulted FIRST among the
-// three, and that ordering is load-bearing: the chat-parity lane answers an
+// four, and that ordering is load-bearing: the chat-parity lane answers an
 // `agent_interruptions` read that carries no `task_id` from its own park, so the
 // journals tab's FIRM-WIDE pending read would otherwise be served that walk's row AND
 // would burn its `emptyReads` budget. Every other handler in the module is client- or
 // id-scoped and falls through, so running first costs no sibling anything.
 import { handleJournalsTableSupabase } from "./journals-table-mock.mjs";
+// L7 (bank/close/registers). ID-scoped like its siblings, hooked in ONE place below, and
+// deliberately NOT first: it answers nothing the journals lane needs, and #548's ordering
+// note above is the one claim in this import block that is load-bearing.
+import { handleL7Supabase } from "./bank-close-registers-mock.mjs";
 
 const e2eRoot = dirname(fileURLToPath(import.meta.url));
 const webRoot = resolve(e2eRoot, "..");
@@ -392,6 +396,7 @@ async function handleSupabase(request, response, url) {
   if (await handleJournalsTableSupabase(request, response, path, url, sendJson, cors)) return;
   if (await handleChatParitySupabase(request, response, path, url, sendJson, cors)) return;
   if (await handleP6_5Supabase(request, response, path, url, sendJson, cors)) return;
+  if (await handleL7Supabase(request, response, path, url, sendJson, cors)) return;
 
   if (request.method === "GET" && path === "/rest/v1/clients") {
     const filter = url.searchParams.get("id");

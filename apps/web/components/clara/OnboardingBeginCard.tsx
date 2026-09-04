@@ -32,7 +32,11 @@ export function BeginOnboardingCard({ session }: { session: SessionTokenAccessor
   const [clr, setClr] = useState<{ code: string; reason: string | null } | null>(null);
   const [result, setResult] = useState<{ client_id: string; plan_id: string } | null>(null);
 
-  async function onConfirm() {
+  // CB-AE2E-004 (#549, carried across #546's extraction of this component out of
+  // OnboardingChecklistCard.tsx): resolves the OUTCOME. This card keeps its OWN err/clr
+  // rather than a hydrated part's, so it reports success itself, and OnboardingDoorDialog
+  // closes only on an explicit `true` — a refusal keeps the dialog and the typed name.
+  async function onConfirm(): Promise<boolean> {
     setBusy(true);
     setErr(null);
     setClr(null);
@@ -46,6 +50,7 @@ export function BeginOnboardingCard({ session }: { session: SessionTokenAccessor
       const out = await beginClientOnboarding(name.trim(), { session });
       setResult(out);
       setName("");
+      return true;
     } catch (e) {
       if (isDoorRefusal(e)) {
         // N7 nit: the SAME code-slot composition ClientOnboardingCard's own
@@ -56,6 +61,7 @@ export function BeginOnboardingCard({ session }: { session: SessionTokenAccessor
       } else {
         setErr(e instanceof Error ? e.message : String(e));
       }
+      return false;
     } finally {
       setBusy(false);
     }

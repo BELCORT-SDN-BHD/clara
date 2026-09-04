@@ -123,7 +123,11 @@ function AddClientControl({ onCreated }: { onCreated: () => void }) {
         confirmLabel={t("addClientConfirm")}
         busy={busy}
         confirmDisabled={!isDoActionPermitted(spec, doEnv)}
-        onConfirm={async () => {
+        // CB-AE2E-004 (#549): resolves the OUTCOME. This dialog keeps its OWN `refusal`
+        // state rather than a hydrated part's, so it reports success itself, and
+        // OnboardingDoorDialog closes only on an explicit `true` — the not-permitted arm and
+        // every caught refusal keep the dialog open with the typed name standing.
+        onConfirm={async (): Promise<boolean> => {
           setBusy(true);
           setRefusal(null);
           try {
@@ -144,17 +148,19 @@ function AddClientControl({ onCreated }: { onCreated: () => void }) {
               // three times and the third answer must never be swallowed — the day an env can
               // change under an open dialog, this is the arm that speaks.
               setRefusal({ message: t("addClientNotPermitted"), code: null });
-              return;
+              return false;
             }
             setName("");
             // Hydrate-never-trust: the register RE-READS rather than splicing in a row built
             // from the door's own reply. The navigation is to the id the DATABASE returned.
             onCreated();
             if (result.kind === "navigated") router.push(result.href);
+            return true;
           } catch (err) {
             // A DoorRefusal renders VERBATIM and is never retried (apps/web/AGENTS.md).
             if (isDoorRefusal(err)) setRefusal({ message: err.message, code: err.code });
             else setRefusal({ message: err instanceof Error ? err.message : String(err), code: null });
+            return false;
           } finally {
             setBusy(false);
           }

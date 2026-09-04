@@ -42,7 +42,7 @@ export function DocumentFilingsHistory({
 }: {
   filings: FilingRow[];
   busy: boolean;
-  act: (fn: () => Promise<void>) => Promise<void>;
+  act: (fn: () => Promise<void>) => Promise<boolean>;
 }) {
   const t = useTranslations("ClientDocuments");
   const tg = useTranslations("DraftsDocumentGovernance");

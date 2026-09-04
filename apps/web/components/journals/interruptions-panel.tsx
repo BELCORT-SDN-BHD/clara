@@ -73,7 +73,7 @@ export function InterruptionsPanel({
    *  all, never a silently-inert button. Returns the SAME act()-derived
    *  Promise the dialog awaits before closing (CodingDoorDialog's own
    *  contract) — never a fire-and-forget callback. */
-  onPromote?: (interruptionId: string, scopeId: string) => Promise<void>;
+  onPromote?: (interruptionId: string, scopeId: string) => Promise<boolean>;
 }) {
   const t = useTranslations("DraftsDocumentGovernance.interruptions");
 
@@ -189,7 +189,7 @@ function AnswerRow({ busy, onAnswer }: { busy: boolean; onAnswer: (answer: Recor
 /** T7 — the promote_clarify_to_question trigger, one door dialog, no fields
  *  of its own (the interruption's own text and the resolved client id are
  *  everything the door needs). */
-function PromoteRow({ busy, onConfirm }: { busy: boolean; onConfirm: () => Promise<void> }) {
+function PromoteRow({ busy, onConfirm }: { busy: boolean; onConfirm: () => Promise<boolean> }) {
   const t = useTranslations("CodingQuestionsSignals.promoteClarify");
   return (
     <div className="flex justify-end">

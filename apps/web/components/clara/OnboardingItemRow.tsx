@@ -98,7 +98,7 @@ export function OnboardingItemRow({
    *  down as `onOk` so the parent's `act` decides whether it ever runs —
    *  mirrors this same file's sibling Cancel door
    *  (`OnboardingChecklistCard.tsx`'s `act(fn, () => setCancelReason(""))`). */
-  onResolve: (resolution: string, onOk: () => void) => Promise<void>;
+  onResolve: (resolution: string, onOk: () => void) => Promise<boolean>;
   /** 裁-27 — the item's SUPERSEDED answers, read from `onboarding_plan_revisions` by the
    *  parent and passed down (the card owns every read; this row renders). `null` means the
    *  trail has not been read yet, which is a DIFFERENT fact from `[]` ("read, and this
@@ -147,9 +147,7 @@ export function OnboardingItemRow({
         confirmLabel={t("resolveConfirm")}
         busy={busy}
         confirmDisabled={!canResolve || resolution.trim().length === 0}
-        onConfirm={async () => {
-          await onResolve(resolution.trim(), () => setResolution(""));
-        }}
+        onConfirm={() => onResolve(resolution.trim(), () => setResolution(""))}
       >
         <Textarea
           aria-label={t("resolveTrigger")}
@@ -181,9 +179,7 @@ export function OnboardingItemRow({
           busy={busy}
           confirmDisabled={amendment.trim().length === 0}
           onOpen={onRequestHistory}
-          onConfirm={async () => {
-            await onResolve(amendment.trim(), () => setAmendment(""));
-          }}
+          onConfirm={() => onResolve(amendment.trim(), () => setAmendment(""))}
         >
           {/* WHAT IS BEING SUPERSEDED, shown before the field that supersedes it. The
               standing answer comes from the item row; the ones before it come from the

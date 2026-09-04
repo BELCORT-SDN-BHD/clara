@@ -44,7 +44,7 @@ export function DocumentAdmin({
 }: {
   document: DocumentRow;
   busy: boolean;
-  act: (fn: () => Promise<void>) => Promise<void>;
+  act: (fn: () => Promise<void>) => Promise<boolean>;
   onCorrect: () => void;
 }) {
   const t = useTranslations("ClientDocuments");

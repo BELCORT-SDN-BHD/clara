@@ -287,18 +287,15 @@ test("T9 (requeue-render-job door, incl. the drift checkbox path): Confirm start
       await h.act(() => clickButton(confirmButton as never));
       for (let i = 0; i < 8; i++) await h.settle();
 
-      // --- Second open: the drift checkbox must be keyboard-reachable, and
-      // Confirm must re-gate on it (RequeueDialog's own note: the dialog
-      // closes on every attempt, so this consent can only ever be shown —
-      // and exercised — on the dialog's NEXT open). ---
+      // --- CB-AE2E-004 (2026-09-04): the dialog STAYS OPEN on the refusal, so the
+      // drift checkbox appears IN PLACE and Confirm re-gates on it without a
+      // close-and-reopen. That is the same claim this arm always made, proven one
+      // step earlier and without the human having to think to come back. ---
       trigger = h.find((n) => n.tagName === "BUTTON" && textOf(n).includes("Requeue"));
       assert.ok(trigger, "the Requeue trigger must still render after the refusal");
-      (trigger as unknown as { focus: () => void }).focus();
-      await h.fireEvent(trigger!, "click");
-      for (let i = 0; i < 6; i++) await h.settle();
 
       const checkbox = findIn(body as never, (n) => n.tagName === "INPUT" && (n as unknown as { type?: string }).type === "checkbox");
-      assert.ok(checkbox, "the drift consent checkbox must render on the second open");
+      assert.ok(checkbox, "the drift consent checkbox must render on the refused attempt, in the still-open dialog");
       assert.ok(
         focusableElements(body as never).includes(checkbox as never),
         "the drift checkbox must be keyboard-reachable, not merely present",
@@ -306,18 +303,14 @@ test("T9 (requeue-render-job door, incl. the drift checkbox path): Confirm start
       assert.deepEqual(checkKeyboardWalk(body as never), [], "no tabindex-order/focus-visible violations with the checkbox visible");
 
       const reasonFieldSecond = findIn(body as never, (n) => n.tagName === "INPUT" && (n as unknown as { type?: string }).type !== "checkbox");
-      assert.ok(reasonFieldSecond, "the reason field must be reachable again");
-      // F4 pin (independent review, re-verify round): PRESENCE alone does not
-      // prove the reset — the field could just as easily have carried the
-      // FIRST open's leftover value forward. Assert the VALUE is actually
-      // empty.
+      assert.ok(reasonFieldSecond, "the reason field must still be reachable");
+      // The typed reason SURVIVES the refusal — that is the whole point of the class
+      // fix. (The F4 reset pin is asserted below, on a genuine close-and-reopen.)
       assert.equal(
         (reasonFieldSecond as unknown as { value: string }).value,
-        "",
-        "the reason field must be RESET (empty), not carrying the first open's leftover text — F4",
+        "render timeout",
+        "the reason the human typed must survive a refusal \u2014 CB-AE2E-004",
       );
-      await h.act(() => { setFieldValue(reasonFieldSecond as never, "accepting the drift"); });
-      for (let i = 0; i < 2; i++) await h.settle();
 
       let confirmSecond = findIn(
         body as never,
@@ -342,12 +335,11 @@ test("T9 (requeue-render-job door, incl. the drift checkbox path): Confirm start
         "checking the drift consent box ENABLES Confirm — the gate moved to the checkbox, it did not disappear",
       );
 
-      // F4 pin (independent review, re-verify round): close WITHOUT
-      // submitting (Cancel, not Confirm — `drift` itself must survive this
-      // close, since it is not reset; only `acceptDrift`/`reason` are), then
-      // reopen and prove the checkbox comes back UNCHECKED and Confirm
-      // re-gates — a fresh deliberate act on EVERY open, not just the second
-      // one.
+      // F4 pin (independent review, re-verify round): close WITHOUT submitting
+      // (Cancel, not Confirm — `drift` itself must survive this close, since it is
+      // not reset; only `acceptDrift`/`reason` are), then reopen and prove the
+      // checkbox comes back UNCHECKED, the reason field comes back EMPTY, and
+      // Confirm re-gates — a fresh deliberate act on EVERY open.
       const cancelSecond = findIn(body as never, (n) => n.tagName === "BUTTON" && textOf(n as never).includes("Cancel"));
       assert.ok(cancelSecond, "the Cancel control must be reachable on the second open too");
       await h.act(() => clickButton(cancelSecond as never));
@@ -361,6 +353,12 @@ test("T9 (requeue-render-job door, incl. the drift checkbox path): Confirm start
 
       const checkboxThird = findIn(body as never, (n) => n.tagName === "INPUT" && (n as unknown as { type?: string }).type === "checkbox");
       assert.ok(checkboxThird, "the drift checkbox must still render on the THIRD open — `drift` itself is not reset by a cancel");
+      const reasonFieldThird = findIn(body as never, (n) => n.tagName === "INPUT" && (n as unknown as { type?: string }).type !== "checkbox");
+      assert.equal(
+        (reasonFieldThird as unknown as { value: string }).value,
+        "",
+        "the reason field must be RESET (empty) on a genuine re-open, not carrying the prior open's text — F4",
+      );
       assert.equal(
         (checkboxThird as unknown as { checked: boolean }).checked,
         false,

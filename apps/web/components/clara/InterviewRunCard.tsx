@@ -181,9 +181,12 @@ export function InterviewRunCard({
     if (await run.submitAnswer(park, answer)) setDraft("");
   }
 
-  async function cancel() {
+  // CB-AE2E-004: resolves the outcome — `true` only when the cancel actually
+  // went through. OnboardingDoorDialog closes on `true` alone, so a refusal (or
+  // an empty reason) keeps the dialog and the typed reason standing.
+  async function cancel(): Promise<boolean> {
     const reason = cancelReason.trim();
-    if (!reason) return;
+    if (!reason) return false;
     run.setBusy(true);
     run.setError(null);
     try {
@@ -193,8 +196,10 @@ export function InterviewRunCard({
       setCancelReason("");
       await onPlanChanged?.();
       await run.refresh();
+      return true;
     } catch (e) {
       run.setError(e instanceof Error ? e.message : String(e));
+      return false;
     } finally {
       run.setBusy(false);
     }

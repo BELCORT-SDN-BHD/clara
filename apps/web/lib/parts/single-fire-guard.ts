@@ -20,20 +20,41 @@ export function createSingleFireGuard(): SingleFireGuard {
 
 /**
  * Runs `fn` only if no other call is already in flight through THIS guard.
- * Returns `true` if `fn` actually ran, `false` if this call was dropped
- * because another was already in flight — a concurrent call is a NO-OP, never
- * queued and never retried (doors.ts's own "a refusal is never auto-retried"
- * law extends naturally to "a door is never double-submitted" here). The
- * caller uses the boolean to decide whether ITS OWN follow-up (e.g. closing a
- * dialog) should run — a dropped call must not behave as if it had succeeded.
+ *
+ * Returns BOTH halves of the outcome, which are different facts and must not be
+ * conflated (CB-AE2E-004, the fifteen-wrapper class defect):
+ *
+ *   - `ran`   — whether `fn` was invoked at all. `false` ONLY when this call was
+ *               dropped because another was already in flight. A concurrent call
+ *               is a NO-OP, never queued and never retried (doors.ts's own "a
+ *               refusal is never auto-retried" law extends naturally to "a door
+ *               is never double-submitted" here).
+ *   - `value` — what `fn` itself resolved to, `undefined` when the call was
+ *               dropped. This is the ONLY channel that carries whether the act
+ *               SUCCEEDED: `act()` (lib/parts/hooks.ts) catches every failure and
+ *               resolves, so a governed refusal never rejects and `ran` is `true`
+ *               for a refused act exactly as it is for a successful one.
+ *
+ * The previous single-boolean signature made those two facts indistinguishable,
+ * and all fifteen door-dialog wrappers read it as "the act succeeded" — closing
+ * the dialog (and destroying the human's typed input) on a refusal that was
+ * asking them to correct a field inside it. A caller that must close only on
+ * success reads `value === true`; a caller that only cares about re-entrancy
+ * reads `ran`.
+ *
+ * `fn` may still throw — the guard is released in a `finally` and the rejection
+ * propagates unchanged, exactly as before.
  */
-export async function runOnce(guard: SingleFireGuard, fn: () => Promise<void>): Promise<boolean> {
-  if (guard.current) return false;
+export async function runOnce<T>(
+  guard: SingleFireGuard,
+  fn: () => Promise<T>,
+): Promise<{ ran: boolean; value: T | undefined }> {
+  if (guard.current) return { ran: false, value: undefined };
   guard.current = true;
   try {
-    await fn();
+    const value = await fn();
+    return { ran: true, value };
   } finally {
     guard.current = false;
   }
-  return true;
 }
