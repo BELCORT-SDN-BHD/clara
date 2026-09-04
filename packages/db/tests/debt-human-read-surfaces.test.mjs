@@ -245,20 +245,20 @@ test("debt-C2 · users_visible: exactly id + display_name -- email is not just p
 // security_barrier) is exactly what THIS file would then require too, correctly, once it
 // lands -- not silently missed.
 //
-// AND THAT IS EXACTLY WHAT KEEPS HAPPENING, WHICH IS THE MECHANISM WORKING. The roster below is
-// now FOURTEEN: P4 tranche-2 landed two (the anticipated firm_registration_requests_visible and
-// the unanticipated counterparty_aliases_visible), and H-19 landed a fourteenth --
-// firm_sales_lane_visible, the read the owner-floored sales-lane control re-reads after its act.
-// It was built on counterparty_aliases_visible's own shape deliberately, so it matches the
-// predicate above and joins this family rather than escaping it: a new firm-scoped human read
-// that did NOT show up here would be the finding, not the one that did.
+// AND THAT IS EXACTLY WHAT KEEPS HAPPENING, WHICH IS THE MECHANISM WORKING. P4 tranche-2 landed
+// two (the anticipated firm_registration_requests_visible and the unanticipated
+// counterparty_aliases_visible); two more are in flight as this is written -- H-19's
+// firm_sales_lane_visible and CB-AE2E-018's firm_timeline_visible. Each was built on an existing
+// member's own shape, so each MATCHES the predicate above and joins the family rather than
+// escaping it: a new firm-scoped human read that did NOT show up here would be the finding.
 //
-// AND THE FOURTEENTH IS BIMODAL, WHICH IS 裁-108 REACHING THIS FILE. H-19's migration is
-// UNNUMBERED until merge, so the runner SKIPS it: CI's estate chain carries THIRTEEN members and
-// a numbered chain carries FOURTEEN. A static roster is wrong on one of the two, so the
-// expectation below is keyed on a POSITIVE catalog read of the view. That is not a softening —
-// the roster stays exactly closed on whichever chain it runs, and any OTHER new member still
-// reds. At merge, when the number is claimed, both chains become the fourteen-member one.
+// AND THE NEW MEMBERS ARE BIMODAL, WHICH IS 裁-108 REACHING THIS FILE. Each ships UNNUMBERED
+// until merge prep and the runner SKIPS such a file, so CI's estate chain carries the pre-cohort
+// THIRTEEN while a numbered chain carries one more per landed cohort. A static roster is wrong on
+// one of the two chains, so the expectation below is derived from a POSITIVE to_regclass read of
+// each view. That is NOT a softening -- the roster stays exactly closed on whichever chain it
+// runs, and any OTHER new member still reds. When both numbers are claimed, every chain carries
+// the fifteen-member family.
 // ---------------------------------------------------------------------------------------
 
 const HRD_A_FAMILY_PREDICATE = `
@@ -275,33 +275,46 @@ async function hrdAFamily() {
   return r.rows.map((x) => x.relname);
 }
 
-test("debt-BAR1 · 裁-15 estate census — EVERY member of the catalog-derived same-shape family (thirteen, or fourteen once H-19’s sales-lane read applies) carries security_barrier, and the reloption is proven to buy pushdown-ordering, not target-list masking", async (t) => {
+test("debt-BAR1 · 裁-15 estate census — EVERY member of the catalog-derived same-shape family (thirteen, plus each landed cohort read) carries security_barrier, and the reloption is proven to buy pushdown-ordering, not target-list masking", async (t) => {
   if (gate(t)) return;
   const family = await hrdAFamily();
-  // The thirteen present at every frontier from 0145 onward.
-  const base = [
+  // TWO COHORT READS ARE BIMODAL, and they have to be: each ships in an UNNUMBERED file until
+  // merge prep and the runner SILENTLY SKIPS such a file (裁-108), so CI's chain carries the
+  // pre-cohort THIRTEEN while a numbered chain carries one more per landed cohort. A hardcoded
+  // count is wrong on one of the two chains — the census is catalog-derived on the left-hand
+  // side, so the right-hand side is derived too, from a POSITIVE to_regclass read of each view.
+  //
+  // THIS IS NOT A SOFTENING. The roster stays exactly CLOSED on whichever chain it runs: any
+  // OTHER same-shape view still reds here, which is the whole point of the cell. Only these two
+  // named members are conditional, and only on their own existence.
+  //
+  // KEEP-BOTH (#552 × #556). firm_timeline_visible is DB-B's (CB-AE2E-018), firm_sales_lane_
+  // visible is H-19's; #552 merges first, so its spread is carried here verbatim and stays inert
+  // on this branch (to_regclass returns null, the spread contributes nothing) until it lands.
+  // Alphabetical position is preserved by writing each spread where its name sorts.
+  const laneReadLanded = (await rootQuery(
+    "select to_regclass('clara.firm_sales_lane_visible') is not null as ok")).rows[0].ok;
+  const timelineLanded = (await rootQuery(
+    "select to_regclass('clara.firm_timeline_visible') is not null as ok")).rows[0].ok;
+  assert.deepEqual(family, [
     "agent_receipts_visible", "agent_tasks_visible", "caller_context",
     "client_identifier_promotions_visible", "coding_tasks_visible",
     "counterparty_aliases_visible",
     "document_intakes_visible", "document_processing_tasks_visible",
     "firm_invites_visible", "firm_members_visible", "firm_open_questions_visible",
     "firm_registration_requests_visible",
+    ...(laneReadLanded ? ["firm_sales_lane_visible"] : []),
+    ...(timelineLanded ? ["firm_timeline_visible"] : []),
     "users_visible",
-  ];
-  // H-19's fourteenth member is BIMODAL, and it has to be: its migration is UNNUMBERED until
-  // merge, so the runner SKIPS it (裁-108) and CI's estate chain carries THIRTEEN while a
-  // numbered chain carries FOURTEEN. A static fourteen is simply wrong on one of the two. The
-  // expectation is therefore keyed on a POSITIVE catalog read of the view itself — never on
-  // tolerating unknown members: the roster stays exactly closed on whichever chain it runs, so
-  // any OTHER new family member still reds here, which is the whole point of the cell.
-  const laneRead = await rootQuery(
-    "select to_regclass('clara.firm_sales_lane_visible') is not null as present");
-  const expected = laneRead.rows[0].present
-    ? [...base, "firm_sales_lane_visible"].sort()
-    : base;
-  assert.deepEqual(family, expected,
-    `the catalog-derived family must be exactly the ${expected.length} expected members for THIS chain `
-    + `(firm_sales_lane_visible present: ${laneRead.rows[0].present}), closed-world -- P4 tranche-2 (0145) landed both firm_registration_requests_visible (anticipated by this file's own header comment) and counterparty_aliases_visible (a round-4 addition this file's author could not have known about -- 裁-11's masked-view mechanism was chosen AFTER this file merged, to satisfy wave-a-shape's fn-fronted-only invariant), and H-19 landed firm_sales_lane_visible -- the read the owner-floored sales-lane control re-reads after its act, built on counterparty_aliases_visible's own shape, which is why it joins this family rather than escaping it`);
+  ], "the catalog-derived family must be exactly the expected members for THIS chain, closed-world"
+    + ` (firm_sales_lane_visible: ${laneReadLanded}, firm_timeline_visible: ${timelineLanded})`
+    + " -- P4 tranche-2 (0145) landed both firm_registration_requests_visible (anticipated by this"
+    + " file's own header comment) and counterparty_aliases_visible (a round-4 addition this file's"
+    + " author could not have known about -- 裁-11's masked-view mechanism was chosen AFTER this file"
+    + " merged, to satisfy wave-a-shape's fn-fronted-only invariant); H-19 landed"
+    + " firm_sales_lane_visible, the read the owner-floored sales-lane control re-reads after its"
+    + " act, built on counterparty_aliases_visible's own shape, which is why it joins this family"
+    + " rather than escaping it");
 
   const r = await rootQuery(
     `select c.relname, c.reloptions
