@@ -1000,6 +1000,31 @@ export const SALES_LANE_0046_COHORT = [
   ...SALES_LANE_0046_HUMAN_FNS, ...SALES_LANE_0046_READ_FNS, ...SALES_LANE_0046_UNGRANTED_FNS,
 ];
 
+// H-17 / H-19 [UNNUMBERED_counterparty_alias_kind_scope, numbered at merge] — the kind-scoped
+// alias unique and the owner-floored sales-lane wrapper.
+//
+// THIS IS A SEPARATE COHORT FROM 0046's ON PURPOSE, and the reason is mechanical: cohortFailures
+// reports a PARTIAL roster and stays silent on a WHOLLY absent one, so adding these names to
+// SALES_LANE_0046_COHORT would red every pre-migration chain — 0046's own names resolve there and
+// these two do not. Both land in ONE migration, so this cohort is bimodal exactly as F-A6's is.
+//
+// AND THE TWO ROSTERS SAY OPPOSITE THINGS ABOUT THE SAME SWITCH, WHICH IS THE POINT. 7A-R1 ruled
+// the activation flip belongs to the owner/deploy connection alone, and
+// `clara.set_sales_lane_activation` STAYS in SALES_LANE_0046_UNGRANTED_FNS above, still expected
+// false for every role — H-19 does not grant it and 0046's own ACL cell would red if it did. What
+// H-19 adds is a NEW wrapper that takes no firm at all (the firm comes from `_human_ctx` at the
+// owner rank), and that one is granted to clara_authenticated. So the census now carries both
+// halves of the ruling side by side: the un-walled signature reachable by nobody, the walled
+// wrapper reachable by the human lane.
+const H17_H19_HUMAN_FNS = ["set_firm_sales_lane_activation"];
+// Named so its absence from every role set is a DECLARED expectation rather than a silent
+// default (the 0020 block's reasoning). It is a SECURITY DEFINER trigger body: the trigger calls
+// it, and nothing else may. The first cut of that migration left PUBLIC holding EXECUTE on it —
+// see T17b's own note that `alter default privileges … revoke execute from public` is a NO-OP
+// against PostgreSQL's hardwired default — so this row is a real expectation, not a formality.
+const H17_H19_UNGRANTED_FNS = ["_tf_counterparty_alias_kind"];
+export const H17_H19_COHORT = [...H17_H19_HUMAN_FNS, ...H17_H19_UNGRANTED_FNS];
+
 // ---------------------------------------------------------------------------
 // F-A6 PR-1 [Wave-F Track A] — the audited freeform read. The ENUMERATED EXECUTE surface of
 // clara_freeform_ro, and the reason it is a cohort rather than a loose list: A.2 is a CLOSED
@@ -1409,6 +1434,9 @@ export const ALLOWED = {
     ...ADJ_0045_SHARED_FNS, // 0045 [D-b2] the due probe — the one name BOTH lanes hold
     ...SALES_LANE_0046_HUMAN_FNS, // 0046 [§7-A] the recorded sales backfill door (admin floor)
     ...SALES_LANE_0046_READ_FNS, // 0046 [§7-A] the signing-time evidence preview + batch read
+    ...H17_H19_HUMAN_FNS, // H-19 the owner-floored sales-lane WRAPPER (no firm argument; the
+    // firm comes from _human_ctx at owner rank). The un-walled 0046 signature it delegates to
+    // stays in SALES_LANE_0046_UNGRANTED_FNS above, expected false for every role.
     ...CLIENT_FACTS_0055_HUMAN_FNS, // 0055 [Wave E lane α] the client-facts door (admin floor;
     // agent + both wake roles gain ZERO — 0055's S7 tail asserts it in-migration)
     ...CLOSE_MODEL_0056_HUMAN_FNS, // 0056 [Wave E lane β] the close model (see the block above)
@@ -1781,6 +1809,7 @@ export async function grantMatrixFailures() {
   failures.push(...cohortFailures("0041 wave D-a fixed-asset register", FA_0041_COHORT, liveNames));
   failures.push(...cohortFailures("0045 wave D-b recurring adjustments", ADJUSTMENTS_0045_COHORT, liveNames));
   failures.push(...cohortFailures("0046 §7-A unattended sales lane", SALES_LANE_0046_COHORT, liveNames));
+  failures.push(...cohortFailures("H-17/H-19 kind-scoped alias unique + owner-floored sales-lane wrapper", H17_H19_COHORT, liveNames));
   failures.push(...cohortFailures("0057 wave E period registry + snapshots", REGISTRY_0057_COHORT, liveNames));
   failures.push(...cohortFailures("0058-0061 wave E metric algebra + evaluator", METRICS_0058_COHORT, liveNames));
   failures.push(...cohortFailures("0065-0072 wave E FS reporting layer", REPORTING_0065_COHORT, liveNames));
