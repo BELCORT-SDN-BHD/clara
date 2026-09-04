@@ -160,11 +160,20 @@ test("the structural boundary: A -> B and A -> firm carry nothing client-owned a
   // crossed — not A's transcript, not A's draft, not A's parked question.
   await page.goto(CLIENT_A);
   await expect(page.getByText("CLIENT A TRANSCRIPT")).toBeVisible({ timeout: 20_000 });
-  await expect(page.getByText("Client: ROME PROPERTIES")).toBeVisible();
+  // CB-AE2E-019 (#L15): the client name became a real `<h1>`, so a `getByText`
+  // for this string now resolves to two elements and trips strict mode. The
+  // second is Next's route announcer (`#__next-route-announcer__`), which prefers
+  // `document.title` and falls back to the first `h1` — this app's title is a
+  // constant, and the announcer was measured carrying the client heading's text,
+  // i.e. it took the fallback. See e2e/parity-holes.spec.ts for the full read.
+  // Located by ROLE + LEVEL instead, which asserts more, not less: the altitude
+  // marker this cell is about is a heading, and the announcer is not one.
+  const clientAHeading = page.getByRole("heading", { name: "Client: ROME PROPERTIES", level: 1 });
+  await expect(clientAHeading).toBeVisible();
   await page.getByLabel(COMPOSER).fill("client A again");
 
   await page.goto("/");
-  await expect(page.getByText("Client: ROME PROPERTIES")).toHaveCount(0);
+  await expect(clientAHeading).toHaveCount(0);
   await expect(page.getByText("CLIENT A TRANSCRIPT")).toHaveCount(0);
   await expect(page.getByText(P6_5.question)).toHaveCount(0);
   await expect(page.getByLabel(COMPOSER)).toHaveValue("");

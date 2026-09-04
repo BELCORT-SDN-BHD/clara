@@ -411,7 +411,29 @@
  * transforms that dialogs and popovers depend on. Any new motion carries its
  * own `@media (prefers-reduced-motion: reduce)` arm, here, beside these
  * three. Every animation in this app is one of: the utilities below, the
- * Dialog's fade/zoom, or the Select popup's fade/zoom — all four conform.
+ * Dialog's fade/zoom, the Select popup's fade/zoom, or the SHEET's side slide
+ * — FIVE families, all conform.
+ *
+ * TRUED 2026-09-04 (CB-AE2E-019). The enumeration said "four families, all
+ * conform" and was wrong the moment `components/ui/sheet.tsx` was vendored: the
+ * shadcn sheet slides its popup in and out on all four sides, and those
+ * translates compiled with NO enclosing at-rule — read out of
+ * `.next/static/chunks/*.css`, where
+ * `.data-\[side\=left\]\:data-ending-style\:translate-x-\[-2\.5rem\][data-side=left][data-ending-style]`
+ * sat bare inside `@layer utilities`. So the firm-rail drawer travelled for a
+ * user who had asked the system for less motion. Its eight side translates now
+ * carry `motion-safe:`, which is this file's rule expressed in a variant rather
+ * than in a hand-written media query, and the count above is five.
+ *
+ * THE STANDING LESSON, since this enumeration has now been wrong once: a count
+ * of families in a comment goes stale the next time a primitive is vendored, and
+ * the staleness is invisible. `tests/reduced-motion-contract.test.ts` is the
+ * mechanical half — it scans every component class string for a MOVEMENT utility
+ * (translate/scale/slide/zoom) that is not behind `motion-safe:` and not on the
+ * short, named exception list, so the next unconditional slide reds at authoring
+ * time rather than waiting for a reviewer to read a compiled stylesheet. The
+ * computed-style half runs in the browser, under a real
+ * `prefers-reduced-motion: reduce`, in `e2e/responsive-shell-walk.spec.ts`.
  */
 
 /*
@@ -505,6 +527,58 @@
     @starting-style {
       opacity: 0;
       translate: 0;
+    }
+  }
+}
+
+/* CB-AE2E-019 — the Clara rail's ENTER *and* EXIT in ONE utility, because both
+ * halves must share a SINGLE `transition` declaration (two utilities each
+ * declaring `transition` are resolved by source order in the compiled sheet, not
+ * by the author — that is how an exit silently stops running months later).
+ * `enter-panel` above is untouched and still serves every other panel.
+ * The full rationale — why the exit is a `[data-state]` arm on a still-mounted
+ * element, why WIDTH animates alongside the slide (§7's own "Clara dock reflow"),
+ * and why `overflow: hidden` is load-bearing — lives with the presence latch that
+ * keeps the panel mounted: `apps/web/lib/clara/useRailPresence.ts`.
+ * Reduced motion: position removed, opacity kept — the contract's rule, BOTH ways.
+ */
+@utility dock-panel {
+  opacity: 1;
+  translate: 0;
+  /* `overflow: hidden` is LOAD-BEARING, not tidiness: the closed arm animates
+   * `width` to 0, and without it the panel's 320px of content keeps painting out
+   * of the collapsing box — the rail's own text slides across the workbench for
+   * the length of the exit. Written here rather than deferred, because a reader
+   * deleting a stray `overflow` will not think to open a TypeScript file first. */
+  overflow: hidden;
+  transition:
+    opacity var(--motion-duration-panel) var(--motion-easing-out),
+    translate var(--motion-duration-panel) var(--motion-easing-out),
+    width var(--motion-duration-panel) var(--motion-easing-out);
+
+  @starting-style {
+    opacity: 1;
+    translate: 100% 0;
+  }
+
+  &[data-state="closed"] {
+    opacity: 0;
+    translate: 100% 0;
+    width: 0;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    transition: opacity var(--motion-duration-panel) var(--motion-easing-out);
+
+    @starting-style {
+      opacity: 0;
+      translate: 0;
+    }
+
+    &[data-state="closed"] {
+      opacity: 0;
+      translate: 0;
+      width: 0;
     }
   }
 }

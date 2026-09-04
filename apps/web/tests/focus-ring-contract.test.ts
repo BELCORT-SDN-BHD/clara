@@ -116,7 +116,7 @@ describe("focus-ring contract — 裁-1's 70% is declared once and obeyed everyw
   it("VACUITY CONTROL: the scan actually finds the carriers — fifteen component files, fifteen class strings", () => {
     // Without this arm the assertion above passes trivially the day the scan
     // walks the wrong directory or the regex stops matching. The count is the
-    // 2026-09-04, TWO trains, and the list is the UNION of what each of them added —
+    // 2026-09-04, THREE trains, and the list is the UNION of what each of them added —
     // never either side's file wholesale, which is how a census like this loses a carrier
     // silently at a merge.
     //
@@ -135,6 +135,24 @@ describe("focus-ring contract — 裁-1's 70% is declared once and obeyed everyw
     // global :focus-visible outline, which is what the product's existing disclosure at
     // components/firm/firm-question-row.tsx:88 already does. Growing this list needs a
     // reason each time; "a new file appeared" is not one.
+    //
+    // AND ONE MOVED, from CB-AE2E-019 in the same merge:
+    // `components/common/section-tabs.tsx` stopped being a carrier and
+    // `components/ui/tabs.tsx` became one, because SectionTabs is now a skin over
+    // the vendored Base UI Tabs primitive and the focus treatment moved DOWN with
+    // the control that draws it. That is the right direction for this census — a
+    // ring on a primitive is inherited by every future consumer, where a ring on
+    // one composed widget is not. The vendored file shipped `ring-ring/50`, which
+    // this very gate is what caught; it was recut to /70 in the same commit as the
+    // add (see that file's provenance header, hand edit 3).
+    //
+    // SO THE ARITHMETIC, stated because THREE trains moved this count inside one
+    // window and "14" on its own hides every one of them: twelve before, MINUS
+    // section-tabs and PLUS ui/tabs (#553's move, net zero), plus
+    // journal-entries-table (#548) and dialog-refusal (#549) = fourteen. No single
+    // train produces this list, and taking any one side's file wholesale at the
+    // merge would have dropped a carrier without changing the count in an obvious
+    // way — which is the failure the union framing above exists to prevent.
     //
     // Exactly one class string per file, now that comments are stripped — see
     // ringCarrierHits's header for why an earlier census's extra "occurrence" was never a
@@ -163,7 +181,6 @@ describe("focus-ring contract — 裁-1's 70% is declared once and obeyed everyw
       "components/clara/ClaraThreadView.tsx",
       "components/common/dialog-refusal.tsx",
       "components/common/native-select.tsx",
-      "components/common/section-tabs.tsx",
       "components/firm/compliance-watch-affordance.tsx",
       "components/journals/drafts-queue-panel.tsx",
       "components/journals/journal-entries-table.tsx",
@@ -173,6 +190,7 @@ describe("focus-ring contract — 裁-1's 70% is declared once and obeyed everyw
       "components/ui/input-group.tsx",
       "components/ui/input.tsx",
       "components/ui/select.tsx",
+      "components/ui/tabs.tsx",
       "components/ui/textarea.tsx",
     ]);
   });

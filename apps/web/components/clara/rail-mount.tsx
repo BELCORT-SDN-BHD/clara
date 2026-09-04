@@ -3,6 +3,7 @@
 import { useParams } from "next/navigation";
 
 import { ClaraRail } from "@/components/clara/ClaraRail";
+import { ClaraRailChrome } from "@/components/clara/rail-chrome";
 
 // P2 FOLD SEAM H: the ONE Clara rail mount for the whole (firm) shell — mounted from
 // `app/(firm)/layout.tsx`. `clientId` comes from the URL when the (firm) layout
@@ -50,9 +51,23 @@ import { ClaraRail } from "@/components/clara/ClaraRail";
 // THE FIRM ALTITUDE IS A SCOPE LIKE ANY OTHER. `clientId ?? "firm"` keys it too, so
 // A -> firm is as clean a boundary as A -> B, and the firm thread's own store entry
 // survives the trip in exactly the same way a client thread's does.
+//
+// CB-AE2E-019 — `<ClaraRailChrome>` WRAPS the rail here rather than the rail
+// growing viewport arms of its own. Two reasons. (1) The key: `key` must stay on
+// `<ClaraRail>` and not migrate to a wrapper, or a client switch would rebuild
+// the chrome (and its focus and presence state) instead of the subtree the P6-5
+// boundary above is about — the chrome is app-wide and client-agnostic, so it
+// sits OUTSIDE the key deliberately. (2) The split: above `lg` the chrome is
+// `display: contents` and the rail's `<aside>` is a direct flex child of the
+// shell row exactly as before, so this wrapper adds nothing to the arm that
+// already worked. See `rail-chrome.tsx`.
 export function RailMount() {
   const params = useParams();
   const clientId = typeof params.clientId === "string" ? params.clientId : undefined;
 
-  return <ClaraRail key={clientId ?? "firm"} clientId={clientId} />;
+  return (
+    <ClaraRailChrome>
+      <ClaraRail key={clientId ?? "firm"} clientId={clientId} />
+    </ClaraRailChrome>
+  );
 }

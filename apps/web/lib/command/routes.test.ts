@@ -40,6 +40,7 @@ import { fileURLToPath } from "node:url";
 import ts from "typescript";
 
 import { matchesQuery } from "../../components/command/command-palette";
+import { ADMIN_NAVIGATION, FIRM_NAVIGATION } from "../firm/navigation";
 import { CLIENT_ROUTES, FIRM_ROUTES, type CommandRoute } from "./routes";
 import messages from "../../messages/en.json";
 
@@ -354,4 +355,55 @@ test("the needsYou row points at /needs-you, and /inbox is not a path this app s
   // /inbox page, this line tells them to re-decide the row rather than
   // silently leaving two inboxes.
   assert.equal(resolvesToPage("/inbox"), false, "if /inbox now exists, decide which one the manifest names — do not keep both");
+});
+
+// --- 4. C-43: the Go floor IS the sidebar's floor, per href -------------------
+
+test("every firm Go row's rank floor equals the navigation registry's floor for the same href", () => {
+  // THE DRIFT GUARD THIS FILE'S OWN HEADER PAID FOR ONCE ALREADY. `FIRM_ROUTES`
+  // is now BUILT from `FIRM_NAVIGATION`/`ADMIN_NAVIGATION` rather than
+  // hand-copied, so this cell asserts a construction rather than policing a copy
+  // — which is the point: if a later lane reintroduces a literal `minimumRole`
+  // here, the two stop agreeing and this reds. The join key is the href, so it
+  // also catches a Go row silently repointed at a different surface while
+  // keeping its old floor.
+  const byHref = new Map([...FIRM_NAVIGATION, ...ADMIN_NAVIGATION].map((e) => [e.href, e]));
+  const mismatched = FIRM_ROUTES.filter((route) => {
+    const entry = byHref.get(route.href);
+    if (!entry) return true;
+    return (
+      entry.minimumRole !== route.minimumRole ||
+      Boolean(entry.operatorOnly) !== Boolean(route.operatorOnly)
+    );
+  });
+  assert.deepEqual(
+    mismatched.map((r) => `${r.id} -> ${r.href} @ ${r.minimumRole}${r.operatorOnly ? " +operator" : ""}`),
+    [],
+    "a ⌘K Go row disagrees with the sidebar about who may see the same page",
+  );
+});
+
+test("VACUITY CONTROL: the floors are not all one value, so the check above discriminates", () => {
+  // Without this, the cell above would pass just as happily if every floor were
+  // "viewer" — including on the day someone flattens them. The registry really
+  // does carry four distinct shapes today (viewer, bookkeeper, admin, and
+  // owner+operatorOnly) and all four must reach the Go manifest.
+  const floors = new Set(FIRM_ROUTES.map((r) => `${r.minimumRole}${r.operatorOnly ? "+op" : ""}`));
+  assert.deepEqual(
+    [...floors].sort(),
+    ["admin", "bookkeeper", "owner+op", "viewer"],
+    "the Go manifest no longer carries the registry's full range of floors",
+  );
+});
+
+test("the join RAN — every row carries a floor, and none was dropped instead of throwing", () => {
+  // The module THROWS on an href in neither registry, so importing this file
+  // already executed the construction. This asserts the row COUNT survived it:
+  // a future refactor that used `.flatMap(... [])` instead of a throw would drop
+  // an unjoinable row silently, and a Go row that quietly disappears is exactly
+  // as wrong as one that quietly appears.
+  assert.equal(FIRM_ROUTES.length, 10);
+  for (const route of FIRM_ROUTES) {
+    assert.equal(typeof route.minimumRole, "string", `${route.id} has no floor`);
+  }
 });
