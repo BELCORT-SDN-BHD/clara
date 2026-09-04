@@ -47,7 +47,27 @@ export function CodingLanePanel({ clientId }: { clientId: string }) {
         ) : !uncoded.data && uncoded.err ? (
           <CodingActionRefusal err={uncoded.err} clr={uncoded.clr} />
         ) : (
-          <UncodedFilingsList entries={uncoded.data ?? []} busy={uncoded.busy} error={uncoded.err} clr={uncoded.clr} act={uncoded.act} />
+          <UncodedFilingsList
+            entries={uncoded.data ?? []}
+            busy={uncoded.busy}
+            error={uncoded.err}
+            clr={uncoded.clr}
+            // SIBLING FLAW P2 — the cross-cell staleness INSIDE this panel.
+            //
+            // `open_coding_task` on an uncoded filing is precisely the act that
+            // MINTS a row in the "Open coding tasks" cell rendered directly
+            // below. `uncoded.act` re-read its own cell and nothing else, so
+            // the human watched the filing leave the list above while the task
+            // it created never appeared — a state that reads as "nothing
+            // happened" and invites a second click on the same door.
+            //
+            // Composed through `act`'s own `onOk` channel rather than a
+            // `.then()` on the returned promise: `onOk` fires ONLY on the
+            // write's success path (hooks.ts:224-227), so a refusal does not
+            // trigger a pointless re-read, and the ordering stays "write, then
+            // both re-reads" instead of racing the hook's own reload.
+            act={(fn) => uncoded.act(fn, () => { void tasks.reload(); })}
+          />
         )}
       </section>
 

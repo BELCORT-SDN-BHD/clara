@@ -31,6 +31,10 @@ import { handleJournalsTableSupabase } from "./journals-table-mock.mjs";
 // deliberately NOT first: it answers nothing the journals lane needs, and #548's ordering
 // note above is the one claim in this import block that is load-bearing.
 import { handleL7Supabase } from "./bank-close-registers-mock.mjs";
+// The documents-viewer walk's own lane (C-07 / D2 / D3), the same file-disjoint shape.
+// Every branch inside is scoped to ITS OWN client/document/extraction ids and falls
+// through otherwise; it never claims the shared client register or the session list.
+import { handleDocumentsViewerRuntime, handleDocumentsViewerSupabase } from "./documents-viewer-mock.mjs";
 
 const e2eRoot = dirname(fileURLToPath(import.meta.url));
 const webRoot = resolve(e2eRoot, "..");
@@ -396,6 +400,20 @@ async function handleSupabase(request, response, url) {
   if (await handleJournalsTableSupabase(request, response, path, url, sendJson, cors)) return;
   if (await handleChatParitySupabase(request, response, path, url, sendJson, cors)) return;
   if (await handleP6_5Supabase(request, response, path, url, sendJson, cors)) return;
+  // THE DOCUMENTS LANE RUNS BEFORE L7's, and the reason is a measured hazard
+  // rather than a preference. `bank-close-registers-mock.mjs:204-246` parses the
+  // request body on EVERY `/rest/v1/rpc/` POST and then returns false for verbs
+  // that are not its own — and `readJson` consumes the stream, so every lane
+  // after it reads `{}` and its own id-scoped guards refuse its own walk's
+  // traffic. That is what turned this lane's confirm-and-file into "unhandled
+  // e2e Supabase route" the first time the two ran together.
+  //
+  // Ordering this lane first is safe in the other direction because it never
+  // does the same thing: it reads the body only INSIDE a matched verb (see its
+  // own note), and its four verbs are disjoint from L7's five. The underlying
+  // consume-then-fall-through in L7's module is reported separately — it still
+  // starves whatever lane is added after it.
+  if (await handleDocumentsViewerSupabase(request, response, path, url, sendJson, cors)) return;
   if (await handleL7Supabase(request, response, path, url, sendJson, cors)) return;
 
   if (request.method === "GET" && path === "/rest/v1/clients") {
@@ -613,6 +631,7 @@ await new Promise((resolveListen, rejectListen) => {
 const mockRuntime = startMockRuntime(mockRuntimePort, async (request, response, url) => {
   if (await handleChatParityRuntime(request, response, url)) return true;
   if (await handleP6_5Runtime(request, response, url)) return true;
+  if (await handleDocumentsViewerRuntime(request, response, url)) return true;
   if (await handleChat(request, response, url)) return true;
   return handleAuthWallMock({
     request, response, path: url.pathname, cors: {}, state,
