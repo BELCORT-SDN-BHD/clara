@@ -105,8 +105,10 @@
 // must independently read the same date off the page, and the band is a pure function of that
 // date. That is the control. The duplicate / overlap / continuity rungs (0038:1663-1679,
 // 1743-1754) can also expose a wrong year, but ONLY when a live neighbouring statement already
-// exists on the same account; continuity in particular keys on strict contiguity
-// (`period_end = period_start - 1`), so on an empty or gapped history none of the three fires.
+// exists on the same account; continuity in particular looks up a neighbour by strict contiguity
+// (a prior statement whose `period_end` IS this one's `period_start - 1`, and a next one whose
+// `period_start` IS this one's `period_end + 1`), so on an empty or gapped history it finds no
+// neighbour and none of the three fires.
 //
 // THE MISSING WALL, named as a DB-lane item rather than built here: `bank_statements` declares
 // `period_start` and `period_end` as bare `date not null` with NO plausibility bound at all
