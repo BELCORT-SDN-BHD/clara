@@ -42,9 +42,14 @@
 //           only authors the `tool-call` input). But it is UNVERSIONED and differs per
 //           verb (`{match_id, …}`, `{reconciliation_id, …}`, …), so this card renders
 //           only its STRING and BOOLEAN leaves, keyed by the DB's own field names, and
-//           renders NO numeral out of it at all. That is strictly stronger than rule 1:
-//           where the shape is unversioned, no number reaches the screen by
-//           construction, so no future payload can smuggle one past this card.
+//           renders NO FIGURE OUT OF IT IN ANY JSON TYPE — not a JSON number, and not a
+//           string that is really a numeral. The second exclusion is measured, not
+//           defensive: `settle_from_bank_line` returns `residue_cents` as TEXT beside a
+//           real-number `settlement_cents` in one object (0121:1628), so filtering by
+//           TYPE alone put a raw cents figure on this card. `lib/parts/bankPayload.ts`'s
+//           `NUMERIC_TEXT` is the wall. That is strictly stronger than rule 1: where the
+//           shape is unversioned, no figure reaches the screen by construction, so no
+//           future verb can smuggle one past this card.
 //
 // Nested objects and arrays are still never walked, in either — `[object Object]` is
 // still not a rendering.
@@ -53,7 +58,7 @@ import { Fragment } from "react";
 import { useTranslations } from "next-intl";
 
 import type { BankActPart, BankPackPart, EntryPostedPart, QuestionOpenedPart } from "../../lib/parts/types";
-import { bankPackBudget, ledgerTextFields } from "../../lib/parts/bankPayload";
+import { bankPackBudget, ledgerTextFields, unreadPackSchema } from "../../lib/parts/bankPayload";
 import { Badge } from "./PartBadge";
 import { PartSummaryCard } from "./PartSummaryCard";
 
@@ -160,6 +165,12 @@ export function BankActCard({ part }: { part: BankActPart }) {
 export function BankPackCard({ part }: { part: BankPackPart }) {
   const t = useTranslations("Clara.parts.bankPack");
   const budget = bankPackBudget(part.pack);
+  // An UNREAD pack is named rather than passed over in silence. `budget === null` has two
+  // causes and only one of them is worth a sentence: a payload that DECLARED a schema this
+  // card does not read is a version skew a human can act on ("the runtime moved ahead of
+  // this page"), while a payload with no declaration at all is just an older or malformed
+  // shape with nothing to say about it. The token is the DB's own and renders verbatim.
+  const declaredSchema = budget === null ? unreadPackSchema(part.pack) : null;
   return (
     <PartSummaryCard
       title={t("title")}
@@ -195,6 +206,9 @@ export function BankPackCard({ part }: { part: BankPackPart }) {
             <Badge tone="warning">{t("truncated")}</Badge>
           ) : null}
         </div>
+      ) : null}
+      {declaredSchema ? (
+        <p className="text-xs text-muted-foreground">{t("unreadSchema", { schema: declaredSchema })}</p>
       ) : null}
     </PartSummaryCard>
   );

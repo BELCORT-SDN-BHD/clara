@@ -26,7 +26,7 @@ import { NextIntlClientProvider } from "next-intl";
 
 import { ClaraRail } from "./ClaraRail";
 import { clickButton, renderComponent, textOf } from "../../test/hookHarness";
-import { enableDomInspection } from "../../test/domInspect";
+import { activeElement, enableDomInspection } from "../../test/domInspect";
 import messages from "../../messages/en.json";
 
 enableDomInspection();
@@ -41,6 +41,11 @@ const CALLER = "99999999-9999-4999-8999-999999999999";
 const COLLEAGUE = "88888888-8888-4888-8888-888888888888";
 
 const TOKEN = `x.${Buffer.from(JSON.stringify({ sub: CALLER })).toString("base64url")}.y`;
+
+/** The `created_at` the harness gives a CREATED row. Deliberately far from any day this
+ *  suite could run on: a cell that asks whether the menu shows the LEDGER's time or the
+ *  BROWSER's cannot tell them apart if the fixture happens to be dated today. */
+const MINTED_LEDGER_TIME = "2019-03-14T09:26:53Z";
 
 /** THE PER-ALTITUDE SELECTION IS MODULE-LEVEL AND OUTLIVES A CELL, so every cell gets
  *  its own altitude key rather than scrubbing a shared one — a choice one cell made
@@ -65,7 +70,18 @@ const transcript = (threadId: string, text: string) => ({
   messages: [{ id: `m-${threadId}`, role: "assistant", parts: [{ type: "text", text }], turn_key: null, task_id: null, seq: 1, created_at: "2026-09-02T00:00:00Z" }],
 });
 
-type Wire = { clientId: string; posts: number; sessions: Row[] };
+type Wire = {
+  clientId: string;
+  posts: number;
+  lists: number;
+  sessions: Row[];
+  /** Fold round: fail the CONFIRMING list read that follows a create, so the provisional
+   *  fallback is reachable. Counted from 1 — the first list read is the initial resolve. */
+  failListsAfter?: number;
+  /** Fold round: hold the FIRST list read open until this resolves, so a cell can act
+   *  while the rail is still resolving. */
+  gate?: Promise<void>;
+};
 
 function makeRouter(wire: Wire) {
   return async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
@@ -74,8 +90,13 @@ function makeRouter(wire: Wire) {
     if (url.endsWith("/api/runtime/chat/sessions")) {
       if (method === "POST") {
         wire.posts += 1;
-        wire.sessions = [row(wire.clientId, THREAD_MINTED, "2026-09-04T00:00:00Z"), ...wire.sessions];
+        wire.sessions = [row(wire.clientId, THREAD_MINTED, MINTED_LEDGER_TIME), ...wire.sessions];
         return json({ session_id: THREAD_MINTED }, 201);
+      }
+      wire.lists += 1;
+      if (wire.lists === 1 && wire.gate) await wire.gate;
+      if (wire.failListsAfter !== undefined && wire.lists > wire.failListsAfter) {
+        return json({ error: "unavailable" }, 503);
       }
       return json({ sessions: wire.sessions });
     }
@@ -140,9 +161,25 @@ function buttonNamed(h: { container: Stub }, name: string): Stub | undefined {
   );
 }
 
+/** OPEN THE THREAD MENU, IDEMPOTENTLY, and never by blind toggling.
+ *
+ *  The header control is a TOGGLE, so a bare click is only "open" when the panel happens
+ *  to be closed — and it does not always happen to be: a successful create closes the
+ *  panel itself, so a cell that clicks again to inspect the result can close what it
+ *  meant to open. Two fold cells failed on exactly that, one reporting a missing button
+ *  and one a missing list, neither of which was the defect it was hunting. Reading
+ *  `aria-expanded` first makes the helper say what it does. */
+async function openMenu(h: { container: Stub; act: (fn: () => void | Promise<void>) => Promise<void> }): Promise<void> {
+  const toggle = buttonNamed(h, "Conversations");
+  assert.ok(toggle, "the rail header must carry the thread menu toggle");
+  if (attr(toggle, "aria-expanded") === "true") return;
+  await h.act(() => clickButton(toggle));
+  assert.equal(attr(toggle, "aria-expanded"), "true", "the toggle must report the panel it just opened");
+}
+
 test("MOUNTING THE RAIL CREATES NOTHING — a chat session is an act now, not a side effect", async () => {
   const clientId = freshClient();
-  const wire: Wire = { clientId, posts: 0, sessions: [row(clientId, THREAD_NEW, "2026-09-03T00:00:00Z")] };
+  const wire: Wire = { clientId, posts: 0, lists: 0, sessions: [row(clientId, THREAD_NEW, "2026-09-03T00:00:00Z")] };
   await withFetch(wire, async () => {
     const h = await renderComponent(rail(clientId));
     try {
@@ -158,7 +195,7 @@ test("MOUNTING THE RAIL CREATES NOTHING — a chat session is an act now, not a 
 
 test("AN ALTITUDE WITH NO THREAD OFFERS ONE — it never sits on the resolving loader", async () => {
   const clientId = freshClient();
-  const wire: Wire = { clientId, posts: 0, sessions: [] };
+  const wire: Wire = { clientId, posts: 0, lists: 0, sessions: [] };
   await withFetch(wire, async () => {
     const h = await renderComponent(rail(clientId));
     try {
@@ -179,7 +216,7 @@ test("AN ALTITUDE WITH NO THREAD OFFERS ONE — it never sits on the resolving l
 
 test("NEW THREAD from the menu creates exactly one session and shows it", async () => {
   const clientId = freshClient();
-  const wire: Wire = { clientId, posts: 0, sessions: [row(clientId, THREAD_NEW, "2026-09-03T00:00:00Z")] };
+  const wire: Wire = { clientId, posts: 0, lists: 0, sessions: [row(clientId, THREAD_NEW, "2026-09-03T00:00:00Z")] };
   await withFetch(wire, async () => {
     const h = await renderComponent(rail(clientId));
     try {
@@ -212,6 +249,7 @@ test("SWITCHING selects an existing thread, creates nothing, and never offers a 
   const wire: Wire = {
     clientId,
     posts: 0,
+    lists: 0,
     sessions: [
       row(clientId, THREAD_NEW, "2026-09-03T00:00:00Z"),
       row(clientId, THREAD_OLD, "2026-09-01T00:00:00Z"),
@@ -225,7 +263,7 @@ test("SWITCHING selects an existing thread, creates nothing, and never offers a 
     const h = await renderComponent(rail(clientId));
     try {
       await settleUntil(h, () => /NEWEST OWN TRANSCRIPT/.test(h.text()), "the newest own thread");
-      await h.act(() => clickButton(buttonNamed(h, "Conversations")!));
+      await openMenu(h);
 
       const rows = findAll(h.container, (n) => n.tagName === "LI");
       assert.equal(rows.length, 2, "the switcher lists the caller's OWN threads only");
@@ -251,12 +289,12 @@ test("SWITCHING selects an existing thread, creates nothing, and never offers a 
 
 test("the menu names ARCHIVE as not built and offers no clear or delete at all", async () => {
   const clientId = freshClient();
-  const wire: Wire = { clientId, posts: 0, sessions: [row(clientId, THREAD_NEW, "2026-09-03T00:00:00Z")] };
+  const wire: Wire = { clientId, posts: 0, lists: 0, sessions: [row(clientId, THREAD_NEW, "2026-09-03T00:00:00Z")] };
   await withFetch(wire, async () => {
     const h = await renderComponent(rail(clientId));
     try {
       await settleUntil(h, () => /NEWEST OWN TRANSCRIPT/.test(h.text()), "the resolved thread");
-      await h.act(() => clickButton(buttonNamed(h, "Conversations")!));
+      await openMenu(h);
 
       // Archive is a real backend gap and says so, rather than shipping a control that
       // would refuse: the table has no `archived_at` and the only lawful mutation is
@@ -275,3 +313,175 @@ test("the menu names ARCHIVE as not built and offers no clear or delete at all",
     }
   });
 });
+
+// --- FOLD ROUND (review-547) --------------------------------------------------------
+
+test("FOLD 2 - a CREATE is confirmed by a read, so the row carries the LEDGER's own time, never this browser's", async () => {
+  // The first cut appended an optimistic row with `created_at: new Date().toISOString()`
+  // and the menu rendered it as "Started ..." - a timestamp the ledger never recorded,
+  // under a comment claiming nothing was inferred. The create now re-reads the list, so
+  // the row on screen is the DB's own.
+  const clientId = freshClient();
+  const wire: Wire = { clientId, posts: 0, lists: 0, sessions: [row(clientId, THREAD_NEW, "2026-09-03T00:00:00Z")] };
+  await withFetch(wire, async () => {
+    const h = await renderComponent(rail(clientId));
+    try {
+      await settleUntil(h, () => /NEWEST OWN TRANSCRIPT/.test(h.text()), "the resolved thread");
+      const listsBefore = wire.lists;
+      await openMenu(h);
+      await h.act(() => clickButton(buttonNamed(h, "New conversation")!));
+      await settleUntil(h, () => /MINTED TRANSCRIPT/.test(h.text()), "the minted thread");
+
+      // DISCRIMINATING: the create is followed by its own list read. Without it the row
+      // could only have come from this hook's own composition.
+      assert.ok(wire.lists > listsBefore, "a create must be confirmed by a read of the list");
+
+      // The harness's row for the minted thread carries `2026-09-04T00:00:00Z`, so the
+      // menu shows the LEDGER's date. This browser's own clock must not appear anywhere
+      // in the panel.
+      await openMenu(h);
+      const panel = h.text();
+      const ledgerDay = new Intl.DateTimeFormat("en-MY", { timeZone: "Asia/Kuala_Lumpur", dateStyle: "medium" }).format(new Date(MINTED_LEDGER_TIME));
+      assert.ok(panel.includes(`Started ${ledgerDay}`), `the row must be labelled from the LEDGER's created_at (${ledgerDay}); panel was: ${panel}`);
+      const today = new Intl.DateTimeFormat("en-MY", { timeZone: "Asia/Kuala_Lumpur", dateStyle: "medium" }).format(new Date());
+      assert.notEqual(today, ledgerDay, "the fixture's date must differ from today, or the next assertion proves nothing");
+      assert.equal(panel.includes(today), false, `the browser's own clock (${today}) must never label a conversation`);
+    } finally {
+      await h.unmount();
+    }
+  });
+});
+
+test("FOLD 2b - when the confirming read FAILS, the row is held PROVISIONALLY with no time at all", async () => {
+  // The session exists - the create returned an id - so dropping it would be worse than
+  // showing it. What must not happen is a fabricated time standing in for the DB's.
+  const clientId = freshClient();
+  const wire: Wire = {
+    clientId, posts: 0, lists: 0, failListsAfter: 1,
+    sessions: [row(clientId, THREAD_NEW, "2026-09-03T00:00:00Z")],
+  };
+  await withFetch(wire, async () => {
+    const h = await renderComponent(rail(clientId));
+    try {
+      await settleUntil(h, () => /NEWEST OWN TRANSCRIPT/.test(h.text()), "the resolved thread");
+      await openMenu(h);
+      await h.act(() => clickButton(buttonNamed(h, "New conversation")!));
+      await settleUntil(h, () => /MINTED TRANSCRIPT/.test(h.text()), "the minted thread is still selected");
+      assert.equal(wire.posts, 1);
+
+      await openMenu(h);
+      await settleUntil(h, () => findAll(h.container, (n) => n.tagName === "LI").length > 0, "the reopened switcher");
+      const rows = findAll(h.container, (n) => n.tagName === "LI");
+      assert.equal(rows.length, 2, "the created session is listed rather than lost");
+      // The provisional row is the newest, and it says what it is instead of a time.
+      assert.equal(textOf(rows[0]!).trim(), "New conversation");
+      assert.doesNotMatch(textOf(rows[0]!), /Started/, "there is no time to show, and none is invented");
+      // The CONFIRMED row beside it still carries the ledger's own - so the assertion
+      // above is about this row, not about the label being missing everywhere.
+      assert.match(textOf(rows[1]!), /Started/);
+    } finally {
+      await h.unmount();
+    }
+  });
+});
+
+test("FOLD 3 - New is REFUSED while the session read is in flight, and cannot mint an unlistable row", async () => {
+  // The first cut left New clickable during the initial read, and the create path then
+  // DROPPED the new row (no caller projection yet) while still writing the selection -
+  // minting an invisible, un-archivable session, the exact defect this train abolishes.
+  const clientId = freshClient();
+  let openGate = () => {};
+  const gate = new Promise<void>((resolve) => { openGate = resolve; });
+  const wire: Wire = { clientId, posts: 0, lists: 0, gate, sessions: [row(clientId, THREAD_NEW, "2026-09-03T00:00:00Z")] };
+  await withFetch(wire, async () => {
+    const h = await renderComponent(rail(clientId));
+    try {
+      // Still resolving: the list read is held open by the gate. The rail's own header
+      // commits regardless, so wait for the toggle rather than for a fixed number of ticks.
+      await settleUntil(h, () => buttonNamed(h, "Conversations") !== undefined, "the rail header");
+      await openMenu(h);
+      await settleUntil(h, () => buttonNamed(h, "New conversation") !== undefined, "the open menu");
+      const create = buttonNamed(h, "New conversation");
+      assert.ok(create, "the control is present - this cell is about the GATE, not the affordance");
+
+      // ASSERT THE GATE, THEN ACT. `clickButton` refuses a disabled node, so a green here
+      // could not be manufactured by clicking through it.
+      assert.equal((create as { disabled?: boolean }).disabled, true, "New must be refused while the list read is in flight");
+      assert.equal(wire.posts, 0);
+
+      // And it opens once the read lands.
+      openGate();
+      await settleUntil(h, () => /NEWEST OWN TRANSCRIPT/.test(h.text()), "the resolved thread");
+      await openMenu(h);
+      const afterResolve = buttonNamed(h, "New conversation");
+      assert.equal((afterResolve as { disabled?: boolean }).disabled, false, "and admitted once there is a list to land in");
+    } finally {
+      openGate();
+      await h.unmount();
+    }
+  });
+});
+
+test("FOLD 3b - the empty-state offer is unreachable while the read is still in flight", async () => {
+  // The offer lives in the resolve-state ladder's LAST arm, which the loading arm
+  // precedes - so it cannot render mid-read by construction. This pins that ordering
+  // rather than trusting it, since a later edit could reorder the arms.
+  const clientId = freshClient();
+  let openGate = () => {};
+  const gate = new Promise<void>((resolve) => { openGate = resolve; });
+  const wire: Wire = { clientId, posts: 0, lists: 0, gate, sessions: [] };
+  await withFetch(wire, async () => {
+    const h = await renderComponent(rail(clientId));
+    try {
+      await h.settle();
+      assert.match(h.text(), /Finding your conversation with Clara/, "the loading arm owns this state");
+      assert.doesNotMatch(h.text(), /No conversation here yet/, "the offer must not race the read that decides whether it applies");
+
+      openGate();
+      await settleUntil(h, () => /No conversation here yet/.test(h.text()), "the offer, after the read");
+      assert.doesNotMatch(h.text(), /Finding your conversation with Clara/);
+    } finally {
+      openGate();
+      await h.unmount();
+    }
+  });
+});
+
+test("FOLD 5 - Escape closes the thread menu and returns focus to the toggle", async () => {
+  const clientId = freshClient();
+  const wire: Wire = { clientId, posts: 0, lists: 0, sessions: [row(clientId, THREAD_NEW, "2026-09-03T00:00:00Z")] };
+  await withFetch(wire, async () => {
+    const h = await renderComponent(rail(clientId));
+    try {
+      await settleUntil(h, () => /NEWEST OWN TRANSCRIPT/.test(h.text()), "the resolved thread");
+      const toggle = buttonNamed(h, "Conversations")!;
+      await h.act(() => clickButton(toggle));
+      assert.equal(attr(toggle, "aria-expanded"), "true");
+      assert.ok(buttonNamed(h, "New conversation"), "the panel is open");
+
+      // The listener is on the PANEL's own node (the component attaches it there rather
+      // than on the document, so it cannot swallow an Escape meant for a dialog opened
+      // over it). This harness's stub nodes carry `__listeners` rather than a real
+      // `dispatchEvent`, so the captured listener is invoked directly - the same
+      // mechanism `clickButton` uses to reach a committed `onClick`. The panel is found
+      // by the control it holds, not by a class name a restyle would move.
+      const panel = findAll(h.container, (n) =>
+        n.tagName === "DIV"
+        && findAll(n, (c) => c.tagName === "BUTTON" && textOf(c).trim() === "New conversation").length === 1)
+        .slice(-1)[0];
+      assert.ok(panel, "the disclosure panel must be findable to drive its own listener");
+      const keydown = (panel.__listeners as Record<string, ((e: unknown) => void)[]> | undefined)?.keydown ?? [];
+      assert.equal(keydown.length, 1, "the panel must carry exactly one keydown listener - its own");
+      await h.act(() => { keydown[0]!({ type: "keydown", key: "Escape", stopPropagation() {} }); });
+
+      assert.equal(buttonNamed(h, "New conversation"), undefined, "Escape closes the panel");
+      assert.equal(attr(toggle, "aria-expanded"), "false");
+      // Focus returns to the control that opened it - a disclosure that drops a keyboard
+      // user at the top of the document is the defect this closes.
+      assert.equal(activeElement(), toggle, "focus returns to the toggle, not to the document");
+    } finally {
+      await h.unmount();
+    }
+  });
+});
+

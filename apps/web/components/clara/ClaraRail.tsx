@@ -11,7 +11,7 @@
 // needed (P2 fold round 3). `auth` defaults to the blessed `sessionTokenAccessor`
 // singleton (`@/lib/session-accessor`); a caller (tests included) may still override it.
 
-import { useId, useState } from "react";
+import { useCallback, useId, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
@@ -32,6 +32,14 @@ export function ClaraRail({ auth = sessionTokenAccessor, clientId }: { auth?: Se
   const { threadId, error, resolving, threads, createThread, creating, selectThread } = useActiveThreadId(auth, clientId);
   const [menuOpen, setMenuOpen] = useState(false);
   const menuId = useId();
+  // FOCUS RETURNS TO THE CONTROL THAT OPENED THE PANEL. The ref lives here, not in the
+  // menu, because the toggle is this component's element — the panel closing unmounts
+  // itself and cannot hand focus anywhere from inside its own teardown.
+  const menuToggleRef = useRef<HTMLButtonElement>(null);
+  const closeMenu = useCallback(() => {
+    setMenuOpen(false);
+    menuToggleRef.current?.focus();
+  }, []);
   useFocusRailSubscription(); // P2 FOLD SEAM C: ⌘K "Ask" -> this rail's composer
 
   const escalateBase = clientId ? `/clients/${clientId}/clara/${threadId}` : `/clara/${threadId}`;
@@ -76,13 +84,14 @@ export function ClaraRail({ auth = sessionTokenAccessor, clientId }: { auth?: Se
               `data-clara-rail` where the a11y scan and the keyboard walk already
               reach it. `aria-expanded`/`aria-controls` carry the state. */}
           <Button
+            ref={menuToggleRef}
             type="button"
             variant="ghost"
             size="icon-sm"
             aria-label={t("threads")}
             aria-expanded={menuOpen}
             aria-controls={menuId}
-            onClick={() => setMenuOpen((v) => !v)}
+            onClick={() => (menuOpen ? closeMenu() : setMenuOpen(true))}
           >
             {t("threadsShort")}
           </Button>
@@ -111,17 +120,19 @@ export function ClaraRail({ auth = sessionTokenAccessor, clientId }: { auth?: Se
           threads={threads}
           activeThreadId={threadId}
           creating={creating}
+          resolving={resolving}
           onCreate={async () => {
             const created = await createThread();
             // The panel closes only on a thread this altitude actually got. A failed
             // create leaves it open with the rail's own error banner below it, rather
             // than dismissing the control that produced the failure.
-            if (created) setMenuOpen(false);
+            if (created) closeMenu();
           }}
           onSelect={(id) => {
             selectThread(id);
-            setMenuOpen(false);
+            closeMenu();
           }}
+          onDismiss={closeMenu}
         />
       ) : null}
       <div className="min-h-0 flex-1">

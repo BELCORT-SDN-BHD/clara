@@ -134,3 +134,96 @@ test("N5 · every lane handler either scopes by the request's own subject, or is
   assert.equal(unscoped.length, UNSCOPEABLE.size, "and it still sees the two that genuinely cannot scope");
   assert.equal(scoped.filter((p) => UNSCOPEABLE.has(p)).length, 0, "no handler is counted both ways");
 });
+
+// --- N6 -----------------------------------------------------------------------------
+//
+// THE SAME RULE, OVER THE SHARED SERVER ITSELF. N4 and N5 read the P6-5 lane's fixtures
+// and its mock; neither reaches `serve-built.mjs`, which owns the ONE session list every
+// walk's rail resolves against. 裁-117 gave that file a CREATE handler, and with it the
+// ability to grow the list at runtime — so the ownership rule now has a second place it
+// can be broken, and it gets its own cell rather than a paragraph, exactly as N4 and N5
+// did.
+//
+// TWO HALVES, because either alone is satisfiable by doing nothing:
+//   (a) no STATIC row in that file claims the firm altitude for the shared subject;
+//   (b) the create handler REFUSES the no-clientId case — the only shape that could add
+//       such a row at runtime.
+//
+// (b) is a deliberate divergence from the real ingress, which DOES accept a firm-altitude
+// create (`packages/runtime/src/chatRoutes.ts` inserts `body.clientId ?? null`). That is
+// the point of pinning it: a reader who finds the mock stricter than the server should
+// find the reason next to the assertion, not have to reconstruct it.
+
+/** The session rows `serve-built.mjs` declares statically, parsed out of its own source
+ *  rather than imported — the module starts an HTTPS server and a `next start` child on
+ *  import, which a unit cell must not do. Each row is read as a field map, so a row that
+ *  grows a field this cell does not know about is still censused. */
+function serveBuiltSessions(): { clientId: string | null; createdBy: string | null }[] {
+  const source = readFileSync(SERVE_BUILT, "utf8");
+  const start = source.indexOf("const sessions = [");
+  assert.ok(start >= 0, "serve-built.mjs must still declare the shared `sessions` array this cell censuses");
+  const end = source.indexOf("\n];", start);
+  assert.ok(end > start, "the `sessions` array must be terminated — the census cannot read a truncated literal");
+  const block = source.slice(start, end);
+
+  const rows: { clientId: string | null; createdBy: string | null }[] = [];
+  for (const line of block.split("\n")) {
+    if (!line.includes("client_id:")) continue;
+    const clientMatch = /client_id:\s*([A-Za-z0-9_]+|null)/.exec(line);
+    const createdMatch = /created_by:\s*("[0-9a-f-]+"|[A-Za-z0-9_]+)/.exec(line);
+    if (!clientMatch || !createdMatch) continue;
+    rows.push({
+      clientId: clientMatch[1] === "null" ? null : clientMatch[1]!,
+      // A literal id is compared as itself; a CONSTANT is compared by name, and `SUBJECT`
+      // is the one name that matters — the shared subject every walk signs in as.
+      createdBy: createdMatch[1]!.replace(/"/g, ""),
+    });
+  }
+  assert.ok(rows.length >= 3, `the census parsed ${rows.length} static rows — it is not reading the array`);
+  return rows;
+}
+
+test("N6 · serve-built's shared session list claims no firm altitude, and its CREATE cannot mint one", () => {
+  const subject = sharedSubject();
+  const rows = serveBuiltSessions();
+  for (const row of rows) {
+    console.log(`  client_id=${row.clientId ?? "null"} created_by=${row.createdBy}`);
+  }
+
+  // (a) THE STATIC HALF. `SUBJECT` appears as a bare identifier in that file, so a row
+  // written as `created_by: SUBJECT` matches by name and one written with the literal
+  // matches by value — both are the shared subject and both are forbidden at the firm
+  // altitude.
+  const claimsFirm = rows.filter((r) => r.clientId === null && (r.createdBy === "SUBJECT" || r.createdBy === subject));
+  assert.deepEqual(claimsFirm, [], "a firm-altitude row with the shared subject is resolved by EVERY walk's rail");
+
+  // The counter-half, so deleting every row would not satisfy the assertion above.
+  const ownClientRows = rows.filter((r) => r.clientId !== null && r.createdBy === "SUBJECT");
+  assert.ok(ownClientRows.length >= 2, "the shared list must still carry the caller's own CLIENT threads");
+
+  // (b) THE RUNTIME HALF. The handler exists, and it refuses exactly the shape that would
+  // add a firm-altitude row — asserted against the guard's own source, not against a
+  // comment claiming it.
+  const source = readFileSync(SERVE_BUILT, "utf8");
+  const createAt = source.indexOf('request.method === "POST" && url.pathname === "/api/chat/sessions"');
+  assert.ok(createAt >= 0, "serve-built.mjs must still own the CREATE beside the ONE session list");
+  const handler = source.slice(createAt, createAt + 900);
+  assert.match(handler, /if\s*\(!body\.clientId\)/, "the create must refuse a session with no client pin");
+  assert.match(handler, /sendJson\(response,\s*400/, "and refuse it as a 400, not by silently minting something else");
+  // The refusal must be the FIRST thing that happens to a clientId-less body: a guard
+  // that ran after the row was pushed would fence nothing.
+  const refusalAt = handler.indexOf("if (!body.clientId)");
+  const pushAt = handler.indexOf("sessions.unshift(");
+  assert.ok(pushAt > refusalAt, "the guard must precede the push, or it fences nothing");
+
+  // POSITIVE CONTROL ON THE INSTRUMENT. A cell that only ever looks for absence proves
+  // nothing unless it can also SEE a violation — so the same census is run over a source
+  // with one firm-altitude row spliced in, and must report it.
+  const violating = rows.concat([{ clientId: null, createdBy: "SUBJECT" }]);
+  assert.equal(
+    violating.filter((r) => r.clientId === null && (r.createdBy === "SUBJECT" || r.createdBy === subject)).length,
+    1,
+    "the census must be able to SEE a firm-altitude claim, or its empty result means nothing",
+  );
+});
+

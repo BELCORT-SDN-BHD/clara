@@ -30,12 +30,13 @@
 // not a firm browser. A colleague's firm-shared thread is excluded by
 // `ownSessionsForAltitude`, not by this component — see that function's own note.
 
+import { useEffect, useRef } from "react";
 import { useTranslations } from "next-intl";
 
 import { Button } from "@/components/ui/button";
 import { NotBuiltNote } from "@/components/common/not-built-note";
 import { businessDateTime } from "@/lib/business-date";
-import type { SessionRow } from "@/lib/clara/api";
+import type { ThreadRow } from "@/lib/clara/useActiveThread";
 import { cn } from "@/lib/utils";
 
 export function ClaraThreadMenu({
@@ -43,20 +44,47 @@ export function ClaraThreadMenu({
   threads,
   activeThreadId,
   creating,
+  resolving,
   onCreate,
   onSelect,
+  onDismiss,
 }: {
   id: string;
-  threads: readonly SessionRow[];
+  threads: readonly ThreadRow[];
   activeThreadId: string | null;
   creating: boolean;
+  /** TRUE while the session read is in flight. New is refused for the duration: a create
+   *  that races the first read has no list to land in, and the row it mints can never be
+   *  archived or deleted if it goes astray. */
+  resolving: boolean;
   onCreate: () => void | Promise<void>;
   onSelect: (threadId: string) => void;
+  /** Escape, and the panel's own request to close. The caller returns focus to the
+   *  toggle — see `ClaraRail`'s handler for why the ref lives there. */
+  onDismiss: () => void;
 }) {
   const t = useTranslations("Clara.rail.menu");
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  // ESCAPE CLOSES IT. A disclosure that traps a keyboard user with no way back is the
+  // defect; the listener is on the panel rather than the document so it cannot swallow
+  // an Escape meant for a dialog opened over it.
+  useEffect(() => {
+    const node = panelRef.current;
+    if (!node) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.stopPropagation();
+      onDismiss();
+    };
+    node.addEventListener("keydown", onKeyDown);
+    return () => node.removeEventListener("keydown", onKeyDown);
+  }, [onDismiss]);
+
+  const createDisabled = creating || resolving;
   return (
-    <div id={id} className="enter-content flex flex-col gap-2 border-b border-border bg-card p-2">
-      <Button type="button" size="xs" variant="outline" className="w-full" disabled={creating} onClick={() => void onCreate()}>
+    <div ref={panelRef} id={id} className="enter-content flex flex-col gap-2 border-b border-border bg-card p-2">
+      <Button type="button" size="xs" variant="outline" className="w-full" disabled={createDisabled} onClick={() => void onCreate()}>
         {creating ? t("creating") : t("newThread")}
       </Button>
 
@@ -84,8 +112,14 @@ export function ClaraThreadMenu({
                           the runtime never writes one (chatRoutes.ts:145 inserts
                           `body.title ?? null` and nothing sends a title), so the
                           fallback is the row's own `created_at` — a fact, not a
-                          label this UI invented for the conversation. */}
-                      {thread.title ?? t("untitled", { started: businessDateTime(thread.created_at) })}
+                          label this UI invented for the conversation.
+                          A NULL `created_at` is a row the hook is holding because the
+                          read that would confirm it did not come back (`ThreadRow`'s own
+                          note). There is no time to show and none is invented; the row
+                          says what it is until the next read replaces it. */}
+                      {thread.title ?? (thread.created_at === null
+                        ? t("untitledNew")
+                        : t("untitled", { started: businessDateTime(thread.created_at) }))}
                     </span>
                   </Button>
                 </li>

@@ -343,3 +343,65 @@ test("bank_pack singularises from the DB's own count rather than printing a bare
     await h.unmount();
   }
 });
+
+test("bank_act renders the LIVE settle return without its cents figure — the numeral arrived as TEXT", async () => {
+  // The exact object `clara._settle_from_bank_line_core` returns
+  // (0121_f_a3_pr1b_agent_limb.sql:1628 builds `'residue_cents', v_res->>'residue_cents'`,
+  // and `->>` is TEXT), carried verbatim to `bank_act.result`. Filtering by JSON TYPE
+  // alone put "1250" on this card as if the ledger had asked the human to read it.
+  const h = await renderComponent(App({
+    ...ACT,
+    verb: "settle_from_bank_line",
+    result: {
+      match_id: "m-1",
+      status: "live",
+      group_id: "3f2504e0-4f89-41d3-9a0c-0305e82c3301",
+      residue_cents: "1250",
+    },
+  }));
+  try {
+    await h.settle();
+    const text = h.text();
+    assert.doesNotMatch(text, /1250/, "a cents figure that arrived as a string must not reach the card");
+    assert.doesNotMatch(text, /residue_cents/, "and neither must its label, which would imply a hidden amount");
+    // The rest of the receipt still renders — this is a refusal to print FIGURES, not the
+    // payload. The uuid is the discriminating one: it is full of digits and must survive.
+    assert.match(text, /m-1/);
+    assert.match(text, /live/);
+    assert.match(text, /3f2504e0-4f89-41d3-9a0c-0305e82c3301/);
+    assert.match(text, /group_id/);
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("bank_pack NAMES a schema it cannot read, and says nothing about a payload that declares none", async () => {
+  const skewed = await renderComponent(App({
+    ...PACK,
+    pack: { schema: "clara.bank-pack/v2", budget: { lines: 12, candidates: 4 } },
+  }));
+  try {
+    await skewed.settle();
+    const text = skewed.text();
+    // The token is the DB's own and renders verbatim — a human reading "came back as
+    // clara.bank-pack/v2" learns the runtime moved ahead of this page.
+    assert.match(text, /clara\.bank-pack\/v2/);
+    assert.match(text, /cannot read/);
+    // And still no count out of the unread shape.
+    assert.doesNotMatch(text, /12 unmatched/);
+  } finally {
+    await skewed.unmount();
+  }
+
+  // A payload that declares NOTHING has nothing to report, and inventing a sentence for
+  // it would be noise on a card that is otherwise correct.
+  const undeclared = await renderComponent(App(PACK));
+  try {
+    await undeclared.settle();
+    assert.doesNotMatch(undeclared.text(), /cannot read/);
+    assert.match(undeclared.text(), /sha256:9f2c11ab77/, "the identifiers still render");
+  } finally {
+    await undeclared.unmount();
+  }
+});
+

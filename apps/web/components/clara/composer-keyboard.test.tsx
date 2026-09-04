@@ -140,7 +140,13 @@ test("ENTER on a non-empty draft posts the turn exactly once AND suppresses the 
   });
 });
 
-test("SHIFT+ENTER inserts a newline and posts nothing", async () => {
+test("SHIFT+ENTER posts nothing and does NOT call preventDefault — the newline is left to the browser", async () => {
+  // NAMED FOR WHAT IT PROVES. There is no layout engine in this harness and no real
+  // textarea behind the stub, so nothing here can observe a newline actually being
+  // typed; what this cell measures is that the handler DECLINES to intercept the key,
+  // which is the whole of its contribution to the newline. The browser leg
+  // (`../../e2e/chat-parity-walk.spec.ts`) is where the newline itself is read back out
+  // of the composer's value.
   claraThreadStore.reset(THREAD);
   const wire: Wire = { turns: 0 };
   await withFetch(wire, async () => {

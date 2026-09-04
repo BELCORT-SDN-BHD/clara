@@ -104,7 +104,16 @@ const clients = [
 ];
 
 /** Sessions minted at RUNTIME by the create handler below, and the marker transcript each
- *  one serves. Kept beside the list they are appended to. */
+ *  one serves. Kept beside the list they are appended to.
+ *
+ *  THEY PERSIST FOR THE SERVER'S LIFETIME, deliberately, and the 裁-117 walk depends on
+ *  it: it creates two threads and switches between them, so the first must still be
+ *  listed after the second is minted. Nothing resets between specs, which is safe only
+ *  because `playwright.config.ts` pins `workers: 1`, `retries: 0` and
+ *  `reuseExistingServer: false` — one server, one pass, one process. The walk reads its
+ *  markers off the screen rather than hard-coding an ordinal for the same reason: another
+ *  spec creating first would shift the count, and only the config keeps that from
+ *  happening today. */
 let createdSessions = 0;
 const createdTranscripts = new Map();
 
@@ -433,17 +442,23 @@ async function handleChat(request, response, url) {
   // row is minted the way `packages/runtime/src/chatRoutes.ts:137-157` mints it: always
   // `private`, `client_id` from the body, `created_by` from the caller.
   //
-  // THE CLIENT PIN IS THE OWNERSHIP WALL, and it is the reason this is safe to add to a
-  // shared list. `e2e-fixture-ownership.test.ts`'s N4 forbids a FIRM-ALTITUDE row
-  // carrying the shared SUBJECT, because `selectOwnSession` resolves on
-  // `(created_by, client_id)` and every walk's firm rail would then land on it. A row
-  // created here carries the requesting walk's OWN client id, so no other altitude can
-  // resolve it — the same property that lets three lanes' client rows already share
-  // this array. A create with NO clientId is refused for exactly that reason.
+  // A PINNED SERVER/MOCK DIVERGENCE, AND IT IS DELIBERATE. The real ingress accepts a
+  // firm-altitude create — `chatRoutes.ts:145` inserts `body.clientId ?? null` and the
+  // product's own rail offers exactly that at the firm altitude. This mock REFUSES it,
+  // because there is one session list for the whole suite and `selectOwnSession` resolves
+  // on `(created_by, client_id)`: a row with `client_id: null` under the shared SUBJECT is
+  // resolved by EVERY walk's firm rail, which is the third instance of the ownership rule
+  // `e2e-fixture-ownership.test.ts` was written for.
+  //
+  // The divergence is FENCED MECHANICALLY by that file's N6 cell, which reads this file
+  // and asserts both halves — that no static row here claims the firm altitude for the
+  // shared subject, and that this handler refuses exactly the no-clientId case. N4 is a
+  // different cell over a different subject (`P6_5_SESSIONS`) and does not reach this
+  // file; citing it here was the reasoning, not the fence.
   if (request.method === "POST" && url.pathname === "/api/chat/sessions") {
     const body = await readJson(request);
     if (!body.clientId) {
-      sendJson(response, 400, { error: "e2e: a firm-altitude session would be resolved by EVERY walk's rail — see e2e-fixture-ownership.test.ts N4" });
+      sendJson(response, 400, { error: "e2e: a firm-altitude session would be resolved by EVERY walk's rail — a deliberate mock/server divergence, fenced by e2e-fixture-ownership.test.ts N6" });
       return true;
     }
     createdSessions += 1;

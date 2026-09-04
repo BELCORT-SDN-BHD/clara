@@ -155,6 +155,11 @@ async function signIn(page: Page): Promise<void> {
 }
 
 const E2E_THREAD = "eeeeeeee-1111-4111-8111-eeeeeeeeeeee";
+/** The subject this walk signs in as, declared by the shared harness
+ *  (`serve-built.mjs`'s own `SUBJECT`). `selectOwnSession` resolves on
+ *  `(created_by, client_id)`, so a created row has to carry it or the rail will not
+ *  see the session it just minted. */
+const PERSONA_SUBJECT = "11111111-1111-1111-1111-111111111111";
 
 /**
  * The rail's whole chat surface, stubbed at the network edge.
@@ -182,11 +187,28 @@ const E2E_THREAD = "eeeeeeee-1111-4111-8111-eeeeeeeeeeee";
  * test — the only way to hold the rail in its loading state on purpose.
  */
 async function stubChat(page: Page, transcript: unknown[] | "never"): Promise<void> {
-  await page.route("**/api/runtime/chat/sessions", (route) =>
-    route.request().method() === "POST"
-      ? route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ session_id: E2E_THREAD }) })
-      : route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ sessions: [] }) }),
-  );
+  // THE LIST REFLECTS THE CREATE, because the real ingress does and the client now reads
+  // it back. `POST /api/chat/sessions` inserts a row and `GET` returns it
+  // (packages/runtime/src/chatRoutes.ts), and since the fold round `createThread` CONFIRMS
+  // a create by re-reading that list rather than composing an optimistic row of its own —
+  // so a stub that answered `[]` forever no longer models the server at all: the rail
+  // would create a session and then correctly report that it cannot see one. The stub
+  // keeps the row it minted, which is one line of state and one less lie.
+  const created: unknown[] = [];
+  await page.route("**/api/runtime/chat/sessions", (route) => {
+    if (route.request().method() === "POST") {
+      created.push({
+        id: E2E_THREAD,
+        title: null,
+        client_id: null,
+        visibility: "private",
+        created_by: PERSONA_SUBJECT,
+        created_at: "2019-03-14T09:26:53.000Z",
+      });
+      return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ session_id: E2E_THREAD }) });
+    }
+    return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ sessions: created }) });
+  });
   // Registered second, so it wins for the `/messages` sub-path (Playwright
   // matches routes in reverse registration order).
   await page.route("**/api/runtime/chat/sessions/*/messages", (route) => {

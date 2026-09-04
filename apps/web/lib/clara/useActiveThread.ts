@@ -41,11 +41,11 @@ const FIRM_ALTITUDE = "firm";
  *  colleague's shared thread is readable, but making it this rail's ACTIVE thread
  *  would put the human's next turn into someone else's conversation. 裁-117 rules
  *  a small own-threads list for beta; a firm-threads browser is its own design. */
-export function ownSessionsForAltitude(
-  sessions: readonly SessionRow[],
+export function ownSessionsForAltitude<T extends { created_by: string; client_id: string | null }>(
+  sessions: readonly T[],
   callerSubject: string,
   clientId?: string,
-): SessionRow[] {
+): T[] {
   return sessions.filter((session) =>
     session.created_by === callerSubject &&
     (clientId ? session.client_id === clientId : session.client_id === null),
@@ -74,16 +74,33 @@ export function selectOwnSession(
  *  the freshly-read own-list is the evidence; absence falls back to the newest, which
  *  is exactly the pre-menu behaviour. */
 export function resolveOwnThread(
-  ownSessions: readonly SessionRow[],
+  ownSessions: readonly { id: string }[],
   selectedId: string | null,
 ): string | null {
   if (selectedId && ownSessions.some((s) => s.id === selectedId)) return selectedId;
   return ownSessions[0]?.id ?? null;
 }
 
+/** A session row as this hook hands it on.
+ *
+ *  `created_at` IS NULLABLE HERE AND NOT ON THE WIRE, and that difference is the whole
+ *  point. `SessionRow.created_at` is `timestamptz not null` — every row the DB returns
+ *  has one. A row this hook is holding because a create SUCCEEDED but the confirming
+ *  read did not come back has no such value, and there is nothing honest to put in its
+ *  place: `Date.now()` is this browser's clock, not the ledger's, and the menu renders
+ *  it to the human as "Started …". So the field is null and the menu says "New
+ *  conversation" instead. This hook never invents a time. */
+export type ThreadRow = Omit<SessionRow, "created_at"> & {
+  created_at: string | null;
+  /** Set only on the row above. It carries the REASON (this row has not been confirmed
+   *  by a read) while `created_at === null` carries the FACT the menu renders from — the
+   *  label keys on the fact alone, so the two can never disagree on screen. */
+  provisional?: true;
+};
+
 type ResolvedThread = {
   altitude: string;
-  sessions: SessionRow[];
+  sessions: ThreadRow[];
   callerSubject: string | null;
   resolving: boolean;
   error: string | null;
@@ -98,7 +115,7 @@ export type ActiveThread = {
    *  spinner. */
   resolving: boolean;
   /** The caller's own threads at this altitude, newest first — the switcher's list. */
-  threads: readonly SessionRow[];
+  threads: readonly ThreadRow[];
   /** The explicit act that mints a thread. Resolves to the new id, or null when the
    *  create failed (the error is surfaced through `error`). */
   createThread: () => Promise<string | null>;
@@ -200,29 +217,69 @@ export function useActiveThreadId(auth: SessionTokenAccessor, clientId?: string)
     [altitude, threads],
   );
 
+  // THE CREATE IS CONFIRMED BY A READ, not by a row this hook composed. Two defects the
+  // first cut of this function carried, both found in review, both closed here:
+  //
+  //   (1) IT FABRICATED A TIMESTAMP. The optimistic row carried
+  //       `created_at: new Date().toISOString()` — this browser's clock — and the menu
+  //       renders that field to the human as "Started …". A time the ledger never
+  //       recorded, presented as the conversation's own. Re-reading the list is what
+  //       supplies the DB's own `created_at`; when the re-read does not come back, the
+  //       fallback row carries `created_at: null` and the menu says so instead.
+  //
+  //   (2) IT COULD SELECT A THREAD IT HAD JUST DROPPED. The optimistic append bailed out
+  //       when `prev.callerSubject` was null (a create racing the first list read), but
+  //       the `selectThreadForAltitude` call below it ran anyway — so the selection
+  //       pointed at a row that was not in the list, `resolveOwnThread` fell back to the
+  //       previous thread, and the session that had just been minted was invisible AND
+  //       un-archivable. Exactly the defect this train exists to abolish. The re-read
+  //       carries its own `callerSubject`, so that state is unreachable on this path; the
+  //       fallback below still refuses to select what it cannot list.
   const createThread = useCallback(async () => {
     setCreating(true);
     try {
       const id = await createSession(auth, clientId ? { clientId } : {});
-      // The new row is appended to THIS altitude's list and selected in one commit, so
-      // the switcher can offer it immediately without waiting for a second list read —
-      // and `resolveOwnThread`'s membership check (which the selection must pass) sees
-      // it. The row's own fields come from the create call's inputs plus the id the
-      // runtime returned; nothing about it is inferred.
-      setResolved((prev) => {
-        if (prev.altitude !== altitude || prev.callerSubject === null) return prev;
-        const row: SessionRow = {
-          id,
-          title: null,
-          client_id: clientId ?? null,
-          visibility: "private",
-          created_by: prev.callerSubject,
-          created_at: new Date().toISOString(),
-        };
-        return { ...prev, sessions: [row, ...prev.sessions], error: null };
-      });
-      claraThreadStore.selectThreadForAltitude(altitude, id);
-      return id;
+      try {
+        // The authoritative shape: the runtime's own row, with the runtime's own
+        // `created_at` and the caller projection bound to the same token that read it.
+        const { sessions, callerSubject } = await listSessionsForCaller(auth);
+        setResolved((prev) => (prev.altitude === altitude
+          ? { ...prev, sessions, callerSubject, error: null }
+          : prev));
+        claraThreadStore.selectThreadForAltitude(altitude, id);
+        return id;
+      } catch (readErr) {
+        // THE SESSION EXISTS — the create returned an id — so losing it here would be
+        // worse than showing it provisionally. It goes on the list with NO time and a
+        // `provisional` marker, and the next successful read replaces it wholesale.
+        let listed = false;
+        setResolved((prev) => {
+          if (prev.altitude !== altitude || prev.callerSubject === null) return prev;
+          listed = true;
+          const row: ThreadRow = {
+            id,
+            title: null,
+            client_id: clientId ?? null,
+            visibility: "private",
+            created_by: prev.callerSubject,
+            created_at: null,
+            provisional: true,
+          };
+          return { ...prev, sessions: [row, ...prev.sessions], error: null };
+        });
+        // SELECT ONLY WHAT IS LISTED. `resolveOwnThread` honours a selection only for an
+        // id in this altitude's own list, so selecting an unlisted row is not merely
+        // useless — it is the silent-orphan state above. With no caller projection to
+        // list it under, the honest outcome is the read's own error.
+        if (listed) {
+          claraThreadStore.selectThreadForAltitude(altitude, id);
+          return id;
+        }
+        setResolved((prev) => (prev.altitude === altitude
+          ? { ...prev, error: (readErr as Error).message }
+          : prev));
+        return null;
+      }
     } catch (err) {
       setResolved((prev) => (prev.altitude === altitude ? { ...prev, error: (err as Error).message } : prev));
       return null;

@@ -3,13 +3,26 @@
 // ../../components/clara/thread-menu.test.tsx; these are the decisions underneath it.
 
 import assert from "node:assert/strict";
-import { describe, it } from "node:test";
+import { describe, it, test } from "node:test";
 
 import type { SessionRow } from "./api";
 import { claraThreadStore } from "./threadStore";
-import { ownSessionsForAltitude, resolveOwnThread, selectOwnSession } from "./useActiveThread";
+import { ownSessionsForAltitude, resolveOwnThread, selectOwnSession, useActiveThreadId } from "./useActiveThread";
+import { renderHook } from "../../test/hookHarness";
 
 const ME = "11111111-1111-1111-1111-111111111111";
+
+const ORPHAN_ID = "0f0f0f0f-1111-4111-8111-111111111111";
+
+/** Settle the hook until `condition` holds, or fail by name rather than by timeout. */
+async function settleHook(h: { settle: () => Promise<void> }, condition: () => boolean): Promise<void> {
+  const deadline = Date.now() + 8_000;
+  while (!condition()) {
+    if (Date.now() >= deadline) throw new Error("timed out waiting for the hook to settle");
+    await h.settle();
+  }
+}
+
 const COLLEAGUE = "22222222-2222-2222-2222-222222222222";
 
 function session(overrides: Partial<SessionRow>): SessionRow {
@@ -112,4 +125,74 @@ describe("claraThreadStore selection", () => {
       unsubscribe();
     }
   });
+});
+
+// --- FOLD ROUND (review-547): the silent-orphan arm, driven at the hook ---------------
+//
+// `createThread`'s fallback refuses to SELECT a row it could not LIST. The fold-round
+// mutant panel found that arm uncovered: with the confirming read in place there is no
+// journey through the rail that reaches it, because the only state with a null caller
+// projection is the one New is now gated against. So it is driven here, at the hook,
+// where the state can be produced on purpose.
+//
+// WHY THE ARM EXISTS AT ALL. `resolveOwnThread` honours a selection only for an id in
+// this altitude's own list. Writing a selection for a row that is not in the list is not
+// merely useless — the rail falls back to the previous thread and the session that was
+// just minted becomes invisible AND un-archivable (`_tf_chat_session_update` raises
+// CLR08 on a DELETE), which is precisely the defect 裁-117 abolished.
+
+test("a create whose caller projection is unreadable does NOT select the row it could not list", async () => {
+  const CLIENT = "c0c0c0c0-1111-4111-8111-111111111111";
+  // A bearer whose `sub` is not a uuid: `callerSubjectFromAccessToken` returns null and
+  // `listSessionsForCaller` throws "session identity is unavailable" — every time. The
+  // create itself only needs a token, so it succeeds and the confirming read does not.
+  const token = `x.${Buffer.from(JSON.stringify({ sub: "not-a-uuid" })).toString("base64url")}.y`;
+  const auth = { getAccessToken: async () => token };
+
+  let created = 0;
+  const originalFetch = globalThis.fetch;
+  const originalUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  process.env.NEXT_PUBLIC_SUPABASE_URL = "https://example.supabase.co";
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    const method = (init?.method ?? "GET").toUpperCase();
+    if (url.endsWith("/api/runtime/chat/sessions")) {
+      if (method === "POST") {
+        created += 1;
+        return new Response(JSON.stringify({ session_id: ORPHAN_ID }), { status: 201, headers: { "content-type": "application/json" } });
+      }
+      return new Response(JSON.stringify({ sessions: [] }), { status: 200, headers: { "content-type": "application/json" } });
+    }
+    return new Response("[]", { status: 200, headers: { "content-type": "application/json" } });
+  }) as typeof fetch;
+
+  try {
+    const h = await renderHook(() => useActiveThreadId(auth, CLIENT));
+    try {
+      // The initial resolve fails on the identity read, so there is no caller projection.
+      await settleHook(h, () => h.current.resolving === false);
+      assert.equal(h.current.threadId, null);
+      assert.ok(h.current.error, "the failed identity read reports itself");
+
+      let returned: string | null = "unset";
+      await h.act(async () => { returned = await h.current.createThread(); });
+      await settleHook(h, () => h.current.creating === false);
+
+      assert.equal(created, 1, "the session WAS created — that is what makes the next assertion matter");
+      assert.equal(returned, null, "a create that cannot be listed reports failure rather than a thread id");
+      // THE DISCRIMINATING POST-CONDITION: no selection was written for the orphan.
+      assert.notEqual(
+        claraThreadStore.getSelectedThreadForAltitude(CLIENT),
+        ORPHAN_ID,
+        "selecting a row that is not in this altitude's list strands the session it names",
+      );
+      assert.equal(h.current.threadId, null, "and the rail does not claim to be showing it");
+    } finally {
+      await h.unmount();
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalUrl === undefined) delete process.env.NEXT_PUBLIC_SUPABASE_URL;
+    else process.env.NEXT_PUBLIC_SUPABASE_URL = originalUrl;
+  }
 });

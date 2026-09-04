@@ -340,6 +340,7 @@
         "creating": "Starting…",
         "switchHeading": "Your conversations here",
         "untitled": "Started {started}",
+        "untitledNew": "New conversation",
         "noThreads": "No conversation here yet.",
         "archiveHeading": "Archiving a conversation",
         "archiveNote": "Not built yet. A chat session cannot be archived, renamed or deleted — clara.chat_sessions has no archived_at column and the only lawful change is sharing it with your firm. The transcript is the audit record, so there will never be a “clear”. Archiving needs a new column and an author-only door."
@@ -461,6 +462,7 @@
         "linesCount": "{count, plural, one {# unmatched line} other {# unmatched lines}}",
         "candidatesCount": "{count, plural, one {# match candidate} other {# match candidates}}",
         "truncated": "The ledger reported this pack as truncated — it does not hold everything for this account.",
+        "unreadSchema": "This pack came back as {schema}, which this card cannot read — only its account and digest are shown.",
         "note": "The digest every bank act in this conversation had to cite. A read only — nothing in the books changed."
       },
       "common": {
