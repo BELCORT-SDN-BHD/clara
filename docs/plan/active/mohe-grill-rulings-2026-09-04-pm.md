@@ -223,7 +223,10 @@ standby acquires it whether the process dies or the client reconnects.
 the behaviour that already ships; only the reasoning was wrong. The record of the corrected contract is
 owed to `docs/ARCHITECTURE.md` §4.3 by the runtime-ops lane that builds 裁-149's clause 1 — **§4.3 does not
 exist yet on `main` at `6bad969b`, where §4 stops at §4.2** — and the rulings register's **row 90** carries
-a one-line erratum written at this clock-out. Clause 1 (the general pool logs, counts and raises a health
+a one-line erratum written at this clock-out. **DISCHARGED:** #558 merged as `2060c762` and wrote §4.3,
+"What a background client error does to the process, per connection (裁-149)", carrying this corrected
+reading — its leader row records the dedicated session as "record → rethrow into the caller's own
+reconnect loop". Clause 1 (the general pool logs, counts and raises a health
 flag) is untouched and still owed. **Amends** 裁-149's clause-2 REASONING only, never its outcome. No
 separate ruling file.
 
