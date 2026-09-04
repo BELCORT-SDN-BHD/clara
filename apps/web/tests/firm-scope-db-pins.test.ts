@@ -215,7 +215,7 @@ const REVIEWED_DYNAMIC_SQL_BARRIERS = new Map<string, ReviewedDynamicSqlBarrier>
     "UNNUMBERED_web_reads_and_small_doors.sql",
     {
       reason: "Reviewed pg_get_functiondef splices recut exactly two TRIGGER functions by name — clara._tf_chat_session_update() and clara._tf_counterparty_update_0011(). Both are `returns trigger`, so neither can emit a view definition of any kind, let alone either P4 scope view; each splice re-reads its own single oid and postchecks the installed body. The file's only other object creation is static DDL the lexer inspects directly.",
-      sha256: "5782ac6e5acd752264bb105fbc21bd4d4edea7b09d4b25ddd2da14fc22830cd8",
+      sha256: "65154b81db0a5c8284ef12bcfc5460dad58ae04fb2f1d7b383a156381c9721f9",
     },
   ],
 ]);

@@ -695,6 +695,15 @@ comment on function clara.archive_chat_session(uuid,text) is
 -- settles are permanently not-evaluable. `0062`'s guard even contemplates the UPDATE case
 -- (`0062:210-216`): a wall standing in front of a door that did not exist.
 --
+-- THE SHIPPED SIGNATURE IS FIVE ARGUMENTS, `p_client` FIRST — a deliberate deviation from the
+-- order's four-argument sketch (`set_counterparty_identifiers(p_counterparty, p_registration_no,
+-- p_tin, p_op_key)`), recorded here so the web lane builds against the real shape rather than the
+-- sketch. `p_client` earns its place: with it the cross-firm refusal is an honest CLR11 read off
+-- `clara.counterparties.client_id`, matching `rename_counterparty` (`0011:1750`) and
+-- `merge_counterparties`; without it the door would have to INFER the client from the counterparty
+-- and could not tell "not your client" from "no such counterparty" — an existence oracle on a
+-- registers surface. Every sibling verb on this table takes the client first for the same reason.
+--
 -- ADMIN FLOOR, AND THE REASON. `create_counterparty` is bookkeeper because BIRTH of reference
 -- data authorizes nothing. Introducing an identity onto a LIVE party is different in kind: it
 -- changes how every future settle binds, and it is the act 0062's name-only wall exists to
