@@ -62,19 +62,28 @@ outage with a confusing error, on every lane at once.
 
 ## Step 3 — re-set the secrets, env-to-env, never printed
 
-Six DSNs carry the pin today; the bank lane and the two checkout lanes join whenever their own
-ceremonies run.
+**FIVE secrets take the pin in this ceremony.** Three more take it whenever their own operator
+ceremonies run, and one — `DATABASE_URL` — is checked by the code but is not a deployed secret;
+the table below is the whole census, so count it rather than a sentence.
 
-| secret | login |
-|---|---|
-| `WORKFLOW_POSTGRES_URL` | the durable world's own DSN |
-| `CLARA_RUNTIME_DATABASE_URL` | `clara_runtime_login` |
-| `CLARA_READ_DATABASE_URL` | `clara_agent_read_login` |
-| `CLARA_WRITE_DATABASE_URL` | `clara_wake_write_login` |
-| `CLARA_FREEFORM_DATABASE_URL` | `clara_freeform_login` |
-| `CLARA_BANK_DATABASE_URL` | `clara_wake_bank_login` — when its ceremony runs |
-| `CLARA_STRIPE_WEBHOOK_DATABASE_URL` | `clara_stripe_webhook_login` — when its ceremony runs |
-| `CLARA_AUTH_WALL_DATABASE_URL` | `clara_auth_wall_login` — when its ceremony runs |
+| secret | login | in this ceremony? |
+|---|---|---|
+| `WORKFLOW_POSTGRES_URL` | the durable world's own DSN | **yes** |
+| `CLARA_RUNTIME_DATABASE_URL` | `clara_runtime_login` | **yes** |
+| `CLARA_READ_DATABASE_URL` | `clara_agent_read_login` | **yes** |
+| `CLARA_WRITE_DATABASE_URL` | `clara_wake_write_login` | **yes** |
+| `CLARA_FREEFORM_DATABASE_URL` | `clara_freeform_login` | **yes** |
+| `CLARA_BANK_DATABASE_URL` | `clara_wake_bank_login` | deferred — when its ceremony runs |
+| `CLARA_STRIPE_WEBHOOK_DATABASE_URL` | `clara_stripe_webhook_login` | deferred — when its ceremony runs |
+| `CLARA_AUTH_WALL_DATABASE_URL` | `clara_auth_wall_login` | deferred — when its ceremony runs |
+| `DATABASE_URL` | the base env identity | **not deployed** — see below |
+
+`DATABASE_URL` is in `TLS_CHECKED_DSN_VARS` (`packages/runtime/lib/tls-ca.mjs`) because the boot
+assert must judge whatever is actually set, and this variable is a legitimate base source on a
+local rig and in `scripts/serve.mjs`'s own `WORKFLOW_POSTGRES_URL` fallback. The deployed runtime
+does not set it — `packages/runtime/README.md`'s secrets list does not name it — so there is
+nothing to re-set here. It is listed so the code's nine checked variables and this table's rows
+reconcile rather than quietly differing by one.
 
 Each value gains, replacing whatever it carried for either parameter:
 

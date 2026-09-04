@@ -274,6 +274,22 @@ test("H-43: TLS_CHECKED_DSN_VARS covers every lane DSN plus both base sources", 
   assert.equal(TLS_CHECKED_DSN_VARS.length, expected.length);
 });
 
+test("H-43 MINOR: the TLS roster is a SUPERSET of the lane roster", async () => {
+  // review-558 MINOR: TLS_CHECKED_DSN_VARS is hand-typed, and it cannot be derived from
+  // LANE_ROSTER without closing an import cycle (lane-probe -> pools -> tls-ca), so the
+  // coupling lives HERE instead. The property that matters: an eighth lane that gets PROBED
+  // but never TLS-CHECKED would be a silent hole — a lane pinning a CA this assert never
+  // validated. Imported rather than re-typed, so this is identity, not spelling.
+  const { LANE_ROSTER } = await import("../lib/lane-probe.mjs");
+  const checked = new Set(TLS_CHECKED_DSN_VARS);
+  const unchecked = LANE_ROSTER.map((d) => d.dsnVar).filter((v) => !checked.has(v)).sort();
+  assert.deepEqual(unchecked, [], `every PROBED lane must also be TLS-checked; unchecked: ${unchecked.join(", ")}`);
+  // The superset is PROPER, and deliberately so: the two base sources the world and the relay
+  // resolve from are not lanes but carry the same pin obligation.
+  const extra = TLS_CHECKED_DSN_VARS.filter((v) => !LANE_ROSTER.some((d) => d.dsnVar === v)).sort();
+  assert.deepEqual(extra, ["DATABASE_URL", "WORKFLOW_POSTGRES_URL"], "the two base sources are the only non-lane members");
+});
+
 test("H-43: the ONE boot door calls the assert", () => {
   const pools = readFileSync(join(RUNTIME_ROOT, "lib", "pools.mjs"), "utf8");
   const start = pools.indexOf("export function assertProductionPoolConfig()");

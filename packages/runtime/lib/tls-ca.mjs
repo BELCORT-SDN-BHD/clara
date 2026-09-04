@@ -64,6 +64,13 @@ export const EXPECTED_CA_FINGERPRINT_SHA256 =
  * Every DSN variable whose TLS posture this assert reads. The seven lane logins plus the two
  * base sources the durable engine and the relay resolve from — WORKFLOW_POSTGRES_URL is the
  * world's own DSN and gets no less scrutiny than a lane's.
+ *
+ * WHY THIS IS HAND-TYPED RATHER THAN DERIVED FROM `LANE_ROSTER` (review-558 MINOR). Importing
+ * lib/lane-probe.mjs here would close a cycle: lane-probe imports pools.mjs, and pools.mjs
+ * imports THIS module for its boot assert. So the coupling is enforced by a CELL instead —
+ * tests/l9-tls-ca.test.mjs asserts this list is a SUPERSET of `LANE_ROSTER`'s `dsnVar` values,
+ * which is the property that actually matters: an eighth lane that gets probed but never
+ * TLS-checked would be a silent hole, and that cell reds the moment one appears.
  */
 export const TLS_CHECKED_DSN_VARS = Object.freeze([
   "CLARA_RUNTIME_DATABASE_URL",
@@ -128,6 +135,17 @@ export function validateCa(caPath, opts = {}) {
  * Unparseable is reported as such rather than thrown: `assertNoTargetSplit` and the pools'
  * own connect path already own DSN validity, and this assert must not become a second, earlier
  * place a malformed DSN kills the boot with a different message.
+ *
+ * URI FORM ONLY — A STATED ASSUMPTION, NOT AN OVERSIGHT (review-558 NIT). This reads the
+ * posture through `new URL`, so it understands `postgres://…?sslmode=…&sslrootcert=…` and
+ * NOTHING ELSE. libpq also accepts a KEYWORD/VALUE form (`host=… sslmode=verify-full
+ * sslrootcert=…`), which fails `new URL` and therefore returns `parsed:false` — the posture
+ * check is SKIPPED for such a DSN, silently. That is acceptable here for one measured reason
+ * and one only: every consumer of these variables is node-postgres via `connectionString`,
+ * whose own parser (`pg-connection-string`) is likewise URI-first, and every recipe in
+ * `docs/ops/dsn-bridge.md` and `docs/ops/runtime-tls-verify-full-ceremony.md` emits the URI
+ * form. If a keyword/value DSN ever becomes a supported input, this function must learn it
+ * BEFORE that lands, or a lane would pin a CA this assert never validated.
  * @param {string} dsn
  * @returns {{parsed:boolean, sslmode:string|null, sslrootcert:string|null}}
  */

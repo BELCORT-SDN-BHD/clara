@@ -29,12 +29,45 @@
 //   * ITS OWN CLIENT, NEVER THE POOL. Probing through `getBankPool()` would CONSTRUCT the lazy
 //     pool and defeat the lazy posture; probing through a checkout would contend for a pooled
 //     connection under load. A dedicated client that is opened and ended is neither.
-//   * A TTL CACHE AND A BOUND. `/ready` is polled by fly on a short interval; opening seven
-//     connections per poll would be a self-inflicted connection storm against the Supavisor
-//     session ceiling the §4.1 budget of 19 is measured against. The result is cached for
-//     CLARA_LANE_PROBE_TTL_MS (default 30s) and every probe is bounded at
-//     CLARA_LANE_PROBE_TIMEOUT_MS (default 3s), run CONCURRENTLY under one Promise.allSettled,
-//     so the whole set costs one timeout — not seven — of fly's 5s /ready budget.
+//   * OFF /READY'S LATENCY BUDGET ENTIRELY, NOT MERELY BOUNDED WITHIN IT — see below. This is
+//     the storage-probe posture, and it is here because the first cut of this file got it
+//     wrong in exactly the way lib/storage-probe.mjs's own header warns about.
+//
+// WHY THIS RUNS IN THE BACKGROUND (review-558 MAJOR-1, and the defect was real).
+//
+// The first cut called `probeLanes()` from `checkReadiness` inside health.mjs's `bounded()`
+// wrapper. `bounded` spends READY_DEADLINE_MS = 5000 PER CALL, SEQUENTIALLY, and there were
+// already two such calls — the main DB round trip and the intake snapshot — while
+// `fly.toml`'s `/ready` check allows a TOTAL of 5s. So H-48's own headline case, a lane whose
+// DSN names a host that BLACK-HOLES rather than refuses, made the probe spend its full ~3s and
+// pushed the whole response past fly's timeout: the operator would have got a timed-out health
+// check INSTEAD of the `pool lane 'x' unreachable` warning this feature exists to give. The
+// feature would have removed the signal it was built to add.
+//
+// `lib/storage-probe.mjs` had already met and solved this, and says so in its own header: "a
+// THIRD sequential network round trip here, even bounded to a 'few seconds', could eat most of
+// the remaining budget." That file is imported two lines above this one in health.mjs.
+//
+// So `laneProbeHealth()` is SYNCHRONOUS: it returns the last known verdict from memory, ~0ms,
+// every time. A background interval — started lazily on first use, unref'd so it never keeps
+// the process alive, never overlapping itself — refreshes that verdict every
+// CLARA_LANE_PROBE_INTERVAL_MS (default 30s). Each cycle probes the lanes CONCURRENTLY, each
+// lane bounded at CLARA_LANE_PROBE_TIMEOUT_MS (default 3s), and the whole cycle is bounded
+// again at CLARA_LANE_PROBE_CYCLE_MS (default 5s) so a hung lane can never wedge the loop.
+// This also removes the connection-storm hazard the old TTL cache existed to bound: seven
+// connections every 30s on a fixed cadence, never one burst per /ready poll.
+//
+// A COLD CACHE READS `pending`, NEVER BLOCKS, AND NEVER FAILS READINESS. A fresh boot has no
+// evidence of a problem, so the first /ready before the first cycle settles reports
+// `checks.pools = {pending: true}` with no warnings — and, critically, `runtimeLaneFailed` is
+// FALSE while pending, so an unmeasured lane can never 503 a healthy machine.
+//
+// THE STALENESS THIS BUYS IS BOUNDED AND ALREADY THE HOUSE CONTRACT. A cached runtime-lane
+// failure can flip `ready` false on a reading up to one interval old — the same shape the
+// world/control heartbeat checks already have (HEARTBEAT_STALE_MS, also 30s). And live
+// liveness is NOT weakened: `checks.db` still measures the runtime pool on the request path
+// every poll. What this probe uniquely proves is that each DEDICATED LOGIN connects and its
+// SET ROLE succeeds (N10) — a configuration property, which a fixed cadence serves properly.
 //
 // NEVER THE DSN. A lane's identity in the output is its NAME and its LOGIN name; a failure
 // carries only a SANITIZED libpq code (the pool-error contract's own sanitizer). The full error
@@ -66,7 +99,18 @@ function finiteEnv(name, fallback) {
 }
 
 const PROBE_TIMEOUT_MS = finiteEnv("CLARA_LANE_PROBE_TIMEOUT_MS", 3000);
-const PROBE_TTL_MS = finiteEnv("CLARA_LANE_PROBE_TTL_MS", 30000);
+/** How often the background loop re-probes. Floor 1000ms: this value FEEDS setInterval, so a
+ *  smaller one would be a sustained connection hot loop driven by a health check. */
+function intervalMs() {
+  const n = Number(process.env.CLARA_LANE_PROBE_INTERVAL_MS);
+  return Number.isFinite(n) && n >= 1000 ? n : 30_000;
+}
+/** A hard bound on a WHOLE cycle, so a hung lane can never wedge the interval loop itself —
+ *  belt and braces over the per-lane bound, which is the thing that should normally stop it. */
+function cycleMs() {
+  const n = Number(process.env.CLARA_LANE_PROBE_CYCLE_MS);
+  return Number.isFinite(n) && n > 0 ? n : 5_000;
+}
 
 /**
  * The full seven-lane roster: this runtime's four `pools.mjs` lanes (derived there from the
@@ -160,35 +204,121 @@ export async function probeLane(descriptor, opts = {}) {
   }
 }
 
-const cache = { at: 0, value: null };
-
 /**
- * Probe every configured lane CONCURRENTLY, cached for PROBE_TTL_MS. The cache is what keeps a
- * one-per-second load-balancer poll from opening seven connections per second.
+ * Probe every configured lane CONCURRENTLY. Pure with respect to the cache — the background
+ * loop below owns the caching; this function just runs one cycle.
+ *
  * `opts.probe` is a TEST SEAM only (production always uses `probeLane`): concurrency is a
  * property of this function, and proving it against a real socket would need a host that hangs
  * rather than refuses — a cell that passes for the wrong reason on a network that answers fast.
  * An injected prober makes the overlap deterministic and the cell discriminating.
- * @param {{timeoutMs?:number, ttlMs?:number, roster?:ReadonlyArray<object>, probe?:Function}} [opts]
+ * @param {{timeoutMs?:number, testMode?:boolean, roster?:ReadonlyArray<object>, probe?:Function}} [opts]
  * @returns {Promise<Array<{lane:string}>>}
  */
 export async function probeLanes(opts = {}) {
-  const ttl = Number.isFinite(opts.ttlMs) && opts.ttlMs >= 0 ? opts.ttlMs : PROBE_TTL_MS;
-  const now = Date.now();
-  if (cache.value && now - cache.at < ttl) return cache.value;
   const roster = opts.roster ?? LANE_ROSTER;
   const probe = opts.probe ?? probeLane;
   const settled = await Promise.allSettled(roster.map((d) => probe(d, opts)));
-  const results = settled.map((s, i) =>
+  return settled.map((s, i) =>
     s.status === "fulfilled" ? s.value : { lane: roster[i].lane, ok: false, error: "probe_internal_error" },
   );
-  cache.at = now;
-  cache.value = results;
-  return results;
 }
 
-/** Test-only: drop the TTL cache so a cell measures a fresh probe. */
+// ---------------------------------------------------------------------------
+// The background refresh loop — the storage-probe.mjs machinery, for the reason stated in this
+// file's header. NOTHING here ever runs on the /ready request path.
+// ---------------------------------------------------------------------------
+
+/** Race `fn()` against a hard deadline; resolves to `onTimeout` if it does not settle in time.
+ *  Mirrors storage-probe.mjs's `withHardTimeout` — the timer is unref'd so a pending cycle can
+ *  never hold the process open by itself. */
+function withHardTimeout(fn, ms, onTimeout) {
+  return new Promise((resolve) => {
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      resolve(onTimeout);
+    }, ms);
+    timer.unref?.();
+    fn().then(
+      (value) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve(value);
+      },
+      () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve(onTimeout);
+      },
+    );
+  });
+}
+
+// PENDING until the first cycle settles: a fresh boot has no evidence of a problem, and an
+// UNMEASURED lane must never 503 a healthy machine (see the header).
+let cachedLanes = null;
+let intervalHandle = null;
+let inFlight = null;
+let busy = false;
+let probeOverride = null; // test seam only; production is always null
+
+async function refreshOnce() {
+  if (busy) return;
+  busy = true;
+  try {
+    const run = () => probeLanes(probeOverride ? { probe: probeOverride } : {});
+    // A cycle that blows its own hard bound reports every lane as unknown rather than freezing
+    // the previous verdict: a stale green is the one answer worse than "not measured".
+    cachedLanes = await withHardTimeout(run, cycleMs(), null);
+  } finally {
+    busy = false;
+  }
+}
+
+function ensureStarted() {
+  if (intervalHandle) return;
+  inFlight = refreshOnce();
+  intervalHandle = setInterval(() => {
+    inFlight = refreshOnce();
+  }, intervalMs());
+  intervalHandle.unref?.();
+}
+
+/**
+ * SYNCHRONOUS — the last known verdict, ~0ms, no I/O on the calling path. Starts the background
+ * loop lazily on first use. `pending` is true until the first cycle settles.
+ * @returns {{pending:boolean, lanes:Array<{lane:string}>}}
+ */
+export function laneProbeHealth() {
+  ensureStarted();
+  if (!Array.isArray(cachedLanes)) return { pending: true, lanes: [] };
+  return { pending: false, lanes: cachedLanes.map((l) => Object.assign({}, l)) };
+}
+
+/** Test-only: full reset (cache + interval + in-flight + override). */
 export function _resetLaneProbeCacheForTest() {
-  cache.at = 0;
-  cache.value = null;
+  if (intervalHandle) clearInterval(intervalHandle);
+  intervalHandle = null;
+  inFlight = null;
+  busy = false;
+  cachedLanes = null;
+  probeOverride = null;
+}
+
+/** Test-only: drive the background loop with an injected prober, so a cell can arm a lane that
+ *  BLACK-HOLES (never resolves) or fails, deterministically and with no socket. */
+export function _setLaneProbeForTest(fn) {
+  probeOverride = fn;
+}
+
+/** Test-only: await the most recently started (or currently in-flight) cycle — starting the
+ *  loop if it has not started — so a cell asserts on a SETTLED verdict instead of racing it. */
+export async function _waitForLaneProbeSettleForTest() {
+  laneProbeHealth();
+  await inFlight;
+  return laneProbeHealth();
 }

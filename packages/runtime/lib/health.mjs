@@ -28,7 +28,7 @@ import { classifyHealth } from "./classify.mjs";
 import { wikiProjectionHealth } from "./wiki-projection-ops.mjs";
 import { storageProbeHealth } from "./storage-probe.mjs";
 import { relayPoolHealth } from "./pool-error-contract.mjs";
-import { probeLanes, READINESS_CRITICAL_LANE } from "./lane-probe.mjs";
+import { laneProbeHealth, READINESS_CRITICAL_LANE } from "./lane-probe.mjs";
 
 const READY_DEADLINE_MS = Number(process.env.CLARA_READY_DEADLINE_MS || 5000);
 const HEARTBEAT_STALE_MS = Number(process.env.CLARA_HEARTBEAT_STALE_MS || 30000);
@@ -311,9 +311,15 @@ export async function checkReadiness() {
   // takes the DOCUMENT LANE down, not "nothing works" — the /ready contract at the top of this
   // file fails only on the latter. storageProbeHealth() is SYNCHRONOUS (storage-probe.mjs runs
   // the actual round trip on its own background interval, off this call entirely) — no await,
-  // no bounded() wrap, ~0ms: three SEQUENTIAL bounded() network round trips already share fly's
-  // 5s /ready timeout above, and this check's own verdict cannot change the status code, so it
-  // must never spend any of that budget. The object it returns is already the full public
+  // no bounded() wrap, ~0ms: the SEQUENTIAL bounded() network round trips above (today TWO —
+  // the main DB check at :99 and the intake snapshot at :286, each able to spend the full
+  // READY_DEADLINE_MS) already share fly's 5s /ready timeout, and this check's own verdict
+  // cannot change the status code, so it must never spend any of that budget. THE LANE PROBE
+  // (H-48, below) IS IN THIS SAME CLASS and for this same reason — it was briefly a third
+  // sequential bounded() call and review-558 caught that; see its own paragraph. The count is
+  // written as "today TWO" rather than a bare number so a future third round trip has to
+  // re-read this sentence rather than inherit a stale one. The object it returns is already
+  // the full public
   // shape (ok/reason/pending only — never the raw vendor error text) — safe to assign as-is to
   // an unauthenticated endpoint's response.
   const storage = storageProbeHealth();
@@ -332,18 +338,27 @@ export async function checkReadiness() {
     warnings.push(`relay pool background error(s) since boot: ${relayPool.errors} (last ${relayPool.last_error_code} at ${relayPool.last_error_at})`);
   }
 
-  // H-48 — the per-lane probe. Seven logins, one `select 1` each AFTER its own SET ROLE, run
-  // concurrently under ONE bounded() so the whole set costs one timeout of fly's /ready budget
-  // rather than seven (the concern health.mjs:308-311 already states for its three sequential
-  // round trips). Unconfigured lazy lanes report `skipped` and are NOT warnings — the bank and
-  // the two checkout lanes are lazy by ruling because their ceremonies are gated on later
-  // events. Only the RUNTIME lane's failure joins the readiness failure set, and it joins the
-  // one that already existed (`checks.db`); every other lane WARNS with its lane name — never
-  // its DSN, never raw DB text.
-  const lanes = await bounded(() => probeLanes(), null);
+  // H-48 — the per-lane probe. Seven logins, one `select 1` each AFTER its own SET ROLE.
+  //
+  // SYNCHRONOUS, ~0ms, AND DELIBERATELY SO (review-558 MAJOR-1). This read spends NONE of fly's
+  // 5s /ready budget: `laneProbeHealth()` returns the last verdict from memory and a background
+  // interval in lib/lane-probe.mjs does the connecting. The first cut awaited a THIRD
+  // sequential `bounded()` here — the exact hazard the storage-probe paragraph above already
+  // names — and H-48's own headline case, a lane whose host BLACK-HOLES rather than refuses,
+  // would then have pushed /ready past fly's 5s timeout: the operator gets a timed-out health
+  // check INSTEAD of the `pool lane 'x' unreachable` warning this feature exists to give.
+  //
+  // A PENDING verdict (the window before the first background cycle settles) is NOT a warning
+  // and NOT a failure: an unmeasured lane must never 503 a healthy machine. Unconfigured lazy
+  // lanes report `skipped` and are not warnings either — the bank and the two checkout lanes
+  // are lazy by ruling because their ceremonies are gated on later events. Only the RUNTIME
+  // lane's failure joins the readiness failure set, and it joins the one that already existed
+  // (`checks.db`, which still measures that pool LIVE on this request path every poll); every
+  // other lane WARNS with its lane name — never its DSN, never raw DB text.
+  const laneProbe = laneProbeHealth();
+  const lanes = laneProbe.pending ? null : laneProbe.lanes;
   if (lanes === null) {
-    checks.pools = { ok: false, error: "lane_probe_timeout" };
-    warnings.push("per-lane pool probe unavailable (timed out)");
+    checks.pools = { pending: true };
   } else {
     checks.pools = lanes;
     for (const lane of lanes) {
@@ -357,7 +372,9 @@ export async function checkReadiness() {
   // conjunct rather than folded into `checks.db` on purpose: `checks.db` reports what the main
   // bounded round trip actually saw, and overwriting it with a probe's verdict would make the
   // response lie about which instrument failed. A SKIPPED runtime lane is not a failure (that is
-  // a test-mode rig with no base source), only an explicit ok:false is.
+  // a test-mode rig with no base source), and neither is a PENDING one — `lanes` is null before
+  // the first background cycle settles, `Array.isArray(null)` is false, so an UNMEASURED lane
+  // can never 503 a healthy machine. Only an explicit ok:false does.
   const runtimeLane = Array.isArray(lanes) ? lanes.find((l) => l.lane === READINESS_CRITICAL_LANE) : null;
   const runtimeLaneFailed = Boolean(runtimeLane && runtimeLane.skipped !== true && runtimeLane.ok === false);
 

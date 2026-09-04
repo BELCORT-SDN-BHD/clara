@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 
 import { CLASSIFY_KINDS, DB_REFUSED_KINDS, SYSTEM_PROMPT, classifyDocumentText } from "../lib/classify-llm.mjs";
 import { CLASSIFY_ENGINE_ID } from "../lib/classify.mjs";
-import { CONFIDENCE_GATE, builtinFixtures, promptSha, readManifest, score, stubModel } from "../scripts/measure-classify-recall.mjs";
+import { CONFIDENCE_GATE, builtinFixtures, printReport, promptSha, readManifest, score, stubModel } from "../scripts/measure-classify-recall.mjs";
 
 const RUNTIME_ROOT = fileURLToPath(new URL("..", import.meta.url));
 const REPO_ROOT = fileURLToPath(new URL("../../..", import.meta.url));
@@ -201,6 +201,53 @@ test("H-04: systemOverride swaps the prompt and NOTHING in production passes it"
   const classify = readFileSync(join(RUNTIME_ROOT, "lib", "classify.mjs"), "utf8");
   assert.ok(!classify.includes("systemOverride"), "no production call site passes the measurement seam");
   assert.match(classify, /await classify\(\{ text, modelId \}\)/, "the production call is exactly {text, modelId}");
+});
+
+test("H-04 MINOR: replay REFUSES the built-in fixtures as a baseline-vs-current input set", () => {
+  // review-558 MINOR: the built-in fixtures are the SAME shapes the sharpened prompt now
+  // carries as its worked examples — a PENYATA/BAKI header, a garbled-column statement, a
+  // balance-sheet management account. Replaying those baseline-vs-current does not measure a
+  // delta: the CURRENT arm wins BY CONSTRUCTION, because it was shown those very shapes. That
+  // is the measurement-artifact class measure-invoice-id-capture.mjs exists to prevent.
+  //
+  // THE CONTAMINATION IS MEASURED HERE, not asserted: every fixture's discriminating tokens are
+  // checked against the prompt's own text, so if either side is re-written the overlap is
+  // re-read rather than remembered.
+  const overlapping = builtinFixtures().filter((f) =>
+    f.text.split(/\s+/).filter((w) => w.length >= 5).some((w) => SYSTEM_PROMPT.includes(w)),
+  );
+  assert.ok(
+    overlapping.length >= 3,
+    `the fallback is contaminated by construction; overlapping fixtures: ${overlapping.length}`,
+  );
+  // And the harness says so rather than printing a number: the refusal, and the opt-in that
+  // brands the run unusable, are both in the shipping source.
+  const harness = readFileSync(join(RUNTIME_ROOT, "scripts", "measure-classify-recall.mjs"), "utf8");
+  assert.match(harness, /replay REFUSES the built-in fixtures as a baseline-vs-current input set/);
+  assert.match(harness, /--allow-contaminated-fixtures/, "an explicit opt-in exists for a plumbing smoke test");
+  assert.match(harness, /CONTAMINATED RUN/, "and the opt-in brands every number it prints");
+  assert.match(harness, /process\.exitCode = 1;/, "the refusal exits non-zero");
+});
+
+test("H-04 NIT: printReport PRINTS the confusion matrix score() builds", () => {
+  // It was computed and thrown away — the most useful artifact of a recall run. Off-diagonal
+  // cells name WHICH kind a miss went to, which is what separates a definition fault (a
+  // confusable) from a calibration fault (a correct kind under the gate).
+  const lines = [];
+  const realLog = console.log;
+  console.log = (...a) => lines.push(a.join(" "));
+  try {
+    printReport("unit", score([
+      { name: "a", expected: "bank_statement", predicted: "bank_statement", confidence: 0.95 },
+      { name: "b", expected: "bank_statement", predicted: "management_account", confidence: 0.9 },
+    ]));
+  } finally {
+    console.log = realLog;
+  }
+  const out = lines.join("\n");
+  assert.match(out, /confusion \(2 cell\(s\), 1 off-diagonal\)/, "the matrix is printed with its off-diagonal count");
+  assert.match(out, /bank_statement -> management_account\s+<-- confusion/, "the confusable is named and flagged");
+  assert.match(out, /bank_statement -> bank_statement/, "the diagonal is printed too, unflagged");
 });
 
 test("H-04: readManifest REFUSES rather than inventing rows", () => {

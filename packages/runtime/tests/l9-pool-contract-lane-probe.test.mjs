@@ -14,7 +14,17 @@ import pg from "pg";
 
 import { makePool } from "../lib/relay.mjs";
 import { relayPoolHealth, _resetPoolErrorContractForTest, sanitizedErrorCode, attachPoolErrorContract } from "../lib/pool-error-contract.mjs";
-import { LANE_ROSTER, READINESS_CRITICAL_LANE, probeLane, probeLanes, laneConfigured, _resetLaneProbeCacheForTest } from "../lib/lane-probe.mjs";
+import {
+  LANE_ROSTER,
+  READINESS_CRITICAL_LANE,
+  probeLane,
+  probeLanes,
+  laneConfigured,
+  laneProbeHealth,
+  _resetLaneProbeCacheForTest,
+  _setLaneProbeForTest,
+  _waitForLaneProbeSettleForTest,
+} from "../lib/lane-probe.mjs";
 import { POOLS_LANE_DESCRIPTORS } from "../lib/pools.mjs";
 
 const RUNTIME_ROOT = fileURLToPath(new URL("..", import.meta.url));
@@ -121,6 +131,29 @@ test("H-48: the roster's four pools.mjs lanes are the descriptors pools.mjs itse
   assert.equal(POOLS_LANE_DESCRIPTORS.find((d) => d.lane === "bank").eager, false, "the bank lane stays LAZY (deploy ordering)");
 });
 
+test("H-48 MINOR: every pool role is the ONE POOL_ROLES constant, in both places", () => {
+  // review-558 MINOR: the descriptors re-typed four role literals while their own comment
+  // claimed derivation. A renamed role, or an eighth lane, could then have drifted the boot
+  // probe away from the role the pool actually SET ROLEs to — the probe would prove a
+  // different grant than production uses. Pinned by reading the shipping source: no setupSql
+  // call site may carry a string literal.
+  const pools = readFileSync(join(RUNTIME_ROOT, "lib", "pools.mjs"), "utf8");
+  // The lookbehind excludes the DECLARATION (`function setupSql(role, readOnly)`) so the census
+  // reads CALL SITES only — otherwise the parameter name itself reads as a role expression.
+  const calls = [...pools.matchAll(/(?<!function )setupSql\(([^,)]+)/g)].map((m) => m[1].trim());
+  assert.ok(calls.length >= 4, `expected at least the four with* wrappers, found ${calls.length}`);
+  const literals = calls.filter((c) => /^["']/.test(c));
+  assert.deepEqual(literals, [], `every setupSql call must read POOL_ROLES; literal(s): ${literals.join(", ")}`);
+  for (const c of calls) assert.match(c, /^POOL_ROLES\./, `unexpected role expression: ${c}`);
+  // And the descriptors carry the SAME values, not a matching spelling.
+  for (const lane of ["runtime", "read", "write", "bank"]) {
+    const d = POOLS_LANE_DESCRIPTORS.find((x) => x.lane === lane);
+    assert.ok(pools.includes(`setupSql(POOL_ROLES.${lane}`), `the ${lane} wrapper reads POOL_ROLES.${lane}`);
+    assert.equal(typeof d.role, "string");
+  }
+  assert.equal(new Set(POOLS_LANE_DESCRIPTORS.map((d) => d.role)).size, 4, "four distinct group roles");
+});
+
 test("H-48: the readiness-critical lane is the runtime lane and nothing else", () => {
   assert.equal(READINESS_CRITICAL_LANE, "runtime");
   assert.ok(LANE_ROSTER.some((d) => d.lane === READINESS_CRITICAL_LANE), "the critical lane is a real roster member");
@@ -197,7 +230,7 @@ test("H-48: probeLanes runs the roster CONCURRENTLY (the /ready budget)", async 
     return { lane: d.lane, ok: true };
   };
   const t0 = Date.now();
-  const out = await probeLanes({ roster, probe, ttlMs: 0 });
+  const out = await probeLanes({ roster, probe });
   const elapsed = Date.now() - t0;
   assert.equal(out.length, 4);
   assert.equal(peak, 4, "all four probes were in flight at the same moment — the discriminating assertion");
@@ -208,22 +241,64 @@ test("H-48: probeLanes runs the roster CONCURRENTLY (the /ready budget)", async 
   _resetLaneProbeCacheForTest();
 });
 
-test("H-48: probeLanes CACHES within its TTL (no connection storm under a 1/s poll)", async () => {
+test("H-48 MAJOR-1: laneProbeHealth is SYNCHRONOUS and spends NO /ready budget", async () => {
+  // The defect review-558 caught: the probe was a THIRD sequential bounded() call inside fly's
+  // 5s /ready window. It is now a memory read; the connecting happens on a background interval.
   _resetLaneProbeCacheForTest();
-  let calls = 0;
-  const roster = [{ lane: "a" }, { lane: "b" }];
-  const probe = async (d) => {
-    calls += 1;
-    return { lane: d.lane, ok: true };
-  };
-  await probeLanes({ roster, probe, ttlMs: 60000 });
-  await probeLanes({ roster, probe, ttlMs: 60000 });
-  await probeLanes({ roster, probe, ttlMs: 60000 });
-  assert.equal(calls, 2, "three /ready polls inside the TTL opened ONE round of probes, not three");
+  try {
+    // A prober that NEVER settles — a lane whose host black-holes rather than refuses, which is
+    // H-48's own headline case and the one that blew the budget.
+    _setLaneProbeForTest(() => new Promise(() => {}));
+    const t0 = Date.now();
+    const first = laneProbeHealth();
+    const elapsed = Date.now() - t0;
+    assert.equal(first.pending, true, "a cold cache reads pending, never a fabricated verdict");
+    assert.deepEqual(first.lanes, [], "and carries no lanes at all");
+    assert.ok(elapsed < 50, `the read must be ~0ms even with a black-holed lane in flight (was ${elapsed}ms)`);
+    // Repeated polls stay free: no second cycle is started while one is in flight.
+    for (let i = 0; i < 20; i++) assert.equal(laneProbeHealth().pending, true);
+    assert.ok(Date.now() - t0 < 200, "twenty polls against a hung lane cost nothing");
+  } finally {
+    _resetLaneProbeCacheForTest();
+  }
+});
+
+test("H-48: the background loop SETTLES and the verdict then appears", async () => {
   _resetLaneProbeCacheForTest();
-  await probeLanes({ roster, probe, ttlMs: 0 });
-  assert.equal(calls, 4, "a zero TTL re-probes");
+  try {
+    let cycles = 0;
+    _setLaneProbeForTest(async (d) => {
+      cycles += 1;
+      return d.lane === "read" ? { lane: d.lane, ok: false, error: "ECONNREFUSED" } : { lane: d.lane, ok: true, latency_ms: 1 };
+    });
+    const settled = await _waitForLaneProbeSettleForTest();
+    assert.equal(settled.pending, false, "after one cycle the verdict is settled");
+    assert.equal(settled.lanes.length, LANE_ROSTER.length, "every roster lane is reported");
+    assert.equal(settled.lanes.find((l) => l.lane === "read").ok, false, "the failing lane's verdict survives into the cache");
+    assert.equal(cycles, LANE_ROSTER.length, "exactly one probe per lane per cycle");
+    // A later read serves the cache — it does NOT start another cycle on the request path.
+    laneProbeHealth();
+    laneProbeHealth();
+    assert.equal(cycles, LANE_ROSTER.length, "reads are free; only the interval re-probes");
+  } finally {
+    _resetLaneProbeCacheForTest();
+  }
+});
+
+test("H-48: laneProbeHealth hands out a COPY — a caller cannot corrupt the cached verdict", async () => {
   _resetLaneProbeCacheForTest();
+  try {
+    _setLaneProbeForTest(async (d) => ({ lane: d.lane, ok: true }));
+    await _waitForLaneProbeSettleForTest();
+    const a = laneProbeHealth();
+    a.lanes[0].ok = false;
+    a.lanes.push({ lane: "injected" });
+    const b = laneProbeHealth();
+    assert.equal(b.lanes[0].ok, true, "the cached row is untouched");
+    assert.equal(b.lanes.length, LANE_ROSTER.length, "and no row was injected");
+  } finally {
+    _resetLaneProbeCacheForTest();
+  }
 });
 
 test("H-48: a probe that rejects outright still yields a result row, never an unsettled set", async () => {
@@ -233,7 +308,7 @@ test("H-48: a probe that rejects outright still yields a result row, never an un
     if (d.lane === "boom") throw new Error("internal");
     return { lane: d.lane, ok: true };
   };
-  const out = await probeLanes({ roster, probe, ttlMs: 0 });
+  const out = await probeLanes({ roster, probe });
   assert.equal(out.length, 2);
   assert.deepEqual(out.find((r) => r.lane === "boom"), { lane: "boom", ok: false, error: "probe_internal_error" });
   _resetLaneProbeCacheForTest();

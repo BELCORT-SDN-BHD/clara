@@ -79,6 +79,12 @@ export const BANK_POOL_MAX = Number(process.env.CLARA_BANK_POOL_MAX || 2);
 // The dedicated login each pool connects AS in production (the two-login law, N10):
 // the pool connects as this login, then SET ROLEs to its one group on every checkout.
 const LOGIN_NAMES = { runtime: "clara_runtime_login", read: "clara_agent_read_login", write: "clara_wake_write_login", bank: "clara_wake_bank_login" }; // step 2
+// The GROUP ROLE each pool SET ROLEs to on every checkout. ONE home, used by BOTH the four
+// `with*` wrappers below and POOLS_LANE_DESCRIPTORS — review-558 MINOR: the descriptors used to
+// re-type these four literals while their own comment claimed derivation, so an eighth lane or a
+// renamed role could have drifted the boot probe away from what the pools actually issue.
+// "Spelling is not identity": a cell pins that every setupSql call site reads from here.
+const POOL_ROLES = { runtime: "clara_runtime", read: "clara_agent_ro", write: "clara_wake_interactive", bank: "clara_wake_bank" };
 const STATEMENT_TIMEOUT_MS = Number(process.env.CLARA_STATEMENT_TIMEOUT_MS || 30000);
 const IDLE_IN_TXN_TIMEOUT_MS = Number(process.env.CLARA_IDLE_IN_TXN_TIMEOUT_MS || 15000);
 const CONNECT_TIMEOUT_MS = Number(process.env.CLARA_CONNECT_TIMEOUT_MS || 5000);
@@ -112,10 +118,11 @@ function poolMaxFor(which) {
 }
 
 /**
- * H-48 — this file's four lanes, DERIVED from the same three private functions the pools
- * themselves use (`dsnVarFor`, `LOGIN_NAMES`, and the roles named in the `with*` wrappers
- * below), so the boot probe can never drift into reading a SECOND hand-typed copy of the
- * mapping. `lib/lane-probe.mjs` composes this with the freeform lane's and the two checkout
+ * H-48 — this file's four lanes, DERIVED from the same three private bindings the pools
+ * themselves use: `dsnVarFor`, `LOGIN_NAMES`, and `POOL_ROLES` — the last of which the four
+ * `with*` wrappers below now read too, so the boot probe cannot drift into a SECOND hand-typed
+ * copy of the mapping. (Until review-558 the roles here WERE such a copy while this sentence
+ * claimed otherwise; a cell now pins every `setupSql` call site to that one constant.) `lib/lane-probe.mjs` composes this with the freeform lane's and the two checkout
  * lanes' own exported constants; nothing here reaches into another module's names.
  *
  * `eager` mirrors `assertProductionPoolConfig` exactly: the three DSNs that function REQUIRES
@@ -125,10 +132,10 @@ function poolMaxFor(which) {
  * prevent.
  */
 export const POOLS_LANE_DESCRIPTORS = Object.freeze([
-  Object.freeze({ lane: "runtime", dsnVar: dsnVarFor("runtime"), login: LOGIN_NAMES.runtime, role: "clara_runtime", eager: true }),
-  Object.freeze({ lane: "read", dsnVar: dsnVarFor("read"), login: LOGIN_NAMES.read, role: "clara_agent_ro", eager: true }),
-  Object.freeze({ lane: "write", dsnVar: dsnVarFor("write"), login: LOGIN_NAMES.write, role: "clara_wake_interactive", eager: true }),
-  Object.freeze({ lane: "bank", dsnVar: dsnVarFor("bank"), login: LOGIN_NAMES.bank, role: "clara_wake_bank", eager: false }),
+  Object.freeze({ lane: "runtime", dsnVar: dsnVarFor("runtime"), login: LOGIN_NAMES.runtime, role: POOL_ROLES.runtime, eager: true }),
+  Object.freeze({ lane: "read", dsnVar: dsnVarFor("read"), login: LOGIN_NAMES.read, role: POOL_ROLES.read, eager: true }),
+  Object.freeze({ lane: "write", dsnVar: dsnVarFor("write"), login: LOGIN_NAMES.write, role: POOL_ROLES.write, eager: true }),
+  Object.freeze({ lane: "bank", dsnVar: dsnVarFor("bank"), login: LOGIN_NAMES.bank, role: POOL_ROLES.bank, eager: false }),
 ]);
 
 /**
@@ -310,7 +317,7 @@ async function checkout(pool, setup, fn) {
  * @param {(c: pg.PoolClient) => Promise<T>} fn
  */
 export function withRuntime(fn) {
-  return checkout(getRuntimePool(), setupSql("clara_runtime", false), fn);
+  return checkout(getRuntimePool(), setupSql(POOL_ROLES.runtime, false), fn);
 }
 
 /**
@@ -372,7 +379,7 @@ export async function withMetricEvaluationBatch(c, fn) {
  * @param {(c: pg.PoolClient) => Promise<T>} fn
  */
 export function withRead(fn) {
-  return checkout(getReadPool(), setupSql("clara_agent_ro", true), fn);
+  return checkout(getReadPool(), setupSql(POOL_ROLES.read, true), fn);
 }
 
 /**
@@ -517,7 +524,7 @@ export function withReadWakeScoped(secret, fn) {
  * @param {(c: pg.PoolClient) => Promise<T>} fn
  */
 export function withWriteWakeScoped(secret, fn) {
-  return checkout(getWritePool(), setupSql("clara_wake_interactive", false), async (c) => {
+  return checkout(getWritePool(), setupSql(POOL_ROLES.write, false), async (c) => {
     await c.query("begin");
     // Parameterised SET LOCAL — the secret never enters SQL text; txn-scoped.
     await c.query("select set_config('clara.wake_secret', $1, true)", [secret]);
@@ -542,7 +549,7 @@ export function withWriteWakeScoped(secret, fn) {
  * @param {(c: pg.PoolClient) => Promise<T>} fn
  */
 export function withBankWakeScoped(secret, fn) {
-  return checkout(getBankPool(), setupSql("clara_wake_bank", false), async (c) => {
+  return checkout(getBankPool(), setupSql(POOL_ROLES.bank, false), async (c) => {
     await c.query("begin");
     // Parameterised SET LOCAL — the secret never enters SQL text; txn-scoped.
     await c.query("select set_config('clara.wake_secret', $1, true)", [secret]);

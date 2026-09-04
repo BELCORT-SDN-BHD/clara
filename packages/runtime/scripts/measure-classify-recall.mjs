@@ -106,6 +106,15 @@ export function printReport(label, result) {
     for (const m of k.misses) console.log(`      MISS  ${m}`);
     for (const u of k.under_gate) console.log(`      UNDER ${u}`);
   }
+  // The confusion matrix itself — review-558 NIT: score() built this Map and nothing printed
+  // it, so the most useful artifact of a recall run was computed and thrown away. Off-diagonal
+  // cells are the finding: they name WHICH kind a miss went to, which is what tells a
+  // definition fault (a confusable) apart from a calibration fault (an under-gate hit).
+  const off = [...result.confusion.entries()].filter(([k]) => k.split(" -> ")[0] !== k.split(" -> ")[1]);
+  console.log(`  confusion (${result.confusion.size} cell(s), ${off.length} off-diagonal):`);
+  for (const [pair, n] of [...result.confusion.entries()].sort((a, b) => b[1] - a[1])) {
+    console.log(`      ${String(n).padStart(3)}  ${pair}${pair.split(" -> ")[0] === pair.split(" -> ")[1] ? "" : "   <-- confusion"}`);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -305,7 +314,7 @@ async function runLive(manifestPath, modelId) {
   return score(rows);
 }
 
-async function runReplay(manifestPath, baselinePath, modelId) {
+async function runReplay(manifestPath, baselinePath, modelId, allowContaminated = false) {
   let baseline;
   try {
     baseline = readFileSync(baselinePath, "utf8");
@@ -315,8 +324,32 @@ async function runReplay(manifestPath, baselinePath, modelId) {
     return;
   }
   const m = manifestPath ? readManifest(manifestPath) : { ok: false, reason: "no --manifest given" };
+  if (!m.ok) {
+    // THE FALLBACK IS CONTAMINATED, AND REFUSING IS THE HONEST ANSWER (review-558 MINOR).
+    // The built-in fixtures are modelled on the SAME shapes the sharpened prompt now carries as
+    // its worked examples — a Maybank-style PENYATA/BAKI header, a garbled-column statement, a
+    // balance-sheet management account. Replaying those through baseline-vs-current does not
+    // measure a delta: the CURRENT arm wins BY CONSTRUCTION, because it was shown those very
+    // shapes. A number produced that way would be a measurement artifact of exactly the kind
+    // scripts/measure-invoice-id-capture.mjs exists to prevent. So replay REFUSES rather than
+    // printing it, unless the operator opts in explicitly for a smoke test of the plumbing.
+    if (!allowContaminated) {
+      console.error(`replay: ${m.reason}.`);
+      console.error(
+        "replay REFUSES the built-in fixtures as a baseline-vs-current input set: they are the same shapes the CURRENT " +
+          "prompt carries as few-shots, so the current arm would win by construction and the delta would be an artifact. " +
+          "Point --manifest at a real labelled corpus. To smoke-test the plumbing only, pass --allow-contaminated-fixtures " +
+          "and treat every number it prints as UNUSABLE for a recall claim.",
+      );
+      process.exitCode = 1;
+      return;
+    }
+    console.error(
+      "replay: CONTAMINATED RUN — the built-in fixtures are the current prompt's own few-shot shapes. The current arm " +
+        "wins by construction. These numbers measure the PLUMBING, never recall, and must never be quoted as a delta.",
+    );
+  }
   const texts = m.ok ? await readTexts(m.rows) : builtinFixtures().map((f) => ({ name: f.name, expected: f.expected, text: f.text }));
-  if (!m.ok) console.error(`replay: ${m.reason} — replaying the BUILT-IN synthesised fixtures instead (say so when quoting the numbers)`);
 
   // The baseline is run by TEMPORARILY substituting the prompt through the same call path, so
   // both arms differ in exactly one variable. classifyDocumentText takes its prompt from the
@@ -374,7 +407,7 @@ async function main() {
   }
   if (mode === "replay") {
     const baseline = flag("--baseline") ?? fileURLToPath(new URL("../tests/fixtures/classify/baseline-prompt-2026-09-04.txt", import.meta.url));
-    await runReplay(flag("--manifest"), baseline, modelId);
+    await runReplay(flag("--manifest"), baseline, modelId, args.includes("--allow-contaminated-fixtures"));
     return;
   }
   console.error(`unknown mode '${mode}' (fixtures | live | replay)`);

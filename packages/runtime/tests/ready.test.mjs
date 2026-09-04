@@ -15,14 +15,16 @@ import { checkReadiness } from "../lib/health.mjs";
 import { _resetStorageProbeCacheForTest } from "../lib/storage-probe.mjs";
 import { makePool } from "../lib/relay.mjs";
 import { _resetPoolErrorContractForTest } from "../lib/pool-error-contract.mjs";
-import { LANE_ROSTER, _resetLaneProbeCacheForTest } from "../lib/lane-probe.mjs";
+import {
+  LANE_ROSTER,
+  _resetLaneProbeCacheForTest,
+  _setLaneProbeForTest,
+  _waitForLaneProbeSettleForTest,
+} from "../lib/lane-probe.mjs";
 
-// An UNREACHABLE lane DSN, assembled piecewise on purpose. Port 1 is reserved and closed on
-// every platform, so a connect there refuses deterministically with no network wait. It is
-// built from parts rather than written as a literal because a DSN carrying an inline password
-// is exactly the shape `scripts/check-leaks.mjs` refuses in a tracked file — the guard cannot
-// tell a fixture from a leak, and it should not have to.
-const UNREACHABLE_DSN = ["postgres:/", "/", "nobody", ":", "PLACEHOLDER", "@", "127.0.0.1:1", "/", "nowhere"].join("");
+// fly.toml's own /ready check timeout — the number the MAJOR-1 cells defend. Kept as a named
+// constant so a reader sees WHICH budget the assertion is about, not a bare 5000.
+const FLY_READY_TIMEOUT_MS = 5000;
 const READY = await rig.runtimeReady();
 const skip = READY ? false : "Slice-4 (0006) surface absent";
 
@@ -200,6 +202,8 @@ test("ready: a relay-pool background error WARNs on /ready and NEVER flips ready
 test("ready: the per-lane probe reports every lane, and the runtime lane is reachable (H-48)", { skip }, async () => {
   _resetLaneProbeCacheForTest();
   try {
+    // The background loop is driven to a SETTLED verdict first; /ready then reads memory.
+    await _waitForLaneProbeSettleForTest();
     const r = await checkReadiness();
     assert.ok(Array.isArray(r.checks.pools), `checks.pools must be the per-lane array, got ${JSON.stringify(r.checks.pools)}`);
     assert.equal(r.checks.pools.length, LANE_ROSTER.length, "every roster lane is reported");
@@ -218,42 +222,85 @@ test("ready: the per-lane probe reports every lane, and the runtime lane is reac
   }
 });
 
-test("ready: a NON-runtime lane that cannot connect WARNs and stays ready; the RUNTIME lane FAILS (H-48)", { skip }, async () => {
+test("ready MAJOR-1: a BLACK-HOLED lane leaves /ready far inside fly's 5s timeout", { skip }, async () => {
+  // THE DEFECT REVIEW-558 CAUGHT, PINNED. The lane probe was a THIRD sequential bounded() call,
+  // each able to spend READY_DEADLINE_MS, inside the 5s total fly.toml:49 allows. H-48's own
+  // headline case — a lane DSN naming a host that BLACK-HOLES rather than refuses — would then
+  // have pushed /ready past that timeout, and the operator would have got a timed-out health
+  // check INSTEAD of the `pool lane 'x' unreachable` warning the feature exists to give.
+  //
+  // The prober here NEVER settles, which is that case exactly. /ready must not wait for it.
   const prev = process.env.CLARA_START_WORLD;
-  const prevRead = process.env.CLARA_READ_DATABASE_URL;
-  const prevRuntime = process.env.CLARA_RUNTIME_DATABASE_URL;
+  process.env.CLARA_START_WORLD = "1";
+  _resetLaneProbeCacheForTest();
+  try {
+    await setBeat("world", "now()");
+    await setBeat("control", "now()");
+    _setLaneProbeForTest(() => new Promise(() => {})); // black hole: never resolves, never rejects
+
+    const t0 = Date.now();
+    const r = await checkReadiness();
+    const elapsed = Date.now() - t0;
+
+    assert.ok(elapsed < FLY_READY_TIMEOUT_MS, `/ready must settle inside fly's ${FLY_READY_TIMEOUT_MS}ms (was ${elapsed}ms)`);
+    assert.ok(elapsed < 2000, `and with real margin, not merely inside it (was ${elapsed}ms)`);
+    assert.equal(r.ready, true, "an UNMEASURED lane never 503s a healthy machine");
+    assert.deepEqual(r.checks.pools, { pending: true }, "a cold cache reports pending, never a fabricated verdict");
+    assert.ok(
+      !r.warnings.some((x) => /pool lane/.test(x)),
+      `a pending probe warns about nothing; got: ${JSON.stringify(r.warnings)}`,
+    );
+    // Polling repeatedly must stay free — a load balancer hits this every 15s forever.
+    const t1 = Date.now();
+    await checkReadiness();
+    await checkReadiness();
+    assert.ok(Date.now() - t1 < FLY_READY_TIMEOUT_MS, "subsequent polls are not slowed by the hung lane either");
+  } finally {
+    _resetLaneProbeCacheForTest();
+    if (prev === undefined) delete process.env.CLARA_START_WORLD;
+    else process.env.CLARA_START_WORLD = prev;
+  }
+});
+
+test("ready MAJOR-1: the lane WARNING still surfaces once the background probe settles (H-48)", { skip }, async () => {
+  // The other half, and the discriminating one: moving the probe off the request path must not
+  // cost the signal. A dead NON-runtime lane WARNs and stays ready; the RUNTIME lane fails.
+  const prev = process.env.CLARA_START_WORLD;
   process.env.CLARA_START_WORLD = "1";
   _resetLaneProbeCacheForTest();
   try {
     await setBeat("world", "now()");
     await setBeat("control", "now()");
 
-    // (a) a non-runtime lane pointed at a closed port: WARN, still ready.
-    process.env.CLARA_READ_DATABASE_URL = UNREACHABLE_DSN;
-    _resetLaneProbeCacheForTest();
+    // (a) a non-runtime lane down: WARN, still ready.
+    _setLaneProbeForTest(async (d) =>
+      d.lane === "read" ? { lane: d.lane, ok: false, error: "ECONNREFUSED" } : { lane: d.lane, ok: true, latency_ms: 1 },
+    );
+    await _waitForLaneProbeSettleForTest();
     const degraded = await checkReadiness();
     assert.equal(degraded.ready, true, "a dead READ lane degrades the agent — it is not 'nothing works'");
     assert.equal(degraded.checks.pools.find((l) => l.lane === "read").ok, false, "the read lane is reported down");
     assert.ok(
-      degraded.warnings.some((x) => /pool lane 'read' unreachable/.test(x)),
+      degraded.warnings.some((x) => /pool lane 'read' unreachable \(ECONNREFUSED\)/.test(x)),
       `expected the read-lane WARN, got: ${JSON.stringify(degraded.warnings)}`,
     );
-    assert.ok(!JSON.stringify(degraded).includes("nowhere"), "no DSN component reaches the payload");
-    delete process.env.CLARA_READ_DATABASE_URL;
 
-    // (b) the RUNTIME lane pointed at the same closed port: ready FALSE. The discriminating
-    // half — without it, (a) would pass for a probe that never fails anything.
-    process.env.CLARA_RUNTIME_DATABASE_URL = UNREACHABLE_DSN;
+    // (b) the RUNTIME lane down: ready FALSE. Without this, (a) would pass for a probe whose
+    // verdict never reaches the readiness decision at all.
     _resetLaneProbeCacheForTest();
+    _setLaneProbeForTest(async (d) =>
+      d.lane === "runtime" ? { lane: d.lane, ok: false, error: "ECONNREFUSED" } : { lane: d.lane, ok: true, latency_ms: 1 },
+    );
+    await _waitForLaneProbeSettleForTest();
     const down = await checkReadiness();
     assert.equal(down.ready, false, "the runtime lane is the ONE lane whose failure is a readiness failure");
     assert.equal(down.checks.pools.find((l) => l.lane === "runtime").ok, false);
+    assert.ok(
+      !down.warnings.some((x) => /pool lane 'runtime'/.test(x)),
+      "the runtime lane is a FAILURE, not a warning — it must not be reported as both",
+    );
   } finally {
     _resetLaneProbeCacheForTest();
-    if (prevRead === undefined) delete process.env.CLARA_READ_DATABASE_URL;
-    else process.env.CLARA_READ_DATABASE_URL = prevRead;
-    if (prevRuntime === undefined) delete process.env.CLARA_RUNTIME_DATABASE_URL;
-    else process.env.CLARA_RUNTIME_DATABASE_URL = prevRuntime;
     if (prev === undefined) delete process.env.CLARA_START_WORLD;
     else process.env.CLARA_START_WORLD = prev;
   }
