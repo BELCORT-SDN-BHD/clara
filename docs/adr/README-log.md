@@ -497,3 +497,4 @@ re-reading find?"
 > later**: v72–v74 are the night's secrets-import releases on the v71 image) beside the
 > statement-lane fixes, the "Enter a statement" pair and DPA v2 — and it **DISCHARGES 裁-150's exit
 > condition**: the session closes, the repo is the handover, no next lanes. Digest row 97.
+> **2026-09-04 ≈09:22 — the repair session's opening minute (ADR-0078, 裁-186…190) is in [`README-log-2026-09.md`](README-log-2026-09.md), opened at this file's ceiling.**
