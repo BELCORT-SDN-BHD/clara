@@ -21,12 +21,17 @@
 // entirely.
 
 import { sessionTokenAccessor } from "@/lib/session-accessor";
-import { fetchDocumentBytes } from "./bytes";
+import { fetchDocumentBytes, VIEWABLE_IN_NEW_TAB } from "./bytes";
 import type { SessionTokenAccessor } from "@/lib/session";
 
 export type OpenDocumentResult =
   | { ok: true }
   | { ok: false; reason: "popup_blocked" }
+  /** C-07 / 裁-175 — the document's own content-type is outside
+   *  `VIEWABLE_IN_NEW_TAB` (bytes.ts). No tab is ever navigated, the blob is
+   *  revoked, and `mime` is carried out VERBATIM so the caller can name the
+   *  actual type rather than guessing at one. */
+  | { ok: false; reason: "not_viewable"; mime: string }
   | { ok: false; reason: "fetch_failed"; message: string };
 
 /** A minimal structural subset of `Window` — enough to navigate the opened tab
@@ -71,6 +76,23 @@ export async function openDocumentInNewTab(
 
   try {
     const bytes = await fetchDocumentBytes(documentId, { session: opts.session ?? sessionTokenAccessor, signal: opts.signal });
+
+    // C-07 / 裁-175 — THE VIEWER GATE, and it runs BEFORE anything else the
+    // resolved bytes could be used for. A `blob:` URL inherits THIS page's
+    // origin, so navigating a tab to one is handing the file the firm member's
+    // own session; only a type the browser renders inline as an inert document
+    // may be handed that (bytes.ts's `VIEWABLE_IN_NEW_TAB` carries the full
+    // reasoning, per type). Ordered ahead of the popup-blocked branch on
+    // purpose: "this file type is not viewable here" is a property of the
+    // DOCUMENT and is true whether or not the browser allowed the tab, whereas
+    // "your browser blocked the tab" would send the human to fix a pop-up
+    // setting that was never the reason.
+    if (!VIEWABLE_IN_NEW_TAB.has(bytes.mime)) {
+      bytes.revoke();
+      tab?.close();
+      return { ok: false, reason: "not_viewable", mime: bytes.mime };
+    }
+
     if (!tab || tab.closed) {
       bytes.revoke();
       return { ok: false, reason: "popup_blocked" };

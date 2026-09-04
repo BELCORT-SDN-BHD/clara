@@ -29,6 +29,7 @@ import { P6_5_SESSIONS } from "./agentic-finish-mock.mjs";
 
 const E2E_DIR = dirname(fileURLToPath(import.meta.url));
 const SERVE_BUILT = join(E2E_DIR, "serve-built.mjs");
+const DOCUMENTS_LANE_MOCK = join(E2E_DIR, "documents-viewer-mock.mjs");
 
 /**
  * EVERY LANE MOCK, not one (裁-190 fold).
@@ -50,6 +51,7 @@ const LANE_MOCKS = [
   "agentic-finish-mock.mjs",
   "bank-close-registers-mock.mjs",
   "chat-parity-mock.mjs",
+  "documents-viewer-mock.mjs",
   "fs4-checkout-mock.mjs",
   "home-board-mock.mjs",
   "journals-table-mock.mjs",
@@ -227,6 +229,11 @@ const LANE_DECLARATIONS: Record<string, { unscopeable: string[]; debt: string[] 
     debt: ["/api/auth-wall/confirm"],
   },
   "journals-table-mock.mjs": { unscopeable: [], debt: [] },
+  // The documents-viewer lane. Every handler names its own client, document, extraction or
+  // candidate before it answers, and the RPC block guards on `p_client`/`p_document`/
+  // `p_candidate` before it dispatches at all — so there is nothing to declare in either
+  // column, which is the state a lane mock should be in.
+  "documents-viewer-mock.mjs": { unscopeable: [], debt: [] },
   "bank-close-registers-mock.mjs": {
     // The gate CATALOG is firm-wide and its read carries no filter AT ALL —
     // `lib/close/api.ts:320-322` sends only `select` and `order`. There is no discriminant in
@@ -331,6 +338,36 @@ test("N5 · every lane handler either scopes by the request's own subject, or is
   // this is a "the reader still works" check, not a second census to keep in step.
   console.log(`\n  scoped handlers across ${LANE_MOCKS.length} lane mocks: ${totalScoped}`);
   assert.ok(totalScoped >= 20, `the census recognised only ${totalScoped} scoped handlers across ${LANE_MOCKS.length} files — it is not reading the guards`);
+});
+
+// --- THE DOCUMENTS-VIEWER LANE (C-07 / D2 / D3) -------------------------------
+//
+// A SECOND lane, measured by the SAME instrument. The rule this file exists for
+// is not about one mock — it is about every lane sharing one server, so a new
+// lane that is not measured here is exactly the gap the rule was written after.
+
+// THIS LANE'S SCOPING CELL IS GONE, and deleting it is the right outcome of the merge.
+// It censused `documents-viewer-mock.mjs` on its own; the 裁-190 fold above generalised the
+// SAME instrument to loop over every mock `serve-built.mjs` imports, with a declaration row
+// per lane. Keeping mine would be a second, weaker copy of a gate that now covers this lane
+// by construction — and a copy is exactly what both folds were written to remove. What
+// survives below is the half their loop does NOT do.
+
+test("N4 · the documents-viewer lane does NOT claim the shared client register", () => {
+  // The sharpest failure this file records is a lane claiming
+  // `/rest/v1/clients` outright, which took away another walk's navigation
+  // link. This lane answers only the by-id form for its own client; the census
+  // above proves the handler falls through, and this reads the guard itself so
+  // the two cells cannot both be satisfied by a handler that returns early for
+  // the wrong reason.
+  const source = readFileSync(DOCUMENTS_LANE_MOCK, "utf8");
+  const block = /path === "\/rest\/v1\/clients"\) \{([\s\S]*?)\n  \}/.exec(source);
+  assert.ok(block, "the documents lane must still declare a /rest/v1/clients handler for this cell to measure");
+  assert.match(
+    block[1]!,
+    /if \(eqParam\(url, "id"\) !== DOCS\.clientId\) return false;/,
+    "the clients handler must fall through on any id but this lane's own",
+  );
 });
 
 // --- N6 -----------------------------------------------------------------------------

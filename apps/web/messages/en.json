@@ -15,7 +15,8 @@
     "cancel": "Cancel",
     "close": "Close",
     "retry": "Retry",
-    "centsUnsafe": "(amount out of range — verify in the ledger)"
+    "centsUnsafe": "(amount out of range — verify in the ledger)",
+    "technicalDetail": "Technical detail"
   },
   "MoneyInput": {
     "placeholder": "0.00",
@@ -1023,6 +1024,14 @@
     "openingDocument": "Opening…",
     "openDocumentFailed": "Could not open this document: {message}",
     "openDocumentPopupBlocked": "Your browser blocked the new tab — allow pop-ups for this site and try again.",
+    "openDocumentNotViewable": "This file type ({mime}) can't be shown in a browser tab — only PDFs and page images can. Read what was extracted from it instead.",
+    "openDocumentShowExtraction": "Show what was extracted",
+    "openDocumentUnknownType": "type not declared",
+    "doorDiagnostic": {
+      "reextraction": "clara.request_reextraction(document, reason)",
+      "consentEvidence": "clara.classify_consent_evidence_document(document, reason)",
+      "autodraft": "clara.request_autodraft(filing)"
+    },
     "legalHoldReason": "Hold reason: {reason}",
     "badgeExtraction": "extraction: {status}",
     "badgePageCount": "{count} pages",
@@ -1076,12 +1085,39 @@
       "unexpected": "Something unexpected happened reading this."
     },
     "evidenceHeading": "Extracted evidence",
-    "evidenceOverlayLabel": "Page overlay viewer",
-    "evidenceOverlayReason": "A page-image overlay of these regions' locators exists only for the chat review card today — not on this tab.",
+    "evidenceOverlayShow": "Show page overlay",
+    "evidenceOverlayHide": "Hide page overlay",
+    "evidenceLayoutElsewhere": "{count} more lines of page text were read from this document — open \"View extraction text\" below to read them.",
     "evidenceEmpty": "No extracted fields yet.",
+    "overlayLoading": "Loading this document's extracted regions…",
+    "overlayNotAvailable": "This document's extraction isn't available for this client, so there is nothing to overlay.",
+    "overlayNoPageForType": "A {mime} file has no page image to show. The fields Clara read from it are listed beside this.",
+    "overlayPageLoading": "Loading the page…",
+    "overlayPageFailed": "The page couldn't be loaded: {message}",
+    "overlayPageAlt": "Page {page} of this document",
+    "overlayPageRegionLabel": "Page {page}, scrollable — use the arrow keys to move around it",
+    "overlayNoRegionsOnPage": "Nothing was extracted from page {page}, so there is nothing to outline on it.",
+    "overlayNoPageSize": "This page can be shown, but not outlined: the extraction recorded no page size, so Clara cannot place the regions without guessing.",
+    "overlayNoDrawableGeometry": "The extracted regions on this page carry no usable outline, so none is drawn.",
+    "overlayClearSelection": "Clear the highlight",
     "evidenceUnlabeledField": "field",
     "evidenceNoValue": "—",
     "evidenceConfidenceValue": "confidence {value}",
+    "evidenceNoConfidence": "no confidence recorded",
+    "factsHeading": "Fields Clara read from this document",
+    "factsEmpty": "The engine recorded no named fields for this document — only page text.",
+    "colFactField": "Field",
+    "colFactValue": "Value",
+    "colFactConfidence": "Engine confidence",
+    "factLabel": {
+      "invoiceTotal": "Invoice total",
+      "invoiceAmountDue": "Amount due",
+      "invoiceCurrency": "Currency",
+      "invoiceVendorName": "Supplier name",
+      "invoiceInvoiceId": "Invoice number",
+      "invoiceInvoiceDate": "Invoice date",
+      "invoiceDeposit": "Deposit"
+    },
     "entriesHeading": "Journal entries filed to this client",
     "entriesEmpty": "No journal entries filed to this client cite this document yet.",
     "entryReversed": "reversed",
@@ -2579,8 +2615,12 @@
       "maxCharsNote": "Budgeted to {maxChars} characters — the same budget the agent reads under.",
       "extractionsHeading": "Extractions",
       "noExtractions": "No completed extraction for this document.",
-      "regionsHeading": "Regions",
-      "noRegions": "No extracted regions.",
+      "layoutHeading": "Page text",
+      "noLayoutText": "No page text was extracted.",
+      "layoutPage": "Page {page} — {count} lines",
+      "layoutPageless": "Table cells and unplaced text — {count} entries",
+      "rawEnvelopeSummary": "Raw engine output (JSON)",
+      "rawEnvelopeTruncated": "Shown exactly as received: the character budget above cut this envelope mid-value, so it is not valid JSON to re-format.",
       "envelopeEmpty": "(no envelope text)",
       "notAvailable": "This document's extraction text isn't available for this client."
     },
@@ -2751,7 +2791,14 @@
       "viewDetailsTrigger": "View details",
       "loadingDetail": "Loading the finding's full detail…",
       "detailNotReachable": "This finding's detail could not be read.",
-      "dedupeKeyLabel": "Dedupe key"
+      "noEvents": "Nothing has happened to this finding since it was raised.",
+      "eventKinds": {
+        "created": "Raised",
+        "superseded": "Superseded by a later check",
+        "resolved": "Resolved",
+        "recheck_opened": "Re-checked",
+        "evaluation": "Evaluated"
+      }
     },
     "sweep": {
       "heading": "Sweep runs",
