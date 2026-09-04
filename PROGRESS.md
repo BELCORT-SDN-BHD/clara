@@ -6,6 +6,18 @@ file wins or it is stale — and truing it is the first thing you do.
 
 ## Current posture
 
+**⇢ 2026-09-04 ≈09:00 MYT — THE REPAIR SESSION IS OPEN on the owner's ask.** Three sources — the
+owner's UIUX flaws file, issue **#541** (the authenticated e2e audit, 36 defects) and the handover's
+own rows — are being unified into one register, each item anchored to code by a mapping workflow
+before any lane opens. Five rulings opened it, 裁-186…190 in
+[`mohe-grill-rulings-2026-09-04-pm.md`](docs/plan/active/mohe-grill-rulings-2026-09-04-pm.md),
+minuted as [ADR-0078](docs/adr/0078-consent-declaration-attestations-abolished-rbac.md): consent is a
+firm-level declaration made once at the DPA stage; every attestation ceremony and maker-checker wall
+is abolished with basic RBAC as the only human gate and automatic receipts kept; the wall-removal DB
+lane runs this session after the P0 block; the two production deploys (runtime v75, the web Worker)
+are the lead's as the owner's delegate; native lanes only. The posture below is the beta's and still
+holds.
+
 **⇢ BETA IS LIVE, AND IT IS CLOSED. THE SPRINT SESSION IS OVER.** The owner ruled **裁-185** on
 2026-09-04 ≈06:15 MYT (`AskUserQuestion`, option 1 of 3 — "GO — 封閉 beta（建議）"): the product is live
 at `https://app.clarabook.com` for **BELCORT and owner-invited testers only**, and open applicants
@@ -89,12 +101,18 @@ fail-closed with a plain receipt, and no wrong number entered the books at any p
 
 ## Lanes
 
-**None.** No lane is running and none is queued (裁-150). The sprint's build closed on 2026-09-03,
+| lane | branch | state |
+|---|---|---|
+| `docs-rulings-186` | branch docs/rulings-186-190-2026-09-04 | this PR — 裁-186…190 and ADR-0078 trued into the digest, the PRD, ARCHITECTURE, the index and the harness |
+| map-and-sweep (workflow) | — | running: anchors every register item to code, sweeps sibling flaws |
+| the P0 block, the UIUX lanes, the wall-removal lane (裁-188), the two deploys (裁-189) | — | queued, opened by the orchestrator in that order |
+
+The sprint's build closed on 2026-09-03,
 the beta-live e2e ran on 09-03/09-04, and every lane in the old table was `merged` or `ceremonied` —
 **that table was moved verbatim to
 [`docs/plan/completed/progress-archive-2026-08-part7.md`](docs/plan/completed/progress-archive-2026-08-part7.md)**
 (md5 `20a52f66ade141634b0fe9441d75e675`), which is the only place the per-lane build history of Wave F
-and the beta sprint is written down. The next session opens a lane when the owner asks for one.
+and the beta sprint is written down. That table is the beta sprint's closed lanes; the live lanes are in the table above.
 
 ## Next
 

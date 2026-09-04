@@ -263,7 +263,7 @@ test("NEW-5: the confirmation response cookie drives the next /signup request", 
 });
 
 test("NEW-2: a fresh /signup render refuses persisted unconfirmed or unreadable users", () => {
-  const session = { subject: SUBJECT, accessToken: "placeholder" };
+  const session = { subject: SUBJECT, accessToken: "placeholder", email: null };
   const refusedUsers: unknown[] = [
     { id: SUBJECT, email_confirmed_at: null },
     { id: SUBJECT, email_confirmed_at: "not-a-timestamp" },
@@ -277,7 +277,7 @@ test("NEW-2: a fresh /signup render refuses persisted unconfirmed or unreadable 
 });
 
 test("NEW-2 RESIDUAL: a direct hosted-Auth caller under autoconfirm drift reaches the firm step — held by the deploy gate, not by code", () => {
-  const session = { subject: SUBJECT, accessToken: "autoconfirmed-token" };
+  const session = { subject: SUBJECT, accessToken: "autoconfirmed-token", email: null };
   const step = SignupStep({
     session,
     user: {
@@ -299,7 +299,7 @@ test("R3, fix round 2026-09-01: a confirmed session with hasOpenRegistration:tru
   // existing test either omitted the prop (defaulting to false) or exercised
   // it only indirectly through a full renderSignupRoute() integration that
   // never actually set it true. This is the POSITIVE arm.
-  const session = { subject: SUBJECT, accessToken: "confirmed-token" };
+  const session = { subject: SUBJECT, accessToken: "confirmed-token", email: null };
   const user = { id: SUBJECT, email_confirmed_at: "2026-08-31T01:02:03Z" };
 
   const step = SignupStep({

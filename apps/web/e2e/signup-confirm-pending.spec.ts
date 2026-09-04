@@ -73,10 +73,35 @@ test("signup account step -> check-your-email, with the confirm code form reacha
   await expect(page.getByRole("heading", { name: "Confirm your email" })).toBeVisible();
   await expectAccessible(page, "check email");
 
-  // The GET is paint-only regardless of the wall's own wiring: rendering the
-  // code form, W-H's own address wall, and the Referrer-Policy header are
-  // pure paint/middleware concerns this Lane-A train DOES ship in full — no
-  // reason to defer any of them to the gated skeleton.
+  // H-35 — THE CARD IS HONEST ABOUT THE RESEND. The build refuses every
+  // resend (`lib/registration/confirmation-resend.ts`'s production default),
+  // so the card may say so and may NOT tell the person to ask for one.
+  await expect(page.getByText(/can't resend one from here/i)).toBeVisible();
+  await expect(page.getByText(/request a new (one|code)/i)).toHaveCount(0);
+
+  // H-35 — AND THE PERSON CAN ACTUALLY REACH THE CODE FORM. Before this the
+  // card had no route to /auth/confirm at all and the mail carries no link
+  // (裁-92), so the only way there was typing the URL. This is the arm the
+  // `page.goto()` below can never prove: a goto establishes that the page
+  // renders, never that anybody can get to it.
+  const enterCode = page.getByRole("link", { name: "Enter my code" });
+  await expect(enterCode).toBeVisible();
+  await enterCode.click();
+  await expect(page).toHaveURL(`${APP_ORIGIN}/auth/confirm`);
+  await expect(page.getByRole("heading", { name: "Enter your confirmation code" })).toBeVisible();
+  // The address travelled with them — the person types six digits, nothing
+  // more. `rememberSignupEmail` wrote it on the previous screen and the code
+  // form reads it from THIS BROWSER's sessionStorage (the W-H wall), so the
+  // control needs no query parameter and carries none.
+  await expect(page.getByLabel("Email")).toHaveValue(email);
+  expect(new URL(page.url()).search).toBe("");
+
+  // A `<Link>` click is a CLIENT-SIDE navigation in the App Router: it fetches
+  // an RSC payload, not a document, so the middleware response headers below
+  // cannot be read off it (measured — `waitForResponse` on a document response
+  // times out at 30 s). The reachability proof is the click above; the header
+  // proof needs a real document GET, which is this one. Two instruments, two
+  // properties, neither standing in for the other.
   const confirmResponse = await page.goto("/auth/confirm");
   expect(confirmResponse?.headers()["referrer-policy"]).toBe("strict-origin");
   // F3 (fresh opus review, 2026-09-01) — FOLD 2's DELIVERY pin. The unit

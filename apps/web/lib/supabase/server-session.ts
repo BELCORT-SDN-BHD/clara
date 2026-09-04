@@ -59,6 +59,25 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 export type ServerSession = {
   readonly accessToken: string;
   readonly subject: string;
+  /**
+   * The caller's address, VERIFIED FROM THE SAME TOKEN as `subject` — the
+   * `email` claim of `accessToken` itself (H-38).
+   *
+   * `null`, never absent, when the token carries no usable email claim. That
+   * is a real shape rather than a failure: an anonymous or provider-linked
+   * session can legitimately have no address, and a resolution that refused
+   * over it would strand callers whose journeys never need one. Every consumer
+   * therefore has to decide what to do with the null, which is the point —
+   * `checkoutSessionForm` omits `customer_email` entirely rather than sending
+   * an empty string.
+   *
+   * BOUND TO THE TOKEN, LIKE `subject`. It is not read from `clara.users`, not
+   * read from a form, and not read from a second Supabase call: an address
+   * that came from anywhere else could name a person other than the one the
+   * doors on this request run as, which is the split-principal defect this
+   * module's header exists to describe.
+   */
+  readonly email: string | null;
 };
 
 /**
@@ -95,14 +114,39 @@ export function tokenFromSession(session: unknown): string | null {
   return token;
 }
 
-/** The deciding half of `resolveServerSession` — both halves must be present, or
- *  there is no session at all. Never a bundle with one field guessed. */
+/**
+ * The caller's address as the token itself states it (H-38).
+ *
+ * NOT A VALIDATOR, ON PURPOSE. This does not test the string against an email
+ * grammar: the claim is signed by the Auth server, this app is not the
+ * authority on what that server considers an address, and a local regex that
+ * disagreed would silently drop a legitimate one. What it DOES enforce is that
+ * the value is a usable non-empty string, because the one consumer that sends
+ * it onward (`customer_email`) takes a Stripe 400 on an empty field. Trimmed
+ * for the same reason.
+ *
+ * Anything else — absent, non-string, blank — is `null`: an honest "this token
+ * does not tell us", never a guess.
+ */
+export function emailFromClaims(claims: unknown): string | null {
+  if (typeof claims !== "object" || claims === null) return null;
+  const email: unknown = (claims as Record<string, unknown>).email;
+  if (typeof email !== "string") return null;
+  const trimmed = email.trim();
+  return trimmed === "" ? null : trimmed;
+}
+
+/** The deciding half of `resolveServerSession` — both REQUIRED halves must be
+ *  present, or there is no session at all. Never a bundle with one field
+ *  guessed. `email` is a third, OPTIONAL field: a token with no address is a
+ *  real session, so its absence yields `null` rather than refusing the whole
+ *  resolution. */
 export function serverSessionFrom(session: unknown, claims: unknown): ServerSession | null {
   const accessToken = tokenFromSession(session);
   if (accessToken === null) return null;
   const subject = subjectFromClaims(claims);
   if (subject === null) return null;
-  return { accessToken, subject };
+  return { accessToken, subject, email: emailFromClaims(claims) };
 }
 
 /**
