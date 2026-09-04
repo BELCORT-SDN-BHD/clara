@@ -73,6 +73,15 @@ export function FirmNavDrawer() {
     <Sheet open={open} onOpenChange={setOpen}>
       <Button
         ref={triggerRef}
+        // `data-firm-drawer-toggle` exists for the browser leg, and the reason is
+        // worth recording: once the sheet is open, Base UI marks the rest of the
+        // document `aria-hidden`, so a ROLE query for this button stops resolving
+        // — correctly, since the button is genuinely not in the accessibility
+        // tree while a modal is up. A test that asserts `aria-expanded="true"`
+        // while the panel is open therefore cannot reach it by role and needs a
+        // structural hook. That is the attribute's whole job; nothing in the
+        // product reads it.
+        data-firm-drawer-toggle
         type="button"
         variant="ghost"
         size="sm"

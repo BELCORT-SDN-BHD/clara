@@ -23,7 +23,12 @@ async function expectAccessible(page: Page, face: string): Promise<void> {
 
 test("client A to B clears the draft, never paints A under B, and chooses the caller's own thread", async ({ page }) => {
   await signInTo(page, `/clients/${CLIENT_A}`);
-  await expect(page.getByText("Client: Rome Properties")).toBeVisible();
+  // CB-AE2E-019: the client's name became a real `<h1>`, and Next's own route
+  // announcer (`#__next-route-announcer__`, an aria-live region) reads the first
+  // h1 — so this string is now legitimately in the document TWICE and a
+  // `getByText` resolves to two elements. Located by ROLE + LEVEL, which is the
+  // stronger locator anyway: it asserts the heading exists as a heading.
+  await expect(page.getByRole("heading", { name: "Client: Rome Properties", level: 1 })).toBeVisible();
   await expect(page.getByText("Own message for client A")).toBeVisible();
   await expect(page.getByText("Colleague message must not auto-open")).toHaveCount(0);
 
@@ -40,7 +45,7 @@ test("client A to B clears the draft, never paints A under B, and chooses the ca
   await expect(page).toHaveURL(/\/clients$/);
   await page.getByRole("link", { name: "Bee Creative Solution" }).click();
   await expect(page).toHaveURL(new RegExp(`/clients/${CLIENT_B}$`));
-  await expect(page.getByText("Client: Bee Creative Solution")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Client: Bee Creative Solution", level: 1 })).toBeVisible();
   await expect(page.getByLabel("Ask Clara")).toHaveValue("");
   await expect(page.getByText("Own message for client A")).toHaveCount(0);
   await expect(page.getByText("Own message for client B")).toBeVisible();

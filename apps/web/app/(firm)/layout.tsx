@@ -67,7 +67,28 @@ export default async function FirmLayout({
         sidebar, via `--sidebar`, and the client-workspace tab header one level
         down); the content column is `--background`, the canvas.
         */}
-        <div className="relative flex min-h-dvh bg-background">
+        {/*
+        CB-AE2E-019 — `overflow-x-clip` on the shell row, and the browser leg is
+        what found it. The rail's enter and exit both TRANSLATE the panel by its
+        own width (`dock-panel`, app/globals.css). In the docked arm that panel
+        is an in-flow flex child, so a translated box sticks out past the row's
+        right edge and the DOCUMENT gains that many pixels of horizontal scroll
+        for the length of the animation — measured at 640 CSS px as
+        `documentElement.scrollWidth` 712 against a `clientWidth` of 640, which
+        is a WCAG 2.2 SC 1.4.10 failure that appears and disappears in 200ms.
+        (The enter has always done this; nothing had ever measured it.)
+
+        `clip`, NOT `hidden`, and the difference is load-bearing: `overflow-x:
+        hidden` forces the other axis to compute as `auto`, which would make this
+        row a scroll container and break the rail's own `sticky top-0`.
+        `overflow-x: clip` pairs legally with `overflow-y: visible`, creates no
+        scroll container, and is the one value that exists for exactly this job.
+        Nothing legitimate is lost: no app content is supposed to paint outside
+        the shell frame horizontally, and every wide surface inside it (every
+        table, via components/ui/table.tsx) already carries its own
+        `overflow-x-auto`.
+        */}
+        <div className="relative flex min-h-dvh overflow-x-clip bg-background">
           {/* DS-02 (P6-3): the bypass-blocks affordance. FIRST in DOM order, so
               it is the first thing Tab reaches on every firm route; `relative`
               on this wrapper is what its `focus:absolute` positions against.

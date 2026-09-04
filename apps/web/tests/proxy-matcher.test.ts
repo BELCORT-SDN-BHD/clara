@@ -86,6 +86,11 @@ describe("only real framework/static namespaces are exempt", () => {
     "/_next/image",
     "/_next/image?url=%2Flogo.png&w=64&q=75",
     "/favicon.ico",
+    // H-31 — the two App Router file-convention icons. Next serves them with a
+    // content-hash QUERY (`/icon.png?icon.<hash>.png`), which is not part of the
+    // pathname the matcher sees, so the bare path is the right thing to assert.
+    "/icon.png",
+    "/apple-icon.png",
     "/brand/fonts/SourceSans3-Regular.ttf",
     "/brand/fonts/Source-Sans-3-LICENSE.md",
   ];
@@ -101,6 +106,12 @@ describe("only real framework/static namespaces are exempt", () => {
     // happens to contain "brand/" deeper in is still gated.
     assert.equal(matches("/clients/acme/brand/assets.png"), true);
     assert.equal(matches("/clients/_next/static"), true);
+    // H-31's two additions cannot re-open finding 3's bypass: a client id that
+    // merely ENDS in one of the icon names is still gated, because the
+    // exclusions are anchored at position 0 of the path.
+    assert.equal(matches("/clients/icon.png"), true);
+    assert.equal(matches("/clients/apple-icon.png"), true);
+    assert.equal(matches("/clients/icon.png/bank"), true);
   });
 });
 

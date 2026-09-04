@@ -89,9 +89,17 @@ test("the firm drawer opens and closes BY KEYBOARD, and focus returns to the tog
   await signInTo(page, "/");
   await ensureRealFocus(page);
 
+  // TWO LOCATORS FOR ONE BUTTON, and the reason is a property of the fix rather
+  // than a convenience. Once the sheet opens, Base UI marks the rest of the
+  // document `aria-hidden` — correctly, because the toggle really is out of the
+  // accessibility tree while a modal is up — so a ROLE query stops resolving and
+  // `toHaveAttribute` reports "element(s) not found". The role locator is what a
+  // user reaches (and is what proves the accessible name), the structural one is
+  // what a test reads state through while the modal is up.
   const toggle = page.getByRole("button", { name: "Menu" });
+  const toggleNode = page.locator("[data-firm-drawer-toggle]");
   await expect(toggle).toBeVisible();
-  await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  await expect(toggleNode).toHaveAttribute("aria-expanded", "false");
 
   // Reached and activated by keyboard, never clicked: Chrome only matches
   // `:focus-visible` and only runs its real focus-restoration path for a
@@ -103,7 +111,11 @@ test("the firm drawer opens and closes BY KEYBOARD, and focus returns to the tog
 
   const panel = page.locator("[data-slot=sheet-content]");
   await expect(panel).toBeVisible();
-  await expect(toggle).toHaveAttribute("aria-expanded", "true");
+  await expect(toggleNode).toHaveAttribute("aria-expanded", "true");
+  // …and the toggle really IS out of the accessibility tree while the modal is
+  // up, which is the behaviour that forced the second locator. Asserted rather
+  // than worked around silently.
+  await expect(toggle).toHaveCount(0);
   // The SAME nav, not a second copy of it — the sidebar's own landmark name.
   await expect(panel.getByRole("navigation", { name: "Firm navigation" })).toBeVisible();
   await expect(panel.getByRole("link", { name: "Clients", exact: true })).toBeVisible();
@@ -124,7 +136,7 @@ test("the firm drawer opens and closes BY KEYBOARD, and focus returns to the tog
   // <body>. A drawer that dumps focus to the top of the document on close makes
   // a keyboard user re-walk the whole page to get back to where they were.
   await expect(toggle).toBeFocused();
-  await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  await expect(toggleNode).toHaveAttribute("aria-expanded", "false");
 });
 
 test("the drawer closes on the navigation it performs — it never sits over the page it just opened", async ({ page }) => {
@@ -141,12 +153,49 @@ test("the drawer closes on the navigation it performs — it never sits over the
   await expect(page.getByRole("link", { name: "Rome Properties" })).toBeVisible();
 });
 
+test("below lg the rail does NOT open itself — the workbench is the work", async ({ page }) => {
+  // The store initialises `railOpen: true` with no persistence, so before this
+  // train every page load opened the rail. In the overlay arm that is a 320px
+  // panel PLUS a backdrop over the whole viewport: the first version of this
+  // walk could not click the drawer toggle at all, because the scrim intercepted
+  // every pointer event on a shell whose entire purpose was to be usable at this
+  // width. The launcher stays the entry point.
+  await page.setViewportSize(NARROW);
+  await signInTo(page, `/clients/${CLIENT_A}`);
+  await expect(page.locator("[data-clara-rail-launcher]")).toBeVisible();
+  await expect(page.locator("[data-clara-rail]")).toHaveCount(0);
+  // …and the drawer toggle is genuinely reachable, which is the thing the scrim
+  // was preventing.
+  await page.getByRole("button", { name: "Menu" }).click();
+  await expect(page.locator("[data-slot=sheet-content]")).toBeVisible();
+});
+
+test("at lg and above the rail is STILL open by default — the narrow default is arm-scoped", async ({ page }) => {
+  // The discriminating other half. Without it, "the rail is closed" would pass
+  // just as happily if the auto-close had been made unconditional, which would
+  // be a silent change to the docked shell every existing walk depends on.
+  await page.setViewportSize(WIDE);
+  await signInTo(page, `/clients/${CLIENT_A}`);
+  await expect(page.locator("[data-clara-rail]")).toBeVisible();
+  await expect(page.locator("[data-clara-rail-launcher]")).toHaveCount(0);
+});
+
 test("below lg the Clara rail is an OVERLAY: it covers the workbench instead of shrinking it", async ({ page }) => {
   await page.setViewportSize(NARROW);
   await signInTo(page, `/clients/${CLIENT_A}`);
 
+  // OPENED BY THE HUMAN, through the launcher — which is now the only way it
+  // opens at this width, and is itself the journey worth walking.
+  await page.locator("[data-clara-rail-launcher]").click();
   const rail = page.locator("[data-clara-rail]");
   await expect(rail).toBeVisible();
+  // Settle the entrance before measuring geometry: `dock-panel` translates the
+  // panel in over 200ms, so a bounding box read on the first visible frame is a
+  // measurement of the animation, not of the layout.
+  await expect
+    .poll(async () => page.evaluate(() => document.getAnimations().filter((a) => a.playState === "running").length))
+    .toBe(0);
+  await expect.poll(async () => (await rail.boundingBox())?.x ?? -1).toBeLessThan(NARROW.width);
   const railBox = await rail.boundingBox();
   const workbench = await page.locator("[data-firm-workbench]").boundingBox();
   expect(railBox).not.toBeNull();
@@ -180,6 +229,7 @@ test("below lg the Clara rail is an OVERLAY: it covers the workbench instead of 
 test("Escape closes the overlay rail, and the exit is a real transition rather than a vanish", async ({ page }) => {
   await page.setViewportSize(NARROW);
   await signInTo(page, `/clients/${CLIENT_A}`);
+  await page.locator("[data-clara-rail-launcher]").click();
   const rail = page.locator("[data-clara-rail]");
   await expect(rail).toBeVisible();
 
@@ -224,19 +274,38 @@ test("SectionTabs is ONE tab stop and the arrow keys move between tabs — the r
   // focus manager; in the node harness every tab rendered `tabindex="-1"`, so
   // asserting it there would have measured the harness. Here it is real.
   await page.setViewportSize(WIDE);
-  await signInTo(page, `/clients/${CLIENT_A}/journals`);
+  await signInTo(page, `/clients/${CLIENT_A}`);
+
+  // WHICH FACE, and why this is a search rather than a fixed URL. Four client
+  // workbenches compose `SectionTabs` (bank, documents, journals, registers) and
+  // each renders it only once its own read lands. The e2e mock does not serve
+  // every one of those reads — journals, for instance, renders its honest
+  // "not available right now" state here — so a hardcoded face would make this
+  // cell a hostage to mock coverage rather than a test of the widget. It walks
+  // the candidates and uses the first that actually renders a tablist, and it
+  // FAILS if none does; it never silently skips.
+  const candidates = ["registers", "bank", "documents", "journals"] as const;
+  let face: string | null = null;
+  for (const candidate of candidates) {
+    await page.goto(`/clients/${CLIENT_A}/${candidate}`);
+    await page.waitForLoadState("networkidle");
+    if ((await page.getByRole("tab").count()) > 1) {
+      face = candidate;
+      break;
+    }
+  }
+  expect(face, `none of ${candidates.join(", ")} rendered a SectionTabs under the e2e mock`).not.toBeNull();
+
   const tabs = page.getByRole("tab");
-  const count = await tabs.count();
-  expect(count, "the journals workbench renders no SectionTabs").toBeGreaterThan(1);
+  expect(await tabs.count()).toBeGreaterThan(1);
 
   // Exactly one tab is in the sequential focus order.
   const stops = await page.evaluate(
     () => [...document.querySelectorAll('[role="tab"]')].filter((t) => t.getAttribute("tabindex") !== "-1").length,
   );
-  expect(stops, "a tablist must be ONE tab stop, not one per tab").toBe(1);
+  expect(stops, `${face}: a tablist must be ONE tab stop, not one per tab`).toBe(1);
 
-  const first = tabs.filter({ has: page.locator(":scope") }).first();
-  await first.focus();
+  await tabs.first().focus();
   const before = await page.evaluate(() => document.activeElement?.textContent ?? "");
   await page.keyboard.press("ArrowRight");
   const after = await page.evaluate(() => document.activeElement?.textContent ?? "");

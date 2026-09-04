@@ -37,6 +37,19 @@ const attr = (node: Stub, name: string): string | null => {
   return get ? get.call(node, name) : null;
 };
 
+/** Invoke the COMMITTED node's own click handler — the same discipline
+ *  `clickButton` applies, for a node this harness reaches by attribute rather
+ *  than by role. Throws rather than no-opping if there is no handler, so a cell
+ *  that clicks nothing cannot pass. */
+function clickVia(node: Stub): void {
+  const propsKey = Object.keys(node as object).find((k) => k.startsWith("__reactProps"));
+  const props = propsKey
+    ? (node as unknown as Record<string, { onClick?: (e: unknown) => void }>)[propsKey]
+    : undefined;
+  if (!props?.onClick) throw new Error("clickVia: this node carries no onClick");
+  props.onClick({ preventDefault() {}, stopPropagation() {} });
+}
+
 function Wrap({ pathname, children }: { pathname: string; children: ReactElement }): ReactElement {
   return createElement(NextIntlClientProvider, {
     locale: "en",
@@ -64,11 +77,10 @@ function Wrap({ pathname, children }: { pathname: string; children: ReactElement
 const drawerTree = (pathname: string) =>
   Wrap({
     pathname,
-    children: createElement(
-      FirmScopeProvider,
-      { scope: { role_rank: 3, is_operator: false } as never },
-      createElement(FirmNavDrawer),
-    ),
+    children: createElement(FirmScopeProvider, {
+      scope: { role_rank: 3, is_operator: false },
+      children: createElement(FirmNavDrawer),
+    }),
   });
 
 test("the drawer toggle is a real disclosure: aria-expanded starts false and aria-controls names the panel", async () => {
@@ -129,23 +141,12 @@ test("the drawer closes on a route change — it never survives the navigation i
       h.find((n) => (n.tagName as string | undefined)?.toLowerCase() === "button" && textOf(n).includes("Menu"));
     const open = trigger();
     assert.ok(open);
-    await h.act(() => {
-      const props = Object.keys(open as object).find((k) => k.startsWith("__reactProps"));
-      (open as unknown as Record<string, { onClick: (e: unknown) => void }>)[props!].onClick({
-        preventDefault() {},
-        stopPropagation() {},
-      });
-    });
+    await h.act(() => clickVia(open));
     assert.equal(attr(trigger()!, "aria-expanded"), "true", "the toggle did not open the drawer");
 
     const navigate = h.find((n) => attr(n, "id") === "nav");
-    await h.act(() => {
-      const props = Object.keys(navigate as object).find((k) => k.startsWith("__reactProps"));
-      (navigate as unknown as Record<string, { onClick: (e: unknown) => void }>)[props!].onClick({
-        preventDefault() {},
-        stopPropagation() {},
-      });
-    });
+    assert.ok(navigate, "the harness's own navigate button is missing");
+    await h.act(() => clickVia(navigate));
     // THE DISCRIMINATING POST-CONDITION: true only after the path changed.
     assert.equal(attr(trigger()!, "aria-expanded"), "false", "the drawer survived the navigation");
   } finally {

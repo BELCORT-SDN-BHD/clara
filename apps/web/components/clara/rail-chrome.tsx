@@ -80,6 +80,38 @@ export function ClaraRailChrome({ children }: { children: React.ReactNode }) {
   const wrapperRef = React.useRef<HTMLDivElement | null>(null);
   const wasOpen = React.useRef(open);
 
+  // BELOW `lg`, THE RAIL DOES NOT OPEN ITSELF — and this is a defect the browser
+  // leg caught, not a preference.
+  //
+  // `claraThreadStore` initialises `railOpen: true` with no persistence, so
+  // every full page load opens the rail. In the DOCKED arm that is a 320px
+  // column beside a workbench. In the OVERLAY arm it is a 320px panel plus a
+  // backdrop over the entire viewport — so at 640 CSS px the first Playwright
+  // walk could not click the drawer toggle at all: the scrim intercepted every
+  // pointer event, on a shell whose whole purpose was to become usable at that
+  // width. The workbench is the work (hard constraint 1); an assistant panel
+  // that covers it before the human has asked for it is not a default, it is a
+  // wall. The launcher is right there, and the audit's own open question named
+  // this exact case ("Defaulting open on a phone hides the workbench entirely").
+  //
+  // ONE FULL PAGE LOAD, ONCE. `RailMount` is outside the client key, so this
+  // component mounts once per document and this effect does not re-run on a
+  // client-side navigation or a client switch — a rail the human opened at this
+  // width STAYS open while they move around. Nothing here touches the store's
+  // default or the docked arm.
+  //
+  // THE SLIDE-OUT ON A NARROW FIRST LOAD IS DELIBERATE AND RECORDED. The server
+  // renders the rail open (it cannot know the viewport), so the close happens
+  // one effect later and the panel takes its normal 200ms exit. That reads as
+  // "Clara is here, and has stepped aside", which is a truer first frame than a
+  // panel that was never there — and it is the same 200ms the panel uses
+  // everywhere else, not a special case.
+  React.useEffect(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
+    if (!window.matchMedia(NARROW_QUERY).matches) return;
+    if (claraThreadStore.isRailOpen()) claraThreadStore.setRailOpen(false);
+  }, []);
+
   React.useEffect(() => {
     const previouslyOpen = wasOpen.current;
     wasOpen.current = open;

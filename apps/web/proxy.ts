@@ -28,8 +28,21 @@ export const config = {
      * - _next/static  (framework build output)
      * - _next/image   (image optimizer)
      * - favicon.ico   (exact file)
+     * - icon.png      (exact file — App Router `app/icon.png`, H-31)
+     * - apple-icon.png (exact file — App Router `app/apple-icon.png`, H-31)
      * - brand/        (public/brand/** — the app's only static asset
      *                 namespace; fonts + their OFL licences)
+     *
+     * H-31, MEASURED, NOT ASSUMED. The two App Router icon routes were added
+     * here because the browser leg caught them behind this gate: the emitted
+     * `<link rel="icon" href="/icon.png?icon.<hash>.png">` fetched from an
+     * UNAUTHENTICATED document (the login page, which is where a first-time
+     * visitor forms an impression) matched the pattern below, ran `proxy()`,
+     * and was redirected to /login — a 200 of `text/html` where the browser
+     * wanted an image, so the tab showed no icon at all. `favicon.ico` was
+     * already exempt, which is exactly why only the .ico half appeared to work.
+     * These are brand assets with no session in them; the exemption is the
+     * whole point of shipping them.
      *
      * NOT an extension list (cross-model security review 2026-08-27, finding
      * 3, MEDIUM). The previous pattern excluded `.*\.(svg|png|jpg|jpeg|gif|
@@ -42,6 +55,6 @@ export const config = {
      * Adding a new always-public static path means adding its NAMESPACE here
      * and extending tests/proxy-matcher.test.ts, which asserts both arms.
      */
-    "/((?!_next/static|_next/image|favicon\\.ico|brand/).*)",
+    "/((?!_next/static|_next/image|favicon\\.ico|icon\\.png|apple-icon\\.png|brand/).*)",
   ],
 };
