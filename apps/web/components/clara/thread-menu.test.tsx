@@ -571,3 +571,54 @@ test("R2 — after a FAILED session read New is REFUSED, so no session is minted
   });
 });
 
+test("R5 — an Escape from a PORTALLED dialog inside the rail's React tree leaves the menu open", async () => {
+  // REACT PROPAGATES SYNTHETIC EVENTS THROUGH THE REACT TREE, NOT THE DOM TREE. Three
+  // Base UI dialogs render inside this rail's tree by way of `ClaraThreadView` —
+  // OnboardingChecklistCard's bootstrap door, InterviewRunCard's cancel door and
+  // ApplyStandardChartControl's apply door — and each portals its content into
+  // `document.body`. So their keydowns DO reach the rail root's handler, and the first
+  // cut of that handler (which claimed in a comment that they never could) closed the
+  // dialog and the thread menu together, moving focus to a control the human was not
+  // using.
+  //
+  // The event is driven at the root with a target OUTSIDE the rail's DOM subtree, which
+  // is exactly the shape a portalled dialog delivers: React-tree ancestor, DOM-tree
+  // stranger. `event.defaultPrevented` cannot be the oracle here — Base UI's own escape
+  // path calls `store.setOpen` rather than preventing the event — so the post-condition
+  // is the menu's own state.
+  const clientId = freshClient();
+  const wire: Wire = { clientId, posts: 0, lists: 0, sessions: [row(clientId, THREAD_NEW, "2026-09-03T00:00:00Z")] };
+  await withFetch(wire, async () => {
+    const h = await renderComponent(rail(clientId));
+    try {
+      await settleUntil(h, () => /NEWEST OWN TRANSCRIPT/.test(h.text()), "the resolved thread");
+      const toggle = buttonNamed(h, "Conversations")!;
+      const railRoot = findAll(h.container, (n) => attr(n, "data-clara-rail") !== null)[0]!;
+      await openMenu(h);
+
+      // A node that is genuinely NOT inside the rail — the stand-in for the portalled
+      // dialog content Base UI mounts on `document.body`.
+      const outside = document.createElement("div") as unknown as Stub;
+      assert.equal(
+        (railRoot.contains as (n: unknown) => boolean)(outside),
+        false,
+        "the fixture must really be outside the rail, or this cell proves nothing",
+      );
+
+      await pressEscape(h, railRoot, outside);
+
+      assert.ok(buttonNamed(h, "New conversation"), "a dialog's Escape must not close the thread menu");
+      assert.equal(attr(toggle, "aria-expanded"), "true");
+
+      // POSITIVE CONTROL on the same handler, same cell: a target INSIDE the rail still
+      // closes it. Without this the assertion above is also satisfied by a handler that
+      // stopped working at all.
+      await pressEscape(h, railRoot, toggle);
+      assert.equal(buttonNamed(h, "New conversation"), undefined, "an Escape from inside the rail still closes the menu");
+      assert.equal(attr(toggle, "aria-expanded"), "false");
+    } finally {
+      await h.unmount();
+    }
+  });
+});
+

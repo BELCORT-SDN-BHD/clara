@@ -221,8 +221,11 @@ describe("canCreateThreadIn", () => {
   });
 
   it("refuses every other combination — the table, exhaustively", () => {
-    // Four inputs, and only the all-true row may pass. Enumerated rather than spot-checked
-    // because a permissive gate here mints a row nothing can list and nothing can delete.
+    // THREE inputs, so eight combinations; the rows below are the four refusals that
+    // matter plus the admitted one above — five of the eight, chosen because the other
+    // three differ from a listed row only in an input that is already false. Enumerated
+    // rather than spot-checked because a permissive gate here mints a row nothing can
+    // list and nothing can delete.
     const rows: { state: GateState; why: string }[] = [
       { state: { ...settled, resolving: true }, why: "a read in flight has no list for the row to land in" },
       { state: { ...settled, callerSubject: null }, why: "a FAILED read settles with no identity to file it under — the state review found open" },
@@ -258,7 +261,9 @@ test("R2 coupling — EVERY producer of `resolving: true` clears the caller proj
   assert.equal(
     compliant.length,
     producers.length,
-    "every construction of an in-flight state must clear `callerSubject` with it — canCreateThreadIn's first half is redundant only while they all do",
+    "every construction of an in-flight state must clear `callerSubject` with it — canCreateThreadIn's first half is redundant only while they all do. "
+      + "NOTE: this pin reads the two fields as ADJACENT, so it also reds on a harmless field REORDER inside the same object literal. That is deliberate — "
+      + "a looser pattern could not tell a reorder from a removal, and the cheap fix is to keep `callerSubject: null` immediately before `resolving: true`.",
   );
 
   // POSITIVE CONTROL on the pin: it must be able to SEE a non-compliant producer, or the

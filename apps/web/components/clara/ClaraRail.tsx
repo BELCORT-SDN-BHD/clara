@@ -36,6 +36,7 @@ export function ClaraRail({ auth = sessionTokenAccessor, clientId }: { auth?: Se
   // menu, because the toggle is this component's element — the panel closing unmounts
   // itself and cannot hand focus anywhere from inside its own teardown.
   const menuToggleRef = useRef<HTMLButtonElement>(null);
+  const railRef = useRef<HTMLElement>(null);
   const closeMenu = useCallback(() => {
     setMenuOpen(false);
     menuToggleRef.current?.focus();
@@ -70,6 +71,7 @@ export function ClaraRail({ auth = sessionTokenAccessor, clientId }: { auth?: Se
     // while it animates, which is a structural change to this component's
     // open/closed branch, not a polish edit — noted rather than half-built.
     <aside
+      ref={railRef}
       data-clara-rail
       className="enter-panel sticky top-0 flex h-dvh w-80 shrink-0 flex-col border-l border-border bg-card shadow-lg"
       aria-label={t("title")}
@@ -81,11 +83,23 @@ export function ClaraRail({ auth = sessionTokenAccessor, clientId }: { auth?: Se
       // change your mind, press Escape without having moved focus). This root is the one
       // ancestor both the toggle and the panel bubble through.
       //
-      // GUARDED ON `menuOpen`, so the rail swallows no Escape it has no use for. A dialog
-      // opened from inside the rail is portalled to `document.body` by Base UI and is not
-      // a descendant of this element, so its own Escape never reaches here either way.
+      // GUARDED TWICE, and the second guard is the one a DOM intuition gets wrong.
+      //
+      // `menuOpen` keeps the rail from swallowing an Escape it has no use for. The
+      // CONTAINMENT check keeps it from swallowing one that belongs to a dialog. React
+      // propagates synthetic events through the REACT tree, not the DOM tree, so a Base UI
+      // dialog portalled into `document.body` still bubbles its keydown to this handler
+      // whenever the component that rendered it is a descendant of this element — and
+      // three are, all reached through `ClaraThreadView`: OnboardingChecklistCard's
+      // bootstrap door, InterviewRunCard's cancel door and ApplyStandardChartControl's
+      // apply door. Without this check, one Escape inside any of them closed the DIALOG
+      // and the thread menu together and moved focus to the menu toggle — a control the
+      // human was not using.
+      //
+      // `contains` is asked of the real DOM, which is where the portal genuinely is not.
       onKeyDown={(event) => {
         if (!menuOpen || event.key !== "Escape") return;
+        if (!railRef.current?.contains(event.target as Node)) return;
         event.stopPropagation();
         closeMenu();
       }}
