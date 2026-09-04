@@ -392,13 +392,23 @@ comment on function clara.client_egress_state(uuid) is
 -- it is a wall change on a relation the runtime and the agent lanes also read, and it belongs
 -- to whoever owns that wall, not to a read-model PR. The residual is named in the PR body.
 --
--- THE VIEW FOLLOWS THE `agent_receipts_visible` PRECEDENT EXACTLY (`0103:406-413`): a plain view,
--- no security_barrier, the floor and the tenant predicate both inside the view's own WHERE, and a
--- flat SELECT grant to clara_authenticated. It is deliberately NOT `security_barrier`: the base
--- relation is already granted to clara_authenticated under a firm-pinned RLS policy, so the view
--- adds a floor and a projection rather than a new tenancy wall, and the precedent it is asked to
--- follow does not carry one.
-create view clara.firm_timeline_visible as
+-- THE VIEW FOLLOWS `agent_receipts_visible` (`0103:406-413`) for its SHAPE — the floor and the
+-- tenant predicate both inside the view's own WHERE, a flat SELECT grant to clara_authenticated —
+-- but it carries `security_barrier`, which that 2026-08 precedent does not.
+--
+-- WHY THE PRECEDENT IS NOT FOLLOWED ON THAT ONE POINT. 裁-15 (2026-08-28) is a LATER standing law
+-- than `0103`, and it binds the catalog-derived same-shape family: every view owned by
+-- clara_fn_owner, SELECT-granted to clara_authenticated, doing its OWN tenant scoping in the body
+-- via jwt_firm()/actor_role_rank()/jwt_sub(). This view matches that predicate exactly, so it is a
+-- member by construction and not by choice. `packages/db/tests/debt-human-read-surfaces.test.mjs`
+-- derives the family FROM THE CATALOG rather than from a list, which is why it caught this on the
+-- first estate run rather than at some later sweep — the census is doing precisely the job it was
+-- built for, and its expected roster is trued from thirteen to fourteen in this same PR.
+--
+-- WHAT THE RELOPTION BUYS, stated so nobody reads more into it: qual-PUSHDOWN ORDER, never column
+-- projection. The payload is absent from this view because it is never selected, not because of
+-- the barrier.
+create view clara.firm_timeline_visible with (security_barrier) as
   select
     e.firm_id                                                        as firm_id,
     e.seq                                                            as seq,
@@ -974,6 +984,17 @@ begin
   end if;
   if not has_table_privilege('clara_authenticated','clara.firm_timeline_visible','select') then
     raise exception 'web-reads tail: firm_timeline_visible is not readable by clara_authenticated'
+      using errcode='CLR10';
+  end if;
+  -- 裁-15: this view is a member of the catalog-derived same-shape family by construction, so it
+  -- carries security_barrier. Asserted HERE as well as in the estate census, because a migration
+  -- that quietly dropped the reloption on a recut would otherwise only surface at the next run of
+  -- a battery in a different file.
+  select count(*) into v_n from pg_class c join pg_namespace n on n.oid=c.relnamespace
+   where n.nspname='clara' and c.relname='firm_timeline_visible'
+     and c.reloptions @> array['security_barrier=true'];
+  if v_n<>1 then
+    raise exception 'web-reads tail: firm_timeline_visible does not carry security_barrier=true (裁-15)'
       using errcode='CLR10';
   end if;
   -- Its own two floors must both be IN the view definition, not merely intended.
