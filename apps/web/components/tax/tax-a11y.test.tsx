@@ -26,6 +26,7 @@ import { checkAccessibility } from "../../test/a11yRules";
 import { focusableElements, checkKeyboardWalk } from "../../test/keyboardWalk";
 import { configureSessionTokenSource, resetSessionTokenSource } from "../../lib/session-accessor";
 import messages from "../../messages/en.json";
+import { FirmScopeProvider } from "../firm-scope-provider";
 import { TaxWorkbenchPage } from "./TaxWorkbenchPage";
 
 enableDomInspection();
@@ -88,12 +89,17 @@ const HAPPY: typeof fetch = async (u) => {
   throw new Error(`unexpected fetch: ${url}`);
 };
 
-function renderTaxTab() {
+/** The layout's positively-read scope. `TaxWorkbenchPage` gates its ONE governed control on it
+ *  (review-557, N7), so the fixture supplies a real rank rather than a stub of the derivation. */
+function renderTaxTab(roleRank = 3) {
   return renderComponent(
     createElement(NextIntlClientProvider, {
       locale: "en",
       messages,
-      children: createElement(TaxWorkbenchPage, { clientId: CLIENT }),
+      children: createElement(FirmScopeProvider, {
+        scope: { role_rank: roleRank, is_operator: false },
+        children: createElement(TaxWorkbenchPage, { clientId: CLIENT }),
+      }),
     }),
   );
 }
@@ -149,21 +155,38 @@ test("CB-AE2E-032: no ClientTax string leaks a lane id, a migration number, a ru
   assert.deepEqual(control.sort(), ["ctl.a", "ctl.b"], "the leak detector must fire on known-bad strings");
 });
 
-/** An element's accessible NAME, by the same precedence the house a11y rules use for form
- *  controls: `aria-label`, else its own text. Tag names alone cannot express 裁-44's rule — a
- *  computation grid and a governed door's reason box are both `TEXTAREA`. */
+function textOfNode(x: unknown): string {
+  const s = x as { nodeType?: number; nodeValue?: string; childNodes?: unknown[]; textContent?: string };
+  if (s.nodeType === 3) return String(s.nodeValue ?? "");
+  const kids = s.childNodes ?? [];
+  if (kids.length > 0) return kids.map(textOfNode).join("");
+  return typeof s.textContent === "string" ? s.textContent : "";
+}
+
+/**
+ * An element's accessible NAME, by the precedence the house a11y rules use for form controls
+ * (`test/a11yRules.ts`): `aria-label`, else its own text, else **an associated `<label>`** —
+ * which for these controls means a WRAPPING one.
+ *
+ * That third arm is not optional dressing (review-557, N8). The two textareas stopped carrying
+ * `aria-label` when their placeholders stopped doubling as their names, and a helper that reads
+ * only the first two arms then reports them as `""` — so a roster pinned on it would have been
+ * pinning two blanks and could no longer say WHICH controls exist, which is the whole claim
+ * 裁-44 asks this cell to make. Tag names cannot make it either: a computation grid and a
+ * governed door's reason box are both `TEXTAREA`.
+ */
 function accessibleName(node: unknown): string {
-  const n = node as { getAttribute?: (a: string) => string | null; childNodes?: unknown[]; nodeValue?: string; nodeType?: number; textContent?: string };
-  const label = n.getAttribute?.("aria-label");
-  if (label) return label;
-  const text = (function read(x: unknown): string {
-    const s = x as { nodeType?: number; nodeValue?: string; childNodes?: unknown[]; textContent?: string };
-    if (s.nodeType === 3) return String(s.nodeValue ?? "");
-    const kids = s.childNodes ?? [];
-    if (kids.length > 0) return kids.map(read).join("");
-    return typeof s.textContent === "string" ? s.textContent : "";
-  })(node).trim();
-  return text;
+  const n = node as { getAttribute?: (a: string) => string | null; parentNode?: unknown };
+  const aria = n.getAttribute?.("aria-label");
+  if (aria) return aria;
+  const own = textOfNode(node).trim();
+  if (own) return own;
+  let cur: unknown = n.parentNode;
+  for (let i = 0; i < 6 && cur; i += 1) {
+    if ((cur as { tagName?: string }).tagName === "LABEL") return textOfNode(cur).trim();
+    cur = (cur as { parentNode?: unknown }).parentNode;
+  }
+  return "";
 }
 
 /** Every descendant of `root` whose tag is in `tags`. */
@@ -193,6 +216,48 @@ function allByTag(root: unknown, tags: readonly string[]): unknown[] {
 //   2. every TEXT-ENTRY element lives inside the turnover-classification panel. This is the
 //      half that catches a computation grid specifically: R1-R10 rows would be inputs somewhere
 //      else on the page, and the roster alone could be satisfied by naming them.
+// N7 (review-557). The rank gate is on the CONTROL, never on the READ — and this cell asserts
+// BOTH halves, because either alone would be satisfied by the wrong build. Hiding the whole tab
+// from a viewer would pass a "no classification control" check while inventing a wall the
+// database does not have: `list_review_queue` floors at VIEWER, so the SST turnover watch is
+// genuinely theirs to see. 裁-187 / ADR-0078 asks for exactly this shape — a control a rank
+// cannot use is not rendered at all, and nothing else moves.
+test("N7: a VIEWER sees the SST turnover watch but is not offered the classification control", async () => {
+  await withMockedEnv(HAPPY, async () => {
+    const h = await renderTaxTab(0);
+    try {
+      for (let i = 0; i < 4; i++) await h.settle();
+      // The read half — the DB-owned figures are still on screen.
+      assert.match(h.text(), /Group F/, "the watch's own service group must still render for a viewer");
+      assert.match(h.text(), /550,000\.00/, "and so must its figures — the read floors at viewer");
+      // The control half.
+      assert.doesNotMatch(h.text(), /Record classification/, "the write must not be offered below its door's floor");
+      assert.equal(
+        h.find((n) => accessibleName(n) === "Account" && (n as { tagName?: string }).tagName === "SELECT"),
+        null,
+        "nor any of its fields",
+      );
+      const violations = checkAccessibility(h.container as never);
+      assert.deepEqual(violations, [], JSON.stringify(violations));
+    } finally {
+      await h.unmount();
+    }
+  });
+});
+
+// The counter-half, so the cell above cannot pass by the panel being broken for everyone.
+test("N7 CONTROL: a BOOKKEEPER — the door's own floor — is offered the classification control", async () => {
+  await withMockedEnv(HAPPY, async () => {
+    const h = await renderTaxTab(1);
+    try {
+      for (let i = 0; i < 4; i++) await h.settle();
+      assert.match(h.text(), /Record classification/, "set_turnover_classification floors at bookkeeper, and the control mirrors it");
+    } finally {
+      await h.unmount();
+    }
+  });
+});
+
 test("裁-44: the Tax tab's only controls are its live governed doors, and no text entry exists outside the one control", async () => {
   await withMockedEnv(HAPPY, async () => {
     const h = await renderTaxTab();
@@ -206,12 +271,12 @@ test("裁-44: the Tax tab's only controls are its live governed doors, and no te
         "Account",                                                  // set_turnover_classification
         "Acknowledge",                                              // ack_compliance_watch
         "Effective from",                                           // set_turnover_classification
-        "Evidence, if you are lowering the account's treatment",    // set_turnover_classification
+        "Evidence",                                                 // set_turnover_classification
+        "Reason (required)",                                         // set_turnover_classification
         "Resolve",                                                  // resolve_compliance_watch
         "Service group",                                            // set_turnover_classification
         "Snooze",                                                   // snooze_compliance_watch
         "Treatment",                                                // set_turnover_classification
-        "Why is this account treated this way?",                    // set_turnover_classification
       ], JSON.stringify(names, null, 2));
 
       // THE SUBMIT IS ABSENT FROM THAT ROSTER BECAUSE IT IS DISABLED, and that is asserted

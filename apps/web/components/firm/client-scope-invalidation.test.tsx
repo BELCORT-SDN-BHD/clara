@@ -76,7 +76,11 @@ const EMPTY_QUEUE = {
   // contract's (`drafts`/`uncoded_filings` for `open_drafts`/`open_tasks`, and `open_tasks`
   // absent). Nothing read them until the board rendered the eight count chips.
   counts: { ready: 0, needs_review: 0, needs_you: 0, open_drafts: 0, open_questions: 0, open_tasks: 0, compliance_watches: 0, lint_findings: 0 },
-  sweep: null, compliance: null, lint: null, rows: [], next_cursor: null,
+  // `compliance` carries its real EMPTY shape, not `null` (review-557, N4 — it was left behind
+  // when the counts above were trued). The live body builds this object unconditionally, and
+  // both the firm-admin register and the Tax tab treat an ABSENT one as a wire fault rather
+  // than as "no watches" — a fixture that ships `null` teaches the opposite.
+  sweep: null, compliance: { stale_evaluator: false, clients: [] }, lint: null, rows: [], next_cursor: null,
 };
 
 /**
@@ -138,14 +142,27 @@ function findWithin(root: unknown, predicate: (n: unknown) => boolean): unknown 
   return null;
 }
 
-/** A live fixture whose client status the test can flip between reads. `clientReads` counts
- *  the reads that actually happened, so "it re-read" is measured, never assumed. */
+/**
+ * A live fixture whose client status the test can flip between reads. `clientReads` counts the
+ * RECORD reads that actually happened, so "it re-read" is measured, never assumed.
+ *
+ * IT COUNTS ONE CALLER, NOT TWO (review-557, N3). `clara.clients` now has a SECOND reader on
+ * this board: `getClientFyEnd` (`lib/close/api.ts`) selects `id,name,fy_end_month,fy_end_day`
+ * from the same relation for the close section. An unfiltered counter therefore counts both,
+ * and "the announcement provoked a real second read" would go green on the close section
+ * re-reading for its own reasons — the subscription under test could be deleted and the cell
+ * would still pass. The projection is the discriminant: only the RECORD read asks for
+ * `status`, and only the fiscal-year read asks for `fy_end_month`.
+ */
 function mockEstate(state: { status: string }) {
   const clientReads: string[] = [];
   const impl = (async (url: RequestInfo | URL) => {
     const u = String(url);
     if (u.includes("/rest/v1/clients")) {
-      clientReads.push(u);
+      if (!u.includes("fy_end_month")) clientReads.push(u);
+      if (u.includes("fy_end_month")) {
+        return jsonResponse([{ id: CLIENT_ID, name: "ROME PROPERTIES", fy_end_month: 12, fy_end_day: 31 }]);
+      }
       return jsonResponse([{ id: CLIENT_ID, name: "ROME PROPERTIES", status: state.status, created_at: "2026-01-01T00:00:00.000Z" }]);
     }
     if (u.includes("/rest/v1/client_facts")) return jsonResponse([]);
@@ -171,12 +188,26 @@ test("H-50 — the client Home tab RE-READS its client on CLIENT_RECORD_CHANGED 
     const h = await renderComponent(App(createElement(ClientWorkspaceOverview, { clientId: CLIENT_ID })));
     try {
       for (let i = 0; i < 6; i++) await h.settle();
-      // SCOPED TO THE h1 (裁-190). The status badge lives inside the client's own heading, and
-      // that is the thing this cell is about; the board also uses the word "Onboarding" as the
-      // h2 of its progress section, so a whole-page match would be reading a projection.
+      // SCOPED TO THE h1, AND THE REASON IS THIS *MOUNT* ARM (裁-190; review-557's comment
+      // correction). On an ONBOARDING client the word "Onboarding" appears TWICE on this board
+      // — the status badge inside the client's own heading, and the `<h2>` of the progress
+      // section — so an unscoped page match cannot say WHICH of them it saw. The badge is what
+      // this cell is about, and `headingText` reads exactly it.
+      //
+      // The scoping is NOT what fixes the post-flip arm below. Measured: with the honest
+      // empties in `emptyBoardRead` in place, the post-flip page has ZERO `/Onboarding/` hits,
+      // so an unscoped `doesNotMatch` would pass there anyway. The EMPTIES are that arm's fix
+      // (without them section B stayed mounted on its own errored plan read); the scoping is
+      // this arm's. Two changes, two reasons, and neither is the other's.
       assert.match(headingText(h), /Onboarding/, `the mount read; got: ${headingText(h)}`);
+      // EXACTLY ONE, not merely "more than zero" (review-557, N3). `clara.clients` has a second
+      // reader on this board — `getClientFyEnd`'s `id,name,fy_end_month,fy_end_day` projection
+      // for the close section — and a counter that swept both up would make this cell a
+      // statement about "some read of that relation happened", not about the record read the
+      // subscription is supposed to provoke. The filter in `mockEstate` is what keeps the two
+      // apart, and this is the assertion that reds if it is removed.
       const readsAtMount = clientReads.length;
-      assert.ok(readsAtMount > 0, "positive control: the mount read actually happened");
+      assert.equal(readsAtMount, 1, `exactly the client RECORD read at mount; got ${clientReads.length}: ${clientReads.join(" | ")}`);
 
       // The database moved, exactly as `commit_client_onboarding` moves it (0017:2825).
       state.status = "active";

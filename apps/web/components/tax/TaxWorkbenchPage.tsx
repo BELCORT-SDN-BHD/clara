@@ -33,6 +33,8 @@
 import { useTranslations } from "next-intl";
 
 import { PageHeader, PageShell } from "@/components/common/page-shell";
+import { firmCapabilities } from "@/lib/firm/capabilities";
+import { useFirmScope } from "@/components/firm-scope-provider";
 import { useAsyncRead } from "@/lib/firm/use-async-read";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
 import { loadClientSstWatch, type ClientSstWatch } from "@/lib/tax/sst-watch";
@@ -42,6 +44,9 @@ import { TurnoverClassificationPanel } from "./TurnoverClassificationPanel";
 
 export function TaxWorkbenchPage({ clientId }: { clientId: string }) {
   const t = useTranslations("ClientTax");
+  // The layout's ONE positively-read scope, handed down by `FirmScopeProvider` — never a second
+  // `caller_context` read here, and never a rank this component derived for itself.
+  const capabilities = firmCapabilities(useFirmScope());
   const watch = useAsyncRead<ClientSstWatch>(() => loadClientSstWatch(sessionTokenAccessor, clientId));
 
   // The service groups THIS CLIENT'S OWN envelope reports — the only DB-owned list of group
@@ -56,12 +61,22 @@ export function TaxWorkbenchPage({ clientId }: { clientId: string }) {
       <PageHeader title={t("heading")} description={t("body")} />
       <SstPanel watch={watch} />
       <TaxComputationPanel />
-      <TurnoverClassificationPanel
-        clientId={clientId}
-        serviceGroups={serviceGroups}
-        busy={watch.busy}
-        act={watch.act}
-      />
+      {/* THE CONTROL IS RANK-GATED; THE WATCH ABOVE IS NOT (review-557, N7). 裁-187 / ADR-0078
+          made "a control the caller's rank cannot use is not rendered" the house rule, and
+          `set_turnover_classification` floors at bookkeeper (`0016:916`), so a viewer would be
+          offered a form that can only ever answer them CLR04. The READ stays open to them:
+          `list_review_queue` floors at viewer, so the SST turnover watch is theirs to see, and
+          hiding a figure the database willingly returns would be this build inventing a wall
+          the DB does not have. An affordance, never a wall — a caller who reaches the door
+          another way still meets its own refusal, rendered verbatim. */}
+      {capabilities.canClassifyTurnover ? (
+        <TurnoverClassificationPanel
+          clientId={clientId}
+          serviceGroups={serviceGroups}
+          busy={watch.busy}
+          act={watch.act}
+        />
+      ) : null}
     </PageShell>
   );
 }

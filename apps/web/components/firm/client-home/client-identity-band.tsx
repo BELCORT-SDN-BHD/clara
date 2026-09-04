@@ -31,7 +31,7 @@ import { useAsyncRead } from "@/lib/firm/use-async-read";
 import type { ClientRow } from "@/lib/firm/reads";
 import { loadClientFactKeys, loadClientFacts, type ClientFactRow } from "@/lib/registers/knowledge";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
-import { ErrorMessage } from "../data-state";
+import { DataState } from "../data-state";
 
 /** A jsonb value the eye can read, or `null` when it is not a scalar. Deliberately NOT
  *  `String(v)`: see this file's header. */
@@ -90,8 +90,19 @@ export function ClientIdentityBand({
         }
         description={t("clientSince", { date: businessDate(new Date(client.created_at)) })}
       />
-      {facts.error ? <ErrorMessage error={facts.error} /> : null}
-      {printable.length > 0 ? (
+      {/* THE CHIPS RIDE `DataState` LIKE EVERY OTHER SECTION (review-557, N9). They were the one
+          block on either board rendering its three states by hand, which is how they came to
+          have no LOADING state at all: an unresolved facts read looked exactly like a client
+          with no facts recorded. `DataState` tells the three apart by construction.
+          The wrapper is still NOT the whole band — a facts failure must degrade the CHIPS only,
+          never the name, status and start date beside them, which come from a different read
+          (the client register's own `factsAvailable` pattern). */}
+      <DataState
+        loading={facts.loading}
+        error={facts.error}
+        isEmpty={live.length === 0}
+        emptyMessage={t("factsEmpty")}
+      >
         <ul className="enter-content flex list-none flex-wrap gap-2 p-0">
           {printable.map((row) => (
             <li key={row.id}>
@@ -116,13 +127,13 @@ export function ClientIdentityBand({
             </li>
           ))}
         </ul>
-      ) : null}
-      {structured > 0 ? (
-        <p className="text-xs text-muted-foreground">{t("factsStructured", { count: structured })}</p>
-      ) : null}
-      {!facts.loading && !facts.error && live.length === 0 ? (
-        <p className="text-xs text-muted-foreground">{t("factsEmpty")}</p>
-      ) : null}
+        {/* Inside the wrapper, because it is a statement ABOUT the facts that were read: a
+            client whose only facts are structured has a `printable` list of zero and this line
+            is the whole answer. Outside it, that would print beside a loading sentence. */}
+        {structured > 0 ? (
+          <p className="text-xs text-muted-foreground">{t("factsStructured", { count: structured })}</p>
+        ) : null}
+      </DataState>
     </div>
   );
 }

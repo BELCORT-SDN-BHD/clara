@@ -172,20 +172,32 @@ export function TurnoverClassificationPanel({
               disabled={busy}
               className="motion-fast h-8 w-fit rounded-lg border border-input bg-transparent px-2.5 text-sm transition-colors outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/70 disabled:cursor-not-allowed disabled:opacity-50"
             />
-            <Textarea
-              value={reason}
-              onChange={(e) => setReason(e.target.value)}
-              placeholder={t("reasonPlaceholder")}
-              aria-label={t("reasonPlaceholder")}
-              disabled={busy}
-            />
-            <Textarea
-              value={evidence}
-              onChange={(e) => setEvidence(e.target.value)}
-              placeholder={t("evidencePlaceholder")}
-              aria-label={t("evidencePlaceholder")}
-              disabled={busy}
-            />
+            {/* REAL `<label>`s, not a placeholder doubling as the accessible name (review-557,
+                N8). A placeholder DISAPPEARS the moment the professional types, so a name
+                borrowed from it is a name that vanishes exactly when someone reviewing what
+                they wrote needs it — and a screen reader's announcement then depends on how
+                much has been typed. The label persists; the placeholder stays as the hint it
+                is. `reason` is required by the door (CLR10 on a blank one) and says so; the
+                evidence field is required only on a watch-lowering move, which the DB decides,
+                so its label says "if" rather than promising either way. */}
+            <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+              {t("reasonLabel")}
+              <Textarea
+                value={reason}
+                onChange={(e) => setReason(e.target.value)}
+                placeholder={t("reasonPlaceholder")}
+                disabled={busy}
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+              {t("evidenceLabel")}
+              <Textarea
+                value={evidence}
+                onChange={(e) => setEvidence(e.target.value)}
+                placeholder={t("evidencePlaceholder")}
+                disabled={busy}
+              />
+            </label>
             <Button
               type="button"
               size="sm"

@@ -38,6 +38,7 @@ import { usePathname } from "next/navigation";
 import { useTranslations } from "next-intl";
 
 import { Button } from "@/components/ui/button";
+import { PageHeader } from "@/components/common/page-shell";
 import { SectionHeader } from "@/components/common/section-header";
 import { useAsyncRead } from "@/lib/firm/use-async-read";
 import { loadClientById } from "@/lib/firm/reads";
@@ -139,6 +140,14 @@ export function ClientWorkspaceOverview({ clientId }: { clientId: string }) {
 
   return (
     <div className="flex flex-col gap-6">
+      {/* THE PAGE ALWAYS HAS EXACTLY ONE `<h1>` (review-557, N5). The identity band owns it
+          once the client record resolves and fills it with the client's own NAME; until then —
+          and on the not-found and failed-read arms, which never reach the band at all — the
+          document would otherwise open on an `<h2>` and have no top-level heading, the same
+          class of outline defect as the blocker above. This is the static workspace label, the
+          fallback `firm-home-board.tsx` already uses for the same reason: a label is not a
+          claim about data, so it is honest before a read lands, where a name would not be. */}
+      {client.data === null ? <PageHeader title={t("heading")} /> : null}
       <DataState
         loading={client.loading}
         error={client.error}

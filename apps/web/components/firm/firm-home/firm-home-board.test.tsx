@@ -106,7 +106,12 @@ test("Firm Home: the h1 is the firm's OWN name from caller_context, and there is
       assert.doesNotMatch(h.text(), /Good morning|Good afternoon|Welcome back/i,
         "caller_context has no display-name column — a greeting would be a name this build invented");
       // The role/client-mix line comes from the SAME read plus the register count, never a guess.
-      assert.match(h.text(), /owner · 2 clients/);
+      // The ROSTER'S OWN LABEL, not the DB token (review-557, MAJOR 4). `caller_context.role`
+      // is `owner`; what a professional reads beside their firm's name is "Owner", the same
+      // word the members roster uses. The negative half is the discriminator: a regression to
+      // printing the raw token reds here rather than passing on a case-insensitive match.
+      assert.match(h.text(), /Owner · 2 clients/);
+      assert.doesNotMatch(h.text(), /owner · 2 clients/, "the raw DB token must not reach the eye");
     } finally { await h.unmount(); }
   });
 });

@@ -92,6 +92,19 @@ export async function listFirmTimeline(
  * A GOVERNED REFUSAL IS NEVER "NOT DEPLOYED" — `isDoorRefusal` is checked FIRST and returns
  * false, so a viewer's CLR04 can never be painted as an absent feature. Neither can a 403, a
  * 5xx or a transport failure: each falls through to the caller's real error rendering.
+ *
+ * WHAT THIS PREDICATE CANNOT TELL APART, named rather than left to be discovered (review-557,
+ * N6). PostgREST answers `PGRST202` for "no function matches this name AND ARGUMENT LIST", so a
+ * function that IS deployed but is called with the wrong parameter names produces the identical
+ * 404, and this returns true for it. The honest note the caller renders would then say "not
+ * available yet" about a read that is in fact live and merely mis-called.
+ *
+ * THAT IS NOT A GAP LEFT OPEN. The argument names are not typed by hand anywhere: `p_after_seq`
+ * and `p_limit` appear exactly once, in `listFirmTimeline` above, and `./timeline.test.ts` pins
+ * the posted body against the migration's own `create function` signature. A drift there reds a
+ * cell rather than degrading silently into this arm. The alternative — probing the schema cache
+ * to distinguish the two 404s — would be a second network call on every failure to sharpen a
+ * message, and it is not worth that.
  */
 export function isTimelineNotDeployed(error: unknown): boolean {
   if (isDoorRefusal(error)) return false;

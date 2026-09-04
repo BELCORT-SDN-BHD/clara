@@ -210,8 +210,16 @@ export async function handleJournalsTableSupabase(request, response, path, url, 
     const body = await readJson(request);
     if (body?.p_scope?.client_id !== JOURNALS.clientId) return false;
     sendJson(response, 200, {
-      counts: { needs_you: 0, needs_review: 1, ready: 0, open_drafts: 1, drafts: 1, uncoded_filings: 0, open_questions: 0, compliance_watches: 0, lint_findings: 0 },
-      sweep: null, compliance: null, lint: null,
+      // THE CONTRACT'S EIGHT COUNT KEYS, and only those (review-557 on #557). This fixture
+      // shipped `drafts` and `uncoded_filings` — neither is a field of the envelope
+      // (`0016:4693-4699`; `lib/firm/needs-you.ts`'s `ReviewQueueCounts`) — and omitted
+      // `open_tasks` entirely. Latent while only the journals walk read it, because that walk
+      // never opens the client Home tab; the moment it does, `needs-you-counts.tsx` prints
+      // "Open coding tasks: undefined" from a fixture nobody would think to suspect.
+      // `compliance` likewise carries its real EMPTY shape rather than `null`, which both the
+      // firm-admin register and the Tax tab treat as a wire fault.
+      counts: { ready: 0, needs_review: 1, needs_you: 0, open_drafts: 1, open_questions: 0, open_tasks: 0, compliance_watches: 0, lint_findings: 0 },
+      sweep: null, compliance: { stale_evaluator: false, clients: [] }, lint: null,
       rows: [QUEUE_ROW],
       next_cursor: null,
     }, cors);

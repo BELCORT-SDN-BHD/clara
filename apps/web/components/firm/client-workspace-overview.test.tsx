@@ -353,6 +353,20 @@ test("a client this session cannot see renders the not-found message and NO sect
     try {
       assert.match(h.text(), /No client with this id is visible to your firm\./);
       assert.doesNotMatch(h.text(), /Needs your attention/, "no section may render for a client that does not resolve");
+      // THE PAGE STILL HAS ITS ONE `<h1>` (review-557, N5). The identity band never renders on
+      // this arm — it is downstream of a client record that does not exist — so without the
+      // static fallback the document would have no top-level heading at all, the same outline
+      // defect as the blocker above, on the arm nobody scans. The mutant panel found this
+      // uncovered: deleting the fallback left the whole suite green.
+      const headings: string[] = [];
+      const walk = (n: unknown): void => {
+        const tag = (n as { tagName?: string }).tagName;
+        if (typeof tag === "string" && /^H[1-6]$/.test(tag)) headings.push(tag);
+        for (const c of ((n as { childNodes?: unknown[] }).childNodes ?? [])) walk(c);
+      };
+      walk(h.container);
+      assert.equal(headings.filter((t) => t === "H1").length, 1, `exactly one h1 on the not-found arm; got ${headings.join(",")}`);
+      assert.equal(headings[0], "H1", `and the document opens on it; got ${headings.join(",")}`);
     } finally { await h.unmount(); }
   });
 });

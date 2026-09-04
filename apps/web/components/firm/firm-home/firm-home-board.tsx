@@ -42,7 +42,7 @@ import { useTranslations } from "next-intl";
 import { NotBuiltNote } from "@/components/common/not-built-note";
 import { PageHeader, PageShell } from "@/components/common/page-shell";
 import { SectionHeader } from "@/components/common/section-header";
-import { loadCallerContext } from "@/lib/firm/caller-context";
+import { FIRM_ROLES, loadCallerContext } from "@/lib/firm/caller-context";
 import { clientStatusTally, oldestWaiting } from "@/lib/firm/home-facts";
 import { loadClientRegister } from "@/lib/firm/reads";
 import { useAsyncRead } from "@/lib/firm/use-async-read";
@@ -63,6 +63,9 @@ const TRIAGE_ROWS = 5;
 export function FirmHomeBoard() {
   const t = useTranslations("FirmHome");
   const tcr = useTranslations("ClientsRegister");
+  // The roster's own role vocabulary — one catalog for the four values, shared with
+  // `components/admin/members-panel.tsx` rather than copied into a second list here.
+  const tm = useTranslations("Members");
 
   // `clara.caller_context` — the firm's own name and the caller's role. The shell already read
   // this server-side to decide SCOPE (lib/require-firm-scope.ts), but it hands only
@@ -92,12 +95,28 @@ export function FirmHomeBoard() {
   // at all (its six columns are pinned byte-for-byte in lib/firm/caller-context.ts), so
   // "Good morning, ⟨name⟩" would be a name this build invented.
   const heading = context?.firm_name ?? t("heading");
+  // THE ROLE IS LABELLED, NOT PRINTED RAW (review-557, MAJOR 4). `caller_context.role` is the
+  // DB's own token — `owner`, `bookkeeper` — and this line renders beside a firm's name for a
+  // professional to read. The product already holds one vocabulary for those four values
+  // (`Members.roles`, the roster's own labels), so this uses it rather than shipping the raw
+  // token as a second, lowercase spelling of the same fact.
+  //
+  // A CHECKED LOOKUP against `FIRM_ROLES` — the closed world `lib/firm/caller-context.ts` pins
+  // against the DB's own CHECK constraint — with the raw value as the honest fallback. Never a
+  // `t(\`roles.${x}\` as ...)` cast: a cast compiles clean and ships a next-intl key path to
+  // the eye the moment the DB admits a fifth role.
+  const roleLabel =
+    context === null
+      ? ""
+      : (FIRM_ROLES as readonly string[]).includes(context.role)
+        ? tm(`roles.${context.role}`)
+        : context.role;
   const description =
     context === null
       ? undefined
       : register.loading || register.error
-        ? t("roleOnly", { role: context.role })
-        : t("roleAndClients", { role: context.role, clientCount: tally.total });
+        ? t("roleOnly", { role: roleLabel })
+        : t("roleAndClients", { role: roleLabel, clientCount: tally.total });
 
   const caughtUp = counts !== null && counts.needs_you === 0 && counts.needs_review === 0;
 
@@ -114,9 +133,19 @@ export function FirmHomeBoard() {
           thing a professional reads at 09:00 on a Monday. */}
       {counts !== null ? (
         <p className="enter-content max-w-prose text-sm text-muted-foreground">
-          {caughtUp
-            ? t("orientationClear")
-            : t("orientation", { needsYou: counts.needs_you, needsReview: counts.needs_review })}
+          {/* TWO SENTENCES, NOT ONE WITH AN EMPTY ARM (review-557, N2). The single ICU string
+              carried `{needsReview, plural, =0 {} …}`, whose empty branch left a trailing space
+              on every rendering where nothing awaited review. Splitting it means the second
+              sentence is simply absent in that case, and each string reads as a sentence on its
+              own rather than as a fragment that only makes sense concatenated. */}
+          {caughtUp ? (
+            t("orientationClear")
+          ) : (
+            <>
+              {t("orientation", { needsYou: counts.needs_you })}
+              {counts.needs_review > 0 ? ` ${t("orientationReview", { needsReview: counts.needs_review })}` : null}
+            </>
+          )}
         </p>
       ) : null}
 
