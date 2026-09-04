@@ -276,6 +276,24 @@ export async function handleCheckoutPost(
       });
     }
     if (err instanceof StripeSessionError) {
+      // THE REASON REACHES A LOG, OR NOBODY EVER LEARNS IT (review-544 MAJOR).
+      // Every `StripeSessionError` collapses into ONE card here — the applicant
+      // is told "we could not reach the payment provider", which is the right
+      // thing to tell them and the wrong thing to be the only record. The
+      // key-class gate's whole value is that a mode mix-up is LOUD, and its
+      // startup arm cannot help on Workers, where the deployment's variables
+      // reach `process.env` per request and module scope sees none of them
+      // (`lib/checkout/stripe-session.ts`'s own note). Without this line a live
+      // key on the beta deployment would refuse every checkout in complete
+      // silence, which looks exactly like Stripe being down.
+      //
+      // THE MESSAGE IS KEY-FREE BY CONSTRUCTION and must stay that way: every
+      // `StripeSessionError` in that module is built from variable names, a
+      // status code, an error NAME, or the two livemode booleans — never from
+      // the secret, and never from Stripe's response body (which can echo
+      // request parameters). `tests/checkout-route.test.ts` pins that the
+      // logged line carries no key and no key prefix.
+      console.error(`[checkout] stripe_unavailable (${err.reason}): ${err.message}`);
       return checkoutRefusal(proof.origin, { kind: "stripe_unavailable" });
     }
     return checkoutRefusal(proof.origin, { kind: "unavailable" });

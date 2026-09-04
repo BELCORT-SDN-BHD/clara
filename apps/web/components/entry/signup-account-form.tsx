@@ -211,6 +211,25 @@ export function SignupAccountForm({
       // remain verbatim: they describe availability/validation, not whether a
       // particular email already has an account.
       if (isDuplicateAccountError(signUpError)) {
+        // REMEMBER THE ADDRESS HERE TOO, AND THIS LINE IS A WALL (review-544
+        // BLOCKER). Flattening the duplicate arm to the same CARD is only half
+        // the flattening once that card carries a control: the /auth/confirm
+        // link added by H-35 leads somewhere whose EMAIL FIELD is prefilled
+        // from this browser's remembered address. Write it only on the fresh
+        // arm and the code form arrives prefilled for a new address and blank
+        // for an existing one — one tap, and the screen has answered "does
+        // this email already have an account". The oracle moves from the card
+        // to its destination; the fix is to make the destination identical
+        // too.
+        //
+        // THE W-H BINDING HOLDS. `rememberSignupEmail` may only ever be
+        // called with an address THIS BROWSER just watched a human type
+        // (signup-email-storage.ts's header), and that is exactly what
+        // happened on this submit — whether or not the account already
+        // existed. Nothing is disclosed by writing it: the value is the one
+        // the person typed into the field above, kept per-tab and per-origin,
+        // and it never leaves this browser.
+        rememberSignupEmail(email);
         setStage("check-email");
         return;
       }
@@ -286,16 +305,20 @@ export function SignupAccountForm({
               was typing the URL. A `<Link>`, not a Button — `/auth/confirm`
               is a real paint-only GET page, and its own header forbids a
               query parameter carrying the address (the W-H wall). None is
-              needed: `rememberSignupEmail` ran above, so the code form
-              prefills from THIS BROWSER's own sessionStorage and the person
-              types only the six digits.
+              needed: `rememberSignupEmail` ran on EVERY arm that reaches this
+              card, so the code form prefills from THIS BROWSER's own
+              sessionStorage and the person types only the six digits.
 
-              Rendered on the duplicate-account arm too, unchanged and
-              deliberately: that arm flattens to this identical card so the
-              screen is not an enumeration oracle, and giving it a different
-              control would restore exactly the signal the flattening
-              removes. An already-confirmed person meets the code form's own
-              refusal, which is the same answer they would get by typing
+              "EVERY ARM" IS LOAD-BEARING, not incidental (review-544). This
+              card is reached two ways — a fresh signup and a duplicate
+              account — and the duplicate arm flattens to this identical card
+              precisely so the screen is not an enumeration oracle. A control
+              whose DESTINATION differs by arm reopens that oracle one click
+              later: prefilled means new, blank means existing. So both arms
+              write the address, and `signup-a11y.test.tsx` asserts the write
+              on all three response shapes rather than only that the rendered
+              text matches. An already-confirmed person meets the code form's
+              own refusal, which is the same answer they would get by typing
               the URL. */}
           <Link
             href="/auth/confirm"

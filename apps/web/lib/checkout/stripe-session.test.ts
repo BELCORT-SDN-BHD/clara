@@ -295,49 +295,85 @@ test("the pinned API version is a real dated Stripe release train", () => {
  *  only part the gate reads. */
 const LIVE_SHAPED_KEY = "sk_live_lane-l1-fixture-not-a-real-key";
 const TEST_SHAPED_KEY = "sk_test_lane-l1-fixture-not-a-real-key";
+/**
+ * RESTRICTED keys, and they are not decoration (review-544 MAJOR).
+ * `stripeKeyLivemode` classifies FOUR prefixes; only the two `sk_` ones were
+ * exercised, so deleting the `rk_` clauses left every cell green while a
+ * restricted LIVE key sailed through the gate. Restricted keys are the ones an
+ * operator reaches for precisely when they are being careful about scope, which
+ * makes the untested half the half a careful operator would hit.
+ */
+const LIVE_RESTRICTED_KEY = "rk_live_lane-l1-fixture-not-a-real-key";
+const TEST_RESTRICTED_KEY = "rk_test_lane-l1-fixture-not-a-real-key";
 
 test("A LIVE-SHAPED KEY UNDER A TEST DEPLOYMENT REFUSES, and fetch is never reached", async () => {
   // The expensive direction. `fetchImpl` throws rather than returning a
   // refusal, so the cell can only pass if the gate ran BEFORE the network call
   // — "zero fetch calls" asserted by construction, not by counting after.
-  let calls = 0;
-  await assert.rejects(
-    () =>
-      createCheckoutSession(REQUEST, {
-        env: { [STRIPE_SECRET_KEY_VAR]: LIVE_SHAPED_KEY, ...TEST_MODE },
-        fetchImpl: async () => { calls += 1; throw new Error("Stripe must not be reached"); },
-      }),
-    (err: unknown) => {
-      assert.ok(err instanceof StripeSessionError);
-      // The reason the route already maps to `stripe_unavailable` — no new UI.
-      assert.equal(err.reason, "unconfigured");
-      assert.match(err.message, /livemode/);
-      // THE SECRET IS NOT IN THE REFUSAL, which reaches a server log.
-      assert.equal(err.message.includes(LIVE_SHAPED_KEY), false, "the refusal carries the key");
-      return true;
-    },
-  );
-  assert.equal(calls, 0, "the gate ran AFTER the Stripe call");
+  // BOTH live prefixes: `sk_live_` and `rk_live_`.
+  for (const key of [LIVE_SHAPED_KEY, LIVE_RESTRICTED_KEY]) {
+    let calls = 0;
+    await assert.rejects(
+      () =>
+        createCheckoutSession(REQUEST, {
+          env: { [STRIPE_SECRET_KEY_VAR]: key, ...TEST_MODE },
+          fetchImpl: async () => { calls += 1; throw new Error("Stripe must not be reached"); },
+        }),
+      (err: unknown) => {
+        assert.ok(err instanceof StripeSessionError, key);
+        // The reason the route already maps to `stripe_unavailable` — no new UI.
+        assert.equal(err.reason, "unconfigured", key);
+        assert.match(err.message, /livemode/);
+        // THE SECRET IS NOT IN THE REFUSAL, which reaches a server log.
+        assert.equal(err.message.includes(key), false, "the refusal carries the key");
+        return true;
+      },
+      key,
+    );
+    assert.equal(calls, 0, `${key}: the gate ran AFTER the Stripe call`);
+  }
 });
 
 test("IT REFUSES IN BOTH DIRECTIONS — a test key on a live deployment is also refused", async () => {
   // The cheap-looking direction, which is the one that quietly takes no money
   // and opens firms for free cards. A gate that only rejected `sk_live_` would
   // pass every assertion in the cell above and miss this entirely.
-  let calls = 0;
-  await assert.rejects(
-    () =>
-      createCheckoutSession(REQUEST, {
-        env: { [STRIPE_SECRET_KEY_VAR]: TEST_SHAPED_KEY, [STRIPE_LIVEMODE_VAR]: "live" },
-        fetchImpl: async () => { calls += 1; return ok(); },
-      }),
-    (err: unknown) => {
-      assert.ok(err instanceof StripeSessionError);
-      assert.equal(err.reason, "unconfigured");
-      return true;
-    },
-  );
-  assert.equal(calls, 0);
+  // BOTH test prefixes: `sk_test_` and `rk_test_`.
+  for (const key of [TEST_SHAPED_KEY, TEST_RESTRICTED_KEY]) {
+    let calls = 0;
+    await assert.rejects(
+      () =>
+        createCheckoutSession(REQUEST, {
+          env: { [STRIPE_SECRET_KEY_VAR]: key, [STRIPE_LIVEMODE_VAR]: "live" },
+          fetchImpl: async () => { calls += 1; return ok(); },
+        }),
+      (err: unknown) => {
+        assert.ok(err instanceof StripeSessionError, key);
+        assert.equal(err.reason, "unconfigured", key);
+        return true;
+      },
+      key,
+    );
+    assert.equal(calls, 0, key);
+  }
+});
+
+test("ALL FOUR PREFIXES are classified, and the classifier is the one the gate calls", () => {
+  // The unit-level companion to the two cells above: the four prefixes
+  // `stripeKeyLivemode` claims to know, each asserted, so deleting one clause
+  // reds here by name instead of only through a refusal that happens to change.
+  assert.equal(stripeKeyLivemode(LIVE_SHAPED_KEY), true, "sk_live_");
+  assert.equal(stripeKeyLivemode(LIVE_RESTRICTED_KEY), true, "rk_live_");
+  assert.equal(stripeKeyLivemode(TEST_SHAPED_KEY), false, "sk_test_");
+  assert.equal(stripeKeyLivemode(TEST_RESTRICTED_KEY), false, "rk_test_");
+  // Leading/trailing whitespace is trimmed before the prefix is read — a
+  // pasted key with a stray newline must not fall through to "unclassifiable".
+  assert.equal(stripeKeyLivemode(`  ${LIVE_RESTRICTED_KEY}\n`), true);
+  // And nothing else is classified: a publishable key, a near-miss and a
+  // fixture are all "unknown", which the gate passes rather than refuses.
+  for (const other of ["pk_live_x", "sk_liv_x", "live_sk_x", FIXTURE_KEY, ""]) {
+    assert.equal(stripeKeyLivemode(other), null, other);
+  }
 });
 
 test("AN UNDECLARED MODE REFUSES — unset is never 'assume test'", async () => {
@@ -479,7 +515,10 @@ test("THE STARTUP ARM reports a mismatch and NEVER throws", async () => {
 test("H-38: customer_email reaches the wire when the token carries one", () => {
   const form = checkoutSessionForm({ ...REQUEST, customerEmail: "aisyah@example.test" });
   assert.equal(form.get("customer_email"), "aisyah@example.test");
-  // And nothing else moved: the eleven pre-existing fields plus this one.
+  // And nothing else moved: the TWELVE pre-existing fields plus this one.
+  // (mode, price, quantity, collection mode, two urls, three `metadata[…]`
+  // and three `subscription_data[metadata][…]` — the deepEqual in the wire-shape
+  // cell above is the roster; this is the count that catches a silent addition.)
   assert.equal([...form.keys()].length, 13);
 });
 

@@ -292,8 +292,19 @@ test("MED-3/LOW-3 (superseded by FS-4 C-6 / 裁-92): the deploy obligations cove
   // — so naming two component paths would be the stale half of the fix. The
   // property is unchanged: the deploy obligation must name where the courtesy
   // actually lives, and README must say so.
-  assert.match(readme, /### 1\.[\s\S]*lib\/auth\/password-policy\.ts/);
-  assert.match(readme, /### 1\.[\s\S]*PASSWORD_MIN_LENGTH/);
+  // SLICED, NOT GREEDY (review-544 NIT). `/### 1\.[\s\S]*needle/` is satisfied
+  // by a needle ANYWHERE after section 1's heading — including in sections 2-5,
+  // which is most of the document. The pin would then survive section 1 losing
+  // the sentence entirely. Section 1's own body is the scope of the claim, so
+  // it is the scope of the assertion.
+  const s1 = readme.split(/\n### /)[1] ?? "";
+  assert.match(s1, /^1\. Password policy/, "the first ### section is not the password-policy one");
+  assert.match(s1, /lib\/auth\/password-policy\.ts/, "README §1 does not name the single site");
+  assert.match(s1, /PASSWORD_MIN_LENGTH/, "README §1 does not name the constant");
+  // And the slice really is a SLICE — if the split stopped working and handed
+  // back the whole document, the two assertions above would go greedy again.
+  assert.ok(s1.length < readme.length / 2, "the section slice is not a slice");
+  assert.doesNotMatch(s1, /### 2\./, "the slice ran past section 1");
   // And it must not go back to naming the retired per-component sites as the
   // place to move the number.
   assert.doesNotMatch(readme, /move `?minLength`? in BOTH/i);

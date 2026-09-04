@@ -1525,7 +1525,7 @@
     "noAccountReturned": "The sign-up didn't complete. No account was created, so nothing was sent to your inbox. Please try again.",
     "checkEmailTitle": "Confirm your email",
     "checkEmailDescription": "Your account exists, but it isn't active until you confirm it.",
-    "checkEmailBanner": "We've sent you a six-digit code. Enter it below and you'll come straight back here to name your firm.",
+    "checkEmailBanner": "We've sent you a six-digit code. Use the button below to enter it, and you'll come straight back here to name your firm.",
     "checkEmailEnterCode": "Enter my code",
     "checkEmailNoCode": "No code yet? Check the spam folder. We can't resend one from here in this build — if it never arrives, start signup again with the same address.",
     "checkEmailSignIn": "Already confirmed? <link>Sign in</link>.",

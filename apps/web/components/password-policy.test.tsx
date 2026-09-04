@@ -13,10 +13,17 @@
 //
 // Three fixed assertions would fix today and rot tomorrow: a FOURTH password
 // surface is added by a future train and no cell knows to look at it. So the
-// ROSTER IS DERIVED FROM THE TREE — every source file that renders a password
-// input — and the render assertions run against a roster this file does not
-// hand-type. A new surface reds cell ② until it is added to the render roster,
-// which is the point: the census cannot silently stop covering the estate.
+// ROSTER IS DERIVED FROM THE TREE — every password INPUT in the source, each
+// classified on its own — and the render assertions run against a roster this
+// file does not hand-type. A new surface reds cell ② until it is added to the
+// render roster, which is the point: the census cannot silently stop covering
+// the estate.
+//
+// THE UNIT IS THE ELEMENT, NOT THE FILE (review-544). Classifying whole files
+// is sound only while every file holds exactly one password input — an accident
+// of today's tree, not a property anything enforces — and it would let a second,
+// undeclared input hide behind a sibling that declared itself properly. See the
+// "PER-ELEMENT" block below for the scan and its synthetic control.
 //
 // ===========================================================================
 // TWO INSTRUMENTS, DELIBERATELY, BECAUSE ONE OF THEM IS WEAK ALONE
@@ -89,12 +96,86 @@ function sourceFiles(): string[] {
 
 const rel = (f: string) => relative(WEB_ROOT, f).split(sep).join("/");
 
-/** Every source file that renders ANY password input, policy-bearing or not. */
-function passwordInputFiles(): string[] {
-  return sourceFiles()
-    .filter((f) => /type="password"/.test(readFileSync(f, "utf8")))
-    .map(rel)
-    .sort();
+// ---------------------------------------------------------------------------
+// PER-ELEMENT, NOT PER-FILE (review-544 NIT)
+// ---------------------------------------------------------------------------
+// The first cut classified whole FILES: a file containing `type="password"`
+// and the string `autoComplete="new-password"` counted as a new-password
+// surface. That is sound only while every file holds exactly one password
+// input, which is an accident of today's tree and not a property anything
+// enforces. A file with two — say a "new password" and a "confirm password" —
+// would be classified once, by whichever attribute happened to appear
+// anywhere in it, and a second input carrying no `autoComplete` at all would
+// be invisible to the totality check that exists to catch exactly that.
+//
+// So the unit of classification is the ELEMENT.
+
+/**
+ * Every `<Input …>` / `<input …>` element in a source file, returned as its own
+ * raw text.
+ *
+ * BRACE DEPTH, NOT THE FIRST `>`. JSX attribute values are arbitrary
+ * expressions and they contain `>` freely — `onChange={(e) => …}` is the
+ * common case — so a scan that stopped at the first `>` would cut most
+ * elements in half and drop the attributes that follow. Quotes are tracked for
+ * the same reason: a `>` inside a string literal ends nothing.
+ */
+export function inputElements(source: string): string[] {
+  const out: string[] = [];
+  const opener = /<[Ii]nput\b/g;
+  let m: RegExpExecArray | null;
+  while ((m = opener.exec(source)) !== null) {
+    let depth = 0;
+    let quote: string | null = null;
+    let i = m.index;
+    for (; i < source.length; i++) {
+      const c = source[i] as string;
+      if (quote !== null) {
+        if (c === quote) quote = null;
+        continue;
+      }
+      if (c === '"' || c === "'" || c === "`") { quote = c; continue; }
+      if (c === "{") { depth += 1; continue; }
+      if (c === "}") { depth -= 1; continue; }
+      if (c === ">" && depth === 0) break;
+    }
+    out.push(source.slice(m.index, Math.min(i + 1, source.length)));
+  }
+  return out;
+}
+
+/** One attribute's raw value text — the contents of `"…"` or of `{…}`, with
+ *  the braces/quotes stripped. `null` when the attribute is absent. */
+export function attributeValue(element: string, name: string): string | null {
+  const at = new RegExp(`\\b${name}\\s*=\\s*`).exec(element);
+  if (at === null) return null;
+  let i = at.index + at[0].length;
+  const first = element[i];
+  if (first === '"' || first === "'") {
+    const end = element.indexOf(first, i + 1);
+    return end === -1 ? null : element.slice(i + 1, end);
+  }
+  if (first !== "{") return null;
+  let depth = 0;
+  const start = i;
+  for (; i < element.length; i++) {
+    if (element[i] === "{") depth += 1;
+    else if (element[i] === "}") { depth -= 1; if (depth === 0) return element.slice(start + 1, i); }
+  }
+  return null;
+}
+
+/**
+ * A password input, read from `type` in EITHER spelling.
+ *
+ * `type="password"` is the literal form; `type={revealed ? "text" : "password"}`
+ * is the show/hide form this estate does not use today and would be a password
+ * field the moment somebody added one. Matching the word inside the whole `type`
+ * expression covers both without pretending to parse TypeScript.
+ */
+export function isPasswordElement(element: string): boolean {
+  const type = attributeValue(element, "type");
+  return type !== null && /\bpassword\b/.test(type);
 }
 
 /**
@@ -108,18 +189,39 @@ function passwordInputFiles(): string[] {
  * change it, and a "use at least 12 characters" hint beside a sign-in field is
  * advice about a password they already have.
  *
- * `autoComplete="new-password"` vs `"current-password"` is exactly that
- * distinction, written by the surface itself for the browser's own password
- * manager. Deriving the split from it means a new surface joins the right side
- * of the roster by declaring what it is, not by being remembered here.
+ * `new-password` vs `current-password` is exactly that distinction, written by
+ * the element itself for the browser's own password manager. Deriving the split
+ * from it means a new surface joins the right side of the roster by declaring
+ * what it is, not by being remembered here.
  */
-const NEW_PASSWORD_MARKER = 'autoComplete="new-password"';
-const CURRENT_PASSWORD_MARKER = 'autoComplete="current-password"';
+const NEW_PASSWORD = "new-password";
+const CURRENT_PASSWORD = "current-password";
 
-function filesWith(marker: string): string[] {
-  return passwordInputFiles().filter((f) =>
-    readFileSync(join(WEB_ROOT, f), "utf8").includes(marker));
+type PasswordElement = { file: string; element: string; autoComplete: string | null };
+
+/** Every password input in the tree, with the file it lives in. */
+function passwordElements(): PasswordElement[] {
+  const out: PasswordElement[] = [];
+  for (const full of sourceFiles()) {
+    const source = readFileSync(full, "utf8");
+    if (!/<[Ii]nput\b/.test(source)) continue;
+    for (const element of inputElements(source)) {
+      if (!isPasswordElement(element)) continue;
+      out.push({ file: rel(full), element, autoComplete: attributeValue(element, "autoComplete") });
+    }
+  }
+  return out.sort((a, b) => a.file.localeCompare(b.file));
 }
+
+/** The files whose password elements declare the given `autoComplete`. */
+function filesWith(marker: string): string[] {
+  return [...new Set(
+    passwordElements().filter((p) => p.autoComplete === marker).map((p) => p.file),
+  )].sort();
+}
+
+/** A hardcoded browser minimum, in either JSX spelling. */
+const HARDCODED_MIN = /minLength=(\{\s*\d+\s*\}|"\d+")/;
 
 /** The surfaces cell ② drives. Kept BESIDE the derived roster so cell ① can
  *  compare them: this list is what is COVERED, the walk is what EXISTS, and a
@@ -141,28 +243,64 @@ test("① the census walker reads a real tree (positive control)", () => {
   );
 });
 
-test("① the roster PARTITIONS every password input in the tree — nothing is unclassified", () => {
-  // The partition must be TOTAL. A password surface that declared neither
-  // autoComplete would fall out of both halves and be policed by nothing,
-  // which is the silent gap this whole file exists to close.
-  const all = passwordInputFiles();
-  const newPassword = filesWith(NEW_PASSWORD_MARKER);
-  const currentPassword = filesWith(CURRENT_PASSWORD_MARKER);
+test("① the classifier reads ELEMENTS, not files — proved on a synthetic source", () => {
+  // THE CONTROL THE REVIEW ASKED FOR, and the one the per-file version could
+  // not have. This source is a single file holding THREE password inputs: one
+  // properly declared, one in the show/hide spelling, and one declaring
+  // nothing at all. A per-file classifier sees `new-password` somewhere in the
+  // text and calls the whole file classified; the per-element one must find
+  // the undeclared input and refuse to classify it.
+  const synthetic = `
+    <Input id="a" type="password" autoComplete="new-password" minLength={PASSWORD_MIN_LENGTH}
+      onChange={(event) => setPassword(event.target.value)} />
+    <Input id="b" type={revealed ? "text" : "password"} autoComplete="current-password" />
+    <Input id="c" type="password" minLength={8} />
+    <Input id="d" type="email" autoComplete="email" />
+  `;
+  const elements = inputElements(synthetic);
+  assert.equal(elements.length, 4, "the element scan lost an input");
+  // The arrow function's own `>` did not truncate the first element — the
+  // failure a first-`>` scan makes, which would drop every later attribute.
+  assert.match(elements[0] as string, /minLength=\{PASSWORD_MIN_LENGTH\}/);
+  assert.match(elements[0] as string, /\/>$/);
+
+  const passwords = elements.filter(isPasswordElement);
+  assert.equal(passwords.length, 3, "the show/hide spelling was missed, or the email was counted");
   assert.deepEqual(
-    [...new Set([...newPassword, ...currentPassword])].sort(),
-    all,
-    "a password surface declares neither new-password nor current-password — classify it",
+    passwords.map((e) => attributeValue(e, "autoComplete")),
+    [NEW_PASSWORD, CURRENT_PASSWORD, null],
+    "the undeclared password input was not seen as undeclared",
+  );
+  // And the widened literal matcher catches both JSX spellings while the
+  // constant reference passes.
+  assert.match(passwords[2] as string, HARDCODED_MIN, 'minLength={8}');
+  assert.match('<input type="password" minLength="8" />', HARDCODED_MIN, 'minLength="8"');
+  assert.doesNotMatch(passwords[0] as string, HARDCODED_MIN, "the constant reference is not a literal");
+});
+
+test("① the roster PARTITIONS every password input in the tree — nothing is unclassified", () => {
+  // The partition must be TOTAL, PER ELEMENT. A password input that declared
+  // neither autoComplete falls out of both halves and is policed by nothing,
+  // which is the silent gap this whole file exists to close — and per-file it
+  // could hide behind a sibling input in the same file that declared one.
+  const unclassified = passwordElements().filter(
+    (p) => p.autoComplete !== NEW_PASSWORD && p.autoComplete !== CURRENT_PASSWORD,
   );
   assert.deepEqual(
-    newPassword.filter((f) => currentPassword.includes(f)),
+    unclassified.map((p) => `${p.file}: ${p.element.replace(/\s+/g, " ").slice(0, 80)}`),
     [],
-    "a file renders both kinds; the per-file split above cannot classify it",
+    "a password input declares neither new-password nor current-password — classify it",
+  );
+  // The instrument found real inputs to classify: four today, and never zero.
+  assert.ok(
+    passwordElements().length >= 4,
+    `only ${passwordElements().length} password inputs found — the element scan is broken`,
   );
 });
 
 test("① EVERY new-password surface in the tree is one this file actually renders", () => {
   assert.deepEqual(
-    filesWith(NEW_PASSWORD_MARKER),
+    filesWith(NEW_PASSWORD),
     [...RENDERED_SURFACES],
     "a new-password surface exists that cell ② does not drive — add it to RENDERED_SURFACES "
     + "and to the render roster below, or the policy census has stopped covering the estate",
@@ -174,25 +312,32 @@ test("① the SIGN-IN field is deliberately outside the policy, and carries no m
   // lane spreading the constant to all four. A minimum on a current-password
   // field refuses a legacy credential at the browser, before the person can
   // sign in and change it.
-  const signIn = filesWith(CURRENT_PASSWORD_MARKER);
-  assert.deepEqual(signIn, ["components/login-form.tsx"], "the sign-in roster moved");
-  for (const file of signIn) {
-    const source = readFileSync(join(WEB_ROOT, file), "utf8");
-    assert.doesNotMatch(source, /minLength/, `${file} constrains an EXISTING password`);
-    assert.doesNotMatch(source, /PASSWORD_MIN_LENGTH/, `${file} states a new-password policy`);
+  // PER ELEMENT: what matters is that the sign-in INPUT carries no minimum,
+  // not that its file happens to contain no such string anywhere.
+  const signIn = passwordElements().filter((p) => p.autoComplete === CURRENT_PASSWORD);
+  assert.deepEqual(signIn.map((p) => p.file), ["components/login-form.tsx"], "the sign-in roster moved");
+  for (const p of signIn) {
+    assert.equal(attributeValue(p.element, "minLength"), null, `${p.file} constrains an EXISTING password`);
+    assert.doesNotMatch(p.element, /PASSWORD_MIN_LENGTH/, `${p.file} states a new-password policy`);
   }
 });
 
-test("① no new-password surface re-types the number instead of reading the constant", () => {
+test("① no new-password input re-types the number instead of reading the constant", () => {
   // The specific rot this replaced: a literal `minLength={8}` beside a comment
-  // saying the value is only a courtesy. Any numeric literal on a minLength in
-  // one of these files is the defect returning, whatever the number is.
-  const roster = filesWith(NEW_PASSWORD_MARKER);
-  assert.ok(roster.length >= 3, `only ${roster.length} new-password files — the marker is broken`);
-  for (const file of roster) {
-    const source = readFileSync(join(WEB_ROOT, file), "utf8");
-    assert.doesNotMatch(source, /minLength=\{\s*\d+\s*\}/, `${file} carries a hardcoded minLength`);
-    assert.match(source, /PASSWORD_MIN_LENGTH/, `${file} does not read the shared constant`);
+  // saying the value is only a courtesy. Any numeric literal on a password
+  // input's minLength is the defect returning, whatever the number is — and
+  // scoping it to the ELEMENT means an unrelated `minLength={6}` elsewhere in
+  // the same file (the six-digit code field is exactly that) neither reds this
+  // nor, worse, satisfies it.
+  const roster = passwordElements().filter((p) => p.autoComplete === NEW_PASSWORD);
+  assert.ok(roster.length >= 3, `only ${roster.length} new-password inputs — the scan is broken`);
+  for (const p of roster) {
+    assert.doesNotMatch(p.element, HARDCODED_MIN, `${p.file} carries a hardcoded minLength`);
+    assert.equal(
+      attributeValue(p.element, "minLength"),
+      "PASSWORD_MIN_LENGTH",
+      `${p.file} does not read the shared constant`,
+    );
   }
 });
 

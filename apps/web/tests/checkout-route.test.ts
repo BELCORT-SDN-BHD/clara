@@ -305,6 +305,58 @@ test("H-38: the address is the SESSION's, never the registration's, and a tokenl
   assert.equal(noEmail.doorCalls.filter((c) => c.fn === "record_checkout_session").length, 1);
 });
 
+test("review-544: the key-class refusal REACHES A LOG, and the line carries no key", async () => {
+  // The applicant sees one collapsed card for every Stripe failure class, which
+  // is right for them and wrong as the only record — a live key on the beta
+  // deployment would refuse every checkout in silence that looks exactly like
+  // Stripe being down. THE GATE IS DRIVEN FOR REAL: no stubbed `createSession`,
+  // so `createCheckoutSession` reads this env, classifies the key and throws
+  // its own refusal, and `fetchImpl` is absent because the gate must refuse
+  // before any network call is attempted.
+  const LIVE_SHAPED_KEY = "sk_live_route-cell-fixture-not-a-real-key";
+  const said: string[] = [];
+  const realError = console.error;
+  console.error = (...args: unknown[]) => { said.push(args.map(String).join(" ")); };
+
+  const rec = recorder();
+  let response: Response;
+  try {
+    response = await withDoors(rec, HAPPY_DOORS, () =>
+      handleCheckoutPost(postRequest(), {
+        ...deps(rec),
+        createSession: undefined,
+        env: { ...ENV, STRIPE_SECRET_KEY: LIVE_SHAPED_KEY, CLARA_STRIPE_LIVEMODE: "test" },
+      } as Parameters<typeof handleCheckoutPost>[1]),
+    );
+  } finally {
+    console.error = realError;
+  }
+
+  // The applicant's own answer is unchanged — the honest card, nothing charged,
+  // and an UNSTAMPED intent so the retry it invites is safe.
+  assert.equal(readFlash(response).kind, "stripe_unavailable");
+  assert.deepEqual(
+    rec.doorCalls.filter((c) => c.fn === "record_checkout_session"),
+    [],
+    "a refused key class still stamped the one-shot intent",
+  );
+
+  // The operator's answer is the log line, and it NAMES THE CAUSE rather than
+  // repeating the card. A line that merely said "stripe_unavailable" would
+  // satisfy "something was logged" and teach nobody anything.
+  assert.equal(said.length, 1, `expected exactly one log line, saw ${said.length}`);
+  const line = said[0] as string;
+  assert.match(line, /unconfigured/, "the logged line does not name the failure class");
+  assert.match(line, /CLARA_STRIPE_LIVEMODE/, "the logged line does not name the variable to fix");
+
+  // AND IT CARRIES NO CREDENTIAL. Not the key, not a vendor prefix, not a
+  // fragment of it — this line goes to a platform log an operator, a log
+  // shipper and a support ticket can all reach.
+  assert.equal(line.includes(LIVE_SHAPED_KEY), false, "the logged line carries the key");
+  assert.doesNotMatch(line, /\b(sk|rk|pk)_(live|test)_/, "the logged line carries a key prefix");
+  assert.doesNotMatch(line, /route-cell-fixture/, "the logged line carries a fragment of the key");
+});
+
 test("W-G: a cross-origin POST is 403 before ANY door, Stripe call or session read", async () => {
   const CROSS_ORIGIN: ReadonlyArray<Record<string, string>> = [
     { origin: "https://evil.example" },
