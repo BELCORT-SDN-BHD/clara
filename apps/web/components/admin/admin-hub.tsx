@@ -5,6 +5,7 @@ import { useTranslations } from "next-intl";
 
 import { NotBuiltNote } from "@/components/common/not-built-note";
 import { useFirmScope } from "@/components/firm-scope-provider";
+import { firmCapabilities } from "@/lib/firm/capabilities";
 import {
   Card,
   CardDescription,
@@ -19,6 +20,25 @@ import {
 /** The real admin hub. Cards are navigation, not fake local tabs. */
 export function AdminHub() {
   return <AdminHubView scope={useFirmScope()} />;
+}
+
+/**
+ * The page's own h1 and orientation line, rank-aware for the same reason
+ * `lib/firm/navigation.ts`'s sidebar label is (E-7 / CB-AE2E-014, 裁-190): a
+ * bookkeeper who follows a link that says "Firm" must not land on a page titled
+ * "Admin". It is a CLIENT component so it can read the scope the layout already
+ * provided; the page stays a Server Component and calls `requireFirmScope()`
+ * exactly zero extra times, which matters — `tests/firm-scope-fourth-entrance.test.ts`
+ * reds on a fourth spine entrance.
+ */
+export function AdminPageTitle() {
+  const t = useTranslations("Admin");
+  return <>{firmCapabilities(useFirmScope()).canManageMembers ? t("heading") : t("firmHeading")}</>;
+}
+
+export function AdminPageDescription() {
+  const t = useTranslations("Admin");
+  return <>{firmCapabilities(useFirmScope()).canManageMembers ? t("body") : t("firmBody")}</>;
 }
 
 /** Exported for the structural/a11y harness; production gets scope from context. */

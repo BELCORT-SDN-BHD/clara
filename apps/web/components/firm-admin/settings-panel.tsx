@@ -6,72 +6,49 @@
 // components/firm-admin's own read/act idiom (vendor-bindings-panel.tsx:
 // useHydratedPart -> {data, err, clr, busy, act}).
 //
-// SCOPE, EXACTLY (per this order): the high-stakes threshold control is a
-// REAL governed write surface (unlike PR-1's Tax tab, which was IA-only
-// honest notes) — the estate's normal form idioms apply, i18n via en.json,
-// a11y per the real-heading-tree lesson PR-1's fix round paid for (no
-// synthetic h1 in the test fixture; this page supplies its own PageHeader
-// h1). The grant_firm_capability/revoke_firm_capability honest note rides
-// here (FS-0 census residual) because this PR is what finally gives it a
-// firm-admin settings surface to sit beside — PR-1 could not place it
-// anywhere, since no such surface existed yet.
+// THE HIGH-STAKES THRESHOLD IS GONE FROM THIS SURFACE (裁-187, owner,
+// 2026-09-04, permanent; minuted as ADR-0078 decision 2). The owner abolished
+// EVERY attestation ceremony and EVERY maker-checker wall: "我要废除所有
+// attestation机制 … 废除所有marker checker 机制, 只有基本的RBAC的权限划分".
+// `firms.high_stakes_amount_cents` and `set_firm_high_stakes_threshold` are named
+// in that ruling's own scope census, and the ruling's execution clause says in as
+// many words that "the threshold verb and its control retire".
+//
+// SO THE CONTROL IS REMOVED OUTRIGHT, not hidden and not disabled. A threshold
+// that gates nothing is worse than absent: a number still on screen, still
+// editable, still described as "the amount above which a posting needs a second
+// person's approval", would be this surface asserting a wall the database is in
+// the middle of taking down. The panel now says what is true — approval depends
+// on rank alone — and reads NOTHING, because the value it used to read no longer
+// governs anything a person can act on here.
+//
+// WHAT IS DELIBERATELY NOT DONE HERE. The verb itself still exists in the
+// database until 裁-188's wall-removal lane lands, and `lib/firm-admin/
+// settings.ts` (outside this lane's file ownership) still wraps it, with its own
+// unit test. That module is the retirement lane's to remove alongside the
+// migration; deleting it from the web first would leave a live door with no
+// build-time record of it at all.
+//
+// The grant_firm_capability/revoke_firm_capability honest note (FS-0 census
+// residual) is unchanged and is now this page's only content.
 
 import { useTranslations } from "next-intl";
 import { Card, CardContent, CardDescription, CardHeader } from "@/components/ui/card";
 import { SectionHeader } from "@/components/common/section-header";
 import { NotBuiltNote } from "@/components/common/not-built-note";
-import { LoadingState, StateBanner } from "@/components/common/state";
-import { useHydratedPart } from "@/lib/parts/hooks";
-import { loadFirmSettings, setFirmHighStakesThreshold } from "@/lib/firm-admin/settings";
-import { fmtCents } from "@/lib/firm-admin/money";
-import { sessionTokenAccessor } from "@/lib/session-accessor";
-import { ThresholdChangeDialog } from "./threshold-dialog";
 
 export function SettingsPanel() {
   const t = useTranslations("FirmAdminCompliance.settings");
-  const tCommon = useTranslations("Common");
-  const settingsState = useHydratedPart(sessionTokenAccessor, (session) => loadFirmSettings(session));
-  const { data, err, clr } = settingsState;
-  const firm = data?.[0] ?? null;
 
   return (
     <div className="flex flex-col gap-4">
       <Card>
         <CardHeader>
-          <SectionHeader level={2}>{t("thresholdHeading")}</SectionHeader>
-          <CardDescription className="text-xs">{t("thresholdSubheading")}</CardDescription>
+          <SectionHeader level={2}>{t("approvalsHeading")}</SectionHeader>
+          <CardDescription className="text-xs">{t("approvalsSubheading")}</CardDescription>
         </CardHeader>
-        <CardContent className="flex flex-col gap-3">
-          {err ? (
-            <StateBanner tone="error" code={clr ? `${clr.code}${clr.reason ? ` · ${clr.reason}` : ""}` : undefined}>
-              {err}
-            </StateBanner>
-          ) : null}
-          {!data ? (
-            !err ? <LoadingState>{t("loading")}</LoadingState> : null
-          ) : !firm ? (
-            <StateBanner tone="error">{t("firmNotFound")}</StateBanner>
-          ) : (
-            // THE PANEL'S OWN receipt of the DB's current value — never
-            // buried inside the (unopened, unmounted-until-open) confirm
-            // dialog below. A caller who never opens the dialog still sees
-            // what is in force today.
-            <p className="text-sm text-muted-foreground">
-              {t("currentValueLabel")}: <span className="font-medium text-foreground">{fmtCents(firm.high_stakes_amount_cents, tCommon("centsUnsafe"))}</span>
-            </p>
-          )}
-          {/* M2 (independent review, PR #489, fix-required): the trigger
-              below is ALWAYS rendered, regardless of the read's own state —
-              see threshold-dialog.tsx's own header for the F3(b) precedent
-              this ports. A read failure must never read as "you are not
-              allowed to change this"; the dialog carries its own error+retry
-              internally when `firm` has not loaded. */}
-          <div>
-            <ThresholdChangeDialog
-              settingsState={settingsState}
-              onSubmit={(cents) => setFirmHighStakesThreshold(sessionTokenAccessor, cents).then(() => undefined)}
-            />
-          </div>
+        <CardContent>
+          <p className="max-w-prose text-sm text-muted-foreground">{t("approvalsNote")}</p>
         </CardContent>
       </Card>
       <Card>

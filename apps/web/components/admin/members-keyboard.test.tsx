@@ -140,10 +140,23 @@ test("members: the remove dialog traps into its own controls and ESCAPES back to
   );
 });
 
-test("members: the invite trigger is DISABLED with the required rank NAMED for a below-admin caller", async () => {
-  // Affordance shaping (design §4 D), and the one place this surface reads the
-  // caller's own rank. It is NOT a wall: `clara._human_ctx` is, and the DB would
-  // refuse CLR04 anyway.
+// THESE TWO CELLS WERE INVERTED ON 2026-09-04 (E-7 / CB-AE2E-014 /
+// CB-AE2E-033, 裁-190), and the inversion is the whole point of the ruling —
+// they are not relaxed, they now pin the OPPOSITE behaviour with the same rigour.
+//   · The first used to require the invite trigger DISABLED, present, and
+//     labelled "Admin or owner can invite someone" for a bookkeeper. The owner
+//     ruled that a control the caller's rank cannot use is NOT RENDERED, so it
+//     now requires the trigger ABSENT — and, because "absent" is the easiest
+//     assertion in the world to satisfy by accident, it proves the ROSTER still
+//     rendered on the same mount before concluding anything.
+//   · The second used to require an UNREADABLE caller context to leave the
+//     trigger ENABLED ("fails OPEN"). Under the ruling an unknown rank is
+//     exactly the case that must not be offered a control, so it now requires
+//     the trigger absent there too. The cost is real and is named in
+//     lib/firm/capabilities.ts's header: a genuine admin whose courtesy read
+//     fails sees no member controls until it succeeds.
+
+test("members: a below-admin caller is offered NO invite trigger at all (裁-190) — not a disabled one", async () => {
   await withMockedEnv(
     async (u) => {
       const url = String(u);
@@ -153,13 +166,16 @@ test("members: the invite trigger is DISABLED with the required rank NAMED for a
     async () => {
       const { h, body } = await mountMembers();
       try {
-        const blocked = findIn(body, (n) => n.tagName === "BUTTON" && textOf(n as never).trim() === "Admin or owner can invite someone");
-        assert.ok(blocked, "the trigger must NAME the required rank rather than vanish");
-        assert.equal((blocked as unknown as { disabled: boolean }).disabled, true);
-        // The gate is asserted DIRECTLY, never by routing a click through it —
-        // `clickButton` refuses a disabled node precisely so a test cannot
-        // manufacture a green on an unopenable door.
-        await assert.rejects(() => clickButton(blocked as never), /refusing to click a DISABLED node/);
+        // THE MUST-NOT-BE-VACUOUS HALF FIRST: this mount really did render the
+        // members surface, so "no trigger" is a finding rather than an empty page.
+        assert.match(textOf(body as never), /Tao Lim/, "the roster itself must have rendered on this mount");
+        for (const label of ["Invite someone", "Admin or owner can invite someone"]) {
+          assert.equal(
+            findIn(body, (n) => n.tagName === "BUTTON" && textOf(n as never).trim() === label),
+            null,
+            `a bookkeeper must see no "${label}" control — neither the live one nor the retired disabled label`,
+          );
+        }
         assert.deepEqual(checkKeyboardWalk(body as never), []);
       } finally {
         await h.unmount();
@@ -168,9 +184,7 @@ test("members: the invite trigger is DISABLED with the required rank NAMED for a
   );
 });
 
-test("members: an UNREADABLE caller context leaves the invite trigger ENABLED — affordance shaping fails OPEN", async () => {
-  // The opposite direction from the scope spine's, deliberately: the boundary is
-  // `_human_ctx`, so a failed courtesy read must never strand a real admin.
+test("members: an UNREADABLE caller context renders NO invite trigger — the gate now fails CLOSED (裁-190)", async () => {
   await withMockedEnv(
     async (u) => {
       const url = String(u);
@@ -180,9 +194,38 @@ test("members: an UNREADABLE caller context leaves the invite trigger ENABLED �
     async () => {
       const { h, body } = await mountMembers();
       try {
-        const live = findIn(body, (n) => n.tagName === "BUTTON" && textOf(n as never).trim() === "Invite someone");
-        assert.ok(live, "a failed context read must leave the real trigger, not the blocked label");
-        assert.equal((live as unknown as { disabled: boolean }).disabled, false);
+        assert.match(textOf(body as never), /Tao Lim/, "the roster read succeeded, so this is a rank finding, not an empty page");
+        assert.equal(
+          findIn(body, (n) => n.tagName === "BUTTON" && textOf(n as never).trim() === "Invite someone"),
+          null,
+          "an unknown rank must not be offered the trigger — this is the direction the ruling reversed",
+        );
+      } finally {
+        await h.unmount();
+      }
+    },
+  );
+});
+
+test("members: a below-admin caller is offered NO row menu — role change and remove are admin-floor doors (裁-190)", async () => {
+  await withMockedEnv(
+    async (u) => {
+      const url = String(u);
+      if (url.includes("/rest/v1/caller_context")) return jsonResponse(BOOKKEEPER_CONTEXT);
+      return mockMembersFetch(url);
+    },
+    async () => {
+      const { h, body } = await mountMembers();
+      try {
+        assert.match(textOf(body as never), /Tao Lim/, "the roster itself must have rendered");
+        assert.equal(
+          findIn(body, (n) => n.tagName === "BUTTON" && attrOf(n, "aria-label") === "Actions for Tao Lim"),
+          null,
+          "no per-row actions trigger may reach a bookkeeper's DOM at all",
+        );
+        // The role is still READ — the roster is bookkeeper+ — so the cell
+        // proves the control went and the information did not.
+        assert.match(textOf(body as never), /Owner/, "the row's role must still render as plain text");
       } finally {
         await h.unmount();
       }

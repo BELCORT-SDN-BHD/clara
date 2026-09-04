@@ -42,9 +42,9 @@ import { EmptyState, LoadingState, StateBanner } from "@/components/common/state
 import { useHydratedPart } from "@/lib/parts/hooks";
 import { createSingleFireGuard, runOnce } from "@/lib/parts/single-fire-guard";
 import { isCallerContextRow, loadCallerContext } from "@/lib/firm/caller-context";
+import { firmCapabilitiesFromRows } from "@/lib/firm/capabilities";
 import {
   approveFirmRegistration,
-  isOperatorConsoleEligible,
   loadOperatorRegistrationQueue,
   rejectFirmRegistration,
 } from "@/lib/registration/doors";
@@ -106,8 +106,19 @@ export function RegistrationsQueuePanel() {
   // `ctxState.data.length > 1` catches the ambiguous case explicitly,
   // rather than folding "exactly one" into the lookup itself. Equivalent
   // truth table, different phrasing.
+  // E-7 (裁-190): the eligibility judgement now comes from the ONE capability
+  // object (lib/firm/capabilities.ts), which composes the very same
+  // `isOperatorConsoleEligible` predicate this file used and folds the
+  // zero-rows/more-than-one-row/null-rank cases into the same denial. The truth
+  // table is UNCHANGED — this gate already failed closed, which is why the
+  // ruling cost it nothing — but there is now one derivation across members,
+  // vendor bindings and this queue instead of three that happened to agree.
+  // `isCallerContextRow` stays as its own conjunct: it proves the row's SHAPE
+  // before `row.user_id` is threaded into the deterministic op_key below, which
+  // is a different question from what the caller may do.
   const row = ctxState.data[0];
-  if (!row || ctxState.data.length > 1 || !isCallerContextRow(row) || !isOperatorConsoleEligible(row)) {
+  const capabilities = firmCapabilitiesFromRows(ctxState.data);
+  if (!row || !isCallerContextRow(row) || !capabilities.canDecideFirmRegistrations) {
     return <StateBanner tone="warning">{t("notOperator")}</StateBanner>;
   }
 

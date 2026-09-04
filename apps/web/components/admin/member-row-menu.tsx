@@ -3,16 +3,29 @@
 // THE ROW-LEVEL ROLE/REMOVE MENU — the surface the DropdownMenu primitive was
 // vendored for (design annex 2 §E; P4-4's file list).
 //
-// THE FOUR ROLES ARE ALWAYS ALL OFFERED, AND THAT IS THE POINT.
-// `set_member_role` refuses **CLR04 'cannot assign a role above your own rank'**
-// (`0145:603`) against the CALLER's own rank, and the last-owner trigger refuses
-// **CLR09 'cannot demote/remove the last active owner'** (`0003:423`) when this
-// row is the firm's last active non-agent owner. This menu pre-empts NEITHER:
-// filtering the list to the caller's rank would hide the ceiling instead of
-// teaching it, and greying out the last owner's demotion would be the UI guessing
-// a fact only the DB can count (plan §2 rule (b); design §4 D says the last-owner
-// wall is "not pre-empted in the UI" in those words). The click happens; the DB's
-// own message renders verbatim, above the table.
+// THIS MENU IS NOT RENDERED AT ALL BELOW ADMIN, as of 2026-09-04 (E-7 /
+// CB-AE2E-014 / CB-AE2E-033, 裁-190). `components/admin/members-tables.tsx`
+// mounts it only when `capabilities.canManageMembers` is true, mirroring
+// `clara.set_member_role`'s and `clara.remove_member`'s own admin floor
+// (`0157_member_door_rank_walls.sql:252` and `:350`) and failing closed on an
+// unreadable rank. A bookkeeper who types the URL now sees the roster with no
+// per-row control, rather than a four-role menu that can only answer CLR04.
+//
+// INSIDE THE MENU, THE FOUR ROLES ARE STILL ALL OFFERED, and that is now a
+// NARROWER claim than it used to be. `set_member_role` refuses **CLR04 'cannot
+// assign a role above your own rank'** (`0157:274`+, the F2 ceiling) against the
+// caller's own rank, and the last-owner trigger refuses **CLR09 'cannot
+// demote/remove the last active owner'** (`0003:423`) when this row is the
+// firm's last active non-agent owner. Neither is pre-empted here: greying out
+// the last owner's demotion would be the UI guessing a fact only the DB can
+// count (plan §2 rule (b); design §4 D says that wall is "not pre-empted in the
+// UI" in those words).
+//
+// **RESIDUE, NAMED RATHER THAN HIDDEN:** an ADMIN still sees the "Owner" item
+// and still meets the CLR04 ceiling on clicking it. 裁-190's order gated the
+// MENU at admin+ and did not reach inside it, so this lane did not filter the
+// ladder to the caller's own rank. It is the same class of finding one rung
+// smaller, and it is the owner's call whether the ruling extends there.
 //
 // THE CURRENT ROLE IS CHECK-MARKED rather than removed — the Mobbin grounding's
 // own shape (§3 takeaway 2, TheyDo/Tailscale: a single-select list with the

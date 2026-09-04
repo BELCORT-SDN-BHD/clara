@@ -1,4 +1,5 @@
 import type { CallerContextRow } from "./caller-context";
+import { firmCapabilities } from "./capabilities";
 import { roleRank, type MemberRole } from "../members/reads";
 import { isOperatorConsoleEligible } from "../registration/doors";
 
@@ -42,7 +43,7 @@ type NavigationEntry = {
 
 export type FirmNavigationEntry = NavigationEntry & {
   readonly id: "home" | "needsYou" | "clients" | "activity" | "admin";
-  readonly messageKey: "home" | "needsYou" | "clients" | "activity" | "admin";
+  readonly messageKey: "home" | "needsYou" | "clients" | "activity" | "admin" | "firm";
 };
 
 export type AdminNavigationEntry = NavigationEntry & {
@@ -130,8 +131,30 @@ export function hasNavigationAccess(
   return true;
 }
 
+/**
+ * "ADMIN" IS THE WRONG WORD BELOW ADMIN RANK, so below admin rank it is not the
+ * word (E-7 / CB-AE2E-014, 裁-190). The section's READ floor stays `viewer` and
+ * is not touched: a viewer legitimately reaches the compliance register and the
+ * firm settings under it, and a bookkeeper the vendor bindings too, so hiding
+ * the entry would remove destinations that ARE theirs. Only the LABEL was
+ * lying — a bookkeeper reads "Admin", finds nothing administrative, and
+ * reasonably concludes the product is offering them something they cannot use.
+ *
+ * The rename rides `messageKey` rather than a branch in the sidebar, so
+ * `components/firm-nav.tsx` (another lane's file) needs no change at all: it
+ * already renders `t(item.messageKey)`. `Admin` at admin+ is byte-identical to
+ * what shipped, which is also why the existing owner walk in
+ * `e2e/firm-navigation-walk.spec.ts` is untouched.
+ *
+ * The threshold is `canManageMembers` rather than a fresh rank literal: "Admin"
+ * is honest exactly when the caller can actually administer the firm's people,
+ * and that predicate already carries its mirrored DB floor and its citation.
+ */
 export function visibleFirmNavigation(scope: NavigationScope): readonly FirmNavigationEntry[] {
-  return FIRM_NAVIGATION.filter((entry) => hasNavigationAccess(scope, entry));
+  const administers = firmCapabilities(scope).canManageMembers;
+  return FIRM_NAVIGATION.filter((entry) => hasNavigationAccess(scope, entry)).map((entry) =>
+    entry.id === "admin" && !administers ? { ...entry, messageKey: "firm" as const } : entry,
+  );
 }
 
 export function visibleAdminNavigation(scope: NavigationScope): readonly AdminNavigationEntry[] {
