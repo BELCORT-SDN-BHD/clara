@@ -39,10 +39,28 @@ export default async function ClientWorkspaceLayout({
         content-card role, while the content column below it wore `--shell`.
         The two roles were exactly inverted.
       */}
-      <header className="flex flex-col gap-2 border-b border-border bg-shell px-8 py-3">
-        <p className="text-sm font-semibold text-foreground">
+      {/*
+        CB-AE2E-019 — two edits here, both from the audit's own reading.
+
+        (1) THE CLIENT NAME IS NOW AN `<h1>`, not a `<p>`. It always WAS the
+        heading of everything below it; it was marked up as a paragraph, so the
+        client-workspace altitude had no level-1 heading at all and a screen
+        reader's heading list skipped straight from the page's own `PageShell`
+        title to the section headings. That is survivable at 1280px where the
+        sidebar and the tab strip are both visible landmarks; at 640 CSS px,
+        where the sidebar is a drawer and the tab strip is a scrolling row, the
+        heading is the only remaining "which client am I in" anchor. It keeps
+        `text-sm font-semibold` — a heading LEVEL is a structural claim, not a
+        type-scale one, and this line is deliberately quieter than the workbench
+        title beneath it.
+
+        (2) `px-8` -> `px-4 lg:px-8`. 64px of horizontal padding is a fifth of a
+        320px viewport, and this header sits above every client surface.
+      */}
+      <header className="flex flex-col gap-2 border-b border-border bg-shell px-4 py-3 lg:px-8">
+        <h1 className="text-sm font-semibold text-foreground">
           {t("clientHeader", { clientName: client.name })}
-        </p>
+        </h1>
         <ClientWorkspaceNav clientId={clientId} />
       </header>
       <ClientScopeProvider clientId={clientId}>

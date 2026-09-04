@@ -32,6 +32,7 @@
   "FirmNav": {
     "ariaLabel": "Firm navigation",
     "adminSectionsLabel": "Admin sections",
+    "drawerTrigger": "Menu",
     "home": "Home",
     "needsYou": "Needs you",
     "clients": "Clients",

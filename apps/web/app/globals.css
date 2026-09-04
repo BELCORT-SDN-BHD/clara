@@ -509,6 +509,53 @@
   }
 }
 
+/* CB-AE2E-019 — the Clara rail's ENTER *and* EXIT in ONE utility, because both
+ * halves must share a SINGLE `transition` declaration (two utilities each
+ * declaring `transition` are resolved by source order in the compiled sheet, not
+ * by the author — that is how an exit silently stops running months later).
+ * `enter-panel` above is untouched and still serves every other panel.
+ * The full rationale — why the exit is a `[data-state]` arm on a still-mounted
+ * element, why WIDTH animates alongside the slide (§7's own "Clara dock reflow"),
+ * and why `overflow: hidden` is load-bearing — lives with the presence latch that
+ * keeps the panel mounted: `apps/web/lib/clara/useRailPresence.ts`.
+ * Reduced motion: position removed, opacity kept — the contract's rule, BOTH ways.
+ */
+@utility dock-panel {
+  opacity: 1;
+  translate: 0;
+  overflow: hidden;
+  transition:
+    opacity var(--motion-duration-panel) var(--motion-easing-out),
+    translate var(--motion-duration-panel) var(--motion-easing-out),
+    width var(--motion-duration-panel) var(--motion-easing-out);
+
+  @starting-style {
+    opacity: 1;
+    translate: 100% 0;
+  }
+
+  &[data-state="closed"] {
+    opacity: 0;
+    translate: 100% 0;
+    width: 0;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    transition: opacity var(--motion-duration-panel) var(--motion-easing-out);
+
+    @starting-style {
+      opacity: 0;
+      translate: 0;
+    }
+
+    &[data-state="closed"] {
+      opacity: 0;
+      translate: 0;
+      width: 0;
+    }
+  }
+}
+
 /* §7's "Rare first welcome only" tier (220ms), in the one treatment its
  * stricter Clara-mascot paragraph spells out verbatim: "opacity plus
  * `translateY(4px)` for 220ms; never loop, float, pulse, bounce, auto-blink or
