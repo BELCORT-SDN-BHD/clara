@@ -1,5 +1,6 @@
 "use client";
 
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 
 /**
@@ -17,13 +18,32 @@ import { cn } from "@/lib/utils";
  * interaction colour, and spending it on "which section am I reading" leaves
  * a page's actual primary action with nothing louder to say.
  *
- * `role="tablist"`/`role="tab"`/`aria-selected` is the resolved semantic —
- * the strongest of the three already in the tree (Registers'), and the only
- * one that is literally true: these buttons select among panels, they do not
- * navigate. Note what this does NOT claim: arrow-key roving focus is not
- * implemented here, exactly as it was not implemented in any of the three
- * originals. Each tab is a real tab stop, which is a coherent (if plainer)
- * keyboard model, not a regression against any lane's prior behaviour.
+ * CB-AE2E-019 — THE HALF THIS FILE USED TO DECLINE, NOW CLOSED BY THE PRIMITIVE.
+ * The previous version of this header recorded the gap in its own words: it
+ * declared `role="tablist"`/`role="tab"`/`aria-selected` and then said
+ * "arrow-key roving focus is not implemented here… Each tab is a real tab stop,
+ * which is a coherent (if plainer) keyboard model". It is not a coherent model —
+ * it is the tablist ARIA contract half-kept. A screen reader that is told this is
+ * a tablist announces "tab 3 of 5" and tells its user to use the arrow keys; on
+ * this widget the arrow keys did nothing and Tab walked every tab instead, which
+ * is exactly the mismatch WAI-ARIA's tabs pattern exists to prevent. Four
+ * workbenches ship it (bank, documents, journals, registers), so the defect was
+ * on four surfaces.
+ *
+ * The fix is `components/ui/tabs.tsx` — Base UI's Tabs, vendored through the
+ * shadcn CLI at style base-nova with zero new dependencies (see that file's
+ * provenance header). The primitive owns the roving tabindex, the
+ * Arrow/Home/End key map, `aria-selected` and the tab/panel wiring. This file is
+ * now a SKIN: the same public API (`label`/`items`/`value`/`onSelect`), the same
+ * underline look, and no keyboard model of its own to get wrong. Nothing about
+ * the four call sites changes.
+ *
+ * WHY `variant="line"` AND NOT the pill default: the `line` variant's active
+ * indicator is an `::after` bar, which is the underline this widget resolved on.
+ * It is repositioned onto the strip's own hairline (`after:bottom-[-1px]`
+ * against the list's `border-b`) so the two read as ONE line rather than two
+ * stacked ones — the job the old `-mb-px` did — and recoloured to `--primary`,
+ * the token the old active state used.
  */
 export function SectionTabs<T extends string>({
   label,
@@ -42,48 +62,49 @@ export function SectionTabs<T extends string>({
   className?: string;
 }) {
   return (
-    <div
-      role="tablist"
-      aria-label={label}
-      className={cn("flex flex-wrap gap-1 border-b border-border", className)}
+    <Tabs
+      value={value}
+      // Base UI hands back the tab's own `value`, which is `T` by construction:
+      // every `TabsTrigger` below is given one of `items`' values and nothing
+      // else can be selected. The cast narrows the primitive's open `TabValue`
+      // back to the caller's union rather than widening the caller's callback.
+      onValueChange={(next) => onSelect(next as T)}
+      className={cn("gap-0", className)}
     >
-      {items.map((item) => {
-        const active = item.value === value;
-        return (
-          <button
+      {/*
+        `group-data-horizontal/tabs:h-auto`, NOT a bare `h-auto`, and this was
+        measured in the BUILT stylesheet after a plain `h-auto` shipped and did
+        nothing. `tabsListVariants`' base carries `group-data-horizontal/tabs:h-8`;
+        the two utilities are in the same tailwind-merge group but under DIFFERENT
+        variants, so `cn()` keeps both and the cascade decides. In
+        `.next/static/chunks/*.css` they compile to `.h-auto{height:auto}` at byte
+        12218 and
+        `.group-data-horizontal\/tabs\:h-8:is(:where(.group\/tabs):where([data-orientation=horizontal]) *)`
+        at byte 39025 — `:where()` contributes ZERO specificity and `*` is zero, so
+        both are (0,1,0) and the LATER one wins. The tablist was a fixed 32px box
+        with `flex-wrap`, so at 640 CSS px a six-tab strip (Bank, Registers) wrapped
+        its second row straight through the list's own `border-b`.
+
+        Matching the variant makes tailwind-merge dedupe rather than making the
+        cascade adjudicate — the same reason the drawer below matches
+        `data-[side=left]:`. No `!important` anywhere: a caller that has to shout
+        over a primitive is a caller that will be shouted over by the next one.
+      */}
+      <TabsList
+        variant="line"
+        aria-label={label}
+        className="group-data-horizontal/tabs:h-auto w-full flex-wrap justify-start gap-1 rounded-none border-b border-border p-0"
+      >
+        {items.map((item) => (
+          <TabsTrigger
             key={item.value}
-            type="button"
-            role="tab"
-            aria-selected={active}
-            onClick={() => onSelect(item.value)}
-            className={cn(
-              // -mb-px lifts the active underline over the strip's own hairline
-              // so the two read as one line, not two stacked ones.
-              //
-              // The focus treatment is the SHADCN RING, not the global
-              // `:focus-visible` outline in globals.css: every Button, Input,
-              // Textarea and Badge in this product focuses with a 3px
-              // `ring-ring/70` halo, and a raw <button> falling through to a
-              // hard 2px outline put two different focus looks on one page.
-              // The global outline stays as the net for anything not yet a
-              // primitive; it is not the idiom. This is a RECORDED
-              // divergence from the token contract's own §9, not pure
-              // internal consistency — see the FOCUS TREATMENT note beside
-              // the identity-canvas citation in app/globals.css.
-              // `focus-visible:border-ring` alongside the ring (the same
-              // Input/NativeSelect idiom) lifts the indicator's own contrast
-              // above WCAG 2.2 SC 1.4.11's 3:1 floor — the translucent ring
-              // alone measured under it.
-              "motion-fast -mb-px rounded-t-md border-b-2 px-2.5 pt-1 pb-2 text-sm font-medium transition-colors outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/70",
-              active
-                ? "border-primary text-foreground"
-                : "border-transparent text-muted-foreground hover:text-foreground",
-            )}
+            value={item.value}
+            className="motion-fast h-auto flex-none rounded-t-md rounded-b-none px-2.5 pt-1 pb-2 after:bg-primary data-active:text-foreground group-data-horizontal/tabs:after:bottom-[-1px]"
           >
             {item.label}
-          </button>
-        );
-      })}
-    </div>
+          </TabsTrigger>
+        ))}
+      </TabsList>
+    </Tabs>
   );
 }

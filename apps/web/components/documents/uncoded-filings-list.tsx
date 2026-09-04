@@ -41,7 +41,7 @@ export function UncodedFilingsList({
    *  one filing's refusal to every other filing shown in the same lane. */
   error: string | null;
   clr: PartClr;
-  act: (fn: () => Promise<void>) => Promise<unknown>;
+  act: (fn: () => Promise<void>) => Promise<boolean>;
 }) {
   const t = useTranslations("CodingQuestionsSignals.uncodedFiling");
   const [lane, setLane] = useState<CodingLane>("needs_you");

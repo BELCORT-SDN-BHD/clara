@@ -319,7 +319,16 @@ test("CloseProposalPanel: Withdraw's CLR41 close_proposal_already_settled refusa
         const bodyText = textOf(body as never);
         assert.match(bodyText, /CLR41/);
         assert.match(bodyText, /already adopted; a settled proposal is terminal/);
-        assert.equal(findAllWithdraw(body).length, 1, "the dialog's own Confirm must be gone from document.body after it settles");
+        // CB-AE2E-004 (2026-09-04): a REFUSED confirm keeps the dialog open, so BOTH
+        // the trigger and the dialog's own Confirm are still in document.body — and
+        // the reason the human typed is still in the textarea. The old assertion here
+        // (length 1, "Confirm must be gone") pinned the defect.
+        assert.equal(findAllWithdraw(body).length, 2, "the dialog must STAY OPEN after a refused confirm");
+        assert.equal(
+          (findByTag(body, "TEXTAREA") as unknown as { value: string }).value,
+          "the analysis was superseded by a later document",
+          "the typed reason survives the refusal",
+        );
       } finally {
         await h.unmount();
         for (let i = 0; i < 5; i++) await h.settle();
@@ -370,15 +379,17 @@ test("FutureAttestationPanel: Confirm stays disabled until every field is filled
         const bodyText = textOf(body as never);
         assert.match(bodyText, /CLR03/, "the refusal code must render verbatim in the persistent banner");
         assert.match(bodyText, /agent identity cannot attest the future method/, "the refusal message must render verbatim, never re-worded");
-        // The trigger's OWN label is "Record future-method attestation" — it
-        // never matches the exact string "Record" (the Confirm button's
-        // label), so the discriminating count here is 0, not 1: the dialog's
-        // Confirm is the ONLY node this predicate can ever match, and it
-        // must be gone once the attempt settles.
+        // The trigger's OWN label is "Record future-method attestation" — it never
+        // matches the exact string "Record" (the Confirm button's label), so this
+        // predicate can only ever match the dialog's own Confirm. CB-AE2E-004
+        // (2026-09-04) flips what it must find: a REFUSED attempt keeps the dialog
+        // open, so Confirm is still there. The old assertion (count 0, "must be
+        // GONE") pinned the class defect — every field this panel asks for lives
+        // inside the dialog the refusal was throwing away.
         assert.equal(
           findAllButtonsByText(body, "Record").length,
-          0,
-          "DISCRIMINATING POST-CONDITION: the dialog's own Confirm ('Record') must be GONE from document.body after it settles",
+          1,
+          "DISCRIMINATING POST-CONDITION: the dialog's own Confirm ('Record') must STILL be in document.body after a refusal",
         );
         assert.ok(
           h.find((n) => n.tagName === "BUTTON" && textOf(n).includes("Record future-method attestation")),

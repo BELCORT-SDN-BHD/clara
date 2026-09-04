@@ -22,6 +22,7 @@
 // answer out of each — the supersession chain, as written, in the order it was written.
 
 import { getRows } from "@/lib/read";
+import { verbatimAnswerText } from "./answer-format";
 import type { SessionTokenAccessor } from "@/lib/session";
 
 type Opts = { session?: SessionTokenAccessor; signal?: AbortSignal };
@@ -76,10 +77,16 @@ function itemFromSnapshot(snapshot: unknown, itemKey: string): { state: string; 
   return null;
 }
 
+/** H-26 — the trail agrees with the row. This used to `JSON.stringify`, so the amend dialog's
+ *  "earlier answers, superseded" list rendered raw JSON for exactly the answers the row above
+ *  it now renders in words. It routes through the SAME verbatim renderer the row's formatter
+ *  falls back to, so the de-duplication below still compares like with like: two genuinely
+ *  different objects still produce different text, and an unchanged one still produces the
+ *  same text across every snapshot that carries it. */
 function answerToText(answer: unknown): string {
   if (typeof answer === "string") return answer;
   if (answer === null || answer === undefined) return "";
-  return JSON.stringify(answer);
+  return verbatimAnswerText(answer);
 }
 
 /**

@@ -134,7 +134,7 @@ export function MatchingSection({ clientId }: { clientId: string }) {
         </CardHeader>
         <CardContent className="flex flex-col gap-2">
           {unmatchedLines.data !== null && <ActionRefusal err={unmatchedLines.err} clr={unmatchedLines.clr} />}
-          <ReadState hasData={unmatchedLines.data !== null} err={unmatchedLines.err} errKind={linesKind.kind} isEmpty={unmatchedLines.data?.length === 0} onRetry={() => void unmatchedLines.reload()}>
+          <ReadState hasData={unmatchedLines.data !== null} err={unmatchedLines.err} errKind={linesKind.kind} isEmpty={unmatchedLines.data?.length === 0} emptyCopy={t("emptyUnmatchedLines")} onRetry={() => void unmatchedLines.reload()}>
             <ul className="flex flex-col gap-2">
               {(unmatchedLines.data ?? []).map((l) => (
                 <li key={l.line_id} className="enter-content flex flex-col gap-2 rounded-lg border border-border bg-card p-3 text-sm">
@@ -174,7 +174,7 @@ export function MatchingSection({ clientId }: { clientId: string }) {
             <SectionHeader level={2}>{t("matchHeading", { count: selectedLineIds.size })}</SectionHeader>
           </CardHeader>
           <CardContent className="flex flex-col gap-2">
-            <ReadState hasData={candidates.data !== null} err={candidates.err} errKind={candidatesKind.kind} isEmpty={candidates.data?.length === 0} onRetry={() => void candidates.reload()}>
+            <ReadState hasData={candidates.data !== null} err={candidates.err} errKind={candidatesKind.kind} isEmpty={candidates.data?.length === 0} emptyCopy={t("emptyCandidates")} onRetry={() => void candidates.reload()}>
               <ul className="flex flex-col gap-1">
                 {(candidates.data ?? []).map((c) => (
                   <li key={c.entry_id} className="flex items-center gap-2 text-xs">

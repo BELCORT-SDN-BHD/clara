@@ -220,19 +220,25 @@ test("FIX-1: a REAL hold_close_prep refusal renders verbatim AND the Hold trigge
           "the trigger must be the SAME node object across the refusal — a different object would prove the not-held block (HoldDialog, and its reason state, included) was unmounted and freshly re-rendered",
         );
 
-        // R4 (rev-t1, optional upgrade — taken): the BEHAVIOURAL claim
-        // directly, not only the structural proxy above. Reopen and check
-        // Confirm's OWN live-derived gate (`confirmDisabled={reason.trim().
-        // length === 0}`) — if `reason` genuinely survived, Confirm reads
-        // enabled on the FIRST render of the reopened dialog, with no retyping.
-        await clickButton(triggerAfterRefusal as never);
-        for (let i = 0; i < 4; i++) await h.settle();
-        const confirmOnReopen = findAllButtonsByText(body, "Hold")[0];
-        assert.ok(confirmOnReopen, "the dialog's own Confirm must render again on reopen");
+        // R4 (rev-t1, optional upgrade — taken), RE-CUT for CB-AE2E-004: the
+        // BEHAVIOURAL claim directly, not only the structural proxy above. There is
+        // no reopen step any more, because the dialog never closed — a refused
+        // confirm now KEEPS it open (single-fire-guard.ts's widened outcome +
+        // hooks.ts's `act` boolean), which is the stronger form of the very
+        // guarantee this cell was written to make. Confirm's OWN live-derived gate
+        // (`confirmDisabled={reason.trim().length === 0}`) reads enabled with no
+        // retyping, which is only possible if `reason` genuinely survived.
+        const confirmStillOpen = findAllButtonsByText(body, "Hold")[0];
+        assert.ok(confirmStillOpen, "the dialog's own Confirm must STILL render — a refusal does not close the dialog");
         assert.equal(
-          (confirmOnReopen as unknown as { disabled: boolean }).disabled,
+          (confirmStillOpen as unknown as { disabled: boolean }).disabled,
           false,
-          "Confirm must read ENABLED immediately on reopen — `reason` still holds the typed text, so `reason.trim().length === 0` is false with no retyping",
+          "Confirm must read ENABLED — `reason` still holds the typed text, so `reason.trim().length === 0` is false with no retyping",
+        );
+        assert.equal(
+          (findByAttr(body, "aria-label", "Hold close prep") as unknown as { value: string }).value,
+          typedReason,
+          "and the typed reason is still IN the field, verbatim",
         );
       } finally {
         await h.unmount();

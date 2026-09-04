@@ -182,11 +182,15 @@ test("COMMIT refusal: a real click on Confirm (clickButton) closes the dialog, a
       // "Commit onboarding" button (the one this test just proved distinct
       // from the trigger, above) must be GONE — the same identity-exclusion
       // idiom the CANCEL test below already uses correctly.
+      // CB-AE2E-004 (2026-09-04) flips this assertion. It used to demand the
+      // dialog's own Confirm be GONE, i.e. that a REFUSAL closed the dialog — that
+      // was the class defect, and the identity-exclusion idiom below is still the
+      // discriminating instrument, only pointed at the correct post-condition.
       const confirmStillThere = findIn(
         body as never,
         (n) => n.tagName === "BUTTON" && textOf(n as never) === "Commit onboarding" && (n as unknown) !== (trigger as unknown),
       );
-      assert.equal(confirmStillThere, null, "the dialog's own Confirm control must be GONE after Confirm settles — the dialog genuinely closed");
+      assert.ok(confirmStillThere, "the dialog's own Confirm control must STILL be there — a refusal keeps the dialog open");
 
       const bodyText = textOf(body as never);
       assert.match(bodyText, /CLR05/, "the CLR code must render, verbatim, in the card's persistent banner");
@@ -291,24 +295,21 @@ test("RESOLVE refusal: the typed resolution SURVIVES a refusal — only a SUCCES
       assert.match(bodyText, /CLR04/, "the refusal must render verbatim (this half already worked before the fix)");
       assert.match(bodyText, /bookkeeper role or higher/, "the DB's own message, verbatim");
 
-      // RE-OPEN the SAME row's dialog (it closed on settle, per
-      // OnboardingDoorDialog's own "closes once the attempt SETTLES" law)
-      // and read the field back — the discriminating proof.
+      // CB-AE2E-004 (2026-09-04): there is no RE-OPEN step any more — the dialog
+      // never closed. OnboardingDoorDialog's "closes once the attempt SETTLES" law is
+      // gone; it closes only on a confirmed success. The field is read IN PLACE,
+      // which is a strictly stronger proof of the same N13 claim: the human is still
+      // looking at the text they typed, beside the refusal that is asking them to
+      // change it.
       const triggerAgain = h.find((n) => n.tagName === "BUTTON" && textOf(n) === "Resolve");
       assert.ok(triggerAgain, "the Resolve trigger must still render after a refusal — the item is still pending");
-      await h.fireEvent(triggerAgain!, "click");
-      for (let i = 0; i < 6; i++) await h.settle();
 
-      // Read the value React itself last rendered onto the REOPENED
-      // (freshly-mounted, per base-ui's own unmount-on-close default)
-      // textarea's own props — the SAME `__reactProps$...` mechanism
-      // `setFieldValue`/`clickButton` already rely on — rather than the raw
-      // DOM property, which a fresh stub node's own value-tracking quirks
-      // make an unreliable read in this harness (the exact precedent
-      // `components/documents/coding-lane-keyboard.test.tsx`'s own
-      // "vendor could not be matched" refusal-survives-reopen test uses).
+      // Read the value React itself last rendered onto the textarea's own props —
+      // the SAME `__reactProps$...` mechanism `setFieldValue`/`clickButton` already
+      // rely on — rather than the raw DOM property, whose value-tracking quirks make
+      // it an unreliable read in this harness.
       const reopenedField = findIn(body as never, (n) => n.tagName === "TEXTAREA") as unknown as Record<string, unknown> | null;
-      assert.ok(reopenedField, "the resolution field must be reachable again");
+      assert.ok(reopenedField, "the resolution field must still be reachable"); 
       const propsKey = Object.keys(reopenedField!).find((k) => k.startsWith("__reactProps"));
       const reactValue = propsKey ? (reopenedField![propsKey] as { value?: string }).value : undefined;
       assert.equal(reactValue, typed, "N13: a REFUSED act must KEEP the typed text — it must not have been silently discarded");
@@ -348,14 +349,36 @@ async function openCommitDialog(h: Awaited<ReturnType<typeof mount>>["h"], body:
   return { trigger: trigger as Node, confirmButton: confirmButton as Node };
 }
 
-test("COMMIT gate — plan_not_open blocks: the dialog's own Confirm is disabled, the reason renders, the door is never called", async () => {
+test("COMMIT gate — plan_not_open: a settled plan offers NO commit door at all, and the door is never called", async () => {
+  // CB-AE2E-023 CHANGED WHAT THIS CELL CAN PROVE, and strengthened it. This used to open the
+  // commit dialog on a COMMITTED plan and assert its Confirm was DISABLED with the
+  // `plan_not_open` reason rendered inside. There is no such dialog any more: a non-open plan
+  // routes to the settled RECEIPT, which renders no Commit and no Cancel trigger — so the
+  // dialog that could only ever be refused is not reachable, rather than reachable-and-inert.
+  //
+  // `commitBlockReason`'s own `plan_not_open` arm is GONE (fold, review-546 nit 4), and so is
+  // its message key. It was unreachable the moment a non-open plan stopped reaching this
+  // function at all, and a dead branch beside live ones reads as a claim that both are
+  // reachable — the card's own doc comment now records why, rather than only this test. The
+  // remaining three gate arms are proved by this file's other cells, which all open a real
+  // dialog on a genuinely open plan.
   const { impl, commitCalls } = buildMock({ plan: COMMITTED_PLAN, items: [SETTLED_ITEM], client: CLIENT_ONBOARDING, seed: FINALIZED_SEED });
   await withMockedEnv(impl, async () => {
     const { h, body } = await mount();
     try {
-      const { confirmButton } = await openCommitDialog(h, body as never);
-      assert.equal((confirmButton as unknown as { disabled: boolean }).disabled, true, "plan_not_open must disable the dialog's own Confirm");
-      assert.match(textOf(body as never), /This plan is no longer open — it cannot be committed again\./, "the plan_not_open reason must render inside the open dialog");
+      assert.equal(
+        h.find((n) => n.tagName === "BUTTON" && textOf(n) === "Commit onboarding"),
+        null,
+        "a committed plan must offer no Commit trigger — the dialog behind it can only be refused",
+      );
+      assert.equal(
+        h.find((n) => n.tagName === "BUTTON" && textOf(n) === "Cancel onboarding"),
+        null,
+        "and no Cancel trigger either (cancel_client_onboarding refuses on p.state<>'open', 0017:2857)",
+      );
+      // The receipt is what stands in its place — DISCRIMINATING: this line exists only on the
+      // settled face.
+      assert.match(textOf(body as never), /Plan revision/, "the settled receipt renders in its place");
       assert.equal(commitCalls.length, 0, "the door must never be called while this conjunct is false");
     } finally {
       await h.unmount();

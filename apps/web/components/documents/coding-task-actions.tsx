@@ -42,7 +42,7 @@ export function CodingTaskActions({
   taskId: string;
   filingId: string;
   busy: boolean;
-  act: (fn: () => Promise<void>) => Promise<unknown>;
+  act: (fn: () => Promise<void>) => Promise<boolean>;
 }) {
   const t = useTranslations("CodingQuestionsSignals.codingTask");
   const [entries, setEntries] = useState<EntriesState>({ kind: "loading" });
@@ -77,6 +77,7 @@ export function CodingTaskActions({
             let succeeded = false;
             await act(async () => { await completeCodingTask(taskId, entryId); succeeded = true; });
             if (succeeded) setEntryId("");
+            return succeeded;
           }}
         >
           {entries.kind === "loading" ? (
@@ -120,6 +121,7 @@ export function CodingTaskActions({
             let succeeded = false;
             await act(async () => { await dismissCodingTask(taskId, reason.trim()); succeeded = true; });
             if (succeeded) setReason("");
+            return succeeded;
           }}
         >
           <Textarea

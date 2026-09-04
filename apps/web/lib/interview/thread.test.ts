@@ -16,7 +16,39 @@ test("echoAnswer renders only the confirmed value it is given", () => {
   assert.equal(echoAnswer("Rome"), "Rome");
   assert.equal(echoAnswer(12), "12");
   assert.equal(echoAnswer(false), "false");
-  assert.equal(echoAnswer({ currency: "MYR" }), '{"currency":"MYR"}');
+  // H-27 — was `'{"currency":"MYR"}'`. Every interview-written answer is a jsonb OBJECT, so
+  // the JSON branch was the branch the whole client interview took: the person's own "You"
+  // bubble read as wire format.
+  assert.equal(echoAnswer({ currency: "MYR" }), "currency: MYR");
+});
+
+test("H-27 — an OBJECT answer never puts a brace in a thread entry, formatter or not", () => {
+  const objectAnswers: unknown[] = [
+    { registration: "202401047756", normalized: "202401047756", form: "unified", format_verified: true },
+    { chart: "firm_template", applied: false },
+    { opening: "carry_down", captured: false },
+    { some_key_from_a_later_vN: { nested: true } },
+    [{ a: 1 }, { b: 2 }],
+  ];
+  const entries = seedThread(objectAnswers.map((answer, i) => ({
+    item_key: `seg_${i}`, item_kind: "capture", state: "answered", required_for_commit: false,
+    question: `Q${i}?`, answer,
+  })));
+  const answered = entries.filter((e) => e.role === "you");
+  assert.equal(answered.length, objectAnswers.length, "every answered item produced its own entry");
+  for (const entry of answered) {
+    assert.doesNotMatch(entry.text, /[{}]/, `a thread entry must never carry a JSON brace; got: ${entry.text}`);
+    assert.doesNotMatch(entry.text, /\[object Object\]/, `got: ${entry.text}`);
+    assert.notEqual(entry.text.trim(), "", "and it must not go silent either — an empty bubble is not an improvement");
+  }
+});
+
+test("seedThread's optional echo is what the interview card passes — the formatter decides the words", () => {
+  const entries = seedThread(
+    [{ item_key: "ssm", item_kind: "must_ask", state: "answered", required_for_commit: true, question: "SSM?", answer: { registration: "202401047756" } }],
+    (itemKey, answer) => `formatted(${itemKey}):${(answer as { registration: string }).registration}`,
+  );
+  assert.deepEqual(entries.map((e) => e.text), ["SSM?", "formatted(ssm):202401047756"]);
 });
 
 test("seedThread emits durable answered/resolved pairs and skips the internal interview_run item", () => {

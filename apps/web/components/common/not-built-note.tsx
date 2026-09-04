@@ -13,9 +13,12 @@ import { cn } from "@/lib/utils";
  * close's proposal panel, the Needs-you gaps note, and the two reports
  * notices) at two different paddings and two different text sizes.
  *
- * The inline variant — a disabled control naming its own shape with a badge
- * beside it — stays in `components/documents/not-built-badge.tsx`; it is a
- * genuinely different shape, not a drifted copy of this one.
+ * There WAS an inline variant beside this one — a disabled control naming its
+ * own shape with a badge — in `components/documents/not-built-badge.tsx`. It
+ * had exactly one caller, the documents tab's "page overlay viewer" note, and
+ * that note stopped being true when D2 built the viewer. The component is
+ * deleted rather than left standing: a "not built yet" primitive with no
+ * caller is a shape the next lane copies without noticing nothing uses it.
  */
 export function NotBuiltNote({ children, className }: { children: ReactNode; className?: string }) {
   return (

@@ -26,7 +26,7 @@ const STATUS_VARIANT = {
   cancelled: "secondary",
 } as const;
 
-function ApprovePairDialog({ busy, onSubmit }: { busy: boolean; onSubmit: (attestation: string) => Promise<void> }) {
+function ApprovePairDialog({ busy, onSubmit }: { busy: boolean; onSubmit: (attestation: string) => Promise<boolean> }) {
   const t = useTranslations("AdjustmentsAccounts.approvePair");
   const [attestation, setAttestation] = useState("");
   return (
@@ -47,7 +47,7 @@ function ApprovePairDialog({ busy, onSubmit }: { busy: boolean; onSubmit: (attes
   );
 }
 
-function CancelPairDialog({ busy, onSubmit }: { busy: boolean; onSubmit: (reason: string) => Promise<void> }) {
+function CancelPairDialog({ busy, onSubmit }: { busy: boolean; onSubmit: (reason: string) => Promise<boolean> }) {
   const t = useTranslations("AdjustmentsAccounts.cancelPair");
   const [reason, setReason] = useState("");
   return (
@@ -78,8 +78,8 @@ export function AdjustmentPairReversalPanel({
 }: {
   pairReversals: AdjustmentPairReversalRow[];
   busy: boolean;
-  onApprove: (pairId: string, attestation: string) => Promise<void>;
-  onCancel: (pairId: string, reason: string) => Promise<void>;
+  onApprove: (pairId: string, attestation: string) => Promise<boolean>;
+  onCancel: (pairId: string, reason: string) => Promise<boolean>;
 }) {
   const t = useTranslations("AdjustmentsAccounts.pairLedger");
   // N10's own convention (adjustments-register.tsx's header): a checked

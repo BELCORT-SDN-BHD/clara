@@ -12,6 +12,8 @@ import { Button } from "@/components/ui/button";
 import { LoadingState, StateBanner } from "@/components/common/state";
 import { PartSlot } from "@/components/clara/PartSlot";
 import { ClaraWelcome } from "@/components/clara/ClaraWelcome";
+import { ClaraThreadResolveState } from "@/components/clara/ClaraThreadResolveState";
+import { ClaraMessageBubble } from "@/components/clara/ClaraMessageBubble";
 import { OnboardingChecklistCard } from "@/components/clara/OnboardingChecklistCard";
 import { TurnProgress } from "@/components/clara/TurnProgress";
 import { ComposerAttachmentControl, type ComposerAttachmentState } from "@/components/clara/ComposerAttachmentControl";
@@ -30,6 +32,10 @@ export function ClaraThreadView({
   variant,
   resolveError = null,
   clientId,
+  resolving = false,
+  onCreateThread,
+  creatingThread = false,
+  canCreateThread = true,
 }: {
   auth?: SessionTokenAccessor;
   threadId: string | null;
@@ -38,6 +44,20 @@ export function ClaraThreadView({
    *  session for the rail to attach to) — distinct from a load/send error on an
    *  already-known thread. */
   resolveError?: string | null;
+  /** 裁-117 — TRUE only while the caller's session list is genuinely in flight.
+   *  `resolving: false` with a null `threadId` is the honest "no conversation at this
+   *  altitude yet" state and renders the New-thread offer below; the loading arm is
+   *  reserved for a read that has not answered. Defaulted so the full-screen mount
+   *  point (which arrives with a concrete id from the URL) needs no change. */
+  resolving?: boolean;
+  /** The explicit act that mints a thread, passed down from `ClaraRail`. Absent at the
+   *  full-screen mount, where there is nothing to create. */
+  onCreateThread?: () => Promise<string | null>;
+  creatingThread?: boolean;
+  /** See `ClaraThreadResolveState`'s own note — the offer refuses a create that could
+   *  not be listed, for the same reason the rail's menu does. Defaults TRUE so the
+   *  full-screen mount, which offers nothing, needs no change. */
+  canCreateThread?: boolean;
   /** T11 (port-wave plan §4 T11): threads onto `OnboardingChecklistCard`
    *  below — present when this thread is mounted under a client workspace
    *  (ClaraRail's own `clientId` prop; ClaraFullScreenThread's client-scoped
@@ -133,15 +153,39 @@ export function ClaraThreadView({
       ? [state.parkedClarify]
       : [];
 
-  async function handleSubmit(e: FormEvent) {
-    e.preventDefault();
-    if (!threadId || !draft.trim() || busy || attachments.blocked) return;
+  // H-24 — ONE SEND PATH, AND ONE GATE ON IT.
+  //
+  // The composer had no key handler at all: a `<textarea>` inside a form does not
+  // submit on Enter the way a single-line `<input>` does, so Enter inserted a newline
+  // and the turn was never posted — text stayed in the box with Send still enabled,
+  // which is exactly the reported symptom. The fix is the in-repo precedent
+  // (InterviewRunCard.tsx:210-215), with the two things this composer needs that the
+  // precedent does not carry.
+  //
+  // (1) THE GATE IS THE BUTTON'S OWN PREDICATE, not a second one that happens to
+  //     agree today. `sendDisabled` below is read by BOTH the Button's `disabled` and
+  //     this guard, so Enter can never post what the button refuses to post, and the
+  //     two cannot drift apart in a later edit. Note it is STRICTLY TIGHTER than the
+  //     old inline guard, which omitted `notSignedIn`.
+  // (2) `nativeEvent.isComposing` — the product ships zh/ms locales, and committing a
+  //     candidate in a Chinese or Malay IME fires an Enter keydown whose only meaning
+  //     is "accept this word". Sending on it would post a half-typed sentence, and the
+  //     turn is not retractable.
+  const sendDisabled = !threadId || notSignedIn || busy || attachments.blocked || !draft.trim();
+
+  async function submitDraft() {
+    if (sendDisabled) return;
     const text = draft;
     const opened = await sendMessage(text, attachments.parts);
     if (opened) {
       setDraft("");
       setAttachmentClearToken((token) => token + 1);
     }
+  }
+
+  async function handleSubmit(e: FormEvent) {
+    e.preventDefault();
+    await submitDraft();
   }
 
   return (
@@ -174,17 +218,18 @@ export function ClaraThreadView({
             Independent of threadId's own load state — see this component's own
             `clientId` doc comment. */}
         <OnboardingChecklistCard clientId={clientId} session={auth} />
-        {/* P3 polish: the rail's own five state spellings joined the product
-            ladder. "Sign in to talk with Clara" is a STATE, not a fault, so it
-            reads `info` here exactly as it does on every other surface; a real
-            load/send failure reads `error`. Boxing them also separates a
-            SYSTEM message from a CONVERSATION message inside a log where both
-            are just paragraphs otherwise. */}
-        {!threadId && resolveError === "not signed in" && <StateBanner tone="info">{t("signInRequired")}</StateBanner>}
-        {!threadId && resolveError && resolveError !== "not signed in" && (
-          <StateBanner tone="error">{t("loadError", { message: resolveError })}</StateBanner>
+        {/* The four thread-less states, one ladder, in their own module — see
+            ./ClaraThreadResolveState.tsx for the order and for why 裁-117 added a
+            fourth arm the old `!resolveError` loader would have swallowed forever. */}
+        {!threadId && (
+          <ClaraThreadResolveState
+            resolveError={resolveError}
+            resolving={resolving}
+            onCreateThread={onCreateThread}
+            creatingThread={creatingThread}
+            canCreate={canCreateThread}
+          />
         )}
-        {!threadId && !resolveError && <LoadingState>{t("resolving")}</LoadingState>}
         {threadId && notSignedIn && <StateBanner tone="info">{t("signInRequired")}</StateBanner>}
         {/* THREE DISTINGUISHABLE STATES, and the error arm no longer hides behind the one
             that only a SUCCESSFUL read can set. Before P6-5 both branches required
@@ -264,29 +309,7 @@ export function ClaraThreadView({
               (checked, not assumed), so nothing nests. */}
           {claraWelcomeVisible({ threadId, notSignedIn, state }) && <ClaraWelcome />}
           {state.messages.map((msg) => (
-            // `enter-content`: a message ARRIVING is the archetypal "prevent a
-            // jarring change". It fires per new message only — a streaming
-            // assistant turn keeps its key, so the text grows without the
-            // bubble ever re-animating.
-            <div key={msg.id} className={cn("enter-content rounded-lg p-2 text-sm", msg.role === "user" ? "bg-muted" : "bg-clara-muted")}>
-              {/* `text-secondary-ink` on the Clara-role ground, not `text-muted-
-                  foreground`: the live axe scan measures the latter at 4.49:1 on
-                  `--clara-muted` — the exact blind spot `secondary-ink-on-clara-muted`
-                  was pinned for after InterviewRunCard hit it (check-token-contrast.mjs
-                  PAIR_SPECS). The user bubble keeps the muted ink it passes on.
-                  MERGE NOTE: P6-3 had moved BOTH roles to secondary-ink for
-                  consistency; #508's conditional is kept because it is the
-                  merged decision and both arms clear AA on their own ground
-                  (muted-foreground 4.624:1 on bg-muted, secondary-ink 7.072:1 on
-                  bg-clara-muted). P6-3's `secondary-ink-on-muted` gate row is
-                  re-sourced accordingly rather than left naming this line. */}
-              <p className={cn("mb-1 text-xs font-medium", msg.role === "user" ? "text-muted-foreground" : "text-secondary-ink")}>
-                {t(`role.${msg.role}`)}
-              </p>
-              {msg.parts.map((part, i) => (
-                <PartSlot key={i} part={part} taskId={msg.task_id} session={auth} />
-              ))}
-            </div>
+            <ClaraMessageBubble key={msg.id} message={msg} session={auth} />
           ))}
           {/* The pending bubble is PROVISIONAL, spelled with a dashed edge rather than
               `opacity-70`. The live axe scan measured that opacity at 2.64:1 on this
@@ -406,6 +429,13 @@ export function ClaraThreadView({
           ref={textareaRef}
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            // Shift+Enter is the newline, and it must stay one: this composer is where
+            // a human writes a multi-line instruction to Clara.
+            if (e.key !== "Enter" || e.shiftKey || e.nativeEvent.isComposing) return;
+            e.preventDefault();
+            void submitDraft();
+          }}
           placeholder={t("composerPlaceholder")}
           // One accessible name, not two. #507 and #508 each added this line
           // independently and the merge kept BOTH — a duplicate JSX attribute the
@@ -429,7 +459,7 @@ export function ClaraThreadView({
           // would have been caught as a failure rather than as a merge decision.
           className="motion-fast min-w-0 flex-1 resize-none rounded-lg border border-input bg-background p-2 text-sm transition-colors outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/70 disabled:cursor-not-allowed disabled:opacity-50"
         />
-        <Button type="submit" disabled={!threadId || notSignedIn || busy || attachments.blocked || !draft.trim()}>
+        <Button type="submit" disabled={sendDisabled}>
           {busy ? t("sending") : t("send")}
         </Button>
       </form>

@@ -24,7 +24,7 @@ export function OpenCandidateList({
   busy: boolean;
   err: string | null;
   clr: PartClr;
-  act: (fn: () => Promise<void>) => Promise<void>;
+  act: (fn: () => Promise<void>) => Promise<boolean>;
 }) {
   const t = useTranslations("ClientDocuments");
 

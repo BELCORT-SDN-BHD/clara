@@ -5,6 +5,7 @@ import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { filingBasisKey } from "@/lib/documents/copy";
+import { businessDateTime } from "@/lib/business-date";
 import { requestAutodraft, retireFiling } from "@/lib/documents/doors";
 import { DocumentsDoorDialog } from "./DocumentsDoorDialog";
 import { EmptyState, StateBanner } from "@/components/common/state";
@@ -42,7 +43,7 @@ export function DocumentFilingsHistory({
 }: {
   filings: FilingRow[];
   busy: boolean;
-  act: (fn: () => Promise<void>) => Promise<void>;
+  act: (fn: () => Promise<void>) => Promise<boolean>;
 }) {
   const t = useTranslations("ClientDocuments");
   const tg = useTranslations("DraftsDocumentGovernance");
@@ -60,7 +61,12 @@ export function DocumentFilingsHistory({
           <li key={filing.id} className="flex flex-col gap-1 text-sm">
             <div className="flex items-center justify-between gap-2">
               <span className="text-foreground">{t(filingBasisKey(filing.basis))}</span>
-              <span className="text-xs text-muted-foreground">{new Date(filing.filed_at).toLocaleDateString()}</span>
+              {/* THE ONE-CLOCK LAW — and `businessDateTime`, not `businessDate`,
+                  because this IS the audit trail: a filings history is a record
+                  of when each act happened, and two reviewers in two timezones
+                  must read the identical wall-clock moment
+                  (lib/business-date.ts's own N11 note). */}
+              <span className="text-xs text-muted-foreground">{businessDateTime(filing.filed_at)}</span>
               {filing.retired_at ? (
                 <span className="text-xs text-muted-foreground">{t("filingRetired")}</span>
               ) : (
@@ -70,6 +76,7 @@ export function DocumentFilingsHistory({
                     triggerSize="xs"
                     title={tg("autodraft.title")}
                     description={tg("autodraft.description")}
+                    diagnostic={t("doorDiagnostic.autodraft")}
                     confirmLabel={tg("autodraft.confirm")}
                     busy={busy}
                     onConfirm={() => {

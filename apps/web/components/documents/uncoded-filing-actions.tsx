@@ -37,7 +37,7 @@ export function UncodedFilingActions({
   documentId: string;
   filingId: string;
   busy: boolean;
-  act: (fn: () => Promise<void>) => Promise<unknown>;
+  act: (fn: () => Promise<void>) => Promise<boolean>;
 }) {
   const t = useTranslations("CodingQuestionsSignals.uncodedFiling");
   const [taskReason, setTaskReason] = useState("");
@@ -61,6 +61,7 @@ export function UncodedFilingActions({
             let succeeded = false;
             await act(async () => { await openCodingTask(clientId, documentId, filingId, taskReason.trim()); succeeded = true; });
             if (succeeded) setTaskReason("");
+            return succeeded;
           }}
         >
           <Textarea
@@ -81,6 +82,7 @@ export function UncodedFilingActions({
             let succeeded = false;
             await act(async () => { await openQuestion(clientId, "document", documentId, questionText.trim()); succeeded = true; });
             if (succeeded) setQuestionText("");
+            return succeeded;
           }}
         >
           <Textarea

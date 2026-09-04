@@ -115,16 +115,22 @@ export function ReconciliationSection({ clientId }: { clientId: string }) {
       <Card>
         <CardHeader><SectionHeader level={2}>{t("pickHeading")}</SectionHeader></CardHeader>
         <CardContent className="flex flex-col gap-3">
-          <ReadState hasData={accounts.data !== null} err={accounts.err} errKind={accountsKind.kind} isEmpty={accounts.data?.length === 0} onRetry={() => void accounts.reload()}>
+          <ReadState hasData={accounts.data !== null} err={accounts.err} errKind={accountsKind.kind} isEmpty={accounts.data?.length === 0} emptyCopy={t("emptyAccounts")} onRetry={() => void accounts.reload()}>
             <NativeSelect aria-label={t("accountLabel")} value={activeAccountId} onChange={(e) => { setBankAccountId(e.target.value); setStatementId(""); }}>
               {(accounts.data ?? []).map((a) => <option key={a.id} value={a.id}>{a.bank_name_display} · {a.account_number}</option>)}
             </NativeSelect>
           </ReadState>
-          <ReadState hasData={statements.data !== null} err={statements.err} errKind={statementsKind.kind} isEmpty={statements.data?.length === 0} onRetry={() => void statements.reload()}>
-            <NativeSelect aria-label={t("statementLabel")} value={activeStatementId} onChange={(e) => setStatementId(e.target.value)}>
-              {(statements.data ?? []).map((st) => <option key={st.id} value={st.id}>{st.period_start} → {st.period_end}</option>)}
-            </NativeSelect>
-          </ReadState>
+          {/* CB-AE2E-034: no accounts means no statements — a DERIVED truth, not a
+              second finding. The statements picker's own empty sentence is suppressed
+              while the accounts read is empty, so this card renders ONE actionable
+              line instead of the same six words twice in a row. */}
+          {accounts.data?.length === 0 ? null : (
+            <ReadState hasData={statements.data !== null} err={statements.err} errKind={statementsKind.kind} isEmpty={statements.data?.length === 0} emptyCopy={t("emptyStatements")} onRetry={() => void statements.reload()}>
+              <NativeSelect aria-label={t("statementLabel")} value={activeStatementId} onChange={(e) => setStatementId(e.target.value)}>
+                {(statements.data ?? []).map((st) => <option key={st.id} value={st.id}>{st.period_start} → {st.period_end}</option>)}
+              </NativeSelect>
+            </ReadState>
+          )}
         </CardContent>
       </Card>
 
@@ -133,7 +139,7 @@ export function ReconciliationSection({ clientId }: { clientId: string }) {
           <CardHeader><SectionHeader level={2}>{t("reconHeading")}</SectionHeader></CardHeader>
           <CardContent className="flex flex-col gap-3">
             {recon.data !== null && <ActionRefusal err={recon.err} clr={recon.clr} />}
-            <ReadState hasData={reconLoadedOnce} err={recon.err} errKind={reconKind.kind} onRetry={() => void recon.reload()}>
+            <ReadState hasData={reconLoadedOnce} err={recon.err} errKind={reconKind.kind} errCopy={(message) => t("errRecon", { message })} onRetry={() => void recon.reload()}>
               {recon.data && (
                 <>
                   <div className="flex items-center gap-2">

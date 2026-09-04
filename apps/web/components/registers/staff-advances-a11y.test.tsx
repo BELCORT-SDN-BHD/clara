@@ -241,15 +241,17 @@ test("F3: a governed refusal (enrol_staff_advance_account) renders verbatim in t
       await h.act(() => { driveHandler(confirmButton as never, "onClick"); });
       for (let i = 0; i < 8; i++) await h.settle();
 
-      // The dialog auto-closes on every confirm attempt (success or refusal)
-      // — the refusal must render in the CALLER's own banner, not inside a
-      // dialog that no longer exists. The dialog's own Cancel control only
-      // exists while it is open, so its absence is the closed signal.
+      // CB-AE2E-004 (2026-09-04): a REFUSED confirm keeps the dialog open and renders
+      // the refusal inside it — the caller's own banner is behind the modal backdrop
+      // and cannot be read while the dialog stands. The dialog's own Cancel control
+      // exists only while it is open, so its presence is the open signal.
       const cancelStillOpen = findIn(body as never, (n) => n.tagName === "BUTTON" && textOf(n as never) === "Cancel");
-      assert.equal(cancelStillOpen, null, "the dialog must have closed after the confirm attempt settled");
+      assert.ok(cancelStillOpen, "the dialog must STAY OPEN after a refused confirm");
+      const personAfter = findIn(body as never, (n) => n.tagName === "INPUT" && (n as unknown as { type?: string }).type !== "checkbox");
+      assert.equal((personAfter as unknown as { value: string }).value, "Ah Chong", "the typed person label survives the refusal");
 
-      assert.match(h.text(), /CLR10/, "the CLR code must render, verbatim");
-      assert.match(h.text(), /already carries an approved GL balance/, "the DB's own message must render, verbatim — never re-worded");
+      assert.match(textOf(body as never), /CLR10/, "the CLR code must render, verbatim");
+      assert.match(textOf(body as never), /already carries an approved GL balance/, "the DB's own message must render, verbatim — never re-worded");
     } finally {
       await h.unmount();
       for (let i = 0; i < 5; i++) await h.settle();

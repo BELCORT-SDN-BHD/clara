@@ -74,7 +74,28 @@ export async function remapBankAccountCoa(
 // ---------------------------------------------------------------------------
 
 export type BankStatementHeaderInput = {
-  period_start: string; period_end: string; statement_date: string | null;
+  /** H-06 — REQUIRED, and required as a PAIR with `account_number`.
+   *  `clara._stmt_header_norm` reads both before anything else and raises CLR10
+   *  `header_unreadable` when either is absent (0038:1189-1200), so a header
+   *  without them can never reach a single one of the door's other validations.
+   *
+   *  Both halves must come from the SELECTED bank account row, never free text:
+   *  `_persist_statement_core` compares them back to the named account
+   *  (0038:1580-1583, `b.bank_code is distinct from v_inst or
+   *  b.account_number_normalized is distinct from v_digits` -> `account_unregistered`).
+   *  `institution_code` is that row's `bank_code`. */
+  institution_code: string;
+  /** The account number AS PRINTED on the account row (`BankAccountRow.account_number`),
+   *  NOT `account_number_normalized`. The two normalizers deliberately differ and the
+   *  migration says so in its own comment (0038:1190-1196): `add_bank_account` keeps the
+   *  client-identifier spelling with HYPHENS PRESERVED, while this door digit-strips
+   *  whatever it is handed and compares digits only. Sending the printed form is both
+   *  correct under that comparison and the more honest receipt payload. */
+  account_number: string;
+  period_start: string; period_end: string;
+  /** REQUIRED — the normalizer rejects a null or non-ISO statement_date with the same
+   *  CLR10 `header_unreadable` (0038:1211-1218), so `null` was never a lawful value. */
+  statement_date: string;
   opening_cents: number; closing_cents: number;
   total_debit_cents: number | null; total_credit_cents: number | null;
   /** null => MYR (absence reads MYR); a non-null non-MYR code is the

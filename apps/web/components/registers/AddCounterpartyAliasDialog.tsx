@@ -20,7 +20,7 @@ export function AddCounterpartyAliasDialog({
 }: {
   counterpartyName: string;
   busy: boolean;
-  onSubmit: (alias: string, origin: CounterpartyAliasOrigin) => Promise<void>;
+  onSubmit: (alias: string, origin: CounterpartyAliasOrigin) => Promise<boolean>;
 }) {
   const t = useTranslations("ArApCounterparty.addAlias");
   const [alias, setAlias] = useState("");

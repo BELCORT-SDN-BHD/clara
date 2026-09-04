@@ -17,6 +17,7 @@
 import { useTranslations } from "next-intl";
 import { useAsyncRead } from "@/lib/firm/use-async-read";
 import { getOpeningDryrun } from "@/lib/registers/opening";
+import type { OpeningDryrun, OpeningTbTargetRow } from "@/lib/registers/opening-types";
 import { fmtCents } from "@/lib/registers/money";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
 import { SectionHeader } from "@/components/common/section-header";
@@ -25,7 +26,44 @@ import { DataTableCard } from "@/components/common/data-table-card";
 import { TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { DataState } from "@/components/firm/data-state";
 
-export function OpeningDryrunStrip({ seedId }: { seedId: string }) {
+/** CB-AE2E-020 — the FOUR conditions `clara._assert_opening_tie` actually
+ *  enforces (0017:3674-3697), in its own order, each a boolean over facts the DB
+ *  already returned. No numeral is minted and no tie is re-derived (constraint 2):
+ *  every gate is a presence/emptiness test on a DB-returned collection, or the DB's
+ *  own signed `obe_net_cents` compared to zero.
+ *
+ *  The strip used to render ONE of them — `obe_net_cents === 0` — under the copy
+ *  "ties", so a seed with no TB targets keyed at all and a trivially-nil OBE painted
+ *  a quiet pass and then refused CLR31 `tie_mismatch` on Approve. Worse, it named
+ *  the one gate it did render after a DIFFERENT refusal: the DB reports that arm as
+ *  `obe_not_nil`, never `tie_mismatch`.
+ *
+ *  Gate 1 is the only one not derivable from the dry-run payload —
+ *  `_opening_seed_deltas` full-joins targets against actuals, so an empty `deltas`
+ *  cannot tell "no targets" from "no basis rows" — hence `targets`, which the
+ *  workbench already holds, is threaded in. */
+export type OpeningTieGate = {
+  /** The DB's own reason token for the arm this gate belongs to, so the copy here
+   *  and the refusal the human may see name the same thing. */
+  reason: "tie_mismatch" | "obe_not_nil";
+  key: "targetsPresent" | "allMapped" | "allTie" | "obeNil";
+  passed: boolean;
+};
+
+export function openingTieGates(data: OpeningDryrun, targets: OpeningTbTargetRow[]): OpeningTieGate[] {
+  return [
+    { key: "targetsPresent", reason: "tie_mismatch", passed: targets.length > 0 },
+    { key: "allMapped", reason: "tie_mismatch", passed: data.unmapped_labels.length === 0 },
+    {
+      key: "allTie",
+      reason: "tie_mismatch",
+      passed: data.deltas.every((d) => d.delta_debit === 0 && d.delta_credit === 0),
+    },
+    { key: "obeNil", reason: "obe_not_nil", passed: data.obe_net_cents === 0 },
+  ];
+}
+
+export function OpeningDryrunStrip({ seedId, targets }: { seedId: string; targets: OpeningTbTargetRow[] }) {
   const t = useTranslations("OpeningCarryDown.dryrun");
   const tc = useTranslations("Common");
   // Re-keyed by seedId (React key on the caller side) rather than a manual
@@ -40,11 +78,7 @@ export function OpeningDryrunStrip({ seedId }: { seedId: string }) {
       <DataState loading={loading} error={error} isEmpty={false} emptyMessage="">
         {data ? (
           <div className="flex flex-col gap-2">
-            <StateBanner tone={data.obe_net_cents === 0 ? "neutral" : "warning"} title={t("asOf", { date: data.as_of })}>
-              {data.obe_net_cents === 0
-                ? t("ties")
-                : t("doesNotTie", { amount: fmtCents(data.obe_net_cents, tc("centsUnsafe")) })}
-            </StateBanner>
+            <OpeningTieGates data={data} targets={targets} asOf={data.as_of} />
             {data.deltas.length === 0 ? (
               <EmptyState className="text-xs">{t("noDeltas")}</EmptyState>
             ) : (
@@ -100,5 +134,31 @@ export function OpeningDryrunStrip({ seedId }: { seedId: string }) {
         ) : null}
       </DataState>
     </div>
+  );
+}
+
+function OpeningTieGates({ data, targets, asOf }: { data: OpeningDryrun; targets: OpeningTbTargetRow[]; asOf: string }) {
+  const t = useTranslations("OpeningCarryDown.dryrun");
+  const tc = useTranslations("Common");
+  const gates = openingTieGates(data, targets);
+  const allPassed = gates.every((g) => g.passed);
+  return (
+    <StateBanner tone={allPassed ? "neutral" : "warning"} title={t("asOf", { date: asOf })}>
+      <p>{allPassed ? t("readyToApprove") : t("notReadyToApprove")}</p>
+      <ul className="mt-1.5 flex flex-col gap-1">
+        {gates.map((g) => (
+          <li key={g.key} className="flex items-start gap-1.5">
+            <span aria-hidden="true">{g.passed ? "✓" : "✕"}</span>
+            <span>
+              <span className="sr-only">{g.passed ? t("gatePassed") : t("gateFailed")} — </span>
+              {g.key === "obeNil" && !g.passed
+                ? t("gate.obeNilFailed", { amount: fmtCents(data.obe_net_cents, tc("centsUnsafe")) })
+                : t(`gate.${g.key}`)}
+              <span className="ml-1.5 font-mono text-xs opacity-70">{g.reason}</span>
+            </span>
+          </li>
+        ))}
+      </ul>
+    </StateBanner>
   );
 }
