@@ -10,8 +10,8 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createElement, useState, type ReactElement } from "react";
 import { NextIntlClientProvider } from "next-intl";
@@ -41,6 +41,19 @@ const codeOf = (path: string): string =>
     .replace(/^\s*\/\/.*$/gm, "");
 
 const h1Count = (path: string): number => (codeOf(path).match(/<h1[\s>]/g) ?? []).length;
+
+/** Every `.tsx` under `dir`, as repo-relative paths — so a census covers files
+ *  nobody has listed by hand yet. */
+function walkTsx(dir: string, out: string[] = []): string[] {
+  for (const entry of readdirSync(dir)) {
+    const full = join(dir, entry);
+    if (statSync(full).isDirectory()) walkTsx(full, out);
+    else if (entry.endsWith(".tsx") && !entry.includes(".test.")) {
+      out.push(relative(WEB_ROOT, full).replace(/\\/g, "/"));
+    }
+  }
+  return out;
+}
 
 const attr = (node: Stub, name: string): string | null => {
   const get = node.getAttribute as ((n: string) => string | null) | undefined;
@@ -241,6 +254,15 @@ test("every chrome column declares a breakpoint arm — the measured absence CB-
     ["components/client-workspace-nav.tsx", /overflow-x-auto lg:flex-wrap/],
     ["components/common/page-shell.tsx", /p-4 lg:p-8/],
     ["components/clara/rail-chrome.tsx", /lg:contents/],
+    // R3 — THE TWO CASCADE FIXES, PINNED WHERE CI CAN SEE THEM. Both defects are
+    // computed styles, so their real instrument is the browser leg — which is
+    // acceptance-only until the 裁-192 smoke job lands, meaning nothing in CI
+    // would notice either one regressing. These two rows do not measure the
+    // cascade; they pin the ONE spelling that resolves it. The override must
+    // carry the vendored utility's own variant, or tailwind-merge keeps both and
+    // the later rule wins — which is exactly how each shipped broken once.
+    ["components/firm-nav-drawer.tsx", /data-\[side=left\]:w-56/],
+    ["components/common/section-tabs.tsx", /group-data-horizontal\/tabs:h-auto/],
   ];
   for (const [file, arm] of arms) {
     assert.match(read(file), arm, `${file} lost its breakpoint arm`);
@@ -268,10 +290,21 @@ test("the client name is a real HEADING, and the h1 census on a client route is 
   // comment, and it cost this cell one red before it was written correctly.
   assert.equal(h1Count("components/common/page-shell.tsx"), 1, "PageShell no longer renders exactly one h1");
   assert.equal(h1Count("app/(firm)/clients/[clientId]/layout.tsx"), 1, "the client layout renders more than one h1");
-  assert.equal(
-    h1Count("components/common/page-shell.tsx") + h1Count("app/(firm)/clients/[clientId]/layout.tsx"),
-    2,
-    "a client route must carry exactly two h1s: the workspace identity and the surface",
+
+  // …AND THE THIRD SOURCE, which is where a third h1 would actually come from.
+  // An earlier version of this cell "checked" the total by SUMMING the two
+  // equalities just asserted — arithmetic on facts already established, which
+  // cannot fail and proves nothing. The real question is whether any client
+  // SURFACE renders a bare `<h1>` of its own instead of going through
+  // `PageHeader`; nothing had ever looked. Walked, so a page added by any lane is
+  // covered without this list being maintained by hand.
+  const clientPages = walkTsx(join(WEB_ROOT, "app/(firm)/clients"));
+  assert.ok(clientPages.length >= 5, `only ${clientPages.length} client-altitude files walked — is the path right?`);
+  const rogue = clientPages.filter((f) => f !== "app/(firm)/clients/[clientId]/layout.tsx" && h1Count(f) > 0);
+  assert.deepEqual(
+    rogue,
+    [],
+    `these client-altitude files render their own <h1> — the route would then carry three: ${rogue.join(", ")}`,
   );
 
   // The FIRM altitude is unaffected and still has exactly one: its layout adds no

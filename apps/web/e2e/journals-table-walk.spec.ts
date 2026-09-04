@@ -46,7 +46,15 @@ async function openPostedTab(page: Page): Promise<void> {
 
 test("the Posted tab is a real table, sorted by POSTING date and not by the read's own order", async ({ page }) => {
   await signInTo(page, JOURNALS_URL);
-  await expect(page.getByText("Client: ROME PUBLIC ADVISORY")).toBeVisible();
+  // CB-AE2E-019 (#553, at merge): the client name became a real `<h1>`, so this
+  // string is in the document twice — the heading, and Next's route announcer,
+  // which prefers `document.title` and falls back to the first h1 (this app's
+  // title is a constant, so the fallback is what runs). A `getByText` therefore
+  // trips strict mode. Located by ROLE + LEVEL, which asserts more, not less.
+  // The same change was made in parity-holes.spec.ts and agentic-finish-walk.spec.ts;
+  // this file arrived from #548 after that sweep, and a census of
+  // `getByText("Client: …")` across e2e/ confirms these three were all of them.
+  await expect(page.getByRole("heading", { name: "Client: ROME PUBLIC ADVISORY", level: 1 })).toBeVisible();
   await openPostedTab(page);
 
   // The fixture's backdated entry is the FIRST row the read returns

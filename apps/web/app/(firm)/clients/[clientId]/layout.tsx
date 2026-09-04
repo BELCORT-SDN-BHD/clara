@@ -61,17 +61,22 @@ export default async function ClientWorkspaceLayout({
         rule (`test/a11yRules.ts:547` starts `runningMax` at 0, so a leading h2
         "jumps from h0 to h2") — it is first in the DOM, so it cannot be a level
         below something that has not appeared yet. Making the SURFACE title an h2
-        instead needs a `level` prop threaded through `PageHeader`, which is either
-        26 files across four other lanes' surfaces or a React context — and a
-        context needs a hook, which would break the contract page-shell.tsx:19-20
-        states in its own words ("Nothing here holds a hook, so a Server Component
-        page and a Client Component workbench can both render it").
+        instead needs a `level` prop threaded through `PageHeader`. COUNTED, not
+        estimated: 22 call sites in 20 files on this tree, 7 of them
+        client-altitude, with more in flight on sibling PRs that have not merged —
+        an earlier version of this note said "26 files across four lanes", which
+        was neither of those numbers. The alternative to threading a prop is a
+        React context, and a context needs a hook, which would break the contract
+        page-shell.tsx:19-20 states in its own words ("Nothing here holds a hook,
+        so a Server Component page and a Client Component workbench can both
+        render it").
 
         Two h1s is valid HTML5, violates no rule this repo or axe enforces at
         WCAG A/AA, and reads as what it is: you are in this client, looking at this
-        surface. `components/shell-responsive.test.tsx` PINS the count and the
-        clean heading order, so the disposition is mechanical rather than a comment
-        — and a third h1, or a reordering that breaks the outline, reds.
+        surface. `components/shell-responsive.test.tsx` PINS it — this layout's one
+        h1, `PageShell`'s one, and ZERO bare `<h1>` in any client-altitude page —
+        so "a third h1 reds" is a claim that file actually enforces rather than a
+        hope about files nobody counted.
 
         It keeps `text-sm font-semibold`: a heading LEVEL is a structural claim,
         not a type-scale one, and this line is deliberately quieter than the
