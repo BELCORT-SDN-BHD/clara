@@ -1,5 +1,5 @@
 *Part 6 of 6 of the FS-11 Wave-G factory-reset as-run (2026-09-04) — the lead's as-run record, written at the final clock-out truing. Previous: `fs11-wave-g-asrun-2026-09-03-part5.md` · Next: none (this is the last part).*
-*Parts 1–3 are the step TEMPLATE, written before the ceremony opened. Parts 4–6 are the AS-RUN, transcribed from the lead's own as-run notes; every stamp, id and count is transcribed and nothing is derived. Where the notes are silent, the line says "not recorded".*
+*Parts 1–3 are the step TEMPLATE, written before the ceremony opened. Parts 4–6 are the AS-RUN, transcribed from the lead's own as-run notes; every stamp, id and count is transcribed and nothing is derived. Where the notes are silent, the line says "not recorded". ONE exception, recorded here: the clock-out addendum of 2026-09-04 — the 23:55:11Z abandon of close run 2, its typed reason, and the second H-11 field check — POST-DATES the notes file and is transcribed from the lead's messages to the truing lane instead.*
 
 # FS-11 · Wave-G factory reset — AS RUN, the bank lane, the close, the reports, and steps 17 → 19 (裁-184)
 

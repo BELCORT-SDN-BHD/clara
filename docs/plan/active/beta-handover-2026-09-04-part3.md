@@ -14,6 +14,13 @@ split convention the ADR digest and the ruling ledgers use.*
 
 ### Carried at the review's insistence — the fourteen rows the first cut missed
 
+*The exact split, because "fourteen" and "twelve" are different numbers and both are true of
+something here: a fresh-context review probed **fourteen** pre-PR rows and found none carried. **TEN
+of them are carried below**; the **other FOUR are dispositions**, named in this section's closing
+paragraph (the `__Host-clara-auth` line closed by measurement, the two LAWS moved to the handover's
+§D, and the dangling doc paths kept inert). The rows below number **twelve** — C-77, C-86 and C-88
+carry further material the same sweep turned up, and C-77 alone holds a ten-item ledger.*
+
 - **C-77 · The 09-01-pm STANDING FOLLOW-UP LEDGER — ten items, none blocking beta**
   (`docs/plan/active/mohe-grill-rulings-2026-09-01-pm.md`, its own closing list): the **756-site /
   88-file `settleUntil` fixed-iteration sweep**, with the helper hoisted to a shared test-hook
@@ -90,8 +97,9 @@ split convention the ADR digest and the ruling ledgers use.*
   documented-as-is · Slice-4's compliance export, trace-debug surface, chat-visibility toggle and
   job-level liveness. **P2.**
 
-**What deliberately STAYED in the archive, named here so nobody hunts for it.** A row was left behind
-only when its action is DONE, or when its content is a LAW or a practice rather than a task.
+**What deliberately STAYED in the archive — the FOUR dispositions, named here so nobody hunts.** A
+row was left behind only when its action is DONE, or when its content is a LAW or a practice rather
+than a task.
 **CLOSED BY MEASUREMENT: the `__Host-clara-auth` HTTPS deployed-origin acceptance line** —
 `app.clarabook.com` now serves the Worker over HTTPS and the cookie landed in the field (secure,
 path=/, sameSite=Lax, at FS-10 S12's authenticated arm, and the FS-11 step-13 walk signed in on it).
@@ -130,6 +138,7 @@ for whichever lane next has the file.
 | `packages/runtime/README.md` | the pointer chain terminates at a STATE sentence ("VERSION 71") rather than the law it demonstrates, which survives at `:182` | measured 2026-09-03 |
 | `docs/product/PRD.md` §9 item 3 | 裁-145's note says four of five are live; **three** are (the Beta terms are not) | 裁-166 |
 | `docs/ARCHITECTURE.md` | the per-pool background-client error CONTRACT (rides C-04's PR) | 裁-149 |
+| `docs/ops/incident-2026-07-26-intake-storage.md:55` · `docs/ops/wave-g-setup-checklist.md:95,114-116,134-138` · `docs/plan/active/frontend-sprint-handoff-2026-08-31-orders.md:418-419` | **review-539's T-H list — three live instructions that now teach the OPPOSITE of what shipped.** 裁-151 removed `NEXT_PUBLIC_CLARA_RUNTIME_URL` and moved `CLARA_RUNTIME_URL`, `CLARA_PUBLIC_ORIGINS` and `CLARA_TRUSTED_CLIENT_IP_HEADER` into `apps/web/wrangler.jsonc`'s `vars` block, yet the incident record's **FIX** line still instructs a reader to set the deleted variable — while `apps/web/.env.example:109` says in capitals that it "IS GONE, DELIBERATELY, AND MUST NOT COME BACK" — and the checklist still lists all three among the `wrangler secret put` names and their proof line. Two historical research records also need a date stamp | 裁-151 · FS-10 S8a |
 
 ---
 

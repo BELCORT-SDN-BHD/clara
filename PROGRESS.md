@@ -64,7 +64,9 @@ fail-closed with a plain receipt, and no wrong number entered the books at any p
   (active, 86-account chart, one sales invoice posted, one bank receipt settled, and **FY2025 OPEN
   with two close runs, both ABANDONED** — run 1 at 05:39 to book the settlement, run 2
   `db941c04-f78e-4595-9004-08df90be1631` at 23:55:11Z = 07:55 MYT at the clock-out, so the period
-  wall is not left on for the next session; no attestation, no finalize).
+  wall is not left on for the next session; no attestation, no finalize). **BEE CREATIVE SOLUTION and
+  ROME PUBLIC ADVISORY were NOT re-onboarded** — they died with the schema at step 4 and are owed
+  before the next full-estate walk (constraint 13).
 - **Books pins — RE-CUT.** The standing RS pin **3,396,500 = 3,396,500 is UNPROVEN POST-RESET: its
   SUBJECT no longer exists.** Those books were built through the product at Slice 6 and died at the
   step-4 drop under **裁-177** (the owner waived the pre-reset dump; dissent filed). **The new pins,
@@ -121,8 +123,11 @@ is the only one that gates anything:
 4. **Hygiene** — handover [part 2](docs/plan/active/beta-handover-2026-09-04-part2.md) §C.3 and §C.5.
 
 **One process item owed:** 裁-171 ordered the twenty knowingly-open items read aloud item by item at
-the launch sitting. The 裁-184 walk consumed the sitting and **the reading did not happen** — the list
-survives in full in the handover, but the reading is a next-session item.
+the launch sitting. The 裁-184 walk consumed the sitting and **the reading did not happen**. The list
+is ENUMERATED at
+[`launch-sitting-record-2026-09-04-part1.md`](docs/plan/completed/launch-sitting-record-2026-09-04-part1.md)
+§3, and every item is also a row in the handover's parts 1–3 — by NAME, not by line. The reading
+itself is a next-session item.
 
 ## Backlog
 
@@ -162,11 +167,12 @@ are the index. The pre-truing text of both sections is archived verbatim in
   C-12 `/ready`'s hard storage gate (裁-61) · C-13 the archived backend queue (裁-123) · C-14 the
   overdue R2 restore drill (裁-163) · C-15 the bigint wire boundary (裁-71⑨) · C-16 single-machine Fly
   with no HA and no external alerting.
-- **P2 — hygiene, handover part 2 §C.3 · §C.4 and part 3:** ~15 web/product nits from the walk
+- **P2 — hygiene, handover part 2 §C.3 · §C.4 and part 3:** **22** web/product nits from the walk
   (H-10 · H-13 · H-14 · H-22 … H-34 · **H-44, the `held_outbox` 6 now read and explained as 裁-165's
-  disabled-source counter** · H-50 … H-54) · the full CARRIED registry **C-17 … C-88**
+  disabled-source counter** · H-50 … H-56) · the full CARRIED registry **C-17 … C-88**
   (database, runtime, frontend, reporting/close/tax, ops/DR/security, harness/CI — **C-77 … C-88 are
-  the fourteen rows a fresh-context review found missing from the first cut and are in part 3**) ·
+  twelve rows in part 3 that carry the fourteen a fresh-context review found missing from the first
+  cut — ten as rows, four as named dispositions**) ·
   and **§C.5, the seventeen documentation truings the rulings ordered that this truing did NOT
   execute** — the Wave-G checklist and `docs/ops/DR.md` lines from 裁-161/162/169/170/177, the T-K
   wrangler comment, the `0161`→`0163` citations, and the rest, each naming its file.
@@ -197,14 +203,17 @@ Same index rule: the detail is in the handover. What a reader most needs to know
   ruling numbers** (H-37).
 - **DR probe `4.9` is UNPROVEN IN THE FIELD** (H-49) — its subject died with the schema by ruling and
   the verify script hard-codes the ids.
-- **Four documents sit at or one line from the 500-line WRITE-BLOCKING ceiling** — measured on this
-  tree: `docs/adr/README.md` **499** (its rows now live in
-  [`docs/adr/README-rulings-2026-09.md`](docs/adr/README-rulings-2026-09.md), which has room),
-  [`docs/adr/README-log.md`](docs/adr/README-log.md) **499** after the launch night's five minutes,
-  `docs/plan/active/checkout-gate-design-part2.md` **500**, and the newest ruling ledger
-  [`mohe-grill-rulings-2026-09-04.md`](docs/plan/active/mohe-grill-rulings-2026-09-04.md) **483**.
-  **A 501st line is refused AT THE WRITE, so the next writer of any of them archives or splits BEFORE
-  it adds** — the log is the one with no headroom left.
+- **The 500-line ceiling is a WRITE-BLOCKING PreToolUse hook, and FOUR documents this session will
+  touch again are at or near it — measured on this branch at the final truing, 2026-09-04:**
+  [`docs/adr/README.md`](docs/adr/README.md) **499** (its ruling rows now live in
+  [`README-rulings-2026-09.md`](docs/adr/README-rulings-2026-09.md), which has room),
+  [`docs/adr/README-log.md`](docs/adr/README-log.md) **499** (445 before the launch night's five
+  dated minutes), `docs/plan/active/checkout-gate-design-part2.md` **500**, and the newest ruling
+  ledger [`mohe-grill-rulings-2026-09-04.md`](docs/plan/active/mohe-grill-rulings-2026-09-04.md)
+  **480**. **That is a SCOPED list, not a repo census** — measured the same way, the repo holds
+  **20** tracked `.md` files at exactly 500, **8** at 499 and **31** already ABOVE 500 (historical
+  records the hook grandfathers because nothing rewrites them). **A 501st line is refused AT THE
+  WRITE, so the next writer of ANY file archives or splits before it adds; check the count first.**
 - **Host and worktree hygiene — the census is a WALK, never a list (裁-173).** Measured at 06:20 on
   2026-09-04: **12 worktrees under the .claude/worktrees directory remain from merged lanes, three of them
   LOCKED**; the WSL `.vhdx` compaction is owed again (~50 GB reclaimable at the last measure).

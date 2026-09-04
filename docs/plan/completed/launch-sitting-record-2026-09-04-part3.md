@@ -1,5 +1,5 @@
 *Part 3 of 3 of the beta launch-sitting record (2026-09-03 → 09-04) — parts 1 and 2 are the sitting's PREP template, written before the walk; this part is the SITTING AS IT HAPPENED, written at the final clock-out truing from the lead's own as-run notes. Previous: `launch-sitting-record-2026-09-04-part2.md` · Next: none (this is the last part).*
-*Every figure, id and stamp below is transcribed from those notes. Where the notes are silent the line says "not recorded"; nothing is derived and nothing is rounded.*
+*Every figure, id and stamp below is transcribed from those notes. Where the notes are silent the line says "not recorded"; nothing is derived and nothing is rounded. ONE exception, recorded here: the clock-out addendum of 2026-09-04 — the 23:55:11Z abandon of close run 2, its typed reason, and the second H-11 field check — POST-DATES the notes file and is transcribed from the lead's messages to the truing lane instead.*
 
 # The beta launch sitting — 2026-09-04 ≈05:44 → 06:19 MYT
 

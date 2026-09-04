@@ -6,7 +6,7 @@ the milestone tally, the P0 and P1 rows, the harness notes and the pick-list. **
 **Why this file exists.** `PROGRESS.md` was re-cut at the final clock-out truing to short rows
 pointing at ids, so the DETAIL of every still-open item lives here. **Every row with an OPEN ACTION
 is carried below; rows that were superseded, historical, or a LESSON rather than a task stayed in
-the archive and are named here in one line each** (part 3's closing paragraph) — a law went to the
+the archive and are named here in one line each** (part 3, §C.4's closing paragraph) — a law went to the
 handover's §D instead of a backlog row, and a done thing is said to be done. **The place to look for
 the words as they stood is
 [`progress-archive-2026-08-part8.md`](../completed/progress-archive-2026-08-part8.md)**, which holds
@@ -23,7 +23,8 @@ Tiers are the same as part 1: **P0** before the first external applicant · **P1
 
 ## C.3 · P2 — hygiene found by the beta-live walk
 
-Every one of these was seen on screen or in a console during the 裁-184 walk. None blocks anything.
+**Twenty-two rows.** Every one was seen on screen, in a console or in a gate result during the 裁-184
+walk. None blocks anything.
 
 | id | area | what was seen | fix shape |
 |---|---|---|---|
@@ -46,6 +47,8 @@ Every one of these was seen on screen or in a console during the 裁-184 walk. N
 | **H-53** | product | **Consent evidence sits in the coding lane.** After the authorization letter was filed it appeared as a third RS filing awaiting coding | Exclude `consent_evidence`-kind filings from the coding lane |
 | **H-44** | runtime | **`held_outbox` 6 at the close — READ AND EXPLAINED, not a defect.** It was 0 at 02:39 and 6 at 06:19; the 06:21 full `/ready` names the cause: **`wakeEngine.heldForDisabledSource` = 6**, with the warning "6 held/queued wake-engine row(s) awaiting a disabled/unregistered source". That counter exists precisely so a DISABLED source cannot accumulate an invisible backlog (`docs/plan/active/g1-wake-engine-design.md:114` — "a disabled source never silently accumulates an invisible backlog"), and 裁-165 ships beta with the G1 cadence sources OFF. **So the six rows are the designed posture being loud** | Nothing now. **When G1 PR-2 (C-05) enables the sources, VERIFY these six are the disabled-source class and that they drain** — a held row that is NOT of that class would be the real finding. **A check inside C-05, not a lane** · owner: whoever builds C-05 · 裁-165 |
 | **H-54** | docs / product | **A close run that is BEGUN turns the period wall ON for every writer** until it is finalized or abandoned — that is what refused the human bank settle at 05:38 (`CLR19 · write_into_closed_period`, correct), and it is why close run 2, begun 05:42:30 only to re-measure the gates, had to be ABANDONED at the clock-out (23:55:11Z) so FY2025 would be left OPEN. Nothing in the product says so | Say it in the Close tab's own copy and in the close runbook: beginning a close closes the period to writers |
+| **H-55** | db / product | **Run 1's `open_bank_recon_items` gate PASSED with ZERO statements on file** for a client that already had a registered MBB bank account — a **vacuous pass**, and the exact mirror of H-12's false FAIL: the same gate then failed run 2 with 11 statement-month gaps once one real statement existed. A gate that is green because it has nothing to look at teaches a firm to trust it | Give the gate an explicit **no-statements** verdict (UNKNOWN or "not measurable") instead of a pass. **0.3 unit** · owner: a db lane · ruling: none — measured at the walk |
+| **H-56** | web / product | **Two gates read UNKNOWN (`bank_recon_identity`, `closing_stock_present`), the UI renders them with no pass badge — and the "Finalize close" control is still OFFERED.** **Whether `finalize_close` itself REFUSES an UNKNOWN gate was NOT tested**: the lead never attempted finalize, and law 2 applies — an offered button is not evidence of what the door does, in either direction | Test finalize against an UNKNOWN gate on a rig FIRST; then either block finalize while any gate is UNKNOWN, or make the attestation dialog NAME each UNKNOWN the attestation would cover. **0.5 unit** · owner: a db + web lane · ruling: none — measured at the walk |
 | **H-41** | design | The **two `clarabook-frontend` recut PRs** — 裁-64②'s `--input` token value and R3 §9's focus-ring founder amendment — are the owner's, in the design-authority repo, outside every lane's write boundary. Until they land the ClaraBook design law drifts from the shipped app and any future port re-imports the drift. 裁-167 rides the same row: if the design repo later implements token contract §5.2 (32/36/40), `apps/web` follows | Owner · 裁-168 |
 
 **Two practices minted by the walk, recorded so they are not re-learned:** a door reason typed
@@ -104,8 +107,9 @@ Grouped by area. **Nothing here was closed by the walk unless the row says so.**
   guarded population while the pin stayed fixed. Candidate: a standing census cell. **P1.**
 - **C-28 · `high_stakes_amount_cents` has no governed self-serve verb** (set once by a hand-run
   deploy script, ADR-0044) — a firm-setup surface item. **P2.**
-- **C-29 · `closing_stock` producer verb** — needed before any real goods-trader close; **this is
-  what makes the `closing_stock_present` gate UNKNOWN in H-21's symptom list.** **P1.**
+- **C-29 · `closing_stock` producer verb** — needed before any real goods-trader close. *(It is NOT
+  what made the gate read UNKNOWN on the walk: that was `trade_nature_fact_absent`, and the interview
+  never asks trade nature — see H-21. Two different halves of the same gate.)* **P1.**
 - **C-30 · `opening_tb.line` producer + the K-doc door** — Phase-5, review-gated; the corpus does not
   need it. **P2.**
 - **C-31 · `0154`'s cluster-wide role census, the CI half — CLOSED BY MEASUREMENT.** The
@@ -189,7 +193,7 @@ Grouped by area. **Nothing here was closed by the walk unless the row says so.**
   cannot open (the nav registry's floors and the route's own door are the walls; derive the Go list
   from the registry). And it **cannot reach a client BY NAME from firm altitude** — `CLIENT_ROUTES`
   render only once the URL already resolves a `clientId`, so ⌘K reaches the register but never a
-  named client. The second has no order anywhere. **P1.**
+  named client. The second has no order anywhere. **裁-117** governs the sibling half — one thread per altitude is the beta shape, with a small "firm threads" list later. **P1.**
 - **C-44 · Two FS-9 conformance residuals** (DS-07 CLOSED by 裁-167). **DS-09 per-field validation
   association** — 2 rendered `aria-invalid` sites against **70** `confirmDisabled=` occurrences across
   **49** files (count the file, never this line). **DS-15** — five self-declared "PORT DRIFT,
@@ -291,8 +295,10 @@ Grouped by area. **Nothing here was closed by the walk unless the row says so.**
   verifyOtp → settle inside one server request, `attempt_id` never crosses the wire, and the walk
   exercised it in the field (one attempt, **accepted**, 167 ms). **What is NOT re-measured and is
   carried:** whether the browser-identity half of the original finding is fully answered, plus the
-  `token_hash`-in-logs and single-use-replay siblings from the same law-28 leg. **P1, as a
-  re-measurement.**
+  `token_hash`-in-logs and single-use-replay siblings from the same law-28 leg. **裁-102** is the
+  ruling that deferred `/signup`'s indirect-resend sibling with all four pieces onto C-3's
+  claim/settle doors, and 裁-169 later SUBSTITUTED its wall with the two platform rate limits.
+  **P1, as a re-measurement.**
 - **C-64 · Host and worktree hygiene — and the census is a WALK, never a list (裁-173).** **Measured
   at 06:20 on 2026-09-04: TWELVE worktrees under the .claude/worktrees directory remain from merged lanes, three
   of them LOCKED.** *(The three carried the ids `agent-a01d56452325f30d7`, `agent-a03968a61c707eb2c`
