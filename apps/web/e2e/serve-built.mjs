@@ -110,6 +110,20 @@ const clients = [
   { id: CLIENT_B, name: "Bee Creative Solution", status: "active", created_at: "2026-02-01T00:00:00.000Z" },
 ];
 
+/** Sessions minted at RUNTIME by the create handler below, and the marker transcript each
+ *  one serves. Kept beside the list they are appended to.
+ *
+ *  THEY PERSIST FOR THE SERVER'S LIFETIME, deliberately, and the 裁-117 walk depends on
+ *  it: it creates two threads and switches between them, so the first must still be
+ *  listed after the second is minted. Nothing resets between specs, which is safe only
+ *  because `playwright.config.ts` pins `workers: 1`, `retries: 0` and
+ *  `reuseExistingServer: false` — one server, one pass, one process. The walk reads its
+ *  markers off the screen rather than hard-coding an ordinal for the same reason: another
+ *  spec creating first would shift the count, and only the config keeps that from
+ *  happening today. */
+let createdSessions = 0;
+const createdTranscripts = new Map();
+
 const sessions = [
   { id: COLLEAGUE_THREAD_A, firm_id: FIRM_ID, client_id: CLIENT_A, created_by: "44444444-4444-4444-8444-444444444444", visibility: "firm", title: "Colleague thread", created_at: "2026-09-02T02:00:00.000Z" },
   { id: THREAD_A, firm_id: FIRM_ID, client_id: CLIENT_A, created_by: SUBJECT, visibility: "private", title: "Own A", created_at: "2026-09-02T01:00:00.000Z" },
@@ -430,9 +444,55 @@ async function handleChat(request, response, url) {
     sendJson(response, 200, { sessions });
     return true;
   }
+
+  // 裁-117 — CREATE, beside the list it appends to, because there is exactly ONE session
+  // list per server and a second one would starve every walk that reads this one. The
+  // row is minted the way `packages/runtime/src/chatRoutes.ts:137-157` mints it: always
+  // `private`, `client_id` from the body, `created_by` from the caller.
+  //
+  // A PINNED SERVER/MOCK DIVERGENCE, AND IT IS DELIBERATE. The real ingress accepts a
+  // firm-altitude create — `chatRoutes.ts:145` inserts `body.clientId ?? null` and the
+  // product's own rail offers exactly that at the firm altitude. This mock REFUSES it,
+  // because there is one session list for the whole suite and `selectOwnSession` resolves
+  // on `(created_by, client_id)`: a row with `client_id: null` under the shared SUBJECT is
+  // resolved by EVERY walk's firm rail, which is the third instance of the ownership rule
+  // `e2e-fixture-ownership.test.ts` was written for.
+  //
+  // The divergence is FENCED MECHANICALLY by that file's N6 cell, which reads this file
+  // and asserts both halves — that no static row here claims the firm altitude for the
+  // shared subject, and that this handler refuses exactly the no-clientId case. N4 is a
+  // different cell over a different subject (`P6_5_SESSIONS`) and does not reach this
+  // file; citing it here was the reasoning, not the fence.
+  if (request.method === "POST" && url.pathname === "/api/chat/sessions") {
+    const body = await readJson(request);
+    if (!body.clientId) {
+      sendJson(response, 400, { error: "e2e: a firm-altitude session would be resolved by EVERY walk's rail — a deliberate mock/server divergence, fenced by e2e-fixture-ownership.test.ts N6" });
+      return true;
+    }
+    createdSessions += 1;
+    const id = `e2e0${String(createdSessions).padStart(4, "0")}-0000-4000-8000-000000000000`;
+    createdTranscripts.set(id, `CREATED THREAD ${createdSessions}`);
+    sessions.unshift({
+      id, firm_id: FIRM_ID, client_id: body.clientId, created_by: SUBJECT,
+      visibility: "private", title: null, created_at: new Date().toISOString(),
+    });
+    sendJson(response, 201, { session_id: id });
+    return true;
+  }
+
   const match = /^\/api\/chat\/sessions\/([^/]+)\/messages$/.exec(url.pathname);
   if (request.method === "GET" && match) {
     const threadId = decodeURIComponent(match[1]);
+    const created = createdTranscripts.get(threadId);
+    if (created) {
+      // A distinguishable transcript per created thread, so a walk can prove it SWITCHED
+      // rather than merely re-rendered. Production would serve an empty list here; the
+      // marker is the instrument, and it exists only for ids this handler minted.
+      sendJson(response, 200, {
+        messages: [{ id: `message-${threadId}`, role: "assistant", parts: [{ type: "text", text: created }], turn_key: null, task_id: null, seq: 1, created_at: "2026-09-04T00:00:00Z" }],
+      });
+      return true;
+    }
     const text = threadId === THREAD_A
       ? "Own message for client A"
       : threadId === THREAD_B
