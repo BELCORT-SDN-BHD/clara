@@ -183,8 +183,11 @@ again before trusting an older PR's evidence at ceremony time.
 
 ## Ceremony runbooks
 
-The six runbooks below route their live DSN-bearing commands through this bridge; each also
+The seven runbooks below route their live DSN-bearing commands through this bridge; each also
 carries a one-line pointer back to this file at the point where DSN discipline is stated:
 `wave-b-0019-ceremony-runbook.md`, `wave-b-0021-ceremony-runbook.md`,
 `wave-b-ceremony-runbook.md`, `runtime-hard-restart.md`, `DR.md`,
-`g1-operator-firm-ceremony.md`.
+`g1-operator-firm-ceremony.md`, `runtime-tls-verify-full-ceremony.md`.
+
+*(The "five ceremony runbooks below" in the scoping paragraph above is older than this list and
+undercounts it; the list here is the roster.)*

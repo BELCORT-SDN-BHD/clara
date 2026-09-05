@@ -157,6 +157,19 @@ why it matters, the fix shape, a size guess, an owner, a ruling number and a tie
 are the index. The pre-truing text of both sections is archived verbatim in
 [`progress-archive-2026-08-part8.md`](docs/plan/completed/progress-archive-2026-08-part8.md).
 
+- **H-43 and H-48 — THE CODE SHIPPED IN #558 (`2060c762`, merged 2026-09-04). What is left is an
+  OPERATOR CEREMONY, not a build.** On `main` today: the per-lane boot probe
+  (`packages/runtime/lib/lane-probe.mjs`, whose own line 128 calls it "the full seven-lane roster",
+  surfaced on `/ready` under `checks.pools` at `packages/runtime/lib/health.mjs:361-372`) · the TLS
+  boot assert (`packages/runtime/lib/tls-ca.mjs`) · the build-info route
+  `apps/web/app/api/build-info/route.ts` · the
+  classify recall harness (`packages/runtime/scripts/measure-classify-recall.mjs`). **H-48 is closed
+  by code and opens for real at the v75 deploy.** **H-43's remainder is the ceremony in
+  [`runtime-tls-verify-full-ceremony.md`](docs/ops/runtime-tls-verify-full-ceremony.md): flip the
+  FIVE runtime DSN secrets that take the pin in that ceremony to `verify-full`** — three more take
+  it whenever their own operator ceremonies run, and `DATABASE_URL` is checked by the code but is
+  not a deployed secret. The 2026-09-04 posture block keeps its historical wording; these rows are
+  the current state.
 - **NEW, from the 2026-09-04→05 repair session — the queue, in order:** **Q-01** DB-D, H-21 the
   onboarding interview's captures projection · **Q-02** the consent lane (裁-186, the firm-level
   DPA-stage declaration; re-shapes H-18) · **Q-03** DB-C, the wall-removal lane (裁-188 — every
@@ -258,6 +271,25 @@ Same index rule: the detail is in the handover. What a reader most needs to know
   picked a breakpoint-hidden icon on one tree and the overlay on another with identical code, so the
   cell passed by luck; every smoke spec must use a subject-scoped locator and assert it resolved
   before measuring.
+- **`packages/runtime/README.md` is stale against #558.** Grepped on `main` at `5007bbcc`, it names
+  `packages/runtime/lib/tls-ca.mjs` exactly once — line 398, about the in-image CA path and its
+  drift cell — and names **none** of the per-lane boot probe, the build-info route, the recall
+  harness, or the
+  new `/ready` shape that reports `checks.pools`. A reader following that README today will not
+  learn the runtime grew a boot probe. **Owner: the 裁-196 runtime follow-up lane**, which is
+  already touching the same files.
+- **No numeric recall FLOOR exists for the H-04 classify gate, and one is owed before v75 ships.**
+  `packages/runtime/scripts/measure-classify-recall.mjs` reports `recall_at_gate` as a percentage
+  and prints it; **nothing in the repo says what percentage passes.** Do not mistake the script's
+  `CONFIDENCE_GATE` of `0.8` for that floor — that is the per-row confidence bar
+  `clara.classify_document` itself applies (the script says so at its own line 63), not a verdict on
+  the run. #558's commit puts the floor with the owner, and the deploy runsheet treats the recall
+  run as pass/fail, so **the two disagree until someone sets a number.** It gates runtime v75.
+- **`apps/web/README.md` has no routine Worker redeploy or version-promote runbook.** It documents
+  the `wrangler.jsonc` bindings and the secrets posture, and it carries no deploy or release
+  section at all — the only walked procedure anywhere is the FS-10 first-deploy as-run, which is a
+  one-time cutover record, not a repeatable runbook. **The v75 and Worker ceremony as-run creates
+  it**; until then a promote is done from memory, and there is no repoint rollback (裁-156).
 - **Two stale in-code claims, both measured:** `apps/web/components/firm/identifier-promotion-row.tsx:7`
   still cites the pre-numbering name UNNUMBERED_proposal_basis_resolved.sql, which has since been
   numbered `packages/db/migrations/0143_proposal_basis_resolved.sql` ·
