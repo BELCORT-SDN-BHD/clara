@@ -15,6 +15,20 @@ it. `PROGRESS.md` keeps a pointer in the place of each.*
 |---|---:|---:|---|
 | 2026-09-04 · beta went live | 23 | 2304 | `759c32130a33e2584574fcdbd506c6ea` |
 | 2026-09-04→05 · the repair session | 28 | 2767 | `fb1f9181f13d71d3444fa62474f73088` |
+| Known issues · the 500-line ceiling + host/worktree hygiene | 23 | 2250 | `ee00ad7ca2b8e8ee099f06482fbe99e9` |
+| Known issues · the Mail gate and the login-CSRF finding, both TRUED | 11 | 1000 | `55293fd70066d428d3aa7d62b05e999a` |
+
+**Two more blocks joined them at the 裁-202 commit,** for the same ceiling reason, and both are
+PROVENANCE rather than current state. **The third** is a pair of Known-issues bullets whose own text
+dates itself — the ceiling bullet's four-document list was "measured on this branch at the final
+truing, **2026-09-04**", and the hygiene bullet's worktree count was "measured at **06:20 on
+2026-09-04**" and tells the reader to re-walk before touching anything. `PROGRESS.md` keeps the
+standing law each minted as a short live bullet: check a file's line count before writing to it and
+split or archive first; and re-walk `git worktree list` before touching any worktree, unlinking every
+reparse point first because removal is junction-unsafe on this host. **The fourth** is the two TRUED
+findings — RISK 50's Mail gate and the confirmation login-CSRF finding — each a closed record whose
+one remaining obligation is already carried as a Backlog row (**H-46** the certification call, which
+is the owner's; **C-63** the browser-identity re-measurement).
 
 **Two reading notes, in the preamble rather than in the moved text — annotating a moved block
 destroys the one thing an archive is for.** (1) The entries' relative links were written from the
@@ -80,3 +94,47 @@ are deployed — DB frontier `0176`, runtime **v75**, web Worker `90c1a5d0…`.
   under the "head must be up to date with base" rule, docs merge between code cycles or you pay a
   cycle. **The session ended with nothing deployed**, which is the state the next session opens on:
   the DB ceremony first, then v75, then the Worker.
+
+---
+
+## The Known-issues block moved at the 裁-202 commit (2026-09-06)
+
+- **The 500-line ceiling is a WRITE-BLOCKING PreToolUse hook, and FOUR documents this session will
+  touch again are at or near it — measured on this branch at the final truing, 2026-09-04:**
+  [`docs/adr/README.md`](docs/adr/README.md) **499** (its ruling rows now live in
+  [`README-rulings-2026-09.md`](docs/adr/README-rulings-2026-09.md), which has room),
+  [`docs/adr/README-log.md`](docs/adr/README-log.md) **499** (445 before the launch night's five
+  dated minutes), `docs/plan/active/checkout-gate-design-part2.md` **500**, and the newest ruling
+  ledger [`mohe-grill-rulings-2026-09-04.md`](docs/plan/active/mohe-grill-rulings-2026-09-04.md)
+  **480**. **That is a SCOPED list, not a repo census** — measured the same way, the repo holds
+  **20** tracked `.md` files at exactly 500, **8** at 499 and **31** already ABOVE 500 (historical
+  records the hook grandfathers because nothing rewrites them). **A 501st line is refused AT THE
+  WRITE, so the next writer of ANY file archives or splits before it adds; check the count first.**
+- **Host and worktree hygiene — the census is a WALK, never a list (裁-173).** Measured at 06:20 on
+  2026-09-04: **12 worktrees under the .claude/worktrees directory remain from merged lanes, three of them
+  LOCKED**; the WSL `.vhdx` compaction is owed again (~50 GB reclaimable at the last measure).
+  **Re-walk with `git worktree list` before touching anything** — the count and the names move every
+  session. **Removal is junction-UNSAFE by default:** never `robocopy /mir` a worktree without
+  `/XJ`, and `git worktree remove --force` and `Remove-Item -Recurse` are not junction-safe on this
+  host either (2026-09-01: 2000 tracked files deleted under the main checkout; 2026-09-02: the main
+  checkout's `apps/web/node_modules` emptied). Unlink every reparse point FIRST, re-walk to prove none
+  remain, THEN remove; post-flight `git status` on main plus `ls apps/web/node_modules/next`. The
+  locked ones need an elevated shell after a Claude Code restart, then `git worktree prune`. Two
+  standing host facts: the OpenNext/Workers artifact must be BUILT ON LINUX, and **WSL idle-terminates
+  without a Windows-side holder** — plant a detached keeper before any port-dependent WSL work.
+
+---
+
+## The two TRUED Known-issues bullets moved at the 裁-202 commit (2026-09-06)
+
+- **RISK 50, the Mail gate — TRUED.** Transport, sender identity and **delivery of a real six-digit
+  signup code to a NON-team address** are all proven (FS-10 S21, after an OTP-length fix: the project
+  carried `mailer_otp_length` = **8** against the app's six-digit form). Time-to-arrive and the From
+  header were asked and **are not recorded**, and FS-11's own code went to a TEAM address — so the
+  ceremony's certification line is the owner's call, carried as H-46.
+- **The confirmation login-CSRF finding — TRUED.** The always-refusing stub is gone; the wall is wired
+  for real by FS-4 C-6 Lane B (#517) and answered in the field (one attempt, accepted, 167 ms). What
+  is carried is a **re-measurement** of the browser-identity half plus the `token_hash`-in-logs and
+  replay siblings (handover part 2, C-63). **Closed in the same breath: the `__Host-clara-auth`
+  HTTPS deployed-origin acceptance line** — the origin serves HTTPS on the Worker and the cookie
+  landed in the field.

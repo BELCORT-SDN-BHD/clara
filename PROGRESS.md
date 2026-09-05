@@ -76,7 +76,7 @@ reversed, and the closure is still an OPERATING posture, not a technical wall.
 | runtime v75 (裁-189) | **DONE 2026-09-05** — released by image after the gate; `/ready` in the new seven-lane shape |
 | the web Worker promotion (裁-189) | **DONE 2026-09-05** — `90c1a5d0…` at 100 %; rollback = re-promote `c5b1e051…` (裁-156) |
 | H-43, the `verify-full` flip on the six lane DSNs | **still OWED** — NOT part of this ceremony; the pooler CA has shipped in the image since #558, which is its prerequisite |
-| the nine queued tickets, then 裁-197's three chat tickets | not started; the order is in the posture block above — the orders are filed at `docs/plan/completed/repair-session-2026-09-04-orders.md` (rules: `docs/plan/completed/repair-session-2026-09-04-house-rules.md`; register: `docs/plan/completed/repair-session-2026-09-04-register.md`; roster: `docs/plan/completed/repair-session-2026-09-04-roster.md`) |
+| the queued tickets, in the 裁-202 order | **not started. The order is RULED (裁-202, 2026-09-06): Q-00 → Q-03 → Q-01+Q-02 → Q-02b → Q-04 → Q-05 → Q-06 → Q-07 → Q-08 → Q-09 → Q-10 → Q-11 → Q-12** — Q-00 is the classify/OCR race plus #558's harness-in-image defects, and Q-02b is the new "small faces" web lane. Full contents in the Backlog. Orders filed at `docs/plan/completed/repair-session-2026-09-04-orders.md` (rules: `…-house-rules.md`; register: `…-register.md`; roster: `…-roster.md`); the ruling's own decision sheet and its four evidence records are the `report-disposition-2026-09-06-*` files in the same directory |
 
 The sprint's build closed on 2026-09-03,
 the beta-live e2e ran on 09-03/09-04, and every lane in the old table was `merged` or `ceremonied` —
@@ -87,11 +87,18 @@ and the beta sprint is written down. That table is the beta sprint's closed lane
 
 ## Next
 
-**The owner reads the handover's Backlog and Known issues and picks.** The recommended order is
-[`beta-handover-2026-09-04.md`](docs/plan/active/beta-handover-2026-09-04.md) §E, and its first block
-is the only one that gates anything:
+**THE PICK IS RULED — 裁-202 (owner, 2026-09-06 ≈02:20 MYT).** Twenty decisions, all per
+recommendation, D-8 = 甲 and D-10 deferred, taken over a per-item disposition of all 216 rows of the
+three opening reports. **The order is Q-00 → Q-03 → Q-01+Q-02 → Q-02b → Q-04 … Q-12**, carried in the
+Backlog below; the sheet the owner ruled from and its four evidence records are the
+`report-disposition-2026-09-06-*` files under `docs/plan/completed/`.
 
-1. **The P0 block — CODED AND NOW SERVING, as of the 2026-09-05 ceremony.** The repair session wrote
+1. **Q-00 — THE CLASSIFY/OCR ORDERING RACE, ahead of everything.** The dispatcher must gate the
+   classify lane on the extraction lane's `done` (or re-run classify on extraction completion),
+   **with a cell that plants a classify task ahead of its extraction and asserts it WAITS.** The same
+   lane fixes #558's two harness-in-image defects (D-2). Until it lands, the AI intake path for the
+   most common Malaysian document class is dead, and H-04 stays open.
+2. **The P0 block — CODED AND NOW SERVING, as of the 2026-09-05 ceremony.** The repair session wrote
    code for H-02 · H-03 · H-05 (#545) · H-06 (#549) · H-35 · H-38 (#544) · H-43 · H-48 · H-04's
    harness (#558) · C-07 (#555) · H-17 · H-19 (#556), **and all three deploy steps have now run**, so
    every one of them reaches a user. **Two caveats the ceremony measured rather than assumed:**
@@ -102,13 +109,14 @@ is the only one that gates anything:
    the firm-level DPA-stage declaration · **DPA v2** (H-36) and the Stripe product-description edit
    (H-37), both owner acts · the two password rotations (H-42, 裁-178 accepted) · H-47 the
    re-migration preflight and runbooks. **H-01 is closed by the v75 deploy itself.**
-2. **The walk's P1 product rows**, starting with **H-21** — projecting the onboarding interview's
-   captures, which alone unblocks four separate symptoms.
-3. **The pre-上市 roadmap in its ruled order** (裁-148 · 裁-150): the pricing sitting (裁-58, which
+3. **Then Q-03, then Q-01+Q-02 as ONE D1 window** — H-21's captures projection and 裁-186's consent
+   declaration both re-cut `commit_client_onboarding`, so they are one lane (D-3). H-21 alone
+   unblocks four separate symptoms.
+4. **The pre-上市 roadmap in its ruled order** (裁-148 · 裁-150): the pricing sitting (裁-58, which
    everything downstream waits on) → the billing TIER tranche + the AI usage ledger (裁-144) → the
    lawyer's pass over the DPA, the beta terms and the consent text (裁-125) → the real-money switch
    with Stripe live mode, KYB and the NON-ZERO checkout walk (裁-126/148) = **上市**.
-4. **Hygiene** — handover [part 2](docs/plan/active/beta-handover-2026-09-04-part2.md) §C.3 and §C.5.
+5. **Hygiene** — handover [part 2](docs/plan/active/beta-handover-2026-09-04-part2.md) §C.3 and §C.5.
 
 **One process item owed:** 裁-171 ordered the twenty knowingly-open items read aloud item by item at
 the launch sitting. The 裁-184 walk consumed the sitting and **the reading did not happen**. The list
@@ -141,16 +149,40 @@ are the index. The pre-truing text of both sections is archived verbatim in
   it whenever their own operator ceremonies run, and `DATABASE_URL` is checked by the code but is
   not a deployed secret. The 2026-09-04 posture block keeps its historical wording; these rows are
   the current state.
-- **NEW, from the 2026-09-04→05 repair session — the queue, in order:** (orders filed 2026-09-06 in `docs/plan/completed/repair-session-2026-09-04-orders.md`) **Q-01** DB-D, H-21 the
-  onboarding interview's captures projection · **Q-02** the consent lane (裁-186, the firm-level
-  DPA-stage declaration; re-shapes H-18) · **Q-03** DB-C, the wall-removal lane (裁-188 — every
-  attestation ceremony and maker-checker wall out of the door bodies, receipts in) · **Q-04** L10
-  `chatTurn` v18 (H-07 · H-08) · **Q-05** the web copy sweep, last among the web lanes · **Q-06**
-  reporting H-15 · **Q-07** the required browser-smoke CI job (裁-192 · CB-AE2E-036) · **Q-08** H-47
-  the re-migration preflight and runbooks · **Q-09** CB-001 the Terms document kind (owner sitting).
-  **Then 裁-197's three, ruled order:** **Q-10** chatTurn tools and cards for the five gaps (≈1.5) ·
+- **THE QUEUE, IN ITS RULED ORDER (裁-202, owner, 2026-09-06 ≈02:20 MYT — twenty decisions, all per
+  recommendation, D-8 = 甲, D-10 deferred).** The order is
+  **Q-00 → Q-03 → Q-01+Q-02 → Q-02b → Q-04 → Q-05 → Q-06 → Q-07 → Q-08 → Q-09 → Q-10 → Q-11 → Q-12**
+  (orders filed in `docs/plan/completed/repair-session-2026-09-04-orders.md`; the decision sheet and
+  its four evidence records are the `report-disposition-2026-09-06-*` files beside it).
+  **Q-00** the classify/OCR race — **ahead of everything** — plus, in the SAME lane, #558's two
+  harness-in-image defects · **Q-03** DB-C, the wall-removal lane (裁-188), moved to directly after
+  Q-00, with `firms.high_stakes_amount_cents` riding that migration — **deleted or demoted to an
+  advisory number, never a new door** · **Q-01 + Q-02 are ONE lane in ONE D1 window** (both re-cut
+  `commit_client_onboarding`) · **Q-02b, the "small faces" web lane:** the DPA signed-state hydrate
+  (CB-AE2E-007) · the OTP resend (CB-AE2E-006) · `/activity` rewired to `list_firm_timeline`
+  (CB-AE2E-018) · the client AI-state readout over `client_egress_state` · the payer-identifier UI
+  (H-09) · the sales-lane panel over the `0176` wrapper with **F-02** (H-19 / CB-AE2E-012) · the two
+  now-false `en.json` strings and the `ClaraThreadMenu` archive control · and the **FY-end countdown
+  strip** (D-8: "GI clock" = 甲, no backend, ≈0.3; the statutory-calendar reading 乙 becomes a
+  pre-上市 row, 丙 not now) · **Q-04** L10 `chatTurn` v18 (H-07 · H-08) · **Q-05** the web copy sweep ·
+  **Q-06** reporting H-15, publishing **ONE management template** — statutory waits for the lawyer
+  (D-15) · **Q-07** the required browser-smoke CI job (裁-192) · **Q-08** H-47 the re-migration
+  preflight and runbooks · **Q-09** CB-001 the Terms document kind, **its sitting held THIS WEEK**
+  (D-6) · then 裁-197's three: **Q-10** chatTurn tools and cards for the five gaps (≈1.5) ·
   **Q-11** real readers for the nine ids-only part kinds (≈1) · **Q-12** provisional streaming text in
   the rail (≈0.7).
+- **ALSO RULED at 裁-202, each a named row with an owner:** **D-6** the placeholder / `[verify]`-token
+  **deploy-gate cell (≈0.2) is built NOW**, not held for the DPA bytes · **D-13** CSP enforcement **by
+  hashes**, before the real-money switch · **D-14** the **restore drill (C-14) runs FIRST**, then the
+  PITR decision (C-56) · **D-16** **ONE close/bank handbook**, folding H-10 · H-13 · H-14 · H-54,
+  which today each prescribe writing into a runbook that does not exist · **D-20** **one field
+  re-verification walk after Q-00**: a real Maybank/Alliance statement through to reconciliation, a
+  clean client finalized entirely through the UI with no DB bridge (CB-AE2E-004), and one sales
+  invoice re-run for H-17's `tokens 0` residual. **D-5:** #541's exit-pack items JOURNAL-01 and
+  CONSENT-01 are **re-cut to 裁-187's and 裁-186's shapes before they can be graded** — as written
+  they are ungradeable. **D-10** chat export files are DEFERRED (no lane; #549's honest copy stands)
+  and **D-19** "card component" CLOSES UNNAMED, re-opening when the owner names the card and screen.
+  **D-11** onboarding full-screen stays opt-in · **D-12** no new UI dependency · **D-18** the two ORPHANED ROWS settle by hand at the next ceremony.
 - **NEW — follow-ups the lanes and reviews surfaced, each needing an owner and a next step:**
   **F-01** `clara.sst_threshold_schedule` has no `clara_authenticated` grant, so the Tax tab's
   turnover-classification control cannot offer the statutory thresholds (裁-196 d; a SELECT grant or
@@ -163,29 +195,27 @@ are the index. The pre-truing text of both sections is archived verbatim in
   `apps/web/e2e/fs4-checkout-mock.mjs`, held closed today only by `workers: 1` · **F-06**
   `apps/web/app/globals.css` is above the 500-line write hook and the next writer must split it
   first.
-- **P0 — NEW, minted by the 2026-09-05 ceremony: the CLASSIFY/OCR ORDERING RACE.** The classify
-  lane is dispatched and settles BEFORE the extraction lane persists its regions, so the classifier
-  reads an empty string and returns `other` at ≤ 0.05 on a document it would otherwise get right.
-  **Measured on all four documents that have ever run it** — classify finished 1.4 s, 3.1 s, 5.7 s
-  and 5.8 s before its OCR row existed; each document has exactly ONE `ocr` extraction
-  (`version_n` 1), so there was no earlier row to read. **This is the real H-04**, and #558's prompt
-  sharpening addressed a different cause. **Fix:** the dispatcher must gate the classify lane on the
-  extraction lane's `done` (or re-run classify on extraction completion). **Owner: the next
-  runtime+DB lane.** Evidence and the reproduction table are in the ceremony as-run, part 1 §5.1a;
-  **the fix needs a cell that plants a classify task ahead of its extraction and asserts it WAITS.**
-- **P0 — NEW: `#558`'s recall harness cannot run inside the image it ships in (two defects).**
-  (i) `packages/runtime/Dockerfile`'s final stage does not `COPY workflows/`, so
-  `packages/runtime/lib/classify.mjs`'s line-28 import of
-  `packages/runtime/workflows/invoiceFacts.v1.behavior.mjs` breaks EVERY
-  standalone script in the image (the server is unaffected — it runs the nitro bundle, where the
-  import is inlined). (ii) `scripts/measure-classify-recall.mjs:290` builds a bare `pg.Client` and
-  never `SET ROLE`s, so it fails **42501** through every lane login by design of
-  `roles-bootstrap.sql:190` (`INHERIT FALSE, SET TRUE`); the fix is to route through
-  `packages/runtime/lib/pools.mjs`'s checkout, which SET ROLEs, or an explicit `set role clara_runtime`
-  after connect. **The pooler does not forward `PGOPTIONS`,** so the env-only workaround is closed —
-  worth a line in `docs/ops/dsn-bridge.md`. **Lesson for the register: an ops script that ships in an
-  image must be PROVEN INSIDE THAT IMAGE before its PR merges;** #558's review verified the harness
-  on the dev host only.
+- **P0 — the CLASSIFY/OCR ORDERING RACE, minted by the 2026-09-05 ceremony. This is Q-00, ahead of
+  everything (裁-202 D-2).** The classify lane is dispatched and settles BEFORE the extraction lane
+  persists its regions, so the classifier reads an empty string and returns `other` at ≤ 0.05 on a
+  document it would otherwise get right. **Measured on all four documents that have ever run it** —
+  classify finished 1.4 s, 3.1 s, 5.7 s and 5.8 s before its OCR row existed; each has exactly ONE
+  `ocr` extraction (`version_n` 1), so there was no earlier row to read. **This is the real H-04**;
+  #558's prompt sharpening addressed a different cause. **Fix:** the dispatcher gates classify on the
+  extraction's `done` (or re-runs classify on extraction completion), **with a cell that plants a
+  classify task ahead of its extraction and asserts it WAITS.** Evidence and the reproduction table:
+  ceremony as-run part 1 §5.1a.
+- **P0 — `#558`'s recall harness cannot run inside the image it ships in (two defects). 裁-202 D-2
+  puts BOTH in the Q-00 lane.** (i) `packages/runtime/Dockerfile`'s final stage does not
+  `COPY workflows/`, so `classify.mjs`'s line-28 import breaks EVERY standalone script in the image
+  (the server is unaffected — it runs the nitro bundle, where the import is inlined).
+  (ii) `scripts/measure-classify-recall.mjs:290` builds a bare `pg.Client` and never `SET ROLE`s, so
+  it fails **42501** through every lane login by design of `roles-bootstrap.sql:190`
+  (`INHERIT FALSE, SET TRUE`); route it through `packages/runtime/lib/pools.mjs`'s checkout, or
+  `set role clara_runtime` after connect. **The pooler does not forward `PGOPTIONS`,** so the env-only
+  workaround is closed — worth a line in `docs/ops/dsn-bridge.md`. **Lesson: an ops script that ships
+  in an image must be PROVEN INSIDE THAT IMAGE before its PR merges;** #558's review verified it on
+  the dev host only.
 - **P0 — before the first EXTERNAL applicant, handover §C.1** (struck rows measured 2026-09-06 on
   `main` at `95441fe6`)**:** ~~H-01 the v71↔DB skew~~ **CLOSED by the v75 deploy, 2026-09-05** ·
   ~~C-07 the XML `blob:` open with no MIME gate~~ **CLOSED by #555, serving 2026-09-05** — what
@@ -207,15 +237,13 @@ are the index. The pre-truing text of both sections is archived verbatim in
   Worker redeploy runbook the ceremony earned could NOT be folded into it as planned. It landed as
   its own file, [`docs/ops/worker-redeploy-runbook.md`](docs/ops/worker-redeploy-runbook.md); fold
   it in when the README is next split. (Same class as the `apps/web/app/globals.css` row above.)
-- **TRUED by the ceremony's live reads (2026-09-05), each previously stated otherwise:**
-  **(a)** the runsheet's "three skipped lanes" for `bank`/`stripe_webhook`/`auth_wall` is STALE —
-  **only `bank` is skipped** (`dsn_not_configured`); the other two probe healthy, their DSNs having
-  been configured by the C-5 secrets ceremony. **(b)** the Worker carries **FOUR** environment
-  variables, not three — `CLARA_PUBLIC_ORIGINS`, `CLARA_RUNTIME_URL`, `CLARA_STRIPE_LIVEMODE`,
-  `CLARA_TRUSTED_CLIENT_IP_HEADER` (six secrets is right). **(c)** the `clara-backup` one-off machine
-  id `d895470c6024e8` in `wave-b-0019-ceremony-runbook.md` is CURRENT, not stale post-reset — it was
-  re-read live. **(d)** `clara.agent_tasks` has **no** `last_refusal` column; it is on
-  `clara.autodraft_attempts` (`0011:712`).
+- **TRUED by the ceremony's live reads (2026-09-05), each previously stated otherwise:** **(a)** only
+  `bank` is skipped on `/ready` (`dsn_not_configured`), not three lanes — `stripe_webhook` and
+  `auth_wall` probe healthy · **(b)** the Worker carries **FOUR** env vars, not three
+  (`CLARA_PUBLIC_ORIGINS`, `CLARA_RUNTIME_URL`, `CLARA_STRIPE_LIVEMODE`,
+  `CLARA_TRUSTED_CLIENT_IP_HEADER`; six secrets is right) · **(c)** the `clara-backup` one-off machine
+  id in `wave-b-0019-ceremony-runbook.md` is CURRENT, re-read live · **(d)** `clara.agent_tasks` has
+  **no** `last_refusal` column; it is on `clara.autodraft_attempts` (`0011:712`).
 - **ORPHANED ROWS, both ruled PROCEED and DO NOT TOUCH at the ceremony; the owner decides disposition:**
   **(i)** `workflow.workflow_runs` `wrun_01M1MNTV64Z681KNQ6QVM4HEDH`, `clientOnboarding_v4`,
   `running` since `2026-09-03 22:22:05` UTC with zero progress — a launch-night orphan whose subject
@@ -273,10 +301,15 @@ are the index. The pre-truing text of both sections is archived verbatim in
   and **§C.5, the seventeen documentation truings the rulings ordered that this truing did NOT
   execute** — the Wave-G checklist and `docs/ops/DR.md` lines from 裁-161/162/169/170/177, the T-K
   wrangler comment, the `0161`→`0163` citations, and the rest, each naming its file.
-- **The owner's own acts:** the two `clarabook-frontend` recut PRs (裁-168) · the Stripe dashboard
-  edits (H-37, H-39) · the two Supabase auth decisions (H-40) · the Resend cap read (H-45) · the Mail
-  certification call (H-46) · the elevated-shell worktree removal and the WSL `.vhdx` compaction
-  (裁-173) · destroying his own `codex-e2e-rate-wall-sleeper` machine on `clara-backup`.
+- **The owner's own acts. FIVE are ruled for TODAY, 2026-09-06 (裁-202 D-7):** H-37 the Stripe
+  checkout page copy · H-39 the duplicate webhook endpoint · H-40 the two Supabase settings
+  (`jwt_exp`, HIBP) · H-45 the Resend cap read back into the checklist · H-46 the call on whether
+  S21's Gmail code certifies 裁-146 point 3. **Also ruled: the DPA v2 draft goes to the lawyer NOW**
+  (H-36, D-6), and **the Terms sitting is held THIS WEEK** (Q-09 · CB-AE2E-001 — must checkout
+  require BOTH receipts, and may a Terms body with 27 lawyer markers be seeded). Standing, unruled:
+  the two `clarabook-frontend` recut PRs (裁-168) · the elevated-shell worktree removal and the WSL
+  `.vhdx` compaction (裁-173) · destroying his own `codex-e2e-rate-wall-sleeper` machine on
+  `clara-backup`.
 
 ## Known issues
 
@@ -365,8 +398,8 @@ changed.**
   approval still refuses and **there is no surface left on which to change the threshold.**
   **UNMEASURED: whether any live firm carries a non-zero `high_stakes_amount_cents`** — the bridge
   sleeper was destroyed at the ceremony's teardown, so no live read was taken. At zero the dead angle
-  is theoretical; above it, that firm cannot approve. Disposition is the owner's (**Q-03**, 裁-188):
-  delete the field or demote it to an advisory number.
+  is theoretical; above it, that firm cannot approve. **DISPOSITION IS RULED — 裁-202 D-4:** the field
+  rides Q-03's wall-removal migration (裁-188) — **deleted or demoted to advisory, never a new door**.
 - **THREE IN-TREE CLAIMS WENT FALSE WHEN `0174` APPLIED, and two of them are USER-FACING copy.**
   (i) `apps/web/components/clara/ClaraThreadMenu.tsx:23` still tells a reader "the table has no
   `archived_at`" — `0174:578` added the column and `0174:650` mints `clara.archive_chat_session`
@@ -413,44 +446,25 @@ changed.**
   ruling numbers** (H-37).
 - **DR probe `4.9` is UNPROVEN IN THE FIELD** (H-49) — its subject died with the schema by ruling and
   the verify script hard-codes the ids.
-- **The 500-line ceiling is a WRITE-BLOCKING PreToolUse hook, and FOUR documents this session will
-  touch again are at or near it — measured on this branch at the final truing, 2026-09-04:**
-  [`docs/adr/README.md`](docs/adr/README.md) **499** (its ruling rows now live in
-  [`README-rulings-2026-09.md`](docs/adr/README-rulings-2026-09.md), which has room),
-  [`docs/adr/README-log.md`](docs/adr/README-log.md) **499** (445 before the launch night's five
-  dated minutes), `docs/plan/active/checkout-gate-design-part2.md` **500**, and the newest ruling
-  ledger [`mohe-grill-rulings-2026-09-04.md`](docs/plan/active/mohe-grill-rulings-2026-09-04.md)
-  **480**. **That is a SCOPED list, not a repo census** — measured the same way, the repo holds
-  **20** tracked `.md` files at exactly 500, **8** at 499 and **31** already ABOVE 500 (historical
-  records the hook grandfathers because nothing rewrites them). **A 501st line is refused AT THE
-  WRITE, so the next writer of ANY file archives or splits before it adds; check the count first.**
-- **Host and worktree hygiene — the census is a WALK, never a list (裁-173).** Measured at 06:20 on
-  2026-09-04: **12 worktrees under the .claude/worktrees directory remain from merged lanes, three of them
-  LOCKED**; the WSL `.vhdx` compaction is owed again (~50 GB reclaimable at the last measure).
-  **Re-walk with `git worktree list` before touching anything** — the count and the names move every
-  session. **Removal is junction-UNSAFE by default:** never `robocopy /mir` a worktree without
-  `/XJ`, and `git worktree remove --force` and `Remove-Item -Recurse` are not junction-safe on this
-  host either (2026-09-01: 2000 tracked files deleted under the main checkout; 2026-09-02: the main
-  checkout's `apps/web/node_modules` emptied). Unlink every reparse point FIRST, re-walk to prove none
-  remain, THEN remove; post-flight `git status` on main plus `ls apps/web/node_modules/next`. The
-  locked ones need an elevated shell after a Claude Code restart, then `git worktree prune`. Two
-  standing host facts: the OpenNext/Workers artifact must be BUILT ON LINUX, and **WSL idle-terminates
-  without a Windows-side holder** — plant a detached keeper before any port-dependent WSL work.
+- **Two standing laws, kept live here; their dated 2026-09-04 measurements moved BYTE-FOR-BYTE at the
+  裁-202 commit** (md5 `ee00ad7ca2b8e8ee099f06482fbe99e9`) **because those counts self-stale.**
+  **(1) The 500-line ceiling is a WRITE-BLOCKING PreToolUse hook** — a 501st line is refused AT THE
+  WRITE, so the next writer of ANY file checks its count and archives or splits BEFORE adding.
+  **(2) The worktree census is a WALK, never a list (裁-173)** — re-walk `git worktree list` first,
+  and **removal is junction-UNSAFE on this host**: unlink every reparse point, re-walk to prove none
+  remain, then remove, then post-flight `git status` on main; never `robocopy /mir` without `/XJ`.
+  Two host facts that do not move: the OpenNext/Workers artifact must be **built on Linux**, and
+  **WSL idle-terminates without a Windows-side holder** — plant a detached keeper first.
 - **`0154`'s cluster-wide role census, the CI half — CLOSED BY MEASUREMENT.** #525 derived the roster
   from `packages/db/deploy/roles-bootstrap.sql` and pinned it, and four hosted sweeps since
   (33712469717 · 33723755257 · 33757365379 · 33781966143) came back 13/13 green including
   `closed-wave-drills`. **The LIVE-cluster half is open as H-47.**
-- **RISK 50, the Mail gate — TRUED.** Transport, sender identity and **delivery of a real six-digit
-  signup code to a NON-team address** are all proven (FS-10 S21, after an OTP-length fix: the project
-  carried `mailer_otp_length` = **8** against the app's six-digit form). Time-to-arrive and the From
-  header were asked and **are not recorded**, and FS-11's own code went to a TEAM address — so the
-  ceremony's certification line is the owner's call, carried as H-46.
-- **The confirmation login-CSRF finding — TRUED.** The always-refusing stub is gone; the wall is wired
-  for real by FS-4 C-6 Lane B (#517) and answered in the field (one attempt, accepted, 167 ms). What
-  is carried is a **re-measurement** of the browser-identity half plus the `token_hash`-in-logs and
-  replay siblings (handover part 2, C-63). **Closed in the same breath: the `__Host-clara-auth`
-  HTTPS deployed-origin acceptance line** — the origin serves HTTPS on the Worker and the cookie
-  landed in the field.
+- **Two TRUED findings moved BYTE-FOR-BYTE at the 裁-202 commit** (md5
+  `55293fd70066d428d3aa7d62b05e999a`), each a closed record whose one live obligation is already a
+  Backlog row: **RISK 50, the Mail gate** — delivery of a real six-digit code to a NON-team address is
+  proven and the certification call is the owner's (**H-46**); and the **confirmation login-CSRF**
+  finding — the wall is wired for real (#517) and answered in the field, the browser-identity
+  re-measurement carried as **C-63**.
 
 ## Session log
 
@@ -468,27 +482,15 @@ it. **At the 2026-09-05 repair-session clock-out the beta-live posture block mov
 [`progress-archive-2026-09-part1.md`](docs/plan/completed/progress-archive-2026-09-part1.md)** — 80
 lines, 7294 bytes, md5 `50f77696976ce97534407334231a8206` on both sides.)*
 
-- **2026-09-04→05 — THE REPAIR SESSION: EIGHTEEN PRs, FIFTEEN RULINGS.** The entry moved
-  BYTE-FOR-BYTE at the 2026-09-06 disposition truing to
-  [`progress-archive-2026-09-part3.md`](docs/plan/completed/progress-archive-2026-09-part3.md) —
-  28 lines, 2767 bytes, md5 `fb1f9181f13d71d3444fa62474f73088` computed on both sides. **Read it
-  with its own supersession note:** its title and closing sentence say NOTHING DEPLOYED, which was
-  true when written and is superseded by the posture block at the top of this file. The owner opened
-  the session at ≈09:00 MYT on 2026-09-04 from three sources — his own UIUX flaws file, issue
-  **#541** (the authenticated production e2e audit, 36 defects, NO-GO) and the beta handover — and
-  **裁-186…200** steered it; every register item was anchored to code before a lane opened, which is
-  why the fixes landed against measured coordinates. The rulings are in
-  [`mohe-grill-rulings-2026-09-04-pm.md`](docs/plan/active/mohe-grill-rulings-2026-09-04-pm.md).
-
-- **2026-09-04 — BETA WENT LIVE, AND THE SPRINT SESSION CLOSED.** The entry moved BYTE-FOR-BYTE at
-  the 2026-09-06 disposition truing to
-  [`progress-archive-2026-09-part3.md`](docs/plan/completed/progress-archive-2026-09-part3.md) —
-  23 lines, 2304 bytes, md5 `759c32130a33e2584574fcdbd506c6ea` computed on both sides of the move
-  and verified present there before this file lost it. It records FS-10's Worker cutover, FS-11's
-  schema rebuild and re-mint of BELCORT through the product's own door, and the 裁-184 product walk
-  in which six of eleven milestones passed and every failure was fail-closed with a receipt; the
-  owner ruled **裁-185 GO, closed beta** at ≈06:15 and asked for the repair list, which is the
-  handover.
+- **BOTH 2026-09-04 ENTRIES MOVED BYTE-FOR-BYTE at the 2026-09-06 disposition truing** to
+  [`progress-archive-2026-09-part3.md`](docs/plan/completed/progress-archive-2026-09-part3.md), each
+  md5-proved on both sides: **"BETA WENT LIVE"** (`759c32130a33e2584574fcdbd506c6ea`) — FS-10's
+  Worker cutover, FS-11's schema rebuild and re-mint of BELCORT through the product's own door, and
+  the 裁-184 walk in which six of eleven milestones passed with every failure fail-closed and
+  receipted, ending in **裁-185 GO, closed beta** — and **"THE REPAIR SESSION"**
+  (`fb1f9181f13d71d3444fa62474f73088`), eighteen PRs under 裁-186…200, every register item anchored
+  to code before a lane opened. **Read the second with its supersession note:** its title and last
+  sentence say NOTHING DEPLOYED, true when written and superseded by the posture block above.
 
 ---
 
