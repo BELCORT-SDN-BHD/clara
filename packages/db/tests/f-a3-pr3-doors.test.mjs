@@ -30,7 +30,7 @@ import {
   a21EnsureReady, firmOf,
 } from "./a21-helpers.mjs";
 import { addBankAccount, enterStatement } from "./x38-match-fixtures.mjs";
-import { wakeQuery, roleQuery } from "./rig-helpers.mjs";
+import { wakeQuery, roleQuery, acctNo } from "./rig-helpers.mjs";
 import { WAKE_ROLE, RATIONALE, MODEL, mintCred, callWrapper, realDigest, approvedEntry } from "./f-a3-pr1b-wake-fixtures.mjs";
 import { freshAdvClient, disburse, applicationLines, ADV1, BANKV, advWorld } from "./x42-adv-world.mjs";
 
@@ -152,7 +152,7 @@ test("f-a3pr3.mfA.pos a real bank_agent credential now reaches wake_book_staff_a
   const { client } = await freshAdvClient("mfApos");
   const { advance } = await disburse({ client, cents: 100_000, postingDate: "2026-07-01" });
   const w = await advWorld();
-  const acct = await addBankAccount(w.users.alice, { client, coaAccountCode: BANKV, accountNumber: `MFAPOS${randomUUID().slice(0, 6)}` });
+  const acct = await addBankAccount(w.users.alice, { client, coaAccountCode: BANKV, accountNumber: acctNo("MFAPOS") });
   const bankAccountId = acct.bank_account_id ?? acct.id;
   const firm = await firmOf(client);
   await grantBankMatching({ client, firm, actor: w.users.alice });
@@ -574,7 +574,7 @@ async function provFixture(label) {
   const { client } = await freshAdvClient(label);
   const w = await advWorld();
   const firm = await firmOf(client);
-  const acct = await addBankAccount(w.users.alice, { client, coaAccountCode: BANKV, accountNumber: `PROV${randomUUID().slice(0, 6)}` });
+  const acct = await addBankAccount(w.users.alice, { client, coaAccountCode: BANKV, accountNumber: acctNo("PROV") });
   const bankAccountId = acct.bank_account_id ?? acct.id;
   await grantBankMatching({ client, firm, actor: w.users.alice });
   const stmt = await enterStatement(w.users.alice, {
