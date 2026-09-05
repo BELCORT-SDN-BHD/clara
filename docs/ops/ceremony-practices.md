@@ -56,6 +56,35 @@ included — this is what W4 caught: the first sweep came back red on a stale cl
 digest §10), and the fix landed as its own PR *before* the ceremony opened, not during it. A
 ceremony never opens on a red sweep.
 
+## 1b · Inside the window: no HTTP to the app, and two Windows traps
+
+**NOBODY SENDS HTTP TO THE APP WHILE THE WINDOW IS OPEN.** Read liveness with `fly status`, never
+with `curl /health`. This is written down because on 2026-09-05 a checkpoint `curl` landed one
+minute after the restart and cost an urgent round-trip establishing that it had not broken the
+quiesce.
+
+**And check `auto_start_machines` rather than assuming a stopped machine stays stopped.**
+`packages/runtime/fly.toml` currently reads `auto_start_machines = false`, which is why that
+particular scare resolved cleanly — Fly's proxy could not have started the machine on an inbound
+request. **A recipe that depends on a config value it never checks has an invisible precondition:**
+a future edit flipping that flag makes the hazard real, so read the flag as part of the window's
+preflight and record what it said.
+
+**Two Windows-host traps, both hit live on 2026-09-05:**
+
+- **`pnpm` cannot be spawned through the bridge.** `dsn-pipe.mjs` spawns its child with no shell,
+  and `pnpm` on Windows is a shim, so `… -- pnpm db:migrate` dies `spawn pnpm ENOENT` **before
+  touching the database**. Use the `node packages/db/scripts/migrate.mjs` form §2 already shows —
+  it is pnpm-free, and it resolves its migrations directory from the SCRIPT FILE
+  (`migrate.mjs`'s `DEFAULT_MIGRATIONS_DIR`), not the cwd, so running it from the repo root is
+  correct. *If a migrate invocation fails, re-read the frontier before concluding anything:
+  absence of output is not evidence that nothing applied.*
+- **Git Bash rewrites paths in both directions when calling `fly.exe`.** A POSIX-looking REMOTE
+  path in argv (`fly ssh sftp put … /tmp/x.json`) is converted to a Windows path before the exe
+  sees it — set `MSYS_NO_PATHCONV=1`. But with conversion off, a LOCAL absolute path must already
+  be Windows-form or the exe cannot open it — convert it with `cygpath -w`. Relative paths need
+  neither.
+
 ## 2 · The sleeper-machine DSN recipe
 
 **Full mechanism and rationale:** `docs/ops/dsn-bridge.md` — read it before running any of

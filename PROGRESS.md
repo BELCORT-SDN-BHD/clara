@@ -6,86 +6,45 @@ file wins or it is stale — and truing it is the first thing you do.
 
 ## Current posture
 
-**⇢ 2026-09-05 — THE REPAIR SESSION LANDED. NOTHING IS DEPLOYED YET.** The session the owner opened
-at ≈09:00 MYT on 2026-09-04 ran to ≈17:00 MYT on 2026-09-05 and put **eighteen pull requests,
-#543…#560**, through the ladder against issue **#541**'s authenticated e2e audit, the owner's own
-UIUX flaws list and the beta handover's rows. **All eighteen are merged**, the last three on
-2026-09-05 — #556 `autoDraft` v10 at 09:19Z, #557 firm and client home at 12:04Z, #559 the rulings
-docs at 12:55Z. Read a PR's verdict from
-`gh pr list --state merged --search "merged:>=2026-09-04"`, never from this paragraph.
+**⇢ 2026-09-06 ≈00:57 MYT — THE CEREMONY RAN. ALL THREE ARMS ARE DEPLOYED.** The 裁-198 window
+opened on sweep **`33967641251`** (13 jobs / 13 SUCCESS, concluded 2026-09-05T14:14:39Z) and the
+fixed 裁-189 order was walked end to end from merged `main` at **`0351f022`**:
 
-**What landed, by area** (merge shas from `gh`, times converted from the UTC stamps at UTC+8):
-
-| area | PR | merge | what it closed |
+| arm | before | after | proof |
 |---|---|---|---|
-| entry / signup | #544 | `e9dbf094` | confirm-code link, honest pending copy, password policy, Stripe key-class gate, `customer_email` — H-35 · H-38 · CB-AE2E-003/006 |
-| statement lane | #545 | `a2d098f2` | `statementFacts` **v3** — period from the statement date with a stated basis, witness→roster institution normalisation, task settlement on step failure — H-02 · H-03 · H-05 |
-| journals | #548 | `144f0a8f` | entries data table, one Approve plus a Posted legend, clarification question text — CB-AE2E-021/022 · H-32 · H-33 · 裁-187 |
-| onboarding | #546 | `aa5fef4a` | typed answers, settled receipt, scope invalidation, add-client, dialog scroll — H-26/27/28/29/30/50/51 · CB-AE2E-008/023/024 |
-| chat rail | #547 | `d1b12f9b` | Enter-to-send, thread menu, typed bank act and pack cards, tool-call status — H-24 · 裁-117 · C6 |
-| firm space | #550 | `c21f26c3` | needs-you what/why/next/when, agent task detail, capability-gated admin controls (**the high-stakes threshold control removed, 裁-187**) — CB-AE2E-014/018/025/026/033 · H-25 |
-| bank / close / registers | #549 | `90b59cc1` | statement header pair, dialogs that stay open on refusal across 15 wrappers, four opening gates, restart close — H-06 · H-11 · H-16 · H-34 · H-54/56 · seven CB-AE2E rows |
-| shell | #553 | `80e42bf7` | responsive firm shell (drawer, overflow nav, overlay rail), favicon, rank-shaped ⌘K — CB-AE2E-019 · H-31 · C-43 |
-| documents | #555 | `6bad969b` | MIME-gated open-in-new-tab plus report-only CSP, page-overlay evidence viewer, tiered extraction — **C-07** · D1/D2/D3 · CB-AE2E-022 |
-| documents e2e | #560 | `2f736758` | the overlay measurement reads the overlay layer, not the first hidden svg |
-| runtime ops | #558 | `2060c762` | per-lane boot probe, the pool error contract (裁-149 · **ARCHITECTURE §4.3**), pooler CA in the image, `/build-info`, classifier recall harness — H-48 · C-04 · H-43 · CB-AE2E-035 · H-04 |
-| DB — close and documents | #551 | `d28b6a75` | document-kind codeability table, honest close gates, classification resolved on `set_document_kind`, `apply_coa_template` refuses an open plan (**裁-193**) — H-12 · H-22 · H-29 · H-53 · H-55 |
-| DB — reads and doors | #552 | `5007bbcc` | own DPA signature, client egress state, firm timeline, chat archive, counterparty identifiers, build frontier, DR canary registry — CB-AE2E-007/018/035 · H-09 · H-49 |
-| docs | #543 · #554 | `dbaf9056` · `0f2f44de` | 裁-186…190 and ADR-0078; 裁-191 · 裁-192 |
-| autoDraft v10 | #556 | `9ed75f49` | exact constraint-name error map (no masked CLR23), kind-scoped alias unique, owner-floored sales-lane activation — H-17 · H-19 · CB-AE2E-012 |
-| firm + client home | #557 | `127c4513` | firm home dashboard and client workspace situation board, tax tab — E-1 · F-1 · CB-AE2E-032 |
-| rulings docs | #559 | `f57f6af4` | 裁-193…197 and the 裁-149 clause-2 erratum |
+| DB | 159 applied / `0164` | **171 applied / `0176_counterparty_alias_kind_scope`** | 12 files applied 16:12:41→16:13:26Z in a **9 m 46 s** quiesce window; all six audited bodies re-cut, all 17 witnesses byte-identical |
+| runtime | v74, image `deployment-01M1JSJW8SW0EZ1SP8ZR48B1WZ` | **v75, `registry.fly.io/clara-runtime:v75-gate-0351f022`** | released BY IMAGE after a build-only push, matched to the gated artefact by Fly **image id** `img_wd57v5d3lej9p38o` |
+| web Worker | version **I** `c5b1e051…` | **`90c1a5d0-f808-4b88-bd28-d2395d9bc26a` at 100 %** | new bytes proved by content-hashed chunk names present in the served `/login` |
 
-**The database sets.** `packages/db/migrations` now carries **0165…0175** on `main` (eleven files,
-counted by `ls`), with **0176** riding #556. **SIX bodies owe a D1 write-quiesce window** across five
-of those files, named in their own headers: `clara.set_document_kind` (`0169`),
-`clara._gate_outstanding_items` (`0172`), `clara.apply_coa_template` (`0173`),
-`clara._tf_chat_session_update()` and `clara._tf_counterparty_update_0011()` (`0174`), and
-`clara._persist_statement_core_v2` (`0175`, which asks for the `statement_facts` lane to be quiesced
-specifically). `0166`, `0167`, `0168`, `0170` and `0171` state in their headers that no window is
-owed.
+**`/ready` now serves the NEW shape**: `checks.pools` present, **seven lanes**, settled on the first
+poll, no `pending`, no `stalled` — `runtime`/`read`/`write`/`freeform`/`stripe_webhook`/`auth_wall`
+all `ok`, **only `bank` skipped (`dsn_not_configured`)**. The "/api/build-info" route returns
+`git_sha 0351f022…` with `frontier {171, 0176…}`. **H-01 is CLOSED by this deploy.** Two smoke
+walks passed in the owner's own signed-in session: **§4.2 PASS ×4** before the Worker step, **§6.2
+PASS ×7** after, with **0 console errors** on every page and Enter-to-send working — the
+discriminating proof the new Worker reached the browser.
 
-**What it proved.** The three sources reconciled into one register and every item was anchored to
-code before a lane opened, so the fixes landed against measured coordinates rather than descriptions.
-**裁-187's abolition is now visible in the product** — the Admin high-stakes threshold control is
-gone (#550) and the journals surface shows one Approve (#548). **The statement lane, the coder and
-the close gates — three of the four failures the 裁-184 walk found — have code on `main`.**
+**As-run: [`docs/ops/runtime-deploy-2026-09-05-v75-and-db-0165-0176.md`](docs/ops/runtime-deploy-2026-09-05-v75-and-db-0165-0176.md)
++ [part 2](docs/ops/runtime-deploy-2026-09-05-part2-worker-and-deviations.md)** (nine deviations,
+D-1…D-9). **AXE was NOT run in the ceremony walk** — the MCP browser has none; accessibility is
+carried by the frontend trains' own Playwright legs per surface under 裁-86.
 
-**What it did NOT do. NOTHING IS DEPLOYED.** No as-run record under `docs/plan/completed/` carries a
-2026-09-05 date, and the deploy ceremonies of **裁-189** have not run — **裁-198 opens them the
-evening of 2026-09-05**, once the chain has landed (it has) and a hand-dispatched sweep on the FINAL
-`main` is green on all 13 jobs, read from `gh run view --json jobs`. The order is fixed and it is
-not optional:
+**THE ONE FINDING THAT OUTLIVES THE DEPLOY — read it before treating H-04 as addressed.** The 裁-199
+recall gate PASSED (per-kind non-regression, zero confident-and-wrong) **while the defect it was
+created for turned out to lie elsewhere**. The baseline arm did NOT reproduce H-04, so the run shows
+v75's prompt is **not worse** on any kind and does **not** show it is better. Root cause, measured:
+**the classify lane settles BEFORE the OCR extraction is persisted** — 1.4 to 5.8 s late on all four
+documents, each with exactly one extraction (`version_n` 1), and `readExtractionText` requires
+`status='done'` — so the classifier is handed an **empty string** and answers `other` at ≤ 0.05.
+#558's prompt sharpening addressed a cause that was not the cause. **H-04 stays OPEN**, and the
+ordering race is a **new P0** below.
 
-1. **The DB ceremony for `0165`…`0176`** from merged `main`, with the six D1 write-quiesce bodies
-   above. **裁-198's shape: backup first and verified · ONE write-quiesce window with the runtime
-   STOPPED, not six narrow ones · per-step rollback recorded step by step.** Stopping the runtime is
-   what makes `0175`'s "quiesce the `statement_facts` lane" unconditional. **`0174` adds
-   `clara.chat_sessions.archived_at` and widens the chat-session update trigger, and `apps/web`
-   already ships code that reads it**
-   (`apps/web/components/clara/ClaraThreadMenu.tsx`, `apps/web/lib/clara/useActiveThread.ts`) —
-   **so the Worker must not be promoted before this ceremony, or
-   every session list 500s.**
-2. **Runtime v75** from merged `main`. It clears H-01, the v71↔schema skew that logs every ~2 s.
-   **Gated by 裁-199's floor:** per-KIND recall with the new prompt ≥ the live prompt's, kind by kind,
-   **and zero new rows the new prompt gets wrong at confidence ≥ 0.8 — one blocks the image.**
-3. **The web Worker**, last. There is no repoint rollback (裁-156); a broken Worker is fixed forward
-   by re-promoting a walked version.
-
-**Nine tickets are queued and not started**, in the order the orchestrator will open them: **(1)**
-DB-D, H-21 the onboarding interview's captures projection · **(2)** the consent lane (裁-186, the
-firm-level DPA-stage declaration) · **(3)** DB-C, the wall-removal lane (裁-188) · **(4)** L10
-`chatTurn` v18 (H-07 · H-08) · **(5)** the web copy sweep, which runs last among the web lanes ·
-**(6)** reporting H-15 · **(7)** the required browser-smoke CI job (裁-192, CB-AE2E-036) · **(8)**
-H-47, the re-migration preflight and runbooks · **(9)** CB-001, the Terms document kind, which needs
-an owner sitting. **Then the three chat tickets of 裁-197, in the ruled order (iii) → (ii) → (i):**
-chatTurn tools and cards for the five gaps ≈1.5 units → real readers for the nine ids-only part kinds
-≈1 unit → provisional streaming text in the rail ≈0.7 unit.
-
-**The owner's own list, unchanged and still owed:** the favicon assets · the Stripe dashboard edits
-(H-37 the product description, H-39 the duplicate webhook endpoint) · the two Supabase auth decisions
-(H-40) · the Resend cap read (H-45) · the two role-password rotations (H-42, 裁-178 accepted) ·
-**DPA v2 and the lawyer's pass** (H-36, 裁-125/166).
+**⇢ 2026-09-05 — the "repair session landed, nothing deployed yet" posture block, with the merge
+table of all nineteen PRs and the three-arm deploy plan, was MOVED to
+[`docs/plan/completed/progress-archive-2026-09-part2.md`](docs/plan/completed/progress-archive-2026-09-part2.md)
+at the ceremony's clock-out** (byte-for-byte, md5 `e109f798187a8a3608f71bd744688d6a`, 80 lines) — this file could not
+hold it and the new posture inside the 500-line ceiling. Its "NOTHING IS DEPLOYED" claim was true
+when written and is superseded by the block at the top of this file.
 
 **⇢ 2026-09-04 ≈09:00 MYT — THE REPAIR SESSION IS OPEN on the owner's ask.** Three sources — the
 owner's UIUX flaws file, issue **#541** (the authenticated e2e audit, 36 defects) and the handover's
@@ -113,9 +72,10 @@ reversed, and the closure is still an OPERATING posture, not a technical wall.
 | lane | state |
 |---|---|
 | every build lane of the repair session | **closed** — all eighteen PRs (#543…#560) are merged; the per-lane table is in the session log below, not here |
-| the DB ceremony for `0165`…`0176` (裁-189) | **queued, and it blocks both deploys** — six D1 write-quiesce bodies |
-| runtime v75 (裁-189) | queued behind the ceremony, gated on the classify recall run (#558 MAJOR-3) |
-| the web Worker promotion (裁-189) | queued last; no repoint rollback (裁-156) |
+| the DB ceremony for `0165`…`0176` (裁-189) | **DONE 2026-09-05** — 12 applied in a 9 m 46 s window; frontier **171 / `0176`** |
+| runtime v75 (裁-189) | **DONE 2026-09-05** — released by image after the gate; `/ready` in the new seven-lane shape |
+| the web Worker promotion (裁-189) | **DONE 2026-09-05** — `90c1a5d0…` at 100 %; rollback = re-promote `c5b1e051…` (裁-156) |
+| H-43, the `verify-full` flip on the six lane DSNs | **still OWED** — NOT part of this ceremony; the pooler CA has shipped in the image since #558, which is its prerequisite |
 | the nine queued tickets, then 裁-197's three chat tickets | not started; the order is in the posture block above |
 
 The sprint's build closed on 2026-09-03,
@@ -131,11 +91,14 @@ and the beta sprint is written down. That table is the beta sprint's closed lane
 [`beta-handover-2026-09-04.md`](docs/plan/active/beta-handover-2026-09-04.md) §E, and its first block
 is the only one that gates anything:
 
-1. **The P0 block — MOSTLY CODED, NONE OF IT SERVING.** The repair session wrote code for H-02 ·
-   H-03 · H-05 (#545) · H-06 (#549) · H-35 · H-38 (#544) · H-43 · H-48 · H-04's harness (#558) ·
-   C-07 (#555) · H-17 · H-19 (#556). **Every one of them reaches a user only after the
-   three deploy steps in the posture block**, so the P0 block is now a DEPLOY problem, not a build
-   problem. **Still unbuilt in P0:** H-18 the client-consent surface, which 裁-186 re-shaped into
+1. **The P0 block — CODED AND NOW SERVING, as of the 2026-09-05 ceremony.** The repair session wrote
+   code for H-02 · H-03 · H-05 (#545) · H-06 (#549) · H-35 · H-38 (#544) · H-43 · H-48 · H-04's
+   harness (#558) · C-07 (#555) · H-17 · H-19 (#556), **and all three deploy steps have now run**, so
+   every one of them reaches a user. **Two caveats the ceremony measured rather than assumed:**
+   **H-04 is NOT closed** — its root cause is the classify/OCR ordering race, not the prompt (see the
+   posture block and the new P0 row) — and **H-43 is NOT done**: the image carries the pooler CA but
+   the `verify-full` flip is its own ceremony, still owed. **Still unbuilt in P0:** H-18 the
+   client-consent surface, which 裁-186 re-shaped into
    the firm-level DPA-stage declaration · **DPA v2** (H-36) and the Stripe product-description edit
    (H-37), both owner acts · the two password rotations (H-42, 裁-178 accepted) · H-47 the
    re-migration preflight and runbooks. **H-01 is closed by the v75 deploy itself.**
@@ -198,8 +161,31 @@ are the index. The pre-truing text of both sections is archived verbatim in
   `apps/web/e2e/fs4-checkout-mock.mjs`, held closed today only by `workers: 1` · **F-06**
   `apps/web/app/globals.css` is above the 500-line write hook and the next writer must split it
   first.
-- **P0 — before the first EXTERNAL applicant (15 rows), handover §C.1:** H-01 the v71↔DB skew
-  (`reconcile_autopost_rules`; a new image, v75 or later) · **C-07 the XML `blob:` open with no MIME
+- **P0 — NEW, minted by the 2026-09-05 ceremony: the CLASSIFY/OCR ORDERING RACE.** The classify
+  lane is dispatched and settles BEFORE the extraction lane persists its regions, so the classifier
+  reads an empty string and returns `other` at ≤ 0.05 on a document it would otherwise get right.
+  **Measured on all four documents that have ever run it** — classify finished 1.4 s, 3.1 s, 5.7 s
+  and 5.8 s before its OCR row existed; each document has exactly ONE `ocr` extraction
+  (`version_n` 1), so there was no earlier row to read. **This is the real H-04**, and #558's prompt
+  sharpening addressed a different cause. **Fix:** the dispatcher must gate the classify lane on the
+  extraction lane's `done` (or re-run classify on extraction completion). **Owner: the next
+  runtime+DB lane.** Evidence and the reproduction table are in the ceremony as-run, part 1 §5.1a;
+  **the fix needs a cell that plants a classify task ahead of its extraction and asserts it WAITS.**
+- **P0 — NEW: `#558`'s recall harness cannot run inside the image it ships in (two defects).**
+  (i) `packages/runtime/Dockerfile`'s final stage does not `COPY workflows/`, so
+  `packages/runtime/lib/classify.mjs`'s line-28 import of
+  `packages/runtime/workflows/invoiceFacts.v1.behavior.mjs` breaks EVERY
+  standalone script in the image (the server is unaffected — it runs the nitro bundle, where the
+  import is inlined). (ii) `scripts/measure-classify-recall.mjs:290` builds a bare `pg.Client` and
+  never `SET ROLE`s, so it fails **42501** through every lane login by design of
+  `roles-bootstrap.sql:190` (`INHERIT FALSE, SET TRUE`); the fix is to route through
+  `packages/runtime/lib/pools.mjs`'s checkout, which SET ROLEs, or an explicit `set role clara_runtime`
+  after connect. **The pooler does not forward `PGOPTIONS`,** so the env-only workaround is closed —
+  worth a line in `docs/ops/dsn-bridge.md`. **Lesson for the register: an ops script that ships in an
+  image must be PROVEN INSIDE THAT IMAGE before its PR merges;** #558's review verified the harness
+  on the dev host only.
+- **P0 — before the first EXTERNAL applicant, handover §C.1:** ~~H-01 the v71↔DB skew~~
+  **CLOSED by the v75 deploy, 2026-09-05.** · **C-07 the XML `blob:` open with no MIME
   gate and no CSP (裁-175)** · H-02 Maybank headers state no period bounds · H-03 the
   witness→`bank_institutions` code normalisation · H-05 the stranded `statement_facts` task ·
   H-06 the "Enter a statement" form omits the institution/account PAIR · H-17 `autoDraft_v9`'s masked
@@ -207,7 +193,30 @@ are the index. The pre-truing text of both sections is archived verbatim in
   H-36 the DPA v1 placeholder · H-37 ruling numbers on the Stripe checkout page · H-42 the two
   unrotated role passwords (裁-178, accepted risk) · H-43 verify-full TLS on the six lane DSNs
   (裁-179) · H-47 a live re-migration flips ceremonied roles to NOLOGIN and `0154`'s absolute role
-  census blocks it · H-48 no per-lane DSN probe at boot.
+  census blocks it · ~~H-48 no per-lane DSN probe at boot~~ **CLOSED — `/ready` serves
+  `checks.pools` with seven lanes since v75.**
+- **`apps/web/README.md` is 514 lines — already over the 500-line write hook**, so the routine
+  Worker redeploy runbook the ceremony earned could NOT be folded into it as planned. It landed as
+  its own file, [`docs/ops/worker-redeploy-runbook.md`](docs/ops/worker-redeploy-runbook.md); fold
+  it in when the README is next split. (Same class as the `apps/web/app/globals.css` row above.)
+- **TRUED by the ceremony's live reads (2026-09-05), each previously stated otherwise:**
+  **(a)** the runsheet's "three skipped lanes" for `bank`/`stripe_webhook`/`auth_wall` is STALE —
+  **only `bank` is skipped** (`dsn_not_configured`); the other two probe healthy, their DSNs having
+  been configured by the C-5 secrets ceremony. **(b)** the Worker carries **FOUR** environment
+  variables, not three — `CLARA_PUBLIC_ORIGINS`, `CLARA_RUNTIME_URL`, `CLARA_STRIPE_LIVEMODE`,
+  `CLARA_TRUSTED_CLIENT_IP_HEADER` (six secrets is right). **(c)** the `clara-backup` one-off machine
+  id `d895470c6024e8` in `wave-b-0019-ceremony-runbook.md` is CURRENT, not stale post-reset — it was
+  re-read live. **(d)** `clara.agent_tasks` has **no** `last_refusal` column; it is on
+  `clara.autodraft_attempts` (`0011:712`).
+- **ORPHANED ROWS, both ruled PROCEED and DO NOT TOUCH at the ceremony; the owner decides disposition:**
+  **(i)** `workflow.workflow_runs` `wrun_01M1MNTV64Z681KNQ6QVM4HEDH`, `clientOnboarding_v4`,
+  `running` since `2026-09-03 22:22:05` UTC with zero progress — a launch-night orphan whose subject
+  is the **E2E audit fixture** "Pine & Co E2E Sdn Bhd" under firm "Clara E2E Audit 2026-09-04", and
+  whose onboarding plan reached `committed` 21 minutes later, so only the engine row is stuck.
+  **(ii)** `clara.document_processing_tasks` `8923e85a…`, lane `statement_facts`, `running` since
+  `2026-09-04 00:28:20` UTC while its workflow run `wrun_01M1MX20K6TCVBN000G2SJN7M6` reads `failed`
+  twelve seconds later — **an orphan of H-03 itself**, the settlement-on-step-failure defect #545
+  fixes. Settle by hand or by the stranded-requeue path.
 - **P1 — before 上市, the walk's own rows, handover §C.2:** H-04 the classifier does not recognise
   bank statements · H-07/H-08 the close-prep chat lane cannot read a close run, and says the wrong
   reason · H-09 the payer-identifier refusal has no UI to satisfy it · H-11 no "Begin close" after an
