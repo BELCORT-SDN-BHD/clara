@@ -17,6 +17,8 @@ it. `PROGRESS.md` keeps a pointer in the place of each.*
 | 2026-09-04→05 · the repair session | 28 | 2767 | `fb1f9181f13d71d3444fa62474f73088` |
 | Known issues · the 500-line ceiling + host/worktree hygiene | 23 | 2250 | `ee00ad7ca2b8e8ee099f06482fbe99e9` |
 | Known issues · the Mail gate and the login-CSRF finding, both TRUED | 11 | 1000 | `55293fd70066d428d3aa7d62b05e999a` |
+| Backlog · the four ceremony truings of 2026-09-05 | 7 | 647 | `ee4533413bc33a7ab7f7f0a2a648c3b2` |
+| Known issues · `0154`'s role census, the CI half, CLOSED BY MEASUREMENT | 4 | 356 | `eab73a1686b9f07c4812ca7495f460a9` |
 
 **Two more blocks joined them at the 裁-202 commit,** for the same ceiling reason, and both are
 PROVENANCE rather than current state. **The third** is a pair of Known-issues bullets whose own text
@@ -138,3 +140,28 @@ are deployed — DB frontier `0176`, runtime **v75**, web Worker `90c1a5d0…`.
   replay siblings (handover part 2, C-63). **Closed in the same breath: the `__Host-clara-auth`
   HTTPS deployed-origin acceptance line** — the origin serves HTTPS on the Worker and the cookie
   landed in the field.
+
+---
+
+## Two more Known-issues blocks moved at the 裁-202 follow-up commit (2026-09-06)
+
+*Both were named by the lead as purely historical and CLOSED. Neither carries an open item away:
+the role-census block says in its own last sentence that **the LIVE-cluster half is open as H-47**,
+which is its own Backlog row, and the ceremony-truings block is a record of reads already written
+into the 2026-09-05 as-run. **One disclosure:** the ceremony-truings bullet was COMPRESSED in place
+at the 裁-202 commit (nine lines to seven, no fact dropped), so the bytes below are that compressed
+form, md5-proved on both sides of THIS move. Its uncompressed 2026-09-05 wording is not preserved
+anywhere as a block; the underlying reads are in the ceremony as-run, which is their source.*
+
+- **TRUED by the ceremony's live reads (2026-09-05), each previously stated otherwise:** **(a)** only
+  `bank` is skipped on `/ready` (`dsn_not_configured`), not three lanes — `stripe_webhook` and
+  `auth_wall` probe healthy · **(b)** the Worker carries **FOUR** env vars, not three
+  (`CLARA_PUBLIC_ORIGINS`, `CLARA_RUNTIME_URL`, `CLARA_STRIPE_LIVEMODE`,
+  `CLARA_TRUSTED_CLIENT_IP_HEADER`; six secrets is right) · **(c)** the `clara-backup` one-off machine
+  id in `wave-b-0019-ceremony-runbook.md` is CURRENT, re-read live · **(d)** `clara.agent_tasks` has
+  **no** `last_refusal` column; it is on `clara.autodraft_attempts` (`0011:712`).
+
+- **`0154`'s cluster-wide role census, the CI half — CLOSED BY MEASUREMENT.** #525 derived the roster
+  from `packages/db/deploy/roles-bootstrap.sql` and pinned it, and four hosted sweeps since
+  (33712469717 · 33723755257 · 33757365379 · 33781966143) came back 13/13 green including
+  `closed-wave-drills`. **The LIVE-cluster half is open as H-47.**

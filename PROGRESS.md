@@ -237,13 +237,7 @@ are the index. The pre-truing text of both sections is archived verbatim in
   Worker redeploy runbook the ceremony earned could NOT be folded into it as planned. It landed as
   its own file, [`docs/ops/worker-redeploy-runbook.md`](docs/ops/worker-redeploy-runbook.md); fold
   it in when the README is next split. (Same class as the `apps/web/app/globals.css` row above.)
-- **TRUED by the ceremony's live reads (2026-09-05), each previously stated otherwise:** **(a)** only
-  `bank` is skipped on `/ready` (`dsn_not_configured`), not three lanes — `stripe_webhook` and
-  `auth_wall` probe healthy · **(b)** the Worker carries **FOUR** env vars, not three
-  (`CLARA_PUBLIC_ORIGINS`, `CLARA_RUNTIME_URL`, `CLARA_STRIPE_LIVEMODE`,
-  `CLARA_TRUSTED_CLIENT_IP_HEADER`; six secrets is right) · **(c)** the `clara-backup` one-off machine
-  id in `wave-b-0019-ceremony-runbook.md` is CURRENT, re-read live · **(d)** `clara.agent_tasks` has
-  **no** `last_refusal` column; it is on `clara.autodraft_attempts` (`0011:712`).
+- **The four ceremony truings of 2026-09-05** (only `bank` skipped on `/ready`; FOUR Worker env vars, not three; the `clara-backup` one-off machine id in `wave-b-0019-ceremony-runbook.md` is CURRENT; `last_refusal` lives on `clara.autodraft_attempts`, not `clara.agent_tasks`) **moved BYTE-FOR-BYTE** to [`progress-archive-2026-09-part3.md`](docs/plan/completed/progress-archive-2026-09-part3.md), md5 `ee4533413bc33a7ab7f7f0a2a648c3b2`; their source is the ceremony as-run.
 - **ORPHANED ROWS, both ruled PROCEED and DO NOT TOUCH at the ceremony; the owner decides disposition:**
   **(i)** `workflow.workflow_runs` `wrun_01M1MNTV64Z681KNQ6QVM4HEDH`, `clientOnboarding_v4`,
   `running` since `2026-09-03 22:22:05` UTC with zero progress — a launch-night orphan whose subject
@@ -455,10 +449,7 @@ changed.**
   remain, then remove, then post-flight `git status` on main; never `robocopy /mir` without `/XJ`.
   Two host facts that do not move: the OpenNext/Workers artifact must be **built on Linux**, and
   **WSL idle-terminates without a Windows-side holder** — plant a detached keeper first.
-- **`0154`'s cluster-wide role census, the CI half — CLOSED BY MEASUREMENT.** #525 derived the roster
-  from `packages/db/deploy/roles-bootstrap.sql` and pinned it, and four hosted sweeps since
-  (33712469717 · 33723755257 · 33757365379 · 33781966143) came back 13/13 green including
-  `closed-wave-drills`. **The LIVE-cluster half is open as H-47.**
+- **`0154`'s cluster-wide role census, the CI half — CLOSED BY MEASUREMENT** (#525 derived the roster from `packages/db/deploy/roles-bootstrap.sql` and pinned it; four hosted sweeps came back 13/13 green including `closed-wave-drills`); **the record moved BYTE-FOR-BYTE** to [`progress-archive-2026-09-part3.md`](docs/plan/completed/progress-archive-2026-09-part3.md), md5 `eab73a1686b9f07c4812ca7495f460a9`. **The LIVE-cluster half stays open as H-47.**
 - **Two TRUED findings moved BYTE-FOR-BYTE at the 裁-202 commit** (md5
   `55293fd70066d428d3aa7d62b05e999a`), each a closed record whose one live obligation is already a
   Backlog row: **RISK 50, the Mail gate** — delivery of a real six-digit code to a NON-team address is

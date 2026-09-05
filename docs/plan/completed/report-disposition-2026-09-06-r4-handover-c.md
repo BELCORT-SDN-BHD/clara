@@ -3,7 +3,13 @@
 The per-item disposition of the beta handover's CARRIED registry (C-01 … C-88), as measured **2026-09-06 on `main` at `fc39c361`** by a
 read-only opus-5 lane under 裁-190. The owner's decisions are recorded in `PROGRESS.md`; this is a
 CLOSED record, filed verbatim so the measurement can be re-read against the tree it was taken on.
-Every citation in it resolves on that commit. Nothing here is edited after filing.
+**TWO CLAIMS BELOW DID NOT REPRODUCE when the docs-sync lane re-read them on `main` at `95441fe6`:
+C-74 lives in the handover's PART 2 at `:380`, not part 3; and C-44's "26 raw `aria-invalid`
+occurrences" measures 15 across 11 files** under `apps/web` (mostly Tailwind `aria-invalid:` state
+variants inside the shadcn primitives, not rendered attributes), 41 repo-wide tracked — so the row's
+own advice applies to itself and the number must be re-measured, never re-quoted. The
+`confirmDisabled=` count of 70 does reproduce. The verbatim block is byte-identical to the source
+and is not edited; this sentence is the correction.
 
 <!-- begin verbatim: R4-handover-C.md · md5 6cf51adea1777f6e86c1f355916a71b2 -->
 # R4 · Disposition of the CARRIED REGISTRY C-01 … C-88

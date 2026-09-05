@@ -3,7 +3,10 @@
 The per-item disposition of the beta handover's own walk rows (H-01 … H-56), as measured **2026-09-06 on `main` at `fc39c361`** by a
 read-only opus-5 lane under 裁-190. The owner's decisions are recorded in `PROGRESS.md`; this is a
 CLOSED record, filed verbatim so the measurement can be re-read against the tree it was taken on.
-Every citation in it resolves on that commit. Nothing here is edited after filing.
+**THREE ANCHORS BELOW DID NOT REPRODUCE when the docs-sync lane re-read them on `main` at
+`95441fe6`, and the true lines are H-09 `0174:785` (granted `:855`), H-49 `0174:928` and H-19
+`0176:327` (granted `:369`)** — the rows' verdicts stand, only their coordinates were off. The
+verbatim block is byte-identical to the source and is not edited; this sentence is the correction.
 
 <!-- begin verbatim: R3-handover-H.md · md5 d0fb7244d7eca2c8f3927e0d4f5fc1a0 -->
 # REPORT 3 — the beta handover's own walk rows, H-01 … H-56: per-item disposition
