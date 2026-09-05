@@ -265,8 +265,10 @@ that kind):** `.claude/skills/emil-design-eng` (motion explains change · immedi
 focus · no decorative perpetual animation) · `.claude/skills/animate` · `.claude/skills/animation-vocabulary`
 · `.claude/skills/review-animations` · `.claude/skills/improve-animations` ·
 `.claude/skills/find-animation-opportunities` · `.claude/skills/apple-design` · `.claude/skills/ask-sonner`
-· `.claude/skills/shadcn` (+ its rules, CLI and registry notes) · `.claude/skills/design-an-interface`
-· `.claude/skills/codebase-design` · `.claude/skills/tdd` · `.claude/skills/prototype` · `.claude/skills/qa`.
+· `.claude/skills/shadcn` (+ its rules, CLI and registry notes) · design-an-interface (a vendored skill
+at the time; upstream absorbed it into `.claude/skills/codebase-design` and the local copy was deleted 2026-09-06)
+· `.claude/skills/codebase-design` · `.claude/skills/tdd` · `.claude/skills/prototype` · qa (likewise:
+absorbed upstream by `.claude/skills/triage` + `.claude/skills/to-tickets`; local copy deleted 2026-09-06).
 The plugin skills `impeccable` and `frontend-design` are available to this session (Claude plugins)
 — use them for the per-surface polish/acceptance lens of Q9's DONE rung 4; a Codex build lane cannot
 read them, so the orchestrator applies that lens at review, beside `emil-design-eng` +
