@@ -149,9 +149,12 @@ are deployed — DB frontier `0176`, runtime **v75**, web Worker `90c1a5d0…`.
 the role-census block says in its own last sentence that **the LIVE-cluster half is open as H-47**,
 which is its own Backlog row, and the ceremony-truings block is a record of reads already written
 into the 2026-09-05 as-run. **One disclosure:** the ceremony-truings bullet was COMPRESSED in place
-at the 裁-202 commit (nine lines to seven, no fact dropped), so the bytes below are that compressed
-form, md5-proved on both sides of THIS move. Its uncompressed 2026-09-05 wording is not preserved
-anywhere as a block; the underlying reads are in the ceremony as-run, which is their source.*
+at the 裁-202 commit (nine lines to seven; **two specifics were not carried** — the `clara-backup`
+one-off machine id (the as-run, line 46) and the C-5 cause of the two healthy lanes (line 379) —
+both remain in `docs/ops/runtime-deploy-2026-09-05-v75-and-db-0165-0176.md`), so the bytes below are
+that compressed form, md5-proved on both sides of THIS move. Its uncompressed 2026-09-05 wording is
+not preserved anywhere as a block; the underlying reads are in the ceremony as-run, which is their
+source.*
 
 - **TRUED by the ceremony's live reads (2026-09-05), each previously stated otherwise:** **(a)** only
   `bank` is skipped on `/ready` (`dsn_not_configured`), not three lanes — `stripe_webhook` and
