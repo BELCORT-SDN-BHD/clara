@@ -393,7 +393,7 @@ lines, 7294 bytes, md5 `50f77696976ce97534407334231a8206` on both sides.)*
 - **2026-09-04→05 — THE REPAIR SESSION: EIGHTEEN PRs, TWELVE RULINGS, NOTHING DEPLOYED.** The owner
   opened it at ≈09:00 MYT on 2026-09-04 with three sources and one instruction — his own UIUX flaws
   file, issue **#541** (the authenticated production e2e audit, 36 defects, NO-GO) and the beta
-  handover — and it ran into the evening of 2026-09-05. **Fourteen rulings, 裁-186…199**, opened and
+  handover — and it ran into the evening of 2026-09-05. **Fifteen rulings, 裁-186…200**, opened and
   steered it: 186 consent becomes a firm-level declaration at the DPA stage and 187 abolishes every
   attestation ceremony and maker-checker wall in favour of basic RBAC (both **against the
   recommendation**, both minuted as **ADR-0078**, both dissents on file) · 188 the wall-removal DB
@@ -403,12 +403,15 @@ lines, 7294 bytes, md5 `50f77696976ce97534407334231a8206` on both sides.)*
   premise correction, the first premise erratum this register has carried · 195 requeue-once · 196
   four readiness and grant items, (b) against the recommendation · 197 three chat tickets queued.
   **Every item in the register was anchored to code before a lane opened**, which is why the fixes
-  landed against measured coordinates. All eighteen PRs are merged. **The evening added two more
+  landed against measured coordinates. All eighteen PRs are merged. **The evening added three more
   rulings:** **198** opens the DB ceremony for `0165`…`0176` that night, gated on the chain landing
   and a 13-job green sweep on the final `main`, in ONE write-quiesce window with the runtime
   stopped · **199** sets the classify gate's floor at NON-REGRESSION per KIND plus zero new
   confident-and-wrong rows, with no absolute number until the first real-corpus run mints a
-  baseline. **Two session-limit cuts** (≈11:20 and ≈12:58 MYT on 09-04) stopped every running agent
+  baseline · **200** makes the owner's own uncommitted `AGENTS.md` edit repo law — asking him before
+  deleting or overwriting a file you did not create now goes through `/grillwithdocs`, and the main
+  checkout was restored to `main`'s identical text rather than left dirty, because the codebase
+  graph's project id is keyed by that path. **Two session-limit cuts** (≈11:20 and ≈12:58 MYT on 09-04) stopped every running agent
   mid-flight; all were resumed from their transcripts with an explicit instruction to re-read their
   worktree before trusting their last command, and no lane lost work. **The lesson that cost the most:
   merging a docs PR in the middle of a code PR's CI cycle forces that PR to re-update and re-run** —

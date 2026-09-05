@@ -325,6 +325,29 @@ before a measurement is a number nobody can defend. **The first run of the harne
 corpus MINTS the baseline**; an absolute floor becomes settable once it exists, and the owner sets it
 then. **Amends** nothing — it fills the gap #558 left open. No separate ruling file.
 
+### 裁-200 — the owner's own `AGENTS.md` edit becomes repo law: ask the owner first **using /grillwithdocs** (owner, 2026-09-05 ≈18:15 MYT, `AskUserQuestion` option (a) of 3, 「并进 #561」; recommendation followed)
+
+**Context.** The main checkout carried an **uncommitted** edit the owner had made by hand to
+`AGENTS.md`'s working protocol: the sentence that had read "**Ask the owner first** before deleting or
+overwriting a file you did not create" now reads "**Ask the owner first** using /grillwithdocs before
+deleting or overwriting a file you did not create". It had sat in the working tree since the session
+opened, outside every lane's worktree, so no PR carried it and every agent read the old sentence.
+
+**Ruled (a): fold it into the repo through #561** rather than open a PR of its own — the docs PR was
+already in flight and the edit is one line. The sentence is now **law**: the ask is not a free-form
+question, it goes through `/grillwithdocs`, which puts the relevant documents in front of the owner
+with the question instead of asking him to recall them.
+
+**The local checkout was then restored to `main`'s identical text and fast-forwarded.** This matters
+for a reason that is not obvious: **the codebase graph's project id is keyed by the checkout PATH**, so
+leaving the main checkout permanently dirty — or re-cloning it elsewhere — would strand the index the
+whole harness greps against. The restore is byte-identical to what #561 merged, so nothing was lost by
+discarding the working-tree copy.
+
+**Amends** `AGENTS.md`'s working protocol, and nothing else — no digest law, no ADR, no product
+invariant. It changes the FORM of an ask that constraint 14 and the working protocol already required,
+never its trigger. No separate ruling file — this entry is the text of record.
+
 ---
 
 **What follows in this session, so the next reader can find it:** the unified defect register built from

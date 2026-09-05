@@ -85,3 +85,13 @@ what did the re-reading find?"
 > confident-and-wrong rows, with no absolute number until the first real-corpus run mints a baseline.
 > The re-brief that produced it is worth keeping: the classifier decides a document's KIND, not its
 > client. Digest rows 105–106.
+
+> **2026-09-05 ≈18:15 MYT — the owner's own harness edit (裁-200).** Digest re-read against the ruling
+> in [`mohe-grill-rulings-2026-09-04-pm.md`](../plan/active/mohe-grill-rulings-2026-09-04-pm.md);
+> **it amends `AGENTS.md`'s working protocol alone — no digest law moves and no ADR is minted** under
+> 裁-140. An uncommitted hand edit had sat in the main checkout since the session opened, so every
+> agent read the old sentence while the owner read the new one; folding it through #561 closed that
+> gap. What it changes is the FORM of the ask, never its trigger: asking the owner before deleting or
+> overwriting a file you did not create now means `/grillwithdocs`, which puts the documents in front
+> of him with the question. The local checkout was restored to `main`'s identical text rather than
+> left dirty, because the codebase graph's project id is keyed by that path. Digest row 107.
