@@ -369,3 +369,90 @@ test("the epoch guard: a slow-FAILING reload started EARLIER does not overwrite 
     await h.unmount();
   }
 });
+
+// ---------------------------------------------------------------------------
+// CB-AE2E-004's OWN SEAM (review-549 MAJOR 3).
+// ---------------------------------------------------------------------------
+//
+// `act()` now RESOLVES an outcome — `true` only when `fn` completed, `false` on any
+// caught failure — and that boolean is the ONLY channel a door dialog has for "did
+// this succeed": `act()` never rejects, because the sticky banner rather than an
+// exception is how a refusal surfaces. All fifteen wrappers close on it.
+//
+// Until these cells, nothing here captured the return value. The cells above prove the
+// RELOAD and the STICKY ERROR, and a mutant flipping either `return` in hooks.ts stayed
+// green because no test ever looked. These are the twins of
+// lib/firm/use-async-read.test.ts:75 and :92, which pin the same contract for the
+// sibling hook.
+
+test("act() resolves TRUE on a clean call — the only signal a door dialog may close on", async () => {
+  const sess = session();
+  const loader = async () => ({ ok: true });
+  const h = await renderHook(() => useHydratedPart(sess, loader));
+  let outcome: boolean | undefined;
+  try {
+    await h.settle();
+    await h.act(async () => {
+      outcome = await h.current.act(async () => {});
+    });
+    assert.equal(outcome, true);
+    assert.equal(h.current.err, null, "a clean act leaves no standing error");
+    assert.equal(h.current.clr, null);
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("act() resolves FALSE on a governed refusal — and still does not reject", async () => {
+  const sess = session();
+  const loader = async () => ({ ok: true });
+  const refusal = new RefusalError("CLR41", "this close run is already abandoned", {
+    reason: "close_not_in_progress",
+    status: 400,
+    pgCode: "CLR41",
+    codeSource: "sqlstate",
+  });
+  const h = await renderHook(() => useHydratedPart(sess, loader));
+  let outcome: boolean | undefined;
+  let threw = false;
+  try {
+    await h.settle();
+    await h.act(async () => {
+      try {
+        outcome = await h.current.act(async () => {
+          throw refusal;
+        });
+      } catch {
+        threw = true;
+      }
+    });
+    assert.equal(threw, false, "act() must never reject — the banner, not an exception, is how a refusal surfaces");
+    assert.equal(outcome, false, "…and the boolean is what tells the dialog to stay open");
+    // The refusal is still surfaced verbatim, which is the other half of the contract.
+    assert.equal(h.current.clr?.code, "CLR41");
+    assert.equal(h.current.clr?.reason, "close_not_in_progress");
+    assert.equal(h.current.err, "this close run is already abandoned");
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("act() resolves FALSE on a NON-governed failure too — a wire error keeps the dialog open as much as a refusal", async () => {
+  const sess = session();
+  const loader = async () => ({ ok: true });
+  const h = await renderHook(() => useHydratedPart(sess, loader));
+  let outcome: boolean | undefined;
+  try {
+    await h.settle();
+    await h.act(async () => {
+      outcome = await h.current.act(async () => {
+        throw new WireError("the network went away", { status: null });
+      });
+    });
+    assert.equal(outcome, false);
+    assert.equal(h.current.clr, null, "a wire error carries no CLR code");
+    assert.equal(h.current.err, "the network went away");
+  } finally {
+    await h.unmount();
+  }
+});

@@ -56,6 +56,17 @@ const WAVE_A_AGENT_READS = [
   "coding_lane", "list_coding_lanes", "get_entry_diff", "get_doc_entry_diff",
   "wake_client", "_agent_read_admitted",
 ];
+// [DB-A, H-53] clara._is_codeable_kind — the ONE definition of which document kinds owe a
+// journal entry, read by the two close gates, by clara.list_uncoded_filings and by
+// clara.list_review_queue's filing rows. It is an underscore helper that BOTH app lanes must
+// hold EXECUTE on, and the reason is structural rather than a convenience: its caller
+// clara.list_uncoded_filings is SECURITY INVOKER (0011:3967, and 0036's own tail asserts that
+// posture), so the predicate runs as the CALLING role and an ungranted helper would 42501 the
+// reader in production while every definer-posture rig cell stayed green. This is exactly the
+// shape _agent_read_admitted already holds one line above -- an invoker reader's gate helper,
+// granted to the lanes that reach the reader and to nobody else. The wake roles are NOT here:
+// they reach the reader through their own admitted wrappers, never directly.
+const DBA_CODEABILITY_SHARED_FNS = ["_is_codeable_kind"];
 const WAVE_A_RUNTIME_FNS = [
   "admit_autodraft_task", "begin_autodraft_task", "settle_autodraft_task",
   "open_sweep_run", "reconcile_sweep_runs",
@@ -1538,10 +1549,18 @@ export const ALLOWED = {
     // INVOKER helpers those reads call — clara_authenticated ONLY; agent + both wake roles gain
     // ZERO, by Annex E's first non-goal. See the block above.
     ...COA_TEMPLATE_PR_B_HUMAN_FNS,
+    // [DB-A, H-53] the codeability predicate — see the block where it is declared for why an
+    // underscore helper is granted at all. Both app lanes hold it because both reach the
+    // SECURITY INVOKER reader that calls it.
+    ...DBA_CODEABILITY_SHARED_FNS,
   ]),
   // [S6 §9/C-11] agent lane loses the bare get_journal_entry(uuid) oracle; keeps the other
   // reads and gains the client-pinned S6 reads + get_journal_entry_for.
-  [ROLES.agentRo]: new Set([...READS.filter((r) => r !== "get_journal_entry"), ...S6_AGENT_READS, ...WAVE_A_AGENT_READS]),
+  [ROLES.agentRo]: new Set([...READS.filter((r) => r !== "get_journal_entry"), ...S6_AGENT_READS, ...WAVE_A_AGENT_READS,
+    // [DB-A, H-53] the agent lane reads clara.list_uncoded_filings (0011:4080's own grant, and
+    // 0011:4271's ACL census pins it), and that reader is SECURITY INVOKER — so the agent role
+    // must hold the predicate it calls, or the agent's coding-lane read 42501s.
+    ...DBA_CODEABILITY_SHARED_FNS]),
   [ROLES.wakeInteractive]: new Set(["wake_draft_entry", "wake_record_client_resolution", "wake_record_notification", ...WAVE_A_WAKE_INTERACTIVE_FNS, ...BINDING_PROPOSAL_PR1_WAKE_FNS, ...AUTHORING_0077_WAKE_FNS, ...POSTING_F_A2_WAKE_FNS, ...F_A5_PR2_WAKE_FNS, ...F_A5B_PR1_WAKE_FNS, ...CARD1_SEAM_WAKE_FNS,
     // [Wave-F Track A, F-A5b card 1] wake_compose_metric_preview_v2 -- 'interactive' ONLY,
     // permanently (CD-16), beside its untouched v1 twin in AUTHORING_0077_WAKE_FNS.

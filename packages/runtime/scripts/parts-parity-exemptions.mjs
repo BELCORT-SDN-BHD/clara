@@ -79,8 +79,11 @@ const REVIEWED_OBJECT_SPREAD_SITES = [
   ["packages/runtime/lib/relay.mjs","assertNoTargetSplit","...parseUrlTarget(process.env.DATABASE_URL)","b7fac4efda9fec1f95de524d660835ef17527255af69ad9dd7265e7ba2ba9af3","0"],
   ["packages/runtime/lib/relay.mjs","assertNoTargetSplit","...parseUrlTarget(process.env.WORKFLOW_POSTGRES_URL)","d0fce5da9b74af277287fa27a5f72d05e08862412c14ba9094b890c334abad93","0"],
   ["packages/runtime/lib/relay.mjs","assertNoTargetSplit","...pg","314c243f644ce3eb9f984091d1f53d513440baeaf360b08bd57dd99785a6a2e6","0"],
-  ["packages/runtime/lib/relay.mjs","makePool","...connConfig()","0cb9952f85336c1b8cf3f344583e89e5d5d8127f6e18b679c7581a91c24d0924","0"],
-  ["packages/runtime/lib/relay.mjs","makePool","...overrides","0cb9952f85336c1b8cf3f344583e89e5d5d8127f6e18b679c7581a91c24d0924","0"],
+  // RE-CUT for 裁-149 (L9): makePool now wraps its pool construction in
+  // attachPoolErrorContract(...), which changes the ENCLOSING return statement's text and so
+  // its sha256. The two spread signatures are unchanged; only the fingerprint moved.
+  ["packages/runtime/lib/relay.mjs","makePool","...connConfig()","f1d319c7a75db091984eac8fe53d359a38140ac5c30fc8a7faf007974e7a0038","0"],
+  ["packages/runtime/lib/relay.mjs","makePool","...overrides","f1d319c7a75db091984eac8fe53d359a38140ac5c30fc8a7faf007974e7a0038","0"],
   ["packages/runtime/lib/seeding-parse.mjs","regionsToEntries","...parsed","7125ba4324f3a40d081a5cf15988564acd8a3250f7452a2d5b9862189332f06e","0"],
   ["packages/runtime/lib/spool.mjs","mergeTaskMeta","...(current ?? {})","925f8d4872f8a41403bc6a2f69bb0035a1aa31f274918bdf138c54767cd72dfb","0"],
   ["packages/runtime/lib/spool.mjs","mergeTaskMeta","...patch","925f8d4872f8a41403bc6a2f69bb0035a1aa31f274918bdf138c54767cd72dfb","0"],

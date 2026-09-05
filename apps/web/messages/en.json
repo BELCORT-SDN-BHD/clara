@@ -15,7 +15,8 @@
     "cancel": "Cancel",
     "close": "Close",
     "retry": "Retry",
-    "centsUnsafe": "(amount out of range — verify in the ledger)"
+    "centsUnsafe": "(amount out of range — verify in the ledger)",
+    "technicalDetail": "Technical detail"
   },
   "MoneyInput": {
     "placeholder": "0.00",
@@ -32,6 +33,7 @@
   "FirmNav": {
     "ariaLabel": "Firm navigation",
     "adminSectionsLabel": "Admin sections",
+    "drawerTrigger": "Menu",
     "home": "Home",
     "needsYou": "Needs you",
     "clients": "Clients",
@@ -364,6 +366,9 @@
       "mail_unavailable": "The invitation service could not be reached, so nothing was created. Try again in a moment.",
       "mail_failed": "The invitation was created but the email did not go out, and its link cannot be recovered. Revoke it below and invite again.",
       "transport": "The invitation server could not be reached."
+    },
+    "name": {
+      "departed": "(no longer a member)"
     }
   },
   "ClientWorkspace": {
@@ -651,10 +656,18 @@
     "go": {
       "heading": "Go",
       "clientHeading": "This client",
+      "clientsHeading": "Clients",
+      "loading": "Checking what you can open…",
+      "readError": "Couldn't check what you can open: {message}",
+      "noAccessContext": "Couldn't read your access, so no pages are listed here. Reload, or use the sidebar.",
+      "clientsLoading": "Loading your clients…",
+      "clientsReadError": "Couldn't read your client register, so no clients are listed here. Open the client register from Go instead.",
+      "clientsTruncated": "Showing {shown} of {total} — type to narrow.",
       "empty": "No matching pages for “{query}”",
       "plannedBadge": "Not built yet",
       "routes": {
         "firmHome": "Firm home",
+        "adminAsFirm": "Firm",
         "needsYou": "Needs you",
         "clientRegister": "Client register",
         "firmActivity": "Firm activity",
@@ -901,6 +914,14 @@
     "openingDocument": "Opening…",
     "openDocumentFailed": "Could not open this document: {message}",
     "openDocumentPopupBlocked": "Your browser blocked the new tab — allow pop-ups for this site and try again.",
+    "openDocumentNotViewable": "This file type ({mime}) can't be shown in a browser tab — only PDFs and page images can. Read what was extracted from it instead.",
+    "openDocumentShowExtraction": "Show what was extracted",
+    "openDocumentUnknownType": "type not declared",
+    "doorDiagnostic": {
+      "reextraction": "clara.request_reextraction(document, reason)",
+      "consentEvidence": "clara.classify_consent_evidence_document(document, reason)",
+      "autodraft": "clara.request_autodraft(filing)"
+    },
     "legalHoldReason": "Hold reason: {reason}",
     "badgeExtraction": "extraction: {status}",
     "badgePageCount": "{count} pages",
@@ -954,12 +975,39 @@
       "unexpected": "Something unexpected happened reading this."
     },
     "evidenceHeading": "Extracted evidence",
-    "evidenceOverlayLabel": "Page overlay viewer",
-    "evidenceOverlayReason": "A page-image overlay of these regions' locators exists only for the chat review card today — not on this tab.",
+    "evidenceOverlayShow": "Show page overlay",
+    "evidenceOverlayHide": "Hide page overlay",
+    "evidenceLayoutElsewhere": "{count} more lines of page text were read from this document — open \"View extraction text\" below to read them.",
     "evidenceEmpty": "No extracted fields yet.",
+    "overlayLoading": "Loading this document's extracted regions…",
+    "overlayNotAvailable": "This document's extraction isn't available for this client, so there is nothing to overlay.",
+    "overlayNoPageForType": "A {mime} file has no page image to show. The fields Clara read from it are listed beside this.",
+    "overlayPageLoading": "Loading the page…",
+    "overlayPageFailed": "The page couldn't be loaded: {message}",
+    "overlayPageAlt": "Page {page} of this document",
+    "overlayPageRegionLabel": "Page {page}, scrollable — use the arrow keys to move around it",
+    "overlayNoRegionsOnPage": "Nothing was extracted from page {page}, so there is nothing to outline on it.",
+    "overlayNoPageSize": "This page can be shown, but not outlined: the extraction recorded no page size, so Clara cannot place the regions without guessing.",
+    "overlayNoDrawableGeometry": "The extracted regions on this page carry no usable outline, so none is drawn.",
+    "overlayClearSelection": "Clear the highlight",
     "evidenceUnlabeledField": "field",
     "evidenceNoValue": "—",
     "evidenceConfidenceValue": "confidence {value}",
+    "evidenceNoConfidence": "no confidence recorded",
+    "factsHeading": "Fields Clara read from this document",
+    "factsEmpty": "The engine recorded no named fields for this document — only page text.",
+    "colFactField": "Field",
+    "colFactValue": "Value",
+    "colFactConfidence": "Engine confidence",
+    "factLabel": {
+      "invoiceTotal": "Invoice total",
+      "invoiceAmountDue": "Amount due",
+      "invoiceCurrency": "Currency",
+      "invoiceVendorName": "Supplier name",
+      "invoiceInvoiceId": "Invoice number",
+      "invoiceInvoiceDate": "Invoice date",
+      "invoiceDeposit": "Deposit"
+    },
     "entriesHeading": "Journal entries filed to this client",
     "entriesEmpty": "No journal entries filed to this client cite this document yet.",
     "entryReversed": "reversed",
@@ -1040,7 +1088,9 @@
       "coaBinding": "Bound to chart account {coa}",
       "deactivate": "Deactivate",
       "reactivate": "Reactivate",
-      "defaultDeactivateReason": "Deactivated from the bank workbench"
+      "defaultDeactivateReason": "Deactivated from the bank workbench",
+      "emptyProposals": "No bank-account proposals are waiting. Clara raises one when a statement names an account this client has not registered yet.",
+      "emptyAccounts": "No bank account is registered for this client yet. Register one above before entering a statement."
     },
     "statements": {
       "accountPickerHeading": "Bank account",
@@ -1075,7 +1125,15 @@
       "matchLive": "matched",
       "matchPending": "pending checker",
       "matchUnmatched": "unmatched",
-      "completePendingMatch": "Complete"
+      "completePendingMatch": "Complete",
+      "emptyAccounts": "No bank account is registered for this client yet. Register one on the Accounts tab before entering a statement.",
+      "emptyStatements": "No statement has been entered for this account yet.",
+      "accountPickerChoose": "Choose a bank account",
+      "noAccountSelected": "Choose the bank account this statement belongs to. Its institution code and account number are what the statement header is filed under.",
+      "statementDateRequired": "Enter the statement date. The database refuses a header without one.",
+      "enterTargetAccount": "This statement will be filed against {account}.",
+      "enterNoTargetAccount": "Choose a bank account above; this statement will be filed against the one you pick.",
+      "errStatementDetail": "Could not read this statement's lines: {message}"
     },
     "matching": {
       "kindLabel": "Counterparty kind",
@@ -1104,7 +1162,11 @@
       "unmatchHint": "Find a match ID on a matched line in the Statements tab's line view, then unmatch it here.",
       "matchIdLabel": "Match ID",
       "reasonLabel": "Reason",
-      "unmatchSubmit": "Unmatch"
+      "unmatchSubmit": "Unmatch",
+      "emptyUnmatchedLines": "Every line on this statement is matched. Nothing is waiting for a decision here.",
+      "emptyCandidates": "No match candidate was found for this line. Settle it against an open item, or raise it as an exception.",
+      "emptyCounterparties": "No counterparty of this kind is recorded for this client yet. Add one in the counterparty register first.",
+      "emptyOpenItems": "This counterparty has no open item to settle against."
     },
     "exceptions": {
       "proposalsHeading": "Open exception proposals",
@@ -1132,7 +1194,9 @@
       "writeOffInvalidAmount": "Debit/credit amounts must be valid.",
       "writeOffIncomplete": "A write-off needs a posting date, a memo, a resolution note, and at least two journal lines.",
       "writeOffSubmit": "Write off",
-      "writeOffBusy": "Writing off…"
+      "writeOffBusy": "Writing off…",
+      "emptyProposals": "No exception proposals are waiting. Clara raises one when a bank line cannot be settled cleanly.",
+      "emptyExceptions": "No bank-line exceptions are recorded for this client."
     },
     "reconciliation": {
       "pickHeading": "Statement",
@@ -1161,7 +1225,10 @@
       "complete": "Certify (complete reconciliation)",
       "cannotCompleteHint": "Not yet completable — see the blockers/stale items above.",
       "voidReasonLabel": "Void reason",
-      "void": "Void this reconciliation"
+      "void": "Void this reconciliation",
+      "emptyAccounts": "No bank account is registered for this client yet. Register one on the Accounts tab, then come back to reconcile.",
+      "emptyStatements": "This account has no statement yet. Enter one on the Statements tab, then come back to reconcile.",
+      "errRecon": "Could not read this statement's reconciliation: {message}"
     },
     "agency": {
       "holdHeading": "Bank agency hold",
@@ -1173,7 +1240,8 @@
       "releaseHold": "Release hold",
       "promotionsHeading": "Open identifier-promotion proposals",
       "promotionsAttribution": "Proposed by the agent — awaiting your decision.",
-      "confirm": "Confirm promotion"
+      "confirm": "Confirm promotion",
+      "emptyProposals": "No agency-collection proposals are waiting. Clara raises one when a receipt looks like money collected on someone else's behalf."
     }
   },
   "ClientClose": {
@@ -1200,15 +1268,27 @@
       "begin": {
         "trigger": "Begin close",
         "title": "Begin close — {label}",
-        "description": "clara.begin_close — opens a close run and evaluates every gate. Needs the close_and_attest capability.",
-        "confirm": "Begin close"
+        "description": "clara.begin_close opens the run and evaluates every gate. It also FREEZES the year: while the run is in progress no approved entry may be posted, changed or reversed with a date inside the period — by you, by a colleague, or by Clara — and the database refuses each attempt with write_into_closed_period. Abandon puts the year back to open. Needs the close_and_attest capability.",
+        "confirm": "Begin close",
+        "restartTrigger": "Restart close",
+        "restartTitle": "Restart the close — {label}",
+        "restartDescription": "The last close run on this year was abandoned, so the year is open again. clara.begin_close opens a NEW run and re-evaluates every gate; the abandoned run stays on the record with its own reason. It freezes the year again: while the new run is in progress no approved entry may be posted, changed or reversed inside the period, by anyone, and the database refuses each attempt with write_into_closed_period. Needs the close_and_attest capability.",
+        "restartConfirm": "Restart close"
       },
       "finalize": {
         "trigger": "Finalize close",
         "title": "Finalize close",
-        "description": "clara.finalize_close re-evaluates every gate in-transaction. A solo firm, or a year with no distinct human preparer, needs an explicit self-attestation — leave it blank otherwise.",
+        "description": "Finalizes the year: clara.finalize_close re-evaluates every gate inside one transaction and either writes the close receipt or refuses, naming the gate that stopped it.",
         "confirm": "Finalize",
-        "attestationLabel": "Self-attestation (only if required)"
+        "attestationLabel": "Self-attestation",
+        "preflight": {
+          "clearTitle": "Nothing is standing in finalize's way",
+          "clearBody": "Every gate on this run has been measured, and each drawer-2 exception carries a live attestation. Finalize re-checks all of it in-transaction — this reading is what the plan says now, not a promise.",
+          "blockedTitle": "What finalize will look at first",
+          "notYetMeasured": "{count, plural, one {# gate has} other {# gates have}} never been measured on this run: {titles}.",
+          "drawer1Unknown": "{count, plural, one {# drawer-1 identity} other {# drawer-1 identities}} could not be evaluated, which finalize refuses as drawer1_state_unknown: {titles}.",
+          "drawer2Unattested": "{count, plural, one {# drawer-2 gate carries an item} other {# drawer-2 gates carry items}} with no live attestation, which finalize refuses as drawer2_unattested: {titles}."
+        }
       },
       "abandon": {
         "trigger": "Abandon close",
@@ -1220,7 +1300,7 @@
       "reopen": {
         "trigger": "Reopen year",
         "title": "Reopen this closed fiscal year",
-        "description": "clara.reopen_fiscal_year mirrors the closing entry as a prior-period adjustment. Needs the reopen capability, a reason (10+ characters), and a correction target. A CLR05 refusal (no_eligible_human / attestation_required / distinct_checker / self_attestation) names exactly who may act — try again with an attestation if it asks for one.",
+        "description": "clara.reopen_fiscal_year mirrors the closing entry as a prior-period adjustment. Needs the reopen capability, a reason (10+ characters), and a correction target naming what is being corrected.",
         "confirm": "Reopen",
         "reasonLabel": "Reason (10+ characters)",
         "targetKindLabel": "Correction target",
@@ -1235,7 +1315,7 @@
         "entryIdsPlaceholder": "e.g. 3fa9c1de-...-..., 8b2e4a10-...-...",
         "documentIdLabel": "Document id",
         "documentIdPlaceholder": "e.g. 8b2e4a10-...-...",
-        "attestationLabel": "Attestation (only if a refusal named it)"
+        "attestationLabel": "Attestation"
       }
     },
     "gates": {
@@ -1251,6 +1331,18 @@
         "description": "clara.attest_close_exception — the existing audited attest door (0056). One click records one attestation, bound to the gate's current measurement.",
         "confirm": "Attest",
         "reasonPlaceholder": "Why is this exception acceptable?"
+      },
+      "state": {
+        "pass": "passed",
+        "fail": "failed",
+        "unknown": "not evaluated",
+        "error": "evaluation error",
+        "advisory": "advisory"
+      },
+      "attestationState": {
+        "absent": "no attestation",
+        "live": "attested",
+        "stale": "attestation out of date"
       }
     },
     "receipt": {
@@ -1448,7 +1540,7 @@
     "sandbox": {
       "heading": "Analysis sandbox",
       "subheading": "Watermarked, never sealed (0132) — structurally unreachable by the seal chain.",
-      "requestNotice": "There is no human \"request export\" door — the mint/request verbs are granted to Clara's agent lane only. Ask Clara, in the rail, to build a sandbox view or request an export.",
+      "requestNotice": "There is no way to request a sandbox export in this build. The mint and request verbs are wake verbs allowlisted to the INTERACTIVE lane alone and granted only to clara_wake_interactive, so no unattended lane can mint one either — and the chat rail has no tool for it. Every sandbox export touching this client is listed below with its state; a finished one carries its own download offer.",
       "loading": "Loading sandbox exports…",
       "error": "Could not load sandbox exports: {message}",
       "empty": "No sandbox exports yet touching this client.",
@@ -1463,9 +1555,12 @@
           "title": "Register an export recipient",
           "description": "clara.register_export_recipient — admin only. Firm-member recipients only in this form (an external recipient's covered-clients form is a named follow-up).",
           "confirm": "Register",
-          "userIdPlaceholder": "Firm member user id (UUID)",
           "displayNamePlaceholder": "Display name",
-          "basisPlaceholder": "Basis for receiving exports"
+          "basisPlaceholder": "Basis for receiving exports",
+          "memberLabel": "Firm member",
+          "memberChoose": "Choose a firm member",
+          "memberLoading": "Reading the firm roster…",
+          "memberRosterUnreadable": "No firm member is listed. The roster read is open to bookkeepers and above, so this is empty either because you cannot read it or because there is nobody to show."
         }
       },
       "download": {
@@ -1827,8 +1922,6 @@
     "dryrun": {
       "heading": "Tie-out",
       "asOf": "As of {date}",
-      "ties": "Ties — the opening-balance-equity net is zero.",
-      "doesNotTie": "Does not tie — opening-balance-equity net {amount}.",
       "noDeltas": "No target/actual comparison rows yet.",
       "accountCol": "Account",
       "targetDebitCol": "Target debit",
@@ -1838,7 +1931,18 @@
       "deltaDebitCol": "Δ debit",
       "deltaCreditCol": "Δ credit",
       "unmappedTitle": "Unmapped source labels",
-      "missingMustAsksTitle": "Missing must-ask items"
+      "missingMustAsksTitle": "Missing must-ask items",
+      "readyToApprove": "Ready to approve — all four checks the approval enforces are satisfied.",
+      "notReadyToApprove": "Not ready to approve — approval enforces all four of these, and the ones marked below are not satisfied yet.",
+      "gatePassed": "satisfied",
+      "gateFailed": "not satisfied",
+      "gate": {
+        "targetsPresent": "A target trial balance has been keyed for this seed.",
+        "allMapped": "Every keyed target line is mapped to an account.",
+        "allTie": "Every account matches its target — no line is off.",
+        "obeNil": "Opening-balance-equity nets to zero.",
+        "obeNilFailed": "Opening-balance-equity does not net to zero — the seed's own figure is {amount}."
+      }
     },
     "items": {
       "heading": "Drafted opening items",
@@ -2030,7 +2134,11 @@
       "registerAccumCol": "Register accumulated",
       "glAccumCol": "GL accumulated",
       "accumDiffCol": "Accumulated difference",
-      "empty": "No fixed-asset accounts enrolled yet."
+      "notEvaluated": "Not evaluated — no fixed-asset account is enrolled and no asset is on the register, so there was nothing to compare.",
+      "preEnrolmentCostCol": "GL cost before enrolment",
+      "preEnrolmentAccumCol": "GL accum. before enrolment",
+      "foreignRegisterCostCol": "GL cost, other register",
+      "foreignRegisterAccumCol": "GL accum., other register"
     },
     "authority": {
       "heading": "Depreciation authority",
@@ -2397,8 +2505,12 @@
       "maxCharsNote": "Budgeted to {maxChars} characters — the same budget the agent reads under.",
       "extractionsHeading": "Extractions",
       "noExtractions": "No completed extraction for this document.",
-      "regionsHeading": "Regions",
-      "noRegions": "No extracted regions.",
+      "layoutHeading": "Page text",
+      "noLayoutText": "No page text was extracted.",
+      "layoutPage": "Page {page} — {count} lines",
+      "layoutPageless": "Table cells and unplaced text — {count} entries",
+      "rawEnvelopeSummary": "Raw engine output (JSON)",
+      "rawEnvelopeTruncated": "Shown exactly as received: the character budget above cut this envelope mid-value, so it is not valid JSON to re-format.",
       "envelopeEmpty": "(no envelope text)",
       "notAvailable": "This document's extraction text isn't available for this client."
     },
@@ -2569,7 +2681,14 @@
       "viewDetailsTrigger": "View details",
       "loadingDetail": "Loading the finding's full detail…",
       "detailNotReachable": "This finding's detail could not be read.",
-      "dedupeKeyLabel": "Dedupe key"
+      "noEvents": "Nothing has happened to this finding since it was raised.",
+      "eventKinds": {
+        "created": "Raised",
+        "superseded": "Superseded by a later check",
+        "resolved": "Resolved",
+        "recheck_opened": "Re-checked",
+        "evaluation": "Evaluated"
+      }
     },
     "sweep": {
       "heading": "Sweep runs",
@@ -2675,7 +2794,6 @@
   "ArApCounterparty": {
     "heading": "Counterparty hygiene",
     "loading": "Loading counterparties…",
-    "empty": "No counterparties recorded yet for this client.",
     "aliasListNotBuilt": "A counterparty's existing aliases and the retire-alias action are not available yet — this build has no read for them. Adding a new alias still works.",
     "kindVendorPlural": "Vendors",
     "kindCustomerPlural": "Customers",
@@ -2802,7 +2920,9 @@
       "description": "Reverses the WHOLE application as one act — never a single row inside it.",
       "confirm": "Unallocate",
       "reasonLabel": "Reason"
-    }
+    },
+    "emptyVendor": "No vendor is recorded yet for this client.",
+    "emptyCustomer": "No customer is recorded yet for this client."
   },
   "ReportsSnapshotsSeeding": {
     "snapshots": {

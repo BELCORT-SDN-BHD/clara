@@ -477,6 +477,17 @@ deployment's public origins are is a fact about the deployment:
   cookie `__Host-clara-auth` with `Secure`. Chrome and Firefox accept that on
   `http://localhost`; Safari does not — develop against HTTPS if you use Safari.
 
+### 6. Content-Security-Policy is REPORT-ONLY; enforcing it is a costed decision (C-07 · 裁-175)
+
+`proxy.ts` sets `Content-Security-Policy-Report-Only` from `lib/security/csp.ts` on every
+matched response. It enforces nothing — it is a MEASUREMENT, shipped as the strict candidate
+(`script-src`/`style-src` `'self'`, no `'unsafe-inline'`, no nonce) so the browser's reports
+mean something. Measured on the built app (`e2e/documents-viewer-walk.spec.ts`): Next 16 on
+OpenNext/Workers violates both directives on an ordinary load, so enforcing needs a nonce
+(dynamic rendering everywhere) or per-response hashes — a decision, not a header rename. The
+wall that IS enforcing today is `VIEWABLE_IN_NEW_TAB` in `lib/documents/bytes.ts`; do not read
+this header as a second wall behind it.
+
 ## What is deliberately NOT here yet
 
 The P2 fold landed the full shell: Supabase SSR cookie auth (`proxy.ts`,

@@ -48,7 +48,7 @@ const DOCUMENT: DocumentRow = {
 
 test("RE-EXTRACTION journey: the dialog opens, its reason field and Confirm/Cancel are keyboard-reachable, Confirm gated until a reason is typed", async () => {
   const h = await renderComponent(
-    App(createElement(DocumentAdmin, { document: DOCUMENT, busy: false, act: async (fn) => { await fn(); }, onCorrect: () => {} })),
+    App(createElement(DocumentAdmin, { document: DOCUMENT, busy: false, act: async (fn) => { await fn(); return true; }, onCorrect: () => {} })),
   );
   const b = body();
   (b as unknown as { appendChild: (c: unknown) => void }).appendChild(h.container);
@@ -59,6 +59,23 @@ test("RE-EXTRACTION journey: the dialog opens, its reason field and Confirm/Canc
     await h.fireEvent(trigger!, "click");
     for (let i = 0; i < 6; i++) await h.settle();
     assert.match(textOf(b as never), /Re-queues this document/, "opening the dialog must reach its own description");
+
+    // CB-AE2E-022, THIS LANE'S HALF: the DB verb this door calls is reachable
+    // from a collapsed "Technical detail" disclosure under the description —
+    // one shared component (components/common/technical-detail.tsx) so every
+    // future door inherits the shape, rather than the verb sitting inside the
+    // sentence a professional reads before confirming.
+    //
+    // THE COPY ITSELF IS NOT THIS LANE'S. Rewriting these five descriptions is
+    // PR #548's item 5, which touches all of them including the two that render
+    // from components/journals; this lane deliberately leaves the strings at
+    // their `main` text so the two diffs do not collide. So this cell asserts
+    // the DISCLOSURE, not the sentence — and it keeps meaning exactly the same
+    // thing after #548 lands and the sentence changes underneath it.
+    const disclosure = findIn(b, (n) => n.tagName === "DETAILS" && textOf(n as never).includes("Technical detail"));
+    assert.ok(disclosure, "the technical-detail disclosure must render");
+    assert.match(textOf(disclosure as never), /clara\.request_reextraction/, "the verb must be reachable there");
+    assert.doesNotMatch(textOf(disclosure as never), /Re-queues this document/, "the disclosure carries the verb, not a copy of the description");
 
     const reasonField = findIn(b, (n) => n.tagName === "TEXTAREA");
     assert.ok(reasonField, "the reason field must render as a real <textarea>");
@@ -94,7 +111,7 @@ test("RE-EXTRACTION journey: the dialog opens, its reason field and Confirm/Canc
 
 test("CONSENT EVIDENCE journey: the dialog opens, its reason field and Confirm/Cancel are keyboard-reachable", async () => {
   const h = await renderComponent(
-    App(createElement(DocumentAdmin, { document: DOCUMENT, busy: false, act: async (fn) => { await fn(); }, onCorrect: () => {} })),
+    App(createElement(DocumentAdmin, { document: DOCUMENT, busy: false, act: async (fn) => { await fn(); return true; }, onCorrect: () => {} })),
   );
   const b = body();
   (b as unknown as { appendChild: (c: unknown) => void }).appendChild(h.container);
@@ -143,7 +160,7 @@ const FILING: FilingRow = {
 
 test("AUTODRAFT journey: the dialog opens with no fields of its own, and Confirm/Cancel are keyboard-reachable", async () => {
   const h = await renderComponent(
-    App(createElement(DocumentFilingsHistory, { filings: [FILING], busy: false, act: async (fn) => { await fn(); } })),
+    App(createElement(DocumentFilingsHistory, { filings: [FILING], busy: false, act: async (fn) => { await fn(); return true; } })),
   );
   const b = body();
   (b as unknown as { appendChild: (c: unknown) => void }).appendChild(h.container);

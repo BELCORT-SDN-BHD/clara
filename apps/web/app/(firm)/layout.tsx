@@ -3,6 +3,7 @@ import { getTranslations } from "next-intl/server";
 
 import { CommandKProvider } from "@/components/command";
 import { FirmNav } from "@/components/firm-nav";
+import { FirmNavDrawer } from "@/components/firm-nav-drawer";
 import { FirmScopeProvider } from "@/components/firm-scope-provider";
 import { LogoutButton } from "@/components/logout-button";
 import { RailMount } from "@/components/clara/rail-mount";
@@ -66,14 +67,51 @@ export default async function FirmLayout({
         sidebar, via `--sidebar`, and the client-workspace tab header one level
         down); the content column is `--background`, the canvas.
         */}
-        <div className="relative flex min-h-dvh bg-background">
+        {/*
+        CB-AE2E-019 — `overflow-x-clip` on the shell row, and the browser leg is
+        what found it. The rail's enter and exit both TRANSLATE the panel by its
+        own width (`dock-panel`, app/globals.css). In the docked arm that panel
+        is an in-flow flex child, so a translated box sticks out past the row's
+        right edge and the DOCUMENT gains that many pixels of horizontal scroll
+        for the length of the animation — measured at 640 CSS px as
+        `documentElement.scrollWidth` 712 against a `clientWidth` of 640, which
+        is a WCAG 2.2 SC 1.4.10 failure that appears and disappears in 200ms.
+        (The enter has always done this; nothing had ever measured it.)
+
+        `clip`, NOT `hidden`, and the difference is load-bearing: `overflow-x:
+        hidden` forces the other axis to compute as `auto`, which would make this
+        row a scroll container and break the rail's own `sticky top-0`.
+        `overflow-x: clip` pairs legally with `overflow-y: visible`, creates no
+        scroll container, and is the one value that exists for exactly this job.
+        Nothing legitimate is lost: no app content is supposed to paint outside
+        the shell frame horizontally, and every wide surface inside it (every
+        table, via components/ui/table.tsx) already carries its own
+        `overflow-x-auto`.
+        */}
+        <div className="relative flex min-h-dvh overflow-x-clip bg-background">
           {/* DS-02 (P6-3): the bypass-blocks affordance. FIRST in DOM order, so
               it is the first thing Tab reaches on every firm route; `relative`
               on this wrapper is what its `focus:absolute` positions against.
               See components/common/skip-link.tsx for why it is mounted here and
               deliberately not in the (entry) or (full) groups. */}
           <SkipLink />
-          <aside className="flex w-56 shrink-0 flex-col gap-4 border-r border-sidebar-border bg-sidebar p-4">
+          {/* CB-AE2E-019, SEAM 1 — THE WIDE ARM, unchanged in every respect
+              except that it is now an arm. `hidden lg:flex` is the whole edit:
+              at and above `lg` this is the same 224px sidebar it has always
+              been, and below `lg` it stops being a row participant entirely
+              (`display: none` removes the box, so it costs zero width rather
+              than being pushed off-screen). Its CONTENT is not duplicated —
+              `<FirmNavDrawer />` in the narrow header below renders the SAME
+              `<FirmNav />` and `<LogoutButton />` components, so the rank floors
+              in lib/firm/navigation.ts shape one nav, not two.
+
+              `lg` (1024px) and not `md` (768px), and the arithmetic is why: the
+              wide arm costs 224 (sidebar) + 320 (Clara rail) + 64 (PageShell's
+              horizontal padding) = 608px of chrome. At `md` that leaves 160px of
+              content — narrower than a journal line's date column. `lg` is the
+              first Tailwind breakpoint at which the three-column shell is
+              legible for accounting work at all. */}
+          <aside className="hidden w-56 shrink-0 flex-col gap-4 border-r border-sidebar-border bg-sidebar p-4 lg:flex">
             <span className="px-2.5 text-sm font-semibold text-sidebar-foreground">
               {t("productName")}
             </span>
@@ -94,13 +132,27 @@ export default async function FirmLayout({
               What confirms the jump to a sighted keyboard user is the scroll
               plus the next Tab landing past the nav — which the browser leg
               asserts (review N-6, recorded rather than changed). */}
-          <div
-            data-firm-workbench
-            id="main-content"
-            tabIndex={-1}
-            className="min-w-0 flex-1 bg-background outline-none"
-          >
-            {children}
+          <div className="flex min-w-0 flex-1 flex-col">
+            {/* CB-AE2E-019 — the narrow-arm header, and note WHERE it sits:
+                OUTSIDE `#main-content`, as its sibling. Putting it inside the
+                skip link's own target would have made the bypass land ABOVE the
+                drawer toggle, so the very next Tab walked back into navigation —
+                a bypass that bypasses nothing, which is the exact failure
+                skip-link.tsx's header says `tabIndex={-1}` exists to prevent.
+                It carries the product name because the sidebar that used to
+                carry it is `display: none` in this arm. */}
+            <header className="flex items-center gap-2 border-b border-border bg-shell px-4 py-2 lg:hidden">
+              <FirmNavDrawer />
+              <span className="text-sm font-semibold text-foreground">{t("productName")}</span>
+            </header>
+            <div
+              data-firm-workbench
+              id="main-content"
+              tabIndex={-1}
+              className="min-w-0 flex-1 bg-background outline-none"
+            >
+              {children}
+            </div>
           </div>
           <RailMount />
         </div>

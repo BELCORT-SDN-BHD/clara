@@ -106,7 +106,7 @@ export function MemberRowMenu({
   /** Performs exactly one governed call and RESOLVES WHEN IT HAS SETTLED. The
    *  returned promise is this component's only signal that an act is in flight;
    *  a caller that returns nothing re-opens the double-fire window. */
-  onPickRole: (role: MemberRole) => Promise<void>;
+  onPickRole: (role: MemberRole) => Promise<boolean>;
   onRemove: () => void;
 }) {
   const t = useTranslations("Members.roster");

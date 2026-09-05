@@ -195,15 +195,25 @@ const REVIEWED_DYNAMIC_SQL_BARRIERS = new Map<string, ReviewedDynamicSqlBarrier>
       sha256: "f6d093e5b5e6037386522581ec07fab6ad955b4944f3871fc5a31b2635173b7b",
     },
   ],
+  // MERGE-TIME OBLIGATION: this key is the FILENAME, and this file is renamed when its
+  // migration number is claimed. Re-key the entry to the numbered name at merge; the sha256
+  // does not move, because a rename changes no bytes.
+  [
+    "0168_coding_lane_kind_exclusion.sql",
+    {
+      reason: "Reviewed pg_get_functiondef splices recut exactly two FUNCTIONS — clara.list_uncoded_filings(uuid) and clara.list_review_queue(jsonb,jsonb,integer) — each read at a literal signature and re-installed with one appended WHERE conjunct; the block emits no view definition at all, so neither P4 scope view can be a target. Same family as 0146's splice of the same queue function.",
+      sha256: "c6f3b99a27f554650982893bc6288f7de33953824e5b930fc862f02c1e42b8d4",
+    },
+  ],
   // The two 裁-190 web-reads/doors files. They are UNNUMBERED until merge prep (裁-108), and an
   // uppercase 'U' sorts AFTER every digit, so both land at the END of the corpus walk — hence
   // their position here: this Map's key order is compared to the census's file-sorted
   // `blockedAt`, so the entries must appear in the same order the corpus does.
-  // AT MERGE PREP THESE TWO KEYS ARE RENAMED WITH THEIR CLAIMED NUMBERS, which moves them from
-  // the end of the corpus to their numeric position — so this list must be RE-SORTED then. The
-  // sha256 values do NOT change: the hash is over the file's CONTENT (`corpus.read(file)` at
-  // `:259`), never its name, so a rename alone leaves them correct and only an edit to the SQL
-  // moves them.
+  // AT MERGE PREP THESE TWO KEYS ARE RENAMED WITH THEIR CLAIMED NUMBERS. Their POSITION does not
+  // move: whatever numbers they take, they sort after `0168` above, so this block stays last and
+  // only the two key strings change. The sha256 values do not change either — the hash is over
+  // the file's CONTENT (`corpus.read(file)` at `:259`), never its name, so a rename alone leaves
+  // them correct and only an edit to the SQL moves them.
   [
     "UNNUMBERED_stmt_witness_totals_and_institution_code.sql",
     {

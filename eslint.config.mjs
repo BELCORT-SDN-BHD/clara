@@ -95,6 +95,17 @@ export default tseslint.config(
       // apps/web's Cloudflare build output/local dev state (never linted or committed).
       "apps/web/.open-next/**",
       "apps/web/.wrangler/**",
+      // VENDORED, NOT AUTHORED (D2). `public/pdf.worker.min.mjs` is a
+      // byte-identical copy of pdfjs-dist's own minified worker build, served
+      // same-origin so the pdf.js page renderer never fetches a third-party
+      // script over a client's documents. It is 1.2MB of minified vendor code:
+      // linting it produces hundreds of no-unused-vars/no-undef errors about
+      // pdf.js's own internals, none of which anyone here can or should fix.
+      // `apps/web/lib/documents/pdf-worker-asset.test.ts` is what keeps it
+      // honest instead — it hashes this file against the installed package, so
+      // a drift between the served worker and the library goes RED there rather
+      // than failing silently in a browser.
+      "apps/web/public/pdf.worker.min.mjs",
     ],
   },
 

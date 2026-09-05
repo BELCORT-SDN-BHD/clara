@@ -113,7 +113,7 @@ async function mount(scope?: { role_rank: number | null; is_operator: boolean })
   return { h, body };
 }
 
-test("Sign refusal (CLR04, insufficient rank): a real click through the dialog's own Confirm button renders the CLR code + message VERBATIM in the panel's own banner, and the dialog closes rather than showing the refusal inside it", async () => {
+test("Sign refusal (CLR04, insufficient rank): a real click through the dialog's own Confirm button renders the CLR code + message VERBATIM, and the dialog STAYS OPEN carrying it (CB-AE2E-004)", async () => {
   const calls: { url: string }[] = [];
   const impl = (async (url: RequestInfo | URL) => {
     const u = String(url);
@@ -148,13 +148,14 @@ test("Sign refusal (CLR04, insufficient rank): a real click through the dialog's
       await h.act(() => { clickButton(confirmButton as never); });
       for (let i = 0; i < 8; i++) await h.settle();
 
-      // The dialog auto-closes on every confirm attempt (success or
-      // refusal) — its own Cancel control only exists while open.
+      // CB-AE2E-004 (2026-09-04): a REFUSED confirm keeps the dialog open, and the
+      // refusal renders inside it. Its own Cancel control exists only while open, so
+      // its presence is the open signal. The old assertion demanded the opposite.
       const cancelStillOpen = findIn(body as never, (n) => n.tagName === "BUTTON" && textOf(n as never) === "Cancel");
-      assert.equal(cancelStillOpen, null, "the dialog must have closed after the confirm attempt settled");
+      assert.ok(cancelStillOpen, "the dialog must STAY OPEN after a refused confirm");
 
       const bodyText = textOf(body as never);
-      assert.match(bodyText, /CLR04/, "the CLR code must render, verbatim, in the panel's own banner");
+      assert.match(bodyText, /CLR04/, "the CLR code must render, verbatim");
       assert.match(bodyText, /insufficient rank/, "the DB's own message must render, verbatim — never re-worded");
 
       const call = calls.find((c) => c.url.includes("/rpc/sign_vendor_identity_binding"));

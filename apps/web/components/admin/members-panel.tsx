@@ -264,11 +264,14 @@ export function MembersPanel() {
         busy={roster.busy}
         onConfirm={async () => {
           const row = removing;
-          if (!row) return;
-          await roster.act(async () => {
+          if (!row) return false;
+          // CB-AE2E-004: the dialog closes only on an accepted act, and the row
+          // it is confirming is cleared only then too — a refusal keeps both.
+          const ok = await roster.act(async () => {
             await removeMember(sessionTokenAccessor, row.membership_id);
           });
-          setRemoving(null);
+          if (ok) setRemoving(null);
+          return ok;
         }}
       />
 
@@ -283,13 +286,16 @@ export function MembersPanel() {
         busy={invites.busy}
         onConfirm={async () => {
           const row = revoking;
-          if (!row) return;
+          if (!row) return false;
           setCourier(null);
           setIssued(null);
-          await invites.act(async () => {
+          // CB-AE2E-004: see the remove dialog above — clear the pending row
+          // only when the door actually accepted.
+          const ok = await invites.act(async () => {
             await revokeInvite(sessionTokenAccessor, row.id);
           });
-          setRevoking(null);
+          if (ok) setRevoking(null);
+          return ok;
         }}
       />
     </div>

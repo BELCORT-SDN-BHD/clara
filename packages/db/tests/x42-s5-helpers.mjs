@@ -1042,6 +1042,21 @@ const KL_ROSTER_0046 = ["preview_ocr_sales_evidence"];
 // this battery also runs against pre-PR-1a chains where the body does not exist yet.
 const KL_ROSTER_F_A4_PR1A = ["_close_gate_undated"];
 
+// DB-A [H-55, `close_gate_bank_enrolment` at whatever number merge claims]:
+// clara._bank_enrolled_fy_months spells the same MYT idiom for the account window it derives.
+// IT CANNOT CALL clara._book_today() EITHER, and for the identical reason _close_gate_undated
+// cannot: the authority answers "what MYT date is today", while this body needs "what MYT month
+// does THIS bank account's created_at / deactivated_at timestamp fall in" — a per-row question
+// the authority does not answer. Taking the conversion in the SESSION time zone instead is the
+// defect arm (A) of this very census exists to catch, and it would make measured_digest read
+// differently from a different connection, so there is no third option. Declared cost, not drift.
+//
+// GATED ON A CATALOG WITNESS, not a migration stem: the body itself, probed at its EXACT
+// SIGNATURE (law 3 — a bare name is a projection of the thing, not the thing). That survives the
+// number claimed at merge AND a file rename, and it keeps the roster and the catalog in exact
+// agreement by construction: the name is expected on this roster precisely when the body exists.
+const KL_ROSTER_DBA_BANK_ENROLMENT = ["_bank_enrolled_fy_months"];
+
 /** The arm (B) duplication roster for the database under test, sorted as the catalog sorts it. */
 export async function s5KlDuplicationRoster(query) {
   const applied = async (pat) => (await query(
@@ -1056,5 +1071,10 @@ export async function s5KlDuplicationRoster(query) {
   // preview_ocr_sales_evidence: a true WINDOW name, present from 0046 until the cutover.
   if (await applied("0046_%") && !(await appliedStem("f_a2_cutover_retirement$"))) names.push(...KL_ROSTER_0046);
   if (await appliedStem("f_a4_pr_1a_measurement_layer$")) names.push(...KL_ROSTER_F_A4_PR1A);
+  // DB-A: a CATALOG witness at the exact signature, not a migration stem — see the block above.
+  const bankEnrolment = (await query(
+    "select (to_regprocedure('clara._bank_enrolled_fy_months(uuid,date,date)') is not null) as ok"
+  )).rows[0].ok;
+  if (bankEnrolment) names.push(...KL_ROSTER_DBA_BANK_ENROLMENT);
   return names.sort().join(" ");
 }

@@ -29,6 +29,7 @@ import { P6_5_SESSIONS } from "./agentic-finish-mock.mjs";
 
 const E2E_DIR = dirname(fileURLToPath(import.meta.url));
 const SERVE_BUILT = join(E2E_DIR, "serve-built.mjs");
+const DOCUMENTS_LANE_MOCK = join(E2E_DIR, "documents-viewer-mock.mjs");
 
 /**
  * EVERY LANE MOCK, not one (裁-190 fold).
@@ -48,7 +49,9 @@ const SERVE_BUILT = join(E2E_DIR, "serve-built.mjs");
  */
 const LANE_MOCKS = [
   "agentic-finish-mock.mjs",
+  "bank-close-registers-mock.mjs",
   "chat-parity-mock.mjs",
+  "documents-viewer-mock.mjs",
   "fs4-checkout-mock.mjs",
   "journals-table-mock.mjs",
 ] as const;
@@ -101,26 +104,44 @@ test("N4 · no lane fixture may claim the FIRM ALTITUDE for the shared subject",
   assert.equal(own.length, 2, "the lane's two CLIENT threads are still the caller's own");
 });
 
+/**
+ * EVERY WAY A HANDLER OPENS, as ONE expression — shared by the census and by its independent
+ * positive control, so the two can never disagree about what a handler even is.
+ *
+ * #549 MAJOR 8: this recognised only `path === "/rest/…"`. `bank-close-registers-mock.mjs`
+ * slices the `/rest/v1/rpc/` prefix once and then dispatches its RPC half on `verb === "…"`,
+ * so FIVE of its ten handlers were invisible to a gate whose whole job is to see them — and an
+ * unscoped one among them would have passed in silence. A census that cannot see a handler
+ * cannot report it unscoped, which is this file's own failure mode, one level up.
+ */
+const HANDLER_OPENER = /(?:path === "(\/(?:rest|api)\/[^"]+)"|verb === "([a-z0-9_]+)")/;
+const HANDLER_OPENER_G = new RegExp(HANDLER_OPENER.source, "g");
+
+/** The label a census row carries, so a verb-dispatched handler reads like the route it answers. */
+function openerLabel(m: RegExpExecArray): string {
+  return m[1] ?? `/rest/v1/rpc/${m[2]}`;
+}
+
 /** An independent count of the handler openers in a file, used as the positive control on the
  *  scan below: a loop that walks the wrong lines, or stops early, disagrees with this. Written
  *  as a whole-source match rather than a per-line walk on purpose — two techniques, one fact. */
 function openerCount(file: string): number {
-  return (readFileSync(file, "utf8").match(/path === "\/(?:rest|api)\/[^"]+"/g) ?? []).length;
+  return (readFileSync(file, "utf8").match(HANDLER_OPENER_G) ?? []).length;
 }
 
-/** Every `path === "/rest/v1/..."` or `path === "/api/..."` handler in ONE lane mock, with
- *  whether its block contains a `return false` — the fall-through that makes it scoped. */
+/** Every handler in ONE lane mock — `path === "…"` or `verb === "…"` — with whether its block
+ *  contains a `return false`, the fall-through that makes it scoped. */
 function handlerCensus(file: string): { path: string; scoped: boolean }[] {
   const source = readFileSync(file, "utf8");
   const lines = source.split("\n");
   const out: { path: string; scoped: boolean }[] = [];
   for (let i = 0; i < lines.length; i += 1) {
-    const opened = /path === "(\/(?:rest|api)\/[^"]+)"/.exec(lines[i]!);
+    const opened = HANDLER_OPENER.exec(lines[i]!);
     if (!opened) continue;
     // The block runs to the next handler opener, or to the end of the function.
     let scoped = false;
     for (let j = i + 1; j < lines.length; j += 1) {
-      if (/path === "(\/(?:rest|api)\/[^"]+)"/.test(lines[j]!)) break;
+      if (HANDLER_OPENER.test(lines[j]!)) break;
       // `return false;` ANYWHERE on the line, not only at its start: the scoping guard is
       // usually written as a one-line `if (…) return false;`. The first cut anchored at the
       // line start and reported thirteen scoped handlers as UNSCOPED — an instrument that
@@ -144,7 +165,7 @@ function handlerCensus(file: string): { path: string; scoped: boolean }[] {
       if (/^\s{1,2}\}\s*$/.test(lines[j]!)) break;
       if (/^\}/.test(lines[j]!)) break;
     }
-    out.push({ path: opened[1]!, scoped });
+    out.push({ path: openerLabel(opened), scoped });
   }
   return out;
 }
@@ -207,6 +228,23 @@ const LANE_DECLARATIONS: Record<string, { unscopeable: string[]; debt: string[] 
     debt: ["/api/auth-wall/confirm"],
   },
   "journals-table-mock.mjs": { unscopeable: [], debt: [] },
+  // The documents-viewer lane. Every handler names its own client, document, extraction or
+  // candidate before it answers, and the RPC block guards on `p_client`/`p_document`/
+  // `p_candidate` before it dispatches at all — so there is nothing to declare in either
+  // column, which is the state a lane mock should be in.
+  "documents-viewer-mock.mjs": { unscopeable: [], debt: [] },
+  "bank-close-registers-mock.mjs": {
+    // The gate CATALOG is firm-wide and its read carries no filter AT ALL —
+    // `lib/close/api.ts:320-322` sends only `select` and `order`. There is no discriminant in
+    // the request to scope on, which is what makes this one genuinely unscopeable rather than
+    // merely unscoped.
+    unscopeable: ["/rest/v1/close_gate_checks"],
+    // DEBT, and #549's own fold had it wrong: it was declared unscopeable, and it is not.
+    // `lib/reports/api.ts:251-256` sends `client_id=eq.<id>` on the wire, so the discriminant
+    // is right there in the request and this handler ignores it. Same shape as the chat-parity
+    // rows above — it COULD scope, which is exactly why it is not called unscopeable.
+    debt: ["/rest/v1/report_agent_receipts"],
+  },
 };
 
 test("N5 · every lane handler either scopes by the request's own subject, or is a NAMED exception", () => {
@@ -286,6 +324,36 @@ test("N5 · every lane handler either scopes by the request's own subject, or is
   // this is a "the reader still works" check, not a second census to keep in step.
   console.log(`\n  scoped handlers across ${LANE_MOCKS.length} lane mocks: ${totalScoped}`);
   assert.ok(totalScoped >= 20, `the census recognised only ${totalScoped} scoped handlers across ${LANE_MOCKS.length} files — it is not reading the guards`);
+});
+
+// --- THE DOCUMENTS-VIEWER LANE (C-07 / D2 / D3) -------------------------------
+//
+// A SECOND lane, measured by the SAME instrument. The rule this file exists for
+// is not about one mock — it is about every lane sharing one server, so a new
+// lane that is not measured here is exactly the gap the rule was written after.
+
+// THIS LANE'S SCOPING CELL IS GONE, and deleting it is the right outcome of the merge.
+// It censused `documents-viewer-mock.mjs` on its own; the 裁-190 fold above generalised the
+// SAME instrument to loop over every mock `serve-built.mjs` imports, with a declaration row
+// per lane. Keeping mine would be a second, weaker copy of a gate that now covers this lane
+// by construction — and a copy is exactly what both folds were written to remove. What
+// survives below is the half their loop does NOT do.
+
+test("N4 · the documents-viewer lane does NOT claim the shared client register", () => {
+  // The sharpest failure this file records is a lane claiming
+  // `/rest/v1/clients` outright, which took away another walk's navigation
+  // link. This lane answers only the by-id form for its own client; the census
+  // above proves the handler falls through, and this reads the guard itself so
+  // the two cells cannot both be satisfied by a handler that returns early for
+  // the wrong reason.
+  const source = readFileSync(DOCUMENTS_LANE_MOCK, "utf8");
+  const block = /path === "\/rest\/v1\/clients"\) \{([\s\S]*?)\n  \}/.exec(source);
+  assert.ok(block, "the documents lane must still declare a /rest/v1/clients handler for this cell to measure");
+  assert.match(
+    block[1]!,
+    /if \(eqParam\(url, "id"\) !== DOCS\.clientId\) return false;/,
+    "the clients handler must fall through on any id but this lane's own",
+  );
 });
 
 // --- N6 -----------------------------------------------------------------------------
@@ -395,3 +463,25 @@ test("N6 · serve-built's shared session list claims no firm altitude, and its C
   assert.equal(seen.length, 1, "the census must REPORT a firm-altitude claim, or its empty result above means nothing");
 });
 
+// ---------------------------------------------------------------------------
+// #549's own fixture claim, in the same spirit as N4 above.
+// ---------------------------------------------------------------------------
+//
+// The bank/close/registers walk asserts that a close-prep hold renders the MEMBER'S NAME
+// rather than the raw `clara.users(id)` uuid it carries (CB-AE2E-028). That claim is only
+// worth anything if the fixture's `held_by` is an id the roster can actually resolve —
+// `serve-built.mjs`'s own `/rest/v1/firm_members_visible` publishes exactly the shared
+// SUBJECT. A different id would resolve to null, the surface would render its shortened-id
+// FALLBACK, and the walk would pass while proving the opposite of what it says.
+test("N4 (L7) · the close-prep hold fixture's held_by IS the shared subject — otherwise the walk proves the fallback", () => {
+  const subject = sharedSubject();
+  const source = readFileSync(join(E2E_DIR, "bank-close-registers-mock.mjs"), "utf8");
+  const match = /heldBy: "([0-9a-f-]+)"/.exec(source);
+  assert.ok(match, "the L7 mock must declare heldBy");
+  console.log(`  shared SUBJECT = ${subject}, L7 heldBy = ${match[1]}`);
+  assert.equal(
+    match[1],
+    subject,
+    "a held_by outside the published roster resolves to null, and the walk would then be asserting the shortened-id fallback while claiming to assert the name",
+  );
+});
