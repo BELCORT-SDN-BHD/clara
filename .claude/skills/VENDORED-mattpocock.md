@@ -26,20 +26,19 @@ This repo **vendors** Matt Pocock's skill pack (git-tracked under `.claude/skill
 - **productivity** (5/7 mapped, 2 added): grill-me, grilling, handoff, teach,
   writing-for-agents — **added**: `to-questionnaire`, `wait-what`
 
-## Local-only skills (upstream retired them; owner ruled 2026-09-06: kept for now)
+## Upstream-retired skills — DELETED here 2026-09-06 (owner: 「都删, 旧的, stale, drift 的都删」)
 
 All six came from one upstream commit, `c66bdee` (2026-08-05, "remove six unused skills and
-the personal bucket"), none were ever in the Claude Code plugin. Two are still cited by name
-in this repo's own historical plan docs, so deleting them would orphan those references:
+the personal bucket"); none were ever in the Claude Code plugin. #566 kept them pending the
+owner's word; the word came the same day and the six directories are gone (the lock regenerated).
+The two historical plan documents that named them were re-worded to plain text so the
+harness-links gate stays green:
 
-- `design-an-interface` → absorbed by `codebase-design` (ships as `DESIGN-IT-TWICE.md`);
-  cited in `docs/plan/active/fe-train-plan-2026-08-30-orders-p4.md:106` and
-  `docs/plan/active/frontend-sprint-handoff-2026-08-31.md:268`
-- `qa` → absorbed by `triage` + `to-tickets`; cited in
-  `docs/plan/active/frontend-sprint-handoff-2026-08-31.md:269`
-- `request-refactor-plan` → absorbed by `to-spec` + `improve-codebase-architecture`
-- `ubiquitous-language` → absorbed by `domain-modeling`
-- `edit-article`, `obsidian-vault` → personal to Matt (the latter hardcoded his own vault path); deleted with the `personal/` bucket
+- design-an-interface → absorbed by `codebase-design` (ships as `DESIGN-IT-TWICE.md`)
+- qa → absorbed by `triage` + `to-tickets`
+- request-refactor-plan → absorbed by `to-spec` + `improve-codebase-architecture`
+- ubiquitous-language → absorbed by `domain-modeling`
+- edit-article, obsidian-vault → personal to Matt (the latter hardcoded his own vault path); deleted upstream with the `personal/` bucket
 
 ## Resolved decisions (fold, 2026-09-06)
 
