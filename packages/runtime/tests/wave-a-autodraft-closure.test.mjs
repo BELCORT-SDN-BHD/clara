@@ -62,7 +62,10 @@ test("isDoubleCodedReason + isQuestionShaped classify the sweep-refusal handling
 test("refusalFromDbError maps CLR21 detail, CLR29 double_coded, native uniques, and 42501 — never leaking SQL", () => {
   assert.equal(refusalFromDbError({ code: "CLR21", detail: '{"reason":"currency_unsupported"}' }).reason, "currency_unsupported");
   assert.equal(refusalFromDbError({ code: "CLR29", detail: '{"reason":"double_coded"}' }).reason, "double_coded");
-  assert.equal(refusalFromDbError({ code: "23505", constraint: "counterparty_aliases_live_uniq" }).code, "CLR23");
+  // H-17 RE-CUT (this PR): `counterparty_aliases_live_uniq` was FICTIONAL. The live index is
+  // `uq_counterparty_aliases_live_name` (0011:669-670). autoDraft_v1's map is a substring test, so
+  // the verdict is unchanged; the exact-name successor is autoDraft.v10.uniques.ts.
+  assert.equal(refusalFromDbError({ code: "23505", constraint: "uq_counterparty_aliases_live_name" }).code, "CLR23");
   assert.equal(refusalFromDbError({ code: "23503" }).code, "CLR11", "FK breach -> not-found collapse");
   assert.equal(refusalFromDbError({ code: "42501" }).code, "CLR03");
   const generic = refusalFromDbError({ code: "XXOTHER", message: "select * from clara.secret" });
