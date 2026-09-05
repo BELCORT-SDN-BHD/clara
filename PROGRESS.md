@@ -76,7 +76,7 @@ reversed, and the closure is still an OPERATING posture, not a technical wall.
 | runtime v75 (裁-189) | **DONE 2026-09-05** — released by image after the gate; `/ready` in the new seven-lane shape |
 | the web Worker promotion (裁-189) | **DONE 2026-09-05** — `90c1a5d0…` at 100 %; rollback = re-promote `c5b1e051…` (裁-156) |
 | H-43, the `verify-full` flip on the six lane DSNs | **still OWED** — NOT part of this ceremony; the pooler CA has shipped in the image since #558, which is its prerequisite |
-| the nine queued tickets, then 裁-197's three chat tickets | not started; the order is in the posture block above |
+| the nine queued tickets, then 裁-197's three chat tickets | not started; the order is in the posture block above — the orders are filed at `docs/plan/completed/repair-session-2026-09-04-orders.md` (rules: `docs/plan/completed/repair-session-2026-09-04-house-rules.md`; register: `docs/plan/completed/repair-session-2026-09-04-register.md`; roster: `docs/plan/completed/repair-session-2026-09-04-roster.md`) |
 
 The sprint's build closed on 2026-09-03,
 the beta-live e2e ran on 09-03/09-04, and every lane in the old table was `merged` or `ceremonied` —
@@ -139,7 +139,7 @@ are the index. The pre-truing text of both sections is archived verbatim in
   it whenever their own operator ceremonies run, and `DATABASE_URL` is checked by the code but is
   not a deployed secret. The 2026-09-04 posture block keeps its historical wording; these rows are
   the current state.
-- **NEW, from the 2026-09-04→05 repair session — the queue, in order:** **Q-01** DB-D, H-21 the
+- **NEW, from the 2026-09-04→05 repair session — the queue, in order:** (orders filed 2026-09-06 in `docs/plan/completed/repair-session-2026-09-04-orders.md`) **Q-01** DB-D, H-21 the
   onboarding interview's captures projection · **Q-02** the consent lane (裁-186, the firm-level
   DPA-stage declaration; re-shapes H-18) · **Q-03** DB-C, the wall-removal lane (裁-188 — every
   attestation ceremony and maker-checker wall out of the door bodies, receipts in) · **Q-04** L10
