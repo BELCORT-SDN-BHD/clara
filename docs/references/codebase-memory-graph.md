@@ -66,6 +66,9 @@ first use in a session):
 - **Re-index after big changes.** `index_repository` (optionally preceded by `detect_changes` /
   `index_status` to confirm it's actually needed) whenever a substantial code change lands — a
   stale index gives confidently wrong answers, which is worse than no index.
+- **CLI form** (needed when the running session's own MCP server holds the canonical graph's
+  database file, e.g. right after a server update): `codebase-memory-mcp cli index_repository
+  --repo-path <path> [--mode fast]` — flag arguments; raw-JSON argument passing is deprecated.
 - **Drill in with Read after, not instead.** The graph tells you *where*; use Read (or
   `get_code_snippet`) to see the actual code once the graph has pointed you at the right file and
   location. Don't stop at the graph's summary if the task needs the real source.

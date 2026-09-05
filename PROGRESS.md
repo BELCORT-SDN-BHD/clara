@@ -451,7 +451,6 @@ changed.**
   **The WSL `.vhdx` compaction is still owed** — **77.3 GB** on disk against **~9.5 GB** of actual distro content, `diskpart` → `compact vdisk` with WSL shut down, the owner's own act — and **the CI runner fleet is separately DECOMMISSIONED** (`docs/ops/ci-runner.md` "Decommissioned 2026-09-06"); WSL itself stays live for the DB test rigs and the Worker's Linux-only OpenNext build. **WSL idle-terminates without a Windows-side holder** — plant a detached keeper before the next port-dependent WSL work.
 - **`0154`'s cluster-wide role census, the CI half — CLOSED BY MEASUREMENT** (#525 derived the roster from `packages/db/deploy/roles-bootstrap.sql` and pinned it; four hosted sweeps came back 13/13 green including `closed-wave-drills`); **the record moved BYTE-FOR-BYTE** to [`progress-archive-2026-09-part3.md`](docs/plan/completed/progress-archive-2026-09-part3.md), md5 `eab73a1686b9f07c4812ca7495f460a9`. **The LIVE-cluster half stays open as H-47.**
 - **Two TRUED findings' pointer text (RISK 50, the Mail gate; the confirmation login-CSRF finding)** moved BYTE-FOR-BYTE at this truing to [`progress-archive-2026-09-part3.md`](docs/plan/completed/progress-archive-2026-09-part3.md), md5 `61f7233bf690c46e5b3cb43dceb55641`; the live obligations stay carried as **H-46** and **C-63**.
-- **`codebase-memory-mcp` is owed a re-index at the next session start.** Updated 0.8.1 → 0.10.8 on 2026-09-06 (official `install.ps1`, checksum-verified, `.mcp.json` unchanged); the canonical project `C-Users-zhant-Desktop-clara-rebuild` could not be re-indexed this session because the session's own still-running 0.8.1 server process holds its database file — run `index_repository` on it first next session, then `delete_project` on the throwaway proof project `clara-rebuild-v0108` (14 904 nodes / 57 038 edges) that the version check produced instead.
 
 ## Session log
 
@@ -485,7 +484,7 @@ lines, 7294 bytes, md5 `50f77696976ce97534407334231a8206` on both sides.)*
   (v1.2.3; six upstream-retired skills kept pending the owner's word); #567 killed the 0.28 % CLR10
   account-number fixture flake CI met on #566 (`f-a3pr3.mfA.pos`), with a 10 000-draw property cell;
   the host clean-up — runners decommissioned, docker pruned 25 GB, 60 worktrees removed,
-  codebase-memory-mcp 0.10.8.
+  codebase-memory-mcp 0.10.8, canonical graph rebuilt (39 970 nodes / 204 921 edges).
 
 ---
 
