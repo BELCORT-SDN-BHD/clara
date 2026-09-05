@@ -332,6 +332,26 @@ export const opk = (tag = "op") =>
 /** A valid 64-hex sha256 derived from a seed (documents CHECK: ^[0-9a-f]{64}$). */
 export const sha = (seed) => createHash("sha256").update(String(seed)).digest("hex");
 
+/**
+ * A bank-account-number fixture value that ALWAYS carries at least one digit, so it can never
+ * trip `clara._add_bank_account_core`'s CLR10 "account number % has no digits" wall
+ * (0155_client_identifiers_unique.sql:557 -- `v_digits := regexp_replace(v_number,'\D','','g');
+ * if btrim(v_digits) = '' then raise ... CLR10`) by pure chance.
+ *
+ * The flake this fixes: `${prefix}${randomUUID().slice(0, 6)}` draws six raw hex characters,
+ * which are all-letter -- no digit at all -- with probability (6/16)^6 ~= 0.28% whenever the
+ * prefix itself carries no digit (measured: f-a3pr3.mfA.pos, CI run 33985989527, prefix
+ * "MFAPOS"). Same shape (a prefix plus six hex-class characters, so the wall's accepted
+ * character set is unchanged), but the LAST character is forced to a decimal digit derived
+ * from the same random draw -- every value this returns satisfies the wall's predicate by
+ * construction, not by luck.
+ */
+export function acctNo(prefix = "") {
+  const hex = randomUUID().replace(/-/g, "").slice(0, 6);
+  const digit = (parseInt(hex[5], 16) % 10).toString();
+  return `${prefix}${hex.slice(0, 5)}${digit}`;
+}
+
 /** A balanced 2-leg entry: debit `cash` / credit `sales`, both = amount. */
 export function balanced(coa, amount, { desc = "rig" } = {}) {
   return [
