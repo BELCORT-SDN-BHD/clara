@@ -142,5 +142,135 @@ for whichever lane next has the file.
 
 ---
 
+## Errata — measured 2026-09-06 on `main` at `95441fe6`
+
+**Why this section exists.** The handover was written on 2026-09-04 and every row was true then. The
+repair session's PRs then merged and the 2026-09-05 ceremony deployed them, and a read-only
+per-item disposition pass on 2026-09-06 found that a handful of rows now carry a **wrong premise, a
+wrong cause, a wrong owner, a wrong anchor or a rejected prescription** — the kinds of error that
+send the next lane to fix the wrong thing. Each entry below quotes what the handover says, states
+what is true now, and names the line the correction was read at. **A correction is written here only
+where the current text was opened and read; the two claims that could not be reproduced say so.**
+The rows themselves are left standing — annotating them in place would make the handover disagree
+with its own dated record.
+
+**Causes and premises — a lane acting on the original text would fix the wrong thing.**
+
+- **H-04** (part 1, `:196`) — the handover prescribes *"Prompt / few-shot work on the classify
+  lane"*. **That is not the cause.** The ceremony measured the real one: the classify lane settles
+  **before** its OCR extraction is persisted (1.4 s, 3.1 s, 5.7 s and 5.8 s early on all four
+  documents that have ever run it, each with exactly one `ocr` extraction at `version_n` 1), and
+  `readExtractionText` requires `status='done'`, so the classifier is handed an **empty string** and
+  answers `other`. #558 sharpened the prompt against a cause that was not the cause, and 裁-199's
+  recall gate passed only because the baseline arm never reproduced the defect. **Fix the
+  dispatcher, not the prompt.** Evidence: ceremony as-run part 1 §5.1a; `PROGRESS.md` posture block
+  and the new P0 row.
+- **H-29** (part 2, `:42`) — the handover says *"the helper reads the wrong field"* and prescribes
+  *"Read the answered field"*. **The helper is faithful.** `0170`'s own header records the
+  measurement: `apps/web/lib/onboarding/coa.ts:89` maps the row's own key, the interview writes
+  `answer:{seed}` and the DB reads `i.answer->>'seed'`. The verdict is DB-computed, and its cause is
+  the state predicate in `clara.coa_chart_state`'s `dec` CTE at
+  `packages/db/migrations/0156_coa_apply_template.sql:1080-1088` (`p2.state = 'committed'`): while
+  onboarding is open the CTE returns no row and the CASE falls to `else 'undecided'` on a client who
+  HAS decided. 裁-193 settled what that should mean, so `0170` adds `seed_decision_plan_state`
+  rather than widening the read. **The web half — one sentence on the card saying "decided in the
+  interview, applies after commit" — is still owed.**
+- **C-10** (part 1, `:232`) — *"`livemode` is stored and never read"*. **The gate exists, at the
+  route.** `packages/runtime/lib/stripe-livemode.mjs` refuses a mode-mismatched event **before**
+  `record_stripe_event` and fails closed when `CLARA_STRIPE_LIVEMODE` is unset; shipped in #511
+  (`344f7ad8`, 2026-09-03), with #544 extending the key-class gate to the web arm. The stored COLUMN
+  stays deliberately unread, by that module's own stated design. **Only the stranded-payment clause
+  of C-10 carries.**
+- **C-11** (part 1, `:233`) — *"`assertTaskStreamAccess` runs once at open, so a removed member keeps
+  the live transcript"*. **False since before the handover was written.**
+  `packages/runtime/src/streamRoute.ts:64-88` re-runs `authenticate` + `assertTaskStreamAccess` in
+  the poll's own checkout and closes the stream with an explicit `revoked` event; the block's own
+  header dates it "B-M3 (security pass, 2026-09-02)" and it shipped in #511 (`344f7ad8`,
+  2026-09-03). **The row should be struck, not scheduled.**
+- **C-60** (part 2, `:283`) — *"two raw-superuser sites remain"*, naming the inline copy in
+  `fs7-v17-chatturn-db.test.mjs` and `cloneAmbientDatabase()` in `migrate-harness.mjs`. **Both were
+  converted by #498 (`d427059f`, 2026-09-03):** `packages/db/tests/migrate-harness.mjs:139-140` calls
+  `assertDestructiveAllowed()` as the function's first statement, and
+  `packages/runtime/tests/fs7-v17-chatturn-db.test.mjs:145-158` states in its own words that "no
+  local reimplementation remains in this file". The "ONE spelling" half of the row is done too.
+  **What honestly carries is the general sweep** — whether every `CREATE`/`DROP DATABASE`/`DROP ROLE`
+  under `packages/*/tests` routes through the guard, which needs a per-site read.
+- **C-74** (part 2 — **not part 3**, where an earlier index placed it; `:380` on `main`, `:383` on
+  this branch after the three pointer lines this PR inserts) — *"a `git grep 裁-110`
+  over `main` returns zero files"*. **裁-110 is authored**, at
+  [`mohe-grill-rulings-2026-09-02.md:15`](mohe-grill-rulings-2026-09-02.md) as
+  `裁-110 · RESERVED (recorded 2026-09-02 to close a silent numbering gap)`, merged in `33e94855`
+  (#503) two days before the handover was written. **The substance carries:** the cross-package
+  test-guard proposal itself is still unruled, which is what the row should now say.
+
+**Prescriptions that were tried and rejected — do not re-attempt them.**
+
+- **H-23** (part 2, `:38`) — the fix shape reads *"Reconcile the two, or name them differently on
+  screen"*. **The first arm is not executable.** #551 measured that the remaining divergences between
+  the Needs-you queue's census and the close gate's `uncoded_documents` census — the FY date range,
+  the join key and the reversal predicate — are **design, not drift**, and unifying them would
+  invalidate attestations already signed. **The naming arm was taken:** `apps/web/messages/en.json:103`
+  now reads `"Filing awaiting an entry"`, pinned by
+  `apps/web/components/firm/needs-you-row-facts.test.tsx:171`, whose assertion states the reason —
+  "the old label collided with the close gate's own `uncoded_documents` census, which counts only
+  FY-DATED filings". `en.json:2683` is still `"Uncoded filings"` on the gate's own side, which is
+  correct there. **Screen wording only; never reconcile the censuses.**
+- **H-33** (part 2, `:45`) — the fix shape reads *"Render it once"*. **Rejected, with the reason in
+  the source.** `apps/web/components/journals/interruptions-panel.tsx:146-156` records that the
+  workbench form and the rail's `ClarifyCard` are **two legitimate altitudes of ONE door**, not two
+  doors, and neither is suppressed; the accessible-name collision was fixed by making the workbench
+  copy say where it is while the rail keeps the short name. **What actually remains** (named at
+  `:157-164`, not silently left): **both submit buttons still read "Answer"**, so the duplicate
+  accessible-name class survives one control over. Renaming it reds
+  `apps/web/components/parts/clarify-card.test.tsx`, so it belongs to whoever owns both files at
+  once — a one-line follow-up, not a re-render.
+
+**Wrong owner, wrong anchor, wrong count.**
+
+- **The Worker's shape** (part 1, `:35-37`) — *"version **I** … deployed at 100 % and carrying six
+  secrets and three vars"*. **Both halves moved.** The variable count was **four**, read live at the
+  2026-09-05 ceremony: `CLARA_PUBLIC_ORIGINS`, `CLARA_RUNTIME_URL`, `CLARA_STRIPE_LIVEMODE` and
+  `CLARA_TRUSTED_CLIENT_IP_HEADER` (six secrets is right). And version **I** `c5b1e051…` was
+  **superseded at that ceremony by `90c1a5d0-f808-4b88-bd28-d2395d9bc26a` at 100 %**; `c5b1e051…` is
+  now the rollback target under 裁-156, not the serving version.
+- **H-38** (part 1, `:210`) — the owner column reads *"a runtime lane"*. **It is a WEB lane.** The
+  Checkout Session create lives at `apps/web/lib/checkout/stripe-session.ts`, where #544 landed the
+  fix (`:348-353`, setting `customer_email` only when present because Stripe 400s on an empty value).
+  The row is closed; the owner column would have misrouted it.
+- **C-25(a)** (part 2, `:100-101`) — anchors the vacuous-green uncoded gate at `0056:1397`. **The live
+  body moved.** `packages/db/migrations/0166_close_gate_codeable_population.sql:109` re-cut
+  `clara._close_gate_uncoded` for H-12 and **kept** the `financial_date between` predicate (`:125`),
+  so the NULL blindness is unchanged but the anchor and its sha pin are not. **C-25(c) — the
+  drawer-1 `tie` on an empty registry at `0056:962` — was NOT re-checked against `0167`**, which
+  re-cut drawer 2; re-scope it before building.
+- **C-35** (part 2, `:146-147`) — names the site `packages/runtime/lib/reconciler-documents.mjs:450`.
+  **The full-overwrite `writeTaskMeta` is at `:451`**, and there is a **second one at `:480`** on the
+  engine-lost requeue path that the row does not name. Both want the merging `mergeTaskMeta`.
+- **C-44** (part 2, `:200-201`) — quotes *"2 rendered `aria-invalid` sites"* against **70**
+  `confirmDisabled=` occurrences. **The `confirmDisabled=` count still measures 70.** The
+  `aria-invalid` count on `main` is **26 occurrences across 15 lines in 11 files** under `apps/web`
+  (`.tsx`/`.ts`/`.css`) — `grep -o … | wc -l` returns **26**, summing `grep -c` returns **15**,
+  because several lines carry the token more than once. **Most are Tailwind `aria-invalid:` state
+  variants inside the shadcn primitives, not rendered attributes**, so none of these numbers is the
+  "rendered sites" figure the row actually wants. **A first cut of this Errata reported 15
+  occurrences and called 26 unreproducible; that was a counting error — `grep -c` counts LINES, not
+  occurrences — and 26 was right.** The row's own advice applies to itself, and to its corrections:
+  count the file, never a line.
+
+**One prescription that points at a document nobody has written.**
+
+- **H-10 · H-14 · H-54** (part 2, `:34`, `:36` and `:52`) each prescribe writing something into a
+  **close or bank runbook**. **No such runbook exists:** `docs/ops/` holds 29 files today and
+  none of them is one (measured by listing the directory, 2026-09-06). The three should be merged
+  into a single deliverable — write one close/bank manual carrying the CLR19 mid-close settle
+  behaviour, the opening-seed remedy ceremony (`create_opening_seed` → `record_opening_target(s)` →
+  `draft_opening_item` → `approve_opening_seed`), and the fact that beginning a close FREEZES the
+  whole year.
+
+---
+
 *Written at the final clock-out truing, 2026-09-04, under 裁-185 and 裁-150. Every row names what was
-measured, and every row that says "not measured" means exactly that.*
+measured, and every row that says "not measured" means exactly that. **The Errata section above was
+added 2026-09-06** from the per-item disposition of the owner's flaws list, issue #541 and this
+handover's own rows; the four disposition records are filed verbatim under
+[`docs/plan/completed/`](../completed/report-disposition-2026-09-06-r3-handover-h.md).*

@@ -348,6 +348,113 @@ discarding the working-tree copy.
 invariant. It changes the FORM of an ask that constraint 14 and the working protocol already required,
 never its trigger. No separate ruling file — this entry is the text of record.
 
+### 裁-201 — deploy v75 with `classify_document`'s auto-accept gate UNCHANGED at 0.8 (owner, 2026-09-05 ≈22:20 MYT, `AskUserQuestion` option (b) of 3, **AGAINST the lead's recommendation**; dissent recorded, executed)
+
+**Filed 2026-09-06 at the disposition truing, because this ledger had no 裁-201 section.** The ruling
+was recorded only in the ceremony as-run
+([`runtime-deploy-2026-09-05-v75-and-db-0165-0176.md`](../../ops/runtime-deploy-2026-09-05-v75-and-db-0165-0176.md),
+§ at line 289) and in the session roster
+([`repair-session-2026-09-04-roster.md`](../completed/repair-session-2026-09-04-roster.md), line 151),
+so the ledger jumped 200 → 202 — the same silent numbering gap 裁-110 was reserved to close. **The
+roster's line is the fullest text of record and is quoted verbatim below; it governs on any
+divergence with this section's framing.**
+
+> **裁-201** (owner, 2026-09-05 ≈22:20 MYT, AskUserQuestion (b) of 3, after a 大白话 re-brief that the 0.8 gate is the DB's lock and the confidence number is the LLM's own self-report): deploy runtime v75 tonight with the auto-accept gate UNCHANGED at 0.8; the 裁-199 recall run proceeds on the four human-labelled documents (3 bank_statement + 1 invoice), denominator recorded first; a confident-and-wrong case still blocks the image. **AGAINST the lead's recommendation** (tighten to 0.95 until 20 human-labelled documents form a baseline, because #558's prompt instructs the model to self-report ≥0.85 — a self-graded score behind the DB's only lock). DISSENT recorded; executed. Mitigation kept: the as-run states "calibration unproven"; the baseline re-run is a Backlog row.
+
+**Amends** nothing. It sets the release condition for one image; the gate value itself is
+`clara.classify_document`'s and moving it needs a DB lane. The calibration remains **unproven** by
+the as-run's own words, and the baseline re-run carries as a Backlog row.
+
+### 裁-202 — the per-item disposition of the three opening reports: twenty decisions, ALL per recommendation; D-8 = 甲, D-10 deferred (owner, 2026-09-06 ≈02:20 MYT, 「全部按推荐，D-8 选甲，D-10 先延后」; recommendation followed)
+
+**Context.** The session opened on three documents and never went back to count them. They are ① the
+owner's own UIUX flaws file (36 items after splitting its compound lines), ② GitHub issue **#541**,
+the authenticated production e2e audit (**CB-AE2E-001…036**), and ③ the beta handover's own rows —
+**H-01…H-56** from the walk and the carried registry **C-01…C-88**. Four read-only opus lanes
+dispositioned every row **on `main` at `fc39c361`, 2026-09-06**, each verdict citing a line actually
+opened rather than a PR title. The evidence records are
+[`report-disposition-2026-09-06-r1-owner-flaws.md`](../completed/report-disposition-2026-09-06-r1-owner-flaws.md)
+· [`-r2-issue-541.md`](../completed/report-disposition-2026-09-06-r2-issue-541.md)
+· [`-r3-handover-h.md`](../completed/report-disposition-2026-09-06-r3-handover-h.md)
+· [`-r4-handover-c.md`](../completed/report-disposition-2026-09-06-r4-handover-c.md), and the sheet
+the owner ruled from is
+[`report-disposition-2026-09-06-decisions.md`](../completed/report-disposition-2026-09-06-decisions.md),
+all filed byte-verbatim between md5 markers.
+
+**The totals, which are the reason the sitting was worth holding.** Of the **128 walk-class rows**
+(the owner's 36, #541's 36, the handover's 56): **66 are FIXED and serving** since the 2026-09-05
+ceremony and **27 are PARTIAL**. Of the **88 C rows**: **3 closed**, **9 partial**, **59 carry**,
+**1 obsolete by ruling**, and **3 premises were already FALSE when the handover was written**.
+
+**The question.** Twenty decisions, each put with a recommendation and a cost. What closes, what the
+queue order is, what a defect's restated form is where its prescription was disproved, and which
+items are the owner's own to act on.
+
+**Ruled — all twenty per recommendation, with D-8 taking option 甲 and D-10 deferred.**
+
+- **D-1** — the **66 FIXED rows CLOSE**. Five carry "field re-verification owed" into D-20:
+  **H-02 · H-03 · H-05 · H-06 · CB-AE2E-004** — closed on CODE AND SHIPPING, never on a field re-proof.
+- **D-2** — the **classify/OCR ordering race is Q-00, ahead of everything.** The same lane fixes
+  #558's two harness-in-image defects: the Dockerfile's missing `COPY workflows/`, and the recall
+  script's bare `pg.Client` that never `SET ROLE`s.
+- **D-3** — **Q-01 (H-21, the interview captures projection) and Q-02 (裁-186's consent declaration)
+  are ONE lane in ONE D1 window**: both re-cut `commit_client_onboarding`.
+- **D-4** — **Q-03 (裁-188's wall removal) moves to directly after Q-00**, and
+  `firms.high_stakes_amount_cents` rides that migration — **deleted, or demoted to an advisory
+  number, never a new door.** The fact that forces it: the DB's high-stakes wall at
+  `packages/db/migrations/0037_wave_c_a_subledger.sql:1992` **outlives the control #550 removed**, so
+  an above-threshold approval refuses today with no surface on which to change the threshold.
+- **D-5** — **#541's exit-pack items JOURNAL-01 and CONSENT-01 are REWRITTEN** to 裁-187's and
+  裁-186's shapes before they can be graded. As written they are ungradeable: one demands a different
+  checker, which 裁-187 abolished; the other demands a per-client evidence chain, which 裁-186 replaced.
+- **D-6** — the **Terms sitting (Q-09 / CB-AE2E-001) is held THIS WEEK**, on its two questions: must
+  checkout require BOTH receipts, and may a Terms body carrying 27 lawyer markers be seeded. **The
+  DPA v2 draft goes to the lawyer NOW** (H-36). **The placeholder / `[verify]`-token DEPLOY GATE cell
+  (≈0.2) is built now, not held for the bytes** — the gate can land before the text it guards.
+- **D-7** — **five owner acts TODAY**: H-37 the Stripe checkout page copy · H-39 the duplicate webhook
+  endpoint · H-40 the two Supabase settings (`jwt_exp`, HIBP) · H-45 the Resend cap read back into the
+  checklist · H-46 the call on whether S21's Gmail code certifies 裁-146 point 3.
+- **D-8** — **"GI clock" = 甲**: an **FY-end countdown strip, no backend**, riding Q-02b (≈0.3).
+  **乙** — a statutory calendar needing seeds, a grant and the due-date oracle `0139` deliberately did
+  not ship — **becomes a pre-上市 row**. **丙** (an SST threshold clock) is not now.
+- **D-9** — **Q-10 / Q-11 / Q-12 stay after Q-00…Q-03.**
+- **D-10** — **chat export files: DEFERRED.** No lane. #549's honest copy — which says plainly that
+  this build has no way to request a sandbox export — stands as the product's answer.
+- **D-11** — **onboarding full-screen stays OPT-IN.** The reason recorded in the source at
+  `apps/web/components/firm/client-workspace-overview.tsx:77-79` stands: a forced redirect makes the
+  client's other eight tabs unreachable for the whole of onboarding.
+- **D-12** — **no new UI dependency**: no TanStack, no motion library.
+- **D-13** — **CSP enforcement by HASHES**, before the real-money switch. A new row, not C-07's
+  remainder-by-default: `unsafe-inline` would surrender half the value.
+- **D-14** — **the restore drill (C-14) runs FIRST, then the PITR decision (C-56).** Deciding whether
+  to buy point-in-time recovery before proving the existing backup restores is buying blind.
+- **D-15** — **Q-06 publishes ONE management template.** Statutory waits for the lawyer's wording.
+- **D-16** — **ONE close/bank handbook** (a docs row), folding **H-10 · H-13 · H-14 · H-54**, each of
+  which today prescribes writing into a runbook that does not exist.
+- **D-17** — **Q-02b, the "small faces" web lane, runs after Q-03**: the DPA signed-state hydrate
+  (CB-AE2E-007, over `get_own_dpa_signature`) · the OTP resend (CB-AE2E-006) · `/activity` rewired to
+  `clara.list_firm_timeline` (CB-AE2E-018) · the client AI-state readout over `client_egress_state` ·
+  the payer-identifier UI (H-09) · the sales-lane panel over the `0176` wrapper, with **F-02**
+  (H-19 / CB-AE2E-012) · the two now-false `en.json` strings and the `ClaraThreadMenu` archive control
+  that `0174` made buildable · and the FY-end strip from D-8.
+- **D-18** — **the two ORPHANED ROWS settle BY HAND at the next ceremony**, not by a lane.
+- **D-19** — **"card component and 其他东西" CLOSES UNNAMED.** Five lanes rewrote card surfaces this
+  session, so any disposition would be a guess about the referent. **It re-opens the moment the owner
+  names the card and the screen.**
+- **D-20** — **ONE field re-verification walk after Q-00**: a real Maybank/Alliance statement carried
+  through to reconciliation · a clean client finalized entirely through the UI with **no DB bridge**
+  (CB-AE2E-004) · one sales invoice re-run to see whether H-17's `tokens 0` residual survives v10.
+
+**THE RULED QUEUE ORDER — this is the operative line.**
+
+> **Q-00 → Q-03 → Q-01+Q-02 → Q-02b → Q-04 → Q-05 → Q-06 → Q-07 → Q-08 → Q-09 → Q-10 → Q-11 → Q-12**
+
+**What changes.** `PROGRESS.md`'s Backlog carries the order above and the new named rows (D-6's deploy
+gate cell, D-13's CSP hashes, D-14's drill-then-PITR, D-16's handbook, D-20's walk); its `## Next`
+stops saying the owner has yet to pick, because he has. **Amends** no standing law and mints no ADR:
+every decision is a queue or scope call inside rulings already made — 186, 187, 188, 192, 195, 196,
+197 — except D-5, which corrects an AUDIT's acceptance clauses to match rulings that post-date it.
+
 ---
 
 **What follows in this session, so the next reader can find it:** the unified defect register built from

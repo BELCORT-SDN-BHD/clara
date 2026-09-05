@@ -95,3 +95,33 @@ what did the re-reading find?"
 > overwriting a file you did not create now means `/grillwithdocs`, which puts the documents in front
 > of him with the question. The local checkout was restored to `main`'s identical text rather than
 > left dirty, because the codebase graph's project id is keyed by that path. Digest row 107.
+
+> **2026-09-05 ≈22:20 MYT — the v75 release gate (裁-201), FILED LATE on 2026-09-06.** Digest re-read
+> against the ruling; **it amends nothing and mints no ADR** under 裁-140 — the gate value belongs to
+> `clara.classify_document` and moving it needs a DB lane. **The reason this line is dated one day
+> after the ruling:** 裁-201 had been recorded only in the ceremony as-run and the session roster, so
+> the ledger [`mohe-grill-rulings-2026-09-04-pm.md`](../plan/active/mohe-grill-rulings-2026-09-04-pm.md)
+> and this digest both jumped 200 → 202 — the silent numbering gap 裁-110 exists to prevent, caught at
+> the 2026-09-06 disposition truing and closed with a ledger section quoting the roster's text of
+> record verbatim. Ruled: ship v75 with the auto-accept gate **at 0.8**, **against** the
+> recommendation to tighten to 0.95 until twenty human-labelled documents form a baseline. The reason
+> the recommendation existed is worth keeping: #558's prompt instructs the model to self-report
+> ≥ 0.85, so the number the gate compares against is **the model's own self-grade**, sitting behind
+> the database's only lock. Dissent recorded, executed, and the mitigation kept — the as-run says
+> "calibration unproven" and the baseline re-run is a Backlog row. Digest row 108.
+
+> **2026-09-06 ≈02:20 MYT — the disposition of the three opening reports (裁-202).** Digest re-read
+> against the ruling in
+> [`mohe-grill-rulings-2026-09-04-pm.md`](../plan/active/mohe-grill-rulings-2026-09-04-pm.md);
+> **no standing law moves and no ADR is minted** under 裁-140 — nineteen of the twenty decisions are
+> queue or scope calls inside rulings already made (186 · 187 · 188 · 192 · 195 · 196 · 197). **The
+> twentieth, D-5, is the one worth reading twice:** #541's exit-pack items JOURNAL-01 ("a different
+> checker approves") and CONSENT-01 (a per-client evidence chain) became **ungradeable** when 裁-187
+> abolished maker-checker and 裁-186 made consent a firm-level declaration — an audit's acceptance
+> clauses can be voided by a later ruling, and reporting "N of 16 pass" against the old text would be
+> measuring a product that no longer exists. Both are re-cut before they are graded again. The
+> census behind the sitting: four read-only lanes dispositioned all 216 rows on `main` at
+> `fc39c361` — **66 of 128 walk-class rows FIXED and serving, 27 partial; of 88 C rows, 3 closed and
+> THREE premises already false when the handover was written.** The ruled queue is **Q-00 → Q-03 →
+> Q-01+Q-02 → Q-02b → Q-04 → Q-05 → Q-06 → Q-07 → Q-08 → Q-09 → Q-10 → Q-11 → Q-12**, with the
+> classify/OCR ordering race ahead of everything. Digest row 109.
