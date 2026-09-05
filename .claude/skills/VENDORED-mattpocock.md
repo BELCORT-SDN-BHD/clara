@@ -13,9 +13,9 @@ own history. Upstream also documents two non-vendored install paths this repo do
 
 | Local | Upstream | Why renamed |
 |---|---|---|
-| `code-reviewbymatt` | `engineering/code-review` | avoids colliding with Claude Code's built-in `/code-review` |
-| `writing-great-skills` | `productivity/writing-for-agents` | upstream did a clean rename (2026-07-23, no alias); we kept the old local folder name — see "Open decision" below |
-| everything else (31 skills) | same leaf name, `engineering/` `in-progress/` `misc/` or `productivity/` | 1:1 |
+| `code-reviewbymatt` | `engineering/code-review` | avoids colliding with Claude Code's built-in `/code-review`; the SKILL.md `name:` line is the ONLY deviation from upstream HEAD anywhere in the skill — `agents/openai.yaml` (Codex `display_name`) is byte-exact to upstream's "Code Review" by owner ruling (2026-09-06 fold) |
+| `writing-for-agents` | `productivity/writing-for-agents` | 1:1 as of 2026-09-06 — was vendored as `writing-great-skills` until then (upstream's own clean rename from `writing-great-skills`, 2026-07-23); the owner ruled to adopt the upstream name outright since a repo-wide grep found zero references to the old local folder name |
+| everything else (30 skills) | same leaf name, `engineering/` `in-progress/` `misc/` or `productivity/` | 1:1 |
 
 ## Vendored per upstream bucket (37 dirs upstream; 33 mapped to local + 4 net-new)
 
@@ -28,30 +28,33 @@ own history. Upstream also documents two non-vendored install paths this repo do
 - **misc** (4/4 mapped): git-guardrails-claude-code, migrate-to-shoehorn, scaffold-exercises,
   setup-pre-commit
 - **productivity** (5/7 mapped, 2 added): grill-me, grilling, handoff, teach,
-  writing-for-agents→writing-great-skills — **added**: `to-questionnaire`, `wait-what`
+  writing-for-agents — **added**: `to-questionnaire`, `wait-what`
 
-## Local-only skills (upstream retired them; kept here, owner to rule on deleting)
+## Local-only skills (upstream retired them; owner ruled 2026-09-06: kept for now)
 
 All six came from one upstream commit, `c66bdee` (2026-08-05, "remove six unused skills and
-the personal bucket"), none were ever in the Claude Code plugin:
+the personal bucket"), none were ever in the Claude Code plugin. Two are still cited by name
+in this repo's own historical plan docs, so deleting them would orphan those references:
 
-- `design-an-interface` → absorbed by `codebase-design` (ships as `DESIGN-IT-TWICE.md`)
-- `qa` → absorbed by `triage` + `to-tickets`
+- `design-an-interface` → absorbed by `codebase-design` (ships as `DESIGN-IT-TWICE.md`);
+  cited in `docs/plan/active/fe-train-plan-2026-08-30-orders-p4.md:106` and
+  `docs/plan/active/frontend-sprint-handoff-2026-08-31.md:268`
+- `qa` → absorbed by `triage` + `to-tickets`; cited in
+  `docs/plan/active/frontend-sprint-handoff-2026-08-31.md:269`
 - `request-refactor-plan` → absorbed by `to-spec` + `improve-codebase-architecture`
 - `ubiquitous-language` → absorbed by `domain-modeling`
 - `edit-article`, `obsidian-vault` → personal to Matt (the latter hardcoded his own vault path); deleted with the `personal/` bucket, not absorbed anywhere
 
-## Open decision for the lead
+## Resolved decisions (fold, 2026-09-06)
 
-The work order's own ADD list named `productivity/writing-for-agents` as a skill to add,
-but its top-of-brief name map already identifies `writing-great-skills` AS
-`writing-for-agents` (renamed upstream). Treating both instructions literally would mean
-carrying a stale pre-rename copy AND a new one side by side. This PR follows the identity
-mapping: `writing-great-skills/` was updated in place with `writing-for-agents`' HEAD content
-(GLOSSARY.md removed — merged into SKILL.md upstream; SKILL-MECHANICS.md added), keeping the
-local folder name and, like `code-reviewbymatt`, deviating only on the SKILL.md `name:` line.
-No separate `writing-for-agents/` folder was created. Flag if a second, upstream-named copy
-was actually wanted.
+1. `code-reviewbymatt/agents/openai.yaml` stays byte-exact to upstream ("Code Review"); the
+   local branding lives only in the folder name and the SKILL.md `name:` line.
+2. `writing-great-skills/` renamed to `writing-for-agents/` (folder + SKILL.md `name:`),
+   adopting the upstream name outright — no duplicate folder.
+3. The six upstream-retired skills stay; deletion is the owner's call, not this vendoring's.
+4. `AGENTS.md` now carries the `## Agent skills` block (its last section) and
+   `docs/agents/issue-tracker.md` carries upstream's "Wayfinding operations" section for
+   `/wayfinder` — see the PR body for both blocks verbatim.
 
 ## Non-mattpocock skills sharing `.claude/skills/`
 
@@ -69,3 +72,9 @@ orchestrator-fable — untouched by this vendoring.
    never overwrite a locally-modified file.
 4. Add any upstream skill dir missing locally, flat, byte-exact.
 5. Re-run the gates below; `git status --short` should show only `.claude/skills/**`.
+
+**Not covered by this vendoring:** the repo-root `skills-lock.json` / `scripts/gen-skills-lock.mjs`
+provenance lock (covers all of `.claude/skills/`, mattpocock and non-mattpocock alike) is not
+wired into `pnpm lint`, `package.json`, or any CI workflow, and its checksums already predate
+this PR's changes. Flagged for the lead; not regenerated here since it is out of this task's
+scope and the tool's own header says it is a manual, opt-in step.
