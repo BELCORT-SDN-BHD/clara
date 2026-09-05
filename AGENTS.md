@@ -92,7 +92,7 @@ leaked credential, a stranded run, a cross-tenant read. Everything else is judge
 | Product law: what/why/scope, and the invariants that bind every feature | `docs/product/PRD.md` (**§6 is LAW**) |
 | The bar the work is judged against, before you call something done | `docs/product/EVALUATION_RUBRIC.md` |
 | Target architecture: event spine, the four structural invariants, runtime, reporting | `docs/ARCHITECTURE.md` (Appendix A = workflow versioning) |
-| Why something is the way it is — decisions and the standing laws they minted | `docs/adr/README.md` (the digest + its dated log, `docs/adr/README-log.md`) — **read the digest first**; drill to the ADR only if the digest is thin. **§15's per-ruling sprint rows moved to `docs/adr/README-rulings-2026-09.md` on 2026-09-03** at the digest's 500-line ceiling: the digest keeps the LAW, the sibling holds the rows (裁-111…185, the launch night’s 151…185 as items 92–97), and every new row is written there |
+| Why something is the way it is — decisions and the standing laws they minted | `docs/adr/README.md` (the digest + its dated log, `docs/adr/README-log.md`) — **read the digest first**; drill to the ADR only if the digest is thin. **§15's per-ruling sprint rows moved to `docs/adr/README-rulings-2026-09.md` on 2026-09-03** at the digest's 500-line ceiling: the digest keeps the LAW, the sibling holds the rows (裁-111…197, the launch night’s 151…185 as items 92–97 and the repair session's 186…197 as items 98–104), and every new row is written there |
 | Where the work stands: posture, lanes, next, backlog, known issues | `PROGRESS.md` |
 | A wave or slice plan, contract, design doc, or acceptance record | `docs/plan/index.md` and `docs/plan/` (keep new documents correctly filed under `docs/plan/active/`/`docs/plan/completed/` per the index's own path-stability convention) |
 | Design direction: the two-pane Agentic OS and typed `parts[]`; the live card-reader catalog | `docs/design/`; `apps/web/lib/parts/catalog.ts` + `apps/web/lib/parts/types.ts` |
@@ -115,7 +115,7 @@ leaked credential, a stranded run, a cross-tenant read. Everything else is judge
 orchestrator — plan, delegate, synthesize, verify, own the state; **the session's opening document is
 `docs/plan/active/beta-handover-2026-09-04.md` (+ its part 2) — beta went LIVE, CLOSED, on 2026-09-04
 under 裁-185, and 裁-150 closed that session: the repo is the handover and no lane runs until the
-owner asks. The owner asked on 2026-09-04 ≈09:00: the repair session is OPEN (裁-186…190,
+owner asks. The owner asked on 2026-09-04 ≈09:00: the repair session is OPEN (裁-186…197,
 `docs/plan/active/mohe-grill-rulings-2026-09-04-pm.md`).** The sprint's own opening document,
 `docs/plan/active/frontend-sprint-handoff-2026-08-31.md` (+ its orders), is now history. **Lanes by
 fit (裁-85, 2026-08-31):** the most effective, suitable and economical model that does not
@@ -138,8 +138,8 @@ opus-5 xhigh for builds where judgement, security or ambiguity dominate, and for
 Fable orchestrates.** Speed is the point — no capacity outages, no resume rounds. Inspect every
 result before accepting it. *Codex lane, for when it resumes — learned the hard way:* the
 `codex:rescue` companion queue is unreliable (it has stalled for hours at "starting") — prefer a
-direct `codex exec` via Bash, backgrounded with a file-watcher on the output. Ledger: `docs/plan/active/mohe-grill-rulings-2026-09-04-pm.md` (**the NEWEST — 裁-186…190, the repair
-session's opening**; 裁-151…185, the launch night, are the tenth ledger
+direct `codex exec` via Bash, backgrounded with a file-watcher on the output. Ledger: `docs/plan/active/mohe-grill-rulings-2026-09-04-pm.md` (**the NEWEST — 裁-186…197, the repair
+session: its opening, its midday, and the small hours of 2026-09-05**; 裁-151…185, the launch night, are the tenth ledger
 `docs/plan/active/mohe-grill-rulings-2026-09-04.md`; the chain
 runs `-08-31` → `-09-01` → `-09-01-pm` → `-09-02` → `-09-02-pm` → `-09-03` → `-09-04` → `-09-04-pm`, the earlier
 files carrying the session state bridges, and each file continuing at the previous one's 500-line
