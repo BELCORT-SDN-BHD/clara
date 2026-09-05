@@ -11,7 +11,7 @@ This repo **vendors** Matt Pocock's skill pack (git-tracked under `.claude/skill
 |---|---|---|
 | `code-reviewbymatt` | `engineering/code-review` | avoids colliding with Claude Code's built-in `/code-review`; the SKILL.md `name:` line is the ONLY deviation from upstream HEAD anywhere in the skill — `agents/openai.yaml` (Codex `display_name`) is byte-exact to upstream's "Code Review" by owner ruling (2026-09-06 fold) |
 | `writing-for-agents` | `productivity/writing-for-agents` | 1:1 as of 2026-09-06 — was vendored as `writing-great-skills` until then (upstream's own clean rename from `writing-great-skills`, 2026-07-23); the owner ruled to adopt the upstream name outright since a repo-wide grep found zero references to the old local folder name |
-| everything else (30 skills) | same leaf name, `engineering/` `in-progress/` `misc/` or `productivity/` | 1:1 |
+| everything else (35 skills — 43 mattpocock-origin, less 6 retired-upstream, less these 2 renamed) | same leaf name, `engineering/` `in-progress/` `misc/` or `productivity/` | 1:1 |
 
 ## Vendored per upstream bucket (37 dirs upstream; 33 mapped to local + 4 net-new)
 
