@@ -132,8 +132,10 @@ are the index. The pre-truing text of both sections is archived verbatim in
   surfaced on `/ready` under `checks.pools` at `packages/runtime/lib/health.mjs:361-372`) · the TLS
   boot assert (`packages/runtime/lib/tls-ca.mjs`) · the build-info route
   `apps/web/app/api/build-info/route.ts` · the
-  classify recall harness (`packages/runtime/scripts/measure-classify-recall.mjs`). **H-48 is closed
-  by code and opens for real at the v75 deploy.** **H-43's remainder is the ceremony in
+  classify recall harness (`packages/runtime/scripts/measure-classify-recall.mjs`). **H-48 was
+  closed by code and OPENED FOR REAL at the v75 deploy on 2026-09-05: `/ready` serves `checks.pools`
+  with all seven lanes** (measured 2026-09-06 on `main` at `95441fe6`; the sentence here read
+  "opens for real at the v75 deploy" until this truing). **H-43's remainder is the ceremony in
   [`runtime-tls-verify-full-ceremony.md`](docs/ops/runtime-tls-verify-full-ceremony.md): flip the
   FIVE runtime DSN secrets that take the pin in that ceremony to `verify-full`** — three more take
   it whenever their own operator ceremonies run, and `DATABASE_URL` is checked by the code but is
@@ -184,16 +186,22 @@ are the index. The pre-truing text of both sections is archived verbatim in
   worth a line in `docs/ops/dsn-bridge.md`. **Lesson for the register: an ops script that ships in an
   image must be PROVEN INSIDE THAT IMAGE before its PR merges;** #558's review verified the harness
   on the dev host only.
-- **P0 — before the first EXTERNAL applicant, handover §C.1:** ~~H-01 the v71↔DB skew~~
-  **CLOSED by the v75 deploy, 2026-09-05.** · **C-07 the XML `blob:` open with no MIME
-  gate and no CSP (裁-175)** · H-02 Maybank headers state no period bounds · H-03 the
-  witness→`bank_institutions` code normalisation · H-05 the stranded `statement_facts` task ·
-  H-06 the "Enter a statement" form omits the institution/account PAIR · H-17 `autoDraft_v9`'s masked
-  CLR23 · H-18 the client-consent grant has no web surface · H-35 no link to /auth/confirm ·
-  H-36 the DPA v1 placeholder · H-37 ruling numbers on the Stripe checkout page · H-42 the two
-  unrotated role passwords (裁-178, accepted risk) · H-43 verify-full TLS on the six lane DSNs
-  (裁-179) · H-47 a live re-migration flips ceremonied roles to NOLOGIN and `0154`'s absolute role
-  census blocks it · ~~H-48 no per-lane DSN probe at boot~~ **CLOSED — `/ready` serves
+- **P0 — before the first EXTERNAL applicant, handover §C.1** (struck rows measured 2026-09-06 on
+  `main` at `95441fe6`)**:** ~~H-01 the v71↔DB skew~~ **CLOSED by the v75 deploy, 2026-09-05** ·
+  ~~C-07 the XML `blob:` open with no MIME gate~~ **CLOSED by #555, serving 2026-09-05** — what
+  remains is a NEW row: flipping the CSP from report-only to enforcing (11 violations measured, all
+  Next's own inline script and style), which needs a hashes-or-`unsafe-inline` decision ·
+  ~~H-02 Maybank headers state no period bounds~~ · ~~H-03 the witness→`bank_institutions` code
+  normalisation~~ · ~~H-05 the stranded `statement_facts` task~~ **all three CLOSED by #545, serving
+  2026-09-05** (H-05's ONE 2026-09-04 orphan row still needs settling by hand — see ORPHANED ROWS
+  (ii) below) · ~~H-06 the "Enter a statement" form omits the institution/account PAIR~~ **CLOSED by
+  #549, serving 2026-09-05** · ~~H-17 `autoDraft_v9`'s masked CLR23~~ **CLOSED by #556 + `0176`, serving 2026-09-05, with an unexplained `tokens 0` residual** (Known issues) ·
+  **H-18 the client-consent grant has no web surface — the FACT stands, the PRESCRIPTION is now 裁-186's** (Known issues; **Q-02**) ·
+  ~~H-35 no link to /auth/confirm~~ **CLOSED by #544, serving 2026-09-05** · H-36 the DPA v1
+  placeholder · H-37 ruling numbers on the Stripe checkout page · H-42 the two unrotated role
+  passwords (裁-178, accepted risk) · H-43 verify-full TLS on the six lane DSNs (裁-179) · H-47 a
+  live re-migration flips ceremonied roles to NOLOGIN and `0154`'s absolute role census blocks it ·
+  ~~H-48 no per-lane DSN probe at boot~~ **CLOSED — `/ready` serves
   `checks.pools` with seven lanes since v75.**
 - **`apps/web/README.md` is 514 lines — already over the 500-line write hook**, so the routine
   Worker redeploy runbook the ceremony earned could NOT be folded into it as planned. It landed as
@@ -217,28 +225,48 @@ are the index. The pre-truing text of both sections is archived verbatim in
   `2026-09-04 00:28:20` UTC while its workflow run `wrun_01M1MX20K6TCVBN000G2SJN7M6` reads `failed`
   twelve seconds later — **an orphan of H-03 itself**, the settlement-on-step-failure defect #545
   fixes. Settle by hand or by the stranded-requeue path.
-- **P1 — before 上市, the walk's own rows, handover §C.2:** H-04 the classifier does not recognise
-  bank statements · H-07/H-08 the close-prep chat lane cannot read a close run, and says the wrong
-  reason · H-09 the payer-identifier refusal has no UI to satisfy it · H-11 no "Begin close" after an
-  abandon · H-12 `uncoded_documents` false-fails on a filed statement · H-15/H-16 zero report
-  templates and a chat export tool that does not exist · H-19/H-20 `set_sales_lane_activation` and
-  `add_client_identifier` have no surface · H-21 **the interview's captures are never projected** ·
-  H-26/H-27 `[object Object]` and raw capture JSON on screen · H-30 the apply-chart dialog cannot be
-  scrolled to its button · H-38 checkout does not carry the applicant's email · H-39 a duplicate
-  Stripe webhook endpoint · H-40 two undecided Supabase auth settings ·
-  H-45 the Resend cap was never read · H-46 the Mail gate is not formally certified · H-49 DR probe
-  `4.9` is UNPROVEN IN THE FIELD (裁-172).
+- **P1 — before 上市, the walk's own rows, handover §C.2** (measured 2026-09-06 on `main` at
+  `95441fe6`; **H-11 · H-12 · H-16 · H-26 · H-27 · H-30 · H-38 left this line — all seven are CLOSED
+  and serving since 2026-09-05**: H-11 and H-16 by #549, H-12 by `0165`+`0166`, H-26 · H-27 · H-30 by
+  #546, H-38 by #544)**:** **H-04 the classifier does not recognise bank statements — RESTATED: the
+  cause is the classify/OCR ordering race**, not the prompt, so the prescription is the dispatcher
+  gate below and NOT another prompt pass · H-07/H-08 the close-prep chat lane cannot read a close
+  run, and says the wrong reason · **H-09 the payer-identifier DOOR IS BUILT and its FACE is not** —
+  `0174:785` mints `clara.set_counterparty_identifiers` (granted `:855`) to record or clear the
+  registration number and TIN on an EXISTING counterparty, while `apps/web` has zero call sites for
+  it and no copy explaining the refusal · **H-15 zero report
+  templates** (`packages/db/seeds/` holds only the smoke and core seeds; the structural blocker is the
+  publisher/renderer manifest disagreement) · **H-19 the sales-lane REGISTRY IS BUILT and its FACE is
+  not** — `0176:327` mints the owner-floored `set_firm_sales_lane_activation` wrapper (granted
+  `:369`) taking the firm from `_human_ctx`, and no `apps/web` surface calls it ·
+  H-20 `add_client_identifier` has no surface · H-21 **the interview's captures are never
+  projected** · H-39 a duplicate Stripe webhook endpoint · H-40 two undecided Supabase auth
+  settings · H-45 the Resend cap was never read · H-46 the Mail gate is not formally certified ·
+  **H-49 the DR canary REGISTRY IS BUILT and the SCRIPT still hard-codes the ids** — `0174:928` creates `clara.dr_canary_subjects` (no UI, by ruling) while
+  `packages/db/scripts/dr-verify-checks.mjs:399,:415` still carries the two id prefixes and no
+  ceremony has seeded a row; probe `4.9` stays UNPROVEN IN THE FIELD (裁-172).
 - **P1 — already ruled before the launch night, handover §C.1's second table:** C-01 the pre-上市
   roadmap · C-02 the billing tier tranche + the AI usage ledger (AI is UNMETERED in beta) ·
-  C-03 the C-2 operator screen (裁-147) · C-04 the pool error contract (裁-149) · C-05 G1 PR-2
+  C-03 the C-2 operator screen (裁-147) · ~~C-04 the pool error contract (裁-149)~~ **CLOSED by #558, serving 2026-09-05** —
+  `packages/runtime/lib/pool-error-contract.mjs` + the contract at `docs/ARCHITECTURE.md` §4.3; 裁-149's clause 2 corrected by erratum in #559 · C-05 G1 PR-2
   (裁-165) · C-06 the beta Terms of Service (裁-129/166) · C-08 the ten 裁-176 ports and fixes · C-09 the checkout/webhook follow-ups ·
-  C-10 `livemode` stored-never-read and the stranded-payment path · C-11 SSE re-authorisation ·
+  **C-10 — ONLY THE STRANDED-PAYMENT CLAUSE CARRIES.** Its `livemode`-stored-never-read half is a stale premise: `packages/runtime/lib/stripe-livemode.mjs` refuses a mode-mismatched event BEFORE
+  `record_stripe_event` and fails closed when the mode is unset (#511, 2026-09-03; #544 extends the
+  key-class gate to the web arm). The stored COLUMN stays deliberately unread, by design ·
+  ~~C-11 SSE re-authorisation~~ **its premise was FALSE when the row was written** —
+  `packages/runtime/src/streamRoute.ts:64-88` re-runs `authenticate` + `assertTaskStreamAccess`
+  inside the poll's own checkout and closes with an explicit `revoked` event; #511 (`344f7ad8`,
+  2026-09-03) ·
   C-12 `/ready`'s hard storage gate (裁-61) · C-13 the archived backend queue (裁-123) · C-14 the
   overdue R2 restore drill (裁-163) · C-15 the bigint wire boundary (裁-71⑨) · C-16 single-machine Fly
   with no HA and no external alerting.
-- **P2 — hygiene, handover part 2 §C.3 · §C.4 and part 3:** **22** web/product nits from the walk
-  (H-10 · H-13 · H-14 · H-22 … H-34 · **H-44, the `held_outbox` 6 now read and explained as 裁-165's
-  disabled-source counter** · H-50 … H-56) · the full CARRIED registry **C-17 … C-88**
+- **P2 — hygiene, handover part 2 §C.3 · §C.4 and part 3:** **22** web/product nits from the walk,
+  of which **12 are CLOSED and serving** (measured 2026-09-06 on `main` at `95441fe6`) — H-22 ·
+  H-24 · H-25 · H-28 · H-31 · H-32 · H-34 · H-50 · H-51 · H-53 · H-55 · H-56 — **and 10 are open:**
+  H-10 · H-13 · H-14 · H-23 · H-29 · H-33 · H-52 · H-54 (open or partial; **H-23 and H-33 carry
+  REJECTED prescriptions — read the part-3 Errata before acting**) · H-41 (the owner's own, 裁-168) ·
+  **H-44, the `held_outbox` 6, explained as 裁-165's disabled-source counter, rides C-05** · the full
+  CARRIED registry **C-17 … C-88**
   (database, runtime, frontend, reporting/close/tax, ops/DR/security, harness/CI — **C-77 … C-88 are
   twelve rows in part 3 that carry the fourteen a fresh-context review found missing from the first
   cut — ten as rows, four as named dispositions**) ·
@@ -254,12 +282,19 @@ are the index. The pre-truing text of both sections is archived verbatim in
 
 Same index rule: the detail is in the handover. What a reader most needs to know today:
 
-**New this session (2026-09-04→05), each measured on `main` at `5007bbcc`:**
+**From the 2026-09-04→05 session. The rows below were first measured on `main` at `5007bbcc`; each
+one still standing was RE-MEASURED on `main` at `95441fe6` on 2026-09-06 and says so where it
+changed.**
 
-- **NOTHING THE SESSION BUILT IS SERVING.** Fifteen PRs are on `main` and the deploy ceremonies have
-  not run. The single ordering hazard that can break production: **`0174` adds
-  `clara.chat_sessions.archived_at`, and `apps/web` already ships readers for it** — promote the
-  Worker before the DB ceremony and every chat session list returns 500.
+- **EVERYTHING THE SESSION BUILT IS SERVING** (measured 2026-09-06 on `main` at `95441fe6`; the
+  earlier "NOTHING THE SESSION BUILT IS SERVING" text was true when written and is now false).
+  Every code PR through **#559** and **#561** is inside `0351f022` and reached a user at the
+  2026-09-05 ceremony: runtime **v75** (`img_wd57v5d3lej9p38o`), web Worker **`90c1a5d0…`**, DB
+  frontier **171 / `0176`**. **#560 landed after the Worker build and is e2e-only**, so it changes
+  no serving byte. **The `0174`/`archived_at` ordering hazard is PAST** — the ceremony applied the DB
+  first — and its reader was never `apps/web`: the SELECT naming the column is the RUNTIME's, at
+  `packages/runtime/src/chatRoutes.ts:178` (deploy-ordering note at `:168`); on `apps/web` the column
+  appears only in comments and one message string.
 - **No door can close an open question whose document filing was RETIRED** (review-551 on #551).
   `retire_document_filing` never touches `open_questions`, and both `resolve` and
   `dismiss_open_question` are walled by `_active_document_filing`; `0169` now makes the same orphan
@@ -317,16 +352,57 @@ Same index rule: the detail is in the handover. What a reader most needs to know
   The comment undercounts because it filtered by route path and the five workbenches live under the
   components tree.
 
-- **The serving image and the schema disagree** (H-01) — `reconcile_autopost_rules` is called by v71
-  and defined nowhere; the autopost reconcile belt is dead and the log storms every ~2 s. **A new
-  image, v75 or later — v72–v74 are the night's secrets-import releases on the v71 image.**
-- **Bank statements cannot be ingested by either AI path** (H-02 · H-03 · H-04 · H-05), and **the
-  human "Enter a statement" form has never been reachable** (H-06). A firm can get a statement in
-  only through the DB door today.
-- **The unattended coder refuses every sales invoice** with a masked CLR23 and opens a human question
-  no answer can satisfy (H-17). The CHAT path codes the same document correctly.
-- **A firm cannot enable AI processing for a client through the product** (H-18) — the grant and the
-  per-purpose activation are dark doors.
+**New at the 2026-09-06 disposition truing, both measured on `main` at `95441fe6`:**
+
+- **THE DB'S HIGH-STAKES WALL SURVIVED THE REMOVAL OF THE UI CONTROL THAT CONFIGURED IT.**
+  `_approve_entry_core`'s segregation rungs still stand at
+  `packages/db/migrations/0037_wave_c_a_subledger.sql:1992` and **no migration in `0165`…`0176` names
+  `high_stakes` at all** (grepped, zero files), while #550 deleted the Change-threshold control
+  outright under 裁-187, its own cells now pinning the absence
+  (`apps/web/components/firm-admin/firm-admin-pages-a11y.test.tsx:253`). So an above-threshold
+  approval still refuses and **there is no surface left on which to change the threshold.**
+  **UNMEASURED: whether any live firm carries a non-zero `high_stakes_amount_cents`** — the bridge
+  sleeper was destroyed at the ceremony's teardown, so no live read was taken. At zero the dead angle
+  is theoretical; above it, that firm cannot approve. Disposition is the owner's (**Q-03**, 裁-188):
+  delete the field or demote it to an advisory number.
+- **THREE IN-TREE CLAIMS WENT FALSE WHEN `0174` APPLIED, and two of them are USER-FACING copy.**
+  (i) `apps/web/components/clara/ClaraThreadMenu.tsx:23` still tells a reader "the table has no
+  `archived_at`" — `0174:578` added the column and `0174:650` mints `clara.archive_chat_session`
+  (granted `:684`), so **the archive control is buildable and simply unbuilt.** (ii)
+  `apps/web/app/(firm)/activity/page.tsx:26-32` still comments that the firm-wide timeline read "is
+  a DATABASE gap" — `clara.list_firm_timeline` exists at `0174:453`, granted `:513`, and Firm Home
+  renders it through `apps/web/lib/firm/timeline.ts`. (iii) The two `en.json` strings asserting those
+  absences — `:260` `timelineNotBuilt` and `:475` `archiveNote` — are now **factually wrong on a beta
+  user's screen**, telling them the product lacks what it has. **Route:** the copy sweep (**Q-05**)
+  or whichever web lane next opens those files; the two strings should not wait for the sweep's turn.
+
+- ~~**The serving image and the schema disagree** (H-01)~~ — **CLOSED, and the storm is MEASURED
+  STOPPED, not inferred stopped.** The acceptance clause ("ten minutes of log without the retired
+  function") was taken 2026-09-05 over a **48 m 30 s** window (17:08:15Z→17:56:45Z) on machine
+  `48ee715b763048`: **100 lines, every one the 30-second `WIKI_PROJECTION dormant` heartbeat** — so
+  100 is the window's true content, not a truncation cap — with `reconcile_autopost_rules` matched
+  **0**, `does not exist` **0**, errors and warnings **0**. On `main` the retired name survives only
+  in comments, plus a regression guard that reds if a caller ever returns.
+- **Only H-04 now stands among the bank-statement rows, and its CAUSE HAS CHANGED.** H-02 · H-03 ·
+  H-05 (#545) and H-06 (#549) are closed and serving since 2026-09-05, so the human "Enter a
+  statement" form is reachable and the hand-key path works. What still breaks the AI path is the
+  **classify/OCR ordering race** (the new P0 above), not a prompt and not the header parser. Two
+  provisos: no real Malaysian statement has been re-run on v75, so these four are closed on CODE AND
+  SHIPPING, not on a field re-proof; and one 2026-09-04 `statement_facts` task is still stranded
+  `running` (ORPHANED ROWS (ii)).
+- ~~**The unattended coder refuses every sales invoice**~~ — **CLOSED by #556 + `0176`, serving
+  2026-09-05.** `autoDraft_v10` maps 23505 by exact constraint name instead of a substring and the
+  alias unique is kind-scoped, so a collision no longer surfaces as an unanswerable CLR23. **The
+  residual is real and unqueued:** #556 states the walk's `error_code internal` / `tokens 0` shape —
+  the model never called at all — is NOT explained by v10. Re-run one sales invoice; if the shape
+  survives it is a new defect, not this one.
+- **A firm still cannot enable AI processing for a client through the product** (H-18) — **the FACT
+  stands, the PRESCRIPTION does not.** Measured 2026-09-06: `apps/web` has **zero call sites** for
+  any egress verb, while the READ door `clara.client_egress_state` is live and granted (`0174:271`,
+  `:366`). The old fix shape — a per-client grant plus per-purpose activation — was **replaced by
+  裁-186 / ADR-0078**: consent is ONE firm-level declaration signed at the DPA stage, and the
+  onboarding commit auto-mints each client's consent citing it. Build that declaration plus a
+  per-client state readout (**Q-02**), never the per-client button.
 - **The onboarding interview's captures never reach the database** (H-21) — no `client_identifiers`,
   no `client_facts`, no `clients.fy_end_month`, no `bank_accounts`. Four separate symptoms, one cause.
 - **Two role passwords sit unrotated in this session's transcript** by ruling (H-42, 裁-178), and
@@ -390,58 +466,27 @@ it. **At the 2026-09-05 repair-session clock-out the beta-live posture block mov
 [`progress-archive-2026-09-part1.md`](docs/plan/completed/progress-archive-2026-09-part1.md)** — 80
 lines, 7294 bytes, md5 `50f77696976ce97534407334231a8206` on both sides.)*
 
-- **2026-09-04→05 — THE REPAIR SESSION: EIGHTEEN PRs, TWELVE RULINGS, NOTHING DEPLOYED.** The owner
-  opened it at ≈09:00 MYT on 2026-09-04 with three sources and one instruction — his own UIUX flaws
-  file, issue **#541** (the authenticated production e2e audit, 36 defects, NO-GO) and the beta
-  handover — and it ran into the evening of 2026-09-05. **Fifteen rulings, 裁-186…200**, opened and
-  steered it: 186 consent becomes a firm-level declaration at the DPA stage and 187 abolishes every
-  attestation ceremony and maker-checker wall in favour of basic RBAC (both **against the
-  recommendation**, both minuted as **ADR-0078**, both dissents on file) · 188 the wall-removal DB
-  lane · 189 the two deploys as the lead's delegate · 190 native lanes only · 191 two arguable
-  document kinds are codeable · 192 the browser smoke becomes a required CI gate (amends 裁-86) ·
-  193 the chart applies only after commit (against the recommendation) · 194 the 裁-149 clause-2
-  premise correction, the first premise erratum this register has carried · 195 requeue-once · 196
-  four readiness and grant items, (b) against the recommendation · 197 three chat tickets queued.
-  **Every item in the register was anchored to code before a lane opened**, which is why the fixes
-  landed against measured coordinates. All eighteen PRs are merged. **The evening added three more
-  rulings:** **198** opens the DB ceremony for `0165`…`0176` that night, gated on the chain landing
-  and a 13-job green sweep on the final `main`, in ONE write-quiesce window with the runtime
-  stopped · **199** sets the classify gate's floor at NON-REGRESSION per KIND plus zero new
-  confident-and-wrong rows, with no absolute number until the first real-corpus run mints a
-  baseline · **200** makes the owner's own uncommitted `AGENTS.md` edit repo law — asking him before
-  deleting or overwriting a file you did not create now goes through `/grillwithdocs`, and the main
-  checkout was restored to `main`'s identical text rather than left dirty, because the codebase
-  graph's project id is keyed by that path. **Two session-limit cuts** (≈11:20 and ≈12:58 MYT on 09-04) stopped every running agent
-  mid-flight; all were resumed from their transcripts with an explicit instruction to re-read their
-  worktree before trusting their last command, and no lane lost work. **The lesson that cost the most:
-  merging a docs PR in the middle of a code PR's CI cycle forces that PR to re-update and re-run** —
-  under the "head must be up to date with base" rule, docs merge between code cycles or you pay a
-  cycle. **The session ended with nothing deployed**, which is the state the next session opens on:
-  the DB ceremony first, then v75, then the Worker.
+- **2026-09-04→05 — THE REPAIR SESSION: EIGHTEEN PRs, FIFTEEN RULINGS.** The entry moved
+  BYTE-FOR-BYTE at the 2026-09-06 disposition truing to
+  [`progress-archive-2026-09-part3.md`](docs/plan/completed/progress-archive-2026-09-part3.md) —
+  28 lines, 2767 bytes, md5 `fb1f9181f13d71d3444fa62474f73088` computed on both sides. **Read it
+  with its own supersession note:** its title and closing sentence say NOTHING DEPLOYED, which was
+  true when written and is superseded by the posture block at the top of this file. The owner opened
+  the session at ≈09:00 MYT on 2026-09-04 from three sources — his own UIUX flaws file, issue
+  **#541** (the authenticated production e2e audit, 36 defects, NO-GO) and the beta handover — and
+  **裁-186…200** steered it; every register item was anchored to code before a lane opened, which is
+  why the fixes landed against measured coordinates. The rulings are in
+  [`mohe-grill-rulings-2026-09-04-pm.md`](docs/plan/active/mohe-grill-rulings-2026-09-04-pm.md).
 
-- **2026-09-04 — BETA WENT LIVE, AND THE SPRINT SESSION CLOSED.** In one continuous sitting from
-  22:10 MYT on 2026-09-03: **FS-10** built the OpenNext/Workers artifact in WSL, created the Worker
-  `clara-web`, walked it on its preview through eight versions (catching that version H carried FIVE
-  of six secrets — read, not assumed — and promoting **I** instead), proved the SSE body genuinely
-  streams through the Worker (TTFB 1.83 s of a 6.05 s total, so 裁-151's fallback was never needed),
-  and moved `app.clarabook.com` off Pages at **≈00:31**; the real-origin re-walk was clean, so the
-  Pages project was deleted in the same sitting per **裁-156** and #540 merged as **`ba8e7d35`** with a
-  13/13 sweep behind it. **FS-11** then dropped and rebuilt the whole `clara` schema — a staged drop
-  after a single transaction ran out of lock slots, 159 migrations re-applied (through a `0154`
-  role-census wall that a live cluster cannot pass without renaming a deploy-minted role), a
-  circuit-breaker outage traced to the re-migration silently flipping every ceremonied role to
-  NOLOGIN, and a TLS probe that found **four production lane DSNs running in PLAINTEXT** — and BELCORT
-  was re-minted through the product's own signup → code → DPA → MYR 0 checkout door, with every
-  Stripe event answering 200. The **裁-184 product walk** then ran the real thing on real Malaysian
-  documents: a client onboarded through the in-thread interview, a chart planted, invoices OCR'd, the
-  agent's witness reads matching the PDF exactly, a journal proposed by Clara and approved by the
-  human, a bank line matched and settled, fifteen close gates evaluated live. **Six of eleven
-  milestones passed; the statement lane, the unattended coder and the report path failed, and every
-  failure was fail-closed with a receipt.** The owner ruled **裁-185** at ≈06:15: **GO, closed beta**,
-  and asked for one complete list of everything to repair. Thirty-five rulings 裁-151…185 are in
-  [`mohe-grill-rulings-2026-09-04.md`](docs/plan/active/mohe-grill-rulings-2026-09-04.md); the list is
-  the handover. **Nine of the fifteen P0 rows were found only because the walk used the real product
-  against real documents on the live estate — a mocked e2e would have found none of them.**
+- **2026-09-04 — BETA WENT LIVE, AND THE SPRINT SESSION CLOSED.** The entry moved BYTE-FOR-BYTE at
+  the 2026-09-06 disposition truing to
+  [`progress-archive-2026-09-part3.md`](docs/plan/completed/progress-archive-2026-09-part3.md) —
+  23 lines, 2304 bytes, md5 `759c32130a33e2584574fcdbd506c6ea` computed on both sides of the move
+  and verified present there before this file lost it. It records FS-10's Worker cutover, FS-11's
+  schema rebuild and re-mint of BELCORT through the product's own door, and the 裁-184 product walk
+  in which six of eleven milestones passed and every failure was fail-closed with a receipt; the
+  owner ruled **裁-185 GO, closed beta** at ≈06:15 and asked for the repair list, which is the
+  handover.
 
 ---
 
