@@ -230,6 +230,10 @@ entries (0.6 GB), and the two exited `preview-rig` / `preview-postgrest` contain
 2026-09-04 08:39) were stopped and `wsl --shutdown` was run; `vmmemWSL` is gone. Re-plant
 a keeper before the next port-dependent WSL work (the standing WSL operating law below).
 
+**The `.vhdx` was 77.3 GB before `wsl --shutdown`, 31.8 GB after it** — Windows reclaimed
+the freed sparse blocks automatically at 06:47; the distro holds ~9.5 GB, so a `diskpart` →
+`compact vdisk` (admin) is OPTIONAL for the remaining ~20 GB, not owed.
+
 Everything from here to the end of this file is now a **historical record** — the fleet
 that existed and the procedure that removed it — kept should a self-hosted runner ever be
 stood up again, never as a live topology.
