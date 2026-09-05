@@ -101,7 +101,7 @@ leaked credential, a stranded run, a cross-tenant read. Everything else is judge
 | Legal/compliance pack for owner review — OpenAI DPA brief, client authorization letter (en/ms/zh), PDPA s.129 cross-border basis, the beta signup consent text + its byte-identity law (裁-90, [`docs/ops/legal/clara-beta-dpa.md`](docs/ops/legal/clara-beta-dpa.md)), and the beta terms of service template (裁-125/129 — a separate document kind, [`docs/ops/legal/clara-beta-terms.md`](docs/ops/legal/clara-beta-terms.md)); every beta legal text is an agent template refined with a lawyer at official launch, never darkened | `docs/ops/legal/` |
 | Backup, restore, DR drill, readiness, SLO | `docs/ops/DR.md` |
 | Piping a live DSN through a ceremony — the CA-pinned TLS bridge, never `sslmode=no-verify` | `docs/ops/dsn-bridge.md` |
-| The CI runner: what it is, how to operate or decommission it | `docs/ops/ci-runner.md` (**hosted since 2026-09-02; the WSL fleet is parked**) |
+| The CI runner: what it is, how to operate or decommission it | `docs/ops/ci-runner.md` (**hosted since 2026-09-02; the WSL fleet was decommissioned 2026-09-06**) |
 | Migrations, seeds, the test rig, DR tooling | `packages/db/README.md` |
 | The durable runtime: workflows, pools, document intake, deploy | `packages/runtime/README.md` |
 | Building/porting the production frontend | `apps/web/README.md` + `apps/web/AGENTS.md`; `docs/plan/active/fe-train-plan-2026-08-30.md` + `docs/plan/active/fe-train-plan-2026-08-30-orders-p4.md` + `docs/plan/active/fe-train-plan-2026-08-30-orders-p6.md`; `docs/plan/active/port-wave-plan-2026-08-28.md` + `docs/plan/active/port-wave-plan-2026-08-28-part2.md` |
