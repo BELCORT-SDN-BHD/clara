@@ -209,7 +209,7 @@ are the index. The pre-truing text of both sections is archived verbatim in
   puts BOTH in the Q-00 lane.** (i) `packages/runtime/Dockerfile`'s final stage does not
   `COPY workflows/`, so `classify.mjs`'s line-28 import breaks EVERY standalone script in the image
   (the server is unaffected — it runs the nitro bundle, where the import is inlined).
-  (ii) `scripts/measure-classify-recall.mjs:290` builds a bare `pg.Client` and never `SET ROLE`s, so
+  (ii) `scripts/measure-classify-recall.mjs:284` builds a bare `pg.Client` and never `SET ROLE`s, so
   it fails **42501** through every lane login by design of `roles-bootstrap.sql:190`
   (`INHERIT FALSE, SET TRUE`); route it through `packages/runtime/lib/pools.mjs`'s checkout, or
   `set role clara_runtime` after connect. **The pooler does not forward `PGOPTIONS`,** so the env-only
@@ -410,8 +410,11 @@ changed.**
   function") was taken 2026-09-05 over a **48 m 30 s** window (17:08:15Z→17:56:45Z) on machine
   `48ee715b763048`: **100 lines, every one the 30-second `WIKI_PROJECTION dormant` heartbeat** — so
   100 is the window's true content, not a truncation cap — with `reconcile_autopost_rules` matched
-  **0**, `does not exist` **0**, errors and warnings **0**. On `main` the retired name survives only
-  in comments, plus a regression guard that reds if a caller ever returns.
+  **0**, `does not exist` **0**, errors and warnings **0**. **This was measured AFTER the R2 record
+  was written** — by the ceremony lane on 2026-09-05, `fly logs -a clara-runtime`, machine
+  `48ee715b763048`, reported to the lead at 17:56:52Z; **the R2 record's "never measured" line
+  describes the state before that read**, and both are true of their own moment. On `main` the
+  retired name survives only in comments, plus a regression guard that reds if a caller ever returns.
 - **Only H-04 now stands among the bank-statement rows, and its CAUSE HAS CHANGED.** H-02 · H-03 ·
   H-05 (#545) and H-06 (#549) are closed and serving since 2026-09-05, so the human "Enter a
   statement" form is reachable and the hand-key path works. What still breaks the AI path is the

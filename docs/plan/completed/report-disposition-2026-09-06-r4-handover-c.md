@@ -3,13 +3,15 @@
 The per-item disposition of the beta handover's CARRIED registry (C-01 … C-88), as measured **2026-09-06 on `main` at `fc39c361`** by a
 read-only opus-5 lane under 裁-190. The owner's decisions are recorded in `PROGRESS.md`; this is a
 CLOSED record, filed verbatim so the measurement can be re-read against the tree it was taken on.
-**TWO CLAIMS BELOW DID NOT REPRODUCE when the docs-sync lane re-read them on `main` at `95441fe6`:
-C-74 lives in the handover's PART 2 at `:380`, not part 3; and C-44's "26 raw `aria-invalid`
-occurrences" measures 15 across 11 files** under `apps/web` (mostly Tailwind `aria-invalid:` state
-variants inside the shadcn primitives, not rendered attributes), 41 repo-wide tracked — so the row's
-own advice applies to itself and the number must be re-measured, never re-quoted. The
-`confirmDisabled=` count of 70 does reproduce. The verbatim block is byte-identical to the source
-and is not edited; this sentence is the correction.
+**ONE LOCATION BELOW IS OFF: C-74 lives in the handover's PART 2, not part 3** — `:380` on `main`,
+`:383` on the branch that filed this record, after the three Errata pointer lines it inserts.
+**C-44's "26 raw `aria-invalid` occurrences" REPRODUCES and is correct:** on `main`, `apps/web`
+(`.tsx`/`.ts`/`.css`) returns **26 occurrences across 15 lines in 11 files**, and `confirmDisabled=`
+still measures 70. *(A first cut of this header claimed 26 did not reproduce and gave 15; that was a
+counting error — `grep -c` counts LINES, `grep -o` counts occurrences.)* Most of the 26 are Tailwind
+`aria-invalid:` state variants inside the shadcn primitives rather than rendered attributes, so the
+row's "rendered sites" figure still needs its own instrument. The verbatim block is byte-identical
+to the source and is not edited; this sentence is the correction.
 
 <!-- begin verbatim: R4-handover-C.md · md5 6cf51adea1777f6e86c1f355916a71b2 -->
 # R4 · Disposition of the CARRIED REGISTRY C-01 … C-88

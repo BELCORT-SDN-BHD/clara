@@ -3,7 +3,12 @@
 The per-item disposition of GitHub issue #541, the authenticated production e2e audit (CB-AE2E-001…036), as measured **2026-09-06 on `main` at `fc39c361`** by a
 read-only opus-5 lane under 裁-190. The owner's decisions are recorded in `PROGRESS.md`; this is a
 CLOSED record, filed verbatim so the measurement can be re-read against the tree it was taken on.
-Every citation in it resolves on that commit. Nothing here is edited after filing.
+**ONE CLAUSE BELOW WAS OVERTAKEN BY A LATER READ: CB-AE2E-005's "the 10-minute log window was never
+measured" describes the state BEFORE the ceremony lane took it** — 2026-09-05, `fly logs -a
+clara-runtime`, machine `48ee715b763048`, a 48 m 30 s window (17:08:15Z→17:56:45Z), 100 lines, zero
+matches for the retired function, reported to the lead at 17:56:52Z and now carried in `PROGRESS.md`.
+Both statements are true of their own moment. The verbatim block is byte-identical to the source and
+is not edited; this sentence is the supersession note.
 
 <!-- begin verbatim: R2-cb-ae2e-541.md · md5 afa67957290d332e5a06a853d603d8a3 -->
 # R2 — disposition of GitHub issue #541 (CB-AE2E-001…036)

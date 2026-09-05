@@ -139,8 +139,9 @@ Fable orchestrates.** Speed is the point — no capacity outages, no resume roun
 result before accepting it. *Codex lane, for when it resumes — learned the hard way:* the
 `codex:rescue` companion queue is unreliable (it has stalled for hours at "starting") — prefer a
 direct `codex exec` via Bash, backgrounded with a file-watcher on the output. Ledger: `docs/plan/active/mohe-grill-rulings-2026-09-04-pm.md` (**the NEWEST — 裁-186…202, the repair
-session: its opening, its midday, the small hours of 2026-09-05, and that evening's deploy block plus
-the owner's own harness edit**; 裁-151…185, the launch night, are the tenth ledger
+session: its opening, its midday, the small hours of 2026-09-05, that evening's deploy block plus
+the owner's own harness edit, and the 2026-09-06 disposition ruling 裁-202 (裁-201 filed late beside
+it)**; 裁-151…185, the launch night, are the tenth ledger
 `docs/plan/active/mohe-grill-rulings-2026-09-04.md`; the chain
 runs `-08-31` → `-09-01` → `-09-01-pm` → `-09-02` → `-09-02-pm` → `-09-03` → `-09-04` → `-09-04-pm`, the earlier
 files carrying the session state bridges, and each file continuing at the previous one's 500-line

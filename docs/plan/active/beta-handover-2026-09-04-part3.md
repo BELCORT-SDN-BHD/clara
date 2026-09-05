@@ -195,7 +195,8 @@ with its own dated record.
   local reimplementation remains in this file". The "ONE spelling" half of the row is done too.
   **What honestly carries is the general sweep** — whether every `CREATE`/`DROP DATABASE`/`DROP ROLE`
   under `packages/*/tests` routes through the guard, which needs a per-site read.
-- **C-74** (part 2, `:383` — **not part 3**, where an earlier index placed it) — *"a `git grep 裁-110`
+- **C-74** (part 2 — **not part 3**, where an earlier index placed it; `:380` on `main`, `:383` on
+  this branch after the three pointer lines this PR inserts) — *"a `git grep 裁-110`
   over `main` returns zero files"*. **裁-110 is authored**, at
   [`mohe-grill-rulings-2026-09-02.md:15`](mohe-grill-rulings-2026-09-02.md) as
   `裁-110 · RESERVED (recorded 2026-09-02 to close a silent numbering gap)`, merged in `33e94855`
@@ -246,12 +247,15 @@ with its own dated record.
   **The full-overwrite `writeTaskMeta` is at `:451`**, and there is a **second one at `:480`** on the
   engine-lost requeue path that the row does not name. Both want the merging `mergeTaskMeta`.
 - **C-44** (part 2, `:200-201`) — quotes *"2 rendered `aria-invalid` sites"* against **70**
-  `confirmDisabled=` occurrences. **The `confirmDisabled=` count still measures 70. The
-  `aria-invalid` number does not reproduce, in either direction:** a plain grep over `apps/web` today
-  returns **15 raw occurrences across 11 files**, most of them Tailwind `aria-invalid:` state
-  variants inside the shadcn primitives rather than rendered attributes, and a repo-wide tracked
-  count returns 41. A separate 2026-09-06 pass reported 26 and that figure could not be reproduced
-  here either. **The row's own advice applies to itself — count the file, never any of these lines.**
+  `confirmDisabled=` occurrences. **The `confirmDisabled=` count still measures 70.** The
+  `aria-invalid` count on `main` is **26 occurrences across 15 lines in 11 files** under `apps/web`
+  (`.tsx`/`.ts`/`.css`) — `grep -o … | wc -l` returns **26**, summing `grep -c` returns **15**,
+  because several lines carry the token more than once. **Most are Tailwind `aria-invalid:` state
+  variants inside the shadcn primitives, not rendered attributes**, so none of these numbers is the
+  "rendered sites" figure the row actually wants. **A first cut of this Errata reported 15
+  occurrences and called 26 unreproducible; that was a counting error — `grep -c` counts LINES, not
+  occurrences — and 26 was right.** The row's own advice applies to itself, and to its corrections:
+  count the file, never a line.
 
 **One prescription that points at a document nobody has written.**
 
