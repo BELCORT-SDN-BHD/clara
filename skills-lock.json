@@ -2,20 +2,36 @@
   "_note": "Provenance lock for vendored engineering skills under .claude/skills/. Regenerate with `node scripts/gen-skills-lock.mjs` after intentionally adding/updating a skill; `--check` verifies it is current.",
   "version": 1,
   "skills": {
+    "animate": {
+      "sha256": "222ba82cf033d0759416efb7a1882123f863c146dea35525e1ac5fb1eda349fb",
+      "files": 2
+    },
+    "animation-vocabulary": {
+      "sha256": "a27b9647300cb5ff93aeeeaa58821d70f2615523911a3ea2feb32a3b66d04f38",
+      "files": 1
+    },
+    "apple-design": {
+      "sha256": "2047dd8783d2dd7386dddb7d7f5aceed614607af21026edcaa2a1b6a92007635",
+      "files": 1
+    },
     "ask-matt": {
-      "sha256": "e75f6fff3769a8e02e555a3264d56be9db5b24c98ae35a6e2e40021cea320313",
+      "sha256": "048f1297f57917a9a9fbaa270c04755f220de7ecf8c5884cd8699671e00f0bbc",
+      "files": 3
+    },
+    "ask-sonner": {
+      "sha256": "990faf715e4db7466d2b719d7c950992e3aa1e8ad14dda511bc3dfe066815325",
       "files": 2
     },
     "claude-handoff": {
-      "sha256": "6caadf4240d1943df6134f4f56bbf0542ed03db5e8c164539c3db17e71ebf6e5",
+      "sha256": "df967b2d8778371ada2fe308e3322028e649f6f281581c023553271ac2a31f21",
       "files": 2
     },
-    "code-review": {
-      "sha256": "7bbf633a942528ecad7e9090460cb556f2b1dfe0b538b1becfad4346c4e9b780",
+    "code-reviewbymatt": {
+      "sha256": "0dfbd821dcb6eaa9a2cdd72e66a24dc139e13081783871d41343df7af85fe4f8",
       "files": 2
     },
     "codebase-design": {
-      "sha256": "e4ef98a519b0679090e31914cab87797aea9892c98a31f32c51fda7d5aeab542",
+      "sha256": "42e4dac1eda26389115a0de78c4b89b32cff1800ef8d6f1ecd8357e334812a4f",
       "files": 4
     },
     "design-an-interface": {
@@ -23,47 +39,63 @@
       "files": 2
     },
     "diagnosing-bugs": {
-      "sha256": "40057543b291af4418138e68076b63eb45609e40952b33f0c14312efdce76d7a",
+      "sha256": "aed1a6e603ed4232ff96e03c051931ca6254c758d783689d5f122a755acae6b9",
       "files": 3
     },
     "domain-modeling": {
-      "sha256": "138c759ff3843f4112aa5e0d0128f0b25bf1ae594a30f88b1b3949db0b38ab19",
+      "sha256": "cb8f109616c95fefe40c334ba1132368d7a3919c61791ad4e78f8a69d9230afc",
       "files": 4
     },
     "edit-article": {
       "sha256": "cb3f41da59d93e96012433ed02f30f1984c3cdf9b39ec503db23f68ec6d96090",
       "files": 2
     },
+    "emil-design-eng": {
+      "sha256": "91f16eb9b00dab16420ee22fba43cb35705841cd27fe0f124fad9e20397a6b8b",
+      "files": 1
+    },
+    "find-animation-opportunities": {
+      "sha256": "ab269f1f94f0226b62aa0fb2622f367fada1db8a4df005c62087fde27499fecd",
+      "files": 1
+    },
     "git-guardrails-claude-code": {
-      "sha256": "a57bec48e789ecd6bd78c86c603389bb768640ef2a98de342b34a3cf640f7056",
+      "sha256": "262e6d183ba32a3a764cfeb03d17ed48f8ccbb3fa4e5a7857b99c38b6339c50c",
       "files": 3
     },
     "grill-me": {
-      "sha256": "71f882abf8228a68f9b9aacd3d9a7f5d2607d5b54f89c84369da2cc7e709a38e",
+      "sha256": "50d1df62745067f06adb415dd96916b451cdd83a2979f4f62c91a5fba5c785b9",
       "files": 2
     },
     "grill-with-docs": {
-      "sha256": "cf12417ee2a7ec36d7fb47a24e109ad81bc85337b9b1a837db395aa2232a0fa7",
+      "sha256": "0da90f05064b365b5b3234de0cf439d5fd6f5c8219a6e5a4aec80bf6b95be179",
       "files": 2
     },
     "grilling": {
-      "sha256": "1185157a3d5e4e4399e4ce038be146b2671cd04c3682d01eed7a591bb0bf94cd",
+      "sha256": "1132af33dc59ce631b6307d6377fd11f416dcbdeb471025c2fce4e4cd0db888f",
       "files": 2
     },
     "handoff": {
-      "sha256": "86dc5d708ff185da9f66724f35588b227b8376e45be1bbe04db7c951e60b5504",
+      "sha256": "e0b826d95e35b2302817dc8f977c831deae3c6cd24e4e322716a84d3566c9e89",
       "files": 2
     },
     "implement": {
       "sha256": "d79219119a74de61eced7a38c36d88c62b1cd6ffa5e2d7f7b49a7f25dfa4eee0",
       "files": 2
     },
+    "implement-spec": {
+      "sha256": "e6b06f814487c928001b17941422f702e73eb89dcdfe2366d595b0a7af3628ec",
+      "files": 2
+    },
+    "improve-animations": {
+      "sha256": "e2ce831ade460d0d46ff90bf930d0d7fe32cb9939d9e94fbce7e39ee64b78880",
+      "files": 3
+    },
     "improve-codebase-architecture": {
-      "sha256": "c69ddb0de0c7d72e8799d90eceeff68c604e4cb0872d9191395392f70da88971",
+      "sha256": "ad94e61b147b0e760e585765625ac5bef091834aeff00c4e1b9bdfe6ba496316",
       "files": 3
     },
     "loop-me": {
-      "sha256": "6bc81a94808c77a7744e1d59db9aba313d188215c3faccef4dfd1345cd864c7e",
+      "sha256": "ebb8ab9ebe148231863e5d52018dd4f7c2d0a7607083431a3be5f4ce14235a82",
       "files": 2
     },
     "migrate-to-shoehorn": {
@@ -75,11 +107,11 @@
       "files": 2
     },
     "orchestrator-fable": {
-      "sha256": "67e0c0f46058671893af8be75466e3800b37319ecac342bddd6a67fdc67b9d63",
+      "sha256": "e2b3c2edfb798b46ec16727d0e4a29ee8b7684d5e78749ac22c461a54744244d",
       "files": 1
     },
     "prototype": {
-      "sha256": "3d914b3ea241a431eb352c7675717531dbfe042e0d9dff2bccb75e1279e9b381",
+      "sha256": "14ae1eef19626bce689f74779975a105789c68e978ac81d02a62f1e723c15b90",
       "files": 4
     },
     "qa": {
@@ -91,11 +123,19 @@
       "files": 2
     },
     "research": {
-      "sha256": "074cf37e56b358bc9856635494a1e7a2fd1e4c864a5a953920a4eac7e8d7e266",
+      "sha256": "2486531c781120290062c58d45329cdd78562a60011200a8d0ae99fb900cb8ed",
       "files": 2
     },
     "resolving-merge-conflicts": {
-      "sha256": "98d310db2da770b7d32a2c57a6ed2dfa9c1a81ba564e41ae80d99f066e44b6e7",
+      "sha256": "6e1c5649c982d305cc0ef297b976ce11b20bed826ff93688c0f096a2bd1801bb",
+      "files": 2
+    },
+    "retro": {
+      "sha256": "d63c45b270c71332bfc9aa78b9203350682290204b4aa54710e68e81f339ac81",
+      "files": 2
+    },
+    "review-animations": {
+      "sha256": "32b550558ce66cf5942f66403d7b44e2df9ffff5ae4a21aeaf98dc3452ddbcc2",
       "files": 2
     },
     "scaffold-exercises": {
@@ -103,63 +143,75 @@
       "files": 2
     },
     "setup-matt-pocock-skills": {
-      "sha256": "94457e4a3fe1e9622a730c057d1c070391f459f23747178d27b01464cc10abd6",
+      "sha256": "5db46b59610ca81de90f5df9352f5372b11e25a5871ef6666f42da46e0724bdd",
       "files": 7
     },
     "setup-pre-commit": {
-      "sha256": "6f188539b987c87b2ef63eafc37fb3d2d1067133785dd36c3fdaa5cfe6ecbe86",
+      "sha256": "91a6d533444b02ab958c56c8e7116288c17310842f2f99482f27c7498c852407",
       "files": 2
     },
     "setup-ts-deep-modules": {
-      "sha256": "a5e1d40d198321a2e0d9cd3c75b54e40afe498742f8df7562059cd53bdac187b",
+      "sha256": "330860fcf638e8553f2d4a5849eb6cc57e66bd43f1ade3237086deb7df3f160d",
       "files": 3
     },
+    "shadcn": {
+      "sha256": "3814e42c17c9521c3533356ecf8fbbd2936e72320e332ed4c142f6192e09e9b9",
+      "files": 15
+    },
     "tdd": {
-      "sha256": "3d0d004ef7720d18e1931f8b56f0faf4feb5c8ba296b89824d8cd4a448c2bdc3",
+      "sha256": "95b4e84e4f44931af4c831dd803eeca60b7077741bcaeb7d6f0e7999ab6f7341",
       "files": 4
     },
     "teach": {
-      "sha256": "f548beca14aaa8e98642eee018d3ac0cc6335e72aea21363ba194d6b4bff65c0",
+      "sha256": "e3fb5fb49fd9defe6e7d802bbcd0e0c0dbde916afa94351be5b0dad7d66f6f59",
       "files": 6
     },
+    "to-questionnaire": {
+      "sha256": "d03984a3bbb78231d77626172a783e949fb96d4f27191051327c7e43de22539b",
+      "files": 2
+    },
     "to-spec": {
-      "sha256": "dc4ee6ac31538b7ab86ca6977891648e142169e7e0f5e7a472548eee70e13304",
+      "sha256": "2f008062d54bb64c11ed35ae9334c45b6fe3638c596f888110add129b2ee7f5a",
       "files": 2
     },
     "to-tickets": {
-      "sha256": "cabee225f957d3ed2b259bd39e4310885cd71533c6dc77b30ced404c5416e80b",
+      "sha256": "3486b34f6dd858e4510586ae4f44762807ad1c194edf1075a61bf6c9a3b6147a",
       "files": 2
     },
     "triage": {
-      "sha256": "ef0b10a2b74f95bab7eb505a670eb1ed7fcfcf7710692266f2c0e7733b804051",
+      "sha256": "5d61151ecfe1e5e5dcf9c6280cf2c157faccff8335f1cc36bc0ca114d129a755",
       "files": 4
     },
     "ubiquitous-language": {
       "sha256": "fb209f0991c3c417c713ff902c0e7ee0d54b599d79782efcbc4da7b5a53340a4",
       "files": 2
     },
+    "wait-what": {
+      "sha256": "3f64d6d82dc9a448070accccd033e5878bf1df3e5c39a9e2417b05456b15478b",
+      "files": 2
+    },
     "wayfinder": {
-      "sha256": "956d634e535b5de561a892a9209b054313eecc8192ea0f97b4110afb16206ef0",
+      "sha256": "00cd4399d6664556beeb14ecbdc29830656e649616792e8574bd7ac7d2721209",
       "files": 2
     },
     "wizard": {
-      "sha256": "14497832cbc64ff3f59becb27af35f0262324058bf32ef361dd8e6b32cca16c4",
+      "sha256": "632717e84509fda0c1de4eeaa4c1b7967a7cf70a109aeac79ca96505f5439874",
       "files": 3
     },
     "writing-beats": {
-      "sha256": "f77331f585b2d59d323aa33f303141088aada07fbf4c73a0a015f2c6a7e051b9",
+      "sha256": "cd605f1eef5cd9923b84cf7284891e3c28a9daabf741e63628d586451cfce228",
       "files": 2
     },
-    "writing-fragments": {
-      "sha256": "c19dc694018d519ba48400c1f84f1e9718f4b6bb85ae2aee34fde24977b8d90f",
-      "files": 2
-    },
-    "writing-great-skills": {
-      "sha256": "293306f10afb3596c331192deb9f1c0f13c8ba7e901498723548a2f357cde49b",
+    "writing-for-agents": {
+      "sha256": "223b2494f380e0551fc8ee26bfb6ac96a93619335a39d626e21e1a669faadb7b",
       "files": 3
     },
+    "writing-fragments": {
+      "sha256": "90d4115256ed2df55ff5320523040a302b053a6ea3f4d055b8e53fbb37a82868",
+      "files": 2
+    },
     "writing-shape": {
-      "sha256": "e824e3f6aaa63ec71745d48e33c28ecacf9e9937a0081938d69dc1d20af02f53",
+      "sha256": "effe23869482f3a97074d95d7f8e2ee39270f70b06385245d5c292f2aa57075f",
       "files": 2
     }
   }

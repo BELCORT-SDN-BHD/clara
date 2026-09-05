@@ -1,10 +1,6 @@
 # Vendored: mattpocock/skills
 
-This repo **vendors** Matt Pocock's skill pack (git-tracked under `.claude/skills/`, flat —
-not `skills/<bucket>/<name>/`) on purpose: every lane and CI job needs the same skill text
-without a network fetch, and freeze-lint-style provenance requires the content to sit in our
-own history. Upstream also documents two non-vendored install paths this repo does NOT use:
-`claude plugins install mattpocock-skills` and `npx skills@latest add mattpocock/skills`.
+This repo **vendors** Matt Pocock's skill pack (git-tracked under `.claude/skills/`, flat — not `skills/<bucket>/<name>/`) on purpose: every lane and CI job needs the same skill text without a network fetch, and freeze-lint-style provenance requires the content to sit in our own history. Upstream also documents two non-vendored install paths this repo does NOT use: `claude plugins install mattpocock-skills` and `npx skills@latest add mattpocock/skills`.
 
 **Tracks:** github.com/mattpocock/skills @ `3cca18b368ae95cdbdebbff572ccafa662551015`
 (2026-09-04, CHANGELOG.md `mattpocock-skills` v1.2.3).
@@ -43,7 +39,7 @@ in this repo's own historical plan docs, so deleting them would orphan those ref
   `docs/plan/active/frontend-sprint-handoff-2026-08-31.md:269`
 - `request-refactor-plan` → absorbed by `to-spec` + `improve-codebase-architecture`
 - `ubiquitous-language` → absorbed by `domain-modeling`
-- `edit-article`, `obsidian-vault` → personal to Matt (the latter hardcoded his own vault path); deleted with the `personal/` bucket, not absorbed anywhere
+- `edit-article`, `obsidian-vault` → personal to Matt (the latter hardcoded his own vault path); deleted with the `personal/` bucket
 
 ## Resolved decisions (fold, 2026-09-06)
 
@@ -56,11 +52,9 @@ in this repo's own historical plan docs, so deleting them would orphan those ref
    `docs/agents/issue-tracker.md` carries upstream's "Wayfinding operations" section for
    `/wayfinder` — see the PR body for both blocks verbatim.
 
-## Non-mattpocock skills sharing `.claude/skills/`
-
+Non-mattpocock skills sharing `.claude/skills/` (untouched by this vendoring's file content):
 animate, animation-vocabulary, apple-design, ask-sonner, emil-design-eng,
-find-animation-opportunities, improve-animations, review-animations, shadcn,
-orchestrator-fable — untouched by this vendoring.
+find-animation-opportunities, improve-animations, review-animations, shadcn, orchestrator-fable.
 
 ## Update recipe
 
@@ -72,9 +66,12 @@ orchestrator-fable — untouched by this vendoring.
    never overwrite a locally-modified file.
 4. Add any upstream skill dir missing locally, flat, byte-exact.
 5. Re-run the gates below; `git status --short` should show only `.claude/skills/**`.
+6. Regenerate `skills-lock.json` (`node scripts/gen-skills-lock.mjs`); `--check` first to confirm drift.
 
-**Not covered by this vendoring:** the repo-root `skills-lock.json` / `scripts/gen-skills-lock.mjs`
-provenance lock (covers all of `.claude/skills/`, mattpocock and non-mattpocock alike) is not
-wired into `pnpm lint`, `package.json`, or any CI workflow, and its checksums already predate
-this PR's changes. Flagged for the lead; not regenerated here since it is out of this task's
-scope and the tool's own header says it is a manual, opt-in step.
+**`skills-lock.json`** (repo root, `scripts/gen-skills-lock.mjs`) hashes every skill listed above,
+mattpocock or not; not wired into `pnpm lint`/CI. `--check` reported DRIFT before this vendoring
+touched anything — last generated at `585346f0` (#246), never since. Regenerated (owner ruling,
+2026-09-06 fold #2): the diff covers every skill this PR refreshed/added/renamed, **plus two things
+unrelated to this PR that the stale lock had simply never caught up to** — `orchestrator-fable`'s
+hash moved from two later, already-merged, unrelated edits (`7ea479ad` #339, `18aba67d` #506), and
+the nine non-mattpocock skills above appear as new rows since the lock predates their addition.
