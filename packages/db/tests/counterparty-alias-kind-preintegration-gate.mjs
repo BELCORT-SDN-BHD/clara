@@ -1,4 +1,4 @@
-// The H-17 / H-19 migration is authored as UNNUMBERED_counterparty_alias_kind_scope.sql and is
+// The H-17 / H-19 migration is authored as 0176_counterparty_alias_kind_scope.sql and is
 // therefore deliberately skipped by the normal migration runner until merge prep, where it claims
 // its number under 裁-108. Package-wide CI preloads this module so the battery skips LOUDLY on a
 // chain that has not applied it. A focused invocation does not preload it and must FAIL when the

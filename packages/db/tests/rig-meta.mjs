@@ -1011,7 +1011,7 @@ export const SALES_LANE_0046_COHORT = [
   ...SALES_LANE_0046_HUMAN_FNS, ...SALES_LANE_0046_READ_FNS, ...SALES_LANE_0046_UNGRANTED_FNS,
 ];
 
-// H-17 / H-19 [UNNUMBERED_counterparty_alias_kind_scope, numbered at merge] — the kind-scoped
+// H-17 / H-19 [0176_counterparty_alias_kind_scope, numbered at merge] — the kind-scoped
 // alias unique and the owner-floored sales-lane wrapper.
 //
 // THIS IS A SEPARATE COHORT FROM 0046's ON PURPOSE, and the reason is mechanical: cohortFailures

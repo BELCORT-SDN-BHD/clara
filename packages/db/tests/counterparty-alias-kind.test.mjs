@@ -1,5 +1,5 @@
 // H-17 (the kind-blind alias unique) + H-19 (the ungranted, unwalled sales-lane flip).
-// Migration: UNNUMBERED_counterparty_alias_kind_scope.sql (number claimed at merge, 裁-108).
+// Migration: 0176_counterparty_alias_kind_scope.sql (number claimed at merge, 裁-108).
 // Every cell gates on the LIVE CATALOG, never on the migration number.
 //
 // THIS FILE OWNS HALF OF A PAIR. The other half is
@@ -71,7 +71,7 @@ function gate(t) {
     return true;
   }
   assert.fail(
-    "counterparty alias-kind is required for a focused run: apply UNNUMBERED_counterparty_alias_kind_scope.sql (or its numbered suite copy)",
+    "counterparty alias-kind is required for a focused run: apply 0176_counterparty_alias_kind_scope.sql (or its numbered suite copy)",
   );
 }
 
