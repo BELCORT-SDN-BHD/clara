@@ -113,7 +113,7 @@ describe("focus-ring contract — 裁-1's 70% is declared once and obeyed everyw
     );
   });
 
-  it("VACUITY CONTROL: the scan actually finds the carriers — fourteen component files, fourteen class strings", () => {
+  it("VACUITY CONTROL: the scan actually finds the carriers — fifteen component files, fifteen class strings", () => {
     // Without this arm the assertion above passes trivially the day the scan
     // walks the wrong directory or the regex stops matching. The count is the
     // 2026-09-04, THREE trains, and the list is the UNION of what each of them added —
@@ -157,9 +157,25 @@ describe("focus-ring contract — 裁-1's 70% is declared once and obeyed everyw
     // Exactly one class string per file, now that comments are stripped — see
     // ringCarrierHits's header for why an earlier census's extra "occurrence" was never a
     // carrier.
+    //
+    //   * #557 (CB-AE2E-032) added components/tax/TurnoverClassificationPanel.tsx: the
+    //     turnover-classification control carries a NATIVE `<input type="date">`, a custom
+    //     control rather than a vendored primitive, so it wears the same ring class string
+    //     components/firm/compliance-watch-affordance.tsx's snooze date input already wears —
+    //     the SAME idiom in a second place, which is what this roster exists to record.
+    //
+    // THE TWO CHIP LINKS FROM THAT SAME TRAIN ARE DELIBERATELY NOT HERE, for the reason the
+    // two <summary> disclosures above are not: a plain link keeps the global :focus-visible
+    // outline and never suppresses it to draw a weaker ring.
+    //
+    // MERGE ARITHMETIC, 2026-09-04. Three trains each grew this census by one — #548's sortable
+    // header, #549's dialog-refusal banner, #557's date input — from the twelve of the
+    // 2026-09-02 re-census. Twelve plus three is FIFTEEN, and each merge that took "either
+    // side" of the count would have silently dropped a carrier the other added, which is why
+    // the list below is a union and this number is derived from it rather than carried over.
     const hits = ringCarrierHits();
     const files = [...new Set(hits.map((h) => h.file))].sort();
-    assert.equal(hits.length, 14, JSON.stringify(hits, null, 2));
+    assert.equal(hits.length, 15, JSON.stringify(hits, null, 2));
     assert.deepEqual(files, [
       "components/admin/admin-hub.tsx",
       "components/clara/ClaraThreadView.tsx",
@@ -168,6 +184,7 @@ describe("focus-ring contract — 裁-1's 70% is declared once and obeyed everyw
       "components/firm/compliance-watch-affordance.tsx",
       "components/journals/drafts-queue-panel.tsx",
       "components/journals/journal-entries-table.tsx",
+      "components/tax/TurnoverClassificationPanel.tsx",
       "components/ui/badge.tsx",
       "components/ui/button.tsx",
       "components/ui/input-group.tsx",

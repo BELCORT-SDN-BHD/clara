@@ -208,6 +208,7 @@ const ALL_FALSE: FirmCapabilities = {
   canProposeVendorBinding: false,
   canRevokeVendorBinding: false,
   canSignVendorBinding: false,
+  canClassifyTurnover: false,
 };
 
 test("firmCapabilities: the four unknown-rank shapes ALL deny — the gate fails CLOSED (裁-187)", () => {
@@ -236,6 +237,11 @@ test("firmCapabilities: each capability turns on at exactly its own floor, and n
   assert.deepEqual(at(2).canRevokeInvite, true, "an admin may revoke an invite");
   assert.deepEqual(at(2).canDecideFirmRegistrations, false, "an admin may NOT decide registrations — that door is owner+");
   assert.deepEqual(at(3).canDecideFirmRegistrations, true, "an owner of an operator firm may");
+  // The client Tax tab's classification control (review-557, N7). A VIEWER still sees the SST
+  // turnover watch itself — that read floors at viewer and is not gated — but is not offered a
+  // write the door can only answer CLR04.
+  assert.deepEqual(at(0).canClassifyTurnover, false, "a viewer may not classify turnover");
+  assert.deepEqual(at(1).canClassifyTurnover, true, "a bookkeeper may — set_turnover_classification's own floor");
 });
 
 // --- the two rank-only walls inside the members doors -----------------------

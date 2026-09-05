@@ -19,6 +19,7 @@ register();
 
 const registry = await import("../workflows/registry.ts");
 const entryAutoDraftV9 = await import("../workflows/autoDraft.v9.ts");
+const entryAutoDraftV10 = await import("../workflows/autoDraft.v10.ts");
 const entryChatTurnV13 = await import("../workflows/chatTurn.v13.ts");
 const entryChatTurnV14 = await import("../workflows/chatTurn.v14.ts");
 const entryChatTurnV15 = await import("../workflows/chatTurn.v15.ts");
@@ -54,8 +55,16 @@ const promptV8 = await import("../workflows/chatTurn.v8.prompt.ts");
 // runs.
 // ===========================================================================
 
-test("registry pins autoDraft to the v9 export", () => {
-  assert.equal(registry.workflows.autoDraft, entryAutoDraftV9.autoDraft_v9);
+// H-17 (the exact native-unique constraint map) has now moved the autoDraft pin again — v9 -> v10,
+// chatTurn untouched — and v9's own assertion becomes a policy (c) assertion in its turn.
+test("registry pins autoDraft to the v10 export", () => {
+  assert.equal(registry.workflows.autoDraft, entryAutoDraftV10.autoDraft_v10);
+});
+
+test("policy (c): autoDraft_v9 is still exported and reachable after the H-17 repoint", () => {
+  assert.equal(typeof entryAutoDraftV9.autoDraft_v9, "function");
+  assert.equal(typeof registry.autoDraft_v9, "function");
+  assert.notEqual(registry.workflows.autoDraft, entryAutoDraftV9.autoDraft_v9);
 });
 
 // F-A6 PR-2 (the audited freeform read) has now moved the chatTurn pin again — v14 -> v15,

@@ -52,3 +52,26 @@ what did the re-reading find?"
 > Playwright smoke on the built app becomes a REQUIRED per-PR CI job beside the per-train acceptance walk,
 > once the two known `checkout-gate-walk.spec.ts` flakes are fixed at their cause (the job is not built
 > yet); ADR-0077 and law 85 carry the "amended by" line; digest row 99. No new ADR under 裁-140.
+
+> **2026-09-04 ≈16:45 MYT — the chart-of-accounts sequencing ruling (裁-193).** Digest re-read against the
+> ruling in [`mohe-grill-rulings-2026-09-04-pm.md`](../plan/active/mohe-grill-rulings-2026-09-04-pm.md).
+> It SETTLES 裁-23 Q5's ambiguity — "after the client is created" means after
+> `commit_client_onboarding`, not after the interview mints the client — rather than reversing any law, so
+> **no digest law carries an amended-by line and no ADR is minted** under 裁-140. Taken AGAINST the
+> recommendation, with no dissent filed: a taste call, no accounting risk either way. The reading that
+> matters for the code is the lead's MECHANISM note, under PRD §6 "enforced in the DB, not the UI": the
+> refusal goes inside `apply_coa_template`, which review-551 measured never consulted the plan at all.
+> Digest row 100.
+
+> **2026-09-05 ≈02:50 MYT — the small-hours block (裁-194 · 195 · 196 · 197).** Digest re-read against the
+> four rulings in [`mohe-grill-rulings-2026-09-04-pm.md`](../plan/active/mohe-grill-rulings-2026-09-04-pm.md);
+> **none of them amends a standing law and none mints an ADR** under 裁-140. **194** is the first PREMISE erratum
+> this register has carried — row 86 already carries 裁-142's correction of an EXAMPLE inside a premise,
+> which is a narrower thing: 裁-149's clause-2 PREMISE was wrong when ruled — the leader session always had
+> an error listener and a reconnect loop — so the reasoning is corrected while the OUTCOME stands and the
+> leader is byte-untouched; row 90 carries the erratum line, and the corrected contract is owed to
+> `docs/ARCHITECTURE.md` §4.3, written by #558 as §4.3, carrying this corrected reading. **195** names a new human act (an ANSWER, never a
+> dismissal) inside an existing wall. **196** takes all four readiness and grant items, (b) AGAINST the
+> lead's recommendation with the dissent filed once, and the lead's implementation reading is recorded so a
+> lane cannot build a 503 out of an unconfigured or unmeasured lane. **197** queues three product tickets
+> after the nine, ordered (iii) → (ii) → (i). Digest rows 101–104.

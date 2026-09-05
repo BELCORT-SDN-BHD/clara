@@ -10,6 +10,14 @@
 // (裁-80). Even once built, 裁-33 walls `issued` behind a named refusal
 // (`tax_issue_unavailable`, seeded in PR-1): this surface can only ever
 // reach DRAFT, never file anything, by design — not a build gap to close.
+//
+// CB-AE2E-032: the identifiers above stay HERE, in source, where they are
+// useful to whoever builds the lane. What changed is the string the panel
+// RENDERS: it named all of them to a Malaysian accountant, for whom "F-T3
+// PR-2…9, paused (裁-80)" is not a sentence about their books and 裁-80 leaks
+// an internal decision id. The user-facing note now says what the product
+// cannot do yet and keeps the never-files promise as product behaviour rather
+// than as a ruling citation.
 
 import { useTranslations } from "next-intl";
 import { Card, CardContent, CardDescription, CardHeader } from "@/components/ui/card";
