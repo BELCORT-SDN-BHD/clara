@@ -56,6 +56,17 @@ const WAVE_A_AGENT_READS = [
   "coding_lane", "list_coding_lanes", "get_entry_diff", "get_doc_entry_diff",
   "wake_client", "_agent_read_admitted",
 ];
+// [DB-A, H-53] clara._is_codeable_kind — the ONE definition of which document kinds owe a
+// journal entry, read by the two close gates, by clara.list_uncoded_filings and by
+// clara.list_review_queue's filing rows. It is an underscore helper that BOTH app lanes must
+// hold EXECUTE on, and the reason is structural rather than a convenience: its caller
+// clara.list_uncoded_filings is SECURITY INVOKER (0011:3967, and 0036's own tail asserts that
+// posture), so the predicate runs as the CALLING role and an ungranted helper would 42501 the
+// reader in production while every definer-posture rig cell stayed green. This is exactly the
+// shape _agent_read_admitted already holds one line above -- an invoker reader's gate helper,
+// granted to the lanes that reach the reader and to nobody else. The wake roles are NOT here:
+// they reach the reader through their own admitted wrappers, never directly.
+const DBA_CODEABILITY_SHARED_FNS = ["_is_codeable_kind"];
 const WAVE_A_RUNTIME_FNS = [
   "admit_autodraft_task", "begin_autodraft_task", "settle_autodraft_task",
   "open_sweep_run", "reconcile_sweep_runs",
@@ -1000,6 +1011,31 @@ export const SALES_LANE_0046_COHORT = [
   ...SALES_LANE_0046_HUMAN_FNS, ...SALES_LANE_0046_READ_FNS, ...SALES_LANE_0046_UNGRANTED_FNS,
 ];
 
+// H-17 / H-19 [0176_counterparty_alias_kind_scope, numbered at merge] — the kind-scoped
+// alias unique and the owner-floored sales-lane wrapper.
+//
+// THIS IS A SEPARATE COHORT FROM 0046's ON PURPOSE, and the reason is mechanical: cohortFailures
+// reports a PARTIAL roster and stays silent on a WHOLLY absent one, so adding these names to
+// SALES_LANE_0046_COHORT would red every pre-migration chain — 0046's own names resolve there and
+// these two do not. Both land in ONE migration, so this cohort is bimodal exactly as F-A6's is.
+//
+// AND THE TWO ROSTERS SAY OPPOSITE THINGS ABOUT THE SAME SWITCH, WHICH IS THE POINT. 7A-R1 ruled
+// the activation flip belongs to the owner/deploy connection alone, and
+// `clara.set_sales_lane_activation` STAYS in SALES_LANE_0046_UNGRANTED_FNS above, still expected
+// false for every role — H-19 does not grant it and 0046's own ACL cell would red if it did. What
+// H-19 adds is a NEW wrapper that takes no firm at all (the firm comes from `_human_ctx` at the
+// owner rank), and that one is granted to clara_authenticated. So the census now carries both
+// halves of the ruling side by side: the un-walled signature reachable by nobody, the walled
+// wrapper reachable by the human lane.
+const H17_H19_HUMAN_FNS = ["set_firm_sales_lane_activation"];
+// Named so its absence from every role set is a DECLARED expectation rather than a silent
+// default (the 0020 block's reasoning). It is a SECURITY DEFINER trigger body: the trigger calls
+// it, and nothing else may. The first cut of that migration left PUBLIC holding EXECUTE on it —
+// see T17b's own note that `alter default privileges … revoke execute from public` is a NO-OP
+// against PostgreSQL's hardwired default — so this row is a real expectation, not a formality.
+const H17_H19_UNGRANTED_FNS = ["_tf_counterparty_alias_kind"];
+export const H17_H19_COHORT = [...H17_H19_HUMAN_FNS, ...H17_H19_UNGRANTED_FNS];
+
 // ---------------------------------------------------------------------------
 // F-A6 PR-1 [Wave-F Track A] — the audited freeform read. The ENUMERATED EXECUTE surface of
 // clara_freeform_ro, and the reason it is a cohort rather than a loose list: A.2 is a CLOSED
@@ -1195,6 +1231,46 @@ export const CHECKOUT_GATE_C2_COHORT = [
 const CHECKOUT_GATE_C6_HUMAN_FNS = ["get_current_checkout_plan", "get_own_checkout_progress"];
 
 export const CHECKOUT_GATE_C6_COHORT = [...CHECKOUT_GATE_C6_HUMAN_FNS];
+
+// 裁-190 web reads and small doors (`0174_web_reads_and_small_doors.sql` +
+// `0175_stmt_witness_totals_and_institution_code.sql` — numbers claimed at merge prep):
+// the seven backend gaps the repair-session web lanes are blocked on, plus the statement lane's
+// institution resolver. Every one of the five human doors exists for the SAME reason: the
+// relation that owns the fact is `force row level security` with a single clara_fn_owner policy
+// and no application-role grant, so a door is the only lawful read path and a table grant would
+// be the wrong fix.
+//   get_own_dpa_signature        — the caller's OWN signatures, jwt_sub()-scoped and NEVER
+//     parameterised (a p_user argument would be a consent oracle on a pre-firm surface).
+//   client_egress_state          — one row per ratified typed egress purpose plus the legacy
+//     blanket consent; bookkeeper+ READ only. The four WRITE doors stay owner-floored.
+//   list_firm_timeline           — the keyset page of clara.firm_timeline_visible; bookkeeper+,
+//     matching /activity's own minimumRole and audit_log's floor.
+//   archive_chat_session         — author-only, one-way, audited; modelled on share_chat_session,
+//     the only other lawful mutation this table has.
+//   set_counterparty_identifiers — admin floor; the first and only writer of registration/tin on
+//     an EXISTING counterparty (create_counterparty's INSERT was the sole producer).
+// NO WAKE OR AGENT SIBLING FOR ANY OF THEM, and that is the design rather than an omission:
+// nothing here is an agent act. The runtime lane gains exactly two, both below.
+const WEB_READS_DOORS_HUMAN_FNS = [
+  "get_own_dpa_signature", "client_egress_state", "list_firm_timeline",
+  "archive_chat_session", "set_counterparty_identifiers",
+];
+// clara_runtime ONLY, and both are underscore-free-by-intent EXCEPT _stmt_institution_code,
+// which keeps the statement lane's own `_stmt_*` family prefix (its siblings _stmt_header_norm /
+// _stmt_lines_norm) because it is a lane-internal normaliser rather than a product verb. That
+// makes it the one granted `_`-prefixed name in the estate, so it is written down HERE and in
+// the two sibling censuses that treat an underscore prefix as "app-callable by nobody".
+//   build_frontier          — {count, max_version} over clara.schema_migrations for the runtime
+//     /build-info route. A definer rather than a table grant: the ledger is the migration
+//     runner's own and a broad SELECT on it is a schema-history oracle nobody asked for.
+//   _stmt_institution_code  — printed bank name/code -> the clara.bank_institutions roster code.
+//     clara_runtime holds ZERO grant on that roster (0038:224-231), so the statement lane could
+//     not map a printed name at all; PR #545's frozen in-workflow mirror is what this retires.
+const WEB_READS_DOORS_RUNTIME_FNS = ["build_frontier", "_stmt_institution_code"];
+
+export const WEB_READS_DOORS_COHORT = [
+  ...WEB_READS_DOORS_HUMAN_FNS, ...WEB_READS_DOORS_RUNTIME_FNS,
+];
 // FS-4 C-3 (checkout-gate design part 2 §1.3 and part 3 §2.1): six authenticated pre-firm/
 // operator-support doors plus the auth-wall lane's exact two-verb, pre-session OTP surface.
 const CHECKOUT_GATE_C3_HUMAN_FNS = [
@@ -1409,6 +1485,9 @@ export const ALLOWED = {
     ...ADJ_0045_SHARED_FNS, // 0045 [D-b2] the due probe — the one name BOTH lanes hold
     ...SALES_LANE_0046_HUMAN_FNS, // 0046 [§7-A] the recorded sales backfill door (admin floor)
     ...SALES_LANE_0046_READ_FNS, // 0046 [§7-A] the signing-time evidence preview + batch read
+    ...H17_H19_HUMAN_FNS, // H-19 the owner-floored sales-lane WRAPPER (no firm argument; the
+    // firm comes from _human_ctx at owner rank). The un-walled 0046 signature it delegates to
+    // stays in SALES_LANE_0046_UNGRANTED_FNS above, expected false for every role.
     ...CLIENT_FACTS_0055_HUMAN_FNS, // 0055 [Wave E lane α] the client-facts door (admin floor;
     // agent + both wake roles gain ZERO — 0055's S7 tail asserts it in-migration)
     ...CLOSE_MODEL_0056_HUMAN_FNS, // 0056 [Wave E lane β] the close model (see the block above)
@@ -1482,6 +1561,9 @@ export const ALLOWED = {
     // mode, and the applicant's OWN checkout progress (self-scoped on jwt_sub). See the block
     // above for why each is a door rather than a table grant.
     ...CHECKOUT_GATE_C6_HUMAN_FNS,
+    // 裁-190: the five web read/write doors over walled relations — see the block above for why
+    // each is a door rather than a table grant, and why none has a wake or agent sibling.
+    ...WEB_READS_DOORS_HUMAN_FNS,
     // FS-4 C-3: DPA, checkout and folded paid-registration claim doors. Every identity and
     // ownership floor is body-enforced; the pre-session OTP pair lives on its isolated role.
     ...CHECKOUT_GATE_C3_HUMAN_FNS,
@@ -1495,10 +1577,18 @@ export const ALLOWED = {
     // INVOKER helpers those reads call — clara_authenticated ONLY; agent + both wake roles gain
     // ZERO, by Annex E's first non-goal. See the block above.
     ...COA_TEMPLATE_PR_B_HUMAN_FNS,
+    // [DB-A, H-53] the codeability predicate — see the block where it is declared for why an
+    // underscore helper is granted at all. Both app lanes hold it because both reach the
+    // SECURITY INVOKER reader that calls it.
+    ...DBA_CODEABILITY_SHARED_FNS,
   ]),
   // [S6 §9/C-11] agent lane loses the bare get_journal_entry(uuid) oracle; keeps the other
   // reads and gains the client-pinned S6 reads + get_journal_entry_for.
-  [ROLES.agentRo]: new Set([...READS.filter((r) => r !== "get_journal_entry"), ...S6_AGENT_READS, ...WAVE_A_AGENT_READS]),
+  [ROLES.agentRo]: new Set([...READS.filter((r) => r !== "get_journal_entry"), ...S6_AGENT_READS, ...WAVE_A_AGENT_READS,
+    // [DB-A, H-53] the agent lane reads clara.list_uncoded_filings (0011:4080's own grant, and
+    // 0011:4271's ACL census pins it), and that reader is SECURITY INVOKER — so the agent role
+    // must hold the predicate it calls, or the agent's coding-lane read 42501s.
+    ...DBA_CODEABILITY_SHARED_FNS]),
   [ROLES.wakeInteractive]: new Set(["wake_draft_entry", "wake_record_client_resolution", "wake_record_notification", ...WAVE_A_WAKE_INTERACTIVE_FNS, ...BINDING_PROPOSAL_PR1_WAKE_FNS, ...AUTHORING_0077_WAKE_FNS, ...POSTING_F_A2_WAKE_FNS, ...F_A5_PR2_WAKE_FNS, ...F_A5B_PR1_WAKE_FNS, ...CARD1_SEAM_WAKE_FNS,
     // [Wave-F Track A, F-A5b card 1] wake_compose_metric_preview_v2 -- 'interactive' ONLY,
     // permanently (CD-16), beside its untouched v1 twin in AUTHORING_0077_WAKE_FNS.
@@ -1572,6 +1662,9 @@ export const ALLOWED = {
     ...FA_0041_SHARED_FNS, // 0041 the due probe
     ...ADJ_0045_RUNTIME_FNS, // 0045 [D-b2] the adjustment sweep's run verb (runtime lane ONLY)
     ...ADJ_0045_SHARED_FNS, // 0045 [D-b2] the due probe
+    // 裁-190: the migration frontier read for /build-info, and the statement lane's institution
+    // resolver. clara_runtime ONLY — see the block above; neither table gains a grant.
+    ...WEB_READS_DOORS_RUNTIME_FNS,
     // [F-A2 PR-2, GM-10] the withdrawal re-admit door — clara_runtime ONLY (the consumer's
     // sole caller); proves the event->entry->attempt->task->filing chain then delegates to
     // 0053's one_click exception. Declared here so any wider grant FAILS the matrix.
@@ -1781,6 +1874,7 @@ export async function grantMatrixFailures() {
   failures.push(...cohortFailures("0041 wave D-a fixed-asset register", FA_0041_COHORT, liveNames));
   failures.push(...cohortFailures("0045 wave D-b recurring adjustments", ADJUSTMENTS_0045_COHORT, liveNames));
   failures.push(...cohortFailures("0046 §7-A unattended sales lane", SALES_LANE_0046_COHORT, liveNames));
+  failures.push(...cohortFailures("H-17/H-19 kind-scoped alias unique + owner-floored sales-lane wrapper", H17_H19_COHORT, liveNames));
   failures.push(...cohortFailures("0057 wave E period registry + snapshots", REGISTRY_0057_COHORT, liveNames));
   failures.push(...cohortFailures("0058-0061 wave E metric algebra + evaluator", METRICS_0058_COHORT, liveNames));
   failures.push(...cohortFailures("0065-0072 wave E FS reporting layer", REPORTING_0065_COHORT, liveNames));
@@ -1853,6 +1947,10 @@ export async function grantMatrixFailures() {
   failures.push(...cohortFailures("FS-4 C-2 projected Stripe store", CHECKOUT_GATE_C2_COHORT, liveNames));
   failures.push(...cohortFailures("FS-4 C-6 apps/web read doors", CHECKOUT_GATE_C6_COHORT, liveNames));
   failures.push(...cohortFailures("FS-4 C-3 folded checkout door", CHECKOUT_GATE_C3_COHORT, liveNames));
+  // 裁-190 — frontier-tolerant like every cohort above: entirely absent on a chain that has not
+  // applied the two UNNUMBERED files (which is every CI chain until merge prep, 裁-108), and a
+  // PARTIAL cohort is caught by name.
+  failures.push(...cohortFailures("裁-190 web reads and small doors", WEB_READS_DOORS_COHORT, liveNames));
   // 裁-21 PR-a — frontier-tolerant by cohortFailures' own rule: a cohort that is entirely
   // absent (every pre-PR-a chain) returns no failure, while a PARTIAL cohort — one of the
   // thirteen retired or renamed without truing this roster — is caught by name.

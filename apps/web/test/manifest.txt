@@ -294,6 +294,7 @@ test/a11yRules.test.ts
 test/keyboardWalk.test.ts
 tests/apiLimitBanner.test.mjs
 tests/app-icons.test.ts
+tests/build-info-route.test.ts
 tests/checkout-claim-route.test.ts
 tests/checkout-route.test.ts
 tests/client-scope.test.ts

@@ -192,24 +192,65 @@ test.describe("documents viewer — the MIME gate, the page overlay and the CSP"
     await selectDocument(page, /invoice-april\.pdf/);
     await page.getByRole("button", { name: "Show page overlay" }).click();
     await expect(page.locator("canvas").first()).toBeVisible({ timeout: 30_000 });
-    await expect.poll(() => page.locator("svg[aria-hidden='true'] polygon").count(), { timeout: 20_000 }).toBeGreaterThan(0);
 
-    const widths = async () => page.evaluate(() => {
-      const svg = document.querySelector("svg[aria-hidden='true']");
+    // THE MEASURED ELEMENT IS SCOPED TO THE OVERLAY LAYER, and that is the whole
+    // point of this edit. `document.querySelector("svg[aria-hidden='true']")`
+    // takes the FIRST match in document order — which on this page is a
+    // breakpoint-hidden `lucide-menu` icon of width 0, not the polygon layer.
+    //
+    // Measured on 2026-09-05: the page carries THREE aria-hidden svgs; index 0
+    // is that icon at width 0, index 1 is the overlay at 125.5, exactly the
+    // canvas's width. So the geometry was right and the assertion was reading
+    // the wrong element — it passed on one tree and failed on pure main with
+    // IDENTICAL code. A cell that passes by luck is worse than one that fails,
+    // because it reports a fix that was never measured.
+    //
+    // `:has(polygon)` is the subject's own child, so the poll below and the
+    // measurement now read the SAME locator, and the measurement asserts the
+    // locator actually resolved to the layer before believing its width.
+    const OVERLAY_SVG = "svg[aria-hidden='true']:has(polygon)";
+    await expect.poll(() => page.locator(`${OVERLAY_SVG} polygon`).count(), { timeout: 20_000 }).toBeGreaterThan(0);
+
+    const widths = async () => page.evaluate((selector) => {
+      const svg = document.querySelector(selector);
       const canvas = document.querySelector("canvas");
       if (!svg || !canvas) return null;
-      return { svg: svg.getBoundingClientRect().width, page: canvas.getBoundingClientRect().width };
-    });
+      return {
+        svg: svg.getBoundingClientRect().width,
+        page: canvas.getBoundingClientRect().width,
+        // Carried out so the assertion can prove WHICH element it measured
+        // rather than trusting the selector to have found the right one.
+        polygons: svg.querySelectorAll("polygon").length,
+      };
+    }, OVERLAY_SVG);
 
     const before = await widths();
     expect(before, "both the page element and its overlay must be on screen").not.toBeNull();
+    expect(before!.polygons, "the measured svg must BE the overlay layer — a zero-polygon match is some other decorative icon").toBeGreaterThan(0);
     expect(Math.abs(before!.svg - before!.page), `svg ${before!.svg} vs canvas ${before!.page}`).toBeLessThanOrEqual(1);
 
     // A real width change, not a simulated one.
+    //
+    // THE POLL WAITS FOR A COMPLETE MEASUREMENT, not merely a different number.
+    // Its first cut read `(await widths())?.page ?? 0` and stopped as soon as
+    // that differed from `before` — which a NULL satisfies instantly, because
+    // the overlay unmounts its <svg> for a frame while the reflowed page is
+    // re-measured (the layer renders only once there are polygons AND a size).
+    // The poll therefore passed on the empty state and the next line dereferenced
+    // null. Waiting on all three facts — resolved, still the layer, and actually
+    // resized — is what makes the assertion below about geometry rather than
+    // about timing.
     await page.setViewportSize({ width: 900, height: 900 });
-    await expect.poll(async () => (await widths())?.page ?? 0, { timeout: 10_000 }).not.toBe(before!.page);
+    await expect
+      .poll(async () => {
+        const w = await widths();
+        return w !== null && w.polygons > 0 && w.page !== before!.page;
+      }, { timeout: 15_000 })
+      .toBe(true);
 
     const after = await widths();
+    expect(after, "the overlay must be back on screen after the reflow").not.toBeNull();
+    expect(after!.polygons, "the overlay layer must still be the element measured after the resize").toBeGreaterThan(0);
     expect(
       Math.abs(after!.svg - after!.page),
       `after the resize the overlay drifted off the page: svg ${after!.svg} vs canvas ${after!.page}`,

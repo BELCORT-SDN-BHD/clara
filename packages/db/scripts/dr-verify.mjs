@@ -29,6 +29,9 @@ import {
   checkSchemasAndJournals, checkTables, checkRoles, checkGrantsAndRls,
   checkConfinementSmoke, checkCanary, checkApGate, checkDocuments,
 } from "./dr-verify-checks.mjs";
+// §4.11 lives in its own module: dr-verify-checks.mjs is at the file-size cap, and this
+// battery is a different KIND of probe — absolute and target-only, never a source diff.
+import { checkIsolationPins } from "./dr-verify-checks-isolation.mjs";
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const MIGRATIONS_DIR = join(SCRIPT_DIR, "..", "migrations");
@@ -160,6 +163,7 @@ async function main() {
     await checkCanary(ctx);
     await checkApGate(ctx);
     await checkDocuments(ctx);
+    await checkIsolationPins(ctx);
   } finally {
     await src.end().catch(() => {});
     await tgt.end().catch(() => {});

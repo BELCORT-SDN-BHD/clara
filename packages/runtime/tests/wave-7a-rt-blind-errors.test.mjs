@@ -85,7 +85,15 @@ test("the three NEW token-specific messages happen to be direction-neutral too �
 });
 
 test("native-constraint collapse (23505/23503/23514) and the structural 42501 mapping are unaffected — still produce oracle-safe, direction-neutral refusals", () => {
-  const dupCounterparty = refusalFromDbError({ code: "23505", constraint: "counterparty_alias_uq" });
+  // H-17 RE-CUT (this PR): `counterparty_alias_uq` was FICTIONAL — the live index is
+  // `uq_counterparty_aliases_live_name` (0011:669-670). `some_other_uq` stays a deliberate
+  // non-name: this cell's subject IS the else-arm, and naming a real index there would test the
+  // wrong thing. Under v6/v7 (substring) both verdicts are unchanged. What CHANGED is that under
+  // autoDraft_v10 the second case no longer answers `double_coded` at all — an unrecognised
+  // unique is `internal/unnamed_unique`, because double_coded is success-shaped. That successor
+  // behaviour is celled in h17-autodraft-v10-constraint-map.test.mjs, not here: these two bodies
+  // are frozen and must keep answering the way they shipped.
+  const dupCounterparty = refusalFromDbError({ code: "23505", constraint: "uq_counterparty_aliases_live_name" });
   assert.equal(dupCounterparty.code, "CLR23");
   const dupOther = refusalFromDbError({ code: "23505", constraint: "some_other_uq" });
   assert.equal(dupOther.code, "CLR21");

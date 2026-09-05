@@ -421,8 +421,11 @@ test("the tool set wires the gate: read_document RECORDS the snapshot it showed,
 // never "v8 is the newest" — it is "the pin is the newest, and every superseded body is still
 // exported" (Appendix A policy (c)). v8 therefore JOINS the policy-(c) list rather than the
 // assertion being deleted, which is the same trueing v7 and v6 got before it.
-test("registry.ts pins autoDraft: autoDraft_v9, and still exports the superseded autoDraft_v8/v7/v6 (policy (c))", () => {
-  assert.equal(registryMod.workflows.autoDraft.name, "autoDraft_v9");
+// H-17 moved the pin to autoDraft_v10 (the exact native-unique constraint map). Same trueing as
+// before: v9 JOINS the policy-(c) list rather than the assertion being deleted.
+test("registry.ts pins autoDraft: autoDraft_v10, and still exports the superseded autoDraft_v9/v8/v7/v6 (policy (c))", () => {
+  assert.equal(registryMod.workflows.autoDraft.name, "autoDraft_v10");
+  assert.equal(typeof registryMod.autoDraft_v9, "function");
   assert.equal(typeof registryMod.autoDraft_v8, "function");
   assert.equal(typeof registryMod.autoDraft_v7, "function");
   assert.equal(typeof registryMod.autoDraft_v6, "function");

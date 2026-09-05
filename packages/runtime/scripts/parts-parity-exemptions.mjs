@@ -79,8 +79,11 @@ const REVIEWED_OBJECT_SPREAD_SITES = [
   ["packages/runtime/lib/relay.mjs","assertNoTargetSplit","...parseUrlTarget(process.env.DATABASE_URL)","b7fac4efda9fec1f95de524d660835ef17527255af69ad9dd7265e7ba2ba9af3","0"],
   ["packages/runtime/lib/relay.mjs","assertNoTargetSplit","...parseUrlTarget(process.env.WORKFLOW_POSTGRES_URL)","d0fce5da9b74af277287fa27a5f72d05e08862412c14ba9094b890c334abad93","0"],
   ["packages/runtime/lib/relay.mjs","assertNoTargetSplit","...pg","314c243f644ce3eb9f984091d1f53d513440baeaf360b08bd57dd99785a6a2e6","0"],
-  ["packages/runtime/lib/relay.mjs","makePool","...connConfig()","0cb9952f85336c1b8cf3f344583e89e5d5d8127f6e18b679c7581a91c24d0924","0"],
-  ["packages/runtime/lib/relay.mjs","makePool","...overrides","0cb9952f85336c1b8cf3f344583e89e5d5d8127f6e18b679c7581a91c24d0924","0"],
+  // RE-CUT for 裁-149 (L9): makePool now wraps its pool construction in
+  // attachPoolErrorContract(...), which changes the ENCLOSING return statement's text and so
+  // its sha256. The two spread signatures are unchanged; only the fingerprint moved.
+  ["packages/runtime/lib/relay.mjs","makePool","...connConfig()","f1d319c7a75db091984eac8fe53d359a38140ac5c30fc8a7faf007974e7a0038","0"],
+  ["packages/runtime/lib/relay.mjs","makePool","...overrides","f1d319c7a75db091984eac8fe53d359a38140ac5c30fc8a7faf007974e7a0038","0"],
   ["packages/runtime/lib/seeding-parse.mjs","regionsToEntries","...parsed","7125ba4324f3a40d081a5cf15988564acd8a3250f7452a2d5b9862189332f06e","0"],
   ["packages/runtime/lib/spool.mjs","mergeTaskMeta","...(current ?? {})","925f8d4872f8a41403bc6a2f69bb0035a1aa31f274918bdf138c54767cd72dfb","0"],
   ["packages/runtime/lib/spool.mjs","mergeTaskMeta","...patch","925f8d4872f8a41403bc6a2f69bb0035a1aa31f274918bdf138c54767cd72dfb","0"],
@@ -142,6 +145,17 @@ const REVIEWED_OBJECT_SPREAD_SITES = [
   ["packages/runtime/workflows/autoDraft.v9.tools.ts","resolveEvidenceRegions","...(actual === null ? {} : { field_path: actual })","7d939ed314d2b860be9e9d87987dddc6f7ad4120a2e2762e9984ab23cd3643ab","0"],
   ["packages/runtime/workflows/autoDraft.v9.tools.ts","runDraftJournalEntry","...(input.counterparty as Record<string, unknown>)","7d79c88a10d6aec0f71928c9d8349383e073739beff6ef8315535c8494c6e44a","0"],
   ["packages/runtime/workflows/autoDraft.v9.tools.ts","runDraftJournalEntry","...(receipt.exception === true ? { exception: true } : {})","2fe6fe026db1f6eda9a69082a7f923e53fba917d74709a11362915256daf7262","0"],
+  // H-17 / autoDraft_v10. Generated with the scanner's own describeParitySite, never hand-written.
+  // ALL FIVE FINGERPRINTS ARE BYTE-IDENTICAL TO THE v9 ROWS DIRECTLY ABOVE, which is the evidence
+  // that the four version-renamed files carry v9's statements unchanged: a fingerprint is the
+  // sha256 of the normalised ENCLOSING STATEMENT, so it could not survive an edit to any of them.
+  // autoDraft.v10.uniques.ts (the one file with new behaviour) contributes NO tuple — it builds no
+  // object by spreading anything.
+  ["packages/runtime/workflows/autoDraft.v10.errors.ts","tierDCapture","...(axis ? { axis } : {})","431052c042c2325d6bbbf74dfbf008721751865682ba860d29a07d8e9c8dc6ca","0"],
+  ["packages/runtime/workflows/autoDraft.v10.impl.ts","recoverAutoDraftStep","...(a.exception === true ? { exception: true } : {})","28bce9aaee47f5efeb83253da0d14b16482b3dedf2f4c67103f53aa9e6371a8f","0"],
+  ["packages/runtime/workflows/autoDraft.v10.tools.ts","resolveEvidenceRegions","...(actual === null ? {} : { field_path: actual })","7d939ed314d2b860be9e9d87987dddc6f7ad4120a2e2762e9984ab23cd3643ab","0"],
+  ["packages/runtime/workflows/autoDraft.v10.tools.ts","runDraftJournalEntry","...(input.counterparty as Record<string, unknown>)","7d79c88a10d6aec0f71928c9d8349383e073739beff6ef8315535c8494c6e44a","0"],
+  ["packages/runtime/workflows/autoDraft.v10.tools.ts","runDraftJournalEntry","...(receipt.exception === true ? { exception: true } : {})","2fe6fe026db1f6eda9a69082a7f923e53fba917d74709a11362915256daf7262","0"],
   ["packages/runtime/workflows/bankAgent.v1.pack.ts","serialiseTools","...(spec as Record<string, unknown>)","b18ec2cecbf2d5193ac7c67e29b908db27815e6ab412d43909935de861f929c9","0"],
   ["packages/runtime/workflows/bankAgent.v1.tools.ts","projectReply","...(typeof r.line_id === \"string\" ? { line_id: r.line_id } : {})","9c80707412d3a8f0c4da39d70eba448a3dcca68fdd171c86a4d0b54c9434dbb4","0"],
   ["packages/runtime/workflows/bankAgent.v1.tools.ts","projectReply","...(typeof r.counterparty_id === \"string\" ? { counterparty_id: r.counterparty_id } : {})","9c80707412d3a8f0c4da39d70eba448a3dcca68fdd171c86a4d0b54c9434dbb4","0"],

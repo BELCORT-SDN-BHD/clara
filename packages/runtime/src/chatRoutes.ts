@@ -157,16 +157,30 @@ export function chatRoutes(): express.Router {
   });
 
   // List the caller's visible sessions (own + firm-shared).
+  //
+  // ARCHIVED SESSIONS ARE EXCLUDED BY DEFAULT (C-1 / 裁-190). `clara.archive_chat_session` is
+  // author-only and one-way; archiving hides a thread from the rail's list and destroys nothing,
+  // so the row and its whole transcript stay readable by id. `?includeArchived=1` returns them —
+  // the thread menu needs a way to show what it hid, and a list that could never surface an
+  // archived thread would make archiving indistinguishable from a delete this table forbids
+  // (0006:378, "chat sessions are not deleted").
+  //
+  // DEPLOY ORDERING, and it is load-bearing: `archived_at` arrives with
+  // UNNUMBERED_web_reads_and_small_doors.sql. This runtime image must NOT be deployed ahead of
+  // that migration's ceremony window, or every session list 500s on an undefined column. Named
+  // in the PR body beside the D1 inventory.
   router.get("/api/chat/sessions", async (req, res) => {
+    const includeArchived = req.query.includeArchived === "1";
     try {
       const rows = await withRuntime(async (c) => {
         const p = await authenticate(c, req.header("authorization"));
         const r = await c.query(
-          `select id, title, client_id, visibility, created_by, created_at
+          `select id, title, client_id, visibility, created_by, created_at, archived_at
              from clara.chat_sessions
             where firm_id = $1 and (visibility = 'firm' or created_by = $2)
+              and ($3 or archived_at is null)
             order by created_at desc limit 200`,
-          [p.firmId, p.sub],
+          [p.firmId, p.sub, includeArchived],
         );
         return r.rows;
       });

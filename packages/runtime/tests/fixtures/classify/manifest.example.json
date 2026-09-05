@@ -1,0 +1,38 @@
+[
+  {
+    "name": "RPR/clara-rpr-decrypted/2025-04 (Maybank current account e-statement)",
+    "document_id": "00000000-0000-0000-0000-000000000000",
+    "firm_id": "00000000-0000-0000-0000-000000000000",
+    "expected_kind": "bank_statement"
+  },
+  {
+    "name": "RS/Alliance Bank statement 2510",
+    "document_id": "00000000-0000-0000-0000-000000000000",
+    "firm_id": "00000000-0000-0000-0000-000000000000",
+    "expected_kind": "bank_statement"
+  },
+  {
+    "name": "BEE CREATIVE/HLB statement 2024-01",
+    "document_id": "00000000-0000-0000-0000-000000000000",
+    "firm_id": "00000000-0000-0000-0000-000000000000",
+    "expected_kind": "bank_statement"
+  },
+  {
+    "name": "RPR/Management accounts YA2025 (balance sheet)",
+    "document_id": "00000000-0000-0000-0000-000000000000",
+    "firm_id": "00000000-0000-0000-0000-000000000000",
+    "expected_kind": "management_account"
+  },
+  {
+    "name": "RS/supplier invoice (EZSEC)",
+    "document_id": "00000000-0000-0000-0000-000000000000",
+    "firm_id": "00000000-0000-0000-0000-000000000000",
+    "expected_kind": "invoice"
+  },
+  {
+    "name": "RPR/salary slip 2025-07",
+    "document_id": "00000000-0000-0000-0000-000000000000",
+    "firm_id": "00000000-0000-0000-0000-000000000000",
+    "expected_kind": "payroll_summary"
+  }
+]

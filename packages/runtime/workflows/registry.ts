@@ -42,6 +42,7 @@ import { autoDraft_v6 } from "./autoDraft.v6.js";
 import { autoDraft_v7 } from "./autoDraft.v7.js";
 import { autoDraft_v8 } from "./autoDraft.v8.js";
 import { autoDraft_v9 } from "./autoDraft.v9.js";
+import { autoDraft_v10 } from "./autoDraft.v10.js";
 import { firmInterview_v1 } from "./firmInterview.v1.js";
 import { firmInterview_v2 } from "./firmInterview.v2.js";
 import { firmInterview_v3 } from "./firmInterview.v3.js";
@@ -124,8 +125,17 @@ export const workflows = {
   // (c)) — the `llm_witness` lane's parks are the deployment-window kind, so a run still resuming
   // into the frozen v2 body at cutover time is the expected case, not a corner one.
   witnessFacts: witnessFacts_v3,
-  // F-A2 (the agentic posting lane): REPOINTED v8 -> v9. Same note, same deploy order.
-  autoDraft: autoDraft_v9,
+  // H-17: REPOINTED v9 -> v10. The unattended coder mapped three different counterparty-identity
+  // uniques onto one untokened, question-shaped CLR23 and called every OTHER unique violation
+  // double_coded, which is success-shaped. v10 replaces that substring test with an exact,
+  // closed constraint-name map (autoDraft.v10.uniques.ts). NO COUPLED MIGRATION AND NO DEPLOY
+  // ORDER IN EITHER DIRECTION: v10 sends the same wire vocabulary to the same unchanged verbs
+  // and only re-reads an error this closure was already catching, so a v10 image against a
+  // pre-migration database and a v9 image against a post-migration one both behave. The
+  // kind-scoped alias unique that ships beside it is an independent DB-side fix — it changes
+  // which collisions can HAPPEN, never how this closure reads one. autoDraft_v9 stays exported
+  // and frozen (policy (c)).
+  autoDraft: autoDraft_v10,
   firmInterview: firmInterview_v3,
   // 裁-21 PR-c: REPOINTED v3 -> v4. The ONLY difference is the question inventory
   // (CLIENT_SEGMENTS_V3 = V2 with `coa_seed` swapped): 裁-23 Q9's re-wording, D-13 item 4's
@@ -644,5 +654,6 @@ export { autoDraft_v6 };
 export { autoDraft_v7 };
 export { autoDraft_v8 };
 export { autoDraft_v9 };
+export { autoDraft_v10 };
 
 export const workflowNames: string[] = Object.keys(workflows);

@@ -244,6 +244,21 @@ test("debt-C2 · users_visible: exactly id + display_name -- email is not just p
 // tranche-2 is expected to add firm_registration_requests_visible later, already designed as
 // security_barrier) is exactly what THIS file would then require too, correctly, once it
 // lands -- not silently missed.
+//
+// AND THAT IS EXACTLY WHAT KEEPS HAPPENING, WHICH IS THE MECHANISM WORKING. P4 tranche-2 landed
+// two (the anticipated firm_registration_requests_visible and the unanticipated
+// counterparty_aliases_visible); two more are in flight as this is written -- H-19's
+// firm_sales_lane_visible and CB-AE2E-018's firm_timeline_visible. Each was built on an existing
+// member's own shape, so each MATCHES the predicate above and joins the family rather than
+// escaping it: a new firm-scoped human read that did NOT show up here would be the finding.
+//
+// AND THE NEW MEMBERS ARE BIMODAL, WHICH IS 裁-108 REACHING THIS FILE. Each ships UNNUMBERED
+// until merge prep and the runner SKIPS such a file, so CI's estate chain carries the pre-cohort
+// THIRTEEN while a numbered chain carries one more per landed cohort. A static roster is wrong on
+// one of the two chains, so the expectation below is derived from a POSITIVE to_regclass read of
+// each view. That is NOT a softening -- the roster stays exactly closed on whichever chain it
+// runs, and any OTHER new member still reds. When both numbers are claimed, every chain carries
+// the fifteen-member family.
 // ---------------------------------------------------------------------------------------
 
 const HRD_A_FAMILY_PREDICATE = `
@@ -260,9 +275,27 @@ async function hrdAFamily() {
   return r.rows.map((x) => x.relname);
 }
 
-test("debt-BAR1 · 裁-15 estate census — EVERY member of the catalog-derived same-shape family (thirteen once P4 tranche-2 lands) carries security_barrier, and the reloption is proven to buy pushdown-ordering, not target-list masking", async (t) => {
+test("debt-BAR1 · 裁-15 estate census — EVERY member of the catalog-derived same-shape family (thirteen, plus each landed cohort read) carries security_barrier, and the reloption is proven to buy pushdown-ordering, not target-list masking", async (t) => {
   if (gate(t)) return;
   const family = await hrdAFamily();
+  // TWO COHORT READS ARE BIMODAL, and they have to be: each ships in an UNNUMBERED file until
+  // merge prep and the runner SILENTLY SKIPS such a file (裁-108), so CI's chain carries the
+  // pre-cohort THIRTEEN while a numbered chain carries one more per landed cohort. A hardcoded
+  // count is wrong on one of the two chains — the census is catalog-derived on the left-hand
+  // side, so the right-hand side is derived too, from a POSITIVE to_regclass read of each view.
+  //
+  // THIS IS NOT A SOFTENING. The roster stays exactly CLOSED on whichever chain it runs: any
+  // OTHER same-shape view still reds here, which is the whole point of the cell. Only these two
+  // named members are conditional, and only on their own existence.
+  //
+  // KEEP-BOTH (#552 × #556). firm_timeline_visible is DB-B's (CB-AE2E-018), firm_sales_lane_
+  // visible is H-19's; #552 merges first, so its spread is carried here verbatim and stays inert
+  // on this branch (to_regclass returns null, the spread contributes nothing) until it lands.
+  // Alphabetical position is preserved by writing each spread where its name sorts.
+  const laneReadLanded = (await rootQuery(
+    "select to_regclass('clara.firm_sales_lane_visible') is not null as ok")).rows[0].ok;
+  const timelineLanded = (await rootQuery(
+    "select to_regclass('clara.firm_timeline_visible') is not null as ok")).rows[0].ok;
   assert.deepEqual(family, [
     "agent_receipts_visible", "agent_tasks_visible", "caller_context",
     "client_identifier_promotions_visible", "coding_tasks_visible",
@@ -270,8 +303,21 @@ test("debt-BAR1 · 裁-15 estate census — EVERY member of the catalog-derived 
     "document_intakes_visible", "document_processing_tasks_visible",
     "firm_invites_visible", "firm_members_visible", "firm_open_questions_visible",
     "firm_registration_requests_visible",
+    ...(laneReadLanded ? ["firm_sales_lane_visible"] : []),
+    ...(timelineLanded ? ["firm_timeline_visible"] : []),
     "users_visible",
-  ], "the catalog-derived family must be exactly the thirteen expected members, closed-world -- P4 tranche-2 (0145) landed both firm_registration_requests_visible (anticipated by this file's own header comment) and counterparty_aliases_visible (a round-4 addition this file's author could not have known about -- 裁-11's masked-view mechanism was chosen AFTER this file merged, to satisfy wave-a-shape's fn-fronted-only invariant)");
+  ], "the catalog-derived family must be exactly the expected members for THIS chain, closed-world"
+    + ` (firm_sales_lane_visible: ${laneReadLanded}, firm_timeline_visible: ${timelineLanded})`
+    + " -- P4 tranche-2 (0145) landed both firm_registration_requests_visible (anticipated by this"
+    + " file's own header comment) and counterparty_aliases_visible (a round-4 addition this file's"
+    + " author could not have known about -- 裁-11's masked-view mechanism was chosen AFTER this file"
+    + " merged, to satisfy wave-a-shape's fn-fronted-only invariant); H-19 landed"
+    + " firm_sales_lane_visible, the read the owner-floored sales-lane control re-reads after its"
+    + " act, built on counterparty_aliases_visible's own shape, which is why it joins this family"
+    + " rather than escaping it; and CB-AE2E-018 / 裁-190 landed firm_timeline_visible (the"
+    + " bookkeeper+ activity feed over clara.domain_events -- a member this census caught on its own"
+    + " author's first estate run, which is the derivation working: the family is read from the"
+    + " catalog, so a new same-shape view joins it whether or not anyone remembered 裁-15)");
 
   const r = await rootQuery(
     `select c.relname, c.reloptions
