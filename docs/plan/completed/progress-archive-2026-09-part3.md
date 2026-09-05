@@ -19,6 +19,7 @@ it. `PROGRESS.md` keeps a pointer in the place of each.*
 | Known issues · the Mail gate and the login-CSRF finding, both TRUED | 11 | 1000 | `55293fd70066d428d3aa7d62b05e999a` |
 | Backlog · the four ceremony truings of 2026-09-05 | 7 | 647 | `ee4533413bc33a7ab7f7f0a2a648c3b2` |
 | Known issues · `0154`'s role census, the CI half, CLOSED BY MEASUREMENT | 4 | 356 | `eab73a1686b9f07c4812ca7495f460a9` |
+| Known issues · Two TRUED findings (Mail gate + login-CSRF), the leftover pointer text | 6 | 509 | `61f7233bf690c46e5b3cb43dceb55641` |
 
 **Two more blocks joined them at the 裁-202 commit,** for the same ceiling reason, and both are
 PROVENANCE rather than current state. **The third** is a pair of Known-issues bullets whose own text
@@ -168,3 +169,21 @@ source.*
   from `packages/db/deploy/roles-bootstrap.sql` and pinned it, and four hosted sweeps since
   (33712469717 · 33723755257 · 33757365379 · 33781966143) came back 13/13 green including
   `closed-wave-drills`. **The LIVE-cluster half is open as H-47.**
+
+---
+
+## One more Known-issues bullet moved, WSL-fleet-decommission docs truing (2026-09-06)
+
+*Freeing lines in `PROGRESS.md` for the WSL-fleet-decommission truing. The bullet below was already
+a pointer to content archived above (the Mail gate and login-CSRF findings, moved at the 裁-202
+commit) — but the pointer text left behind in `PROGRESS.md` was itself six lines of historical
+detail, not the one-line pointer the ceiling calls for. It moves here too, byte-for-byte, and
+`PROGRESS.md` keeps a genuine one-line pointer in its place; the live obligations it names, **H-46**
+and **C-63**, are unaffected — both are already carried as their own Backlog rows.*
+
+- **Two TRUED findings moved BYTE-FOR-BYTE at the 裁-202 commit** (md5
+  `55293fd70066d428d3aa7d62b05e999a`), each a closed record whose one live obligation is already a
+  Backlog row: **RISK 50, the Mail gate** — delivery of a real six-digit code to a NON-team address is
+  proven and the certification call is the owner's (**H-46**); and the **confirmation login-CSRF**
+  finding — the wall is wired for real (#517) and answered in the field, the browser-identity
+  re-measurement carried as **C-63**.
