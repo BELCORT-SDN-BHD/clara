@@ -7,7 +7,8 @@ image the 裁-199 recall gate had already run against; and `clara-web` was promo
 lane as the lead's hands, the lead acting as the owner's **DELEGATE** (裁-189), from merged `main`
 at **`0351f0225a93dcc6fa53989633f5ce5427bf82de`** under the window 裁-198 opened.
 
-Order: "scratchpad/order-CEREMONY-0905.md". The fixed sequence (裁-189) was **DB → runtime →
+Order: `ceremony-order-2026-09-05.md` (filed 2026-09-06; the session scratchpad's
+historical order-CEREMONY-0905.md). The fixed sequence (裁-189) was **DB → runtime →
 Worker**, and it is not cosmetic: `chatRoutes.ts:168-171` states in code that the session-list
 `archived_at` read 500s on every call until `0174` is applied, and `apps/web` already shipped code
 reading it.
