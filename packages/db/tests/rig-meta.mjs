@@ -1207,8 +1207,8 @@ const CHECKOUT_GATE_C6_HUMAN_FNS = ["get_current_checkout_plan", "get_own_checko
 
 export const CHECKOUT_GATE_C6_COHORT = [...CHECKOUT_GATE_C6_HUMAN_FNS];
 
-// 裁-190 web reads and small doors (`UNNUMBERED_web_reads_and_small_doors.sql` +
-// `UNNUMBERED_stmt_witness_totals_and_institution_code.sql` — numbers claimed at merge prep):
+// 裁-190 web reads and small doors (`0174_web_reads_and_small_doors.sql` +
+// `0175_stmt_witness_totals_and_institution_code.sql` — numbers claimed at merge prep):
 // the seven backend gaps the repair-session web lanes are blocked on, plus the statement lane's
 // institution resolver. Every one of the five human doors exists for the SAME reason: the
 // relation that owns the fact is `force row level security` with a single clara_fn_owner policy

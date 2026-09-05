@@ -191,7 +191,7 @@ test("NOG-6 an UNFLAGGED client's customer CAN be enriched -- the scope is the f
 // ---------------------------------------------------------------------------
 // NOG-7..9 -- THE UPDATE ARM.
 //
-// TRUED 2026-09-04 (H-09 / 裁-190, UNNUMBERED_web_reads_and_small_doors.sql). This block's
+// TRUED 2026-09-04 (H-09 / 裁-190, 0174_web_reads_and_small_doors.sql). This block's
 // original comment read: "Today clara._tf_counterparty_update_0011's whitelist already refuses
 // every UPDATE of these columns, for every client ... no product verb can reach this path -- that
 // is the finding, not a shortcut." BOTH halves of that have now changed, and they changed BY

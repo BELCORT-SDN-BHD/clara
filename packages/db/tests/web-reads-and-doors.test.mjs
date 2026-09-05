@@ -1,6 +1,6 @@
 // WEB READS AND SMALL DOORS — the rig battery for
-// packages/db/migrations/UNNUMBERED_web_reads_and_small_doors.sql and its statement-lane sibling
-// UNNUMBERED_stmt_witness_totals_and_institution_code.sql (numbered at merge under 裁-108).
+// packages/db/migrations/0174_web_reads_and_small_doors.sql and its statement-lane sibling
+// 0175_stmt_witness_totals_and_institution_code.sql (numbered at merge under 裁-108).
 //
 // Refs #541 · CB-AE2E-007 · H-18 · CB-AE2E-018 · C-1 · H-09 · CB-AE2E-035 · H-49 · 裁-190.
 //
@@ -84,7 +84,7 @@ function gate(t) {
   }
   assert.fail(
     "web-reads-and-doors is required for a focused run: apply "
-    + "UNNUMBERED_web_reads_and_small_doors.sql (or its numbered suite copy)",
+    + "0174_web_reads_and_small_doors.sql (or its numbered suite copy)",
   );
 }
 
@@ -96,7 +96,7 @@ function stmtGate(t) {
     return true;
   }
   assert.fail(
-    "web-reads-and-doors statement cells require UNNUMBERED_stmt_witness_totals_and_institution_code.sql",
+    "web-reads-and-doors statement cells require 0175_stmt_witness_totals_and_institution_code.sql",
   );
 }
 

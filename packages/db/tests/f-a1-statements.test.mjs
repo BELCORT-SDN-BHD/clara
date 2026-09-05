@@ -234,7 +234,7 @@ test("f-a1s.b the refusal ORDER matches the live ladder, pinned by payloads that
   }
 
   // THE WITNESS LANE'S PRINTED TOTALS — TRUED 2026-09-04 (裁-190,
-  // UNNUMBERED_stmt_witness_totals_and_institution_code.sql). This block used to assert
+  // 0175_stmt_witness_totals_and_institution_code.sql). This block used to assert
   // `totals_unreadable` here, because 0098 folded 'witness' into `v_two` and `v_two` was also the
   // flag the MANDATORY printed totals keyed on. That made a statement whose PAPER prints no
   // TOTAL DEBIT / TOTAL CREDIT block — the common Malaysian shape — pass the structured lane and

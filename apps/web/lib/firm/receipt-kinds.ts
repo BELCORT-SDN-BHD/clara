@@ -90,7 +90,7 @@ export const WIRED_AGENT_RECEIPT_KINDS = [
   // for no reason but an unwritten statement. UNNUMBERED at authoring; the number
   // is claimed at merge prep under 裁-108, which is why this comment names the
   // MEMBER migration rather than the one that re-cuts the shim.
-  "agent_act", // UNNUMBERED_web_reads_and_small_doors.sql -> clara.agent_act_receipts
+  "agent_act", // 0174_web_reads_and_small_doors.sql -> clara.agent_act_receipts
 ] as const satisfies readonly AgentReceiptKind[];
 
 /** The four whose shim is still 0103's typed-empty stub. The two lists are
