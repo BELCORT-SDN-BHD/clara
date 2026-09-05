@@ -75,3 +75,13 @@ what did the re-reading find?"
 > lead's recommendation with the dissent filed once, and the lead's implementation reading is recorded so a
 > lane cannot build a 503 out of an unconfigured or unmeasured lane. **197** queues three product tickets
 > after the nine, ordered (iii) → (ii) → (i). Digest rows 101–104.
+
+> **2026-09-05 ≈17:55–17:58 MYT — the deploy block (裁-198 · 199).** Digest re-read against both rulings
+> in [`mohe-grill-rulings-2026-09-04-pm.md`](../plan/active/mohe-grill-rulings-2026-09-04-pm.md);
+> **neither amends a standing law and neither mints an ADR** under 裁-140. **198** schedules the ceremony
+> 裁-189 already assigned — tonight, gated on the chain landing and a 13-job green sweep on the final
+> `main`, in ONE write-quiesce window with the runtime stopped, backup first, per-step rollback. **199**
+> closes the hole #558 left: the classify gate's floor is NON-REGRESSION per KIND plus zero new
+> confident-and-wrong rows, with no absolute number until the first real-corpus run mints a baseline.
+> The re-brief that produced it is worth keeping: the classifier decides a document's KIND, not its
+> client. Digest rows 105–106.

@@ -42,7 +42,10 @@ workflow).
 ## 1. Backup first (fresh, verified)
 
 One-off backup run: `fly machine start d895470c6024e8 -a clara-backup`
-— **never** a plain `fly deploy` on the backup app. Confirm the run's zero-501 log and the
+— **never** a plain `fly deploy` on the backup app.
+**That machine id predates the 2026-09-03 factory reset and is NOT to be reused: re-derive it live
+with `fly machine list -a clara-backup` and start the id that command returns.** The id above is
+kept only so the shape of the command is readable. Confirm the run's zero-501 log and the
 object count against yesterday's.
 
 ## 2. Strict write quiescence

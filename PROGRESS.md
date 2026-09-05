@@ -6,6 +6,87 @@ file wins or it is stale — and truing it is the first thing you do.
 
 ## Current posture
 
+**⇢ 2026-09-05 — THE REPAIR SESSION LANDED. NOTHING IS DEPLOYED YET.** The session the owner opened
+at ≈09:00 MYT on 2026-09-04 ran to ≈17:00 MYT on 2026-09-05 and put **eighteen pull requests,
+#543…#560**, through the ladder against issue **#541**'s authenticated e2e audit, the owner's own
+UIUX flaws list and the beta handover's rows. **All eighteen are merged**, the last three on
+2026-09-05 — #556 `autoDraft` v10 at 09:19Z, #557 firm and client home at 12:04Z, #559 the rulings
+docs at 12:55Z. Read a PR's verdict from
+`gh pr list --state merged --search "merged:>=2026-09-04"`, never from this paragraph.
+
+**What landed, by area** (merge shas from `gh`, times converted from the UTC stamps at UTC+8):
+
+| area | PR | merge | what it closed |
+|---|---|---|---|
+| entry / signup | #544 | `e9dbf094` | confirm-code link, honest pending copy, password policy, Stripe key-class gate, `customer_email` — H-35 · H-38 · CB-AE2E-003/006 |
+| statement lane | #545 | `a2d098f2` | `statementFacts` **v3** — period from the statement date with a stated basis, witness→roster institution normalisation, task settlement on step failure — H-02 · H-03 · H-05 |
+| journals | #548 | `144f0a8f` | entries data table, one Approve plus a Posted legend, clarification question text — CB-AE2E-021/022 · H-32 · H-33 · 裁-187 |
+| onboarding | #546 | `aa5fef4a` | typed answers, settled receipt, scope invalidation, add-client, dialog scroll — H-26/27/28/29/30/50/51 · CB-AE2E-008/023/024 |
+| chat rail | #547 | `d1b12f9b` | Enter-to-send, thread menu, typed bank act and pack cards, tool-call status — H-24 · 裁-117 · C6 |
+| firm space | #550 | `c21f26c3` | needs-you what/why/next/when, agent task detail, capability-gated admin controls (**the high-stakes threshold control removed, 裁-187**) — CB-AE2E-014/018/025/026/033 · H-25 |
+| bank / close / registers | #549 | `90b59cc1` | statement header pair, dialogs that stay open on refusal across 15 wrappers, four opening gates, restart close — H-06 · H-11 · H-16 · H-34 · H-54/56 · seven CB-AE2E rows |
+| shell | #553 | `80e42bf7` | responsive firm shell (drawer, overflow nav, overlay rail), favicon, rank-shaped ⌘K — CB-AE2E-019 · H-31 · C-43 |
+| documents | #555 | `6bad969b` | MIME-gated open-in-new-tab plus report-only CSP, page-overlay evidence viewer, tiered extraction — **C-07** · D1/D2/D3 · CB-AE2E-022 |
+| documents e2e | #560 | `2f736758` | the overlay measurement reads the overlay layer, not the first hidden svg |
+| runtime ops | #558 | `2060c762` | per-lane boot probe, the pool error contract (裁-149 · **ARCHITECTURE §4.3**), pooler CA in the image, `/build-info`, classifier recall harness — H-48 · C-04 · H-43 · CB-AE2E-035 · H-04 |
+| DB — close and documents | #551 | `d28b6a75` | document-kind codeability table, honest close gates, classification resolved on `set_document_kind`, `apply_coa_template` refuses an open plan (**裁-193**) — H-12 · H-22 · H-29 · H-53 · H-55 |
+| DB — reads and doors | #552 | `5007bbcc` | own DPA signature, client egress state, firm timeline, chat archive, counterparty identifiers, build frontier, DR canary registry — CB-AE2E-007/018/035 · H-09 · H-49 |
+| docs | #543 · #554 | `dbaf9056` · `0f2f44de` | 裁-186…190 and ADR-0078; 裁-191 · 裁-192 |
+| autoDraft v10 | #556 | `9ed75f49` | exact constraint-name error map (no masked CLR23), kind-scoped alias unique, owner-floored sales-lane activation — H-17 · H-19 · CB-AE2E-012 |
+| firm + client home | #557 | `127c4513` | firm home dashboard and client workspace situation board, tax tab — E-1 · F-1 · CB-AE2E-032 |
+| rulings docs | #559 | `f57f6af4` | 裁-193…197 and the 裁-149 clause-2 erratum |
+
+**The database sets.** `packages/db/migrations` now carries **0165…0175** on `main` (eleven files,
+counted by `ls`), with **0176** riding #556. **SIX bodies owe a D1 write-quiesce window** across five
+of those files, named in their own headers: `clara.set_document_kind` (`0169`),
+`clara._gate_outstanding_items` (`0172`), `clara.apply_coa_template` (`0173`),
+`clara._tf_chat_session_update()` and `clara._tf_counterparty_update_0011()` (`0174`), and
+`clara._persist_statement_core_v2` (`0175`, which asks for the `statement_facts` lane to be quiesced
+specifically). `0166`, `0167`, `0168`, `0170` and `0171` state in their headers that no window is
+owed.
+
+**What it proved.** The three sources reconciled into one register and every item was anchored to
+code before a lane opened, so the fixes landed against measured coordinates rather than descriptions.
+**裁-187's abolition is now visible in the product** — the Admin high-stakes threshold control is
+gone (#550) and the journals surface shows one Approve (#548). **The statement lane, the coder and
+the close gates — three of the four failures the 裁-184 walk found — have code on `main`.**
+
+**What it did NOT do. NOTHING IS DEPLOYED.** No as-run record under `docs/plan/completed/` carries a
+2026-09-05 date, and the deploy ceremonies of **裁-189** have not run — **裁-198 opens them the
+evening of 2026-09-05**, once the chain has landed (it has) and a hand-dispatched sweep on the FINAL
+`main` is green on all 13 jobs, read from `gh run view --json jobs`. The order is fixed and it is
+not optional:
+
+1. **The DB ceremony for `0165`…`0176`** from merged `main`, with the six D1 write-quiesce bodies
+   above. **裁-198's shape: backup first and verified · ONE write-quiesce window with the runtime
+   STOPPED, not six narrow ones · per-step rollback recorded step by step.** Stopping the runtime is
+   what makes `0175`'s "quiesce the `statement_facts` lane" unconditional. **`0174` adds
+   `clara.chat_sessions.archived_at` and widens the chat-session update trigger, and `apps/web`
+   already ships code that reads it**
+   (`apps/web/components/clara/ClaraThreadMenu.tsx`, `apps/web/lib/clara/useActiveThread.ts`) —
+   **so the Worker must not be promoted before this ceremony, or
+   every session list 500s.**
+2. **Runtime v75** from merged `main`. It clears H-01, the v71↔schema skew that logs every ~2 s.
+   **Gated by 裁-199's floor:** per-KIND recall with the new prompt ≥ the live prompt's, kind by kind,
+   **and zero new rows the new prompt gets wrong at confidence ≥ 0.8 — one blocks the image.**
+3. **The web Worker**, last. There is no repoint rollback (裁-156); a broken Worker is fixed forward
+   by re-promoting a walked version.
+
+**Nine tickets are queued and not started**, in the order the orchestrator will open them: **(1)**
+DB-D, H-21 the onboarding interview's captures projection · **(2)** the consent lane (裁-186, the
+firm-level DPA-stage declaration) · **(3)** DB-C, the wall-removal lane (裁-188) · **(4)** L10
+`chatTurn` v18 (H-07 · H-08) · **(5)** the web copy sweep, which runs last among the web lanes ·
+**(6)** reporting H-15 · **(7)** the required browser-smoke CI job (裁-192, CB-AE2E-036) · **(8)**
+H-47, the re-migration preflight and runbooks · **(9)** CB-001, the Terms document kind, which needs
+an owner sitting. **Then the three chat tickets of 裁-197, in the ruled order (iii) → (ii) → (i):**
+chatTurn tools and cards for the five gaps ≈1.5 units → real readers for the nine ids-only part kinds
+≈1 unit → provisional streaming text in the rail ≈0.7 unit.
+
+**The owner's own list, unchanged and still owed:** the favicon assets · the Stripe dashboard edits
+(H-37 the product description, H-39 the duplicate webhook endpoint) · the two Supabase auth decisions
+(H-40) · the Resend cap read (H-45) · the two role-password rotations (H-42, 裁-178 accepted) ·
+**DPA v2 and the lawyer's pass** (H-36, 裁-125/166).
+
 **⇢ 2026-09-04 ≈09:00 MYT — THE REPAIR SESSION IS OPEN on the owner's ask.** Three sources — the
 owner's UIUX flaws file, issue **#541** (the authenticated e2e audit, 36 defects) and the handover's
 own rows — are being unified into one register, each item anchored to code by a mapping workflow
@@ -18,94 +99,24 @@ lane runs this session after the P0 block; the two production deploys (runtime v
 are the lead's as the owner's delegate; native lanes only. The posture below is the beta's and still
 holds.
 
-**⇢ BETA IS LIVE, AND IT IS CLOSED. THE SPRINT SESSION IS OVER.** The owner ruled **裁-185** on
-2026-09-04 ≈06:15 MYT (`AskUserQuestion`, option 1 of 3 — "GO — 封閉 beta（建議）"): the product is live
-at `https://app.clarabook.com` for **BELCORT and owner-invited testers only**, and open applicants
-wait for **a new runtime image (v75 or later)** + the statement-lane fixes + the "Enter a statement"
-form fix + **DPA v2**.
-Sign-ups are not switched off at the platform (`disable_signup: false`, read by Management API), so
-the closure is an OPERATING posture — the owner controls who gets the address — not a technical wall.
-Under **裁-150** this session CLOSES with the PR that carries this edit: **the repo is the handover
-and there are NO next lanes.** The next session starts on the owner's ask.
-
-**⇢ READ THIS NEXT: [`docs/plan/active/beta-handover-2026-09-04.md`](docs/plan/active/beta-handover-2026-09-04.md)
-and its [part 2](docs/plan/active/beta-handover-2026-09-04-part2.md) and
-[part 3](docs/plan/active/beta-handover-2026-09-04-part3.md).** That is the complete report
-裁-185 asked for — the posture in plain language, the milestone tally of the beta-live walk, **every
-backlog item and known issue across backend, frontend, harness, ops and legal** with an id, an owner,
-a next step, a size guess and a priority tier, the harness notes, and an ordered pick-list. **The
-Backlog and Known-issues sections below are SHORT ROWS pointing at that file's ids; the detail lives
-there**, and the two sections as they read before this truing were moved byte-for-byte to
-[`docs/plan/completed/progress-archive-2026-08-part8.md`](docs/plan/completed/progress-archive-2026-08-part8.md).
-
-**What ran, and what it proved.** FS-10 (the P6-X cutover) opened 22:10 MYT 2026-09-03 and moved
-`app.clarabook.com` from Cloudflare Pages to the Worker `clara-web` at **≈00:31 MYT 2026-09-04**;
-FS-11 (the Wave-G factory reset) opened ≈01:32 and closed with BELCORT re-minted through the
-product's own self-serve door; the 裁-184 product walk ran to 05:44. As-runs:
-[`fs10-cutover-asrun-2026-09-03-part3.md`](docs/plan/completed/fs10-cutover-asrun-2026-09-03-part3.md)
-· [`fs11-wave-g-asrun-2026-09-03-part4.md`](docs/plan/completed/fs11-wave-g-asrun-2026-09-03-part4.md)
-(+ parts 5 and 6) ·
-[`launch-sitting-record-2026-09-04-part3.md`](docs/plan/completed/launch-sitting-record-2026-09-04-part3.md).
-**Honest tally: of the ELEVEN enumerated milestones — 6 PASS · 1 PARTIAL · 2 FAIL · 2 NOT REACHED**
-(never "16 of 16"; sixteen was never enumerated anywhere — 裁-164). **Every refusal in the walk was
-fail-closed with a plain receipt, and no wrong number entered the books at any point.**
-
-- **Web:** Cloudflare Worker `clara-web`, version **I = `c5b1e051-6c68-4f56-8ba2-28b3265979e1`**,
-  100 %, six secrets + three vars. Both `workers.dev` URLs OFF (404). **The Pages project `clara` is
-  DELETED** and `clara-e3o.pages.dev` no longer resolves — **there is no repoint rollback**; a broken
-  Worker is fixed FORWARD by re-promoting a walked version (裁-156, dissent filed on it).
-- **Runtime:** Fly machine `48ee715b763048`, 2/2 checks, `/ready` **true**. `fly status` VERSION reads
-  **74**, and `fly releases --json` at 06:21 settled what that means: **v71, v72, v73 and v74 all
-  carry the same image `deployment-01M1JSJW8SW0EZ1SP8ZR48B1WZ`** — v72–v74 are the night's three
-  `fly secrets import` releases (裁-179 ×2 + the freeform password), **not new code**, so the served
-  code is the **v71** build of `344f7ad8` and **the next real deploy is v75**. **#533's reconciler
-  unwire is MERGED AND NOT SERVING:** the DB no longer defines `clara.reconcile_autopost_rules`, v71
-  still calls it, and the runtime logs the error every ~2 s. **A new image (v75 or later) is handover
-  row H-01 and it is the first thing to do.** `held_outbox` **6** at the close (0 at 02:39) is **read
-  and explained**: `/ready` at 06:21 shows `wakeEngine.heldForDisabledSource` 6 with the warning "6
-  held/queued wake-engine row(s) awaiting a disabled/unregistered source" — the designed loudness of
-  裁-165's disabled wake sources (`docs/plan/active/g1-wake-engine-design.md:114`), not a fault.
-- **Database:** factory-reset and re-applied from scratch — **159 migrations, frontier
-  `0164_checkout_gate_c6_web_reads`**, 19 `clara%` roles, `verify_evaluator_freeze()` reading
-  `{"ok": true, "verified_deployed": 7, "verified_registered": 8}`. All six runtime lane DSNs now
-  carry `uselibpqcompat=true&sslmode=require` — **encrypted, certificate UNVERIFIED** (裁-179 option
-  c; before tonight four of them were PLAINTEXT). verify-full is handover row H-43.
-- **Estate:** firms **Alara · Borneo · BELCORT** (`04daf86c-3aaf-4c59-9442-cce93f3582af`,
-  `is_operator = true`, the only operator firm the unique index admits) · clients Meridian Logistics ·
-  Sunrise Retail · Highland Coffee · ROME PROPERTIES `acb60b65…` · **ROME SECRETARY `7a045c7f…`**
-  (active, 86-account chart, one sales invoice posted, one bank receipt settled, and **FY2025 OPEN
-  with two close runs, both ABANDONED** — run 1 at 05:39 to book the settlement, run 2
-  `db941c04-f78e-4595-9004-08df90be1631` at 23:55:11Z = 07:55 MYT at the clock-out, so the period
-  wall is not left on for the next session; no attestation, no finalize). **BEE CREATIVE SOLUTION and
-  ROME PUBLIC ADVISORY were NOT re-onboarded** — they died with the schema at step 4 and are owed
-  before the next full-estate walk (constraint 13).
-- **Books pins — RE-CUT.** The standing RS pin **3,396,500 = 3,396,500 is UNPROVEN POST-RESET: its
-  SUBJECT no longer exists.** Those books were built through the product at Slice 6 and died at the
-  step-4 drop under **裁-177** (the owner waived the pre-reset dump; dissent filed). **The new pins,
-  both re-derived by `trial_balance_as_of` from the DB and never read off a chat reply:** at **20:58Z**
-  `1100` Dr 2,800.00 / `4000` Cr 2,800.00, and at **21:40Z** `1020` Dr 2,800.00 · `1100` net 0 ·
-  `4000` Cr 2,800.00.
-- **`main` = `ba8e7d35`** (#540, the `apps/dashboard` source delete). The hand sweep **33781966143**
-  on it: **SUCCESS, 13 of 13 jobs**, ≈02:14 MYT — the tree without `apps/dashboard` is proven green
-  across every leg including the closed-wave drills and the four frontier legs.
-- **The test-data authority has EXPIRED WITH BETA.** Constraint 14 is DATA-scoped and expires at beta,
-  and 裁-162's FS-11-scoped supersession of `docs/ops/DR.md`'s owner-run classifier expired with the
-  ceremony. **From here: no agent-run destructive command against the live project.** BELCORT is the
-  operator firm; the Rome/BEE clients remain resettable TEST fixtures (ADR-0075, constraint 13).
-- **CI** is GitHub-hosted on `ubuntu-latest` (裁-135) and **the repo is PUBLIC**; the four `clara-wsl`
-  runners are stopped and disabled. After any PR touching a closed drill or the pipeline itself, run
-  `gh workflow run ci.yml` by hand, and read a sweep's verdict from `gh run view`'s job list.
-- **Hard-blocked ids** (canary `daba7f2e` · witness `d023b48c`) — hook-enforced
-  (`scripts/hooks/pinned-ids-guard.mjs`). Their clara-side rows died with the schema at step 4
-  (裁-160, accepted); the hook and the constraint are unchanged.
+**⇢ The beta-live posture block that stood here — the 裁-185 GO paragraph and the whole "What ran,
+and what it proved" bullet list — moved BYTE-FOR-BYTE to
+[`progress-archive-2026-09-part1.md`](docs/plan/completed/progress-archive-2026-09-part1.md)** at
+this truing (md5 `50f77696976ce97534407334231a8206`, 80 lines, 7294 bytes, computed on both sides of
+the move and verified present there before this file lost it). It is still exactly right about
+2026-09-04 ≈06:15 MYT; it is no longer a statement of today's posture. **Beta remains LIVE and
+CLOSED** at `https://app.clarabook.com` for BELCORT and owner-invited testers — 裁-185 is not
+reversed, and the closure is still an OPERATING posture, not a technical wall.
 
 ## Lanes
 
-| lane | branch | state |
-|---|---|---|
-| `docs-rulings-186` | branch docs/rulings-186-190-2026-09-04 | this PR — 裁-186…190 and ADR-0078 trued into the digest, the PRD, ARCHITECTURE, the index and the harness |
-| map-and-sweep (workflow) | — | running: anchors every register item to code, sweeps sibling flaws |
-| the P0 block, the UIUX lanes, the wall-removal lane (裁-188), the two deploys (裁-189) | — | queued, opened by the orchestrator in that order |
+| lane | state |
+|---|---|
+| every build lane of the repair session | **closed** — all eighteen PRs (#543…#560) are merged; the per-lane table is in the session log below, not here |
+| the DB ceremony for `0165`…`0176` (裁-189) | **queued, and it blocks both deploys** — six D1 write-quiesce bodies |
+| runtime v75 (裁-189) | queued behind the ceremony, gated on the classify recall run (#558 MAJOR-3) |
+| the web Worker promotion (裁-189) | queued last; no repoint rollback (裁-156) |
+| the nine queued tickets, then 裁-197's three chat tickets | not started; the order is in the posture block above |
 
 The sprint's build closed on 2026-09-03,
 the beta-live e2e ran on 09-03/09-04, and every lane in the old table was `merged` or `ceremonied` —
@@ -120,18 +131,14 @@ and the beta sprint is written down. That table is the beta sprint's closed lane
 [`beta-handover-2026-09-04.md`](docs/plan/active/beta-handover-2026-09-04.md) §E, and its first block
 is the only one that gates anything:
 
-1. **The P0 block — everything the beta stays CLOSED until.** a new runtime image, v75 or later
-   (H-01) · the "Enter a statement"
-   institution/account pair (H-06) · one `statementFacts.v3` train for the period-bounds inference,
-   the witness→roster normalisation and the task settlement (H-02 · H-03 · H-05) · `autoDraft_v10`
-   for the masked CLR23 (H-17) · the client-consent surface, built the owner's way — collected in the
-   onboarding interview and granted on commit (H-18, 裁-182) · the /auth/confirm link (H-35) ·
-   **DPA v2** (H-36) and the Stripe product-description edit (H-37) · verify-full TLS (H-43) and the
-   two password rotations (H-42) · **C-07 the XML MIME gate (裁-175, lifted into P0 because beta now
-   takes real uploads)** · the re-migration runbook truings and the per-lane boot probe (H-47 ·
-   H-48). ≈**7 lane-units** plus a handful of owner minutes. **The order of H-43 and C-07 is the
-   LEAD's** — both rulings called themselves the first post-beta code item; the owner re-orders them
-   at the next session's opening if he disagrees.
+1. **The P0 block — MOSTLY CODED, NONE OF IT SERVING.** The repair session wrote code for H-02 ·
+   H-03 · H-05 (#545) · H-06 (#549) · H-35 · H-38 (#544) · H-43 · H-48 · H-04's harness (#558) ·
+   C-07 (#555) · H-17 · H-19 (#556). **Every one of them reaches a user only after the
+   three deploy steps in the posture block**, so the P0 block is now a DEPLOY problem, not a build
+   problem. **Still unbuilt in P0:** H-18 the client-consent surface, which 裁-186 re-shaped into
+   the firm-level DPA-stage declaration · **DPA v2** (H-36) and the Stripe product-description edit
+   (H-37), both owner acts · the two password rotations (H-42, 裁-178 accepted) · H-47 the
+   re-migration preflight and runbooks. **H-01 is closed by the v75 deploy itself.**
 2. **The walk's P1 product rows**, starting with **H-21** — projecting the onboarding interview's
    captures, which alone unblocks four separate symptoms.
 3. **The pre-上市 roadmap in its ruled order** (裁-148 · 裁-150): the pricing sitting (裁-58, which
@@ -156,6 +163,41 @@ why it matters, the fix shape, a size guess, an owner, a ruling number and a tie
 are the index. The pre-truing text of both sections is archived verbatim in
 [`progress-archive-2026-08-part8.md`](docs/plan/completed/progress-archive-2026-08-part8.md).
 
+- **H-43 and H-48 — THE CODE SHIPPED IN #558 (`2060c762`, merged 2026-09-04). What is left is an
+  OPERATOR CEREMONY, not a build.** On `main` today: the per-lane boot probe
+  (`packages/runtime/lib/lane-probe.mjs`, whose own line 128 calls it "the full seven-lane roster",
+  surfaced on `/ready` under `checks.pools` at `packages/runtime/lib/health.mjs:361-372`) · the TLS
+  boot assert (`packages/runtime/lib/tls-ca.mjs`) · the build-info route
+  `apps/web/app/api/build-info/route.ts` · the
+  classify recall harness (`packages/runtime/scripts/measure-classify-recall.mjs`). **H-48 is closed
+  by code and opens for real at the v75 deploy.** **H-43's remainder is the ceremony in
+  [`runtime-tls-verify-full-ceremony.md`](docs/ops/runtime-tls-verify-full-ceremony.md): flip the
+  FIVE runtime DSN secrets that take the pin in that ceremony to `verify-full`** — three more take
+  it whenever their own operator ceremonies run, and `DATABASE_URL` is checked by the code but is
+  not a deployed secret. The 2026-09-04 posture block keeps its historical wording; these rows are
+  the current state.
+- **NEW, from the 2026-09-04→05 repair session — the queue, in order:** **Q-01** DB-D, H-21 the
+  onboarding interview's captures projection · **Q-02** the consent lane (裁-186, the firm-level
+  DPA-stage declaration; re-shapes H-18) · **Q-03** DB-C, the wall-removal lane (裁-188 — every
+  attestation ceremony and maker-checker wall out of the door bodies, receipts in) · **Q-04** L10
+  `chatTurn` v18 (H-07 · H-08) · **Q-05** the web copy sweep, last among the web lanes · **Q-06**
+  reporting H-15 · **Q-07** the required browser-smoke CI job (裁-192 · CB-AE2E-036) · **Q-08** H-47
+  the re-migration preflight and runbooks · **Q-09** CB-001 the Terms document kind (owner sitting).
+  **Then 裁-197's three, ruled order:** **Q-10** chatTurn tools and cards for the five gaps (≈1.5) ·
+  **Q-11** real readers for the nine ids-only part kinds (≈1) · **Q-12** provisional streaming text in
+  the rail (≈0.7).
+- **NEW — follow-ups the lanes and reviews surfaced, each needing an owner and a next step:**
+  **F-01** `clara.sst_threshold_schedule` has no `clara_authenticated` grant, so the Tax tab's
+  turnover-classification control cannot offer the statutory thresholds (裁-196 d; a SELECT grant or
+  a definer read, DB-D) · **F-02** the requeue-once lane (裁-195; copy
+  `readmit_autodraft_after_withdrawal`, ≈0.5) · **F-03** the 裁-196 (a)+(b) runtime follow-up —
+  refuse to boot on `sslmode=no-verify`, and fail `/ready` for a CONFIGURED-but-unreachable
+  non-runtime lane only (≈0.5, L9) · **F-04** the classifier engine-id `:v2` bump, which needs a DB
+  lane and an in-flight transition posture because `enqueue_document_processing` hard-codes `:v1`
+  (#558) · **F-05** the whole-prefix claim on the PostgREST rpc route in
+  `apps/web/e2e/fs4-checkout-mock.mjs`, held closed today only by `workers: 1` · **F-06**
+  `apps/web/app/globals.css` is above the 500-line write hook and the next writer must split it
+  first.
 - **P0 — before the first EXTERNAL applicant (15 rows), handover §C.1:** H-01 the v71↔DB skew
   (`reconcile_autopost_rules`; a new image, v75 or later) · **C-07 the XML `blob:` open with no MIME
   gate and no CSP (裁-175)** · H-02 Maybank headers state no period bounds · H-03 the
@@ -202,6 +244,69 @@ are the index. The pre-truing text of both sections is archived verbatim in
 ## Known issues
 
 Same index rule: the detail is in the handover. What a reader most needs to know today:
+
+**New this session (2026-09-04→05), each measured on `main` at `5007bbcc`:**
+
+- **NOTHING THE SESSION BUILT IS SERVING.** Fifteen PRs are on `main` and the deploy ceremonies have
+  not run. The single ordering hazard that can break production: **`0174` adds
+  `clara.chat_sessions.archived_at`, and `apps/web` already ships readers for it** — promote the
+  Worker before the DB ceremony and every chat session list returns 500.
+- **No door can close an open question whose document filing was RETIRED** (review-551 on #551).
+  `retire_document_filing` never touches `open_questions`, and both `resolve` and
+  `dismiss_open_question` are walled by `_active_document_filing`; `0169` now makes the same orphan
+  block `set_document_kind` too — a correct refusal that widens a pre-existing dead end by one door.
+  Needs a small door (`dismiss_orphaned_question`, or a lift inside `retire_document_filing`).
+- **A chart planted mid-interview survived a cancelled client and blocked every later apply forever**
+  (`0173`'s own header, lines 98–115). Until that rung the door consulted the onboarding plan
+  nowhere, so a chart could be applied mid-interview and, if the client was then CANCELLED, archived
+  holding it, with `chart_not_empty` refusing afterwards. 裁-193's rung closes the path forward;
+  **any client already in that state predates the fix and is not repaired by it.**
+- **`clara.sst_threshold_schedule` has no firm-user read** (裁-196 d) — the Tax tab's classification
+  control can only offer the client's own watch groups.
+- **The classifier engine id cannot be bumped to `:v2` without a DB lane** (#558) —
+  `enqueue_document_processing` hard-codes `:v1` at `0123:1128`, `classify_document` matches it
+  exactly at `0016:3225-3228`, and `0102:447` byte-pins it. A bump today strands every classify task.
+- **Three e2e-harness rules the CI-E2E lane (裁-192) must carry, or the browser gate ships blind:**
+  **(i)** the table primitive has **no browser coverage** — no walk face renders a read-only table
+  that scrolls, and axe applies `scrollable-region-focusable` only to a region that actually scrolls,
+  so `apps/web/components/ui/table.tsx`'s `tabIndex` is unproven in a browser · **(ii)** the mock
+  **body-consumption** order hazard — `bank-close-registers-mock.mjs:206` reads the request body
+  unconditionally on every PostgREST rpc POST, and only hook ORDER keeps the later lanes alive; the
+  fix is one memoising `readJson` plus a parse-after-match cell · **(iii)** the **selector-luck**
+  class, found 2026-09-05 on `documents-viewer-walk.spec.ts:198` — a generic `svg[aria-hidden='true']`
+  picked a breakpoint-hidden icon on one tree and the overlay on another with identical code, so the
+  cell passed by luck; every smoke spec must use a subject-scoped locator and assert it resolved
+  before measuring.
+- **`packages/runtime/README.md` is stale against #558.** Grepped on `main` at `5007bbcc`, it names
+  `packages/runtime/lib/tls-ca.mjs` exactly once — line 398, about the in-image CA path and its
+  drift cell — and names **none** of the per-lane boot probe, the build-info route, the recall
+  harness, or the
+  new `/ready` shape that reports `checks.pools`. A reader following that README today will not
+  learn the runtime grew a boot probe. **Owner: the 裁-196 runtime follow-up lane**, which is
+  already touching the same files.
+- **The H-04 classify gate's floor is NON-REGRESSION, not a number** (**裁-199**, which closed this
+  the same day it was filed). Runtime v75 ships when per-KIND recall with the new prompt is ≥ the
+  live prompt's, **kind by kind and never as an aggregate** — an aggregate can rise while bank
+  statements collapse, the exact H-04 failure the walk found — **and when no row the new prompt gets
+  wrong at confidence ≥ 0.8 was right under the live one; ONE such case blocks the image.** Do not
+  mistake `packages/runtime/scripts/measure-classify-recall.mjs`'s `CONFIDENCE_GATE` of `0.8` for a
+  pass mark: it is the per-row bar `clara.classify_document` itself applies, at the script's own
+  line 63. **No absolute floor exists yet, by ruling** — the first run against the real corpus mints
+  the baseline and the owner sets a number then.
+- **`apps/web/README.md` has no routine Worker redeploy or version-promote runbook.** It documents
+  the `wrangler.jsonc` bindings and the secrets posture, and it carries no deploy or release
+  section at all — the only walked procedure anywhere is the FS-10 first-deploy as-run, which is a
+  one-time cutover record, not a repeatable runbook. **The v75 and Worker ceremony as-run creates
+  it**; until then a promote is done from memory, and there is no repoint rollback (裁-156).
+- **Two stale in-code claims, both measured:** `apps/web/components/firm/identifier-promotion-row.tsx:7`
+  still cites the pre-numbering name UNNUMBERED_proposal_basis_resolved.sql, which has since been
+  numbered `packages/db/migrations/0143_proposal_basis_resolved.sql` ·
+  `apps/web/app/(firm)/clients/[clientId]/layout.tsx:65-66` says "22 call sites in 20 files on this
+  tree, **7** of them client-altitude" — the 22 and the 20 still measure true, but the
+  client-altitude count is **9**: four `<PageHeader>` call sites in pages under the client route plus
+  five in workbench components that render only there (close, documents, journals, reports, tax).
+  The comment undercounts because it filtered by route path and the five workbenches live under the
+  components tree.
 
 - **The serving image and the schema disagree** (H-01) — `reconcile_autopost_rules` is called by v71
   and defined nowhere; the autopost reconcile belt is dead and the log storms every ~2 s. **A new
@@ -271,7 +376,36 @@ truings to keep this file inside its cap. **At the FINAL clock-out truing on 202
 `Known issues` sections moved to
 [`-part8.md`](docs/plan/completed/progress-archive-2026-08-part8.md)** — all four byte-for-byte, each
 md5 computed on both sides of the move and each verified present in its archive before this file lost
-it.)*
+it. **At the 2026-09-05 repair-session clock-out the beta-live posture block moved to the first
+2026-09 part,
+[`progress-archive-2026-09-part1.md`](docs/plan/completed/progress-archive-2026-09-part1.md)** — 80
+lines, 7294 bytes, md5 `50f77696976ce97534407334231a8206` on both sides.)*
+
+- **2026-09-04→05 — THE REPAIR SESSION: EIGHTEEN PRs, TWELVE RULINGS, NOTHING DEPLOYED.** The owner
+  opened it at ≈09:00 MYT on 2026-09-04 with three sources and one instruction — his own UIUX flaws
+  file, issue **#541** (the authenticated production e2e audit, 36 defects, NO-GO) and the beta
+  handover — and it ran into the evening of 2026-09-05. **Fourteen rulings, 裁-186…199**, opened and
+  steered it: 186 consent becomes a firm-level declaration at the DPA stage and 187 abolishes every
+  attestation ceremony and maker-checker wall in favour of basic RBAC (both **against the
+  recommendation**, both minuted as **ADR-0078**, both dissents on file) · 188 the wall-removal DB
+  lane · 189 the two deploys as the lead's delegate · 190 native lanes only · 191 two arguable
+  document kinds are codeable · 192 the browser smoke becomes a required CI gate (amends 裁-86) ·
+  193 the chart applies only after commit (against the recommendation) · 194 the 裁-149 clause-2
+  premise correction, the first premise erratum this register has carried · 195 requeue-once · 196
+  four readiness and grant items, (b) against the recommendation · 197 three chat tickets queued.
+  **Every item in the register was anchored to code before a lane opened**, which is why the fixes
+  landed against measured coordinates. All eighteen PRs are merged. **The evening added two more
+  rulings:** **198** opens the DB ceremony for `0165`…`0176` that night, gated on the chain landing
+  and a 13-job green sweep on the final `main`, in ONE write-quiesce window with the runtime
+  stopped · **199** sets the classify gate's floor at NON-REGRESSION per KIND plus zero new
+  confident-and-wrong rows, with no absolute number until the first real-corpus run mints a
+  baseline. **Two session-limit cuts** (≈11:20 and ≈12:58 MYT on 09-04) stopped every running agent
+  mid-flight; all were resumed from their transcripts with an explicit instruction to re-read their
+  worktree before trusting their last command, and no lane lost work. **The lesson that cost the most:
+  merging a docs PR in the middle of a code PR's CI cycle forces that PR to re-update and re-run** —
+  under the "head must be up to date with base" rule, docs merge between code cycles or you pay a
+  cycle. **The session ended with nothing deployed**, which is the state the next session opens on:
+  the DB ceremony first, then v75, then the Worker.
 
 - **2026-09-04 — BETA WENT LIVE, AND THE SPRINT SESSION CLOSED.** In one continuous sitting from
   22:10 MYT on 2026-09-03: **FS-10** built the OpenNext/Workers artifact in WSL, created the Worker

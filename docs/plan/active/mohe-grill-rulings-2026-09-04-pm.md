@@ -271,6 +271,60 @@ DB lane (DB-D). No separate ruling file.
 **Order among the three: (iii) → (ii) → (i)** unless the owner says otherwise — he listed (iii) first.
 They queue AFTER the nine lanes already ordered. No separate ruling file.
 
+### 裁-198 — the DB ceremony for `0165`…`0176` opens as soon as the chain lands and the hand sweep on the final `main` is green — tonight (owner, 2026-09-05 ≈17:55 MYT, `AskUserQuestion` option (a) of 3; recommendation followed)
+
+**Context.** The repair session put eleven migrations on `main` (`0165`…`0175`) with `0176` riding
+#556, and **six bodies owe a D1 write-quiesce window** — `clara.set_document_kind` (`0169`),
+`clara._gate_outstanding_items` (`0172`), `clara.apply_coa_template` (`0173`),
+`clara._tf_chat_session_update()` and `clara._tf_counterparty_update_0011()` (`0174`), and
+`clara._persist_statement_core_v2` (`0175`). Nothing is deployed, and the ordering is not optional:
+`0174` adds `clara.chat_sessions.archived_at` and `apps/web` already ships readers for it, so the
+Worker cannot be promoted first.
+
+**Ruled (a): tonight, on two preconditions, in ONE window.** The ceremony opens as soon as **(i)** the
+merge chain has landed and **(ii)** a hand-dispatched sweep on the FINAL `main` comes back green on all
+**13** jobs — read from `gh run view --json jobs`, never from a PR's colours. The shape:
+
+1. **Backup first**, verified, before any DDL.
+2. **ONE write-quiesce window with the runtime STOPPED** — not six narrow ones. The six bodies go in
+   together; stopping the runtime is what makes `0175`'s "quiesce the `statement_facts` lane"
+   requirement unconditional rather than a lane-by-lane judgement.
+3. **Per-step rollback**, recorded step by step, so a failure at step N does not require reasoning
+   about steps 1…N-1 after the fact.
+
+**Then, and only then:** runtime v75 (gated by 裁-199), then the web Worker. **Amends** nothing — it
+schedules the ceremony 裁-189 already assigned to the lead as the owner's delegate. No separate ruling
+file — this entry is the text of record.
+
+### 裁-199 — the H-04 classify gate's floor for runtime v75 is NON-REGRESSION on the real corpus, not an absolute number (owner, 2026-09-05 ≈17:58 MYT, option (a) of 3, after one 大白话 re-brief; recommendation followed)
+
+**The re-brief, because the first framing was wrong in the room.** The classifier decides a document's
+**KIND** — invoice, receipt, bank statement, tax correspondence — **not which client it belongs to**.
+Client attribution is a separate structural wall (PRD §6 invariant 2(a)); a classifier miss files a
+document under the wrong KIND, which surfaces as a wrong close-gate population or a document that never
+reaches the coding lane, **never as a cross-client leak**.
+
+**The problem this closes.** `packages/runtime/scripts/measure-classify-recall.mjs` reports
+`recall_at_gate` as a percentage and prints it, and **nothing in the repo said what percentage passes**.
+The script's `CONFIDENCE_GATE` of `0.8` is the per-row confidence bar `clara.classify_document` itself
+applies — the script says so at its own line 63 — **not a verdict on the run**. #558's commit put the
+floor with the owner and the deploy runsheet treated the run as pass/fail, so the two disagreed until
+this ruling.
+
+**Ruled (a): NON-REGRESSION on the real corpus.** Runtime v75 ships when both hold:
+
+1. **Per-KIND recall with the new prompt is ≥ the live prompt's**, kind by kind. Not an aggregate — an
+   aggregate can rise while bank statements collapse, which is the exact H-04 failure the 裁-184 walk
+   found.
+2. **ZERO new "confident and wrong" cases** — a row the new prompt predicts at confidence ≥ 0.8 that
+   the live prompt did not get wrong at that confidence. **ONE such case blocks the image.** A
+   confident wrong answer is worse than a refusal, because the gate lets it through unexamined.
+
+**No absolute number is set, and that is deliberate:** there is no baseline yet, and a number invented
+before a measurement is a number nobody can defend. **The first run of the harness against the real
+corpus MINTS the baseline**; an absolute floor becomes settable once it exists, and the owner sets it
+then. **Amends** nothing — it fills the gap #558 left open. No separate ruling file.
+
 ---
 
 **What follows in this session, so the next reader can find it:** the unified defect register built from

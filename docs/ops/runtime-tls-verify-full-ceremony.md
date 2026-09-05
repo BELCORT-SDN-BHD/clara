@@ -13,7 +13,7 @@ alone**, and the order is fail-closed in the wrong direction if reversed.
 
 | piece | where |
 |---|---|
-| the CA in the runner stage at `/app/ops/tls/pooler-ca.crt` | `packages/runtime/Dockerfile` |
+| the CA in the runner stage at the in-container path /app/ops/tls/pooler-ca.crt | `packages/runtime/Dockerfile` |
 | the fingerprint pin + the ported structural validation | `packages/runtime/lib/tls-ca.mjs` |
 | the boot assert (refuses a pinned-but-broken CA; WARNs when nothing is pinned) | `packages/runtime/lib/pools.mjs`, inside `assertProductionPoolConfig` |
 | the drift cells (the COPY line, the two fingerprint pins agreeing) | `packages/runtime/tests/l9-tls-ca.test.mjs` |
@@ -80,7 +80,7 @@ the table below is the whole census, so count it rather than a sentence.
 
 `DATABASE_URL` is in `TLS_CHECKED_DSN_VARS` (`packages/runtime/lib/tls-ca.mjs`) because the boot
 assert must judge whatever is actually set, and this variable is a legitimate base source on a
-local rig and in `scripts/serve.mjs`'s own `WORKFLOW_POSTGRES_URL` fallback. The deployed runtime
+local rig and in `packages/runtime/scripts/serve.mjs`'s own `WORKFLOW_POSTGRES_URL` fallback. The deployed runtime
 does not set it — `packages/runtime/README.md`'s secrets list does not name it — so there is
 nothing to re-set here. It is listed so the code's nine checked variables and this table's rows
 reconcile rather than quietly differing by one.
