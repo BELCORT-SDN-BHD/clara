@@ -132,6 +132,7 @@ export const NON_PATH_ALLOWLIST = new Set([
   "build/wave-a-daily-loop", // a git branch (the Wave-A build lane), not a directory
   "actions/checkout@v4", // a GitHub Actions ref in a CI excerpt, not a file
   "github.com/mosaladtaooo/clara", // ADR-001's original repo URL written without a scheme (the repo has since moved to the org, ADR-021)
+  "mosaladtaooo/clara", // docs/agents/issue-tracker.md's transfer note — the pre-move owner/repo slug, not a path in this tree
   "openai/gpt-5-mini", // a model identifier (the extraction lane's OCR model), not a file
   "BELCORT-SDN-BHD/clara", // a GitHub owner/repo slug, not a path in this tree
   "manifest.json", // a file INSIDE a produced backup bundle (DR.md §9), not a file in this repo

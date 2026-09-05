@@ -249,3 +249,17 @@ every PR, docs-only included.
 
 **Ceremonies run from merged `main`, never from a branch.** A migration that replaces a live
 writer's body needs a D1 write-quiesce window; the recipes live in `docs/ops/`.
+
+## Agent skills
+
+### Issue tracker
+
+GitHub Issues in `BELCORT-SDN-BHD/clara` (PRs are not treated as a request surface). `PROGRESS.md` stays the state authority per hard constraint 8. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+The five default canonical labels (`needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`), unchanged. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context, harness-native: the domain layer is `AGENTS.md`/`CLAUDE.md` plus `docs/product/PRD.md`, `docs/ARCHITECTURE.md`, and `docs/adr/`, not a generic single-file domain doc. See `docs/agents/domain.md`.
