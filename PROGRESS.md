@@ -447,18 +447,10 @@ changed.**
   裁-202 commit** (md5 `ee00ad7ca2b8e8ee099f06482fbe99e9`) **because those counts self-stale.**
   **(1) The 500-line ceiling is a WRITE-BLOCKING PreToolUse hook** — a 501st line is refused AT THE
   WRITE, so the next writer of ANY file checks its count and archives or splits BEFORE adding.
-  **(2) The worktree census is a WALK, never a list (裁-173)** — re-walk `git worktree list` first,
-  and **removal is junction-UNSAFE on this host**: unlink every reparse point, re-walk to prove none
-  remain, then remove, then post-flight `git status` on main; never `robocopy /mir` without `/XJ`.
-  Two host facts that do not move: the OpenNext/Workers artifact must be **built on Linux**, and
-  **WSL idle-terminates without a Windows-side holder** — plant a detached keeper first.
+  **(2) The worktree census is a WALK, never a list (裁-173)** — re-walk `git worktree list` first, unlink every reparse point, re-walk to prove none remain, then remove, then post-flight `git status` on main; never `robocopy /mir` without `/XJ` — the exact procedure that removed **all 60** .claude/worktrees entries from merged lanes on **2026-09-06** (`git worktree list` now shows `main` only).
+  **The WSL `.vhdx` was 77.3 GB before `wsl --shutdown`, 31.8 GB after it** — Windows reclaimed the freed sparse blocks automatically at 06:47; the distro holds ~9.5 GB, so a `diskpart` → `compact vdisk` (admin) is OPTIONAL for the remaining ~20 GB, not owed — and **the CI runner fleet is separately DECOMMISSIONED** (`docs/ops/ci-runner.md` "Decommissioned 2026-09-06"); WSL itself stays live for the DB test rigs and the Worker's Linux-only OpenNext build. **WSL idle-terminates without a Windows-side holder** — plant a detached keeper before the next port-dependent WSL work.
 - **`0154`'s cluster-wide role census, the CI half — CLOSED BY MEASUREMENT** (#525 derived the roster from `packages/db/deploy/roles-bootstrap.sql` and pinned it; four hosted sweeps came back 13/13 green including `closed-wave-drills`); **the record moved BYTE-FOR-BYTE** to [`progress-archive-2026-09-part3.md`](docs/plan/completed/progress-archive-2026-09-part3.md), md5 `eab73a1686b9f07c4812ca7495f460a9`. **The LIVE-cluster half stays open as H-47.**
-- **Two TRUED findings moved BYTE-FOR-BYTE at the 裁-202 commit** (md5
-  `55293fd70066d428d3aa7d62b05e999a`), each a closed record whose one live obligation is already a
-  Backlog row: **RISK 50, the Mail gate** — delivery of a real six-digit code to a NON-team address is
-  proven and the certification call is the owner's (**H-46**); and the **confirmation login-CSRF**
-  finding — the wall is wired for real (#517) and answered in the field, the browser-identity
-  re-measurement carried as **C-63**.
+- **Two TRUED findings' pointer text (RISK 50, the Mail gate; the confirmation login-CSRF finding)** moved BYTE-FOR-BYTE at this truing to [`progress-archive-2026-09-part3.md`](docs/plan/completed/progress-archive-2026-09-part3.md), md5 `61f7233bf690c46e5b3cb43dceb55641`; the live obligations stay carried as **H-46** and **C-63**.
 
 ## Session log
 
@@ -490,7 +482,9 @@ lines, 7294 bytes, md5 `50f77696976ce97534407334231a8206` on both sides.)*
   opening reports against `fc39c361` (裁-202: 66 of 128 walk rows FIXED and serving, the ruled queue
   Q-00 → Q-03 → Q-01+Q-02 → Q-02b → …) and trued this file; #566 vendored mattpocock/skills at `3cca18b3`
   (v1.2.3; six upstream-retired skills kept pending the owner's word); #567 killed the 0.28 % CLR10
-  account-number fixture flake CI met on #566 (`f-a3pr3.mfA.pos`), with a 10 000-draw property cell.
+  account-number fixture flake CI met on #566 (`f-a3pr3.mfA.pos`), with a 10 000-draw property cell;
+  the host clean-up — runners decommissioned, docker pruned 25 GB, 60 worktrees removed,
+  codebase-memory-mcp 0.10.8, canonical graph rebuilt (39 970 nodes / 204 921 edges).
 
 ---
 

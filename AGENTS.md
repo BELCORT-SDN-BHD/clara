@@ -101,7 +101,7 @@ leaked credential, a stranded run, a cross-tenant read. Everything else is judge
 | Legal/compliance pack for owner review — OpenAI DPA brief, client authorization letter (en/ms/zh), PDPA s.129 cross-border basis, the beta signup consent text + its byte-identity law (裁-90, [`docs/ops/legal/clara-beta-dpa.md`](docs/ops/legal/clara-beta-dpa.md)), and the beta terms of service template (裁-125/129 — a separate document kind, [`docs/ops/legal/clara-beta-terms.md`](docs/ops/legal/clara-beta-terms.md)); every beta legal text is an agent template refined with a lawyer at official launch, never darkened | `docs/ops/legal/` |
 | Backup, restore, DR drill, readiness, SLO | `docs/ops/DR.md` |
 | Piping a live DSN through a ceremony — the CA-pinned TLS bridge, never `sslmode=no-verify` | `docs/ops/dsn-bridge.md` |
-| The CI runner: what it is, how to operate or decommission it | `docs/ops/ci-runner.md` (**hosted since 2026-09-02; the WSL fleet is parked**) |
+| The CI runner: what it is, how to operate or decommission it | `docs/ops/ci-runner.md` (**hosted since 2026-09-02; the WSL fleet was decommissioned 2026-09-06**) |
 | Migrations, seeds, the test rig, DR tooling | `packages/db/README.md` |
 | The durable runtime: workflows, pools, document intake, deploy | `packages/runtime/README.md` |
 | Building/porting the production frontend | `apps/web/README.md` + `apps/web/AGENTS.md`; `docs/plan/active/fe-train-plan-2026-08-30.md` + `docs/plan/active/fe-train-plan-2026-08-30-orders-p4.md` + `docs/plan/active/fe-train-plan-2026-08-30-orders-p6.md`; `docs/plan/active/port-wave-plan-2026-08-28.md` + `docs/plan/active/port-wave-plan-2026-08-28-part2.md` |
@@ -198,17 +198,14 @@ Law 1 is the floor, not the ceiling.
 CI is GitHub Actions on **GitHub-hosted `ubuntu-latest` runners** (Ubuntu 24.04, one fresh
 single-tenant VM per job) since **2026-09-02** (裁-135, owner — speed for the beta sprint;
 `docs/ops/ci-runner.md` "Hosted from 2026-09-02"). Same workflows, same binding green-check
-gate. **The four self-hosted WSL2 runner instances** (`clara-wsl` … `clara-wsl-4`, labels
-`self-hosted, linux, clara`) **are still registered but no event routes to them** — the
-`runs-on` label is gone from every job. The private-repo-only order of operations that
-governed them is now a **decommission note**: they are removed by `config.sh remove`
-(`docs/ops/ci-runner.md` "Re-register / decommission") and must never be re-pointed at
-`pull_request` while the repo is public. **The four services were stopped and disabled at
-21:48 MYT on 2026-09-02** (GitHub shows all four offline; the un-registration completes later) —
-and stopping them does NOT reap a cancelled job's service containers: five orphaned
-`<jobid>_postgres17_<hash>` containers were found and removed 2h17m later, so the census
-step in that runbook section is part of the decommission. Every job carries a `timeout-minutes`
-ceiling — hosted minutes are billed, so a hung leg can no longer burn hours.
+gate. **The four self-hosted WSL2 runners are DECOMMISSIONED** (`clara-wsl` … `clara-wsl-4`) —
+un-registered 2026-09-06 06:35–06:37 MYT via `config.sh remove` with a fresh removal token per
+runner, their `~/actions-runner{,-2,-3,-4}` directories deleted, and Docker inside that WSL
+distro pruned alongside; `gh api repos/BELCORT-SDN-BHD/clara/actions/runners --jq .total_count`
+now reads **0**. The record and the removal procedure are in `docs/ops/ci-runner.md`
+("Decommissioned 2026-09-06"). **The residual rule survives for any future self-hosted
+runner: never point one at `pull_request` while the repo is public.** Every job carries a
+`timeout-minutes` ceiling — hosted minutes are billed, so a hung leg can no longer burn hours.
 
 Every PR gets the lint job unconditionally, docs-only diffs included — freeze-lint,
 leak-scan, gitleaks, the wiki dynamic-SQL gates, harness-links, eslint. A diff that touches

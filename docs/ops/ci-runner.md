@@ -201,12 +201,42 @@ which `closed-wave-drills` does not yet have. **This red was predicted before th
 against; the fix lane is open as PR #518. When it lands, re-dispatch the sweep — that is the
 only thing that re-proves this leg.
 
-## The self-hosted fleet (2026-08-11 → 2026-09-02) — parked, kept for decommission
+## The self-hosted fleet (2026-08-11 → 2026-09-02) — DECOMMISSIONED 2026-09-06
 
 **What this was.** The SAME GitHub Actions CI — same workflows, same binding green-check
 gate on every PR (the engineering doctrine is unchanged) — executing on our own hardware
 instead of GitHub-hosted runners, because the org's free-tier minutes exhausted and the
 merge queue froze. Runner minutes on self-hosted are free and unlimited for private repos.
+
+## Decommissioned 2026-09-06
+
+The four self-hosted runners are fully removed, not merely parked. `gh api
+repos/BELCORT-SDN-BHD/clara/actions/runners --jq .total_count` reads **0**.
+
+**What was done, in order (06:35–06:37 MYT):** for each of `clara-wsl`, `clara-wsl-2`,
+`clara-wsl-3`, `clara-wsl-4` (GitHub runner ids 21–24) — `svc.sh uninstall`, then
+`config.sh remove` with a fresh removal token per runner. Their directories,
+`/home/runner/actions-runner{,-2,-3,-4}` (5.6 + 3.9 + 3.5 + 3.4 GB), were deleted inside
+WSL. **Kept:** the /home/runner/clara-web-build clone (the Linux-only Worker build
+checkout, `docs/ops/worker-redeploy-runbook.md`) and the standalone wrangler under
+/tmp/wr — WSL itself stays, for the DB test rigs and the Worker build.
+
+**Docker inside WSL was pruned** (`docker system prune -a --volumes -f`): **25.36 GB
+reclaimed** — 97 volumes (21.95 GB, the dead rigs), 9 images (2.0 GB), 40 build-cache
+entries (0.6 GB), and the two exited `preview-rig` / `preview-postgrest` containers. The
+`postgres:17` image is re-pulled by the next rig that needs one.
+
+**The two WSL keeper processes** (`wsl -d Ubuntu -- sleep infinity`, alive since
+2026-09-04 08:39) were stopped and `wsl --shutdown` was run; `vmmemWSL` is gone. Re-plant
+a keeper before the next port-dependent WSL work (the standing WSL operating law below).
+
+**The `.vhdx` was 77.3 GB before `wsl --shutdown`, 31.8 GB after it** — Windows reclaimed
+the freed sparse blocks automatically at 06:47; the distro holds ~9.5 GB, so a `diskpart` →
+`compact vdisk` (admin) is OPTIONAL for the remaining ~20 GB, not owed.
+
+Everything from here to the end of this file is now a **historical record** — the fleet
+that existed and the procedure that removed it — kept should a self-hosted runner ever be
+stood up again, never as a live topology.
 
 ## Topology
 
