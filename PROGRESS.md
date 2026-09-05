@@ -9,8 +9,9 @@ file wins or it is stale — and truing it is the first thing you do.
 **⇢ 2026-09-05 — THE REPAIR SESSION LANDED. NOTHING IS DEPLOYED YET.** The session the owner opened
 at ≈09:00 MYT on 2026-09-04 ran to ≈17:00 MYT on 2026-09-05 and put **eighteen pull requests,
 #543…#560**, through the ladder against issue **#541**'s authenticated e2e audit, the owner's own
-UIUX flaws list and the beta handover's rows. **Fifteen are merged; three are in the merge chain**
-(#556 `autoDraft` v10, #557 firm and client home, #559 the rulings docs). Read a PR's verdict from
+UIUX flaws list and the beta handover's rows. **All eighteen are merged**, the last three on
+2026-09-05 — #556 `autoDraft` v10 at 09:19Z, #557 firm and client home at 12:04Z, #559 the rulings
+docs at 12:55Z. Read a PR's verdict from
 `gh pr list --state merged --search "merged:>=2026-09-04"`, never from this paragraph.
 
 **What landed, by area** (merge shas from `gh`, times converted from the UTC stamps at UTC+8):
@@ -31,9 +32,9 @@ UIUX flaws list and the beta handover's rows. **Fifteen are merged; three are in
 | DB — close and documents | #551 | `d28b6a75` | document-kind codeability table, honest close gates, classification resolved on `set_document_kind`, `apply_coa_template` refuses an open plan (**裁-193**) — H-12 · H-22 · H-29 · H-53 · H-55 |
 | DB — reads and doors | #552 | `5007bbcc` | own DPA signature, client egress state, firm timeline, chat archive, counterparty identifiers, build frontier, DR canary registry — CB-AE2E-007/018/035 · H-09 · H-49 |
 | docs | #543 · #554 | `dbaf9056` · `0f2f44de` | 裁-186…190 and ADR-0078; 裁-191 · 裁-192 |
-| autoDraft v10 | #556 | **landing** | exact constraint-name error map (no masked CLR23), kind-scoped alias unique, owner-floored sales-lane activation — H-17 · H-19 · CB-AE2E-012 |
-| firm + client home | #557 | **landing** | firm home dashboard and client workspace situation board, tax tab — E-1 · F-1 · CB-AE2E-032 |
-| rulings docs | #559 | **landing** | 裁-193…197 and the 裁-149 clause-2 erratum |
+| autoDraft v10 | #556 | `9ed75f49` | exact constraint-name error map (no masked CLR23), kind-scoped alias unique, owner-floored sales-lane activation — H-17 · H-19 · CB-AE2E-012 |
+| firm + client home | #557 | `127c4513` | firm home dashboard and client workspace situation board, tax tab — E-1 · F-1 · CB-AE2E-032 |
+| rulings docs | #559 | `f57f6af4` | 裁-193…197 and the 裁-149 clause-2 erratum |
 
 **The database sets.** `packages/db/migrations` now carries **0165…0175** on `main` (eleven files,
 counted by `ls`), with **0176** riding #556. **SIX bodies owe a D1 write-quiesce window** across five
@@ -51,18 +52,23 @@ gone (#550) and the journals surface shows one Approve (#548). **The statement l
 the close gates — three of the four failures the 裁-184 walk found — have code on `main`.**
 
 **What it did NOT do. NOTHING IS DEPLOYED.** No as-run record under `docs/plan/completed/` carries a
-2026-09-05 date, and the deploy ceremonies of **裁-189** have not run. The order is fixed and it is
+2026-09-05 date, and the deploy ceremonies of **裁-189** have not run — **裁-198 opens them the
+evening of 2026-09-05**, once the chain has landed (it has) and a hand-dispatched sweep on the FINAL
+`main` is green on all 13 jobs, read from `gh run view --json jobs`. The order is fixed and it is
 not optional:
 
 1. **The DB ceremony for `0165`…`0176`** from merged `main`, with the six D1 write-quiesce bodies
-   above. **`0174` adds `clara.chat_sessions.archived_at` and widens the chat-session update
-   trigger, and `apps/web` already ships code that reads it**
+   above. **裁-198's shape: backup first and verified · ONE write-quiesce window with the runtime
+   STOPPED, not six narrow ones · per-step rollback recorded step by step.** Stopping the runtime is
+   what makes `0175`'s "quiesce the `statement_facts` lane" unconditional. **`0174` adds
+   `clara.chat_sessions.archived_at` and widens the chat-session update trigger, and `apps/web`
+   already ships code that reads it**
    (`apps/web/components/clara/ClaraThreadMenu.tsx`, `apps/web/lib/clara/useActiveThread.ts`) —
    **so the Worker must not be promoted before this ceremony, or
    every session list 500s.**
 2. **Runtime v75** from merged `main`. It clears H-01, the v71↔schema skew that logs every ~2 s.
-   **Gated on the classify recall run** — #558's MAJOR-3 — because the classifier harness that ships
-   with it has not been run against the real corpus.
+   **Gated by 裁-199's floor:** per-KIND recall with the new prompt ≥ the live prompt's, kind by kind,
+   **and zero new rows the new prompt gets wrong at confidence ≥ 0.8 — one blocks the image.**
 3. **The web Worker**, last. There is no repoint rollback (裁-156); a broken Worker is fixed forward
    by re-promoting a walked version.
 
@@ -106,7 +112,7 @@ reversed, and the closure is still an OPERATING posture, not a technical wall.
 
 | lane | state |
 |---|---|
-| every build lane of the repair session | **closed** — fifteen PRs merged, three in the merge chain (#556 · #557 · #559); the per-lane table is in the session log below, not here |
+| every build lane of the repair session | **closed** — all eighteen PRs (#543…#560) are merged; the per-lane table is in the session log below, not here |
 | the DB ceremony for `0165`…`0176` (裁-189) | **queued, and it blocks both deploys** — six D1 write-quiesce bodies |
 | runtime v75 (裁-189) | queued behind the ceremony, gated on the classify recall run (#558 MAJOR-3) |
 | the web Worker promotion (裁-189) | queued last; no repoint rollback (裁-156) |
@@ -127,7 +133,7 @@ is the only one that gates anything:
 
 1. **The P0 block — MOSTLY CODED, NONE OF IT SERVING.** The repair session wrote code for H-02 ·
    H-03 · H-05 (#545) · H-06 (#549) · H-35 · H-38 (#544) · H-43 · H-48 · H-04's harness (#558) ·
-   C-07 (#555) · H-17 · H-19 (#556, landing). **Every one of them reaches a user only after the
+   C-07 (#555) · H-17 · H-19 (#556). **Every one of them reaches a user only after the
    three deploy steps in the posture block**, so the P0 block is now a DEPLOY problem, not a build
    problem. **Still unbuilt in P0:** H-18 the client-consent surface, which 裁-186 re-shaped into
    the firm-level DPA-stage declaration · **DPA v2** (H-36) and the Stripe product-description edit
@@ -278,13 +284,15 @@ Same index rule: the detail is in the handover. What a reader most needs to know
   new `/ready` shape that reports `checks.pools`. A reader following that README today will not
   learn the runtime grew a boot probe. **Owner: the 裁-196 runtime follow-up lane**, which is
   already touching the same files.
-- **No numeric recall FLOOR exists for the H-04 classify gate, and one is owed before v75 ships.**
-  `packages/runtime/scripts/measure-classify-recall.mjs` reports `recall_at_gate` as a percentage
-  and prints it; **nothing in the repo says what percentage passes.** Do not mistake the script's
-  `CONFIDENCE_GATE` of `0.8` for that floor — that is the per-row confidence bar
-  `clara.classify_document` itself applies (the script says so at its own line 63), not a verdict on
-  the run. #558's commit puts the floor with the owner, and the deploy runsheet treats the recall
-  run as pass/fail, so **the two disagree until someone sets a number.** It gates runtime v75.
+- **The H-04 classify gate's floor is NON-REGRESSION, not a number** (**裁-199**, which closed this
+  the same day it was filed). Runtime v75 ships when per-KIND recall with the new prompt is ≥ the
+  live prompt's, **kind by kind and never as an aggregate** — an aggregate can rise while bank
+  statements collapse, the exact H-04 failure the walk found — **and when no row the new prompt gets
+  wrong at confidence ≥ 0.8 was right under the live one; ONE such case blocks the image.** Do not
+  mistake `packages/runtime/scripts/measure-classify-recall.mjs`'s `CONFIDENCE_GATE` of `0.8` for a
+  pass mark: it is the per-row bar `clara.classify_document` itself applies, at the script's own
+  line 63. **No absolute floor exists yet, by ruling** — the first run against the real corpus mints
+  the baseline and the owner sets a number then.
 - **`apps/web/README.md` has no routine Worker redeploy or version-promote runbook.** It documents
   the `wrangler.jsonc` bindings and the secrets posture, and it carries no deploy or release
   section at all — the only walked procedure anywhere is the FS-10 first-deploy as-run, which is a
@@ -376,7 +384,7 @@ lines, 7294 bytes, md5 `50f77696976ce97534407334231a8206` on both sides.)*
 - **2026-09-04→05 — THE REPAIR SESSION: EIGHTEEN PRs, TWELVE RULINGS, NOTHING DEPLOYED.** The owner
   opened it at ≈09:00 MYT on 2026-09-04 with three sources and one instruction — his own UIUX flaws
   file, issue **#541** (the authenticated production e2e audit, 36 defects, NO-GO) and the beta
-  handover — and it ran to ≈17:00 MYT on 2026-09-05. **Twelve rulings, 裁-186…197**, opened and
+  handover — and it ran into the evening of 2026-09-05. **Fourteen rulings, 裁-186…199**, opened and
   steered it: 186 consent becomes a firm-level declaration at the DPA stage and 187 abolishes every
   attestation ceremony and maker-checker wall in favour of basic RBAC (both **against the
   recommendation**, both minuted as **ADR-0078**, both dissents on file) · 188 the wall-removal DB
@@ -386,8 +394,12 @@ lines, 7294 bytes, md5 `50f77696976ce97534407334231a8206` on both sides.)*
   premise correction, the first premise erratum this register has carried · 195 requeue-once · 196
   four readiness and grant items, (b) against the recommendation · 197 three chat tickets queued.
   **Every item in the register was anchored to code before a lane opened**, which is why the fixes
-  landed against measured coordinates. Fifteen PRs merged and three were in the chain at the
-  clock-out. **Two session-limit cuts** (≈11:20 and ≈12:58 MYT on 09-04) stopped every running agent
+  landed against measured coordinates. All eighteen PRs are merged. **The evening added two more
+  rulings:** **198** opens the DB ceremony for `0165`…`0176` that night, gated on the chain landing
+  and a 13-job green sweep on the final `main`, in ONE write-quiesce window with the runtime
+  stopped · **199** sets the classify gate's floor at NON-REGRESSION per KIND plus zero new
+  confident-and-wrong rows, with no absolute number until the first real-corpus run mints a
+  baseline. **Two session-limit cuts** (≈11:20 and ≈12:58 MYT on 09-04) stopped every running agent
   mid-flight; all were resumed from their transcripts with an explicit instruction to re-read their
   worktree before trusting their last command, and no lane lost work. **The lesson that cost the most:
   merging a docs PR in the middle of a code PR's CI cycle forces that PR to re-update and re-run** —
