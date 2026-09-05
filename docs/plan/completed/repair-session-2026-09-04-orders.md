@@ -1,8 +1,11 @@
 # Repair session 2026-09-04 — the queued work orders
 
 The eight QUEUED work orders of the 2026-09-04→06 repair session, filed here byte-verbatim from
-the session scratchpad, in the queue order `PROGRESS.md`'s Backlog (Q-01…Q-09) gives. Each order
-inherits [`repair-session-2026-09-04-house-rules.md`](repair-session-2026-09-04-house-rules.md)
+the session scratchpad, in the order they were issued; their queue positions are `PROGRESS.md`'s
+Backlog (Q-01 = DB-D, Q-02 = CONSENT-186, Q-03 = DB-C, Q-04 = L10, Q-05 = L17, Q-06 =
+REPORTING-H15, Q-07 = CI-E2E-192; L18 is unnumbered; Q-08/Q-09 have no order filed here), which
+governs. Each order inherits
+[`repair-session-2026-09-04-house-rules.md`](repair-session-2026-09-04-house-rules.md)
 (the common house rules plus the lead-run migration renumber tool). Scratchpad paths named inside
 an order below (`scratchpad/order-*.md`, worktree names) are historical labels from when the
 order was drafted — the order text itself, not that path, is the durable copy. `PROGRESS.md`

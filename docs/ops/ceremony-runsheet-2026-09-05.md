@@ -1,11 +1,12 @@
 # The 2026-09-05 production ceremony — runsheet of record
 
 The step-by-step runsheet for the 2026-09-05 production ceremony (DB `0165`–`0176` → runtime v75
-→ web Worker), filed here byte-verbatim from the session scratchpad
-(`ceremony-runsheet-2026-09-05.md`). The order this runsheet serves is
+→ web Worker), filed here byte-verbatim from the session scratchpad (historical label:
+ceremony-runsheet-2026-09-05.md). The order this runsheet serves is
 [`ceremony-order-2026-09-05.md`](ceremony-order-2026-09-05.md); the as-run is
 [`runtime-deploy-2026-09-05-v75-and-db-0165-0176.md`](runtime-deploy-2026-09-05-v75-and-db-0165-0176.md)
-plus its part 2.
+plus [part 2](runtime-deploy-2026-09-05-part2-worker-and-deviations.md). The verbatim block below
+cites the session scratchpad's own file name; it is a historical label, not a repo path.
 
 <!-- begin verbatim: ceremony-runsheet-2026-09-05.md · md5 3fc0d9fb384468456338ef9f640a35a2 -->
 # Deploy ceremony runsheet — DB 0165–0176 → runtime v75 → web Worker (draft, 2026-09-05)

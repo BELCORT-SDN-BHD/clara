@@ -76,7 +76,7 @@ reversed, and the closure is still an OPERATING posture, not a technical wall.
 | runtime v75 (裁-189) | **DONE 2026-09-05** — released by image after the gate; `/ready` in the new seven-lane shape |
 | the web Worker promotion (裁-189) | **DONE 2026-09-05** — `90c1a5d0…` at 100 %; rollback = re-promote `c5b1e051…` (裁-156) |
 | H-43, the `verify-full` flip on the six lane DSNs | **still OWED** — NOT part of this ceremony; the pooler CA has shipped in the image since #558, which is its prerequisite |
-| the nine queued tickets, then 裁-197's three chat tickets | not started; the order is in the posture block above — the orders are filed at `docs/plan/completed/repair-session-2026-09-04-orders.md` (rules: `…-house-rules.md`; register: `…-register.md`; roster: `…-roster.md`, all under `docs/plan/completed/`) |
+| the nine queued tickets, then 裁-197's three chat tickets | not started; the order is in the posture block above — the orders are filed at `docs/plan/completed/repair-session-2026-09-04-orders.md` (rules: `docs/plan/completed/repair-session-2026-09-04-house-rules.md`; register: `docs/plan/completed/repair-session-2026-09-04-register.md`; roster: `docs/plan/completed/repair-session-2026-09-04-roster.md`) |
 
 The sprint's build closed on 2026-09-03,
 the beta-live e2e ran on 09-03/09-04, and every lane in the old table was `merged` or `ceremonied` —

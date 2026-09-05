@@ -2,10 +2,12 @@
 
 The order the lead issued for the 2026-09-05 production ceremony: DB migrations `0165`–`0176`
 → runtime v75 → the web Worker, filed here byte-verbatim from the session scratchpad
-(`order-CEREMONY-0905.md`). The as-run is
+(historical label: order-CEREMONY-0905.md). The as-run is
 [`runtime-deploy-2026-09-05-v75-and-db-0165-0176.md`](runtime-deploy-2026-09-05-v75-and-db-0165-0176.md)
-plus its part 2; the step-by-step runsheet this order points to is
-[`ceremony-runsheet-2026-09-05.md`](ceremony-runsheet-2026-09-05.md).
+plus [part 2](runtime-deploy-2026-09-05-part2-worker-and-deviations.md); the step-by-step
+runsheet this order points to is
+[`ceremony-runsheet-2026-09-05.md`](ceremony-runsheet-2026-09-05.md). The verbatim block below
+cites the session scratchpad's own file names; they are historical labels, not repo paths.
 
 <!-- begin verbatim: order-CEREMONY-0905.md · md5 1d6dab36d539df31d9ab5e2e449ccf58 -->
 # ORDER — the 2026-09-05 production ceremony (DB 0165–0176 → runtime v75 → web Worker)
