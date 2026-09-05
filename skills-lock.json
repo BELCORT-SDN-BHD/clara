@@ -34,10 +34,6 @@
       "sha256": "42e4dac1eda26389115a0de78c4b89b32cff1800ef8d6f1ecd8357e334812a4f",
       "files": 4
     },
-    "design-an-interface": {
-      "sha256": "d9329d4406efb8edb0ce14a21a83422c9f6abee7f679c90fdc761a89b98bd5ce",
-      "files": 2
-    },
     "diagnosing-bugs": {
       "sha256": "aed1a6e603ed4232ff96e03c051931ca6254c758d783689d5f122a755acae6b9",
       "files": 3
@@ -45,10 +41,6 @@
     "domain-modeling": {
       "sha256": "cb8f109616c95fefe40c334ba1132368d7a3919c61791ad4e78f8a69d9230afc",
       "files": 4
-    },
-    "edit-article": {
-      "sha256": "cb3f41da59d93e96012433ed02f30f1984c3cdf9b39ec503db23f68ec6d96090",
-      "files": 2
     },
     "emil-design-eng": {
       "sha256": "91f16eb9b00dab16420ee22fba43cb35705841cd27fe0f124fad9e20397a6b8b",
@@ -102,10 +94,6 @@
       "sha256": "0dfa9344caa8321587b34dd503cca67aa9df259ca11f23773b184aa4f798de15",
       "files": 2
     },
-    "obsidian-vault": {
-      "sha256": "34bd81033dd94faa03c32707b36106c806dd54988fa161e6f7cd6e8c58a0d1c1",
-      "files": 2
-    },
     "orchestrator-fable": {
       "sha256": "e2b3c2edfb798b46ec16727d0e4a29ee8b7684d5e78749ac22c461a54744244d",
       "files": 1
@@ -113,14 +101,6 @@
     "prototype": {
       "sha256": "14ae1eef19626bce689f74779975a105789c68e978ac81d02a62f1e723c15b90",
       "files": 4
-    },
-    "qa": {
-      "sha256": "e90af69b9aa86272845e4f63b6ae27bb118841216cac9e60ed0128751ea3f797",
-      "files": 2
-    },
-    "request-refactor-plan": {
-      "sha256": "f450a60c4f38b008a4beaecd216bacab1dd1cbee5c5b2456c05d77b11ebe31a2",
-      "files": 2
     },
     "research": {
       "sha256": "2486531c781120290062c58d45329cdd78562a60011200a8d0ae99fb900cb8ed",
@@ -181,10 +161,6 @@
     "triage": {
       "sha256": "5d61151ecfe1e5e5dcf9c6280cf2c157faccff8335f1cc36bc0ca114d129a755",
       "files": 4
-    },
-    "ubiquitous-language": {
-      "sha256": "fb209f0991c3c417c713ff902c0e7ee0d54b599d79782efcbc4da7b5a53340a4",
-      "files": 2
     },
     "wait-what": {
       "sha256": "3f64d6d82dc9a448070accccd033e5878bf1df3e5c39a9e2417b05456b15478b",
