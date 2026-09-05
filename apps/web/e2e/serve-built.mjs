@@ -35,6 +35,16 @@ import { handleL7Supabase } from "./bank-close-registers-mock.mjs";
 // Every branch inside is scoped to ITS OWN client/document/extraction ids and falls
 // through otherwise; it never claims the shared client register or the session list.
 import { handleDocumentsViewerRuntime, handleDocumentsViewerSupabase } from "./documents-viewer-mock.mjs";
+// The Home boards' fixture lane (#557). Consulted LAST among the lane hooks and BEFORE this
+// file's own generic fixtures — see that module's header for why answering with honest EMPTIES
+// cannot starve a lane that owns one of the same routes for its own ids, and why its one
+// id-scoped client row has to precede the generic `/rest/v1/clients` branch.
+//
+// LAST IS ALSO SAFE AGAINST THE CONSUME-THEN-FALL-THROUGH HAZARD the documents lane's note
+// below records against L7's module: this lane's handlers never call `readJson`, so a request
+// body some earlier hook already drained costs it nothing. Its RPC branch answers on the PATH
+// alone, and its one relation branch reads the query string.
+import { handleHomeBoardSupabase } from "./home-board-mock.mjs";
 
 const e2eRoot = dirname(fileURLToPath(import.meta.url));
 const webRoot = resolve(e2eRoot, "..");
@@ -415,6 +425,11 @@ async function handleSupabase(request, response, url) {
   // starves whatever lane is added after it.
   if (await handleDocumentsViewerSupabase(request, response, path, url, sendJson, cors)) return;
   if (await handleL7Supabase(request, response, path, url, sendJson, cors)) return;
+  // LAST among the lane hooks, and still BEFORE the generic fixtures — see home-board-mock.mjs's
+  // header. It has to precede the generic `/rest/v1/clients` branch below to serve its ONE
+  // id-scoped client row (a SERVER-side layout read `page.route` cannot reach), and it falls
+  // through for every other id, so the unfiltered register stays exactly as this file has it.
+  if (await handleHomeBoardSupabase(request, response, path, url, sendJson, cors)) return;
 
   if (request.method === "GET" && path === "/rest/v1/clients") {
     const filter = url.searchParams.get("id");
@@ -445,10 +460,17 @@ async function handleSupabase(request, response, url) {
   }
 
   if (request.method === "POST" && path === "/rest/v1/rpc/list_review_queue") {
+    // TRUED 2026-09-04 (裁-190). Three of the eight count keys were not the contract's:
+    // `drafts`/`uncoded_filings` for `open_drafts`/`open_tasks`, and `open_tasks` was absent
+    // entirely (lib/firm/needs-you.ts's `ReviewQueueCounts`, grounded on the live body's own
+    // jsonb_build_object). Nothing read them before Firm Home rendered the eight chips, so the
+    // drift was invisible; with the scoreboard live, two chips would have printed `undefined`.
+    // `compliance` likewise carries its real EMPTY shape rather than `null` — the firm-admin
+    // register and the Tax tab both treat an absent envelope as a wire fault, deliberately.
     sendJson(response, 200, {
-      counts: { needs_you: 0, needs_review: 0, ready: 0, drafts: 0, uncoded_filings: 0, open_questions: 0, compliance_watches: 0, lint_findings: 0 },
+      counts: { ready: 0, needs_review: 0, needs_you: 0, open_drafts: 0, open_questions: 0, open_tasks: 0, compliance_watches: 0, lint_findings: 0 },
       sweep: null,
-      compliance: null,
+      compliance: { stale_evaluator: false, clients: [] },
       lint: null,
       rows: [],
       next_cursor: null,

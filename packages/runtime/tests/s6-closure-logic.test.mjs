@@ -68,9 +68,17 @@ test("refusalFromDbError maps CLR21 with a DETAIL reason token", () => {
   assert.ok(r.message.length > 0);
 });
 
+// H-17 RE-CUT (this PR): both constraint names below were FICTIONAL — `counterparties_client_reg_
+// uniq` and `journal_entries_one_open_draft` are strings no PostgreSQL in this estate has ever
+// emitted. The real ones are `uq_counterparties_client_registration` (0015:187) and
+// `uq_journal_entries_one_open_draft_filing` (0017:799), and both are now used. chatTurn_v2's map
+// is a SUBSTRING test, so the verdicts below are unchanged — which is exactly the point: a
+// substring map cannot tell a real index name from an invented one, and a battery written against
+// invented names could never have caught that. The exact-name successor lives in
+// autoDraft.v10.uniques.ts; this frozen v2 body is not being changed, only measured honestly.
 test("refusalFromDbError maps native constraints + structural 42501 (belt), never leaking SQL", () => {
-  assert.equal(refusalFromDbError({ code: "23505", constraint: "counterparties_client_reg_uniq" }).code, "CLR23");
-  assert.equal(refusalFromDbError({ code: "23505", constraint: "journal_entries_one_open_draft" }).reason, "double_coded");
+  assert.equal(refusalFromDbError({ code: "23505", constraint: "uq_counterparties_client_registration" }).code, "CLR23");
+  assert.equal(refusalFromDbError({ code: "23505", constraint: "uq_journal_entries_one_open_draft_filing" }).reason, "double_coded");
   assert.equal(refusalFromDbError({ code: "23503" }).code, "CLR11", "FK breach collapses to not-found (no tenant oracle)");
   assert.equal(refusalFromDbError({ code: "42501" }).code, "CLR03", "structural agent-writer denial stays distinct");
   assert.equal(refusalFromDbError({ code: "CLR25" }).code, "CLR25");

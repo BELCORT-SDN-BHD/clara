@@ -1,37 +1,59 @@
 "use client";
 
-// The client workspace "Home" tab — the real client record (lib/firm/reads.ts's
-// loadClientById), replacing the P1 scaffold's verbatim-clientId placeholder, plus
-// a client-scoped slice of the SAME queue Needs-you reads (clara.list_review_queue,
-// p_scope: {client_id}) — "what does THIS client need from me", not a duplicated
-// mechanism.
+// The client workspace "Home" tab — a SITUATION BOARD for one client, in accounting order.
 //
-// FIX-5 (independent review, fix-required, 2026-08-27): rides lib/firm/
-// use-review-queue.ts (the paginated reader) rather than a raw single-page
-// listReviewQueue call — the same "silently cut list under a true count" gap
-// applies here as much as the firm-wide inbox. Row_kind uses the SAME checked
-// lookup as components/firm/needs-you-row.tsx (lib/firm/needs-you.ts's
-// isKnownReviewQueueRowKind) rather than a second copy. N11: `created_at`
-// renders in the business timezone explicitly.
-// R5 (independent review, 2026-08-27 — round 2): `status` now uses the SAME
-// checked lookup built for the client register (components/firm/
-// client-register-list.tsx) instead of the raw DB value.
+// WHAT IT WAS. Ninety-six lines rendering a two-row `<dl>` (status, created_at) and a bare
+// `<li>` text list with no link, no badge and no count — while nine client-scoped read modules
+// the app already owns sat unused, and the firm-wide inbox rendered the SAME queue rows through
+// `NeedsYouRow` with their deep links and inline acts.
+//
+// THE ORDER IS THE WALK ORDER, NOT SCREEN ORDER. Identity → what is waiting → the document and
+// coding pipeline → bank → close → history: intake before bank, bank before settle, settle
+// before reconcile, and only then close. An onboarding client is the one exception, and its
+// exception is the whole point — for a client mid-interview the plan outranks everything, so
+// section B lifts directly under the identity band and is ABSENT otherwise.
+//
+// EVERY SECTION READS FOR ITSELF, and that is a correctness property rather than a style. One
+// failed read must leave every other section's real numbers on screen: a board that blanks on a
+// single failure reads as "this client has nothing outstanding", which is the most expensive
+// possible way to be wrong here.
+//
+// FIX-5 / R5 (independent review, 2026-08-27) SURVIVE THIS REBUILD. The queue still rides
+// `lib/firm/use-review-queue.ts` (the paginated reader) rather than a raw single-page call, and
+// `status` still uses the client register's own checked label lookup rather than the raw DB
+// value — both now live in the sections that render them.
+//
+// #546 (lane L2) IS MERGED IN, WHOLE. That PR's `ContinueOnboardingCard` and its
+// `CLIENT_RECORD_CHANGED` bus subscription both live here unchanged in behaviour — the card
+// above the board, the subscription re-reading the client after the rail's onboarding commit
+// flips `clara.clients.status`. This train was built against origin/main before that PR landed
+// and left the two seams open for it deliberately; the merge took both sides rather than
+// either. The one thing that did NOT survive is #546's local `statusLabels` map, and only
+// because the status badge moved into the identity band, which does the same checked lookup
+// against the same `ClientsRegister.statuses.*` vocabulary.
 
 import { useEffect } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useTranslations } from "next-intl";
+
+import { Button } from "@/components/ui/button";
+import { PageHeader } from "@/components/common/page-shell";
+import { SectionHeader } from "@/components/common/section-header";
 import { useAsyncRead } from "@/lib/firm/use-async-read";
 import { loadClientById } from "@/lib/firm/reads";
 import { listSessionsForCaller } from "@/lib/clara/api";
 import { selectOwnSession } from "@/lib/clara/useActiveThread";
 import { focusRail, onClientRecordChanged } from "@/lib/command/bus";
-import { isKnownReviewQueueRowKind, reviewQueueRowKey } from "@/lib/firm/needs-you";
 import { useReviewQueue } from "@/lib/firm/use-review-queue";
-import { businessDate } from "@/lib/business-date";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
-import { Button } from "@/components/ui/button";
-import { SectionHeader } from "@/components/common/section-header";
+import { ClientBankSummary } from "./client-home/client-bank-summary";
+import { ClientCloseSummary } from "./client-home/client-close-summary";
+import { ClientDocsBacklog } from "./client-home/client-docs-backlog";
+import { ClientIdentityBand } from "./client-home/client-identity-band";
+import { ClientLastActivity } from "./client-home/client-last-activity";
+import { ClientNeedsYou } from "./client-home/client-needs-you";
+import { ClientOnboardingProgress } from "./client-home/client-onboarding-progress";
 import { DataState } from "./data-state";
 
 /**
@@ -91,18 +113,23 @@ function ContinueOnboardingCard({ clientId }: { clientId: string }) {
 
 export function ClientWorkspaceOverview({ clientId }: { clientId: string }) {
   const t = useTranslations("ClientWorkspace");
-  const tny = useTranslations("NeedsYou");
-  const tcr = useTranslations("ClientsRegister");
   const client = useAsyncRead(() => loadClientById(sessionTokenAccessor, clientId));
   const queue = useReviewQueue({ client_id: clientId });
 
-  // H-50 — `useAsyncRead` reads ONCE by contract (its own header: "a NEW loader identity ALONE
-  // never re-triggers a reload… must either React-key itself by those ids or call reload()
-  // explicitly"). The act that changes this client's status happens in the Clara rail, a
-  // SIBLING subtree of this page's own, so nothing here could know to re-read: the status line
-  // below kept saying "Onboarding" for an activated client until a hard reload. The card
-  // announces on the bus after a SUCCESSFUL act; this re-reads. It never trusts a value from
-  // the event — there is none to trust.
+  // H-50 (#546) — `useAsyncRead` reads ONCE by contract (its own header: "a NEW loader identity
+  // ALONE never re-triggers a reload… must either React-key itself by those ids or call
+  // reload() explicitly"). The act that changes this client's status happens in the Clara rail,
+  // a SIBLING subtree of this page's own, so nothing here could know to re-read: the status
+  // badge in the identity band below would keep saying "Onboarding" for an activated client
+  // until a hard reload. The card announces on the bus after a SUCCESSFUL act; this re-reads.
+  // It never trusts a value from the event — there is none to trust.
+  //
+  // KEPT WHOLE THROUGH THIS TRAIN'S REBUILD. The seam was written for it: the reload is bound
+  // to a named const, the subscription is unchanged, and the section that renders the status
+  // (the identity band) is downstream of the same `client` read, so the re-read still reaches
+  // it. The `statusLabels` map #546 declared beside this effect is gone from HERE and only from
+  // here — the identity band owns that lookup now, using the SAME checked register vocabulary
+  // (`ClientsRegister.statuses.*`) rather than a second copy of it.
   const reloadClient = client.reload;
   useEffect(
     () => onClientRecordChanged((detail) => {
@@ -111,18 +138,16 @@ export function ClientWorkspaceOverview({ clientId }: { clientId: string }) {
     [clientId, reloadClient],
   );
 
-  const statusLabels: Record<string, string> = {
-    active: tcr("statuses.active"),
-    archived: tcr("statuses.archived"),
-    onboarding: tcr("statuses.onboarding"),
-  };
-
   return (
     <div className="flex flex-col gap-6">
-      {/* The owner's ask — offered ONLY while the client is genuinely in onboarding, and read
-          from the client's own DB-owned status rather than from the presence of a plan. */}
-      {client.data?.status === "onboarding" ? <ContinueOnboardingCard clientId={clientId} /> : null}
-
+      {/* THE PAGE ALWAYS HAS EXACTLY ONE `<h1>` (review-557, N5). The identity band owns it
+          once the client record resolves and fills it with the client's own NAME; until then —
+          and on the not-found and failed-read arms, which never reach the band at all — the
+          document would otherwise open on an `<h2>` and have no top-level heading, the same
+          class of outline defect as the blocker above. This is the static workspace label, the
+          fallback `firm-home-board.tsx` already uses for the same reason: a label is not a
+          claim about data, so it is honest before a read lands, where a name would not be. */}
+      {client.data === null ? <PageHeader title={t("heading")} /> : null}
       <DataState
         loading={client.loading}
         error={client.error}
@@ -130,47 +155,40 @@ export function ClientWorkspaceOverview({ clientId }: { clientId: string }) {
         emptyMessage={t("notFoundMessage")}
       >
         {client.data ? (
-          <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm">
-            <dt className="text-muted-foreground">{t("statusLabel")}</dt>
-            <dd className="text-foreground">{statusLabels[client.data.status] ?? client.data.status}</dd>
-            <dt className="text-muted-foreground">{t("createdLabel")}</dt>
-            <dd className="text-foreground">{businessDate(new Date(client.data.created_at))}</dd>
-          </dl>
+          <div className="flex flex-col gap-6">
+            <ClientIdentityBand clientId={clientId} client={client.data} />
+            {/* #546's escalation offer, BELOW the identity band — review-557's blocker, and the
+                fix is structural rather than cosmetic. The card carries its own
+                `SectionHeader level={2}`, and this train moved the page's `<h1>` down into the
+                identity band; above the band the document therefore opened H2, H1, H2 on the
+                onboarding arm, which is a `heading-order` violation and a regression against
+                main (where `page.tsx` rendered the `PageHeader` first). It was invisible
+                because every a11y scan in this train mounted an ACTIVE client — the arm that
+                never renders this card. Both are now scanned.
+                Inside the `DataState` for the same reason: the card's condition already reads
+                `client.data.status`, so it has nothing to say until the client record resolves,
+                and rendering it outside meant a card could precede a heading that had not
+                arrived yet. Section B still carries no continue-affordance of its own, so this
+                stays the ONE entrance to that governed run. */}
+            {client.data.status === "onboarding" ? <ContinueOnboardingCard clientId={clientId} /> : null}
+            <ClientOnboardingProgress clientId={clientId} status={client.data.status} />
+
+            <div className="@container">
+              <div className="grid grid-cols-1 gap-6 @3xl:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
+                <div className="flex min-w-0 flex-col gap-6">
+                  <ClientNeedsYou queue={queue} clientName={client.data.name} />
+                  <ClientDocsBacklog clientId={clientId} />
+                </div>
+                <div className="flex min-w-0 flex-col gap-6">
+                  <ClientBankSummary clientId={clientId} />
+                  <ClientCloseSummary clientId={clientId} />
+                  <ClientLastActivity clientId={clientId} />
+                </div>
+              </div>
+            </div>
+          </div>
         ) : null}
       </DataState>
-
-      <div className="flex flex-col gap-2">
-        <SectionHeader level={2}>{t("queueHeading")}</SectionHeader>
-        <DataState
-          loading={queue.loading}
-          error={queue.error}
-          isEmpty={queue.rows.length === 0}
-          emptyMessage={t("queueEmpty")}
-        >
-          <ul className="flex flex-col gap-1 text-sm text-card-foreground">
-            {queue.rows.map((row) => (
-              <li key={reviewQueueRowKey(row)}>
-                {isKnownReviewQueueRowKind(row.row_kind)
-                  ? tny(`rowKind.${row.row_kind}`)
-                  : tny("rowKind.unknown", { kind: row.row_kind })}
-                {row.question_text ? ` — ${row.question_text}` : ""}
-              </li>
-            ))}
-          </ul>
-          {queue.hasMore ? (
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="mt-2 self-start"
-              onClick={() => void queue.loadMore()}
-              disabled={queue.loadingMore || queue.busy}
-            >
-              {queue.loadingMore ? tny("loadingMore") : tny("loadMore")}
-            </Button>
-          ) : null}
-        </DataState>
-      </div>
     </div>
   );
 }

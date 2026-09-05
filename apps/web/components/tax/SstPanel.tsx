@@ -1,31 +1,30 @@
 "use client";
 
-// SST panel (P6-T, F-T1) — SST registration status, the taxable period's
-// output tax, and the SST-02 return draft. F-T1 PR-1 (migration 0153,
-// merged) is greenfield for `sst_rate_schedule` ONLY (created there, no
-// governed door). `sst_threshold_schedule` is NOT new: it was CREATED at
-// migration 0016 (0016_a21_compliance_watch.sql:237) and is already
-// LIVE-CONSUMED today — `evaluate_sst_watch`/`evaluate_sst_watches_all`
-// read it (0016:568/618/883) and `set_turnover_classification` validates
-// against it (0016:926). 0153 only ALTERs that existing table (Annex A.1's
-// ordered specification), it does not birth it — fixed here after an
-// independent review round (PR #487) caught the original comment
-// mis-describing an already-live, already-consumed table as inert
-// greenfield. The registration/period/return machinery
-// (sst-engine-design-part2.md's PR-2 through PR-6 — `sst_registrations`,
-// `sst_taxable_periods`, `sst_returns`/`sst_return_02a` + "the producer")
-// does not exist on this tip; Track B is paused (裁-80). No verb has been
-// named for the SST-02 producer anywhere in the design corpus yet ("the
-// producer", unnamed) — so this note names the real objects that DO and do
-// not exist rather than inventing a function signature that has never been
-// assigned one.
+// SST panel — this client's LIVE compliance watch, plus one honest note for the registration
+// and return machinery that does not exist.
+//
+// WHAT CHANGED, AND WHY (CB-AE2E-032). This panel used to be a single static note whose text was
+// internal build-log prose: it named lane ids, migration numbers, an owner-ruling id and raw SQL
+// signatures, none of which is meaningful to a Malaysian accountant and the last of which leaks
+// the internal decision log. The identifiers were not deleted — they belong in a source comment,
+// which is where they now live (see the census in lib/tax/sst-watch.ts's header). The note the
+// professional reads says what the firm cannot do yet and what to do instead.
+//
+// THE PANEL NOW READS. The SST compliance watch reaches a human session through
+// `clara.list_review_queue`'s own `compliance` object and nothing else — the watch table carries
+// no `clara_authenticated` grant. That read is made once by the workbench above and handed to
+// the section below, so this panel adds no call of its own.
 
 import { useTranslations } from "next-intl";
+
 import { Card, CardContent, CardDescription, CardHeader } from "@/components/ui/card";
 import { SectionHeader } from "@/components/common/section-header";
 import { NotBuiltNote } from "@/components/common/not-built-note";
+import type { AsyncReadState } from "@/lib/firm/use-async-read";
+import type { ClientSstWatch } from "@/lib/tax/sst-watch";
+import { SstWatchSection } from "./SstWatchSection";
 
-export function SstPanel() {
+export function SstPanel({ watch }: { watch: AsyncReadState<ClientSstWatch> }) {
   const t = useTranslations("ClientTax.sst");
   return (
     <Card>
@@ -33,7 +32,8 @@ export function SstPanel() {
         <SectionHeader level={2}>{t("heading")}</SectionHeader>
         <CardDescription className="text-xs">{t("subheading")}</CardDescription>
       </CardHeader>
-      <CardContent>
+      <CardContent className="flex flex-col gap-4">
+        <SstWatchSection watch={watch} />
         <NotBuiltNote className="text-xs">{t("notBuilt")}</NotBuiltNote>
       </CardContent>
     </Card>

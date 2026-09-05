@@ -72,18 +72,97 @@ function App(children: ReturnType<typeof createElement>) {
 }
 
 const EMPTY_QUEUE = {
-  counts: { needs_you: 0, needs_review: 0, ready: 0, drafts: 0, uncoded_filings: 0, open_questions: 0, compliance_watches: 0, lint_findings: 0 },
-  sweep: null, compliance: null, lint: null, rows: [], next_cursor: null,
+  // TRUED with the client Home rebuild (裁-190): three of the eight keys were not the
+  // contract's (`drafts`/`uncoded_filings` for `open_drafts`/`open_tasks`, and `open_tasks`
+  // absent). Nothing read them until the board rendered the eight count chips.
+  counts: { ready: 0, needs_review: 0, needs_you: 0, open_drafts: 0, open_questions: 0, open_tasks: 0, compliance_watches: 0, lint_findings: 0 },
+  // `compliance` carries its real EMPTY shape, not `null` (review-557, N4 — it was left behind
+  // when the counts above were trued). The live body builds this object unconditionally, and
+  // both the firm-admin register and the Tax tab treat an ABSENT one as a wire fault rather
+  // than as "no watches" — a fixture that ships `null` teaches the opposite.
+  sweep: null, compliance: { stale_evaluator: false, clients: [] }, lint: null, rows: [], next_cursor: null,
 };
 
-/** A live fixture whose client status the test can flip between reads. `clientReads` counts
- *  the reads that actually happened, so "it re-read" is measured, never assumed. */
+/**
+ * The reads the client Home board makes BESIDES the client record and the review queue, each
+ * answered with its honest EMPTY.
+ *
+ * ADDED WITH THE BOARD REBUILD (裁-190), and it is not padding. This file is about the
+ * invalidation seam, and every one of these sections renders its own failed-read banner when a
+ * read is unanswered — which is correct behaviour, but it left section B (onboarding progress)
+ * permanently on screen for an ACTIVE client, because that section stays mounted while its plan
+ * read is loading OR errored and only withdraws once the read settles to "no plan". So the
+ * fixture has to answer them for the cells below to be measuring the status, and not the shape
+ * of an error state.
+ */
+function emptyBoardRead(u: string): Response | null {
+  const RELATIONS = [
+    "/rest/v1/client_fact_keys", "/rest/v1/onboarding_plans", "/rest/v1/onboarding_plan_items",
+    "/rest/v1/opening_seed_registry", "/rest/v1/attribution_candidates", "/rest/v1/coding_tasks_visible",
+    "/rest/v1/lint_findings", "/rest/v1/close_prep_holds",
+  ];
+  const RPCS = [
+    "/rpc/list_uncoded_filings", "/rpc/list_bank_accounts", "/rpc/list_bank_account_proposals",
+    "/rpc/list_bank_statements", "/rpc/list_fiscal_years", "/rpc/list_agent_act_receipts",
+  ];
+  return [...RELATIONS, ...RPCS].some((p) => u.includes(p)) ? jsonResponse([]) : null;
+}
+
+/** The `<h1>`'s own text — the client's name AND its status badge, which is where the status
+ *  actually renders. Asserting on the whole page's text would be reading a PROJECTION of the
+ *  status ("does the word appear anywhere"), and the board now has a legitimate second use of
+ *  the word: the `<h2>` of section B, the onboarding-progress section. */
+function headingText(h: { find: (p: (n: unknown) => boolean) => unknown }): string {
+  const node = h.find((n) => (n as { tagName?: string }).tagName === "H1");
+  assert.ok(node, "the board must render exactly one h1 — the client's own name");
+  const read = (n: unknown): string => {
+    const s = n as { nodeType?: number; nodeValue?: string; childNodes?: unknown[]; textContent?: string };
+    if (s.nodeType === 3) return String(s.nodeValue ?? "");
+    const kids = s.childNodes ?? [];
+    if (kids.length > 0) return kids.map(read).join("");
+    return typeof s.textContent === "string" ? s.textContent : "";
+  };
+  return read(node);
+}
+
+/** The escalation card's own subtree — it is the only element carrying the Clara-muted ground.
+ *  Scoped because the board around it now renders many legitimate links ("Open the bank tab",
+ *  "Open the close tab", the fact chips), so "is there an anchor on this page" stopped being a
+ *  statement about the card. */
+function escalationCard(h: { find: (p: (n: unknown) => boolean) => unknown }): unknown {
+  return h.find((n) => String((n as { className?: string }).className ?? "").includes("bg-clara-muted"));
+}
+
+function findWithin(root: unknown, predicate: (n: unknown) => boolean): unknown {
+  if (predicate(root)) return root;
+  for (const child of ((root as { childNodes?: unknown[] }).childNodes ?? [])) {
+    const found = findWithin(child, predicate);
+    if (found) return found;
+  }
+  return null;
+}
+
+/**
+ * A live fixture whose client status the test can flip between reads. `clientReads` counts the
+ * RECORD reads that actually happened, so "it re-read" is measured, never assumed.
+ *
+ * IT COUNTS ONE CALLER, NOT TWO (review-557, N3). `clara.clients` now has a SECOND reader on
+ * this board: `getClientFyEnd` (`lib/close/api.ts`) selects `id,name,fy_end_month,fy_end_day`
+ * from the same relation for the close section. An unfiltered counter therefore counts both,
+ * and "the announcement provoked a real second read" would go green on the close section
+ * re-reading for its own reasons — the subscription under test could be deleted and the cell
+ * would still pass. The projection is the discriminant: only the RECORD read asks for
+ * `status`, and only the fiscal-year read asks for `fy_end_month`.
+ */
 function mockEstate(state: { status: string }) {
   const clientReads: string[] = [];
   const impl = (async (url: RequestInfo | URL) => {
     const u = String(url);
     if (u.includes("/rest/v1/clients")) {
-      clientReads.push(u);
+      if (!u.includes("fy_end_month")) clientReads.push(u);
+      if (u.includes("fy_end_month")) {
+        return jsonResponse([{ id: CLIENT_ID, name: "ROME PROPERTIES", fy_end_month: 12, fy_end_day: 31 }]);
+      }
       return jsonResponse([{ id: CLIENT_ID, name: "ROME PROPERTIES", status: state.status, created_at: "2026-01-01T00:00:00.000Z" }]);
     }
     if (u.includes("/rest/v1/client_facts")) return jsonResponse([]);
@@ -92,6 +171,8 @@ function mockEstate(state: { status: string }) {
     // about the invalidation seam, and `add-client-control.test.tsx` owns that gate.
     if (u.includes("/rest/v1/caller_context")) return jsonResponse([]);
     if (u.includes("/rpc/list_review_queue")) return jsonResponse(EMPTY_QUEUE);
+    const board = emptyBoardRead(u);
+    if (board) return board;
     // `ContinueOnboardingCard`'s read-only thread resolution. No session is created here and
     // none may be: creating one would race the rail's own resolver.
     if (u.includes("/api/runtime/chat/sessions")) return jsonResponse({ sessions: [] });
@@ -107,9 +188,26 @@ test("H-50 — the client Home tab RE-READS its client on CLIENT_RECORD_CHANGED 
     const h = await renderComponent(App(createElement(ClientWorkspaceOverview, { clientId: CLIENT_ID })));
     try {
       for (let i = 0; i < 6; i++) await h.settle();
-      assert.match(h.text(), /Onboarding/, `the mount read; got: ${h.text()}`);
+      // SCOPED TO THE h1, AND THE REASON IS THIS *MOUNT* ARM (裁-190; review-557's comment
+      // correction). On an ONBOARDING client the word "Onboarding" appears TWICE on this board
+      // — the status badge inside the client's own heading, and the `<h2>` of the progress
+      // section — so an unscoped page match cannot say WHICH of them it saw. The badge is what
+      // this cell is about, and `headingText` reads exactly it.
+      //
+      // The scoping is NOT what fixes the post-flip arm below. Measured: with the honest
+      // empties in `emptyBoardRead` in place, the post-flip page has ZERO `/Onboarding/` hits,
+      // so an unscoped `doesNotMatch` would pass there anyway. The EMPTIES are that arm's fix
+      // (without them section B stayed mounted on its own errored plan read); the scoping is
+      // this arm's. Two changes, two reasons, and neither is the other's.
+      assert.match(headingText(h), /Onboarding/, `the mount read; got: ${headingText(h)}`);
+      // EXACTLY ONE, not merely "more than zero" (review-557, N3). `clara.clients` has a second
+      // reader on this board — `getClientFyEnd`'s `id,name,fy_end_month,fy_end_day` projection
+      // for the close section — and a counter that swept both up would make this cell a
+      // statement about "some read of that relation happened", not about the record read the
+      // subscription is supposed to provoke. The filter in `mockEstate` is what keeps the two
+      // apart, and this is the assertion that reds if it is removed.
       const readsAtMount = clientReads.length;
-      assert.ok(readsAtMount > 0, "positive control: the mount read actually happened");
+      assert.equal(readsAtMount, 1, `exactly the client RECORD read at mount; got ${clientReads.length}: ${clientReads.join(" | ")}`);
 
       // The database moved, exactly as `commit_client_onboarding` moves it (0017:2825).
       state.status = "active";
@@ -117,8 +215,11 @@ test("H-50 — the client Home tab RE-READS its client on CLIENT_RECORD_CHANGED 
       for (let i = 0; i < 6; i++) await h.settle();
 
       assert.ok(clientReads.length > readsAtMount, "the announcement provoked a real second read");
-      assert.match(h.text(), /Active/, `the face now shows the DB's own new status; got: ${h.text()}`);
-      assert.doesNotMatch(h.text(), /Onboarding/, "and the stale one is gone");
+      assert.match(headingText(h), /Active/, `the face now shows the DB's own new status; got: ${headingText(h)}`);
+      assert.doesNotMatch(headingText(h), /Onboarding/, "and the stale one is gone");
+      // The board's own onboarding SECTION follows the same re-read: an activated client with
+      // no plan has no onboarding story, so section B withdraws entirely rather than lingering.
+      assert.doesNotMatch(h.text(), /required answers recorded/, "the progress section is gone too");
     } finally {
       await h.unmount();
     }
@@ -206,7 +307,10 @@ function mockWithThreads(state: { status: string }, sessions: unknown[]) {
     if (u.includes("/rest/v1/clients")) {
       return jsonResponse([{ id: CLIENT_ID, name: "ROME PROPERTIES", status: state.status, created_at: "2026-01-01T00:00:00.000Z" }]);
     }
+    if (u.includes("/rest/v1/client_facts")) return jsonResponse([]);
     if (u.includes("/rpc/list_review_queue")) return jsonResponse(EMPTY_QUEUE);
+    const board = emptyBoardRead(u);
+    if (board) return board;
     throw new Error(`unexpected fetch: ${u}`);
   }) as typeof fetch;
   return { impl, sessionWrites };
@@ -264,7 +368,16 @@ test("with NO resolvable thread the escalation card offers the rail instead — 
     try {
       for (let i = 0; i < 8; i++) await h.settle();
       assert.match(h.text(), /Continue onboarding with Clara/, `the control is still offered; got: ${h.text()}`);
-      assert.equal(h.find((n) => (n as { tagName?: string }).tagName === "A"), null, "and it is NOT a link");
+      // SCOPED TO THE CARD (裁-190). The board around it now renders many legitimate anchors —
+      // the owning-tab links, the fact chips — so "is there an anchor on this page" stopped
+      // being a statement about this card's control.
+      const card = escalationCard(h);
+      assert.ok(card, "the escalation card must be on screen for this claim to mean anything");
+      assert.equal(
+        findWithin(card, (n) => (n as { tagName?: string }).tagName === "A"),
+        null,
+        "and the card's control is NOT a link",
+      );
       assert.match(h.text(), /could not be resolved/, "it says so, rather than pretending");
       assert.equal(sessionWrites.length, 0, "still no write");
     } finally {

@@ -53,6 +53,7 @@ const LANE_MOCKS = [
   "chat-parity-mock.mjs",
   "documents-viewer-mock.mjs",
   "fs4-checkout-mock.mjs",
+  "home-board-mock.mjs",
   "journals-table-mock.mjs",
 ] as const;
 
@@ -245,6 +246,19 @@ const LANE_DECLARATIONS: Record<string, { unscopeable: string[]; debt: string[] 
     // rows above — it COULD scope, which is exactly why it is not called unscopeable.
     debt: ["/rest/v1/report_agent_receipts"],
   },
+  // The Home boards' lane (#557). Its ONE literal-path handler, `/rest/v1/clients`, scopes by
+  // id and falls through, so nothing is declared here.
+  //
+  // THE SAME COVERAGE LIMIT fs4's row names, in a different shape, and it is recorded rather
+  // than hidden: this census reads `path === "<literal>"`, and that file's other handlers
+  // dispatch through two ARRAY membership tests (`EMPTY_RELATIONS.includes(path)` /
+  // `EMPTY_RPCS.includes(path)`), which this reader cannot see. Those handlers are
+  // deliberately unscoped and answer for every subject — but every one of them returns `[]`,
+  // the honest empty, so there is no fixture in them for a sibling walk to resolve as its own.
+  // That is the property the N4/N5 pair exists to protect, and it is why "unscoped" is the
+  // right shape here rather than a debt to repay. A green on this row means "the one shape the
+  // reader can see is clean", not "this file is clean".
+  "home-board-mock.mjs": { unscopeable: [], debt: [] },
 };
 
 test("N5 · every lane handler either scopes by the request's own subject, or is a NAMED exception", () => {

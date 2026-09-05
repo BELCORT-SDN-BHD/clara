@@ -57,7 +57,32 @@
   },
   "FirmHome": {
     "heading": "Firm home",
-    "body": "The firm-altitude surfaces each have their own page in the sidebar — the Needs-you inbox, the client register, firm activity and admin. This home page carries no summary of its own yet."
+    "roleAndClients": "{role} · {clientCount, plural, one {# client} other {# clients}}",
+    "roleOnly": "{role}",
+    "orientation": "{needsYou, plural, =0 {Nothing needs you.} one {# item needs you.} other {# items need you.}}",
+    "orientationReview": "{needsReview, plural, one {# is awaiting review.} other {# are awaiting review.}}",
+    "orientationClear": "You are caught up. Nothing is waiting on you or awaiting review.",
+    "needsYouHeading": "Needs you",
+    "needsYouUnavailable": "The review queue could not be summarised right now.",
+    "oldestWaitingHeading": "Oldest waiting",
+    "oldestWaitingEmpty": "Nothing is waiting on you.",
+    "ageDays": "waiting {days, plural, one {# day} other {# days}}",
+    "ageToday": "waiting since today",
+    "clientFirmWide": "Not about one client",
+    "clientUnnamed": "Open the client",
+    "claraWorkingHeading": "Clara is working",
+    "claraWorkingEmpty": "Clara has no tasks running.",
+    "claraWorkingCount": "{count, plural, one {# task running} other {# tasks running}}",
+    "seeAgentActivity": "See all agent activity",
+    "activityHeading": "Recent activity",
+    "activityEmpty": "No firm activity recorded yet.",
+    "activityNotDeployed": "The firm activity timeline is not available yet. When it is, this column will show what happened across the firm — who did what, for which client, and when. Clara's own runs are on the activity page meanwhile.",
+    "seeInbox": "See the full inbox",
+    "seeActivity": "See all activity",
+    "clientsEmpty": "No clients yet.",
+    "clientsLine": "{active} active · {onboarding} onboarding · {archived} archived",
+    "clientsOther": "{count, plural, one {# client has another status} other {# clients have another status}}",
+    "notBuilt": "A firm-wide close status per client is not built. Close readiness is read one client at a time, on that client's Close tab. Statutory deadlines are not recorded yet, so nothing here reminds you of one."
   },
   "NeedsYou": {
     "heading": "Needs you",
@@ -376,11 +401,58 @@
     "clientHeader": "Client: {clientName}",
     "body": "One workspace per client. The accounting objects are tabs — journals, documents, bank, close, reports, registers and knowledge.",
     "clientIdLabel": "Client ID",
-    "statusLabel": "Status",
-    "createdLabel": "Client since",
     "notFoundMessage": "No client with this id is visible to your firm.",
     "queueHeading": "Needs your attention",
-    "queueEmpty": "Nothing is waiting on you for this client right now."
+    "queueEmpty": "Nothing is waiting on you for this client right now.",
+    "clientSince": "Client since {date}",
+    "factsEmpty": "No facts have been recorded for this client yet.",
+    "factsStructured": "{count, plural, one {# recorded fact holds structured detail} other {# recorded facts hold structured detail}} — open the Knowledge tab to read them.",
+    "onboardingHeading": "Onboarding",
+    "onboardingNoPlan": "No onboarding plan has been opened for this client.",
+    "onboardingAnswers": "{answered} of {required} required answers recorded",
+    "onboardingOpeningSeeded": "The opening position has been finalised.",
+    "onboardingOpeningPending": "The opening position is not finalised yet.",
+    "onboardingPlanState": "Plan state {state}, revision {revision}",
+    "onboardingWhereToContinue": "Continue the interview with Clara in the panel beside this page.",
+    "docsHeading": "Documents & coding",
+    "docsEmpty": "Nothing is waiting in this client's document or coding pipeline.",
+    "docsOverlapNote": "Some of these also appear under Needs you above — the two lists answer different questions, so do not add them together.",
+    "docsAwaitingAttribution": "{n, plural, one {# filing awaiting attribution} other {# filings awaiting attribution}}",
+    "docsUncoded": "{n, plural, one {# filing not coded} other {# filings not coded}}",
+    "docsCodingTasks": "{n, plural, one {# coding task open} other {# coding tasks open}}",
+    "docsLintFindings": "{n, plural, one {# lint finding open} other {# lint findings open}}",
+    "bankHeading": "Bank",
+    "bankEmpty": "No bank accounts recorded for this client.",
+    "bankLatestStatement": "Latest statement to {period}",
+    "bankNoStatement": "No statement recorded",
+    "bankStatementUnreadable": "Statements could not be read for this account",
+    "bankProposals": "{n, plural, one {# account proposal pending} other {# account proposals pending}}",
+    "bankOpenTab": "Open the bank tab",
+    "closeHeading": "Close",
+    "closeEmpty": "No fiscal years opened yet for this client.",
+    "closeYear": "Fiscal year",
+    "closeStatus": {
+      "open": "Open",
+      "closing": "Closing",
+      "closed": "Closed",
+      "reopened": "Reopened"
+    },
+    "closeYearEnd": "Year end",
+    "closeYearEndUnset": "No year end is on file for this client.",
+    "closeYearEndOnFile": "Year end on file: {date}",
+    "closeYearEndSource": "{date} ({source})",
+    "closeYearEndBasis": {
+      "asserted": "stated by your firm",
+      "default_1231": "defaulted to 31 December",
+      "asserted_by_file": "taken from a filed document"
+    },
+    "closeReadinessLabel": "Readiness",
+    "closeReadiness": "{met} of {total} measured gates passing",
+    "closeHold": "Close prep on hold",
+    "closeOpenTab": "Open the close tab",
+    "activityHeading": "Last activity",
+    "activityEmpty": "No agent activity recorded for this client.",
+    "activitySeeAll": "See all activity"
   },
   "Clara": {
     "rail": {
@@ -731,18 +803,56 @@
     "body": "Malaysia's SST and income-tax lifecycle for this client. Once a close seals, Clara drafts every rung — its statutory citation and her own reasoning included — and a professional reviews and signs. Nothing here files or posts on its own.",
     "sst": {
       "heading": "SST",
-      "subheading": "Registration status, the period's output tax, and the SST-02 return draft (F-T1).",
-      "notBuilt": "Clara will show this client's SST registration status, the period's output tax, and draft the SST-02 return here once F-T1 builds the registration and return tables. Today only the SST rate and threshold reference tables are live — the rate table since F-T1 PR-1 (migration 0153), the threshold table since migration 0016 — no governed door exists for either. The rest is F-T1 PR-2 onward, paused (裁-80)."
+      "subheading": "This client's SST turnover watch, and where registration and returns stand.",
+      "notBuilt": "Clara does not yet track this client's SST registration, its taxable periods or the SST-02 return. Record the registration status and number in the client's knowledge facts meanwhile, and file the return the way your firm files it today. What Clara does track is the turnover watch above: it tells you when this client is approaching or has crossed the registration threshold."
+    },
+    "sstWatch": {
+      "heading": "Turnover watch",
+      "empty": "No SST turnover watch is open for this client.",
+      "noOpenWatchRow": "There is nothing to acknowledge, snooze or resolve on this watch right now.",
+      "stale": "These figures were last recalculated more than 48 hours ago. Treat them as indicative until the next run.",
+      "confirmedIncluded": "Confirmed taxable turnover",
+      "unknownOrMixed": "Unclassified or mixed turnover",
+      "screeningProxy": "Screening estimate",
+      "earliestCrossing": "Earliest month the threshold was crossed",
+      "applicationDue": "Registration application due",
+      "futureMethod": "Future-turnover method",
+      "notRecorded": "Not recorded",
+      "state": {
+        "monitored": "Monitored",
+        "early_warning": "Approaching the threshold",
+        "crossed": "Threshold crossed",
+        "overdue": "Registration overdue",
+        "resolved": "Resolved"
+      }
     },
     "computation": {
       "heading": "Income tax computation",
-      "subheading": "The R1–R10 computation and the CP204 estimate, draft only (F-T3).",
-      "notBuilt": "Once a close seals, Clara will draft the R1–R10 computation and the CP204 estimate (clara.evaluate_tax_computation_v1) here, every rung carrying its statutory citation and her own explanation, for a professional to sign. Today only the tax law and platform reference tables are live (F-T3 PR-1, migration 0152) — the computation itself is F-T3 PR-2…9, paused (裁-80). It stays draft-only even once built: nothing on this tab is ever filed."
+      "subheading": "The income tax computation and the CP204 estimate, draft only.",
+      "notBuilt": "Clara does not yet draft this client's income tax computation or its CP204 estimate. When she does, every line will carry the statutory provision it rests on and her reasoning for it, and a professional signs before anything leaves the firm. Nothing on this tab will ever file a return or submit an estimate — that stays your firm's act, in the authority's own channel."
     },
     "turnoverClassification": {
       "heading": "Turnover classification",
-      "subheading": "Classify each account's SST turnover treatment.",
-      "notBuilt": "Clara will let a bookkeeper classify each account's SST turnover treatment here (clara.set_turnover_classification, live since migration 0016) once Track B's Tax tab UI resumes — paused, 裁-80."
+      "subheading": "Record how each account's turnover is treated for the SST threshold.",
+      "explainer": "The turnover watch counts an account towards the SST threshold according to how it is classified here. An unclassified account is counted as uncertain, which is why the watch above shows an unclassified figure. Recording a classification takes effect from the date you give and closes the previous one the day before, so the history stays continuous.",
+      "accountLabel": "Account",
+      "accountPlaceholder": "Choose an account",
+      "noAccounts": "This client's chart of accounts has no active accounts to classify.",
+      "classificationLabel": "Treatment",
+      "classification": {
+        "included": "Counts towards the threshold",
+        "excluded": "Does not count towards the threshold",
+        "unknown_or_mixed": "Uncertain or mixed"
+      },
+      "serviceGroupLabel": "Service group",
+      "serviceGroupNone": "No service group",
+      "effectiveFromLabel": "Effective from",
+      "reasonLabel": "Reason (required)",
+      "reasonPlaceholder": "Why is this account treated this way?",
+      "evidenceLabel": "Evidence",
+      "evidencePlaceholder": "Evidence, if you are lowering the account's treatment",
+      "submit": "Record classification",
+      "notBuilt": "Classifications you record are not listed back here yet — this panel records a decision, it does not yet show the history of decisions. The turnover figures above are recalculated by a scheduled run rather than immediately, so they may not move until the next one."
     }
   },
   "JournalsWorkbench": {

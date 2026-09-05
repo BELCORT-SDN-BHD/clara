@@ -73,6 +73,20 @@ async function praLanded() {
   return r.rows[0].ok;
 }
 
+/** 裁-190 / CB-AE2E-018 repoints pi's DORMANT f_a4 stub onto clara.agent_act_receipts (0138), so
+ *  the close lane's agent acts finally reach clara.agent_receipts_visible. f_a4 therefore moves
+ *  from the unwired list to the WIRED map on a chain that carries that migration. Gated exactly
+ *  like praLanded/bp1Landed above and by the same kind of witness — an exact-signature
+ *  to_regprocedure on a door the SAME migration creates, never the shim itself: probing the shim
+ *  would be self-referential (the thing under assertion deciding whether to assert it), the trap
+ *  pi-E1's own comment names. The file ships UNNUMBERED and claims its number at merge, so a
+ *  number-keyed gate would go vacuous the day it is renumbered (review law 3). */
+async function webReadsLanded() {
+  const r = await rootQuery(
+    "select to_regprocedure('clara.list_firm_timeline(bigint,integer)') is not null as ok");
+  return r.rows[0].ok;
+}
+
 before(async () => {
   live = await piApplied();
   if (live) world = await buildWorld();
@@ -126,6 +140,7 @@ test("pi-A1 · the seven shims are registered, present, conforming, and unwired 
   if (gate(t)) return;
   const pra = await praLanded();
   const bp1 = await bp1Landed();
+  const wr = await webReadsLanded();
   const r = await rootQuery("select * from clara.agent_receipt_source_census() order by item");
   // 'pb_binding' sorts AFTER every 'f_a*' item, so it appends — the census orders by item.
   const expectedItems = ["f_a2", "f_a3", "f_a4", "f_a5", "f_a6", "f_a7"]
@@ -146,7 +161,13 @@ test("pi-A1 · the seven shims are registered, present, conforming, and unwired 
   // pb_binding is the same shape as f_a7b: born wired by its own migration, never an unwired
   // stub, and the FIRST member outside the f_a* family (裁-18b PR-1 widened the registry key to
   // a pb_* family for the pre-beta ruling queue, which has no Wave-F number to claim honestly).
+  // 裁-190 adds a FOURTH legitimately-wired exception, and it is the first of pi's ORIGINAL
+  // seven stubs to be repointed by a train that is not its own member migration: f_a4's member
+  // table (clara.agent_act_receipts, 0138) had existed since the close agent limb landed, and the
+  // shim was simply never repointed — so close acts were absent from the Activity feed apps/web
+  // already reads. CB-AE2E-018 repoints it with the one statement pi designed for the purpose.
   const WIRED = { f_a6: "freeform_read_log", f_a7: "agent_filing_receipts",
+    ...(wr ? { f_a4: "agent_act_receipts" } : {}),
     ...(pra ? { f_a7b: "onboarding_agent_receipts" } : {}),
     ...(bp1 ? { pb_binding: "binding_agent_receipts" } : {}) };
   for (const row of r.rows) {

@@ -78,6 +78,17 @@ export type FirmCapabilities = {
   readonly canRevokeVendorBinding: boolean;
   /** Sign a proposed vendor identity binding. */
   readonly canSignVendorBinding: boolean;
+  /** Record an account's SST turnover classification on the client Tax tab.
+   *
+   *  THE READ IS NOT GATED, ONLY THE CONTROL (review-557, N7). A viewer may see this client's
+   *  SST turnover watch — it arrives on `clara.list_review_queue`, which floors at viewer, and
+   *  hiding a figure the database willingly returns would be this build inventing a wall. What
+   *  a viewer must not be OFFERED is the write, because `set_turnover_classification` floors at
+   *  bookkeeper and can only ever answer them CLR04. The door's ADDITIONAL admin+ check on a
+   *  watch-LOWERING move is deliberately NOT mirrored: that predicate reads the classification
+   *  in force at the effective date, which no human read exposes, so the DB decides it and its
+   *  refusal renders verbatim. */
+  readonly canClassifyTurnover: boolean;
 };
 
 /**
@@ -179,6 +190,18 @@ export const FIRM_CAPABILITY_FLOORS = [
     migration: "0154_binding_proposal_pr_1.sql",
     line: 2742,
   },
+  {
+    // The client Tax tab's ONE governed write (review-557, N7). Created at `0016:905` and never
+    // replaced or dropped — the census below proves that rather than this comment asserting it.
+    // Its rank check is the plain `_human_ctx(role_rank('bookkeeper'))` on line 916; the
+    // watch-lowering admin+ branch further down the body is a per-CALL condition on data no
+    // human read exposes, so it stays the DB's to decide and is not a floor to mirror.
+    capability: "canClassifyTurnover",
+    door: "set_turnover_classification",
+    role: "bookkeeper",
+    migration: "0016_a21_compliance_watch.sql",
+    line: 916,
+  },
 ] as const satisfies readonly {
   capability: keyof FirmCapabilities;
   door: string;
@@ -220,6 +243,7 @@ const NOTHING: FirmCapabilities = {
   canProposeVendorBinding: false,
   canRevokeVendorBinding: false,
   canSignVendorBinding: false,
+  canClassifyTurnover: false,
 };
 
 /** `>= floor`, fail-closed on a NULL/unknown rank — the SQL's own
@@ -246,6 +270,7 @@ export function firmCapabilities(scope: CapabilityScope | null): FirmCapabilitie
     canProposeVendorBinding: atLeast(rank, "bookkeeper"),
     canRevokeVendorBinding: atLeast(rank, "bookkeeper"),
     canSignVendorBinding: atLeast(rank, "admin"),
+    canClassifyTurnover: atLeast(rank, "bookkeeper"),
   };
 }
 
