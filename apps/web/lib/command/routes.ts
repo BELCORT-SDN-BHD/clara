@@ -45,6 +45,9 @@
  * each child also needs its own exact row here to remain discoverable.
  */
 
+import { ADMIN_NAVIGATION, FIRM_NAVIGATION } from "@/lib/firm/navigation";
+import type { MemberRole } from "@/lib/members/reads";
+
 export type CommandRouteStatus = "built" | "planned";
 
 export interface CommandRouteBase {
@@ -59,6 +62,17 @@ export interface CommandRouteBase {
 export interface FirmCommandRoute extends CommandRouteBase {
   scope: "firm";
   href: string;
+  /**
+   * C-43 — the rank floor, DERIVED from the sidebar's own registry, never
+   * retyped here. See `FIRM_ROUTES` below for the join and why it is a join.
+   * Shaped as `NavigationEntry` so `hasNavigationAccess` can be CALLED on it
+   * rather than a second copy of that predicate being written (裁-107a).
+   */
+  minimumRole: MemberRole;
+  operatorOnly?: true;
+  /** ⌘K label ids keyed by the sidebar's rank-shaped `messageKey`. See
+   *  `FIRM_ROUTE_PRESENTATION` for why the two catalogues are joined. */
+  rankLabels?: Readonly<Record<string, string>>;
 }
 
 export interface ClientCommandRoute extends CommandRouteBase {
@@ -69,11 +83,62 @@ export interface ClientCommandRoute extends CommandRouteBase {
 
 export type CommandRoute = FirmCommandRoute | ClientCommandRoute;
 
-/** Firm-altitude surfaces (Q3). Always offered, regardless of current route. */
-export const FIRM_ROUTES: FirmCommandRoute[] = [
+/**
+ * C-43 — THE FIRM GO ROWS ARE DERIVED, NOT A SECOND COPY.
+ *
+ * WHAT WAS WRONG. `FIRM_ROUTES` was a flat hand-written constant with no rank
+ * field at all, and `command-palette.tsx` filtered it by TEXT only. Meanwhile
+ * `lib/firm/navigation.ts` held the real floors the sidebar applies — activity
+ * at bookkeeper, members at admin, registrations at owner-plus-operator. So a
+ * viewer whose sidebar correctly hid Activity, Members and Firm registrations
+ * still saw all three in ⌘K, on the surface most likely to be used in front of
+ * a client. Nothing granted them anything (the destination's own RLS and its
+ * door remain the wall — navigation.ts's own note) but ⌘K was telling a
+ * professional that a room existed for them when it did not.
+ *
+ * WHY A JOIN AND NOT A `minimumRole` FIELD PER ROW. Adding a floor to each row
+ * here would have been the third place a floor is written and the second place
+ * it can rot. This file's OWN header records what that costs: the SYNC NOTE at
+ * the top is the post-mortem of hand-maintaining a copy of the route tree, in
+ * which ten of fifteen rows were wrong and one pointed at `/inbox`, a path no
+ * `page.tsx` has ever served. So the floor is not written here — it is LOOKED UP
+ * from the sidebar's registry by `href`, at module load, and a row whose href is
+ * in neither registry THROWS at import time rather than shipping a row with no
+ * floor. `routes.test.ts` re-asserts the equality per row so the guard is a
+ * measurement and not only a construction.
+ *
+ * WHAT STAYS HERE. The presentational half a nav registry has no business
+ * carrying: the ⌘K message key (`CommandPalette.go.routes.<id>` — deliberately
+ * NOT the sidebar's own key, since "Firm home" and "Home" are different sentences
+ * in different places), the fuzzy-match keywords, and `status`, which this file's
+ * mechanical page-tree check owns both ways.
+ */
+const FIRM_ROUTE_PRESENTATION: readonly {
+  id: string;
+  /** The join key. Must equal a `FIRM_NAVIGATION` or `ADMIN_NAVIGATION` href. */
+  href: string;
+  status: CommandRouteStatus;
+  keywords: string[];
+  /**
+   * C-43, second order: a ⌘K label that follows the SIDEBAR'S RANK-SHAPED one.
+   *
+   * `visibleFirmNavigation` rewrites an entry's `messageKey` for some callers —
+   * today the Admin entry becomes "Firm" for anyone who cannot actually
+   * administer the firm's people (裁-187), because "a bookkeeper reads 'Admin',
+   * finds nothing administrative, and reasonably concludes the product is
+   * offering them something they cannot use". ⌘K's labels are a SEPARATE
+   * catalogue on purpose ("Firm home" here, "Home" in the sidebar), so that
+   * rename did not reach this row — and a bookkeeper would have read "Firm" in
+   * the sidebar and "Admin" in ⌘K for one href. That is precisely the drift C-43
+   * exists to end, so the two are joined here rather than left to agree by luck:
+   * a key in this map is chosen when the rank-shaped entry's `messageKey`
+   * matches it. Data, not a branch in the render path, so the next such rename is
+   * one line.
+   */
+  rankLabels?: Readonly<Record<string, string>>;
+}[] = [
   {
     id: "firmHome",
-    scope: "firm",
     href: "/",
     status: "built",
     keywords: ["home", "dashboard"],
@@ -86,7 +151,6 @@ export const FIRM_ROUTES: FirmCommandRoute[] = [
     // cross-client inbox from the app's universal entry point landed on Next's
     // bare 404, OUTSIDE the firm shell.
     id: "needsYou",
-    scope: "firm",
     href: "/needs-you",
     status: "built",
     keywords: ["needs you", "inbox", "exceptions", "proactive"],
@@ -94,7 +158,6 @@ export const FIRM_ROUTES: FirmCommandRoute[] = [
   {
     // TRUED (MBB-5): app/(firm)/clients/page.tsx is live.
     id: "clientRegister",
-    scope: "firm",
     href: "/clients",
     status: "built",
     keywords: ["clients", "register", "book of clients"],
@@ -102,7 +165,6 @@ export const FIRM_ROUTES: FirmCommandRoute[] = [
   {
     // TRUED (MBB-5): app/(firm)/activity/page.tsx is live.
     id: "firmActivity",
-    scope: "firm",
     href: "/activity",
     status: "built",
     keywords: ["activity", "receipts", "open register", "audit"],
@@ -115,15 +177,15 @@ export const FIRM_ROUTES: FirmCommandRoute[] = [
     // that trues the parent too, per §3.6's own rule: truing routes.ts is
     // part of a train's merge, never a later sweep.
     id: "admin",
-    scope: "firm",
     href: "/admin",
     status: "built",
     keywords: ["admin", "firm controls", "tiers", "metering"],
+    // 裁-187: the sidebar calls this "Firm" for a caller who administers nothing.
+    rankLabels: { firm: "adminAsFirm" },
   },
   {
     // T10 (port-wave plan §4 T10): the compliance register, under /admin.
     id: "adminCompliance",
-    scope: "firm",
     href: "/admin/compliance",
     status: "built",
     keywords: ["compliance", "sst", "registration", "watch"],
@@ -132,7 +194,6 @@ export const FIRM_ROUTES: FirmCommandRoute[] = [
     // T10 (port-wave plan §4 T10): the vendor identity binding governance
     // panel, under /admin.
     id: "adminVendorBindings",
-    scope: "firm",
     href: "/admin/vendor-bindings",
     status: "built",
     keywords: ["vendor", "binding", "identity", "propose", "sign", "revoke"],
@@ -140,7 +201,6 @@ export const FIRM_ROUTES: FirmCommandRoute[] = [
   {
     // P4-4/P4-6: the members, roles and invitations surface.
     id: "adminMembers",
-    scope: "firm",
     href: "/admin/members",
     status: "built",
     keywords: ["members", "roles", "rbac", "invites", "access"],
@@ -148,21 +208,62 @@ export const FIRM_ROUTES: FirmCommandRoute[] = [
   {
     // P4-5: the operator approval queue, under /admin.
     id: "adminRegistrations",
-    scope: "firm",
     href: "/admin/registrations",
     status: "built",
     keywords: ["registrations", "approvals", "operator", "queue"],
   },
   {
-    // FS-8 PR-2 (裁-97): the firm-settings surface, under /admin — the
-    // high-stakes threshold control + the capabilities honest note.
+    // FS-8 PR-2 (裁-97): the firm-settings surface, under /admin. Built around
+    // the high-stakes threshold control until 裁-187 retired that control
+    // outright; the keywords lost "threshold" and "high stakes" with it, so the
+    // palette cannot advertise a destination by a control it no longer holds.
+    // What is there now: the approvals note and the capabilities honest note.
     id: "adminSettings",
-    scope: "firm",
     href: "/admin/settings",
     status: "built",
-    keywords: ["settings", "threshold", "high stakes", "capabilities", "owner"],
+    keywords: ["settings", "approvals", "capabilities", "owner"],
   },
 ];
+
+/**
+ * The floors, by href, from the TWO registries the sidebar itself reads. Built
+ * once at module load. `ADMIN_NAVIGATION` is folded in after `FIRM_NAVIGATION`
+ * and their hrefs are disjoint (`/admin` vs `/admin/*`), so there is no
+ * precedence question to get wrong.
+ */
+const NAVIGATION_FLOOR_BY_HREF = new Map<string, { minimumRole: MemberRole; operatorOnly?: true }>(
+  [...FIRM_NAVIGATION, ...ADMIN_NAVIGATION].map((entry) => [
+    entry.href,
+    entry.operatorOnly
+      ? { minimumRole: entry.minimumRole, operatorOnly: entry.operatorOnly }
+      : { minimumRole: entry.minimumRole },
+  ]),
+);
+
+/** Firm-altitude surfaces (Q3). Always offered, regardless of current route —
+ *  subject to the caller's rank, which `command-palette.tsx` applies with the
+ *  sidebar's own `hasNavigationAccess`. */
+export const FIRM_ROUTES: FirmCommandRoute[] = FIRM_ROUTE_PRESENTATION.map((row) => {
+  const floor = NAVIGATION_FLOOR_BY_HREF.get(row.href);
+  if (!floor) {
+    // FAIL CLOSED AT IMPORT, not at render. A Go row with no floor would be a
+    // row nothing filters — the exact defect C-43 is. Throwing here makes the
+    // build/first-import the place it is caught, and `routes.test.ts` executes
+    // this module, so it is caught by the suite too.
+    throw new Error(
+      `⌘K Go row "${row.id}" points at ${row.href}, which is in neither FIRM_NAVIGATION nor ADMIN_NAVIGATION — a Go row must be a navigable surface with a known rank floor.`,
+    );
+  }
+  return {
+    id: row.id,
+    scope: "firm",
+    href: row.href,
+    status: row.status,
+    keywords: row.keywords,
+    rankLabels: row.rankLabels,
+    ...floor,
+  };
+});
 
 /**
  * Client-workspace tabs (Q3). Offered only when the current URL resolves a

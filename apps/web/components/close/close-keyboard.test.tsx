@@ -73,7 +73,18 @@ function gateApp() {
   return createElement(NextIntlClientProvider, {
     locale: "en",
     messages,
-    children: createElement(GateCheckRow, { check: unattestedDrawer2Check(), closeRunId: "run1", busy: false, onAttest: async () => {} }),
+    // 裁-187 (2026-09-04): the attest ceremony is revealed only beside a refusal
+    // that NAMED an attestation (finalize_close's CLR41 `drawer2_unattested`,
+    // 0128:199-232). The fixture plants that refusal, because the trigger this
+    // test is about does not exist without it.
+    children: createElement(GateCheckRow, {
+      check: unattestedDrawer2Check(),
+      closeRunId: "run1",
+      busy: false,
+      refusal: { code: "CLR41", reason: "drawer2_unattested" },
+      refusalMessage: "drawer-2 gate ar_control_tie is fail and 1 item(s) carry no live attestation",
+      onAttest: async () => true,
+    }),
   });
 }
 
@@ -162,7 +173,7 @@ test("CLOSE journey (gate row's OWN working door dialog, for contrast): a differ
         // `disabled`) — used directly rather than re-deriving CloseDoors'
         // full plan-shaped props here.
         createElement(CloseDoorDialog, {
-          triggerLabel: "Begin close", title: "Begin close", confirmLabel: "Begin close", busy: false, onConfirm: async () => {},
+          triggerLabel: "Begin close", title: "Begin close", confirmLabel: "Begin close", busy: false, onConfirm: async () => true,
         }),
       ),
     }),

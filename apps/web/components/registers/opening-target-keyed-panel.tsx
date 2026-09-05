@@ -101,7 +101,7 @@ function KeyedResolutionDialog({ clientId, seed, busy, act }: { clientId: string
       description={t("mintResolutionDescription")}
       confirmLabel={t("mintResolutionTrigger")}
       busy={busy}
-      onConfirm={async () => { await act(async () => { await recordOpeningKeyedResolution(sessionTokenAccessor, { client: clientId, seed: seed.id, note }); }); }}
+      onConfirm={() => act(async () => { await recordOpeningKeyedResolution(sessionTokenAccessor, { client: clientId, seed: seed.id, note }); })}
     >
       <div className="grid gap-1.5">
         <Label htmlFor="opening-keyed-note">{t("noteLabel")}</Label>
@@ -135,6 +135,8 @@ function TargetDialog({ seed, accounts, busy, act }: { seed: OpeningSeedRow; acc
           // F6 (fix round, rev-t2): only clear on a real success — see
           // opening-items-panel.tsx's own DraftItemDialog note.
           if (ok) { setLineKey(""); setDebit(0); setCredit(0); }
+          // CB-AE2E-004: the outcome is also what closes (or keeps) the dialog.
+          return ok;
         })
       }
     >

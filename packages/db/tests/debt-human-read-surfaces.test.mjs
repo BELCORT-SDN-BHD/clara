@@ -314,7 +314,10 @@ test("debt-BAR1 · 裁-15 estate census — EVERY member of the catalog-derived 
     + " merged, to satisfy wave-a-shape's fn-fronted-only invariant); H-19 landed"
     + " firm_sales_lane_visible, the read the owner-floored sales-lane control re-reads after its"
     + " act, built on counterparty_aliases_visible's own shape, which is why it joins this family"
-    + " rather than escaping it");
+    + " rather than escaping it; and CB-AE2E-018 / 裁-190 landed firm_timeline_visible (the"
+    + " bookkeeper+ activity feed over clara.domain_events -- a member this census caught on its own"
+    + " author's first estate run, which is the derivation working: the family is read from the"
+    + " catalog, so a new same-shape view joins it whether or not anyone remembered 裁-15)");
 
   const r = await rootQuery(
     `select c.relname, c.reloptions

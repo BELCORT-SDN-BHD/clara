@@ -15,6 +15,7 @@ import { EmptyState, LoadingState, StateBanner } from "@/components/common/state
 import { ArtifactRow } from "./ArtifactRow";
 import { ReportAgentReceiptsPanel } from "./ReportAgentReceiptsPanel";
 import type { SessionTokenAccessor } from "@/lib/session";
+import { useMemberNames } from "@/lib/members/use-member-names";
 
 export function StatutoryReportsPanel({ clientId, session }: { clientId: string; session: SessionTokenAccessor }) {
   const t = useTranslations("ClientReports.statutory");
@@ -22,6 +23,10 @@ export function StatutoryReportsPanel({ clientId, session }: { clientId: string;
   // The download OFFER, read once for the whole panel: whether each artifact is downloadable is
   // the DOOR's verdict, never something this panel derives from a row it already has.
   const offers = useDownloadOffers(clientId, session);
+  // review-549 MAJOR 7: ONE roster read for the whole panel, passed down to every row.
+  // `useMemberNames` reads `clara.firm_members_visible` once per mount, so holding it in
+  // ArtifactRow was N reads for N artifacts — the N+1 its own header forbids.
+  const memberNames = useMemberNames(session);
 
   return (
     // P3 polish: the bespoke `rounded-xl border bg-surface p-4` <section> became
@@ -73,6 +78,7 @@ export function StatutoryReportsPanel({ clientId, session }: { clientId: string;
                 session={session}
                 busy={busy}
                 act={act}
+                memberNames={memberNames}
               />
             ))}
           </div>

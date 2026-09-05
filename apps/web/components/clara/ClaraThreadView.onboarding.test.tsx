@@ -44,7 +44,13 @@ function App(clientId: string | undefined) {
   return createElement(NextIntlClientProvider, {
     locale: "en",
     messages,
-    children: createElement(ClaraThreadView, { threadId: null, variant: "rail", clientId }),
+    // 裁-117 — `resolving: true` is now EXPLICIT. The rail's session read used to
+    // create a thread when it found none, so "no threadId" and "still resolving" were
+    // the same state and the prop did not exist. They are two states now
+    // (lib/clara/useActiveThread.ts's header: creation stopped being a mount side
+    // effect), and this cell's subject is the RESOLVING one — so it says so rather
+    // than inheriting whichever arm the default happens to select.
+    children: createElement(ClaraThreadView, { threadId: null, variant: "rail", clientId, resolving: true }),
   });
 }
 

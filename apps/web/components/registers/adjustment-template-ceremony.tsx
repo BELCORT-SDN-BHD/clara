@@ -31,7 +31,7 @@ export function ProposeTemplateDialog({
 }: {
   accounts: AccountRow[];
   busy: boolean;
-  onSubmit: (input: ProposeTemplateFields) => Promise<void>;
+  onSubmit: (input: ProposeTemplateFields) => Promise<boolean>;
 }) {
   const t = useTranslations("AdjustmentsAccounts.proposeTemplate");
   const [name, setName] = useState("");
@@ -113,7 +113,7 @@ export function ProposeTemplateDialog({
   );
 }
 
-export function SignTemplateDialog({ templateName, busy, onSubmit }: { templateName: string; busy: boolean; onSubmit: () => Promise<void> }) {
+export function SignTemplateDialog({ templateName, busy, onSubmit }: { templateName: string; busy: boolean; onSubmit: () => Promise<boolean> }) {
   const t = useTranslations("AdjustmentsAccounts.signTemplate");
   return (
     <AdjustmentDoorDialog
@@ -135,7 +135,7 @@ export function RetireTemplateDialog({
 }: {
   templateName: string;
   busy: boolean;
-  onSubmit: (reason: string) => Promise<void>;
+  onSubmit: (reason: string) => Promise<boolean>;
 }) {
   const t = useTranslations("AdjustmentsAccounts.retireTemplate");
   const [reason, setReason] = useState("");

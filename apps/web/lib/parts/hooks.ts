@@ -107,8 +107,18 @@ export type PartHydrationState<T> = {
    *  NEXT `act()` call, or by that follow-up reload itself failing (whose own
    *  failure then becomes the shown error) — never silently by a read that merely
    *  happens to succeed. The write failing is real news even when the row still
-   *  reads fine. */
-  act: (fn: () => Promise<void>, onOk?: () => void) => Promise<void>;
+   *  reads fine.
+   *
+   *  RESOLVES TO THE OUTCOME (CB-AE2E-004): `true` only when `fn` completed
+   *  without throwing, `false` when it failed for ANY reason — a governed
+   *  DoorRefusal, a WireError, or anything else `applyFailure` routes into
+   *  err/clr. It still never REJECTS (the sticky banner, not an exception, is how
+   *  a refusal is surfaced), so the boolean is the only channel a caller has for
+   *  "did this act succeed": the fifteen door-dialog wrappers read it to decide
+   *  whether to close, and a refused act must leave the dialog — and the human's
+   *  typed input — standing. The post-attempt reload's own outcome is deliberately
+   *  NOT part of this boolean: it reports what the WRITE did. */
+  act: (fn: () => Promise<void>, onOk?: () => void) => Promise<boolean>;
 };
 
 function applyFailure(e: unknown, setErr: (s: string | null) => void, setClr: (c: PartClr) => void): void {
@@ -219,7 +229,7 @@ export function useHydratedPart<T>(
   const reload = useCallback(() => reloadImpl(), [reloadImpl]);
 
   const act = useCallback(
-    async (fn: () => Promise<void>, onOk?: () => void) => {
+    async (fn: () => Promise<void>, onOk?: () => void): Promise<boolean> => {
       setBusy(true);
       setErr(null);
       setClr(null);
@@ -227,6 +237,7 @@ export function useHydratedPart<T>(
         await fn();
         onOk?.();
         await reloadImpl(); // re-derive — never trust the write's own view of the result.
+        return true;
       } catch (e) {
         applyFailure(e, setErr, setClr);
         // Sticky refusal (finding 1): re-derive `data` for real, but PRESERVE the
@@ -235,6 +246,7 @@ export function useHydratedPart<T>(
         // the reload's OWN failure (still unconditional, inside its catch above)
         // or the next act() call retires it.
         await reloadImpl({ preserveErrorOnSuccess: true }).catch(() => {});
+        return false;
       } finally {
         setBusy(false);
       }

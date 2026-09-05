@@ -34,7 +34,7 @@ export function SetCounterpartyTermsDialog({
   counterpartyName: string;
   currentDays: number | null;
   busy: boolean;
-  onSubmit: (days: number) => Promise<void>;
+  onSubmit: (days: number) => Promise<boolean>;
 }) {
   const t = useTranslations("ArApCounterparty.setTerms");
   const [raw, setRaw] = useState(currentDays != null ? String(currentDays) : "");
@@ -48,7 +48,7 @@ export function SetCounterpartyTermsDialog({
       busy={busy}
       confirmDisabled={parsed === null}
       // N4 (independent review): a typed guard, not a cast.
-      onConfirm={() => (parsed === null ? Promise.resolve() : onSubmit(parsed))}
+      onConfirm={() => (parsed === null ? Promise.resolve(false) : onSubmit(parsed))}
     >
       <div className="flex flex-col gap-1.5">
         <Label htmlFor="cp-terms-days">{t("daysLabel")}</Label>

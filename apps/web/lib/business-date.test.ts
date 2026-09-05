@@ -44,6 +44,70 @@ test("no apps/web file originates a date from the browser's UTC clock", () => {
   );
 });
 
+test("no apps/web file renders a DATE or TIME through the viewer's own locale", () => {
+  // THE SECOND HALF OF THE SAME LAW, and the one the guard above could not see.
+  //
+  // `businessDate` defends the ORIGINATION of a date (the browser's UTC clock
+  // as a query argument). This defends its RENDERING: `.toLocaleDateString()`
+  // and `.toLocaleTimeString()` format in the VIEWER's timezone, so a reviewer
+  // outside UTC+8 reads a filing date, an approval time or a receipt that can
+  // disagree with the DB's own business day by one — the "two machines, two
+  // days" hazard `businessDateTime`'s own header (N11) names. Two live
+  // offenders were found by hand on the documents tab
+  // (`filed-document-list.tsx:61`, `document-filings-history.tsx:63`) after the
+  // guard above had been green for weeks, because it only ever matched the
+  // origination idiom.
+  //
+  // `toLocaleString` on a NUMBER is untouched and must stay so: it is how every
+  // money and byte-count formatter in this app groups thousands
+  // (`lib/journals/balance.ts`, `lib/registers/money.ts`,
+  // `components/reports/ArtifactRow.tsx`). Only the two DATE-only methods, plus
+  // `toLocaleString` applied directly to a `new Date(...)`, are forbidden.
+  const forbidden = [
+    /\.toLocaleDateString\s*\(/,
+    /\.toLocaleTimeString\s*\(/,
+    /new\s+Date\s*\([^)]*\)\s*\.toLocaleString\s*\(/,
+  ];
+  const offenders: string[] = [];
+  for (const file of walkTs(APP_DIR)) {
+    const rel = relative(APP_DIR, file).split("\\").join("/");
+    if (rel === "lib/business-date.ts") continue; // sanctioned — the ONE canonical copy
+    if (rel.endsWith(".test.ts") || rel.endsWith(".test.tsx")) continue; // fixtures, not production output
+    const src = readFileSync(file, "utf8");
+    for (const [i, line] of src.split("\n").entries()) {
+      const trimmed = line.trimStart();
+      if (trimmed.startsWith("//") || trimmed.startsWith("*")) continue;
+      if (forbidden.some((re) => re.test(line))) offenders.push(`${rel}:${i + 1}`);
+    }
+  }
+  assert.deepEqual(
+    offenders,
+    [],
+    "these files render a date or time in the VIEWER's timezone — two reviewers in two timezones read different days.\n" +
+      `Import businessDate()/businessDateTime() from lib/business-date.ts instead:\n  ${offenders.join("\n  ")}`,
+  );
+});
+
+test("VACUITY CONTROL: the date-rendering guard's patterns match the idiom they forbid, and spare the money one", () => {
+  // Without this the cell above passes identically against a regex that matches
+  // nothing — the exact way the origination guard stayed green while two
+  // rendering offenders sat in components/documents/.
+  const forbidden = [
+    /\.toLocaleDateString\s*\(/,
+    /\.toLocaleTimeString\s*\(/,
+    /new\s+Date\s*\([^)]*\)\s*\.toLocaleString\s*\(/,
+  ];
+  const matches = (line: string) => forbidden.some((re) => re.test(line));
+
+  assert.equal(matches("{new Date(filing.filed_at).toLocaleDateString()}"), true, "the exact removed offender must match");
+  assert.equal(matches("d.toLocaleTimeString()"), true);
+  assert.equal(matches("new Date(x).toLocaleString()"), true);
+
+  assert.equal(matches('(cents / 100).toLocaleString("en-MY")'), false, "money grouping must NOT be caught");
+  assert.equal(matches("custody.byte_size.toLocaleString()"), false, "a byte count must NOT be caught");
+  assert.equal(matches("businessDateTime(filing.filed_at)"), false, "the sanctioned replacement must NOT be caught");
+});
+
 test("the business timezone is the one clara._book_today() books in", () => {
   assert.equal(CLARA_BUSINESS_TIMEZONE, "Asia/Kuala_Lumpur");
 });

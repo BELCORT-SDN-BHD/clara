@@ -17,6 +17,7 @@ import { DraftsQueuePanel } from "@/components/journals/drafts-queue-panel";
 import { PostedPanel } from "@/components/journals/posted-panel";
 import { ComposeDialog } from "@/components/journals/compose-dialog";
 import { InterruptionsPanel } from "@/components/journals/interruptions-panel";
+import { JournalStatusLegend } from "@/components/journals/status-legend";
 
 type Tab = "drafts" | "posted" | "clarifications";
 
@@ -98,6 +99,11 @@ export function JournalsWorkbench({ clientId }: { clientId: string }) {
         value={tab}
         onSelect={setTab}
       />
+      {/* CB-AE2E-021 (D): the state legend sits under the tab strip rather
+          than inside one panel — the "Posted"/"Approved" confusion it settles
+          spans the drafts tab and the posted tab equally, and a legend that
+          only appears on one of them explains the split from inside it. */}
+      <JournalStatusLegend />
       {tab === "drafts" && (
         <DraftsQueuePanel
           clientId={clientId}
@@ -131,9 +137,12 @@ export function JournalsWorkbench({ clientId }: { clientId: string }) {
       )}
       {tab === "posted" && (
         <PostedPanel
+          clientId={clientId}
           entries={data.entries}
           lines={data.lines}
           linesTruncated={data.linesTruncated}
+          entriesTruncated={data.entriesTruncated}
+          accounts={data.accounts}
           busy={workbench.busy}
           err={workbench.err}
           clr={workbench.clr}

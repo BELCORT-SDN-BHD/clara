@@ -19,8 +19,20 @@ import { cn } from "@/lib/utils";
  * labels. Nothing here holds a hook, so a Server Component page and a
  * Client Component workbench can both render it.
  */
+/**
+ * CB-AE2E-019 — the padding is now an arm, `p-4 lg:p-8`.
+ *
+ * `p-8` was unconditional, and it is 64px of HORIZONTAL padding on a frame that
+ * every route-level surface in the product renders inside. On a 320 CSS px
+ * viewport that is a fifth of the screen spent before the first character; the
+ * audit named this the one place where fixing only the three chrome columns
+ * would still leave the shell failing WCAG 2.2 SC 1.4.10 Reflow. The vertical
+ * rhythm (`gap-6` between major sections) is untouched — it is the page's
+ * internal rhythm, not its inset, and compressing it would make a narrow page
+ * denser rather than wider.
+ */
 export function PageShell({ children, className }: { children: ReactNode; className?: string }) {
-  return <main className={cn("flex flex-col gap-6 p-8", className)}>{children}</main>;
+  return <main className={cn("flex flex-col gap-6 p-4 lg:p-8", className)}>{children}</main>;
 }
 
 export function PageHeader({

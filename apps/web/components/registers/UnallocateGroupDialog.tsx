@@ -21,7 +21,7 @@ export function UnallocateGroupDialog({
 }: {
   group: ApplicationGroup;
   busy: boolean;
-  onSubmit: (applicationGroupId: string, reason: string) => Promise<void>;
+  onSubmit: (applicationGroupId: string, reason: string) => Promise<boolean>;
 }) {
   const t = useTranslations("ArApCounterparty.unallocateGroup");
   const tc = useTranslations("Common");

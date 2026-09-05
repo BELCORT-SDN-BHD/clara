@@ -21,6 +21,8 @@ import { issueReportForApproval, archiveSignedOriginal, retrieveSignedOriginal, 
 import { DownloadArtifactButton } from "./DownloadArtifactButton";
 import type { DownloadableArtifact, ReportArtifactRow } from "@/lib/reports/types";
 import type { SessionTokenAccessor } from "@/lib/session";
+import { MemberName } from "@/components/common/member-name";
+import type { MemberNameResolver } from "@/lib/members/use-member-names";
 
 /** LOW (independent review, L3): `Number(byteSize)` on a malformed string
  *  (empty, whitespace, non-digits) silently becomes NaN, which
@@ -37,13 +39,19 @@ export function ArtifactRow({
   session,
   busy,
   act,
+  memberNames,
 }: {
   artifact: ReportArtifactRow;
   /** The OFFER door's row for this artifact, or `null` while the offer read is in flight. */
   offer: DownloadableArtifact | null;
   session: SessionTokenAccessor;
   busy: boolean;
-  act: (fn: () => Promise<void>) => Promise<void>;
+  act: (fn: () => Promise<void>) => Promise<boolean>;
+  /** review-549 MAJOR 7: held ONCE by the panel and passed down, never mounted per row.
+   *  `useMemberNames` issues one `firm_members_visible` read per mount, so a hook here
+   *  was N reads for N artifacts — the exact N+1 its own header (use-member-names.ts:33-35)
+   *  tells callers to avoid. `firm-activity-feed.tsx:39-42` is the precedent. */
+  memberNames: MemberNameResolver;
 }) {
   const t = useTranslations("ClientReports.statutory");
   const [copied, setCopied] = useState(false);
@@ -80,7 +88,7 @@ export function ArtifactRow({
         <dt className="text-muted-foreground">{t("bytesLabel")}</dt>
         <dd className="font-mono text-card-foreground">{artifact.byte_size.toLocaleString()}</dd>
         <dt className="text-muted-foreground">{t("sealedBy")}</dt>
-        <dd className="font-mono text-card-foreground">{artifact.sealed_by} · {artifact.sealed_at}</dd>
+        <dd className="text-card-foreground"><MemberName userId={artifact.sealed_by} resolver={memberNames} showRole={false} /> <span className="font-mono">· {artifact.sealed_at}</span></dd>
       </dl>
       {artifact.kind === "pre_sign" ? (
         <div className="flex flex-wrap gap-2">
@@ -102,7 +110,7 @@ function IssueDialog({
   artifact: ReportArtifactRow;
   session: SessionTokenAccessor;
   busy: boolean;
-  act: (fn: () => Promise<void>) => Promise<void>;
+  act: (fn: () => Promise<void>) => Promise<boolean>;
 }) {
   const t = useTranslations("ClientReports.statutory.issue");
   const [reason, setReason] = useState("");
@@ -141,7 +149,7 @@ function ArchiveDialog({
   artifact: ReportArtifactRow;
   session: SessionTokenAccessor;
   busy: boolean;
-  act: (fn: () => Promise<void>) => Promise<void>;
+  act: (fn: () => Promise<void>) => Promise<boolean>;
 }) {
   const t = useTranslations("ClientReports.statutory.archive");
   const [sha, setSha] = useState("");

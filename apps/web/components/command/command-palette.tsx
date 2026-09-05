@@ -23,8 +23,13 @@ import {
 import { DO_ACTIONS, permittedDoActions, type DoActionEnv, type DoActionSpec } from "@/lib/command/do-actions";
 import { loadDoEnv, runDoAction } from "@/lib/command/do-dispatch";
 import { isDoorRefusal } from "@/lib/doors";
+import { visibleAdminNavigation, visibleFirmNavigation } from "@/lib/firm/navigation";
+import { loadClientRegister, type ClientRow } from "@/lib/firm/reads";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
 import type { SessionTokenAccessor } from "@/lib/session";
+
+/** C-43 — the ceiling on the rendered Clients group. See `clientRegisterState`. */
+export const GO_CLIENTS_RENDER_CAP = 50;
 
 function normalize(value: string): string {
   return value.trim().toLowerCase();
@@ -92,10 +97,20 @@ type DoState =
  * a dead `<CommandEmpty>` that the always-present Ask/Do rows would make
  * unreachable.
  *
- * Go and Ask stay synchronous (a static local manifest; one DOM event). Do is
- * the one asynchronous section, and it has a REAL loading branch behind a real
- * read — the note the original version of this header left for whoever wired a
- * live data source, honoured rather than reinterpreted.
+ * C-43 CHANGED WHAT "GO" IS. This header used to say "Go and Ask stay
+ * synchronous (a static local manifest; one DOM event)" and treated that as a
+ * feature. It was also the defect: a static manifest cannot know the caller's
+ * rank, so ⌘K offered Activity, Members and Firm registrations to a viewer whose
+ * sidebar correctly hid all three. Go is now asynchronous, on the SAME read Do
+ * already makes (`loadDoEnv`, once per open), plus one register read for the
+ * Clients group. Ask stays synchronous and unconditional — it is the universal
+ * fallback ("one way in, from anywhere", PRD §5a) and must never wait on a read.
+ *
+ * The cost is real and was weighed: ⌘K is a 100+/day shortcut and Go now has a
+ * brief loading line where it used to paint instantly. The alternative —
+ * rendering the full list optimistically and filtering when the read lands —
+ * FLASHES rows the caller may not open, which is a worse thing to do in front of
+ * a client than to wait one round trip. Neither arm renders an unfiltered list.
  */
 export function CommandPalette({ onNavigate, session = sessionTokenAccessor }: CommandPaletteProps) {
   const t = useTranslations("CommandPalette");
@@ -107,14 +122,6 @@ export function CommandPalette({ onNavigate, session = sessionTokenAccessor }: C
 
   const clientId = resolveClientIdFromPathname(pathname ?? "");
 
-  const firmMatches = React.useMemo(
-    () =>
-      FIRM_ROUTES.filter((route) =>
-        matchesQuery([tGoRoutes(route.id), ...(route.keywords ?? [])], query),
-      ),
-    [query, tGoRoutes],
-  );
-
   const clientMatches = React.useMemo(
     () =>
       clientId
@@ -124,8 +131,6 @@ export function CommandPalette({ onNavigate, session = sessionTokenAccessor }: C
         : [],
     [clientId, query, tGoRoutes],
   );
-
-  const hasGoMatches = firmMatches.length > 0 || clientMatches.length > 0;
 
   function goTo(href: string) {
     router.push(href);
@@ -165,6 +170,120 @@ export function CommandPalette({ onNavigate, session = sessionTokenAccessor }: C
   // twice, never copied (裁-107a).
   const doRows = doEnv ? permittedDoActions(doEnv, DO_ACTIONS) : [];
 
+  // ── C-43, GAP A: THE GO SECTION IS RANK-SHAPED ─────────────────────────────
+  //
+  // It rides the read that ALREADY RUNS. `loadDoEnv` above returns the live
+  // `CallerContextRow` carrying `role_rank` and `is_operator` — exactly the
+  // `NavigationScope` shape `lib/firm/navigation.ts` declares — so shaping Go
+  // costs zero extra requests and cannot disagree with Do about who the caller
+  // is. The predicate is `hasNavigationAccess`, CALLED, not copied: it is the
+  // same function `components/firm-nav.tsx` applies to the sidebar, so a ⌘K row
+  // and a sidebar row for one href can no longer disagree (裁-107a).
+  //
+  // THIS MAKES GO ASYNCHRONOUS for the first time, and the three states are kept
+  // apart on purpose — the same distinction do-dispatch.ts draws for Do:
+  //
+  //   loading  the read is in flight. A spinner-free honest line, not an empty
+  //            list: "nothing here for you" is a claim, and we have not looked.
+  //   error    the read THREW. The banner says so. Rendering the unfiltered list
+  //            here would be the whole defect back again, on the failure path.
+  //   ready + ctx === null
+  //            the read landed and there is no caller_context row. That is not
+  //            "no matching pages" either — it is "we could not find out what you
+  //            may open", and it renders as such, with NO rows. Fail closed.
+  //
+  // HIDING A ROW GRANTS NOTHING. navigation.ts's own note is the law here: this
+  // is legibility, and the destination's RLS policy or governed door remains the
+  // wall. A caller who types the URL still meets it.
+  const goScope = doState.phase === "ready" ? doState.env.ctx : null;
+
+  // THE SIDEBAR'S OWN OUTPUT, not a parallel computation over the same inputs.
+  // `visibleFirmNavigation`/`visibleAdminNavigation` are the functions
+  // `components/firm-nav.tsx` renders from, so what they return IS the sidebar —
+  // filtered by `hasNavigationAccess` inside, and RANK-SHAPED on the way out
+  // (裁-187 rewrites the Admin entry's `messageKey` to "firm" for a caller who
+  // administers nothing). Calling them instead of re-applying the predicate here
+  // buys the second half for free: the ⌘K row and the sidebar row for one href
+  // cannot disagree about whether it is offered OR about what it is called.
+  const navByHref = React.useMemo(() => {
+    if (goScope === null) return null;
+    return new Map(
+      [...visibleFirmNavigation(goScope), ...visibleAdminNavigation(goScope)].map((entry) => [
+        entry.href,
+        "messageKey" in entry ? entry.messageKey : entry.navMessageKey,
+      ]),
+    );
+  }, [goScope]);
+
+  /** The ⌘K label id for a row, following the sidebar's rank-shaped rename. */
+  const labelIdFor = React.useCallback(
+    (route: (typeof FIRM_ROUTES)[number]) => {
+      const navKey = navByHref?.get(route.href);
+      return (navKey && route.rankLabels?.[navKey]) ?? route.id;
+    },
+    [navByHref],
+  );
+
+  const firmMatches = React.useMemo(
+    () =>
+      navByHref === null
+        ? []
+        : FIRM_ROUTES.filter(
+            (route) =>
+              navByHref.has(route.href) &&
+              matchesQuery([tGoRoutes(labelIdFor(route)), ...(route.keywords ?? [])], query),
+          ),
+    [navByHref, labelIdFor, query, tGoRoutes],
+  );
+
+  // ── C-43, GAP B: A CLIENT IS REACHABLE BY NAME ─────────────────────────────
+  //
+  // `CLIENT_ROUTES` are all `href(clientId)` and render only once the URL is
+  // ALREADY under `/clients/:id`, so from firm altitude ⌘K offered the register
+  // and nothing else: typing a client's name matched that one row's keywords.
+  // `loadClientRegister` existed with zero callers here.
+  //
+  // ONE READ PER OPEN, exactly like Do's — the palette is mounted by the dialog
+  // portal on open and unmounted on close, so this effect IS "every time" and
+  // there is no per-keystroke query. The read is RLS-scoped through `getRows`, so
+  // it returns only clients this session may see: no new authority is created
+  // here, and no rank field is owed (navigation.ts records the clients read as
+  // viewer-floor with no rank).
+  //
+  // A FAILED READ IS A NOTE, NEVER A SILENT FALLBACK to the register row — the
+  // register row is a different answer to a different question, and offering it
+  // in place of a failed name search would look like "no such client".
+  const [clientRegister, setClientRegister] = React.useState<
+    { phase: "loading" } | { phase: "ready"; rows: ClientRow[] } | { phase: "error" }
+  >({ phase: "loading" });
+
+  React.useEffect(() => {
+    let cancelled = false;
+    setClientRegister({ phase: "loading" });
+    loadClientRegister(session)
+      .then((rows) => {
+        if (!cancelled) setClientRegister({ phase: "ready", rows });
+      })
+      .catch(() => {
+        if (!cancelled) setClientRegister({ phase: "error" });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [session]);
+
+  // Matched over NAME and ID both: a colleague pasting an id from a ticket and a
+  // human typing half a name are the same journey.
+  const clientNameMatches =
+    clientRegister.phase === "ready"
+      ? clientRegister.rows.filter((row) => matchesQuery([row.name, row.id], query))
+      : [];
+  // THE CAP IS ON WHAT IS RENDERED, not on what was read. A firm with 400 clients
+  // gets 50 rows and a line telling it to type — which is true and actionable —
+  // rather than a silently truncated list that looks complete.
+  const clientNameRows = clientNameMatches.slice(0, GO_CLIENTS_RENDER_CAP);
+  const clientNameTruncated = clientNameMatches.length > clientNameRows.length;
+
   async function handleDo(spec: DoActionSpec) {
     if (!doEnv || doBusy) return;
     setDoBusy(true);
@@ -199,6 +318,24 @@ export function CommandPalette({ onNavigate, session = sessionTokenAccessor }: C
         placeholder={t("inputPlaceholder")}
       />
       <CommandList>
+        {/* C-43: Go's own three states, before any row is rendered. Each is a
+            DIFFERENT SENTENCE, and none of them is "no matching pages". */}
+        {doState.phase === "loading" && (
+          <div role="status" className="px-3 py-4 text-sm text-muted-foreground">
+            {t("go.loading")}
+          </div>
+        )}
+        {doState.phase === "error" && (
+          <div className="px-3 py-2">
+            <StateBanner tone="error">{t("go.readError", { message: doState.message })}</StateBanner>
+          </div>
+        )}
+        {doState.phase === "ready" && goScope === null && (
+          <div className="px-3 py-2">
+            <StateBanner tone="error">{t("go.noAccessContext")}</StateBanner>
+          </div>
+        )}
+
         {firmMatches.length > 0 && (
           <CommandGroup heading={t("go.heading")}>
             {firmMatches.map((route) => (
@@ -207,7 +344,7 @@ export function CommandPalette({ onNavigate, session = sessionTokenAccessor }: C
                 value={route.id}
                 onSelect={() => goTo(route.href)}
               >
-                <span>{tGoRoutes(route.id)}</span>
+                <span>{tGoRoutes(labelIdFor(route))}</span>
                 {route.status === "planned" && (
                   <Badge variant="outline" className="ml-auto">
                     {t("go.plannedBadge")}
@@ -237,11 +374,53 @@ export function CommandPalette({ onNavigate, session = sessionTokenAccessor }: C
           </CommandGroup>
         )}
 
-        {!hasGoMatches && (
+        {/* C-43 GAP B — clients BY NAME, at both altitudes. From inside client A,
+            jumping to client B by name is the same need it is from firm home. */}
+        {clientRegister.phase === "loading" && (
           <div role="status" className="px-3 py-4 text-sm text-muted-foreground">
-            {t("go.empty", { query })}
+            {t("go.clientsLoading")}
           </div>
         )}
+        {clientRegister.phase === "error" && (
+          <div className="px-3 py-2">
+            <StateBanner tone="error">{t("go.clientsReadError")}</StateBanner>
+          </div>
+        )}
+        {clientNameRows.length > 0 && (
+          <CommandGroup heading={t("go.clientsHeading")}>
+            {clientNameRows.map((row) => (
+              <CommandItem
+                key={row.id}
+                value={`client-${row.id}`}
+                onSelect={() => goTo(`/clients/${row.id}`)}
+              >
+                <span>{row.name}</span>
+              </CommandItem>
+            ))}
+            {clientNameTruncated && (
+              <div role="status" className="px-3 py-2 text-xs text-muted-foreground">
+                {t("go.clientsTruncated", {
+                  shown: clientNameRows.length,
+                  total: clientNameMatches.length,
+                })}
+              </div>
+            )}
+          </CommandGroup>
+        )}
+
+        {/* "No matching pages" is now reachable ONLY when Go actually looked and
+            found nothing — every not-looked-yet and could-not-look state is
+            rendered above, so this line can no longer stand in for them. */}
+        {doState.phase === "ready" &&
+          goScope !== null &&
+          clientRegister.phase !== "loading" &&
+          firmMatches.length === 0 &&
+          clientMatches.length === 0 &&
+          clientNameRows.length === 0 && (
+            <div role="status" className="px-3 py-4 text-sm text-muted-foreground">
+              {t("go.empty", { query })}
+            </div>
+          )}
 
         <CommandSeparator />
 

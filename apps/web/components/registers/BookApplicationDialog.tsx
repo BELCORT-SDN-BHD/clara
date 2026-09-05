@@ -56,7 +56,7 @@ export function BookApplicationDialog({
    *  client-side guess at what is still owed). */
   outstandingAdvances: StaffAdvanceSummaryRow[];
   busy: boolean;
-  onSubmit: (input: BookStaffAdvanceApplicationInput) => Promise<void>;
+  onSubmit: (input: BookStaffAdvanceApplicationInput) => Promise<boolean>;
 }) {
   const t = useTranslations("StaffAdvances.bookApplication");
   const tc = useTranslations("Common");

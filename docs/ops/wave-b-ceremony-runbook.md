@@ -57,6 +57,11 @@ live.
 
 - 5a. Part A + C via psql against the project (the serializable proconfig pin + assert;
   the wiki_projection checkpoint seed-at-head).
+  **Part A is a NO-OP on any database that has taken the chain past DB-A's
+  `opening_approval_isolation_pin` migration (CB-AE2E-004, 2026-09-04)** — the pin is applied
+  by that migration, and `alter function … set` is idempotent, so running it again changes
+  nothing. Run 5a anyway on a target restored from an older dump. Step 7's live probe is
+  unchanged and still the check that matters.
 - 5b. Part B (the Storage wiki policy pair) in the **Supabase SQL editor** (storage
   schema — not reachable from the rig).
 
@@ -91,8 +96,11 @@ dormant — the surface + seed now both exist); `/ready` green.
 6. Storage probe: one wiki put → re-download → sha match (5b took).
 7. **Serializable probe (F10):** via the dashboard (or PostgREST curl) call
    `approve_opening_seed` with a CURRENT plan revision and ONE STALE ENTRY token →
-   expect the typed `revision_mismatch` refusal. A `not_serializable` refusal = 5a did
-   not take (PostgREST hoisted-settings) → STOP and investigate before any real approval.
+   expect the typed `revision_mismatch` refusal. A `not_serializable` refusal = the pin is
+   absent (5a did not take, or the target predates the migration that carries it) → STOP and
+   investigate before any real approval. `pnpm --filter @clara/db dr:verify`'s §4.11 cell
+   answers the same question against a restored target, absolutely and without a source to
+   compare to.
 8. Rollback preflight AFTER (same query as §0) — record the run counts.
 9. Backup re-proof: the next daily run zero-501 WITH wiki objects present.
 

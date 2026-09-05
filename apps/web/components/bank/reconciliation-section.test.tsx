@@ -192,3 +192,72 @@ test("N17 (c): ackedStale AND voidReason clear when the selected statement chang
     },
   );
 });
+
+// ---------------------------------------------------------------------------
+// CB-AE2E-034 — eight bank reads, one six-word empty sentence.
+// ---------------------------------------------------------------------------
+//
+// `ReadState` had no seam for per-read copy: `if (isEmpty) return
+// <EmptyState>{t("empty")}</EmptyState>` with `t` bound to ClientBank.common, whose
+// `empty` is "Nothing here yet." The reconciliation tab stacked TWO of them inside
+// one CardContent — the accounts picker and the statements picker — so a client with
+// no bank account read the identical sentence twice, one above the other, and neither
+// said which read was empty or what to do about it.
+//
+// The seam is `emptyCopy`, defaulted so nothing regresses; the second half is that a
+// derived truth is not a second finding: no accounts means no statements, so the
+// statements picker's own sentence is suppressed while the accounts read is empty.
+
+test("CB-AE2E-034: no bank accounts renders ONE actionable sentence, naming the read \u2014 not the generic line twice", async () => {
+  await withMockedEnv(
+    async (u) => {
+      const url = String(u);
+      if (url.includes("/rpc/list_bank_accounts")) return jsonResponse([]);
+      if (url.includes("/rpc/list_bank_statements")) return jsonResponse([]);
+      throw new Error(`unexpected fetch: ${url}`);
+    },
+    async () => {
+      const h = await mountAndSettle();
+      try {
+        const text = h.text();
+        assert.match(text, /No bank account is registered for this client yet/, "the sentence names the read that was empty");
+        assert.match(text, /Register one on the Accounts tab/, "\u2026and what to do about it");
+        assert.doesNotMatch(text, /Nothing here yet/, "the generic six-word sentence must be gone from this card");
+
+        // THE DUPLICATE, pinned as a count: the statements picker's own empty
+        // sentence is suppressed while the accounts read is empty.
+        const occurrences = text.split("No bank account is registered for this client yet").length - 1;
+        assert.equal(occurrences, 1, "exactly ONE empty sentence in this card, never the same claim stacked twice");
+        assert.doesNotMatch(text, /This account has no statement yet/, "no accounts means no statements \u2014 a derived truth, not a second finding");
+      } finally {
+        await h.unmount();
+      }
+    },
+  );
+});
+
+// MUST-NOT-RED CONTROL: with accounts present but no statements, the STATEMENTS
+// sentence is exactly what must render \u2014 the suppression is scoped to the derived
+// case, not a blanket hide.
+test("CB-AE2E-034 control: accounts present, no statements \u2014 the statements picker DOES say so, in its own words", async () => {
+  await withMockedEnv(
+    async (u) => {
+      const url = String(u);
+      if (url.includes("/rpc/list_bank_accounts")) return jsonResponse([ACCOUNT]);
+      if (url.includes("/rpc/list_bank_statements")) return jsonResponse([]);
+      throw new Error(`unexpected fetch: ${url}`);
+    },
+    async () => {
+      const h = await mountAndSettle();
+      try {
+        const text = h.text();
+        assert.match(text, /This account has no statement yet/);
+        assert.match(text, /Enter one on the Statements tab/);
+        assert.doesNotMatch(text, /No bank account is registered/);
+        assert.doesNotMatch(text, /Nothing here yet/);
+      } finally {
+        await h.unmount();
+      }
+    },
+  );
+});

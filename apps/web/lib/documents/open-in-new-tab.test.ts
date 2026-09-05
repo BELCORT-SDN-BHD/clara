@@ -177,3 +177,111 @@ test("realWindowOpen: passes through whatever window.open returns, including nul
     },
   );
 });
+
+// --- C-07 / 裁-175 — THE VIEWER GATE ------------------------------------------
+//
+// The defect these cells pin: an uploaded `application/xml` was fetched, blobbed
+// and navigated into a new tab. A `blob:` URL inherits the CREATING page's
+// origin, so an `<?xml-stylesheet?>` with inline script executed in apps/web's
+// own origin as the opening firm member. Every cell here FAILS on the pre-gate
+// code — the old code returned `{ok:true}` for every one of them.
+
+function bytesResponse(mime: string): typeof fetch {
+  return (async () => new Response(new Blob(["x"]), { status: 200, headers: { "content-type": mime } })) as typeof fetch;
+}
+
+for (const mime of [
+  "application/xml",
+  "text/csv",
+  "application/x-ofx",
+  "application/octet-stream",
+  "image/tiff",
+  "image/heic",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+]) {
+  test(`not_viewable: ${mime} is REFUSED before navigation — the blob is revoked, the tab is closed, no href is ever written`, async () => {
+    const tab = fakeTab();
+    let created = 0;
+    const revoked: string[] = [];
+    const originalCreate = URL.createObjectURL;
+    const originalRevoke = URL.revokeObjectURL;
+    URL.createObjectURL = () => { created += 1; return "blob:fake-url"; };
+    URL.revokeObjectURL = (u: string) => { revoked.push(u); };
+    try {
+      await withMockedFetch(bytesResponse(mime), async () => {
+        const result = await openDocumentInNewTab("doc-1", { session: session(), windowOpen: () => tab });
+        assert.deepEqual(result, { ok: false, reason: "not_viewable", mime });
+        // THE DISCRIMINATING POST-CONDITION: the tab was never navigated. On the
+        // pre-gate code this is "blob:fake-url" and the result is {ok:true}.
+        assert.equal(tab.hrefSet, null, "a non-viewable document must never reach tab.location.href — that is the whole defect");
+        assert.equal(tab.closedCalled, true, "the about:blank tab opened for the click must be closed again, never left blank and orphaned");
+        assert.equal(created, 1);
+        assert.deepEqual(revoked, ["blob:fake-url"], "the blob must be revoked, never leaked to a tab that will not use it");
+      });
+    } finally {
+      URL.createObjectURL = originalCreate;
+      URL.revokeObjectURL = originalRevoke;
+    }
+  });
+}
+
+for (const mime of ["application/pdf", "image/png", "image/jpeg", "image/webp"]) {
+  test(`viewable: ${mime} still opens — the gate refuses a type, it does not refuse the feature`, async () => {
+    const tab = fakeTab();
+    const originalCreate = URL.createObjectURL;
+    URL.createObjectURL = () => "blob:fake-url";
+    try {
+      await withMockedFetch(bytesResponse(mime), async () => {
+        const result = await openDocumentInNewTab("doc-1", { session: session(), windowOpen: () => tab });
+        assert.deepEqual(result, { ok: true });
+        assert.equal(tab.hrefSet, "blob:fake-url");
+        assert.equal(tab.closedCalled, false);
+      });
+    } finally {
+      URL.createObjectURL = originalCreate;
+    }
+  });
+}
+
+test("not_viewable is decided BEFORE popup_blocked — the refusal names the document's type, not the browser's setting", async () => {
+  // Ordering matters for honesty, not for safety: with the popup blocked
+  // nothing unsafe can happen either way. But "allow pop-ups and try again" is
+  // a false instruction for a file that would be refused with pop-ups allowed.
+  let revoked = false;
+  const originalCreate = URL.createObjectURL;
+  const originalRevoke = URL.revokeObjectURL;
+  URL.createObjectURL = () => "blob:fake-url";
+  URL.revokeObjectURL = () => { revoked = true; };
+  try {
+    await withMockedFetch(bytesResponse("application/xml"), async () => {
+      const result = await openDocumentInNewTab("doc-1", { session: session(), windowOpen: () => null });
+      assert.deepEqual(result, { ok: false, reason: "not_viewable", mime: "application/xml" });
+      assert.equal(revoked, true);
+    });
+  } finally {
+    URL.createObjectURL = originalCreate;
+    URL.revokeObjectURL = originalRevoke;
+  }
+});
+
+test("the gate is in the LIBRARY: openDocumentInNewTab has no option that turns it off", async () => {
+  // R1/R5's own two-walls reasoning, applied to C-07: a component-level check
+  // could be bypassed by a second caller, and an opt-out parameter would BE
+  // that second caller. This asserts the shape of the API, not a behaviour —
+  // the only knobs are session, signal and the injectable windowOpen adapter.
+  const tab = fakeTab();
+  const originalCreate = URL.createObjectURL;
+  URL.createObjectURL = () => "blob:fake-url";
+  try {
+    await withMockedFetch(bytesResponse("application/xml"), async () => {
+      const result = await openDocumentInNewTab("doc-1", {
+        session: session(),
+        windowOpen: () => tab,
+      } as Parameters<typeof openDocumentInNewTab>[1]);
+      assert.equal(result.ok, false);
+    });
+  } finally {
+    URL.createObjectURL = originalCreate;
+  }
+});

@@ -30,7 +30,7 @@ export function CodingTasksSection({
   busy: boolean;
   error: string | null;
   clr: PartClr;
-  act: (fn: () => Promise<void>) => Promise<unknown>;
+  act: (fn: () => Promise<void>) => Promise<boolean>;
 }) {
   const t = useTranslations("CodingQuestionsSignals.codingTask");
   const [actingId, setActingId] = useState<string | null>(null);

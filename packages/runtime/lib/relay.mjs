@@ -26,6 +26,7 @@
 
 import pg from "pg";
 import { setTimeout as sleep } from "node:timers/promises";
+import { attachPoolErrorContract } from "./pool-error-contract.mjs";
 
 // ---------------------------------------------------------------------------
 // Constants — the routing vocabulary (contract §2.7 decision set)
@@ -143,12 +144,18 @@ export function connConfig() {
   return url ? { connectionString: url } : {};
 }
 
-/** @param {pg.PoolConfig} [overrides] */
+/** The relay pool (裁-149 clause 1): log-and-recycle on a background client error, never a
+ *  crash — the contract, its counters and the leader-side correction live in
+ *  lib/pool-error-contract.mjs, which is this module's ONLY new dependency.
+ *  @param {pg.PoolConfig} [overrides] */
 export function makePool(overrides = {}) {
-  return new pg.Pool({ ...connConfig(), max: 4, ...overrides });
+  return attachPoolErrorContract(new pg.Pool({ ...connConfig(), max: 4, ...overrides }), "relay");
 }
 
-/** A single dedicated connection (the runner's leader session uses this). */
+/** A single dedicated connection (the runner's leader session uses this). The CALLER owns its
+ *  error posture and BOTH leader call sites already attach a listener that records the error
+ *  and rethrows it into their own reconnect loop — see pool-error-contract.mjs clause 2 for
+ *  why that as-built posture, not 裁-149's premise about it, is what this repo has. */
 export function makeClient() {
   return new pg.Client(connConfig());
 }

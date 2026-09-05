@@ -13,7 +13,26 @@ import { join } from "node:path";
 import * as rig from "./rig.mjs";
 import { checkReadiness } from "../lib/health.mjs";
 import { _resetStorageProbeCacheForTest } from "../lib/storage-probe.mjs";
+import { makePool } from "../lib/relay.mjs";
+import { _resetPoolErrorContractForTest } from "../lib/pool-error-contract.mjs";
+import {
+  LANE_ROSTER,
+  _resetLaneProbeCacheForTest,
+  _setLaneProbeForTest,
+  _waitForLaneProbeSettleForTest,
+} from "../lib/lane-probe.mjs";
 
+// A synthetic lane DSN whose every component is a RECOGNISABLE token, assembled piecewise
+// because a DSN carrying an inline credential is the shape scripts/check-leaks.mjs refuses
+// in a tracked file. Its whole job is to be findable: if any of these turns up in the
+// /ready payload or a warning line, the probe leaked a DSN onto an UNAUTHENTICATED endpoint.
+// Order: user, credential, host, database.
+const LEAK_TOKENS = Object.freeze(["l9leakuser", "l9leaksecret", "l9leakhost.invalid", "l9leakdb"]);
+const LEAK_DSN = ["postgres:/", "/", LEAK_TOKENS[0], ":", LEAK_TOKENS[1], "@", LEAK_TOKENS[2], ":1", "/", LEAK_TOKENS[3]].join("");
+
+// fly.toml's own /ready check timeout — the number the MAJOR-1 cells defend. Kept as a named
+// constant so a reader sees WHICH budget the assertion is about, not a bare 5000.
+const FLY_READY_TIMEOUT_MS = 5000;
 const READY = await rig.runtimeReady();
 const skip = READY ? false : "Slice-4 (0006) surface absent";
 
@@ -138,6 +157,240 @@ test("ready: a held wake-engine row at/below its firm's own checkpoint WARNs on 
       `expected a heldBelowCheckpoint WARN line, got: ${JSON.stringify(r.warnings)}`,
     );
   } finally {
+    if (prev === undefined) delete process.env.CLARA_START_WORLD;
+    else process.env.CLARA_START_WORLD = prev;
+  }
+});
+
+// 裁-149 (C-04) + H-48 — the two signals this PR adds to the readiness aggregation, exercised
+// through checkReadiness itself rather than through their own modules: the unit cells in
+// l9-pool-contract-lane-probe.test.mjs prove the counter and the prober; these prove the WIRING,
+// which is the half that was inert for wakeEngineHealth's own counter three rounds ago.
+test("ready: a relay-pool background error WARNs on /ready and NEVER flips ready false (裁-149)", { skip }, async () => {
+  const prev = process.env.CLARA_START_WORLD;
+  process.env.CLARA_START_WORLD = "1";
+  _resetPoolErrorContractForTest();
+  try {
+    await setBeat("world", "now()");
+    await setBeat("control", "now()");
+    const before = await checkReadiness();
+    assert.equal(before.ready, true, "mandatory setup: ready before the planted error");
+    assert.ok(
+      !before.warnings.some((x) => /relay pool background error/.test(x)),
+      "control: no relay-pool warning before the error is planted",
+    );
+    assert.deepEqual(before.checks.relay_pool, { errors: 0, last_error_at: null, last_error_code: null });
+
+    const pool = makePool();
+    try {
+      pool.emit("error", Object.assign(new Error("terminating connection due to administrator command"), { code: "57P01" }));
+    } finally {
+      await pool.end().catch(() => {});
+    }
+
+    const after = await checkReadiness();
+    assert.equal(after.ready, true, "a background pool error is an AVAILABILITY signal, never a 503");
+    assert.equal(after.checks.relay_pool.errors, 1, "the counter surfaces in checks");
+    assert.equal(after.checks.relay_pool.last_error_code, "57P01", "the SANITIZED code surfaces, never the DB text");
+    assert.ok(
+      after.warnings.some((x) => /relay pool background error\(s\) since boot: 1/.test(x)),
+      `expected the relay-pool WARN line, got: ${JSON.stringify(after.warnings)}`,
+    );
+    assert.ok(
+      !JSON.stringify(after.checks.relay_pool).includes("terminating connection"),
+      "the raw DB message never reaches the unauthenticated /ready payload",
+    );
+  } finally {
+    _resetPoolErrorContractForTest();
+    if (prev === undefined) delete process.env.CLARA_START_WORLD;
+    else process.env.CLARA_START_WORLD = prev;
+  }
+});
+
+test("ready: the per-lane probe reports every lane, and the runtime lane is reachable (H-48)", { skip }, async () => {
+  _resetLaneProbeCacheForTest();
+  try {
+    // The background loop is driven to a SETTLED verdict first; /ready then reads memory.
+    await _waitForLaneProbeSettleForTest();
+    const r = await checkReadiness();
+    assert.ok(Array.isArray(r.checks.pools), `checks.pools must be the per-lane array, got ${JSON.stringify(r.checks.pools)}`);
+    assert.equal(r.checks.pools.length, LANE_ROSTER.length, "every roster lane is reported");
+    const runtimeLane = r.checks.pools.find((l) => l.lane === "runtime");
+    assert.ok(runtimeLane, "the runtime lane is present");
+    assert.equal(runtimeLane.ok, true, `the rig's runtime lane must answer select 1 (${JSON.stringify(runtimeLane)})`);
+    assert.equal(typeof runtimeLane.latency_ms, "number");
+    // No lane's row may carry anything but its name, its verdict and a sanitized code.
+    for (const lane of r.checks.pools) {
+      for (const key of Object.keys(lane)) {
+        assert.ok(["lane", "ok", "latency_ms", "error", "skipped", "reason"].includes(key), `unexpected key '${key}' on a lane row`);
+      }
+    }
+  } finally {
+    _resetLaneProbeCacheForTest();
+  }
+});
+
+test("ready MAJOR-1: a BLACK-HOLED lane leaves /ready far inside fly's 5s timeout", { skip }, async () => {
+  // THE DEFECT REVIEW-558 CAUGHT, PINNED. The lane probe was a THIRD sequential bounded() call,
+  // each able to spend READY_DEADLINE_MS, inside the 5s total fly.toml:49 allows. H-48's own
+  // headline case — a lane DSN naming a host that BLACK-HOLES rather than refuses — would then
+  // have pushed /ready past that timeout, and the operator would have got a timed-out health
+  // check INSTEAD of the `pool lane 'x' unreachable` warning the feature exists to give.
+  //
+  // The prober here NEVER settles, which is that case exactly. /ready must not wait for it.
+  const prev = process.env.CLARA_START_WORLD;
+  process.env.CLARA_START_WORLD = "1";
+  _resetLaneProbeCacheForTest();
+  try {
+    await setBeat("world", "now()");
+    await setBeat("control", "now()");
+    _setLaneProbeForTest(() => new Promise(() => {})); // black hole: never resolves, never rejects
+
+    const t0 = Date.now();
+    const r = await checkReadiness();
+    const elapsed = Date.now() - t0;
+
+    assert.ok(elapsed < FLY_READY_TIMEOUT_MS, `/ready must settle inside fly's ${FLY_READY_TIMEOUT_MS}ms (was ${elapsed}ms)`);
+    assert.ok(elapsed < 2000, `and with real margin, not merely inside it (was ${elapsed}ms)`);
+    assert.equal(r.ready, true, "an UNMEASURED lane never 503s a healthy machine");
+    assert.deepEqual(
+      r.checks.pools,
+      { pending: true, stalled: false },
+      "a cold cache reports pending and NOT-yet-stalled, never a fabricated verdict",
+    );
+    assert.ok(
+      !r.warnings.some((x) => /pool lane/.test(x)),
+      `a pending probe warns about nothing; got: ${JSON.stringify(r.warnings)}`,
+    );
+    // Polling repeatedly must stay free — a load balancer hits this every 15s forever.
+    const t1 = Date.now();
+    await checkReadiness();
+    await checkReadiness();
+    assert.ok(Date.now() - t1 < FLY_READY_TIMEOUT_MS, "subsequent polls are not slowed by the hung lane either");
+  } finally {
+    _resetLaneProbeCacheForTest();
+    if (prev === undefined) delete process.env.CLARA_START_WORLD;
+    else process.env.CLARA_START_WORLD = prev;
+  }
+});
+
+test("ready MAJOR-1: the lane WARNING still surfaces once the background probe settles (H-48)", { skip }, async () => {
+  // The other half, and the discriminating one: moving the probe off the request path must not
+  // cost the signal. A dead NON-runtime lane WARNs and stays ready; the RUNTIME lane fails.
+  const prev = process.env.CLARA_START_WORLD;
+  process.env.CLARA_START_WORLD = "1";
+  _resetLaneProbeCacheForTest();
+  try {
+    await setBeat("world", "now()");
+    await setBeat("control", "now()");
+
+    // (a) a non-runtime lane down: WARN, still ready.
+    _setLaneProbeForTest(async (d) =>
+      d.lane === "read" ? { lane: d.lane, ok: false, error: "ECONNREFUSED" } : { lane: d.lane, ok: true, latency_ms: 1 },
+    );
+    await _waitForLaneProbeSettleForTest();
+    const degraded = await checkReadiness();
+    assert.equal(degraded.ready, true, "a dead READ lane degrades the agent — it is not 'nothing works'");
+    assert.equal(degraded.checks.pools.find((l) => l.lane === "read").ok, false, "the read lane is reported down");
+    assert.ok(
+      degraded.warnings.some((x) => /pool lane 'read' unreachable \(ECONNREFUSED\)/.test(x)),
+      `expected the read-lane WARN, got: ${JSON.stringify(degraded.warnings)}`,
+    );
+
+    // (b) the RUNTIME lane down: ready FALSE. Without this, (a) would pass for a probe whose
+    // verdict never reaches the readiness decision at all.
+    _resetLaneProbeCacheForTest();
+    _setLaneProbeForTest(async (d) =>
+      d.lane === "runtime" ? { lane: d.lane, ok: false, error: "ECONNREFUSED" } : { lane: d.lane, ok: true, latency_ms: 1 },
+    );
+    await _waitForLaneProbeSettleForTest();
+    const down = await checkReadiness();
+    assert.equal(down.ready, false, "the runtime lane is the ONE lane whose failure is a readiness failure");
+    assert.equal(down.checks.pools.find((l) => l.lane === "runtime").ok, false);
+    assert.ok(
+      !down.warnings.some((x) => /pool lane 'runtime'/.test(x)),
+      "the runtime lane is a FAILURE, not a warning — it must not be reported as both",
+    );
+  } finally {
+    _resetLaneProbeCacheForTest();
+    if (prev === undefined) delete process.env.CLARA_START_WORLD;
+    else process.env.CLARA_START_WORLD = prev;
+  }
+});
+
+test("ready r2: a STALLED probe loop WARNS on /ready and never fails readiness (H-48)", { skip }, async () => {
+  // Until r2 a wedged loop was silent: a cycle that blows its bound resets the verdict to
+  // pending, which read identically to "not measured yet", forever. /ready now says so.
+  const prev = process.env.CLARA_START_WORLD;
+  const prevInterval = process.env.CLARA_LANE_PROBE_INTERVAL_MS;
+  const prevCycle = process.env.CLARA_LANE_PROBE_CYCLE_MS;
+  process.env.CLARA_START_WORLD = "1";
+  process.env.CLARA_LANE_PROBE_INTERVAL_MS = "1000";
+  process.env.CLARA_LANE_PROBE_CYCLE_MS = "30";
+  _resetLaneProbeCacheForTest();
+  try {
+    await setBeat("world", "now()");
+    await setBeat("control", "now()");
+    _setLaneProbeForTest(() => new Promise(() => {})); // every cycle exceeds cycleMs
+
+    const fresh = await checkReadiness();
+    assert.equal(fresh.checks.pools.stalled, false, "a fresh loop is pending, NOT yet stalled");
+    assert.ok(!fresh.warnings.some((x) => /probe loop is stalled/.test(x)), "and warns about nothing yet");
+
+    await new Promise((r) => setTimeout(r, 2100)); // past two intervals
+    const stalled = await checkReadiness();
+    assert.equal(stalled.ready, true, "a stalled INSTRUMENT is not a broken lane — never a 503");
+    assert.equal(stalled.checks.pools.stalled, true, "the stall is reported in checks");
+    assert.ok(
+      stalled.warnings.some((x) => /probe loop is stalled, not the lanes/.test(x)),
+      `expected the stalled WARN, got: ${JSON.stringify(stalled.warnings)}`,
+    );
+  } finally {
+    _resetLaneProbeCacheForTest();
+    if (prevInterval === undefined) delete process.env.CLARA_LANE_PROBE_INTERVAL_MS;
+    else process.env.CLARA_LANE_PROBE_INTERVAL_MS = prevInterval;
+    if (prevCycle === undefined) delete process.env.CLARA_LANE_PROBE_CYCLE_MS;
+    else process.env.CLARA_LANE_PROBE_CYCLE_MS = prevCycle;
+    if (prev === undefined) delete process.env.CLARA_START_WORLD;
+    else process.env.CLARA_START_WORLD = prev;
+  }
+});
+
+test("ready r2: NO DSN component reaches the /ready payload or a warning line (H-48)", { skip }, async () => {
+  // END-TO-END, through the REAL probeLane — not an injected stub, because the leak this
+  // defends against would live in the real one. A lane is pointed at a synthetic DSN whose
+  // user, credential, host and database are all recognisable tokens; /ready must carry none of
+  // them, in checks or in warnings. It is an unauthenticated endpoint.
+  const prev = process.env.CLARA_START_WORLD;
+  const prevRead = process.env.CLARA_READ_DATABASE_URL;
+  process.env.CLARA_START_WORLD = "1";
+  process.env.CLARA_READ_DATABASE_URL = LEAK_DSN;
+  _resetLaneProbeCacheForTest();
+  try {
+    await setBeat("world", "now()");
+    await setBeat("control", "now()");
+    await _waitForLaneProbeSettleForTest(); // a REAL cycle: the read lane genuinely fails to connect
+
+    const r = await checkReadiness();
+    const readLane = r.checks.pools.find((l) => l.lane === "read");
+    assert.ok(readLane, "the read lane is reported");
+    assert.equal(readLane.ok, false, "mandatory setup: the synthetic DSN really did fail to connect");
+    assert.equal(r.ready, true, "a dead READ lane is a warning, not a 503");
+    assert.ok(
+      r.warnings.some((x) => /pool lane 'read' unreachable/.test(x)),
+      `expected the read-lane WARN, got: ${JSON.stringify(r.warnings)}`,
+    );
+    const payload = JSON.stringify(r);
+    for (const token of LEAK_TOKENS) {
+      assert.ok(!payload.includes(token), `the DSN component '${token}' must never reach the /ready payload`);
+      for (const w of r.warnings) {
+        assert.ok(!w.includes(token), `the DSN component '${token}' must never reach a warning line`);
+      }
+    }
+  } finally {
+    _resetLaneProbeCacheForTest();
+    if (prevRead === undefined) delete process.env.CLARA_READ_DATABASE_URL;
+    else process.env.CLARA_READ_DATABASE_URL = prevRead;
     if (prev === undefined) delete process.env.CLARA_START_WORLD;
     else process.env.CLARA_START_WORLD = prev;
   }

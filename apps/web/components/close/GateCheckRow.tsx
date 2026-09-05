@@ -11,7 +11,9 @@ import { useTranslations } from "next-intl";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { CloseDoorDialog } from "./CloseDoorDialog";
-import type { ClosePlanCheck, GateState } from "@/lib/close/types";
+import type { AttestationState, ClosePlanCheck, GateState } from "@/lib/close/types";
+import type { PartClr } from "@/lib/parts/hooks";
+import type { DialogRefusal } from "@/components/common/dialog-refusal";
 
 const STATE_GLYPH: Record<GateState, string> = {
   pass: "✓",
@@ -42,7 +44,52 @@ export function toAttestItemKey(itemKey: string): string | null {
   return itemKey === "__gate__" ? null : itemKey;
 }
 
-function GateBadge({ state, notYetMeasuredLabel }: { state: GateState | "not_yet_measured"; notYetMeasuredLabel: string }) {
+/** 裁-187 (owner, 2026-09-04) — the attestation FIELD is revealed only beside a
+ *  verbatim door refusal that NAMES an attestation. These are finalize_close's own
+ *  two attestation reasons, read from its live body (0128:199-232 `drawer2_unattested`,
+ *  0128:222-229 `close_attestation_stale`); the database walls come down in a later
+ *  lane, so until then the honest interim is: don't offer a ceremony until the DB
+ *  asks for one, and never fabricate the string it asks for. */
+export function attestationWasNamedByRefusal(refusal: PartClr): boolean {
+  return (
+    refusal?.code === "CLR41" &&
+    (refusal.reason === "drawer2_unattested" || refusal.reason === "close_attestation_stale")
+  );
+}
+
+/** H-56 — the DB's raw `close_gate_results.state` token was printed straight to a
+ *  professional ("? unknown", "live") beside translated copy in the same row. A
+ *  CHECKED lookup with a RAW-VALUE fallback, never a dynamic `t(state)` call: a
+ *  value outside the closed set falls back to the token rather than throwing a
+ *  missing-message error out of the close plan (the fixed-assets-register.tsx
+ *  precedent this row's own header already cites). */
+function useGateStateLabel(): (state: GateState) => string {
+  const t = useTranslations("ClientClose.gates.state");
+  return (state) => {
+    const known: Record<GateState, string> = {
+      pass: t("pass"),
+      fail: t("fail"),
+      unknown: t("unknown"),
+      error: t("error"),
+      advisory: t("advisory"),
+    };
+    return known[state] ?? state;
+  };
+}
+
+function useAttestationStateLabel(): (state: AttestationState) => string {
+  const t = useTranslations("ClientClose.gates.attestationState");
+  return (state) => {
+    const known: Record<AttestationState, string> = {
+      absent: t("absent"),
+      live: t("live"),
+      stale: t("stale"),
+    };
+    return known[state] ?? state;
+  };
+}
+
+function GateBadge({ state, notYetMeasuredLabel, label }: { state: GateState | "not_yet_measured"; notYetMeasuredLabel: string; label: (s: GateState) => string }) {
   if (state === "not_yet_measured") {
     return (
       <Badge variant="outline">
@@ -52,7 +99,7 @@ function GateBadge({ state, notYetMeasuredLabel }: { state: GateState | "not_yet
   }
   return (
     <Badge variant={STATE_VARIANT[state]}>
-      <span aria-hidden="true">{STATE_GLYPH[state]}</span> {state}
+      <span aria-hidden="true">{STATE_GLYPH[state]}</span> {label(state)}
     </Badge>
   );
 }
@@ -61,6 +108,8 @@ export function GateCheckRow({
   check,
   closeRunId,
   busy,
+  refusal,
+  refusalMessage,
   onAttest,
 }: {
   check: ClosePlanCheck;
@@ -68,15 +117,25 @@ export function GateCheckRow({
    *  or open year's checks are read-only history here). */
   closeRunId: string | null;
   busy: boolean;
-  onAttest: (args: { checkKey: string; reason: string; itemKey: string | null }) => Promise<void>;
+  /** The panel's own standing refusal. 裁-187: it is what REVEALS the attest
+   *  affordance — see `attestationWasNamedByRefusal`. Defaults to null, i.e. no
+   *  attestation ceremony is offered. */
+  refusal?: PartClr;
+  /** The same refusal's verbatim message, carried INTO the attest dialog
+   *  (CB-AE2E-004 — the page banner is behind the modal backdrop). */
+  refusalMessage?: string | null;
+  onAttest: (args: { checkKey: string; reason: string; itemKey: string | null }) => Promise<boolean>;
 }) {
   const t = useTranslations("ClientClose.gates");
+  const gateStateLabel = useGateStateLabel();
+  const attestationStateLabel = useAttestationStateLabel();
+  const attestationOffered = attestationWasNamedByRefusal(refusal ?? null);
   return (
     <div className="enter-content flex flex-col gap-2 rounded-lg border border-border bg-card p-3 text-sm">
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-xs text-muted-foreground">{t("drawer")} {check.drawer}</span>
         <span className="font-medium text-card-foreground">{check.title}</span>
-        <GateBadge state={check.result.state} notYetMeasuredLabel={t("notYetMeasured")} />
+        <GateBadge state={check.result.state} notYetMeasuredLabel={t("notYetMeasured")} label={gateStateLabel} />
         {check.applies_when !== "always" ? (
           <span className="text-xs text-muted-foreground">({check.applies_when})</span>
         ) : null}
@@ -94,9 +153,10 @@ export function GateCheckRow({
                 {item.attestation.state === "absent" ? (
                   <>
                     <Badge variant="outline">{t("noAttestation")}</Badge>
-                    {closeRunId && check.drawer === 2 ? (
+                    {closeRunId && check.drawer === 2 && attestationOffered ? (
                       <AttestForm
                         busy={busy}
+                        dialogRefusal={{ err: refusalMessage ?? null, clr: refusal ?? null }}
                         onSubmit={(reason) => onAttest({ checkKey: check.check_key, reason, itemKey: mappedItemKey })}
                       />
                     ) : null}
@@ -110,7 +170,7 @@ export function GateCheckRow({
                   // verbatim — only which one is a chip changed.
                   <>
                     <Badge variant={item.attestation.state === "live" ? "default" : "outline"}>
-                      {item.attestation.state}
+                      {attestationStateLabel(item.attestation.state)}
                     </Badge>
                     <span className="text-muted-foreground">{item.attestation.reason}</span>
                   </>
@@ -124,7 +184,7 @@ export function GateCheckRow({
   );
 }
 
-function AttestForm({ busy, onSubmit }: { busy: boolean; onSubmit: (reason: string) => Promise<void> }) {
+function AttestForm({ busy, dialogRefusal, onSubmit }: { busy: boolean; dialogRefusal: DialogRefusal; onSubmit: (reason: string) => Promise<boolean> }) {
   const t = useTranslations("ClientClose.gates.attest");
   const [reason, setReason] = useState("");
   return (
@@ -135,6 +195,7 @@ function AttestForm({ busy, onSubmit }: { busy: boolean; onSubmit: (reason: stri
       confirmLabel={t("confirm")}
       busy={busy}
       confirmDisabled={reason.trim().length === 0}
+      refusal={dialogRefusal}
       onConfirm={() => onSubmit(reason)}
     >
       <Textarea

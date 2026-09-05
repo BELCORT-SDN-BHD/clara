@@ -63,7 +63,7 @@ test("WITHDRAW journey: from an expanded draft, the Withdraw dialog opens, its r
         clientId: "c1",
         queueRows: [QUEUE_ROW], queueCounts: { open_drafts: 1 }, entries: [DRAFT_ENTRY], lines: DRAFT_LINES,
         linesTruncated: false, accounts: ACCOUNTS, busy: false, err: null, clr: null, actingId: null,
-        onApprove: () => {}, onRevise: () => {}, onApproveRoutine: () => {}, onWithdraw: async () => {},
+        onApprove: () => {}, onRevise: () => {}, onApproveRoutine: () => {}, onWithdraw: async () => true,
       }),
     ),
   );
@@ -77,9 +77,22 @@ test("WITHDRAW journey: from an expanded draft, the Withdraw dialog opens, its r
     await h.fireEvent(rowToggle!, "click");
     await h.settle();
 
-    // Both new T6 controls are reachable in the expanded, collapsed (default) view.
+    // CB-AE2E-021: there is now exactly ONE approval control on an expanded
+    // draft. "Approve (routine)" used to sit beside "Approve" in the
+    // governance row with nothing on screen saying what "routine" meant; the
+    // routing moved onto the one button (drafts-queue-panel.tsx's own
+    // comment). Asserting the ABSENCE here rather than only in the dedicated
+    // cell keeps this walk from silently passing if it comes back.
+    //
+    // THE LITERAL IS DELIBERATE, not a leftover: the message key that produced
+    // it (`DraftsDocumentGovernance.approveRoutine.trigger`) is DELETED, so
+    // this string exists nowhere else in the tree and the assertion is a drift
+    // pin on the label as much as on the button. The VERB is untouched —
+    // `lib/journals/governance-doors.ts`'s `approveRoutineEntry` stays
+    // exported and tested, and its header records that it is the right door
+    // for a future batch-approve surface.
     const approveRoutine = h.find((n) => n.tagName === "BUTTON" && textOf(n).match(/^Approve \(routine\)$/) !== null);
-    assert.ok(approveRoutine, "the Approve (routine) button must render");
+    assert.equal(approveRoutine, null, "the duplicate 'Approve (routine)' button must be gone");
     const withdrawTrigger = h.find((n) => n.tagName === "BUTTON" && textOf(n).match(/^Withdraw$/) !== null);
     assert.ok(withdrawTrigger, "the Withdraw dialog trigger must render as a real button");
     assert.ok(focusableElements(h.container as never).includes(withdrawTrigger as never), "Withdraw trigger must be keyboard-reachable");
@@ -151,7 +164,7 @@ test("WITHDRAW confirm: a real click on Confirm calls onWithdraw and closes the 
         queueRows: [QUEUE_ROW], queueCounts: { open_drafts: 1 }, entries: [DRAFT_ENTRY], lines: DRAFT_LINES,
         linesTruncated: false, accounts: ACCOUNTS, busy: false, err: null, clr: null, actingId: null,
         onApprove: () => {}, onRevise: () => {}, onApproveRoutine: () => {},
-        onWithdraw: async (entryId, reason, expectedRevision, onOk) => { calls.push({ entryId, reason, expectedRevision }); onOk(); },
+        onWithdraw: async (entryId, reason, expectedRevision, onOk) => { calls.push({ entryId, reason, expectedRevision }); onOk(); return true; },
       }),
     ),
   );
@@ -239,7 +252,7 @@ test("PROMOTE journey: the dialog opens (only once a client_id genuinely resolve
     App(createElement(InterruptionsPanel, {
       interruptions: [INTERRUPTION], busy: false, err: null, clr: null, actingId: null, onAnswer: () => {},
       clientIdByTaskId: { t1: "client-9" },
-      onPromote: async (interruptionId, scopeId) => { calls.push({ interruptionId, scopeId }); },
+      onPromote: async (interruptionId, scopeId) => { calls.push({ interruptionId, scopeId }); return true; },
     })),
   );
   const body = (globalThis as unknown as { document: { body: { appendChild: (c: unknown) => void } } }).document.body;
@@ -276,7 +289,7 @@ test("PROMOTE journey: with no resolved client id for this task, the promote con
     App(createElement(InterruptionsPanel, {
       interruptions: [INTERRUPTION], busy: false, err: null, clr: null, actingId: null, onAnswer: () => {},
       clientIdByTaskId: {},
-      onPromote: async () => {},
+      onPromote: async () => true,
     })),
   );
   try {

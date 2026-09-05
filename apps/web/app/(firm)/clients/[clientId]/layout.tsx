@@ -39,10 +39,56 @@ export default async function ClientWorkspaceLayout({
         content-card role, while the content column below it wore `--shell`.
         The two roles were exactly inverted.
       */}
-      <header className="flex flex-col gap-2 border-b border-border bg-shell px-8 py-3">
-        <p className="text-sm font-semibold text-foreground">
+      {/*
+        CB-AE2E-019 — two edits here, both from the audit's own reading.
+
+        (1) THE CLIENT NAME IS A REAL HEADING, not a `<p>`. The audit's complaint
+        was precise: "the client's identity is a non-heading paragraph", so it did
+        not appear in a screen reader's heading list at all. That is survivable at
+        1280px where the sidebar and the tab strip are both visible landmarks; at
+        640 CSS px, where the sidebar is a drawer and the tab strip is a scrolling
+        row, this line is the only remaining "which client am I in" anchor.
+
+        A CORRECTION, AND THE TRADE-OFF IT RESTS ON. This comment first claimed
+        "the client-workspace altitude had no level-1 heading at all". That was
+        FALSE, and the review caught it: `components/common/page-shell.tsx:54`'s
+        `PageHeader` renders an `<h1>` on every route-level surface, this
+        altitude's pages included. So a client route carries TWO h1s — the
+        workspace identity here, and the surface's own title below it.
+
+        That is deliberate, and the two alternatives were measured before it was
+        settled. Making THIS heading an `<h2>` reds the repo's own heading-order
+        rule (`test/a11yRules.ts:547` starts `runningMax` at 0, so a leading h2
+        "jumps from h0 to h2") — it is first in the DOM, so it cannot be a level
+        below something that has not appeared yet. Making the SURFACE title an h2
+        instead needs a `level` prop threaded through `PageHeader`. COUNTED, not
+        estimated: 22 call sites in 20 files on this tree, 7 of them
+        client-altitude, with more in flight on sibling PRs that have not merged —
+        an earlier version of this note said "26 files across four lanes", which
+        was neither of those numbers. The alternative to threading a prop is a
+        React context, and a context needs a hook, which would break the contract
+        page-shell.tsx:19-20 states in its own words ("Nothing here holds a hook,
+        so a Server Component page and a Client Component workbench can both
+        render it").
+
+        Two h1s is valid HTML5, violates no rule this repo or axe enforces at
+        WCAG A/AA, and reads as what it is: you are in this client, looking at this
+        surface. `components/shell-responsive.test.tsx` PINS it — this layout's one
+        h1, `PageShell`'s one, and ZERO bare `<h1>` in any client-altitude page —
+        so "a third h1 reds" is a claim that file actually enforces rather than a
+        hope about files nobody counted.
+
+        It keeps `text-sm font-semibold`: a heading LEVEL is a structural claim,
+        not a type-scale one, and this line is deliberately quieter than the
+        workbench title beneath it.
+
+        (2) `px-8` -> `px-4 lg:px-8`. 64px of horizontal padding is a fifth of a
+        320px viewport, and this header sits above every client surface.
+      */}
+      <header className="flex flex-col gap-2 border-b border-border bg-shell px-4 py-3 lg:px-8">
+        <h1 className="text-sm font-semibold text-foreground">
           {t("clientHeader", { clientName: client.name })}
-        </p>
+        </h1>
         <ClientWorkspaceNav clientId={clientId} />
       </header>
       <ClientScopeProvider clientId={clientId}>
