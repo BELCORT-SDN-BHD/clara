@@ -1,5 +1,8 @@
 # Clara beta — the handover, 2026-09-04
 
+**Errata 2026-09-06:** several rows below are corrected in part 3's Errata section — read it before
+acting on H-04 · H-23 · H-29 · H-33 · H-38 · C-10 · C-11 · C-25 · C-35 · C-44 · C-60 · C-74.
+
 **Read this first on the next session.** It is written for someone with no session, no transcript
 and no task board — only this repo. It carries the posture, what the beta-live e2e proved and
 failed, **the complete Backlog and Known-issues list across backend, frontend, harness, ops and

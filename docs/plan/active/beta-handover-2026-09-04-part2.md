@@ -1,5 +1,8 @@
 # Clara beta — the handover, part 2: the P2 rows, the carried registry, and the owed truings
 
+**Errata 2026-09-06:** several rows below are corrected in part 3's Errata section — read it before
+acting on H-04 · H-23 · H-29 · H-33 · H-38 · C-10 · C-11 · C-25 · C-35 · C-44 · C-60 · C-74.
+
 *Continues [`beta-handover-2026-09-04.md`](beta-handover-2026-09-04.md), which carries the posture,
 the milestone tally, the P0 and P1 rows, the harness notes and the pick-list. **Read that first.***
 
