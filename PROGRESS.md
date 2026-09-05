@@ -485,6 +485,12 @@ lines, 7294 bytes, md5 `50f77696976ce97534407334231a8206` on both sides.)*
   (`fb1f9181f13d71d3444fa62474f73088`), eighteen PRs under 裁-186…200, every register item anchored
   to code before a lane opened. **Read the second with its supersession note:** its title and last
   sentence say NOTHING DEPLOYED, true when written and superseded by the posture block above.
+- **2026-09-06 — THE DISPOSITION SITTING, four PRs, all merged:** #564 filed the repair session's orders,
+  rules, register, roster and ceremony order/runsheet verbatim; #565 dispositioned every item of the three
+  opening reports against `fc39c361` (裁-202: 66 of 128 walk rows FIXED and serving, the ruled queue
+  Q-00 → Q-03 → Q-01+Q-02 → Q-02b → …) and trued this file; #566 vendored mattpocock/skills at `3cca18b3`
+  (v1.2.3; six upstream-retired skills kept pending the owner's word); #567 killed the 0.28 % CLR10
+  account-number fixture flake CI met on #566 (`f-a3pr3.mfA.pos`), with a 10 000-draw property cell.
 
 ---
 
