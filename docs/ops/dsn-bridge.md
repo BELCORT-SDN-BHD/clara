@@ -183,6 +183,22 @@ again before trusting an older PR's evidence at ceremony time.
 
 ## Ceremony runbooks
 
+## What the POOLER does not forward — `PGOPTIONS` cannot assume a role
+
+**Measured live on 2026-09-05.** node-postgres DOES map `PGOPTIONS` onto the startup `options`
+parameter (node-postgres's own "lib/connection-parameters.js" — `val('options', …)`, then into the
+startup packet),
+so `PGOPTIONS='-c role=clara_runtime'` *ought* to let a bare client assume its group role at connect
+with no DSN handling at all. **It does not work through the Supabase session pooler**, which does
+not forward arbitrary startup options to the backend: the connection still fails `42501` on the
+first privileged read.
+
+This matters because every lane login is granted its group `WITH INHERIT FALSE, SET TRUE`
+(`packages/db/deploy/roles-bootstrap.sql`) — the bare login is deliberately privilege-less until it
+`SET ROLE`s, which `packages/runtime/lib/pools.mjs` does on every checkout. **So any script that
+builds its own client, rather than going through the pool, must issue an explicit
+`set role <group>` after connecting.** There is no environment-only shortcut.
+
 The seven runbooks below route their live DSN-bearing commands through this bridge; each also
 carries a one-line pointer back to this file at the point where DSN discipline is stated:
 `wave-b-0019-ceremony-runbook.md`, `wave-b-0021-ceremony-runbook.md`,
