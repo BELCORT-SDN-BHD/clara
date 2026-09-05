@@ -230,7 +230,7 @@ are the index. The pre-truing text of both sections is archived verbatim in
   and serving since 2026-09-05**: H-11 and H-16 by #549, H-12 by `0165`+`0166`, H-26 · H-27 · H-30 by
   #546, H-38 by #544)**:** **H-04 the classifier does not recognise bank statements — RESTATED: the
   cause is the classify/OCR ordering race**, not the prompt, so the prescription is the dispatcher
-  gate below and NOT another prompt pass · H-07/H-08 the close-prep chat lane cannot read a close
+  gate named in the new P0 row ABOVE, never another prompt pass · H-07/H-08 the close-prep chat lane cannot read a close
   run, and says the wrong reason · **H-09 the payer-identifier DOOR IS BUILT and its FACE is not** —
   `0174:785` mints `clara.set_counterparty_identifiers` (granted `:855`) to record or clear the
   registration number and TIN on an EXISTING counterparty, while `apps/web` has zero call sites for
