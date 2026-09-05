@@ -6,7 +6,7 @@ How the engineering skills (mattpocock/skills) should consume this repo's domain
 
 ## Before exploring, read these (in order of relevance to the task)
 
-- **`AGENTS.md`** (repo root) — the agent entry point: the fifteen hard constraints, the menu of where truth lives, the working protocol. (`CLAUDE.md` only imports it.)
+- **`AGENTS.md`** (repo root) — the agent entry point: the fourteen hard constraints (numbered 1–15 with 12 vacant), the menu of where truth lives, the working protocol. (`CLAUDE.md` only imports it.)
 - **`docs/product/PRD.md`** — what Clara is, users, scope, and the product invariants that are LAW (§6). The domain glossary lives here.
 - **`docs/ARCHITECTURE.md`** — the target backend map: the event spine, the four structural invariants, the data plane, the AI-SDK 7 + Workflow-DevKit runtime, reporting. Appendix A = the Slice-0 spike results + the binding workflow-versioning policy.
 - **`docs/plan/index.md`** — the plan index: live contracts and design docs under `docs/plan/active/`, closed ones under `docs/plan/completed/`. Current posture and the backlog live in `PROGRESS.md`.
