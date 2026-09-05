@@ -6,17 +6,28 @@ repo's 500-line document ceiling.*
 
 *It holds the **"THE REPAIR SESSION LANDED / NOTHING IS DEPLOYED YET" posture block of
 `PROGRESS.md` as it stood immediately before the 2026-09-06 ceremony truing** — the merge table of
-all nineteen PRs and the three-arm deploy plan — moved BYTE-FOR-BYTE and verified present here
-before `PROGRESS.md` lost it. Its claim "NOTHING IS DEPLOYED" was true when written and is now
-superseded; the deploy is recorded in
-[`docs/ops/runtime-deploy-2026-09-05-v75-and-db-0165-0176.md`](../../ops/runtime-deploy-2026-09-05-v75-and-db-0165-0176.md).*
+all nineteen PRs and the three-arm deploy plan — moved **BYTE-FOR-BYTE** and verified present here
+before `PROGRESS.md` lost it.*
 
-**md5 of the moved block, computed on both sides of the move:**
-`e467b7c8894622471ce78a4267eda705` (84 lines, 7881 bytes).
+**THE SUPERSESSION NOTE BELONGS HERE, IN THE PREAMBLE, NOT IN THE MOVED TEXT.** The block's claim
+that **NOTHING IS DEPLOYED YET** was true when it was written and is now superseded: the ceremony
+ran on 2026-09-05 and all three arms are deployed — the database at frontier `0176`, runtime
+**v75**, and the web Worker at `90c1a5d0…`. The deploy is recorded in
+[`runtime-deploy-2026-09-05-v75-and-db-0165-0176.md`](../../ops/runtime-deploy-2026-09-05-v75-and-db-0165-0176.md)
+and its [part 2](../../ops/runtime-deploy-2026-09-05-part2-worker-and-deviations.md). The block
+below is left exactly as it stood; annotating it would destroy the very thing an archive is for.
+
+*(An earlier cut of this file DID annotate the block — three edits — while still claiming
+"byte-for-byte", and recorded an md5 of the annotated text. review-554 caught it. The block below is
+now the verbatim pre-image and the hash below is the matching one.)*
+
+**md5 of the moved block, computed on BOTH sides of the move and equal:**
+`e109f798187a8a3608f71bd744688d6a` (80 lines, 7708 bytes) — the pre-image is
+`PROGRESS.md` lines 9–88 at `origin/main`.
 
 ---
 
-**⇢ 2026-09-05 — THE REPAIR SESSION LANDED (superseded above: it is now deployed).** The session the owner opened
+**⇢ 2026-09-05 — THE REPAIR SESSION LANDED. NOTHING IS DEPLOYED YET.** The session the owner opened
 at ≈09:00 MYT on 2026-09-04 ran to ≈17:00 MYT on 2026-09-05 and put **eighteen pull requests,
 #543…#560**, through the ladder against issue **#541**'s authenticated e2e audit, the owner's own
 UIUX flaws list and the beta handover's rows. **All eighteen are merged**, the last three on
@@ -81,9 +92,6 @@ not optional:
    **and zero new rows the new prompt gets wrong at confidence ≥ 0.8 — one blocks the image.**
 3. **The web Worker**, last. There is no repoint rollback (裁-156); a broken Worker is fixed forward
    by re-promoting a walked version.
-
-**ALL THREE RAN on 2026-09-05 evening — see the posture block above.** The 裁-199 gate result and
-its caveat, and the nine deviations, are in the as-run.
 
 **Nine tickets are queued and not started**, in the order the orchestrator will open them: **(1)**
 DB-D, H-21 the onboarding interview's captures projection · **(2)** the consent lane (裁-186, the

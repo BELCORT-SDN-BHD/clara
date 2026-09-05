@@ -42,7 +42,7 @@ ordering race is a **new P0** below.
 **⇢ 2026-09-05 — the "repair session landed, nothing deployed yet" posture block, with the merge
 table of all nineteen PRs and the three-arm deploy plan, was MOVED to
 [`docs/plan/completed/progress-archive-2026-09-part2.md`](docs/plan/completed/progress-archive-2026-09-part2.md)
-at the ceremony's clock-out** (byte-for-byte, md5 `e467b7c8894622471ce78a4267eda705`, 84 lines) — this file could not
+at the ceremony's clock-out** (byte-for-byte, md5 `e109f798187a8a3608f71bd744688d6a`, 80 lines) — this file could not
 hold it and the new posture inside the 500-line ceiling. Its "NOTHING IS DEPLOYED" claim was true
 when written and is superseded by the block at the top of this file.
 
