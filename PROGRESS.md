@@ -288,13 +288,15 @@ changed.**
 
 - **EVERYTHING THE SESSION BUILT IS SERVING** (measured 2026-09-06 on `main` at `95441fe6`; the
   earlier "NOTHING THE SESSION BUILT IS SERVING" text was true when written and is now false).
-  Every code PR through **#559** and **#561** is inside `0351f022` and reached a user at the
-  2026-09-05 ceremony: runtime **v75** (`img_wd57v5d3lej9p38o`), web Worker **`90c1a5d0…`**, DB
-  frontier **171 / `0176`**. **#560 landed after the Worker build and is e2e-only**, so it changes
-  no serving byte. **The `0174`/`archived_at` ordering hazard is PAST** — the ceremony applied the DB
-  first — and its reader was never `apps/web`: the SELECT naming the column is the RUNTIME's, at
-  `packages/runtime/src/chatRoutes.ts:178` (deploy-ordering note at `:168`); on `apps/web` the column
-  appears only in comments and one message string.
+  **All NINETEEN PRs #543…#561 are ancestors of `0351f022`** — each tested with
+  `git merge-base --is-ancestor` on its own merge commit — and `0351f022` IS #561's merge commit, so
+  the ceremony carried every one: runtime **v75** (`img_wd57v5d3lej9p38o`), web Worker
+  **`90c1a5d0…`**, DB frontier **171 / `0176`**. *(Both 2026-09-06 disposition reports say #560
+  landed AFTER the web build. It did not — `2f736758` merged before #551. It changes no serving byte
+  for a different reason: it edits only an e2e spec, which the Worker bundle does not carry.)*
+  **The `0174`/`archived_at` ordering hazard is PAST** — the ceremony applied the DB first — and its
+  reader was never `apps/web`: the SELECT naming the column is the RUNTIME's at
+  `packages/runtime/src/chatRoutes.ts:178`; on `apps/web` it appears only in comments and one string.
 - **No door can close an open question whose document filing was RETIRED** (review-551 on #551).
   `retire_document_filing` never touches `open_questions`, and both `resolve` and
   `dismiss_open_question` are walled by `_active_document_filing`; `0169` now makes the same orphan
