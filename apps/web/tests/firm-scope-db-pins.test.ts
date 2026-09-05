@@ -20,6 +20,12 @@ import { stripComments } from "../test/sourceOracle";
 import { lexSql, viewDefinitionOffsets } from "../test/sqlOracle";
 import type { SessionTokenAccessor } from "@/lib/session";
 import type { ServerSession } from "../lib/supabase/server-session";
+import {
+  DEFAULT_MIGRATION_CORPUS,
+  REVIEWED_DYNAMIC_SQL_BARRIERS,
+  migration,
+  type MigrationCorpus,
+} from "./firm-scope-db-pins.corpus";
 
 /**
  * THE DB-FACING PINS for P4-2 — the projections are the DB's own words, the
@@ -36,7 +42,8 @@ import type { ServerSession } from "../lib/supabase/server-session";
  */
 
 const WEB_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
-const MIGRATIONS_DIR = join(WEB_ROOT, "..", "..", "packages", "db", "migrations");
+// The migration corpus (MIGRATIONS_DIR, the file list, the reader) and the reviewed
+// dynamic-SQL barrier map live in ./firm-scope-db-pins.corpus.ts since 2026-09-05.
 
 // ---------------------------------------------------------------------------
 // THE ISOMORPHIC WALL — a client-importable module may not reach next/headers
@@ -147,65 +154,6 @@ describe("client-importable modules never drag next/headers into the bundle", ()
     assert.deepEqual(specs, ["./read"], "a type-only import was followed as a value edge");
   });
 });
-
-const MIGRATION_FILES = readdirSync(MIGRATIONS_DIR)
-  .filter((f) => f.endsWith(".sql"))
-  .sort();
-
-const migration = (name: string): string => readFileSync(join(MIGRATIONS_DIR, name), "utf8");
-
-type MigrationCorpus = {
-  readonly files: readonly string[];
-  readonly read: (name: string) => string;
-};
-
-const DEFAULT_MIGRATION_CORPUS: MigrationCorpus = { files: MIGRATION_FILES, read: migration };
-
-/** Exact, reviewed dynamic-SQL barriers. A new migration is never admitted here
- * merely because the lexer could not inspect it: adding an entry is a review act
- * and the reason records why this specific barrier is understood. */
-type ReviewedDynamicSqlBarrier = { readonly reason: string; readonly sha256: string };
-
-const REVIEWED_DYNAMIC_SQL_BARRIERS = new Map<string, ReviewedDynamicSqlBarrier>([
-  [
-    "0146_ninth_rowkind_seeding_proposal.sql",
-    {
-      reason: "Reviewed splice of clara.list_review_queue() from pg_get_functiondef; it cannot replace either P4 scope view.",
-      sha256: "561ede4d64af78cbc150894b8ca6014f7b1514d45fa5d313ef6681012d2398a6",
-    },
-  ],
-  [
-    "0147_db_hardening_b_hash_only_bearer_tokens.sql",
-    {
-      reason: "Reviewed ALTER TABLE formatter drops the discovered firm_admissions primary-key constraint; it emits no view definition.",
-      sha256: "28cfc3f7d83e28818e455c96849efe61ab87008bd7482239dfab41d0499f8121",
-    },
-  ],
-  [
-    "0149_counterparty_merge_pr_1.sql",
-    {
-      reason: "Reviewed pg_get_functiondef splices recut four named counterparty functions only; neither P4 scope view is a target.",
-      sha256: "e44758a0a931122c1be8452fa4f4866d29e180bbffa0cff1ea3c9a9a94425cb5",
-    },
-  ],
-  [
-    "0151_f_a9_pr_1b_brake_census.sql",
-    {
-      reason: "Reviewed pg_get_functiondef loop recuts the explicit F-A9 function roster only; neither P4 scope view is a target.",
-      sha256: "f6d093e5b5e6037386522581ec07fab6ad955b4944f3871fc5a31b2635173b7b",
-    },
-  ],
-  // MERGE-TIME OBLIGATION: this key is the FILENAME, and this file is renamed when its
-  // migration number is claimed. Re-key the entry to the numbered name at merge; the sha256
-  // does not move, because a rename changes no bytes.
-  [
-    "0168_coding_lane_kind_exclusion.sql",
-    {
-      reason: "Reviewed pg_get_functiondef splices recut exactly two FUNCTIONS — clara.list_uncoded_filings(uuid) and clara.list_review_queue(jsonb,jsonb,integer) — each read at a literal signature and re-installed with one appended WHERE conjunct; the block emits no view definition at all, so neither P4 scope view can be a target. Same family as 0146's splice of the same queue function.",
-      sha256: "c6f3b99a27f554650982893bc6288f7de33953824e5b930fc862f02c1e42b8d4",
-    },
-  ],
-]);
 
 /**
  * Every real, statement-level `create [or replace] view clara.<name>` OCCURRENCE

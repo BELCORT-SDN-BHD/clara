@@ -425,6 +425,25 @@ const P4T2_CLOCK_NAMES = ["_create_firm_core", "approve_firm_registration", "rej
 // unconditional entry would turn those legs red while saying nothing about clock discipline.
 const REGISTRY_0057_CLOCK_NAMES = ["verify_snapshot"];
 
+// 裁-190 [web reads and small doors]: TWO lawful bare-clock writers, and both are the 0057
+// shape — a timestamptz recording WHEN a human acted, landing in no date-typed accounting
+// decision and driving no period arithmetic.
+//   archive_chat_session         — `archived_at = now()` on the author's own chat session. A
+//     one-way visibility stamp on a transcript; nothing reads it as a date.
+//   set_counterparty_identifiers — `updated_at = now()` on the counterparty row, which is the
+//     column the 0011 trigger has always maintained on every counterparty write (rename and
+//     terms are already in this roster for the identical line).
+// _book_today() would be a category error here for the reason the 0057 block states: both are
+// timestamps of an act that happened, not accounting dates.
+//
+// FRONTIER-GATED, and here that matters more than usual: these two ship UNNUMBERED until merge
+// prep (裁-108), so on every CI chain — and on every `db-slice-frontiers` leg pinned earlier —
+// the functions do not exist at all. An unconditional entry would red those legs while saying
+// nothing about clock discipline. Gated on the CATALOG rather than a migration stem, because a
+// stem does not exist until the number is claimed (review law 3: probe the thing, not a name it
+// does not yet have).
+const WEB_READS_DOORS_CLOCK_NAMES = ["archive_chat_session", "set_counterparty_identifiers"];
+
 // 0059 [Wave E lane δ]: ONE lawful bare-clock reader, and it is the 0057 shape again.
 // clara.approve_metric_definition stamps `approved_at = statement_timestamp()` on the version row
 // it approves — a timestamptz recording WHEN a human approved, which lands in no date-typed
@@ -970,6 +989,17 @@ export async function s5BareTokenRoster(query) {
   }
   if (await appliedStem("checkout_gate_c2_stripe_events$")) names.push(...CHECKOUT_GATE_C2_CLOCK_NAMES);
   if (await appliedStem("checkout_gate_c3_folded_door$")) names.push(...CHECKOUT_GATE_C3_CLOCK_NAMES);
+  // 裁-190: catalog-gated, not stem-gated — the cohort is UNNUMBERED until merge prep, so it has
+  // no stem to witness yet. The probe is an EXACT signature via to_regprocedure rather than a
+  // relation, because both names ARE functions and a bare name would not survive an overload
+  // (review law 3). Its sibling `clara.firm_timeline_visible` would work too; the door is
+  // probed instead so the witness and the subject are the same kind of thing.
+  const procExists = async (sig) => (await query(
+    "select to_regprocedure($1) is not null as ok", [sig]
+  )).rows[0].ok === true;
+  if (await procExists("clara.archive_chat_session(uuid,text)")) {
+    names.push(...WEB_READS_DOORS_CLOCK_NAMES);
+  }
   return names.sort();
 }
 
