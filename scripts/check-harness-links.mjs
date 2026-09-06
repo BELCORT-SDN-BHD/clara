@@ -78,9 +78,10 @@ export const STRICT = true;
 
 export const ENTRY_LIST = Object.freeze([
   "AGENTS.md",
-  "PROGRESS.md",
   "docs/adr/README.md",
-  "docs/plan/index.md",
+  // PROGRESS.md and docs/plan/index.md were pinned here until the owner's harness restructure
+  // of 2026-09-06 removed both files (with docs/plan/ entirely); a pin on a deliberately deleted
+  // file is a permanent MISSING-ENTRY-FILE, not a rot signal.
 ]);
 
 /**
@@ -132,7 +133,8 @@ export const NON_PATH_ALLOWLIST = new Set([
   "build/wave-a-daily-loop", // a git branch (the Wave-A build lane), not a directory
   "actions/checkout@v4", // a GitHub Actions ref in a CI excerpt, not a file
   "github.com/mosaladtaooo/clara", // ADR-001's original repo URL written without a scheme (the repo has since moved to the org, ADR-021)
-  "mosaladtaooo/clara", // docs/agents/issue-tracker.md's transfer note — the pre-move owner/repo slug, not a path in this tree
+  "CONTEXT.md", // docs/agents/domain.md (the verbatim mattpocock/skills template) names the root domain glossary that /domain-modeling creates LAZILY; its absence is by design, the template itself says "proceed silently"
+  "CONTEXT-MAP.md", // likewise — the multi-context root map, only ever created by /domain-modeling in a multi-context repo
   "openai/gpt-5-mini", // a model identifier (the extraction lane's OCR model), not a file
   "BELCORT-SDN-BHD/clara", // a GitHub owner/repo slug, not a path in this tree
   "manifest.json", // a file INSIDE a produced backup bundle (DR.md §9), not a file in this repo
