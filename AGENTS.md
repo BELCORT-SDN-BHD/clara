@@ -43,12 +43,12 @@ an RLS-isolated Postgres.
 
 ### Issue tracker
 
-GitHub Issues in `BELCORT-SDN-BHD/clara` (PRs are not treated as a request surface). See `docs/agents/issue-tracker.md`.
+GitHub Issues, via the `gh` CLI (repo inferred from `git remote -v`). See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 
-The five default canonical labels (`needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`), unchanged. See `docs/agents/triage-labels.md`.
+The five default labels (`needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`). See `docs/agents/triage-labels.md`.
 
 ### Domain docs
 
-Single-context, harness-native: the domain layer is `AGENTS.md`/`CLAUDE.md` plus `docs/product/PRD.md`, `docs/ARCHITECTURE.md`, and `docs/adr/`, not a generic single-file domain doc. See `docs/agents/domain.md`.
+Single-context: a root `CONTEXT.md` plus `docs/adr/`, created lazily by the domain-modeling skill. See `docs/agents/domain.md`.
