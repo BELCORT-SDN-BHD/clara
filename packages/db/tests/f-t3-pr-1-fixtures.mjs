@@ -32,7 +32,7 @@ export const CODES = [
 ];
 
 /** The twelve leaf add_back_class values the 裁-21 COA research JSON carries
- *  (docs/plan/research/coa-template-2026-08-29.json, accounts 6400-6492, tax_sensitive=true).
+ *  (packages/db/tests/fixtures/coa-template-2026-08-29.json, accounts 6400-6492, tax_sensitive=true).
  *  The map must cover every one of them EXACTLY once. */
 export const RESEARCH_LEAVES = [
   "club_subscriptions_and_entrance_fees", "depreciation_and_amortisation",

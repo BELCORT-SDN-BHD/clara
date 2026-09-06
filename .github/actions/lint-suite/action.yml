@@ -1,6 +1,6 @@
 name: Lint + secrets + boundary gates
 description: >-
-  The full lint family — freeze-lint, leak-scan, the wiki gates, harness-links + the hook
+  The full lint family — freeze-lint, leak-scan, the wiki gates, the hook
   self-tests, the evaluator freeze family, the render package drill, and the pinned
   gitleaks scan. (The vendor-binding post-control gate retired with F-A2 PR-3.) Every step is moved from
   ci.yml's lint job verbatim in every EXECUTABLE respect (ADR-0073 lever 5), with ONE
@@ -37,21 +37,16 @@ runs:
     # scripts/check-binding-post-control.mjs and its selftest are deleted in the same PR —
     # a gate certifying a function that no longer exists would itself be a false green.
 
-    # Harness-links gate (owner-ruled Q9-A): every doc a session is told to read FIRST
-    # (AGENTS.md, PROGRESS.md, docs/adr/README.md, docs/plan/index.md) has its markdown
-    # links + backtick paths validated against disk, one hop into referenced docs/*.md
-    # files, plus docs/adr/'s own bidirectional index check. STRICT=true since assembly:
-    # all four entries exist, so a missing one is a hard failure, as is any broken
-    # reference inside a file that exists.
+    # (The harness-links gate that used to ride this step was abolished by the owner on
+    # 2026-09-06 together with the harness restructure — scripts/check-harness-links.mjs
+    # and its selftest are deleted, nothing validates doc paths in CI any more.)
     #
-    # The pinned-ids self-test rides here too. The guard itself is a PreToolUse hook, not
+    # The pinned-ids self-test. The guard itself is a PreToolUse hook, not
     # a CI step — CI can never exercise it in situ — so this run is the only thing standing
     # between a refactor and a silently dead safety pin (AGENTS.md hard constraint 11).
-    - name: Harness-links gate + self-tests (Q9-A entry-list integrity, pinned-ids + dispatch-model guards)
+    - name: Hook self-tests (pinned-ids + dispatch-model guards)
       shell: bash -e {0}
       run: |
-        node scripts/check-harness-links.mjs
-        node scripts/check-harness-links.selftest.mjs
         node scripts/hooks/pinned-ids-guard.selftest.mjs
         # Same deal for the dispatch-model guard (AGENTS.md hard constraint 5).
         node scripts/hooks/dispatch-model-guard.selftest.mjs
