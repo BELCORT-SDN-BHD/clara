@@ -334,17 +334,20 @@ export async function releaseSession(s) {
 // The committed research JSON — the seed's own source of truth
 // ---------------------------------------------------------------------------
 
-/** Loaded from the REPO, not from a copy this test carries: the cell's whole point is that the
- *  shipped rows and the committed dossier cannot drift apart unnoticed. */
+/** Loaded from the ONE committed copy of the dossier, never from a copy this test re-types: the
+ *  cell's whole point is that the shipped rows and the committed dossier cannot drift apart
+ *  unnoticed. The dossiers lived under docs/plan/research/ until the owner's 2026-09-06 docs
+ *  restructure removed that tree; they are the seed's machine-readable evidence, so they moved
+ *  next to the tests that consume them (tests/fixtures/), byte-identical. */
 export function researchJson() {
   return JSON.parse(
-    readFileSync(new URL("../../../docs/plan/research/coa-template-2026-08-29.json", import.meta.url), "utf8"),
+    readFileSync(new URL("./fixtures/coa-template-2026-08-29.json", import.meta.url), "utf8"),
   );
 }
 
 export function researchAddendumJson() {
   return JSON.parse(
-    readFileSync(new URL("../../../docs/plan/research/coa-template-addendum-2026-08-29.json", import.meta.url), "utf8"),
+    readFileSync(new URL("./fixtures/coa-template-addendum-2026-08-29.json", import.meta.url), "utf8"),
   );
 }
 

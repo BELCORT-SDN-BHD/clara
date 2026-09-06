@@ -283,7 +283,7 @@ test("ft3-C4 · the add_back_class map is TOTAL over the twelve 裁-21 research 
         where m.superseded_at is null and m.seeded_in_migration = 'f_t3_pr_1_tax_platform'
         order by m.add_back_class`);
     assert.deepEqual(r.rows.map((x) => x.add_back_class), RESEARCH_LEAVES,
-      "exactly the twelve leaves of docs/plan/research/coa-template-2026-08-29.json, each once");
+      "exactly the twelve leaves of packages/db/tests/fixtures/coa-template-2026-08-29.json, each once");
     for (const row of r.rows) {
       assert.equal(row.code_resolves, true, `${row.add_back_class} -> ${row.code} resolves`);
     }

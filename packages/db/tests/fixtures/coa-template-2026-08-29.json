@@ -1,0 +1,249 @@
+{
+  "edition": {
+    "date": "2026-08-29",
+    "mpers": {
+      "current_edition": "MPERS (2016)",
+      "next_edition": "MPERS (2025)",
+      "next_effective": "annual periods beginning on or after 2027-01-01; early adoption permitted",
+      "basis_paragraphs": [
+        "MPERS 4.2 - 18 minimum statement-of-financial-position line items (unchanged in substance in the 2025 edition, confirmed via IFRS.org's own markup document)",
+        "MPERS 5.5 - 9 minimum statement-of-comprehensive-income line items (unchanged in substance in the 2025 edition)"
+      ],
+      "source": "https://www.masb.org.my/pages.php?id=615 ; https://www.ifrs.org/content/dam/ifrs/supporting-implementation/smes/2025/ifrs-for-smes-standard-markup.pdf ; fetched 2026-08-29"
+    },
+    "lhdn_public_rulings": {
+      "entertainment": "PR 4/2015 (29 Jul 2015) - ITA 1967 s.39(1)(l)/s.18",
+      "donations": "ITA 1967 s.44(6) - no dedicated company-level Public Ruling located; the PR 6/2023->PR 4/2024->PR 7/2025 chain is scoped to individual taxpayers only",
+      "fines_and_penalties": "ITA 1967 s.39(1) + s.33(1); no dedicated PR - case law (Aspac Lubricants (M) Sdn Bhd v KPHDN)",
+      "capital_allowance_qualifying_plant": "PR 12/2014 (31 Dec 2014)",
+      "capital_allowance_computation": "PR 6/2015 (27 Aug 2015) - includes the motor-vehicle QE restriction, Schedule 3 Para 2/2A",
+      "leave_passage": "PR 1/2003 (5 Aug 2003) - ITA 1967 s.13(1)(b)",
+      "private_expenses": "ITA 1967 s.39(1)(a) - no dedicated PR",
+      "club_subscriptions": "ITA 1967 s.39(1)(m) - no dedicated PR",
+      "doubtful_debts": "PR 4/2019 (24 Sep 2019, replaces PR 1/2002) - ITA 1967 s.34(2)",
+      "unapproved_provident_funds": "ITA 1967 s.39(1)(c) - no dedicated PR",
+      "sole_prop_partnership_records": "PR 5/2000 (Revised) - Keeping Sufficient Records (Persons Other Than Companies); primary text not directly fetchable this pass, see dossier SS7"
+    },
+    "msic": {
+      "current_edition": "MSIC 2008 v1.0",
+      "current_edition_confirmed_live_for": "SSM registration and LHDN MyInvois e-Invoice classification as of 2026-08-29",
+      "next_edition": "MSIC 2025",
+      "next_edition_launched": "2025-10-28",
+      "next_edition_routine_use_from": "2027 (DOSM aggregate statistics staged from 2027; Economic Census 2026 is first survey to use it)",
+      "crosswalk_2008_to_2025": "not found published at any level - named gap"
+    },
+    "ssmxt": {
+      "version": "SSMxT_2022v1.0",
+      "status": "live taxonomy behind MBRS 2.0 (platform went live Sep 2024; mandatory phase-in complete as of 2025-06-01 for all CA2016 companies); no newer taxonomy version found anywhere searched",
+      "fs_mpers_concept_count": 2375,
+      "role": "cross-check only, never a spine (coa-template-design.md D-13 item 2) - element-level content not obtained this pass, aggregate counts only"
+    },
+    "software_surveyed": [
+      "AutoCount Accounting",
+      "SQL Account",
+      "QNE Optimum",
+      "Bukku",
+      "Financio",
+      "Million Accounting Software",
+      "Xero (Malaysia)",
+      "QuickBooks Online (Malaysia)",
+      "Biztory",
+      "Sage UBS (found incidentally, confirmed)",
+      "NCL Online Accounting (found incidentally, confirmed)"
+    ],
+    "research_dossier": "docs/plan/research/coa-template-research-2026-08-29.md"
+  },
+
+  "numbering": {
+    "scheme": "4-digit numeric account_code, one block per account_type: 1000-1999 asset, 2000-2999 liability, 3000-3999 equity, 4000-4999 income, 5000-5999 cost of sales (account_type remains 'expense' - a numbering-only distinction, since the account_type CHECK admits only asset|liability|equity|income|expense), 6000-6999 operating expense, 9000-9999 system roles. No dash or slash sub-account suffix; sub-account granularity is reached by spacing plain codes within a block.",
+    "rationale": "Research-earned, not habit. Of the 8 software products with confirmed numbering evidence, 3 (Bukku - the one genuinely cloud-native Malaysian SaaS surveyed and Clara's closest product analog; Sage UBS; NCL) converge on this exact 4-digit block shape, and QuickBooks Online's own suggested ranges (once account numbers are enabled) follow the identical convention. It is also the universal GAAP teaching convention. It satisfies the FIRST branch of the already-shipped ck_coa_account_code_0009 CHECK (^[0-9]{4,8}$) with no dash-parsing needed. Explicitly REJECTED: the 3-digit-dash convention (XXX-0000 / XXX-000) used by the three highest-installed-base desktop incumbents (AutoCount, SQL Account, QNE) - that shape is structurally identical to ROME PROPERTIES' carried-down '300-000' chart (300-000 TRADE DEBTORS, 400-000 TRADE CREDITORS), which the owner's ruling explicitly names as one of the two forms not to pick (coa-template-gate-record.md Q2 folded against rulings-0829-sitting.md: neither the estate seed's 4-digit habit nor RPR's carried-down 300-000 style). Full evidence table: coa-template-research-2026-08-29.md SS2."
+  },
+
+  "families": [
+    { "family_key": "cash_and_bank", "label": "Cash and Bank", "inclusion": "core", "basis": "MPERS 4.2(a)", "sort_ordinal": 10, "msic_sections": [], "msic_divisions": [], "trade_natures": [], "entity_types": [] },
+    { "family_key": "trade_receivables", "label": "Trade and Other Receivables", "inclusion": "core", "basis": "MPERS 4.2(b)", "sort_ordinal": 20, "msic_sections": [], "msic_divisions": [], "trade_natures": [], "entity_types": [] },
+    { "family_key": "trade_payables", "label": "Trade and Other Payables", "inclusion": "core", "basis": "MPERS 4.2(f)", "sort_ordinal": 30, "msic_sections": [], "msic_divisions": [], "trade_natures": [], "entity_types": [] },
+    { "family_key": "statutory_payables", "label": "Statutory Payables", "inclusion": "core", "basis": "firm practice, per the 2026-08-29 software-catalog research (coa-template-research-2026-08-29.md SS4) - MPERS 4.2(f) covers the balance-sheet placement, no PR prescribes the account names themselves", "sort_ordinal": 40, "msic_sections": [], "msic_divisions": [], "trade_natures": [], "entity_types": [] },
+    { "family_key": "equity_common", "label": "Retained Earnings", "inclusion": "core", "basis": "MPERS 4.2(q)", "sort_ordinal": 50, "msic_sections": [], "msic_divisions": [], "trade_natures": [], "entity_types": [] },
+    { "family_key": "revenue", "label": "Revenue", "inclusion": "core", "basis": "MPERS 5.5(a)", "sort_ordinal": 60, "msic_sections": [], "msic_divisions": [], "trade_natures": [], "entity_types": [] },
+    { "family_key": "employment_costs", "label": "Employment Costs", "inclusion": "core", "basis": "MPERS 5.5 (expense by nature)", "sort_ordinal": 70, "msic_sections": [], "msic_divisions": [], "trade_natures": [], "entity_types": [] },
+    { "family_key": "premises_and_admin", "label": "Premises and Administrative Expenses", "inclusion": "core", "basis": "MPERS 5.5 (expense by nature)", "sort_ordinal": 80, "msic_sections": [], "msic_divisions": [], "trade_natures": [], "entity_types": [] },
+    { "family_key": "finance_costs", "label": "Finance Costs", "inclusion": "core", "basis": "MPERS 5.5(b)", "sort_ordinal": 90, "msic_sections": [], "msic_divisions": [], "trade_natures": [], "entity_types": [] },
+    { "family_key": "system_roles", "label": "System Roles", "inclusion": "core", "basis": "firm practice - PRD S6 invariants 7 and 12; the estate's own rounding/OBE/SST-purchase-cost markers", "sort_ordinal": 100, "msic_sections": [], "msic_divisions": [], "trade_natures": [], "entity_types": [] },
+
+    { "family_key": "inventory_and_cogs", "label": "Inventory and Cost of Sales", "inclusion": "by_industry", "basis": "MPERS 5.5 (expense by nature); cost-of-sales presentation", "sort_ordinal": 110, "msic_sections": [], "msic_divisions": [], "trade_natures": ["goods_trading", "mixed"], "entity_types": [] },
+    { "family_key": "manufacturing", "label": "Manufacturing", "inclusion": "by_industry", "basis": "firm practice, keyed to MSIC 2008 Section C (Manufacturing)", "sort_ordinal": 120, "msic_sections": ["C"], "msic_divisions": ["10","11","12","13","14","15","16","17","18","19","20","21","22","23","24","25","26","27","28","29","30","31","32","33"], "trade_natures": ["goods_trading", "mixed"], "entity_types": [] },
+    { "family_key": "property_rental", "label": "Property Rental", "inclusion": "by_industry", "basis": "firm practice, keyed to MSIC 2008 Section L (Real Estate Activities); quit rent vs assessment are distinct Malaysian statutory charges (coa-template-research-2026-08-29.md SS6)", "sort_ordinal": 130, "msic_sections": ["L"], "msic_divisions": ["68"], "trade_natures": [], "entity_types": [] },
+    { "family_key": "construction_contracts", "label": "Construction Contracts", "inclusion": "by_industry", "basis": "MFRS 15 / MPERS Section 23 contract-asset and contract-liability treatment; retention practice, keyed to MSIC 2008 Section F (Construction)", "sort_ordinal": 140, "msic_sections": ["F"], "msic_divisions": ["41","42","43"], "trade_natures": [], "entity_types": [] },
+    { "family_key": "professional_services", "label": "Professional Services", "inclusion": "by_industry", "basis": "firm practice, keyed to MSIC 2008 Sections M (Professional, Scientific and Technical) and N (Administrative and Support Services); disbursement vs reimbursement distinction per LHDN e-Invoice guidance", "sort_ordinal": 150, "msic_sections": ["M", "N"], "msic_divisions": ["69","70","71","72","73","74","75","77","78","79","80","81","82"], "trade_natures": ["services", "mixed"], "entity_types": [] },
+    { "family_key": "fnb_hospitality", "label": "Food and Beverage / Hospitality", "inclusion": "by_industry", "basis": "firm practice, keyed to MSIC 2008 Section I (Accommodation and Food Service Activities); service charge is distinct from SST per RMCD's own position (coa-template-research-2026-08-29.md SS6)", "sort_ordinal": 160, "msic_sections": ["I"], "msic_divisions": ["55","56"], "trade_natures": [], "entity_types": [] },
+    { "family_key": "motor_vehicles", "label": "Motor Vehicles", "inclusion": "opt_in", "basis": "firm practice", "sort_ordinal": 170, "msic_sections": [], "msic_divisions": [], "trade_natures": [], "entity_types": [] },
+    { "family_key": "foreign_currency", "label": "Foreign Currency", "inclusion": "opt_in", "basis": "firm practice", "sort_ordinal": 180, "msic_sections": [], "msic_divisions": [], "trade_natures": [], "entity_types": [] },
+
+    { "family_key": "entertainment", "label": "Entertainment (Tax-Split)", "inclusion": "opt_in", "basis": "ITA 1967 s.39(1)(l)/s.18; PR 4/2015 (50% restriction, 8 named 100%-deductible exceptions)", "sort_ordinal": 190, "msic_sections": [], "msic_divisions": [], "trade_natures": [], "entity_types": [] },
+    { "family_key": "donations_approved", "label": "Donations - Approved Institutions (Tax-Split)", "inclusion": "opt_in", "basis": "ITA 1967 s.44(6) - deductible to the Government/State/local authority without cap, or to a DGIR-approved institution up to 10% of aggregate income", "sort_ordinal": 200, "msic_sections": [], "msic_divisions": [], "trade_natures": [], "entity_types": [] },
+    { "family_key": "donations_unapproved", "label": "Donations - Unapproved / Non-Deductible (Tax-Split)", "inclusion": "opt_in", "basis": "ITA 1967 s.44(6) by omission - not within the approved mechanism, non-deductible", "sort_ordinal": 210, "msic_sections": [], "msic_divisions": [], "trade_natures": [], "entity_types": [] },
+    { "family_key": "fines_and_penalties", "label": "Fines and Penalties (Tax-Split)", "inclusion": "opt_in", "basis": "ITA 1967 s.39(1) read with s.33(1); case law (Aspac Lubricants (M) Sdn Bhd v KPHDN) - no dedicated Public Ruling", "sort_ordinal": 220, "msic_sections": [], "msic_divisions": [], "trade_natures": [], "entity_types": [] },
+    { "family_key": "depreciation_and_amortisation", "label": "Depreciation and Amortisation (Tax-Split)", "inclusion": "opt_in", "basis": "ITA 1967 s.39(1)(k) disallows book depreciation; s.19 + Schedule 3 substitute capital allowances; PR 12/2014, PR 6/2015", "sort_ordinal": 230, "msic_sections": [], "msic_divisions": [], "trade_natures": [], "entity_types": [] },
+    { "family_key": "leave_passage", "label": "Leave Passage (Tax-Split)", "inclusion": "opt_in", "basis": "ITA 1967 s.13(1)(b); PR 1/2003 - the fare portion is non-deductible to the employer; food/accommodation/incidentals are treated as entertainment instead", "sort_ordinal": 240, "msic_sections": [], "msic_divisions": [], "trade_natures": [], "entity_types": [] },
+    { "family_key": "private_and_proprietor_expenses", "label": "Private and Proprietor's Expenses (Tax-Split)", "inclusion": "opt_in", "basis": "ITA 1967 s.39(1)(a) - domestic/private expenditure - no dedicated Public Ruling", "sort_ordinal": 250, "msic_sections": [], "msic_divisions": [], "trade_natures": [], "entity_types": [] },
+    { "family_key": "motor_running_costs", "label": "Motor Vehicle Running Costs (Tax-Split)", "inclusion": "opt_in", "basis": "ITA 1967 Schedule 3 Para 2/2A (QE cap for non-commercial vehicles, RM50,000/RM100,000); PR 6/2015; running-cost apportionment under s.33(1)/s.39(1)(a)", "sort_ordinal": 260, "msic_sections": [], "msic_divisions": [], "trade_natures": [], "entity_types": [] },
+    { "family_key": "club_subscriptions_and_entrance_fees", "label": "Club Subscriptions and Entrance Fees (Tax-Split)", "inclusion": "opt_in", "basis": "ITA 1967 s.39(1)(m) - standalone disallowance, distinct from the entertainment 50% rule - no dedicated Public Ruling", "sort_ordinal": 270, "msic_sections": [], "msic_divisions": [], "trade_natures": [], "entity_types": [] },
+    { "family_key": "doubtful_debts_and_provisions", "label": "Doubtful Debts and Unapproved Provisions (Tax-Split)", "inclusion": "opt_in", "basis": "ITA 1967 s.34(2); PR 4/2019 (replaces PR 1/2002) - a specific provision is deductible, a general provision is not; s.39(1)(c) for unapproved pension/provident fund contributions", "sort_ordinal": 280, "msic_sections": [], "msic_divisions": [], "trade_natures": [], "entity_types": [] },
+
+    { "family_key": "equity_company", "label": "Equity - Company", "inclusion": "opt_in", "basis": "Companies Act 2016 s.74 (no-par-value regime, effective 2017-01-31); MPERS 4.11(f)/4.12", "sort_ordinal": 290, "msic_sections": [], "msic_divisions": [], "trade_natures": [], "entity_types": ["sdn_bhd", "bhd"] },
+    { "family_key": "equity_sole_prop", "label": "Equity - Sole Proprietorship", "inclusion": "opt_in", "basis": "firm practice per professional convention (ACCA FA2; IFRS for SMEs Module 4 worked examples) - no capital/current split for a sole proprietor, capital and drawings only. Hard constraint 13: a sole proprietor's own account is EQUITY, never a staff advance.", "sort_ordinal": 300, "msic_sections": [], "msic_divisions": [], "trade_natures": [], "entity_types": ["sole_prop"] },
+    { "family_key": "equity_partnership", "label": "Equity - Partnership", "inclusion": "opt_in", "basis": "firm practice per professional convention (ACCA FA2; IFRS for SMEs Module 4 S4.13) - capital and current accounts per partner; profit-sharing ratio governed by the Partnership Act 1961, not an accounting standard", "sort_ordinal": 310, "msic_sections": [], "msic_divisions": [], "trade_natures": [], "entity_types": ["partnership", "llp"] }
+  ],
+
+  "accounts": [
+    { "account_code": "1000", "name": "Cash on Hand", "account_type": "asset", "account_class": null, "special_acc_type": null, "family_key": "cash_and_bank", "sort_ordinal": 10, "tax_sensitive": false, "add_back_class": null, "statutory": null, "notes": null },
+    { "account_code": "1010", "name": "Petty Cash", "account_type": "asset", "account_class": null, "special_acc_type": null, "family_key": "cash_and_bank", "sort_ordinal": 20, "tax_sensitive": false, "add_back_class": null, "statutory": null, "notes": null },
+    { "account_code": "1020", "name": "Bank Current Account", "account_type": "asset", "account_class": null, "special_acc_type": null, "family_key": "cash_and_bank", "sort_ordinal": 30, "tax_sensitive": false, "add_back_class": null, "statutory": null, "notes": "flagged is_bank_account=true only through the add_bank_account verb, never at template apply (coa-template-annexes.md Annex E)" },
+    { "account_code": "1030", "name": "Bank Savings Account", "account_type": "asset", "account_class": null, "special_acc_type": null, "family_key": "cash_and_bank", "sort_ordinal": 40, "tax_sensitive": false, "add_back_class": null, "statutory": null, "notes": null },
+    { "account_code": "1040", "name": "Fixed / Time Deposit", "account_type": "asset", "account_class": null, "special_acc_type": null, "family_key": "cash_and_bank", "sort_ordinal": 50, "tax_sensitive": false, "add_back_class": null, "statutory": null, "notes": null },
+
+    { "account_code": "1100", "name": "Trade Receivables Control", "account_type": "asset", "account_class": "receivable", "special_acc_type": null, "family_key": "trade_receivables", "sort_ordinal": 10, "tax_sensitive": false, "add_back_class": null, "statutory": null, "notes": null },
+    { "account_code": "1110", "name": "Other Receivables", "account_type": "asset", "account_class": null, "special_acc_type": null, "family_key": "trade_receivables", "sort_ordinal": 20, "tax_sensitive": false, "add_back_class": null, "statutory": null, "notes": null },
+    { "account_code": "1120", "name": "Deposits Paid", "account_type": "asset", "account_class": null, "special_acc_type": null, "family_key": "trade_receivables", "sort_ordinal": 30, "tax_sensitive": false, "add_back_class": null, "statutory": null, "notes": "utility/rental/other refundable deposits paid by the client" },
+    { "account_code": "1130", "name": "Prepayments", "account_type": "asset", "account_class": null, "special_acc_type": null, "family_key": "trade_receivables", "sort_ordinal": 40, "tax_sensitive": false, "add_back_class": null, "statutory": null, "notes": null },
+    { "account_code": "1190", "name": "Allowance for Doubtful Debts", "account_type": "asset", "account_class": null, "special_acc_type": null, "family_key": "trade_receivables", "sort_ordinal": 50, "tax_sensitive": false, "add_back_class": null, "statutory": null, "notes": "balance-sheet contra-asset; the deductibility split (specific vs general) lives on the P&L side under doubtful_debts_and_provisions" },
+
+    { "account_code": "2000", "name": "Trade Payables Control", "account_type": "liability", "account_class": "payable", "special_acc_type": null, "family_key": "trade_payables", "sort_ordinal": 10, "tax_sensitive": false, "add_back_class": null, "statutory": null, "notes": null },
+    { "account_code": "2010", "name": "Other Payables", "account_type": "liability", "account_class": null, "special_acc_type": null, "family_key": "trade_payables", "sort_ordinal": 20, "tax_sensitive": false, "add_back_class": null, "statutory": null, "notes": null },
+    { "account_code": "2020", "name": "Accruals", "account_type": "liability", "account_class": null, "special_acc_type": null, "family_key": "trade_payables", "sort_ordinal": 30, "tax_sensitive": false, "add_back_class": null, "statutory": null, "notes": null },
+
+    { "account_code": "2100", "name": "EPF (KWSP) Payable", "account_type": "liability", "account_class": null, "special_acc_type": null, "family_key": "statutory_payables", "sort_ordinal": 10, "tax_sensitive": false, "add_back_class": null, "statutory": "epf", "notes": "not split employee/employer by default - see dossier SS4" },
+    { "account_code": "2110", "name": "SOCSO (PERKESO) Payable", "account_type": "liability", "account_class": null, "special_acc_type": null, "family_key": "statutory_payables", "sort_ordinal": 20, "tax_sensitive": false, "add_back_class": null, "statutory": "socso", "notes": null },
+    { "account_code": "2120", "name": "EIS (SIP) Payable", "account_type": "liability", "account_class": null, "special_acc_type": null, "family_key": "statutory_payables", "sort_ordinal": 30, "tax_sensitive": false, "add_back_class": null, "statutory": "eis", "notes": null },
+    { "account_code": "2130", "name": "PCB (MTD) Payable", "account_type": "liability", "account_class": null, "special_acc_type": null, "family_key": "statutory_payables", "sort_ordinal": 40, "tax_sensitive": false, "add_back_class": null, "statutory": "pcb_mtd", "notes": "PCB = Potongan Cukai Bulanan (vernacular); MTD = Monthly Tax Deduction (LHDN technical term) - both carried in the name so either reading matches" },
+    { "account_code": "2140", "name": "HRDF (HRD Corp) Levy Payable", "account_type": "liability", "account_class": null, "special_acc_type": null, "family_key": "statutory_payables", "sort_ordinal": 50, "tax_sensitive": false, "add_back_class": null, "statutory": "hrdf", "notes": "weakest-evidenced statutory name in this template - no surveyed software product confirmed a shipped default line, see dossier SS4 and SS7 item 7" },
+    { "account_code": "2150", "name": "SST Output Tax Payable", "account_type": "liability", "account_class": null, "special_acc_type": "sst_output", "family_key": "statutory_payables", "sort_ordinal": 60, "tax_sensitive": false, "add_back_class": null, "statutory": "sst_output", "notes": null },
+
+    { "account_code": "3900", "name": "Retained Earnings", "account_type": "equity", "account_class": null, "special_acc_type": "retained_earnings", "family_key": "equity_common", "sort_ordinal": 10, "tax_sensitive": false, "add_back_class": null, "statutory": null, "notes": "applies unconditionally, in every entity_type case" },
+
+    { "account_code": "4000", "name": "Sales / Fees Income", "account_type": "income", "account_class": null, "special_acc_type": null, "family_key": "revenue", "sort_ordinal": 10, "tax_sensitive": false, "add_back_class": null, "statutory": null, "notes": null },
+    { "account_code": "4010", "name": "Other Operating Income", "account_type": "income", "account_class": null, "special_acc_type": null, "family_key": "revenue", "sort_ordinal": 20, "tax_sensitive": false, "add_back_class": null, "statutory": null, "notes": null },
+    { "account_code": "4900", "name": "Other Income (Non-Operating)", "account_type": "income", "account_class": null, "special_acc_type": null, "family_key": "revenue", "sort_ordinal": 30, "tax_sensitive": false, "add_back_class": null, "statutory": null, "notes": null },
+
+    { "account_code": "6000", "name": "Salaries and Wages", "account_type": "expense", "account_class": null, "special_acc_type": null, "family_key": "employment_costs", "sort_ordinal": 10, "tax_sensitive": false, "add_back_class": null, "statutory": null, "notes": null },
+    { "account_code": "6010", "name": "EPF Contribution (Employer)", "account_type": "expense", "account_class": null, "special_acc_type": null, "family_key": "employment_costs", "sort_ordinal": 20, "tax_sensitive": false, "add_back_class": null, "statutory": "epf", "notes": null },
+    { "account_code": "6020", "name": "SOCSO Contribution (Employer)", "account_type": "expense", "account_class": null, "special_acc_type": null, "family_key": "employment_costs", "sort_ordinal": 30, "tax_sensitive": false, "add_back_class": null, "statutory": "socso", "notes": null },
+    { "account_code": "6030", "name": "EIS Contribution (Employer)", "account_type": "expense", "account_class": null, "special_acc_type": null, "family_key": "employment_costs", "sort_ordinal": 40, "tax_sensitive": false, "add_back_class": null, "statutory": "eis", "notes": null },
+    { "account_code": "6040", "name": "HRDF (HRD Corp) Levy Expense", "account_type": "expense", "account_class": null, "special_acc_type": null, "family_key": "employment_costs", "sort_ordinal": 50, "tax_sensitive": false, "add_back_class": null, "statutory": "hrdf", "notes": null },
+    { "account_code": "6050", "name": "Bonus and Incentives", "account_type": "expense", "account_class": null, "special_acc_type": null, "family_key": "employment_costs", "sort_ordinal": 60, "tax_sensitive": false, "add_back_class": null, "statutory": null, "notes": null },
+    { "account_code": "6060", "name": "Staff Welfare and Training (incl. exempt medical/dental BIK)", "account_type": "expense", "account_class": null, "special_acc_type": null, "family_key": "employment_costs", "sort_ordinal": 70, "tax_sensitive": false, "add_back_class": null, "statutory": null, "notes": "medical/dental benefits are exempt BIK under PR 11/2019 and PR 5/2019 - cleanly deductible, no add-back, so kept here rather than given a tax-split account (dossier SS3)" },
+
+    { "account_code": "6100", "name": "Rental of Premises", "account_type": "expense", "account_class": null, "special_acc_type": null, "family_key": "premises_and_admin", "sort_ordinal": 10, "tax_sensitive": false, "add_back_class": null, "statutory": null, "notes": null },
+    { "account_code": "6110", "name": "Utilities (Electricity and Water)", "account_type": "expense", "account_class": null, "special_acc_type": null, "family_key": "premises_and_admin", "sort_ordinal": 20, "tax_sensitive": false, "add_back_class": null, "statutory": null, "notes": null },
+    { "account_code": "6120", "name": "Telephone and Internet", "account_type": "expense", "account_class": null, "special_acc_type": null, "family_key": "premises_and_admin", "sort_ordinal": 30, "tax_sensitive": false, "add_back_class": null, "statutory": null, "notes": null },
+    { "account_code": "6130", "name": "Insurance (General)", "account_type": "expense", "account_class": null, "special_acc_type": null, "family_key": "premises_and_admin", "sort_ordinal": 40, "tax_sensitive": false, "add_back_class": null, "statutory": null, "notes": null },
+    { "account_code": "6140", "name": "Printing, Stationery and Postage", "account_type": "expense", "account_class": null, "special_acc_type": null, "family_key": "premises_and_admin", "sort_ordinal": 50, "tax_sensitive": false, "add_back_class": null, "statutory": null, "notes": null },
+    { "account_code": "6150", "name": "Professional Fees (Legal, Accounting, Secretarial)", "account_type": "expense", "account_class": null, "special_acc_type": null, "family_key": "premises_and_admin", "sort_ordinal": 60, "tax_sensitive": false, "add_back_class": null, "statutory": null, "notes": null },
+    { "account_code": "6160", "name": "Repairs and Maintenance", "account_type": "expense", "account_class": null, "special_acc_type": null, "family_key": "premises_and_admin", "sort_ordinal": 70, "tax_sensitive": false, "add_back_class": null, "statutory": null, "notes": null },
+    { "account_code": "6170", "name": "General Administrative Expenses", "account_type": "expense", "account_class": null, "special_acc_type": null, "family_key": "premises_and_admin", "sort_ordinal": 80, "tax_sensitive": false, "add_back_class": null, "statutory": null, "notes": null },
+
+    { "account_code": "6800", "name": "Bank Charges", "account_type": "expense", "account_class": null, "special_acc_type": null, "family_key": "finance_costs", "sort_ordinal": 10, "tax_sensitive": false, "add_back_class": null, "statutory": null, "notes": null },
+    { "account_code": "6810", "name": "Interest Expense", "account_type": "expense", "account_class": null, "special_acc_type": null, "family_key": "finance_costs", "sort_ordinal": 20, "tax_sensitive": false, "add_back_class": null, "statutory": null, "notes": null },
+    { "account_code": "6820", "name": "Realised Foreign Exchange Gain / Loss", "account_type": "expense", "account_class": null, "special_acc_type": null, "family_key": "finance_costs", "sort_ordinal": 30, "tax_sensitive": false, "add_back_class": null, "statutory": null, "notes": null },
+    { "account_code": "6830", "name": "Unrealised Foreign Exchange Gain / Loss", "account_type": "expense", "account_class": null, "special_acc_type": null, "family_key": "finance_costs", "sort_ordinal": 40, "tax_sensitive": false, "add_back_class": null, "statutory": null, "notes": null },
+
+    { "account_code": "9900", "name": "Opening Balance Equity", "account_type": "equity", "account_class": null, "special_acc_type": "opening_balance_equity", "family_key": "system_roles", "sort_ordinal": 10, "tax_sensitive": false, "add_back_class": null, "statutory": null, "notes": null },
+    { "account_code": "9910", "name": "Rounding", "account_type": "expense", "account_class": null, "special_acc_type": "rounding", "family_key": "system_roles", "sort_ordinal": 20, "tax_sensitive": false, "add_back_class": null, "statutory": null, "notes": null },
+    { "account_code": "9920", "name": "SST Purchase Cost", "account_type": "expense", "account_class": null, "special_acc_type": "sst_purchase_cost", "family_key": "system_roles", "sort_ordinal": 30, "tax_sensitive": false, "add_back_class": null, "statutory": "sst_input", "notes": "input SST is expensed, not claimed, per PRD S6 invariant 12 / WA21-R1" },
+
+    { "account_code": "1200", "name": "Inventory / Stock", "account_type": "asset", "account_class": null, "special_acc_type": null, "family_key": "inventory_and_cogs", "sort_ordinal": 10, "tax_sensitive": false, "add_back_class": null, "statutory": null, "notes": null },
+    { "account_code": "5000", "name": "Purchases", "account_type": "expense", "account_class": null, "special_acc_type": null, "family_key": "inventory_and_cogs", "sort_ordinal": 20, "tax_sensitive": false, "add_back_class": null, "statutory": null, "notes": null },
+    { "account_code": "5010", "name": "Carriage Inwards", "account_type": "expense", "account_class": null, "special_acc_type": null, "family_key": "inventory_and_cogs", "sort_ordinal": 30, "tax_sensitive": false, "add_back_class": null, "statutory": null, "notes": null },
+    { "account_code": "5020", "name": "Opening Stock", "account_type": "expense", "account_class": null, "special_acc_type": null, "family_key": "inventory_and_cogs", "sort_ordinal": 40, "tax_sensitive": false, "add_back_class": null, "statutory": null, "notes": null },
+    { "account_code": "5030", "name": "Closing Stock", "account_type": "expense", "account_class": null, "special_acc_type": null, "family_key": "inventory_and_cogs", "sort_ordinal": 50, "tax_sensitive": false, "add_back_class": null, "statutory": null, "notes": "contra to cost of sales" },
+    { "account_code": "5040", "name": "Cost of Sales", "account_type": "expense", "account_class": null, "special_acc_type": null, "family_key": "inventory_and_cogs", "sort_ordinal": 60, "tax_sensitive": false, "add_back_class": null, "statutory": null, "notes": null },
+
+    { "account_code": "1210", "name": "Raw Materials Inventory", "account_type": "asset", "account_class": null, "special_acc_type": null, "family_key": "manufacturing", "sort_ordinal": 10, "tax_sensitive": false, "add_back_class": null, "statutory": null, "notes": null },
+    { "account_code": "1220", "name": "Work-in-Progress Inventory", "account_type": "asset", "account_class": null, "special_acc_type": null, "family_key": "manufacturing", "sort_ordinal": 20, "tax_sensitive": false, "add_back_class": null, "statutory": null, "notes": null },
+    { "account_code": "1230", "name": "Finished Goods Inventory", "account_type": "asset", "account_class": null, "special_acc_type": null, "family_key": "manufacturing", "sort_ordinal": 30, "tax_sensitive": false, "add_back_class": null, "statutory": null, "notes": null },
+    { "account_code": "5100", "name": "Direct Labour", "account_type": "expense", "account_class": null, "special_acc_type": null, "family_key": "manufacturing", "sort_ordinal": 40, "tax_sensitive": false, "add_back_class": null, "statutory": null, "notes": null },
+    { "account_code": "5110", "name": "Factory Overheads", "account_type": "expense", "account_class": null, "special_acc_type": null, "family_key": "manufacturing", "sort_ordinal": 50, "tax_sensitive": false, "add_back_class": null, "statutory": null, "notes": null },
+    { "account_code": "5120", "name": "Factory Rental and Utilities", "account_type": "expense", "account_class": null, "special_acc_type": null, "family_key": "manufacturing", "sort_ordinal": 60, "tax_sensitive": false, "add_back_class": null, "statutory": null, "notes": null },
+
+    { "account_code": "4100", "name": "Rental Income", "account_type": "income", "account_class": null, "special_acc_type": null, "family_key": "property_rental", "sort_ordinal": 10, "tax_sensitive": false, "add_back_class": null, "statutory": null, "notes": null },
+    { "account_code": "6200", "name": "Quit Rent (Cukai Tanah)", "account_type": "expense", "account_class": null, "special_acc_type": null, "family_key": "property_rental", "sort_ordinal": 20, "tax_sensitive": false, "add_back_class": null, "statutory": null, "notes": "paid to the State Land Office; distinct from assessment (dossier SS6)" },
+    { "account_code": "6210", "name": "Assessment (Cukai Pintu / Taksiran)", "account_type": "expense", "account_class": null, "special_acc_type": null, "family_key": "property_rental", "sort_ordinal": 30, "tax_sensitive": false, "add_back_class": null, "statutory": null, "notes": "paid to the local council, based on Annual Rental Value" },
+    { "account_code": "6220", "name": "Property Maintenance and Sinking Fund", "account_type": "expense", "account_class": null, "special_acc_type": null, "family_key": "property_rental", "sort_ordinal": 40, "tax_sensitive": false, "add_back_class": null, "statutory": null, "notes": "billed separately by the JMB/MC for strata properties" },
+    { "account_code": "6230", "name": "Letting Agent Commission", "account_type": "expense", "account_class": null, "special_acc_type": null, "family_key": "property_rental", "sort_ordinal": 50, "tax_sensitive": false, "add_back_class": null, "statutory": null, "notes": null },
+
+    { "account_code": "1300", "name": "Contract Assets (Amount Due from Customers)", "account_type": "asset", "account_class": null, "special_acc_type": null, "family_key": "construction_contracts", "sort_ordinal": 10, "tax_sensitive": false, "add_back_class": null, "statutory": null, "notes": "MFRS 15 contract-asset treatment, replacing the older 'amount due from customers' terminology" },
+    { "account_code": "1310", "name": "Retention Receivable", "account_type": "asset", "account_class": null, "special_acc_type": null, "family_key": "construction_contracts", "sort_ordinal": 20, "tax_sensitive": false, "add_back_class": null, "statutory": null, "notes": "typically 5-10% of certified sum, standard Malaysian construction practice" },
+    { "account_code": "2200", "name": "Contract Liabilities (Amount Due to Customers)", "account_type": "liability", "account_class": null, "special_acc_type": null, "family_key": "construction_contracts", "sort_ordinal": 30, "tax_sensitive": false, "add_back_class": null, "statutory": null, "notes": null },
+    { "account_code": "2210", "name": "Retention Payable", "account_type": "liability", "account_class": null, "special_acc_type": null, "family_key": "construction_contracts", "sort_ordinal": 40, "tax_sensitive": false, "add_back_class": null, "statutory": null, "notes": null },
+    { "account_code": "4200", "name": "Construction Contract Revenue", "account_type": "income", "account_class": null, "special_acc_type": null, "family_key": "construction_contracts", "sort_ordinal": 50, "tax_sensitive": false, "add_back_class": null, "statutory": null, "notes": null },
+    { "account_code": "5200", "name": "Subcontractor Costs", "account_type": "expense", "account_class": null, "special_acc_type": null, "family_key": "construction_contracts", "sort_ordinal": 60, "tax_sensitive": false, "add_back_class": null, "statutory": null, "notes": null },
+
+    { "account_code": "4300", "name": "Fee Income by Service Line", "account_type": "income", "account_class": null, "special_acc_type": null, "family_key": "professional_services", "sort_ordinal": 10, "tax_sensitive": false, "add_back_class": null, "statutory": null, "notes": null },
+    { "account_code": "1320", "name": "Unbilled Receivables (Work-in-Progress)", "account_type": "asset", "account_class": null, "special_acc_type": null, "family_key": "professional_services", "sort_ordinal": 20, "tax_sensitive": false, "add_back_class": null, "statutory": null, "notes": null },
+    { "account_code": "1330", "name": "Disbursements Recoverable", "account_type": "asset", "account_class": null, "special_acc_type": null, "family_key": "professional_services", "sort_ordinal": 30, "tax_sensitive": false, "add_back_class": null, "statutory": null, "notes": "pass-through disbursements, excluded from revenue per LHDN e-Invoice guidance (dossier SS6)" },
+    { "account_code": "5300", "name": "Subcontracted Professional Fees", "account_type": "expense", "account_class": null, "special_acc_type": null, "family_key": "professional_services", "sort_ordinal": 40, "tax_sensitive": false, "add_back_class": null, "statutory": null, "notes": null },
+
+    { "account_code": "4400", "name": "Food and Beverage Sales", "account_type": "income", "account_class": null, "special_acc_type": null, "family_key": "fnb_hospitality", "sort_ordinal": 10, "tax_sensitive": false, "add_back_class": null, "statutory": null, "notes": null },
+    { "account_code": "5400", "name": "Food Cost", "account_type": "expense", "account_class": null, "special_acc_type": null, "family_key": "fnb_hospitality", "sort_ordinal": 20, "tax_sensitive": false, "add_back_class": null, "statutory": null, "notes": null },
+    { "account_code": "5410", "name": "Beverage Cost", "account_type": "expense", "account_class": null, "special_acc_type": null, "family_key": "fnb_hospitality", "sort_ordinal": 30, "tax_sensitive": false, "add_back_class": null, "statutory": null, "notes": null },
+    { "account_code": "2300", "name": "Service Charge Payable", "account_type": "liability", "account_class": null, "special_acc_type": null, "family_key": "fnb_hospitality", "sort_ordinal": 40, "tax_sensitive": false, "add_back_class": null, "statutory": null, "notes": "business income later distributed to staff per internal policy - NOT SST, must not be commingled with 2150 (dossier SS6)" },
+
+    { "account_code": "1400", "name": "Motor Vehicles at Cost", "account_type": "asset", "account_class": null, "special_acc_type": null, "family_key": "motor_vehicles", "sort_ordinal": 10, "tax_sensitive": false, "add_back_class": null, "statutory": null, "notes": null },
+    { "account_code": "1410", "name": "Accumulated Depreciation - Motor Vehicles", "account_type": "asset", "account_class": null, "special_acc_type": null, "family_key": "motor_vehicles", "sort_ordinal": 20, "tax_sensitive": false, "add_back_class": null, "statutory": null, "notes": "contra-asset" },
+    { "account_code": "6300", "name": "Road Tax and Insurance - Motor Vehicles", "account_type": "expense", "account_class": null, "special_acc_type": null, "family_key": "motor_vehicles", "sort_ordinal": 30, "tax_sensitive": false, "add_back_class": null, "statutory": null, "notes": null },
+
+    { "account_code": "1050", "name": "Foreign Currency Bank Account", "account_type": "asset", "account_class": null, "special_acc_type": null, "family_key": "foreign_currency", "sort_ordinal": 10, "tax_sensitive": false, "add_back_class": null, "statutory": null, "notes": "realised/unrealised FX gain-loss accounts live in core finance_costs (6820/6830)" },
+
+    { "account_code": "6400", "name": "Entertainment Expenses", "account_type": "expense", "account_class": null, "special_acc_type": null, "family_key": "entertainment", "sort_ordinal": 10, "tax_sensitive": true, "add_back_class": "entertainment", "statutory": null, "notes": "50% restricted by default per PR 4/2015; 8 named exceptions are 100% deductible" },
+    { "account_code": "6410", "name": "Donations - Approved Institutions", "account_type": "expense", "account_class": null, "special_acc_type": null, "family_key": "donations_approved", "sort_ordinal": 10, "tax_sensitive": true, "add_back_class": "donations_approved", "statutory": null, "notes": "deductible up to 10% of aggregate income (s.44(6)); Government/State/local-authority gifts are uncapped" },
+    { "account_code": "6420", "name": "Donations - Unapproved / Non-Deductible", "account_type": "expense", "account_class": null, "special_acc_type": null, "family_key": "donations_unapproved", "sort_ordinal": 10, "tax_sensitive": true, "add_back_class": "donations_unapproved", "statutory": null, "notes": "not within s.44(6) - non-deductible" },
+    { "account_code": "6430", "name": "Fines and Penalties", "account_type": "expense", "account_class": null, "special_acc_type": null, "family_key": "fines_and_penalties", "sort_ordinal": 10, "tax_sensitive": true, "add_back_class": "fines_and_penalties", "statutory": null, "notes": "non-deductible under s.39(1)/s.33(1); no dedicated PR - case law only" },
+    { "account_code": "6440", "name": "Depreciation and Amortisation", "account_type": "expense", "account_class": null, "special_acc_type": null, "family_key": "depreciation_and_amortisation", "sort_ordinal": 10, "tax_sensitive": true, "add_back_class": "depreciation_and_amortisation", "statutory": null, "notes": "always added back under s.39(1)(k); capital allowance computed separately under Schedule 3" },
+    { "account_code": "6450", "name": "Leave Passage", "account_type": "expense", "account_class": null, "special_acc_type": null, "family_key": "leave_passage", "sort_ordinal": 10, "tax_sensitive": true, "add_back_class": "leave_passage", "statutory": null, "notes": "the fare portion is non-deductible per PR 1/2003; food/accommodation/incidentals should instead be coded to 6400 Entertainment" },
+    { "account_code": "6460", "name": "Private and Proprietor's Expenses", "account_type": "expense", "account_class": null, "special_acc_type": null, "family_key": "private_and_proprietor_expenses", "sort_ordinal": 10, "tax_sensitive": true, "add_back_class": "private_and_proprietor_expenses", "statutory": null, "notes": "non-deductible under s.39(1)(a)" },
+    { "account_code": "6470", "name": "Motor Vehicle Running Costs", "account_type": "expense", "account_class": null, "special_acc_type": null, "family_key": "motor_running_costs", "sort_ordinal": 10, "tax_sensitive": true, "add_back_class": "motor_running_costs", "statutory": null, "notes": "apportioned business:private for mixed-use vehicles; QE for non-commercial vehicles capped at RM50,000/RM100,000 under Schedule 3 Para 2/2A" },
+    { "account_code": "6480", "name": "Club Subscriptions and Entrance Fees", "account_type": "expense", "account_class": null, "special_acc_type": null, "family_key": "club_subscriptions_and_entrance_fees", "sort_ordinal": 10, "tax_sensitive": true, "add_back_class": "club_subscriptions_and_entrance_fees", "statutory": null, "notes": "non-deductible under s.39(1)(m) - a standalone rule, distinct from the entertainment 50% restriction" },
+    { "account_code": "6490", "name": "Provision for Doubtful Debts - Specific", "account_type": "expense", "account_class": null, "special_acc_type": null, "family_key": "doubtful_debts_and_provisions", "sort_ordinal": 10, "tax_sensitive": true, "add_back_class": "doubtful_debts_specific", "statutory": null, "notes": "deductible under s.34(2) - individually assessed, evidenced" },
+    { "account_code": "6491", "name": "Provision for Doubtful Debts - General", "account_type": "expense", "account_class": null, "special_acc_type": null, "family_key": "doubtful_debts_and_provisions", "sort_ordinal": 20, "tax_sensitive": true, "add_back_class": "doubtful_debts_general", "statutory": null, "notes": "non-deductible under s.34(2) - a flat-percentage / MFRS-9-ECL-style provision is not an evidenced specific provision" },
+    { "account_code": "6492", "name": "Unapproved Pension / Provident Fund Contributions", "account_type": "expense", "account_class": null, "special_acc_type": null, "family_key": "doubtful_debts_and_provisions", "sort_ordinal": 30, "tax_sensitive": true, "add_back_class": "unapproved_provident_fund", "statutory": null, "notes": "non-deductible under s.39(1)(c)" },
+
+    { "account_code": "3000", "name": "Share Capital", "account_type": "equity", "account_class": null, "special_acc_type": null, "family_key": "equity_company", "sort_ordinal": 10, "tax_sensitive": false, "add_back_class": null, "statutory": null, "notes": "no-par-value regime, CA 2016 s.74 - no separate Share Premium account for new issuances" },
+    { "account_code": "3100", "name": "Reserves (Other)", "account_type": "equity", "account_class": null, "special_acc_type": null, "family_key": "equity_company", "sort_ordinal": 20, "tax_sensitive": false, "add_back_class": null, "statutory": null, "notes": "named as reserves arise, per MPERS 4.12" },
+    { "account_code": "3800", "name": "Dividends Paid", "account_type": "equity", "account_class": null, "special_acc_type": null, "family_key": "equity_company", "sort_ordinal": 30, "tax_sensitive": false, "add_back_class": null, "statutory": null, "notes": "contra-equity" },
+
+    { "account_code": "3010", "name": "Proprietor's Capital Account", "account_type": "equity", "account_class": null, "special_acc_type": null, "family_key": "equity_sole_prop", "sort_ordinal": 10, "tax_sensitive": false, "add_back_class": null, "statutory": null, "notes": "hard constraint 13's BEE CREATIVE SOLUTION case: the sole proprietor's own account is EQUITY, never a staff advance" },
+    { "account_code": "3810", "name": "Proprietor's Drawings", "account_type": "equity", "account_class": null, "special_acc_type": null, "family_key": "equity_sole_prop", "sort_ordinal": 20, "tax_sensitive": false, "add_back_class": null, "statutory": null, "notes": "netted against capital at period end; a sole proprietor carries no separate current account (dossier SS5)" },
+
+    { "account_code": "3020", "name": "Partners' Capital Accounts", "account_type": "equity", "account_class": null, "special_acc_type": null, "family_key": "equity_partnership", "sort_ordinal": 10, "tax_sensitive": false, "add_back_class": null, "statutory": null, "notes": "pooled at template level; split per named partner is an editing step at apply time (Q3's ruling)" },
+    { "account_code": "3030", "name": "Partners' Current Accounts", "account_type": "equity", "account_class": null, "special_acc_type": null, "family_key": "equity_partnership", "sort_ordinal": 20, "tax_sensitive": false, "add_back_class": null, "statutory": null, "notes": "fluctuating - share of appropriated profit/loss less drawings" },
+    { "account_code": "3820", "name": "Partners' Drawings", "account_type": "equity", "account_class": null, "special_acc_type": null, "family_key": "equity_partnership", "sort_ordinal": 30, "tax_sensitive": false, "add_back_class": null, "statutory": null, "notes": null }
+  ],
+
+  "equity_variants": {
+    "sdn_bhd": [
+      { "account_code": "3000", "name": "Share Capital" },
+      { "account_code": "3100", "name": "Reserves (Other)" },
+      { "account_code": "3900", "name": "Retained Earnings" },
+      { "account_code": "3800", "name": "Dividends Paid" }
+    ],
+    "sole_proprietor": [
+      { "account_code": "3010", "name": "Proprietor's Capital Account" },
+      { "account_code": "3900", "name": "Retained Earnings" },
+      { "account_code": "3810", "name": "Proprietor's Drawings" }
+    ],
+    "partnership": [
+      { "account_code": "3020", "name": "Partners' Capital Accounts" },
+      { "account_code": "3030", "name": "Partners' Current Accounts" },
+      { "account_code": "3900", "name": "Retained Earnings" },
+      { "account_code": "3820", "name": "Partners' Drawings" }
+    ]
+  },
+
+  "known_gaps": [
+    "society and cooperative entity_types (2 of the 8 live client_facts entity_type enum values) have no equity_variants entry - only equity_common (Retained Earnings) applies; a client recorded with entity_type=society|cooperative|other needs a manual equity build. See dossier SS7 item 8.",
+    "HRDF (HRD Corp) Levy Payable (2140) and HRDF Levy Expense (6040) are the weakest-evidenced statutory names in this template - no surveyed software product confirmed either as a shipped default line.",
+    "SSMxT_2022's live FS-MPERS element list (2,375 concepts) was not obtained at plain-English detail; the family/account cut here has NOT been diffed against it, as the design (D-13 item 2) anticipated. This remains a named cross-check obligation, not performed by this dossier.",
+    "No DOSM-published MSIC 2008 to MSIC 2025 crosswalk exists at any level - the msic_edition stamp on client_facts is the compensating control this template relies on."
+  ]
+}
