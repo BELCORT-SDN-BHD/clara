@@ -12,7 +12,7 @@ an RLS-isolated Postgres.
 | When you need | Read |
 |---|---|
 | 用户、问题、产品行为、核心体验、范围和完成条件 | `docs/product/PRD.md` |
-| Live Codebase | codebase-memory-mcp |
+| Live Codebase for grouding and query| codebase-memory-mcp |
 | 技术栈及选择原因、系统边界、模块职责、依赖关系、主要数据流和关键技术取舍 | `docs/ARCHITECTURE.md` |
 | Why something is the way it is — decisions and the standing laws they minted | `docs/adr/README.md` (the digest + its dated log, `docs/adr/README-log.md`) — **read the digest first**; drill to the ADR only if the digest is thin.|
 | Migrations, seeds, the test rig, DR tooling | `packages/db/README.md` |
