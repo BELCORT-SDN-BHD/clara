@@ -504,7 +504,7 @@ test("C-04 drift guard: EVERY `new pg.Pool` site in the runtime declares an erro
 test("裁-149 clause 2, AS BUILT: both leader sessions record and RETHROW — they are not crash-loud", () => {
   // The ruling's premise says no listener is attached to the leader's dedicated makeClient()
   // session. It is, at BOTH call sites, and this PR deliberately left them byte-untouched. This
-  // cell pins the posture docs/ARCHITECTURE.md §4.3 now claims, so a future edit that silently
+  // cell pins the posture docs/ARCHITECTURE.md ("Operation and verification") now claims, so a future edit that silently
   // converts the leader to crash-loud (or to a swallow) has to face the contract first.
   for (const rel of ["scripts/relay.mjs", "lib/leader.mjs"]) {
     const src = readFileSync(join(RUNTIME_ROOT, rel), "utf8");
@@ -515,9 +515,13 @@ test("裁-149 clause 2, AS BUILT: both leader sessions record and RETHROW — th
 });
 
 test("裁-149 clause 3: the contract is written down where the ruling says it must be", () => {
+  // docs/ARCHITECTURE.md ("Operation and verification") states the posture in prose. The pins
+  // below track that wording — re-pinned 2026-09-07 when the doc was condensed and its ruling
+  // references (and the recorded premise correction) were folded into the as-built statement:
+  // the leader reconnects, it is not crash-loud.
   const arch = readFileSync(join(RUNTIME_ROOT, "..", "..", "docs", "ARCHITECTURE.md"), "utf8");
-  assert.match(arch, /background client error does to the process, per connection/, "ARCHITECTURE carries the per-connection contract");
-  assert.match(arch, /log \+ COUNT \+ recycle/, "the pool's posture is stated");
-  assert.match(arch, /rethrow into the caller's own reconnect loop/, "the leader's as-built posture is stated");
-  assert.match(arch, /correction to 裁-149's premise/, "the premise correction is recorded, not silently 'kept'");
+  assert.match(arch, /Idle pool errors\s+log\/recycle connections/, "ARCHITECTURE states the pool posture: log + recycle");
+  assert.match(arch, /relay-pool counters surface warnings/, "the relay pool's COUNT -> /ready warning posture is stated");
+  assert.match(arch, /leader['’]s dedicated session\s+detects failure, releases its advisory lock and reconnects/, "the leader's as-built posture (record -> rethrow -> reconnect, never crash-loud) is stated");
+  assert.match(arch, /Lane probes are asynchronous/, "the lane-probe reading rule (pending is unmeasured) is stated");
 });
