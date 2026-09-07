@@ -1,81 +1,75 @@
-# @clara/backup — off-site DR backup app (`clara-backup`)
+# @clara/backup
 
-The scheduled off-site backup wiring decided in `docs/ops/DR.md` §8 (item 2) and scoped
-by the Wave A2 contract §8 / **WA2-R6**. A **separate, self-contained Fly app** (`sin`) —
-**never** the non-HA runtime machine, and **not** a pnpm workspace member (it is excluded
-in `pnpm-workspace.yaml`; its deps install inside its own Docker image). It exists so an
-**account/region loss** the same-account Supabase managed backups could not survive is
-recoverable.
+A separate Fly batch app that creates encrypted off-site recovery copies. It is excluded from
+the pnpm workspace and installs its own dependencies inside its Docker image.
+System boundaries live in [ARCHITECTURE](../../docs/ARCHITECTURE.md).
 
-> **Off-site is DR, not the archive.** The 7-year statutory record (ITA s.82/82A, CA2016
-> s.245) is the **live DB + Supabase managed backups**. This off-site copy is a rolling
-> **30–90 day** DR window. Retention here is about *usefulness*, not the statute.
+## One run
 
-## What it does (one run, daily)
+The runner reuses [the database full-profile backup](../db/README.md), captures globals evidence
+and selected Auth data (`auth.users` and `auth.identities`), and mirrors private document
+objects incrementally. It verifies content addresses, compresses database files with zstd,
+encrypts the bundle and individual document copies with age, uploads to R2, and sends success
+or failure to a dead-man switch.
 
-1. **Full-profile DB dump** — reuses `@clara/db` `backup.mjs --profile full` (four
-   authoritative schemas `clara`/`workflow`/`workflow_drizzle`/`graphile_worker`, **WITH
-   owners + ACLs**; asserts the full inventory; **v17 client required**). Reused, not
-   re-implemented, so the "refuse a partial full" safety is never lost.
-2. **Globals evidence dump** — `pg_dumpall --globals-only` (evidence/diff artifact; roles
-   are restored by `deploy/roles-bootstrap.sql`, not this dump).
-3. **`auth` data-only dump** — `auth.users` + `auth.identities` (**PII + bcrypt hashes →
-   age encryption is mandatory**).
-4. **`firm-docs` byte mirror** — Supabase Storage REST (`service_role`); content-address
-   (`firms/<uuid>/docs/<sha256>.<ext>`) verified on download. Mirrored to R2 as an
-   **incremental, individually age-encrypted** prefix — write-once + delete-never, so only
-   **new** objects are encrypted + uploaded (no daily re-store of the whole mirror).
-5. **`manifest.json`** — records the migration-head `(version, checksum)` fingerprint (the
-   `dr-verify` completeness floor), the bundle sha256, and firm-docs aggregate — **no
-   client-identifying paths** (the detailed index rides *inside* the encrypted bundle).
-6. **Bundle** — `tar --zstd` → **age-encrypt** → `clara-dr-<ts>.tar.zst.age` (age does not
-   compress, so zstd first).
-7. **Upload** — `rclone copy` to R2: the incremental `firm-docs-mirror/` prefix + a dated
-   `db-snapshots/<YYYY>/<ts>/` snapshot (pruned by an R2 Object-Lifecycle rule at 30d).
-8. **Success ping** — the dead-man's-switch (healthchecks.io); `/fail` on error so the
-   alarm fires promptly instead of waiting out the grace window.
+The cleartext manifest contains integrity/freshness metadata. Detailed document paths remain in
+the encrypted bundle. Plaintext staging is removed on success or failure.
+The mirror is additive; snapshot expiry is an R2 lifecycle setting, not deletion performed by
+this script. The default rolling DR window is 30 days. It does not establish statutory retention
+or prove that a backup can be restored.
 
-## Secrets law
+## Configuration
 
-The DB connection is **libpq PG\*/`DATABASE_URL` only — never a DSN in code/argv**
-(`packages/db/lib/pg.mjs`). Every other secret comes from a **file named by env** or from
-rclone's own config, and its value is **never logged**. The age **recipient (public)** key
-is committed (`deploy/age-recipient.txt`) — encryption needs no secret. The age **identity
-(private)** key is **owner custody, off-repo and off-R2**. The leak-scan gate
-(`scripts/check-leaks.mjs`) covers every file here.
+[.env.example](.env.example) lists the variables; the script does not automatically load that file.
+Supply environment variables directly or use Node's `--env-file` option for local rehearsals.
 
-## Build + deploy (owner)
+- Database: `DATABASE_URL` or `PG*`; the shared helper derives the external tools' environment.
+- Storage: `CLARA_BACKUP_STORAGE_URL`, `CLARA_BACKUP_STORAGE_KEY_FILE`,
+  `CLARA_BACKUP_STORAGE_BUCKET`.
+- R2: `CLARA_BACKUP_R2_BUCKET`, `CLARA_BACKUP_R2_REMOTE`, and rclone configuration or
+  `RCLONE_CONFIG_R2_*` variables.
+- Encryption: `CLARA_BACKUP_AGE_RECIPIENTS_FILE`. The committed recipient key is public;
+  the private age identity stays outside the repository and backup store.
+- Monitoring: `CLARA_BACKUP_PING_URL` or `CLARA_BACKUP_PING_URL_FILE`.
+  A real run refuses missing monitoring unless the explicit rehearsal override
+  `CLARA_BACKUP_ALLOW_NO_PING=1` is set.
+- Scratch/retention: `CLARA_BACKUP_STAGING_DIR`, `CLARA_BACKUP_RETENTION_DAYS`.
+- Tools: PostgreSQL 17 `PG_DUMP`/`PG_DUMPALL`/`PSQL`, plus age, tar/zstd and rclone.
 
-The image is shipped **build-only + push** (a plain `fly deploy` would create AND start
-a machine — i.e. fire a live backup run — even with no services), and the ONE scheduled
-machine is created from the pushed image. `fly machine run` **disregards fly.toml**
-(env/files/vm), so image-intrinsic env is baked in the Dockerfile and the rest rides as
-flags — the exact flag set (the runtime contract) is `docs/ops/DR.md` §9 step 6:
+Credentials stay in environment or mounted secret files. The backup Storage credential is a
+privileged service credential and is separate from the runtime's restricted custody role.
+
+## Validate and deploy
+
+From this package:
 
 ```sh
-fly apps create clara-backup
-# Stage ALL secrets first from a NAME=VALUE file written OUTSIDE the repo (see
-# DR.md §9 step 4; the service_role key goes BASE64-encoded as
-# CLARA_BACKUP_STORAGE_SERVICE_KEY_B64):
-fly secrets import -a clara-backup --stage < "$env:USERPROFILE\clara-backup-secrets.env"
-# Build from the REPO ROOT (context needs packages/backup + packages/db);
-# --dockerfile explicit (nested-config resolution is not doc-guaranteed):
-fly deploy . --config packages/backup/fly.toml --dockerfile packages/backup/Dockerfile \
-    --build-only --push --image-label dr-wiring-1 -a clara-backup
-# Create ONE daily scheduled machine from the pushed image (full flag set: DR.md §9).
-# It boots ONCE immediately at creation — that supervised run IS the first live run:
-fly machine run registry.fly.io/clara-backup:dr-wiring-1 -a clara-backup \
-    --region sin --schedule daily ... # + --file-secret / -e flags per DR.md §9
+node scripts/backup-run.mjs --dry-run
+node --check scripts/backup-run.mjs
+npm test
 ```
 
-## Local validation (no live anything)
+Dry-run performs no database, Storage, R2 or monitoring I/O. It checks configuration shape and
+prints missing values; it does not certify a real backup.
+
+From the repository root, build and push without starting a backup:
 
 ```sh
-node scripts/backup-run.mjs --dry-run   # validates env-wiring + the step plan, ZERO install
-node --check scripts/backup-run.mjs      # syntax
+fly deploy . --config packages/backup/fly.toml --dockerfile packages/backup/Dockerfile --build-only --push -a clara-backup
 ```
 
-The **first live run** and all credential-bearing steps are **owner-gated** (the classifier
-blocks the agent from reading `~/.clara-*` secrets or running against live). Verify cadence:
-**monthly-light** (decrypt + restore the DB dumps into a local throwaway PG17) and
-**quarterly-full** (the `docs/ops/DR-full-drill.md` STRICT drill). See `docs/ops/DR.md` §9.
+Create/configure the scheduled Machine from the verified image with explicit region, VM size,
+environment and secret-file mounts; `fly machine run` is a Machine operation, not a replay of
+this app's `fly.toml`. The Dockerfile names the expected mounted Storage secret and intrinsic
+rclone settings. Review the actual Machine configuration after changes.
+[Fly Machine documentation](https://www.fly.io/docs/machines/flyctl/fly-machine-run/)
+
+## Verify recovery
+
+Check the uploaded manifest's freshness, checksum and expected migration frontier, and confirm
+the dead-man switch observed the run. Periodically decrypt a bundle into isolated storage,
+restore it on a disposable PostgreSQL target, verify roles/ACLs/engine journals and document
+hashes, then record the result. Keep the restored workflow engine off during a drill.
+
+Use [the database recovery instructions](../db/README.md) for restore and strict verification.
+A successful upload or recent monitoring ping is not a restore result.

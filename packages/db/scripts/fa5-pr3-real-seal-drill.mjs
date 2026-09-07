@@ -69,8 +69,7 @@ function fail(msg) { process.stderr.write(`fa5-pr3-drill: FAIL -- ${msg}\n`); pr
 function docker(args, opts = {}) {
   // MSYS_NO_PATHCONV=1 unconditionally: when the docker command is routed through wsl.exe from a
   // Git Bash-flavoured environment, an unset value lets MSYS mangle a `/mnt/c/...` volume spec
-  // into a Windows path mid-argument (docs/ops/DR-render.md's own "running flyctl from Windows"
-  // hazard, the same class here). Harmless everywhere else.
+  // into a Windows path mid-argument. Harmless elsewhere.
   return spawnSync(DOCKER_CMD[0], [...DOCKER_CMD.slice(1), ...args],
     { encoding: "utf8", env: { ...process.env, MSYS_NO_PATHCONV: "1" }, ...opts });
 }
@@ -349,8 +348,8 @@ async function main() {
 
     // ================================================================================
     // 4. THE BYTE-REPRODUCTION DRILL -- against THAT real artifact, three arms, all required.
-    //    Per docs/ops/DR-render.md's "the drill (described)": replay via clara.replay_render_
-    //    inputs, re-render the SAME job's payload, compare to expected_sha256. Re-derives the
+    //    See packages/reporting-render/README.md. Replay via clara.replay_render_inputs,
+    //    re-render the SAME job's payload, compare to expected_sha256. Re-derives the
     //    payload directly (the ORIGINAL render_job's lease is gone once complete_render_job runs
     //    -- render_job_payload's OWN gate is authorization, not a structural dependency; every
     //    fact it reads is keyed off report_run_id/version ids that are immutable once sealed).

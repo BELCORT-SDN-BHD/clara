@@ -1,23 +1,17 @@
-# fly.toml — Clara runtime (Slice 4, contract §5 / §4.1). Deploy from the REPO ROOT
-# so the Docker build context is the pnpm workspace root:
+# Clara runtime. Deploy from the repository root for the workspace build context:
 #     fly deploy --config packages/runtime/fly.toml
-#
-# The app name below is a PLACEHOLDER — the operator creates the real app
-# (`fly apps create <name>`) and replaces this line before the first deploy.
 app = "clara-runtime"
 
-# Singapore — closest region to Malaysia (ADR-014).
+# Singapore deployment region.
 primary_region = "sin"
 
 [build]
-  # Dockerfile path resolves relative to THIS config file (fly behavior, proven
-  # at first deploy); the BUILD CONTEXT is the directory `fly deploy` runs from —
-  # deploy from the REPO ROOT so the Dockerfile's root-relative COPYs work.
+  # Dockerfile is relative to this config; build context is the repository root.
   dockerfile = "Dockerfile"
 
 [env]
   PORT = "3200"
-  # The deployed app IS the durable runtime — the world is ON here (and ONLY here).
+  # Start the durable world on this runtime host; keep it off in restore drills.
   CLARA_START_WORLD = "1"
   WORKFLOW_TARGET_WORLD = "@workflow/world-postgres"
   CLARA_SPOOL_DIR = "/data/spool"
@@ -30,10 +24,8 @@ primary_region = "sin"
   # CLARA_RUNTIME_DATABASE_URL, CLARA_READ_DATABASE_URL) are set with `fly secrets
   # set` — NEVER in this file. See the deploy runbook in README.md.
 
-# ONE always-on machine — EXPLICITLY NON-HA (contract §4.1). The durable engine is
-# single-leader (the 'router' advisory lock); a second machine would contend it and
-# split the loops. Do NOT scale this app > 1. The world must never be parked by the
-# platform, so auto start/stop are OFF and one machine is always running.
+# One always-on machine with a local spool. Multiple-machine operation is not
+# supported by this deployment; keep auto start/stop off so background work continues.
 [http_service]
   internal_port = 3200
   force_https = true
@@ -41,9 +33,7 @@ primary_region = "sin"
   auto_start_machines = false
   min_machines_running = 1
 
-  # Readiness gate (§4.7): /ready FAILS on DB unreachable / world dead / control
-  # listener dead / taxonomy HALT — the LB then holds traffic (and a crash-only exit
-  # takes the machine down for Fly to restart).
+  # /ready checks critical dependencies; optional lane warnings are not hard gates.
   [[http_service.checks]]
     interval = "15s"
     timeout = "5s"
@@ -60,15 +50,12 @@ primary_region = "sin"
   path = "/health"
 
 [[restart]]
-  # After a crash-loop burns Fly's default 10-restart budget the machine stays
-  # STOPPED (ceremony lesson 2026-07-19) — always-restart keeps the single
-  # non-HA machine self-healing.
+  # Keep restarting after crashes; availability still depends on this one machine.
   policy = "always"
 
 [[vm]]
   size = "shared-cpu-1x"
-  # 1gb OOM-killed clamd once the full ClamAV signature set loaded (live
-  # incident 2026-07-19); 2gb is the proven-stable floor for clamd + node.
+  # ClamAV's full signature set plus Node exceeded the former 1 GB allocation.
   memory = "2gb"
 
 # Disposable encrypted intake spool only; canonical custody remains private

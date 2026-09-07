@@ -12,7 +12,7 @@
 -- a human did not have to hand-assemble. This is 0020's.
 --
 -- CONTRACT: docs/plan/wave-b-migration-0020-design.md §10.3 step 3.
--- RUNBOOK:  docs/ops/wave-b-0020-ceremony-runbook.md §7.
+-- Operating guidance: packages/db/README.md, "Migration and deployment behavior".
 --
 -- USAGE (live env, DSN from the environment — NEVER in argv):
 --     psql -v ON_ERROR_STOP=1 -f packages/db/deploy/wave-b-0020-postverify.sql

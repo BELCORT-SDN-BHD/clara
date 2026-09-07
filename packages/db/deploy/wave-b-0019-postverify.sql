@@ -10,7 +10,7 @@
 -- replaces the other.
 --
 -- CONTRACT: docs/plan/wave-b-migration-0019-design.md §11 step 5 (post-DB verify).
--- RUNBOOK:  docs/ops/wave-b-0019-ceremony-runbook.md
+-- Operating guidance: packages/db/README.md, "Migration and deployment behavior".
 --
 -- USAGE (live env, DSN from the environment — NEVER in argv):
 --     psql -v ON_ERROR_STOP=1 -f packages/db/deploy/wave-b-0019-postverify.sql

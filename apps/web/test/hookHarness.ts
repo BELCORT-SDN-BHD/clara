@@ -1,22 +1,11 @@
-// A dependency-free driver for controller hooks, ported verbatim (mechanism, not
-// look) from apps/dashboard/test/hookHarness.ts. Its own header explains the
-// rationale better than a summary would:
+// Test driver for React hooks and components that need real state, effects,
+// timers, async work, and React DOM event handling. It mounts through
+// `react-dom/client` so tests observe the same update lifecycle as the app.
 //
-// "The dashboard suite renders through `renderToStaticMarkup` — one pass, no
-// effects, no state. That is the right instrument for a presentational component
-// and the wrong one for a CONTROLLER hook, whose whole subject matter is what
-// happens over time: an effect arms an interval, a timer fires, an await
-// resolves, and the question is which of those writes to a field wins. So this
-// harness mounts the real hook through the real `react-dom/client` and lets the
-// test drive the clock, with no jsdom and no new package."
-//
-// WHAT IT SHIMS, AND WHY THAT IS ENOUGH (renderHook): the component under test
-// renders `null`, so React never creates, diffs or removes a host node — it
-// only needs a container that answers as an element, and the handful of
-// document/window properties the commit phase touches unconditionally.
-//
-// `renderComponent` (below) is the SAME shim extended to mount a REAL
-// element tree — see its own header for what that needed on top.
+// The minimal DOM shim supports two uses. `renderHook` mounts a component that
+// returns `null`, so React needs only an element-like container and the
+// document/window fields its commit phase reads. `renderComponent` extends the
+// same shim to mount an element tree; its own header describes those additions.
 
 import { createElement, act as reactAct, type ReactElement } from "react";
 
@@ -229,7 +218,12 @@ function installDom(): void {
   doc.defaultView = win;
   (globalThis as Stub).document = doc;
   (globalThis as Stub).window = win;
-  (globalThis as Stub).navigator = win.navigator;
+  Object.defineProperty(globalThis, "navigator", {
+    value: win.navigator,
+    configurable: true,
+    enumerable: true,
+    writable: true,
+  });
   (globalThis as Stub).IS_REACT_ACT_ENVIRONMENT = true;
   // See elementClassFor's own header — @base-ui/react's ref callbacks check
   // `instanceof HTMLElement` (and friends); leaving these undefined throws

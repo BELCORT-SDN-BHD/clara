@@ -10,10 +10,9 @@
 // committed pooler CA (ops/tls/pooler-ca.crt) for libpq-based tools, and spawns <command> with
 // the DSN in the CHILD's environment only. The DSN is never written to disk, never logged, and
 // never appears in any process's argv (this script's own or the child's) — it travels
-// env-to-end exactly once, per hard constraint 4 and the ADR-0075 receipting law.
+// env-to-end exactly once.
 //
-// Recipe of record: docs/plan/completed/wave-e-delta-ceremony-asrun.md:71-80 ("The
-// connection mechanism"), made durable after two live ceremonies degraded to
+// This bridge became durable after two live ceremonies degraded to
 // `sslmode=no-verify` because the prior dsn-pipe.mjs was session-local and gone
 // (fix-queue-survey.md F20-F22).
 //
@@ -32,10 +31,10 @@ export const DEFAULT_CA_PATH = resolve(HERE, "..", "..", "ops", "tls", "pooler-c
 // Captured from the live pooler 2026-08-23 and independently confirmed byte-identical against
 // Supabase's own publicly-hosted copy (https://supabase-downloads.s3-ap-southeast-1.amazonaws.com
 // /prod/ssl/prod-ca-2021.crt, fetched over standard web PKI -- a channel independent of the
-// pooler's own handshake). See docs/ops/dsn-bridge.md "CA provenance" for both readings. Pinning
+// pooler's own handshake). Pinning
 // the exact fingerprint here means a swapped or corrupted ops/tls/pooler-ca.crt is refused at
 // preflight rather than silently trusted -- rotate this constant in the SAME PR that replaces
-// the .crt file (docs/ops/dsn-bridge.md "Rotation").
+// the .crt file.
 const EXPECTED_CA_FINGERPRINT_SHA256 =
   "80:70:25:AD:50:D4:ED:21:9D:2C:9C:7D:29:9C:00:4F:82:4E:B0:0C:F7:F6:5A:FE:F6:07:D0:7B:72:E6:CA:FA";
 

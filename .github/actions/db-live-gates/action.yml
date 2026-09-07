@@ -1,26 +1,21 @@
 name: Live-behavior gates (runtime e2es + DR round-trip)
 description: >-
-  The per-PR legs that exercise LIVE runtime code paths and the standing DR laws —
-  deliberately NOT demoted with the closed-wave drills (ADR-0073): the intake and
-  interview/cutover e2es drive the same engine, spool and workflow code every current
-  wave keeps changing, and the DR pair is law-39 anti-misleading-green material
-  (ADR-012/0020). Step bodies moved verbatim from ci.yml's former monolithic `ci` job
-  (lever 5), plus ONE new step documented inline: the runtime-only build the e2es load.
+  Per-PR runtime end-to-end and disaster-recovery checks. Intake and interview
+  tests exercise the engine, spool and workflow code; the DR pair verifies backup
+  and restore on separate clusters. The runtime build supplies the modules they load.
   Requires: workspace installed, PG17 client present, libpq env pointing at the primary
   postgres:17 service, PGB_PORT/PGC_PORT/PGD_PORT naming three more clusters' ports.
-  2026-09-02 CI-shape ruling: every full-fresh-migrate invocation in this file gets its
-  OWN pristine cluster — postgres (primary) for intake_ci, postgres_c for Wave-B, postgres_d
+  Every full-fresh-migrate invocation gets its own pristine cluster: postgres for
+  intake_ci, postgres_c for Wave-B, postgres_d
   for the DR round-trip's SOURCE, postgres_b reserved for the DR round-trip's TARGET only.
   Roles are Postgres cluster-global; migration 0154 (merged, immutable) pins an absolute
   clara-role count at its position in the chain, which breaks the moment a SECOND
   from-scratch migrate shares a cluster with a first one that already minted a role a
-  later migration adds (measured: PR #484's 0160, reproduced in the exact job shape before
-  this fix; PR #493's C-3 mints two more on top of it, so this had to be generic, never a
-  hardcoded role-name reset).
+  later migration adds. Separate clusters avoid ordering as a hidden precondition.
 runs:
   using: composite
   steps:
-    # [ADR-0073 — the one NEW step in this file] The three e2es below import the BUILT
+    # The three e2es below import the built
     # server (`../.output/server/index.mjs`), which the monolith used to satisfy with the
     # whole-workspace build it ran anyway. This job builds ONLY @clara/runtime (nitro),
     # keeping the leg self-contained without artifact plumbing from the build job — the

@@ -14,9 +14,8 @@
 //
 // THE THREE FAILURE ARMS ARE TOLD APART, and that is the whole point of this file:
 //   NOT DEPLOYED  the function is absent from PostgREST's schema cache (404 / 42883) — the
-//                 honest `NotBuiltNote`. This is the state on every checkout until the DB lane's
-//                 migration merges, and it is NOT an error: nothing is broken, the read simply
-//                 does not exist yet.
+//                 compatibility `NotBuiltNote`. This can occur during deployment skew or when a
+//                 local database predates migration 0174; the current database ships the read.
 //   REFUSED       a viewer meets the door's own CLR04 (the contract floors at bookkeeper). That
 //                 renders VERBATIM through `ErrorMessage` — it is a true answer about the
 //                 caller's rank, and painting it as "not built" would tell them the product is

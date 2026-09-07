@@ -1,4 +1,4 @@
-// clara-backup — the scheduled off-site DR job (Wave A2 §8 / WA2-R6, docs/ops/DR.md §9).
+// Scheduled off-site backup job. See packages/backup/README.md for operation and recovery.
 //
 // Pipeline (one run, exits 0 on success / non-zero on failure — a Fly SCHEDULED machine
 // boots this to completion daily):
@@ -13,12 +13,11 @@
 //   8. rclone copy → R2 (incremental firm-docs mirror prefix + a dated 30-day DB snapshot)
 //   9. success ping → the dead-man's-switch (healthchecks.io)
 //
-// SECRETS LAW: the DB connection is libpq PG*/DATABASE_URL only (packages/db/lib/pg.mjs);
+// The DB connection uses PG*/DATABASE_URL (packages/db/lib/pg.mjs);
 // the service_role key + ping URL come from files/env (never argv, never logged); the R2
 // token lives in rclone.conf/env; the age RECIPIENT (public) key is committed to the repo
-// (encrypt needs no secret). This job is OWNER-DEPLOYED with those secrets set as Fly
-// secrets on the clara-backup app ONLY — see docs/ops/DR.md §9. The FIRST live run is an
-// owner-gated step; this file is validated locally by `--dry-run` + `node --check`.
+// (encryption needs no private key). Configure credentials on the backup app separately.
+// --dry-run validates configuration without DB, Storage, R2 or monitoring I/O.
 // STATIC imports here are pg-FREE ON PURPOSE: `--dry-run` must validate the wiring
 // with ZERO install. The DB/tool modules (dumps.mjs, storage-mirror.mjs, bundle.mjs,
 // r2.mjs, ping.mjs, and packages/db/lib/pg.mjs which imports the `pg` package) are

@@ -9,8 +9,7 @@
 // a contract that drops the payload entirely and floors at bookkeeper, and it never reads the
 // spine directly.
 //
-// THE CONTRACT, quoted from the migration that mints it (the DB lane's
-// `UNNUMBERED_web_reads_and_small_doors.sql`, section 3):
+// THE CONTRACT, quoted from migration 0174, which mints it:
 //
 //   create function clara.list_firm_timeline(p_after_seq bigint, p_limit int)
 //   returns table(seq bigint, event_type text, event_description text, client_id uuid,
@@ -23,11 +22,11 @@
 //     honest CLR04 refusal rather than an empty firm. That refusal renders VERBATIM through
 //     `ErrorMessage` — it is a real answer about the caller's rank, never a "not built" state.
 //
-// HYDRATE-NEVER-TRUST, AND THE ONE ARM THAT IS NOT AN ERROR. This module ships BEFORE the
-// migration that mints the function. Until that lands, PostgREST answers `POST /rpc/
-// list_firm_timeline` with a 404 (`PGRST202`, "could not find the function in the schema
-// cache") — which `lib/doors.ts` classifies `kind: "not_found"`. That single, specific shape is
-// "the read is not deployed yet", and the caller renders an honest `NotBuiltNote` for it. EVERY
+// HYDRATE-NEVER-TRUST, AND THE ONE ARM THAT IS NOT AN ERROR. During deployment skew, or against
+// a local database predating migration 0174, PostgREST answers `POST /rpc/list_firm_timeline`
+// with a 404 (`PGRST202`, "could not find the function in the schema cache") — which
+// `lib/doors.ts` classifies `kind: "not_found"`. That single, specific shape is "the read is not
+// deployed yet", and the caller renders an honest `NotBuiltNote` for it. EVERY
 // OTHER failure — a refusal, a 401, a 403, a 5xx, a transport failure — is a real failure and
 // renders as one. `isTimelineNotDeployed` below is the ONE place that distinction is drawn, so
 // no caller can widen it by accident: a `catch` that swallowed more would turn a genuine outage

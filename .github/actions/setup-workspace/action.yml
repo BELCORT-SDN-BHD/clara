@@ -1,19 +1,7 @@
 name: Setup workspace (pnpm + node + install)
 description: >-
   Pinned pnpm + node toolchain and a frozen-lockfile install, shared by every job.
-  HOSTED RE-CUT (裁-135, 2026-09-02): the install now uses actions/setup-node's own
-  `cache: pnpm` instead of the persistent local store this action carried for the
-  self-hosted fleet. That store ($HOME/.pnpm-store) was the right answer on a
-  long-lived WSL host, where GitHub's remote cache service meant a network zip/unzip
-  round-trip per job; a GitHub-hosted runner is a THROWAWAY VM, so a local store is
-  cold on every job by construction and the remote cache is the only one that can be
-  warm at all. The store path setup-node caches is whatever `pnpm store path` reports,
-  so the explicit `--store-dir` is REMOVED — an install writing somewhere the cache
-  step never reads is a cache that silently does nothing (ADR-0073 lever 3, re-cut).
-  The pinned pnpm/action-setup's per-instance `dest` is also removed with the fleet:
-  it existed because that action recursively DELETES its default ~/setup-pnpm before
-  reinstalling, and two runner instances shared one HOME (the recorded "setup-pnpm
-  race"). One job per VM makes that race structurally impossible.
+  setup-node caches pnpm's reported store path on the hosted runner.
 runs:
   using: composite
   steps:

@@ -1,89 +1,77 @@
-# `@clara/reporting-render` — the deterministic report render worker
+# @clara/reporting-render
 
-Wave E lane ζ. Design of record: `docs/plan/active/wave-e-design-reporting-part2.md` §10 (this
-worker), §9 (sealed artifacts and custody), §7 (the claim gates). Operations, the drill and the
-deploy commands: `docs/ops/DR-render.md`.
+A separate Fly batch worker for deterministic sealed-report PDFs. It is excluded from the pnpm
+workspace and installs its own dependencies inside its Docker image.
+System and product boundaries live in [ARCHITECTURE](../../docs/ARCHITECTURE.md).
 
-A **separate Fly app** (`clara-render`, `sin`) and **not a pnpm workspace member** — excluded in
-`pnpm-workspace.yaml` beside `packages/backup`, for the same two reasons: it is a self-contained,
-separately-imaged batch app, and adding a workspace importer with no `pnpm-lock.yaml` entry would
-fail `pnpm install --frozen-lockfile`, which is every CI job's first step. Its dependencies are
-installed **inside its own Docker image**.
+## Current behavior
 
-## What it does, in order
+`scripts/render-worker.mjs` claims one `clara.render_jobs` job at a time using a short-lived
+database session, reads its lease-scoped payload, assembles Typst source, renders PDF bytes,
+extracts their text/metadata, scans the result, uploads at a content address, verifies the stored
+bytes, and completes the database artifact. Failures are recorded on the job; lost leases stop
+work before render or upload. The worker listens on no port.
 
-1. **Claim** one job from `clara.render_jobs` (`for update skip locked`) over a **short-lived DSN
-   session** — no pool, no LISTEN client, concurrency 1 in v1.
-2. **Read** only what that job pins, through `clara.render_job_payload`, which is lease-scoped: a
-   worker with no live lease reads nothing at all.
-3. **Assemble** a typesetting source from the resolved layout AST. Every database string is
-   emitted as a **string literal**, never as markup, so firm and statutory text cannot become
-   typesetting instructions. No number is ever formatted here — cell values arrive as the
-   database's own `displayed_text`.
-4. **Typeset** with a pinned declarative engine, network disabled, system fonts unavailable, and
-   `SOURCE_DATE_EPOCH` derived from the reporting period rather than from a clock.
-5. **Extract** the text from the **produced PDF bytes** with a pinned extractor whose exact
-   version is read from the binary, and run the **§7 gate-3 claim scan** over that extraction plus
-   the uncompressed metadata.
-6. **Put** the bytes at their content address (`x-upsert:false`, so overwrite is structurally
-   impossible) and **read them back** to prove they are there.
-7. **Complete** the job, which seals the `clara.report_artifacts` row through lane ε's own gate.
+Numbers arrive as database `displayed_text`; the sealed assembler does not calculate or round
+them. Text is emitted as string literals. Fonts are fetched by content hash per job, then
+typesetting runs without network/system-font fallback. The manifest pins image, source commit,
+engine/extractor versions, assets and clock-free document metadata.
 
-The order only looks circular until you read §9: the bytes are produced → the extractor reads them
-→ the scan runs over that extraction → the extraction's hash and the tool version join the
-manifest → the manifest is sealed. The scan runs strictly **before** the seal and its output is an
-**input** to it.
+**Sandbox export is incomplete.** `lib/layout-sandbox.mjs` and sandbox database wrappers exist,
+with tests and runtime dispatch machinery, but this worker does not import or run them.
+A passing sandbox-layout test or watermark drill does not prove end-to-end sandbox export.
 
-## Where the decisions live
+## Modules and validation
 
-Everything that DECIDES is a pure function with no database, no container and no PDF, so it can be
-exercised directly with `npm test` — which prints its own case count, and is the number to quote
-rather than one written here (a spelled count over an enumerable set has been wrong twice in this
-lane already):
-
-| Module | Decides |
+| Module | Responsibility |
 |---|---|
-| `lib/decisions.mjs` | the render gate (§7 gate 2), the uncertified stamp (§11), the pin check, duplicate completion, bounded retry |
-| `lib/lexicon.mjs` | the gate-3 claim scan — including the ruling that **a locale with no effective lexicon row is a refusal, never a pass** |
-| `lib/chart.mjs` | the four named axis policies, and the same-source data table asserted **by cell id** |
-| `lib/layout.mjs` | the AST walk; an unrecognised node kind refuses rather than being dropped |
-| `lib/manifest.mjs` | the environment pins (each mandatory, none defaulted) and the clock-free document metadata |
-| `lib/canonical-json.mjs` | the deterministic serialisation everything else derives from |
+| `lib/decisions.mjs`, `lib/lexicon.mjs` | Render admission and final-byte claim scan |
+| `lib/chart.mjs`, `lib/layout.mjs` | Chart policy and sealed layout assembly |
+| `lib/layout-sandbox.mjs` | Unwired sandbox assembly |
+| `lib/manifest.mjs`, `lib/canonical-json.mjs` | Reproducible metadata and serialization |
+| `lib/db.mjs`, `engine.mjs`, `extract.mjs`, `fonts.mjs`, `objects.mjs` | Database and binary/Storage adapters |
 
-Those six carry the `@frozen` marker, so `scripts/check-frozen-workflows.mjs` hash-locks them and
-their import closure on every PR (design §4.2).
+Frozen decision/assembly files are registered in the root workflow manifest. Retain their hashes
+and import closure; a behavior change needs the corresponding version/deployment work.
 
-**The five adapters deliberately carry no freeze marker, and each has the same reason:** every one
-of them imports something outside this package (`packages/runtime/lib/storage.mjs`) or shells out
-to a pinned binary, and the freeze-lint freezes a marked file's *entire relative import closure* —
-so marking any of them would hash-lock a runtime-lane file that lane legitimately edits, and the
-next storage change would fail this gate for a reason that has nothing to do with rendering.
-
-That includes **`fonts.mjs`, which is the security-sensitive one** and therefore worth stating
-rather than leaving to inference: it fetches and hash-verifies typefaces, so a future change there
-— a system-font fallback, a relaxed verify — would escape the frozen surface. Its protection is
-not the freeze marker but its own battery (ten cases, every refusal exercised) plus the fact that
-the *decisions* it feeds (`layout.mjs`'s font-hash validation) are frozen. If the import boundary
-ever changes so `fonts.mjs` depends on nothing outside this package, it should be frozen too.
-
-## What it is NOT allowed to do
-
-- **Serve traffic.** No port, no `[http_service]`, no `[[services]]`, no inbound connection.
-- **Format a figure.** E-R8 floor ①: every number comes from the database's algebra. A layout that
-  asks for a different rounding than the database produced is a refusal, not a re-round.
-- **Seal without its pins.** The image **digest** (never a tag) and the source commit are passed at
-  machine-create time, and the worker refuses to seal without them — "unknown" and "reproducible"
-  must never be indistinguishable inside a sealed artifact.
-- **Fall back to a system font**, an ambient clock, an ambient timezone, or a network fetch.
-
-## Running it
+From this package:
 
 ```sh
-npm run check     # node --check across every module
-npm test          # the pure decision battery — no DB, no Docker, no Fly
-npm run worker    # the loop; needs DATABASE_URL and the storage/env pins
+npm run check
+npm test
+npm run worker
 ```
 
-Deploy is **build-only + push, then `fly machine run`** — never a plain `fly deploy`, which would
-start a machine and fire a live render. The commands live in exactly one place:
-`docs/ops/DR-render.md`.
+`check` syntax-checks its explicitly listed modules. Tests exercise local decisions and adapters;
+neither command proves a deployed render or Storage custody. `worker` runs real jobs when supplied
+with the production connection and storage configuration.
+
+Useful operational probes remain in `scripts/`: `verify-reports-prefix.mjs` writes synthetic
+bytes and reads them back; `double-render-drill.mjs` compares repeated renders; and
+`watermark-burn-drill.mjs` checks the produced bytes. Their prerequisites are in their headers.
+
+## Configuration and deployment
+
+Set `DATABASE_URL` for the runtime login/role and the restricted Storage variables
+`CLARA_STORAGE_URL`, `CLARA_STORAGE_ROLE`, `CLARA_STORAGE_ROLE_JWT`.
+The worker requires `CLARA_RENDER_IMAGE_DIGEST` (an immutable digest) and
+`CLARA_RENDER_SOURCE_COMMIT`; absent provenance prevents sealing.
+The Dockerfile pins Typst/Poppler binaries and intrinsic paths.
+`CLARA_RENDER_LEASE_SECONDS` and `CLARA_RENDER_MAX_JOBS` bound one drain.
+
+From the repository root:
+
+```sh
+fly deploy . --config packages/reporting-render/fly.toml --dockerfile packages/reporting-render/Dockerfile --build-only --push -a clara-render
+```
+
+Create/update the batch Machine from the verified image with explicit environment and VM settings.
+A plain application deploy can start work; build-only does not.
+Configure runtime dispatch separately through `packages/runtime/lib/reconciler-render.mjs`.
+Verify the dedicated credential can write/read the reports prefix before the first real seal.
+[Fly build/deploy documentation](https://www.fly.io/docs/blueprints/working-with-docker/)
+
+After a deployment, verify a real queued job completes, its content hash matches the stored PDF,
+and its manifest names the image actually used. Before replacing an image needed for reproducible
+re-rendering, preserve that image and its pinned assets. A pure test result is not the report-chain
+or disaster-recovery acceptance.

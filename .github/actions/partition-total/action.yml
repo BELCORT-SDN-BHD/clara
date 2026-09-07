@@ -1,10 +1,8 @@
 name: The Wave D-b partition is total
 description: >-
   The standing, DATABASE-FREE coverage gate — every x41/x42 test file in exactly one
-  slice list, the cross-slice contract roster total against disk. Step body moved
-  verbatim from ci.yml's db-split-partition-total job (ADR-0073 lever 5). Stays
-  per-PR: it costs seconds and catches PR-authoring mistakes (a file joining the
-  corpus and no list) at the PR, not at the sweep.
+  slice list, with the cross-slice contract roster checked against disk. It runs on
+  each PR because it is cheap and catches unassigned tests immediately.
 runs:
   using: composite
   steps:

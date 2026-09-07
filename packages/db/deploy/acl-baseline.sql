@@ -1,31 +1,21 @@
--- packages/db/deploy/acl-baseline.sql — HIGH-10 deployment ACL baseline (CEREMONY).
+-- Deployment ACL baseline. Run as the intended schema/database owner.
+-- This separate operating step changes public-schema and database privileges;
+-- the clara-scoped migration suite does not apply or prove the hosted baseline.
+-- See packages/db/README.md, "Backup and recovery".
 --
--- Run in the LIVE project as the schema/db OWNER (Supabase `postgres`). This is NOT a
--- migration and is NOT run against the clara rig by `pnpm test` (it changes `public`
--- nspacl + database datacl, which the clara-scoped migration chain must not own — the
--- delivery-vehicle argument is in the Lane C report §6). It confines the agent/wake
--- lanes from schema `public`; it CANNOT close the pg_catalog residual (pg_notify /
--- pg_advisory_* / pg_sleep / query_to_xml are superuser-owned — a non-superuser REVOKE
--- there only prints "no privileges could be revoked" and changes nothing; report
--- §4b/§5). That residual is an ACCEPTED, documented gap on managed Supabase, with low
--- practical severity today (the sanctioned agent surface is curated typed reads, not
--- raw SQL — report §3); the superuser-only close is the commented block at the end.
+-- Confined roles lose public-schema access and database TEMP. Existing privileges
+-- for other roles are snapshotted and restored, rather than granted indiscriminately.
+-- Verify Auth, Storage, Realtime, PostgREST and pooler behavior on a scratch hosted
+-- project before applying this platform-wide change. Prepare a rollback appropriate
+-- to the measured grants; restoring PUBLIC USAGE/TEMP reverses the broad revocations.
+-- Reapply and verify the baseline after full restore, which does not restore it.
 --
--- The public-USAGE and database-TEMP changes are SNAPSHOT-AND-PRESERVE (Codex HIGH-7 /
--- MEDIUM-1): before revoking PUBLIC, the APPLY block snapshots which non-confined roles
--- effectively hold each privilege and re-grants EXACTLY that set — so managed Supabase
--- service roles KEEP the TEMP they had, and a re-run does NOT widen a role created after
--- a prior baseline. Because this local rig cannot exercise hosted GoTrue/Auth, Storage,
--- Realtime, PostgREST, or Supavisor, the SCRATCH-PROJECT DRESS REHEARSAL (docs/ops/
--- DR-full-drill.md) is the hosted-services preflight: stage this in a maintenance window
--- with Auth/Storage/Realtime/PostgREST/pooler smokes and a prepared
--- `grant temp on database <db> to public; grant usage on schema public to public;` rollback.
---
--- Ceremony-tested on a local PG16 throwaway (full db suite 265/0/11 before and after,
--- non-breaking); posture mirrors deploy/storage-provision.sql. A DR restore does NOT
--- carry this baseline (a --no-privileges-free full dump captures clara ACLs but the
--- restore recreates `public` with its default PUBLIC USAGE), so RE-RUNNING THIS SCRIPT
--- IS A MANDATORY POST-RESTORE STEP — see docs/ops/DR.md and Lane C report §9.
+-- This does NOT close the managed pg_catalog privilege limitation: pg_notify,
+-- pg_advisory_*, pg_sleep and query_to_xml can be superuser-owned, so a non-superuser
+-- REVOKE can warn without changing access. Clara now includes governed freeform SQL
+-- reads; the former "typed reads only" severity rationale no longer applies.
+-- Reassess the reachable surface with current roles and hosted evidence. The
+-- superuser-only examples below are commented out, not an implemented mitigation.
 \set ON_ERROR_STOP on
 
 \echo '===== PREFLIGHT (review before proceeding) ====='
@@ -37,12 +27,8 @@ select nspname, pg_get_userbyid(nspowner) as public_owner,
        pg_has_role(current_user,'pg_database_owner','USAGE') as deploy_is_dbowner_member
   from pg_namespace where nspname='public';
 \echo '--- roles that will be CONFINED (agent/wake lanes + their logins) — edit ONLY with owner sign-off ---'
--- F-A6 PR-1 adds the freeform read lane. It is confined for the SAME reason the other read
--- lanes are: it must reach exactly its 35 enumerated relations and nothing the public schema
--- happens to expose. Leaving it out would have made the newest, widest-reading role the ONE
--- lane the ACL baseline does not confine.
--- FS-4 C-2 adds the webhook executor/login; C-3 adds the auth-wall executor/login on the same
--- non-human-lane rule.
+-- The roster includes freeform SQL, webhook and auth-wall executors/logins.
+-- Their intended privileges do not include arbitrary objects in public.
 select unnest(array['clara_agent_ro','clara_wake_interactive','clara_wake_proactive',
                     'clara_agent_read_login','clara_wake_write_login',
                     'clara_freeform_ro','clara_freeform_login',
@@ -113,7 +99,7 @@ begin
   execute format('revoke temp on database %I from public', current_database());
 
   -- 2) Re-grant public USAGE + database TEMP to EXACTLY the pre-revoke snapshots (the
-  --    confined five were already excluded), preserving status quo for every platform/
+  --    confined roles were already excluded), preserving status quo for every platform/
   --    app role while cutting off exactly the agent/wake lanes.
   foreach rn in array usage_snapshot loop
     execute format('grant usage on schema public to %I', rn);
@@ -143,7 +129,7 @@ end $$;
 
 -- 5) OPTIONAL / SUPERUSER-ONLY (managed Supabase CANNOT run this — pg_catalog is
 --    superuser-owned; a non-superuser REVOKE here only prints "no privileges could be
---    revoked" and changes nothing — report §4b). Enable ONLY on self-hosted Postgres or
+--    revoked" and changes nothing). Enable only on self-hosted Postgres or
 --    inside a superuser maintenance window. Closes the pg_notify/advisory residual.
 -- revoke execute on function pg_catalog.pg_notify(text,text) from public;
 -- revoke execute on function pg_catalog.pg_advisory_lock(bigint) from public;

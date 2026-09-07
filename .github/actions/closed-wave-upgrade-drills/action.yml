@@ -1,12 +1,8 @@
 name: Closed-wave upgrade drills (C9 → Wave D-b)
 description: >-
-  The eight closed-wave deploy/upgrade drills the owner's 2026-08-21 ruling demotes to
-  the weekly sweep (ADR-0073 lever 1): each applies a full (or frontier-shaped)
-  migration chain into its own throwaway database — the serially-growing cost the
-  per-PR gate no longer pays. Every step body is moved verbatim from ci.yml's former
-  monolithic `ci` job (lever 5). Requires: workspace installed, PG17 client present,
-  libpq env pointing at the job's throwaway postgres:17 service. Every drill creates
-  its OWN *_ci database; none touches the service's default clara_ci.
+  Eight historical deploy/upgrade drills for the weekly and manual sweep. Each
+  applies a full or frontier-shaped migration chain to its own *_ci database.
+  Requires an installed workspace, PostgreSQL 17 client and libpq environment.
 runs:
   using: composite
   steps:
@@ -316,8 +312,7 @@ runs:
     # to keep every marker string, and must be REFUSED by the sha256(prosrc) pin; then the
     # guardless mutant of the same file must be ADMITTED. Reset-gated (replays the chain
     # below 0144 twice), so it runs ALONE in its OWN throwaway database — the concurrent
-    # all-packages sweep only ever SKIPS it (`.claude/rules/db-tests.md`: a skip-only drill
-    # is a false green).
+    # all-packages sweep only ever SKIPS it, so this focused drill prevents a false green.
     - name: Hardening-A recut-guard drill (isolated DB)
       working-directory: packages/db
       shell: bash -e {0}
@@ -348,7 +343,7 @@ runs:
     # proves each conversion per row against a dual derivation (Node crypto vs Postgres
     # sha256), then mutates each guard for real. Reset-gated (replays the numbered chain once
     # per cell), so it runs ALONE in its OWN throwaway database — the concurrent all-packages
-    # sweep only ever SKIPS it (`.claude/rules/db-tests.md`: a skip-only drill is a false green).
+    # sweep only ever SKIPS it, so this focused drill prevents a false green.
     - name: Hardening-B populated upgrade drill (isolated DB)
       working-directory: packages/db
       shell: bash -e {0}

@@ -76,11 +76,7 @@ const withNextIntl = createNextIntlPlugin("./i18n/request.ts");
 
 export default withNextIntl(nextConfig);
 
-// Reaches Cloudflare bindings (KV/R2/D1/service bindings, once wrangler.jsonc
-// declares any) from `next dev`. A no-op today — apps/web declares no bindings
-// yet. Verified empirically to build clean under plain `next build` on Windows
-// (2026-08-27, this scaffold). The opennextjs-cloudflare BUILD/PREVIEW/DEPLOY
-// commands themselves need Node >=22 (wrangler's floor, see package.json) and
-// are documented-not-run here — the Cloudflare build runs on WSL CI. See
-// README.md "Cloudflare" section.
+// Makes bindings declared in wrangler.jsonc available to `next dev`. There are
+// no KV, R2, D1, or service bindings today, so this is currently a no-op. The
+// OpenNext/Wrangler commands need Node 22 or newer; see README.md.
 initOpenNextCloudflareForDev();

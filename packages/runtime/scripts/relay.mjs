@@ -1,7 +1,6 @@
 // The outbox relay runner — the long-lived process that drains committed domain
-// events into durable wake intents (Slice 3; contract
-// docs/plan/completed/slice3-event-spine-contract.md §2.9). Plain .mjs + pg, the
-// scripts/worker.mjs precedent (env-only connection, no DSN literal).
+// events into durable wake intents. See packages/runtime/README.md, "Current structure".
+// Plain .mjs + pg, with environment-only connection configuration.
 //
 // Lifecycle (X2 — resilient): an OUTER loop owns the connection lifecycle. Each
 // iteration connects ONE dedicated session and:

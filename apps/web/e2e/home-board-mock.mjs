@@ -76,10 +76,9 @@ const EMPTY_RPCS = [
 /**
  * Answer one request, or return false to let `serve-built.mjs` fall through to its 404.
  *
- * `list_firm_timeline` is DELIBERATELY NOT HANDLED. The DB lane that mints it has not merged, so
- * a 404 is what the real estate returns today — and the Firm Home section under test renders its
- * honest "not available yet" note for exactly that shape. Answering it here would hide the
- * default state from every walk that is not specifically about the timeline.
+ * `list_firm_timeline` is DELIBERATELY NOT HANDLED. This mock exercises the compatibility arm
+ * for a database that predates migration 0174, so Firm Home renders its "not available yet"
+ * note for the resulting 404. Timeline-specific walks supply their own handler.
  */
 export async function handleHomeBoardSupabase(request, response, path, url, sendJson, cors) {
   // ID-SCOPED, and it falls through for every id but its own — including the UNFILTERED

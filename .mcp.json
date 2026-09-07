@@ -1,8 +1,12 @@
 {
   "mcpServers": {
+    "cloudflare-api": {
+      "type": "http",
+      "url": "https://mcp.cloudflare.com/mcp"
+    },
     "codebase-memory-mcp": {
       "type": "stdio",
-      "command": "C:/Users/zhant/AppData/Local/Programs/codebase-memory-mcp/codebase-memory-mcp.exe",
+      "command": "codebase-memory-mcp",
       "args": [],
       "env": {}
     },
@@ -13,7 +17,7 @@
     "shadcn": {
       "type": "stdio",
       "command": "cmd",
-      "args": ["/c", "npx", "shadcn@4.12.0", "mcp"],
+      "args": ["/c", "pnpm", "--dir", "apps/web", "exec", "shadcn", "mcp"],
       "env": {}
     }
   }

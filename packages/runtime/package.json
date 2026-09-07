@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Clara agent-runtime service — the durable chat runtime (Slice 4): the WDK Postgres world, the chat loop (chatTurn_v1), SSE, clarify, the outbox drain, the settle-reconciler, the supervisor, and health/ready.",
+  "description": "Clara durable agent runtime: conversations, document intake, accounting workflows, event consumers and recovery.",
   "scripts": {
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",

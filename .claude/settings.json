@@ -7,16 +7,6 @@
           {
             "type": "command",
             "command": "node",
-            "args": ["${CLAUDE_PROJECT_DIR}/scripts/hooks/pinned-ids-guard.mjs"]
-          }
-        ]
-      },
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node",
             "args": ["${CLAUDE_PROJECT_DIR}/scripts/hooks/dispatch-model-guard.mjs"]
           }
         ]

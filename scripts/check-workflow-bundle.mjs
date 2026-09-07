@@ -2,11 +2,9 @@
 // Workflow-bundle gate — the POST-BUILD half of Appendix A, and the answer to a defect this
 // repo has already paid for twice.
 //
-// WHY THIS EXISTS. `.claude/rules/runtime-workflows.md` states the hazard in its own words:
-// "the WDK compiler can silently swallow a directive: the source reads correctly, the build
-// succeeds, and the behaviour is simply absent at runtime. Typecheck does not cover this, and
-// neither does reading the source." PROGRESS.md records the 2026-08-26 case where a deploy's
-// tag was assumed and the serving bundle was still on v13. Both are invisible to every
+// WHY THIS EXISTS. The WDK compiler can silently swallow a directive: the source reads
+// correctly, the build succeeds, and the behaviour is simply absent at runtime. A prior deploy
+// also served an older workflow bundle than its tag claimed. Both defects are invisible to every
 // source-reading gate in the estate.
 //
 // WHY IT IS A SCRIPT AND NOT ONLY A TEST CELL (P6-1 Codex review, MEDIUM-1). A test cell that

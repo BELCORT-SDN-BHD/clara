@@ -1,20 +1,13 @@
 # syntax=docker/dockerfile:1
-# clara-backup — the off-site DR backup app (Wave A2 §8 / WA2-R6). A SEPARATE Fly app
-# from the runtime (NEVER the non-HA runtime machine). BUILD FROM THE REPO ROOT so the
-# context carries both packages/backup AND packages/db (the full-profile dump tooling
-# is reused from @clara/db) — build-only + push; a plain `fly deploy` would START a
-# machine, i.e. fire a live backup run. The command of record: docs/ops/DR.md §9 step 6.
-#
-# NO secrets are baked: the root .dockerignore excludes .env / node_modules / .git, and
-# every credential is supplied at RUN time as a Fly secret (env) — see docs/ops/DR.md §9.
+# Off-site backup worker. Build from the repository root to include shared DB tooling.
+# See README.md, "Validate and deploy", for build-only and Machine configuration.
+# Credentials arrive through environment/mounted files; local secrets are excluded.
 FROM node:20-bookworm-slim AS runner
 ENV NODE_ENV=production
 WORKDIR /app
 
-# System tools: the v17 Postgres CLIENT (server is 17.6 — a v16 client aborts), age
-# (encryption), rclone (R2 upload), zstd (compress-before-age), curl (dead-man's-switch
-# ping is done in-process via fetch, but curl is handy for debugging), ca-certificates.
-# postgresql-client-17 comes from the PGDG apt repo (bookworm ships only 15/16).
+# PostgreSQL 17 client tools, age encryption, zstd compression and supporting utilities.
+# pg_dump must not be older than the server's major version. PGDG supplies the client.
 RUN set -eux; \
     apt-get update; \
     apt-get install -y --no-install-recommends ca-certificates curl gnupg age unzip zstd; \
@@ -25,12 +18,9 @@ RUN set -eux; \
     apt-get install -y --no-install-recommends postgresql-client-17; \
     rm -rf /var/lib/apt/lists/*
 
-# rclone: a PINNED upstream release binary, NOT Debian's — bookworm ships rclone 1.60, which
-# fires a first-attempt 501 NotImplemented on R2 single-file PUTs (noisy retries; docs/ops/DR.md
-# §9). Provenance is checksum-verified. To bump: edit these two lines to the new version + its
-# rclone-v<VER>-linux-amd64.zip entry from https://downloads.rclone.org/v<VER>/SHA256SUMS.
-# The ARGs are deliberately NOT RCLONE_-prefixed: rclone reads every RCLONE_<flag> env var as
-# config (RCLONE_VERSION would set its boolean --version flag and abort the smoke check).
+# Checksum-verified rclone release. For an upgrade, verify the linux-amd64 archive
+# against the official release's SHA256SUMS before changing both pins.
+# Avoid RCLONE_-prefixed ARG names: rclone treats that prefix as configuration.
 ARG PINNED_RCLONE_VERSION=1.74.4
 ARG PINNED_RCLONE_SHA256=fe435e0c36228e7c2f116a8701f01127bb1f694005fc11d1f27186c8bca4115d
 RUN set -eux; \
@@ -41,52 +31,39 @@ RUN set -eux; \
     rm -rf /tmp/rclone.zip /tmp/rclone-bin; \
     rclone --version
 
-# The v17 client binaries (Debian installs them under /usr/lib/postgresql/17/bin).
+# PostgreSQL 17 client binary paths.
 ENV PG_DUMP=/usr/lib/postgresql/17/bin/pg_dump \
     PG_DUMPALL=/usr/lib/postgresql/17/bin/pg_dumpall \
     PSQL=/usr/lib/postgresql/17/bin/psql
 
-# Node deps (just `pg`, for the schema-presence check in @clara/db's backup.mjs and the
-# migration-head query). Installed at the APP ROOT /app/node_modules so BOTH
-# packages/backup/scripts/*.mjs AND packages/db/lib/pg.mjs resolve `pg` by walking up.
+# Shared pg dependency resolves from /app for the backup and DB helper packages.
 COPY packages/backup/package.json ./package.json
 RUN npm install --omit=dev --no-audit --no-fund
 
-# The backup app + the reused @clara/db dump tooling (source only — node_modules and
-# .env are excluded by the root .dockerignore).
+# Backup source and shared dump tooling; .dockerignore excludes local secrets/dependencies.
 COPY packages/backup ./packages/backup
 COPY packages/db ./packages/db
 
-# Ephemeral scratch for the run (bundle + only the NEW encrypted firm-docs; firm-doc
-# PLAINTEXT is never written to disk — it is encrypted from memory). Mount a Fly volume
-# at /data and set CLARA_BACKUP_STAGING_DIR=/data/staging if the firm-doc delta is large.
+# Ephemeral bundle and encrypted document staging. Document plaintext streams from
+# memory into encryption. A large delta can use a mounted staging volume instead.
 ENV CLARA_BACKUP_STAGING_DIR=/tmp/clara-backup
 RUN mkdir -p /tmp/clara-backup
 
-# Image-intrinsic paths. These live HERE (not fly.toml [env]) because the scheduled
-# machine is created with `fly machine run`, which DISREGARDS fly.toml configuration —
-# only Dockerfile ENVs and machine-run flags reach the machine (docs/ops/DR.md §9).
-#   - The age RECIPIENT (public) key ships in the image at this path.
-#   - The service_role key file is materialized at machine-create time via
-#     `--file-secret /run/secrets/clara_storage_service_key=CLARA_BACKUP_STORAGE_SERVICE_KEY_B64`
-#     (the Fly secret holds the BASE64-encoded key; Fly decodes it to this file).
+# Public encryption recipients are included; the private age identity is not.
+# Machine configuration must mount the Storage credential at this path, for example:
+# --file-secret /run/secrets/clara_storage_service_key=CLARA_BACKUP_STORAGE_SERVICE_KEY_B64
+# The Fly file secret contains the base64-encoded value. See README.md, "Configuration".
 ENV CLARA_BACKUP_AGE_RECIPIENTS_FILE=/app/packages/backup/deploy/age-recipient.txt \
     CLARA_BACKUP_STORAGE_KEY_FILE=/run/secrets/clara_storage_service_key
 
-# The rclone R2 remote's non-secret constants (the token key-id/secret/endpoint stay
-# Fly secrets). NO_CHECK_BUCKET is load-bearing: R2 talks through a BUCKET-SCOPED
-# token, which rightly cannot CreateBucket — but rclone's default bucket-existence
-# check falls back to exactly that (PUT /<bucket>) when a single-file upload's HEAD
-# 404s, turning every db-snapshots upload into 403 AccessDenied (proven live,
-# 2026-07-22 wiring ceremony; Cloudflare's R2 docs prescribe no_check_bucket for
-# scoped tokens). Baked here so no machine-run flag is load-bearing for correctness.
+# R2 remote constants. The token and endpoint remain runtime secrets.
+# no_check_bucket avoids a CreateBucket fallback that a bucket-scoped token cannot use.
 ENV RCLONE_CONFIG_R2_TYPE=s3 \
     RCLONE_CONFIG_R2_PROVIDER=Cloudflare \
     RCLONE_CONFIG_R2_REGION=auto \
     RCLONE_CONFIG_R2_ACL=private \
     RCLONE_CONFIG_R2_NO_CHECK_BUCKET=true
 
-# A Fly SCHEDULED machine boots this to completion daily. Exit 0 = success (pings the
-# dead-man's-switch); any non-zero exit = failure (fires the /fail ping). All secrets
-# come from the environment (Fly secrets), never the image.
+# Run to completion. A real run reports success/failure to the configured monitor;
+# scheduling is configured on the Machine. Credentials are never embedded here.
 CMD ["node", "packages/backup/scripts/backup-run.mjs"]

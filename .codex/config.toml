@@ -1,11 +1,17 @@
+[mcp_servers.cloudflare-api]
+url = "https://mcp.cloudflare.com/mcp"
+
 [mcp_servers.codebase-memory-mcp]
-command = "C:/Users/zhant/AppData/Local/Programs/codebase-memory-mcp/codebase-memory-mcp.exe"
+command = "codebase-memory-mcp"
 
 [mcp_servers.shadcn]
 command = "cmd"
 args = [
     "/c",
-    "npx",
-    "shadcn@4.12.0",
+    "pnpm",
+    "--dir",
+    "apps/web",
+    "exec",
+    "shadcn",
     "mcp",
 ]

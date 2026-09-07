@@ -3,7 +3,14 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Clara web app (P1 foundation scaffold). Next.js App Router, deployed to Cloudflare Workers via @opennextjs/cloudflare; replaces apps/dashboard at cutover. See README.md for the rulings pointer and token provenance.",
+  "devEngines": {
+    "runtime": {
+      "name": "node",
+      "version": "22.23.2",
+      "onFail": "download"
+    }
+  },
+  "description": "ClaraBook production web app: Next.js App Router deployed to Cloudflare Workers with OpenNext.",
   "scripts": {
     "dev": "next dev",
     "build": "node scripts/check-public-key.mjs && next build",

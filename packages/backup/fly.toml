@@ -1,45 +1,26 @@
-# fly.toml — clara-backup (Wave A2 §8 / WA2-R6): the off-site DR backup app.
-#
-# A SEPARATE Fly app from clara-runtime (the runtime machine is explicitly NON-HA and
-# must never carry this job). This file drives the IMAGE BUILD ONLY.
-#
-# DO NOT run a plain `fly deploy`: with no services it still creates AND STARTS a
-# machine (plus a stopped standby), i.e. it would fire a live backup run on every
-# deploy. Build-only + push (from the REPO ROOT, --dockerfile explicit), then create
-# the ONE scheduled machine from the pushed image with `fly machine run`. The exact
-# commands live in ONE place — docs/ops/DR.md §9 step 6 — deliberately not restated
-# here (a stale copy of a deploy command in this file is how live-run accidents happen).
-#
-# `fly machine run` DISREGARDS fly.toml configuration (env/files/vm — it reads only
-# the app name), so there is NO [env] section here: image-intrinsic env lives in the
-# Dockerfile, run-specific env + the service_role secret file ride as `-e` /
-# `--file-secret` flags. The exact machine-run command is the runbook's step 6
-# (docs/ops/DR.md §9) — that flag set IS the runtime contract.
+# Off-site backup app, separate from the durable runtime.
+# Build/push without starting a backup; see README.md, "Validate and deploy".
+# Create the scheduled Machine from the verified image with explicit environment,
+# secret-file mounts and VM settings. fly machine run does not replay this file's
+# app deployment configuration.
 app = "clara-backup"
 
-# Singapore — same city as the Supabase project (ap-southeast-1); low pooler latency,
-# free egress to R2 (WA2-R6).
+# Singapore, near the source database.
 primary_region = "sin"
 
 [build]
   dockerfile = "Dockerfile"
 
-# NO [http_service] and NO [[services]]: this is a BATCH job, not a server. It has no
-# port and serves no traffic — it boots, runs the pipeline to completion, and exits.
-# Liveness is the dead-man's-switch (healthchecks.io), NOT an HTTP health check.
+# Batch job with no HTTP service. Backup freshness is monitored through
+# the configured dead-man switch rather than an inbound health endpoint.
 
-# Sizing intent (informational — the scheduled machine is created by `fly machine run`,
-# which ignores this section too; pass --vm-size shared-cpu-1x --vm-memory 1024).
-# The job is I/O-bound (dump + upload); the ~52 MB dump + only the NEW encrypted
-# firm-docs stage in /tmp (rootfs); mount a volume at /data and repoint
-# CLARA_BACKUP_STAGING_DIR only if the daily delta is large.
+# Sizing reference; pass equivalent VM settings when creating the Machine.
+# Staging uses /tmp by default. For a large daily delta, mount a volume and
+# change CLARA_BACKUP_STAGING_DIR; verify available space before running.
 [[vm]]
   size = "shared-cpu-1x"
   memory = "1gb"
 
-# SCHEDULING: set at machine-create time (Fly has no fly.toml `schedule` key). Fly's
-# schedule granularity is coarse and fuzzy (hourly|daily|weekly|monthly, approximate
-# times); `daily` + the 26h dead-man's-switch grace (docs/ops/DR.md §7) tolerates it.
-# The machine STARTS ONCE IMMEDIATELY at creation (that supervised boot IS the
-# owner-gated first live run), then re-runs ~daily; exit 0 → stopped until the next
-# cycle (scheduled machines default to the on-fail restart policy).
+# Configure scheduling on the Machine and inspect its actual state after creation.
+# Daily scheduling is approximate; choose the monitoring grace accordingly.
+# Verify the first completed run and its freshness manifest, not just the schedule.

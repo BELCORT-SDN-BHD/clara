@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// Workflow freeze-lint — enforces the BINDING versioning policy from
-// docs/ARCHITECTURE.md Appendix A (Slice-0 spike finding T6):
+// Workflow freeze-lint — enforces the versioning policy in
+// docs/ARCHITECTURE.md, "Durable runtime and events":
 //
 //   (a) a deployed workflow body is immutable once any run can be in flight;
 //       every behavioural change ships as a NEW exported workflow (_v2, _v3…);
@@ -103,8 +103,7 @@ function hasWorkflowDirective(src) {
 // Defence-in-depth: reject a base ref that isn't a plain git ref name.
 const RAW_BASE_REF = process.env.FREEZE_BASE_REF || "origin/main";
 const BASE_REF = /^[A-Za-z0-9._/-]+$/.test(RAW_BASE_REF) ? RAW_BASE_REF : "origin/main";
-// Coverage scope: ALL tracked source under packages/ (spike/ is a throwaway and is
-// intentionally out of scope). Not a narrow per-directory allowlist.
+// Coverage scope: ALL tracked source under packages/. Not a narrow per-directory allowlist.
 const SCAN_PATHSPEC = "packages";
 const SOURCE_EXT = new Set([".ts", ".tsx", ".mts", ".cts", ".mjs", ".cjs", ".js", ".jsx"]);
 

@@ -1,9 +1,7 @@
 name: DB estate suite (deploy-onto-existing + migrate/seed/all-package tests)
 description: >-
-  The two per-PR backstop legs the owner's 2026-08-21 ruling names as staying per-PR
-  (ADR-0073): the deploy-onto-existing check and the full estate suite. Both step
-  bodies are moved verbatim from ci.yml's former monolithic `ci` job (lever 5).
-  Requires: repo checked out with origin/main fetched, workspace installed, libpq env
+  Per-PR deploy-onto-existing and full-estate checks. Requires origin/main,
+  an installed workspace and a libpq environment
   (PGHOST/PGPORT/PGUSER/PGPASSWORD/PGDATABASE=clara_ci) pointing at the job's
   throwaway postgres:17 service.
 runs:
@@ -42,7 +40,7 @@ runs:
     # CI. Runs after seed because the db smoke test asserts against the migrated
     # + seeded schema. Folds in the former `--filter @clara/db test` step.
     #
-    # NO BUILD STEP HERE, measured not assumed (ADR-0073): the only estate test that
+    # NO BUILD STEP HERE: the only estate test that
     # touches `.output` is worker-path.test.mjs, which stages its OWN fixture bundle —
     # the e2es that import the real built server live in the db-live-gates job, which
     # builds the runtime itself.
@@ -51,19 +49,14 @@ runs:
       env:
         # Un-skips the rig-gated suites against the shared migrated DB — they are
         # pollution-proof by construction (they stage their own fixtures). The
-        # dashboard queue-kind parity probe and the DB↔surface seam census that
-        # this variable used to arm were DELETED with apps/dashboard at P6-X; the
-        # runtime interview plan-db tests remain, so the variable is still load-
-        # bearing. See the P6-X PR body for the disposition of both instruments.
+        # Runtime interview plan-db tests read this variable.
         CLARA_RIG_DB: "1"
       run: |
         pnpm db:migrate
         pnpm db:seed
         pnpm -r --if-present test
 
-    # FALSE-GREEN PROTECTION for the 裁-41 battery (.claude/rules/db-tests.md: "a new wave
-    # battery's false-green protection is its own dedicated ci.yml drill step ... focused run,
-    # allow-missing variable unset"). The sweep above preloads
+    # FALSE-GREEN PROTECTION for the 裁-41 battery. The sweep above preloads
     # tests/client-identifiers-unique-preintegration-gate.mjs, which sets
     # CLARA_ALLOW_MISSING_CLIENT_IDENTIFIERS_UNIQUE=1 so a PRE-migration chain skips loudly
     # instead of failing — and a skip that nothing ever contradicts is a green that proves

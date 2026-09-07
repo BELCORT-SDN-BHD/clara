@@ -1,29 +1,9 @@
 #!/usr/bin/env node
 /**
- * apps/web/scripts/run-tests.mjs — `pnpm test`'s real body (T0 seam, port-wave
- * plan §3.1). Reads test/manifest.txt (one test file path per line) and
- * spawns `node --import ./test/bootstrap.mjs --import tsx --test <paths...>`
- * with those paths as positional arguments — the same invocation
- * package.json's `test` script used to hardcode as a single 70-argument
- * (69 real test-file paths + a trailing bare `tests/`), 2,239-character
- * line (measured at pre-seam `main`, `apps/web/package.json:13`, commit
- * `33f152b`). Moving the enumeration here means adding a test file
- * is a one-line diff to a text file, not an edit to a line long enough that a
- * git conflict resolved "take theirs" could silently delete another train's
- * tests with nothing going red (apps/web/AGENTS.md: the Node 20 test runner
- * does NOT directory-scan for `.test.ts`/`.test.tsx`).
- *
- * Deliberately does NOT also pass a bare `tests/` directory argument the way
- * the old inline command did. That trailing entry was carrying real, invisible
- * weight: Node's directory-scan recognizes `.test.mjs` (just not `.test.ts`/
- * `.test.tsx`), so five `.test.mjs` files under tests/ (apiLimitBanner,
- * focusRailSubscription, streamAuthority, streamParser, streamReattach) ran
- * every `pnpm test` without ever being named anywhere in package.json. They
- * are now explicit lines in test/manifest.txt like every other file — the
- * whole point of this seam is that "which tests run" is legible from ONE
- * checked-in list, not partly from an implicit directory scan whose coverage
- * depends on file extension. check-test-manifest.mjs (this app's `lint`
- * script) is the gate that keeps that list honest.
+ * Runs every path in test/manifest.txt with the package's Node runtime,
+ * test bootstrap and tsx loader. Explicit paths keep coverage independent
+ * of Node's test-discovery rules. The manifest check in `pnpm lint` verifies
+ * that the list includes every supported test file.
  */
 
 import { readFileSync } from "node:fs";

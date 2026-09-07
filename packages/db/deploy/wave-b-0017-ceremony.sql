@@ -1,6 +1,6 @@
--- wave-b-0017-ceremony.sql — WB-R18 ceremony SQL artifacts (owner-!-gated; NOT a
--- migration — applied manually in the ceremony window per the runbook
--- docs/ops/wave-b-ceremony-runbook.md, AFTER the atomic 0017 apply).
+-- Compatibility deployment helper for databases predating the forward isolation pin.
+-- This is not a migration. Inspect the current frontier and
+-- packages/db/README.md, "Migration and deployment behavior", before use.
 --
 -- Part A — serializable RPC pinning (settled dashboard plan F10).
 --

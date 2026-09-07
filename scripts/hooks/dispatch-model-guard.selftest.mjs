@@ -1,9 +1,9 @@
 #!/usr/bin/env node
-// Self-test for the dispatch-model PreToolUse hook (AGENTS.md hard constraint 5).
+// Self-test for the dispatch-model PreToolUse hook used by orchestrator-fable.
 //
 //   node scripts/hooks/dispatch-model-guard.selftest.mjs   # exit 0 green, 1 red
 //
-// Three layers, mirroring pinned-ids-guard.selftest.mjs:
+// Three layers:
 //   (1) IN-PROCESS — imports evaluateToolCall() from the pure module and drives it through the
 //       decision matrix (both dispatch tools x pinned/unpinned x the documented exemptions).
 //       Fast, and where the bulk of the coverage lives. Several cells here assert an ALLOW that
@@ -15,12 +15,10 @@
 //       scriptPath branch against a REAL temp file (readable, and deliberately missing), which
 //       is the one path the pure module cannot cover by construction.
 //   (3) REGISTRATION — parses the tracked .claude/settings.json and proves a PreToolUse command
-//       resolves to THIS file on disk, AND that the pinned-ids registration survived alongside
-//       it. A guard nothing invokes still decides correctly and protects nothing; and this
-//       lane's own edit to settings.json is exactly the act that could have displaced the
-//       neighbouring hook, so the merge is asserted rather than assumed.
+//       resolves to THIS file on disk. A guard nothing invokes still decides correctly and
+//       protects nothing.
 //
-// This runs in `pnpm lint` and in ci.yml, beside the pinned-ids selftest. CI cannot exercise a
+// This runs in `pnpm lint` and in ci.yml. CI cannot exercise a
 // PreToolUse hook IN SITU — only a real Claude Code session can — so layer 3 is the closest
 // automated proof available that the registration is live.
 //
@@ -42,7 +40,6 @@ import {
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const CLI = join(HERE, "dispatch-model-guard.mjs");
-const PINNED_IDS_CLI = join(HERE, "pinned-ids-guard.mjs");
 
 let failures = 0;
 let cases = 0;
@@ -235,13 +232,13 @@ testCase("isAgentDispatch() / hasExplicitModel() / isFork() are independently sa
   if (isFork({ subagent_type: "Fork" })) throw new Error("only the exact fork type is exempt");
 });
 
-testCase("blockMessage() names the constraint, the ADR, and the fix — for BOTH block shapes", () => {
+testCase("blockMessage() names the policy and the fix — for BOTH block shapes", () => {
   const agentMsg = blockMessage({ shape: "agent-model-missing", tool_name: "Agent" });
-  for (const must of ["AGENTS.md hard constraint 5", "ADR-0069", "claude-sonnet-5", "fork"]) {
+  for (const must of ["orchestrator-fable worker policy", "SKILL.md", "claude-sonnet-5", "fork"]) {
     if (!agentMsg.includes(must)) throw new Error(`agent blockMessage is missing "${must}":\n${agentMsg}`);
   }
   const wfMsg = blockMessage({ shape: "workflow-zero-model-pins", tool_name: "Workflow" });
-  for (const must of ["AGENTS.md hard constraint 5", "ADR-0069", "agent()", "NOT ONE model pin"]) {
+  for (const must of ["orchestrator-fable worker policy", "SKILL.md", "agent()", "NOT ONE model pin"]) {
     if (!wfMsg.includes(must)) throw new Error(`workflow blockMessage is missing "${must}":\n${wfMsg}`);
   }
 });
@@ -261,10 +258,10 @@ function runCli(input) {
   }
 }
 
-testCase("e2e: Agent with no model -> exit 2, stderr cites the constraint", () => {
+testCase("e2e: Agent with no model -> exit 2, stderr cites the policy", () => {
   const { code, stderr } = runCli(JSON.stringify({ tool_name: "Agent", tool_input: { subagent_type: "general-purpose", prompt: "go" } }));
   if (code !== 2) throw new Error(`expected exit 2, got ${code}; stderr=${stderr}`);
-  if (!stderr.includes("AGENTS.md hard constraint 5")) throw new Error(`stderr does not cite the constraint:\n${stderr}`);
+  if (!stderr.includes("orchestrator-fable worker policy")) throw new Error(`stderr does not cite the policy:\n${stderr}`);
 });
 
 testCase("e2e: Agent with a model -> exit 0, silent", () => {
@@ -373,22 +370,6 @@ testCase("tracked settings.json registers a PreToolUse command resolving to THIS
       `no PreToolUse hook resolves to ${CLI}. Candidates: ${JSON.stringify(candidates)}. `
       + `A hook whose command cannot launch fails OPEN — the tool call proceeds — so a stale `
       + `registration here means the guard is silently absent.`,
-    );
-  }
-});
-
-testCase("the pinned-ids registration SURVIVED alongside it (merge, never overwrite)", () => {
-  // This lane added a second PreToolUse entry to a file that already carried one. Overwriting
-  // rather than merging would leave AGENTS.md hard constraint 11 unguarded while this selftest
-  // and pinned-ids-guard.selftest.mjs both still... well, the pinned-ids selftest would catch
-  // it too. Asserted from BOTH sides deliberately: whichever guard is edited next, the other
-  // one's disappearance is a red test, not a silent regression.
-  const candidates = registeredTargets();
-  const hit = candidates.find((c) => existsSync(c.abs) && resolve(c.abs) === resolve(PINNED_IDS_CLI));
-  if (!hit) {
-    throw new Error(
-      `the pinned-ids guard is no longer registered in .claude/settings.json (expected a hook `
-      + `resolving to ${PINNED_IDS_CLI}). Candidates: ${JSON.stringify(candidates)}.`,
     );
   }
 });

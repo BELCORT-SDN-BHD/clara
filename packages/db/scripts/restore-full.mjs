@@ -70,7 +70,7 @@ export function restoreFull(opts) {
   return { ok: true };
 }
 
-/** The manual post-restore checklist — ceremonies + Storage + verification. */
+/** Manual post-restore configuration, Storage and verification checklist. */
 function printChecklist(log = console.log) {
   const lines = [
     "",
@@ -82,10 +82,11 @@ function printChecklist(log = console.log) {
     "       - psql -f deploy/storage-provision.sql   (clara_storage_docs policies)",
     "       - re-upload the document bytes from the off-site byte mirror",
     "       - verify every clara.documents.source_doc_sha256 matches a re-uploaded object",
-    "  2. LOGIN CEREMONIES (interactive — set the pool passwords, roles are NOLOGIN):",
+    "  2. LOGIN CONFIGURATION (set required pool passwords; restored roles are NOLOGIN):",
     "       - psql -f deploy/write-login-ceremony.sql   (clara_wake_write_login; \\prompt)",
     "       - psql -f deploy/read-logins-ceremony.sql    (clara_runtime_login + clara_agent_read_login; \\prompt)",
-    "       - update CLARA_WRITE_DATABASE_URL / the runtime + read DSNs out of band",
+    "       - configure every required lane, including freeform, bank and checkout logins",
+    "       - update the matching DSN secrets; see packages/runtime/README.md for the roster",
     "  3. ACL BASELINE (a restore does NOT carry the public-schema ACL — re-apply is",
     "     MANDATORY): psql -f deploy/acl-baseline.sql   (as the db owner)",
     "  4. ENGINE SANITY (do NOT re-bootstrap blindly): confirm",
@@ -98,9 +99,10 @@ function printChecklist(log = console.log) {
     "         must stay parked on BOTH sides — resuming it would duplicate a live run and",
     "         break canary parity. Drill verification is SQL-only (step 5).",
     "       If you are unsure which mode you are in, you are in a DRILL. Do not start the world.",
-    "  5. VERIFICATION BATTERY: node scripts/dr-verify.mjs (source↔target) — all PASS.",
+    "  5. VERIFICATION: node scripts/dr-verify.mjs (source↔target); inspect PASS/FAIL/SKIP.",
+    "     Use CLARA_DR_STRICT=1 when canary/AP proof is required.",
     "",
-    "  (See docs/ops/DR-full-drill.md §3 — the full-profile restore runbook.)",
+    "  (See packages/db/README.md, Backup and recovery.)",
     "",
   ];
   for (const l of lines) log(l);

@@ -264,10 +264,3 @@ test("H-04: readManifest REFUSES rather than inventing rows", () => {
     assert.equal(row.document_id, "00000000-0000-0000-0000-000000000000");
   }
 });
-
-test("H-04: the example manifest names the off-repo corpus doc rather than copying it", () => {
-  const readme = readFileSync(join(FIXTURES, "README.md"), "utf8");
-  assert.match(readme, /docs\/plan\/completed\/corpus-manifest-2026-09-04\.md/, "the inventory is NAMED, not duplicated");
-  assert.match(readme, /never enter the repo or CI/, "and the reason is stated");
-  assert.match(readme, /The recall floor for "done" is the owner's to set/, "the harness reports; it does not decide the bar");
-});
