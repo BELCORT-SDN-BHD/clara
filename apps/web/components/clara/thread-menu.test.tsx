@@ -311,7 +311,7 @@ test("SWITCHING selects an existing thread, creates nothing, and never offers a 
   });
 });
 
-test("the menu names ARCHIVE as not built and offers no clear or delete at all", async () => {
+test("the menu names the missing archive control and offers no clear or delete at all", async () => {
   const clientId = freshClient();
   const wire: Wire = { clientId, posts: 0, lists: 0, sessions: [row(clientId, THREAD_NEW, "2026-09-03T00:00:00Z")] };
   await withFetch(wire, async () => {
@@ -320,11 +320,10 @@ test("the menu names ARCHIVE as not built and offers no clear or delete at all",
       await settleUntil(h, () => /NEWEST OWN TRANSCRIPT/.test(h.text()), "the resolved thread");
       await openMenu(h);
 
-      // Archive is a real backend gap and says so, rather than shipping a control that
-      // would refuse: the table has no `archived_at` and the only lawful mutation is
-      // `clara.share_chat_session`.
+      // Migration 0174 supplies the archive door. The menu names the remaining
+      // frontend connection instead of claiming the backend is absent.
       assert.match(h.text(), /Archiving a conversation/);
-      assert.match(h.text(), /Not built yet/);
+      assert.match(h.text(), /Conversation transcripts remain available as an audit record/);
 
       // And CLEAR/DELETE are absent entirely — not disabled, not "coming soon". The
       // transcript is the audit record and `_tf_chat_session_update` refuses a DELETE
@@ -621,4 +620,3 @@ test("R5 — an Escape from a PORTALLED dialog inside the rail's React tree leav
     }
   });
 });
-

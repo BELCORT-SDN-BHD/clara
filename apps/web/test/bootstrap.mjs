@@ -1,5 +1,4 @@
-// Test bootstrap for apps/web's node:test suite (mirrors
-// apps/dashboard/test/bootstrap.mjs). Loaded via `--import` BEFORE tsx so it can
+// Test bootstrap for apps/web's node:test suite. Loaded via `--import` before tsx to
 // point tsx at a react-jsx tsconfig — the app tsconfig uses `jsx: preserve` (Next
 // injects the runtime), which esbuild would otherwise compile to the classic
 // `React.createElement` and crash. No CSS-module stub needed here: this app's
@@ -10,7 +9,7 @@ import { fileURLToPath } from "node:url";
 
 process.env.TSX_TSCONFIG_PATH = fileURLToPath(new URL("../tsconfig.test.json", import.meta.url));
 
-// P6-6: `next/image` needs one resolution redirect under this runtime — Node's
+// `next/image` needs one resolution redirect under this runtime — Node's
 // ESM-to-CJS interop does not implement the `__esModule` convention Next's
 // image entry relies on, so the default import lands on a wrapper object React
 // cannot render. `test/shims/nextImage.mjs` carries the full explanation;

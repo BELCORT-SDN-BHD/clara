@@ -1,51 +1,36 @@
-# classify recall — fixtures
+# Classifier recall fixtures
 
-**H-04.** What the recall harness (`packages/runtime/scripts/measure-classify-recall.mjs`) reads.
+[measure-classify-recall.mjs](../../../scripts/measure-classify-recall.mjs) measures the document
+classifier against labeled, persisted OCR text. It does not re-OCR documents.
 
-| file | what it is |
+| File | Purpose |
 |---|---|
-| `manifest.example.json` | the SHAPE of a labelled manifest, with placeholder ids. Never a real corpus. |
-| `baseline-prompt-2026-09-04.txt` | the classifier system prompt as it stood on `main` before this PR sharpened it, captured verbatim so `replay` can measure a before/after on identical input. |
+| `manifest.example.json` | Manifest shape with placeholder identities |
+| `baseline-prompt-2026-09-04.txt` | Fixed baseline prompt for before/after replay |
 
-## The corpus is OFF-REPO and stays there
+Real client documents and labeled manifests stay outside the repository. A manifest row identifies
+an already-ingested `document_id`, its `firm_id`, an `expected_kind` from `CLASSIFY_KINDS`,
+and an optional human-readable name.
 
-Real client payloads never enter the repo or CI — the F-A1 precedent
-(`docs/plan/completed/f-a1-corpus-measurement.md`) is explicit about it. The inventory of what
-exists, and where, is `docs/plan/completed/corpus-manifest-2026-09-04.md`: four desktop folders,
-their counts, what each holds, and the three 资料缺失 marks. **This directory records the
-SHAPE of a manifest, never its contents.**
-
-## Writing the real manifest
-
-The harness's `live` mode reads each document's PERSISTED OCR layout text — the same substrate
-`packages/runtime/lib/classify.mjs` feeds the model. It never re-OCRs, because a measurement
-that re-OCRs is measuring OCR too. So a manifest row addresses a document that has already been
-ingested: `document_id`, `firm_id`, `expected_kind`, and an optional human `name`.
+Run from the repository root:
 
 ```sh
-# fixtures (default): no model, no DB, no corpus — proves the harness's own arithmetic
 node packages/runtime/scripts/measure-classify-recall.mjs
-
-# live: the real model over real persisted OCR text
-node packages/runtime/scripts/measure-classify-recall.mjs live --manifest ./my-manifest.json
-
-# replay: the baseline prompt and the current one, over ONE input set
-node packages/runtime/scripts/measure-classify-recall.mjs replay --manifest ./my-manifest.json
+node packages/runtime/scripts/measure-classify-recall.mjs live --manifest /private/manifest.json
+node packages/runtime/scripts/measure-classify-recall.mjs replay --manifest /private/manifest.json
 ```
 
-`expected_kind` must be a member of `CLASSIFY_KINDS`; the reader refuses a manifest that labels
-anything else, refuses one with missing ids, and reports "fixture absent" rather than inventing
-rows when the file is not there.
+The default mode uses a stub model and proves only the scorer's arithmetic.
+Live/replay require the connection environment and model credentials; their model calls send
+document text to the configured provider. Use the appropriately authorized corpus.
+Run from the source checkout: the deployed image currently lacks dependencies/fixtures needed by
+the script's live/replay path.
 
-## What the numbers mean
+`recall_at_gate` counts correct predictions at confidence >= 0.8; `recall_any` includes correct
+predictions below that threshold. The 0.8 value is the database's per-row classification gate,
+not an overall quality target.
 
-Two recall figures per kind, and the gap between them is the finding:
-
-- **`recall_at_gate`** — correct AND confidence ≥ 0.8. This is the headline, because it is the
-  gate `clara.classify_document` actually applies: a correct kind at 0.4 sets nothing and opens
-  a human review question instead.
-- **`recall_any`** — correct at any confidence. A large gap means the model KNOWS but is
-  under-confident, which is a calibration repair, not a definition repair.
-
-**The recall floor for "done" is the owner's to set.** This harness reports what it measured and
-nothing else.
+The approved comparison gate is per-kind non-regression against the baseline and no newly
+confident-wrong row that the baseline got right. No absolute recall floor has been chosen.
+Print model/prompt provenance with results. A passing replay does not verify dispatcher ordering:
+classification must also be tested when its task appears before OCR finishes.

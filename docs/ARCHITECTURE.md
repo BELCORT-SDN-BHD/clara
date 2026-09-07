@@ -1,457 +1,268 @@
-# Clara — Target Architecture (Rebuild v1)
+# Clara — Architecture
 
-*How the PRD becomes real. This is the technical source of truth for the greenfield build. It fixes the eleven verified failure patterns (`docs/audit/00-GATE-1-README.md`) and realises the Gate-1 rulings (`docs/audit/04-gate1-decisions.md`). The Phase-2 research it draws on is in `docs/phase2-research/`. Status: Gate-2 ratified 2026-07-17 (see `docs/adr/`).*
+This is the technical companion to the [PRD](PRD.md). It describes implemented boundaries and
+their reasons. Package READMEs own setup and operating procedures. Historical decisions
+remain in Git rather than a second documentation tree.
 
----
+## System shape
 
-## 0. The one invariant, and how it is made structural
-
-**The DB owns every AUTHORITATIVE number; the agent only orchestrates; one audited function per mutation class.** *(Wording amended by ADR-065/E-R4, 2026-08-08, mirroring PRD §6 invariant 1: the LLM may propose or independently check a calculation, but no model-generated numeral enters a durable report unless a versioned deterministic evaluator reproduces it from DB-owned inputs.)* The prior build honoured this for GL balance but leaked everywhere else — the read tool could write (Ggr-1), provenance was unvalidated (GAP0-1), side-effects were prompt-only (F3), gates were model-asserted (A-5/A-16). The rebuild makes the invariant **structural at four load-bearing points** (Gate-1 C3), so correctness does not depend on model or app discipline:
-
-1. **Client attribution** — a DB function (`assert_client_resolved`) gates every client-scoped write on a persisted, *server-verified* client resolution; no write path exists that skips it. The admissible ORIGIN of that resolution is a human click, an exact identifier match, **or the agent's own judgement under the structural walls of ADR-0074/TA-P7** — a printed identifier naming a different client REFUSES, more than one candidate must be clarified, a re-attribution raises a named misrouted-egress event, an unresolvable document falls to a firm-scoped question, and when she is unsure she asks. *(AMENDED by ADR-0074/TA-P7, ratified 2026-08-22; digest law 79. **Was:** ~~"gates every client-scoped write on a persisted, ≥0.95, *server-verified* client resolution"~~. `assert_client_resolved` and its no-write-path-skips-it property are unchanged; only the admissible origin changes, and the ≥0.95 numeral leaves with the judgement it described. A model never scores itself, digest law 72. **TRUED 2026-08-26:** the §3 function catalog now describes the SHIPPED `0125` recut (F-A7a, ceremonied 2026-08-25) — see §3.3.)*
-2. **Provenance binding** — document-origin writes validate `source_doc_sha256` + `document_id` against a real ingested document row in the same transaction; an invalid or absent pair RAISES.
-3. **Wake authority** — each wake kind carries a DB-enforced **allowlist** of invokable functions; `[proactive]` can call only `record_notification`. Not a blocklist.
-4. **Write authorization** — the agent's READ path is **structurally read-only** (a role with no EXECUTE on any volatile writer; **the GRANTS are the wall** — `default_transaction_read_only` is a session belt that applies **only at LOGIN, not under `SET ROLE`**, so it is not the guarantee: `0002_foundation.sql:91-101` says so in its own comment and tolerates its own failure. *(Parenthetical trued 2026-08-23; the belt is kept for the eventual dedicated freeform-read LOGIN role.)*), so no SELECT-wrapped write is possible; role floors live in the DB. *(Amended by ADR-0071: the agent additionally holds a wake-scoped, allowlisted WRITE lane — posting, matching, adjustments, close key ① — granted by the same lane-split-by-GRANT mechanism; her unattended writes are her own judgement under digest laws 71-72, receipt-stamped with model+version.)*
-
-Everything else (coding choices, materiality, close-readiness judgement) stays **visibility-first** — surfaced, not hard-blocked — per the owner's standing philosophy. **One ruled exception (ADR-065/E-R2, 2026-08-08): the year-end close's drawer-2 gates default-REFUSE until a per-item, named, receipted human attestation — close-readiness at the close boundary is fail-closed-with-attestation, not advisory. Drawer-3 readiness signals remain visibility-first. Drawer-1 items (continuity math, control tie-outs, ordering) are structural invariants, not judgement — this sentence never reached them.** **SUPERSEDED by ADR-0078 (裁-187, 2026-09-04): drawer-2 gates are evaluated and recorded, and finalize is a one-click admin+ act with an automatic receipt naming each gate's verdict, UNKNOWN included.**
-
----
-
-## 1. Topology — three planes, greenfield
-
-> **[TRUED 2026-08-31] What "Supabase" means here, at the bytes.** The Postgres IS a hosted
-> Supabase project and the browser's bearer IS a Supabase-issued session JWT — both true. What is
-> now true is that production frontend `apps/web` ships `@supabase/ssr` 0.12.5 plus
-> `@supabase/supabase-js` (`apps/web/package.json`) for cookie-session auth (`apps/web/lib/supabase/client.ts`,
-> `apps/web/lib/supabase/server.ts`, `apps/web/lib/supabase/proxy.ts`). Its data
-> plane still talks to PostgREST through raw requests (`apps/web/lib/read.ts:144`,
-> `apps/web/lib/doors.ts:112`). The retiring dashboard likewise uses raw `fetch`, and the runtime verifies
-> the issuer's JWTs with **`jose`** (`packages/runtime/lib/authz.mjs:23` — `jwtVerify` +
-> `createRemoteJWKSet`; `jose` 6.2.3 in `packages/runtime/package.json`).
-
-```
-Browser (Next.js dashboard)            Bearer = Supabase session USER JWT (firm claims)
-  │
-  ├─ READS  ──▶ Postgres via PostgREST (RLS-scoped) + typed read functions
-  ├─ WRITES ──▶ audited RPC on the session JWT (never a god key)
-  └─ CHAT/EVENTS ──▶ agent service (SSE)      Bearer = session JWT / firm-scoped short-TTL credential
-  ▼
-Postgres (fresh Supabase project)  ── THE SINGLE SOURCE OF TRUTH
-  forced RLS per firm_id · EXECUTE-only audited SECURITY DEFINER writers · structural read-only agent role
-  · durable event log + outbox · durable agent-runtime tables · the two-layer knowledge store
-  ▲
-Agent runtime (Clara) on Fly  ── long-lived Node service; durable runs/tasks/checkpoints; holder of the standing service credentials
-  (裁-114: no service credential ever reaches a browser; apps/web's SERVER-ONLY Route Handlers are a second, browser-isolated holder
-   where a flow requires it — the invite mailer's `SUPABASE_SERVICE_ROLE_KEY` (`apps/web/lib/members/invite-mail.ts`) and
-   FS-4's `STRIPE_SECRET_KEY` for the checkout route, which needs a `clara_authenticated` session no runtime identity can
-   take; `STRIPE_WEBHOOK_SECRET` is RUNTIME env (`checkout-gate-design-part3.md:181`, C-5/#511))
+```mermaid
+flowchart LR
+  Browser[Accountant: workbench and Clara rail] --> Web[apps/web: Next.js on Cloudflare Workers]
+  Web -->|User JWT: reads and audited RPCs| Data[Supabase Postgres and PostgREST]
+  Web -->|Same-origin runtime proxy| Runtime[packages/runtime: Node on Fly]
+  Runtime -->|Separate role-scoped connections| Data
+  Runtime -->|Private source objects| Storage[Supabase Storage]
+  Runtime -->|Authorised extraction / model requests| Providers[OCR and model providers]
+  Renderer[packages/reporting-render] -->|Claim / fetch / settle| Data
+  Renderer --> Storage
+  Backup[packages/backup] -->|Encrypted bundles| R2[Cloudflare R2]
+  Backup --> Data
+  Stripe[Stripe] -->|Signed webhook| Runtime
+  Web -->|Server-only checkout| Stripe
 ```
 
-- **Fresh Supabase project** + the **`packages/db` migration rig** for day-to-day dev — migrations are validated on a throwaway Postgres (CI's `postgres:17` service, or a scratch schema), never hand-applied to a live project. *(A local Supabase CLI stack was the original intent; it needs Docker, which is unavailable here, so the rig is the as-built target — see `PROGRESS.md`.)* Every schema change is a versioned migration in the repo from day one; seed scripts produce synthetic data. The old project stays frozen (read-only) until Phase-5 decommission sign-off.
-- Isolation is **RLS on `firm_id`** for every firm-scoped table, not project-per-firm — the proven model from the old build (frozen-repo ADR-029, cited as salvage evidence — not an ADR in this repo's decision log), which is PORT. What changes is everything *above* the isolation boundary. **The one deliberate exception is the pre-firm admission cohort** (FS-4: `dpa_documents` / `dpa_signatures` / `registration_rate_events` / `checkout_intents`, `0158`+): those rows exist BEFORE a firm does, so they carry no `firm_id` and are isolated by **zero application grants** instead — every policy is owner-role-only, and the only doors are SECURITY DEFINER functions. A builder extending that cohort must NOT reach for a firm-scoped policy; there is no firm to scope to yet.
-- **Hosts:** the runtime is a long-lived process on **Fly** (region `sin`, co-located with Supabase `ap-southeast-1`) — the WDK world needs an always-on worker, not a serverless function; `apps/web` targets **Cloudflare Workers** through `@opennextjs/cloudflare`, while the retiring dashboard remains on **Cloudflare Pages** at `app.clarabook.com` until P6-X cutover; the DB is **Supabase**. The runtime host is ratified in `docs/adr/` (ADR-014) (Fly is also the frozen prior plane's host, so the ADR marks it a deliberate greenfield choice, not a carryover).
+Postgres holds accounting state, authority, receipts and durable workflow state. Object storage
+holds original evidence and generated bytes. The web app and agent use that shared state; neither
+keeps a competing ledger. Pre-firm admission is a separate access domain because its applicant
+does not yet belong to a firm.
 
----
+## Repository map and stack
 
-## 1a. The pre-firm admission plane (FS-4, 裁-73/88/89/91/92 — added at the 2026-09-02 truing)
-
-A fourth subsystem sits BEFORE the three planes above, because a paying customer exists before
-their firm does: **Stripe Checkout (TEST mode at beta, 裁-88) → the signed webhook → the
-redacted `stripe_events` projection (裁-91 — allow-listed reconciliation fields only, no
-`customer_details` PII at rest, Stripe stays the system of record for what Stripe saw) →
-the one-transaction folded admission door (裁-89: no admission token survives; it calls
-`_create_firm_core` directly) → a born firm.** Around it: the versioned DPA store +
-append-only signatures, the registration rate wall, `checkout_intents`, and the 6-digit
-emailed confirmation code (裁-92) behind four rate walls. Objects land in `0158`+ (C-1) and
-the C-2/C-3 migrations; the design packet is `docs/plan/active/checkout-gate-design*.md`.
-**Isolation here is NOT `firm_id` RLS** — see §1's exception note: zero application grants,
-owner-role-only policies, SECURITY DEFINER doors. The webhook's principal is its own
-NOLOGIN + `_login` role pair granted EXECUTE on exactly its two functions.
-
-**Mail — who sends what (裁-146, 2026-09-03).** Two senders, ONE provider. **Signup confirmation and
-password reset are sent by Supabase Auth's own mailer, over CUSTOM SMTP pointed at Resend** — host
-smtp.resend.com, username the literal string `resend`, password a Resend API key the owner enters in
-the dashboard (Authentication → SMTP Settings) or sets through the Management API
-(PATCH /v1/projects/{ref}/config/auth) with his personal access token; never in the repo, never
-printed. Custom SMTP is not optional: Supabase's **default** mailer delivers only to the project's
-organisation-team addresses (*Email address not authorized* for everyone else), at 2 messages/hour,
-with no SLA and explicitly "not meant for production" (the official auth-smtp guide) — so on the
-default mailer every real beta applicant's confirmation code silently goes nowhere while
-`supabase.auth.signUp` (`apps/web/components/entry/signup-account-form.tsx:167`, the call that
-triggers the mail) resolves normally. **Invitations are sent by the Resend API directly**, from the
-server-only invite route (`apps/web/app/api/invite/route.ts` → `apps/web/lib/members/courier.ts` →
-`apps/web/lib/members/invite-mail.ts`); on that arm Supabase sends nothing, the token being minted by
-`generateLink`. **Configured 2026-09-03 ≈16:08 MYT** — the owner enabled custom SMTP and read the
-form back (Enable custom SMTP ON, host smtp.resend.com, sender no-reply@mail.clarabook.com, sender
-name Clara); the port, username and password fields were below the fold and are not recorded as read.
-That is the ARRANGEMENT standing up, not the gate closing: Wave-G's "Mail" line still certifies only
-on a received message. **Delivery to a NON-team address is PROVEN, ≈16:55 MYT 2026-09-03** — a
-Supabase *Invite user* mail, sent through the new custom SMTP, arrived at a private address outside
-the project's Supabase team, From "Clara <no-reply@mail.clarabook.com>". That is the **Invite-user
-template arm, not the signup-code arm**: it proves the transport and the sender identity end to end
-and retires the *Email address not authorized* wall as a measurement, while **the
-signup-confirmation arm is NOT certified and the gate stays open**. Three further acts were
-**REPORTED DONE by the owner ≈17:00 MYT — a report, not a measurement (裁-112), with no read-back**:
-the test user deleted, the Rate Limits raise applied (**the raised value was not stated, so no
-number is recorded**), and the *Confirm signup* template confirmed to carry `{{ .Token }}`. All
-three are read back at the Wave-G walk. **The sender** is **no-reply@mail.clarabook.com** — on the one domain
-verified in the Resend dashboard (owner's reading, 2026-09-03: exactly one domain, status Verified),
-a sending subdomain distinct from the app origin app.clarabook.com. The same address serves both
-senders, so the estate has ONE verified sending identity. It reaches the code only through the
-`INVITE_MAIL_FROM` environment variable, which `apps/web/.env.example` ships BLANK behind a
-placeholder — **the repo pins no domain**, so "both senders on mail.clarabook.com" is a deployment
-instruction here, never a measured repo fact. **Templates:** the *Confirm signup* template stays Supabase's six-digit
-code, `{{ .Token }}` with nothing to click (裁-92), because the confirmation card reads a numeric
-one-time code (`apps/web/components/entry/email-confirmation-card.tsx`); the *Reset password* template
-keeps a LINK, because that arm redirects to /auth/recover and spends a `?code=` through
-`exchangeCodeForSession` (`apps/web/app/(entry)/auth/recover/handler.ts`) — it has no code field.
-**Expiry:** the one Email OTP expiry setting is 60 minutes for both the confirmation code and the
-staff-invite token (裁-131), set only once C-5's attempt wall is live. **The cap** is the Resend
-plan's, never Supabase's 2/hour — with Supabase's own auth rate limit in front of it, which starts at
-30 messages/hour the moment custom SMTP is saved and is raised on the Rate Limits page as part of the
-same owner act. Wave-G's "Mail" line certifies only on a REAL confirmation received at a NON-team
-address (`docs/ops/wave-g-setup-checklist.md`); the standing ledger entry is
-`docs/plan/active/mohe-grill-rulings-2026-09-03.md`.
-
-## 2. The event-driven accounting state layer (the North-Star spine)
-
-Fixes A-1..A-7 (no event layer, no context pack, no freshness). This is the biggest net-new subsystem.
-
-### 2.1 Domain events + outbox
-- Every audited write function, in its own transaction, appends one or more **domain events** to an append-only `domain_events` log (firm-scoped, typed: `document.ingested`, `entry.coded`, `entry.approved`, `entry.reversed`, `ar_item.opened`, `ar_item.allocated`, `recon.matched`, `asset.acquired`, `asset.depreciated`, `period.closed`, `coa.changed`, `tax.updated`, `document.classified`, `compliance.watch_transition`, …). The event carries the actor, the affected ids, and a monotonic per-firm sequence.
-- A transactional **outbox** row is written in the same commit. A relay (in the agent service) drains the outbox and drives projections + wakes. **No fire-and-forget** — an event is never lost because the write committed but a webhook missed (the A-2 defect); at-least-once delivery + idempotent consumers.
-
-### 2.2 Projections (read models Clara and the UI consume)
-Consumers subscribe to the event stream and maintain derived read models: the per-client **context-pack cache**, the **knowledge wiki** (§5), reconciliation status, aging snapshots, the exception inbox, and coding signals. Projections are rebuildable from the log (replay), which also gives us disaster recovery for derived state.
-
-Three new event-stream consumers join the existing five loops (Wave A2.1, ADR-028/029/030): **`classify`** (document-type resolution, §7), **`facts_gate`** (the classify-first facts dispatch — a document with no resolved kind is routed through the classify lane first, then its facts re-fire: `invoice`/`credit_note`/`debit_note` → `invoice_facts`, XML → `local_facts`, other kinds → a `skipped_kind` receipt), and **`sst_watch`** (the SST registration compliance watch on `entry.approved`, §8). The SST watch also carries a **daily repair belt on the reconciler** — a first-cycle-at-boot sweep that re-evaluates every active client from the books (catching pre-existing crossings, backdating, reversals, schedule/classification changes) and writes one append-only evaluation receipt. The belt evaluates **one client per statement, never all clients in one call**: the evaluator's state transition emits a domain event whose first act row-locks the firm's `firm_event_seq` counter until commit, so a single all-clients transaction would hold that lock across the whole sweep and stall every concurrent writer (approval, draft, chat turn, ingest) behind it — per-client statements take and release the lock per client instead.
-
-**The reconciler carries FOUR daily belts today, not five** (as-built 2026-09-03, all on the
-leader's daily flag — `opts.sstWatches` / `lintBelt` / `faRuns` / `adjRuns` — the FA and
-adjustment belts feature-detecting their own DB surface so a runtime image can boot before its
-migration lands). A fifth belt, the **autopost-rule expiry/nudge** sweep (Wave A2.1, `0015`,
-WA2-R10 never-auto-renew), RETIRED WHOLE — the DB function `reconcile_autopost_rules()` and the
-whole CODING-rules EXECUTION tier were dropped at `0118` (F-A2 PR-3, 2026-08-25 ceremony), and
-its runtime caller (`reconciler.mjs`'s belt registration + `leader.mjs`'s cadence knob) retired
-with it: the first PR-3 pass left the caller wired, firing the dropped call every ~2s poll,
-invisible in `beltErrors`, until it was unwired in full. Unlike the FA/adjustment belts (whose
-DB surface arrives AFTER the runtime image by design, so a `to_regprocedure` feature-detect
-boots them dormant until their migration lands), this belt's DB half is gone for good — there
-is no future migration to wait for, so the call path was removed rather than feature-detected
-(`docs/plan/active/f-a2-annexes-1-estate.md` §B.1: "RETIRE (drop the verb)"). **Merged, NOT
-SERVING until the next runtime deploy (`v72`)** — v71 (deployed 2026-09-03 04:51Z from
-`344f7ad8`) predates this fix and still carries the wired caller (the README's Leader-loop bullet's law). The
-separate, later BANK-rules machine retired WHOLE at `0129` (F-A3 PR-3, 2026-08-26 ceremony)
-the same way.
-The four survivors: `sst_watch` (above, `0016`) · the per-client **wiki-lint** belt (Wave B) · the
-**FA depreciation-run** belt (Wave D-a, `0041`, `to_regprocedure`-guarded) · the
-**recurring-adjustment** belt (Wave D-b2, `0045`, `to_regprocedure`-guarded). Each belt is
-**failure-isolated** — an error logs and retries next cycle rather than
-starving the sweepers behind it. The last one is architecturally new in kind: it is the product's
-**first calendar-triggered poster** — until `0045` nothing in Clara posted on a schedule, only
-in response to an event or a human. Its autonomy is bounded by one authority doctrine shared
-with the FA belt (WD-R5/WD-R8): nothing runs without an **admin+-signed per-client authority**;
-the **first occurrence under a template always DRAFTS** (the ramp), so a human sees the shape
-before any autonomy is earned; only afterwards do occurrences auto-post, each with a receipt;
-and a **high-stakes occurrence always routes to a distinct human checker** regardless of ramp.
-Autonomy is forward-only from the signing date — catch-up occurrences all draft. The
-per-client-statement rule above binds this belt for the same `firm_event_seq` reason.
-
-### 2.2a The universal wake-execution engine (Gate G1, `0133`)
-A single registry-driven consumer, `clara.wake_engine_sources`, generalizes the spine's
-`kind='wake'` held-task carrier beyond autodraft's own precedent: each registered source names
-its `task_kind` and an `enabled` flag, and the engine's state matrix moves a task
-held→running→settled the same way the estate's other spine consumers do. `_settle_wake_task()`
-writes BOTH the task row and its `wakes_outbox` projection in one settlement, and a
-direct-queue carrier that dead-letters lands in its own `clara.wake_engine_task_dead_letters`
-table (mirroring `relay_dead_letters`' shape). The registry ships EMPTY by design — `bank_agent`
-and `close_prep` seed rows land `enabled=false` — so a consumer only goes live when its owning
-lane inserts-and-flips its own row; the per-wake-kind allowlist (§0 item 3) is unchanged and
-unconsulted by this engine's own logic.
-
-### 2.3 Context packs + freshness
-- Before any accounting decision, Clara calls `get_context_pack(client_id, purpose)` → a fresh, typed pack: client profile, FY/period + lock state, MSIC/business description, SST/tax status, COA policy, relevant documents, journal history slice, approval/reversal history, reconciliation exceptions, open questions (must-asks), the relevant wiki pages, and the **current books-version token**.
-- Every pack carries the version token. A write asserts the token is still current (optimistic concurrency); a stale pack forces a re-fetch — Clara **never acts on stale context** (fixes A-7). Figures from an earlier chat turn can never replay as authoritative.
-
-### 2.4 Trigger taxonomy (A-2)
-A declarative table maps each event type → a routing decision: `internal_task` | `notification` | `background_review` | `context_update` | `ignore`, keyed on risk, materiality, workflow state, period status, freshness, and whether records/tax/reconciliation/reporting/audit/close-readiness are affected. Human-direct events that must NOT wake Clara are explicitly `ignore` (kills the over-automation noise). The routing is data, versioned, and testable — not scattered prose.
-
----
-
-## 3. The data plane (Postgres)
-
-### 3.1 What is PORT (keep) vs REBUILD
-From the salvage manifest (89/134 DB assets PORT): the **isolation + audit spine is PORT** — forced RLS per `firm_id`, EXECUTE-only grants (no raw DML path), the deferred SECURITY-DEFINER balance trigger, `(client_id, account_code)` composite-FK COA integrity, anti-spoof actor stamping, the effective-dated `tax_rates` authority, the write primitives themselves (`approve_entry`, `reverse_entry`, the SST leg computation, the recon/FA/subledger writers). What is **REBUILD** is the *orchestration that calls them* and the *guards that gate them*.
-
-### 3.2 The structural read-only agent role (fixes Ggr-1/I-1/H-6)
-The agent's freeform read path no longer relies on a lexical verb filter. Two layers:
-- The agent's DB role has **no EXECUTE on any volatile/SECURITY-DEFINER writer** — only EXECUTE on the STABLE typed read functions + RLS-scoped SELECT — and its session sets `default_transaction_read_only = on`. A `select approve_entry(...)` fails at the role level, not a string check.
-- A **curated/typed read surface** covers every accounting workflow (the old build forced freeform SQL because curated reads were insufficient — Ggr-2). Where a genuinely freeform read is needed, it runs on the read-only role, is parameterised, and is **audit-logged** (query text + actor + purpose).
-
-### 3.3 The four structural invariants as DB objects
-- `assert_client_resolved(client_id, resolution_id, document_id)` — RAISES unless a persisted `client_resolutions` row exists with `method in ('human','rule','judgement')` and `confidence ≥ 0.95` (TRUED 2026-08-26 to the shipped `0125` recut); called inside every client-scoped writer.
-- Provenance CHECK — document-origin writers validate `(document_id, source_doc_sha256)` against `documents`; RAISES on mismatch.
-- Wake allowlist — the runtime mints a wake credential whose grants are the allowlist for that wake kind; the DB is the backstop (a `[proactive]` credential has EXECUTE only on `record_notification`).
-- Role floors + plan→approve — `assert_can_*` floors on every writer; approval binds to an expected revision token (fixes GAP0-5); posted lines immutable via trigger (fixes GAP0-4).
-
-Beside these four sits exactly ONE capped, flag-gated widening of what a firm's members may read, named here so it cannot grow silently: the **OPERATOR tier** (`clara.firms.is_operator`, `0133_g1_wake_engine.sql` — `not null default false`, `uq_firms_one_operator` admitting at most one operator firm ever, flipped only by the raw owner-run one-shot ceremony `docs/ops/g1-operator-firm-ceremony.md` and carried by NO firm until FS-11's reset marks BELCORT, 裁-121③) lets the single operator firm read **registration applications and Stripe problem events ONLY** — both pre-firm admission-plane objects (§1a), never a book table — beside the one estate-wide wake-source control that reads no firm's data, so it can never surface a figure of another firm's books; PRD §4's "The OPERATOR tier" carries the cap as law and PRD §6's tenancy wall is untouched by it (裁-143).
-
-### 3.4 Maker/checker (Gate-1 C4)
-- Every entry stores `maker_actor` (drafter/last human editor) and `checker_actor` (approver), modelled as distinct identities.
-- ~~`approve_entry` on the **high-stakes lane** RAISES if `checker_actor = maker_actor` and the firm has ≥2 eligible humans; solo firms record a `self_approval_attestation`.~~ **SUPERSEDED by ADR-0078 (裁-187, 2026-09-04):** the distinct-checker gate, the high-stakes threshold and the solo-firm attestation are ABOLISHED; maker and checker identities stay recorded on every entry; the gate is RBAC — bookkeeper approves and posts any amount (own drafts included), close is admin+, members/legal are owner-only. **The bodies still carry the rungs until the 裁-188 wall-removal lane lands.**
-- *(Superseded on the agentic lane by ADR-0071: the agent IS the recorded approving identity on her unattended posts — model+version on the receipt — at any amount; the human lane's distinct-checker gate and the solo-firm attestation are unchanged, and the surviving human acts are enumerated in PRD §2.)* Sweep acknowledgements require a bookkeeper+ human. Enforced in the DB, not the UI.
-
-### 3.5 Intrinsic subledger + counterparty entity (Gate-1 C2; fixes F3-1..8)
-- A first-class **`counterparties`** table per client: id-keyed, typed (customer/supplier/both), with **`counterparty_aliases`** children (the PORT'd alias/normalise machinery). Rules, KB evidence, recon hints, and AR/AP open items FK to the counterparty id — so an alias repoint never splits history (fixes C-9). Counterparty **narrative** (who this vendor is, quirks, typical treatments) lives as wiki pages cross-linked to the entity id (Gate-1 C2 §3).
-- **Subledger maintenance is intrinsic to the write.** Coding a sales invoice to Trade Debtors and recording the AR open item happen in **one audited transaction**. *As built (`0037`, Wave C-a): the composite is `approve_entry`, whose internal `_subledger_on_approve` maintains `clara.open_items` alongside the GL write, the counterparty link and the domain event — the design-era names `code_and_open_ar` / `record_ar_invoice` were never the shipped spelling; grep the real ones.* There is no path that posts the GL leg without the open item — the F3 dead-chain class is structurally impossible. Same for AP bills, bank receipts→allocations, and FA acquisitions→register rows.
-- Bank matching gets **structural parity checks** (fixes GAP1-1/1-2): `match_bank_line` RAISES on wrong account/period/amount-beyond-tolerance and enforces entry-exclusivity (an entry can be matched once); re-match requires an explicit unmatch first.
-
-### 3.6 Period integrity (fixes F12-*, B-1, GAP2-1, GAP5-*)
-- Carry-down is **one-shot + idempotent** *(as built: `create_opening_seed` → `draft_opening_item` → `approve_opening_seed`, the tie asserted by `_assert_opening_tie`, corrections via `supersede_opening_item`; the design-era name `seed_opening_carry_forward` never shipped)*: a per-client "opening seeded" registry row makes a second full seed RAISE; per-item idempotency keys allow safe incremental completion; a supersede-not-duplicate re-seed verb handles corrections. A TB tie-out is asserted.
-- Year-end close is **serialized** (advisory lock per client) so no writer escapes into the just-locked FY (fixes GAP2-1); every continuity read (bank recon, AR/AP/FA tie-outs) is taught the **close segment** so it never double-counts the opening restatement (fixes F12-1/F3-7); reverse/re-open has an **ordering guard** (cannot reverse FY(n) under a live FY(n+1) close — fixes GAP5-3); the close lifecycle writes history receipts (fixes GAP5-2).
-
-### 3.7 Idempotency + cancellation (fixes GAP4-1/4-4)
-Insert-style writers (`draft_entry`, `record_accrual`, …) accept an idempotency key; a retry after a lost HTTP response is a no-op, not a duplicate. Runs are server-side cancellable (a real abort path), so a UI Stop actually halts the tool loop.
-
----
-
-## 4. The agent runtime (Clara)
-
-The prior runtime was a thin, process-local shell — all run/clarify/interruption state in an in-memory Map, lost on restart (Grt-1). The rebuild's runtime is defined by the requirements below, and the SDK recommendation is now firm (Gate-2 decision item):
-
-### 4.0 Runtime recommendation (G1 — for Gate-2 ratification)
-
-**Recommended: Vercel AI SDK 7 (`ai@7`) + Workflow DevKit (`workflow` + `@workflow/world-postgres`), self-hosted in the Clara service on Fly, all state in our own Postgres — behind the swap-seam. Named fallback: LangGraph JS + PostgresSaver.** Full evidence: `docs/phase2-research/runtime-recommendation.md`, **double-verified by two independent primary-source lanes on 2026-07-17** (a second lane re-fetched every decisive doc claim and corroborated all of them verbatim — record: `docs/phase2-research/runtime-recommendation-corroboration.md`).
-
-Why it wins the decisive rows: the agent loop runs *inside* a step-checkpointed durable engine on our own Postgres (`'use step'` memoization = the strongest no-double-post story); hooks park clarify/approval interruptions for **days at zero compute** and resume on answer; approvals persist as HMAC-signable message parts in our DB; OTel tracing carries full-content spans to a DPA-covered vendor (Langfuse a concrete candidate) or self-host from the same code — so the C6 posture (ADR-011: Clara-controlled at launch, vendor OFF until gated) is a config flag, not a re-architecture; true model-agnosticism; Apache-2.0. The incumbent OpenAI Agents SDK loses on its own docs (parallel package-aliased SDK versions recommended for approvals pending across upgrades; no step engine); LangGraph ties on durability/HITL but re-executes an interrupted node from its top (a permanent idempotency burden) and gravitates to LangSmith; the Claude Agent SDK fails the stated model-agnosticism requirement.
-
-**Two hard preconditions carried to Gate 2:** (1) a **1–2 week production spike** before the Phase-3 commitment — Supabase session-mode (5432) LISTEN/NOTIFY under the WDK world, and explicit redeploy-under-parked-hook + redeploy-mid-run acceptance tests (WDK's deploy docs are verified silent on in-flight-run replay across code deploys — the top risk; mitigations: pinned versions, name-versioned workflows, drain-active-runs deploy policy); (2) the **C6 checklist** (executed DPA + firm disclosure + PDPA cross-border check) before any firm data flows to the trace vendor. **If the spike fails, LangGraph JS becomes #1 behind the same seam.**
-
-Integration shape (detail in the research file §6): engine schemas (`workflow_*`, `graphile_worker`) under a dedicated `clara_runtime` role with no `authenticated` grants; firm-facing **RLS-scoped projection tables** (`agent_tasks`, `agent_interruptions`, `wakes_outbox`) carry what the dashboard shows; clarify = a hook-parked tool; approvals = the `toolApproval` UX layer over the DB-owned authorization law (C3/C4); dual idempotency (step memoization + DB idempotency keys); `trace_id` threaded into task rows and audited-fn receipts; **runs execute independently of SSE attach** (closes the ghost-upload class D-1/E-1).
-
-### 4.0a Runtime requirements (SDK-independent — bind whichever runtime ships)
-
-1. **Durable run/task/checkpoint state** — `tasks`, `runs`, `run_steps`, `interruptions`, `tool_calls`, `checkpoints`, `wakes` are DB tables written *as the run progresses*, surviving restart/redeploy (the old schema had `tool_calls`/`artifact` columns that were never written — this is now the spine).
-2. **Resumable HITL** — clarification and approval interruptions are durable, first-class objects correlated to a `clarify_id` and bound to the asking user (fixes GAP4-3); a run pauses at zero compute and resumes on the answer, days later, without double-posting.
-3. **Typed tools + structured outputs + per-tool guardrails**, parallel tool calls.
-4. **Durable-workflow checkpointing + idempotency + error recovery/retry** — completed steps do not re-run on replay; re-drive treats an already-approved entry as success (fixes the bulk-approve miscount).
-5. **Tracing (Gate-1 C6, governed by `docs/adr/` ADR-011)** — the runtime writes full-content traces to **Clara-controlled Postgres storage**; the OTel path *can* export full-content to a DPA-covered vendor from the same code, but that export ships **OFF** and is enabled later only **minimized-first** and only after the DPA + **MIA client authorization** + PDPA-cross-border gate (ADR-011). The DB-backed run history is the durable audit record regardless.
-6. **Structural post-workflow sync** — derived outcomes (notifications, KB/wiki updates, recon hints, export receipts) are written by the outbox/projection layer or asserted at run settle, **not** left to the model remembering (fixes Grt-13).
-7. **SSE streaming** driven independently of whether a client is attached — a run started by any surface (chat rail, documents tab) **executes** (fixes D-1/E-1: never toast success on a fire-and-forget POST).
-8. **MCP consumption, skills/progressive-disclosure, multi-agent/background jobs** (bulk approve, reconciliation sweeps) as durable jobs.
-
-### 4.1 Tool catalog (G4-G6)
-**[GATE-2 TARGET — not built.]** Curated typed tools, one per audited mutation class, plus the typed read surface + the audited read-only freeform tool. The target catalog is generated from the DB function registry and lint-checked against it (fixes the doctrine drift where a tool named in doctrine had no ToolSpec and would hard-fail — F3-12/I-4). What exists instead is versioned, hand-authored workflow tool registration plus exact roster/census tests. No shell/psql/file tools; the WEB READ tool exists under ADR-0071/G9's two-tier discipline (number-bearing facts only via effective-dated tables; open reading with inert-data + citation + official-source preference). Skill-load + context-pack retrieval are **gated before any consequential write** (fixes G9 convention-not-gate).
-
-### 4.2 Grounding (G2)
-In-context: the current doctrine pack (regenerated fresh against the real registry — fixes the wrong-OCR-vendor drift), the active skill, tool schemas, and the fresh context pack. Retrievable: the full PRD/architecture, the client wiki, historical data via typed reads. The exact in-context/retrievable split is documented and token-budgeted.
-
-### 4.3 What a background client error does to the process, per connection (裁-149)
-
-**The contract.** `pg` emits `'error'` on a Pool when an *idle* client's backend dies with nobody awaiting it — a pooler restart, a failover, a maintenance kill. An `EventEmitter` `'error'` with **no listener throws**, and the supervisor `packages/runtime/scripts/serve.mjs`'s crash-only policy turns that into process death. Every connection the runtime opens therefore declares one of two postures, and the table below is the whole census — a ninth pool site without a listener is a defect, pinned by a drift-guard cell.
-
-| connection | posture on a background error | why |
-|---|---|---|
-| relay pool (`packages/runtime/lib/relay.mjs`, `makePool`) | **log + COUNT + recycle**; surfaced on `/ready` as a WARNING that never flips `ready` false | it is the runner's real connection pool, so repeated errors there are an availability signal, not a fault (裁-149 clause 1) |
-| the four `packages/runtime/lib/pools.mjs` pools, `packages/runtime/lib/freeform-read.mjs`, the two `packages/runtime/lib/checkout-pools.mjs` pools, `packages/runtime/lib/db.ts` | log + recycle (as they already did) | the affected client is already out of the pool; the next checkout opens a fresh connection |
-| the relay **leader**'s dedicated session (`packages/runtime/scripts/relay.mjs`, `packages/runtime/lib/leader.mjs`) | record → **rethrow into the caller's own reconnect loop** | the dead session releases its session-level advisory lock, so a standby takes over *immediately*; the surviving process then re-acquires rather than dying |
-
-The contract itself lives in `packages/runtime/lib/pool-error-contract.mjs`; the per-lane boot probe that measures each of the seven logins is `packages/runtime/lib/lane-probe.mjs`.
-
-**Reading that probe's `/ready` output.** It runs on a background interval and `/ready` reads the last verdict from memory, so **a single `pending` sample is not a statement that the lanes are healthy** — it says only that no cycle has settled yet, which is the normal state for the first poll after a boot or a deploy. Read the second poll. A loop that stays `pending` past two intervals reports `stalled` and raises its own warning, so a wedged probe is distinguishable from an unmeasured one rather than silent.
-
-**A correction to 裁-149's premise, recorded because the ruling text says otherwise.** Clause 2 states that the relay module attaches no listener "nor to the leader's dedicated `makeClient()` session", i.e. that the leader is crash-loud. It is not, and was not when the ruling was written: `packages/runtime/scripts/relay.mjs:139-141` and `packages/runtime/lib/leader.mjs:177-179` both attach one, record into `connErr`, and rethrow at the top of the next poll. The **failover** the ruling wanted is unaffected — the lock is released by the backend when the session ends — and the as-built adds that the surviving process re-acquires without a machine restart. The leader was therefore left byte-untouched; only the pool half of the ruling was built.
-
----
-
-## 5. The knowledge layer — two-layer Karpathy wiki (Gate-1 B)
-
-- **Layer 1 — the wiki.** Per-client interlinked markdown pages in Storage + a `wiki_pages` index (path, summary, provenance, version, cross-refs) in Postgres, maintained by three operations: **ingest** (an event/document updates the relevant pages, cross-refs, and an append-only wiki log), **query** (retrieve relevant pages → synthesise with citations → optionally file the analysis back), **lint** (scheduled; flags contradictions, stale claims, orphaned pages, gaps → owner). Pages are provenance-cited to immutable sources, versioned, and **injected into every context pack**. Wiki content is **inert data on read** (injection defence).
-- **Layer 2 — typed authority.** `coa_mapping_rules` (user-gated), the `assert_client_resolved` gate, and first-class **`open_questions`** (must-ask) objects with resolution state that block workflows. The three memory-note needs map here (observation/profile → typed profile facts; must_ask → open_questions; rule_hint → low-evidence proposals).
-- **The wiki informs; the typed layer decides.** No wiki page selects an account, lowers a gate, or authorises a write — no DB gate/bound/floor function reads wiki. *(Narrowed by ADR-0071: on the agentic lane the knowledge layer lawfully informs the judgement that IS the posting authority — it is that lane's learning loop, digest law 73; injection defence is unchanged, wiki content stays inert data on read.)*
-
----
-
-## 6. The reporting engine (H)
-
-Fixes H-1/H-2/H-4 (model-authored numbers laundered as DB-authoritative). Composable + schema-driven, not fixed templates:
-- Clara translates intent → a **structured report spec** (scope, period, entity, filters, layout).
-- The spec is executed by **DB read functions only** — every figure, total, and balance/verification claim comes from the DB (the `balanced` flag is DB-computed, never hard-coded true).
-- Renderers (CSV/PDF/XLSX/UI artifact) **format** DB output; a model cannot inject a number or a balance claim into a rendered artifact. Free-text commentary is clearly labelled model-authored and never presented as a computed figure.
-- Every export is persisted as a **durable, auditable artifact** with parameters, data-version token, permissions, and reproducibility — never a loose file, never model-authored bytes filed as authoritative (fixes H-1).
-
-**As shipped:** the renderer lives in `packages/reporting-render` —
-`packages/reporting-render/lib/layout.mjs` is the FROZEN sealed-lane layout (golden-hashed
-like a workflow body), `packages/reporting-render/lib/layout-sandbox.mjs` its sibling for the
-non-authoritative analysis lane, and `packages/reporting-render/scripts/render-worker.mjs` the
-worker driving both. **The two-tier split is SHIPPED FACT (digest law 74):** the sandbox lane is
-watermarked non-authoritative and structurally unreachable from the seal chain; the sealed
-lane runs the full open→evaluate→seal→render chain through the OBO lane. The `0135` substitution
-seam closes the sandbox numeral path by resolving placeholder blocks through DB-owned `cell` basis
-references before output (migration header: `packages/db/migrations/0135_card1_substitution_seam.sql`).
-
----
-
-## 7. Document pipeline, storage doctrine + registry (E)
-
-**Evidence-region capture is an ingestion requirement, not a UI choice** (design dependency #2): the OCR pipeline captures and persists **per-field bounding regions** (Azure DI returns `boundingRegions` — the old integration discarded them), so the `doc_review` side-by-side verification surface (the J-18 fix, "verified against source IS the approval act") can bind every journal-line field to its exact source span, validated at insert (invariant 2b).
-
-
-Firm-scoped keys (`firms/{firm_id}/…`), an **Unassigned lane** for persist-after-OCR-before-assignment (every document persists immediately after OCR — fixes E2), a **storage move capability** so an assigned document's bytes actually relocate (the old wake lane could not move objects — E3), and every generated export in the export taxonomy as an auditable artifact. The document registry stays consistent across storage objects, DB rows, UI tabs, Clara's access, and the unassigned lane. Delete is never granted (reverse-not-delete + retention).
-
-A **`classify` lane** resolves each document's type after layout/structured extraction and before its facts are read, persisting the verdict via the audited `classify_document(...)` — human-recorded kind overrides the model — so the fact-extraction engines are never fed an unclassified or mis-typed document (Wave A2.1, ADR-028/029/030).
-
-**The extraction estate after ADR-0071 (shipped/ceremonied 2026-08-20, F-A1; `docs/plan/active/wave-f-contract.md`):** the semantic readers — Azure `prebuilt-invoice`, Azure `prebuilt-bankStatement`, and the deterministic layout-reader family — RETIRED. Facts are witnessed by the **LLM witness pair** (one read of the stored OCR raw text, one of the original image bytes; same provider, two channels), agreeing to the sen under a versioned deterministic DB predicate, every witnessed amount server-snapped to a layout region (so the polygon/evidence walls and `doc_review` keep their fuel), the document's arithmetic identity and the bank running-balance chain retained as mechanical checks, and both reads persisted whole with model+version stamps. OCR itself is demoted to a coordinates-and-text-fidelity supplier — zero semantics — and is vendor-swappable behind the existing normalized envelope/regions shape. Digest law 72 is the binding statement.
-
-**Egress consent (the governor PRD §6 invariant 16(a) names, 裁-114):** a client document
-leaves Clara only under the typed, purpose-scoped consent subsystem —
-`client_egress_consents` / `client_egress_purpose_consents` / `firm_egress_purpose_consents`,
-the `*_purpose_activations` tables, and `egress_dispatch_authorizations` with the
-activate/deactivate/consume doors (`0020_typed_consent.sql`, with `0011_daily_loop.sql`'s client consents and
-`0123_f_a7_gamma_egress.sql`'s firm-level half; ADR-0040/0041; digest law 58).
-Consent is re-checked at the dispatch boundary; a grant alone never authorizes. Admin surface:
-`apps/web/app/(firm)/admin/vendor-bindings/`.
-
-## 7a. Retention (fixes GAP3-4/3-5)
-The 7-year statutory clock anchors at **period-end + filing date** (ITA s.82/82A, CA2016 s.245), not row-creation, and is recomputed on close; `legal_hold` gets a real audited writer.
-
----
-
-## 8. Tax / SST engine
-
-> **TRUED 2026-08-31 (裁-62): the tax module is INERT at beta.** F-T3 PR-7 is held, no tax
-> artifacts issue, and all 13 treatment codes remain unsigned. The list below is target v1 scope,
-> not the current build state.
-
-The compliance-correct core (Gate-1 C5). **The normative requirements document is `docs/phase2-research/accounting-practice-map.md`** — grounded in the owner's SST primary-source research (Acts, regulations, MySST manuals) + the frozen repo's tax evidence, with a source register. The engine implements, at minimum:
-
-- **Registration & taxable-period model** — registration-effective dates, assigned period cycles incl. DG variations; the SST taxable period is its own scope axis distinct from the FY (fixes GAP3-1).
-- **The SST registration compliance watch** (Wave A2.1, ADR-028/029/030) — a **non-blocking**, per-(client, service-group) durable case that never moves money or gates a workflow. A DB evaluator (`evaluate_sst_watch`) computes the statutory **month-end rolling turnover test** (the month + 11 preceding) against an effective-dated service-group threshold schedule, recomputed at every month-end since ledger coverage to detect the **earliest crossing** (exact statutory boundary — RM 500,000.00 is not crossed, 500,000.01 is). Its state machine runs `monitored → early_warning (≥80%) → crossed → overdue (application deadline passed)`, with `acknowledged`/`snoozed` overlays that never erase the condition and `resolved` only on a typed conclusion + evidence; append-only watch events are the disposition trail. It is surfaced through the review queue (a `compliance_watch` row kind + the ComplianceWatchCard) and a context-pack block framed as a **DB-computed screening estimate** — never a legal determination, never multiplied into tax due (WA21-R3/R5/R6).
-- **Service tax on the payment basis** on the now-real AR anchors + the s.11(2) 12-month rule + bad-debt relief + credit/debit-note deductions (fixes F3-8/GAP3-8 — no more silent accrual substitution).
-- **Sales tax on the accrual basis**; output-only, no input credit anywhere.
-- **Rate & sector schedule** maintained and effective-dated, incl. the 6%-retained sectors; MSIC informs classification (fixes GAP3-2).
-- **Dual-registrant (`both`) separation that survives export** — per-tax declarations through PDF/XLSX/CSV, never a combined payable (fixes GAP3-3/H-13).
-- **The SST-02 return** with per-field form mapping, NIL validity, imported-taxable-services reverse charge, and group/B2B exemption awareness.
-- **The draft tax computation** (add-backs, capital allowances, chargeable income, Form C/P/B, CP204) as the **last v1 slice**, allowed to slip to v1.1 (owner ruling).
-
-Payroll = coding + the built deadline calendar (practice-map Part 3). Inventory = periodic closing-stock adjustment at close with a completeness check (practice-map §2.9). The practice map's Part 5 v1 scope ledger is the scope authority for Phase 4.
-
----
-
-## 9. Cross-cutting
-
-- **Security/isolation** — the PORT'd RLS + EXECUTE-only spine + firm-scoped credentials + the cross-firm isolation rig (kept as a go-live gate) + **live authority revocation** (removed/demoted members lose access immediately — fixes GAP1-4).
-- **Observability** — DB-backed run history (always) + Clara-controlled OTel storage at launch; vendor export OFF until the ADR-011 gate (DPA + MIA client authorization + PDPA), minimized-first when enabled.
-- **Ops / DR / CI (fixes GAP1-5/1-6/1-7)** — CI **applies the real `packages/db` schema and tests the agent runtime** (the old CI tested the decommissioned schema — the misleading-green defect); a real **backup/restore/DR contract** for the 7-year source of truth; **readiness probes + SLOs + alerting** (not liveness-only); the event log gives point-in-time replay for derived state.
-- **AI-quality eval (fixes GAP3-6)** — a falsifiable eval harness (attribution precision/abstention, coding accuracy by document class, must-ask recall, auto-post precision) is a **real Phase-5 gate**, not waived.
-- **Per-firm guardrails (fixes GAP4-5)** — metering, token/spend budgets, run-concurrency caps, fail-closed usage limits.
-
----
-
-## 10. What this fixes, mapped
-
-| Failure pattern (audit) | Architectural fix |
+| Path | Responsibility |
 |---|---|
-| 1 · dead subledger chain | §3.5 intrinsic subledger (same-txn side-effects) |
-| 2 · no durable state | §4 durable runtime tables |
-| 3 · no event/context layer | §2 event log + context packs + freshness |
-| 4 · read tool can write | §3.2 structural read-only role |
-| 5 · upload silently no-ops | §4(7) runs execute independent of SSE attach |
-| 6 · dead generative-UI | §4 + design docs (card protocol) |
-| 7 · period integrity | §3.6 idempotent carry-down, serialized close, segmented reads |
-| 8 · governance prompt-deep | §0/§3.3/§3.4 structural invariants + maker-checker |
-| 9 · reporting launders numbers | §6 DB-owned figures only |
-| 10 · ops/verification/compliance | §9 CI/DR/eval/guardrails |
-| 11 · doctrine drift | §4.1 registry-generated tool catalog + lint gate |
-| 11a · bank-match integrity (GAP1-1/1-2) + evidence regions (J-18) | §3.5 structural match-parity + entry-exclusivity; §7 per-field bounding-region capture + the `doc_review` verification surface |
+| `apps/web` | Next.js App Router, React, TypeScript, Tailwind, Base UI/shadcn, next-intl and Supabase cookie auth. OpenNext packages the app for Cloudflare Workers. |
+| `packages/runtime` | AI SDK model/tool loop, Workflow SDK Postgres world, Nitro server build, document intake, event consumers, reconciliation and SSE. Long-running Fly process. |
+| `packages/db` | Ordered SQL migrations, reference seeds, audited accounting functions, tenant isolation, test rigs and backup/restore tools. |
+| `packages/reporting-render` | Independently imaged deterministic report renderer and artifact delivery support. |
+| `packages/backup` | Independently imaged encrypted off-site backup job. |
+| `scripts` | Repository verification and operating helpers used by package scripts or CI. |
+| `.github` | GitHub Actions: source checks, database estate tests, upgrade/replay drills and release evidence. |
+| `.claude`, `.agents`, `.codex` | Repository skills originate in `.claude/skills`; `.agents/skills` holds local Codex copies and local-only additions. Hook and MCP configuration stay with their tools. Product requirements live in the PRD. |
 
----
+Read manifests and lockfiles for exact versions. The workspace defaults to Node 20 and pnpm;
+`apps/web` declares a package-managed Node 22 runtime for its scripts and Cloudflare tooling.
+Backup and renderer are outside the pnpm workspace and have their own image/dependency lifecycle.
+The dashboard and spike are retired.
 
-## Appendix A — Slice-0 spike results (2026-07-17): the durable engine is GO, with a binding versioning policy
+Cloudflare's official API MCP supplies agent-facing documentation and account operations through
+project MCP configuration. OpenNext and the package-pinned Wrangler CLI own local web builds,
+version uploads and release promotion. These are engineering tools, separate from Clara's
+accounting-agent tools. Setup and authentication are described in the web README.
 
-The Slice-0 spike ran against the fresh hosted Supabase project (`spike/RESULTS.md` is the evidence record). **T1–T6 ALL PASS.** Decisive findings, now binding on the build:
+The key choices are a single RLS-isolated database rather than a project per firm, durable work
+independent of the browser, a long-running workflow host, and thin clients over audited domain
+operations. AI SDK separates model access from persisted workflow steps and interruptions. These
+choices do not establish complete product coverage: the gaps in Work still apply.
 
-1. **At-least-once is real; the DB idempotency key is the floor** (T4, empirically): the engine re-invoked a step whose transaction had already committed; only `ON CONFLICT (op_key)` kept the books at exactly one posting + the same receipt (`wasDuplicate: true` in the run's return value). Every audited mutation carries an idempotency key — permanent, mandatory (Codex refinement 1, confirmed).
-2. **The world self-recovers active runs at startup** (undocumented): re-enqueues in-flight runs under their dedup key, bypassing dead workers' stale locks — crash recovery was automatic (~5s) in T4. Parked runs count as "active" and replay their memoized prefix harmlessly on every boot.
-3. **No run pinning on self-hosted WDK** (T6, the hazard): an in-place edit to a workflow body **silently changes the semantics of the un-executed remainder of every in-flight run** — no error, no old-semantics preservation. A silent-correctness hazard for accounting workflows. **Mitigation proven:** name-versioned workflows — old parked runs completed on pure V1 semantics while new enqueues rode V2.
-4. **BINDING VERSIONING POLICY (from T6):** (a) a deployed workflow body is immutable once any run can be in flight; every behavioral change ships as a new exported workflow (`_v2`, `_v3`, …), the old export retained until zero non-terminal runs reference it; (b) enqueue sites always target the newest version; a CI freeze-lint (golden-hash per frozen workflow) forbids editing frozen bodies; (c) renaming/deleting an export with in-flight runs is forbidden (workflowName derives from path+export — a rename strands parked runs); (d) in-place hotfixes only for provably pre-park-idempotent step-body bugs.
+## Frontend and identity boundary
 
-**Freeze-lint coverage (as built, finding 11):** the CI freeze-lint golden-hashes each `@frozen` workflow **and its transitive relative-import closure**, requires every `"use workflow"` file to be frozen + registered, compares append-only vs `origin/main` (fail-closed if the base ref is missing under CI), and **rejects a workspace-package / path-alias import inside a frozen closure** (such a first-party import would escape the closure and change a frozen body while its hash stayed green). **No longer deferred — both are BUILT and enforced** (verified 2026-08-06 in `scripts/check-frozen-workflows.mjs`, which delegates to `freeze-lint-checks.mjs`): **registry-version monotonicity** — the lint parses `packages/runtime/workflows/registry.ts` at HEAD and at the base ref, so a class may only keep or *increase* its version and a class removed vs base is a hard reject — and **enqueue-site provenance** — every WDK enqueue in `packages/runtime` (tests and the registry itself excluded) must receive a workflow reference whose import provenance traces to the registry. Policy (b) is therefore machine-checked, not convention. Handles: `scripts/check-frozen-workflows.mjs`, the manifest `frozen-workflows.json` (**233** entries at the 2026-09-03 truing — the count grows with every frozen closure; read the file, not this line), regenerated only via `pnpm freeze:update` (refused under CI).
-4a. **The parallel EVALUATOR freeze (invariant 1's enforcement machinery, mirroring the
-workflow freeze above):** `frozen-evaluators.json` is the manifest; `scripts/check-frozen-
-evaluators.mjs` is its lint (with its own `--lock-deployed` ceremony flag, refused under CI);
-`clara.evaluator_versions.deployed` is the DB-side flag a registered evaluator row carries;
-`clara.verify_evaluator_freeze()` re-derives every DEPLOYED member's hash LIVE from the
-catalog between migration bodies and their commit, so an in-place edit fails at APPLY, not
-merely at review; `clara._tf_evaluator_deploy_once` is the one-way, exactly-once
-undeployed→deployed transition trigger, gated on the deploying session holding no active
-`SET ROLE`; and `packages/db/scripts/deploy-evaluator-version.mjs` is the deploy ceremony
-script that flips it (a SEPARATE act from the manifest lock — `packages/db/README.md`'s
-"Evaluator deploy ceremony" section). Together these make invariant 1's "no model-generated
-numeral enters a durable artifact unless a versioned deterministic evaluator reproduces it"
-structural, not conventional, on the evaluator half of the same invariant the workflow freeze
-enforces on the workflow half.
-5. Operational notes: the runtime reads `WORKFLOW_POSTGRES_URL` (not `DATABASE_URL` — mapped in the worker entry); engine timestamps are tz-naive (display only); Supavisor session-mode LISTEN/NOTIFY verified at 32ms with sub-second job pickup.
+`apps/web/app` separates entry/auth routes, firm routes and full-screen surfaces. The client URL
+selects the workspace. `components` contains workbenches, dialogs, the Clara rail and card readers;
+`lib` contains domain adapters, session/scope handling and read/write boundaries; `messages` owns
+localised copy; `app/globals.css` supplies shared visual tokens.
 
-Remaining before final Slice-0 sign-off: the 48-hour park check-in (armed 2026-07-17 15:15 +08, resume due ≥2026-07-19 15:15 +08). **RESOLVED** — the park check-in closed with Slice 4 (ADR-017); nothing remains open in this appendix.
+Supabase SSR clients manage cookies. Server session resolution obtains a verified caller context;
+database functions consult current membership so an old JWT does not preserve a removed role.
+UI capability checks improve navigation, but database authorisation is decisive.
 
----
+`lib/read.ts` (`getRows`) performs authenticated PostgREST reads; `lib/doors.ts` (`callDoor`)
+invokes audited RPCs and returns typed refusals. Financial rows are not mutated optimistically.
+After an operation, the UI re-reads state, keeps a failed action visible and renders money from
+exact minor units. Large identifiers must survive JSON without JavaScript number rounding; the
+remaining freeform-read exception is tracked in Work.
 
-## Roadmaps (carried from REBUILD-PLAN at the 2026-08-12 harness refactor)
+The browser reaches the runtime through `app/api/runtime/[...path]/route.ts`. This same-origin
+proxy reads its target at request time and forwards an allowlisted header set, including the
+session bearer. It supports chat, task streams, interviews, intake and document bytes. Runs
+continue without an SSE client. The stream route rechecks task access on each poll and emits
+revocation when authority is lost.
 
-*The section below is reproduced verbatim from the former docs/plan/REBUILD-PLAN.md (deleted
-at the harness docs-tree refactor; its dated STATUS chronology is now the historical record at
-`docs/plan/completed/rebuild-plan-history.md`). It moved here, rather than into that historical
-archive, because it is a live routing table — new `document_kind`/`coding_kind` work still reads
-it as the authority for where an unbuilt kind's destination is decided.*
+Service credentials belong in runtime/server-only handlers. The web server has narrowly needed
+credentials for checkout and invitation delivery; the browser holds public configuration and its
+user session. `NEXT_PUBLIC_*` is never a secret channel. `wrangler.jsonc` owns the Worker's
+plain-text deployment variables; secrets are configured separately.
 
-### The `coding_kind` roadmap — where each classified document lands
+The parts catalog is a discriminated contract between runtime emissions and web readers. It
+supports hydration of past actions as well as live replies. Current parity checks cover kinds,
+not full field schemas or independently deployed versions; several parts still have only
+identifier-level readers. These are implementation gaps.
 
-> **Added 2026-07-29** (Wave-C grilling). The classifier recognises **17 `document_kind` values**
-> (`0007_document_pipeline.sql:33-37`) while the books can code **5 `coding_kind` values**
-> (`0037_wave_c_a_subledger.sql:500-503` — widened from 0015's three by WC-R9:
-> `supplier_bill,sales_invoice,sales_credit_note,customer_receipt,supplier_payment`).
-> Until now **no artifact stated where the other 12 land** —
-> a search of PRD, this plan, ARCHITECTURE and all three project logs returned zero hits. That
-> absence is what produced the receipt-routing seam: ADR-ruled receipt auto-routing (0025) sends
-> every receipt into the paid OCR lane, and those receipts are now read and then strand, because a
-> counter purchase has no payable credit and so cannot be a `supplier_bill`. **This table closes
-> that gap.** Rulings marked **[R]** are ratified in `docs/plan/completed/wave-c-contract.md`; **[P]** are
-> proposed and await the owner.
+## Database authority and accounting
 
-**The law this table encodes:** `coding_kind` means *"which control account this entry touches, and
-in which direction"* — **not** "what kind of document this is". A document kind earns a typed coding
-lane **only** when a wrong posting would silently corrupt a subledger. Everything else rides the
-generic lane (`coding_kind` NULL), which carries every LAW invariant — client attribution,
-provenance binding, balance, reverse-not-delete. *(The "breeds no sightings, permanently
-ineligible for autopost" clause is SUPERSEDED by ADR-0071: the rules machine retires and the
-generic lane is fully eligible for unattended agentic posting under the witness-pair regime,
-same as every other lane.)* **A new `coding_kind` is always a migration, never an agent
-decision.**
+Clara can choose and execute accounting work. `wake_post_entry` and the agent posting core admit
+agent-authored postings with model/version attribution. The acceptance boundary is the audited
+operation: it validates accounting meaning, authority and evidence as well as input shape.
 
-| `document_kind` | Destination | Wave |
-|---|---|---|
-| `invoice` | `supplier_bill` · `sales_invoice` | **LIVE** |
-| `e_invoice_xml` | `sales_invoice` via the structured (XML-only) lane | **LIVE** |
-| `credit_note` | `sales_credit_note` LIVE; purchase side → `supplier_credit_note`, added additively **[P]** | LIVE / purchase side **UNBUILT** (not in the five-value set) |
-| `debit_note` | rides `sales_invoice` deliberately — identical subledger effect **[R]** | **LIVE** |
-| `payment_voucher` | `supplier_payment` (settlement kind) **[R]** | **LIVE** (ADR-052 / `0037`) |
-| `bank_statement` | **Not a coding kind.** Becomes statement lines that MATCH entries; settlement is carried by `customer_receipt`/`supplier_payment` **[R]** | **LIVE** (ADR-053 / `0038`) |
-| `receipt` | `cash_purchase` — zero control legs, creates no AP. **Blocked**: "paid at the counter?" is not extractable today (no payment-method field; `invoice.amount_due` is a consistency test). Interim: generic lane **[R]** | **UNBUILT** — still the generic lane |
-| `claim_form` | **Generic lane, permanently** — a non-`payable`-class "due to employee/director" liability by account convention (WC-R10). The real want is tier-2 rule breeding, not a typed kind **[P]** | — |
-| `payroll_summary` | **Generic lane, permanently** for the journal; the statutory deadline calendar is Wave F (PRD §4.16 — no payroll engine) **[P]** | F (calendar only) |
-| `handwritten_note` · `other` | Generic lane **[P]** | — |
-| `management_account` | **Never a coding kind** — carry-down + TB tie-out input | B |
-| `opening_balance_doc` | **Never a coding kind** — carry-forward | B |
-| `ssm_company_doc` | **Never a coding kind** — onboarding/identity | B |
-| `agreement_contract` · `knowledge_artifact` | **Never a coding kind** — client wiki | B |
-| `tax_correspondence` | **Never a coding kind** — wiki + tax lane | B / F |
+- **Isolation:** firm-scoped tables enforce `firm_id` RLS. Application writers have EXECUTE on
+  named functions rather than unrestricted DML. Definer functions validate context and scope;
+  ownership, search path and grants are part of the boundary.
+- **Separate privileges:** human, agent read/write, freeform, bank, webhook and auth-wall
+  connections have distinct purposes. A read connection cannot obtain write authority by
+  wrapping a writer in `SELECT`. Read-only session settings supplement grants; changing role is
+  not the same as starting a new login session.
+- **Managed catalog limit:** the public-schema ACL baseline cannot revoke provider-owned
+  `pg_catalog` functions on hosted Supabase. Public access to notification, advisory-lock,
+  sleep and XML helper families is a recorded residual, not a closed privilege boundary.
+  Freeform-read policy and timeouts need their own evidence against that surface.
+- **Attribution and evidence:** client-scoped document actions require a persisted resolution.
+  The current function accepts human, rule and judgement origins. Its numeric confidence
+  predicate remains in SQL; judgement resolutions are minted at 1.0. This is not a model
+  self-assessment knob. Document-backed entries bind to an ingested document and its source hash.
+- **Exact accounting:** money uses integer minor units, with DB balance and rounding rules.
+  Approval is revision-bound; posted history is immutable, corrected by reversal/supersession.
+  Account relationships and domain checks protect the books beyond the JSON/schema shape.
+- **Atomic consequences:** `_subledger_on_approve` keeps open items with GL posting; settlement
+  and asset operations maintain their domain state and audit events in the transaction. Wiki and
+  other projections follow committed events asynchronously.
+- **Reconciliation transaction scope:** complete one reconciliation per transaction. The deferred
+  settled-authority check carries one receipt; any future bulk-completion path must first remove
+  that limitation. The current UI follows the supported shape.
+- **Retries:** insert-style operations accept idempotency keys. A lost response or replay must
+  return the prior effect. Actor binding is also necessary; inconsistent wrapper conventions
+  remain in Work.
 
-~~**The honest gap this table exposes is not tier 3, it is tier 2.**~~ **DISSOLVED by
-ADR-0071 (2026-08-18).** The gap this paragraph registered — sightings breeding only on
-supplier bills and sales invoices, the long tail earning no compounding autonomy — was real
-as written (re-verified 2026-08-06 against `0037`), and it is closed not by widening the
-breeding but by retiring the machinery: under G1/G1.4 the agent's own judgement posts every
-document class unattended (witness-pair gated), and the learning loop is the knowledge
-layer, not rule objects. The historical text stands above for provenance; nothing here is
-still a build item.
+The current human approval core still contains high-amount maker/checker and attestation gates.
+The approved direction replaces them with role floors and automatic receipts. Removing a web
+threshold control did not remove its DB gate; the pending wall-removal migration owns that gap.
+
+Migrations are ordered, checksum-checked deployment inputs. Read the latest replacement of a
+function, not only its first definition. Historical migrations and retained workflow versions are
+executable upgrade/recovery dependencies; document cleanup does not justify deleting them.
+
+## Admission and operator support
+
+Signup and recovery use Supabase Auth mail through configured SMTP. Staff invitations use the
+server-only Resend courier with a token generated through Supabase. Confirmation is a code flow;
+recovery is a link/code-exchange flow. Delivery, rate limits and sender configuration are hosted
+behaviour, not consequences of a successful API response.
+
+Admission uses versioned legal bytes/signatures, registration rate events, checkout intents,
+Stripe Checkout and a signature-verified webhook. Stripe events retain an allowlisted projection
+of reconciliation fields. A successful claim creates the firm in one transaction; there is no
+separate admission-token handoff. Checkout and webhook check their declared Stripe mode. Beta
+uses test mode and unpriced trial plans.
+
+Pre-firm tables cannot use an existing firm's RLS scope. Restricted grants, owner-role policies
+and audited definer doors isolate applicants and operator actions. The webhook has a narrow role
+pair. `is_operator` grants registration/payment-support access and the estate wake-source switch,
+with an additional owner floor; it opens no other firm's books. At most one firm may carry it.
+
+Separate Terms acceptance, the firm consent declaration, paid tiers and metering are unfinished.
+Existing DPA signatures or test Checkout success do not prove those features.
+
+## Durable runtime and events
+
+The runtime starts its Postgres world only when configured. Runs/steps/hooks live in the engine
+schema; `clara.agent_tasks`, interruptions, receipts and outboxes expose scoped product state.
+A local intake spool buffers work; it is not canonical document storage.
+
+`packages/runtime/workflows/registry.ts` selects versions for new work and retains older exports
+for in-flight runs. Frozen workflow bodies and their relative-import closures are hash-checked
+by `scripts/check-frozen-workflows.mjs`. Behaviour changes need a successor and registry repoint;
+rollback must support every non-terminal run's version. Step replay plus database idempotency
+protects against repeated delivery.
+
+Audited writes append events and outbox entries in the same commit. Consumers maintain checkpoints
+and projections, with retries/dead letters and advisory-lock coordination. Context packs gather
+client facts, period, accounts, documents, open items, questions and knowledge with a books-version
+token. Consequential operations validate their expected basis rather than treating an old chat
+response as current state.
+
+The reconciler repairs stranded state and runs daily SST-watch, wiki-lint, asset and adjustment
+belts. Their signed-authority/ramp rules still exist in current implementations. Coding/bank
+rule-execution machines are retired. The universal wake registry has `bank_agent` and `close_prep`
+sources, shipped disabled by default. Their bodies exist; producer/activation/retention work is
+unfinished. Held disabled-source rows are visible posture, not automatically failed tasks.
+Notification-only proactive credentials remain distinct from acting wakes.
+
+Tools are versioned, hand-authored workflow registrations with roster checks. Generating the
+catalog from the DB registry remains a target. Prompts do not substitute for DB privileges,
+provenance or replay protection.
+
+## Documents and knowledge
+
+Intake validates media, scans it, buffers encrypted bytes and establishes private storage custody.
+Documents can remain unassigned. OCR supplies text and coordinates; classification resolves kind
+before downstream semantic processing. Field regions fuel the evidence viewer and provenance.
+
+The current dispatcher has an ordering race: classify can run before OCR is `done`, read empty
+text and label a bank statement `other`. Fixing this is the first queued runtime change. The last
+prompt recall comparison did not reproduce that race.
+
+Invoice/statement extraction uses two model reads, one from OCR text and one from source images,
+persisted with model/version stamps and checked for agreement and arithmetic identities.
+Statement processing also normalises institution identity and derives declared monthly period
+bounds where needed. The local structured lane parses inbound UBL XML. CSV/OFX parsers exist;
+the OFX field battery and office-document semantics remain incomplete.
+
+`coding_kind` describes the control-account consequence, not the document's visual class. Typed
+lanes are supplier bill, sales invoice, sales credit note, customer receipt and supplier payment.
+Other admissible bookkeeping uses the generic lane. Statements feed bank lines; identity,
+knowledge and opening documents feed their own workflows. The codeability predicate excludes
+non-accounting documents from coding and close counts.
+
+Client/firm consents, purpose activations and prepared dispatch authorisations govern external
+processing. Grant and activation are distinct. The wiki path consumes a bound authorisation
+immediately before model dispatch; remaining document/firm egress gaps are in Work. The approved
+DPA-stage declaration is not yet integrated into onboarding.
+
+The client wiki combines immutable sources, a DB index/version/citation model and content-addressed
+page bytes in Storage. Event-driven ingest, synthesis and stale-citation updates maintain it;
+scheduled lint surfaces contradictions. Wiki informs agent judgement as untrusted data. It cannot
+change a permission, numeric evaluator or identity constraint.
+
+## Close, reporting and tax
+
+Opening balances use an explicit seed, targets, items and approval with a trial-balance tie-out.
+Carry-forward is idempotent and reads respect close segments. Close operations serialise by client
+and enforce order across years. Beginning a close freezes the relevant period to book writers
+until finalised or abandoned. Bank settlement therefore precedes beginning the close; the web
+README describes this sequence.
+
+Formal reporting follows open → evaluate → seal → render. Snapshots and versioned evaluators
+derive figures; numeric placeholders resolve to recorded cells, and the renderer consumes their
+display text rather than a model-retyped amount. Template wording, basis, versions, permissions
+and artifact hashes support reproducibility. Evaluator manifests and DB deploy/freeze verification
+protect calculation definitions as well as workflow code.
+
+The renderer's current worker serves the sealed lane. A sandbox layout and DB primitives exist,
+but a sandbox worker does not. Analysis stays marked non-authoritative and cannot enter the seal
+chain. A usable management template and publish/render compatibility still need completion;
+downloaded bytes and a restore/re-render drill are separate acceptance work.
+
+SST-watch screening, schedules and tax foundations exist in SQL. The beta interface shows the
+watch/classification surface; it does not issue returns or computations. Treatment approval, tax
+completion, the payroll calendar and activation remain deferred. Rates, thresholds and legal text
+are verified effective-dated inputs, not cached facts in this document.
+
+## Operation and verification
+
+`/health` reports liveness; `/ready` reports dependencies and consumer state. Idle pool errors
+log/recycle connections; relay-pool counters surface warnings. The leader's dedicated session
+detects failure, releases its advisory lock and reconnects. Lane probes are asynchronous:
+`pending` is unmeasured, `stalled` is a warning, and a missing optional DSN differs from a failing
+configured connection. Hard readiness for all configured lanes and storage remains unfinished.
+
+The deployment uses one always-on Fly machine and a local spool; it is not HA. Source/report
+objects live elsewhere. Backup tools support encrypted full profiles with schema/data,
+role/ACL evidence and object inventories. Restore and rendering need real drills; a manifest
+does not prove a hosted backup can be decrypted.
+
+Schema, runtime image and web versions are coordinated releases. Writer-body changes need a
+quiescent window and post-deploy evidence; bootstrap/re-migration risks are tracked. Web
+`/api/build-info` exposes its source SHA and configured runtime URL. Runtime `/api/build-info`
+(also reached through web `/api/runtime/build-info`) exposes its SHA/image/workflow exports and DB
+frontier. Renderer identity needs a separate check. Vendor
+trace export is off; durable task and audit history stay in Clara-controlled storage.
+
+CI covers lint/security/freeze checks, types, builds, DB/runtime estate tests and historical
+upgrade/replay drills. Web fixture/unit tests and browser E2E prove different things; browser smoke
+is not yet required CI. Frozen files and migrations retain dated comments where changing bytes
+would alter verification contracts. Current instructions live here and in package READMEs.
+
+Official references: [PostgreSQL RLS](https://www.postgresql.org/docs/current/ddl-rowsecurity.html),
+[Supabase SSR](https://supabase.com/docs/guides/auth/server-side/creating-a-client?queryGroups=framework&framework=nextjs),
+[Workflow Postgres world](https://workflow-sdk.dev/worlds/postgres),
+[OpenNext Cloudflare](https://opennext.js.org/cloudflare). Check them against the installed version
+before changing an integration; this cleanup does not upgrade dependencies.

@@ -1,13 +1,9 @@
 name: Wave-E contract drills (δ · θ · ε · η)
 description: >-
-  The four Wave-E focused contract drills the owner's 2026-08-21 ruling demotes to the
-  weekly sweep (ADR-0073 lever 1) — Wave E is closed, and each drill migrates + seeds
-  a fresh full chain into its own database, the serially-growing cost shape. Every step
-  body is moved verbatim from ci.yml's former monolithic `ci` job (lever 5). The
-  hazard each guards (the package sweep's preintegration gates setting
-  CLARA_ALLOW_MISSING_WAVE_E_* for every file) is unchanged, as is every drill's
-  fail-never-skip presence-guard polarity. Requires: workspace installed, PG17 client
-  present, libpq env pointing at the job's throwaway postgres:17 service.
+  Four historical Wave-E contract drills for the weekly and manual sweep. Each
+  migrates and seeds a fresh chain in its own database. They prevent false greens
+  from the package sweep's allow-missing preintegration flags. Requires an installed
+  workspace, PostgreSQL 17 client and libpq environment.
 runs:
   using: composite
   steps:

@@ -1,7 +1,7 @@
 // Dead-man's-switch (healthchecks.io) — the ONLY alarm that fires on the ABSENCE of
 // a backup (laptop/app off, job crashed, upload silently failed). The job pings on
-// SUCCESS; no ping within the grace window (26h per docs/ops/DR.md §7) ⇒ the switch
-// alerts tools@belcort.com. The manifest-age check (the optional CF Worker, deploy/
+// SUCCESS; no ping within the configured grace window alerts the configured recipients.
+// See packages/backup/README.md, "Verify recovery". The manifest-age check (deploy/
 // cf-worker/) is corroboration, not the primary alarm.
 //
 // The ping URL carries a UUID → low-power secret: it is read from env/file by the

@@ -3,7 +3,7 @@
 // age (age-encryption.org) encrypts to a RECIPIENT (public) key — the encrypt side
 // needs NO secret at all, so the scheduled job holds zero key material for this step;
 // the recipient file is committed to the repo. Decryption needs the IDENTITY (private)
-// key, which stays in OWNER CUSTODY off-repo/off-R2 (see docs/ops/DR.md §9). age does
+// key, which stays outside the repository and R2 (see packages/backup/README.md). age does
 // NOT compress, so we zstd BEFORE age.
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
@@ -23,8 +23,8 @@ export function readRecipients(recipientsFile) {
   const real = lines.filter((l) => !/YOUR_|PLACEHOLDER|REPLACE/i.test(l));
   if (real.length === 0) {
     throw new Error(
-      `age recipients file ${recipientsFile} contains only PLACEHOLDER(s). The owner must fill in the real ` +
-        `age recipient public key before the first live run (docs/ops/DR.md §9).`,
+      `age recipients file ${recipientsFile} contains only PLACEHOLDER(s). Configure a verified ` +
+        `age recipient public key before a real run (see packages/backup/README.md, Configuration).`,
     );
   }
   return real;

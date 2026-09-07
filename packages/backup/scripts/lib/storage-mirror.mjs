@@ -9,7 +9,7 @@
 // so an object once encrypted+uploaded never changes: we encrypt+stage ONLY objects
 // whose `.age` key is not already in R2 (existingKeys), and the orchestrator `rclone
 // copy`s them (additive; delete-never). This avoids re-storing the whole ~GB mirror
-// every day (docs/ops/DR.md §9 retention). age is non-deterministic, so we must NOT
+// every day (see packages/backup/README.md, "One run"). age is non-deterministic, so we must NOT
 // re-encrypt already-present objects — the existingKeys skip is what keeps it stable.
 //
 // The service_role key is read LAZILY from a file named by env and is NEVER logged.

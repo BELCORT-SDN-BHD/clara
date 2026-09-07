@@ -257,7 +257,7 @@
     "firmScopeNoClient": "Firm-wide (no client)",
     "noRationale": "No stated rationale.",
     "timelineHeading": "Everything that happened",
-    "timelineNotBuilt": "A firm-wide timeline of who did what — the people's acts as well as the agent's — is not built here yet. It needs the clara.list_firm_timeline read, which this build does not call, so this page can only show the agent receipts below. Approving an entry, resolving a question or changing a member's role leaves no trace on this page today.",
+    "timelineNotBuilt": "The complete firm timeline is available on Firm Home, but this Activity page has not been connected to it yet. This page currently shows agent tasks and agent receipts only.",
     "receiptKinds": {
       "entry_post": "Journal entry posted",
       "bank_agent": "Bank agent act",
@@ -472,7 +472,7 @@
         "untitledNew": "New conversation",
         "noThreads": "No conversation here yet.",
         "archiveHeading": "Archiving a conversation",
-        "archiveNote": "Not built yet. A chat session cannot be archived, renamed or deleted — clara.chat_sessions has no archived_at column and the only lawful change is sharing it with your firm. The transcript is the audit record, so there will never be a “clear”. Archiving needs a new column and an author-only door."
+        "archiveNote": "Archiving is not available from this menu yet. Conversation transcripts remain available as an audit record and cannot be cleared or deleted."
       }
     },
     "fullScreen": {

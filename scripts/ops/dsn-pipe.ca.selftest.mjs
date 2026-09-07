@@ -60,7 +60,7 @@ testCase("a TRUNCATED PEM block fails closed", () => {
 testCase("(F2) the committed CA has at least 30 days remaining before notAfter", () => {
   const cert = new X509Certificate(readFileSync(COMMITTED_CA, "utf8"));
   const daysLeft = (Date.parse(cert.validTo) - Date.now()) / (24 * 60 * 60 * 1000);
-  if (daysLeft < 30) throw new Error(`only ${daysLeft.toFixed(1)} days remain before ${cert.validTo} -- rotate the pinned CA (docs/ops/dsn-bridge.md "Rotation")`);
+  if (daysLeft < 30) throw new Error(`only ${daysLeft.toFixed(1)} days remain before ${cert.validTo} -- rotate the pinned CA (packages/runtime/README.md "Health, TLS and serving identity")`);
 });
 
 const harnessForOpenssl = { reportFail, reportSkip };

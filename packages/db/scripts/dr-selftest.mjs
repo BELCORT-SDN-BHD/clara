@@ -13,7 +13,8 @@
 //   5. assert the rows came back identical
 //   6. clean up in finally (drop <unique>)
 //
-// Prints machine-checkable evidence for docs/ops/DR.md. Connection via env only.
+// Prints recovery evidence; see packages/db/README.md, "Backup and recovery".
+// Connection configuration comes from the environment.
 
 import { unlinkSync } from "node:fs";
 import { makeClient, targetLabel } from "../lib/pg.mjs";

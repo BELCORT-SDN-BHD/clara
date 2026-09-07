@@ -19,8 +19,8 @@
 // twin proving it CAN say NO.
 //
 // NOT proved here (deliberately): that the committed CA validates the REAL live Supabase pooler
-// today. That is the "positive live leg" — a manual, on-demand check, documented in
-// docs/ops/dsn-bridge.md, run before any ceremony and at PR review; it is deliberately kept OUT
+// today. That is the "positive live leg" — a manual, on-demand check run before any ceremony
+// and at PR review; it is deliberately kept OUT
 // of the auto-run battery so `pnpm lint` never depends on third-party network reachability. See
 // this PR's report for the live evidence captured at build time, including an INDEPENDENT-
 // CHANNEL byte-comparison against Supabase's own publicly-hosted copy of the certificate.

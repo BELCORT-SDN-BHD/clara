@@ -3,7 +3,7 @@ description: >-
   Fail CLOSED (finding 2): if origin/main EXISTS on the remote, the append-only
   freeze-lint + migration-history gates MUST have it — a fetch failure can no longer
   masquerade as success. Only a genuine first-introduction (origin/main absent) may
-  pass without a base. Moved verbatim from ci.yml (ADR-0073 lever 5).
+  pass without a base.
 runs:
   using: composite
   steps:

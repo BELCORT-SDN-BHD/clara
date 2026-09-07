@@ -98,7 +98,7 @@ export function resolveConfig({ dryRun = false } = {}) {
 
   if (missing.length) {
     const msg = `backup: missing required configuration:\n  - ${missing.join("\n  - ")}\n` +
-      `See packages/backup/.env.example and docs/ops/DR.md §9. (Secrets never go in argv or code.)`;
+      `See packages/backup/.env.example and packages/backup/README.md, Configuration. (Secrets never go in argv or code.)`;
     if (dryRun) {
       // In dry-run we REPORT but do not abort on missing values — the point is to prove
       // the wiring resolves given a full env; the caller decides.

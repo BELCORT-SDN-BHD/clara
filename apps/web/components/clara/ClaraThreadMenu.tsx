@@ -4,7 +4,7 @@
 //
 // WHAT IT BUILDS, AND WHY EXACTLY THIS MUCH. The census behind this train found that
 // NEW and SWITCH were pure UI gaps — both wires have been live since 0006 — while
-// CLEAR is structurally out and ARCHIVE is a genuine backend gap:
+// CLEAR is structurally out and ARCHIVE still needs its frontend control:
 //
 //   NEW      `POST /api/chat/sessions` is live (packages/runtime/src/chatRoutes.ts:137-157)
 //            and `createSession` is exported (lib/clara/api.ts:181-192). Its only caller
@@ -20,10 +20,9 @@
 //            reverse-not-delete is the law, and a "clear" control would be a control
 //            for a door that must never exist. There is deliberately no affordance for
 //            it here, not even a disabled one.
-//   ARCHIVE  A REAL BACKEND GAP, named honestly. The table has no `archived_at` and the
-//            only lawful mutation is `clara.share_chat_session` (0006:894), so there is
-//            no door to call. It gets a NotBuiltNote — the product's one "named, not
-//            delivered" signal — rather than a control that would refuse.
+//   ARCHIVE  Migration 0174 added `archived_at` and the author-only archive door; the
+//            runtime excludes archived sessions from its list. This menu does not call
+//            the door yet, so it keeps a NotBuiltNote until the control is connected.
 //
 // 裁-117 rules one thread per altitude as the beta shape "with a small firm-threads
 // list later", so this is a SWITCHER over the caller's own threads, not a sidebar and
@@ -53,8 +52,8 @@ export function ClaraThreadMenu({
   creating: boolean;
   /** FALSE while a create could not land anywhere the human would see it — the read is
    *  still in flight, or it settled without a caller projection. New is refused for the
-   *  duration, because a session minted into that state is listed by nothing and can
-   *  never be archived or deleted. See `useActiveThreadId`'s own note. */
+   *  duration, because a session minted into that state is listed by nothing in the
+   *  current browser state. See `useActiveThreadId`'s own note. */
   canCreate: boolean;
   onCreate: () => void | Promise<void>;
   onSelect: (threadId: string) => void;

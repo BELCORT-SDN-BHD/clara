@@ -23,13 +23,10 @@ export default async function FirmActivityPage() {
       {/* T7 (port-wave plan §4/§5) — cancel_agent_task's own control over the
           LIVE task queue, above the receipts history below it. */}
       <AgentTasksPanel />
-      {/* E-2 / CB-AE2E-018: the TIMELINE this page should lead with — every act
-          in the firm, human as well as agent — is a DATABASE gap, not a web one.
-          `clara.domain_events` and `clara.audit_log` both exist and are granted,
-          but no read joins them into a firm-wide timeline and apps/web reads
-          neither; the honest shape is a dashed note naming the absence, and the
-          note goes away the day the read lands. Nothing fake is wired behind
-          it. */}
+      {/* CB-AE2E-018: `clara.list_firm_timeline` is live and Firm Home already
+          reads it. This route still leads with the older task and receipt
+          surfaces, so keep the missing Activity-page connection visible until
+          the timeline section is shared or moved here. */}
       <section className="flex flex-col gap-2">
         <SectionHeader level={2}>{t("timelineHeading")}</SectionHeader>
         <NotBuiltNote className="text-xs">{t("timelineNotBuilt")}</NotBuiltNote>

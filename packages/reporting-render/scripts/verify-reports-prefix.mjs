@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// THE `reports/` PREFIX POSITIVE READ (design part2 §9, R18/MINOR 25; docs/ops/DR-render.md's
-// first "not inherited" ceremony step).
+// Verify a reports-prefix upload and readback before rendering actual reports.
+// See packages/reporting-render/README.md, "Modules and validation".
 //
 // safeKey's live regex admits only `firms/…/docs/…`, and the storage role check is about the
 // ROLE, not the PREFIX — so extending the shared `firm-docs` bucket's policy to `reports/` is a
@@ -19,7 +19,7 @@
 // leaves one inert, content-addressed artifact behind rather than anything a reader could mistake
 // for a report. It is a `.json` object, which safeReportKey admits alongside `.pdf`.
 //
-// Run it at ceremony time, BEFORE the first seal:
+// Run before the first seal, with the intended environment supplied securely:
 //   CLARA_STORAGE_URL=… CLARA_STORAGE_ROLE_JWT=… CLARA_STORAGE_ROLE=… \
 //   CLARA_REPORTS_PROBE_FIRM=<firm uuid> node scripts/verify-reports-prefix.mjs
 

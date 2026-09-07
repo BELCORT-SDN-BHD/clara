@@ -19,11 +19,11 @@
 //     it is an evidence/diff artifact only — the restorable role recreation is the
 //     reviewed, idempotent deploy/roles-bootstrap.sql. This is what a real restore needs
 //     so it never loses in-flight runs OR the security envelope. Scheduled DR must use
-//     the full profile (see docs/ops/DR.md).
+//     the full profile (see packages/db/README.md, "Backup and recovery").
 //
-// Connection is via libpq env vars only (PGHOST/PGPORT/PGUSER/PGPASSWORD/
-// PGDATABASE) — pg_dump does NOT read DATABASE_URL, and we never put a DSN on the
-// command line. The pg_dump binary MUST match the server major version
+// The shared connection helper derives libpq PG* variables from a DSN or PG* input;
+// pg_dump itself does not read DATABASE_URL. Credentials stay out of argv.
+// The pg_dump binary must support the server major version
 // (Postgres 17 here). On a machine whose PATH pg_dump is older, point PG_DUMP at a
 // v17 binary, e.g. PG_DUMP=/path/to/pg17/bin/pg_dump (PG_DUMPALL for globals).
 //
@@ -123,7 +123,7 @@ function dumpGlobals({ log = console.log } = {}) {
   });
   if (r.error || r.status !== 0) {
     log(
-      `backup(full): globals dump SKIPPED (${r.error ? r.error.message : "exit " + r.status}) — roles may not be dumpable by this user on a managed project. This is an EVIDENCE/DIFF artifact only; the restorable role recreation is deploy/roles-bootstrap.sql (see docs/ops/DR.md).`,
+      `backup(full): globals dump SKIPPED (${r.error ? r.error.message : "exit " + r.status}) — roles may not be dumpable by this user on a managed project. This is an EVIDENCE/DIFF artifact only; the restorable role recreation is deploy/roles-bootstrap.sql (see packages/db/README.md, Backup and recovery).`,
     );
     return null;
   }
@@ -157,7 +157,7 @@ export async function backupFull(opts = {}) {
     throw new Error(
       `full backup: required schema(s) MISSING from the target — ${missing.join(", ")} (present: ${present.join(", ") || "none"}). ` +
         `The FULL DR profile must capture every authoritative schema (${AUTHORITATIVE_SCHEMAS.join(", ")}) so a restore never drops durable-run state; ` +
-        `refusing to write a partial "full" backup. If a schema legitimately does not exist yet, the full-profile DR drill is not ready (see docs/ops/DR.md).`,
+        `refusing to write a partial "full" backup. If a schema legitimately does not exist yet, the full-profile DR drill is not ready (see packages/db/README.md, Backup and recovery).`,
     );
   }
   log(`backup(full): authoritative schemas present: ${present.join(", ")} · target ${targetLabel()}`);

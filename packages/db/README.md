@@ -1,254 +1,116 @@
-# @clara/db — data plane
+# @clara/db
 
-Versioned migrations, seeds (synthetic only), the ephemeral test rig, and the
-DR backup/restore tooling. The shared Postgres is Clara's single source of
-truth (`docs/ARCHITECTURE.md` §3).
+Clara's PostgreSQL migrations, synthetic seeds, database tests, and backup/restore tools.
+Product boundaries and the intended architecture live in [ARCHITECTURE](../../docs/ARCHITECTURE.md).
 
-> **Scope.** Slice 1 landed the *pipeline* (migration `0001_smoke.sql` — a
-> placeholder that only proves the runner works end-to-end). **Slice 2** (`0002`–
-> `0004` + seed `0002_core_seed.sql`) lands the **governed DB core**: the six
-> `clara_*` roles, identity/RBAC, forced RLS with role-pinned read policies, the
-> two-lane audited writers (human vs. wake — the agent can never sign), the four
-> structural invariants, the balance/immutability/append-only triggers, and
-> money-as-cents. See `docs/plan/completed/rebuild-plan-history.md`.
->
-> **Migration ledger — TRUED 2026-09-03 (counted, not remembered).** `main` carries **158
-> migration files, `0001`–`0163`, counted at `265a8ee7`; count the directory, not this line**
-> (the sequence skips `0032` and `0073`–`0076`, none of which
-> ever existed as files — `0073`-`0076` were claimed by the Wave-E ζ render/DR train and then
-> re-claimed at `0079`-`0083` when the frontier moved before it merged; only its OWN squash
-> subject still says "0073-0076", stale pre-renumber testimony, immutable, while the migrations
-> DIRECTORY stays the numbering authority). **THIS BRANCH adds one file above that frontier,**
-> `0164_checkout_gate_c6_web_reads.sql`. The tail, in number order: **`0161` Q-D6 (#509),
-> MERGED · `0162` FS-7 e2 (#512), MERGED · `0163` FS-4 C-3 (#493), MERGED at `265a8ee7` · `0164`
-> Lane B's C-6 (#517), claimed at this branch's own merge prep and settled ONCE THIS PR MERGES.**
-> Every number below `0164` has landed, so this file's number carries no re-cut condition —
-> and if another train merges above `0163` first, this one re-cuts rather than inserting under
-> it. The runner refuses a
-> late-inserted lower number, so a number belongs to whoever merges next above the frontier,
-> never to whoever authored first. And **live is applied through the frontier
-> `0153_f_t1_sst_reference_tables`, 148 migrations** (`0154`–`0163` are on `main`, merged but
-> NOT yet applied — each applies in its own ceremony window; re-verify the live number with
-> `select count(*), max(version) from clara.schema_migrations` before trusting this snapshot).
-> *(Was: "150 files through `0155`, trued 2026-08-30" — the FS-4/FS-7 trains claimed
-> `0156`–`0164` since.)* The paragraph below is the **2026-08-09 arrivals note**, kept as the record
-> of that batch rather than rewritten:
->
-> The most recent arrivals
-> are the **F6–F9 batch** (ADR-066, applied 2026-08-08 23:24Z in ONE D1-quiesced ceremony):
-> `0051_extraction_recovery_door.sql` (F6 — both failed populations get a lawful retry) ·
-> `0052_customer_identity_facts.sql` (F7 — `invoice.contact_person` joins the CLR10
-> allowlist) · `0053_autodraft_readmit_after_withdrawal.sql` (F8 — the five-conjunct
-> re-admit arm) · `0054_region_ordinal.sql` (F9 — the stable `region_idx`). Before them:
-> the §7-A pair `0046`/`0047` (ADR-063/064) and the post-close fix train `0048` (F5
-> sweep-cap own-run) · `0049` (zero-evidence direction abstains; born
-> `clara.migration_receipts`) · `0050_egress_release_skip_consent.sql` (F4).
->
-> **This ledger is a snapshot and WILL go stale — verify before relying on it.**
-> The authoritative reads are `select count(*), max(version) from clara.schema_migrations`
-> against live, and `ls packages/db/migrations/` for the repo. Migration numbers are
-> claimed at MERGE time (standing law), so the repo frontier can move without a deploy.
->
-> **audit_log append-only — honesty boundary.** `clara.audit_log` is append-only,
-> enforced by UPDATE/DELETE/TRUNCATE triggers so that no app role, agent, or even
-> a SECURITY DEFINER bug can rewrite a receipt. This is defense in depth against
-> *application-layer* tampering — **not** against a compromised database
-> **superuser**, who can drop the trigger or the table and therefore sits outside
-> the guarantee. That boundary belongs to the platform (Postgres role hardening,
-> backups, DR), not to the schema.
+## Layout and commands
 
-## Layout
+| Path | Purpose |
+|---|---|
+| `migrations/` | Ordered schema and function changes; applied files are checksum-verified |
+| `seeds/` | Synthetic test data |
+| `lib/` | Connection resolution and destructive-operation guards |
+| `scripts/` | Migration, seed, reset, backup, restore and verification entry points |
+| `deploy/` | Role, login, Storage and platform configuration outside the migration runner |
+| [tests/README.md](tests/README.md) | Database test prerequisites and isolation |
 
-```
-migrations/NNNN_name.sql   numeric-ordered, immutable once applied
-seeds/NNNN_name.sql        SYNTHETIC data only, idempotent
-lib/pg.mjs                 env-only connection helper (no DSN in code/argv)
-scripts/migrate.mjs        runner: applies pending migrations in a tx each; records sha256
-scripts/seed.mjs           runner: applies seeds
-scripts/reset.mjs          drops ONLY the `clara` schema
-scripts/backup.mjs         pg_dump -> timestamped plain-SQL file (default | --profile full)
-scripts/restore.mjs        psql apply of a dump file
-scripts/restore-full.mjs   full DR restore: roles-bootstrap -> restore -> ceremony checklist
-scripts/dr-selftest.mjs    real dump+restore round-trip in a throwaway schema
-scripts/dr-verify.mjs      full-profile restore verification battery (source<->target)
-scripts/dr-verify-util.mjs · dr-verify-checks.mjs   the battery's helpers + §4 probes
-deploy/roles-bootstrap.sql idempotent recreation of the clara-custom roles it enumerates — 19 at `265a8ee7` (11 group + 7 login shells + clara_storage_docs, #493 added clara_auth_wall/clara_auth_wall_login); count the file, not this line (DR step 1; FRESH-TARGET-ONLY)
-deploy/read-logins-ceremony.sql  runtime + read-pool LOGIN ceremony (post-restore; mirrors write-login)
-deploy/acl-baseline.sql    HIGH-10 public-schema ACL baseline (ceremony; post-restore re-apply)
-tests/pipeline.test.mjs    migrate -> seed -> assert (node --test)
-```
-
-## Connecting (no secrets in code)
-
-Connection comes from the environment only. Either export libpq vars or a DSN:
+Run from the repository root:
 
 ```sh
-# libpq vars (REQUIRED for backup/restore — pg_dump/psql don't read a DSN)
-export PGHOST=... PGPORT=5432 PGUSER=... PGPASSWORD=... PGDATABASE=postgres
-# or a DSN for the node scripts (Supabase SESSION pooler, port 5432)
-export DATABASE_URL=...
+pnpm --filter @clara/db migrate
+pnpm --filter @clara/db seed
+pnpm --filter @clara/db test
+pnpm --filter @clara/db reset
+pnpm --filter @clara/db backup
+pnpm --filter @clara/db backup:full
+pnpm --filter @clara/db restore:full --file /path/to/full-dump.sql
+pnpm --filter @clara/db dr:selftest
+pnpm --filter @clara/db dr:verify
 ```
 
-See `.env.example`. `.env` is gitignored; never commit a credential.
+This package is plain ESM. It has lint and executable tests, but no TypeScript build gate.
 
-## Commands
+## Connections and destructive operations
 
-```sh
-pnpm --filter @clara/db migrate    # apply pending migrations
-pnpm --filter @clara/db seed       # load synthetic seed data
-pnpm --filter @clara/db test       # migrate -> seed -> assert (needs a DB)
-pnpm --filter @clara/db reset      # drop the clara schema (scoped, safe)
-pnpm --filter @clara/db backup     # pg_dump the clara schema (default profile)
-pnpm --filter @clara/db backup:full# FULL DR profile: 4 schemas + owners + privileges
-pnpm --filter @clara/db restore:full # roles-bootstrap -> restore -> ceremony checklist
-pnpm --filter @clara/db dr:selftest# exercise a full dump+restore round-trip
-pnpm --filter @clara/db dr:verify  # restore verification battery (needs the two CLARA_DR_*_URL)
+Supply connection credentials through `DATABASE_URL`, `WORKFLOW_POSTGRES_URL`, or libpq
+`PG*` environment variables. [lib/pg.mjs](lib/pg.mjs) resolves one target, rejects conflicting
+URL/PG settings, and derives the child process's `PG*` environment for `pg_dump` and `psql`.
+Do not put credentials in source or command arguments.
+
+Use a disposable database for tests, seeds and resets. These operations require
+`CLARA_ALLOW_DESTRUCTIVE=1`; non-disposable targets also require
+`CLARA_DESTRUCTIVE_TARGET` to match the resolved `user@host:port/database` exactly.
+The guard recognizes host/name patterns; it cannot establish that a local database contains
+only disposable data. `reset` drops the `clara` schema, not the durable engine or platform schemas.
+`migrate` applies to its configured target without an interactive confirmation.
+
+Use PostgreSQL 17 client tools for this estate. Override `PG_DUMP`, `PG_DUMPALL` and `PSQL`
+when PATH points at a different installation. An older-major `pg_dump` refuses a newer server.
+[PostgreSQL documentation](https://www.postgresql.org/docs/17/app-pgdump.html)
+
+## Migration and deployment behavior
+
+The runner uses a session connection, a session advisory lock, and one transaction per migration.
+Use a direct connection or session pooler. Transactions default to READ COMMITTED; the
+checksum-keyed exceptions in [migration-atomicity.mjs](scripts/migration-atomicity.mjs) select
+a different isolation level where required.
+
+Applied migration bytes are immutable. Add a successor migration instead of changing the stored
+checksum. Filenames must be `NNNN_name.sql`; the runner rejects late insertion below the applied
+frontier. Files with no leading digit, including `UNNUMBERED_*.sql`, are silently skipped.
+`CLARA_MIGRATIONS_DIR` selects an alternate chain and must be set correctly for a split test rig.
+
+Read the repository frontier from `migrations/` and the target frontier from:
+
+```sql
+select count(*), max(version) from clara.schema_migrations;
 ```
 
-Root shortcuts: `pnpm db:migrate`, `pnpm db:seed`, `pnpm db:reset`, `pnpm db:backup`,
-`pnpm db:backup:full`, `pnpm db:restore:full`, `pnpm db:dr:verify`. Full-profile DR
-runbook + tooling: `docs/ops/DR-full-drill.md`.
+Before deploying a change to an active writer body, stop new writes and drain in-flight calls,
+apply the migration, then resume. Calls already executing can finish on their previous body.
+A changed function named in `clara.control_witnesses` must receive the matching reviewed
+`prosrc_sha` in the same migration, or its dependent gate refuses.
 
-**Running `test` locally also needs `CLARA_ALLOW_DESTRUCTIVE=1`.** `tests/pipeline.test.mjs`
-calls the real `seed()` (which truncates+reloads the smoke tables) as its own proof that the
-pipeline works end to end, and `lib/guard.mjs` refuses any destructive op without the sentinel
-— by design, the same wall every seed/reset/restore script carries, never weakened for a test's
-convenience. CI's `db-estate` job sets this for the WHOLE job (`.github/workflows/ci.yml`), so
-migrate, seed and test all share one env block there; a local run that exports the var for
-migrate/seed but forgets it on the `test` invocation gets a single, correctly-worded refusal
-from `pipeline.test.mjs` and nothing else. Export it once, for the whole session, before any of
-the three commands above.
+Rebuilding a target from the migration chain and restoring a dump are different operations.
+A full replay creates login shells as NOLOGIN; restore the intended LOGIN state and credentials
+afterward and probe every configured runtime lane. Existing platform roles can also collide
+with historical migration census assertions. A green local chain does not prove that a live
+cluster can be replayed without a target-specific preflight.
 
-**Re-running `test` against the SAME already-tested database needs `CLARA_ESTATE_REUSED_DB=1`.**
-A handful of one-way evaluator-ceremony cells (`clara._tf_evaluator_deploy_once`, 0060, admits
-exactly one undeployed→deployed transition per `clara.evaluator_versions` row, EVER) prove a
-"born undeployed" precondition that a second invocation against the same database can never
-re-witness — that is the ceremony working as designed, not a defect. There is no `deployed_at`
-column to tell that apart from a fixture illegitimately flipping a row early, so reuse must be
-DECLARED, not inferred: `f-a5-reporting-agency-pr1.test.mjs` cell D hard-fails an unexplained
-already-deployed row unless this var says the reuse is deliberate. Everywhere else in this
-family the freshness check is derived (`evaluatorCeremonyUnwitnessed()`, `delta-fixtures.mjs`)
-from the exact closed-world evaluator roster `delta-contract.test.mjs` pins by name and version
-— not a blanket "any undeployed row" count, so migrating a reused database onto a NEW frontier
-that registers one more evaluator does not get misread as "fresh" (it fails closed either way,
-just loudly, rather than silently).
+## Frozen evaluator deployment
 
-## The migration runner contract
+An evaluator registered as undeployed remains unavailable until deliberately activated.
+There are two separate steps:
 
-- Migrations apply in numeric filename order, each in its **own transaction**.
-- **`CLARA_MIGRATIONS_DIR`** (env, optional) points the runner at an alternate
-  migrations directory (`scripts/migrate.mjs` reads it). It is **BINDING for the
-  split-rig CI sweeps** — every `packages/db/tests/split-lists/test-list-d-b*.txt`
-  run sets it to the SUITE's directory; forgetting it on a split rig yields ~300
-  phantom reds. Unset, the runner uses this package's `migrations/`.
-- Each applied migration's `sha256` is recorded in `clara.schema_migrations`.
-- **Migrations are immutable**: editing an already-applied file trips a checksum
-  drift error — add a new migration instead.
-- `reset` drops only the `clara` schema. It never touches `public`, `spike`,
-  `workflow`, `graphile_worker`, or any Supabase-managed schema. (On the shared
-  project the Slice-0 spike still holds a live parked run in `workflow` /
-  `graphile_worker` — this is why the pipeline is schema-scoped.)
-- **The filename filter has two branches, and only one of them is loud.** A filename with **no
-  leading digit** (the `UNNUMBERED_*.sql` an author lands with, before 裁-108's number claim at
-  merge prep) is **silently skipped** — `MIGRATION_LIKE = /^\d+.*\.sql$/` (`scripts/migrate.mjs:59`),
-  `if (!MIGRATION_LIKE.test(file)) continue;` (`:262`), no log line, and the run summary at `:524`
-  (`migrate: N new migration(s) applied · M total`) counts only files that passed the filter — so
-  a green `pnpm db:migrate` proves nothing about a file still named `UNNUMBERED_*.sql`. A
-  leading-digit name that is **not** fixed-width `NNNN_name.sql` is the other branch and throws
-  loudly instead (`:263-265`). No CI job covers the silent branch today. **The convention is
-  live whenever an open PR carries an `UNNUMBERED_*.sql` file — count it on the PRs' branches
-  (`git ls-tree origin/<branch> packages/db/migrations/ | grep UNNUMBERED`), never this line.**
-  At `0b8bb58c` (2026-09-03) that was **#517 alone** — #509 and #512 had already merged with
-  claimed numbers (0161, 0162). Cite 裁-108 ("the number claim at merge prep ARMS the tests")
-  whenever you review one.
+1. `node packages/db/scripts/deploy-evaluator-version.mjs --name <name> --version <version>`
+   changes the database row under the bare migration principal, with no active SET ROLE.
+2. `node scripts/check-frozen-evaluators.mjs --lock-deployed` locks the repository manifest.
 
-## Deploy contract (writer-body migrations) — rule D1
+The database transition is one-way and hash-verified. The manifest command marks **every**
+currently unlocked entry deployed; it is not a per-entry operation. Reconcile the intended
+deployment set first. Neither step substitutes for the other.
 
-A migration that **replaces the body of an audited writer** (e.g. `0005_event_spine`
-rewrites every `clara.*` writer to append its `domain_events` row in the same
-transaction) carries a deploy-time obligation once a **live runtime** exists:
+## Backup and recovery
 
-> **D1 — write-quiesce.** Any migration that replaces writer function bodies
-> **requires an application write-quiesce for its deploy window.** PostgreSQL runs
-> each in-flight PL/pgSQL execution to completion on the body it **started** with, so
-> a writer call that begins *before* the migration commits and finishes *after* it
-> runs on the OLD body — it would skip the new behaviour (e.g. emit no event). Quiesce
-> the writers (stop accepting new wake/human write RPCs, let in-flight ones drain),
-> apply the migration, then resume.
+The default `backup` is a **diagnostic snapshot only**: it omits engine state and strips
+owners/privileges. Do not start a restored diagnostic snapshot as an application database.
 
-This was **materially zero-risk pre-Slice-4** — no runtime deployed, and
-CI / throwaway targets have no concurrent writers — so `0005` needed no special
-handling. The runtime is live since Slice 4: the rule binds every live deploy that
-ships a writer-body change.
-(Design authority: `docs/plan/completed/slice3-event-spine-contract.md` v2.2 §D1; the in-flight-body
-behaviour is a PostgreSQL property, not a Clara mechanism.)
+`backup:full` preserves owners and privileges across `clara`, `workflow`,
+`workflow_drizzle` and `graphile_worker`. Its globals dump is supporting evidence;
+[deploy/roles-bootstrap.sql](deploy/roles-bootstrap.sql) recreates custom roles on a fresh target.
 
-> **D2 — re-witness a witnessed control.** A migration that `CREATE OR REPLACE`s a body named in
-> `clara.control_witnesses` **must re-witness it in the same file** — update that row's
-> `prosrc_sha` to the sha256 of the reviewed new body. The registry exists because a control had
-> been "proven" first by a migration ledger row (append-only, so permanently true long after
-> `0118` dropped the control it named) and then by a marker string in the body (a text projection:
-> a string literal, a nested dollar-quoted body or an unused variable all satisfy it). The gate
-> now opens for the reviewed BYTES and nothing else, which means a recut without a re-witness
-> **closes the gate and its door starts refusing** — deliberately, because a control whose body
-> changed without review is a control nobody has reviewed. The instrument is
-> `encode(sha256(convert_to(prosrc,'UTF8')),'hex')` — prosrc, never `pg_get_functiondef`.
-> `packages/db/tests/binding-proposal-pr-1.test.mjs`'s `bp1.C3-registry` cell asserts every
-> registered witness still matches its live body, so a forgotten re-witness reds the suite rather
-> than surfacing as a door that has quietly stopped working.
+`restore:full` runs role bootstrap before the transactional dump restore, then prints manual
+follow-ups. Complete those follow-ups against the current estate: private Storage bucket/policies
+and bytes, every configured login and credential, public-schema ACL baseline, and engine migration
+journal parity. Use the [runtime README](../runtime/README.md) for the complete lane roster,
+including freeform, bank and checkout logins.
 
-## Transaction-isolation pins
+For an isolated drill, keep the restored engine off. A real recovery may resume parked runs
+only after verifying the target's custody, roles and workflow compatibility.
+`dr:verify` uses distinct `CLARA_DR_SOURCE_URL` and `CLARA_DR_TARGET_URL`, with a principal
+able to read all rows; `CLARA_DR_STRICT=1` makes its canary/AP checks mandatory, and
+`CLARA_DR_VERIFY_OUT` writes evidence. Inspect PASS/FAIL/SKIP outcomes, not just the command's exit.
 
-Every migration opens **READ COMMITTED**, stated explicitly on the `BEGIN` and then
-**read back from the server** and refused on mismatch — `0019_wiki_boundary` refuses
-outright under repeatable read (CLR32), so this is never a global switch.
-
-`MIGRATION_ISOLATION_PINS` (`scripts/migration-atomicity.mjs`) is the one exception list,
-keyed on a migration's **checksum** — its identity, not its number, so a renumbered file
-still resolves. A pinned name arriving with unexpected bytes aborts in pre-flight, before
-anything is applied. Today it holds exactly one entry: `0057_wave_e_registry_snapshots`
-runs REPEATABLE READ, because its S0.9 birth sentinel asks whether the transaction's own
-xid is visible in its own snapshot — a question with no stable answer under READ COMMITTED,
-since any transaction completing after ours anywhere on the cluster pushes the snapshot's
-`xmax` past our xid.
-
-**Before adding a pin, read the trade recorded above the table.** A repeatable-read
-transaction holds one snapshot for its whole life: the runner's before/after evidence reads
-stop seeing third-party changes (accepted — a pinned migration only ever applies on a fresh
-chain), and a **data backfill** under it silently skips rows committed after the snapshot
-and raises 40001 on concurrently-modified rows. Backfills want the D1 write-quiesce window
-or no pin at all.
-
-## Evaluator deploy ceremony (two SEPARATE acts, both required)
-
-A new frozen evaluator ships DARK (`deployed: false`) by construction. Flipping it live is
-TWO halves, run in this order — neither substitutes for the other:
-
-1. **`node packages/db/scripts/deploy-evaluator-version.mjs --name <n> --version <v>`** — the
-   DB-side act. It flips `clara.evaluator_versions.deployed` for the named row, but only under
-   the BARE migration principal: `clara._tf_evaluator_deploy_once` (`0060:93`) refuses the
-   undeployed→deployed transition unless `current_user = session_user`, i.e. the deploying
-   session holds NO active `SET ROLE`. `clara.verify_evaluator_freeze()` is checked before the
-   flip commits. This transition is one-way and admitted exactly once per row, ever — no undo,
-   and a second run is a no-op.
-2. **`node scripts/check-frozen-evaluators.mjs --lock-deployed`** — the repo-side act. It stamps
-   `frozen-evaluators.json` so a deployed body's hash becomes immutable versus `origin/main`.
-   Skipping this after step 1 leaves a LIVE evaluator outside the append-only hash lock — missed
-   once on 2026-08-24, caught and fixed 2026-08-26.
-
-**`--lock-deployed` is BLANKET, not per-entry**: it stamps EVERY manifest entry whose `deployed`
-flag is not already `true`. Run it only when every currently-dark entry in the manifest is
-genuinely, deliberately intended to be deployed — never as a routine "sync the file" step.
-
-## CI
-
-CI applies every migration to a **throwaway `postgres:17` service container**
-(never a live project), then runs the seed + smoke test against it. See
-`.github/workflows/ci.yml` and the repo `README.md`.
-
-## Typechecking
-
-This package is intentionally plain ESM (`.mjs`) — no build step, runnable
-directly by `node` in CI. It has no `tsc` typecheck; correctness is proven by
-`tests/pipeline.test.mjs`. TypeScript packages (`@clara/runtime`,
-`@clara/web`) carry the `typecheck` gate.
+Database dumps do not include Storage bytes or managed Auth configuration.
+The [backup service](../backup/README.md) adds encrypted off-site document copies and selected Auth
+data. Restore verification is necessary before treating a backup as recoverable.

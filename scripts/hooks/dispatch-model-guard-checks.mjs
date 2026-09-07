@@ -1,20 +1,16 @@
-// Dispatch-model guard — pure decision logic (AGENTS.md hard constraint 5).
+// Dispatch-model guard — pure decision logic for the orchestrator-fable worker policy.
 //
 // THE LAW THIS ENFORCES. Every dispatch pins an explicit `model`. Omission does not fail — it
 // SILENTLY INHERITS the main model (Fable), which is forbidden. Named and built-in Workflows
-// count as dispatches. Sources:
-//   - AGENTS.md, hard constraint 5 ("Every dispatch pins an explicit `model`").
-//   - docs/adr/README.md:276-278 — "Named/built-in Workflow invocations are dispatches — every
-//     dispatch pins an explicit `model`; omission inherits the main model, which is forbidden.
-//     *(owner directive, recorded at 0069)*".
+// count as dispatches. Source: .claude/skills/orchestrator-fable/SKILL.md, which requires every
+// native dispatch to carry an explicit model rather than inherit the orchestrator model.
 // It was prompt-enforced only until this file, and it was violated once historically: a
 // code-review Workflow script whose agent() calls carried no model pin ran the whole review on
 // the inherited main model without anyone noticing at dispatch time. That is the exact shape
 // this guard exists to catch.
 //
 // ===========================================================================================
-// THREAT MODEL — READ THIS BEFORE JUDGING THE GUARD. Same posture as the pinned-ids guard
-// (scripts/hooks/pinned-ids-guard-checks.mjs), and stated here for the same reason.
+// THREAT MODEL — READ THIS BEFORE JUDGING THE GUARD.
 //
 // This is a MISTAKE-NET for the common OMISSION shapes. It exists to catch the realistic
 // failure: an orchestrator, working fast, spawns a lane or fires a workflow and simply forgets
@@ -26,10 +22,9 @@
 // spawns a worker through a channel this file does not classify — a raw `codex exec` in Bash,
 // an MCP server that fans out internally, a workflow whose model is chosen by data at runtime —
 // passes untouched. The law's PRIMARY enforcement is elsewhere and always was: the process law
-// in AGENTS.md and the review ladder. This guard is a cheap net under those, not a substitute.
+// in the orchestrator skill and the review ladder. This guard is a cheap net under those, not a substitute.
 //
-// The structural ceiling is the same as the pinned-ids guard's, and is documented in full in
-// that file's header: a PreToolUse hook that FAILS TO LAUNCH fails OPEN (only exit 2 blocks);
+// A PreToolUse hook that FAILS TO LAUNCH fails OPEN (only exit 2 blocks);
 // `disableAllHooks: true` in an untracked settings.local.json blanks it; hook entries MERGE
 // across settings levels, so a personal settings file cannot selectively remove this one.
 //
@@ -50,7 +45,7 @@
 //      the body lives elsewhere. ALLOWED, and the omission stays a review-ladder matter.
 //   4. AN UNREADABLE scriptPath. Fail-OPEN. A mistake-net that blocks on its own inability to
 //      read a file converts an I/O hiccup into a broken harness, which is the failure mode the
-//      pinned-ids guard's malformed-stdin path also declines to have.
+//      guard should not have.
 //   5. CASE. The agent-call probe is case-SENSITIVE (`agent(`, the spelling the workflow DSL
 //      uses). A script spelling it `Agent(` is not classified as a dispatch site here. Widening
 //      to /i would start blocking scripts that merely construct something named `Agent`, and a
@@ -64,9 +59,9 @@
 
 /** The citation every block message carries. Kept in one place so it cannot drift. */
 export const CONSTRAINT_CITATION =
-  "AGENTS.md hard constraint 5 (every dispatch pins an explicit `model`; omission silently "
-  + "inherits the main model, which is forbidden) — owner directive recorded at ADR-0069 "
-  + "(docs/adr/README.md, \"Named/built-in Workflow invocations are dispatches\")";
+  "orchestrator-fable worker policy (every native dispatch pins an explicit `model`; omission "
+  + "silently inherits the orchestrator model, which is forbidden) "
+  + "(.claude/skills/orchestrator-fable/SKILL.md)";
 
 /**
  * An agent-call site inside a Workflow script. `\b` before `agent` is load-bearing: it keeps

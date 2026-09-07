@@ -1,11 +1,8 @@
 name: Wave D-b frontier leg
 description: >-
-  One leg of the [WAVE D-b SPLIT] per-slice frontier matrix, moved verbatim from
-  ci.yml's db-slice-frontiers job (ADR-0073 lever 5) with the mechanical transform
-  `matrix.*` → `inputs.*` and the toolchain steps replaced by the shared
-  setup-workspace / pg17-client composites. The presence gate, the NONE-OR-ALL rule,
-  the name-not-number selection, the E17 CLARA_MIGRATIONS_DIR discipline, the cell
-  floor, the contracts roster and the isolated drill are all unchanged. Requires:
+  One leg of the Wave D-b per-slice frontier matrix. It enforces the presence gate,
+  all-or-none inputs, name-based migration selection, test floor, contract roster
+  and isolated upgrade drill. Requires
   repo checked out, libpq env pointing at the job's throwaway postgres:17 service.
 inputs:
   slice:

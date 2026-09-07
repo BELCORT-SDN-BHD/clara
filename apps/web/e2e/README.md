@@ -1,125 +1,59 @@
-# apps/web/e2e — the Playwright suite
+# Browser tests
 
-Run with `pnpm --filter @clara/web e2e` (`e2e/run.mjs`): it builds the app, starts it with
-`next start` behind `serve-built.mjs`'s HTTPS mock-Supabase proxy, and runs every `*.spec.ts`
-in this directory against the built app in real Chromium. `playwright.config.ts` (one level up)
-owns the shared config — `testDir: "./e2e"`, one shared `webServer`, one browser project.
+Run the default browser suite from the repository root:
 
-## Files
+```sh
+pnpm --filter @clara/web e2e
+```
 
-- `signup-confirm-pending.spec.ts` — the full signup -> explicit email confirmation -> holding
-  page walk, with axe scans on each face (PR #461, round 6).
-- `interview-walk.spec.ts` — the durable client interview walk (FS-5, 裁-86), run against the
-  real backend via `live-stack/` (see that directory's own README for why). ALSO carries FS-8's
-  Tax tab arm (P6-T IA shell): nav-click and ⌘K both reach `/clients/:id/tax` on the SAME
-  COMPLETE fixture the interview walk uses, and the three honest notes render. No interview
-  segment is answered by this arm — it only needs the fixture's authenticated client.
-- `entry-faces-walk.spec.ts` — the entry group's pre-auth faces: login, signup (rendering,
-  client-side validation, keyboard pass), an incomplete invite link, an unknown route, the
-  holding page's anonymous-visitor redirect, and the confirm face's honest missing-token state
-  (PR #461, the 裁-86 e2e leg — this walk was first run manually via the session's Playwright
-  MCP tools against the built app on 2026-08-31, then encoded here). Also carries the two
-  positive controls the review round asked for: one proving the console-error collector fires
-  at all, one proving the `page.route` glob on the signup endpoint fires at all -- an `errors:
-  []` or a `signupCalls: 0` reading is not evidence either instrument works, only that neither
-  happened to catch anything. The signup SUBMISSION arm (mail -> confirm) is deliberately
-  excluded from the REST of this spec's tests and lands with FS-4's e2e instead -- 裁-92 (the
-  6-digit-code confirmation) replaces the as-built confirm flow before beta, and walking it now
-  would need a Supabase email-template act FS-4 immediately supersedes.
-- `firm-navigation-walk.spec.ts` — P4-6's built-app rank-shaping walk: an operator owner
-  reaches Members through Admin in two navigation clicks, while a bookkeeper sees only the
-  destinations admitted by the mock fixture rank. It proves built-app scope propagation and
-  navigation shaping, not a DB rank, RLS policy, or live `caller_context` response.
-- `money-input.spec.ts` — the build-gated journal MoneyInput component walk, including its
-  visible refusal contract and a WCAG A/AA axe scan.
-- `chat-parity-walk.spec.ts` — 裁-130's chat-parity walk: a PARKED clarify answered inline in
-  the thread, a document attached from the composer riding the sent turn as its document
-  reference, and the firm altitude's honest note where the affordance is absent. Axe (WCAG
-  2.0/2.1 A+AA) on both faces, with a positive control proving the scan actually inspected the
-  page. Runs on `serve-built.mjs`'s mocked stack — see `chat-parity-mock.mjs`'s header for the
-  exact line between what is real (the browser, the built bundle, the same-origin runtime proxy
-  route) and what is faked (PostgREST and the runtime itself — its intake legs AND its chat and
-  task-stream legs, all of them now reached THROUGH that proxy). Since the chat/SSE repoint this
-  walk is also the local proof that a turn and a live SSE attach survive the proxy under
-  `next start`; whether a streamed body survives OpenNext-on-Workers is a different question,
-  and the FS-10 preview walk owns it.
-- `chat-parity-mock.mjs` — that walk's own mock lane, a file-disjoint sibling of
-  `serve-built.mjs` (the same shape `live-stack/serve-live.mjs` takes), reached through three
-  small hooks so no other spec's surface changes.
-- `parity-holes.spec.ts` — closes the prototype parity holes (#507, 裁-117): client A-to-B
-  clears the draft and never paints A under B, the docked rail owns its width without
-  covering the workbench, a client/thread mismatch is indistinguishable from not-found, the
-  full password-recovery keyboard/refusal/success/callback/policy walk, the reset face's
-  sessionless refusal, and a thrown entry page's route error boundary with a safe digest.
-- `identity-finish.spec.ts` — P6-6's 裁-86 browser leg (#514): the Ledger Fold mark on every
-  entry face (R1), the Clara mascot in the docked rail's welcome state (裁-14), the §7
-  reduced-motion arm, and axe over every face touched — proving what only a browser can (the
-  asset bytes actually arrived, the composited CSS resolves real values).
-- `a11y-finish-walk.spec.ts` — P6-3's 裁-86 browser leg (#515): axe-core's real `target-size`
-  rule (裁-13) with its spacing exception, the skip link reaching focus past the sidebar
-  (DS-02), the dropdown genuinely stopping under reduced motion (DS-01), and the recut ring +
-  `--input` reaching the browser as computed style rather than class strings (裁-1).
-- `reports-download-walk.spec.ts` — FS-7 echelon 2's mandatory browser leg (#512, 裁-96②): a
-  signed-in member clicks Download on a real sandbox export and receives the sealed bytes,
-  hashed on disk against what the database sealed, through a real same-origin proxy + real
-  runtime + real Postgres/RLS (`run-reports-download-walk.mjs` provisions the fixtures); a
-  second case proves an UNFINISHED export shows the door's own refusal and no control. What it
-  does NOT prove: the door/route logic itself (`packages/db/tests/fs7-e2-artifact-download.test.mjs`
-  and the runtime battery own that) — only that a human, in a browser, gets the file.
-- `agentic-finish-walk.spec.ts` — P6-5's 裁-86 browser leg (#519): five journeys against the
-  BUILT app — ⌘K "Do" present/absent by the caller's real DB-ranked admin floor (two personas,
-  the allowlist changing in the database with nothing redeployed), a reload re-attaching a
-  parked clarify, a client switch across the structural rail boundary (A→B and A→firm), an
-  amend on a settled onboarding item, and the apply-standard-chart button (裁-128). What it does
-  NOT prove: Postgres is not in this walk (`agentic-finish-mock.mjs`), so no refusal, floor or
-  RLS policy is actually exercised — only the calls made and what the surface does with the
-  mocked answers; the verbatim DoorRefusal rendering is proved in the node suite instead
-  (`components/command/command-do.test.tsx`).
-- `bank-close-registers-walk.spec.ts` — L7's 裁-86 browser leg: three journeys on the
-  BUILT app, each proving something a node cell cannot. (1) CB-AE2E-004 — a REFUSED
-  door keeps its dialog open, with the reason the human typed still in the field and
-  the DB's own code + message readable INSIDE the dialog; before the fix the dialog
-  closed on any settled attempt, and once it closes the page-level banner is behind the
-  modal backdrop, which is exactly the part only a browser can show. (2) H-11 /
-  CB-AE2E-016 — a year whose latest close run was ABANDONED offers a door again,
-  labelled "Restart close", where the old predicate rendered an empty door row. (3)
-  CB-AE2E-028 — the close-prep hold names the member holding it rather than the raw
-  `clara.users(id)` uuid. Axe (WCAG 2.0/2.1 A+AA) on every face touched, including the
-  face with the refused dialog OPEN. Runs on `bank-close-registers-mock.mjs`.
-- `bank-close-registers-mock.mjs` — that walk's own mock lane, a file-disjoint sibling
-  of `chat-parity-mock.mjs` and `agentic-finish-mock.mjs`, reached through one hook in
-  `serve-built.mjs`. Its two unscopeable handlers are declared and argued in
-  `e2e-fixture-ownership.test.ts`, which now censuses BOTH lane mocks.
-- `run.mjs`, `serve-built.mjs` — the build-then-serve harness; see their own headers. The two
-  INTERNAL ports are overridable — `CLARA_E2E_NEXT_PORT` (default 3101) and
-  `CLARA_E2E_RUNTIME_PORT` (default 3102), alongside the public `CLARA_E2E_APP_ORIGIN` — so a
-  second lane can run the harness while another already holds the defaults. Specs read the
-  origin from `CLARA_E2E_APP_ORIGIN` rather than re-hardcoding it.
-- `helpers.ts` — shared spec-level instruments, ONE spelling each. Today: `ensureRealFocus(page)`
-  (PR #510), the positive precondition every keyboard-first walk anchors on instead of a bare
-  `bringToFront()` or a sleep — see its own header for the race it closes. `entry-faces-walk.spec.ts`'s
-  login and signup keyboard-pass cells and `parity-holes.spec.ts`'s password-recovery keyboard-pass
-  cell all call it; any new keyboard-driven walk (a fresh `page.goto()` immediately followed by a
-  `page.keyboard.press(...)`, with no real click or `locator.focus()` establishing focus first)
-  should too.
+[`run.mjs`](run.mjs) builds `@clara/web`, starts the production Next.js server behind a local HTTPS proxy, and runs every `*.spec.ts` in this directory with Chromium. [`playwright.config.ts`](../playwright.config.ts) fixes the suite at one worker, no retries, no reused server, and retained traces on failure. OpenSSL must be available so the harness can create its temporary local certificate.
 
-## Why these specs are NOT in `apps/web/test/manifest.txt`
+## Fixture boundary
 
-`scripts/check-test-manifest.mjs`'s own file-matching rule is
-`/\.test\.(ts|tsx|js|jsx|mjs|cjs)$/` — it globs for `*.test.*`, never `*.spec.*`. Every file in
-this directory uses the `.spec.ts` extension specifically so the manifest gate's glob never
-sees it: `run-tests.mjs` feeds the manifest's paths straight to `node --test`, which does not
-speak `@playwright/test`'s `test`/`expect` — a `.spec.ts` file caught by that glob would fail
-under the wrong runner, not pass under the right one. Checked directly against the gate's
-regex before writing this file (2026-08-31) — no manifest edit was made or is needed.
+The default suite uses [`serve-built.mjs`](serve-built.mjs). The browser and production bundle are real; Supabase, PostgREST responses, Stripe, and most runtime responses are deterministic local fixtures. The suite is suitable for route behavior, client state, accessibility, responsive layout, same-origin proxying, and request-shape checks. It does not prove live RLS, a deployed workflow, Cloudflare streaming, mail delivery, Stripe, or production configuration.
 
-## Why the CI browser leg is not wired up yet
+Two specs need dedicated real-stack runners and skip their fixture-dependent cases in the default command:
 
-This suite runs today only when a human or an agent invokes `pnpm --filter @clara/web e2e`
-directly (or drives the same faces manually through the Playwright MCP tools, as the
-`entry-faces-walk` spec's own header describes). Landing it as a required, always-green GitHub
-Actions job — the render-drill-style CI leg described in `AGENTS.md`'s CI/CD section — is
-**not owned by any order: 裁-86 makes the Playwright walk a per-train ACCEPTANCE instrument, not
-a CI gate; FS-11 (the reduced Wave G) first walks steps 2–4 and 6–11 in a browser.** Wiring it
-in early, ad hoc, on one PR would give this one train's browser leg a different CI shape than
-every other frontend train's, and no order carries this wiring uniformly for all of them.
+- [`interview-walk.spec.ts`](interview-walk.spec.ts) is run by `e2e/live-stack/run-live-walk.mjs` against real Postgres, PostgREST, and the runtime.
+- [`reports-download-walk.spec.ts`](reports-download-walk.spec.ts) is run by `e2e/live-stack/run-reports-download-walk.mjs` against real report doors and the runtime with a temporary local object store.
+
+The mock server keeps mutable fixture state for the life of the process. Keep `workers: 1`, `retries: 0`, and `reuseExistingServer: false` unless the fixtures are redesigned for isolation. Override the default ports when another run is active:
+
+```sh
+CLARA_E2E_APP_ORIGIN=https://127.0.0.1:3200 \
+CLARA_E2E_NEXT_PORT=3201 \
+CLARA_E2E_RUNTIME_PORT=3202 \
+pnpm --filter @clara/web e2e
+```
+
+On PowerShell, set those environment variables before running the command.
+
+## Coverage map
+
+The checked-in suite currently contains 17 specs:
+
+| Spec | What it exercises |
+|---|---|
+| `entry-faces-walk.spec.ts` | Login, signup validation, invite refusal, confirmation, holding redirect, and global not-found |
+| `signup-confirm-pending.spec.ts` | Signup, six-digit confirmation, firm step, DPA step, and pending state |
+| `checkout-gate-walk.spec.ts` | Confirmation-to-checkout-to-claim journey and fail-closed request boundaries |
+| `firm-navigation-walk.spec.ts` | Rank-shaped firm navigation and firm controls |
+| `home-board-walk.spec.ts` | Firm and client home boards, responsive composition, and activity summary |
+| `responsive-shell-walk.spec.ts` | Narrow/zoomed shell, drawer and rail behavior, keyboard focus, tabs, assets, and accessibility |
+| `identity-finish.spec.ts` | Brand assets, entry faces, Clara mascot, and reduced motion |
+| `a11y-finish-walk.spec.ts` | Target size, skip link, focus ring, reduced motion, and axe scans |
+| `parity-holes.spec.ts` | Client/thread isolation, password recovery, route errors, and rail layout |
+| `chat-parity-walk.spec.ts` | Clarifications, attachments, thread creation/switching, stream proxying, and typed cards |
+| `agentic-finish-walk.spec.ts` | Capability-shaped commands, task reattachment, onboarding receipt states, and chart apply |
+| `journals-table-walk.spec.ts` | Journal tables, filters, disclosure, approval, clarifications, and accessibility |
+| `documents-viewer-walk.spec.ts` | Safe document viewing, evidence overlays, extraction hierarchy, CSP reporting, and accessibility |
+| `bank-close-registers-walk.spec.ts` | Refusal-preserving dialogs, close restart, and human-readable close holds |
+| `money-input.spec.ts` | Exact-cent input and ambiguous-input refusal |
+| `interview-walk.spec.ts` | Real-stack onboarding interview and Tax route reachability when its fixture is supplied |
+| `reports-download-walk.spec.ts` | Real-stack sealed artifact download when its fixture is supplied |
+
+These files use `.spec.ts` because the package's Node test manifest accepts `*.test.*` files. Do not add Playwright specs to [`test/manifest.txt`](../test/manifest.txt).
+
+## CI status
+
+The browser suite is not a required GitHub Actions check today. The repository CI runs the web build, Node tests, runtime/database e2e checks, and other gates, but it does not invoke `pnpm --filter @clara/web e2e`. The required browser-smoke CI lane remains active work and is tracked in [`docs/WORK.md`](../../../docs/WORK.md).

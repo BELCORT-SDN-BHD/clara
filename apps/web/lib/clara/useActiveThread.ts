@@ -8,11 +8,10 @@
 // CREATION IS NO LONGER A MOUNT SIDE EFFECT (裁-117, this train). This hook used to
 // end its resolve with `await createSession(...)` whenever the altitude had no own
 // session yet — so merely NAVIGATING to a client workspace minted a
-// `clara.chat_sessions` row. That row can never be removed: `_tf_chat_session_update`
-// (0006_runtime_core.sql:374-386) raises CLR08 'chat sessions are not deleted' on
-// DELETE and refuses every UPDATE touching a column other than `visibility`, and the
-// table has no `archived_at` at all. One permanent, unreachable row per (user, client
-// visited) is the cost, and nothing in the product could ever show or retire them.
+// `clara.chat_sessions` row. The original 0006 contract prohibited deletion and admitted
+// only visibility changes, while the rail could not show or retire the newly created row.
+// One unreachable row per (user, client visited) was the cost. Migration 0174 later added
+// an author-only archive door; the menu control for that door remains to be connected.
 //
 // So creation is an ACT now — `createThread`, wired to the rail's own "New thread"
 // control — and an altitude with no thread resolves honestly to `threadId: null` with
@@ -109,9 +108,9 @@ export type ThreadRow = Omit<SessionRow, "created_at"> & {
  * a FAILED read open: that settles with `resolving: false` AND `callerSubject: null`, the
  * rail shows its error banner, and the thread menu — which is not part of that ladder —
  * would still offer New. A create from there succeeds at the runtime and is then listed
- * by nothing, because `ownSessionsForAltitude` has no caller projection to match on, and
- * the row can never be archived or deleted (`_tf_chat_session_update` raises CLR08 on a
- * DELETE). That is the un-removable-row class 裁-117 exists to abolish.
+ * by nothing, because `ownSessionsForAltitude` has no caller projection to match on.
+ * The menu does not yet expose migration 0174's archive door, so preventing that hidden
+ * row remains the safest browser behavior.
  *
  * THE TWO HALVES OVERLAP TODAY and the redundancy is deliberate. `useActiveThreadId`'s
  * resolve effect clears `callerSubject` in the same commit that sets `resolving`, so no
@@ -266,8 +265,8 @@ export function useActiveThreadId(auth: SessionTokenAccessor, clientId?: string)
   //       when `prev.callerSubject` was null (a create racing the first list read), but
   //       the `selectThreadForAltitude` call below it ran anyway — so the selection
   //       pointed at a row that was not in the list, `resolveOwnThread` fell back to the
-  //       previous thread, and the session that had just been minted was invisible AND
-  //       un-archivable. Exactly the defect this train exists to abolish. The re-read
+  //       previous thread, and the session that had just been minted was invisible.
+  //       Exactly the defect this train exists to abolish. The re-read
   //       carries its own `callerSubject`, so that state is unreachable on this path; the
   //       fallback below still refuses to select what it cannot list.
   const createThread = useCallback(async () => {

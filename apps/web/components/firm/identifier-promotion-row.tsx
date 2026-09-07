@@ -3,9 +3,9 @@
 // One clara.client_identifier_promotions_visible row (lib/firm/needs-you-gaps.ts).
 // Confirm is a genuine ONE-CLICK act (the door takes no other argument —
 // 0103_f_a7_pi_additive.sql:866-904); decline needs a reason, same
-// mode-toggle shape as FirmQuestionRow/NeedsYouRow. 裁-22: `citations` is now
-// DB-RESOLVED (region_id/extraction_id/document_id/kind, UNNUMBERED_proposal_
-// basis_resolved.sql) -- the count still renders (sightings/citationsLabel),
+// mode-toggle shape as FirmQuestionRow/NeedsYouRow. `citations` is DB-resolved by
+// migration 0143 (region_id/extraction_id/document_id/kind); the count still renders
+// (sightings/citationsLabel),
 // and the resolved rows render too, via the SAME generic details/summary/pre
 // dump FirmQuestionRow already uses for its own under-typed jsonb column
 // (`candidates`) -- no new primitive, no per-field guess at a shape the DB

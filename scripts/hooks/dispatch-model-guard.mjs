@@ -2,27 +2,23 @@
 // Dispatch-model PreToolUse hook — the filesystem/stdin wiring only. The rule (what counts as a
 // dispatch, what counts as a pin, what is deliberately out of scope) lives in the pure module
 // ./dispatch-model-guard-checks.mjs, which this file and the selftest
-// (dispatch-model-guard.selftest.mjs) both import — the same split as pinned-ids-guard.mjs /
-// pinned-ids-guard-checks.mjs, and as scripts/check-wiki-dynamic-sql.mjs / wiki-lint-checks.mjs.
+// (dispatch-model-guard.selftest.mjs) both import — the same split as
+// scripts/check-wiki-dynamic-sql.mjs / wiki-lint-checks.mjs.
 //
-// WHAT IT DEFENDS: AGENTS.md hard constraint 5 — every dispatch pins an explicit `model`;
-// omission silently inherits the main model (Fable), which is forbidden (owner directive
-// recorded at ADR-0069, docs/adr/README.md:276-278). Prompt-enforced only until this file, and
-// violated once historically by a Workflow script with zero model pins.
+// WHAT IT DEFENDS: the orchestrator-fable skill requires every native dispatch to pin an
+// explicit `model`; omission silently inherits the orchestrator model. Prompt-enforced only
+// until this file, and violated once historically by a Workflow script with zero model pins.
 //
 // IT IS A MISTAKE-NET, NOT CONTAINMENT. The full threat model and the explicit out-of-scope
 // list (forks, partial pinning, named workflows, unreadable script paths, case, unrecognised
 // input shapes) are in the checks module's header. Read that before judging this guard.
 //
-// CONTRACT (Claude Code PreToolUse hook, the same shape pinned-ids-guard.mjs implements): reads
+// CONTRACT (Claude Code PreToolUse hook): reads
 // one JSON object from stdin — {tool_name, tool_input, ...} — on the block path prints a message
 // to stderr and exits 2; otherwise exits 0. No dependencies — Node built-ins only.
 //
-// REGISTRATION. The TRACKED project `.claude/settings.json` carries it, MERGED as a second
-// hooks.PreToolUse entry beside the pinned-ids one (hook entries accumulate; a second entry does
-// not displace the first). The full doctrine — why the registration ships tracked rather than
-// per-checkout, and why `scripts/hooks/` rather than `.claude/hooks/` — is written out once in
-// pinned-ids-guard.mjs's header and is not repeated here.
+// REGISTRATION. The tracked project `.claude/settings.json` carries it so every checkout uses
+// the same worker-dispatch policy.
 //
 //   {
 //     "matcher": "*",
@@ -86,12 +82,8 @@ function main() {
   try {
     payload = raw.trim() ? JSON.parse(raw) : {};
   } catch {
-    // Malformed/non-JSON stdin: FAIL OPEN, and note that this differs from pinned-ids-guard.mjs,
-    // which falls back to a raw-text scan. The difference is in what each guard looks for.
-    // Pinned-ids hunts for a PRESENT token (an id plus a write verb), which survives in
-    // unparsed text. This guard's trigger is an ABSENCE — a missing `model` field — and an
-    // absence in text we failed to parse is not evidence of anything (the house's second
-    // review-and-evidence law, AGENTS.md: "Absence is not evidence"). A raw-text fallback here
+    // Malformed/non-JSON stdin: FAIL OPEN. This guard's trigger is an ABSENCE — a missing
+    // `model` field — and an absence in text we failed to parse is not evidence. A raw-text fallback here
     // could not tell "this dispatch pinned no model" from "we could not read the payload that
     // pinned one", so it would block correct dispatches on a parse hiccup. Allow, and let the
     // process law cover the case a broken payload would have.

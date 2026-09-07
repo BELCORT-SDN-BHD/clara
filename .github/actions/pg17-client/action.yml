@@ -2,20 +2,14 @@ name: Install PostgreSQL 17 client
 description: >-
   Install the v17 client so pg_dump matches the server (the wrapper picks the highest
   installed version). ubuntu-latest (Ubuntu 24.04) ships v16, which refuses a v17
-  server. Moved verbatim from ci.yml (ADR-0073 lever 5); the self-hosted flock retired
-  with the fleet (裁-135, 2026-09-02) — see the step comment.
+  server.
 runs:
   using: composite
   steps:
     - name: Install PostgreSQL 17 client (for DR pg_dump)
       shell: bash -e {0}
       run: |
-        # IDEMPOTENT. The host-wide `sudo flock /var/lock/clara-pgdg.lock` retired with
-        # the self-hosted fleet (裁-135): it existed because PARALLEL JOBS ON ONE WSL HOST
-        # raced the keyring/sources writes and the dpkg lock, and a GitHub-hosted runner
-        # is a single-tenant, single-job, throwaway VM with no second job to race. The
-        # VERSION GUARD stays — it was never the lock's job, and it is what makes a
-        # re-entry (a composite used twice in one job, as frontier-leg does) a no-op.
+        # Idempotent because frontier-leg can invoke this composite twice in one job.
         # DPkg::Lock::Timeout is kept too: apt's own unattended-upgrades timer can still
         # hold the lock briefly on a fresh runner image.
         sudo bash -ec '

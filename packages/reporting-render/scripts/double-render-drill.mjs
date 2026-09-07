@@ -27,7 +27,7 @@
 // argument that the pinned Typst 0.12.0 rejects) would have failed EVERY real render while this
 // drill stayed green, because the fixture emitted a preamble the product never emits. It still
 // needs no database, no firm and no client data: sealed-artifact reproducibility from real inputs
-// is the DR drill's job (docs/ops/DR-render.md).
+// is the recovery drill's job (packages/reporting-render/README.md).
 //
 // Usage:  node scripts/double-render-drill.mjs [--image clara-render:spike]
 // Exit 0 only when ALL THREE arms pass.

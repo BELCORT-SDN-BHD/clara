@@ -1,12 +1,5 @@
-// H-04 — the doc-classifier RECALL harness.
-//
-// WHY THIS EXISTS, AND WHY IT COMES BEFORE THE PROMPT CHANGE. The launch e2e classified two real
-// bank statements as `other` — 0.05 confidence on a 4-page Maybank statement, 0.00 on a 5-page
-// Alliance one. The low-confidence hold worked as designed (a human set the kind), but the most
-// common document class in the product was unrecognised. Sharpening the prompt without a
-// measurement would be a guess: `scripts/measure-invoice-id-capture.mjs` exists because a
-// GATE-3 number turned out to be a MEASUREMENT ARTIFACT of an out-of-repo eval driver, and this
-// harness is deliberately built in that file's shape so the same mistake is not repeated.
+// Document-classifier recall harness. It measures prompt behavior on fixed OCR text.
+// This does not reproduce or validate the separate classify-before-OCR ordering race.
 //
 // THREE MODES, one of which needs no model and no database:
 //
@@ -21,11 +14,10 @@
 //             one in ONE pass, so the delta is measured on identical input. This is what makes
 //             a prompt change defensible rather than asserted.
 //
-// THE CORPUS IS OFF-REPO AND STAYS THERE. `docs/plan/completed/corpus-manifest-2026-09-04.md`
-// inventories it (folders, counts, the three 资料缺失 marks). Real client payloads never enter
-// the repo or CI — the f-a1 precedent is explicit. `--manifest` points at a LOCAL json the
-// operator writes; its SHAPE (never its contents) is
-// `packages/runtime/tests/fixtures/classify/manifest.example.json`. A missing manifest reports
+// Real client corpus payloads stay outside the repository and CI. See
+// packages/runtime/tests/fixtures/classify/README.md for current modes and image limitations.
+// --manifest points at a local JSON file matching
+// packages/runtime/tests/fixtures/classify/manifest.example.json. A missing manifest reports
 // "fixture absent" and exits — it never fabricates rows.
 //
 // PROVENANCE ON EVERY RUN: the model id and a sha256 of the SYSTEM_PROMPT are printed before
