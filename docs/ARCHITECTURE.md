@@ -296,6 +296,12 @@ Beta test Checkout、已有 DPA 签署不能证明付费计量、完整法律接
 LISTEN 是及时通知，持久队列与轮询保证可恢复扫描。投影记录 lag，不能把已提交账务和界面刷新混为一件事。
 `/health` 表达进程存活，`/ready` 表达配置依赖和消费者状况；缺少可选配置与已配置但失败必须区分。
 
+连接故障的现行契约（as built）：Idle pool errors log/recycle connections;
+relay-pool counters surface warnings. The leader's dedicated session
+detects failure, releases its advisory lock and reconnects. Lane probes are asynchronous:
+`pending` 表示尚未测量，`stalled` 是警告；不可把尚未完成的探测当成健康证明。
+所有已配置连接通道和存储的完整硬性 readiness 检查仍未完成。
+
 Workflow registry 决定新接收的版本，旧非终态运行继续拥有其原 body 与相容依赖。
 目前 frozen closure 有 hash 检查；目标进一步固定 instruction／skill／tool registry manifest、
 schema 和依赖解析。发布新 successor 时保留旧导出，rollback 也必须支持全部非终态 bundle 或先验证 drain。

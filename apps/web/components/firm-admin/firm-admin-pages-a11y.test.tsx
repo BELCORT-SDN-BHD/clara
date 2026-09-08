@@ -82,7 +82,7 @@ test("AdminPage's own composition has ordered headings and named links for every
     assert.match(bodyText, /Vendor identity bindings/, "the hub link to /admin/vendor-bindings must render with its real label");
     assert.match(bodyText, /Firm registrations/, "the hub link to /admin/registrations must render with its real label");
     assert.match(bodyText, /Firm settings/, "the hub link to /admin/settings must render with its real label");
-    assert.match(bodyText, /post-beta Billing PR-1\/PR-2 lane/, "the hub must name the lane for its unbuilt billing surfaces");
+    assert.match(bodyText, /Usage summaries, plan details, and billing management are not available yet\./, "the hub must explain which billing capabilities are unavailable");
     const violations = checkAccessibility(h.container as never);
     assert.deepEqual(violations, [], JSON.stringify(violations));
   } finally {
