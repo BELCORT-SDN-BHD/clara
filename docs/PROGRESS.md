@@ -7,7 +7,7 @@
 - Blueprints, formal spec mirror and research evidence are versioned with this repository; GitHub records their publication and merge checks.
 - Phase: Wayfinder, formal spec and blueprint alignment complete; next is to-tickets.
 - Checks: document/reference review passed; 244 frozen workflow files, 9 evaluators and 9 historical migration checksums verified.
-- Tests/lint: application suites and full lint not run for this documentation change; focused whitespace check passed.
+- Tests/lint: full pnpm lint passed locally; hosted application/database results and publication checks are recorded on [PR #613](https://github.com/BELCORT-SDN-BHD/clara/pull/613).
 
 ## Completed
 

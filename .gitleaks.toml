@@ -40,4 +40,17 @@ regexes = [
   # scope_key='_ft1_test_…' trips generic-api-key on entropy alone. Regex-based,
   # not fingerprint-based, for the squash-rewrite reason the paths comment states.
   '''^_ft1_test_immutability_probe(_successor)?$''',
+  # Five exact base64 fragments from the GPOS/glyf tables of Adobe Source Sans 3
+  # 3.052R, embedded in docs/plan/active/prototypes/accounting-work-interaction.html.
+  # Both decoded fonts match the official TTF files byte-for-byte (SHA-256):
+  # Regular:  4644c81b86ec9caaa76b634889968ed3c4f4f52f054855933acc7c2b21e53b0f
+  # Semibold: a3f4f8dcf343a8f24dc61951de93f3ba1558b15cd250ba24af8a40e957081b7d
+  # Source: https://github.com/adobe-fonts/source-sans/tree/3.052R/TTF
+  # They resemble AWS IDs but are font data. Keep scanning the HTML and history;
+  # do not exempt the file, all data URLs, or the ABIA prefix.
+  '''^ABIAMQAVABUANAAWABYA$''',
+  '''^ABIAOUA2CQEAAREPDAIE$''',
+  '''^ABIAG0AYBAEAAQFMAQEA$''',
+  '''^ABIAQAAUABQAKAAVABUA$''',
+  '''^ABIAPUALCQMCAQABTAQB$''',
 ]
