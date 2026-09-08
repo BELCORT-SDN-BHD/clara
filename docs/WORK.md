@@ -6,7 +6,9 @@ that state and its evidence; it is not a second backlog.
 
 ## Current phase — 2026-09-09
 
-Wayfinder decision convergence is complete; the next phase is /to-spec. The [runtime route is resolved](https://github.com/BELCORT-SDN-BHD/clara/issues/607#issuecomment-5588548302):
+Wayfinder and /to-spec are complete. The published [formal spec](https://github.com/BELCORT-SDN-BHD/clara/issues/612)
+contains 111 user stories and six acceptance-appendix comments. The owner confirmed the test seams;
+the next phase is /to-tickets. The [runtime route is resolved](https://github.com/BELCORT-SDN-BHD/clara/issues/607#issuecomment-5588548302):
 a new frozen successor uses Node 22, Workflow 4 and AI SDK ToolLoopAgent with one versioned Clara
 harness. The native WorkflowAgent comparison, benefits, exact dependency costs and remaining
 production gates are in the [route audit](plan/active/refresh-2026-09-08-runtime-route-audit.md).
@@ -24,15 +26,16 @@ retain initial dispositions, current-source corrections, explicit duplicates, fu
 and actionable discovery/validation. They do not claim all defects are verified or fixed.
 
 Use the [phase handoff](plan/active/refresh-2026-09-08-phase-handoff.md)
-to run /to-spec, then /to-tickets and /implement. No formal spec or full implementation-ticket
-graph has been published. [重判旧 audit 与 backlog，切出可验证实现切片](https://github.com/BELCORT-SDN-BHD/clara/issues/605)
+to run /to-tickets and /implement. The full implementation-ticket graph has not yet been
+published. [重判旧 audit 与 backlog，切出可验证实现切片](https://github.com/BELCORT-SDN-BHD/clara/issues/605)
 stays open through concrete issue creation; closing it first is not a circular prerequisite
 for spec synthesis. The overall map includes implementation and remains open through delivery.
 
-A same-machine fresh session must read full GitHub bodies/comments and the local evidence.
-Reviewed snapshots and executable prototypes are on local, unpushed research branches; a new
-clone cannot recover those branches from GitHub issue links alone. The map's latest snapshot
-comment identifies the exact retained commits.
+A fresh session reads the full GitHub spec and its acceptance appendices plus repository SOT.
+The build contract is portable through GitHub. Detailed research and executable prototypes remain
+on local, unpushed branches; a new clone cannot fetch those hashes. The map's latest checkpoint
+identifies the retained snapshots. The [Matt setup check](plan/active/refresh-2026-09-09-matt-setup-check.md)
+records restored upstream skills and the verified GitHub configuration.
 
 ## Accepted direction and coverage
 

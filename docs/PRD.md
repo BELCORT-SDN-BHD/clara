@@ -11,6 +11,9 @@ Accepted product decisions belong here when settled, including before implementa
 formal feature spec and its implementation tickets refine acceptance; they do not silently
 replace this intent. [Work](WORK.md) links the active phase, decisions and evidence.
 
+The [Clara refresh formal spec](https://github.com/BELCORT-SDN-BHD/clara/issues/612) and its
+acceptance appendices now define the detailed build contract; publication does not imply implementation.
+
 ## Who it serves
 
 The customer is a Malaysian accounting firm managing multiple client businesses. Firm staff use
