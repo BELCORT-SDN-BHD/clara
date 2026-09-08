@@ -9,37 +9,37 @@
 **2026-09-09 coverage checkpoint:** [the complete-prompt coverage review](https://github.com/BELCORT-SDN-BHD/clara/issues/597#issuecomment-5588454922)
 adds the [59-request/34-journey/component audit](refresh-2026-09-08-original-prompt-coverage.md)
 and [216-item historical register](refresh-2026-09-08-audit-register.md).
-The [direct-debit scope question](https://github.com/BELCORT-SDN-BHD/clara/issues/611)
-is a new claimed map child and native blocker of the audit/slicing ticket; the owner answer
-is pending. The [Copilot follow-up](refresh-2026-09-08-copilot-motion-research.md)
+The [direct-debit scope decision](https://github.com/BELCORT-SDN-BHD/clara/issues/611#issuecomment-5588831144)
+is confirmed and closed: observed-debit bookkeeping/settlement and authorised recurring accounting
+plans are in scope; actual payment initiation and bank mandates remain future scope. The [Copilot follow-up](refresh-2026-09-08-copilot-motion-research.md)
 now supplies bounded actual motion and official chart-reference evidence.
 The [runtime boundary rig](refresh-2026-09-08-runtime-boundary-proof.md), local harness
 commit `2d34cd3e`, extends the earlier proof with commit-before-checkpoint replay and PG
 transaction ordering. The [fair runtime comparison](refresh-2026-09-08-runtime-route-audit.md)
 is the route decision input; WorkflowAgent 1.0.70 supports Workflow 4, unlike its 2.x line.
 
-Latest checkpoint: the [runtime route is resolved](https://github.com/BELCORT-SDN-BHD/clara/issues/607#issuecomment-5588548302), with synthetic PG boundary proof at local harness `2d34cd3e` and a separately retained native WorkflowAgent v1 comparator. The [visual decision](https://github.com/BELCORT-SDN-BHD/clara/issues/609#issuecomment-5587677017) remains resolved at `8f72de0dd39fca702eb0c9cacd8fab5de8982223`. Audit classification and nested recovery now supply synthesis input. Only the direct-debit scope answer is outstanding in the decision frontier; production verification belongs to the implementation gates.
+Latest checkpoint: the [runtime route is resolved](https://github.com/BELCORT-SDN-BHD/clara/issues/607#issuecomment-5588548302), with synthetic PG boundary proof at local harness `2d34cd3e` and a separately retained native WorkflowAgent v1 comparator. The [visual decision](https://github.com/BELCORT-SDN-BHD/clara/issues/609#issuecomment-5587677017) remains resolved at `8f72de0dd39fca702eb0c9cacd8fab5de8982223`. Audit classification and nested recovery now supply synthesis input. The direct-debit scope decision is also resolved, leaving no unanswered product decision in the frontier; production verification belongs to the implementation gates.
 
 ## Answer at this checkpoint
 
-Wayfinder **decision convergence is not complete yet**. The overall [Clara refresh：统一 accounting work、agent／KB 与工作台体验](https://github.com/BELCORT-SDN-BHD/clara/issues/597) map is also open, but its destination expressly includes implementation and verification, so it can remain open after decision convergence and through the build. Its child state at this audit was:
+Wayfinder **decision convergence is complete**. The overall [Clara refresh：统一 accounting work、agent／KB 与工作台体验](https://github.com/BELCORT-SDN-BHD/clara/issues/597) map remains open because its destination expressly includes implementation and verification. Its child state at this checkpoint is:
 
 | Ticket | State at this audit | Meaning for the boundary |
 |---|---|---|
-| [明确定期扣款的记账与支付边界](https://github.com/BELCORT-SDN-BHD/clara/issues/611) | Open; owner answer pending | Distinguish accounting for observed debits and authorised journal plans from actually initiating payments or managing bank mandates. |
+| [明确定期扣款的记账与支付边界](https://github.com/BELCORT-SDN-BHD/clara/issues/611#issuecomment-5588831144) | Closed; owner confirmed | Observed-debit bookkeeping/settlement and authorised accounting plans are included; actual payment initiation and bank mandate management remain future scope. |
 | [核实当前 accounting engine、任务与聊天的真实契约](https://github.com/BELCORT-SDN-BHD/clara/issues/598); [研究 agent loop、Workflow 与 KB 的可用技术路线](https://github.com/BELCORT-SDN-BHD/clara/issues/599); [研究工作台、澄清与财务信息的 UI 模式](https://github.com/BELCORT-SDN-BHD/clara/issues/600) | Closed | Their research is input to synthesis. Closure is not implementation proof. |
 | [确定 Accounting Work 的自动执行、生命周期与交互契约](https://github.com/BELCORT-SDN-BHD/clara/issues/601); [确定分录、业务对象与确定性校验的边界](https://github.com/BELCORT-SDN-BHD/clara/issues/602); [确定客户知识、身份与 agent context 的维护契约](https://github.com/BELCORT-SDN-BHD/clara/issues/603) | Closed | Accepted product decisions; do not reopen them during seam or ticket review. |
 | [确定整体导航、页面职责与 shadcn 组件契约](https://github.com/BELCORT-SDN-BHD/clara/issues/604); [确定首页财务指标、聚合口径与数据新鲜度](https://github.com/BELCORT-SDN-BHD/clara/issues/608); [补齐全量前端用户流、交互状态与 Mobbin 对照](https://github.com/BELCORT-SDN-BHD/clara/issues/610) | Closed | Accepted navigation/data decisions and completed research coverage; still not a frontend implementation. |
 | [验证统一 Clara agent harness 与持久化执行的实施路线](https://github.com/BELCORT-SDN-BHD/clara/issues/607#issuecomment-5588548302) | Closed | Node22 / Workflow4 / ToolLoopAgent first successor selected after fair native1 comparison. Real business doors, delivery, streams and cutover remain implementation gates. |
 | [比较并确定 Clara 页面的视觉、响应式和动效方案](https://github.com/BELCORT-SDN-BHD/clara/issues/609) | Closed | A Home + B Work and bounded visual/interaction conclusions are resolved. Production acceptance is recorded in the [visual evidence](refresh-2026-09-08-visual-decision.md). Do not reopen the selected direction. |
-| [重判旧 audit 与 backlog，切出可验证实现切片](https://github.com/BELCORT-SDN-BHD/clara/issues/605) | Open; only the direct-debit scope child remains an open native blocker | Classification and nested obligations are ready for synthesis. This ticket stays open through concrete /to-tickets publication; its closure is not a prerequisite for /to-spec. |
+| [重判旧 audit 与 backlog，切出可验证实现切片](https://github.com/BELCORT-SDN-BHD/clara/issues/605) | Open; no open native blockers | Classification and nested obligations are ready for synthesis. This ticket stays open through concrete /to-tickets publication; its closure is not a prerequisite for /to-spec. |
 | [等待成功提取后再分类文件，修复 OCR／classify 竞态](https://github.com/BELCORT-SDN-BHD/clara/issues/606) | Open, `ready-for-agent` | Independently identified implementation item. Its local migration/evidence is not deployed proof and does not move the whole refresh to implementation. |
 
 A same-computer fresh session can continue once it reads the sources below. **GitHub alone is not sufficient today.** The reviewed SOT/evidence package is preserved separately on local `codex/research-ui-contract`; the research/prototype branches have no upstream. A new clone on another machine cannot recover unpushed commits from the issue map or local absolute links. Read the map's latest snapshot comment for the exact documentation commit.
 
 The correct route is:
 
-1. Record the answer to [明确定期扣款的记账与支付边界](https://github.com/BELCORT-SDN-BHD/clara/issues/611). The runtime, visual, Work, accounting and KB directions are already resolved; do not re-ask them.
+1. Read the [recorded direct-debit scope decision](https://github.com/BELCORT-SDN-BHD/clara/issues/611#issuecomment-5588831144), together with the resolved runtime, visual, Work, accounting and KB directions. Do not re-ask settled choices.
 2. Synthesize the completed audit classification/nested-obligation input, explicitly carrying discovery, retained defects, superseded remedies and future-scope items into the formal spec and ticket graph. Keep the audit/slicing ticket open until concrete issue publication is done.
 3. Run `/to-spec` to collapse the linked decisions and local evidence into a buildable spec, including review of its proposed test seams before publication.
 4. Publish the reviewed formal spec to GitHub. Existing accepted direction is already authorised; do not repeat settled product decisions.
@@ -55,7 +55,7 @@ The correct route is:
 - The audit portion of [重判旧 audit 与 backlog，切出可验证实现切片](https://github.com/BELCORT-SDN-BHD/clara/issues/605) has classified old findings as still valid, locally verified, hosted verified, superseded, wrong premise, external/owner dependency, or unverified, and has supplied implementation obligations to synthesis. Its concrete issue creation may remain for `/to-tickets`. An old closed issue is never accepted as repair evidence by itself.
 - The selected runtime and visual conclusions are recorded with their limits. A prototype or import/build proof does not become a production adoption claim.
 - Product decisions are present in PRD/domain vocabulary and implementation facts are present in Architecture, with target and current behavior clearly separated.
-- A fresh reader has portable references to the evidence needed by `/to-spec`; an issue summary is an index, not the full evidence package.
+- A fresh reader can recover the evidence needed by `/to-spec` from the recorded local snapshot and issue references. Same-machine recovery is available; another-machine handoff still requires a reachable evidence package as detailed below. This portability obligation is separate from product decision convergence.
 
 The map remains the live destination/status container after this boundary because its destination includes implementation. It must no longer be the only place where build acceptance can be reconstructed. The **overall refresh map** is complete only when the accepted implementation slices and required verification are complete or explicitly disposed, not when Wayfinder decision convergence ends.
 
@@ -123,7 +123,7 @@ Read in this order:
 
 Recommended fresh-session instruction:
 
-> Continue the Clara refresh map at the current phase boundary. Read this handoff, full issue bodies/comments and live dependencies, then the local PRD/Architecture/Work/CONTEXT and cited evidence. Treat accepted decisions as authorised and do not reopen them. Before `/to-spec`, settle the direct-debit scope question, read the resolved runtime/visual decisions and synthesize the completed audit input. Preserve the to-spec seam reconciliation and the to-tickets concrete split/blocker review. Distinguish accepted target, current source, local checks, deployed version and hosted evidence.
+> Continue the Clara refresh map at the current phase boundary. Read this handoff, full issue bodies/comments and live dependencies, then the local PRD/Architecture/Work/CONTEXT and cited evidence. Treat accepted decisions as authorised and do not reopen them. Wayfinder decision convergence is complete. Run `/to-spec` using the resolved direct-debit/runtime/visual decisions and completed audit input. Preserve the to-spec seam reconciliation and the to-tickets concrete split/blocker review. Distinguish accepted target, current source, local checks, deployed version and hosted evidence.
 
 ### Local branch and artifact manifest
 
@@ -148,8 +148,8 @@ The main checkout remains at `68ab4323`, with SOT/document edits and unrelated r
 2. **GitHub comments contain machine-local absolute paths.** Paths such as `C:\Users\zhant\Desktop\clara-rebuild\...` are useful on this computer and unusable in another clone. Replace or supplement them with repository-relative links after the documents are committed.
 3. **Clean local commits are still non-portable.** A commit hash on an unpushed branch cannot be fetched from another machine. Preserve the branch refs locally; before a new-machine handoff, push an authorised evidence branch or integrate the reviewed artifacts into a reachable repository commit.
 4. **The reviewed SOT/evidence snapshot is local.** PRD, Architecture, Work, CONTEXT, AGENTS and the active-plan documents are captured on `codex/research-ui-contract`, separately from the main checkout's unrelated dirty code/config. Its exact closing commit is recorded in the map's snapshot comment. This preserves the files locally; it does not make the branch remotely fetchable.
-5. **The product-spec file is not the formal `/to-spec` output.** It labels itself v0.1 and contains accepted behavior plus proposed implementation. The formal phase must synthesize current map decisions and publish the build contract to the tracker after remaining gates close.
-6. **Implementation readiness is uneven.** [等待成功提取后再分类文件，修复 OCR／classify 竞态](https://github.com/BELCORT-SDN-BHD/clara/issues/606) may proceed independently. The broad refresh cannot skip `/to-spec`: the direct-debit scope answer must first be recorded, and the resolved runtime plus completed audit input must be read, while the audit/slicing ticket may stay open for `/to-tickets` to finish its issue-creation portion.
+5. **The product-spec file is not the formal `/to-spec` output.** It labels itself v0.1 and contains accepted behavior plus proposed implementation. The formal phase must synthesize current map decisions and publish the build contract to the tracker; the Wayfinder decisions needed for synthesis are now resolved.
+6. **Implementation readiness is uneven.** [等待成功提取后再分类文件，修复 OCR／classify 竞态](https://github.com/BELCORT-SDN-BHD/clara/issues/606) may proceed independently. The broad refresh cannot skip `/to-spec`: the resolved scope/runtime decisions and completed audit input must be read, while the audit/slicing ticket may stay open for `/to-tickets` to finish its issue-creation portion.
 
 For another machine, the minimum portable package is: reviewed PRD/Architecture/WORK/CONTEXT; this handoff; the active evidence set; reachable prototype/research commits or exported artifacts; and GitHub issues whose links are repository-relative. Until that package is committed/pushed, “continue from GitHub map” is a same-machine instruction only.
 

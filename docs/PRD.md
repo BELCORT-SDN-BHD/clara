@@ -204,7 +204,7 @@ On resumption, Clara rechecks current facts and authority; independently complet
 | Documents | Upload or attach once; retain the source, resolve client and type, extract evidence and show field-level source regions. Unassigned, ambiguous, failed and refiled documents have a recovery path. |
 | Bookkeeping | Coding and posting complete the GL and required AR/AP, bank, asset and audit effects. Review, edit, approve, reverse and bulk work share the same accounting state. |
 | Receivables/payables | Invoice/bill open items, settlement allocations, aging, statements and control-account tie-outs remain consistent across periods. |
-| Bank | Import statements, match or book movements, explain exceptions and prove reconciliation. Exclusion requires an explicit, attributable decision under the applicable authority; automatic completion does not authorise unexplained exclusions. |
+| Bank | Import statements, match or book movements (including observed direct debits), explain exceptions and prove reconciliation. Match an already recorded payment without duplicating its cash entry. Exclusion requires an explicit, attributable decision under the applicable authority; automatic completion does not authorise unexplained exclusions. |
 | Assets and adjustments | Acquisitions, depreciation, disposal, recurring/reversing entries, prepayments and staff advances are traceable and tied to the books. |
 | Close and continuity | Show readiness, complete preparation, close in order, carry forward once and support governed reopening. Missing evidence or coverage is distinguishable from a passed check. |
 | Reporting | Trial balance, journals, GL, management accounts, aging and formal statement packs are reproducible, permissioned artifacts. A statement pack only claims a reporting framework when all required statements, notes and wording are supported. |
@@ -213,6 +213,11 @@ On resumption, Clara rechecks current facts and authority; independently complet
 | Knowledge | A source-linked client wiki improves Clara's judgement over time. Structured facts, identifiers, questions and receipts carry durable decisions; narrative cannot grant permissions. |
 | Activity and exceptions | Show attributable actions, failures and recovery across clients. Notification-only proactive wakes stay distinct from authorised background work. |
 | Commercial operation | Firm subscriptions, seats, active-client capacity, a shared AI allowance, overage and invoicing. Beta checkout is present; paid pricing and usage billing remain unfinished. |
+
+Chat, files/bank statements and direct Accounting actions share the same bookkeeping and settlement
+operations for observed debits. Explicit instructions or existing authority rules can establish a
+recurring accounting plan; observing repeated debits alone does not authorise one. Such a plan
+schedules accounting entries, not bank payments. The UI and Work results must keep these meanings clear.
 
 Client Knowledge is the unified product surface for client facts, identities, aliases and durable
 preferences. Explicit user-provided information is saved automatically and can be corrected or
@@ -266,6 +271,10 @@ registration/payment support and estate wake-source controls; it does not open o
 Single-entity books per client are the present scope. Group consolidation, external-ERP posting,
 client logins, a payroll engine and perpetual inventory are not planned as part of the current
 core. App and agent operations use the deployed schema; schema evolution belongs to engineering.
+
+Actual bank payment initiation and creation/cancellation of bank mandates are outside this refresh.
+They remain a future payment capability; accounting autonomy and recurring-entry authority do not
+grant permission to move money.
 
 Inbound MyInvois XML parsing exists. API pull, outbound issuance, foreign currency and first-class
 payroll-document ingestion remain future decisions. Supplier credit notes and cash-purchase

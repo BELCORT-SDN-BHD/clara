@@ -6,16 +6,16 @@ that state and its evidence; it is not a second backlog.
 
 ## Current phase — 2026-09-09
 
-Wayfinder is at its final scope boundary. The [runtime route is resolved](https://github.com/BELCORT-SDN-BHD/clara/issues/607#issuecomment-5588548302):
+Wayfinder decision convergence is complete; the next phase is /to-spec. The [runtime route is resolved](https://github.com/BELCORT-SDN-BHD/clara/issues/607#issuecomment-5588548302):
 a new frozen successor uses Node 22, Workflow 4 and AI SDK ToolLoopAgent with one versioned Clara
 harness. The native WorkflowAgent comparison, benefits, exact dependency costs and remaining
 production gates are in the [route audit](plan/active/refresh-2026-09-08-runtime-route-audit.md).
 
-The original-prompt review found one unanswered product choice:
-[明确定期扣款的记账与支付边界](https://github.com/BELCORT-SDN-BHD/clara/issues/611).
-It distinguishes bookkeeping observed debits and authorised recurring journals from actually
-initiating bank payments or managing mandates. The owner answer is pending; agentic default
-does not settle this separate scope.
+The owner resolved the last original-prompt scope question:
+[明确定期扣款的记账与支付边界](https://github.com/BELCORT-SDN-BHD/clara/issues/611#issuecomment-5588831144).
+This refresh includes bookkeeping/settlement of observed debits and explicitly authorised
+recurring accounting plans. Actual bank payment initiation and mandate management remain future
+scope. No unanswered product choice remains in the Wayfinder decision frontier.
 
 The audit classification input is ready for synthesis: the
 [216-item register](plan/active/refresh-2026-09-08-audit-register.md) and
@@ -23,7 +23,7 @@ The audit classification input is ready for synthesis: the
 retain initial dispositions, current-source corrections, explicit duplicates, future-scope items
 and actionable discovery/validation. They do not claim all defects are verified or fixed.
 
-After the scope answer, use the [phase handoff](plan/active/refresh-2026-09-08-phase-handoff.md)
+Use the [phase handoff](plan/active/refresh-2026-09-08-phase-handoff.md)
 to run /to-spec, then /to-tickets and /implement. No formal spec or full implementation-ticket
 graph has been published. [重判旧 audit 与 backlog，切出可验证实现切片](https://github.com/BELCORT-SDN-BHD/clara/issues/605)
 stays open through concrete issue creation; closing it first is not a circular prerequisite
