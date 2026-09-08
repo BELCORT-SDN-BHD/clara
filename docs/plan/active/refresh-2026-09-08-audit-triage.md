@@ -47,9 +47,9 @@ The snapshot immediately after charting returned exactly **9 open issues**. This
 
 There is now one live `wayfinder:map` (#597). The five standard triage labels and the wayfinder labels already exist. No additional map or general audit umbrella should be created.
 
-## Current source-of-truth gap
+## Source-of-truth gap at the audit baseline
 
-The baseline commit tracks only five files under `docs/`: `PRD.md`, `ARCHITECTURE.md` and the three agent documents. It had no tracked `WORK.md`, `docs/WORK.md`, `PROGRESS.md`, or historical `docs/plan` tree, although PRD linked to the missing Work page. The parent session has now added `docs/WORK.md` as a pointer to the canonical refresh map, repairing that documentation gap without reconstructing an old backlog as current truth.
+The baseline commit tracked only five files under `docs/`: `PRD.md`, `ARCHITECTURE.md` and the three agent documents. It had no tracked state-persistence document or historical `docs/plan` tree, although PRD linked to a missing state page. That was a historical documentation gap. PRD and Architecture now own the enduring product and technical blueprints; GitHub specs and implementation issues own delivery contracts, dependencies and status. Old backlogs are evidence inputs, not current truth by default.
 
 ## Status re-adjudication
 
@@ -86,7 +86,7 @@ The parent refresh session supplied two current, read-only hosted observations. 
 - All “current” deploy identities and line anchors in the 2026-09-06 disposition are stale as current claims. They are still legitimate historical evidence.
 - #541's last comment says the umbrella stays open, while the issue is closed. Its closure is tracker state only and cannot close the listed defects.
 - #573's agent, IA, component and binding resolutions are explicitly superseded. Treating them as accepted requirements would be wrong.
-- Old references to `PROGRESS.md`, `WORK.md`, archived `docs/plan/*` decisions and the handover as current repository documents are stale at HEAD because those files are absent.
+- Old state-page references, archived `docs/plan/*` decisions and the handover were stale as current repository documents at the audit baseline because those files were absent. Retain their historical evidence without treating the missing pages as current authority.
 - The old report's broad counts such as “66 fixed and serving” must not be repeated as a present count. This pass sampled high-impact claims and did not re-evaluate every row.
 
 ### PRODUCT DECISIONS AT INITIAL CHARTING — historical snapshot

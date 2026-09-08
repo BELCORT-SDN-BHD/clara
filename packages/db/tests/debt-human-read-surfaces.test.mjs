@@ -1,5 +1,5 @@
 // Debt-clearing lane -- three additive human read surfaces the 磨合 (frontend integration)
-// window found missing (PROGRESS.md's 磨合 lane row): clara.firm_open_questions_visible,
+// window found missing: clara.firm_open_questions_visible,
 // clara.client_identifier_promotions_visible, clara.users_visible.
 //
 // Migration: packages/db/migrations/0137_debt_human_read_surfaces.sql.

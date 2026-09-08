@@ -277,7 +277,7 @@
     "firmBody": "The firm-wide registers and controls your role can reach.",
     "sectionsLabel": "Firm admin sections",
     "noSections": "No admin sections are available at your rank.",
-    "unbuiltNote": "The metering rollup, tier surfaces, and /admin/billing are not built yet; they remain in the post-beta Billing PR-1/PR-2 lane recorded in PROGRESS.md.",
+    "unbuiltNote": "Usage summaries, plan details, and billing management are not available yet.",
     "sections": {
       "members": {
         "title": "Members",

@@ -1,6 +1,5 @@
 // lib/firm/needs-you-gaps.ts — the two human read/act surfaces the 磨合
-// (frontend integration) window found missing and PROGRESS.md logged as
-// "Backend gaps found and honestly not-built (Track-A debt, pre-P6)". BOTH
+// (frontend integration) window found missing as Track-A debt, pre-P6. BOTH
 // gaps closed at the DB by migration 0137 (verb-coverage census, 2026-08-28):
 // zero live bodies replaced, three additive masked views, tail-proven —
 // clara.firm_open_questions_visible (14 cols) and

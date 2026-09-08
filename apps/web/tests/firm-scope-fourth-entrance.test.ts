@@ -22,7 +22,7 @@ import {
 } from "../test/sourceOracle";
 
 /**
- * THE FOURTH-ENTRANCE GAP (PROGRESS.md Known issues; precondition for #455).
+ * THE FOURTH-ENTRANCE GAP (precondition for #455).
  *
  * `firm-scope-surfaces.test.ts`'s census enumerates every `page`/`route` LEAF the
  * App Router serves — that is the whole of its `LEAF` regex. Two classes of

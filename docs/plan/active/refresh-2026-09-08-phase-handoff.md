@@ -41,13 +41,14 @@ No full implementation graph has been published by /to-spec. No production chang
 
 | Source | Ownership |
 |---|---|
-| PRD | Accepted product intent, updated when decisions settle. |
-| Architecture | Current implemented boundaries; update with verified implementation, not speculative completion. |
+| PRD | Enduring product blueprint: vision, users, problems, behavior, core journeys, scope and completion conditions. Update after accepted product decisions. |
+| Architecture | Enduring technical blueprint: stack and reasons, system boundaries, responsibilities, dependencies, data flows and trade-offs. Distinguish current implementation from explicitly accepted target architecture. |
 | CONTEXT / ADRs | Shared domain vocabulary and applicable recorded decisions. |
-| Formal GitHub spec and appendices | Build acceptance and retained obligations. |
+| Formal GitHub spec and appendices | Dated delivery contract, build acceptance and retained obligations. Later accepted contracts may supersede its delivery scope. |
 | Implementation issues | Concrete slice scope, blockers, status and local/hosted evidence. |
-| Work | Short pointer to current phase and controlling sources. |
 | Dated evidence / prototypes | Source findings and bounded experiments with explicit limitations. |
+
+Accepted Wayfinder or spec decisions update PRD and Architecture before ticket decomposition. Implementation updates the architecture's current-state claims with verified evidence; accepting a target does not mean it has shipped. Later decisions update these enduring blueprints without rewriting what an older investigation or prototype actually proved.
 
 The earlier [v0.1 product-contract draft](refresh-2026-09-08-product-spec.md) is historical synthesis input; it is superseded for build acceptance by the published formal spec. The [original-prompt coverage](refresh-2026-09-08-original-prompt-coverage.md) retains 126 traceable rows; the categories are not an implementation completion percentage.
 

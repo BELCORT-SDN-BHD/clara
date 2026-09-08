@@ -2,9 +2,9 @@
 
 日期：2026-09-08。状态：v0.1，已确认的产品行为＋待验证的实现方案。本文不是全量重构已完成的声明。
 
-2026-09-09：Wayfinder 和 `/to-spec` 已完成。[正式 GitHub spec](https://github.com/BELCORT-SDN-BHD/clara/issues/612)及其验收附录现为 build contract。本文保留为 v0.1 历史合成输入；正式 spec 对其验收表述有优先权，当前实现仍以 Architecture 为准。
+2026-09-09：Wayfinder 和 `/to-spec` 已完成。[正式 GitHub spec](https://github.com/BELCORT-SDN-BHD/clara/issues/612)及其验收附录现为本轮 build contract。本文保留为 v0.1 历史合成输入；正式 spec 对其本轮验收表述有优先权。长期产品与技术蓝图由 PRD 和 Architecture 维护；Architecture 区分当前实现与已接受的目标架构，不能将接受目标等同于已上线。
 
-决策状态以 [Clara refresh map](https://github.com/BELCORT-SDN-BHD/clara/issues/597) 为准；产品意图已同步到 [PRD](../../PRD.md)，当前实现见 [Architecture](../../ARCHITECTURE.md) 和 [后端证据](refresh-2026-09-08-backend-evidence.md)。此草案将讨论转成可审阅的场景与验收，不替代各决策票中的确认记录。
+本轮决策状态以 [Clara refresh map](https://github.com/BELCORT-SDN-BHD/clara/issues/597) 为准；长期产品意图见 [PRD](../../PRD.md)，当前与已接受的目标技术蓝图见 [Architecture](../../ARCHITECTURE.md)。[后端证据](refresh-2026-09-08-backend-evidence.md)保留调查当时的事实与限制。此草案将讨论转成可审阅的场景与验收，不替代各决策票中的确认记录。
 
 ## 1. 已确认的产品行为
 
