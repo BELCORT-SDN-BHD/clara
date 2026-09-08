@@ -809,7 +809,7 @@ test("f31w.p the Tier-C wall: an unlisted-but-typed reason re-raises out of the 
 //     (0040-era, pre-Charter) product/authority-model conflict with F-A3's own design (which
 //     built BOTH verbs assuming the agent COULD resolve). Reported as its own finding and left
 //     RED on purpose pending a ruling, separate from the reviewed nine. The owner has since ruled:
-//     the ratified F-A3 scope (PROGRESS.md's F-A3 row) places "resolve exception incl. write-off"
+//     the ratified F-A3 scope places "resolve exception incl. write-off"
 //     in the agent's OPEN register; law 71's reservation keeps only the MINTING act
 //     (except_bank_line, the red pen) human. The migration's D-11 CoR
 //     (clara._tf_bank_settled_authority_belt) widens the RESOLUTION floor ONLY -- an agent

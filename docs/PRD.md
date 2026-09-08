@@ -1,139 +1,212 @@
-# Clara — Product
+# Clara — Product Blueprint
 
-Clara is an AI-native Accounting OS for Malaysian accounting firms. She handles client
-onboarding, bookkeeping, reconciliation, close, tax preparation and reporting in a shared
-workspace with the accountant. The ambition is to remove 99%+ of manual bookkeeping labour
-while keeping every entry attributable and the books reconcilable. This is a product goal,
-not a measured result.
+Clara 是面向马来西亚会计事务所的 AI 原生 Accounting OS。事务所把客户资料和工作目标交给 Clara；她理解资料、完成会计工作，在确实缺少资讯、出现冲突或需要人的决定时提问。会计师与 Clara 在同一个工作空间里查看、处理和解释同一套账。
 
-This document owns product intent. [Architecture](ARCHITECTURE.md) describes the implementation.
+本文是持续维护的最高层产品蓝图：说明服务谁、为什么存在、用户怎样完成工作，以及什么结果才算做好。这里描述已接受的产品方向，不表示全部功能已经交付。[Architecture](ARCHITECTURE.md) 负责技术方案，以及现有实现与目标之间的区别。每轮 spec 细化那一轮的交付合同，tickets 记录执行与验证；后续方案取代旧方案时，应更新本蓝图，读者无需拼接历史 spec 才能理解 Clara。
 
-## Who it serves
+## 1. 背景、问题与愿景
 
-The customer is a Malaysian accounting firm managing multiple client businesses. Firm staff use
-Clara; their client businesses supply documents and do not have a login. Each client's books,
-financial year, evidence and knowledge remain distinct inside the firm's private workspace.
+事务所同时服务多个客户。客户送来的发票、银行月结单、收付款说明和期初资料往往零散、不完整，也未必及时。会计人员不仅要录入数字，还要判断属于哪个客户、采用什么处理、是否已经入账、应抵消哪一笔，以及会影响哪些账簿和报表。
 
-The core problem is the complete accounting job: messy documents must become the correct client's
-books, with matching subledgers, registers, reconciliation and reports. A correct journal with a
-missing receivable or an unexplained balance is unfinished work.
+这些工作容易在文件夹、表格、会计系统和聊天记录之间断开。记下一笔分录，并不代表应收款、银行匹配、资产登记、折旧或关账已经完整处理。发生更正时，人还要追踪后续影响，重新解释数字，并辨认哪些报告已经过时。
 
-## The experience
+Clara 的愿景是让事务所交付完整、可信的客户账务，把人的时间集中在判断、客户关系和专业服务上。长期目标是减少 99% 以上的手工簿记劳动；这是愿景，尚不是已测得的效果，也不意味着消除必要的专业判断。
 
-Clara is a working participant, with the workbench as the visible record of her work. The
-accountant can inspect a source, answer a question, correct an entry or act on an object directly.
-Removing the chat rail must still leave the work, its evidence and the available actions usable.
+产品价值由完成的会计结果衡量：客户的账能对上、来源说得清、问题找得到、工作能继续。生成一段回答、识别一张文件或提出一份草稿，只是可能的过程。
 
-- **One workspace, two complementary surfaces.** Client work lives in journals, documents, bank,
-  registers, knowledge, close and reports; Clara stays alongside in a docked rail. Firm-level
-  navigation and the Needs-you inbox cover the whole portfolio.
-- **Objects over chat transcripts.** Replies can contain typed questions, plans, documents,
-  analyses and action cards. Reopening a card reads current authoritative state. A confirmed,
-  reversed, failed or interrupted action looks different and has an honest next step.
-- **Plans persist.** Onboarding and close have inspectable progress, outstanding decisions and
-  recoverable interruptions. Refreshing or switching client must preserve the user's place.
-- **Direct control.** Object actions and the command palette complement natural language. A user
-  should not need to guess a prompt to reach an available operation.
-- **Professional density.** Calm typography, clear grouping and concise copy support all-day
-  work. Keyboard access, visible focus, readable contrast, zoom and reduced motion are part of
-  usability. Meaning must not depend on colour alone.
-- **Honest feedback.** Completion follows the server's receipt. Refusals explain the user's next
-  step without exposing internal migration names or build plans. An unavailable feature is labelled
-  accurately; an implemented backend without a usable surface remains incomplete.
+## 2. 服务谁，以及希望改善什么
 
-## Autonomy and professional control
+| 用户或参与者 | 当前痛点 | Clara 应带来的结果 |
+|---|---|---|
+| 事务所负责人 | 难以同时掌握客户进度、员工负荷和交付风险 | 看见整个客户组合的待决事项、正在处理的工作和完成结果，管理人员及服务范围 |
+| 会计师、簿记人员 | 重复录入、追问资料、对账和更正占用大量时间 | 让 Clara 完成有足够依据的工作，自己处理必要决定、查看来源和直接更正 |
+| 复核及只读人员 | 需要追溯结果，又不应获得修改权限 | 在获准范围内查看、解释和导出账务及依据 |
+| 客户企业 | 资料交给事务所后仍需反复解释业务背景 | 提供资料和说明，由事务所维护清楚、持续积累的客户上下文 |
 
-Clara may interpret evidence, classify documents, infer accounting treatment, calculate, propose
-work and post within her authorised scope. Her own judgement can authorise routine bookkeeping;
-she is not limited to drafting for a human. Her identity and model/version remain attributable.
+购买和使用产品的是事务所。客户企业是被服务的账务主体，目前没有独立登录入口。一个事务所可以管理多个客户；每个客户有独立的账、财年、资料、工作和知识。
 
-Persisted accounting accepts more than a valid data shape: it checks tenant and client scope,
-authority, evidence, balanced entries, period state and complete accounting consequences.
-Formal report figures are reproducible from recorded inputs through versioned deterministic
-evaluation. Exploration may use model calculations, with analysis clearly separated from a
-formal report. The precise implemented boundary is in Architecture.
+Firm workspace 是事务所的客户组合视角；client workspace 是某一个客户的工作视角。在 firm 中可以跨获准客户查询或发起一批工作，但每一笔会计执行都必须明确属于一个客户。这不会自然形成多个公司的合并账。
 
-The intended human capability ladder is:
+<a id="autonomy-and-professional-control"></a>
 
-| Role | Product responsibility |
+## 3. 核心产品承诺
+
+### Clara 默认主动完成工作
+
+所有事务所和用户获得的都是 agentic 产品。在当前权限和足够资料支持下，Clara 直接完成会计处理、入账、匹配以及获准的后续影响。普通工作不需要先启用自动化模式、申请 autodraft 或逐次打开 autopost。
+
+输入可以是文件、对话、用户直接操作，或已明确授权的计划。用户可以要求“把这笔费用记进去”，即使没有附件；明确提供的事实可以构成处理依据，但 Clara 必须保留其来自用户说明的事实，不能假装有一份不存在的单据。
+
+Clara 自己处理可以解决的格式问题和暂时故障。缺事实、存在实质冲突、客户归属不明或需要人的会计决定时，她提出有上下文的问题。无法自行恢复的系统故障应说明失败与恢复途径，不把技术问题伪装成用户必须回答的会计问题。
+
+### 完成一件工作，就是完成它相关的会计结果
+
+已入账的日记账分录记录总账的借贷影响。应收应付、付款分配、固定资产、计划和期间状态则回答不同的业务问题，不能全部用一张分录代替。
+
+例如，记录购入设备可能同时形成分录和固定资产；把已有收款抵消发票可能只更新抵消关系，不应再制造一笔收款。Clara 和用户直接操作，都应完成同样完整的业务结果。
+
+更正也必须处理受到影响的未结项目、已抵消金额、资产或计划，以及报告是否仍然有效。Clara 在原授权范围内可以纠正开放期间中自己造成的错误，并通知用户；原始已入账历史继续保留。涉及锁期、权限变化或不确定处理时，先解决相应决定。
+
+### 工作持续存在，聊天只是一个入口
+
+一件 Accounting Work 包含目标、客户、来源、结果、当前进度和待回答问题。用户可以从 chat rail、Work 详情或 Needs you 回答同一个问题，并继续同一件工作。
+
+新建对话会清空该次聊天上下文，正在执行的工作、账务和已确认知识继续存在。历史对话可以切换、归档、恢复和真正删除普通文字；删除前应说明需要保留的最少会计依据。归档和删除是不同动作。
+
+取消工作只停止余下部分。已经完成的结果继续保留；若有一笔操作正在完成，先显示正在停止，待结果确定后再显示已取消。撤回已入账结果需要相应的冲销或更正。
+
+一批 100 份文件中，5 份缺资料，不应阻止其余独立的 95 份继续。用户能看到各自结果、等待原因和整批进度。换人接手、问题过期或刷新页面不会让工作消失；继续执行仍须有当前有效的权限。
+
+### 客户知识随工作积累，并且可以解释和纠正
+
+Knowledge 统一呈现客户资料、交易对方及别名、长期偏好、会计政策和有来源的处理经验。无需先手工登记 vendor/customer binding 才让 Clara 开始工作。
+
+明确提供的长期资料自动保存并可更正或撤回；文件事实保留来源；Clara 的推测保留待证实状态。重要矛盾必须说明。系统应能区分同名交易对方，维护历史账务所指向的对象。
+
+在客户上下文中说“以后这样处理”，默认只适用于该客户。明确要求全 firm 使用，并具备相应权限时，才形成事务所默认规则；已有客户例外继续保留。
+
+已完成的工作和纠正可以积累可追溯经验，供后续参考。反复采用某种做法，不会自动把它变成已确认政策，也不会授权未来持续产生分录的计划。修正或撤回依据时，依赖它的经验也要能被重新评估。删除普通聊天仍保留支撑已确认知识的最少、可读依据，不保留一份隐藏的完整聊天。
+
+<a id="the-experience"></a>
+
+## 4. 用户如何看见和参与工作
+
+| 入口 | 用户在这里解决的问题 |
 |---|---|
-| Viewer | Read and export authorised information. |
-| Bookkeeper | Upload, draft, match, answer Clara, approve and post any amount, including own drafts. |
-| Admin | Bookkeeping plus client/firm configuration, opening approval and close operations. |
-| Owner | Ownership, member administration, legal signatures and operator actions where separately eligible. |
+| Firm overview | 哪些客户需要关注、哪些工作等待人员决定、团队正在交付什么 |
+| Client Home | 这个客户现在怎么样：需要我几件事、正在做什么、刚完成什么、财务情况如何 |
+| Work | 查看可筛选的工作列表，进入详情理解目标、来源、结果、进度和问题，并就地回答或继续对话 |
+| Documents | 上传、查看和纠正资料，理解每类文件的主要事实、处理状态及相关账务 |
+| Accounting | 按日记账、银行、应收应付、资产、计划、科目和关账查看或处理业务对象 |
+| Knowledge | 查看 Clara 已知什么、依据在哪里、适用哪个客户，并进行纠正 |
+| Reports | 查看、解释和导出财务结果，知道期间、依据、覆盖范围及是否仍然有效 |
+| Activity | 追溯谁做了什么、发生了什么变化，以及结果和依据 |
+| Chat rail | 自然语言发起、解释和继续工作；始终明确当前客户或跨客户范围 |
+| Settings | 管理事务所、成员、客户配置、通知和商业账户 |
 
-Human actions use role checks and automatic receipts. Separate checker and attestation ceremonies
-are being removed by an approved change; the current DB still contains some of those gates. This
-gap must be closed in code, rather than described as already removed. An agent does not impersonate
-a human for an explicitly human action, legal signature or filing submission.
+客户首页采用轻量玻璃层次与清晰栅格，工作处理采用列表加详情。首页既要有会计师关心的数字和图表，也要直接显示等待用户处理的工作数量。财务摘要包括账面现金／银行、应收、应付、期间利润，以及收入费用、现金趋势和按到期日划分的未结金额。对账和关账进度必须来自可核实的要求；没有资料不能显示为已完成。
 
-## Product scope
+财务期间默认从马来西亚当前月初至今，并可切换。数字应说明期间、币种、覆盖和更新时间；数据缺失或延迟不伪装成零。切换财务期间不会藏起其他期间的待决工作。事务所首页以客户组合及执行情况为主，不把不同客户的金额当成正式合并财务报表。
 
-| Area | Intended complete behaviour |
+聊天需要流式反馈、附件、结果卡片和清楚的问题交互。用户向上阅读时不应被新消息强行拉走；等待、失败、恢复和完成要能辨认。停止当前回复的生成与取消会计工作是两个明确分开的动作。卡片打开的是相关工作的当前状态。内部推理全文、技术日志和工具名称不应成为理解产品的前提。
+
+全产品保持专业的信息密度、清楚的层级、必要的动效和一致的交互。辅助动作放在合适的位置，常用动作容易发现；键盘、可见焦点、缩放、窄屏和减少动效同属正常使用。空白、加载、没有权限、部分完成和出错，都必须有可信的说明及下一步。
+
+## 5. 核心用户旅程
+
+### 5.1 建立事务所并开始服务客户
+
+负责人完成邮箱确认、适用条款和资料处理声明、产品准入及结账步骤，取得自己的事务所空间。邀请同事后，成员可以接受邀请、恢复账户并按职责工作。数据处理用途与告知应清楚；一次事务所声明不能变成无限制披露客户资料的许可。
+
+事务所添加客户，通过可继续的访谈确认企业身份、财年、报告口径和会计需求。已有业务的客户带入期初总账、应收应付和固定资产，相关明细与期初余额对齐。缺少某些资料时保留已经完成的部分，指出继续所需内容。
+
+### 5.2 从文件或一句话完成会计处理
+
+用户在客户 workspace 上传发票、账单、报销单、银行月结单或其他支持资料，处理自动开始。也可以在 chat 附上文件，或直接说明一笔无附件的业务。
+
+Clara 识别客户和资料内容，读取相关客户知识，判断已有记录及所需会计处理。资料足够时完成工作，并展示来源、会计结果和相关对象。不同文件呈现不同的主要事实；用户可以从金额或字段定位到所依据的原文位置和文件版本。纠正文件类型、客户归属或来源内容后，应看见受影响的结果及处理方法。
+
+需要澄清时，问题解释缺了什么、为什么需要以及可回答的方式。用户在原处或 Needs you 回答后，继续原工作。无需重新上传、重新描述整件事或寻找某一条旧聊天才能恢复。
+
+### 5.3 对账、收付款与抵消
+
+Clara 从银行月结单或其他收付款资料辨认交易。已经入账的付款只进行匹配或抵消；未记录的经济事项才产生相应的新会计影响。发票、贷项、费用、退款和非银行月结单提供的收付款也需要正确处理。
+
+例如，一笔 RM10,000 收款找不到可靠的付款人或发票，保留待处理交易并提问，不猜测清账，也不默认塞入暂记科目。排除某笔银行交易需要明确、可追溯的依据与权限。
+
+资料覆盖、金额和差异都符合要求时，Clara 可以完成对账。账面现金和银行月结单余额的含义需要清楚；缺少月结单不是已经对平的证据。
+
+### 5.4 资产、调整和持续性计划
+
+用户可通过对话、文件或 Accounting 直接处理资产购入、处置、折旧、预付款摊销、员工垫款、应计／转回和其他调整。所需分录与资产或明细记录一起构成结果。
+
+购入事实足够而折旧年限不明时，先完成购入及资产登记，再询问折旧资料。已有明确政策和授权的事项可以执行；新建持续产生未来分录的计划，需要明确指令或已有明确授权规则。已有计划无需额外通过一次人工批准来“获得”自动执行资格。
+
+计划说明计算依据、生效范围和时间，支持修改、暂停及结束。每次到期产生获准的会计工作；重复触发不能重复记账。未来计划并不自行授权历史补提。已发生的银行定期扣款可以记账，但会计计划不会替用户启动银行付款。
+
+### 5.5 更正并处理后续影响
+
+用户可以从日记账、银行、资产等对象直接更正，或要求 Clara 处理。更正展示影响哪些账项、抵消关系、期间及输出，并保留先前记录。
+
+Clara 在有效权限内完成可确定的影响。受到锁期或缺少决定阻挡的部分单独等待；已完成的独立部分保留。旧报告保持当时的内容，受影响时显示过时或被新版取代，用户可以比较原因。
+
+### 5.6 关账与下一期间
+
+用户可以在 chat 或 Work 发起关账，也可以明确设置月结／年结计划。到期意味着开始准备，只有资料覆盖、对账、相关账簿和当前权限都满足要求，才完成关账和锁期。正常自动关账不需要再启用一种“全自动”模式。
+
+首页和关账页面显示真实的准备程度与缺口。某个指定的缺失证据，可由有权限的人说明理由并接受为该次关账例外；它仍显示为例外，Clara 不能代人接受，也不能豁免借贷平衡等会计底线。
+
+锁期后收到迟到单据时，Clara 解释影响并提出方案，由用户决定重开原期间或在允许的后续期间调整。结转只能完成一次；待最终验证的事项不能提前显示通过。
+
+### 5.7 理解结果并交付报告
+
+会计师从 Reports 或对话获取试算表、总账、管理报表、账龄及已支持的正式报表包。结果能追溯到客户、期间和依据，重新查看仍能解释相同数字；问答中的探索性分析与正式交付报告应能区分。
+
+完整报告不只是一张下载按钮。用户能判断资料是否齐全、计算是否完成、输出是否仍然有效，并在获准范围内导出。未具备完整报表、附注及适用措辞时，不得宣称已经符合某一报告框架。
+
+## 6. 范围与非目标
+
+### 当前核心范围
+
+事务所及成员管理、客户建立与期初导入、支持资料的接收和理解、完整簿记与日记账、银行对账、应收应付与抵消、固定资产与调整、已授权计划、科目维护、客户知识、关账及结转、财务报告、工作追踪和可恢复的人机协作。
+
+这一范围包含供应商贷项、现金购买、员工报销、非银行来源的还款／抵消和已有扣款的记账等已接受场景。当前缺少某条实现路径，不会自动把已接受的功能移出范围。每个客户以单一企业账簿为核心。
+
+### 更广的产品方向及阶段边界
+
+| 方向 | 产品边界 |
 |---|---|
-| Firm admission | Confirm email, accept the applicable legal documents, pass admission/rate checks, complete checkout and claim one firm workspace. Staff invitations and recovery are usable without operator intervention. |
-| Client onboarding | An iterative interview captures identity, reporting basis, financial year and accounting needs. Confirmed facts reach their canonical records. Ongoing clients bring opening GL, AR/AP and fixed assets with a trial-balance tie-out. |
-| Documents | Upload or attach once; retain the source, resolve client and type, extract evidence and show field-level source regions. Unassigned, ambiguous, failed and refiled documents have a recovery path. |
-| Bookkeeping | Coding and posting complete the GL and required AR/AP, bank, asset and audit effects. Review, edit, approve, reverse and bulk work share the same accounting state. |
-| Receivables/payables | Invoice/bill open items, settlement allocations, aging, statements and control-account tie-outs remain consistent across periods. |
-| Bank | Import statements, match or book movements, explain exceptions and prove reconciliation. The accountant retains the explicit exclusion decision. |
-| Assets and adjustments | Acquisitions, depreciation, disposal, recurring/reversing entries, prepayments and staff advances are traceable and tied to the books. |
-| Close and continuity | Show readiness, complete preparation, close in order, carry forward once and support governed reopening. Missing evidence or coverage is distinguishable from a passed check. |
-| Reporting | Trial balance, journals, GL, management accounts, aging and formal statement packs are reproducible, permissioned artifacts. A statement pack only claims a reporting framework when all required statements, notes and wording are supported. |
-| Tax | Malaysia-specific SST registration/watch, taxable periods, treatments and returns, then draft tax computation and capital allowances. Preparation is in scope; a human reviews and files. Tax remains inactive in the beta. |
-| Payroll and inventory | Code statutory payroll obligations and provide a deadline calendar; support periodic closing-stock adjustments. Full payroll processing and perpetual inventory are outside scope. |
-| Knowledge | A source-linked client wiki improves Clara's judgement over time. Structured facts, identifiers, questions and receipts carry durable decisions; narrative cannot grant permissions. |
-| Activity and exceptions | Show attributable actions, failures and recovery across clients. Notification-only proactive wakes stay distinct from authorised background work. |
-| Commercial operation | Firm subscriptions, seats, active-client capacity, a shared AI allowance, overage and invoicing. Beta checkout is present; paid pricing and usage billing remain unfinished. |
+| 马来西亚税务准备 | 包括 SST 相关准备、税务计算草稿和资本津贴；由人复核和提交。当前 beta 不启用税务，这轮 refresh 不隐含税务正式上线 |
+| 商业运营 | 事务所订阅、席位、活跃客户容量、共享 AI 用量及账单属于产品方向；现有 beta 准入不表示正式计量和收费已经完成 |
+| 工资与存货相关会计 | 可记录已提供的工资法定义务及定期存货调整；不等于完整工资处理或永续库存系统 |
+| 电子发票与扩展业务 | 接收已支持的电子发票资料；主动拉取、对外开票、多币种及专门工资单接收等扩展仍需各自决定和交付 |
+| 后续合规能力 | 员工津贴专项、自开票义务识别、预扣税机制和法定截止日历保留为未来方向，不默认为当前核心已支持 |
 
-## Trust requirements
+税务、法律及商业条件需要在对应功能启用时核实，不在本产品蓝图内堆积税率、门槛、接口规则或法律文本。
 
-1. **Private firms, explicit clients.** Cross-firm access is refused. Client attribution is recorded
-   and validated; conflicting identifiers or unresolved ambiguity require clarification. Never
-   fabricate a registration number, TIN, account code or source identifier. Name-only records stay
-   name-only until evidence supports an update.
-2. **Evidence and accountability.** A document-backed entry validates its source reference and hash.
-   Every accounting change records who acted and what changed. Corrections preserve posted history
-   through reversals or supersession and bind approval to the revision reviewed.
-3. **Correct complete books.** Monetary amounts use exact minor units. Entries balance, period
-   boundaries hold, and subledger consequences accompany the posting. Derived views can catch up
-   through the event system; their freshness must be visible.
-4. **Resumable work.** Interruptions and retries preserve progress without duplicate postings.
-   Repeated delivery, a disconnected browser or a restarted runtime must not create a second effect.
-5. **Controlled disclosure.** Client information is disclosed only for authorised purposes. The
-   approved direction is one firm declaration at the DPA stage supplying onboarding consent
-   evidence, with purpose activation and dispatch checks retained. This integration is unfinished.
-   Vendor trace export remains off pending its separate disclosure and privacy review.
-6. **Untrusted content stays data.** Source documents, OCR, wiki pages and web content inform the
-   agent; they cannot change her permissions or become system instructions.
+### 非目标
 
-The operator is a separate support capability, not a rank above another firm's owner. It covers
-registration/payment support and estate wake-source controls; it does not open other firms' books.
+当前核心不包括集团合并、向外部 ERP 自动写账、客户企业登录、完整工资引擎或永续库存。实际发起银行付款、建立或取消扣款授权，也不在本轮范围内。拥有自动记账权限不代表可以移动资金。
 
-## Boundaries and later scope
+Clara 不替人作必须由本人完成的法律签署或申报，也不把“自动”解释为忽略客户隔离、有效权限、缺失依据和会计底线。
 
-Single-entity books per client are the present scope. Group consolidation, external-ERP posting,
-client logins, a payroll engine and perpetual inventory are not planned as part of the current
-core. App and agent operations use the deployed schema; schema evolution belongs to engineering.
+## 7. 信任与专业控制
 
-Inbound MyInvois XML parsing exists. API pull, outbound issuance, foreign currency and first-class
-payroll-document ingestion remain future decisions. Supplier credit notes and cash-purchase
-specialisation remain explicit gaps rather than silently assumed coding lanes. Staff allowances,
-self-billed obligation detection, withholding-tax mechanics and the statutory calendar stay on the
-future-product list in Work.
+| 角色 | 用户可以承担的产品职责 |
+|---|---|
+| Viewer | 查看及导出获准的信息 |
+| Bookkeeper | 上传、整理、匹配、回答问题、准备和入账；正常权限内可处理自己准备的记录，不以金额强制增加第二人审批 |
+| Admin | 簿记职责，加上适用的客户／事务所配置、期初确认和关账操作 |
+| Owner | 所有权、成员管理和适用的法律签署；平台支持能力须另行具备资格 |
 
-Tax schedules, thresholds, forms and legal text are effective-dated inputs, verified against
-official sources when that feature is implemented or activated. This PRD does not cache tax rates
-or substitute for a professional legal/accounting review.
+普通获准的手动入账，在资料和会计条件满足时，无需默认的第二人复核或额外声明仪式。用户直接执行表达当前处理意图；接受某次关账的缺失证据例外仍是需要单独记录的决定。
 
-## Acceptance
+人和 Clara 都受实际权限约束；回答问题不会自动扩权。人员离开或权限变化后，仍有有效事务所授权的工作可以继续；依赖已失效个人授权的工作，等待有权限的人接手。
 
-A complete release lets a firm go from signup to an active client, process representative invoices
-and bank statements, correct and reconcile the books, close a period and obtain a reproducible
-management report through the product. The same journey must expose its audit trail and recover
-from refusals without an engineer writing database rows.
+事务所之间的资料保持私密。平台支持人员处理注册、支付或运行支持，并不因此获得其他事务所的账簿。客户资料只用于获准用途；外部分析或追踪服务的披露需要独立核实。
 
-Verification must include cross-firm isolation, live role changes, retry/restart behaviour,
-source attribution, accounting tie-outs and accessible browser flows. Fixture/unit success,
-deployed bytes and an observed user journey are different kinds of evidence. The current beta's
-limitations and the next release's unfinished acceptance work are recorded in [Work](WORK.md).
+每个会计结果能回答：属于谁、谁提出或执行、依据是什么、改变了什么。名称不明确时不编造身份，数字和账簿必须一致，原始已入账历史不能被悄悄抹去。文件、知识和外部内容提供资讯，不能替用户授予权限。
+
+## 8. 成功指标与产品完成条件
+
+衡量重点是实际完成的工作及减少的人力。以下定义用于建立基线和持续比较；目前不宣称已经测得改善，也不杜撰上线目标值。
+
+| 指标 | 如何判断产品是否改善 |
+|---|---|
+| 每个客户期间的人工处理时间 | 比较相近业务复杂度、资料完整度下，人员用于录入、追问、复核及更正的总时间 |
+| 自主完成率 | 在资料和权限足够的支持工作中，无额外人工操作而完成完整业务结果的比例；同时展示被排除的等待和失败工作 |
+| 必要交互质量 | 区分确实缺资料／决定的问题，与重复追问、已有资料仍要求输入或无意义确认；观察回答后能否继续完成 |
+| 交付时效 | 从资料齐备到可用账务结果，以及从满足关账前提到完成报告的时间 |
+| 正确性与后续更正 | 观察重复入账、错配、账簿不一致及需返工的比例；用相同业务样本比较，不用生成数量代替质量 |
+| 可解释性与恢复 | 能否找到来源和更正链，能否在中断、换人或失去连接后完成原工作且没有重复结果 |
+| 事务所采用程度 | 活跃处理客户及重复使用核心旅程的情况，结合会计人员对节省时间、可信度和掌控感的反馈 |
+
+一个可交付的核心版本，应让真实事务所在产品内完成“建立事务所 → 建立客户和期初 → 接收资料或指令 → 完成账务 → 处理问题及更正 → 对账和关账 → 取得报告”的完整旅程，无需工程师代写账务。
+
+完成条件还包括：直接操作与 Clara 得到相同业务结果；相关明细与总账对齐；问题在各入口一致；重试、中断和取消不制造重复或丢失已完成结果；权限变化有效；来源可追溯；键盘和窄屏使用完整；不可用或未完成的能力明确呈现。仅有原型、单项测试成功或上线记录，都不能单独证明这条旅程已经可用。
+
+## 9. 如何持续维护这份蓝图
+
+每次 Wayfinder 或 to-spec 接受了新的产品决定，就在进入拆票前更新相应章节；没有改变产品方向时，不追加形式化记录。实施中确认的变化也应在同一轮同步。被替代的方向直接改写为当前方向，必要历史由 GitHub 决策和版本历史保留。
+
+本文件保留长期有用的用户、问题、行为、体验、范围和成功标准。具体组件、技术栈、模块、数据流及技术取舍进入 Architecture；一轮交付的详细验收、任务依赖与完成状态进入对应 spec 和 tickets。两份蓝图有冲突时应明确解决并同步，不能依赖某份旧 spec 永远覆盖它们。

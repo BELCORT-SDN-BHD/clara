@@ -42,4 +42,4 @@ The runners use separate default ports. Their `CLARA_E2E_*_PORT` variables can b
 
 The harness PostgREST connects with the disposable rig's privileged database user and then executes requests under the JWT role with `SET ROLE`. This still exercises the target role's RLS policies, but it does not reproduce production's narrow authenticator login. Do not copy this connection shape into a deployed service.
 
-These walks prove browser-to-runtime-to-database behavior for onboarding interviews and report downloads. They do not prove Cloudflare behavior, production secrets, mail delivery, Stripe, or a production database. They are not required GitHub Actions checks today; the browser CI lane is tracked in [`docs/WORK.md`](../../../../docs/WORK.md).
+These walks prove browser-to-runtime-to-database behavior for onboarding interviews and report downloads. They do not prove Cloudflare behavior, production secrets, mail delivery, Stripe, or a production database. They are not required GitHub Actions checks today; browser verification and its delivery obligations are included in the [refresh spec and audit appendices](https://github.com/BELCORT-SDN-BHD/clara/issues/612).

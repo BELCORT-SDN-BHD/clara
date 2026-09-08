@@ -27,7 +27,7 @@
 // **IT DOES NOT BOUND RUNS IN FLIGHT.** This is a bound on MINTS PER SWEEP, not on the number of
 // workflow runs concurrently alive. A minted-but-not-yet-claimed task still reads `queued` with a
 // NULL `workflow_run_id` in the next sweep's snapshot, so under claim latency it is minted again
-// (registered as a named F-A2 follow-up in PROGRESS.md: the sidecar `runId` clobber at
+// (the sidecar `runId` clobber at
 // reconciler-documents.mjs:198-206 + spool.mjs:124; harmless — the workflow dedupes — but it
 // costs pool checkouts). The global cap BOUNDS that accumulation per sweep; it does not
 // eliminate it, and closing it properly touches a pre-existing path that needs its own review.

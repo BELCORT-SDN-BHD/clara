@@ -2,7 +2,7 @@
 
 ClaraBook's production web application. It is a Next.js 16 App Router app, runs on React 19, and is deployed to Cloudflare Workers through OpenNext. The current production origin is `https://app.clarabook.com`; `apps/web` is the active frontend.
 
-Product requirements and current scope live in [`docs/PRD.md`](../../docs/PRD.md). System boundaries and deployment topology live in [`docs/ARCHITECTURE.md`](../../docs/ARCHITECTURE.md). Current posture and the ordered delivery register live in [`docs/WORK.md`](../../docs/WORK.md). Keep changing product status in those documents rather than copying dated plans into this README.
+Product vision, behavior and scope live in [`docs/PRD.md`](../../docs/PRD.md). System boundaries, deployment topology and accepted technical direction live in [`docs/ARCHITECTURE.md`](../../docs/ARCHITECTURE.md). Dated delivery contracts, dependencies and implementation status live in [GitHub Issues](https://github.com/BELCORT-SDN-BHD/clara/issues). Keep this README focused on application setup and operating procedures.
 
 ## Application map
 
@@ -21,7 +21,7 @@ The browser reads allowed tables and views through [`lib/read.ts`](lib/read.ts) 
 
 The interface uses `next-intl` with a static English locale, semantic tokens from [`app/globals.css`](app/globals.css), local Source Sans 3 and Source Serif 4 assets, and shadcn/Base UI primitives. The beta is light-theme only.
 
-Some routes intentionally show an unavailable or not-built state where a product capability is incomplete. The active list and its ordering belong in `docs/WORK.md`; do not infer completeness from the presence of a page or button.
+Some routes intentionally show an unavailable or not-built state where a product capability is incomplete. Delivery scope and ordering belong in GitHub specs and implementation issues; do not infer completeness from the presence of a page or button.
 
 ## Close and bank operating order
 
@@ -32,7 +32,7 @@ Prepare and reconcile the books before beginning a financial-year close. For an 
 3. `draft_opening_item` for the supported opening entries.
 4. `approve_opening_seed` against the current onboarding-plan revision and the approval evidence the door requires.
 
-Then load statements covering the relevant financial year, resolve or explicitly acknowledge outstanding lines, and complete each bank reconciliation. A partial-year statement set can correctly report missing months. Do not treat a zero-statement result as proof of coverage; the current close gate's vacuous-pass case remains tracked in `docs/WORK.md`. If reconciliation reports `recon_opening_mismatch`, correct the opening position from evidence and run the checks again. Do not invent a brought-forward balance to make the difference zero.
+Then load statements covering the relevant financial year, resolve or explicitly acknowledge outstanding lines, and complete each bank reconciliation. A partial-year statement set can correctly report missing months. Do not treat a zero-statement result as proof of coverage; explicit coverage evidence is part of the [refresh spec's close acceptance](https://github.com/BELCORT-SDN-BHD/clara/issues/612). If reconciliation reports `recon_opening_mismatch`, correct the opening position from evidence and run the checks again. Do not invent a brought-forward balance to make the difference zero.
 
 Complete bank settlements and other financial-year writes before `begin_close`. Beginning close changes the year to `closing` and rejects writers into that year until the close is finalized or abandoned; an attempted settlement in the period is refused and rolls back. The approved Q-03 role simplification is still pending, so some current approval paths can also require a second checker or written attestation. Follow the refusal returned by the door rather than assuming the intended future role model is already active.
 

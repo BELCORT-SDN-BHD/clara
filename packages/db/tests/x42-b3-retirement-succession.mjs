@@ -20,10 +20,8 @@
 // would be circular (a verb can be absent because 0129 dropped it, or because the frontier never
 // created it in the first place — the two are indistinguishable from the drop side alone).
 //
-// A LIVE catalog object is not forever, though: PROGRESS.md:186 already ledgers a forward
-// consolidation in this exact neighbourhood (wake_propose_bank_identifier_promotion onto pi's
-// _identifier_promotion_core), and a future PR could rename or fold the human confirm door the
-// same way, silently blinding the catalog witness back to "looks pre-retirement". The migration-
+// A LIVE catalog object is not forever: a future PR could rename or fold the human confirm
+// door, silently blinding the catalog witness back to "looks pre-retirement". The migration-
 // STEM probe is the durable second leg: `clara.schema_migrations` is APPLIED HISTORY, immutable
 // once recorded (db-migrations.md's own law), so `^[0-9]{4}_f_a3_pr3_retirement_parity_doors$`
 // having a row is a permanent fact regardless of what any later PR does to 0129's own bodies —

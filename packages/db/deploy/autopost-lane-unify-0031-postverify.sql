@@ -147,7 +147,7 @@ begin
   -- one _finish_op call exists anywhere in the function (probe 3 already proved the
   -- refusal slice contains none), so this occurrence can only be the genuine one.
   --
-  -- SUCCESSION-AWARE (2026-08-30, backend-small lane item 4 / PROGRESS.md Known-issues
+  -- SUCCESSION-AWARE (2026-08-30, backend-small lane item 4 / known issue
   -- 3d: "ALREADY RED at step 4/6 at the 0147 frontier on both sides -- pre-existing and
   -- unrelated to F-A9"). RUN AND CONFIRMED on a fresh 0001-0155 replay: this probe reds
   -- with exactly that message, on a chain that never touched F-A9 PR-1B at all -- so the

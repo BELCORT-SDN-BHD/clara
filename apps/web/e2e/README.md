@@ -56,4 +56,4 @@ These files use `.spec.ts` because the package's Node test manifest accepts `*.t
 
 ## CI status
 
-The browser suite is not a required GitHub Actions check today. The repository CI runs the web build, Node tests, runtime/database e2e checks, and other gates, but it does not invoke `pnpm --filter @clara/web e2e`. The required browser-smoke CI lane remains active work and is tracked in [`docs/WORK.md`](../../../docs/WORK.md).
+The browser suite is not a required GitHub Actions check today. The repository CI runs the web build, Node tests, runtime/database e2e checks, and other gates, but it does not invoke `pnpm --filter @clara/web e2e`. Browser verification and its delivery obligations are included in the [refresh spec and audit appendices](https://github.com/BELCORT-SDN-BHD/clara/issues/612).

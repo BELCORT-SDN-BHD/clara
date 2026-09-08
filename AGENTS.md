@@ -3,13 +3,20 @@
 Clara is an AI-native Accounting OS for Malaysian accounting firms. The agent and the human
 work on the same auditable, tenant-isolated accounting state.
 
-## The Harness menu — what you need, where the truth lives
+## Harness menu
 
-| Question | Source |
-|---|---|
-| Users, vision, experience, product scope and acceptance | [PRD](docs/PRD.md) |
-| Frontend/backend structure, boundaries, data flows and technical decisions | [Architecture](docs/ARCHITECTURE.md) |
-|  The fastest and most efficient code intelligence engine for AI coding agents. Full-indexes an average repository in milliseconds | codebase-memory-mcp |
+| Source | Responsibility | Read when |
+|---|---|---|
+| [PRD](docs/PRD.md) | Highest-level product blueprint: context, vision, users, problems, product behaviour, core journeys, scope, non-goals and success criteria | Understanding or changing what Clara should do and why |
+| [Architecture](docs/ARCHITECTURE.md) | Highest-level technical blueprint: stack and rationale, system boundaries, module responsibilities, dependencies, data flows and tradeoffs; distinguish implemented state from accepted target | Understanding or changing how Clara works |
+| codebase-memory-mcp | Searchable map of current code structure; verify coverage and read source for gaps | Locating implementation and checking technical claims |
+| [Context](CONTEXT.md) | Shared accounting and product vocabulary | Naming concepts or resolving domain ambiguity |
+| [PROGRESS](docs/PROGRESS.md) | Minimal session state: current commit, verification, active work, known blockers and next steps | Starting, resuming or handing off a session |
+
+PRD and Architecture are the enduring human-readable sources of truth. GitHub specs describe a
+particular delivery scope; tickets own its work, dependencies and completion evidence. Later accepted
+decisions may supersede older specs: update the relevant blueprint instead of accumulating conflicting
+instructions. Source code and deployment evidence establish what is actually implemented.
 
 ## Working protocol
 
@@ -20,24 +27,17 @@ work on the same auditable, tenant-isolated accounting state.
    build. Look up repository facts directly; ask the owner about unresolved product decisions.
 4. Check current official documentation, through Context7 or the vendor, before changing a stack
    integration. Installed versions and lockfiles describe this repository's dependencies.
-5. Verify the affected behaviour and update its existing source of truth in the same change.
-   Keep the current task's unresolved work actionable and distinguish local tests from hosted evidence.
+5. After Wayfinder or to-spec settles a product or technical decision, update the relevant PRD or
+   Architecture section before to-tickets. Mark accepted technical targets separately from current
+   implementation. Resolve contradictions explicitly; keep detailed acceptance in the delivery spec.
+6. Verify affected behaviour and update the relevant blueprint with implementation changes. Record
+   completion evidence and remaining work on GitHub; distinguish local checks from hosted evidence.
 
-## Hard constraints
+## Session continuity
 
-
-
-## Clock in, clock out
-
-**Clock in** — new or compacted session:
-
-
-**Clock out** — before the session ends, and before any compaction:
-
-
-## CI/CD
-
-
+Start with the minimal state file, then read the active GitHub spec/tickets and relevant blueprint.
+Before ending or compacting, replace that state with the current commit, actual verification results,
+unfinished work and the next concrete action. Keep it brief; GitHub owns the delivery history and backlog.
 
 ## Agent skills
 
@@ -52,5 +52,4 @@ The five default labels (`needs-triage`, `needs-info`, `ready-for-agent`, `ready
 ### Domain docs
 
 Single-context: a root `CONTEXT.md` plus `docs/adr/`, created lazily by the domain-modeling skill. See `docs/agents/domain.md`.
-
 
