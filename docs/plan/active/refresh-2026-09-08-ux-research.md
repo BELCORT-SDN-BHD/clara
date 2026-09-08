@@ -2,6 +2,8 @@
 
 Date: 2026-09-08. Canonical effort: [Clara refresh](https://github.com/BELCORT-SDN-BHD/clara/issues/597). This is research evidence and a proposal, not a completed redesign or a claim of exhaustive flow coverage.
 
+Status clarification after the owner exchanges: candidate/remaining language below describes this research snapshot. Work lifecycle, conversation deletion, Knowledge and navigation now follow their accepted resolutions and the [current product contract](refresh-2026-09-08-product-spec.md); they are not reopened by the older proposal text. The selected direction is A dashboard plus B Work. [补齐全量前端用户流、交互状态与 Mobbin 对照](https://github.com/BELCORT-SDN-BHD/clara/issues/610) owns whole-product detail coverage beyond these bounded reference sequences; 73 inspected core static frames and a full component catalog disposition do not establish that every Clara journey has been designed, built or tested.
+
 ## What was inspected
 
 - Current PRD and Architecture, graph-discovered frontend symbols, direct source for DocumentsWorkbench, NeedsYouRow, ClaraThreadMenu, ClaraThreadView, TurnProgress, InterruptionsPanel and threadStore. Coverage metadata reported changed file metadata; direct source was used. `globals.css` has a recorded partial-parse range at line 23; its actual token declarations were read directly.

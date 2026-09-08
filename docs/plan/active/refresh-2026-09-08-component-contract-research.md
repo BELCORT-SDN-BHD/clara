@@ -3,6 +3,8 @@
 **Checked:** 2026-09-08
 **Scope:** `apps/web` shell, chat, documents, Needs you, preferences, and the current shadcn Base registry. This is research only; no component, preset, or production UI was changed.
 
+**Closing prototype checkpoint:** [A Home + B Work is resolved](https://github.com/BELCORT-SDN-BHD/clara/issues/609#issuecomment-5587677017) at local prototype commit `8f72de0dd39fca702eb0c9cacd8fab5de8982223`. [Visual evidence](refresh-2026-09-08-visual-decision.md) records focus, Tabs, rail dismissal, transcript scrolling and reduced-motion checks. The prototype's generation status is static: undefined `shimmer` classes were removed, so this is not evidence that animated Shimmer was installed or verified. The catalog assessment below remains a component selection record, not production completion.
+
 ## Verified local baseline
 
 - `apps/web/components.json` selects shadcn `base-nova`, Base UI, CSS variables, Lucide, and `@/*` aliases. Its `registries` object is empty.

@@ -9,6 +9,8 @@ work on the same auditable, tenant-isolated accounting state.
 |---|---|
 | Users, vision, experience, product scope and acceptance | [PRD](docs/PRD.md) |
 | Frontend/backend structure, boundaries, data flows and technical decisions | [Architecture](docs/ARCHITECTURE.md) |
+| Active decisions, implementation frontier, evidence and phase handoff | [Work](docs/WORK.md) |
+| Shared accounting and product vocabulary | [Context](CONTEXT.md) |
 |  The fastest and most efficient code intelligence engine for AI coding agents. Full-indexes an average repository in milliseconds | codebase-memory-mcp |
 
 ## Working protocol
@@ -52,5 +54,4 @@ The five default labels (`needs-triage`, `needs-info`, `ready-for-agent`, `ready
 ### Domain docs
 
 Single-context: a root `CONTEXT.md` plus `docs/adr/`, created lazily by the domain-modeling skill. See `docs/agents/domain.md`.
-
 

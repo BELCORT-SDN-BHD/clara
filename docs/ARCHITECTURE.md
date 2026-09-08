@@ -1,8 +1,12 @@
 # Clara — Architecture
 
 This is the technical companion to the [PRD](PRD.md). It describes implemented boundaries and
-their reasons. Package READMEs own setup and operating procedures. Historical decisions
-remain in Git rather than a second documentation tree.
+their reasons. Package READMEs own setup and operating procedures. [Work](WORK.md) links
+accepted design decisions, proposals and their evidence; an accepted target is not an
+implemented boundary. Correct current-source findings here when verified, and update affected
+architecture in the same change as its implementation. Keep local checks and hosted observations
+distinct. Domain vocabulary and applicable decision records follow the repository's domain-doc
+convention.
 
 ## System shape
 
@@ -123,8 +127,9 @@ operation: it validates accounting meaning, authority and evidence as well as in
   remain in Work.
 
 The current human approval core still contains high-amount maker/checker and attestation gates.
-The approved direction replaces them with role floors and automatic receipts. Removing a web
-threshold control did not remove its DB gate; the pending wall-removal migration owns that gap.
+Migration 0106 excludes agent calls from that branch; unattended posting instead enters through
+its own credential, evidence and current-books checks. The refresh revalidates human ceremonies
+against the automation contract. Removing a web threshold control did not remove its DB gate.
 
 Migrations are ordered, checksum-checked deployment inputs. Read the latest replacement of a
 function, not only its first definition. Historical migrations and retained workflow versions are
@@ -186,9 +191,14 @@ Intake validates media, scans it, buffers encrypted bytes and establishes privat
 Documents can remain unassigned. OCR supplies text and coordinates; classification resolves kind
 before downstream semantic processing. Field regions fuel the evidence viewer and provenance.
 
-The current dispatcher has an ordering race: classify can run before OCR is `done`, read empty
-text and label a bank statement `other`. Fixing this is the first queued runtime change. The last
-prompt recall comparison did not reproduce that race.
+The source baseline through migration 0176 can admit classification before extraction finishes.
+The local 0177 candidate and its facts-gate consumer defer a null-kind PDF/image until OCR or
+structured parsing is `done`, then use `document.extraction_completed` to revisit the gate and
+task dedupe to admit classification. [Local validation](plan/active/refresh-2026-09-08-ocr-fix-validation.md)
+does not yet prove the full database chain or hosted rollout. Deploying that candidate requires
+the extraction-aware consumer before the database gate migration. Its rollback restores the
+database body through a new append-only migration before reverting the consumer; reverting the
+consumer first can checkpoint completion events and strand documents.
 
 Invoice/statement extraction uses two model reads, one from OCR text and one from source images,
 persisted with model/version stamps and checked for agreement and arithmetic identities.
@@ -207,10 +217,23 @@ processing. Grant and activation are distinct. The wiki path consumes a bound au
 immediately before model dispatch; remaining document/firm egress gaps are in Work. The approved
 DPA-stage declaration is not yet integrated into onboarding.
 
-The client wiki combines immutable sources, a DB index/version/citation model and content-addressed
-page bytes in Storage. Event-driven ingest, synthesis and stale-citation updates maintain it;
-scheduled lint surfaces contradictions. Wiki informs agent judgement as untrusted data. It cannot
-change a permission, numeric evaluator or identity constraint.
+The client wiki has a DB index/version/citation model. Model-generated counterparty pages are
+also uploaded to content-addressed Storage; deterministic source and seeding lanes publish DB
+content directly. Event-driven ingest, synthesis and stale-citation updates maintain versions.
+Current publishers supply empty cross-reference lists, and contradiction/stale-claim lint expects
+subject metadata the inspected production writers do not emit, limiting those checks. The chat
+pack uses a fixed priority/recency budget rather than question-conditioned retrieval. Wiki informs
+agent judgement as untrusted data; permission, evaluator and identity checks remain outside it.
+
+Typed client facts retain asserted basis and supersession history; their admin-only human write
+door is not currently wired into the inspected web/runtime callers. The client Knowledge panel
+reads these facts, while wiki retirement is exposed separately in Reports. Current source-page
+ingest publishes fixed text plus an opaque document ID, not a document summary. A separate
+`approved_coding_patterns` pack block is recomputed from unreversed approved books on read and
+remains advisory. Current chat v17 reuses a loader that catches every pack-preload failure and
+continues with null context; this does not waive the accounting tools' separate checks, but it
+does not distinguish unavailable knowledge from an empty pack. The refresh's unified knowledge
+capture, retrieval and correction contract is a target described in PRD, not the current wiring.
 
 ## Close, reporting and tax
 
