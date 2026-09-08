@@ -3,8 +3,8 @@
 ## Current State
 
 - Updated: 2026-09-09 (MYT).
-- Main checkout: 68ab432308e1bfe87871565c207f8f4ac1e89101, with local changes.
-- Documentation snapshot: codex/research-ui-contract HEAD; unpushed, separate from main's local candidates.
+- Code baseline reviewed: 68ab432308e1bfe87871565c207f8f4ac1e89101. Read the checkout's latest commit with git log -1.
+- Blueprints, formal spec mirror and research evidence are versioned with this repository; GitHub records their publication and merge checks.
 - Phase: Wayfinder, formal spec and blueprint alignment complete; next is to-tickets.
 - Checks: document/reference review passed; 244 frozen workflow files, 9 evaluators and 9 historical migration checksums verified.
 - Tests/lint: application suites and full lint not run for this documentation change; focused whitespace check passed.
@@ -23,7 +23,7 @@
 ## Known Issues
 
 - [OCR/classification race](https://github.com/BELCORT-SDN-BHD/clara/issues/606): local candidate exists; implementation/hosted acceptance remains outstanding.
-- Research/prototype branches are local and unpushed; another machine cannot fetch their hashes yet.
+- Separate visual and agent-runtime prototype branches remain local; published evidence describes their limits, but another machine cannot fetch those prototype hashes yet.
 - Preserve unrelated main checkout runtime/config edits; this documentation work does not validate them.
 
 ## Next Steps

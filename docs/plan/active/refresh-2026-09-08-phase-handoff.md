@@ -58,16 +58,16 @@ The [runtime route](https://github.com/BELCORT-SDN-BHD/clara/issues/607#issuecom
 
 The [visual decision](https://github.com/BELCORT-SDN-BHD/clara/issues/609#issuecomment-5587677017) selects A Home + B Work. Full product, keyboard/narrow/zoom/assistive-technology/recovery acceptance still applies; static Mobbin frames and synthetic prototypes do not establish it.
 
-Local preserved branches, all unpushed:
+Publication and separately preserved prototype branches:
 
 | Purpose | Branch / location | Evidence limit |
 |---|---|---|
-| Reviewed SOT, research and formal spec | `codex/research-ui-contract` at `C:\Users\zhant\Desktop\clara-rebuild-research-ui-contract`; exact latest hash in the map's publication checkpoint | Snapshot includes reviewed documents and tracked skill restoration; unrelated main runtime/config candidate is excluded. |
+| Reviewed SOT, research and formal spec | Versioned repository files, published through `codex/research-ui-contract`; exact merge and checks in the map's publication checkpoint | Includes reviewed documents, retained evidence artifacts and tracked skill restoration; unrelated main runtime/config candidate is excluded. |
 | A+B visual prototype | `codex/prototype-clara-visual` at `8f72de0dd39fca702eb0c9cacd8fab5de8982223`, sibling `clara-rebuild-prototype-clara-visual` | Synthetic data/local interactions; no production API/persistence proof. |
 | Durable-agent proof | `codex/research-agent-harness` at `2d34cd3ef5bdd84e86ffba9e3c23cd596acf7960`, sibling `clara-rebuild-agent-harness` | Real PG/process restart and synthetic business-state ordering; not real Clara RLS or two deployments. |
 | Accounting Work prototype | `codex/prototype-accounting-work` at `4121d9edcc783f254574b545d03c014b1bcaf58d`, sibling `clara-rebuild-prototype-accounting-work` | Throwaway synthetic interaction model. |
 
-The formal build contract and acceptance appendices are now readable from GitHub on another machine. Detailed research and executable prototype commits are still local: a new clone cannot fetch unpushed hashes. Transfer/publish a reachable evidence package before relying on those experiments elsewhere. Same-machine work can read the existing directories immediately.
+The formal build contract and acceptance appendices are readable from GitHub. Research documents and the retained artifacts in this repository travel with its publication. The separate executable visual and agent-runtime prototype branches remain local: a new clone cannot fetch their unpushed hashes. Transfer/publish those prototype branches before relying on their full experiments elsewhere. Same-machine work can read the existing directories immediately. Original dated evidence describes what was observed at the time; later publication does not upgrade that evidence into production verification.
 
 ## Matt skill setup
 
