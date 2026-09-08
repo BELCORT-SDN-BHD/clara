@@ -22,3 +22,11 @@ The catalog customizer displayed Radix UI/Lucide. Clara uses Base UI. Any future
 ## Remaining work
 
 Compare desktop/narrow glass and plain variants using the same accepted Work/home data. Inspect other Efferd dashboards only for a specific unmet layout or information need. Final chart measures and motion choices remain their own decisions; the owner has not approved a wholesale template import.
+
+## Focused supplementary inspection — Dashboard 6 and 12
+
+On the same date, the live [Dashboard 6](https://efferd.com/view/dashboard-6) and [Dashboard 12](https://efferd.com/view/dashboard-12) previews were inspected through viewport screenshots and accessibility trees, specifically for financial hierarchy and contextual actions. This is a bounded sample, not a claim to have reviewed every Efferd block or its source.
+
+- Dashboard 6 uses a date control, aligned values, thin separators, a large trend and a secondary summary column. Its displayed date filter and chart axis did not describe the same interval in the observed demo. A large segmented revenue gauge did not make its denominator clear. Borrow the hierarchy; require coherent periods and a meaningful scale in Clara.
+- Dashboard 12 uses a title-level “Ask AI” action, compact metric panels and an at-risk table with row-level follow-up actions. Clicking “Ask AI” in the observed public preview produced no navigation or dialog; this does not establish an agent interaction contract. In Clara, contextual actions must open the same real Work, question or object already represented elsewhere.
+- Neither sample changes the accepted work-first home, navigation, metric decision or component foundation. Keep chart labels and rows fully readable instead of copying the demos' edge fades. The reference informs the three visual prototypes; the owner still chooses after interacting with those prototypes.
