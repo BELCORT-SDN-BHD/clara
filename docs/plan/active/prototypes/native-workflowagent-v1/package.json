@@ -1,0 +1,25 @@
+{
+  "name": "clara-workflow-agent1-comparator",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "check": "tsc --noEmit",
+    "test": "vitest run --config vitest.config.ts"
+  },
+  "dependencies": {
+    "@ai-sdk/workflow": "1.0.70",
+    "@workflow/world-postgres": "4.3.4",
+    "ai": "7.0.69",
+    "workflow": "4.8.4",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@ai-sdk/provider-utils": "5.0.27",
+    "@workflow/vitest": "4.0.20",
+    "typescript": "5.9.3",
+    "vitest": "3.2.4"
+  }
+}

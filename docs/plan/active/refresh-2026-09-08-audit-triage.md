@@ -4,6 +4,11 @@
 
 This is the duplicate-prevention and status map for the 2026-09-08 refresh. It does not re-approve the withdrawn Clara v2 charter and it does not treat a closed GitHub issue as proof of a fix or deployment.
 
+The later [216-item register](refresh-2026-09-08-audit-register.md), checked 2026-09-09,
+now accounts for every historical ID from the four appendices, separate known-issue extras,
+current-source corrections and named validation obligations. It supersedes this note's
+initial inventory coverage, without claiming all findings are fixed or verified on the host.
+
 Evidence read for this pass:
 
 - local `main` at `68ab432308e1bfe87871565c207f8f4ac1e89101`;

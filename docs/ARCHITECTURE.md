@@ -46,6 +46,10 @@ does not yet belong to a firm.
 
 Read manifests and lockfiles for exact versions. The workspace defaults to Node 20 and pnpm;
 `apps/web` declares a package-managed Node 22 runtime for its scripts and Cloudflare tooling.
+The runtime currently installs AI SDK 7.0.77, whose Node requirement is 22, while the root
+engine range and runtime Docker stages still target Node 20. The isolated Node 22 build and
+typecheck passed, but the Linux image and hosted runtime have not been migrated; see the
+[runtime build evidence](plan/active/refresh-2026-09-08-runtime-node22-build-proof.md).
 Backup and renderer are outside the pnpm workspace and have their own image/dependency lifecycle.
 The dashboard and spike are retired.
 

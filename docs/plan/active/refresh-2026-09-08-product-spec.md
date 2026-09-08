@@ -176,11 +176,13 @@ Q16–Q18 的 owner 回答已记录在前文；旧实现与先前提问中的自
 
 OCR、解析与分类可作为明确的输入处理步骤；没有必要仅为保持“一个 agent”的外观去删除可靠解析器。需要审查的是重复推理、互不共享问题的多个 agent 和难以纠错的硬路由。
 
-当前最稳妥的顺序是先统一业务契约，再用隔离样例比较现有 Workflow 4 上的统一循环与 Workflow 5／WorkflowAgent。后者须验证 Nitro 构建、Postgres world、包版本、旧运行恢复和流式传输。`needsApproval` 不自动等于长时间挂起；Clara 的澄清必须保持服务器端持久化。
+2026-09-09 的[技术路线决议](https://github.com/BELCORT-SDN-BHD/clara/issues/607#issuecomment-5588548302)已选择首轮采用 Node 22、Workflow 4.8.4／Postgres World 4.3.4 和现有 AI SDK 7.0.77 ToolLoopAgent，以新的冻结 successor 承接统一 harness，保留旧 v1–v17 的可执行绑定。这是待实施目标，不是当前生产状态。澄清继续保存为服务器端持久问题，`needsApproval` 不自动等于持久等待。
 
-实际技术选型由 [验证统一 Clara agent harness 与持久化执行的实施路线](https://github.com/BELCORT-SDN-BHD/clara/issues/607) 承接。这是从地图待明确事项中切出的兼容性／恢复验证，须以可运行样例及执行时的官方版本为准；该结论是相关实现切片的前置条件。
+[公平比较](refresh-2026-09-08-runtime-route-audit.md)确认 WorkflowAgent 1.0.70 支持 Workflow 4，且模型调用与 step 标记工具可分别 checkpoint；其精确 AI7.0.69 依赖缺少后续流式重试／消息修正，需要额外依赖隔离和维护。WorkflowAgent 2.x 有 Workflow 5 的可安装候选，但仍须验证 runtime/world/compiler 迁移和旧运行切换。首轮选定路线接受较粗的 ToolLoop 段重放成本，必须验证有界预算、部分文本重建和 receipt-backed 结果，而不是把这个取舍隐藏起来。
 
-[隔离执行记录](refresh-2026-09-08-agent-harness-validation.md)已验证脚本模型的工具错误反馈、样例内存去重，以及 Node 22／PostgreSQL 17 下真实 Workflow 4 的进程重启、持久 hook／SSE 重读和合成可信状态表的重新读取。它没有证明实际模型修正质量、Clara 的真实权限／业务 SQL、授权到写入提交的原子性或旧／新版本切换。[现有答案接纳走查](refresh-2026-09-08-answer-admission-evidence.md)进一步确认 Clara 已有数据库行锁、pending 状态检查、幂等回执及持久投递记录，应保留复用；原始 resumeHook 接受并发答案不是已证明的 Clara 缺陷。剩余验证包括投递成功而 delivered_at 未提交时的恢复，以及取消与业务动作的接纳顺序。取消沿用 Q8：阻止后续新动作，已接纳的原子操作结算期间显示「正在停止」，完成回执保留，明确最终边界后才显示已取消；不能承诺瞬间撤销，也不能让后续写入无限继续。WorkflowAgent 比较集仍只完成安装／import，项目声明的 Node 20 也低于现有 AI SDK 的 Node >=22 支持要求。因此技术票继续开放，不能据此宣称生产路线或迁移已完成。
+[新增边界证明](refresh-2026-09-08-runtime-boundary-proof.md)在真实 PG17／Workflow4 下验证了 effect 提交后、步骤 checkpoint 前中断并恢复同一 receipt，以及合成取消／权限／期间事务顺序、KB-only 重评和删除聊天后保留 Work 依据。原生 WorkflowAgent 比较另有 Node22 typecheck 与 Workflow Vitest 2/2，使用 local world，不能冒充原生路线的 PG restart 证明。
+
+[现有答案接纳走查](refresh-2026-09-08-answer-admission-evidence.md)确认 Clara 已有数据库第一回答门和持久投递记录，可复用；原始 resumeHook 接受并发答案不是已证明的 Clara 缺陷。真实业务门的权限到提交、稳定逻辑操作与 payload 绑定、投递领取者／lease 崩溃窗口、取消终态、KB/聊天真实存储传播、Linux/hosted 和两次构建的切换／回退，均是正式 spec 与实现票的明确验收。取消沿用 Q8：阻止后续新动作，已接纳的原子操作结算期间显示「正在停止」，保留完成回执后才显示终态。
 
 ## 5. Client KB：统一所有权，保留可验证的结构
 
@@ -277,7 +279,7 @@ Q24/Q25 已确认工作优先的 Client home 和 Accounting 分组。下面的�
 
 [已完成的 UI 研究](https://github.com/BELCORT-SDN-BHD/clara/issues/600#issuecomment-5583876289)和[组件核对](refresh-2026-09-08-component-contract-research.md)支持以下方案。Owner 新增的 [Efferd Dashboard 2 偏好](refresh-2026-09-08-efferd-reference.md)是视觉输入，未改变页面职责。[交互原型](prototypes/accounting-work-interaction.html)用合成内存状态讨论 Work 行为；刷新会重置，不能作为真实持久化或成品 UI 的证明。
 
-本轮新增的[首页数据证据](refresh-2026-09-08-dashboard-data-evidence.md)核对了真实来源、计算口径及缺口。工作去重统计、现金科目覆盖、按到期日的逾期金额，以及保持同一期间／年结处理口径的收入费用读取，都不能从现有首页展示推定为已实现。Q27 中 owner 已选择 A 的 dashboard 搭配 B 的 Work 组件，并要求更多会计师关注的图表、直接可见的待答工作数和适合的原生 shadcn 组件。独立分支 `codex/prototype-clara-visual` 的本地 commit `fa5489d618d46c595a979fb7b075eb88552971a5` 已细化这一方向，包含四个财务摘要、三组 Chart、原生 shell／Tabs 和合成流式 Clara 问答；README 及已更新 A 桌面／窄屏截图位于该分支 `docs/plan/active/prototypes/clara-visual/`。局部浏览器行为、TypeScript 与针对性 ESLint 已验证；真实账务、持久化、完整无障碍及全量页面仍未实现或验收。具体数据合同由指标决策记录。
+本轮新增的[首页数据证据](refresh-2026-09-08-dashboard-data-evidence.md)核对了真实来源、计算口径及缺口。工作去重统计、现金科目覆盖、按到期日的逾期金额，以及保持同一期间／年结处理口径的收入费用读取，都不能从现有首页展示推定为已实现。Q27 中 owner 已选择 A 的 dashboard 搭配 B 的 Work 组件，并要求更多会计师关注的图表、直接可见的待答工作数和适合的原生 shadcn 组件。独立分支 `codex/prototype-clara-visual` 的本地 commit `8f72de0dd39fca702eb0c9cacd8fab5de8982223` 已细化这一方向，包含四个财务摘要、三组 Chart、原生 shell／Tabs 和合成流式 Clara 问答；README 及已更新 A 桌面／窄屏截图位于该分支 `docs/plan/active/prototypes/clara-visual/`。局部浏览器行为、TypeScript 与针对性 ESLint 已验证；真实账务、持久化、完整无障碍及全量页面仍未实现或验收。具体数据合同由指标决策记录。
 
 **范围与导航。** Firm shell 提供 Home、Clients、Work 和 Activity，Settings 按账号／事务所／成员权限／商业管理组织。Needs you 是 Work 的常驻快捷视图及首页待办入口，读取同一组问题，不再建独立处理队列。Client shell 提供 Home、Work、Documents、Accounting、Knowledge、Reports；Accounting 下按业务列出 Journals、Bank、Receivables & payables、Assets、Plans、Accounts 和 Close。名称和折叠方式可随视觉原型优化，但不能把所有对象塞进一条横向 tab 栏。路由目的地使用 links，页面内的相邻视图才用 Tabs。原有链接迁移后仍能到达对应对象。
 

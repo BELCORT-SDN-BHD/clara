@@ -1,0 +1,46 @@
+{
+  "checkedAt": "2026-09-09T00:27:00+08:00",
+  "runtime": "node v22.23.0",
+  "packages": {
+    "@ai-sdk/workflow": "1.0.70",
+    "ai": "7.0.69",
+    "workflow": "4.8.4",
+    "@workflow/world-postgres": "4.3.4",
+    "@workflow/vitest": "4.0.20",
+    "vitest": "3.2.4"
+  },
+  "commands": [
+    "npx --yes --package node@22.23.0 node node_modules/typescript/bin/tsc --noEmit",
+    "npx --yes --package node@22.23.0 node node_modules/vitest/vitest.mjs run --config vitest.config.ts"
+  ],
+  "typecheck": "passed",
+  "test": {
+    "status": "passed",
+    "files": 1,
+    "tests": 2,
+    "agentModelSteps": 2,
+    "finalText": "Completed from the synthetic receipt.",
+    "receipt": "receipt:work-native-1:native-v1",
+    "mainLoopPersistedWorkflowStepNames": [
+      "step//@ai-sdk/workflow@1.0.70//doStreamStep",
+      "step//./workflows/native-agent//createSyntheticReceipt",
+      "step//@ai-sdk/workflow@1.0.70//writeToolResults",
+      "step//@ai-sdk/workflow@1.0.70//doStreamStep",
+      "step//@ai-sdk/workflow@1.0.70//closeStream"
+    ],
+    "unsafeFinish": {
+      "finishReason": "content-filter",
+      "toolExecuted": false,
+      "persistedWorkflowStepNames": [
+        "step//@ai-sdk/workflow@1.0.70//doStreamStep"
+      ]
+    }
+  },
+  "providerCalls": 0,
+  "limits": [
+    "Workflow Vitest local world, not PostgreSQL World",
+    "No process restart or two-build cutover",
+    "Synthetic receipt tool; no Clara RLS or business SQL",
+    "No injected retry after partial stream output"
+  ]
+}

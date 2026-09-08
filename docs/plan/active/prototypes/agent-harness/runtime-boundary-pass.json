@@ -1,0 +1,150 @@
+{
+  "result": "PASS",
+  "environment": {
+    "node": "v22.23.2",
+    "postgres": "postgres (PostgreSQL) 17.11",
+    "workflow": "4.8.4",
+    "postgresWorld": "4.3.4",
+    "ai": "7.0.77"
+  },
+  "crashBoundary": {
+    "runId": "wrun_01M20WGD9ETKK6RWCBA8CWG1GE",
+    "servingPidBefore": 55672,
+    "servingPidAfter": 48660,
+    "oldPidExited": true,
+    "postgresPidBefore": 43356,
+    "postgresPidAfter": 43356,
+    "effectCommittedBeforeKill": true,
+    "receiptBeforeKill": "1",
+    "receiptAfterReplay": "1",
+    "replayObservedExistingReceipt": true,
+    "effectRows": 1,
+    "persistedSseReplay": {
+      "accepted": true,
+      "completed": true
+    }
+  },
+  "cancellation": {
+    "cancelBlockedWhileAcceptedOperationSettled": true,
+    "first": {
+      "outcome": "committed",
+      "receiptId": "3",
+      "deduplicated": false
+    },
+    "cancel": {
+      "cancelRequested": true
+    },
+    "second": {
+      "outcome": "refused_cancelled"
+    },
+    "effects": 1
+  },
+  "authorityPeriod": {
+    "operationFirst": {
+      "operation": {
+        "outcome": "committed",
+        "receiptId": "4",
+        "deduplicated": false
+      },
+      "revoke": {
+        "role": "viewer",
+        "active": false,
+        "authority_revision": 2,
+        "period_open": false,
+        "period_revision": 2
+      },
+      "nextOperation": {
+        "outcome": "refused_authority_or_period",
+        "observed": {
+          "role": "viewer",
+          "active": false,
+          "authorityRevision": 2,
+          "periodOpen": false,
+          "periodRevision": 2
+        }
+      }
+    },
+    "revokeFirst": {
+      "revoke": {
+        "role": "viewer",
+        "active": false,
+        "authority_revision": 2,
+        "period_open": false,
+        "period_revision": 2
+      },
+      "operation": {
+        "outcome": "refused_authority_or_period",
+        "observed": {
+          "role": "viewer",
+          "active": false,
+          "authorityRevision": 2,
+          "periodOpen": false,
+          "periodRevision": 2
+        }
+      },
+      "effects": 0
+    }
+  },
+  "knowledge": {
+    "stale": {
+      "outcome": "replan_required",
+      "expectedKnowledgeRevision": 1,
+      "currentKnowledgeRevision": 2
+    },
+    "effectsBeforeReplan": 0,
+    "replan": {
+      "priorKnowledgeRevision": 1,
+      "plannedKnowledgeRevision": 2,
+      "authoritySnapshot": {
+        "role": "bookkeeper",
+        "active": true,
+        "authorityRevision": 1,
+        "periodOpen": true,
+        "periodRevision": 1
+      }
+    },
+    "current": {
+      "outcome": "committed",
+      "receiptId": "5",
+      "deduplicated": false
+    },
+    "authorityAndPeriodUnchanged": true
+  },
+  "retainedBodyAndChatDeletion": {
+    "retainedOldRun": {
+      "runId": "wrun_01M20WGGNYA0RP5X1KSV8TSASF",
+      "bodyVersion": "v3-tool-loop"
+    },
+    "newDefaultRun": {
+      "runId": "wrun_01M20WGH04K2EZ6SBGBEFXXKG9",
+      "bodyVersion": "v4-runtime-boundary"
+    },
+    "chatDeletion": {
+      "ordinaryChatRows": 0,
+      "instruction": "Resume work from durable basis",
+      "sourceRef": "fixture://basis-resume",
+      "acceptedAnswer": "accepted identity fact",
+      "resumableQuestion": true
+    },
+    "syntheticAnswerAdmission": {
+      "firstAccepted": true,
+      "sameOperationReplay": true,
+      "conflictingOperationKeyStatus": 409,
+      "secondAnswerStatus": 409
+    }
+  },
+  "boundaries": {
+    "transactionTests": "real scratch PostgreSQL 17 row locks and commits against a synthetic schema",
+    "model": "AI SDK ToolLoopAgent with MockLanguageModelV4 scripted output; no provider call or recovery-quality claim",
+    "workflow": "real Workflow 4.8.4 Nitro server and Postgres world on loopback",
+    "answerAdmission": "synthetic first-answer transaction; no claim that the prototype is Clara's production dispatcher",
+    "versionRetention": "one new compiled bundle retaining v3 while defaulting new starts to v4; not a two-binary deploy or rollback test"
+  },
+  "productionUnproven": [
+    "Clara tenant RLS, production authority tables, accounting functions, and period-close functions",
+    "hosted PostgreSQL/provider execution and Linux Node 22 container image",
+    "answer-dispatch crash recovery, lease expiry/redelivery, and chat deletion authorization",
+    "two-binary deployment cutover/rollback and removal policy for nonterminal workflow bodies"
+  ],
+  "logs": "C:\\Users\\zhant\\AppData\\Local\\Temp\\clara-agent-harness-607\\runtime-boundary-run-VjgcRz"
+}

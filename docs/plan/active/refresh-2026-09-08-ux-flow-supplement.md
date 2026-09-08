@@ -111,6 +111,11 @@ This corrects the main report's original overly broad “empty overview” label
 
 ### Copilot Money dashboard: complete bounded sequence
 
+**2026-09-09 follow-up:** the [first-party motion and chart study](refresh-2026-09-08-copilot-motion-research.md)
+adds live public-page row-transition observations and official walkthrough/documentation evidence.
+The historical paragraph below remains a static-frame account; it no longer represents the
+entire Copilot research set. No exact chart/panel easing or authenticated-app behavior is inferred.
+
 The connector rendered all **3/3 static frames** of the [Dashboard flow](https://mobbin.com/flows/784fafc4-81bb-4d1e-a75b-47aacbefba1b). This captured version presents an assets/debt trend with an explicit range, followed by a dashboard with a primary budget amount, To review, category amounts, upcoming items and a labelled current-versus-prior income comparison. It complements the two newer-looking individual reference screens already in the main report; no claim is made that one capture is the currently shipped app version. Useful structure is a legible number with its basis, supporting trend and a direct route to underlying records. Its consumer budget semantics, promotional section, bright palette and horizontal category cards are not Clara requirements. The Work queue remains a filterable list. Static captures cannot establish Copilot's animation philosophy or timing; Clara motion must be judged in a runnable prototype using its own tokens and reduced-motion behavior.
 
 ### Final research coverage boundary
