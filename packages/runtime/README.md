@@ -129,6 +129,9 @@ about absent pins or non-verifying modes. To activate verified TLS, deploy the i
 the CA first, validate the server chain, then update the applicable DSNs with
 `sslmode=verify-full&sslrootcert=/app/ops/tls/pooler-ca.crt` and re-probe every lane.
 Shipping the certificate does not establish that live secrets use it. `checks.tls` reports what
+Read `checks.tls.pinned` on the deployed host rather than the image: on 2026-09-09 all seven
+lane DSNs of `clara-runtime` were switched to verify-full through this ceremony and `/ready`
+reported them pinned with the shipped CA validated (#617).
 the running process actually booted with, by variable name; `measured:false` means the boot
 assert has not run there and is not evidence of a clean posture.
 [node-postgres SSL configuration](https://node-postgres.com/features/ssl)
