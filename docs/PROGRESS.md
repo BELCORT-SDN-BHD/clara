@@ -3,7 +3,7 @@
 ## Current State
 
 - Updated: 2026-09-09 (MYT), end of the first `/implement` session.
-- Local `main` is five commits ahead of origin (95ddfcc4): 2d87f8ec (#606), 3b4e5b26 (#616), 05f9f524 (#606 fixture), 0164a2f0 (#617), 7f4f90a4 (#618). Pushed to branch `implement/refresh-2026-09-09` with a pull request; `main` requires the `ci` check, so it fast-forwards only after CI passes.
+- Latest `main` commit: e619066f (PR #684 merged by fast-forward after a green hosted CI run: 2d87f8ec #606, 3b4e5b26 #616, 05f9f524 #606 fixture, 0164a2f0 #617, 7f4f90a4 #618). `main` requires the `ci` check, so every push goes through a branch and pull request first.
 - Phase: implementation of the published refresh tickets has started. #606, #616, #617 and #618 are implemented and verified locally; none is closed (hosted evidence outstanding, see each issue's latest comment).
 - Local verification (fresh PostgreSQL 17.11 clusters through the repo runner 0001–0177, Node 22.23.2): `@clara/db` 4101 tests · 4006 pass · 0 fail (one timing flake in `x85-b3-reopen-ends-on` passes 3/3 alone) · 94 skipped; `@clara/runtime` 2109 · 2107 pass · 1 skipped · 1 Windows-only failure (`intake-unit` EICAR cell, Windows Defender quarantines the fixture); root `pnpm lint`, `pnpm typecheck`, web build, post-build gates, live-gate e2es (intake, interview, kill-resume, version-cutover) and the Node 22 Linux image smoke (WSL Docker, postgres:17) all pass.
 - Unrelated owner edits left uncommitted on purpose: `.codex/config.toml` and the Mobbin paragraph in `apps/web/README.md`.
@@ -29,6 +29,6 @@
 
 ## Next Steps
 
-1. Owner: merge the pull request once `ci` is green (or ask the agent to fast-forward `main`), then deploy per `packages/runtime/README.md` and record hosted evidence on #606/#616/#617/#618 before closing them.
+1. Owner: deploy per `packages/runtime/README.md` (consumer image before migration 0177), record the Fly/hosted-journey evidence on #606/#616/#617/#618, then close them (or close now on local + CI evidence — owner's call; the tickets are labelled ready-for-human).
 2. Next implementation frontier: #614 (scoped shell and route migration, unblocks seven tickets), then #615, #619–#622; the ToolLoopAgent successor ticket (blocked by #616) once #616 closes.
 3. [Final acceptance #683](https://github.com/BELCORT-SDN-BHD/clara/issues/683) owns integrated delivery, blueprint synchronization and explicit closure of #612/#597.
