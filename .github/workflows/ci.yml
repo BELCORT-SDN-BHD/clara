@@ -37,7 +37,7 @@ jobs:
       code: ${{ steps.classify.outputs.code }}
       db: ${{ steps.classify.outputs.db }}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
       # DIAGNOSTIC ONLY — no gate reads it, nothing branches on it. It exists so the
@@ -100,7 +100,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # Full history: freeze-lint compares against origin/main; push/scheduled
           # gitleaks scans full history.
@@ -118,14 +118,16 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 20.19.5
+          node-version: 22.23.2
       # reporting-render is outside the pnpm workspace; its built-in-only unit battery
       # must be invoked explicitly before the image build.
+      # Node 22's test runner takes glob patterns, not directories (the Node 20 directory form
+      # resolves to a single missing module on 22). The quoted glob is expanded by node itself.
       - name: Renderer unit battery (packages/reporting-render/tests)
-        run: node --test packages/reporting-render/tests/
+        run: node --test "packages/reporting-render/tests/**/*.test.mjs"
       # The image has no bundled font; install the mounted fixture font if the runner
       # image does not already provide it.
       - name: Ensure a drill font is present
@@ -164,7 +166,7 @@ jobs:
       NEXT_PUBLIC_SUPABASE_URL: "https://ci-placeholder.supabase.co"
       NEXT_PUBLIC_SUPABASE_ANON_KEY: "sb_publishable_ci_placeholder"
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/setup-workspace
       - name: Typecheck (tsc across TS packages)
         run: pnpm typecheck
@@ -234,7 +236,7 @@ jobs:
       - name: Wire service ports (ephemeral host ports -> env)
         run: |
           echo "PGPORT=${{ job.services.postgres.ports['5432'] }}" >> "$GITHUB_ENV"
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # Full history so deploy-onto-existing + migration-history compare against
           # origin/main (append-only-vs-base is the ONLY real protection).
@@ -334,7 +336,7 @@ jobs:
           echo "PGB_PORT=${{ job.services.postgres_b.ports['5432'] }}" >> "$GITHUB_ENV"
           echo "PGC_PORT=${{ job.services.postgres_c.ports['5432'] }}" >> "$GITHUB_ENV"
           echo "PGD_PORT=${{ job.services.postgres_d.ports['5432'] }}" >> "$GITHUB_ENV"
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/setup-workspace
       - uses: ./.github/actions/pg17-client
       - uses: ./.github/actions/db-live-gates
@@ -371,7 +373,7 @@ jobs:
       - name: Wire service ports (ephemeral host ports -> env)
         run: |
           echo "PGPORT=${{ job.services.postgres.ports['5432'] }}" >> "$GITHUB_ENV"
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/setup-workspace
       - uses: ./.github/actions/pg17-client
       - uses: ./.github/actions/closed-wave-upgrade-drills
@@ -427,7 +429,7 @@ jobs:
       - name: Wire service ports (ephemeral host ports -> env)
         run: |
           echo "PGPORT=${{ job.services.postgres.ports['5432'] }}" >> "$GITHUB_ENV"
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/frontier-leg
         with:
           slice: ${{ matrix.slice }}
@@ -443,7 +445,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/partition-total
 
   # ===========================================================================

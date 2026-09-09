@@ -7,7 +7,7 @@
   "scripts": {
     "check": "node --check scripts/render-worker.mjs && node --check scripts/verify-reports-prefix.mjs && node --check lib/canonical-json.mjs && node --check lib/decisions.mjs && node --check lib/lexicon.mjs && node --check lib/chart.mjs && node --check lib/layout.mjs && node --check lib/manifest.mjs && node --check lib/engine.mjs && node --check lib/extract.mjs && node --check lib/db.mjs && node --check lib/objects.mjs && node --check lib/fonts.mjs",
     "lint": "eslint .",
-    "test": "node --test tests/",
+    "test": "node --test \"tests/**/*.test.mjs\"",
     "worker": "node scripts/render-worker.mjs",
     "verify:reports-prefix": "node scripts/verify-reports-prefix.mjs"
   },

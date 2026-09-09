@@ -68,8 +68,9 @@ pnpm --filter @clara/web e2e
 `build` first checks that `NEXT_PUBLIC_SUPABASE_ANON_KEY` is a publishable or positively identified
 anon key. This package declares Node 22 through `devEngines.runtime`; `pnpm install` downloads
 the exact runtime pinned in the lockfile, and package scripts/`pnpm exec` use it automatically.
-This also satisfies Wrangler and OpenNext's Node requirement while the repository's default and
-backend runtime remain Node 20. Use pnpm to invoke web tools so they receive the package runtime.
+This also satisfies Wrangler and OpenNext's Node requirement; the repository's default toolchain,
+CI and the backend runtime image are on the same Node 22 line. Use pnpm to invoke web tools so
+they receive the package runtime.
 
 ## Cloudflare deployment
 

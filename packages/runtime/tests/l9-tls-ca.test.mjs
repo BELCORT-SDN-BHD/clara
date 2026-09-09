@@ -40,7 +40,9 @@ function scratch() {
 
 test("H-43 drift guard: the RUNNER stage COPYs the pooler CA to the pinned in-image path", () => {
   const dockerfile = readFileSync(join(RUNTIME_ROOT, "Dockerfile"), "utf8");
-  const runnerIdx = dockerfile.indexOf("FROM node:20-bookworm-slim AS runner");
+  // #616: the image's Node line is pinned here on purpose — a base bump is a host decision
+  // (root engines / .nvmrc / CI move together), so this guard reds until all four agree.
+  const runnerIdx = dockerfile.search(/^FROM node:22-bookworm-slim AS runner$/m);
   assert.ok(runnerIdx > 0, "mandatory setup: the runner stage was located");
   const runnerStage = dockerfile.slice(runnerIdx);
   assert.match(
@@ -65,7 +67,7 @@ test("H-43 drift guard: the RUNNER stage COPYs the pooler CA to the pinned in-im
 
 test("CB-AE2E-035 drift guard: the runner stage declares the build-sha ARG/ENV pair", () => {
   const dockerfile = readFileSync(join(RUNTIME_ROOT, "Dockerfile"), "utf8");
-  const runnerStage = dockerfile.slice(dockerfile.indexOf("FROM node:20-bookworm-slim AS runner"));
+  const runnerStage = dockerfile.slice(dockerfile.search(/^FROM node:22-bookworm-slim AS runner$/m));
   assert.match(runnerStage, /^ARG CLARA_BUILD_SHA=""$/m, "the build arg is declared, defaulting to empty");
   assert.match(runnerStage, /^ENV CLARA_BUILD_SHA=\$CLARA_BUILD_SHA$/m, "and promoted to an ENV the route can read");
 });

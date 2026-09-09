@@ -115,6 +115,10 @@ what is serving; local registry values alone cannot do that.
 
 ## Deployment and rollback
 
+The image builds and runs on Node 22 (`node:22-bookworm-slim`, both stages), the same line as
+`.nvmrc`, the root `engines` range and CI. Node 20 is end-of-life; an image built from an older
+base is not a supported rollback target for the Node line itself, only for the code it carries.
+
 The current Fly configuration is one always-on machine with a disposable intake spool.
 Additional machines/HA require a deliberate deployment design and connection-budget review.
 

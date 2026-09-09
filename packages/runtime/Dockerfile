@@ -3,9 +3,11 @@
 # See packages/runtime/README.md, "Deployment and rollback".
 # Selective COPY keeps local secrets and host-built output out of the image.
 # Build native bindings inside Linux; never reuse a Windows .output directory.
+# Both stages run Node 22 (the .nvmrc / root engines / CI toolchain, #616); Node 20 reached
+# end-of-life on 2026-04-30 and the AI SDK 7 / Workflow 4 stack is verified on 22.
 
 # Builder: install dependencies, then compile Nitro.
-FROM node:20-bookworm-slim AS builder
+FROM node:22-bookworm-slim AS builder
 RUN corepack enable
 WORKDIR /app
 
@@ -32,7 +34,7 @@ RUN pnpm --filter @clara/runtime build
 RUN pnpm --filter @clara/runtime deploy --legacy --prod /app/deploy
 
 # Runner: compiled server, supervisor and production dependencies.
-FROM node:20-bookworm-slim AS runner
+FROM node:22-bookworm-slim AS runner
 ENV NODE_ENV=production
 WORKDIR /app
 

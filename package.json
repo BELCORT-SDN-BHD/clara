@@ -6,7 +6,7 @@
   "description": "Clara — AI-native Accounting OS for Malaysian accounting firms (greenfield rebuild). Monorepo root.",
   "packageManager": "pnpm@10.33.0",
   "engines": {
-    "node": ">=20.19 <21",
+    "node": ">=22.11 <23",
     "pnpm": ">=10"
   },
   "scripts": {
@@ -34,7 +34,7 @@
   },
   "devDependencies": {
     "@eslint/js": "9.39.5",
-    "@types/node": "20.19.0",
+    "@types/node": "22.20.1",
     "eslint": "9.39.5",
     "globals": "17.7.0",
     "pg": "8.20.0",

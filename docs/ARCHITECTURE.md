@@ -55,11 +55,12 @@ Web 的请求生命周期与会计工作的生命周期分开，关闭页面不�
 
 精确依赖由 [根 manifest](../package.json)、[Web manifest](../apps/web/package.json)、
 [Runtime manifest](../packages/runtime/package.json) 与 [lockfile](../pnpm-lock.yaml) 固定。
-当前根 engine 和 runtime Docker stages 仍是 Node 20；Web 脚本声明包管理的 Node 22。
-AI SDK 7 的 Node 要求与 runtime 宿主尚未对齐。
+根 engine（`>=22.11 <23`）、`.nvmrc`、CI toolchain 与 runtime Docker 两个 stage 现已统一为 Node 22.23.2；
+Web 通过 `devEngines.runtime` 声明同一版本。Node 20 已于 2026-04-30 停止维护。
+当前 Workflow 4.8.4、Postgres World 4.3.4、AI SDK 7.0.77 组合在 Node 22 上完成本地 typecheck、
+Nitro build、全量 DB／runtime 测试与持久 World e2e；Linux image 与 hosted 证据以 #616 记录为准。
 
-**已接受目标：**把根／runtime Linux image／CI／Fly 对齐 Node 22，以同一组 Workflow 4.8.4、
-Postgres World 4.3.4、AI SDK 7.0.77 构建首个 ToolLoopAgent successor。
+**已接受目标：**以该 Node 22 宿主与同一组依赖构建首个 ToolLoopAgent successor。
 选择这条路线是沿用已调查的数据库和执行基础，并减少手写 loop 的职责；没有宣称它是所有产品的最优栈。
 WorkflowAgent v1 能与 Workflow 4 配合，但其精确的较旧 AI 依赖和 stream retry 维护是已记录的取舍。
 Workflow 5 是另一组需整体验证的候选依赖，本次目标未采用；换路线需要更新架构决定及等价验证。
@@ -322,7 +323,7 @@ Web、runtime、DB frontier 和 renderer 分别记录发布身份；源代码通
 
 | 领域 | 当前实现的事实／限制 | 已接受目标 |
 |---|---|---|
-| Agent 与宿主 | 分散冻结流程，chatTurn v17；runtime image 仍 Node 20；Node 22 的隔离 build/typecheck 已有局部证据。 | Node 22 完整宿主对齐；首个 ToolLoopAgent successor 与显式版本 bundle；保留旧运行。 |
+| Agent 与宿主 | 分散冻结流程，chatTurn v17；根／CI／runtime image 已统一 Node 22.23.2（#616，本地验证；hosted 发布待记录）。 | 首个 ToolLoopAgent successor 与显式版本 bundle；保留旧运行。 |
 | Work 与控制 | tasks、interruptions、回执、SSE、租约已有；版本答案、正确投递和取消排序仍有差距。 | 统一业务 Work，共享问题与稳定操作身份，真实重启／竞争下保持完整结果。 |
 | 会计能力 | JE、subledger、结算、资产、close 基础存在；入口能力及人工／agent 行为不一致。 | 全范围领域操作与必要关联影响；去掉普通入账额外仪式，保留实际权限与硬约束。 |
 | 文件 | 0177 与 extraction-aware facts_gate consumer 已合入 main 并在本地 PG17 全链验证：未知 kind 的 PDF／图片在成功提取前返回 awaiting_extraction；hosted 发布待记录。 | 能力分层与 source／facts／operation 状态一致；hosted 上传旅程验收。 |
