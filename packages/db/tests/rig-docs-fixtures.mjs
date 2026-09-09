@@ -358,9 +358,25 @@ export async function ensureClassifyGateExtraction({ firm, document }) {
       where document_id=$1 and firm_id=$2 and status='done' and engine_kind in ('ocr','structured_parse') limit 1`,
     [document, firm]);
   if (done.rowCount === 0) {
-    await seedExtraction({ firm, document, engineId: GATE_EXTRACTION_ENGINE_ID, engineKind: "ocr", status: "done" });
+    await seedExtraction({
+      firm, document, engineId: GATE_EXTRACTION_ENGINE_ID, engineKind: "ocr", status: "done",
+      extra: { id: gateExtractionId() },
+    });
   }
   return refireFactsGate(document);
+}
+
+/**
+ * The gate row's id sorts BELOW every real (random v4) extraction id. Two readers tie-break on
+ * the id: `get_document_extract`'s `chosen` CTE picks one done row per engine_kind by
+ * `version_n desc, id desc`, and the 0017/0089 supersede trigger orders `(extracted_at, id)`.
+ * A fixture that later seeds its own version-1 OCR row therefore ALWAYS wins both ties, so the
+ * gate row can never shadow the row a test cites (measured: f-a1.o flipped on the uuid coin
+ * before this — the gate row won `id desc` and the reader returned no regions).
+ */
+function gateExtractionId() {
+  const hex = randomUUID().replace(/-/g, "");
+  return `00000000-0000-4000-8000-${hex.slice(20, 32)}`;
 }
 
 /** retire_document_filing(filing_id, reason, expected_revision, op_key) — the S5-D3
