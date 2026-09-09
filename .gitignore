@@ -60,3 +60,6 @@ Thumbs.db
 
 # Local Codex copies of .claude/skills and local-only skill additions.
 .agents/
+
+# Local scratch space for skills (to-tickets working files); delivery history lives on GitHub.
+.scratch/
