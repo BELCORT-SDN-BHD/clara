@@ -54,7 +54,14 @@ async function closeThenReopen(tag, { reason = "x85: reopening to correct the ye
   const closed = await finalizeClose(owner, { fy: fx.fy });
   const target = fx.revenueEntry ?? closed.close_entry_id;
   const reopener = await reopenerFor(owner, { closer: owner, alternate: world.users.hana });
-  const before_ = new Date();
+  // THE WINDOW'S LOWER BOUND COMES FROM THE DATABASE, not from `new Date()`. B3.2 brackets the
+  // act's own stamps (created_at / approved_at / closed_at / audit_log.at) between this reading
+  // and one taken after the call, and every one of those stamps is written by the SERVER clock.
+  // Bounding a server clock with the client's compares two clocks: on a fresh cluster under
+  // full-suite load that flaked once, an entirely correct stamp landing microseconds outside a
+  // JS-sampled window. `now()` is the transaction timestamp, and these helpers autocommit one
+  // statement each, so this reading precedes the reopen's own statement on the same server clock.
+  const before_ = (await rootQuery("select now() as t")).rows[0].t;
   const reopened = await reopenFY(reopener, {
     fy: fx.fy, reason, correctionTarget: target ? { entry_ids: [target] } : { check_key: "ar_control_tie" },
   });
@@ -130,7 +137,11 @@ test("B3.1 the reopen reversal is DATED the reopened year's ends_on, inside that
 test("B3.2 created_at / approved_at / actor / receipt / audit / events all carry the REAL act, never ends_on", async (t) => {
   if (skipHere(t)) return;
   const { owner, reopener, fx, closed, reopened, calledAt } = await closeThenReopen("b32");
-  const after_ = new Date();
+  // The upper bound, from the same clock that wrote every stamp this cell brackets (see
+  // closeThenReopen). The intent is unchanged and is what the window is FOR: these stamps say
+  // when the act really happened, and emphatically not the year end -- which is a FUTURE year
+  // here, so a window this tight is still the discriminating test and the notEqual below says so.
+  const after_ = (await rootQuery("select now() as t")).rows[0].t;
   const m = (await rootQuery(
     `select id, created_at, approved_at, updated_at, maker_actor, checker_actor, last_human_editor
        from clara.journal_entries where reversal_of = $1`, [closed.close_entry_id])).rows[0];

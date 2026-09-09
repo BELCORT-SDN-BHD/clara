@@ -88,7 +88,9 @@ after(async () => {
  * B7 PRE-INTEGRATION POLARITY. A FOCUSED run (no --import gate) FAILS when the objects are
  * absent; only the gated package-wide sweep skips. Before this existed the battery skipped
  * unconditionally, so a migration that was never applied, was misnumbered, or was silently
- * reverted read as GREEN -- the exact false-green .claude/rules/db-tests.md warns about.
+ * reverted read as GREEN -- the exact false-green `packages/db/tests/README.md` warns about
+ * ("a skipped preintegration suite is not evidence that its feature passed"); the
+ * `.claude/rules/db-tests.md` this line used to cite is not in this repository.
  */
 function requirePresent(t, present, what) {
   if (ready && present) return false;
@@ -195,8 +197,10 @@ test("NOG-6 an UNFLAGGED client's customer CAN be enriched -- the scope is the f
 // original comment read: "Today clara._tf_counterparty_update_0011's whitelist already refuses
 // every UPDATE of these columns, for every client ... no product verb can reach this path -- that
 // is the finding, not a shortcut." BOTH halves of that have now changed, and they changed BY
-// DESIGN rather than by drift, which is why the cells move with them (.claude/rules/db-tests.md:
-// a floor pinned to a catalog object a later migration retires is trued IN THE SAME PR):
+// DESIGN rather than by drift, which is why the cells move with them (packages/db/README.md,
+// "Migration and deployment behavior" — the `.claude/rules/db-tests.md` this cited is not in
+// this repository: a floor pinned to a catalog object a later migration retires is trued IN THE
+// SAME PR):
 //   * the non-merge whitelist widened a SECOND time -- exactly the possibility the old comment
 //     itself flagged -- and now admits registration_no / registration_normalized / tin, so the
 //     0011 immutability wall no longer refuses these UPDATEs for an unflagged client;
@@ -228,12 +232,12 @@ test("NOG-7 UPDATE enriching a flagged client's existing customer is refused BY 
   assert.equal(row.registration_no, null, "NOG-7: the row is unchanged");
 });
 
-/** The H-09 cohort's CATALOG witness (.claude/rules/db-tests.md's succession pattern): an EXACT
- *  signature via to_regprocedure, never a bare name — the door is UNNUMBERED until merge prep
- *  (裁-108) and a migration-stem witness does not exist until the number is claimed, so the
- *  catalog is the only stable half of the pattern available here. Both limbs below keep their
- *  PRE-cohort assertion on the other branch rather than skipping, so this file says something
- *  true on every chain instead of going quiet on half of them. */
+/** The H-09 cohort's CATALOG witness (the succession pattern in packages/db/README.md, "Migration
+ *  and deployment behavior"): an EXACT signature via to_regprocedure, never a bare name — the door
+ *  is UNNUMBERED until merge prep (裁-108) and a migration-stem witness does not exist until the
+ *  number is claimed, so the catalog is the only stable half of the pattern available here. Both
+ *  limbs below keep their PRE-cohort assertion on the other branch rather than skipping, so this
+ *  file says something true on every chain instead of going quiet on half of them. */
 async function identifiersDoorLanded() {
   const r = await rootQuery(
     "select to_regprocedure('clara.set_counterparty_identifiers(uuid,uuid,text,text,text)') is not null as ok");

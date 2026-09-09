@@ -879,7 +879,9 @@ const COA_TEMPLATE_PR_A_CLOCK_NAMES = ["publish_coa_template", "retire_coa_templ
 // date-typed column at all. The other eleven bodies are clean on the same detector -- the
 // additive door, the five reads, the four INVOKER helpers and the plant loop.
 //
-// THE GATE IS STILL A PAIR (.claude/rules/db-tests.md's succession pattern: a migration STEM
+// THE GATE IS STILL A PAIR (the succession pattern in packages/db/README.md, "Migration and
+// deployment behavior" — the `.claude/rules/db-tests.md` this cited is not in this repository: a
+// migration STEM
 // witness OR a catalog witness, post-armed if EITHER says applied), but the STEM IS NOW THE
 // PRIMARY ARM: the migration is numbered (`0156_coa_apply_template.sql`, claimed at #479's
 // merge), so `coa_apply_template$` is a real, permanent schema_migrations row on any database
@@ -914,7 +916,8 @@ export async function s5BareTokenRoster(query) {
   const appliedStem = async (re) => (await query(
     `select count(*)::int as n from clara.schema_migrations where version ~ '${re}'`
   )).rows[0].n === 1;
-  // The CATALOG half of the succession pattern (.claude/rules/db-tests.md): an EXACT
+  // The CATALOG half of the succession pattern (packages/db/README.md, "Migration and
+  // deployment behavior"): an EXACT
   // schema-qualified relation name, for a migration whose stem cannot be witnessed because it is
   // still UNNUMBERED on the database under test. Not a bare name and not a LIKE.
   const relationExists = async (qualified) => (await query(

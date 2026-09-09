@@ -89,12 +89,27 @@ export const TLS_CHECKED_DSN_VARS = Object.freeze([
 ]);
 
 /**
- * #617 — the boot assert's own reading, kept for `/ready`. `null` means the assert has NOT RUN in
+ * #617 — the boot assert's own reading, kept for `/ready`. ABSENT means the assert has NOT RUN in
  * this process (a world-off health check, a test file that never booted the pools), which is a
  * different fact from "ran and found nothing pinned" and must not be reported as the latter.
- * @type {{pinned:string[], unpinned:string[], weakMode:string[], validated:string[]}|null}
+ *
+ * ON `globalThis` RATHER THAN A MODULE-LEVEL `let`, AND THIS IS THE WHOLE POINT (the hosted
+ * finding that reopened #617). `scripts/serve.mjs` calls `assertProductionPoolConfig()` through
+ * the UNBUNDLED `lib/pools.mjs` -> this module, and only THEN imports the built Nitro server —
+ * whose bundle carries its OWN inlined copy of this file. Two module instances, two module
+ * scopes: the boot assert wrote the unbundled instance's variable, and `tlsPostureHealth()`,
+ * reached from `lib/health.mjs` INSIDE the bundle, read the bundle instance's own — still unset.
+ * Measured on the live Fly machine (v76): `checks.tls {"measured": false}` plus the WARN "TLS
+ * posture NOT MEASURED" on a process whose assert had in fact run and logged. `globalThis` is
+ * the one scope both copies share, so the reading crosses the bundle boundary; the key is
+ * namespaced the way `scripts/serve.mjs` namespaces `globalThis.__claraSupervisor`.
  */
-let snapshot = null;
+const SNAPSHOT_KEY = "__claraTlsPosture";
+
+/** @returns {{pinned:string[], unpinned:string[], weakMode:string[], validated:string[]}|null} */
+function readSnapshot() {
+  return /** @type {any} */ (globalThis)[SNAPSHOT_KEY] ?? null;
+}
 
 /**
  * The TLS posture `/ready` reports (`checks.tls`). VARIABLE NAMES AND COUNTS ONLY — never a DSN,
@@ -104,6 +119,7 @@ let snapshot = null;
  * @returns {{measured:boolean, pinned?:string[], unpinned?:string[], weak_mode?:string[], validated?:number}}
  */
 export function tlsPostureHealth() {
+  const snapshot = readSnapshot();
   if (snapshot === null) return { measured: false };
   return {
     measured: true,
@@ -114,9 +130,11 @@ export function tlsPostureHealth() {
   };
 }
 
-/** Test-only: forget the boot reading, so a cell can assert the NOT-MEASURED branch. */
+/** Test-only: forget the boot reading, so a cell can assert the NOT-MEASURED branch. Deletes the
+ *  `globalThis` key rather than assigning `null`, so every instance of this module — including the
+ *  bundle's copy — sees the same not-measured state a never-booted process starts in. */
 export function _resetTlsPostureSnapshotForTest() {
-  snapshot = null;
+  delete /** @type {any} */ (globalThis)[SNAPSHOT_KEY];
 }
 
 /** The sslmode values that actually authenticate the server. Everything else is encrypted-but-anonymous. */
@@ -206,10 +224,11 @@ export function readDsnTlsPosture(dsn) {
  * a DSN's `sslmode` does not actually authenticate the server. Returns a summary so a cell can
  * assert on it; the summary names VARIABLES and PATHS, never DSN contents.
  *
- * #617: the summary is ALSO kept in a module-level snapshot, so `/ready` can report the posture
- * this process actually booted with. Until now this was a boot-time WARN in the log and nothing
- * else: an operator asking "did the verify-full ceremony actually take on this machine?" had to
- * find the boot line, and a machine restarted since had nothing to show at all.
+ * #617: the summary is ALSO kept in a PROCESS-WIDE snapshot (`SNAPSHOT_KEY` on `globalThis`, for
+ * the bundle-boundary reason stated there), so `/ready` can report the posture this process
+ * actually booted with. Until now this was a boot-time WARN in the log and nothing else: an
+ * operator asking "did the verify-full ceremony actually take on this machine?" had to find the
+ * boot line, and a machine restarted since had nothing to show at all.
  *
  * @param {{env?:NodeJS.ProcessEnv, testMode?:boolean, log?:(msg:string)=>void, now?:number}} [opts]
  * @returns {{pinned:string[], unpinned:string[], weakMode:string[], validated:string[]}}
@@ -251,7 +270,9 @@ export function assertLaneDsnTlsPosture(opts = {}) {
   // ONLY when this call read the REAL environment. A cell that passes `opts.env` is exercising a
   // FIXTURE, and letting a fixture overwrite the process's own boot reading would put invented
   // variable names on a live /ready payload.
-  if (opts.env === undefined) snapshot = { pinned, unpinned, weakMode, validated };
+  if (opts.env === undefined) {
+    /** @type {any} */ (globalThis)[SNAPSHOT_KEY] = { pinned, unpinned, weakMode, validated };
+  }
 
   if (testMode) return { pinned, unpinned, weakMode, validated };
 

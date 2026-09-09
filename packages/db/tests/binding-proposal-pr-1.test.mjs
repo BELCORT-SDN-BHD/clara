@@ -14,7 +14,9 @@
 // FAIL, NEVER SKIP. The migration is UNNUMBERED on the branch (the conductor claims its number
 // at merge prep), so readiness is probed by CATALOG — exact-signature to_regprocedure — not by a
 // schema_migrations version string that does not exist yet. Against the pre-migration frontier
-// this battery goes RED, deliberately (.claude/rules/db-tests.md; the estate's fail0017 idiom).
+// this battery goes RED, deliberately (the estate's fail0017 idiom; packages/db/README.md,
+// "Migration and deployment behavior" — the `.claude/rules/db-tests.md` this cited is not in
+// this repository).
 //
 // Serial discipline: --test-concurrency=1 (shared rig convention).
 

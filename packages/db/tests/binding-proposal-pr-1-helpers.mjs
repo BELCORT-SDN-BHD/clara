@@ -91,14 +91,18 @@ export async function bp1Live() {
 }
 
 /** FAIL, never skip (the estate's fail0017 discipline): this battery is REQUIRED to go red
- *  against the pre-migration frontier. A drill that only ever skips is a false green. */
+ *  against the pre-migration frontier. A drill that only ever skips is a false green.
+ *  The message names packages/db/README.md, "Migration and deployment behavior"; the
+ *  `.claude/rules/db-tests.md` it used to name is NOT in this repository, so an operator
+ *  reading this failure was sent to a file they could not open. */
 export function failBp1(live) {
   if (!live) {
     throw new Error(
       "裁-18b PR-1 NOT applied (clara.wake_propose_vendor_identity_binding / "
       + "wake_list_binding_candidates / decline_vendor_identity_binding do not all resolve at "
       + "their exact signatures) — this battery is REQUIRED to fail against the pre-0150 "
-      + "frontier rather than skip (work-order discipline, .claude/rules/db-tests.md).");
+      + "frontier rather than skip (work-order discipline; packages/db/README.md, "
+      + "\"Migration and deployment behavior\").");
   }
 }
 

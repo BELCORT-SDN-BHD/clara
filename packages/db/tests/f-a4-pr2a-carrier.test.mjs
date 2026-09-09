@@ -84,7 +84,10 @@ test("fa4p2a.W17-mutant with the supersede-only trigger disabled the UPDATE land
   // rootQuery is POOLED, so `rootQuery("begin")` opened a transaction on one connection while the
   // DISABLE TRIGGER and the ROLLBACK went to others -- the disable therefore AUTOCOMMITTED and
   // PERMANENTLY disarmed the wall on the rig, which is how W17 came to "pass" a run in which the
-  // trigger was not even armed. `.claude/rules/db-tests.md` states this rule; I broke it and it
+  // trigger was not even armed. The rule is `tests/rig-helpers.mjs`'s own (withTxn holds ONE
+  // client for its whole block, rootQuery does not), and `packages/db/tests/README.md` is what
+  // tells a reader to read those helper contracts; the `.claude/rules/db-tests.md` that stated
+  // the rule is not in this repository. I broke it and it
   // cost a false green, which is exactly the failure a mutant exists to prevent.
   await withTxn(async (c) => {
     await c.query("alter table clara.document_service_periods disable trigger t_dsp_supersede_only");

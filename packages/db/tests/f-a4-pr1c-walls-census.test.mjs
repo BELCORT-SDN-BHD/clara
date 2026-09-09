@@ -275,10 +275,12 @@ test("fa4c.F3 C-21 parity: the extracted reads answer IDENTICALLY through the hu
 
 test("fa4c.G1 the wake surface census: the built wrappers, their allowlist rows, the parked/unparked thirteenth, and no role but clara_wake_interactive", async (t) => {
   if (gate(t)) return;
-  // SUCCESSION-AWARE (.claude/rules/db-tests.md): F-A4 PR-2a UNPARKS the thirteenth verb, so this
-  // gate's twelve-and-absent assertion goes false BY DESIGN the moment that migration lands -- not
-  // drift. The witness is a CATALOG one, probed by EXACT SIGNATURE rather than a bare name (law 3)
-  // and never by a migration NUMBER, which is claimed at merge. Both arms assert; neither skips.
+  // SUCCESSION-AWARE (packages/db/README.md, "Migration and deployment behavior" — the
+  // `.claude/rules/db-tests.md` this cited is not in this repository): F-A4 PR-2a UNPARKS the
+  // thirteenth verb, so this gate's twelve-and-absent assertion goes false BY DESIGN the moment
+  // that migration lands -- not drift. The witness is a CATALOG one, probed by EXACT SIGNATURE
+  // rather than a bare name (law 3) and never by a migration NUMBER, which is claimed at merge.
+  // Both arms assert; neither skips.
   const w = await rootQuery(
     `select (to_regprocedure('clara.prepayment_schedule_v1(uuid,uuid)') is not null
              and to_regprocedure('clara.wake_establish_prepayment_schedule(uuid,uuid,text,text,text,jsonb,text)') is not null) as unparked`);

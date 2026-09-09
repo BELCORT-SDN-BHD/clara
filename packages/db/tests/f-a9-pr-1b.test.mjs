@@ -26,7 +26,9 @@
 //     which is the arithmetic the un-widened bucket gets wrong by exactly one.
 //
 // GATE. This battery FAILS rather than skips when its own migration is absent — the shape
-// `.claude/rules/db-tests.md` calls final-acceptance ("a focused run leaves its variable
+// `packages/db/tests/README.md` calls skip-is-not-evidence, and which the
+// `.claude/rules/db-tests.md` this line used to cite is NOT in this repository to state ("a
+// focused run leaves its variable
 // UNSET, which is the shape that fails rather than skips"). It ships in the same PR as the
 // migration, so there is no legitimate frontier at which it should be quiet. It is not a
 // slice file, so it is not in the `db-slice-frontiers` partition corpus.

@@ -55,11 +55,12 @@ export const ISOLATION_PIN_SETTING = "default_transaction_isolation=serializable
 export async function checkIsolationPins(ctx) {
   const { tgt, STRICT, record } = ctx;
 
-  // THE SUCCESSION GATE (.claude/rules/db-tests.md). This cell asserts a state that a target
-  // acquires in one of two ways: the forward migration that carries the pin, or the manual
-  // ceremony. A target whose CHAIN predates that migration can only have it from the ceremony
-  // — and a throwaway CI database has never run one, so an unconditional FAIL there would be
-  // reporting a difference of vintage as a defect.
+  // THE SUCCESSION GATE (packages/db/README.md, "Migration and deployment behavior" — the
+  // `.claude/rules/db-tests.md` this cited is not in this repository). This cell asserts a state
+  // that a target acquires in one of two ways: the forward migration that carries the pin, or
+  // the manual ceremony. A target whose CHAIN predates that migration can only have it from the
+  // ceremony — and a throwaway CI database has never run one, so an unconditional FAIL there
+  // would be reporting a difference of vintage as a defect.
   //
   // The witness is the migration's STABLE STEM in clara.schema_migrations, never its number
   // (numbers are claimed at merge) and never a filename. Present → the pin is MANDATORY and

@@ -1,5 +1,8 @@
-// R9 storage write probe (docs/plan/active/harness-audit-rulings-2026-08-26.md — the
-// MEASUREMENT half of follow-up (a) of docs/ops/incident-2026-07-26-intake-storage.md). Unit-
+// R9 storage write probe — the MEASUREMENT half of the intake-storage follow-up, whose contract
+// now lives in packages/runtime/README.md, "Health, TLS and serving identity" (`checks.storage`).
+// #617: the two documents this header used to cite — `docs/plan/active/harness-audit-rulings-
+// 2026-08-26.md` for the ruling and `docs/ops/incident-2026-07-26-intake-storage.md` for the
+// incident — are NOT in this repository, so a reader following either reached nothing. Unit-
 // level: exercises storage-probe.mjs directly against storage.mjs's own RELAY_TEST_MODE seams
 // (local-fs fallback + the injectable globalThis.__claraStorageForTest shim already defined in
 // storage.mjs), so no DB rig and no live Supabase credential are needed. checkReadiness()'s own

@@ -19,6 +19,7 @@
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
 import * as rig from "./rig.mjs";
 import { WAKE_EVENT_TYPE } from "./relay-fixtures.mjs";
 import {
@@ -26,6 +27,7 @@ import {
   runWakeEngineCycle, wakeEngineHealth, loadEnabledSources, SOURCE_MAX_ATTEMPTS_FALLBACK,
 } from "../lib/wake-engine.mjs";
 import { reconcileWakeEngineTasks } from "../lib/reconciler-wake.mjs";
+import { LAG_COLUMN, RELAY_CONSUMER_HEALTH_COLUMNS, relayConsumerHealth } from "../lib/consumer-health.mjs";
 // round-7 (native adversarial leg, MUST #1) — the two new cells below need redrive() itself
 // (relay.mjs), not a raw-SQL simulation, plus its own ROUTER-side consumer name (dead-letters in
 // this battery are always keyed under 'router', matching every other cell in this file).
@@ -124,6 +126,42 @@ test("wakeEngineHealth reports consumer/lag/pendingDeadLetters/firmsTracked/held
     assert.equal(typeof h[k], "number", `${k} is a number`);
     assert.ok(h[k] >= 0, `${k} is non-negative`);
   }
+
+  // #617 follow-up — the VALUES the shared columns now produce, unchanged. This engine composes
+  // `lag` and `firms_uncheckpointed` from lib/consumer-health.mjs while computing its own
+  // dead-letter halves, so the three columns it does NOT own must read exactly what the shared
+  // statement every other relay consumer runs reads. Same consumer name, same snapshot semantics
+  // (one statement each), so a difference here is a real divergence and not scheduling.
+  const shared = await rig.asRuntime((c) => relayConsumerHealth(c, WAKE_ENGINE_CONSUMER, SOURCE_MAX_ATTEMPTS_FALLBACK));
+  assert.equal(h.lag, shared.lag, "wake_engine's lag IS the shared column's number");
+  assert.equal(h.firmsTracked, shared.firmsTracked, "and so is firmsTracked");
+  assert.equal(h.firmsUncheckpointed, shared.firmsUncheckpointed, "and firmsUncheckpointed");
+  // The field set and its ORDER — what /ready's readers actually see. Pinned here as well as in
+  // the #617 per-source-cap cell below, because THIS is the cell a consolidation touches first.
+  assert.deepEqual(
+    Object.keys(h),
+    ["consumer", "lag", "pendingDeadLetters", "firmsTracked", "heldForDisabledSource", "cancelRequestedStuck", "heldBelowCheckpoint", "firmsUncheckpointed", "deadLetters"],
+    "wakeEngineHealth's published field set and order",
+  );
+});
+
+test("#617 follow-up: wake_engine's backlog column IS lib/consumer-health.mjs's, not a second copy of its SQL", () => {
+  // NO DATABASE, deliberately: this is the COUPLING, and it must hold on every leg including the
+  // ones where the G1 surface is absent. Until this fix wake-engine.mjs carried its own
+  // byte-identical literal of the lag subquery while every other relay consumer read the shared
+  // one — two texts answering one question, and an operator reading two different numbers under
+  // one name the day either moved. Proved by reading the SOURCE rather than by importing, because
+  // importing shows only that two modules resolve one binding; the hazard is two LITERALS drifting.
+  const src = readFileSync(new URL("../lib/wake-engine.mjs", import.meta.url), "utf8");
+  assert.ok(src.includes("${LAG_COLUMN},"), "wakeEngineHealth interpolates the shared column");
+  assert.ok(
+    !src.includes("sum(greatest(s.n - coalesce(c.last_seq"),
+    "and carries NO second copy of the lag subquery's own text",
+  );
+  // The shared set opens with that same column, so `relayConsumerHealth` and this engine are
+  // reading one definition rather than two that merely agree today.
+  assert.ok(RELAY_CONSUMER_HEALTH_COLUMNS.startsWith(`${LAG_COLUMN},`), "the shared column set opens with the shared lag column");
+  assert.match(LAG_COLUMN, /::bigint as lag$/, "and it still names the column `lag`, which is the wire field");
 });
 
 test("loadEnabledSources re-reads the registry EVERY call — never cached (design battery D4's own premise)", { skip: skip || skipG1 }, async () => {

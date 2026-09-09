@@ -344,10 +344,64 @@ test("p6-1.db.freeform.read-id-high-sequence: DB->wrapper loss is measured and f
 
   // Root-only rig setup: make the NEXT identity value exactly 2^53+1. This changes only the
   // throwaway sequence; the production body and every security mechanism remain untouched.
-  await rig.rootQuery(
-    "select setval(pg_get_serial_sequence('clara.freeform_read_log','id')::regclass,$1::bigint,true)",
-    ["9007199254740992"],
-  );
+  //
+  // AND IT IS PUT BACK, which the first cut did not do. `setval` is not transactional and a
+  // sequence is ESTATE state, so this cell used to leave clara.freeform_read_log's identity
+  // sequence parked at 2^53+1 — astronomically above the table's own real ids — for every suite
+  // that came after it on that database, in this package and in packages/db alike. Two failures
+  // follow on a REUSED rig, and both were reproduced here: any later receipt id is an unsafe JSON
+  // number that cannot survive a round trip (the very hazard THIS cell exists to measure, now
+  // visited on cells that never asked for it), and the moment anything moves the sequence back
+  // down — the next run of this cell does exactly that — nextval hands out an id the append-only
+  // log already holds and the insert dies on `freeform_read_log_pkey`. Restored to greatest(the
+  // table's own highest id BELOW the poison, whatever the sequence legitimately stood at before
+  // this cell), so a fresh rig goes back to where it was and a populated one still lands above
+  // its own data.
+  const POISON_FLOOR = "9000000000000000"; // 9e15 — above every real id, below 2^53+1
+  // ONE CONNECTION for the read-then-move pair, so the value put back is the value this cell
+  // displaced. `pg_sequence_last_value` is null for a sequence never yet drawn from.
+  const seqBefore = await rig.asRoot(async (c) => {
+    const prev = (await c.query(
+      "select pg_sequence_last_value(pg_get_serial_sequence('clara.freeform_read_log','id')::regclass)::text as last_value",
+    )).rows[0].last_value;
+    await c.query(
+      "select setval(pg_get_serial_sequence('clara.freeform_read_log','id')::regclass,$1::bigint,true)",
+      ["9007199254740992"],
+    );
+    // A prior run of this cell UNDER THE OLD CODE leaves the sequence poisoned, and carrying that
+    // reading forward as "the previous value" would restore the very defect. Such a reading is
+    // discarded rather than trusted, so the restore below is self-healing on that database too.
+    return prev != null && BigInt(prev) < BigInt(POISON_FLOOR) ? prev : null;
+  });
+  // RESTORE ON EVERY EXIT, INCLUDING A FAILING ONE — a cell that reds must not also poison the rig
+  // for every file that runs after it, which is what made this a suite-wide defect rather than a
+  // local one. The same connection reads the sequence back, so the assertions measure the state
+  // this hook actually left rather than a second snapshot of it.
+  t.after(async () => {
+    const restored = await rig.asRoot(async (c) => {
+      await c.query(
+        `select setval(pg_get_serial_sequence('clara.freeform_read_log','id')::regclass,
+                       greatest(coalesce((select max(id) from clara.freeform_read_log where id < $1::bigint), 1),
+                                coalesce($2::bigint, 1)),
+                       true)`,
+        [POISON_FLOOR, seqBefore],
+      );
+      return (await c.query(
+        `select pg_sequence_last_value(pg_get_serial_sequence('clara.freeform_read_log','id')::regclass)::text as last_value,
+                (select coalesce(max(id), 0) from clara.freeform_read_log where id < $1::bigint)::text as max_below`,
+        [POISON_FLOOR],
+      )).rows[0];
+    });
+    assert.ok(
+      BigInt(restored.last_value) < BigInt(POISON_FLOOR),
+      `the sequence is restored below the poison value (got ${restored.last_value})`,
+    );
+    assert.ok(
+      BigInt(restored.last_value) >= BigInt(restored.max_below),
+      `and at or above the table's own highest real id, so the next insert cannot collide ` +
+        `(sequence ${restored.last_value} vs max(id) ${restored.max_below})`,
+    );
+  });
 
   let result;
   await assert.doesNotReject(async () => {

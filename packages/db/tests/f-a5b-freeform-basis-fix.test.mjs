@@ -525,7 +525,9 @@ test("fix.fr.ndims-forced — with the CHECK lifted inside a rolled-back txn, a 
     // package, but CI's estate sweep has OTHER packages writing to the same database, so an
     // unbounded wait here could park on a lock and be read as a hang. Bound it and treat a lock
     // failure as a loud skip rather than a false red — the truncate-guard discipline
-    // (.claude/rules/db-tests.md), applied to the same hazard in a different disguise.
+    // (`packages/db/tests/README.md`, whose closing rule is that cleanup must account for
+    // other live test connections; the `.claude/rules/db-tests.md` this line used to cite is not
+    // in this repository), applied to the same hazard in a different disguise.
     await c.query("set local lock_timeout = '5s'");
     try {
       await c.query("alter table clara.freeform_read_log drop constraint ck_freeform_scope_client");

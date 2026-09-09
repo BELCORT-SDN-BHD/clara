@@ -1,7 +1,8 @@
-// Wave E lane ZETA — the render-queue battery's shared fixtures. NOT a test file: only
-// `*.test.mjs` is collected (`.claude/rules/db-tests.md`), and this is a module those files
-// import. Extracted when the battery outgrew the repo's 500-line file discipline, the same split
-// epsilon made for its phase modules.
+// Wave E lane ZETA — the render-queue battery's shared fixtures. NOT a test file: only `*.test.mjs`
+// is collected (packages/db/package.json's own `test` script glob, whose command
+// `packages/db/tests/README.md` describes; the `.claude/rules/db-tests.md` this cited is not in
+// this repository), and this is a module those files import. Extracted when the battery outgrew the
+// repo's 500-line file discipline, the same split epsilon made for its phase modules.
 
 import assert from "node:assert/strict";
 

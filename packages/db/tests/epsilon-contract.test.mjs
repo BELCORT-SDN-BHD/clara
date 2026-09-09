@@ -49,7 +49,9 @@ const CEREMONY_EXCLUDED_V2 = ["evaluate_metric", 2];
  *  entry the covered-five ceremony flips it on sight and the floor reads SIX, which is what the
  *  clean-order estate run reported the day PR-2a landed.
  *
- *  THIS IS THE CLOSED-WAVE FLOOR RULE working as written (.claude/rules/db-tests.md): a PR that
+ *  THIS IS THE CLOSED-WAVE FLOOR RULE working as written (packages/db/README.md, "Migration and
+ *  deployment behavior" — the `.claude/rules/db-tests.md` this cited is not in this
+ *  repository): a PR that
  *  moves a catalog object a closed-wave floor counts trues that floor IN THE SAME PR. The floor is
  *  not wrong and PR-2a is not wrong -- the count simply moved, and the PR that moved it says so. */
 const CEREMONY_EXCLUDED_V3 = ["prepayment_schedule", 1];

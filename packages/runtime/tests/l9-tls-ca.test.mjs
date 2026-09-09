@@ -13,8 +13,10 @@ import {
   EXPECTED_CA_FINGERPRINT_SHA256,
   IN_IMAGE_CA_PATH,
   TLS_CHECKED_DSN_VARS,
+  _resetTlsPostureSnapshotForTest,
   assertLaneDsnTlsPosture,
   readDsnTlsPosture,
+  tlsPostureHealth,
   validateCa,
 } from "../lib/tls-ca.mjs";
 
@@ -88,7 +90,9 @@ test("H-43: the runtime's CA fingerprint pin is byte-equal to the ceremony bridg
   assert.equal(
     EXPECTED_CA_FINGERPRINT_SHA256,
     m[1],
-    "the two pins MUST move in the same PR as the .crt file (docs/ops/dsn-bridge.md, 'Rotation')",
+    // #617: the `docs/ops/dsn-bridge.md` this line used to cite is NOT in this repository, so it
+    // now names the section that is — packages/runtime/README.md, "Health, TLS and serving identity".
+    'the two pins MUST move in the same PR as the .crt file (packages/runtime/README.md, "Health, TLS and serving identity")',
   );
 });
 
@@ -259,6 +263,58 @@ test("H-43 boot assert: test mode is silent, but STILL fails closed on a broken 
       }),
     /FAIL-CLOSED/,
   );
+});
+
+test("#617: the boot reading crosses a MODULE-INSTANCE boundary — the bundle's own copy reads it", async () => {
+  // THE HOSTED DEFECT, reproduced in-process. scripts/serve.mjs runs the boot assert through the
+  // UNBUNDLED lib/pools.mjs -> lib/tls-ca.mjs and only then imports .output/server/index.mjs,
+  // whose bundle INLINES its own copy of this module; lib/health.mjs calls tlsPostureHealth()
+  // from inside that bundle. A module-level `let` therefore had the assert writing one instance's
+  // variable and /ready reading another's, which is why the live machine (v76) served
+  // `checks.tls {"measured": false}` and the WARN "TLS posture NOT MEASURED" on a process whose
+  // assert HAD run. A second SPECIFIER for the same file is the smallest faithful stand-in for
+  // that boundary: Node keys its module registry on the resolved URL, so `?copy=2` is a second
+  // instance with its own module scope, exactly as the bundle's inlined copy is.
+  const secondSpecifier = `${new URL("../lib/tls-ca.mjs", import.meta.url).href}?copy=2`;
+  const second = await import(secondSpecifier);
+  // The control that makes every assertion below meaningful: this really IS a second instance and
+  // not the registry handing back the module this file already imported statically.
+  assert.notEqual(second.tlsPostureHealth, tlsPostureHealth, "control — two specifiers, two module instances");
+
+  const saved = TLS_CHECKED_DSN_VARS.map((name) => [name, process.env[name]]);
+  try {
+    // NOT-MEASURED still holds in BOTH instances for a process whose assert has never run —
+    // the branch that must survive this fix, because it is the one honest answer to "no reading".
+    _resetTlsPostureSnapshotForTest();
+    assert.deepEqual(tlsPostureHealth(), { measured: false }, "instance A: an unrun assert says so");
+    assert.deepEqual(second.tlsPostureHealth(), { measured: false }, "instance B: and so does the second copy");
+
+    // A HERMETIC real-environment run: the snapshot is written ONLY when the assert read
+    // process.env (opts.env undefined), so the environment is what has to be controlled here.
+    // Every checked variable is cleared and exactly one is set, so the reading below is this
+    // cell's own and not whatever DSNs the ambient rig happens to export.
+    for (const [name] of saved) delete process.env[name];
+    process.env.CLARA_READ_DATABASE_URL = fixtureDsn("db");
+    const out = assertLaneDsnTlsPosture({ testMode: true, log: () => {} });
+    assert.deepEqual(out.unpinned, ["CLARA_READ_DATABASE_URL"], "mandatory setup: the assert read the env this cell set");
+
+    // THE DECISIVE ASSERTION: instance B never ran an assert, and reports instance A's reading.
+    const a = tlsPostureHealth();
+    const b = second.tlsPostureHealth();
+    assert.equal(b.measured, true, "the instance that never ran the assert still reports MEASURED");
+    assert.deepEqual(b, a, "and reports exactly what the instance that DID run it reports");
+    assert.deepEqual(b.unpinned, ["CLARA_READ_DATABASE_URL"], "including the variable names themselves");
+
+    // And the reset reaches both instances too, so a cell can still pin the NOT-MEASURED branch.
+    second._resetTlsPostureSnapshotForTest();
+    assert.deepEqual(tlsPostureHealth(), { measured: false }, "a reset in either instance clears the shared reading");
+  } finally {
+    _resetTlsPostureSnapshotForTest();
+    for (const [name, value] of saved) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  }
 });
 
 test("H-43: an unparseable DSN is left to the connect path, not turned into a boot failure here", () => {

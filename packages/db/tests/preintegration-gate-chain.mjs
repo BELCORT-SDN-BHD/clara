@@ -10,7 +10,9 @@
 // mistake — and its consequence is invisible where it is made: the battery then FAILS LOUDLY
 // instead of skipping on every chain that predates its migration, i.e. the frontier legs and the
 // closed-wave drills, which run on the weekly sweep FAR from the PR that caused it.
-// (.claude/rules/db-tests.md names exactly this "reds the NEXT sweep far from the PR" class.)
+// (`packages/db/tests/README.md` names the half of this that is written down — "a skipped
+// preintegration suite is not evidence that its feature passed"; the `.claude/rules/db-tests.md`
+// that named this "reds the NEXT sweep far from the PR" class is not in this repository.)
 // Measured live at authoring: #425 shipped tests/promotion-dup-open-wall-preintegration-gate.mjs
 // and never added its token, which is what motivated this audit.
 //

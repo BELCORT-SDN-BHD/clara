@@ -2,7 +2,11 @@
 # Off-site backup worker. Build from the repository root to include shared DB tooling.
 # See README.md, "Validate and deploy", for build-only and Machine configuration.
 # Credentials arrive through environment/mounted files; local secrets are excluded.
-FROM node:20-bookworm-slim AS runner
+# #616 follow-up: Node 22, matching the rest of the estate. Node 20 reached end-of-life, and this
+# app is not a pnpm workspace member, so nothing about the root engines pin reached it — it was the
+# last node:20 line under packages/backup. The Debian codename below (bookworm, for the PGDG
+# sources.list entry) is the same on the node:22 tag, so the pgdg pin needs no change with it.
+FROM node:22-bookworm-slim AS runner
 ENV NODE_ENV=production
 WORKDIR /app
 

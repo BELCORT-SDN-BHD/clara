@@ -467,7 +467,9 @@ test("C5 · the annotation HINTS: twelve add-back leaves verbatim, eleven statut
 
   // The boundary: PR-a mints no tax_* relation. Proved by ABSENCE only until F-T3 PR-1 lands --
   // that file mints the tax-law relations BY DESIGN (0152_f_t3_pr_1_tax_platform), so this floor
-  // is trued IN THE SAME PR per .claude/rules/db-tests.md's succession pattern: branch on the
+  // is trued IN THE SAME PR per the succession pattern in packages/db/README.md, "Migration and
+  // deployment behavior" (the `.claude/rules/db-tests.md` this cited is not in this repository):
+  // branch on the
   // migration STEM witness, and on the post-arm assert the tax_* set is EXACTLY F-T3's own five
   // (any other tax_* relation is still a PR-a boundary breach). The FK assertion below is the half
   // of the boundary that survives either way: coa_template_accounts never grows a foreign key

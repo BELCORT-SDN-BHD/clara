@@ -22,8 +22,9 @@
 //
 // Serial discipline: --test-concurrency=1 (shared rig convention). The two race cells take two
 // DEDICATED pooled connections each and PROVE the interleave with pg_blocking_pids
-// (.claude/rules/db-tests.md: "never a sleep, which proves nothing about whether the block
-// actually happened").
+// (never a sleep, which proves nothing about whether the block actually happened -- the rig
+// helper contracts `packages/db/tests/README.md` tells a reader to read; the
+// `.claude/rules/db-tests.md` this line used to cite is not in this repository).
 
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";

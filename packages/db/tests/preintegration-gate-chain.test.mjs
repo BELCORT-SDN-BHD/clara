@@ -5,7 +5,9 @@
 // packages/db/package.json's test script. That is a one-token mistake whose consequence is
 // invisible where it is made — the battery FAILS instead of skipping on every chain that predates
 // its migration, which is the frontier legs and the closed-wave drills, and those run on the
-// weekly sweep far from the PR that caused it (.claude/rules/db-tests.md names this class). The
+// weekly sweep far from the PR that caused it (`packages/db/tests/README.md` carries the
+// skip-is-not-evidence half; the `.claude/rules/db-tests.md` that named this class is not in
+// this repository). The
 // token is added in this PR; this file is what stops the NEXT one.
 //
 // NO DATABASE. Deliberately: it reads package.json and this directory and nothing else, so it

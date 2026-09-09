@@ -16,8 +16,9 @@
 // THREE gates, not two (review-518-r2 F2): `CLARA_RIG_ALLOW_RESET` (this file's own
 // schema-drop), `CLARA_ALLOW_DESTRUCTIVE` (reset()'s own guard), and
 // `CLARA_RIG_ALLOW_ROLE_SWEEP` (the cluster-wide role sweep `resetForFullReplay()`
-// calls below — see `.claude/rules/db-tests.md`'s gate paragraph and
-// `tests/rig-cluster-reset.mjs`'s header). Omitting the third gate fails closed with
+// calls below — see `packages/db/tests/README.md`'s destructive-target paragraph and
+// `tests/rig-cluster-reset.mjs`'s header; the `.claude/rules/db-tests.md` gate paragraph this
+// used to cite is not in this repository). Omitting the third gate fails closed with
 // a named `RoleSweepRefused`, not silently.
 //
 // ROLE SURVIVAL ACROSS THE FOUR CYCLES BELOW (found 2026-09-02 review of PR #485,
@@ -220,14 +221,15 @@ test("§3.0.2 ambiguous citation ABORT: a cited entry that lacks EXACTLY one leg
   // and an APPROVED entry citing it → the backfill finds ZERO matches → ABORT.
   //
   // UNEXERCISED ON THIS RIG SHAPE (review-518 D4, confirmed deterministic and
-  // environment-independent, not flaky): `set constraints all deferred` below and
-  // the entry insert that follows are each their OWN autocommitting `rootQuery()`
-  // statement (`.claude/rules/db-tests.md`: "A pooled query() outside an explicit
-  // begin is its own transaction"), so the deferred-constraint setting lands on a
-  // DIFFERENT pooled connection from the one that runs the insert it is meant to
-  // defer — the balance-check trigger fires immediately on the insert's own commit,
-  // before journal_lines exists, and the raw insert is rejected with CLR07
-  // "unbalanced" every time. The `.catch()` below bails the cell out gracefully
+  // environment-independent, not flaky): `set constraints all deferred` below and the entry insert
+  // that follows are each their OWN autocommitting `rootQuery()` statement (the rule
+  // `tests/rig-helpers.mjs` implements and `packages/db/tests/README.md` tells a reader to read
+  // those helpers for; the `.claude/rules/db-tests.md` this cited is not in this repository: "A
+  // pooled query() outside an explicit begin is its own transaction"), so the deferred-constraint
+  // setting lands on a DIFFERENT pooled connection from the one that runs the insert it is meant to
+  // defer — the balance-check trigger fires immediately on the insert's own commit, before
+  // journal_lines exists, and the raw insert is rejected with CLR07 "unbalanced" every time. The
+  // `.catch()` below bails the cell out gracefully
   // (an "interface expectation", not a fresh finding), so `assert.rejects` at the
   // bottom of this test has never actually run against real ambiguous-citation
   // data. Fixing the staging (wrap both statements in one `withTxn()`/

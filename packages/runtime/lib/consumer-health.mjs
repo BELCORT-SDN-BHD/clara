@@ -45,13 +45,21 @@ export const FIRMS_UNCHECKPOINTED_COLUMN = `(select count(*) from clara.firm_eve
           where not exists (select 1 from clara.relay_checkpoints c
                              where c.consumer = $1 and c.firm_id = s.firm_id))::int as firms_uncheckpointed`;
 
+/** The BACKLOG column. `$1` = consumer name. Split out for the same reason
+ *  `FIRMS_UNCHECKPOINTED_COLUMN` is: wake_engine composes it into its own multi-counter statement
+ *  (its dead-letter halves are per-ledger and per-source, so it cannot take the whole set below)
+ *  and until #617's follow-up it carried a hand-copied second literal of this text. One backlog
+ *  definition across every relay consumer, or an operator is reading two different numbers under
+ *  one name the day either copy moves. */
+export const LAG_COLUMN = `coalesce((select sum(greatest(s.n - coalesce(c.last_seq, 0), 0))
+                   from clara.firm_event_seq s
+                   left join clara.relay_checkpoints c on c.consumer = $1 and c.firm_id = s.firm_id), 0)::bigint as lag`;
+
 /** The five columns every relay consumer's health statement selects.
  *  `$1` = consumer name, `$2` = that consumer's OWN max attempts. Spine tables only
  *  (firm_event_seq / relay_checkpoints / relay_dead_letters, all 0005-era), so every consumer
  *  that documents itself as safe to call before its own migration stays safe. */
-export const RELAY_CONSUMER_HEALTH_COLUMNS = `coalesce((select sum(greatest(s.n - coalesce(c.last_seq, 0), 0))
-                   from clara.firm_event_seq s
-                   left join clara.relay_checkpoints c on c.consumer = $1 and c.firm_id = s.firm_id), 0)::bigint as lag,
+export const RELAY_CONSUMER_HEALTH_COLUMNS = `${LAG_COLUMN},
        (select count(*) from clara.relay_dead_letters where consumer = $1 and status = 'pending')::int as pending_dead_letters,
        ${FIRMS_UNCHECKPOINTED_COLUMN},
        (select count(*) from clara.relay_dead_letters

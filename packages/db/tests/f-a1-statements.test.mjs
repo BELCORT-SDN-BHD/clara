@@ -243,7 +243,9 @@ test("f-a1s.b the refusal ORDER matches the live ladder, pinned by payloads that
   // structured lane's: checked when present, never mandatory. Both directions are pinned here,
   // because "admits NULL totals" must not be readable as "stops checking".
   //
-  // COHORT-GATED on the CATALOG (.claude/rules/db-tests.md's succession pattern), by an EXACT
+  // COHORT-GATED on the CATALOG (the succession pattern in packages/db/README.md, "Migration and
+  // deployment behavior" — the `.claude/rules/db-tests.md` this cited is not in this
+  // repository), by an EXACT
   // signature from the SAME migration that re-cuts the core — never a bare name, and never a
   // migration stem, which does not exist until the number is claimed at merge prep (裁-108).
   // Both limbs keep their PRE-cohort assertion on the other branch rather than skipping.

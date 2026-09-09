@@ -96,7 +96,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { discoverWork, writeCheckpoint, acquireLeaderLock, setRuntimeRole, CONSUMER as ROUTER_CONSUMER, WAKE_ENGINE_CONSUMER } from "./relay.mjs";
 import { makeRuntimeClient } from "./pools.mjs";
 import { isConnErr, waitForNudge } from "./listen.mjs";
-import { FIRMS_UNCHECKPOINTED_COLUMN, relayConsumerCategories } from "./consumer-health.mjs";
+import { FIRMS_UNCHECKPOINTED_COLUMN, LAG_COLUMN, relayConsumerCategories } from "./consumer-health.mjs";
 
 /** The wake-engine consumer name — its own checkpoint / lock key (relay_checkpoints,
  *  acquireLeaderLock, relay_dead_letters' carrier-1 ledger). NOT used directly as the
@@ -955,9 +955,11 @@ export async function runWakeEngineCycle(client, opts = {}) {
 export async function wakeEngineHealth(client) {
   const r = await client.query(
     `select
-       coalesce((select sum(greatest(s.n - coalesce(c.last_seq, 0), 0))
-                   from clara.firm_event_seq s
-                   left join clara.relay_checkpoints c on c.consumer = $1 and c.firm_id = s.firm_id), 0)::bigint as lag,
+       -- the BACKLOG column, from lib/consumer-health.mjs for the same reason the
+       -- not-yet-measured one below is: this statement carried a hand-copied second literal of
+       -- that text (byte-identical, and therefore a second thing to move), while every other
+       -- relay consumer read the shared one. $1 is this statement's consumer parameter too.
+       ${LAG_COLUMN},
        (select count(*) from clara.relay_dead_letters where consumer = $1 and status = 'pending')::int
          -- #6 (round-4 review): the task-keyed ledger is now split into TWO consumer keys (claim
          -- vs enqueue, never sharing a budget) — both count toward this health signal, since an
