@@ -78,11 +78,13 @@ Wrangler is Cloudflare's official CLI and is pinned in this package. Use the wor
 through `pnpm --dir apps/web exec wrangler` from the repository root. OpenNext prepares this
 Next.js app for Workers; Wrangler uploads versions and controls promotion/rollback.
 
-The project also configures the official `cloudflare-api` MCP server in `.mcp.json` and
-`.codex/config.toml`. It provides documentation search and scoped Cloudflare API access for
-account inspection and operations. Authenticate each agent client through Cloudflare OAuth;
-for Codex, run `codex mcp login cloudflare-api`. OAuth credentials stay in the client's credential
-store. In Claude Code, approve the project server and authenticate it through `/mcp`.
+The project configures the official `cloudflare-api` and `mobbin` remote MCP servers in
+`.mcp.json` and `.codex/config.toml`. Cloudflare provides documentation search and scoped API
+access for account inspection and operations; Mobbin provides product-design reference search.
+Authenticate each agent client through the provider's OAuth flow. For Codex CLI, run
+`codex mcp login cloudflare-api` and `codex mcp login mobbin`; OAuth credentials stay in the
+client's credential store. In Claude Code, approve the project servers and authenticate them
+through `/mcp`. Mobbin MCP requires a Pro, Team, or Enterprise plan.
 Wrangler has a separate login: use `pnpm --dir apps/web exec wrangler login`, then
 `pnpm --dir apps/web exec wrangler whoami` to verify the selected account. The API MCP complements
 the local build/release chain; it cannot

@@ -4,6 +4,9 @@ url = "https://mcp.cloudflare.com/mcp"
 [mcp_servers.codebase-memory-mcp]
 command = "codebase-memory-mcp"
 
+[mcp_servers.mobbin]
+url = "https://api.mobbin.com/mcp"
+
 [mcp_servers.shadcn]
 command = "cmd"
 args = [
