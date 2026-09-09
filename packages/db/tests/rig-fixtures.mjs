@@ -17,8 +17,13 @@ import {
   rootQuery,
   runAs,
 } from "./rig-helpers.mjs";
+// C33.6: the sandbox marker's ONE home. `buildWorld` used to spell `rig_<clock>_<hex>` inline;
+// `sandboxName()` mints the identical shape and gives the convention a name a cell can read
+// (`isSandboxName`) instead of re-spelling the literal. See fixtures/sandbox-marker.mjs.
+import { sandboxName } from "./fixtures/sandbox-marker.mjs";
 
 export * from "./rig-helpers.mjs";
+export { SANDBOX_PREFIX, sandboxName, isSandboxName } from "./fixtures/sandbox-marker.mjs";
 
 // ---------------------------------------------------------------------------
 // Writer wrappers (contract §5 surface). Writers return a jsonb receipt; each
@@ -416,7 +421,7 @@ async function buildCoa(ownerSub, client) {
  *        S solo (erin owner). Clients A1,A2 (firm A), B1 (firm B), S1 (firm S).
  */
 export async function buildWorld() {
-  const prefix = `rig_${Date.now().toString(36)}_${randomUUID().slice(0, 6)}`;
+  const prefix = sandboxName(); // C33.6 — the SAME `rig_<clock>_<hex>` shape, from its one home
 
   const users = {
     alice: await insertUser(prefix, "alice"),

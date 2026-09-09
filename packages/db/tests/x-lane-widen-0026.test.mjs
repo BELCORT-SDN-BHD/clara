@@ -1,8 +1,15 @@
 // Migration 0026 — lane joins document_processing_tasks' unique key, engine_kind (the
 // verified lane-equivalent) joins document_extractions'. See 0026_lane_widen.sql's own
-// header for the full defect analysis (Gate-S receipt:
-// C:\Users\zhant\.clara-tools\captures\gate-s-log-2026-07-28.md), the five ON CONFLICT
-// call sites, and amendment A11 (the 0020 §6 pin).
+// header for the full defect analysis, the five ON CONFLICT call sites, and amendment A11
+// (the 0020 §6 pin).
+//
+// [C82.4] THE GATE-S RECEIPT 0026's HEADER CITES IS AN EXTERNAL, NON-REPRODUCIBLE ARTEFACT.
+// That header (and, until now, this one) names `C:\Users\zhant\.clara-tools\captures\gate-s-log-2026-07-28.md`
+// — a capture on ONE operator's machine on ONE day. It is not in this repository, it cannot
+// be fetched by CI or by another engineer, and applied migration bytes are immutable, so the
+// citation cannot be corrected at its source. Read it as provenance for a past review, never
+// as evidence anyone can check: every claim this suite makes is re-derived below against the
+// live catalog and the live rig, and nothing here depends on that file existing.
 //
 // READINESS: the 0021+ discipline — every cell FAILS loudly against a 25-migration
 // database rather than skipping, so a green battery against a prestate missing the

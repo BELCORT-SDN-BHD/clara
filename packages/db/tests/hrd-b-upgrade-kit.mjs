@@ -46,10 +46,10 @@ export function skipUnlessReset(t) {
  *  the frontier became 0153, and placing B's copy at 0147 was refused by the runner as a
  *  late-inserted lower number -- the whole drill went red on the sweep (run 33283730630, 8/8).
  *  The successors are copied back in by placeMigration(), AFTER B or its mutant, so each cell
- *  still applies the WHOLE on-disk chain onto the populated book (.claude/rules/db-tests.md) in
- *  the order live saw it: pre-B -> B -> successors. migrate() re-verifies EVERY applied
- *  version's checksum against what is in `dir` on every subsequent call, so nothing may be
- *  omitted once applied. */
+ *  still applies the WHOLE on-disk chain onto the populated book (packages/db/README.md,
+ *  "Migration and deployment behavior") in the order live saw it: pre-B -> B -> successors.
+ *  migrate() re-verifies EVERY applied version's checksum against what is in `dir` on every
+ *  subsequent call, so nothing may be omitted once applied. */
 export function exportBaseline() {
   const tmp = mkdtempSync(join(tmpdir(), "clara-hrdb-baseline-"));
   let max = 0;
@@ -179,11 +179,13 @@ export async function seedPreState() {
  *  THE FILE IS WRITTEN UNDER B'S REAL BASENAME, whatever `stem` says. The successors carry
  *  STEM WITNESSES on B (`0154_binding_proposal_pr_1` refuses "frontier mismatch" unless
  *  `0147_db_hardening_b_hash_only_bearer_tokens` is in `clara.schema_migrations` -- the
- *  succession pattern of .claude/rules/db-tests.md, which is correct and immutable once applied),
- *  so a copy applied under `0147_hrd_b_mutant_x` is invisible to them and every cell that reaches
- *  the successors reds at 0154 (sweep run 33288656180: 3 pass / 5 fail -- exactly the cells where B
- *  or its mutant APPLIED). The mutant identity lives in `stem`, recorded here for the cells' own
- *  `schema_migrations` reads (`placedVersion()`), never in the version string the estate reads. */
+ *  succession pattern packages/db/README.md's "Migration and deployment behavior" section
+ *  states ("Applied migration bytes are immutable. Add a successor migration instead"), which
+ *  is correct and immutable once applied), so a copy applied under `0147_hrd_b_mutant_x` is
+ *  invisible to them and every cell that reaches the successors reds at 0154 (sweep run
+ *  33288656180: 3 pass / 5 fail -- exactly the cells where B or its mutant APPLIED). The mutant
+ *  identity lives in `stem`, recorded here for the cells' own `schema_migrations` reads
+ *  (`placedVersion()`), never in the version string the estate reads. */
 export function placeMigration(dir, version, text, stem) {
   LAST_STEM = stem;
   writeFileSync(join(dir, REAL_BASENAME), text ?? readFileSync(REAL_FILE, "utf8"));

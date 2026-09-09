@@ -16,6 +16,9 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import {
   ROLES,
+  PG,
+  assertRaises,
+  roleQuery,
   opk,
   sha,
   rootQuery,
@@ -86,6 +89,105 @@ test("§3.6 firm_document_limits carries docs_per_day / pages_per_day / ocr_conc
   await setDocLimits(firm, { docsPerDay: 3, pagesPerDay: 5, ocrConcurrency: 1 });
   const row = await rootQuery("select docs_per_day, pages_per_day, ocr_concurrency from clara.firm_document_limits where firm_id=$1", [firm]);
   assert.equal(row.rows[0].pages_per_day, 5, "the per-firm pages/day override took");
+});
+
+// ===========================================================================
+// C-26 [#618] — THE PARTIAL-UPDATE HAZARD IS UNREACHABLE FROM THE BOUNDARY.
+//
+// THE HAZARD, stated in migration 0090's own SECTION 4 header and NOT fixed there:
+// `clara._tf_firm_document_limits_upsert` (0007:545-556) is a BEFORE-INSERT pseudo-upsert
+// with a HARDCODED column list — it rewrites docs_per_day, pages_per_day and ocr_concurrency
+// on every INSERT against an existing firm row. An INSERT naming only ONE limit therefore
+// silently resets the other two to their table defaults.
+//
+// WHY THERE IS NOTHING TO FIX AT THE OPERATION BOUNDARY, and this cell is the proof rather
+// than the claim: there is no public writer to reach the trigger through. `clara.firm_document_limits`
+// carries SELECT for clara_authenticated and clara_runtime (0007:810/818 policies) and NOTHING
+// else for any application role, and no granted routine writes it — the ONLY routine in the
+// whole schema that does is the trigger function itself, which is granted to nobody. So the
+// hazard is reachable only by an owner-level or superuser hand (the operator ceremony, and this
+// rig's own root fixture). Both halves are asserted here, from the live catalog and from a live
+// refusal, so a future migration that opens a writer or a table grant reds THIS cell.
+//
+// THE SECOND HALF is the fixture's own discipline: `setDocLimits` always names all three limit
+// columns (its parameter defaults fill any the caller omits), so a rig cell can never
+// accidentally author a partial row and then reason about a value the trigger reset. Proven
+// behaviourally — a second call that names one limit still lands the fixture's defaults for the
+// other two, which is exactly what "always writes all three" looks like from the outside.
+// ===========================================================================
+test("C-26 §3.6 no application role can write firm_document_limits, and the root fixture always writes all three limits", async (t) => {
+  if (unready(t)) return;
+  const { clients } = world;
+  const firm = await firmOf(clients.A1);
+
+  // (a) TABLE PRIVILEGE — swept over every clara_* role the cluster actually has, not a
+  //     hard-coded list, so a role added by a later migration is covered the day it lands.
+  const roles = await rootQuery(
+    "select rolname from pg_roles where rolname like 'clara\\_%' and rolname <> 'clara_fn_owner' order by rolname",
+  );
+  assert.ok(roles.rowCount >= 6, `only ${roles.rowCount} clara_* application roles found — the sweep is not reading pg_roles`);
+  const writers = [];
+  for (const { rolname } of roles.rows) {
+    for (const priv of ["INSERT", "UPDATE", "DELETE"]) {
+      const r = await rootQuery("select has_table_privilege($1, 'clara.firm_document_limits', $2) as ok", [rolname, priv]);
+      if (r.rows[0].ok) writers.push(`${rolname} ${priv}`);
+    }
+  }
+  assert.deepEqual(writers, [], "an application role can write clara.firm_document_limits — the 0090 partial-update hazard becomes reachable");
+  // The sweep is not vacuous: the same probe must answer TRUE for the owner.
+  const owner = await rootQuery("select has_table_privilege('clara_fn_owner', 'clara.firm_document_limits', 'INSERT') as ok");
+  assert.equal(owner.rows[0].ok, true, "clara_fn_owner must hold INSERT — otherwise the probe above proves nothing");
+
+  // (b) NO GRANTED ROUTINE WRITES IT. The only writer in the schema is the trigger function,
+  //     and it is EXECUTE-granted to nobody.
+  const writersInCatalog = await rootQuery(
+    `select p.proname,
+            (select count(*)::int from pg_roles r
+              where r.rolname like 'clara\\_%' and r.rolname <> 'clara_fn_owner'
+                and has_function_privilege(r.rolname, p.oid, 'execute')) as granted_to
+       from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+      where n.nspname = 'clara'
+        and p.prosrc ~* '(insert\\s+into|update)\\s+clara\\.firm_document_limits'
+      order by p.proname`,
+  );
+  assert.deepEqual(
+    writersInCatalog.rows.map((r) => `${r.proname} (reachable by ${r.granted_to} app role(s))`),
+    ["_tf_firm_document_limits_upsert (reachable by 0 app role(s))"],
+    "something other than the BEFORE-INSERT trigger writes firm_document_limits, or the trigger became app-callable",
+  );
+
+  // (c) A LIVE REFUSAL, not only a catalog reading.
+  await assertRaises(
+    PG.insufficientPrivilege,
+    () => roleQuery(ROLES.authenticated, "insert into clara.firm_document_limits (firm_id, pages_per_day) values ($1, 1)", [firm]),
+    "clara_authenticated INSERT into firm_document_limits",
+  );
+  await assertRaises(
+    PG.insufficientPrivilege,
+    () => roleQuery(ROLES.runtime, "update clara.firm_document_limits set pages_per_day = 1 where firm_id = $1", [firm]),
+    "clara_runtime UPDATE of firm_document_limits",
+  );
+
+  // (d) THE FIXTURE NAMES ALL THREE, EVERY TIME. First a fully-specified row, then a call that
+  //     names ONE limit: the other two come back as the FIXTURE's defaults (100/2), never as
+  //     the previous call's values — which is what "always writes all three columns" means, and
+  //     simultaneously demonstrates the trigger's rewrite that makes it necessary.
+  await setDocLimits(firm, { docsPerDay: 7, pagesPerDay: 11, ocrConcurrency: 1 });
+  const first = (await rootQuery(
+    "select docs_per_day, pages_per_day, ocr_concurrency from clara.firm_document_limits where firm_id=$1", [firm],
+  )).rows[0];
+  assert.deepEqual([first.docs_per_day, first.pages_per_day, first.ocr_concurrency], [7, 11, 1]);
+  await setDocLimits(firm, { pagesPerDay: 13 });
+  const second = (await rootQuery(
+    "select docs_per_day, pages_per_day, ocr_concurrency from clara.firm_document_limits where firm_id=$1", [firm],
+  )).rows[0];
+  assert.deepEqual(
+    [second.docs_per_day, second.pages_per_day, second.ocr_concurrency],
+    [100, 13, 2],
+    "setDocLimits left a limit column unnamed — the trigger would then reset it to the TABLE default and a "
+    + "cell reasoning about docs_per_day/ocr_concurrency would be reading a value nobody chose",
+  );
+  noteLane("C-26: firm_document_limits has no public writer; the 0090 partial-update hazard is owner-only (no fix at the boundary)");
 });
 
 // ===========================================================================

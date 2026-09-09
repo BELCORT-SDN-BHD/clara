@@ -1075,6 +1075,20 @@ const FREEFORM_F_A6_SHARED_FNS = [];
 // wave's own cohort, instead of silently going stale as an unwrapped literal.
 export const BANK_AGENCY_F_A3_PR1B_COHORT = ["set_bank_agency_hold"];
 
+// #618 — the clara_wake_bank EXECUTE roster. 0121 §K/§L's THIRTEEN wake_* bank wrappers (its
+// own tail census asserts each grants EXECUTE to clara_wake_bank and to no other grantee) plus
+// 0129's wake_book_staff_advance_application, which that file grants to clara_wake_bank ALONE.
+// Declared once and used by BOTH the clara_wake_bank key and its NOLOGIN member shell below,
+// so the two can never drift apart while claiming to census both sides of one membership.
+export const BANK_AGENCY_WAKE_BANK_FNS = [
+  "wake_add_bank_account", "wake_book_staff_advance_application",
+  "wake_complete_bank_reconciliation", "wake_get_bank_pack", "wake_match_bank_line",
+  "wake_propose_bank_identifier_promotion", "wake_propose_bank_line_exception",
+  "wake_resolve_and_book_bank_line", "wake_resolve_bank_line_exception",
+  "wake_settle_from_bank_line", "wake_unmatch_bank_match", "wake_upsert_account",
+  "wake_void_bank_reconciliation", "wake_void_bank_statement",
+];
+
 // Gate G1 [the universal wake-execution engine] the one human door: set_wake_source_enabled, an
 // OWNER-floor idempotent upsert on a wake_engine_sources row (body-enforced floor; the estate-wide
 // analogue of set_bank_agency_hold's own per-client bookkeeper-floor cohort above — a named cohort
@@ -1647,6 +1661,57 @@ export const ALLOWED = {
   // effective set, so both sides of the membership are catalog-censused.
   "clara_auth_wall": new Set(CHECKOUT_GATE_C3_AUTH_WALL_FNS),
   "clara_auth_wall_login": new Set(CHECKOUT_GATE_C3_AUTH_WALL_FNS),
+  // #618 — THE SIX ROLES THIS CENSUS NEVER PROBED, and what their absence cost.
+  //
+  // `grantMatrixFailures` iterates Object.keys(ALLOWED). F-A6 PR-1's own comment above states
+  // the consequence exactly: "a role that is not a key is never probed by the exact-EXECUTE
+  // census AT ALL". Six clara_* roles existed on the live catalog and were not keys, so the
+  // 24 EXECUTE grants they hold were outside this instrument entirely — not expected-false,
+  // not expected-true, simply unseen. `preview_wrong_client_correction` reached
+  // clara_wake_filing (0126:2081) and `wake_book_staff_advance_application` reached
+  // clara_wake_bank (0129) with no cell in this file able to notice either way, and a REVOKE
+  // of any of the 24 would have left this census green.
+  //
+  // Found by the operation-contract census (packages/db/scripts/operation-census.mjs), whose
+  // `unattributed` label is precisely "granted on the boundary, claimed by no cohort here";
+  // these six keys are what makes that label honestly zero rather than waived away.
+  //
+  // Each roster below is an EXPLICIT ENUMERATION, the same discipline every cohort above
+  // carries — not a catalog read. A grant added to one of these roles is expected-false until
+  // someone writes it down here, which is the whole point.
+  //
+  // [Wave-F Track A, F-A7 beta, 0126 §S8] the FILING wake role. Nine names: the four filing
+  // wrappers that are clara_wake_filing ONLY (the block on wake_file_document above names
+  // them), wake_file_document itself (shared with clara_wake_interactive for chat parity),
+  // 0126's own ACL extension of the human read `preview_wrong_client_correction` to this
+  // role, and the three later proposal verbs (0142/0143/0154) that landed on the same lane.
+  "clara_wake_filing": new Set([
+    "preview_wrong_client_correction", "wake_file_document", "wake_list_binding_candidates",
+    "wake_open_firm_question", "wake_propose_client_onboarding", "wake_propose_filing_correction",
+    "wake_propose_identifier_promotion", "wake_propose_vendor_identity_binding",
+    "wake_reattribute_document",
+  ]),
+  // [F-A3 PR-1b, 0121 §K/§L + PR-3, 0129] the BANK agent role: 0121's thirteen wake_* bank
+  // wrappers plus 0129's wake_book_staff_advance_application, which is granted to
+  // clara_wake_bank ALONE. The NOLOGIN member shell inherits the identical effective set
+  // (pg_auth_members.inherit_option = true, measured), so naming both roles censuses both
+  // sides of that membership — the clara_stripe_webhook/_login precedent above.
+  "clara_wake_bank": new Set(BANK_AGENCY_WAKE_BANK_FNS),
+  "clara_wake_bank_login": new Set(BANK_AGENCY_WAKE_BANK_FNS),
+  // The runtime LOGIN's own direct grant. `clara.record_rule_resolution` is granted to
+  // clara_runtime_login and to NOBODY else — not even to clara_runtime — and
+  // packages/runtime/lib/matcher.mjs:186-196 reaches it by `reset role` back to the bare
+  // login for exactly one statement, then restores `set role clara_runtime` in a finally.
+  // The membership is `with inherit false` (measured), so this ONE name is the login's whole
+  // ambient EXECUTE surface: this key asserts that, catalog-wide.
+  "clara_runtime_login": new Set(["record_rule_resolution"]),
+  // THE OTHER TWO LOGIN SHELLS' SETS ARE EMPTY, AND THAT IS THE ASSERTION — the same
+  // measured statement clara_freeform_login's empty set makes above. Both are members
+  // `with inherit false` of a group that holds a large EXECUTE surface (clara_agent_ro,
+  // clara_wake_interactive), and both nonetheless reach ZERO functions in schema clara until
+  // they explicitly SET ROLE. Asserted over the whole catalog, not over one probe.
+  "clara_agent_read_login": new Set([]),
+  "clara_wake_write_login": new Set([]),
   // Slice-4 runtime surface (contract v2.1 §3.0/3.6/3.7/3.8): runtime lane only.
   [ROLES.runtime]: new Set([
     "mint_wake_credential", "revoke_wake_credential",
@@ -1845,8 +1910,15 @@ export async function grantMatrixFailures() {
   const roles = live.rows.filter((r) => r.ok).map((r) => r.rolname);
   const absent = live.rows.filter((r) => !r.ok).map((r) => r.rolname);
   const failures = [];
-  if (absent.length && absent.some((r) => !r.startsWith("clara_freeform")
-      && !r.startsWith("clara_stripe_webhook") && !r.startsWith("clara_auth_wall"))) {
+  // #618 adds clara_wake_filing (0126), clara_wake_bank + its login shell (0121) and the three
+  // dedicated login shells to the tolerated-absent set for the SAME reason the three prefixes
+  // above are there: each is created by a migration well above the oldest frontier this file
+  // still runs against, and a pre-that-migration database must SKIP the role, not drown the
+  // report in "role does not exist" noise that says nothing about grants.
+  const ABSENT_TOLERATED = ["clara_freeform", "clara_stripe_webhook", "clara_auth_wall",
+    "clara_wake_filing", "clara_wake_bank", "clara_runtime_login", "clara_agent_read_login",
+    "clara_wake_write_login"];
+  if (absent.length && absent.some((r) => !ABSENT_TOLERATED.some((prefix) => r.startsWith(prefix)))) {
     failures.push(`ALLOWED names role(s) that do not exist on this database: ${absent.join(", ")}`);
   }
   for (const f of fns.rows) {

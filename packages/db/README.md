@@ -66,6 +66,10 @@ Read the repository frontier from `migrations/` and the target frontier from:
 select count(*), max(version) from clara.schema_migrations;
 ```
 
+That ledger is the only statement of what has landed. A migration body that ran to completion,
+a `raise notice ... OK` tail, and a green `migrate` exit each describe one attempt; the row in
+`clara.schema_migrations` describes the target. A green chain is not a landed frontier.
+
 Before deploying a change to an active writer body, stop new writes and drain in-flight calls,
 apply the migration, then resume. Calls already executing can finish on their previous body.
 A changed function named in `clara.control_witnesses` must receive the matching reviewed
@@ -76,6 +80,40 @@ A full replay creates login shells as NOLOGIN; restore the intended LOGIN state 
 afterward and probe every configured runtime lane. Existing platform roles can also collide
 with historical migration census assertions. A green local chain does not prove that a live
 cluster can be replayed without a target-specific preflight.
+
+## Operation-contract census
+
+[scripts/operation-census.mjs](scripts/operation-census.mjs) rebuilds the public SQL operation
+boundary from the live catalog and the current sources: every routine in schema `clara`, its
+owner, `SECURITY DEFINER` and `search_path`, its ACL per grantee, the CLR/SQLSTATE codes its
+body raises, and every call site in `apps/web` and `packages/runtime` that names it. Run it
+against a migrated database from any working directory:
+
+```sh
+node packages/db/scripts/operation-census.mjs --out /tmp/census        # JSON + markdown
+node packages/db/scripts/operation-census.mjs --out /tmp/census --strict  # exit 1 on a finding
+```
+
+Connection details come from the environment, as for every script here. Findings carry one of
+seven labels: `public_execute`, `called_missing`, `called_ungranted`, `named_arg_mismatch`,
+`unattributed`, `granted_uncalled` (informational) and `frontier_mismatch`. An exemption is one
+`<label>:<target>` pair in [tests/fixtures/operation-census-waivers.mjs](tests/fixtures/operation-census-waivers.mjs)
+with a reason of at least 40 characters; there is no function-level blanket exemption, and a
+waiver that suppresses nothing is reported as a dead exemption.
+[tests/operation-census.test.mjs](tests/operation-census.test.mjs) is the gate, and it breaks
+every label it asserts to prove the analyser can still see.
+
+`granted_uncalled` — the informational label — groups by bare function name, so an uncalled
+OVERLOAD of an otherwise-called name is not reported: a scanned call site resolves to every
+overload of the name it spells, and choosing one would need overload resolution the scanner
+does not attempt. At frontier 0177 that covers three of 470 distinct public names
+(`consume_egress_dispatch`, `prepare_egress_dispatch`, `settle_autodraft_task`), each called
+only from runtime SQL with positional arguments. The labels that gate — `called_ungranted` and
+`named_arg_mismatch` among them — are decided per call site and are unaffected.
+
+The census reports its frontier from `clara.schema_migrations` and compares it against the
+migration files on disk. It never reads a migration's own success text: a chain that ran green
+and a frontier that landed are different claims, and only the ledger states the second.
 
 ## Frozen evaluator deployment
 
