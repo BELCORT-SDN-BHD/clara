@@ -2,20 +2,17 @@
 
 ## Current State
 
-- Updated: 2026-09-10 (MYT), after the first `/implement` session closed its four tickets and the harness sync that followed.
-- `main` at 02760468 (PRs #684–#688, #694 and #695 all merged by fast-forward after green CI) plus this harness-sync update. `main` requires the `ci` check, so every push goes branch → PR → green → fast-forward of the same SHA.
-- Hosted: `clara-runtime` **v77** (image `refresh-6d4efd3d`, Node 22) live; migration **0177 landed** on the live database (frontier 0177, 172 applied; consumer-first order, runtime quiesced for the cutover); all seven lane DSNs now `sslmode=verify-full` against the shipped pooler CA (`/ready` `checks.tls` pinned ×7, validated); the operation census matched the live catalog.
-- Tickets: #606, #616, #617, #618 **closed** with local + hosted evidence. The #606 hosted journey (owner signed in, agent drove a real upload through the client Documents workbench on 2026-09-10 01:21 MYT) showed the classify task created 98 ms after `document.extraction_completed`, one task per lane, downstream facts once; the trail is on the ticket.
-- Local verification recorded per commit; last fresh-cluster runs: db 4101/4006 pass/94 skipped (one x85-b3 timing flake, since fixed to the DB clock), runtime 2114/2111 pass/1 skipped/1 Windows-only EICAR.
-- Harness sync 2026-09-10: code-map index fresh; blueprint/README drift from the session fixed (ARCHITECTURE documents section and §11 now record the #606/#616/#617 hosted evidence; runtime README TLS paragraph repaired; consumer-first migration order documented in both READMEs); four `docs/plan/active/` paths cited by #612 exist only at `99ed3aca` (noted on #612); the owner's local edits (`.codex/config.toml`, web README MCP paragraph) are committed. Owner edits to harness files always get synced to `main`.
+- Updated: 2026-09-10 (MYT), after the second `/implement` session closed #614 (scoped shell, client switching, legacy-route migration).
+- `main` at e967b442 (PR #697, two commits, fast-forwarded after green CI) plus this state update. `main` requires the `ci` check, so every push goes branch → PR → green → fast-forward of the same SHA.
+- Hosted: `clara-web` version `65d6e906-c47c-47cc-8fd9-c9604a57f3c6` (tag `refresh-e967b442`) promoted at 100% on Cloudflare Workers from commit e967b442 (Linux build in a clean clone, only the two public Supabase values + `CLARA_BUILD_SHA` at build time; all six secret names attached; previous version `90c1a5d0-f808-4b88-bd28-d2395d9bc26a` is the rollback point). `clara-runtime` **v77** (image `refresh-6d4efd3d`, Node 22) and migration **0177** unchanged since the first session; seven lane DSNs `sslmode=verify-full`.
+- Tickets: #606, #616, #617, #618 closed in the first session; **#614 closed** on 2026-09-10 with local + hosted evidence on the ticket (unit 2808/2808, browser 139 passed / 7 live-stack skips, hosted redirect matrix and login smoke; the signed-in hosted journey needs the owner's browser).
+- Local verification recorded per commit; last fresh-cluster DB/runtime runs are from the first session (db 4101/4006 pass/94 skipped, runtime 2114/2111 pass/1 skipped/1 Windows-only EICAR) — nothing in #614 touched `packages/db` or `packages/runtime`.
 
 ## Completed
 
 - [x] Product decisions, research and prototype direction accepted; [formal spec #612](https://github.com/BELCORT-SDN-BHD/clara/issues/612) and 71 tickets published (#606, #614–#683).
-- [x] [#606](https://github.com/BELCORT-SDN-BHD/clara/issues/606) classify after extraction: migration 0177 (pg_get_functiondef splice), extraction-aware facts_gate consumer, fixture and pin alignment, precondition drill 18/18, hosted upload journey recorded.
-- [x] [#616](https://github.com/BELCORT-SDN-BHD/clara/issues/616) Node 22 host: root/CI/Dockerfile/test scripts on 22.23.2, node24 action pins, Linux image boot + restart smoke.
-- [x] [#617](https://github.com/BELCORT-SDN-BHD/clara/issues/617) readiness observability: three-plus states per dependency, per-lane pool errors, consumer categories, leader state, TLS posture, fault-injection cells, recovery checklist.
-- [x] [#618](https://github.com/BELCORT-SDN-BHD/clara/issues/618) operation-contract census tool + gate, six roles added to the T17 grant roster, sandbox-marker helper, C-26 no-writer proof.
+- [x] [#606](https://github.com/BELCORT-SDN-BHD/clara/issues/606) classify after extraction; [#616](https://github.com/BELCORT-SDN-BHD/clara/issues/616) Node 22 host; [#617](https://github.com/BELCORT-SDN-BHD/clara/issues/617) readiness observability; [#618](https://github.com/BELCORT-SDN-BHD/clara/issues/618) operation-contract census (first session).
+- [x] [#614](https://github.com/BELCORT-SDN-BHD/clara/issues/614) scoped shell: one navigation registry (`apps/web/lib/navigation/tree.ts`) driving the shadcn/Base UI Sidebar, scope switcher, Breadcrumb and ⌘K; `/work` (Needs you as a saved view), `/settings/*`, `/clients/:id/work|accounting`; `/needs-you` and `/admin/*` 307-migrated; drafts survive scope switches; retired entry points mapped (D5/D6); Architecture §9/§11 record the implemented shell.
 
 ## In Progress
 
@@ -23,10 +20,10 @@
 
 ## Known Issues
 
-GitHub owns these now, as plain issues (milestones are reserved for features and product upgrades). Side findings from the first implementation session, all `needs-triage`: #689 (p6-1 cell not idempotent on a reused DB), #690 (bare `db-tests.md` citations), #691 (reporting-render Node 20 digest, owner decision), #692 (0007 limits trigger, no writer yet), #693 (Windows-only EICAR/Defender). Two findings were attached to the tickets that will fix them instead: the frozen `chatTurn_v1` read-pool call (comments on #623/#637) and the Documents list that does not re-poll (comments on #633/#650). #683's second criterion needs each of these to carry a decision before close-out. `packages/backup` moved to Node 22 (built, not deployed).
+GitHub owns these as plain issues (`needs-triage`, no milestone): #689 (p6-1 cell not idempotent on a reused DB), #690 (bare `db-tests.md` citations), #691 (reporting-render Node 20 digest, owner decision), #692 (0007 limits trigger, no writer yet), #693 (Windows-only EICAR/Defender), #698 (auth wall drops the `?next=` query, found while smoke-testing #614). Findings an existing ticket will fix stay as comments on that ticket: frozen `chatTurn_v1` read-pool call (#623/#637), Documents list not re-polling (#633/#650), autodraft recovery copy and automatic admission (#633), operator registrations parked under `/settings/registrations` (#615), narrow list-to-detail Back (#641). #683's second criterion needs each to carry a decision before close-out. `packages/backup` moved to Node 22 (built, not deployed).
 
 ## Next Steps
 
-1. Next implementation frontier: #614 (scoped shell and route migration, unblocks seven tickets), then #615, #619–#622; the ToolLoopAgent successor ticket is unblocked now that #616 is closed.
-2. Owner: run `/triage` over #689–#693 when convenient; #691 and #693 need a decision, the rest are agent-sized once labelled `ready-for-agent`.
+1. Next implementation frontier: the tickets #614 unblocked — #626 (personal settings), #627 (Tax boundary), #635 (firm settings; also needs #625/#628), #632/#633/#634 (also need #623) — plus the still-unblocked #615, #619–#622; #641 (Work list/detail) needs #629/#630 first. #623 (first persistent Clara successor) is the deepest dependency in the graph.
+2. Owner: run `/triage` over #689–#693 when convenient; sign in on app.clarabook.com and walk the new shell once (client switch, `/work?view=needs-you`, an old `/admin/members` bookmark) so #614's hosted journey carries a human observation too.
 3. [Final acceptance #683](https://github.com/BELCORT-SDN-BHD/clara/issues/683) owns integrated delivery, blueprint synchronization and explicit closure of #612/#597.
