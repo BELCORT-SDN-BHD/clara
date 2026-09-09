@@ -29,11 +29,11 @@ import { useTranslations } from "next-intl";
 import { Badge } from "@/components/parts/PartBadge";
 import type { ReviewQueueCounts } from "@/lib/firm/needs-you";
 
-/** The destination every chip shares — the inbox is one surface, filtered by the human's eye
- *  rather than by a query parameter no tab reads yet (lib/firm/needs-you-links.ts's own
- *  "no deep fragment" note: a link that LOOKS like it filters and does not is worse than one
- *  that plainly opens the list). */
-const INBOX_HREF = "/needs-you";
+/** The destination every chip shares. #614 D5: the inbox is the saved "needs you" view of
+ *  Work, not its own route — `?view=needs-you` is a real query Work reads (unlike the old
+ *  "no deep fragment" case lib/firm/needs-you-links.ts's own note describes), so this is a
+ *  link that filters, not one that only looks like it does. */
+const INBOX_HREF = "/work?view=needs-you";
 
 export function NeedsYouScoreboard({ counts }: { counts: ReviewQueueCounts }) {
   const t = useTranslations("NeedsYou");

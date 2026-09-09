@@ -11,9 +11,11 @@ import { cn } from "@/lib/utils";
  * landmark, Registers a muted pill row with `role="tablist"`. Same widget,
  * three looks and three accessibility trees.
  *
- * UNDERLINE, not pills, is the resolved look — the client workspace's own
- * tab nav (`components/client-workspace-nav.tsx`) already owns the muted
- * pill, and a SECOND rung of pills directly beneath it flattens the
+ * UNDERLINE, not pills, is the resolved look. The muted pill belongs to
+ * NAVIGATION — it was the client workspace's own tab strip when that existed,
+ * and since #614 it is the settings nav and the Work saved-view strip
+ * (`components/settings/settings-nav.tsx`, `components/work/work-views.tsx`) —
+ * and a rung of pills directly above or below an in-page switcher flattens the
  * hierarchy. The filled-primary variant is worse still: `--primary` is the
  * interaction colour, and spending it on "which section am I reading" leaves
  * a page's actual primary action with nothing louder to say.

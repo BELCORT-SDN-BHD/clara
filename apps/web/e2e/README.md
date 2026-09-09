@@ -30,18 +30,18 @@ On PowerShell, set those environment variables before running the command.
 
 ## Coverage map
 
-The checked-in suite currently contains 17 specs:
+The checked-in suite currently contains 18 specs:
 
 | Spec | What it exercises |
 |---|---|
 | `entry-faces-walk.spec.ts` | Login, signup validation, invite refusal, confirmation, holding redirect, and global not-found |
 | `signup-confirm-pending.spec.ts` | Signup, six-digit confirmation, firm step, DPA step, and pending state |
 | `checkout-gate-walk.spec.ts` | Confirmation-to-checkout-to-claim journey and fail-closed request boundaries |
-| `firm-navigation-walk.spec.ts` | Rank-shaped firm navigation and firm controls |
+| `firm-navigation-walk.spec.ts` | Rank-shaped sidebar and settings hub, Work's saved "Needs you" view, and the Work/Activity agent-task split |
 | `home-board-walk.spec.ts` | Firm and client home boards, responsive composition, and activity summary |
-| `responsive-shell-walk.spec.ts` | Narrow/zoomed shell, drawer and rail behavior, keyboard focus, tabs, assets, and accessibility |
+| `responsive-shell-walk.spec.ts` | Narrow/zoomed shell, the mobile sheet and docked-rail behavior, keyboard focus, tabs, assets, and accessibility |
 | `identity-finish.spec.ts` | Brand assets, entry faces, Clara mascot, and reduced motion |
-| `a11y-finish-walk.spec.ts` | Target size, skip link, focus ring, reduced motion, and axe scans |
+| `a11y-finish-walk.spec.ts` | Target size, skip link, focus ring, reduced motion, and axe scans across the shell's own surfaces |
 | `parity-holes.spec.ts` | Client/thread isolation, password recovery, route errors, and rail layout |
 | `chat-parity-walk.spec.ts` | Clarifications, attachments, thread creation/switching, stream proxying, and typed cards |
 | `agentic-finish-walk.spec.ts` | Capability-shaped commands, task reattachment, onboarding receipt states, and chart apply |
@@ -51,6 +51,7 @@ The checked-in suite currently contains 17 specs:
 | `money-input.spec.ts` | Exact-cent input and ambiguous-input refusal |
 | `interview-walk.spec.ts` | Real-stack onboarding interview and Tax route reachability when its fixture is supplied |
 | `reports-download-walk.spec.ts` | Real-stack sealed artifact download when its fixture is supplied |
+| `shell-migration-walk.spec.ts` | #614's unified shell: the legacy `/admin`/`/needs-you` redirect matrix, identity at every width, the keyboard scope switcher and its cross-client isolation guarantee, the mobile sheet's keyboard contract, the Accounting sidebar group, reduced motion, the client-not-found boundary, Work's destination split, settings rank-shaping, and the train's retired entries |
 
 These files use `.spec.ts` because the package's Node test manifest accepts `*.test.*` files. Do not add Playwright specs to [`test/manifest.txt`](../test/manifest.txt).
 

@@ -94,7 +94,12 @@ describe("裁-117 prototype-parity wiring", () => {
     // a sibling of the workbench rather than something floating over it.
     const contentAt = layout.indexOf("data-firm-workbench");
     const railAt = layout.indexOf("<RailMount />");
-    const rowCloseAt = layout.indexOf("</div>", railAt);
+    // #614: the shell row IS `<SidebarProvider>` now (a `flex min-h-svh w-full`
+    // wrapper the vendored primitive supplies), not a hand-rolled `<div>`. The
+    // CLAIM is unchanged and is what this cell has always been about — the rail
+    // is a sibling INSIDE the row, after the workbench — so only the closing tag
+    // this looks for moved.
+    const rowCloseAt = layout.indexOf("</SidebarProvider>", railAt);
     assert.ok(
       contentAt >= 0 && railAt > contentAt && rowCloseAt > railAt,
       "rail is not inside the shell flex row after the workbench",

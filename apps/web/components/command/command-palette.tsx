@@ -18,12 +18,12 @@ import { focusRail } from "@/lib/command/bus";
 import {
   CLIENT_ROUTES,
   FIRM_ROUTES,
+  permittedNavHrefs,
   resolveClientIdFromPathname,
 } from "@/lib/command/routes";
 import { DO_ACTIONS, permittedDoActions, type DoActionEnv, type DoActionSpec } from "@/lib/command/do-actions";
 import { loadDoEnv, runDoAction } from "@/lib/command/do-dispatch";
 import { isDoorRefusal } from "@/lib/doors";
-import { visibleAdminNavigation, visibleFirmNavigation } from "@/lib/firm/navigation";
 import { loadClientRegister, type ClientRow } from "@/lib/firm/reads";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
 import type { SessionTokenAccessor } from "@/lib/session";
@@ -177,8 +177,9 @@ export function CommandPalette({ onNavigate, session = sessionTokenAccessor }: C
   // `NavigationScope` shape `lib/firm/navigation.ts` declares — so shaping Go
   // costs zero extra requests and cannot disagree with Do about who the caller
   // is. The predicate is `hasNavigationAccess`, CALLED, not copied: it is the
-  // same function `components/firm-nav.tsx` applies to the sidebar, so a ⌘K row
-  // and a sidebar row for one href can no longer disagree (裁-107a).
+  // same function `components/app-shell/app-sidebar.tsx` applies to the sidebar,
+  // over the same registry rows, so a ⌘K row and a sidebar row for one
+  // destination can no longer disagree (裁-107a).
   //
   // THIS MAKES GO ASYNCHRONOUS for the first time, and the three states are kept
   // apart on purpose — the same distinction do-dispatch.ts draws for Do:
@@ -197,43 +198,35 @@ export function CommandPalette({ onNavigate, session = sessionTokenAccessor }: C
   // wall. A caller who types the URL still meets it.
   const goScope = doState.phase === "ready" ? doState.env.ctx : null;
 
-  // THE SIDEBAR'S OWN OUTPUT, not a parallel computation over the same inputs.
-  // `visibleFirmNavigation`/`visibleAdminNavigation` are the functions
-  // `components/firm-nav.tsx` renders from, so what they return IS the sidebar —
-  // filtered by `hasNavigationAccess` inside, and RANK-SHAPED on the way out
-  // (裁-187 rewrites the Admin entry's `messageKey` to "firm" for a caller who
-  // administers nothing). Calling them instead of re-applying the predicate here
-  // buys the second half for free: the ⌘K row and the sidebar row for one href
-  // cannot disagree about whether it is offered OR about what it is called.
-  const navByHref = React.useMemo(() => {
-    if (goScope === null) return null;
-    return new Map(
-      [...visibleFirmNavigation(goScope), ...visibleAdminNavigation(goScope)].map((entry) => [
-        entry.href,
-        "messageKey" in entry ? entry.messageKey : entry.navMessageKey,
-      ]),
-    );
-  }, [goScope]);
-
-  /** The ⌘K label id for a row, following the sidebar's rank-shaped rename. */
-  const labelIdFor = React.useCallback(
-    (route: (typeof FIRM_ROUTES)[number]) => {
-      const navKey = navByHref?.get(route.href);
-      return (navKey && route.rankLabels?.[navKey]) ?? route.id;
-    },
-    [navByHref],
+  // THE SIDEBAR'S OWN ANSWER, not a parallel computation over the same inputs.
+  // `permittedNavHrefs` runs `hasNavigationAccess` over the SAME registry rows
+  // (`lib/navigation/tree.ts`) `components/app-shell/app-sidebar.tsx` renders, so
+  // a ⌘K row and a sidebar row for one destination cannot disagree about whether
+  // it is offered. The join key is `navHref`, which equals `href` for every row
+  // except the "Needs you" SAVED VIEW — `/work?view=needs-you` filters `/work`
+  // and inherits its floor, because a view cannot be more restricted than the
+  // destination it filters.
+  //
+  // #614 RETIRED THE RANK-SHAPED LABEL. 裁-187 rewrote the Admin entry's label to
+  // "Firm" for a caller who administered nothing, and this file carried a
+  // `rankLabels` join so ⌘K would follow that rename. The destination is now
+  // "Settings", which is honest at every rank, so there is no rename to follow
+  // and no second label source to keep in sync — see lib/firm/navigation.ts.
+  const permitted = React.useMemo(
+    () => (goScope === null ? null : permittedNavHrefs(goScope)),
+    [goScope],
   );
 
   const firmMatches = React.useMemo(
     () =>
-      navByHref === null
+      permitted === null
         ? []
         : FIRM_ROUTES.filter(
             (route) =>
-              navByHref.has(route.href) &&
-              matchesQuery([tGoRoutes(labelIdFor(route)), ...(route.keywords ?? [])], query),
+              permitted.has(route.navHref) &&
+              matchesQuery([tGoRoutes(route.id), ...(route.keywords ?? [])], query),
           ),
-    [navByHref, labelIdFor, query, tGoRoutes],
+    [permitted, query, tGoRoutes],
   );
 
   // ── C-43, GAP B: A CLIENT IS REACHABLE BY NAME ─────────────────────────────
@@ -344,7 +337,7 @@ export function CommandPalette({ onNavigate, session = sessionTokenAccessor }: C
                 value={route.id}
                 onSelect={() => goTo(route.href)}
               >
-                <span>{tGoRoutes(labelIdFor(route))}</span>
+                <span>{tGoRoutes(route.id)}</span>
                 {route.status === "planned" && (
                   <Badge variant="outline" className="ml-auto">
                     {t("go.plannedBadge")}

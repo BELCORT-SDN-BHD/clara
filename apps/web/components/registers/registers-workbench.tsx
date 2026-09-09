@@ -49,11 +49,19 @@ export function RegistersWorkbench({ clientId }: { clientId: string }) {
   return (
     <div className="flex flex-col gap-4">
       {/* P3 polish: the muted-pill strip became the shared <SectionTabs>
-          underline. The pill belongs to the client-workspace nav one rung up
-          (components/client-workspace-nav.tsx) — a second rung of pills
-          directly beneath it flattened the hierarchy. The tablist/tab/
-          aria-selected semantics this lane already had are what the shared
-          component adopted for everyone. */}
+          underline. The pill belongs to NAVIGATION — it was the client-workspace
+          tab strip one rung up when that existed, and since #614 the sidebar
+          carries that job — so a second rung of pills here flattened the
+          hierarchy. The tablist/tab/aria-selected semantics this lane already
+          had are what the shared component adopted for everyone.
+
+          #614: FOUR of these six tabs are now also named in the sidebar's
+          Accounting group (`lib/navigation/tree.ts`) as `?tab=` destinations —
+          aging, fixedAssets, adjustments and accounts. Opening and staff
+          advances are reachable ONLY here, deliberately: naming every tab twice
+          would make the sidebar a second, competing tab strip. This control
+          stays the authority on which view is showing; the sidebar rows are
+          entrances to it. */}
       <SectionTabs
         label={t("heading")}
         items={TABS.map((tab) => ({ value: tab, label: t(`tabs.${tab}`) }))}

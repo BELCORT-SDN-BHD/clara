@@ -85,9 +85,29 @@ interface ClaraStoreState {
    *  which `useActiveThread.ts:52-73` records must never be deleted while a live
    *  SSE turn is writing into it. */
   selectedByAltitude: Record<string, string>;
+  /** #614 A7 — the unsent composer draft, keyed by conversation identity
+   *  `(altitude, threadId)`, NESTED (not a flattened composite string) so a
+   *  wholesale purge of one threadId (`reset` below) can walk every altitude's
+   *  inner map without parsing a key back apart.
+   *
+   *  BOTH HALVES OF THE KEY MATTER, and the altitude half is not redundant with
+   *  the thread half just because a real thread belongs to exactly one
+   *  altitude in production. `ClaraThreadView` (the full-screen mount) can flip
+   *  `clientId` as a bare PROP CHANGE with the SAME `threadId` still resolving —
+   *  see its own `attachments` reset effect's header for the identical hazard
+   *  measured for the attachment tray — and a draft keyed by threadId alone
+   *  would ride that change straight over the scope boundary A7 exists to draw.
+   *  Memory-only: no localStorage, no reload recovery promised. */
+  drafts: Record<string, Record<string, string>>;
 }
 
-let state: ClaraStoreState = { railOpen: true, composerFocusRequest: null, threads: {}, selectedByAltitude: {} };
+let state: ClaraStoreState = {
+  railOpen: true,
+  composerFocusRequest: null,
+  threads: {},
+  selectedByAltitude: {},
+  drafts: {},
+};
 const listeners = new Set<() => void>();
 
 function emit(): void {
@@ -147,6 +167,36 @@ export const claraThreadStore = {
    *  back to the newest own session, which is the pre-menu behaviour unchanged. */
   getSelectedThreadForAltitude(altitude: string): string | null {
     return state.selectedByAltitude[altitude] ?? null;
+  },
+
+  /** #614 A7 — the composer draft for one conversation. `""` for a key that has
+   *  never been written, same honest-default shape as `getThread`. */
+  getDraft(altitude: string, threadId: string): string {
+    return state.drafts[altitude]?.[threadId] ?? "";
+  },
+
+  /** Fires `emit()` only on an actual change, matching `selectThreadForAltitude`'s
+   *  own guard — a mounted view's `useSyncExternalStore` re-render is cheap but not
+   *  free, and every keystroke calls this. */
+  setDraft(altitude: string, threadId: string, text: string): void {
+    if ((state.drafts[altitude]?.[threadId] ?? "") === text) return;
+    state = {
+      ...state,
+      drafts: { ...state.drafts, [altitude]: { ...state.drafts[altitude], [threadId]: text } },
+    };
+    emit();
+  },
+
+  /** The ONE place a submitted draft is forgotten — call this only after a send
+   *  actually opened its stream (the same authority `markSent` waits for), never
+   *  on `postTurn`'s 202 alone: a turn the runtime refused must leave the human's
+   *  text right where they can still fix and resend it. */
+  clearDraft(altitude: string, threadId: string): void {
+    if (!(threadId in (state.drafts[altitude] ?? {}))) return;
+    const forAltitude = { ...state.drafts[altitude] };
+    delete forAltitude[threadId];
+    state = { ...state, drafts: { ...state.drafts, [altitude]: forAltitude } };
+    emit();
   },
 
   /** Authoritative — replaces the whole message list from a fresh `getMessages` read,
@@ -265,11 +315,24 @@ export const claraThreadStore = {
     setThread(threadId, { stream: initialClaraStreamState });
   },
 
+  /** #614 A7 — ALSO forgets this threadId's draft, in every altitude it might be
+   *  filed under (see `drafts`'s own header for why the key is nested by
+   *  altitude at all). A wholesale "forget this thread" that left a draft
+   *  behind would be the one call in this store a test can no longer use to
+   *  get back to a clean slate — the exact isolation `composer-keyboard.test.tsx`
+   *  leans on between its five cells, all against the same threadId. */
   reset(threadId: string): void {
-    if (!(threadId in state.threads)) return;
+    const draftAltitudes = Object.keys(state.drafts).filter((altitude) => threadId in state.drafts[altitude]!);
+    if (!(threadId in state.threads) && draftAltitudes.length === 0) return;
     const threads = { ...state.threads };
     delete threads[threadId];
-    state = { ...state, threads };
+    const drafts = { ...state.drafts };
+    for (const altitude of draftAltitudes) {
+      const forAltitude = { ...drafts[altitude] };
+      delete forAltitude[threadId];
+      drafts[altitude] = forAltitude;
+    }
+    state = { ...state, threads, drafts };
     emit();
   },
 };

@@ -30,7 +30,7 @@ import { activeElement, enableDomInspection } from "../../test/domInspect";
 import { checkAccessibility } from "../../test/a11yRules";
 import { checkKeyboardWalk, focusableElements } from "../../test/keyboardWalk";
 import { configureSessionTokenSource, resetSessionTokenSource } from "../../lib/session-accessor";
-import { AdminHubView } from "../admin/admin-hub";
+import { SettingsHubView } from "../settings/settings-hub";
 import { PageHeader, PageShell } from "../common/page-shell";
 import { ComplianceRegisterPanel } from "./compliance-register-panel";
 import { VendorBindingsPanel } from "./vendor-bindings-panel";
@@ -61,27 +61,32 @@ function withMessages(children: unknown) {
   return createElement(NextIntlClientProvider, { locale: "en", messages, children: children as never });
 }
 
-// --- shadow of app/(firm)/admin/page.tsx ------------------------------------
+// --- shadow of app/(firm)/settings/page.tsx ---------------------------------
+// #614 renamed the surface (/admin -> /settings) and its hub component
+// (components/admin/admin-hub.tsx -> components/settings/settings-hub.tsx). The
+// shadow follows both; what it MEASURES is unchanged, plus one row — the new
+// Account section — and one badge, the Legacy mark on vendor bindings.
 
-function AdminPageShadow() {
-  const t = useTranslations("Admin");
+function SettingsPageShadow() {
+  const t = useTranslations("Settings");
   return createElement(
     PageShell,
     null,
     createElement(PageHeader, { title: t("heading"), description: t("body") }),
-    createElement(AdminHubView, { scope: { role_rank: 3, is_operator: true } }),
+    createElement(SettingsHubView, { scope: { role_rank: 3, is_operator: true } }),
   );
 }
 
-test("AdminPage's own composition has ordered headings and named links for every visible admin surface", async () => {
-  const h = await renderComponent(withMessages(createElement(AdminPageShadow)));
+test("SettingsPage's own composition has ordered headings and named links for every visible settings surface", async () => {
+  const h = await renderComponent(withMessages(createElement(SettingsPageShadow)));
   try {
     const bodyText = textOf(h.container as never);
-    assert.match(bodyText, /Members/, "the hub link to /admin/members must render with its real label");
-    assert.match(bodyText, /Compliance register/, "the hub link to /admin/compliance must render with its real label");
-    assert.match(bodyText, /Vendor identity bindings/, "the hub link to /admin/vendor-bindings must render with its real label");
-    assert.match(bodyText, /Firm registrations/, "the hub link to /admin/registrations must render with its real label");
-    assert.match(bodyText, /Firm settings/, "the hub link to /admin/settings must render with its real label");
+    assert.match(bodyText, /Account/, "the hub link to /settings/account must render with its real label");
+    assert.match(bodyText, /Members/, "the hub link to /settings/members must render with its real label");
+    assert.match(bodyText, /Compliance/, "the hub link to /settings/compliance must render with its real label");
+    assert.match(bodyText, /Vendor identity bindings/, "the hub link to /settings/vendor-bindings must render with its real label");
+    assert.match(bodyText, /Registrations/, "the hub link to /settings/registrations must render with its real label");
+    assert.match(bodyText, /Legacy/, "the vendor-bindings card must carry its Legacy mark");
     assert.match(bodyText, /Usage summaries, plan details, and billing management are not available yet\./, "the hub must explain which billing capabilities are unavailable");
     const violations = checkAccessibility(h.container as never);
     assert.deepEqual(violations, [], JSON.stringify(violations));
@@ -90,17 +95,17 @@ test("AdminPage's own composition has ordered headings and named links for every
   }
 });
 
-test("Admin hub keyboard walk reaches every visible card link in DOM order", async () => {
-  const h = await renderComponent(withMessages(createElement(AdminPageShadow)));
+test("Settings hub keyboard walk reaches every visible card link in DOM order", async () => {
+  const h = await renderComponent(withMessages(createElement(SettingsPageShadow)));
   try {
     const links = focusableElements(h.container as never).filter(
       (node) => (node as { tagName?: string }).tagName === "A",
     );
-    assert.equal(links.length, 5, "the operator owner hub exposes all five built admin destinations");
+    assert.equal(links.length, 6, "the operator owner hub exposes all six built settings destinations");
     assert.deepEqual(checkKeyboardWalk(h.container as never), []);
     for (const link of links) {
       (link as { focus: () => void }).focus();
-      assert.equal(activeElement(), link, "keyboard focus must reach each admin card link");
+      assert.equal(activeElement(), link, "keyboard focus must reach each settings card link");
     }
   } finally {
     await h.unmount();
@@ -205,6 +210,13 @@ test("/admin/vendor-bindings page composition (PageHeader + the real VendorBindi
         // firm reading only "requires an admin who did not propose it" has no idea what to DO.
         assert.match(pageText, /let Clara propose it, or add a second admin/, "pageDescription must name both lawful exits, verbatim");
         assert.doesNotMatch(pageText, /a different admin signs it/, "the retired phrasing (tells a genuinely solo firm to use a person who does not exist) must not render");
+        // #614 D6: bindings are readable history, not a processing gate — the
+        // panel states that up front, persistently, not only in a dialog.
+        assert.match(
+          pageText,
+          /no longer a prerequisite for processing documents/,
+          "the panel must explain bindings are no longer required before an upload processes",
+        );
         const violations = checkAccessibility(h.container as never);
         assert.deepEqual(violations, [], JSON.stringify(violations));
       } finally {

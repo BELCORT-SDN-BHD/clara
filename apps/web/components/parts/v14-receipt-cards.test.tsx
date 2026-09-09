@@ -141,8 +141,9 @@ test("question_opened renders the question VERBATIM with its id, scope and the N
     // The DB's own bytes, never re-worded.
     assert.ok(text.includes(QUESTION.question), "the question text must render verbatim");
     // The part carries no client_id, so the only honest destination is the firm
-    // inbox the durable question actually lands in.
-    assert.deepEqual(hrefs(h), ["/needs-you"]);
+    // inbox the durable question actually lands in (#614 D5: /needs-you ->
+    // /work?view=needs-you).
+    assert.deepEqual(hrefs(h), ["/work?view=needs-you"]);
   } finally {
     await h.unmount();
   }

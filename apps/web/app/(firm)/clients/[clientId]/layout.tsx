@@ -1,21 +1,48 @@
 import type { ReactNode } from "react";
 import { notFound } from "next/navigation";
-import { getTranslations } from "next-intl/server";
 
+import { ClientIdentityPublisher } from "@/components/app-shell/scope-context";
 import { ClientScopeProvider } from "@/components/client-scope-provider";
-import { ClientWorkspaceNav } from "@/components/client-workspace-nav";
 import { loadClientById } from "@/lib/firm/reads";
 import { fixedTokenAccessor, resolveServerSession } from "@/lib/supabase/server-session";
 
 /**
- * The client-workspace altitude — ONE workspace, accounting objects as tabs
- * (owner ruling Q3): journals · documents · bank · close · reports ·
- * registers · knowledge, plus this level's own "Home".
+ * The client-workspace altitude.
  *
- * Everything below `<ClientScopeProvider>` is keyed on `clientId` and gets
- * fully unmounted/remounted on a client switch — see
- * components/client-scope-provider.tsx and lib/client-scope.ts for why that
+ * #614 — THIS LAYOUT RENDERS NO CHROME. It used to own two things: an `<h1>`
+ * reading "Client: <name>" and a horizontal nine-tab strip
+ * (`components/client-workspace-nav.tsx`). Both are gone, and where they went is
+ * the point rather than a deletion:
+ *
+ *   · IDENTITY moved UP, into the shell. The client's name is the label on the
+ *     sidebar's first group, the current scope on the switcher, and a crumb in
+ *     the breadcrumb — three places a human is already looking, at every width,
+ *     instead of one line that scrolled away with the page.
+ *   · The TAB STRIP became the sidebar's client group, over the one registry
+ *     (`lib/navigation/tree.ts`). Nine controls in a row that wrapped to four
+ *     lines at 640 CSS px are now a column that has room for them, with the
+ *     eight accounting surfaces behind a collapsible rather than flattened
+ *     alongside Documents and Reports.
+ *
+ * WHAT THAT BUYS, measured against the pin it replaces: `components/
+ * shell-responsive.test.tsx` used to pin TWO `<h1>`s on every client route — this
+ * layout's identity heading and `PageShell`'s own — and the old header carried a
+ * long note on why neither alternative was cheaper than living with it. There is
+ * now exactly ONE: the page's. The a11y question that note could not resolve is
+ * resolved by removing the second heading rather than by ranking it.
+ *
+ * WHAT IS UNCHANGED, and must stay so: everything below `<ClientScopeProvider>`
+ * is keyed on `clientId` and gets fully unmounted/remounted on a client switch —
+ * see components/client-scope-provider.tsx and lib/client-scope.ts for why that
  * is a security mechanism here, not a performance nicety.
+ *
+ * HOW THE NAME REACHES THE SHELL. `ClientIdentityPublisher` publishes `{id,
+ * name}` into a module-level store the sidebar and breadcrumb subscribe to.
+ * React context flows down, never up, and the components that need this name are
+ * rendered by the layout ABOVE this one — see
+ * components/app-shell/scope-context.tsx for the mechanism and, more
+ * importantly, for the rule that keeps a stale store from ever showing one
+ * client's name over another client's page.
  */
 export default async function ClientWorkspaceLayout({
   children,
@@ -29,71 +56,11 @@ export default async function ClientWorkspaceLayout({
   if (caller === null) notFound();
   const client = await loadClientById(fixedTokenAccessor(caller.accessToken), clientId);
   if (client === null) notFound();
-  const t = await getTranslations("ClientWorkspace");
 
   return (
-    <div className="flex min-h-dvh flex-col">
-      {/*
-        The mirror half of the same token-role fix: this tab strip is NAV
-        chrome, so it carries `--shell` — it was wearing `--surface`, the
-        content-card role, while the content column below it wore `--shell`.
-        The two roles were exactly inverted.
-      */}
-      {/*
-        CB-AE2E-019 — two edits here, both from the audit's own reading.
-
-        (1) THE CLIENT NAME IS A REAL HEADING, not a `<p>`. The audit's complaint
-        was precise: "the client's identity is a non-heading paragraph", so it did
-        not appear in a screen reader's heading list at all. That is survivable at
-        1280px where the sidebar and the tab strip are both visible landmarks; at
-        640 CSS px, where the sidebar is a drawer and the tab strip is a scrolling
-        row, this line is the only remaining "which client am I in" anchor.
-
-        A CORRECTION, AND THE TRADE-OFF IT RESTS ON. This comment first claimed
-        "the client-workspace altitude had no level-1 heading at all". That was
-        FALSE, and the review caught it: `components/common/page-shell.tsx:54`'s
-        `PageHeader` renders an `<h1>` on every route-level surface, this
-        altitude's pages included. So a client route carries TWO h1s — the
-        workspace identity here, and the surface's own title below it.
-
-        That is deliberate, and the two alternatives were measured before it was
-        settled. Making THIS heading an `<h2>` reds the repo's own heading-order
-        rule (`test/a11yRules.ts:547` starts `runningMax` at 0, so a leading h2
-        "jumps from h0 to h2") — it is first in the DOM, so it cannot be a level
-        below something that has not appeared yet. Making the SURFACE title an h2
-        instead needs a `level` prop threaded through `PageHeader`. COUNTED, not
-        estimated: 22 call sites in 20 files on this tree, 7 of them
-        client-altitude, with more in flight on sibling PRs that have not merged —
-        an earlier version of this note said "26 files across four lanes", which
-        was neither of those numbers. The alternative to threading a prop is a
-        React context, and a context needs a hook, which would break the contract
-        page-shell.tsx:19-20 states in its own words ("Nothing here holds a hook,
-        so a Server Component page and a Client Component workbench can both
-        render it").
-
-        Two h1s is valid HTML5, violates no rule this repo or axe enforces at
-        WCAG A/AA, and reads as what it is: you are in this client, looking at this
-        surface. `components/shell-responsive.test.tsx` PINS it — this layout's one
-        h1, `PageShell`'s one, and ZERO bare `<h1>` in any client-altitude page —
-        so "a third h1 reds" is a claim that file actually enforces rather than a
-        hope about files nobody counted.
-
-        It keeps `text-sm font-semibold`: a heading LEVEL is a structural claim,
-        not a type-scale one, and this line is deliberately quieter than the
-        workbench title beneath it.
-
-        (2) `px-8` -> `px-4 lg:px-8`. 64px of horizontal padding is a fifth of a
-        320px viewport, and this header sits above every client surface.
-      */}
-      <header className="flex flex-col gap-2 border-b border-border bg-shell px-4 py-3 lg:px-8">
-        <h1 className="text-sm font-semibold text-foreground">
-          {t("clientHeader", { clientName: client.name })}
-        </h1>
-        <ClientWorkspaceNav clientId={clientId} />
-      </header>
-      <ClientScopeProvider clientId={clientId}>
-        <div className="flex-1">{children}</div>
-      </ClientScopeProvider>
-    </div>
+    <ClientScopeProvider clientId={clientId}>
+      <ClientIdentityPublisher id={clientId} name={client.name} />
+      {children}
+    </ClientScopeProvider>
   );
 }

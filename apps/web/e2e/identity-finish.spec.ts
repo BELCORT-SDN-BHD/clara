@@ -151,7 +151,9 @@ async function signIn(page: Page): Promise<void> {
   await page.getByLabel("Email").fill("owner@example.test");
   await page.getByLabel("Password").fill("Clara-e2e-password-1!");
   await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page.getByRole("navigation", { name: "Firm navigation" })).toBeVisible();
+  // #614: "Firm navigation" retired with the bespoke `<aside>` it named —
+  // the sidebar's one landmark is now "Main".
+  await expect(page.getByRole("navigation", { name: "Main" })).toBeVisible();
 }
 
 const E2E_THREAD = "eeeeeeee-1111-4111-8111-eeeeeeeeeeee";

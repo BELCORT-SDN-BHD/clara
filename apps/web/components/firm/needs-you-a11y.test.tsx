@@ -468,9 +468,10 @@ test("firm needs-you inbox: a seeding_proposal row, dispatched through the REAL 
         // NOT this affordance's own, so its presence is expected, not a defect.
         // The discriminating assertion is that the REGISTRY-dispatched link
         // (SeedingProposalAffordance, via getNeedsYouAffordance) ALSO renders,
-        // and points at the OWNING TAB specifically.
-        const reportsLink = h.find((n) => n.tagName === "A" && (n as unknown as { getAttribute?: (a: string) => string | null }).getAttribute?.("href") === "/clients/c1/reports");
-        assert.ok(reportsLink, "the registry dispatched a REAL link to the owning tab (/clients/c1/reports)");
+        // and points at the OWNING TAB specifically. #614 D6: the fragment
+        // targets ReportsPage.tsx's "Internal processing" section directly.
+        const reportsLink = h.find((n) => n.tagName === "A" && (n as unknown as { getAttribute?: (a: string) => string | null }).getAttribute?.("href") === "/clients/c1/reports#internal-processing");
+        assert.ok(reportsLink, "the registry dispatched a REAL link to the owning tab (/clients/c1/reports#internal-processing)");
         assert.match(textOf(reportsLink as never), /Review in Reports/, "the deep-link text is the affordance's own label, not the generic \"Open client\" text");
         const violations = checkAccessibility(h.container as never);
         assert.deepEqual(violations, [], JSON.stringify(violations));

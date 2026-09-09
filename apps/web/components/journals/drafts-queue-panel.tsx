@@ -95,13 +95,14 @@ export function DraftsQueuePanel({
         // rest genuinely cannot be reached from here: this tab calls
         // clara.list_review_queue with `p_cursor: null` hard-wired
         // (lib/journals/api.ts:220) and does not paginate past `p_limit`. The
-        // one surface that DOES page through the same union is /needs-you,
-        // which threads the RPC's own `next_cursor` (components/firm/
-        // needs-you-inbox.tsx's Load more). So the sentence now states the
-        // fact and the link goes where the rest of the queue actually is.
+        // one surface that DOES page through the same union is /work's
+        // needs-you view, which threads the RPC's own `next_cursor`
+        // (components/firm/needs-you-inbox.tsx's Load more). So the sentence
+        // now states the fact and the link goes where the rest of the queue
+        // actually is (#614 D5: /needs-you -> /work?view=needs-you).
         <p className="text-sm text-warning">
           {t("showingOf", { shown: queueRows.length, total: queueCounts.open_drafts })}{" "}
-          <Link href="/needs-you" className="underline underline-offset-2">
+          <Link href="/work?view=needs-you" className="underline underline-offset-2">
             {t("showingOfLink")}
           </Link>
         </p>

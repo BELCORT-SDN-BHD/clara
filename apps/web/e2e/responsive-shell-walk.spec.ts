@@ -125,19 +125,27 @@ test("at 640 CSS px the workbench keeps 320px and the page never scrolls sideway
   await expectReflows(page, "firm home");
 
   await page.goto(`/clients/${CLIENT_A}`);
-  await expect(page.getByRole("heading", { name: "Client: Rome Properties", level: 1 })).toBeVisible();
+  // #614: the layout's "Client: <name>" heading is gone — identity lives in the
+  // breadcrumb (and, when the sidebar is docked, the group label). At this
+  // NARROW width the sidebar is a closed sheet, so the breadcrumb is the one
+  // that must still say which client this is.
+  await expect(page.getByRole("navigation", { name: "Breadcrumb" }).getByText("Rome Properties")).toBeVisible();
   await expectReflows(page, "client workspace");
 
   await page.goto(`/clients/${CLIENT_A}/journals`);
   await expectReflows(page, "client journals");
 });
 
-test("the client's name is the level-1 heading — the altitude had no h1 at all", async ({ page }) => {
+test("the client route carries exactly one h1 — identity now lives in the shell, not a second heading", async ({ page }) => {
+  // #614 removed the layout's own "Client: <name>" heading (the pre-#614 pin
+  // was TWO h1s on every client route — see shell-responsive.test.tsx's own
+  // history). The client workspace home still renders its own single h1 (the
+  // client's real name, via ClientIdentityBand) — that is the page's OWN
+  // content heading, not shell chrome, and it is now the only one.
   await page.setViewportSize(NARROW);
   await signInTo(page, `/clients/${CLIENT_A}`);
-  const h1 = page.getByRole("heading", { level: 1, name: /^Client: / });
-  await expect(h1).toBeVisible();
-  await expect(h1).toHaveText("Client: Rome Properties");
+  await expect(page.getByRole("heading", { level: 1 })).toHaveCount(1);
+  await expect(page.getByRole("navigation", { name: "Breadcrumb" }).getByText("Rome Properties")).toBeVisible();
 });
 
 test("the firm drawer opens and closes BY KEYBOARD, and focus returns to the toggle", async ({ page }) => {
@@ -152,7 +160,7 @@ test("the firm drawer opens and closes BY KEYBOARD, and focus returns to the tog
   // `toHaveAttribute` reports "element(s) not found". The role locator is what a
   // user reaches (and is what proves the accessible name), the structural one is
   // what a test reads state through while the modal is up.
-  const toggle = page.getByRole("button", { name: "Menu" });
+  const toggle = page.getByRole("button", { name: "Toggle navigation" });
   const toggleNode = page.locator("[data-firm-drawer-toggle]");
   await expect(toggle).toBeVisible();
   await expect(toggleNode).toHaveAttribute("aria-expanded", "false");
@@ -173,7 +181,7 @@ test("the firm drawer opens and closes BY KEYBOARD, and focus returns to the tog
   // than worked around silently.
   await expect(toggle).toHaveCount(0);
   // The SAME nav, not a second copy of it — the sidebar's own landmark name.
-  await expect(panel.getByRole("navigation", { name: "Firm navigation" })).toBeVisible();
+  await expect(panel.getByRole("navigation", { name: "Main" })).toBeVisible();
   await expect(panel.getByRole("link", { name: "Clients", exact: true })).toBeVisible();
 
   // FOCUS IS INSIDE. Without this the Escape below would be pressed against the
@@ -198,7 +206,7 @@ test("the firm drawer opens and closes BY KEYBOARD, and focus returns to the tog
 test("the drawer closes on the navigation it performs — it never sits over the page it just opened", async ({ page }) => {
   await page.setViewportSize(NARROW);
   await signInTo(page, "/");
-  const toggle = page.getByRole("button", { name: "Menu" });
+  const toggle = page.getByRole("button", { name: "Toggle navigation" });
   await toggle.click();
   const panel = page.locator("[data-slot=sheet-content]");
   await expect(panel).toBeVisible();
@@ -222,7 +230,7 @@ test("below lg the rail does NOT open itself — the workbench is the work", asy
   await expect(page.locator("[data-clara-rail]")).toHaveCount(0);
   // …and the drawer toggle is genuinely reachable, which is the thing the scrim
   // was preventing.
-  await page.getByRole("button", { name: "Menu" }).click();
+  await page.getByRole("button", { name: "Toggle navigation" }).click();
   await expect(page.locator("[data-slot=sheet-content]")).toBeVisible();
 });
 
@@ -320,9 +328,14 @@ test("at 1280 the rail is still DOCKED — the wide arm is untouched by the over
   const workbench = await page.locator("[data-firm-workbench]").boundingBox();
   // Docked: the workbench ENDS where the rail begins. No overlap.
   expect((workbench?.x ?? 0) + (workbench?.width ?? 0)).toBeLessThanOrEqual((railBox?.x ?? 0) + 1);
-  // …and the drawer toggle is not on screen at all in this arm.
-  await expect(page.getByRole("button", { name: "Menu" })).toHaveCount(0);
-  await expect(page.getByRole("navigation", { name: "Firm navigation" })).toBeVisible();
+  // …and there is no MOBILE SHEET in this arm. The trigger itself is NOT
+  // hidden at this width any more — the vendored `SidebarTrigger` is the SAME
+  // control that collapses the docked column at `md` and opens the sheet
+  // below it (components/ui/sidebar.tsx), so its absence would be the wrong
+  // claim now; the sheet's absence is the one that still distinguishes the
+  // docked arm.
+  await expect(page.locator("[data-slot=sheet-content]")).toHaveCount(0);
+  await expect(page.getByRole("navigation", { name: "Main" })).toBeVisible();
 });
 
 test("SectionTabs is ONE tab stop and the arrow keys move between tabs — the roving focus the primitive brought", async ({ page }) => {
@@ -401,15 +414,15 @@ test("the DOCKED rail's transition is clean too — the wide arm is sampled, not
   });
 });
 
-test("the firm drawer is 224 CSS px at 640, not the vendored sheet's 384", async ({ page }) => {
-  // MEASURED, because the class string lies about this on its own. The vendored
-  // sheet's `data-[side=left]:w-3/4` and `data-[side=left]:sm:max-w-sm` are
-  // (0,2,0) selectors and beat a bare `.w-56` / `.max-w-[85vw]` at (0,1,0), so
-  // the drawer shipped at 384px with the 85vw cap never binding, under a comment
-  // that said 224px. Only a computed read catches that.
+test("the mobile sheet is 18rem (288px) — the vendored primitive's own width, not the docked rail's 224", async ({ page }) => {
+  // MEASURED, because #614 replaced the bespoke drawer with the vendored
+  // Sidebar's own sheet arm (components/ui/sidebar.tsx: `SIDEBAR_WIDTH_MOBILE`,
+  // deliberately left at the vendored 18rem — see that file's hand-edit 2 for
+  // why only the DESKTOP width was retuned to the old rail's 224px and the
+  // sheet, which is not competing with anything else on screen, was not).
   await page.setViewportSize(NARROW);
   await signInTo(page, "/");
-  await page.getByRole("button", { name: "Menu" }).click();
+  await page.getByRole("button", { name: "Toggle navigation" }).click();
   const panel = page.locator("[data-slot=sheet-content]");
   await expect(panel).toBeVisible();
   await expect
@@ -417,10 +430,10 @@ test("the firm drawer is 224 CSS px at 640, not the vendored sheet's 384", async
     .toBe(0);
 
   const width = await panel.evaluate((el) => el.getBoundingClientRect().width);
-  expect(width, `the drawer is ${width}px — it should be the rail's own 224`).toBeCloseTo(224, 0);
+  expect(width, `the sheet is ${width}px — it should be the primitive's own 18rem (288)`).toBeCloseTo(288, 0);
   // …and it is not merely narrow by accident: 85vw of this viewport is 544, so a
-  // drawer that had lost the width entirely and was only being capped would read
-  // 544 here, not 224.
+  // sheet that had lost the width entirely and was only being capped would read
+  // 544 here, not 288.
   expect(width).toBeLessThan(NARROW.width * 0.85);
 });
 
@@ -480,7 +493,7 @@ test("DS-01 extended: the SHEET drops its slide under prefers-reduced-motion and
   await signInTo(page, "/");
   await page.emulateMedia({ reducedMotion: "reduce" });
 
-  await page.getByRole("button", { name: "Menu" }).click();
+  await page.getByRole("button", { name: "Toggle navigation" }).click();
   const panel = page.locator("[data-slot=sheet-content]");
   await expect(panel).toBeVisible();
 
@@ -542,38 +555,41 @@ test("C-43: ⌘K reaches a client BY NAME from firm altitude, in one selection",
   const row = page.getByRole("option", { name: "Bee Creative Solution" });
   await expect(row).toBeVisible();
   await row.click();
-  // THE DISCRIMINATING POST-CONDITION: the client's own workspace, by id.
+  // THE DISCRIMINATING POST-CONDITION: the client's own workspace, by id, and
+  // the sidebar's client group now names it — #614 retired the layout's
+  // "Client: <name>" heading in favour of the shell's own identity surfaces.
   await expect(page).toHaveURL(new RegExp(`/clients/${CLIENT_B}$`));
-  await expect(page.getByRole("heading", { name: "Client: Bee Creative Solution", level: 1 })).toBeVisible();
+  await expect(page.getByRole("navigation", { name: "Main" }).getByText("Bee Creative Solution", { exact: true })).toBeVisible();
 });
 
 test("C-43: ⌘K's Go list is rank-shaped — a bookkeeper sees exactly what their sidebar shows", async ({ page }) => {
   await page.setViewportSize(WIDE);
   await signInTo(page, "/", "bookkeeper@example.test");
-  const nav = page.getByRole("navigation", { name: "Firm navigation" });
+  const nav = page.getByRole("navigation", { name: "Main" });
   // Establish the ORACLE from the sidebar itself rather than from a list this
   // test typed: the claim is that the two agree, so one of them has to be read.
   await expect(nav.getByRole("link", { name: "Activity", exact: true })).toBeVisible();
-  // 裁-187 (arrived on main from a sibling train): the section entry is still
-  // there — its destinations really are reachable at this rank — but it no
-  // longer calls itself "Admin", because a bookkeeper administers nothing under
-  // it. `e2e/firm-navigation-walk.spec.ts` pins the same pair.
+  // #614 retired the "Admin"/"Firm" rank-shaped rename outright — the
+  // destination is "Settings" at every rank now, so neither retired label may
+  // resurface. `e2e/firm-navigation-walk.spec.ts` pins the same pair.
   await expect(nav.getByRole("link", { name: "Admin", exact: true })).toHaveCount(0);
-  await nav.getByRole("link", { name: "Firm", exact: true }).click();
-  await expect(nav.getByRole("link", { name: "Members", exact: true })).toHaveCount(0);
+  await expect(nav.getByRole("link", { name: "Firm", exact: true })).toHaveCount(0);
+  await nav.getByRole("link", { name: "Settings", exact: true }).click();
+  await expect(page.getByRole("link", { name: "Members", exact: true })).toHaveCount(0);
 
   await ensureRealFocus(page);
   await page.keyboard.press("Control+K");
   await expect(page.getByRole("option", { name: "Firm activity" })).toBeVisible();
   await expect(page.getByRole("option", { name: "Vendor identity bindings" })).toBeVisible();
-  // HIDDEN, matching the sidebar. Before C-43 all three of these rendered.
+  // HIDDEN, matching the sidebar/hub. Before C-43 all three of these rendered.
   await expect(page.getByRole("option", { name: "Members", exact: true })).toHaveCount(0);
   await expect(page.getByRole("option", { name: "Firm registrations" })).toHaveCount(0);
   // …AND THE LABEL AGREES TOO, not just the visibility. This is the half the
   // merge exposed: ⌘K kept its own catalogue and went on saying "Admin" while
   // the sidebar said "Firm" for the same href. Both halves of the agreement are
-  // now asserted against the sidebar read above, in one persona.
-  await expect(page.getByRole("option", { name: "Firm", exact: true })).toBeVisible();
+  // now asserted against the sidebar read above, in one persona — both retired
+  // in favour of "Settings".
+  await expect(page.getByRole("option", { name: "Settings", exact: true })).toBeVisible();
   await expect(page.getByRole("option", { name: "Admin", exact: true })).toHaveCount(0);
 });
 
@@ -610,7 +626,7 @@ test("the narrow shell stays clean under the full WCAG 2.1 AA scan, drawer open 
   const closed = await new AxeBuilder({ page }).withTags(tags).analyze();
   expect(closed.violations, "narrow firm home, drawer closed").toEqual([]);
 
-  await page.getByRole("button", { name: "Menu" }).click();
+  await page.getByRole("button", { name: "Toggle navigation" }).click();
   await expect(page.locator("[data-slot=sheet-content]")).toBeVisible();
   await expect
     .poll(async () => page.evaluate(() => document.getAnimations().filter((a) => a.playState === "running").length))

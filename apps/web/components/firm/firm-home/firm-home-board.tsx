@@ -155,8 +155,9 @@ export function FirmHomeBoard() {
             <section aria-labelledby="firm-home-needs-you" className="flex flex-col gap-3">
               <SectionHeader
                 level={2}
+                // #614 D5: the inbox is now the saved "needs you" view of Work.
                 action={
-                  <Link href="/needs-you" className="text-xs text-primary underline-offset-4 hover:underline">
+                  <Link href="/work?view=needs-you" className="text-xs text-primary underline-offset-4 hover:underline">
                     {t("seeInbox")}
                   </Link>
                 }

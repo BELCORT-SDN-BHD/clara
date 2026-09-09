@@ -40,8 +40,20 @@ import { fileURLToPath } from "node:url";
 import ts from "typescript";
 
 import { matchesQuery } from "../../components/command/command-palette";
-import { ADMIN_NAVIGATION, FIRM_NAVIGATION } from "../firm/navigation";
-import { CLIENT_ROUTES, FIRM_ROUTES, type CommandRoute } from "./routes";
+import type { NavigationScope } from "../firm/navigation";
+import {
+  ACCOUNTING_ITEMS,
+  CLIENT_NAV,
+  FIRM_NAV,
+  SETTINGS_SECTIONS,
+  accountingHref,
+  clientNavHref,
+  visibleAccountingItems,
+  visibleClientNav,
+  visibleFirmNav,
+  visibleSettingsSections,
+} from "../navigation/tree";
+import { CLIENT_ROUTES, FIRM_ROUTES, permittedNavHrefs, type CommandRoute } from "./routes";
 import messages from "../../messages/en.json";
 
 const APP_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "app");
@@ -78,8 +90,13 @@ function pagePatterns(dir: string, segments: string[] = [], out: string[][] = []
 
 const PATTERNS = pagePatterns(APP_DIR);
 
+/** Path segments, with any query or fragment dropped first. #614 put real
+ *  `?tab=` and `?view=` rows in the manifest (the four register views and the
+ *  Needs-you saved view), and a `?` left in place turns the last segment into
+ *  `registers?tab=aging`, which matches no pattern and would report every one of
+ *  them as a 404. */
 function segmentsOf(href: string): string[] {
-  return href.split("/").filter(Boolean);
+  return href.split(/[?#]/, 1)[0]!.split("/").filter(Boolean);
 }
 
 function matchesPattern(hrefSegments: string[], pattern: string[]): boolean {
@@ -296,20 +313,23 @@ test("REVERSE GATE: every real (firm) page is discoverable from ⌘K or an in-ap
   );
 });
 
-test("/admin/members is present in ⌘K by its own stable row", () => {
-  const members = FIRM_ROUTES.find((route) => route.id === "adminMembers");
-  assert.ok(members, "removing adminMembers strands the flagship RBAC page from ⌘K");
-  assert.equal(members.href, "/admin/members");
+test("/settings/members is present in ⌘K by its own stable row", () => {
+  // #614 moved the RBAC page from /admin/members to /settings/members. The claim
+  // is unchanged: the flagship roster surface has its OWN row, so a search for
+  // "members" lands on it rather than on the generic parent.
+  const members = FIRM_ROUTES.find((route) => route.id === "settingsMembers");
+  assert.ok(members, "removing settingsMembers strands the flagship RBAC page from ⌘K");
+  assert.equal(members.href, "/settings/members");
   assert.equal(resolvesToPage(members.href), true);
-
-  const admin = FIRM_ROUTES.find((route) => route.id === "admin");
-  assert.ok(admin);
-  assert.equal(
-    matchesQuery(["Admin", ...(admin.keywords ?? [])], "members"),
-    false,
-    "the generic Admin row must not win a Members search before the specific destination",
-  );
   assert.equal(members.keywords?.includes("members"), true);
+
+  const settings = FIRM_ROUTES.find((route) => route.id === "settings");
+  assert.ok(settings);
+  assert.equal(
+    matchesQuery(["Settings"], "members"),
+    false,
+    "the generic Settings LABEL must not win a Members search on its own",
+  );
 });
 // --- 1. built => a page exists ----------------------------------------------
 
@@ -346,15 +366,22 @@ test("every href in the manifest resolves to a real page — a ⌘K row may not 
 
 // --- The named regression pin ------------------------------------------------
 
-test("the needsYou row points at /needs-you, and /inbox is not a path this app serves", () => {
+test("the needsYou row points at the SAVED VIEW of Work, and neither /inbox nor /needs-you is a path this app serves", () => {
+  // #614: the cross-client inbox is a saved view of /work, not a route of its
+  // own. The regression this cell was minted for is unchanged in kind — a Go row
+  // pointing at a path the tree does not serve — and both of the paths this row
+  // has historically named are now checked.
   const needsYou = FIRM_ROUTES.find((r) => r.id === "needsYou");
   assert.ok(needsYou, "the cross-client inbox must stay in the Go manifest");
-  assert.equal(needsYou.href, "/needs-you");
-  assert.equal(resolvesToPage("/needs-you"), true);
-  // The pin is on the TREE, not on the string: if someone ever builds an
-  // /inbox page, this line tells them to re-decide the row rather than
-  // silently leaving two inboxes.
+  assert.equal(needsYou.href, "/work?view=needs-you");
+  assert.equal(needsYou.navHref, "/work", "a saved view inherits the floor of the destination it filters");
+  assert.equal(resolvesToPage(needsYou.href), true);
+  // The pin is on the TREE, not on the string: if someone ever builds one of
+  // these pages, this line tells them to re-decide the row rather than silently
+  // leaving two inboxes. /needs-you is a temporary redirect now
+  // (lib/navigation/legacy-routes.ts), and a redirect is not a page.
   assert.equal(resolvesToPage("/inbox"), false, "if /inbox now exists, decide which one the manifest names — do not keep both");
+  assert.equal(resolvesToPage("/needs-you"), false, "the old inbox route must stay deleted — a page here would shadow its own redirect");
 });
 
 // --- 4. C-43: the Go floor IS the sidebar's floor, per href -------------------
@@ -367,9 +394,9 @@ test("every firm Go row's rank floor equals the navigation registry's floor for 
   // here, the two stop agreeing and this reds. The join key is the href, so it
   // also catches a Go row silently repointed at a different surface while
   // keeping its old floor.
-  const byHref = new Map([...FIRM_NAVIGATION, ...ADMIN_NAVIGATION].map((e) => [e.href, e]));
+  const byHref = new Map([...FIRM_NAV, ...SETTINGS_SECTIONS].map((e) => [e.href, e]));
   const mismatched = FIRM_ROUTES.filter((route) => {
-    const entry = byHref.get(route.href);
+    const entry = byHref.get(route.navHref);
     if (!entry) return true;
     return (
       entry.minimumRole !== route.minimumRole ||
@@ -402,8 +429,82 @@ test("the join RAN — every row carries a floor, and none was dropped instead o
   // a future refactor that used `.flatMap(... [])` instead of a throw would drop
   // an unjoinable row silently, and a Go row that quietly disappears is exactly
   // as wrong as one that quietly appears.
-  assert.equal(FIRM_ROUTES.length, 10);
+  // #614: five firm destinations + the Needs-you saved view + six settings
+  // sections. The rows are BUILT from the registry now rather than joined to it,
+  // so this count is what catches a construction that silently drops one.
+  assert.equal(FIRM_ROUTES.length, FIRM_NAV.length + 1 + SETTINGS_SECTIONS.length);
+  assert.equal(FIRM_ROUTES.length, 12);
   for (const route of FIRM_ROUTES) {
     assert.equal(typeof route.minimumRole, "string", `${route.id} has no floor`);
+  }
+});
+
+// --- 5. C77.5: the sidebar and ⌘K offer the SAME destinations ----------------
+
+const PERSONAS: { name: string; scope: NavigationScope }[] = [
+  { name: "viewer", scope: { role_rank: 0, is_operator: false } },
+  { name: "bookkeeper", scope: { role_rank: 1, is_operator: false } },
+  { name: "admin", scope: { role_rank: 2, is_operator: false } },
+  { name: "owner", scope: { role_rank: 3, is_operator: false } },
+  { name: "operator owner", scope: { role_rank: 3, is_operator: true } },
+  { name: "unknown rank", scope: { role_rank: null, is_operator: false } },
+];
+
+test("PARITY, firm scope: the destinations ⌘K offers are exactly the ones the shell can reach, per role", () => {
+  // THE OBLIGATION THIS DISCHARGES, stated precisely, because "the same set" is
+  // not literally true and pretending otherwise would make this cell a lie.
+  //
+  // The SIDEBAR renders the five firm destinations. ⌘K additionally indexes the
+  // six SETTINGS SECTIONS and the Needs-you saved view — destinations that are
+  // real and reachable, but that live one level inside a menu entry rather than
+  // being menu entries themselves. So the honest parity is over what the shell
+  // can REACH, which is the registry's own two firm-altitude collections, joined
+  // to ⌘K by `navHref`.
+  //
+  // Both directions are asserted. Sidebar-not-in-⌘K is a destination you can see
+  // and cannot search for; ⌘K-not-in-sidebar is the C-43 defect — a row offering
+  // a room this caller cannot open.
+  for (const { name, scope } of PERSONAS) {
+    const reachable = [
+      ...visibleFirmNav(scope).map((i) => i.href),
+      ...visibleSettingsSections(scope).map((s) => s.href),
+    ].sort();
+    const permitted = permittedNavHrefs(scope);
+    const offered = [...new Set(FIRM_ROUTES.filter((r) => permitted.has(r.navHref)).map((r) => r.navHref))].sort();
+    assert.deepEqual(offered, reachable, `${name}: ⌘K and the shell disagree about firm destinations`);
+
+    // ...and every top-level menu row really is searchable, which is the half a
+    // navHref-set comparison could satisfy vacuously if the Go manifest dropped
+    // a row whose navHref another row happened to share.
+    for (const item of visibleFirmNav(scope)) {
+      assert.ok(
+        FIRM_ROUTES.some((r) => r.href === item.href && permitted.has(r.navHref)),
+        `${name}: the sidebar renders ${item.href} but ⌘K has no row for it`,
+      );
+    }
+  }
+});
+
+test("PARITY, client scope: ⌘K's client rows ARE the registry's client destinations", () => {
+  const clientId = "client-1111";
+  const full = [
+    ...CLIENT_NAV.map((i) => clientNavHref(clientId, i)),
+    ...ACCOUNTING_ITEMS.map((i) => accountingHref(clientId, i)),
+  ].sort();
+  const offered = CLIENT_ROUTES.map((r) => r.href(clientId)).sort();
+  assert.deepEqual(offered, full, "⌘K's client rows are not the registry's client destinations");
+
+  // ⌘K's client rows are NOT rank-filtered today, and that is correct rather
+  // than an oversight: every client destination is viewer-floored, so the
+  // palette offers the same list to anyone who can open the workspace at all.
+  // This is the cell that would red the day a floored client surface arrives
+  // without the palette learning to shape itself.
+  for (const { name, scope } of PERSONAS) {
+    if (scope.role_rank === null) continue;
+    const reachable = [
+      ...visibleClientNav(scope).map((i) => clientNavHref(clientId, i)),
+      ...visibleAccountingItems(scope).map((i) => accountingHref(clientId, i)),
+    ].sort();
+    assert.deepEqual(reachable, full, `${name}: a client destination is rank-shaped but ⌘K is not`);
   }
 });

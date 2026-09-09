@@ -79,7 +79,8 @@ export function ClaraWorkingTile() {
               </li>
             ))}
           </ul>
-          <Link href="/activity" className="text-xs text-primary underline-offset-4 hover:underline">
+          {/* #614 D5: in-flight agent tasks moved from /activity to /work. */}
+          <Link href="/work" className="text-xs text-primary underline-offset-4 hover:underline">
             {t("seeAgentActivity")}
           </Link>
         </div>

@@ -103,8 +103,8 @@ export function EntryPostedCard({ part }: { part: EntryPostedPart }) {
 
 /** The opened-question receipt. The question text is the DB's own bytes, rendered
  *  verbatim and never re-worded. The part carries no client_id (chatTurn.v13.post.ts:111-116),
- *  so the only honest destination is the firm's Needs-you queue, where the durable
- *  question actually lands. */
+ *  so the only honest destination is the firm's Needs-you view of Work (#614 D5), where the
+ *  durable question actually lands. */
 export function QuestionOpenedCard({ part }: { part: QuestionOpenedPart }) {
   const t = useTranslations("Clara.parts.questionOpened");
   return (
@@ -114,7 +114,7 @@ export function QuestionOpenedCard({ part }: { part: QuestionOpenedPart }) {
         [t("questionLabel"), part.question_id],
         [t("scopeLabel"), part.scope_kind],
       ]}
-      link={{ href: "/needs-you", label: t("link") }}
+      link={{ href: "/work?view=needs-you", label: t("link") }}
     >
       <p className="text-card-foreground">{part.question}</p>
     </PartSummaryCard>

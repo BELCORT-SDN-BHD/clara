@@ -406,6 +406,22 @@ export function enableDomInspection(): void {
         display: "block",
         visibility: "visible",
         position: "static",
+        // #614: @base-ui/react's Collapsible panel decides between a CSS
+        // transition and a CSS animation by READING these three
+        // (`getAnimationType`, collapsible/panel/useCollapsiblePanel.mjs), and
+        // it does so unguarded — `panelStyles.animationName.split(',')` threw
+        // "Cannot read properties of undefined" out of a layout effect the
+        // moment the app-shell sidebar's Accounting group was mounted here, with
+        // React reporting only a generic concurrent-rendering error. "No
+        // animation, no transition" is the honest answer for a stub with no
+        // stylesheet and no layout: the panel then opens and closes
+        // instantaneously, which is exactly what a structural cell wants to
+        // observe.
+        animationName: "none",
+        animationDuration: "0s",
+        animationDelay: "0s",
+        transitionDuration: "0s",
+        transitionDelay: "0s",
       };
     };
     winForStyle.getComputedStyle = computedStyle as unknown;

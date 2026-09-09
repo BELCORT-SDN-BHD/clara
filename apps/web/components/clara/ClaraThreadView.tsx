@@ -5,7 +5,7 @@
 // never a separate universe"). All state comes from `useClaraThread` /
 // `lib/clara/threadStore.ts`, the one source of truth both mount points read.
 
-import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useTranslations } from "next-intl";
 
 import { Button } from "@/components/ui/button";
@@ -20,7 +20,7 @@ import { ComposerAttachmentControl, type ComposerAttachmentState } from "@/compo
 import { claraWelcomeVisible } from "@/lib/clara/welcomeState";
 import type { SessionTokenAccessor } from "@/lib/session";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
-import type { ClaraThreadUiState } from "@/lib/clara/threadStore";
+import { claraThreadStore, type ClaraThreadUiState } from "@/lib/clara/threadStore";
 import { useClaraThread, useComposerFocusRequest } from "@/lib/clara/useClaraThread";
 import { foldLiveClarifyParts } from "@/lib/clara/liveClarify";
 import { ThreadActionCoordinatorProvider } from "@/lib/parts/thread-action-coordinator";
@@ -66,7 +66,35 @@ export function ClaraThreadView({
   clientId?: string;
 }) {
   const t = useTranslations("Clara.thread");
-  const [draft, setDraft] = useState("");
+  // #614 A7 — the SAME "firm" literal `useActiveThread.ts` defines as
+  // `FIRM_ALTITUDE` (not exported there, so repeated here rather than reached
+  // for across a file this lane does not touch). This is the draft store's
+  // scope half of the `(altitude, threadId)` key — see threadStore.ts's own
+  // header on `drafts` for why a bare prop-change scope switch needs it.
+  const altitude = clientId ?? "firm";
+  // THE DRAFT LIVES IN THE STORE, NOT IN LOCAL STATE (#614 A7). A `useState("")`
+  // here is exactly what journey A7 rules out: `<RailMount/>` keys the whole rail
+  // subtree on `clientId ?? "firm"` (remounting this component on every client
+  // switch) and `ClaraRail` unmounts it outright once the close animation settles
+  // — either event would tear down a `useState` and take the unsent draft with
+  // it. Reading through `useSyncExternalStore` means a scope change that does NOT
+  // remount (the full-screen mount's bare `clientId` prop change) also just works:
+  // the selector re-keys on the new `(altitude, threadId)` and the OLD scope's
+  // text never rides along, with no separate reset effect to keep in sync.
+  const draft = useSyncExternalStore(
+    claraThreadStore.subscribe,
+    () => (threadId ? claraThreadStore.getDraft(altitude, threadId) : ""),
+    () => (threadId ? claraThreadStore.getDraft(altitude, threadId) : ""),
+  );
+  const setDraft = useCallback(
+    (text: string) => {
+      // No threadId, no key to file it under — the composer is disabled in this
+      // state anyway (see the textarea's own `disabled` below).
+      if (!threadId) return;
+      claraThreadStore.setDraft(altitude, threadId, text);
+    },
+    [altitude, threadId],
+  );
   const [attachments, setAttachments] = useState<ComposerAttachmentState>({ parts: [], blocked: false });
   const [attachmentClearToken, setAttachmentClearToken] = useState(0);
   const { state, sendMessage, retryConnection, retryLoad } = useClaraThread(auth, threadId ?? "");
@@ -117,9 +145,14 @@ export function ClaraThreadView({
   useEffect(() => {
     if (!focusRequest || focusRequest.token === appliedFocusTokenRef.current) return;
     appliedFocusTokenRef.current = focusRequest.token;
+    // #614 A7: the token dedup above is the whole contract unchanged — this
+    // effect still applies at most once per request, so a request that has
+    // already landed can never fire again over whatever the human has since
+    // typed. `setDraft` now routes through the store, but it is still gated
+    // by the exact same ref this effect always used.
     if (focusRequest.prefill) setDraft(focusRequest.prefill);
     textareaRef.current?.focus();
-  }, [focusRequest]);
+  }, [focusRequest, setDraft]);
 
   const notSignedIn = state.loadError === "not signed in";
   const busy = state.sendStatus === "sending";
@@ -177,8 +210,13 @@ export function ClaraThreadView({
     if (sendDisabled) return;
     const text = draft;
     const opened = await sendMessage(text, attachments.parts);
+    // #614 A7 — the draft is forgotten ONLY on a send that actually opened its
+    // stream, mirroring `markSent`'s own authority. A refused turn (rate limit,
+    // network error) must leave the human's text sitting right there to fix
+    // and resend — clearing it here on the 202/opened path is what already
+    // distinguishes "sent" from "attempted".
     if (opened) {
-      setDraft("");
+      if (threadId) claraThreadStore.clearDraft(altitude, threadId);
       setAttachmentClearToken((token) => token + 1);
     }
   }

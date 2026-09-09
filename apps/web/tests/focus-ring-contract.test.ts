@@ -173,17 +173,26 @@ describe("focus-ring contract — 裁-1's 70% is declared once and obeyed everyw
     // 2026-09-02 re-census. Twelve plus three is FIFTEEN, and each merge that took "either
     // side" of the count would have silently dropped a carrier the other added, which is why
     // the list below is a union and this number is derived from it rather than carried over.
+    //
+    // #614, +1 NET AND BOTH HALVES NAMED. `components/admin/admin-hub.tsx` LEFT
+    // this census — it was renamed to `components/settings/settings-hub.tsx`
+    // when /admin became /settings, carrying its one card-link ring string
+    // unchanged. `components/accounting/accounting-hub.tsx` JOINED it: the new
+    // Accounting index is the same card-hub idiom, which is exactly what this
+    // roster exists to record — one treatment, written down wherever it is used.
+    // Fifteen minus one plus two is SIXTEEN.
     const hits = ringCarrierHits();
     const files = [...new Set(hits.map((h) => h.file))].sort();
-    assert.equal(hits.length, 15, JSON.stringify(hits, null, 2));
+    assert.equal(hits.length, 16, JSON.stringify(hits, null, 2));
     assert.deepEqual(files, [
-      "components/admin/admin-hub.tsx",
+      "components/accounting/accounting-hub.tsx",
       "components/clara/ClaraThreadView.tsx",
       "components/common/dialog-refusal.tsx",
       "components/common/native-select.tsx",
       "components/firm/compliance-watch-affordance.tsx",
       "components/journals/drafts-queue-panel.tsx",
       "components/journals/journal-entries-table.tsx",
+      "components/settings/settings-hub.tsx",
       "components/tax/TurnoverClassificationPanel.tsx",
       "components/ui/badge.tsx",
       "components/ui/button.tsx",

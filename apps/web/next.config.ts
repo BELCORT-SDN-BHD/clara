@@ -5,6 +5,8 @@ import type { NextConfig } from "next";
 import createNextIntlPlugin from "next-intl/plugin";
 import { initOpenNextCloudflareForDev } from "@opennextjs/cloudflare";
 
+import { legacyRedirects } from "./lib/navigation/legacy-routes";
+
 const moneyInputHarnessEnabled = process.env.CLARA_E2E_MONEY_INPUT_HARNESS === "1";
 const routeErrorProbeEnabled = process.env.CLARA_E2E_ROUTE_ERROR_PROBE === "1";
 
@@ -61,6 +63,23 @@ const nextConfig: NextConfig = {
         : {}),
     },
   },
+  // #614 — THE LEGACY ROUTE MATRIX, as data, in one place
+  // (`lib/navigation/legacy-routes.ts`, which carries the reasoning and the
+  // `permanent: false` decision). `/needs-you` and the whole `/admin` subtree
+  // moved; their old addresses are in browser histories, in Slack messages and
+  // in deep links a Needs-you row already handed out, so each one redirects
+  // rather than 404s.
+  //
+  // ORDER OF OPERATIONS, because it surprises: Next applies `redirects()` BEFORE
+  // `proxy.ts`. An unauthenticated hit on `/admin/members` therefore redirects
+  // first and meets the auth gate at the NEW path, landing on
+  // `/login?next=/settings/members` — which is the behaviour we want, and it
+  // means the auth wall never sees the old path.
+  //
+  // Unlike `rewrites()` (see the note below), a redirect destination is a
+  // literal path with no environment in it, so baking it into
+  // `routes-manifest.json` at build time is correct rather than the F1/F2 defect.
+  redirects: async () => legacyRedirects(),
   // DELIBERATELY no `rewrites()` for the runtime proxy (independent review
   // 2026-08-27, F1/F2): a `rewrites()` destination is baked into
   // `.next/routes-manifest.json` at BUILD time, so `process.env` is read once at

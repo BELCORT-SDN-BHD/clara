@@ -18,10 +18,12 @@ import { buttonVariants } from "@/components/ui/button";
  * not-found.md): "not-found.js … is used to render UI when the `notFound`
  * function is thrown within a route segment", while "the root app/not-found.js …
  * handle[s] any unmatched URLs for your whole application" (Version History:
- * "v13.3.0 — Root app/not-found handles global unmatched URLs"). Nothing in
- * apps/web calls `notFound()` — a full-tree grep returns zero — so a
- * `(firm)/not-found.tsx` would be an unreachable branch today AND would not
- * catch the case the finding is about. The root file is the one that does.
+ * "v13.3.0 — Root app/not-found handles global unmatched URLs"). At the time
+ * this file was written, nothing in apps/web called `notFound()`, so a
+ * `(firm)/not-found.tsx` would have been an unreachable branch. This root file
+ * still owns the UNMATCHED-URL case; #614 D6 later gave the ONE segment that
+ * does call `notFound()` (`app/(firm)/clients/[clientId]/layout.tsx`) its own
+ * boundary at `app/(firm)/clients/not-found.tsx`, inside the shell.
  *
  * It therefore renders inside the ROOT layout (fonts, tokens, the intl provider)
  * but NOT inside the firm sidebar shell, because Next composes the root
@@ -39,8 +41,9 @@ export default async function NotFound() {
         <Link href="/" className={buttonVariants({ variant: "outline", size: "sm" })}>
           {t("firmHome")}
         </Link>
-        <Link href="/needs-you" className={buttonVariants({ variant: "outline", size: "sm" })}>
-          {t("needsYou")}
+        {/* #614 D5: the needs-you door renamed to Work. */}
+        <Link href="/work" className={buttonVariants({ variant: "outline", size: "sm" })}>
+          {t("work")}
         </Link>
       </nav>
     </PageShell>

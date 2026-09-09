@@ -9,57 +9,79 @@ async function signIn(page: Page, email: string): Promise<void> {
   await page.getByLabel("Password").fill("Clara-e2e-password-1!");
   await page.getByRole("button", { name: "Sign in" }).click();
   await expect(page).toHaveURL(/\/$/);
-  await expect(page.getByRole("navigation", { name: "Firm navigation" })).toBeVisible();
+  // #614: the sidebar's ONE navigation landmark, over the one registry
+  // (lib/navigation/tree.ts) — "Firm navigation" retired with the bespoke
+  // `<aside>` it named.
+  await expect(page.getByRole("navigation", { name: "Main" })).toBeVisible();
 }
 
 test("operator owner sees the full sidebar and reaches Members in two navigation clicks", async ({ page }) => {
   await signIn(page, "owner@example.test");
-  const nav = page.getByRole("navigation", { name: "Firm navigation" });
+  const nav = page.getByRole("navigation", { name: "Main" });
 
   await expect(nav.getByRole("link", { name: "Home", exact: true })).toBeVisible();
-  await expect(nav.getByRole("link", { name: "Needs you", exact: true })).toBeVisible();
   await expect(nav.getByRole("link", { name: "Clients", exact: true })).toBeVisible();
+  await expect(nav.getByRole("link", { name: "Work", exact: true })).toBeVisible();
   await expect(nav.getByRole("link", { name: "Activity", exact: true })).toBeVisible();
+  // "Needs you" is no longer a sidebar destination of its own — #614 folded it
+  // into Work as a saved view (/work?view=needs-you), reached from Work's own
+  // view strip rather than from a second sidebar row.
+  await expect(nav.getByRole("link", { name: "Needs you", exact: true })).toHaveCount(0);
 
-  await nav.getByRole("link", { name: "Admin", exact: true }).click();
-  await expect(page).toHaveURL(/\/admin$/);
-  await expect(nav.getByRole("link", { name: "Members", exact: true })).toBeVisible();
-  await expect(nav.getByRole("link", { name: "Firm registrations", exact: true })).toBeVisible();
-  await expect(nav.getByRole("link", { name: "Compliance register", exact: true })).toBeVisible();
-  await expect(nav.getByRole("link", { name: "Vendor identity bindings", exact: true })).toBeVisible();
-  await expect(nav.getByRole("link", { name: "Firm settings", exact: true })).toBeVisible();
+  await nav.getByRole("link", { name: "Settings", exact: true }).click();
+  await expect(page).toHaveURL(/\/settings$/);
+  // The six settings sections are now cards on the hub, not sidebar rows — the
+  // sidebar's Settings entry is one destination, and its sections are the
+  // CONTENTS of that destination (components/settings/settings-hub.tsx).
+  // Asserted on each card's own `<h2>`, not the wrapping `<Link>` — the link's
+  // accessible name is its whole card (title AND description concatenated),
+  // and several descriptions say "firm" in passing, which would make a
+  // substring match on the link's name ambiguous for the "Firm" section.
+  const heading = (name: string) => page.getByRole("heading", { name, exact: true, level: 2 });
+  await expect(heading("Members")).toBeVisible();
+  await expect(heading("Registrations")).toBeVisible();
+  await expect(heading("Compliance")).toBeVisible();
+  await expect(heading("Vendor identity bindings")).toBeVisible();
+  await expect(heading("Firm")).toBeVisible();
 
-  await nav.getByRole("link", { name: "Members", exact: true }).click();
-  await expect(page).toHaveURL(/\/admin\/members$/);
+  // Clicking anywhere inside the card's `<Link>` navigates — the heading is a
+  // descendant of it, and a click there bubbles to the anchor exactly as a
+  // click anywhere else in the card would.
+  await heading("Members").click();
+  await expect(page).toHaveURL(/\/settings\/members$/);
   await expect(page.getByRole("heading", { name: "Members", level: 1 })).toBeVisible();
 
   await nav.getByRole("link", { name: "Home", exact: true }).click();
   await page.keyboard.press("Control+K");
   await page.getByPlaceholder("Search or ask Clara…").fill("members");
   await expect(page.getByRole("option", { name: "Members", exact: true })).toBeVisible();
-  await expect(page.getByRole("option", { name: "Admin", exact: true })).toHaveCount(0);
   await page.getByRole("option", { name: "Members", exact: true }).click();
-  await expect(page).toHaveURL(/\/admin\/members$/);
+  await expect(page).toHaveURL(/\/settings\/members$/);
 });
 
 test("bookkeeper sidebar shows viewer/bookkeeper reads and hides admin- and owner-only destinations", async ({ page }) => {
   await signIn(page, "bookkeeper@example.test");
-  const nav = page.getByRole("navigation", { name: "Firm navigation" });
+  const nav = page.getByRole("navigation", { name: "Main" });
 
-  // E-7 (裁-187): the section entry is still THERE — its destinations really are
-  // reachable at this rank — but it no longer calls itself "Admin", because a
-  // bookkeeper administers nothing under it.
-  await expect(nav.getByRole("link", { name: "Firm", exact: true })).toBeVisible();
+  // #614 retired the "Admin"/"Firm" rank-shaped rename outright (E-7 / 裁-187's
+  // predecessor problem) — the destination is "Settings" at every rank, so
+  // neither retired label may resurface for a bookkeeper or for anyone else.
+  await expect(nav.getByRole("link", { name: "Settings", exact: true })).toBeVisible();
   await expect(nav.getByRole("link", { name: "Admin", exact: true })).toHaveCount(0);
+  await expect(nav.getByRole("link", { name: "Firm", exact: true })).toHaveCount(0);
 
-  await nav.getByRole("link", { name: "Firm", exact: true }).click();
-  await expect(page).toHaveURL(/\/admin$/);
-  await expect(page.getByRole("heading", { name: "Firm", level: 1 })).toBeVisible();
-  await expect(nav.getByRole("link", { name: "Compliance register", exact: true })).toBeVisible();
-  await expect(nav.getByRole("link", { name: "Vendor identity bindings", exact: true })).toBeVisible();
-  await expect(nav.getByRole("link", { name: "Firm settings", exact: true })).toBeVisible();
-  await expect(nav.getByRole("link", { name: "Members", exact: true })).toHaveCount(0);
-  await expect(nav.getByRole("link", { name: "Firm registrations", exact: true })).toHaveCount(0);
+  await nav.getByRole("link", { name: "Settings", exact: true }).click();
+  await expect(page).toHaveURL(/\/settings$/);
+  await expect(page.getByRole("heading", { name: "Settings", level: 1 })).toBeVisible();
+  // Asserted on each card's own `<h2>` — see the operator-owner test above
+  // for why the wrapping `<Link>`'s own accessible name is not the right
+  // subject here.
+  const sectionHeading = (name: string) => page.getByRole("heading", { name, exact: true, level: 2 });
+  await expect(sectionHeading("Compliance")).toBeVisible();
+  await expect(sectionHeading("Vendor identity bindings")).toBeVisible();
+  await expect(sectionHeading("Firm")).toBeVisible();
+  await expect(sectionHeading("Members")).toHaveCount(0);
+  await expect(sectionHeading("Registrations")).toHaveCount(0);
 });
 
 // ---------------------------------------------------------------------------
@@ -72,9 +94,9 @@ test("bookkeeper sidebar shows viewer/bookkeeper reads and hides admin- and owne
 // left behind in a disabled span, would slip past one of the two.
 // ---------------------------------------------------------------------------
 
-test("a bookkeeper reaches /admin/members by URL and is offered NO role menu and NO invite trigger", async ({ page }) => {
+test("a bookkeeper reaches /settings/members by URL and is offered NO role menu and NO invite trigger", async ({ page }) => {
   await signIn(page, "bookkeeper@example.test");
-  await page.goto("/admin/members");
+  await page.goto("/settings/members");
   // The ROSTER read is bookkeeper+, so the page is not empty — which is what
   // makes every absence below a finding rather than a blank screen.
   await expect(page.getByRole("heading", { name: "Everyone with access", level: 2 })).toBeVisible();
@@ -86,23 +108,23 @@ test("a bookkeeper reaches /admin/members by URL and is offered NO role menu and
   await expect(page.getByText("Remove from firm")).toHaveCount(0);
 
   const result = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
-  expect(result.violations, "/admin/members as a bookkeeper").toEqual([]);
+  expect(result.violations, "/settings/members as a bookkeeper").toEqual([]);
 });
 
 test("an owner IS offered the role menu on the same page — the gate shapes by rank, it does not delete the control", async ({ page }) => {
   await signIn(page, "owner@example.test");
-  await page.goto("/admin/members");
+  await page.goto("/settings/members");
   await expect(page.getByRole("button", { name: /^Actions for / })).toHaveCount(1);
   await expect(page.getByRole("button", { name: "Invite someone", exact: true })).toBeVisible();
 
   const result = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
-  expect(result.violations, "/admin/members as an owner").toEqual([]);
+  expect(result.violations, "/settings/members as an owner").toEqual([]);
 });
 
-test("the high-stakes threshold control is GONE from /admin/settings for every rank (裁-187)", async ({ page }) => {
+test("the high-stakes threshold control is GONE from /settings/firm for every rank (裁-187)", async ({ page }) => {
   for (const email of ["owner@example.test", "bookkeeper@example.test"]) {
     await signIn(page, email);
-    await page.goto("/admin/settings");
+    await page.goto("/settings/firm");
     await expect(page.getByRole("heading", { name: "Firm settings", level: 1 })).toBeVisible();
     // BY ROLE and BY TEXT — 裁-187 retired the verb and its control outright,
     // so neither a live trigger nor a leftover label may survive anywhere.
@@ -117,7 +139,7 @@ test("the high-stakes threshold control is GONE from /admin/settings for every r
     await expect(page.getByText(/still refuses a solo approval on a high-stakes entry/)).toBeVisible();
 
     const result = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
-    expect(result.violations, `/admin/settings as ${email}`).toEqual([]);
+    expect(result.violations, `/settings/firm as ${email}`).toEqual([]);
     await page.context().clearCookies();
   }
 });
@@ -168,11 +190,16 @@ test("a Needs-you row answers WHAT, WHY, NEXT and WHEN on the built app", async 
   }
 
   await signIn(page, "owner@example.test");
-  await page.goto("/needs-you");
+  // #614: the cross-client review queue is no longer its own route — it is
+  // Work's saved "Needs you" view (lib/navigation/legacy-routes.ts redirects
+  // the old /needs-you here).
+  await page.goto("/work?view=needs-you");
 
   // WHAT — the client's own NAME, merged from the register (`clients` in the
   // shared mock: CLIENT_A is "Rome Properties"). Before this train the
-  // cross-client queue never named the client at all.
+  // cross-client queue never named the client at all. The row's own rendering
+  // is unchanged by #614 (components/firm/needs-you-row.tsx) — only the route
+  // it lives on moved.
   await expect(page.getByText(/Client: ?Rome Properties/)).toBeVisible();
   await expect(page.getByText("Open question").first()).toBeVisible();
   // WHY — the derived sentence and the two flag chips.
@@ -192,10 +219,40 @@ test("a Needs-you row answers WHAT, WHY, NEXT and WHEN on the built app", async 
   await expect(page.getByText("acknowledge the run there")).toHaveCount(0);
 
   const result = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
-  expect(result.violations, "/needs-you").toEqual([]);
+  expect(result.violations, "/work?view=needs-you").toEqual([]);
 });
 
-test("/activity opens the agent-task drawer and logs NO MISSING_MESSAGE", async ({ page }) => {
+// #614: the agent-task queue (and its "Details" drawer) moved from /activity
+// to /work — /activity is an audit trail of what already happened again, and
+// the live queue of what is running now lives where the rest of "what is
+// open" lives. See lib/navigation/tree.ts's own header and
+// app/(firm)/activity/page.tsx / app/(firm)/work/page.tsx for the split.
+test("/activity is an audit trail again — no agent-task panel, no Details button", async ({ page }) => {
+  await page.route("**/e2e-supabase/rest/v1/agent_receipts_visible**", (route) =>
+    route.fulfill({ status: 200, contentType: "application/json", body: "[]" }));
+
+  await signIn(page, "owner@example.test");
+  await page.goto("/activity");
+
+  // The Activity page names its remaining UI connection gap without claiming
+  // that the firm timeline read is absent from the database.
+  await expect(page.getByRole("heading", { name: "Everything that happened", level: 2 })).toBeVisible();
+  await expect(page.getByText(/Activity page has not been connected/)).toBeVisible();
+  // The note now says explicitly where the live queue went, not just that it
+  // is not here — the retirement of the panel this train left behind.
+  await expect(page.getByText(/running agent tasks are on Work/)).toBeVisible();
+
+  // THE RETIRED ENTRY: the drawer and its trigger are gone from THIS page —
+  // BY ROLE and BY TEXT, so neither a live trigger nor a leftover label may
+  // survive here.
+  await expect(page.getByRole("button", { name: "Details", exact: true })).toHaveCount(0);
+  await expect(page.getByText("Agent task detail")).toHaveCount(0);
+
+  const result = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
+  expect(result.violations, "/activity").toEqual([]);
+});
+
+test("/work opens the agent-task drawer and logs NO MISSING_MESSAGE", async ({ page }) => {
   const consoleText: string[] = [];
   page.on("console", (msg) => consoleText.push(msg.text()));
 
@@ -215,14 +272,21 @@ test("/activity opens the agent-task drawer and logs NO MISSING_MESSAGE", async 
     }));
   await page.route("**/e2e-supabase/rest/v1/agent_receipts_visible**", (route) =>
     route.fulfill({ status: 200, contentType: "application/json", body: "[]" }));
+  await page.route("**/e2e-supabase/rest/v1/rpc/list_review_queue", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        watermark: "w2",
+        counts: { ready: 0, needs_review: 0, needs_you: 0, open_drafts: 0, open_questions: 0, open_tasks: 0, compliance_watches: 0, lint_findings: 0 },
+        sweep: { open_run: false, last_finalized_at: null, last_ack_at: null },
+        rows: [],
+        next_cursor: null,
+      }),
+    }));
 
   await signIn(page, "owner@example.test");
-  await page.goto("/activity");
-
-  // The Activity page names its remaining UI connection gap without claiming
-  // that the firm timeline read is absent from the database.
-  await expect(page.getByRole("heading", { name: "Everything that happened", level: 2 })).toBeVisible();
-  await expect(page.getByText(/Activity page has not been connected/)).toBeVisible();
+  await page.goto("/work");
 
   // THE DRAWER. Discriminating: its fields must be absent before the click.
   await expect(page.getByText("Agent task detail")).toHaveCount(0);
@@ -233,7 +297,7 @@ test("/activity opens the agent-task drawer and logs NO MISSING_MESSAGE", async 
   await expect(page.getByText(/no read joins a task id to the receipts/)).toBeVisible();
 
   const result = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
-  expect(result.violations, "/activity with the task drawer open").toEqual([]);
+  expect(result.violations, "/work with the task drawer open").toEqual([]);
 
   // Escape, not a click on "Close": `DialogContent` ships its own icon-only
   // dismiss whose accessible name is ALSO "Close", so a role+name click is a
@@ -246,7 +310,7 @@ test("/activity opens the agent-task drawer and logs NO MISSING_MESSAGE", async 
   // H-25: the walk that minted this saw MISSING_MESSAGE four times on this
   // page, all from `CodingQuestionsSignals.agentTasks.loading`.
   const missing = consoleText.filter((line) => /MISSING_MESSAGE/.test(line));
-  expect(missing, `console MISSING_MESSAGE on /activity:\n${missing.join("\n")}`).toEqual([]);
+  expect(missing, `console MISSING_MESSAGE on /work:\n${missing.join("\n")}`).toEqual([]);
 
   // POSITIVE CONTROL for the collector itself. A console assertion that has
   // never been SEEN to catch anything is an assumption — this proves the

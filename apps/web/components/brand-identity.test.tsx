@@ -479,7 +479,9 @@ const PLATFORM_SLOT = [
   "Metadata.description",
   "Brand.productName",
   "NotFound.body",
-  "Admin.sections.registrations.purpose",
+  // #614 renamed the namespace with the surface: /admin became /settings, and
+  // `Admin` folded into `Settings`. The STRING is unchanged, and so is the claim.
+  "Settings.sections.registrations.purpose",
   "Members.inviteDialog.description",
   "Members.courier.recipient_has_account",
   "Login.description",

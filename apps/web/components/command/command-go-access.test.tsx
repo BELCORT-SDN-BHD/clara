@@ -205,15 +205,17 @@ test("a BOOKKEEPER sees Activity but not Members or Firm registrations — the s
   );
 });
 
-test("the Go row's LABEL follows the sidebar's rank-shaped rename — a bookkeeper reads 'Firm', not 'Admin'", async () => {
-  // 裁-187 renamed the Admin entry to "Firm" for a caller who administers
-  // nothing, and it rides `messageKey` on `visibleFirmNavigation` so the sidebar
-  // needed no change. ⌘K's labels are a SEPARATE catalogue by design, so the
-  // rename did NOT reach this row — and a bookkeeper read "Firm" in the sidebar
-  // and "Admin" in ⌘K for the same href. That is the exact drift C-43 exists to
-  // end, arriving from a sibling train after C-43 was written, which is why the
-  // palette now takes the registry's rank-shaped OUTPUT rather than re-applying
-  // its predicate.
+test("the rank-shaped LABEL is retired: the parent row reads 'Settings' for a bookkeeper, and the word 'Admin' is gone", async () => {
+  // THE HISTORY THIS CELL CARRIES. 裁-187 renamed the sidebar's /admin entry to
+  // "Firm" for a caller who administered nothing, because "Admin" over a page
+  // holding only registers a bookkeeper may read was a lie. ⌘K kept a SEPARATE
+  // label catalogue, so the rename did not reach this row and one href read
+  // "Firm" in the sidebar and "Admin" in ⌘K — the exact drift C-43 exists to end.
+  // #614 removed the lie at its source instead: the destination is /settings,
+  // which is honest at every rank, so there is no rename left to follow and no
+  // second catalogue to keep in sync (see lib/firm/navigation.ts).
+  //
+  // The cell is kept, inverted: it now proves the word that lied is ABSENT.
   await withFetch(
     (url) => {
       if (url.includes("/rest/v1/caller_context")) return json(ctxRow("bookkeeper", 1));
@@ -226,10 +228,9 @@ test("the Go row's LABEL follows the sidebar's rank-shaped rename — a bookkeep
         await settleUntil(h, () => h.text().includes("Firm activity"), "the Go rows", h.text);
         const text = h.text();
         // The row is OFFERED — it is viewer-floor, and a bookkeeper really can
-        // reach its children — but it is not called "Admin".
-        assert.ok(findRowByText(h.container, "Firm"), "the /admin row is missing for a bookkeeper");
-        assert.equal(findRowByText(h.container, "Admin"), null, "⌘K still calls it 'Admin' for a bookkeeper");
-        assert.doesNotMatch(text, /\bAdmin\b/);
+        // reach the sections under it.
+        assert.ok(findRowByText(h.container, "Settings"), "the /settings row is missing for a bookkeeper");
+        assert.doesNotMatch(text, /\bAdmin\b/, "the retired rank-shaped label is back");
       } finally {
         await h.unmount();
       }
@@ -237,10 +238,10 @@ test("the Go row's LABEL follows the sidebar's rank-shaped rename — a bookkeep
   );
 });
 
-test("…and an ADMIN still reads 'Admin' — the rename is rank-shaped, not a blanket rewrite", async () => {
-  // The discriminating other half. Without it, "the label is Firm" would pass
-  // just as happily if the row had simply been renamed for everyone, which is a
-  // different (and wrong) product.
+test("…and an ADMIN reads the same word — one label, not a rank-shaped pair", async () => {
+  // The discriminating other half, in its new direction. Without it, "the label
+  // is Settings" would pass just as happily if the row were still rewritten per
+  // rank and this persona simply happened to get the same string.
   await withFetch(
     (url) => {
       if (url.includes("/rest/v1/caller_context")) return json(ctxRow("admin", 2));
@@ -251,7 +252,34 @@ test("…and an ADMIN still reads 'Admin' — the rename is rank-shaped, not a b
       const h = await renderComponent(App());
       try {
         await settleUntil(h, () => h.text().includes("Members"), "the admin's Go rows", h.text);
-        assert.ok(findRowByText(h.container, "Admin"), "an admin should still read 'Admin'");
+        assert.ok(findRowByText(h.container, "Settings"), "an admin should read 'Settings' too");
+        assert.doesNotMatch(h.text(), /\bAdmin\b/, "no rank reads the retired word");
+      } finally {
+        await h.unmount();
+      }
+    },
+  );
+});
+
+test("the SAVED VIEW is its own Go row, and it points at /work?view=needs-you", async () => {
+  // #614: /needs-you is a redirect now. The flagship cross-client inbox has to
+  // stay one keystroke away, which means ⌘K indexes the saved VIEW rather than
+  // only the destination it filters — the row a human types "needs you" to find.
+  pushed.length = 0;
+  await withFetch(
+    (url) => {
+      if (url.includes("/rest/v1/caller_context")) return json(ctxRow("viewer", 0));
+      if (url.includes("/rest/v1/clients")) return json(CLIENTS);
+      throw new Error(`unexpected fetch: ${url}`);
+    },
+    async () => {
+      const h = await renderComponent(App());
+      try {
+        await settleUntil(h, () => h.text().includes("Needs you"), "the Needs-you row", h.text);
+        const row = findRowByText(h.container, "Needs you");
+        assert.ok(row, "the cross-client inbox is not reachable from ⌘K");
+        await h.act(() => selectRow(row));
+        assert.deepEqual(pushed, ["/work?view=needs-you"]);
       } finally {
         await h.unmount();
       }

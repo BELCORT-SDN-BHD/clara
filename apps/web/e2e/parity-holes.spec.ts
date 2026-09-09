@@ -23,25 +23,12 @@ async function expectAccessible(page: Page, face: string): Promise<void> {
 
 test("client A to B clears the draft, never paints A under B, and chooses the caller's own thread", async ({ page }) => {
   await signInTo(page, `/clients/${CLIENT_A}`);
-  // CB-AE2E-019: the client's name became a real `<h1>`, and this string is now
-  // legitimately in the document TWICE, so a `getByText` trips strict mode.
-  //
-  // THE SECOND ELEMENT IS NEXT'S ROUTE ANNOUNCER, and the mechanism is worth
-  // stating correctly because the first version of this comment got it half
-  // right. `#__next-route-announcer__` does NOT simply "read the first h1":
-  // node_modules/next/dist/client/components/app-router-announcer.js prefers
-  // `document.title` and falls back to `document.querySelector('h1')` only when
-  // the title is empty. This app sets a CONSTANT title ("ClaraBook",
-  // app/layout.tsx's generateMetadata) with no route-level override anywhere under
-  // (firm) — and the failure this locator was changed for showed the announcer
-  // carrying "Client: Rome Properties", i.e. it took the h1 FALLBACK, because
-  // `document.title` was empty at the commit the announcer's effect ran on.
-  // Measured, not reasoned: the strict-mode error named the announcer div and its
-  // contents verbatim.
-  //
-  // Located by ROLE + LEVEL, which is the stronger locator regardless: it asserts
-  // the heading exists AS a heading, which is the thing CB-AE2E-019 changed.
-  await expect(page.getByRole("heading", { name: "Client: Rome Properties", level: 1 })).toBeVisible();
+  // #614 removed the layout's own "Client: <name>" heading — the h1/route-
+  // announcer strict-mode hazard CB-AE2E-019 worked around here is retired
+  // with it (there is now exactly one h1 on this route, and it is not this
+  // string — see e2e/responsive-shell-walk.spec.ts's own pin). Client identity
+  // now lives in the sidebar's own group label, which this cell reads instead.
+  await expect(page.getByRole("navigation", { name: "Main" }).getByText("Rome Properties", { exact: true })).toBeVisible();
   await expect(page.getByText("Own message for client A")).toBeVisible();
   await expect(page.getByText("Colleague message must not auto-open")).toHaveCount(0);
 
@@ -54,11 +41,14 @@ test("client A to B clears the draft, never paints A under B, and chooses the ca
   await page.keyboard.press("Tab");
   await expect(page.getByRole("button", { name: "Collapse Clara" })).toBeFocused();
 
-  await page.getByRole("link", { name: "Clients", exact: true }).click();
+  // Scoped to the sidebar: #614's breadcrumb also renders a "Clients"
+  // ancestor link (lib/navigation/tree.ts's `breadcrumbFor`), so the
+  // unscoped locator is now ambiguous between the two.
+  await page.getByRole("navigation", { name: "Main" }).getByRole("link", { name: "Clients", exact: true }).click();
   await expect(page).toHaveURL(/\/clients$/);
   await page.getByRole("link", { name: "Bee Creative Solution" }).click();
   await expect(page).toHaveURL(new RegExp(`/clients/${CLIENT_B}$`));
-  await expect(page.getByRole("heading", { name: "Client: Bee Creative Solution", level: 1 })).toBeVisible();
+  await expect(page.getByRole("navigation", { name: "Main" }).getByText("Bee Creative Solution", { exact: true })).toBeVisible();
   await expect(page.getByLabel("Ask Clara")).toHaveValue("");
   await expect(page.getByText("Own message for client A")).toHaveCount(0);
   await expect(page.getByText("Own message for client B")).toBeVisible();

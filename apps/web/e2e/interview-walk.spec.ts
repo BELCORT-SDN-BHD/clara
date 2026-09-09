@@ -20,13 +20,16 @@ import { CLIENT_SEG_KEYS } from "../lib/interview/api";
  * No interview segment is answered by this arm — it only needs the
  * fixture's authenticated client, not its thread.
  *
- * FS-8 PR-2 (裁-97) ADDS a further arm, firm-altitude this time: nav-click
- * through FirmNav's Admin link to the new /admin/settings surface, asserting
- * the high-stakes-threshold control and the capabilities honest note both
+ * FS-8 PR-2 (裁-97) ADDED a further arm, firm-altitude this time: nav-click
+ * through FirmNav's Admin link to the /admin/settings surface (since #614,
+ * /settings/firm — the old path redirects there), asserting the
+ * high-stakes-threshold control and the capabilities honest note both
  * render. `establishSession` mints a JWT for the SAME sub `rig.buildFirm`
  * creates as the fixture's OWNER, so this session genuinely holds owner
  * rank — the control is asserted rendered and reachable, not merely visible-
- * but-refused.
+ * but-refused. THAT ARM WAS DELETED (裁-187, see the note near the bottom of
+ * this file); this paragraph is kept as the history of why the file once
+ * had it.
  *
  * DELIBERATELY DEFERRED: execution against the live runtime/DB estate. This
  * file consumes three isolated, already-open review fixtures supplied via the
@@ -296,11 +299,19 @@ test("the Tax tab is reachable by nav-click and by ⌘K, and its three honest no
 
   // Arm 1 — nav-click. The workspace home is enough; the interview segments
   // above are never touched by this arm.
+  //
+  // #614: the nine-tab horizontal strip ("Client workspace navigation") is
+  // gone — Tax is now a child of the sidebar's Accounting group, inside the
+  // client's own group in the ONE nav landmark ("Main"). The group is closed
+  // by default on the workspace home (lib/navigation/tree.ts's
+  // `resolveActive`: `accountingOpen` is only true when the caller is already
+  // under Accounting), so the chevron has to be opened by keyboard first —
+  // the same disclosure contract responsive-shell-walk.spec.ts's "Accounting
+  // group" cells drive.
   await page.goto(workspaceHref);
-  await page
-    .getByRole("navigation", { name: "Client workspace navigation" })
-    .getByRole("link", { name: "Tax", exact: true })
-    .click();
+  const mainNav = page.getByRole("navigation", { name: "Main" });
+  await mainNav.getByRole("button", { name: "Toggle Accounting" }).click();
+  await mainNav.getByRole("link", { name: "Tax", exact: true }).click();
   await expect(page).toHaveURL(new RegExp(`${taxHref.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`));
   await expect(page.getByRole("heading", { name: "SST", exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Income tax computation", exact: true })).toBeVisible();
@@ -322,16 +333,18 @@ test("the Tax tab is reachable by nav-click and by ⌘K, and its three honest no
 });
 
 // THE FIRM-SETTINGS THRESHOLD WALK WAS DELETED HERE ON 2026-09-04 (裁-187,
-// owner, permanent — ADR-0078 decision 2). It walked /admin/settings, asserted
-// the "High-stakes threshold" heading and the "Change threshold" trigger, then
-// drove the write door end to end against the live stack. The ruling abolishes
-// every maker-checker wall and retires the threshold verb WITH its control, so
-// the panel renders neither, and the cell had nothing left to walk.
+// owner, permanent — ADR-0078 decision 2). It walked /admin/settings (#614
+// later moved this address to /settings/firm; the old path now redirects),
+// asserted the "High-stakes threshold" heading and the "Change threshold"
+// trigger, then drove the write door end to end against the live stack. The
+// ruling abolishes every maker-checker wall and retires the threshold verb
+// WITH its control, so the panel renders neither, and the cell had nothing
+// left to walk.
 //
 // This file belongs to the onboarding-interview lane, not to the lane that
 // removed the control (L5, PR for #541). It was edited only because leaving it
 // would have shipped a spec asserting a surface the same PR deletes; the
 // deletion is called out in that PR body. The rest of this file is untouched.
-// The /admin/settings surface keeps its coverage in
+// The surface (now /settings/firm) keeps its coverage in
 // components/firm-admin/firm-admin-pages-a11y.test.tsx (which now pins the
 // ABSENCE of the control) and in e2e/firm-navigation-walk.spec.ts.

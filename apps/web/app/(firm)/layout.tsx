@@ -1,13 +1,14 @@
-import type { ReactNode } from "react";
-import { getTranslations } from "next-intl/server";
+import { Suspense, type ReactNode } from "react";
+import { cookies } from "next/headers";
 
+import { AppSidebar } from "@/components/app-shell/app-sidebar";
+import { ShellHeader } from "@/components/app-shell/shell-header";
 import { CommandKProvider } from "@/components/command";
-import { FirmNav } from "@/components/firm-nav";
-import { FirmNavDrawer } from "@/components/firm-nav-drawer";
 import { FirmScopeProvider } from "@/components/firm-scope-provider";
-import { LogoutButton } from "@/components/logout-button";
 import { RailMount } from "@/components/clara/rail-mount";
 import { SkipLink } from "@/components/common/skip-link";
+import { SidebarInset, SidebarProvider, SIDEBAR_COOKIE_NAME } from "@/components/ui/sidebar";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import { requireFirmScope } from "@/lib/require-firm-scope";
 
 /**
@@ -26,9 +27,26 @@ import { requireFirmScope } from "@/lib/require-firm-scope";
  * route.ts`. It redirects to the holding route on an empty read AND on a
  * failed one; nothing below renders on a denial, because `redirect()` throws.
  *
- * Two-level IA (owner ruling Q3): this is the firm level — sidebar nav
- * (Home · Needs you · Clients · Activity · Admin). The client level nests
- * inside at app/(firm)/clients/[clientId]/layout.tsx.
+ * #614 — ONE NAVIGATION SURFACE, TWO LEVELS INSIDE IT. This layout used to hold
+ * a bespoke `<aside>` for the firm rail plus a sheet that rendered the same nav
+ * a second time, and the client level nested a THIRD chrome (a nine-tab
+ * horizontal strip) underneath. It is now the vendored Sidebar over the one
+ * registry (`lib/navigation/tree.ts`): inside a client the sidebar opens with
+ * that client's own group above the firm's, and the client layout adds no
+ * chrome of its own at all.
+ *
+ * THE BREAKPOINT ARITHMETIC, since it moved. `components/ui/sidebar.tsx` docks
+ * at `md` (768px) and becomes a sheet below it; the Clara rail docks at `lg`
+ * (1024px) and is an overlay below it. Between 768 and 1023 the sidebar is
+ * therefore visible while the rail costs the workbench ZERO width — which is
+ * exactly why CB-AE2E-019's `lg`-only arm can relax here without reopening its
+ * finding. The three widths that matter:
+ *   1024+  1024 - 224 (sidebar) - 320 (docked rail) - 64 (PageShell lg padding) = 416px
+ *    768   768 - 224 - 0 (rail overlaid) - 32 (PageShell narrow padding)        = 512px
+ *    320   320 - 0 (sidebar is a sheet) - 0 - 32                                = 288px
+ * The first two clear the 320px floor the audit set for accounting work; the
+ * third is the whole viewport minus padding, which is all any layout can offer.
+ * No arm makes the document scroll sideways.
  *
  * P2 FOLD SEAM H: mounts the two app-wide shell affordances here, ONCE —
  * `<CommandKProvider>` (⌘K, per its own header's integration note) and
@@ -49,113 +67,94 @@ export default async function FirmLayout({
   // caller_context merely to shape an affordance.
   const scope = await requireFirmScope();
 
-  // `Brand`, not the old `FirmShell` namespace: P6-6's ClaraBook copy pass
-  // (R1) made the platform name ONE string with two consumers — this shell and
-  // the entry lockup (`components/entry/brand-lockup.tsx`) — rather than two
-  // copies free to drift into disagreeing about what the product is called.
-  const t = await getTranslations("Brand");
+  // The sidebar's own persistence, read on the SERVER so a collapsed sidebar
+  // does not paint open and then snap shut on hydration. Absent cookie means
+  // open, which is the right default for a first visit.
+  const sidebarOpen = (await cookies()).get(SIDEBAR_COOKIE_NAME)?.value !== "false";
 
   return (
     <CommandKProvider>
+      {/* #614: the WHOLE caller_context row, not a two-field narrowing of it.
+          The shell has to render the firm's name and the caller's role, and the
+          layout is already holding the row that carries both — see
+          components/firm-scope-provider.tsx for why widening the provider is
+          the cheaper of the two answers. */}
       <FirmScopeProvider scope={scope}>
-        {/*
-        TOKEN-ROLE FIX (P3 polish, coordinator ruling): the content column used
-        to inherit `bg-shell` from this wrapper. `--shell` is the NAV/APP-SHELL
-        role in the ClaraBook token contract, deliberately distinct from the
-        content canvas — so painting a page's own ground with it was a role
-        misuse even though it read fine. `--shell` now stays on the chrome (the
-        sidebar, via `--sidebar`, and the client-workspace tab header one level
-        down); the content column is `--background`, the canvas.
-        */}
-        {/*
-        CB-AE2E-019 — `overflow-x-clip` on the shell row, and the browser leg is
-        what found it. The rail's enter and exit both TRANSLATE the panel by its
-        own width (`dock-panel`, app/globals.css). In the docked arm that panel
-        is an in-flow flex child, so a translated box sticks out past the row's
-        right edge and the DOCUMENT gains that many pixels of horizontal scroll
-        for the length of the animation — measured at 640 CSS px as
-        `documentElement.scrollWidth` 712 against a `clientWidth` of 640, which
-        is a WCAG 2.2 SC 1.4.10 failure that appears and disappears in 200ms.
-        (The enter has always done this; nothing had ever measured it.)
+        {/* The vendored Sidebar's collapsed-state tooltips need a provider, and
+            it belongs HERE rather than in `app/layout.tsx`: the (entry) and
+            (full) groups render no sidebar, and a provider at the root would
+            put a tooltip context around the sign-in card for nothing. */}
+        <TooltipProvider>
+          {/*
+          CB-AE2E-019 — `overflow-x-clip` on the shell row, and the browser leg is
+          what found it. The rail's enter and exit both TRANSLATE the panel by its
+          own width (`dock-panel`, app/globals.css). In the docked arm that panel
+          is an in-flow flex child, so a translated box sticks out past the row's
+          right edge and the DOCUMENT gains that many pixels of horizontal scroll
+          for the length of the animation — measured at 640 CSS px as
+          `documentElement.scrollWidth` 712 against a `clientWidth` of 640, which
+          is a WCAG 2.2 SC 1.4.10 failure that appears and disappears in 200ms.
 
-        `clip`, NOT `hidden`, and the difference is load-bearing: `overflow-x:
-        hidden` forces the other axis to compute as `auto`, which would make this
-        row a scroll container and break the rail's own `sticky top-0`.
-        `overflow-x: clip` pairs legally with `overflow-y: visible`, creates no
-        scroll container, and is the one value that exists for exactly this job.
-        Nothing legitimate is lost: no app content is supposed to paint outside
-        the shell frame horizontally, and every wide surface inside it (every
-        table, via components/ui/table.tsx) already carries its own
-        `overflow-x-auto`.
-        */}
-        <div className="relative flex min-h-dvh overflow-x-clip bg-background">
-          {/* DS-02 (P6-3): the bypass-blocks affordance. FIRST in DOM order, so
-              it is the first thing Tab reaches on every firm route; `relative`
-              on this wrapper is what its `focus:absolute` positions against.
-              See components/common/skip-link.tsx for why it is mounted here and
-              deliberately not in the (entry) or (full) groups. */}
-          <SkipLink />
-          {/* CB-AE2E-019, SEAM 1 — THE WIDE ARM, unchanged in every respect
-              except that it is now an arm. `hidden lg:flex` is the whole edit:
-              at and above `lg` this is the same 224px sidebar it has always
-              been, and below `lg` it stops being a row participant entirely
-              (`display: none` removes the box, so it costs zero width rather
-              than being pushed off-screen). Its CONTENT is not duplicated —
-              `<FirmNavDrawer />` in the narrow header below renders the SAME
-              `<FirmNav />` and `<LogoutButton />` components, so the rank floors
-              in lib/firm/navigation.ts shape one nav, not two.
+          `clip`, NOT `hidden`, and the difference is load-bearing: `overflow-x:
+          hidden` forces the other axis to compute as `auto`, which would make this
+          row a scroll container and break the rail's own `sticky top-0`.
+          `overflow-x: clip` pairs legally with `overflow-y: visible`, creates no
+          scroll container, and is the one value that exists for exactly this job.
+          It also does not clip the sidebar: `overflow` never clips a
+          `position: fixed` descendant whose containing block is the viewport, and
+          this row establishes no such containing block (no transform, no filter,
+          no `contain`).
 
-              `lg` (1024px) and not `md` (768px), and the arithmetic is why: the
-              wide arm costs 224 (sidebar) + 320 (Clara rail) + 64 (PageShell's
-              horizontal padding) = 608px of chrome. At `md` that leaves 160px of
-              content — narrower than a journal line's date column. `lg` is the
-              first Tailwind breakpoint at which the three-column shell is
-              legible for accounting work at all. */}
-          <aside className="hidden w-56 shrink-0 flex-col gap-4 border-r border-sidebar-border bg-sidebar p-4 lg:flex">
-            <span className="px-2.5 text-sm font-semibold text-sidebar-foreground">
-              {t("productName")}
-            </span>
-            <FirmNav />
-            <div className="mt-auto">
-              <LogoutButton />
-            </div>
-          </aside>
-          {/* `id`/`tabIndex` are the SkipLink's anchor — the column exists for
-              every route in this group by construction, which the page-level
-              `<main>` does not. See skip-link.tsx's header.
-              `outline-none` here is deliberate and is the W3C WAI skip-link
-              tutorial's own pattern: a `tabindex="-1"` container is a scroll
-              and announce target, not a control in the tab order, and ringing
-              a full-viewport column on every skip would be louder than the
-              journey it serves. Chrome does not match `:focus-visible` on
-              programmatic focus of a div either, so nothing paints regardless.
-              What confirms the jump to a sighted keyboard user is the scroll
-              plus the next Tab landing past the nav — which the browser leg
-              asserts (review N-6, recorded rather than changed). */}
-          <div className="flex min-w-0 flex-1 flex-col">
-            {/* CB-AE2E-019 — the narrow-arm header, and note WHERE it sits:
-                OUTSIDE `#main-content`, as its sibling. Putting it inside the
-                skip link's own target would have made the bypass land ABOVE the
-                drawer toggle, so the very next Tab walked back into navigation —
-                a bypass that bypasses nothing, which is the exact failure
-                skip-link.tsx's header says `tabIndex={-1}` exists to prevent.
-                It carries the product name because the sidebar that used to
-                carry it is `display: none` in this arm. */}
-            <header className="flex items-center gap-2 border-b border-border bg-shell px-4 py-2 lg:hidden">
-              <FirmNavDrawer />
-              <span className="text-sm font-semibold text-foreground">{t("productName")}</span>
-            </header>
-            <div
-              data-firm-workbench
-              id="main-content"
-              tabIndex={-1}
-              className="min-w-0 flex-1 bg-background outline-none"
-            >
-              {children}
-            </div>
-          </div>
-          <RailMount />
-        </div>
+          `relative` is the SkipLink's `focus:absolute` anchor, unchanged.
+          */}
+          <SidebarProvider
+            defaultOpen={sidebarOpen}
+            className="relative overflow-x-clip bg-background"
+          >
+            {/* DS-02 (P6-3): the bypass-blocks affordance. FIRST in DOM order, so
+                it is the first thing Tab reaches on every firm route. See
+                components/common/skip-link.tsx for why it is mounted here and
+                deliberately not in the (entry) or (full) groups. */}
+            <SkipLink />
+            {/* The two `<Suspense>` boundaries are a BUILD-TIME contract, not a
+                loading state. `useSearchParams()` (the sidebar needs `?tab=` to
+                know which register view is current, the breadcrumb to name it)
+                requires a Suspense boundary above it or Next refuses to
+                statically render the page. Every route in this group is dynamic
+                already — this layout reads cookies twice over — so neither
+                fallback is ever shown; the boundary exists so a future change
+                that makes a page static fails loudly instead of at build. */}
+            <Suspense fallback={null}>
+              <AppSidebar />
+            </Suspense>
+            <SidebarInset className="min-w-0">
+              <Suspense fallback={null}>
+                <ShellHeader />
+              </Suspense>
+              {/* `id`/`tabIndex` are the SkipLink's anchor — the column exists for
+                  every route in this group by construction, which the page-level
+                  `<main>` does not. See skip-link.tsx's header.
+                  `outline-none` here is deliberate and is the W3C WAI skip-link
+                  tutorial's own pattern: a `tabindex="-1"` container is a scroll
+                  and announce target, not a control in the tab order, and ringing
+                  a full-viewport column on every skip would be louder than the
+                  journey it serves. Chrome does not match `:focus-visible` on
+                  programmatic focus of a div either, so nothing paints regardless.
+                  What confirms the jump to a sighted keyboard user is the scroll
+                  plus the next Tab landing past the nav — which the browser leg
+                  asserts (review N-6, recorded rather than changed). */}
+              <div
+                data-firm-workbench
+                id="main-content"
+                tabIndex={-1}
+                className="min-w-0 flex-1 bg-background outline-none"
+              >
+                {children}
+              </div>
+            </SidebarInset>
+            <RailMount />
+          </SidebarProvider>
+        </TooltipProvider>
       </FirmScopeProvider>
     </CommandKProvider>
   );

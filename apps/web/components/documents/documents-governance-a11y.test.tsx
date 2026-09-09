@@ -300,11 +300,13 @@ test("DocumentFilingsHistory has zero violations with the autodraft outcome bann
       (b as unknown as { appendChild: (c: unknown) => void }).appendChild(h.container);
       try {
         for (let i = 0; i < 2; i++) await h.settle();
-        const trigger = h.find((n) => n.tagName === "BUTTON" && textOf(n).match(/^Request autodraft$/) !== null);
+        // #614 D6: relabelled from "Request autodraft" — an attributed upload now
+        // starts processing on its own, so this trigger is the RECOVERY path.
+        const trigger = h.find((n) => n.tagName === "BUTTON" && textOf(n).match(/^Start processing again$/) !== null);
         assert.ok(trigger, "the autodraft trigger must render");
         await h.fireEvent(trigger!, "click");
         for (let i = 0; i < 4; i++) await h.settle();
-        const confirmButton = findIn(b, (n) => n.tagName === "BUTTON" && textOf(n as never).match(/^Request autodraft$/) !== null && n !== trigger);
+        const confirmButton = findIn(b, (n) => n.tagName === "BUTTON" && textOf(n as never).match(/^Start again$/) !== null && n !== trigger);
         assert.ok(confirmButton, "the confirm control must render");
         // `h.fireEvent` dispatches only through `container`'s own delegated
         // listeners — the confirm button lives in the Dialog's OPEN portal

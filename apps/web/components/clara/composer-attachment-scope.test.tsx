@@ -33,6 +33,7 @@ import { NextIntlClientProvider } from "next-intl";
 import { ClaraThreadView } from "./ClaraThreadView";
 import { renderComponent, setFieldValue, textOf } from "../../test/hookHarness";
 import { enableDomInspection } from "../../test/domInspect";
+import { claraThreadStore } from "../../lib/clara/threadStore";
 import type { SessionTokenAccessor } from "../../lib/session";
 import messages from "../../messages/en.json";
 
@@ -205,6 +206,142 @@ test("client A -> client B: the tray empties and the filed attachment does not r
         await sendAndReadTheWire(h, calls, "a question about client B"),
         [{ type: "text", text: "a question about client B" }],
         "a document filed to client A must never ride client B's turn",
+      );
+    } finally {
+      await h.unmount();
+    }
+  });
+});
+
+// #614 A7 ("Scope switch") — THE COMPOSER DRAFT'S OWN ISOLATION. Same defect
+// class as the attachment tray above (a rail/full-screen mount that outlives a
+// scope change), same production event (`setClient()` flips `clientId` as a
+// bare PROP CHANGE, no remount), but the FIX is different: the tray above is
+// reset by an effect keyed on `[clientId, threadId]`; a draft cannot be reset
+// that way without racing the human's own next keystroke, so it is instead
+// held OUTSIDE this component entirely — `claraThreadStore`'s `drafts`, keyed
+// by `(altitude, threadId)` — and simply read fresh for whichever key is
+// current. Spec #612 decision 5: "Layout remounts must not own the only copy
+// of drafts, accepted questions or history state."
+
+function draftBox(h: { find: (p: (n: Stub) => boolean) => Stub | null }): Stub {
+  const node = h.find((n) => n.tagName === "TEXTAREA");
+  assert.ok(node, "the composer textarea must be mounted");
+  return node;
+}
+
+/** A STATIC counterpart to `mountSwitcher` — no in-place setter, for the two
+ *  tests below that prove the draft survives an actual UNMOUNT + remount
+ *  (a closed rail, or any other structural teardown) rather than a live prop
+ *  change. Same fixed `THREAD_ID` as `mountSwitcher`, deliberately: the point
+ *  of both rigs is to isolate ONE variable at a time. */
+function mountUnderClient(clientId: string | undefined): ReactElement {
+  return createElement(NextIntlClientProvider, {
+    locale: "en", messages, timeZone: "Asia/Kuala_Lumpur",
+    children: createElement("div", null,
+      createElement("h1", null, "Clara test context"),
+      createElement(ClaraThreadView, { auth: session, threadId: THREAD_ID, variant: "full", clientId })),
+  });
+}
+
+test("client A -> client B -> client A: A's draft survives the round trip, B starts empty (issue 614, A7)", async () => {
+  const { element, setClient } = mountSwitcher();
+  await withFetch(router, async () => {
+    const h = await renderComponent(element);
+    try {
+      await settleUntil(h, () => h.find((n) => n.tagName === "TEXTAREA") !== null, "the composer");
+      await h.act(() => setFieldValue(draftBox(h), "A's half-written question"));
+      assert.equal((draftBox(h) as { value: string }).value, "A's half-written question");
+
+      // THE ALTITUDE CHANGED, THE THREAD ID DID NOT (mountSwitcher's own point) —
+      // if the draft were keyed by threadId alone this would carry A's text
+      // straight into B's box, which is exactly the leak A7 rules out.
+      await h.act(() => setClient()(CLIENT_B));
+      await settleUntil(
+        h,
+        () => (draftBox(h) as { value: string }).value === "",
+        "B's empty composer — A's text must not ride the switch",
+      );
+
+      await h.act(() => setClient()(CLIENT_A));
+      await settleUntil(
+        h,
+        () => (draftBox(h) as { value: string }).value === "A's half-written question",
+        "A's draft restored on the way back",
+      );
+    } finally {
+      await h.unmount();
+      claraThreadStore.clearDraft(CLIENT_A, THREAD_ID);
+      claraThreadStore.clearDraft(CLIENT_B, THREAD_ID);
+    }
+  });
+});
+
+test("a remount under the SAME scope keeps the draft — no layout remount may own the only copy of it (issue 614, A7, spec 612 decision 5)", async () => {
+  await withFetch(router, async () => {
+    const h1 = await renderComponent(mountUnderClient(CLIENT_A));
+    try {
+      await settleUntil(h1, () => h1.find((n) => n.tagName === "TEXTAREA") !== null, "the composer");
+      await h1.act(() => setFieldValue(draftBox(h1), "half-written, then torn down"));
+    } finally {
+      await h1.unmount();
+    }
+    // A fresh mount of the SAME conversation — e.g. `<RailMount/>`'s own key
+    // remounting the whole rail subtree on a client switch that lands back on
+    // a scope it already visited, or the plain remount below proves directly.
+    const h2 = await renderComponent(mountUnderClient(CLIENT_A));
+    try {
+      await settleUntil(h2, () => h2.find((n) => n.tagName === "TEXTAREA") !== null, "the composer, again");
+      assert.equal((draftBox(h2) as { value: string }).value, "half-written, then torn down");
+    } finally {
+      await h2.unmount();
+      claraThreadStore.clearDraft(CLIENT_A, THREAD_ID);
+    }
+  });
+});
+
+test("closing the rail and reopening it shows the same draft — closing the Sheet must not cancel Work (issue 614, A7)", async () => {
+  await withFetch(router, async () => {
+    const h1 = await renderComponent(mountUnderClient(CLIENT_A));
+    try {
+      await settleUntil(h1, () => h1.find((n) => n.tagName === "TEXTAREA") !== null, "the composer");
+      await h1.act(() => setFieldValue(draftBox(h1), "still mid-sentence"));
+      // `ClaraRail` returns the launcher once `presence === "closed"`
+      // (ClaraRail.tsx) — this flag plus the unmount below is what a real
+      // rail close actually does to this view. The draft has to survive it
+      // with no help from this component's own lifecycle.
+      claraThreadStore.setRailOpen(false);
+    } finally {
+      await h1.unmount();
+    }
+    claraThreadStore.setRailOpen(true);
+    const h2 = await renderComponent(mountUnderClient(CLIENT_A));
+    try {
+      await settleUntil(h2, () => h2.find((n) => n.tagName === "TEXTAREA") !== null, "the reopened composer");
+      assert.equal((draftBox(h2) as { value: string }).value, "still mid-sentence");
+    } finally {
+      await h2.unmount();
+      claraThreadStore.clearDraft(CLIENT_A, THREAD_ID);
+      claraThreadStore.setRailOpen(true);
+    }
+  });
+});
+
+test("a successful send clears the stored draft — a refused turn must not (issue 614, A7)", async () => {
+  await withFetch(router, async (calls) => {
+    const h = await renderComponent(mountUnderClient(CLIENT_A));
+    try {
+      await settleUntil(h, () => h.find((n) => n.tagName === "TEXTAREA") !== null, "the composer");
+      await sendAndReadTheWire(h, calls, "a question that will actually send");
+      await settleUntil(
+        h,
+        () => (draftBox(h) as { value: string }).value === "",
+        "the draft clears once the turn's stream opens",
+      );
+      assert.equal(
+        claraThreadStore.getDraft(CLIENT_A, THREAD_ID),
+        "",
+        "the store entry itself is gone, not only the rendered box",
       );
     } finally {
       await h.unmount();

@@ -23,9 +23,12 @@ const CLIENT_A = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 
 const FACES = [
   ["home", "/"],
-  ["admin hub", "/admin"],
-  ["members", "/admin/members"],
+  ["work", "/work"],
+  ["settings hub", "/settings"],
+  ["members", "/settings/members"],
   ["journals", `/clients/${CLIENT_A}/journals`],
+  ["accounting hub", `/clients/${CLIENT_A}/accounting`],
+  ["client work", `/clients/${CLIENT_A}/work`],
 ] as const;
 
 async function signInTo(page: Page, destination: string): Promise<void> {
@@ -123,22 +126,31 @@ test("DS-02: one Tab reaches the skip link, and activating it moves focus past t
   // rather than "we are inside #main-content": the home face's content column
   // has no focusable descendant of its own, so on that page the next stop is
   // legitimately the Clara rail, which is also past the nav. Both outcomes are
-  // the bypass working; landing back in the <aside> is the failure.
+  // the bypass working; landing back in the sidebar's own nav is the failure.
+  //
+  // #614: the sidebar this pin is about no longer renders as an `<aside>` —
+  // `components/ui/sidebar.tsx`'s vendored primitive is plain `<div>`s under
+  // ONE `<nav aria-label="Main">` landmark (its own header, hand edit 5, on
+  // why `<main>` was avoided; the equivalent reasoning applies to `<aside>`,
+  // which was never the right role for a navigation menu). The Clara rail
+  // (`components/clara/ClaraRail.tsx`) is the one remaining `<aside>` on this
+  // page, and landing there is the OTHER legitimate outcome named above — so
+  // this check now targets the nav landmark by name, not the tag.
   await page.keyboard.press("Tab");
   const where = await page.evaluate(() => {
     const el = document.activeElement;
-    const aside = document.querySelector("aside");
+    const nav = document.querySelector('nav[aria-label="Main"]');
     return {
-      inSidebar: Boolean(el && aside?.contains(el)),
+      inSidebar: Boolean(el && nav?.contains(el)),
       isSkipLink: el instanceof HTMLAnchorElement && el.getAttribute("href") === "#main-content",
     };
   });
-  expect(where.inSidebar, "focus fell back into the sidebar — the skip did not move focus").toBe(false);
+  expect(where.inSidebar, "focus fell back into the sidebar's own nav — the skip did not move focus").toBe(false);
   expect(where.isSkipLink, "focus never left the skip link").toBe(false);
 });
 
 test("DS-01: the dropdown popup drops its movement under prefers-reduced-motion and keeps its fade", async ({ page }) => {
-  await signInTo(page, "/admin/members");
+  await signInTo(page, "/settings/members");
 
   await page.emulateMedia({ reducedMotion: "reduce" });
   // components/admin/member-row-menu.tsx:112 — the only live DropdownMenu in
@@ -161,7 +173,7 @@ test("DS-01: the dropdown popup drops its movement under prefers-reduced-motion 
 });
 
 test("裁-1 / 裁-2 4c: the recut ring and the recut control edge reach the browser as computed style", async ({ page }) => {
-  await signInTo(page, "/admin/members");
+  await signInTo(page, "/settings/members");
 
   // The ring token at 70%: read the resolved custom properties off :root, so a
   // token that never compiled (a typo, a stripped declaration) is caught here

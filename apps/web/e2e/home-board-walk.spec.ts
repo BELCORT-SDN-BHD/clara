@@ -140,8 +140,10 @@ test("Firm Home names the firm, scores the queue from the envelope, and every ti
   await expect(board.getByText(/A firm-wide close status per client is not built/)).toBeVisible();
 
   // A tile, then back — the journey the map's own test obligation names.
+  // #614: the tile now lands on Work's saved "Needs you" view rather than a
+  // route of its own (needs-you-scoreboard.tsx's own `INBOX_HREF`).
   await board.getByRole("link", { name: "Needs you: 3" }).click();
-  await expect(page).toHaveURL(/\/needs-you$/);
+  await expect(page).toHaveURL(/\/work\?view=needs-you$/);
   await page.goBack();
   await expect(page).toHaveURL(/\/$/);
   await workbench(page).getByRole("link", { name: "Open the journals tab" }).click();
@@ -152,18 +154,14 @@ test("the client board reads for an ACTIVE client: identity, the queue with its 
   await signInTo(page, `/clients/${CLIENT_ACTIVE}`);
   await settled(page);
 
-  // TWO h1s ON A CLIENT ROUTE, AND THAT IS THE MERGED DESIGN — not a defect this walk should
-  // paper over. #553 (CB-AE2E-019) made the workspace-identity line a real heading, having
-  // measured the two alternatives: an `<h2>` there reds the repo's own heading-order rule
-  // (it is first in the DOM, so it cannot be a level below something that has not appeared),
-  // and demoting every surface title needs a `level` prop threaded through 22 `PageHeader`
-  // call sites. `components/shell-responsive.test.tsx` PINS the pair, so a third h1 reds.
-  // This walk therefore names BOTH rather than asserting a count of one — the layout's says
-  // "Client: <name>", the board's is the client's name WITH its status badge in the
-  // accessible name, which is also the check that the badge is not colour-only.
-  await expect(workbench(page).getByRole("heading", { name: "Client: Rome Properties", level: 1 })).toBeVisible();
+  // ONE h1 ON A CLIENT ROUTE — #614 removed the layout's own "Client: <name>"
+  // heading (the pre-#614 pin here was TWO, one from the layout and one from
+  // this board; `components/shell-responsive.test.tsx` now pins ONE). The
+  // board's own h1 is the client's name WITH its status badge in the
+  // accessible name, which is also the check that the badge is not
+  // colour-only.
   await expect(workbench(page).getByRole("heading", { name: /^Rome Properties\s*Active$/, level: 1 })).toBeVisible();
-  await expect(workbench(page).getByRole("heading", { level: 1 })).toHaveCount(2);
+  await expect(workbench(page).getByRole("heading", { level: 1 })).toHaveCount(1);
   await expect(workbench(page).getByText("Client since 2026-01-01")).toBeVisible();
   await expect(workbench(page).getByText("Needs you: 3")).toBeVisible();
   await expect(workbench(page).getByText("FY 2026")).toBeVisible();
@@ -178,9 +176,10 @@ test("the client board lifts ONBOARDING progress for a client mid-interview", as
   await signInTo(page, `/clients/${CLIENT_ONBOARDING}`);
   await settled(page);
 
-  // The same pair as the active arm — see that cell's note on why a client route carries two.
-  await expect(workbench(page).getByRole("heading", { name: "Client: Kuching Kopitiam", level: 1 })).toBeVisible();
+  // The same single h1 as the active arm — see that cell's note on why a
+  // client route now carries exactly one.
   await expect(workbench(page).getByRole("heading", { name: /^Kuching Kopitiam\s*Onboarding$/, level: 1 })).toBeVisible();
+  await expect(workbench(page).getByRole("heading", { level: 1 })).toHaveCount(1);
   await expect(workbench(page).getByRole("heading", { name: "Onboarding", exact: true, level: 2 })).toBeVisible();
   await expect(workbench(page).getByText("1 of 2 required answers recorded")).toBeVisible();
   await expect(workbench(page).getByText("The opening position is not finalised yet.")).toBeVisible();

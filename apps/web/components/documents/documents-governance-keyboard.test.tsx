@@ -166,12 +166,14 @@ test("AUTODRAFT journey: the dialog opens with no fields of its own, and Confirm
   (b as unknown as { appendChild: (c: unknown) => void }).appendChild(h.container);
   try {
     for (let i = 0; i < 2; i++) await h.settle();
-    const trigger = h.find((n) => n.tagName === "BUTTON" && textOf(n).match(/^Request autodraft$/) !== null);
+    // #614 D6: relabelled from "Request autodraft" — an attributed upload now
+    // starts processing on its own, so this trigger is the RECOVERY path.
+    const trigger = h.find((n) => n.tagName === "BUTTON" && textOf(n).match(/^Start processing again$/) !== null);
     assert.ok(trigger, "the autodraft trigger must render");
     await h.fireEvent(trigger!, "click");
     for (let i = 0; i < 6; i++) await h.settle();
 
-    const confirmButton = findIn(b, (n) => n.tagName === "BUTTON" && textOf(n as never).match(/^Request autodraft$/) !== null && n !== trigger);
+    const confirmButton = findIn(b, (n) => n.tagName === "BUTTON" && textOf(n as never).match(/^Start again$/) !== null && n !== trigger);
     const cancelButton = findIn(b, (n) => n.tagName === "BUTTON" && textOf(n as never).match(/^Cancel$/) !== null);
     assert.ok(confirmButton, "the confirm control must render");
     assert.ok(cancelButton, "the cancel control must render");

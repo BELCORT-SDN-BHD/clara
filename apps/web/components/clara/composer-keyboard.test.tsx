@@ -134,6 +134,14 @@ test("ENTER on a non-empty draft posts the turn exactly once AND suppresses the 
       await settle(h);
       assert.equal(result.defaultPrevented, true, "an Enter that sends must not also type a newline");
       assert.equal(wire.turns, 1);
+      // #614 A7 — a REFUSED turn (this wire always answers 429) must leave the
+      // draft exactly where the human can fix and resend it; only a turn whose
+      // stream actually opens clears it (ClaraThreadView.tsx's `submitDraft`).
+      assert.equal(
+        (box as unknown as { value: string }).value,
+        "code this invoice",
+        "a rate-limited send is a refusal, not a send — the draft is not this component's to lose",
+      );
     } finally {
       await h.unmount();
     }

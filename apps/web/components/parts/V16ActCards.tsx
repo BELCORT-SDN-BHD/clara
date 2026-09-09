@@ -186,7 +186,7 @@ export function FirmQuestionCard({ part }: { part: FirmQuestionPart }) {
     <PartSummaryCard
       title={t("title")}
       rows={[[t("questionLabel"), part.question_id]]}
-      link={{ href: "/needs-you", label: t("link") }}
+      link={{ href: "/work?view=needs-you", label: t("link") }}
     >
       <HydrateState state={state} hasRow={row !== null} />
       {row ? (
@@ -202,7 +202,8 @@ export function FirmQuestionCard({ part }: { part: FirmQuestionPart }) {
           <p className="wrap-anywhere text-card-foreground">{row.question_text}</p>
           <FactRows rows={[[t("documentLabel"), row.document_id]]} />
           {/* `candidates` is deliberately absent — V16Cards.tsx header rule 2.
-              The queue row at /needs-you renders it; this card links there. */}
+              The queue row at /work?view=needs-you renders it; this card links there
+              (#614 D5). */}
 
           {isOpen && actionUnavailable ? <p className="text-xs text-muted-foreground">{tc("actionUnavailable")}</p> : null}
           {isOpen ? (

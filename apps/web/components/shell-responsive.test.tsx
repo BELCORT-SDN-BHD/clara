@@ -1,10 +1,26 @@
-// CB-AE2E-019 — the shell's three seams, at the layer a node cell can actually
-// settle: the DISCLOSURE CONTRACT on the firm drawer, the ROVING FOCUS the
-// vendored tabs primitive brought to `SectionTabs`, and the arms declared in the
-// layout files.
+// CB-AE2E-019, CARRIED FORWARD THROUGH #614 — the shell's seams, at the layer a
+// node cell can actually settle: the DISCLOSURE CONTRACT on the sidebar toggle,
+// the ROVING FOCUS the vendored tabs primitive brought to `SectionTabs`, and the
+// breakpoint arms declared in the shell's own files.
+//
+// WHAT CHANGED WITH #614, and what deliberately did not. The firm drawer
+// (`components/firm-nav-drawer.tsx`), the firm sidebar
+// (`components/firm-nav.tsx`) and the client tab strip
+// (`components/client-workspace-nav.tsx`) are gone: one vendored Sidebar over
+// one registry replaces all three, and its sheet arm IS the drawer. So the
+// drawer cells below became SIDEBAR-TRIGGER cells — same disclosure contract,
+// same Label-in-Name rule, asserted on the control that now carries it. The
+// SectionTabs cells and the arm census are unchanged in kind.
+//
+// THE h1 PIN INVERTED, and that is the headline. This file used to pin TWO h1s
+// on every client route — the client layout's "Client: <name>" plus
+// `PageShell`'s own — and the layout carried a long note on why neither
+// alternative was cheaper. #614 removed the first one: identity moved into the
+// sidebar group label, the scope switcher and the breadcrumb. The pin is now
+// exactly ONE h1 per client route, and ZERO in the client layout.
 //
 // What is deliberately NOT claimed here: that anything is 640 CSS px wide, that
-// the drawer traps focus, or that the page does not scroll sideways. Those are
+// the sheet traps focus, or that the page does not scroll sideways. Those are
 // geometry and a real focus manager, and a jsdom-free node harness has neither —
 // `e2e/responsive-shell-walk.spec.ts` measures them on the built app.
 
@@ -13,7 +29,7 @@ import { test } from "node:test";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createElement, useState, type ReactElement } from "react";
+import { createElement, type ReactElement } from "react";
 import { NextIntlClientProvider } from "next-intl";
 import { AppRouterContext } from "next/dist/shared/lib/app-router-context.shared-runtime";
 import { PathnameContext } from "next/dist/shared/lib/hooks-client-context.shared-runtime";
@@ -22,8 +38,9 @@ import { renderComponent, textOf } from "../test/hookHarness";
 import { enableDomInspection } from "../test/domInspect";
 import messages from "../messages/en.json";
 import { SectionTabs } from "./common/section-tabs";
-import { FirmNavDrawer } from "./firm-nav-drawer";
+import { ShellHeader } from "./app-shell/shell-header";
 import { FirmScopeProvider } from "./firm-scope-provider";
+import { SidebarProvider } from "./ui/sidebar";
 
 enableDomInspection();
 
@@ -95,83 +112,53 @@ function Wrap({ pathname, children }: { pathname: string; children: ReactElement
   });
 }
 
-// ── SEAM 1: the firm drawer's disclosure contract ───────────────────────────
+// ── SEAM 1: the sidebar toggle's disclosure contract ────────────────────────
 
-const drawerTree = (pathname: string) =>
+const headerTree = (pathname: string) =>
   Wrap({
     pathname,
     children: createElement(FirmScopeProvider, {
-      scope: { role_rank: 3, is_operator: false },
-      children: createElement(FirmNavDrawer),
+      scope: { role_rank: 3, is_operator: false, firm_name: "E2E Accounting", role: "owner" },
+      children: createElement(SidebarProvider, { children: createElement(ShellHeader) }),
     }),
   });
 
-test("the drawer toggle is a real disclosure: aria-expanded starts false and aria-controls names the panel", async () => {
-  const h = await renderComponent(drawerTree("/"));
+const toggleOf = (h: { find: (p: (n: Stub) => boolean) => Stub | null }) =>
+  h.find((n) => attr(n, "data-firm-drawer-toggle") !== null);
+
+test("the sidebar toggle is a real disclosure: aria-expanded reflects the panel's state", async () => {
+  const h = await renderComponent(headerTree("/"));
   try {
-    const trigger = h.find(
-      (n) => (n.tagName as string | undefined)?.toLowerCase() === "button" && textOf(n).includes("Menu"),
-    );
-    assert.ok(trigger, "no drawer toggle rendered");
-    assert.equal(attr(trigger, "aria-expanded"), "false");
-    const controls = attr(trigger, "aria-controls");
-    assert.ok(controls && controls.length > 0, "the toggle names no panel");
+    const trigger = toggleOf(h);
+    assert.ok(trigger, "no sidebar toggle rendered");
+    // The provider's `defaultOpen` is true, so the desktop panel starts open and
+    // the toggle must SAY so — a disclosure that always reads "false" is the
+    // defect this cell exists for.
+    assert.equal(attr(trigger, "aria-expanded"), "true");
+    await h.act(() => clickVia(trigger));
+    assert.equal(attr(toggleOf(h)!, "aria-expanded"), "false", "the toggle did not collapse the sidebar");
+    await h.act(() => clickVia(toggleOf(h)!));
+    assert.equal(attr(toggleOf(h)!, "aria-expanded"), "true", "the toggle is one-way");
   } finally {
     await h.unmount();
   }
 });
 
-test("the toggle's ACCESSIBLE NAME is its visible text — no aria-label that voice control cannot say", async () => {
-  // WCAG 2.1 SC 2.5.3 (Label in Name). A button reading "Menu" with
-  // `aria-label="Open firm navigation"` cannot be operated by someone saying
-  // "click Menu", which is the one thing that button is for.
-  const h = await renderComponent(drawerTree("/"));
+test("the toggle's accessible name is a real one, and it is not the empty string the primitive shipped", async () => {
+  // The vendored `SidebarTrigger` carried a hardcoded English `<span
+  // class="sr-only">Toggle Sidebar</span>`. The house pass routed it through
+  // next-intl with a prop override; this is the cell that would notice if either
+  // half regressed to nothing at all — an icon-only button with no name is a
+  // WCAG 4.1.2 failure and `checkAccessibility`'s `button-name` rule would only
+  // see it if this file rendered the header, which is why it does.
+  const h = await renderComponent(headerTree("/"));
   try {
-    const trigger = h.find(
-      (n) => (n.tagName as string | undefined)?.toLowerCase() === "button" && textOf(n).includes("Menu"),
-    );
+    const trigger = toggleOf(h);
     assert.ok(trigger);
-    const label = attr(trigger, "aria-label");
-    assert.equal(label, null, `the toggle carries aria-label="${label}", which does not contain its visible text`);
-  } finally {
-    await h.unmount();
-  }
-});
-
-test("the drawer closes on a route change — it never survives the navigation it just performed", async () => {
-  // Driven at the SOURCE the component actually reads (`usePathname`), not by
-  // clicking a link: a handler-on-each-link implementation would pass a click
-  // test and still leave the drawer open on a back-button navigation.
-  function Harness(): ReactElement {
-    const [path, setPath] = useState("/");
-    return createElement(
-      "div",
-      null,
-      createElement(
-        "button",
-        { type: "button", id: "nav", onClick: () => setPath("/clients") },
-        "navigate",
-      ),
-      drawerTree(path),
-    );
-  }
-  // `createElement(Harness)`, never `Harness()` — calling a component as a
-  // plain function runs its hooks outside a render and React throws
-  // "Invalid hook call", which is how this cell first went red.
-  const h = await renderComponent(createElement(Harness));
-  try {
-    const trigger = () =>
-      h.find((n) => (n.tagName as string | undefined)?.toLowerCase() === "button" && textOf(n).includes("Menu"));
-    const open = trigger();
-    assert.ok(open);
-    await h.act(() => clickVia(open));
-    assert.equal(attr(trigger()!, "aria-expanded"), "true", "the toggle did not open the drawer");
-
-    const navigate = h.find((n) => attr(n, "id") === "nav");
-    assert.ok(navigate, "the harness's own navigate button is missing");
-    await h.act(() => clickVia(navigate));
-    // THE DISCRIMINATING POST-CONDITION: true only after the path changed.
-    assert.equal(attr(trigger()!, "aria-expanded"), "false", "the drawer survived the navigation");
+    assert.match(textOf(trigger), /Toggle navigation/);
+    // WCAG 2.1 SC 2.5.3 (Label in Name) is not at stake here — the visible label
+    // IS the screen-reader label, because the button has no visible text at all.
+    assert.equal(attr(trigger, "aria-label"), null, "the name is the sr-only text, not a competing aria-label");
   } finally {
     await h.unmount();
   }
@@ -241,27 +228,31 @@ test("SectionTabs' accessibility tree comes from the PRIMITIVE — tablist, tabs
   }
 });
 
-// ── The declared arms, read from the layout sources ─────────────────────────
+// ── The declared arms, read from the shell's sources ────────────────────────
 
 test("every chrome column declares a breakpoint arm — the measured absence CB-AE2E-019 opened on", () => {
   // The audit's finding was a MEASURED ABSENCE: zero `sm:`/`md:`/`lg:` hits in
   // any of the shell's six chrome files. This is the same measurement, inverted,
-  // so the absence cannot quietly return one file at a time.
+  // so the absence cannot quietly return one file at a time. The FILE LIST moved
+  // with #614 — three hand-rolled chromes became one vendored Sidebar — but the
+  // property is identical: every column that costs width says at which width it
+  // costs it.
   const arms: [string, RegExp][] = [
-    ["app/(firm)/layout.tsx", /hidden [^"]*lg:flex/],
-    ["app/(firm)/layout.tsx", /lg:hidden/],
-    ["app/(firm)/clients/[clientId]/layout.tsx", /px-4[^"]*lg:px-8/],
-    ["components/client-workspace-nav.tsx", /overflow-x-auto lg:flex-wrap/],
+    // The sidebar's own two arms: a docked column at `md` and above, and the
+    // sheet below it (`isMobile` in the same file, at the same 768px).
+    ["components/ui/sidebar.tsx", /md:block/],
+    ["components/ui/sidebar.tsx", /md:flex/],
+    ["hooks/use-mobile.ts", /SIDEBAR_BREAKPOINT = 768/],
+    // The breadcrumb's collapse, which is what keeps identity on screen at 320px.
+    ["components/app-shell/app-breadcrumb.tsx", /sm:not-sr-only/],
+    ["components/app-shell/app-breadcrumb.tsx", /sm:hidden/],
     ["components/common/page-shell.tsx", /p-4 lg:p-8/],
     ["components/clara/rail-chrome.tsx", /lg:contents/],
     // R3 — THE TWO CASCADE FIXES, PINNED WHERE CI CAN SEE THEM. Both defects are
-    // computed styles, so their real instrument is the browser leg — which is
-    // acceptance-only until the 裁-192 smoke job lands, meaning nothing in CI
-    // would notice either one regressing. These two rows do not measure the
-    // cascade; they pin the ONE spelling that resolves it. The override must
-    // carry the vendored utility's own variant, or tailwind-merge keeps both and
-    // the later rule wins — which is exactly how each shipped broken once.
-    ["components/firm-nav-drawer.tsx", /data-\[side=left\]:w-56/],
+    // computed styles, so their real instrument is the browser leg. These rows
+    // do not measure the cascade; they pin the ONE spelling that resolves it.
+    // The override must carry the vendored utility's own variant, or
+    // tailwind-merge keeps both and the later rule wins.
     ["components/common/section-tabs.tsx", /group-data-horizontal\/tabs:h-auto/],
   ];
   for (const [file, arm] of arms) {
@@ -269,59 +260,54 @@ test("every chrome column declares a breakpoint arm — the measured absence CB-
   }
 });
 
-test("the client name is a real HEADING, and the h1 census on a client route is pinned at two", () => {
-  // WHAT THE AUDIT ACTUALLY COMPLAINED OF: "the client's identity is a
-  // non-heading paragraph", so it was absent from the heading list entirely.
-  const layout = read("app/(firm)/clients/[clientId]/layout.tsx");
-  assert.match(layout, /<h1[^>]*>\s*\{t\("clientHeader"/);
-  assert.doesNotMatch(layout, /<p[^>]*>\s*\{t\("clientHeader"/);
+test("EXACTLY ONE h1 per client route — the shell owns identity now, the page owns the title", () => {
+  // THE INVERSION #614 PAID FOR. The old client layout rendered an `<h1>`
+  // reading "Client: <name>" above `PageShell`'s own, and this cell pinned the
+  // total at TWO with a long note on why neither alternative was cheaper: a
+  // leading `<h2>` reds test/a11yRules.ts's heading-order rule, and a `level`
+  // prop on `PageHeader` was 22 call sites in 20 files plus a hook that
+  // component is contractually not allowed to hold.
+  //
+  // Removing the heading resolved it instead of ranking it. Identity now lives
+  // in the sidebar's client group label, the scope switcher and the breadcrumb —
+  // three places visible at every width, where the old line scrolled away with
+  // the page.
+  assert.equal(h1Count("components/common/page-shell.tsx"), 1, "PageShell no longer renders exactly one h1");
+  assert.equal(
+    h1Count("app/(firm)/clients/[clientId]/layout.tsx"),
+    0,
+    "the client layout renders a heading again — identity belongs to the shell",
+  );
+  assert.equal(h1Count("app/(firm)/layout.tsx"), 0);
 
-  // …AND THE PART THE FIRST VERSION OF THIS CELL MISSED. Its comment claimed the
-  // altitude "had no level-1 heading at all", which was false: PageHeader renders
-  // one on every route-level surface. So a client route has TWO h1s, and that is
-  // now a PINNED number rather than an accident — see the layout's own note for
-  // why neither alternative was taken (a leading h2 reds test/a11yRules.ts:547's
-  // heading-order rule; a `level` prop on PageHeader is 26 files or a hook this
-  // component is contractually not allowed to hold).
-  // COUNTED OVER CODE, NOT OVER THE FILE. Both of these files DESCRIBE `<h1` in
+  // …AND THE THIRD SOURCE, which is where a second h1 would actually come from.
+  // COUNTED OVER CODE, NOT OVER THE FILE: both shell files DESCRIBE `<h1` in
   // their comments — page-shell.tsx's header quotes the very markup five lanes
   // duplicated — and a naive `match(/<h1/g)` reads two in a file that renders
-  // one. That is the same class of error as reading a class string out of a
-  // comment, and it cost this cell one red before it was written correctly.
-  assert.equal(h1Count("components/common/page-shell.tsx"), 1, "PageShell no longer renders exactly one h1");
-  assert.equal(h1Count("app/(firm)/clients/[clientId]/layout.tsx"), 1, "the client layout renders more than one h1");
-
-  // …AND THE THIRD SOURCE, which is where a third h1 would actually come from.
-  // An earlier version of this cell "checked" the total by SUMMING the two
-  // equalities just asserted — arithmetic on facts already established, which
-  // cannot fail and proves nothing. The real question is whether any client
-  // SURFACE renders a bare `<h1>` of its own instead of going through
-  // `PageHeader`; nothing had ever looked. Walked, so a page added by any lane is
-  // covered without this list being maintained by hand.
+  // one. Walked, so a page added by any lane is covered without this list being
+  // maintained by hand.
   const clientPages = walkTsx(join(WEB_ROOT, "app/(firm)/clients"));
   assert.ok(clientPages.length >= 5, `only ${clientPages.length} client-altitude files walked — is the path right?`);
-  const rogue = clientPages.filter((f) => f !== "app/(firm)/clients/[clientId]/layout.tsx" && h1Count(f) > 0);
+  const rogue = clientPages.filter((f) => h1Count(f) > 0);
   assert.deepEqual(
     rogue,
     [],
-    `these client-altitude files render their own <h1> — the route would then carry three: ${rogue.join(", ")}`,
+    `these client-altitude files render their own <h1> instead of going through PageHeader: ${rogue.join(", ")}`,
   );
-
-  // The FIRM altitude is unaffected and still has exactly one: its layout adds no
-  // heading of its own. This is the arm that would catch the client layout's h1
-  // being hoisted somewhere shared.
-  assert.equal(h1Count("app/(firm)/layout.tsx"), 0);
 });
 
-test("the narrow header sits OUTSIDE #main-content, so the skip link still skips navigation", () => {
-  // The failure this pins is subtle and total: put the drawer toggle inside the
+test("the shell header sits OUTSIDE #main-content, so the skip link still skips navigation", () => {
+  // The failure this pins is subtle and total: put the sidebar toggle inside the
   // skip link's own target and the bypass lands ABOVE it, so the next Tab walks
   // straight back into navigation. Read as ORDER in the source, which is what
   // determines it.
   const layout = read("app/(firm)/layout.tsx");
-  const headerAt = layout.indexOf("<FirmNavDrawer />");
+  const headerAt = layout.indexOf("<ShellHeader />");
   const mainAt = layout.indexOf('id="main-content"');
-  assert.ok(headerAt >= 0, "the narrow header is gone");
+  const skipAt = layout.indexOf("<SkipLink />");
+  assert.ok(skipAt >= 0, "the skip link is gone");
+  assert.ok(headerAt >= 0, "the shell header is gone");
   assert.ok(mainAt >= 0, "the skip link's target is gone");
-  assert.ok(headerAt < mainAt, "the drawer toggle is inside #main-content — the skip link now skips nothing");
+  assert.ok(skipAt < headerAt, "the skip link is no longer the first focusable thing in the shell");
+  assert.ok(headerAt < mainAt, "the sidebar toggle is inside #main-content — the skip link now skips nothing");
 });

@@ -35,6 +35,10 @@ export function VendorBindingsPanel() {
 
   return (
     <div className="flex flex-col gap-3">
+      {/* #614 D6: bindings are readable HISTORY now, not a gate — an
+          attributed upload processes without one. Every action/read below
+          is unchanged; this only states what the register is FOR today. */}
+      <StateBanner tone="info">{t("notPrerequisiteNotice")}</StateBanner>
       <div className="grid max-w-xs gap-1.5">
         <Label htmlFor="vb-client-picker">{t("clientPickerLabel")}</Label>
         {!clientsState.data ? (

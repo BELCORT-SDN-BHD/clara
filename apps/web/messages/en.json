@@ -30,22 +30,61 @@
     "productName": "ClaraBook",
     "skipToContent": "Skip to main content"
   },
-  "FirmNav": {
-    "ariaLabel": "Firm navigation",
-    "adminSectionsLabel": "Admin sections",
-    "drawerTrigger": "Menu",
-    "home": "Home",
-    "needsYou": "Needs you",
-    "clients": "Clients",
-    "activity": "Activity",
-    "admin": "Admin",
-    "firm": "Firm",
-    "adminSections": {
-      "members": "Members",
-      "registrations": "Firm registrations",
-      "compliance": "Compliance register",
-      "vendorBindings": "Vendor identity bindings",
-      "settings": "Firm settings"
+  "AppShell": {
+    "mainNavLabel": "Main",
+    "breadcrumbLabel": "Breadcrumb",
+    "toggleNavigation": "Toggle navigation",
+    "toggleSection": "Toggle {section}",
+    "sidebarTitle": "Navigation",
+    "sidebarDescription": "The firm and client navigation panel.",
+    "moreCrumbs": "More",
+    "betaBadge": "Beta",
+    "legacyBadge": "Legacy",
+    "signedInAs": "Signed in to {firmName}",
+    "firmNav": {
+      "home": "Home",
+      "clients": "Clients",
+      "work": "Work",
+      "activity": "Activity",
+      "settings": "Settings"
+    },
+    "clientNav": {
+      "home": "Home",
+      "work": "Work",
+      "documents": "Documents",
+      "accounting": "Accounting",
+      "knowledge": "Knowledge",
+      "reports": "Reports",
+      "registersView": "Registers"
+    },
+    "accounting": {
+      "journals": "Journals",
+      "bank": "Bank",
+      "receivables": "Receivables & payables",
+      "assets": "Assets",
+      "plans": "Plans",
+      "accounts": "Accounts",
+      "close": "Close",
+      "tax": "Tax"
+    },
+    "scope": {
+      "firmCaption": "Firm",
+      "clientCaption": "Client",
+      "clientPlaceholder": "Client",
+      "firmHome": "Firm home",
+      "clientsHeading": "Clients",
+      "clientsLoading": "Loading your clients…",
+      "clientsReadError": "Couldn't read your client register. Open the client register instead.",
+      "clientsEmpty": "No clients yet.",
+      "allClients": "All clients",
+      "searchHint": "Press ⌘K to search every client.",
+      "currentClient": "Current client"
+    },
+    "roles": {
+      "viewer": "Viewer",
+      "bookkeeper": "Bookkeeper",
+      "admin": "Admin",
+      "owner": "Owner"
     }
   },
   "NotFound": {
@@ -53,7 +92,14 @@
     "body": "Nothing is served at this address. If you followed a link inside ClaraBook, the link is wrong — not the page.",
     "navLabel": "Ways back",
     "firmHome": "Firm home",
-    "needsYou": "Needs you"
+    "work": "Work"
+  },
+  "ClientNotFound": {
+    "heading": "This client isn't visible to your firm",
+    "body": "The client this link points to could not be opened here. It may not exist, may have been removed, or may belong to a different firm.",
+    "navLabel": "Ways back",
+    "clients": "Clients",
+    "firmHome": "Firm home"
   },
   "FirmHome": {
     "heading": "Firm home",
@@ -242,7 +288,7 @@
   "FirmActivity": {
     "heading": "Activity",
     "body": "The firm-wide receipts and open-register feed.",
-    "subheading": "A record of what the agent did across every client — not a queue of what awaits you. See Needs you for that.",
+    "subheading": "A record of what the agent did across every client — not a queue of what awaits you. Work is where what awaits you lives.",
     "visibilityNote": "Receipts are visible to bookkeeper-and-above roles. A more limited role sees an empty feed for that reason, not because nothing happened.",
     "coverageNote": "This feed can currently show four kinds of agent act: freeform reads, filings, client onboarding and vendor bindings. Posted entries, bank-agent acts, general agent acts, report-agent acts and web fetches are not recorded here yet, so an empty feed does not mean the agent has been idle.",
     "showingRecent": "Showing the 100 most recent receipts. There is no paging past that, so older receipts are not reachable from this page.",
@@ -257,7 +303,7 @@
     "firmScopeNoClient": "Firm-wide (no client)",
     "noRationale": "No stated rationale.",
     "timelineHeading": "Everything that happened",
-    "timelineNotBuilt": "The complete firm timeline is available on Firm Home, but this Activity page has not been connected to it yet. This page currently shows agent tasks and agent receipts only.",
+    "timelineNotBuilt": "The complete firm timeline is available on Firm Home, but this Activity page has not been connected to it yet. This page currently shows agent receipts only; running agent tasks are on Work.",
     "receiptKinds": {
       "entry_post": "Journal entry posted",
       "bank_agent": "Bank agent act",
@@ -270,35 +316,44 @@
       "binding_agent": "Vendor binding proposed"
     }
   },
-  "Admin": {
-    "heading": "Admin",
-    "body": "Manage the people, compliance and identity controls that govern this firm.",
-    "firmHeading": "Firm",
-    "firmBody": "The firm-wide registers and controls your role can reach.",
-    "sectionsLabel": "Firm admin sections",
-    "noSections": "No admin sections are available at your rank.",
+  "Settings": {
+    "heading": "Settings",
+    "body": "Your account, and the firm-wide registers and controls your role can reach.",
+    "sectionsLabel": "Settings sections",
+    "navLabel": "Settings sections",
+    "noSections": "No settings sections are available at your rank.",
     "unbuiltNote": "Usage summaries, plan details, and billing management are not available yet.",
     "sections": {
+      "account": {
+        "title": "Account",
+        "purpose": "Your own sign-in and session on this device."
+      },
+      "firm": {
+        "title": "Firm",
+        "purpose": "Review the firm-wide authority controls."
+      },
       "members": {
         "title": "Members",
         "purpose": "Manage roles, invitations and access to this firm."
       },
-      "registrations": {
-        "title": "Firm registrations",
-        "purpose": "Review requests to create firms on ClaraBook."
-      },
       "compliance": {
-        "title": "Compliance register",
+        "title": "Compliance",
         "purpose": "Review SST-registration watches across the firm."
       },
       "vendorBindings": {
         "title": "Vendor identity bindings",
         "purpose": "Govern the evidence bindings used to identify vendors."
       },
-      "settings": {
-        "title": "Firm settings",
-        "purpose": "Review the firm-wide authority controls."
+      "registrations": {
+        "title": "Registrations",
+        "purpose": "Review requests to create firms on ClaraBook."
       }
+    },
+    "account": {
+      "heading": "Account",
+      "body": "Your own sign-in and session. Everything about the firm lives under the other settings sections.",
+      "sessionHeading": "This session",
+      "notBuilt": "Changing your email, your password and your display name from inside the app is not built yet. Password recovery from the sign-in screen is the one route that works today."
     }
   },
   "Members": {
@@ -398,8 +453,6 @@
   },
   "ClientWorkspace": {
     "heading": "Client workspace",
-    "clientHeader": "Client: {clientName}",
-    "body": "One workspace per client. The accounting objects are tabs — journals, documents, bank, close, reports, registers and knowledge.",
     "clientIdLabel": "Client ID",
     "notFoundMessage": "No client with this id is visible to your firm.",
     "queueHeading": "Needs your attention",
@@ -739,25 +792,31 @@
       "plannedBadge": "Not built yet",
       "routes": {
         "firmHome": "Firm home",
-        "adminAsFirm": "Firm",
-        "needsYou": "Needs you",
         "clientRegister": "Client register",
+        "firmWork": "Work",
+        "needsYou": "Needs you",
         "firmActivity": "Firm activity",
-        "admin": "Admin",
-        "adminCompliance": "Compliance register",
-        "adminVendorBindings": "Vendor identity bindings",
-        "adminMembers": "Members",
-        "adminRegistrations": "Firm registrations",
-        "adminSettings": "Firm settings",
+        "settings": "Settings",
+        "settingsAccount": "Your account",
+        "settingsFirm": "Firm settings",
+        "settingsMembers": "Members",
+        "settingsCompliance": "Compliance register",
+        "settingsVendorBindings": "Vendor identity bindings",
+        "settingsRegistrations": "Firm registrations",
         "clientWorkspaceHome": "Workspace overview",
-        "journals": "Journals",
+        "clientWork": "This client's work",
         "documents": "Documents",
-        "bank": "Bank",
-        "close": "Close",
-        "clientTax": "Tax",
+        "clientAccounting": "Accounting",
+        "knowledge": "Knowledge",
         "reports": "Reports",
-        "registers": "Registers",
-        "knowledge": "Knowledge"
+        "journals": "Journals",
+        "bank": "Bank",
+        "registersAging": "Receivables & payables",
+        "registersAssets": "Assets register",
+        "registersPlans": "Plans register",
+        "registersAccounts": "Chart of accounts",
+        "close": "Close",
+        "clientTax": "Tax"
       }
     },
     "ask": {
@@ -786,17 +845,33 @@
       }
     }
   },
-  "ClientWorkspaceNav": {
-    "ariaLabel": "Client workspace navigation",
-    "home": "Home",
-    "journals": "Journals",
-    "documents": "Documents",
-    "bank": "Bank",
-    "close": "Close",
-    "tax": "Tax",
-    "reports": "Reports",
-    "registers": "Registers",
-    "knowledge": "Knowledge"
+  "Work": {
+    "heading": "Work",
+    "body": "What is waiting on a person, across every client.",
+    "viewsLabel": "Saved views",
+    "viewAll": "All",
+    "viewNeedsYou": "Needs you",
+    "needsYouHeading": "Needs you",
+    "notBuilt": "The full filterable Work list and the detail view of a single item arrive with the durable Work records. Today this page composes the two live queues it already has: what is waiting on you, and what the agent is running.",
+    "clientHeading": "Work",
+    "clientBody": "What is waiting on a person for this client.",
+    "clientNotBuilt": "The full filterable Work list and the detail view of a single item arrive with the durable Work records. Today this page shows this client's slice of the review queue."
+  },
+  "ClientAccounting": {
+    "heading": "Accounting",
+    "body": "This client's books: the journals, the bank, the registers, the close and the tax computation.",
+    "sectionsLabel": "Accounting surfaces",
+    "noSections": "No accounting surfaces are available at your rank.",
+    "purposes": {
+      "journals": "Draft, review and post journal entries.",
+      "bank": "Load statements, match lines and reconcile each account.",
+      "receivables": "Open receivable and payable balances by counterparty and age.",
+      "assets": "The fixed asset register, its cost, depreciation and net book value.",
+      "plans": "Adjustment plans and the entries they generate.",
+      "accounts": "The chart of accounts this client posts to.",
+      "close": "Fiscal years, close gates and the statutory close pack.",
+      "tax": "SST and income-tax positions. The workbench states its own boundary."
+    }
   },
   "ClientTax": {
     "heading": "Tax",
@@ -2653,10 +2728,10 @@
       "priorKindNone": "unclassified"
     },
     "autodraft": {
-      "trigger": "Request autodraft",
-      "title": "Request autodraft",
-      "description": "Asks Clara to draft a journal entry from this filing. Nothing posts — you still review the draft, and Clara still runs under the same coding-lane and daily budget limits as her unattended sweep.",
-      "confirm": "Request autodraft",
+      "trigger": "Start processing again",
+      "title": "Start processing again",
+      "description": "An attributed upload is processed automatically once Clara has evidence to extract from — this is only for a filing whose processing did not start or did not complete. It re-admits this SAME filing. Nothing posts, and Clara still runs under the same coding-lane and daily budget limits as her unattended sweep.",
+      "confirm": "Start again",
       "outcome": {
         "admitted": "Admitted — Clara will draft this filing.",
         "re_admitted": "Re-admitted after the earlier attempt didn't complete.",
@@ -2812,7 +2887,7 @@
     },
     "agentTasks": {
       "heading": "Running agent tasks",
-      "note": "Tasks the agent is currently queued, held, running, or awaiting your input on — cancellable here. Already-finished work is in the activity log below.",
+      "note": "Tasks the agent is currently queued, held, running, or awaiting your input on — cancellable here. Already-finished work is in the Activity log.",
       "loading": "Loading running agent tasks…",
       "empty": "No running agent tasks right now.",
       "detailTrigger": "Details",
@@ -3035,6 +3110,10 @@
     "emptyCustomer": "No customer is recorded yet for this client."
   },
   "ReportsSnapshotsSeeding": {
+    "internalProcessing": {
+      "heading": "Internal processing",
+      "body": "Seeding, wiki curation and render jobs are Clara's own maintenance, kept here for history and recovery. They are not reports."
+    },
     "snapshots": {
       "heading": "Month snapshots",
       "subheading": "clara.period_snapshots — a frozen management-accounts dataset per completed month.",
@@ -3180,6 +3259,7 @@
     "vendorBindings": {
       "pageHeading": "Vendor identity bindings",
       "pageDescription": "Propose, sign and revoke a vendor's identity binding. Signing requires an admin who did not propose it — the person who proposed a binding cannot also sign it; let Clara propose it, or add a second admin.",
+      "notPrerequisiteNotice": "Vendor identity bindings are no longer a prerequisite for processing documents — Clara maintains counterparty identities and aliases from evidence automatically. This register remains for history and for governing existing bindings.",
       "clientPickerLabel": "Client",
       "clientPickerLoading": "Loading clients…",
       "clientPickerPlaceholder": "Select a client…",

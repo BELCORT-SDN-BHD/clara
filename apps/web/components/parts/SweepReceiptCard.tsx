@@ -82,9 +82,9 @@ function outcomeTone(outcome: string): "info" | "warning" | "neutral" {
  *  the door rejects gets the refusal verbatim through `act`'s sticky-refusal
  *  path, which is the only place that verdict can honestly be made.
  *
- *  THE LINK goes to the firm's Needs-you queue, where `SweepStatusPanel` renders
- *  the sweep's own queue-altitude state. There is no per-run route to point at
- *  and this card does not pretend otherwise. */
+ *  THE LINK goes to the firm's Needs-you view of Work (#614 D5), where
+ *  `SweepStatusPanel` renders the sweep's own queue-altitude state. There is
+ *  no per-run route to point at and this card does not pretend otherwise. */
 export function SweepReceiptCard({ part }: { part: SweepReceiptPart }) {
   const t = useTranslations("Clara.parts.sweepReceipt");
   const tc = useTranslations("Clara.parts.common");
@@ -112,7 +112,7 @@ export function SweepReceiptCard({ part }: { part: SweepReceiptPart }) {
     <PartSummaryCard
       title={t("title")}
       rows={[[t("runLabel"), part.run_id]]}
-      link={{ href: "/needs-you", label: t("link") }}
+      link={{ href: "/work?view=needs-you", label: t("link") }}
     >
       <HydrateState state={state} hasRow={run !== null} />
       {run ? (

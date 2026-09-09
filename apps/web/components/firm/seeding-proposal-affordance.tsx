@@ -14,6 +14,10 @@
 // The deep link goes to the OWNING TAB (`/clients/:id/reports`, where SeedingBatchesPanel
 // is mounted), never the client workspace root — the P6 flow-polish note 裁-17's own ruling
 // recorded ("inbox rows deep-link to the owning tab/object, not the client-workspace root").
+//
+// #614 D6 (spec §7): ReportsPage.tsx now groups SeedingBatchesPanel under an "Internal
+// processing" section, `id="internal-processing"` — the `#internal-processing` fragment
+// scrolls straight to it rather than leaving a human to find it among the report panels.
 
 import { useTranslations } from "next-intl";
 import Link from "next/link";
@@ -24,7 +28,7 @@ export function SeedingProposalAffordance({ row }: NeedsYouAffordanceProps) {
   if (!row.client_id) return null;
   return (
     <Link
-      href={`/clients/${row.client_id}/reports`}
+      href={`/clients/${row.client_id}/reports#internal-processing`}
       className="text-xs text-primary underline-offset-4 hover:underline"
     >
       {t("reviewSeedingProposals")}

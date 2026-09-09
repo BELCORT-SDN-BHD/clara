@@ -58,7 +58,17 @@ test("a row with no client has NOWHERE honest to go, so it gets no link", () => 
 });
 
 test("every emitted href is a path CLIENT_ROUTES actually serves", () => {
-  const served = new Set(CLIENT_ROUTES.map((route) => route.href(CLIENT)));
+  // COMPARED AS PATHS, with any `?tab=` dropped from BOTH sides. #614 gave the
+  // registers workbench four named views in the navigation registry
+  // (`/registers?tab=aging`, `…=fixedAssets`, `…=adjustments`, `…=accounts`),
+  // so `CLIENT_ROUTES` now carries the VIEW where it used to carry the bare
+  // path. A deep link from a Needs-you row still points at the workbench and
+  // still lands on it — the workbench falls back to its own default tab — so
+  // the claim this cell makes is about the route the app serves, and that is
+  // what it now compares. A row that pointed at a path with no page at all is
+  // still caught, which is the defect it was minted for.
+  const pathOf = (href: string) => href.split(/[?#]/, 1)[0]!;
+  const served = new Set(CLIENT_ROUTES.map((route) => pathOf(route.href(CLIENT))));
   for (const kind of REVIEW_QUEUE_ROW_KINDS) {
     const href = needsYouRowHref(row(kind));
     assert.ok(href, `${kind} resolves to a path`);
