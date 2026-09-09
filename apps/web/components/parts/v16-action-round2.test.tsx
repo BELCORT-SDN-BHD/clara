@@ -254,7 +254,11 @@ test("one thread-wide guard drops a synchronous duplicate and a cross-card act, 
           void clickButton(before[0]!);
           void clickButton(before[1]!);
         });
-        for (let i = 0; i < 4 && acknowledgeA === 0; i++) await h.settle();
+        // Wait for the guarded act to REACH the wire, not for a fixed number of settles: on a
+        // loaded CI runner (PR #686, db-estate) four settles were not enough and the cell read
+        // 0 !== 1 before the first RPC had been issued. The bound is generous; the assertion
+        // below is unchanged and still fails on a real double emission.
+        for (let i = 0; i < 60 && acknowledgeA === 0; i++) await h.settle();
 
         assert.equal(acknowledgeA, 1, "a synchronous same-button double click must emit one RPC");
         assert.equal(acknowledgeB, 0, "a second PartSlot must be dropped while the first card owns the thread guard");
