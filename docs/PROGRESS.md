@@ -2,12 +2,12 @@
 
 ## Current State
 
-- Updated: 2026-09-10 (MYT), after the first `/implement` session closed its four tickets.
-- `main` at 56f2233e (PRs #684–#688 all merged by fast-forward after green CI) plus this follow-ups update (PR #694 merged as 0e1566e3). `main` requires the `ci` check, so every push goes branch → PR → green → fast-forward of the same SHA.
-- Hosted: `clara-runtime` **v77** (image `refresh-6d4efd3d`, Node 22) live; migration **0177 landed** on the live database (frontier 172, consumer-first order, runtime quiesced for the cutover); all seven lane DSNs now `sslmode=verify-full` against the shipped pooler CA (`/ready` `checks.tls` pinned ×7, validated); the operation census matched the live catalog.
+- Updated: 2026-09-10 (MYT), after the first `/implement` session closed its four tickets and the harness sync that followed.
+- `main` at 02760468 (PRs #684–#688, #694 and #695 all merged by fast-forward after green CI) plus this harness-sync update. `main` requires the `ci` check, so every push goes branch → PR → green → fast-forward of the same SHA.
+- Hosted: `clara-runtime` **v77** (image `refresh-6d4efd3d`, Node 22) live; migration **0177 landed** on the live database (frontier 0177, 172 applied; consumer-first order, runtime quiesced for the cutover); all seven lane DSNs now `sslmode=verify-full` against the shipped pooler CA (`/ready` `checks.tls` pinned ×7, validated); the operation census matched the live catalog.
 - Tickets: #606, #616, #617, #618 **closed** with local + hosted evidence. The #606 hosted journey (owner signed in, agent drove a real upload through the client Documents workbench on 2026-09-10 01:21 MYT) showed the classify task created 98 ms after `document.extraction_completed`, one task per lane, downstream facts once; the trail is on the ticket.
 - Local verification recorded per commit; last fresh-cluster runs: db 4101/4006 pass/94 skipped (one x85-b3 timing flake, since fixed to the DB clock), runtime 2114/2111 pass/1 skipped/1 Windows-only EICAR.
-- Owner edits left uncommitted on purpose: `.codex/config.toml`, the Mobbin paragraph in `apps/web/README.md`.
+- Harness sync 2026-09-10: code-map index fresh; blueprint/README drift from the session fixed (ARCHITECTURE documents section and §11 now record the #606/#616/#617 hosted evidence; runtime README TLS paragraph repaired; consumer-first migration order documented in both READMEs); four `docs/plan/active/` paths cited by #612 exist only at `99ed3aca` (noted on #612); the owner's local edits (`.codex/config.toml`, web README MCP paragraph) are committed. Owner edits to harness files always get synced to `main`.
 
 ## Completed
 

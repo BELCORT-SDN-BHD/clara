@@ -125,15 +125,16 @@ reported as sanitized identifier-shaped codes and the full error goes to the ser
 
 TLS is determined by each DSN. The image contains `/app/ops/tls/pooler-ca.crt`;
 `lib/tls-ca.mjs` rejects malformed/expired/mismatched configured pins, but currently only warns
-about absent pins or non-verifying modes. To activate verified TLS, deploy the image containing
-the CA first, validate the server chain, then update the applicable DSNs with
-`sslmode=verify-full&sslrootcert=/app/ops/tls/pooler-ca.crt` and re-probe every lane.
+about absent pins or non-verifying modes. To activate verified TLS on a lane that is not yet
+pinned, deploy the image containing the CA first, validate the server chain, then update the
+applicable DSNs with `sslmode=verify-full&sslrootcert=/app/ops/tls/pooler-ca.crt` and re-probe
+every lane.
 Shipping the certificate does not establish that live secrets use it. `checks.tls` reports what
-Read `checks.tls.pinned` on the deployed host rather than the image: on 2026-09-09 all seven
-lane DSNs of `clara-runtime` were switched to verify-full through this ceremony and `/ready`
-reported them pinned with the shipped CA validated (#617).
 the running process actually booted with, by variable name; `measured:false` means the boot
-assert has not run there and is not evidence of a clean posture.
+assert has not run there and is not evidence of a clean posture. Read `checks.tls.pinned` on the
+deployed host rather than the image: on 2026-09-09 all seven lane DSNs of `clara-runtime` were
+switched to verify-full through this ceremony and `/ready` reported them pinned with the shipped
+CA validated (#617).
 [node-postgres SSL configuration](https://node-postgres.com/features/ssl)
 
 ### Recovery checklist
@@ -225,6 +226,15 @@ base is not a supported rollback target for the Node line itself, only for the c
 The current Fly configuration is one always-on machine with a disposable intake spool.
 Additional machines/HA require a deliberate deployment design and connection-budget review.
 
+This order is not universal: read the migration's own header before sequencing it. A migration
+whose new behavior depends on a consumer already understanding an event inverts steps 1 and 3.
+[`0177_classify_after_extraction.sql`](../db/migrations/0177_classify_after_extraction.sql) states
+that dependency: release the non-frozen `facts_gate` consumer image first, quiesce writers, then
+apply the migration, so an event emitted during rollout cannot be checkpointed as irrelevant and
+leave the document waiting forever. Its rollback mirrors the same dependency: a new append-only
+recovery migration restores the prior body while that consumer stays live, and only then does the
+consumer roll back. #606 shipped in that consumer-first order.
+
 1. Apply required database changes with the [database deployment contract](../db/README.md).
    For a fresh engine only, run the installed `bootstrap` CLI against the intended session
    connection. Do not bootstrap over restored engine state without checking its journal.
@@ -256,6 +266,10 @@ strands that run.
 ## Evaluation
 
 [Classifier fixtures](tests/fixtures/classify/README.md) explain the recall harness.
-Its synthetic mode tests scoring, not model accuracy. The classify-before-OCR race, in-image
-harness dependencies, and field re-verification remain open; a prompt comparison does not close
-an ingestion-ordering defect.
+Its synthetic mode tests scoring, not model accuracy. In-image harness dependencies and field
+re-verification remain open; a prompt comparison does not close an ingestion-ordering defect.
+The classify-before-OCR race itself is closed (#606): migration
+`0177_classify_after_extraction.sql` makes a NULL-kind document's facts enqueue return
+`awaiting_extraction` until a `done` OCR/structured-parse extraction exists, and the `facts_gate`
+consumer re-enters that enqueue on `document.extraction_completed` as well as
+`document.classified`.

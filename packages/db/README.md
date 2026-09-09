@@ -75,6 +75,15 @@ apply the migration, then resume. Calls already executing can finish on their pr
 A changed function named in `clara.control_witnesses` must receive the matching reviewed
 `prosrc_sha` in the same migration, or its dependent gate refuses.
 
+A migration can invert that order, so read its header before applying it.
+[0177_classify_after_extraction.sql](migrations/0177_classify_after_extraction.sql) requires the
+extraction-aware facts_gate consumer ([../runtime/lib/facts-gate.mjs](../runtime/lib/facts-gate.mjs))
+to be deployed before the migration is applied, so a `document.extraction_completed` event emitted
+during the cutover cannot be checkpointed as irrelevant and leave the document waiting. It also
+refuses the cutover while any pre-cutover classify task is still claimable without a successful
+extraction, and its rollback is a new append-only recovery migration applied while that consumer
+stays live. The hosted rollout applied it in that consumer-first order inside the quiescence window.
+
 Rebuilding a target from the migration chain and restoring a dump are different operations.
 A full replay creates login shells as NOLOGIN; restore the intended LOGIN state and credentials
 afterward and probe every configured runtime lane. Existing platform roles can also collide
