@@ -27,7 +27,10 @@ import { createSession, listSessionsForCaller, type SessionRow } from "./api";
 import { claraThreadStore } from "./threadStore";
 import type { SessionTokenAccessor } from "@/lib/session";
 
-const FIRM_ALTITUDE = "firm";
+/** The store key for firm altitude (no `clientId`) — exported so a caller that
+ *  needs to name firm altitude on its own (`ClaraThreadView`, `rail-mount.tsx`)
+ *  spells it the one way this module does, rather than re-typing `"firm"`. */
+export const FIRM_ALTITUDE = "firm";
 
 /** Every session the caller AUTHORED at this altitude, in the order the wire
  *  delivered them (`GET /api/chat/sessions` orders `created_at desc`,

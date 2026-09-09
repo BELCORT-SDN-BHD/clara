@@ -181,18 +181,29 @@ describe("focus-ring contract — 裁-1's 70% is declared once and obeyed everyw
     // Accounting index is the same card-hub idiom, which is exactly what this
     // roster exists to record — one treatment, written down wherever it is used.
     // Fifteen minus one plus two is SIXTEEN.
+    //
+    // #614 CODE REVIEW, -1 NET, THE TWO FROM THAT MERGE BECOME ONE.
+    // `components/settings/settings-hub.tsx` and `components/accounting/
+    // accounting-hub.tsx` had drifted to the identical `nav`/`ul`/`Link`/`Card`
+    // composition — including this same ring-carrying class string on the same
+    // `<Link>` — so both were extracted into one presentational
+    // `components/common/hub-cards.tsx` (this file's own `HubCards`). The two
+    // hubs LEAVE this census; `hub-cards.tsx` JOINS it, carrying the one class
+    // string both used to carry separately. Sixteen minus two plus one is
+    // FIFTEEN — back to where the 2026-09-04 re-census left it, because a
+    // dedup and a genuine new carrier cancel out in the arithmetic even though
+    // neither is the other.
     const hits = ringCarrierHits();
     const files = [...new Set(hits.map((h) => h.file))].sort();
-    assert.equal(hits.length, 16, JSON.stringify(hits, null, 2));
+    assert.equal(hits.length, 15, JSON.stringify(hits, null, 2));
     assert.deepEqual(files, [
-      "components/accounting/accounting-hub.tsx",
       "components/clara/ClaraThreadView.tsx",
       "components/common/dialog-refusal.tsx",
+      "components/common/hub-cards.tsx",
       "components/common/native-select.tsx",
       "components/firm/compliance-watch-affordance.tsx",
       "components/journals/drafts-queue-panel.tsx",
       "components/journals/journal-entries-table.tsx",
-      "components/settings/settings-hub.tsx",
       "components/tax/TurnoverClassificationPanel.tsx",
       "components/ui/badge.tsx",
       "components/ui/button.tsx",

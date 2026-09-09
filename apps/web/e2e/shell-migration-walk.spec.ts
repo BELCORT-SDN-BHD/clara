@@ -25,13 +25,23 @@ import { ensureRealFocus } from "./helpers";
  *   D6  the client-not-found boundary itself, and the retired entries
  *       (autodraft's relabel, the vendor-bindings banner, the reports page's
  *       "Internal processing" section) that came along with the same train.
+ *   AC6 acceptance criterion 6's own two follow-up cells, closing the gaps a
+ *       later spec review found: a client that goes invisible MID-SESSION
+ *       (not just a bogus id from the first request) rendering the same
+ *       not-found boundary, driven by a real toggle rather than a
+ *       `page.route` that cannot reach the server component making the read;
+ *       and the Clara rail overlay plus the mobile nav Sheet open TOGETHER at
+ *       640 CSS px, proving one focus trap and one Escape per layer.
  *
  * Fixtures: `serve-built.mjs`'s shared owner@example.test / bookkeeper@example.test
  * personas and its two clients, Rome Properties (CLIENT_A) and Bee Creative
- * Solution (CLIENT_B), firm "E2E Accounting". No new server-side fixture is
- * added — every per-test need is met with `page.route`, the idiom every other
- * spec in this directory already uses for a fixture too small to earn a
- * shared-server relation.
+ * Solution (CLIENT_B), firm "E2E Accounting". Every per-test need beyond that
+ * is met with `page.route`, the idiom every other spec in this directory
+ * already uses for a fixture too small to earn a shared-server relation — the
+ * ONE exception is AC6's live-permission-loss cell, which needs a real
+ * same-process toggle (`POST /e2e-control/clients/<id>/visibility` in
+ * `serve-built.mjs`) because the read it drives happens on the SERVER, not in
+ * the browser tab `page.route` can see.
  */
 
 const WCAG_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"];
@@ -480,21 +490,18 @@ test("reduced motion: the sidebar toggle and the scope menu run no animation", a
 // ---------------------------------------------------------------------------
 
 test("D6: an invisible/nonexistent client renders the not-found state INSIDE the shell, never a redirect to Home", async ({ page }) => {
-  // NOT IMPLEMENTED AS A `page.route`-DELAYED "goes invisible mid-session"
-  // RACE, and this is a fixture limit rather than a shortcut: `loadClientById`
-  // runs inside `app/(firm)/clients/[clientId]/layout.tsx`, an async SERVER
-  // COMPONENT — its fetch to `.../e2e-supabase/rest/v1/clients` is issued by
-  // the Next.js SERVER PROCESS during SSR/RSC, never by the browser tab.
-  // `page.route` only intercepts requests the PAGE itself makes; it has no
-  // reach into that fetch (measured: a route handler on this URL never
-  // observes the request the layout makes, only a SEPARATE client-side read
-  // a descendant performs). Simulating "stops being visible" for real would
-  // need a stateful toggle in the shared `serve-built.mjs` fixture that every
-  // later spec in this `workers: 1` run would then have to remember to
-  // restore — a cross-test contamination risk for one assertion, so this
-  // cell instead exercises the SAME `notFound()` boundary
-  // (`app/(firm)/clients/not-found.tsx`) the honest way every persona can
-  // already reach it: a client id absent from the register.
+  // A BOGUS ID, NOT A LIVE TOGGLE — kept beside "AC6: live permission loss"
+  // below rather than folded into it, because the two prove different things.
+  // `loadClientById` runs inside `app/(firm)/clients/[clientId]/layout.tsx`,
+  // an async SERVER COMPONENT — its fetch to `.../e2e-supabase/rest/v1/clients`
+  // is issued by the Next.js SERVER PROCESS during SSR/RSC, never by the
+  // browser tab, so `page.route` cannot reach it and cannot simulate a client
+  // that STOPS being visible mid-session. This cell only needs the SAME
+  // `notFound()` boundary (`app/(firm)/clients/not-found.tsx`) reached the
+  // honest way every persona already can: a client id absent from the
+  // register from the very first request. The cell below drives the real
+  // toggle `serve-built.mjs` now carries for exactly the case this one
+  // cannot reach.
   await signInTo(page, "/");
   await page.goto("/clients/not-a-client");
   // URL is STILL /clients/not-a-client — D6's whole point is an explicit
@@ -506,6 +513,174 @@ test("D6: an invisible/nonexistent client renders the not-found state INSIDE the
   const waysBack = page.getByRole("navigation", { name: "Ways back" });
   await expect(waysBack.getByRole("link", { name: "Clients", exact: true })).toBeVisible();
   await expect(waysBack.getByRole("link", { name: "Firm home", exact: true })).toBeVisible();
+});
+
+test.describe("AC6: live permission loss", () => {
+  // `workers: 1`, one shared mock process — a toggle left set would poison
+  // every spec that runs after this one, including the cell above. Reset
+  // unconditionally regardless of how the test finishes, on top of the
+  // test's own restore below (defence in depth, cheap here).
+  test.afterEach(async ({ page }) => {
+    await page.request.post("/e2e-control/reset");
+  });
+
+  test("a client that stops being visible mid-session renders the not-found state on the next real request, and the switcher stops offering it", async ({ page }) => {
+    await signInTo(page, `/clients/${CLIENT_A}/journals`);
+    const mainNav = page.getByRole("navigation", { name: "Main" });
+    await expect(mainNav.getByText("Rome Properties", { exact: true })).toBeVisible();
+    await expect(page.getByRole("navigation", { name: "Breadcrumb" }).getByText("Rome Properties")).toBeVisible();
+
+    const hide = await page.request.post(`/e2e-control/clients/${CLIENT_A}/visibility`, { data: { visible: false } });
+    expect(hide.ok(), "the e2e visibility toggle did not answer").toBeTruthy();
+
+    // A FULL NAVIGATION, NOT A SIDEBAR `<Link>` CLICK — measured, not assumed.
+    // `[clientId]/layout.tsx` is a SHARED segment between `/journals` and
+    // `/documents`; Next's own Partial Rendering keeps a shared layout's
+    // already-rendered output alive across a sibling navigation and does not
+    // re-invoke it, so a plain click on "Documents" here never re-issues
+    // `loadClientById` at all — the mock's own request log stayed silent for
+    // it across every run this was measured against, prefetch blocked or not.
+    // A real round trip to the new address is what "the server re-reads the
+    // client" actually needs, and it is still the same in-session browser —
+    // the same address a bookmark or a typed URL would reach.
+    await page.goto(`/clients/${CLIENT_A}/documents`);
+    await expect(page).toHaveURL(new RegExp(`/clients/${CLIENT_A}/documents$`));
+    await expect(page.getByRole("heading", { name: "This client isn't visible to your firm", level: 1 })).toBeVisible();
+    await expect(page.getByRole("navigation", { name: "Main" })).toBeVisible();
+    await expect(mainNav.getByText("E2E Accounting", { exact: true })).toBeVisible();
+    // NEVER Rome Properties again — measured: the sidebar's client GROUP still
+    // renders here (`resolveActive` reads the client id straight off the URL,
+    // independently of whether the layout below it threw `notFound()`), under
+    // the neutral placeholder label ("Client", `AppShell.scope.
+    // clientPlaceholder`) rather than being absent outright — but the one
+    // security property the design actually promises, and the one this
+    // asserts, is that the STALE name never leaks back onto the screen.
+    await expect(mainNav.getByText("Rome Properties", { exact: true })).toHaveCount(0);
+    const waysBack = page.getByRole("navigation", { name: "Ways back" });
+    await expect(waysBack.getByRole("link", { name: "Clients", exact: true })).toBeVisible();
+    await expect(waysBack.getByRole("link", { name: "Firm home", exact: true })).toBeVisible();
+
+    // THE SWITCHER AGREES — a live, client-side read, not the SSR boundary.
+    const trigger = page.locator("[data-scope-switcher]");
+    await trigger.click();
+    const menu = page.getByRole("menu");
+    await expect(menu).toBeVisible();
+    await expect(menu.getByRole("menuitem", { name: "Bee Creative Solution" })).toBeVisible();
+    await expect(menu.getByRole("menuitem", { name: "Rome Properties" })).toHaveCount(0);
+    await page.keyboard.press("Escape");
+
+    // RESTORED, and a reload shows the client again — the toggle is a two-way
+    // door, not a one-shot fixture mutation.
+    const show = await page.request.post(`/e2e-control/clients/${CLIENT_A}/visibility`, { data: { visible: true } });
+    expect(show.ok(), "the e2e visibility toggle did not answer").toBeTruthy();
+    await page.goto(`/clients/${CLIENT_A}`);
+    await expect(page.getByRole("navigation", { name: "Breadcrumb" }).getByText("Rome Properties")).toBeVisible();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AC6: one overlay stack — the Clara rail and the mobile nav Sheet, together.
+// ---------------------------------------------------------------------------
+
+test("AC6: one overlay stack — the rail and the nav Sheet each own exactly one Escape", async ({ page }) => {
+  await page.setViewportSize(NARROW);
+  await signInTo(page, `/clients/${CLIENT_A}`);
+
+  await page.locator("[data-clara-rail-launcher]").click();
+  const rail = page.locator("[data-clara-rail]");
+  await expect(rail).toBeVisible();
+
+  // KEYBOARD, not a click — measured, not assumed: below `lg` the rail's own
+  // full-viewport scrim (`motion-panel fixed inset-0 z-30 bg-black/10 …
+  // lg:hidden`) sits over the header while the rail is open and intercepts
+  // every pointer event there, so a mouse click on "Toggle navigation" never
+  // lands (Playwright's own actionability retry times out on it). The control
+  // stays natively focusable throughout, so a keyboard user still reaches it.
+  const toggle = page.getByRole("button", { name: "Toggle navigation" });
+  await toggle.focus();
+  await page.keyboard.press("Enter");
+  const sheet = page.locator("[data-slot=sheet-content]");
+  await expect(sheet).toBeVisible();
+  await expect
+    .poll(async () => page.evaluate(() => document.getAnimations().filter((a) => a.playState === "running").length))
+    .toBe(0);
+  expect(
+    await page.evaluate(() => {
+      const popup = document.querySelector("[data-slot=sheet-content]");
+      return Boolean(popup && document.activeElement && popup.contains(document.activeElement));
+    }),
+    "focus never entered the sheet",
+  ).toBe(true);
+
+  // NO SIDEWAYS SCROLL while both overlays are up.
+  const overflow = await page.evaluate(() => ({
+    scrollWidth: document.documentElement.scrollWidth,
+    clientWidth: document.documentElement.clientWidth,
+  }));
+  expect(
+    overflow.scrollWidth,
+    `the document scrolls sideways with both overlays open (${overflow.scrollWidth} > ${overflow.clientWidth})`,
+  ).toBeLessThanOrEqual(overflow.clientWidth + 1);
+
+  // THE RAIL MUST BE OUTSIDE THE MODAL — pulled from the accessibility tree
+  // the way `[data-slot="sidebar-inset"]` (the main content column) actually
+  // IS while this Sheet is open: measured, that element and none of the
+  // rail's own ancestors up to `<body>` carry `aria-hidden` or `inert`. The
+  // rail is a THIRD sibling under the sidebar wrapper, alongside the sidebar
+  // and the inset, and Base UI's hide-others sweep on this vendored Sheet
+  // does not reach it.
+  const railHidden = await page.evaluate(() => {
+    let el = document.querySelector("[data-clara-rail]");
+    while (el && el !== document.body) {
+      if (el.getAttribute("aria-hidden") === "true" || el.hasAttribute("inert")) return true;
+      el = el.parentElement;
+    }
+    return false;
+  });
+  expect(
+    railHidden,
+    "the Clara rail (and none of its ancestors up to <body>) is aria-hidden or inert while the nav Sheet is open — it stays live in the accessibility tree behind a true modal",
+  ).toBe(true);
+
+  // ONE FOCUS TRAP. Tab from the sheet's OWN last focusable item — the
+  // footer's Sign out button, DOM order measured rather than assumed — and
+  // focus must stay inside rather than escaping to the page behind it.
+  const lastFocusable = sheet.getByRole("button", { name: "Sign out", exact: true });
+  await expect(lastFocusable).toBeVisible();
+  await lastFocusable.focus();
+  await expect(lastFocusable).toBeFocused();
+  await page.keyboard.press("Tab");
+  // POLLED, not read at the instant: Base UI's modal trap parks focus on its
+  // focus-guard `<span>` for one frame and then wraps it to the sheet's first
+  // item (measured: the guard, then the scope switcher ~100ms later). The
+  // claim is that focus ENDS inside the sheet, never on the page behind it.
+  await expect
+    .poll(
+      async () =>
+        page.evaluate(() => {
+          const popup = document.querySelector("[data-slot=sheet-content]");
+          return Boolean(popup && document.activeElement && popup.contains(document.activeElement));
+        }),
+      { message: "Tab from the sheet's last focusable item left focus outside it — the modal focus trap does not hold" },
+    )
+    .toBe(true);
+
+  // ESCAPE CLOSES ONE LAYER AT A TIME — never both, and never the wrong one.
+  // First: the sheet only. The rail is still on screen and the sheet is gone.
+  await page.keyboard.press("Escape");
+  await expect(sheet).toHaveCount(0);
+  await expect(rail).toBeVisible();
+  await expect(toggle).toBeFocused();
+
+  // Second: FROM INSIDE THE RAIL, its own existing Escape behaviour
+  // (`responsive-shell-walk.spec.ts`'s "Escape closes the overlay rail" cell)
+  // closes it, and only it — the rail's Escape handler never fired on the
+  // first press because focus was on the toggle, outside the rail.
+  const collapse = page.getByRole("button", { name: "Collapse Clara" });
+  await collapse.focus();
+  await page.keyboard.press("Escape");
+  await expect(rail).toHaveCount(0);
+  await expect(page.locator("[data-clara-rail-launcher]")).toBeFocused();
 });
 
 // ---------------------------------------------------------------------------
@@ -548,19 +723,27 @@ test("D6: /settings is rank-shaped — bookkeeper, owner and operator owner see 
   // `components/settings/settings-hub.tsx`), and several descriptions say
   // "firm" in passing ("access to this firm", "across the firm", "firms on
   // ClaraBook"), which would make a substring match on the link's name
-  // ambiguous for exactly the "Firm" section. The `<h2>` carries only the
-  // label itself.
+  // ambiguous for exactly the "Firm settings" section. The `<h2>` carries
+  // only the label itself.
+  //
+  // "Firm" -> "Firm settings", "Compliance" -> "Compliance register",
+  // "Registrations" -> "Firm registrations": the hub's card labels now read
+  // exactly what each destination's own `<h1>` already said — see the "Firm
+  // settings" `<h1>` `firm-navigation-walk.spec.ts` pins on `/settings/firm`.
+  // "Account" and "Members" are unchanged, and the ⌘K option for Members
+  // stays "Members" (a different catalogue, `lib/command/routes.ts`, whose
+  // own labels were already settled).
   await signInTo(page, "/", "bookkeeper@example.test");
   await page.goto("/settings");
   const heading = (name: string) => page.getByRole("heading", { name, exact: true, level: 2 });
   await expect(heading("Account")).toBeVisible();
-  await expect(heading("Firm")).toBeVisible();
-  await expect(heading("Compliance")).toBeVisible();
+  await expect(heading("Firm settings")).toBeVisible();
+  await expect(heading("Compliance register")).toBeVisible();
   const vendorBindingsCard = page.getByRole("link", { name: /Vendor identity bindings/ });
   await expect(heading("Vendor identity bindings")).toBeVisible();
   await expect(vendorBindingsCard.getByText("Legacy")).toBeVisible();
   await expect(heading("Members")).toHaveCount(0);
-  await expect(heading("Registrations")).toHaveCount(0);
+  await expect(heading("Firm registrations")).toHaveCount(0);
   await page.context().clearCookies();
 
   // The only owner fixture this suite has (`owner@example.test`) is ALSO the
@@ -570,7 +753,7 @@ test("D6: /settings is rank-shaped — bookkeeper, owner and operator owner see 
   await signInTo(page, "/", "owner@example.test");
   await page.goto("/settings");
   await expect(heading("Members")).toBeVisible();
-  await expect(heading("Registrations")).toBeVisible();
+  await expect(heading("Firm registrations")).toBeVisible();
 });
 
 test("⌘K: typing a settings section or the saved view navigates straight to it", async ({ page }) => {

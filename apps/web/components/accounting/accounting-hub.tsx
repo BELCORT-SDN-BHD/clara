@@ -1,16 +1,10 @@
 "use client";
 
-import Link from "next/link";
 import { useTranslations } from "next-intl";
 
+import { HubCards } from "@/components/common/hub-cards";
 import { useFirmScope } from "@/components/firm-scope-provider";
 import { Badge } from "@/components/ui/badge";
-import {
-  Card,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { accountingHref, visibleAccountingItems, type NavigationScope } from "@/lib/navigation/tree";
 
 /**
@@ -50,27 +44,15 @@ export function AccountingHubView({
   }
 
   return (
-    <nav aria-label={t("sectionsLabel")}>
-      <ul className="grid gap-4 md:grid-cols-2">
-        {items.map((item) => (
-          <li key={item.id}>
-            <Link
-              href={accountingHref(clientId, item)}
-              className="group block h-full rounded-xl outline-none focus-visible:ring-3 focus-visible:ring-ring/70"
-            >
-              <Card className="h-full transition-colors group-hover:bg-accent/40">
-                <CardHeader>
-                  <CardTitle className="flex flex-wrap items-center gap-2">
-                    <h2>{tShell(item.labelKey)}</h2>
-                    {item.beta ? <Badge variant="outline">{tShell("betaBadge")}</Badge> : null}
-                  </CardTitle>
-                  <CardDescription>{t(`purposes.${item.id}`)}</CardDescription>
-                </CardHeader>
-              </Card>
-            </Link>
-          </li>
-        ))}
-      </ul>
-    </nav>
+    <HubCards
+      label={t("sectionsLabel")}
+      items={items.map((item) => ({
+        key: item.id,
+        href: accountingHref(clientId, item),
+        title: tShell(item.labelKey),
+        badge: item.beta ? <Badge variant="outline">{tShell("betaBadge")}</Badge> : undefined,
+        description: t(`purposes.${item.id}`),
+      }))}
+    />
   );
 }

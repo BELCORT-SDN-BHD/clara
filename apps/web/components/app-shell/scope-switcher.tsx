@@ -80,7 +80,8 @@ export function ScopeSwitcher({
   searchParams: { get(name: string): string | null };
   /** The client the URL is on, or null at firm altitude. */
   clientId: string | null;
-  /** Null until the client layout has published it — the id stands in. */
+  /** Null until the client layout has published it — the neutral placeholder
+   *  stands in, never the id. */
   clientName: string | null;
   firmName: string;
   /** The blessed singleton by default (apps/web/AGENTS.md's session-accessor

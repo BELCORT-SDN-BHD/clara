@@ -64,6 +64,7 @@ components/clara/onboarding-checklist-keyboard.test.tsx
 components/clara/onboarding-checklist.test.tsx
 components/clara/onboarding-progress-sync.test.tsx
 components/clara/rail-boundary.test.tsx
+components/clara/rail-chrome.test.tsx
 components/clara/thread-live-clarify.test.tsx
 components/clara/thread-live-regions.test.tsx
 components/clara/thread-menu.test.tsx

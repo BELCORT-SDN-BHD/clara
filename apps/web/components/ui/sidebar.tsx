@@ -48,7 +48,12 @@
 //     movement. The group label's OPACITY transition is left
 //     unconditional, which is the contract's own rule: "reduced motion removes
 //     position, scale, stagger and parallax; opacity and explicit state copy
-//     remain".
+//     remain". The same defect was present on two more elements that move
+//     rather than fade — `SidebarMenuButton`'s variant base (a bare
+//     `transition-[width,height,padding]`) and `SidebarRail` (a bare
+//     `transition-all ease-linear`, whose only actual motion is the resize
+//     handle's translate) — both now name their moving property, carry
+//     `motion-fast` for the duration, and add `motion-reduce:transition-none`.
 //  4. `dark:` census: ZERO occurrences in the emitted file (light-theme-only,
 //     owner ruling Q4) — nothing to strip. Recorded as a measurement.
 //  5. `SidebarInset` renders a `<div>`, NOT a `<main>`. Every route-level
@@ -129,6 +134,18 @@ function useSidebar() {
   }
 
   return context
+}
+
+/**
+ * HAND EDIT (#614): the same context, or `null` outside a provider. For chrome
+ * that is mounted BESIDE the sidebar in production (the Clara rail, a sibling
+ * under the provider) but rendered bare in unit cells: it must know when the
+ * mobile Sheet is up — the rail goes `inert` behind that modal, measured in the
+ * browser leg where Base UI's hide-others left the rail live — without
+ * demanding a provider it does not otherwise need.
+ */
+function useSidebarOptional() {
+  return React.useContext(SidebarContext)
 }
 
 function SidebarProvider({
@@ -393,7 +410,7 @@ function SidebarRail({
       onClick={toggleSidebar}
       title={name}
       className={cn(
-        "absolute inset-y-0 z-20 hidden w-4 transition-all ease-linear group-data-[side=left]:-right-4 group-data-[side=right]:left-0 after:absolute after:inset-y-0 after:start-1/2 after:w-[2px] hover:after:bg-sidebar-border sm:flex ltr:-translate-x-1/2 rtl:-translate-x-1/2",
+        "absolute inset-y-0 z-20 hidden w-4 motion-fast transition-transform motion-reduce:transition-none ease-linear group-data-[side=left]:-right-4 group-data-[side=right]:left-0 after:absolute after:inset-y-0 after:start-1/2 after:w-[2px] hover:after:bg-sidebar-border sm:flex ltr:-translate-x-1/2 rtl:-translate-x-1/2",
         "in-data-[side=left]:cursor-w-resize in-data-[side=right]:cursor-e-resize",
         "[[data-side=left][data-state=collapsed]_&]:cursor-e-resize [[data-side=right][data-state=collapsed]_&]:cursor-w-resize",
         "group-data-[collapsible=offcanvas]:translate-x-0 group-data-[collapsible=offcanvas]:after:left-full hover:group-data-[collapsible=offcanvas]:bg-sidebar",
@@ -581,7 +598,7 @@ function SidebarMenuItem({ className, ...props }: React.ComponentProps<"li">) {
 }
 
 const sidebarMenuButtonVariants = cva(
-  "peer/menu-button group/menu-button flex w-full items-center gap-2 overflow-hidden rounded-md p-2 text-left text-sm ring-sidebar-ring outline-hidden transition-[width,height,padding] group-has-data-[sidebar=menu-action]/menu-item:pr-8 group-data-[collapsible=icon]:size-8! group-data-[collapsible=icon]:p-2! hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 active:bg-sidebar-accent active:text-sidebar-accent-foreground disabled:pointer-events-none disabled:opacity-50 aria-disabled:pointer-events-none aria-disabled:opacity-50 data-open:hover:bg-sidebar-accent data-open:hover:text-sidebar-accent-foreground data-active:bg-sidebar-accent data-active:font-medium data-active:text-sidebar-accent-foreground [&_svg]:size-4 [&_svg]:shrink-0 [&>span:last-child]:truncate",
+  "peer/menu-button group/menu-button flex w-full items-center gap-2 overflow-hidden rounded-md p-2 text-left text-sm ring-sidebar-ring outline-hidden motion-fast transition-[width,height,padding] motion-reduce:transition-none group-has-data-[sidebar=menu-action]/menu-item:pr-8 group-data-[collapsible=icon]:size-8! group-data-[collapsible=icon]:p-2! hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 active:bg-sidebar-accent active:text-sidebar-accent-foreground disabled:pointer-events-none disabled:opacity-50 aria-disabled:pointer-events-none aria-disabled:opacity-50 data-open:hover:bg-sidebar-accent data-open:hover:text-sidebar-accent-foreground data-active:bg-sidebar-accent data-active:font-medium data-active:text-sidebar-accent-foreground [&_svg]:size-4 [&_svg]:shrink-0 [&>span:last-child]:truncate",
   {
     variants: {
       variant: {
@@ -826,4 +843,5 @@ export {
   SidebarSeparator,
   SidebarTrigger,
   useSidebar,
+  useSidebarOptional,
 }

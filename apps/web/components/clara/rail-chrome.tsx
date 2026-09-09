@@ -92,7 +92,20 @@ const NARROW_QUERY = "(width < 64rem)";
 export const RAIL_PANEL_CLASS =
   "dock-panel sticky top-0 flex h-dvh w-80 max-w-[85vw] shrink-0 flex-col border-l border-border bg-card shadow-lg";
 
-export function ClaraRailChrome({ children }: { children: React.ReactNode }) {
+export function ClaraRailChrome({
+  children,
+  inert = false,
+}: {
+  children: React.ReactNode;
+  /** #614 AC6 — true while a modal above the rail (the mobile navigation
+   *  Sheet) owns the page; see rail-mount.tsx. Applied to the scrim and the
+   *  wrapper, so the whole rail leaves the focus order and the a11y tree. */
+  inert?: boolean;
+}) {
+  // Spread, not `inert={inert || undefined}`: the attribute must be ABSENT when
+  // no modal is above the rail, and a present-but-undefined prop is still a
+  // present prop to a host that records what it was handed.
+  const inertProps = inert ? { inert: true as const } : {};
   const open = useClaraRailOpen();
   const wrapperRef = React.useRef<HTMLDivElement | null>(null);
   const wasOpen = React.useRef(open);
@@ -172,12 +185,14 @@ export function ClaraRailChrome({ children }: { children: React.ReactNode }) {
           // Escape and the rail's own "Collapse Clara" button are the keyboard
           // routes out, so this is not the sole path to any act.
           aria-hidden="true"
+          {...inertProps}
           className="motion-panel fixed inset-0 z-30 bg-black/10 transition-opacity lg:hidden"
           onClick={() => claraThreadStore.setRailOpen(false)}
         />
       ) : null}
       <div
         ref={wrapperRef}
+        {...inertProps}
         // `tabIndex={-1}` + `outline-none` is the SAME disposition, for the same
         // reason, as the shell's `#main-content` column (app/(firm)/layout.tsx's
         // own note): this is a programmatic focus target, not a control in the

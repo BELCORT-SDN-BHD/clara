@@ -446,6 +446,53 @@ test("a client is reachable by name from INSIDE another client, too", async () =
   );
 });
 
+test("a NULL-RANK caller inside a client sees no client rows — the parity hole closed", async () => {
+  // Before this fix, `clientMatches` rendered every `CLIENT_ROUTES` row
+  // regardless of scope: a caller whose rank the database could not even order
+  // (`role_rank: null`, `lib/firm/navigation.ts`'s own "fail closed on a
+  // NULL/unknown rank" case) was offered every client destination by name —
+  // "This client" group and all — exactly the unfiltered list the firm-scope
+  // Go rows were fixed to never show again under C-43. This is that same fix,
+  // for client scope: `clientMatches` is now built from
+  // `visibleClientNav`/`visibleAccountingItems`, the sidebar's own predicate,
+  // so a null rank reaches NOTHING here either.
+  await withFetch(
+    (url) => {
+      if (url.includes("/rest/v1/caller_context")) {
+        return json([
+          {
+            user_id: "11111111-1111-4111-8111-111111111111",
+            firm_id: "44444444-4444-4444-8444-444444444444",
+            firm_name: "BELCORT",
+            role: "unknown",
+            role_rank: null,
+            is_operator: false,
+          },
+        ]);
+      }
+      if (url.includes("/rest/v1/clients")) return json(CLIENTS);
+      throw new Error(`unexpected fetch: ${url}`);
+    },
+    async () => {
+      const h = await renderComponent(App(`/clients/${CLIENT_A}`));
+      try {
+        // The by-NAME client search is unrelated to this scope (RLS-scoped, not
+        // rank-shaped — navigation.ts records it viewer-floor with no rank), so
+        // it still settles and gives this test something honest to wait on.
+        await settleUntil(h, () => h.text().includes("Rome Properties"), "the clients-by-name group", h.text);
+        const text = h.text();
+        // NOT the "This client" group heading, and not any of its rows — a
+        // CLIENT_NAV item and an ACCOUNTING_ITEMS item, one of each.
+        assert.doesNotMatch(text, /This client\b/);
+        assert.equal(findRowByText(h.container, "Workspace overview"), null);
+        assert.equal(findRowByText(h.container, "Journals"), null);
+      } finally {
+        await h.unmount();
+      }
+    },
+  );
+});
+
 test("a FAILED client-register read renders an honest note — it does NOT quietly fall back to the register row", async () => {
   await withFetch(
     (url) => {

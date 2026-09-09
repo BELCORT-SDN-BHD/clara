@@ -121,6 +121,16 @@ const state = {
   authWall: { mode: "verify" },
   authWallRequests: [],
   doorCalls: [],
+  // #614 AC6 — the live-permission-loss toggle. `loadClientById`
+  // (`app/(firm)/clients/[clientId]/layout.tsx`) runs SERVER-side, so its
+  // fetch to `.../e2e-supabase/rest/v1/clients` is issued by the Next.js
+  // server process, never by the browser tab — `page.route` cannot reach it.
+  // This Set is the mock's own stand-in for "RLS no longer admits this row":
+  // every handler below that returns rows from the shared `clients` fixture
+  // filters a hidden id out, so a spec can make a client disappear MID-SESSION
+  // and prove the shell's real not-found boundary rather than only its
+  // bogus-id arm. See `handleClientVisibilityControl` for how a spec flips it.
+  hiddenClients: new Set(),
 };
 
 const clients = [
@@ -433,9 +443,10 @@ async function handleSupabase(request, response, url) {
 
   if (request.method === "GET" && path === "/rest/v1/clients") {
     const filter = url.searchParams.get("id");
+    const visible = clients.filter((client) => !state.hiddenClients.has(client.id));
     const rows = filter?.startsWith("eq.")
-      ? clients.filter((client) => client.id === filter.slice(3))
-      : clients;
+      ? visible.filter((client) => client.id === filter.slice(3))
+      : visible;
     sendJson(response, 200, rows, cors);
     return;
   }
@@ -562,6 +573,42 @@ async function handleChat(request, response, url) {
   return false;
 }
 
+/** #614 AC6's own app-origin control endpoint — the same idiom as P6-5's
+ *  `/e2e-p6-5/reset` below (a plain POST this server answers directly, never
+ *  a runtime route, never proxied to `next start`). It lives OUTSIDE the
+ *  Supabase prefix on purpose: `handleSupabase` is reached only under
+ *  `supabasePrefix`, and while nothing in this mock actually gates `/rest` on
+ *  a bearer token today, a control surface for TEST STATE has no business
+ *  living where a real Authorization/apikey header would ever be expected —
+ *  keeping it on the bare app origin keeps that true even if `/rest` grows a
+ *  token check later.
+ *
+ *  `POST /e2e-control/clients/<id>/visibility` with `{ "visible": boolean }`
+ *  adds or removes `<id>` from `state.hiddenClients`; every client-row read in
+ *  `handleSupabase` above (`/rest/v1/clients`, filtered or not) already
+ *  consults that Set. `POST /e2e-control/reset` clears it outright — the
+ *  `workers: 1` backstop so a spec that ends early (a failed assertion, a
+ *  thrown timeout) can never leave a LATER spec's client invisible; the walk
+ *  that uses the toggle also restores visibility itself before it finishes,
+ *  in a `test.afterEach`, for the same reason defence in depth is cheap here. */
+async function handleClientVisibilityControl(request, response, url) {
+  const visibilityMatch = /^\/e2e-control\/clients\/([^/]+)\/visibility$/.exec(url.pathname);
+  if (request.method === "POST" && visibilityMatch) {
+    const id = decodeURIComponent(visibilityMatch[1]);
+    const body = await readJson(request);
+    if (body.visible === false) state.hiddenClients.add(id);
+    else state.hiddenClients.delete(id);
+    sendJson(response, 200, { id, visible: !state.hiddenClients.has(id) });
+    return true;
+  }
+  if (request.method === "POST" && url.pathname === "/e2e-control/reset") {
+    state.hiddenClients.clear();
+    sendJson(response, 200, { reset: true });
+    return true;
+  }
+  return false;
+}
+
 const httpsServer = createHttpsServer(
   { key: readFileSync(keyPath), cert: readFileSync(certPath) },
   (request, response) => {
@@ -581,9 +628,14 @@ const httpsServer = createHttpsServer(
     // and `/api/runtime/tasks/*` requests fall through to `proxyToNext` like every other
     // app request — traversing `next start`, the firm-scope guard and the real proxy.
     //
-    // What stays here is P6-5's ONE app-origin control endpoint (`/e2e-p6-5/reset`),
-    // which is not a runtime route and never was.
-    handleP6_5App(request, response, url)
+    // What stays here is P6-5's ONE app-origin control endpoint (`/e2e-p6-5/reset`)
+    // and #614 AC6's own (`/e2e-control/...`, `handleClientVisibilityControl` above)
+    // — neither is a runtime route and neither ever was.
+    handleClientVisibilityControl(request, response, url)
+      .then((handled) => {
+        if (handled) return true;
+        return handleP6_5App(request, response, url);
+      })
       .then((handled) => {
         if (handled) return;
         proxyToNext(request, response);

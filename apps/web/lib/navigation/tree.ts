@@ -347,8 +347,10 @@ export type ActiveNav = {
   readonly settingsSection: SettingsSectionId | null;
 };
 
-/** `/clients/<id>[/...]` → the id, or null at firm altitude. Mirrors
- *  `lib/command/routes.ts`'s own resolver, including its garbage-in rule. */
+/** `/clients/<id>[/...]` → the id, or null at firm altitude. THE resolver for
+ *  that one dynamic segment — `lib/command/routes.ts` re-exports this under
+ *  its own `resolveClientIdFromPathname` name rather than keeping a second,
+ *  hand-duplicated regex (#614 code review). */
 export function clientIdOf(pathname: string): string | null {
   const match = /^\/clients\/([^/?#]+)(?:\/.*)?$/.exec(pathname);
   const segment = match?.[1];
@@ -378,11 +380,15 @@ const NOTHING_ACTIVE = {
 /**
  * Which ONE entry in the whole tree is the page the caller is looking at.
  *
- * The contract the sidebar depends on: AT MOST ONE of `firmItem`, `clientItem`,
- * `accountingItem` and `settingsSection` is non-null, so `aria-current="page"`
- * lands exactly once. Inside a client, the firm group's Clients row is NOT
+ * The contract the sidebar depends on: AT MOST ONE of `firmItem`, `clientItem`
+ * and `accountingItem` is non-null, so `aria-current="page"` lands exactly
+ * once in the sidebar. Inside a client, the firm group's Clients row is NOT
  * current — the client group above it already says where you are, and two
  * `aria-current`s in one nav is the defect this rule exists to prevent.
+ * `settingsSection` is a second mark by design: it accompanies
+ * `firmItem: "settings"` rather than replacing it, because the section is
+ * marked current in the in-page settings nav, never in the sidebar, so it
+ * cannot collide with the sidebar's own single `aria-current`.
  *
  * The three cases worth naming:
  *   · `/registers` with no `?tab=` is the aging view (the workbench's own
@@ -469,14 +475,27 @@ export function resolveActive(pathname: string, params: ReadonlyParams = EMPTY_P
  *
  * The LAST crumb never carries an href: it is the page you are on, and a link to
  * here is a link to nowhere.
+ *
+ * `scope` marks the ONE crumb that is the current ALTITUDE's identity — the
+ * firm crumb at firm altitude, the client crumb (name or placeholder) at client
+ * altitude — and `app-breadcrumb.tsx`'s narrow arm keeps exactly this crumb and
+ * the last one visible. THIS USED TO BE A HEURISTIC ("the last `kind: 'text'`
+ * crumb") rather than a flag, and it broke on the one case that mattered most:
+ * before the client layout publishes the client's name, `clientCrumbOf` below
+ * returns a `kind: "message"` placeholder crumb (never the raw id — #614 A7),
+ * so "the last text crumb" landed back on the FIRM crumb and the narrow arm
+ * showed firm identity while the URL was already inside a client. An explicit
+ * flag, set once per `breadcrumbFor` return path regardless of which `kind` the
+ * scope crumb happens to be, does not have that failure mode.
  */
 export type Crumb =
-  | { readonly kind: "text"; readonly text: string; readonly href?: string }
+  | { readonly kind: "text"; readonly text: string; readonly href?: string; readonly scope?: true }
   | {
       readonly kind: "message";
       readonly ns: "AppShell" | "Settings";
       readonly key: string;
       readonly href?: string;
+      readonly scope?: true;
     };
 
 export interface BreadcrumbNames {
@@ -507,22 +526,29 @@ export function breadcrumbFor(
   names: BreadcrumbNames,
 ): Crumb[] {
   const active = resolveActive(pathname, params);
+  // TWO firm crumbs, not one, because `scope` may land on only ONE of them.
+  // `firm` is the plain ancestry link client-scope trails use to point back at
+  // firm home; `firmScope` is the SAME crumb with `scope: true`, used only when
+  // firm altitude IS the current scope. Reusing one object for both would mark
+  // the firm crumb as the scope identity even inside a client, which is exactly
+  // the bug this flag exists to not have.
   const firm: Crumb = { kind: "text", text: names.firmName, href: "/" };
+  const firmScope: Crumb = { ...firm, scope: true };
 
   if (active.scope === "firm") {
     if (active.firmItem === "home" || active.firmItem === null) {
-      return [{ kind: "text", text: names.firmName }];
+      return [{ kind: "text", text: names.firmName, scope: true }];
     }
     const item = FIRM_NAV.find((entry) => entry.id === active.firmItem)!;
     if (active.firmItem !== "settings") {
-      return [firm, { kind: "message", ns: "AppShell", key: item.labelKey }];
+      return [firmScope, { kind: "message", ns: "AppShell", key: item.labelKey }];
     }
     const settings: Crumb = { kind: "message", ns: "AppShell", key: item.labelKey, href: item.href };
     if (active.settingsSection === null) {
-      return [firm, { kind: "message", ns: "AppShell", key: item.labelKey }];
+      return [firmScope, { kind: "message", ns: "AppShell", key: item.labelKey }];
     }
     const section = SETTINGS_SECTIONS.find((s) => s.id === active.settingsSection)!;
-    return [firm, settings, { kind: "message", ns: "Settings", key: section.labelKey }];
+    return [firmScope, settings, { kind: "message", ns: "Settings", key: section.labelKey }];
   }
 
   const clientId = active.clientId!;
@@ -531,11 +557,19 @@ export function breadcrumbFor(
   // (the layout that reads it publishes it one commit later). The stand-in is
   // the neutral "Client" placeholder — NEVER the raw id (a UUID is not an
   // identity a person or a screen reader should meet, not even for one paint)
-  // and never a guessed name (#614 A7).
+  // and never a guessed name (#614 A7). EITHER WAY this is the client-scope
+  // identity crumb, so `scope: true` is set on both arms — the placeholder is
+  // still "who you are with" for as long as the real name has not landed.
   const clientCrumbOf = (href?: string): Crumb =>
     names.clientName != null
-      ? { kind: "text", text: names.clientName, ...(href === undefined ? {} : { href }) }
-      : { kind: "message", ns: "AppShell", key: "scope.clientPlaceholder", ...(href === undefined ? {} : { href }) };
+      ? { kind: "text", text: names.clientName, scope: true, ...(href === undefined ? {} : { href }) }
+      : {
+          kind: "message",
+          ns: "AppShell",
+          key: "scope.clientPlaceholder",
+          scope: true,
+          ...(href === undefined ? {} : { href }),
+        };
   const clientCrumb: Crumb = clientCrumbOf(clientBase(clientId));
 
   if (active.clientItem === "home") {

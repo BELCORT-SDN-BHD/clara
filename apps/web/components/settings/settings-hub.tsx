@@ -1,17 +1,11 @@
 "use client";
 
-import Link from "next/link";
 import { useTranslations } from "next-intl";
 
+import { HubCards } from "@/components/common/hub-cards";
 import { NotBuiltNote } from "@/components/common/not-built-note";
 import { useFirmScope } from "@/components/firm-scope-provider";
 import { Badge } from "@/components/ui/badge";
-import {
-  Card,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { visibleSettingsSections, type NavigationScope } from "@/lib/navigation/tree";
 
 /**
@@ -47,34 +41,19 @@ export function SettingsHubView({ scope }: { scope: NavigationScope }) {
 
   return (
     <div className="flex flex-col gap-4">
-      <nav aria-label={t("sectionsLabel")}>
-        <ul className="grid gap-4 md:grid-cols-2">
-          {sections.map((section) => (
-            <li key={section.id}>
-              <Link
-                href={section.href}
-                className="group block h-full rounded-xl outline-none focus-visible:ring-3 focus-visible:ring-ring/70"
-              >
-                <Card className="h-full transition-colors group-hover:bg-accent/40">
-                  <CardHeader>
-                    <CardTitle className="flex flex-wrap items-center gap-2">
-                      <h2>{t(section.labelKey)}</h2>
-                      {/* A destination that exists because something depends on
-                          it, not because the product wants it there. The panel
-                          itself carries the explanation; this is the signal a
-                          reader needs before clicking. */}
-                      {section.legacy ? (
-                        <Badge variant="outline">{tShell("legacyBadge")}</Badge>
-                      ) : null}
-                    </CardTitle>
-                    <CardDescription>{t(section.purposeKey)}</CardDescription>
-                  </CardHeader>
-                </Card>
-              </Link>
-            </li>
-          ))}
-        </ul>
-      </nav>
+      <HubCards
+        label={t("sectionsLabel")}
+        items={sections.map((section) => ({
+          key: section.id,
+          href: section.href,
+          title: t(section.labelKey),
+          // A destination that exists because something depends on it, not
+          // because the product wants it there. The panel itself carries the
+          // explanation; this is the signal a reader needs before clicking.
+          badge: section.legacy ? <Badge variant="outline">{tShell("legacyBadge")}</Badge> : undefined,
+          description: t(section.purposeKey),
+        }))}
+      />
       <NotBuiltNote>{t("unbuiltNote")}</NotBuiltNote>
     </div>
   );

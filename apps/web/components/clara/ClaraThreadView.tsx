@@ -22,6 +22,7 @@ import type { SessionTokenAccessor } from "@/lib/session";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
 import { claraThreadStore, type ClaraThreadUiState } from "@/lib/clara/threadStore";
 import { useClaraThread, useComposerFocusRequest } from "@/lib/clara/useClaraThread";
+import { FIRM_ALTITUDE } from "@/lib/clara/useActiveThread";
 import { foldLiveClarifyParts } from "@/lib/clara/liveClarify";
 import { ThreadActionCoordinatorProvider } from "@/lib/parts/thread-action-coordinator";
 import { cn } from "@/lib/utils";
@@ -66,16 +67,16 @@ export function ClaraThreadView({
   clientId?: string;
 }) {
   const t = useTranslations("Clara.thread");
-  // #614 A7 — the SAME "firm" literal `useActiveThread.ts` defines as
-  // `FIRM_ALTITUDE` (not exported there, so repeated here rather than reached
-  // for across a file this lane does not touch). This is the draft store's
-  // scope half of the `(altitude, threadId)` key — see threadStore.ts's own
-  // header on `drafts` for why a bare prop-change scope switch needs it.
-  const altitude = clientId ?? "firm";
+  // #614 A7 — `FIRM_ALTITUDE`, `useActiveThread.ts`'s own name for firm
+  // altitude's store key, now exported and imported rather than repeated as a
+  // bare "firm" literal (#614 code review). This is the draft store's scope
+  // half of the `(altitude, threadId)` key — see threadStore.ts's own header
+  // on `drafts` for why a bare prop-change scope switch needs it.
+  const altitude = clientId ?? FIRM_ALTITUDE;
   // THE DRAFT LIVES IN THE STORE, NOT IN LOCAL STATE (#614 A7). A `useState("")`
   // here is exactly what journey A7 rules out: `<RailMount/>` keys the whole rail
-  // subtree on `clientId ?? "firm"` (remounting this component on every client
-  // switch) and `ClaraRail` unmounts it outright once the close animation settles
+  // subtree on `clientId ?? FIRM_ALTITUDE` (remounting this component on every
+  // client switch) and `ClaraRail` unmounts it outright once the close animation settles
   // — either event would tear down a `useState` and take the unsent draft with
   // it. Reading through `useSyncExternalStore` means a scope change that does NOT
   // remount (the full-screen mount's bare `clientId` prop change) also just works:
@@ -118,7 +119,7 @@ export function ClaraThreadView({
   // stand in for this reset.
   //
   // P6-5 — THIS RESET IS **NOT** RETIRED BY THE STRUCTURAL BOUNDARY, and the measurement is
-  // why. `RailMount` now keys the whole rail subtree on `clientId ?? "firm"`
+  // why. `RailMount` now keys the whole rail subtree on `clientId ?? FIRM_ALTITUDE`
   // (components/clara/rail-mount.tsx), which does cover this component ON THE RAIL. But the
   // rail is not this component's only mount point: `ClaraFullScreenThread` mounts it from
   // `app/(full)/clients/[clientId]/clara/[threadId]/page.tsx`, and the App Router REUSES a

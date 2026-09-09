@@ -22,10 +22,11 @@ import { useParams } from "next/navigation";
  *
  * THE SAFETY RULE, AND IT IS THE WHOLE POINT: a consumer only uses the stored
  * name when the stored `id` matches the clientId in the URL RIGHT NOW. Otherwise
- * it falls back to the id itself. That is what makes a stale store harmless
- * rather than a cross-client identity leak — during the frame between navigating
- * from client A to client B and B's layout publishing, the shell shows B's id,
- * never A's name. `components/client-scope-provider.tsx` says why that distinction
+ * it falls back to the neutral placeholder (`t("scope.clientPlaceholder")`),
+ * never a guessed name. That is what makes a stale store harmless rather than a
+ * cross-client identity leak — during the frame between navigating from client A
+ * to client B and B's layout publishing, the shell shows the placeholder, never
+ * A's name. `components/client-scope-provider.tsx` says why that distinction
  * is a security property here and not a nicety.
  *
  * PUBLISHED FROM A LAYOUT EFFECT, not during render: the subscriber is an
@@ -33,9 +34,9 @@ import { useParams } from "next/navigation";
  * "cannot update a component while rendering a different component" error. A
  * layout effect commits before the browser paints, so an in-app navigation
  * shows the name in the first painted frame. A HARD load does not: the server
- * has no store, so the server-rendered HTML carries the id and the name replaces
- * it on hydration. Stated rather than hidden — an id is honest, and a guessed
- * name would not be.
+ * has no store, so the server-rendered HTML carries the neutral placeholder and
+ * the name replaces it on hydration. Stated rather than hidden — a placeholder
+ * is honest, and a guessed name would not be.
  */
 
 export type ClientIdentity = { readonly id: string; readonly name: string };

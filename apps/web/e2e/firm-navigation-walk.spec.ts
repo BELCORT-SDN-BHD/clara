@@ -36,13 +36,17 @@ test("operator owner sees the full sidebar and reaches Members in two navigation
   // Asserted on each card's own `<h2>`, not the wrapping `<Link>` — the link's
   // accessible name is its whole card (title AND description concatenated),
   // and several descriptions say "firm" in passing, which would make a
-  // substring match on the link's name ambiguous for the "Firm" section.
+  // substring match on the link's name ambiguous for the "Firm settings"
+  // section. "Firm" -> "Firm settings", "Compliance" -> "Compliance
+  // register", "Registrations" -> "Firm registrations": the card label now
+  // reads exactly what the destination's own `<h1>` says (pinned below for
+  // "Firm settings"). "Members" is unchanged.
   const heading = (name: string) => page.getByRole("heading", { name, exact: true, level: 2 });
   await expect(heading("Members")).toBeVisible();
-  await expect(heading("Registrations")).toBeVisible();
-  await expect(heading("Compliance")).toBeVisible();
+  await expect(heading("Firm registrations")).toBeVisible();
+  await expect(heading("Compliance register")).toBeVisible();
   await expect(heading("Vendor identity bindings")).toBeVisible();
-  await expect(heading("Firm")).toBeVisible();
+  await expect(heading("Firm settings")).toBeVisible();
 
   // Clicking anywhere inside the card's `<Link>` navigates — the heading is a
   // descendant of it, and a click there bubbles to the anchor exactly as a
@@ -75,13 +79,15 @@ test("bookkeeper sidebar shows viewer/bookkeeper reads and hides admin- and owne
   await expect(page.getByRole("heading", { name: "Settings", level: 1 })).toBeVisible();
   // Asserted on each card's own `<h2>` — see the operator-owner test above
   // for why the wrapping `<Link>`'s own accessible name is not the right
-  // subject here.
+  // subject here. "Firm" -> "Firm settings", "Compliance" ->
+  // "Compliance register", "Registrations" -> "Firm registrations" — the
+  // same rename the operator-owner test above documents.
   const sectionHeading = (name: string) => page.getByRole("heading", { name, exact: true, level: 2 });
-  await expect(sectionHeading("Compliance")).toBeVisible();
+  await expect(sectionHeading("Compliance register")).toBeVisible();
   await expect(sectionHeading("Vendor identity bindings")).toBeVisible();
-  await expect(sectionHeading("Firm")).toBeVisible();
+  await expect(sectionHeading("Firm settings")).toBeVisible();
   await expect(sectionHeading("Members")).toHaveCount(0);
-  await expect(sectionHeading("Registrations")).toHaveCount(0);
+  await expect(sectionHeading("Firm registrations")).toHaveCount(0);
 });
 
 // ---------------------------------------------------------------------------

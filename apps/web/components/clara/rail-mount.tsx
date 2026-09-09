@@ -4,6 +4,8 @@ import { useParams } from "next/navigation";
 
 import { ClaraRail } from "@/components/clara/ClaraRail";
 import { ClaraRailChrome } from "@/components/clara/rail-chrome";
+import { useSidebarOptional } from "@/components/ui/sidebar";
+import { FIRM_ALTITUDE } from "@/lib/clara/useActiveThread";
 
 // P2 FOLD SEAM H: the ONE Clara rail mount for the whole (firm) shell — mounted from
 // `app/(firm)/layout.tsx`. `clientId` comes from the URL when the (firm) layout
@@ -48,9 +50,11 @@ import { ClaraRailChrome } from "@/components/clara/rail-chrome";
 // thing that could destroy a running turn's state on a switch away and back. A different
 // client is a different thread id, so nothing crosses; see that file's own note.
 //
-// THE FIRM ALTITUDE IS A SCOPE LIKE ANY OTHER. `clientId ?? "firm"` keys it too, so
-// A -> firm is as clean a boundary as A -> B, and the firm thread's own store entry
-// survives the trip in exactly the same way a client thread's does.
+// THE FIRM ALTITUDE IS A SCOPE LIKE ANY OTHER. `clientId ?? FIRM_ALTITUDE` keys it
+// too, so A -> firm is as clean a boundary as A -> B, and the firm thread's own
+// store entry survives the trip in exactly the same way a client thread's does.
+// `FIRM_ALTITUDE` is `useActiveThread.ts`'s own name for this store key, imported
+// rather than re-spelled as a bare "firm" literal (#614 code review).
 //
 // CB-AE2E-019 — `<ClaraRailChrome>` WRAPS the rail here rather than the rail
 // growing viewport arms of its own. Two reasons. (1) The key: `key` must stay on
@@ -64,10 +68,19 @@ import { ClaraRailChrome } from "@/components/clara/rail-chrome";
 export function RailMount() {
   const params = useParams();
   const clientId = typeof params.clientId === "string" ? params.clientId : undefined;
+  // ONE OVERLAY STACK (#614, AC6). Below `md` the navigation Sheet is a modal;
+  // Base UI hides the sidebar inset behind it but its hide-others sweep does
+  // not reach this sibling (measured in the browser leg), so the rail stayed
+  // live — focusable and announced — behind a true modal. While the mobile
+  // Sheet is open the rail is `inert`: not focusable, not in the accessibility
+  // tree, and it never intercepts a pointer. Nothing about the rail's own
+  // state changes; closing the Sheet restores it exactly as it was.
+  const sidebar = useSidebarOptional();
+  const behindNavSheet = sidebar?.isMobile === true && sidebar.openMobile;
 
   return (
-    <ClaraRailChrome>
-      <ClaraRail key={clientId ?? "firm"} clientId={clientId} />
+    <ClaraRailChrome inert={behindNavSheet}>
+      <ClaraRail key={clientId ?? FIRM_ALTITUDE} clientId={clientId} />
     </ClaraRailChrome>
   );
 }

@@ -40,6 +40,7 @@ import {
   SETTINGS_SECTIONS,
   WORK_NEEDS_YOU_HREF,
   accountingHref,
+  clientIdOf,
   clientNavHref,
   type AccountingItemId,
   type ClientNavId,
@@ -227,17 +228,12 @@ export function permittedNavHrefs(scope: NavigationScope): Set<string> {
  * as `app/(firm)/clients/[clientId]/page.tsx` already does (hard constraint
  * 2: the DB, not the UI, owns identity — this only echoes back what the URL
  * itself already asserts).
+ *
+ * This USED TO be its own regex, hand-duplicated from `lib/navigation/tree.ts`'s
+ * `clientIdOf` and drifted from it (this one matched `[^/]+`, that one
+ * `[^/?#]+`) — two resolvers for the same one dynamic segment, which is exactly
+ * the kind of drift C-43 exists to end. Re-exported under the palette's
+ * existing name instead, so `command-palette.tsx` need not change its import
+ * and there is one resolver, not two.
  */
-export function resolveClientIdFromPathname(pathname: string): string | null {
-  const match = /^\/clients\/([^/]+)(?:\/.*)?$/.exec(pathname);
-  const segment = match?.[1];
-  if (!segment) return null;
-  // A malformed percent-encoding ("%E0%A4%A") throws from decodeURIComponent;
-  // this runs in the palette's render body, so an uncaught throw would crash
-  // the whole component over a garbage URL. Garbage in → no client context.
-  try {
-    return decodeURIComponent(segment);
-  } catch {
-    return null;
-  }
-}
+export { clientIdOf as resolveClientIdFromPathname };

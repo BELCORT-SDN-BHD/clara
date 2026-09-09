@@ -214,9 +214,9 @@ export function AppSidebarView({
             <ClientGroup
               scope={scope}
               clientId={active.clientId}
-              // The id is the honest stand-in until the name lands — see
+              // The neutral placeholder stands in until the name lands — see
               // components/app-shell/scope-context.tsx for why it can be late and
-              // why it is never another client's name.
+              // why it is never another client's name (or a guessed one).
               label={clientName ?? t("scope.clientPlaceholder")}
               active={active}
             />
@@ -415,7 +415,7 @@ function AccountingGroup({
         >
           <ChevronRightIcon
             aria-hidden="true"
-            className="motion-fast size-4 shrink-0 motion-safe:transition-transform in-data-panel-open:rotate-90"
+            className="motion-fast size-4 shrink-0 transition-transform motion-reduce:transition-none in-data-panel-open:rotate-90"
           />
         </CollapsibleTrigger>
         <CollapsibleContent>

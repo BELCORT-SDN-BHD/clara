@@ -25,6 +25,7 @@ import { DO_ACTIONS, permittedDoActions, type DoActionEnv, type DoActionSpec } f
 import { loadDoEnv, runDoAction } from "@/lib/command/do-dispatch";
 import { isDoorRefusal } from "@/lib/doors";
 import { loadClientRegister, type ClientRow } from "@/lib/firm/reads";
+import { accountingHref, clientNavHref, visibleAccountingItems, visibleClientNav } from "@/lib/navigation/tree";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
 import type { SessionTokenAccessor } from "@/lib/session";
 
@@ -122,16 +123,6 @@ export function CommandPalette({ onNavigate, session = sessionTokenAccessor }: C
 
   const clientId = resolveClientIdFromPathname(pathname ?? "");
 
-  const clientMatches = React.useMemo(
-    () =>
-      clientId
-        ? CLIENT_ROUTES.filter((route) =>
-            matchesQuery([tGoRoutes(route.id), ...(route.keywords ?? [])], query),
-          )
-        : [],
-    [clientId, query, tGoRoutes],
-  );
-
   function goTo(href: string) {
     router.push(href);
     onNavigate();
@@ -227,6 +218,38 @@ export function CommandPalette({ onNavigate, session = sessionTokenAccessor }: C
               matchesQuery([tGoRoutes(route.id), ...(route.keywords ?? [])], query),
           ),
     [permitted, query, tGoRoutes],
+  );
+
+  // GAP A's client-scope twin (code review, #614). `CLIENT_ROUTES` used to
+  // render every row regardless of `goScope` — a viewer denied Journals in the
+  // sidebar still saw it in ⌘K from inside that same client, and a caller with
+  // no readable rank at all (`goScope === null`) was offered every client
+  // destination rather than none. `visibleClientNav`/`visibleAccountingItems`
+  // are the SAME rank-shaped predicate the sidebar's `ClientGroup` calls
+  // (`components/app-shell/app-sidebar.tsx`), over the same registry rows —
+  // building the permitted set from them, keyed by THIS `clientId`, is
+  // `permittedNavHrefs` above's own shape, just for the client-scoped rows it
+  // does not cover. A null `goScope` yields an empty set, so a client row fails
+  // closed exactly as `visibleClientNav` itself does — never falls through to
+  // the unfiltered list.
+  const clientPermitted = React.useMemo(() => {
+    if (goScope === null || !clientId) return new Set<string>();
+    const hrefs = new Set<string>();
+    for (const item of visibleClientNav(goScope)) hrefs.add(clientNavHref(clientId, item));
+    for (const item of visibleAccountingItems(goScope)) hrefs.add(accountingHref(clientId, item));
+    return hrefs;
+  }, [goScope, clientId]);
+
+  const clientMatches = React.useMemo(
+    () =>
+      clientId
+        ? CLIENT_ROUTES.filter(
+            (route) =>
+              clientPermitted.has(route.href(clientId)) &&
+              matchesQuery([tGoRoutes(route.id), ...(route.keywords ?? [])], query),
+          )
+        : [],
+    [clientId, clientPermitted, query, tGoRoutes],
   );
 
   // ── C-43, GAP B: A CLIENT IS REACHABLE BY NAME ─────────────────────────────

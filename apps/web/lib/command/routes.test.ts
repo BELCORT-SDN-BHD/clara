@@ -494,17 +494,27 @@ test("PARITY, client scope: ⌘K's client rows ARE the registry's client destina
   const offered = CLIENT_ROUTES.map((r) => r.href(clientId)).sort();
   assert.deepEqual(offered, full, "⌘K's client rows are not the registry's client destinations");
 
-  // ⌘K's client rows are NOT rank-filtered today, and that is correct rather
-  // than an oversight: every client destination is viewer-floored, so the
-  // palette offers the same list to anyone who can open the workspace at all.
-  // This is the cell that would red the day a floored client surface arrives
-  // without the palette learning to shape itself.
+  // `CLIENT_ROUTES` (`full`, above) is the RAW registry, deliberately
+  // unfiltered — the LIVE palette filters it itself now
+  // (`components/command/command-palette.tsx`'s `clientPermitted`, #614 code
+  // review closed the parity hole where a null/unreadable rank was offered
+  // every client destination by name search regardless of scope). This cell
+  // proves the REGISTRY stays exhaustive for every rank that can reach the
+  // workspace at all: every client destination is viewer-floored today, so
+  // `reachable` still equals `full` for every persona but the null-rank one —
+  // the day a floored client surface arrives, this reds before the palette
+  // needs to.
+  //
+  // The null-rank persona is INCLUDED rather than skipped: `hasNavigationAccess`
+  // fails closed on a null rank (lib/firm/navigation.ts), so its reachable set
+  // is EMPTY, never `full` — the same fail-closed answer
+  // `command-go-access.test.tsx` asserts through the real component.
   for (const { name, scope } of PERSONAS) {
-    if (scope.role_rank === null) continue;
     const reachable = [
       ...visibleClientNav(scope).map((i) => clientNavHref(clientId, i)),
       ...visibleAccountingItems(scope).map((i) => accountingHref(clientId, i)),
     ].sort();
-    assert.deepEqual(reachable, full, `${name}: a client destination is rank-shaped but ⌘K is not`);
+    const expected = scope.role_rank === null ? [] : full;
+    assert.deepEqual(reachable, expected, `${name}: a client destination is rank-shaped but ⌘K is not`);
   }
 });

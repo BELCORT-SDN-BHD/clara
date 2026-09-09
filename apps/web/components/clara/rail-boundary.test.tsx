@@ -26,6 +26,7 @@ import { ClaraRail } from "./ClaraRail";
 import { renderComponent, setFieldValue } from "../../test/hookHarness";
 import { enableDomInspection } from "../../test/domInspect";
 import { claraThreadStore } from "../../lib/clara/threadStore";
+import { FIRM_ALTITUDE } from "../../lib/clara/useActiveThread";
 import messages from "../../messages/en.json";
 
 enableDomInspection();
@@ -91,13 +92,13 @@ async function settleUntil(h: { settle: () => Promise<void> }, condition: () => 
 
 /** The REAL boundary: `RailMount`'s own body, with the URL segment as the only input — the
  *  production switch. `useParams` is the one thing a test has to supply, so this mirrors
- *  rail-mount.tsx's `key={clientId ?? "firm"}` on the same `<ClaraRail>` it mounts. */
+ *  rail-mount.tsx's `key={clientId ?? FIRM_ALTITUDE}` on the same `<ClaraRail>` it mounts. */
 function mountRail(): { element: ReactElement; setClient: () => (next: string | undefined) => void } {
   let setter: ((next: string | undefined) => void) | null = null;
   function Harness(): ReactElement {
     const [clientId, setClientId] = useState<string | undefined>(CLIENT_A);
     setter = setClientId;
-    return createElement(ClaraRail, { key: clientId ?? "firm", auth: { getAccessToken: async () => TOKEN }, clientId });
+    return createElement(ClaraRail, { key: clientId ?? FIRM_ALTITUDE, auth: { getAccessToken: async () => TOKEN }, clientId });
   }
   return {
     element: createElement(NextIntlClientProvider, {
@@ -196,8 +197,11 @@ test("the boundary is at the MOUNT, so the key covers the whole rail subtree", (
   // A source pin, deliberately narrow: the behavioural cells above run against a harness that
   // reproduces the mount's key, and this is what ties that harness to the real file. Without
   // it, moving the key back down into ClaraRail would leave every cell above green.
+  //
+  // `FIRM_ALTITUDE`, not a bare "firm" literal, since #614 code review exported it from
+  // useActiveThread.ts for exactly this call site (and ClaraThreadView.tsx's own).
   const src = textOfFile("components/clara/rail-mount.tsx");
-  assert.match(src, /<ClaraRail\s+key=\{clientId \?\? "firm"\}/);
+  assert.match(src, /<ClaraRail\s+key=\{clientId \?\? FIRM_ALTITUDE\}/);
   const rail = textOfFile("components/clara/ClaraRail.tsx");
   assert.doesNotMatch(rail, /<ClaraThreadView\s+key=/, "the retired per-feature key must not come back beside the structural one");
 });

@@ -2,7 +2,7 @@ import { getTranslations } from "next-intl/server";
 
 import { NotBuiltNote } from "@/components/common/not-built-note";
 import { PageHeader, PageShell } from "@/components/common/page-shell";
-import { ClientWorkQueue } from "@/components/work/client-needs-you";
+import { ClientWorkQueue } from "@/components/work/client-work-queue";
 
 /**
  * "/clients/:clientId/work" — the same question as `/work`, scoped to one client
@@ -16,7 +16,7 @@ import { ClientWorkQueue } from "@/components/work/client-needs-you";
  * altitudes.
  *
  * IT IS THE SAME COMPONENT AS THE HOME'S SECTION C, given its own read — see
- * components/work/client-needs-you.tsx. One rendering of one queue.
+ * components/work/client-work-queue.tsx. One rendering of one queue.
  *
  * HONESTLY PARTIAL, and the note says so: the filterable list and the detail
  * view of a single item arrive with the durable Work records (#641).

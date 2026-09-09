@@ -84,14 +84,20 @@ export function AppBreadcrumbView({
   const label = (crumb: Crumb): string =>
     crumb.kind === "text" ? crumb.text : crumb.ns === "Settings" ? tSettings(crumb.key) : tShell(crumb.key);
 
-  // THE SCOPE CRUMB is the last literal NAME in the trail: the client's name
-  // inside a client, the firm's name outside one. Derived rather than passed,
-  // so a future trail shape cannot forget to say which crumb is the identity.
+  // THE SCOPE CRUMB is whichever one `breadcrumbFor` flagged `scope: true` —
+  // the client's name (or, pre-hydration, its neutral placeholder) inside a
+  // client, the firm's name outside one. USED TO be derived here as "the last
+  // `kind: 'text'` crumb", which broke on the placeholder: before the client
+  // layout publishes the client's name, the client crumb is a `kind: "message"`
+  // crumb (never the raw id — #614 A7), so the old heuristic fell through to
+  // the FIRM crumb and the narrow arm showed firm identity while the URL was
+  // already inside a client. The flag does not have that failure mode — see
+  // `Crumb`'s own header in lib/navigation/tree.ts.
   const lastIndex = crumbs.length - 1;
-  let scopeIndex = 0;
-  crumbs.forEach((crumb, i) => {
-    if (crumb.kind === "text") scopeIndex = i;
-  });
+  const scopeIndex = Math.max(
+    0,
+    crumbs.findIndex((crumb) => crumb.scope === true),
+  );
 
   const keep = (i: number) => i === scopeIndex || i === lastIndex;
   const collapsedBefore = crumbs.some((_, i) => i < scopeIndex && !keep(i));

@@ -21,9 +21,13 @@ import { buttonVariants } from "@/components/ui/button";
  * "v13.3.0 — Root app/not-found handles global unmatched URLs"). At the time
  * this file was written, nothing in apps/web called `notFound()`, so a
  * `(firm)/not-found.tsx` would have been an unreachable branch. This root file
- * still owns the UNMATCHED-URL case; #614 D6 later gave the ONE segment that
- * does call `notFound()` (`app/(firm)/clients/[clientId]/layout.tsx`) its own
- * boundary at `app/(firm)/clients/not-found.tsx`, inside the shell.
+ * still owns the UNMATCHED-URL case; #614 D6 later gave one of the two segments
+ * that now call `notFound()` (`app/(firm)/clients/[clientId]/layout.tsx`) its own
+ * boundary at `app/(firm)/clients/not-found.tsx`, inside the shell. The other
+ * call site, `app/(full)/clients/[clientId]/clara/[threadId]/page.tsx`, is in the
+ * `(full)` group rather than `(firm)` and has no boundary of its own, so it still
+ * bubbles all the way up to this file — an escalated thread on an unreadable
+ * client renders the same unmatched-URL page as a bad path.
  *
  * It therefore renders inside the ROOT layout (fonts, tokens, the intl provider)
  * but NOT inside the firm sidebar shell, because Next composes the root

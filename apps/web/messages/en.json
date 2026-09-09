@@ -329,7 +329,7 @@
         "purpose": "Your own sign-in and session on this device."
       },
       "firm": {
-        "title": "Firm",
+        "title": "Firm settings",
         "purpose": "Review the firm-wide authority controls."
       },
       "members": {
@@ -337,7 +337,7 @@
         "purpose": "Manage roles, invitations and access to this firm."
       },
       "compliance": {
-        "title": "Compliance",
+        "title": "Compliance register",
         "purpose": "Review SST-registration watches across the firm."
       },
       "vendorBindings": {
@@ -345,7 +345,7 @@
         "purpose": "Govern the evidence bindings used to identify vendors."
       },
       "registrations": {
-        "title": "Registrations",
+        "title": "Firm registrations",
         "purpose": "Review requests to create firms on ClaraBook."
       }
     },
@@ -870,7 +870,7 @@
       "plans": "Adjustment plans and the entries they generate.",
       "accounts": "The chart of accounts this client posts to.",
       "close": "Fiscal years, close gates and the statutory close pack.",
-      "tax": "SST and income-tax positions. The workbench states its own boundary."
+      "tax": "SST and income-tax reads. Beta — filing is not enabled; the workbench states what it can read today."
     }
   },
   "ClientTax": {
@@ -2730,7 +2730,7 @@
     "autodraft": {
       "trigger": "Start processing again",
       "title": "Start processing again",
-      "description": "An attributed upload is processed automatically once Clara has evidence to extract from — this is only for a filing whose processing did not start or did not complete. It re-admits this SAME filing. Nothing posts, and Clara still runs under the same coding-lane and daily budget limits as her unattended sweep.",
+      "description": "Clara's unattended sweep picks filings up on its own. Use this only for a filing whose processing did not start or did not complete: it re-admits this same filing. Nothing posts, and Clara still runs under the same coding-lane and daily budget limits as her sweep.",
       "confirm": "Start again",
       "outcome": {
         "admitted": "Admitted — Clara will draft this filing.",
@@ -3116,7 +3116,7 @@
     },
     "snapshots": {
       "heading": "Month snapshots",
-      "subheading": "clara.period_snapshots — a frozen management-accounts dataset per completed month.",
+      "subheading": "A frozen management-accounts dataset per completed month — the inputs a report was computed from.",
       "loading": "Loading snapshots…",
       "error": "Could not load snapshots: {message}",
       "empty": "No snapshots minted yet for this client.",
@@ -3136,7 +3136,7 @@
     },
     "renderJobs": {
       "heading": "Render job queue",
-      "subheading": "clara.render_jobs — only a failed job can be requeued.",
+      "subheading": "Report rendering jobs. Only a failed job can be requeued.",
       "loading": "Loading render jobs…",
       "error": "Could not load render jobs: {message}",
       "empty": "No render jobs yet for this client.",
@@ -3158,7 +3158,7 @@
     },
     "seeding": {
       "heading": "Seeding batches",
-      "subheading": "clara.seeding_batches / clara.seeding_proposals — coding-seed proposals extracted from a source document.",
+      "subheading": "Coding-seed proposals extracted from a source document.",
       "loading": "Loading seeding batches…",
       "error": "Could not load seeding batches: {message}",
       "empty": "No seeding batches yet for this client.",
@@ -3192,7 +3192,7 @@
     },
     "wiki": {
       "heading": "Wiki pages",
-      "subheading": "clara.wiki_pages — treatment notes, vendor rules and period context Clara has recorded for this client.",
+      "subheading": "Treatment notes, vendor rules and period context Clara has recorded for this client.",
       "editNotice": "There is no human door to author or edit a page's content — wiki_page_versions is written by the seeding-tick projection and by Clara's own agent lane. This surface curates (retires) pages only.",
       "loading": "Loading wiki pages…",
       "error": "Could not load wiki pages: {message}",

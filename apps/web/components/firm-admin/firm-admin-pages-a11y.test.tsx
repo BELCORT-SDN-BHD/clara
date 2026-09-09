@@ -83,9 +83,9 @@ test("SettingsPage's own composition has ordered headings and named links for ev
     const bodyText = textOf(h.container as never);
     assert.match(bodyText, /Account/, "the hub link to /settings/account must render with its real label");
     assert.match(bodyText, /Members/, "the hub link to /settings/members must render with its real label");
-    assert.match(bodyText, /Compliance/, "the hub link to /settings/compliance must render with its real label");
+    assert.match(bodyText, /Compliance register/, "the hub link to /settings/compliance must render with its real label");
     assert.match(bodyText, /Vendor identity bindings/, "the hub link to /settings/vendor-bindings must render with its real label");
-    assert.match(bodyText, /Registrations/, "the hub link to /settings/registrations must render with its real label");
+    assert.match(bodyText, /Firm registrations/, "the hub link to /settings/registrations must render with its real label");
     assert.match(bodyText, /Legacy/, "the vendor-bindings card must carry its Legacy mark");
     assert.match(bodyText, /Usage summaries, plan details, and billing management are not available yet\./, "the hub must explain which billing capabilities are unavailable");
     const violations = checkAccessibility(h.container as never);

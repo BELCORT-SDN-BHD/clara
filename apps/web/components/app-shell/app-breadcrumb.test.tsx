@@ -232,6 +232,36 @@ test("the collapse KEEPS the scope and the current page, and hides everything be
   }
 });
 
+test("the collapse KEEPS the placeholder scope crumb too — the pre-hydration parity hole closed", async () => {
+  // Before `scope` (lib/navigation/tree.ts's `Crumb`) was an explicit flag, the
+  // narrow arm picked the scope crumb by finding the LAST `kind: "text"` crumb.
+  // Before the client layout publishes the client's name, the client crumb is
+  // `kind: "message"` — the neutral placeholder, never the raw id (#614 A7) —
+  // so that heuristic fell through to the FIRM crumb, and the placeholder
+  // collapsed away exactly when a human most needed "whose books am I looking
+  // at" on screen: the frame right after a hard load or a client switch.
+  const h = await render({ pathname: `/clients/${CLIENT}/documents`, clientName: null });
+  try {
+    const rows = crumbs(h.container);
+    assert.deepEqual(
+      rows.map(([text, , collapsed]) => [text, collapsed]),
+      [
+        ["E2E Accounting", true],
+        ["Clients", true],
+        // THE SCOPE — the placeholder, never the firm, survives the collapse.
+        ["Client", false],
+        // THE CURRENT PAGE.
+        ["Documents", false],
+      ],
+    );
+    // One ellipsis: everything before the placeholder. Nothing sits between the
+    // placeholder and the current page on this route, so there is no second one.
+    assert.equal(ellipsisCount(h.container), 1);
+  } finally {
+    await h.unmount();
+  }
+});
+
 test("at FIRM scope the firm's name is what survives, and a two-crumb trail collapses nothing", async () => {
   const settings = await render({ pathname: "/settings/members" });
   try {

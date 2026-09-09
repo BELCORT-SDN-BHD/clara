@@ -26,7 +26,11 @@ describe("裁-117 prototype-parity wiring", () => {
     const mount = read("components/clara/rail-mount.tsx");
     const rail = read("components/clara/ClaraRail.tsx");
     const active = read("lib/clara/useActiveThread.ts");
-    assert.match(mount, /<ClaraRail\s+key=\{clientId \?\? ["']firm["']\}/);
+    // `FIRM_ALTITUDE`, not a bare "firm" literal — #614 code review exported it
+    // from useActiveThread.ts (the same file `active` reads, below) for exactly
+    // this call site and ClaraThreadView.tsx's own, so the two stop re-spelling
+    // firm altitude's store key independently.
+    assert.match(mount, /<ClaraRail\s+key=\{clientId \?\? FIRM_ALTITUDE\}/);
     assert.match(active, /created_by\s*===\s*callerSubject/);
     // The altitude fence that keeps a resolution for one altitude off another's screen.
     assert.match(active, /resolved\.altitude === altitude/);
