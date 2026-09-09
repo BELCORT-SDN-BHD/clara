@@ -96,7 +96,14 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { discoverWork, writeCheckpoint, acquireLeaderLock, setRuntimeRole, CONSUMER as ROUTER_CONSUMER, WAKE_ENGINE_CONSUMER } from "./relay.mjs";
 import { makeRuntimeClient } from "./pools.mjs";
 import { isConnErr, waitForNudge } from "./listen.mjs";
-import { FIRMS_UNCHECKPOINTED_COLUMN, LAG_COLUMN, relayConsumerCategories } from "./consumer-health.mjs";
+import {
+  FIRMS_UNCHECKPOINTED_COLUMN,
+  LAG_COLUMN,
+  deadLetterCategoryFromRow,
+  deadLetterExhausted,
+  deadLetterPending,
+  relayConsumerCategories,
+} from "./consumer-health.mjs";
 
 /** The wake-engine consumer name — its own checkpoint / lock key (relay_checkpoints,
  *  acquireLeaderLock, relay_dead_letters' carrier-1 ledger). NOT used directly as the
@@ -952,6 +959,26 @@ export async function runWakeEngineCycle(client, opts = {}) {
 // (design §3: "one engine, many sources" is the new fact this gate introduces).
 // ---------------------------------------------------------------------------
 
+/** THIS ENGINE'S RETRY CAP FOR A wake_outbox-CARRIED ROW, AS SQL — per SOURCE, never a module
+ *  constant: clara.wake_engine_sources.max_attempts, which loadSources reads and which
+ *  "attempts >= source.maxAttempts" compares against. Matched back to ITS OWN source the way the
+ *  cycle matches it (event_type, under loadSources' own dedup order: most-recently-created wins,
+ *  source_key as the tiebreak); `$3` is the fallback for a row whose source is gone or disabled.
+ *  `dl` is the clara.relay_dead_letters alias. Named once because the estate column below and
+ *  `wakeEngineDeadLetterCategory` must read the same cap — a second copy is a second answer. */
+const WAKE_OUTBOX_SOURCE_CAP = `coalesce((select s.max_attempts from clara.wake_engine_sources s
+                                              where s.carrier = 'wake_outbox' and s.enabled
+                                                and s.event_type = dl.event_type
+                                              order by s.created_at desc, s.source_key desc limit 1), $3)`;
+
+/** The same cap for a direct_queue-carried TASK row: matched by the task's own kind, the way
+ *  processTask matches it. `tdl` is the wake_engine_task_dead_letters alias and `at` the joined
+ *  clara.agent_tasks row. */
+const DIRECT_QUEUE_SOURCE_CAP = `coalesce((select s.max_attempts from clara.wake_engine_sources s
+                                                   where s.carrier = 'direct_queue' and s.enabled
+                                                     and s.task_kind = at.kind
+                                                   order by s.created_at desc, s.source_key desc limit 1), $3)`;
+
 export async function wakeEngineHealth(client) {
   const r = await client.query(
     `select
@@ -960,11 +987,11 @@ export async function wakeEngineHealth(client) {
        -- that text (byte-identical, and therefore a second thing to move), while every other
        -- relay consumer read the shared one. $1 is this statement's consumer parameter too.
        ${LAG_COLUMN},
-       (select count(*) from clara.relay_dead_letters where consumer = $1 and status = 'pending')::int
+       (select count(*) from clara.relay_dead_letters where consumer = $1 and ${deadLetterPending()})::int
          -- #6 (round-4 review): the task-keyed ledger is now split into TWO consumer keys (claim
          -- vs enqueue, never sharing a budget) — both count toward this health signal, since an
          -- operator reading pendingDeadLetters cares that SOMETHING is stuck, not which ledger.
-         + (select count(*) from clara.wake_engine_task_dead_letters where consumer = any($2) and status = 'pending')::int
+         + (select count(*) from clara.wake_engine_task_dead_letters where consumer = any($2) and ${deadLetterPending()})::int
          as pending_dead_letters,
        -- #617 — the EXHAUSTED half of that same pair: a pending dead-letter whose attempt_count
        -- has reached the cap is no longer retried (processEvent/processTask skip past it), so it
@@ -976,20 +1003,14 @@ export async function wakeEngineHealth(client) {
        -- (most-recently-created wins, source_key as the tiebreak). A row whose source is gone or
        -- has been disabled has no live cap to read; it falls back to $3, which is the column's
        -- own DB default (0133), and it is STILL counted, because a dead-lettered row on a source
-       -- nobody serves any more is precisely one an operator has to deal with by hand.
+       -- nobody serves any more is precisely one an operator has to deal with by hand. Both caps
+       -- and the pending/exhausted shape itself are named ABOVE (and in lib/consumer-health.mjs)
+       -- so wakeEngineDeadLetterCategory classifies ONE row by this very text.
        (select count(*) from clara.relay_dead_letters dl
-         where dl.consumer = $1 and dl.status = 'pending'
-           and dl.attempt_count >= coalesce((select s.max_attempts from clara.wake_engine_sources s
-                                              where s.carrier = 'wake_outbox' and s.enabled
-                                                and s.event_type = dl.event_type
-                                              order by s.created_at desc, s.source_key desc limit 1), $3))::int
+         where dl.consumer = $1 and ${deadLetterExhausted("dl.", WAKE_OUTBOX_SOURCE_CAP)})::int
          + (select count(*) from clara.wake_engine_task_dead_letters tdl
               join clara.agent_tasks at on at.id = tdl.task_id
-             where tdl.consumer = any($2) and tdl.status = 'pending'
-               and tdl.attempt_count >= coalesce((select s.max_attempts from clara.wake_engine_sources s
-                                                   where s.carrier = 'direct_queue' and s.enabled
-                                                     and s.task_kind = at.kind
-                                                   order by s.created_at desc, s.source_key desc limit 1), $3))::int
+             where tdl.consumer = any($2) and ${deadLetterExhausted("tdl.", DIRECT_QUEUE_SOURCE_CAP)})::int
          as exhausted_dead_letters,
        -- the NOT-YET-MEASURED column, from lib/consumer-health.mjs so its definition lives in
        -- ONE place across every relay consumer ($1 is this statement's consumer parameter too).
@@ -1048,6 +1069,29 @@ export async function wakeEngineHealth(client) {
     firmsUncheckpointed: h.firmsUncheckpointed,
     deadLetters: h.deadLetters,
   };
+}
+
+/**
+ * ONE relay dead-letter row's category for THIS engine — `deadLetterCategory`'s equivalent
+ * (lib/consumer-health.mjs), but reading the PER-SOURCE cap above instead of `$2`, so it cannot
+ * disagree with the `exhausted_dead_letters` column it shares that text with. Its reason for
+ * existing is the same: the estate counts are shared with every other suite running against the
+ * one CI database (`pnpm -r --if-present test`), so a cell proves its OWN row's category here and
+ * asserts only direction on the counts.
+ *
+ * @param {{query: (sql: string, params?: any[]) => Promise<{rows: any[]}>}} client
+ * @param {string} eventId clara.domain_events id the dead letter is keyed to
+ * @returns {Promise<"absent"|"resolved"|"pending"|"exhausted">}
+ */
+export async function wakeEngineDeadLetterCategory(client, eventId) {
+  const r = await client.query(
+    `select ${deadLetterPending("dl.")} as pending,
+            ${deadLetterExhausted("dl.", WAKE_OUTBOX_SOURCE_CAP)} as exhausted
+       from clara.relay_dead_letters dl
+      where dl.consumer = $1 and dl.event_id = $2`,
+    [WAKE_ENGINE_CONSUMER, eventId, SOURCE_MAX_ATTEMPTS_FALLBACK],
+  );
+  return deadLetterCategoryFromRow(r.rows[0]);
 }
 
 // ---------------------------------------------------------------------------

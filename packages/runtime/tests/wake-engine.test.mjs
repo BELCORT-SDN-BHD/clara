@@ -24,10 +24,10 @@ import * as rig from "./rig.mjs";
 import { WAKE_EVENT_TYPE } from "./relay-fixtures.mjs";
 import {
   WAKE_ENGINE_CONSUMER, WAKE_ENGINE_CLAIM_CONSUMER, WAKE_ENGINE_ENQUEUE_CONSUMER,
-  runWakeEngineCycle, wakeEngineHealth, loadEnabledSources, SOURCE_MAX_ATTEMPTS_FALLBACK,
+  runWakeEngineCycle, wakeEngineHealth, wakeEngineDeadLetterCategory, loadEnabledSources, SOURCE_MAX_ATTEMPTS_FALLBACK,
 } from "../lib/wake-engine.mjs";
 import { reconcileWakeEngineTasks } from "../lib/reconciler-wake.mjs";
-import { LAG_COLUMN, RELAY_CONSUMER_HEALTH_COLUMNS, relayConsumerHealth } from "../lib/consumer-health.mjs";
+import { LAG_COLUMN, RELAY_CONSUMER_HEALTH_COLUMNS, relayConsumerHealth, relayFirmCategory } from "../lib/consumer-health.mjs";
 // round-7 (native adversarial leg, MUST #1) — the two new cells below need redrive() itself
 // (relay.mjs), not a raw-SQL simulation, plus its own ROUTER-side consumer name (dead-letters in
 // this battery are always keyed under 'router', matching every other cell in this file).
@@ -116,7 +116,26 @@ after(async () => {
 // Health shape — mirrors autodraftHealth's own cells; extended with heldForDisabledSource.
 // =====================================================================================
 test("wakeEngineHealth reports consumer/lag/pendingDeadLetters/firmsTracked/heldForDisabledSource/cancelRequestedStuck/heldBelowCheckpoint", { skip: skip || skipG1 }, async () => {
-  const h = await rig.asRuntime((c) => wakeEngineHealth(c));
+  // BOTH READS IN ONE SNAPSHOT. [#686 — 2026-09-09] The comparison below is between two separate
+  // statements, and under `pnpm -r --if-present test` — the db, web and runtime suites against ONE
+  // Postgres — an event appended by another suite between them moves the estate lag and reds this
+  // cell on a difference that is SCHEDULING, not divergence (reproduced: `13284 !== 13287`, and on
+  // the pre-#686 file too, so this was always the shape). A repeatable-read transaction gives both
+  // statements the same snapshot, which restores the claim this cell's own comment makes: a
+  // difference here is a real divergence between the two column definitions.
+  const { h, shared } = await rig.asRuntime(async (c) => {
+    await c.query("begin isolation level repeatable read");
+    try {
+      return {
+        h: await wakeEngineHealth(c),
+        shared: await relayConsumerHealth(c, WAKE_ENGINE_CONSUMER, SOURCE_MAX_ATTEMPTS_FALLBACK),
+      };
+    } finally {
+      // A commit on an aborted transaction rolls it back; either way the checkout returns to the
+      // pool with no transaction open (withActor's RESET ALL does not end one).
+      await c.query("commit");
+    }
+  });
   assert.equal(h.consumer, WAKE_ENGINE_CONSUMER);
   // NOTE-b (opus, round-4 review): cancelRequestedStuck added to this signal set.
   // round-7 (native adversarial leg, MUST #1): heldBelowCheckpoint added — defense-in-depth for
@@ -130,9 +149,9 @@ test("wakeEngineHealth reports consumer/lag/pendingDeadLetters/firmsTracked/held
   // #617 follow-up — the VALUES the shared columns now produce, unchanged. This engine composes
   // `lag` and `firms_uncheckpointed` from lib/consumer-health.mjs while computing its own
   // dead-letter halves, so the three columns it does NOT own must read exactly what the shared
-  // statement every other relay consumer runs reads. Same consumer name, same snapshot semantics
-  // (one statement each), so a difference here is a real divergence and not scheduling.
-  const shared = await rig.asRuntime((c) => relayConsumerHealth(c, WAKE_ENGINE_CONSUMER, SOURCE_MAX_ATTEMPTS_FALLBACK));
+  // statement every other relay consumer runs reads. Same consumer name, and now genuinely the
+  // same snapshot (both statements are read above, inside one repeatable-read transaction), so a
+  // difference here is a real divergence and not scheduling.
   assert.equal(h.lag, shared.lag, "wake_engine's lag IS the shared column's number");
   assert.equal(h.firmsTracked, shared.firmsTracked, "and so is firmsTracked");
   assert.equal(h.firmsUncheckpointed, shared.firmsUncheckpointed, "and firmsUncheckpointed");
@@ -1816,29 +1835,29 @@ test("D7b a task belonging to ANOTHER firm is left alone by the firm-scoped belt
 });
 
 // =====================================================================================
-// #617 — THE CATEGORIES, AGAINST A REAL DATABASE. Both cells are DELTA-based on purpose: these
-// are ESTATE-WIDE reads (what an operator looks at) and this rig is shared, so an absolute number
-// would be a fixture of whatever else has run. Every baseline below is taken AFTER the cell's own
-// registry mutations, so the ONLY thing that changes between two measurements is this cell's own
-// dead-letter row — a source toggle can re-classify OTHER rows in the estate, and a delta taken
-// across one would be measuring them too. Placed LAST in the file: cell (b) deliberately leaves
-// no enabled wake_outbox source for WAKE_EVENT_TYPE, which every earlier cell registers for
+// #617 — THE CATEGORIES, AGAINST A REAL DATABASE.
+//
+// [#686 — 2026-09-09] BOTH CELLS USED TO BE DELTA-BASED against baselines taken just before each
+// mutation, on the reasoning that an absolute estate number would be a fixture of whatever else
+// had run. The delta is no better: CI runs `pnpm -r --if-present test`, i.e. the db, web and
+// runtime suites CONCURRENTLY against ONE Postgres, so a firm or dead letter another suite creates
+// between two reads lands inside the delta (wave-a's twin of the firmsUncheckpointed cell failed
+// exactly that way on PR #686, `4 !== 1`). Each cell now proves its OWN firm's / OWN row's
+// category — `relayFirmCategory` and this engine's `wakeEngineDeadLetterCategory`, which reads the
+// SAME per-source cap text as the estate column it is being compared with — and asserts only what
+// concurrent noise can STRENGTHEN about the counts. Placed LAST in the file: cell (b) deliberately
+// leaves no enabled wake_outbox source for WAKE_EVENT_TYPE, which every earlier cell registers for
 // itself anyway.
 // =====================================================================================
 
 test("#617 wakeEngineHealth: a dead letter is EXHAUSTED against ITS OWN SOURCE's max_attempts, not a module constant", { skip: skip || skipG1 }, async () => {
   const key = `${rig.WAKE_ENGINE_TEST_PREFIX}617cap_${randomUUID().slice(0, 8)}`;
-  // TWO baselines, on purpose. `beforeFirm` predates the firm, because firmsUncheckpointed can
-  // only be measured across the firm's own creation; `before` postdates registerSource, because
-  // registering an enabled source DISABLES any other source for this event type (the file's own
-  // isolation rule) and can therefore re-classify OTHER estate rows' exhaustion. Registering
-  // touches wake_engine_sources only, so it cannot move firmsUncheckpointed between the two.
-  const beforeFirm = await rig.asRuntime((c) => wakeEngineHealth(c));
   // The WIRE SHAPE, pinned. #617 moved this query into lib/consumer-health.mjs, shared with
   // every other relay consumer; the fields and their ORDER are what /ready and its readers
   // actually see, so a future consolidation that renames, reorders or drops one fails HERE.
+  const shape = await rig.asRuntime((c) => wakeEngineHealth(c));
   assert.deepEqual(
-    Object.keys(beforeFirm),
+    Object.keys(shape),
     ["consumer", "lag", "pendingDeadLetters", "firmsTracked", "heldForDisabledSource", "cancelRequestedStuck", "heldBelowCheckpoint", "firmsUncheckpointed", "deadLetters"],
     "wakeEngineHealth's field set and order (its five own counters keep their places)",
   );
@@ -1848,13 +1867,14 @@ test("#617 wakeEngineHealth: a dead letter is EXHAUSTED against ITS OWN SOURCE's
   await registerSource({ sourceKey: key, carrier: "wake_outbox", eventType: WAKE_EVENT_TYPE, taskKind: "wake", wakeKind: "proactive", maxAttempts: 2, enabled: true, actor: w.owner });
   assert.ok(2 < SOURCE_MAX_ATTEMPTS_FALLBACK, "mandatory setup: this source's cap is below the fallback, so the two answers differ");
 
-  const before = await rig.asRuntime((c) => wakeEngineHealth(c));
-  assert.equal(
-    before.firmsUncheckpointed - beforeFirm.firmsUncheckpointed,
-    1,
-    "the new firm's events are NOT-YET-MEASURED by this engine — no checkpoint row exists for it",
+  const firmCategory = await rig.asRuntime((c) => relayFirmCategory(c, WAKE_ENGINE_CONSUMER, w.firm));
+  assert.deepEqual(
+    { hasEvents: firmCategory.hasEvents, checkpointed: firmCategory.checkpointed },
+    { hasEvents: true, checkpointed: false },
+    "the new firm's events are NOT-YET-MEASURED by this engine — no checkpoint row exists for it, so it is NOT in firmsTracked either",
   );
-  assert.equal(before.firmsTracked, beforeFirm.firmsTracked, "and it is NOT in firmsTracked — the two are complements");
+  const before = await rig.asRuntime((c) => wakeEngineHealth(c));
+  assert.ok(before.firmsUncheckpointed >= 1, "and the estate column carries it — a floor another suite's firms can only raise");
   const ev = await rig.emitWakeEvent(w.firm, { actor: w.owner });
   await rig.rootQuery(
     `insert into clara.relay_dead_letters (consumer, event_id, reason, status, attempt_count)
@@ -1862,25 +1882,29 @@ test("#617 wakeEngineHealth: a dead letter is EXHAUSTED against ITS OWN SOURCE's
     [WAKE_ENGINE_CONSUMER, ev.id],
   );
 
+  assert.equal(
+    await rig.asRuntime((c) => wakeEngineDeadLetterCategory(c, ev.id)),
+    "pending",
+    "a pending dead letter at 1 of its source's 2 attempts is counted as pending and NOT as exhausted",
+  );
   const retrying = await rig.asRuntime((c) => wakeEngineHealth(c));
-  assert.equal(retrying.deadLetters.pending - before.deadLetters.pending, 1, "a pending dead letter is counted as pending");
-  assert.equal(retrying.deadLetters.exhausted, before.deadLetters.exhausted, "and is NOT exhausted at 1 of its source's 2 attempts");
+  assert.ok(retrying.deadLetters.pending >= 1, "and the estate backlog carries it");
   assert.equal(retrying.pendingDeadLetters, retrying.deadLetters.pending, "the compatibility field still mirrors the pending total");
 
   await rig.rootQuery("update clara.relay_dead_letters set attempt_count = 2 where consumer = $1 and event_id = $2", [
     WAKE_ENGINE_CONSUMER,
     ev.id,
   ]);
-  const exhausted = await rig.asRuntime((c) => wakeEngineHealth(c));
   assert.equal(
-    exhausted.deadLetters.exhausted - before.deadLetters.exhausted,
-    1,
+    await rig.asRuntime((c) => wakeEngineDeadLetterCategory(c, ev.id)),
+    "exhausted",
     "AT the source's own cap the row is EXHAUSTED — measured against wake_engine_sources.max_attempts, which is what the cycle compares against",
   );
-  assert.equal(
-    exhausted.deadLetters.pending - before.deadLetters.pending,
-    1,
-    "an exhausted row is STILL pending — exhausted is a subset, so the two counts must not be subtracted from each other",
+  const exhausted = await rig.asRuntime((c) => wakeEngineHealth(c));
+  assert.ok(exhausted.deadLetters.exhausted >= 1, "and the estate's exhausted count carries it");
+  assert.ok(
+    exhausted.deadLetters.pending >= exhausted.deadLetters.exhausted,
+    "an exhausted row is STILL pending — exhausted is a subset, so the two counts must not be subtracted from each other (exact: one snapshot)",
   );
 });
 
@@ -1899,8 +1923,6 @@ test("#617 wakeEngineHealth: a dead letter whose source is GONE falls back to th
   );
   assert.equal(live.rows[0].n, 0, "mandatory setup: no enabled wake_outbox source serves this event type any more");
 
-  // Baseline AFTER the toggle: nothing but this cell's own row changes from here on.
-  const before = await rig.asRuntime((c) => wakeEngineHealth(c));
   const ev = await rig.emitWakeEvent(w.firm, { actor: w.owner });
   await rig.rootQuery(
     `insert into clara.relay_dead_letters (consumer, event_id, reason, status, attempt_count)
@@ -1908,23 +1930,27 @@ test("#617 wakeEngineHealth: a dead letter whose source is GONE falls back to th
     [WAKE_ENGINE_CONSUMER, ev.id, SOURCE_MAX_ATTEMPTS_FALLBACK - 1],
   );
 
-  const retrying = await rig.asRuntime((c) => wakeEngineHealth(c));
-  assert.equal(retrying.deadLetters.pending - before.deadLetters.pending, 1, "the row on a retired source is still PENDING work");
+  // No baseline read at all any more: the row's own category is the whole claim, and it is exact.
+  // (The delta this cell used to take was doubly fragile — a source toggle re-classifies OTHER
+  // estate rows' exhaustion, and a concurrent suite adds its own rows to the same counts.)
   assert.equal(
-    retrying.deadLetters.exhausted,
-    before.deadLetters.exhausted,
-    "and one short of the FALLBACK cap it is not exhausted — which also proves the disabled source's own 2 was not used",
+    await rig.asRuntime((c) => wakeEngineDeadLetterCategory(c, ev.id)),
+    "pending",
+    "the row on a retired source is still PENDING work, and one short of the FALLBACK cap it is not exhausted — which also proves the disabled source's own 2 was not used",
   );
+  const retrying = await rig.asRuntime((c) => wakeEngineHealth(c));
+  assert.ok(retrying.deadLetters.pending >= 1, "and the estate backlog carries it");
 
   await rig.rootQuery("update clara.relay_dead_letters set attempt_count = $3 where consumer = $1 and event_id = $2", [
     WAKE_ENGINE_CONSUMER,
     ev.id,
     SOURCE_MAX_ATTEMPTS_FALLBACK,
   ]);
-  const exhausted = await rig.asRuntime((c) => wakeEngineHealth(c));
   assert.equal(
-    exhausted.deadLetters.exhausted - before.deadLetters.exhausted,
-    1,
+    await rig.asRuntime((c) => wakeEngineDeadLetterCategory(c, ev.id)),
+    "exhausted",
     "at the fallback cap it IS exhausted — a dead letter on a source nobody serves any more is precisely one an operator must deal with by hand",
   );
+  const exhausted = await rig.asRuntime((c) => wakeEngineHealth(c));
+  assert.ok(exhausted.deadLetters.exhausted >= 1, "and the estate's exhausted count carries it");
 });

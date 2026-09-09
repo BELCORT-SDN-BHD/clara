@@ -12,6 +12,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import * as rig from "./rig.mjs";
 import { autodraftHealth, runAutodraftCycle, runCatchupPass, AUTODRAFT_CONSUMER, AUTODRAFT_MAX_ATTEMPTS } from "../lib/autodraft.mjs";
+import { deadLetterCategory, relayFirmCategory } from "../lib/consumer-health.mjs";
 import { reconcileAutoDraftTasks, terminalForAutodraft } from "../lib/reconciler.mjs";
 
 const READY = await rig.runtimeReady();
@@ -59,19 +60,32 @@ test("autodraftHealth reports the consumer's own lag + dead-letter counts (spine
   assert.ok(h.lag >= 0 && h.pendingDeadLetters >= 0 && h.firmsTracked >= 0);
 });
 
-// #617 — THE CATEGORIES, AGAINST A REAL DATABASE. Both cells are DELTA-based on purpose:
-// `firmsUncheckpointed` and the dead-letter counts are ESTATE-WIDE reads (that is what an
-// operator looks at), and this rig is shared, so an absolute number would be a fixture of
-// whatever else has run. A delta measures exactly what the cell itself caused. Spine tables
-// only, so both run in the SAME pre-0011 tier as the health cell above.
+// #617 — THE CATEGORIES, AGAINST A REAL DATABASE. Spine tables only, so both cells run in the
+// SAME pre-0011 tier as the health cell above.
+//
+// [#686 — 2026-09-09] BOTH CELLS USED TO ASSERT AN ESTATE DELTA
+// (`seeded.firmsUncheckpointed - before.firmsUncheckpointed === 1`), on the reasoning that an
+// absolute estate number would be a fixture of whatever else had run. It is worse than that: CI
+// runs `pnpm -r --if-present test`, i.e. the db, web and runtime suites CONCURRENTLY against ONE
+// Postgres, and `clara.firm_event_seq` is shared by every consumer and every suite — so the delta
+// was ALSO counting every firm another suite created between the two reads. This exact cell failed
+// on PR #686 with `4 !== 1`, and it reproduces on demand by running any two consumer suites at
+// once. A delta measures what the cell caused only in a world where nothing else runs, and nothing
+// enforces that world.
+//
+// So the categories are now proved where they are deterministic: the PER-FIRM / PER-ROW readers in
+// lib/consumer-health.mjs, which answer the same question over the same SQL text about state no
+// other suite can touch (their agreement with the estate columns is pinned in
+// tests/consumer-health-readers.test.mjs). What the estate counts still assert is only what
+// concurrent noise can STRENGTHEN, never break.
 
 test("#617 autodraftHealth: a firm with events and NO checkpoint counts as UNCHECKPOINTED, not merely as lag", { skip }, async () => {
-  const before = await rig.asRuntime((c) => autodraftHealth(c));
   // The WIRE SHAPE, pinned. #617 moved this query into lib/consumer-health.mjs, shared with
   // every other relay consumer; the fields and their ORDER are what /ready and its readers
   // actually see, so a future consolidation that renames, reorders or drops one fails HERE.
+  const shape = await rig.asRuntime((c) => autodraftHealth(c));
   assert.deepEqual(
-    Object.keys(before),
+    Object.keys(shape),
     ["consumer", "lag", "pendingDeadLetters", "firmsTracked", "firmsUncheckpointed", "deadLetters", "deferredWithdrawals"],
     "autodraftHealth's field set and order (deferredWithdrawals keeps its own place)",
   );
@@ -79,29 +93,39 @@ test("#617 autodraftHealth: a firm with events and NO checkpoint counts as UNCHE
   // while this consumer has never checkpointed it.
   const { firm } = await rig.buildFirm("ad617u");
 
-  const seeded = await rig.asRuntime((c) => autodraftHealth(c));
-  assert.equal(
-    seeded.firmsUncheckpointed - before.firmsUncheckpointed,
-    1,
-    "a firm with events this consumer has never checkpointed is counted as NOT-YET-MEASURED",
+  const seededFirm = await rig.asRuntime((c) => relayFirmCategory(c, AUTODRAFT_CONSUMER, firm));
+  assert.deepEqual(
+    { hasEvents: seededFirm.hasEvents, checkpointed: seededFirm.checkpointed },
+    { hasEvents: true, checkpointed: false },
+    "a firm with events this consumer has never checkpointed is counted as NOT-YET-MEASURED — and is NOT in firmsTracked, the two being complements",
   );
-  assert.equal(seeded.firmsTracked, before.firmsTracked, "and it is NOT yet in firmsTracked — the two are complements");
+  assert.equal(
+    seededFirm.lag,
+    await rig.headSeq(firm),
+    "while `lag` reads the missing checkpoint as last_seq 0 and reports the firm's ENTIRE history: exactly the ambiguity this category resolves",
+  );
+  const seeded = await rig.asRuntime((c) => autodraftHealth(c));
+  assert.ok(seeded.firmsUncheckpointed >= 1, "and the estate column carries it — a floor another suite's firms can only raise");
 
   // The discriminating half: run the consumer over those (non-autodraft) events. The firm now HAS
   // a checkpoint, so it leaves the uncheckpointed category — while `lag` (which reads a missing
   // checkpoint as last_seq 0) was never able to tell the two states apart on its own.
   await rig.asRuntime((c) => runAutodraftCycle(c, { onlyFirm: firm, enqueue: async () => {}, log: () => {} }));
   assert.equal(await rig.checkpointSeq(firm, AUTODRAFT_CONSUMER), await rig.headSeq(firm), "mandatory setup: the cycle converged to head");
-  const drained = await rig.asRuntime((c) => autodraftHealth(c));
-  assert.equal(
-    drained.firmsUncheckpointed,
-    seeded.firmsUncheckpointed - 1,
-    "once checkpointed the firm leaves the not-yet-measured category",
+  const drainedFirm = await rig.asRuntime((c) => relayFirmCategory(c, AUTODRAFT_CONSUMER, firm));
+  assert.deepEqual(
+    { hasEvents: drainedFirm.hasEvents, checkpointed: drainedFirm.checkpointed, lag: drainedFirm.lag },
+    { hasEvents: true, checkpointed: true, lag: 0 },
+    "once checkpointed the firm leaves the not-yet-measured category and joins the tracked one, contributing nothing to lag",
   );
-  assert.equal(drained.firmsTracked, before.firmsTracked + 1, "and joins the tracked one");
+  const drained = await rig.asRuntime((c) => autodraftHealth(c));
+  assert.ok(drained.firmsTracked >= 1, "which the estate's tracked count carries in turn");
 });
 
 test("#617 autodraftHealth: dead letters split into pending vs EXHAUSTED at this consumer's own cap", { skip }, async () => {
+  // `before` is kept for ONE field: deferredWithdrawals is a PROCESS-LOCAL counter
+  // (deferredWithdrawalState.size, lib/autodraft.mjs), so unlike the estate counts no concurrent
+  // suite can move it and comparing it across this cell's work is still exact.
   const before = await rig.asRuntime((c) => autodraftHealth(c));
   const { firm } = await rig.buildFirm("ad617x");
   // Any real event of this firm's own stream carries the dead-letter row (the stamping trigger
@@ -123,9 +147,13 @@ test("#617 autodraftHealth: dead letters split into pending vs EXHAUSTED at this
     eventId,
     AUTODRAFT_MAX_ATTEMPTS - 1,
   ]);
+  assert.equal(
+    await rig.asRuntime((c) => deadLetterCategory(c, AUTODRAFT_CONSUMER, eventId, AUTODRAFT_MAX_ATTEMPTS)),
+    "pending",
+    "a pending dead letter one short of the cap is counted as pending and NOT as exhausted",
+  );
   const retrying = await rig.asRuntime((c) => autodraftHealth(c));
-  assert.equal(retrying.deadLetters.pending - before.deadLetters.pending, 1, "a pending dead letter is counted as pending");
-  assert.equal(retrying.deadLetters.exhausted, before.deadLetters.exhausted, "and is NOT exhausted while attempts remain");
+  assert.ok(retrying.deadLetters.pending >= 1, "and the estate backlog carries it");
   assert.equal(retrying.pendingDeadLetters, retrying.deadLetters.pending, "the compatibility field still mirrors the pending total");
 
   // AT the cap: retrying has stopped (the cycle skips past it and advances the checkpoint), so it
@@ -135,12 +163,16 @@ test("#617 autodraftHealth: dead letters split into pending vs EXHAUSTED at this
     eventId,
     AUTODRAFT_MAX_ATTEMPTS,
   ]);
-  const exhausted = await rig.asRuntime((c) => autodraftHealth(c));
-  assert.equal(exhausted.deadLetters.exhausted - before.deadLetters.exhausted, 1, "at the cap the row is EXHAUSTED");
   assert.equal(
-    exhausted.deadLetters.pending - before.deadLetters.pending,
-    1,
-    "an exhausted row is STILL pending — exhausted is a subset, so the two counts must not be subtracted from each other",
+    await rig.asRuntime((c) => deadLetterCategory(c, AUTODRAFT_CONSUMER, eventId, AUTODRAFT_MAX_ATTEMPTS)),
+    "exhausted",
+    "at the cap the row is EXHAUSTED",
+  );
+  const exhausted = await rig.asRuntime((c) => autodraftHealth(c));
+  assert.ok(exhausted.deadLetters.exhausted >= 1, "and the estate's exhausted count carries it");
+  assert.ok(
+    exhausted.deadLetters.pending >= exhausted.deadLetters.exhausted,
+    "an exhausted row is STILL pending — exhausted is a subset, so the two counts must not be subtracted from each other (exact: one snapshot)",
   );
   assert.equal(
     exhausted.deferredWithdrawals,

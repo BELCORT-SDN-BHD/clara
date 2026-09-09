@@ -11,6 +11,7 @@ import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
 import { runMatcherCycle, matcherRedrive, matcherHealth, CONSUMERS, MATCHER_CONSUMER, MATCHER_VERSION, MATCHER_MAX_ATTEMPTS } from "../lib/matcher.mjs";
 import { runRelayCycle } from "../lib/relay.mjs";
+import { deadLetterCategory, relayFirmCategory } from "../lib/consumer-health.mjs";
 import {
   skip,
   rootQuery,
@@ -151,47 +152,62 @@ test("matcherHealth reports the matcher's own lag + pending dead-letter counts",
   assert.ok(h.lag >= 0 && h.pendingDeadLetters >= 0);
 });
 
-// #617 — THE CATEGORIES, AGAINST A REAL DATABASE. Both cells are DELTA-based on purpose:
-// `firmsUncheckpointed` and the dead-letter counts are ESTATE-WIDE reads (that is what an
-// operator looks at), and this rig is shared, so an absolute number would be a fixture of
-// whatever else has run. A delta measures exactly what the cell itself caused.
+// #617 — THE CATEGORIES, AGAINST A REAL DATABASE.
+//
+// [#686 — 2026-09-09] These cells used to assert an ESTATE DELTA around their own work
+// (`seeded.firmsUncheckpointed - before.firmsUncheckpointed === 1`), on the reasoning that an
+// absolute estate number would be a fixture of whatever else had run. The delta is no better: CI
+// runs `pnpm -r --if-present test`, i.e. the db, web and runtime suites CONCURRENTLY against ONE
+// Postgres, and `clara.firm_event_seq` is shared by every consumer and every suite — so it was
+// also counting firms another suite created between the two reads (wave-a's twin of this cell
+// failed exactly that way on PR #686, `4 !== 1`). What IS deterministic is the PER-FIRM / PER-ROW
+// category, so that is what these cells now prove, through the readers in lib/consumer-health.mjs:
+// the same SQL text as the estate columns, over state no other suite can touch (their agreement is
+// pinned in tests/consumer-health-readers.test.mjs). The estate counts keep only assertions that
+// concurrent noise can STRENGTHEN, never break.
 
 test("#617 matcherHealth: a firm with events and NO checkpoint counts as UNCHECKPOINTED, not merely as lag", { skip }, async () => {
-  const before = await asMatcherLogin((c) => matcherHealth(c));
   // The WIRE SHAPE, pinned. #617 moved this query into lib/consumer-health.mjs, shared with
   // every other relay consumer; the fields and their ORDER are what /ready and its readers
   // actually see, so a future consolidation that renames, reorders or drops one fails HERE.
+  const shape = await asMatcherLogin((c) => matcherHealth(c));
   assert.deepEqual(
-    Object.keys(before),
+    Object.keys(shape),
     ["consumer", "lag", "pendingDeadLetters", "firmsTracked", "firmsUncheckpointed", "deadLetters"],
     "matcherHealth's field set and order",
   );
   const { owner, firm, clients } = await buildFirmWithClients(1);
   await seedMatchableDocument({ firm, owner, client: clients[0], tin: tinOf() });
 
-  const seeded = await asMatcherLogin((c) => matcherHealth(c));
-  assert.equal(
-    seeded.firmsUncheckpointed - before.firmsUncheckpointed,
-    1,
-    "a firm with events this consumer has never checkpointed is counted as NOT-YET-MEASURED",
+  const seededFirm = await asMatcherLogin((c) => relayFirmCategory(c, MATCHER_CONSUMER, firm));
+  assert.deepEqual(
+    { hasEvents: seededFirm.hasEvents, checkpointed: seededFirm.checkpointed },
+    { hasEvents: true, checkpointed: false },
+    "a firm with events this consumer has never checkpointed is counted as NOT-YET-MEASURED — and is NOT in firmsTracked, the two being complements",
   );
-  assert.equal(seeded.firmsTracked, before.firmsTracked, "and it is NOT yet in firmsTracked — the two are complements");
+  assert.equal(
+    seededFirm.lag,
+    await headSeq(firm),
+    "while `lag` reads the missing checkpoint as last_seq 0 and reports the firm's ENTIRE history: exactly the ambiguity this category resolves",
+  );
+  const seeded = await asMatcherLogin((c) => matcherHealth(c));
+  assert.ok(seeded.firmsUncheckpointed >= 1, "and the estate column carries it — a floor another suite's firms can only raise");
 
   // The discriminating half: run the consumer. The firm now HAS a checkpoint, so it leaves the
   // uncheckpointed category — while `lag` (which reads a missing checkpoint as last_seq 0) was
   // never able to tell the two states apart on its own.
   await drainMatcher(firm);
-  const drained = await asMatcherLogin((c) => matcherHealth(c));
-  assert.equal(
-    drained.firmsUncheckpointed,
-    seeded.firmsUncheckpointed - 1,
-    "once checkpointed the firm leaves the not-yet-measured category",
+  const drainedFirm = await asMatcherLogin((c) => relayFirmCategory(c, MATCHER_CONSUMER, firm));
+  assert.deepEqual(
+    { hasEvents: drainedFirm.hasEvents, checkpointed: drainedFirm.checkpointed, lag: drainedFirm.lag },
+    { hasEvents: true, checkpointed: true, lag: 0 },
+    "once checkpointed the firm leaves the not-yet-measured category and joins the tracked one, contributing nothing to lag (drainMatcher converged to head)",
   );
-  assert.equal(drained.firmsTracked, before.firmsTracked + 1, "and joins the tracked one");
+  const drained = await asMatcherLogin((c) => matcherHealth(c));
+  assert.ok(drained.firmsTracked >= 1, "which the estate's tracked count carries in turn");
 });
 
 test("#617 matcherHealth: dead letters split into pending vs EXHAUSTED at this consumer's own cap", { skip }, async () => {
-  const before = await asMatcherLogin((c) => matcherHealth(c));
   const { owner, firm, clients } = await buildFirmWithClients(1);
   const { eventId } = await seedMatchableDocument({ firm, owner, client: clients[0], tin: tinOf() });
   // A REAL dead letter, minted the way production mints one: a transient reader failure inside
@@ -212,9 +228,13 @@ test("#617 matcherHealth: dead letters split into pending vs EXHAUSTED at this c
     eventId,
     MATCHER_MAX_ATTEMPTS - 1,
   ]);
+  assert.equal(
+    await asMatcherLogin((c) => deadLetterCategory(c, MATCHER_CONSUMER, eventId, MATCHER_MAX_ATTEMPTS)),
+    "pending",
+    "a pending dead letter one short of the cap is counted as pending and NOT as exhausted",
+  );
   const retrying = await asMatcherLogin((c) => matcherHealth(c));
-  assert.equal(retrying.deadLetters.pending - before.deadLetters.pending, 1, "a pending dead letter is counted as pending");
-  assert.equal(retrying.deadLetters.exhausted, before.deadLetters.exhausted, "and is NOT exhausted while attempts remain");
+  assert.ok(retrying.deadLetters.pending >= 1, "and the estate backlog carries it");
   assert.equal(retrying.pendingDeadLetters, retrying.deadLetters.pending, "the compatibility field still mirrors the pending total");
 
   // AT the cap: retrying has stopped (the cycle skips past it and advances the checkpoint), so it
@@ -224,12 +244,16 @@ test("#617 matcherHealth: dead letters split into pending vs EXHAUSTED at this c
     eventId,
     MATCHER_MAX_ATTEMPTS,
   ]);
-  const exhausted = await asMatcherLogin((c) => matcherHealth(c));
-  assert.equal(exhausted.deadLetters.exhausted - before.deadLetters.exhausted, 1, "at the cap the row is EXHAUSTED");
   assert.equal(
-    exhausted.deadLetters.pending - before.deadLetters.pending,
-    1,
-    "an exhausted row is STILL pending — exhausted is a subset, so the two counts must not be subtracted from each other",
+    await asMatcherLogin((c) => deadLetterCategory(c, MATCHER_CONSUMER, eventId, MATCHER_MAX_ATTEMPTS)),
+    "exhausted",
+    "at the cap the row is EXHAUSTED",
+  );
+  const exhausted = await asMatcherLogin((c) => matcherHealth(c));
+  assert.ok(exhausted.deadLetters.exhausted >= 1, "and the estate's exhausted count carries it");
+  assert.ok(
+    exhausted.deadLetters.pending >= exhausted.deadLetters.exhausted,
+    "an exhausted row is STILL pending — exhausted is a subset, so the two counts must not be subtracted from each other (exact: one snapshot)",
   );
 });
 
