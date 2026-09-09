@@ -34,6 +34,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { discoverWork, writeCheckpoint, acquireLeaderLock, setRuntimeRole } from "./relay.mjs";
 import { makeRuntimeClient } from "./pools.mjs";
 import { isConnErr, waitForNudge } from "./listen.mjs";
+import { relayConsumerHealth } from "./consumer-health.mjs";
 
 /** The facts-gate consumer name — its own checkpoint / dead-letter / lock key. */
 export const FACTS_GATE_CONSUMER = "facts_gate";
@@ -45,6 +46,10 @@ const FACTS_GATE_EVENT_TYPES = Object.freeze(["document.extraction_completed", F
 const isFactsGateEventType = (eventType) => FACTS_GATE_EVENT_TYPES.includes(eventType);
 
 const MAX_ATTEMPTS = Number(process.env.CLARA_FACTS_GATE_MAX_ATTEMPTS || 5);
+/** #617: exported so the cell that proves `deadLetters.exhausted` can pin the BOUNDARY (cap-1 is
+ *  still being retried, cap is not) against the value this consumer actually uses, rather than
+ *  against a second hand-typed 5 that would stop meaning anything the day the knob moves. */
+export const FACTS_GATE_MAX_ATTEMPTS = MAX_ATTEMPTS;
 const POLL_INTERVAL_MS = Number(process.env.CLARA_FACTS_GATE_POLL_MS || 2000);
 const RECONNECT_BASE_MS = 500;
 const RECONNECT_MAX_MS = 5000;
@@ -249,20 +254,17 @@ export const CONSUMERS = Object.freeze({
 // facts-gate consumer must NEVER take chat traffic down (the matcher/autodraft law). Touches
 // ONLY spine tables that exist since 0005, so it is safe to call BEFORE 0016 is applied.
 export async function factsGateHealth(client) {
-  const r = await client.query(
-    `select
-       coalesce((select sum(greatest(s.n - coalesce(c.last_seq, 0), 0))
-                   from clara.firm_event_seq s
-                   left join clara.relay_checkpoints c on c.consumer = $1 and c.firm_id = s.firm_id), 0)::bigint as lag,
-       (select count(*) from clara.relay_dead_letters where consumer = $1 and status = 'pending')::int as pending_dead_letters,
-       (select count(*) from clara.relay_checkpoints where consumer = $1)::int as firms_tracked`,
-    [FACTS_GATE_CONSUMER],
-  );
+  // The shared read (lib/consumer-health.mjs) — it carries the definition of each category and
+  // the reason `lag` and `pendingDeadLetters` can express neither of the two newer ones. This
+  // consumer supplies only what is its own: its name and ITS OWN retry cap.
+  const h = await relayConsumerHealth(client, FACTS_GATE_CONSUMER, MAX_ATTEMPTS);
   return {
     consumer: FACTS_GATE_CONSUMER,
-    lag: Number(r.rows[0].lag),
-    pendingDeadLetters: r.rows[0].pending_dead_letters,
-    firmsTracked: r.rows[0].firms_tracked,
+    lag: h.lag,
+    pendingDeadLetters: h.pendingDeadLetters,
+    firmsTracked: h.firmsTracked,
+    firmsUncheckpointed: h.firmsUncheckpointed,
+    deadLetters: h.deadLetters,
   };
 }
 

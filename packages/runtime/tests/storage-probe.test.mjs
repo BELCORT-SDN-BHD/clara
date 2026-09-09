@@ -119,15 +119,73 @@ test("storage probe: read-back-mismatch arm — tampered bytes on readback repor
 
 // --- the sync/interval facade health.mjs actually calls -------------------------------------
 
-test("storage probe facade: cold start is optimistic (ok:true, pending:true) and returns synchronously", async () => {
+test("storage probe facade: cold start is PENDING and carries NO ok, and returns synchronously", async () => {
+  // #617. This cell used to assert `ok:true, pending:true` — an UNMEASURED lane reported as
+  // healthy, which is the exact shape the ticket forbids ("not yet measured must never read as
+  // healthy"). Every reader that branched on `.ok` alone — /ready's own warning line included —
+  // therefore saw a green storage lane for the whole cold-start window. The verdict now carries
+  // `pending` and NOTHING ELSE: an `ok` key is absent until a cycle has actually measured one.
   const r = storageProbeHealth();
-  assert.equal(r.ok, true, "a fresh boot has no evidence of a problem yet");
   assert.equal(r.pending, true, "cold start must say so, so a caller can tell 'unknown' from 'known healthy'");
+  assert.equal("ok" in r, false, "an UNMEASURED probe must not claim ok at all — absence is not evidence");
   // storageProbeHealth() kicked off a real background cycle as a side effect of the call
   // above; drain it before this test returns so it cannot land, unawaited, inside the NEXT
   // test's window (that stray-call race is exactly what production the busy guard prevents
   // for OVERLAPPING cycles, but a cross-test leak needs the test itself to drain).
   await _waitForStorageProbeSettleForTest();
+});
+
+test("storage probe facade: UNCONFIGURED storage is `skipped`, never a failure and never a probe cycle", async () => {
+  // #617 acceptance (1): "unconfigured optional ≠ configured-but-failing". Without this branch a
+  // deployment that simply has no storage secrets ran the probe anyway, `realConfig()` threw
+  // "Storage custom-role configuration is missing", and /ready reported `ok:false,
+  // reason:'storage_error'` — indistinguishable from a live storage outage. `configured` is read
+  // off storage.mjs's OWN config surface (CLARA_STORAGE_URL + _ROLE + _ROLE_JWT, realConfig()'s
+  // three requirements); no new environment variable is invented here.
+  const previousUrl = process.env.CLARA_STORAGE_URL;
+  const previousRole = process.env.CLARA_STORAGE_ROLE;
+  const previousJwt = process.env.CLARA_STORAGE_ROLE_JWT;
+  let putCalls = 0;
+  globalThis.__claraStorageForTest = {
+    put: async () => {
+      putCalls += 1;
+      return { created: true, existed: false };
+    },
+  };
+  delete process.env.RELAY_TEST_MODE; // the local-fs fallback IS a configured surface; leave it
+  delete process.env.CLARA_STORAGE_URL;
+  delete process.env.CLARA_STORAGE_ROLE;
+  delete process.env.CLARA_STORAGE_ROLE_JWT;
+  try {
+    const r = await _waitForStorageProbeSettleForTest();
+    assert.deepEqual(r, { skipped: true, reason: "storage_not_configured" }, "an unconfigured lane reports its own third state");
+    assert.equal("ok" in r, false, "and never claims ok — it was never measured");
+    assert.equal(putCalls, 0, "an unconfigured lane must not be probed at all (no cycle, no log spam)");
+  } finally {
+    process.env.RELAY_TEST_MODE = "1";
+    if (previousUrl === undefined) delete process.env.CLARA_STORAGE_URL;
+    else process.env.CLARA_STORAGE_URL = previousUrl;
+    if (previousRole === undefined) delete process.env.CLARA_STORAGE_ROLE;
+    else process.env.CLARA_STORAGE_ROLE = previousRole;
+    if (previousJwt === undefined) delete process.env.CLARA_STORAGE_ROLE_JWT;
+    else process.env.CLARA_STORAGE_ROLE_JWT = previousJwt;
+    _resetStorageProbeCacheForTest();
+  }
+});
+
+test("storage probe facade: a CONFIGURED-but-failing lane is a different verdict from an unconfigured one", async () => {
+  // The discriminating half of the cell above: same probe, same /ready reader, two distinct
+  // verdicts. Without this pair a regression that reported everything as `skipped` would pass
+  // the unconfigured cell alone.
+  globalThis.__claraStorageForTest = {
+    put: async () => {
+      throw new StorageError("storage_error", "simulated permission denied (403)");
+    },
+  };
+  const failing = await _waitForStorageProbeSettleForTest();
+  assert.equal(failing.ok, false, "a configured lane that fails says so");
+  assert.equal(failing.reason, "storage_error");
+  assert.equal(failing.skipped, undefined, "and is never confused with 'not configured'");
 });
 
 test("storage probe facade: settles once, then repeat calls stay synchronous (no re-probe) until the cache expires", async () => {
@@ -172,8 +230,11 @@ test("storage probe facade: logs via console.error only on a red<->green transit
   try {
     const first = await _waitForStorageProbeSettleForTest();
     assert.equal(first.ok, false);
-    assert.equal(logs.length, 1, `expected exactly one transition log for the cold(green)->red flip, got ${JSON.stringify(logs)}`);
-    assert.match(logs[0], /GREEN -> RED/);
+    assert.equal(logs.length, 1, `expected exactly one transition log for the cold(unknown)->red flip, got ${JSON.stringify(logs)}`);
+    // #617: the cold state is UNKNOWN, not GREEN — the log says so rather than claiming a green
+    // reading that was never taken. (A cold->green settle logs nothing at all: there is no
+    // alarm in "the first measurement was fine", and a line per boot is noise, not signal.)
+    assert.match(logs[0], /UNKNOWN -> RED/);
 
     // Let the background interval fire several more times while still red — steady state,
     // no new transition, so no new log line.

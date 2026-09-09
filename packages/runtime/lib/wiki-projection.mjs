@@ -135,6 +135,11 @@ const MAX_FACT_CITATIONS = 50;
 const WIKI_MODEL = process.env.CLARA_WIKI_MODEL || process.env.CLARA_CHAT_MODEL || "gpt-5.6-terra";
 const WIKI_ENGINE_ID = `clara-wiki-synth:${WIKI_MODEL}`;
 const MAX_ATTEMPTS = Number(process.env.CLARA_WIKI_PROJECTION_MAX_ATTEMPTS || 5);
+/** #617: the ops half (`wikiProjectionHealth`, lib/wiki-projection-ops.mjs) has to split its
+ *  pending dead-letters into "still inside the retry budget" and "EXHAUSTED, waiting on an
+ *  operator", and the cap that decides which is THIS one. Exported rather than re-typed there:
+ *  a second hand-written 5 would silently mis-classify every dead letter the day this knob moves. */
+export const WIKI_PROJECTION_MAX_ATTEMPTS = MAX_ATTEMPTS;
 const skip = (status) => ({ status, mutate: null });
 
 export function contentSha256(content) {

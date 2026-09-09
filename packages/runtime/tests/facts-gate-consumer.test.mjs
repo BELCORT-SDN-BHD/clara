@@ -14,7 +14,7 @@ import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { rootQuery, humanQuery, asRuntime, asFnOwner, buildFirm, headSeq, checkpointSeq, deadLettersForFirm, endPool, ensureClassifyConsent, opk } from "./relay-fixtures.mjs";
 import { seedVerifiedDocument, seedExtraction, seedRegion } from "./matcher-testkit.mjs";
-import { runFactsGateCycle, factsGateHealth, factsGateRedrive, CONSUMERS, FACTS_GATE_CONSUMER, FACTS_GATE_EVENT_TYPE } from "../lib/facts-gate.mjs";
+import { runFactsGateCycle, factsGateHealth, factsGateRedrive, CONSUMERS, FACTS_GATE_CONSUMER, FACTS_GATE_EVENT_TYPE, FACTS_GATE_MAX_ATTEMPTS } from "../lib/facts-gate.mjs";
 import { liveWitnessConsent } from "./f-a1-witness-fixtures.mjs";
 
 async function probe0016() {
@@ -245,6 +245,86 @@ test("redrive refuses when there is no facts_gate dead-letter", { skip }, async 
   const document = await seedKnownKindDoc({ firm, owner, kind: "invoice" });
   const { eventId } = await emitClassified(firm, document, owner);
   await assert.rejects(() => asRuntime((c) => factsGateRedrive(c, eventId)), /no dead-letter for consumer='facts_gate'/);
+});
+
+// #617 — THE THREE CATEGORIES, AGAINST A REAL DATABASE. Both cells are DELTA-based on purpose:
+// `firmsUncheckpointed` and the dead-letter counts are ESTATE-WIDE reads (that is what an
+// operator looks at), and this rig is shared, so an absolute number would be a fixture of
+// whatever else has run. A delta measures exactly what the cell itself caused.
+
+test("#617 health: a firm with events and NO checkpoint counts as UNCHECKPOINTED, not merely as lag", { skip }, async () => {
+  const before = await asRuntime((c) => factsGateHealth(c));
+  // The WIRE SHAPE, pinned. #617 moved this query into lib/consumer-health.mjs, shared with
+  // every other relay consumer; the fields and their ORDER are what /ready and its readers
+  // actually see, so a future consolidation that renames, reorders or drops one fails HERE.
+  assert.deepEqual(
+    Object.keys(before),
+    ["consumer", "lag", "pendingDeadLetters", "firmsTracked", "firmsUncheckpointed", "deadLetters"],
+    "factsGateHealth's field set and order",
+  );
+  const { owner, firm } = await buildFirm("fg617u");
+  const document = await seedKnownKindDoc({ firm, owner, kind: "invoice" });
+  await emitClassified(firm, document, owner);
+
+  const seeded = await asRuntime((c) => factsGateHealth(c));
+  assert.equal(
+    seeded.firmsUncheckpointed - before.firmsUncheckpointed,
+    1,
+    "a firm with events this consumer has never checkpointed is counted as NOT-YET-MEASURED",
+  );
+  assert.equal(seeded.firmsTracked, before.firmsTracked, "and it is NOT yet in firmsTracked — the two are complements");
+
+  // The discriminating half: run the consumer. The firm now HAS a checkpoint, so it leaves the
+  // uncheckpointed category — while `lag` (which reads a missing checkpoint as last_seq 0) was
+  // never able to tell the two states apart on its own.
+  await drainFactsGate(firm);
+  const drained = await asRuntime((c) => factsGateHealth(c));
+  assert.equal(
+    drained.firmsUncheckpointed,
+    seeded.firmsUncheckpointed - 1,
+    "once checkpointed the firm leaves the not-yet-measured category",
+  );
+  assert.equal(drained.firmsTracked, before.firmsTracked + 1, "and joins the tracked one");
+});
+
+test("#617 health: dead letters split into pending vs EXHAUSTED at this consumer's own cap", { skip }, async () => {
+  const before = await asRuntime((c) => factsGateHealth(c));
+  const { owner, firm } = await buildFirm("fg617x");
+  const document = await seedKnownKindDoc({ firm, owner, kind: "invoice" });
+  const { eventId } = await emitClassified(firm, document, owner);
+  await rootQuery(
+    `insert into clara.relay_dead_letters (consumer, event_id, reason, attempted_taxonomy_version)
+       values ($1, $2, 'rig-seeded #617', null)`,
+    [FACTS_GATE_CONSUMER, eventId],
+  );
+
+  // BOUNDARY, from below. One attempt short of the cap the row is still inside its retry budget:
+  // it counts as pending and NOT as exhausted. Without this arm the cell would pass for an
+  // implementation that simply called every pending dead letter exhausted.
+  await rootQuery("update clara.relay_dead_letters set attempt_count = $3 where consumer = $1 and event_id = $2", [
+    FACTS_GATE_CONSUMER,
+    eventId,
+    FACTS_GATE_MAX_ATTEMPTS - 1,
+  ]);
+  const retrying = await asRuntime((c) => factsGateHealth(c));
+  assert.equal(retrying.deadLetters.pending - before.deadLetters.pending, 1, "a pending dead letter is counted as pending");
+  assert.equal(retrying.deadLetters.exhausted, before.deadLetters.exhausted, "and is NOT exhausted while attempts remain");
+  assert.equal(retrying.pendingDeadLetters, retrying.deadLetters.pending, "the compatibility field still mirrors the pending total");
+
+  // AT the cap: retrying has stopped (processEvent skips past it and advances the checkpoint),
+  // so it needs an operator redrive and is reported as its own category.
+  await rootQuery("update clara.relay_dead_letters set attempt_count = $3 where consumer = $1 and event_id = $2", [
+    FACTS_GATE_CONSUMER,
+    eventId,
+    FACTS_GATE_MAX_ATTEMPTS,
+  ]);
+  const exhausted = await asRuntime((c) => factsGateHealth(c));
+  assert.equal(exhausted.deadLetters.exhausted - before.deadLetters.exhausted, 1, "at the cap the row is EXHAUSTED");
+  assert.equal(
+    exhausted.deadLetters.pending - before.deadLetters.pending,
+    1,
+    "an exhausted row is STILL pending — exhausted is a subset, so the two counts must not be subtracted from each other",
+  );
 });
 
 test("registry + health: the facts_gate entry is group-runtime and health reports lag/dead-letters", { skip }, async () => {

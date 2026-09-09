@@ -43,6 +43,15 @@ import { reconcileSandboxDispatch } from "./reconciler-sandbox.mjs";
 // — so the belt takes its own checkout from the webhook pool.
 import { reconcileStripeEvents, stripeApplyDue } from "./stripe-applier.mjs";
 import { isConnErr, waitForNudge } from "./listen.mjs";
+// #617: the leader's own state, recorded for /ready. A pure recorder — no imports but the
+// sanitizer, no DB reach, and no say in what this loop does (see its header).
+import {
+  recordLeaderAcquired,
+  recordLeaderHalt,
+  recordLeaderLost,
+  recordLeaderStarted,
+  recordLeaderStopped,
+} from "./leader-state.mjs";
 
 const POLL_INTERVAL_MS = Number(process.env.CLARA_LEADER_POLL_MS || 2000);
 const RECONNECT_BASE_MS = 500;
@@ -153,6 +162,7 @@ export function startLeaderLoop(deps) {
   const stopRef = { stop: false, wake: null };
 
   const loop = (async () => {
+    recordLeaderStarted(); // #617 — "no leader in this process" must never read like "leader down"
     let backoff = RECONNECT_BASE_MS;
     let iteration = 0;
     let lastSstRun = 0; // 0 ⇒ the first cycle after boot runs the SST repair belt (catches pre-existing crossings post-0016)
@@ -183,6 +193,7 @@ export function startLeaderLoop(deps) {
         await acquireLeaderLock(client, CONSUMER); // BLOCKS until leadership
         await client.query("listen clara_events");
         log("LEADER acquired");
+        recordLeaderAcquired(); // #617
         backoff = RECONNECT_BASE_MS;
         while (!stopRef.stop) {
           if (connErr) throw connErr;
@@ -251,6 +262,11 @@ export function startLeaderLoop(deps) {
             iteration += 1;
           } catch (err) {
             if (err instanceof TaxonomyHaltError || err?.halt) {
+              // RECORDED BEFORE onHalt, deliberately: the default onHalt is process.exit(2), so
+              // anything written after it would never happen. The record exists for the window
+              // before the exit, for a supervisor that injects its own onHalt, and for the cell
+              // that has to prove this ordering without killing the test runner.
+              recordLeaderHalt(err);
               onHalt(err);
               return;
             }
@@ -262,6 +278,7 @@ export function startLeaderLoop(deps) {
         }
       } catch (err) {
         if (stopRef.stop) break;
+        recordLeaderLost(err); // #617 — the flap counter an operator reads off /ready
         log(`LEADER connection-lost (${err?.message ?? err}) — reconnecting in ${backoff}ms`);
         await sleep(backoff);
         backoff = Math.min(backoff * 2, RECONNECT_MAX_MS);
@@ -269,6 +286,7 @@ export function startLeaderLoop(deps) {
         await client.end().catch(() => {});
       }
     }
+    recordLeaderStopped(); // #617 — a deliberate stop is not a fault; it must not read as one
   })();
 
   return {

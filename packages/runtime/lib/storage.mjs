@@ -264,7 +264,8 @@ export async function verifyWikiCanonical(key, expectedSha256) {
 // regex admits only `firms/…/docs/…` and the role check is about the ROLE, not the prefix — so
 // the storage role's policy must be extended to the `reports/` prefix DELIBERATELY. That
 // extension is a named ceremony step with a positive read (upload one object, read it back by
-// key) before the first seal; it is written down in docs/ops/DR.md §10, not implied here.
+// key) before the first seal — a ceremony this repository does not carry a runbook for (#617:
+// the `docs/ops/DR.md` cited here does not exist); it is not implied by this code either.
 //
 // Overwrite is structurally impossible (x-upsert:false → a 409 is idempotent success), which is
 // what makes an at-least-once render safe: the key is the content address, so a second identical

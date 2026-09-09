@@ -96,18 +96,118 @@ tasks waiting before egress. The classifier's engine id is also DB-pinned.
 
 ## Health, TLS and serving identity
 
-`GET /health` is dependency-free liveness. `GET /ready` fails on database/runtime-lane failure,
-dead required engine/control heartbeats, or taxonomy halt. Other lane failures, intake/storage
-failures and queue lag currently warn. Pending/skipped lane probes are distinct from failures.
-The per-lane results appear under `checks.pools`; background relay-pool errors are counted.
+`GET /health` is dependency-free liveness. `GET /ready` fails (503) on database/runtime-lane
+failure, dead required engine/control heartbeats, or taxonomy halt. Everything else — other lane
+failures, intake/storage failures, queue lag, pool errors, leader reconnects and TLS posture —
+warns. That split is unchanged.
+
+Read the body as three answers, never two. A check is measured-and-healthy, measured-and-failing,
+or **not measured**; an absent optional dependency is a fourth answer and never the second.
+
+| Field | Says |
+|---|---|
+| `checks.pools` | Per-lane probe. `{pending:true}` before the first background cycle, `stalled` when the probe loop itself has wedged, `skipped/dsn_not_configured` for an unconfigured lazy lane, else `ok` + `latency_ms` or `ok:false` + a sanitized code. |
+| `checks.pool_errors` | Per-lane background pool-error counters (`errors`, `last_error_at`, `last_error_code`). A lane MISSING from this map is a lazy pool this process never opened — not a lane with zero errors. |
+| `checks.relay_pool` | The relay pool's own counters (same shape), kept separate so one error never warns twice. |
+| `checks.storage` | `{pending:true}` (never measured — carries no `ok`), `{skipped:true, reason:"storage_not_configured"}`, or a measured `ok`/`ok:false` with a classified `reason`. |
+| `checks.leader` | `{started, held, since, reconnects, last_error_code, halted}`. `started:false` means no leader runs in this process. `held:false` while started is a reconnect (warn). A recorded `halted` sets `ok:false`. |
+| `checks.tls` | The boot assert's reading: `measured:false` when it has not run here, else `pinned`/`unpinned`/`weak_mode` as **variable names** plus a `validated` count. Never a DSN, never a certificate path. |
+| Consumer checks | `lag`, `pendingDeadLetters` (unchanged), plus `deadLetters:{pending,exhausted}` and `firmsUncheckpointed` for relay consumers, and `stranded`/`maxAttemptCount`/`strandedMs` for the task lanes. A consumer whose health query threw appears as `{ok:false, unavailable:true, error:<code>}` — never as a missing key. |
+
+`exhausted` counts pending dead letters at or past that consumer's own max attempts: retrying has
+stopped and only a redrive clears them. `firmsUncheckpointed` counts firms with events and no
+checkpoint row — not-yet-measured, which `lag` cannot express because it reads a missing
+checkpoint as sequence zero. `stranded` counts rows wedged in `running` past the lane's own
+requeue threshold, which the queued backlog cannot see at all.
+
+Nothing in the payload carries a DSN, a certificate path or raw database text; failures are
+reported as sanitized identifier-shaped codes and the full error goes to the server log.
 
 TLS is determined by each DSN. The image contains `/app/ops/tls/pooler-ca.crt`;
 `lib/tls-ca.mjs` rejects malformed/expired/mismatched configured pins, but currently only warns
 about absent pins or non-verifying modes. To activate verified TLS, deploy the image containing
 the CA first, validate the server chain, then update the applicable DSNs with
 `sslmode=verify-full&sslrootcert=/app/ops/tls/pooler-ca.crt` and re-probe every lane.
-Shipping the certificate does not establish that live secrets use it.
+Shipping the certificate does not establish that live secrets use it. `checks.tls` reports what
+the running process actually booted with, by variable name; `measured:false` means the boot
+assert has not run there and is not evidence of a clean posture.
 [node-postgres SSL configuration](https://node-postgres.com/features/ssl)
+
+### Recovery checklist
+
+Run these against the machine that is serving. `$BASE` is the runtime's origin (locally
+`http://127.0.0.1:3200`; on Fly, run the `curl` inside `fly ssh console -C`). Every step is a
+command; none of them is a description of one.
+
+1. **Read the whole verdict, then the warnings.** A 200 with warnings is degraded-but-serving;
+   only the fail set above returns 503.
+
+   ```sh
+   curl -fsS "$BASE/ready" | jq '{ready, warnings}'
+   curl -fsS "$BASE/ready" | jq '.checks | {pools, pool_errors, relay_pool, storage, leader, tls}'
+   ```
+
+2. **Separate not-measured from failing before doing anything.** If `checks.pools.pending` is
+   true, or `checks.storage.pending` is true, or `checks.tls.measured` is false, you have no
+   reading yet — poll again rather than acting on absence.
+
+   ```sh
+   sleep 30 && curl -fsS "$BASE/ready" | jq '.checks.pools, .checks.storage, .checks.tls'
+   ```
+
+3. **Name the failing lane.** `skipped` lanes are unconfigured by design (bank, the two checkout
+   lanes); a lane with `ok:false` carries a sanitized code, and its login/DSN variable is in the
+   lane table above under "Connection and service configuration".
+
+   ```sh
+   curl -fsS "$BASE/ready" | jq '.checks.pools | arrays | map(select(.ok == false))'
+   curl -fsS "$BASE/ready" | jq '.checks.pool_errors | with_entries(select(.value.errors > 0))'
+   ```
+
+4. **Name the stalled consumer and the work behind it.** `exhausted` and `stranded` are the two
+   categories that do not clear on their own.
+
+   ```sh
+   curl -fsS "$BASE/ready" | jq '.checks | with_entries(select((.value | objects | .deadLetters.exhausted // 0) > 0))'
+   curl -fsS "$BASE/ready" | jq '.checks | with_entries(select((.value | objects | .stranded // 0) > 0))'
+   ```
+
+5. **List the exhausted dead letters for that consumer** (read-only; the runtime DSN, psql):
+
+   ```sh
+   psql "$CLARA_RUNTIME_DATABASE_URL" -c \
+     "select event_id, event_type, attempt_count, reason
+        from clara.relay_dead_letters
+       where consumer = 'facts_gate' and status = 'pending'
+       order by attempt_count desc limit 20;"
+   ```
+
+6. **Redrive each one** with the registered helper (idempotent; refuses when there is no dead
+   letter for that consumer/event):
+
+   ```sh
+   cd packages/runtime
+   node scripts/relay.mjs redrive <eventId> --consumer facts_gate
+   ```
+
+   Registered consumers are `router`, `matcher`, `sst_watch`, `facts_gate` and
+   `wiki_projection`. The autodraft and wake-engine ledgers have **no** CLI redrive today: their
+   `exhausted` counts are diagnostic, and clearing them is a database-side operation, not a
+   documented one-liner. Do not infer a verb this repository does not ship.
+
+7. **Confirm recovery, and confirm it moved.** A single reading proves nothing; the lane must be
+   `ok:true` and the category count must have fallen.
+
+   ```sh
+   curl -fsS "$BASE/ready" | jq '{ready, warnings}'
+   curl -fsS "$BASE/ready" | jq '.checks.pools | arrays | map(select(.ok == false)) | length'
+   ```
+
+A stranded task lane recovers when its own worker requeues the row past
+`CLARA_CLASSIFY_STRANDED_MS` / `CLARA_LOCAL_FACTS_STRANDED_MS`; if `stranded` does not fall
+across two polls, the consumer loop itself is not running. A leader showing `held:false` with a
+rising `reconnects` is reconnecting on its own; a recorded `halted` means the process is exiting
+non-zero and supervision restarts it — check `checks.taxonomy` before assuming otherwise.
 
 Authenticated `GET /api/build-info` reports baked build identity, workflow names and the DB
 migration frontier. Use this together with the actual Fly image and Worker version to establish

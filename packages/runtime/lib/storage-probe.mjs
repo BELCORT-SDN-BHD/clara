@@ -1,5 +1,8 @@
-// /ready storage write probe — R9 (docs/plan/active/harness-audit-rulings-2026-08-26.md),
-// follow-up (a) of docs/ops/incident-2026-07-26-intake-storage.md.
+// /ready storage write probe — R9, follow-up (a) of the 2026-07-26 intake-storage incident.
+// (#617: the `docs/plan/active/harness-audit-rulings-2026-08-26.md` and
+// `docs/ops/incident-2026-07-26-intake-storage.md` this header used to cite are NOT in this
+// repository. The account below is the surviving record; the operator-facing readiness and
+// recovery contract is `packages/runtime/README.md`, "Health, TLS and serving identity".)
 //
 // THE INCIDENT'S HEADLINE WAS RETRACTED — READ THIS BEFORE TRUSTING ANY "~12h outage" framing
 // elsewhere in this repo's history. Intake was never down for new documents; every observed
@@ -74,9 +77,11 @@
 // for diagnosis); an already-known-red cycle stays silent to avoid spamming that log once a
 // minute forever. The public verdict (storageProbeHealth()'s return value, which becomes
 // checks.storage on the UNAUTHENTICATED /ready response) never carries that raw detail — only
-// a short classified `reason` code. See docs/ops/DR.md:300 for the still-open other half of
-// this follow-up: an EXTERNAL uptime check that pages someone on that transition. This file
-// only makes the runtime know and log; it does not page anyone.
+// a short classified `reason` code. The still-open other half of this follow-up — an EXTERNAL
+// uptime check that PAGES someone on that transition — is not in this repository (#617: the
+// `docs/ops/DR.md` this line used to cite does not exist here); the operator-facing half that
+// does exist is the recovery checklist in `packages/runtime/README.md`, "Health, TLS and
+// serving identity". This file only makes the runtime know and log; it does not page anyone.
 
 import { createHash } from "node:crypto";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
@@ -85,6 +90,24 @@ import { join } from "node:path";
 import { putCanonical, verifyCanonical, StorageError } from "./storage.mjs";
 
 const PROBE_FIRM_ID = "00000000-0000-4000-8000-000000000000";
+
+/**
+ * Is the document-custody lane CONFIGURED AT ALL (#617)? Read off `storage.mjs`'s OWN config
+ * surface — `realConfig()` requires exactly these three, and `putCanonical` short-circuits to
+ * the local-fs fallback under `RELAY_TEST_MODE`, which IS a configured surface on a rig. No new
+ * environment variable is invented here; inventing one would create a second, driftable answer
+ * to a question storage.mjs already answers.
+ *
+ * WHY THIS EXISTS. Without it an estate that simply has no storage secrets ran the probe anyway,
+ * `realConfig()` threw "Storage custom-role configuration is missing", and /ready reported
+ * `ok:false, reason:'storage_error'` — a MISSING OPTIONAL LANE reported in the same words as a
+ * live storage outage. An operator cannot triage those two with the same runbook, so they must
+ * not read the same on the endpoint.
+ */
+function storageConfigured() {
+  if (process.env.RELAY_TEST_MODE === "1") return true;
+  return Boolean(process.env.CLARA_STORAGE_URL && process.env.CLARA_STORAGE_ROLE_JWT && process.env.CLARA_STORAGE_ROLE);
+}
 
 function cacheMs() {
   // Floor 1000ms: this value now FEEDS setInterval (not a staleness compare), so 0 would be
@@ -172,9 +195,18 @@ export async function _probeStorageOnceForTest() {
   return withHardTimeout(runProbeOnce, timeoutMs(), { ok: false, reason: "storage_probe_timeout" });
 }
 
-// Optimistic until the first cycle completes: a fresh boot has no evidence of a problem yet,
-// this check is WARN-only (never gates readiness), and the window is bounded to one TIMEOUT_MS.
-let cachedResult = { ok: true, pending: true };
+// THREE STATES, NEVER TWO (#617). The verdict this module hands /ready is one of:
+//   * `{pending:true}`            — not yet measured. It carries NO `ok` key AT ALL, which is the
+//                                   whole point: the previous shape was `{ok:true, pending:true}`,
+//                                   i.e. an UNMEASURED lane reporting itself HEALTHY, and every
+//                                   reader that branched on `.ok` (including /ready's own warning
+//                                   line) believed it for the whole cold-start window.
+//   * `{skipped:true, reason}`    — the lane is NOT CONFIGURED (see storageConfigured above). An
+//                                   absent optional lane is not a failing one.
+//   * `{ok, reason?, pending:false}` — actually measured, this cycle.
+// This check is WARN-only in every one of those states; it never gates readiness.
+let cachedResult = Object.freeze({ pending: true });
+const UNCONFIGURED_VERDICT = Object.freeze({ skipped: true, reason: "storage_not_configured" });
 let intervalHandle = null;
 let inFlight = null; // the current/most-recent refresh cycle's promise (test determinism seam)
 let busy = false; // never let two probe cycles overlap (a slow cycle + a short CACHE_MS otherwise races)
@@ -183,13 +215,18 @@ async function refreshOnce() {
   if (busy) return;
   busy = true;
   try {
-    const wasOk = cachedResult.ok;
+    // `null` = the previous verdict was never MEASURED (cold, or unconfigured). Keeping that
+    // distinct from `true` is what stops the log claiming a GREEN reading nobody ever took.
+    const wasOk = cachedResult.pending === true || cachedResult.skipped === true ? null : cachedResult.ok;
     const result = await withHardTimeout(runProbeOnce, timeoutMs(), { ok: false, reason: "storage_probe_timeout" });
     cachedResult = { ok: result.ok, reason: result.reason, pending: false };
-    if (wasOk !== result.ok) {
-      // Deliberate alarm line — see the header comment ("TRANSITIONS ARE LOGGED...").
+    // Deliberate alarm line — see the header comment ("TRANSITIONS ARE LOGGED..."). An
+    // UNKNOWN -> GREEN first settle is NOT a transition worth a line (there is no alarm in "the
+    // first measurement was fine", and one line per boot is noise); every other change is.
+    if (wasOk !== result.ok && !(wasOk === null && result.ok === true)) {
+      const from = wasOk === null ? "UNKNOWN" : wasOk ? "GREEN" : "RED";
       console.error(
-        `[storage-probe] ${wasOk ? "GREEN -> RED" : "RED -> GREEN"}` +
+        `[storage-probe] ${from} -> ${result.ok ? "GREEN" : "RED"}` +
           `${result.reason ? ` (${result.reason})` : ""}${result.detail ? `: ${result.detail}` : ""}`,
       );
     }
@@ -199,6 +236,17 @@ async function refreshOnce() {
 }
 
 function ensureStarted() {
+  // An UNCONFIGURED lane is never probed: a cycle would only produce `realConfig()`'s own
+  // "configuration is missing" throw, once a minute, forever — a false alarm and a log flood
+  // for a lane the deployment simply does not have. Re-read on EVERY call (not once at load)
+  // so a mid-life configuration change is reflected rather than frozen at boot.
+  if (!storageConfigured()) {
+    if (intervalHandle) clearInterval(intervalHandle);
+    intervalHandle = null;
+    inFlight = null;
+    cachedResult = UNCONFIGURED_VERDICT;
+    return;
+  }
   if (intervalHandle) return;
   inFlight = refreshOnce();
   intervalHandle = setInterval(() => {
@@ -211,7 +259,10 @@ function ensureStarted() {
  * Synchronous — returns the last known verdict instantly, no I/O on the calling path (see the
  * header comment: this is off /ready's latency budget entirely). A background interval,
  * started lazily on first use, keeps the verdict refreshed at most once per CACHE_MS.
- * @returns {{ok:boolean, reason?:string, pending?:boolean}}
+ * THREE STATES — see `cachedResult`'s own note: `pending` (never measured, NO `ok` key),
+ * `skipped` (not configured), or a measured `ok`. A reader must branch on all three; testing
+ * `!verdict.ok` alone reads an unmeasured or absent lane as a FAILURE.
+ * @returns {{ok?:boolean, reason?:string, pending?:boolean, skipped?:boolean}}
  */
 export function storageProbeHealth() {
   ensureStarted();
@@ -225,7 +276,7 @@ export function _resetStorageProbeCacheForTest() {
   intervalHandle = null;
   inFlight = null;
   busy = false;
-  cachedResult = { ok: true, pending: true };
+  cachedResult = Object.freeze({ pending: true });
 }
 
 /** Test-only: await the most recently started (or currently in-flight) background refresh

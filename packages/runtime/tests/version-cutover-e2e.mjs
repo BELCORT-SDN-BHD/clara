@@ -31,8 +31,10 @@
 //   node tests/version-cutover-e2e.mjs
 //
 // It closes an audited GATE-7 gap: the v25 rollback preflight existed ONLY as a manual
-// runbook SQL step (docs/ops/wave-b-ceremony-runbook.md lines 18/87, run live in WB-R18) + a
-// static freeze-lint — never an executable rig test with parked runs across a version cutover.
+// runbook SQL step (run live in WB-R18; the contract now lives in packages/runtime/README.md,
+// 'Deployment and rollback' — the docs/ops/ runbook this line used to cite is not in this
+// repository) + a static freeze-lint — never an executable rig test with parked runs across a
+// version cutover.
 //
 // Reference note (recorded deviation): a standalone plain-node e2e cannot DIRECT-import the
 // frozen chatTurn_v7 "use workflow" proxy — the workflowId-bearing proxy is produced by the
@@ -174,7 +176,7 @@ async function deriveNewestChatTurnExport() {
 }
 
 /** The runbook §0/§8 preflight, executable: a version is rollback-'allowed' iff it has ZERO
- *  non-terminal runs (docs/ops/wave-b-ceremony-runbook.md lines 18/87). */
+ *  non-terminal runs (packages/runtime/README.md, 'Deployment and rollback'). */
 async function rollbackPreflight(rig, name) {
   const r = await rig.rootQuery(
     "select count(*)::int n from workflow.workflow_runs where name=$1 and status not in ('completed','failed','cancelled')",

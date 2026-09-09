@@ -25,6 +25,7 @@ import { randomUUID } from "node:crypto";
 import { setRuntimeRole, acquireLeaderLock } from "./relay.mjs";
 import { makeRuntimeClient, withRuntime as defaultWithRuntime } from "./pools.mjs";
 import { isConnErr, waitForNudge } from "./listen.mjs";
+import { taskLaneHealth } from "./consumer-health.mjs";
 import { interpretClaimReceipt } from "../workflows/invoiceFacts.v1.behavior.mjs";
 import { classifyDocumentText } from "./classify-llm.mjs";
 
@@ -268,22 +269,21 @@ export async function runClassifyCycle(client, deps = {}) {
 // same condition from the other side and shows the discoverQueued cap doing its job.
 // ---------------------------------------------------------------------------
 export async function classifyHealth(client) {
-  const r = await client.query(
-    `select
-       count(*) filter (where status='queued')::int as queued,
-       count(*) filter (where status='running')::int as running,
-       coalesce(extract(epoch from (now() - min(created_at) filter (where status='queued'))) * 1000, 0)::bigint as oldest_queued_ms,
-       coalesce(extract(epoch from (now() - min(coalesce(started_at, updated_at)) filter (where status='running'))) * 1000, 0)::bigint as oldest_running_ms,
-       coalesce(max(attempt_count), 0)::int as max_attempt_count
-     from clara.document_processing_tasks where lane='classify' and status in ('queued','running')`,
-  );
+  // The shared task-lane read (lib/consumer-health.mjs), which carries the definition of the
+  // stranded/attempt categories. The threshold is THIS module's own STRANDED_MS — the same one
+  // the worker requeues on — passed in rather than re-read from the environment by the reader:
+  // health.mjs used to re-read CLARA_CLASSIFY_STRANDED_MS itself, which is a second answer to
+  // one question.
+  const h = await taskLaneHealth(client, "classify", STRANDED_MS);
   return {
     consumer: CLASSIFY_CONSUMER,
-    queued: Number(r.rows[0].queued),
-    running: Number(r.rows[0].running),
-    oldestQueuedMs: Number(r.rows[0].oldest_queued_ms),
-    oldestRunningMs: Number(r.rows[0].oldest_running_ms),
-    maxAttemptCount: Number(r.rows[0].max_attempt_count),
+    queued: h.queued,
+    running: h.running,
+    oldestQueuedMs: h.oldestQueuedMs,
+    oldestRunningMs: h.oldestRunningMs,
+    maxAttemptCount: h.maxAttemptCount,
+    stranded: h.stranded,
+    strandedMs: h.strandedMs,
   };
 }
 

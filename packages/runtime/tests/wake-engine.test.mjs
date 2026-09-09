@@ -23,7 +23,7 @@ import * as rig from "./rig.mjs";
 import { WAKE_EVENT_TYPE } from "./relay-fixtures.mjs";
 import {
   WAKE_ENGINE_CONSUMER, WAKE_ENGINE_CLAIM_CONSUMER, WAKE_ENGINE_ENQUEUE_CONSUMER,
-  runWakeEngineCycle, wakeEngineHealth, loadEnabledSources,
+  runWakeEngineCycle, wakeEngineHealth, loadEnabledSources, SOURCE_MAX_ATTEMPTS_FALLBACK,
 } from "../lib/wake-engine.mjs";
 import { reconcileWakeEngineTasks } from "../lib/reconciler-wake.mjs";
 // round-7 (native adversarial leg, MUST #1) — the two new cells below need redrive() itself
@@ -1775,4 +1775,118 @@ test("D7b a task belonging to ANOTHER firm is left alone by the firm-scoped belt
   assert.equal(out.wakeSettled, 0, "D7b: scoped to a DIFFERENT firm, the other firm's stuck task is untouched");
   const untouched = await rig.readTask(task);
   assert.equal(untouched.status, "running", "D7b: still running — the firm predicate is real, not decoration");
+});
+
+// =====================================================================================
+// #617 — THE CATEGORIES, AGAINST A REAL DATABASE. Both cells are DELTA-based on purpose: these
+// are ESTATE-WIDE reads (what an operator looks at) and this rig is shared, so an absolute number
+// would be a fixture of whatever else has run. Every baseline below is taken AFTER the cell's own
+// registry mutations, so the ONLY thing that changes between two measurements is this cell's own
+// dead-letter row — a source toggle can re-classify OTHER rows in the estate, and a delta taken
+// across one would be measuring them too. Placed LAST in the file: cell (b) deliberately leaves
+// no enabled wake_outbox source for WAKE_EVENT_TYPE, which every earlier cell registers for
+// itself anyway.
+// =====================================================================================
+
+test("#617 wakeEngineHealth: a dead letter is EXHAUSTED against ITS OWN SOURCE's max_attempts, not a module constant", { skip: skip || skipG1 }, async () => {
+  const key = `${rig.WAKE_ENGINE_TEST_PREFIX}617cap_${randomUUID().slice(0, 8)}`;
+  // TWO baselines, on purpose. `beforeFirm` predates the firm, because firmsUncheckpointed can
+  // only be measured across the firm's own creation; `before` postdates registerSource, because
+  // registering an enabled source DISABLES any other source for this event type (the file's own
+  // isolation rule) and can therefore re-classify OTHER estate rows' exhaustion. Registering
+  // touches wake_engine_sources only, so it cannot move firmsUncheckpointed between the two.
+  const beforeFirm = await rig.asRuntime((c) => wakeEngineHealth(c));
+  // The WIRE SHAPE, pinned. #617 moved this query into lib/consumer-health.mjs, shared with
+  // every other relay consumer; the fields and their ORDER are what /ready and its readers
+  // actually see, so a future consolidation that renames, reorders or drops one fails HERE.
+  assert.deepEqual(
+    Object.keys(beforeFirm),
+    ["consumer", "lag", "pendingDeadLetters", "firmsTracked", "heldForDisabledSource", "cancelRequestedStuck", "heldBelowCheckpoint", "firmsUncheckpointed", "deadLetters"],
+    "wakeEngineHealth's field set and order (its five own counters keep their places)",
+  );
+  const w = await rig.buildFirm("g1_617cap");
+  // maxAttempts 2 is deliberately BELOW the absent-source fallback (5): a row at 2 can only read
+  // as exhausted if the per-source lookup actually happened.
+  await registerSource({ sourceKey: key, carrier: "wake_outbox", eventType: WAKE_EVENT_TYPE, taskKind: "wake", wakeKind: "proactive", maxAttempts: 2, enabled: true, actor: w.owner });
+  assert.ok(2 < SOURCE_MAX_ATTEMPTS_FALLBACK, "mandatory setup: this source's cap is below the fallback, so the two answers differ");
+
+  const before = await rig.asRuntime((c) => wakeEngineHealth(c));
+  assert.equal(
+    before.firmsUncheckpointed - beforeFirm.firmsUncheckpointed,
+    1,
+    "the new firm's events are NOT-YET-MEASURED by this engine — no checkpoint row exists for it",
+  );
+  assert.equal(before.firmsTracked, beforeFirm.firmsTracked, "and it is NOT in firmsTracked — the two are complements");
+  const ev = await rig.emitWakeEvent(w.firm, { actor: w.owner });
+  await rig.rootQuery(
+    `insert into clara.relay_dead_letters (consumer, event_id, reason, status, attempt_count)
+       values ($1, $2, 'rig-seeded #617', 'pending', 1)`,
+    [WAKE_ENGINE_CONSUMER, ev.id],
+  );
+
+  const retrying = await rig.asRuntime((c) => wakeEngineHealth(c));
+  assert.equal(retrying.deadLetters.pending - before.deadLetters.pending, 1, "a pending dead letter is counted as pending");
+  assert.equal(retrying.deadLetters.exhausted, before.deadLetters.exhausted, "and is NOT exhausted at 1 of its source's 2 attempts");
+  assert.equal(retrying.pendingDeadLetters, retrying.deadLetters.pending, "the compatibility field still mirrors the pending total");
+
+  await rig.rootQuery("update clara.relay_dead_letters set attempt_count = 2 where consumer = $1 and event_id = $2", [
+    WAKE_ENGINE_CONSUMER,
+    ev.id,
+  ]);
+  const exhausted = await rig.asRuntime((c) => wakeEngineHealth(c));
+  assert.equal(
+    exhausted.deadLetters.exhausted - before.deadLetters.exhausted,
+    1,
+    "AT the source's own cap the row is EXHAUSTED — measured against wake_engine_sources.max_attempts, which is what the cycle compares against",
+  );
+  assert.equal(
+    exhausted.deadLetters.pending - before.deadLetters.pending,
+    1,
+    "an exhausted row is STILL pending — exhausted is a subset, so the two counts must not be subtracted from each other",
+  );
+});
+
+test("#617 wakeEngineHealth: a dead letter whose source is GONE falls back to the column default and is STILL counted", { skip: skip || skipG1 }, async () => {
+  // The fallback branch. registerSource's own isolation rule disables every other enabled
+  // wake_outbox source for this event_type, and disabling this one immediately afterwards leaves
+  // the event type with NO live source at all — the state a retired or switched-off source leaves
+  // behind, and the state whose cap can only come from SOURCE_MAX_ATTEMPTS_FALLBACK.
+  const key = `${rig.WAKE_ENGINE_TEST_PREFIX}617fb_${randomUUID().slice(0, 8)}`;
+  const w = await rig.buildFirm("g1_617fb");
+  await registerSource({ sourceKey: key, carrier: "wake_outbox", eventType: WAKE_EVENT_TYPE, taskKind: "wake", wakeKind: "proactive", maxAttempts: 2, enabled: true, actor: w.owner });
+  await setEnabled(key, false, w.owner);
+  const live = await rig.rootQuery(
+    "select count(*)::int as n from clara.wake_engine_sources where carrier='wake_outbox' and enabled and event_type=$1",
+    [WAKE_EVENT_TYPE],
+  );
+  assert.equal(live.rows[0].n, 0, "mandatory setup: no enabled wake_outbox source serves this event type any more");
+
+  // Baseline AFTER the toggle: nothing but this cell's own row changes from here on.
+  const before = await rig.asRuntime((c) => wakeEngineHealth(c));
+  const ev = await rig.emitWakeEvent(w.firm, { actor: w.owner });
+  await rig.rootQuery(
+    `insert into clara.relay_dead_letters (consumer, event_id, reason, status, attempt_count)
+       values ($1, $2, 'rig-seeded #617 fallback', 'pending', $3)`,
+    [WAKE_ENGINE_CONSUMER, ev.id, SOURCE_MAX_ATTEMPTS_FALLBACK - 1],
+  );
+
+  const retrying = await rig.asRuntime((c) => wakeEngineHealth(c));
+  assert.equal(retrying.deadLetters.pending - before.deadLetters.pending, 1, "the row on a retired source is still PENDING work");
+  assert.equal(
+    retrying.deadLetters.exhausted,
+    before.deadLetters.exhausted,
+    "and one short of the FALLBACK cap it is not exhausted — which also proves the disabled source's own 2 was not used",
+  );
+
+  await rig.rootQuery("update clara.relay_dead_letters set attempt_count = $3 where consumer = $1 and event_id = $2", [
+    WAKE_ENGINE_CONSUMER,
+    ev.id,
+    SOURCE_MAX_ATTEMPTS_FALLBACK,
+  ]);
+  const exhausted = await rig.asRuntime((c) => wakeEngineHealth(c));
+  assert.equal(
+    exhausted.deadLetters.exhausted - before.deadLetters.exhausted,
+    1,
+    "at the fallback cap it IS exhausted — a dead letter on a source nobody serves any more is precisely one an operator must deal with by hand",
+  );
 });

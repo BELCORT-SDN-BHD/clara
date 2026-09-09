@@ -32,6 +32,8 @@
 
 import pg from "pg";
 import { connConfig, assertNoTargetSplit } from "./relay.mjs";
+// #617: the per-lane background-error contract (both pools carried console-only listeners).
+import { attachPoolErrorContract } from "./pool-error-contract.mjs";
 
 const TEST_MODE = process.env.RELAY_TEST_MODE === "1";
 
@@ -41,6 +43,8 @@ export const STRIPE_WEBHOOK_LOGIN = "clara_stripe_webhook_login";
 export const STRIPE_WEBHOOK_ROLE = "clara_stripe_webhook";
 /** Named by design part 3 §3's environment table, verbatim. */
 export const STRIPE_WEBHOOK_DSN_VAR = "CLARA_STRIPE_WEBHOOK_DATABASE_URL";
+/** #617: this lane's NAME on /ready — see FREEFORM_LANE's note in lib/freeform-read.mjs. */
+export const STRIPE_WEBHOOK_LANE = "stripe_webhook";
 
 /** 0161 §0: the pre-session auth-wall pair. */
 export const AUTH_WALL_LOGIN = "clara_auth_wall_login";
@@ -48,6 +52,8 @@ export const AUTH_WALL_ROLE = "clara_auth_wall";
 /** NOT named in part 3 §3 (the table predates 0161's role pair); this is the name the deploy
  *  notes in the PR body carry, and the only place it is defined. */
 export const AUTH_WALL_DSN_VAR = "CLARA_AUTH_WALL_DATABASE_URL";
+/** #617: this lane's NAME on /ready — see FREEFORM_LANE's note in lib/freeform-read.mjs. */
+export const AUTH_WALL_LANE = "auth_wall";
 
 const STATEMENT_TIMEOUT_MS = Number(process.env.CLARA_STATEMENT_TIMEOUT_MS || 30000);
 const IDLE_IN_TXN_TIMEOUT_MS = Number(process.env.CLARA_IDLE_IN_TXN_TIMEOUT_MS || 15000);
@@ -120,8 +126,7 @@ let _authWallPool = null;
 /** Lazy singleton webhook pool (clara_stripe_webhook_login -> SET ROLE clara_stripe_webhook). */
 export function getStripeWebhookPool() {
   if (!_stripePool) {
-    _stripePool = new pg.Pool(laneConfig(STRIPE_WEBHOOK_DSN_VAR, STRIPE_WEBHOOK_LOGIN, STRIPE_WEBHOOK_POOL_MAX));
-    _stripePool.on("error", (err) => console.error("[clara-runtime] stripe webhook pool error:", err.message));
+    _stripePool = attachPoolErrorContract(new pg.Pool(laneConfig(STRIPE_WEBHOOK_DSN_VAR, STRIPE_WEBHOOK_LOGIN, STRIPE_WEBHOOK_POOL_MAX)), STRIPE_WEBHOOK_LANE);
   }
   return _stripePool;
 }
@@ -129,8 +134,7 @@ export function getStripeWebhookPool() {
 /** Lazy singleton auth-wall pool (clara_auth_wall_login -> SET ROLE clara_auth_wall). */
 export function getAuthWallPool() {
   if (!_authWallPool) {
-    _authWallPool = new pg.Pool(laneConfig(AUTH_WALL_DSN_VAR, AUTH_WALL_LOGIN, AUTH_WALL_POOL_MAX));
-    _authWallPool.on("error", (err) => console.error("[clara-runtime] auth wall pool error:", err.message));
+    _authWallPool = attachPoolErrorContract(new pg.Pool(laneConfig(AUTH_WALL_DSN_VAR, AUTH_WALL_LOGIN, AUTH_WALL_POOL_MAX)), AUTH_WALL_LANE);
   }
   return _authWallPool;
 }

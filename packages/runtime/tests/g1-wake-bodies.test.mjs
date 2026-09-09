@@ -239,9 +239,11 @@ test("G1B-C1 a DISABLED source claims nothing; enabling through set_wake_source_
 
   // THE POSITIVE CONTROL, through the REAL audited door. set_wake_source_enabled is owner-floor
   // AND operator-firm-gated: _human_ctx(owner) alone proves only "owner of SOME firm". The
-  // ceremony's own raw act (docs/ops/g1-operator-firm-ceremony.md) sets firms.is_operator; this
-  // cell walks that same door rather than UPDATEing the registry behind its back, then puts the
-  // flag back so the estate is left exactly as found (uq_firms_one_operator admits only one).
+  // ceremony's own raw act sets firms.is_operator (#617: described in docs/ARCHITECTURE.md,
+  // 'Admission and operator support' — the docs/ops/ runbook this line used to cite is not in
+  // this repository); this cell walks that same door rather than UPDATEing the registry behind
+  // its back, then puts the flag back so the estate is left exactly as found
+  // (uq_firms_one_operator admits only one).
   //
   // uq_firms_one_operator is a genuine database-wide partial UNIQUE INDEX, not a roster this
   // cell can narrow by identity (T1's prefix-exclusion trick, packages/db/tests/g1-wake-engine

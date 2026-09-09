@@ -59,6 +59,10 @@ import { assertCheckoutPoolConfig, endCheckoutPools } from "./checkout-pools.mjs
 // the fingerprint pin, the ported structural checks and the ceremony's ordering rule are one
 // subject, and the runtime must carry them itself because scripts/ops/ is not in the image.
 import { assertLaneDsnTlsPosture } from "./tls-ca.mjs";
+// #617: the per-lane background-error contract. These four pools carried console-only `error`
+// listeners — logged, never COUNTED — so a pooler restart that recycled the read or write lane
+// left no trace an operator could read off /ready, only a line in whatever log window survived.
+import { attachPoolErrorContract } from "./pool-error-contract.mjs";
 
 const TEST_MODE = process.env.RELAY_TEST_MODE === "1";
 
@@ -76,6 +80,11 @@ export const WRITE_POOL_MAX = Number(process.env.CLARA_WRITE_POOL_MAX || 2);
 // (MUST G below): that ceremony is itself gated on G1 merging first.
 export const BANK_POOL_MAX = Number(process.env.CLARA_BANK_POOL_MAX || 2);
 
+// #617 — the LANE NAME each pool answers to on /ready, in ONE home. Both POOLS_LANE_DESCRIPTORS
+// (the boot probe's roster, i.e. `checks.pools`) and the per-lane error contract's label (i.e.
+// `checks.pool_errors`) read from here, so the two reports name the same four lanes by
+// construction rather than by two hand-typed copies agreeing today.
+const LANE_NAMES = { runtime: "runtime", read: "read", write: "write", bank: "bank" };
 // The dedicated login each pool connects AS in production (the two-login law, N10):
 // the pool connects as this login, then SET ROLEs to its one group on every checkout.
 const LOGIN_NAMES = { runtime: "clara_runtime_login", read: "clara_agent_read_login", write: "clara_wake_write_login", bank: "clara_wake_bank_login" }; // step 2
@@ -132,10 +141,10 @@ function poolMaxFor(which) {
  * prevent.
  */
 export const POOLS_LANE_DESCRIPTORS = Object.freeze([
-  Object.freeze({ lane: "runtime", dsnVar: dsnVarFor("runtime"), login: LOGIN_NAMES.runtime, role: POOL_ROLES.runtime, eager: true }),
-  Object.freeze({ lane: "read", dsnVar: dsnVarFor("read"), login: LOGIN_NAMES.read, role: POOL_ROLES.read, eager: true }),
-  Object.freeze({ lane: "write", dsnVar: dsnVarFor("write"), login: LOGIN_NAMES.write, role: POOL_ROLES.write, eager: true }),
-  Object.freeze({ lane: "bank", dsnVar: dsnVarFor("bank"), login: LOGIN_NAMES.bank, role: POOL_ROLES.bank, eager: false }),
+  Object.freeze({ lane: LANE_NAMES.runtime, dsnVar: dsnVarFor("runtime"), login: LOGIN_NAMES.runtime, role: POOL_ROLES.runtime, eager: true }),
+  Object.freeze({ lane: LANE_NAMES.read, dsnVar: dsnVarFor("read"), login: LOGIN_NAMES.read, role: POOL_ROLES.read, eager: true }),
+  Object.freeze({ lane: LANE_NAMES.write, dsnVar: dsnVarFor("write"), login: LOGIN_NAMES.write, role: POOL_ROLES.write, eager: true }),
+  Object.freeze({ lane: LANE_NAMES.bank, dsnVar: dsnVarFor("bank"), login: LOGIN_NAMES.bank, role: POOL_ROLES.bank, eager: false }),
 ]);
 
 /**
@@ -227,10 +236,9 @@ let _bankPool = null;
 /** Lazy singleton runtime pool (clara_runtime). */
 export function getRuntimePool() {
   if (!_runtimePool) {
-    _runtimePool = new pg.Pool(loginConfig("runtime"));
-    // A pool-level error (backend terminating an idle client) must never crash
-    // the process — the affected client is already removed; log and move on.
-    _runtimePool.on("error", (err) => console.error("[clara-runtime] runtime pool error:", err.message));
+    // A pool-level error (backend terminating an idle client) must never crash the process —
+    // the affected client is already removed; log, COUNT (#617, per lane) and move on.
+    _runtimePool = attachPoolErrorContract(new pg.Pool(loginConfig("runtime")), LANE_NAMES.runtime);
   }
   return _runtimePool;
 }
@@ -238,8 +246,7 @@ export function getRuntimePool() {
 /** Lazy singleton read pool (clara_agent_ro, read-only). */
 export function getReadPool() {
   if (!_readPool) {
-    _readPool = new pg.Pool(loginConfig("read"));
-    _readPool.on("error", (err) => console.error("[clara-runtime] read pool error:", err.message));
+    _readPool = attachPoolErrorContract(new pg.Pool(loginConfig("read")), LANE_NAMES.read);
   }
   return _readPool;
 }
@@ -249,8 +256,7 @@ export function getReadPool() {
  * (it COMMITs the draft). Small (max 2) so it fits the connection budget. */
 export function getWritePool() {
   if (!_writePool) {
-    _writePool = new pg.Pool(loginConfig("write"));
-    _writePool.on("error", (err) => console.error("[clara-runtime] write pool error:", err.message));
+    _writePool = attachPoolErrorContract(new pg.Pool(loginConfig("write")), LANE_NAMES.write);
   }
   return _writePool;
 }
@@ -260,8 +266,7 @@ export function getWritePool() {
  * workflow's own bank-scoped work uses this; the engine's claim/checkpoint stays clara_runtime. */
 export function getBankPool() {
   if (!_bankPool) {
-    _bankPool = new pg.Pool(loginConfig("bank"));
-    _bankPool.on("error", (err) => console.error("[clara-runtime] bank pool error:", err.message));
+    _bankPool = attachPoolErrorContract(new pg.Pool(loginConfig("bank")), LANE_NAMES.bank);
   }
   return _bankPool;
 }

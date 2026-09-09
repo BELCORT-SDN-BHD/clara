@@ -9,7 +9,7 @@ import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
-import { runMatcherCycle, matcherRedrive, matcherHealth, CONSUMERS, MATCHER_CONSUMER, MATCHER_VERSION } from "../lib/matcher.mjs";
+import { runMatcherCycle, matcherRedrive, matcherHealth, CONSUMERS, MATCHER_CONSUMER, MATCHER_VERSION, MATCHER_MAX_ATTEMPTS } from "../lib/matcher.mjs";
 import { runRelayCycle } from "../lib/relay.mjs";
 import {
   skip,
@@ -149,6 +149,88 @@ test("matcherHealth reports the matcher's own lag + pending dead-letter counts",
   assert.equal(typeof h.lag, "number");
   assert.equal(typeof h.pendingDeadLetters, "number");
   assert.ok(h.lag >= 0 && h.pendingDeadLetters >= 0);
+});
+
+// #617 — THE CATEGORIES, AGAINST A REAL DATABASE. Both cells are DELTA-based on purpose:
+// `firmsUncheckpointed` and the dead-letter counts are ESTATE-WIDE reads (that is what an
+// operator looks at), and this rig is shared, so an absolute number would be a fixture of
+// whatever else has run. A delta measures exactly what the cell itself caused.
+
+test("#617 matcherHealth: a firm with events and NO checkpoint counts as UNCHECKPOINTED, not merely as lag", { skip }, async () => {
+  const before = await asMatcherLogin((c) => matcherHealth(c));
+  // The WIRE SHAPE, pinned. #617 moved this query into lib/consumer-health.mjs, shared with
+  // every other relay consumer; the fields and their ORDER are what /ready and its readers
+  // actually see, so a future consolidation that renames, reorders or drops one fails HERE.
+  assert.deepEqual(
+    Object.keys(before),
+    ["consumer", "lag", "pendingDeadLetters", "firmsTracked", "firmsUncheckpointed", "deadLetters"],
+    "matcherHealth's field set and order",
+  );
+  const { owner, firm, clients } = await buildFirmWithClients(1);
+  await seedMatchableDocument({ firm, owner, client: clients[0], tin: tinOf() });
+
+  const seeded = await asMatcherLogin((c) => matcherHealth(c));
+  assert.equal(
+    seeded.firmsUncheckpointed - before.firmsUncheckpointed,
+    1,
+    "a firm with events this consumer has never checkpointed is counted as NOT-YET-MEASURED",
+  );
+  assert.equal(seeded.firmsTracked, before.firmsTracked, "and it is NOT yet in firmsTracked — the two are complements");
+
+  // The discriminating half: run the consumer. The firm now HAS a checkpoint, so it leaves the
+  // uncheckpointed category — while `lag` (which reads a missing checkpoint as last_seq 0) was
+  // never able to tell the two states apart on its own.
+  await drainMatcher(firm);
+  const drained = await asMatcherLogin((c) => matcherHealth(c));
+  assert.equal(
+    drained.firmsUncheckpointed,
+    seeded.firmsUncheckpointed - 1,
+    "once checkpointed the firm leaves the not-yet-measured category",
+  );
+  assert.equal(drained.firmsTracked, before.firmsTracked + 1, "and joins the tracked one");
+});
+
+test("#617 matcherHealth: dead letters split into pending vs EXHAUSTED at this consumer's own cap", { skip }, async () => {
+  const before = await asMatcherLogin((c) => matcherHealth(c));
+  const { owner, firm, clients } = await buildFirmWithClients(1);
+  const { eventId } = await seedMatchableDocument({ firm, owner, client: clients[0], tin: tinOf() });
+  // A REAL dead letter, minted the way production mints one: a transient reader failure inside
+  // the cycle (the same injection the redrive cell above uses), never a hand-inserted row.
+  const boom = async () => {
+    const e = new Error("injected transient reader failure (#617 boundary cell)");
+    e.code = "XXBOOM";
+    throw e;
+  };
+  await runCycle({ onlyFirm: firm, batchSize: 50, readMatchInputs: boom });
+  assert.equal((await matcherDeadLetters(firm)).length, 1, "mandatory setup: one pending matcher dead-letter");
+
+  // BOUNDARY, from below. One attempt short of the cap the row is still inside its retry budget:
+  // it counts as pending and NOT as exhausted. Without this arm the cell would pass for an
+  // implementation that simply called every pending dead letter exhausted.
+  await rootQuery("update clara.relay_dead_letters set attempt_count = $3 where consumer = $1 and event_id = $2", [
+    MATCHER_CONSUMER,
+    eventId,
+    MATCHER_MAX_ATTEMPTS - 1,
+  ]);
+  const retrying = await asMatcherLogin((c) => matcherHealth(c));
+  assert.equal(retrying.deadLetters.pending - before.deadLetters.pending, 1, "a pending dead letter is counted as pending");
+  assert.equal(retrying.deadLetters.exhausted, before.deadLetters.exhausted, "and is NOT exhausted while attempts remain");
+  assert.equal(retrying.pendingDeadLetters, retrying.deadLetters.pending, "the compatibility field still mirrors the pending total");
+
+  // AT the cap: retrying has stopped (the cycle skips past it and advances the checkpoint), so it
+  // needs an operator redrive and is reported as its own category.
+  await rootQuery("update clara.relay_dead_letters set attempt_count = $3 where consumer = $1 and event_id = $2", [
+    MATCHER_CONSUMER,
+    eventId,
+    MATCHER_MAX_ATTEMPTS,
+  ]);
+  const exhausted = await asMatcherLogin((c) => matcherHealth(c));
+  assert.equal(exhausted.deadLetters.exhausted - before.deadLetters.exhausted, 1, "at the cap the row is EXHAUSTED");
+  assert.equal(
+    exhausted.deadLetters.pending - before.deadLetters.pending,
+    1,
+    "an exhausted row is STILL pending — exhausted is a subset, so the two counts must not be subtracted from each other",
+  );
 });
 
 // ---------------------------------------------------------------------------

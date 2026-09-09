@@ -12,9 +12,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import * as rig from "./rig.mjs";
 import { checkReadiness } from "../lib/health.mjs";
-import { _resetStorageProbeCacheForTest } from "../lib/storage-probe.mjs";
+import { _resetStorageProbeCacheForTest, _waitForStorageProbeSettleForTest } from "../lib/storage-probe.mjs";
 import { makePool } from "../lib/relay.mjs";
-import { _resetPoolErrorContractForTest } from "../lib/pool-error-contract.mjs";
+import { _resetPoolErrorContractForTest, poolErrorHealth } from "../lib/pool-error-contract.mjs";
+import { withRead, endPools } from "../lib/pools.mjs";
+import { assertLaneDsnTlsPosture, _resetTlsPostureSnapshotForTest } from "../lib/tls-ca.mjs";
+import { _resetLeaderStateForTest } from "../lib/leader-state.mjs";
+import { FACTS_GATE_CONSUMER, FACTS_GATE_MAX_ATTEMPTS } from "../lib/facts-gate.mjs";
 import {
   LANE_ROSTER,
   _resetLaneProbeCacheForTest,
@@ -54,6 +58,9 @@ before(async () => {
 
 after(async () => {
   await rig.endPool();
+  await endPools(); // the lane pools this file's fault-injection cell opens
+  _resetLeaderStateForTest();
+  _resetTlsPostureSnapshotForTest();
   // Stop the storage probe's background interval before its scratch dir disappears below.
   _resetStorageProbeCacheForTest();
   if (previousStorageDir === undefined) delete process.env.CLARA_TEST_STORAGE_DIR;
@@ -408,5 +415,263 @@ test("ready: world ON with a STALE control beat FAILS (control listener dead)", 
   } finally {
     if (prev === undefined) delete process.env.CLARA_START_WORLD;
     else process.env.CLARA_START_WORLD = prev;
+  }
+});
+
+// ===========================================================================
+// #617 — THE FAULT-INJECTION BATTERY.
+//
+// The through-line of every cell below: an UNMEASURED or ABSENT reading must never be served as
+// a healthy one, and a fault must be visible on /ready in a shape an operator can act on. Each
+// cell also re-runs the DSN-leak assertion — /ready is unauthenticated, and every field these
+// changes add is a new chance to spill one.
+// ===========================================================================
+
+/** Every cell's closing assertion: no DSN component, in checks or in any warning line. */
+function assertNoDsnLeak(r) {
+  const payload = JSON.stringify(r);
+  for (const token of LEAK_TOKENS) {
+    assert.ok(!payload.includes(token), `the DSN component '${token}' must never reach the /ready payload`);
+    for (const w of r.warnings) assert.ok(!w.includes(token), `the DSN component '${token}' must never reach a warning line`);
+  }
+}
+
+test("#617 fault: a lane DISCONNECTS -> ok:false with a sanitized code -> RECOVERS -> ok:true", { skip }, async () => {
+  // The recovery half is the half that was never proven. A probe that goes red and stays red
+  // (a cached verdict, a latched flag, a loop that stopped after its first failure) would pass
+  // every existing cell in this file: they all stop at the failure.
+  const prev = process.env.CLARA_START_WORLD;
+  const prevRead = process.env.CLARA_READ_DATABASE_URL;
+  process.env.CLARA_START_WORLD = "1";
+  _resetLaneProbeCacheForTest();
+  try {
+    await setBeat("world", "now()");
+    await setBeat("control", "now()");
+
+    process.env.CLARA_READ_DATABASE_URL = LEAK_DSN; // points at a host that is not there
+    await _waitForLaneProbeSettleForTest();
+    const down = await checkReadiness();
+    const downLane = down.checks.pools.find((l) => l.lane === "read");
+    assert.equal(downLane.ok, false, "the disconnected lane reports a failure");
+    assert.match(downLane.error, /^[A-Za-z0-9_]{1,32}$/, "and only a sanitized code — never raw DB text");
+    assert.equal(down.ready, true, "a non-runtime lane failure is a WARN, never a 503");
+    assertNoDsnLeak(down);
+
+    // RECOVERY: put the lane back and let one more background cycle settle.
+    if (prevRead === undefined) delete process.env.CLARA_READ_DATABASE_URL;
+    else process.env.CLARA_READ_DATABASE_URL = prevRead;
+    _resetLaneProbeCacheForTest();
+    await _waitForLaneProbeSettleForTest();
+    const back = await checkReadiness();
+    const backLane = back.checks.pools.find((l) => l.lane === "read");
+    assert.equal(backLane.ok, true, `the lane must report healthy again once it is (${JSON.stringify(backLane)})`);
+    assert.ok(
+      !back.warnings.some((x) => /pool lane 'read' unreachable/.test(x)),
+      `and the warning must clear; got: ${JSON.stringify(back.warnings)}`,
+    );
+    assertNoDsnLeak(back);
+  } finally {
+    _resetLaneProbeCacheForTest();
+    if (prevRead === undefined) delete process.env.CLARA_READ_DATABASE_URL;
+    else process.env.CLARA_READ_DATABASE_URL = prevRead;
+    if (prev === undefined) delete process.env.CLARA_START_WORLD;
+    else process.env.CLARA_START_WORLD = prev;
+  }
+});
+
+test("#617 fault: a REAL backend kill on a pooled idle client increments THAT lane's counter on /ready", { skip }, async () => {
+  // Not a synthetic `pool.emit('error')` — an actual `pg_terminate_backend` of an idle client
+  // sitting in the read pool, which is the production failure (a pooler restart, a failover, an
+  // operator's maintenance kill). That is the event that used to be logged and then vanish.
+  _resetPoolErrorContractForTest();
+  try {
+    // Check out once so the pool has a live, then idle, physical connection; capture its pid
+    // from inside the checkout, which is the only place it is knowable.
+    const pid = await withRead(async (c) => Number((await c.query("select pg_backend_pid() as pid")).rows[0].pid));
+    assert.ok(Number.isFinite(pid) && pid > 0, "mandatory setup: the read pool checked out a real backend");
+    assert.equal(poolErrorHealth().read.errors, 0, "the read lane starts clean and is REGISTERED (constructed, not absent)");
+
+    await rig.rootQuery("select pg_terminate_backend($1)", [pid]);
+
+    // The pool's 'error' event lands asynchronously on the idle client.
+    const deadline = Date.now() + 10_000;
+    while (poolErrorHealth().read.errors === 0 && Date.now() < deadline) await new Promise((r) => setTimeout(r, 25));
+
+    const counters = poolErrorHealth().read;
+    assert.equal(counters.errors, 1, "the killed lane's own counter moved");
+    assert.match(counters.last_error_code, /^[A-Za-z0-9_]{1,32}$/, "a sanitized code, never the DB message");
+    assert.equal(poolErrorHealth().write?.errors ?? 0, 0, "and no other lane's counter did");
+
+    const r = await checkReadiness();
+    assert.equal(r.ready, true, "a background pool error is an availability signal, never a 503");
+    assert.equal(r.checks.pool_errors.read.errors, 1, "the counter surfaces on /ready, keyed by lane");
+    assert.ok(
+      r.warnings.some((x) => /pool lane 'read' background error\(s\) since boot: 1/.test(x)),
+      `expected the per-lane WARN, got: ${JSON.stringify(r.warnings)}`,
+    );
+    assert.ok(
+      !JSON.stringify(r.checks.pool_errors).includes("terminating connection"),
+      "the raw DB message never reaches the unauthenticated payload",
+    );
+    assertNoDsnLeak(r);
+  } finally {
+    _resetPoolErrorContractForTest();
+  }
+});
+
+test("#617 fault: storage PENDING and storage NOT CONFIGURED are distinct /ready states, neither healthy", { skip }, async () => {
+  const prevUrl = process.env.CLARA_STORAGE_URL;
+  const prevRole = process.env.CLARA_STORAGE_ROLE;
+  const prevJwt = process.env.CLARA_STORAGE_ROLE_JWT;
+  _resetStorageProbeCacheForTest();
+  try {
+    // (a) PENDING — the cold-start window. Previously reported `ok:true` and warned about
+    // nothing at all: an unmeasured document lane, served as a healthy one.
+    const pending = await checkReadiness();
+    assert.equal(pending.checks.storage.pending, true, "the cold verdict says it has not measured");
+    assert.equal("ok" in pending.checks.storage, false, "and claims no ok at all");
+    assert.ok(
+      pending.warnings.some((x) => /storage probe pending \(not yet measured\)/.test(x)),
+      `expected the pending WARN, got: ${JSON.stringify(pending.warnings)}`,
+    );
+    assert.equal(pending.ready, true, "still WARN-only — the storage lane never gates readiness");
+    await _waitForStorageProbeSettleForTest(); // drain the cycle that call started
+
+    // (b) NOT CONFIGURED — an estate with no storage secrets. Previously indistinguishable from
+    // a live storage outage (both `ok:false, reason:'storage_error'`).
+    _resetStorageProbeCacheForTest();
+    delete process.env.RELAY_TEST_MODE;
+    delete process.env.CLARA_STORAGE_URL;
+    delete process.env.CLARA_STORAGE_ROLE;
+    delete process.env.CLARA_STORAGE_ROLE_JWT;
+    const unconfigured = await checkReadiness();
+    assert.deepEqual(
+      unconfigured.checks.storage,
+      { skipped: true, reason: "storage_not_configured" },
+      "an unconfigured lane reports its own third state",
+    );
+    assert.ok(
+      unconfigured.warnings.some((x) => /storage is NOT CONFIGURED/.test(x)),
+      `expected the not-configured WARN, got: ${JSON.stringify(unconfigured.warnings)}`,
+    );
+    assert.ok(
+      !unconfigured.warnings.some((x) => /storage write probe failed/.test(x)),
+      "and it is NEVER reported as a failure — that is the whole distinction",
+    );
+    assertNoDsnLeak(unconfigured);
+  } finally {
+    process.env.RELAY_TEST_MODE = "1";
+    if (prevUrl === undefined) delete process.env.CLARA_STORAGE_URL;
+    else process.env.CLARA_STORAGE_URL = prevUrl;
+    if (prevRole === undefined) delete process.env.CLARA_STORAGE_ROLE;
+    else process.env.CLARA_STORAGE_ROLE = prevRole;
+    if (prevJwt === undefined) delete process.env.CLARA_STORAGE_ROLE_JWT;
+    else process.env.CLARA_STORAGE_ROLE_JWT = prevJwt;
+    _resetStorageProbeCacheForTest();
+  }
+});
+
+test("#617 fault: a QUEUE STALL shows as its own categories — a stranded task and an EXHAUSTED dead letter", { skip }, async () => {
+  // The two stall shapes that used to be invisible or mislabelled: a local_facts row wedged in
+  // 'running' (contributing to no queued backlog at all), and a facts_gate dead letter past its
+  // retry cap (counted only inside a pending total that also holds rows still being retried).
+  const prev = process.env.CLARA_START_WORLD;
+  process.env.CLARA_START_WORLD = "1";
+  try {
+    await setBeat("world", "now()");
+    await setBeat("control", "now()");
+    const w = await rig.buildFirm("ready-stall");
+    // The same governed seeder the matcher/classify rigs use, called directly rather than through
+    // matcher-testkit.mjs so this file keeps its own (already long) import list.
+    const sha = rig.sha(`ready-stall_${rig.opk("d")}`);
+    const document = (
+      await rig.rootQuery("select clara._seed_verified_document($1,$2,$3,$4,$5,$6,$7,$8,1) as r", [
+        w.firm,
+        null,
+        sha,
+        "ready-stall.pdf",
+        "application/pdf",
+        2048,
+        `firms/${w.firm}/docs/${sha}.pdf`,
+        w.owner,
+      ])
+    ).rows[0].r.document_id;
+
+    // (a) a STRANDED local_facts task: 'running', started long past the lane's own threshold.
+    await rig.rootQuery(
+      `insert into clara.document_processing_tasks
+         (firm_id, document_id, engine_id, version_n, lane, status, workflow_run_id, started_at, attempt_count)
+       values ($1,$2,'clara-local-facts:v1',1,'local_facts','running','rig-617-stall', now() - interval '2 hours', 4)`,
+      [w.firm, document],
+    );
+
+    // (b) an EXHAUSTED facts_gate dead letter: pending, at that consumer's own cap.
+    const seq = Number(
+      (
+        await rig.asFnOwner((c) =>
+          c.query("select clara._append_event($1,'document.classified',null,$2,null,null,null,$3,null,'{}'::jsonb) as seq", [
+            w.firm,
+            w.owner,
+            document,
+          ]),
+        )
+      ).rows[0].seq,
+    );
+    const eventId = (await rig.rootQuery("select id from clara.domain_events where firm_id=$1 and seq=$2", [w.firm, seq])).rows[0].id;
+    await rig.rootQuery(
+      `insert into clara.relay_dead_letters (consumer, event_id, reason, attempted_taxonomy_version, attempt_count)
+         values ($1, $2, 'rig-seeded #617 stall', null, $3)`,
+      [FACTS_GATE_CONSUMER, eventId, FACTS_GATE_MAX_ATTEMPTS],
+    );
+
+    const r = await checkReadiness();
+    assert.equal(r.ready, true, "a queue stall degrades a lane; it is never 'nothing works'");
+    assert.ok(
+      r.warnings.some((x) => /local_facts: \d+ task\(s\) STRANDED in 'running'/.test(x)),
+      `expected the stranded-task WARN, got: ${JSON.stringify(r.warnings)}`,
+    );
+    assert.ok(r.checks.localFacts.stranded >= 1, "and the count is in checks, not only in prose");
+    assert.ok(
+      r.warnings.some((x) => /facts_gate dead-letter\(s\) EXHAUSTED past max attempts/.test(x)),
+      `expected the exhausted dead-letter WARN, got: ${JSON.stringify(r.warnings)}`,
+    );
+    assert.ok(r.checks.factsGate.deadLetters.exhausted >= 1, "counted apart from the pending total");
+    assert.ok(
+      r.warnings.some((x) => /facts_gate: \d+ firm\(s\) have events but NO checkpoint/.test(x)),
+      `expected the not-yet-measured WARN (this firm has an event and no facts_gate checkpoint), got: ${JSON.stringify(r.warnings)}`,
+    );
+    assertNoDsnLeak(r);
+  } finally {
+    if (prev === undefined) delete process.env.CLARA_START_WORLD;
+    else process.env.CLARA_START_WORLD = prev;
+  }
+});
+
+test("#617: checks.tls carries VARIABLE NAMES and counts only — never a DSN, never a fabricated posture", { skip }, async () => {
+  const prevRead = process.env.CLARA_READ_DATABASE_URL;
+  _resetTlsPostureSnapshotForTest();
+  try {
+    // (a) NOT MEASURED: the boot assert has not run in this process. That is not "nothing is
+    // pinned"; reporting it as a clean posture would be the fabricated-green shape #617 removes.
+    const unmeasured = await checkReadiness();
+    assert.deepEqual(unmeasured.checks.tls, { measured: false }, "an unrun assert says so and claims nothing else");
+
+    // (b) MEASURED: run the real boot assert over the real environment, with one lane pointed at
+    // a DSN whose every component is a recognisable token.
+    process.env.CLARA_READ_DATABASE_URL = LEAK_DSN;
+    assertLaneDsnTlsPosture();
+    const r = await checkReadiness();
+    assert.equal(r.checks.tls.measured, true);
+    assert.ok(r.checks.tls.unpinned.includes("CLARA_READ_DATABASE_URL"), "the VARIABLE NAME is what is reported");
+    assert.ok(r.checks.tls.weak_mode.includes("CLARA_READ_DATABASE_URL"), "a DSN with no verifying sslmode is named too");
+    assert.equal(typeof r.checks.tls.validated, "number", "validated is a COUNT — a sslrootcert PATH is deployment shape, not a health field");
+    for (const key of Object.keys(r.checks.tls)) {
+      assert.ok(["measured", "pinned", "unpinned", "weak_mode", "validated"].includes(key), `unexpected key '${key}' on checks.tls`);
+    }
+    assertNoDsnLeak(r);
+  } finally {
+    if (prevRead === undefined) delete process.env.CLARA_READ_DATABASE_URL;
+    else process.env.CLARA_READ_DATABASE_URL = prevRead;
+    _resetTlsPostureSnapshotForTest();
   }
 });

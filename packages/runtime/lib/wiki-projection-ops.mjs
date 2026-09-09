@@ -17,12 +17,14 @@ import { setTimeout, clearTimeout } from "node:timers";
 import { acquireLeaderLock, setRuntimeRole } from "./relay.mjs";
 import { makeRuntimeClient } from "./pools.mjs";
 import { isConnErr, waitForNudge } from "./listen.mjs";
+import { RELAY_CONSUMER_HEALTH_COLUMNS, relayConsumerCategories } from "./consumer-health.mjs";
 import {
   WIKI_PROJECTION_CONSUMER,
   runWikiProjectionCycle,
   isClaraTerminal,
   claraReason,
   CONFIG_DEAD_LETTER_PREFIX,
+  WIKI_PROJECTION_MAX_ATTEMPTS,
 } from "./wiki-projection.mjs";
 
 const POLL_INTERVAL_MS = Number(process.env.CLARA_WIKI_PROJECTION_POLL_MS || 2000);
@@ -168,26 +170,33 @@ export async function repairWikiOrphans(client, opts = {}) {
 // --- /ready WARN signal (warn-only; /ready NEVER gates on wiki freshness — WB-R3). Spine tables
 // since 0005, safe pre-0017 (⇒ lag 0). -----------------------------------------------------------
 export async function wikiProjectionHealth(client) {
+  // The four shared readings come from lib/consumer-health.mjs (which carries the definition of
+  // each category); `configuration_blocked` is this consumer's OWN column and rides the SAME
+  // statement, so every number below is one snapshot of relay_dead_letters, never two reads a
+  // round trip apart. $1 = consumer, $2 = this consumer's max attempts, $3 = the config prefix.
   const r = await client.query(
     `select
-       coalesce((select sum(greatest(s.n - coalesce(c.last_seq, 0), 0))
-                   from clara.firm_event_seq s
-                   left join clara.relay_checkpoints c on c.consumer = $1 and c.firm_id = s.firm_id), 0)::bigint as lag,
-       (select count(*) from clara.relay_dead_letters where consumer = $1 and status = 'pending')::int as pending_dead_letters,
+       ${RELAY_CONSUMER_HEALTH_COLUMNS},
        (select count(*) from clara.relay_dead_letters
-          where consumer = $1 and status = 'pending' and reason like $2)::int as configuration_blocked,
-       (select count(*) from clara.relay_checkpoints where consumer = $1)::int as firms_tracked`,
-    [WIKI_PROJECTION_CONSUMER, CONFIG_DEAD_LETTER_PREFIX + "%"]);
+          where consumer = $1 and status = 'pending' and reason like $3)::int as configuration_blocked`,
+    [WIKI_PROJECTION_CONSUMER, WIKI_PROJECTION_MAX_ATTEMPTS, CONFIG_DEAD_LETTER_PREFIX + "%"]);
+  const h = relayConsumerCategories(r.rows[0]);
   return {
     consumer: WIKI_PROJECTION_CONSUMER,
-    lag: Number(r.rows[0].lag),
-    pendingDeadLetters: r.rows[0].pending_dead_letters,
+    lag: h.lag,
+    pendingDeadLetters: h.pendingDeadLetters,
     // F3: an EXPLICIT signal that the projection is stalled on a runtime misconfiguration (a
     // pending dead-letter whose reason carries the CONFIG_DEAD_LETTER_PREFIX), distinct from an
     // ordinary poison-pill dead-letter. Clears automatically when the config is fixed and the
     // event replays (F6 resolves the row).
     configurationBlocked: Number(r.rows[0].configuration_blocked) > 0,
-    firmsTracked: r.rows[0].firms_tracked,
+    firmsTracked: h.firmsTracked,
+    // #617: NB the WB-R18 ceremony SEEDS a checkpoint per firm at head, so a non-zero
+    // `firmsUncheckpointed` here is usually a firm born after that ceremony (correct, starts at
+    // 0) OR the ceremony not having run at all — `wikiColdStartReady().seeded` below is the
+    // consumer-level answer to which.
+    firmsUncheckpointed: h.firmsUncheckpointed,
+    deadLetters: h.deadLetters,
   };
 }
 

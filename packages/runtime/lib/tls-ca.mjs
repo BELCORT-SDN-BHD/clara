@@ -3,9 +3,11 @@
 // THE DEFECT. `ops/tls/pooler-ca.crt` exists at the repo root (the Supabase Root 2021 CA,
 // fingerprint-pinned in `scripts/ops/dsn-pipe.mjs`), and the runtime image NEVER copied it. The
 // runner stage installs `ca-certificates`, which is the ~150-root PUBLIC Mozilla trust store —
-// and Supabase's pooler CA is SELF-SIGNED, so it is not in that store. `docs/ops/dsn-bridge.md`
-// proves the negative directly: `openssl s_client` WITHOUT the CA exits 1 with "self-signed
-// certificate in certificate chain".
+// and Supabase's pooler CA is SELF-SIGNED, so it is not in that store. The negative was proved
+// directly at the time: `openssl s_client` WITHOUT the CA exits 1 with "self-signed certificate
+// in certificate chain". (#617: the `docs/ops/dsn-bridge.md` this paragraph and several below
+// used to cite is NOT in this repository. The account here is the surviving record; the
+// operator-facing contract is `packages/runtime/README.md`, "Health, TLS and serving identity".)
 //
 // WHAT THAT MEANT MECHANICALLY, at pg 8.20.0 / pg-connection-string 2.14.0. Without
 // `uselibpqcompat` in the DSN, that parser's non-libpq branch maps `sslmode=verify-full` to
@@ -21,7 +23,9 @@
 //
 // THE FIX HAS TWO HALVES AND NEITHER WORKS ALONE. CODE: the Dockerfile COPY, this assert, and
 // the drift cell. CEREMONY: the live openssl leg, the six secrets re-set, and the ordering —
-// IMAGE FIRST, SECRETS SECOND. Recipe: `docs/ops/runtime-tls-verify-full-ceremony.md`.
+// IMAGE FIRST, SECRETS SECOND. That ceremony's steps are summarised in
+// `packages/runtime/README.md`, "Health, TLS and serving identity"; the
+// `docs/ops/runtime-tls-verify-full-ceremony.md` this line used to point at does not exist here.
 //
 // WHY THIS ASSERT IS DSN-DRIVEN RATHER THAN UNCONDITIONAL, stated because it is a deliberate
 // scoping decision and not an oversight. An assert that REQUIRED the CA at the in-image path on
@@ -53,8 +57,8 @@ export const IN_IMAGE_CA_PATH = "/app/ops/tls/pooler-ca.crt";
 
 /**
  * Captured from the live pooler 2026-08-23 and independently confirmed byte-identical against
- * Supabase's publicly-hosted copy — see `docs/ops/dsn-bridge.md` "CA provenance" for both
- * readings. MUST MOVE IN THE SAME PR as `ops/tls/pooler-ca.crt` and as
+ * Supabase's publicly-hosted copy (both readings were recorded in a bridge document that is not
+ * in this repository — #617). MUST MOVE IN THE SAME PR as `ops/tls/pooler-ca.crt` and as
  * `scripts/ops/dsn-pipe.mjs`'s own copy of this constant; a cell asserts the two agree.
  */
 export const EXPECTED_CA_FINGERPRINT_SHA256 =
@@ -83,6 +87,37 @@ export const TLS_CHECKED_DSN_VARS = Object.freeze([
   "WORKFLOW_POSTGRES_URL",
   "DATABASE_URL",
 ]);
+
+/**
+ * #617 — the boot assert's own reading, kept for `/ready`. `null` means the assert has NOT RUN in
+ * this process (a world-off health check, a test file that never booted the pools), which is a
+ * different fact from "ran and found nothing pinned" and must not be reported as the latter.
+ * @type {{pinned:string[], unpinned:string[], weakMode:string[], validated:string[]}|null}
+ */
+let snapshot = null;
+
+/**
+ * The TLS posture `/ready` reports (`checks.tls`). VARIABLE NAMES AND COUNTS ONLY — never a DSN,
+ * never a sslrootcert PATH: `validated` is deliberately a COUNT rather than the list of paths the
+ * assert returns, because a filesystem path is deployment shape that an unauthenticated endpoint
+ * has no reason to carry.
+ * @returns {{measured:boolean, pinned?:string[], unpinned?:string[], weak_mode?:string[], validated?:number}}
+ */
+export function tlsPostureHealth() {
+  if (snapshot === null) return { measured: false };
+  return {
+    measured: true,
+    pinned: snapshot.pinned.slice(),
+    unpinned: snapshot.unpinned.slice(),
+    weak_mode: snapshot.weakMode.slice(),
+    validated: snapshot.validated.length,
+  };
+}
+
+/** Test-only: forget the boot reading, so a cell can assert the NOT-MEASURED branch. */
+export function _resetTlsPostureSnapshotForTest() {
+  snapshot = null;
+}
 
 /** The sslmode values that actually authenticate the server. Everything else is encrypted-but-anonymous. */
 const VERIFYING_SSLMODES = Object.freeze(["verify-full", "verify-ca"]);
@@ -142,9 +177,9 @@ export function validateCa(caPath, opts = {}) {
  * sslrootcert=…`), which fails `new URL` and therefore returns `parsed:false` — the posture
  * check is SKIPPED for such a DSN, silently. That is acceptable here for one measured reason
  * and one only: every consumer of these variables is node-postgres via `connectionString`,
- * whose own parser (`pg-connection-string`) is likewise URI-first, and every recipe in
- * `docs/ops/dsn-bridge.md` and `docs/ops/runtime-tls-verify-full-ceremony.md` emits the URI
- * form. If a keyword/value DSN ever becomes a supported input, this function must learn it
+ * whose own parser (`pg-connection-string`) is likewise URI-first, and every ceremony recipe
+ * this repository carries (`packages/runtime/README.md`, "Health, TLS and serving identity")
+ * emits the URI form. If a keyword/value DSN ever becomes a supported input, this function must learn it
  * BEFORE that lands, or a lane would pin a CA this assert never validated.
  * @param {string} dsn
  * @returns {{parsed:boolean, sslmode:string|null, sslrootcert:string|null}}
@@ -170,6 +205,11 @@ export function readDsnTlsPosture(dsn) {
  * or whose fingerprint moved. Warns — never refuses — when production DSNs pin nothing, or when
  * a DSN's `sslmode` does not actually authenticate the server. Returns a summary so a cell can
  * assert on it; the summary names VARIABLES and PATHS, never DSN contents.
+ *
+ * #617: the summary is ALSO kept in a module-level snapshot, so `/ready` can report the posture
+ * this process actually booted with. Until now this was a boot-time WARN in the log and nothing
+ * else: an operator asking "did the verify-full ceremony actually take on this machine?" had to
+ * find the boot line, and a machine restarted since had nothing to show at all.
  *
  * @param {{env?:NodeJS.ProcessEnv, testMode?:boolean, log?:(msg:string)=>void, now?:number}} [opts]
  * @returns {{pinned:string[], unpinned:string[], weakMode:string[], validated:string[]}}
@@ -207,20 +247,28 @@ export function assertLaneDsnTlsPosture(opts = {}) {
     validated.push(caPath);
   }
 
+  // SNAPSHOT BEFORE THE TEST-MODE RETURN, so a rig reports the same shape production does — and
+  // ONLY when this call read the REAL environment. A cell that passes `opts.env` is exercising a
+  // FIXTURE, and letting a fixture overwrite the process's own boot reading would put invented
+  // variable names on a live /ready payload.
+  if (opts.env === undefined) snapshot = { pinned, unpinned, weakMode, validated };
+
   if (testMode) return { pinned, unpinned, weakMode, validated };
 
   if (pinned.length === 0) {
     log(
       "[clara-runtime] TLS WARNING: no configured DSN carries sslrootcert=, so no lane pins the Supabase pooler CA. " +
         `Until the verify-full secrets ceremony runs, lane TLS is unauthenticated in practice. Recipe: ` +
-        `docs/ops/runtime-tls-verify-full-ceremony.md (the CA ships in this image at ${IN_IMAGE_CA_PATH}).`,
+        `packages/runtime/README.md, "Health, TLS and serving identity" ` +
+        `(the CA ships in this image at ${IN_IMAGE_CA_PATH}).`,
     );
   }
   if (weakMode.length > 0) {
     log(
       `[clara-runtime] TLS WARNING: ${weakMode.length} configured DSN(s) do not request a VERIFYING sslmode ` +
-        `(verify-full/verify-ca): ${weakMode.join(", ")}. An encrypted-but-unauthenticated connection is what ` +
-        `docs/ops/dsn-bridge.md exists to prevent.`,
+        `(verify-full/verify-ca): ${weakMode.join(", ")}. An encrypted-but-unauthenticated connection is the ` +
+        `posture the verify-full ceremony exists to end — see packages/runtime/README.md, ` +
+        `"Health, TLS and serving identity".`,
     );
   }
   return { pinned, unpinned, weakMode, validated };

@@ -18,7 +18,7 @@ process.env.RELAY_TEST_MODE ??= "1";
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { rootQuery, humanQuery, asRuntime, asFnOwner, opk, buildFirm, createClient, headSeq, checkpointSeq, deadLettersForFirm, endPool } from "./relay-fixtures.mjs";
-import { runSstWatchCycle, sstWatchHealth, sstWatchRedrive, CONSUMERS, SST_WATCH_CONSUMER, SST_WATCH_EVENT_TYPE } from "../lib/sst-watch.mjs";
+import { runSstWatchCycle, sstWatchHealth, sstWatchRedrive, CONSUMERS, SST_WATCH_CONSUMER, SST_WATCH_EVENT_TYPE, SST_WATCH_MAX_ATTEMPTS } from "../lib/sst-watch.mjs";
 import { reconcileSstWatches } from "../lib/reconciler.mjs";
 
 async function probe0016() {
@@ -188,6 +188,86 @@ test("the daily SST belt issues ONE evaluate_sst_watch per active client + the r
   // The receipt landed — this is what backs list_review_queue's stale_evaluator (>48h) flag.
   const receipts = Number((await rootQuery("select count(*)::int n from clara.compliance_eval_runs")).rows[0].n);
   assert.ok(receipts >= 1, "a compliance_eval_runs receipt row exists after the belt runs");
+});
+
+// #617 — THE CATEGORIES, AGAINST A REAL DATABASE. Both cells are DELTA-based on purpose:
+// `firmsUncheckpointed` and the dead-letter counts are ESTATE-WIDE reads (that is what an
+// operator looks at), and this rig is shared, so an absolute number would be a fixture of
+// whatever else has run. A delta measures exactly what the cell itself caused.
+
+test("#617 sstWatchHealth: a firm with events and NO checkpoint counts as UNCHECKPOINTED, not merely as lag", { skip }, async () => {
+  const before = await asRuntime((c) => sstWatchHealth(c));
+  // The WIRE SHAPE, pinned. #617 moved this query into lib/consumer-health.mjs, shared with
+  // every other relay consumer; the fields and their ORDER are what /ready and its readers
+  // actually see, so a future consolidation that renames, reorders or drops one fails HERE.
+  assert.deepEqual(
+    Object.keys(before),
+    ["consumer", "lag", "pendingDeadLetters", "firmsTracked", "firmsUncheckpointed", "deadLetters"],
+    "sstWatchHealth's field set and order",
+  );
+  const { owner, firm, client } = await buildFirm("sst617u");
+  await attestFutureMethod(owner, firm, client);
+  await emitEntryApproved(firm, client, owner);
+
+  const seeded = await asRuntime((c) => sstWatchHealth(c));
+  assert.equal(
+    seeded.firmsUncheckpointed - before.firmsUncheckpointed,
+    1,
+    "a firm with events this consumer has never checkpointed is counted as NOT-YET-MEASURED",
+  );
+  assert.equal(seeded.firmsTracked, before.firmsTracked, "and it is NOT yet in firmsTracked — the two are complements");
+
+  // The discriminating half: run the consumer. The firm now HAS a checkpoint, so it leaves the
+  // uncheckpointed category — while `lag` (which reads a missing checkpoint as last_seq 0) was
+  // never able to tell the two states apart on its own.
+  await drainSstWatch(firm);
+  const drained = await asRuntime((c) => sstWatchHealth(c));
+  assert.equal(
+    drained.firmsUncheckpointed,
+    seeded.firmsUncheckpointed - 1,
+    "once checkpointed the firm leaves the not-yet-measured category",
+  );
+  assert.equal(drained.firmsTracked, before.firmsTracked + 1, "and joins the tracked one");
+});
+
+test("#617 sstWatchHealth: dead letters split into pending vs EXHAUSTED at this consumer's own cap", { skip }, async () => {
+  const before = await asRuntime((c) => sstWatchHealth(c));
+  const { owner, firm, client } = await buildFirm("sst617x");
+  const { eventId } = await emitEntryApproved(firm, client, owner);
+  // A raw relay-infra seed (the redrive cell above uses the same one) — never a books/event insert.
+  await rootQuery(
+    `insert into clara.relay_dead_letters (consumer, event_id, reason, attempted_taxonomy_version)
+       values ($1, $2, 'rig-seeded #617', null)`,
+    [SST_WATCH_CONSUMER, eventId],
+  );
+
+  // BOUNDARY, from below. One attempt short of the cap the row is still inside its retry budget:
+  // it counts as pending and NOT as exhausted. Without this arm the cell would pass for an
+  // implementation that simply called every pending dead letter exhausted.
+  await rootQuery("update clara.relay_dead_letters set attempt_count = $3 where consumer = $1 and event_id = $2", [
+    SST_WATCH_CONSUMER,
+    eventId,
+    SST_WATCH_MAX_ATTEMPTS - 1,
+  ]);
+  const retrying = await asRuntime((c) => sstWatchHealth(c));
+  assert.equal(retrying.deadLetters.pending - before.deadLetters.pending, 1, "a pending dead letter is counted as pending");
+  assert.equal(retrying.deadLetters.exhausted, before.deadLetters.exhausted, "and is NOT exhausted while attempts remain");
+  assert.equal(retrying.pendingDeadLetters, retrying.deadLetters.pending, "the compatibility field still mirrors the pending total");
+
+  // AT the cap: retrying has stopped (the cycle skips past it and advances the checkpoint), so it
+  // needs an operator redrive and is reported as its own category.
+  await rootQuery("update clara.relay_dead_letters set attempt_count = $3 where consumer = $1 and event_id = $2", [
+    SST_WATCH_CONSUMER,
+    eventId,
+    SST_WATCH_MAX_ATTEMPTS,
+  ]);
+  const exhausted = await asRuntime((c) => sstWatchHealth(c));
+  assert.equal(exhausted.deadLetters.exhausted - before.deadLetters.exhausted, 1, "at the cap the row is EXHAUSTED");
+  assert.equal(
+    exhausted.deadLetters.pending - before.deadLetters.pending,
+    1,
+    "an exhausted row is STILL pending — exhausted is a subset, so the two counts must not be subtracted from each other",
+  );
 });
 
 test("registry + health: the sst_watch entry is group-runtime and health reports lag/dead-letters", { skip }, async () => {

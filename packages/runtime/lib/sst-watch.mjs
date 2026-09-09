@@ -24,6 +24,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { discoverWork, writeCheckpoint, acquireLeaderLock, setRuntimeRole } from "./relay.mjs";
 import { makeRuntimeClient } from "./pools.mjs";
 import { isConnErr, waitForNudge } from "./listen.mjs";
+import { relayConsumerHealth } from "./consumer-health.mjs";
 
 /** The sst-watch consumer name — its own checkpoint / dead-letter / lock key. */
 export const SST_WATCH_CONSUMER = "sst_watch";
@@ -31,6 +32,10 @@ export const SST_WATCH_CONSUMER = "sst_watch";
 export const SST_WATCH_EVENT_TYPE = "entry.approved";
 
 const MAX_ATTEMPTS = Number(process.env.CLARA_SST_WATCH_MAX_ATTEMPTS || 5);
+/** #617: exported so the cell that proves `deadLetters.exhausted` can pin the BOUNDARY (cap-1 is
+ *  still being retried, cap is not) against the value this consumer actually uses, rather than
+ *  against a second hand-typed 5 that would stop meaning anything the day the knob moves. */
+export const SST_WATCH_MAX_ATTEMPTS = MAX_ATTEMPTS;
 const POLL_INTERVAL_MS = Number(process.env.CLARA_SST_WATCH_POLL_MS || 2000);
 const RECONNECT_BASE_MS = 500;
 const RECONNECT_MAX_MS = 5000;
@@ -252,20 +257,17 @@ export const CONSUMERS = Object.freeze({
 // relay_dead_letters), so it is safe to call BEFORE 0016 is applied (/ready never breaks
 // pre-deploy — the consumer='sst_watch' rows simply do not exist yet ⇒ lag 0).
 export async function sstWatchHealth(client) {
-  const r = await client.query(
-    `select
-       coalesce((select sum(greatest(s.n - coalesce(c.last_seq, 0), 0))
-                   from clara.firm_event_seq s
-                   left join clara.relay_checkpoints c on c.consumer = $1 and c.firm_id = s.firm_id), 0)::bigint as lag,
-       (select count(*) from clara.relay_dead_letters where consumer = $1 and status = 'pending')::int as pending_dead_letters,
-       (select count(*) from clara.relay_checkpoints where consumer = $1)::int as firms_tracked`,
-    [SST_WATCH_CONSUMER],
-  );
+  // The shared read (lib/consumer-health.mjs) — it carries the definition of each category and
+  // the reason `lag` and `pendingDeadLetters` can express neither of the two newer ones. This
+  // consumer supplies only what is its own: its name and ITS OWN retry cap.
+  const h = await relayConsumerHealth(client, SST_WATCH_CONSUMER, MAX_ATTEMPTS);
   return {
     consumer: SST_WATCH_CONSUMER,
-    lag: Number(r.rows[0].lag),
-    pendingDeadLetters: r.rows[0].pending_dead_letters,
-    firmsTracked: r.rows[0].firms_tracked,
+    lag: h.lag,
+    pendingDeadLetters: h.pendingDeadLetters,
+    firmsTracked: h.firmsTracked,
+    firmsUncheckpointed: h.firmsUncheckpointed,
+    deadLetters: h.deadLetters,
   };
 }
 

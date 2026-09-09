@@ -11,7 +11,7 @@ import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import * as rig from "./rig.mjs";
-import { autodraftHealth, runCatchupPass } from "../lib/autodraft.mjs";
+import { autodraftHealth, runAutodraftCycle, runCatchupPass, AUTODRAFT_CONSUMER, AUTODRAFT_MAX_ATTEMPTS } from "../lib/autodraft.mjs";
 import { reconcileAutoDraftTasks, terminalForAutodraft } from "../lib/reconciler.mjs";
 
 const READY = await rig.runtimeReady();
@@ -57,6 +57,96 @@ test("autodraftHealth reports the consumer's own lag + dead-letter counts (spine
   assert.equal(typeof h.lag, "number");
   assert.equal(typeof h.pendingDeadLetters, "number");
   assert.ok(h.lag >= 0 && h.pendingDeadLetters >= 0 && h.firmsTracked >= 0);
+});
+
+// #617 — THE CATEGORIES, AGAINST A REAL DATABASE. Both cells are DELTA-based on purpose:
+// `firmsUncheckpointed` and the dead-letter counts are ESTATE-WIDE reads (that is what an
+// operator looks at), and this rig is shared, so an absolute number would be a fixture of
+// whatever else has run. A delta measures exactly what the cell itself caused. Spine tables
+// only, so both run in the SAME pre-0011 tier as the health cell above.
+
+test("#617 autodraftHealth: a firm with events and NO checkpoint counts as UNCHECKPOINTED, not merely as lag", { skip }, async () => {
+  const before = await rig.asRuntime((c) => autodraftHealth(c));
+  // The WIRE SHAPE, pinned. #617 moved this query into lib/consumer-health.mjs, shared with
+  // every other relay consumer; the fields and their ORDER are what /ready and its readers
+  // actually see, so a future consolidation that renames, reorders or drops one fails HERE.
+  assert.deepEqual(
+    Object.keys(before),
+    ["consumer", "lag", "pendingDeadLetters", "firmsTracked", "firmsUncheckpointed", "deadLetters", "deferredWithdrawals"],
+    "autodraftHealth's field set and order (deferredWithdrawals keeps its own place)",
+  );
+  // buildFirm's own firm/client creation events are enough: they put the firm in firm_event_seq
+  // while this consumer has never checkpointed it.
+  const { firm } = await rig.buildFirm("ad617u");
+
+  const seeded = await rig.asRuntime((c) => autodraftHealth(c));
+  assert.equal(
+    seeded.firmsUncheckpointed - before.firmsUncheckpointed,
+    1,
+    "a firm with events this consumer has never checkpointed is counted as NOT-YET-MEASURED",
+  );
+  assert.equal(seeded.firmsTracked, before.firmsTracked, "and it is NOT yet in firmsTracked — the two are complements");
+
+  // The discriminating half: run the consumer over those (non-autodraft) events. The firm now HAS
+  // a checkpoint, so it leaves the uncheckpointed category — while `lag` (which reads a missing
+  // checkpoint as last_seq 0) was never able to tell the two states apart on its own.
+  await rig.asRuntime((c) => runAutodraftCycle(c, { onlyFirm: firm, enqueue: async () => {}, log: () => {} }));
+  assert.equal(await rig.checkpointSeq(firm, AUTODRAFT_CONSUMER), await rig.headSeq(firm), "mandatory setup: the cycle converged to head");
+  const drained = await rig.asRuntime((c) => autodraftHealth(c));
+  assert.equal(
+    drained.firmsUncheckpointed,
+    seeded.firmsUncheckpointed - 1,
+    "once checkpointed the firm leaves the not-yet-measured category",
+  );
+  assert.equal(drained.firmsTracked, before.firmsTracked + 1, "and joins the tracked one");
+});
+
+test("#617 autodraftHealth: dead letters split into pending vs EXHAUSTED at this consumer's own cap", { skip }, async () => {
+  const before = await rig.asRuntime((c) => autodraftHealth(c));
+  const { firm } = await rig.buildFirm("ad617x");
+  // Any real event of this firm's own stream carries the dead-letter row (the stamping trigger
+  // derives firm/seq/type from it). A raw relay-infra seed — never a books/event insert.
+  const eventId = (
+    await rig.rootQuery("select id from clara.domain_events where firm_id=$1 order by seq desc limit 1", [firm])
+  ).rows[0].id;
+  await rig.rootQuery(
+    `insert into clara.relay_dead_letters (consumer, event_id, reason, attempted_taxonomy_version)
+       values ($1, $2, 'rig-seeded #617', null)`,
+    [AUTODRAFT_CONSUMER, eventId],
+  );
+
+  // BOUNDARY, from below. One attempt short of the cap the row is still inside its retry budget:
+  // it counts as pending and NOT as exhausted. Without this arm the cell would pass for an
+  // implementation that simply called every pending dead letter exhausted.
+  await rig.rootQuery("update clara.relay_dead_letters set attempt_count = $3 where consumer = $1 and event_id = $2", [
+    AUTODRAFT_CONSUMER,
+    eventId,
+    AUTODRAFT_MAX_ATTEMPTS - 1,
+  ]);
+  const retrying = await rig.asRuntime((c) => autodraftHealth(c));
+  assert.equal(retrying.deadLetters.pending - before.deadLetters.pending, 1, "a pending dead letter is counted as pending");
+  assert.equal(retrying.deadLetters.exhausted, before.deadLetters.exhausted, "and is NOT exhausted while attempts remain");
+  assert.equal(retrying.pendingDeadLetters, retrying.deadLetters.pending, "the compatibility field still mirrors the pending total");
+
+  // AT the cap: retrying has stopped (the cycle skips past it and advances the checkpoint), so it
+  // needs an operator redrive and is reported as its own category.
+  await rig.rootQuery("update clara.relay_dead_letters set attempt_count = $3 where consumer = $1 and event_id = $2", [
+    AUTODRAFT_CONSUMER,
+    eventId,
+    AUTODRAFT_MAX_ATTEMPTS,
+  ]);
+  const exhausted = await rig.asRuntime((c) => autodraftHealth(c));
+  assert.equal(exhausted.deadLetters.exhausted - before.deadLetters.exhausted, 1, "at the cap the row is EXHAUSTED");
+  assert.equal(
+    exhausted.deadLetters.pending - before.deadLetters.pending,
+    1,
+    "an exhausted row is STILL pending — exhausted is a subset, so the two counts must not be subtracted from each other",
+  );
+  assert.equal(
+    exhausted.deferredWithdrawals,
+    before.deferredWithdrawals,
+    "and a poisoned event is NOT a deferred withdrawal — F2-R's process-local signal stays its own category",
+  );
 });
 
 // [ROOT-ERADICATION residue R9 / WDB-R1 — ruled 2026-08-03] THIS CELL USED TO ASSERT A GLOBAL

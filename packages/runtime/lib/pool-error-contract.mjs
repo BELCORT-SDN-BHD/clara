@@ -39,7 +39,39 @@
 // counter plus a listener, kept separate from `relay.mjs` because that file is already
 // past the repo's file-size ceiling and because a contract deserves one readable home.
 
-const state = { errors: 0, lastErrorAt: null, lastErrorCode: null };
+// #617 — ONE COUNTER PER LABEL, not one counter for the whole process. The original state was a
+// single triple, so the SEVEN dedicated-login lane pools (which carried console-only listeners
+// and were never counted at all) could not have been told apart even once they were counted: an
+// operator reading `errors: 3` would not know whether the write floor, the freeform reader or
+// the Stripe webhook lane had been recycled. A lane is the unit an operator acts on — it maps
+// 1:1 onto `checks.pools`' own lane names — so it is the unit the counter keys on.
+//
+// A label ONLY appears once its pool has been CONSTRUCTED. That absence is itself information
+// (these pools are lazy singletons): a missing lane means this process never opened that pool,
+// which is a different fact from "opened it and saw zero errors", and the two must not collapse.
+const lanes = new Map();
+
+/** The relay pool's label. Its counters have their OWN /ready key (`checks.relay_pool`, 裁-149
+ *  clause 1) and are therefore EXCLUDED from the per-lane map, so one background error can never
+ *  produce two warning lines saying the same thing. `lib/relay.mjs`'s makePool() passes this
+ *  string literally — it cannot import it without changing a statement the parts-parity census
+ *  has fingerprinted — and a cell pins the two spellings together. */
+export const RELAY_POOL_LABEL = "relay";
+
+/** @param {string} label */
+function laneState(label) {
+  let s = lanes.get(label);
+  if (!s) {
+    s = { errors: 0, lastErrorAt: null, lastErrorCode: null };
+    lanes.set(label, s);
+  }
+  return s;
+}
+
+/** @param {{errors:number,lastErrorAt:string|null,lastErrorCode:string|null}} s */
+function snapshot(s) {
+  return { errors: s.errors, last_error_at: s.lastErrorAt, last_error_code: s.lastErrorCode };
+}
 
 /**
  * SANITIZED error identity — a short libpq/Node code token, or the constant "unknown".
@@ -68,7 +100,12 @@ export function sanitizedErrorCode(err) {
  * @returns {P}
  */
 export function attachPoolErrorContract(pool, label) {
+  laneState(label); // REGISTERED AT ATTACH: a constructed-but-clean pool reports 0, not absent
   pool.on("error", (err) => {
+    // RE-RESOLVED on every event, never captured at attach time: `_resetPoolErrorContractForTest`
+    // replaces the map's entries, and a listener holding the OLD object would keep counting into
+    // a record nothing reads — a cell would then measure zero while the process saw the error.
+    const state = laneState(label);
     state.errors += 1;
     state.lastErrorAt = new Date().toISOString();
     state.lastErrorCode = sanitizedErrorCode(err);
@@ -84,12 +121,28 @@ export function attachPoolErrorContract(pool, label) {
  * @returns {{errors:number, last_error_at:string|null, last_error_code:string|null}}
  */
 export function relayPoolHealth() {
-  return { errors: state.errors, last_error_at: state.lastErrorAt, last_error_code: state.lastErrorCode };
+  return snapshot(laneState(RELAY_POOL_LABEL));
 }
 
-/** Test-only reset — the counter is process-global, so cells must not leak into each other. */
+/**
+ * #617 — the per-LANE background-error counters, read by `/ready` as `checks.pool_errors`.
+ * Keyed on the lane name (the same names `checks.pools` uses, so the two reports line up), and
+ * carrying ONLY constructed pools: an absent lane means this process never opened that pool, a
+ * different fact from a zero count. The relay pool is deliberately absent — it has its own
+ * `checks.relay_pool` key and would otherwise be reported, and warned about, twice.
+ * Monotonic since process start; `errors > 0` is a WARNING, never a readiness failure.
+ * @returns {Record<string, {errors:number, last_error_at:string|null, last_error_code:string|null}>}
+ */
+export function poolErrorHealth() {
+  const out = {};
+  for (const [label, s] of lanes) {
+    if (label === RELAY_POOL_LABEL) continue;
+    out[label] = snapshot(s);
+  }
+  return out;
+}
+
+/** Test-only reset — the counters are process-global, so cells must not leak into each other. */
 export function _resetPoolErrorContractForTest() {
-  state.errors = 0;
-  state.lastErrorAt = null;
-  state.lastErrorCode = null;
+  lanes.clear();
 }

@@ -23,6 +23,7 @@ import { Worker } from "node:worker_threads";
 import { setRuntimeRole, acquireLeaderLock } from "./relay.mjs";
 import { makeRuntimeClient, withRuntime as defaultWithRuntime } from "./pools.mjs";
 import { isConnErr, waitForNudge } from "./listen.mjs";
+import { taskLaneHealth } from "./consumer-health.mjs";
 import { MYINVOIS_ENGINE_ID } from "./myinvois.mjs";
 import { resolveLibWorker } from "./worker-path.mjs";
 import { interpretClaimReceipt } from "../workflows/invoiceFacts.v1.behavior.mjs";
@@ -194,18 +195,23 @@ export async function runLocalFactsCycle(client, deps = {}) {
 // checkpoint). Warn-only: a stalled local_facts consumer must NEVER take traffic down.
 // ---------------------------------------------------------------------------
 export async function localFactsHealth(client) {
-  const r = await client.query(
-    `select
-       count(*) filter (where status='queued')::int as queued,
-       count(*) filter (where status='running')::int as running,
-       coalesce(extract(epoch from (now() - min(created_at) filter (where status='queued'))) * 1000, 0)::bigint as oldest_queued_ms
-     from clara.document_processing_tasks where lane='local_facts' and status in ('queued','running')`,
-  );
+  // #617 — this lane had the classify lane's QUEUED-ONLY blind spot and none of its
+  // compensating signals. A row stuck in 'running' contributes to neither the queued count nor
+  // oldestQueuedMs, so a wedged local_facts worker showed as a perfectly idle one; and an
+  // attempt_count climbing toward the terminal fail was invisible until the task died. Both are
+  // now counted, by the SAME shared read the classify lane uses (lib/consumer-health.mjs),
+  // against this module's OWN threshold — the one runLocalFactsCycle requeues on
+  // (CLARA_LOCAL_FACTS_STRANDED_MS, default 10 minutes, matching the classify lane's).
+  const h = await taskLaneHealth(client, "local_facts", STRANDED_MS);
   return {
     consumer: LOCAL_FACTS_CONSUMER,
-    queued: Number(r.rows[0].queued),
-    running: Number(r.rows[0].running),
-    oldestQueuedMs: Number(r.rows[0].oldest_queued_ms),
+    queued: h.queued,
+    running: h.running,
+    oldestQueuedMs: h.oldestQueuedMs,
+    oldestRunningMs: h.oldestRunningMs,
+    maxAttemptCount: h.maxAttemptCount,
+    stranded: h.stranded,
+    strandedMs: h.strandedMs,
   };
 }
 

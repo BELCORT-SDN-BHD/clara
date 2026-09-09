@@ -33,6 +33,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { discoverWork, writeCheckpoint, acquireLeaderLock, setRuntimeRole } from "./relay.mjs";
 import { makeRuntimeClient } from "./pools.mjs";
 import { isConnErr, waitForNudge } from "./listen.mjs";
+import { relayConsumerHealth } from "./consumer-health.mjs";
 
 /** The autodraft consumer name — its own checkpoint / dead-letter / lock key. */
 export const AUTODRAFT_CONSUMER = "autodraft";
@@ -45,6 +46,10 @@ export const AUTODRAFT_EVENT_TYPES = Object.freeze([
 const AUTODRAFT_EVENT_SET = new Set(AUTODRAFT_EVENT_TYPES);
 
 const MAX_ATTEMPTS = Number(process.env.CLARA_AUTODRAFT_MAX_ATTEMPTS || 5);
+/** #617: exported so the cell that proves `deadLetters.exhausted` can pin the BOUNDARY (cap-1 is
+ *  still being retried, cap is not) against the value this consumer actually uses, rather than
+ *  against a second hand-typed 5 that would stop meaning anything the day the knob moves. */
+export const AUTODRAFT_MAX_ATTEMPTS = MAX_ATTEMPTS;
 // F2-R (opus review, round 2 — SUPERSEDES the round-1 cycle-bound). retry_pending_settlement
 // (a LIVE owner task, GM-10) is a real, not-yet-terminal fact -- never an error -- and the
 // round-1 fix's MAX_RETRY_PENDING_CYCLES bound was measured to give up in ~10s of WALL-CLOCK
@@ -440,20 +445,17 @@ export async function runCatchupPass(client, opts = {}) {
 // exist since 0005, so it is safe to call before 0011 is applied.
 // ---------------------------------------------------------------------------
 export async function autodraftHealth(client) {
-  const r = await client.query(
-    `select
-       coalesce((select sum(greatest(s.n - coalesce(c.last_seq, 0), 0))
-                   from clara.firm_event_seq s
-                   left join clara.relay_checkpoints c on c.consumer = $1 and c.firm_id = s.firm_id), 0)::bigint as lag,
-       (select count(*) from clara.relay_dead_letters where consumer = $1 and status = 'pending')::int as pending_dead_letters,
-       (select count(*) from clara.relay_checkpoints where consumer = $1)::int as firms_tracked`,
-    [AUTODRAFT_CONSUMER],
-  );
+  // The shared read (lib/consumer-health.mjs) — it carries the definition of each category and
+  // the reason `lag` and `pendingDeadLetters` can express neither of the two newer ones. This
+  // consumer supplies only what is its own: its name and ITS OWN retry cap.
+  const h = await relayConsumerHealth(client, AUTODRAFT_CONSUMER, MAX_ATTEMPTS);
   return {
     consumer: AUTODRAFT_CONSUMER,
-    lag: Number(r.rows[0].lag),
-    pendingDeadLetters: r.rows[0].pending_dead_letters,
-    firmsTracked: r.rows[0].firms_tracked,
+    lag: h.lag,
+    pendingDeadLetters: h.pendingDeadLetters,
+    firmsTracked: h.firmsTracked,
+    firmsUncheckpointed: h.firmsUncheckpointed,
+    deadLetters: h.deadLetters,
     // F2-R (opus review): distinct from generic lag/pending_dead_letters ON PURPOSE — a
     // withdrawal deferred pending its owner task's settlement is neither poisoned (no
     // relay_dead_letters row) nor merely "behind" (lag counts it, but so does every other

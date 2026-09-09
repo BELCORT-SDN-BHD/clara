@@ -96,6 +96,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { discoverWork, writeCheckpoint, acquireLeaderLock, setRuntimeRole, CONSUMER as ROUTER_CONSUMER, WAKE_ENGINE_CONSUMER } from "./relay.mjs";
 import { makeRuntimeClient } from "./pools.mjs";
 import { isConnErr, waitForNudge } from "./listen.mjs";
+import { FIRMS_UNCHECKPOINTED_COLUMN, relayConsumerCategories } from "./consumer-health.mjs";
 
 /** The wake-engine consumer name — its own checkpoint / lock key (relay_checkpoints,
  *  acquireLeaderLock, relay_dead_letters' carrier-1 ledger). NOT used directly as the
@@ -122,6 +123,15 @@ export { WAKE_ENGINE_CONSUMER };
  *  enqueue-path exhaustion can never count against a claim-path cap or vice versa. */
 export const WAKE_ENGINE_CLAIM_CONSUMER = `${WAKE_ENGINE_CONSUMER}_claim`;
 export const WAKE_ENGINE_ENQUEUE_CONSUMER = `${WAKE_ENGINE_CONSUMER}_enqueue`;
+
+/** #617 — the cap `wakeEngineHealth` reads for a dead-lettered row whose SOURCE no longer exists
+ *  or has been disabled, so there is no live `wake_engine_sources.max_attempts` to read. It is
+ *  the column's own DB default (`max_attempts int not null default 5`, migration 0133) and is
+ *  used ONLY as that fallback — every row whose source is still registered is measured against
+ *  that source's actual value, exactly as the cycle's own `attempts >= source.maxAttempts` is.
+ *  This is a health READ, never a control decision: mis-reading a retired source's cap can
+ *  misplace a row between two warning categories, never retry or skip anything. */
+export const SOURCE_MAX_ATTEMPTS_FALLBACK = 5;
 
 const RECONNECT_BASE_MS = 500;
 const RECONNECT_MAX_MS = 5000;
@@ -954,6 +964,34 @@ export async function wakeEngineHealth(client) {
          -- operator reading pendingDeadLetters cares that SOMETHING is stuck, not which ledger.
          + (select count(*) from clara.wake_engine_task_dead_letters where consumer = any($2) and status = 'pending')::int
          as pending_dead_letters,
+       -- #617 — the EXHAUSTED half of that same pair: a pending dead-letter whose attempt_count
+       -- has reached the cap is no longer retried (processEvent/processTask skip past it), so it
+       -- waits on an operator redrive rather than on time. THIS ENGINE'S CAP IS PER SOURCE, not a
+       -- module constant: clara.wake_engine_sources.max_attempts, which loadSources reads and
+       -- which "attempts >= source.maxAttempts" compares against. So each ledger row is matched
+       -- back to ITS OWN source the same way the cycle matches it — event_type for the wake_outbox
+       -- carrier, the task's kind for direct_queue — under loadSources' own dedup order
+       -- (most-recently-created wins, source_key as the tiebreak). A row whose source is gone or
+       -- has been disabled has no live cap to read; it falls back to $3, which is the column's
+       -- own DB default (0133), and it is STILL counted, because a dead-lettered row on a source
+       -- nobody serves any more is precisely one an operator has to deal with by hand.
+       (select count(*) from clara.relay_dead_letters dl
+         where dl.consumer = $1 and dl.status = 'pending'
+           and dl.attempt_count >= coalesce((select s.max_attempts from clara.wake_engine_sources s
+                                              where s.carrier = 'wake_outbox' and s.enabled
+                                                and s.event_type = dl.event_type
+                                              order by s.created_at desc, s.source_key desc limit 1), $3))::int
+         + (select count(*) from clara.wake_engine_task_dead_letters tdl
+              join clara.agent_tasks at on at.id = tdl.task_id
+             where tdl.consumer = any($2) and tdl.status = 'pending'
+               and tdl.attempt_count >= coalesce((select s.max_attempts from clara.wake_engine_sources s
+                                                   where s.carrier = 'direct_queue' and s.enabled
+                                                     and s.task_kind = at.kind
+                                                   order by s.created_at desc, s.source_key desc limit 1), $3))::int
+         as exhausted_dead_letters,
+       -- the NOT-YET-MEASURED column, from lib/consumer-health.mjs so its definition lives in
+       -- ONE place across every relay consumer ($1 is this statement's consumer parameter too).
+       ${FIRMS_UNCHECKPOINTED_COLUMN},
        (select count(*) from clara.relay_checkpoints where consumer = $1)::int as firms_tracked,
        (select count(*) from clara.agent_tasks at
           join clara.wake_intents wi on wi.id = at.origin_intent_id
@@ -991,17 +1029,22 @@ export async function wakeEngineHealth(client) {
          where at.kind = 'wake' and at.status = 'held'
            and wi.event_seq <= c.last_seq)::int
          as held_below_checkpoint`,
-    [WAKE_ENGINE_CONSUMER, [WAKE_ENGINE_CLAIM_CONSUMER, WAKE_ENGINE_ENQUEUE_CONSUMER]],
+    [WAKE_ENGINE_CONSUMER, [WAKE_ENGINE_CLAIM_CONSUMER, WAKE_ENGINE_ENQUEUE_CONSUMER], SOURCE_MAX_ATTEMPTS_FALLBACK],
   );
   const row = r.rows[0];
+  // The shared mapper (lib/consumer-health.mjs) — this engine computes `exhausted_dead_letters`
+  // itself (per-source cap, above) but publishes the SAME field names as every other consumer.
+  const h = relayConsumerCategories(row);
   return {
     consumer: WAKE_ENGINE_CONSUMER,
-    lag: Number(row.lag),
-    pendingDeadLetters: row.pending_dead_letters,
-    firmsTracked: row.firms_tracked,
+    lag: h.lag,
+    pendingDeadLetters: h.pendingDeadLetters,
+    firmsTracked: h.firmsTracked,
     heldForDisabledSource: row.held_for_disabled_source,
     cancelRequestedStuck: row.cancel_requested_stuck,
     heldBelowCheckpoint: row.held_below_checkpoint,
+    firmsUncheckpointed: h.firmsUncheckpointed,
+    deadLetters: h.deadLetters,
   };
 }
 

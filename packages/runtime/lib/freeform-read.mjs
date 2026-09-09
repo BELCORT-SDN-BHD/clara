@@ -48,6 +48,8 @@
 
 import pg from "pg";
 import { connConfig, assertNoTargetSplit } from "./relay.mjs";
+// #617: the per-lane background-error contract (this pool carried a console-only listener).
+import { attachPoolErrorContract } from "./pool-error-contract.mjs";
 
 const TEST_MODE = process.env.RELAY_TEST_MODE === "1";
 
@@ -57,6 +59,10 @@ export const FREEFORM_LOGIN = "clara_freeform_login";
 /** The group role the checkout SET ROLEs to (N10 — never operate as the bare login). */
 export const FREEFORM_ROLE = "clara_freeform_ro";
 export const FREEFORM_DSN_VAR = "CLARA_FREEFORM_DATABASE_URL";
+/** #617: this lane's NAME on /ready — the one `checks.pools` and `checks.pool_errors` both use.
+ *  Exported so `lib/lane-probe.mjs`'s roster and this file's error-contract label read the same
+ *  binding instead of two hand-typed literals (the file's own "spelling is not identity" law). */
+export const FREEFORM_LANE = "freeform";
 
 /** Read when the pool is CREATED, not at module load — the same discipline as the timeout
  *  below, and for a second reason here: it lets the battery pin the pool to ONE connection so
@@ -210,8 +216,7 @@ let _freeformPool = null;
 /** Lazy singleton freeform pool (clara_freeform_login -> SET ROLE clara_freeform_ro). */
 export function getFreeformPool() {
   if (!_freeformPool) {
-    _freeformPool = new pg.Pool(freeformConfig());
-    _freeformPool.on("error", (err) => console.error("[clara-runtime] freeform pool error:", err.message));
+    _freeformPool = attachPoolErrorContract(new pg.Pool(freeformConfig()), FREEFORM_LANE);
   }
   return _freeformPool;
 }

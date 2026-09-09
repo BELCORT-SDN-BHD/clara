@@ -298,12 +298,23 @@ Beta test Checkout、已有 DPA 签署不能证明付费计量、完整法律接
 业务提交同事务写事件及 outbox；消费者用 checkpoint、去重、重试／dead letter 推进投影。
 LISTEN 是及时通知，持久队列与轮询保证可恢复扫描。投影记录 lag，不能把已提交账务和界面刷新混为一件事。
 `/health` 表达进程存活，`/ready` 表达配置依赖和消费者状况；缺少可选配置与已配置但失败必须区分。
+现行实现（#617）把每项检查读成三种以上答案而不是两种：已测量健康、已测量失败、尚未测量
+（`pending`／`measured:false`／`unavailable:true`／`firmsUncheckpointed`），以及未配置
+（`skipped`）。存储探测的冷启动不再报 `ok:true`；未配置存储与已配置但失败是不同字段和不同告警。
+消费者健康另外分出 `deadLetters.exhausted`（超过该消费者自身重试上限、只能靠 redrive 清除）
+与 `stranded`（卡在 running 超过该 lane 自身阈值），与 lag、pending 分开计数；健康查询本身抛错
+会给出显式 `unavailable` 条目而不是缺键。/ready 只输出变量名与经过清洗的标识符码，不含 DSN、
+证书路径或原始数据库文本。
 
 连接故障的现行契约（as built）：Idle pool errors log/recycle connections;
-relay-pool counters surface warnings. The leader's dedicated session
-detects failure, releases its advisory lock and reconnects. Lane probes are asynchronous:
+relay-pool counters surface warnings. 每条专用 login lane 的后台连接错误也按 lane 计数
+（`checks.pool_errors`），未构造的 lazy pool 表示为缺席而不是零。The leader's dedicated session
+detects failure, releases its advisory lock and reconnects；其 acquire／lost／re-acquire 与
+halt 记录在 `checks.leader`（halt 在调用 onHalt 之前写入），held:false 是告警，halt 使该项
+`ok:false`，但都不改变 /ready 的硬失败集合。启动时的 DSN TLS posture 以变量名形式出现在
+`checks.tls`，未运行该断言时报 `measured:false`。Lane probes are asynchronous:
 `pending` 表示尚未测量，`stalled` 是警告；不可把尚未完成的探测当成健康证明。
-所有已配置连接通道和存储的完整硬性 readiness 检查仍未完成。
+所有已配置连接通道和存储的完整硬性 readiness 检查仍未完成；上述新增读数全部是告警级别。
 
 Workflow registry 决定新接收的版本，旧非终态运行继续拥有其原 body 与相容依赖。
 目前 frozen closure 有 hash 检查；目标进一步固定 instruction／skill／tool registry manifest、
@@ -330,7 +341,7 @@ Web、runtime、DB frontier 和 renderer 分别记录发布身份；源代码通
 | Knowledge | facts、wiki 与 advisory pattern pack 分开；检索偏固定 priority／recency；部分 claim metadata 缺失，chat pack 错误会降为 null。 | 统一捕获、身份、版本、按需检索、纠正和投影；必需知识不可用时诚实暂停。 |
 | 自动计划与 close | 日常 reconciler／资产／调整机制已有；bank_agent／close_prep wake sources 默认关闭，生产／激活链路不完整。 | 显式授权计划到期产生 Work，普通自主执行含满足条件的 recon／close；技术开关不成为用户 opt-in。 |
 | 财务界面与输出 | 旧工作台和 card readers；sealed renderer 已有，sandbox worker、完整管理模板和交付验证仍不齐。 | 完整旅程、统一 metric pack、可靠 AI UI、可复现且可下载的报表。 |
-| 准入与运行保障 | beta 准入、部分法律／外发机制、备份工具、单机部署；完整 readiness 与恢复证据仍有边界。 | 合同与实现一致的准入／外发、协调版本发布及代表性 hosted／restore 验证。 |
+| 准入与运行保障 | beta 准入、部分法律／外发机制、备份工具、单机部署；/ready 已区分未测量／未配置／已配置失败，并按 lane 计连接错误、暴露 leader 与 TLS posture，附可执行恢复清单（#617，本地 PG17 全链验证；hosted 证据待记录）；完整硬性 readiness 与恢复证据仍有边界。 | 合同与实现一致的准入／外发、协调版本发布及代表性 hosted／restore 验证。 |
 
 以上是持续有效的架构分界，不是项目进度清单。具体切片、依赖、故障证据与完成状态由 GitHub
 spec／implementation issues 承担；技术目标变化后维护本文件，不能让历史 spec 覆盖已接受的新方向。

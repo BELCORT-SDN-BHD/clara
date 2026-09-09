@@ -90,12 +90,14 @@ import pg from "pg";
 import { connConfig, assertNoTargetSplit } from "./relay.mjs";
 import { sanitizedErrorCode } from "./pool-error-contract.mjs";
 import { POOLS_LANE_DESCRIPTORS } from "./pools.mjs";
-import { FREEFORM_DSN_VAR, FREEFORM_LOGIN, FREEFORM_ROLE } from "./freeform-read.mjs";
+import { FREEFORM_DSN_VAR, FREEFORM_LANE, FREEFORM_LOGIN, FREEFORM_ROLE } from "./freeform-read.mjs";
 import {
   STRIPE_WEBHOOK_DSN_VAR,
+  STRIPE_WEBHOOK_LANE,
   STRIPE_WEBHOOK_LOGIN,
   STRIPE_WEBHOOK_ROLE,
   AUTH_WALL_DSN_VAR,
+  AUTH_WALL_LANE,
   AUTH_WALL_LOGIN,
   AUTH_WALL_ROLE,
 } from "./checkout-pools.mjs";
@@ -129,13 +131,17 @@ function cycleMs() {
  * same private mapping the pools themselves use), plus the freeform lane and the two checkout
  * lanes, composed from THEIR OWN exported constants. Nothing here re-types a login, a role or a
  * DSN variable name — "spelling is not identity", and a roster that spells its members itself
- * is a second source of truth that drifts.
+ * is a second source of truth that drifts. #617 extended that to the lane NAMES themselves
+ * (FREEFORM_LANE / STRIPE_WEBHOOK_LANE / AUTH_WALL_LANE / pools.mjs's own LANE_NAMES), because
+ * those names are now ALSO the labels the per-lane pool-error counters report under: two /ready
+ * keys (`checks.pools` and `checks.pool_errors`) that must name the same lane are exactly the
+ * pair a hand-typed second copy silently splits.
  */
 export const LANE_ROSTER = Object.freeze([
   ...POOLS_LANE_DESCRIPTORS,
-  Object.freeze({ lane: "freeform", dsnVar: FREEFORM_DSN_VAR, login: FREEFORM_LOGIN, role: FREEFORM_ROLE, eager: true }),
-  Object.freeze({ lane: "stripe_webhook", dsnVar: STRIPE_WEBHOOK_DSN_VAR, login: STRIPE_WEBHOOK_LOGIN, role: STRIPE_WEBHOOK_ROLE, eager: false }),
-  Object.freeze({ lane: "auth_wall", dsnVar: AUTH_WALL_DSN_VAR, login: AUTH_WALL_LOGIN, role: AUTH_WALL_ROLE, eager: false }),
+  Object.freeze({ lane: FREEFORM_LANE, dsnVar: FREEFORM_DSN_VAR, login: FREEFORM_LOGIN, role: FREEFORM_ROLE, eager: true }),
+  Object.freeze({ lane: STRIPE_WEBHOOK_LANE, dsnVar: STRIPE_WEBHOOK_DSN_VAR, login: STRIPE_WEBHOOK_LOGIN, role: STRIPE_WEBHOOK_ROLE, eager: false }),
+  Object.freeze({ lane: AUTH_WALL_LANE, dsnVar: AUTH_WALL_DSN_VAR, login: AUTH_WALL_LOGIN, role: AUTH_WALL_ROLE, eager: false }),
 ]);
 
 /**

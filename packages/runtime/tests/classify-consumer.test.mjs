@@ -130,12 +130,51 @@ test("a payroll_summary verdict is NEVER misfiled as invoice (the headline failu
 test("classifyHealth reports the classify lane's queued/running backlog (pre-0016-safe shape)", { skip }, async () => {
   const h = await asRuntime((c) => classifyHealth(c));
   assert.equal(h.consumer, CLASSIFY_CONSUMER);
+  // The WIRE SHAPE, pinned. #617 moved this query into lib/consumer-health.mjs, shared with the
+  // classify lane; the fields and their ORDER are what /ready and its readers actually see, so a
+  // future consolidation that renames, reorders or drops one fails HERE.
+  assert.deepEqual(
+    Object.keys(h),
+    ["consumer", "queued", "running", "oldestQueuedMs", "oldestRunningMs", "maxAttemptCount", "stranded", "strandedMs"],
+    "classifyHealth's field set and order",
+  );
   assert.equal(typeof h.queued, "number");
   assert.equal(typeof h.running, "number");
   assert.equal(typeof h.oldestQueuedMs, "number");
   assert.equal(typeof h.oldestRunningMs, "number", "oldestRunningMs surfaces a stuck/looping task (finding 3)");
   assert.equal(typeof h.maxAttemptCount, "number", "maxAttemptCount surfaces the retry-cap signal (finding 3)");
   assert.ok(h.queued >= 0 && h.running >= 0);
+  assert.equal(typeof h.stranded, "number", "#617: the COUNT of stranded rows, beside the oldest-running AGE");
+  assert.equal(typeof h.strandedMs, "number", "#617: and the threshold it was measured against, so /ready need not re-read the env");
+});
+
+test("#617 classifyHealth: a running task older than the stranded threshold is counted as STRANDED, not as backlog", { skip }, async () => {
+  // The blind spot this closes: `queued` cannot see a wedged task at all (a looping task is
+  // 'running' for all but a moment of each cycle), and `oldestRunningMs` says one row is late
+  // without saying whether that is one poisoned document or the whole lane. Delta-based — the
+  // rig is shared and carries whatever earlier runs left behind.
+  const { owner, firm, client } = await buildFirm("cls617");
+  const before = await asRuntime((c) => classifyHealth(c));
+  const { taskId } = await seedClassifiable({ firm, owner, client });
+
+  const queuedNow = await asRuntime((c) => classifyHealth(c));
+  assert.equal(queuedNow.queued - before.queued, 1, "mandatory setup: the new task is QUEUED");
+  assert.equal(queuedNow.stranded, before.stranded, "a queued task is never stranded — the categories do not overlap");
+
+  // Drive it into the exact shape the counter is for: 'running', started well past the lane's own
+  // requeue threshold. (The update trigger stamps updated_at itself, which is why the predicate
+  // reads coalesce(started_at, updated_at) and this cell sets started_at.)
+  await rootQuery(
+    `update clara.document_processing_tasks
+        set status='running', workflow_run_id='rig-617-stranded',
+            started_at = now() - ($2::bigint * interval '1 millisecond') - interval '1 minute'
+      where id=$1`,
+    [taskId, queuedNow.strandedMs],
+  );
+  const stranded = await asRuntime((c) => classifyHealth(c));
+  assert.equal(stranded.stranded - before.stranded, 1, "the stranded row is counted in its own category");
+  assert.equal(stranded.queued - before.queued, 0, "and has LEFT the queued backlog — a stall is not a queue");
+  assert.ok(stranded.oldestRunningMs > stranded.strandedMs, "the pre-existing age signal agrees, but it is not the count");
 });
 
 // Finding 6 — version_n is per (document_id, engine_id), so an ocr v1 and a structured_parse

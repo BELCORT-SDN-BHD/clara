@@ -29,7 +29,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import { rootQuery, humanQuery, asRuntime, asFnOwner, opk, buildFirm, headSeq, checkpointSeq, endPool } from "./relay-fixtures.mjs";
-import { runWikiProjectionCycle, wikiProjectionRedrive, CONSUMERS, WIKI_PROJECTION_CONSUMER } from "../lib/wiki-projection.mjs";
+import { runWikiProjectionCycle, wikiProjectionRedrive, CONSUMERS, WIKI_PROJECTION_CONSUMER, WIKI_PROJECTION_MAX_ATTEMPTS } from "../lib/wiki-projection.mjs";
 import { wikiProjectionHealth } from "../lib/wiki-projection-ops.mjs";
 import { verifyWikiCanonical } from "../lib/storage.mjs";
 
@@ -487,6 +487,95 @@ test("[R3 F2/F3] a CONFIGURATION refusal (isolation_unsupported) BLOCKS the curs
   assert.ok(await pageBySlug(client, `counterparty/${cp}`), "the event projected once the isolation was fixed");
   const dl2 = (await deadLetters(firm)).find((d) => String(d.reason).startsWith("runtime misconfiguration"));
   assert.equal(dl2.status, "resolved", "…and the config dead-letter resolved automatically (F6)");
+});
+
+// #617 — THE CATEGORIES, AGAINST A REAL DATABASE. Both cells are DELTA-based on purpose:
+// `firmsUncheckpointed` and the dead-letter counts are ESTATE-WIDE reads (that is what an
+// operator looks at), and this rig is shared, so an absolute number would be a fixture of
+// whatever else has run. A delta measures exactly what the cell itself caused.
+
+test("#617 wikiProjectionHealth: a firm with events and NO checkpoint counts as UNCHECKPOINTED, not merely as lag", { skip }, async () => {
+  const before = await asRuntime((c) => wikiProjectionHealth(c));
+  // The WIRE SHAPE, pinned. #617 moved this query into lib/consumer-health.mjs, shared with
+  // every other relay consumer; the fields and their ORDER are what /ready and its readers
+  // actually see, so a future consolidation that renames, reorders or drops one fails HERE.
+  assert.deepEqual(
+    Object.keys(before),
+    ["consumer", "lag", "pendingDeadLetters", "configurationBlocked", "firmsTracked", "firmsUncheckpointed", "deadLetters"],
+    "wikiProjectionHealth's field set and order (configurationBlocked keeps its own place)",
+  );
+  // buildFirm's own firm/client creation events are enough: they put the firm in
+  // firm_event_seq while this consumer has never checkpointed it. (The WB-R18 ceremony seeds a
+  // checkpoint per firm AT HEAD; a firm born after it — like this one — correctly has none, which
+  // is exactly the state an operator needs to be able to tell apart from "far behind".)
+  const { firm } = await buildFirm("wp617u");
+
+  const seeded = await asRuntime((c) => wikiProjectionHealth(c));
+  assert.equal(
+    seeded.firmsUncheckpointed - before.firmsUncheckpointed,
+    1,
+    "a firm with events this consumer has never checkpointed is counted as NOT-YET-MEASURED",
+  );
+  assert.equal(seeded.firmsTracked, before.firmsTracked, "and it is NOT yet in firmsTracked — the two are complements");
+
+  // The discriminating half: run the consumer over those (non-target) events. The firm now HAS a
+  // checkpoint, so it leaves the uncheckpointed category — while `lag` (which reads a missing
+  // checkpoint as last_seq 0) was never able to tell the two states apart on its own.
+  await drainWiki(firm);
+  const drained = await asRuntime((c) => wikiProjectionHealth(c));
+  assert.equal(
+    drained.firmsUncheckpointed,
+    seeded.firmsUncheckpointed - 1,
+    "once checkpointed the firm leaves the not-yet-measured category",
+  );
+  assert.equal(drained.firmsTracked, before.firmsTracked + 1, "and joins the tracked one");
+});
+
+test("#617 wikiProjectionHealth: dead letters split into pending vs EXHAUSTED at this consumer's own cap", { skip }, async () => {
+  const before = await asRuntime((c) => wikiProjectionHealth(c));
+  const { owner, firm, client } = await buildFirm("wp617x");
+  const { eventId } = await emitEvent(firm, "counterparty.created", { client, actor: owner, payload: { counterparty_id: randomUUID() } });
+  // A raw relay-infra seed — never a books/event insert. The reason deliberately does NOT carry
+  // CONFIG_DEAD_LETTER_PREFIX: an exhausted poison pill and a configuration block are different
+  // answers, and this cell pins that they stay different.
+  await rootQuery(
+    `insert into clara.relay_dead_letters (consumer, event_id, reason, attempted_taxonomy_version)
+       values ($1, $2, 'rig-seeded #617', null)`,
+    [WIKI_PROJECTION_CONSUMER, eventId],
+  );
+
+  // BOUNDARY, from below. One attempt short of the cap the row is still inside its retry budget:
+  // it counts as pending and NOT as exhausted. Without this arm the cell would pass for an
+  // implementation that simply called every pending dead letter exhausted.
+  await rootQuery("update clara.relay_dead_letters set attempt_count = $3 where consumer = $1 and event_id = $2", [
+    WIKI_PROJECTION_CONSUMER,
+    eventId,
+    WIKI_PROJECTION_MAX_ATTEMPTS - 1,
+  ]);
+  const retrying = await asRuntime((c) => wikiProjectionHealth(c));
+  assert.equal(retrying.deadLetters.pending - before.deadLetters.pending, 1, "a pending dead letter is counted as pending");
+  assert.equal(retrying.deadLetters.exhausted, before.deadLetters.exhausted, "and is NOT exhausted while attempts remain");
+  assert.equal(retrying.pendingDeadLetters, retrying.deadLetters.pending, "the compatibility field still mirrors the pending total");
+
+  // AT the cap: retrying has stopped, so the row needs an operator redrive and is reported as its
+  // own category.
+  await rootQuery("update clara.relay_dead_letters set attempt_count = $3 where consumer = $1 and event_id = $2", [
+    WIKI_PROJECTION_CONSUMER,
+    eventId,
+    WIKI_PROJECTION_MAX_ATTEMPTS,
+  ]);
+  const exhausted = await asRuntime((c) => wikiProjectionHealth(c));
+  assert.equal(exhausted.deadLetters.exhausted - before.deadLetters.exhausted, 1, "at the cap the row is EXHAUSTED");
+  assert.equal(
+    exhausted.deadLetters.pending - before.deadLetters.pending,
+    1,
+    "an exhausted row is STILL pending — exhausted is a subset, so the two counts must not be subtracted from each other",
+  );
+  assert.equal(
+    exhausted.configurationBlocked,
+    before.configurationBlocked,
+    "and an ordinary poison pill NEVER reads as a runtime misconfiguration — F3's signal is its own category",
+  );
 });
 
 test("registry + redrive guard: unknown dead-letter refuses; identity is runtime-role", { skip }, async () => {

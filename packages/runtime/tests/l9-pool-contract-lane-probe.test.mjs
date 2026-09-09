@@ -13,7 +13,16 @@ import { fileURLToPath } from "node:url";
 import pg from "pg";
 
 import { makePool } from "../lib/relay.mjs";
-import { relayPoolHealth, _resetPoolErrorContractForTest, sanitizedErrorCode, attachPoolErrorContract } from "../lib/pool-error-contract.mjs";
+import {
+  relayPoolHealth,
+  poolErrorHealth,
+  RELAY_POOL_LABEL,
+  _resetPoolErrorContractForTest,
+  sanitizedErrorCode,
+  attachPoolErrorContract,
+} from "../lib/pool-error-contract.mjs";
+import { FREEFORM_LANE } from "../lib/freeform-read.mjs";
+import { AUTH_WALL_LANE, STRIPE_WEBHOOK_LANE } from "../lib/checkout-pools.mjs";
 import {
   LANE_ROSTER,
   READINESS_CRITICAL_LANE,
@@ -97,8 +106,11 @@ test("C-04: attachPoolErrorContract labels the log line and returns the same poo
   assert.equal(returned, fake, "the pool is returned so a constructor can be wrapped in one expression");
   assert.equal(fake.handlers.length, 1, "exactly one 'error' handler attached");
   fake.handlers[0](Object.assign(new Error("x"), { code: "08006" }));
-  assert.equal(relayPoolHealth().errors, 1);
-  assert.equal(relayPoolHealth().last_error_code, "08006");
+  // #617: the counter is keyed on the LABEL now, so this event lands under "unit" and NOT on
+  // the relay pool's own key — which is the property that makes a per-lane report possible.
+  assert.equal(poolErrorHealth().unit.errors, 1);
+  assert.equal(poolErrorHealth().unit.last_error_code, "08006");
+  assert.equal(relayPoolHealth().errors, 0, "a labelled pool's error never lands on the relay pool's counter");
   _resetPoolErrorContractForTest();
 });
 
@@ -499,6 +511,90 @@ test("C-04 drift guard: EVERY `new pg.Pool` site in the runtime declares an erro
   }
   assert.ok(sites >= 9, `expected at least the nine known pool sites, censused ${sites}`);
   assert.deepEqual(uncovered, [], `every pool must declare an error posture; uncovered: ${uncovered.join(", ")}`);
+});
+
+test("#617 drift guard: every DEDICATED-LOGIN LANE pool is COUNTED, under its own lane name", () => {
+  // The cell above admits a bare `.on("error", …)` — which is what the seven lane pools carried
+  // before #617: LOGGED, never COUNTED, so a Supavisor restart that recycled the write floor or
+  // the freeform reader left nothing an operator could read off /ready. A LOG is not a SIGNAL.
+  // This is the stronger census, scoped to the three modules that own the lane pools: each
+  // `new pg.Pool(` there must be wrapped in attachPoolErrorContract(...) ON THE SAME LINE, and
+  // the labels together must be EXACTLY the roster's lane names — no more, no fewer, no
+  // re-spelling. (`lib/db.ts`'s engine pool and relay.mjs's own pool are deliberately outside
+  // this set: the first is the durable engine's, the second has its own `checks.relay_pool`.)
+  const laneModules = ["lib/pools.mjs", "lib/freeform-read.mjs", "lib/checkout-pools.mjs"];
+  const labels = [];
+  const uncounted = [];
+  for (const rel of laneModules) {
+    const lines = readFileSync(join(RUNTIME_ROOT, rel), "utf8").split(/\r?\n/);
+    for (let i = 0; i < lines.length; i++) {
+      if (!lines[i].includes("new pg.Pool(")) continue;
+      const m = /attachPoolErrorContract\(new pg\.Pool\(.*\),\s*([A-Za-z_$][\w$.]*)\s*\)/.exec(lines[i]);
+      if (!m) {
+        uncounted.push(`${rel}:${i + 1}`);
+        continue;
+      }
+      labels.push(m[1]);
+    }
+  }
+  assert.deepEqual(uncounted, [], `every lane pool must be COUNTED, not merely logged; uncounted: ${uncounted.join(", ")}`);
+  // The labels are IDENTIFIERS, never string literals — that is the property that makes the
+  // /ready lane names and the counter keys one binding rather than two agreeing spellings.
+  const resolved = labels.map((expr) => {
+    if (expr.startsWith("LANE_NAMES.")) return expr.slice("LANE_NAMES.".length);
+    if (expr === "FREEFORM_LANE") return FREEFORM_LANE;
+    if (expr === "STRIPE_WEBHOOK_LANE") return STRIPE_WEBHOOK_LANE;
+    if (expr === "AUTH_WALL_LANE") return AUTH_WALL_LANE;
+    throw new Error(`unrecognised pool-error label expression '${expr}' — a new lane must join this census deliberately`);
+  });
+  assert.deepEqual(
+    [...resolved].sort(),
+    LANE_ROSTER.map((d) => d.lane).sort(),
+    "the counted lanes and the probed lanes must be the SAME seven, by name",
+  );
+});
+
+test("#617: poolErrorHealth counts PER LANE, and never doubles the relay pool's own key", async () => {
+  _resetPoolErrorContractForTest();
+  try {
+    assert.deepEqual(poolErrorHealth(), {}, "a process that has constructed no lane pool reports NOTHING — absence is not zero");
+
+    const read = attachPoolErrorContract(new pg.Pool({}), "read");
+    const write = attachPoolErrorContract(new pg.Pool({}), "write");
+    try {
+      assert.deepEqual(
+        poolErrorHealth(),
+        {
+          read: { errors: 0, last_error_at: null, last_error_code: null },
+          write: { errors: 0, last_error_at: null, last_error_code: null },
+        },
+        "a CONSTRUCTED but clean pool reports zero — which is a different fact from being absent",
+      );
+      read.emit("error", Object.assign(new Error("terminating connection due to administrator command"), { code: "57P01" }));
+      read.emit("error", Object.assign(new Error("terminating connection due to administrator command"), { code: "57P01" }));
+      const after = poolErrorHealth();
+      assert.equal(after.read.errors, 2, "the read lane counted both");
+      assert.equal(after.read.last_error_code, "57P01", "the SANITIZED code, never the DB text");
+      assert.equal(after.write.errors, 0, "and the write lane is untouched — the whole point of keying on the lane");
+      assert.ok(!JSON.stringify(after).includes("terminating connection"), "no raw DB text on an unauthenticated payload");
+    } finally {
+      await read.end().catch(() => {});
+      await write.end().catch(() => {});
+    }
+
+    // The relay pool keeps its own dedicated key; it must not ALSO appear here, or one error
+    // would produce two /ready warning lines about the same connection.
+    const relay = makePool();
+    try {
+      relay.emit("error", Object.assign(new Error("boom"), { code: "57P01" }));
+      assert.equal(relayPoolHealth().errors, 1, "the relay counter still moves (裁-149 clause 1 is untouched)");
+      assert.equal(RELAY_POOL_LABEL in poolErrorHealth(), false, "and it never doubles into the per-lane map");
+    } finally {
+      await relay.end().catch(() => {});
+    }
+  } finally {
+    _resetPoolErrorContractForTest();
+  }
 });
 
 test("裁-149 clause 2, AS BUILT: both leader sessions record and RETHROW — they are not crash-loud", () => {

@@ -218,7 +218,13 @@ test("H-43 boot assert: a production deployment that pins NOTHING warns and stil
   assert.deepEqual(out.pinned, []);
   assert.deepEqual(out.unpinned, ["CLARA_RUNTIME_DATABASE_URL"]);
   assert.ok(logged.some((m) => /no configured DSN carries sslrootcert=/.test(m)), "the unpinned WARN fires");
-  assert.ok(logged.some((m) => m.includes("runtime-tls-verify-full-ceremony.md")), "and names the ceremony recipe");
+  // #617: the WARN used to name `docs/ops/runtime-tls-verify-full-ceremony.md`, a file that is
+  // NOT in this repository — an operator following the line reached nothing. It now names the
+  // section that IS here, and this cell pins that it still names SOMETHING an operator can open.
+  assert.ok(
+    logged.some((m) => m.includes('packages/runtime/README.md, "Health, TLS and serving identity"')),
+    "and names a recipe the reader can actually open in this repository",
+  );
   assert.ok(logged.every((m) => !m.includes(H) && !m.includes(U)), "no warning ever echoes a DSN");
 });
 
