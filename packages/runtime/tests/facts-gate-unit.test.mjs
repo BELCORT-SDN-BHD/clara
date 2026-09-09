@@ -96,6 +96,19 @@ test("a classify_low_confidence receipt is also a success for checkpointing (nev
   assert.equal(client.state.deadLetters.length, 0);
 });
 
+test("extraction completion re-fires enqueue and duplicate target events remain safe to checkpoint", async () => {
+  const events = [
+    { seq: 7, id: "e7", event_type: "document.extraction_completed", document_id: "d2" },
+    { seq: 8, id: "e8", event_type: "document.extraction_completed", document_id: "d2" },
+    { seq: 9, id: "e9", event_type: "document.classified", document_id: "d2" },
+  ];
+  const client = cycleClient({ events });
+  await runFactsGateCycle(client, { onlyFirm: "F1", log: () => {} });
+  assert.deepEqual(client.state.enqueueCalls, [["d2"], ["d2"], ["d2"]]);
+  assert.deepEqual(client.state.checkpoints.map((c) => c.seq), [7, 8, 9]);
+  assert.equal(client.state.deadLetters.length, 0);
+});
+
 test("a GENUINE throw from enqueue_invoice_facts dead-letters (no checkpoint)", async () => {
   const events = [{ seq: 9, id: "e9", event_type: "document.classified", document_id: "d3" }];
   const client = cycleClient({

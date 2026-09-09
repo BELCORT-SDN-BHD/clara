@@ -12,8 +12,8 @@ process.env.RELAY_TEST_MODE ??= "1";
 
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
-import { rootQuery, asRuntime, asFnOwner, buildFirm, headSeq, checkpointSeq, deadLettersForFirm, endPool } from "./relay-fixtures.mjs";
-import { seedVerifiedDocument } from "./matcher-testkit.mjs";
+import { rootQuery, humanQuery, asRuntime, asFnOwner, buildFirm, headSeq, checkpointSeq, deadLettersForFirm, endPool, ensureClassifyConsent, opk } from "./relay-fixtures.mjs";
+import { seedVerifiedDocument, seedExtraction, seedRegion } from "./matcher-testkit.mjs";
 import { runFactsGateCycle, factsGateHealth, factsGateRedrive, CONSUMERS, FACTS_GATE_CONSUMER, FACTS_GATE_EVENT_TYPE } from "../lib/facts-gate.mjs";
 import { liveWitnessConsent } from "./f-a1-witness-fixtures.mjs";
 
@@ -28,6 +28,16 @@ async function probe0016() {
 }
 const HAS16 = await probe0016();
 const skip = HAS16 ? false : "0016 facts-gate surface absent — migrate the target first";
+
+async function probe0177() {
+  const r = await rootQuery(
+    `select position('awaiting_extraction' in p.prosrc) > 0 as gated
+       from pg_proc p where p.oid='clara._enqueue_invoice_facts_core(uuid)'::regprocedure`,
+  );
+  return Boolean(r.rows[0]?.gated);
+}
+const HAS177 = HAS16 && (await probe0177());
+const skip177 = HAS177 ? false : "0177 classify-after-extraction gate absent — migrate the target first";
 
 after(async () => {
   await endPool();
@@ -51,6 +61,16 @@ async function emitClassified(firm, document, actor) {
     const seq = Number(s.rows[0].seq);
     const e = await c.query("select id from clara.domain_events where firm_id=$1 and seq=$2", [firm, seq]);
     return { seq, eventId: e.rows[0].id };
+  });
+}
+
+async function emitDocumentEvent(firm, document, actor, eventType) {
+  return asFnOwner(async (c) => {
+    const s = await c.query(
+      "select clara._append_event($1,$2,null,$3,null,null,null,$4,null,'{}'::jsonb) as seq",
+      [firm, eventType, actor, document],
+    );
+    return Number(s.rows[0].seq);
   });
 }
 
@@ -110,6 +130,89 @@ test("cycle: a firm with ONLY non-target events advances the checkpoint without 
   const { firm } = await buildFirm("fgc");
   await drainFactsGate(firm);
   assert.equal(await checkpointSeq(firm, FACTS_GATE_CONSUMER), await headSeq(firm), "checkpoint walked to head over non-target events");
+});
+
+test("0177 ordering: filing waits for successful extraction; stale and duplicate events enqueue classify exactly once", { skip: skip177 }, async () => {
+  const { owner, firm, client } = await buildFirm("fg177");
+  const document = await seedVerifiedDocument({ firm, uploadedBy: owner });
+  await ensureClassifyConsent(owner, { firm, client });
+  await rootQuery(
+    "insert into clara.document_filings(firm_id,document_id,client_id,filed_by,basis) values($1,$2,$3,$4,'legacy-0007')",
+    [firm, document, client, owner],
+  );
+
+  const before = await asRuntime((c) => c.query("select clara.enqueue_invoice_facts($1) as r", [document]));
+  assert.equal(before.rows[0].r.status, "awaiting_extraction");
+  assert.equal((await factsTasks(document, "classify")).length, 0, "filing before extraction creates no classify task");
+
+  await emitDocumentEvent(firm, document, owner, "document.classified");
+  await drainFactsGate(firm);
+  assert.equal((await factsTasks(document, "classify")).length, 0, "a spurious classified event cannot bypass OCR");
+
+  await seedExtraction({ firm, document, status: "failed" });
+  await emitDocumentEvent(firm, document, owner, "document.extraction_failed");
+  await drainFactsGate(firm);
+  assert.equal((await factsTasks(document, "classify")).length, 0, "a failed extraction never creates a classify task");
+
+  const extraction = await seedExtraction({ firm, document, status: "done", versionN: 2 });
+  await seedRegion({ firm, extraction, fieldPath: "body", textContent: "TAX INVOICE INV-177 TOTAL RM 100" });
+  await emitDocumentEvent(firm, document, owner, "document.extraction_completed");
+  await emitDocumentEvent(firm, document, owner, "document.extraction_completed");
+  await drainFactsGate(firm);
+
+  const tasks = await factsTasks(document, "classify");
+  assert.equal(tasks.length, 1, "duplicate completion events converge on one classify task");
+  assert.equal(tasks[0].status, "queued");
+  assert.equal(await checkpointSeq(firm, FACTS_GATE_CONSUMER), await headSeq(firm));
+});
+
+test("0177 ordering: an already-extracted filing enqueues immediately and keeps the classify consent gate", { skip: skip177 }, async () => {
+  const { owner, firm, client } = await buildFirm("fg177");
+  const document = await seedVerifiedDocument({ firm, uploadedBy: owner });
+  await rootQuery(
+    "insert into clara.document_filings(firm_id,document_id,client_id,filed_by,basis) values($1,$2,$3,$4,'legacy-0007')",
+    [firm, document, client, owner],
+  );
+  await seedExtraction({ firm, document, status: "done" });
+
+  const blocked = await asRuntime((c) => c.query("select clara.enqueue_invoice_facts($1) as r", [document]));
+  assert.equal(blocked.rows[0].r.status, "failed");
+  assert.equal(blocked.rows[0].r.reason, "document_processing_consent_inactive");
+
+  const consented = await seedVerifiedDocument({ firm, uploadedBy: owner });
+  await rootQuery(
+    "insert into clara.document_filings(firm_id,document_id,client_id,filed_by,basis) values($1,$2,$3,$4,'legacy-0007')",
+    [firm, consented, client, owner],
+  );
+  await seedExtraction({ firm, document: consented, status: "done" });
+  await ensureClassifyConsent(owner, { firm, client });
+  const immediate = await asRuntime((c) => c.query("select clara.enqueue_invoice_facts($1) as r", [consented]));
+  assert.equal(immediate.rows[0].r.status, "queued");
+  assert.equal((await factsTasks(consented, "classify")).length, 1);
+});
+
+test("0177 downstream: duplicate and out-of-order post-classification events admit exactly one facts task", { skip: skip177 }, async () => {
+  const { owner, firm, client } = await buildFirm("fg177");
+  await liveWitnessConsent(owner, { firm, client });
+  const document = await seedVerifiedDocument({ firm, uploadedBy: owner, client });
+  await seedExtraction({ firm, document, status: "done" });
+  await humanQuery(
+    owner,
+    "select clara.set_document_kind(p_document=>$1,p_kind=>'invoice',p_reason=>'focused 0177 downstream test',p_op_key=>$2)",
+    [document, opk("fg177kind")],
+  );
+
+  // set_document_kind has set the actual kind and emitted document.classified. Deliver the
+  // extraction-completed signal late, then deliver the classified event again.
+  await emitDocumentEvent(firm, document, owner, "document.extraction_completed");
+  await emitDocumentEvent(firm, document, owner, "document.classified");
+  await drainFactsGate(firm);
+
+  const downstream = await factsTasks(document, "llm_witness");
+  assert.equal(downstream.length, 1, "duplicate and out-of-order events converge on one downstream facts task");
+  assert.ok(["queued", "held_egress", "running"].includes(downstream[0].status));
+  assert.equal(await checkpointSeq(firm, FACTS_GATE_CONSUMER), await headSeq(firm));
+  assert.equal((await deadLettersForFirm(firm, FACTS_GATE_CONSUMER)).length, 0);
 });
 
 test("checkpoints are independent: the router pointer is untouched by a facts_gate run", { skip }, async () => {

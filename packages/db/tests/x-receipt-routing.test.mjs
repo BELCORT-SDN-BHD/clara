@@ -366,8 +366,14 @@ test("P4 TOCTOU order A: enqueue_invoice_facts holds the document lock FIRST —
   // FILING TIME (kind is null then), pre-seeding a classify task before the race even
   // starts. seedVerifiedDocument mints the document row directly, bypassing file_document
   // entirely, so this race's "a" call is the ONLY thing that can ever open a task here.
-  const { seedVerifiedDocument } = await import("./rig-docs-fixtures.mjs");
-  const doc = await seedVerifiedDocument({ firm: await firmOf(client), kind: null });
+  const { seedVerifiedDocument, seedExtraction, classifyGateWaitsForExtraction } = await import("./rig-docs-fixtures.mjs");
+  const firm = await firmOf(client);
+  const doc = await seedVerifiedDocument({ firm, kind: null });
+  // [#606 / 0177] the automatic core now waits for a SUCCESSFUL extraction before it opens the
+  // classify lane. Give the race that precondition up front (a done OCR row is not a task, so
+  // the "genuinely task-free" premise above is intact) — the property under test is which KIND
+  // snapshot the core routes on, not whether OCR has finished.
+  if (await classifyGateWaitsForExtraction()) await seedExtraction({ firm, document: doc.documentId, status: "done" });
 
   const out = await holdThenContend({
     a: {
@@ -405,8 +411,11 @@ test("P4 TOCTOU order B: set_document_kind holds the document lock FIRST — enq
   // See order A's comment: a genuinely task-free document (seedVerifiedDocument bypasses
   // file_document's own auto-enqueue), so a surviving classify task can only mean this
   // function routed on the stale pre-commit NULL snapshot.
-  const { seedVerifiedDocument } = await import("./rig-docs-fixtures.mjs");
+  const { seedVerifiedDocument, seedExtraction, classifyGateWaitsForExtraction } = await import("./rig-docs-fixtures.mjs");
   const doc = await seedVerifiedDocument({ firm, kind: null });
+  // [#606 / 0177] see order A: the core's classify arm needs a done extraction on the document
+  // before it can route at all; seed it so this order's "b" call exercises the kind snapshot.
+  if (await classifyGateWaitsForExtraction()) await seedExtraction({ firm, document: doc.documentId, status: "done" });
   // F-A1 PR-3 CUTOVER: post-commit this document routes to llm_witness, which is
   // consent-gated on the document's ACTIVE FILING(S) (0090 wall 6/§7e) — zero filings fails
   // closed regardless of any consent elsewhere ("no client exists who could have authorized

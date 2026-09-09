@@ -271,12 +271,13 @@ export async function upsertAccountClassed(sub, { client, code, name, type = "ex
 /** Seed a verified document and file it to a client (active filing + resolution
  *  ABOUT the document). Returns { documentId, filingId, sha256 }. The S5 proven
  *  chain (rig-docs-filings-provenance): seed → file_document w/ freshResolution. */
-export async function filedDocument(sub, { firm, client, kind = null, financialDate = null }) {
+export async function filedDocument(sub, { firm, client, kind = null, financialDate = null, seedGateExtraction = true }) {
   const seed = await seedVerifiedDocument({ firm, kind, financialDate });
   const filingId = await fileDocument(sub, {
     document: seed.documentId,
     client,
     resolution: await freshResolution(sub, client, { subjectKind: "document", subjectId: seed.documentId }),
+    seedGateExtraction,
   });
   return { documentId: seed.documentId, filingId, sha256: seed.sha256 };
 }
@@ -311,14 +312,19 @@ export async function mintInteractive(firm, onBehalfOf = null) {
 // different questions, and a fixture that wants only the first must not accidentally buy the
 // second.
 export async function seedCitedDocument(sub, { firm, client, quote = "RM 5,000.00", fieldPath = FIELD.total, kind = null, direction = null } = {}) {
-  const { seedExtraction, seedRegion } = await import("./rig-docs-fixtures.mjs");
+  const { seedExtraction, seedRegion, ensureClassifyGateExtraction } = await import("./rig-docs-fixtures.mjs");
   // A document whose DIRECTION the fixture wants stated is an invoice-kind document: 0016's
   // classify-first gate only lets the facts lane engage on a kind-stamped doc, and without a
   // facts task there is no facts extraction for the resolver to read. An explicit `kind` still
   // wins — this only supplies the one the direction evidence implies.
-  const doc = await filedDocument(sub, { firm, client, kind: kind ?? (direction ? "invoice" : null) });
+  const effectiveKind = kind ?? (direction ? "invoice" : null);
+  // [#606 / 0177] this fixture seeds its OWN done OCR row below, which IS the extraction the
+  // classify gate waits for — so file with the generic gate convenience off (no second row) and
+  // re-fire the gate once the real row exists, exactly as the facts_gate consumer would.
+  const doc = await filedDocument(sub, { firm, client, kind: effectiveKind, seedGateExtraction: false });
   const extractionId = await seedExtraction({ firm, document: doc.documentId, engineKind: "ocr", status: "done" });
   const regionId = await seedRegion({ firm, extraction: extractionId, fieldPath, textContent: quote, locator: { page: 1, polygon: [0, 0, 1, 1] } });
+  if (effectiveKind == null) await ensureClassifyGateExtraction({ firm, document: doc.documentId });
   if (direction) await seedPurchaseDirection(sub, { client, document: doc.documentId, quote, direction });
   return { ...doc, extractionId, regionId, quote };
 }

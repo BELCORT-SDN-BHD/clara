@@ -4,11 +4,13 @@
 // discovery/checkpoint/dead-letter primitives UNCHANGED.
 // Own name ('facts_gate'), own advisory lock (hashtext('facts_gate')), own (consumer,firm)
 // checkpoint, own dead-letter lane, own /ready WARN signal. Subscribes to
-// `document.classified` ONLY (every other type is a checkpoint-only advance).
+// `document.extraction_completed` and `document.classified` (every other type is a
+// checkpoint-only advance).
 //
-// WHY: a NULL-kind pdf/image is routed to the CLASSIFY lane first (never stranded); once the
-// classifier sets a kind (>=0.8) it emits `document.classified`. THIS consumer catches that
-// and RE-FIRES clara.enqueue_invoice_facts(document) — which, now that the kind is known,
+// WHY: a NULL-kind pdf/image waits until OCR/structured extraction succeeds. The extraction
+// completion event re-fires the enqueue and creates the classify task. Once the classifier
+// sets a kind (>=0.8) it emits `document.classified`; this consumer re-fires the same enqueue,
+// which, now that the kind is known,
 // routes an invoice/credit_note/debit_note to the invoice_facts lane (the DB owns the whole
 // gate: a payroll_summary yields skipped_kind, a low-confidence hold yields
 // classify_low_confidence, consent evidence is exempt). The 0016 header (L3376) is explicit:
@@ -35,8 +37,12 @@ import { isConnErr, waitForNudge } from "./listen.mjs";
 
 /** The facts-gate consumer name — its own checkpoint / dead-letter / lock key. */
 export const FACTS_GATE_CONSUMER = "facts_gate";
-/** The ONLY event type the consumer acts on; all others are checkpoint-only. */
+/** Kept for compatibility with existing callers that name the classified event directly. */
 export const FACTS_GATE_EVENT_TYPE = "document.classified";
+/** Events that can move a document through the classify -> facts gate. */
+const FACTS_GATE_EVENT_TYPES = Object.freeze(["document.extraction_completed", FACTS_GATE_EVENT_TYPE]);
+
+const isFactsGateEventType = (eventType) => FACTS_GATE_EVENT_TYPES.includes(eventType);
 
 const MAX_ATTEMPTS = Number(process.env.CLARA_FACTS_GATE_MAX_ATTEMPTS || 5);
 const POLL_INTERVAL_MS = Number(process.env.CLARA_FACTS_GATE_POLL_MS || 2000);
@@ -44,7 +50,7 @@ const RECONNECT_BASE_MS = 500;
 const RECONNECT_MAX_MS = 5000;
 
 /**
- * Re-fire the invoice-facts enqueue for ONE document.classified event — a PLAIN group-role
+ * Re-fire the invoice-facts enqueue for ONE extraction-completed or classified event — a PLAIN group-role
  * call (enqueue_invoice_facts takes ONLY p_document, no op_key: it is internally idempotent
  * on the document's task trail). MUST run inside an open transaction on a clara_runtime-role
  * connection. Returns the DB's jsonb receipt {document_id, status, task_id?}.
@@ -82,7 +88,7 @@ async function recordFactsGateDeadLetter(client, { eventId, reason }) {
 }
 
 async function readEvents(client, firmId, lastSeq, batchSize) {
-  // document.classified carries a document_id column; client_id is NULL on this event.
+  // Both target document events carry document_id; client_id is NULL.
   const r = await client.query(
     `select seq, id, event_type, document_id
        from clara.domain_events
@@ -108,7 +114,7 @@ async function checkpointOnly(client, { firmId, seq }) {
   }
 }
 
-/** The facts-gate effect for one document.classified event + its checkpoint, in ONE
+/** The facts-gate effect for one target document event + its checkpoint, in ONE
  *  transaction. A terminal-by-design receipt status is logged verbatim and STILL
  *  checkpointed; only a THROWN error rolls back + dead-letters. */
 async function runEffectTxn(client, { firmId, ev, deps }) {
@@ -131,7 +137,7 @@ async function runEffectTxn(client, { firmId, ev, deps }) {
   }
 }
 
-/** Walk one firm's events; re-fire the facts enqueue for each document.classified (own txn,
+/** Walk one firm's events; re-fire the facts enqueue for each target document event (own txn,
  *  so a poison blocks only itself), coalesce non-target events into one checkpoint advance. */
 async function processFactsGateFirm(client, { firmId, lastSeq, batchSize, deps }) {
   const log = deps.log ?? (() => {});
@@ -141,7 +147,7 @@ async function processFactsGateFirm(client, { firmId, lastSeq, batchSize, deps }
   let cursor = lastSeq;
   let effects = 0;
   for (const ev of evs) {
-    if (ev.eventType !== FACTS_GATE_EVENT_TYPE || !ev.documentId) continue; // checkpoint-only; coalesced below
+    if (!isFactsGateEventType(ev.eventType) || !ev.documentId) continue; // checkpoint-only; coalesced below
     const res = await runEffectTxn(client, { firmId, ev, deps });
     if (res.ok) {
       cursor = ev.seq;
@@ -212,7 +218,9 @@ export async function factsGateRedrive(client, eventId) {
     if (dl.rowCount === 0) throw new Error(`facts_gate redrive: no dead-letter for consumer='facts_gate' event=${eventId}`);
     const ev = await readEventById(client, eventId);
     if (!ev) throw new Error(`facts_gate redrive: event ${eventId} not found`);
-    if (ev.eventType !== FACTS_GATE_EVENT_TYPE) throw new Error(`facts_gate redrive: event ${eventId} is '${ev.eventType}', not ${FACTS_GATE_EVENT_TYPE}`);
+    if (!isFactsGateEventType(ev.eventType)) {
+      throw new Error(`facts_gate redrive: event ${eventId} is '${ev.eventType}', not one of ${FACTS_GATE_EVENT_TYPES.join(", ")}`);
+    }
     await applyFactsGateEffects(client, { documentId: ev.documentId });
     await client.query("update clara.relay_dead_letters set status = 'resolved', resolved_at = now() where consumer = $1 and event_id = $2", [
       FACTS_GATE_CONSUMER,

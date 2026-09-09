@@ -17,7 +17,7 @@ import {
   ROLES, rootQuery, roleQuery, humanQuery, opk, endPool, ensureReady,
 } from "./rig-helpers.mjs";
 import { buildWorld, freshResolution, createClient } from "./rig-fixtures.mjs";
-import { seedVerifiedDocument, fileDocument } from "./rig-docs-fixtures.mjs";
+import { seedVerifiedDocument, fileDocument, seedExtraction, classifyGateWaitsForExtraction } from "./rig-docs-fixtures.mjs";
 import { classifyDocument, setDocumentKind } from "./a21-helpers.mjs";
 
 let live = false;
@@ -143,6 +143,19 @@ async function prepareFirmNarrowDispatch({ firm, moment, sha, eventSeq = 1, even
 // ---------------------------------------------------------------------------
 
 async function enqueue(document) {
+  // [#606 / 0177] the core now answers `awaiting_extraction` for a NULL-kind pdf/image BEFORE
+  // it reaches the classify lane's consent gates. Every cell in this file drives the enqueue
+  // to read a CONSENT verdict, so give the document the successful extraction the gate waits
+  // for first (idempotent — never a second row once one exists; a no-op below 0177).
+  if (await classifyGateWaitsForExtraction()) {
+    const d = (await rootQuery("select firm_id, document_kind from clara.documents where id=$1", [document])).rows[0];
+    if (d && d.document_kind == null) {
+      const done = await rootQuery(
+        `select 1 from clara.document_extractions where document_id=$1 and status='done'
+            and engine_kind in ('ocr','structured_parse') limit 1`, [document]);
+      if (done.rowCount === 0) await seedExtraction({ firm: d.firm_id, document, status: "done" });
+    }
+  }
   const r = await rootQuery(
     "select clara._enqueue_invoice_facts_core(p_document => $1) as r", [document]);
   return r.rows[0].r;

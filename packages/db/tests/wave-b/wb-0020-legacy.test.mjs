@@ -270,6 +270,40 @@ function applyRestoreF_A7_Gamma(member, src) {
   return src;
 }
 
+// =========================================================================
+// AMENDMENT #606 / 0177 (Clara refresh, classify-after-extraction,
+// 0177_classify_after_extraction.sql, 2026-09-09). The SAME §6 member --
+// _enqueue_invoice_facts_core ("router") -- gains ONE more deliberately-changed layer, now
+// the OUTERMOST of all (authored latest): the NULL-kind classify arm first requires a DONE
+// ocr/structured_parse extraction on the document and otherwise returns the terminal-by-design
+// `awaiting_extraction` receipt (no task, no model call); document.extraction_completed re-fires
+// the enqueue through the runtime's facts_gate consumer. The edit sits INSIDE the classify
+// routing arm of the earlier mime-routing block, disjoint from every later consent-gate layer
+// (gamma's classify arm, F-A1's llm_witness arm) and from 0038's own spans. PURELY ADDITIVE:
+// the pair is TRANSCRIBED VERBATIM from 0177's own v_anchor / v_replacement splice literals
+// (the "from" side is the replacement, the "to" side the anchor), so reversing it restores
+// the exact pre-0177 text. Dormancy vs drift follows gamma's discipline: absent on a chain
+// below 0177 (a no-op), present exactly once on or after it, anything else is drift.
+const RESTORE_0177 = {
+"router": [
+[
+"    if d.document_kind is null then\n      if not exists (\n        select 1 from clara.document_extractions e\n         where e.document_id=p_document and e.firm_id=d.firm_id\n           and e.status='done' and e.engine_kind in ('ocr','structured_parse')\n      ) then\n        return jsonb_build_object('document_id',p_document,'status','awaiting_extraction');\n      end if;\n      v_lane:='classify'; v_engine:='clara-classify-llm:v1';",
+"    if d.document_kind is null then\n      v_lane:='classify'; v_engine:='clara-classify-llm:v1';",
+]
+]
+};
+function applyRestore0177(member, src) {
+  for (const [frm, to] of RESTORE_0177[member]) {
+    const n = src.split(frm).length - 1;
+    if (n === 0) continue;
+    if (n !== 1) {
+      throw new Error(`#606/0177 restore(${member}): the extraction-gate pair appears ${n} times -- the live body drifted from the ratified 0177 shape`);
+    }
+    src = src.replace(frm, to);
+  }
+  return src;
+}
+
 const RESTORE_0038 = {
 "claim": [
 [
@@ -464,9 +498,14 @@ const BYTE_IDENTICAL = {
     //   0. F-A7 GAMMA (newest of all) -- the new classify-lane consent-gate elsif arm, in the
     //      SAME outer if/elsif/end-if 0038 later reverses wholesale. Purely additive (empty
     //      "to" side), disjoint from layers 1-4's spans, reversed FIRST.
+    //  -1. #606 / 0177 (newest of all, 2026-09-09) -- the classify arm's successful-extraction
+    //      precondition (`awaiting_extraction`), inside the mime-routing block, disjoint from
+    //      every consent-gate layer. Purely additive, transcribed from the splice literals,
+    //      dormancy-safe, reversed FIRST.
     restore: (src) => applyRestore0038("router", applyRestoreFA1("router",
       applyRestoreFA1PR3("router", applyRestoreFA2Engine("router",
-        applyRestoreFA2Activation("router", applyRestoreF_A7_Gamma("router", src))))))
+        applyRestoreFA2Activation("router", applyRestoreF_A7_Gamma("router",
+          applyRestore0177("router", src)))))))
       .replace(
         "  d record; t record; v_task uuid; v_version int; v_attempts int; v_pages int;\n  v_lane text; v_engine text; v_task_status text;\n",
         "  d record; t record; v_task uuid; v_version int; v_attempts int; v_pages int;\n  v_lane text; v_engine text;\n",

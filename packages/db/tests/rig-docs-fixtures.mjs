@@ -288,19 +288,79 @@ export async function ensureFirmNarrowAttribution({ firm }) {
  *  EXACT closed-world count on client_egress_purpose_consents for a client that also happened
  *  to file an already-kinded document via this same helper). */
 export async function fileDocument(sub, {
-  document, client, resolution = null, opKey = null, grantClassifyConsent = true,
+  document, client, resolution = null, opKey = null, grantClassifyConsent = true, seedGateExtraction = true,
 }) {
   const { human } = await import("./rig-docs-helpers.mjs");
-  if (grantClassifyConsent) {
-    const docRow = await rootQuery("select firm_id, document_kind from clara.documents where id=$1", [document]);
-    const firm = docRow.rows[0]?.firm_id;
-    const kind = docRow.rows[0]?.document_kind;
-    if (firm && kind == null) await ensureClassifyConsent(sub, { firm, client });
-  }
+  const docRow = await rootQuery("select firm_id, document_kind from clara.documents where id=$1", [document]);
+  const firm = docRow.rows[0]?.firm_id;
+  const kind = docRow.rows[0]?.document_kind;
+  if (grantClassifyConsent && firm && kind == null) await ensureClassifyConsent(sub, { firm, client });
   const receipt = await callFnAdaptive("file_document", {
     document, client, resolution, op_key: opKey ?? opk("file"),
   }, { persona: human(sub), label: "file_document" });
-  return idOf(receipt, "filing_id", "filing");
+  const filingId = idOf(receipt, "filing_id", "filing");
+  // [#606 / 0177] file_document's own auto-enqueue now answers `awaiting_extraction` for a
+  // NULL-kind pdf/image until a successful extraction exists. Reproduce the pre-0177 fixture
+  // outcome (a queued classify task) the way production reaches it: seed the extraction the gate
+  // waits for, then re-fire the gate exactly as the facts_gate consumer does. Gated on the live
+  // frontier, kind-null only, opt out with `seedGateExtraction: false`.
+  if (seedGateExtraction && firm && kind == null) await ensureClassifyGateExtraction({ firm, document });
+  return filingId;
+}
+
+// ---------------------------------------------------------------------------
+// [#606 / 0177] classify-after-extraction convenience. Migration 0177 recut
+// _enqueue_invoice_facts_core so a NULL-kind pdf/image returns `awaiting_extraction` until a
+// done ocr/structured_parse extraction exists; the runtime's facts_gate consumer re-fires the
+// enqueue on document.extraction_completed. Pre-0177 fixtures relied on file_document's
+// auto-enqueue opening the classify task at filing time. These helpers keep that outcome
+// honest: the extraction the gate waits for is seeded (idempotent, never a second row when
+// one already exists) and the gate is re-fired through the SAME public verb the consumer
+// calls. Silent no-op below the 0177 frontier.
+// ---------------------------------------------------------------------------
+
+let _classifyGateWaits = null;
+/** Does the live automatic classify gate wait for a successful extraction (0177 applied)? */
+export async function classifyGateWaitsForExtraction() {
+  if (_classifyGateWaits !== null) return _classifyGateWaits;
+  const r = await rootQuery(
+    `select coalesce(position('awaiting_extraction' in p.prosrc) > 0, false) as gated
+       from pg_proc p where p.oid = to_regprocedure('clara._enqueue_invoice_facts_core(uuid)')`);
+  _classifyGateWaits = r.rows[0]?.gated === true;
+  return _classifyGateWaits;
+}
+
+/** The engine id of the gate-satisfying extraction row this rig seeds (distinct from every
+ *  real engine so a fixture's own later OCR row never collides on (document, engine, version)). */
+export const GATE_EXTRACTION_ENGINE_ID = "rig-0177:ocr-gate";
+
+/** Re-fire the automatic facts gate for one document as clara_runtime — the exact call the
+ *  facts_gate consumer makes on document.extraction_completed / document.classified. Returns
+ *  the DB's jsonb receipt ({document_id, status, task_id?}). */
+export async function refireFactsGate(document) {
+  const r = await roleQuery(ROLES.runtime, "select clara.enqueue_invoice_facts($1) as r", [document]);
+  return r.rows[0]?.r ?? null;
+}
+
+/** For a NULL-kind pdf/image document: make sure a done ocr/structured_parse extraction exists
+ *  (seeding the rig gate row only when none does) and re-fire the gate. Returns the enqueue
+ *  receipt, or null when nothing applied (below the frontier, kind already set, non-pdf/image). */
+export async function ensureClassifyGateExtraction({ firm, document }) {
+  if (!(await classifyGateWaitsForExtraction())) return null;
+  const doc = await rootQuery(
+    "select document_kind, mime_type from clara.documents where id=$1 and firm_id=$2", [document, firm]);
+  const row = doc.rows[0];
+  if (!row || row.document_kind != null) return null;
+  const mime = String(row.mime_type ?? "").toLowerCase();
+  if (!(mime === "application/pdf" || mime.startsWith("image/"))) return null;
+  const done = await rootQuery(
+    `select 1 from clara.document_extractions
+      where document_id=$1 and firm_id=$2 and status='done' and engine_kind in ('ocr','structured_parse') limit 1`,
+    [document, firm]);
+  if (done.rowCount === 0) {
+    await seedExtraction({ firm, document, engineId: GATE_EXTRACTION_ENGINE_ID, engineKind: "ocr", status: "done" });
+  }
+  return refireFactsGate(document);
 }
 
 /** retire_document_filing(filing_id, reason, expected_revision, op_key) — the S5-D3

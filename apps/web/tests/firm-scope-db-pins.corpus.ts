@@ -92,4 +92,12 @@ export const REVIEWED_DYNAMIC_SQL_BARRIERS = new Map<string, ReviewedDynamicSqlB
       sha256: "59c49ce96ef534f04958cbd831e5e6d0e02e4dca47b80385daf0d1c16cc99493",
     },
   ],
+  // #606 (2026-09-09): the classify-after-extraction gate is the same 0175 splice family.
+  [
+    "0177_classify_after_extraction.sql",
+    {
+      reason: "Reviewed pg_get_functiondef splice recuts ONE named function, clara._enqueue_invoice_facts_core(uuid), read by its exact oid and re-installed with one early `awaiting_extraction` return inserted at a single anchor; it returns jsonb and emits no view definition, so neither P4 scope view is reachable. Its prestate pins the pre-image body sha256 and owner, and its postcheck pins the post-image sha256, the unchanged ACL, SECURITY DEFINER and search_path.",
+      sha256: "2f33b837f22a331593f23a36972d7804268cfaa3a8b47483e36be433f7dece52",
+    },
+  ],
 ]);

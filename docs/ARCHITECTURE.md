@@ -201,8 +201,10 @@ SSE 传递解释和状态，不拥有执行。当前 stream 会在轮询时重�
 UBL XML 已有结构化路径，CSV／OFX 及其他格式的业务覆盖程度不同。
 已接受目标用能力目录明确每一层支持程度，并补齐范围内缺失 executor，不能用 placeholder 缩减产品承诺。
 原件版本、字段来源区域、duplicate／refile／supersede 关系必须保留，改来源后重新评估受影响工作。
-异步 gate 的迁移必须保持消费契约：本地 0177 候选要求先具备 extraction-completed 消费能力再切换 gate；
-回退先恢复相容数据库行为，再回退 consumer，避免完成事件被忽略并推进 checkpoint 后永久漏处理。
+异步 gate 的迁移必须保持消费契约：0177（成功提取后才进入 classify lane）要求先部署具备
+extraction-completed 消费能力的 facts_gate consumer 再切换 gate；回退先用新的 append-only 迁移恢复相容数据库行为，
+再回退 consumer，避免完成事件被忽略并推进 checkpoint 后永久漏处理。0177 已在本地 PG17 全链验证并合入 main；
+hosted 发布与真实上传旅程仍待 #606 记录。
 
 **Knowledge 目标：**一个受治理的服务和产品入口，下层保留 typed canonical facts、稳定身份、
 来源、声明、修订与依赖关系；wiki、搜索、索引和可读 OKF bundle 是可重建投影。
@@ -323,7 +325,7 @@ Web、runtime、DB frontier 和 renderer 分别记录发布身份；源代码通
 | Agent 与宿主 | 分散冻结流程，chatTurn v17；runtime image 仍 Node 20；Node 22 的隔离 build/typecheck 已有局部证据。 | Node 22 完整宿主对齐；首个 ToolLoopAgent successor 与显式版本 bundle；保留旧运行。 |
 | Work 与控制 | tasks、interruptions、回执、SSE、租约已有；版本答案、正确投递和取消排序仍有差距。 | 统一业务 Work，共享问题与稳定操作身份，真实重启／竞争下保持完整结果。 |
 | 会计能力 | JE、subledger、结算、资产、close 基础存在；入口能力及人工／agent 行为不一致。 | 全范围领域操作与必要关联影响；去掉普通入账额外仪式，保留实际权限与硬约束。 |
-| 文件 | baseline 可在提取完成前分类；本地 0177 与 extraction-aware consumer 是尚未完整验证／发布的候选。 | 成功提取后才运行依赖文本的分类，能力分层与 source／facts／operation 状态一致。 |
+| 文件 | 0177 与 extraction-aware facts_gate consumer 已合入 main 并在本地 PG17 全链验证：未知 kind 的 PDF／图片在成功提取前返回 awaiting_extraction；hosted 发布待记录。 | 能力分层与 source／facts／operation 状态一致；hosted 上传旅程验收。 |
 | Knowledge | facts、wiki 与 advisory pattern pack 分开；检索偏固定 priority／recency；部分 claim metadata 缺失，chat pack 错误会降为 null。 | 统一捕获、身份、版本、按需检索、纠正和投影；必需知识不可用时诚实暂停。 |
 | 自动计划与 close | 日常 reconciler／资产／调整机制已有；bank_agent／close_prep wake sources 默认关闭，生产／激活链路不完整。 | 显式授权计划到期产生 Work，普通自主执行含满足条件的 recon／close；技术开关不成为用户 opt-in。 |
 | 财务界面与输出 | 旧工作台和 card readers；sealed renderer 已有，sandbox worker、完整管理模板和交付验证仍不齐。 | 完整旅程、统一 metric pack、可靠 AI UI、可复现且可下载的报表。 |
