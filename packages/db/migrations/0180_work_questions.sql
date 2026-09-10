@@ -613,6 +613,51 @@ end $$;
 revoke all on function clara.open_work_question(uuid,text,jsonb,jsonb,text,jsonb) from public;
 grant execute on function clara.open_work_question(uuid,text,jsonb,jsonb,text,jsonb) to clara_runtime;
 
+-- -------------------------------------------------------------------------------------
+-- clara.work_authority_snapshot — WHAT IS STILL TRUE ABOUT THIS WORK, ASKED BY THE RUN.
+--
+-- #629's "role loss blocks continuation": a Work that parked on a question may be resumed HOURS
+-- later, and the human who initiated it may by then have been demoted, deactivated, or had their
+-- client archived. `claraWork_v2` re-reads this snapshot the moment a resume lands and settles
+-- `refused` / `authority_lost` when it no longer holds — BEFORE it feeds the answer to the model
+-- and long before the commit-time recheck inside `clara._record_journal_entry_core` (0178) would
+-- catch it. Both belts stay: this one refuses honestly and early, that one refuses structurally
+-- and last.
+--
+-- WHY A DOOR AND NOT A QUERY. MEASURED, not stylistic: `clara_runtime` holds NO select on
+-- `clara.firm_memberships` and NO execute on `clara.role_rank(text)` (probed on a database built
+-- purely from migrations). A run cannot ask "is this human still a bookkeeper" from its own role
+-- at all, and widening the runtime's grants to let it would open the whole membership table to
+-- the lane that executes model output. One definer read, granted to one role, answers the exact
+-- question and nothing else.
+--
+-- IT IS A READ. No DML, no audit row, no notify — a snapshot that changed something would not be
+-- a snapshot.
+-- -------------------------------------------------------------------------------------
+create function clara.work_authority_snapshot(p_task uuid) returns jsonb
+  language sql stable security definer set search_path = clara, pg_temp as $$
+  select jsonb_build_object(
+    'task_id', t.id,
+    'task_status', t.status,
+    'work_id', w.id,
+    'work_status', w.status,
+    'client_id', w.client_id,
+    'client_status', cl.status,
+    'basis_digest', w.basis_digest,
+    'initiator', w.initiator,
+    'initiator_role', m.role,
+    'initiator_active', (m.status = 'active'),
+    'initiator_authorised',
+      coalesce(m.status = 'active' and clara.role_rank(m.role) >= clara.role_rank('bookkeeper'), false))
+  from clara.agent_tasks t
+  join clara.accounting_work w on w.id = t.work_id
+  join clara.clients cl on cl.id = w.client_id
+  left join clara.firm_memberships m on m.firm_id = w.firm_id and m.user_id = w.initiator
+  where t.id = p_task and t.kind = 'accounting_work';
+$$;
+revoke all on function clara.work_authority_snapshot(uuid) from public;
+grant execute on function clara.work_authority_snapshot(uuid) to clara_runtime;
+
 -- =====================================================================================
 -- §E  THE HUMAN LANE — clara.answer_work_question, THE FIRST-ANSWER GATE.
 --
@@ -1053,6 +1098,7 @@ begin
     'clara.get_work_question(uuid)',
     'clara.get_work_pending_question(uuid)',
     'clara.expire_due_interruptions(integer,uuid)',
+    'clara.work_authority_snapshot(uuid)',
     'clara._assert_work_question_fields(jsonb)',
     'clara._assert_work_answer(jsonb,jsonb,uuid)',
     'clara._work_question_record(uuid)',
@@ -1067,8 +1113,9 @@ begin
   select count(*) into v_n from information_schema.role_routine_grants g
    where g.routine_schema = 'clara' and g.grantee = 'PUBLIC'
      and g.routine_name in ('open_work_question','answer_work_question','get_work_question',
-       'get_work_pending_question','expire_due_interruptions','_assert_work_question_fields',
-       '_assert_work_answer','_work_question_record','_tf_work_question_immutable');
+       'get_work_pending_question','expire_due_interruptions','work_authority_snapshot',
+       '_assert_work_question_fields','_assert_work_answer','_work_question_record',
+       '_tf_work_question_immutable');
   if v_n <> 0 then
     raise exception '#629 tail: PUBLIC holds EXECUTE on % of this migration''s functions', v_n
       using errcode='CLR10';
@@ -1088,6 +1135,7 @@ begin
   for n, v_grantee in select * from (values
       ('open_work_question','clara_runtime'),
       ('expire_due_interruptions','clara_runtime'),
+      ('work_authority_snapshot','clara_runtime'),
       ('answer_work_question','clara_authenticated'),
       ('get_work_question','clara_authenticated'),
       ('get_work_pending_question','clara_authenticated')) as t(fn, grantee) loop
@@ -1100,7 +1148,7 @@ begin
   select count(*) into v_n from information_schema.role_routine_grants g
    where g.routine_schema = 'clara' and g.grantee like 'clara_wake%'
      and g.routine_name in ('open_work_question','answer_work_question','get_work_question',
-       'get_work_pending_question','expire_due_interruptions');
+       'get_work_pending_question','expire_due_interruptions','work_authority_snapshot');
   if v_n <> 0 then
     raise exception '#629 tail: a wake role holds EXECUTE on one of this migration''s doors' using errcode='CLR10';
   end if;

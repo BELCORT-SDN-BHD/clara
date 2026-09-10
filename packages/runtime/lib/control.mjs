@@ -502,7 +502,20 @@ export async function runControlCycle(client, deps) {
   const e = await expirePastDueInterruptions(client, deps);
   const d = await deliverInterruptions(client, deps);
   const c = await processCancellations(client, deps);
-  return { ...e, ...d, ...c };
+  // Built field by field rather than spread: the parts-parity census refuses an unclassifiable
+  // object spread anywhere under packages/runtime (claraWork.v1.tools.ts states the same rule at
+  // its own read-failure payload), and a third arm made this one unclassifiable.
+  return {
+    expired: e.expired ?? 0,
+    leased: d.leased,
+    delivered: d.delivered,
+    leaseLost: d.leaseLost,
+    hookMissing: d.hookMissing,
+    leaseRenewals: d.leaseRenewals,
+    attemptAbandoned: d.attemptAbandoned,
+    settled: c.settled,
+    settleFailed: c.settleFailed,
+  };
 }
 
 // ---------------------------------------------------------------------------

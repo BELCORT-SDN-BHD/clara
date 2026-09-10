@@ -34,6 +34,11 @@ const DEFAULT_DECLARERS = [
   DEFAULT_DECLARER,
   "packages/runtime/workflows/chatTurn.v18.parts.ts",
   "packages/runtime/workflows/claraWork.v1.parts.ts",
+  // #629: claraWork_v2 declares ONE new kind (`work_question`) and re-exports v1's two BY IMPORT
+  // rather than re-declaring them, so this file adds exactly one discriminant to the merged map —
+  // `declaredPartShapesAcross` refuses a discriminant declared in two files, and a re-declaration
+  // would have tripped it.
+  "packages/runtime/workflows/claraWork.v2.parts.ts",
 ];
 const DEFAULT_READER = "apps/web/lib/parts/types.ts";
 const DEFAULT_RUNTIME_ROOT = "packages/runtime";

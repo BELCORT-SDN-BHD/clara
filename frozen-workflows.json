@@ -966,6 +966,30 @@
       "note": "#623 — part of the claraWork_v1 closure (the first persistent Clara successor, the Work run); registry.ts adds claraWork: here as a NEW class, never a repoint. DEPLOY ORDER: migration 0178 must be live BEFORE any accounting_work task can be minted. NOT deploy-locked yet — the ceremony stamps `deployed: true` after the image is live.",
       "deployed": true
     },
+    "packages/runtime/workflows/claraWork.v2.bundle.ts": {
+      "sha256": "4bacd90e9e38a95e5940b47c706e27bd71413027021eb103d07f9ff31d02a91e",
+      "note": ""
+    },
+    "packages/runtime/workflows/claraWork.v2.impl.ts": {
+      "sha256": "3eeb33d47b8d9c7740e0c36b41b4b0d08ab57dae5e69bf170be707d1dba914ba",
+      "note": ""
+    },
+    "packages/runtime/workflows/claraWork.v2.parts.ts": {
+      "sha256": "4694ae043e8bb422ac4941993630f457fdc1beeba8d438918d3f4b4b6df11e41",
+      "note": ""
+    },
+    "packages/runtime/workflows/claraWork.v2.prompt.ts": {
+      "sha256": "fabd1d1bc8fadf0d1c64bbf8a56e96469bfc8a023a89523e5327ae33d7f8ccb4",
+      "note": ""
+    },
+    "packages/runtime/workflows/claraWork.v2.tools.ts": {
+      "sha256": "0804c1dc51656927661c7a247baa702b056d77aad10fd752f970dbb946bbca4e",
+      "note": ""
+    },
+    "packages/runtime/workflows/claraWork.v2.ts": {
+      "sha256": "4909e1c37bba304a43fdc9a4d5aa2209f022ceb121da0a02e0086234827ad59f",
+      "note": ""
+    },
     "packages/runtime/workflows/clientOnboarding.v1.ts": {
       "sha256": "e0c03498363833b0585904af1f41b77677efb2c81cad107e979623e7d95baa39",
       "note": "",

@@ -26,6 +26,7 @@ import { chatTurn_v16 } from "./chatTurn.v16.js";
 import { chatTurn_v17 } from "./chatTurn.v17.js";
 import { chatTurn_v18 } from "./chatTurn.v18.js";
 import { claraWork_v1 } from "./claraWork.v1.js";
+import { claraWork_v2 } from "./claraWork.v2.js";
 import { documentIngest_v1 } from "./documentIngest.v1.js";
 import { documentIngest_v2 } from "./documentIngest.v2.js";
 import { invoiceFacts_v1 } from "./invoiceFacts.v1.js";
@@ -117,7 +118,32 @@ export const workflows = {
   // is what the freeze-lint enqueue-provenance check requires. Nothing mints an
   // `accounting_work` task before 0178 widens the kind CHECK, so this key is inert against a
   // pre-0178 database rather than dangerous.
-  claraWork: claraWork_v1,
+  //
+  // #629 (SHARED WORK QUESTIONS): REPOINTED v1 -> v2. v2 adds exactly ONE wire kind
+  // (`work_question`) and changes exactly ONE tool's input schema (`ask_question` gains a REASON
+  // and one to six TYPED FIELDS); the recording tool, the chart read, the budgets and every
+  // accounting boundary are v1's, reached by import. v1 stays frozen, built and EXPORTED below.
+  //
+  // THE DEPLOY ORDER IS OWED IN ONE DIRECTION AND IT IS NOT OPTIONAL: MIGRATION 0180 MUST BE LIVE
+  // BEFORE THIS IMAGE RUNS ANY WORK. `claraWork_v2` calls `clara.open_work_question` and
+  // `clara.work_authority_snapshot`, neither of which exists before 0180; against a pre-0180
+  // database the park raises `undefined_function` (42883), which the classifier reads as an
+  // invariant and the run settles `failed` with nothing posted. CONTAINED, not corrupting — but it
+  // makes Clara refuse the thing it offered to do, so deploy 0180 first. The REVERSE order is
+  // free: 0180 against a v1 image adds columns and verbs that nothing calls, and v1's own
+  // `clara.open_interruption` park is untouched by it.
+  //
+  // THE READER PARITY HOLD APPLIES, exactly as it did for chatTurn v16 and v18: apps/web must
+  // declare `work_question` before this image can merge — the CI `build` job runs
+  // `check-parts-parity.mjs` and refuses while the reader trails the declarer.
+  //
+  // ROLLBACK TO v1 IS THE STANDING PARKED-RUN PREFLIGHT AND THEN A REPOINT. A v1 image cannot
+  // consume a v2 hook payload's extra fields — it ignores them, which is safe — but it also cannot
+  // OPEN a work question, so a rolled-back image parks new Work on a bare clarify that the new web
+  // surfaces will not offer a form for. Work already parked on a v2 question stays answerable
+  // (the door and the read doors are the database's, not the image's) and its run resumes under
+  // whichever image is live. That is the honest runbook line, not "rollback is free".
+  claraWork: claraWork_v2,
   documentIngest: documentIngest_v2,
   invoiceFacts: invoiceFacts_v1,
   // F-A2 WINDOW B (the statement ACTIVATION): REPOINTED. PR-4 shipped statementFacts_v2 built,
@@ -680,6 +706,12 @@ export { chatTurn_v17 };
 // target and the body any run parked at cutover resumes into — and the pinned v18 body is
 // exported too so the rollback preflight can use the same uniform census for every version.
 export { chatTurn_v18 };
+// #629 repointed `claraWork:` v1 -> v2. v1 remains exported by policy (c) — it is the rollback
+// target and the body any Work parked on a v1 clarify hook resumes into at cutover — and the
+// pinned v2 body is exported too so the rollback preflight can use the same uniform census for
+// every version.
+export { claraWork_v1 };
+export { claraWork_v2 };
 export { documentIngest_v1 };
 export { autoDraft_v1 };
 export { autoDraft_v2 };
