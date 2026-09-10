@@ -22,10 +22,13 @@ import { SectionHeader } from "@/components/common/section-header";
 import { NotBuiltNote } from "@/components/common/not-built-note";
 import type { AsyncReadState } from "@/lib/firm/use-async-read";
 import type { ClientSstWatch } from "@/lib/tax/sst-watch";
+import { CAPABILITY_BOUNDARY_ANCHOR } from "./CapabilityBoundarySection";
 import { SstWatchSection } from "./SstWatchSection";
+import { TaxStatusRegion } from "./tax-status";
 
 export function SstPanel({ watch }: { watch: AsyncReadState<ClientSstWatch> }) {
   const t = useTranslations("ClientTax.sst");
+  const tb = useTranslations("ClientTax.boundary");
   return (
     <Card>
       <CardHeader>
@@ -34,7 +37,22 @@ export function SstPanel({ watch }: { watch: AsyncReadState<ClientSstWatch> }) {
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
         <SstWatchSection watch={watch} />
-        <NotBuiltNote className="text-xs">{t("notBuilt")}</NotBuiltNote>
+        {/* "Not enabled" — no read is ever attempted for SST registration/return state,
+            because no such object exists in the catalog (this ticket's own inventory).
+            role="status" (TaxStatusRegion) so it announces distinctly from the read
+            states above it, and the one link every unsupported operation on this page
+            uses to reach the single capability-boundary section (#627 AC(d)). */}
+        <TaxStatusRegion>
+          <NotBuiltNote className="text-xs">
+            {t("notBuilt")}{" "}
+            <a
+              href={`#${CAPABILITY_BOUNDARY_ANCHOR}`}
+              className="font-medium text-foreground underline underline-offset-2 transition-colors hover:text-primary"
+            >
+              {tb("linkText")}
+            </a>
+          </NotBuiltNote>
+        </TaxStatusRegion>
       </CardContent>
     </Card>
   );

@@ -51,6 +51,10 @@ import { handleHomeBoardSupabase } from "./home-board-mock.mjs";
 // below rather than answered from a second one. Its runtime half owns `/api/work/*` and
 // one control path; see that module's header for what the walk does and does not prove.
 import { JOURNAL_WORK_SESSIONS, handleJournalWorkRuntime, handleJournalWorkSupabase } from "./journal-work-mock.mjs";
+// #627's own lane (the D4 tax-boundary walk). ID-scoped like its siblings — five client ids,
+// one per five/six-state read outcome — hooked in ONE place below, before `handleL7Supabase`
+// (see that hook's own note for why order matters here).
+import { handleD4Supabase } from "./tax-boundary-mock.mjs";
 
 const e2eRoot = dirname(fileURLToPath(import.meta.url));
 const webRoot = resolve(e2eRoot, "..");
@@ -260,6 +264,39 @@ async function readJson(request) {
 async function handleSupabase(request, response, url) {
   const path = url.pathname.slice(supabasePrefix.length);
   console.log(`[e2e-mock] ${request.method} ${path}`);
+
+  // #627's OWN FIX for a hazard the L7 hook's header already named for a different verb,
+  // now hit by a SECOND lane on `list_review_queue`: `journals-table-mock.mjs`'s own handler
+  // for this verb reads the POST body via `readJson(request)` UNCONDITIONALLY (before it
+  // knows whether this call is even its own client), then falls through with `return false`
+  // when the client does not match — but Node's request stream can only be drained ONCE,
+  // so `tax-boundary-mock.mjs`'s own `readJson(request)` call after it (same verb, different
+  // client ids) silently saw `{}`, every one of its five branches missed, and every D4 client
+  // fell through to the generic empty-envelope default regardless of which state it asked
+  // for. Neither lane mock did anything wrong in isolation; two independent readers of ONE
+  // request stream is the actual defect, and the fix belongs here; where the dispatcher
+  // already owns the request, rather than teaching every current and future
+  // `list_review_queue` consumer to coordinate with each other.
+  //
+  // The fix: drain the body exactly ONCE, right here, before ANY lane hook runs, then
+  // re-install the stream's own async-iteration protocol so every later `for await (const
+  // chunk of request)` — every lane mock's own `readJson`, unchanged — sees the SAME bytes
+  // again, as many times as asked, in whatever order the hooks below call it.
+  if (request.method === "POST" && path === "/rest/v1/rpc/list_review_queue") {
+    const chunks = [];
+    for await (const chunk of request) chunks.push(chunk);
+    const rawBody = Buffer.concat(chunks);
+    request[Symbol.asyncIterator] = () => {
+      let delivered = false;
+      return {
+        async next() {
+          if (delivered) return { value: undefined, done: true };
+          delivered = true;
+          return { value: rawBody, done: false };
+        },
+      };
+    };
+  }
   if (request.method === "OPTIONS") {
     response.writeHead(204, {
       "access-control-allow-origin": appOrigin,
@@ -464,6 +501,13 @@ async function handleSupabase(request, response, url) {
   // consume-then-fall-through in L7's module is reported separately — it still
   // starves whatever lane is added after it.
   if (await handleDocumentsViewerSupabase(request, response, path, url, sendJson, cors)) return;
+  // #627's D4 lane. SAFE to run before L7's hook for the same reason the documents lane is:
+  // its ONE rpc verb (`list_review_queue`) reads the request body only INSIDE that verb's own
+  // match, never unconditionally on every `/rest/v1/rpc/` POST — so it never drains a stream a
+  // later lane still needs. Placed before `handleL7Supabase` on purpose (that lane's own note
+  // above: it consumes the body on every RPC POST before checking the verb, which would starve
+  // this lane's `list_review_queue` reads of theirs if this ran after it).
+  if (await handleD4Supabase(request, response, path, url, sendJson, cors)) return;
   if (await handleL7Supabase(request, response, path, url, sendJson, cors)) return;
   // LAST among the lane hooks, and still BEFORE the generic fixtures — see home-board-mock.mjs's
   // header. It has to precede the generic `/rest/v1/clients` branch below to serve its ONE

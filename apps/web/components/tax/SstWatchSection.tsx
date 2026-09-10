@@ -30,13 +30,15 @@ import { useTranslations } from "next-intl";
 
 import { Badge } from "@/components/parts/PartBadge";
 import { SectionHeader } from "@/components/common/section-header";
-import { StateBanner } from "@/components/common/state";
+import { EmptyState, LoadingState, StateBanner } from "@/components/common/state";
 import { ComplianceWatchAffordance } from "@/components/firm/compliance-watch-affordance";
-import { DataState } from "@/components/firm/data-state";
+import { ErrorMessage } from "@/components/firm/data-state";
 import { businessDate } from "@/lib/business-date";
 import type { AsyncReadState } from "@/lib/firm/use-async-read";
+import { classifyTaxReadOutcome } from "@/lib/tax/read-state";
 import { fmtCents } from "@/lib/registers/money";
 import type { ClientSstWatch } from "@/lib/tax/sst-watch";
+import { TaxStatusRegion } from "./tax-status";
 
 /** The five values `clara.compliance_watches.state` admits today. A value outside them renders
  *  as its own raw text — the house's checked-lookup discipline, never a next-intl key path and
@@ -49,19 +51,31 @@ export function SstWatchSection({ watch }: { watch: AsyncReadState<ClientSstWatc
 
   const data = watch.data;
   const rows = data?.watches ?? [];
+  // #627: replaces the shared <DataState> wrapper with the SAME branching, precedence and
+  // copy it already used (error, then loading, then empty, then the real rows) — the ONE
+  // difference is the empty branch now carries role="status" (TaxStatusRegion), which
+  // DataState's own EmptyState call cannot, since that shared component is out of this
+  // ticket's scope (components/tax/*, lib/tax/* only — AGENTS.md). `classifyTaxReadOutcome`
+  // is the single source of that precedence, unit-pinned in tax-boundary-states.test.tsx.
+  const outcome = classifyTaxReadOutcome({ loading: watch.loading, error: watch.error, isEmpty: rows.length === 0 });
 
   return (
     <section aria-labelledby="client-tax-sst-watch" className="flex flex-col gap-3">
       <SectionHeader level={3}>
         <span id="client-tax-sst-watch">{t("heading")}</span>
       </SectionHeader>
+      {/* The source line — AC(a)'s "listed with its source": the same figures below, named
+          honestly once rather than re-stated on every row. */}
+      <p className="text-xs text-muted-foreground">{t("source")}</p>
       {data?.staleEvaluator ? <StateBanner tone="warning">{t("stale")}</StateBanner> : null}
-      <DataState
-        loading={watch.loading}
-        error={watch.error}
-        isEmpty={rows.length === 0}
-        emptyMessage={t("empty")}
-      >
+      {outcome === "loading" ? <LoadingState>{tc("loading")}</LoadingState> : null}
+      {outcome === "denied" || outcome === "error" ? <ErrorMessage error={watch.error} /> : null}
+      {outcome === "empty" ? (
+        <TaxStatusRegion>
+          <EmptyState>{t("empty")}</EmptyState>
+        </TaxStatusRegion>
+      ) : null}
+      {outcome === "ok" ? (
         <div className="enter-content flex flex-col gap-3">
           {rows.map((row) => (
             <div
@@ -107,7 +121,7 @@ export function SstWatchSection({ watch }: { watch: AsyncReadState<ClientSstWatc
             <p className="text-xs text-muted-foreground">{t("noOpenWatchRow")}</p>
           )}
         </div>
-      </DataState>
+      ) : null}
     </section>
   );
 }

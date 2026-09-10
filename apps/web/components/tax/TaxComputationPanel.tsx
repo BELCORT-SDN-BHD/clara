@@ -23,9 +23,12 @@ import { useTranslations } from "next-intl";
 import { Card, CardContent, CardDescription, CardHeader } from "@/components/ui/card";
 import { SectionHeader } from "@/components/common/section-header";
 import { NotBuiltNote } from "@/components/common/not-built-note";
+import { CAPABILITY_BOUNDARY_ANCHOR } from "./CapabilityBoundarySection";
+import { TaxStatusRegion } from "./tax-status";
 
 export function TaxComputationPanel() {
   const t = useTranslations("ClientTax.computation");
+  const tb = useTranslations("ClientTax.boundary");
   return (
     <Card>
       <CardHeader>
@@ -33,7 +36,23 @@ export function TaxComputationPanel() {
         <CardDescription className="text-xs">{t("subheading")}</CardDescription>
       </CardHeader>
       <CardContent>
-        <NotBuiltNote className="text-xs">{t("notBuilt")}</NotBuiltNote>
+        {/* "Not enabled" — no computation object, no CP204 object, no Form C object and no
+            evaluator door exist in the catalog (this ticket's own inventory: migration 0152
+            seeded platform law tables only, with "no clara_authenticated grant... PR-1
+            builds NO door at all"). role="status" so it announces distinctly, and links to
+            the ONE capability-boundary section every unsupported operation on this page
+            uses (#627 AC(d)) rather than writing its own explanation. */}
+        <TaxStatusRegion>
+          <NotBuiltNote className="text-xs">
+            {t("notBuilt")}{" "}
+            <a
+              href={`#${CAPABILITY_BOUNDARY_ANCHOR}`}
+              className="font-medium text-foreground underline underline-offset-2 transition-colors hover:text-primary"
+            >
+              {tb("linkText")}
+            </a>
+          </NotBuiltNote>
+        </TaxStatusRegion>
       </CardContent>
     </Card>
   );

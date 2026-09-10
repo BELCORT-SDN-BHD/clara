@@ -29,6 +29,15 @@
 // (the figures) and the queue row that carries `watch_id` (the acts). The classification
 // control's governed write rides THIS read's `act()`, so every act re-reads — see that panel's
 // own note on why the watch, and not the chart, is the thing re-read.
+//
+// #627 (present the real tax reads and the honest not-enabled capability boundary) adds ONE
+// thing on top: a single, explicit capability-boundary section every "not enabled" note deep-
+// links to, plus screen-reader status labels distinguishing the read's five states (not
+// enabled, successful no data, stale effective-dated source, denied read, technical failure).
+// It activates NO beta Tax scope, filing or new tax calculation, and its own commit adds no
+// migration — see this route's own STEP-1 inventory in `page.tsx`'s header comment for the
+// full table of every tax-related read/operation this build measured against
+// `packages/db/migrations` before applying the boundary.
 
 import { useTranslations } from "next-intl";
 
@@ -38,6 +47,7 @@ import { useFirmScope } from "@/components/firm-scope-provider";
 import { useAsyncRead } from "@/lib/firm/use-async-read";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
 import { loadClientSstWatch, type ClientSstWatch } from "@/lib/tax/sst-watch";
+import { CapabilityBoundarySection } from "./CapabilityBoundarySection";
 import { SstPanel } from "./SstPanel";
 import { TaxComputationPanel } from "./TaxComputationPanel";
 import { TurnoverClassificationPanel } from "./TurnoverClassificationPanel";
@@ -77,6 +87,10 @@ export function TaxWorkbenchPage({ clientId }: { clientId: string }) {
           act={watch.act}
         />
       ) : null}
+      {/* #627 — the ONE capability-boundary destination every "not enabled" note above
+          deep-links to. Rendered unconditionally: it names what is enabled (the watch
+          above, its three acts, turnover classification) as plainly as what is not. */}
+      <CapabilityBoundarySection />
     </PageShell>
   );
 }

@@ -56,6 +56,7 @@ const LANE_MOCKS = [
   "home-board-mock.mjs",
   "journal-work-mock.mjs",
   "journals-table-mock.mjs",
+  "tax-boundary-mock.mjs",
 ] as const;
 
 /**
@@ -272,6 +273,10 @@ const LANE_DECLARATIONS: Record<string, { unscopeable: string[]; debt: string[] 
   // right shape here rather than a debt to repay. A green on this row means "the one shape the
   // reader can see is clean", not "this file is clean".
   "home-board-mock.mjs": { unscopeable: [], debt: [] },
+  // #627's D4 lane. Every handler names its own client (five distinct ids, one per state)
+  // before it answers, and falls through otherwise — same shape as documents-viewer-mock.mjs
+  // above, which is the state a lane mock should be in.
+  "tax-boundary-mock.mjs": { unscopeable: [], debt: [] },
 };
 
 test("N5 · every lane handler either scopes by the request's own subject, or is a NAMED exception", () => {

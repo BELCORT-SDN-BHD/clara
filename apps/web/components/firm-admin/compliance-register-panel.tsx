@@ -10,21 +10,30 @@
 // row itself (components/firm/compliance-watch-affordance.tsx) — this panel
 // is a pure, honest READ, no second write surface for the same doors.
 //
-// Error rendering follows components/reports/ExportRecipientsPanel.tsx's own
-// pattern: useHydratedPart flattens a failure to `err`(string)/`clr` — that is
-// NOT the raw error instance components/firm/data-state.tsx's ErrorMessage
-// classifies via `instanceof`, so this panel renders the flattened pair
-// directly rather than re-wrapping it through that component.
+// #627 REBUILD: moved off `lib/parts/hooks.ts`'s `useHydratedPart`, whose
+// `applyFailure` flattens every failure to a bare `err`(string)/`clr` pair —
+// losing the `WireErrorKind` a caller needs to tell "your account can't read
+// this yet" (403 forbidden) apart from "the read genuinely failed"
+// (5xx/transport/malformed). `lib/firm/use-async-read.ts` keeps the RAW
+// thrown error, so the same `classifyTaxReadOutcome` + `ErrorMessage` pairing
+// this ticket's client Tax tab uses now applies here too — one five-state
+// read model for both surfaces this ticket owns (client Tax, firm compliance
+// settings), never two independently-drifting ones. The per-row card/`<dl>`
+// layout is UNCHANGED: at 320px it already reads without any horizontal
+// scroll (no genuinely two-dimensional table exists here to need the
+// labelled-viewport treatment `components/ui/table.tsx` provides elsewhere).
 
 import { useMemo } from "react";
 import { useTranslations } from "next-intl";
 
 import { Badge } from "@/components/ui/badge";
 import { EmptyState, LoadingState, StateBanner } from "@/components/common/state";
-import { useHydratedPart } from "@/lib/parts/hooks";
+import { ErrorMessage } from "@/components/firm/data-state";
+import { useAsyncRead } from "@/lib/firm/use-async-read";
 import { loadComplianceRegister, type ComplianceClientWatch, type ComplianceWatchState } from "@/lib/firm-admin/compliance";
 import { loadClientRegister, type ClientRow } from "@/lib/firm/reads";
 import { fmtCents } from "@/lib/firm-admin/money";
+import { classifyTaxReadOutcome } from "@/lib/tax/read-state";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
 
 const STATE_VARIANT: Record<string, "outline" | "default" | "destructive" | "secondary"> = {
@@ -49,14 +58,27 @@ type KnownFutureMethodStatus = (typeof KNOWN_FUTURE_METHOD_STATUSES)[number];
 export function ComplianceRegisterPanel() {
   const t = useTranslations("FirmAdminCompliance.compliance");
 
-  const clientsState = useHydratedPart(sessionTokenAccessor, (session) => loadClientRegister(session));
-  const { data: register, err, clr } = useHydratedPart(sessionTokenAccessor, (session) => loadComplianceRegister(session));
+  const clientsState = useAsyncRead(() => loadClientRegister(sessionTokenAccessor));
+  const registerState = useAsyncRead(() => loadComplianceRegister(sessionTokenAccessor));
+  const register = registerState.data;
+  const rows = register?.clients ?? [];
+  const outcome = classifyTaxReadOutcome({
+    loading: registerState.loading,
+    error: registerState.error,
+    isEmpty: rows.length === 0,
+  });
 
   const clientsById = useMemo(() => {
     const map = new Map<string, ClientRow>();
     for (const c of clientsState.data ?? []) map.set(c.id, c);
     return map;
   }, [clientsState.data]);
+
+  const clientsErrorMessage = clientsState.error
+    ? clientsState.error instanceof Error
+      ? clientsState.error.message
+      : String(clientsState.error)
+    : null;
 
   return (
     <div className="flex flex-col gap-3">
@@ -69,38 +91,29 @@ export function ComplianceRegisterPanel() {
           register still rendered RM figures with no disclosure that the
           client column had fallen back to raw UUIDs. Review law 2: absence
           is not evidence, so a degraded read must say so. */}
-      {clientsState.err ? (
-        <StateBanner tone="warning" code={clientsState.clr ? `${clientsState.clr.code}${clientsState.clr.reason ? ` · ${clientsState.clr.reason}` : ""}` : undefined}>
-          {t("clientNamesUnavailable")} ({clientsState.err})
+      {clientsErrorMessage ? (
+        <StateBanner tone="warning">
+          {t("clientNamesUnavailable")} ({clientsErrorMessage})
         </StateBanner>
       ) : null}
-      {!register ? (
-        err ? (
-          <StateBanner tone="error" code={clr ? `${clr.code}${clr.reason ? ` · ${clr.reason}` : ""}` : undefined}>
-            {err}
-          </StateBanner>
-        ) : (
-          <LoadingState>{t("loading")}</LoadingState>
-        )
-      ) : register.clients.length === 0 ? (
-        <EmptyState>{t("empty")}</EmptyState>
-      ) : (
-        <>
-          {err ? (
-            // The list is still real (a fresh reload after this failed) —
-            // the failure renders ALONGSIDE it, never replacing it
-            // (ExportRecipientsPanel.tsx's own "Low 8" precedent).
-            <StateBanner tone="error" code={clr ? `${clr.code}${clr.reason ? ` · ${clr.reason}` : ""}` : undefined}>
-              {err}
-            </StateBanner>
-          ) : null}
-          <ul className="flex flex-col divide-y divide-border rounded-lg border border-border">
-            {register.clients.map((row) => (
-              <ComplianceClientRow key={`${row.client_id}:${row.service_group}`} row={row} clientName={clientsById.get(row.client_id)?.name ?? null} />
-            ))}
-          </ul>
-        </>
-      )}
+      {outcome === "loading" ? <LoadingState>{t("loading")}</LoadingState> : null}
+      {outcome === "denied" || outcome === "error" ? <ErrorMessage error={registerState.error} /> : null}
+      {/* "Successful, no data" gets its own status region (#627) — the same
+          role="status" treatment the client Tax tab applies, so a screen
+          reader announces "no open compliance watches" as its own state
+          rather than silent muted prose. */}
+      {outcome === "empty" ? (
+        <div role="status">
+          <EmptyState>{t("empty")}</EmptyState>
+        </div>
+      ) : null}
+      {outcome === "ok" ? (
+        <ul className="flex flex-col divide-y divide-border rounded-lg border border-border">
+          {rows.map((row) => (
+            <ComplianceClientRow key={`${row.client_id}:${row.service_group}`} row={row} clientName={clientsById.get(row.client_id)?.name ?? null} />
+          ))}
+        </ul>
+      ) : null}
     </div>
   );
 }

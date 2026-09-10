@@ -1150,6 +1150,7 @@
     },
     "sstWatch": {
       "heading": "Turnover watch",
+      "source": "Read from your firm's SST compliance monitor, recalculated on a periodic schedule.",
       "empty": "No SST turnover watch is open for this client.",
       "noOpenWatchRow": "There is nothing to acknowledge, snooze or resolve on this watch right now.",
       "stale": "These figures were last recalculated more than 48 hours ago. Treat them as indicative until the next run.",
@@ -1195,6 +1196,19 @@
       "evidencePlaceholder": "Evidence, if you are lowering the account's treatment",
       "submit": "Record classification",
       "notBuilt": "Classifications you record are not listed back here yet — this panel records a decision, it does not yet show the history of decisions. The turnover figures above are recalculated by a scheduled run rather than immediately, so they may not move until the next one."
+    },
+    "boundary": {
+      "heading": "Capability boundary",
+      "subheading": "What Clara can currently read and act on for tax, and what is not enabled yet.",
+      "linkText": "See the capability boundary",
+      "enabledHeading": "Enabled today",
+      "enabledSstWatch": "The SST turnover watch above, with its confirmed, unclassified and screening figures, its threshold-crossing month and its registration due date.",
+      "enabledComplianceActs": "Acknowledging, snoozing or resolving an open SST watch on this client.",
+      "enabledTurnoverClassification": "Recording how an account's turnover is treated for the SST threshold, effective from a date you give.",
+      "notEnabledHeading": "Not enabled yet",
+      "notEnabledRegistration": "SST registration status, taxable periods and the SST-02 return — record the registration status in the client's knowledge facts and file the return the way your firm files it today.",
+      "notEnabledComputation": "The income tax computation and the CP204 estimate — nothing on this tab drafts, computes or files either.",
+      "notEnabledStatutory": "A statutory deadline calendar — this product does not yet offer one, for tax or any other domain."
     }
   },
   "JournalsWorkbench": {

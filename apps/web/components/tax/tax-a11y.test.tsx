@@ -210,9 +210,13 @@ function allByTag(root: unknown, tags: readonly string[]): unknown[] {
 // form would also produce, so the guard had been deleted while a comment said it had not.
 //
 // The rule 裁-44 actually states is about WHICH controls exist, and there are two halves:
-//   1. the ROSTER is pinned by accessible NAME — every control on this tab belongs to a live
-//      governed door (the three compliance-watch triggers, and the turnover-classification
-//      door's own fields). A new control cannot appear without a human editing this list.
+//   1. the ROSTER is pinned by accessible NAME — every control on this tab either belongs to a
+//      live governed door (the three compliance-watch triggers, and the turnover-classification
+//      door's own fields) or is a plain navigational anchor to the ONE capability-boundary
+//      section (#627's `#capability-boundary` — never a button, never a form control, never
+//      anything that submits). A new FORM control cannot appear without a human editing this
+//      list; a THIRD "See the capability boundary" anchor would still be caught by the sorted
+//      count below.
 //   2. every TEXT-ENTRY element lives inside the turnover-classification panel. This is the
 //      half that catches a computation grid specifically: R1-R10 rows would be inputs somewhere
 //      else on the page, and the roster alone could be satisfied by naming them.
@@ -274,6 +278,8 @@ test("裁-44: the Tax tab's only controls are its live governed doors, and no te
         "Evidence",                                                 // set_turnover_classification
         "Reason (required)",                                         // set_turnover_classification
         "Resolve",                                                  // resolve_compliance_watch
+        "See the capability boundary",                              // #627 — SstPanel's "not enabled" note, deep-links to #capability-boundary
+        "See the capability boundary",                              // #627 — TaxComputationPanel's "not enabled" note, same anchor
         "Service group",                                            // set_turnover_classification
         "Snooze",                                                   // snooze_compliance_watch
         "Treatment",                                                // set_turnover_classification
