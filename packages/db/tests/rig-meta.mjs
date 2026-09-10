@@ -1534,6 +1534,29 @@ export const WORK_QUESTIONS_0180_COHORT = [
   ...WORK_QUESTIONS_0180_UNGRANTED_FNS,
 ];
 
+// #634 [0182, optional and LATE journal evidence] — the EVIDENCE lane, its own cohort for the
+// same "wholly present or wholly absent" reason 0178's carries: folding these names into 0178's
+// roster would red every database between the two frontiers, and `cohortFailures()` fails a
+// PARTIAL cohort by design.
+//
+//   the TWO human doors — clara_authenticated ONLY. `attach_entry_evidence` is a bookkeeper+
+//   write with NO financial effect (it records which document backs an already-posted entry, in
+//   `clara.entry_evidence_links`; the posted row itself is never touched), and `list_entry_links`
+//   is the journal surface's bookkeeper+ read. clara_runtime, the agent role and BOTH wake roles
+//   gain ZERO: naming a source is a human's act about a human's evidence, and a lane that could
+//   attach its own evidence would be the agent asserting its own provenance.
+const JOURNAL_EVIDENCE_0182_HUMAN_FNS = ["attach_entry_evidence", "list_entry_links"];
+//   …and the UNGRANTED closure the two doors and the recut 0178 bodies share: the source-ref
+//   predicates and the one-document-one-entry probe. Listed so `cohortFailures` reports a
+//   half-applied 0182 rather than a silently narrower boundary.
+const JOURNAL_EVIDENCE_0182_UNGRANTED_FNS = [
+  "_assert_journal_source_refs", "_journal_source_refs_canonical", "_journal_source_document",
+  "_document_posting_entry", "_journal_document_filed",
+];
+export const JOURNAL_EVIDENCE_0182_COHORT = [
+  ...JOURNAL_EVIDENCE_0182_HUMAN_FNS, ...JOURNAL_EVIDENCE_0182_UNGRANTED_FNS,
+];
+
 export const ALLOWED = {
   // Slice-4 governance writers (contract v2.1 §3.2/3.3/3.5): human lane only.
   [ROLES.authenticated]: new Set([
@@ -1674,6 +1697,9 @@ export const ALLOWED = {
     // clara_authenticated ONLY; agent, both wake roles and clara_runtime gain ZERO.
     ...WORK_QUESTIONS_0180_HUMAN_FNS,
     ...ACTIVITY_FEED_0181_HUMAN_FNS,
+    // #634 0182 the journal-evidence pair — see the block above. clara_authenticated ONLY;
+    // clara_runtime, the agent role and both wake roles gain ZERO.
+    ...JOURNAL_EVIDENCE_0182_HUMAN_FNS,
   ]),
   // [S6 §9/C-11] agent lane loses the bare get_journal_entry(uuid) oracle; keeps the other
   // reads and gains the client-pinned S6 reads + get_journal_entry_for.
@@ -2047,6 +2073,7 @@ export async function grantMatrixFailures() {
   failures.push(...cohortFailures("F-A3 PR-1a bank/COA core extractions", EXTRACTION_F_A3_PR1A_COHORT, liveNames));
   failures.push(...cohortFailures("#623 0178 accounting-work lane", WORK_JOURNAL_0178_COHORT, liveNames));
   failures.push(...cohortFailures("#629 0180 shared work-question lane", WORK_QUESTIONS_0180_COHORT, liveNames));
+  failures.push(...cohortFailures("#634 0182 journal-evidence lane", JOURNAL_EVIDENCE_0182_COHORT, liveNames));
   failures.push(...cohortFailures("wave F F-A1 PR-4 bank-statement witness cutover", STATEMENT_F_A1_PR4_COHORT, liveNames));
   // F-A6's cohort is bimodal: wholly present once PR-1 applies, wholly absent before it. Half a
   // cohort is a half-applied migration and is reported as one.
