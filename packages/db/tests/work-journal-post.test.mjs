@@ -432,6 +432,82 @@ test("w623.rls.no-write no application role may write either new table directly"
   assert.deepEqual(bad, [], "rls.no-write: the verbs are the only door");
 });
 
+// THE RUN HAS TO BE ABLE TO READ THE WORK IT WAS HANDED. This cell exists because the runtime lane
+// measured its absence on a database built purely from migrations: `claraWork_v1`'s `loadWorkStep`
+// joins `clara.agent_tasks` to `clara.accounting_work`, and `GET /api/work/:workId` selects the
+// table directly; both run inside the runtime pool, which SET ROLEs `clara_runtime`. With no grant
+// the first Work run died with "permission denied for table accounting_work" after its WDK retries
+// and the read route 500d. The fix is a SELECT grant plus a SELECT-only `clara_runtime` policy
+// arm, and this cell states BOTH halves of it: the reads succeed, every write is still refused by
+// the privilege system before RLS is consulted, and the receipt table -- which the runtime has no
+// read site for -- stays shut.
+test("w623.rls.runtime-read clara_runtime reads a Work and can still move nothing", async (t) => {
+  if (await gateWork(t)) return;
+  const a = await armed();
+
+  // (1) `loadWorkStep`'s query, shape for shape.
+  const loaded = await roleQuery(ROLES.runtime,
+    `select t.status as task_status, t.model_snapshot,
+            w.id as work_id, w.firm_id, w.client_id, w.initiator, w.logical_op_id,
+            w.basis, w.basis_origin, w.status as work_status
+       from clara.agent_tasks t
+       join clara.accounting_work w on w.id = t.work_id
+      where t.id = $1 and t.kind = 'accounting_work'`, [a.task_id]);
+  assert.equal(loaded.rowCount, 1, "runtime-read: loadWorkStep's join returns the Work it was handed");
+  assert.equal(loaded.rows[0].work_id, a.work_id, "runtime-read: and it is the RIGHT Work");
+  assert.equal(loaded.rows[0].logical_op_id, a.logical_op_id,
+    "runtime-read: the logical identity the run will post under is readable, not guessed");
+
+  // (2) `GET /api/work/:workId`'s query: firm-pinned, by id.
+  const got = await roleQuery(ROLES.runtime,
+    "select w.id, w.status, w.basis_digest from clara.accounting_work w where w.id = $1 and w.firm_id = $2",
+    [a.work_id, FIRM_A()]);
+  assert.equal(got.rowCount, 1, "runtime-read: the read route's firm-pinned select returns the row");
+  // The policy arm is `using (true)`, so the FIRM PIN is the route's own -- prove it bites.
+  const foreign = await roleQuery(ROLES.runtime,
+    "select w.id from clara.accounting_work w where w.id = $1 and w.firm_id = $2",
+    [a.work_id, world.firms.B]);
+  assert.equal(foreign.rowCount, 0, "runtime-read: another firm's id returns nothing (the route pins the firm)");
+
+  // (3) Every write is refused, and refused by the PRIVILEGE system (42501), not by a trigger:
+  // the runtime never reaches the row's triggers at all. `insufficient_privilege` is the wall.
+  const denied = async (sql, params, label) => {
+    const err = await roleQuery(ROLES.runtime, sql, params).then(
+      () => null, (e) => e);
+    assert.ok(err, `runtime-read: ${label} must be refused, not accepted`);
+    assert.equal(err.code, "42501",
+      `runtime-read: ${label} is refused as insufficient_privilege (got ${err.code}: ${err.message})`);
+  };
+  await denied("update clara.accounting_work set status='completed' where id = $1", [a.work_id], "update");
+  await denied("delete from clara.accounting_work where id = $1", [a.work_id], "delete");
+  await denied(
+    `insert into clara.accounting_work (firm_id, client_id, purpose, status, initiator,
+       initiator_role, intent_key, logical_op_id, basis, basis_digest, basis_origin)
+     values ($1,$2,'journal_entry','queued',$3,'bookkeeper',$4,$5,'{}'::jsonb,repeat('0',64),'user_direct')`,
+    [FIRM_A(), a.client, a.author, opk("forged"), `work:${a.work_id}:journal_entry:9`], "insert");
+
+  // (4) The receipt table gains NOTHING. The runtime has no read site there -- the receipt comes
+  // back to the run in the wake verb's return value, and the web reads the row as a human.
+  await denied("select count(*) from clara.operation_receipts", [], "select on operation_receipts");
+
+  // (5) The catalog half, so a future revoke cannot pass this cell by accident.
+  const acl = await rootQuery(
+    `select coalesce(array_agg(lower(a.privilege_type) order by a.privilege_type), '{}') as privs
+       from pg_class c cross join lateral aclexplode(c.relacl) a join pg_roles r on r.oid = a.grantee
+      where c.oid = 'clara.accounting_work'::regclass and r.rolname = 'clara_runtime'`);
+  assert.deepEqual(acl.rows[0].privs, ["select"],
+    "runtime-read: clara_runtime holds SELECT on accounting_work and ONLY select");
+  const arm = await rootQuery(
+    `select polcmd, polwithcheck is null as no_check,
+            (select array_agg(rolname::text order by rolname) from pg_roles where oid = any(polroles)) as roles
+       from pg_policy where polrelid = 'clara.accounting_work'::regclass
+        and polname = 'p_accounting_work_runtime'`);
+  assert.equal(arm.rowCount, 1, "runtime-read: the runtime policy arm exists by name");
+  assert.equal(arm.rows[0].polcmd, "r", "runtime-read: it is a SELECT arm");
+  assert.equal(arm.rows[0].no_check, true, "runtime-read: it carries no WITH CHECK -- there is nothing to write");
+  assert.deepEqual(arm.rows[0].roles, ["clara_runtime"], "runtime-read: and it names clara_runtime alone");
+});
+
 test("w623.receipt.append-only a committed receipt cannot be updated or deleted", async (t) => {
   if (await gateWork(t)) return;
   const a = await armed();

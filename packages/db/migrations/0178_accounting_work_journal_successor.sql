@@ -318,6 +318,20 @@ create policy p_accounting_work_owner on clara.accounting_work
 create policy p_accounting_work_read on clara.accounting_work
   for select to clara_authenticated using (firm_id = clara.jwt_firm());
 grant select on clara.accounting_work to clara_authenticated;
+-- THE RUN MUST BE ABLE TO READ THE WORK IT WAS HANDED. `claraWork_v1`'s `loadWorkStep` joins
+-- `clara.agent_tasks` to this table, and `GET /api/work/:workId` selects it directly; both run
+-- inside the runtime pool, which SET ROLEs `clara_runtime`. Without this pair the very first Work
+-- run dies with "permission denied for table accounting_work" after its WDK retries, and the read
+-- route 500s -- measured on a database built purely from migrations. This mirrors the estate's own
+-- `p_agent_tasks_runtime` (0006_runtime_core.sql), which is the task half of the same row, EXCEPT
+-- that it is SELECT-ONLY: every write to accounting_work stays inside the SECURITY DEFINER verbs
+-- (`admit_journal_work` / `retry_accounting_work` / `claim_work_run` / `settle_work_run` and
+-- `_record_journal_entry_core`), so the runtime can observe the Work but never move it. The
+-- companion `clara.operation_receipts` gets NOTHING: the runtime never reads it -- the receipt is
+-- returned to the run by the wake verb, and the web reads the row under `clara_authenticated`.
+create policy p_accounting_work_runtime on clara.accounting_work
+  for select to clara_runtime using (true);
+grant select on clara.accounting_work to clara_runtime;
 
 create index ix_accounting_work_client on clara.accounting_work(client_id, created_at desc);
 create index ix_accounting_work_task on clara.accounting_work(current_task_id);
@@ -1366,15 +1380,22 @@ declare
   v_n int; v_def text; v_src text; v_grantees text[]; v_bad text; v_role text; v_tbl text;
   v_priv text; v_dml int;
 begin
-  -- (H.1) Both tables: forced RLS, exactly the owner+read policy pair, no app-role DML.
+  -- (H.1) Both tables: forced RLS, the policy set each is supposed to carry, no app-role DML, and
+  -- an ACL read back grantee-by-grantee. accounting_work is READ by the runtime as well as by the
+  -- human role -- claraWork_v1's loadWorkStep joins it and GET /api/work/:workId selects it, both
+  -- inside the runtime pool -- so it carries a THIRD policy and a second SELECT grantee.
+  -- operation_receipts has no runtime read site and stays on the owner+read pair.
   foreach v_tbl in array array['accounting_work','operation_receipts'] loop
     if not exists (select 1 from pg_class c join pg_namespace n on n.oid=c.relnamespace
         where n.nspname='clara' and c.relname=v_tbl and c.relrowsecurity and c.relforcerowsecurity) then
       raise exception '#623 tail: clara.% lacks forced RLS', v_tbl using errcode='CLR10';
     end if;
-    if (select count(*) from pg_policy where polrelid = ('clara.'||v_tbl)::regclass) <> 2 then
-      raise exception '#623 tail: clara.% does not carry exactly the owner+read policy pair', v_tbl using errcode='CLR10';
+    v_n := (select count(*) from pg_policy where polrelid = ('clara.'||v_tbl)::regclass);
+    if v_n <> (case when v_tbl = 'accounting_work' then 3 else 2 end) then
+      raise exception '#623 tail: clara.% carries % policies, not the reviewed set', v_tbl, v_n using errcode='CLR10';
     end if;
+    -- NO app role holds DML on EITHER table. The verbs are the only door, and the runtime arm
+    -- below widens the READ surface only.
     foreach v_role in array array['clara_authenticated','clara_agent_ro','clara_runtime',
         'clara_wake_interactive','clara_wake_proactive','clara_freeform_ro'] loop
       foreach v_priv in array array['insert','update','delete','truncate'] loop
@@ -1386,7 +1407,44 @@ begin
     if not has_table_privilege('clara_authenticated', 'clara.'||v_tbl, 'select') then
       raise exception '#623 tail: clara_authenticated cannot SELECT clara.%', v_tbl using errcode='CLR10';
     end if;
+    -- WHO HOLDS WHAT, read from the table's OWN acl rather than through has_table_privilege():
+    -- that function follows grants-of-role and would call an inherited privilege the table's own.
+    -- PUBLIC first, because a PUBLIC grant explodes to grantee 0 and joins no role.
+    if exists (select 1 from pg_class c cross join lateral aclexplode(c.relacl) a
+        where c.oid = ('clara.'||v_tbl)::regclass and a.grantee = 0) then
+      raise exception '#623 tail: clara.% carries a PUBLIC grant', v_tbl using errcode='CLR10';
+    end if;
+    select coalesce(array_agg(r.rolname||':'||lower(a.privilege_type)
+                              order by r.rolname, a.privilege_type), '{}'::text[])
+      into v_grantees
+      from pg_class c cross join lateral aclexplode(c.relacl) a
+      join pg_roles r on r.oid = a.grantee
+     where c.oid = ('clara.'||v_tbl)::regclass and a.grantee <> c.relowner;
+    if v_grantees <> (case when v_tbl = 'accounting_work'
+          then array['clara_authenticated:select','clara_runtime:select']
+          else array['clara_authenticated:select'] end) then
+      raise exception '#623 tail: clara.% grants %, not the reviewed SELECT-only set', v_tbl, v_grantees using errcode='CLR10';
+    end if;
   end loop;
+  -- (H.1b) The runtime read arm, stated positively and negatively. The run must be able to LOAD
+  -- the Work it was handed; it must not be able to move it, and it gains nothing on the receipt
+  -- table, whose only reader is the human role.
+  if not has_table_privilege('clara_runtime', 'clara.accounting_work', 'select') then
+    raise exception '#623 tail: clara_runtime cannot SELECT clara.accounting_work -- claraWork_v1 cannot load its own Work' using errcode='CLR10';
+  end if;
+  if has_table_privilege('clara_runtime', 'clara.operation_receipts', 'select') then
+    raise exception '#623 tail: clara_runtime holds SELECT on clara.operation_receipts -- the runtime has no read site there' using errcode='CLR10';
+  end if;
+  if not exists (select 1 from pg_policy p where p.polrelid = 'clara.accounting_work'::regclass
+      and p.polname = 'p_accounting_work_runtime' and p.polcmd = 'r'
+      and p.polwithcheck is null
+      and p.polroles = array['clara_runtime'::regrole::oid]) then
+    raise exception '#623 tail: p_accounting_work_runtime is not a SELECT-only, clara_runtime-only arm' using errcode='CLR10';
+  end if;
+  if exists (select 1 from pg_policy p where p.polrelid = 'clara.operation_receipts'::regclass
+      and 'clara_runtime'::regrole::oid = any(p.polroles)) then
+    raise exception '#623 tail: a clara_runtime policy reaches clara.operation_receipts' using errcode='CLR10';
+  end if;
   if (select count(*) from pg_trigger t where t.tgrelid='clara.operation_receipts'::regclass
         and not t.tgisinternal) <> 2 then
     raise exception '#623 tail: operation_receipts does not carry both immutability belts' using errcode='CLR10';
@@ -1548,6 +1606,6 @@ begin
     raise exception '#623 tail: % granted #623 verb(s) carry DML against clara.journal_entries', v_dml using errcode='CLR10';
   end if;
 
-  raise notice '#623 tail: OK -- clara.accounting_work and clara.operation_receipts created (forced RLS, owner+read policy pair, ZERO DML to any app role, both immutability belts, and the one-committed-effect-per-logical-identity partial unique index). agent_tasks.kind gained accounting_work and LOST NOTHING; work_id is bidirectionally CHECK-bound to that kind and the status mirror carries running/awaiting_input ONLY. Four runtime verbs reach clara_runtime and nobody else; one wake verb reaches clara_wake_interactive and nobody else, behind exactly ONE interactive_client allowlist row, with its DML in an UNGRANTED core. The agent-post receipt wall now counts BOTH receipt shapes with ARM 0 still first, the is_agent-only live arm intact, no rule-id exemption, and its AFTER UPDATE event set unmoved. The lane ships empty.';
+  raise notice '#623 tail: OK -- clara.accounting_work and clara.operation_receipts created (forced RLS, ZERO DML to any app role, both immutability belts, and the one-committed-effect-per-logical-identity partial unique index). The READ surface is asserted from the ACL itself, grantee by grantee: accounting_work grants SELECT and only SELECT to exactly clara_authenticated and clara_runtime -- the run has to be able to load the Work it was handed -- behind an owner arm, a human arm and a SELECT-only clara_runtime arm; operation_receipts grants SELECT to clara_authenticated alone behind the owner+read pair, and no clara_runtime grant or policy reaches it. agent_tasks.kind gained accounting_work and LOST NOTHING; work_id is bidirectionally CHECK-bound to that kind and the status mirror carries running/awaiting_input ONLY. Four runtime verbs reach clara_runtime and nobody else; one wake verb reaches clara_wake_interactive and nobody else, behind exactly ONE interactive_client allowlist row, with its DML in an UNGRANTED core. The agent-post receipt wall now counts BOTH receipt shapes with ARM 0 still first, the is_agent-only live arm intact, no rule-id exemption, and its AFTER UPDATE event set unmoved. The lane ships empty.';
 end
 $w623_tail$;
