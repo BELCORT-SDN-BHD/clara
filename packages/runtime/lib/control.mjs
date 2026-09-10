@@ -28,7 +28,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { resumeHook as apiResumeHook, getRun as apiGetRun } from "workflow/api";
 import { makeRuntimeClient, setRuntimeRoleOn } from "./pools.mjs";
 import { isConnErr, waitForNudge } from "./listen.mjs";
-import { settleTaskTerminal } from "./reconciler.mjs";
+import { settleCancelledByKind } from "./reconciler.mjs";
 
 /** The control NOTIFY channel (empty-payload nudge — the poll is the guarantee). */
 export const CONTROL_CHANNEL = "clara_runtime_ctl";
@@ -120,19 +120,40 @@ export async function deliverInterruptions(client, deps) {
 
 /**
  * Abort + settle every cancel_requested task. `cancelRun(runId)` aborts the engine
- * run (idempotent — a terminal/absent run is fine); the reconciler's settleTaskTerminal
- * moves the task to cancelled + closes pending interruptions (S4-D6) and lets
- * settle_chat_turn recover any checkpointed work. Abort FIRST, then settle — a crash
- * between them is repaired by the reconciler.
+ * run (idempotent — a terminal/absent run is fine); `settleCancelledByKind` moves the
+ * task to its kind's own terminal state and closes pending interruptions (S4-D6).
+ * Abort FIRST, then settle — a crash between them is repaired by the reconciler.
+ *
+ * TWO THINGS THIS LOOP LEARNED FROM #623's REVIEWED FINDING R2, and both of them are
+ * about a raise that had nowhere to go:
+ *
+ *   1. IT DISPATCHES BY KIND. It used to call `settleTaskTerminal` — i.e.
+ *      `clara.settle_chat_turn` — for EVERY cancel_requested row, and that verb raises
+ *      CLR10 ('settle_chat_turn is for chat turns only') the instant the kind is not
+ *      `chat_turn`. reconciler.mjs's sweep learned this in 2026-07-31's Section-I zombie
+ *      and grew a kind dispatch; this listener never did, so an `accounting_work` (or
+ *      autodraft, or wake) cancel raised here instead. It now shares the reconciler's
+ *      ONE dispatch rather than carrying a second copy that can fall a kind behind.
+ *   2. IT ISOLATES PER ROW. The raise above escaped `processCancellations` →
+ *      `runControlCycle`, so ONE unsettleable row also killed the interruption delivery
+ *      that runs beside it AND the `control` heartbeat that `/ready` reads — every poll,
+ *      for as long as the row existed. A settle failure is now one logged, COUNTED row and
+ *      the cycle carries on, exactly as reconcileTasks' own cancel loop does.
+ *
  * @param {import("pg").ClientBase} client  a clara_runtime connection
  * @param {{cancelRun:(runId:string)=>Promise<unknown>, batchSize?:number,
  *          onlyFirm?:string|null, log?:(m:string)=>void}} deps
  *   onlyFirm scopes the scan to one firm (TEST-ONLY; production leaves it null).
+ * @returns {Promise<{settled:number, settleFailed:number}>}
  */
 export async function processCancellations(client, deps) {
   const { cancelRun, batchSize = 20, onlyFirm = null, log = () => {} } = deps;
+  // `kind` rides the select for the same reason reconciler.mjs's cancel query carries it: the
+  // settle cannot be chosen without it. Nothing else is joined here — the accounting arm reads
+  // the Work's own row from inside the dispatch so this statement stays parseable against a
+  // database that has not run migration 0178 yet.
   const rows = await client.query(
-    `select id, workflow_run_id
+    `select id, kind, workflow_run_id
        from clara.agent_tasks
       where status = 'cancel_requested'
         and ($2::uuid is null or firm_id = $2)
@@ -141,6 +162,7 @@ export async function processCancellations(client, deps) {
     [batchSize, onlyFirm],
   );
   let settled = 0;
+  let settleFailed = 0;
   for (const t of rows.rows) {
     if (t.workflow_run_id) {
       try {
@@ -151,10 +173,15 @@ export async function processCancellations(client, deps) {
         log(`[control] cancelRun(${t.workflow_run_id}) noop/err: ${err?.message ?? err}`);
       }
     }
-    await settleTaskTerminal(client, t.id, "cancelled", null);
-    settled += 1;
+    try {
+      await settleCancelledByKind(client, t);
+      settled += 1;
+    } catch (err) {
+      settleFailed += 1;
+      log(`[control] cancel-settle failed task=${t.id} kind=${t.kind}: ${err?.message ?? err}`);
+    }
   }
-  return { settled };
+  return { settled, settleFailed };
 }
 
 /** One control cycle: deliver interruptions, then settle cancellations. */

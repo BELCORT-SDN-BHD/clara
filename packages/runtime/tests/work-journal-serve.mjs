@@ -17,8 +17,17 @@
 //   narrate            answer in prose without calling a tool at all — the "the model said it
 //                      did something and did nothing" case, which must settle the Work `failed`
 //                      with `no_effect` rather than `completed`.
+//
+// ONE MODEL, TWO HALVES, BECAUSE ONE PROCESS RUNS BOTH LANES. `resolveModel` reads the same
+// `globalThis.__claraModelForTest` for every closure in the image, and the two lanes call the SDK
+// differently: claraWork_v1's `ToolLoopAgent` calls `generate()` → `doGenerate`, while a chat turn
+// calls `streamText` → `doStream`. So this model implements both, and the B6 leg (a real
+// chatTurn_v18 turn whose model calls `start_journal_work`) drives the streaming half while the
+// Work run that follows it drives the generating half — in the SAME process, against the same
+// world. The chat half is `CLARA_CHAT_TEST_BASIS`-driven: the e2e hands it the exact figures it
+// wants admitted, so the leg's assertion and the model's script cannot drift apart.
 
-import { MockLanguageModelV4 } from "ai/test";
+import { MockLanguageModelV4, simulateReadableStream } from "ai/test";
 
 const SCRIPT = process.env.CLARA_WORK_TEST_SCRIPT || "post";
 
@@ -103,7 +112,65 @@ function admittedBasis(text) {
   return null;
 }
 
+// ---------------------------------------------------------------------------
+// The CHAT half (doStream) — the B6 leg's scripted turn.
+// ---------------------------------------------------------------------------
+
+/** The `start_journal_work` input this process's chat turn should call, handed in by the e2e as
+ *  JSON so the leg's own assertions and this script read ONE set of figures. Absent = the chat
+ *  half narrates instead, which keeps every other spawn of this file unchanged. */
+const CHAT_BASIS = (() => {
+  const raw = process.env.CLARA_CHAT_TEST_BASIS;
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+})();
+
+function chatUsage() {
+  return {
+    inputTokens: { total: 4, noCache: 4, cacheRead: undefined, cacheWrite: undefined },
+    outputTokens: { total: 6, reasoning: undefined, audio: undefined },
+    raw: undefined,
+  };
+}
+
+function textChunks(text) {
+  return [
+    { type: "stream-start", warnings: [] },
+    { type: "text-start", id: "t1" },
+    ...text.split(" ").map((w) => ({ type: "text-delta", id: "t1", delta: `${w} ` })),
+    { type: "text-end", id: "t1" },
+    { type: "finish", usage: chatUsage(), finishReason: { unified: "stop", raw: "stop" } },
+  ];
+}
+
+function startWorkChunks(input) {
+  const payload = JSON.stringify(input);
+  return [
+    { type: "stream-start", warnings: [] },
+    { type: "tool-input-start", id: "w1", toolName: "start_journal_work" },
+    { type: "tool-input-delta", id: "w1", delta: payload },
+    { type: "tool-input-end", id: "w1" },
+    { type: "tool-call", toolCallId: "w1", toolName: "start_journal_work", input: payload },
+    { type: "finish", usage: chatUsage(), finishReason: { unified: "tool-calls", raw: "tool_use" } },
+  ];
+}
+
 const model = new MockLanguageModelV4({
+  // INPUT-DRIVEN, never a call counter — the same discipline the generating half carries, and for
+  // the same reason: a chat segment can re-execute, and `toolsUsed` reads the STRUCTURED tool
+  // parts rather than scanning the prompt text (the system prompt NAMES start_journal_work, so a
+  // substring probe would be true on the very first turn and this script would never call it).
+  doStream: async (options) => {
+    const used = toolsUsed(options?.prompt ?? []);
+    if (CHAT_BASIS === null || used.has("start_journal_work")) {
+      return { stream: simulateReadableStream({ chunks: textChunks("I have queued that entry for you."), chunkDelayInMs: 2 }) };
+    }
+    return { stream: simulateReadableStream({ chunks: startWorkChunks(CHAT_BASIS), chunkDelayInMs: 2 }) };
+  },
   doGenerate: async (options) => {
     const prompt = options?.prompt ?? [];
     const text = promptText(prompt);

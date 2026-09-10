@@ -15,6 +15,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 
 const { register } = await import("tsx/esm/api");
 register();
@@ -66,6 +67,9 @@ const TABLE = [
   ["CLR10", "invalid_source_refs", "invariant"],
   ["CLR10", "wrong_task_kind", "invariant"],
   ["CLR10", "logical_op_mismatch", "invariant"],
+  // The credential names a DIFFERENT human than the Work's own initiator. An INVARIANT and not a
+  // refusal, unlike every other CLR04 here — see the cell below and the table's own note.
+  ["CLR04", "obo_not_initiator", "invariant"],
   ["CLR03", "no_wake_credential", "invariant"],
   ["CLR03", "wrong_wake_kind", "invariant"],
   ["CLR03", "wake_obo_unbound", "invariant"],
@@ -80,6 +84,49 @@ test("623.errors: every named (errcode, reason) pair classifies exactly as the c
     assert.equal(c.code, code);
     assert.equal(c.reason, reason);
     assert.ok(c.message.length > 0, `${code}/${reason} carries a message a human can read`);
+  }
+});
+
+test("623.errors: obo_not_initiator is the runtime's OWN fault, not the human's standing", () => {
+  // 0178's `clara._record_journal_entry_core` binds the wake credential's `on_behalf_of` to the
+  // Work's OWN initiator: authority alone is not enough, the receipt must attribute the posting
+  // to the human who asked. The runtime mints that credential FROM `work.initiator`, read by
+  // loadWorkStep off the very Work row this run is executing — so the two can only disagree if
+  // this process paired a credential with the wrong Work.
+  const c = errors.classifyWorkError(raise("CLR04", "obo_not_initiator"));
+  assert.equal(c.kind, "invariant", "a pairing bug in this runtime is a VISIBLE fault");
+  assert.equal(c.terminal, true);
+  assert.equal(c.recoverable, false, "a human's Retry cannot fix a credential this runtime built wrong");
+  assert.equal(errors.workOutcomeFor(c.kind), "failed");
+  assert.equal(errors.taskErrorCodeFor(c.kind), "internal");
+
+  // Its CLR04 NEIGHBOURS are the opposite, and that contrast is the whole reason the table is
+  // keyed on the pair rather than on the code: these ARE the human's live standing changing under
+  // a run, and a Retry after the role is restored genuinely succeeds.
+  for (const reason of ["obo_not_active", "actor_not_active", "insufficient_role"]) {
+    const other = errors.classifyWorkError(raise("CLR04", reason));
+    assert.equal(other.kind, "refusal", `${reason} stays a refusal`);
+    assert.equal(other.recoverable, true);
+  }
+  // And the CLR04 DEFAULT is still `refusal` — an unnamed authority CLR04 fails closed toward
+  // the human, which is why this pair had to be named to get the other answer.
+  assert.equal(errors.classifyWorkError(raise("CLR04", "some_future_authority_rule")).kind, "refusal");
+});
+
+test("623.errors: the RECEIPT OVERRIDE is a result flag, not an error this table classifies", () => {
+  // `clara.settle_work_run` does not RAISE when it overrides a cancelled/failed/expired/refused
+  // settle over a Work that already holds a committed receipt — it succeeds as `completed` and
+  // says so in its answer (`requested_outcome`, `overridden_by_receipt`). Nothing reaches the
+  // classifier, and the runtime's own half of that law lives in lib/reconciler-work.mjs.
+  const src = readFileSync(new URL("../workflows/claraWork.v1.errors.ts", import.meta.url), "utf8");
+  assert.match(src, /RECEIPT(?:\s|\/)+OVERRIDE/, "the file states why the override is absent from the table");
+  assert.equal(
+    src.includes("overridden_by_receipt"),
+    true,
+    "and names the flag, so a reader can find the mechanism rather than assume it was forgotten",
+  );
+  for (const reason of ["overridden_by_receipt", "requested_outcome"]) {
+    assert.equal(errors.classifyWorkError(raise("CLR10", reason)).kind, "refusal", `${reason} is not a pair this table knows`);
   }
 });
 

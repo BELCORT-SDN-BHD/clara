@@ -192,11 +192,34 @@ export async function assertSessionAccess(client, sessionId, principal) {
 }
 
 /**
- * Assert the principal may access a TASK's stream — a task is reachable iff its
- * session is (delegates to assertSessionAccess after resolving the task's
- * session). A nonexistent task, a task in another firm, and a task whose session
- * is private-to-another all raise the SAME AuthError 404 (§3.2 masked-view law).
- * Returns { task, session }.
+ * Assert the principal may access a TASK's stream. A nonexistent task, a task in another firm,
+ * and a task whose session is private-to-another all raise the SAME AuthError 404 (§3.2
+ * masked-view law). Returns the task row plus the session columns when there is a session.
+ *
+ * TWO ARMS, BECAUSE THERE ARE NOW TWO KINDS OF THING THAT STREAM.
+ *
+ *   CHAT-SHAPED (the original, unchanged in meaning): a task is reachable iff its SESSION is —
+ *   same firm AND (visibility='firm' OR created_by = the principal). Every `chat_turn`, and any
+ *   other kind that carries a `session_id`, is judged this way.
+ *
+ *   ACCOUNTING WORK (#623, reviewed finding R6): `accounting_work` tasks carry `session_id NULL`
+ *   by construction — a Work admitted from the C3 composer never had a conversation — so the old
+ *   INNER JOIN to `clara.chat_sessions` dropped every one of them and `GET /api/tasks/:id/stream`
+ *   answered 404 for a task the initiating bookkeeper had just created. The reachability question
+ *   for a Work is the FIRM's, not a session's: `clara.accounting_work`'s own human read policy is
+ *   `firm_id = clara.jwt_firm()` with no per-client clause (0178's header states that explicitly —
+ *   this estate carries no client-access table, client access IS firm membership), so this arm
+ *   asks exactly that and nothing narrower. `principal.firmId` is resolved from LIVE membership by
+ *   `resolvePrincipal` on every call, so a removed member fails here on the stream's next poll.
+ *
+ * TWO STATEMENTS, NOT ONE, AND THE ORDER IS THE DEPLOY ORDER. `clara.accounting_work` does not
+ * exist before migration 0178, and a statement naming a missing relation fails at PARSE time — so
+ * a single query OR-ing both arms would have made a runtime image that ran ahead of 0178 refuse
+ * every CHAT stream too. The chat arm runs first and unchanged; the Work arm runs only when the
+ * chat arm found nothing, and an `undefined_table` from it reads as "no such task", which against
+ * a pre-0178 database is exactly true. Both misses end in the SAME AuthError 404 with the same
+ * body, so neither arm is an existence oracle.
+ *
  * @param {import("pg").ClientBase} client  a clara_runtime connection
  * @param {string} taskId
  * @param {{sub: string, firmId: string}} principal
@@ -215,6 +238,23 @@ export async function assertTaskStreamAccess(client, taskId, principal) {
         and (s.visibility = 'firm' or s.created_by = $3)`,
     [taskId, principal.firmId, principal.sub],
   );
-  if (r.rowCount === 0) throw new AuthError(404, "not_found", "not found");
-  return r.rows[0];
+  if (r.rowCount > 0) return r.rows[0];
+  let work;
+  try {
+    work = await client.query(
+      `select t.id as task_id, t.status, t.workflow_run_id, t.session_id, t.kind, t.firm_id,
+              null::text as visibility, t.created_by
+         from clara.agent_tasks t
+         join clara.accounting_work w on w.id = t.work_id
+        where t.id = $1 and t.kind = 'accounting_work' and t.firm_id = $2 and w.firm_id = $2`,
+      [taskId, principal.firmId],
+    );
+  } catch (err) {
+    // 42P01 undefined_table — this image is running ahead of migration 0178, so there is no
+    // accounting Work anywhere to be denied. Any other error is a real fault and rides out.
+    if (err?.code !== "42P01") throw err;
+    throw new AuthError(404, "not_found", "not found");
+  }
+  if (work.rowCount === 0) throw new AuthError(404, "not_found", "not found");
+  return work.rows[0];
 }

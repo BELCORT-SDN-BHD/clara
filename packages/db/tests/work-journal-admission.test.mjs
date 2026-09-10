@@ -152,7 +152,11 @@ test("w623.admit.client-scoped-intent the SAME key against a DIFFERENT client is
 
 test("w623.admit.caps a memo or narration the frozen tool schema could never post is refused at ADMISSION", async (t) => {
   if (await gateWork(t)) return;
-  // THE FINDING. `claraWork.v1.tools.ts` is @frozen and caps the echoed basis at
+  // THE FINDING. `claraWork.v1.tools.ts` is FROZEN and caps the echoed basis at
+  // (spelled without the literal freeze marker on purpose: scripts/check-frozen-workflows.mjs
+  // treats ANY file containing that marker as a frozen root and hash-locks its whole relative
+  // import closure — a prose mention here dragged this test file, its fixtures and half of
+  // packages/db into frozen-workflows.json)
   // memo ≤ 4000 and description ≤ 2000. A longer one ADMITTED — a Work row, a queued run, a
   // model call — and then died inside the segment when the model echoed the basis back, settling
   // the Work `failed` for a reason the composer could have shown the typist at submit time.

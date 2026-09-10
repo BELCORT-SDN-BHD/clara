@@ -924,7 +924,7 @@
       "note": "#623 — part of the claraWork_v1 closure (the first persistent Clara successor, the Work run); registry.ts adds claraWork: here as a NEW class, never a repoint. DEPLOY ORDER: migration 0178 must be live BEFORE any accounting_work task can be minted. NOT deploy-locked yet — the ceremony stamps `deployed: true` after the image is live."
     },
     "packages/runtime/workflows/claraWork.v1.errors.ts": {
-      "sha256": "f1dcceee234e94a0b728d4695562979b1ebe8bc52a8aa26dc3e4cd96e1b22130",
+      "sha256": "b3aca3b4e46beaca9e103584bd58828a83d1c9a8aa2e3a4bd022a3593e95bbe8",
       "note": "#623 — part of the claraWork_v1 closure (the first persistent Clara successor, the Work run); registry.ts adds claraWork: here as a NEW class, never a repoint. DEPLOY ORDER: migration 0178 must be live BEFORE any accounting_work task can be minted. NOT deploy-locked yet — the ceremony stamps `deployed: true` after the image is live."
     },
     "packages/runtime/workflows/claraWork.v1.impl.ts": {
@@ -932,7 +932,7 @@
       "note": "#623 — part of the claraWork_v1 closure (the first persistent Clara successor, the Work run); registry.ts adds claraWork: here as a NEW class, never a repoint. DEPLOY ORDER: migration 0178 must be live BEFORE any accounting_work task can be minted. NOT deploy-locked yet — the ceremony stamps `deployed: true` after the image is live."
     },
     "packages/runtime/workflows/claraWork.v1.parts.ts": {
-      "sha256": "dadbe0668b602e5f28913220aa84bf95c9b23aa8bf9dcc5971e7cf1b2ee9f901",
+      "sha256": "f7cfc8a36c1eda2182cc68c8e9b62bfac40a901fb5d82ee544bbffb12c5783e0",
       "note": "#623 — part of the claraWork_v1 closure (the first persistent Clara successor, the Work run); registry.ts adds claraWork: here as a NEW class, never a repoint. DEPLOY ORDER: migration 0178 must be live BEFORE any accounting_work task can be minted. NOT deploy-locked yet — the ceremony stamps `deployed: true` after the image is live."
     },
     "packages/runtime/workflows/claraWork.v1.prompt.ts": {

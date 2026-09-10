@@ -60,16 +60,21 @@ export const WAIVERS = new Map([
   // rig-meta.mjs's agentRo roster is literally `READS.filter(r => r !== "get_journal_entry")`
   // — so that tool answers 42501 today. It is the ONLY call site of the bare reader left in
   // packages/runtime (measured: `grep -n "clara.get_journal_entry(" workflows/*.ts`); every
-  // later version calls the client-pinned `get_journal_entry_for` instead, and
-  // workflows/registry.ts:88 binds `chatTurn` to chatTurn_v17. The file is FROZEN
-  // (frozen-workflows.json lists it), so the fix is not a source edit here: a parked v1 run
-  // that resumes into that tool surfaces the read as its `{ error }` result.
+  // later version calls the client-pinned `get_journal_entry_for` instead. The registry now
+  // binds `chatTurn` to chatTurn_v18 (#623's repoint), and #623's OWN new closure —
+  // claraWork_v1, whose `confirmEntryStep` re-reads the entry it just posted — deliberately
+  // uses `get_journal_entry_for` too, so a second successor has come and gone without adding a
+  // reason to keep the bare reader alive. The file is FROZEN (frozen-workflows.json lists it),
+  // so the fix is not a source edit here: a parked v1 run that resumes into that tool surfaces
+  // the read as its `{ error }` result.
   ["called_ungranted:clara.get_journal_entry(p_entry uuid)", {
     reason:
       "chatTurn_v1 (workflows/chatTurn.impl.ts:112, FROZEN per frozen-workflows.json) is the "
       + "last caller of the bare reader 0009 retired from clara_agent_ro; every later version "
-      + "uses get_journal_entry_for and registry.ts:88 binds chatTurn to v17. Real defect, "
-      + "unfixable in a frozen artifact — reported for routing, not silently absorbed.",
+      + "uses get_journal_entry_for, registry.ts binds chatTurn to v18, and #623's new "
+      + "claraWork_v1 closure uses get_journal_entry_for as well — no successor keeps the bare "
+      + "reader. Real defect, unfixable in a frozen artifact — reported for routing, not "
+      + "silently absorbed.",
   }],
 ]);
 

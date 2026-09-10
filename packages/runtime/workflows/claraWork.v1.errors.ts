@@ -41,6 +41,14 @@
 // `write_into_closed_period` (0056), and `clara._assert_balanced` raises a bare CLR07 with no
 // detail at all (0003).
 //
+// ONE THING 0178'S ROSTER LISTS THAT THIS TABLE DELIBERATELY DOES NOT CARRY: the RECEIPT
+// OVERRIDE. A settle of `cancelled`/`refused`/`failed`/`expired` over a Work that already holds a
+// committed operation receipt does not raise at all — `clara.settle_work_run` succeeds and writes
+// `completed`, answering with `requested_outcome` and `overridden_by_receipt` so the caller can
+// see it was overridden. It is a RESULT FLAG, not an error, so there is nothing here to classify;
+// the runtime's own half of that law lives in lib/reconciler-work.mjs, which asks the books before
+// it names a terminal so it never requests the false outcome in the first place.
+//
 // THE DEFAULT IS FAIL-CLOSED-TOWARD-THE-HUMAN, AND THAT CHOICE IS DELIBERATE. An unrecognised
 // CLR10 reason is classified `refusal`, not `invalid_input`: a business refusal this table has
 // not been taught is still a refusal, and settling the Work `refused` with the database's own
@@ -118,7 +126,14 @@ const REASON_TABLE: ReadonlyArray<readonly [string, string, WorkErrorKind]> = Ob
   // The echoed basis did not re-hash to the admitted basis. The model changed something it had
   // no authority to change; handing the admitted basis back is a legitimate repair.
   ["CLR10", "basis_mismatch", "invalid_input"],
-  // Admission-shape refusals, raised by clara._assert_journal_basis with a typed `field`.
+  // Admission-shape refusals, raised by clara._assert_journal_basis with a typed `field` AND a
+  // typed `constraint`. ONE reason covers the whole family — the constraint token rides in the
+  // detail rather than in the key, so `iso_date`, `exactly_one_side`, `balanced`, `integer_cents`
+  // and `max_length` all classify here without widening this table. `max_length` is the newest of
+  // them (the memo's 4000 and a line narration's 2000, restated by 0178 from THIS closure's own
+  // frozen tool schema) and it is `invalid_input` for the same reason the rest are: the model
+  // echoed something the schema cannot carry, and handing the admitted basis back is a legitimate
+  // repair inside budgets.replans.
   // Reachable from the chat tool (which builds a basis from prose) and as the belt behind
   // admission inside clara._record_journal_entry_core.
   ["CLR10", "invalid_basis", "invalid_input"],
@@ -183,6 +198,22 @@ const REASON_TABLE: ReadonlyArray<readonly [string, string, WorkErrorKind]> = Ob
   ["CLR03", "wake_obo_unbound", "invariant"],
   ["CLR03", "wake_task_unbound", "invariant"],
   ["CLR11", "credential_client_pin", "invariant"],
+  // THE CREDENTIAL NAMES THE WRONG HUMAN. 0178's `clara._record_journal_entry_core` binds the
+  // wake credential's `on_behalf_of` to the Work's OWN initiator, so a credential minted OBO some
+  // OTHER live bookkeeper cannot commit this Work — authority alone is not enough, the receipt
+  // must attribute the posting to the human who asked.
+  //
+  // IT IS AN INVARIANT AND NOT A REFUSAL, WHICH IS WHERE THE CLR04 DEFAULT WOULD HAVE PUT IT.
+  // Every other CLR04 in this table is the HUMAN'S standing changing under a run — no longer
+  // active, no longer bookkeeper+ — and a human's Retry after the role is restored can genuinely
+  // succeed, which is what `refusal` promises. This one cannot be that: `workScoped` mints the
+  // credential with `work.initiator`, read by `loadWorkStep` from the Work row this very run is
+  // executing, so the two can only disagree if THIS runtime paired a credential with the wrong
+  // Work. Classifying it `refusal` would tell a human their authority was declined and offer a
+  // Retry that must fail identically forever; `invariant` settles the Work `failed`/internal and
+  // makes the pairing bug visible, which is the whole point of the kind. It sits with
+  // `logical_op_mismatch` and the credential-shape CLR03s for exactly that reason.
+  ["CLR04", "obo_not_initiator", "invariant"],
 ]);
 
 /** Parse a raiser's `detail` jsonb through v11's own parser so the two vocabularies cannot

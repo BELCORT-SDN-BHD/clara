@@ -30,7 +30,7 @@ import { reconcileLintBelt } from "./reconciler-lint.mjs";
 import { reconcileFaRuns } from "./reconciler-fa.mjs";
 import { reconcileAdjustmentRuns } from "./reconciler-adjustments.mjs";
 import { reconcileWakeEngineTasks } from "./reconciler-wake.mjs";
-import { reconcileAccountingWorkTasks, settleWorkTerminal } from "./reconciler-work.mjs";
+import { cancelSettleForWork, reconcileAccountingWorkTasks, settleWorkTerminal, workResultForTask } from "./reconciler-work.mjs";
 
 const GRACE_REENQUEUE = process.env.CLARA_RECONCILE_GRACE || "15 seconds";
 const ORPHAN_WINDOW = process.env.CLARA_RECONCILE_ORPHAN_WINDOW || "30 minutes";
@@ -140,6 +140,69 @@ export async function settleTaskTerminal(client, taskId, outcome, errorCode) {
   await client.query("select clara.settle_chat_turn($1, $2::jsonb, $3, $4, $5)", [taskId, "[]", 0, outcome, errorCode]);
 }
 
+/**
+ * THE ONE CANCEL SETTLE, DISPATCHED BY KIND — used by BOTH cancel paths in this package.
+ *
+ * There are two of them, and until #623's reviewed finding R2 only one of them knew about kinds:
+ * this module's sweep (section B below) dispatched correctly while `lib/control.mjs`'s listener
+ * called `settleTaskTerminal` for EVERY cancel_requested row regardless of kind. `settle_chat_turn`
+ * raises CLR10 ('settle_chat_turn is for chat turns only', 0006:1021) the instant the kind is not
+ * `chat_turn`, and in the listener that raise escaped `runControlCycle` — taking the interruption
+ * delivery cycle AND the `control` heartbeat down with it, every poll, for as long as the row
+ * existed. That is the 2026-07-31 Section-I zombie in the other belt. One shared dispatch is the
+ * fix: a kind can no longer be known to one cancel path and unknown to the other.
+ *
+ * `task` is `{ id, kind }` — nothing more, so BOTH cancel selects stay parseable against a
+ * pre-0178 database (see `workResultForTask`'s note on why the Work's own row is read from inside
+ * the accounting arm rather than joined into the caller's query). THROWS on a database refusal:
+ * per-row isolation belongs to the caller's loop, which is where the counters live.
+ *
+ * @param {import("pg").ClientBase} client  a clara_runtime connection
+ * @param {{id:string, kind:string}} task
+ */
+export async function settleCancelledByKind(client, task) {
+  if (task.kind === "autodraft") {
+    // settle_autodraft_task (0036 CoR) has NO 'cancelled' outcome — its outcome
+    // CHECK is drafted|skipped_lane|noop_existing|failed (0036:864-868) — so a
+    // cancelled autodraft settles 'failed' with the cancellation named in the
+    // refusal, matching terminalForAutodraft's own engine==='cancelled' arm below.
+    await settleAutoDraftTerminal(client, task.id, "failed", null, { code: "internal", reason: "cancelled" });
+    return;
+  }
+  if (task.kind === "wake" || task.kind === "close_prep") {
+    // Gate G1: the comment above section B was true UP TO this gate's own matrix delta —
+    // 'wake' (and close_prep, already-live since 0120 but never actually reachable until a
+    // runtime exists to drive it there) can now legitimately reach cancel_requested via
+    // running->cancel_requested. settle_chat_turn refuses CLR10 for any kind<>'chat_turn', so
+    // falling through to the generic branch below would raise on every such row — settle
+    // through clara._settle_wake_task instead, which keeps wakes_outbox in sync too.
+    // 裁-44 R3 / FOLD-19 — named notation, like every other _settle_wake_task call site. This
+    // one sits OUTSIDE the ruling's named six (it is reconciler.mjs, not reconciler-wake.mjs),
+    // and it is corrected here for one reason: the bundle check this fold adds asserts that NO
+    // positional settle survives, and a check that has to be weakened to accommodate a known
+    // survivor is not a check. Behaviour-identical, one line, same verb, same adjacent
+    // outcome/error-code hazard the other six were fixed for.
+    await client.query("select clara._settle_wake_task(p_task => $1, p_outcome => $2, p_error_code => $3)", [task.id, "cancelled", null]);
+    return;
+  }
+  if (task.kind === "accounting_work") {
+    // #623 — the THIRD kind this dispatch has to know about, and for exactly the reason the
+    // two above it exist: settle_chat_turn raises CLR10 for any kind<>'chat_turn', so falling
+    // through to the generic branch would raise on every cancelled Work and re-throw forever.
+    // clara.settle_work_run settles BOTH halves — the task and its clara.accounting_work row —
+    // in one idempotent call, and it is the only verb that does. A cancel does NOT reverse a
+    // posted entry (ARCHITECTURE §6: "取消不冲销已入账结果"), which is why the outcome comes from
+    // `cancelSettleForWork`: a Work that already recorded an effect settles `completed` carrying
+    // that effect, and only a Work that posted nothing settles `cancelled`. The read THROWS to
+    // the caller rather than defaulting to `cancelled`: not knowing whether an entry was posted
+    // is exactly the state in which "Nothing was posted." would be a lie.
+    const settle = cancelSettleForWork(await workResultForTask(client, task.id));
+    await settleWorkTerminal(client, task.id, settle.outcome, settle.errorCode, settle.error, settle.result);
+    return;
+  }
+  await settleTaskTerminal(client, task.id, "cancelled", null);
+}
+
 // ---------------------------------------------------------------------------
 // The task reconciliation matrix.
 // ---------------------------------------------------------------------------
@@ -190,8 +253,11 @@ export async function reconcileTasks(client, deps) {
   // running->{completed,failed,cancel_requested}, cancel_requested->{completed,failed,
   // cancelled}. A 'wake' or 'close_prep' row (close_prep's own matrix has allowed
   // cancel_requested since 0120, though nothing could drive it there before a runtime existed)
-  // now legitimately reaches this query — the `kind === "wake" || kind === "close_prep"` branch
-  // below settles it through clara._settle_wake_task, never the chat_turn-only settle_chat_turn.
+  // now legitimately reaches this query — the wake/close_prep arm settles it through
+  // clara._settle_wake_task, never the chat_turn-only settle_chat_turn.
+  // THE DISPATCH ITSELF NOW LIVES IN `settleCancelledByKind` (above), because #623's finding R2
+  // proved a second cancel path exists — lib/control.mjs's listener — and it did NOT dispatch by
+  // kind at all. Two copies of a kind table is how one of them comes to be a version behind.
   const cancels = await client.query(
     `select id, kind, workflow_run_id from clara.agent_tasks
       where status = 'cancel_requested' and ($1::uuid is null or firm_id = $1)
@@ -229,47 +295,7 @@ export async function reconcileTasks(client, deps) {
     }
     if (!abortConfirmed) continue;
     try {
-      if (t.kind === "autodraft") {
-        // settle_autodraft_task (0036 CoR) has NO 'cancelled' outcome — its outcome
-        // CHECK is drafted|skipped_lane|noop_existing|failed (0036:864-868) — so a
-        // cancelled autodraft settles 'failed' with the cancellation named in the
-        // refusal, matching terminalForAutodraft's own engine==='cancelled' arm below.
-        await settleAutoDraftTerminal(client, t.id, "failed", null, { code: "internal", reason: "cancelled" });
-      } else if (t.kind === "wake" || t.kind === "close_prep") {
-        // Gate G1: the comment above this section was true UP TO this gate's own matrix delta —
-        // 'wake' (and close_prep, already-live since 0120 but never actually reachable until a
-        // runtime exists to drive it there) can now legitimately reach cancel_requested via
-        // running->cancel_requested. settle_chat_turn refuses CLR10 for any kind<>'chat_turn', so
-        // falling through to the generic branch below would raise on every such row — settle
-        // through clara._settle_wake_task instead, which keeps wakes_outbox in sync too.
-        // 裁-44 R3 / FOLD-19 — named notation, like every other _settle_wake_task call site. This
-        // one sits OUTSIDE the ruling's named six (it is reconciler.mjs, not reconciler-wake.mjs),
-        // and it is corrected here for one reason: the bundle check this fold adds asserts that NO
-        // positional settle survives, and a check that has to be weakened to accommodate a known
-        // survivor is not a check. Behaviour-identical, one line, same verb, same adjacent
-        // outcome/error-code hazard the other six were fixed for.
-        await client.query(
-          "select clara._settle_wake_task(p_task => $1, p_outcome => $2, p_error_code => $3)",
-          [t.id, "cancelled", null],
-        );
-      } else if (t.kind === "accounting_work") {
-        // #623 — the THIRD kind this dispatch has to know about, and for exactly the reason the
-        // two above it exist: settle_chat_turn raises CLR10 for any kind<>'chat_turn', so falling
-        // through to the generic branch would raise on every cancelled Work and re-throw forever.
-        // clara.settle_work_run settles BOTH halves — the task and its clara.accounting_work row —
-        // in one idempotent call, and it is the only verb that does. A cancel does NOT reverse a
-        // posted entry (ARCHITECTURE §6: "取消不冲销已入账结果"): a Work that already committed its
-        // entry is terminal before it can reach cancel_requested, and this branch only ever
-        // settles one that had not.
-        await settleWorkTerminal(client, t.id, "cancelled", null, {
-          code: "cancelled",
-          reason: "cancelled",
-          message: "This Work was cancelled before an entry was recorded. Nothing was posted.",
-          recoverable: true,
-        });
-      } else {
-        await settleTaskTerminal(client, t.id, "cancelled", null);
-      }
+      await settleCancelledByKind(client, t);
       out.cancelled += 1;
     } catch (err) {
       // Isolated PER TASK, same as section A's re-enqueue try/catch: one task's settle

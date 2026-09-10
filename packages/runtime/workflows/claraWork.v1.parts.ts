@@ -14,6 +14,22 @@
 // (apps/web/lib/parts/types.ts: "a card re-derives authoritative state from a pinned DB read
 // function on mount and after every action"). A Work's status changes while a card is on
 // screen; a receipt id does not.
+//
+// BOTH KINDS ARE LIVE-STREAM-ONLY, AND THAT IS A PROPERTY OF THIS LANE RATHER THAN AN OVERSIGHT.
+// They are written to the RUN'S WRITABLE and reach a reader through `GET /api/tasks/:id/stream`
+// while the run is executing. They are NOT persisted anywhere a later read can recover them: the
+// stream route's terminal message replays `clara.chat_messages.parts`, and an `accounting_work`
+// task has no chat message — it carries `session_id NULL` by construction — so a reader that
+// attaches after the run ends gets the engine's replayed chunks and a terminal `done`, never a
+// durable parts array. THE DURABLE SURFACE IS `clara.accounting_work` ITSELF: `status` for what
+// `work_status` narrated, and `result` (`entry_id`, `receipt_id`) for what `work_result` carried.
+// The Work detail polls that row every 3s while the Work is non-terminal (#623's web contract),
+// which is why nothing is lost when a stream is missed — and why nothing here may ever be the
+// ONLY record of an effect.
+//
+// (`lib/authz.mjs`'s `assertTaskStreamAccess` grew an `accounting_work` arm for the same finding
+// that produced this note: until it did, the stream 404'd for every Work because the access check
+// inner-joined `clara.chat_sessions`.)
 
 /**
  * ONE observable status of a running Work.

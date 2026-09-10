@@ -19,6 +19,9 @@ import { randomUUID } from "node:crypto";
 import { register } from "tsx/esm/api";
 
 import * as rig from "./rig.mjs";
+import { AuthError, assertTaskStreamAccess, resolvePrincipal } from "../lib/authz.mjs";
+import { processCancellations } from "../lib/control.mjs";
+import { reconcileAccountingWorkTasks } from "../lib/reconciler-work.mjs";
 
 register();
 const { workErrorStatus, WORK_MAPPED_CODES } = await import("../src/workRoutes.ts");
@@ -329,6 +332,173 @@ test("623.db: a below-floor or foreign author cannot admit Work for a client", {
   const viewer = await rig.addMember(owner, await rig.firmOfClient(client), { role: "viewer", prefix: "wv" });
   const below = await refused(() => admit(client, viewer, `intent_${randomUUID()}`));
   assert.ok(["CLR03", "CLR04"].includes(below.code), `a below-bookkeeper member is refused (got ${below.code})`);
+});
+
+// ==============================================================================================
+// THE RECOVERY BELTS, against the real verbs and the real least-privileged role. These are the
+// reviewed findings R1/R2/R6 at the only altitude that can prove them: a mock client can show the
+// runtime ASKS for the right outcome, but only the database can show what the Work ends up saying.
+// ==============================================================================================
+
+/** Claim a Work's current task onto a run id, the way claraWork_v1's own claim step does. */
+const claimFor = (taskId, runId) =>
+  rig.asRuntime((c) =>
+    c.query("select clara.claim_work_run($1::uuid,$2::text,$3::jsonb)", [taskId, runId, JSON.stringify(manifestFor())]),
+  );
+
+/** An engine double for the reconciler: every run id reports the same terminal status. */
+const engineAlways = (status) => () => ({
+  get status() {
+    if (status === "lost") return Promise.reject(Object.assign(new Error("run not found"), { code: "RUN_NOT_FOUND" }));
+    return Promise.resolve(status);
+  },
+  cancel: async () => {},
+});
+
+test("623.db.R1: a run that POSTED and then died settles COMPLETED, not 'Nothing was posted'", { skip: SKIP }, async () => {
+  const { owner, client } = await rig.buildFirm("w-receipt");
+  const firm = await rig.firmOfClient(client);
+  const receipt = await admit(client, owner, `intent_${randomUUID()}`);
+  await claimFor(receipt.task_id, "run-posted");
+
+  // The effect the tool's own commit leaves on the Work. This is the ONLY witness `clara_runtime`
+  // can see — 0178 grants it SELECT on clara.accounting_work and NOTHING on
+  // clara.operation_receipts — and it is what the belt must consult before naming a terminal.
+  const posted = { entry_id: randomUUID(), receipt_id: randomUUID(), posted_at: new Date().toISOString() };
+  await rig.rootQuery("update clara.accounting_work set result = $2::jsonb where id = $1", [receipt.work_id, JSON.stringify(posted)]);
+
+  const out = await rig.asRuntime((c) =>
+    reconcileAccountingWorkTasks(c, { enqueueClaraWork: async () => {}, getRun: engineAlways("lost"), onlyFirm: firm }),
+  );
+  assert.equal(out.workSettledCompleted, 1, "the belt settled it from the BOOKS, not from the dead engine");
+  assert.equal(out.workSettledFailed, 0);
+
+  const work = await readWork(receipt.work_id);
+  assert.equal(work.status, "completed", "a dead run cannot un-post an entry");
+  assert.equal(work.error, null, "and no 'Nothing was posted.' is written over one that was");
+  assert.equal(work.result.entry_id, posted.entry_id, "the entry survives as the Work's result");
+  const tasks = await tasksForWork(receipt.work_id);
+  assert.equal(tasks[0].status, "completed");
+  assert.equal(tasks[0].error_code, null, "a completed run carries no task error");
+});
+
+test("623.db.R1: a run that posted NOTHING and died is still an honest failure", { skip: SKIP }, async () => {
+  const { owner, client } = await rig.buildFirm("w-noeffect-db");
+  const firm = await rig.firmOfClient(client);
+  const receipt = await admit(client, owner, `intent_${randomUUID()}`);
+  await claimFor(receipt.task_id, "run-empty");
+
+  const out = await rig.asRuntime((c) =>
+    reconcileAccountingWorkTasks(c, { enqueueClaraWork: async () => {}, getRun: engineAlways("failed"), onlyFirm: firm }),
+  );
+  assert.equal(out.workSettledFailed, 1);
+  assert.equal(out.workSettledCompleted, 0, "the receipt arm is EVIDENCE-driven, not a way to call everything completed");
+
+  const work = await readWork(receipt.work_id);
+  assert.equal(work.status, "failed");
+  assert.equal(work.error?.reason, "run_failed");
+  assert.match(work.error?.message ?? "", /Nothing was posted/);
+  assert.equal(work.error?.recoverable, true, "and a human's Retry is still on the table");
+});
+
+test("623.db.R2: a cancel_requested Work settles through settle_work_run and the cycle carries on", { skip: SKIP }, async () => {
+  const { owner, firm, client } = await rig.buildFirm("w-cancel");
+  const receipt = await admit(client, owner, `intent_${randomUUID()}`);
+  await claimFor(receipt.task_id, "run-cancel");
+  await rig.rootQuery("update clara.agent_tasks set status = 'cancel_requested' where id = $1", [receipt.task_id]);
+
+  // A CHAT turn cancelled in the SAME firm, created AFTER the Work so it sorts behind it. Before
+  // this fix the Work row raised CLR10 out of settle_chat_turn and took the whole control cycle
+  // with it — this second row is the one that used to never be reached.
+  const session = await rig.createChatSession({ author: owner, client, visibility: "private" });
+  const { task_id: chatTask } = await rig.beginChatTurn({ session, author: owner });
+  await rig.bindRun(chatTask, "run-chat-cancel");
+  await rig.driveTask(chatTask, ["cancel_requested"]);
+
+  const aborted = [];
+  const logged = [];
+  const out = await rig.asRuntime((c) =>
+    processCancellations(c, { cancelRun: async (r) => aborted.push(r), onlyFirm: firm, log: (m) => logged.push(m) }),
+  );
+
+  assert.equal(out.settleFailed, 0, `no row refused its settle (${logged.join(" | ")})`);
+  assert.equal(out.settled, 2, "BOTH rows settled — the Work no longer aborts the cycle before the chat turn");
+  assert.deepEqual(aborted.sort(), ["run-cancel", "run-chat-cancel"], "both engine runs were aborted first");
+
+  const work = await readWork(receipt.work_id);
+  assert.equal(work.status, "cancelled", "the WORK carries cancelled — a status settle_chat_turn could never write");
+  assert.match(work.error?.message ?? "", /Nothing was posted/);
+  const tasks = await tasksForWork(receipt.work_id);
+  assert.equal(tasks[0].status, "cancelled");
+  assert.equal((await rig.readTask(chatTask)).status, "cancelled", "and the chat turn behind it settled too");
+});
+
+test("623.db.R2: cancelling a Work that ALREADY POSTED completes it instead of erasing the entry", { skip: SKIP }, async () => {
+  const { owner, firm, client } = await rig.buildFirm("w-cancel-posted");
+  const receipt = await admit(client, owner, `intent_${randomUUID()}`);
+  await claimFor(receipt.task_id, "run-cancel-posted");
+  const posted = { entry_id: randomUUID(), receipt_id: randomUUID() };
+  await rig.rootQuery("update clara.accounting_work set result = $2::jsonb where id = $1", [receipt.work_id, JSON.stringify(posted)]);
+  await rig.rootQuery("update clara.agent_tasks set status = 'cancel_requested' where id = $1", [receipt.task_id]);
+
+  const out = await rig.asRuntime((c) => processCancellations(c, { cancelRun: async () => {}, onlyFirm: firm }));
+  assert.equal(out.settled, 1);
+  assert.equal(out.settleFailed, 0);
+
+  const work = await readWork(receipt.work_id);
+  assert.equal(work.status, "completed", "ARCHITECTURE §6: a cancel does not reverse a posted entry");
+  assert.equal(work.result.entry_id, posted.entry_id);
+  assert.equal(work.error, null);
+});
+
+test("623.db.R6: the Work's own stream is reachable by its firm, and by nobody else", { skip: SKIP }, async () => {
+  const { owner, firm, client } = await rig.buildFirm("w-stream");
+  const receipt = await admit(client, owner, `intent_${randomUUID()}`);
+  const task = await rig.readTask(receipt.task_id);
+  assert.equal(task.session_id, null, "an accounting_work task carries NO chat session — the reason the old join dropped it");
+
+  const ownerP = await rig.asRuntime((c) => resolvePrincipal(c, owner));
+  const access = await rig.asRuntime((c) => assertTaskStreamAccess(c, receipt.task_id, ownerP));
+  assert.equal(String(access.task_id), String(receipt.task_id), "the initiator reaches their own Work's stream");
+  assert.equal(access.kind, "accounting_work");
+  assert.equal(access.status, "queued", "and the row carries what streamRoute reads");
+  assert.equal(access.workflow_run_id, null);
+
+  // A colleague in the SAME firm reaches it too: clara.accounting_work's human read policy is
+  // `firm_id = clara.jwt_firm()` with no per-client clause (0178's header), and this arm is that
+  // policy, not a narrower guess.
+  const colleague = await rig.addMember(owner, firm, { role: "bookkeeper", prefix: "wsm" });
+  const colleagueP = await rig.asRuntime((c) => resolvePrincipal(c, colleague));
+  assert.ok(await rig.asRuntime((c) => assertTaskStreamAccess(c, receipt.task_id, colleagueP)));
+
+  // Another firm's member gets the SAME 404 a nonexistent task gets — no existence oracle.
+  const outsider = await rig.buildFirm("w-stream-out");
+  const outsiderP = await rig.asRuntime((c) => resolvePrincipal(c, outsider.owner));
+  const foreign = await rig.asRuntime((c) => assertTaskStreamAccess(c, receipt.task_id, outsiderP)).catch((e) => e);
+  const missing = await rig.asRuntime((c) => assertTaskStreamAccess(c, randomUUID(), ownerP)).catch((e) => e);
+  const malformed = await rig.asRuntime((c) => assertTaskStreamAccess(c, "not-a-uuid", ownerP)).catch((e) => e);
+  for (const [label, err] of [["foreign", foreign], ["missing", missing], ["malformed", malformed]]) {
+    assert.ok(err instanceof AuthError, `${label} raises AuthError`);
+    assert.equal(err.status, 404, `${label} is 404`);
+    assert.equal(err.message, "not found", `${label} says the same thing as the others`);
+  }
+});
+
+test("623.db.R6: the chat arm is untouched — a foreign-private session is still 404", { skip: SKIP }, async () => {
+  const { owner, firm, client } = await rig.buildFirm("w-stream-chat");
+  const member = await rig.addMember(owner, firm, { role: "bookkeeper", prefix: "wsc" });
+  const ownerP = await rig.asRuntime((c) => resolvePrincipal(c, owner));
+  const memberP = await rig.asRuntime((c) => resolvePrincipal(c, member));
+
+  const priv = await rig.createChatSession({ author: owner, client, visibility: "private" });
+  const { task_id: taskId } = await rig.beginChatTurn({ session: priv, author: owner });
+
+  const mine = await rig.asRuntime((c) => assertTaskStreamAccess(c, taskId, ownerP));
+  assert.equal(mine.kind, "chat_turn");
+  assert.equal(String(mine.session_id), String(priv), "the chat arm still resolves through the session");
+
+  const denied = await rig.asRuntime((c) => assertTaskStreamAccess(c, taskId, memberP)).catch((e) => e);
+  assert.ok(denied instanceof AuthError && denied.status === 404, "a firm colleague still cannot read a private session's stream");
 });
 
 // ==============================================================================================

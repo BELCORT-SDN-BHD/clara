@@ -24,6 +24,15 @@
 //      post-commit enqueue (which is what chatTurn_v18's frozen tool can do, and all it can do)
 //      is picked up by the reconciler's `accounting_work` arm, and this file prints how long that
 //      took.
+//   7. B6 END TO END, THROUGH THE REAL chatTurn_v18 CLOSURE. Reviewed finding R7: every existing
+//      cell for `start_journal_work` drove it against FAKE pools, so nothing proved that a real
+//      chat turn — the frozen v18 body, a real session, a real `withRuntime` checkout, the real
+//      admission verb — produces a Work at all. This leg posts a turn over HTTP, lets the scripted
+//      model call the tool with the SAME figures as leg 1, and then asserts BOTH halves of the
+//      journey: the admitted row's `basis`, `basis_digest`, `basis_origin='clara_interpreted'`
+//      and its `chat_task` source ref, AND that the reconciler dispatched it through to a
+//      completed Work with exactly one entry and one committed receipt. Legs 1 and 6 each prove
+//      one half against a synthetic admission; only this one joins them.
 //
 // GATED. `CLARA_SKIP_WORK_E2E=1` opts out (the heavy-test precedent), and the file SKIPS CLEANLY
 // when migration 0178 is absent — its runtime half merges alongside its DB half, and a green e2e
@@ -182,6 +191,30 @@ function basisFor(memo, cents = 120000) {
   };
 }
 
+/** The B6 leg's scripted `start_journal_work` input — THE SAME FIGURES leg 1 posts through the C3
+ *  composer, so the two admission paths can be compared byte for byte on the admitted basis. */
+const CHAT_TOOL_INPUT = {
+  posting_date: "2026-09-01",
+  memo: "office rent — e2e 1",
+  lines: [
+    { account_code: "6100", debit_cents: 120000, credit_cents: 0, description: "office rent" },
+    { account_code: "1100", debit_cents: 0, credit_cents: 120000, description: "Maybank" },
+  ],
+  rationale: "the human named the date, the amount and both accounts",
+};
+
+/** The DATABASE-shaped basis both paths must land on: `toDbBasis` (the route) and
+ *  `basisFromInput` (the frozen chat tool) are different translators of one contract. */
+const EXPECTED_DB_BASIS = {
+  posting_date: "2026-09-01",
+  memo: "office rent — e2e 1",
+  currency: "MYR",
+  lines: [
+    { account_code: "6100", debit_cents: 120000, credit_cents: 0, description: "office rent" },
+    { account_code: "1100", debit_cents: 0, credit_cents: 120000, description: "Maybank" },
+  ],
+};
+
 async function main() {
   const rig = await import("./rig.mjs");
   if (!(await rig.runtimeReady())) throw new Error("the 0006 runtime surface is absent — migrate the target first");
@@ -238,7 +271,7 @@ async function main() {
   // =========================================================================
   // 1-4, 6: one long-lived engine.
   // =========================================================================
-  const first = spawnServe();
+  const first = spawnServe({ CLARA_CHAT_TEST_BASIS: JSON.stringify(CHAT_TOOL_INPUT) });
   try {
     await waitReady();
     assert.ok(first.state.banner, "C88.8: the world-start banner names the serving bundle digest");
@@ -302,6 +335,65 @@ async function main() {
     assert.equal(conflict.body.error, "intent_payload_conflict");
     assert.equal(await countEntries(one.client), 1, "the conflict created NO second effect");
     console.log("[work-e2e] PASS 3: a changed payload under the same intent key is a typed conflict with no effect");
+
+    // ---- 7. B6: a REAL chatTurn_v18 turn admits the Work -------------------
+    // Everything in this leg is the production path: an HTTP session, an HTTP turn, the frozen
+    // v18 body, the frozen tool, `clara.admit_journal_work` under `withRuntime`, and then the
+    // reconciler's `accounting_work` arm — which is the ONLY thing that can dispatch a
+    // chat-admitted Work, because a frozen file may not import the registry to call `start()`.
+    const chat = await seedClient("we-b6");
+    const session = await api("POST", "/api/chat/sessions", { clientId: chat.client, title: "B6" }, chat.jwt);
+    assert.equal(session.status, 201, `session created (got ${session.status} ${JSON.stringify(session.body)})`);
+    const sessionId = session.body.id ?? session.body.session_id;
+    assert.ok(sessionId, `the session id comes back (${JSON.stringify(session.body)})`);
+
+    const turn = await api(
+      "POST",
+      `/api/chat/${sessionId}/turns`,
+      {
+        turnKey: `tk_${randomUUID().slice(0, 12)}`,
+        parts: [{ type: "text", text: "record RM 1,200 office rent paid from Maybank on 2026-09-01: Dr 6100 / Cr 1100" }],
+      },
+      chat.jwt,
+    );
+    assert.equal(turn.status, 202, `the turn is accepted (got ${turn.status} ${JSON.stringify(turn.body)})`);
+    const chatTaskId = turn.body.task_id;
+    assert.ok(chatTaskId, "and it names the chat task");
+
+    // The Work the TOOL admitted, found by the client it was pinned to (the chat turn never
+    // returns a work id — the card does, and the card is the web's business).
+    const b6StartedAt = Date.now();
+    let b6Work = null;
+    while (Date.now() - b6StartedAt < 90000) {
+      const r = await rig.rootQuery("select * from clara.accounting_work where client_id = $1", [chat.client]);
+      if (r.rows.length > 0) {
+        b6Work = r.rows[0];
+        break;
+      }
+      await sleep(250);
+    }
+    assert.ok(b6Work, "the chat turn admitted a Work through clara.admit_journal_work");
+    assert.equal(b6Work.purpose, "journal_entry");
+    assert.equal(b6Work.initiator, chat.owner, "admitted for the HUMAN who was talking, not a service identity");
+    assert.deepEqual(b6Work.basis, EXPECTED_DB_BASIS, "the frozen tool's translation lands on the SAME basis the composer's does");
+    assert.ok(/^[0-9a-f]{64}$/.test(b6Work.basis_digest), "the DATABASE derived the digest — the tool never sends one");
+    assert.equal(b6Work.basis_origin, "clara_interpreted", "a chat-originated basis is labelled INTERPRETED, never user_direct");
+    assert.equal(b6Work.source_refs.length, 1, "one source ref");
+    assert.equal(b6Work.source_refs[0].kind, "chat_task", "and it names the conversation this basis came from");
+    assert.equal(String(b6Work.source_refs[0].task_id), String(chatTaskId), "the ref points at the REAL chat task");
+    assert.equal(String(b6Work.source_refs[0].session_id), String(sessionId), "read off the task, never from a model argument");
+    assert.equal(b6Work.logical_op_id, `work:${b6Work.id}:journal_entry:1`, "server-assigned logical identity");
+
+    const b6Done = await pollWork(b6Work.id, chat.jwt, (b) => TERMINAL.has(b.work.status), "b6 work settles", 90000);
+    const b6LatencyMs = Date.now() - b6StartedAt;
+    assert.equal(b6Done.work.status, "completed", `the reconciler dispatched it and it completed (got ${b6Done.work.status} / ${JSON.stringify(b6Done.work.error)})`);
+    assert.ok(b6Done.work.result?.entry_id, "with a posted entry");
+    assert.equal(await countEntries(chat.client), 1, "EXACTLY ONE journal entry for this client");
+    assert.equal(await countReceipts(b6Work.id), 1, "and EXACTLY ONE committed operation receipt");
+    const b6Entry = await rig.rootQuery("select status, origin, document_id from clara.journal_entries where id = $1", [b6Done.work.result.entry_id]);
+    assert.equal(b6Entry.rows[0].status, "approved");
+    assert.equal(b6Entry.rows[0].document_id, null, "documentless — a chat basis is not a document and none is invented");
+    console.log(`[work-e2e] PASS 7: a real chatTurn_v18 turn admitted clara_interpreted Work and the reconciler ran it to a posted entry in ${b6LatencyMs}ms`);
 
     // ---- 6. the chat-origin dispatch latency (measured) --------------------
     // chatTurn_v18's frozen tool CANNOT enqueue (freeze-lint forbids a frozen file importing the

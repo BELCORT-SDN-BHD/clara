@@ -21,15 +21,25 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 
-import { reconcileAccountingWorkTasks, settleWorkTerminal, terminalForWork } from "../lib/reconciler-work.mjs";
+import {
+  cancelSettleForWork,
+  committedWorkResult,
+  reconcileAccountingWorkTasks,
+  settleWorkTerminal,
+  terminalForWork,
+  workResultForTask,
+} from "../lib/reconciler-work.mjs";
 
 /** A stateful scripted mock pg client for reconcileAccountingWorkTasks.
  *
  *  `queued`  — [{ id }] rows §A selects (queued + unbound past grace).
  *  `open`    — [{ id, status }] rows §B selects (running/awaiting_input + bound).
- *  `settle`  — optional (taskId) => void, to make one settle THROW. */
-function mockWorkClient({ queued = [], open = [], settle } = {}) {
-  const calls = { queuedSelections: [], openSelections: [], settles: [] };
+ *  `results` — { [taskId]: <clara.accounting_work.result jsonb> }, what the books say this Work
+ *              already recorded. Absent = no result at all, which is the ordinary case.
+ *  `settle`  — optional (taskId) => void, to make one settle THROW.
+ *  `resultRead` — optional (taskId) => void, to make the BOOKS READ throw. */
+function mockWorkClient({ queued = [], open = [], results = {}, settle, resultRead } = {}) {
+  const calls = { queuedSelections: [], openSelections: [], settles: [], resultReads: [] };
   const live = new Map(open.map((t) => [t.id, { id: t.id, status: t.status }]));
   const client = {
     calls,
@@ -45,10 +55,22 @@ function mockWorkClient({ queued = [], open = [], settle } = {}) {
         calls.openSelections.push(rows.map((r) => r.id));
         return { rows, rowCount: rows.length };
       }
+      if (/join clara\.accounting_work w on w\.id = t\.work_id/.test(s)) {
+        const taskId = params[0];
+        calls.resultReads.push(taskId);
+        if (typeof resultRead === "function") resultRead(taskId);
+        return { rows: [{ result: results[taskId] ?? null }], rowCount: 1 };
+      }
       if (/clara\.settle_work_run/.test(s)) {
-        const [taskId, outcome, errorCode, error] = params;
+        const [taskId, outcome, errorCode, error, result] = params;
         if (typeof settle === "function") settle(taskId);
-        calls.settles.push({ taskId, outcome, errorCode, error: error == null ? null : JSON.parse(error) });
+        calls.settles.push({
+          taskId,
+          outcome,
+          errorCode,
+          error: error == null ? null : JSON.parse(error),
+          result: result == null ? null : JSON.parse(result),
+        });
         live.delete(taskId); // a settled task leaves the open population
         return { rows: [{ r: { replayed: false } }], rowCount: 1 };
       }
@@ -57,6 +79,14 @@ function mockWorkClient({ queued = [], open = [], settle } = {}) {
   };
   return client;
 }
+
+/** A `clara.accounting_work.result` that names a posted entry — the shape a completed
+ *  `wake_record_journal_entry` leaves behind. */
+const POSTED = {
+  entry_id: "55555555-5555-4555-8555-555555555555",
+  receipt_id: "66666666-6666-4666-8666-666666666666",
+  posted_at: "2026-09-10T02:00:00.000Z",
+};
 
 const engineStatus = (map) => (runId) => ({
   get status() {
@@ -73,6 +103,7 @@ test("623.reconcile: an un-wired belt is a clean no-op, never a crash", async ()
   const out = await reconcileAccountingWorkTasks(client, {});
   assert.deepEqual(out, {
     workReenqueued: 0,
+    workSettledCompleted: 0,
     workSettledFailed: 0,
     workSettledExpired: 0,
     workSettledCancelled: 0,
@@ -114,6 +145,7 @@ test("623.reconcile: terminalForWork is matrix-aware and refuses to invent a leg
     outcome: "failed",
     errorCode: "internal",
     error: { code: "engine_lost", reason: "engine_lost", message: "The run executing this Work is gone. Nothing was posted.", recoverable: true },
+    result: null,
   });
   assert.equal(terminalForWork("running", "failed").outcome, "failed");
   assert.equal(terminalForWork("running", "completed").error.code, "no_effect", "a finished run that settled nothing produced nothing");
@@ -132,6 +164,127 @@ test("623.reconcile: terminalForWork is matrix-aware and refuses to invent a leg
   for (const [status, engine] of [["running", "lost"], ["running", "failed"], ["running", "completed"], ["awaiting_input", "lost"], ["awaiting_input", "cancelled"]]) {
     assert.equal(terminalForWork(status, engine).error.recoverable, true, `${status}/${engine} stays recoverable`);
   }
+});
+
+// ==============================================================================================
+// R1 — THE BOOKS OUTRANK THE ENGINE. A run that committed an entry and then died must never be
+// settled with "Nothing was posted." written over a posted journal entry.
+// ==============================================================================================
+
+test("623.reconcile: committedWorkResult counts an entry, and only an entry, as evidence", () => {
+  assert.equal(committedWorkResult(null), null);
+  assert.equal(committedWorkResult(undefined), null);
+  assert.equal(committedWorkResult("posted"), null, "a string is not a result object");
+  assert.equal(committedWorkResult([{ entry_id: "e" }]), null, "nor is an array");
+  assert.equal(committedWorkResult({}), null, "an empty result names no entry");
+  assert.equal(
+    committedWorkResult({ budget: { segments: 1 }, confirmed: false }),
+    null,
+    "a result that describes a RUN and no entry is not evidence of a posting",
+  );
+  assert.equal(committedWorkResult({ entry_id: "" }), null, "a blank id is not an id");
+  assert.equal(committedWorkResult({ entry_id: "   " }), null);
+  assert.equal(committedWorkResult({ entry_id: 42 }), null, "and it must be a string");
+  assert.deepEqual(committedWorkResult(POSTED), POSTED, "an entry id IS the evidence");
+});
+
+test("623.reconcile: a Work that already posted settles COMPLETED, whatever the engine says", () => {
+  for (const [status, engine] of [
+    ["running", "lost"],
+    ["running", "failed"],
+    ["running", "completed"],
+    ["running", "cancelled"],
+    ["awaiting_input", "lost"],
+    ["awaiting_input", "failed"],
+    ["awaiting_input", "cancelled"],
+  ]) {
+    assert.deepEqual(
+      terminalForWork(status, engine, POSTED),
+      { outcome: "completed", errorCode: null, error: null, result: POSTED },
+      `${status}/${engine} over a committed receipt is completed`,
+    );
+  }
+  // The evidence still has to BE evidence: a result with no entry id changes nothing.
+  assert.equal(terminalForWork("running", "failed", { budget: {} }).outcome, "failed");
+  assert.equal(terminalForWork("running", "failed", null).error.code, "run_failed");
+  // And a status this belt does not own stays untouched even with a receipt.
+  assert.equal(terminalForWork("queued", "failed", POSTED), null);
+  assert.equal(terminalForWork("completed", "failed", POSTED), null);
+});
+
+test("623.reconcile: §B settles a posted-then-dead run COMPLETED and carries the entry as its result", async () => {
+  const client = mockWorkClient({
+    open: [
+      { id: "posted-then-died", status: "running" },
+      { id: "posted-then-parked", status: "awaiting_input" },
+      { id: "posted-nothing", status: "running" },
+    ],
+    results: { "posted-then-died": POSTED, "posted-then-parked": POSTED },
+  });
+  const out = await reconcileAccountingWorkTasks(client, {
+    enqueueClaraWork: async () => {},
+    getRun: engineStatus({ "posted-then-died": "lost", "posted-then-parked": "lost", "posted-nothing": "lost" }),
+  });
+
+  assert.equal(out.workSettledCompleted, 2, "two Works held an entry — a dead run cannot un-post it");
+  assert.equal(out.workSettledFailed, 1, "and the one that posted nothing is still an honest failure");
+  assert.equal(out.workSettledExpired, 0, "the parked one is NOT expired: it finished its work before the hook died");
+
+  const byTask = Object.fromEntries(client.calls.settles.map((s) => [s.taskId, s]));
+  assert.equal(byTask["posted-then-died"].outcome, "completed");
+  assert.equal(byTask["posted-then-died"].errorCode, null);
+  assert.equal(byTask["posted-then-died"].error, null, "and NOT 'Nothing was posted.'");
+  assert.deepEqual(byTask["posted-then-died"].result, POSTED, "the entry rides to p_result so the Work detail can show it");
+  assert.equal(byTask["posted-then-parked"].outcome, "completed");
+  assert.equal(byTask["posted-nothing"].outcome, "failed");
+  assert.match(byTask["posted-nothing"].error.message, /Nothing was posted/);
+});
+
+test("623.reconcile: a books read that FAILS leaves the task open rather than guessing", async () => {
+  const client = mockWorkClient({
+    open: [{ id: "unreadable", status: "running" }],
+    resultRead: () => {
+      throw Object.assign(new Error("connection terminated"), { code: "08006" });
+    },
+  });
+  const logged = [];
+  const out = await reconcileAccountingWorkTasks(client, {
+    enqueueClaraWork: async () => {},
+    getRun: engineStatus({ unreadable: "failed" }),
+    log: (m) => logged.push(m),
+  });
+  assert.equal(client.calls.settles.length, 0, "not knowing whether an entry exists is not a licence to say none does");
+  assert.equal(out.workSettledFailed, 0);
+  assert.match(logged.join("\n"), /result read failed task=unreadable/);
+});
+
+test("623.reconcile: cancelSettleForWork keeps a posted entry and cancels only an empty Work", () => {
+  const cancelled = cancelSettleForWork(null);
+  assert.equal(cancelled.outcome, "cancelled");
+  assert.equal(cancelled.result, null);
+  assert.match(cancelled.error.message, /Nothing was posted/);
+  assert.equal(cancelled.error.recoverable, true);
+
+  const kept = cancelSettleForWork(POSTED);
+  assert.deepEqual(kept, { outcome: "completed", errorCode: null, error: null, result: POSTED });
+});
+
+test("623.reconcile: workResultForTask reads the Work through its task and reduces it", async () => {
+  const statements = [];
+  const client = {
+    query: async (sql, params) => {
+      statements.push({ sql: String(sql), params });
+      return { rows: [{ result: POSTED }], rowCount: 1 };
+    },
+  };
+  assert.deepEqual(await workResultForTask(client, "t-1"), POSTED);
+  assert.equal(statements.length, 1);
+  assert.match(statements[0].sql, /clara\.accounting_work/);
+  assert.match(statements[0].sql, /t\.kind = 'accounting_work'/, "the read is scoped to the one kind that has a Work");
+  assert.deepEqual(statements[0].params, ["t-1"]);
+
+  const empty = { query: async () => ({ rows: [], rowCount: 0 }) };
+  assert.equal(await workResultForTask(empty, "t-2"), null, "no row is no evidence");
 });
 
 test("623.reconcile: simultaneous expiry categories keep DISTINCT counters (C34.1)", async () => {
@@ -224,19 +377,125 @@ test("623.reconcile: settleWorkTerminal calls the WORK verb, never settle_chat_t
   assert.doesNotMatch(statements[0].sql, /settle_autodraft_task/);
   assert.equal(statements[0].params[1], "cancelled");
   assert.equal(JSON.parse(statements[0].params[3]).recoverable, true);
+  assert.equal(statements[0].params[4], null, "a cancel with nothing to show carries no result");
+
+  const withResult = [];
+  await settleWorkTerminal(
+    { query: async (sql, params) => (withResult.push({ sql: String(sql), params }), { rows: [{ r: {} }], rowCount: 1 }) },
+    "t",
+    "completed",
+    null,
+    null,
+    POSTED,
+  );
+  assert.equal(JSON.parse(withResult[0].params[4]).entry_id, POSTED.entry_id, "and a receipt-aware completed carries the entry");
 });
 
-test("623.reconcile: the sweep's cancel dispatch routes an accounting_work task to the WORK verb", async () => {
-  // reconciler.mjs's section B is the ONE cancel query, dispatching by kind. A regression here is
-  // the 2026-07-31 Section-I zombie's exact shape: settle_chat_turn raises CLR10 for a foreign
-  // kind, the raise escapes, and every belt behind it starves.
+// ==============================================================================================
+// R2 — THE ONE CANCEL DISPATCH. Both cancel paths in this package (the reconciler sweep and the
+// control listener) settle through `settleCancelledByKind`, so a kind cannot be known to one and
+// unknown to the other. A regression is the 2026-07-31 Section-I zombie's exact shape:
+// settle_chat_turn raises CLR10 for a foreign kind, the raise escapes, and every belt behind it
+// starves — in the listener's case taking interruption delivery and the `control` heartbeat too.
+// ==============================================================================================
+
+/** A mock client that records statements and answers the two reads a cancel settle can make. */
+function mockCancelClient({ result = null } = {}) {
+  const statements = [];
+  return {
+    statements,
+    query: async (sql, params) => {
+      const s = String(sql);
+      statements.push({ sql: s, params });
+      if (/join clara\.accounting_work w on w\.id = t\.work_id/.test(s)) return { rows: [{ result }], rowCount: 1 };
+      return { rows: [{ r: { replayed: false } }], rowCount: 1 };
+    },
+  };
+}
+
+test("623.reconcile: the shared cancel dispatch routes every kind to ITS OWN settle verb", async () => {
+  const { settleCancelledByKind } = await import("../lib/reconciler.mjs");
+
+  const work = mockCancelClient();
+  await settleCancelledByKind(work, { id: "w1", kind: "accounting_work" });
+  const workSettle = work.statements.find((s) => /settle_work_run/.test(s.sql));
+  assert.ok(workSettle, "an accounting_work cancel settles through clara.settle_work_run");
+  assert.equal(workSettle.params[1], "cancelled");
+  assert.match(JSON.parse(workSettle.params[3]).message, /Nothing was posted/);
+  assert.equal(work.statements.some((s) => /settle_chat_turn/.test(s.sql)), false, "and never through settle_chat_turn");
+
+  const chat = mockCancelClient();
+  await settleCancelledByKind(chat, { id: "c1", kind: "chat_turn" });
+  assert.match(chat.statements[0].sql, /settle_chat_turn/, "a chat turn still settles the chat way");
+
+  for (const kind of ["wake", "close_prep"]) {
+    const wake = mockCancelClient();
+    await settleCancelledByKind(wake, { id: `k-${kind}`, kind });
+    assert.match(wake.statements[0].sql, /_settle_wake_task/, `${kind} settles through the wake verb`);
+    assert.doesNotMatch(wake.statements[0].sql, /settle_chat_turn/);
+  }
+
+  const auto = mockCancelClient();
+  await settleCancelledByKind(auto, { id: "a1", kind: "autodraft" });
+  assert.match(auto.statements[0].sql, /settle_autodraft_task/, "an autodraft settles through its own CoR verb");
+});
+
+test("623.reconcile: cancelling a Work that ALREADY POSTED completes it instead (ARCHITECTURE §6)", async () => {
+  const { settleCancelledByKind } = await import("../lib/reconciler.mjs");
+  const client = mockCancelClient({ result: POSTED });
+  await settleCancelledByKind(client, { id: "w-posted", kind: "accounting_work" });
+  const settle = client.statements.find((s) => /settle_work_run/.test(s.sql));
+  assert.equal(settle.params[1], "completed", "a cancel does not reverse a posted entry");
+  assert.equal(settle.params[3], null, "and it writes no 'Nothing was posted' error over one that was");
+  assert.deepEqual(JSON.parse(settle.params[4]), POSTED);
+});
+
+test("623.control: the listener dispatches by kind and one bad row cannot abort the cycle", async () => {
+  const { processCancellations } = await import("../lib/control.mjs");
+  const rows = [
+    { id: "work-1", kind: "accounting_work", workflow_run_id: "wf-work-1" },
+    { id: "chat-1", kind: "chat_turn", workflow_run_id: "wf-chat-1" },
+    { id: "wake-1", kind: "wake", workflow_run_id: null },
+  ];
+  const statements = [];
+  const client = {
+    query: async (sql, params) => {
+      const s = String(sql);
+      statements.push({ sql: s, params });
+      if (/status = 'cancel_requested'/.test(s)) return { rows, rowCount: rows.length };
+      if (/join clara\.accounting_work w on w\.id = t\.work_id/.test(s)) return { rows: [{ result: null }], rowCount: 1 };
+      if (/settle_chat_turn/.test(s)) throw Object.assign(new Error("the database refused this settle"), { code: "CLR13" });
+      return { rows: [{ r: { replayed: false } }], rowCount: 1 };
+    },
+  };
+  const aborted = [];
+  const logged = [];
+  const out = await processCancellations(client, { cancelRun: async (r) => aborted.push(r), log: (m) => logged.push(m) });
+
+  // BEFORE this fix every row above went to settle_chat_turn, which raises CLR10 for any kind but
+  // chat_turn — and that raise escaped the whole control cycle, taking interruption delivery and
+  // the `control` heartbeat with it on every poll.
+  const verbs = statements.filter((s) => !/cancel_requested/.test(s.sql)).map((s) => s.sql);
+  assert.equal(verbs.filter((s) => /settle_work_run/.test(s)).length, 1, "the Work settles through clara.settle_work_run");
+  assert.equal(verbs.filter((s) => /_settle_wake_task/.test(s)).length, 1, "the wake settles through the wake verb");
+  assert.equal(verbs.filter((s) => /settle_chat_turn/.test(s)).length, 1, "and ONLY the chat turn reaches settle_chat_turn");
+
+  assert.deepEqual(aborted, ["wf-work-1", "wf-chat-1"], "every bound run is still aborted first");
+  assert.equal(out.settled, 2, "the two settleable rows settled");
+  assert.equal(out.settleFailed, 1, "and the refusal is a COUNTED fact, not a swallowed one");
+  assert.match(logged.join("\n"), /cancel-settle failed task=chat-1 kind=chat_turn/);
+});
+
+test("623.reconcile: neither cancel select names a relation migration 0178 introduces", async () => {
+  // A statement naming a missing relation fails at PARSE time, so a join here would have made a
+  // runtime image running ahead of 0178 unable to cancel ANY kind — chat turns included. The
+  // Work's own row is read from INSIDE the accounting arm, which no other kind reaches.
   const { readFile } = await import("node:fs/promises");
-  const src = await readFile(new URL("../lib/reconciler.mjs", import.meta.url), "utf8");
-  const dispatch = /const cancels = await client\.query\([\s\S]*?out\.cancelled \+= 1;/.exec(src)?.[0];
-  assert.ok(dispatch, "the cancel dispatch is present");
-  assert.match(dispatch, /t\.kind === "accounting_work"/, "accounting_work has its own arm");
-  const arm = /t\.kind === "accounting_work"\)\s*\{[\s\S]*?\}\s*else \{/.exec(dispatch)?.[0];
-  assert.ok(arm, "the arm has a body");
-  assert.match(arm, /settleWorkTerminal\(/, "and it settles through the Work verb");
-  assert.doesNotMatch(arm, /settleTaskTerminal\(/);
+  for (const file of ["../lib/reconciler.mjs", "../lib/control.mjs"]) {
+    const src = await readFile(new URL(file, import.meta.url), "utf8");
+    const select = /select[^;]*?status = 'cancel_requested'[\s\S]*?`/.exec(src)?.[0];
+    assert.ok(select, `${file} carries a cancel_requested select`);
+    assert.match(select, /kind/, `${file}'s cancel select reads the kind it must dispatch on`);
+    assert.doesNotMatch(select, /accounting_work/, `${file}'s cancel select stays parseable pre-0178`);
+  }
 });

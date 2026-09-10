@@ -29,6 +29,33 @@
 // SELECT the read route 500s while admission still works, which is the confusing half-state worth
 // naming in advance.
 //
+// WIRE FIELD PATHS — ONE VOCABULARY, AND IT IS THE DATABASE'S.
+//
+// A 400 from this surface has two machine-readable slots, `field` and `reason`, and both of them
+// are spelled the way migration 0178 spells them, whether the refusal came from this file or from
+// `clara._assert_journal_basis`:
+//
+//   field    `basis` | `posting_date` | `memo` | `currency` | `lines` | `lines[N]` |
+//            `lines[N].account_code` | `lines[N].debit_cents` | `lines[N].credit_cents` |
+//            `lines[N].description`  — snake_case, no `basis.` prefix, and N is 1-BASED because
+//            SQL's `with ordinality` counts from one and the database generates the path FROM
+//            that ordinal (0178's header states this and says zero-based consumers subtract one
+//            at THEIR edge). This route iterates a JavaScript array, so it adds one; `linePath`
+//            is the only place that arithmetic happens.
+//   reason   the database's `constraint` token: `object` | `present` | `iso_date` | `nonempty` |
+//            `myr` | `array` | `at_least_two` | `exactly_one_side` | `integer_cents` |
+//            `nonnegative_integer_cents` | `balanced` | `nonzero_total` | `max_length`, plus the
+//            one route-only token `text` (see `toDbBasis`). For a non-basis CLR10 the reason is
+//            the database's typed `detail.reason` instead (`invalid_intent_key`, …).
+//
+// WHY IT MATTERS ENOUGH TO STATE. `apps/web/lib/work/journal-basis.ts`'s `fieldForServerPath` is
+// the ONE mapper from a wire path onto a focusable control, and it was written against the
+// database's spelling. This route used to answer `basis.postingDate` / `basis.lines[0].accountCode`
+// — a second, camelCase, zero-based vocabulary that mapper does not know — so a 400 raised HERE
+// (the earlier, cheaper half of the very same validation) put no error beside any control and
+// focused nothing, while the identical refusal from the DATABASE did. Two spellings of one
+// contract is a mapper that is right half the time; there is now one.
+//
 // THE READ ROUTE IS NARROW ON PURPOSE. The web reads `clara.accounting_work`,
 // `clara.operation_receipts`, `clara.journal_entries` and `clara.journal_lines` through their own
 // RLS as the signed-in human; `GET /api/work/:workId` exists for the lost-response check and for
@@ -56,6 +83,31 @@ function invalid(field: string, reason: string): InvalidBasis {
   return { error: "invalid_basis", field, reason };
 }
 
+/** The DB's own path for a line field, 1-BASED (see the WIRE FIELD PATHS note in this file's
+ *  header). `i` is the JavaScript array index this route iterated with. */
+function linePath(i: number, field?: string): string {
+  return field === undefined ? `lines[${i + 1}]` : `lines[${i + 1}].${field}`;
+}
+
+/** THE FROZEN TOOL SCHEMA'S CAPS, RESTATED AT THE FIRST DOOR. `claraWork.v1.tools.ts` spells the
+ *  echoed basis `memo: z.string().trim().min(1).max(4000)` and `description: z.string().max(2000)`,
+ *  and that file is FROZEN (spelled without the literal freeze marker: scripts/check-frozen-
+ *  workflows.mjs treats ANY file containing that marker as a frozen root and hash-locks its whole
+ *  relative import closure, so a prose mention here would freeze this route, lib/authz.mjs,
+ *  lib/pools.mjs and workflows/registry.ts — the one file that must never be frozen).
+ *  Without these two checks an over-long memo was ADMITTED — the Work
+ *  row existed, a run was queued, real budget was spent — and then died inside the segment when
+ *  the model echoed the basis back, settling the Work `failed` for something the composer could
+ *  have shown the typist at submit time. Migration 0178's `clara._assert_journal_basis` carries
+ *  the same two caps; this is the earlier, more legible half.
+ *
+ *  THE MEASUREMENTS ARE THE SCHEMA'S, NOT A ROUNDING OF THEM. Zod's `.trim()` transforms BEFORE
+ *  `.max()`, so the memo cap is measured on the TRIMMED string; `description` carries no `.trim()`,
+ *  so its cap is measured on the RAW one. A route that measured both the same way would refuse a
+ *  memo the run could post, or admit one it could not. */
+export const MEMO_MAX_CHARS = 4000;
+export const LINE_DESCRIPTION_MAX_CHARS = 2000;
+
 function isInteger(value: unknown): value is number {
   return typeof value === "number" && Number.isInteger(value);
 }
@@ -70,37 +122,47 @@ function isInteger(value: unknown): value is number {
  * refused by name rather than rounded, because a rounded cent is a wrong ledger.
  */
 export function toDbBasis(raw: unknown): { ok: true; basis: Record<string, unknown> } | { ok: false; error: InvalidBasis } {
-  if (!raw || typeof raw !== "object") return { ok: false, error: invalid("basis", "required") };
+  if (!raw || typeof raw !== "object") return { ok: false, error: invalid("basis", "object") };
   const basis = raw as WireBasis;
-  if (typeof basis.postingDate !== "string" || !DATE_RE.test(basis.postingDate)) {
-    return { ok: false, error: invalid("basis.postingDate", "date_required") };
+  if (typeof basis.postingDate !== "string" || basis.postingDate.trim() === "") {
+    return { ok: false, error: invalid("posting_date", "present") };
   }
+  if (!DATE_RE.test(basis.postingDate)) return { ok: false, error: invalid("posting_date", "iso_date") };
   if (typeof basis.memo !== "string" || basis.memo.trim() === "") {
-    return { ok: false, error: invalid("basis.memo", "memo_required") };
+    return { ok: false, error: invalid("memo", "nonempty") };
   }
-  if (basis.currency !== "MYR") return { ok: false, error: invalid("basis.currency", "currency_must_be_myr") };
-  if (!Array.isArray(basis.lines) || basis.lines.length < 2) {
-    return { ok: false, error: invalid("basis.lines", "at_least_two_lines") };
-  }
+  // The TRIMMED length, because the frozen tool schema trims before it caps (see MEMO_MAX_CHARS).
+  if (basis.memo.trim().length > MEMO_MAX_CHARS) return { ok: false, error: invalid("memo", "max_length") };
+  if (basis.currency !== "MYR") return { ok: false, error: invalid("currency", "myr") };
+  if (!Array.isArray(basis.lines)) return { ok: false, error: invalid("lines", "array") };
+  if (basis.lines.length < 2) return { ok: false, error: invalid("lines", "at_least_two") };
   const lines: Array<Record<string, unknown>> = [];
   let debit = 0;
   let credit = 0;
   for (let i = 0; i < basis.lines.length; i += 1) {
     const line = basis.lines[i] as WireLine;
-    if (!line || typeof line !== "object") return { ok: false, error: invalid(`basis.lines[${i}]`, "line_required") };
+    if (!line || typeof line !== "object") return { ok: false, error: invalid(linePath(i), "object") };
     if (typeof line.accountCode !== "string" || line.accountCode.trim() === "") {
-      return { ok: false, error: invalid(`basis.lines[${i}].accountCode`, "account_required") };
+      return { ok: false, error: invalid(linePath(i, "account_code"), "nonempty") };
     }
-    if (!isInteger(line.debitCents) || line.debitCents < 0) {
-      return { ok: false, error: invalid(`basis.lines[${i}].debitCents`, "integer_cents_required") };
-    }
-    if (!isInteger(line.creditCents) || line.creditCents < 0) {
-      return { ok: false, error: invalid(`basis.lines[${i}].creditCents`, "integer_cents_required") };
-    }
+    if (!isInteger(line.debitCents)) return { ok: false, error: invalid(linePath(i, "debit_cents"), "integer_cents") };
+    if (line.debitCents < 0) return { ok: false, error: invalid(linePath(i, "debit_cents"), "nonnegative_integer_cents") };
+    if (!isInteger(line.creditCents)) return { ok: false, error: invalid(linePath(i, "credit_cents"), "integer_cents") };
+    if (line.creditCents < 0) return { ok: false, error: invalid(linePath(i, "credit_cents"), "nonnegative_integer_cents") };
     const oneSided = (line.debitCents > 0 && line.creditCents === 0) || (line.creditCents > 0 && line.debitCents === 0);
-    if (!oneSided) return { ok: false, error: invalid(`basis.lines[${i}]`, "exactly_one_side") };
-    if (line.description !== undefined && typeof line.description !== "string") {
-      return { ok: false, error: invalid(`basis.lines[${i}].description`, "text_expected") };
+    if (!oneSided) return { ok: false, error: invalid(linePath(i), "exactly_one_side") };
+    // `text` is the ONE constraint token below that migration 0178 has no analogue for, and it is
+    // here rather than left to the database on purpose: 0178 reads the narration with `->>`, which
+    // coerces a number to its text form and never type-checks it, so a numeric description would
+    // be ADMITTED and then refused inside the run by `claraWork.v1.tools.ts`'s frozen
+    // `z.string().max(2000).nullish()` — admitted-but-unpostable, the exact failure the two caps
+    // above exist to prevent.
+    if (line.description !== undefined && line.description !== null && typeof line.description !== "string") {
+      return { ok: false, error: invalid(linePath(i, "description"), "text") };
+    }
+    // The RAW length — that schema does not trim (see LINE_DESCRIPTION_MAX_CHARS).
+    if (typeof line.description === "string" && line.description.length > LINE_DESCRIPTION_MAX_CHARS) {
+      return { ok: false, error: invalid(linePath(i, "description"), "max_length") };
     }
     debit += line.debitCents;
     credit += line.creditCents;
@@ -108,10 +170,11 @@ export function toDbBasis(raw: unknown): { ok: true; basis: Record<string, unkno
       account_code: line.accountCode,
       debit_cents: line.debitCents,
       credit_cents: line.creditCents,
-      description: line.description === undefined ? null : line.description,
+      description: line.description === undefined || line.description === null ? null : line.description,
     });
   }
-  if (debit !== credit) return { ok: false, error: invalid("basis.lines", "unbalanced") };
+  if (debit !== credit) return { ok: false, error: invalid("lines", "balanced") };
+  if (debit === 0) return { ok: false, error: invalid("lines", "nonzero_total") };
   return {
     ok: true,
     basis: { posting_date: basis.postingDate, memo: basis.memo, currency: "MYR", lines },
@@ -213,30 +276,55 @@ async function enqueueWork(taskId: string): Promise<void> {
   }
 }
 
-function sendAdmissionError(res: express.Response, err: unknown, label: string): void {
+/**
+ * The COMPLETE translation of one raised database error into an HTTP answer, or `null` when this
+ * map does not claim the error (the caller logs it and answers 500). Exported so a cell drives
+ * THIS function rather than a copy of its predicate — the same reason `toDbBasis` and
+ * `workErrorStatus` are exported, and the only way to test the 409 body without an HTTP server.
+ */
+export function workErrorResponse(err: unknown): { status: number; body: Record<string, unknown> } | null {
   const code = (err as { code?: string })?.code;
   const reason = reasonOf(err);
   const status = workErrorStatus(code, reason);
   if (status === 400) {
-    res.status(400).json({ error: "invalid_basis", field: fieldOf(err) ?? "basis", reason: reason ?? "invalid_basis" });
-    return;
+    // `constraint` IS the reason on the wire for an `invalid_basis`, so the route's own 400s and
+    // the database's speak ONE vocabulary (see the WIRE FIELD PATHS note in this file's header).
+    // Every other CLR10 has no constraint and rides back under its own typed reason.
+    const constraint = detailField(err, "constraint");
+    return {
+      status: 400,
+      body: {
+        error: "invalid_basis",
+        field: fieldOf(err) ?? "basis",
+        reason: reason === "invalid_basis" && constraint !== null ? constraint : (reason ?? "invalid_basis"),
+      },
+    };
   }
   if (status === 409) {
     if (reason === "not_retryable") {
       // The contract's 409 body: the machine-readable error AND the Work status that made the
       // retry illegal, which is what the detail's own `status` field carries.
-      res.status(409).json({ error: "not_retryable", status: detailField(err, "status") });
-      return;
+      return { status: 409, body: { error: "not_retryable", status: detailField(err, "status") } };
     }
-    res.status(409).json({ error: reason === "intent_payload_conflict" ? "intent_payload_conflict" : "conflict" });
-    return;
+    if (reason === "intent_payload_conflict") {
+      // THE WORK ID IS THE WHOLE POINT OF THIS 409. `clara.admit_journal_work` puts the EXISTING
+      // Work's id in the detail, and the composer's conflict Alert reads it to offer "this draft
+      // was already submitted with different figures" WITH A LINK to that Work. Dropping it left
+      // the human told they had a conflict and given no way to look at it — a dead end where the
+      // database had supplied the exit.
+      return { status: 409, body: { error: "intent_payload_conflict", work_id: detailField(err, "work_id") } };
+    }
+    return { status: 409, body: { error: "conflict" } };
   }
-  if (status === 404) {
-    res.status(404).json({ error: "not_found", message: "not found" });
-    return;
-  }
-  if (status === 403) {
-    res.status(403).json({ error: "forbidden", message: "not permitted" });
+  if (status === 404) return { status: 404, body: { error: "not_found", message: "not found" } };
+  if (status === 403) return { status: 403, body: { error: "forbidden", message: "not permitted" } };
+  return null;
+}
+
+function sendAdmissionError(res: express.Response, err: unknown, label: string): void {
+  const answer = workErrorResponse(err);
+  if (answer !== null) {
+    res.status(answer.status).json(answer.body);
     return;
   }
   console.error(`[clara-runtime] ${label} error:`, (err as Error)?.message ?? err);
@@ -260,8 +348,11 @@ export function workRoutes(): express.Router {
     }
     if (typeof body.intentKey !== "string" || body.intentKey.trim() === "") {
       // C82.1: an empty or whitespace key is refused BEFORE any reservation. The database
-      // refuses it too; refusing it here means it never reaches a reservation at all.
-      res.status(400).json({ error: "invalid_basis", field: "intentKey", reason: "intent_key_required" });
+      // refuses it too, and this answers with the DATABASE'S OWN BODY for that refusal —
+      // `invalid_intent_key`, field `basis` (0178 raises it with no field, and the intent key is
+      // not a control a human typed) — so the two halves of one validation cannot be told apart
+      // by a client. See the WIRE FIELD PATHS note in this file's header.
+      res.status(400).json({ error: "invalid_basis", field: "basis", reason: "invalid_intent_key" });
       return;
     }
     const translated = toDbBasis(body.basis);
@@ -318,7 +409,8 @@ export function workRoutes(): express.Router {
     }
     const body = (req.body ?? {}) as { opKey?: unknown };
     if (typeof body.opKey !== "string" || body.opKey.trim() === "") {
-      res.status(400).json({ error: "invalid_basis", field: "opKey", reason: "op_key_required" });
+      // The retry door's own C82.1 key gate, answering the database's body (`invalid_op_key`).
+      res.status(400).json({ error: "invalid_basis", field: "basis", reason: "invalid_op_key" });
       return;
     }
     try {

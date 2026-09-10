@@ -7,10 +7,12 @@
 //   §A  QUEUED-WITHOUT-A-RUN past a grace window -> re-enqueue through the REGISTRY. The
 //       workflow's own claim step CAS-binds itself, so a duplicate start self-aborts and this
 //       belt never needs to bind anything.
-//   §B  RUNNING/PARKED-WITH-A-RUN whose engine run is TERMINAL -> settle from engine truth
-//       through `clara.settle_work_run`, never `settle_chat_turn` (which raises CLR10 for any
-//       kind other than `chat_turn` — the 2026-07-31 Section-I zombie's own lesson) and never
-//       `settle_autodraft_task`.
+//   §B  RUNNING/PARKED-WITH-A-RUN whose engine run is TERMINAL -> settle from THE BOOKS FIRST and
+//       engine truth second, through `clara.settle_work_run`, never `settle_chat_turn` (which
+//       raises CLR10 for any kind other than `chat_turn` — the 2026-07-31 Section-I zombie's own
+//       lesson) and never `settle_autodraft_task`. "The books first" is #623's reviewed finding
+//       R1: a Work that already recorded an effect settles `completed` with that effect no matter
+//       what the engine says, because a dead run cannot un-post a journal entry.
 //
 // THE THIRD EDGE — a cancel_requested Work — LIVES IN reconciler.mjs's section B, beside the
 // autodraft and wake arms, because that section is where the ONE cancel query already dispatches
@@ -37,9 +39,23 @@ function isRunNotFound(err) {
 }
 
 /**
+ * THE BOOKS COME FIRST. Reviewed finding (#623 R1): every arm below used to translate the
+ * ENGINE's opinion of what happened straight onto the Work, without ever asking whether that Work
+ * had already recorded an effect. A run that had committed `wake_record_journal_entry` — an
+ * approved journal entry and a committed `clara.operation_receipts` row, real money in a real
+ * client's ledger — and then died before checkpointing settled `failed` with "Nothing was posted."
+ * written over a posted entry. `clara.settle_work_run` now overrides that from the receipt side
+ * (0178's `clara._work_committed_receipt`), and BOTH belts stay: the database refuses to record a
+ * false outcome, and the runtime does not ask for one in the first place. The witness the runtime
+ * can see is `clara.accounting_work.result` — `clara_runtime` holds SELECT on that relation and
+ * deliberately holds NOTHING on `clara.operation_receipts`, so the result object is the whole of
+ * this lane's evidence and the database owns the rest.
+ *
  * The legal terminal settle for an OPEN accounting_work task given the engine's terminal status.
  * PURE, and deliberately shaped like `terminalForOpenTask`:
  *
+ *   any status     → a Work that ALREADY HOLDS a committed effect is `completed`, whatever the
+ *                    engine says. A dead run cannot un-post an entry.
  *   running        → completed is NOT reachable here (a completed run settles its own Work), so
  *                    a terminal engine run on a still-running task means the run died after
  *                    claiming and before settling → `failed`.
@@ -47,47 +63,132 @@ function isRunNotFound(err) {
  *                    resumed: its hook is unreachable, so the honest settle is `expired`
  *                    (recoverable — a human's Retry makes a NEW run for the SAME Work).
  *
- * @returns {{outcome:'failed'|'expired'|'cancelled', errorCode:string|null, error:object}|null}
+ * @param {string} taskStatus
+ * @param {string} engine
+ * @param {object|null} [committed]  the Work's own committed result, from `committedWorkResult`
+ * @returns {{outcome:'completed'|'failed'|'expired'|'cancelled', errorCode:string|null,
+ *            error:object|null, result:object|null}|null}
  */
-export function terminalForWork(taskStatus, engine) {
+export function terminalForWork(taskStatus, engine, committed = null) {
+  if (taskStatus !== "running" && taskStatus !== "awaiting_input") return null;
+  const effect = committedWorkResult(committed);
+  if (effect !== null) {
+    // THE ONE ARM THAT OUTRANKS THE ENGINE. The entry exists; the only honest terminal is the one
+    // the ledger already wrote, and the result carries it so the Work detail can show the entry.
+    return { outcome: "completed", errorCode: null, error: null, result: effect };
+  }
   if (taskStatus === "running") {
     if (engine === "lost") {
-      return { outcome: "failed", errorCode: "internal", error: reason("engine_lost", "The run executing this Work is gone. Nothing was posted.") };
+      return settle("failed", "internal", reason("engine_lost", "The run executing this Work is gone. Nothing was posted."));
     }
     if (engine === "failed") {
-      return { outcome: "failed", errorCode: "internal", error: reason("run_failed", "The run executing this Work failed. Nothing was posted.") };
+      return settle("failed", "internal", reason("run_failed", "The run executing this Work failed. Nothing was posted."));
     }
     if (engine === "completed") {
-      // The run finished without settling — it produced no receipt, so the Work produced no
-      // effect. §6: success is decided by the complete business result, never by a stream ending.
-      return { outcome: "failed", errorCode: "internal", error: reason("no_effect", "The run finished without recording an entry. Nothing was posted.") };
+      // The run finished without settling AND the Work holds no committed effect — so the Work
+      // produced nothing. §6: success is decided by the complete business result, never by a
+      // stream ending. The receipt arm above is what keeps this from ever saying so falsely.
+      return settle("failed", "internal", reason("no_effect", "The run finished without recording an entry. Nothing was posted."));
     }
     return null; // 'cancelled' on a plain running task is anomalous — the cancel path owns it
   }
-  if (taskStatus === "awaiting_input") {
-    if (engine === "lost" || engine === "failed") {
-      return { outcome: "expired", errorCode: null, error: reason("question_unreachable", "The question this Work was waiting on can no longer be answered. Nothing was posted.") };
-    }
-    if (engine === "cancelled") {
-      return { outcome: "cancelled", errorCode: null, error: reason("cancelled", "This Work was cancelled while waiting for an answer. Nothing was posted.") };
-    }
-    return null; // 'completed' while parked is impossible (a finished run settles its Work)
+  if (engine === "lost" || engine === "failed") {
+    return settle("expired", null, reason("question_unreachable", "The question this Work was waiting on can no longer be answered. Nothing was posted."));
   }
-  return null;
+  if (engine === "cancelled") {
+    return settle("cancelled", null, reason("cancelled", "This Work was cancelled while waiting for an answer. Nothing was posted."));
+  }
+  return null; // 'completed' while parked is impossible (a finished run settles its Work)
 }
 
 function reason(code, message) {
   return { code, reason: code, message, recoverable: true };
 }
 
+function settle(outcome, errorCode, error) {
+  return { outcome, errorCode, error, result: null };
+}
+
+/**
+ * The Work's OWN committed effect, or null. `clara.accounting_work.result` is the only witness
+ * `clara_runtime` can read (0178 grants it SELECT there and nothing at all on
+ * `clara.operation_receipts`), and it counts as evidence ONLY when it names an entry: a result
+ * object carrying budget numbers and no `entry_id` describes a run, not a posting.
+ *
+ * PURE, so the belts that consult it and the cells that pin it drive the same predicate.
+ * @param {unknown} result  the `result` jsonb off a `clara.accounting_work` row
+ * @returns {Record<string, unknown>|null}
+ */
+export function committedWorkResult(result) {
+  if (result === null || typeof result !== "object" || Array.isArray(result)) return null;
+  const entryId = /** @type {{entry_id?: unknown}} */ (result).entry_id;
+  if (typeof entryId !== "string" || entryId.trim() === "") return null;
+  return /** @type {Record<string, unknown>} */ (result);
+}
+
+/**
+ * Read one accounting_work task's Work result and reduce it through `committedWorkResult`.
+ *
+ * ISSUED ONLY FOR A TASK ALREADY KNOWN TO BE `kind='accounting_work'`, and that is a DEPLOY-ORDER
+ * decision rather than a stylistic one. `clara.accounting_work` does not exist before migration
+ * 0178, and a statement naming a missing relation fails at PARSE time — so folding this read into
+ * the sweep's own SELECT (or into either cancel path's) would have made a runtime image that ran
+ * ahead of 0178 fail to reconcile or cancel ANY kind, chat turns included. workflows/registry.ts
+ * states the standard this package holds itself to for that ordering: a wrong order must leave
+ * Clara refusing the thing it offered to do, never breaking the things it already did. No
+ * `accounting_work` row can exist before 0178 widens the kind CHECK, so a query reached only from
+ * such a row is exactly as inert as the registry key itself.
+ *
+ * @param {import("pg").ClientBase} client  a clara_runtime connection
+ * @param {string} taskId
+ * @returns {Promise<Record<string, unknown>|null>}
+ */
+export async function workResultForTask(client, taskId) {
+  const r = await client.query(
+    `select w.result
+       from clara.agent_tasks t
+       join clara.accounting_work w on w.id = t.work_id
+      where t.id = $1 and t.kind = 'accounting_work'`,
+    [taskId],
+  );
+  return committedWorkResult(r.rows[0]?.result ?? null);
+}
+
+/**
+ * The terminal settle a CANCEL of an accounting Work deserves, given what the Work already holds.
+ * The same receipt-first law as `terminalForWork`, spelled once so the two cancel call sites
+ * (reconciler.mjs's sweep and control.mjs's listener) can never disagree: ARCHITECTURE §6 says a
+ * cancel does not reverse a posted entry ("取消不冲销已入账结果"), so a Work with a committed
+ * effect settles `completed` and a Work without one settles `cancelled`.
+ * PURE.
+ * @param {unknown} result  the `result` jsonb off the Work row (may be null for a non-Work task)
+ */
+export function cancelSettleForWork(result) {
+  const effect = committedWorkResult(result);
+  if (effect !== null) return { outcome: "completed", errorCode: null, error: null, result: effect };
+  return {
+    outcome: "cancelled",
+    errorCode: null,
+    error: {
+      code: "cancelled",
+      reason: "cancelled",
+      message: "This Work was cancelled before an entry was recorded. Nothing was posted.",
+      recoverable: true,
+    },
+    result: null,
+  };
+}
+
 /** Settle an accounting Work terminally (idempotent by task — an already-terminal task returns
- *  `{"replayed":true}` rather than raising). */
-export async function settleWorkTerminal(client, taskId, outcome, errorCode, error) {
-  await client.query("select clara.settle_work_run($1::uuid, $2::text, $3::text, $4::jsonb, null::jsonb) as r", [
+ *  `{"replayed":true}` rather than raising). `result` rides to `p_result` so a receipt-aware
+ *  `completed` carries the entry it is completed BY, rather than an empty success. */
+export async function settleWorkTerminal(client, taskId, outcome, errorCode, error, result = null) {
+  await client.query("select clara.settle_work_run($1::uuid, $2::text, $3::text, $4::jsonb, $5::jsonb) as r", [
     taskId,
     outcome,
     errorCode,
     error == null ? null : JSON.stringify(error),
+    result == null ? null : JSON.stringify(result),
   ]);
 }
 
@@ -109,6 +210,10 @@ export async function reconcileAccountingWorkTasks(client, deps) {
   const { enqueueClaraWork, getRun, onlyFirm = null, graceInterval = WORK_GRACE_REENQUEUE, log = () => {} } = deps;
   const out = {
     workReenqueued: 0,
+    // The receipt-aware arm gets its OWN counter for the same C34.1 reason the other three have
+    // one: "the run died but the entry is on the books" and "the run died and nothing was posted"
+    // are different facts about the estate, and one number that could mean either hides the first.
+    workSettledCompleted: 0,
     workSettledFailed: 0,
     workSettledExpired: 0,
     workSettledCancelled: 0,
@@ -158,14 +263,26 @@ export async function reconcileAccountingWorkTasks(client, deps) {
       }
     }
     if (!engine) continue; // still in flight
-    const settle = terminalForWork(t.status, engine);
+    // ASK THE BOOKS BEFORE NAMING A TERMINAL. A read failure here does NOT fall through to the
+    // engine's opinion: not knowing whether an entry was posted is precisely the state in which
+    // writing "Nothing was posted." would be the lie R1 names. Skip the row; the next sweep asks
+    // again, and the row is still open.
+    let committed;
+    try {
+      committed = await workResultForTask(client, t.id);
+    } catch (err) {
+      log(`[reconcile] accounting-work result read failed task=${t.id}: ${err?.message ?? err}`);
+      continue;
+    }
+    const settle = terminalForWork(t.status, engine, committed);
     if (!settle) {
       log(`[reconcile] no legal terminal for accounting-work task=${t.id} status=${t.status} engine=${engine} — skipping`);
       continue;
     }
     try {
-      await settleWorkTerminal(client, t.id, settle.outcome, settle.errorCode, settle.error);
-      if (settle.outcome === "failed") out.workSettledFailed += 1;
+      await settleWorkTerminal(client, t.id, settle.outcome, settle.errorCode, settle.error, settle.result);
+      if (settle.outcome === "completed") out.workSettledCompleted += 1;
+      else if (settle.outcome === "failed") out.workSettledFailed += 1;
       else if (settle.outcome === "expired") out.workSettledExpired += 1;
       else out.workSettledCancelled += 1;
     } catch (err) {
