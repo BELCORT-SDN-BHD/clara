@@ -68,6 +68,14 @@ _Avoid_: A confirmed policy merely because an action succeeded or was repeated; 
 The recorded debit and credit effects of an accounting event on the general ledger. Related assets, outstanding items, allocations, schedules and period decisions carry additional business meaning.
 _Avoid_: Every change to product or accounting state.
 
+**Work run**:
+One execution attempt of an Accounting work: the durable task and workflow run that claims the work, runs Clara's bundle and settles an outcome. A retry is a new run under the same work and the same logical operation identity.
+_Avoid_: A new piece of work; a reason to post the same effect twice.
+
+**Operation receipt**:
+The record that one logical operation identity committed its business effect: which run and bundle produced it, which human authority it acted for, and which objects it created. At most one committed receipt exists per logical operation identity; a replay returns it and a changed payload under that identity is refused.
+_Avoid_: A chat message claiming completion; a task status; a second effect.
+
 **Accounting operation**:
 A business action, such as recording an acquisition or settling an invoice, with its required journal effects and related accounting records. Its meaning is the same whether initiated by a person or Clara.
 _Avoid_: An arbitrary collection of journal lines as a complete description of every action.
