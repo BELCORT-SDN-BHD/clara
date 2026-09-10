@@ -40,9 +40,10 @@ test("initial read: representative rows carry actor, client, the DB's own senten
   await expect(page.getByText("A fiscal period close was begun.")).toBeVisible();
   await expect(page.getByText("Recorded a journal entry")).toBeVisible();
 
-  // Attribution present on every row (C77.3) — the shared subject falls back to its shortened
-  // id when the roster does not resolve a name, but it is never ABSENT.
-  await expect(page.getByText("1111111…", { exact: false }).first()).toBeVisible();
+  // Attribution present on every row (C77.3) — the shared subject resolves to its real
+  // display name through the firm_members_visible roster (serve-built.mjs's generic fixture),
+  // so it is never a blank cell.
+  await expect(page.getByText("E2E Owner").first()).toBeVisible();
 
   // The client name resolves through the register read, not a raw id.
   await expect(page.getByText(ACTIVITY.clientName).first()).toBeVisible();
@@ -144,7 +145,8 @@ test("a denied detail (a direct deep link to a refused id) shows a not-found sta
 test("live permission loss clears the list on a focus recheck and explains the access state", async ({ page }) => {
   await signIn(page);
   await page.goto(`/activity?client=${ACTIVITY.flipClientId}`);
-  await expect(page.getByText("No activity has been recorded for this firm yet.")).toBeVisible();
+  // A client filter is already active, so the honest empty copy is "no MATCHES", not "first use".
+  await expect(page.getByText("No activity matches these filters.")).toBeVisible();
 
   await page.evaluate(() => window.dispatchEvent(new Event("focus")));
   await expect(page.getByText("Activity is not available")).toBeVisible();

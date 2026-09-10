@@ -487,10 +487,26 @@ async function handleSupabase(request, response, url) {
     return;
   }
 
-  // FIRST, and safe there because every branch inside is scoped to the chat-parity ids
-  // and falls through otherwise (merge of origin/main `cea3da39` / #507 — see that
-  // module's own note). Running it after the generic fixtures below instead would have
-  // starved the chat-parity thread of its `chat_sessions` row, which #507's new
+  // #632's own lane runs FIRST OF ALL, and it has to: `bank-close-registers-mock.mjs`
+  // (handleL7Supabase, below) reads the request body on EVERY `/rest/v1/rpc/` POST before
+  // checking whether the verb is even one of its own, and does not restore it — the same
+  // measured hazard that lane's neighbouring comment already names for the documents lane.
+  // `readJson`'s `for await (const chunk of request)` drains the stream exactly once; a
+  // second reader (this lane's own `handleActivitySupabase`, running after L7's) sees zero
+  // chunks and silently gets back `{}`, which is indistinguishable from "no client filter,
+  // no kind filter" — every list_activity call answered the SAME unfiltered page 1
+  // regardless of what the browser actually asked for, and no error surfaced anywhere,
+  // because `{}`'s undefined fields all satisfy this lane's own permissive matches. MEASURED
+  // by running the kind-filter cell in isolation with server- and browser-side argument
+  // logging: the browser sent `p_kinds:["close"]`, the mock's own handler read back
+  // `body.p_kinds === undefined`. `list_activity`/`get_activity_event` are names no other
+  // lane's verb list contains, so running first costs every other lane nothing — this
+  // handler drains a body only inside its own two exact path checks.
+  if (await handleActivitySupabase(request, response, path, url, sendJson, cors)) return;
+  // FIRST among the REMAINING hooks, and safe there because every branch inside is scoped
+  // to the chat-parity ids and falls through otherwise (merge of origin/main `cea3da39` /
+  // #507 — see that module's own note). Running it after the generic fixtures below instead
+  // would have starved the chat-parity thread of its `chat_sessions` row, which #507's new
   // client/thread pairing check turns into a 404.
   if (await handleJournalsTableSupabase(request, response, path, url, sendJson, cors)) return;
   if (await handleChatParitySupabase(request, response, path, url, sendJson, cors)) return;
@@ -542,10 +558,6 @@ async function handleSupabase(request, response, url) {
   // The home board is LAST because the journal-work lane must precede it (see that lane's own
   // note above, which carries the measurement).
   if (await handleHomeBoardSupabase(request, response, path, url, sendJson, cors)) return;
-  // #632's own lane, last among the hooks (its RPCs — list_activity/get_activity_event — are
-  // claimed by no other lane, and its two client ids are already in the shared register above,
-  // so ordering here costs nothing but is kept alongside its siblings for a reader's sake).
-  if (await handleActivitySupabase(request, response, path, url, sendJson, cors)) return;
 
   if (request.method === "GET" && path === "/rest/v1/clients") {
     const filter = url.searchParams.get("id");
