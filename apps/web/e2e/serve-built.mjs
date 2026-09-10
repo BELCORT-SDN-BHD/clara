@@ -45,6 +45,12 @@ import { handleDocumentsViewerRuntime, handleDocumentsViewerSupabase } from "./d
 // body some earlier hook already drained costs it nothing. Its RPC branch answers on the PATH
 // alone, and its one relation branch reads the query string.
 import { handleHomeBoardSupabase } from "./home-board-mock.mjs";
+// #623's durable-Work lane. Same file-disjoint shape: every branch is scoped to its own
+// client (or to an id that module minted) and falls through otherwise, it claims no
+// unfiltered register, and its ONE chat thread is APPENDED to the shared `sessions` list
+// below rather than answered from a second one. Its runtime half owns `/api/work/*` and
+// one control path; see that module's header for what the walk does and does not prove.
+import { JOURNAL_WORK_SESSIONS, handleJournalWorkRuntime, handleJournalWorkSupabase } from "./journal-work-mock.mjs";
 
 const e2eRoot = dirname(fileURLToPath(import.meta.url));
 const webRoot = resolve(e2eRoot, "..");
@@ -183,6 +189,10 @@ const sessions = [
   // row here carries `created_by: SUBJECT` and its OWN client id, and both walks select by
   // (created_by, client_id), so neither can see the other's.
   ...P6_5_SESSIONS,
+  // #623's ONE thread, appended for exactly the same reason and with the same property:
+  // it carries this list's shared SUBJECT and its OWN client id, so `(created_by,
+  // client_id)` can resolve it only from that lane's client and never at the firm altitude.
+  ...JOURNAL_WORK_SESSIONS,
 ];
 
 function confirmedUser() {
@@ -459,6 +469,16 @@ async function handleSupabase(request, response, url) {
   // header. It has to precede the generic `/rest/v1/clients` branch below to serve its ONE
   // id-scoped client row (a SERVER-side layout read `page.route` cannot reach), and it falls
   // through for every other id, so the unfiltered register stays exactly as this file has it.
+  // #623's lane runs BEFORE the home board's, and that ordering is LOAD-BEARING rather than
+  // a preference — measured, not reasoned. `home-board-mock.mjs`'s `EMPTY_RELATIONS` answers
+  // `/rest/v1/coa_accounts` and `/rest/v1/agent_tasks_visible` with an honest `[]` for EVERY
+  // subject (its own header names that as deliberate), so with this hook after it the journal
+  // composer's account picker held nothing but its placeholder and the Work detail could never
+  // read its run's task. Running first costs that lane nothing: every branch in this module is
+  // scoped to its own client (or to an id it minted) and falls through otherwise, so the honest
+  // empties still answer every other walk. It never calls `readJson` in the PostgREST half, so
+  // an earlier hook that already drained a POST body costs it nothing either.
+  if (await handleJournalWorkSupabase(request, response, path, url, sendJson, cors)) return;
   if (await handleHomeBoardSupabase(request, response, path, url, sendJson, cors)) return;
 
   if (request.method === "GET" && path === "/rest/v1/clients") {
@@ -733,6 +753,11 @@ const mockRuntime = startMockRuntime(mockRuntimePort, async (request, response, 
   if (await handleChatParityRuntime(request, response, url)) return true;
   if (await handleP6_5Runtime(request, response, url)) return true;
   if (await handleDocumentsViewerRuntime(request, response, url)) return true;
+  // #623, BEFORE `handleChat` and for the reason its neighbours are: it answers ONE exact
+  // thread id, so it cannot swallow the shared session list or any thread another walk owns,
+  // while `handleChat` claims the whole `/api/chat/sessions/…/messages` shape and would
+  // otherwise serve this lane's thread a canned text message with no Work cards in it.
+  if (await handleJournalWorkRuntime(request, response, url)) return true;
   if (await handleChat(request, response, url)) return true;
   return handleAuthWallMock({
     request, response, path: url.pathname, cors: {}, state,

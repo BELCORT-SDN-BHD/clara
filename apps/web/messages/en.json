@@ -57,6 +57,10 @@
       "reports": "Reports",
       "registersView": "Registers"
     },
+    "clientLeaf": {
+      "journalComposer": "Record journal entry",
+      "workDetail": "Journal entry"
+    },
     "accounting": {
       "journals": "Journals",
       "bank": "Bank",
@@ -771,6 +775,26 @@
         "acknowledgeBlockedNotFinalized": "This run has not finalized yet, so it cannot be acknowledged.",
         "acknowledgeAlreadyDone": "This run has already been acknowledged.",
         "link": "Open Needs you"
+      },
+      "workAccepted": {
+        "title": "Accounting work accepted",
+        "purposeLabel": "purpose",
+        "workLabel": "work",
+        "operationLabel": "operation identity",
+        "note": "Clara accepted this as durable work. It runs in the background; its own page keeps the current state, the basis and the receipt.",
+        "link": "Open this work"
+      },
+      "workStatus": {
+        "label": "Work status",
+        "workLabel": "for work {work}"
+      },
+      "workResult": {
+        "title": "Journal entry posted",
+        "entryLabel": "entry",
+        "receiptLabel": "receipt",
+        "workLabel": "work",
+        "note": "One balanced entry and one authoritative receipt. The lines and the total are read on the journals workbench.",
+        "link": "Open the client's journals"
       }
     }
   },
@@ -855,7 +879,178 @@
     "notBuilt": "The full filterable Work list and the detail view of a single item arrive with the durable Work records. Today this page composes the two live queues it already has: what is waiting on you, and what the agent is running.",
     "clientHeading": "Work",
     "clientBody": "What is waiting on a person for this client.",
-    "clientNotBuilt": "The full filterable Work list and the detail view of a single item arrive with the durable Work records. Today this page shows this client's slice of the review queue."
+    "clientNotBuilt": "The visible, clearable filters this list is owed — and the difference between an empty list and a filtered no-match — are not built yet. Today this page shows every durable work record for this client, newest first, above this client's slice of the review queue."
+  },
+  "JournalComposer": {
+    "heading": "Record journal entry",
+    "body": "Enter a balanced journal entry without a source document. Submitting admits durable work; the entry is posted by that work and appears on its own page.",
+    "postingDate": "Posting date",
+    "memo": "Memo",
+    "account": "Account",
+    "accountForLine": "Account, line {line}",
+    "lineDescription": "Description",
+    "descriptionForLine": "Description, line {line}",
+    "debit": "Debit",
+    "debitForLine": "Debit, line {line}",
+    "credit": "Credit",
+    "creditForLine": "Credit, line {line}",
+    "rowActions": "Row actions",
+    "removeLine": "Remove line {line}",
+    "addLine": "Add a line",
+    "selectAccount": "Choose an account",
+    "linesTableLabel": "Journal entry lines",
+    "presentationSumLabel": "Typed totals",
+    "differenceLabel": "Difference",
+    "submit": "Submit",
+    "submitting": "Submitting…",
+    "checking": "Checking whether this was already accepted…",
+    "retry": "Try again",
+    "draftKept": "This draft is kept in this tab for this client until you submit it.",
+    "draftNotKept": "This browser is not keeping this draft — if you leave this page, what you have typed is lost.",
+    "accountsUnavailable": "The chart of accounts could not be read, so account names and the unknown-account check are unavailable. You can still enter a code; the accounts are rechecked when the entry is posted.",
+    "issues": {
+      "postingDateRequired": "Enter the posting date.",
+      "postingDateInvalid": "Enter a real calendar date, as YYYY-MM-DD.",
+      "memoRequired": "Enter a memo describing this entry.",
+      "tooFewLines": "A journal entry needs at least two lines.",
+      "accountRequired": "Choose an account for this line.",
+      "accountUnknown": "This client's chart has no active account with that code.",
+      "amountRequired": "Enter a debit or a credit for this line.",
+      "amountBothSides": "A line carries a debit or a credit, never both.",
+      "amountNotExact": "Enter an exact amount in ringgit and sen.",
+      "unbalanced": "Debits and credits must be equal."
+    },
+    "rejected": {
+      "title": "The server did not accept these figures",
+      "body": "Correct the highlighted field and submit again. Nothing was recorded."
+    },
+    "conflict": {
+      "title": "This draft was already submitted with different figures",
+      "body": "Work already exists under this draft's identity, and its figures are not the ones on screen. Open that work to see what was accepted, or start a new draft so these figures are submitted as a separate entry.",
+      "newDraft": "Start a new draft with these figures",
+      "link": "Open the existing work"
+    },
+    "denied": {
+      "title": "You cannot record a journal entry for this client",
+      "body": "Recording a journal entry needs bookkeeper access to this client. Ask a firm administrator if you believe this is wrong."
+    },
+    "notFound": {
+      "title": "This client is not available",
+      "body": "The client this page names could not be found for your firm."
+    },
+    "unavailable": {
+      "title": "The service is not accepting work right now",
+      "body": "Nothing was recorded. Your draft is untouched — try again in a moment."
+    },
+    "lost": {
+      "title": "We could not confirm whether this was accepted",
+      "body": "The connection dropped before an answer arrived, so this entry may or may not have been accepted. Trying again is safe: it carries the same identity, so it resolves the existing work rather than creating a second one."
+    }
+  },
+  "WorkDetail": {
+    "heading": "Journal entry",
+    "body": "One durable accounting work record: what was asked, what ran, and what it recorded.",
+    "loading": "Reading this work record…",
+    "purpose": "Purpose",
+    "statusColumn": "Status",
+    "submittedAt": "Submitted",
+    "initiatorRole": "Authority",
+    "roleAtAdmission": "{role}, at the time it was submitted",
+    "runStatus": "Run: {status}",
+    "runVersion": "Run version",
+    "source": "Source",
+    "noSourceDocument": "No source document — user-supplied basis",
+    "fromClaraConversation": "From a Clara conversation",
+    "sourceOther": "Recorded against a source this page does not name",
+    "basisHeading": "What was asked for",
+    "basisNote": "The basis this work was admitted with. It never changes, so a refusal can be read against exactly what was submitted.",
+    "basisUnreadable": "The basis of this work could not be read.",
+    "basisTableLabel": "Requested journal entry lines",
+    "postingDate": "Posting date",
+    "memo": "Memo",
+    "currency": "Currency",
+    "postedHeading": "What was recorded",
+    "postedTableLabel": "Posted journal entry lines",
+    "account": "Account",
+    "lineNo": "Line",
+    "lineDescription": "Description",
+    "debit": "Debit",
+    "credit": "Credit",
+    "amountUnreadable": "unreadable",
+    "presentationSumLabel": "Requested totals",
+    "entryStatus": "Entry status",
+    "receiptId": "Receipt",
+    "receiptVia": "Recorded through",
+    "viewInJournals": "View in Journals",
+    "rowActions": "Row actions",
+    "openWork": "Open",
+    "listHeading": "Accounting work",
+    "listLoading": "Reading this client's work records…",
+    "listEmpty": "No accounting work has been submitted for this client yet.",
+    "listReadFailed": "This client's work records could not be read.",
+    "listTruncated": "Only the most recent work records are shown.",
+    "delayedSince": "Update delayed. The last successful read was {at}.",
+    "readFailed": {
+      "title": "This work record could not be read",
+      "body": "Nothing about this work has changed — only this page's ability to read it."
+    },
+    "readFailedWithData": "Showing the state as at {at}. The latest read did not succeed.",
+    "retryRead": "Read again",
+    "retryWork": "Run this again",
+    "retryingWork": "Starting a new run…",
+    "retryRefused": "This work cannot be run again in its current state.",
+    "retryUnavailable": "The service could not start a new run. Nothing changed.",
+    "editAsNewDraft": "Edit as a new draft",
+    "notFound": {
+      "title": "This work record was not found",
+      "body": "It may belong to another client, or it may never have existed. Check the address, or open this client's work list."
+    },
+    "denied": {
+      "title": "You cannot see this work record",
+      "body": "Your access to this client changed, so the details have been cleared from this page."
+    },
+    "status": {
+      "queued": "Queued",
+      "running": "Running",
+      "awaiting_input": "Waiting for an answer",
+      "stopping": "Stopping",
+      "completed": "Completed",
+      "refused": "Refused",
+      "failed": "Failed",
+      "cancelled": "Cancelled",
+      "expired": "Expired"
+    },
+    "running": {
+      "body": "This work is running. You can leave this page — it keeps its own state, and this page rereads it."
+    },
+    "stopping": {
+      "body": "This work is stopping. Anything already admitted is finishing; no new operations will start."
+    },
+    "completed": {
+      "title": "Completed",
+      "body": "One balanced journal entry was recorded, with the receipt below."
+    },
+    "awaiting": {
+      "title": "Waiting for an answer",
+      "body": "This work asked a question and is parked until someone answers it.",
+      "link": "Open what needs you"
+    },
+    "refused": {
+      "title": "Refused",
+      "body": "The database refused this operation. Nothing was recorded."
+    },
+    "failed": {
+      "title": "This work did not finish",
+      "body": "The run stopped before it recorded anything."
+    },
+    "budget": {
+      "title": "This work ran out of its allowance",
+      "body": "The run reached the limit set for it and stopped without recording anything. Running it again starts a fresh allowance."
+    },
+    "cancelled": {
+      "title": "Cancelled",
+      "body": "This work was cancelled. Anything already recorded stays recorded and is shown below."
+    }
   },
   "ClientAccounting": {
     "heading": "Accounting",

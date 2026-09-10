@@ -22,14 +22,15 @@ export type CatalogEntry = { renderBranch: true; fixtures: ClaraPart[] };
 
 /** The part types that render a VISIBLE persisted element. Every key here MUST
  *  have a branch in PartRenderer.tsx; the parity test (./catalog.test.tsx) enforces
- *  it. 24 render-branch entries + the 2 STATUS_RESOLVER_TYPES above = 26 total,
+ *  it. 27 render-branch entries + the 2 STATUS_RESOLVER_TYPES above = 29 total,
  *  matching the live ClaraPart union in ./types.ts exactly.
  *
  *  The count's own history, because every step of it was a measurement rather
  *  than a plan: 16 + 2 = 18 until 2026-08-29, when MBB-4 registered the four
  *  chatTurn_v14 receipt kinds the live emitter was already putting on the wire
  *  (20 + 2 = 22); then 24 + 2 = 26 on 2026-08-30, when P6-2 registered the four
- *  chatTurn_v16 kinds P6-1 declared (ruling Q8). */
+ *  chatTurn_v16 kinds P6-1 declared (ruling Q8); then 27 + 2 = 29 on 2026-09-10,
+ *  when the durable-Work three joined for the first persistent successor. */
 export const PART_CATALOG = {
   text: {
     renderBranch: true,
@@ -261,6 +262,56 @@ export const PART_CATALOG = {
       { type: "close_proposal", proposal_id: "prop-2525", close_run_id: "run-2525", client_id: "client-1111" },
     ],
   },
+  // --- The three durable-Work kinds (#623) ------------------------------------
+  // Shaped from the shared contract the runtime worker declares against, field
+  // for field (see ./types.ts's own block for what that means and what it does
+  // not prove yet). Each renders identifiers plus the DB's own status word; none
+  // carries a figure, so none of these fixtures has one to accidentally paint.
+  work_accepted: {
+    renderBranch: true,
+    fixtures: [
+      {
+        type: "work_accepted",
+        work_id: "work-3131",
+        client_id: "client-1111",
+        purpose: "journal_entry",
+        logical_op_id: "work:work-3131:journal_entry:1",
+      },
+      // `client_id` EMPTY — the same shape `entry_posted` documents above. A card
+      // that built `/clients//work/work-3232` from it would be a 404 dressed as
+      // an affordance, so the branch drops the link instead; this fixture is the
+      // reachability proof that it still renders.
+      {
+        type: "work_accepted",
+        work_id: "work-3232",
+        client_id: "",
+        purpose: "journal_entry",
+        logical_op_id: "work:work-3232:journal_entry:1",
+      },
+    ],
+  },
+  work_status: {
+    renderBranch: true,
+    fixtures: [
+      { type: "work_status", work_id: "work-3131", status: "running" },
+      // A status this build does not know renders VERBATIM rather than through a
+      // missing `t()` key — the checked-lookup discipline, exercised.
+      { type: "work_status", work_id: "work-3131", status: "some_future_status" },
+    ],
+  },
+  work_result: {
+    renderBranch: true,
+    fixtures: [
+      {
+        type: "work_result",
+        work_id: "work-3131",
+        client_id: "client-1111",
+        entry_id: "entry-3131",
+        receipt_id: "receipt-3131",
+      },
+    ],
+  },
+
   freeform_result: {
     renderBranch: true,
     // `read_id` is a STRING carrying a bigint (clara.freeform_read_log.id is a

@@ -38,8 +38,29 @@
  * with `null`. The nil uuid (`00000000-…-000000000000`) passes this check —
  * it is a syntactically valid uuid that simply names no row.
  */
-const CLIENT_ID_SHAPE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const UUID_SHAPE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * ONE REGEX, TWO NAMES — and the second name is the reason this generalisation
+ * is safe rather than scope creep.
+ *
+ * `clara.clients.id` is not the only `uuid` this app ever takes off a URL:
+ * `/clients/:clientId/work/:workId` addresses `clara.accounting_work.id`
+ * (migration 0178) the same way, and the defect this module was written for is
+ * IDENTICAL there — a malformed `id=eq.not-a-work` is a PostgREST 400 `22P02`
+ * that THROWS, so the route renders "Something went wrong" instead of its own
+ * not-found state. The fix is the same guard applied before the read.
+ *
+ * The alternative was a second copy of this pattern in a second module, which is
+ * exactly the "spelling is not identity" drift the review laws exist to catch: a
+ * regex that merely LOOKS the same is not the same guard. So the pattern stays
+ * here, once, and `isClientIdShape` is kept as the name every existing call site
+ * already reads rather than being renamed across the tree.
+ */
+export function isUuidShape(value: string): boolean {
+  return UUID_SHAPE.test(value);
+}
 
 export function isClientIdShape(value: string): boolean {
-  return CLIENT_ID_SHAPE.test(value);
+  return isUuidShape(value);
 }

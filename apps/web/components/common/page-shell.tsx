@@ -39,6 +39,7 @@ export function PageHeader({
   title,
   description,
   action,
+  headingId,
 }: {
   title: ReactNode;
   /** The one-or-two-sentence orientation line some surfaces carry. */
@@ -47,11 +48,32 @@ export function PageHeader({
    *  "New journal entry"). Kept in the header rather than floating above the
    *  content so every page puts its main act in the same place. */
   action?: ReactNode;
+  /**
+   * An id on the `<h1>`, for the ONE surface that has to move focus to it: the
+   * Work detail, which §4 requires to "focus its heading when reached by
+   * navigation". The heading also takes `tabIndex={-1}` when an id is given,
+   * because an `<h1>` is not focusable otherwise and `.focus()` on it would
+   * silently do nothing.
+   *
+   * A PROP, NOT A `focusOnMount` BEHAVIOUR, and the difference matters: this
+   * module is imported by server components and has no `"use client"`, so it
+   * cannot hold an effect. The client surface that needs the focus owns the
+   * decision — which is also the right place for it, since §4's other half
+   * ("merely opening a background update does not steal focus") is a judgement
+   * about that surface's own lifecycle, not about page headers in general.
+   */
+  headingId?: string;
 }) {
   return (
     <header className="flex flex-wrap items-start justify-between gap-2">
       <div className="flex min-w-0 flex-col gap-1">
-        <h1 className="text-xl font-semibold text-foreground">{title}</h1>
+        <h1
+          id={headingId}
+          tabIndex={headingId === undefined ? undefined : -1}
+          className="text-xl font-semibold text-foreground"
+        >
+          {title}
+        </h1>
         {description ? <p className="max-w-prose text-sm text-muted-foreground">{description}</p> : null}
       </div>
       {action ? <div className="shrink-0">{action}</div> : null}

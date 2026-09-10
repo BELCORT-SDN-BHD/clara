@@ -88,19 +88,22 @@ for (const type of STATUS_RESOLVER_TYPES) {
   });
 }
 
-// Belt-and-braces: the catalog is exactly 26 live types (24 render branches + 2
+// Belt-and-braces: the catalog is exactly 29 live types (27 render branches + 2
 // status resolvers). It was 18 (16 + 2) — the corrected count from
 // docs/plan/active/codex-frontend-handoff-errata-2026-08-27.md (ii), not the stale
 // 21 in frontend-handoff-2026-08-23.md §3.1 — until MBB-4 registered the four
 // chatTurn_v14 receipt kinds the live emitter was already putting on the wire
-// (22), and 26 since P6-2 registered the Q8 four that chatTurn_v16 declares.
-// This test is the one cell in the suite that had to be EDITED by this PR rather
-// than added to, and its failing beforehand was the proof that the catalog's own
-// completeness mechanism works: the guards in ./catalog.ts and the parity loop
-// above cannot be satisfied by a count, so this assertion is the only thing
-// standing between "four kinds registered" and "four SPECIFIC kinds registered".
-test("the catalog totals 26 live part types (24 render branches + 2 status resolvers)", () => {
-  assert.equal(RENDER_BRANCH_TYPES.length, 24);
+// (22), then 26 when P6-2 registered the Q8 four that chatTurn_v16 declares, and
+// 29 since the durable-Work three (`work_accepted`, `work_status`,
+// `work_result`) joined for the first persistent successor.
+// This test is the one cell in the suite that has to be EDITED by such a change
+// rather than added to, and its failing beforehand is the proof that the
+// catalog's own completeness mechanism works: the guards in ./catalog.ts and the
+// parity loop above cannot be satisfied by a count, so this assertion is the
+// only thing standing between "three kinds registered" and "three SPECIFIC kinds
+// registered".
+test("the catalog totals 29 live part types (27 render branches + 2 status resolvers)", () => {
+  assert.equal(RENDER_BRANCH_TYPES.length, 27);
   assert.equal(STATUS_RESOLVER_TYPES.length, 2);
   const retired = ["kb_rule_proposal", "rule_post_receipt", "bank_rule_proposal"];
   for (const t of retired) {
@@ -123,6 +126,17 @@ test("the catalog totals 26 live part types (24 render branches + 2 status resol
     assert.ok(
       RENDER_BRANCH_TYPES.includes(t as (typeof RENDER_BRANCH_TYPES)[number]),
       `${t} is on the chatTurn_v16 wire — it must have a render branch, never the unsupported chip`,
+    );
+  }
+  // The durable-Work three, BY NAME and for the same reason. These are the exact
+  // names the shared contract spells for the runtime's own declarers
+  // (`chatTurn.v18.parts.ts` for `work_accepted`; `claraWork.v1.parts.ts` for the
+  // other two), and `packages/runtime/scripts/check-parts-parity.mjs` is what
+  // holds the reader and the declarer to them.
+  for (const t of ["work_accepted", "work_status", "work_result"]) {
+    assert.ok(
+      RENDER_BRANCH_TYPES.includes(t as (typeof RENDER_BRANCH_TYPES)[number]),
+      `${t} is on the durable-Work wire — it must have a render branch, never the unsupported chip`,
     );
   }
   // 裁-44 / 裁-62 / 裁-70: the tax-draft kind is RESERVED and must NOT be here.

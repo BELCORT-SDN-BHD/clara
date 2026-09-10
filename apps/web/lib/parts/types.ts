@@ -285,10 +285,67 @@ export type CloseProposalPart = {
  *  wrong. The card filters `id=eq.<read_id>` and never does arithmetic on it. */
 export type FreeformResultPart = { type: "freeform_result"; read_id: string };
 
-/** The canonical transcript wire union: 26 live members (9 base + 4 Wave-A +
- *  1 Wave-C-c + 2 Wave-D-a + 2 Wave-D-b + 4 chatTurn_v14 + 4 chatTurn_v16).
- *  Adding a member here without a matching ./catalog.ts entry fails `tsc` — see
- *  catalog.ts's AllCovered/NoExtra guard. */
+// --- The durable-Work kinds (#623) --------------------------------------------
+// The runtime is the DECLARER — `chatTurn.v18.parts.ts` emits `work_accepted`,
+// and `claraWork.v1.parts.ts` emits `work_status` and `work_result`; this module
+// is the READER, and `packages/runtime/scripts/check-parts-parity.mjs` is the CI
+// gate that holds the two in step. The same law the v14 and v16 blocks above
+// state applies here: do not add, rename or widen a field to make a card nicer,
+// because the wire does not carry it.
+//
+// THESE THREE WERE WRITTEN AGAINST A SHARED CONTRACT RATHER THAN AGAINST THE
+// DECLARER'S SOURCE, because the three workers on this ticket built in parallel
+// and the runtime closure lands on another branch. That is a NAMED LIMIT: until
+// the branches merge, "transcribed field for field" is a claim proven only by
+// the parity gate, not by a read of the emitter. The gate is the instrument that
+// settles it, and running it is part of this lane's own evidence.
+
+/** ONE admitted Work, announced in the conversation that asked for it — the B6
+ *  receipt. It carries the CLIENT because the durable detail lives at
+ *  `/clients/:client_id/work/:work_id`, and a card that had only the work id
+ *  could build no route at all.
+ *
+ *  `logical_op_id` IS ON THE WIRE AND IS RENDERED, not decoration: it is the
+ *  server-assigned identity of the accounting operation, and it is what makes a
+ *  replayed commit resolve the ORIGINAL receipt. A professional reading a
+ *  transcript can match it against the receipt on the Work page.
+ *
+ *  NO AMOUNT, NO LINES, NO STATUS. The Work's basis and its outcome are read on
+ *  its own page, live; a figure copied into a chat card is a figure that goes
+ *  stale the moment the run settles (apps/web AGENTS.md: "the UI never invents a
+ *  number"). */
+export type WorkAcceptedPart = {
+  type: "work_accepted";
+  work_id: string;
+  client_id: string;
+  purpose: string;
+  logical_op_id: string;
+};
+
+/** A run's own status, as the workflow observed it. TWO FIELDS WIDE, and the
+ *  absence of a `client_id` is structural rather than an omission: this part is
+ *  a progress note inside one turn, emitted by the run that is already writing
+ *  to that turn's stream, and it addresses nothing a reader can navigate to on
+ *  its own. So the card renders a compact line and offers NO link — a link built
+ *  from a client id this part does not carry would be invented. */
+export type WorkStatusPart = { type: "work_status"; work_id: string; status: string };
+
+/** The COMMITTED effect: one journal entry, one receipt, both named by the
+ *  database. Identifier-only, like every other receipt kind here — the entry's
+ *  lines and total are read on the journals workbench, which is what the card
+ *  links to. */
+export type WorkResultPart = {
+  type: "work_result";
+  work_id: string;
+  client_id: string;
+  entry_id: string;
+  receipt_id: string;
+};
+
+/** The canonical transcript wire union: 29 live members (9 base + 4 Wave-A +
+ *  1 Wave-C-c + 2 Wave-D-a + 2 Wave-D-b + 4 chatTurn_v14 + 4 chatTurn_v16 +
+ *  3 durable-Work). Adding a member here without a matching ./catalog.ts entry
+ *  fails `tsc` — see catalog.ts's AllCovered/NoExtra guard. */
 export type ClaraPart =
   | { type: "text"; text: string }
   | { type: "tool_call"; tool: string; tool_call_id: string; input: unknown }
@@ -315,4 +372,7 @@ export type ClaraPart =
   | AgentReceiptPart
   | FirmQuestionPart
   | CloseProposalPart
-  | FreeformResultPart;
+  | FreeformResultPart
+  | WorkAcceptedPart
+  | WorkStatusPart
+  | WorkResultPart;

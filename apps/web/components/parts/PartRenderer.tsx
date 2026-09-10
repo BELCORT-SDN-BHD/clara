@@ -9,6 +9,7 @@ import { PartSummaryCard, type SummaryRow } from "./PartSummaryCard";
 import { BankActCard, BankPackCard, EntryPostedCard, QuestionOpenedCard } from "./V14ReceiptCards";
 import { AgentReceiptCard, FreeformResultCard } from "./V16Cards";
 import { CloseProposalCard, FirmQuestionCard } from "./V16ActCards";
+import { WorkAcceptedCard, WorkResultCard, WorkStatusLine } from "./WorkCards";
 import { SweepReceiptCard } from "./SweepReceiptCard";
 import { ClarifyCard } from "./ClarifyCard";
 import type { SessionTokenAccessor } from "@/lib/session";
@@ -280,6 +281,14 @@ export function PartRenderer({
   // 裁-20: needed NO wire change — `sweep_receipt` has been on the live union
   // since the port and simply rendered through SUMMARY_TYPES until now.
   if (part.type === "sweep_receipt") return <SweepReceiptCard part={part} />;
+
+  // The three durable-Work kinds (#623). Like the v14 four they render the wire
+  // and stop — the Work's live state is read on its OWN page, which is exactly
+  // where the accepted card links, so a transcript never holds a second, staler
+  // copy of a status that keeps changing. See ./WorkCards.tsx.
+  if (part.type === "work_accepted") return <WorkAcceptedCard part={part} />;
+  if (part.type === "work_status") return <WorkStatusLine part={part} />;
+  if (part.type === "work_result") return <WorkResultCard part={part} />;
 
   // RESERVED, AND DELIBERATELY NOT A BRANCH — the tax-draft card (裁-44). Its
   // part shape belongs to the `ft3-taxprep-design` lane, alongside the

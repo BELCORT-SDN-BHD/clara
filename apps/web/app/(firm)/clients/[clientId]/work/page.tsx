@@ -2,6 +2,7 @@ import { getTranslations } from "next-intl/server";
 
 import { NotBuiltNote } from "@/components/common/not-built-note";
 import { PageHeader, PageShell } from "@/components/common/page-shell";
+import { AccountingWorkList } from "@/components/work/accounting-work-list";
 import { ClientWorkQueue } from "@/components/work/client-work-queue";
 
 /**
@@ -18,8 +19,16 @@ import { ClientWorkQueue } from "@/components/work/client-work-queue";
  * IT IS THE SAME COMPONENT AS THE HOME'S SECTION C, given its own read — see
  * components/work/client-work-queue.tsx. One rendering of one queue.
  *
- * HONESTLY PARTIAL, and the note says so: the filterable list and the detail
- * view of a single item arrive with the durable Work records (#641).
+ * THE DURABLE WORK RECORDS LAND HERE FIRST. `AccountingWorkList` is this
+ * client's `clara.accounting_work` rows — what has been asked of the agent and
+ * how it ended — and each row links to its own address. It sits ABOVE the review
+ * queue because the two answer different questions: this one is the record of an
+ * operation, the queue below is what is waiting on a person. See that component's
+ * own header for why they are not merged.
+ *
+ * STILL HONESTLY PARTIAL, and the note still says so: the FILTERS the journey
+ * asks for (a visible, clearable filter set, and an empty-with-filters state
+ * distinct from an empty list) are not built here yet.
  */
 export default async function ClientWorkPage({
   params,
@@ -32,6 +41,7 @@ export default async function ClientWorkPage({
   return (
     <PageShell>
       <PageHeader title={t("clientHeading")} description={t("clientBody")} />
+      <AccountingWorkList clientId={clientId} />
       <ClientWorkQueue clientId={clientId} />
       <NotBuiltNote>{t("clientNotBuilt")}</NotBuiltNote>
     </PageShell>
