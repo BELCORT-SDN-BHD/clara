@@ -952,6 +952,17 @@ const USER_PREFERENCES_0179_CLOCK_NAMES = ["save_my_preferences"];
 const WORK_QUESTIONS_0180_CLOCK_NAMES = [
   "answer_work_question", "expire_due_interruptions", "open_work_question",
 ];
+// #634 [0182] — optional and late journal evidence. ZERO names are added, and that is a
+// MEASUREMENT rather than an omission. `_record_journal_entry_core` is recut but already sits in
+// WORK_JOURNAL_0178_CLOCK_NAMES above and its recut introduces no new clock read (the same
+// `approved_at`/`updated_at`/`posted_at` stamps). `admit_journal_work` reads no clock before or
+// after its recut. `attach_entry_evidence` reads none either: `entry_evidence_links.attached_at`
+// is a COLUMN DEFAULT (not prosrc), exactly as the checkout-gate note above records for
+// `claim_confirmation_attempt`, and the door derives no DATE from any instant. `list_entry_links`,
+// `_journal_document_filed`, `_document_posting_entry`, `_assert_journal_source_refs`,
+// `_journal_source_refs_canonical` and `_journal_source_document` are all clock-free reads.
+// No `appliedStem('journal_work_evidence$')` arm is therefore needed below; adding an empty one
+// would suggest a roster that grows when it does not.
 
 /** The arm (D) roster for the database under test, sorted as the catalog sorts it. */
 export async function s5BareTokenRoster(query) {
