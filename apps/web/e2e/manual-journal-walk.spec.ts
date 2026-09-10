@@ -136,7 +136,7 @@ test("C3: evidence is OPTIONAL, and the chosen document survives a reload under 
 
   // THE POSTED ENTRY'S SOURCE IS READ BACK FROM THE DATABASE, not from what was
   // submitted — the same read that would show a LATE attachment.
-  await expect(page.getByRole("heading", { level: 2, name: "Posted entry" })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 2, name: "What was recorded" })).toBeVisible();
   await expect(page.getByText(JOURNAL_WORK.freeDocumentId, { exact: false })).toBeVisible();
   // …and the late door is NOT offered on an entry that already has a source.
   await expect(page.getByRole("button", { name: "Attach evidence" })).toHaveCount(0);
@@ -208,7 +208,7 @@ test("B3: LATE attachment on a posted documentless entry — happy, replay, and 
 
   // "No document" IS WRITTEN OUT rather than left as an empty slot: an entry
   // recorded without evidence is a legitimate state, not a gap in the record.
-  await expect(page.getByRole("heading", { level: 2, name: "Posted entry" })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 2, name: "What was recorded" })).toBeVisible();
   await expect(page.getByText("No document", { exact: true }).first()).toBeVisible();
 
   const trigger = page.getByRole("button", { name: "Attach evidence" });
@@ -252,6 +252,7 @@ test("B3: the late door refuses a STALE view of the entry and says so inline, ke
   await page.goto(COMPOSER_URL);
   await fillBalancedBasis(page);
   await page.getByRole("button", { name: "Submit" }).click();
+  await expect(page).toHaveURL(/\/work\/[0-9a-f-]{36}$/);
   const workId = workIdIn(page.url());
   await control(page, { op: "run", workId });
   await control(page, { op: "complete", workId });
