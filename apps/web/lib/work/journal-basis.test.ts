@@ -284,3 +284,29 @@ test("totalsOf ignores a non-integer rather than adding NaN into a money total",
   ]);
   assert.deepEqual(totals, { debitCents: 100, creditCents: 100, differenceCents: 0, balanced: true });
 });
+
+// ===========================================================================================
+// #634 — THE EVIDENCE CONTROL joins the one wire→control vocabulary.
+// ===========================================================================================
+
+test("#634: the evidence array's wire path maps onto the evidence control, in BOTH spellings", () => {
+  // The route re-spells `source_refs[N]` as `sourceRefs[N]` before it answers (that is its ONE
+  // translation, `toWireField`), so the browser normally sees the camelCase form — but a refusal
+  // that ever arrived in the database's own spelling must still land on the same control rather
+  // than on nothing at all. Accepting both is not a second vocabulary: it is the SAME path,
+  // recognised whichever side of the one translator it came from.
+  assert.equal(fieldForServerPath("sourceRefs"), "evidence");
+  assert.equal(fieldForServerPath("sourceRefs[1]"), "evidence");
+  assert.equal(fieldForServerPath("sourceRefs[2]"), "evidence");
+  assert.equal(fieldForServerPath("source_refs"), "evidence");
+  assert.equal(fieldForServerPath("source_refs[1]"), "evidence");
+});
+
+test("#634: an unknown path is still null rather than a guessed control", () => {
+  // `sourceRefs[0]` is not a path this vocabulary produces (SQL counts from one), and a prefix
+  // match would be exactly the "focus whichever control shares a prefix" failure the module's
+  // own header refuses.
+  assert.equal(fieldForServerPath("sourceRefs[0]"), null);
+  assert.equal(fieldForServerPath("sourceRefsomething"), null);
+  assert.equal(fieldForServerPath("basis"), null);
+});

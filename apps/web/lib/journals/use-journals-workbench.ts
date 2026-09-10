@@ -31,7 +31,7 @@
 // SAME err/clr to every draft's detail panel and to the posted panel's every
 // row, so a refusal from reversing entry A could render attached to entry B's
 // still-open detail view (cross-attribution). `actingId` tracks WHICH row (or
-// the sentinel `"compose"`) the CURRENT busy/err/clr belongs to — set
+// the sentinel a multi-row panel uses) the CURRENT busy/err/clr belongs to — set
 // synchronously, before `state.act()` is even called, so it always lands in
 // the SAME React batch as `act()`'s own `setBusy(true); setErr(null);
 // setClr(null)` (hooks.ts's own act() does this at the top of its body, before
@@ -47,11 +47,9 @@ import { isDoorError } from "@/lib/doors";
 import type { SessionTokenAccessor } from "@/lib/session";
 import {
   approveEntry,
-  composeManualEntry,
   loadJournalsWorkbench,
   reverseEntry,
   reviseEntry,
-  type ComposeManualEntryInput,
 } from "./api";
 import {
   answerInterruption,
@@ -96,11 +94,6 @@ async function loadJournalsWorkbenchWithInterruptions(
   ]);
   return { ...data, interruptions, clientIdByTaskId };
 }
-
-/** The sentinel `actingId` for the compose ceremony — not a real entry id
- *  (a new entry has none until the door succeeds), but a stable identity the
- *  compose dialog can compare against. */
-export const COMPOSE_ACTING_ID = "compose";
 
 function kindOfReadFailure(e: unknown): ReadErrorKind | null {
   if (isReadError(e)) return e.kind;
@@ -151,17 +144,9 @@ export function useJournalsWorkbench(clientId: string, auth: SessionTokenAccesso
     [auth, state],
   );
 
-  const compose = useCallback(
-    (input: ComposeManualEntryInput, onOk?: () => void) => {
-      setActingId(COMPOSE_ACTING_ID);
-      return state.act(() => composeManualEntry(auth, clientId, input).then(() => undefined), onOk);
-    },
-    [auth, clientId, state],
-  );
-
   // --- T6 additions: the routine quick-approve, draft withdrawal, and the
   // firm-wide agent-clarify answer door — all ride the SAME act()-and-reload
-  // cycle as approve/revise/reverse/compose above (hydrate-never-trust). ---
+  // cycle as approve/revise/reverse above (hydrate-never-trust). ---
 
   const approveRoutine = useCallback(
     (entryId: string, expectedRevision: string, onOk?: () => void) => {
@@ -199,5 +184,5 @@ export function useJournalsWorkbench(clientId: string, auth: SessionTokenAccesso
     [auth, state],
   );
 
-  return { ...state, readErrorKind, actingId, approve, revise, reverse, compose, approveRoutine, withdraw, answerClarify, promoteClarify };
+  return { ...state, readErrorKind, actingId, approve, revise, reverse, approveRoutine, withdraw, answerClarify, promoteClarify };
 }

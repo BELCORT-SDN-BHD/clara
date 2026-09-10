@@ -429,72 +429,24 @@ export async function reverseEntry(
 // this mission's SCOPE to wire, but the way a human corrects this specific
 // mistake today (via the dashboard, until a P3 follow-up wires it here too).
 
-/** Step 1 of manual compose — see the header above. Exposed separately only so
- *  a test can exercise it in isolation; `composeManualEntry` is the intended
- *  call site. */
-export async function recordManualResolution(session: SessionTokenAccessor, clientId: string): Promise<string> {
-  const out = await callDoor<{ resolution_id?: string }>(
-    "record_client_resolution",
-    {
-      p_client: clientId,
-      p_subject_kind: "manual",
-      p_subject: null,
-      p_confidence: 1,
-      p_method: "human",
-      p_evidence: {},
-      p_op_key: opKey(),
-    },
-    { session },
-  );
-  const id = out?.resolution_id;
-  if (!id) throw new Error("record_client_resolution returned no resolution_id");
-  return id;
-}
+// #634 RETIRED THE MANUAL-COMPOSE CEREMONY. `recordManualResolution`,
+// `draftManualEntry` and `composeManualEntry` used to live here: a two-call
+// dance that minted a `client_resolutions` row for a manual entry that resolves
+// NOTHING, drafted against it, and then demanded a SECOND human approve the
+// result with an attestation.
+//
+// Three findings retired it, and none of them is a preference:
+//   * The resolution was a FABRICATED ATTRIBUTION FACT. A documentless basis a
+//     human typed has no subject to resolve; migration 0178's own header states
+//     why the accounting-work lane refuses to mint one.
+//   * The approve-with-attestation step was a PER-ACTION TWO-PERSON CEREMONY for
+//     an ordinary authorised posting, which the refresh spec rejects outright
+//     (#634's C-28 / C55.11 / C83.5 / CB-AE2E-010 / CB-AE2E-021 obligations).
+//     Actual role authority and the hard accounting constraints remain — they
+//     are enforced at admission AND rechecked at commit.
+//   * It was a SECOND route to one job. `/clients/:id/accounting/journal/new`
+//     (the C3 composer) is the one manual-JV entry point, and the Journals tab's
+//     primary act now links there.
+// The DOCUMENT-sourced draft queue below is untouched: an autodrafted entry is a
+// proposal about somebody else's document and still deserves a reviewer.
 
-/** Step 2 of manual compose — see the header above. */
-export async function draftManualEntry(
-  session: SessionTokenAccessor,
-  clientId: string,
-  resolutionId: string,
-  postingDate: string,
-  memo: string,
-  lines: EntryLineInput[],
-): Promise<{ entry_id: string; revision_token: string; status: string }> {
-  const out = await callDoor<{ entry_id?: string; revision_token?: string; status?: string }>(
-    "draft_entry",
-    {
-      p_client: clientId,
-      p_resolution: resolutionId,
-      p_posting_date: postingDate,
-      p_memo: memo,
-      p_lines: lines,
-      p_document: null,
-      p_sha256: null,
-      p_flags: {},
-      p_op_key: opKey(),
-      p_proposed_counterparty: null,
-      p_evidence: null,
-    },
-    { session },
-  );
-  if (!out?.entry_id) throw new Error("draft_entry returned no entry_id");
-  return { entry_id: out.entry_id, revision_token: out.revision_token ?? "", status: out.status ?? "draft" };
-}
-
-export type ComposeManualEntryInput = {
-  postingDate: string;
-  memo: string;
-  lines: EntryLineInput[];
-};
-
-/** The full manual-compose ceremony: record the resolution, then draft the
- *  entry against it. See the header above for the grounding + the orphaned-
- *  resolution-on-refusal note. */
-export async function composeManualEntry(
-  session: SessionTokenAccessor,
-  clientId: string,
-  input: ComposeManualEntryInput,
-): Promise<{ entry_id: string; revision_token: string; status: string }> {
-  const resolutionId = await recordManualResolution(session, clientId);
-  return draftManualEntry(session, clientId, resolutionId, input.postingDate, input.memo, input.lines);
-}

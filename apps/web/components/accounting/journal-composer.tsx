@@ -49,9 +49,10 @@ import { Textarea } from "@/components/ui/textarea";
 import { businessToday } from "@/lib/business-date";
 import { listCoaAccounts } from "@/lib/journals/api";
 import { useAsyncRead } from "@/lib/firm/use-async-read";
-import { canOpenClientLeaf, workDetailHref, type NavigationScope } from "@/lib/navigation/tree";
+import { canOpenClientLeaf, journalEntryHref, workDetailHref, type NavigationScope } from "@/lib/navigation/tree";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
 import { submitJournalWork, type SubmitJournalWorkResult } from "@/lib/work/api";
+import { listClientEvidenceDocuments, type EvidenceDocument } from "@/lib/work/evidence";
 import {
   MEMO_MAX_CHARS,
   charsLeft,
@@ -87,6 +88,12 @@ type Phase =
   /** The lost-response resolution is in flight — the SAME intent key, re-sent. */
   | { kind: "checking" }
   | { kind: "conflict"; workId: string | null }
+  /** #634 — the chosen SOURCE DOCUMENT already backs a posted entry. A separate
+   *  arm from `conflict` because the next action is the opposite one: this
+   *  refusal opens IMPACT OR CORRECTION on the entry that already stands there,
+   *  and must NOT offer a new intent key — rotating the identity and pressing
+   *  again is exactly the second effect the rule prevents. */
+  | { kind: "sourceConflict"; entryId: string | null }
   | { kind: "denied" }
   | { kind: "notFound" }
   | { kind: "unavailable"; message: string }
@@ -122,6 +129,7 @@ export function JournalComposerView({
   storage,
   session = sessionTokenAccessor,
   loadAccounts,
+  loadDocuments,
 }: {
   clientId: string;
   scope: NavigationScope & { firm_id?: string; user_id?: string };
@@ -130,8 +138,14 @@ export function JournalComposerView({
   storage?: DraftStorage | null;
   session?: SessionTokenAccessor;
   loadAccounts?: () => Promise<CoaAccountRow[]>;
+  loadDocuments?: () => Promise<EvidenceDocument[]>;
 }) {
   const t = useTranslations("JournalComposer");
+  /** #634's own copy lives in its own namespace (`ManualJournal`) rather than
+   *  being folded into `JournalComposer` — the manual-JV journey spans this
+   *  form, the Work detail's late attachment and the journals table, and one
+   *  namespace for one journey keeps those three surfaces' words together. */
+  const tm = useTranslations("ManualJournal");
   const go = navigate;
 
   // THE DRAFT SCOPE, or null. A caller whose firm/user could not be read does
@@ -155,6 +169,13 @@ export function JournalComposerView({
   const [postingDate, setPostingDate] = useState(() => restored?.postingDate ?? businessToday());
   const [memo, setMemo] = useState(() => restored?.memo ?? "");
   const [lines, setLines] = useState<JournalDraftLine[]>(() => restored?.lines ?? emptyDraftLines());
+  /** #634 — THE OPTIONAL SOURCE DOCUMENT. `null` is "no document", which is a
+   *  CHOICE this journey supports rather than a missing value: the raw balanced
+   *  JV is the expert path and evidence is optional where the operation permits
+   *  it. It rides the draft under the SAME user+firm+client key and the SAME
+   *  intent key, so a reload — or a lost response resolved by re-sending that
+   *  key — carries the same evidence claim, never a different one. */
+  const [documentId, setDocumentId] = useState<string | null>(() => restored?.documentId ?? null);
   const [phase, setPhase] = useState<Phase>({ kind: "editing" });
   /** Issues are shown only AFTER a submit attempt — a form that reds every field
    *  before anyone has typed is telling a human off for not having started. */
@@ -170,6 +191,15 @@ export function JournalComposerView({
     () => (accountsRead.data === null ? null : new Set(accountsRead.data.filter((a) => a.is_active).map((a) => a.account_code))),
     [accountsRead.data],
   );
+
+  // THE DOCUMENTS READ IS ITS OWN FAILURE, like the chart's: a preparer who
+  // wanted no document is not blocked by a documents surface that is down, and
+  // the admission door re-checks the document against the client's live filings
+  // regardless. So it degrades to "no document" rather than to a dead form.
+  const documentsRead = useAsyncRead<EvidenceDocument[]>(() =>
+    loadDocuments ? loadDocuments() : listClientEvidenceDocuments(clientId, { session }),
+  );
+  const documents = documentsRead.data ?? [];
 
   const draft = useMemo(() => ({ postingDate, memo, lines }), [postingDate, memo, lines]);
   const issues: JournalIssue[] = useMemo(
@@ -193,8 +223,8 @@ export function JournalComposerView({
       setKept(false);
       return;
     }
-    setKept(writeJournalDraft(draftScope, { intentKey, ...draft }, store));
-  }, [draftScope, intentKey, draft, store]);
+    setKept(writeJournalDraft(draftScope, { intentKey, ...draft, documentId }, store));
+  }, [draftScope, intentKey, draft, documentId, store]);
 
   const busy = phase.kind === "submitting" || phase.kind === "checking";
 
@@ -256,6 +286,15 @@ export function JournalComposerView({
       setPhase({ kind: "conflict", workId: result.workId });
       return;
     }
+    if (result.kind === "source_conflict") {
+      // THE CHOICE IS PRESERVED, and the control is focused: the document the
+      // human picked stays picked so they can see WHICH one is spoken for, and
+      // the only forward moves are "open that entry" or "choose another
+      // document" — never a resubmit of this same intent.
+      setPhase({ kind: "sourceConflict", entryId: result.entryId });
+      focusField("evidence");
+      return;
+    }
     if (result.kind === "denied") {
       setPhase({ kind: "denied" });
       return;
@@ -270,8 +309,12 @@ export function JournalComposerView({
   const send = async () => {
     const basis = toJournalBasisWire(draft, knownCodes);
     if (basis === null) return; // unreachable: the caller validated first
+    // OMITTED ENTIRELY when there is no document — the route reads an absent and
+    // an empty list identically, and sending `[]` would be the same request with
+    // more bytes and one more shape for a reader to reason about.
+    const evidence = documentId === null ? {} : { sourceRefs: [{ kind: "document" as const, documentId }] };
     setPhase({ kind: "submitting" });
-    const first = await submit(session, { clientId, intentKey, basis });
+    const first = await submit(session, { clientId, intentKey, basis, ...evidence });
     if (first.kind !== "lost") {
       apply(first);
       return;
@@ -282,7 +325,7 @@ export function JournalComposerView({
     // Exactly once — a loop here would be a client deciding to hammer a runtime
     // that is already not answering.
     setPhase({ kind: "checking" });
-    apply(await submit(session, { clientId, intentKey, basis }));
+    apply(await submit(session, { clientId, intentKey, basis, ...evidence }));
   };
 
   const onSubmit = (e: FormEvent) => {
@@ -378,6 +421,69 @@ export function JournalComposerView({
         registerField={registerField}
       />
 
+      {/* #634 — EVIDENCE, AND IT IS OPTIONAL.
+          The raw balanced JV stays an EXPERT PATH: an entry may be recorded with
+          no document at all, and this section says so in words rather than
+          leaving a preparer to infer it from an empty control. "No document" is
+          the DEFAULT OPTION and is selectable on purpose — a chooser whose empty
+          state is only the absence of a choice cannot be re-chosen with the
+          keyboard once something has been picked.
+
+          A NATIVE <select> RATHER THAN A COMBOBOX. Appendix D asks for the
+          simplest control that carries the job: this list is a client's filed
+          documents (tens, not thousands), a native select is typeable, works at
+          320 px and at 200 % zoom, needs no portal and no focus trap, and it is
+          the one control every assistive technology already knows. */}
+      <fieldset className="flex flex-col gap-1.5 border-0 p-0">
+        <legend className="text-sm font-medium">{tm("evidence.legend")}</legend>
+        <p id={`${fieldElementId("evidence")}-help`} className="text-xs text-muted-foreground">
+          {tm("evidence.help")}
+        </p>
+        <select
+          id={fieldElementId("evidence")}
+          ref={(node) => registerField("evidence", node)}
+          className="h-9 rounded-md border border-input bg-background px-3 text-sm"
+          value={documentId ?? ""}
+          disabled={busy}
+          aria-invalid={phase.kind === "sourceConflict" || (phase.kind === "rejected" && phase.field === "evidence") ? true : undefined}
+          aria-describedby={`${fieldElementId("evidence")}-help ${fieldElementId("evidence")}-error`}
+          onChange={(e) => {
+            setDocumentId(e.target.value === "" ? null : e.target.value);
+            // A REFUSAL ABOUT THE OLD CHOICE IS RETIRED BY MAKING A NEW ONE.
+            // Leaving the conflict Alert up beside a document that is no longer
+            // selected would be the form describing a state that has passed.
+            if (phase.kind === "sourceConflict" || (phase.kind === "rejected" && phase.field === "evidence")) {
+              setPhase({ kind: "editing" });
+            }
+          }}
+        >
+          <option value="">{tm("evidence.none")}</option>
+          {documents.map((doc) => (
+            <option key={doc.documentId} value={doc.documentId}>
+              {evidenceOptionLabel(doc, tm)}
+            </option>
+          ))}
+        </select>
+        <p id={`${fieldElementId("evidence")}-error`} className="text-xs text-error" role="alert">
+          {phase.kind === "rejected" && phase.field === "evidence" ? tm("evidence.invalid") : ""}
+        </p>
+        {/* The documents read degrades ON ITS OWN, exactly as the chart read
+            does: no document is a valid answer, so a failed list must not stop a
+            submit. */}
+        {documentsRead.error !== null ? (
+          <StateBanner
+            tone="warning"
+            action={
+              <Button type="button" variant="outline" size="sm" onClick={() => void documentsRead.reload()}>
+                {t("retry")}
+              </Button>
+            }
+          >
+            {tm("evidence.unavailable")}
+          </StateBanner>
+        ) : null}
+      </fieldset>
+
       {/* THE CHART READ IS A SEPARATE FAILURE FROM THE FORM'S. A preparer who
           knows the code can still submit; the commit rechecks every account
           against the live chart anyway. So this degrades rather than blocking. */}
@@ -442,6 +548,7 @@ function ComposerPhaseBanner({
   onNewIntent: () => void;
 }) {
   const t = useTranslations("JournalComposer");
+  const tm = useTranslations("ManualJournal");
   if (phase.kind === "editing" || phase.kind === "submitting" || phase.kind === "checking") return null;
 
   if (phase.kind === "rejected") {
@@ -480,6 +587,31 @@ function ComposerPhaseBanner({
       </StateBanner>
     );
   }
+  if (phase.kind === "sourceConflict") {
+    // A PERSISTENT ALERT, AND NO RESUBMIT. The document is spoken for, so the
+    // only honest forward moves are to look at the entry that already stands on
+    // it (impact / correction) or to choose a different document — and neither
+    // is "press submit again", which is why this arm offers no retry and no new
+    // intent key.
+    return (
+      <StateBanner
+        tone="error"
+        title={tm("sourceConflict.title")}
+        action={
+          phase.entryId === null ? undefined : (
+            <Link
+              href={journalEntryHref(clientId, phase.entryId)}
+              className="text-sm font-medium text-primary underline underline-offset-2"
+            >
+              {tm("sourceConflict.link")}
+            </Link>
+          )
+        }
+      >
+        {tm("sourceConflict.body")}
+      </StateBanner>
+    );
+  }
   if (phase.kind === "denied") {
     return (
       <StateBanner tone="warning" title={t("denied.title")}>
@@ -513,4 +645,23 @@ function ComposerPhaseBanner({
       {phase.kind === "lost" ? t("lost.body") : t("unavailable.body")}
     </StateBanner>
   );
+}
+
+/** One document, as a single readable option: its filename, what KIND of
+ *  document it is, and the date it belongs to. Built here rather than in the
+ *  read so the words are translated and the shape stays a plain string — a
+ *  native `<option>` renders text, not markup, and a screen reader reads exactly
+ *  what is written here. */
+function evidenceOptionLabel(
+  doc: EvidenceDocument,
+  t: (key: string, values?: Record<string, string>) => string,
+): string {
+  const name = doc.filename ?? t("evidence.unnamed");
+  const kind = doc.kind ?? t("evidence.unknownKind");
+  // The document's own business date when it has one; otherwise the day it was
+  // filed to this client. Sliced to the calendar day rather than re-formatted:
+  // this journey is about EXACT dates, and a locale re-render here would be a
+  // second date format beside the posting-date control's ISO one.
+  const date = (doc.financialDate ?? doc.filedAt).slice(0, 10);
+  return t("evidence.option", { name, kind, date });
 }

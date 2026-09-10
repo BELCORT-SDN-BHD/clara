@@ -7,17 +7,18 @@
 // component hands down — no panel fetches on its own.
 
 import { useState } from "react";
+import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { useJournalsWorkbench } from "@/lib/journals/use-journals-workbench";
 import { PageHeader, PageShell } from "@/components/common/page-shell";
 import { SectionTabs } from "@/components/common/section-tabs";
 import { LoadingState, StateBanner, type BannerTone } from "@/components/common/state";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { DraftsQueuePanel } from "@/components/journals/drafts-queue-panel";
 import { PostedPanel } from "@/components/journals/posted-panel";
-import { ComposeDialog } from "@/components/journals/compose-dialog";
 import { InterruptionsPanel } from "@/components/journals/interruptions-panel";
 import { JournalStatusLegend } from "@/components/journals/status-legend";
+import { journalComposerHref } from "@/lib/navigation/tree";
 
 type Tab = "drafts" | "posted" | "clarifications";
 
@@ -25,7 +26,6 @@ export function JournalsWorkbench({ clientId }: { clientId: string }) {
   const t = useTranslations("JournalsWorkbench");
   const workbench = useJournalsWorkbench(clientId);
   const [tab, setTab] = useState<Tab>("drafts");
-  const [composeOpen, setComposeOpen] = useState(false);
 
   // --- honest, distinct states — no state below fabricates a number or hides
   // a real failure behind a generic message (mission's mechanism rules).
@@ -77,16 +77,17 @@ export function JournalsWorkbench({ clientId }: { clientId: string }) {
       <PageHeader
         title={t("heading")}
         action={
-          <ComposeDialog
-            open={composeOpen}
-            onOpenChange={setComposeOpen}
-            accounts={data.accounts}
-            busy={workbench.busy}
-            err={workbench.err}
-            clr={workbench.clr}
-            actingId={workbench.actingId}
-            onSubmit={(input) => void workbench.compose(input, () => setComposeOpen(false))}
-          />
+          /* #634 — ONE MANUAL-JV ENTRY POINT, AND IT IS A ROUTE.
+             This used to open a Dialog that ran the retired compose ceremony (a
+             fabricated client resolution, then a draft, then a second human's
+             attestation). Journey C3's composer is the one place a manual
+             journal is written now, it has its own durable address, and its
+             draft survives a reload — none of which a Dialog on this page did.
+             The Accounting hub links to the SAME route, so there is one job and
+             one destination rather than two. */
+          <Link href={journalComposerHref(clientId)} className={buttonVariants({ size: "sm" })}>
+            {t("newJournalEntry")}
+          </Link>
         }
       />
       <SectionTabs

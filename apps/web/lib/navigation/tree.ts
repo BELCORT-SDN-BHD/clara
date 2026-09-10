@@ -372,6 +372,16 @@ export function workDetailHref(clientId: string, workId: string): string {
   return `${clientBase(clientId)}/work/${encodeURIComponent(workId)}`;
 }
 
+/** `/clients/:clientId/journals` — the posted-and-drafts surface. With an entry
+ *  id it becomes the ONE address that opens the journal table on that entry, so
+ *  a refusal that names an entry ("that document already backs a posted entry")
+ *  has somewhere real to send a human, and Back returns them to what they were
+ *  doing. The id is percent-encoded for the reason `workDetailHref` states. */
+export function journalEntryHref(clientId: string, entryId?: string | null): string {
+  const base = `${clientBase(clientId)}/journals`;
+  return entryId ? `${base}?tab=posted&entry=${encodeURIComponent(entryId)}` : base;
+}
+
 export function clientNavHref(clientId: string, item: ClientNavItem): string {
   return item.segment === "" ? clientBase(clientId) : `${clientBase(clientId)}/${item.segment}`;
 }

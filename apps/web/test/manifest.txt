@@ -262,7 +262,6 @@ lib/interview/api.test.ts
 lib/interview/contract.test.ts
 lib/interview/thread.test.ts
 lib/interview/useInterviewRun.test.ts
-lib/journals/api-compose.test.ts
 lib/journals/api.test.ts
 lib/journals/balance.test.ts
 lib/journals/diff-reads.test.ts

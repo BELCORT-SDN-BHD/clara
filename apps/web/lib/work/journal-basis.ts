@@ -47,6 +47,11 @@ export type JournalDraftInput = {
 export type JournalFieldId =
   | "postingDate"
   | "memo"
+  /** #634 — the OPTIONAL source document. One control, however many refusals
+   *  name it: this journey binds at most one document per Work, so an index in
+   *  the wire path picks out an element of a list the form renders as a single
+   *  chooser. */
+  | "evidence"
   | "lines"
   | `line.${number}.account`
   | `line.${number}.description`
@@ -300,6 +305,23 @@ export function fieldForServerPath(path: string | null): JournalFieldId | null {
   if (path === "posting_date") return "postingDate";
   if (path === "memo") return "memo";
   if (path === "lines") return "lines";
+
+  // #634 — THE EVIDENCE ARRAY, IN BOTH SPELLINGS OF ONE PATH. The database
+  // raises `source_refs[N]`; `packages/runtime/src/workRoutes.ts`'s `toWireField`
+  // re-spells it `sourceRefs[N]` (the ONE translation that route performs) and
+  // its own earlier validation emits the camelCase form directly. Recognising
+  // both is not a second vocabulary — it is the same path either side of one
+  // translator, and a refusal that arrived in the raw form must still land on
+  // the control rather than on nothing. Every index collapses to the SAME
+  // control because this journey binds at most one document per Work.
+  const evidence = /^(?:sourceRefs|source_refs)(?:\[(\d+)\])?$/.exec(path);
+  if (evidence) {
+    if (evidence[1] === undefined) return "evidence";
+    const ordinal = Number(evidence[1]);
+    // ONE-BASED ON THE WIRE, exactly as `lines[N]` is: `[0]` is not a path this
+    // vocabulary produces, so it is refused rather than read as the first ref.
+    return Number.isSafeInteger(ordinal) && ordinal >= 1 ? "evidence" : null;
+  }
 
   const line = /^lines\[(\d+)\](?:\.(account_code|debit_cents|credit_cents|description))?$/.exec(path);
   if (!line) return null;

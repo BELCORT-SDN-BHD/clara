@@ -182,16 +182,23 @@ test("CB-AE2E-022: no DB verb identifier reaches user copy in the journals names
   }
 });
 
-test("CB-AE2E-022: the compose dialog's description says what the act DOES, and what it costs the reader", () => {
-  const description = (messages as unknown as { JournalsWorkbench: { compose: { description: string } } })
-    .JournalsWorkbench.compose.description;
-  assert.doesNotMatch(description, VERB_LEAK);
-  // The two facts the old copy carried are both KEPT: the entry is booked
-  // against this client (the record_client_resolution half — CLR01, invariant
-  // 1) and it lands as a DRAFT (draft_entry returns status 'draft').
-  assert.match(description, /this client/i);
-  assert.match(description, /draft/i);
-  assert.match(description, /nothing posts until it is approved/i);
+// #634 REPLACED CB-AE2E-022's SUBJECT. That cell read
+// `JournalsWorkbench.compose.description` — the copy of the manual compose
+// DIALOG, which is retired: the dialog ran a ceremony (a fabricated client
+// resolution, a draft, then a second human's attestation) that #634's
+// C-28 / C55.11 / C83.5 obligations reject for an ordinary authorised posting.
+// The OBLIGATION itself is preserved verbatim and re-pointed at the surface that
+// replaced it: the Journals tab's primary act must name what it does in a
+// reader's words, and must not leak a verb name.
+test("CB-AE2E-022: the Journals tab's primary act names the JOB in a reader's words, with no verb leak", () => {
+  const label = (messages as unknown as { JournalsWorkbench: { newJournalEntry: string } })
+    .JournalsWorkbench.newJournalEntry;
+  assert.doesNotMatch(label, VERB_LEAK);
+  assert.match(label, /journal entry/i);
+  // …and the destination's own description still tells a reader what the act
+  // costs them: it ADMITS work, and the entry is posted by a run afterwards.
+  const composer = (messages as unknown as { JournalComposer: { body: string } }).JournalComposer.body;
+  assert.doesNotMatch(composer, VERB_LEAK);
 });
 
 test("the Clarifications panel still renders one card per pending row", async () => {

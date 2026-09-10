@@ -276,74 +276,13 @@ test("actingId: distinguishes which row a refusal belongs to across two differen
   );
 });
 
-test("compose(): sets actingId to the COMPOSE_ACTING_ID sentinel, never a real row id", async () => {
-  await withMockedFetch(
-    async (input) => {
-      const url = String(input);
-      if (url.includes("rpc/record_client_resolution")) return jsonResponse({ code: "CLR04", message: "insufficient role" }, 400);
-      if (url.includes("rpc/list_review_queue")) return jsonResponse({ rows: [] });
-      return jsonResponse([]);
-    },
-    async () => {
-      const sess = fakeSession();
-      const h = await renderHook(() => useJournalsWorkbench(CLIENT_ID, sess));
-      try {
-        await h.settle();
-        await h.act(async () => {
-          await h.current.compose({ postingDate: "2026-08-27", memo: "x", lines: [] });
-        });
-        assert.equal(h.current.actingId, "compose");
-        assert.equal(h.current.clr?.code, "CLR04");
-      } finally {
-        await h.unmount();
-      }
-    },
-  );
-});
-
-test("compose(): a successful two-call ceremony re-reads afterward", async () => {
-  const seen: string[] = [];
-  await withMockedFetch(
-    async (input) => {
-      const url = String(input);
-      if (url.includes("rpc/record_client_resolution")) {
-        seen.push("resolution");
-        return jsonResponse({ resolution_id: "res-1" });
-      }
-      if (url.includes("rpc/draft_entry")) {
-        seen.push("draft");
-        return jsonResponse({ entry_id: "e9", revision_token: "rev-9", status: "draft" });
-      }
-      seen.push("read");
-      if (url.includes("rpc/list_review_queue")) return jsonResponse({ rows: [] });
-      return jsonResponse([]);
-    },
-    async () => {
-      const sess = fakeSession();
-      const h = await renderHook(() => useJournalsWorkbench(CLIENT_ID, sess));
-      try {
-        await h.settle();
-        seen.length = 0; // drop the mount reload's own reads before asserting call order
-        await h.act(async () => {
-          await h.current.compose({
-            postingDate: "2026-08-27",
-            memo: "manual test entry",
-            lines: [
-              { account_code: "1000", debit_cents: 500, credit_cents: 0 },
-              { account_code: "3000", debit_cents: 0, credit_cents: 500 },
-            ],
-          });
-        });
-        assert.deepEqual(seen.slice(0, 2), ["resolution", "draft"]);
-        assert.equal(h.current.err, null);
-      } finally {
-        await h.unmount();
-      }
-    },
-  );
-});
-
-// --- T6: approveRoutine / withdraw / answerClarify -----------------------------
+// #634 RETIRED THE TWO `compose()` CELLS THAT SAT HERE. They pinned the manual
+// compose ceremony's sentinel `actingId` and its two-call
+// (record_client_resolution -> draft_entry) shape. Both the ceremony and the
+// hook method are gone: the manual JV is journey C3's composer route, whose own
+// cells (components/accounting/journal-composer.test.tsx) cover the identity,
+// the refusal mapping and the draft. Nothing about the DOCUMENT-sourced draft
+// queue below changed.
 
 test("approveRoutine(): calls approve_routine_entry then re-reads", async () => {
   const seen: string[] = [];

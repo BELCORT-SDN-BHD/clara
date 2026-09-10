@@ -1270,15 +1270,6 @@
       "presentationSumLabel": "Totals (presentation sum)",
       "notBalanced": "Debits and credits don't match yet — the DB will refuse an unbalanced entry on submit."
     },
-    "compose": {
-      "trigger": "New journal entry",
-      "title": "New journal entry",
-      "description": "Record a journal entry by hand. Clara books it against this client and leaves it as a draft — nothing posts until it is approved.",
-      "postingDate": "Posting date",
-      "memo": "Memo",
-      "submit": "Create draft",
-      "submitting": "Creating…"
-    },
     "drafts": {
       "empty": "No drafts are waiting for review.",
       "showingOf": "Showing {shown} of {total} drafts — the rest are behind a large backlog in another category on this page. This tab cannot page past them.",
@@ -1315,7 +1306,8 @@
       "reverse": "Reverse",
       "confirmReverse": "Confirm reversal",
       "cancel": "Cancel"
-    }
+    },
+    "newJournalEntry": "New journal entry"
   },
   "ClientDocuments": {
     "heading": "Documents",
@@ -4026,5 +4018,88 @@
     "eventReceiptId": "Receipt",
     "eventBasisOrigin": "Basis origin",
     "eventInitiator": "Initiator"
+  },
+  "ManualJournal": {
+    "evidence": {
+      "legend": "Evidence (optional)",
+      "help": "A journal entry may be recorded with no document at all. Attach one of this client's filed documents if this entry has a source, or leave it as No document — you can attach one later.",
+      "none": "No document",
+      "option": "{name} · {kind} · {date}",
+      "unnamed": "Untitled document",
+      "unknownKind": "Unclassified",
+      "invalid": "That document is not an active filed document of this client. Choose another, or record the entry with no document.",
+      "unavailable": "We could not read this client's documents. You can still record the entry with no document."
+    },
+    "sourceConflict": {
+      "title": "That document already backs a posted entry",
+      "body": "One document backs at most one posted journal entry. Nothing was recorded. Open the entry that already stands on it to see its impact or correct it, or choose a different document.",
+      "link": "Open that journal entry"
+    },
+    "attach": {
+      "trigger": "Attach evidence",
+      "title": "Attach evidence to this entry",
+      "description": "Record which of this client's documents is the source behind this posted entry. Nothing about the entry itself changes — no amount, no date, no account.",
+      "document": "Document",
+      "submit": "Attach",
+      "submitting": "Attaching…",
+      "cancel": "Cancel",
+      "choose": "Choose a document",
+      "attached": "Evidence attached.",
+      "alreadyAttached": "That document is already the source on this entry. Nothing changed.",
+      "noDocuments": "This client has no filed documents to attach.",
+      "invalid": "That document is not an active filed document of this client.",
+      "evidenceAlreadyAttached": "This entry already carries a different source document. Nothing changed — open the correction path if the source is wrong.",
+      "sourceConflict": "That document already backs another posted entry. Nothing was recorded.",
+      "sourceConflictLink": "Open that journal entry",
+      "notApproved": "Evidence attaches to a posted entry. This one is not posted yet.",
+      "stale": "This entry changed since you opened it. We reloaded it — check it and try again.",
+      "denied": "You do not have permission to attach evidence on this client.",
+      "notFound": "We could not find that entry.",
+      "unavailable": "We could not reach the server. Nothing was recorded.",
+      "refused": "The system refused it, and here is exactly what it said."
+    },
+    "links": {
+      "origin": "Origin",
+      "originHuman": "{name}",
+      "originClara": "Clara",
+      "originUnknown": "—",
+      "source": "Source",
+      "noSource": "No document",
+      "work": "Work",
+      "openWork": "Open the Work",
+      "receipt": "Receipt",
+      "copyReceipt": "Copy receipt id",
+      "copied": "Receipt id copied",
+      "purpose": "Purpose",
+      "basisOrigin": "Basis",
+      "basisUserDirect": "Typed by a person",
+      "basisClaraInterpreted": "Interpreted by Clara",
+      "correction": "Correction",
+      "reversedBy": "Reversed by this entry",
+      "reversalOf": "Reverses this entry",
+      "reversalReason": "Reason: {reason}",
+      "unavailable": "We could not read the Work, receipt and source links for these entries. The amounts and dates below are still the database's own.",
+      "sourceWorkCommit": "Attached when the entry was recorded",
+      "sourceLateAttachment": "Attached afterwards",
+      "sourceDocumentCoding": "Coded from the document"
+    },
+    "filters": {
+      "legend": "Filter entries",
+      "origin": "Origin",
+      "originAny": "Any origin",
+      "originHuman": "Recorded by a person",
+      "originClara": "Recorded by Clara",
+      "source": "Source",
+      "sourceAny": "With or without a source",
+      "sourceWith": "Has a source document",
+      "sourceWithout": "No source document",
+      "from": "Posted from",
+      "to": "Posted to",
+      "memo": "Memo contains",
+      "clear": "Clear filters",
+      "summary": "{shown} of {total} entries",
+      "none": "No entries match these filters.",
+      "highlighted": "Showing the entry you were sent to. Clear the filters to see the rest."
+    }
   }
 }

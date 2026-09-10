@@ -67,6 +67,13 @@ export type SubmitJournalWorkResult =
   /** 409 — the same intent key already named a DIFFERENT payload. `workId` is
    *  present only when the response carries one; a link is never invented. */
   | { kind: "conflict"; workId: string | null }
+  /** 409 — #634: the chosen SOURCE DOCUMENT already backs a posted entry. A
+   *  DIFFERENT refusal from `conflict` because the next action is different: an
+   *  attachment conflict opens IMPACT OR CORRECTION on the entry that already
+   *  stands there, and must never be resolved by rotating the intent key and
+   *  submitting again — that would be the second effect the rule exists to
+   *  prevent. Both ids are present only when the response carried them. */
+  | { kind: "source_conflict"; entryId: string | null; documentId: string | null }
   | { kind: "denied" }
   | { kind: "not_found" }
   /** The server answered and is not accepting: 503, or any other 5xx. */
@@ -142,8 +149,15 @@ function admissionOf(body: Record<string, unknown>): WorkAdmission | null {
   };
 }
 
+/** #634 — the OPTIONAL evidence a composer may send with an admission. At most
+ *  one document per Work in this journey; `kind` is a literal because the only
+ *  other source-ref kind the estate mints (`chat_task`) belongs to the frozen
+ *  chat workflow, and a browser asserting one would be a client claiming
+ *  provenance it does not have. */
+export type JournalSourceRefWire = { kind: "document"; documentId: string };
+
 /**
- * Admit ONE documentless journal Work.
+ * Admit ONE journal Work, with or without a source document.
  *
  * `intentKey` IS THE CALLER'S IDENTITY FOR THIS INTENT, minted once when the
  * draft starts and carried across every attempt at THAT draft — a resubmit of
@@ -154,7 +168,15 @@ function admissionOf(body: Record<string, unknown>): WorkAdmission | null {
  */
 export async function submitJournalWork(
   auth: SessionTokenAccessor,
-  input: { clientId: string; intentKey: string; basis: JournalBasisWire },
+  input: {
+    clientId: string;
+    intentKey: string;
+    basis: JournalBasisWire;
+    /** Omitted entirely for a documentless Work — the route reads an absent,
+     *  null or empty list identically, and sending `[]` would be the same
+     *  request with more bytes. */
+    sourceRefs?: ReadonlyArray<JournalSourceRefWire>;
+  },
   signal?: AbortSignal,
 ): Promise<SubmitJournalWorkResult> {
   const token = await auth.getAccessToken();
@@ -184,7 +206,18 @@ export async function submitJournalWork(
   }
   if (res.status === 401 || res.status === 403) return { kind: "denied" };
   if (res.status === 404) return { kind: "not_found" };
-  if (res.status === 409) return { kind: "conflict", workId: str(body.work_id) };
+  if (res.status === 409) {
+    // TWO CONFLICTS, TWO NEXT ACTIONS, and the body's own `error` is what tells
+    // them apart. `intent_payload_conflict` says these figures are a new intent
+    // (rotate the key); `source_already_posted` says the DOCUMENT is spoken for
+    // and no key rotation can change that — the human goes to the entry that
+    // already stands on it. Collapsing them would offer "try again" for the one
+    // case where trying again is exactly what must not happen.
+    if (str(body.error) === "source_already_posted") {
+      return { kind: "source_conflict", entryId: str(body.entry_id), documentId: str(body.document_id) };
+    }
+    return { kind: "conflict", workId: str(body.work_id) };
+  }
   return {
     kind: "unavailable",
     message: str(body.error) ?? str(body.message) ?? `the runtime answered ${res.status}`,

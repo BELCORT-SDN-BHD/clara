@@ -45,6 +45,14 @@ export type StoredJournalDraft = JournalDraftInput & {
   /** Minted when the draft STARTS. Stable across every edit and every resubmit
    *  of these same figures; a genuinely new intent gets a new one. */
   intentKey: string;
+  /** #634 — the OPTIONAL source document, or null for "no document". It rides
+   *  the draft under the same key as the figures because it is part of the same
+   *  intent: the admission door compares the canonical source refs alongside the
+   *  basis digest, so re-sending the same intent key with a DIFFERENT document
+   *  is a typed conflict rather than a replay. A draft restored without it (one
+   *  written before this field existed) reads as null — evidence is optional, so
+   *  absence is a valid state and never a reason to discard the figures. */
+  documentId?: string | null;
 };
 
 /** The `Storage` surface this module needs — declared rather than imported so a
@@ -118,8 +126,13 @@ function parseDraft(raw: string): StoredJournalDraft | null {
   if (typeof draft.intentKey !== "string" || draft.intentKey.trim() === "") return null;
   if (typeof draft.postingDate !== "string" || typeof draft.memo !== "string") return null;
   if (!Array.isArray(draft.lines) || !draft.lines.every(isLine)) return null;
+  // UNTRUSTED INPUT, like every other field here: a stored document id that is
+  // not a string is DROPPED (the draft survives without it) rather than carried
+  // into a wire body the admission door would refuse by name.
+  const documentId = typeof draft.documentId === "string" && draft.documentId.trim() !== "" ? draft.documentId : null;
   return {
     intentKey: draft.intentKey,
+    documentId,
     postingDate: draft.postingDate,
     memo: draft.memo,
     lines: draft.lines.map((line) => ({
