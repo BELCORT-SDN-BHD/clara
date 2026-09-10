@@ -27,10 +27,11 @@
 // ORIGINAL receipt instead of posting a second entry. They are different
 // controls with different words, and only the second is a write.
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
 
+import { AttachEvidenceDialog } from "@/components/work/attach-evidence-dialog";
 import { PostedLinesTable, WorkBasisTable } from "@/components/work/work-tables";
 import { StateBanner } from "@/components/common/state";
 import { WorkQuestionPanel } from "@/components/work/work-question-panel";
@@ -48,6 +49,7 @@ import { WORK_NEEDS_YOU_HREF, clientBase, journalComposerHref } from "@/lib/navi
 import { sessionTokenAccessor } from "@/lib/session-accessor";
 import { retryWork, type RetryWorkResult } from "@/lib/work/api";
 import { accountNames, type WorkDetailData } from "@/lib/work/reads";
+import { listEntryLinks, type EntryLinkRow } from "@/lib/work/evidence";
 import { useWorkDetail } from "@/lib/work/use-work-detail";
 import {
   defaultDraftStorage,
@@ -119,6 +121,7 @@ export function WorkDetailView({
   session = sessionTokenAccessor,
   scope,
   storage,
+  loadLinks = listEntryLinks,
 }: {
   clientId: string;
   workId: string;
@@ -126,6 +129,11 @@ export function WorkDetailView({
   now?: () => number;
   retry?: typeof retryWork;
   session?: SessionTokenAccessor;
+  /** #634 — the entry's CURRENT source, Work, receipt and correction chain, read
+   *  through `clara.list_entry_links`. Separate from `load` because it is read
+   *  again after every late attachment (hydrate-never-trust) while the Work
+   *  itself has not moved. */
+  loadLinks?: typeof listEntryLinks;
   /** WHO is reading, for the composer draft "Edit as a new draft" seeds. Both
    *  halves are optional and a MISSING half means no seeding at all — a draft
    *  filed under a guessed scope is worse than a draft that was never saved
@@ -134,6 +142,8 @@ export function WorkDetailView({
   storage?: DraftStorage | null;
 }) {
   const t = useTranslations("WorkDetail");
+  /** #634's copy lives with the rest of the manual-JV journey's words. */
+  const tm = useTranslations("ManualJournal");
   // A MALFORMED WORK ID IS A NOT-FOUND QUESTION, NOT A DATABASE ONE — the same
   // rule lib/client-id.ts states for the client segment, applied to this one.
   // Checked HERE as well as inside the reader: this is what stops the hook from
@@ -147,6 +157,20 @@ export function WorkDetailView({
   });
   const [retryState, setRetryState] = useState<RetryWorkResult | null>(null);
   const [retrying, setRetrying] = useState(false);
+  /** #634 — the posted entry's links row, or null while unread / unreadable. A
+   *  failed links read NEVER blocks the page: the entry, its lines and its
+   *  receipt are the database's own and stay on screen; only the source line
+   *  degrades to "we could not read it". */
+  const [links, setLinks] = useState<EntryLinkRow | null>(null);
+  const postedEntryId = state.data?.entry?.id ?? null;
+  const reloadLinks = useCallback(async () => {
+    if (postedEntryId === null) return;
+    const rows = await loadLinks(clientId, [postedEntryId], { session }).catch(() => []);
+    setLinks(rows.find((row) => row.entry_id === postedEntryId) ?? null);
+  }, [clientId, postedEntryId, loadLinks, session]);
+  useEffect(() => {
+    void reloadLinks();
+  }, [reloadLinks]);
   // ONE ROSTER READ PER MOUNT, held at the page level exactly as
   // lib/members/use-member-names.ts asks: this page names one actor, and a
   // failed read falls through to the shortened raw id rather than to a guess.
@@ -341,6 +365,17 @@ export function WorkDetailView({
           <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
             <dt className="text-muted-foreground">{t("entryStatus")}</dt>
             <dd className="text-foreground">{entry.status}</dd>
+            {/* #634 — THE ENTRY'S SOURCE, read back from the database rather than
+                inferred from what was submitted: a document may have been
+                attached LATE, after this Work finished, and the honest answer to
+                "what backs this entry" is whatever the link relation says NOW.
+                "No document" is written in words rather than left as an empty
+                slot — an entry recorded without evidence is a legitimate state
+                of this journey, not a gap. */}
+            <dt className="text-muted-foreground">{tm("links.source")}</dt>
+            <dd className="wrap-anywhere text-foreground">
+              {links?.document_id ?? tm("links.noSource")}
+            </dd>
             {committed === null ? null : (
               <>
                 <dt className="text-muted-foreground">{t("receiptId")}</dt>
@@ -350,6 +385,23 @@ export function WorkDetailView({
               </>
             )}
           </dl>
+          {/* THE LATE DOOR, offered only where it can actually do something: a
+              POSTED entry that carries no source yet. It is an act on the ENTRY,
+              so it lives beside the entry rather than in the Work's identity
+              block, and it has NO financial effect — see the dialog's header. */}
+          {entry.status === "approved" && (links === null || links.document_id === null) ? (
+            <div>
+              <AttachEvidenceDialog
+                clientId={clientId}
+                entryId={entry.id}
+                expectedRevision={entry.revision_token ?? ""}
+                onAttached={async () => {
+                  await Promise.all([reloadLinks(), state.reload()]);
+                }}
+                session={session}
+              />
+            </div>
+          ) : null}
           <PostedLinesTable lines={lines} names={names} />
         </section>
       ) : null}
