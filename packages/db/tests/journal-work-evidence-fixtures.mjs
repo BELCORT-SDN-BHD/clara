@@ -13,7 +13,8 @@
 //   clara.attach_entry_evidence(p_entry, p_document, p_expected_revision, p_op_key) -> jsonb
 //   clara.list_entry_links(p_client, p_entries uuid[])  -> jsonb array
 
-import { rootQuery, humanQuery, opk } from "./work-journal-fixtures.mjs";
+import { rootQuery, humanQuery, opk, BUNDLE_DIGEST, RATIONALE } from "./work-journal-fixtures.mjs";
+import { getPool } from "./rig-helpers.mjs";
 import { markSkip } from "./wave-a-helpers.mjs";
 
 export * from "./work-journal-fixtures.mjs";
@@ -58,6 +59,9 @@ export const EVIDENCE_REASON = {
   evidenceAlreadyAttached: "evidence_already_attached",
   entryNotFound: "entry_not_found",
   entryNotApproved: "entry_not_approved",
+  /** LAW 6 leaves a reversed entry `approved`, so `entry_not_approved` does not cover it: the
+   *  late door refuses closed history under its own token, naming the correction. */
+  entryReversed: "entry_reversed",
   staleRevision: "stale_revision",
   invalidOpKey: "invalid_op_key",
   clientNotFound: "client_not_found",
@@ -113,6 +117,129 @@ export async function retireFiling(sub, { filing, reason = "#634 rig: source wit
 
 /** A `document` source ref, in the shape admission accepts. */
 export const docRef = (documentId) => ({ kind: "document", document_id: documentId });
+
+/** Reverse a posted entry through `clara.reverse_entry` — LAW 6's own door (0009), never a
+ *  hand-set `reversed_by` (which `clara._tf_entry_immutable` refuses anyway). Returns the door's
+ *  receipt: `{reversal_id, status}`. The caller ASSERTS on it; a raise here is a finding about
+ *  the world, not a reason to go green. */
+export async function reverseEntry(sub, { entry, reason = "#634 rig: posted in error", opKey = null }) {
+  const r = await humanQuery(sub,
+    "select clara.reverse_entry(p_entry => $1::uuid, p_reason => $2::text,"
+    + " p_op_key => $3::text) as result",
+    [entry, reason, opKey ?? opk("w634-reverse")]);
+  return r.rows[0].result;
+}
+
+// ===========================================================================================
+// 4b · FORCED TWO-SESSION SCHEDULES. The estate's X7 law: PROVE the block via pg_blocking_pids
+// BEFORE releasing the holder — a schedule that never blocked proves nothing about a race.
+//
+// Modelled on `rig-docs-race.mjs`'s `holdThenContend` and kept HERE rather than imported so the
+// #634 battery carries its own identity setup (a wake credential on one side, a signed-in human
+// on the other) and its own outcome shape: this lane's whole claim is about the typed `detail`
+// a loser gets, and the shared driver discards it.
+// ===========================================================================================
+
+async function raceEnter(client, side) {
+  const pid = (await client.query("select pg_backend_pid() as pid")).rows[0].pid;
+  if (side.role) await client.query(`set role ${side.role}`);
+  await client.query("begin");
+  if (side.jwtSub != null) {
+    await client.query("select set_config('request.jwt.claims', $1, true)",
+      [JSON.stringify({ sub: side.jwtSub, role: "authenticated" })]);
+  }
+  if (side.wakeSecret != null) {
+    await client.query("select set_config('clara.wake_secret', $1, true)", [side.wakeSecret]);
+  }
+  return pid;
+}
+
+async function raceCleanup(clients) {
+  for (const c of clients) {
+    await c.query("rollback").catch(() => {});
+    await c.query("reset role").catch(() => {});
+    await c.query("reset all").catch(() => {});
+    c.release();
+  }
+}
+
+/** Poll until backend `pid` is WAITING on a lock held by `blockerPid`. */
+async function waitBlockedBy(pid, blockerPid, timeoutMs = 20000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const r = await rootQuery(
+      "select wait_event_type as wet, pg_blocking_pids(pid) as blockers"
+      + " from pg_stat_activity where pid = $1", [pid]);
+    const row = r.rows[0];
+    if (row && row.wet === "Lock" && (row.blockers || []).map(Number).includes(Number(blockerPid))) {
+      return true;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  return false;
+}
+
+/**
+ * HOLD-then-CONTEND: side `a` runs its statement and HOLDS its transaction open (its writes
+ * uncommitted); side `b` fires and must BLOCK on `a`'s uncommitted key, then resolve against
+ * `a`'s COMMITTED state once `a` commits. Returns `{ a, b, provedBlocked }`, each side
+ * `{ ok, receipt }` or `{ ok:false, code, detail, message }` — `detail` PARSED, because the typed
+ * refusal is the whole point of the schedule.
+ */
+export async function holdThenContend({ a, b }) {
+  const c1 = await getPool().connect();
+  const c2 = await getPool().connect();
+  const out = { a: null, b: null, provedBlocked: false };
+  const settle = (e) => ({
+    ok: false, code: e.code,
+    detail: (() => { try { return JSON.parse(e.detail ?? "{}"); } catch { return {}; } })(),
+    message: e.message,
+  });
+  try {
+    const pid1 = await raceEnter(c1, a);
+    try {
+      out.a = { ok: true, receipt: await a.run(c1) };
+    } catch (e) {
+      out.a = settle(e);
+    }
+
+    const pid2 = await raceEnter(c2, b);
+    const p2 = Promise.resolve()
+      .then(() => b.run(c2))
+      .then((receipt) => { out.b = { ok: true, receipt }; })
+      .catch((e) => { out.b = settle(e); });
+
+    out.provedBlocked = await waitBlockedBy(pid2, pid1);
+    await c1.query("commit").catch(() => c1.query("rollback").catch(() => {}));
+    await p2;
+    await c2.query("commit").catch(() => c2.query("rollback").catch(() => {}));
+  } finally {
+    await raceCleanup([c1, c2]);
+  }
+  return out;
+}
+
+/** `wake_record_journal_entry` on a CALLER-SUPPLIED client (the race sides own their txn). The
+ *  named-argument call is the same one `wakeRecordJournalEntry` builds. */
+export async function recordJournalEntryOn(client, { client: cli, work, logicalOpId, basis: b,
+  bundleDigest = BUNDLE_DIGEST, runId = null, rationale = RATIONALE }) {
+  const r = await client.query(
+    "select clara.wake_record_journal_entry(p_client => $1::uuid, p_work => $2::uuid,"
+    + " p_logical_op_id => $3::text, p_basis => $4::jsonb, p_bundle_digest => $5::text,"
+    + " p_run_id => $6::text, p_rationale => $7::text) as result",
+    [cli, work, logicalOpId, JSON.stringify(b), bundleDigest, runId ?? opk("w634-race-run"),
+      rationale]);
+  return r.rows[0].result;
+}
+
+/** `attach_entry_evidence` on a CALLER-SUPPLIED client, for the same reason. */
+export async function attachEntryEvidenceOn(client, { entry, document, expectedRevision, opKey }) {
+  const r = await client.query(
+    "select clara.attach_entry_evidence(p_entry => $1::uuid, p_document => $2::uuid,"
+    + " p_expected_revision => $3::uuid, p_op_key => $4::text) as result",
+    [entry, document, expectedRevision, opKey]);
+  return r.rows[0].result;
+}
 
 // ===========================================================================================
 // 5 · Readers.

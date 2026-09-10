@@ -42,6 +42,7 @@ import { useTranslations } from "next-intl";
 import { JournalBasisFields, fieldElementId, type FieldNode } from "@/components/accounting/journal-basis-fields";
 import { useFirmScope } from "@/components/firm-scope-provider";
 import { StateBanner } from "@/components/common/state";
+import { NativeSelect } from "@/components/common/native-select";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -446,10 +447,16 @@ export function JournalComposerView({
         <p id={`${fieldElementId("evidence")}-help`} className="text-xs text-muted-foreground">
           {tm("evidence.help")}
         </p>
-        <select
+        {/* `NativeSelect`, NOT a hand-rolled `<select>`: the account picker on
+            every line and the late-attachment dialog both use it, and it is what
+            carries the house focus ring, the disabled treatment and the
+            `aria-invalid` border. A bare element here looked almost right and
+            showed the browser's default focus outline instead of the product's —
+            one control on this form behaving unlike every other. */}
+        <NativeSelect
           id={fieldElementId("evidence")}
           ref={(node) => registerField("evidence", node)}
-          className="h-9 rounded-md border border-input bg-background px-3 text-sm"
+          className="w-full"
           value={documentId ?? ""}
           disabled={busy}
           aria-invalid={phase.kind === "sourceConflict" || (phase.kind === "rejected" && phase.field === "evidence") ? true : undefined}
@@ -470,7 +477,7 @@ export function JournalComposerView({
               {evidenceOptionLabel(doc, tm)}
             </option>
           ))}
-        </select>
+        </NativeSelect>
         <p id={`${fieldElementId("evidence")}-error`} className="text-xs text-error" role="alert">
           {phase.kind === "rejected" && phase.field === "evidence" ? tm("evidence.invalid") : ""}
         </p>
@@ -519,7 +526,16 @@ export function JournalComposerView({
       <p className="text-xs text-muted-foreground">{kept ? t("draftKept") : t("draftNotKept")}</p>
 
       <div className="flex flex-wrap items-center gap-3">
-        <Button type="submit" disabled={busy}>
+        {/* NO RESUBMIT OF A SPOKEN-FOR DOCUMENT. `sourceConflict` is the one
+            refusal on this form that pressing again cannot change: the document
+            already backs a posted entry, so the SAME intent re-sent gets the
+            SAME 409 for ever. Leaving the button live said otherwise — the
+            banner's own copy claims "no resubmit", and a control that still
+            accepts the press is the product contradicting itself. The chooser's
+            `onChange` clears the phase, so choosing another document (or "No
+            document") re-enables it in the same tick the choice is made; that
+            is the forward move, along with opening the entry that stands there. */}
+        <Button type="submit" disabled={busy || phase.kind === "sourceConflict"}>
           {busy ? t("submitting") : t("submit")}
         </Button>
         {/* THE PENDING LABEL IS A NAMED STATUS, not only a disabled button —
@@ -599,7 +615,8 @@ function ComposerPhaseBanner({
     // only honest forward moves are to look at the entry that already stands on
     // it (impact / correction) or to choose a different document — and neither
     // is "press submit again", which is why this arm offers no retry and no new
-    // intent key.
+    // intent key, AND why the form's primary Submit is disabled for as long as
+    // this phase stands (see its call site).
     return (
       <StateBanner
         tone="error"

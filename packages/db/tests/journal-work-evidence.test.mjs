@@ -25,7 +25,8 @@ import {
   // #634
   gateEvidence, EVIDENCE_REASON, EVIDENCE_CLR, attachEntryEvidence, listEntryLinks,
   evidenceDocument, retireFiling, docRef, linksForEntry, linksForDocument, linkCount,
-  entryRow, opReceiptCount,
+  entryRow, opReceiptCount, reverseEntry, holdThenContend, recordJournalEntryOn,
+  attachEntryEvidenceOn, ROLES, withTxnOrNull,
 } from "./journal-work-evidence-fixtures.mjs";
 
 let world = null;
@@ -546,6 +547,221 @@ test("w634.attach.notapproved a DRAFT entry refuses entry_not_approved by name",
 });
 
 // ===========================================================================================
+// 4b · LAW 6 AND THE DOCUMENT. A reversed entry must RELEASE its source, or the firm's own
+// invoice is unusable for ever and the correction it exists for cannot be recorded.
+// ===========================================================================================
+
+test("w634.release.reversal reversing a document-backed entry frees the document for the correction", async (t) => {
+  if (await gateEvidence(t)) return;
+  const doc = await evidenceDocument(ALICE(), { firm: FIRM_A(), client: A1() });
+  const first = await armed({ sourceRefs: [docRef(doc.documentId)],
+    b: basis({ cents: 77700, memo: `w634 wrong period ${opk("memo")}` }) });
+  const wrong = await post(first);
+  const held = (await linksForEntry(wrong.entry_id))[0];
+  assert.equal(held.released_at, null, "release: a live binding holds the document");
+
+  const reversed = await reverseEntry(ALICE(), {
+    entry: wrong.entry_id, reason: "w634: posted against the wrong period" });
+  assert.equal(reversed.status, "approved", "release: LAW 6's own door posted the mirror");
+
+  // 1 · THE LINK IS STAMPED, NOT DELETED AND NOT RE-POINTED.
+  const after = (await linksForEntry(wrong.entry_id))[0];
+  assert.ok(after.released_at, "release: the reversal RELEASED the binding");
+  assert.equal(after.document_id, doc.documentId,
+    "release: …and the row still names the document — the chain stays inspectable");
+  assert.equal(after.entry_id, wrong.entry_id);
+  assert.equal(after.attached_via, "work_commit", "release: nothing else about the act moved");
+
+  // 2 · THE CORRECTED JV MAY CITE THE SAME INVOICE — admitted, and it COMMITS.
+  const fixed = await armed({ sourceRefs: [docRef(doc.documentId)],
+    b: basis({ cents: 77700, memo: `w634 corrected ${opk("memo")}` }) });
+  const posted = await post(fixed);
+  assert.equal(posted.posted, true, "release: the correction posts");
+  assert.equal(posted.document_id, doc.documentId,
+    "release: …backed by the very document the reversed entry cited");
+  const live = await linksForDocument(doc.documentId);
+  assert.equal(live.length, 2, "release: two links — one released, one live");
+  assert.equal(live.filter((r) => r.released_at === null).length, 1,
+    "release: exactly ONE live binding, which is what the partial unique index enforces");
+
+  // 3 · THE READ REPORTS BOTH HONESTLY.
+  const rows = await listEntryLinks(BOB(), {
+    client: A1(), entries: [wrong.entry_id, posted.entry_id] });
+  const byId = Object.fromEntries(rows.map((r) => [r.entry_id, r]));
+  assert.equal(byId[wrong.entry_id].document_id, doc.documentId);
+  assert.ok(byId[wrong.entry_id].released_at,
+    "release: the surface can tell a RELEASED binding from a live one");
+  assert.equal(byId[wrong.entry_id].reversed_by, reversed.reversal_id);
+  assert.equal(byId[posted.entry_id].document_id, doc.documentId);
+  assert.equal(byId[posted.entry_id].released_at, null);
+});
+
+test("w634.release.late the late door attaches a released document to the replacement entry", async (t) => {
+  if (await gateEvidence(t)) return;
+  const doc = await evidenceDocument(ALICE(), { firm: FIRM_A(), client: A1() });
+  const first = await armed({ sourceRefs: [docRef(doc.documentId)],
+    b: basis({ cents: 51100, memo: `w634 late-release ${opk("memo")}` }) });
+  const wrong = await post(first);
+  await reverseEntry(ALICE(), { entry: wrong.entry_id, reason: "w634: wrong account" });
+
+  const replacement = await postedEntry({ cents: 51100 });
+  const out = await attachEntryEvidence(BOB(), {
+    entry: replacement.entry_id, document: doc.documentId,
+    expectedRevision: replacement.revision_token });
+  assert.equal(out.attached, true,
+    "release.late: a document freed by a reversal is attachable to the entry that replaced it");
+  assert.equal(out.document_id, doc.documentId);
+  assert.equal(out.attached_via, "late_attachment");
+  assert.equal((await linksForDocument(doc.documentId)).filter((r) => r.released_at === null).length, 1,
+    "release.late: still exactly one LIVE binding");
+});
+
+test("w634.release.reversed the late door refuses closed history and names the correction", async (t) => {
+  if (await gateEvidence(t)) return;
+  const p = await postedEntry({ cents: 62200 });
+  const reversed = await reverseEntry(ALICE(), {
+    entry: p.entry_id, reason: "w634: reversed before any source was named" });
+  assert.equal(reversed.status, "approved");
+  const doc = await evidenceDocument(ALICE(), { firm: FIRM_A(), client: A1() });
+
+  // The reversed entry is STILL `approved` (LAW 6 reverses, it does not withdraw), so this is
+  // its own token rather than `entry_not_approved`.
+  const row = await entryRow(p.entry_id);
+  assert.equal(row.status, "approved", "release.reversed: the state that makes the arm necessary");
+  const { detail } = await assertPair(CLR.conflict, EVIDENCE_REASON.entryReversed,
+    () => attachEntryEvidence(BOB(), { entry: p.entry_id, document: doc.documentId,
+      expectedRevision: row.revision_token }), "release.reversed");
+  assert.equal(detail.reversed_by, reversed.reversal_id,
+    "release.reversed: the refusal names the entry that replaced this one");
+  assert.equal((await linksForEntry(p.entry_id)).length, 0,
+    "release.reversed: no link was written — a link here could never be released and would "
+    + "strand the document for ever");
+});
+
+test("w634.release.appendonly released_at is the ONLY column that may ever move, and only once", async (t) => {
+  if (await gateEvidence(t)) return;
+  const doc = await evidenceDocument(ALICE(), { firm: FIRM_A(), client: A1() });
+  const other = await evidenceDocument(ALICE(), { firm: FIRM_A(), client: A1() });
+  const a = await armed({ sourceRefs: [docRef(doc.documentId)],
+    b: basis({ cents: 33300, memo: `w634 belt ${opk("memo")}` }) });
+  const out = await post(a);
+  const link = (await linksForEntry(out.entry_id))[0];
+
+  // Even as ROOT, through no door at all: the belt is a property of the data.
+  const swap = await withTxnOrNull((c) => c.query(
+    "update clara.entry_evidence_links set document_id=$2 where id=$1", [link.id, other.documentId]));
+  assert.equal(swap.error?.code, "CLR08",
+    "release.appendonly: a link is never re-pointed at another document");
+  const smuggle = await withTxnOrNull((c) => c.query(
+    "update clara.entry_evidence_links set released_at=now(), document_id=$2 where id=$1",
+    [link.id, other.documentId]));
+  assert.equal(smuggle.error?.code, "CLR08",
+    "release.appendonly: …and a release may not carry another column with it");
+  const gone = await withTxnOrNull((c) => c.query(
+    "delete from clara.entry_evidence_links where id=$1", [link.id]));
+  assert.equal(gone.error?.code, "CLR08", "release.appendonly: a link is never deleted");
+
+  // The lawful move, then its irreversibility.
+  const released = await withTxnOrNull((c) => c.query(
+    "update clara.entry_evidence_links set released_at=now() where id=$1", [link.id]));
+  assert.equal(released.error, undefined, "release.appendonly: the one lawful move is allowed");
+  const undo = await withTxnOrNull((c) => c.query(
+    "update clara.entry_evidence_links set released_at=null where id=$1", [link.id]));
+  assert.equal(undo.error?.code, "CLR08", "release.appendonly: a released link is final");
+});
+
+// ===========================================================================================
+// 4c · THE INDEX'S OWN REFUSAL WEARS THE DOOR'S NAME. Two sessions, a PROVEN block, and a
+// TYPED answer — never a raw 23505 no classifier above can act on.
+// ===========================================================================================
+
+test("w634.race.commit two runs posting the same document: the loser gets source_conflict, not 23505", async (t) => {
+  if (await gateEvidence(t)) return;
+  const doc = await evidenceDocument(ALICE(), { firm: FIRM_A(), client: A1() });
+  const one = await armed({ sourceRefs: [docRef(doc.documentId)],
+    b: basis({ cents: 41100, memo: `w634 race one ${opk("memo")}` }) });
+  const two = await armed({ sourceRefs: [docRef(doc.documentId)],
+    b: basis({ cents: 41200, memo: `w634 race two ${opk("memo")}` }) });
+
+  const out = await holdThenContend({
+    a: { role: ROLES.wakeInteractive, wakeSecret: one.cred.secret,
+      run: (c) => recordJournalEntryOn(c, { client: one.client, work: one.work_id,
+        logicalOpId: one.logical_op_id, basis: one.basis }) },
+    b: { role: ROLES.wakeInteractive, wakeSecret: two.cred.secret,
+      run: (c) => recordJournalEntryOn(c, { client: two.client, work: two.work_id,
+        logicalOpId: two.logical_op_id, basis: two.basis }) },
+  });
+
+  assert.equal(out.a.ok, true, `race.commit: the holder posts (${out.a.code ?? ""} ${out.a.message ?? ""})`);
+  assert.equal(out.provedBlocked, true,
+    "race.commit: the contender genuinely BLOCKED on the holder — a schedule that never blocked "
+    + "proves nothing about the race");
+  assert.equal(out.b.ok, false, "race.commit: …and lost");
+  assert.equal(out.b.code, "CLR13",
+    `race.commit: a TYPED conflict, never a raw 23505 (got ${out.b.code}: ${out.b.message})`);
+  assert.equal(out.b.detail.reason, EVIDENCE_REASON.sourceConflict);
+  assert.equal(out.b.detail.constraint, "already_posted");
+  assert.equal(out.b.detail.entry_id, out.a.receipt.entry_id,
+    "race.commit: the refusal names the entry that won the document");
+  assert.equal((await linksForDocument(doc.documentId)).length, 1,
+    "race.commit: one document, one link — the index held");
+  assert.equal((await receiptsForWork(two.work_id)).length, 0,
+    "race.commit: the loser's whole transaction rolled back — no receipt, no effect");
+});
+
+test("w634.race.late two late attachments of one document: the loser gets source_already_posted", async (t) => {
+  if (await gateEvidence(t)) return;
+  const doc = await evidenceDocument(ALICE(), { firm: FIRM_A(), client: A1() });
+  const p1 = await postedEntry({ cents: 44400 });
+  const p2 = await postedEntry({ cents: 44500 });
+
+  const out = await holdThenContend({
+    a: { role: ROLES.authenticated, jwtSub: BOB(),
+      run: (c) => attachEntryEvidenceOn(c, { entry: p1.entry_id, document: doc.documentId,
+        expectedRevision: p1.revision_token, opKey: opk("w634-race-late-a") }) },
+    b: { role: ROLES.authenticated, jwtSub: BOB(),
+      run: (c) => attachEntryEvidenceOn(c, { entry: p2.entry_id, document: doc.documentId,
+        expectedRevision: p2.revision_token, opKey: opk("w634-race-late-b") }) },
+  });
+
+  assert.equal(out.a.ok, true, `race.late: the holder attaches (${out.a.code ?? ""} ${out.a.message ?? ""})`);
+  assert.equal(out.provedBlocked, true, "race.late: the contender genuinely BLOCKED");
+  assert.equal(out.b.ok, false);
+  assert.equal(out.b.code, "CLR13",
+    `race.late: a TYPED conflict, never a raw 23505 (got ${out.b.code}: ${out.b.message})`);
+  assert.equal(out.b.detail.reason, EVIDENCE_REASON.sourceAlreadyPosted);
+  assert.equal(out.b.detail.entry_id, p1.entry_id,
+    "race.late: the refusal names the entry that already stands on the document");
+  assert.equal((await linksForEntry(p2.entry_id)).length, 0, "race.late: the loser wrote nothing");
+});
+
+test("w634.race.samestate a race that lands the very state the caller asked for REPLAYS, it does not refuse", async (t) => {
+  if (await gateEvidence(t)) return;
+  const doc = await evidenceDocument(ALICE(), { firm: FIRM_A(), client: A1() });
+  const p = await postedEntry({ cents: 45500 });
+
+  // Two presses of ONE decision under two keys (a lost response, retried) that happen to race.
+  const out = await holdThenContend({
+    a: { role: ROLES.authenticated, jwtSub: BOB(),
+      run: (c) => attachEntryEvidenceOn(c, { entry: p.entry_id, document: doc.documentId,
+        expectedRevision: p.revision_token, opKey: opk("w634-race-same-a") }) },
+    b: { role: ROLES.authenticated, jwtSub: BOB(),
+      run: (c) => attachEntryEvidenceOn(c, { entry: p.entry_id, document: doc.documentId,
+        expectedRevision: p.revision_token, opKey: opk("w634-race-same-b") }) },
+  });
+
+  assert.equal(out.a.ok, true, `race.samestate: the holder attaches (${out.a.code ?? ""} ${out.a.message ?? ""})`);
+  assert.equal(out.provedBlocked, true, "race.samestate: the contender genuinely BLOCKED");
+  assert.equal(out.b.ok, true,
+    `race.samestate: the loser is told the truth, not refused (${out.b.code ?? ""}: ${out.b.message ?? ""})`);
+  assert.equal(out.b.receipt.already_attached, true);
+  assert.equal(out.b.receipt.link_id, out.a.receipt.link_id,
+    "race.samestate: both presses name the ONE link");
+  assert.equal((await linksForEntry(p.entry_id)).length, 1,
+    "race.samestate: exactly one link, however many sessions asked for it");
+});
+
+// ===========================================================================================
 // 5 · The journal surface's read.
 // ===========================================================================================
 
@@ -571,6 +787,8 @@ test("w634.links.shape list_entry_links exposes purpose, source, Work, receipt a
   assert.equal(d.initiator_role, "bookkeeper");
   assert.equal(d.document_id, doc.documentId, "links.shape: the source document");
   assert.equal(d.document_source, "work_commit", "links.shape: …and HOW it was bound");
+  assert.equal(d.released_at, null,
+    "links.shape: a LIVE binding — the column the surface reads to tell it from a released one");
   assert.equal(d.status, "approved");
   assert.equal(d.origin, "agent");
   assert.equal(d.reversal_of, null);
@@ -585,16 +803,16 @@ test("w634.links.shape list_entry_links exposes purpose, source, Work, receipt a
 test("w634.links.correction the reversal pair rides the same read", async (t) => {
   if (await gateEvidence(t)) return;
   const p = await postedEntry({ cents: 77700 });
-  const reversed = await humanQuery(ALICE(),
-    "select clara.reverse_entry(p_entry => $1::uuid, p_reason => $2::text,"
-    + " p_op_key => $3::text) as result",
-    [p.entry_id, "w634: posted against the wrong period", opk("w634-rev")])
-    .catch((e) => ({ error: e }));
-  if (reversed.error) {
-    t.diagnostic(`links.correction: reverse_entry unavailable (${reversed.error.code}: ${reversed.error.message})`);
-    return;
-  }
-  const mirror = reversed.rows[0].result.reversal_id ?? reversed.rows[0].result.entry_id;
+  // ASSERTED, never swallowed. An earlier cut of this cell caught a raise from `reverse_entry`,
+  // wrote a diagnostic and RETURNED GREEN — so a broken reversal door, or a world that could not
+  // reach one, read exactly like a passing correction chain. LAW 6 is the subject of this cell:
+  // if the estate cannot reverse this entry, that is the finding.
+  const reversed = await reverseEntry(ALICE(), {
+    entry: p.entry_id, reason: "w634: posted against the wrong period", opKey: opk("w634-rev") });
+  assert.equal(reversed.status, "approved",
+    "links.correction: the reversal mirror is posted, not parked as a high-stakes draft");
+  const mirror = reversed.reversal_id;
+  assert.ok(mirror, "links.correction: the door names the entry it wrote");
   const rows = await listEntryLinks(BOB(), { client: A1(), entries: [p.entry_id, mirror] });
   const byId = Object.fromEntries(rows.map((r) => [r.entry_id, r]));
   assert.equal(byId[p.entry_id].reversed_by, mirror,

@@ -20,6 +20,10 @@
 // document picked and the dialog open, because the next act is almost always
 // "look at that, then choose again" — closing the dialog would throw away the
 // one piece of state the human just produced.
+//
+// AND THE OP KEY SURVIVES AN UNOBSERVED OUTCOME. `unavailable` means nobody can
+// say whether the door ran, so the retry must ride the SAME key and let
+// `clara._reserve_op` answer — see `confirm` below for the whole rule.
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
@@ -87,6 +91,12 @@ export function AttachEvidenceDialog({
   const t = useTranslations("ManualJournal");
   const [open, setOpen] = useState(false);
   const [documents, setDocuments] = useState<EvidenceDocument[] | null>(null);
+  /** THREE STATES, NOT TWO. `documents === null` is "not read yet",
+   *  `documents === []` is "this client has none", and this flag is "we could
+   *  not read them". Collapsing the third into the second (which an earlier cut
+   *  did) made a failed read say *this client has no filed documents* — a claim
+   *  about the client's records that the browser is in no position to make. */
+  const [documentsUnavailable, setDocumentsUnavailable] = useState(false);
   const [documentId, setDocumentId] = useState("");
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<AttachEvidenceResult | null>(null);
@@ -121,12 +131,17 @@ export function AttachEvidenceDialog({
     opKey.current = crypto.randomUUID();
     void (loadDocuments ? loadDocuments() : listClientEvidenceDocuments(clientId, { session }))
       .then((rows) => {
-        if (live) setDocuments(rows);
+        if (!live) return;
+        setDocuments(rows);
+        setDocumentsUnavailable(false);
       })
       .catch(() => {
-        // An unreadable list is an EMPTY list plus an honest note below, never a
-        // dialog that hangs on a spinner.
-        if (live) setDocuments([]);
+        // AN UNREADABLE LIST IS A NAMED STATE, never a dialog that hangs on a
+        // spinner and never the sentence "this client has no filed documents" —
+        // the composer's own documents arm is the model.
+        if (!live) return;
+        setDocuments([]);
+        setDocumentsUnavailable(true);
       });
     return () => {
       live = false;
@@ -143,10 +158,20 @@ export function AttachEvidenceDialog({
     );
     setResult(answer);
     setBusy(false);
-    // A NEW KEY FOR THE NEXT DECISION. The old one now names an answer the
-    // database has stored; reusing it would replay that answer instead of doing
-    // the new thing the human is about to ask for.
-    opKey.current = crypto.randomUUID();
+    // A NEW KEY FOR THE NEXT DECISION — BUT ONLY AFTER A SETTLED OUTCOME. The old
+    // key names an answer the database has STORED (an attachment, or a typed
+    // refusal it reserved and finished), so reusing it would replay that answer
+    // instead of doing the new thing the human is about to ask for.
+    //
+    // `unavailable` IS NOT A SETTLED OUTCOME. Nothing was observed: the request
+    // may have reached the door and written the link, and the response may
+    // simply have been lost. Rotating the key there is the one move that turns a
+    // safe retry into a SECOND act — §3's lost-response rule ("same operation
+    // identity for retries; a NEW intent gets a new identity") says the retry
+    // must replay under the SAME key, so `clara._reserve_op` answers with
+    // `operation_in_flight` or with the original result rather than attaching
+    // again under a fresh identity.
+    if (answer.kind !== "unavailable") opKey.current = crypto.randomUUID();
     if (answer.kind === "source_conflict") {
       setConflictEntry(await findEntry(clientId, documentId, { session }).catch(() => null));
     }
@@ -206,7 +231,9 @@ export function AttachEvidenceDialog({
               </option>
             ))}
           </NativeSelect>
-          {documents !== null && list.length === 0 ? (
+          {documentsUnavailable ? (
+            <StateBanner tone="warning">{t("attach.documentsUnavailable")}</StateBanner>
+          ) : documents !== null && list.length === 0 ? (
             <p className="text-xs text-muted-foreground">{t("attach.noDocuments")}</p>
           ) : null}
           <AttachOutcome clientId={clientId} conflictEntry={conflictEntry} result={result} />
@@ -265,22 +292,23 @@ function AttachOutcome({
       </StateBanner>
     );
   }
-  const body =
-    result.kind === "invalid_document"
-      ? t("attach.invalid")
-      : result.kind === "evidence_already_attached"
-        ? t("attach.evidenceAlreadyAttached")
-        : result.kind === "entry_not_approved"
-          ? t("attach.notApproved")
-          : result.kind === "stale"
-            ? t("attach.stale")
-            : result.kind === "denied"
-              ? t("attach.denied")
-              : result.kind === "not_found"
-                ? t("attach.notFound")
-                : result.kind === "refused"
-                  ? t("attach.refused")
-                  : t("attach.unavailable");
+  // A SWITCH RATHER THAN AN EIGHT-DEEP TERNARY, and the keys stay LITERAL inside
+  // it: `scripts/check-message-keys.mjs` reads `t("…")` call sites to decide
+  // which keys are used, so a table lookup would make every message here look
+  // unused and the gate would delete copy the product renders.
+  const body = ((): string => {
+    switch (result.kind) {
+      case "invalid_document": return t("attach.invalid");
+      case "evidence_already_attached": return t("attach.evidenceAlreadyAttached");
+      case "entry_not_approved": return t("attach.notApproved");
+      case "entry_reversed": return t("attach.entryReversed");
+      case "stale": return t("attach.stale");
+      case "denied": return t("attach.denied");
+      case "not_found": return t("attach.notFound");
+      case "refused": return t("attach.refused");
+      default: return t("attach.unavailable");
+    }
+  })();
   return (
     <StateBanner
       tone={result.kind === "denied" ? "warning" : "error"}

@@ -45,8 +45,12 @@
 //   reason   the database's `constraint` token: `object` | `present` | `iso_date` | `nonempty` |
 //            `myr` | `array` | `at_least_two` | `exactly_one_side` | `integer_cents` |
 //            `nonnegative_integer_cents` | `balanced` | `nonzero_total` | `max_length`, plus the
-//            one route-only token `text` (see `toDbBasis`). For a non-basis CLR10 the reason is
-//            the database's typed `detail.reason` instead (`invalid_intent_key`, …).
+//            one route-only token `text` (see `toDbBasis`). #634 adds the evidence array's own
+//            tokens on the same footing — `object` | `kind` | `document_id` | `uuid` |
+//            `at_most_one_document` | `not_filed` — because `invalid_source_ref` is field-scoped
+//            exactly as `invalid_basis` is, and `not_filed` is reachable only from the database.
+//            For a non-field CLR10 the reason is the database's typed `detail.reason` instead
+//            (`invalid_intent_key`, …).
 //
 // WHY IT MATTERS ENOUGH TO STATE. `apps/web/lib/work/journal-basis.ts`'s `fieldForServerPath` is
 // the ONE mapper from a wire path onto a focusable control, and it was written against the
@@ -337,16 +341,27 @@ export function workErrorResponse(err: unknown): { status: number; body: Record<
   const reason = reasonOf(err);
   const status = workErrorStatus(code, reason);
   if (status === 400) {
-    // `constraint` IS the reason on the wire for an `invalid_basis`, so the route's own 400s and
+    // `constraint` IS the reason on the wire for a field-scoped CLR10, so the route's own 400s and
     // the database's speak ONE vocabulary (see the WIRE FIELD PATHS note in this file's header).
     // Every other CLR10 has no constraint and rides back under its own typed reason.
+    //
+    // #634 · `invalid_source_ref` FOLDS TOO, and the reason is measured rather than symmetric for
+    // its own sake. `toDbSourceRefs` above answers `object` / `kind` / `at_most_one_document` /
+    // `uuid` — bare constraint tokens — while the database answers the SAME four plus `not_filed`,
+    // the one only it can reach (is this an active, byte-verified filing of THIS client?), under
+    // `reason: "invalid_source_ref"` with the token buried in `detail.constraint`. Unfolded, the
+    // browser saw two different vocabularies for one refusal depending on WHICH half caught it,
+    // and `not_filed` — the only case a preparer can actually act on — never reached the wire at
+    // all. `lib/wire.ts` surfaces `detail.reason` and discards every other detail key, so folding
+    // here is the only place it can happen.
     const constraint = detailField(err, "constraint");
+    const folds = reason === "invalid_basis" || reason === "invalid_source_ref";
     return {
       status: 400,
       body: {
         error: "invalid_basis",
         field: toWireField(fieldOf(err)) ?? "basis",
-        reason: reason === "invalid_basis" && constraint !== null ? constraint : (reason ?? "invalid_basis"),
+        reason: folds && constraint !== null ? constraint : (reason ?? "invalid_basis"),
       },
     };
   }

@@ -305,11 +305,45 @@ test("634.route: the DATABASE's source_refs[N] path is re-spelled sourceRefs[N] 
   });
   assert.deepEqual(workErrorResponse(err), {
     status: 400,
-    body: { error: "invalid_basis", field: "sourceRefs[1]", reason: "invalid_source_ref" },
+    body: { error: "invalid_basis", field: "sourceRefs[1]", reason: "not_filed" },
   });
   // A basis path is NOT re-spelled — only the evidence array is.
   const basisErr = raised("CLR10", { reason: "invalid_basis", field: "lines[1].account_code", constraint: "nonempty" });
   assert.equal(workErrorResponse(basisErr).body.field, "lines[1].account_code");
+});
+
+test("634.route: an evidence refusal speaks ONE vocabulary whichever half caught it", () => {
+  // Reviewed finding. `toDbSourceRefs` above answers with the bare CONSTRAINT token; the database
+  // answers `reason: "invalid_source_ref"` with the token in `detail.constraint`, and
+  // `lib/wire.ts` discards every detail key but `reason` — so unfolded, one refusal reached the
+  // browser under two different spellings depending on which half caught it, and `not_filed` (the
+  // only arm the route cannot reach, and the only one a preparer can act on) never reached the
+  // wire at all.
+  //
+  // THE FOUR SHARED TOKENS, each raised from BOTH halves, must answer identically.
+  for (const constraint of ["object", "kind", "uuid", "at_most_one_document"]) {
+    const fromDb = workErrorResponse(raised("CLR10", {
+      reason: "invalid_source_ref", field: "source_refs[1]", constraint,
+    }));
+    const fromRoute = refuseRefs(constraint === "object" ? [42]
+      : constraint === "kind" ? [{ kind: "invoice", documentId: DOC }]
+        : constraint === "uuid" ? [{ kind: "document", documentId: "not-a-uuid" }]
+          : [{ kind: "document", documentId: DOC }, { kind: "document", documentId: DOC }]);
+    assert.equal(fromDb.body.reason, constraint,
+      `the database's ${constraint} keeps its token on the wire`);
+    assert.equal(fromRoute.reason, constraint, `…and so does the route's own ${constraint}`);
+  }
+  // …and the DB-ONLY arm keeps the token nothing else can produce.
+  assert.equal(
+    workErrorResponse(raised("CLR10", {
+      reason: "invalid_source_ref", field: "source_refs[1]", constraint: "not_filed",
+    })).body.reason,
+    "not_filed",
+    "not_filed is reachable only from the database and must survive the wire");
+  // A detail with NO constraint keeps the typed reason rather than inventing one.
+  assert.equal(
+    workErrorResponse(raised("CLR10", { reason: "invalid_source_ref", field: "source_refs[1]" })).body.reason,
+    "invalid_source_ref");
 });
 
 test("634.route: source_already_posted is a 409 that NAMES the entry already standing on the document", () => {

@@ -1549,9 +1549,16 @@ const JOURNAL_EVIDENCE_0182_HUMAN_FNS = ["attach_entry_evidence", "list_entry_li
 //   …and the UNGRANTED closure the two doors and the recut 0178 bodies share: the source-ref
 //   predicates and the one-document-one-entry probe. Listed so `cohortFailures` reports a
 //   half-applied 0182 rather than a silently narrower boundary.
+//   …plus the TWO trigger bodies the reviewed release-on-reversal fix adds: the links table's
+//   one-column append-only allowset (`released_at`, null -> instant, nothing else) and the
+//   `clara.journal_entries.reversed_by` trigger that stamps it. Both are ungranted definer
+//   trigger functions; they are listed for the same half-applied signal as the predicates above,
+//   because a 0182 with the doors but WITHOUT the release would strand a reversed entry's
+//   document for ever.
 const JOURNAL_EVIDENCE_0182_UNGRANTED_FNS = [
   "_assert_journal_source_refs", "_journal_source_refs_canonical", "_journal_source_document",
   "_document_posting_entry", "_journal_document_filed",
+  "_tf_entry_evidence_link_append_only", "_tf_entry_evidence_release",
 ];
 export const JOURNAL_EVIDENCE_0182_COHORT = [
   ...JOURNAL_EVIDENCE_0182_HUMAN_FNS, ...JOURNAL_EVIDENCE_0182_UNGRANTED_FNS,

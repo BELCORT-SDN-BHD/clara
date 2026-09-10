@@ -6,6 +6,7 @@
 // holds no state of its own (every piece lives in the table, so a re-read
 // after a door call never collapses a row the reader had open).
 
+import { useState } from "react";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
 
@@ -240,14 +241,28 @@ function EntryLinesReadout({
 function EntryLinksReadout({ clientId, link }: { clientId: string; link: EntryLinkRow | null }) {
   const tm = useTranslations("ManualJournal");
   if (link === null) return null;
+  // A RELEASED BINDING IS SAID SO, in place of how it was bound. Once the entry
+  // is reversed the document is free again (migration 0182's
+  // `t_entry_evidence_release`), and "Attached when the entry was recorded" would
+  // read as the current fact about a document that now backs the correction.
   const sourceNote =
-    link.document_source === "work_commit"
-      ? tm("links.sourceWorkCommit")
-      : link.document_source === "late_attachment"
-        ? tm("links.sourceLateAttachment")
-        : link.document_source === "document_coding"
-          ? tm("links.sourceDocumentCoding")
-          : null;
+    link.released_at !== null
+      ? tm("links.sourceReleased")
+      : link.document_source === "work_commit"
+        ? tm("links.sourceWorkCommit")
+        : link.document_source === "late_attachment"
+          ? tm("links.sourceLateAttachment")
+          : link.document_source === "document_coding"
+            ? tm("links.sourceDocumentCoding")
+            : null;
+  const purpose =
+    link.purpose === null
+      ? null
+      : link.purpose === "journal_entry"
+        ? tm("links.purposeJournalEntry")
+        // The vocabulary is one value today; an unknown one renders VERBATIM
+        // rather than crashing on a missing key, exactly as `basis_origin` does.
+        : link.purpose;
   const basis =
     link.basis_origin === "user_direct"
       ? tm("links.basisUserDirect")
@@ -273,6 +288,16 @@ function EntryLinksReadout({ clientId, link }: { clientId: string; link: EntryLi
           </span>
         )}
       </dd>
+      {/* WHAT KIND OF WORK THIS WAS. `accounting_work.purpose` was read by every
+          surface on this journey and rendered by none — the reviewer's finding.
+          It is the column that says a raw JV is a raw JV rather than one of the
+          purposes the lane will grow. */}
+      {purpose === null ? null : (
+        <>
+          <dt className="text-muted-foreground">{tm("links.purpose")}</dt>
+          <dd className="text-foreground">{purpose}</dd>
+        </>
+      )}
       {basis === null ? null : (
         <>
           <dt className="text-muted-foreground">{tm("links.basisOrigin")}</dt>
@@ -295,12 +320,17 @@ function EntryLinksReadout({ clientId, link }: { clientId: string; link: EntryLi
       {link.receipt_id === null ? null : (
         <>
           <dt className="text-muted-foreground">{tm("links.receipt")}</dt>
-          {/* THE SHORT ID PLUS THE WHOLE ONE IN `title`, the same treatment the
-              Reference column gives the entry's own uuid — a receipt id is a
-              thing a professional quotes to somebody else, so it must be
-              selectable in full rather than only recognisable. */}
-          <dd className="wrap-anywhere font-mono text-foreground" title={link.receipt_id}>
-            {link.receipt_id.slice(0, 8)}
+          {/* THE SHORT ID TO RECOGNISE IT BY, AND A COPY CONTROL TO QUOTE IT
+              WITH. A receipt id is a thing a professional puts in an email to
+              somebody else, and an earlier cut offered only a `title` tooltip —
+              which is unreachable by keyboard, invisible on touch and cannot be
+              selected. `components/reports/ArtifactRow.tsx` is the house pattern
+              for this pair and is what this follows. */}
+          <dd className="flex flex-wrap items-center gap-2">
+            <span className="wrap-anywhere font-mono text-foreground" title={link.receipt_id}>
+              {link.receipt_id.slice(0, 8)}
+            </span>
+            <CopyReceiptButton receiptId={link.receipt_id} />
           </dd>
         </>
       )}
@@ -334,5 +364,36 @@ function EntryLinksReadout({ clientId, link }: { clientId: string; link: EntryLi
         </>
       )}
     </dl>
+  );
+}
+
+/**
+ * COPY THE WHOLE RECEIPT ID. The short form above is for recognising a row; this
+ * is for quoting one to somebody else, which is what a receipt id is actually
+ * for. `components/reports/ArtifactRow.tsx` is the house pattern — a small
+ * outline Button, a confirmed label for a moment, and a `.catch` that leaves the
+ * label alone when the browser refuses the clipboard (a permission prompt
+ * declined, an insecure origin) rather than claiming a copy that did not happen.
+ */
+function CopyReceiptButton({ receiptId }: { receiptId: string }) {
+  const tm = useTranslations("ManualJournal");
+  const [copied, setCopied] = useState(false);
+  return (
+    <Button
+      type="button"
+      variant="outline"
+      size="xs"
+      onClick={() => {
+        navigator.clipboard
+          ?.writeText(receiptId)
+          .then(() => {
+            setCopied(true);
+            setTimeout(() => setCopied(false), 1500);
+          })
+          .catch(() => {});
+      }}
+    >
+      {copied ? tm("links.receiptCopied") : tm("links.copyReceipt")}
+    </Button>
   );
 }

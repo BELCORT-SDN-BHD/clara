@@ -60,6 +60,41 @@
 -- one would make its `order by created_at limit 1` a coin toss on a tie.)
 --
 -- =====================================================================================
+-- THE THIRD MEASUREMENT: A REVERSAL MUST RELEASE THE DOCUMENT, OR LAW 6 STRANDS IT FOREVER.
+--
+-- Reviewed finding, and it is an accounting invariant rather than a nicety. LAW 6 says a wrong
+-- entry is REVERSED and a corrected one is posted in its place. Without the arm below, the
+-- reversed entry's link keeps holding the document under
+-- `uq_entry_evidence_links_document`: the corrected JV citing the SAME invoice is refused
+-- `source_already_posted` at admission (naming the entry that is no longer in the books), the
+-- late door refuses it too, and the firm's own invoice is unusable for ever. Measured against
+-- the estate's other lane, which does NOT have the defect: the DOCUMENT-CODING arm of
+-- `clara._document_posting_entry` already asks for an approved and NOT-REVERSED entry, because
+-- a reversed coding is lawfully re-codable.
+--
+-- THE FIX DOES NOT TOUCH `clara.reverse_entry` (0009:1697), and that is deliberate: it is a live
+-- writer with sixteen sibling reversal writers across the estate (`set reversed_by =` appears in
+-- 0004, 0005, 0007, 0009, 0011, 0015, 0016, 0017, 0027, 0029, 0035, 0037 …), and an arm added to
+-- one of them would be absent from the other fifteen. So the release rides a TRIGGER on the
+-- column itself — `t_entry_evidence_release`, AFTER UPDATE OF `reversed_by` — which every one of
+-- those writers passes through, including the `approve_entry` path that stamps `reversed_by` on
+-- the original when a reversal DRAFT is later approved.
+--
+-- THE LINK ROW IS NOT DELETED AND NOT RE-POINTED. It is STAMPED `released_at`, so the chain
+-- stays inspectable: `clara.list_entry_links` still reports the reversed entry's document, with
+-- the instant it stopped being the live binding. The table's append-only trigger is widened to
+-- admit EXACTLY that one column moving from null to non-null — the `clara._tf_entry_immutable`
+-- allowset precedent, applied to this table with a one-column allowset of its own — and the
+-- document uniqueness becomes PARTIAL on `released_at is null`. The ENTRY uniqueness stays
+-- UNCONDITIONAL: an entry never gains a second source, released or not.
+--
+-- AND THE LATE DOOR REFUSES A REVERSED ENTRY (CLR13 `entry_reversed`). Without that arm the hole
+-- reopens from the other side: a link born against an already-reversed entry would never be
+-- released (the reversal UPDATE that fires the trigger has already happened) and would hold the
+-- document for ever. Evidence attaches to a LIVE posted entry; the correction is where the source
+-- belongs, and the refusal names the entry that replaced this one.
+--
+-- =====================================================================================
 -- DEPLOY ORDER AND WRITE QUIESCENCE. This file RECUTS TWO LIVE WRITER BODIES —
 -- `clara.admit_journal_work` and `clara._record_journal_entry_core` — with full-body
 -- `create or replace` copies of their 0178 text plus the arms named below. A call already
@@ -69,10 +104,21 @@
 -- frontier 0179 in §0 below, so a drifted body is REFUSED rather than silently overwritten.
 --
 -- CONSUMER-FIRST: none owed. Every new object is NEW; the two recuts are STRICT ADDITIONS on the
--- documentless path — a Work whose `source_refs` names no document behaves byte-for-byte as it
--- did before this file (the new arms are all guarded by `v_source_document is not null`), and no
--- deployed consumer sends a `document` source ref until the runtime route that can produce one
--- ships. The one behaviour that changes for an EXISTING Work is the replay comparison in
+-- documentless path — a Work whose `source_refs` names no document reaches the same effects, in
+-- the same order, and no deployed consumer sends a `document` source ref until the runtime route
+-- that can produce one ships.
+--
+-- THREE PAYLOADS DO GAIN A KEY on that path, and saying "byte-for-byte" of them would be false
+-- (reviewed finding; measured on the rig by `w634.commit.documentless`): `accounting_work.result`,
+-- the `clara._audit` payload and `clara._finish_op`'s stored result each now carry
+-- `document_id: null` for a documentless Work, because they build it from `v_source_document`
+-- unconditionally. That is an ADDITIVE key with a null value in three JSONB records nobody keys
+-- off, and it is stated rather than hidden. The ONE payload that IS byte-identical is the one a
+-- wall reads: `clara.operation_receipts.effects` gains `document_id` only when there is a
+-- document (`t_je_agent_post_receipt` and the outcome-shape CHECK read that column), and
+-- `w634.commit.documentless` pins its absence.
+--
+-- The other behaviour that changes for an EXISTING Work is the replay comparison in
 -- `admit_journal_work`: a replay whose source refs canonicalise differently is now a typed
 -- `intent_payload_conflict` instead of a silent replay. Chat-lane refs canonicalise to
 -- `{"kind":"chat_task"}` with their `task_id`/`session_id` DROPPED precisely so the frozen
@@ -114,6 +160,9 @@
 --   CLR10 invalid_op_key          blank/whitespace op key (BEFORE any reservation)
 --   CLR11 entry_not_found         unknown entry, or an entry outside the caller's firm (no oracle)
 --   CLR13 entry_not_approved      + status; evidence attaches to a POSTED entry only
+--   CLR13 entry_reversed          + entry_id + reversed_by; evidence attaches to a LIVE posted
+--                                 entry, and the refusal names the correction that replaced this
+--                                 one (see THE THIRD MEASUREMENT above)
 --   CLR06 stale_revision          + revision_token; the caller's view is not the current row
 --   CLR10 invalid_source_ref      + constraint in {uuid, not_filed}; the document is not an
 --                                 active, byte-verified filing of THIS entry's client
@@ -188,8 +237,14 @@ begin
   if exists (select 1 from pg_proc p where p.pronamespace='clara'::regnamespace
       and p.proname in ('attach_entry_evidence','list_entry_links','_journal_source_refs_canonical',
         '_assert_journal_source_refs','_journal_source_document','_document_posting_entry',
-        '_journal_document_filed')) then
+        '_journal_document_filed','_tf_entry_evidence_link_append_only',
+        '_tf_entry_evidence_release')) then
     raise exception '#634 partial birth: one or more new function names already resolve' using errcode='CLR10';
+  end if;
+  if exists (select 1 from pg_trigger t where t.tgname = 't_entry_evidence_release'
+               and t.tgrelid = 'clara.journal_entries'::regclass and not t.tgisinternal) then
+    raise exception '#634 partial birth: t_entry_evidence_release already sits on clara.journal_entries'
+      using errcode='CLR10';
   end if;
 
   -- 0.5 · THE TWO LIVE BODIES THIS FILE REPLACES, pinned by prosrc sha-256 at frontier 0179.
@@ -220,12 +275,22 @@ set role clara_fn_owner;
 -- `clara.operation_receipts`. Re-pointing a document after a reversal is #646's scope (source
 -- correction) and is deliberately NOT reachable here.
 --
--- `uq_entry_evidence_links_document` is the STRUCTURAL half of "one document backs at most one
--- posted entry": the two doors below refuse it by name first (CLR13 `source_already_posted`, so
--- the human gets the conflicting entry id and a route to impact/correction), and this index makes
--- a second row impossible even under a genuine race and even if a future writer forgets to ask.
--- Two independent mechanisms, because "the writer always checks" is a property of code and this
--- is a property of the data — 0178 §B's own reasoning, applied to the same shape of claim.
+-- `uq_entry_evidence_links_document` is the STRUCTURAL half of "one LIVE document binding backs
+-- at most one posted entry": the two doors below refuse it by name first (CLR13
+-- `source_already_posted`, so the human gets the conflicting entry id and a route to
+-- impact/correction), and this index makes a second row impossible even under a genuine race and
+-- even if a future writer forgets to ask. Two independent mechanisms, because "the writer always
+-- checks" is a property of code and this is a property of the data — 0178 §B's own reasoning,
+-- applied to the same shape of claim. It is PARTIAL on `released_at is null` (see THE THIRD
+-- MEASUREMENT in this file's header): a reversed entry's binding is released, and the corrected
+-- JV may cite the same invoice.
+--
+-- BOTH DOORS ALSO CATCH THE INDEX'S OWN `unique_violation` and re-raise the SAME typed refusal
+-- they raise from their pre-checks. Reviewed finding: without it a genuine race — two sessions
+-- past their pre-checks, the second blocked on the index — escaped as a raw 23505 with no
+-- `detail.reason`, which every classifier above (the runtime's `WORK_MAPPED_CODES`, the web's
+-- `parseReasonToken`) reads as an unclassified 500 rather than as the conflict it is. A refusal
+-- must have ONE spelling however it was detected.
 --
 -- `work_id` is NULLABLE on purpose: a late attachment against an entry that did NOT come from an
 -- accounting Work (a document-lane entry, a human manual entry from an older door) is a lawful
@@ -245,6 +310,13 @@ create table clara.entry_evidence_links (
   attached_via   text        not null check (attached_via in ('work_commit','late_attachment')),
   attached_by    uuid        not null references clara.users(id),
   attached_at    timestamptz not null default now(),
+  -- #634 (reviewed finding) · THE ONE COLUMN THAT EVER MOVES, and only ever from NULL to an
+  -- instant, stamped by `t_entry_evidence_release` when the entry this link points at is
+  -- REVERSED. It is not a deletion and not a re-pointing: the row keeps naming the document that
+  -- backed the entry, and `clara.list_entry_links` keeps reporting it, so the correction chain
+  -- stays inspectable. What it releases is the DOCUMENT'S availability — see THE THIRD
+  -- MEASUREMENT in this file's header, and `uq_entry_evidence_links_document`'s predicate.
+  released_at    timestamptz,
   constraint fk_entry_evidence_links_entry foreign key (entry_id, firm_id, client_id)
     references clara.journal_entries(id, firm_id, client_id),
   constraint fk_entry_evidence_links_document foreign key (document_id, firm_id)
@@ -265,11 +337,13 @@ create table clara.entry_evidence_links (
 comment on table clara.entry_evidence_links is
   '#634: the ONE evidence relation for the accounting-work journal lane -- which client document '
   'backs which posted entry, written identically by the commit path and by the late door '
-  '(clara.attach_entry_evidence). Append-only; posted entries are never rewritten '
+  '(clara.attach_entry_evidence). Append-only apart from released_at (null -> instant, stamped by '
+  't_entry_evidence_release when the entry is reversed); posted entries are never rewritten '
   '(clara._tf_entry_immutable). uq_entry_evidence_links_document is the structural half of "one '
-  'document backs at most one posted entry".';
+  'LIVE document binding backs at most one posted entry".';
 
-create unique index uq_entry_evidence_links_document on clara.entry_evidence_links(document_id);
+create unique index uq_entry_evidence_links_document on clara.entry_evidence_links(document_id)
+  where released_at is null;
 create index ix_entry_evidence_links_client on clara.entry_evidence_links(client_id, attached_at desc);
 create index ix_entry_evidence_links_work on clara.entry_evidence_links(work_id) where (work_id is not null);
 
@@ -285,10 +359,64 @@ create policy p_entry_evidence_links_read on clara.entry_evidence_links
   for select to clara_authenticated using (firm_id = clara.jwt_firm());
 grant select on clara.entry_evidence_links to clara_authenticated;
 
+-- THE APPEND-ONLY BELT, WITH A ONE-COLUMN ALLOWSET. The generic `clara._tf_append_only` (0003)
+-- refuses every UPDATE, and this table needs exactly one: `released_at`, NULL -> an instant, and
+-- nothing else on the row moving with it. That is the `clara._tf_entry_immutable` shape
+-- (0016:4943) — an allowset plus `(to_jsonb(new) - allowed) is distinct from (to_jsonb(old) -
+-- allowed)` — narrowed to one column and one direction, so a "release" can never be a re-point,
+-- an un-release or a quiet edit of the document behind a posted entry. DELETE stays refused
+-- outright: a link is the durable record of an act.
+create function clara._tf_entry_evidence_link_append_only() returns trigger
+  language plpgsql security definer set search_path = clara, pg_temp as $$
+begin
+  if tg_op = 'DELETE' then
+    raise exception '% is append-only', tg_table_name using errcode = 'CLR08';
+  end if;
+  if old.released_at is not null then
+    raise exception '% is append-only (a released link is final)', tg_table_name
+      using errcode = 'CLR08';
+  end if;
+  if new.released_at is null then
+    raise exception '% is append-only (released_at is the only column that may move, and only to an instant)',
+      tg_table_name using errcode = 'CLR08';
+  end if;
+  if (to_jsonb(new) - 'released_at') is distinct from (to_jsonb(old) - 'released_at') then
+    raise exception '% is append-only (no column but released_at may move)', tg_table_name
+      using errcode = 'CLR08';
+  end if;
+  return new;
+end $$;
+revoke all on function clara._tf_entry_evidence_link_append_only() from public;
+
 create trigger t_entry_evidence_links_append_only before update or delete on clara.entry_evidence_links
-  for each row execute function clara._tf_append_only();
+  for each row execute function clara._tf_entry_evidence_link_append_only();
 create trigger t_entry_evidence_links_no_truncate before truncate on clara.entry_evidence_links
   for each statement execute function clara._tf_no_truncate();
+
+-- THE RELEASE ITSELF — on the COLUMN, not in a writer. `set reversed_by =` has sixteen call
+-- sites across the estate (0004, 0005, 0007, 0009, 0011, 0015, 0016, 0017, 0027, 0029, 0035,
+-- 0037 …): `clara.reverse_entry`'s own straight-through arm, and every `approve_entry`-class
+-- path that stamps the ORIGINAL when a reversal DRAFT is later approved. A trigger on the column
+-- is the only place all sixteen pass through, and it is why this file recuts none of them.
+--
+-- `now()` IS A BARE CLOCK READ and this function therefore joins the 0042 arm-(D) roster
+-- (`packages/db/tests/x42-s5-helpers.mjs`, gated on this migration's stem). It stamps an INSTANT
+-- and derives no DATE from it — the same lawful use every other `_tf_*` on that roster makes.
+create function clara._tf_entry_evidence_release() returns trigger
+  language plpgsql security definer set search_path = clara, pg_temp as $$
+begin
+  update clara.entry_evidence_links set released_at = now()
+   where entry_id = new.id and released_at is null;
+  return null;
+end $$;
+revoke all on function clara._tf_entry_evidence_release() from public;
+
+-- AFTER, and gated on the transition rather than on the column list alone: `update ... set
+-- reversed_by = ...` names the column even when it writes the value it already had, and a link
+-- must be released exactly once, at the moment the entry stops being the live one.
+create trigger t_entry_evidence_release after update of reversed_by on clara.journal_entries
+  for each row when (old.reversed_by is null and new.reversed_by is not null)
+  execute function clara._tf_entry_evidence_release();
 
 -- =====================================================================================
 -- §B  THE SOURCE-REF PREDICATES. Ungranted; shared by admission, by commit and by the late door
@@ -414,17 +542,19 @@ revoke all on function clara._assert_journal_source_refs(uuid,uuid,jsonb) from p
 -- three askers (admission, commit, the late door) can never disagree, and so the answer always
 -- agrees with `uq_entry_evidence_links_document`.
 --
--- TWO LANES, ONE QUESTION. The DOCUMENT CODING lane binds a document to an entry through
--- `clara.journal_entries.document_id` (with its filing + sha trio), and a reversed coding is
--- lawfully re-codable, so that arm asks for an APPROVED, NOT-REVERSED entry. This lane binds
--- through `clara.entry_evidence_links`, whose rows are append-only and never re-pointed, so that
--- arm asks for ANY link — otherwise a reversal would free the document by the door's reckoning
--- while the unique index still held it, and the refusal would escape as a raw 23505.
+-- TWO LANES, ONE QUESTION, AND BOTH IGNORE A REVERSAL. The DOCUMENT CODING lane binds a document
+-- to an entry through `clara.journal_entries.document_id` (with its filing + sha trio), and a
+-- reversed coding is lawfully re-codable, so that arm asks for an APPROVED, NOT-REVERSED entry.
+-- This lane binds through `clara.entry_evidence_links`, and its RELEASED rows are exactly the
+-- reversed ones (`t_entry_evidence_release` above) — so that arm asks for a LIVE link. The two
+-- predicates now say the same thing about the same event, which is what makes the answer agree
+-- with `uq_entry_evidence_links_document`'s own `where released_at is null`: the door's reckoning
+-- and the index's can never disagree, in either direction.
 create function clara._document_posting_entry(p_client uuid, p_document uuid) returns uuid
   language sql stable security definer set search_path = clara, pg_temp as $$
   select e.entry_id from (
     select l.entry_id, 0 as rank from clara.entry_evidence_links l
-      where l.client_id = p_client and l.document_id = p_document
+      where l.client_id = p_client and l.document_id = p_document and l.released_at is null
     union all
     select j.id, 1 from clara.journal_entries j
       where j.client_id = p_client and j.document_id = p_document
@@ -821,11 +951,28 @@ begin
   -- #634 · THE EVIDENCE LINK, born inside the posting transaction and naming its receipt. The
   -- SAME relation and the SAME shape the late door writes -- that is what makes the two entry
   -- points one contract rather than two lookalikes.
+  --
+  -- THE INDEX'S OWN REFUSAL WEARS THE SAME NAME (reviewed finding). Step 7b above asked whether
+  -- the document was free; a CONCURRENT sibling can post between that read and this write, and
+  -- then `uq_entry_evidence_links_document` is what stops the second row. Uncaught, that escaped
+  -- as a raw 23505 — no `detail.reason`, so `WORK_MAPPED_CODES` classified it as unmapped and the
+  -- Work reported an internal error for what is an ordinary, expected conflict. The handler
+  -- re-reads the committed winner and raises the SAME (CLR13, source_conflict, already_posted)
+  -- pair 7b raises. A violation it cannot explain is RE-RAISED verbatim rather than renamed.
   if v_source_document is not null then
-    insert into clara.entry_evidence_links(firm_id, client_id, entry_id, document_id, work_id,
-        receipt_id, logical_op_id, attached_via, attached_by)
-      values (p_firm, p_client, v_entry, v_source_document, p_work, v_receipt, p_logical_op_id,
-        'work_commit', p_obo);
+    begin
+      insert into clara.entry_evidence_links(firm_id, client_id, entry_id, document_id, work_id,
+          receipt_id, logical_op_id, attached_via, attached_by)
+        values (p_firm, p_client, v_entry, v_source_document, p_work, v_receipt, p_logical_op_id,
+          'work_commit', p_obo);
+    exception when unique_violation then
+      v_posted_entry := clara._document_posting_entry(p_client, v_source_document);
+      if v_posted_entry is null then raise; end if;
+      raise exception 'that document already backs a posted journal entry'
+        using errcode='CLR13', detail=jsonb_build_object('reason','source_conflict',
+          'document_id', v_source_document, 'entry_id', v_posted_entry,
+          'constraint','already_posted', 'conflict', true)::text;
+    end;
   end if;
 
   update clara.accounting_work
@@ -896,7 +1043,8 @@ begin
 
   -- THE ENTRY, inside the caller's firm. Cross-firm is NOT-FOUND, never a different error: this
   -- door must not become an existence oracle for another firm's ledger.
-  select je.id, je.client_id, je.firm_id, je.status, je.revision_token, je.document_id
+  select je.id, je.client_id, je.firm_id, je.status, je.revision_token, je.document_id,
+         je.reversed_by
     into e from clara.journal_entries je where je.id = p_entry and je.firm_id = c.firm;
   if not found then
     raise exception 'journal entry not found in your firm' using errcode='CLR11',
@@ -906,6 +1054,17 @@ begin
     raise exception 'evidence attaches to a posted entry; this one is %', e.status
       using errcode='CLR13', detail=jsonb_build_object('reason','entry_not_approved',
         'status', e.status)::text;
+  end if;
+  -- #634 (reviewed finding) · A REVERSED ENTRY IS CLOSED HISTORY. Its status is still `approved`
+  -- (LAW 6 reverses, it does not withdraw), so the arm above does not catch it — and a link born
+  -- here would never be released, because the reversal UPDATE that fires
+  -- `t_entry_evidence_release` has already happened. It would hold the document for ever, which
+  -- is the exact stranding THE THIRD MEASUREMENT exists to prevent. The source belongs on the
+  -- entry that REPLACED this one, and the refusal names it.
+  if e.reversed_by is not null then
+    raise exception 'this entry has been reversed; attach the source to the entry that replaced it'
+      using errcode='CLR13', detail=jsonb_build_object('reason','entry_reversed',
+        'entry_id', p_entry, 'reversed_by', e.reversed_by)::text;
   end if;
   if p_expected_revision is distinct from e.revision_token then
     raise exception 'this entry changed since you read it' using errcode='CLR06',
@@ -968,11 +1127,39 @@ begin
                     then 'entry:' || p_entry::text || ':attach_evidence:1'
                     else 'work:' || v_work::text || ':attach_evidence:1' end;
 
-  insert into clara.entry_evidence_links(firm_id, client_id, entry_id, document_id, work_id,
-      receipt_id, logical_op_id, attached_via, attached_by)
-    values (c.firm, e.client_id, p_entry, p_document, v_work, null, v_logical,
-      'late_attachment', c.actor)
-    returning id into v_link;
+  -- THE INDEX'S OWN REFUSAL WEARS THE SAME NAMES (reviewed finding), for the same reason the
+  -- commit path's does: every check above ran against a snapshot, and a concurrent sibling can
+  -- commit between them and this INSERT. The handler re-reads what actually stands there and
+  -- answers with the SAME three arms the pre-checks use — including the REPLAY arm, because a
+  -- race that lands the very document this caller asked for has produced the state they asked
+  -- for, and calling that a conflict would be a lie about the outcome. An unexplained violation
+  -- is re-raised verbatim.
+  begin
+    insert into clara.entry_evidence_links(firm_id, client_id, entry_id, document_id, work_id,
+        receipt_id, logical_op_id, attached_via, attached_by)
+      values (c.firm, e.client_id, p_entry, p_document, v_work, null, v_logical,
+        'late_attachment', c.actor)
+      returning id into v_link;
+  exception when unique_violation then
+    select l2.id, l2.document_id, l2.work_id, l2.logical_op_id, l2.attached_via
+      into l from clara.entry_evidence_links l2 where l2.entry_id = p_entry;
+    if found and l.document_id = p_document then
+      return clara._finish_op(c.firm, 'attach_entry_evidence', p_op_key, jsonb_build_object(
+        'attached', true, 'entry_id', p_entry, 'document_id', l.document_id,
+        'link_id', l.id, 'work_id', l.work_id, 'logical_op_id', l.logical_op_id,
+        'attached_via', l.attached_via, 'already_attached', true));
+    end if;
+    if found then
+      raise exception 'this entry already carries a different source document'
+        using errcode='CLR13', detail=jsonb_build_object('reason','evidence_already_attached',
+          'document_id', l.document_id, 'entry_id', p_entry, 'conflict', true)::text;
+    end if;
+    v_posted_entry := clara._document_posting_entry(e.client_id, p_document);
+    if v_posted_entry is null then raise; end if;
+    raise exception 'that document already backs a posted journal entry'
+      using errcode='CLR13', detail=jsonb_build_object('reason','source_already_posted',
+        'document_id', p_document, 'entry_id', v_posted_entry, 'conflict', true)::text;
+  end;
 
   perform clara._audit(c.firm, c.actor, null, null, 'attach_entry_evidence', p_entry,
     jsonb_build_object('client', e.client_id, 'entry', p_entry, 'document', p_document,
@@ -989,7 +1176,7 @@ comment on function clara.attach_entry_evidence(uuid,uuid,uuid,text) is
   '#634 C3 late attachment. Bookkeeper+, op-key idempotent, NO financial effect: it writes one '
   'clara.entry_evidence_links row and touches no column of the posted entry (LAW 6). CLR06 on a '
   'stale p_expected_revision; CLR13 evidence_already_attached / source_already_posted / '
-  'entry_not_approved; CLR11 entry_not_found (no cross-firm oracle).';
+  'entry_not_approved / entry_reversed; CLR11 entry_not_found (no cross-firm oracle).';
 
 -- =====================================================================================
 -- §F  clara.list_entry_links — THE JOURNAL SURFACE'S ONE READ.
@@ -1039,6 +1226,12 @@ begin
                                 when je.document_id is not null then 'document_coding'
                                 else null end,
         'attached_at',     l.attached_at,
+        -- #634 (reviewed finding) · WHEN THE BINDING STOPPED BEING THE LIVE ONE, or null. A
+        -- reversed entry keeps reporting the document it was backed by — the chain stays
+        -- inspectable — and this instant is what says the document is now free for the
+        -- correction. A surface that read `document_id` alone would otherwise present a released
+        -- binding as the current fact.
+        'released_at',     l.released_at,
         'reversal_of',     je.reversal_of,
         'reversed_by',     je.reversed_by,
         'reversal_reason', je.reversal_reason)
@@ -1056,7 +1249,8 @@ grant execute on function clara.list_entry_links(uuid,uuid[]) to clara_authentic
 comment on function clara.list_entry_links(uuid, uuid[]) is
   '#634 C3 journal surface. Per entry: Work, operation receipt, logical operation id, purpose, '
   'basis origin, initiator, source document (evidence link OR the document-coding column, with '
-  'the lane named) and the correction chain. Bookkeeper+, firm+client floored, batch cap 500.';
+  'the lane named and released_at when a reversal freed the binding) and the correction chain. '
+  'Bookkeeper+, firm+client floored, batch cap 500.';
 
 reset role;
 
@@ -1099,6 +1293,39 @@ begin
    where t.tgrelid='clara.entry_evidence_links'::regclass and not t.tgisinternal;
   if v_n <> 2 then
     raise exception '#634 tail: entry_evidence_links carries % non-internal trigger(s), expected 2', v_n
+      using errcode='CLR10';
+  end if;
+
+  -- THE RELEASE MECHANISM, all three halves of it (see THE THIRD MEASUREMENT in the header).
+  -- (1) the document uniqueness is PARTIAL, so a released binding frees its document…
+  select count(*) into v_n from pg_index i join pg_class c on c.oid = i.indexrelid
+   where c.relname = 'uq_entry_evidence_links_document' and i.indisunique and i.indpred is not null;
+  if v_n <> 1 then
+    raise exception '#634 tail: uq_entry_evidence_links_document is not a PARTIAL unique index -- a reversed entry would strand its document for ever'
+      using errcode='CLR10';
+  end if;
+  -- (2) …the trigger that stamps the release sits on the COLUMN every reversal writer moves…
+  select count(*) into v_n from pg_trigger t join pg_proc p on p.oid = t.tgfoid
+   where t.tgrelid='clara.journal_entries'::regclass and not t.tgisinternal
+     and t.tgname = 't_entry_evidence_release' and p.proname = '_tf_entry_evidence_release';
+  if v_n <> 1 then
+    raise exception '#634 tail: t_entry_evidence_release is not installed on clara.journal_entries'
+      using errcode='CLR10';
+  end if;
+  -- (3) …and the append-only belt on the links table is the ONE-COLUMN allowset, not the generic
+  -- refuse-everything body (which would make the release above impossible).
+  select p.proname into v_sig from pg_trigger t join pg_proc p on p.oid = t.tgfoid
+   where t.tgrelid='clara.entry_evidence_links'::regclass
+     and t.tgname = 't_entry_evidence_links_append_only';
+  if v_sig is distinct from '_tf_entry_evidence_link_append_only' then
+    raise exception '#634 tail: the links append-only trigger runs % rather than the one-column allowset', coalesce(v_sig,'<none>')
+      using errcode='CLR10';
+  end if;
+  -- …and the LATE door refuses a reversed entry by name, or the stranding reopens from its side.
+  select p.prosrc into v_sig from pg_proc p
+   where p.oid='clara.attach_entry_evidence(uuid,uuid,uuid,text)'::regprocedure;
+  if position('entry_reversed' in v_sig) = 0 or position('unique_violation' in v_sig) = 0 then
+    raise exception '#634 tail: clara.attach_entry_evidence lost its reversed-entry arm or its typed unique-violation handler'
       using errcode='CLR10';
   end if;
 
@@ -1147,7 +1374,8 @@ begin
   end if;
   select p.prosrc into v_sig from pg_proc p
    where p.oid='clara._record_journal_entry_core(uuid,uuid,text,uuid,uuid,text,jsonb,text,text,text)'::regprocedure;
-  if position('source_conflict' in v_sig)=0 or position('entry_evidence_links' in v_sig)=0 then
+  if position('source_conflict' in v_sig)=0 or position('entry_evidence_links' in v_sig)=0
+     or position('unique_violation' in v_sig)=0 then
     raise exception '#634 tail: the commit recut lost one of its new arms' using errcode='CLR10';
   end if;
   if position('obo_not_initiator' in v_sig)=0 or position('generic_control_leg' in v_sig)=0
@@ -1162,6 +1390,6 @@ begin
       using errcode='CLR10';
   end if;
 
-  raise notice '#634 tail: OK -- clara.entry_evidence_links is forced-RLS with exactly 2 policies, zero DML grants and both immutability belts; clara.attach_entry_evidence and clara.list_entry_links are PUBLIC-revoked, clara_authenticated-granted and unreachable by any agent/runtime role; clara.admit_journal_work and clara._record_journal_entry_core carry their new evidence arms with every 0178 arm intact and write no document_id onto a journal entry.';
+  raise notice '#634 tail: OK -- clara.entry_evidence_links is forced-RLS with exactly 2 policies, zero DML grants and both immutability belts (the append-only one carrying the released_at allowset); uq_entry_evidence_links_document is PARTIAL and t_entry_evidence_release sits on clara.journal_entries, so a reversal frees the document for the correction; clara.attach_entry_evidence and clara.list_entry_links are PUBLIC-revoked, clara_authenticated-granted and unreachable by any agent/runtime role; clara.admit_journal_work and clara._record_journal_entry_core carry their new evidence arms (typed unique-violation handlers included) with every 0178 arm intact and write no document_id onto a journal entry.';
 end
 $w634_tail$;

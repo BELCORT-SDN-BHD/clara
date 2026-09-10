@@ -102,6 +102,14 @@ export type EntryLinkRow = {
    *  source — which is an honest answer, not a missing one. */
   document_source: "work_commit" | "late_attachment" | "document_coding" | null;
   attached_at: string | null;
+  /** WHEN THE BINDING STOPPED BEING THE LIVE ONE, or null. Migration 0182's
+   *  `t_entry_evidence_release` stamps it when the entry is REVERSED, which is
+   *  what frees the document for the corrected entry (LAW 6: reverse, then
+   *  re-post — the invoice must not be stranded on history). The row keeps
+   *  naming the document either way, so the chain stays inspectable; a surface
+   *  that read `document_id` alone would present a released binding as the
+   *  current fact. */
+  released_at: string | null;
   reversal_of: string | null;
   reversed_by: string | null;
   reversal_reason: string | null;
@@ -175,6 +183,10 @@ export type AttachEvidenceResult =
    *  resolves WHICH one from the rows — see its note for why not from here. */
   | { kind: "source_conflict" }
   | { kind: "entry_not_approved" }
+  /** The entry has been REVERSED. LAW 6 leaves it `approved`, so this is its own
+   *  arm rather than `entry_not_approved`: evidence belongs on the entry that
+   *  REPLACED this one, and a link recorded here could never be released. */
+  | { kind: "entry_reversed" }
   /** CLR06 — the caller's view of the entry is not the current row. */
   | { kind: "stale" }
   | { kind: "denied" }
@@ -201,6 +213,13 @@ export type AttachEvidenceResult =
  * asks: this ticket's `clara.entry_evidence_links`, and the DOCUMENT-CODING
  * lane's own `clara.journal_entries.document_id` (approved, not reversed).
  * Returns null when nothing holds it — a link is never invented.
+ *
+ * BOTH ARMS IGNORE A REVERSAL, and the two spellings of that are the two lanes'
+ * own: `released_at is null` here (0182's `t_entry_evidence_release` stamps it
+ * when the entry is reversed) and `reversed_by is null` there. Without the first
+ * one this function would send a human to an entry that is no longer in the
+ * books, for a document the door has already freed — the exact opposite of the
+ * conflict it is explaining.
  */
 export async function findEntryForDocument(
   clientId: string,
@@ -210,7 +229,7 @@ export async function findEntryForDocument(
   const doc = encodeURIComponent(documentId);
   const client = encodeURIComponent(clientId);
   const links = await getRows<{ entry_id: string }>(
-    `entry_evidence_links?document_id=eq.${doc}&client_id=eq.${client}&select=entry_id`,
+    `entry_evidence_links?document_id=eq.${doc}&client_id=eq.${client}&released_at=is.null&select=entry_id`,
     opts,
   );
   const link = links[0];
@@ -264,6 +283,7 @@ export async function attachEntryEvidence(
       if (reason === "evidence_already_attached") return { kind: "evidence_already_attached" };
       if (reason === "source_already_posted") return { kind: "source_conflict" };
       if (reason === "entry_not_approved") return { kind: "entry_not_approved" };
+      if (reason === "entry_reversed") return { kind: "entry_reversed" };
       if (err.code === "CLR06") return { kind: "stale" };
       if (reason === "entry_not_found") return { kind: "not_found" };
       if (err.code === "CLR04") return { kind: "denied" };

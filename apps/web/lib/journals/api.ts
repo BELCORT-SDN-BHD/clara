@@ -305,8 +305,10 @@ export async function approveEntry(
  *  is required (the 0016 body's own gate, `coding_kind in
  *  ('supplier_bill','sales_invoice','sales_credit_note')`, is structural and
  *  not one of the two patched regions) — this workbench always passes `null`
- *  for both, matching the manual-compose ceremony `draftManualEntry` below
- *  uses. Replaces EVERY line (DELETE + bulk INSERT keyed by array position) —
+ *  for both, which is what a REVISE of an autodrafted manual entry needs. (An
+ *  earlier line here cited `draftManualEntry below`; #634 retired the manual
+ *  compose ceremony and that function with it, so the sentence named nothing.)
+ *  Replaces EVERY line (DELETE + bulk INSERT keyed by array position) —
  *  the caller sends the full new line set, not a delta. Returns
  *  `{revision_token}`: the NEW token, required for the next `approveEntry`
  *  call on this same entry (hydrate-never-trust: the caller still re-reads the

@@ -394,8 +394,9 @@ test("reverseEntry: a CLR10 already-reversed refusal surfaces verbatim, never re
   );
 });
 
-// --- manual compose: the two-call ceremony ------------------------------------
-// Split into ./api-compose.test.ts to keep this file under the repo's file-size
-// convention (500 lines) — covers composeManualEntry/draftManualEntry/
-// recordManualResolution, including the N3 wire-shape assertion and the
-// "step 2 refuses, step 1 already landed" case.
+// --- manual compose: RETIRED ---------------------------------------------------
+// #634 retired the two-call manual compose ceremony (composeManualEntry /
+// draftManualEntry / recordManualResolution) along with its ./api-compose.test.ts
+// cells: the one way to record a raw balanced JV is now the C3 composer, which
+// admits an accounting Work. The drafts and review queues for DOCUMENT-sourced
+// autodrafts are untouched and their cells are above.

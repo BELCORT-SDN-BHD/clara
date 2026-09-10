@@ -952,17 +952,23 @@ const USER_PREFERENCES_0179_CLOCK_NAMES = ["save_my_preferences"];
 const WORK_QUESTIONS_0180_CLOCK_NAMES = [
   "answer_work_question", "expire_due_interruptions", "open_work_question",
 ];
-// #634 [0182] — optional and late journal evidence. ZERO names are added, and that is a
-// MEASUREMENT rather than an omission. `_record_journal_entry_core` is recut but already sits in
+// #634 [0182] — optional and late journal evidence. EXACTLY ONE name, and every other body in the
+// migration is measured out rather than omitted. `_tf_entry_evidence_release` is the trigger the
+// reviewed release-on-reversal fix installs on `clara.journal_entries.reversed_by`; it stamps
+// `entry_evidence_links.released_at = now()` so a reversed entry stops holding its document, and
+// it derives no DATE from that instant — the same lawful use every other `_tf_*` on this roster
+// makes.
+//
+// The rest add nothing. `_record_journal_entry_core` is recut but already sits in
 // WORK_JOURNAL_0178_CLOCK_NAMES above and its recut introduces no new clock read (the same
 // `approved_at`/`updated_at`/`posted_at` stamps). `admit_journal_work` reads no clock before or
 // after its recut. `attach_entry_evidence` reads none either: `entry_evidence_links.attached_at`
 // is a COLUMN DEFAULT (not prosrc), exactly as the checkout-gate note above records for
 // `claim_confirmation_attempt`, and the door derives no DATE from any instant. `list_entry_links`,
 // `_journal_document_filed`, `_document_posting_entry`, `_assert_journal_source_refs`,
-// `_journal_source_refs_canonical` and `_journal_source_document` are all clock-free reads.
-// No `appliedStem('journal_work_evidence$')` arm is therefore needed below; adding an empty one
-// would suggest a roster that grows when it does not.
+// `_journal_source_refs_canonical`, `_journal_source_document` and
+// `_tf_entry_evidence_link_append_only` are all clock-free.
+const JOURNAL_EVIDENCE_0182_CLOCK_NAMES = ["_tf_entry_evidence_release"];
 
 /** The arm (D) roster for the database under test, sorted as the catalog sorts it. */
 export async function s5BareTokenRoster(query) {
@@ -1064,6 +1070,7 @@ export async function s5BareTokenRoster(query) {
   }
   if (await appliedStem("user_preferences$")) names.push(...USER_PREFERENCES_0179_CLOCK_NAMES);
   if (await appliedStem("work_questions$")) names.push(...WORK_QUESTIONS_0180_CLOCK_NAMES);
+  if (await appliedStem("journal_work_evidence$")) names.push(...JOURNAL_EVIDENCE_0182_CLOCK_NAMES);
   return names.sort();
 }
 

@@ -162,11 +162,25 @@ export function WorkDetailView({
    *  receipt are the database's own and stay on screen; only the source line
    *  degrades to "we could not read it". */
   const [links, setLinks] = useState<EntryLinkRow | null>(null);
+  /** THE THIRD STATE, and it is an ACCOUNTING fact that needs it. Without this,
+   *  a links read that FAILED rendered exactly like one that succeeded and found
+   *  nothing — the page said "No document" about an entry whose source it had
+   *  simply been unable to read, and offered "Attach evidence" on the strength of
+   *  that guess. The journals workbench already carries this distinction
+   *  (`journals-workbench.tsx`'s own `linksUnavailable`); this page now does too. */
+  const [linksUnavailable, setLinksUnavailable] = useState(false);
   const postedEntryId = state.data?.entry?.id ?? null;
   const reloadLinks = useCallback(async () => {
     if (postedEntryId === null) return;
-    const rows = await loadLinks(clientId, [postedEntryId], { session }).catch(() => []);
-    setLinks(rows.find((row) => row.entry_id === postedEntryId) ?? null);
+    try {
+      const rows = await loadLinks(clientId, [postedEntryId], { session });
+      setLinks(rows.find((row) => row.entry_id === postedEntryId) ?? null);
+      setLinksUnavailable(false);
+    } catch {
+      // The LAST KNOWN row is kept (§3's "refresh with known data"), and the
+      // flag is what stops the page asserting an absence it did not read.
+      setLinksUnavailable(true);
+    }
   }, [clientId, postedEntryId, loadLinks, session]);
   useEffect(() => {
     void reloadLinks();
@@ -374,8 +388,23 @@ export function WorkDetailView({
                 of this journey, not a gap. */}
             <dt className="text-muted-foreground">{tm("links.source")}</dt>
             <dd className="wrap-anywhere text-foreground">
-              {links?.document_id ?? tm("links.noSource")}
+              {linksUnavailable && links === null
+                ? tm("links.unavailable")
+                : (links?.document_id ?? tm("links.noSource"))}
             </dd>
+            {/* #634 — WHAT KIND OF WORK THIS WAS. `accounting_work.purpose` is
+                read on every one of this journey's surfaces and was rendered on
+                none of them; the vocabulary is one value today (`journal_entry`)
+                and an unknown one renders VERBATIM rather than crashing on a
+                missing message key, exactly as `basis_origin` does above. */}
+            {links?.purpose == null ? null : (
+              <>
+                <dt className="text-muted-foreground">{tm("links.purpose")}</dt>
+                <dd className="text-foreground">
+                  {links.purpose === "journal_entry" ? tm("links.purposeJournalEntry") : links.purpose}
+                </dd>
+              </>
+            )}
             {committed === null ? null : (
               <>
                 <dt className="text-muted-foreground">{t("receiptId")}</dt>
@@ -386,10 +415,18 @@ export function WorkDetailView({
             )}
           </dl>
           {/* THE LATE DOOR, offered only where it can actually do something: a
-              POSTED entry that carries no source yet. It is an act on the ENTRY,
-              so it lives beside the entry rather than in the Work's identity
-              block, and it has NO financial effect — see the dialog's header. */}
-          {entry.status === "approved" && (links === null || links.document_id === null) ? (
+              POSTED entry, not yet reversed, whose links we SUCCESSFULLY READ and
+              which carries no source. It is an act on the ENTRY, so it lives
+              beside the entry rather than in the Work's identity block, and it
+              has NO financial effect — see the dialog's header.
+              GATED ON A SUCCESSFUL READ. Offering it because a read FAILED would
+              be inviting a human into a door that answers
+              `evidence_already_attached` — the affordance asserting an absence
+              nobody established. A reversed entry is excluded for the database's
+              own reason (0182 refuses `entry_reversed`): the source belongs on
+              the entry that replaced this one. */}
+          {entry.status === "approved" && !linksUnavailable && links !== null
+            && links.document_id === null && links.reversed_by === null ? (
             <div>
               <AttachEvidenceDialog
                 clientId={clientId}
