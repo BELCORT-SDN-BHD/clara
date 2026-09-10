@@ -18,10 +18,10 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import {
-  gateWork, buildWorkWorld, endPool, printLaneNotes, printSkipCount,
+  buildWorkWorld, endPool, printLaneNotes, printSkipCount,
   admitJournalWork, claimWorkRun, mintClientObo, wakeRecordJournalEntry, freshWorkClient,
   basis, WCHART, REASON, CLR, assertPair, assertRaises, rootQuery, humanQuery, opk,
-  workRow, receiptsForWork, entryCount, entriesForClient, AGENT_USER_ID,
+  workRow, receiptsForWork, entryCount,
   // #634
   gateEvidence, EVIDENCE_REASON, EVIDENCE_CLR, attachEntryEvidence, listEntryLinks,
   evidenceDocument, retireFiling, docRef, linksForEntry, linksForDocument, linkCount,
