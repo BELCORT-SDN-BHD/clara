@@ -4,7 +4,7 @@
 
 - Updated: 2026-09-10 (MYT), after the third `/implement` session: #623 (first persistent Clara successor: a documentless journal entry) implemented and locally verified on branch `refresh/623-journal-successor`; #626 and #627 implemented and locally verified on their own branches, waiting behind #623.
 - `main` at 0852d191 (the owner's harness edits, PRs #702/#703) at the time of writing; the #623 PR fast-forwards it next. `main` requires the `ci` check, so every push goes branch → PR → green → fast-forward of the same SHA.
-- Hosted: unchanged from the #614 close-out — `clara-web` `5dcee6d8` (3f4c5f8b), `clara-runtime` release **v78** (image `refresh-6d4efd3d`, Node 22; v78 re-released the v77 image), live DB frontier **0177**. #623's hosted release (0178 on the live DB via an ephemeral Fly machine + `scripts/ops/dsn-pipe.mjs`, runtime v79, web deploy, signed-in walk) follows the PR.
+- Hosted (2026-09-10 23:45 MYT): #623 released in the documented order — migration **0178** applied to the live Supabase DB from this checkout with the DSN piped from an ephemeral Fly machine through `scripts/ops/dsn-pipe.mjs` (runtime machine stopped for the window; prestate clean, tail OK; frontier **173 / 0178**); `clara-runtime` release **v79** = image `refresh-72b9b85b` (Node 22.23.2; `/health` 200, `/ready` true with every lane ok, clamd ok after signature load; world-start log `bundle clara-work/v1 digest=afb2038a…`); `clara-web` version **2d94f5fb** (tag `refresh-72b9b85b`, six secret names, built in a clean Linux clone) promoted at 100% — `/login` 200, icons 200, the two new routes 307 to `/login?next=…`, legacy 307s intact. Rollback points: web `5dcee6d8`, runtime `refresh-6d4efd3d` (v78), DB 0177 (additive migration, no destructive rollback). The frozen manifest is deploy-locked (24 entries). Still owed: the signed-in hosted walk (compose → Work detail → journal) in the owner's browser session, then the #623 close-out.
 - #623 local evidence (Windows 11, Node 22.23.2, disposable PG17 clusters by deploy-onto-existing): db suite 4152 / 4058 pass / 0 fail / 94 skip; runtime suite 2211 / 2209 pass / 1 fail (Windows-only EICAR) / 1 skip; world, version-cutover and work-journal e2es PASS on a migration-built rig (crash-after-commit replay, intent replay, typed 409, retry under the same identity, a real `chatTurn_v18` turn); web unit 2923 / 2923, browser 152 passed / 0 failed / 7 fixture-gated skips; root lint, typecheck, freeze-lint (additions-only), evaluator freeze, wiki SQL, leak scan, bundle gate, worker-paths, parts-parity all OK. Standards / spec / adversarial reviews: 20 findings fixed and re-verified on live databases; 3 residuals fixed in the final commit.
 - #626 (`refresh/626-personal-settings`, migration 0179): web unit 2838 / 2838, lint, build, browser 151 / 0 / 7; 0179 applies without 0178 and its cells + #618 census pass; found and fixed a PUBLIC EXECUTE leak. #627 (`refresh/627-tax-boundary`, no migration): unit 2825 / 2825, lint, build, browser 149 / 0 / 7. Both rebase onto the new `main` after #623 (known conflicts: `packages/db/tests/rig-meta.mjs`; `apps/web/e2e/serve-built.mjs`, `test/manifest.txt`, `e2e/README.md`).
 
@@ -17,7 +17,7 @@
 
 ## In Progress
 
-- #623 hosted release: PR → green `ci` → fast-forward; then 0178 on the live database, runtime image v79, web deploy, signed-in hosted walk, evidence + close-out on the ticket. Then #626 (0179 after 0178) and #627 as separate PRs from their branches.
+- #623: hosted release done (see Current State); the signed-in hosted walk and the ticket close-out remain. #626 (0179 after 0178) and #627 rebase onto main and go as separate PRs.
 
 ## Known Issues
 
@@ -25,7 +25,7 @@ GitHub owns these as plain issues (`needs-triage`, no milestone): #689 (p6-1 cel
 
 ## Next Steps
 
-1. Finish #623's hosted release per the deploy order (0178 → runtime v79 → web), record hosted evidence on the ticket, run the frozen-manifest `--lock-deployed` ceremony, close #623.
+1. #623: the owner signs in on app.clarabook.com in the desktop-app browser pane; walk compose → Work detail → journal on a test client, record it on the ticket, close #623.
 2. #626 then #627: rebase onto `main`, PR, CI, fast-forward, deploy (0179 rides the same ceremony), close with evidence.
 3. Next frontier the #623 close unblocks: #629 (questions), #630 (cancel ordering), #631, #632, #633 (also needs #620/#624), #634; still-open frontier #615, #619, #620, #621, #622, #624, #635 (needs #625/#628).
 4. Owner: run `/triage` over #689–#693 and the new candidates above when convenient.
