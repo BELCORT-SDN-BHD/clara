@@ -635,6 +635,24 @@ async function handleSupabase(request, response, url) {
     return;
   }
 
+  if (request.method === "POST" && path === "/rest/v1/rpc/list_entry_links") {
+    // #634 — the Journals workbench reads the Work / receipt / source / correction
+    // links for whatever entries its tab has read, so this call fires on EVERY
+    // signed-in journals page across the whole suite, not only the lanes that
+    // care about it. The SAME reasoning #626 records for `get_my_preferences`
+    // above: a generic, honest EMPTY answer here keeps every other spec's page
+    // free of an unhandled-route 404 for a call it never asked about, and a lane
+    // that owns the answer (journal-work-mock.mjs) claims the path earlier in the
+    // chain and never reaches this default.
+    //
+    // EMPTY IS HONEST HERE, and it is not the same as "no source": the table
+    // renders a NULL link row as "we did not read it" rather than as "there is
+    // none", which is exactly what an empty answer means on a lane with no
+    // fixture for it.
+    sendJson(response, 200, [], cors);
+    return;
+  }
+
   sendJson(response, 404, { message: `unhandled e2e Supabase route: ${request.method} ${path}` }, cors);
 }
 
