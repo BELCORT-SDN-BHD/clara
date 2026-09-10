@@ -233,20 +233,27 @@ test("a Needs-you row answers WHAT, WHY, NEXT and WHEN on the built app", async 
 // the live queue of what is running now lives where the rest of "what is
 // open" lives. See lib/navigation/tree.ts's own header and
 // app/(firm)/activity/page.tsx / app/(firm)/work/page.tsx for the split.
+//
+// #632 TRUED: this cell used to prove "no agent-task panel" by checking the
+// OLD placeholder page's own copy ("Everything that happened" / "has not been
+// connected") — a proxy that was true only because the real feed did not
+// exist yet. CB-AE2E-018 is discharged now (the real feed replaces that
+// NotBuiltNote entirely), so the positive evidence this cell rests on is the
+// REAL page's own heading and empty-state copy; the negative claims this cell
+// actually exists for (no agent-task panel, no Details drawer) are unchanged
+// and still asserted below.
 test("/activity is an audit trail again — no agent-task panel, no Details button", async ({ page }) => {
   await page.route("**/e2e-supabase/rest/v1/agent_receipts_visible**", (route) =>
     route.fulfill({ status: 200, contentType: "application/json", body: "[]" }));
+  await page.route("**/e2e-supabase/rest/v1/rpc/list_activity", (route) =>
+    route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ rows: [], next_cursor: null, truncated: false }) }));
 
   await signIn(page, "owner@example.test");
   await page.goto("/activity");
 
-  // The Activity page names its remaining UI connection gap without claiming
-  // that the firm timeline read is absent from the database.
-  await expect(page.getByRole("heading", { name: "Everything that happened", level: 2 })).toBeVisible();
-  await expect(page.getByText(/Activity page has not been connected/)).toBeVisible();
-  // The note now says explicitly where the live queue went, not just that it
-  // is not here — the retirement of the panel this train left behind.
-  await expect(page.getByText(/running agent tasks are on Work/)).toBeVisible();
+  // The real, unified feed (#632) — an h1, not the old placeholder's h2.
+  await expect(page.getByRole("heading", { name: "Activity", level: 1 })).toBeVisible();
+  await expect(page.getByText("No activity has been recorded for this firm yet.")).toBeVisible();
 
   // THE RETIRED ENTRY: the drawer and its trigger are gone from THIS page —
   // BY ROLE and BY TEXT, so neither a live trigger nor a leftover label may
