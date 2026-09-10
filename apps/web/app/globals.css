@@ -22,6 +22,34 @@
 
 @custom-variant dark (&:where(.dark *));
 
+/*
+ * #626 (refresh spec #612, journey D1) — the user's OWN motion preference,
+ * ADDED alongside the OS `prefers-reduced-motion` media feature Tailwind's
+ * built-in `motion-reduce:`/`motion-safe:` variants already check, never
+ * replacing it. Verified by compiling this exact block through Tailwind
+ * v4.3.3's own `compile()` API before landing: `motion-reduce:<utility>`
+ * emits the utility's declarations TWICE — once under
+ * `@media (prefers-reduced-motion: reduce)` (byte-identical to today, so an
+ * OS-level reduced-motion user sees NO regression before any JS has run) and
+ * once under `:where([data-motion="reduced"], [data-motion="reduced"] *)` — a
+ * true union, not a replacement. `components/app-shell/motion-preference-
+ * sync.tsx` is the ONLY writer of `data-motion` on `<html>`: it seeds the
+ * attribute from the OS query synchronously (so a caller who has never saved
+ * an override still matches only the media-query arm, identically to before
+ * this file existed), then upgrades it to "reduced" once the caller's own
+ * `interface.motion` preference (clara.get_my_preferences(), 0179) reads
+ * back as `"reduced"` — "system" or an unauthenticated/failed read leaves the
+ * OS arm as the only one that can ever fire.
+ */
+@custom-variant motion-reduce {
+  @media (prefers-reduced-motion: reduce) {
+    @slot;
+  }
+  &:where([data-motion="reduced"], [data-motion="reduced"] *) {
+    @slot;
+  }
+}
+
 @theme inline {
   --font-sans: var(--font-source-sans);
   --font-heading: var(--font-source-sans);

@@ -536,6 +536,18 @@ async function handleSupabase(request, response, url) {
     return;
   }
 
+  if (request.method === "POST" && path === "/rest/v1/rpc/get_my_preferences") {
+    // #626 — MotionPreferenceSync (components/app-shell/motion-preference-sync.tsx) is mounted
+    // in the ROOT layout, so this call fires on EVERY signed-in page across the whole suite, not
+    // only personal-settings-walk.spec.ts's own. A generic, honest "nothing saved yet" default
+    // here keeps every OTHER spec's page free of an unhandled-route 404 for a call it never
+    // asked about; a spec that cares about a SPECIFIC stored preference installs its own
+    // `page.route` for this same path, which Playwright's last-registered-wins order lets
+    // override this default per test (personal-settings-walk.spec.ts does exactly that).
+    sendJson(response, 200, { version: 0, interface: {}, notifications: {}, updated_at: null }, cors);
+    return;
+  }
+
   sendJson(response, 404, { message: `unhandled e2e Supabase route: ${request.method} ${path}` }, cors);
 }
 

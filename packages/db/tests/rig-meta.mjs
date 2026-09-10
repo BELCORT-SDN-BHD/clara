@@ -1489,6 +1489,15 @@ export const WORK_JOURNAL_0178_COHORT = [
   ...WORK_JOURNAL_0178_UNGRANTED_FNS,
 ];
 
+// #626 D1: the caller's OWN interface/notification preferences, keyed by PERSON rather than by
+// firm (0179_user_preferences.sql's own header). No floor check applies -- both doors admit any
+// authenticated actor over their OWN row alone (RLS self-select on the table, `jwt_sub()`/
+// `_human_ctx` scoping in the functions) -- so, unlike every other cohort above, there is no rank
+// to record here. clara_authenticated ONLY: agent, both wake roles and clara_runtime gain ZERO --
+// a preference a human never asked for is not something the agent lane should read or write on
+// their behalf, and the migration's own header names "no wake/agent variant exists or is needed".
+const USER_PREFERENCES_0179_HUMAN_FNS = ["get_my_preferences", "save_my_preferences"];
+
 export const ALLOWED = {
   // Slice-4 governance writers (contract v2.1 §3.2/3.3/3.5): human lane only.
   [ROLES.authenticated]: new Set([
@@ -1622,6 +1631,9 @@ export const ALLOWED = {
     // underscore helper is granted at all. Both app lanes hold it because both reach the
     // SECURITY INVOKER reader that calls it.
     ...DBA_CODEABILITY_SHARED_FNS,
+    // #626 D1 the personal-preferences pair — see the block above. clara_authenticated ONLY;
+    // agent + both wake roles gain ZERO.
+    ...USER_PREFERENCES_0179_HUMAN_FNS,
   ]),
   // [S6 §9/C-11] agent lane loses the bare get_journal_entry(uuid) oracle; keeps the other
   // reads and gains the client-pinned S6 reads + get_journal_entry_for.

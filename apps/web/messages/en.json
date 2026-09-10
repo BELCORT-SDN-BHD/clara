@@ -355,9 +355,71 @@
     },
     "account": {
       "heading": "Account",
-      "body": "Your own sign-in and session. Everything about the firm lives under the other settings sections.",
-      "sessionHeading": "This session",
-      "notBuilt": "Changing your email, your password and your display name from inside the app is not built yet. Password recovery from the sign-in screen is the one route that works today."
+      "body": "Your own sign-in, interface and notification preferences. Everything about the firm lives under the other settings sections.",
+      "loading": "Loading your preferences…",
+      "deniedTitle": "Signed out",
+      "deniedBody": "Your session has ended. Sign in again to see or change your preferences.",
+      "readErrorTitle": "Couldn't read your preferences",
+      "readErrorBody": "Something went wrong reading your saved preferences. Try reloading the page.",
+      "save": {
+        "action": "Save changes",
+        "saving": "Saving…",
+        "savedToast": "Preferences saved",
+        "staleTitle": "Changed elsewhere",
+        "staleBody": "Your preferences were changed in another tab or device since this page loaded. Reload to see the current values — your unsaved changes here are kept and ready to save again.",
+        "staleReload": "Reload and keep my edits",
+        "failedTitle": "Couldn't save",
+        "failedGenericBody": "Your changes were not saved. Try again."
+      },
+      "sections": {
+        "account": {
+          "heading": "Account",
+          "displayNameLabel": "Display name",
+          "emailLabel": "Email",
+          "emailScopeNote": "Read-only, from your current sign-in session.",
+          "editNote": "Changing your email, password or display name from inside the app is not built yet. Password recovery from the sign-in screen is the one route that works today.",
+          "sessionHeading": "This session"
+        },
+        "interface": {
+          "heading": "Interface",
+          "userScopeBadge": "Your setting",
+          "unsavedBadge": "Unsaved",
+          "resetAction": "Reset",
+          "motion": {
+            "legend": "Motion",
+            "description": "Controls animation across Clara — panel transitions, the sidebar and dialogs. Your operating system's own reduced-motion setting is always respected in addition to this.",
+            "options": {
+              "system": {
+                "label": "Match my system setting",
+                "description": "Use full motion unless your operating system asks for less."
+              },
+              "reduced": {
+                "label": "Always reduce motion",
+                "description": "Turn off non-essential motion here, even if your system allows it."
+              }
+            }
+          },
+          "sidebarDefault": {
+            "legend": "Sidebar starts",
+            "description": "Applies the next time you open Clara on a device — it does not move a sidebar you already have open elsewhere.",
+            "options": {
+              "expanded": {
+                "label": "Expanded",
+                "description": "Show the full sidebar with labels."
+              },
+              "collapsed": {
+                "label": "Collapsed",
+                "description": "Start with icons only; expand it any time."
+              }
+            }
+          }
+        },
+        "notifications": {
+          "heading": "Notifications",
+          "notConfiguredTitle": "Not configured yet",
+          "notConfiguredBody": "Clara does not send personal notifications outside the product today, so there is nothing to choose here yet. This section will gain real controls once a notification channel exists — it will not gain a placeholder toggle before then."
+        }
+      }
     }
   },
   "Members": {

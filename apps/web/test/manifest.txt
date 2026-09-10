@@ -300,6 +300,9 @@ lib/registration/doors.test.ts
 lib/registration/dpa-reads.test.ts
 lib/reports/api.test.ts
 lib/session-accessor.test.ts
+lib/settings/motion-preference.test.ts
+lib/settings/preference-state.test.ts
+lib/settings/preferences.test.ts
 lib/wire.test.ts
 lib/work/api.test.ts
 lib/work/journal-basis.test.ts

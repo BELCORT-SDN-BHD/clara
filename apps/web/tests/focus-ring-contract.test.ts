@@ -193,9 +193,25 @@ describe("focus-ring contract — 裁-1's 70% is declared once and obeyed everyw
     // FIFTEEN — back to where the 2026-09-04 re-census left it, because a
     // dedup and a genuine new carrier cancel out in the arithmetic even though
     // neither is the other.
+    //
+    // #626 (personal settings, journey D1), +5 NET, ALL FIVE FRESH VENDOR
+    // INSTALLS. Five shadcn/Base UI primitives were added for the
+    // `/settings/account` rebuild — Field, Radio Group, Switch, Toast, Toggle
+    // — and every one of them shipped the vendor's stock `focus-visible:
+    // ring-ring/50`, exactly the drift class this whole suite exists to catch
+    // (this file's own header: "before this train there were twelve
+    // independent /50 literals and nothing anywhere that would notice"). Each
+    // was hand-recut to `/70` in the same commit as the add, the same
+    // discipline `components/ui/tabs.tsx`'s own entry above already records
+    // for an earlier vendor install. `components/ui/toggle-group.tsx` and
+    // `components/ui/alert.tsx` were ALSO added in this train but carry no
+    // `ring-ring/NN` class string at all (Alert has no focusable control;
+    // Toggle Group's own ring lives on `components/ui/toggle.tsx`, which this
+    // list already carries) — so the count moves by exactly five, not seven.
+    // Fifteen plus five is TWENTY.
     const hits = ringCarrierHits();
     const files = [...new Set(hits.map((h) => h.file))].sort();
-    assert.equal(hits.length, 15, JSON.stringify(hits, null, 2));
+    assert.equal(hits.length, 20, JSON.stringify(hits, null, 2));
     assert.deepEqual(files, [
       "components/clara/ClaraThreadView.tsx",
       "components/common/dialog-refusal.tsx",
@@ -207,11 +223,16 @@ describe("focus-ring contract — 裁-1's 70% is declared once and obeyed everyw
       "components/tax/TurnoverClassificationPanel.tsx",
       "components/ui/badge.tsx",
       "components/ui/button.tsx",
+      "components/ui/field.tsx",
       "components/ui/input-group.tsx",
       "components/ui/input.tsx",
+      "components/ui/radio-group.tsx",
       "components/ui/select.tsx",
+      "components/ui/switch.tsx",
       "components/ui/tabs.tsx",
       "components/ui/textarea.tsx",
+      "components/ui/toast.tsx",
+      "components/ui/toggle.tsx",
     ]);
   });
 

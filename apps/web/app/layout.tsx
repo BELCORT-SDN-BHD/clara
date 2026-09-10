@@ -3,6 +3,7 @@ import localFont from "next/font/local";
 import { NextIntlClientProvider } from "next-intl";
 import { getTranslations } from "next-intl/server";
 
+import { MotionPreferenceSync } from "@/components/app-shell/motion-preference-sync";
 import { SessionTokenBridge } from "@/components/session-token-bridge";
 
 import "./globals.css";
@@ -57,6 +58,7 @@ export default async function RootLayout({
       <body className="font-sans antialiased">
         <NextIntlClientProvider>
           <SessionTokenBridge />
+          <MotionPreferenceSync />
           {children}
         </NextIntlClientProvider>
       </body>

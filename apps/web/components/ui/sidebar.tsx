@@ -113,7 +113,12 @@ const SIDEBAR_WIDTH_MOBILE = "18rem"
 const SIDEBAR_WIDTH_ICON = "3rem"
 const SIDEBAR_KEYBOARD_SHORTCUT = "b"
 
-export { SIDEBAR_COOKIE_NAME, SIDEBAR_WIDTH }
+// SIDEBAR_COOKIE_MAX_AGE exported for #626: the personal-settings "sidebar
+// starts" preference writes THIS SAME cookie (same name, same max-age) on
+// save, so a saved default is the ONE mechanism above (not a second one) —
+// components/settings/account-settings.tsx imports both rather than
+// re-declaring the literal.
+export { SIDEBAR_COOKIE_NAME, SIDEBAR_COOKIE_MAX_AGE, SIDEBAR_WIDTH }
 
 type SidebarContextProps = {
   state: "expanded" | "collapsed"
