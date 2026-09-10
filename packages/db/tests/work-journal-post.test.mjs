@@ -54,6 +54,21 @@ async function armed({ client = null, author = null, b = null } = {}) {
   return { ...work, cred, client: cli, author: who, basis: b ?? basis() };
 }
 
+/** Park a claimed run on a clarify through the estate's OWN opener (0006's runtime verb —
+ *  deliberately NOT a direct insert: the cascade under test is about the real clarify lane). */
+async function openWorkInterruption(task, question = { type: "text", text: "which bank account is this?" }) {
+  const r = await roleQuery(ROLES.runtime,
+    "select clara.open_interruption(p_task => $1, p_hook_token => $2, p_question => $3::jsonb, p_asked_of => null) as id",
+    [task, opk("w623-hook"), JSON.stringify(question)]);
+  return r.rows[0].id;
+}
+
+/** The interruption's status, read as root (the panel's own row). */
+async function interruptionStatus(id) {
+  const r = await rootQuery("select status from clara.agent_interruptions where id = $1", [id]);
+  return r.rows[0]?.status ?? null;
+}
+
 const post = (a, over = {}) => wakeRecordJournalEntry(a.cred.secret, {
   client: a.client, work: a.work_id, logicalOpId: a.logical_op_id, basis: a.basis, ...over,
 });
@@ -319,6 +334,63 @@ test("w623.settle.completed-after-commit an HONEST completed settle is not an ov
   const w = await workRow(a.work_id);
   assert.equal(w.result.entry_id, posted.entry_id, "settle.completed-after-commit: the result is unmoved");
   assert.equal((await receiptsForWork(a.work_id)).length, 1);
+});
+
+test("w623.settle.clarify-cascade a terminal settle closes the run's PENDING question — override included", async (t) => {
+  if (await gateWork(t)) return;
+  // THE FINDING. Every other terminal settle in the estate cancels its task's pending clarify
+  // (S4-D6): `clara.settle_chat_turn` ends with that cascade and `clara.cancel_agent_task`
+  // carries the same one. `clara.settle_work_run` did not — so a Work parked on a question and
+  // then settled left the interruption `pending`, and the firm-wide clarifications panel went on
+  // offering a question against a run that no longer exists and could not consume the answer.
+
+  // Leg 1 — the ordinary terminal settle: parked, then expired.
+  const a = await armed();
+  const iid = await openWorkInterruption(a.task_id);
+  assert.equal((await taskRow(a.task_id)).status, "awaiting_input",
+    "settle.clarify-cascade: the clarify parked the run…");
+  assert.equal((await workRow(a.work_id)).status, "awaiting_input",
+    "settle.clarify-cascade: …and the mirror parked the Work with it");
+  assert.equal(await interruptionStatus(iid), "pending");
+
+  const expired = await settleWorkRun({
+    task: a.task_id, outcome: "expired", errorCode: "timeout",
+    error: { code: "timeout", reason: "timeout", message: "the run ran out of time", recoverable: false },
+  });
+  assert.equal(expired.status, "expired");
+  assert.equal(expired.overridden_by_receipt, false);
+  assert.equal((await workRow(a.work_id)).status, "expired", "settle.clarify-cascade: the Work is terminal…");
+  assert.equal(await interruptionStatus(iid), "cancelled",
+    "settle.clarify-cascade: …and its question died with the run, rather than staying unanswerable");
+
+  // …and a replay moves nothing (the replay arm returns before the cascade; the cascade itself
+  // matches no row a second time either).
+  const replay = await settleWorkRun({ task: a.task_id, outcome: "expired" });
+  assert.equal(replay.replayed, true);
+  assert.equal(await interruptionStatus(iid), "cancelled",
+    "settle.clarify-cascade: the replay leaves the cancelled question cancelled");
+
+  // Leg 2 — the RECEIPT OVERRIDE. A Work forced to `completed` by committed books must not leave
+  // a pending question behind either: the run is just as gone.
+  const b = await armed();
+  const bid = await openWorkInterruption(b.task_id);
+  const posted = await post(b);
+  assert.equal(posted.posted, true, "settle.clarify-cascade: the parked run posted before its settle");
+  assert.equal(await interruptionStatus(bid), "pending");
+
+  const forced = await settleWorkRun({
+    task: b.task_id, outcome: "failed", errorCode: "internal",
+    error: { code: "engine_lost", reason: "engine_lost", message: "Nothing was posted.", recoverable: false },
+  });
+  assert.equal(forced.status, "completed", "settle.clarify-cascade: the books override the failed settle…");
+  assert.equal(forced.requested_outcome, "failed");
+  assert.equal(forced.overridden_by_receipt, true);
+  const bw = await workRow(b.work_id);
+  assert.equal(bw.status, "completed");
+  assert.equal(bw.error, null);
+  assert.equal(bw.result.entry_id, posted.entry_id);
+  assert.equal(await interruptionStatus(bid), "cancelled",
+    "settle.clarify-cascade: …and the overridden settle closes the question too");
 });
 
 test("w623.cancel.queued-after-commit the estate's own cancel door cannot strand a POSTED Work", async (t) => {

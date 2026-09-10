@@ -121,6 +121,9 @@
 --                                   result and the error cleared. The answer carries
 --                                   `requested_outcome` and `overridden_by_receipt` so the caller
 --                                   can see it was overridden, and the audit row carries both
+--   (no errcode) clarify cascade    EVERY terminal settle -- override included -- also closes the
+--                                   task's PENDING interruption (S4-D6), so a settled Work leaves
+--                                   no unanswerable question in the clarifications panel
 --
 -- clara.wake_record_journal_entry (the granted wrapper — RAISES ONLY, carries no DML)
 --   CLR03 no_wake_credential        no live credential in the session GUC
@@ -1184,6 +1187,18 @@ begin
                        else coalesce(result, '{}'::jsonb) || p_result end
    where id = t.work_id;
 
+  -- THE PENDING QUESTION DIES WITH THE RUN (S4-D6). Every other terminal settle in the estate
+  -- carries this cascade -- `clara.settle_chat_turn` (0006) ends with it, and
+  -- `clara.cancel_agent_task` (0006/0133) carries the same one -- and this verb is terminal for
+  -- EVERY outcome it admits, the RECEIPT OVERRIDE included: a Work forced to `completed` by a
+  -- committed receipt must not leave an unanswerable question behind either. Reviewed finding:
+  -- a Work parked on a clarify and then settled `expired` kept its interruption `pending`, and
+  -- the firm-wide clarifications panel went on offering a question against a run that no longer
+  -- exists and could not consume the answer. Idempotent by construction: the replay arm above
+  -- returns before this point, and `status='pending'` matches nothing on a second pass.
+  update clara.agent_interruptions set status = 'cancelled'
+   where task_id = p_task and status = 'pending';
+
   perform clara._audit(t.firm_id, clara.agent_user_id(), t.created_by, null,
     'settle_work_run', null,
     jsonb_build_object('work', t.work_id, 'task', p_task, 'outcome', v_work_status,
@@ -1807,6 +1822,12 @@ begin
      or position('overridden_by_receipt' in v_src) = 0 then
     raise exception '#623 tail: settle_work_run does not consult the committed receipt before translating an outcome -- a cancelled run could still write "nothing was posted" over a posted entry' using errcode='CLR10';
   end if;
+  -- …and the terminal settle carries the estate's own clarify cascade (S4-D6), on EVERY outcome
+  -- including the overridden one: a settled Work that left its interruption `pending` kept an
+  -- unanswerable question live in the firm-wide clarifications panel.
+  if v_src !~ 'update\s+clara\.agent_interruptions\s+set\s+status\s*=\s*''cancelled''' then
+    raise exception '#623 tail: settle_work_run does not cascade the task''s pending interruption -- a terminal Work would leave an unanswerable clarify pending' using errcode='CLR10';
+  end if;
   select p.prosrc into v_src from pg_proc p
    where p.oid = 'clara._tf_accounting_work_status_mirror()'::regprocedure;
   if position('clara._work_committed_receipt' in v_src) = 0 then
@@ -1834,6 +1855,6 @@ begin
     end if;
   end loop;
 
-  raise notice '#623 tail: OK -- clara.accounting_work and clara.operation_receipts created (forced RLS, ZERO DML to any app role, both immutability belts, and the one-committed-effect-per-logical-identity partial unique index). The READ surface is asserted from the ACL itself, grantee by grantee: accounting_work grants SELECT and only SELECT to exactly clara_authenticated and clara_runtime -- the run has to be able to load the Work it was handed -- behind an owner arm, a human arm and a SELECT-only clara_runtime arm; operation_receipts grants SELECT to clara_authenticated alone behind the owner+read pair, and no clara_runtime grant or policy reaches it. agent_tasks.kind gained accounting_work and LOST NOTHING; work_id is bidirectionally CHECK-bound to that kind and the status mirror carries running/awaiting_input plus ONE receipt-aware terminal arm. Four runtime verbs reach clara_runtime and nobody else; one wake verb reaches clara_wake_interactive and nobody else, behind exactly ONE interactive_client allowlist row, with its DML in an UNGRANTED core. The agent-post receipt wall now counts BOTH receipt shapes with ARM 0 still first, the is_agent-only live arm intact, no rule-id exemption, and its AFTER UPDATE event set unmoved. The lane ships empty. THE FOUR REVIEWED FINDINGS are re-read from the catalog too: the intent key is unique on (firm_id, client_id, intent_key) and BOTH admission lookups carry the client conjunct, so one key against two clients of a firm is two Works; clara.settle_work_run and the agent_tasks status mirror BOTH consult clara._work_committed_receipt before writing a terminal state, so a cancelled, failed or expired settle over a Work that already holds a committed operation receipt lands as completed with the receipt as its result (and says so, in the answer and in the audit row) instead of writing "nothing was posted" over a posted entry; the accounting_work queued arm can reach completed so that override is not refused by the task guard; clara._record_journal_entry_core binds the credential''s on_behalf_of to the Work''s OWN initiator (CLR04 obo_not_initiator), so a credential minted OBO another live bookkeeper cannot commit somebody else''s Work; and clara._assert_journal_basis restates the frozen tool schema''s memo (4000) and line-description (2000) caps, so nothing is admitted that the run could never post.';
+  raise notice '#623 tail: OK -- clara.accounting_work and clara.operation_receipts created (forced RLS, ZERO DML to any app role, both immutability belts, and the one-committed-effect-per-logical-identity partial unique index). The READ surface is asserted from the ACL itself, grantee by grantee: accounting_work grants SELECT and only SELECT to exactly clara_authenticated and clara_runtime -- the run has to be able to load the Work it was handed -- behind an owner arm, a human arm and a SELECT-only clara_runtime arm; operation_receipts grants SELECT to clara_authenticated alone behind the owner+read pair, and no clara_runtime grant or policy reaches it. agent_tasks.kind gained accounting_work and LOST NOTHING; work_id is bidirectionally CHECK-bound to that kind and the status mirror carries running/awaiting_input plus ONE receipt-aware terminal arm. Four runtime verbs reach clara_runtime and nobody else; one wake verb reaches clara_wake_interactive and nobody else, behind exactly ONE interactive_client allowlist row, with its DML in an UNGRANTED core. The agent-post receipt wall now counts BOTH receipt shapes with ARM 0 still first, the is_agent-only live arm intact, no rule-id exemption, and its AFTER UPDATE event set unmoved. The lane ships empty. THE FOUR REVIEWED FINDINGS are re-read from the catalog too: the intent key is unique on (firm_id, client_id, intent_key) and BOTH admission lookups carry the client conjunct, so one key against two clients of a firm is two Works; clara.settle_work_run and the agent_tasks status mirror BOTH consult clara._work_committed_receipt before writing a terminal state, so a cancelled, failed or expired settle over a Work that already holds a committed operation receipt lands as completed with the receipt as its result (and says so, in the answer and in the audit row) instead of writing "nothing was posted" over a posted entry; every terminal settle, the overridden one included, also cancels the task''s PENDING interruption (S4-D6, the same cascade clara.settle_chat_turn and clara.cancel_agent_task carry), so a settled Work leaves no unanswerable question in the clarifications panel; the accounting_work queued arm can reach completed so that override is not refused by the task guard; clara._record_journal_entry_core binds the credential''s on_behalf_of to the Work''s OWN initiator (CLR04 obo_not_initiator), so a credential minted OBO another live bookkeeper cannot commit somebody else''s Work; and clara._assert_journal_basis restates the frozen tool schema''s memo (4000) and line-description (2000) caps, so nothing is admitted that the run could never post.';
 end
 $w623_tail$;

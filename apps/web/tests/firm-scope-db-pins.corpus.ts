@@ -106,11 +106,15 @@ export const REVIEWED_DYNAMIC_SQL_BARRIERS = new Map<string, ReviewedDynamicSqlB
   // initiator-bound posting, client-scoped intent keys, basis caps). The migration had never
   // shipped, so it was edited in place; the barrier below is unchanged in KIND — the same two
   // splices, one of them now replacing a slightly longer anchor — and only the CONTENT hash moved.
+  // Re-pinned AGAIN the same day for the residual finding: clara.settle_work_run now carries the
+  // estate's own pending-clarify cascade (S4-D6). That is a plain `update clara.agent_interruptions`
+  // inside a static function body plus one more catalog assertion in the tail — it adds NO dynamic
+  // SQL and moves neither splice, so again only the CONTENT hash moved.
   [
     "0178_accounting_work_journal_successor.sql",
     {
       reason: "Reviewed pg_get_functiondef splice recuts TWO named trigger functions, clara._tf_agent_task_insert() and clara._tf_agent_task_update(), each read by its exact regprocedure and re-installed with one counted anchor replaced; both return trigger and emit no view definition, so neither P4 scope view is reachable. Each splice pins its pre-image prosrc sha256 and asserts its anchor occurs EXACTLY once before replacing, and the migration's tail re-reads both bodies to prove every pre-existing task kind survived.",
-      sha256: "b5b04a2c9fba53572a61be733acc071404034f442d27d06c8f49c1ab6ef36f34",
+      sha256: "6fc68dd9df656731d43e861846de987ed1879a4c35726102a6171e74458b7f3a",
     },
   ],
 ]);

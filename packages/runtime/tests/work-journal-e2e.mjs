@@ -12,7 +12,9 @@
 //      with its lines, and ONE `clara.operation_receipts` row attributing the act.
 //   2. A LOST ACKNOWLEDGEMENT. The same intentKey re-POSTed returns the SAME Work with
 //      `replayed:true` and mints no second task and no second entry.
-//   3. A CHANGED PAYLOAD under that key is a 409 with a typed conflict and no second effect.
+//   3. A CHANGED PAYLOAD under that key is a 409 with a typed conflict, no second effect, and a
+//      `work_id` that IS the Work leg 1 admitted — the DB's typed detail, the route's mapping and
+//      the wire body pinned as one chain rather than three separately-plausible halves.
 //   4. A RUN THAT PRODUCED NOTHING settles `failed`/`no_effect` — not `completed` — and Retry
 //      creates a NEW run for the SAME logical operation identity, which then commits under that
 //      identity (C-62 / C54.1).
@@ -32,7 +34,10 @@
 //      journey: the admitted row's `basis`, `basis_digest`, `basis_origin='clara_interpreted'`
 //      and its `chat_task` source ref, AND that the reconciler dispatched it through to a
 //      completed Work with exactly one entry and one committed receipt. Legs 1 and 6 each prove
-//      one half against a synthetic admission; only this one joins them.
+//      one half against a synthetic admission; only this one joins them. Leg 1 now reads ITS
+//      admitted row from the database too (basis, digest, `basis_origin='user_direct'`, no source
+//      refs), so the C3/B6 basis equality is measured on both sides and the two DIGESTS are
+//      compared — same figures, same digest, whichever entry point produced them.
 //
 // GATED. `CLARA_SKIP_WORK_E2E=1` opts out (the heavy-test precedent), and the file SKIPS CLEANLY
 // when migration 0178 is absent — its runtime half merges alongside its DB half, and a green e2e
@@ -286,6 +291,19 @@ async function main() {
     assert.equal(admitted.body.replayed, false);
     assert.equal(admitted.body.logical_op_id, `work:${admitted.body.work_id}:journal_entry:1`, "server-assigned logical identity");
 
+    // THE C3 HALF OF THE C3/B6 COMPARISON, read from the DATABASE. Reviewed finding: the B6 leg
+    // asserted its admitted basis against EXPECTED_DB_BASIS while this leg never SELECTed
+    // `clara.accounting_work` at all, so "both translators land on the same basis" was true by
+    // construction — a drift in the ROUTE's `toDbBasis` would have moved this leg's stored basis
+    // and nothing would have said so. Both halves are now measured against the same constant, and
+    // PASS 7 additionally compares the two DIGESTS.
+    const c3Work = await readWork(admitted.body.work_id);
+    assert.ok(c3Work, "the composer's admission wrote a Work row");
+    assert.deepEqual(c3Work.basis, EXPECTED_DB_BASIS, "the ROUTE's translation lands on the contract's DB basis");
+    assert.ok(/^[0-9a-f]{64}$/.test(c3Work.basis_digest), "the DATABASE derived the digest — the route never sends one");
+    assert.equal(c3Work.basis_origin, "user_direct", "a composer basis is the human's own figures, never clara_interpreted");
+    assert.deepEqual(c3Work.source_refs, [], "and it cites no conversation — nothing interpreted it");
+
     const done = await pollWork(admitted.body.work_id, one.jwt, (b) => TERMINAL.has(b.work.status), "work settles");
     assert.equal(done.work.status, "completed", `the Work completes (got ${done.work.status} / ${JSON.stringify(done.work.error)})`);
     assert.ok(done.work.result?.entry_id, "the result names the posted entry");
@@ -333,6 +351,12 @@ async function main() {
     );
     assert.equal(conflict.status, 409, `a changed basis under the same intent is a 409 (got ${conflict.status})`);
     assert.equal(conflict.body.error, "intent_payload_conflict");
+    // THE WHOLE CHAIN, end to end. The DB cell pins that the raise's typed detail NAMES the Work
+    // the key is already bound to; the route cell pins that the handler reads that field onto the
+    // body. Neither proves the link survives the real boundary — so this is the one place the id
+    // a human would click is compared to the Work PASS 1 actually admitted.
+    assert.equal(conflict.body.work_id, admitted.body.work_id,
+      "the 409 names the FIRST Work, so the web's 'you already asked this' affordance points somewhere real");
     assert.equal(await countEntries(one.client), 1, "the conflict created NO second effect");
     console.log("[work-e2e] PASS 3: a changed payload under the same intent key is a typed conflict with no effect");
 
@@ -377,6 +401,9 @@ async function main() {
     assert.equal(b6Work.initiator, chat.owner, "admitted for the HUMAN who was talking, not a service identity");
     assert.deepEqual(b6Work.basis, EXPECTED_DB_BASIS, "the frozen tool's translation lands on the SAME basis the composer's does");
     assert.ok(/^[0-9a-f]{64}$/.test(b6Work.basis_digest), "the DATABASE derived the digest — the tool never sends one");
+    assert.equal(b6Work.basis_digest, c3Work.basis_digest,
+      "SAME FIGURES, SAME DIGEST across the two entry points — the chat tool and the composer are one contract, "
+      + "and PASS 1 read its half from the database too, so this equality is measured rather than assumed");
     assert.equal(b6Work.basis_origin, "clara_interpreted", "a chat-originated basis is labelled INTERPRETED, never user_direct");
     assert.equal(b6Work.source_refs.length, 1, "one source ref");
     assert.equal(b6Work.source_refs[0].kind, "chat_task", "and it names the conversation this basis came from");

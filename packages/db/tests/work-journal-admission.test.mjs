@@ -110,9 +110,15 @@ test("w623.admit.conflict the same intent_key with a CHANGED basis is a typed co
   const before = await rootQuery("select count(*)::int as n from clara.accounting_work where firm_id=$1",
     [(await workRow(first.work_id)).firm_id]);
 
-  await assertPair(CLR.badRequest, REASON.intentConflict,
+  const { detail } = await assertPair(CLR.badRequest, REASON.intentConflict,
     () => admitJournalWork({ client: A1(), author: BOB(), intentKey: key, basis: basis({ cents: 999900 }) }),
     "admit.conflict");
+  // THE LINK, not just the classification. The 409 the web shows carries a "you already asked
+  // this" affordance, and that affordance is only navigable if the raise NAMES the Work the key
+  // is already bound to. A detail that typed the reason and dropped the id would leave the
+  // route inventing one — so the chain is pinned at its source here, and at its end in the e2e.
+  assert.equal(detail.work_id, first.work_id,
+    "admit.conflict: the typed detail names the FIRST Work, so the 409 can link to it");
 
   const after = await rootQuery("select count(*)::int as n from clara.accounting_work where firm_id=$1",
     [(await workRow(first.work_id)).firm_id]);
