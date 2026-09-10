@@ -334,7 +334,12 @@ begin
         detail=jsonb_build_object('reason','invalid_fields','field',v_key,'constraint','unit')::text;
     end if;
     if v_kind = 'choice' then
-      if jsonb_typeof(f->'options') <> 'array' or jsonb_array_length(f->'options') < 2
+      -- `f ? 'options'` FIRST, and it is load-bearing rather than defensive: `f->'options'` is SQL
+      -- NULL when the key is absent, so `jsonb_typeof(NULL) <> 'array'` evaluates to NULL, the
+      -- whole OR collapses to NULL, and `if NULL then` does NOT raise. A choice field with no
+      -- options would have been admitted — measured by the cell, not reasoned about.
+      if not (f ? 'options') or jsonb_typeof(f->'options') <> 'array'
+         or jsonb_array_length(f->'options') < 2
          or jsonb_array_length(f->'options') > 20 then
         raise exception 'choice field % needs between two and twenty options', v_key using errcode='CLR10',
           detail=jsonb_build_object('reason','invalid_fields','field',v_key,'constraint','options')::text;

@@ -930,6 +930,29 @@ const WORK_JOURNAL_0178_CLOCK_NAMES = [
 // `claim_confirmation_attempt`. No date is ever derived from it.
 const USER_PREFERENCES_0179_CLOCK_NAMES = ["save_my_preferences"];
 
+// #629 [0180] — shared Work questions. THREE bodies read a bare timestamptz clock, and every one
+// of them stamps or compares an INSTANT rather than deriving a DATE:
+//   `open_work_question`        stamps `agent_tasks.updated_at` on the running->awaiting_input
+//                               transition and the question's own `expires_at = now() + 14 days`
+//                               — the deadline 0006 already spelled this way in
+//                               `clara.open_interruption`, restated here because the Work lane
+//                               opens its own row rather than calling that verb.
+//   `answer_work_question`      compares the deadline with clock_timestamp() AFTER acquiring the
+//                               row lock (S4-D5: now() freezes at txn start, so an answer that
+//                               waited across the deadline must lose), and stamps `answered_at`.
+//   `expire_due_interruptions`  selects rows whose `expires_at < clock_timestamp()`. The cutoff is
+//                               the wall clock and takes NO parameter, so there is nothing to
+//                               derive a date from either.
+// The four read/validate helpers (`get_work_question`, `get_work_pending_question`,
+// `_assert_work_question_fields`, `_assert_work_answer`) and the `_tf_work_question_immutable`
+// trigger body read NO clock at all — measured with arm (D)'s own detector against the live
+// catalog, not assumed from the file's first text. The `date` field kind's values are the HUMAN's
+// own typed ISO strings, validated against `^\d{4}-\d{2}-\d{2}$` and a `::date` cast, which is
+// exactly the property arm (D) exists to protect.
+const WORK_QUESTIONS_0180_CLOCK_NAMES = [
+  "answer_work_question", "expire_due_interruptions", "open_work_question",
+];
+
 /** The arm (D) roster for the database under test, sorted as the catalog sorts it. */
 export async function s5BareTokenRoster(query) {
   const applied = async (pat) => (await query(
@@ -1029,6 +1052,7 @@ export async function s5BareTokenRoster(query) {
     names.push(...WORK_JOURNAL_0178_CLOCK_NAMES);
   }
   if (await appliedStem("user_preferences$")) names.push(...USER_PREFERENCES_0179_CLOCK_NAMES);
+  if (await appliedStem("work_questions$")) names.push(...WORK_QUESTIONS_0180_CLOCK_NAMES);
   return names.sort();
 }
 
