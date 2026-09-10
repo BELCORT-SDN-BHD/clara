@@ -66,6 +66,7 @@ import {
   type EntrySortKey,
 } from "@/lib/journals/entries-table";
 import type { CoaAccountRow, JournalEntryRow, JournalLineRow } from "@/lib/journals/types";
+import type { EntryLinkRow } from "@/lib/work/evidence";
 import type { PartClr } from "@/lib/parts/hooks";
 
 /** Text columns read best ascending on a first click; a date or a money
@@ -127,10 +128,25 @@ export function JournalEntriesTable({
   actingId,
   onReverse,
   defaultStatus,
+  links = [],
+  linksUnavailable = false,
+  initialEntryId = "",
 }: {
   clientId: string;
   entries: JournalEntryRow[];
   lines: JournalLineRow[];
+  /** #634 — one row per entry from `clara.list_entry_links`: the Work, the
+   *  operation receipt, the source document and the correction chain. */
+  links?: readonly EntryLinkRow[];
+  /** #634 — the links read FAILED. Said out loud above the table rather than
+   *  rendered as "no source" on every row: "we could not read it" and "there is
+   *  none" are different facts, and only one of them is this surface's to
+   *  assert. */
+  linksUnavailable?: boolean;
+  /** #634 — `?entry=<id>`: the address a refusal's link lands on. It opens the
+   *  table filtered to that one entry, with its detail already disclosed, and
+   *  the Clear control returns the reader to the whole tab. */
+  initialEntryId?: string;
   linesTruncated: boolean;
   /** lib/journals/api.ts:248 — `true` means `entries` is an INCOMPLETE page of
    *  clara.journal_entries, not the whole client's history. */
@@ -153,22 +169,27 @@ export function JournalEntriesTable({
   const tp = useTranslations("JournalsWorkbench.posted");
   const ts = useTranslations("JournalsWorkbench.status");
   const to = useTranslations("JournalsWorkbench.origin");
+  const tm = useTranslations("ManualJournal");
 
   // The state the tab OPENS on, and what "Clear filters" returns to. Clearing to NO_FILTERS
   // would widen the Posted tab into drafts and withdrawn entries — a control named "Clear"
   // showing MORE than the tab promised.
   const initialFilters = useMemo<EntriesFilters>(() => ({ ...NO_FILTERS, status: defaultStatus }), [defaultStatus]);
   const [sort, setSort] = useState<EntriesSort>(DEFAULT_SORT);
-  const [filters, setFilters] = useState<EntriesFilters>(initialFilters);
+  // THE URL IS THE OPENING STATE, and only the opening state: `?entry=` is read
+  // once, into the same filter model every control writes, so Back/Forward keep
+  // working and "Clear filters" returns to the tab's own state rather than to a
+  // half-remembered address.
+  const [filters, setFilters] = useState<EntriesFilters>(() => ({ ...initialFilters, entry: initialEntryId }));
   const [pageSize, setPageSize] = useState<number>(PAGE_SIZES[0]);
   const [page, setPage] = useState(1);
-  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [expandedId, setExpandedId] = useState<string | null>(initialEntryId === "" ? null : initialEntryId);
   const [reversingId, setReversingId] = useState<string | null>(null);
   const [reason, setReason] = useState("");
   const [diffId, setDiffId] = useState<string | null>(null);
 
   const totalsSortable = !linesTruncated;
-  const all = useMemo(() => buildEntryRows(entries, lines), [entries, lines]);
+  const all = useMemo(() => buildEntryRows(entries, lines, links), [entries, lines, links]);
   const filtered = useMemo(() => filterEntryRows(all, filters), [all, filters]);
   const sorted = useMemo(() => sortEntryRows(filtered, sort, totalsSortable), [filtered, sort, totalsSortable]);
   const current = pageOf(sorted, page, pageSize);
@@ -187,6 +208,8 @@ export function JournalEntriesTable({
     <div className="flex flex-col gap-2">
       {entriesTruncated && <p className="text-sm text-warning">{t("entriesTruncated")}</p>}
       {linesTruncated && <p className="text-sm text-warning">{t("linesTruncated")}</p>}
+      {linksUnavailable && <p className="text-sm text-warning">{tm("links.unavailable")}</p>}
+      {filters.entry !== "" && <p className="text-sm text-muted-foreground">{tm("filters.highlighted")}</p>}
 
       <div className="flex flex-wrap items-end gap-2">
         <FilterField id="je-filter-status" label={t("filterStatus")}>
@@ -208,6 +231,35 @@ export function JournalEntriesTable({
               </option>
             ))}
           </NativeSelect>
+        </FilterField>
+        {/* #634 — THREE MORE QUESTIONS A REVIEWER ACTUALLY ASKS, beside the two
+            the table already answered. "Origin" here is not the row's writing
+            LANE (that is the Source select above, whose values are
+            manual/document/agent/reversal): it is whether a PERSON typed these
+            figures or Clara interpreted them, which is the question a reviewer
+            asks about a posting they did not make. */}
+        <FilterField id="je-filter-basis" label={tm("filters.origin")}>
+          <NativeSelect id="je-filter-basis" value={filters.basis} onChange={(e) => update({ basis: e.target.value })}>
+            <option value={ANY}>{tm("filters.originAny")}</option>
+            <option value="user_direct">{tm("filters.originHuman")}</option>
+            <option value="clara_interpreted">{tm("filters.originClara")}</option>
+          </NativeSelect>
+        </FilterField>
+        <FilterField id="je-filter-hassource" label={tm("filters.source")}>
+          <NativeSelect id="je-filter-hassource" value={filters.source} onChange={(e) => update({ source: e.target.value })}>
+            <option value={ANY}>{tm("filters.sourceAny")}</option>
+            <option value="with">{tm("filters.sourceWith")}</option>
+            <option value="without">{tm("filters.sourceWithout")}</option>
+          </NativeSelect>
+        </FilterField>
+        <FilterField id="je-filter-memo" label={tm("filters.memo")}>
+          <Input
+            id="je-filter-memo"
+            type="search"
+            value={filters.memo}
+            onChange={(e) => update({ memo: e.target.value })}
+            className="w-48"
+          />
         </FilterField>
         <FilterField id="je-filter-from" label={t("filterFrom")}>
           <Input id="je-filter-from" type="date" value={filters.from} onChange={(e) => update({ from: e.target.value })} className="w-40" />
@@ -284,6 +336,7 @@ export function JournalEntriesTable({
                   diffOpen={diffId === row.entry.id}
                   onToggleDiff={() => setDiffId(diffId === row.entry.id ? null : row.entry.id)}
                   onReverse={onReverse}
+                  link={row.link}
                   onReverseOk={() => {
                     setReversingId(null);
                     setReason("");

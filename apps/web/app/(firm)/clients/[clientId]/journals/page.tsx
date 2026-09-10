@@ -11,13 +11,34 @@ import { JournalsWorkbench } from "@/components/journals/journals-workbench";
  * Client Component that owns the actual hydration (direct RLS reads via
  * getRows + governed doors via callDoor, both browser-only: they read the
  * session token via lib/session-accessor.ts).
+ *
+ * #634 — `?tab=` and `?entry=` ARE READ HERE, on the server, and handed down as
+ * plain props. A `useSearchParams()` in the client component would work too, but
+ * it forces a Suspense boundary on every build of this route for a value that is
+ * only ever the OPENING state; reading it here keeps the address the source of
+ * truth for arrival and leaves the component's own state the source of truth
+ * afterwards. The address matters because a refusal elsewhere in this journey
+ * ("that document already backs a posted entry") links straight to one entry,
+ * and Back must return the reader to what they were doing.
  */
 export default async function ClientJournalsPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ clientId: string }>;
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const { clientId } = await params;
+  const query = (await searchParams) ?? {};
+  const one = (value: string | string[] | undefined): string =>
+    typeof value === "string" ? value : Array.isArray(value) ? (value[0] ?? "") : "";
+  const tab = one(query.tab);
 
-  return <JournalsWorkbench clientId={clientId} />;
+  return (
+    <JournalsWorkbench
+      clientId={clientId}
+      initialTab={tab === "posted" || tab === "drafts" || tab === "clarifications" ? tab : undefined}
+      initialEntryId={one(query.entry)}
+    />
+  );
 }

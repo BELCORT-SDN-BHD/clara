@@ -30,6 +30,7 @@
 
 import { JournalEntriesTable } from "@/components/journals/journal-entries-table";
 import type { CoaAccountRow, JournalEntryRow, JournalLineRow } from "@/lib/journals/types";
+import type { EntryLinkRow } from "@/lib/work/evidence";
 import type { PartClr } from "@/lib/parts/hooks";
 
 export function PostedPanel({
@@ -44,8 +45,16 @@ export function PostedPanel({
   clr,
   actingId,
   onReverse,
+  links = [],
+  linksUnavailable = false,
+  initialEntryId = "",
 }: {
   clientId: string;
+  /** #634 — read by the workbench above (one hydration per tab), passed through
+   *  here: this panel is composition, and it fetches nothing of its own. */
+  links?: readonly EntryLinkRow[];
+  linksUnavailable?: boolean;
+  initialEntryId?: string;
   entries: JournalEntryRow[];
   lines: JournalLineRow[];
   /** FIX-1 (independent review): see lib/journals/types.ts's `JournalsData`
@@ -77,6 +86,9 @@ export function PostedPanel({
       clr={clr}
       actingId={actingId}
       onReverse={onReverse}
+      links={links}
+      linksUnavailable={linksUnavailable}
+      initialEntryId={initialEntryId}
       defaultStatus="approved"
     />
   );

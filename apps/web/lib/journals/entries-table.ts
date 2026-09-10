@@ -23,6 +23,7 @@
 // (see `sortEntryRows`).
 
 import type { JournalEntryRow, JournalLineRow } from "./types";
+import type { EntryLinkRow } from "@/lib/work/evidence";
 
 /** journal_entries.status — the CLOSED three-value CHECK domain, transcribed
  *  from packages/db/migrations/0007_document_pipeline.sql:1012-1014
@@ -59,9 +60,28 @@ export type EntriesFilters = {
   from: string;
   /** `""`, or an inclusive `YYYY-MM-DD` upper bound on posting_date. */
   to: string;
+  /** #634 — `ANY`, `"with"` or `"without"`: does this entry have a SOURCE
+   *  DOCUMENT. A different question from `origin` (which says which LANE wrote
+   *  the row) and the one a reviewer actually asks when they are looking for
+   *  entries to substantiate. */
+  source: string;
+  /** #634 — `ANY`, or an `accounting_work.basis_origin` value: did a PERSON type
+   *  these figures (`user_direct`) or did Clara interpret them from a sentence
+   *  (`clara_interpreted`). An entry whose links row was not read has NO answer
+   *  and matches neither — absence is not evidence. */
+  basis: string;
+  /** #634 — `""`, or a case-insensitive substring of the memo the row shows. */
+  memo: string;
+  /** #634 — `""`, or ONE `journal_entries.id`. The address a refusal's link
+   *  lands on (`?entry=…`): a reader sent to a specific entry sees that entry,
+   *  and an id this read does not contain shows NOTHING rather than everything,
+   *  so its absence is visible instead of hidden behind a full table. */
+  entry: string;
 };
 
-export const NO_FILTERS: EntriesFilters = { status: ANY, origin: ANY, from: "", to: "" };
+export const NO_FILTERS: EntriesFilters = {
+  status: ANY, origin: ANY, from: "", to: "", source: ANY, basis: ANY, memo: "", entry: "",
+};
 
 export type EntryTableRow = {
   entry: JournalEntryRow;
@@ -83,9 +103,24 @@ export type EntryTableRow = {
   reversed: boolean;
   /** `origin === 'reversal'` — this entry IS a reversal (0003_books_core.sql:108). */
   isReversal: boolean;
+  /**
+   * #634 — this entry's Work, operation receipt, source document and correction
+   * chain, from `clara.list_entry_links`.
+   *
+   * NULL means the LINKS READ DID NOT COVER THIS ENTRY — it failed, or it was
+   * not asked. That is a different fact from "this entry has no source", which
+   * is a link row whose `document_id` is null, and the two must never render the
+   * same way: one is "we do not know", the other is "there is none".
+   */
+  link: EntryLinkRow | null;
 };
 
-export function buildEntryRows(entries: JournalEntryRow[], lines: JournalLineRow[]): EntryTableRow[] {
+export function buildEntryRows(
+  entries: JournalEntryRow[],
+  lines: JournalLineRow[],
+  links: readonly EntryLinkRow[] = [],
+): EntryTableRow[] {
+  const linkByEntry = new Map(links.map((row) => [row.entry_id, row]));
   const byEntry = new Map<string, { debit: number; credit: number }>();
   for (const line of lines) {
     const acc = byEntry.get(line.entry_id) ?? { debit: 0, credit: 0 };
@@ -103,6 +138,7 @@ export function buildEntryRows(entries: JournalEntryRow[], lines: JournalLineRow
       creditCents: sums ? sums.credit : null,
       reversed: entry.reversed_by !== null,
       isReversal: entry.origin === "reversal",
+      link: linkByEntry.get(entry.id) ?? null,
     };
   });
 }
@@ -140,6 +176,29 @@ export function filterEntryRows(rows: EntryTableRow[], filters: EntriesFilters):
     const e = row.entry;
     if (filters.status !== ANY && e.status !== filters.status) return false;
     if (filters.origin !== ANY && e.origin !== filters.origin) return false;
+    // #634 · ONE ENTRY, when a refusal's link named one. Checked FIRST among the
+    // new arms because it is the narrowest: everything else is a browse, this is
+    // an address.
+    if (filters.entry !== "" && e.id !== filters.entry) return false;
+    if (filters.source !== ANY) {
+      // The LINK is the authority on whether there is a source, and it already
+      // coalesces the document-coding lane's own `journal_entries.document_id`
+      // (migration 0182's `list_entry_links`). An entry whose link row was not
+      // read has no source THAT THIS SURFACE KNOWS OF, and reads as "without" —
+      // which is why the surface also says, above the table, when the links read
+      // failed: an unknown must never be silently presented as an answer.
+      const hasSource = row.link?.document_id != null;
+      if (filters.source === "with" && !hasSource) return false;
+      if (filters.source === "without" && hasSource) return false;
+    }
+    if (filters.basis !== ANY && row.link?.basis_origin !== filters.basis) return false;
+    if (filters.memo.trim() !== "") {
+      const needle = filters.memo.trim().toLowerCase();
+      // A row with NO memo can never match: it cannot be shown to contain the
+      // text, and a search that returned it would be answering a question it
+      // never asked.
+      if (!(e.memo ?? "").toLowerCase().includes(needle)) return false;
+    }
     if (filters.from || filters.to) {
       const d = e.posting_date;
       if (!d) return false;
@@ -238,6 +297,10 @@ export function filtersActive(filters: EntriesFilters, initial: EntriesFilters =
     filters.status !== initial.status ||
     filters.origin !== initial.origin ||
     filters.from !== initial.from ||
-    filters.to !== initial.to
+    filters.to !== initial.to ||
+    filters.source !== initial.source ||
+    filters.basis !== initial.basis ||
+    filters.memo !== initial.memo ||
+    filters.entry !== initial.entry
   );
 }

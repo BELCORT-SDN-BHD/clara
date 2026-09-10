@@ -6,6 +6,7 @@
 // holds no state of its own (every piece lives in the table, so a re-read
 // after a door call never collapses a row the reader had open).
 
+import Link from "next/link";
 import { useTranslations } from "next-intl";
 
 import { Button } from "@/components/ui/button";
@@ -17,7 +18,9 @@ import { Money } from "@/components/journals/money";
 import { FormattedDate } from "@/components/journals/formatted-date";
 import { EntryStatusBadge } from "@/components/journals/entry-status-badge";
 import { EntryDiffPanel } from "@/components/journals/entry-diff-panel";
+import { journalEntryHref, workDetailHref } from "@/lib/navigation/tree";
 import type { EntryTableRow } from "@/lib/journals/entries-table";
+import type { EntryLinkRow } from "@/lib/work/evidence";
 import type { CoaAccountRow, JournalLineRow } from "@/lib/journals/types";
 import type { PartClr } from "@/lib/parts/hooks";
 
@@ -49,7 +52,7 @@ export function originLabel(origin: string, to: (key: string) => string): string
 export function EntryRows({
   clientId, row, lines, accounts, linesTruncated, busy, err, clr,
   expanded, onToggle, reversing, onStartReverse, onCancelReverse,
-  reason, onReasonChange, diffOpen, onToggleDiff, onReverse, onReverseOk,
+  reason, onReasonChange, diffOpen, onToggleDiff, onReverse, onReverseOk, link = null,
 }: {
   clientId: string;
   row: EntryTableRow;
@@ -70,6 +73,10 @@ export function EntryRows({
   onToggleDiff: () => void;
   onReverse: (entryId: string, reason: string, onOk: () => void) => void;
   onReverseOk: () => void;
+  /** #634 — this entry's Work, operation receipt, source document and correction
+   *  chain. NULL means the links read did not cover this entry, which the table
+   *  says once above itself rather than as a per-row "no source". */
+  link?: EntryLinkRow | null;
 }) {
   const t = useTranslations("JournalsWorkbench.table");
   const tp = useTranslations("JournalsWorkbench.posted");
@@ -126,6 +133,7 @@ export function EntryRows({
           <TableCell colSpan={COLUMN_COUNT} className="whitespace-normal">
             <div className="flex flex-col gap-2">
               <EntryLinesReadout lines={entryLines} accounts={accounts} linesTruncated={linesTruncated} />
+              <EntryLinksReadout clientId={clientId} link={link} />
               {err && (
                 <StateBanner tone="error" code={clr ? clr.code : undefined}>
                   {err}
@@ -214,5 +222,117 @@ function EntryLinesReadout({
           );
         })}
     </ul>
+  );
+}
+
+/**
+ * #634 — WHERE THIS ENTRY CAME FROM AND WHAT STANDS BEHIND IT: the purpose, who
+ * authored the figures, the source document, the durable Work, the operation
+ * receipt, and the correction chain in both directions.
+ *
+ * IT RENDERS NOTHING IT WAS NOT TOLD. A null `link` means the links read did not
+ * cover this entry — the table says that once, above itself — so this block is
+ * simply absent rather than filled with dashes that would read as "there is
+ * none". Every value below is a column of `clara.list_entry_links`; nothing here
+ * is derived and nothing is invented, which is why an entry with no Work behind
+ * it shows no Work row at all instead of an empty one.
+ */
+function EntryLinksReadout({ clientId, link }: { clientId: string; link: EntryLinkRow | null }) {
+  const tm = useTranslations("ManualJournal");
+  if (link === null) return null;
+  const sourceNote =
+    link.document_source === "work_commit"
+      ? tm("links.sourceWorkCommit")
+      : link.document_source === "late_attachment"
+        ? tm("links.sourceLateAttachment")
+        : link.document_source === "document_coding"
+          ? tm("links.sourceDocumentCoding")
+          : null;
+  const basis =
+    link.basis_origin === "user_direct"
+      ? tm("links.basisUserDirect")
+      : link.basis_origin === "clara_interpreted"
+        ? tm("links.basisClaraInterpreted")
+        : // A value outside the pair renders VERBATIM rather than crashing on a
+          // missing message key — `accounting_work.basis_origin`'s CHECK may
+          // widen, and the honest answer to an unknown word is the word.
+          link.basis_origin;
+  return (
+    <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
+      <dt className="text-muted-foreground">{tm("links.source")}</dt>
+      <dd className="wrap-anywhere text-foreground">
+        {link.document_id === null ? (
+          // "No document" IN WORDS. An entry recorded without evidence is a
+          // legitimate state of this journey, and an empty cell would read as a
+          // gap in the record rather than as a choice somebody made.
+          tm("links.noSource")
+        ) : (
+          <span className="flex flex-wrap items-baseline gap-2">
+            <span className="font-mono">{link.document_id.slice(0, 8)}</span>
+            {sourceNote === null ? null : <span className="text-muted-foreground">{sourceNote}</span>}
+          </span>
+        )}
+      </dd>
+      {basis === null ? null : (
+        <>
+          <dt className="text-muted-foreground">{tm("links.basisOrigin")}</dt>
+          <dd className="text-foreground">{basis}</dd>
+        </>
+      )}
+      {link.work_id === null ? null : (
+        <>
+          <dt className="text-muted-foreground">{tm("links.work")}</dt>
+          <dd>
+            <Link
+              href={workDetailHref(clientId, link.work_id)}
+              className="text-sm font-medium text-primary underline underline-offset-2"
+            >
+              {tm("links.openWork")}
+            </Link>
+          </dd>
+        </>
+      )}
+      {link.receipt_id === null ? null : (
+        <>
+          <dt className="text-muted-foreground">{tm("links.receipt")}</dt>
+          {/* THE SHORT ID PLUS THE WHOLE ONE IN `title`, the same treatment the
+              Reference column gives the entry's own uuid — a receipt id is a
+              thing a professional quotes to somebody else, so it must be
+              selectable in full rather than only recognisable. */}
+          <dd className="wrap-anywhere font-mono text-foreground" title={link.receipt_id}>
+            {link.receipt_id.slice(0, 8)}
+          </dd>
+        </>
+      )}
+      {link.reversed_by === null ? null : (
+        <>
+          <dt className="text-muted-foreground">{tm("links.correction")}</dt>
+          <dd className="flex flex-wrap items-baseline gap-2">
+            <Link
+              href={journalEntryHref(clientId, link.reversed_by)}
+              className="text-sm font-medium text-primary underline underline-offset-2"
+            >
+              {tm("links.reversedBy")}
+            </Link>
+            {link.reversal_reason === null ? null : (
+              <span className="text-muted-foreground">{tm("links.reversalReason", { reason: link.reversal_reason })}</span>
+            )}
+          </dd>
+        </>
+      )}
+      {link.reversal_of === null ? null : (
+        <>
+          <dt className="text-muted-foreground">{tm("links.correction")}</dt>
+          <dd>
+            <Link
+              href={journalEntryHref(clientId, link.reversal_of)}
+              className="text-sm font-medium text-primary underline underline-offset-2"
+            >
+              {tm("links.reversalOf")}
+            </Link>
+          </dd>
+        </>
+      )}
+    </dl>
   );
 }

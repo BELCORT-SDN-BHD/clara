@@ -21,6 +21,7 @@ import {
   type EntriesFilters,
 } from "./entries-table";
 import type { JournalEntryRow, JournalLineRow } from "./types";
+import type { EntryLinkRow } from "@/lib/work/evidence";
 
 function entry(over: Partial<JournalEntryRow> & { id: string }): JournalEntryRow {
   return {
@@ -148,8 +149,13 @@ test("the three filters narrow independently, and filtersActive reports whether 
   const byRange = filterEntryRows(rows, { ...NO_FILTERS, from: "2026-02-01", to: "2026-03-01" });
   assert.deepEqual(byRange.map((r) => r.entry.id), ["c"]);
 
-  // `ANY` on both enum filters is the do-not-filter sentinel.
-  assert.equal(filterEntryRows(rows, { status: ANY, origin: ANY, from: "", to: "" }).length, 3);
+  // EVERY filter at its own do-not-filter sentinel keeps every row. Written as a full literal
+  // rather than a spread on purpose: this cell exists to prove the sentinels, so a new filter
+  // added without one goes RED here (as #634's four did) instead of quietly narrowing the table.
+  assert.equal(
+    filterEntryRows(rows, { status: ANY, origin: ANY, from: "", to: "", source: ANY, basis: ANY, memo: "", entry: "" }).length,
+    3,
+  );
 });
 
 // The Posted tab OPENS on `status: "approved"`. That is the tab's contract, not something the
@@ -195,4 +201,108 @@ test("pageOf slices, clamps an out-of-range page, and never reports 'page 1 of 0
 
   const none = pageOf([], 1, 25);
   assert.deepEqual([none.page, none.pageCount, none.rows.length], [1, 1, 0]);
+});
+
+// ===========================================================================================
+// #634 — THE LINK MODEL: Work, receipt, source and the correction chain, merged onto the rows,
+// plus the three filters a reader needs once a source can be present or absent.
+// ===========================================================================================
+
+function link(over: Partial<EntryLinkRow> & { entry_id: string }): EntryLinkRow {
+  return {
+    status: "approved", origin: "agent", work_id: null, receipt_id: null, logical_op_id: null,
+    purpose: null, basis_origin: null, initiator: null, initiator_role: null,
+    document_id: null, document_source: null, attached_at: null,
+    reversal_of: null, reversed_by: null, reversal_reason: null,
+    ...over,
+  };
+}
+
+test("#634: buildEntryRows merges each entry's link row, and leaves it null when there is none", () => {
+  const rows = buildEntryRows(
+    [entry({ id: "e1" }), entry({ id: "e2" })],
+    [],
+    [link({ entry_id: "e1", work_id: "w1", document_id: "d1", document_source: "work_commit" })],
+  );
+  const byId = Object.fromEntries(rows.map((r) => [r.entry.id, r]));
+  assert.equal(byId.e1!.link?.work_id, "w1");
+  assert.equal(byId.e1!.link?.document_id, "d1");
+  // An entry the links read did not cover is NULL, never a fabricated empty row: "we did not
+  // read it" and "there is no source" are different facts and the surface says so differently.
+  assert.equal(byId.e2!.link, null);
+});
+
+test("#634: buildEntryRows still works with no links at all (the read failed, the table stands)", () => {
+  const rows = buildEntryRows([entry({ id: "e1" })], []);
+  assert.equal(rows[0]!.link, null);
+});
+
+test("#634: the has-a-source filter keys on the LINK, not on the entry's own document_id alone", () => {
+  const rows = buildEntryRows(
+    [entry({ id: "e1" }), entry({ id: "e2" }), entry({ id: "e3", document_id: "d3" })],
+    [],
+    [link({ entry_id: "e1", document_id: "d1", document_source: "late_attachment" }), link({ entry_id: "e2" })],
+  );
+  const withSource = filterEntryRows(rows, { ...NO_FILTERS, source: "with" });
+  assert.deepEqual(withSource.map((r) => r.entry.id), ["e1"]);
+  // e3 carries the DOCUMENT-CODING lane's own column but no link row — it has a source too,
+  // and a filter that missed it would hide half the estate's document-backed entries. It is
+  // absent here only because this fixture gave it no link row: the link read is the one the
+  // filter trusts, and `document_id` on the entry reaches it through `list_entry_links`'
+  // own coalesce. Stated so the next reader does not "fix" it the wrong way.
+  const withoutSource = filterEntryRows(rows, { ...NO_FILTERS, source: "without" });
+  assert.deepEqual(withoutSource.map((r) => r.entry.id), ["e2", "e3"]);
+  // `ANY` keeps every row, which is what the default must do.
+  assert.equal(filterEntryRows(rows, NO_FILTERS).length, 3);
+});
+
+test("#634: the basis-origin filter separates what a person typed from what Clara interpreted", () => {
+  const rows = buildEntryRows(
+    [entry({ id: "e1" }), entry({ id: "e2" }), entry({ id: "e3" })],
+    [],
+    [
+      link({ entry_id: "e1", basis_origin: "user_direct" }),
+      link({ entry_id: "e2", basis_origin: "clara_interpreted" }),
+    ],
+  );
+  assert.deepEqual(
+    filterEntryRows(rows, { ...NO_FILTERS, basis: "user_direct" }).map((r) => r.entry.id),
+    ["e1"],
+  );
+  assert.deepEqual(
+    filterEntryRows(rows, { ...NO_FILTERS, basis: "clara_interpreted" }).map((r) => r.entry.id),
+    ["e2"],
+  );
+  // e3 has no link row, so its basis origin is UNKNOWN — and an unknown is never counted as
+  // either answer. Absence is not evidence.
+  assert.equal(filterEntryRows(rows, { ...NO_FILTERS, basis: "user_direct" }).some((r) => r.entry.id === "e3"), false);
+});
+
+test("#634: the memo search is a case-insensitive substring over the memo the row shows", () => {
+  const rows = buildEntryRows(
+    [entry({ id: "e1", memo: "Office RENT paid from Maybank" }), entry({ id: "e2", memo: "Bank charges" }), entry({ id: "e3", memo: null })],
+    [],
+  );
+  assert.deepEqual(filterEntryRows(rows, { ...NO_FILTERS, memo: "rent" }).map((r) => r.entry.id), ["e1"]);
+  assert.deepEqual(filterEntryRows(rows, { ...NO_FILTERS, memo: "  BANK " }).map((r) => r.entry.id), ["e1", "e2"]);
+  // A row with NO memo can never match a search: it cannot be proven to contain the text.
+  assert.equal(filterEntryRows(rows, { ...NO_FILTERS, memo: "e" }).some((r) => r.entry.id === "e3"), false);
+  // A blank search is not a filter.
+  assert.equal(filterEntryRows(rows, { ...NO_FILTERS, memo: "   " }).length, 3);
+});
+
+test("#634: the ENTRY filter is the one a refusal's link lands on — exactly that row, nothing else", () => {
+  const rows = buildEntryRows([entry({ id: "e1" }), entry({ id: "e2" })], []);
+  assert.deepEqual(filterEntryRows(rows, { ...NO_FILTERS, entry: "e2" }).map((r) => r.entry.id), ["e2"]);
+  // An id that names nothing in this read shows NOTHING rather than everything: the reader was
+  // sent to a specific entry, and silently showing the whole table would hide that it is absent.
+  assert.deepEqual(filterEntryRows(rows, { ...NO_FILTERS, entry: "nope" }), []);
+});
+
+test("#634: the new filters count as reader edits, so Clear appears and returns to the tab's own state", () => {
+  const initial: EntriesFilters = { ...NO_FILTERS, status: "approved" };
+  assert.equal(filtersActive(initial, initial), false);
+  for (const patch of [{ source: "with" as const }, { basis: "user_direct" }, { memo: "rent" }, { entry: "e1" }]) {
+    assert.equal(filtersActive({ ...initial, ...patch }, initial), true, JSON.stringify(patch));
+  }
 });

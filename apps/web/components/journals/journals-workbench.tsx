@@ -6,7 +6,7 @@
 // child panel below is purely presentational over the data/actions this
 // component hands down — no panel fetches on its own.
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { useJournalsWorkbench } from "@/lib/journals/use-journals-workbench";
@@ -19,13 +19,63 @@ import { PostedPanel } from "@/components/journals/posted-panel";
 import { InterruptionsPanel } from "@/components/journals/interruptions-panel";
 import { JournalStatusLegend } from "@/components/journals/status-legend";
 import { journalComposerHref } from "@/lib/navigation/tree";
+import { listEntryLinks, type EntryLinkRow } from "@/lib/work/evidence";
 
 type Tab = "drafts" | "posted" | "clarifications";
 
-export function JournalsWorkbench({ clientId }: { clientId: string }) {
+export function JournalsWorkbench({
+  clientId,
+  initialTab,
+  initialEntryId = "",
+  loadLinks = listEntryLinks,
+}: {
+  clientId: string;
+  /** #634 — `?tab=`: the OPENING tab only. Every later change is the reader's. */
+  initialTab?: Tab;
+  /** #634 — `?entry=`: the one entry a refusal's link sent this reader to. */
+  initialEntryId?: string;
+  loadLinks?: typeof listEntryLinks;
+}) {
   const t = useTranslations("JournalsWorkbench");
   const workbench = useJournalsWorkbench(clientId);
-  const [tab, setTab] = useState<Tab>("drafts");
+  const [tab, setTab] = useState<Tab>(initialTab ?? "drafts");
+  /** #634 — the Work / receipt / source / correction facts for the entries this
+   *  tab has read. Fetched HERE rather than inside the panel, because this
+   *  component owns the tab's ONE hydration and a panel that fetched on its own
+   *  would be a second, unsynchronised read of the same page.
+   *
+   *  A FAILURE IS A NAMED STATE, not an empty result: `linksUnavailable` is
+   *  passed to the table, which says so above itself. Rendering "no source" on
+   *  every row because a read failed would be this surface asserting something
+   *  it does not know. */
+  const [links, setLinks] = useState<readonly EntryLinkRow[]>([]);
+  const [linksUnavailable, setLinksUnavailable] = useState(false);
+  // The id LIST as a string, so the effect re-runs when the entries change but
+  // not on every re-render that happens to rebuild an equal array.
+  const entryIds = (workbench.data?.entries ?? []).map((e) => e.id).join(",");
+  useEffect(() => {
+    const ids = entryIds === "" ? [] : entryIds.split(",");
+    if (ids.length === 0) {
+      setLinks([]);
+      setLinksUnavailable(false);
+      return;
+    }
+    let live = true;
+    void loadLinks(clientId, ids)
+      .then((rows) => {
+        if (!live) return;
+        setLinks(rows);
+        setLinksUnavailable(false);
+      })
+      .catch(() => {
+        if (!live) return;
+        setLinks([]);
+        setLinksUnavailable(true);
+      });
+    return () => {
+      live = false;
+    };
+  }, [clientId, entryIds, loadLinks]);
 
   // --- honest, distinct states — no state below fabricates a number or hides
   // a real failure behind a generic message (mission's mechanism rules).
@@ -139,6 +189,9 @@ export function JournalsWorkbench({ clientId }: { clientId: string }) {
       {tab === "posted" && (
         <PostedPanel
           clientId={clientId}
+          links={links}
+          linksUnavailable={linksUnavailable}
+          initialEntryId={initialEntryId}
           entries={data.entries}
           lines={data.lines}
           linesTruncated={data.linesTruncated}
