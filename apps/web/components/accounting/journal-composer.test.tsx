@@ -608,7 +608,13 @@ test("a FAILED chart read degrades the form rather than blocking it", async () =
 // #634 - OPTIONAL EVIDENCE.
 // ===========================================================================================
 
-test("#634: EVIDENCE IS OPTIONAL - the default is an explicit No document, and nothing is sent", async () => {
+// THE `t634` PREFIX IS NOT A TYPO. A string literal containing `#634` is a valid
+// three-digit CSS hex colour, and this app's `no-restricted-syntax` raw-colour
+// rule (owner ruling Q4) reds every one of them. Ticket ids stay in COMMENTS,
+// where the rule does not look; test NAMES carry the bare number.
+
+
+test("t634: EVIDENCE IS OPTIONAL - the default is an explicit No document, and nothing is sent", async () => {
   const sent: Submitted[] = [];
   const h = await renderComponent(
     App({
@@ -637,7 +643,7 @@ test("#634: EVIDENCE IS OPTIONAL - the default is an explicit No document, and n
   }
 });
 
-test("#634: a chosen document rides the submit as ONE document source ref", async () => {
+test("t634: a chosen document rides the submit as ONE document source ref", async () => {
   const sent: Submitted[] = [];
   const h = await renderComponent(
     App({
@@ -660,7 +666,7 @@ test("#634: a chosen document rides the submit as ONE document source ref", asyn
   }
 });
 
-test("#634: the SAME intent key carries the evidence through a lost-response replay", async () => {
+test("t634: the SAME intent key carries the evidence through a lost-response replay", async () => {
   // The one behaviour the whole idempotency story rests on, extended to the
   // EVIDENCE half of the payload: the admission door compares canonical source
   // refs alongside the basis digest, so a replay that dropped the document would
@@ -689,7 +695,7 @@ test("#634: the SAME intent key carries the evidence through a lost-response rep
   }
 });
 
-test("#634: a SOURCE CONFLICT is a persistent Alert with a link and NO resubmit of this intent", async () => {
+test("t634: a SOURCE CONFLICT is a persistent Alert with a link and NO resubmit of this intent", async () => {
   const sent: Submitted[] = [];
   const h = await renderComponent(
     App({
@@ -729,7 +735,7 @@ test("#634: a SOURCE CONFLICT is a persistent Alert with a link and NO resubmit 
   }
 });
 
-test("#634: choosing a different document retires the conflict Alert", async () => {
+test("t634: choosing a different document retires the conflict Alert", async () => {
   const h = await renderComponent(
     App({ submit: async () => ({ kind: "source_conflict", entryId: null, documentId: null }) }),
   );
@@ -747,7 +753,7 @@ test("#634: choosing a different document retires the conflict Alert", async () 
   }
 });
 
-test("#634: a refusal NAMING the evidence array focuses the evidence control", async () => {
+test("t634: a refusal NAMING the evidence array focuses the evidence control", async () => {
   const h = await renderComponent(
     App({ submit: async () => ({ kind: "invalid_basis", field: "sourceRefs[1]", reason: "invalid_source_ref" }) }),
   );
@@ -763,7 +769,7 @@ test("#634: a refusal NAMING the evidence array focuses the evidence control", a
   }
 });
 
-test("#634: a FAILED documents read degrades the form rather than blocking it", async () => {
+test("t634: a FAILED documents read degrades the form rather than blocking it", async () => {
   const sent: Submitted[] = [];
   const h = await renderComponent(
     App({

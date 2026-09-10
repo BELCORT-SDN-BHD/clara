@@ -218,7 +218,13 @@ function link(over: Partial<EntryLinkRow> & { entry_id: string }): EntryLinkRow 
   };
 }
 
-test("#634: buildEntryRows merges each entry's link row, and leaves it null when there is none", () => {
+// THE `t634` PREFIX IS NOT A TYPO. A string literal containing `#634` is a valid
+// three-digit CSS hex colour, and this app's `no-restricted-syntax` raw-colour
+// rule (owner ruling Q4) reds every one of them. Ticket ids stay in COMMENTS,
+// where the rule does not look; test NAMES carry the bare number.
+
+
+test("t634: buildEntryRows merges each entry's link row, and leaves it null when there is none", () => {
   const rows = buildEntryRows(
     [entry({ id: "e1" }), entry({ id: "e2" })],
     [],
@@ -232,12 +238,12 @@ test("#634: buildEntryRows merges each entry's link row, and leaves it null when
   assert.equal(byId.e2!.link, null);
 });
 
-test("#634: buildEntryRows still works with no links at all (the read failed, the table stands)", () => {
+test("t634: buildEntryRows still works with no links at all (the read failed, the table stands)", () => {
   const rows = buildEntryRows([entry({ id: "e1" })], []);
   assert.equal(rows[0]!.link, null);
 });
 
-test("#634: the has-a-source filter keys on the LINK, not on the entry's own document_id alone", () => {
+test("t634: the has-a-source filter keys on the LINK, not on the entry's own document_id alone", () => {
   const rows = buildEntryRows(
     [entry({ id: "e1" }), entry({ id: "e2" }), entry({ id: "e3", document_id: "d3" })],
     [],
@@ -256,7 +262,7 @@ test("#634: the has-a-source filter keys on the LINK, not on the entry's own doc
   assert.equal(filterEntryRows(rows, NO_FILTERS).length, 3);
 });
 
-test("#634: the basis-origin filter separates what a person typed from what Clara interpreted", () => {
+test("t634: the basis-origin filter separates what a person typed from what Clara interpreted", () => {
   const rows = buildEntryRows(
     [entry({ id: "e1" }), entry({ id: "e2" }), entry({ id: "e3" })],
     [],
@@ -278,7 +284,7 @@ test("#634: the basis-origin filter separates what a person typed from what Clar
   assert.equal(filterEntryRows(rows, { ...NO_FILTERS, basis: "user_direct" }).some((r) => r.entry.id === "e3"), false);
 });
 
-test("#634: the memo search is a case-insensitive substring over the memo the row shows", () => {
+test("t634: the memo search is a case-insensitive substring over the memo the row shows", () => {
   const rows = buildEntryRows(
     [entry({ id: "e1", memo: "Office RENT paid from Maybank" }), entry({ id: "e2", memo: "Bank charges" }), entry({ id: "e3", memo: null })],
     [],
@@ -291,7 +297,7 @@ test("#634: the memo search is a case-insensitive substring over the memo the ro
   assert.equal(filterEntryRows(rows, { ...NO_FILTERS, memo: "   " }).length, 3);
 });
 
-test("#634: the ENTRY filter is the one a refusal's link lands on — exactly that row, nothing else", () => {
+test("t634: the ENTRY filter is the one a refusal's link lands on — exactly that row, nothing else", () => {
   const rows = buildEntryRows([entry({ id: "e1" }), entry({ id: "e2" })], []);
   assert.deepEqual(filterEntryRows(rows, { ...NO_FILTERS, entry: "e2" }).map((r) => r.entry.id), ["e2"]);
   // An id that names nothing in this read shows NOTHING rather than everything: the reader was
@@ -299,7 +305,7 @@ test("#634: the ENTRY filter is the one a refusal's link lands on — exactly th
   assert.deepEqual(filterEntryRows(rows, { ...NO_FILTERS, entry: "nope" }), []);
 });
 
-test("#634: the new filters count as reader edits, so Clear appears and returns to the tab's own state", () => {
+test("t634: the new filters count as reader edits, so Clear appears and returns to the tab's own state", () => {
   const initial: EntriesFilters = { ...NO_FILTERS, status: "approved" };
   assert.equal(filtersActive(initial, initial), false);
   for (const patch of [{ source: "with" as const }, { basis: "user_direct" }, { memo: "rent" }, { entry: "e1" }]) {

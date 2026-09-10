@@ -289,7 +289,13 @@ test("totalsOf ignores a non-integer rather than adding NaN into a money total",
 // #634 — THE EVIDENCE CONTROL joins the one wire→control vocabulary.
 // ===========================================================================================
 
-test("#634: the evidence array's wire path maps onto the evidence control, in BOTH spellings", () => {
+// THE `t634` PREFIX IS NOT A TYPO. A string literal containing `#634` is a valid
+// three-digit CSS hex colour, and this app's `no-restricted-syntax` raw-colour
+// rule (owner ruling Q4) reds every one of them. Ticket ids stay in COMMENTS,
+// where the rule does not look; test NAMES carry the bare number.
+
+
+test("t634: the evidence array's wire path maps onto the evidence control, in BOTH spellings", () => {
   // The route re-spells `source_refs[N]` as `sourceRefs[N]` before it answers (that is its ONE
   // translation, `toWireField`), so the browser normally sees the camelCase form — but a refusal
   // that ever arrived in the database's own spelling must still land on the same control rather
@@ -302,7 +308,7 @@ test("#634: the evidence array's wire path maps onto the evidence control, in BO
   assert.equal(fieldForServerPath("source_refs[1]"), "evidence");
 });
 
-test("#634: an unknown path is still null rather than a guessed control", () => {
+test("t634: an unknown path is still null rather than a guessed control", () => {
   // `sourceRefs[0]` is not a path this vocabulary produces (SQL counts from one), and a prefix
   // match would be exactly the "focus whichever control shares a prefix" failure the module's
   // own header refuses.

@@ -130,7 +130,13 @@ async function pressAttach(h: Awaited<ReturnType<typeof renderComponent>>): Prom
   await drain(h);
 }
 
-test("#634: confirm sends the chosen document with the entry's revision and ONE op key, then re-reads", async () => {
+// THE `t634` PREFIX IS NOT A TYPO. A string literal containing `#634` is a valid
+// three-digit CSS hex colour, and this app's `no-restricted-syntax` raw-colour
+// rule (owner ruling Q4) reds every one of them. Ticket ids stay in COMMENTS,
+// where the rule does not look; test NAMES carry the bare number.
+
+
+test("t634: confirm sends the chosen document with the entry's revision and ONE op key, then re-reads", async () => {
   const attempts: Attempt[] = [];
   let reReads = 0;
   const h = await renderComponent(
@@ -164,7 +170,7 @@ test("#634: confirm sends the chosen document with the entry's revision and ONE 
   }
 });
 
-test("#634: a SOURCE CONFLICT stays open, keeps the choice, and links to the entry it found", async () => {
+test("t634: a SOURCE CONFLICT stays open, keeps the choice, and links to the entry it found", async () => {
   let reReads = 0;
   const h = await renderComponent(
     App({
@@ -198,7 +204,7 @@ test("#634: a SOURCE CONFLICT stays open, keeps the choice, and links to the ent
   }
 });
 
-test("#634: a STALE revision renders inline and does not close the dialog", async () => {
+test("t634: a STALE revision renders inline and does not close the dialog", async () => {
   const h = await renderComponent(App({ attach: async () => ({ kind: "stale" }) }));
   try {
     await openDialog(h);
@@ -212,7 +218,7 @@ test("#634: a STALE revision renders inline and does not close the dialog", asyn
   }
 });
 
-test("#634: the SAME document already attached reads as the state it is, not as a failure", async () => {
+test("t634: the SAME document already attached reads as the state it is, not as a failure", async () => {
   const h = await renderComponent(
     App({
       attach: async (input) => ({ kind: "attached", entryId: ENTRY, documentId: input.documentId, linkId: "l1", workId: null, alreadyAttached: true }),
@@ -231,7 +237,7 @@ test("#634: the SAME document already attached reads as the state it is, not as 
   }
 });
 
-test("#634: a client with NO filed documents says so instead of offering an empty chooser", async () => {
+test("t634: a client with NO filed documents says so instead of offering an empty chooser", async () => {
   const h = await renderComponent(App({ loadDocuments: async () => [] }));
   try {
     await openDialog(h);

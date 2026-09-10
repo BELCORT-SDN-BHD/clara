@@ -283,7 +283,13 @@ test("B3: the late door refuses a STALE view of the entry and says so inline, ke
   await expect(page.getByText("No document", { exact: true }).first()).toBeVisible();
 });
 
-test("#634 renders at 320 px, at 200 % zoom, by keyboard, and with reduced motion", async ({ page }) => {
+// THE `t634` PREFIX IS NOT A TYPO. A string literal containing `#634` is a valid
+// three-digit CSS hex colour, and this app's `no-restricted-syntax` raw-colour
+// rule (owner ruling Q4) reds every one of them. Ticket ids stay in COMMENTS,
+// where the rule does not look; test NAMES carry the bare number.
+
+
+test("t634 renders at 320 px, at 200 % zoom, by keyboard, and with reduced motion", async ({ page }) => {
   await page.emulateMedia({ reducedMotion: "reduce" });
   await page.setViewportSize({ width: 320, height: 780 });
   await page.goto(COMPOSER_URL);
