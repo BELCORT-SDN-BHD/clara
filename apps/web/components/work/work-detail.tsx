@@ -34,17 +34,29 @@ import { useTranslations } from "next-intl";
 import { PostedLinesTable, WorkBasisTable } from "@/components/work/work-tables";
 import { StateBanner } from "@/components/common/state";
 import { SectionHeader } from "@/components/common/section-header";
+import { MemberName } from "@/components/common/member-name";
+import { useFirmScope } from "@/components/firm-scope-provider";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { businessDateTime } from "@/lib/business-date";
 import { isUuidShape } from "@/lib/client-id";
-import { WORK_NEEDS_YOU_HREF, journalComposerHref } from "@/lib/navigation/tree";
+import { readClarifyQuestion } from "@/lib/journals/governance-doors";
+import { useMemberNames, type MemberNameResolver } from "@/lib/members/use-member-names";
+import { WORK_NEEDS_YOU_HREF, clientBase, journalComposerHref } from "@/lib/navigation/tree";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
 import { retryWork, type RetryWorkResult } from "@/lib/work/api";
 import { accountNames, type WorkDetailData } from "@/lib/work/reads";
 import { useWorkDetail } from "@/lib/work/use-work-detail";
+import {
+  defaultDraftStorage,
+  draftFromBasis,
+  writeJournalDraft,
+  type DraftStorage,
+  type JournalDraftScope,
+} from "@/lib/work/journal-draft";
 import { isRetryableWorkStatus, type AccountingWorkRow } from "@/lib/work/types";
+import type { AgentInterruptionRow } from "@/lib/journals/types";
 import type { SessionTokenAccessor } from "@/lib/session";
 
 export const WORK_HEADING_ID = "work-detail-heading";
@@ -80,12 +92,23 @@ export function WorkStatusBadge({ status }: { status: string }) {
 }
 
 export function WorkDetail({ clientId, workId }: { clientId: string; workId: string }) {
-  return <WorkDetailView clientId={clientId} workId={workId} />;
+  // THE SCOPE IS READ HERE AND NOWHERE BELOW, for the reason `JournalComposer`
+  // states about `useRouter`: `useFirmScope` THROWS outside the firm layout's
+  // provider, so a View that called it could not be mounted by a node cell at
+  // all. The wrapper owns the context read; the View takes a plain value.
+  const scope = useFirmScope();
+  return (
+    <WorkDetailView
+      clientId={clientId}
+      workId={workId}
+      scope={{ firmId: scope.firm_id, userId: scope.user_id }}
+    />
+  );
 }
 
 /** Exported with its seams open for the cells: `load` replaces the RLS reader,
- *  `now` the staleness clock, `retry` the runtime write. Production passes none
- *  of them. */
+ *  `now` the staleness clock, `retry` the runtime write, `storage` the
+ *  composer's draft store. Production passes none of them. */
 export function WorkDetailView({
   clientId,
   workId,
@@ -93,6 +116,8 @@ export function WorkDetailView({
   now,
   retry = retryWork,
   session = sessionTokenAccessor,
+  scope,
+  storage,
 }: {
   clientId: string;
   workId: string;
@@ -100,6 +125,12 @@ export function WorkDetailView({
   now?: () => number;
   retry?: typeof retryWork;
   session?: SessionTokenAccessor;
+  /** WHO is reading, for the composer draft "Edit as a new draft" seeds. Both
+   *  halves are optional and a MISSING half means no seeding at all — a draft
+   *  filed under a guessed scope is worse than a draft that was never saved
+   *  (lib/work/journal-draft.ts's own rule). */
+  scope?: { firmId?: string; userId?: string };
+  storage?: DraftStorage | null;
 }) {
   const t = useTranslations("WorkDetail");
   // A MALFORMED WORK ID IS A NOT-FOUND QUESTION, NOT A DATABASE ONE — the same
@@ -115,6 +146,10 @@ export function WorkDetailView({
   });
   const [retryState, setRetryState] = useState<RetryWorkResult | null>(null);
   const [retrying, setRetrying] = useState(false);
+  // ONE ROSTER READ PER MOUNT, held at the page level exactly as
+  // lib/members/use-member-names.ts asks: this page names one actor, and a
+  // failed read falls through to the shortened raw id rather than to a guess.
+  const memberNames = useMemberNames(session);
 
   // FOCUS THE HEADING ON ARRIVAL (§4). Once, on mount — a background poll that
   // changes the status must never steal focus from whatever the human is
@@ -181,10 +216,39 @@ export function WorkDetailView({
     );
   }
 
-  const { work, task, entry, lines, receipts, accounts } = state.data;
+  const { work, task, entry, lines, receipts, accounts, interruption } = state.data;
   const names = accountNames(accounts);
   const committed = receipts.find((r) => r.outcome === "committed") ?? null;
   const canRetry = isRetryableWorkStatus(work.status);
+
+  // THE DRAFT SCOPE, or null — the same three-part key the composer files under,
+  // built from the same two context fields. Null when either is missing, which
+  // is what makes "Edit as a new draft" fall back to an ordinary link to an
+  // empty form rather than promising a seeding it cannot deliver.
+  const draftScope: JournalDraftScope | null =
+    scope?.firmId && scope?.userId ? { userId: scope.userId, firmId: scope.firmId, clientId } : null;
+  const store = storage === undefined ? defaultDraftStorage() : storage;
+
+  /**
+   * SEEDS THE COMPOSER FROM THIS WORK'S OWN BASIS, and it is a WRITE to another
+   * surface's persistence rather than a navigation trick — which is why it is
+   * here, next to the row it copies, rather than in the composer, which would
+   * otherwise have to learn how to read a Work.
+   *
+   * IT MINTS A NEW `intentKey` (`draftFromBasis` does, and its header says why):
+   * running the SAME figures again is `/retry` on this Work, and editing them
+   * into different ones is a DIFFERENT economic intent. Carrying the old key
+   * would make the database answer `intent_payload_conflict` to a human who did
+   * exactly what the link told them to.
+   *
+   * IT RUNS BEFORE THE NAVIGATION, on the click, because the composer restores
+   * its draft in a lazy `useState` initialiser — i.e. before its first paint. A
+   * write that happened after the route change would arrive too late to be read.
+   */
+  const seedDraft = () => {
+    if (draftScope === null || work.basis === null) return;
+    writeJournalDraft(draftScope, draftFromBasis(work.basis), store);
+  };
 
   const runRetry = async () => {
     if (retrying) return;
@@ -201,7 +265,7 @@ export function WorkDetailView({
 
   return (
     <div className="flex flex-col gap-6">
-      <WorkFacts work={work} taskStatus={task?.status ?? null} />
+      <WorkFacts work={work} taskStatus={task?.status ?? null} members={memberNames} />
 
       {/* DELAYED IS ABOUT THE READ, not about the Work. It says the page has not
           managed a successful read since a named time, which is a fact about the
@@ -244,6 +308,8 @@ export function WorkDetailView({
         retrying={retrying}
         retryState={retryState}
         onRetry={() => void runRetry()}
+        interruption={interruption}
+        onEditAsNewDraft={seedDraft}
       />
 
       <section className="flex flex-col gap-2">
@@ -292,12 +358,24 @@ export function WorkDetailView({
 
 /** The identity block: what this Work IS, who asked for it, on what basis, and
  *  which frozen bundle ran it. Every value is a column; nothing is derived. */
-function WorkFacts({ work, taskStatus }: { work: AccountingWorkRow; taskStatus: string | null }) {
+function WorkFacts({
+  work,
+  taskStatus,
+  members,
+}: {
+  work: AccountingWorkRow;
+  taskStatus: string | null;
+  members: MemberNameResolver;
+}) {
   const t = useTranslations("WorkDetail");
   const documentless = Array.isArray(work.source_refs) && work.source_refs.length === 0;
   const chatRef = (work.source_refs ?? []).find((ref) => ref.kind === "chat_task") ?? null;
   const bundleId = work.bundle?.id ?? null;
   const bundleDigest = work.bundle?.digest ?? null;
+  // `basis_origin` IS A CHECKED LOOKUP, never an interpolated `t()` key: 0178's
+  // CHECK admits two values today and later purposes may widen it, and a value
+  // outside the pair renders VERBATIM rather than crashing on a missing message.
+  const knownOrigin = work.basis_origin === "user_direct" || work.basis_origin === "clara_interpreted";
 
   return (
     <section className="flex flex-col gap-3">
@@ -329,6 +407,46 @@ function WorkFacts({ work, taskStatus }: { work: AccountingWorkRow; taskStatus: 
               ? t("fromClaraConversation")
               : t("sourceOther")}
         </dd>
+        {/* WHERE THE FIGURES CAME FROM — a column of the row, and a different
+            question from "was there a document". `source_refs` says what this
+            Work points at; `basis_origin` says who composed the numbers, and the
+            two can disagree (a documentless chat-interpreted basis carries a
+            chat ref and no document at all). A professional reading a posted
+            entry needs to know whether a human typed these cents or a model
+            interpreted them from a sentence, so the row is rendered rather than
+            left in the database. */}
+        <dt className="text-muted-foreground">{t("basisOriginLabel")}</dt>
+        <dd className="text-foreground">
+          {!knownOrigin ? (
+            work.basis_origin
+          ) : work.basis_origin === "user_direct" ? (
+            // NAMED, not role-shaped: `initiator_role` is already its own row
+            // above and is an authority SNAPSHOT. This says WHO, through the one
+            // resolver the estate uses for a user id — which falls back to the
+            // shortened raw id rather than guessing a name.
+            <span className="inline-flex flex-wrap items-baseline gap-1">
+              <span>{t("basisOrigin.userDirect")}</span>
+              <MemberName userId={work.initiator} resolver={members} showRole={false} />
+            </span>
+          ) : (
+            <span className="inline-flex flex-wrap items-baseline gap-2">
+              <span>{t("basisOrigin.claraInterpreted")}</span>
+              {/* THE CONVERSATION, when the row names one. There is no per-thread
+                  route in this product — the rail resolves this client's own
+                  thread on the client workspace — so the link goes to the
+                  workspace that opens it, which is a REAL in-app path. A
+                  `/threads/<id>` address would be invented. */}
+              {chatRef === null ? null : (
+                <Link
+                  href={clientBase(encodeURIComponent(work.client_id))}
+                  className="text-sm font-medium text-primary underline underline-offset-2"
+                >
+                  {t("basisOrigin.openConversation")}
+                </Link>
+              )}
+            </span>
+          )}
+        </dd>
         {bundleId === null ? null : (
           <>
             <dt className="text-muted-foreground">{t("runVersion")}</dt>
@@ -350,6 +468,8 @@ function WorkOutcome({
   retrying,
   retryState,
   onRetry,
+  interruption,
+  onEditAsNewDraft,
 }: {
   work: AccountingWorkRow;
   clientId: string;
@@ -357,6 +477,10 @@ function WorkOutcome({
   retrying: boolean;
   retryState: RetryWorkResult | null;
   onRetry: () => void;
+  /** The row this Work is parked on, when it is parked and visible. */
+  interruption: AgentInterruptionRow | null;
+  /** Writes the composer's draft from this basis, before the link navigates. */
+  onEditAsNewDraft: () => void;
 }) {
   const t = useTranslations("WorkDetail");
 
@@ -366,15 +490,21 @@ function WorkOutcome({
     </Button>
   ) : undefined;
 
-  // "EDIT AS NEW DRAFT" IS A LINK, NOT A WRITE — it opens the composer, which
-  // mints a NEW intent key for figures that are about to change. Seeding it from
-  // this basis is #634's own follow-up (the composer restores a draft from
-  // storage, and writing another surface's draft from here would put one
-  // component's fingers in another's persistence); today the link takes the
-  // human to the form with their own draft rules intact.
+  // "EDIT AS A NEW DRAFT" IS STILL A LINK, and it now SEEDS the form it opens.
+  //
+  // A LINK RATHER THAN A BUTTON because the destination is a page: the address
+  // bar, the middle click and the back button all have to keep working, and a
+  // `router.push` behind a button takes all three away. The seeding rides the
+  // click handler, which fires before the navigation — see `seedDraft` at the
+  // call site for why the ORDER is the whole mechanism.
+  //
+  // WHAT IT MEANS WHEN THERE IS NO SCOPE OR NO BASIS: the handler writes nothing
+  // and the human lands on an empty composer, which is the behaviour this control
+  // had before it could seed at all. Never a half-copied basis.
   const editLink = (
     <Link
       href={journalComposerHref(clientId)}
+      onClick={onEditAsNewDraft}
       className="text-sm font-medium text-primary underline underline-offset-2"
     >
       {t("editAsNewDraft")}
@@ -438,6 +568,20 @@ function WorkOutcome({
   }
 
   if (work.status === "awaiting_input") {
+    // THE QUESTION ITSELF, not a sentence about there being one.
+    //
+    // "This work asked a question and is parked until someone answers it" tells
+    // a human that something is waiting and then makes them go somewhere else to
+    // find out WHAT — on a page that has already read the row. The question is
+    // one RLS read away (lib/work/reads.ts), so it is rendered here, above the
+    // link to the inbox that can answer it, and the link stays because answering
+    // is #629's surface rather than this one's.
+    //
+    // NULL IS STILL A STATE. A payload neither `question` nor `text` parses, a
+    // row this caller cannot see, a second pending row — all three fall back to
+    // the original sentence rather than to a placeholder over a shape this page
+    // cannot prove (lib/journals/governance-doors.ts's `readClarifyQuestion`).
+    const clarify = interruption === null ? null : readClarifyQuestion(interruption.question);
     return (
       <StateBanner
         tone="warning"
@@ -448,7 +592,19 @@ function WorkOutcome({
           </Link>
         }
       >
-        {t("awaiting.body")}
+        {clarify === null ? (
+          t("awaiting.body")
+        ) : (
+          <span className="flex flex-col gap-1">
+            {/* The RUN'S OWN WORDS, verbatim — the same posture the refusal arm
+                takes about the database's. */}
+            <span className="font-medium text-foreground">{clarify.question}</span>
+            {clarify.context === null ? null : (
+              <span className="text-xs text-muted-foreground">{clarify.context}</span>
+            )}
+            <span className="text-xs text-muted-foreground">{t("awaiting.answerElsewhere")}</span>
+          </span>
+        )}
       </StateBanner>
     );
   }

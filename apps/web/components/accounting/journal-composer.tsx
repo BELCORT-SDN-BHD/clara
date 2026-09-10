@@ -53,8 +53,11 @@ import { canOpenClientLeaf, workDetailHref, type NavigationScope } from "@/lib/n
 import { sessionTokenAccessor } from "@/lib/session-accessor";
 import { submitJournalWork, type SubmitJournalWorkResult } from "@/lib/work/api";
 import {
+  MEMO_MAX_CHARS,
+  charsLeft,
   fieldForServerPath,
   firstInvalidField,
+  showCharsLeft,
   toJournalBasisWire,
   validateJournalDraft,
   type JournalDraftLine,
@@ -173,6 +176,7 @@ export function JournalComposerView({
     () => (showIssues ? validateJournalDraft(draft, knownCodes) : []),
     [showIssues, draft, knownCodes],
   );
+  const memoIssue = issues.find((i) => i.field === "memo");
 
   // PERSIST ON EVERY EDIT. Not debounced: the payload is small, the storage is
   // synchronous, and a debounce is exactly how a draft goes missing when a tab
@@ -202,9 +206,34 @@ export function JournalComposerView({
     if (node === null) fields.current.delete(field);
     else fields.current.set(field, node);
   }, []);
+
+  /**
+   * FOCUS HAPPENS AFTER THE RENDER THAT ENABLES THE CONTROL, and that ordering
+   * is the whole reason this is an effect rather than a direct call.
+   *
+   * MEASURED, in a real browser (this ticket's own walk): while a submit is in
+   * flight every control on this form carries `disabled`, and `.focus()` on a
+   * DISABLED element is a silent no-op. The 400 arm below sets the phase to
+   * `rejected` — which is what re-enables them — and then asked for focus in the
+   * same tick, before React had re-rendered. So the server named a field, the
+   * message appeared beside it, and focus stayed on the Submit button. The unit
+   * harness could not see it: its stub `focus()` has no notion of `disabled`.
+   *
+   * A TICK, NOT THE FIELD, IS THE STATE. Two identical refusals in a row name
+   * the same control, and a state that only held the field id would not change —
+   * so the effect would not re-run and the second refusal would move nothing.
+   */
+  const focusTarget = useRef<JournalFieldId | null>(null);
+  const [focusTick, setFocusTick] = useState(0);
   const focusField = (field: JournalFieldId) => {
-    fields.current.get(field)?.focus();
+    focusTarget.current = field;
+    setFocusTick((tick) => tick + 1);
   };
+  useEffect(() => {
+    if (focusTick === 0) return; // the mount, which must not steal focus
+    const field = focusTarget.current;
+    if (field !== null) fields.current.get(field)?.focus();
+  }, [focusTick]);
 
   /** Applies ONE runtime answer. Split out because the lost-response arm calls
    *  it for a second attempt, and two copies of this mapping would be two places
@@ -312,18 +341,31 @@ export function JournalComposerView({
 
       <div className="flex flex-col gap-1.5">
         <Label htmlFor={fieldElementId("memo")}>{t("memo")}</Label>
+        {/* `maxLength` IS THE FROZEN TOOL SCHEMA'S CAP (lib/work/journal-basis.ts
+            states where both caps come from), restated at the control so the
+            browser stops rather than letting a preparer write four thousand and
+            one characters the runtime will refuse by name. */}
         <Textarea
           id={fieldElementId("memo")}
           ref={(node) => registerField("memo", node)}
           rows={2}
           value={memo}
           disabled={busy}
-          aria-invalid={issues.some((i) => i.field === "memo") ? true : undefined}
-          aria-describedby={`${fieldElementId("memo")}-error`}
+          maxLength={MEMO_MAX_CHARS}
+          aria-invalid={memoIssue === undefined ? undefined : true}
+          aria-describedby={`${fieldElementId("memo")}-error ${fieldElementId("memo")}-left`}
           onChange={(e) => setMemo(e.target.value)}
         />
+        {/* NEAR THE CAP ONLY, and never a live region — see the same treatment on
+            a line's narration for why. */}
+        <p id={`${fieldElementId("memo")}-left`} className="text-xs text-muted-foreground">
+          {showCharsLeft(memo, MEMO_MAX_CHARS) ? t("charactersLeft", { count: charsLeft(memo, MEMO_MAX_CHARS) }) : ""}
+        </p>
         <p id={`${fieldElementId("memo")}-error`} className="text-xs text-error" role="alert">
-          {issues.find((i) => i.field === "memo") ? t("issues.memoRequired") : ""}
+          {/* The ISSUE'S OWN code, not a fixed sentence: "enter a memo" and "this
+              memo is too long" are different instructions, and the control has
+              two rules now. */}
+          {memoIssue === undefined ? "" : t(`issues.${memoIssue.code}`)}
         </p>
       </div>
 

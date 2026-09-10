@@ -901,6 +901,7 @@
     "linesTableLabel": "Journal entry lines",
     "presentationSumLabel": "Typed totals",
     "differenceLabel": "Difference",
+    "charactersLeft": "{count} characters left",
     "submit": "Submit",
     "submitting": "Submitting…",
     "checking": "Checking whether this was already accepted…",
@@ -912,9 +913,11 @@
       "postingDateRequired": "Enter the posting date.",
       "postingDateInvalid": "Enter a real calendar date, as YYYY-MM-DD.",
       "memoRequired": "Enter a memo describing this entry.",
+      "memoTooLong": "This memo is longer than 4,000 characters. Shorten it before submitting.",
       "tooFewLines": "A journal entry needs at least two lines.",
       "accountRequired": "Choose an account for this line.",
       "accountUnknown": "This client's chart has no active account with that code.",
+      "descriptionTooLong": "This description is longer than 2,000 characters. Shorten it before submitting.",
       "amountRequired": "Enter a debit or a credit for this line.",
       "amountBothSides": "A line carries a debit or a credit, never both.",
       "amountNotExact": "Enter an exact amount in ringgit and sen.",
@@ -962,6 +965,12 @@
     "noSourceDocument": "No source document — user-supplied basis",
     "fromClaraConversation": "From a Clara conversation",
     "sourceOther": "Recorded against a source this page does not name",
+    "basisOriginLabel": "Figures from",
+    "basisOrigin": {
+      "userDirect": "Entered by",
+      "claraInterpreted": "Interpreted by Clara from a conversation",
+      "openConversation": "Open the conversation"
+    },
     "basisHeading": "What was asked for",
     "basisNote": "The basis this work was admitted with. It never changes, so a refusal can be read against exactly what was submitted.",
     "basisUnreadable": "The basis of this work could not be read.",
@@ -1033,6 +1042,7 @@
     "awaiting": {
       "title": "Waiting for an answer",
       "body": "This work asked a question and is parked until someone answers it.",
+      "answerElsewhere": "This work stays parked until the question is answered.",
       "link": "Open what needs you"
     },
     "refused": {

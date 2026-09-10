@@ -20,6 +20,26 @@
 // composer's lost-response arm is written against, so faking it faithfully is
 // what makes the lost-response cell mean anything at all.
 //
+// EVERY REFUSAL BODY BELOW IS THE REAL ONE, TRANSCRIBED FROM THE ROUTE — never a
+// shape invented to make a cell go green. Two of them carry machine-readable
+// slots the client acts on, so getting either wrong would make a walk prove the
+// opposite of the product:
+//
+//   400 `{ "error": "invalid_basis", "field", "reason" }` — `field` is the
+//   DATABASE'S spelling (snake_case, no `basis.` prefix) and its line index is
+//   ONE-BASED, because the DB generates the path from `with ordinality`
+//   (packages/runtime/src/workRoutes.ts's WIRE FIELD PATHS note; the mapper is
+//   apps/web/lib/work/journal-basis.ts's `fieldForServerPath`). A mock that made
+//   up a field name would have let a zero-based mapper pass a browser walk while
+//   focusing the wrong money control in production. This lane does not GUESS
+//   which basis to refuse — nothing a composer can build reaches the route
+//   invalid, by construction — so the refusal is INJECTED through the control
+//   endpoint, exactly as the run's own state transitions are.
+//
+//   409 `{ "error": "intent_payload_conflict", "work_id" }` — the id of the Work
+//   that intent key ALREADY names, which is what lets the composer's conflict
+//   Alert offer a route to it instead of an apology.
+//
 // EVERY HANDLER IS SCOPED TO THIS LANE'S OWN CLIENT, and each one says how —
 // `e2e-fixture-ownership.test.ts` exists because three lanes learned the hard way
 // that a handler claiming a SHARED endpoint replaces everyone else's fixture.
@@ -36,6 +56,8 @@
 // scoped the same way everything else here is — they resolve only ids this module
 // minted, and return false otherwise — but that is a property a reader has to
 // check in this file, not one the gate measures.
+
+import { createHash } from "node:crypto";
 
 /** The shared subject and firm `serve-built.mjs` signs every walk in as. Re-typed
  *  rather than imported because that module starts an HTTPS server and a
@@ -54,6 +76,9 @@ export const JOURNAL_WORK = {
    *  durable record the chat card links to, so that cell proves the LINK rather
    *  than re-proving admission. */
   seededWorkId: "62309001-6230-4623-8623-623062309001",
+  /** The intent key the seeded Work already spent. A draft carrying it with
+   *  DIFFERENT figures is the conflict arm, and the 409 names that Work. */
+  seededIntentKey: "seeded-chat-intent",
   seededTaskId: "72309001-7230-4723-8723-723072309001",
   seededEntryId: "82309001-8230-4823-8823-823082309001",
   seededReceiptId: "92309001-9230-4923-8923-923092309001",
@@ -118,7 +143,23 @@ function seededBasis() {
 /** This lane's mutable fixture state. It lives for the server's lifetime, which
  *  is safe only because `playwright.config.ts` pins `workers: 1`; every spec that
  *  admits Work resets it first through the control endpoint below. */
-const state = { minted: 0, works: new Map(), tasks: new Map(), intents: new Map(), receipts: [], entries: new Map(), lines: new Map() };
+const state = {
+  minted: 0,
+  works: new Map(),
+  tasks: new Map(),
+  intents: new Map(),
+  receipts: [],
+  entries: new Map(),
+  lines: new Map(),
+  /** The ONE injected 400, armed by the control endpoint and spent by the next
+   *  admission — see this file's header for why a basis refusal has to be
+   *  injected rather than provoked. */
+  nextBasisRefusal: null,
+  /** `clara.agent_interruptions` rows, in the shape `clara.open_interruption`
+   *  writes them: one PENDING row per parked task, its `question` jsonb carrying
+   *  the runtime's own `{ type, question, context, framing }`. */
+  interruptions: [],
+};
 
 function pad(n) {
   return String(n).padStart(4, "0");
@@ -132,16 +173,24 @@ function seed() {
   state.entries.clear();
   state.lines.clear();
   state.receipts.length = 0;
+  state.nextBasisRefusal = null;
+  state.interruptions.length = 0;
 
   const work = newWorkRow({
     id: JOURNAL_WORK.seededWorkId,
     taskId: JOURNAL_WORK.seededTaskId,
-    intentKey: "seeded-chat-intent",
+    intentKey: JOURNAL_WORK.seededIntentKey,
     basis: seededBasis(),
     origin: "clara_interpreted",
     sourceRefs: [{ kind: "chat_task", task_id: JOURNAL_WORK.seededTaskId, session_id: JOURNAL_WORK.threadId }],
   });
   state.works.set(work.id, work);
+  // THE SEEDED WORK OWNS ITS INTENT KEY, exactly as an admitted row does in the
+  // database: `clara.accounting_work` carries `unique (firm_id, intent_key)`, so
+  // every Work that exists has already claimed one. Registering it is what lets
+  // a walk reach the conflict arm — submit DIFFERENT figures under a key the
+  // firm has already spent, and the door answers 409 naming the Work it points at.
+  state.intents.set(work.intent_key, work.id);
   state.tasks.set(JOURNAL_WORK.seededTaskId, { id: JOURNAL_WORK.seededTaskId, status: "queued", error_code: null, created_at: work.created_at, updated_at: work.created_at });
   commit(work, JOURNAL_WORK.seededEntryId, JOURNAL_WORK.seededReceiptId);
 }
@@ -171,11 +220,21 @@ function newWorkRow({ id, taskId, intentKey, basis, origin, sourceRefs }) {
   };
 }
 
-/** A STAND-IN for `clara._hash`-style canonical hashing. It is only ever compared
- *  against itself inside this process, and the walk never asserts its value — the
- *  real digest is the database's, computed from the basis it stores. */
+/**
+ * A STAND-IN for `clara._hash`-style canonical hashing. It is only ever compared
+ * against itself inside this process, and the walk never asserts its value — the
+ * real digest is the database's, computed from the basis it stores.
+ *
+ * IT HASHES THE WHOLE BASIS, and it did not always. The first version base64'd
+ * the JSON and kept the first 32 characters — which encode the first 24 BYTES,
+ * i.e. `{"posting_date":"2026-09`. Every basis this lane can build shares that
+ * prefix, so two DIFFERENT payloads under one intent key produced the SAME
+ * digest and the fixture answered `replayed: true` where the database would
+ * answer 409. A fixture that cannot tell two bases apart cannot model
+ * idempotency at all, and the conflict arm was unreachable through it.
+ */
 function digestOf(basis) {
-  return `sha256:${Buffer.from(JSON.stringify(basis)).toString("base64url").slice(0, 32)}`;
+  return `sha256:${createHash("sha256").update(JSON.stringify(basis)).digest("hex")}`;
 }
 
 /** The whole committed effect, in one place: one approved entry, its lines, one
@@ -271,6 +330,15 @@ export async function handleJournalWorkRuntime(request, response, url) {
     if (body?.clientId !== JOURNAL_WORK.clientId) return false;
     const intentKey = String(body?.intentKey ?? "");
     const basis = basisFromWire(body?.basis);
+    // THE INJECTED 400, BEFORE the idempotency arms — the route validates the
+    // basis before it reaches `clara.admit_journal_work`, so a refused shape
+    // never touches the intent key and nothing is admitted.
+    if (state.nextBasisRefusal !== null) {
+      const refusal = state.nextBasisRefusal;
+      state.nextBasisRefusal = null;
+      send(response, 400, { error: "invalid_basis", field: refusal.field, reason: refusal.reason });
+      return true;
+    }
     const known = state.intents.get(intentKey);
     if (known !== undefined) {
       const work = state.works.get(known);
@@ -360,6 +428,14 @@ function control(body) {
     seed();
     return { reset: true };
   }
+  // ARMS THE NEXT ADMISSION'S 400. The body it will send is taken VERBATIM from
+  // the caller, so a walk states the exact wire path it expects the composer to
+  // resolve — and a wrong `fieldForServerPath` reds the walk instead of quietly
+  // focusing another row.
+  if (body.op === "refuse_basis") {
+    state.nextBasisRefusal = { field: String(body.field ?? "basis"), reason: String(body.reason ?? "invalid_basis") };
+    return { armed: state.nextBasisRefusal };
+  }
   const work = state.works.get(String(body.workId ?? ""));
   if (work === undefined) return { error: "no_such_work" };
   const task = state.tasks.get(work.current_task_id);
@@ -370,6 +446,36 @@ function control(body) {
     work.status = "running";
     work.bundle = BUNDLE;
     if (task) { task.status = "running"; task.updated_at = at; }
+    return { status: work.status };
+  }
+  if (body.op === "ask") {
+    // THE PARK, as the estate performs it: `clara.open_interruption` writes ONE
+    // pending row against the TASK and flips the task to `awaiting_input`, and
+    // 0178's mirror trigger carries that onto the Work. Two records, one
+    // transition — modelled here in the same order.
+    work.status = "awaiting_input";
+    work.bundle = BUNDLE;
+    if (task) { task.status = "awaiting_input"; task.updated_at = at; }
+    state.interruptions.push({
+      id: `a230${pad(state.interruptions.length + 1)}-a230-4a23-8a23-a230a230a230`,
+      task_id: work.current_task_id,
+      kind: "clarify",
+      // `question`, NEVER `text` — the live writer is `openInterruptionStep`
+      // (H-32; apps/web/lib/journals/governance-doors.ts's own reader note).
+      question: {
+        type: "clarify",
+        question: String(body.question ?? "Which Maybank account did this rent leave from?"),
+        context: String(body.context ?? "This client has two accounts coded 1100."),
+        framing: "Answer in one line.",
+      },
+      answer: null,
+      status: "pending",
+      asked_of: SUBJECT,
+      answered_by: null,
+      expires_at: "2026-09-30T00:00:00.000Z",
+      created_at: at,
+      answered_at: null,
+    });
     return { status: work.status };
   }
   if (body.op === "complete") {
@@ -451,6 +557,23 @@ export async function handleJournalWorkSupabase(request, response, path, url, se
     const entryId = eqParam(url, "entry_id");
     if (entryId === null || !state.lines.has(entryId)) return false;
     sendJson(response, 200, state.lines.get(entryId), cors);
+    return true;
+  }
+
+  if (request.method === "GET" && path === "/rest/v1/agent_interruptions") {
+    // SCOPED TO A TASK THIS MODULE MINTED. The journals workbench reads the same
+    // relation FIRM-WIDE (`status=eq.pending` with no task filter) and the chat
+    // rail reads it per chat task; both carry a `task_id` this lane never minted
+    // — or none at all — so both fall through to the shared fixture.
+    const taskId = eqParam(url, "task_id");
+    if (taskId === null || !state.tasks.has(taskId)) return false;
+    const status = eqParam(url, "status");
+    sendJson(
+      response,
+      200,
+      state.interruptions.filter((row) => row.task_id === taskId && (status === null || row.status === status)),
+      cors,
+    );
     return true;
   }
 

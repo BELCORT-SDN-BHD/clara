@@ -23,6 +23,38 @@
 // `work_result` carry a client id and can build one; `work_status` does not
 // carry one at all (see ../../lib/parts/types.ts), so it offers none rather than
 // inventing a route from a value the wire does not have.
+//
+// TWO OF THESE THREE ARE LIVE-STREAM-ONLY, AND THE SHARED CONTRACT'S PHRASE
+// "PARTS PERSISTED THROUGH THE SETTLE" WAS NEVER IMPLEMENTED. Recorded here
+// rather than quietly carried, because it changes what a reader may conclude
+// from a card's ABSENCE:
+//
+//   `work_accepted` IS durable. It is minted by a CHAT turn (`chatTurn_v18`),
+//   so it lands in `clara.chat_messages.parts` and is replayed on every later
+//   read of that transcript — which is why the B6 conversation still shows it
+//   days later.
+//
+//   `work_status` and `work_result` are NOT. A `claraWork` run writes them to
+//   its own writable and they reach a reader through `GET /api/tasks/:id/stream`
+//   WHILE THE RUN IS EXECUTING. The stream route's terminal message replays
+//   `clara.chat_messages.parts`, and an `accounting_work` task has no chat
+//   message — it carries `session_id NULL` by construction — so a reader that
+//   attaches after the run ends gets replayed chunks and a `done`, never a
+//   durable parts array (packages/runtime/workflows/claraWork.v1.parts.ts states
+//   the same thing from the emitter's side).
+//
+// SO NOTHING IS LOST, AND THE REASON IS NOT THESE CARDS. The durable surface is
+// `clara.accounting_work` itself — `status` for what `work_status` narrated,
+// `result` (`entry_id`, `receipt_id`) for what `work_result` carried — and the
+// Work detail polls that row every 3 s while the Work is non-terminal
+// (../work/work-detail.tsx, ../../lib/work/use-work-detail.ts). THAT is the
+// mechanism the product relies on; these two cards are a live convenience over
+// it, and neither is ever the only record of an effect.
+//
+// THEY STAY ANYWAY, and not only for parity. The reader must declare every kind
+// the runtime can emit (`packages/runtime/scripts/check-parts-parity.mjs` is a CI
+// gate), and a declared kind with no render branch is a part that reaches a
+// transcript and paints nothing.
 
 import { useTranslations } from "next-intl";
 

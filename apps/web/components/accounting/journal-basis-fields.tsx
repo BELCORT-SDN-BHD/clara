@@ -33,7 +33,15 @@ import { Table, TableBody, TableCell, TableFooter, TableHead, TableHeader, Table
 import { NativeSelect } from "@/components/common/native-select";
 import { MoneyInput } from "@/components/common/money-input";
 import { Money } from "@/components/journals/money";
-import { totalsOf, type JournalDraftLine, type JournalFieldId, type JournalIssue } from "@/lib/work/journal-basis";
+import {
+  LINE_DESCRIPTION_MAX_CHARS,
+  charsLeft,
+  showCharsLeft,
+  totalsOf,
+  type JournalDraftLine,
+  type JournalFieldId,
+  type JournalIssue,
+} from "@/lib/work/journal-basis";
 import type { CoaAccountRow } from "@/lib/journals/types";
 
 /** The DOM id of one control — used for `aria-describedby`, and as the label a
@@ -149,11 +157,15 @@ export function JournalBasisFields({
         <TableBody>
           {lines.map((line, i) => {
             const accountField: JournalFieldId = `line.${i}.account`;
+            const descriptionField: JournalFieldId = `line.${i}.description`;
             const debitField: JournalFieldId = `line.${i}.debit`;
             const creditField: JournalFieldId = `line.${i}.credit`;
             const accountMessage = message(accountField);
+            const descriptionMessage = message(descriptionField);
             const debitMessage = message(debitField);
             const creditMessage = message(creditField);
+            const description = line.description ?? "";
+            const descriptionNearCap = showCharsLeft(description, LINE_DESCRIPTION_MAX_CHARS);
             return (
               <TableRow key={i}>
                 <TableCell>
@@ -178,12 +190,34 @@ export function JournalBasisFields({
                   <FieldError id={`${fieldElementId(accountField)}-error`}>{accountMessage}</FieldError>
                 </TableCell>
                 <TableCell>
+                  {/* `maxLength` IS THE FROZEN TOOL SCHEMA'S CAP, restated at the
+                      control so the browser simply stops rather than letting a
+                      preparer type two hundred characters the runtime will
+                      refuse. The submit-time rule still exists, because a
+                      RESTORED draft can carry a longer narration than this
+                      attribute would ever have allowed. */}
                   <Input
+                    id={fieldElementId(descriptionField)}
+                    ref={(node) => registerField(descriptionField, node)}
                     aria-label={t("descriptionForLine", { line: i + 1 })}
-                    value={line.description ?? ""}
+                    aria-invalid={descriptionMessage === null ? undefined : true}
+                    aria-describedby={`${fieldElementId(descriptionField)}-error ${fieldElementId(descriptionField)}-left`}
+                    maxLength={LINE_DESCRIPTION_MAX_CHARS}
+                    value={description}
                     disabled={disabled}
                     onChange={(e) => update(i, { description: e.target.value })}
                   />
+                  {/* THE COUNT APPEARS ONLY NEAR THE CAP (see `showCharsLeft`),
+                      and it is NOT a live region: a number that re-announced
+                      itself on every keystroke would talk over the field it is
+                      about. It is wired in through `aria-describedby` instead,
+                      so it is read WITH the control. */}
+                  <p id={`${fieldElementId(descriptionField)}-left`} className="text-xs text-muted-foreground">
+                    {descriptionNearCap
+                      ? t("charactersLeft", { count: charsLeft(description, LINE_DESCRIPTION_MAX_CHARS) })
+                      : ""}
+                  </p>
+                  <FieldError id={`${fieldElementId(descriptionField)}-error`}>{descriptionMessage}</FieldError>
                 </TableCell>
                 <TableCell>
                   {/* ONE SIDE PER LINE, enforced at the KEYSTROKE and not only at

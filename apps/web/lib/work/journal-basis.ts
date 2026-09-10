@@ -49,6 +49,7 @@ export type JournalFieldId =
   | "memo"
   | "lines"
   | `line.${number}.account`
+  | `line.${number}.description`
   | `line.${number}.debit`
   | `line.${number}.credit`;
 
@@ -56,15 +57,56 @@ export type JournalIssueCode =
   | "postingDateRequired"
   | "postingDateInvalid"
   | "memoRequired"
+  | "memoTooLong"
   | "tooFewLines"
   | "accountRequired"
   | "accountUnknown"
+  | "descriptionTooLong"
   | "amountRequired"
   | "amountBothSides"
   | "amountNotExact"
   | "unbalanced";
 
 export type JournalIssue = { field: JournalFieldId; code: JournalIssueCode };
+
+/**
+ * THE TWO LENGTH CAPS, AND WHERE THEY COME FROM.
+ *
+ * Neither is this form's preference. They are the FROZEN tool schema's
+ * (`packages/runtime/workflows/claraWork.v1.tools.ts`:
+ * `memo: z.string().trim().min(1).max(4000)`, `description: z.string().max(2000)`),
+ * restated at this door because a basis longer than them is ADMITTED-BUT-
+ * UNPOSTABLE: `POST /api/work/journal` and migration 0178 both refuse it with
+ * `max_length`, and a run that somehow received one could not echo it back
+ * through the tool that posts it.
+ *
+ * THE TWO ARE MEASURED DIFFERENTLY, and the asymmetry is the schema's, not a
+ * slip: zod TRIMS the memo before it caps it, and does NOT trim a line
+ * narration. So the memo cap is on the trimmed string and the description cap is
+ * on the raw one — exactly what `toDbBasis` measures at the runtime door
+ * (`packages/runtime/src/workRoutes.ts`'s `MEMO_MAX_CHARS` /
+ * `LINE_DESCRIPTION_MAX_CHARS`).
+ */
+export const MEMO_MAX_CHARS = 4000;
+export const LINE_DESCRIPTION_MAX_CHARS = 2000;
+
+/** How much of a cap must be spent before the count is worth showing — a TENTH
+ *  left. A counter that is on screen from the first keystroke is a number nobody
+ *  is reading; one that appears at 3,600 characters is telling a preparer
+ *  something they are about to need. */
+const NEAR_CAP_FRACTION = 10;
+
+/** Characters still available under a cap. Negative when the value is already
+ *  over it — which a `maxLength` control cannot produce, but a draft restored
+ *  from storage can. */
+export function charsLeft(value: string, cap: number): number {
+  return cap - value.length;
+}
+
+/** Whether the remaining-count belongs on screen for this value. */
+export function showCharsLeft(value: string, cap: number): boolean {
+  return charsLeft(value, cap) <= Math.ceil(cap / NEAR_CAP_FRACTION);
+}
 
 export type JournalTotals = {
   debitCents: number;
@@ -137,13 +179,23 @@ export function validateJournalDraft(
   if (draft.postingDate.trim() === "") issues.push({ field: "postingDate", code: "postingDateRequired" });
   else if (!isCalendarDate(draft.postingDate)) issues.push({ field: "postingDate", code: "postingDateInvalid" });
 
+  // BLANK BEFORE TOO LONG: they are different instructions and only one can be
+  // true, so the order is which one a human should read.
   if (draft.memo.trim() === "") issues.push({ field: "memo", code: "memoRequired" });
+  else if (draft.memo.trim().length > MEMO_MAX_CHARS) issues.push({ field: "memo", code: "memoTooLong" });
 
   draft.lines.forEach((line, i) => {
     const code = line.account_code.trim();
     if (code === "") issues.push({ field: `line.${i}.account`, code: "accountRequired" });
     else if (knownAccountCodes !== null && !knownAccountCodes.has(code)) {
       issues.push({ field: `line.${i}.account`, code: "accountUnknown" });
+    }
+
+    // BETWEEN THE ACCOUNT AND THE AMOUNTS, because that is where the control
+    // sits in the row — this list's order IS the focus order (see the header).
+    // The RAW length, per the cap's own note.
+    if ((line.description ?? "").length > LINE_DESCRIPTION_MAX_CHARS) {
+      issues.push({ field: `line.${i}.description`, code: "descriptionTooLong" });
     }
 
     const debit = line.debit_cents;
@@ -207,26 +259,70 @@ export function toJournalBasisWire(
 }
 
 /**
- * THE RUNTIME'S OWN `field` STRING, mapped onto a control this form renders.
+ * THE WIRE'S OWN `field` STRING, mapped onto a control this form renders.
  *
- * The 400 body carries the database's typed detail —
- * `{"reason":"invalid_basis","field":"lines[1].debit_cents"}` — and that is a
- * SERVER address, not a client one. Mapping it here rather than in the component
- * keeps the translation in one testable place, and returning `null` for anything
- * unrecognised is what stops a future field name from focusing the wrong control:
- * an unmapped refusal renders as a form-level message with the server's own text
- * beside it, which is honest, instead of pointing at whichever control happened
- * to match a prefix.
+ * ONE VOCABULARY CROSSES `POST /api/work/journal`'s 400, AND IT IS THE
+ * DATABASE'S. Whether the refusal came from `packages/runtime/src/workRoutes.ts`'s
+ * `toDbBasis` (the earlier, cheaper half) or from migration 0178's
+ * `clara._assert_journal_basis` (the authority), the body is the same shape with
+ * the same spellings:
+ *
+ *     400 { "error": "invalid_basis", "field": <path>, "reason": <constraint> }
+ *
+ * and `field` is snake_case, carries NO `basis.` prefix, and indexes lines from
+ * ONE:
+ *
+ *     basis | posting_date | memo | currency | lines | lines[N] |
+ *     lines[N].account_code | lines[N].debit_cents | lines[N].credit_cents |
+ *     lines[N].description
+ *
+ * IT IS 1-BASED BECAUSE SQL COUNTS FROM ONE. The DB generates the path from
+ * `with ordinality`, the route adds one to its JavaScript index in a single
+ * helper (`linePath`), and a zero-based consumer subtracts one AT ITS OWN EDGE.
+ * This function is that edge for the browser: `lines[1]` is the FIRST row of the
+ * form, `lines[2]` the second. Getting the offset wrong is not a cosmetic slip —
+ * it focuses the wrong money control and reds a field the server never named.
+ *
+ * NOTHING camelCase IS ACCEPTED ANY MORE. An earlier reading also matched
+ * `postingDate`, which is the WIRE REQUEST's spelling (`lib/work/api.ts`'s
+ * `JournalBasisWire`), never a spelling any refusal comes back in. Keeping it
+ * would have been a second vocabulary that no door speaks.
+ *
+ * `null` FOR ANYTHING ELSE, deliberately. `basis` and `currency` are real wire
+ * paths with no control of their own (this form has no currency field: every
+ * basis it can build is in ringgit), and an unrecognised path is a field name a
+ * future build added. All three render as a form-level message carrying the
+ * server's own `reason`, which is honest — instead of focusing whichever control
+ * happened to share a prefix.
  */
 export function fieldForServerPath(path: string | null): JournalFieldId | null {
   if (path === null) return null;
-  if (path === "posting_date" || path === "postingDate") return "postingDate";
+  if (path === "posting_date") return "postingDate";
   if (path === "memo") return "memo";
   if (path === "lines") return "lines";
-  const line = /^lines\[(\d+)\]\.(account_code|debit_cents|credit_cents)$/.exec(path);
+
+  const line = /^lines\[(\d+)\](?:\.(account_code|debit_cents|credit_cents|description))?$/.exec(path);
   if (!line) return null;
-  const index = Number(line[1]);
-  if (!Number.isSafeInteger(index) || index < 0) return null;
-  if (line[2] === "account_code") return `line.${index}.account`;
-  return line[2] === "debit_cents" ? `line.${index}.debit` : `line.${index}.credit`;
+  const ordinal = Number(line[1]);
+  // ONE-BASED ON THE WIRE: `lines[0]` is not a path this vocabulary produces, so
+  // it is refused rather than silently read as the first row.
+  if (!Number.isSafeInteger(ordinal) || ordinal < 1) return null;
+  const index = ordinal - 1;
+
+  switch (line[2]) {
+    case "account_code":
+      return `line.${index}.account`;
+    case "debit_cents":
+      return `line.${index}.debit`;
+    case "credit_cents":
+      return `line.${index}.credit`;
+    case "description":
+      return `line.${index}.description`;
+    default:
+      // A BARE `lines[N]` — the route raises it for `object` (a line that is not
+      // an object, which this form cannot build) and for `exactly_one_side`,
+      // which is a statement about the two AMOUNT controls. Debit is the first
+      // of them in the row, so it is the one focus lands on.
+      return `line.${index}.debit`;
+  }
 }

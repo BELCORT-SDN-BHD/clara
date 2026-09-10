@@ -22,7 +22,8 @@
 import { getRows } from "@/lib/read";
 import { isUuidShape } from "@/lib/client-id";
 import { listCoaAccounts } from "@/lib/journals/api";
-import type { CoaAccountRow, JournalEntryRow, JournalLineRow } from "@/lib/journals/types";
+import { getPendingInterruptionForTask } from "@/lib/journals/governance-doors";
+import type { AgentInterruptionRow, CoaAccountRow, JournalEntryRow, JournalLineRow } from "@/lib/journals/types";
 import type { SessionTokenAccessor } from "@/lib/session";
 import {
   ACCOUNTING_WORK_SELECT,
@@ -156,6 +157,34 @@ export type WorkDetailData = {
   entry: JournalEntryRow | null;
   lines: JournalLineRow[];
   receipts: OperationReceiptRow[];
+  /**
+   * THE QUESTION THIS WORK IS PARKED ON, when it is parked on one.
+   *
+   * Read ONLY while the Work says `awaiting_input`, and read by TASK — a run
+   * parks by calling `clara.open_interruption`, which writes one
+   * `clara.agent_interruptions` row against `accounting_work.current_task_id`
+   * and flips the task (and, through 0178's mirror trigger, the Work) to
+   * `awaiting_input`. `getPendingInterruptionForTask` is the estate's own exact
+   * addressing of that row: `(task_id, status='pending')` names AT MOST ONE, and
+   * its `limit=2` keeps a second pending row observable as ambiguity rather than
+   * truncating it into a false certainty (lib/journals/governance-doors.ts's own
+   * ADDRESSING LAW note).
+   *
+   * IT IS NOT THE NEEDS-YOU INBOX'S READ, and the difference is a relation
+   * rather than a preference. `/work?view=needs-you` renders
+   * `clara.list_review_queue`, whose `open_question` rows come from
+   * `clara.open_questions` — a different table, which a parked agent run does
+   * not write. The two surfaces answer the same human question from the two
+   * places the estate actually stores it; this page reads the one its own run
+   * parked on.
+   *
+   * `null` covers three cases this page deliberately does not distinguish: the
+   * Work is not parked, the row is not visible to this caller (the read is
+   * firm-scoped, floored at bookkeeper+), or there is more than one pending row.
+   * All three render the same honest "a question is waiting" banner with the
+   * link to the inbox that can answer it.
+   */
+  interruption: AgentInterruptionRow | null;
   /** The client's chart, for the basis table's account NAMES. A failed chart
    *  read degrades to an empty list — the basis still renders with its codes,
    *  which are the values the database actually holds. */
@@ -181,15 +210,25 @@ export async function loadWorkDetail(
   if (work === null) return null;
 
   const entryId = typeof work.result?.entry_id === "string" ? work.result.entry_id : null;
-  const [task, receipts, accounts, entry] = await Promise.all([
+  // THE PARKED QUESTION IS READ ONLY WHEN THE WORK SAYS IT IS PARKED. Every other
+  // status would spend a request on a relation that has nothing to say, on a page
+  // that re-reads itself every three seconds.
+  const parked = work.status === "awaiting_input" && work.current_task_id !== null;
+  const [task, receipts, accounts, entry, interruption] = await Promise.all([
     work.current_task_id === null ? Promise.resolve(null) : getWorkTask(work.current_task_id, opts),
     listOperationReceipts(clientId, workId, opts),
     listCoaAccounts(opts.session, clientId, opts.signal).catch(() => [] as CoaAccountRow[]),
     entryId === null ? Promise.resolve(null) : getEntry(clientId, entryId, opts),
+    // DEGRADES TO null RATHER THAN FAILING THE PAGE, the same posture the chart
+    // read above takes: a Work that cannot show its question is still a Work
+    // whose status, basis and receipt a human came here to read.
+    parked
+      ? getPendingInterruptionForTask(work.current_task_id!, opts).catch(() => null)
+      : Promise.resolve(null),
   ]);
   const lines = entry === null ? [] : await listEntryLines(entry.id, opts);
 
-  return { work, task, entry, lines, receipts, accounts };
+  return { work, task, entry, lines, receipts, accounts, interruption };
 }
 
 /** account_code → name, for the basis and entry tables. A code with no chart row

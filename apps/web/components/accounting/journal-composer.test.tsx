@@ -105,6 +105,23 @@ async function submitForm(h: Awaited<ReturnType<typeof renderComponent>>): Promi
   await h.settle();
 }
 
+/** The cap a control actually carries.
+ *
+ *  MEASURED, not assumed: react-dom writes this one through
+ *  `setAttribute("maxLength", …)` — the CAMEL-CASED name, not the HTML
+ *  attribute's lowercase `maxlength` and not a DOM property. Both other spellings
+ *  are read too, so this helper cannot go green on a control that lost the one
+ *  react actually writes. */
+function maxLengthOf(node: Stub): number | null {
+  const get = (node as { getAttribute?: (k: string) => string | null }).getAttribute;
+  for (const name of ["maxLength", "maxlength"]) {
+    const value = get?.call(node, name);
+    if (value !== null && value !== undefined) return Number(value);
+  }
+  const asProperty = (node as { maxLength?: unknown }).maxLength;
+  return typeof asProperty === "number" ? asProperty : null;
+}
+
 /** The `id` of whatever currently holds focus. A PROJECTION, never the node:
  *  `assert.equal(activeElement(), someNode)` serialises two live DOM stubs into
  *  its failure message and exhausts the heap before it can print one. */
@@ -298,16 +315,120 @@ test("503 is an inline alert with a retry — NOT a replay, because the server a
   }
 });
 
-test("400 focuses the control the SERVER named and says nothing was recorded", async () => {
+test("400 focuses the control the SERVER named — and the wire's line index is ONE-BASED", async () => {
+  // `lines[1]` IS THE FIRST ROW. The wire speaks the database's vocabulary and
+  // the database counts lines from one (`with ordinality`); a mapper that read
+  // the index as zero-based reddened the second row for a refusal about the
+  // first, which is exactly the kind of misdirection a money form cannot afford.
+  const first = await renderComponent(
+    App({ submit: async () => ({ kind: "invalid_basis", field: "lines[1].credit_cents", reason: "exactly_one_side" }) }),
+  );
+  try {
+    await first.settle();
+    await fillGoodEntry(first);
+    await submitForm(first);
+    assert.match(first.text(), /The server did not accept these figures/);
+    assert.match(first.text(), /exactly_one_side/, "the server's own reason, verbatim");
+    assert.equal(focusedId(), "journal-basis-line-0-credit");
+  } finally {
+    await first.unmount();
+  }
+
+  const second = await renderComponent(
+    App({ submit: async () => ({ kind: "invalid_basis", field: "lines[2].account_code", reason: "nonempty" }) }),
+  );
+  try {
+    await second.settle();
+    await fillGoodEntry(second);
+    await submitForm(second);
+    assert.equal(focusedId(), "journal-basis-line-1-account");
+  } finally {
+    await second.unmount();
+  }
+});
+
+test("400 on a path with NO control of its own is a form-level message, never a focus into the wrong field", async () => {
   const h = await renderComponent(
-    App({ submit: async () => ({ kind: "invalid_basis", field: "lines[1].credit_cents", reason: "invalid_basis" }) }),
+    App({ submit: async () => ({ kind: "invalid_basis", field: "currency", reason: "myr" }) }),
   );
   try {
     await h.settle();
     await fillGoodEntry(h);
+    const before = focusedId();
     await submitForm(h);
     assert.match(h.text(), /The server did not accept these figures/);
-    assert.equal(focusedId(), "journal-basis-line-1-credit");
+    assert.match(h.text(), /myr/);
+    assert.equal(focusedId(), before, "an unmapped path moves focus nowhere");
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("the MEMO cap is enforced at the control and at the submit, and the count appears only near it", async () => {
+  const sent: Submitted[] = [];
+  const h = await renderComponent(
+    App({
+      submit: async (_auth, input) => {
+        sent.push(input);
+        return { kind: "accepted", workId: "w", taskId: "t", logicalOpId: "op", status: "queued", replayed: false };
+      },
+    }),
+  );
+  try {
+    await h.settle();
+    await fillGoodEntry(h);
+
+    // THE CONTROL CARRIES THE CAP, so the browser simply stops rather than
+    // letting a preparer write past what the frozen tool schema will accept.
+    // Read as a PROPERTY: react-dom assigns `maxLength` on a known form element
+    // rather than routing it through `setAttribute`.
+    assert.equal(maxLengthOf(byId(h, "journal-basis-memo")), 4000);
+
+    // A short memo shows NO count.
+    assert.ok(!/characters left/.test(h.text()));
+
+    // Near the cap it appears, counting down in exact characters.
+    await h.fireEvent(byId(h, "journal-basis-memo"), "change", (n) => setFieldValue(n, "m".repeat(3_600)));
+    await h.settle();
+    assert.match(h.text(), /400 characters left/);
+
+    // OVER the cap — reachable only from a restored draft, which is untrusted
+    // input like any other persisted payload — is refused BY NAME, with focus.
+    await h.fireEvent(byId(h, "journal-basis-memo"), "change", (n) => setFieldValue(n, "m".repeat(4_001)));
+    await submitForm(h);
+    assert.equal(sent.length, 0, "an over-long memo is never sent to be refused remotely");
+    assert.match(h.text(), /This memo is longer than 4,000 characters/);
+    assert.equal(focusedId(), "journal-basis-memo");
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("a LINE NARRATION has the same two doors, and its error sits beside the narration itself", async () => {
+  const sent: Submitted[] = [];
+  const h = await renderComponent(
+    App({
+      submit: async (_auth, input) => {
+        sent.push(input);
+        return { kind: "accepted", workId: "w", taskId: "t", logicalOpId: "op", status: "queued", replayed: false };
+      },
+    }),
+  );
+  try {
+    await h.settle();
+    await fillGoodEntry(h);
+
+    assert.equal(maxLengthOf(byLabel(h, "Description, line 2")), 2000);
+
+    await h.fireEvent(byLabel(h, "Description, line 2"), "change", (n) => setFieldValue(n, "d".repeat(1_800)));
+    await h.settle();
+    assert.match(h.text(), /200 characters left/);
+
+    await h.fireEvent(byLabel(h, "Description, line 2"), "change", (n) => setFieldValue(n, "d".repeat(2_001)));
+    await submitForm(h);
+    assert.equal(sent.length, 0);
+    assert.match(h.text(), /This description is longer than 2,000 characters/);
+    assert.equal(focusedId(), "journal-basis-line-1-description");
   } finally {
     await h.unmount();
   }

@@ -32,22 +32,15 @@ import { Textarea } from "@/components/ui/textarea";
 import { EmptyState, StateBanner } from "@/components/common/state";
 import { FormattedDateTime } from "./formatted-date";
 import { CodingDoorDialog } from "@/components/documents/CodingDoorDialog";
+import { readClarifyQuestion } from "@/lib/journals/governance-doors";
 import type { AgentInterruptionRow } from "@/lib/journals/types";
 import type { PartClr } from "@/lib/parts/hooks";
 
-function str(v: unknown): string | null {
-  return typeof v === "string" && v.trim().length > 0 ? v : null;
-}
-
-type ClarifyQuestion = { question: string; context: string | null; framing: string | null };
-
-/** Returns null when NEITHER key parses — the caller then renders the raw
- *  payload rather than a placeholder over a shape it cannot prove. */
-function readClarify(question: Record<string, unknown>): ClarifyQuestion | null {
-  const text = str(question.question) ?? str(question.text);
-  if (!text) return null;
-  return { question: text, context: str(question.context), framing: str(question.framing) };
-}
+// THE READER MOVED; IT DID NOT CHANGE. `readClarifyQuestion` is the same body
+// this file used to hold privately, lifted to lib/journals/governance-doors.ts —
+// beside the read that fetches these rows — because #623's Work detail renders
+// the SAME parked question, and two copies of a defensive jsonb parser are two
+// places H-32's finding could be re-broken independently.
 
 export function InterruptionsPanel({
   interruptions,
@@ -86,7 +79,7 @@ export function InterruptionsPanel({
       <p className="text-sm text-muted-foreground">{t("firmWideNote")}</p>
       {interruptions.map((row) => {
         const isActing = actingId === row.id;
-        const clarify = readClarify(row.question);
+        const clarify = readClarifyQuestion(row.question);
         const scopeClientId = clientIdByTaskId[row.task_id] ?? null;
         return (
           <Card key={row.id} className="enter-content">

@@ -267,6 +267,26 @@ export const PART_CATALOG = {
   // for field (see ./types.ts's own block for what that means and what it does
   // not prove yet). Each renders identifiers plus the DB's own status word; none
   // carries a figure, so none of these fixtures has one to accidentally paint.
+  //
+  // "PERSISTED-RENDER BRANCH" MEANS SOMETHING NARROWER FOR TWO OF THESE THREE,
+  // and this catalog is the wrong place for a reader to acquire the wrong idea.
+  // `renderBranch: true` is a claim about THIS MODULE'S contract — that
+  // PartRenderer paints the kind when it is handed one, rather than dropping it
+  // — and every fixture below proves exactly that. It is NOT a claim that the
+  // part will be there to hand over later.
+  //
+  //   `work_accepted` genuinely is: `chatTurn_v18` mints it inside a chat turn,
+  //   so it lands in `clara.chat_messages.parts` and replays on every later read.
+  //
+  //   `work_status` and `work_result` are NOT. A `claraWork` run writes them to
+  //   its own writable, they reach a reader over `GET /api/tasks/:id/stream`
+  //   while the run executes, and an `accounting_work` task has no chat message
+  //   to persist them into (`session_id` is NULL by construction). The shared
+  //   contract's line "parts persisted through the settle" was never
+  //   implemented; the durable surface is `clara.accounting_work` (`status`,
+  //   `result`), which the Work detail polls. See ../../components/parts/
+  //   WorkCards.tsx's header and packages/runtime/workflows/claraWork.v1.parts.ts
+  //   for the same fact from the renderer's and the emitter's sides.
   work_accepted: {
     renderBranch: true,
     fixtures: [

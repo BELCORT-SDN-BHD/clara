@@ -225,6 +225,68 @@ test("a FAILED chart read degrades to codes — it never takes the whole page do
   );
 });
 
+test("an AWAITING_INPUT work reads the task's ONE pending interruption, by task and by status", async () => {
+  await withFetch(
+    (url) => {
+      if (url.includes("/accounting_work?")) return json([workRow({ status: "awaiting_input", result: null })]);
+      if (url.includes("/agent_tasks_visible?")) return json([{ id: TASK, status: "awaiting_input", error_code: null, created_at: null, updated_at: null }]);
+      if (url.includes("/operation_receipts?")) return json([]);
+      if (url.includes("/coa_accounts?")) return json([]);
+      if (url.includes("/agent_interruptions?")) {
+        return json([{ id: "int-1", task_id: TASK, kind: "clarify", question: { question: "Which account?" }, answer: null, status: "pending", asked_of: null, answered_by: null, expires_at: "2026-09-02T00:00:00Z", created_at: "2026-09-01T01:30:00Z", answered_at: null }]);
+      }
+      throw new Error(`unexpected read: ${url}`);
+    },
+    async (urls) => {
+      const data = await loadWorkDetail(CLIENT, WORK, { session });
+      assert.equal(data?.interruption?.id, "int-1");
+      const asked = urls.find((u) => u.includes("/agent_interruptions?"))!;
+      assert.match(asked, new RegExp(`task_id=eq\\.${TASK}`), "addressed BY TASK, never 'the newest row'");
+      assert.match(asked, /status=eq\.pending/);
+      // The exact-one idiom: `limit=2` keeps a second pending row observable as
+      // ambiguity instead of truncating it into a false certainty.
+      assert.match(asked, /limit=2/);
+    },
+  );
+});
+
+test("only an AWAITING_INPUT work spends a request on the interruption relation", async () => {
+  await withFetch(
+    (url) => {
+      if (url.includes("/accounting_work?")) return json([workRow({ status: "running", result: null })]);
+      if (url.includes("/agent_tasks_visible?")) return json([{ id: TASK, status: "running", error_code: null, created_at: null, updated_at: null }]);
+      if (url.includes("/operation_receipts?")) return json([]);
+      if (url.includes("/coa_accounts?")) return json([]);
+      throw new Error(`unexpected read: ${url}`);
+    },
+    async (urls) => {
+      const data = await loadWorkDetail(CLIENT, WORK, { session });
+      assert.equal(data?.interruption, null);
+      // This page re-reads itself every three seconds; a request to a relation
+      // with nothing to say is one it makes twenty times a minute.
+      assert.ok(!urls.some((u) => u.includes("/agent_interruptions?")));
+    },
+  );
+});
+
+test("a FAILED interruption read degrades to null — the Work's own facts still render", async () => {
+  await withFetch(
+    (url) => {
+      if (url.includes("/accounting_work?")) return json([workRow({ status: "awaiting_input", result: null })]);
+      if (url.includes("/agent_tasks_visible?")) return json([{ id: TASK, status: "awaiting_input", error_code: null, created_at: null, updated_at: null }]);
+      if (url.includes("/operation_receipts?")) return json([]);
+      if (url.includes("/coa_accounts?")) return json([]);
+      if (url.includes("/agent_interruptions?")) return json({ message: "boom" }, 500);
+      throw new Error(`unexpected read: ${url}`);
+    },
+    async () => {
+      const data = await loadWorkDetail(CLIENT, WORK, { session });
+      assert.ok(data, "the work still resolves");
+      assert.equal(data.interruption, null);
+    },
+  );
+});
+
 test("accountNames maps a code to its name, and leaves an unknown code to render as itself", () => {
   const names = accountNames([
     { client_id: CLIENT, account_code: "6100", name: "Rent", account_type: "expense", is_active: true },

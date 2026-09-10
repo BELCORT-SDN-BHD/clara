@@ -91,6 +91,35 @@ export async function getPendingInterruptionForTask(taskId: string, opts: Opts =
   return rows.length === 1 ? rows[0]! : null;
 }
 
+/**
+ * THE `question` JSONB, READ ONCE FOR EVERY SURFACE THAT SHOWS A PARKED QUESTION.
+ *
+ * H-32's finding, kept in one place rather than re-derived per caller. The column
+ * is untyped jsonb (packages/db/migrations/0006_runtime_core.sql:198) and its
+ * shape belongs to the RUNTIME: the live writer is `openInterruptionStep`, which
+ * builds `{ type: "clarify", question, context, framing }`
+ * (packages/runtime/workflows/chatTurn.v10.impl.ts, re-exported by v16/v17 and
+ * imported by `claraWork_v1`'s own park step), and every `open_interruption`
+ * caller in packages/runtime writes `question` — never `text`. `.text` is kept
+ * as a COMPATIBILITY fallback because the column is untyped and the absence of a
+ * `.text` writer today is not proof no row ever carried one.
+ *
+ * `null` WHEN NEITHER KEY PARSES, so a caller renders the raw payload (the
+ * clarifications panel) or a plain "a question is waiting" sentence (the Work
+ * detail) rather than a placeholder over a shape it cannot prove.
+ */
+export type ClarifyQuestion = { question: string; context: string | null; framing: string | null };
+
+function nonBlank(v: unknown): string | null {
+  return typeof v === "string" && v.trim().length > 0 ? v : null;
+}
+
+export function readClarifyQuestion(question: Record<string, unknown>): ClarifyQuestion | null {
+  const text = nonBlank(question.question) ?? nonBlank(question.text);
+  if (!text) return null;
+  return { question: text, context: nonBlank(question.context), framing: nonBlank(question.framing) };
+}
+
 /** The settled re-read after an answer: the row is addressed by the id the card
  *  itself just sent to `answer_interruption`, so it is exact — never "the newest row
  *  on this task". Keeps the settled row deliberately (unlike

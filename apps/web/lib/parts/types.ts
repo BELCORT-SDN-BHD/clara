@@ -293,12 +293,22 @@ export type FreeformResultPart = { type: "freeform_result"; read_id: string };
 // state applies here: do not add, rename or widen a field to make a card nicer,
 // because the wire does not carry it.
 //
-// THESE THREE WERE WRITTEN AGAINST A SHARED CONTRACT RATHER THAN AGAINST THE
-// DECLARER'S SOURCE, because the three workers on this ticket built in parallel
-// and the runtime closure lands on another branch. That is a NAMED LIMIT: until
-// the branches merge, "transcribed field for field" is a claim proven only by
-// the parity gate, not by a read of the emitter. The gate is the instrument that
-// settles it, and running it is part of this lane's own evidence.
+// THESE THREE WERE FIRST WRITTEN AGAINST A SHARED CONTRACT rather than against
+// the declarer's source, because the three workers on this ticket built in
+// parallel. THE BRANCHES HAVE SINCE MERGED: `chatTurn.v18.parts.ts` and
+// `claraWork.v1.parts.ts` are readable beside this file, the parity gate runs
+// over both, and "transcribed field for field" is no longer a claim resting on
+// a document alone.
+//
+// ONE THING THAT CONTRACT PROMISED IS NOT TRUE, and it is recorded where a
+// reader of these types will meet it: it said the run's parts are "persisted
+// through the settle". They are not. `work_accepted` is durable because a CHAT
+// turn mints it into `clara.chat_messages.parts`; `work_status` and
+// `work_result` are written to a `claraWork` run's writable and are LIVE-STREAM
+// ONLY — an `accounting_work` task has no chat message to persist them into. The
+// durable surface for both is `clara.accounting_work` (`status`, `result`),
+// which the Work detail polls. ../parts/catalog.ts and
+// ../../components/parts/WorkCards.tsx carry the same note where it bites.
 
 /** ONE admitted Work, announced in the conversation that asked for it — the B6
  *  receipt. It carries the CLIENT because the durable detail lives at

@@ -11,9 +11,13 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
+  LINE_DESCRIPTION_MAX_CHARS,
+  MEMO_MAX_CHARS,
+  charsLeft,
   fieldForServerPath,
   firstInvalidField,
   isCalendarDate,
+  showCharsLeft,
   toJournalBasisWire,
   totalsOf,
   validateJournalDraft,
@@ -170,19 +174,105 @@ test("a posting date must be a REAL calendar day — no timezone, no Date.parse 
   ]);
 });
 
-test("the runtime's own `field` string maps onto a control — and an UNRECOGNISED one maps to nothing", () => {
+test("the wire's `field` string is ONE-BASED: lines[1] is the FIRST row of this form", () => {
+  // THE DEFECT THIS CELL FENCES, and it was pinned the wrong way round before.
+  // `POST /api/work/journal`'s 400 speaks the DATABASE's vocabulary, and the
+  // database generates its line paths from `with ordinality`, which counts from
+  // ONE. A mapper that read the index as zero-based reddened the SECOND row for
+  // a refusal about the FIRST — and focused the wrong money control while doing
+  // it.
+  assert.equal(fieldForServerPath("lines[1].debit_cents"), "line.0.debit");
+  assert.equal(fieldForServerPath("lines[1].credit_cents"), "line.0.credit");
+  assert.equal(fieldForServerPath("lines[1].account_code"), "line.0.account");
+  assert.equal(fieldForServerPath("lines[1].description"), "line.0.description");
+  assert.equal(fieldForServerPath("lines[2].credit_cents"), "line.1.credit");
+  assert.equal(fieldForServerPath("lines[2].account_code"), "line.1.account");
+  assert.equal(fieldForServerPath("lines[12].account_code"), "line.11.account");
+  // A BARE `lines[N]` — `exactly_one_side` is about the two amount controls, and
+  // debit is the first of them in the row.
+  assert.equal(fieldForServerPath("lines[3]"), "line.2.debit");
+});
+
+test("the wire's whole-payload paths map onto the controls that exist, and onto NOTHING when they do not", () => {
   assert.equal(fieldForServerPath("posting_date"), "postingDate");
   assert.equal(fieldForServerPath("memo"), "memo");
-  assert.equal(fieldForServerPath("lines[1].debit_cents"), "line.1.debit");
-  assert.equal(fieldForServerPath("lines[0].credit_cents"), "line.0.credit");
-  assert.equal(fieldForServerPath("lines[12].account_code"), "line.12.account");
   assert.equal(fieldForServerPath("lines"), "lines");
-  // The whole point of returning null: a future field name must not focus
-  // whichever control happens to share a prefix.
+
+  // `basis` and `currency` are REAL wire paths with no control of their own —
+  // this form has no currency field, because every basis it can build is in
+  // ringgit. Both render as a form-level message carrying the server's reason.
+  assert.equal(fieldForServerPath("basis"), null);
+  assert.equal(fieldForServerPath("currency"), null);
+
+  // THE REQUEST'S OWN camelCase IS NOT A REFUSAL'S SPELLING. `postingDate` is
+  // what `lib/work/api.ts` SENDS; no door ever answers in it, and accepting it
+  // here was a second vocabulary nothing speaks.
+  assert.equal(fieldForServerPath("postingDate"), null);
+
+  // A future field name must not focus whichever control shares a prefix.
   assert.equal(fieldForServerPath("basis_digest"), null);
   assert.equal(fieldForServerPath("lines[x].debit_cents"), null);
   assert.equal(fieldForServerPath("lines[-1].debit_cents"), null);
+  // ONE-BASED means `lines[0]` is not a path this vocabulary can produce.
+  assert.equal(fieldForServerPath("lines[0].credit_cents"), null);
   assert.equal(fieldForServerPath(null), null);
+});
+
+test("the two LENGTH CAPS are the frozen tool schema's, measured the way that schema measures them", () => {
+  assert.equal(MEMO_MAX_CHARS, 4000);
+  assert.equal(LINE_DESCRIPTION_MAX_CHARS, 2000);
+
+  // MEMO: TRIMMED, because zod trims before it caps. Four thousand characters
+  // wrapped in whitespace is a legal memo.
+  const memo4000 = "m".repeat(MEMO_MAX_CHARS);
+  assert.deepEqual(validateJournalDraft({ ...goodDraft(), memo: `  ${memo4000}  ` }, CHART), []);
+  assert.deepEqual(validateJournalDraft({ ...goodDraft(), memo: `${memo4000}x` }, CHART), [
+    { field: "memo", code: "memoTooLong" },
+  ]);
+  // BLANK BEATS TOO LONG: they are different instructions and only one can hold.
+  assert.deepEqual(validateJournalDraft({ ...goodDraft(), memo: "   " }, CHART), [
+    { field: "memo", code: "memoRequired" },
+  ]);
+
+  // DESCRIPTION: RAW, because that schema does NOT trim — so a narration padded
+  // to 2,001 characters is refused even though its trimmed form would fit.
+  const draft = goodDraft();
+  draft.lines[1]!.description = `${"d".repeat(LINE_DESCRIPTION_MAX_CHARS)} `;
+  assert.deepEqual(validateJournalDraft(draft, CHART), [
+    { field: "line.1.description", code: "descriptionTooLong" },
+  ]);
+});
+
+test("a line's narration issue sits BETWEEN its account and its amounts — the order IS the focus order", () => {
+  const draft = goodDraft();
+  draft.lines[0]!.account_code = "";
+  draft.lines[0]!.description = "x".repeat(LINE_DESCRIPTION_MAX_CHARS + 1);
+  draft.lines[0]!.debit_cents = 0;
+  draft.lines[0]!.credit_cents = 0;
+  assert.deepEqual(
+    validateJournalDraft(draft, CHART).map((i) => i.field),
+    ["line.0.account", "line.0.description", "line.0.debit", "lines"],
+  );
+  // The first invalid control is still the leftmost one in the row.
+  assert.equal(firstInvalidField(validateJournalDraft(draft, CHART)), "line.0.account");
+});
+
+test("the remaining-characters count appears only NEAR the cap, and counts down in exact characters", () => {
+  // A counter on screen from the first keystroke is a number nobody reads. A
+  // TENTH left is where it starts earning its space.
+  assert.equal(showCharsLeft("", MEMO_MAX_CHARS), false);
+  assert.equal(showCharsLeft("m".repeat(3_000), MEMO_MAX_CHARS), false);
+  assert.equal(showCharsLeft("m".repeat(3_600), MEMO_MAX_CHARS), true);
+  assert.equal(charsLeft("m".repeat(3_600), MEMO_MAX_CHARS), 400);
+
+  assert.equal(showCharsLeft("d".repeat(1_799), LINE_DESCRIPTION_MAX_CHARS), false);
+  assert.equal(showCharsLeft("d".repeat(1_800), LINE_DESCRIPTION_MAX_CHARS), true);
+  assert.equal(charsLeft("d".repeat(1_800), LINE_DESCRIPTION_MAX_CHARS), 200);
+
+  // A RESTORED draft can be over the cap even though `maxLength` would never
+  // have let it be typed — the count goes negative rather than clamping to zero,
+  // because "you are 40 over" is the instruction and "0 left" is not.
+  assert.equal(charsLeft("d".repeat(LINE_DESCRIPTION_MAX_CHARS + 40), LINE_DESCRIPTION_MAX_CHARS), -40);
 });
 
 test("totalsOf ignores a non-integer rather than adding NaN into a money total", () => {

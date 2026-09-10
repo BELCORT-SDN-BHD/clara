@@ -21,9 +21,11 @@ import { enableDomInspection } from "../../test/domInspect";
 import { ReadError } from "../../lib/read";
 import { WORK_HEADING_ID, WorkDetailView } from "./work-detail";
 import { WORK_STALE_AFTER_MS } from "../../lib/work/use-work-detail";
+import { journalDraftKey, type DraftStorage } from "../../lib/work/journal-draft";
 import type { RetryWorkResult } from "../../lib/work/api";
 import type { WorkDetailData } from "../../lib/work/reads";
 import type { AccountingWorkRow } from "../../lib/work/types";
+import type { AgentInterruptionRow } from "../../lib/journals/types";
 import messages from "../../messages/en.json";
 
 enableDomInspection();
@@ -33,6 +35,19 @@ type Stub = Record<string, unknown>;
 const CLIENT = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const WORK = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 const ENTRY = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+const TASK = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+const FIRM = "ffffffff-ffff-4fff-8fff-ffffffffffff";
+const USER = "user-1";
+
+function memoryStorage(): DraftStorage & { map: Map<string, string> } {
+  const map = new Map<string, string>();
+  return {
+    map,
+    getItem: (k) => map.get(k) ?? null,
+    setItem: (k, v) => void map.set(k, v),
+    removeItem: (k) => void map.delete(k),
+  };
+}
 
 function workRow(over: Partial<AccountingWorkRow> = {}): AccountingWorkRow {
   return {
@@ -74,6 +89,7 @@ function data(over: Partial<WorkDetailData> = {}): WorkDetailData {
     entry: null,
     lines: [],
     receipts: [],
+    interruption: null,
     accounts: [
       { client_id: CLIENT, account_code: "6100", name: "Office rent", account_type: "expense", is_active: true },
       { client_id: CLIENT, account_code: "1100", name: "Maybank current", account_type: "asset", is_active: true },
@@ -87,6 +103,8 @@ function App(props: {
   load?: (clientId: string, workId: string) => Promise<WorkDetailData | null>;
   now?: () => number;
   retry?: (auth: unknown, input: { workId: string; opKey: string }) => Promise<RetryWorkResult>;
+  scope?: { firmId?: string; userId?: string };
+  storage?: DraftStorage | null;
 }): ReactElement {
   return createElement(NextIntlClientProvider, {
     locale: "en",
@@ -99,8 +117,35 @@ function App(props: {
       now: props.now,
       retry: (props.retry ?? (async () => ({ kind: "accepted", workId: WORK, taskId: "t", logicalOpId: "op", status: "queued", replayed: false }))) as never,
       session: { getAccessToken: async () => "tok" },
+      scope: props.scope,
+      storage: props.storage ?? null,
     }),
   });
+}
+
+/** A pending `clara.agent_interruptions` row, in the shape `openInterruptionStep`
+ *  actually writes — `{ type, question, context, framing }`, never `{ text }`
+ *  (H-32's finding, which this page inherits through the shared reader). */
+function parkedQuestion(over: Partial<AgentInterruptionRow> = {}): AgentInterruptionRow {
+  return {
+    id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+    task_id: TASK,
+    kind: "clarify",
+    question: {
+      type: "clarify",
+      question: "Which bank account did the rent leave from?",
+      context: "The basis names 1100, but this client has two Maybank accounts.",
+      framing: "Answer in one line.",
+    },
+    answer: null,
+    status: "pending",
+    asked_of: null,
+    answered_by: null,
+    expires_at: "2026-09-02T01:00:00.000Z",
+    created_at: "2026-09-01T01:30:00.000Z",
+    answered_at: null,
+    ...over,
+  };
 }
 
 function hrefs(container: Stub): string[] {
@@ -333,12 +378,174 @@ test("a COMPLETED work offers NO retry — only a recoverable state may run agai
   }
 });
 
-test("AWAITING INPUT points at what needs a person, and does not pretend to be running", async () => {
-  const h = await renderComponent(App({ load: async () => data({ work: workRow({ status: "awaiting_input" }) }) }));
+test("AWAITING INPUT renders THE QUESTION ITSELF, with its context, above the link that can answer it", async () => {
+  // The defect this cell fences: the banner used to say only "this work asked a
+  // question", on a page that had already read the row the question is in. A
+  // human then had to leave to find out WHAT was asked.
+  const h = await renderComponent(
+    App({
+      load: async () =>
+        data({
+          work: workRow({ status: "awaiting_input", current_task_id: TASK }),
+          interruption: parkedQuestion(),
+        }),
+    }),
+  );
   try {
     await h.settle();
-    assert.match(h.text(), /asked a question and is parked/);
+    const text = h.text();
+    assert.match(text, /Which bank account did the rent leave from\?/, "the run's own words, verbatim");
+    assert.match(text, /this client has two Maybank accounts/, "and the context it supplied with them");
+    // The generic sentence is REPLACED, not printed beside the real question.
+    assert.ok(!/asked a question and is parked/.test(text));
+    // Answering is another surface's job, so the route to it stays.
     assert.ok(hrefs(h.container).includes("/work?view=needs-you"));
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("AWAITING INPUT with NO readable question falls back to the honest sentence, never a placeholder", async () => {
+  // Three causes, one rendering: the payload parses as neither `question` nor
+  // `text`, the row is not visible to this caller, or two rows are pending. This
+  // page distinguishes none of them and claims none of them.
+  for (const interruption of [
+    null,
+    parkedQuestion({ question: { type: "clarify", framing: "no text at all" } }),
+  ]) {
+    const h = await renderComponent(
+      App({
+        load: async () =>
+          data({ work: workRow({ status: "awaiting_input", current_task_id: TASK }), interruption }),
+      }),
+    );
+    try {
+      await h.settle();
+      assert.match(h.text(), /asked a question and is parked/);
+      assert.ok(hrefs(h.container).includes("/work?view=needs-you"));
+    } finally {
+      await h.unmount();
+    }
+  }
+});
+
+test("BASIS ORIGIN is a fact on the page: who typed the figures, or that Clara read them off a conversation", async () => {
+  // The column existed and rendered NOWHERE. `source_refs` answers "was there a
+  // document"; `basis_origin` answers "did a human type these cents" — a
+  // different question, and the one a professional reading a posted entry needs.
+  const direct = await renderComponent(App({ load: async () => data() }));
+  try {
+    await direct.settle();
+    assert.match(direct.text(), /Figures from/);
+    assert.match(direct.text(), /Entered by/);
+    // The roster read is not stubbed here, so the resolver falls through to the
+    // shortened raw id — the documented fallback, never a guessed name.
+    assert.ok(!/Interpreted by Clara/.test(direct.text()));
+  } finally {
+    await direct.unmount();
+  }
+
+  const interpreted = await renderComponent(
+    App({
+      load: async () =>
+        data({
+          work: workRow({
+            basis_origin: "clara_interpreted",
+            source_refs: [{ kind: "chat_task", task_id: TASK, session_id: "s1" }],
+          }),
+        }),
+    }),
+  );
+  try {
+    await interpreted.settle();
+    assert.match(interpreted.text(), /Interpreted by Clara from a conversation/);
+    // A REAL in-app path: this product has no per-thread route, so the link goes
+    // to the workspace whose rail opens this client's conversation.
+    assert.ok(hrefs(interpreted.container).includes(`/clients/${CLIENT}`));
+  } finally {
+    await interpreted.unmount();
+  }
+});
+
+test("an UNKNOWN basis_origin renders VERBATIM rather than crashing a message lookup", async () => {
+  const h = await renderComponent(
+    App({ load: async () => data({ work: workRow({ basis_origin: "some_future_origin" }) }) }),
+  );
+  try {
+    await h.settle();
+    assert.match(h.text(), /some_future_origin/);
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("EDIT AS A NEW DRAFT seeds the composer from this basis, under a NEW intent identity", async () => {
+  const store = memoryStorage();
+  const h = await renderComponent(
+    App({
+      scope: { firmId: FIRM, userId: USER },
+      storage: store,
+      load: async () =>
+        data({
+          work: workRow({
+            status: "refused",
+            error: { code: "CLR10", reason: "write_into_closed_period", message: "Closed.", recoverable: true },
+          }),
+        }),
+    }),
+  );
+  try {
+    await h.settle();
+    const link = h.find(
+      (n) =>
+        n.tagName === "A" &&
+        String((n as { textContent?: string }).textContent ?? "").includes("Edit as a new draft"),
+    );
+    assert.ok(link, "the refused state offers the edit route");
+    assert.equal(store.map.size, 0, "nothing is written until the human asks for it");
+
+    await h.fireEvent(link, "click");
+    await h.settle();
+
+    const key = journalDraftKey({ userId: USER, firmId: FIRM, clientId: CLIENT });
+    const raw = store.map.get(key);
+    assert.ok(raw, `no draft filed under ${key}`);
+    const draft = JSON.parse(raw) as { intentKey: string; postingDate: string; memo: string; lines: unknown[] };
+    assert.equal(draft.postingDate, "2026-09-01");
+    assert.equal(draft.memo, "Office rent, September");
+    assert.equal(draft.lines.length, 2);
+    // THE WHOLE POINT: a NEW identity. Re-running the SAME figures is `/retry`;
+    // editing them is a different economic intent, and carrying the admitted key
+    // would earn an `intent_payload_conflict` for doing what the link said.
+    assert.match(draft.intentKey, /^[0-9a-f-]{36}$/i);
+    assert.notEqual(draft.intentKey, "intent-1");
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("EDIT AS A NEW DRAFT with NO scope writes nothing — a draft under a guessed key is worse than none", async () => {
+  const store = memoryStorage();
+  const h = await renderComponent(
+    App({
+      // No firm/user: the provider could not supply them.
+      storage: store,
+      load: async () => data({ work: workRow({ status: "refused" }) }),
+    }),
+  );
+  try {
+    await h.settle();
+    const link = h.find(
+      (n) =>
+        n.tagName === "A" &&
+        String((n as { textContent?: string }).textContent ?? "").includes("Edit as a new draft"),
+    );
+    assert.ok(link);
+    await h.fireEvent(link, "click");
+    await h.settle();
+    assert.equal(store.map.size, 0);
+    // The link still goes to the composer — it simply opens an empty one.
+    assert.ok(hrefs(h.container).includes(`/clients/${CLIENT}/accounting/journal/new`));
   } finally {
     await h.unmount();
   }

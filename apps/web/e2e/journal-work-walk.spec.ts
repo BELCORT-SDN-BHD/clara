@@ -334,6 +334,166 @@ test("B3 recovery: a typed refusal renders VERBATIM, and Retry starts a NEW run 
   await expect(page.getByRole("region", { name: "Accounting work" }).getByRole("row")).toHaveCount(3);
 });
 
+test("a 400 focuses the control the SERVER named, and the wire's line index is ONE-BASED", async ({ page }) => {
+  // WHY A BROWSER FOR THIS. `fieldForServerPath` has unit cells, but only a real
+  // form can prove that the string the runtime sends reaches a control that
+  // exists and takes focus. The refusal is INJECTED (see the mock's header:
+  // nothing this composer can build reaches the route invalid), and the walk
+  // states the exact wire path — `lines[2].credit_cents` — so a mapper that read
+  // the index as zero-based would focus the THIRD row, which does not exist, and
+  // red this cell instead of silently misdirecting a preparer.
+  await page.goto(COMPOSER_URL);
+  await fillBalancedBasis(page);
+  await control(page, { op: "refuse_basis", field: "lines[2].credit_cents", reason: "exactly_one_side" });
+
+  await page.getByRole("button", { name: "Submit" }).click();
+  await expect(page.getByText("The server did not accept these figures")).toBeVisible();
+  // The server's own machine-readable reason, verbatim beside the message.
+  await expect(page.getByText("exactly_one_side")).toBeVisible();
+  // `lines[2]` IS THE SECOND ROW.
+  await expect(page.locator("#journal-basis-line-1-credit")).toBeFocused();
+  // Nothing was admitted and the draft is untouched.
+  await expect(page).toHaveURL(new RegExp(`${COMPOSER_URL}$`));
+  await expect(page.getByLabel("Memo")).toHaveValue("Office rent paid from Maybank");
+
+  // The SAME path one row up lands one row up. Two cells' worth of claim in one
+  // walk, because the offset is the whole risk here.
+  await control(page, { op: "refuse_basis", field: "lines[1].account_code", reason: "nonempty" });
+  await page.getByRole("button", { name: "Submit" }).click();
+  await expect(page.locator("#journal-basis-line-0-account")).toBeFocused();
+});
+
+test("a 409 says the figures differ from what that identity already named, and LINKS the Work it named", async ({ page }) => {
+  // THE CONFLICT ARM, reached the way production reaches it: a draft whose
+  // `intentKey` the firm has ALREADY spent, carrying different figures. The
+  // seeded conversation Work owns that key (the fixture registers it, as
+  // `unique (firm_id, intent_key)` guarantees a real row does), so submitting a
+  // different basis under it is exactly `intent_payload_conflict`.
+  await page.evaluate(
+    ([key, value]) => window.sessionStorage.setItem(key, value),
+    [
+      DRAFT_KEY,
+      JSON.stringify({
+        intentKey: JOURNAL_WORK.seededIntentKey,
+        postingDate: "2026-09-01",
+        memo: "Office rent paid from Maybank",
+        lines: [
+          // RM 900, not the seeded RM 1,200 — a DIFFERENT payload under the same
+          // identity, which is the only thing that earns a 409.
+          { account_code: JOURNAL_WORK.rentAccount, debit_cents: 90_000, credit_cents: 0, description: "" },
+          { account_code: JOURNAL_WORK.bankAccount, debit_cents: 0, credit_cents: 90_000, description: "" },
+        ],
+      }),
+    ] as const,
+  );
+
+  await page.goto(COMPOSER_URL);
+  await page.getByRole("button", { name: "Submit" }).click();
+
+  await expect(page.getByText("This draft was already submitted with different figures")).toBeVisible();
+  // THE LINK IS THE POINT OF THE FINDING THAT MINTED THIS CELL. The 409 carries
+  // `work_id`; without a route to it a human is told a Work exists and given no
+  // way to look at it.
+  const open = page.getByRole("link", { name: "Open the existing work" });
+  await expect(open).toBeVisible();
+  await open.click();
+  await expect(page).toHaveURL(new RegExp(`/clients/${CLIENT}/work/${JOURNAL_WORK.seededWorkId}$`));
+  // It really is the Work that identity named — RM 1,200, not the RM 900 on the
+  // form that was refused.
+  await expect(
+    page.getByRole("region", { name: "Requested journal entry lines" }).getByText("RM 1,200.00").first(),
+  ).toBeVisible();
+
+  // Back on the form (its draft intact, because nothing was admitted), the OTHER
+  // next action rotates the identity and keeps the typed figures — and the very
+  // same submit is then admitted as its own Work.
+  await page.goBack();
+  await expect(page).toHaveURL(new RegExp(`${COMPOSER_URL}$`));
+  await page.getByRole("button", { name: "Submit" }).click();
+  await expect(page.getByText("This draft was already submitted with different figures")).toBeVisible();
+  await page.getByRole("button", { name: "Start a new draft with these figures" }).click();
+  await page.getByRole("button", { name: "Submit" }).click();
+  await expect(page).toHaveURL(/\/work\/[0-9a-f-]{36}$/);
+  expect(workIdIn(page.url()), "a rotated identity is a NEW Work").not.toBe(JOURNAL_WORK.seededWorkId);
+  await expect(
+    page.getByRole("region", { name: "Requested journal entry lines" }).getByText("RM 900.00").first(),
+  ).toBeVisible();
+});
+
+test("AWAITING INPUT shows the question the run is parked on, not just that there is one", async ({ page }) => {
+  await page.goto(COMPOSER_URL);
+  await fillBalancedBasis(page);
+  await page.getByRole("button", { name: "Submit" }).click();
+  await expect(page).toHaveURL(/\/work\/[0-9a-f-]{36}$/);
+  const workId = workIdIn(page.url());
+
+  await control(page, { op: "run", workId });
+  await control(page, {
+    op: "ask",
+    workId,
+    question: "Which Maybank account did this rent leave from?",
+    context: "This client has two accounts coded 1100.",
+  });
+
+  await expect(page.getByText("Waiting for an answer").first()).toBeVisible({ timeout: 15_000 });
+  // THE QUESTION ITSELF, read off `clara.agent_interruptions` under the caller's
+  // own RLS — on a page that had already read the task it belongs to.
+  await expect(page.getByText("Which Maybank account did this rent leave from?")).toBeVisible();
+  await expect(page.getByText("This client has two accounts coded 1100.")).toBeVisible();
+  // Answering is another surface's job, so the route to it is still offered.
+  await expect(page.getByRole("link", { name: "Open what needs you" })).toBeVisible();
+  await scan(page, "work detail, awaiting input");
+});
+
+test("EDIT AS A NEW DRAFT lands on a composer already holding these figures, under a NEW identity", async ({ page }) => {
+  await page.goto(COMPOSER_URL);
+  await fillBalancedBasis(page);
+  await page.getByLabel("Description, line 1").fill("September rent");
+  await page.getByRole("button", { name: "Submit" }).click();
+  await expect(page).toHaveURL(/\/work\/[0-9a-f-]{36}$/);
+  const workId = workIdIn(page.url());
+  // THE BASELINE THE SEEDING IS MEASURED AGAINST: the draft was retired the
+  // moment the runtime named the Work, so anything the composer holds after the
+  // link below can only have come from this page.
+  expect(
+    await page.evaluate((key) => window.sessionStorage.getItem(key), DRAFT_KEY),
+    "the draft is retired on a 202",
+  ).toBeNull();
+
+  await control(page, { op: "run", workId });
+  await control(page, { op: "refuse", workId });
+  await expect(page.getByText("Refused", { exact: true }).first()).toBeVisible({ timeout: 15_000 });
+
+  await page.getByRole("link", { name: "Edit as a new draft" }).click();
+  await expect(page).toHaveURL(new RegExp(`${COMPOSER_URL}$`));
+
+  // THE COMPOSER IS SEEDED. Before this fix the link opened an empty form and a
+  // human had to retype a basis the page was already showing them.
+  await expect(page.getByLabel("Memo")).toHaveValue("Office rent paid from Maybank");
+  await expect(page.getByLabel("Posting date")).toHaveValue("2026-09-01");
+  await expect(page.getByLabel("Account, line 1")).toHaveValue(JOURNAL_WORK.rentAccount);
+  await expect(page.getByLabel("Account, line 2")).toHaveValue(JOURNAL_WORK.bankAccount);
+  await expect(page.getByLabel("Description, line 1")).toHaveValue("September rent");
+  // The AMOUNTS came across as exact cents — asserted through the form's own
+  // live totals rather than a formatted input string, so the claim is about the
+  // money rather than about a display convention.
+  const seeded = page.getByRole("region", { name: "Journal entry lines" });
+  await expect(seeded.getByText("RM 1,200.00").first()).toBeVisible();
+  await expect(seeded.getByText("RM 0.00").first()).toBeVisible();
+
+  // AND IT CARRIES A NEW IDENTITY. Submitting these edited figures must admit a
+  // SECOND Work rather than earning `intent_payload_conflict` for doing exactly
+  // what the link offered.
+  await page.getByLabel("Debit, line 1").fill("1000.00");
+  await page.getByLabel("Credit, line 2").fill("1000.00");
+  await page.getByRole("button", { name: "Submit" }).click();
+  await expect(page).toHaveURL(/\/work\/[0-9a-f-]{36}$/);
+  expect(workIdIn(page.url()), "a new intent is a NEW Work, never the refused one").not.toBe(workId);
+  await expect(
+    page.getByRole("region", { name: "Requested journal entry lines" }).getByText("RM 1,000.00").first(),
+  ).toBeVisible();
+});
+
 test("a LOST acknowledgement resolves to the SAME Work, because the re-post carries the SAME intent key", async ({ page }) => {
   await page.goto(COMPOSER_URL);
   await fillBalancedBasis(page);
