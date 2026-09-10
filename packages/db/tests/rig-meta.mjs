@@ -1498,6 +1498,36 @@ export const WORK_JOURNAL_0178_COHORT = [
 // their behalf, and the migration's own header names "no wake/agent variant exists or is needed".
 const USER_PREFERENCES_0179_HUMAN_FNS = ["get_my_preferences", "save_my_preferences"];
 
+// #629 [0180, shared Work questions] — the SHARED-QUESTION lane, one cohort for the same "wholly
+// present or wholly absent" reason 0178's list above carries.
+//
+//   the THREE human doors — clara_authenticated ONLY. The answer gate is floored at bookkeeper+
+//   inside the body (`_human_ctx(role_rank('bookkeeper'))`), and so are both read doors; the wake
+//   roles and clara_runtime gain ZERO, because a lane that could answer its own question would be
+//   an agent deciding what it was told.
+const WORK_QUESTIONS_0180_HUMAN_FNS = [
+  "answer_work_question", "get_work_question", "get_work_pending_question",
+];
+//   the THREE runtime verbs — clara_runtime ONLY, the same lane clara.open_interruption sits in
+//   (0006:1178). `work_authority_snapshot` is a READ and is granted here rather than to a wake
+//   role for a measured reason: clara_runtime holds no select on clara.firm_memberships and no
+//   execute on clara.role_rank, so the run cannot ask "is this human still a bookkeeper" any other
+//   way, and widening those grants would open the membership table to the lane that executes model
+//   output.
+const WORK_QUESTIONS_0180_RUNTIME_FNS = [
+  "open_work_question", "expire_due_interruptions", "work_authority_snapshot",
+];
+//   …and the UNGRANTED closure: the two field/answer predicates the open verb and the answer gate
+//   share, the one record projection every read door returns, and the immutability trigger body.
+const WORK_QUESTIONS_0180_UNGRANTED_FNS = [
+  "_assert_work_question_fields", "_assert_work_answer", "_work_question_record",
+  "_tf_work_question_immutable",
+];
+export const WORK_QUESTIONS_0180_COHORT = [
+  ...WORK_QUESTIONS_0180_HUMAN_FNS, ...WORK_QUESTIONS_0180_RUNTIME_FNS,
+  ...WORK_QUESTIONS_0180_UNGRANTED_FNS,
+];
+
 export const ALLOWED = {
   // Slice-4 governance writers (contract v2.1 §3.2/3.3/3.5): human lane only.
   [ROLES.authenticated]: new Set([
@@ -1634,6 +1664,9 @@ export const ALLOWED = {
     // #626 D1 the personal-preferences pair — see the block above. clara_authenticated ONLY;
     // agent + both wake roles gain ZERO.
     ...USER_PREFERENCES_0179_HUMAN_FNS,
+    // #629 [0180] the shared work question's three human doors — see the block above.
+    // clara_authenticated ONLY; agent, both wake roles and clara_runtime gain ZERO.
+    ...WORK_QUESTIONS_0180_HUMAN_FNS,
   ]),
   // [S6 §9/C-11] agent lane loses the bare get_journal_entry(uuid) oracle; keeps the other
   // reads and gains the client-pinned S6 reads + get_journal_entry_for.
@@ -1777,6 +1810,9 @@ export const ALLOWED = {
     // [#623, 0178] the accounting-work admission and run lifecycle — clara_runtime ONLY, the
     // same lane clara.begin_chat_turn sits in (0006:1176).
     ...WORK_JOURNAL_0178_RUNTIME_FNS,
+    // [#629, 0180] the shared question's open verb, its expiry sweep and the authority snapshot a
+    // resumed run reads — clara_runtime ONLY, the same lane clara.open_interruption sits in.
+    ...WORK_QUESTIONS_0180_RUNTIME_FNS,
     // [F-A2 PR-2, GM-10] the withdrawal re-admit door — clara_runtime ONLY (the consumer's
     // sole caller); proves the event->entry->attempt->task->filing chain then delegates to
     // 0053's one_click exception. Declared here so any wider grant FAILS the matrix.
@@ -2003,6 +2039,7 @@ export async function grantMatrixFailures() {
   failures.push(...cohortFailures("F-A1 PR-3 cutover: fail_witness_facts", WITNESS_F_A1_PR3_COHORT, liveNames));
   failures.push(...cohortFailures("F-A3 PR-1a bank/COA core extractions", EXTRACTION_F_A3_PR1A_COHORT, liveNames));
   failures.push(...cohortFailures("#623 0178 accounting-work lane", WORK_JOURNAL_0178_COHORT, liveNames));
+  failures.push(...cohortFailures("#629 0180 shared work-question lane", WORK_QUESTIONS_0180_COHORT, liveNames));
   failures.push(...cohortFailures("wave F F-A1 PR-4 bank-statement witness cutover", STATEMENT_F_A1_PR4_COHORT, liveNames));
   // F-A6's cohort is bimodal: wholly present once PR-1 applies, wholly absent before it. Half a
   // cohort is a half-applied migration and is reported as one.
