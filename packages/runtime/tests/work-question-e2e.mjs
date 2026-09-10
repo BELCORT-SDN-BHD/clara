@@ -123,6 +123,10 @@ function spawnServe(port, extra = {}) {
   });
   child.stderr.setEncoding("utf8");
   child.stderr.on("data", (d) => {
+    // KEPT, not only forwarded: a child that never becomes ready is the one case where the
+    // interesting output is the part the filter below would have dropped, and a walk that prints
+    // "did not become ready" with nothing else is a dead end for whoever reads the log.
+    state.stderr = `${state.stderr ?? ""}${d}`.slice(-8000);
     if (/FATAL|Error:|exit_before_deliver|exit_after_commit|stall_deliver|lease lost/.test(d)) process.stderr.write(`[child:${port}] ${d}`);
   });
   return { child, state, port };
@@ -139,7 +143,7 @@ function waitExit(child, timeoutMs = 30000) {
   });
 }
 
-async function waitReady(port, deadlineMs = 60000) {
+async function waitReady(port, deadlineMs = 60000, engine = null) {
   const base = `http://127.0.0.1:${port}`;
   const end = Date.now() + deadlineMs;
   let healthy = false;
@@ -155,7 +159,13 @@ async function waitReady(port, deadlineMs = 60000) {
     }
     await sleep(250);
   }
-  throw new Error(`serve child on ${port} did not become ready (/health + /ready 200)`);
+  throw new Error(
+    `serve child on ${port} did not become ready (/health + /ready 200)`
+    + (engine ? `
+--- child stderr ---
+${engine.state.stderr ?? "(none)"}
+--- exit: ${JSON.stringify(engine.state.exitInfo)} ---` : ""),
+  );
 }
 
 async function api(port, method, path, body, jwt) {
@@ -554,10 +564,12 @@ async function main() {
     const workerA = spawnServe(PORT_D, { CLARA_WORK_TEST_FAULT: "stall_deliver", CLARA_CTL_LEASE_SECONDS: "2" });
     let workerB = null;
     try {
-      await waitReady(PORT_D);
+      await waitReady(PORT_D, 90000, workerA);
       await sleep(3500);
       workerB = spawnServe(PORT_E, { CLARA_CTL_LEASE_SECONDS: "2" });
-      await waitReady(PORT_E);
+      // A SECOND full engine on a machine that is already running one takes longer to boot than a
+      // first, and this leg is the only place two are up at once.
+      await waitReady(PORT_E, 150000, workerB);
       const settled = await pollWork(PORT_E, workId, ctx.jwt, (b) => TERMINAL.has(b.work.status), "leg 5 settles", 120000);
       assert.equal(settled.work.status, "completed", `one of the two workers delivered (got ${settled.work.status})`);
       assert.equal(await countEntries(ctx.client), 1, "EXACTLY ONE entry, with two workers racing the same answer");

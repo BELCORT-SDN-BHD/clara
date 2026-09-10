@@ -95,15 +95,16 @@ for (const type of STATUS_RESOLVER_TYPES) {
 // chatTurn_v14 receipt kinds the live emitter was already putting on the wire
 // (22), then 26 when P6-2 registered the Q8 four that chatTurn_v16 declares, and
 // 29 since the durable-Work three (`work_accepted`, `work_status`,
-// `work_result`) joined for the first persistent successor.
+// `work_result`) joined for the first persistent successor, and 30 since #629's
+// `work_question` joined them — the shared question `claraWork_v2` parks on.
 // This test is the one cell in the suite that has to be EDITED by such a change
 // rather than added to, and its failing beforehand is the proof that the
 // catalog's own completeness mechanism works: the guards in ./catalog.ts and the
 // parity loop above cannot be satisfied by a count, so this assertion is the
 // only thing standing between "three kinds registered" and "three SPECIFIC kinds
 // registered".
-test("the catalog totals 29 live part types (27 render branches + 2 status resolvers)", () => {
-  assert.equal(RENDER_BRANCH_TYPES.length, 27);
+test("the catalog totals 30 live part types (28 render branches + 2 status resolvers)", () => {
+  assert.equal(RENDER_BRANCH_TYPES.length, 28);
   assert.equal(STATUS_RESOLVER_TYPES.length, 2);
   const retired = ["kb_rule_proposal", "rule_post_receipt", "bank_rule_proposal"];
   for (const t of retired) {
@@ -111,6 +112,12 @@ test("the catalog totals 29 live part types (27 render branches + 2 status resol
   }
   // The four v14 kinds are registered BY NAME, not merely by count — a count
   // alone would pass if some other four had been added instead.
+  // …and #629's one, by NAME for the same reason: a count alone would pass if some other kind
+  // had been registered instead of the one the runtime can actually emit.
+  assert.ok(
+    RENDER_BRANCH_TYPES.includes("work_question" as (typeof RENDER_BRANCH_TYPES)[number]),
+    "work_question is on the LIVE claraWork_v2 wire (claraWork.v2.parts.ts) — it must have a render branch",
+  );
   for (const t of ["entry_posted", "question_opened", "bank_act", "bank_pack"]) {
     assert.ok(
       RENDER_BRANCH_TYPES.includes(t as (typeof RENDER_BRANCH_TYPES)[number]),
