@@ -908,6 +908,21 @@ const CHECKOUT_GATE_C3_CLOCK_NAMES = [
   "claim_paid_firm", "open_checkout_intent", "settle_confirmation_attempt",
 ];
 
+// #623 [0178] — the accounting-work lane. FOUR bodies read a bare timestamptz clock, and every
+// one of them stamps an INSTANT, never derives a DATE: `_tf_accounting_work_immutable` sets
+// `updated_at` on every lawful Work mutation; `claim_work_run` and `settle_work_run` stamp
+// `agent_tasks.updated_at`; `_record_journal_entry_core` stamps `approved_at`, `updated_at` and
+// the receipt's `posted_at`. The entry's POSTING DATE is never clock-derived — it is the human's
+// own admitted value, carried through as `(basis->>'posting_date')::date`, which is exactly the
+// property arm (D) exists to protect.
+//
+// `_tf_agent_task_insert` and `_tf_agent_task_update` are NOT added: both already sit in the base
+// array, and 0178 splices arms into them without introducing a new clock read.
+const WORK_JOURNAL_0178_CLOCK_NAMES = [
+  "_record_journal_entry_core", "_tf_accounting_work_immutable", "claim_work_run",
+  "settle_work_run",
+];
+
 /** The arm (D) roster for the database under test, sorted as the catalog sorts it. */
 export async function s5BareTokenRoster(query) {
   const applied = async (pat) => (await query(
@@ -1002,6 +1017,9 @@ export async function s5BareTokenRoster(query) {
   )).rows[0].ok === true;
   if (await procExists("clara.archive_chat_session(uuid,text)")) {
     names.push(...WEB_READS_DOORS_CLOCK_NAMES);
+  }
+  if (await appliedStem("accounting_work_journal_successor$")) {
+    names.push(...WORK_JOURNAL_0178_CLOCK_NAMES);
   }
   return names.sort();
 }

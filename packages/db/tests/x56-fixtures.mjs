@@ -38,6 +38,19 @@ export async function hasB3() {
   return r.rows[0].n === 1;
 }
 
+/** #623 frontier probe: has the accounting-work lane landed? Same STEM discipline as hasB3 —
+ *  the number is claimed at merge, the stem is not. It matters to the approve-writer census
+ *  because clara._record_journal_entry_core posts its documentless entry as a DRAFT and then
+ *  flips it with the very UPDATE that census detects. That is deliberate, not incidental:
+ *  clara._tf_assert_agent_post_receipt fires AFTER UPDATE, so an insert-approved shortcut
+ *  would slip past the one wall that makes the post receipt structural. */
+export async function has623() {
+  const r = await rootQuery(
+    "select count(*)::int as n from clara.schema_migrations where version ~ 'accounting_work_journal_successor$'",
+  );
+  return r.rows[0].n === 1;
+}
+
 /** Q-D6's close-seal wall (`migrations/0161_qd6_close_seal_wall.sql`) — the FIFTEENTH
  *  gate-catalog row, drawer 1. Read from the LIVE CATALOG, never a filename and never a
  *  schema_migrations row, so a renumber cannot move it.

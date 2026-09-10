@@ -203,14 +203,26 @@ test("x42.r8.tails.4 TAIL 1(a) approve-path census, widened, matches the pinned 
   // [B3 / ADR-068 ruling 1] the SIXTH is reopen_fiscal_year, which mints its own ends_on-dated
   // reversal of the closing entry in-body instead of delegating to reverse_entry. Gated on the
   // migration STEM, never a number: B3's numbers are claimed at merge.
+  // [#623] the SEVENTH is _record_journal_entry_core, the accounting-work lane's UNGRANTED
+  // commit core: it inserts the documentless entry as a draft and flips it with exactly this
+  // UPDATE, deliberately — clara._tf_assert_agent_post_receipt is an AFTER UPDATE trigger, so
+  // an insert-approved shortcut would slip past the one wall that makes the post receipt
+  // structural. Gated on the migration STEM, never a number.
   const n56a = (await rootQuery("select count(*)::int as n from clara.schema_migrations where version like '0056_%'")).rows[0].n;
   const nB3a = (await rootQuery("select count(*)::int as n from clara.schema_migrations where version ~ 'b3_reopen_ends_on$'")).rows[0].n;
-  assert.equal(r.n, nB3a === 1 ? 6 : (n56a === 1 ? 5 : 4));
-  assert.equal(r.names, nB3a === 1
-    ? "_approve_entry_core, _approve_opening_entry, approve_wrong_client_correction, finalize_close, reopen_fiscal_year, reverse_entry"
-    : n56a === 1
-      ? "_approve_entry_core, _approve_opening_entry, approve_wrong_client_correction, finalize_close, reverse_entry"
-      : "_approve_entry_core, _approve_opening_entry, approve_wrong_client_correction, reverse_entry");
+  const n623a = (await rootQuery("select count(*)::int as n from clara.schema_migrations where version ~ 'accounting_work_journal_successor$'")).rows[0].n;
+  // Built ADDITIVELY, in collate "C" order, so each frontier contributes exactly its own name
+  // rather than a fourth hand-written full-roster branch.
+  const expected = [
+    "_approve_entry_core", "_approve_opening_entry",
+    ...(n623a === 1 ? ["_record_journal_entry_core"] : []),
+    "approve_wrong_client_correction",
+    ...(n56a === 1 ? ["finalize_close"] : []),
+    ...(nB3a === 1 ? ["reopen_fiscal_year"] : []),
+    "reverse_entry",
+  ];
+  assert.equal(r.n, expected.length);
+  assert.equal(r.names, expected.join(", "));
 });
 
 test("x42.r8.tails.4b TAIL 1(b) hook-caller census, widened WITH the self-match guard, matches the pinned four — and WITHOUT the guard, self-matches the hook itself (proving the guard is load-bearing)", async (t) => {

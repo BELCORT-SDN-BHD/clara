@@ -17,7 +17,7 @@ import {
 } from "./wave-a-fixtures.mjs";
 import * as wb from "./wave-b/wb-fixtures.mjs";
 import {
-  has0056, hasB3, caught, cleanCloseableFY, beginClose, finalizeClose, reopenFY,
+  has0056, hasB3, has623, caught, cleanCloseableFY, beginClose, finalizeClose, reopenFY,
   grantCapability, revokeCapability, freshActiveClient, proposeFY, openFY, addDaysStr,
   forgeClosedPeriodMovement, setupCloseCoa, plainEntry, BANK1, RE1, REVN, EXPN, attestCloseSig,
 } from "./x56-fixtures.mjs";
@@ -69,15 +69,28 @@ test("A19e finalize_close authors the closing entry in-body (draft then census-v
   // (x42b0-r8-tails.4): once the B3 pair lands, reopen_fiscal_year performs its OWN
   // census-visible flip instead of delegating to reverse_entry, so the roster grows five to
   // six. NAMES first, so a drift NAMES itself rather than reading as an off-by-one.
+  // [#623] the same gate, one lane later: clara._record_journal_entry_core drafts the
+  // documentless accounting-work entry and flips it with this very UPDATE, because the
+  // agent-post receipt wall is an AFTER UPDATE trigger and an insert-approved shortcut would
+  // slip past it. So the roster grows again — and the expectation is built ADDITIVELY, in
+  // collate "C" order, so each frontier contributes exactly its own name and a drift still
+  // NAMES itself rather than reading as an off-by-one.
   const b3 = await hasB3();
+  const w623 = await has623();
+  const expected = [
+    "_approve_entry_core", "_approve_opening_entry",
+    ...(w623 ? ["_record_journal_entry_core"] : []),
+    "approve_wrong_client_correction", "finalize_close",
+    ...(b3 ? ["reopen_fiscal_year"] : []),
+    "reverse_entry",
+  ];
   assert.equal(
     census.names,
-    b3
-      ? "_approve_entry_core, _approve_opening_entry, approve_wrong_client_correction, finalize_close, reopen_fiscal_year, reverse_entry"
-      : "_approve_entry_core, _approve_opening_entry, approve_wrong_client_correction, finalize_close, reverse_entry",
-    "the pinned four PLUS finalize_close (PLUS reopen_fiscal_year once B3 lands), in collate \"C\" order",
+    expected.join(", "),
+    "the pinned four PLUS finalize_close (PLUS reopen_fiscal_year once B3 lands, PLUS "
+    + "_record_journal_entry_core once #623 lands), in collate \"C\" order",
   );
-  assert.equal(census.n, b3 ? 6 : 5, `approve-writer count (got ${census.n}: ${census.names})`);
+  assert.equal(census.n, expected.length, `approve-writer count (got ${census.n}: ${census.names})`);
 
   // The body itself: born draft, flipped by a literal UPDATE (never an insert-approved,
   // which would be invisible to the census above).

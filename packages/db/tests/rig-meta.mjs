@@ -1462,6 +1462,33 @@ export async function coaTemplatePrbSigFailures() {
   return failures;
 }
 
+// #623 [0178, the first persistent Clara successor] — the ACCOUNTING-WORK lane. One cohort, for
+// the same "wholly present or wholly absent" reason every earlier wave's list carries: folding
+// these names into an older roster would red every pre-0178 database, and `cohortFailures()`
+// fails a PARTIAL cohort by design.
+//
+//   the FOUR admission/lifecycle verbs — clara_runtime ONLY, mirroring clara.begin_chat_turn's
+//   own grant (0006:1176). The wake roles gain ZERO: a lane that could admit its own work would
+//   be an agent deciding what it is authorised to do.
+const WORK_JOURNAL_0178_RUNTIME_FNS = [
+  "admit_journal_work", "retry_accounting_work", "claim_work_run", "settle_work_run",
+];
+//   the ONE wake wrapper — clara_wake_interactive ONLY (the group role the runtime's WRITE pool
+//   SET ROLEs to), gated further by exactly one `interactive_client` wake_fn_allowlist row.
+const WORK_JOURNAL_0178_WAKE_FNS = ["wake_record_journal_entry"];
+//   …and the UNGRANTED closure: the core that holds every journal DML, the basis predicates the
+//   admission and commit lanes share, and the two trigger bodies. Listed so `cohortFailures`
+//   reports a half-applied 0178 rather than a silently narrower boundary.
+const WORK_JOURNAL_0178_UNGRANTED_FNS = [
+  "_record_journal_entry_core", "_assert_journal_basis", "_journal_basis_canonical",
+  "_journal_basis_digest", "_journal_cents", "_tf_accounting_work_immutable",
+  "_tf_accounting_work_status_mirror",
+];
+export const WORK_JOURNAL_0178_COHORT = [
+  ...WORK_JOURNAL_0178_RUNTIME_FNS, ...WORK_JOURNAL_0178_WAKE_FNS,
+  ...WORK_JOURNAL_0178_UNGRANTED_FNS,
+];
+
 export const ALLOWED = {
   // Slice-4 governance writers (contract v2.1 §3.2/3.3/3.5): human lane only.
   [ROLES.authenticated]: new Set([
@@ -1631,7 +1658,12 @@ export const ALLOWED = {
     // F-A4 PR-2a's thirteenth wrapper -- the ONE new privilege in that whole train (NON-GOAL 3:
     // no floor moves anywhere). DRAFT-ONLY by construction: it reaches only the propose core, and
     // status='live' is written by clara.sign_adjustment_template alone, which holds no wake grant.
-    ...F_A4_PR2A_WAKE_FNS]),
+    ...F_A4_PR2A_WAKE_FNS,
+    // [#623, 0178] the accounting-work commit door. The write pool SET ROLEs to this group role
+    // for every interactive kind, and the `interactive_client` allowlist row is the KIND gate on
+    // top of it: a plain `interactive` credential holding this EXECUTE is still refused by the
+    // wrapper's own typed wrong_wake_kind arm and by assert_wake_allowed behind it.
+    ...WORK_JOURNAL_0178_WAKE_FNS]),
   [ROLES.wakeProactive]: new Set(["wake_record_notification"]),
   // F-A6 PR-1 — BOTH new roles are KEYS, and that is the whole point of adding them (E.2/C11,
   // GM-6): `grantMatrixFailures` iterates Object.keys(ALLOWED), so a role that is not a key is
@@ -1730,6 +1762,9 @@ export const ALLOWED = {
     // 裁-190: the migration frontier read for /build-info, and the statement lane's institution
     // resolver. clara_runtime ONLY — see the block above; neither table gains a grant.
     ...WEB_READS_DOORS_RUNTIME_FNS,
+    // [#623, 0178] the accounting-work admission and run lifecycle — clara_runtime ONLY, the
+    // same lane clara.begin_chat_turn sits in (0006:1176).
+    ...WORK_JOURNAL_0178_RUNTIME_FNS,
     // [F-A2 PR-2, GM-10] the withdrawal re-admit door — clara_runtime ONLY (the consumer's
     // sole caller); proves the event->entry->attempt->task->filing chain then delegates to
     // 0053's one_click exception. Declared here so any wider grant FAILS the matrix.
@@ -1955,6 +1990,7 @@ export async function grantMatrixFailures() {
   failures.push(...cohortFailures("0090-0095 wave F F-A1 witness-pair lane", WITNESS_F_A1_COHORT, liveNames));
   failures.push(...cohortFailures("F-A1 PR-3 cutover: fail_witness_facts", WITNESS_F_A1_PR3_COHORT, liveNames));
   failures.push(...cohortFailures("F-A3 PR-1a bank/COA core extractions", EXTRACTION_F_A3_PR1A_COHORT, liveNames));
+  failures.push(...cohortFailures("#623 0178 accounting-work lane", WORK_JOURNAL_0178_COHORT, liveNames));
   failures.push(...cohortFailures("wave F F-A1 PR-4 bank-statement witness cutover", STATEMENT_F_A1_PR4_COHORT, liveNames));
   // F-A6's cohort is bimodal: wholly present once PR-1 applies, wholly absent before it. Half a
   // cohort is a half-applied migration and is reported as one.

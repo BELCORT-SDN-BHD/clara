@@ -110,6 +110,18 @@ export const WAKE_ALLOWLIST_ROSTER = {
         + "attended chat session can drive them; the attended-authority floor (A8) is a separate, "
         + "per-verb wall inside the wrapper, not a fact this allowlist roster carries.",
     })),
+    {
+      fn: "wake_record_journal_entry",
+      stem: "accounting_work_journal_successor",
+      applied: fnExists("clara.wake_record_journal_entry(uuid,uuid,text,jsonb,text,text,text)"),
+      why: "#623 (0178): the accounting-work commit door. It DOES post — one approved "
+        + "documentless journal entry plus one operation receipt — and it is registered here "
+        + "deliberately rather than smuggled in. The 0107 comment that this kind 'posts nothing' "
+        + "was already superseded at 0129, where four of the thirteen mirrored bank verbs post; "
+        + "what the kind still guarantees is the CLIENT PIN, which this wrapper enforces "
+        + "unconditionally (an unpinned interactive_client credential is refused outright) and "
+        + "which is what keeps a chat session's authority scoped to the client it is about.",
+    },
   ],
 };
 

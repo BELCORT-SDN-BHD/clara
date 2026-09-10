@@ -75,7 +75,14 @@ apply the migration, then resume. Calls already executing can finish on their pr
 A changed function named in `clara.control_witnesses` must receive the matching reviewed
 `prosrc_sha` in the same migration, or its dependent gate refuses.
 
-A migration can invert that order, so read its header before applying it.
+A migration can invert that order, so read its header before applying it. Not every migration
+carries one: [0178_accounting_work_journal_successor.sql](migrations/0178_accounting_work_journal_successor.sql)
+states in its header that it owes **no** consumer-first obligation, and why — every object it adds
+is new, no deployed lane produces or consumes the `accounting_work` task kind until its own
+admission verb is called, and the one live body it replaces (`clara._tf_assert_agent_post_receipt`)
+is replaced with a strict widening, so nothing legal before the migration becomes illegal after it.
+It still rides the writer quiescence window for function-body replacement, because a call already
+executing finishes on its previous body.
 [0177_classify_after_extraction.sql](migrations/0177_classify_after_extraction.sql) requires the
 extraction-aware facts_gate consumer ([../runtime/lib/facts-gate.mjs](../runtime/lib/facts-gate.mjs))
 to be deployed before the migration is applied, so a `document.extraction_completed` event emitted
@@ -115,7 +122,7 @@ every label it asserts to prove the analyser can still see.
 `granted_uncalled` — the informational label — groups by bare function name, so an uncalled
 OVERLOAD of an otherwise-called name is not reported: a scanned call site resolves to every
 overload of the name it spells, and choosing one would need overload resolution the scanner
-does not attempt. At frontier 0177 that covers three of 470 distinct public names
+does not attempt. At frontier 0178 that covers three of 475 distinct public names
 (`consume_egress_dispatch`, `prepare_egress_dispatch`, `settle_autodraft_task`), each called
 only from runtime SQL with positional arguments. The labels that gate — `called_ungranted` and
 `named_arg_mismatch` among them — are decided per call site and are unaffected.
