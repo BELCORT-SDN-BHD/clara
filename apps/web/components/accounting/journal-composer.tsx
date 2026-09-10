@@ -434,8 +434,15 @@ export function JournalComposerView({
           documents (tens, not thousands), a native select is typeable, works at
           320 px and at 200 % zoom, needs no portal and no focus trap, and it is
           the one control every assistive technology already knows. */}
-      <fieldset className="flex flex-col gap-1.5 border-0 p-0">
-        <legend className="text-sm font-medium">{tm("evidence.legend")}</legend>
+      <div className="flex flex-col gap-1.5">
+        {/* A REAL `<label for>`, not a `<legend>`. MEASURED, on this ticket's own
+            browser walk: a `<fieldset>`/`<legend>` around ONE control gives the
+            group a name and leaves the `<select>` itself nameless — axe-core's
+            `select-name` rule is critical about exactly that, and a screen
+            reader landing on the control would hear no name at all. The other
+            two controls on this form are labelled the same way; this one now
+            matches them. */}
+        <Label htmlFor={fieldElementId("evidence")}>{tm("evidence.legend")}</Label>
         <p id={`${fieldElementId("evidence")}-help`} className="text-xs text-muted-foreground">
           {tm("evidence.help")}
         </p>
@@ -482,7 +489,7 @@ export function JournalComposerView({
             {tm("evidence.unavailable")}
           </StateBanner>
         ) : null}
-      </fieldset>
+      </div>
 
       {/* THE CHART READ IS A SEPARATE FAILURE FROM THE FORM'S. A preparer who
           knows the code can still submit; the commit rechecks every account
