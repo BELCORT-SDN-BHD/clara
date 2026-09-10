@@ -34,7 +34,6 @@ after(async () => {
 });
 
 const A1 = () => world.clients.A1;
-const B1 = () => world.clients.B1;
 const ALICE = () => world.users.alice;   // owner, firm A
 const BOB = () => world.users.bob;       // bookkeeper, firm A
 const CAROL = () => world.users.carol;   // viewer, firm A

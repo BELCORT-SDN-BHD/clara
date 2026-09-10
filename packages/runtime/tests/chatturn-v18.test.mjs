@@ -93,8 +93,13 @@ test("623.v18: the registry pins chatTurn at v18 and adds claraWork as a NEW cla
   assert.equal(registry.workflows.chatTurn, registry.chatTurn_v18, "chatTurn: routes to the v18 body");
   assert.ok(typeof registry.workflows.claraWork === "function", "claraWork: is registered");
   assert.ok(registry.workflowNames.includes("claraWork"), "the class name is dispatchable by string too");
-  // A NEW class, never a repoint: nothing that was already routed changed target except chatTurn.
-  assert.match(REGISTRY_SRC, /claraWork: claraWork_v1/);
+  // #623 ADDED `claraWork` AS A NEW CLASS; #629 THEN REPOINTED IT v1 -> v2 (the typed shared
+  // question). The claim this cell was written for is unchanged and still asserted — the key is
+  // dispatchable, chatTurn is untouched by the Work lane's own cutover, and every predecessor
+  // stays EXPORTED under policy (c) — so the pin is updated rather than the cell deleted.
+  assert.match(REGISTRY_SRC, /claraWork: claraWork_v2/);
+  assert.ok(typeof registry.claraWork_v1 === "function", "v1 is still exported for parked runs and rollback");
+  assert.ok(typeof registry.claraWork_v2 === "function", "…and the pinned body is exported too");
   assert.match(REGISTRY_SRC, /chatTurn: chatTurn_v18/);
   // v17 stays EXPORTED (policy (c)) so a parked run resumes and a rollback has a target.
   assert.ok(typeof registry.chatTurn_v17 === "function", "v17 is still exported");

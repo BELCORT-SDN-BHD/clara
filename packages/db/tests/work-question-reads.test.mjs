@@ -15,7 +15,7 @@ import assert from "node:assert/strict";
 import {
   gateQuestion, buildWorkWorld, endPool, printLaneNotes, printSkipCount,
   admitJournalWork, claimWorkRun, settleWorkRun, cancelAgentTask,
-  openWorkQuestion, answerWorkQuestion, parkedWork, interruptionRow,
+  answerWorkQuestion, parkedWork, interruptionRow,
   getWorkQuestion, getWorkPendingQuestion, expireDueInterruptions, listReviewQueue,
   twoFields, twoFieldAnswer, questionPayload, QREASON, CLR, ROLES, roleQuery, namedCall,
   assertPair, assertRaises, detailOf, rootQuery, opk, workRow, freshWorkClient,
