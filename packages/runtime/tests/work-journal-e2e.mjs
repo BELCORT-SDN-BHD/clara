@@ -38,6 +38,14 @@
 //      admitted row from the database too (basis, digest, `basis_origin='user_direct'`, no source
 //      refs), so the C3/B6 basis equality is measured on both sides and the two DIGESTS are
 //      compared — same figures, same digest, whichever entry point produced them.
+//   8. #634 OPTIONAL EVIDENCE, END TO END. A Work admitted with `sourceRefs:[{kind:'document'}]`
+//      posts an entry whose `clara.entry_evidence_links` row names the document, the Work and the
+//      receipt, with `document_id` on the receipt's own `effects` — and with
+//      `journal_entries.document_id` still NULL, because a posted entry is never rewritten and
+//      that column is the document-coding lane's trio. Then the half only a real boundary can
+//      prove: a SECOND intent naming the same document is a 409 `source_already_posted` whose
+//      body NAMES the entry already standing there, with no second Work, no second run and no
+//      second entry. Skips cleanly below the 0182 frontier.
 //
 // GATED. `CLARA_SKIP_WORK_E2E=1` opts out (the heavy-test precedent), and the file SKIPS CLEANLY
 // when migration 0178 is absent — its runtime half merges alongside its DB half, and a green e2e
@@ -237,6 +245,28 @@ async function main() {
     process.exit(0);
   }
 
+  // #634's own frontier, probed separately: this branch's runtime half merges alongside its DB
+  // half, and leg 8 must SKIP rather than red on a database that has 0178 but not 0182.
+  const evProbe = await rig.rootQuery(`
+    select to_regclass('clara.entry_evidence_links') is not null as links_tbl,
+           to_regprocedure('clara.attach_entry_evidence(uuid,uuid,uuid,text)') is not null as attach
+  `);
+  const EVIDENCE_READY = Boolean(evProbe.rows[0]?.links_tbl && evProbe.rows[0]?.attach);
+
+  /** A verified document FILED to this client, through the estate's own seed helper (which mints
+   *  the client resolution and the filing the evidence predicate reads). */
+  const seedFiledDocument = async (firm, client, tag) => {
+    const sha256 = (randomUUID() + randomUUID()).replace(/-/g, "").slice(0, 64);
+    const r = await rig.rootQuery(
+      `select clara._seed_verified_document(
+         p_firm => $1::uuid, p_client => $2::uuid, p_sha256 => $3::text, p_filename => $4::text,
+         p_mime => 'application/pdf', p_bytes => 1024::bigint, p_storage_path => $5::text,
+         p_document_kind => 'invoice') as receipt`,
+      [firm, client, sha256, `${tag}.pdf`, `firms/${firm}/docs/${sha256}.pdf`],
+    );
+    return r.rows[0].receipt.document_id;
+  };
+
   const countEntries = (client) =>
     rig.rootQuery("select count(*)::int as n from clara.journal_entries where client_id = $1", [client]).then((r) => r.rows[0].n);
   const countReceipts = (work) =>
@@ -363,6 +393,95 @@ async function main() {
       "the 409 names the FIRST Work, so the web's 'you already asked this' affordance points somewhere real");
     assert.equal(await countEntries(one.client), 1, "the conflict created NO second effect");
     console.log("[work-e2e] PASS 3: a changed payload under the same intent key is a typed conflict with no effect");
+
+    // ---- 8. #634: a Work admitted WITH a document, and the second one that cannot have it ----
+    // The whole point of this leg is that the three entry points (with evidence, without, and
+    // late) cannot double-post: the document a posted entry stands on is CLAIMED, and a second
+    // intent naming it is refused at ADMISSION — before a Work exists, before a run is queued,
+    // before a cent of budget is spent — with the entry that already stands there named, so the
+    // browser opens impact/correction instead of resubmitting.
+    if (EVIDENCE_READY) {
+      const ev = await seedClient("we-evidence");
+      const doc = await seedFiledDocument(ev.firm, ev.client, "we-evidence");
+      const evAdmit = await api(
+        "POST",
+        "/api/work/journal",
+        {
+          clientId: ev.client,
+          intentKey: randomUUID(),
+          basis: basisFor("office rent — e2e evidence"),
+          sourceRefs: [{ kind: "document", documentId: doc }],
+        },
+        ev.jwt,
+      );
+      assert.equal(evAdmit.status, 202, `an evidence-bearing admission is a 202 (got ${evAdmit.status} ${JSON.stringify(evAdmit.body)})`);
+      const evWork = await readWork(evAdmit.body.work_id);
+      assert.equal(evWork.source_refs?.[0]?.kind, "document", "the Work carries the document the human chose");
+      assert.equal(evWork.source_refs[0].document_id, doc);
+
+      const evDone = await pollWork(evAdmit.body.work_id, ev.jwt, (b) => TERMINAL.has(b.work.status), "evidence work settles");
+      assert.equal(evDone.work.status, "completed", `the evidence Work completes (got ${evDone.work.status} / ${JSON.stringify(evDone.work.error)})`);
+      assert.equal(await countEntries(ev.client), 1, "exactly ONE journal entry");
+      assert.equal(await countReceipts(evAdmit.body.work_id), 1, "exactly ONE committed operation receipt");
+
+      const evReceipt = await rig.rootQuery("select effects from clara.operation_receipts where work_id = $1", [evAdmit.body.work_id]);
+      assert.equal(evReceipt.rows[0].effects.document_id, doc, "the receipt's effects NAME the evidence");
+      assert.equal(evReceipt.rows[0].effects.entry_id, evDone.work.result.entry_id);
+
+      const evLinks = await rig.rootQuery("select * from clara.entry_evidence_links where entry_id = $1", [evDone.work.result.entry_id]);
+      assert.equal(evLinks.rows.length, 1, "exactly ONE evidence link");
+      assert.equal(evLinks.rows[0].document_id, doc);
+      assert.equal(evLinks.rows[0].work_id, evAdmit.body.work_id, "the link names the Work it was born in");
+      assert.equal(evLinks.rows[0].attached_via, "work_commit");
+      assert.equal(evLinks.rows[0].attached_by, ev.owner, "attributed to the human, not the agent");
+
+      // The POSTED entry is untouched by the document-coding trio — evidence lives beside it.
+      const evEntry = await rig.rootQuery("select document_id, filing_id, source_doc_sha256 from clara.journal_entries where id = $1", [
+        evDone.work.result.entry_id,
+      ]);
+      assert.equal(evEntry.rows[0].document_id, null, "journal_entries.document_id stays NULL — a posted entry is never rewritten");
+      assert.equal(evEntry.rows[0].filing_id, null);
+      assert.equal(evEntry.rows[0].source_doc_sha256, null, "and no document sha is fabricated");
+
+      // A SECOND intent naming the SAME document: refused at admission, no second effect.
+      const clash = await api(
+        "POST",
+        "/api/work/journal",
+        {
+          clientId: ev.client,
+          intentKey: randomUUID(),
+          basis: basisFor("office rent — e2e evidence clash", 99000),
+          sourceRefs: [{ kind: "document", documentId: doc }],
+        },
+        ev.jwt,
+      );
+      assert.equal(clash.status, 409, `a second Work on the same document is a 409 (got ${clash.status} ${JSON.stringify(clash.body)})`);
+      assert.equal(clash.body.error, "source_already_posted");
+      assert.equal(clash.body.entry_id, evDone.work.result.entry_id, "the 409 NAMES the entry already standing on the document");
+      assert.equal(clash.body.document_id, doc);
+      await sleep(500);
+      assert.equal(await countEntries(ev.client), 1, "the conflict created NO second effect");
+      const works = await rig.rootQuery("select count(*)::int as n from clara.accounting_work where client_id = $1", [ev.client]);
+      assert.equal(works.rows[0].n, 1, "…and no second Work, no second run");
+
+      // A malformed / foreign document is a 400 that names the CONTROL, not a 500.
+      const bad = await api(
+        "POST",
+        "/api/work/journal",
+        {
+          clientId: ev.client,
+          intentKey: randomUUID(),
+          basis: basisFor("office rent — e2e evidence bad"),
+          sourceRefs: [{ kind: "document", documentId: "00000000-0000-4000-8000-000000634fff" }],
+        },
+        ev.jwt,
+      );
+      assert.equal(bad.status, 400, `an unfiled document is a 400 (got ${bad.status} ${JSON.stringify(bad.body)})`);
+      assert.deepEqual(bad.body, { error: "invalid_basis", field: "sourceRefs[1]", reason: "invalid_source_ref" });
+      console.log("[work-e2e] PASS 8: evidence rides admission -> commit -> link + receipt; a second Work on the same document is refused with no effect");
+    } else {
+      console.log("[work-e2e] PASS 8: SKIPPED — migration 0182 (clara.entry_evidence_links) is not on this database");
+    }
 
     // ---- 7. B6: a REAL chatTurn_v18 turn admits the Work -------------------
     // Everything in this leg is the production path: an HTTP session, an HTTP turn, the frozen
