@@ -1,8 +1,9 @@
 "use client";
 
-// A controlled editor for a journal entry's line array — shared by the compose
-// dialog (a brand-new entry) and the drafts panel's revise form (an existing
-// entry's lines). Emits `EntryLineInput[]` (lib/journals/types.ts) — the exact
+// A controlled editor for a journal entry's line array — used by the drafts
+// panel's REVISE form (an existing entry's lines). It was also the manual
+// compose Dialog's editor until #634 retired that ceremony; journey C3's
+// composer has its own (components/accounting/journal-basis-fields.tsx). Emits `EntryLineInput[]` (lib/journals/types.ts) — the exact
 // shape `draft_entry`/`revise_entry` accept as `p_lines`. This component does
 // NOT validate balance or account existence itself — the DB is the authority
 // (CLR07/CLR10 on a real submit); it only shows the client-side PRESENTATION

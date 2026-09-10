@@ -2,10 +2,13 @@ import { JournalsWorkbench } from "@/components/journals/journals-workbench";
 
 /**
  * "/clients/:clientId/journals" — one tab of the client workspace (owner
- * ruling Q3). The real surface: drafts, the review queue (approve/revise), the
- * manual JE compose ceremony, and posted-entry reversal (law 6: reverse-not-
- * delete — there is no delete verb). See lib/journals/api.ts for the full
- * verb/view grounding, migration-cited.
+ * ruling Q3). The real surface: the DOCUMENT-sourced drafts queue, the review
+ * queue (approve/revise/withdraw), the posted table with its Work / receipt /
+ * source / correction links, and posted-entry reversal (law 6: reverse-not-
+ * delete — there is no delete verb). #634 RETIRED the manual JE compose
+ * ceremony that used to live here: the one manual-JV entry point is journey C3's
+ * composer route, and this page's primary act links to it. See lib/journals/api.ts
+ * for the full verb/view grounding, migration-cited.
  *
  * A Server Component boundary only — `clientId` is handed straight to the
  * Client Component that owns the actual hydration (direct RLS reads via
