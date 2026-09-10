@@ -74,6 +74,7 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 type WireLine = { accountCode?: unknown; debitCents?: unknown; creditCents?: unknown; description?: unknown };
 type WireBasis = { postingDate?: unknown; memo?: unknown; currency?: unknown; lines?: unknown };
+type WireSourceRef = { kind?: unknown; documentId?: unknown };
 
 /** A 400 payload: the offending field and the machine-readable reason, so the composer can put
  *  the error beside the control that produced it instead of showing one banner for everything. */
@@ -179,6 +180,55 @@ export function toDbBasis(raw: unknown): { ok: true; basis: Record<string, unkno
     ok: true,
     basis: { posting_date: basis.postingDate, memo: basis.memo, currency: "MYR", lines },
   };
+}
+
+/**
+ * #634 — THE OPTIONAL EVIDENCE ON AN ADMISSION, translated into the database's own shape.
+ *
+ * EVIDENCE IS OPTIONAL, AND ABSENCE IS NOT A REFUSAL. An omitted, null or empty `sourceRefs` is a
+ * documentless Work — the C3 expert path #623 shipped, unchanged. The one supported kind on THIS
+ * door is `document`: `chat_task` refs are the FROZEN `chatTurn.v18` lane's to mint (it puts the
+ * conversation's own task and session on the Work), and a browser asserting one would be a client
+ * claiming provenance it does not have.
+ *
+ * The field paths are 1-BASED and spelled `sourceRefs[N]`, which is the WIRE spelling of the
+ * database's own `source_refs[N]` (see `toWireField`). One vocabulary, one mapper — the same law
+ * the WIRE FIELD PATHS note in this file's header states for the basis.
+ */
+export function toDbSourceRefs(
+  raw: unknown,
+): { ok: true; sourceRefs: Array<Record<string, unknown>> } | { ok: false; error: InvalidBasis } {
+  if (raw === undefined || raw === null) return { ok: true, sourceRefs: [] };
+  if (!Array.isArray(raw)) return { ok: false, error: invalid("sourceRefs", "array") };
+  const refs: Array<Record<string, unknown>> = [];
+  let documents = 0;
+  for (let i = 0; i < raw.length; i += 1) {
+    const path = `sourceRefs[${i + 1}]`;
+    const ref = raw[i] as WireSourceRef;
+    if (!ref || typeof ref !== "object" || Array.isArray(ref)) {
+      return { ok: false, error: invalid(path, "object") };
+    }
+    if (ref.kind !== "document") return { ok: false, error: invalid(path, "kind") };
+    documents += 1;
+    // At most ONE document per Work in this ticket (multi-document evidence is out of scope).
+    // Refused HERE as well as in the database because the composer can put the error beside the
+    // control, and because a Work admitted with two would be unpostable anyway.
+    if (documents > 1) return { ok: false, error: invalid(path, "at_most_one_document") };
+    if (typeof ref.documentId !== "string" || !UUID_RE.test(ref.documentId)) {
+      return { ok: false, error: invalid(path, "uuid") };
+    }
+    refs.push({ kind: "document", document_id: ref.documentId });
+  }
+  return { ok: true, sourceRefs: refs };
+}
+
+/** The WIRE spelling of a field path the DATABASE raised. Every path is the database's already —
+ *  EXCEPT its evidence array, which it spells `source_refs` and the browser posts as `sourceRefs`.
+ *  This is the ONE place that translation happens, for the same reason `linePath` is the one place
+ *  the 1-based arithmetic happens. */
+function toWireField(field: string | null): string | null {
+  if (field === null) return null;
+  return field.startsWith("source_refs") ? `sourceRefs${field.slice("source_refs".length)}` : field;
 }
 
 /**
@@ -295,12 +345,27 @@ export function workErrorResponse(err: unknown): { status: number; body: Record<
       status: 400,
       body: {
         error: "invalid_basis",
-        field: fieldOf(err) ?? "basis",
+        field: toWireField(fieldOf(err)) ?? "basis",
         reason: reason === "invalid_basis" && constraint !== null ? constraint : (reason ?? "invalid_basis"),
       },
     };
   }
   if (status === 409) {
+    if (reason === "source_already_posted") {
+      // #634 · THE ENTRY ID IS THE WHOLE POINT OF THIS 409. The document the human chose already
+      // backs a posted entry, and an attachment conflict OPENS IMPACT/CORRECTION rather than
+      // becoming a second effect — so the answer carries the entry that already stands there and
+      // the document that was refused, and the composer offers a link to it instead of a
+      // resubmit of the same intent. Neither id is invented: a detail without one answers null.
+      return {
+        status: 409,
+        body: {
+          error: "source_already_posted",
+          entry_id: detailField(err, "entry_id"),
+          document_id: detailField(err, "document_id"),
+        },
+      };
+    }
     if (reason === "not_retryable") {
       // The contract's 409 body: the machine-readable error AND the Work status that made the
       // retry illegal, which is what the detail's own `status` field carries.
@@ -340,7 +405,9 @@ export function workRoutes(): express.Router {
       res.status(503).json({ error: "shutting_down", message: "the runtime is draining — retry shortly" });
       return;
     }
-    const body = (req.body ?? {}) as { clientId?: unknown; intentKey?: unknown; basis?: unknown };
+    const body = (req.body ?? {}) as {
+      clientId?: unknown; intentKey?: unknown; basis?: unknown; sourceRefs?: unknown;
+    };
     if (typeof body.clientId !== "string" || !UUID_RE.test(body.clientId)) {
       // A malformed client id is a NOT-FOUND, never a database error (#614's lesson).
       res.status(404).json({ error: "not_found", message: "not found" });
@@ -360,13 +427,24 @@ export function workRoutes(): express.Router {
       res.status(400).json(translated.error);
       return;
     }
+    // #634 · OPTIONAL EVIDENCE. Validated at the same door and in the same vocabulary as the
+    // basis; the database re-validates every element and is the authority (it alone can say
+    // whether the document is an active verified filing of THIS client).
+    const refs = toDbSourceRefs(body.sourceRefs);
+    if (!refs.ok) {
+      res.status(400).json(refs.error);
+      return;
+    }
 
     try {
       const admitted = await withRuntime(async (c) => {
         const p = await authenticate(c, req.header("authorization"));
         const r = await c.query(
           "select clara.admit_journal_work($1::uuid, $2::uuid, $3::text, $4::jsonb, $5::text, $6::jsonb, $7::text) as receipt",
-          [body.clientId, p.sub, body.intentKey, JSON.stringify(translated.basis), "user_direct", "[]", DEFAULT_MODEL],
+          [
+            body.clientId, p.sub, body.intentKey, JSON.stringify(translated.basis), "user_direct",
+            JSON.stringify(refs.sourceRefs), DEFAULT_MODEL,
+          ],
         );
         return (r.rows[0]?.receipt ?? null) as {
           work_id: string;

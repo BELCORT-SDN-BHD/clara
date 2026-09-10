@@ -241,3 +241,110 @@ test("623.route: the other doors are unchanged, and an unmapped code is a 500 ra
   assert.equal(workErrorResponse(new Error("no code at all")), null);
   assert.equal(workErrorStatus("CLR10", "intent_payload_conflict"), 409, "the status map itself is untouched");
 });
+
+// ===========================================================================================
+// #634 — OPTIONAL EVIDENCE ON THE ADMISSION DOOR.
+//
+// The wire carries `sourceRefs: [{kind:'document', documentId}]` or nothing at all, and the
+// route's job is the same as `toDbBasis`'s: name the offending element in the DATABASE's own
+// vocabulary so ONE mapper in `apps/web/lib/work/journal-basis.ts` can focus the control that
+// produced it. The index is 1-BASED for the same reason every other field path here is — SQL's
+// `with ordinality` counts from one and the database generates its paths FROM that ordinal.
+// ===========================================================================================
+
+const { toDbSourceRefs } = await import("../src/workRoutes.ts");
+
+const DOC = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+const refuseRefs = (raw) => {
+  const out = toDbSourceRefs(raw);
+  assert.equal(out.ok, false, `expected a refusal, got ${JSON.stringify(out)}`);
+  return out.error;
+};
+
+test("634.route: evidence is OPTIONAL — absent, null and empty all admit as a documentless Work", () => {
+  for (const raw of [undefined, null, []]) {
+    const out = toDbSourceRefs(raw);
+    assert.equal(out.ok, true, `${JSON.stringify(raw)} admits`);
+    assert.deepEqual(out.sourceRefs, [], "…as an EMPTY array, never a fabricated ref");
+  }
+});
+
+test("634.route: one document ref is translated into the database's own snake_case shape", () => {
+  const out = toDbSourceRefs([{ kind: "document", documentId: DOC }]);
+  assert.equal(out.ok, true);
+  assert.deepEqual(out.sourceRefs, [{ kind: "document", document_id: DOC }],
+    "the route speaks the database's spelling, exactly as toDbBasis does");
+});
+
+test("634.route: a malformed ref is refused by name, with a 1-BASED sourceRefs path", () => {
+  assert.deepEqual(refuseRefs("nope"), { error: "invalid_basis", field: "sourceRefs", reason: "array" });
+  assert.deepEqual(refuseRefs([null]), { error: "invalid_basis", field: "sourceRefs[1]", reason: "object" });
+  assert.deepEqual(refuseRefs([{ documentId: DOC }]), { error: "invalid_basis", field: "sourceRefs[1]", reason: "kind" });
+  assert.deepEqual(refuseRefs([{ kind: "chat_task", documentId: DOC }]),
+    { error: "invalid_basis", field: "sourceRefs[1]", reason: "kind" },
+    "the chat lane's own ref kind is the FROZEN chat workflow's to mint, never this browser door's");
+  assert.deepEqual(refuseRefs([{ kind: "document" }]), { error: "invalid_basis", field: "sourceRefs[1]", reason: "uuid" });
+  assert.deepEqual(refuseRefs([{ kind: "document", documentId: "not-a-uuid" }]),
+    { error: "invalid_basis", field: "sourceRefs[1]", reason: "uuid" });
+  // The SECOND element is [2] — the same 1-based arithmetic `linePath` does, in one place.
+  assert.deepEqual(refuseRefs([{ kind: "document", documentId: DOC }, null]),
+    { error: "invalid_basis", field: "sourceRefs[2]", reason: "object" });
+  // At most ONE document per Work in this ticket; the route refuses it early and the database
+  // refuses it again under the same token.
+  assert.deepEqual(
+    refuseRefs([{ kind: "document", documentId: DOC }, { kind: "document", documentId: DOC }]),
+    { error: "invalid_basis", field: "sourceRefs[2]", reason: "at_most_one_document" });
+});
+
+test("634.route: the DATABASE's source_refs[N] path is re-spelled sourceRefs[N] on the wire", () => {
+  // ONE vocabulary, and it is the web's control name. `apps/web/lib/work/journal-basis.ts` maps a
+  // wire path onto a focusable control; the database spells its own array `source_refs`, and a
+  // refusal raised THERE must reach the same control as one raised in this file.
+  const err = raised("CLR10", {
+    reason: "invalid_source_ref", field: "source_refs[1]", constraint: "not_filed",
+  });
+  assert.deepEqual(workErrorResponse(err), {
+    status: 400,
+    body: { error: "invalid_basis", field: "sourceRefs[1]", reason: "invalid_source_ref" },
+  });
+  // A basis path is NOT re-spelled — only the evidence array is.
+  const basisErr = raised("CLR10", { reason: "invalid_basis", field: "lines[1].account_code", constraint: "nonempty" });
+  assert.equal(workErrorResponse(basisErr).body.field, "lines[1].account_code");
+});
+
+test("634.route: source_already_posted is a 409 that NAMES the entry already standing on the document", () => {
+  const err = raised("CLR13", {
+    reason: "source_already_posted",
+    document_id: DOC,
+    entry_id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+    conflict: true,
+  });
+  assert.deepEqual(workErrorResponse(err), {
+    status: 409,
+    body: {
+      error: "source_already_posted",
+      entry_id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      document_id: DOC,
+    },
+  });
+  // The link is never INVENTED: a conflict whose detail carries no entry id answers with null,
+  // and the composer's Alert then shows the conflict without a dead link.
+  const bare = raised("CLR13", { reason: "source_already_posted" });
+  assert.deepEqual(workErrorResponse(bare).body,
+    { error: "source_already_posted", entry_id: null, document_id: null });
+  // …and the commit-time twin (raised inside the run, classified by claraWork's own errors) is
+  // still an ordinary 409 on this surface, because this door never raises it.
+  assert.deepEqual(workErrorResponse(raised("CLR13", { reason: "source_conflict" })),
+    { status: 409, body: { error: "conflict" } });
+});
+
+test("634.route: WORK_MAPPED_CODES still covers every code the evidence arms can raise", async () => {
+  const { WORK_MAPPED_CODES } = await import("../src/workRoutes.ts");
+  // invalid_source_ref rides CLR10; source_already_posted rides CLR13. Both were already claimed
+  // by the map, so #634 widens the REASONS this door answers without widening its CODES — and a
+  // census that says otherwise is a lie in one direction or the other.
+  for (const code of ["CLR10", "CLR13"]) {
+    assert.ok(WORK_MAPPED_CODES.includes(code), `${code} is claimed`);
+    assert.notEqual(workErrorStatus(code, "invalid_source_ref"), null);
+  }
+});

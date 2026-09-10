@@ -594,3 +594,124 @@ test("623.db.census: the two CLR10s the contract distinguishes get DIFFERENT sta
   assert.equal(workErrorStatus("CLR11", "work_not_found"), 404);
   assert.equal(workErrorStatus("CLR04", "insufficient_role"), 403);
 });
+
+// ===========================================================================================
+// #634 — OPTIONAL EVIDENCE, under the SAME `clara_runtime` role, on the RECUT verb.
+//
+// Gated separately from 0178: this branch's DB half is its own migration, and a cell that
+// pretended to pass against a database without `clara.entry_evidence_links` would be worse than
+// one that says it did not run. The DEEP evidence battery (commit, the late door, the conflict
+// matrix, RLS) lives in `packages/db/tests/journal-work-evidence.test.mjs`; what belongs HERE is
+// the runtime's own edge: the recut verb answering `clara_runtime`, and the route's map turning
+// that answer into an HTTP one.
+// ===========================================================================================
+
+const { workErrorResponse } = await import("../src/workRoutes.ts");
+
+async function evidenceLaneReady() {
+  try {
+    const r = await rig.rootQuery(`
+      select to_regclass('clara.entry_evidence_links') is not null as tbl,
+             to_regprocedure('clara.attach_entry_evidence(uuid,uuid,uuid,text)') is not null as attach,
+             to_regprocedure('clara.list_entry_links(uuid,uuid[])') is not null as links
+    `);
+    const row = r.rows[0] ?? {};
+    return row.tbl && row.attach && row.links;
+  } catch {
+    return false;
+  }
+}
+
+const EV_READY = READY && (await evidenceLaneReady());
+const EV_SKIP = EV_READY ? false : "migration 0182 (clara.entry_evidence_links + the evidence doors) is not on this database";
+
+/** A verified document FILED to this client, through the estate's own seed helper (which mints
+ *  the resolution and the filing the coding lane requires). Returns the document id. */
+async function filedDocument(firm, client, tag = "w634") {
+  const sha256 = (randomUUID() + randomUUID()).replace(/-/g, "").slice(0, 64);
+  const r = await rig.rootQuery(
+    `select clara._seed_verified_document(
+       p_firm => $1::uuid, p_client => $2::uuid, p_sha256 => $3::text, p_filename => $4::text,
+       p_mime => 'application/pdf', p_bytes => 1024::bigint, p_storage_path => $5::text,
+       p_document_kind => 'invoice') as receipt`,
+    [firm, client, sha256, `${tag}.pdf`, `firms/${firm}/docs/${sha256}.pdf`],
+  );
+  return r.rows[0].receipt.document_id;
+}
+
+test("634.db: an admission naming a filed client document carries it on the Work", { skip: EV_SKIP }, async () => {
+  const { owner, firm, client } = await rig.buildFirm("w634-doc");
+  const doc = await filedDocument(firm, client, "w634doc");
+  const receipt = await admit(client, owner, `intent_${randomUUID()}`, basis(), "user_direct", [
+    { kind: "document", document_id: doc },
+  ]);
+  assert.equal(receipt.replayed, false);
+  const work = await readWork(receipt.work_id);
+  assert.equal(work.source_refs.length, 1);
+  assert.equal(work.source_refs[0].kind, "document");
+  assert.equal(work.source_refs[0].document_id, doc, "the document the human picked, verbatim");
+
+  // …and evidence is still OPTIONAL: the very same door, same client, no refs, still admits.
+  const bare = await admit(client, owner, `intent_${randomUUID()}`);
+  assert.deepEqual((await readWork(bare.work_id)).source_refs, []);
+});
+
+test("634.db: the recut verb's refusal carries the (code, reason, field) triple the route maps", { skip: EV_SKIP }, async () => {
+  const { owner, client } = await rig.buildFirm("w634-ref");
+
+  // A uuid that names no filing of this client — the same answer a foreign firm's document gets
+  // (no existence oracle), and the ONLY answer a browser ever needs to act on.
+  const bad = await refused(() =>
+    admit(client, owner, `intent_${randomUUID()}`, basis(), "user_direct", [
+      { kind: "document", document_id: "00000000-0000-4000-8000-000000634fff" },
+    ]),
+  );
+  assert.equal(bad.code, "CLR10");
+  assert.equal(bad.detail.reason, "invalid_source_ref");
+  assert.equal(bad.detail.field, "source_refs[1]", "the DATABASE's own 1-BASED path");
+  assert.equal(bad.detail.constraint, "not_filed");
+  // …and the route turns exactly that into a 400 the composer can place beside its control.
+  assert.deepEqual(
+    workErrorResponse(Object.assign(new Error("refused"), { code: bad.code, detail: JSON.stringify(bad.detail) })),
+    { status: 400, body: { error: "invalid_basis", field: "sourceRefs[1]", reason: "invalid_source_ref" } },
+  );
+
+  // Nothing durable was written by the refusal.
+  const works = await rig.rootQuery("select count(*)::int as n from clara.accounting_work where client_id=$1", [client]);
+  assert.equal(works.rows[0].n, 0, "a refused source ref mints no Work, no run and no budget");
+});
+
+test("634.db: the evidence doors are HUMAN-only — clara_runtime holds no EXECUTE on either", { skip: EV_SKIP }, async () => {
+  const r = await rig.rootQuery(`
+    select has_function_privilege('clara_runtime','clara.attach_entry_evidence(uuid,uuid,uuid,text)','execute') as rt_attach,
+           has_function_privilege('clara_runtime','clara.list_entry_links(uuid,uuid[])','execute') as rt_links,
+           has_function_privilege('clara_authenticated','clara.attach_entry_evidence(uuid,uuid,uuid,text)','execute') as human_attach,
+           has_function_privilege('clara_authenticated','clara.list_entry_links(uuid,uuid[])','execute') as human_links`);
+  const row = r.rows[0];
+  assert.equal(row.rt_attach, false, "the runtime pool cannot attach evidence on a human's behalf");
+  assert.equal(row.rt_links, false);
+  assert.equal(row.human_attach, true, "the signed-in bookkeeper is the one principal that can");
+  assert.equal(row.human_links, true);
+});
+
+test("634.db: the FROZEN chatTurn.v18 tool schema still names no document, and mints only a chat_task ref", async () => {
+  const { readFileSync } = await import("node:fs");
+  const tools = readFileSync(new URL("../workflows/chatTurn.v18.tools.ts", import.meta.url), "utf8");
+  const start = tools.indexOf("start_journal_work");
+  assert.ok(start > 0, "the chat lane's journal entry point is still called start_journal_work");
+  // The INPUT SCHEMA — everything between the tool name and the admission call it makes.
+  const schema = tools.slice(start, tools.indexOf("const sourceRefs", start));
+  for (const forbidden of ["documentId", "document_id", "sourceRefs", "evidence"]) {
+    assert.equal(
+      schema.includes(forbidden),
+      false,
+      `chatTurn.v18's start_journal_work input schema must not carry ${forbidden} — #634 adds `
+        + "evidence to the BROWSER door only; the chat lane names the conversation it came from "
+        + "and nothing else, and that file is FROZEN (read-only to this ticket)",
+    );
+  }
+  assert.ok(
+    tools.includes('const sourceRefs = [{ kind: "chat_task", task_id: ctx.taskId, session_id: sessionId }];'),
+    "…and the ref it DOES mint is still the chat_task one, unchanged",
+  );
+});
