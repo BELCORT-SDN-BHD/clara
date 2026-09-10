@@ -101,7 +101,7 @@ const hookNotFound = () => {
   e.name = "HookNotFoundError";
   throw e;
 };
-const runStatus = (status) => (/** @type {string} */ _id) => ({ status: Promise.resolve(status) });
+const runStatus = (status) => () => ({ status: Promise.resolve(status) });
 
 // ===========================================================================================
 // 1 · The payload a Work question resumes with.

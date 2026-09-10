@@ -36,7 +36,7 @@
 
 import { tool } from "ai";
 import { z } from "zod";
-import { pools, type PgExec } from "./chatTurn.v15.infra.js";
+import type { PgExec } from "./chatTurn.v15.infra.js";
 import { classifyWorkError } from "./claraWork.v1.errors.js";
 import type { ClaraWorkBudgets } from "./claraWork.v1.bundle.js";
 // The three tool NAMES come from v1's PROMPT module, where the string literals are declared —
