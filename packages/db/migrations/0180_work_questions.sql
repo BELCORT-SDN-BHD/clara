@@ -236,6 +236,13 @@ declare
                            'reason','source_ref'];
   c text;
 begin
+  -- SCOPED TO WORK QUESTIONS, and it is the same scoping every other predicate in this file
+  -- carries. A CHAT clarify's lease/delivery columns were left free by 0006 on purpose (they are
+  -- runtime bookkeeping), and `control-lease.test.mjs` drives a crash-and-retry by resetting
+  -- `delivered_at` on exactly such a row. Making the ratchet bind that lane would have changed the
+  -- chat lane's behaviour as a side effect of a Work ticket — the thing this migration's header
+  -- promises it does not do.
+  if new.work_id is null and old.work_id is null then return new; end if;
   foreach c in array v_frozen loop
     if (to_jsonb(new) -> c) is distinct from (to_jsonb(old) -> c) then
       raise exception 'work-question column % is immutable', c

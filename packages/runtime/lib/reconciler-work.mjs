@@ -101,6 +101,29 @@ export function terminalForWork(taskStatus, engine, committed = null) {
   return null; // 'completed' while parked is impossible (a finished run settles its Work)
 }
 
+/**
+ * THE TERMINAL A PARKED WORK DESERVES WHEN ITS QUESTION CAN NO LONGER BE DELIVERED (#629).
+ *
+ * `terminalForWork` above already answers `expired` / `question_unreachable` for a parked Work
+ * whose ENGINE RUN is gone. #629 adds the other half of the same fact: a run that is still
+ * "running" as far as the engine is concerned, but whose resume HOOK has been reconciled to
+ * `delivery_state='hook_missing'` — the control listener asked the engine, the run had not moved
+ * on, and the hook was not there. A suspended run with no hook can never resume, so the honest
+ * settle is the same one: `expired`, RECOVERABLE, because a human's Retry makes a NEW run for the
+ * SAME Work that asks the question again (as version 2).
+ *
+ * THE BOOKS STILL COME FIRST, for the same reason every other arm here asks them: an unreachable
+ * hook cannot un-post an entry.
+ * PURE.
+ * @param {unknown} committed  the Work's own `result` jsonb
+ */
+export function terminalForUnreachableQuestion(committed = null) {
+  const effect = committedWorkResult(committed);
+  if (effect !== null) return { outcome: "completed", errorCode: null, error: null, result: effect };
+  return settle("expired", null, reason("question_unreachable",
+    "The answer to this Work's question could not be delivered to the run that asked it. Nothing was posted."));
+}
+
 function reason(code, message) {
   return { code, reason: code, message, recoverable: true };
 }
@@ -143,6 +166,42 @@ export function committedWorkResult(result) {
  * @param {string} taskId
  * @returns {Promise<Record<string, unknown>|null>}
  */
+/**
+ * TRUE iff this parked task's question has been reconciled UNREACHABLE (#629): terminal, never
+ * delivered, and resting at `delivery_state='hook_missing'` because control.mjs asked the engine
+ * and found a live run with no hook.
+ *
+ * PROBED FOR ITS COLUMN FIRST, and that is the same deploy-order decision `workResultForTask`'s
+ * own docblock states in full: a statement naming a column that does not exist fails at PARSE
+ * time, so an ungated read here would break the reconcile sweep for EVERY kind on a runtime image
+ * that started ahead of migration 0180. Memoised only on TRUE — a database gains the column once
+ * and never loses it, while a FALSE answer must stay re-askable so a long-lived process picks the
+ * new lane up after the migration lands.
+ *
+ * @param {import("pg").ClientBase} client  a clara_runtime connection
+ * @param {string} taskId
+ */
+let deliveryStateColumnPresent = false;
+export async function questionUnreachableForTask(client, taskId) {
+  if (!deliveryStateColumnPresent) {
+    const probe = await client.query(
+      `select count(*)::int as n from information_schema.columns
+        where table_schema = 'clara' and table_name = 'agent_interruptions'
+          and column_name in ('work_id','delivery_state')`,
+    );
+    deliveryStateColumnPresent = (probe.rows[0]?.n ?? 0) === 2;
+    if (!deliveryStateColumnPresent) return false;
+  }
+  const r = await client.query(
+    `select 1 from clara.agent_interruptions
+      where task_id = $1 and work_id is not null
+        and delivery_state = 'hook_missing' and delivered_at is null
+      limit 1`,
+    [taskId],
+  );
+  return r.rowCount > 0;
+}
+
 export async function workResultForTask(client, taskId) {
   const r = await client.query(
     `select w.result
@@ -262,7 +321,22 @@ export async function reconcileAccountingWorkTasks(client, deps) {
         continue;
       }
     }
-    if (!engine) continue; // still in flight
+    // #629 — THE OTHER WAY A PARKED WORK DIES. The engine says the run is still in flight, and for
+    // a RUNNING task that is the whole answer. For a PARKED one it is not: the control listener may
+    // already have reconciled its question to `hook_missing` — asked the engine, found the run had
+    // not moved on, and found no hook. A suspended run with no hook can never resume, so the Work
+    // is settled `expired` (recoverable) rather than left parked for ever on a question nobody can
+    // deliver. A probe failure decides nothing and the row stays open.
+    let unreachable = false;
+    if (!engine && t.status === "awaiting_input") {
+      try {
+        unreachable = await questionUnreachableForTask(client, t.id);
+      } catch (err) {
+        log(`[reconcile] accounting-work question probe failed task=${t.id}: ${err?.message ?? err}`);
+        continue;
+      }
+    }
+    if (!engine && !unreachable) continue; // still in flight
     // ASK THE BOOKS BEFORE NAMING A TERMINAL. A read failure here does NOT fall through to the
     // engine's opinion: not knowing whether an entry was posted is precisely the state in which
     // writing "Nothing was posted." would be the lie R1 names. Skip the row; the next sweep asks
@@ -274,7 +348,7 @@ export async function reconcileAccountingWorkTasks(client, deps) {
       log(`[reconcile] accounting-work result read failed task=${t.id}: ${err?.message ?? err}`);
       continue;
     }
-    const settle = terminalForWork(t.status, engine, committed);
+    const settle = engine ? terminalForWork(t.status, engine, committed) : terminalForUnreachableQuestion(committed);
     if (!settle) {
       log(`[reconcile] no legal terminal for accounting-work task=${t.id} status=${t.status} engine=${engine} — skipping`);
       continue;
