@@ -4026,6 +4026,8 @@
     "emptyFirstUse": "No activity has been recorded for this firm yet.",
     "emptyFiltered": "No activity matches these filters.",
     "staleNote": "The activity feed could not refresh. Showing the last activity it read.",
+    "failedReadTitle": "Activity could not be read",
+    "failedReadBody": "Something went wrong reading the activity feed. Nothing was recorded and nothing was lost — try again.",
     "retry": "Retry",
     "deniedTitle": "Activity is not available",
     "deniedGeneric": "Your access changed, so the activity feed was cleared rather than showing what it last read.",

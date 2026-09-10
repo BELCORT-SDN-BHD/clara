@@ -18,7 +18,7 @@ import assert from "node:assert/strict";
 import {
   rootQuery, humanQuery, buildWorkWorld, freshWorkClient, endPool, opk, assertRaises,
   admitJournalWork, claimWorkRun, mintClientObo, wakeRecordJournalEntry, basis, AGENT_USER_ID,
-  printLaneNotes, printSkipCount,
+  printSkipCount,
 } from "./work-journal-fixtures.mjs";
 import { seedVerifiedDocument } from "./rig-docs-fixtures.mjs";
 
@@ -56,10 +56,7 @@ after(async () => {
   await endPool();
 });
 
-const A1 = () => world.clients.A1;
-const B1 = () => world.clients.B1;
 const FIRM_A = () => world.firms.A;
-const FIRM_B = () => world.firms.B;
 const ALICE = () => world.users.alice; // owner, firm A
 const BOB = () => world.users.bob; // bookkeeper, firm A
 const CAROL = () => world.users.carol; // viewer, firm A

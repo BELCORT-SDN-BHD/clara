@@ -1497,6 +1497,12 @@ export const WORK_JOURNAL_0178_COHORT = [
 // a preference a human never asked for is not something the agent lane should read or write on
 // their behalf, and the migration's own header names "no wake/agent variant exists or is needed".
 const USER_PREFERENCES_0179_HUMAN_FNS = ["get_my_preferences", "save_my_preferences"];
+// #632 [0181] the attributable Activity feed's two doors — SECURITY INVOKER over three
+// already-clara_authenticated-granted sources (clara.firm_timeline_visible,
+// clara.agent_receipts_visible, clara.operation_receipts), each with its own inline bookkeeper
+// floor. clara_authenticated ONLY: no wake or agent variant exists — this is a human-read
+// audit surface, never something a model lane produces or consumes on its own.
+const ACTIVITY_FEED_0181_HUMAN_FNS = ["list_activity", "get_activity_event"];
 
 // #629 [0180, shared Work questions] — the SHARED-QUESTION lane, one cohort for the same "wholly
 // present or wholly absent" reason 0178's list above carries.
@@ -1667,6 +1673,7 @@ export const ALLOWED = {
     // #629 [0180] the shared work question's three human doors — see the block above.
     // clara_authenticated ONLY; agent, both wake roles and clara_runtime gain ZERO.
     ...WORK_QUESTIONS_0180_HUMAN_FNS,
+    ...ACTIVITY_FEED_0181_HUMAN_FNS,
   ]),
   // [S6 §9/C-11] agent lane loses the bare get_journal_entry(uuid) oracle; keeps the other
   // reads and gains the client-pinned S6 reads + get_journal_entry_for.

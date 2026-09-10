@@ -188,8 +188,8 @@ const PAGE_2 = [PAGE_2_NEW_ROW, DOCUMENT_ROW];
 
 let flipCallCount = 0;
 
-function clr(status, code, message) {
-  return { status, body: { code, message, details: JSON.stringify({ reason: "e2e_permission_flip" }) } };
+function clr(status, code, message, reason) {
+  return { status, body: { code, message, details: JSON.stringify({ reason }) } };
 }
 
 export async function handleActivitySupabase(request, response, path, url, sendJson, cors) {
@@ -205,7 +205,7 @@ export async function handleActivitySupabase(request, response, path, url, sendJ
         sendJson(response, 200, { rows: [], next_cursor: null, truncated: false }, cors);
         return true;
       }
-      const { status, body: refusal } = clr(400, "CLR04", "insufficient role");
+      const { status, body: refusal } = clr(400, "CLR04", "insufficient role", "e2e_permission_flip");
       sendJson(response, status, refusal, cors);
       return true;
     }
@@ -225,7 +225,7 @@ export async function handleActivitySupabase(request, response, path, url, sendJ
   if (request.method === "POST" && path === "/rest/v1/rpc/get_activity_event") {
     const body = await readJson(request);
     if (body.p_source === "event" && body.p_id === ACTIVITY.deniedEventId) {
-      const { status, body: refusal } = clr(400, "CLR11", "activity event not found");
+      const { status, body: refusal } = clr(400, "CLR11", "activity event not found", "activity_event_not_found");
       sendJson(response, status, refusal, cors);
       return true;
     }

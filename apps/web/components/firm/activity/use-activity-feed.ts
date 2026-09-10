@@ -46,6 +46,10 @@ export type ActivityFeedState = {
   staleError: unknown | null;
   /** Set exactly when a refresh failed AS a permission loss — `rows` has already been cleared. */
   denied: unknown | null;
+  /** `true` only when `staleError` is set AND no read has EVER succeeded — the distinct "failed
+   *  read" state (spec appendix C §3), not "stale": there is no prior page to call stale, and
+   *  the "could not refresh, showing the last activity it read" copy would be a lie here. */
+  failedFirstRead: boolean;
   duplicatesDropped: number;
   loadMore: () => void;
   retry: () => void;
@@ -61,6 +65,7 @@ export function useActivityFeed(filters: ActivityFilters): ActivityFeedState {
   const [staleError, setStaleError] = useState<unknown | null>(null);
   const [denied, setDenied] = useState<unknown | null>(null);
   const [duplicatesDropped, setDuplicatesDropped] = useState(0);
+  const [everLoaded, setEverLoaded] = useState(false);
 
   // Filters as a stable, comparable key — a NEW array/object identity every render must not
   // itself trigger a reload (the caller is a plain function component re-rendering).
@@ -87,6 +92,7 @@ export function useActivityFeed(filters: ActivityFilters): ActivityFeedState {
       const page = await listActivity(filtersRef.current, { cursor: null });
       if (epoch !== epochRef.current) return; // superseded by a later reload
       hasLoadedOnceRef.current = true;
+      setEverLoaded(true);
       setRows(page.rows);
       setNextCursor(page.next_cursor);
       setTruncated(page.truncated);
@@ -186,5 +192,6 @@ export function useActivityFeed(filters: ActivityFilters): ActivityFeedState {
   return {
     rows, nextCursor, truncated, loading, refreshing, loadingMore,
     staleError, denied, duplicatesDropped, loadMore, retry: () => void reload(),
+    failedFirstRead: staleError !== null && !everLoaded,
   };
 }

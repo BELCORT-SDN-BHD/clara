@@ -103,6 +103,28 @@ export function ActivityFeed() {
     );
   }
 
+  // The FIRST read failed outright — a genuinely distinct state from "stale" (there is no prior
+  // page to call stale, so that copy would be a lie) and from "empty" (a read that did not
+  // answer proves nothing about whether the firm has activity).
+  if (feed.failedFirstRead) {
+    return (
+      <div className="flex flex-col gap-3">
+        <ActivityFilters state={state} clients={clients} />
+        <StateBanner
+          tone="error"
+          title={t("failedReadTitle")}
+          action={
+            <Button type="button" variant="outline" size="sm" onClick={feed.retry}>
+              {t("retry")}
+            </Button>
+          }
+        >
+          {t("failedReadBody")}
+        </StateBanner>
+      </div>
+    );
+  }
+
   const isEmpty = feed.rows.length === 0;
   const isFirstUse = isEmpty && state.client === null && state.kinds.length === 0 && state.since === null && state.until === null;
 
