@@ -30,7 +30,7 @@ On PowerShell, set those environment variables before running the command.
 
 ## Coverage map
 
-The checked-in suite currently contains 21 specs:
+The checked-in suite currently contains 22 specs:
 
 | Spec | What it exercises |
 |---|---|
@@ -56,6 +56,7 @@ The checked-in suite currently contains 21 specs:
 | `shell-migration-walk.spec.ts` | #614's unified shell: the legacy `/admin`/`/needs-you` redirect matrix, identity at every width, the keyboard scope switcher and its cross-client isolation guarantee, the mobile sheet's keyboard contract, the Accounting sidebar group, reduced motion, the client-not-found boundary (a bogus id, and — via a same-process visibility toggle — a client that goes invisible mid-session), one overlay stack (the Clara rail plus the mobile nav Sheet open together at 640px), Work's destination split, settings rank-shaping, and the train's retired entries |
 | `personal-settings-walk.spec.ts` | #626's `/settings/account`: loaded/dirty/saved/reload-persists, per-field Reset, save failure (CLR10) preserving dirty state with first-invalid-focus, concurrent change (CLR06) and Reload-and-keep-my-edits, denied/signed-out, the honest Notifications "not configured" note, the saved motion preference's `data-motion` attribute independent of the OS setting, keyboard-only save, 320px and 200%-zoom layout, and deep link/Back |
 | `tax-boundary-walk.spec.ts` | #627's Tax tab: the SST watch's enabled/empty/stale/denied/technical-failure states as distinct labelled regions, the capability-boundary deep link and its focus return (both click-driven and a fresh navigation), 320px, reduced motion, and the `/admin/compliance` legacy redirect into the rebuilt compliance register |
+| `activity-feed-walk.spec.ts` | #632's `/activity`: representative upload/posting/correction/close/report/agent-receipt/conversation-maintenance rows with attribution, kind and client filters written to the URL, keyset "Load more" with dedupe-by-(source,id), a correction's two-sided original/replacement link, the `?event=` detail Sheet's Title/initial-focus/Escape/focus-return and Back-preserves-filters contract, a no-oracle denied detail via a direct deep link, live permission loss clearing the list on a focus recheck, 320px, 200% zoom, and reduced motion |
 
 These files use `.spec.ts` because the package's Node test manifest accepts `*.test.*` files. Do not add Playwright specs to [`test/manifest.txt`](../test/manifest.txt).
 

@@ -55,6 +55,11 @@ import { JOURNAL_WORK_SESSIONS, handleJournalWorkRuntime, handleJournalWorkSupab
 // one per five/six-state read outcome — hooked in ONE place below, before `handleL7Supabase`
 // (see that hook's own note for why order matters here).
 import { handleD4Supabase } from "./tax-boundary-mock.mjs";
+// #632's own lane (the attributable Activity feed walk). ID-scoped like its siblings; its ONE
+// exception is `ACTIVITY_CLIENTS`, spliced into the shared `clients` array below (APPENDED, never
+// replacing) because the Activity page's client Select is this train's first consumer of the
+// UNFILTERED client register — see that export's own header in activity-mock.mjs.
+import { ACTIVITY_CLIENTS, handleActivitySupabase } from "./activity-mock.mjs";
 
 const e2eRoot = dirname(fileURLToPath(import.meta.url));
 const webRoot = resolve(e2eRoot, "..");
@@ -146,6 +151,9 @@ const state = {
 const clients = [
   { id: CLIENT_A, name: "Rome Properties", status: "active", created_at: "2026-01-01T00:00:00.000Z" },
   { id: CLIENT_B, name: "Bee Creative Solution", status: "active", created_at: "2026-02-01T00:00:00.000Z" },
+  // #632's two fixture clients — see that lane's own ACTIVITY_CLIENTS header for why this array,
+  // unlike `sessions`, needed a first lane-contribution at all.
+  ...ACTIVITY_CLIENTS,
 ];
 
 // #614 — Postgres `uuid` shape (`clara.clients.id`, 0003_books_core.sql:34-40), mirrored
@@ -534,6 +542,10 @@ async function handleSupabase(request, response, url) {
   // The home board is LAST because the journal-work lane must precede it (see that lane's own
   // note above, which carries the measurement).
   if (await handleHomeBoardSupabase(request, response, path, url, sendJson, cors)) return;
+  // #632's own lane, last among the hooks (its RPCs — list_activity/get_activity_event — are
+  // claimed by no other lane, and its two client ids are already in the shared register above,
+  // so ordering here costs nothing but is kept alongside its siblings for a reader's sake).
+  if (await handleActivitySupabase(request, response, path, url, sendJson, cors)) return;
 
   if (request.method === "GET" && path === "/rest/v1/clients") {
     const filter = url.searchParams.get("id");

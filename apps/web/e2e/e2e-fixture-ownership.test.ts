@@ -48,6 +48,7 @@ const DOCUMENTS_LANE_MOCK = join(E2E_DIR, "documents-viewer-mock.mjs");
  * so `derivedLaneMocks()` reads that, and the assertion below is what actually fires.
  */
 const LANE_MOCKS = [
+  "activity-mock.mjs",
   "agentic-finish-mock.mjs",
   "bank-close-registers-mock.mjs",
   "chat-parity-mock.mjs",
@@ -195,6 +196,10 @@ function handlerCensus(file: string): { path: string; scoped: boolean }[] {
  * The journals lane declares NEITHER, which is the shape a new lane mock should aim for.
  */
 const LANE_DECLARATIONS: Record<string, { unscopeable: string[]; debt: string[] }> = {
+  // #632's own lane. `list_activity`/`get_activity_event` are brand-new RPCs no other lane ever
+  // calls, and each still carries its own `return false;` fall-through on an unmatched
+  // `p_client`/`p_source`+`p_id` — the journals lane's shape, declaring neither list.
+  "activity-mock.mjs": { unscopeable: [], debt: [] },
   "agentic-finish-mock.mjs": {
     unscopeable: ["/rest/v1/rpc/list_coa_templates", "/rest/v1/rpc/begin_client_onboarding"],
     debt: [],
