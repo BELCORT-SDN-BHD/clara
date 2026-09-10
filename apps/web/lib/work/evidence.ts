@@ -130,12 +130,22 @@ export async function listEntryLinks(
   // An empty ask is an empty answer, and a request the caller can prove is
   // pointless must never be sent (lib/read.ts's absence posture).
   if (unique.length === 0) return [];
-  const rows = await callDoor<EntryLinkRow[] | null>(
-    "list_entry_links",
-    { p_client: clientId, p_entries: unique.slice(0, ENTRY_LINKS_BATCH_MAX) },
-    opts,
-  );
-  return Array.isArray(rows) ? rows : [];
+  // PAGED, NOT TRUNCATED. The journals read's own ceiling is 1000 entries
+  // (lib/journals/api.ts's FETCH_CAP) and this door's batch cap is 500, so a
+  // single call would either be REFUSED or — worse — quietly answer for the
+  // first 500 and leave the rest rendering as "we did not read it" with nothing
+  // saying so. Two round trips are cheaper than a surface that is silently
+  // half-informed about which entries have evidence.
+  const out: EntryLinkRow[] = [];
+  for (let i = 0; i < unique.length; i += ENTRY_LINKS_BATCH_MAX) {
+    const rows = await callDoor<EntryLinkRow[] | null>(
+      "list_entry_links",
+      { p_client: clientId, p_entries: unique.slice(i, i + ENTRY_LINKS_BATCH_MAX) },
+      opts,
+    );
+    if (Array.isArray(rows)) out.push(...rows);
+  }
+  return out;
 }
 
 /** Every outcome of the late door, typed. The three CONFLICT arms are separate
