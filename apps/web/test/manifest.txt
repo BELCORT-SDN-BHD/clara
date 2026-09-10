@@ -192,6 +192,7 @@ components/reports/reports-snapshots-seeding-keyboard.test.tsx
 components/shell-responsive.test.tsx
 components/tax/tax-a11y.test.tsx
 components/tax/tax-boundary-states.test.tsx
+components/work/attach-evidence-dialog.test.tsx
 components/work/work-detail.test.tsx
 components/work/work-question-form.test.tsx
 e2e/e2e-fixture-ownership.test.ts

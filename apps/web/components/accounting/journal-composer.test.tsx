@@ -57,7 +57,13 @@ function memoryStorage(): DraftStorage & { map: Map<string, string> } {
   };
 }
 
-type Submitted = { clientId: string; intentKey: string; basis: unknown };
+type Submitted = { clientId: string; intentKey: string; basis: unknown; sourceRefs?: unknown };
+
+/** #634 - two of this client's filed documents, in the shape the pick list reads. */
+const DOCUMENTS = [
+  { documentId: "d1111111-1111-4111-8111-111111111111", filename: "sept-rent.pdf", kind: "invoice", filedAt: "2026-09-02T03:00:00Z", financialDate: "2026-09-01" },
+  { documentId: "d2222222-2222-4222-8222-222222222222", filename: "bank-slip.pdf", kind: "receipt", filedAt: "2026-09-03T03:00:00Z", financialDate: null },
+];
 
 function App(props: {
   scope?: typeof BOOKKEEPER;
@@ -65,6 +71,7 @@ function App(props: {
   navigate?: (href: string) => void;
   storage?: DraftStorage | null;
   loadAccounts?: () => Promise<CoaAccountRow[]>;
+  loadDocuments?: () => Promise<typeof DOCUMENTS>;
 }): ReactElement {
   return createElement(NextIntlClientProvider, {
     locale: "en",
@@ -77,6 +84,7 @@ function App(props: {
       submit: (props.submit ?? (async () => ({ kind: "denied" }) as SubmitJournalWorkResult)) as never,
       storage: props.storage ?? null,
       loadAccounts: props.loadAccounts ?? (async () => ACCOUNTS),
+      loadDocuments: (props.loadDocuments ?? (async () => DOCUMENTS)) as never,
       session: { getAccessToken: async () => "tok" },
     }),
   });
@@ -590,6 +598,190 @@ test("a FAILED chart read degrades the form rather than blocking it", async () =
     await h.fireEvent(byLabel(h, "Credit, line 2"), "change", (n) => setFieldValue(n, "10.00"));
     await submitForm(h);
     assert.equal(sent.length, 1, "a preparer who knows the code can still submit");
+  } finally {
+    await h.unmount();
+  }
+});
+
+
+// ===========================================================================================
+// #634 - OPTIONAL EVIDENCE.
+// ===========================================================================================
+
+test("#634: EVIDENCE IS OPTIONAL - the default is an explicit No document, and nothing is sent", async () => {
+  const sent: Submitted[] = [];
+  const h = await renderComponent(
+    App({
+      submit: async (_auth, input) => {
+        sent.push(input);
+        return { kind: "accepted", workId: "w", taskId: "t", logicalOpId: "op", status: "queued", replayed: false };
+      },
+    }),
+  );
+  try {
+    await h.settle();
+    // The chooser exists, says evidence is optional IN WORDS, and OPENS on
+    // "No document" - a selectable option rather than a blank, so a preparer who
+    // picked a file can get back to "none" with the keyboard.
+    const select = byId(h, "journal-basis-evidence");
+    assert.equal(select.tagName, "SELECT");
+    assert.equal((select as { value?: unknown }).value, "");
+    assert.match(h.text(), /may be recorded with no document at all/);
+    assert.match(h.text(), /No document/);
+    await fillGoodEntry(h);
+    await submitForm(h);
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0]!.sourceRefs, undefined, "a documentless Work sends NO sourceRefs at all");
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("#634: a chosen document rides the submit as ONE document source ref", async () => {
+  const sent: Submitted[] = [];
+  const h = await renderComponent(
+    App({
+      submit: async (_auth, input) => {
+        sent.push(input);
+        return { kind: "accepted", workId: "w", taskId: "t", logicalOpId: "op", status: "queued", replayed: false };
+      },
+    }),
+  );
+  try {
+    await h.settle();
+    // The option carries what a preparer needs to recognise the file.
+    assert.match(h.text(), /sept-rent\.pdf/);
+    await fillGoodEntry(h);
+    await h.fireEvent(byId(h, "journal-basis-evidence"), "change", (n) => setFieldValue(n, DOCUMENTS[0]!.documentId));
+    await submitForm(h);
+    assert.deepEqual(sent[0]!.sourceRefs, [{ kind: "document", documentId: DOCUMENTS[0]!.documentId }]);
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("#634: the SAME intent key carries the evidence through a lost-response replay", async () => {
+  // The one behaviour the whole idempotency story rests on, extended to the
+  // EVIDENCE half of the payload: the admission door compares canonical source
+  // refs alongside the basis digest, so a replay that dropped the document would
+  // be answered as a typed CONFLICT rather than as the replay it is.
+  const sent: Submitted[] = [];
+  const h = await renderComponent(
+    App({
+      submit: async (_auth, input) => {
+        sent.push(input);
+        return sent.length === 1
+          ? { kind: "lost", message: "socket" }
+          : { kind: "accepted", workId: "w", taskId: "t", logicalOpId: "op", status: "queued", replayed: true };
+      },
+    }),
+  );
+  try {
+    await h.settle();
+    await fillGoodEntry(h);
+    await h.fireEvent(byId(h, "journal-basis-evidence"), "change", (n) => setFieldValue(n, DOCUMENTS[1]!.documentId));
+    await submitForm(h);
+    assert.equal(sent.length, 2, "the lost response is resolved by re-sending, exactly once");
+    assert.equal(sent[0]!.intentKey, sent[1]!.intentKey, "...under the SAME intent key");
+    assert.deepEqual(sent[0]!.sourceRefs, sent[1]!.sourceRefs, "...and the SAME evidence");
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("#634: a SOURCE CONFLICT is a persistent Alert with a link and NO resubmit of this intent", async () => {
+  const sent: Submitted[] = [];
+  const h = await renderComponent(
+    App({
+      submit: async (_auth, input) => {
+        sent.push(input);
+        return { kind: "source_conflict", entryId: "e5555555-5555-4555-8555-555555555555", documentId: DOCUMENTS[0]!.documentId };
+      },
+    }),
+  );
+  try {
+    await h.settle();
+    await fillGoodEntry(h);
+    await h.fireEvent(byId(h, "journal-basis-evidence"), "change", (n) => setFieldValue(n, DOCUMENTS[0]!.documentId));
+    await submitForm(h);
+    assert.equal(sent.length, 1);
+    assert.match(h.text(), /already backs a posted entry/);
+    // THE LINK GOES SOMEWHERE REAL - the journals table, opened on that entry.
+    const link = h.find(
+      (n) =>
+        n.tagName === "A" &&
+        String((n as { getAttribute?: (k: string) => string | null }).getAttribute?.("href") ?? "").includes(
+          "entry=e5555555-5555-4555-8555-555555555555",
+        ),
+    );
+    assert.ok(link, "the conflict Alert links to the entry that already stands on the document");
+    // THE INPUT IS PRESERVED and the offending control is focused, so the human
+    // can choose another document without retyping a table of money.
+    assert.equal(focusedId(), "journal-basis-evidence");
+    assert.equal((byId(h, "journal-basis-memo") as { value?: unknown }).value, "Office rent, September");
+    assert.equal((byId(h, "journal-basis-evidence") as { value?: unknown }).value, DOCUMENTS[0]!.documentId);
+    // NO "start a new draft" affordance: rotating the intent key cannot free a
+    // document that is already spoken for, and offering it would invite the very
+    // second effect the rule prevents.
+    assert.doesNotMatch(h.text(), /Start a new draft/i);
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("#634: choosing a different document retires the conflict Alert", async () => {
+  const h = await renderComponent(
+    App({ submit: async () => ({ kind: "source_conflict", entryId: null, documentId: null }) }),
+  );
+  try {
+    await h.settle();
+    await fillGoodEntry(h);
+    await h.fireEvent(byId(h, "journal-basis-evidence"), "change", (n) => setFieldValue(n, DOCUMENTS[0]!.documentId));
+    await submitForm(h);
+    assert.match(h.text(), /already backs a posted entry/);
+    await h.fireEvent(byId(h, "journal-basis-evidence"), "change", (n) => setFieldValue(n, DOCUMENTS[1]!.documentId));
+    await h.settle();
+    assert.doesNotMatch(h.text(), /already backs a posted entry/);
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("#634: a refusal NAMING the evidence array focuses the evidence control", async () => {
+  const h = await renderComponent(
+    App({ submit: async () => ({ kind: "invalid_basis", field: "sourceRefs[1]", reason: "invalid_source_ref" }) }),
+  );
+  try {
+    await h.settle();
+    await fillGoodEntry(h);
+    await h.fireEvent(byId(h, "journal-basis-evidence"), "change", (n) => setFieldValue(n, DOCUMENTS[0]!.documentId));
+    await submitForm(h);
+    assert.equal(focusedId(), "journal-basis-evidence");
+    assert.match(h.text(), /not an active filed document of this client/);
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("#634: a FAILED documents read degrades the form rather than blocking it", async () => {
+  const sent: Submitted[] = [];
+  const h = await renderComponent(
+    App({
+      loadDocuments: async () => {
+        throw new Error("boom");
+      },
+      submit: async (_auth, input) => {
+        sent.push(input);
+        return { kind: "accepted", workId: "w", taskId: "t", logicalOpId: "op", status: "queued", replayed: false };
+      },
+    }),
+  );
+  try {
+    await h.settle();
+    assert.match(h.text(), /could not read this client's documents/);
+    await fillGoodEntry(h);
+    await submitForm(h);
+    assert.equal(sent.length, 1, "no document is a valid answer, so an unreadable list never blocks a submit");
   } finally {
     await h.unmount();
   }
