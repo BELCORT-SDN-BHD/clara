@@ -352,3 +352,4 @@ tests/streamAuthority.test.mjs
 tests/streamParser.test.mjs
 tests/streamReattach.test.mjs
 tests/token-contrast.test.ts
+lib/firm/activity.test.ts
