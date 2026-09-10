@@ -33,6 +33,7 @@ import { useTranslations } from "next-intl";
 
 import { PostedLinesTable, WorkBasisTable } from "@/components/work/work-tables";
 import { StateBanner } from "@/components/common/state";
+import { WorkQuestionPanel } from "@/components/work/work-question-panel";
 import { SectionHeader } from "@/components/common/section-header";
 import { MemberName } from "@/components/common/member-name";
 import { useFirmScope } from "@/components/firm-scope-provider";
@@ -583,29 +584,36 @@ function WorkOutcome({
     // cannot prove (lib/journals/governance-doors.ts's `readClarifyQuestion`).
     const clarify = interruption === null ? null : readClarifyQuestion(interruption.question);
     return (
-      <StateBanner
-        tone="warning"
-        title={t("awaiting.title")}
-        action={
-          <Link href={WORK_NEEDS_YOU_HREF} className="text-sm font-medium text-primary underline underline-offset-2">
-            {t("awaiting.link")}
-          </Link>
-        }
-      >
-        {clarify === null ? (
-          t("awaiting.body")
-        ) : (
-          <span className="flex flex-col gap-1">
-            {/* The RUN'S OWN WORDS, verbatim — the same posture the refusal arm
-                takes about the database's. */}
-            <span className="font-medium text-foreground">{clarify.question}</span>
-            {clarify.context === null ? null : (
-              <span className="text-xs text-muted-foreground">{clarify.context}</span>
-            )}
-            <span className="text-xs text-muted-foreground">{t("awaiting.answerElsewhere")}</span>
-          </span>
-        )}
-      </StateBanner>
+      <div className="flex flex-col gap-3">
+        <StateBanner
+          tone="warning"
+          title={t("awaiting.title")}
+          action={
+            <Link href={WORK_NEEDS_YOU_HREF} className="text-sm font-medium text-primary underline underline-offset-2">
+              {t("awaiting.link")}
+            </Link>
+          }
+        >
+          {clarify === null ? (
+            t("awaiting.body")
+          ) : (
+            <span className="flex flex-col gap-1">
+              {/* The RUN'S OWN WORDS, verbatim — the same posture the refusal arm
+                  takes about the database's. */}
+              <span className="font-medium text-foreground">{clarify.question}</span>
+              {clarify.context === null ? null : (
+                <span className="text-xs text-muted-foreground">{clarify.context}</span>
+              )}
+            </span>
+          )}
+        </StateBanner>
+        {/* #629 — THE ANSWER, HERE. The banner above still says WHAT is waiting (and still falls
+            back to the table read when the door is unreachable); this renders the SAME form
+            Needs-you and the Clara rail render, so a person who is already looking at the Work
+            does not have to go anywhere to answer one date. `key` is the WORK, so the detail's
+            3-second poll never re-mounts it and never steals focus mid-sentence. */}
+        <WorkQuestionPanel key={work.id} workId={work.id} />
+      </div>
     );
   }
 

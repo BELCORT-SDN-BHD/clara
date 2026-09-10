@@ -146,6 +146,7 @@
     "countsOpenTasks": "Open coding tasks",
     "countsComplianceWatches": "Compliance watches",
     "countsLintFindings": "Lint findings",
+    "countsWorkQuestions": "Clara questions",
     "sectionNeedsYou": "Needs you",
     "sectionNeedsReview": "Needs review",
     "rowKind": {
@@ -158,6 +159,7 @@
       "fixed_asset_incomplete": "Fixed asset — particulars incomplete",
       "staff_advance_incomplete": "Staff advance — particulars incomplete",
       "seeding_proposal": "Seeding proposals awaiting review",
+      "work_question": "Clara is waiting on an answer",
       "unknown": "Unrecognized item ({kind})"
     },
     "openClient": "Open client",

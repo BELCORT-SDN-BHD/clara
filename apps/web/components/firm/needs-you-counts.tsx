@@ -24,6 +24,10 @@ export function NeedsYouCounts({ counts }: { counts: ReviewQueueCounts }) {
     [t("countsOpenTasks"), counts.open_tasks],
     [t("countsComplianceWatches"), counts.compliance_watches],
     [t("countsLintFindings"), counts.lint_findings],
+    // #629 — `?? 0` rather than a required key: a database at a pre-0180 frontier sends no
+    // `work_questions`, and a chip reading `undefined` would be a lie about a population that
+    // simply cannot exist there yet. Zero is the honest answer in both worlds.
+    [t("countsWorkQuestions"), counts.work_questions ?? 0],
   ];
   return (
     <div className="flex flex-wrap gap-2">

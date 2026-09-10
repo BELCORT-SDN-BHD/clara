@@ -106,6 +106,14 @@ export const REVIEW_QUEUE_ROW_KINDS = [
   // 裁-17 (0146_ninth_rowkind_seeding_proposal.sql): batch-level, one row
   // per client with >=1 OPEN clara.seeding_proposals row.
   "seeding_proposal",
+  // #629 (0180_work_questions.sql): ONE row per PENDING question a running
+  // accounting Work is parked on. Section `needs_you`, lane `needs_you` — a
+  // person must act before the Work can move, exactly like an open_question.
+  // The row reuses the EXISTING 30-key shape (`id`/`question_id` carry the
+  // question, `task_id` the parked run, `question_text` the question itself);
+  // the version, the typed fields and the reason come from
+  // `clara.get_work_question`, which is the ONE record every surface renders.
+  "work_question",
 ] as const;
 
 export type ReviewQueueRowKind = (typeof REVIEW_QUEUE_ROW_KINDS)[number];
@@ -216,6 +224,11 @@ export type ReviewQueueCounts = {
   compliance_watches: number;
   /** 0017+ */
   lint_findings: number;
+  /** #629 (0180+) — OPTIONAL on this type ON PURPOSE. Every fixture in this app
+   *  that constructs a counts object would otherwise stop compiling for a key
+   *  the surface renders as `?? 0`, and a required key would be a claim that a
+   *  pre-0180 database sends one. It does not. */
+  work_questions?: number;
 };
 
 export type ReviewQueueSweep = {

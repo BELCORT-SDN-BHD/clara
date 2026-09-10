@@ -31,6 +31,7 @@ import { CodingTaskAffordance } from "./coding-task-affordance";
 import { LintFindingAffordance } from "./lint-finding-affordance";
 import { ComplianceWatchAffordance } from "./compliance-watch-affordance";
 import { SeedingProposalAffordance } from "./seeding-proposal-affordance";
+import { WorkQuestionAffordance } from "./work-question-affordance";
 
 export type NeedsYouAffordanceProps = {
   row: ReviewQueueRow;
@@ -108,6 +109,10 @@ export const NEEDS_YOU_AFFORDANCES: Record<ReviewQueueRowKind, NeedsYouAffordanc
     // tick/decline acts stay on T9's SeedingBatchesPanel; see
     // ./seeding-proposal-affordance.tsx's own header for the grounding.
     seeding_proposal: SeedingProposalAffordance,
+    // #629 (0180_work_questions.sql): the persistent question a running accounting
+    // Work is parked on. The affordance EXPANDS the same form the Work detail and
+    // the Clara rail render — see ./work-question-affordance.tsx's own header.
+    work_question: WorkQuestionAffordance,
   } satisfies Record<ReviewQueueRowKind, NeedsYouAffordance | null>,
 );
 
