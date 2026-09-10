@@ -125,6 +125,28 @@ test("623.bundle: the world-start banner names the same digest the manifest does
   assert.equal(bundle.claraWorkBundleIdentity().digest, PINNED_DIGEST);
 });
 
+test("623.bundle: /api/build-info SERVES that digest — the payload, not just the route source", async () => {
+  // The route-shape cell in l9-build-info.test.mjs pins that `src/buildInfoRoutes.ts` passes
+  // `bundles: [claraWorkBundleIdentity()]`. This one drives the PAYLOAD builder those names reach,
+  // so "one read answers which bundle this image is running" is measured at the surface an
+  // operator actually curls rather than inferred from a source match.
+  const { buildInfo } = await import("../lib/build-info.mjs");
+  const payload = await buildInfo({
+    names: ["chatTurn"],
+    bundles: [bundle.claraWorkBundleIdentity()],
+    withRuntime: async () => ({ rows: [{ frontier: { count: 178, max_version: "0178" } }] }),
+  });
+  assert.equal(Array.isArray(payload.bundles), true, "the payload carries a bundles array");
+  assert.equal(payload.bundles.length, 1);
+  assert.equal(payload.bundles[0].id, "clara-work/v1");
+  assert.equal(payload.bundles[0].digest, PINNED_DIGEST, "and it is THE digest, not a second copy that could drift");
+  assert.deepEqual(payload.bundles[0].budgets, bundle.CLARA_WORK_BUDGETS_V1, "budgets ride; they are part of what an image promises");
+  assert.equal("text" in payload.bundles[0], false, "the INSTRUCTION PROSE does not — a build-info payload is a version report, not a prompt dump");
+  // Copied, never aliased: a caller must not be able to mutate a frozen module's object through
+  // the response (the `workflows: [...names]` precedent in the same builder).
+  assert.notEqual(payload.bundles[0], bundle.claraWorkBundleIdentity());
+});
+
 test("623.bundle: the fault injection is inert without RELAY_TEST_MODE", () => {
   assert.equal(tools.workTestFault({ CLARA_WORK_TEST_FAULT: "exit_after_commit" }), null, "production combination is inert");
   assert.equal(tools.workTestFault({ RELAY_TEST_MODE: "1" }), null, "no fault named is no fault");
