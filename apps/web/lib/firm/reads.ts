@@ -22,6 +22,7 @@
 //     (two honest reads, never a fabricated join the DB doesn't offer). A client with
 //     no live fact row renders that field absent, never inferred.
 
+import { isClientIdShape } from "../client-id";
 import { getRows } from "../read";
 import type { SessionTokenAccessor } from "@/lib/session";
 
@@ -122,8 +123,20 @@ export function loadClientRegister(session: SessionTokenAccessor): Promise<Clien
 
 /** One client, by id — the workspace overview's own read. `null` when RLS
  *  admits no such row (not in this firm, or it never existed): the caller
- *  renders that as `not_found`, never as a thrown error the DB never raised. */
+ *  renders that as `not_found`, never as a thrown error the DB never raised.
+ *
+ *  #614 — DEFENCE IN DEPTH: a malformed `clientId` (not shaped like
+ *  `clara.clients.id`, a Postgres `uuid`) resolves `null` here WITHOUT
+ *  issuing a request. Real PostgREST answers a non-uuid `id=eq.<value>`
+ *  filter with HTTP 400 `22P02` — a THROW, unlike the honest empty result
+ *  set an unknown-but-well-formed id gets — which would turn every caller's
+ *  "not found" branch into an unhandled error. `app/(firm)/clients/
+ *  [clientId]/layout.tsx` already checks this before calling in (so the
+ *  common path never reaches here for a malformed id), but every OTHER
+ *  caller of this function gets the same honesty for free rather than having
+ *  to re-derive the same guard. */
 export async function loadClientById(session: SessionTokenAccessor, clientId: string): Promise<ClientRow | null> {
+  if (!isClientIdShape(clientId)) return null;
   const rows = await getRows<ClientRow>("clients", {
     select: "id,name,status,created_at",
     filters: { id: `eq.${clientId}` },

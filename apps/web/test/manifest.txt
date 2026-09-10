@@ -210,6 +210,7 @@ lib/clara/threadStore.test.ts
 lib/clara/turnRun.test.ts
 lib/clara/useActiveThread.test.ts
 lib/clara/welcomeState.test.ts
+lib/client-id.test.ts
 lib/close/api.test.ts
 lib/coding/doors.test.ts
 lib/coding/loaders.test.ts

@@ -1,6 +1,8 @@
 import type { ReactNode } from "react";
+import { notFound } from "next/navigation";
 
 import { ClientScopeProvider } from "@/components/client-scope-provider";
+import { isClientIdShape } from "@/lib/client-id";
 
 /**
  * The (full) group's client-scope layout — carries over ONLY the security
@@ -18,6 +20,15 @@ import { ClientScopeProvider } from "@/components/client-scope-provider";
  * activation — moving the page out of `(firm)` must never mean moving it out
  * from under scope activation too. Every route under `/clients/[clientId]/`,
  * in EITHER group, sits under a layout that calls this.
+ *
+ * #614 — THE SAME MALFORMED-ID GUARD AS THE `(firm)` SIBLING, for the same
+ * reason: the thread page under this layout reads with `clientId` too (its
+ * own `client_id=eq.<value>` filters), and a segment that isn't shaped like
+ * `clara.clients.id` (a Postgres `uuid`) is a not-found address, never a
+ * database question. This group has no `not-found.tsx` of its own, so the
+ * `notFound()` call bubbles to the root `app/not-found.tsx` — see that
+ * file's own header, which already documents this as the one call site that
+ * lands there.
  */
 export default async function FullClientScopeLayout({
   children,
@@ -27,6 +38,7 @@ export default async function FullClientScopeLayout({
   params: Promise<{ clientId: string }>;
 }) {
   const { clientId } = await params;
+  if (!isClientIdShape(clientId)) notFound();
 
   return <ClientScopeProvider clientId={clientId}>{children}</ClientScopeProvider>;
 }

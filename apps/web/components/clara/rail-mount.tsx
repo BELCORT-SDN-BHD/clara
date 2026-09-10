@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 import { ClaraRail } from "@/components/clara/ClaraRail";
 import { ClaraRailChrome } from "@/components/clara/rail-chrome";
 import { useSidebarOptional } from "@/components/ui/sidebar";
+import { isClientIdShape } from "@/lib/client-id";
 import { FIRM_ALTITUDE } from "@/lib/clara/useActiveThread";
 
 // P2 FOLD SEAM H: the ONE Clara rail mount for the whole (firm) shell — mounted from
@@ -67,7 +68,20 @@ import { FIRM_ALTITUDE } from "@/lib/clara/useActiveThread";
 // already worked. See `rail-chrome.tsx`.
 export function RailMount() {
   const params = useParams();
-  const clientId = typeof params.clientId === "string" ? params.clientId : undefined;
+  // #614 — A MALFORMED SEGMENT MOUNTS THE FIRM-ALTITUDE RAIL, NEVER A
+  // client_id=eq.<garbage> REQUEST. `params.clientId` is the raw URL segment,
+  // unchecked by anything upstream by the time it reaches a client component
+  // — the layout's own `notFound()` guard (app/(firm)/clients/[clientId]/
+  // layout.tsx) runs in a DIFFERENT React subtree (this mount is a sibling of
+  // `{children}` in app/(firm)/layout.tsx, see this file's own header) and
+  // never protects this read. Before this gate, a segment like
+  // "not-a-client" reached `OnboardingChecklistCard` -> `getOnboardingClient`
+  // (lib/onboarding/api.ts) as an id=eq. filter that real PostgREST answers
+  // with HTTP 400 `22P02`, and that raw code leaked straight into the rail's
+  // error banner (CB-AE2E-022). Falling back to `undefined` here is exactly
+  // the firm altitude this component already has a name for.
+  const rawClientId = typeof params.clientId === "string" ? params.clientId : undefined;
+  const clientId = rawClientId !== undefined && isClientIdShape(rawClientId) ? rawClientId : undefined;
   // ONE OVERLAY STACK (#614, AC6). Below `md` the navigation Sheet is a modal;
   // Base UI hides the sidebar inset behind it but its hide-others sweep does
   // not reach this sibling (measured in the browser leg), so the rail stayed

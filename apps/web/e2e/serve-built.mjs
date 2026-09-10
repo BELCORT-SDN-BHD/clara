@@ -138,6 +138,26 @@ const clients = [
   { id: CLIENT_B, name: "Bee Creative Solution", status: "active", created_at: "2026-02-01T00:00:00.000Z" },
 ];
 
+// #614 — Postgres `uuid` shape (`clara.clients.id`, 0003_books_core.sql:34-40), mirrored
+// from `lib/client-id.ts`'s own regex so THIS MOCK'S FAILURE MODE MATCHES THE LIVE ONE.
+// The `/rest/v1/clients` handler below used to answer `id=eq.<any string>` with an honest
+// `[]` regardless of shape — which is exactly why `shell-migration-walk.spec.ts`'s bogus-id
+// cell passed locally while app.clarabook.com (real PostgREST) threw HTTP 400 `22P02` for
+// the same input and rendered the route's ERROR boundary instead of the scoped not-found.
+// See that handler's own note.
+const CLIENT_ID_SHAPE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** The exact PostgREST error body a non-uuid `eq.` filter on a uuid column returns —
+ *  measured on app.clarabook.com against `/clients/not-a-client/journals` (#614). */
+function sendMalformedUuidFilter(response, value, cors) {
+  sendJson(
+    response,
+    400,
+    { code: "22P02", details: null, hint: null, message: `invalid input syntax for type uuid: "${value}"` },
+    cors,
+  );
+}
+
 /** Sessions minted at RUNTIME by the create handler below, and the marker transcript each
  *  one serves. Kept beside the list they are appended to.
  *
@@ -443,10 +463,17 @@ async function handleSupabase(request, response, url) {
 
   if (request.method === "GET" && path === "/rest/v1/clients") {
     const filter = url.searchParams.get("id");
+    const filterValue = filter?.startsWith("eq.") ? filter.slice(3) : null;
+    // #614 — MOCK PARITY WITH REAL POSTGREST: a malformed `id=eq.<value>` (not shaped like
+    // `clara.clients.id`, a uuid) is a 400 `22P02` on the live API, never an honest `[]`.
+    // Checked BEFORE the `hiddenClients` filter — a malformed id was never a visible client
+    // to begin with, so there is nothing for that toggle to hide.
+    if (filterValue !== null && !CLIENT_ID_SHAPE.test(filterValue)) {
+      sendMalformedUuidFilter(response, filterValue, cors);
+      return;
+    }
     const visible = clients.filter((client) => !state.hiddenClients.has(client.id));
-    const rows = filter?.startsWith("eq.")
-      ? visible.filter((client) => client.id === filter.slice(3))
-      : visible;
+    const rows = filterValue !== null ? visible.filter((client) => client.id === filterValue) : visible;
     sendJson(response, 200, rows, cors);
     return;
   }

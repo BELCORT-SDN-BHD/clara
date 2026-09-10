@@ -513,6 +513,25 @@ test("D6: an invisible/nonexistent client renders the not-found state INSIDE the
   const waysBack = page.getByRole("navigation", { name: "Ways back" });
   await expect(waysBack.getByRole("link", { name: "Clients", exact: true })).toBeVisible();
   await expect(waysBack.getByRole("link", { name: "Firm home", exact: true })).toBeVisible();
+
+  // #614 hosted finding — "not-a-client" IS MALFORMED, not merely unknown: real PostgREST
+  // answers `id=eq.not-a-client` with HTTP 400 `22P02`, which used to THROW past
+  // `notFound()` and render `app/(firm)/error.tsx`'s "Something went wrong" boundary
+  // instead of the scoped not-found above. That heading assertion alone would not have
+  // caught the regression — a page can carry both the not-found heading AND a nested
+  // error boundary — so this checks for the absence directly.
+  await expect(page.getByRole("heading", { name: "Something went wrong", level: 1 })).toHaveCount(0);
+
+  // The rail used to leak the raw PostgREST code too (CB-AE2E-022: no internal error codes
+  // in user copy) — `OnboardingChecklistCard` read `id=eq.not-a-client` client-side via the
+  // clientId `RailMount` lifted straight off the URL. `app/(firm)/clients/not-found.tsx`
+  // renders INSIDE the (firm) shell, so the rail is still mounted here; only check its
+  // contents when it is actually visible (a launcher-gated overlay below `lg`, per
+  // `rail-chrome.tsx`, would otherwise make this a false negative rather than a real pass).
+  const rail = page.locator("[data-clara-rail]");
+  if (await rail.isVisible()) {
+    await expect(rail).not.toContainText(/22P02|invalid input syntax/i);
+  }
 });
 
 test.describe("AC6: live permission loss", () => {

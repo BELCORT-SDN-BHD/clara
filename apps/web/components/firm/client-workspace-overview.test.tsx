@@ -18,7 +18,9 @@ import { ClientWorkspaceOverview } from "./client-workspace-overview";
 
 enableDomInspection();
 
-const CLIENT_ID = "c1";
+// A uuid-shaped id, because `loadClientById` (via the #614 guard) answers null for any
+// other shape before it reads — the overview under test must be reachable.
+const CLIENT_ID = "c1c1c1c1-0000-4000-8000-000000000001";
 const CLIENT = [{ id: CLIENT_ID, name: "Rome Properties Sdn Bhd", status: "active", created_at: "2026-03-12T00:00:00Z" }];
 const FY_END = [{ id: CLIENT_ID, name: "Rome Properties Sdn Bhd", fy_end_month: 12, fy_end_day: 31 }];
 

@@ -13,6 +13,15 @@
 // WHAT SURVIVES: nothing client-owned. WHAT MUST NOT BE TORN DOWN: the module-level
 // `claraThreadStore` entry for a turn that is still running — the last cell is that half, and
 // it is the one the removed `claraThreadStore.reset(...)` call used to break.
+//
+// #614 — TWO MORE CELLS, same replay pattern: `rail-mount.tsx` now runs `rawClientId !==
+// undefined && isClientIdShape(rawClientId) ? rawClientId : undefined` on the raw URL
+// segment BEFORE handing it to `ClaraRail`, so a malformed segment ("not-a-client") never
+// reaches the rail as a `clientId` at all — it mounts the FIRM altitude instead of letting
+// `OnboardingChecklistCard` issue a `client_id=eq.not-a-client` read that real PostgREST
+// answers with a raw `22P02` the rail used to show verbatim. `isClientIdShape` is imported
+// from the SAME module `rail-mount.tsx` imports (`lib/client-id.ts`) rather than
+// re-implemented, and the trailing source-pin test ties this replay to the literal guard.
 
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -26,6 +35,7 @@ import { ClaraRail } from "./ClaraRail";
 import { renderComponent, setFieldValue } from "../../test/hookHarness";
 import { enableDomInspection } from "../../test/domInspect";
 import { claraThreadStore } from "../../lib/clara/threadStore";
+import { isClientIdShape } from "../../lib/client-id";
 import { FIRM_ALTITUDE } from "../../lib/clara/useActiveThread";
 import messages from "../../messages/en.json";
 
@@ -92,11 +102,16 @@ async function settleUntil(h: { settle: () => Promise<void> }, condition: () => 
 
 /** The REAL boundary: `RailMount`'s own body, with the URL segment as the only input — the
  *  production switch. `useParams` is the one thing a test has to supply, so this mirrors
- *  rail-mount.tsx's `key={clientId ?? FIRM_ALTITUDE}` on the same `<ClaraRail>` it mounts. */
-function mountRail(): { element: ReactElement; setClient: () => (next: string | undefined) => void } {
+ *  rail-mount.tsx's `key={clientId ?? FIRM_ALTITUDE}` on the same `<ClaraRail>` it mounts.
+ *  `initial` is REQUIRED, deliberately, rather than defaulted to CLIENT_A: a default
+ *  parameter fires on an explicit `undefined` argument too, which is exactly the value the
+ *  #614 "malformed segment" cell below needs to pass through unchanged to prove firm
+ *  altitude — a default here would have silently substituted CLIENT_A and made that cell
+ *  pass for the wrong reason. Every pre-#614 cell passes CLIENT_A explicitly instead. */
+function mountRail(initial: string | undefined): { element: ReactElement; setClient: () => (next: string | undefined) => void } {
   let setter: ((next: string | undefined) => void) | null = null;
   function Harness(): ReactElement {
-    const [clientId, setClientId] = useState<string | undefined>(CLIENT_A);
+    const [clientId, setClientId] = useState<string | undefined>(initial);
     setter = setClientId;
     return createElement(ClaraRail, { key: clientId ?? FIRM_ALTITUDE, auth: { getAccessToken: async () => TOKEN }, clientId });
   }
@@ -110,7 +125,7 @@ function mountRail(): { element: ReactElement; setClient: () => (next: string | 
 }
 
 test("A -> B: the outgoing client's transcript and composer draft do not survive the switch", async () => {
-  const { element, setClient } = mountRail();
+  const { element, setClient } = mountRail(CLIENT_A);
   await withFetch(async () => {
     const h = await renderComponent(element);
     try {
@@ -140,7 +155,7 @@ test("A -> B: the outgoing client's transcript and composer draft do not survive
 });
 
 test("A -> firm: the altitude change is a boundary too", async () => {
-  const { element, setClient } = mountRail();
+  const { element, setClient } = mountRail(CLIENT_A);
   await withFetch(async () => {
     const h = await renderComponent(element);
     try {
@@ -167,7 +182,7 @@ test("WHAT MUST NOT BE TORN DOWN: a running turn's store entry survives a switch
   // module-level and keyed by THREAD id, which is what makes surviving safe: a different
   // client resolves a different thread, so nothing crosses.
   claraThreadStore.reset(THREAD_A);
-  const { element, setClient } = mountRail();
+  const { element, setClient } = mountRail(CLIENT_A);
   await withFetch(async () => {
     const h = await renderComponent(element);
     try {
@@ -193,6 +208,43 @@ test("WHAT MUST NOT BE TORN DOWN: a running turn's store entry survives a switch
   });
 });
 
+test("GH-614: a malformed URL segment mounts the FIRM-ALTITUDE rail, replaying RailMount's own guard", async () => {
+  const rawSegment = "not-a-client";
+  const derivedClientId = rawSegment !== undefined && isClientIdShape(rawSegment) ? rawSegment : undefined;
+  assert.equal(derivedClientId, undefined, "a malformed segment must derive to undefined — firm altitude");
+
+  const { element } = mountRail(derivedClientId);
+  await withFetch(async () => {
+    const h = await renderComponent(element);
+    try {
+      await settleUntil(h, () => /FIRM TRANSCRIPT/.test(h.text()), "the firm thread");
+      assert.doesNotMatch(
+        h.text(),
+        /CLIENT A TRANSCRIPT|CLIENT B TRANSCRIPT/,
+        "no client-scoped thread renders for a malformed id",
+      );
+    } finally {
+      await h.unmount();
+    }
+  });
+});
+
+test("GH-614: a well-formed URL segment mounts that client's rail, replaying RailMount's own guard", async () => {
+  const rawSegment: string | undefined = CLIENT_A;
+  const derivedClientId = rawSegment !== undefined && isClientIdShape(rawSegment) ? rawSegment : undefined;
+  assert.equal(derivedClientId, CLIENT_A, "a well-formed segment passes through unchanged");
+
+  const { element } = mountRail(derivedClientId);
+  await withFetch(async () => {
+    const h = await renderComponent(element);
+    try {
+      await settleUntil(h, () => /CLIENT A TRANSCRIPT/.test(h.text()), "client A's thread");
+    } finally {
+      await h.unmount();
+    }
+  });
+});
+
 test("the boundary is at the MOUNT, so the key covers the whole rail subtree", () => {
   // A source pin, deliberately narrow: the behavioural cells above run against a harness that
   // reproduces the mount's key, and this is what ties that harness to the real file. Without
@@ -202,6 +254,9 @@ test("the boundary is at the MOUNT, so the key covers the whole rail subtree", (
   // useActiveThread.ts for exactly this call site (and ClaraThreadView.tsx's own).
   const src = textOfFile("components/clara/rail-mount.tsx");
   assert.match(src, /<ClaraRail\s+key=\{clientId \?\? FIRM_ALTITUDE\}/);
+  // #614 — the malformed-id guard itself, pinned: without this, the two replay cells above
+  // would keep passing even if the real file's guard were ever deleted.
+  assert.match(src, /isClientIdShape\(rawClientId\)\s*\?\s*rawClientId\s*:\s*undefined/);
   const rail = textOfFile("components/clara/ClaraRail.tsx");
   assert.doesNotMatch(rail, /<ClaraThreadView\s+key=/, "the retired per-feature key must not come back beside the structural one");
 });

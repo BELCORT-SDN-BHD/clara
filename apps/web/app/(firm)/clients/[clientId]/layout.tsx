@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 
 import { ClientIdentityPublisher } from "@/components/app-shell/scope-context";
 import { ClientScopeProvider } from "@/components/client-scope-provider";
+import { isClientIdShape } from "@/lib/client-id";
 import { loadClientById } from "@/lib/firm/reads";
 import { fixedTokenAccessor, resolveServerSession } from "@/lib/supabase/server-session";
 
@@ -52,6 +53,17 @@ export default async function ClientWorkspaceLayout({
   params: Promise<{ clientId: string }>;
 }) {
   const { clientId } = await params;
+  // #614 — A MALFORMED id is a NOT-FOUND question, not a database one.
+  // `clientId` is a Postgres `uuid` column (0003_books_core.sql:34-40); a
+  // segment that isn't shaped like one (e.g. "not-a-client") makes
+  // `loadClientById` below issue `id=eq.not-a-client`, and real PostgREST
+  // answers that with HTTP 400 `22P02` — a THROW, not the empty result set
+  // an unknown-but-well-formed id gets. That throw used to reach the ERROR
+  // boundary before `notFound()` ever ran (AC5/CB-AE2E-022 violation: the
+  // route rendered "Something went wrong" instead of the scoped not-found).
+  // Checked BEFORE `resolveServerSession()` too — a malformed address is
+  // never worth a session lookup either.
+  if (!isClientIdShape(clientId)) notFound();
   const caller = await resolveServerSession();
   if (caller === null) notFound();
   const client = await loadClientById(fixedTokenAccessor(caller.accessToken), clientId);

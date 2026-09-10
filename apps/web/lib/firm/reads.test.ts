@@ -79,30 +79,56 @@ test("loadClientRegisterFacts: filters to entity_type/msic, unsuperseded only", 
   assert.match(seenUrl, /superseded_at=is\.null/);
 });
 
+// #614 — well-formed-but-unrelated uuids, deliberately: the cells below are
+// about the WIRE round trip (filter shape, empty-result honesty), not about
+// the shape gate itself (that is lib/client-id.test.ts's job and the
+// dedicated "malformed id" cell further down).
+const WELL_FORMED_ID = "22222222-2222-4222-8222-222222222222";
+const WELL_FORMED_UNKNOWN_ID = "00000000-0000-4000-8000-000000000000";
+
 test("loadClientById: filters by id, resolves the first row", async () => {
   let seenUrl = "";
   await withMockedFetch(
     async (url) => {
       seenUrl = String(url);
-      return jsonResponse([{ id: "c1", name: "Acme", status: "active", created_at: "2026-01-01" }], 200);
+      return jsonResponse([{ id: WELL_FORMED_ID, name: "Acme", status: "active", created_at: "2026-01-01" }], 200);
     },
     async () => {
-      const row = await loadClientById(fakeSession("tok"), "c1");
-      assert.deepEqual(row, { id: "c1", name: "Acme", status: "active", created_at: "2026-01-01" });
+      const row = await loadClientById(fakeSession("tok"), WELL_FORMED_ID);
+      assert.deepEqual(row, { id: WELL_FORMED_ID, name: "Acme", status: "active", created_at: "2026-01-01" });
     },
   );
   assert.match(seenUrl, /\/rest\/v1\/clients\?/);
-  assert.match(seenUrl, /id=eq\.c1/);
+  assert.match(seenUrl, new RegExp(`id=eq\\.${WELL_FORMED_ID}`));
 });
 
 test("loadClientById: an empty result (RLS admits no such row) resolves null, never throws", async () => {
   await withMockedFetch(
     async () => jsonResponse([], 200),
     async () => {
-      const row = await loadClientById(fakeSession("tok"), "missing");
+      const row = await loadClientById(fakeSession("tok"), WELL_FORMED_UNKNOWN_ID);
       assert.equal(row, null);
     },
   );
+});
+
+test("loadClientById: a MALFORMED id resolves null WITHOUT issuing a request (#614)", async () => {
+  // Real PostgREST answers a non-uuid `id=eq.<value>` filter with HTTP 400
+  // `22P02` — a throw the old code let escape past `notFound()`. If this ever
+  // regressed to sending the request, the fetch below would flip `called` to
+  // true rather than the assertion ever failing on a body it returned.
+  let called = false;
+  await withMockedFetch(
+    async () => {
+      called = true;
+      return jsonResponse({ code: "22P02", message: 'invalid input syntax for type uuid: "not-a-client"' }, 400);
+    },
+    async () => {
+      const row = await loadClientById(fakeSession("tok"), "not-a-client");
+      assert.equal(row, null);
+    },
+  );
+  assert.equal(called, false, "a malformed id must never reach fetch");
 });
 
 test("loadFirmActivity: a 403 (RLS/grant refusal) propagates as a typed ReadError, never masked", async () => {
