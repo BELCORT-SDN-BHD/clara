@@ -128,7 +128,11 @@ test("C3: evidence is OPTIONAL, and the chosen document survives a reload under 
 
   // ── submit → the durable Work, which carries the document it cited ─────────
   await page.getByRole("button", { name: "Submit" }).click();
-  await expect(page).toHaveURL(/\/work\/[0-9a-f-]{36}$/);
+  // A GENEROUS wait, not the 5-second default: this assertion is about WHERE the
+  // submit lands, and the round trip goes through the app's own proxy to the
+  // runtime and back. Measured on a loaded host, where the default timed out on a
+  // navigation that then happened.
+  await expect(page).toHaveURL(/\/work\/[0-9a-f-]{36}$/, { timeout: 20_000 });
   const workId = workIdIn(page.url());
   await control(page, { op: "run", workId });
   await control(page, { op: "complete", workId });
@@ -176,7 +180,11 @@ test("C3: a document that already backs a posted entry is a persistent Alert wit
   await evidence(page).selectOption(JOURNAL_WORK.freeDocumentId);
   await expect(page.getByText("That document already backs a posted entry")).toHaveCount(0);
   await page.getByRole("button", { name: "Submit" }).click();
-  await expect(page).toHaveURL(/\/work\/[0-9a-f-]{36}$/);
+  // A GENEROUS wait, not the 5-second default: this assertion is about WHERE the
+  // submit lands, and the round trip goes through the app's own proxy to the
+  // runtime and back. Measured on a loaded host, where the default timed out on a
+  // navigation that then happened.
+  await expect(page).toHaveURL(/\/work\/[0-9a-f-]{36}$/, { timeout: 20_000 });
 });
 
 test("C3: a refusal NAMING the evidence array lands on the evidence control, with the draft intact", async ({ page }) => {
@@ -200,7 +208,11 @@ test("B3: LATE attachment on a posted documentless entry — happy, replay, and 
   await page.goto(COMPOSER_URL);
   await fillBalancedBasis(page);
   await page.getByRole("button", { name: "Submit" }).click();
-  await expect(page).toHaveURL(/\/work\/[0-9a-f-]{36}$/);
+  // A GENEROUS wait, not the 5-second default: this assertion is about WHERE the
+  // submit lands, and the round trip goes through the app's own proxy to the
+  // runtime and back. Measured on a loaded host, where the default timed out on a
+  // navigation that then happened.
+  await expect(page).toHaveURL(/\/work\/[0-9a-f-]{36}$/, { timeout: 20_000 });
   const workId = workIdIn(page.url());
   await control(page, { op: "run", workId });
   await control(page, { op: "complete", workId });
@@ -252,7 +264,11 @@ test("B3: the late door refuses a STALE view of the entry and says so inline, ke
   await page.goto(COMPOSER_URL);
   await fillBalancedBasis(page);
   await page.getByRole("button", { name: "Submit" }).click();
-  await expect(page).toHaveURL(/\/work\/[0-9a-f-]{36}$/);
+  // A GENEROUS wait, not the 5-second default: this assertion is about WHERE the
+  // submit lands, and the round trip goes through the app's own proxy to the
+  // runtime and back. Measured on a loaded host, where the default timed out on a
+  // navigation that then happened.
+  await expect(page).toHaveURL(/\/work\/[0-9a-f-]{36}$/, { timeout: 20_000 });
   const workId = workIdIn(page.url());
   await control(page, { op: "run", workId });
   await control(page, { op: "complete", workId });
