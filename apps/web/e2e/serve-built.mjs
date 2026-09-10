@@ -50,7 +50,7 @@ import { handleHomeBoardSupabase } from "./home-board-mock.mjs";
 // unfiltered register, and its ONE chat thread is APPENDED to the shared `sessions` list
 // below rather than answered from a second one. Its runtime half owns `/api/work/*` and
 // one control path; see that module's header for what the walk does and does not prove.
-import { JOURNAL_WORK_SESSIONS, handleJournalWorkRuntime, handleJournalWorkSupabase } from "./journal-work-mock.mjs";
+import { JOURNAL_WORK_SESSIONS, handleJournalWorkRpc, handleJournalWorkRuntime, handleJournalWorkSupabase } from "./journal-work-mock.mjs";
 // #627's own lane (the D4 tax-boundary walk). ID-scoped like its siblings — five client ids,
 // one per five/six-state read outcome — hooked in ONE place below, before `handleL7Supabase`
 // (see that hook's own note for why order matters here).
@@ -511,6 +511,15 @@ async function handleSupabase(request, response, url) {
   if (await handleJournalsTableSupabase(request, response, path, url, sendJson, cors)) return;
   if (await handleChatParitySupabase(request, response, path, url, sendJson, cors)) return;
   if (await handleP6_5Supabase(request, response, path, url, sendJson, cors)) return;
+  // #634's TWO governed doors, ordered HERE and not beside their own lane's
+  // PostgREST hook below. Measured hazard, the same one this file already
+  // records for the documents lane: `bank-close-registers-mock.mjs` reads the
+  // request body on EVERY `/rest/v1/rpc/` POST before it checks the verb, and
+  // `readJson` consumes the stream — so a lane ordered after it reads `{}` and
+  // its own id-scoped guards then refuse its own walk's traffic. This hook
+  // matches its two verbs by NAME first and reads the body only inside a match,
+  // so it starves nothing in the other direction either.
+  if (await handleJournalWorkRpc(request, response, path, url, sendJson, cors)) return;
   // THE DOCUMENTS LANE RUNS BEFORE L7's, and the reason is a measured hazard
   // rather than a preference. `bank-close-registers-mock.mjs:204-246` parses the
   // request body on EVERY `/rest/v1/rpc/` POST and then returns false for verbs

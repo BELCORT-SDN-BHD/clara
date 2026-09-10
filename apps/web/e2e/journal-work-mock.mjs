@@ -90,6 +90,14 @@ export const JOURNAL_WORK = {
   rentAccount: "6100",
   bankAccount: "1100",
   unknownAccount: "9999",
+  /** #634 — this client's two FILED documents. `freeDocumentId` backs nothing,
+   *  so it is the one a composer may cite and the one the late door may attach;
+   *  `takenDocumentId` already backs the seeded posted entry, so citing it is the
+   *  `source_already_posted` arm at BOTH doors. */
+  freeDocumentId: "d2306001-d230-4d23-8d23-d230d2306001",
+  freeDocumentName: "september-rent-invoice.pdf",
+  takenDocumentId: "d2306002-d230-4d23-8d23-d230d2306002",
+  takenDocumentName: "august-rent-invoice.pdf",
   /** The control endpoint, as the BROWSER addresses it: the same-origin proxy
    *  maps `/api/runtime/<p>` onto the runtime's `/api/<p>`. */
   controlPath: "/api/runtime/e2e-journal-work/control",
@@ -127,6 +135,40 @@ const ACCOUNTS = [
   { client_id: JOURNAL_WORK.clientId, account_code: "6199", name: "Office rent (retired)", account_type: "expense", is_active: false },
 ];
 
+/** #634 — `clara.documents` rows, as `lib/documents/reads.ts` selects them. */
+const DOCUMENTS = [
+  {
+    id: JOURNAL_WORK.freeDocumentId, sha256: "a".repeat(64), original_filename: JOURNAL_WORK.freeDocumentName,
+    mime_type: "application/pdf", byte_size: 20480, storage_path: `firms/${FIRM_ID}/docs/a.pdf`, uploaded_by: SUBJECT,
+    created_at: "2026-09-02T00:00:00.000Z", bytes_verified_at: "2026-09-02T00:00:01.000Z", page_count: 1,
+    extraction_status: "done", document_kind: "invoice", financial_date: "2026-09-01",
+    retention_state: "anchored", retain_until: "2033-09-01", retention_basis: "statutory", legal_hold: false, legal_hold_reason: null,
+  },
+  {
+    id: JOURNAL_WORK.takenDocumentId, sha256: "b".repeat(64), original_filename: JOURNAL_WORK.takenDocumentName,
+    mime_type: "application/pdf", byte_size: 20481, storage_path: `firms/${FIRM_ID}/docs/b.pdf`, uploaded_by: SUBJECT,
+    created_at: "2026-08-02T00:00:00.000Z", bytes_verified_at: "2026-08-02T00:00:01.000Z", page_count: 1,
+    extraction_status: "done", document_kind: "invoice", financial_date: "2026-08-01",
+    retention_state: "anchored", retain_until: "2033-08-01", retention_basis: "statutory", legal_hold: false, legal_hold_reason: null,
+  },
+];
+
+/** #634 — the ACTIVE filings that make those documents THIS CLIENT's. The estate
+ *  has no client column on `clara.documents`; the filing is the binding, and
+ *  `uq_document_filing_active` admits at most one live filing per (document,
+ *  client) — which is why there is exactly one row here per document. */
+const FILINGS = DOCUMENTS.map((doc, i) => ({
+  id: `f230600${i + 1}-f230-4f23-8f23-f230f230600${i + 1}`,
+  document_id: doc.id,
+  client_id: JOURNAL_WORK.clientId,
+  filed_at: doc.created_at,
+  filed_by: SUBJECT,
+  basis: "human",
+  retired_at: null,
+  retirement_reason: null,
+  revision_token: `rev-filing-${i + 1}`,
+}));
+
 const BUNDLE = { id: "clara-work/v1", digest: "9f2b7c1d4e6a8b0c2d4e6f8a0b2c4d6e8f0a2b4c6d8e0f2a4b6c8d0e2f4a6b8c" };
 
 /** The one basis the seeded Work was admitted with — RM 1,200 office rent paid
@@ -158,6 +200,11 @@ const state = {
    *  admission — see this file's header for why a basis refusal has to be
    *  injected rather than provoked. */
   nextBasisRefusal: null,
+  /** #634 — `clara.entry_evidence_links`, keyed by entry id. AT MOST ONE per
+   *  entry (the table's own `uq_entry_evidence_links_entry`) and at most one per
+   *  DOCUMENT (`uq_entry_evidence_links_document`) — both invariants are modelled
+   *  here, because the walk's whole point is that they hold end to end. */
+  links: new Map(),
   /** `clara.agent_interruptions` rows, in the shape `clara.open_interruption`
    *  writes them: one PENDING row per parked task, its `question` jsonb carrying
    *  the runtime's own `{ type, question, context, framing }`. */
@@ -205,6 +252,7 @@ function seed() {
   state.questions.clear();
   state.nextAnswerRefusal = null;
   state.showQuestionCard = false;
+  state.links.clear();
 
   const work = newWorkRow({
     id: JOURNAL_WORK.seededWorkId,
@@ -254,6 +302,21 @@ function seed() {
   state.intents.set(work.intent_key, work.id);
   state.tasks.set(JOURNAL_WORK.seededTaskId, { id: JOURNAL_WORK.seededTaskId, status: "queued", error_code: null, created_at: work.created_at, updated_at: work.created_at });
   commit(work, JOURNAL_WORK.seededEntryId, JOURNAL_WORK.seededReceiptId);
+  // #634 — the seeded entry ALREADY STANDS on one of the two documents, which is
+  // what makes `source_already_posted` reachable at both doors without the walk
+  // having to post twice first. Written as a LATE attachment, so the fixture also
+  // carries one row of each `attached_via` value from the first paint.
+  state.links.set(JOURNAL_WORK.seededEntryId, {
+    entry_id: JOURNAL_WORK.seededEntryId,
+    client_id: JOURNAL_WORK.clientId,
+    document_id: JOURNAL_WORK.takenDocumentId,
+    work_id: JOURNAL_WORK.seededWorkId,
+    receipt_id: null,
+    logical_op_id: `work:${JOURNAL_WORK.seededWorkId}:attach_evidence:1`,
+    attached_via: "late_attachment",
+    attached_by: SUBJECT,
+    attached_at: "2026-09-05T01:00:00.000Z",
+  });
 }
 
 function newWorkRow({ id, taskId, intentKey, basis, origin, sourceRefs }) {
@@ -316,16 +379,29 @@ function commit(work, entryId, receiptId) {
       counterparty_id: null,
     })),
   );
+  // #634 — the evidence link is BORN INSIDE the posting transaction when the
+  // Work cited a document, naming the Work and its receipt.
+  const citedDocument = (work.source_refs ?? []).find((r) => r.kind === "document")?.document_id ?? null;
+  if (citedDocument !== null) {
+    state.links.set(entryId, {
+      entry_id: entryId, client_id: JOURNAL_WORK.clientId, document_id: citedDocument, work_id: work.id,
+      receipt_id: receiptId, logical_op_id: work.logical_op_id, attached_via: "work_commit",
+      attached_by: SUBJECT, attached_at: at,
+    });
+  }
   state.receipts.push({
     id: receiptId, client_id: JOURNAL_WORK.clientId, work_id: work.id, purpose: "journal_entry",
     logical_op_id: work.logical_op_id, payload_digest: work.basis_digest, acting_actor: SUBJECT,
     on_behalf_of: SUBJECT, via_wake_kind: "interactive_client", bundle_digest: BUNDLE.digest,
     run_id: `run-${work.id}`, task_id: work.current_task_id, outcome: "committed",
-    effects: { entry_id: entryId, revision_token: `rev-${entryId}` }, refusal: null, created_at: at,
+    effects: citedDocument === null
+      ? { entry_id: entryId, revision_token: `rev-${entryId}` }
+      : { entry_id: entryId, revision_token: `rev-${entryId}`, document_id: citedDocument },
+    refusal: null, created_at: at,
   });
   work.status = "completed";
   work.bundle = BUNDLE;
-  work.result = { entry_id: entryId, receipt_id: receiptId, posted_at: at };
+  work.result = { entry_id: entryId, receipt_id: receiptId, posted_at: at, document_id: citedDocument };
   work.error = null;
   work.updated_at = at;
   const task = state.tasks.get(work.current_task_id);
@@ -400,23 +476,57 @@ export async function handleJournalWorkRuntime(request, response, url) {
       send(response, 400, { error: "invalid_basis", field: refusal.field, reason: refusal.reason });
       return true;
     }
+    // #634 · THE EVIDENCE HALF OF THE ADMISSION. The wire shape and both refusal
+    // bodies are the ROUTE's own (packages/runtime/src/workRoutes.ts): a
+    // malformed ref is a 400 whose `field` the composer maps onto its evidence
+    // control, and a document that already backs a posted entry is a 409 naming
+    // that entry — never a shape invented to make a cell go green.
+    const sourceRefs = Array.isArray(body?.sourceRefs) ? body.sourceRefs : [];
+    for (let i = 0; i < sourceRefs.length; i += 1) {
+      const ref = sourceRefs[i];
+      const documentId = typeof ref?.documentId === "string" ? ref.documentId : "";
+      if (ref?.kind !== "document" || !DOCUMENTS.some((d) => d.id === documentId)) {
+        send(response, 400, { error: "invalid_basis", field: `sourceRefs[${i + 1}]`, reason: "invalid_source_ref" });
+        return true;
+      }
+    }
+    const citedDocument = sourceRefs.length > 0 ? String(sourceRefs[0].documentId) : null;
     const known = state.intents.get(intentKey);
     if (known !== undefined) {
       const work = state.works.get(known);
       // THE TWO IDEMPOTENCY ARMS, as `clara.admit_journal_work` defines them:
       // same key + same digest resolves the ORIGINAL Work; same key + a
       // different payload is a typed conflict and admits nothing.
-      if (work.basis_digest !== digestOf(basis)) {
+      // TWO PAYLOAD HALVES, ONE TOKEN — the recut door compares the canonical
+      // source refs alongside the basis digest, so re-submitting one intent with
+      // a DIFFERENT document is a conflict rather than a replay that silently
+      // drops the new evidence.
+      const sameEvidence = (work.source_refs ?? []).filter((r) => r.kind === "document").map((r) => r.document_id).join(",")
+        === (citedDocument === null ? "" : citedDocument);
+      if (work.basis_digest !== digestOf(basis) || !sameEvidence) {
         send(response, 409, { error: "intent_payload_conflict", work_id: work.id });
         return true;
       }
       send(response, 202, admissionBody(work, true));
       return true;
     }
+    // ONE DOCUMENT, ONE POSTED ENTRY — asked AFTER the replay branch (a replay of
+    // an already-admitted Work owns its own document) and BEFORE anything is
+    // minted, so a conflicting attachment never spends a Work or a run.
+    if (citedDocument !== null) {
+      const standing = [...state.links.values()].find((row) => row.document_id === citedDocument);
+      if (standing !== undefined) {
+        send(response, 409, { error: "source_already_posted", entry_id: standing.entry_id, document_id: citedDocument });
+        return true;
+      }
+    }
     state.minted += 1;
     const id = `6230${pad(state.minted)}-6230-4623-8623-623062306230`;
     const taskId = `7230${pad(state.minted)}-7230-4723-8723-723072307230`;
-    const work = newWorkRow({ id, taskId, intentKey, basis, origin: "user_direct", sourceRefs: [] });
+    const work = newWorkRow({
+      id, taskId, intentKey, basis, origin: "user_direct",
+      sourceRefs: citedDocument === null ? [] : [{ kind: "document", document_id: citedDocument }],
+    });
     state.works.set(id, work);
     state.tasks.set(taskId, { id: taskId, status: "queued", error_code: null, created_at: work.created_at, updated_at: work.created_at });
     state.intents.set(intentKey, id);
@@ -497,6 +607,17 @@ function control(body) {
     // Arm the transcript's `work_question` part for the B6 cell. See `state.showQuestionCard`.
     state.showQuestionCard = true;
     return { showQuestionCard: true };
+  }
+  // #634 — MOVE THE ROW UNDER AN OPEN DIALOG. The late door's CLR06 is a race:
+  // the caller read a revision, something else changed the entry, and the door
+  // must refuse rather than write against a view that is no longer current. The
+  // walk cannot forge a request the client would not make, so it moves the ROW
+  // instead — which is exactly what the race is.
+  if (body.op === "bump_revision") {
+    const entry = state.entries.get(String(body.entryId ?? ""));
+    if (entry === undefined) return { error: "no_such_entry" };
+    entry.revision_token = `rev-${entry.id}-moved`;
+    return { revision_token: entry.revision_token };
   }
   if (body.op === "refuse_basis") {
     state.nextBasisRefusal = { field: String(body.field ?? "basis"), reason: String(body.reason ?? "invalid_basis") };
@@ -675,6 +796,36 @@ export async function handleJournalWorkSupabase(request, response, path, url, se
     return true;
   }
 
+  // #634 — the composer's and the dialog's pick list: this client's ACTIVE
+  // filings, resolved to their document rows. Both are scoped to THIS lane's
+  // client (or to ids this module minted) and fall through otherwise.
+  if (request.method === "GET" && path === "/rest/v1/document_filings") {
+    if (eqParam(url, "client_id") !== ours) return false;
+    sendJson(response, 200, FILINGS, cors);
+    return true;
+  }
+
+  if (request.method === "GET" && path === "/rest/v1/documents") {
+    const inList = url.searchParams.get("id");
+    if (inList === null || !inList.startsWith("in.(")) return false;
+    const ids = inList.slice(4, -1).split(",").map((v) => decodeURIComponent(v));
+    const rows = DOCUMENTS.filter((d) => ids.includes(d.id));
+    if (rows.length === 0) return false;
+    sendJson(response, 200, rows, cors);
+    return true;
+  }
+
+  // #634 — `findEntryForDocument`'s first read: WHICH entry already stands on a
+  // document, answered from the rows rather than from a refusal (a governed
+  // refusal carries only `detail.reason` to a browser).
+  if (request.method === "GET" && path === "/rest/v1/entry_evidence_links") {
+    if (eqParam(url, "client_id") !== ours) return false;
+    const documentId = eqParam(url, "document_id");
+    const rows = [...state.links.values()].filter((row) => documentId === null || row.document_id === documentId);
+    sendJson(response, 200, rows.map((row) => ({ entry_id: row.entry_id })), cors);
+    return true;
+  }
+
   if (request.method === "GET" && path === "/rest/v1/agent_interruptions") {
     // SCOPED TO A TASK THIS MODULE MINTED. The journals workbench reads the same
     // relation FIRM-WIDE (`status=eq.pending` with no task filter) and the chat
@@ -844,4 +995,120 @@ export function journalWorkTranscript() {
       created_at: "2026-09-05T00:00:02.000Z",
     },
   ];
+}
+
+// ── #634's governed doors ────────────────────────────────────────────────────
+
+/**
+ * `clara.list_entry_links` and `clara.attach_entry_evidence`, as PostgREST RPCs.
+ *
+ * A SEPARATE HOOK, CALLED EARLY, and the reason is `serve-built.mjs`'s own
+ * measured hazard: `bank-close-registers-mock.mjs` reads the request body on
+ * EVERY `/rest/v1/rpc/` POST before it checks the verb, and `readJson` consumes
+ * the stream — so any lane ordered after it reads `{}`. This hook runs BEFORE
+ * that one and reads the body ONLY inside a verb it has already matched by name,
+ * so it starves nothing in either direction.
+ *
+ * EVERY REFUSAL BELOW IS THE REAL ONE: a governed CLR SQLSTATE plus the DB's own
+ * `details` jsonb, which is all `lib/wire.ts`'s `parseReasonToken` ever surfaces
+ * to a component — the exact reason the browser resolves a conflicting entry id
+ * from the ROWS instead of from the refusal.
+ */
+export async function handleJournalWorkRpc(request, response, path, url, sendJson, cors) {
+  if (request.method !== "POST") return false;
+
+  if (path === "/rest/v1/rpc/list_entry_links") {
+    const body = await readJson(request);
+    if (body?.p_client !== JOURNAL_WORK.clientId) return false;
+    const ids = Array.isArray(body?.p_entries) ? body.p_entries : [];
+    const rows = ids
+      .filter((id) => state.entries.has(id))
+      .map((id) => {
+        const entry = state.entries.get(id);
+        const link = state.links.get(id) ?? null;
+        const receipt = state.receipts.find((r) => r.effects?.entry_id === id) ?? null;
+        const work = receipt === null ? null : (state.works.get(receipt.work_id) ?? null);
+        return {
+          entry_id: id,
+          status: entry.status,
+          origin: entry.origin,
+          work_id: work?.id ?? link?.work_id ?? null,
+          receipt_id: receipt?.id ?? null,
+          logical_op_id: work?.logical_op_id ?? link?.logical_op_id ?? null,
+          purpose: work?.purpose ?? null,
+          basis_origin: work?.basis_origin ?? null,
+          initiator: work?.initiator ?? null,
+          initiator_role: work?.initiator_role ?? null,
+          document_id: link?.document_id ?? entry.document_id ?? null,
+          document_source: link !== null ? link.attached_via : entry.document_id !== null ? "document_coding" : null,
+          attached_at: link?.attached_at ?? null,
+          reversal_of: entry.reversal_of,
+          reversed_by: entry.reversed_by,
+          reversal_reason: entry.reversal_reason,
+        };
+      });
+    sendJson(response, 200, rows, cors);
+    return true;
+  }
+
+  if (path === "/rest/v1/rpc/attach_entry_evidence") {
+    const body = await readJson(request);
+    const entryId = String(body?.p_entry ?? "");
+    const entry = state.entries.get(entryId);
+    if (entry === undefined) return false;
+    const documentId = String(body?.p_document ?? "");
+    const refuse = (code, reason, message) =>
+      sendJson(response, 400, { code, message, details: JSON.stringify({ reason }) }, cors);
+
+    if (entry.status !== "approved") {
+      refuse("CLR13", "entry_not_approved", "evidence attaches to a posted entry; this one is not posted");
+      return true;
+    }
+    if (String(body?.p_expected_revision ?? "") !== entry.revision_token) {
+      refuse("CLR06", "stale_revision", "this entry changed since you read it");
+      return true;
+    }
+    if (!DOCUMENTS.some((d) => d.id === documentId)) {
+      refuse("CLR10", "invalid_source_ref", "that document is not an active verified filing of this entry's client");
+      return true;
+    }
+    const existing = state.links.get(entryId) ?? null;
+    if (existing !== null) {
+      // THE SAME DOCUMENT REPLAYS — a lost response must be safe to repeat — and
+      // a DIFFERENT one is a conflict that names nothing this browser can read,
+      // exactly as the real door's typed detail reaches it.
+      if (existing.document_id === documentId) {
+        sendJson(response, 200, {
+          attached: true, entry_id: entryId, document_id: documentId, link_id: existing.entry_id,
+          work_id: existing.work_id, logical_op_id: existing.logical_op_id,
+          attached_via: existing.attached_via, already_attached: true,
+        }, cors);
+        return true;
+      }
+      refuse("CLR13", "evidence_already_attached", "this entry already carries a different source document");
+      return true;
+    }
+    const standing = [...state.links.values()].find((row) => row.document_id === documentId);
+    if (standing !== undefined) {
+      refuse("CLR13", "source_already_posted", "that document already backs a posted journal entry");
+      return true;
+    }
+    const receipt = state.receipts.find((r) => r.effects?.entry_id === entryId) ?? null;
+    const workId = receipt?.work_id ?? null;
+    const at = new Date().toISOString();
+    state.links.set(entryId, {
+      entry_id: entryId, client_id: JOURNAL_WORK.clientId, document_id: documentId, work_id: workId,
+      receipt_id: null,
+      logical_op_id: workId === null ? `entry:${entryId}:attach_evidence:1` : `work:${workId}:attach_evidence:1`,
+      attached_via: "late_attachment", attached_by: SUBJECT, attached_at: at,
+    });
+    sendJson(response, 200, {
+      attached: true, entry_id: entryId, document_id: documentId, link_id: entryId, work_id: workId,
+      logical_op_id: state.links.get(entryId).logical_op_id, attached_via: "late_attachment",
+      already_attached: false,
+    }, cors);
+    return true;
+  }
+
+  return false;
 }
