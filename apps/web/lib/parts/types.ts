@@ -352,9 +352,35 @@ export type WorkResultPart = {
   receipt_id: string;
 };
 
-/** The canonical transcript wire union: 29 live members (9 base + 4 Wave-A +
+/** #629 — ONE persistent question a running Work parked on. Declared by
+ *  `claraWork.v2.parts.ts`; transcribed field for field from it.
+ *
+ *  IDENTIFIERS PLUS A LAST-HEARD STATUS, and the status is carried for the same
+ *  narrow reason `work_status` carries one: the card exists to make a LIVE run
+ *  observable between durable reads. It is NOT authority — the card hydrates
+ *  `clara.get_work_question` on mount and re-reads it after every action, which
+ *  is what lets it converge when somebody else answers first.
+ *
+ *  `question_version` IS ON THE WIRE AND IS LOAD-BEARING. A re-asked question is
+ *  a NEW row with the NEXT version, and the answer door takes the version as an
+ *  argument: a card holding version 1 must be told it is stale rather than
+ *  allowed to answer version 2's question with version 1's draft.
+ *
+ *  NO TEXT, NO FIELDS, NO DEADLINE. Those are the record's, read live. A card
+ *  that rendered a remembered field set would invite somebody to type an answer
+ *  into a form nobody is waiting for. */
+export type WorkQuestionPart = {
+  type: "work_question";
+  work_id: string;
+  client_id: string;
+  question_id: string;
+  question_version: number;
+  status: string;
+};
+
+/** The canonical transcript wire union: 30 live members (9 base + 4 Wave-A +
  *  1 Wave-C-c + 2 Wave-D-a + 2 Wave-D-b + 4 chatTurn_v14 + 4 chatTurn_v16 +
- *  3 durable-Work). Adding a member here without a matching ./catalog.ts entry
+ *  4 durable-Work, the fourth being #629's `work_question`). Adding a member here without a matching ./catalog.ts entry
  *  fails `tsc` — see catalog.ts's AllCovered/NoExtra guard. */
 export type ClaraPart =
   | { type: "text"; text: string }
@@ -385,4 +411,5 @@ export type ClaraPart =
   | FreeformResultPart
   | WorkAcceptedPart
   | WorkStatusPart
-  | WorkResultPart;
+  | WorkResultPart
+  | WorkQuestionPart;

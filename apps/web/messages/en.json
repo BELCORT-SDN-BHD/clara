@@ -3915,5 +3915,64 @@
       "title": "That did not go through",
       "description": "The system refused it, and here is exactly what it said."
     }
+  },
+  "WorkQuestion": {
+    "reasonLabel": "Why it is needed:",
+    "versionLabel": "Question {version}",
+    "noQuestionText": "A question is waiting on this Work, and its text could not be read.",
+    "required": "Required",
+    "optional": "Optional",
+    "moneyHelp": "amount in ringgit and sen, e.g. 1200.00",
+    "dateHelp": "YYYY-MM-DD",
+    "noteLabel": "Note",
+    "noteHelp": "Anything the person acting on this should know. Optional.",
+    "reviewHeading": "Check your answers",
+    "reviewStep": "Review · {total} answers",
+    "fieldStep": "Question {index} of {total}",
+    "back": "Back",
+    "next": "Next",
+    "submit": "Send answer",
+    "submitting": "Sending your answer…",
+    "leavePending": "Leave pending",
+    "leavePendingHelp": "You do not have to guess. Leaving this pending keeps the question open for whoever can answer it.",
+    "accepted": "Your answer was accepted and this Work will continue with it.",
+    "answeredBy": "Answered by a {role} at {at} · question {version}",
+    "draftKept": "What you had typed",
+    "denied": "You can no longer answer this question.",
+    "failed": "We could not tell whether your answer was recorded. Sending it again is safe — it will not be recorded twice.",
+    "opKeyConflict": "This browser already sent a different answer under the same identity. Change what you typed and send again.",
+    "convergeAnswered": "Somebody else answered this question first. Their answer is the one this Work is using.",
+    "convergeStale": "This question was asked again while you were typing, so this answer is for an older version of it. Open the Work to see the current question.",
+    "convergeExpired": "This question expired before it was answered. The Work can be retried, which asks it again.",
+    "convergeCancelled": "This Work was stopped, so its question is closed.",
+    "convergeBasisChanged": "What this Work is recording has changed since the question was asked, so the answer no longer applies.",
+    "convergeStateChanged": "This Work is no longer waiting on this question.",
+    "convergeInFlight": "This answer is already being recorded. Give it a moment and read the Work again.",
+    "constraint": {
+      "required": "This is needed before the Work can continue.",
+      "integer_cents": "Enter an exact amount in ringgit and sen, with at most two decimal places.",
+      "iso_date": "Enter a real date as YYYY-MM-DD.",
+      "option": "Choose one of the options offered.",
+      "active_account": "That account code is not active in this client's chart.",
+      "max_length": "That is longer than this field accepts.",
+      "unknown_key": "This answer carried something the question did not ask for.",
+      "text": "Enter text.",
+      "invalid": "That value was refused."
+    },
+    "inbox": {
+      "answerAction": "Answer",
+      "collapseAction": "Close",
+      "waitingSince": "Waiting since {since}",
+      "clientLabel": "Client",
+      "openWork": "Open the Work",
+      "loadFailed": "This question could not be read just now. Nothing was changed."
+    },
+    "card": {
+      "title": "Clara asked a question",
+      "workLabel": "Work {work}",
+      "openWork": "Open the Work",
+      "loading": "Reading the question…",
+      "unavailable": "This question could not be read. Open the Work to see it."
+    }
   }
 }

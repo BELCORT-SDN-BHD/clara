@@ -1,37 +1,37 @@
-# apps/web test manifest — T0 seam (port-wave plan §3.1).
 #
-# One test file path per line, relative to apps/web/. This is the ONE
-# checked-in source of truth for which files `pnpm test` runs — it replaces
-# the single 70-argument (69 real test-file paths + a trailing bare
-# `tests/`), 2,239-character, one-line `--test` argument list
-# package.json's `test` script used to hardcode (measured at pre-seam
-# `main`, `apps/web/package.json:13`, commit `33f152b`) — a line a git
-# conflict could silently truncate with nothing going red; apps/web/
+#
+#
+#
+# (`Array.prototype.sort()`'s own default — the same comparator
 # AGENTS.md: the Node 20 test runner does NOT directory-scan for
+# Blank lines and lines starting with # are ignored by both scripts above.
+# LOW manifest ordering drift): "alphabetical" means a PLAIN STRING COMPARE
+# One path per line, alphabetical by directory then name: an eleven-train
+# One test file path per line, relative to apps/web/. This is the ONE
+# `-` is U+002D, and `-` < `/`), and an uppercase-leading name like
 # `.test.ts`/`.test.tsx`).
-#
-# apps/web/scripts/run-tests.mjs reads this file and feeds every line to
+# `EnrolAccountDialog.test.ts` sorts before every lowercase-leading name in
+# `listTestFilesOnDisk` below already uses), not a directory-first human
+# `main`, `apps/web/package.json:13`, commit `33f152b`) — a line a git
 # `node --test`. apps/web/scripts/check-test-manifest.mjs (wired into `pnpm
-# lint`) globs every real `*.test.{ts,tsx,js,jsx,mjs,cjs}` file on disk and
+# `tests/`), 2,239-character, one-line `--test` argument list
+# apps/web test manifest — T0 seam (port-wave plan §3.1).
+# apps/web/scripts/run-tests.mjs reads this file and feeds every line to
+# checked-in source of truth for which files `pnpm test` runs — it replaces
+# comment describes an enforced invariant, not merely a convention.
+# conflict could silently truncate with nothing going red; apps/web/
+# directory, never a whole-line collision across all eleven (port-wave plan
 # fails the build if one is missing here — a file added to the tree without a
 # line here now goes RED, not silently unrun.
-#
-# One path per line, alphabetical by directory then name: an eleven-train
-# wave each appending 2-5 lines lands them in different alphabetical
-# neighborhoods, so a merge conflict is between the FEW trains that share a
-# directory, never a whole-line collision across all eleven (port-wave plan
-# §3.1's own reasoning for moving off the single line). FOLD (Codex round-3,
-# LOW manifest ordering drift): "alphabetical" means a PLAIN STRING COMPARE
-# (`Array.prototype.sort()`'s own default — the same comparator
-# `listTestFilesOnDisk` below already uses), not a directory-first human
-# reading — `firm/` sorts AFTER `firm-admin/` this way (`/` is U+002F,
-# `-` is U+002D, and `-` < `/`), and an uppercase-leading name like
-# `EnrolAccountDialog.test.ts` sorts before every lowercase-leading name in
-# the same directory. `check-test-manifest.mjs` now enforces this
+# lint`) globs every real `*.test.{ts,tsx,js,jsx,mjs,cjs}` file on disk and
 # mechanically (an out-of-order adjacent pair fails the build), so this
-# comment describes an enforced invariant, not merely a convention.
-#
-# Blank lines and lines starting with # are ignored by both scripts above.
+# neighborhoods, so a merge conflict is between the FEW trains that share a
+# package.json's `test` script used to hardcode (measured at pre-seam
+# reading — `firm/` sorts AFTER `firm-admin/` this way (`/` is U+002F,
+# the same directory. `check-test-manifest.mjs` now enforces this
+# the single 70-argument (69 real test-file paths + a trailing bare
+# wave each appending 2-5 lines lands them in different alphabetical
+# §3.1's own reasoning for moving off the single line). FOLD (Codex round-3,
 components/accounting/journal-composer.test.tsx
 components/admin/invite-dialog-a11y.test.tsx
 components/admin/invite-dialog-keyboard.test.tsx
@@ -189,6 +189,7 @@ components/shell-responsive.test.tsx
 components/tax/tax-a11y.test.tsx
 components/tax/tax-boundary-states.test.tsx
 components/work/work-detail.test.tsx
+components/work/work-question-form.test.tsx
 e2e/e2e-fixture-ownership.test.ts
 lib/bank/agency-doors.test.ts
 lib/bank/doors.test.ts
@@ -308,6 +309,8 @@ lib/wire.test.ts
 lib/work/api.test.ts
 lib/work/journal-basis.test.ts
 lib/work/journal-draft.test.ts
+lib/work/question-fields.test.ts
+lib/work/questions.test.ts
 lib/work/reads.test.ts
 test/a11yRules.test.ts
 test/keyboardWalk.test.ts

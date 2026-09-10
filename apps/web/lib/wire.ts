@@ -84,6 +84,35 @@ export function parseReasonToken(details?: string): string | null {
   }
 }
 
+/**
+ * THE WHOLE typed detail object, not just its `reason` discriminant (#629).
+ *
+ * WHY THIS EXISTS BESIDE `parseReasonToken` RATHER THAN REPLACING IT. `reason` is the
+ * discriminant every governed refusal in the estate carries and every caller keys on; it stays a
+ * first-class field on `RefusalError` and nothing about it moves. What #629 adds is a class of
+ * refusal whose detail carries MORE than a discriminant and whose extra keys a surface must
+ * render:
+ *   · `clara.answer_work_question` CLR10 `invalid_answer` names the offending `field` and the
+ *     `constraint` it violated, so the browser can focus the first invalid control — the
+ *     interaction contract's "focus the first invalid field" line, which cannot be honoured from a
+ *     reason token alone.
+ *   · its CLR13 converge refusals carry `current` — the authoritative status, version, answerer
+ *     and time — so a loser can render what actually happened instead of a bare "no".
+ *
+ * DEFENSIVE, and null-on-anything-unexpected: a detail that is absent, not JSON, or not an object
+ * yields `null`, exactly as `parseReasonToken` yields null. A caller reads a key or it does not.
+ * A refusal NEVER becomes less usable because its detail was malformed.
+ */
+export function parseRefusalDetail(details?: string): Record<string, unknown> | null {
+  if (!details) return null;
+  try {
+    const j: unknown = JSON.parse(details);
+    return j !== null && typeof j === "object" && !Array.isArray(j) ? (j as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+}
+
 /** A governed refusal: the CLR code + message, carried VERBATIM — never re-worded
  *  (contract §3.3 / §4.8, the parts.tsx precedent). This is the only error shape a
  *  card may print a message from directly; every other failure is operational, not
@@ -91,6 +120,11 @@ export function parseReasonToken(details?: string): string | null {
 export class RefusalError extends Error {
   readonly code: string;
   readonly reason: string | null;
+  /** The WHOLE typed detail object the refusal carried, or null (#629). `reason` above is its
+   *  discriminant and stays the field every existing caller reads; this is the rest of it, for the
+   *  refusals whose contract carries more — `field`/`constraint` on an invalid answer, `current`
+   *  on a converge. Never required, never trusted to be present. */
+  readonly detail: Record<string, unknown> | null;
   readonly status: number;
   /** The RAW `body.code` PostgREST reported, independent of `code` — present even
    *  when `code` was recovered via the message-regex fallback (in which case
@@ -106,12 +140,19 @@ export class RefusalError extends Error {
   constructor(
     code: string,
     message: string,
-    opts: { reason: string | null; status: number; pgCode: string | null; codeSource: "sqlstate" | "message" },
+    opts: {
+      reason: string | null;
+      status: number;
+      pgCode: string | null;
+      codeSource: "sqlstate" | "message";
+      detail?: Record<string, unknown> | null;
+    },
   ) {
     super(message);
     this.name = "RefusalError";
     this.code = code;
     this.reason = opts.reason;
+    this.detail = opts.detail ?? null;
     this.status = opts.status;
     this.pgCode = opts.pgCode;
     this.codeSource = opts.codeSource;
@@ -172,6 +213,7 @@ export function classifyPgrestFailure(
       status,
       pgCode: body.code ?? null,
       codeSource: clrSource(body.code),
+      detail: parseRefusalDetail(body.details),
     });
   }
   const detail = [body.code, body.message].filter(Boolean).join(" — ");

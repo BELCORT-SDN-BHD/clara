@@ -332,6 +332,37 @@ export const PART_CATALOG = {
     ],
   },
 
+  // #629: the shared question, offered inside the conversation that started the
+  // Work. LIVE-STREAM-ONLY like its two siblings above, and for the same reason —
+  // an `accounting_work` task has no chat message to persist a part into. The
+  // card hydrates `clara.get_work_question` and re-reads it after every action,
+  // so an absent part means "this transcript was attached late", never "there is
+  // no question".
+  work_question: {
+    renderBranch: true,
+    fixtures: [
+      {
+        type: "work_question",
+        work_id: "work-3131",
+        client_id: "client-1111",
+        question_id: "question-3131",
+        question_version: 1,
+        status: "pending",
+      },
+      // `client_id` EMPTY — the same shape `work_accepted` documents above: the
+      // card drops its link rather than building `/clients//work/...`, and this
+      // fixture is the reachability proof that it still renders.
+      {
+        type: "work_question",
+        work_id: "work-3232",
+        client_id: "",
+        question_id: "question-3232",
+        question_version: 2,
+        status: "pending",
+      },
+    ],
+  },
+
   freeform_result: {
     renderBranch: true,
     // `read_id` is a STRING carrying a bigint (clara.freeform_read_log.id is a

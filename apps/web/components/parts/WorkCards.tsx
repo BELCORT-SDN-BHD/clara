@@ -56,13 +56,19 @@
 // gate), and a declared kind with no render branch is a part that reaches a
 // transcript and paints nothing.
 
+import { useCallback } from "react";
 import { useTranslations } from "next-intl";
 
 import { Badge } from "./PartBadge";
 import { PartSummaryCard } from "./PartSummaryCard";
 import { usableId } from "./PartCardShell";
 import { workDetailHref } from "@/lib/navigation/tree";
-import type { WorkAcceptedPart, WorkResultPart, WorkStatusPart } from "@/lib/parts/types";
+import { WorkQuestionForm } from "@/components/work/work-question-form";
+import { useHydratedPart } from "@/lib/parts/hooks";
+import { sessionTokenAccessor } from "@/lib/session-accessor";
+import { getSessionIdentity } from "@/lib/settings/account-identity";
+import { getWorkQuestion } from "@/lib/work/questions";
+import type { WorkAcceptedPart, WorkQuestionPart, WorkResultPart, WorkStatusPart } from "@/lib/parts/types";
 
 /** The accepted-Work receipt. Links to the durable detail — the persistent
  *  outcome §3 requires an accepted long operation to have. */
@@ -133,5 +139,47 @@ export function WorkResultCard({ part }: { part: WorkResultPart }) {
           : null
       }
     />
+  );
+}
+
+/**
+ * #629 — THE SHARED QUESTION, IN THE CONVERSATION THAT STARTED THE WORK.
+ *
+ * IT HYDRATES AND IT DOES NOT REMEMBER. The part carries identifiers and a LAST-HEARD status; the
+ * question text, its reason, its typed fields and its accepted answer are read from
+ * `clara.get_work_question` on mount and re-read after every action. That is what makes this card
+ * converge rather than argue when somebody answers the same question from Needs-you while this
+ * transcript is on screen — the exact "answer accepted elsewhere" row of the shared state contract.
+ *
+ * IT RENDERS THE SAME FORM B3 AND B4 RENDER. Not a chat-shaped variant of it: the acceptance line
+ * is that the three surfaces show one question and post one answer, and a card with its own inputs
+ * would be a second question wearing the first one's identifiers.
+ *
+ * NO LIVE REGION, exactly like its three siblings above. The transcript owns the one announcement
+ * boundary (§5); a card that announced its own acceptance would say the same result twice.
+ */
+export function WorkQuestionCard({ part }: { part: WorkQuestionPart }) {
+  const t = useTranslations("WorkQuestion.card");
+  const addressable = usableId(part.work_id) && usableId(part.client_id);
+  const load = useCallback(
+    async () => ({
+      record: await getWorkQuestion(part.question_id),
+      identity: await getSessionIdentity(),
+    }),
+    [part.question_id],
+  );
+  const { data, loading } = useHydratedPart(sessionTokenAccessor, load);
+
+  return (
+    <PartSummaryCard
+      title={t("title")}
+      rows={[[t("workLabel", { work: part.work_id }), `#${part.question_version}`]]}
+      note={loading ? t("loading") : data?.record ? null : t("unavailable")}
+      link={addressable ? { href: workDetailHref(part.client_id, part.work_id), label: t("openWork") } : null}
+    >
+      {data?.record && data.identity ? (
+        <WorkQuestionForm record={data.record} userId={data.identity.userId} />
+      ) : null}
+    </PartSummaryCard>
   );
 }
