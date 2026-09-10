@@ -30,7 +30,7 @@ import { ToolLoopAgent, hasToolCall, isStepCount } from "ai";
 import type { ModelMessage } from "ai";
 import { getWritable, getWorkflowMetadata } from "workflow";
 import { pools, resolveModel, type PgExec } from "./chatTurn.v15.infra.js";
-import { classifyWorkError, workErrorPayload, type WorkErrorClass } from "./claraWork.v1.errors.js";
+import { classifyWorkError, workErrorPayload, type WorkErrorClass } from "./claraWork.v2.errors.js";
 import {
   newBudgetLedger,
   type JournalBasis,

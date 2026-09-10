@@ -37,7 +37,7 @@
 import { tool } from "ai";
 import { z } from "zod";
 import type { PgExec } from "./chatTurn.v15.infra.js";
-import { classifyWorkError } from "./claraWork.v1.errors.js";
+import { classifyWorkError } from "./claraWork.v2.errors.js";
 import type { ClaraWorkBudgets } from "./claraWork.v1.bundle.js";
 // The three tool NAMES come from v1's PROMPT module, where the string literals are declared —
 // never from v1's tools module, which merely re-exports them. The parts-parity census resolves a

@@ -51,7 +51,7 @@ import {
 } from "./claraWork.v2.impl.js";
 import { ASK_QUESTION_TOOL } from "./claraWork.v2.tools.js";
 import { CLARA_WORK_BUDGETS_V2 } from "./claraWork.v2.bundle.js";
-import { budgetExhaustedPayload, taskErrorCodeFor, workOutcomeFor } from "./claraWork.v1.errors.js";
+import { budgetExhaustedPayload, taskErrorCodeFor, workOutcomeFor } from "./claraWork.v2.errors.js";
 import { CLARIFY_FRAMING } from "./chatTurn.v11.prompt.js";
 
 /** The resume payload the control listener writes for a WORK question. `question_id` and

@@ -970,8 +970,12 @@
       "sha256": "4bacd90e9e38a95e5940b47c706e27bd71413027021eb103d07f9ff31d02a91e",
       "note": ""
     },
+    "packages/runtime/workflows/claraWork.v2.errors.ts": {
+      "sha256": "1ce0ec11663c6bfd636d103546d088c17247efb4ad561f4fb84a0e1dc20f0591",
+      "note": ""
+    },
     "packages/runtime/workflows/claraWork.v2.impl.ts": {
-      "sha256": "3eeb33d47b8d9c7740e0c36b41b4b0d08ab57dae5e69bf170be707d1dba914ba",
+      "sha256": "e8e4ca6ef09e35d0ac486a1ff345417344b2477ea25c0f20424243ef9902b101",
       "note": ""
     },
     "packages/runtime/workflows/claraWork.v2.parts.ts": {
@@ -983,11 +987,11 @@
       "note": ""
     },
     "packages/runtime/workflows/claraWork.v2.tools.ts": {
-      "sha256": "2df5f3494a1cda68f3adaceac71246197e2dc53b63e3e9479d8531e42038eae1",
+      "sha256": "b9ba2f93a013bb65af87d335c75ff2128099fd79fdf67d9c627b341da1c93b8d",
       "note": ""
     },
     "packages/runtime/workflows/claraWork.v2.ts": {
-      "sha256": "4909e1c37bba304a43fdc9a4d5aa2209f022ceb121da0a02e0086234827ad59f",
+      "sha256": "3c99556226cb636ad3799af138b7ce698c78031743c7d1d56164af8a409f871d",
       "note": ""
     },
     "packages/runtime/workflows/clientOnboarding.v1.ts": {
