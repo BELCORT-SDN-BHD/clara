@@ -454,6 +454,19 @@ function control(body) {
     state.nextBasisRefusal = { field: String(body.field ?? "basis"), reason: String(body.reason ?? "invalid_basis") };
     return { armed: state.nextBasisRefusal };
   }
+  // #629 — ARMS THE NEXT ANSWER'S REFUSAL. The wire body is taken VERBATIM from the caller, so a
+  // walk states the exact (code, reason) pair it expects the form to converge on, and a mapper
+  // that read the code alone would red the walk rather than quietly rendering the wrong sentence.
+  if (body.op === "refuse_answer") {
+    state.nextAnswerRefusal = {
+      code: String(body.code ?? "CLR13"),
+      reason: String(body.reason ?? "already_answered"),
+      message: String(body.message ?? "this question is no longer open (answered)"),
+      current: body.current ?? null,
+      settle: body.settle ?? null,
+    };
+    return { armed: state.nextAnswerRefusal };
+  }
   const work = state.works.get(String(body.workId ?? ""));
   if (work === undefined) return { error: "no_such_work" };
   const task = state.tasks.get(work.current_task_id);
@@ -525,19 +538,6 @@ function control(body) {
       answered_at: null,
     });
     return { status: work.status };
-  }
-  // #629 — ARMS THE NEXT ANSWER'S REFUSAL. The wire body is taken VERBATIM from the caller, so a
-  // walk states the exact (code, reason) pair it expects the form to converge on, and a mapper
-  // that read the code alone would red the walk rather than quietly rendering the wrong sentence.
-  if (body.op === "refuse_answer") {
-    state.nextAnswerRefusal = {
-      code: String(body.code ?? "CLR13"),
-      reason: String(body.reason ?? "already_answered"),
-      message: String(body.message ?? "this question is no longer open (answered)"),
-      current: body.current ?? null,
-      settle: body.settle ?? null,
-    };
-    return { armed: state.nextAnswerRefusal };
   }
   if (body.op === "complete") {
     state.minted += 1;

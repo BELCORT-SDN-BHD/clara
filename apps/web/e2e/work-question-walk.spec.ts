@@ -72,7 +72,11 @@ async function scan(page: Page, what: string): Promise<void> {
   expect(results.violations.map((v) => `${v.id}: ${v.nodes.length}`), what).toEqual([]);
 }
 
-const workIdIn = (url: string): string => url.slice(url.lastIndexOf("/") + 1);
+function workIdIn(url: string): string {
+  const found = /\/work\/([0-9a-f-]{36})(?:$|[?#])/i.exec(url);
+  expect(found, `no work id in ${url}`).toBeTruthy();
+  return found![1]!;
+}
 
 /** Admit a Work through the real composer, then park it on a two-field question. Returns the
  *  Work's id, which is also the page the walk is left on. */
@@ -81,9 +85,11 @@ async function parkOnQuestion(page: Page, extra: Record<string, unknown> = {}): 
   await page.goto(COMPOSER_URL);
   await page.getByLabel("Posting date").fill("2026-09-01");
   await page.getByLabel("Memo").fill("Office rent, September");
-  await page.getByLabel("Account, line 1").fill("6100");
+  // The account controls are native `<select>`s over this client's own chart, so they are
+  // SELECTED rather than typed — the same helper #623's own walk uses, for the same reason.
+  await page.getByLabel("Account, line 1").selectOption(JOURNAL_WORK.rentAccount);
   await page.getByLabel("Debit, line 1").fill("1200.00");
-  await page.getByLabel("Account, line 2").fill("1100");
+  await page.getByLabel("Account, line 2").selectOption(JOURNAL_WORK.bankAccount);
   await page.getByLabel("Credit, line 2").fill("1200.00");
   await page.getByRole("button", { name: "Submit" }).click();
   await expect(page).toHaveURL(/\/work\/[0-9a-f-]{36}$/);
