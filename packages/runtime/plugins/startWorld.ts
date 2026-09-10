@@ -34,6 +34,7 @@ import { workflows, workflowsByName } from "../workflows/registry.js";
 // digest this process logs is, by construction, the digest its runs stamp onto every Work row and
 // every operation receipt — never a second copy that could disagree.
 import { CLARA_WORK_BUNDLE_V1_BANNER } from "../workflows/claraWork.v1.bundle.js";
+import { CLARA_WORK_BUNDLE_V2_BANNER } from "../workflows/claraWork.v2.bundle.js";
 import { makeDocumentServices, recoverPendingDocumentIntakes } from "../lib/intake.mjs";
 import { makeInvoiceFactsServices } from "../workflows/invoiceFacts.v1.services.mjs";
 import { makeStatementFactsServices } from "../workflows/statementFacts.v1.services.mjs";
@@ -159,6 +160,12 @@ export default definePlugin(() => {
       // served by /api/build-info and written onto every Work row by claim_work_run, so a log
       // line, an HTTP read and a database row can be compared without trusting any of them.
       console.log(CLARA_WORK_BUNDLE_V1_BANNER);
+      // #629 — BOTH bundles, and both lines stay. v1 is still exported, still frozen, and still
+      // the body any Work parked on a v1 hook resumes into at cutover; v2 is what `workflows
+      // .claraWork` now dispatches. An image that logged only the pinned one would leave a
+      // rollback preflight unable to tell, from the logs alone, which bodies this process
+      // actually carries — which is the question C88.8's line exists to answer.
+      console.log(CLARA_WORK_BUNDLE_V2_BANNER);
     } catch (err) {
       console.error("[clara-runtime] durable world FAILED to start:", err instanceof Error ? err.message : String(err));
       process.exit(1); // crash-only: world-start failure is fatal (S4-D10)

@@ -159,7 +159,23 @@ const state = {
    *  writes them: one PENDING row per parked task, its `question` jsonb carrying
    *  the runtime's own `{ type, question, context, framing }`. */
   interruptions: [],
+  /** #629 — `clara.get_work_question` records, keyed by question id: the ONE record B3, B4 and B6
+   *  all read. The `agent_interruptions` array above is the pre-0180 shape the Work detail's
+   *  BANNER still reads; this map is what the FORM reads. Both are written by the same `ask` op,
+   *  because in the database they are one row. */
+  questions: new Map(),
+  /** The ONE injected answer refusal, armed by the control endpoint and spent by the next answer
+   *  — the convergence arms cannot be provoked from a browser, so they are injected exactly as
+   *  the basis refusal above is. */
+  nextAnswerRefusal: null,
 };
+
+/** The two-field question this lane asks by default: a date and an amount in integer cents — the
+ *  pair that makes the bounded stepper a stepper rather than a single Field. */
+const DEFAULT_QUESTION_FIELDS = [
+  { key: "posting_date", label: "Posting date", kind: "date", required: true },
+  { key: "amount_cents", label: "Amount", kind: "money", required: true, unit: "MYR" },
+];
 
 function pad(n) {
   return String(n).padStart(4, "0");
@@ -175,6 +191,8 @@ function seed() {
   state.receipts.length = 0;
   state.nextBasisRefusal = null;
   state.interruptions.length = 0;
+  state.questions.clear();
+  state.nextAnswerRefusal = null;
 
   const work = newWorkRow({
     id: JOURNAL_WORK.seededWorkId,
@@ -456,8 +474,38 @@ function control(body) {
     work.status = "awaiting_input";
     work.bundle = BUNDLE;
     if (task) { task.status = "awaiting_input"; task.updated_at = at; }
+    const questionId = `a230${pad(state.interruptions.length + 1)}-a230-4a23-8a23-a230a230a230`;
+    // #629 — THE SAME ROW, WITH THE WORK IDENTITY ON IT. `clara.open_work_question` (0180) writes
+    // everything `clara.open_interruption` writes plus the Work id, the version, the Work's basis
+    // digest and the TYPED FIELDS; the read doors project that as one record. Modelled here so
+    // the browser walk exercises the real client shapes rather than a form built from props.
+    state.questions.set(questionId, {
+      question_id: questionId,
+      work_id: work.id,
+      client_id: JOURNAL_WORK.clientId,
+      task_id: work.current_task_id,
+      firm_id: FIRM_ID,
+      question_version: state.questions.size + 1,
+      status: "pending",
+      question: String(body.question ?? "Which Maybank account did this rent leave from?"),
+      context: String(body.context ?? "This client has two accounts coded 1100."),
+      reason: String(body.reason ?? "The admitted basis names no posting date and no amount."),
+      fields: Array.isArray(body.fields) && body.fields.length > 0 ? body.fields : DEFAULT_QUESTION_FIELDS,
+      source_ref: null,
+      basis_digest: "a".repeat(64),
+      expires_at: "2026-09-30T00:00:00.000Z",
+      created_at: at,
+      answer: null,
+      answered_by: null,
+      answered_at: null,
+      answered_role: null,
+      delivery_state: "pending",
+      delivery_attempts: 0,
+      work_status: "awaiting_input",
+      work_basis_digest: "a".repeat(64),
+    });
     state.interruptions.push({
-      id: `a230${pad(state.interruptions.length + 1)}-a230-4a23-8a23-a230a230a230`,
+      id: questionId,
       task_id: work.current_task_id,
       kind: "clarify",
       // `question`, NEVER `text` — the live writer is `openInterruptionStep`
@@ -477,6 +525,19 @@ function control(body) {
       answered_at: null,
     });
     return { status: work.status };
+  }
+  // #629 — ARMS THE NEXT ANSWER'S REFUSAL. The wire body is taken VERBATIM from the caller, so a
+  // walk states the exact (code, reason) pair it expects the form to converge on, and a mapper
+  // that read the code alone would red the walk rather than quietly rendering the wrong sentence.
+  if (body.op === "refuse_answer") {
+    state.nextAnswerRefusal = {
+      code: String(body.code ?? "CLR13"),
+      reason: String(body.reason ?? "already_answered"),
+      message: String(body.message ?? "this question is no longer open (answered)"),
+      current: body.current ?? null,
+      settle: body.settle ?? null,
+    };
+    return { armed: state.nextAnswerRefusal };
   }
   if (body.op === "complete") {
     state.minted += 1;
@@ -574,6 +635,80 @@ export async function handleJournalWorkSupabase(request, response, path, url, se
       state.interruptions.filter((row) => row.task_id === taskId && (status === null || row.status === status)),
       cors,
     );
+    return true;
+  }
+
+  // #629 — THE THREE DOORS. `callDoor` posts to `/rest/v1/rpc/<fn>`, so these are the exact wire
+  // shapes `apps/web/lib/work/questions.ts` builds and the exact refusal envelope
+  // `apps/web/lib/wire.ts` classifies (`code` = the SQLSTATE, `details` = the typed detail JSON).
+  // Every one is ID-SCOPED to a question this module minted and falls through otherwise.
+  if (request.method === "POST" && path === "/rest/v1/rpc/get_work_pending_question") {
+    const body = await readJson(request);
+    const work = state.works.get(String(body?.p_work ?? ""));
+    if (work === undefined) return false;
+    const found = [...state.questions.values()].find((q) => q.work_id === work.id && q.status === "pending");
+    sendJson(response, 200, found ?? null, cors);
+    return true;
+  }
+
+  if (request.method === "POST" && path === "/rest/v1/rpc/get_work_question") {
+    const body = await readJson(request);
+    const found = state.questions.get(String(body?.p_question ?? ""));
+    if (found === undefined) return false;
+    sendJson(response, 200, found, cors);
+    return true;
+  }
+
+  if (request.method === "POST" && path === "/rest/v1/rpc/answer_work_question") {
+    const body = await readJson(request);
+    const found = state.questions.get(String(body?.p_question ?? ""));
+    if (found === undefined) return false;
+    const armed = state.nextAnswerRefusal;
+    if (armed !== null) {
+      state.nextAnswerRefusal = null;
+      if (armed.settle !== null && typeof armed.settle === "object") Object.assign(found, armed.settle);
+      sendJson(
+        response,
+        400,
+        {
+          code: armed.code,
+          message: armed.message,
+          details: JSON.stringify(armed.current === null ? { reason: armed.reason } : { reason: armed.reason, current: armed.current }),
+        },
+        cors,
+      );
+      return true;
+    }
+    // THE FIRST-ANSWER GATE, modelled: one accepted answer, and a REPLAY of the same op key with
+    // the same payload returns the ORIGINAL receipt rather than answering twice.
+    if (found.status === "answered" && found.answer_key === String(body?.p_op_key ?? "")) {
+      sendJson(response, 200, found.receipt, cors);
+      return true;
+    }
+    const at = new Date().toISOString();
+    found.status = "answered";
+    found.answer = body?.p_answer ?? {};
+    found.answered_by = SUBJECT;
+    found.answered_role = "bookkeeper";
+    found.answered_at = at;
+    found.answer_key = String(body?.p_op_key ?? "");
+    found.receipt = {
+      question_id: found.question_id,
+      work_id: found.work_id,
+      question_version: found.question_version,
+      status: "answered",
+      answered_by: SUBJECT,
+      answered_role: "bookkeeper",
+      answered_at: at,
+    };
+    const q = state.interruptions.find((row) => row.id === found.question_id);
+    if (q !== undefined) {
+      q.status = "answered";
+      q.answer = found.answer;
+      q.answered_by = SUBJECT;
+      q.answered_at = at;
+    }
+    sendJson(response, 200, found.receipt, cors);
     return true;
   }
 

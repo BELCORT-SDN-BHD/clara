@@ -242,6 +242,15 @@ export async function deliverInterruptions(client, deps) {
       log(`[clara-runtime] CLARA_WORK_TEST_FAULT=exit_before_deliver — exiting after the lease, before the resume (question=${row.id})`);
       process.exit(137);
     }
+    // THE LEASE-EXPIRY BARRIER (test mode only). Sleeps PAST this listener's own lease WITHOUT
+    // renewing it, so a second worker re-leases the row and delivers while this one is still
+    // "in flight". The claimant condition on the stamp is what then keeps this listener from
+    // counting the other process's delivery as its own — the property `work-question-e2e.mjs`
+    // leg 5 drives with two real processes.
+    if (row.work_id && controlTestFault() === "stall_deliver") {
+      log(`[clara-runtime] CLARA_WORK_TEST_FAULT=stall_deliver — holding question=${row.id} past its ${leaseSeconds}s lease without renewing`);
+      await sleep((leaseSeconds + 2) * 1000);
+    }
     let hookGone = false;
     try {
       await withLeaseRenewal(client, row, { listenerId, leaseSeconds, maxLeaseRenewals, log, onRenew: () => { leaseRenewals += 1; } },
