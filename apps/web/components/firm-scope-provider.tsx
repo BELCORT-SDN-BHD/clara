@@ -25,8 +25,29 @@ import type { NavigationScope } from "@/lib/firm/navigation";
  * upstream; it does not re-read the session or the DB, and route layouts, RLS
  * and the governed doors keep that job.
  */
+/**
+ * #623 WIDENED IT AGAIN, by the same two-field rule and for a measurable reason.
+ *
+ * The journal composer preserves an unsent draft under `sessionStorage`, and the
+ * refresh contract (§3, "Draft across local view changes") requires that key to
+ * be scoped to the USER, the FIRM and the CLIENT — "scope change never transfers
+ * a draft into a different client", and a shared browser must not hand one
+ * member's half-typed entry to the next. `user_id` and `firm_id` are the first
+ * two thirds of that key, they are NOT NULL columns of the row this provider is
+ * already holding (`clara.caller_context`, 0141:544), and the alternative was a
+ * second `caller_context` read on the composer route — precisely what P4-6's "no
+ * child re-reads the session or caller_context merely to shape an affordance"
+ * rules out.
+ *
+ * STILL OPTIONAL IN THE TYPE, for the same reason the first two additions are: a
+ * rank-shaped fixture is what a dozen cells hand this provider, and those cells
+ * are testing rank, not identity. Production always passes the full row. A
+ * consumer that cannot read both fields does NOT fall back to a partial key — it
+ * declines to persist at all (lib/work/journal-draft.ts), because a draft filed
+ * under a guessed scope is worse than a draft that was never saved.
+ */
 export type FirmScopeValue = NavigationScope &
-  Partial<Pick<CallerContextRow, "firm_name" | "role">>;
+  Partial<Pick<CallerContextRow, "firm_name" | "role" | "firm_id" | "user_id">>;
 
 const FirmScopeContext = createContext<FirmScopeValue | null>(null);
 

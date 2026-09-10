@@ -1,11 +1,19 @@
 "use client";
 
+import Link from "next/link";
 import { useTranslations } from "next-intl";
 
 import { HubCards } from "@/components/common/hub-cards";
 import { useFirmScope } from "@/components/firm-scope-provider";
 import { Badge } from "@/components/ui/badge";
-import { accountingHref, visibleAccountingItems, type NavigationScope } from "@/lib/navigation/tree";
+import { Button } from "@/components/ui/button";
+import {
+  accountingHref,
+  canOpenClientLeaf,
+  journalComposerHref,
+  visibleAccountingItems,
+  type NavigationScope,
+} from "@/lib/navigation/tree";
 
 /**
  * The Accounting index — one card per accounting surface, the same idiom as the
@@ -38,21 +46,43 @@ export function AccountingHubView({
   const t = useTranslations("ClientAccounting");
   const tShell = useTranslations("AppShell");
   const items = visibleAccountingItems(scope);
+  // THE HUB'S ONE PRIMARY ACT (#623). Everything else on this page is
+  // navigation — a card that takes you somewhere to look. Recording a journal
+  // entry is the thing a bookkeeper comes to Accounting to DO, so it is a
+  // Button, above the cards, and it is shaped by the same one predicate every
+  // row goes through. A viewer does not see it: the write door behind it
+  // (`clara.admit_journal_work`, bookkeeper+) can only ever refuse them, which
+  // is 裁-187's rule, and typing the address still reaches the composer's own
+  // denied state rather than a blank.
+  const canCompose = canOpenClientLeaf(scope, "journalComposer");
 
-  if (items.length === 0) {
+  if (items.length === 0 && !canCompose) {
     return <p className="text-sm text-muted-foreground">{t("noSections")}</p>;
   }
 
   return (
-    <HubCards
-      label={t("sectionsLabel")}
-      items={items.map((item) => ({
-        key: item.id,
-        href: accountingHref(clientId, item),
-        title: tShell(item.labelKey),
-        badge: item.beta ? <Badge variant="outline">{tShell("betaBadge")}</Badge> : undefined,
-        description: t(`purposes.${item.id}`),
-      }))}
-    />
+    <div className="flex flex-col gap-6">
+      {canCompose ? (
+        <div>
+          <Button render={<Link href={journalComposerHref(clientId)} />}>
+            {tShell("clientLeaf.journalComposer")}
+          </Button>
+        </div>
+      ) : null}
+      {items.length === 0 ? (
+        <p className="text-sm text-muted-foreground">{t("noSections")}</p>
+      ) : (
+        <HubCards
+          label={t("sectionsLabel")}
+          items={items.map((item) => ({
+            key: item.id,
+            href: accountingHref(clientId, item),
+            title: tShell(item.labelKey),
+            badge: item.beta ? <Badge variant="outline">{tShell("betaBadge")}</Badge> : undefined,
+            description: t(`purposes.${item.id}`),
+          }))}
+        />
+      )}
+    </div>
   );
 }

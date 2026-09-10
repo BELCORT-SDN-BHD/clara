@@ -285,45 +285,55 @@ export type CloseProposalPart = {
  *  wrong. The card filters `id=eq.<read_id>` and never does arithmetic on it. */
 export type FreeformResultPart = { type: "freeform_result"; read_id: string };
 
-/** ONE accounting Work, admitted from a conversation (#623). MINTED BY chatTurn_v18's
- *  `start_journal_work` and declared by `packages/runtime/workflows/chatTurn.v18.parts.ts` —
- *  the runtime is the declarer, this module is the reader.
+// --- The durable-Work kinds (#623) --------------------------------------------
+// The runtime is the DECLARER — `chatTurn.v18.parts.ts` emits `work_accepted`,
+// and `claraWork.v1.parts.ts` emits `work_status` and `work_result`; this module
+// is the READER, and `packages/runtime/scripts/check-parts-parity.mjs` is the CI
+// gate that holds the two in step. The same law the v14 and v16 blocks above
+// state applies here: do not add, rename or widen a field to make a card nicer,
+// because the wire does not carry it.
+//
+// THESE THREE WERE WRITTEN AGAINST A SHARED CONTRACT RATHER THAN AGAINST THE
+// DECLARER'S SOURCE, because the three workers on this ticket built in parallel
+// and the runtime closure lands on another branch. That is a NAMED LIMIT: until
+// the branches merge, "transcribed field for field" is a claim proven only by
+// the parity gate, not by a read of the emitter. The gate is the instrument that
+// settles it, and running it is part of this lane's own evidence.
+
+/** ONE admitted Work, announced in the conversation that asked for it — the B6
+ *  receipt. It carries the CLIENT because the durable detail lives at
+ *  `/clients/:client_id/work/:work_id`, and a card that had only the work id
+ *  could build no route at all.
  *
- *  HYDRATES `clara.accounting_work` by `id=eq.<work_id>` under the client scope. There is no
- *  act door on this card: admission already happened, and everything a human can then do
- *  (Retry, edit as a new draft) belongs to the Work detail page.
+ *  `logical_op_id` IS ON THE WIRE AND IS RENDERED, not decoration: it is the
+ *  server-assigned identity of the accounting operation, and it is what makes a
+ *  replayed commit resolve the ORIGINAL receipt. A professional reading a
+ *  transcript can match it against the receipt on the Work page.
  *
- *  NOTHING THAT MOVES RIDES HERE — not `status`, not `result`, not `error`, not the basis. The
- *  Work is queued when this card is minted and will not be queued for long; a card that
- *  rendered a remembered status would be wrong within seconds of being right. */
+ *  NO AMOUNT, NO LINES, NO STATUS. The Work's basis and its outcome are read on
+ *  its own page, live; a figure copied into a chat card is a figure that goes
+ *  stale the moment the run settles (apps/web AGENTS.md: "the UI never invents a
+ *  number"). */
 export type WorkAcceptedPart = {
   type: "work_accepted";
   work_id: string;
   client_id: string;
-  purpose: "journal_entry";
+  purpose: string;
   logical_op_id: string;
 };
 
-/** ONE observable status of a running Work (#623). MINTED BY claraWork_v1's own stream and
- *  declared by `packages/runtime/workflows/claraWork.v1.parts.ts`.
- *
- *  `status` IS CARRIED, unlike most identifier-only parts, and only because this kind exists to
- *  make a LIVE run observable between durable reads. A card renders it as the last-heard status
- *  and re-reads `clara.accounting_work` for authority.
- *
- *  `status` IS `string`, not a union of literals: the vocabulary lives in a CHECK on
- *  `clara.accounting_work.status` that later purposes extend, and a literal union transcribed
- *  today would make a status the wire already carries unrenderable the day the CHECK grows. */
+/** A run's own status, as the workflow observed it. TWO FIELDS WIDE, and the
+ *  absence of a `client_id` is structural rather than an omission: this part is
+ *  a progress note inside one turn, emitted by the run that is already writing
+ *  to that turn's stream, and it addresses nothing a reader can navigate to on
+ *  its own. So the card renders a compact line and offers NO link — a link built
+ *  from a client id this part does not carry would be invented. */
 export type WorkStatusPart = { type: "work_status"; work_id: string; status: string };
 
-/** ONE completed Work's authoritative effect (#623): the posted journal entry and its operation
- *  receipt. MINTED BY claraWork_v1 and declared by
- *  `packages/runtime/workflows/claraWork.v1.parts.ts`.
- *
- *  HYDRATES `clara.journal_entries` / `clara.journal_lines` by `entry_id` and
- *  `clara.operation_receipts` by `receipt_id`, both under the client scope. NOTHING FROM THE
- *  ENTRY'S OWN CONTENT RIDES HERE — no amounts, no memo, no posting date. The amount is the one
- *  field where a stale copy is a lie a human would act on. */
+/** The COMMITTED effect: one journal entry, one receipt, both named by the
+ *  database. Identifier-only, like every other receipt kind here — the entry's
+ *  lines and total are read on the journals workbench, which is what the card
+ *  links to. */
 export type WorkResultPart = {
   type: "work_result";
   work_id: string;
@@ -334,9 +344,8 @@ export type WorkResultPart = {
 
 /** The canonical transcript wire union: 29 live members (9 base + 4 Wave-A +
  *  1 Wave-C-c + 2 Wave-D-a + 2 Wave-D-b + 4 chatTurn_v14 + 4 chatTurn_v16 +
- *  1 chatTurn_v18 + 2 claraWork_v1).
- *  Adding a member here without a matching ./catalog.ts entry fails `tsc` — see
- *  catalog.ts's AllCovered/NoExtra guard. */
+ *  3 durable-Work). Adding a member here without a matching ./catalog.ts entry
+ *  fails `tsc` — see catalog.ts's AllCovered/NoExtra guard. */
 export type ClaraPart =
   | { type: "text"; text: string }
   | { type: "tool_call"; tool: string; tool_call_id: string; input: unknown }

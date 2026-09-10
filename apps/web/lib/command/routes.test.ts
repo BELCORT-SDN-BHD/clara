@@ -201,15 +201,53 @@ function staticNextLinkHrefs(roots: readonly string[]): string[] {
   return [...hrefs].filter((href) => href.startsWith("/"));
 }
 
+/**
+ * DESTINATIONS THE ONE NAVIGATION REGISTRY BUILDS, which a LITERAL-link census
+ * structurally cannot see — and which are therefore proven discoverable a
+ * different way rather than waived.
+ *
+ * The reverse gate's instrument reads string literals: `href="/work"` counts,
+ * `href={fn(clientId)}` cannot. That is the right trade for a menu of fixed
+ * addresses, and it stayed right for every dynamic page in the tree until now
+ * because each of those has a `CLIENT_ROUTES` row whose builder the gate calls
+ * itself. Two destinations have neither, and both for a reason:
+ *
+ *   /clients/[clientId]/accounting/journal/new — an ACT, not a place. It is the
+ *     Accounting hub's one primary action, and a ⌘K "Go" row for it would put a
+ *     write affordance in a list of read destinations, offered at every rank
+ *     (`CLIENT_ROUTES` carries no floor; `permittedNavHrefs` shapes only the
+ *     firm rows).
+ *   /clients/[clientId]/work/[workId] — one durable RECORD. There is no static
+ *     address for it at all: a ⌘K row would need a work id nobody has typed.
+ *
+ * SO EACH ONE DECLARES ITS BUILDER, and the cell below PROVES three things about
+ * every entry: the page really exists, the builder really is exported from the
+ * one registry, and it really is CALLED from a rendered surface. That is a
+ * positive proof of discoverability — stronger for these two than the literal
+ * census is for anything else, because a literal `href="/foo"` in a dead branch
+ * would satisfy the gate and this does not. An entry whose builder loses its
+ * last call site reds here.
+ */
+const REGISTRY_BUILT: ReadonlyArray<{ pattern: string; builder: string }> = [
+  { pattern: "/clients/[clientId]/accounting/journal/new", builder: "journalComposerHref" },
+  { pattern: "/clients/[clientId]/work/[workId]", builder: "workDetailHref" },
+];
+
 function orphanedFirmPages(
   firmAppDir: string,
   manifestHrefs: readonly string[],
   linkHrefs: readonly string[],
+  registryBuilt: readonly string[] = [],
 ): string[] {
   const discoverable = [...manifestHrefs, ...linkHrefs].map((href) => href.split(/[?#]/, 1)[0]!);
+  const built = new Set(registryBuilt);
   return pagePatterns(firmAppDir)
-    .filter((pattern) => !discoverable.some((href) => matchesPattern(segmentsOf(href), pattern)))
     .map(routePatternLabel)
+    .filter((label) => !built.has(label))
+    .filter((label) => {
+      const pattern = label === "/" ? [] : label.slice(1).split("/");
+      return !discoverable.some((href) => matchesPattern(segmentsOf(href), pattern));
+    })
     .sort();
 }
 
@@ -305,12 +343,53 @@ test("REVERSE GATE positive control: a planted firm page with no manifest row or
 test("REVERSE GATE: every real (firm) page is discoverable from ⌘K or an in-app next/link", () => {
   const manifestHrefs = ALL_ROUTES.map(hrefOf);
   const linkHrefs = staticNextLinkHrefs([APP_DIR, join(WEB_DIR, "components")]);
-  const orphans = orphanedFirmPages(join(APP_DIR, "(firm)"), manifestHrefs, linkHrefs);
+  const orphans = orphanedFirmPages(
+    join(APP_DIR, "(firm)"),
+    manifestHrefs,
+    linkHrefs,
+    REGISTRY_BUILT.map((row) => row.pattern),
+  );
   assert.deepEqual(
     orphans,
     [],
     "a page exists in the real firm app tree but has neither a routes.ts row nor a literal in-app next/link",
   );
+});
+
+test("REGISTRY-BUILT destinations are real pages whose builder is exported from the ONE registry and actually called", () => {
+  const treeSource = readFileSync(join(WEB_DIR, "lib", "navigation", "tree.ts"), "utf8");
+  const surfaces = [...sourceFiles(APP_DIR), ...sourceFiles(join(WEB_DIR, "components"))];
+
+  for (const { pattern, builder } of REGISTRY_BUILT) {
+    // 1. THE PAGE EXISTS. A declaration for a route nobody serves would quietly
+    //    subtract a pattern that never appears, which is a waiver dressed as a
+    //    proof; this is what stops the list rotting into a parking space.
+    const segments = pattern.slice(1).split("/");
+    assert.ok(
+      PATTERNS.some((p) => p.length === segments.length && p.every((seg, i) => seg === segments[i])),
+      `${pattern} is declared registry-built but the app tree serves no page there — drop the row`,
+    );
+
+    // 2. THE BUILDER IS THE REGISTRY'S. Read out of tree.ts's own source rather
+    //    than imported, so a builder that moved to some second, competing
+    //    module reds here instead of passing on a same-spelled export.
+    assert.match(
+      treeSource,
+      new RegExp(`export function ${builder}\\(`),
+      `${builder} must be exported from lib/navigation/tree.ts — a destination built anywhere else is a second navigation registry`,
+    );
+
+    // 3. IT IS CALLED FROM A RENDERED SURFACE. Not a test, not a fixture: a
+    //    builder with no call site under app/ or components/ means the page is
+    //    genuinely unreachable, which is exactly what the reverse gate exists
+    //    to catch — so this is the same question, asked where the instrument
+    //    can answer it.
+    const callers = surfaces.filter((file) => readFileSync(file, "utf8").includes(`${builder}(`));
+    assert.ok(
+      callers.length > 0,
+      `${builder} is called nowhere under app/ or components/ — ${pattern} is unreachable`,
+    );
+  }
 });
 
 test("/settings/members is present in ⌘K by its own stable row", () => {

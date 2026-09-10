@@ -90,6 +90,26 @@ export type AccountingItemId =
   | "close"
   | "tax";
 
+/**
+ * A LEAF is a destination BELOW a client-nav row: it has its own address and its
+ * own breadcrumb crumb, and it is deliberately NOT a menu entry.
+ *
+ * WHY IT IS IN THE REGISTRY AT ALL, given the sidebar never renders one. Because
+ * the registry is the ONE answer to "where am I" — `resolveActive` has to keep
+ * the parent row current while a leaf is open (a human composing a journal entry
+ * is still under Accounting), and `breadcrumbFor` has to name the leaf rather
+ * than stopping at its parent and claiming the human is on a page they are not.
+ * A leaf written anywhere else would be the fifth hand-maintained copy this file
+ * exists to have removed.
+ *
+ * THEY ARE NOT SIDEBAR ROWS, AND THAT IS THE POINT. `/…/accounting/journal/new`
+ * is an ACT you arrive at from the Accounting hub, not a place you browse to;
+ * `/…/work/:workId` names one durable record and cannot be a static menu entry
+ * at all. Adding either to `CLIENT_NAV` would put a permanent row in the menu for
+ * a page that is only ever reached with an intent.
+ */
+export type ClientLeafId = "journalComposer" | "workDetail";
+
 /** The `?tab=` values `components/registers/registers-workbench.tsx` accepts. */
 export type RegisterTab =
   | "opening"
@@ -138,6 +158,14 @@ export type ClientNavItem = Floored & {
   readonly segment: string;
   readonly labelKey: `clientNav.${ClientNavId}`;
   readonly icon: NavIconName;
+};
+
+export type ClientLeaf = Floored & {
+  readonly id: ClientLeafId;
+  /** The `CLIENT_NAV` row that stays `aria-current` while this leaf is open. */
+  readonly parent: ClientNavId;
+  /** Key under the `AppShell` namespace — the leaf's own breadcrumb crumb. */
+  readonly labelKey: `clientLeaf.${ClientLeafId}`;
 };
 
 export type AccountingItem = Floored & {
@@ -287,10 +315,61 @@ export const ACCOUNTING_ITEMS: readonly AccountingItem[] = [
   { id: "tax", segment: "tax", labelKey: "accounting.tax", icon: "receipt", minimumRole: "viewer", beta: true },
 ] as const;
 
+/**
+ * THE TWO LEAVES, and the floor each one is written at.
+ *
+ *  - journalComposer: BOOKKEEPER. Not because a viewer cannot read a form, but
+ *    because this page's whole purpose is to admit an accounting operation, and
+ *    the write door behind it (`clara.admit_journal_work`, reached through the
+ *    runtime's `POST /api/work/journal`) rechecks that the author is an ACTIVE
+ *    bookkeeper-or-above with access to the client. Offering the composer to a
+ *    viewer would be offering a control that can only ever refuse — 裁-187's
+ *    ruling, which `lib/firm/capabilities.ts` states in full. The route itself
+ *    still renders for a viewer, as the DENIED state rather than as a form: an
+ *    address a human typed deserves an explanation, not a blank.
+ *  - workDetail: VIEWER, matching its parent. It is a READ of one durable Work
+ *    record, and `clara.accounting_work`'s own RLS policy is the wall.
+ *
+ * THE FLOOR IS LEGIBILITY, NOT AUTHORITY — the same sentence this file's header
+ * makes about every other row. Hiding the hub's primary action from a viewer
+ * grants and revokes nothing; the DB refuses either way.
+ *
+ * `workDetail`'S LABEL IS THE WORK'S PURPOSE, AND TODAY THAT IS A CONSTANT — a
+ * NAMED LIMIT rather than a shortcut. `clara.accounting_work.purpose` carries a
+ * CLOSED one-member CHECK (`purpose in ('journal_entry')`), so "Journal entry" is
+ * the only value the crumb can take and a static key is the truth. This module
+ * is pure functions over a URL and holds no row, so the day a second purpose is
+ * admitted the crumb has to become data-driven (the page reads the row; the
+ * breadcrumb would take the label as a name, the way it already takes the
+ * client's). Leaving the constant in place then would silently label a payroll
+ * Work "Journal entry", so this note is the trigger for that change.
+ */
+export const CLIENT_LEAVES: readonly ClientLeaf[] = [
+  { id: "journalComposer", parent: "accounting", labelKey: "clientLeaf.journalComposer", minimumRole: "bookkeeper" },
+  { id: "workDetail", parent: "work", labelKey: "clientLeaf.workDetail", minimumRole: "viewer" },
+] as const;
+
+export function clientLeaf(id: ClientLeafId): ClientLeaf {
+  return CLIENT_LEAVES.find((leaf) => leaf.id === id)!;
+}
+
 // ── hrefs ────────────────────────────────────────────────────────────────────
 
 export function clientBase(clientId: string): string {
   return `/clients/${clientId}`;
+}
+
+/** `/clients/:clientId/accounting/journal/new` — the C3 composer. */
+export function journalComposerHref(clientId: string): string {
+  return `${clientBase(clientId)}/accounting/journal/new`;
+}
+
+/** `/clients/:clientId/work/:workId` — one durable Work record's own address.
+ *  The id is percent-encoded here even though every caller holds a uuid: this
+ *  function builds a URL, and a URL builder that trusts its input is how a
+ *  malformed id becomes a malformed route. */
+export function workDetailHref(clientId: string, workId: string): string {
+  return `${clientBase(clientId)}/work/${encodeURIComponent(workId)}`;
 }
 
 export function clientNavHref(clientId: string, item: ClientNavItem): string {
@@ -320,6 +399,13 @@ export function visibleAccountingItems(scope: NavigationScope): readonly Account
   return ACCOUNTING_ITEMS.filter((item) => hasNavigationAccess(scope, item));
 }
 
+/** Whether this caller's rank is offered a leaf's own entry point — the hub's
+ *  primary action, the composer's form. Called with the SAME predicate every
+ *  other row goes through, never a second rank comparison. */
+export function canOpenClientLeaf(scope: NavigationScope, id: ClientLeafId): boolean {
+  return hasNavigationAccess(scope, clientLeaf(id));
+}
+
 // ── reading the current URL ──────────────────────────────────────────────────
 
 /**
@@ -345,6 +431,15 @@ export type ActiveNav = {
    *  register tabs the sidebar does not name. Drives the collapsible's default. */
   readonly accountingOpen: boolean;
   readonly settingsSection: SettingsSectionId | null;
+  /**
+   * The LEAF below `clientItem`, when the URL names one. It ACCOMPANIES its
+   * parent rather than replacing it — exactly as `settingsSection` accompanies
+   * `firmItem: "settings"` — because the sidebar must keep marking the parent
+   * row current while a human is on a leaf, and the breadcrumb is the only
+   * surface that names the leaf itself. So this is not a second sidebar mark and
+   * cannot collide with the one `aria-current` the sidebar renders.
+   */
+  readonly clientLeaf: ClientLeafId | null;
 };
 
 /** `/clients/<id>[/...]` → the id, or null at firm altitude. THE resolver for
@@ -375,7 +470,25 @@ const NOTHING_ACTIVE = {
   accountingItem: null,
   accountingOpen: false,
   settingsSection: null,
+  clientLeaf: null,
 } as const;
+
+/**
+ * Which LEAF, if any, the sub-path below a client-nav row names.
+ *
+ * EXACT LENGTHS, not prefixes. `/…/work/:workId/anything` is not the Work detail
+ * — no page serves it — and answering "workDetail" for it would put a crumb on
+ * the screen for a route that 404s. A deeper path resolves to its PARENT row with
+ * no leaf, which is the honest reading: you are under Work, on a surface the tree
+ * does not name.
+ */
+function leafFor(parent: ClientNavId, rest: readonly string[]): ClientLeafId | null {
+  if (parent === "accounting" && rest.length === 3 && rest[1] === "journal" && rest[2] === "new") {
+    return "journalComposer";
+  }
+  if (parent === "work" && rest.length === 2) return "workDetail";
+  return null;
+}
 
 /**
  * Which ONE entry in the whole tree is the page the caller is looking at.
@@ -459,6 +572,7 @@ export function resolveActive(pathname: string, params: ReadonlyParams = EMPTY_P
       ...NOTHING_ACTIVE,
       clientItem: item.id,
       accountingOpen: item.id === "accounting",
+      clientLeaf: leafFor(item.id, rest),
     };
   }
 
@@ -577,7 +691,20 @@ export function breadcrumbFor(
   }
   if (active.clientItem !== null) {
     const item = CLIENT_NAV.find((entry) => entry.id === active.clientItem)!;
-    return [firm, clients, clientCrumb, { kind: "message", ns: "AppShell", key: item.labelKey }];
+    if (active.clientLeaf === null) {
+      return [firm, clients, clientCrumb, { kind: "message", ns: "AppShell", key: item.labelKey }];
+    }
+    // A LEAF DEEPENS THE TRAIL BY ONE, and its parent becomes a link — the row
+    // the sidebar is still marking current is now an ancestor you can go back
+    // to, which is exactly what a breadcrumb is for.
+    const leaf = CLIENT_LEAVES.find((entry) => entry.id === active.clientLeaf)!;
+    return [
+      firm,
+      clients,
+      clientCrumb,
+      { kind: "message", ns: "AppShell", key: item.labelKey, href: clientNavHref(clientId, item) },
+      { kind: "message", ns: "AppShell", key: leaf.labelKey },
+    ];
   }
   if (active.accountingOpen) {
     const accountingItem = CLIENT_NAV.find((entry) => entry.id === "accounting")!;
@@ -620,6 +747,15 @@ export function breadcrumbFor(
  *     not a datum) and `?view=` (a saved view of Work) are carried.
  *   · A firm-altitude path. `/activity` is not a client destination at all, so
  *     the switch lands on B's home rather than pretending Activity is scoped.
+ *
+ * A LEAF DOES NOT TRAVEL EITHER, and it falls out by construction rather than by
+ * a rule: the client arm below rebuilds the destination from the `CLIENT_NAV`
+ * ROW, never from the incoming path, so `/clients/A/work/<workId>` lands on
+ * `/clients/B/work` and `/clients/A/accounting/journal/new` on
+ * `/clients/B/accounting`. Both are the right answers for the same reason a
+ * thread is not portable — `<workId>` names one client's record, and a
+ * half-typed journal entry belongs to the client it was typed under (the draft
+ * itself is keyed on that client too; see lib/work/journal-draft.ts).
  */
 export function switchClientDestination(
   pathname: string,

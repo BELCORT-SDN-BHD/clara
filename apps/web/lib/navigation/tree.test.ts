@@ -25,6 +25,7 @@ import { test } from "node:test";
 import messages from "../../messages/en.json";
 import {
   ACCOUNTING_ITEMS,
+  CLIENT_LEAVES,
   CLIENT_NAV,
   FIRM_NAV,
   REGISTERS_DEFAULT_TAB,
@@ -32,14 +33,17 @@ import {
   WORK_NEEDS_YOU_HREF,
   accountingHref,
   breadcrumbFor,
+  canOpenClientLeaf,
   clientIdOf,
   clientNavHref,
+  journalComposerHref,
   resolveActive,
   switchClientDestination,
   visibleAccountingItems,
   visibleClientNav,
   visibleFirmNav,
   visibleSettingsSections,
+  workDetailHref,
   type NavigationScope,
 } from "./tree";
 
@@ -202,6 +206,51 @@ test("resolveActive reads a client sub-path, and the registers workbench's own d
   assert.equal(clara.accountingOpen, false);
 });
 
+// ── leaves ───────────────────────────────────────────────────────────────────
+
+test("a LEAF keeps its PARENT current and names itself — the sidebar mark does not move", () => {
+  const composer = resolveActive(journalComposerHref(A), params());
+  assert.equal(composer.scope, "client");
+  assert.equal(composer.clientId, A);
+  // The sidebar still marks Accounting: a human composing an entry IS under
+  // Accounting, and moving the mark would tell them they left it.
+  assert.equal(composer.clientItem, "accounting");
+  assert.equal(composer.accountingOpen, true);
+  assert.equal(composer.clientLeaf, "journalComposer");
+  // The leaf is NOT one of the accounting children — it is not a workbench.
+  assert.equal(composer.accountingItem, null);
+
+  const detail = resolveActive(workDetailHref(A, "work-1"), params());
+  assert.equal(detail.clientItem, "work");
+  assert.equal(detail.clientLeaf, "workDetail");
+
+  // A bare parent has no leaf.
+  assert.equal(resolveActive(`/clients/${A}/work`).clientLeaf, null);
+  assert.equal(resolveActive(`/clients/${A}/accounting`).clientLeaf, null);
+});
+
+test("a DEEPER path than a leaf resolves to the PARENT with no leaf — no crumb for a route nobody serves", () => {
+  assert.equal(resolveActive(`/clients/${A}/work/work-1/extra`).clientLeaf, null);
+  assert.equal(resolveActive(`/clients/${A}/work/work-1/extra`).clientItem, "work");
+  assert.equal(resolveActive(`/clients/${A}/accounting/journal`).clientLeaf, null);
+  assert.equal(resolveActive(`/clients/${A}/accounting/journal/new/again`).clientLeaf, null);
+});
+
+test("the leaf href builders encode their ids — a URL builder never trusts its input", () => {
+  assert.equal(journalComposerHref(A), `/clients/${A}/accounting/journal/new`);
+  assert.equal(workDetailHref(A, "w 1/x"), `/clients/${A}/work/w%201%2Fx`);
+});
+
+test("the composer is floored at BOOKKEEPER, the work detail at VIEWER — through the ONE predicate", () => {
+  assert.equal(canOpenClientLeaf(VIEWER, "journalComposer"), false, "the write door behind it can only refuse a viewer");
+  assert.equal(canOpenClientLeaf(BOOKKEEPER, "journalComposer"), true);
+  assert.equal(canOpenClientLeaf(OWNER, "journalComposer"), true);
+  // Fail closed on an unread rank, exactly as every other row does.
+  assert.equal(canOpenClientLeaf(UNKNOWN, "journalComposer"), false);
+  assert.equal(canOpenClientLeaf(UNKNOWN, "workDetail"), false);
+  assert.equal(canOpenClientLeaf(VIEWER, "workDetail"), true);
+});
+
 test("AT MOST ONE entry is ever current — the aria-current contract, over every route this app serves", () => {
   const routes = [
     "/", "/clients", "/work", "/activity", "/settings",
@@ -211,6 +260,8 @@ test("AT MOST ONE entry is ever current — the aria-current contract, over ever
     ...ACCOUNTING_ITEMS.map((i) => accountingHref(A, i)),
     `/clients/${A}/clara/t1`,
     `/clients/${A}/registers?tab=opening`,
+    journalComposerHref(A),
+    workDetailHref(A, "work-1"),
   ];
   for (const route of routes) {
     const [path, query = ""] = route.split("?");
@@ -299,6 +350,32 @@ test("the breadcrumb is the page's ancestry, firm first, and the CURRENT page is
   ]);
 });
 
+test("a LEAF deepens the trail by one, and its parent becomes a link", () => {
+  assert.deepEqual(shape(journalComposerHref(A)), [
+    { text: "E2E Accounting", href: "/" },
+    { text: "AppShell:firmNav.clients", href: "/clients" },
+    { text: "Rome Properties", href: `/clients/${A}` },
+    { text: "AppShell:clientNav.accounting", href: `/clients/${A}/accounting` },
+    { text: "AppShell:clientLeaf.journalComposer", href: null },
+  ]);
+
+  // THE WORK'S OWN CRUMB IS ITS PURPOSE, NEVER THE UUID — a uuid is not an
+  // identity a person or a screen reader should meet, which is the same rule
+  // the client crumb's placeholder exists for.
+  const detail = shape(workDetailHref(A, "b1b1b1b1-1111-4111-8111-111111111111"));
+  assert.deepEqual(detail, [
+    { text: "E2E Accounting", href: "/" },
+    { text: "AppShell:firmNav.clients", href: "/clients" },
+    { text: "Rome Properties", href: `/clients/${A}` },
+    { text: "AppShell:clientNav.work", href: `/clients/${A}/work` },
+    { text: "AppShell:clientLeaf.workDetail", href: null },
+  ]);
+  assert.ok(
+    detail.every((crumb) => !crumb.text.includes("b1b1b1b1")),
+    "the work id must not appear as crumb text",
+  );
+});
+
 test("no breadcrumb trail ever ends in a link, on any route", () => {
   const routes = [
     "/", "/clients", "/work", "/activity", "/settings",
@@ -307,6 +384,8 @@ test("no breadcrumb trail ever ends in a link, on any route", () => {
     ...ACCOUNTING_ITEMS.map((i) => accountingHref(A, i)),
     `/clients/${A}/registers?tab=opening`,
     `/clients/${A}/clara/t1`,
+    journalComposerHref(A),
+    workDetailHref(A, "work-1"),
   ];
   for (const route of routes) {
     const [path, query = ""] = route.split("?");
@@ -349,6 +428,12 @@ test("switching client keeps the DESTINATION KIND under the new client", () => {
   assert.equal(to(`/clients/${A}/work`, "view=needs-you"), `/clients/${B}/work?view=needs-you`);
 });
 
+test("A LEAF DOES NOT TRAVEL — a work id names one client's record, and a half-typed entry belongs to the client it was typed under", () => {
+  const to = (path: string) => switchClientDestination(path, params(), B);
+  assert.equal(to(workDetailHref(A, "work-1")), `/clients/${B}/work`);
+  assert.equal(to(journalComposerHref(A)), `/clients/${B}/accounting`);
+});
+
 test("a THREAD is not portable, and a firm path is not a client destination", () => {
   const to = (path: string, query = "") => switchClientDestination(path, params(query), B);
   // One conversation about one client. There is no corresponding thread under B,
@@ -389,6 +474,7 @@ test("every label key in the registry resolves to a non-empty STRING in messages
     ...FIRM_NAV.map((i): [string, string] => ["AppShell", i.labelKey]),
     ...CLIENT_NAV.map((i): [string, string] => ["AppShell", i.labelKey]),
     ...ACCOUNTING_ITEMS.map((i): [string, string] => ["AppShell", i.labelKey]),
+    ...CLIENT_LEAVES.map((i): [string, string] => ["AppShell", i.labelKey]),
     ["AppShell", "clientNav.registersView"],
     ...SETTINGS_SECTIONS.flatMap((s): [string, string][] => [
       ["Settings", s.labelKey],

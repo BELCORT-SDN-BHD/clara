@@ -32,6 +32,7 @@
 # comment describes an enforced invariant, not merely a convention.
 #
 # Blank lines and lines starting with # are ignored by both scripts above.
+components/accounting/journal-composer.test.tsx
 components/admin/invite-dialog-a11y.test.tsx
 components/admin/invite-dialog-keyboard.test.tsx
 components/admin/members-a11y.test.tsx
@@ -150,6 +151,7 @@ components/parts/v16-act-cards.test.tsx
 components/parts/v16-action-round2.test.tsx
 components/parts/v16-cards-a11y.test.tsx
 components/parts/v16-read-cards.test.tsx
+components/parts/work-cards.test.tsx
 components/password-policy.test.tsx
 components/registers/EnrolAccountDialog.test.ts
 components/registers/accounts-a11y.test.tsx
@@ -185,6 +187,7 @@ components/reports/reports-snapshots-seeding-a11y.test.tsx
 components/reports/reports-snapshots-seeding-keyboard.test.tsx
 components/shell-responsive.test.tsx
 components/tax/tax-a11y.test.tsx
+components/work/work-detail.test.tsx
 e2e/e2e-fixture-ownership.test.ts
 lib/bank/agency-doors.test.ts
 lib/bank/doors.test.ts
@@ -298,6 +301,10 @@ lib/registration/dpa-reads.test.ts
 lib/reports/api.test.ts
 lib/session-accessor.test.ts
 lib/wire.test.ts
+lib/work/api.test.ts
+lib/work/journal-basis.test.ts
+lib/work/journal-draft.test.ts
+lib/work/reads.test.ts
 test/a11yRules.test.ts
 test/keyboardWalk.test.ts
 tests/apiLimitBanner.test.mjs

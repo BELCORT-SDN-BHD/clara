@@ -30,7 +30,7 @@ On PowerShell, set those environment variables before running the command.
 
 ## Coverage map
 
-The checked-in suite currently contains 18 specs:
+The checked-in suite currently contains 19 specs:
 
 | Spec | What it exercises |
 |---|---|
@@ -51,6 +51,7 @@ The checked-in suite currently contains 18 specs:
 | `money-input.spec.ts` | Exact-cent input and ambiguous-input refusal |
 | `interview-walk.spec.ts` | Real-stack onboarding interview and Tax route reachability when its fixture is supplied |
 | `reports-download-walk.spec.ts` | Real-stack sealed artifact download when its fixture is supplied |
+| `journal-work-walk.spec.ts` | #623's durable-Work journey: the Accounting hub's primary act, the composer's validation and first-invalid focus, a restored draft and its unknown account, submit → the Work detail running to a posted entry, a typed refusal and the Retry that starts a NEW run of the SAME Work, a LOST acknowledgement resolving to that same Work through its intent key, the `work_accepted`/`work_status`/`work_result` cards in a transcript, the malformed-id not-found boundary, 320 CSS px and 200% zoom, reduced motion, and heading focus that a background poll never takes back |
 | `shell-migration-walk.spec.ts` | #614's unified shell: the legacy `/admin`/`/needs-you` redirect matrix, identity at every width, the keyboard scope switcher and its cross-client isolation guarantee, the mobile sheet's keyboard contract, the Accounting sidebar group, reduced motion, the client-not-found boundary (a bogus id, and — via a same-process visibility toggle — a client that goes invisible mid-session), one overlay stack (the Clara rail plus the mobile nav Sheet open together at 640px), Work's destination split, settings rank-shaping, and the train's retired entries |
 
 These files use `.spec.ts` because the package's Node test manifest accepts `*.test.*` files. Do not add Playwright specs to [`test/manifest.txt`](../test/manifest.txt).

@@ -54,6 +54,7 @@ const LANE_MOCKS = [
   "documents-viewer-mock.mjs",
   "fs4-checkout-mock.mjs",
   "home-board-mock.mjs",
+  "journal-work-mock.mjs",
   "journals-table-mock.mjs",
 ] as const;
 
@@ -229,6 +230,18 @@ const LANE_DECLARATIONS: Record<string, { unscopeable: string[]; debt: string[] 
     debt: ["/api/auth-wall/confirm"],
   },
   "journals-table-mock.mjs": { unscopeable: [], debt: [] },
+  // #623's durable-Work lane. Nothing is declared: every literal-path handler in it
+  // gates on `client_id`/`id` being its own before it answers, including the CONTROL
+  // endpoint, whose body has to name this lane's client — a control surface that
+  // answered for any body would be able to advance another lane's fixture.
+  //
+  // THE SAME COVERAGE LIMIT fs4's and home-board's rows name, in this file's third
+  // shape, and it is recorded rather than hidden: that module's `GET /api/work/:id`
+  // and `POST /api/work/:id/retry` are matched with a REGEX because their paths carry
+  // an id, so this census cannot see them at all. Both resolve only ids that module
+  // minted and return false otherwise. A green on this row means "every handler the
+  // reader can see is scoped", not "this file is clean".
+  "journal-work-mock.mjs": { unscopeable: [], debt: [] },
   // The documents-viewer lane. Every handler names its own client, document, extraction or
   // candidate before it answers, and the RPC block guards on `p_client`/`p_document`/
   // `p_candidate` before it dispatches at all — so there is nothing to declare in either
