@@ -100,6 +100,10 @@ export const REASON = {
   credentialClientPin: "credential_client_pin",
   wakeOboUnbound: "wake_obo_unbound",
   oboNotActive: "obo_not_active",
+  // Added at integration review: a credential minted OBO ANY live bookkeeper of the firm could
+  // commit somebody else's Work, and the receipt's `on_behalf_of` — the estate's record of whose
+  // authority was rechecked — then named a human who never asked for the entry.
+  oboNotInitiator: "obo_not_initiator",
   logicalOpMismatch: "logical_op_mismatch",
   basisMismatch: "basis_mismatch",
   operationConflict: "operation_payload_conflict",
@@ -249,6 +253,18 @@ export async function settleWorkRun({ task, outcome, errorCode = null, error = n
   return r.rows[0].result;
 }
 
+/** Cancel a run through the ESTATE'S OWN human door (clara.cancel_agent_task, 0006/0133) — the
+ *  door #623 must survive without editing. It is deliberately called as a HUMAN, because that is
+ *  the only way it is ever reached: a bookkeeper pressing Stop on a run that is already holding
+ *  the pen. Returns `{task_id, status}` — `cancel_requested` for a live run, `cancelled` for one
+ *  that never started. */
+export async function cancelAgentTask(sub, { task, opKey = null }) {
+  const r = await humanQuery(sub,
+    "select clara.cancel_agent_task(p_task => $1::uuid, p_op_key => $2::text) as result",
+    [task, opKey ?? opk("w623-cancel")]);
+  return r.rows[0].result;
+}
+
 /** Mint the PINNED chat wake kind OBO a human, exactly as the runtime's write pool does. */
 export async function mintClientObo({ firm, obo, client, kind = "interactive_client", ttl = "15 minutes" }) {
   const r = await rootQuery(
@@ -290,6 +306,15 @@ export async function taskRow(id) {
 export async function tasksForWork(work) {
   const r = await rootQuery(
     "select id, status, kind, error_code, workflow_run_id from clara.agent_tasks where work_id=$1 order by created_at", [work]);
+  return r.rows;
+}
+
+/** The audit rows one verb wrote about one Work, newest first. `clara.audit_log` names the verb
+ *  in `fn` and carries its payload in `args` (0002). */
+export async function auditFor(fn, work) {
+  const r = await rootQuery(
+    "select fn, args from clara.audit_log where fn=$1 and args->>'work'=$2 order by at desc, id desc",
+    [fn, work]);
   return r.rows;
 }
 

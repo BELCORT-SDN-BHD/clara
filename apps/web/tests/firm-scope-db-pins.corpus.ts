@@ -102,11 +102,15 @@ export const REVIEWED_DYNAMIC_SQL_BARRIERS = new Map<string, ReviewedDynamicSqlB
   ],
   // #623 (2026-09-10): the accounting-work lane widens the two agent_tasks guard bodies by the
   // same splice family. TWO executes in one DO block, not one — both recut a TRIGGER function.
+  // Re-pinned the same day after the integration review recut 0178 itself (receipt-aware settle,
+  // initiator-bound posting, client-scoped intent keys, basis caps). The migration had never
+  // shipped, so it was edited in place; the barrier below is unchanged in KIND — the same two
+  // splices, one of them now replacing a slightly longer anchor — and only the CONTENT hash moved.
   [
     "0178_accounting_work_journal_successor.sql",
     {
       reason: "Reviewed pg_get_functiondef splice recuts TWO named trigger functions, clara._tf_agent_task_insert() and clara._tf_agent_task_update(), each read by its exact regprocedure and re-installed with one counted anchor replaced; both return trigger and emit no view definition, so neither P4 scope view is reachable. Each splice pins its pre-image prosrc sha256 and asserts its anchor occurs EXACTLY once before replacing, and the migration's tail re-reads both bodies to prove every pre-existing task kind survived.",
-      sha256: "fe418d5482a1cf76c67b88e91c1918fd95bc8e9ced6ef64f32e5d03ceaa9334b",
+      sha256: "b5b04a2c9fba53572a61be733acc071404034f442d27d06c8f49c1ab6ef36f34",
     },
   ],
 ]);

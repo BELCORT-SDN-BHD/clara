@@ -19,6 +19,7 @@ import assert from "node:assert/strict";
 import {
   gateWork, buildWorkWorld, endPool, printLaneNotes, printSkipCount, noteLane,
   admitJournalWork, claimWorkRun, mintClientObo, wakeRecordJournalEntry, freshWorkClient,
+  settleWorkRun, cancelAgentTask, taskRow, auditFor,
   basis, WCHART, REASON, CLR, BUNDLE_DIGEST, assertPair, assertRaises,
   rootQuery, humanQuery, opk, workRow, receiptsForWork, entriesForClient, linesOf,
   entryCount, committedReceiptCount, AGENT_USER_ID, ROLES, roleQuery, withTxnOrNull,
@@ -211,6 +212,145 @@ test("w623.wall.fires the widened receipt wall ABORTS a #623 post whose operatio
 });
 
 // ===========================================================================================
+// 1b · THE RECEIPT OVERRIDES THE RUN'S OPINION.
+//
+// The finding these cells pin, measured on a live database: `clara.settle_work_run` translated
+// what the RUN believed onto the Work without ever asking the books. A run that had already
+// committed `wake_record_journal_entry` — an approved entry, a committed receipt, real money in a
+// real client's ledger — and was then cancelled or reaped settled the Work `cancelled`/`failed`
+// with "Nothing was posted" in its `error`, and the run's own later `completed` settle came back
+// `{"replayed":true}` because the task was terminal by then. The books said posted; the Work said
+// the opposite; nothing reconciled them. A run's intention cannot un-post an entry.
+// ===========================================================================================
+
+test("w623.settle.cancel-after-commit a committed receipt OVERRIDES a cancelled settle", async (t) => {
+  if (await gateWork(t)) return;
+  const a = await armed();
+  const posted = await post(a);
+
+  // The estate's OWN human Stop, pressed while the run holds the pen — unedited by #623.
+  const cancel = await cancelAgentTask(BOB(), { task: a.task_id });
+  assert.equal(cancel.status, "cancel_requested",
+    "settle.cancel-after-commit: cancelling a LIVE run is a request; the settle is what terminalises it");
+
+  const out = await settleWorkRun({
+    task: a.task_id, outcome: "cancelled",
+    error: { code: "cancelled", reason: "cancelled", message: "Nothing was posted.", recoverable: false },
+  });
+  assert.equal(out.status, "completed",
+    "settle.cancel-after-commit: the Work settles COMPLETED — the entry exists and cannot be un-posted");
+  assert.equal(out.requested_outcome, "cancelled",
+    "settle.cancel-after-commit: …and the answer says what was ASKED");
+  assert.equal(out.overridden_by_receipt, true, "settle.cancel-after-commit: …and that it was overridden");
+  assert.equal(out.replayed, false);
+
+  const w = await workRow(a.work_id);
+  assert.equal(w.status, "completed");
+  assert.equal(w.error, null, "settle.cancel-after-commit: 'Nothing was posted' never lands on a posted Work");
+  assert.equal(w.result.entry_id, posted.entry_id, "settle.cancel-after-commit: the RECEIPT is the result");
+  assert.equal(w.result.receipt_id, posted.receipt_id);
+
+  const task = await taskRow(a.task_id);
+  assert.equal(task.status, "completed", "settle.cancel-after-commit: the run is done, and done successfully");
+  assert.equal(task.error_code, null);
+
+  // The overridden request is not silently swallowed: the audit trail carries both.
+  const audit = await auditFor("settle_work_run", a.work_id);
+  assert.equal(audit[0].args.requested_outcome, "cancelled");
+  assert.equal(audit[0].args.overridden_outcome, "cancelled");
+  assert.equal(audit[0].args.overridden_by_receipt, true);
+  assert.equal(audit[0].args.outcome, "completed",
+    "settle.cancel-after-commit: the trail records what was asked AND what happened");
+
+  // …and the run's own later settle, arriving after its checkpoint, REPLAYS.
+  const later = await settleWorkRun({
+    task: a.task_id, outcome: "completed",
+    result: { entry_id: posted.entry_id, receipt_id: posted.receipt_id },
+  });
+  assert.equal(later.replayed, true, "settle.cancel-after-commit: the run's own completed settle replays");
+  assert.equal(later.status, "completed");
+  assert.equal((await entriesForClient(A1())).filter((e) => e.id === posted.entry_id).length, 1,
+    "settle.cancel-after-commit: still exactly ONE entry");
+  assert.equal((await receiptsForWork(a.work_id)).length, 1,
+    "settle.cancel-after-commit: …and exactly ONE receipt");
+});
+
+test("w623.settle.failed-after-commit a committed receipt OVERRIDES a failed settle, error_code and all", async (t) => {
+  if (await gateWork(t)) return;
+  const a = await armed();
+  const posted = await post(a);
+
+  const out = await settleWorkRun({
+    task: a.task_id, outcome: "failed", errorCode: "limit",
+    error: { code: "budget_exhausted", reason: "budget_exhausted", message: "no calls left", recoverable: true },
+  });
+  assert.equal(out.status, "completed", "settle.failed-after-commit: the books win");
+  assert.equal(out.requested_outcome, "failed");
+  assert.equal(out.overridden_by_receipt, true);
+
+  const task = await taskRow(a.task_id);
+  assert.equal(task.status, "completed");
+  assert.equal(task.error_code, null,
+    "settle.failed-after-commit: a 'limit' error_code does not ride a run that completed");
+  const w = await workRow(a.work_id);
+  assert.equal(w.status, "completed");
+  assert.equal(w.error, null, "settle.failed-after-commit: no budget-exhausted copy over a posted entry");
+  assert.equal(w.result.entry_id, posted.entry_id);
+});
+
+test("w623.settle.completed-after-commit an HONEST completed settle is not an override, and re-settling replays", async (t) => {
+  if (await gateWork(t)) return;
+  const a = await armed();
+  const posted = await post(a);
+
+  const first = await settleWorkRun({
+    task: a.task_id, outcome: "completed",
+    result: { entry_id: posted.entry_id, receipt_id: posted.receipt_id },
+  });
+  assert.equal(first.status, "completed");
+  assert.equal(first.replayed, false, "settle.completed-after-commit: the first settle is not a replay");
+  assert.equal(first.overridden_by_receipt, false,
+    "settle.completed-after-commit: nothing was overridden — the caller asked for what happened");
+
+  const again = await settleWorkRun({ task: a.task_id, outcome: "completed" });
+  assert.equal(again.replayed, true, "settle.completed-after-commit: a re-settle REPLAYS");
+  assert.equal(again.status, "completed");
+  assert.equal(again.overridden_by_receipt, false);
+  const w = await workRow(a.work_id);
+  assert.equal(w.result.entry_id, posted.entry_id, "settle.completed-after-commit: the result is unmoved");
+  assert.equal((await receiptsForWork(a.work_id)).length, 1);
+});
+
+test("w623.cancel.queued-after-commit the estate's own cancel door cannot strand a POSTED Work", async (t) => {
+  if (await gateWork(t)) return;
+  // THE OTHER HALF OF THE SAME FINDING. Nothing in the estate makes a CLAIM a precondition of
+  // posting — `_record_journal_entry_core` attributes its receipt to the Work's current run when
+  // the credential binds no task — so a Work can hold a committed receipt while its task is still
+  // `queued`. `clara.cancel_agent_task` terminalises a queued task ITSELF, with no settle in
+  // sight: pre-fix the Work stayed at `queued` forever with money in the ledger.
+  const work = await admitJournalWork({ client: A1(), author: BOB(), basis: basis() });
+  const cred = await mintClientObo({ firm: FIRM_A(), obo: BOB(), client: A1() });
+  const posted = await wakeRecordJournalEntry(cred.secret,
+    { client: A1(), work: work.work_id, logicalOpId: work.logical_op_id, basis: basis() });
+  assert.equal(posted.posted, true);
+  assert.equal((await taskRow(work.task_id)).status, "queued",
+    "cancel.queued-after-commit: the run never claimed, and the DB never required it to");
+
+  const cancel = await cancelAgentTask(BOB(), { task: work.task_id });
+  assert.equal(cancel.status, "cancelled",
+    "cancel.queued-after-commit: a queued run cancels TERMINALLY — no settle will ever be called");
+
+  const w = await workRow(work.work_id);
+  assert.equal(w.status, "completed",
+    "cancel.queued-after-commit: the Work is not stranded at queued with a posted entry behind it");
+  assert.equal(w.error, null);
+  assert.equal(w.result.entry_id, posted.entry_id, "cancel.queued-after-commit: the receipt is the result");
+  assert.equal(w.result.receipt_id, posted.receipt_id);
+  noteLane("cancel.queued-after-commit: answered by the agent_tasks status mirror's receipt-aware "
+    + "terminal arm — clara.cancel_agent_task (0006/0133) is NOT edited by #623");
+});
+
+// ===========================================================================================
 // 2 · The refusals. Each asserts the typed pair AND that nothing durable was written.
 // ===========================================================================================
 
@@ -223,6 +363,38 @@ async function refuses(client, code, reason, fn, label) {
   assert.equal(await committedReceiptCount(client), receipts, `${label}: NO committed receipt was written`);
   return out;
 }
+
+test("w623.post.obo-not-initiator a credential minted OBO ANOTHER live bookkeeper cannot commit this Work", async (t) => {
+  if (await gateWork(t)) return;
+  // THE FINDING. The commit core rechecked whether the credential's human still HOLDS authority,
+  // and the wrapper rechecked the client pin — neither asked whether this was the human who
+  // ASKED for the entry. Alice is an owner of the same firm: active, well above the bookkeeper
+  // floor, and pinned to the same client. Every check that existed said yes, and the receipt's
+  // `on_behalf_of` — the estate's record of whose authority was rechecked, and the name a
+  // reviewer reads off an agent-posted entry — would have named a human who never authorised it.
+  const work = await admitJournalWork({ client: A1(), author: BOB(), basis: basis() });
+  await claimWorkRun({ task: work.task_id, runId: opk("run") });
+  const notMine = await mintClientObo({ firm: FIRM_A(), obo: ALICE(), client: A1() });
+
+  await refuses(A1(), CLR.authz, REASON.oboNotInitiator, () => wakeRecordJournalEntry(
+    notMine.secret,
+    { client: A1(), work: work.work_id, logicalOpId: work.logical_op_id, basis: basis() }),
+    "post.obo-not-initiator");
+  assert.equal((await workRow(work.work_id)).result, null,
+    "post.obo-not-initiator: the Work records no outcome either");
+
+  // …and the refusal lands BEFORE the reservation, so the initiator's own run is not locked out
+  // of its identity by somebody else's rejected attempt.
+  const held = await rootQuery(
+    "select count(*)::int as n from clara.op_receipts where fn='record_journal_entry' and op_key=$1",
+    [work.logical_op_id]);
+  assert.equal(held.rows[0].n, 0,
+    "post.obo-not-initiator: nothing was reserved under this Work's operation identity");
+  const mine = await mintClientObo({ firm: FIRM_A(), obo: BOB(), client: A1() });
+  const out = await wakeRecordJournalEntry(mine.secret,
+    { client: A1(), work: work.work_id, logicalOpId: work.logical_op_id, basis: basis() });
+  assert.equal(out.posted, true, "post.obo-not-initiator: the INITIATOR still posts normally");
+});
 
 test("w623.post.obo-revoked authority is rechecked AT COMMIT, not read off the admission snapshot", async (t) => {
   if (await gateWork(t)) return;

@@ -90,7 +90,10 @@
 --   CLR10 invalid_request           + class 'model'; a blank model snapshot. Refused HERE because
 --                                   the agent_tasks INSERT guard's own refusal is untyped
 --   CLR10 invalid_basis             + field + constraint (see _assert_journal_basis below)
---   CLR10 intent_payload_conflict   same (firm, intent_key), different basis digest
+--   CLR10 intent_payload_conflict   same (firm, CLIENT, intent_key), different basis digest.
+--                                   The identity is client-scoped: the same key against a
+--                                   DIFFERENT client of the same firm is a DIFFERENT intent and
+--                                   admits its own Work
 --
 -- clara.retry_accounting_work
 --   CLR10 invalid_op_key            blank/whitespace op key (BEFORE any reservation)
@@ -112,6 +115,12 @@
 --   CLR10 invalid_error_code        error code outside agent_tasks' own CHECK set
 --   CLR11 task_not_found
 --   CLR10 wrong_task_kind
+--   (no errcode) receipt override   a settle of cancelled/failed/expired/refused over a Work that
+--                                   already holds a COMMITTED operation receipt does not RAISE --
+--                                   it succeeds as `completed`, with the receipt's effects as the
+--                                   result and the error cleared. The answer carries
+--                                   `requested_outcome` and `overridden_by_receipt` so the caller
+--                                   can see it was overridden, and the audit row carries both
 --
 -- clara.wake_record_journal_entry (the granted wrapper — RAISES ONLY, carries no DML)
 --   CLR03 no_wake_credential        no live credential in the session GUC
@@ -129,6 +138,9 @@
 --   CLR10 logical_op_mismatch       the Work's identity is not the one presented
 --   CLR04 obo_not_active            the human is no longer an active member  (LIVE, at commit)
 --   CLR04 insufficient_role         the human is no longer bookkeeper+       (LIVE, at commit)
+--   CLR04 obo_not_initiator         the credential names a DIFFERENT human than the one who
+--                                   admitted this Work -- authority alone is not enough, the
+--                                   receipt must attribute the posting to the human who asked
 --   CLR10 client_inactive
 --   CLR10 invalid_basis             + field + constraint (belt behind admission)
 --   CLR10 operation_payload_conflict + logical_op_id  -- CHECKED BEFORE basis_mismatch, on purpose:
@@ -145,8 +157,16 @@
 -- clara._assert_journal_basis / clara._journal_cents
 --   CLR10 invalid_basis, with `field` naming the offending path (1-BASED, matching SQL's own
 --   `with ordinality`: `basis`, `posting_date`, `memo`, `currency`, `lines`, `lines[N]`,
---   `lines[N].account_code`, `lines[N].debit_cents`, `lines[N].credit_cents`) and `constraint`
---   naming what was violated.
+--   `lines[N].account_code`, `lines[N].debit_cents`, `lines[N].credit_cents`,
+--   `lines[N].description`) and `constraint` naming what was violated
+--   (`object`, `present`, `iso_date`, `nonempty`, `myr`, `array`, `at_least_two`,
+--   `exactly_one_side`, `integer_cents`, `nonnegative_integer_cents`, `balanced`,
+--   `nonzero_total`, `max_length`).
+--   THE 1-BASED INDEX IS DELIBERATE AND STAYS. SQL's `with ordinality` counts from one, and the
+--   field path is generated FROM that ordinal, so it is the database's own count rather than a
+--   translation of it. Zero-based consumers (the runtime classifier's field echo and the web
+--   composer's focus-the-first-invalid-control) subtract one at THEIR edge; the DB never
+--   pretends to a convention it does not use internally.
 --
 -- clara._tf_accounting_work_immutable
 --   CLR08 accounting_work_immutable  + column
@@ -234,6 +254,7 @@ begin
       and p.proname in ('admit_journal_work','retry_accounting_work','claim_work_run',
         'settle_work_run','wake_record_journal_entry','_record_journal_entry_core',
         '_assert_journal_basis','_journal_basis_canonical','_journal_basis_digest','_journal_cents',
+        '_work_committed_receipt',
         '_tf_accounting_work_immutable','_tf_accounting_work_status_mirror')) then
     raise exception '#623 partial birth: one or more new function names already resolve' using errcode='CLR10';
   end if;
@@ -302,7 +323,14 @@ create table clara.accounting_work (
   constraint fk_accounting_work_client foreign key (client_id, firm_id)
     references clara.clients(id, firm_id),
   constraint uq_accounting_work_logical_op unique (logical_op_id),
-  constraint uq_accounting_work_intent unique (firm_id, intent_key),
+  -- THE INTENT KEY IS SCOPED TO THE CLIENT, NOT MERELY TO THE FIRM. Reviewed finding: the
+  -- composer mints ONE draft uuid per draft and the chat lane derives its key from
+  -- `stableOpKey(taskId, "start_journal_work", input)`; neither is guaranteed distinct ACROSS
+  -- clients, and a firm-scoped key made the second client's intent VANISH -- admission returned
+  -- the FIRST client's Work with `replayed:true`, so the second bookkeeper watched a Work
+  -- against somebody else's books and their own entry was never admitted at all. Idempotency
+  -- must be scoped to the thing the operation acts on, and the client is that thing.
+  constraint uq_accounting_work_intent unique (firm_id, client_id, intent_key),
   constraint uq_accounting_work_id_firm_client unique (id, firm_id, client_id)
 );
 comment on table clara.accounting_work is
@@ -436,13 +464,45 @@ create trigger t_operation_receipts_append_only before update or delete on clara
 create trigger t_operation_receipts_no_truncate before truncate on clara.operation_receipts
   for each statement execute function clara._tf_no_truncate();
 
+-- -------------------------------------------------------------------------------------
+-- THE ONE QUESTION EVERY LIFECYCLE WRITER ASKS OF THIS TABLE: did this Work already record a
+-- committed effect? Asked in exactly one place so the two askers (clara.settle_work_run and the
+-- agent_tasks status mirror) can never disagree, and shaped as the Work's OWN `result` object so
+-- an answer can be written straight onto the row.
+--
+-- WHY IT EXISTS AT ALL. Reviewed finding: `settle_work_run` translated the RUN's opinion of what
+-- happened onto the WORK without ever asking the books. A run that had already committed
+-- `wake_record_journal_entry` -- an approved journal entry, a committed receipt, real money in a
+-- real client's ledger -- and was then cancelled or reaped settled the Work `cancelled`/`failed`
+-- with "Nothing was posted" in its `error`, and the run's own later `completed` settle came back
+-- `{"replayed":true}` because the task was terminal by then. The entry was posted, the receipt
+-- named it, and the operator's screen said the opposite. The committed receipt is the only
+-- witness with standing here: a run's intention cannot un-post an entry, so the receipt WINS and
+-- the requested outcome is overridden (and recorded as overridden -- see settle_work_run).
+-- `order by created_at` is belt: uq_operation_receipts_committed already admits at most one
+-- committed row per (firm, logical identity), and a Work carries exactly one identity.
+-- -------------------------------------------------------------------------------------
+create function clara._work_committed_receipt(p_work uuid) returns jsonb
+  language sql stable security definer set search_path = clara, pg_temp as $$
+  select jsonb_build_object('entry_id', o.effects->>'entry_id', 'receipt_id', o.id,
+                            'posted_at', o.created_at)
+    from clara.operation_receipts o
+   where o.work_id = p_work and o.outcome = 'committed'
+   order by o.created_at limit 1;
+$$;
+revoke all on function clara._work_committed_receipt(uuid) from public;
+
 -- =====================================================================================
 -- §C  clara.agent_tasks — the new kind, its Work pointer, and the STATUS MIRROR.
 --
--- The mirror exists so `clara.open_interruption` — the estate's own parking door — keeps the Work
--- honest WITHOUT BEING EDITED. It mirrors only the two NON-TERMINAL transitions: terminal state
--- is `clara.settle_work_run`'s to write, because the Work's terminal vocabulary is richer than the
--- task's (a `refused` Work settles a task `failed`, and a mirror could not tell the two apart).
+-- The mirror exists so `clara.open_interruption` and `clara.cancel_agent_task` — the estate's own
+-- parking and cancel doors — keep the Work honest WITHOUT BEING EDITED. It mirrors the two
+-- NON-TERMINAL transitions outright: terminal state is `clara.settle_work_run`'s to write,
+-- because the Work's terminal vocabulary is richer than the task's (a `refused` Work settles a
+-- task `failed`, and a mirror could not tell the two apart). Its ONE terminal arm is the
+-- receipt-aware one: a task terminalised by a door that knows nothing about #623, over a Work
+-- that already recorded a committed effect, settles the Work `completed` rather than leaving an
+-- entry posted under a Work that never reached a terminal state at all.
 -- =====================================================================================
 alter table clara.agent_tasks drop constraint ck_agent_tasks_kind_0011;
 alter table clara.agent_tasks add constraint ck_agent_tasks_kind_0011
@@ -541,7 +601,13 @@ begin
       -- onto FOUR task statuses (a `refused` Work settles its run `failed`) and the reconciler
       -- may cancel a run that never claimed.
       when old.kind='accounting_work' then case old.status
-        when 'queued' then new.status in ('running','cancel_requested','cancelled','failed','expired')
+        -- `queued -> completed` is admitted for ONE measured reason: nothing in the estate makes
+        -- a CLAIM a precondition of posting (clara._record_journal_entry_core attributes its
+        -- receipt to the Work's current task when the credential binds none), so a run can hold
+        -- a committed operation receipt while its task is still queued -- and
+        -- clara.settle_work_run's receipt override then has to be able to say `completed` on it.
+        -- Without this the override raised CLR13 out of this guard and the Work stayed stranded.
+        when 'queued' then new.status in ('running','cancel_requested','completed','cancelled','failed','expired')
         when 'running' then new.status in ('awaiting_input','cancel_requested','completed','failed','cancelled','expired')
         when 'awaiting_input' then new.status in ('running','cancel_requested','completed','failed','cancelled','expired')
         when 'cancel_requested' then new.status in ('completed','failed','cancelled','expired')
@@ -554,16 +620,38 @@ $w623_task_guards$;
 
 create function clara._tf_accounting_work_status_mirror() returns trigger
   language plpgsql security definer set search_path = clara, pg_temp as $$
+declare v_receipt jsonb;
 begin
   if new.work_id is null then return null; end if;
-  -- ONLY the non-terminal pair. A terminal task status is settle_work_run's to translate.
-  if new.status not in ('running', 'awaiting_input') then return null; end if;
+  if new.status in ('running', 'awaiting_input') then
+    update clara.accounting_work w
+       set status = new.status
+     where w.id = new.work_id
+       and w.status is distinct from new.status
+       -- A Work that already settled is never re-opened by a late task transition.
+       and w.status not in ('completed','refused','failed','cancelled','expired');
+    return null;
+  end if;
+  -- THE TERMINAL ARM IS RECEIPT-AWARE, AND IT IS THE ONLY TERMINAL STATE THIS MIRROR WRITES.
+  -- A terminal task status is normally clara.settle_work_run's to translate, because the Work's
+  -- vocabulary is richer than the task's -- and that is still true for every Work that posted
+  -- nothing. But `clara.cancel_agent_task` (0006/0133, and deliberately NOT edited by this file)
+  -- terminalises a QUEUED accounting_work task itself, with no settle in sight: it writes
+  -- `status='cancelled'` and returns. Reviewed finding: nothing in the estate requires a run to
+  -- have CLAIMED before it posts -- `_record_journal_entry_core` attributes the receipt to
+  -- `w.current_task_id` when the credential binds no task -- so a Work could hold an approved
+  -- entry and a committed receipt while its task was still `queued`, and one human cancel then
+  -- stranded it at `queued` FOREVER with money in the ledger and no terminal state on the row.
+  -- This arm answers that without touching the estate's cancel door: a committed receipt makes
+  -- the Work `completed`, whatever the task's terminal status says, and never the reverse -- a
+  -- terminal task with NO receipt still falls through to settle_work_run untouched.
+  if new.status not in ('completed','failed','cancelled','expired') then return null; end if;
+  v_receipt := clara._work_committed_receipt(new.work_id);
+  if v_receipt is null then return null; end if;
   update clara.accounting_work w
-     set status = new.status
-   where w.id = new.work_id
-     and w.status is distinct from new.status
-     -- A Work that already settled is never re-opened by a late task transition.
-     and w.status not in ('completed','refused','failed','cancelled','expired');
+     set status = 'completed', error = null,
+         result = coalesce(w.result, '{}'::jsonb) || v_receipt
+   where w.id = new.work_id and w.status is distinct from 'completed';
   return null;
 end $$;
 revoke all on function clara._tf_accounting_work_status_mirror() from public;
@@ -624,6 +712,22 @@ begin
       using errcode='CLR10',
         detail='{"reason":"invalid_basis","field":"memo","constraint":"nonempty"}';
   end if;
+  -- THE CAPS ARE THE FROZEN TOOL SCHEMA'S, RESTATED HERE SO ADMISSION REFUSES WHAT THE RUN
+  -- COULD NEVER POST. Reviewed finding: `claraWork.v1.tools.ts` spells the echoed basis
+  -- `memo: z.string().trim().min(1).max(4000)` and `description: z.string().max(2000)`, and that
+  -- schema is @frozen. An over-long memo therefore ADMITTED (the Work exists, a run is queued)
+  -- and then died inside the segment when the model echoed the basis back, settling the Work
+  -- `failed` for a reason the composer could have shown the typist at submit time. The trimmed
+  -- length is what the memo cap measures because the tool schema trims BEFORE it caps; the
+  -- description cap measures the RAW string because that schema does not trim.
+  if char_length(btrim(p_basis->>'memo')) > 4000 then
+    raise exception 'the memo is % characters; the postable maximum is 4000',
+      char_length(btrim(p_basis->>'memo'))
+      using errcode='CLR10',
+        detail=jsonb_build_object('reason','invalid_basis','field','memo',
+          'constraint','max_length','max',4000,
+          'length', char_length(btrim(p_basis->>'memo')))::text;
+  end if;
   if upper(btrim(coalesce(p_basis->>'currency',''))) <> 'MYR' then
     raise exception 'only MYR is supported' using errcode='CLR10',
       detail='{"reason":"invalid_basis","field":"currency","constraint":"myr"}';
@@ -648,6 +752,14 @@ begin
       raise exception 'line % names no account', e.idx using errcode='CLR10',
         detail=jsonb_build_object('reason','invalid_basis',
           'field','lines[' || e.idx || '].account_code','constraint','nonempty')::text;
+    end if;
+    -- The line narration's own cap, from the same frozen schema (see the memo cap above).
+    if char_length(coalesce(e.elem->>'description','')) > 2000 then
+      raise exception 'line % carries a % character narration; the postable maximum is 2000',
+        e.idx, char_length(e.elem->>'description')
+        using errcode='CLR10', detail=jsonb_build_object('reason','invalid_basis',
+          'field','lines[' || e.idx || '].description','constraint','max_length','max',2000,
+          'length', char_length(e.elem->>'description'))::text;
     end if;
     v_d := clara._journal_cents(e.elem, 'debit_cents', e.idx::int);
     v_c := clara._journal_cents(e.elem, 'credit_cents', e.idx::int);
@@ -775,10 +887,13 @@ begin
   perform clara._assert_journal_basis(p_basis);
   v_digest := clara._journal_basis_digest(p_basis);
 
-  -- Idempotent on (firm, intent_key). The unique constraint below is what makes this safe under
-  -- a genuine race; this read is the fast path and the source of the typed conflict.
+  -- Idempotent on (firm, CLIENT, intent_key). The unique constraint is what makes this safe
+  -- under a genuine race; this read is the fast path and the source of the typed conflict. The
+  -- client conjunct is not decoration: without it the same key used against two clients of one
+  -- firm returned the FIRST client's Work as a replay and silently dropped the second intent.
   select w.id, w.basis_digest, w.logical_op_id, w.current_task_id, w.status into x
-    from clara.accounting_work w where w.firm_id = v_firm and w.intent_key = p_intent_key;
+    from clara.accounting_work w
+   where w.firm_id = v_firm and w.client_id = p_client and w.intent_key = p_intent_key;
   if found then
     if x.basis_digest is distinct from v_digest then
       raise exception 'this intent key already carries a different journal basis'
@@ -803,7 +918,8 @@ begin
     -- A concurrent admission won the key. Re-read and answer as a replay if it is the SAME basis,
     -- and as the typed conflict otherwise -- never as a raw 23505 the runtime cannot classify.
     select w.id, w.basis_digest, w.logical_op_id, w.current_task_id, w.status into x
-      from clara.accounting_work w where w.firm_id = v_firm and w.intent_key = p_intent_key;
+      from clara.accounting_work w
+     where w.firm_id = v_firm and w.client_id = p_client and w.intent_key = p_intent_key;
     if not found or x.basis_digest is distinct from v_digest then
       raise exception 'this intent key already carries a different journal basis'
         using errcode='CLR10',
@@ -974,11 +1090,30 @@ grant execute on function clara.claim_work_run(uuid,text,jsonb) to clara_runtime
 -- with error_code 'tool_error' (the estate's own code for "a tool said no") and records the TYPED
 -- refusal on clara.accounting_work.error, which is where the web reads it. The Work's status is
 -- the authority on what happened; the task's status is the authority on whether compute is done.
+--
+-- THE RECEIPT OVERRIDES THE REQUESTED OUTCOME (reviewed finding). Everything above is about
+-- translating what the RUN believes; none of it asked the books. Measured on a live database:
+-- a run commits `wake_record_journal_entry` -- approved entry, committed receipt, real money in
+-- a real client's ledger -- and before its settle a bookkeeper calls `clara.cancel_agent_task`
+-- on the task; the control path then settles `cancelled`, this verb wrote "Nothing was posted"
+-- into `accounting_work.error`, and the run's own later `completed` settle came back
+-- `{"replayed":true}` because the task was terminal by then. The books said posted, the Work
+-- said cancelled, and nothing ever reconciled them.
+--
+-- A run's intention cannot un-post an entry. So when this Work already carries a COMMITTED
+-- operation receipt, the outcome is FORCED to `completed` with the receipt's own effects as the
+-- result and the error cleared, whatever the caller asked for -- and the overridden request is
+-- recorded, in the returned object AND in the audit trail, because silently answering something
+-- other than what was asked is how the estate loses a fact. The run's later `completed` settle
+-- then replays, which is exactly what it should do. Nothing here invents an effect: the override
+-- fires only on a receipt that the posting transaction itself wrote.
 -- -------------------------------------------------------------------------------------
 create function clara.settle_work_run(p_task uuid, p_outcome text, p_error_code text,
     p_error jsonb, p_result jsonb) returns jsonb
   language plpgsql security definer set search_path = clara, pg_temp as $$
-declare t record; v_task_status text; v_err text; v_work_status text;
+declare
+  t record; v_task_status text; v_err text; v_work_status text;
+  v_receipt jsonb; v_outcome text; v_overridden text;
 begin
   if p_outcome is null or p_outcome not in ('completed','refused','failed','cancelled','expired') then
     raise exception 'unknown settle outcome %', p_outcome using errcode='CLR10',
@@ -1010,37 +1145,58 @@ begin
     return jsonb_build_object('work_id', t.work_id, 'task_id', p_task,
       'task_status', t.status,
       'status', (select w.status from clara.accounting_work w where w.id = t.work_id),
+      'requested_outcome', p_outcome, 'overridden_by_receipt', false,
       'replayed', true);
   end if;
 
-  v_task_status := case p_outcome
+  -- THE BOOKS, BEFORE THE TRANSLATION. Asked once, of the one witness with standing.
+  v_receipt := clara._work_committed_receipt(t.work_id);
+  if v_receipt is not null and p_outcome <> 'completed' then
+    v_overridden := p_outcome;
+    v_outcome := 'completed';
+  else
+    v_outcome := p_outcome;
+  end if;
+
+  v_task_status := case v_outcome
     when 'completed' then 'completed'
     when 'refused'   then 'failed'
     when 'failed'    then 'failed'
     when 'cancelled' then 'cancelled'
     else 'expired' end;
-  v_err := case p_outcome
+  v_err := case v_outcome
     when 'refused' then coalesce(p_error_code, 'tool_error')
     when 'failed'  then coalesce(p_error_code, 'internal')
+    when 'completed' then null   -- a completed run carries no task error, forced or not
     else p_error_code end;
-  v_work_status := p_outcome;
+  v_work_status := v_outcome;
 
   update clara.agent_tasks set status = v_task_status, error_code = v_err, updated_at = now()
    where id = p_task;
   update clara.accounting_work
      set status = v_work_status,
-         error  = case when p_outcome = 'completed' then null else p_error end,
-         result = case when p_result is null then result
-                      else coalesce(result, '{}'::jsonb) || p_result end
+         error  = case when v_outcome = 'completed' then null else p_error end,
+         -- On an override the receipt's own effects ARE the result: the caller's result (if any)
+         -- describes an outcome that did not happen, so it is not merged over the books.
+         result = case when v_overridden is not null
+                         then coalesce(result, '{}'::jsonb) || v_receipt
+                       when p_result is null then result
+                       else coalesce(result, '{}'::jsonb) || p_result end
    where id = t.work_id;
 
   perform clara._audit(t.firm_id, clara.agent_user_id(), t.created_by, null,
     'settle_work_run', null,
-    jsonb_build_object('work', t.work_id, 'task', p_task, 'outcome', p_outcome,
-      'error_code', v_err));
+    jsonb_build_object('work', t.work_id, 'task', p_task, 'outcome', v_work_status,
+      'error_code', v_err, 'requested_outcome', p_outcome,
+      'overridden_by_receipt', (v_overridden is not null))
+    || case when v_overridden is not null
+              then jsonb_build_object('overridden_outcome', v_overridden, 'receipt', v_receipt)
+            else '{}'::jsonb end);
 
   return jsonb_build_object('work_id', t.work_id, 'task_id', p_task,
-    'task_status', v_task_status, 'status', v_work_status, 'replayed', false);
+    'task_status', v_task_status, 'status', v_work_status,
+    'requested_outcome', p_outcome, 'overridden_by_receipt', (v_overridden is not null),
+    'replayed', false);
 end $$;
 revoke all on function clara.settle_work_run(uuid,text,text,jsonb,jsonb) from public;
 grant execute on function clara.settle_work_run(uuid,text,text,jsonb,jsonb) to clara_runtime;
@@ -1090,6 +1246,19 @@ begin
   if clara.role_rank(v_role) < clara.role_rank('bookkeeper') then
     raise exception 'the initiating member no longer holds the bookkeeper floor'
       using errcode='CLR04', detail='{"reason":"insufficient_role"}';
+  end if;
+  -- 2b · THE HUMAN IS THE WORK'S OWN INITIATOR, not merely SOME live bookkeeper of the firm.
+  -- Reviewed finding: the two arms above ask whether `p_obo` still holds authority, and the
+  -- wrapper asks whether the credential is pinned to this client -- neither asks whether this is
+  -- the human who ASKED for the entry. So an `interactive_client` credential minted OBO any
+  -- other active bookkeeper of the firm could commit this Work, and the receipt's
+  -- `on_behalf_of` -- the estate's record of WHOSE AUTHORITY was rechecked, and the name a
+  -- reviewer reads off the posted entry -- would attribute the posting to a human who never
+  -- authorised it. The Work names its initiator at admission and that column is immutable, so
+  -- the binding is exact and cheap. This is an authority check, not an input check: CLR04.
+  if p_obo is distinct from w.initiator then
+    raise exception 'this operation is bound to the human who admitted it; the credential names another'
+      using errcode='CLR04', detail='{"reason":"obo_not_initiator"}';
   end if;
 
   -- 3 · THE CLIENT, now.
@@ -1542,6 +1711,7 @@ begin
   end if;
   foreach v_bad in array array['_record_journal_entry_core','_assert_journal_basis',
       '_journal_basis_canonical','_journal_basis_digest','_journal_cents',
+      '_work_committed_receipt',
       '_tf_accounting_work_immutable','_tf_accounting_work_status_mirror'] loop
     if exists (select 1 from pg_proc f
         cross join lateral aclexplode(coalesce(f.proacl, acldefault('f', f.proowner))) a
@@ -1558,6 +1728,7 @@ begin
      and p.proname in ('admit_journal_work','retry_accounting_work','claim_work_run',
        'settle_work_run','wake_record_journal_entry','_record_journal_entry_core',
        '_assert_journal_basis','_journal_basis_canonical','_journal_basis_digest','_journal_cents',
+       '_work_committed_receipt',
        '_tf_accounting_work_immutable','_tf_accounting_work_status_mirror')
      and (not p.prosecdef or p.proowner <> 'clara_fn_owner'::regrole
           or p.proconfig is null
@@ -1606,6 +1777,63 @@ begin
     raise exception '#623 tail: % granted #623 verb(s) carry DML against clara.journal_entries', v_dml using errcode='CLR10';
   end if;
 
-  raise notice '#623 tail: OK -- clara.accounting_work and clara.operation_receipts created (forced RLS, ZERO DML to any app role, both immutability belts, and the one-committed-effect-per-logical-identity partial unique index). The READ surface is asserted from the ACL itself, grantee by grantee: accounting_work grants SELECT and only SELECT to exactly clara_authenticated and clara_runtime -- the run has to be able to load the Work it was handed -- behind an owner arm, a human arm and a SELECT-only clara_runtime arm; operation_receipts grants SELECT to clara_authenticated alone behind the owner+read pair, and no clara_runtime grant or policy reaches it. agent_tasks.kind gained accounting_work and LOST NOTHING; work_id is bidirectionally CHECK-bound to that kind and the status mirror carries running/awaiting_input ONLY. Four runtime verbs reach clara_runtime and nobody else; one wake verb reaches clara_wake_interactive and nobody else, behind exactly ONE interactive_client allowlist row, with its DML in an UNGRANTED core. The agent-post receipt wall now counts BOTH receipt shapes with ARM 0 still first, the is_agent-only live arm intact, no rule-id exemption, and its AFTER UPDATE event set unmoved. The lane ships empty.';
+  -- (H.9) THE FOUR REVIEWED FINDINGS, each re-read from the COMMITTED catalog rather than
+  -- trusted from the text above. A postcheck that only restated the file would be a comment.
+  --
+  -- (H.9a) F3 — the intent key's identity is CLIENT-scoped, read off the constraint's own
+  -- column list in its own key order. A firm-scoped key made the same key on a second client of
+  -- the same firm return the FIRST client's Work as a replay, dropping the second intent.
+  select coalesce(array_agg(a.attname order by k.ord), '{}'::text[]) into v_grantees
+    from pg_constraint c
+    cross join lateral unnest(c.conkey) with ordinality as k(attnum, ord)
+    join pg_attribute a on a.attrelid = c.conrelid and a.attnum = k.attnum
+   where c.conrelid = 'clara.accounting_work'::regclass
+     and c.conname = 'uq_accounting_work_intent';
+  if v_grantees <> array['firm_id','client_id','intent_key'] then
+    raise exception '#623 tail: uq_accounting_work_intent covers %, not (firm_id, client_id, intent_key)', v_grantees using errcode='CLR10';
+  end if;
+  select p.prosrc into v_src from pg_proc p
+   where p.oid = 'clara.admit_journal_work(uuid,uuid,text,jsonb,text,jsonb,text)'::regprocedure;
+  if (length(v_src) - length(replace(v_src, 'w.client_id = p_client', ''))) / length('w.client_id = p_client') <> 2 then
+    raise exception '#623 tail: admission does not scope BOTH intent-key lookups (fast path and unique_violation arm) to the client' using errcode='CLR10';
+  end if;
+
+  -- (H.9b) F1 — the receipt override. BOTH askers consult the one predicate, and the settle
+  -- verb names the override in what it returns rather than answering something other than what
+  -- it was asked without saying so.
+  select p.prosrc into v_src from pg_proc p
+   where p.oid = 'clara.settle_work_run(uuid,text,text,jsonb,jsonb)'::regprocedure;
+  if position('clara._work_committed_receipt' in v_src) = 0
+     or position('overridden_by_receipt' in v_src) = 0 then
+    raise exception '#623 tail: settle_work_run does not consult the committed receipt before translating an outcome -- a cancelled run could still write "nothing was posted" over a posted entry' using errcode='CLR10';
+  end if;
+  select p.prosrc into v_src from pg_proc p
+   where p.oid = 'clara._tf_accounting_work_status_mirror()'::regprocedure;
+  if position('clara._work_committed_receipt' in v_src) = 0 then
+    raise exception '#623 tail: the status mirror carries no receipt-aware terminal arm -- clara.cancel_agent_task would strand a posted Work' using errcode='CLR10';
+  end if;
+  select p.prosrc into v_src from pg_proc p where p.oid = 'clara._tf_agent_task_update()'::regprocedure;
+  if position($arm$'cancel_requested','completed','cancelled','failed','expired'$arm$ in v_src) = 0 then
+    raise exception '#623 tail: the accounting_work queued arm cannot reach completed -- the receipt override would raise CLR13 out of the task guard' using errcode='CLR10';
+  end if;
+
+  -- (H.9c) F2 — the credential's human IS the Work's initiator, not merely some live bookkeeper.
+  select p.prosrc into v_src from pg_proc p
+   where p.oid = 'clara._record_journal_entry_core(uuid,uuid,text,uuid,uuid,text,jsonb,text,text,text)'::regprocedure;
+  if position('obo_not_initiator' in v_src) = 0
+     or position('p_obo is distinct from w.initiator' in v_src) = 0 then
+    raise exception '#623 tail: the commit core does not bind the credential''s human to the Work''s own initiator -- the receipt could attribute a posting to a human who never asked for it' using errcode='CLR10';
+  end if;
+
+  -- (H.9d) F4 — the frozen tool schema's caps are restated at admission, so nothing is admitted
+  -- that the run could never post.
+  select p.prosrc into v_src from pg_proc p where p.oid = 'clara._assert_journal_basis(jsonb)'::regprocedure;
+  foreach v_bad in array array['max_length', '> 4000', '> 2000', '].description'] loop
+    if position(v_bad in v_src) = 0 then
+      raise exception '#623 tail: the basis assertion carries no % arm -- an unpostable basis would still admit', v_bad using errcode='CLR10';
+    end if;
+  end loop;
+
+  raise notice '#623 tail: OK -- clara.accounting_work and clara.operation_receipts created (forced RLS, ZERO DML to any app role, both immutability belts, and the one-committed-effect-per-logical-identity partial unique index). The READ surface is asserted from the ACL itself, grantee by grantee: accounting_work grants SELECT and only SELECT to exactly clara_authenticated and clara_runtime -- the run has to be able to load the Work it was handed -- behind an owner arm, a human arm and a SELECT-only clara_runtime arm; operation_receipts grants SELECT to clara_authenticated alone behind the owner+read pair, and no clara_runtime grant or policy reaches it. agent_tasks.kind gained accounting_work and LOST NOTHING; work_id is bidirectionally CHECK-bound to that kind and the status mirror carries running/awaiting_input plus ONE receipt-aware terminal arm. Four runtime verbs reach clara_runtime and nobody else; one wake verb reaches clara_wake_interactive and nobody else, behind exactly ONE interactive_client allowlist row, with its DML in an UNGRANTED core. The agent-post receipt wall now counts BOTH receipt shapes with ARM 0 still first, the is_agent-only live arm intact, no rule-id exemption, and its AFTER UPDATE event set unmoved. The lane ships empty. THE FOUR REVIEWED FINDINGS are re-read from the catalog too: the intent key is unique on (firm_id, client_id, intent_key) and BOTH admission lookups carry the client conjunct, so one key against two clients of a firm is two Works; clara.settle_work_run and the agent_tasks status mirror BOTH consult clara._work_committed_receipt before writing a terminal state, so a cancelled, failed or expired settle over a Work that already holds a committed operation receipt lands as completed with the receipt as its result (and says so, in the answer and in the audit row) instead of writing "nothing was posted" over a posted entry; the accounting_work queued arm can reach completed so that override is not refused by the task guard; clara._record_journal_entry_core binds the credential''s on_behalf_of to the Work''s OWN initiator (CLR04 obo_not_initiator), so a credential minted OBO another live bookkeeper cannot commit somebody else''s Work; and clara._assert_journal_basis restates the frozen tool schema''s memo (4000) and line-description (2000) caps, so nothing is admitted that the run could never post.';
 end
 $w623_tail$;

@@ -120,6 +120,65 @@ test("w623.admit.conflict the same intent_key with a CHANGED basis is a typed co
     "admit.conflict: …and NO second Work was created");
 });
 
+test("w623.admit.client-scoped-intent the SAME key against a DIFFERENT client is a DIFFERENT intent", async (t) => {
+  if (await gateWork(t)) return;
+  // THE FINDING THIS CELL PINS. Idempotency was scoped to the FIRM, and neither key generator is
+  // guaranteed distinct across clients: the composer mints one draft uuid per draft, and the chat
+  // lane derives its key from the task id and the tool input. A firm-scoped key therefore made
+  // the SECOND client's intent vanish — admission handed back the FIRST client's Work with
+  // `replayed:true`, so a bookkeeper watched a Work against somebody else's books while their own
+  // entry was never admitted at all. Same key, two clients, two Works.
+  const key = `w623-two-clients-${Date.now().toString(36)}`;
+  const one = await admitJournalWork({ client: A1(), author: BOB(), intentKey: key });
+  const two = await admitJournalWork({ client: A2(), author: BOB(), intentKey: key });
+
+  assert.equal(two.replayed, false,
+    "admit.client-scoped-intent: the second client's intent is NOT a replay of the first client's");
+  assert.notEqual(two.work_id, one.work_id, "admit.client-scoped-intent: two Works");
+  assert.notEqual(two.task_id, one.task_id, "admit.client-scoped-intent: …and two runs");
+  assert.notEqual(two.logical_op_id, one.logical_op_id,
+    "admit.client-scoped-intent: …carrying two distinct operation identities");
+  assert.equal((await workRow(one.work_id)).client_id, A1());
+  assert.equal((await workRow(two.work_id)).client_id, A2(),
+    "admit.client-scoped-intent: the second Work is against the client it was submitted for");
+
+  // …and the key is STILL idempotent WITHIN each client, which is the half that must not regress.
+  const again = await admitJournalWork({ client: A2(), author: BOB(), intentKey: key });
+  assert.equal(again.replayed, true, "admit.client-scoped-intent: a re-POST for A2 still replays");
+  assert.equal(again.work_id, two.work_id);
+  assert.equal((await tasksForWork(two.work_id)).length, 1,
+    "admit.client-scoped-intent: …and mints no second run");
+});
+
+test("w623.admit.caps a memo or narration the frozen tool schema could never post is refused at ADMISSION", async (t) => {
+  if (await gateWork(t)) return;
+  // THE FINDING. `claraWork.v1.tools.ts` is @frozen and caps the echoed basis at
+  // memo ≤ 4000 and description ≤ 2000. A longer one ADMITTED — a Work row, a queued run, a
+  // model call — and then died inside the segment when the model echoed the basis back, settling
+  // the Work `failed` for a reason the composer could have shown the typist at submit time.
+  const { detail: memoD } = await assertPair(CLR.badRequest, REASON.invalidBasis,
+    () => admitJournalWork({ client: A1(), author: BOB(), basis: basis({ memo: "m".repeat(4001) }) }),
+    "admit.caps(memo)");
+  assert.equal(memoD.field, "memo", "admit.caps: the detail names the memo");
+  assert.equal(memoD.constraint, "max_length");
+  assert.equal(memoD.max, 4000, "admit.caps: …and the cap it broke");
+
+  const long = basis();
+  long.lines[1].description = "d".repeat(2001);
+  const { detail: lineD } = await assertPair(CLR.badRequest, REASON.invalidBasis,
+    () => admitJournalWork({ client: A1(), author: BOB(), basis: long }), "admit.caps(description)");
+  assert.equal(lineD.field, "lines[2].description",
+    "admit.caps: the offending path is 1-BASED, as every other basis field path in this lane is");
+  assert.equal(lineD.constraint, "max_length");
+  assert.equal(lineD.max, 2000);
+
+  // THE BOUNDARY ADMITS. A cap that refused its own limit would be a new floor nobody agreed to.
+  const edge = basis({ memo: "m".repeat(4000) });
+  edge.lines[0].description = "d".repeat(2000);
+  const out = await admitJournalWork({ client: A1(), author: BOB(), basis: edge });
+  assert.equal(out.status, "queued", "admit.caps: exactly 4000 and exactly 2000 are postable");
+});
+
 // ===========================================================================================
 // 2 · Admission — the refusals, each with its typed pair.
 // ===========================================================================================
