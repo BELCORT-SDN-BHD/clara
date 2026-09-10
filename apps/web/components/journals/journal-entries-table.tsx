@@ -233,11 +233,15 @@ export function JournalEntriesTable({
           </NativeSelect>
         </FilterField>
         {/* #634 — THREE MORE QUESTIONS A REVIEWER ACTUALLY ASKS, beside the two
-            the table already answered. "Origin" here is not the row's writing
-            LANE (that is the Source select above, whose values are
-            manual/document/agent/reversal): it is whether a PERSON typed these
-            figures or Clara interpreted them, which is the question a reviewer
-            asks about a posting they did not make. */}
+            the table already answered. Their names are deliberately NOT "Origin"
+            and "Source": this table already has a "Source" select (the row's
+            writing LANE — manual/document/agent/reversal), and a second control
+            with the same visible name is both ambiguous to a reader and
+            ambiguous to `getByLabel` — measured, on the existing journals walk,
+            which failed with "strict mode violation: getByLabel('Source')
+            resolved to 2 elements". "Recorded by" asks whether a PERSON typed
+            these figures or Clara interpreted them; "Source document" asks
+            whether there is evidence behind the entry at all. */}
         <FilterField id="je-filter-basis" label={tm("filters.origin")}>
           <NativeSelect id="je-filter-basis" value={filters.basis} onChange={(e) => update({ basis: e.target.value })}>
             <option value={ANY}>{tm("filters.originAny")}</option>
