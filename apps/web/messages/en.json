@@ -3979,5 +3979,64 @@
       "loading": "Reading the question…",
       "unavailable": "This question could not be read. Open the Work to see it."
     }
+  },
+  "Activity": {
+    "heading": "Activity",
+    "subheading": "An attributable record of what happened across every client — documents, journal entries, closes, reports and agent acts — linked to the Work, object and source behind each one.",
+    "filterClient": "Client",
+    "filterClientAll": "All clients",
+    "filterSince": "Since",
+    "filterUntil": "Until",
+    "filterClear": "Clear filters",
+    "filterKinds": "Filter by kind",
+    "kindLabels": {
+      "documents": "Documents",
+      "journal": "Journal",
+      "close": "Close",
+      "report": "Reports",
+      "agent": "Agent",
+      "work": "Work"
+    },
+    "statusLabels": {
+      "approved": "Approved",
+      "reversed": "Reversed",
+      "superseded": "Superseded",
+      "withdrawn": "Withdrawn"
+    },
+    "workPurposes": {
+      "journal_entry": "Recorded a journal entry"
+    },
+    "columnActor": "Actor",
+    "columnClient": "Client",
+    "onBehalfOf": "on behalf of",
+    "via": "via",
+    "clientUnnamed": "Unnamed client",
+    "noClient": "No client",
+    "linksToOriginal": "Links to the original entry it replaced.",
+    "linksToReplacement": "Links to the entry that replaced it.",
+    "viewWork": "View Work",
+    "viewObject": "View in books",
+    "loading": "Loading activity…",
+    "refreshing": "Refreshing activity…",
+    "rowCount": "{count, plural, =0 {No activity shown} =1 {1 event shown} other {# events shown}}",
+    "partialProjection": "This page may not show every matching event yet — load more to see the rest.",
+    "duplicatesDropped": "{count, plural, =1 {1 event you already saw was skipped} other {# events you already saw were skipped}} while loading more.",
+    "loadMore": "Load more",
+    "loadingMore": "Loading more…",
+    "emptyFirstUse": "No activity has been recorded for this firm yet.",
+    "emptyFiltered": "No activity matches these filters.",
+    "staleNote": "The activity feed could not refresh. Showing the last activity it read.",
+    "retry": "Retry",
+    "deniedTitle": "Activity is not available",
+    "deniedGeneric": "Your access changed, so the activity feed was cleared rather than showing what it last read.",
+    "unlabeledEvent": "Unlabelled event",
+    "eventHeading": "Event detail",
+    "eventLoading": "Loading the event…",
+    "eventSubheading": "What happened, who acted, and what it is linked to.",
+    "eventTime": "Occurred",
+    "eventDescription": "What happened",
+    "eventStatus": "Status",
+    "eventOriginal": "Original",
+    "eventReplacement": "Replacement"
   }
 }

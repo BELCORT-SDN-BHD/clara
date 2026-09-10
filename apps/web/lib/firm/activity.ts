@@ -301,6 +301,18 @@ export function activityUrlStateEqual(a: ActivityUrlState, b: ActivityUrlState):
 
 export { EMPTY_STATE as EMPTY_ACTIVITY_URL_STATE };
 
+/** For an `agent_receipt` row, the `receipt_kind` half of its `id` (see this file's header —
+ *  the id IS `receipt_kind:receipt_id`, so this is a client-side re-derivation of the SAME
+ *  encoding the door already documents, not a second contract). `null` for any other source, or
+ *  for a malformed id with no colon at all. Used to render the SAME receipt-kind label
+ *  `lib/firm/receipt-kinds.ts` already pins, without the door repeating the kind as a second
+ *  field on every list row. */
+export function agentReceiptKindOf(row: Pick<ActivityRow, "source" | "id">): string | null {
+  if (row.source !== "agent_receipt") return null;
+  const i = row.id.indexOf(":");
+  return i > 0 ? row.id.slice(0, i) : null;
+}
+
 // ── link builders ─────────────────────────────────────────────────────────────
 
 /** `/clients/:clientId/work/:workId` — the one object link that names a specific row today. */

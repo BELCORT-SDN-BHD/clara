@@ -209,14 +209,21 @@ describe("focus-ring contract — 裁-1's 70% is declared once and obeyed everyw
     // Toggle Group's own ring lives on `components/ui/toggle.tsx`, which this
     // list already carries) — so the count moves by exactly five, not seven.
     // Fifteen plus five is TWENTY.
+    //
+    // #632 (the Activity feed, journey B5), +1 NET. `components/firm/activity/activity-row.tsx`
+    // added a raw `<button>` — a row's own observable-sentence trigger that opens the event
+    // detail Sheet — the SAME shape as this list's other raw-button carriers
+    // (journal-entries-table's sortable header, drafts-queue-panel's disclosure), so it takes
+    // the shadcn ring for the same reason they do. Twenty plus one is TWENTY-ONE.
     const hits = ringCarrierHits();
     const files = [...new Set(hits.map((h) => h.file))].sort();
-    assert.equal(hits.length, 20, JSON.stringify(hits, null, 2));
+    assert.equal(hits.length, 21, JSON.stringify(hits, null, 2));
     assert.deepEqual(files, [
       "components/clara/ClaraThreadView.tsx",
       "components/common/dialog-refusal.tsx",
       "components/common/hub-cards.tsx",
       "components/common/native-select.tsx",
+      "components/firm/activity/activity-row.tsx",
       "components/firm/compliance-watch-affordance.tsx",
       "components/journals/drafts-queue-panel.tsx",
       "components/journals/journal-entries-table.tsx",

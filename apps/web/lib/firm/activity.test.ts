@@ -7,6 +7,7 @@ import assert from "node:assert/strict";
 
 import {
   ACTIVITY_KINDS,
+  agentReceiptKindOf,
   activityDocumentsHref,
   activityJournalsHref,
   activityReportsHref,
@@ -251,6 +252,19 @@ test("activityUrlStateEqual: filters equal, order-sensitive on kinds, event comp
   assert.equal(activityUrlStateEqual(a, c), false, "kind order differs");
   const d = parseActivityUrlState(params("client=c2&kinds=journal,close&event=event:e1"));
   assert.equal(activityUrlStateEqual(a, d), false, "client differs");
+});
+
+// ── agentReceiptKindOf: the client-side re-derivation of the same id encoding ──
+
+test("agentReceiptKindOf: the receipt_kind half of an agent_receipt row's id", () => {
+  assert.equal(agentReceiptKindOf({ source: "agent_receipt", id: "freeform_read:42" }), "freeform_read");
+  assert.equal(agentReceiptKindOf({ source: "agent_receipt", id: "agent_filing:11111111-1111-1111-1111-111111111111" }), "agent_filing");
+});
+
+test("agentReceiptKindOf: null for any other source, or a malformed id with no colon", () => {
+  assert.equal(agentReceiptKindOf({ source: "event", id: "e1" }), null);
+  assert.equal(agentReceiptKindOf({ source: "operation_receipt", id: "r1" }), null);
+  assert.equal(agentReceiptKindOf({ source: "agent_receipt", id: "no-colon" }), null);
 });
 
 // ── link builders ────────────────────────────────────────────────────────────

@@ -241,6 +241,7 @@ lib/firm-admin/chat-sharing.test.ts
 lib/firm-admin/compliance.test.ts
 lib/firm-admin/settings.test.ts
 lib/firm-admin/vendor-bindings.test.ts
+lib/firm/activity.test.ts
 lib/firm/capabilities.test.ts
 lib/firm/home-facts.test.ts
 lib/firm/navigation-label.test.ts
@@ -352,4 +353,3 @@ tests/streamAuthority.test.mjs
 tests/streamParser.test.mjs
 tests/streamReattach.test.mjs
 tests/token-contrast.test.ts
-lib/firm/activity.test.ts
