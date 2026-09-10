@@ -923,6 +923,13 @@ const WORK_JOURNAL_0178_CLOCK_NAMES = [
   "settle_work_run",
 ];
 
+// #626 [0179] — personal preferences. ONE body reads a bare timestamptz clock and it stamps an
+// INSTANT: `save_my_preferences` sets `user_preferences.updated_at = now()` on every accepted
+// PATCH. `get_my_preferences` reads no clock, and the table's own `updated_at default now()` is a
+// COLUMN DEFAULT (not prosrc), exactly as the checkout-gate note above records for
+// `claim_confirmation_attempt`. No date is ever derived from it.
+const USER_PREFERENCES_0179_CLOCK_NAMES = ["save_my_preferences"];
+
 /** The arm (D) roster for the database under test, sorted as the catalog sorts it. */
 export async function s5BareTokenRoster(query) {
   const applied = async (pat) => (await query(
@@ -1021,6 +1028,7 @@ export async function s5BareTokenRoster(query) {
   if (await appliedStem("accounting_work_journal_successor$")) {
     names.push(...WORK_JOURNAL_0178_CLOCK_NAMES);
   }
+  if (await appliedStem("user_preferences$")) names.push(...USER_PREFERENCES_0179_CLOCK_NAMES);
   return names.sort();
 }
 
