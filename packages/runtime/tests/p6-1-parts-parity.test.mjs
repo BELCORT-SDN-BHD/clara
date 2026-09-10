@@ -62,11 +62,14 @@ const POST_P6_READER_KINDS = [
   "work_accepted",
   "work_status",
   "work_result",
+  // #629 — claraWork_v2 declares ONE more kind beside the Work run that writes it: the shared
+  // question a parked Work is waiting on. Same shorthand as the three above.
+  "work_question",
 ];
 
 /** The kinds a reader fixture MUST carry for the gate to admit it — the emittable set, which is
  *  the declared set minus the produced-elsewhere allowlist. */
-const EMITTABLE_KINDS = ["freeform_result", "work_accepted", "work_status", "work_result"];
+const EMITTABLE_KINDS = ["freeform_result", "work_accepted", "work_status", "work_result", "work_question"];
 
 function readerFixture(kinds) {
   return `export type ClaraPart =\n${kinds.map((kind) => `  | { type: "${kind}" }`).join("\n")};\n`;
@@ -93,7 +96,7 @@ function checkSynthetic(runtimeSources, options = {}) {
   });
 }
 
-test("p6-1.parts-parity: v16 plus the live 26-kind reader admits the freeform_result emitter", () => {
+test("p6-1.parts-parity: v16 plus the live reader admits the freeform_result emitter", () => {
   const result = checkPartsParity({ declarerSource: DECLARER, readerSource: READER, runtimeSources: RUNTIME_SOURCES });
   assert.deepEqual(result.reader, POST_P6_READER_KINDS, "control: merged P6-2 carries the literal post-bump reader roster");
   assert.deepEqual(result.emittable, EMITTABLE_KINDS, "every declared kind with an object-literal construction site is emittable here");
@@ -133,12 +136,20 @@ test("p6-1.parts-parity: v16 plus the live 26-kind reader admits the freeform_re
     {
       kind: "work_result",
       classification: "emittable",
-      constructionSites: ["packages/runtime/workflows/claraWork.v1.impl.ts"],
+      constructionSites: [
+        "packages/runtime/workflows/claraWork.v1.impl.ts",
+        "packages/runtime/workflows/claraWork.v2.impl.ts",
+      ],
+    },
+    {
+      kind: "work_question",
+      classification: "emittable",
+      constructionSites: ["packages/runtime/workflows/claraWork.v2.impl.ts"],
     },
   ], "the literal allowlist census pins kind + file while leaving line numbers diagnostic-only");
 });
 
-test("p6-1.parts-parity: v16 plus a 26-kind reader fixture is admitted", () => {
+test("p6-1.parts-parity: v16 plus the live reader fixture is admitted", () => {
   const result = checkPartsParity({
     declarerSource: DECLARER,
     readerSource: readerFixture(POST_P6_READER_KINDS),

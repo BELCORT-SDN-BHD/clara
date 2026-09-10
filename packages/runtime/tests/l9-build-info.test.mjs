@@ -153,7 +153,12 @@ test("CB-035: the route is mounted under /api and takes the same authenticate ga
   // #623 / C88.8 — the serving bundle identity rides the SAME import-here-pass-in shape, and for
   // the same reason: lib/build-info.mjs is plain-Node .mjs and cannot import a TS module.
   assert.match(src, /import \{ claraWorkBundleIdentity \} from "\.\.\/workflows\/claraWork\.v1\.bundle\.js"/, "the route imports the bundle identity");
-  assert.match(src, /bundles: \[claraWorkBundleIdentity\(\)\]/, "...and passes it into the payload, so one read answers which bundle this image serves");
+  // #629 — BOTH bundles are served, PINNED FIRST. v1 is still exported and still the body any Work
+  // parked on a v1 hook resumes into at cutover; v2 is what `workflows.claraWork` dispatches. A
+  // payload naming only one of them would leave a rollback preflight unable to answer, from one
+  // read, which bodies this image actually carries — the question this route exists for.
+  assert.match(src, /import \{ claraWorkBundleIdentityV2 \} from "\.\.\/workflows\/claraWork\.v2\.bundle\.js"/, "the route imports the v2 bundle identity too");
+  assert.match(src, /bundles: \[claraWorkBundleIdentityV2\(\), claraWorkBundleIdentity\(\)\]/, "...and passes BOTH into the payload, pinned first, so one read answers which bundles this image serves");
 });
 
 test("CB-035: index.ts mounts the router, and the three ROOT endpoints stay ungated and build-free", () => {
