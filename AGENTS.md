@@ -45,20 +45,17 @@ instructions. Source code and deployment evidence establish what is actually imp
 9. 当用户主动说" Idea session " , 这个时期讨论出来的东西可以 as "idea" and "need-triages" lable publish in GitHub 
    Issues.
 
-## CI/CD
-
 ## At session start (clock in)
 1. Read PROGRESS.md for current state
-2. Read DECISIONS.md for important decisions
-3. Check to confirm repo is in consistent state
-4. Grill user to whether to continue from PROGRESS.md "Next Steps" section.
+2. Check to confirm repo is in consistent state
+3. Grill user to whether to continue from PROGRESS.md "Next Steps" section.
 
 ## Before session end (clock out)
 1. Update PROGRESS.md
 2. Check to confirm consistent state
 3. Commit all completed work
 4. IF FOUND OUT edit that didint done by you , grill user to comfirm it as commit and merge to main.
-5. Refresh graphify of this project, ensure all local and github main is sync also.
+5. Refresh codebase-memory-mcp of this project, ensure all local and github main is sync also.
 
 ## Agent skills
 
