@@ -376,8 +376,14 @@ test("…and the chat lane settles on that transcript, not on a derived outcome 
 // the part union by four kinds and rebinds the prompt/impl/usage triple, adds NO tool, and
 // still reaches v10's byte-untouched body through the same import chain. Only the pin assertion
 // moves, and v15 joins the policy (c) roster.
-test("registry.ts pins chatTurn_v17 and still exports superseded v16/v15/v14/v13/v12/v11/v10/v9/v8 (policy (c))", () => {
-  assert.equal(registryMod.workflows.chatTurn.name, "chatTurn_v17");
+// ...and v17 -> v18 at #623 (the first persistent Clara successor's chat half). v18 is a THIN
+// extension too: it adds ONE tool (`start_journal_work`), widens the part union by ONE kind
+// (`work_accepted`), joins that kind to the C-19 terminal set, and still reaches v10's
+// byte-untouched body through the same import chain. Only the pin assertion moves, and v17 joins
+// the policy (c) roster.
+test("registry.ts pins chatTurn_v18 and still exports superseded v17/v16/v15/v14/v13/v12/v11/v10/v9/v8 (policy (c))", () => {
+  assert.equal(registryMod.workflows.chatTurn.name, "chatTurn_v18");
+  assert.equal(typeof registryMod.chatTurn_v17, "function");
   assert.equal(typeof registryMod.chatTurn_v16, "function");
   assert.equal(typeof registryMod.chatTurn_v15, "function");
   assert.equal(typeof registryMod.chatTurn_v14, "function");

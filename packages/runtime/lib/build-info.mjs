@@ -83,7 +83,14 @@ export async function readMigrationFrontier(deps = {}) {
  * The full build-info payload. Everything except the frontier is process-local and cannot fail.
  * `names` is REQUIRED from the caller (see the registry note at the top of this file); the
  * route passes `workflowNames` and a cell pins that it does.
- * @param {{env?:NodeJS.ProcessEnv, names?:ReadonlyArray<string>, withRuntime?:Function, timeoutMs?:number}} [deps]
+ * #623 / C88.8 — `bundles` is passed in for the SAME reason `names` is: the bundle module is
+ * TypeScript and lives beside the frozen workflow closure, so a plain-Node `.mjs` cannot import
+ * it without a build. `src/buildInfoRoutes.ts` can, and a cell pins that it does. Each entry is
+ * `{id, digest, instructions, skills, tools, budgets}` — identity and budgets, never the
+ * instruction prose (a build-info payload is a version report, not a prompt dump).
+ *
+ * @param {{env?:NodeJS.ProcessEnv, names?:ReadonlyArray<string>, bundles?:ReadonlyArray<object>,
+ *          withRuntime?:Function, timeoutMs?:number}} [deps]
  */
 export async function buildInfo(deps = {}) {
   const env = deps.env ?? process.env;
@@ -103,6 +110,9 @@ export async function buildInfo(deps = {}) {
     // route existed, kept here so one read answers "which workflows, from which commit". Copied
     // rather than aliased so a caller cannot mutate the registry's array through the response.
     workflows: [...(deps.names ?? [])],
+    // The frozen agent bundles this image serves, by id + digest. Copied rather than aliased so a
+    // caller cannot mutate a frozen module's object through the response.
+    bundles: (deps.bundles ?? []).map((b) => JSON.parse(JSON.stringify(b))),
     frontier,
     frontier_reason,
     ts: new Date().toISOString(),

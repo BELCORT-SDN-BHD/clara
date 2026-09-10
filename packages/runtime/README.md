@@ -261,6 +261,33 @@ Before rollback, inventory non-terminal `workflow.workflow_runs` and verify the 
 contains every referenced workflow name/version. A rollback to an image missing a parked version
 strands that run.
 
+### #623 — the accounting-Work lane (`claraWork_v1`, `chatTurn_v18`)
+
+This image adds one workflow CLASS (`claraWork`) and repoints `chatTurn:` to v18. Both halves call
+database verbs that arrive with migration **0178**, so the order is owed in one direction and is
+not optional: **apply 0178 before releasing this image.** Against a pre-0178 database the failure
+is contained rather than corrupting — the chat tool returns a typed refusal and a Work run settles
+`failed` with a named invariant, posting nothing — but Clara refuses the thing it just offered to
+do. The reverse order is free: 0178 against a pre-#623 image adds tables and verbs nothing calls.
+
+Rollback is NOT symmetric here, and the runbook should say so plainly. A rollback to a
+`claraWork`-less image leaves already-admitted `clara.accounting_work` rows with queued
+`accounting_work` tasks that no export can run: the lane PARKS rather than losing work, and those
+Works resume when a `claraWork`-carrying image returns. Inventory them the same way parked runs are
+inventoried, and expect `clara.agent_tasks` rows of kind `accounting_work` in `queued`/`running`.
+
+Build identity gained a `bundles` field: `GET /api/build-info` serves `{id, digest, instructions,
+skills, tools, budgets}` for `clara-work/v1`, and the process logs the same digest once at world
+start (`[clara-runtime] bundle clara-work/v1 digest=<sha256>`). Those two and the `bundle.digest`
+column on every `clara.accounting_work` row are the three places the serving bundle can be read;
+a deploy check should see the same hex in all three.
+
+The frozen manifest ceremony is still OWED for this change: the thirteen new entries
+(`chatTurn.v18.*`, `claraWork.v1.*`) are registered with hashes but carry no `deployed: true`.
+Run `node scripts/check-frozen-workflows.mjs --lock-deployed` and commit the manifest **after**
+the image is live, exactly as every prior closure did — locking before deploy would freeze a body
+that no parked run can yet exist for.
+
 [Fly build and deploy behavior](https://www.fly.io/docs/blueprints/working-with-docker/)
 
 ## Evaluation

@@ -53,11 +53,15 @@ after(async () => {
 // H-17 has now moved the autoDraft pin, v9 -> v10 (the exact native-unique constraint map), with
 // chatTurn untouched — so v9's own assertion becomes a policy (c) assertion in its turn, exactly
 // as v8's did before it. The PAIR is still this cell's subject.
-test("registry.ts pins autoDraft_v10/chatTurn_v17 and still exports superseded v9/v8/v16/v15/v14/v13/v12 (policy (c))", () => {
+// #623 has now moved the chatTurn pin again, v17 -> v18 (the first persistent Clara successor's
+// chat half: one added tool, one added wire kind), with autoDraft untouched — so v17 joins the
+// same policy (c) ladder every predecessor joined. EXTENDED, never re-cut.
+test("registry.ts pins autoDraft_v10/chatTurn_v18 and still exports superseded v9/v8/v17/v16/v15/v14/v13/v12 (policy (c))", () => {
   assert.equal(registryMod.workflows.autoDraft.name, "autoDraft_v10");
   assert.equal(typeof registryMod.autoDraft_v9, "function");
-  assert.equal(registryMod.workflows.chatTurn.name, "chatTurn_v17");
+  assert.equal(registryMod.workflows.chatTurn.name, "chatTurn_v18");
   assert.equal(typeof registryMod.autoDraft_v8, "function");
+  assert.equal(typeof registryMod.chatTurn_v17, "function");
   assert.equal(typeof registryMod.chatTurn_v16, "function");
   assert.equal(typeof registryMod.chatTurn_v15, "function");
   assert.equal(typeof registryMod.chatTurn_v14, "function");

@@ -500,7 +500,7 @@ test("f-a6.pr2.registry: v15 stays exported and IS its own function; chatTurn: n
   assert.equal(typeof registry.chatTurn_v14, "function");
   assert.equal(registry.chatTurn_v14, v14Module.chatTurn_v14, "no parked run is stranded by the repoint");
   assert.equal(registry.chatTurn_v15, v15Module.chatTurn_v15, "the registry's v15 export IS chatTurn.v15.ts's own function");
-  assert.equal(registry.workflows.chatTurn.name, "chatTurn_v17", "FS-7 repointed chatTurn past P6-1's v16 and this file's own v15 pin");
+  assert.equal(registry.workflows.chatTurn.name, "chatTurn_v18", "#623 repointed chatTurn past FS-7's v17, P6-1's v16 and this file's own v15 pin");
   assert.notEqual(registry.workflows.chatTurn, registry.chatTurn_v14);
   assert.notEqual(registry.workflows.chatTurn, v15Module.chatTurn_v15, "...and no longer at v15 either");
 });

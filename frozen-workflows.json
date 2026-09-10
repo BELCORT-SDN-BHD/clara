@@ -655,6 +655,30 @@
       "note": "",
       "deployed": true
     },
+    "packages/runtime/workflows/chatTurn.v18.impl.ts": {
+      "sha256": "cf3a585e49e7af0e4203972515c49b9f08caa5b364cb0ab75e4b0edf1d1c5e0b",
+      "note": "#623 — part of the chatTurn_v18 closure (the first persistent Clara successor, chat half); registry.ts points chatTurn: here. v17 stays frozen and exported (policy (c)). DEPLOY ORDER: migration 0178 must be live BEFORE this image admits any Work. NOT deploy-locked yet — the ceremony stamps `deployed: true` after the image is live."
+    },
+    "packages/runtime/workflows/chatTurn.v18.parts.ts": {
+      "sha256": "73a7a98f7671ab8ffb982f2acdd720855741e33c08db9f1fa3f03bf7dd74cfc3",
+      "note": "#623 — part of the chatTurn_v18 closure (the first persistent Clara successor, chat half); registry.ts points chatTurn: here. v17 stays frozen and exported (policy (c)). DEPLOY ORDER: migration 0178 must be live BEFORE this image admits any Work. NOT deploy-locked yet — the ceremony stamps `deployed: true` after the image is live."
+    },
+    "packages/runtime/workflows/chatTurn.v18.prompt.ts": {
+      "sha256": "348abe18d8576bb7be3b8fae7835438e6027c6b5e5c46c4c2ee69352f0db691a",
+      "note": "#623 — part of the chatTurn_v18 closure (the first persistent Clara successor, chat half); registry.ts points chatTurn: here. v17 stays frozen and exported (policy (c)). DEPLOY ORDER: migration 0178 must be live BEFORE this image admits any Work. NOT deploy-locked yet — the ceremony stamps `deployed: true` after the image is live."
+    },
+    "packages/runtime/workflows/chatTurn.v18.tools.ts": {
+      "sha256": "685e6c115166b0c98037c13cd9b4cb380c7ef1fa5067b27adb26d99350882147",
+      "note": "#623 — part of the chatTurn_v18 closure (the first persistent Clara successor, chat half); registry.ts points chatTurn: here. v17 stays frozen and exported (policy (c)). DEPLOY ORDER: migration 0178 must be live BEFORE this image admits any Work. NOT deploy-locked yet — the ceremony stamps `deployed: true` after the image is live."
+    },
+    "packages/runtime/workflows/chatTurn.v18.ts": {
+      "sha256": "490dfae450353f737b5955c04efdaed680565d0c992b0e05eb118cb3f7f786a5",
+      "note": "#623 — part of the chatTurn_v18 closure (the first persistent Clara successor, chat half); registry.ts points chatTurn: here. v17 stays frozen and exported (policy (c)). DEPLOY ORDER: migration 0178 must be live BEFORE this image admits any Work. NOT deploy-locked yet — the ceremony stamps `deployed: true` after the image is live."
+    },
+    "packages/runtime/workflows/chatTurn.v18.usage.ts": {
+      "sha256": "585dd97b11a0d0cfebcae223636a400480070b7e1834bdd9e1ed0b966f55f94d",
+      "note": "#623 — part of the chatTurn_v18 closure (the first persistent Clara successor, chat half); registry.ts points chatTurn: here. v17 stays frozen and exported (policy (c)). DEPLOY ORDER: migration 0178 must be live BEFORE this image admits any Work. NOT deploy-locked yet — the ceremony stamps `deployed: true` after the image is live."
+    },
     "packages/runtime/workflows/chatTurn.v2.errors.ts": {
       "sha256": "b88e5124a5df2e9000f9a64ea408dae6c05cf9ee47d4a528c426af3a7391e4b5",
       "note": "",
@@ -894,6 +918,34 @@
       "sha256": "eeb04623c32183df6903cfbe21359055bbfac248839229219a3b85c887e25ee3",
       "note": "",
       "deployed": true
+    },
+    "packages/runtime/workflows/claraWork.v1.bundle.ts": {
+      "sha256": "76afb33615381af3284f3fdbabc31f808376350bae99c71258b51ed619684d6a",
+      "note": "#623 — part of the claraWork_v1 closure (the first persistent Clara successor, the Work run); registry.ts adds claraWork: here as a NEW class, never a repoint. DEPLOY ORDER: migration 0178 must be live BEFORE any accounting_work task can be minted. NOT deploy-locked yet — the ceremony stamps `deployed: true` after the image is live."
+    },
+    "packages/runtime/workflows/claraWork.v1.errors.ts": {
+      "sha256": "f1dcceee234e94a0b728d4695562979b1ebe8bc52a8aa26dc3e4cd96e1b22130",
+      "note": "#623 — part of the claraWork_v1 closure (the first persistent Clara successor, the Work run); registry.ts adds claraWork: here as a NEW class, never a repoint. DEPLOY ORDER: migration 0178 must be live BEFORE any accounting_work task can be minted. NOT deploy-locked yet — the ceremony stamps `deployed: true` after the image is live."
+    },
+    "packages/runtime/workflows/claraWork.v1.impl.ts": {
+      "sha256": "79f34b5beb4275d1443be133fdf322f9ac21219dbbd8f7802fb0ac732d4d614c",
+      "note": "#623 — part of the claraWork_v1 closure (the first persistent Clara successor, the Work run); registry.ts adds claraWork: here as a NEW class, never a repoint. DEPLOY ORDER: migration 0178 must be live BEFORE any accounting_work task can be minted. NOT deploy-locked yet — the ceremony stamps `deployed: true` after the image is live."
+    },
+    "packages/runtime/workflows/claraWork.v1.parts.ts": {
+      "sha256": "dadbe0668b602e5f28913220aa84bf95c9b23aa8bf9dcc5971e7cf1b2ee9f901",
+      "note": "#623 — part of the claraWork_v1 closure (the first persistent Clara successor, the Work run); registry.ts adds claraWork: here as a NEW class, never a repoint. DEPLOY ORDER: migration 0178 must be live BEFORE any accounting_work task can be minted. NOT deploy-locked yet — the ceremony stamps `deployed: true` after the image is live."
+    },
+    "packages/runtime/workflows/claraWork.v1.prompt.ts": {
+      "sha256": "b089dc377013aa248cb3ef416b905ca4a4017144e35799acb4c18194ec298ef8",
+      "note": "#623 — part of the claraWork_v1 closure (the first persistent Clara successor, the Work run); registry.ts adds claraWork: here as a NEW class, never a repoint. DEPLOY ORDER: migration 0178 must be live BEFORE any accounting_work task can be minted. NOT deploy-locked yet — the ceremony stamps `deployed: true` after the image is live."
+    },
+    "packages/runtime/workflows/claraWork.v1.tools.ts": {
+      "sha256": "6dab173fa81e6af0b18beea2ca79a1df7d3cea948373ecd2b8ed5d22dab14b36",
+      "note": "#623 — part of the claraWork_v1 closure (the first persistent Clara successor, the Work run); registry.ts adds claraWork: here as a NEW class, never a repoint. DEPLOY ORDER: migration 0178 must be live BEFORE any accounting_work task can be minted. NOT deploy-locked yet — the ceremony stamps `deployed: true` after the image is live."
+    },
+    "packages/runtime/workflows/claraWork.v1.ts": {
+      "sha256": "1838c9d18168823efdb6163c25e52e4e5e473e1199df166718b49366a9118c1b",
+      "note": "#623 — part of the claraWork_v1 closure (the first persistent Clara successor, the Work run); registry.ts adds claraWork: here as a NEW class, never a repoint. DEPLOY ORDER: migration 0178 must be live BEFORE any accounting_work task can be minted. NOT deploy-locked yet — the ceremony stamps `deployed: true` after the image is live."
     },
     "packages/runtime/workflows/clientOnboarding.v1.ts": {
       "sha256": "e0c03498363833b0585904af1f41b77677efb2c81cad107e979623e7d95baa39",

@@ -149,7 +149,11 @@ test("CB-035: the route is mounted under /api and takes the same authenticate ga
   // lib/build-info.mjs cannot import the TS registry, so the ROUTE must pass the names in.
   // Without this the payload would report `workflows: []`, which reads as "none registered".
   assert.match(src, /import \{ workflowNames \} from "\.\.\/workflows\/registry\.js"/, "the route imports the registry");
-  assert.match(src, /buildInfo\(\{ names: workflowNames \}\)/, "and passes its names into the payload");
+  assert.match(src, /buildInfo\(\{ names: workflowNames/, "and passes its names into the payload");
+  // #623 / C88.8 — the serving bundle identity rides the SAME import-here-pass-in shape, and for
+  // the same reason: lib/build-info.mjs is plain-Node .mjs and cannot import a TS module.
+  assert.match(src, /import \{ claraWorkBundleIdentity \} from "\.\.\/workflows\/claraWork\.v1\.bundle\.js"/, "the route imports the bundle identity");
+  assert.match(src, /bundles: \[claraWorkBundleIdentity\(\)\]/, "...and passes it into the payload, so one read answers which bundle this image serves");
 });
 
 test("CB-035: index.ts mounts the router, and the three ROOT endpoints stay ungated and build-free", () => {

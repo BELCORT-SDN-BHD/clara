@@ -22,6 +22,19 @@ import { describeParitySite, siteExemptionLedger } from "./parts-parity-sites.mj
 
 const REPO_ROOT = fileURLToPath(new URL("../../..", import.meta.url));
 const DEFAULT_DECLARER = "packages/runtime/workflows/chatTurn.v16.parts.ts";
+// #623 — THE DECLARER IS A SET, NOT A FILE. It was one file while exactly one closure had ever
+// widened the wire. Two closures now do: chatTurn_v18 declares `work_accepted` (it is minted by a
+// chat turn) and claraWork_v1 declares `work_status` / `work_result` (they are written by a Work
+// run's own stream). The alternative — re-declaring v16's four kinds inside a newer file so the
+// gate could keep reading one — is exactly the duplicate-discriminant shape `declaredPartShapes`
+// refuses on sight, and it would put four copies of a shape beside a producer that does not mint
+// them. A discriminant declared twice ANYWHERE in the set is a hard throw, so "exactly one
+// declaration per kind" stays mechanically true rather than becoming a convention.
+const DEFAULT_DECLARERS = [
+  DEFAULT_DECLARER,
+  "packages/runtime/workflows/chatTurn.v18.parts.ts",
+  "packages/runtime/workflows/claraWork.v1.parts.ts",
+];
 const DEFAULT_READER = "apps/web/lib/parts/types.ts";
 const DEFAULT_RUNTIME_ROOT = "packages/runtime";
 
@@ -354,8 +367,33 @@ function constructionSiteCensus(runtimeSources, declared, siteExemptions) {
   return sites;
 }
 
+/** Read the declarer modules this repo carries. */
+export function readDeclarerSources(paths = DEFAULT_DECLARERS) {
+  return paths.map((path) => ({ path, source: readFileSync(resolve(REPO_ROOT, path), "utf8") }));
+}
+
+/** Merge every declarer's shapes into ONE kind -> fields map, refusing a discriminant declared in
+ *  two files (the same law `declaredPartShapes` enforces inside one file). */
+export function declaredPartShapesAcross(declarers) {
+  const merged = new Map();
+  const owner = new Map();
+  for (const { path, source } of declarers) {
+    for (const [kind, fields] of declaredPartShapes(source, path)) {
+      if (merged.has(kind)) {
+        throw new Error(
+          `parts-parity: discriminant ${kind} is declared in both ${owner.get(kind)} and ${path} — exactly one declaration per kind`,
+        );
+      }
+      merged.set(kind, fields);
+      owner.set(kind, path);
+    }
+  }
+  return merged;
+}
+
 export function checkPartsParity({
   declarerSource,
+  declarerSources,
   readerSource,
   runtimeSources = readRuntimeSources(),
   declarerPath = DEFAULT_DECLARER,
@@ -363,8 +401,22 @@ export function checkPartsParity({
   allowlistedKinds = PRODUCED_ELSEWHERE_PART_KINDS,
   siteExemptions = DEFAULT_SITE_EXEMPTIONS,
 }) {
-  const declared = [...declaredPartShapes(declarerSource).keys()];
-  if (declared.length === 0) throw new Error(`${declarerPath}: no exported object-type part declarations found`);
+  // `declarerSource` stays a supported SHORTHAND for "this one declarer's text, plus whatever
+  // else the repo declares" — every pre-#623 caller passes the v16 declarer that way, and a cell
+  // that mutates it is exercising the PARSER, not the roster. `declarerSources` names the whole
+  // set explicitly, which is what the CLI does.
+  const declarers =
+    declarerSources
+    ?? (declarerSource === undefined
+      ? readDeclarerSources()
+      : [
+          { path: declarerPath, source: declarerSource },
+          ...readDeclarerSources(DEFAULT_DECLARERS.filter((candidate) => candidate !== declarerPath)),
+        ]);
+  const declared = [...declaredPartShapesAcross(declarers).keys()];
+  if (declared.length === 0) {
+    throw new Error(`${declarers.map((d) => d.path).join(", ")}: no exported object-type part declarations found`);
+  }
   const reader = readerPartKinds(readerSource, readerPath);
   const allowlisted = [...allowlistedKinds];
   if (new Set(allowlisted).size !== allowlisted.length) throw new Error("produced-elsewhere allowlist must be duplicate-free");
@@ -413,11 +465,10 @@ export function formatCensus(census) {
 }
 
 function main() {
-  const declarerPath = resolve(REPO_ROOT, DEFAULT_DECLARER);
   const readerPath = resolve(REPO_ROOT, DEFAULT_READER);
   try {
     const result = checkPartsParity({
-      declarerSource: readFileSync(declarerPath, "utf8"),
+      declarerSources: readDeclarerSources(),
       readerSource: readFileSync(readerPath, "utf8"),
     });
     const census = formatCensus(result.census);

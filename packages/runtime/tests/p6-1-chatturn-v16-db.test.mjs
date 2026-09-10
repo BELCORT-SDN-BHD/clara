@@ -70,8 +70,8 @@ const skip = READY ? false : "P6-1: the Q8 hydrate surfaces (0103/0126/0131/0137
 
 const AGENT_ROLES = ["clara_agent_ro", "clara_wake_interactive", "clara_wake_proactive", "clara_wake_bank", "clara_wake_filing", "clara_freeform_ro", "clara_runtime"];
 
-test("p6-1.db.registry: v17 is the current pin and preserves v16's promotion behaviour", () => {
-  assert.equal(currentChatName, "chatTurn_v17", "FS-7 succeeded P6-1 without widening the wire");
+test("p6-1.db.registry: v18 is the current pin and preserves v16's promotion behaviour", () => {
+  assert.equal(currentChatName, "chatTurn_v18", "#623 succeeded FS-7 without widening the wire");
   // A bare text part exercises no promotion arm at all (both sides would agree on ANY promoter,
   // including a broken one), so this discriminates nothing — MATERIAL-3, PR #485 fix round. Use
   // the same three-shape content fs7-v17-chatturn.test.mjs proves v17-vs-v16 identical over: a

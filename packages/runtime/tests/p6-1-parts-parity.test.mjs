@@ -53,7 +53,20 @@ const POST_P6_READER_KINDS = [
   "firm_question",
   "close_proposal",
   "freeform_result",
+  // #623 — the declarer is now a SET (check-parts-parity.mjs's own note says why): chatTurn_v18
+  // declares `work_accepted` beside the chat tool that mints it, and claraWork_v1 declares
+  // `work_status` / `work_result` beside the Work run that writes them. Every cell below that
+  // passes `declarerSource` alone still gets the whole set, because the shorthand means "this
+  // declarer's TEXT, plus whatever else the repo declares" — so these three are part of the live
+  // roster whichever way a cell names the declarers.
+  "work_accepted",
+  "work_status",
+  "work_result",
 ];
+
+/** The kinds a reader fixture MUST carry for the gate to admit it — the emittable set, which is
+ *  the declared set minus the produced-elsewhere allowlist. */
+const EMITTABLE_KINDS = ["freeform_result", "work_accepted", "work_status", "work_result"];
 
 function readerFixture(kinds) {
   return `export type ClaraPart =\n${kinds.map((kind) => `  | { type: "${kind}" }`).join("\n")};\n`;
@@ -83,7 +96,7 @@ function checkSynthetic(runtimeSources, options = {}) {
 test("p6-1.parts-parity: v16 plus the live 26-kind reader admits the freeform_result emitter", () => {
   const result = checkPartsParity({ declarerSource: DECLARER, readerSource: READER, runtimeSources: RUNTIME_SOURCES });
   assert.deepEqual(result.reader, POST_P6_READER_KINDS, "control: merged P6-2 carries the literal post-bump reader roster");
-  assert.deepEqual(result.emittable, ["freeform_result"], "only the kind with an object-literal construction site is emittable here");
+  assert.deepEqual(result.emittable, EMITTABLE_KINDS, "every declared kind with an object-literal construction site is emittable here");
   assert.equal(result.ok, true, "the commit-parity gate admits the merged reader at parity with the emitter");
   assert.deepEqual(result.missing, []);
   assert.match(
@@ -103,6 +116,24 @@ test("p6-1.parts-parity: v16 plus the live 26-kind reader admits the freeform_re
       kind: "freeform_result",
       classification: "emittable",
       constructionSites: ["packages/runtime/workflows/chatTurn.v16.prompt.ts"],
+    },
+    {
+      kind: "work_accepted",
+      classification: "emittable",
+      constructionSites: [
+        "packages/runtime/workflows/chatTurn.v18.prompt.ts",
+        "packages/runtime/workflows/chatTurn.v18.tools.ts",
+      ],
+    },
+    {
+      kind: "work_status",
+      classification: "emittable",
+      constructionSites: ["packages/runtime/workflows/claraWork.v1.impl.ts"],
+    },
+    {
+      kind: "work_result",
+      classification: "emittable",
+      constructionSites: ["packages/runtime/workflows/claraWork.v1.impl.ts"],
     },
   ], "the literal allowlist census pins kind + file while leaving line numbers diagnostic-only");
 });
@@ -126,7 +157,7 @@ test("p6-1.parts-parity: the real source reader sees an .mjs construction site",
   try {
     const result = checkPartsParity({
       declarerSource: DECLARER,
-      readerSource: readerFixture(["freeform_result"]),
+      readerSource: readerFixture(EMITTABLE_KINDS),
       runtimeSources: readRuntimeSources(),
     });
     assert.deepEqual(result.allowlistedWithConstructionSites, ["agent_receipt"]);
@@ -140,7 +171,7 @@ test("p6-1.parts-parity: an identifier discriminant THROWS instead of disappeari
   assert.throws(
     () => checkPartsParity({
       declarerSource: DECLARER,
-      readerSource: readerFixture(["freeform_result"]),
+      readerSource: readerFixture(EMITTABLE_KINDS),
       runtimeSources: [{
         path: "packages/runtime/workflows/identifier-discriminant.mutant.ts",
         source: 'const kind = "agent_receipt"; export const emitted = { type: kind };\n',
@@ -155,7 +186,7 @@ test("p6-1.parts-parity: a computed type key THROWS instead of disappearing from
   assert.throws(
     () => checkPartsParity({
       declarerSource: DECLARER,
-      readerSource: readerFixture(["freeform_result"]),
+      readerSource: readerFixture(EMITTABLE_KINDS),
       runtimeSources: [{
         path: "packages/runtime/workflows/computed-discriminant.mutant.ts",
         source: 'const key = "type"; export const emitted = { [key]: "agent_receipt" };\n',
@@ -170,7 +201,7 @@ test("p6-1.parts-parity: an unresolved computed key THROWS instead of being assu
   assert.throws(
     () => checkPartsParity({
       declarerSource: DECLARER,
-      readerSource: readerFixture(["freeform_result"]),
+      readerSource: readerFixture(EMITTABLE_KINDS),
       runtimeSources: [{
         path: "packages/runtime/workflows/unknown-computed-key.mutant.ts",
         source: 'export const emitted = { [runtimeKey]: "agent_receipt" };\n',
@@ -185,7 +216,7 @@ test("p6-1.parts-parity: template and spread discriminants also THROW", () => {
   assert.throws(
     () => checkPartsParity({
       declarerSource: DECLARER,
-      readerSource: readerFixture(["freeform_result"]),
+      readerSource: readerFixture(EMITTABLE_KINDS),
       runtimeSources: [{
         path: "packages/runtime/workflows/template-discriminant.mutant.ts",
         source: 'const suffix = "receipt"; export const emitted = { type: `agent_${suffix}` };\n',
@@ -197,7 +228,7 @@ test("p6-1.parts-parity: template and spread discriminants also THROW", () => {
   assert.throws(
     () => checkPartsParity({
       declarerSource: DECLARER,
-      readerSource: readerFixture(["freeform_result"]),
+      readerSource: readerFixture(EMITTABLE_KINDS),
       runtimeSources: [{
         path: "packages/runtime/workflows/spread-discriminant.mutant.ts",
         source: 'const overrides = {}; export const emitted = { type: "agent_receipt", ...overrides };\n',
@@ -405,7 +436,7 @@ test("p6-1.parts-parity: an allowlisted produced-elsewhere kind that gains a con
   ];
   const result = checkPartsParity({
     declarerSource: DECLARER,
-    readerSource: readerFixture(["freeform_result"]),
+    readerSource: readerFixture(EMITTABLE_KINDS),
     runtimeSources: mutatedSources,
   });
   assert.equal(result.ok, false, "the exemption loses validity as soon as runtime can construct the kind");
@@ -416,7 +447,7 @@ test("p6-1.parts-parity: a declared kind with no construction site and no allowl
   const mutatedDeclarer = `${DECLARER}\nexport type UnexplainedPart = { type: "unexplained_part"; id: string };\n`;
   const result = checkPartsParity({
     declarerSource: mutatedDeclarer,
-    readerSource: readerFixture(["freeform_result", "unexplained_part"]),
+    readerSource: readerFixture([...EMITTABLE_KINDS, "unexplained_part"]),
     runtimeSources: RUNTIME_SOURCES,
   });
   assert.equal(result.ok, false, "every declared-only kind needs an explicit produced-elsewhere explanation");
@@ -426,7 +457,7 @@ test("p6-1.parts-parity: a declared kind with no construction site and no allowl
 test("p6-1.parts-parity: declared-only allowlisted kinds do not turn emitter parity into declarer parity", () => {
   const result = checkPartsParity({
     declarerSource: DECLARER,
-    readerSource: readerFixture(["freeform_result"]),
+    readerSource: readerFixture(EMITTABLE_KINDS),
     runtimeSources: RUNTIME_SOURCES,
   });
   assert.equal(result.ok, true, "the reader may omit kinds declared here but produced elsewhere");

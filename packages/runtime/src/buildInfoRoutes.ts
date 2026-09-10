@@ -30,6 +30,10 @@ import { buildInfo } from "../lib/build-info.mjs";
 // plain-Node .mjs cannot resolve it without a build, which would make that module untestable.
 // This file is TS and compiles with it, so the names are passed in.
 import { workflowNames } from "../workflows/registry.js";
+// #623 / C88.8 — the serving bundle identity rides the SAME import-here-pass-in shape as the
+// registry names above, and for the same reason: lib/build-info.mjs is plain-Node .mjs and cannot
+// resolve a TypeScript module without a build.
+import { claraWorkBundleIdentity } from "../workflows/claraWork.v1.bundle.js";
 
 export function buildInfoRoutes(): express.Router {
   const router = express.Router();
@@ -49,7 +53,7 @@ export function buildInfoRoutes(): express.Router {
     }
     // Past the gate, nothing here can throw: buildInfo swallows the frontier read's failures
     // into `frontier: null` + a reason by construction.
-    res.json(await buildInfo({ names: workflowNames }));
+    res.json(await buildInfo({ names: workflowNames, bundles: [claraWorkBundleIdentity()] }));
   });
 
   return router;

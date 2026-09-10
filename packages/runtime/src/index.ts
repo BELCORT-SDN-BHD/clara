@@ -3,6 +3,7 @@ import express from "express";
 import { workflowNames } from "../workflows/registry.js";
 import { checkReadiness } from "../lib/health.mjs";
 import { chatRoutes } from "./chatRoutes.js";
+import { workRoutes } from "./workRoutes.js";
 import { intakeRoutes } from "./intakeRoutes.js";
 import { streamRoutes } from "./streamRoute.js";
 import { documentRoutes } from "./documentRoutes.js";
@@ -99,6 +100,11 @@ app.use(buildInfoRoutes());
 
 // Chat: sessions, messages, turns (admission + enqueue), and the SSE stream.
 app.use(chatRoutes());
+// Accounting Work (#623): admit a documentless journal intent (from the Accounting composer or
+// from a Clara turn's own tool), retry a refused/failed Work as a NEW run under the SAME logical
+// identity, and read one Work back after a lost response. Mounted AFTER express.json (it takes an
+// ordinary JSON body) and beside chat because it shares chat's trusted-ingress helpers.
+app.use(workRoutes());
 app.use(streamRoutes());
 // Durable interview family (Wave B, B-II): firm-bootstrap + client onboarding as durable
 // runs. Enqueue/answer/cancel/state; governance verbs stay on the dashboard (PostgREST).

@@ -54,15 +54,19 @@ const FAKE_CTX = {
 // in this file's bytes, comments included.
 const FROZEN_MARKER = "@" + "frozen";
 
-test("fs7.v17.registry: chatTurn is pinned to v17 while v16 remains its own exported body", () => {
-  assert.equal(registry.workflows.chatTurn.name, "chatTurn_v17");
-  assert.equal(registry.workflows.chatTurn, v17Module.chatTurn_v17, "the pin IS v17's module function");
+// #623 REPOINTED chatTurn v17 -> v18. This cell's subject does not change — it asks whether the
+// pin moved and whether the SUPERSEDED body is still reachable by identity — so v17 takes v16's
+// place in it and v16 keeps its own line, the same ladder every prior bump extended.
+test("fs7.v17.registry: chatTurn is pinned to v18 while v17 and v16 remain their own exported bodies", () => {
+  assert.equal(registry.workflows.chatTurn.name, "chatTurn_v18");
+  assert.equal(registry.chatTurn_v17, v17Module.chatTurn_v17, "policy (c): v17 remains reachable by identity");
   assert.equal(registry.chatTurn_v16, v16Module.chatTurn_v16, "policy (c): v16 remains reachable by identity");
-  assert.notEqual(registry.workflows.chatTurn, v16Module.chatTurn_v16, "the live pin actually moved");
+  assert.notEqual(registry.workflows.chatTurn, v17Module.chatTurn_v17, "the live pin actually moved");
+  assert.notEqual(registry.workflows.chatTurn, v16Module.chatTurn_v16);
 });
 
-test("fs7.v17.registry.policy-c: every chatTurn body v1..v17 remains reachable by export", async () => {
-  for (let n = 1; n <= 17; n += 1) {
+test("fs7.v17.registry.policy-c: every chatTurn body v1..v18 remains reachable by export", async () => {
+  for (let n = 1; n <= 18; n += 1) {
     const name = `chatTurn_v${n}`;
     const mod = await import(`../workflows/chatTurn.v${n}.ts`);
     assert.equal(typeof registry[name], "function", `registry exports ${name}`);

@@ -490,7 +490,7 @@ test("f-a2.pr2.chat-usage-writes-through-F-A9-agent-door with the attended ident
 test("f-a2.pr2.registry: chatTurn and autoDraft are repointed, and v8/v9/v12/v13/v14/v15 stay EXPORTED so no parked run is stranded", () => {
   assert.equal(registry.workflows.autoDraft.name, "autoDraft_v10",
     "H-17 moved the pin v9 -> v10; the claim is 'the pin is newest', so v9 joins the policy-(c) loop below");
-  assert.equal(registry.workflows.chatTurn.name, "chatTurn_v17", "FS-7 repointed chatTurn past P6-1's v16 and the earlier v15/v14/v13 pins");
+  assert.equal(registry.workflows.chatTurn.name, "chatTurn_v18", "#623 repointed chatTurn past FS-7's v17, P6-1's v16 and the earlier v15/v14/v13 pins");
   assert.equal(typeof registry.autoDraft_v8, "function", "policy (c): never delete an export with in-flight runs");
   assert.equal(typeof registry.chatTurn_v15, "function", "policy (c): the version this cell pinned before P6-1 stays exported once superseded");
   assert.equal(typeof registry.chatTurn_v14, "function", "policy (c): the version this cell used to pin stays exported once superseded");
@@ -498,7 +498,8 @@ test("f-a2.pr2.registry: chatTurn and autoDraft are repointed, and v8/v9/v12/v13
   assert.equal(typeof registry.chatTurn_v12, "function");
   assert.equal(registry.autoDraft_v10, registry.workflows.autoDraft, "the newly pinned body stays directly addressable by workflow id");
   assert.equal(typeof registry.chatTurn_v16, "function", "policy (c): P6-1's body remains exported after FS-7");
-  assert.equal(registry.chatTurn_v17, registry.workflows.chatTurn);
+  assert.equal(typeof registry.chatTurn_v17, "function", "policy (c): FS-7's body remains exported after #623");
+  assert.equal(registry.chatTurn_v18, registry.workflows.chatTurn);
   for (let n = 1; n <= 9; n += 1) assert.equal(typeof registry[`autoDraft_v${n}`], "function");
   for (let n = 1; n <= 11; n += 1) assert.equal(typeof registry[`chatTurn_v${n}`], "function");
 });

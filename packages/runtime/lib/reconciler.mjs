@@ -30,6 +30,7 @@ import { reconcileLintBelt } from "./reconciler-lint.mjs";
 import { reconcileFaRuns } from "./reconciler-fa.mjs";
 import { reconcileAdjustmentRuns } from "./reconciler-adjustments.mjs";
 import { reconcileWakeEngineTasks } from "./reconciler-wake.mjs";
+import { reconcileAccountingWorkTasks, settleWorkTerminal } from "./reconciler-work.mjs";
 
 const GRACE_REENQUEUE = process.env.CLARA_RECONCILE_GRACE || "15 seconds";
 const ORPHAN_WINDOW = process.env.CLARA_RECONCILE_ORPHAN_WINDOW || "30 minutes";
@@ -251,6 +252,21 @@ export async function reconcileTasks(client, deps) {
           "select clara._settle_wake_task(p_task => $1, p_outcome => $2, p_error_code => $3)",
           [t.id, "cancelled", null],
         );
+      } else if (t.kind === "accounting_work") {
+        // #623 — the THIRD kind this dispatch has to know about, and for exactly the reason the
+        // two above it exist: settle_chat_turn raises CLR10 for any kind<>'chat_turn', so falling
+        // through to the generic branch would raise on every cancelled Work and re-throw forever.
+        // clara.settle_work_run settles BOTH halves — the task and its clara.accounting_work row —
+        // in one idempotent call, and it is the only verb that does. A cancel does NOT reverse a
+        // posted entry (ARCHITECTURE §6: "取消不冲销已入账结果"): a Work that already committed its
+        // entry is terminal before it can reach cancel_requested, and this branch only ever
+        // settles one that had not.
+        await settleWorkTerminal(client, t.id, "cancelled", null, {
+          code: "cancelled",
+          reason: "cancelled",
+          message: "This Work was cancelled before an entry was recorded. Nothing was posted.",
+          recoverable: true,
+        });
       } else {
         await settleTaskTerminal(client, t.id, "cancelled", null);
       }
@@ -551,6 +567,7 @@ export { reconcileAdjustmentRuns };
 // crash-recovery for a wake-engine-owned task is not a cadence concern the way the SST/lint/FA/
 // adjustment belts are.
 export { reconcileWakeEngineTasks };
+export { reconcileAccountingWorkTasks, settleWorkTerminal, terminalForWork } from "./reconciler-work.mjs";
 
 // ---------------------------------------------------------------------------
 // One full sweep (called under the leader lock by the supervisor).
@@ -673,11 +690,14 @@ export async function runReconcilerSweep(client, deps) {
   const fa = deps.faRuns ? await belt("fa runs", () => reconcileFaRuns(client, { log }), { faOk: false }) : {};
   const adj = deps.adjRuns ? await belt("adjustment runs", () => reconcileAdjustmentRuns(client, { log }), { adjOk: false }) : {}; // Wave D-b belt (0045)
   const wake = await belt("wake engine reconcile", () => reconcileWakeEngineTasks(client, deps)); // Gate G1 belt — unconditional, like autodraft reconcile
+  // #623 belt — unconditional, like the autodraft and wake reconciles. Pre-0178 the kind CHECK
+  // excludes 'accounting_work', so every query inside returns empty and this costs one round trip.
+  const work = await belt("accounting work reconcile", () => reconcileAccountingWorkTasks(client, deps));
   const prune = deps.prune ? await belt("trace prune", () => pruneTraces(client, {}), { pruned: 0 }) : { pruned: 0 };
   // A FAILED BELT CONTRIBUTES NO COUNTERS, deliberately: a zeroed fallback would claim "nothing
   // to settle" where the truth is "we do not know", and it would let a caller's `"key" in swept`
   // assertion pass for a belt that never ran. `beltErrors` names them positively instead — the
   // autodraft edge's own law (a failure that is COUNTED stays visible; a failure that is only
   // logged is one grep away from invisible).
-  return { heartbeatOk: true, beltErrors, ...expiry, ...tasks, ...autodraftTasks, ...documentTasks, ...documentIntakes, ...intakeRecovery, ...spool, ...sst, ...lint, ...fa, ...adj, ...wake, ...prune };
+  return { heartbeatOk: true, beltErrors, ...expiry, ...tasks, ...autodraftTasks, ...documentTasks, ...documentIntakes, ...intakeRecovery, ...spool, ...sst, ...lint, ...fa, ...adj, ...wake, ...work, ...prune };
 }

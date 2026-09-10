@@ -30,6 +30,10 @@ import { startWikiProjectionLoop } from "../lib/wiki-projection-ops.mjs";
 import { heartbeat } from "../lib/reconciler.mjs";
 import { start, getRun } from "workflow/api";
 import { workflows, workflowsByName } from "../workflows/registry.js";
+// #623 (C88.8): the serving bundle's own banner. Imported from the FROZEN bundle module so the
+// digest this process logs is, by construction, the digest its runs stamp onto every Work row and
+// every operation receipt — never a second copy that could disagree.
+import { CLARA_WORK_BUNDLE_V1_BANNER } from "../workflows/claraWork.v1.bundle.js";
 import { makeDocumentServices, recoverPendingDocumentIntakes } from "../lib/intake.mjs";
 import { makeInvoiceFactsServices } from "../workflows/invoiceFacts.v1.services.mjs";
 import { makeStatementFactsServices } from "../workflows/statementFacts.v1.services.mjs";
@@ -149,6 +153,12 @@ export default definePlugin(() => {
       const { getWorld } = await import("workflow/runtime");
       await getWorld().start?.();
       console.log(`[clara-runtime] durable world started pid=${process.pid}`);
+      // C88.8 — "Emit and assert the exact serving bundle/workflow registry version at startup
+      // and in evidence logs." ONE line, at the moment the world is dispatchable, naming the
+      // sha256 of the claraWork_v1 bundle this image actually carries. The same constant is
+      // served by /api/build-info and written onto every Work row by claim_work_run, so a log
+      // line, an HTTP read and a database row can be compared without trusting any of them.
+      console.log(CLARA_WORK_BUNDLE_V1_BANNER);
     } catch (err) {
       console.error("[clara-runtime] durable world FAILED to start:", err instanceof Error ? err.message : String(err));
       process.exit(1); // crash-only: world-start failure is fatal (S4-D10)
@@ -213,6 +223,14 @@ export default definePlugin(() => {
         // The reconciler re-enqueues an admitted-but-unstarted autodraft task (Wave A); the
         // reference resolves through the registry `workflows` object (freeze-lint provenance).
         enqueueAutoDraft: (taskId: string) => start(workflows.autoDraft, [{ taskId }]),
+        // #623: the accounting-Work lane. UNLIKE every dep above it, this one is not only a
+        // recovery belt — it is the ONLY dispatcher a CHAT-originated Work has. chatTurn_v18's
+        // `start_journal_work` runs inside a frozen file, and a frozen file may not import
+        // workflows/registry.ts (that would hash-lock a file which must move on every repoint),
+        // so freeze-lint's enqueue-provenance rule leaves that admission path with no legal
+        // `start()` call site. Without this dep a chat-admitted Work would sit `queued` forever.
+        // Resolved through the registry `workflows` object, like every sibling.
+        enqueueClaraWork: (taskId: string) => start(workflows.claraWork, [{ taskId }]),
         recoverDocumentIntakes: () =>
           recoverPendingDocumentIntakes({
             withRuntime,

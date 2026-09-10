@@ -24,6 +24,8 @@ import { chatTurn_v14 } from "./chatTurn.v14.js";
 import { chatTurn_v15 } from "./chatTurn.v15.js";
 import { chatTurn_v16 } from "./chatTurn.v16.js";
 import { chatTurn_v17 } from "./chatTurn.v17.js";
+import { chatTurn_v18 } from "./chatTurn.v18.js";
+import { claraWork_v1 } from "./claraWork.v1.js";
 import { documentIngest_v1 } from "./documentIngest.v1.js";
 import { documentIngest_v2 } from "./documentIngest.v2.js";
 import { invoiceFacts_v1 } from "./invoiceFacts.v1.js";
@@ -85,7 +87,37 @@ export const workflows = {
   // all three report wrappers for an interactive credential, so no migration, ceremony, reader
   // change or new secret rides with this image. v16 stays frozen, built and exported for parked
   // runs and rollback policy (c).
-  chatTurn: chatTurn_v17,
+  //
+  // #623 (THE FIRST PERSISTENT CLARA SUCCESSOR): REPOINTED v17 -> v18. v18 adds exactly ONE tool
+  // (`start_journal_work`) and exactly ONE wire kind (`work_accepted`), and joins that kind to
+  // the C-19 book-act terminal set. Everything else is byte-carried from v17 by import.
+  //
+  // THE DEPLOY ORDER IS OWED IN ONE DIRECTION AND IT IS NOT OPTIONAL: MIGRATION 0178 MUST BE
+  // LIVE ON THE DATABASE BEFORE THIS IMAGE ADMITS ANY WORK. `start_journal_work` calls
+  // `clara.admit_journal_work`, and `claraWork_v1` below calls `clara.claim_work_run`,
+  // `clara.wake_record_journal_entry` and `clara.settle_work_run` — none of which exists before
+  // 0178. Against a pre-0178 database every one of those raises `undefined_function` (42883).
+  // The failure is CONTAINED (the chat tool returns a typed refusal; the Work run settles
+  // `failed` with a named invariant and posts nothing), so a wrong order corrupts nothing — it
+  // just makes Clara refuse the thing it offered to do. Deploy 0178 first. The REVERSE order is
+  // free: 0178 against a v17 image adds tables and verbs that nothing calls.
+  //
+  // THE READER PARITY HOLD APPLIES TOO, exactly as it did for v16: apps/web must declare
+  // `work_accepted` (and claraWork_v1's `work_status` / `work_result`) before this image can
+  // merge — the CI `build` job runs `check-parts-parity.mjs` and refuses while the reader trails
+  // the declarers. A rollback to v17 requires the standing parked-run preflight; it then stops
+  // minting the new card and stops admitting new Work, without changing the database. Work rows
+  // already admitted keep their queued tasks, and a v17 image carries no `claraWork` export to
+  // run them — so a rollback PARKS the lane rather than losing it, and that is the honest
+  // description to put in a runbook, not "rollback is free".
+  chatTurn: chatTurn_v18,
+  // #623 — A NEW CLASS, never a repoint. `accounting_work` tasks are dispatched here by
+  // src/workRoutes.ts's post-commit enqueue and by the reconciler's own `accounting_work`
+  // re-enqueue arm (lib/reconciler-work.mjs); both resolve the body through THIS object, which
+  // is what the freeze-lint enqueue-provenance check requires. Nothing mints an
+  // `accounting_work` task before 0178 widens the kind CHECK, so this key is inert against a
+  // pre-0178 database rather than dangerous.
+  claraWork: claraWork_v1,
   documentIngest: documentIngest_v2,
   invoiceFacts: invoiceFacts_v1,
   // F-A2 WINDOW B (the statement ACTIVATION): REPOINTED. PR-4 shipped statementFacts_v2 built,
@@ -644,6 +676,10 @@ export { chatTurn_v16 };
 // deploy dependency. v16 remains exported by policy (c); the pinned v17 body is exported too so
 // the rollback preflight can use the same uniform census for every version.
 export { chatTurn_v17 };
+// #623 repointed `chatTurn:` v17 -> v18. v17 remains exported by policy (c) — it is the rollback
+// target and the body any run parked at cutover resumes into — and the pinned v18 body is
+// exported too so the rollback preflight can use the same uniform census for every version.
+export { chatTurn_v18 };
 export { documentIngest_v1 };
 export { autoDraft_v1 };
 export { autoDraft_v2 };

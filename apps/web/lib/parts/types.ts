@@ -285,8 +285,56 @@ export type CloseProposalPart = {
  *  wrong. The card filters `id=eq.<read_id>` and never does arithmetic on it. */
 export type FreeformResultPart = { type: "freeform_result"; read_id: string };
 
-/** The canonical transcript wire union: 26 live members (9 base + 4 Wave-A +
- *  1 Wave-C-c + 2 Wave-D-a + 2 Wave-D-b + 4 chatTurn_v14 + 4 chatTurn_v16).
+/** ONE accounting Work, admitted from a conversation (#623). MINTED BY chatTurn_v18's
+ *  `start_journal_work` and declared by `packages/runtime/workflows/chatTurn.v18.parts.ts` —
+ *  the runtime is the declarer, this module is the reader.
+ *
+ *  HYDRATES `clara.accounting_work` by `id=eq.<work_id>` under the client scope. There is no
+ *  act door on this card: admission already happened, and everything a human can then do
+ *  (Retry, edit as a new draft) belongs to the Work detail page.
+ *
+ *  NOTHING THAT MOVES RIDES HERE — not `status`, not `result`, not `error`, not the basis. The
+ *  Work is queued when this card is minted and will not be queued for long; a card that
+ *  rendered a remembered status would be wrong within seconds of being right. */
+export type WorkAcceptedPart = {
+  type: "work_accepted";
+  work_id: string;
+  client_id: string;
+  purpose: "journal_entry";
+  logical_op_id: string;
+};
+
+/** ONE observable status of a running Work (#623). MINTED BY claraWork_v1's own stream and
+ *  declared by `packages/runtime/workflows/claraWork.v1.parts.ts`.
+ *
+ *  `status` IS CARRIED, unlike most identifier-only parts, and only because this kind exists to
+ *  make a LIVE run observable between durable reads. A card renders it as the last-heard status
+ *  and re-reads `clara.accounting_work` for authority.
+ *
+ *  `status` IS `string`, not a union of literals: the vocabulary lives in a CHECK on
+ *  `clara.accounting_work.status` that later purposes extend, and a literal union transcribed
+ *  today would make a status the wire already carries unrenderable the day the CHECK grows. */
+export type WorkStatusPart = { type: "work_status"; work_id: string; status: string };
+
+/** ONE completed Work's authoritative effect (#623): the posted journal entry and its operation
+ *  receipt. MINTED BY claraWork_v1 and declared by
+ *  `packages/runtime/workflows/claraWork.v1.parts.ts`.
+ *
+ *  HYDRATES `clara.journal_entries` / `clara.journal_lines` by `entry_id` and
+ *  `clara.operation_receipts` by `receipt_id`, both under the client scope. NOTHING FROM THE
+ *  ENTRY'S OWN CONTENT RIDES HERE — no amounts, no memo, no posting date. The amount is the one
+ *  field where a stale copy is a lie a human would act on. */
+export type WorkResultPart = {
+  type: "work_result";
+  work_id: string;
+  client_id: string;
+  entry_id: string;
+  receipt_id: string;
+};
+
+/** The canonical transcript wire union: 29 live members (9 base + 4 Wave-A +
+ *  1 Wave-C-c + 2 Wave-D-a + 2 Wave-D-b + 4 chatTurn_v14 + 4 chatTurn_v16 +
+ *  1 chatTurn_v18 + 2 claraWork_v1).
  *  Adding a member here without a matching ./catalog.ts entry fails `tsc` — see
  *  catalog.ts's AllCovered/NoExtra guard. */
 export type ClaraPart =
@@ -315,4 +363,7 @@ export type ClaraPart =
   | AgentReceiptPart
   | FirmQuestionPart
   | CloseProposalPart
-  | FreeformResultPart;
+  | FreeformResultPart
+  | WorkAcceptedPart
+  | WorkStatusPart
+  | WorkResultPart;
