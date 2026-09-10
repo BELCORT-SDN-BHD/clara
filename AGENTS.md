@@ -20,24 +20,42 @@ instructions. Source code and deployment evidence establish what is actually imp
 
 ## Working protocol
 
-1. Run `orchestrator-fable` for substantive work.
-2. Ground with `codebase-memory-mcp`: list projects, query the relevant
-   structure and check coverage. Read source for gaps, then the relevant document above.
-3. Use `grilling` to settle ambiguity that changes product scope or acceptance before a non-trivial
+1. Ground to the codebase with `codebase-memory-mcp`. Use it to query anything for implementation or clarify.
+2. Use `grilling` to settle ambiguity that changes product scope or acceptance before a non-trivial
    build. Look up repository facts directly; ask the owner about unresolved product decisions.
-4. Check current official documentation, through Context7 or the vendor, before changing a stack
+3. Check current official documentation, through Context7 or the vendor, before changing a stack
    integration. Installed versions and lockfiles describe this repository's dependencies.
+4. Verify the affected behaviour and update its existing source of truth in the same change.
+   Keep the current task's unresolved work actionable and distinguish local tests from hosted evidence.
 5. After Wayfinder or to-spec settles a product or technical decision, update the relevant PRD or
    Architecture section before to-tickets. Mark accepted technical targets separately from current
    implementation. Resolve contradictions explicitly; keep detailed acceptance in the delivery spec.
-6. Verify affected behaviour and update the relevant blueprint with implementation changes. Record
-   completion evidence and remaining work on GitHub; distinguish local checks from hosted evidence.
+6. Push back with real examples: When you push back or recommend, include one real practice close to the case — a 
+   company, product, or method you actually know (Linear, Shape Up, Figma), or better, one you can point to (a Mobbin 
+   screenshot, a documentation link). Never invent or embellish one: if you know no close example, say so and argue 
+   from the Founder's own product instead. An example you cannot point to is labeled as recalled, not presented as 
+   fact. 
+7. Claims need evidence: Any statement about the state of the world ("the design system covers this", "this rule is 
+   already enforced", "that was fixed") 
+   must be backed by a checkable source: a file path, a commit, a test or command run, or a link. A real-world 
+   anecdote is an argument (7.2), not evidence. 
+   If you cannot point to a source, say "unverified" instead of asserting. No evidence, no claim.
+8. Wayfinder or grillwithdocs session 的 map / specs 可以add "Milestone" in Github as a 版本控制, 版本控制型号可以在
+   wayfinder和agent 一起讨论.
+9. 当用户主动说" Idea session " , 这个时期讨论出来的东西可以 as "idea" and "need-triages" lable publish in GitHub 
+   Issues.
 
-## Session continuity
+## At session start (clock in)
+1. Read PROGRESS.md for current state
+2. Check to confirm repo is in consistent state
+3. Grill user to whether to continue from PROGRESS.md "Next Steps" section.
 
-Start with the minimal state file, then read the active GitHub spec/tickets and relevant blueprint.
-Before ending or compacting, replace that state with the current commit, actual verification results,
-unfinished work and the next concrete action. Keep it brief; GitHub owns the delivery history and backlog.
+## Before session end (clock out)
+1. Update PROGRESS.md
+2. Check to confirm consistent state
+3. Commit all completed work
+4. IF FOUND OUT edit that didint done by you , grill user to comfirm it as commit and merge to main.
+5. Refresh codebase-memory-mcp of this project, ensure all local and github main is sync also.
 
 ## Agent skills
 
