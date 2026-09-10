@@ -237,11 +237,14 @@ export function JournalEntriesTable({
             and "Source": this table already has a "Source" select (the row's
             writing LANE — manual/document/agent/reversal), and a second control
             with the same visible name is both ambiguous to a reader and
-            ambiguous to `getByLabel` — measured, on the existing journals walk,
-            which failed with "strict mode violation: getByLabel('Source')
-            resolved to 2 elements". "Recorded by" asks whether a PERSON typed
-            these figures or Clara interpreted them; "Source document" asks
-            whether there is evidence behind the entry at all. */}
+            ambiguous to `getByLabel` — measured TWICE on the existing journals
+            walk, which failed with "strict mode violation: getByLabel('Source')
+            resolved to 2 elements" first against a second literal "Source" and
+            then against "Source document", because that matcher is a SUBSTRING
+            match unless a caller asks for exact. "Recorded by" asks whether a
+            PERSON typed these figures or Clara interpreted them; "Evidence" —
+            the word the rest of this journey already uses — asks whether there
+            is a source document behind the entry at all. */}
         <FilterField id="je-filter-basis" label={tm("filters.origin")}>
           <NativeSelect id="je-filter-basis" value={filters.basis} onChange={(e) => update({ basis: e.target.value })}>
             <option value={ANY}>{tm("filters.originAny")}</option>

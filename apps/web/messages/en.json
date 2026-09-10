@@ -4059,18 +4059,11 @@
       "refused": "The system refused it, and here is exactly what it said."
     },
     "links": {
-      "origin": "Origin",
-      "originHuman": "{name}",
-      "originClara": "Clara",
-      "originUnknown": "—",
       "source": "Source",
       "noSource": "No document",
       "work": "Work",
       "openWork": "Open the Work",
       "receipt": "Receipt",
-      "copyReceipt": "Copy receipt id",
-      "copied": "Receipt id copied",
-      "purpose": "Purpose",
       "basisOrigin": "Basis",
       "basisUserDirect": "Typed by a person",
       "basisClaraInterpreted": "Interpreted by Clara",
@@ -4084,21 +4077,15 @@
       "sourceDocumentCoding": "Coded from the document"
     },
     "filters": {
-      "legend": "Filter entries",
       "origin": "Recorded by",
       "originAny": "Anyone",
       "originHuman": "Recorded by a person",
       "originClara": "Recorded by Clara",
-      "source": "Source document",
-      "sourceAny": "With or without one",
+      "source": "Evidence",
+      "sourceAny": "With or without evidence",
       "sourceWith": "Has a source document",
       "sourceWithout": "No source document",
-      "from": "Posted on or after",
-      "to": "Posted on or before",
       "memo": "Memo contains",
-      "clear": "Clear filters",
-      "summary": "{shown} of {total} entries",
-      "none": "No entries match these filters.",
       "highlighted": "Showing the entry you were sent to. Clear the filters to see the rest."
     }
   }
