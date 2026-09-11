@@ -378,10 +378,20 @@ test("a COMPLETED work offers NO retry — only a recoverable state may run agai
   }
 });
 
-test("AWAITING INPUT renders THE QUESTION ITSELF, with its context, above the link that can answer it", async () => {
-  // The defect this cell fences: the banner used to say only "this work asked a
-  // question", on a page that had already read the row the question is in. A
-  // human then had to leave to find out WHAT was asked.
+test("AWAITING INPUT has ONE owner for the question text, and the row read is its fallback", async () => {
+  // THE ORIGINAL DEFECT this cell fenced: the banner said only "this work asked a question", on a
+  // page that had already read the row the question is in, so a human had to leave to find out
+  // WHAT was asked.
+  //
+  // THE REVIEWED DEFECT IT NOW ALSO FENCES (#629): the fix above put the run's words in the
+  // BANNER, and the question form below it then rendered the SAME sentence from the shared record
+  // — one question, printed twice, read twice by a screen reader, and two places to disagree the
+  // moment it is re-asked. §5's one-owner rule applies to text as much as to announcements, so the
+  // banner now states the STATE and the thing that can be ANSWERED owns the question.
+  //
+  // The row read is not discarded: it rides into the panel as the fallback its door-unreachable
+  // arm renders. In this harness `clara.get_work_question` is unreachable (no session, no fetch),
+  // which is exactly that arm — so the run's own words are on screen, ONCE, from the fallback.
   const h = await renderComponent(
     App({
       load: async () =>
@@ -394,11 +404,11 @@ test("AWAITING INPUT renders THE QUESTION ITSELF, with its context, above the li
   try {
     await h.settle();
     const text = h.text();
-    assert.match(text, /Which bank account did the rent leave from\?/, "the run's own words, verbatim");
-    assert.match(text, /this client has two Maybank accounts/, "and the context it supplied with them");
-    // The generic sentence is REPLACED, not printed beside the real question.
-    assert.ok(!/asked a question and is parked/.test(text));
-    // Answering is another surface's job, so the route to it stays.
+    const asked = text.match(/Which bank account did the rent leave from\?/g) ?? [];
+    assert.equal(asked.length, 1, "the question is on the page EXACTLY once");
+    assert.match(text, /this client has two Maybank accounts/, "with the context the run supplied");
+    assert.match(text, /asked a question and is parked/, "the banner states the STATE it is in");
+    // The whole inbox is still one click away for somebody who wants it.
     assert.ok(hrefs(h.container).includes("/work?view=needs-you"));
   } finally {
     await h.unmount();

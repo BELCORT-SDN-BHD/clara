@@ -71,10 +71,24 @@ export function WorkQuestionPanel({
   const { data, loading, err } = useHydratedPart(sessionTokenAccessor, load);
 
   if (loading) {
+    // THE QUESTION IS ALREADY KNOWN; only its typed fields are not. The calling page read the
+    // interruption row before this door was called, so printing the run's own words NOW rather than
+    // after a round trip is strictly better — and it keeps ONE owner for that text either way, which
+    // is the whole point of the caller having handed it down instead of rendering it itself.
     return (
-      <div className="flex flex-col gap-2" aria-hidden="true">
-        <Skeleton className="h-5 w-3/4" />
-        <Skeleton className="h-9 w-full max-w-sm" />
+      <div className="flex flex-col gap-2">
+        {fallbackQuestion?.question ? (
+          <p className="text-sm font-medium text-foreground" data-testid="work-question-fallback-text">
+            {fallbackQuestion.question}
+          </p>
+        ) : null}
+        {fallbackQuestion?.context ? (
+          <p className="text-xs text-secondary-ink">{fallbackQuestion.context}</p>
+        ) : null}
+        <div className="flex flex-col gap-2" aria-hidden="true">
+          <Skeleton className="h-5 w-3/4" />
+          <Skeleton className="h-9 w-full max-w-sm" />
+        </div>
       </div>
     );
   }
