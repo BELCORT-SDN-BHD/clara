@@ -374,6 +374,13 @@ export type CancelWorkResult =
   | ({ kind: "answered" } & WorkCancelAnswer)
   /** 409 with the DB's own `status` — rendered verbatim beside the refusal. */
   | { kind: "conflict"; reason: string | null; status: string | null }
+  /**
+   * 409 `{error:'transient'}` — PostgreSQL broke a deadlock or a serialization failure and the
+   * STATEMENT NEVER RAN. It is not a conflict with the world: the Work is in exactly the state it
+   * was, and pressing the same button again is the whole remedy. Kept apart from `conflict`
+   * because that arm sends a person to read a row for an explanation that is not in it.
+   */
+  | { kind: "transient" }
   | { kind: "denied" }
   | { kind: "not_found" }
   | { kind: "invalid"; reason: string | null }
@@ -436,6 +443,11 @@ export async function cancelWork(
   }
   if (res.status === 401 || res.status === 403) return { kind: "denied" };
   if (res.status === 404) return { kind: "not_found" };
+  // THE TRANSIENT IS READ BEFORE THE CONFLICT, because it arrives on the same status code and
+  // means the opposite thing: `workRoutes.ts` answers `409 {error:'transient'}` for a 40P01/40001
+  // the database broke, and the statement never ran. Collapsing it into `conflict` told a preparer
+  // "the database refused the request in the state it found" and sent them to read an unchanged row.
+  if (res.status === 409 && str(body.error) === "transient") return { kind: "transient" };
   if (res.status === 409) return { kind: "conflict", reason: str(body.error), status: str(body.status) };
   if (res.status === 400) return { kind: "invalid", reason: str(body.reason) ?? str(body.error) };
   return {
@@ -458,6 +470,8 @@ export type TakeOverWorkResult =
   | ({ kind: "accepted" } & WorkTakeOver)
   /** 409 — the Work is not available to take over (still authorised, or its run is live). */
   | { kind: "not_takeable"; status: string | null }
+  /** 409 `{error:'transient'}` — see `CancelWorkResult`'s own arm: nothing happened, try again. */
+  | { kind: "transient" }
   /** 400 — the basis was INTERPRETED and the colleague has not confirmed the one they read.
    *  `basisDigest` is what the resubmit must carry back. */
   | { kind: "confirm_basis"; basisDigest: string | null; basisOrigin: string | null }
@@ -512,6 +526,7 @@ export async function takeOverWork(
   }
   if (res.status === 401 || res.status === 403) return { kind: "denied" };
   if (res.status === 404) return { kind: "not_found" };
+  if (res.status === 409 && str(body.error) === "transient") return { kind: "transient" };
   if (res.status === 409) return { kind: "not_takeable", status: str(body.status) };
   if (res.status === 400) {
     if (str(body.error) === "basis_confirmation_required") {

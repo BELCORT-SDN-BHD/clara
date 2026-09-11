@@ -158,6 +158,14 @@ export function WorkAcceptedCard({ part }: { part: WorkAcceptedPart }) {
   // …and the ANSWER lives on the card rather than inside the dialog, for the reason work-detail's
   // own copy of this state records: the trigger unmounts with the status change that produced it.
   const [cancelState, setCancelState] = useState<CancelWorkResult | null>(null);
+  // #630 (review) — A DECISION IN PROGRESS IS NOT TORN DOWN BY A POLL. The three-second re-read
+  // above is what makes this card converge past `stopping`; it also means `cancellable` can go
+  // false while a bookkeeper is reading the confirmation — a colleague cancelling from the Work
+  // detail page, or the run settling on its own. Before this, the open modal unmounted with no
+  // dismissal, focus was lost, and the `lost`/`unavailable` retry arm (which deliberately keeps the
+  // dialog and its op key) was destroyed the same way. While the modal is open it stays mounted
+  // whatever the status says; the DOOR remains the authority on what the confirm does.
+  const [decisionOpen, setDecisionOpen] = useState(false);
 
   return (
     <PartSummaryCard
@@ -172,12 +180,13 @@ export function WorkAcceptedCard({ part }: { part: WorkAcceptedPart }) {
       link={addressable ? { href: workDetailHref(part.client_id, part.work_id), label: t("link") } : null}
     >
       {parked ? <WorkQuestionPanel workId={part.work_id} announce="none" /> : null}
-      {cancellable ? (
+      {cancellable || decisionOpen ? (
         <CancelWorkDialog
           workId={part.work_id}
           clientId={part.client_id}
           onCancelled={reload}
           onAnswer={setCancelState}
+          onOpenChange={setDecisionOpen}
           // #630 (review) — WHERE FOCUS GOES WHEN THIS TRIGGER UNMOUNTS. An accepted cancel moves
           // the Work out of a cancellable status and takes the trigger with it, so Base UI's own
           // focus return lands on a node that no longer exists and the reader is dropped on

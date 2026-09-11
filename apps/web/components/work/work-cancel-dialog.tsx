@@ -110,6 +110,7 @@ export function CancelWorkDialog({
   clientId,
   onCancelled,
   onAnswer,
+  onOpenChange,
   returnFocusTo,
   cancel = cancelWork,
   session = sessionTokenAccessor,
@@ -134,6 +135,16 @@ export function CancelWorkDialog({
    * place on the page. The id names a focusable landmark (the Work's heading carries `tabIndex=-1`
    * for the same reason the page focuses it on arrival); absent, nothing is moved.
    */
+  /**
+   * #630 (review) — SO THE CALLER CAN KEEP THIS MOUNTED WHILE A PERSON IS INSIDE THE DECISION.
+   * Both surfaces that offer this control gate it on the Work being in a cancellable status, and
+   * both re-read that status every three seconds — so a colleague cancelling from the other surface
+   * (or the run simply settling) made `cancellable` false and destroyed an open modal with no
+   * dismissal, taking the focus trap and the decision's op key with it. The caller ORs this flag
+   * into its own gate; the door is still the authority on what the confirm actually does, and
+   * answers `already_terminal` when the Work has moved on.
+   */
+  onOpenChange?: (open: boolean) => void;
   returnFocusTo?: string;
   cancel?: typeof cancelWork;
   session?: SessionTokenAccessor;
@@ -154,8 +165,10 @@ export function CancelWorkDialog({
     onAnswer?.(answer);
     setBusy(false);
     // AN OUTCOME NOBODY OBSERVED KEEPS THE DIALOG OPEN and keeps the key: the human's next act is
-    // to try the same decision again, not to start a different one.
-    if (answer.kind !== "lost" && answer.kind !== "unavailable") setOpen(false);
+    // to try the same decision again, not to start a different one. A TRANSIENT joins them for the
+    // same reason and a stronger one — the statement never ran, so the retry IS this decision, and
+    // `clara._reserve_op` recognises it because the op key has not been renewed.
+    if (answer.kind !== "lost" && answer.kind !== "unavailable" && answer.kind !== "transient") setOpen(false);
     // …and when the answer moves the Work OUT of a cancellable status, this trigger is about to
     // unmount. Hand focus to the named landmark on the next tick, AFTER the close has run its own
     // focus return — otherwise the return wins and lands on a node that no longer exists.
@@ -177,6 +190,7 @@ export function CancelWorkDialog({
         open={open}
         onOpenChange={(next) => {
           setResult(null);
+          onOpenChange?.(next);
           dialog.onOpenChange(next);
         }}
       >
@@ -190,6 +204,12 @@ export function CancelWorkDialog({
           </DialogHeader>
           {result !== null && (result.kind === "lost" || result.kind === "unavailable") ? (
             <UnobservedBanner kind={result.kind} noun="cancel" />
+          ) : null}
+          {/* THE RETRY AFFORDANCE IS THE BUTTON ALREADY BELOW IT. A transient means the statement
+              never ran, so there is nothing to read on the Work's row and nothing to decide again —
+              only to press once more, under the same op key this still-open dialog is holding. */}
+          {result !== null && result.kind === "transient" ? (
+            <StateBanner tone="warning" title={t("transientTitle")}>{t("transientBody")}</StateBanner>
           ) : null}
           <DialogFooter>
             {/* THE SAFE ACTION HOLDS INITIAL FOCUS. `autoFocus` on the close, never on the
@@ -289,6 +309,18 @@ export function CancelOutcome({
   return null;
 }
 
+/** The answers that leave the takeover dialog OPEN — the human is still inside the decision, and
+ *  the same op key is still the one their retry must carry. */
+function keepsModalOpen(result: TakeOverWorkResult): boolean {
+  return result.kind === "lost" || result.kind === "unavailable" || result.kind === "transient"
+    || result.kind === "invalid" || result.kind === "confirm_basis";
+}
+
+/** …of those, the two the PAGE can still say something useful about once the modal is gone. */
+function isUnobserved(result: TakeOverWorkResult): boolean {
+  return result.kind === "lost" || result.kind === "unavailable";
+}
+
 export function TakeOverWorkAction({
   workId,
   basisOrigin,
@@ -297,6 +329,7 @@ export function TakeOverWorkAction({
   accountNames,
   onTakenOver,
   onAnswer,
+  returnFocusTo,
   takeOver = takeOverWork,
   session = sessionTokenAccessor,
 }: {
@@ -320,6 +353,15 @@ export function TakeOverWorkAction({
    *  takeover makes the Work `queued`, this whole offer unmounts with that status change, and an
    *  outcome rendered here would vanish at the moment it was supposed to be read. */
   onAnswer?: (result: TakeOverWorkResult) => void;
+  /**
+   * #630 (review) — WHERE FOCUS GOES WHEN THIS OFFER UNMOUNTS, for exactly the reason
+   * `CancelWorkDialog.returnFocusTo` exists. An ACCEPTED takeover makes the Work `queued`,
+   * `isTakeOverable` turns false and this whole component disappears with the status change — so
+   * Base UI's focus return lands on a trigger that is no longer in the document and focus falls to
+   * `<body>`, restarting the next Tab at the top of the page. The id names a focusable landmark
+   * (the Work's heading already carries `tabIndex={-1}` for this); absent, nothing is moved.
+   */
+  returnFocusTo?: string;
   takeOver?: typeof takeOverWork;
   session?: SessionTokenAccessor;
 }) {
@@ -340,9 +382,25 @@ export function TakeOverWorkAction({
       basisDigest: withDigest ? basisDigest : null,
     });
     setResult(answer);
-    onAnswer?.(answer);
+    // ONE BANNER FOR ONE ANSWER. `lost` and `unavailable` KEEP this dialog open (the human's next
+    // act is to retry the same decision under the same op key), and the page renders the very same
+    // `UnobservedBanner` from `onAnswer` — so handing those up here painted the identical sentence
+    // twice: once inside the modal and once inert behind the overlay, with two live regions
+    // announcing it. They are held locally instead and handed over when the dialog closes, which is
+    // the moment the page becomes the only surface still able to carry them.
+    if (!keepsModalOpen(answer)) onAnswer?.(answer);
     setBusy(false);
     if (answer.kind === "accepted" || answer.kind === "not_takeable" || answer.kind === "denied") setOpen(false);
+    // …and an ACCEPTED handover unmounts this offer with the status change, so the focus return
+    // Base UI performs lands on a node that is gone. Hand focus to the named landmark on the next
+    // tick, AFTER that return has run — the same order `CancelWorkDialog` uses.
+    if (returnFocusTo !== undefined && answer.kind === "accepted") {
+      setTimeout(() => {
+        const doc: { getElementById?: (id: string) => { focus?: () => void } | null } | undefined =
+          typeof document === "undefined" ? undefined : document;
+        doc?.getElementById?.(returnFocusTo)?.focus?.();
+      }, 0);
+    }
     await onTakenOver();
   };
 
@@ -353,6 +411,8 @@ export function TakeOverWorkAction({
   const inDialog: ReactNode = result === null ? null
     : result.kind === "lost" || result.kind === "unavailable"
       ? <UnobservedBanner kind={result.kind} noun="takeOver" />
+      : result.kind === "transient"
+        ? <StateBanner tone="warning" title={t("transientTitle")}>{t("transientBody")}</StateBanner>
       : result.kind === "confirm_basis"
         ? (
           <StateBanner tone="warning" title={t("takeOverConfirmTitle")}>
@@ -371,6 +431,10 @@ export function TakeOverWorkAction({
     <Dialog
       open={open}
       onOpenChange={(next) => {
+        // THE HAND-OVER POINT. A `lost`/`unavailable` answer was the dialog's to show while the
+        // dialog was there to show it; the instant it closes, the page is the only surface left,
+        // and an answer nobody observed must not vanish because a person dismissed the modal.
+        if (!next && result !== null && keepsModalOpen(result) && isUnobserved(result)) onAnswer?.(result);
         setResult(null);
         dialog.onOpenChange(next);
       }}

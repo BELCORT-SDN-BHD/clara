@@ -121,6 +121,7 @@ function TakeOverHost(props: {
   takeOver: (auth: unknown, input: Attempt) => Promise<TakeOverWorkResult>;
   basisOrigin?: string;
   basis?: unknown;
+  returnFocusTo?: string;
 }): ReactElement {
   const [answer, setAnswer] = useState<TakeOverWorkResult | null>(null);
   return createElement(
@@ -134,6 +135,7 @@ function TakeOverHost(props: {
       accountNames: new Map([["6100", "Rent expense"], ["1100", "Maybank current"]]),
       onTakenOver: () => {},
       onAnswer: setAnswer,
+      returnFocusTo: props.returnFocusTo,
       takeOver: props.takeOver as never,
       session: { getAccessToken: async () => "tok" } as never,
     }),
@@ -145,6 +147,7 @@ function TakeOverApp(props: {
   takeOver: (auth: unknown, input: Attempt) => Promise<TakeOverWorkResult>;
   basisOrigin?: string;
   basis?: unknown;
+  returnFocusTo?: string;
 }): ReactElement {
   return createElement(NextIntlClientProvider, {
     locale: "en",
@@ -392,10 +395,24 @@ test("630f: the confirm step RENDERS the basis it asks a colleague to take respo
   }
 });
 
-test("630f: a takeover answer that keeps the modal open is rendered INSIDE the modal", async () => {
+/** How many times one sentence appears in the body text. A regex `match` cannot see a duplicate,
+ *  which is exactly how the first cut of the cell below passed over two copies of one banner. */
+function occurrences(text: string, needle: string): number {
+  let n = 0;
+  let at = text.indexOf(needle);
+  while (at !== -1) { n += 1; at = text.indexOf(needle, at + needle.length); }
+  return n;
+}
+
+test("630f: a takeover answer that keeps the modal open is rendered INSIDE the modal — ONCE", async () => {
   // `lost` does not close the dialog — the human's next act is to retry the SAME decision. Rendered
   // outside `DialogContent` it mounted behind the overlay: present in the tree, invisible and inert
   // to the person looking at a dialog that appeared to have done nothing.
+  //
+  // AND THE FIX FOR THAT ADDED A SECOND COPY (review round 2): `submit` handed the same answer to
+  // the page through `onAnswer`, which renders the identical `UnobservedBanner`, so the sentence
+  // appeared twice — once in the modal and once inert behind it — with two live regions announcing
+  // it. A `match` cannot see that; a COUNT can.
   const h = await renderComponent(
     TakeOverApp({ takeOver: async () => ({ kind: "lost", message: "socket closed" }) }),
   );
@@ -404,7 +421,8 @@ test("630f: a takeover answer that keeps the modal open is rendered INSIDE the m
     const confirm = findIn(bodyNode(), (n) => n.tagName === "BUTTON" && textOf(n as never).includes("take responsibility"));
     await h.act(async () => { await clickButton(confirm as never); });
     await drain(h);
-    assert.match(bodyText(), /We did not hear back/, "the unobserved answer is on screen");
+    assert.equal(occurrences(bodyText(), "We did not hear back"), 1,
+      "ONE banner for one answer — the page does not paint a second copy behind the overlay");
     assert.match(bodyText(), /The handover may or may not have been recorded/,
       "…in the TAKEOVER's own words, never the cancel's");
     // …and it is inside the dialog: the dialog is still open, so its Title is still there.
@@ -413,6 +431,87 @@ test("630f: a takeover answer that keeps the modal open is rendered INSIDE the m
     assert.ok(dialogNode, "the dialog element is findable");
     assert.match(textOf(dialogNode as never), /We did not hear back/,
       "…and the banner is INSIDE it, not stranded behind the overlay");
+
+    // …AND THE ANSWER SURVIVES THE DISMISSAL. Closing the modal is the moment the page becomes the
+    // only surface left; an answer nobody observed must not disappear because somebody pressed Esc.
+    const close = findIn(bodyNode(), (n) => n.tagName === "BUTTON" && textOf(n as never).trim() === "Not now");
+    assert.ok(close, "the dialog's own dismissal");
+    await h.act(async () => { await clickButton(close as never); });
+    await drain(h);
+    assert.equal(occurrences(bodyText(), "We did not hear back"), 1,
+      "still exactly one — handed to the page as the modal let go of it");
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("630f: an ACCEPTED takeover hands focus to the named landmark, because its offer unmounts", async () => {
+  // `isTakeOverable` turns false the moment the Work goes `queued`, so this whole offer — trigger
+  // included — leaves the document. Base UI returns focus to that trigger; with it gone, focus fell
+  // to `<body>` and the next Tab restarted at the top of the page.
+  // The heading lives on the PAGE, above this component, so the effect looks it up by the id both
+  // sides share. The stub document has no `getElementById`; installing one is how this cell
+  // observes the call the browser would make (the house pattern — work-detail.test.tsx's own
+  // "THE HEADING TAKES FOCUS ON ARRIVAL").
+  const doc = globalThis.document as unknown as { getElementById?: (id: string) => unknown };
+  const original = doc.getElementById;
+  const focused: string[] = [];
+  doc.getElementById = (id: string) => ({ focus: () => focused.push(id) });
+  try {
+    const h = await renderComponent(
+      TakeOverApp({
+        takeOver: async () => ({
+          kind: "accepted", workId: WORK, taskId: null, logicalOpId: null, status: "queued",
+          responsible: null, previousResponsible: null, initiatedBy: null, takenOver: true, replayed: false,
+        } as TakeOverWorkResult),
+        returnFocusTo: "work-heading",
+      }),
+    );
+    try {
+      await openCancel(h, "Take responsibility");
+      const confirm = findIn(bodyNode(), (n) => n.tagName === "BUTTON" && textOf(n as never).includes("take responsibility"));
+      await h.act(async () => { await clickButton(confirm as never); });
+      await drain(h);
+      await h.act(async () => { await new Promise((r) => setTimeout(r, 1)); });
+      assert.deepEqual(focused, ["work-heading"],
+        "focus lands on the Work's heading, not on `<body>` — the reader keeps their place");
+    } finally {
+      await h.unmount();
+    }
+  } finally {
+    if (original === undefined) delete doc.getElementById;
+    else doc.getElementById = original;
+  }
+});
+
+test("630f: a TRANSIENT keeps the decision open and offers the same press again", async () => {
+  // `workRoutes.ts` answers `409 {error:'transient'}` for a 40P01/40001 the database broke: the
+  // statement NEVER RAN. Collapsing it into `conflict` told a preparer "the database refused the
+  // request in the state it found" and sent them to read a Work row that is unchanged — so they
+  // concluded the cancel was impossible and left the run going. The remedy is one more press, on
+  // the SAME op key, which is why the dialog must not close.
+  const keys: string[] = [];
+  const h = await renderComponent(
+    CancelApp({
+      cancel: async (_auth, input) => { keys.push(input.opKey); return { kind: "transient" }; },
+    }),
+  );
+  try {
+    await openCancel(h);
+    const confirm = buttonIn("Cancel this Work");
+    await h.act(async () => { await clickButton(confirm as never); });
+    await drain(h);
+    assert.match(bodyText(), /That did not go through/, "the surface says what actually happened");
+    assert.match(bodyText(), /Nothing changed/, "…and that nothing moved");
+    assert.equal(/The database refused the request in the state it found/.test(bodyText()), false,
+      "never the state-conflict sentence: there is no state to read");
+    assert.match(bodyText(), /Cancel this Work/, "the retry affordance is the same button, still there");
+
+    await h.act(async () => { await clickButton(buttonIn("Cancel this Work") as never); });
+    await drain(h);
+    assert.equal(keys.length, 2, "the second press really reached the door");
+    assert.equal(keys[0], keys[1],
+      "…under the SAME op key, so clara._reserve_op recognises one decision rather than two");
   } finally {
     await h.unmount();
   }

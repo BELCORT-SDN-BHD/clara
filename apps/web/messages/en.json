@@ -4133,6 +4133,8 @@
     "conflictBody": "The database refused the request in the state it found. The Work's own row below is the answer \u2014 read it, then decide.",
     "unavailableTitle": "We could not reach the runtime",
     "unavailableBody": "Nothing was cancelled. Try again in a moment.",
+    "transientTitle": "That did not go through — try again",
+    "transientBody": "Nothing changed. The database was busy with another change to this Work at the same moment, so the request never ran. Pressing again is the same decision, not a second one.",
     "lostTitle": "We did not hear back",
     "lostBody": "The cancellation may or may not have been recorded. This page re-reads the Work below \u2014 that row is the answer, not this message.",
     "announcement": "Work status: {status}",

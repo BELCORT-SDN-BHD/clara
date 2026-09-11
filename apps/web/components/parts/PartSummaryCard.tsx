@@ -55,10 +55,17 @@ export function PartSummaryCard({
   const present = rows.filter((r): r is [string, string] => r[1] != null && r[1] !== "");
   return (
     <div className="enter-content flex flex-col gap-2 rounded-lg border border-border bg-card p-3 text-sm">
+      {/* #630 (review) — NO `outline-none` HERE. This span is a FOCUS TARGET: the rail card hands
+          focus to it when a cancel's answer unmounts the trigger, and suppressing the ring meant
+          moving a keyboard reader somewhere in a long scrolling transcript with nothing to show
+          where they landed. `PageShell`'s heading — the precedent this card cites for the whole
+          `tabIndex={-1}` pattern (common/page-shell.tsx) — adds no such class and keeps globals.css's
+          `:focus-visible` ring, which Chrome draws for a programmatic focus that follows a keyboard
+          interaction. The keyboard-walk gate cannot catch this: it skips negative tabindex. */}
       <span
         id={titleId}
         tabIndex={titleId === undefined ? undefined : -1}
-        className="font-medium text-card-foreground outline-none"
+        className="font-medium text-card-foreground"
       >
         {title}
       </span>

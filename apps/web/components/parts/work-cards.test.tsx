@@ -46,7 +46,7 @@ import { test } from "node:test";
 import { createElement, type ReactElement } from "react";
 import { NextIntlClientProvider } from "next-intl";
 
-import { renderComponent } from "../../test/hookHarness";
+import { renderComponent, clickButton, textOf } from "../../test/hookHarness";
 import { enableDomInspection } from "../../test/domInspect";
 import { configureSessionTokenSource, resetSessionTokenSource } from "../../lib/session-accessor";
 import { PartRenderer, FALLBACK_UNSUPPORTED_PREFIX } from "./PartRenderer";
@@ -400,13 +400,20 @@ test("630 the rail card POLLS while the Work is live and schedules NOTHING once 
   //
   // The INTERVAL is what is pinned here rather than elapsed wall-clock: a cell that waited three
   // real seconds per assertion would be slow and, worse, would be measuring the host's scheduler.
+  //
+  // AND THE BODY IS RUN, not merely scheduled (review round 2). A spy that recorded only the DELAY
+  // passed on `setInterval(() => {}, WORK_CARD_POLL_MS)` — a card that schedules an empty tick and
+  // never converges past `stopping`, which is the exact defect this cell is named for. The
+  // callbacks are captured and fired by hand, and the assertion is that the Work was RE-READ.
   const scheduled: number[] = [];
+  const ticks: Array<() => void> = [];
   const cleared: unknown[] = [];
   const realSet = globalThis.setInterval;
   const realClear = globalThis.clearInterval;
   globalThis.setInterval = ((fn: () => void, ms?: number) => {
     scheduled.push(Number(ms));
-    return realSet(fn, 1_000_000);   // never actually fires inside the cell
+    ticks.push(fn);
+    return realSet(fn, 1_000_000);   // never fires on its own inside the cell
   }) as typeof globalThis.setInterval;
   globalThis.clearInterval = ((id: unknown) => { cleared.push(id); return realClear(id as never); }) as typeof globalThis.clearInterval;
 
@@ -414,6 +421,7 @@ test("630 the rail card POLLS while the Work is live and schedules NOTHING once 
   try {
     for (const [status, polls] of [["running", true], ["stopping", true], ["cancelled", false], ["completed", false]] as const) {
       scheduled.length = 0;
+      ticks.length = 0;
       const backend = stubBackend((call) =>
         call.fn === "accounting_work"
           ? { status: 200, body: [{ id: PARKED_WORK, client_id: PARKED_CLIENT, status }] }
@@ -424,6 +432,19 @@ test("630 the rail card POLLS while the Work is live and schedules NOTHING once 
         for (let i = 0; i < 6; i += 1) await h.settle();
         assert.equal(scheduled.includes(WORK_CARD_POLL_MS), polls,
           `${status}: the card ${polls ? "converges" : "is finished and schedules nothing"}`);
+        if (polls) {
+          const before = backend.calls.filter((c) => c.fn === "accounting_work").length;
+          // A SNAPSHOT of the callbacks, never the live array: each re-render re-registers the
+          // interval, so iterating the array itself would keep firing bodies the loop is creating.
+          await h.act(async () => {
+            for (const tick of [...ticks]) tick();
+            await new Promise((r) => setTimeout(r, 0));
+          });
+          for (let i = 0; i < 4; i += 1) await h.settle();
+          assert.ok(backend.calls.filter((c) => c.fn === "accounting_work").length > before,
+            `${status}: the tick RE-READ the Work — an interval that schedules an empty body is not `
+            + "convergence, and that is what this cell used to accept");
+        }
       } finally {
         await h.unmount();
         backend.restore();
@@ -433,5 +454,69 @@ test("630 the rail card POLLS while the Work is live and schedules NOTHING once 
   } finally {
     globalThis.setInterval = realSet;
     globalThis.clearInterval = realClear;
+  }
+});
+
+/** The dialog is PORTALLED to `document.body`, which this card's container never reaches — so the
+ *  search walks the body, exactly as work-cancel-dialog.test.tsx does. */
+function bodyNode(): Stub {
+  return (globalThis as unknown as { document: { body: Stub } }).document.body;
+}
+
+function findInBody(predicate: (n: Stub) => boolean): Stub | null {
+  const walk = (n: Stub): Stub | null => {
+    if (predicate(n)) return n;
+    for (const c of ((n.childNodes as Stub[] | undefined) ?? [])) {
+      const found = walk(c);
+      if (found) return found;
+    }
+    return null;
+  };
+  return walk(bodyNode());
+}
+
+test("630 the rail card's poll never unmounts an OPEN cancel decision", async () => {
+  // MEASURED SHAPE (review): the three-second re-read the cell above pins is also what can take
+  // `cancellable` false while a bookkeeper is reading the confirmation — a colleague cancelling from
+  // the Work detail page, or the run settling on its own. The open modal then unmounted with no
+  // dismissal, focus was lost, and the `lost`/`unavailable` retry arm (which deliberately keeps the
+  // dialog AND its op key) was destroyed the same way. While the modal is open it stays mounted
+  // whatever the status says; the DOOR is still the authority on what the confirm does.
+  let status = "running";
+  const ticks: Array<() => void> = [];
+  const realSet = globalThis.setInterval;
+  globalThis.setInterval = ((fn: () => void) => {
+    ticks.push(fn);
+    return realSet(fn, 1_000_000);
+  }) as typeof globalThis.setInterval;
+  const part = { ...ACCEPTED, work_id: PARKED_WORK, client_id: PARKED_CLIENT } as ClaraPart;
+  const backend = stubBackend((call) =>
+    call.fn === "accounting_work"
+      ? { status: 200, body: [{ id: PARKED_WORK, client_id: PARKED_CLIENT, status }] }
+      : { status: 404, body: {} });
+  const h = await renderComponent(ScopedApp(part, 1));
+  try {
+    (bodyNode() as { appendChild: (n: unknown) => void }).appendChild(h.container);
+    await settleUntil(h, () => backend.calls.some((c) => c.fn === "accounting_work"), "the Work status was read");
+    for (let i = 0; i < 6; i += 1) await h.settle();
+    const trigger = findInBody((n) => n.tagName === "BUTTON" && textOf(n as never).trim() === "Cancel Work");
+    assert.ok(trigger, "precondition: a running Work is cancellable from the rail");
+    await h.act(async () => { await clickButton(trigger as never); });
+    for (let i = 0; i < 4; i += 1) await h.settle();
+    assert.match(textOf(bodyNode() as never), /Cancel this Work\?/, "precondition: the decision is open");
+
+    // …and now the row settles under them, on the card's own poll.
+    status = "cancelled";
+    await h.act(async () => {
+      for (const tick of [...ticks]) tick();
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    for (let i = 0; i < 6; i += 1) await h.settle();
+    assert.match(textOf(bodyNode() as never), /Cancel this Work\?/,
+      "the open decision is still on screen: a poll must not destroy a modal somebody is reading");
+  } finally {
+    globalThis.setInterval = realSet;
+    await h.unmount();
+    backend.restore();
   }
 });

@@ -209,24 +209,24 @@ function hrefs(container: Stub): string[] {
   return out;
 }
 
-function buttonLabelled(h: { find: (p: (n: Stub) => boolean) => Stub | null }, text: string): Stub | null {
-  return h.find((n) => n.tagName === "BUTTON" && String((n as { textContent?: string }).textContent ?? "").includes(text));
+/** Settle until a rendered condition holds, bounded by wall clock — never a fixed hop count. A
+ *  re-render that has not yet re-read the row still shows the OLD arm, and a cell that asserted
+ *  across it would be asserting about a transition that never happened. */
+async function settleUntil(
+  h: { settle: () => Promise<void> },
+  condition: () => boolean,
+  description: string,
+  timeoutMs = 5000,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!condition()) {
+    if (Date.now() >= deadline) throw new Error(`settleUntil: timed out waiting for ${description}`);
+    await h.settle();
+  }
 }
 
-/** #630 — THE ELEMENT THE ACTION SLOT HOLDS, as a tag+class signature. React reconciles a slot by
- *  ELEMENT TYPE, so a slot whose signature changes between two status arms is a slot that tears its
- *  subtree down — taking an open dialog, its focus trap and its op key with it. */
-function slotOf(h: { find: (p: (n: Stub) => boolean) => Stub | null }, label: string): string | null {
-  const slot = h.find((n) => {
-    const cls = typeof n.getAttribute === "function"
-      ? (n.getAttribute as (k: string) => string | null)("class")
-      : null;
-    return n.tagName === "DIV" && cls !== null && cls.includes("flex-wrap")
-      && String((n as { textContent?: string }).textContent ?? "").includes(label);
-  });
-  if (slot === null) return null;
-  const cls = (slot.getAttribute as (k: string) => string | null)("class");
-  return `${String(slot.tagName)}:${cls ?? ""}`;
+function buttonLabelled(h: { find: (p: (n: Stub) => boolean) => Stub | null }, text: string): Stub | null {
+  return h.find((n) => n.tagName === "BUTTON" && String((n as { textContent?: string }).textContent ?? "").includes(text));
 }
 
 test("A MALFORMED WORK ID IS THE NOT-FOUND STATE, and fires no read at all", async () => {
@@ -1053,32 +1053,73 @@ test("630 a VIEWER is offered neither destructive control — both doors floor a
   }
 });
 
-test("630 the cancel control survives the poll flipping awaiting_input to running", async () => {
-  // MEASURED SHAPE (review): `cancelAction` was mounted at two different slot positions — inside a
-  // wrapping `div` for `awaiting_input` and bare for queued/running. React reconciles a slot by
-  // ELEMENT TYPE, so the three-second poll flipping between the two arms destroyed the dialog and
-  // mounted a fresh, closed one: an open modal vanished with no dismissal, focus fell to `<body>`,
-  // and a submit in flight lost its decision's op key. One wrapper in both arms keeps ONE dialog.
+test("630 the cancel control is the SAME NODE across the poll flipping awaiting_input to running", async () => {
+  // MEASURED SHAPE (review round 2): matching the two arms' wrapper tag and class was NOT the fix.
+  // The parked arm passed TWO children to that slot (the Needs-you link, then the dialog) and the
+  // running arm passed ONE; React reconciles a single-child slot against the FIRST existing child,
+  // whose type differs, so it deleted the subtree and mounted a fresh, CLOSED dialog. The open
+  // modal a bookkeeper was reading vanished with no dismissal, focus fell to `<body>`, and a submit
+  // in flight lost its op key — after which `clara._reserve_op` could no longer connect the two
+  // attempts. A signature cell could not see any of it: `DIV:flex flex-wrap items-center gap-3`
+  // read the same on both sides of exactly the code the finding was about.
   //
-  // What a node cell can hold still is the COMPOSITION: the same element type in the action slot on
-  // both sides of the transition. The dialog's own survival across it is the browser walk's.
+  // SO THIS ASSERTS IDENTITY. The control now lives in the detail view's own action bar, at one
+  // position no status arm can move, and the node itself must survive the transition.
   let status = "awaiting_input";
   const h = await renderComponent(
     App({ load: async () => data({ work: workRow({ status }) }) }),
   );
   try {
-    await h.settle();
+    await settleUntil(h, () => /parked until someone answers it/.test(h.text()), "the parked arm");
     const before = buttonLabelled(h, "Cancel Work");
     assert.ok(before, "a parked Work is cancellable");
-    const parkedSlot = slotOf(h, "Cancel Work");
 
     status = "running";
     await h.act(async () => { await h.rerender(App({ load: async () => data({ work: workRow({ status }) }) })); });
-    await h.settle();
+    // THE FLIP MUST ACTUALLY BE OBSERVED, or the cell asserts identity across a re-render that
+    // never changed arms — which is a green over exactly the defect it exists for.
+    await settleUntil(h, () => /This work is running/.test(h.text()), "the running arm");
+    assert.doesNotMatch(h.text(), /parked until someone answers it/, "the parked arm is gone");
     const after = buttonLabelled(h, "Cancel Work");
     assert.ok(after, "…and so is a running one");
-    assert.equal(slotOf(h, "Cancel Work"), parkedSlot,
-      "the control sits under the SAME element type in both arms, so the slot is not torn down");
+    // `assert.ok(a === b)` rather than `assert.equal`: the harness's stub nodes are cyclic and the
+    // deep-equality path walks them forever.
+    assert.ok(before === after,
+      "the SAME node, not an equivalent one: a remount here destroys an open modal mid-decision");
+
+    // …and back again, because the flip happens in both directions between two polls.
+    status = "awaiting_input";
+    await h.act(async () => { await h.rerender(App({ load: async () => data({ work: workRow({ status }) }) })); });
+    await settleUntil(h, () => /parked until someone answers it/.test(h.text()), "the parked arm again");
+    assert.ok(buttonLabelled(h, "Cancel Work") === before, "…in the other direction too");
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("630 the cancel control is OUTSIDE every status banner, so no status arm owns it", async () => {
+  // The structural half of the same claim, and the one that would catch a later edit putting the
+  // control back inside an arm: the trigger must not be a descendant of the status banner.
+  const h = await renderComponent(App({ load: async () => data({ work: workRow({ status: "running" }) }) }));
+  try {
+    await h.settle();
+    const trigger = buttonLabelled(h, "Cancel Work");
+    assert.ok(trigger, "the control renders");
+    // `StateBanner`'s root carries `max-w-prose … rounded-lg border p-3` (components/common/state.tsx).
+    // A banner that CONTAINS the trigger is a banner that owns it, and owning it means the next
+    // status change takes it down mid-decision.
+    const banner = h.find((n) => {
+      const cls = typeof n.getAttribute === "function"
+        ? (n.getAttribute as (k: string) => string | null)("class")
+        : null;
+      return n.tagName === "DIV" && cls !== null && cls.includes("max-w-prose") && cls.includes("rounded-lg")
+        && String((n as { textContent?: string }).textContent ?? "").includes("Cancel Work");
+    });
+    // `assert.ok(x === null)`, never `assert.equal`: formatting a stub node for the failure message
+    // walks a cyclic tree and exhausts the heap before the assertion is ever reported.
+    assert.ok(banner === null,
+      "no status banner contains the destructive control — the banner says what the status MEANS, "
+      + "and a control inside it is a control the next poll can destroy");
   } finally {
     await h.unmount();
   }

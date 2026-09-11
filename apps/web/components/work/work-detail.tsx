@@ -198,6 +198,9 @@ export function WorkDetailView({
    *  trigger unmounts the moment the Work leaves a cancellable status — which is exactly when the
    *  answer matters most (the `already_completed` arm carries the receipt and the entry link). */
   const [cancelState, setCancelState] = useState<CancelWorkResult | null>(null);
+  /** #630 (review) — see the action bar below: an open decision outlives a status change the
+   *  three-second poll observes, so the dialog is not unmounted while a person is inside it. */
+  const [cancelOpen, setCancelOpen] = useState(false);
   /** #630 — and the takeover's, for the same reason: an accepted takeover makes the Work `queued`
    *  and the offer that produced the answer unmounts with it. */
   const [takeOverState, setTakeOverState] = useState<TakeOverWorkResult | null>(null);
@@ -395,21 +398,46 @@ export function WorkDetailView({
         work={work}
         clientId={clientId}
         canRetry={canRetry}
-        canCancel={canCancel}
         canTakeOver={canTakeOver}
         retrying={retrying}
         retryState={retryState}
         onRetry={() => void runRetry()}
         onConverge={() => state.reload()}
-        cancel={cancel}
         takeOver={takeOver}
-        onCancelAnswer={setCancelState}
         onTakeOverAnswer={setTakeOverState}
         session={session}
         interruption={interruption}
         accountNames={names}
         onEditAsNewDraft={seedDraft}
       />
+
+      {/* #630 (review) — THE DESTRUCTIVE ACTION LIVES OUTSIDE EVERY STATUS ARM, at ONE fixed
+          position in this tree, and that is load-bearing rather than tidy.
+          MEASURED: `CancelWorkDialog` used to be handed to whichever `StateBanner` the current
+          status rendered. Matching the two wrappers' tag and class was not enough — the parked arm
+          passes TWO children to that slot (the Needs-you link, then the dialog) and the running arm
+          passes ONE, and React reconciles a single-child slot against the FIRST existing child. The
+          types differ, so the whole subtree was deleted and a fresh, CLOSED dialog mounted: the open
+          modal a bookkeeper was reading vanished with no dismissal on the three-second poll's
+          `awaiting_input ⇄ running` flip, focus fell to `<body>`, and a submit in flight lost its
+          op key — after which `clara._reserve_op` could no longer connect the two attempts.
+          Here the dialog's position among its siblings never changes, so its fiber survives every
+          status the poll can report; only `canCancel` going false (a Work that genuinely settled)
+          takes it away. */}
+      <div key="work-action-bar" className="flex flex-wrap items-center gap-3 empty:hidden">
+        {canCancel || cancelOpen ? (
+          <CancelWorkDialog
+            workId={work.id}
+            clientId={clientId}
+            onCancelled={() => state.reload()}
+            onAnswer={setCancelState}
+            onOpenChange={setCancelOpen}
+            returnFocusTo={WORK_HEADING_ID}
+            cancel={cancel}
+            session={session}
+          />
+        ) : null}
+      </div>
 
       {/* #630 — THE CANCEL'S OWN ANSWER, outside every status arm so it survives the status change
           that produced it. `null` renders nothing. */}
@@ -639,15 +667,12 @@ function WorkOutcome({
   work,
   clientId,
   canRetry,
-  canCancel,
   canTakeOver,
   retrying,
   retryState,
   onRetry,
   onConverge,
-  cancel,
   takeOver,
-  onCancelAnswer,
   onTakeOverAnswer,
   session,
   interruption,
@@ -657,8 +682,6 @@ function WorkOutcome({
   work: AccountingWorkRow;
   clientId: string;
   canRetry: boolean;
-  /** #630 — whether "Cancel Work" is worth offering from this status. */
-  canCancel: boolean;
   /** #630 — whether "Take responsibility" is worth offering for this refusal. */
   canTakeOver: boolean;
   retrying: boolean;
@@ -668,10 +691,7 @@ function WorkOutcome({
    *  this component paints nothing it was not told by a fresh read, and the 3-second poll keeps
    *  converging on `stopping` → terminal afterwards. */
   onConverge: () => void | Promise<void>;
-  cancel: typeof cancelWork;
   takeOver: typeof takeOverWork;
-  /** Hands the cancel's answer to the page, which renders it outside every status arm. */
-  onCancelAnswer: (result: CancelWorkResult) => void;
   onTakeOverAnswer: (result: TakeOverWorkResult) => void;
   session: SessionTokenAccessor;
   /** The row this Work is parked on, when it is parked and visible. */
@@ -685,19 +705,10 @@ function WorkOutcome({
   const t = useTranslations("WorkDetail");
   const tc = useTranslations("WorkCancel");
 
-  /** #630 — ONE instance, rendered into whichever arm is live. Mounting it twice would give the
-   *  page two dialogs with the same Title and two op-key decisions for one intent. */
-  const cancelAction = canCancel ? (
-    <CancelWorkDialog
-      workId={work.id}
-      clientId={clientId}
-      onCancelled={onConverge}
-      onAnswer={onCancelAnswer}
-      returnFocusTo={WORK_HEADING_ID}
-      cancel={cancel}
-      session={session}
-    />
-  ) : null;
+  // #630 (review) — "Cancel Work" IS NOT RENDERED HERE, deliberately. It lives in the detail view's
+  // own action bar, at one position that no status change moves, because a control mounted inside a
+  // status arm is a control the next poll can destroy mid-decision. This component renders what the
+  // status MEANS; the act belongs to the page.
 
   const retryButton = canRetry ? (
     <Button type="button" variant="outline" size="sm" disabled={retrying} onClick={onRetry}>
@@ -755,6 +766,7 @@ function WorkOutcome({
             accountNames={accountNames}
             onTakenOver={onConverge}
             onAnswer={onTakeOverAnswer}
+            returnFocusTo={WORK_HEADING_ID}
             takeOver={takeOver}
             session={session}
           />
@@ -823,10 +835,6 @@ function WorkOutcome({
               <Link href={WORK_NEEDS_YOU_HREF} className="text-sm font-medium text-primary underline underline-offset-2">
                 {t("awaiting.link")}
               </Link>
-              {/* #630 — a parked Work is still cancellable: nobody has to answer a question just
-                  to stop something they no longer want. THE WRAPPER IS THE SAME ELEMENT the
-                  queued/running arm uses; see `cancelSlot` below for why that matters. */}
-              {cancelAction}
             </div>
           }
         >
@@ -897,24 +905,9 @@ function WorkOutcome({
 
   // queued / running, and any status this build does not know. An OBSERVED state and nothing else:
   // no percentage, no estimate, no animation standing in for progress.
-  //
-  // #630 (review) — THE ACTION SLOT IS THE SAME ELEMENT IN BOTH ARMS, and that is load-bearing
-  // rather than cosmetic. React reconciles a slot by ELEMENT TYPE: this arm used to pass
-  // `cancelAction` (a `CancelWorkDialog`) straight into `action` while the awaiting_input arm
-  // passed a wrapping `div`, so the 3-second poll flipping `running ⇄ awaiting_input` — which this
-  // file's own comment records happening between two polls — destroyed the open modal, took focus
-  // to `<body>` with no dismissal, and threw away the decision's op key mid-submit. One wrapper in
-  // both arms keeps ONE dialog mounted across the transition.
   return (
     <div className="flex flex-col gap-2">
-      <StateBanner
-        tone="info"
-        action={cancelAction === null ? undefined : (
-          <div className="flex flex-wrap items-center gap-3">{cancelAction}</div>
-        )}
-      >
-        {t("running.body")}
-      </StateBanner>
+      <StateBanner tone="info">{t("running.body")}</StateBanner>
     </div>
   );
 }
