@@ -17,13 +17,13 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { createElement, type ReactElement } from "react";
+import { createElement, useState, type ReactElement } from "react";
 import { NextIntlClientProvider } from "next-intl";
 
 import { renderComponent, clickButton, textOf } from "../../test/hookHarness";
 import { enableDomInspection, activeElement } from "../../test/domInspect";
 import { checkKeyboardWalk, isKeyboardOperable } from "../../test/keyboardWalk";
-import { CancelWorkDialog, TakeOverWorkAction } from "./work-cancel-dialog";
+import { CancelOutcome, CancelWorkDialog, TakeOverWorkAction } from "./work-cancel-dialog";
 import type { CancelWorkResult, TakeOverWorkResult } from "../../lib/work/api";
 import messages from "../../messages/en.json";
 
@@ -63,6 +63,29 @@ async function drain(h: Awaited<ReturnType<typeof renderComponent>>): Promise<vo
   for (let i = 0; i < 6; i++) await h.settle();
 }
 
+/** The PAGE's own shape: the dialog hands its answer up and the page renders it, which is what
+ *  keeps an `already_completed` receipt on screen after the trigger has unmounted. Mirrored here so
+ *  these cells drive the composition the product actually ships. */
+function CancelHost(props: {
+  cancel: (auth: unknown, input: Attempt) => Promise<CancelWorkResult>;
+  onCancelled?: () => void;
+}): ReactElement {
+  const [answer, setAnswer] = useState<CancelWorkResult | null>(null);
+  return createElement(
+    "div",
+    null,
+    createElement(CancelWorkDialog, {
+      workId: WORK,
+      clientId: CLIENT,
+      onCancelled: props.onCancelled ?? (() => {}),
+      onAnswer: setAnswer,
+      cancel: props.cancel as never,
+      session: { getAccessToken: async () => "tok" } as never,
+    }),
+    createElement(CancelOutcome, { result: answer, clientId: CLIENT }),
+  );
+}
+
 function CancelApp(props: {
   cancel: (auth: unknown, input: Attempt) => Promise<CancelWorkResult>;
   onCancelled?: () => void;
@@ -71,13 +94,7 @@ function CancelApp(props: {
     locale: "en",
     messages,
     timeZone: "Asia/Kuala_Lumpur",
-    children: createElement(CancelWorkDialog, {
-      workId: WORK,
-      clientId: CLIENT,
-      onCancelled: props.onCancelled ?? (() => {}),
-      cancel: props.cancel as never,
-      session: { getAccessToken: async () => "tok" } as never,
-    }),
+    children: createElement(CancelHost, props),
   });
 }
 

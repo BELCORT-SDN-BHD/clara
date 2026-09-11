@@ -56,11 +56,12 @@
 // gate), and a declared kind with no render branch is a part that reaches a
 // transcript and paints nothing.
 
-import { useCallback } from "react";
+import { useCallback, useState } from "react";
 import { useTranslations } from "next-intl";
 
-import { CancelWorkDialog } from "@/components/work/work-cancel-dialog";
+import { CancelOutcome, CancelWorkDialog } from "@/components/work/work-cancel-dialog";
 import { isCancellableWorkStatus } from "@/lib/work/types";
+import type { CancelWorkResult } from "@/lib/work/api";
 
 import { Badge } from "./PartBadge";
 import { PartSummaryCard } from "./PartSummaryCard";
@@ -122,6 +123,9 @@ export function WorkAcceptedCard({ part }: { part: WorkAcceptedPart }) {
   // than against the status the part was written with — which for a part in a transcript is almost
   // always stale.
   const cancellable = work !== null && isCancellableWorkStatus(work.status);
+  // …and the ANSWER lives on the card rather than inside the dialog, for the reason work-detail's
+  // own copy of this state records: the trigger unmounts with the status change that produced it.
+  const [cancelState, setCancelState] = useState<CancelWorkResult | null>(null);
 
   return (
     <PartSummaryCard
@@ -140,8 +144,10 @@ export function WorkAcceptedCard({ part }: { part: WorkAcceptedPart }) {
           workId={part.work_id}
           clientId={part.client_id}
           onCancelled={reload}
+          onAnswer={setCancelState}
         />
       ) : null}
+      <CancelOutcome result={cancelState} clientId={part.client_id} />
       {/* THE CONVERGED STATE, from the SAME hydrated row the offer was made against. `stopping` is
           rendered by name so the rail says the same word the Work detail does while an admitted
           operation settles — one vocabulary across both surfaces. */}

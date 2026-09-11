@@ -32,7 +32,7 @@ import Link from "next/link";
 import { useTranslations } from "next-intl";
 
 import { AttachEvidenceDialog } from "@/components/work/attach-evidence-dialog";
-import { CancelWorkDialog, TakeOverWorkAction } from "@/components/work/work-cancel-dialog";
+import { CancelOutcome, CancelWorkDialog, TakeOverWorkAction } from "@/components/work/work-cancel-dialog";
 import { PostedLinesTable, WorkBasisTable } from "@/components/work/work-tables";
 import { StateBanner } from "@/components/common/state";
 import { WorkQuestionPanel } from "@/components/work/work-question-panel";
@@ -48,7 +48,7 @@ import { readClarifyQuestion } from "@/lib/journals/governance-doors";
 import { useMemberNames, type MemberNameResolver } from "@/lib/members/use-member-names";
 import { WORK_NEEDS_YOU_HREF, clientBase, journalComposerHref } from "@/lib/navigation/tree";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
-import { cancelWork, retryWork, takeOverWork, type RetryWorkResult } from "@/lib/work/api";
+import { cancelWork, retryWork, takeOverWork, type CancelWorkResult, type RetryWorkResult } from "@/lib/work/api";
 import { accountNames, type WorkDetailData } from "@/lib/work/reads";
 import { listEntryLinks, type EntryLinkRow } from "@/lib/work/evidence";
 import { useWorkDetail } from "@/lib/work/use-work-detail";
@@ -171,6 +171,10 @@ export function WorkDetailView({
   });
   const [retryState, setRetryState] = useState<RetryWorkResult | null>(null);
   const [retrying, setRetrying] = useState(false);
+  /** #630 — THE CANCEL'S ANSWER LIVES HERE, not inside the dialog, because the dialog's own
+   *  trigger unmounts the moment the Work leaves a cancellable status — which is exactly when the
+   *  answer matters most (the `already_completed` arm carries the receipt and the entry link). */
+  const [cancelState, setCancelState] = useState<CancelWorkResult | null>(null);
   /** #634 — the posted entry's links row, or null while unread / unreadable. A
    *  failed links read NEVER blocks the page: the entry, its lines and its
    *  receipt are the database's own and stay on screen; only the source line
@@ -372,10 +376,15 @@ export function WorkDetailView({
         onConverge={() => state.reload()}
         cancel={cancel}
         takeOver={takeOver}
+        onCancelAnswer={setCancelState}
         session={session}
         interruption={interruption}
         onEditAsNewDraft={seedDraft}
       />
+
+      {/* #630 — THE CANCEL'S OWN ANSWER, outside every status arm so it survives the status change
+          that produced it. `null` renders nothing. */}
+      <CancelOutcome result={cancelState} clientId={clientId} />
 
       <section className="flex flex-col gap-2">
         <SectionHeader level={2}>{t("basisHeading")}</SectionHeader>
@@ -608,6 +617,7 @@ function WorkOutcome({
   onConverge,
   cancel,
   takeOver,
+  onCancelAnswer,
   session,
   interruption,
   onEditAsNewDraft,
@@ -628,6 +638,8 @@ function WorkOutcome({
   onConverge: () => void | Promise<void>;
   cancel: typeof cancelWork;
   takeOver: typeof takeOverWork;
+  /** Hands the cancel's answer to the page, which renders it outside every status arm. */
+  onCancelAnswer: (result: CancelWorkResult) => void;
   session: SessionTokenAccessor;
   /** The row this Work is parked on, when it is parked and visible. */
   interruption: AgentInterruptionRow | null;
@@ -644,6 +656,7 @@ function WorkOutcome({
       workId={work.id}
       clientId={clientId}
       onCancelled={onConverge}
+      onAnswer={onCancelAnswer}
       returnFocusTo={WORK_HEADING_ID}
       cancel={cancel}
       session={session}

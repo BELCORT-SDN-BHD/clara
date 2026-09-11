@@ -64,6 +64,7 @@ export function CancelWorkDialog({
   workId,
   clientId,
   onCancelled,
+  onAnswer,
   returnFocusTo,
   cancel = cancelWork,
   session = sessionTokenAccessor,
@@ -72,6 +73,14 @@ export function CancelWorkDialog({
   clientId: string;
   /** Re-read the Work after ANY completed attempt, refusal included — hydrate-never-trust. */
   onCancelled: () => void | Promise<void>;
+  /**
+   * THE ANSWER GOES TO THE PAGE, NOT TO THIS COMPONENT. Measured in the browser walk: an accepted
+   * cancel moves the Work out of a cancellable status, the trigger that owns this dialog unmounts
+   * with it — and an outcome rendered HERE unmounted too, taking the `already_completed` receipt
+   * link with it the instant it mattered most. The caller holds the result and renders
+   * `CancelOutcome` somewhere that survives the status change.
+   */
+  onAnswer?: (result: CancelWorkResult) => void;
   /**
    * WHERE FOCUS GOES WHEN THE TRIGGER IS NOT THERE TO RETURN TO. Base UI returns focus to the
    * control that opened the dialog, which is exactly right for a dismissal — and impossible after
@@ -89,12 +98,14 @@ export function CancelWorkDialog({
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<CancelWorkResult | null>(null);
   const decision = useDecisionKey();
+  void clientId;   // the answer's entry link is rendered by the PAGE, from the same value
 
   const submit = async () => {
     if (busy) return;
     setBusy(true);
     const answer = await cancel(session, { workId, opKey: decision.key() });
     setResult(answer);
+    onAnswer?.(answer);
     setBusy(false);
     // AN OUTCOME NOBODY OBSERVED KEEPS THE DIALOG OPEN and keeps the key: the human's next act is
     // to try the same decision again, not to start a different one.
@@ -149,7 +160,9 @@ export function CancelWorkDialog({
           </DialogFooter>
         </DialogContent>
       </Dialog>
-      <CancelOutcome result={result} clientId={clientId} />
+      {/* THE IN-DIALOG ARM ONLY. Everything that survives the dialog's close is the PAGE's to
+          render (see `onAnswer`); what stays here is the pair that keeps the dialog open, because
+          those are answers the human is still inside the decision for. */}
     </>
   );
 }

@@ -158,11 +158,21 @@ test("B3 cancel: STOPPING is shown while an admitted operation settles, and only
   await expect(page).toHaveURL(new RegExp(`/work/${workId}$`));
 
   // The boundary becomes known; the page's own 3-second poll converges on it.
-  await control(page, { op: "settle_stopping", workId, outcome: "cancelled" });
+  const settled = await control(page, { op: "settle_stopping", workId, outcome: "cancelled" });
+  expect(settled.status, "the fixture actually settled the Work").toBe("cancelled");
   await expect(page.getByText("Cancelled", { exact: true }).first()).toBeVisible({ timeout: 20_000 });
   await expect(page.getByText("Nothing was posted.")).toBeVisible();
-  // …carrying what the RUN asked for, which the settle superseded.
-  await expect(page.getByText("The run reported failed as it stopped.")).toBeVisible();
+  // …CARRYING WHAT THE RUN ASKED FOR, which `clara.settle_work_run` superseded. Asserted on the
+  // WIRE first and on the page second: the two are different claims, and a page assertion alone
+  // could fail for a rendering reason while the data was fine — or pass while the estate had
+  // quietly dropped the fact.
+  const wire = await page.evaluate(async (id: string) => {
+    const res = await fetch(`/api/runtime/work/${id}`, { cache: "no-store" });
+    return (await res.json()) as { work?: { error?: { superseded?: { outcome?: string } } } };
+  }, workId);
+  expect(wire.work?.error?.superseded?.outcome,
+    "the run's own requested outcome rides under error.superseded").toBe("failed");
+  await expect(page.getByText("The run reported failed as it stopped.")).toBeVisible({ timeout: 20_000 });
   await scan(page, "work detail, cancelled");
 
   // STABLE BACK: the composer is one step back, and the Work address is still the Work address.
@@ -233,9 +243,14 @@ test("320 CSS px and 200% zoom: the cancel dialog fits, and the page does not sc
   await control(page, { op: "run", workId });
   await expect(page.getByText("Running", { exact: true }).first()).toBeVisible({ timeout: 15_000 });
 
-  await page.setViewportSize({ width: 320, height: 720 });
+  // THE DIALOG IS OPENED AT THE WIDE VIEWPORT AND THEN NARROWED, deliberately. At 320 px the Clara
+  // rail becomes an OVERLAY (`fixed inset-y-0 right-0 z-40`) and covers the page behind it, so a
+  // click on a page control is intercepted by the rail rather than reaching the button — a shell
+  // behaviour this ticket neither introduced nor owns. What #630 has to prove at 320 px is that the
+  // DIALOG fits and stays operable, and resizing with it open measures exactly that.
   await page.getByRole("button", { name: "Cancel Work" }).click();
   await expect(page.getByRole("dialog")).toBeVisible();
+  await page.setViewportSize({ width: 320, height: 720 });
   await expect(page.getByRole("dialog").getByRole("button", { name: "Cancel this Work" })).toBeVisible();
   const narrow = await page.evaluate(() => ({
     scroll: document.documentElement.scrollWidth,
@@ -247,10 +262,13 @@ test("320 CSS px and 200% zoom: the cancel dialog fits, and the page does not sc
   await page.keyboard.press("Escape");
   await expect(page.getByRole("dialog")).toBeHidden();
 
-  // 200% zoom is the same measurement at half the CSS viewport.
+  // 200% zoom is the same measurement at half the CSS viewport, and the dialog is opened at the
+  // wide viewport for the same reason as above.
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await page.getByRole("button", { name: "Cancel Work" }).click();
+  await expect(page.getByRole("dialog").getByRole("heading", { name: "Cancel this Work?" })).toBeVisible();
   await page.setViewportSize({ width: 640, height: 720 });
   await page.evaluate(() => { document.documentElement.style.zoom = "200%"; });
-  await page.getByRole("button", { name: "Cancel Work" }).click();
   await expect(page.getByRole("dialog").getByRole("heading", { name: "Cancel this Work?" })).toBeVisible();
   const zoomed = await page.evaluate(() => ({
     scroll: document.documentElement.scrollWidth,
