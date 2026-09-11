@@ -523,3 +523,41 @@ test("af.15 a finalized sweep with drafted_count>0 is PRESENT under kind=agent, 
   assert.equal(detail.actor, null);
   assert.equal(detail.event_type, "sweep.run_completed");
 });
+
+// ===========================================================================================
+// 9b · #728 REVIEW ROUND — the sweep helper is a DOOR, not a side channel. Cross-model review
+// (Codex, 2026-09-11) read 0183 and found two holes in the arm above: the helper was
+// clara_authenticated-granted with NO floor of its own, and its clara.sweep_runs lookup was not
+// bound to the event's own firm. Both are pinned here.
+// ===========================================================================================
+
+/** `clara._sweep_run_drafted_count` called DIRECTLY — exactly the way PostgREST reaches it. It
+ *  HAS to carry a clara_authenticated grant (clara.list_activity/clara.get_activity_event are
+ *  SECURITY INVOKER and clara.sweep_runs carries no grant of its own), so "who may call it" is a
+ *  question this battery must answer rather than assume. */
+async function sweepDraftedCount(sub, eventId) {
+  const r = await humanQuery(sub, "select clara._sweep_run_drafted_count($1::uuid) as n", [eventId]);
+  return r.rows[0].n;
+}
+
+test("af.16 the sweep helper carries the feed's OWN bookkeeper floor — a viewer refused by list_activity cannot read a sweep's drafted_count through the helper either", async (t) => {
+  if (await gateSweep(t)) return;
+  const drafted = await mkSweepEvent({ firm: FIRM_A(), draftedCount: 3, expectedCount: 9 });
+
+  // THE BASELINE THAT GIVES THE REFUSAL ITS MEANING: the feed itself refuses this viewer.
+  await assertRaises(CLR04, () => listActivity(CAROL()), "af.16 baseline: list_activity refuses a viewer");
+  // …and so must the helper. Same-firm event ids are readable by ANY member under the firm-only
+  // clara.domain_events read policy (0005), so a floorless clara_authenticated-granted helper
+  // would hand a VIEWER every sweep's drafted_count one id at a time — a side channel round the
+  // floor the door in front of it spends three checks establishing.
+  await assertRaises(CLR04, () => sweepDraftedCount(CAROL(), drafted.eventId),
+    "af.16 the helper refuses the SAME viewer, with the SAME code the door uses");
+
+  // AND THE DOOR IT EXISTS FOR IS UNHARMED — the floor is a floor, not a wall.
+  assert.equal(await sweepDraftedCount(BOB(), drafted.eventId), 3,
+    "af.16 a bookkeeper still reads the one count the feed borrows");
+  const page = await listActivity(BOB(), { kinds: ["agent"], since: drafted.occurredAt, limit: 100 });
+  assert.ok(rowsOf(page).some((r) => r.id === drafted.eventId),
+    "af.16 and the kept sweep row still reaches a bookkeeper's feed");
+});
+
