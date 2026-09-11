@@ -104,6 +104,21 @@ runs:
         RELAY_TEST_MODE=1 \
         WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGC_PORT/clara_wave_b_ci" \
           node tests/work-question-e2e.mjs
+        # #630 — the work-CANCELLATION e2e, AFTER its two siblings and on the same rig. It drives
+        # the ordering boundary in the only place it is real: a cancel that arrives while a posting
+        # transaction holds the Work row lock WAITS and then reports `already_completed`, a cancel
+        # that lands first makes the Work read `stopping` and admits no further operation, a
+        # revocation between the chart read and the write refuses the commit and leaves the revoked
+        # actor unable to read the firm's own rows, and a colleague takes responsibility and posts
+        # exactly one entry. It holds the scripted model in a deterministic window through a gate
+        # FILE rather than a new CLARA_WORK_TEST_FAULT, because claraWork_v2 is deploy-locked and a
+        # test affordance must not mint a new frozen version. It SKIPS CLEANLY (exit 0, printed
+        # reason) when migration 0184 is absent, so it is safe to merge before the DB half lands.
+        PGPORT=$PGC_PORT \
+        PGDATABASE=clara_wave_b_ci \
+        RELAY_TEST_MODE=1 \
+        WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGC_PORT/clara_wave_b_ci" \
+          node tests/work-cancel-e2e.mjs
 
     - name: DR backup/restore self-test (ephemeral postgres:17)
       shell: bash -e {0}
