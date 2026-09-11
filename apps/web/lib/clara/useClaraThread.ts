@@ -200,9 +200,15 @@ export function useClaraThread(
   const sendGenRef = useRef(0);
   /** The send generation a pending stop belongs to, or null when no stop is waiting. */
   const pendingStopRef = useRef<number | null>(null);
-  /** Set false by the unmount cleanup, so nothing writes state into a closed rail. */
+  /** Set false by the unmount cleanup, so nothing writes state into a closed rail. RE-ARMED on
+   *  every mount rather than only initialised: React's StrictMode mounts, unmounts and remounts an
+   *  effect in development, and a flag that only ever goes false would leave the machine silent
+   *  for the life of the page after that first synthetic teardown. */
   const mountedRef = useRef(true);
-  useEffect(() => () => { mountedRef.current = false; pendingStopRef.current = null; }, []);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; pendingStopRef.current = null; };
+  }, []);
   const setStop = useCallback((next: StopReplyState) => {
     if (mountedRef.current) setStopState(next);
   }, []);

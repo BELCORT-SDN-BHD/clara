@@ -35,6 +35,9 @@
 //      respawn the reconciler settles the Work per the receipt law and the terminal is read back.
 //   8. STOP REPLY IS NOT CANCEL WORK. Cancelling the CHAT-TURN task that started a Work leaves the
 //      Work running, and it goes on to complete.
+//   9. A REPLAYED SETTLE FOR A SUPERSEDED RUN. A run ends failed, a human retries, and the dead
+//      run's uncheckpointed settle arrives afterwards: it answers `stale_task`, writes nothing, and
+//      the retried run is still one the estate will let post.
 //
 // THE HOLD IS A TEST-FILE AFFORDANCE, NOT A NEW FROZEN FAULT. `claraWork_v2` is deploy-locked, so a
 // new `CLARA_WORK_TEST_FAULT` arm inside it would mean a whole new version file set for a test
@@ -839,6 +842,72 @@ async function main() {
       if (!engine.state.exited) engine.child.kill("SIGKILL");
       await waitExit(engine.child).catch(() => {});
     }
+  }
+
+  // =========================================================================
+  // 9. A REPLAYED SETTLE FOR A SUPERSEDED RUN — the retry survives it.
+  //
+  // THE MEASURED SHAPE leg 4 CANNOT CARRY. `settleWorkStep` is a durable step, and a run that
+  // dies between its effect and its checkpoint re-executes it on respawn — which is leg 4's whole
+  // subject. What leg 4 cannot add is a RETRY inside that window: its Work reaches `completed`
+  // (the receipt on disk is the witness with standing), and `clara.retry_accounting_work` refuses
+  // any Work that is not `refused`/`failed`/`expired` (0178:1005). So the same window is walked
+  // here with no engine at all: a run that ended FAILED with nothing posted, a human's Retry, and
+  // then the dead run's settle arriving late. The database battery's wc.33 pins the pending
+  // question's survival; this leg pins that the retried run is still a run the estate will honour.
+  // =========================================================================
+  {
+    const ctx = await seedClient("wc-stale");
+    const admitted = await rig.asRuntime((c) =>
+      c.query("select clara.admit_journal_work($1::uuid,$2::uuid,$3::text,$4::jsonb,'user_direct','[]'::jsonb,$5::text) as r", [
+        ctx.client, ctx.owner, randomUUID(),
+        JSON.stringify({
+          posting_date: POSTING_DATE, memo: "office rent — superseded settle", currency: "MYR",
+          lines: [
+            { account_code: "6100", debit_cents: CENTS, credit_cents: 0, description: "office rent" },
+            { account_code: "1100", debit_cents: 0, credit_cents: CENTS, description: "Maybank" },
+          ],
+        }),
+        rig.DEFAULT_MODEL,
+      ]),
+    ).then((r) => r.rows[0].r);
+    const task1 = admitted.task_id;
+
+    const settle = (task, tag) => rig.asRuntime((c) =>
+      c.query("select clara.settle_work_run($1::uuid,'failed','internal',$2::jsonb,null) as r", [
+        task, JSON.stringify({ code: "internal", reason: tag, message: "the run ended", recoverable: true }),
+      ]),
+    ).then((r) => r.rows[0].r);
+
+    const first = await settle(task1, "run_failed");
+    assert.equal(first.replayed, false, "leg 9: the first settle is the real one");
+    assert.equal((await readWork(admitted.work_id)).status, "failed", "leg 9: the Work heard it");
+
+    const retried = await rig.asRuntime((c) =>
+      c.query("select clara.retry_accounting_work($1::uuid,$2::uuid,$3::text) as r",
+        [admitted.work_id, ctx.owner, `retry-${randomUUID()}`]),
+    ).then((r) => r.rows[0].r);
+    assert.notEqual(String(retried.task_id), String(task1), "leg 9: Retry opened a SECOND run");
+
+    // …and NOW the dead run's uncheckpointed settle step re-executes.
+    const replay = await settle(task1, "run_failed");
+    assert.equal(replay.replayed, true, "leg 9: the old run is not settled twice");
+    assert.equal(replay.stale_task, true, "leg 9: the answer names the superseded run by name");
+    assert.equal(replay.converged, null, "leg 9: …and it converged nothing");
+
+    const live = await readWork(admitted.work_id);
+    assert.equal(live.status, "queued", "leg 9: the retried Work is untouched by the dead run's word");
+    assert.equal(String(live.current_task_id), String(retried.task_id), "leg 9: still on the retried run");
+    assert.equal(live.error, null, "leg 9: with no error written over it");
+
+    // THE CONSEQUENCE, not just the row: a Work the stale settle had terminalised would be refused
+    // by the posting core for ever (CLR13 `work_settled`). This one is still admissible.
+    const guard = await rig.asRuntime((c) =>
+      c.query("select status from clara.accounting_work where id=$1", [admitted.work_id]),
+    ).then((r) => r.rows[0].status);
+    assert.equal(TERMINAL.has(guard), false, "leg 9: the Work is not settled, so its run may still post");
+    assert.equal(await countEntries(ctx.client), 0, "leg 9: and nothing was posted along the way");
+    console.log("[wc-e2e] PASS 9: a settle replayed for a superseded run says so and writes nothing");
   }
 
   rmSync(GATE_DIR, { recursive: true, force: true });
