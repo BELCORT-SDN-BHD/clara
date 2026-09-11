@@ -101,8 +101,13 @@ function submitResultKinds(): string[] {
 /** The kinds the composer's `apply` names explicitly. */
 function composerPlacedKinds(): string[] {
   const { code } = readCode(COMPOSER);
-  const start = code.indexOf("const apply = (result: SubmitJournalWorkResult)");
-  assert.ok(start > 0, "the composer no longer declares apply(result)");
+  // `async` is OPTIONAL in this anchor on purpose: `apply` became async when the
+  // `source_conflict` arm had to resolve the CLAIMANT client of the entry the refusal names
+  // (#728 delta review [3]) — a change to ONE arm's body, not to the roster this cell is about.
+  // Matching either spelling keeps the pin on what it claims to watch.
+  const declaration = /const apply = (?:async )?\(result: SubmitJournalWorkResult\)/u.exec(code);
+  assert.ok(declaration, "the composer no longer declares apply(result)");
+  const start = declaration.index;
   const end = code.indexOf("const send = async", start);
   assert.ok(end > start, "apply's body could not be bounded");
   const body = code.slice(start, end);
