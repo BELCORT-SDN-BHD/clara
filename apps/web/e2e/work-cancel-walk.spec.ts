@@ -322,6 +322,12 @@ test("B7: Stop reply and Cancel Work are different controls doing different thin
   // rendered at all there. The rail learns it from the DATABASE's own row, and the fixture arms one.
   await control(page, { op: "live_turn" });
   await control(page, { op: "card" });
+  // …AND THE TRANSCRIPT'S WORK IS PUT BACK IN A CANCELLABLE STATE. The seeded thread's
+  // `work_accepted` part names a Work the fixture seeds COMPLETED (it is the one B6's `work_result`
+  // card reads), and the card offers Cancel Work off the LIVE row rather than off the part — so
+  // without this the correct answer is no control at all, which is the opposite of what this cell
+  // is about.
+  await control(page, { op: "run", workId: JOURNAL_WORK.seededWorkId });
   await page.goto(WORK_LIST_URL);
   const rail = page.locator("[data-clara-rail]");
   await expect(rail).toBeVisible();
