@@ -98,6 +98,12 @@ export const JOURNAL_WORK = {
   freeDocumentName: "september-rent-invoice.pdf",
   takenDocumentId: "d2306002-d230-4d23-8d23-d230d2306002",
   takenDocumentName: "august-rent-invoice.pdf",
+  // #634 review — a document FILED to this client whose BYTES WERE NEVER
+  // VERIFIED. `clara._journal_document_filed` applies the estate's custody floor
+  // (`bytes_verified_at is not null`, 0007:982's own rule), so this one can only
+  // ever come back `not_filed`: the chooser must not offer it at all.
+  unverifiedDocumentId: "d2306003-d230-4d23-8d23-d230d2306003",
+  unverifiedDocumentName: "unverified-upload.pdf",
   /** The control endpoint, as the BROWSER addresses it: the same-origin proxy
    *  maps `/api/runtime/<p>` onto the runtime's `/api/<p>`. */
   controlPath: "/api/runtime/e2e-journal-work/control",
@@ -150,6 +156,14 @@ const DOCUMENTS = [
     created_at: "2026-08-02T00:00:00.000Z", bytes_verified_at: "2026-08-02T00:00:01.000Z", page_count: 1,
     extraction_status: "done", document_kind: "invoice", financial_date: "2026-08-01",
     retention_state: "anchored", retain_until: "2033-08-01", retention_basis: "statutory", legal_hold: false, legal_hold_reason: null,
+  },
+  {
+    // FILED BUT NOT BYTE-VERIFIED — see JOURNAL_WORK.unverifiedDocumentId's note.
+    id: JOURNAL_WORK.unverifiedDocumentId, sha256: "c".repeat(64), original_filename: JOURNAL_WORK.unverifiedDocumentName,
+    mime_type: "application/pdf", byte_size: 20482, storage_path: `firms/${FIRM_ID}/docs/c.pdf`, uploaded_by: SUBJECT,
+    created_at: "2026-09-03T00:00:00.000Z", bytes_verified_at: null, page_count: null,
+    extraction_status: "pending", document_kind: null, financial_date: null,
+    retention_state: "anchored", retain_until: "2033-09-03", retention_basis: "statutory", legal_hold: false, legal_hold_reason: null,
   },
 ];
 
@@ -1042,6 +1056,11 @@ export async function handleJournalWorkRpc(request, response, path, url, sendJso
           document_id: link?.document_id ?? entry.document_id ?? null,
           document_source: link !== null ? link.attached_via : entry.document_id !== null ? "document_coding" : null,
           attached_at: link?.attached_at ?? null,
+          // #634 review: the instant a REVERSAL freed the binding, or null. The
+          // fixture never reverses, so it is always null here — the column is
+          // carried so the shape matches the door's and a surface that reads it
+          // is exercised rather than silently defaulting.
+          released_at: link?.released_at ?? null,
           reversal_of: entry.reversal_of,
           reversed_by: entry.reversed_by,
           reversal_reason: entry.reversal_reason,

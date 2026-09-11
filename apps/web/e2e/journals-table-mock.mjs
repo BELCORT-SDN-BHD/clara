@@ -60,6 +60,9 @@ export const JOURNALS = {
   march: "c1c1c1c1-3333-4333-8333-333333333333",
   draft: "d1d1d1d1-4444-4444-8444-444444444444",
   question: "Which financial year does this invoice belong to?",
+  // #634 — the Work and the operation receipt behind the `backdated` entry.
+  workId: "cafe0001-cafe-4caf-8caf-cafecafe0001",
+  receiptId: "cafe0002-cafe-4caf-8caf-cafecafe0002",
 };
 
 const CLIENT = {
@@ -147,6 +150,32 @@ async function readJson(request) {
 }
 
 /** The PostgREST half. Returns true when it answered. */
+/** #634 — one `clara.list_entry_links` row per POSTED entry of this fixture.
+ *  `recent` came from the DOCUMENT-CODING lane (it carries `document_id` on the
+ *  entry itself) and `backdated` from an accounting Work with no source at all,
+ *  so the walk can read BOTH honest answers — a named source and "No document" —
+ *  off the same table. */
+const LINKS = [
+  {
+    entry_id: JOURNALS.backdated,
+    status: "approved", origin: "manual",
+    work_id: JOURNALS.workId, receipt_id: JOURNALS.receiptId,
+    logical_op_id: `work:${JOURNALS.workId}:journal_entry:1`,
+    purpose: "journal_entry", basis_origin: "user_direct",
+    initiator: "11111111-1111-4111-8111-111111111111", initiator_role: "bookkeeper",
+    document_id: null, document_source: null, attached_at: null, released_at: null,
+    reversal_of: null, reversed_by: null, reversal_reason: null,
+  },
+  {
+    entry_id: JOURNALS.recent,
+    status: "approved", origin: "document",
+    work_id: null, receipt_id: null, logical_op_id: null,
+    purpose: null, basis_origin: null, initiator: null, initiator_role: null,
+    document_id: "doc-1", document_source: "document_coding", attached_at: null, released_at: null,
+    reversal_of: null, reversed_by: null, reversal_reason: null,
+  },
+];
+
 export async function handleJournalsTableSupabase(request, response, path, url, sendJson, cors) {
   const client = url.searchParams.get("client_id");
   const ours = `eq.${JOURNALS.clientId}`;
@@ -200,6 +229,23 @@ export async function handleJournalsTableSupabase(request, response, path, url, 
     if (url.searchParams.get("status") !== "eq.pending") return false;
     if (url.searchParams.get("task_id") || url.searchParams.get("id")) return false;
     sendJson(response, 200, [INTERRUPTION], cors);
+    return true;
+  }
+
+  if (request.method === "POST" && path === "/rest/v1/rpc/list_entry_links") {
+    // #634 — the Work / operation receipt / source document / correction chain
+    // the row detail discloses. SCOPED BY THE RPC's OWN ARGUMENT, so
+    // `serve-built.mjs`'s honest empty default still answers every other lane.
+    //
+    // The rows are the shape `clara.list_entry_links` returns, and they carry
+    // the THREE facts the table has no other way to show: which Work recorded
+    // the entry, which operation receipt proves it, and which document (if any)
+    // stands behind it. `released_at` is null on both because this fixture
+    // reverses nothing.
+    const body = await readJson(request);
+    if (body?.p_client !== JOURNALS.clientId) return false;
+    const asked = Array.isArray(body?.p_entries) ? body.p_entries : [];
+    sendJson(response, 200, LINKS.filter((row) => asked.includes(row.entry_id)), cors);
     return true;
   }
 

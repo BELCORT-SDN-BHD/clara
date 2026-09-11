@@ -312,6 +312,7 @@ lib/settings/preference-state.test.ts
 lib/settings/preferences.test.ts
 lib/wire.test.ts
 lib/work/api.test.ts
+lib/work/evidence.test.ts
 lib/work/journal-basis.test.ts
 lib/work/journal-draft.test.ts
 lib/work/question-fields.test.ts
@@ -338,6 +339,7 @@ tests/invite-courier-egress.test.ts
 tests/invite-courier.test.ts
 tests/invite-mail-transport.test.ts
 tests/invite-verification.test.ts
+tests/journal-refusal-roster.test.ts
 tests/parity-holes.test.ts
 tests/password-recovery-handler.test.ts
 tests/proxy-matcher.test.ts
@@ -356,5 +358,3 @@ tests/streamAuthority.test.mjs
 tests/streamParser.test.mjs
 tests/streamReattach.test.mjs
 tests/token-contrast.test.ts
-tests/journal-refusal-roster.test.ts
-lib/work/evidence.test.ts

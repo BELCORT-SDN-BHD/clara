@@ -98,6 +98,20 @@ function workIdIn(url: string): string {
 
 const evidence = (page: Page) => page.locator("#journal-basis-evidence");
 
+/** One Work composed with NO document and run through to a posted entry — the
+ *  state the late door exists for. Returns the Work id. */
+async function postedDocumentlessWork(page: Page): Promise<string> {
+  await page.goto(COMPOSER_URL);
+  await fillBalancedBasis(page);
+  await page.getByRole("button", { name: "Submit" }).click();
+  await expect(page).toHaveURL(/\/work\/[0-9a-f-]{36}$/, { timeout: 20_000 });
+  const workId = workIdIn(page.url());
+  await control(page, { op: "run", workId });
+  await control(page, { op: "complete", workId });
+  await page.reload();
+  return workId;
+}
+
 test.beforeEach(async ({ page }) => {
   await signInTo(page, WORK_LIST_URL);
   await control(page, { op: "reset" });
@@ -250,7 +264,6 @@ test("B3: LATE attachment on a posted documentless entry — happy, replay, and 
   await expect(dialog.getByText("already backs another posted entry", { exact: false })).toHaveCount(0);
   await dialog.getByRole("button", { name: "Attach", exact: true }).click();
   await expect(page.getByRole("dialog")).toHaveCount(0);
-  // FOCUS RETURNS TO THE TRIGGER the dialog was opened from (§4).
   await expect(page.getByText(JOURNAL_WORK.freeDocumentId, { exact: false })).toBeVisible();
 
   // THE ENTRY NOW CARRIES ITS SOURCE, read back from the database — and the door
@@ -339,4 +352,55 @@ test("t634 renders at 320 px, at 200 % zoom, by keyboard, and with reduced motio
   await expect(evidence(page)).toBeFocused();
   await evidence(page).selectOption(JOURNAL_WORK.freeDocumentId);
   await expect(evidence(page)).toHaveValue(JOURNAL_WORK.freeDocumentId);
+});
+
+test("B3: ESCAPE closes the attach dialog and RETURNS focus to the trigger", async ({ page }) => {
+  // §4's dialog law, and the half only a real browser can hold: `Escape`, and
+  // focus RETURNING to the control the dialog was opened from. An earlier cut of
+  // this walk carried a comment claiming the return and asserted only that a
+  // document was on screen — the comment was doing the work the cell was not.
+  await postedDocumentlessWork(page);
+
+  const trigger = page.getByRole("button", { name: "Attach evidence" });
+  await expect(trigger).toBeVisible();
+  await ensureRealFocus(page);
+  await trigger.click();
+
+  const dialog = page.getByRole("dialog");
+  await expect(dialog.locator("#attach-evidence-document")).toBeFocused();
+  // A CHOICE MADE, THEN ABANDONED: Escape must not be a way to half-commit it.
+  await dialog.locator("#attach-evidence-document").selectOption(JOURNAL_WORK.freeDocumentId);
+
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(trigger).toBeFocused();
+
+  // NOTHING WAS ATTACHED — the entry still says so, and the door is still there.
+  await expect(page.getByText("No document", { exact: true }).first()).toBeVisible();
+  await expect(trigger).toBeVisible();
+
+  // …and the CHOICE SURVIVES a re-open, so abandoning a dialog is not the same
+  // as losing the one piece of state the human just produced.
+  await trigger.click();
+  await expect(page.getByRole("dialog").locator("#attach-evidence-document"))
+    .toHaveValue(JOURNAL_WORK.freeDocumentId);
+});
+
+test("t634: an UNVERIFIED filed document is offered by NEITHER chooser", async ({ page }) => {
+  // Cross-model review, confirmed against migration 0182:
+  // `clara._journal_document_filed` requires `bytes_verified_at is not null`, so
+  // an unverified upload can only ever come back `not_filed`. A chooser that
+  // offers it is a form inviting a refusal it could have predicted.
+  await page.goto(COMPOSER_URL);
+  await expect(evidence(page)).toBeVisible();
+  await expect(evidence(page).locator("option", { hasText: JOURNAL_WORK.freeDocumentName })).toHaveCount(1);
+  await expect(evidence(page).locator("option", { hasText: JOURNAL_WORK.unverifiedDocumentName })).toHaveCount(0);
+
+  // The LATE door's chooser is the same list, and must agree.
+  await postedDocumentlessWork(page);
+  await ensureRealFocus(page);
+  await page.getByRole("button", { name: "Attach evidence" }).click();
+  const chooser = page.getByRole("dialog").locator("#attach-evidence-document");
+  await expect(chooser.locator("option", { hasText: JOURNAL_WORK.freeDocumentName })).toHaveCount(1);
+  await expect(chooser.locator("option", { hasText: JOURNAL_WORK.unverifiedDocumentName })).toHaveCount(0);
 });

@@ -169,3 +169,38 @@ test("axe is clean on all three journals tabs", async ({ page }) => {
     expect(result.violations, `journals tab ${String(tab)} axe violations`).toEqual([]);
   }
 });
+
+test("t634: an expanded posted row discloses its Work, its receipt and its source — both honest answers", async ({ page }) => {
+  // #634 asks the journals surface to expose purpose, source, Work, receipt and
+  // the correction chain. Only a browser can prove the DISCLOSURE actually paints
+  // them: the unit cells hold the model, and the mock lane holds the rows.
+  await signInTo(page, JOURNALS_URL);
+  await openPostedTab(page);
+
+  // 1 · THE WORK-RECORDED ENTRY, with no source. "No document" is written out —
+  // an entry recorded without evidence is a legitimate state, not a gap.
+  const fromWork = page.locator("table tbody tr").filter({ hasText: "BACKDATED January rent" }).first();
+  await fromWork.getByRole("button", { name: "View" }).click();
+  await expect(page.getByText("Purpose", { exact: true })).toBeVisible();
+  await expect(page.getByText("Journal entry", { exact: true })).toBeVisible();
+  await expect(page.getByText("Typed by a person", { exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Open the Work" })).toBeVisible();
+  await expect(page.getByText("No document", { exact: true })).toBeVisible();
+
+  // THE RECEIPT IS OBTAINABLE, not merely recognisable: the short form to read,
+  // and a copy control for the whole id — which is what a professional quotes to
+  // somebody else. A `title` tooltip is unreachable by keyboard and invisible on
+  // touch, which is why it is not the only affordance.
+  await expect(page.getByText("Receipt", { exact: true })).toBeVisible();
+  const copy = page.getByRole("button", { name: "Copy", exact: true });
+  await expect(copy).toBeVisible();
+  await copy.click();
+  await expect(page.getByRole("button", { name: "Copied", exact: true })).toBeVisible();
+
+  // 2 · THE DOCUMENT-CODED ENTRY, whose source came from the OTHER lane — the
+  // surface names the lane rather than guessing from a non-null id.
+  await fromWork.getByRole("button", { name: "Hide" }).click();
+  const fromDocument = page.locator("table tbody tr").filter({ hasText: "RECENT April utilities" }).first();
+  await fromDocument.getByRole("button", { name: "View" }).click();
+  await expect(page.getByText("Coded from the document", { exact: true })).toBeVisible();
+});
