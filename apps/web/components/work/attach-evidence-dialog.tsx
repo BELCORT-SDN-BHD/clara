@@ -276,32 +276,15 @@ export function AttachEvidenceDialog({
     // `operation_in_flight` or with the original result rather than attaching
     // again under a fresh identity.
     if (answer.kind !== "unavailable") opKey.current = crypto.randomUUID();
-    // ALWAYS re-read, refusal included: a stale-revision refusal in particular
-    // means the caller's copy of the entry is wrong, and the fix is a fresh read.
-    await onAttached();
-    // THE CLAIMANT IS NOT READ HERE AT ALL (delta review round 4, SHOULD-FIX [6] / NIT [4]).
-    // Round 3 put it last-and-bounded, which fixed nothing a person feels: it still sat IN FRONT
-    // of the focus recovery below, so a PostgREST worker that accepts the connection and stalls
-    // left a keyboard or screen-reader user inside an open modal with focus on <body> for the full
-    // five seconds — and longer, because `getRows` awaits `session.getAccessToken()` BEFORE the
-    // signal ever reaches the wire (lib/read.ts), so a stalled token refresh is outside the
-    // timeout altogether. The claimant is resolved by the effect above instead, exactly as the
-    // composer does it: nothing on screen, and nothing about where focus sits, waits for a read
-    // this file's own comment calls an upgrade that "must cost a link, not the dialog".
-    if (answer.kind === "attached") {
-      setOpen(false);
-      setResult(null);
-      setDocumentId("");
-      // #728 finding 3 — `nextPaint` (the SAME timing #629's own row-focus fix uses) is awaited
-      // before moving focus, because the reload above resolves one tick before React actually
-      // commits this affordance's removal — focusing before that commit would target a node the
-      // browser is about to detach, reproducing the exact defect this fix exists to close.
-      // `restoreFocusAfterRow(null, landmark)` is `null` for the trigger deliberately: this
-      // affordance is now known to be gone (the condition that rendered it just became false), so
-      // there is no trigger left to check — the call always lands on the landmark.
-      await nextPaint();
-      restoreFocusAfterRow(null, landmark);
-    } else {
+    // THE REFUSAL'S FOCUS RECOVERY RUNS FIRST — before the re-read, not after it (delta
+    // review round 4, the residual behind finding [4]). Moving the advisory claimant read out
+    // of the way left one await still in front of this: `onAttached()`, which is authoritative
+    // and must always run, but carries no bound at all — so a stalled re-read stranded focus on
+    // <body> for EVER, worse than the five seconds the review measured. Nothing about where a
+    // person stands inside this dialog depends on the entry behind it: the refusal's one next
+    // act is to choose another document, right here. The composer focuses its evidence control
+    // in the same tick it sets the phase (journal-composer.tsx `apply`); this is the parity.
+    if (answer.kind !== "attached") {
       // #728 finding 3, review round (N8) — A REFUSAL STRANDS FOCUS unless this fires. `busy`
       // disables the select, Cancel AND Attach for the duration of the write, so the Attach button
       // focus was on is disabled UNDER the person's cursor and the browser drops focus to <body>;
@@ -336,6 +319,32 @@ export function AttachEvidenceDialog({
         || tag === "SELECT" || tag === "TEXTAREA";
       const stranded = !onALiveControl || active === confirmRef.current;
       if (openRef.current && stranded) selectRef.current?.focus();
+    }
+    // ALWAYS re-read, refusal included: a stale-revision refusal in particular
+    // means the caller's copy of the entry is wrong, and the fix is a fresh read.
+    await onAttached();
+    // THE CLAIMANT IS NOT READ HERE AT ALL (delta review round 4, SHOULD-FIX [6] / NIT [4]).
+    // Round 3 put it last-and-bounded, which fixed nothing a person feels: it still sat IN FRONT
+    // of the focus recovery above, so a PostgREST worker that accepts the connection and stalls
+    // left a keyboard or screen-reader user inside an open modal with focus on <body> for the full
+    // five seconds — and longer, because `getRows` awaits `session.getAccessToken()` BEFORE the
+    // signal ever reaches the wire (lib/read.ts), so a stalled token refresh is outside the
+    // timeout altogether. The claimant is resolved by the effect above instead, exactly as the
+    // composer does it: nothing on screen, and nothing about where focus sits, waits for a read
+    // this file's own comment calls an upgrade that "must cost a link, not the dialog".
+    if (answer.kind === "attached") {
+      setOpen(false);
+      setResult(null);
+      setDocumentId("");
+      // #728 finding 3 — `nextPaint` (the SAME timing #629's own row-focus fix uses) is awaited
+      // before moving focus, because the reload above resolves one tick before React actually
+      // commits this affordance's removal — focusing before that commit would target a node the
+      // browser is about to detach, reproducing the exact defect this fix exists to close.
+      // `restoreFocusAfterRow(null, landmark)` is `null` for the trigger deliberately: this
+      // affordance is now known to be gone (the condition that rendered it just became false), so
+      // there is no trigger left to check — the call always lands on the landmark.
+      await nextPaint();
+      restoreFocusAfterRow(null, landmark);
     }
   };
 

@@ -825,3 +825,37 @@ test("t728g: the claimant read is abandoned by its own TIMEOUT, not only by clos
     (globalThis as { setTimeout: unknown }).setTimeout = realSetTimeout;
   }
 });
+
+test("t728g: a re-read that never answers does not hold the refusal's focus recovery either", async () => {
+  // The residual behind finding [4]. Moving the CLAIMANT read out of the way leaves one more
+  // await in front of the focus recovery: `onAttached()`, the authoritative re-read. That one is
+  // not advisory and must always run — but the refusal's next act is inside THIS dialog (choose
+  // another document), and nothing about where focus sits depends on the entry behind it. It also
+  // carries no bound at all, so a stalled re-read stranded focus on <body> for ever — strictly
+  // worse than the five seconds the review measured. The composer focuses its evidence control in
+  // the same tick it sets the phase (journal-composer.tsx `apply`); this is the dialog's parity.
+  const h = await renderComponent(
+    App({
+      attach: async () => ({ kind: "source_conflict" }),
+      // Never settles. The re-read still runs — it is simply no longer in front of the person's
+      // place in the dialog.
+      onAttached: (() => new Promise(() => {})) as never,
+      findEntry: (async () => null) as never,
+    }),
+  );
+  try {
+    await openDialog(h);
+    await choose(h, DOCUMENTS[0]!.documentId);
+    await pressAttach(h);
+
+    assert.match(bodyText(), /already backs another posted entry/,
+      "the refusal paints while the re-read is still in flight");
+    assert.ok(activeElement() === selectIn(),
+      "focus is on the document chooser although the re-read has not answered — an unbounded "
+      + `read must not hold a person's place inside an open modal (active element was `
+      + `${String((activeElement() as { tagName?: string } | null)?.tagName ?? "none")})`);
+  } finally {
+    await h.unmount();
+    await drain(h);
+  }
+});
