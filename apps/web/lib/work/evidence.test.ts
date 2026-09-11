@@ -160,9 +160,14 @@ test("t728: listSpokenForDocuments reads the RPC and returns the rows verbatim",
   );
 });
 
-test("t728: listSpokenForDocuments reports a malformed (non-array) envelope as empty, never a crash", async () => {
+test("t728: listSpokenForDocuments THROWS on a malformed (non-array) envelope — never an empty answer", async () => {
+  // An empty array is a REAL answer meaning "nothing is spoken for", and every caller renders it
+  // by enabling every option. Coercing a malformed envelope into it would silently turn "we could
+  // not check" into "we checked and it is free" — the exact conflation mergeSpokenFor's third
+  // state exists to prevent (review round, N11). Both callers catch and show their own
+  // "check unavailable" line, which the two picker cells pin.
   await withRows(() => ({ not: "an array" }), async () => {
-    assert.deepEqual(await listSpokenForDocuments(CLIENT, { session }), []);
+    await assert.rejects(() => listSpokenForDocuments(CLIENT, { session }), /array of rows/);
   });
 });
 

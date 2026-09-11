@@ -127,18 +127,22 @@ export type SpokenForDocumentRow = {
  * entry of ANY client of the firm, with the claimant named.
  *
  * A SETOF/TABLE function is always an array on the wire (the same shape `lib/firm/timeline.ts`'s
- * own `listFirmTimeline` reads) — anything else is reported as empty rather than coerced into a
- * fabricated row. This module never treats a malformed envelope as "call it again"; the merge
- * below treats an EMPTY array from a genuinely-failed read as indistinguishable from a client with
- * nothing spoken for, which is why `mergeSpokenFor` takes a THIRD state (unavailable) rather than
- * inferring it from an empty list.
+ * own `listFirmTimeline` reads). Anything else THROWS rather than resolving to `[]`: an empty
+ * array is a real answer meaning "nothing is spoken for", and every caller renders it by enabling
+ * every option. Coercing a malformed envelope into that answer would silently turn "we could not
+ * check" into "we checked and it is free" — the exact conflation `mergeSpokenFor`'s third state
+ * exists to prevent (cross-model review, 2026-09-11). The callers already catch and show their
+ * own "check unavailable" line, so a throw is the honest shape, not a crash.
  */
 export async function listSpokenForDocuments(
   clientId: string,
   opts: Opts = {},
 ): Promise<SpokenForDocumentRow[]> {
   const out = await callDoor<unknown>("list_spoken_for_documents", { p_client: clientId }, opts);
-  return Array.isArray(out) ? (out as SpokenForDocumentRow[]) : [];
+  if (!Array.isArray(out)) {
+    throw new Error("list_spoken_for_documents did not answer with an array of rows");
+  }
+  return out as SpokenForDocumentRow[];
 }
 
 /** An `EvidenceDocument` plus the ONE fact the picker renders it with: null when the document is

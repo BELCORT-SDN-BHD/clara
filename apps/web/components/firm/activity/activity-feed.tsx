@@ -104,11 +104,19 @@ export function ActivityFeed() {
   // keypress last touched stays put through the `router.back()`/`router.replace()` that follows —
   // browser-walked correctly, per the ticket), which is exactly why this effect CHECKS first
   // rather than always acting: the physical browser Back button (or a swipe-back gesture) never
-  // itself held DOM focus, so an SPA re-render that follows a pop leaves focus nowhere, and this
-  // is the belt that catches that path (and any other that leaves focus nowhere) without touching
-  // the path that already works. `nextPaint` (the SAME timing #629's own row-focus fix uses,
-  // components/firm/work-question-affordance.tsx) is awaited before checking `activeElement`,
-  // because the Sheet's own close is not necessarily synchronous with the URL settling.
+  // itself held DOM focus, so an SPA re-render that follows a pop leaves focus nowhere. `nextPaint`
+  // (the SAME timing #629's own row-focus fix uses, components/firm/work-question-affordance.tsx)
+  // is awaited before checking `activeElement`, because the Sheet's own close is not necessarily
+  // synchronous with the URL settling.
+  //
+  // EXACTLY ONE TRANSITION, NAMED (review round): `?event=` going from set to unset. The Sheet also
+  // disappears when a refresh turns this component into its loading / denied / failed-first-read
+  // branch WITHOUT the URL changing, and this effect does NOT fire on those — `state.event` is
+  // unchanged, so the dependency never re-runs. That is deliberate rather than overlooked: those
+  // three branches replace the whole list (the row to return to is gone, and two of them do not
+  // render the page heading either), so there is nothing here to move focus TO; the honest fix for
+  // them is a focus target inside those banners, which is a different change on a different
+  // surface. Said out loud so the next reader does not take this belt for more than it is.
   useEffect(() => {
     const key = state.event ? formatEventParam(state.event.source, state.event.id) : null;
     const prevKey = lastEventKeyRef.current;
@@ -127,8 +135,14 @@ export function ActivityFeed() {
         return;
       }
       // The row is gone (filters changed, it scrolled past the loaded page) — the list's own
-      // heading landmark, exactly the #629 "nearest enclosing landmark" fallback.
-      const heading = document.getElementById(ACTIVITY_HEADING_ID);
+      // heading landmark, exactly the #629 "nearest enclosing landmark" fallback. BOTH the method
+      // and its answer are checked, the same way components/work/work-detail.tsx:201-206 checks
+      // them: the page heading lives in app/(firm)/activity/page.tsx, one level above this
+      // component, so a caller that renders the feed alone has no such element — and a test DOM
+      // need not implement `getElementById` at all.
+      const doc = document as unknown as { getElementById?: (id: string) => HTMLElement | null };
+      if (typeof doc.getElementById !== "function") return;
+      const heading = doc.getElementById(ACTIVITY_HEADING_ID);
       if (heading) {
         if (!heading.hasAttribute("tabindex")) heading.setAttribute("tabindex", "-1");
         heading.focus();

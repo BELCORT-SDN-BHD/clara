@@ -248,10 +248,16 @@ export function AttachEvidenceDialog({
       // there is no trigger left to check — the call always lands on the landmark.
       await nextPaint();
       restoreFocusAfterRow(null, landmark);
+    } else {
+      // #728 finding 3, review round (N8) — A REFUSAL STRANDS FOCUS unless this fires. `busy`
+      // disables the select, Cancel AND Attach for the duration of the write, so the Attach button
+      // focus was on is disabled UNDER the person's cursor and the browser drops focus to <body>;
+      // re-enabling the controls afterwards does not bring it back. Focus goes to the ONE control
+      // this refusal asks them to change — not to the refusal banner, which is already the single
+      // announcement owner (role="status" inside AttachOutcome) and would be read twice.
+      await nextPaint();
+      selectRef.current?.focus();
     }
-    // A REFUSED attempt changes nothing about where focus is: the dialog stays open (see this
-    // file's own header, "the choice survives a refusal") and Base UI's Dialog primitive owns
-    // focus while it is open — this fix touches only the path that unmounts something.
   };
 
   // `spokenFor` is already `null` both before the first read settles and after a failed one
@@ -309,6 +315,7 @@ export function AttachEvidenceDialog({
               // because an `<option>` cannot carry either.
               <option key={doc.documentId} value={doc.documentId} disabled={doc.spokenFor !== null}>
                 {optionLabel(doc, t)}
+                {doc.spokenFor !== null ? ` — ${tWalk("evidenceSpokenForOption")}` : ""}
               </option>
             ))}
           </NativeSelect>
@@ -320,7 +327,7 @@ export function AttachEvidenceDialog({
           {spokenForUnavailable ? (
             <p className="text-xs text-muted-foreground">{tWalk("evidenceSpokenForUnavailable")}</p>
           ) : null}
-          <SpokenForNotes clientId={clientId} options={list} />
+          <SpokenForNotes clientId={clientId} options={list} selectedDocumentId={documentId} />
           <AttachOutcome clientId={clientId} conflictEntry={conflictEntry} result={result} />
         </div>
         <DialogFooter>

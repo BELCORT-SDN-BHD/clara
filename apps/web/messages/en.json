@@ -4101,6 +4101,8 @@
     "agentActorLabel": "Clara",
     "systemActorLabel": "Clara (system)",
     "evidenceSpokenFor": "{name} already backs a posted journal entry.",
+    "evidenceSpokenForOption": "already backs a posted entry",
+    "evidenceSpokenForSummary": "{count, plural, =1 {One of these documents already backs a posted journal entry and cannot be chosen.} other {# of these documents already back a posted journal entry and cannot be chosen.}}",
     "evidenceSpokenForElsewhere": "{name} already backs a posted journal entry for {client}.",
     "evidenceSpokenForUnnamedClient": "another client",
     "evidenceSpokenForLink": "View that journal entry",

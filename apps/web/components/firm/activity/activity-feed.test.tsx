@@ -295,7 +295,9 @@ test("ActivityFeed: history Back out of the Sheet returns focus to the row that 
 
         const row = h.find((n) => (n as { getAttribute?: (k: string) => string | null }).getAttribute?.("data-activity-row-key") === `event:${ROW.id}`);
         assert.ok(row, "the row must still be rendered");
-        assert.equal(activeElement(), row, "focus lands back on the row that opened the Sheet, never on <body>");
+        // `assert.ok(a === b)`, never `assert.equal` — two stub-DOM nodes handed to node:assert's
+        // deep-equality path HANG the runner on this harness (LANE-RECIPE's own measured note).
+        assert.ok(activeElement() === row, "focus lands back on the row that opened the Sheet, never on <body>");
       } finally {
         await h.unmount();
       }
@@ -320,20 +322,88 @@ test("ActivityFeed: an IN-PAGE close (something already holds focus) is left unt
         // Something OTHER than the row or the heading already holds focus (e.g. the filter
         // control an in-page close left focus on) — never reset it to body first.
         const filterControl = h.find((n) => (n as { tagName?: string }).tagName === "SELECT" || (n as { tagName?: string }).tagName === "INPUT");
-        if (filterControl && typeof (filterControl as { focus?: () => void }).focus === "function") {
-          (filterControl as { focus: () => void }).focus();
-        }
+        // ASSERTED, not guarded: an `if (filterControl)` wrapper turns "the filters did not render"
+        // into a silent pass, which is the one outcome that would make the rest of this cell prove
+        // nothing (review round, N17).
+        assert.ok(filterControl, "the filter controls render — this cell needs a real focus holder");
+        (filterControl as { focus: () => void }).focus();
         const before = activeElement();
+        assert.ok(before === filterControl, "setup: the filter control really holds focus");
 
         await h.rerender(App(createElement(ActivityFeed)) as never);
         for (let i = 0; i < 6; i++) await h.settle();
 
-        if (filterControl) {
-          assert.equal(activeElement(), before, "focus that was already somewhere real must not be moved");
-        }
+        assert.ok(activeElement() === before, "focus that was already somewhere real must not be moved");
       } finally {
         await h.unmount();
       }
     },
   );
+});
+
+test("ActivityFeed: when the row that opened the Sheet is NOT in the loaded page, Back focuses the list's heading landmark instead", async () => {
+  // THE FALLBACK ARM, which had no pin of its own (review round, N15). It is reached whenever the
+  // key the Sheet was opened under names no rendered row — the filters moved, the row aged past
+  // the loaded page, or (modelled here, because it needs nothing else to change) a `?event=` deep
+  // link straight to an event the first page does not carry.
+  const ROW = activityRow();
+  const ABSENT = "e9999999-9999-4999-8999-999999999999";
+  // The stub `document` implements no `getElementById` (only work-detail.test.tsx has ever needed
+  // one), so this cell installs the same kind of probe that file does — which is also what makes
+  // the focused id observable at all.
+  const doc = globalThis.document as unknown as {
+    getElementById?: (id: string) => unknown;
+    activeElement: unknown;
+    body: unknown;
+  };
+  const original = doc.getElementById;
+  const focused: string[] = [];
+  const attrs = new Map<string, string>();
+  doc.getElementById = (id: string) => ({
+    focus: () => focused.push(id),
+    hasAttribute: (name: string) => attrs.has(name),
+    setAttribute: (name: string, value: string) => { attrs.set(name, value); },
+  });
+  try {
+    await withMockedEnv(
+      (async (url: RequestInfo | URL) => {
+        const u = String(url);
+        if (u.includes("/rest/v1/clients")) return jsonResponse([ACTIVITY_CLIENT]);
+        if (u.includes("/rest/v1/firm_members_visible")) return jsonResponse(MEMBERS);
+        if (u.includes("/rest/v1/rpc/list_activity")) {
+          return jsonResponse({ rows: [ROW], next_cursor: null, truncated: false });
+        }
+        if (u.includes("/rest/v1/rpc/get_activity_event")) {
+          return jsonResponse({ ...ROW, id: ABSENT, client_name: null });
+        }
+        throw new Error(`unexpected fetch ${u}`);
+      }) as typeof fetch,
+      async () => {
+        const h = await renderComponent(App(createElement(ActivityFeed)) as never);
+        try {
+          for (let i = 0; i < 5; i++) await h.settle();
+          await h.rerender(App(createElement(ActivityFeed), `event=event:${ABSENT}`) as never);
+          for (let i = 0; i < 5; i++) await h.settle();
+
+          // The same named harness gap as the cell above: this stub DOM does not reset
+          // activeElement when a focused subtree is removed, so the premise a physical Back press
+          // produces is set explicitly.
+          doc.activeElement = doc.body;
+
+          await h.rerender(App(createElement(ActivityFeed)) as never);
+          for (let i = 0; i < 6; i++) await h.settle();
+
+          assert.deepEqual(focused, ["activity-feed-heading"],
+            "with no row to return to, focus lands on the list's heading landmark — never left on <body>");
+          assert.equal(attrs.get("tabindex"), "-1",
+            "a heading is not natively focusable: the fallback must make it a real target first");
+        } finally {
+          await h.unmount();
+        }
+      },
+    );
+  } finally {
+    if (original === undefined) delete doc.getElementById;
+    else doc.getElementById = original;
+  }
 });

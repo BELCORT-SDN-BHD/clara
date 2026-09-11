@@ -384,7 +384,9 @@ test("t728: a SUCCESSFUL attach moves focus to the 'What was recorded' landmark,
 
     const heading = findIn(bodyNode(), (n) => n.tagName === "H2" && textOf(n as never) === "What was recorded");
     assert.ok(heading, "the section heading must render");
-    assert.equal(activeElement(), heading, "focus lands on the landmark, never on <body>, once the affordance is gone");
+    // `assert.ok(a === b)`, never `assert.equal` — two stub-DOM nodes handed to node:assert's
+    // deep-equality path HANG the runner on this harness (LANE-RECIPE's own measured note).
+    assert.ok(activeElement() === heading, "focus lands on the landmark, never on <body>, once the affordance is gone");
     assert.equal((heading as { getAttribute?: (k: string) => string | null }).getAttribute?.("tabindex"), "-1",
       "a heading is not natively focusable — the fix must give it tabIndex=-1 to be a real target");
   } finally {
@@ -393,7 +395,7 @@ test("t728: a SUCCESSFUL attach moves focus to the 'What was recorded' landmark,
   }
 });
 
-test("t728: a REFUSED attach leaves the dialog open and does NOT move focus to the landmark", async () => {
+test("t728: a REFUSED attach keeps the dialog open and puts focus on the control the refusal asks about", async () => {
   const h = await renderComponent(App({ attach: async () => ({ kind: "invalid_document" }) }));
   try {
     await openDialog(h);
@@ -401,9 +403,16 @@ test("t728: a REFUSED attach leaves the dialog open and does NOT move focus to t
     await pressAttach(h);
     for (let i = 0; i < 4; i++) await h.settle();
 
+    // A POSITIVE TARGET, not "not the landmark" (review round, N13): `busy` disables the select,
+    // Cancel AND Attach for the duration of the write, so the button focus was on is disabled
+    // under the person's cursor and a real browser drops focus to <body> — re-enabling does not
+    // bring it back. "Focus is not on the landmark" would pass with focus nowhere at all, which is
+    // exactly the defect. Assert where it IS: the one control this refusal asks them to change.
+    const select = selectIn();
+    assert.ok(select, "the chooser is still mounted — the dialog stays open through a refusal");
+    assert.ok(activeElement() === select, "focus returns to the chooser, never stranded on <body>");
     const heading = findIn(bodyNode(), (n) => n.tagName === "H2" && textOf(n as never) === "What was recorded");
-    assert.notEqual(activeElement(), heading,
-      "a refusal changes nothing about focus — the dialog stays open (this file's own header), so the landmark fix must not fire");
+    assert.ok(activeElement() !== heading, "…and NOT on the landmark, which belongs to the path that unmounts this affordance");
     // The dialog is still open and showing the refusal, per the existing refusal cells above.
     assert.match(bodyText(), /not an active filed document/);
   } finally {
@@ -435,12 +444,29 @@ test("t728: a document already spoken for renders DISABLED with a reason and a l
     assert.ok(freeOption, "the other document is still offered");
     assert.notEqual((freeOption as { disabled?: unknown }).disabled, true, "…and stays selectable — the advisory read must not disable what it did not name");
 
-    assert.match(bodyText(), /already backs a posted journal entry/, "the reason renders beside the select, where an <option> has no room for it");
+    // WHILE BROWSING: the reason rides the OPTION's own label (bounded — one option, one label)
+    // and ONE summary line says how many are unavailable. The per-document paragraph-and-link the
+    // first cut rendered for EVERY spoken-for document is gone: on a client a year in, that list is
+    // most of its filing history (review round, N9).
+    assert.match(textOf(spokenForOption as never), /already backs a posted entry/,
+      "the disabled option says WHY on itself — C08.6, and the one place a browsing person reads");
+    assert.match(bodyText(), /already backs a posted journal entry and cannot be chosen/,
+      "one summary line beside the select, whatever the count");
+    const unselectedLink = findIn(
+      bodyNode(),
+      (n) => n.tagName === "A" && String((n as { getAttribute?: (k: string) => string | null }).getAttribute?.("href") ?? "").includes(OTHER_ENTRY),
+    );
+    assert.equal(unselectedLink, null,
+      "…and NO link while nothing is selected — the link belongs to the one document whose conflict is the person's own");
+
+    // WHEN THEIR OWN CHOICE IS THE CONFLICTED ONE: the sentence and the link appear, once.
+    await setFieldValue(select as never, DOCUMENTS[0]!.documentId);
+    await h.settle();
     const entryLink = findIn(
       bodyNode(),
       (n) => n.tagName === "A" && String((n as { getAttribute?: (k: string) => string | null }).getAttribute?.("href") ?? "").includes(OTHER_ENTRY),
     );
-    assert.ok(entryLink, "the reason links to the entry the document already backs");
+    assert.ok(entryLink, "the selected document's own reason links to the entry it already backs");
   } finally {
     await h.unmount();
     await drain(h);
@@ -474,6 +500,9 @@ test("t728: a SIBLING client's entry holding the document is named, and the link
   );
   try {
     await openDialog(h);
+    // The sibling-client sentence belongs to the SELECTED document's own note — see SpokenForNotes.
+    await setFieldValue(selectIn() as never, DOCUMENTS[0]!.documentId);
+    await h.settle();
     assert.match(bodyText(), /already backs a posted journal entry for Beta Sdn Bhd/,
       "the sentence names WHOSE entry holds it — 'already backs a posted entry' is unactionable without that");
     const href = String(

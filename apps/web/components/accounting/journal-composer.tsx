@@ -508,6 +508,7 @@ export function JournalComposerView({
             // BESIDE the select below, an `<option>` having no room for either.
             <option key={doc.documentId} value={doc.documentId} disabled={doc.spokenFor !== null}>
               {evidenceOptionLabel(doc, tm)}
+              {doc.spokenFor !== null ? ` — ${tWalk("evidenceSpokenForOption")}` : ""}
             </option>
           ))}
         </NativeSelect>
@@ -532,7 +533,7 @@ export function JournalComposerView({
         {spokenForRead.error !== null ? (
           <p className="text-xs text-muted-foreground">{tWalk("evidenceSpokenForUnavailable")}</p>
         ) : null}
-        <SpokenForNotes clientId={clientId} options={evidenceOptions} />
+        <SpokenForNotes clientId={clientId} options={evidenceOptions} selectedDocumentId={documentId ?? ""} />
       </div>
 
       {/* THE CHART READ IS A SEPARATE FAILURE FROM THE FORM'S. A preparer who

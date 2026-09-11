@@ -17,7 +17,7 @@ import { test } from "node:test";
 import { createElement, type ReactElement } from "react";
 import { NextIntlClientProvider } from "next-intl";
 
-import { renderComponent, setFieldValue } from "../../test/hookHarness";
+import { renderComponent, setFieldValue, textOf } from "../../test/hookHarness";
 import { enableDomInspection, activeElement } from "../../test/domInspect";
 import { JournalComposerView } from "./journal-composer";
 import { journalDraftKey, type DraftStorage } from "../../lib/work/journal-draft";
@@ -894,9 +894,20 @@ test("t728: a document already spoken for renders DISABLED with a reason and a l
     assert.ok(freeOption, "the other document is still offered");
     assert.notEqual((freeOption as { disabled?: unknown }).disabled, true, "…and stays selectable");
 
-    assert.match(h.text(), /already backs a posted journal entry/);
+    // Bounded (review round, N9): the reason rides the option's own label, ONE summary line sits
+    // beside the select, and the paragraph-with-link belongs to the SELECTED document alone.
+    assert.match(textOf(spokenForOption as never), /already backs a posted entry/);
+    assert.match(h.text(), /already backs a posted journal entry and cannot be chosen/);
+    assert.equal(
+      h.find((n) => n.tagName === "A" && String((n as { getAttribute?: (k: string) => string | null }).getAttribute?.("href") ?? "").includes(OTHER_ENTRY)),
+      null,
+      "no link while nothing is selected",
+    );
+
+    await setFieldValue(select as never, DOCUMENTS[0]!.documentId);
+    await h.settle();
     const link = h.find((n) => n.tagName === "A" && String((n as { getAttribute?: (k: string) => string | null }).getAttribute?.("href") ?? "").includes(OTHER_ENTRY));
-    assert.ok(link, "the reason links to the entry the document already backs");
+    assert.ok(link, "the SELECTED document's reason links to the entry it already backs");
   } finally {
     await h.unmount();
   }
@@ -931,6 +942,9 @@ test("t728: a SIBLING client's entry holding the document is named, and the link
     }),
   );
   try {
+    await h.settle();
+    // The sibling-client sentence belongs to the SELECTED document's own note — see SpokenForNotes.
+    await setFieldValue(byId(h, "journal-basis-evidence") as never, DOCUMENTS[0]!.documentId);
     await h.settle();
     assert.match(h.text(), /already backs a posted journal entry for Beta Sdn Bhd/,
       "the sentence names WHOSE entry holds it");
