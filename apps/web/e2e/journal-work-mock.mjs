@@ -1324,7 +1324,13 @@ export async function handleJournalWorkSupabase(request, response, path, url, se
   // different things about them.
   if (request.method === "POST" && path === "/rest/v1/rpc/cancel_agent_task") {
     const body = await readJson(request);
-    state.stopCalls.push({ task: String(body?.p_task ?? ""), opKey: String(body?.p_op_key ?? "") });
+    const task = String(body?.p_task ?? "");
+    // SCOPED TO THE TURN THIS LANE MINTED, like every other handler here: a task id this module
+    // never armed belongs to somebody else's fixture and falls through. (`readJson` caches on the
+    // request, so reading before the fall-through costs the next lane nothing — this file's own
+    // note on the once-readable stream.)
+    if (state.liveTurn === null || task !== state.liveTurn.id) return false;
+    state.stopCalls.push({ task, opKey: String(body?.p_op_key ?? "") });
     if (state.stopAnswer === "denied") {
       sendJson(response, 403, {
         code: "CLR04", message: "cancelling an agent task requires a bookkeeper or above",

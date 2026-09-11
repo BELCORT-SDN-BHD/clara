@@ -205,6 +205,12 @@ describe("#634 — the composer's refusal roster is BOUND to its producers", () 
       not_takeable: 409,
       work_cancelled: 409,
       work_settled: 409,
+      // …and the two the #630 review added. `run_already_terminal` is the stranded-pair belt's own
+      // 409 (before it, that shape reached a human as the task matrix's untyped CLR13 dressed as a
+      // codeless conflict); `transient` is PostgreSQL's own 40P01/40001, which say nothing about
+      // the request and must read as "try again" rather than as an internal failure.
+      run_already_terminal: 409,
+      transient: 409,
     };
     const kinds = new Set(submitResultKinds());
     for (const token of tokens) {
