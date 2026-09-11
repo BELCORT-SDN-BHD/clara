@@ -81,15 +81,30 @@ const SETTLED_PARTS = [
  *  way a timer would. */
 const ROW_APPEARS_AFTER_EMPTY_READS = 1;
 
+/** #727 — HOW MANY TEXT DELTAS THE BURST ARM STREAMS, and why the number is this one.
+ *  React's nested-update ceiling is 50 commits; the defect #727 records armed a fresh
+ *  one-second timer (and therefore a fresh setState) on EVERY render of the thread, so
+ *  every delta past ~50 was a candidate for the throw. 300 is six times the ceiling, at a
+ *  cadence slow enough that the turn clock is certainly mounted before they start. */
+const BURST_DELTAS = 300;
+const BURST_INTERVAL_MS = 15;
+
 const state = {
   turns: [],
   chunkSent: false,
   emptyReads: 0,
+  /** #727 — OPT-IN, exactly as `journal-work-mock.mjs`'s `showParkedCard` is. The two
+   *  things this arm adds (a live `agent_tasks_visible` row, so the turn clock mounts, and
+   *  a long burst of text deltas after the clarify chunk) change what every OTHER cell in
+   *  this lane would see on screen, so they are armed by the one cell that needs them and
+   *  disarmed in its own `finally`. */
+  burst: false,
   interruption: { status: "pending", answer: null, answered_by: null, answered_at: null },
 };
 
 /** A fresh turn is a fresh task, so the park it will produce starts unwritten again. Keeps
- *  the walks independent of each other's order. */
+ *  the walks independent of each other's order. Deliberately does NOT touch `burst`: the
+ *  cell that armed it owns it across the turn it is about to send. */
 function resetPark() {
   state.chunkSent = false;
   state.emptyReads = 0;
@@ -169,6 +184,28 @@ export async function handleChatParitySupabase(request, response, path, url, sen
       visibility: "private",
       title: "Chat parity",
       created_at: "2026-09-02T01:00:00.000Z",
+    }], cors);
+    return true;
+  }
+
+  // #727 — THE THREAD'S LIVE RUN, so the turn clock (`TurnProgress`, 裁-132) actually
+  // mounts. Without a row here `readThreadRunSnapshot` reports no run, the clock renders
+  // nothing at all, and the burst cell would walk a screen the hosted turn never had.
+  // ID-SCOPED like every other handler in this module — this lane's own thread and its own
+  // task, nothing else — and further gated on the burst arm, so the lane's other cells see
+  // exactly the screen they always did.
+  if (request.method === "GET" && path === "/rest/v1/agent_tasks_visible") {
+    if (!state.burst) return false;
+    const bySession = url.searchParams.get("session_id");
+    const byId = url.searchParams.get("id");
+    const mine = bySession === `eq.${CHAT_PARITY.threadId}` || byId === `eq.${CHAT_PARITY.taskId}`;
+    if (!mine) return false;
+    sendJson(response, 200, [{
+      id: CHAT_PARITY.taskId,
+      status: "running",
+      // Relative to NOW, so the clock reads a handful of seconds rather than a number of
+      // months — the cell asserts the shape of the sentence, never a literal value.
+      created_at: new Date(Date.now() - 5_000).toISOString(),
     }], cors);
     return true;
   }
@@ -326,7 +363,40 @@ export async function handleChatParityRuntime(request, response, url) {
     // The chunk is out; the ROW is still three step boundaries away. `rowExistsYet()`
     // above is what makes the browser walk face the real ordering.
     state.chunkSent = true;
+    // #727 — THE PARK IS NOT SILENT. The hosted turn kept streaming assistant text for
+    // about a minute WHILE it was parked on the clarify, and every one of those deltas
+    // re-rendered the whole thread through `useSyncExternalStore`. That is the load the
+    // defect needed, so the burst arm reproduces it: `text-delta` chunks in the emitter's
+    // own shape (`consumeChatTurnModelResult` forwards AI SDK `fullStream` parts verbatim),
+    // on a cadence, after the clarify rather than before it.
+    if (state.burst) {
+      let sent = 0;
+      const timer = setInterval(() => {
+        if (sent >= BURST_DELTAS || response.writableEnded) {
+          clearInterval(timer);
+          return;
+        }
+        sent += 1;
+        response.write(`event: chunk\ndata: ${JSON.stringify({ type: "text-delta", id: `d${sent}`, text: `token ${sent} ` })}\n\n`);
+      }, BURST_INTERVAL_MS);
+      // The stream is held open deliberately (a parked task never closes it), so the ONLY
+      // thing that stops this timer on a navigated-away page is the socket closing.
+      response.on("close", () => clearInterval(timer));
+    }
     // No terminal `message`, no `done`, no close: the task is PARKED.
+    return true;
+  }
+
+  // #727's control leg — the same idiom `journal-work-mock.mjs` uses, reached by the
+  // browser through the app's REAL proxy at `/api/runtime/e2e-chat-parity/control` with
+  // the session it already holds. Scoped to this lane's own thread id, so it can never
+  // advance another lane's fixture.
+  if (request.method === "POST" && path === "/api/e2e-chat-parity/control") {
+    const body = await readJson(request);
+    if (body?.thread !== CHAT_PARITY.threadId) return false;
+    state.burst = body?.burst === true;
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify({ burst: state.burst }));
     return true;
   }
 

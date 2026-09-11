@@ -113,10 +113,10 @@ function spyConsoleError(): { messages: () => string[]; restore: () => void } {
 /** The harness's error boundary: a render that throws must be VISIBLE to the cell rather
  *  than silently unmounting the tree the assertions then fail to find. */
 class Boundary extends Component<{ children: ReactNode; onError: (e: Error) => void }, { failed: boolean }> {
-  state = { failed: false };
+  override state = { failed: false };
   static getDerivedStateFromError() { return { failed: true }; }
-  componentDidCatch(error: Error) { this.props.onError(error); }
-  render() { return this.state.failed ? null : this.props.children; }
+  override componentDidCatch(error: Error) { this.props.onError(error); }
+  override render() { return this.state.failed ? null : this.props.children; }
 }
 
 function intl(children: ReactNode): ReactElement {
@@ -163,7 +163,7 @@ test("the turn clock arms ONE timer for one turn, however many live deltas re-re
       assert.equal(
         timers.armed(),
         1,
-        `the turn clock re-armed its timer ${timers.armed() - atMount} times across ${DELTAS} deltas — an effect whose dependency is a fresh identity per render, calling setState in its body, is React #185's own definition`,
+        `the turn clock re-armed its timer ${timers.armed() - atMount} times across ${DELTAS} deltas — an effect whose dependency is a fresh identity per render, calling setState in its body, is React's own definition of a nested-update loop`,
       );
       assert.deepEqual(
         errors.messages().filter((m) => NESTED_UPDATE.test(m)),
@@ -342,7 +342,7 @@ test("a live clarify survives a 200-delta stream: no nested-update ceiling, and 
       assert.deepEqual(
         errors.messages().filter((m) => NESTED_UPDATE.test(m)),
         [],
-        "React reported its nested-update ceiling during the stream — this is #185 in development's own words",
+        "React reported its nested-update ceiling during the stream — this is the production error 185 in development's own words",
       );
       assert.ok(
         timers.armed() - afterClarify <= 1,

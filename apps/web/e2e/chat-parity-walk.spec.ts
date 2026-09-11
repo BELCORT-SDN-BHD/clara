@@ -294,3 +294,118 @@ test("裁-117: the rail creates a thread only when asked, and its menu switches 
 
   await scan(page, "rail thread menu face");
 });
+
+// ---------------------------------------------------------------------------
+// #727 — THE LIVE TURN UNDER ITS OWN STREAM.
+// ---------------------------------------------------------------------------
+
+/** Everything the page said went wrong, in the browser's own words. React reports a
+ *  hydration mismatch (#418) and a nested-update ceiling (#185) through DIFFERENT channels
+ *  — `onRecoverableError` reaches the console, a thrown one reaches `pageerror` — so both
+ *  are collected or the cell can be green about the half it did not watch. */
+function watchPageErrors(page: Page): { seen: () => string[] } {
+  const seen: string[] = [];
+  page.on("console", (message) => {
+    if (message.type() === "error") seen.push(message.text());
+  });
+  page.on("pageerror", (error) => seen.push(error.message));
+  return { seen: () => seen };
+}
+
+const REACT_FAULTS = /Minified React error #(185|418|423|425)|Maximum update depth exceeded|Hydration failed|hydration-mismatch|did not match/i;
+
+async function setBurst(page: Page, on: boolean): Promise<void> {
+  const answer = await page.evaluate(
+    async ([thread, burst]) => {
+      const res = await fetch("/api/runtime/e2e-chat-parity/control", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ thread, burst }),
+      });
+      return { status: res.status, body: await res.text() };
+    },
+    [THREAD_ID, on] as const,
+  );
+  expect(answer.status, `arming the #727 burst returned ${answer.status}: ${answer.body}`).toBe(200);
+}
+
+test("#727: a clarify asked DURING a live stream is answered in place — the turn clock does not tear the view down", async ({ page }) => {
+  // THE HOSTED SHAPE, reproduced. The turn streams, the clarify card mounts with its
+  // answer control, the turn clock ("Clara has been working on this for m:ss") counts, and
+  // assistant text keeps arriving for several seconds on top of it. On the code #727 was
+  // filed against, every one of those deltas re-armed the clock's one-second timer — one
+  // setState per render — until React's nested-update ceiling threw #185 out of
+  // `claraThreadStore.emit()`, inside the stream reader's own uncaught `onEvent`, and
+  // `useClaraThread` painted the throw as "Could not send that message: stream error: …".
+  const faults = watchPageErrors(page);
+  await openThread(page);
+  await setBurst(page, true);
+  try {
+    await page.getByLabel(COMPOSER).fill("Record RM 2.00 of bank charges; ask me which posting date to use");
+    await page.getByLabel(COMPOSER).press("Enter");
+
+    await expect(page.getByText(QUESTION)).toBeVisible();
+    // THE PRECONDITION, ASSERTED — the vacuity control for this whole cell. Without a live
+    // `agent_tasks_visible` row the turn clock renders nothing at all, and a green here
+    // would mean "the component that carried the defect was never on screen".
+    await expect(page.getByText(/Clara has been working on this for \d+:\d\d/)).toBeVisible({ timeout: 15_000 });
+
+    // The burst runs for ~4.5s (300 deltas at 15ms). Answering AFTER it has been flowing
+    // for a while is the hosted sequence: the owner's view died about a minute in.
+    const answerField = page.getByLabel("Your answer");
+    await expect(answerField).toBeVisible({ timeout: 20_000 });
+    await page.waitForTimeout(5_000);
+
+    // STILL THERE. The failure this ticket records is that the live view was REPLACED by
+    // an error banner, taking the answer control with it.
+    await expect(page.getByText("Could not send that message")).toHaveCount(0);
+    await expect(page.getByText(QUESTION)).toBeVisible();
+    await expect(answerField).toBeVisible();
+
+    await answerField.fill("2026-08-31");
+    await page.getByRole("button", { name: "Answer", exact: true }).click();
+    await expect(page.getByText("Answered by your firm")).toBeVisible();
+    await expect(page.getByText("2026-08-31")).toBeVisible();
+
+    // 320 CSS px, the accounting floor: the clarify group and its control stay usable and
+    // the document never scrolls sideways.
+    await page.setViewportSize({ width: 320, height: 800 });
+    await expect(page.getByText("Answered by your firm")).toBeVisible();
+    const overflow = await page.evaluate(() => ({
+      scrollWidth: document.documentElement.scrollWidth,
+      clientWidth: document.documentElement.clientWidth,
+    }));
+    expect(overflow.scrollWidth, "the clarify group must not make the document scroll sideways at 320px")
+      .toBeLessThanOrEqual(overflow.clientWidth);
+
+    expect(
+      faults.seen().filter((m) => REACT_FAULTS.test(m)),
+      "no React nested-update or hydration fault may reach the console during a live clarify",
+    ).toEqual([]);
+  } finally {
+    await setBurst(page, false).catch(() => {});
+  }
+});
+
+test("#727: under reduced motion the clarify group fades and does not MOVE", async ({ page }) => {
+  // Counting MOVEMENT only, per the motion contract: `enter-content` keeps its opacity
+  // transition under `prefers-reduced-motion: reduce` and drops the 4px rise, so the
+  // discriminating fact is which properties the group actually transitions.
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await openThread(page);
+  await page.getByLabel(COMPOSER).fill("Code this invoice");
+  await page.getByLabel(COMPOSER).press("Enter");
+  await expect(page.getByText(QUESTION)).toBeVisible();
+
+  const properties = await page.evaluate((question) => {
+    const node = [...document.querySelectorAll("div")].find(
+      (el) => el.className.includes("enter-content") && (el.textContent ?? "").includes(question),
+    );
+    if (!node) return null;
+    return getComputedStyle(node).transitionProperty;
+  }, QUESTION);
+  expect(properties, "the clarify group must be the enter-content element the contract names").not.toBeNull();
+  expect(properties, "reduced motion keeps the fade").toContain("opacity");
+  expect(properties, "reduced motion drops the rise — movement is the thing that is removed")
+    .not.toContain("translate");
+});

@@ -690,3 +690,51 @@ test("focus: the heading takes focus on arrival, and a background update never t
   // STATUS and nothing else.
   await expect(page.getByRole("link", { name: "View in Journals" })).toHaveCount(0);
 });
+
+/**
+ * #727 — THE WORK DETAIL ROUTE HYDRATES CLEAN.
+ *
+ * The owner's 2026-09-11 signed-in walk read THREE `Minified React error #418` in the
+ * console on `/clients/:id/work/:workId`. #418 is React's hydration mismatch: the HTML the
+ * server rendered did not match what the client rendered first. It is invisible — the page
+ * looks right, because React silently re-renders the whole subtree on the client — which is
+ * exactly why it needs a collector rather than an eye.
+ *
+ * A BROWSER IS THE ONLY INSTRUMENT FOR IT. The node harness mounts a stub DOM with no HTML
+ * parser, so it can render a tree but cannot HYDRATE one: there is no server-rendered markup
+ * for a client render to disagree with. This cell runs against the real `next build` output
+ * served by `next start`, so the server render, the shipped bundle and the browser's own
+ * parser are all the production ones.
+ */
+test("#727: the Work detail route hydrates with no React fault in the console", async ({ page }) => {
+  const faults: string[] = [];
+  page.on("console", (message) => { if (message.type() === "error") faults.push(message.text()); });
+  page.on("pageerror", (error) => faults.push(error.message));
+
+  // A SEEDED, COMPLETED Work — the fullest version of this page: the facts block, the basis
+  // table, the posted-entry block and its links row. A skeleton-only page would hydrate
+  // clean for the boring reason that it renders almost nothing.
+  await page.goto(`/clients/${CLIENT}/work/${JOURNAL_WORK.seededWorkId}`);
+  await expect(page.getByText("Completed", { exact: true }).first()).toBeVisible();
+  await settle(page);
+
+  // And the PARKED face, which mounts the question panel and its form — the subtree #629
+  // added to this route, and the one that reads a `localStorage` draft in a lazy state
+  // initialiser (lib/work/questions.ts's `readWorkAnswerDraft`). A read like that during
+  // the FIRST client render is the classic #418 shape, so it is walked rather than reasoned
+  // about.
+  await control(page, { op: "park_card" });
+  await page.goto(`/clients/${CLIENT}/work/${JOURNAL_WORK.parkedCardWorkId}`);
+  await expect(page.getByText("Waiting for an answer").first()).toBeVisible({ timeout: 15_000 });
+  await settle(page);
+
+  const react = faults.filter((m) =>
+    /Minified React error #(185|418|423|425)|Maximum update depth exceeded|Hydration failed|hydration-mismatch|didn't match|did not match/i.test(m),
+  );
+  expect(react, "the Work detail route must hydrate with no React nested-update or hydration fault").toEqual([]);
+  // The vacuity control on the collector itself: a listener that was never attached, or a
+  // page that never loaded, also produces an empty list. `page.evaluate` proves the channel
+  // this cell reads is live.
+  await page.evaluate(() => console.error("e2e-727-collector-probe"));
+  expect(faults, "the console collector must actually be receiving errors").toContain("e2e-727-collector-probe");
+});
