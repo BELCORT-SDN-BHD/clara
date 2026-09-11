@@ -400,7 +400,19 @@ export async function handleChatParityRuntime(request, response, url) {
   // advance another lane's fixture.
   if (request.method === "POST" && path === "/api/e2e-chat-parity/control") {
     const body = await readJson(request);
-    if (body?.thread !== CHAT_PARITY.threadId) return false;
+    // ANSWERS, NEVER FALLS THROUGH. The `return false` this replaced was a contract
+    // violation dressed as scoping: every other handler in this module declines BEFORE it
+    // touches the request, because declining means "someone else will read this request" —
+    // and the body has already been drained by the line above, so the next handler would
+    // read an empty stream and mis-parse it. This path belongs to this module either way;
+    // a wrong thread id is a MALFORMED call to an endpoint that is ours, so it is refused
+    // here, in terms the walk can read, instead of arriving somewhere else as a 404 with
+    // no body.
+    if (body?.thread !== CHAT_PARITY.threadId) {
+      response.writeHead(400, { "content-type": "application/json" });
+      response.end(JSON.stringify({ error: "wrong_thread", expected: CHAT_PARITY.threadId, got: body?.thread ?? null }));
+      return true;
+    }
     state.burst = body?.burst === true;
     response.writeHead(200, { "content-type": "application/json" });
     response.end(JSON.stringify({ burst: state.burst }));
