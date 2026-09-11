@@ -1569,18 +1569,20 @@ export const JOURNAL_EVIDENCE_0182_COHORT = [
 // signature and grant (ACTIVITY_FEED_0181_HUMAN_FNS above already covers them; 0183 only edits
 // their BODIES, so no roster change is owed for those two names). Two NEW names this cohort
 // tracks:
-//   `_sweep_run_drafted_count` — the ONE clara_authenticated-granted SECURITY DEFINER helper the
+//   `_sweep_events_with_effect` — the ONE clara_authenticated-granted SECURITY DEFINER helper the
 //   sweep exclusion needs, because `clara.sweep_runs` itself carries no clara_authenticated grant
 //   at all (measured on the catalog; 0183's own header records the finding) and an INVOKER
-//   list_activity/get_activity_event cannot read it directly. SELF-SCOPED to clara.jwt_firm()
-//   inside its own body, so it is safe to be clara_authenticated-granted (and therefore
-//   PostgREST-reachable directly despite the leading underscore, 0181's own caveat for
-//   `_human_ctx`) — no argument can make it answer for a firm other than the caller's own.
+//   list_activity/get_activity_event cannot read it directly. It is granted, and therefore
+//   PostgREST-reachable directly despite the leading underscore (0181's own caveat for
+//   `_human_ctx`), so it carries the feed's OWN bookkeeper floor (clara._human_ctx) and is
+//   self-scoped to the session firm inside its body — no argument can make it answer for another
+//   firm, and no caller the feed refuses can reach it. SET-shaped rather than scalar: the per-row
+//   form it replaced cost 4.8 s a page at 6,000 sweep events (measured).
 //   `list_spoken_for_documents` — the new bookkeeper+ read (advisory only; attach_entry_evidence's
 //   own CLR13 stays the actual law) — clara_authenticated ONLY; no agent/wake/runtime variant
 //   exists or is needed, because naming which documents already back a posted entry is a human
 //   bookkeeping fact, not something the agent lane decides on its own.
-const WALK_FINDINGS_0183_HUMAN_FNS = ["_sweep_run_drafted_count", "list_spoken_for_documents"];
+const WALK_FINDINGS_0183_HUMAN_FNS = ["_sweep_events_with_effect", "list_spoken_for_documents"];
 export const WALK_FINDINGS_0183_COHORT = [...WALK_FINDINGS_0183_HUMAN_FNS];
 
 export const ALLOWED = {

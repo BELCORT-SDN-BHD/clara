@@ -152,16 +152,16 @@ function rowsOf(page) {
  *  directly (as root) so a cell can force an EXACT `drafted_count` without driving the whole
  *  autodraft machinery. `_append_event` is called directly too (root bypasses its ungranted ACL,
  *  exactly as every other direct-event fixture in this estate's rig does) so the payload carries
- *  the run's own id, precisely as `clara._sweep_run_drafted_count` (0183) expects. Returns the
+ *  the run's own id, precisely as `clara._sweep_events_with_effect` (0183) expects. Returns the
  *  event's OWN id/occurred_at, read back from `clara.domain_events` by (firm_id, seq) — the seq
  *  `_append_event` hands back, never assumed. */
-async function mkSweepEvent({ firm, draftedCount, expectedCount = null }) {
+async function mkSweepEvent({ firm, draftedCount, postedCount = 0, refusedCount = 0, expectedCount = null }) {
   const exp = expectedCount ?? draftedCount;
   const run = (await rootQuery(
     `insert into clara.sweep_runs(firm_id, state, window_started_at, window_ended_at,
-        expected_count, drafted_count, finalized_at)
-     values ($1, 'finalized', now(), now(), $2, $3, now()) returning id`,
-    [firm, exp, draftedCount])).rows[0].id;
+        expected_count, drafted_count, posted_count, refused_count, finalized_at)
+     values ($1, 'finalized', now(), now(), $2, $3, $4, $5, now()) returning id`,
+    [firm, exp, draftedCount, postedCount, refusedCount])).rows[0].id;
   const seq = (await rootQuery(
     `select clara._append_event($1, 'sweep.run_completed', null, null, null, null, null, null, null,
         jsonb_build_object('run_id', $2::uuid, 'expected_count', $3::int)) as seq`,
@@ -474,12 +474,16 @@ test("af.13 p_limit clamps to the door's own [1,100] window on both ends", async
 
 test("af.14 a finalized sweep with drafted_count=0 is ABSENT from the feed, and its deep link answers the same CLR11 no-oracle refusal as a genuinely absent id", async (t) => {
   if (await gateSweep(t)) return;
+  const cli = await freshWorkClient(ALICE(), "af14");
   const noop = await mkSweepEvent({ firm: FIRM_A(), draftedCount: 0, expectedCount: 3 });
+  // A REAL agent row in the SAME window, so the absence below is a measured exclusion rather than
+  // a read that happened to return nothing (native review N14: af.14 had no positive control, so a
+  // door that answered [] for every kind would have passed it).
+  const control = await mkAgentAct({ firm: FIRM_A(), client: cli });
 
-  // Positive control first — the YES that gives the NO meaning: a listActivity read scoped tightly
-  // to this event's own instant (since is inclusive) and to the agent kind it WOULD carry if kept
-  // must come back with nothing named by this id.
   const page = await listActivity(BOB(), { kinds: ["agent"], since: noop.occurredAt, limit: 100 });
+  assert.ok(rowsOf(page).some((r) => r.id === `agent_act:${control.id}`),
+    "af.14 POSITIVE CONTROL: a real agent row in the same window and kind IS returned by this very read");
   assert.equal(rowsOf(page).some((r) => r.id === noop.eventId), false,
     "af.14 a zero-effect sweep heartbeat never appears in the feed, even asking for exactly its own kind and instant");
   // And asking under NO kind filter at all (the shape that buried real postings on the live firm)
@@ -532,15 +536,6 @@ test("af.15 a finalized sweep with drafted_count>0 is PRESENT under kind=agent, 
 // bound to the event's own firm. Both are pinned here.
 // ===========================================================================================
 
-/** `clara._sweep_run_drafted_count` called DIRECTLY — exactly the way PostgREST reaches it. It
- *  HAS to carry a clara_authenticated grant (clara.list_activity/clara.get_activity_event are
- *  SECURITY INVOKER and clara.sweep_runs carries no grant of its own), so "who may call it" is a
- *  question this battery must answer rather than assume. */
-async function sweepDraftedCount(sub, eventId) {
-  const r = await humanQuery(sub, "select clara._sweep_run_drafted_count($1::uuid) as n", [eventId]);
-  return r.rows[0].n;
-}
-
 /** An event appended to `firm` by root (the only writer that may), returning its own id and
  *  instant read back from clara.domain_events by the seq `_append_event` hands out. Generalises
  *  `mkSweepEvent` above for the cells that need a DIFFERENT event_type or a payload no lawful
@@ -564,6 +559,14 @@ async function mkSweepRun({ firm, draftedCount }) {
     [firm, draftedCount])).rows[0].id;
 }
 
+/** The KEPT sweep receipts this caller's firm has, read through the door's own definer helper --
+ *  the shape PostgREST exposes it as. `eventId` narrows to one id (null asks for the firm's set). */
+async function keptSweepEvents(sub, eventId = null) {
+  const r = await humanQuery(sub,
+    "select event_id::text as event_id from clara._sweep_events_with_effect($1::uuid)", [eventId]);
+  return r.rows.map((row) => row.event_id);
+}
+
 test("af.16 the sweep helper carries the feed's OWN bookkeeper floor — a viewer refused by list_activity cannot read a sweep's drafted_count through the helper either", async (t) => {
   if (await gateSweep(t)) return;
   const drafted = await mkSweepEvent({ firm: FIRM_A(), draftedCount: 3, expectedCount: 9 });
@@ -574,12 +577,12 @@ test("af.16 the sweep helper carries the feed's OWN bookkeeper floor — a viewe
   // clara.domain_events read policy (0005), so a floorless clara_authenticated-granted helper
   // would hand a VIEWER every sweep's drafted_count one id at a time — a side channel round the
   // floor the door in front of it spends three checks establishing.
-  await assertRaises(CLR04, () => sweepDraftedCount(CAROL(), drafted.eventId),
+  await assertRaises(CLR04, () => keptSweepEvents(CAROL(), drafted.eventId),
     "af.16 the helper refuses the SAME viewer, with the SAME code the door uses");
 
   // AND THE DOOR IT EXISTS FOR IS UNHARMED — the floor is a floor, not a wall.
-  assert.equal(await sweepDraftedCount(BOB(), drafted.eventId), 3,
-    "af.16 a bookkeeper still reads the one count the feed borrows");
+  assert.deepEqual(await keptSweepEvents(BOB(), drafted.eventId), [drafted.eventId],
+    "af.16 a bookkeeper still reads the one fact the feed borrows");
   const page = await listActivity(BOB(), { kinds: ["agent"], since: drafted.occurredAt, limit: 100 });
   assert.ok(rowsOf(page).some((r) => r.id === drafted.eventId),
     "af.16 and the kept sweep row still reaches a bookkeeper's feed");
@@ -594,8 +597,8 @@ test("af.17 a sweep event of THIS firm whose payload names ANOTHER firm's run co
   const foreignRun = await mkSweepRun({ firm: FIRM_B(), draftedCount: 4 });
   const ev = await mkRawEvent({ firm: FIRM_A(), payload: { run_id: foreignRun, expected_count: 4 } });
 
-  assert.equal(await sweepDraftedCount(BOB(), ev.eventId), null,
-    "af.17 the helper resolves NOTHING across the firm boundary — another firm's drafted_count is not this firm's fact to report");
+  assert.deepEqual(await keptSweepEvents(BOB(), ev.eventId), [],
+    "af.17 the helper resolves NOTHING across the firm boundary — another firm's effect is not this firm's fact to report");
   const page = await listActivity(BOB(), { since: ev.occurredAt, limit: 100 });
   assert.equal(rowsOf(page).some((r) => r.id === ev.eventId), false,
     "af.17 …so the row is treated as the zero-effect heartbeat it is, never kept on a foreign count");
@@ -614,16 +617,64 @@ test("af.18 the helper answers ONLY for a sweep receipt, and an unresolvable run
   const other = await mkRawEvent({
     firm: FIRM_A(), type: "kb_rule.proposed", client: cli, payload: { run_id: run },
   });
-  assert.equal(await sweepDraftedCount(BOB(), other.eventId), null,
+  assert.deepEqual(await keptSweepEvents(BOB(), other.eventId), [],
     "af.18 a non-sweep event of this firm resolves no run, whatever its payload says");
 
   // (b) A SWEEP receipt whose `run_id` is not a uuid at all. The cast alone would raise 22P02 —
   // an untyped error, inside a per-row predicate, which would take the ENTIRE feed down for the
   // firm rather than hiding one unverifiable heartbeat.
   const junk = await mkRawEvent({ firm: FIRM_A(), payload: { run_id: "not-a-uuid", expected_count: 1 } });
-  assert.equal(await sweepDraftedCount(BOB(), junk.eventId), null,
+  assert.deepEqual(await keptSweepEvents(BOB(), junk.eventId), [],
     "af.18 a malformed run_id is an unresolvable run, not an error");
   const page = await listActivity(BOB(), { since: junk.occurredAt, limit: 100 });
   assert.equal(rowsOf(page).some((r) => r.id === junk.eventId), false,
     "af.18 the feed still answers, with the unverifiable heartbeat excluded — never shown by default");
+});
+
+test("af.19 EFFECT IS drafted + posted: a sweep that POSTED entries and drafted none is KEPT, and one that only refused is not", async (t) => {
+  if (await gateSweep(t)) return;
+  // 0108 split the sweep's bookkeeping into four counters, and its own header says why in so many
+  // words: "a post is not a draft". A run that posted entries changed the books MORE than one that
+  // merely drafted, so reading drafted_count alone (the first cut of 0183 did) would have hidden
+  // exactly the sweep a bookkeeper most needs to see. Native seven-lens review, 2026-09-11.
+  const posted = await mkSweepEvent({ firm: FIRM_A(), draftedCount: 0, postedCount: 2, expectedCount: 4 });
+  const page = await listActivity(BOB(), { kinds: ["agent"], since: posted.occurredAt, limit: 100 });
+  const row = rowsOf(page).find((r) => r.id === posted.eventId);
+  assert.ok(row, "af.19 a sweep that posted entries and drafted none IS in the feed");
+  assert.equal(row.kind, "agent");
+  assert.deepEqual(await keptSweepEvents(BOB(), posted.eventId), [posted.eventId],
+    "af.19 …and the helper itself names it, which is where the drafted+posted sum lives");
+
+  // REFUSALS AND SKIPS ARE DELIBERATELY OUT of the sum: neither moved a cent, a refusal already
+  // has its own attributable surface in the agent-receipt lane, and folding them in would re-open
+  // the flood this ticket closes (a firm whose sweeps refuse every window would be back to 288
+  // unattributed rows a day). Pinned so the decision is a measured contract, not an oversight.
+  const refusedOnly = await mkSweepEvent({ firm: FIRM_A(), draftedCount: 0, refusedCount: 3, expectedCount: 3 });
+  const after = await listActivity(BOB(), { since: refusedOnly.occurredAt, limit: 100 });
+  assert.equal(rowsOf(after).some((r) => r.id === refusedOnly.eventId), false,
+    "af.19 a run that only REFUSED is not an effect on the books — excluded, by decision (see 0183 section 1)");
+  await assertRaises(CLR11, () => getActivityEvent(BOB(), "event", refusedOnly.eventId),
+    "af.19 …and its deep link is the same no-oracle refusal");
+});
+
+test("af.20 the sweep exclusion is SET-BASED — list_activity's installed body borrows the helper ONCE per call, never once per row", async (t) => {
+  if (await gateSweep(t)) return;
+  // THE BLOCKER THE NATIVE REVIEW MEASURED: a SECURITY DEFINER function with its own search_path
+  // can never be inlined, and the first cut called one from inside ev_base's WHERE — a predicate
+  // that runs BEFORE the order/limit, so the cost grew with the firm's whole append-only sweep
+  // history (142 ms -> 4.8 s at 6,000 sweep events, 21 days at the live five-minute cadence).
+  // Read from the INSTALLED body rather than from the file, the same way this migration's own
+  // prestate sha-pins and its tail's kind-ladder check read it: what is deployed is what matters.
+  const body = (await rootQuery(
+    "select p.prosrc from pg_proc p where p.oid = 'clara.list_activity(text,int,uuid,text[],timestamptz,timestamptz)'::regprocedure",
+  )).rows[0].prosrc;
+  const calls = body.split("clara._sweep_events_with_effect(").length - 1;
+  assert.equal(calls, 1,
+    "af.20 EXACTLY ONE textual call site — a second one would almost certainly be a per-row predicate again");
+  assert.match(body, /v_kept_sweeps uuid\[\]/,
+    "af.20 …and it is materialised into a local array before the union");
+  assert.match(body, /v\.event_id = any\(v_kept_sweeps\)/,
+    "af.20 …which the union's own predicate tests, so no plan can turn it back into a call per row");
+  assert.equal(body.includes("clara._sweep_events_with_effect(v.event_id)"), false,
+    "af.20 the correlated per-row form is gone from the deployed body");
 });
