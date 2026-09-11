@@ -79,6 +79,9 @@ function App(props: {
     client_name: string | null;
     via: "evidence_link" | "coding";
   }>>;
+  /** The fallback that names the CLAIMANT client of the entry a `source_already_posted` refusal
+   *  points at, when the advisory read did not settle or did not carry that document. */
+  resolveEntryClient?: (entryId: string) => Promise<string | null>;
 }): ReactElement {
   return createElement(NextIntlClientProvider, {
     locale: "en",
@@ -93,6 +96,7 @@ function App(props: {
       loadAccounts: props.loadAccounts ?? (async () => ACCOUNTS),
       loadDocuments: (props.loadDocuments ?? (async () => DOCUMENTS)) as never,
       loadSpokenFor: (props.loadSpokenFor ?? (async () => [])) as never,
+      resolveEntryClient: (props.resolveEntryClient ?? (async () => CLIENT)) as never,
       session: { getAccessToken: async () => "tok" },
     }),
   });
@@ -729,6 +733,9 @@ test("t634: a SOURCE CONFLICT is a persistent Alert with a link and NO resubmit 
         ),
     );
     assert.ok(link, "the conflict Alert links to the entry that already stands on the document");
+    const href = String((link as { getAttribute?: (k: string) => string | null }).getAttribute?.("href") ?? "");
+    assert.ok(href.includes(CLIENT),
+      "…in THIS client's journals, because the resolver named this client as the claimant");
     // THE INPUT IS PRESERVED and the offending control is focused, so the human
     // can choose another document without retyping a table of money.
     assert.equal(focusedId(), "journal-basis-evidence");
@@ -740,6 +747,127 @@ test("t634: a SOURCE CONFLICT is a persistent Alert with a link and NO resubmit 
     assert.doesNotMatch(h.text(), /Start a new draft/i);
   } finally {
     await h.unmount();
+  }
+});
+
+test("t728: a SOURCE CONFLICT whose entry belongs to a SIBLING client links into THAT client's journals", async () => {
+  // `admit_journal_work`'s CLR13 detail carries an entry_id and NO client, and
+  // `clara._document_posting_entry` resolves it across the WHOLE FIRM — so the entry may be a
+  // sibling client's, and `journalEntryHref(clientId, …)` (what this banner did until the delta
+  // review, finding [3]) routed to a journal that can never contain it.
+  const SIB_ENTRY = "e7777777-7777-4777-8777-777777777777";
+  const SIB_CLIENT = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+  const h = await renderComponent(
+    App({
+      // The advisory read ALREADY names the claimant, so this path costs no extra read at all.
+      loadSpokenFor: async () => [
+        { document_id: DOCUMENTS[0]!.documentId, entry_id: SIB_ENTRY, client_id: SIB_CLIENT, client_name: "Beta Sdn Bhd", via: "coding" },
+      ],
+      resolveEntryClient: async () => {
+        throw new Error("the advisory rows already answer this — no second read is owed");
+      },
+      submit: async () => ({ kind: "source_conflict", entryId: SIB_ENTRY, documentId: DOCUMENTS[0]!.documentId }),
+    }),
+  );
+  try {
+    await h.settle();
+    await fillGoodEntry(h);
+    await h.fireEvent(byId(h, "journal-basis-evidence"), "change", (n) => setFieldValue(n, DOCUMENTS[0]!.documentId));
+    await submitForm(h);
+    const link = h.find((n) => n.tagName === "A"
+      && String((n as { getAttribute?: (k: string) => string | null }).getAttribute?.("href") ?? "").includes(`entry=${SIB_ENTRY}`));
+    assert.ok(link, "the refusal still offers the entry it is about");
+    const href = String((link as { getAttribute?: (k: string) => string | null }).getAttribute?.("href") ?? "");
+    assert.ok(href.includes(SIB_CLIENT), `the link targets the CLAIMANT client's journals (got ${href})`);
+    assert.equal(href.includes(CLIENT), false, "…and never this composer's own client");
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("t728: when the claimant cannot be resolved at all the refusal carries NO link, rather than a wrong one", async () => {
+  // A link into a journal the entry is not in is worse than none: `journal-entries-table.tsx`
+  // answers it with "clear the filters and narrow by posting date", advice that can never reach
+  // the entry. So an unresolvable claimant renders the banner without its action.
+  const LOST_ENTRY = "e8888888-8888-4888-8888-888888888888";
+  const h = await renderComponent(
+    App({
+      loadSpokenFor: async () => [],
+      resolveEntryClient: async () => null,
+      submit: async () => ({ kind: "source_conflict", entryId: LOST_ENTRY, documentId: DOCUMENTS[0]!.documentId }),
+    }),
+  );
+  try {
+    await h.settle();
+    await fillGoodEntry(h);
+    await h.fireEvent(byId(h, "journal-basis-evidence"), "change", (n) => setFieldValue(n, DOCUMENTS[0]!.documentId));
+    await submitForm(h);
+    assert.match(h.text(), /already backs a posted entry/, "the refusal itself still renders");
+    assert.equal(
+      h.find((n) => n.tagName === "A"
+        && String((n as { getAttribute?: (k: string) => string | null }).getAttribute?.("href") ?? "").includes(LOST_ENTRY)),
+      null,
+      "no link is invented when nothing names the claimant",
+    );
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("t728: a restored draft on a spoken-for document renders BOTH links at once, and their names stay distinct", async () => {
+  // THE STATE THE ROUND DELETED THE ONLY PIN FOR (delta review [11]). Submit is not gated on the
+  // advisory read, so a draft restored with a document that became spoken-for while it sat in
+  // sessionStorage carries BOTH: SpokenForNotes' "View that journal entry" for the selection, and
+  // the door's own refusal with "Open that journal entry". Two links in one view: if either label
+  // is ever re-worded to match the other, one accessible name would name two different routes.
+  const storage = memoryStorage();
+  const first = await renderComponent(App({ storage }));
+  try {
+    await first.settle();
+    await fillGoodEntry(first);
+    // Free when the draft was saved — which is the whole premise.
+    await first.fireEvent(byId(first, "journal-basis-evidence"), "change", (n) => setFieldValue(n, DOCUMENTS[0]!.documentId));
+    await first.settle();
+  } finally {
+    await first.unmount();
+  }
+
+  const SPOKEN_ENTRY = "e9999999-9999-4999-8999-999999999999";
+  const second = await renderComponent(
+    App({
+      storage,
+      // …spoken for by the time the draft is restored.
+      loadSpokenFor: async () => [
+        { document_id: DOCUMENTS[0]!.documentId, entry_id: SPOKEN_ENTRY, client_id: CLIENT, client_name: "Acme Sdn Bhd", via: "evidence_link" },
+      ],
+      submit: async () => ({ kind: "source_conflict", entryId: SPOKEN_ENTRY, documentId: DOCUMENTS[0]!.documentId }),
+    }),
+  );
+  try {
+    await second.settle();
+    // THE RESTORE IS PROVEN BY THE NOTE, not by the select's value: SpokenForNotes renders the
+    // per-document reason ONLY for the current selection, so its link existing at all is the
+    // evidence that the restored `documentId` survived the remount.
+    assert.match(second.text(), /already backs a posted journal entry/);
+    const advisory = second.find((n) => n.tagName === "A" && textOf(n as never).trim() === "View that journal entry");
+    assert.ok(advisory, "the restored draft still holds the (now spoken-for) document, so its note renders");
+    await submitForm(second);
+    // `h.find` walks in document order and stops on `true`; an ALWAYS-FALSE predicate therefore
+    // visits every node, which is how this harness collects rather than finds.
+    const names: string[] = [];
+    second.find((n) => {
+      if (n.tagName === "A") {
+        const name = textOf(n as never).trim();
+        if (/journal entry$/.test(name)) names.push(name);
+      }
+      return false;
+    });
+    assert.ok(names.includes("View that journal entry"), `the advisory link is present (saw ${JSON.stringify(names)})`);
+    assert.ok(names.includes("Open that journal entry"), `the refusal's link is present (saw ${JSON.stringify(names)})`);
+    assert.equal(new Set(names).size, names.length,
+      `two links in one view must not share one accessible name (saw ${JSON.stringify(names)})`);
+  } finally {
+    await second.unmount();
   }
 });
 
@@ -913,12 +1041,40 @@ test("t728: a document already spoken for renders DISABLED with a reason and a l
   }
 });
 
+test("t728: TWO spoken-for documents render the summary's PLURAL arm — the ICU `other` branch, which no cell had ever evaluated", async () => {
+  // `evidenceSpokenForSummary` is `{count, plural, =1 {...} other {# of these documents ...}}`.
+  // `check-message-keys.mjs` only proves the key resolves to a string; a typo inside the `other`
+  // arm throws in next-intl's formatter at RENDER time, for any client with two or more spoken-for
+  // documents — which the picker's own header calls the common case (delta review [10]).
+  const h = await renderComponent(
+    App({
+      loadSpokenFor: async () => [
+        { document_id: DOCUMENTS[0]!.documentId, entry_id: "e1111111-1111-4111-8111-111111111111", client_id: CLIENT, client_name: "Acme Sdn Bhd", via: "evidence_link" },
+        { document_id: DOCUMENTS[1]!.documentId, entry_id: "e2222222-2222-4222-8222-222222222222", client_id: CLIENT, client_name: "Acme Sdn Bhd", via: "coding" },
+      ],
+    }),
+  );
+  try {
+    await h.settle();
+    assert.match(h.text(), /2 of these documents already back a posted journal entry/,
+      "the plural arm formats the count — and formatting it at all is the point of this cell");
+  } finally {
+    await h.unmount();
+  }
+});
+
 test("t728: a FAILED spoken-for read disables nothing and says the check was unavailable", async () => {
   const h = await renderComponent(App({ loadSpokenFor: async () => { throw new Error("gateway"); } }));
   try {
     await h.settle();
     const select = byId(h, "journal-basis-evidence");
     const options = ((select as { childNodes?: Stub[] }).childNodes ?? []).filter((n) => n.tagName === "OPTION");
+    // COUNT FIRST: the loop below is vacuous on an empty list, and an empty list is exactly what a
+    // refactor folding the two reads into one effect would produce — the spoken-for failure
+    // running the DOCUMENTS catch, so the picker offers nothing at all while the banner assertion
+    // still matches (delta review [6]).
+    assert.equal(options.length, DOCUMENTS.length + 1,
+      `the chooser still offers every document plus the "no document" option (saw ${options.length})`);
     for (const opt of options) {
       assert.notEqual((opt as { disabled?: unknown }).disabled, true, "a failed check must never disable a real option");
     }

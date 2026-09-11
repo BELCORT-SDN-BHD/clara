@@ -56,6 +56,7 @@ import { submitJournalWork, type SubmitJournalWorkResult } from "@/lib/work/api"
 import { SpokenForNotes } from "@/components/work/spoken-for-note";
 import {
   listClientEvidenceDocuments,
+  findEntryClient,
   listSpokenForDocuments,
   mergeSpokenFor,
   type EvidenceDocument,
@@ -101,7 +102,20 @@ type Phase =
    *  refusal opens IMPACT OR CORRECTION on the entry that already stands there,
    *  and must NOT offer a new intent key — rotating the identity and pressing
    *  again is exactly the second effect the rule prevents. */
-  | { kind: "sourceConflict"; entryId: string | null }
+  | {
+      kind: "sourceConflict";
+      entryId: string | null;
+      /** THE CLAIMANT CLIENT of `entryId`, resolved after the refusal — NOT this
+       *  composer's own client (delta review of the fix round, finding [3]).
+       *  `admit_journal_work`'s CLR13 detail carries an `entry_id` and no client,
+       *  and `clara._document_posting_entry` resolves it across the WHOLE FIRM,
+       *  so a document filed to two clients of one firm can be held by a sibling
+       *  client's entry. Null means the claimant could not be resolved, and then
+       *  no link is offered: a link into a journal the entry is not in is worse
+       *  than none (`journal-entries-table.tsx`'s no-matches advice can never
+       *  reach it). */
+      entryClientId: string | null;
+    }
   | { kind: "denied" }
   | { kind: "notFound" }
   | { kind: "unavailable"; message: string }
@@ -139,6 +153,7 @@ export function JournalComposerView({
   loadAccounts,
   loadDocuments,
   loadSpokenFor,
+  resolveEntryClient = findEntryClient,
 }: {
   clientId: string;
   scope: NavigationScope & { firm_id?: string; user_id?: string };
@@ -150,6 +165,9 @@ export function JournalComposerView({
   loadDocuments?: () => Promise<EvidenceDocument[]>;
   /** #728 finding 5 — injectable for the same reason `loadDocuments` is. */
   loadSpokenFor?: () => Promise<SpokenForDocumentRow[]>;
+  /** #728 delta review [3] — the fallback that names the CLAIMANT client of the entry a
+   *  `source_already_posted` refusal points at, injectable for the same reason. */
+  resolveEntryClient?: typeof findEntryClient;
 }) {
   const t = useTranslations("JournalComposer");
   /** #634's own copy lives in its own namespace (`ManualJournal`) rather than
@@ -290,8 +308,13 @@ export function JournalComposerView({
 
   /** Applies ONE runtime answer. Split out because the lost-response arm calls
    *  it for a second attempt, and two copies of this mapping would be two places
-   *  a status could be classified differently. */
-  const apply = (result: SubmitJournalWorkResult): void => {
+   *  a status could be classified differently.
+   *
+   *  ASYNC because ONE arm needs a read before it can paint: `source_conflict`
+   *  must name the CLAIMANT client of the entry it points at, and the refusal
+   *  itself does not carry one (delta review [3]). Every other arm returns
+   *  without awaiting anything. */
+  const apply = async (result: SubmitJournalWorkResult): Promise<void> => {
     if (result.kind === "accepted") {
       // The draft is retired ONLY now: until the runtime named the Work, the
       // typed figures were the only copy that existed.
@@ -314,7 +337,21 @@ export function JournalComposerView({
       // human picked stays picked so they can see WHICH one is spoken for, and
       // the only forward moves are "open that entry" or "choose another
       // document" — never a resubmit of this same intent.
-      setPhase({ kind: "sourceConflict", entryId: result.entryId });
+      //
+      // WHOSE ENTRY IT IS, IN TWO STEPS AND NO MORE THAN ONE EXTRA READ. First
+      // the advisory rows this picker already holds: `list_spoken_for_documents`
+      // answers firm-wide and names the claimant, so when that read landed the
+      // route costs nothing. When it did not (the read failed, or has not
+      // settled, or the refusal names a document the picker never saw), one
+      // firm-scoped `journal_entries` read resolves it. If BOTH come back empty
+      // the banner renders without a link — see the phase's own note.
+      const advisory = result.documentId === null
+        ? null
+        : (spokenForRead.data ?? []).find((r) => r.document_id === result.documentId)?.client_id ?? null;
+      const owner = advisory ?? (result.entryId === null
+        ? null
+        : await resolveEntryClient(result.entryId, { session }).catch(() => null));
+      setPhase({ kind: "sourceConflict", entryId: result.entryId, entryClientId: owner });
       focusField("evidence");
       return;
     }
@@ -339,7 +376,7 @@ export function JournalComposerView({
     setPhase({ kind: "submitting" });
     const first = await submit(session, { clientId, intentKey, basis, ...evidence });
     if (first.kind !== "lost") {
-      apply(first);
+      await apply(first);
       return;
     }
     // THE LOST-RESPONSE RESOLUTION. No answer was observed, so the Work may
@@ -348,7 +385,7 @@ export function JournalComposerView({
     // Exactly once — a loop here would be a client deciding to hammer a runtime
     // that is already not answering.
     setPhase({ kind: "checking" });
-    apply(await submit(session, { clientId, intentKey, basis, ...evidence }));
+    await apply(await submit(session, { clientId, intentKey, basis, ...evidence }));
   };
 
   const onSubmit = (e: FormEvent) => {
@@ -662,9 +699,11 @@ function ComposerPhaseBanner({
         tone="error"
         title={tm("sourceConflict.title")}
         action={
-          phase.entryId === null ? undefined : (
+          phase.entryId === null || phase.entryClientId === null ? undefined : (
             <Link
-              href={journalEntryHref(clientId, phase.entryId)}
+              // THE CLAIMANT'S ROUTE, not this composer's client — see the phase's own note and
+              // `spoken-for-note.tsx`, which states the same rule for the advisory link.
+              href={journalEntryHref(phase.entryClientId, phase.entryId)}
               className="text-sm font-medium text-primary underline underline-offset-2"
             >
               {tm("sourceConflict.link")}
