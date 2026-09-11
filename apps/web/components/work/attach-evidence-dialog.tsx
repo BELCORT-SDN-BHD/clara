@@ -212,6 +212,38 @@ export function AttachEvidenceDialog({
     };
   }, [open, clientId, loadSpokenFor, session]);
 
+  /**
+   * THE CLAIMANT, RESOLVED AFTER THE REFUSAL IS ALREADY ON SCREEN.
+   *
+   * An effect rather than an await inside `confirm` (delta review round 4, SHOULD-FIX [6]): the
+   * refusal, the re-enabled controls AND the focus recovery must not wait on a read whose only
+   * product is a link and a name. The composer answered the identical finding this way one round
+   * earlier (components/accounting/journal-composer.tsx); the dialog was left bounded-but-blocking.
+   *
+   * Bounded three ways, like the composer's: an `AbortSignal` the cleanup fires when the refusal
+   * is replaced or the dialog unmounts, a timeout that fires it anyway, and a re-check that the
+   * same document is still the one refused before the answer is written — the person may have
+   * chosen another while the read was in flight.
+   */
+  const conflictDocumentId = result?.kind === "source_conflict" ? documentId : null;
+  useEffect(() => {
+    if (conflictDocumentId === null) return;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), CLAIMANT_READ_TIMEOUT_MS);
+    void (async () => {
+      // FIRM-WIDE, not client-scoped: see findEntryForDocument's note. The claim this refusal is
+      // about may be held by a sibling client the document is also filed to.
+      const claim = await findEntry(conflictDocumentId, { session, signal: controller.signal })
+        .catch(() => null);
+      if (controller.signal.aborted || claim === null) return;
+      setConflictEntry(claim);
+    })();
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [conflictDocumentId, findEntry, session]);
+
   const confirm = async () => {
     if (busy || documentId === "") return;
     setBusy(true);
@@ -247,20 +279,15 @@ export function AttachEvidenceDialog({
     // ALWAYS re-read, refusal included: a stale-revision refusal in particular
     // means the caller's copy of the entry is wrong, and the fix is a fresh read.
     await onAttached();
-    if (answer.kind === "source_conflict") {
-      // FIRM-WIDE, not client-scoped: see findEntryForDocument's note. The claim this refusal is
-      // about may be held by a sibling client the document is also filed to.
-      //
-      // LAST, AND BOUNDED (delta review round 3, finding [3], applied here too). The refusal is
-      // already on screen — `setResult` ran before the await above — so this read only upgrades
-      // the banner with a link and a name. It therefore goes AFTER the authoritative re-read
-      // rather than in front of it, and it carries a timeout: `fetch` with no signal never gives
-      // up, and a PostgREST worker that accepts the connection and stalls must cost a link, not
-      // the dialog.
-      setConflictEntry(await findEntry(documentId, {
-        session, signal: AbortSignal.timeout(CLAIMANT_READ_TIMEOUT_MS),
-      }).catch(() => null));
-    }
+    // THE CLAIMANT IS NOT READ HERE AT ALL (delta review round 4, SHOULD-FIX [6] / NIT [4]).
+    // Round 3 put it last-and-bounded, which fixed nothing a person feels: it still sat IN FRONT
+    // of the focus recovery below, so a PostgREST worker that accepts the connection and stalls
+    // left a keyboard or screen-reader user inside an open modal with focus on <body> for the full
+    // five seconds — and longer, because `getRows` awaits `session.getAccessToken()` BEFORE the
+    // signal ever reaches the wire (lib/read.ts), so a stalled token refresh is outside the
+    // timeout altogether. The claimant is resolved by the effect above instead, exactly as the
+    // composer does it: nothing on screen, and nothing about where focus sits, waits for a read
+    // this file's own comment calls an upgrade that "must cost a link, not the dialog".
     if (answer.kind === "attached") {
       setOpen(false);
       setResult(null);
@@ -425,12 +452,28 @@ function AttachOutcome({
     // WHEN THE CLAIMANT IS A SIBLING CLIENT, SAY SO BEFORE OFFERING THE DOOR OUT (delta review
     // round 3, finding [5]): the link leaves this client's books, and the advisory surface for the
     // identical fact already names the claimant (`spoken-for-note.tsx`). Same fallback as there.
+    //
+    // …AND SAY IT OUTSIDE THE LIVE REGION (delta review round 4, finding [7], the same defect the
+    // composer carried). `StateBanner tone="error"` computes `role="alert"` — assertive, and
+    // implicitly atomic, so ANY mutation re-announces the whole box. The claimant here always
+    // arrives after the paint, so writing its sentence and its <Link> into that box announced one
+    // refusal twice, the second time contradicting the first about where the link goes. The alert
+    // carries the refusal and nothing else; the claimant line and its link are a plain sibling
+    // with no role — unannounced, never hidden (components/common/state.tsx's `silent` note).
     const elsewhere = conflictEntry !== null && conflictEntry.clientId !== clientId;
     return (
-      <StateBanner
-        tone="error"
-        action={
-          conflictEntry === null ? undefined : (
+      <div className="flex w-full max-w-prose flex-col items-start gap-1.5">
+        <StateBanner tone="error">{t("attach.sourceConflict")}</StateBanner>
+        {conflictEntry === null ? null : (
+          <p className="text-sm text-muted-foreground">
+            {elsewhere ? (
+              <>
+                {tWalk("attachSourceConflictElsewhere", {
+                  client: conflictEntry.clientName ?? tWalk("evidenceSpokenForUnnamedClient"),
+                })}
+                {" "}
+              </>
+            ) : null}
             <Link
               // THE CLAIMANT'S ROUTE, never the asking client's — see conflictEntry's own note.
               href={journalEntryHref(conflictEntry.clientId, conflictEntry.entryId)}
@@ -438,15 +481,9 @@ function AttachOutcome({
             >
               {t("attach.sourceConflictLink")}
             </Link>
-          )
-        }
-      >
-        {elsewhere
-          ? tWalk("attachSourceConflictElsewhere", {
-              client: conflictEntry.clientName ?? tWalk("evidenceSpokenForUnnamedClient"),
-            })
-          : t("attach.sourceConflict")}
-      </StateBanner>
+          </p>
+        )}
+      </div>
     );
   }
   // A SWITCH RATHER THAN AN EIGHT-DEEP TERNARY, and the keys stay LITERAL inside

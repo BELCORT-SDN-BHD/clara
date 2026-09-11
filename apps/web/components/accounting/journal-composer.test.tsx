@@ -1264,3 +1264,100 @@ test("t728f: a claimant the advisory read did not name is resolved AFTER the ban
     await h.unmount();
   }
 });
+
+// ---------------------------------------------------------------------------
+// #728 delta review round 4 — the refusal is announced ONCE, and the bound on
+// the claimant read is a bound a cell can see.
+// ---------------------------------------------------------------------------
+
+/** Every node that ANNOUNCES on its own AND has something to say: a computed
+ *  `role="alert"`/`"status"`, or an explicit `aria-live` that is not "off", carrying text.
+ *
+ *  EMPTY ONES ARE EXCLUDED DELIBERATELY. This form mounts eight standing, empty live regions — a
+ *  `role="alert"` slot per Field plus the submit status — and an empty live region speaks nothing;
+ *  counting them would make the assertion about the form's construction rather than about what a
+ *  person HEARS. §5's one-announcement-owner rule is about what is spoken, and about a region
+ *  whose content is rewritten after paint, which is spoken twice. */
+function liveRegions(h: { container: Stub }): Stub[] {
+  const out: Stub[] = [];
+  const walk = (n: Stub) => {
+    const get = (n as { getAttribute?: (k: string) => string | null }).getAttribute;
+    const role = get ? get.call(n, "role") : null;
+    const live = get ? get.call(n, "aria-live") : null;
+    if ((role === "alert" || role === "status" || (live !== null && live !== "off"))
+      && textOf(n).trim() !== "") out.push(n);
+    for (const c of ((n as { childNodes?: Stub[] }).childNodes ?? [])) walk(c);
+  };
+  walk(h.container as Stub);
+  return out;
+}
+
+/** True when `needle` IS `haystack` or sits anywhere beneath it. */
+function containsNode(haystack: Stub, needle: Stub): boolean {
+  if (haystack === needle) return true;
+  for (const c of ((haystack as { childNodes?: Stub[] }).childNodes ?? [])) {
+    if (containsNode(c, needle)) return true;
+  }
+  return false;
+}
+
+test("t728g: the source_conflict refusal is ONE alert, and its text does not change when the claimant lands", async () => {
+  // Finding [7]. Round 3 moved the claimant read behind the paint, which fixed the delay and
+  // opened a second defect: `StateBanner tone="error"` computes `role="alert"` (state.tsx), an
+  // assertive live region, and the composer then REWROTE it — the body sentence swapped for the
+  // claimant one and a <Link> inserted — so one refusal interrupted a screen reader twice, the
+  // second time contradicting the first about where the link goes. §5 has an explicit rule and an
+  // opt-out for exactly this (state.tsx's `silent`, born from #629's "one accepted answer was
+  // announced twice"). Round 2 announced it once, complete; this cell is what keeps it that way
+  // without going back to holding the refusal behind the read.
+  const LATE_ENTRY = "e4444444-4444-4444-8444-444444444444";
+  const LATE_CLIENT = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+  let release: ((v: { clientId: string; clientName: string | null }) => void) | null = null;
+  const h = await renderComponent(
+    App({
+      loadSpokenFor: async () => [],
+      // Held open on purpose: the assertions below compare the alert BEFORE and AFTER it lands.
+      resolveEntryClient: () => new Promise((resolve) => { release = resolve; }),
+      submit: async () => ({ kind: "source_conflict", entryId: LATE_ENTRY, documentId: DOCUMENTS[0]!.documentId }),
+    }),
+  );
+  try {
+    await h.settle();
+    await fillGoodEntry(h);
+    await h.fireEvent(byId(h, "journal-basis-evidence"), "change", (n) => setFieldValue(n, DOCUMENTS[0]!.documentId));
+    await submitForm(h);
+
+    const before = liveRegions(h);
+    assert.equal(before.length, 1,
+      `one refusal owns exactly one announcement — found ${before.length}: `
+      + JSON.stringify(before.map((n) => textOf(n))));
+    const spoken = textOf(before[0]!);
+    assert.match(spoken, /One document backs at most one posted journal entry/,
+      "…and it is the refusal that is announced (vacuity control)");
+
+    // The claimant arrives a tick later, exactly as a PostgREST read does.
+    await h.act(() => { release!({ clientId: LATE_CLIENT, clientName: "Beta Sdn Bhd" }); });
+    await h.settle();
+
+    const after = liveRegions(h);
+    assert.equal(after.length, 1,
+      `still exactly one announcement after the claimant resolves — found ${after.length}: `
+      + JSON.stringify(after.map((n) => textOf(n))));
+    assert.equal(textOf(after[0]!), spoken,
+      "the ALERT's own text is unchanged by the claimant read — an assertive region rewritten after "
+      + `paint is a second interruption for one refusal (was ${JSON.stringify(spoken)}, now `
+      + `${JSON.stringify(textOf(after[0]!))})`);
+
+    // …and the upgrade really did arrive — outside the live region, where it interrupts nobody
+    // and an assistive-technology user still reads it in the same place a sighted one sees it.
+    assert.match(h.text(), /belongs to Beta Sdn Bhd/,
+      "the claimant sentence still renders (vacuity control for the assertion above)");
+    const link = h.find((n) => n.tagName === "A"
+      && String((n as { getAttribute?: (k: string) => string | null }).getAttribute?.("href") ?? "").includes(LATE_ENTRY));
+    assert.ok(link, "…and so does the link");
+    assert.equal(containsNode(after[0]!, link), false,
+      "the late link sits OUTSIDE the alert: inserting a node into an assertive region re-announces it");
+  } finally {
+    await h.unmount();
+  }
+});

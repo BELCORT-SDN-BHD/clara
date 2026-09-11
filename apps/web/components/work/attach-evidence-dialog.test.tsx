@@ -602,8 +602,10 @@ test("t728f: the dialog's refusal NAMES the sibling client its link leads to, an
     await openDialog(named);
     await choose(named, DOCUMENTS[0]!.documentId);
     await pressAttach(named);
-    assert.match(textOf(bodyNode()), /a posted entry of Beta Sdn Bhd/,
+    assert.match(textOf(bodyNode()), /belongs to Beta Sdn Bhd/,
       "the refusal names the claimant before offering the door out of this client");
+    assert.match(textOf(bodyNode()), /leaves this client/,
+      "…and says plainly that following the link leaves these books");
   } finally {
     await named.unmount();
     await drain(named);
@@ -624,8 +626,202 @@ test("t728f: the dialog's refusal NAMES the sibling client its link leads to, an
       "this client's own entry keeps the plain refusal");
     assert.doesNotMatch(textOf(bodyNode()), /leaves this client/,
       "…and nothing claims the link goes somewhere else");
+    assert.doesNotMatch(textOf(bodyNode()), /belongs to/,
+      "…and no claimant is named, because the claimant is these very books");
   } finally {
     await own.unmount();
     await drain(own);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// #728 delta review round 4 — the refusal's focus recovery is not hostage to a
+// cosmetic read, and the refusal is announced once.
+// ---------------------------------------------------------------------------
+
+/** Every node that ANNOUNCES on its own AND has something to say. Empty live regions are excluded
+ *  deliberately: this dialog and the page behind it mount standing, empty `role="alert"` slots,
+ *  and an empty live region speaks nothing — counting those would make the assertion about how
+ *  the tree is built rather than about what a person HEARS (§5's one-announcement-owner rule). */
+function liveRegionsIn(root: Stub): Stub[] {
+  const out: Stub[] = [];
+  const walk = (n: Stub) => {
+    const get = (n as { getAttribute?: (k: string) => string | null }).getAttribute;
+    const role = get ? get.call(n, "role") : null;
+    const live = get ? get.call(n, "aria-live") : null;
+    if ((role === "alert" || role === "status" || (live !== null && live !== "off"))
+      && textOf(n as never).trim() !== "") out.push(n);
+    for (const c of ((n as { childNodes?: Stub[] }).childNodes ?? [])) walk(c);
+  };
+  walk(root);
+  return out;
+}
+
+/** True when `needle` IS `haystack` or sits anywhere beneath it. */
+function containsNode(haystack: Stub, needle: Stub): boolean {
+  if (haystack === needle) return true;
+  for (const c of ((haystack as { childNodes?: Stub[] }).childNodes ?? [])) {
+    if (containsNode(c, needle)) return true;
+  }
+  return false;
+}
+
+test("t728g: a claimant read that never answers does not hold the refusal's focus recovery", async () => {
+  // Delta review round 4, SHOULD-FIX [6] / NIT [4]. Round 1's N8 fix exists because `busy`
+  // disables the Attach button UNDER the cursor, so a real browser drops focus to <body> and
+  // re-enabling the control does not bring it back. Round 3 then put the claimant read — which
+  // the code's own comment calls an upgrade that "must cost a link, not the dialog" — IN FRONT of
+  // that recovery, bounded only by a 5 s timeout. A PostgREST worker that accepts the connection
+  // and stalls therefore leaves a keyboard or screen-reader user inside an open modal with focus
+  // on <body> for five seconds — and longer still, because `getRows` awaits
+  // `session.getAccessToken()` BEFORE the signal ever reaches the wire (lib/read.ts), so a stalled
+  // token refresh is outside the timeout altogether. The composer solved this by moving the read
+  // into an effect; this cell holds the dialog to the same answer, with a read that NEVER settles.
+  let armed: AbortSignal | null = null;
+  const h = await renderComponent(
+    App({
+      attach: async () => ({ kind: "source_conflict" }),
+      findEntry: ((_documentId: string, opts?: { signal?: AbortSignal }) => {
+        armed = opts?.signal ?? null;
+        return new Promise(() => {});
+      }) as never,
+    }),
+  );
+  try {
+    await openDialog(h);
+    await choose(h, DOCUMENTS[0]!.documentId);
+    await pressAttach(h);
+
+    // The refusal is on screen and the controls are live, with the claimant read still outstanding.
+    assert.match(bodyText(), /already backs another posted entry/,
+      "the refusal paints while the claimant read is still in flight");
+    // …and focus is back on the one control this refusal asks them to change, NOW — not in 5 s.
+    // `assert.ok(a === b)`, never `assert.equal`: the house harness's stub nodes are cyclic, and
+    // node-assert's diff of two of them exhausts the heap (apps/web AGENTS.md's own note).
+    const active = activeElement();
+    assert.ok(active === selectIn(),
+      "focus is on the document chooser immediately after the refusal, not parked on <body> for the "
+      + `length of an advisory read (active element was ${String((active as { tagName?: string } | null)?.tagName ?? "none")})`);
+    assert.ok(armed !== null, "the claimant read is armed with an AbortSignal (vacuity control)");
+    assert.equal((armed as AbortSignal).aborted, false, "…which is still live while the refusal stands");
+    // No link yet — nothing has named the claimant — but that costs a link, not the focus.
+    assert.equal(
+      findIn(bodyNode(), (n) => n.tagName === "A"
+        && String((n as { getAttribute?: (k: string) => string | null }).getAttribute?.("href") ?? "").includes(OTHER_ENTRY)),
+      null,
+      "the link waits for the claimant; the person's place in the dialog does not");
+  } finally {
+    await h.unmount();
+    await drain(h);
+  }
+});
+
+test("t728g: the dialog's source_conflict refusal is ONE alert, and its text does not change when the claimant lands", async () => {
+  // The other half of finding [7], on this surface. `StateBanner tone="error"` computes
+  // `role="alert"`, and the dialog's claimant arrives strictly after the paint — so writing the
+  // claimant sentence and the <Link> INTO that box announces one refusal twice. The alert carries
+  // the refusal and nothing else; the claimant line and its link are a plain sibling with no role.
+  let release: ((v: { entryId: string; clientId: string; clientName: string | null }) => void) | null = null;
+  const h = await renderComponent(
+    App({
+      attach: async () => ({ kind: "source_conflict" }),
+      findEntry: (() => new Promise((resolve) => { release = resolve; })) as never,
+    }),
+  );
+  try {
+    await openDialog(h);
+    await choose(h, DOCUMENTS[0]!.documentId);
+    await pressAttach(h);
+
+    const before = liveRegionsIn(bodyNode());
+    assert.equal(before.length, 1,
+      `one refusal owns exactly one announcement — found ${before.length}: `
+      + JSON.stringify(before.map((n) => textOf(n as never))));
+    const spoken = textOf(before[0]! as never);
+    assert.match(spoken, /already backs another posted entry/,
+      "…and it is the refusal that is announced (vacuity control)");
+
+    await h.act(() => { release!({ entryId: OTHER_ENTRY, clientId: OTHER_CLIENT, clientName: "Beta Sdn Bhd" }); });
+    await drain(h);
+
+    const after = liveRegionsIn(bodyNode());
+    assert.equal(after.length, 1,
+      `still exactly one announcement after the claimant resolves — found ${after.length}: `
+      + JSON.stringify(after.map((n) => textOf(n as never))));
+    assert.equal(textOf(after[0]! as never), spoken,
+      "the ALERT's own text is unchanged by the claimant read — an assertive region rewritten after "
+      + `paint is a second interruption for one refusal (was ${JSON.stringify(spoken)}, now `
+      + `${JSON.stringify(textOf(after[0]! as never))})`);
+
+    assert.match(bodyText(), /Beta Sdn Bhd/,
+      "the claimant sentence still renders (vacuity control for the assertion above)");
+    const link = findIn(bodyNode(), (n) => n.tagName === "A"
+      && String((n as { getAttribute?: (k: string) => string | null }).getAttribute?.("href") ?? "").includes(OTHER_ENTRY));
+    assert.ok(link, "…and so does the link");
+    assert.equal(containsNode(after[0]!, link as Stub), false,
+      "the late link sits OUTSIDE the alert: inserting a node into an assertive region re-announces it");
+  } finally {
+    await h.unmount();
+    await drain(h);
+  }
+});
+
+test("t728g: the claimant read is abandoned by its own TIMEOUT, not only by closing the dialog", async () => {
+  // Delta review round 4, NIT [8]. `AbortSignal.timeout(CLAIMANT_READ_TIMEOUT_MS)` was the bound
+  // round 3 added here, and no cell exercised it firing: the existing cells hand `findEntry` a
+  // stub that never reads `opts.signal`, so deleting the `signal:` property kept everything green
+  // and the branch could drift back to a read that holds a fetch for the tab's lifetime. This
+  // cell moves the clock instead of waiting on it, and asserts what a person is left with.
+  let armed: AbortSignal | null = null;
+  const realSetTimeout = globalThis.setTimeout;
+  const timers: Array<() => void> = [];
+  (globalThis as { setTimeout: unknown }).setTimeout = ((fn: () => void, ms?: number, ...rest: unknown[]) => {
+    if (ms === 5000) {
+      timers.push(fn);
+      return 0 as unknown as ReturnType<typeof setTimeout>;
+    }
+    return (realSetTimeout as (...a: unknown[]) => unknown)(fn, ms, ...rest) as ReturnType<typeof setTimeout>;
+  }) as typeof setTimeout;
+  try {
+    const h = await renderComponent(
+      App({
+        attach: async () => ({ kind: "source_conflict" }),
+        findEntry: ((_documentId: string, opts?: { signal?: AbortSignal }) => {
+          armed = opts?.signal ?? null;
+          return new Promise(() => {});
+        }) as never,
+      }),
+    );
+    try {
+      await openDialog(h);
+      await choose(h, DOCUMENTS[0]!.documentId);
+      await pressAttach(h);
+
+      assert.equal(timers.length, 1,
+        `the claimant read arms exactly one 5000 ms abort timer — found ${timers.length}`);
+      assert.ok(armed !== null, "…and the read is armed with the signal that timer fires");
+      assert.equal((armed as AbortSignal).aborted, false, "…which is live while the read is outstanding");
+
+      await h.act(() => { timers[0]!(); });
+      await drain(h);
+
+      assert.equal((armed as AbortSignal).aborted, true,
+        "the timeout ABORTS the read — without it the fetch outlives the dialog and the banner waits "
+        + "for a link that will never come");
+      assert.match(bodyText(), /already backs another posted entry/,
+        "the refusal still stands after the read is abandoned");
+      assert.equal(
+        findIn(bodyNode(), (n) => n.tagName === "A"
+          && String((n as { getAttribute?: (k: string) => string | null }).getAttribute?.("href") ?? "").includes(OTHER_ENTRY)),
+        null,
+        "…and no link was invented for a claimant nobody read");
+      assert.ok(activeElement() === selectIn(),
+        "…and focus was never the timeout's hostage: it was restored when the refusal painted");
+    } finally {
+      await h.unmount();
+      await drain(h);
+    }
+  } finally {
+    (globalThis as { setTimeout: unknown }).setTimeout = realSetTimeout;
   }
 });

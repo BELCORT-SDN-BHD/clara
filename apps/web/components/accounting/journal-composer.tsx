@@ -753,37 +753,59 @@ function ComposerPhaseBanner({
     // intent key, AND why the form's primary Submit is disabled for as long as
     // this phase stands (see its call site).
     //
-    // …AND WHEN THE ENTRY IS A SIBLING CLIENT'S, THE BANNER SAYS SO (delta review
+    // …AND WHEN THE ENTRY IS A SIBLING CLIENT'S, THE COPY SAYS SO (delta review
     // round 3, finding [5]). The link leaves this client's books for another
     // client's Journals route — a new client-scope epoch, with the abandoned
     // composer behind it — so the sentence names the claimant BEFORE the person
     // follows it. The same comparison `spoken-for-note.tsx` makes for the
     // advisory sentence, and the same fallback when the name could not be read:
     // "another client" is vaguer but true, "undefined" is neither.
+    //
+    // …AND IT SAYS SO *OUTSIDE THE LIVE REGION* (delta review round 4, finding
+    // [7]). `StateBanner tone="error"` computes `role="alert"` — an assertive
+    // region whose implicit `aria-atomic` re-announces the WHOLE box on any
+    // mutation. Round 3 made the claimant arrive AFTER the paint, which is
+    // right, and then wrote it INTO that box: the body sentence was swapped and
+    // a <Link> inserted, so one refusal interrupted a screen reader twice, the
+    // second time contradicting the first about where the link goes. So the
+    // alert now carries the refusal and NOTHING ELSE — the same sentence
+    // whether or not the claimant is ever read — and the late-arriving claimant
+    // line and its link are a plain sibling with no role. Unannounced, never
+    // hidden: same text, same reading order, same place on the page (the rule
+    // `silent`'s own doc block in components/common/state.tsx records, from
+    // #629's "one accepted answer was announced twice").
     const elsewhere = phase.entryClientId !== null && phase.entryClientId !== clientId;
+    // Computed as a value rather than checked inline so the narrowing holds: both halves must be
+    // known before there is a route to offer.
+    const claimantHref = phase.entryId === null || phase.entryClientId === null
+      ? null
+      // THE CLAIMANT'S ROUTE, not this composer's client — see the phase's own note and
+      // `spoken-for-note.tsx`, which states the same rule for the advisory link.
+      : journalEntryHref(phase.entryClientId, phase.entryId);
     return (
-      <StateBanner
-        tone="error"
-        title={tm("sourceConflict.title")}
-        action={
-          phase.entryId === null || phase.entryClientId === null ? undefined : (
+      <div className="flex w-full max-w-prose flex-col items-start gap-1.5">
+        <StateBanner tone="error" title={tm("sourceConflict.title")}>
+          {tm("sourceConflict.body")}
+        </StateBanner>
+        {claimantHref === null ? null : (
+          <p className="text-sm text-muted-foreground">
+            {elsewhere ? (
+              <>
+                {tWalk("sourceConflictElsewhere", {
+                  client: phase.entryClientName ?? tWalk("evidenceSpokenForUnnamedClient"),
+                })}
+                {" "}
+              </>
+            ) : null}
             <Link
-              // THE CLAIMANT'S ROUTE, not this composer's client — see the phase's own note and
-              // `spoken-for-note.tsx`, which states the same rule for the advisory link.
-              href={journalEntryHref(phase.entryClientId, phase.entryId)}
+              href={claimantHref}
               className="text-sm font-medium text-primary underline underline-offset-2"
             >
               {tm("sourceConflict.link")}
             </Link>
-          )
-        }
-      >
-        {elsewhere
-          ? tWalk("sourceConflictElsewhere", {
-              client: phase.entryClientName ?? tWalk("evidenceSpokenForUnnamedClient"),
-            })
-          : tm("sourceConflict.body")}
-      </StateBanner>
+          </p>
+        )}
+      </div>
     );
   }
   if (phase.kind === "denied") {
