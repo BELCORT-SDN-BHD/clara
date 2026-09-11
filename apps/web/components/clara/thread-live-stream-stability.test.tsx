@@ -19,7 +19,8 @@
 //      React bails out only while two consecutive `Date.now()` reads land in the SAME
 //      millisecond, which a cheap render does and a real one — a long transcript with a
 //      clarify card and two Work cards in it — does not. Measured here before the fix:
-//      six timers armed just to MOUNT, and 86 armed across 50 parent renders.
+//      six timers armed just to MOUNT this component, 86 in total by the end of 50 further
+//      parent renders, and 439 armed across the 200-delta burst in cell 3 below.
 //   4. Each of those commits leaves work pending, which is what React counts toward its
 //      nested-update ceiling. Past the ceiling the NEXT `scheduleUpdateOnFiber` throws —
 //      and during a stream that call comes from `claraThreadStore.emit()` inside

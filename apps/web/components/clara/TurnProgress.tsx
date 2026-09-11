@@ -61,8 +61,9 @@ export function TurnProgress({
   // forever, bailing out only while two consecutive reads landed in the same millisecond.
   // A cheap render does; a rail rendering a long transcript with a clarify card and two
   // Work cards in it does not. Measured on the code this replaced: SIX timers armed just
-  // to mount this component, and 439 armed across 200 live stream deltas
-  // (thread-live-stream-stability.test.tsx).
+  // to mount this component, 439 armed across a 200-delta burst in the node harness
+  // (thread-live-stream-stability.test.tsx), and 536 armed in real Chromium across the
+  // browser walk's own stream (e2e/chat-parity-walk.spec.ts).
   //
   // WHY THAT ENDED THE TURN. Every one of those commits leaves work pending, which is what
   // React counts toward its nested-update ceiling; past the ceiling the next scheduled
