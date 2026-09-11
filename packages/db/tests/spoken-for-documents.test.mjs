@@ -17,7 +17,7 @@ import assert from "node:assert/strict";
 import {
   rootQuery, humanQuery, buildWorkWorld, freshWorkClient, endPool, opk, assertRaises,
   admitJournalWork, claimWorkRun, mintClientObo, wakeRecordJournalEntry, basis, WCHART,
-  printSkipCount, evidenceDocument, attachEntryEvidence, reverseEntry,
+  printSkipCount, evidenceDocument, attachEntryEvidence, reverseEntry, fileSameDocumentTo,
 } from "./journal-work-evidence-fixtures.mjs";
 import { withTxn } from "./rig-txn.mjs";
 
@@ -185,6 +185,8 @@ test("sfd.3 a LIVE entry_evidence_links binding is reported via='evidence_link',
   assert.equal(rows.length, 1, "sfd.3 exactly the attached document is reported");
   assert.equal(rows[0].document_id, doc.documentId);
   assert.equal(rows[0].entry_id, posted.entryId);
+  assert.equal(rows[0].client_id, cli, "sfd.3 the claimant is this same client, named explicitly");
+  assert.equal(rows[0].client_name, await clientName(cli));
   assert.equal(rows[0].via, "evidence_link");
   assert.equal(rows.some((r) => r.document_id === other.documentId), false,
     "sfd.3 the OTHER filed document of the same client is not spoken for");
@@ -221,6 +223,8 @@ test("sfd.5 an approved, not-reversed document-coding entry is reported via='cod
   assert.equal(rows.length, 1);
   assert.equal(rows[0].document_id, doc.documentId);
   assert.equal(rows[0].entry_id, entryId);
+  assert.equal(rows[0].client_id, cli);
+  assert.equal(rows[0].client_name, await clientName(cli));
   assert.equal(rows[0].via, "coding");
 });
 
@@ -264,4 +268,110 @@ test("sfd.8 a client with nothing spoken for reads an empty array, not an error 
   await evidenceDocument(BOB(), { firm: FIRM_A(), client: cli }); // filed, but never attached or coded
   const rows = await listSpokenFor(BOB(), cli);
   assert.deepEqual(rows, []);
+});
+
+// ===========================================================================================
+// 5 · #728 REVIEW ROUND — THE CLAIM IS FIRM-WIDE, and the door must answer at that scope.
+//
+// Cross-model review (Codex, 2026-09-11) read the first cut of this door and found it asking a
+// CLIENT-scoped question against a FIRM-WIDE invariant. `uq_document_filing_active` is
+// `(document_id, client_id) where retired_at is null` (0007:93), so ONE document may be actively
+// filed to TWO clients of a firm; `uq_entry_evidence_links_document` carries no client column at
+// all, and `clara._document_posting_entry` (0182:579-590) deliberately scopes its own lookup to
+// the FIRM for exactly that reason — its header records the same review finding from #634's round.
+// A client-scoped read here would call a document free for client B while client A's entry already
+// stands on it, and the person would learn that only from the door's refusal on submit — which is
+// the whole defect #728 item 5 exists to close.
+//
+// So the door now asks: of the documents THIS CLIENT'S PICKER CAN OFFER (its own active filings),
+// which are claimed by ANY live posted entry of the firm, and by WHOSE entry. `client_id` +
+// `client_name` name the claimant so the surface can link to the right client's Journals route.
+// ===========================================================================================
+
+/** The claimant's own name, read as root — the fact the door joins in, checked against the
+ *  relation rather than against the door's own answer. */
+async function clientName(client) {
+  return (await rootQuery("select name from clara.clients where id = $1", [client])).rows[0].name;
+}
+
+test("sfd.9 a document filed to TWO clients and already backing client A's entry is reported for client B too — naming A as the claimant", async (t) => {
+  if (await gate(t)) return;
+  const a = await freshWorkClient(ALICE(), "sfd9a");
+  const b = await freshWorkClient(ALICE(), "sfd9b");
+  const posted = await postedEntry({ client: a });
+  const doc = await evidenceDocument(BOB(), { firm: FIRM_A(), client: a });
+  // The SAME document, live in both clients at once — the shape uq_document_filing_active admits
+  // and the one a client-scoped read cannot see.
+  await fileSameDocumentTo(BOB(), { document: doc.documentId, client: b });
+  const attach = await attachEntryEvidence(BOB(), {
+    entry: posted.entryId, document: doc.documentId, expectedRevision: posted.revisionToken,
+  });
+  assert.equal(attach.attached, true, "sfd.9 setup: client A's entry now stands on the document");
+
+  const rows = await listSpokenFor(BOB(), b);
+  assert.equal(rows.length, 1,
+    "sfd.9 client B's picker IS told the document is spoken for, though the entry holding it belongs to A");
+  assert.equal(rows[0].document_id, doc.documentId);
+  assert.equal(rows[0].entry_id, posted.entryId);
+  assert.equal(rows[0].client_id, a, "sfd.9 the CLAIMANT client is named, never the client that asked");
+  assert.equal(rows[0].client_name, await clientName(a),
+    "sfd.9 …by name, so the surface can say whose entry holds it without a second read");
+  assert.equal(rows[0].via, "evidence_link");
+});
+
+test("sfd.10 the document-coding lane crosses the same boundary: client A's approved coding holds a document client B's picker also offers", async (t) => {
+  if (await gate(t)) return;
+  const a = await freshWorkClient(ALICE(), "sfd10a");
+  const b = await freshWorkClient(ALICE(), "sfd10b");
+  const doc = await evidenceDocument(BOB(), { firm: FIRM_A(), client: a });
+  await fileSameDocumentTo(BOB(), { document: doc.documentId, client: b });
+  const entryId = await codedEntry({
+    client: a, documentId: doc.documentId, filingId: doc.filingId, sha256: doc.sha256,
+  });
+
+  const rows = await listSpokenFor(BOB(), b);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].document_id, doc.documentId);
+  assert.equal(rows[0].entry_id, entryId);
+  assert.equal(rows[0].client_id, a);
+  assert.equal(rows[0].client_name, await clientName(a));
+  assert.equal(rows[0].via, "coding");
+});
+
+test("sfd.11 a document claimed by BOTH lanes is reported ONCE, by the live evidence link — the precedence clara._document_posting_entry itself applies", async (t) => {
+  if (await gate(t)) return;
+  const cli = await freshWorkClient(ALICE(), "sfd11");
+  const posted = await postedEntry({ client: cli });
+  const doc = await evidenceDocument(BOB(), { firm: FIRM_A(), client: cli });
+  await attachEntryEvidence(BOB(), {
+    entry: posted.entryId, document: doc.documentId, expectedRevision: posted.revisionToken,
+  });
+  // …and a coding-lane entry on the SAME document. #718 records that the coding lane can still
+  // post on a document this lane has already bound (not this ticket's to fix), so the double
+  // claim is a state the read must answer DETERMINISTICALLY rather than one it may assume away.
+  const coded = await codedEntry({
+    client: cli, documentId: doc.documentId, filingId: doc.filingId, sha256: doc.sha256,
+  });
+
+  const rows = await listSpokenFor(BOB(), cli);
+  assert.equal(rows.length, 1, "sfd.11 ONE row per document — a picker option carries one reason, not two");
+  assert.equal(rows[0].entry_id, posted.entryId,
+    "sfd.11 the LIVE evidence link wins, exactly as clara._document_posting_entry ranks it (0182:581-590)");
+  assert.equal(rows[0].via, "evidence_link");
+  assert.notEqual(rows[0].entry_id, coded, "sfd.11 …and not the coding-lane entry");
+});
+
+test("sfd.12 a document of ANOTHER client, spoken for and never filed to this one, is not this client's business", async (t) => {
+  if (await gate(t)) return;
+  const a = await freshWorkClient(ALICE(), "sfd12a");
+  const b = await freshWorkClient(ALICE(), "sfd12b");
+  const posted = await postedEntry({ client: a });
+  const doc = await evidenceDocument(BOB(), { firm: FIRM_A(), client: a });
+  await attachEntryEvidence(BOB(), {
+    entry: posted.entryId, document: doc.documentId, expectedRevision: posted.revisionToken,
+  });
+  // NO second filing this time: the document is not in client B's picker at all, so naming it to
+  // B would be a fact about another client's records that B's surface never asked for.
+  assert.deepEqual(await listSpokenFor(BOB(), b), [],
+    "sfd.12 the answer is bounded by what THIS client's picker can offer — its own active filings");
 });

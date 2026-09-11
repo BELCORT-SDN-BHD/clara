@@ -646,13 +646,41 @@ comment on function clara.get_activity_event(text, text) is
 
 -- ==============================================================================================
 -- 4. clara.list_spoken_for_documents -- #728 item 5. The evidence pickers' advisory read: which
---    of a client's documents already back a LIVE posted entry, and how. Bookkeeper+, firm+client
---    floored, no-oracle CLR11 on a cross-firm or absent client. Read-only; the door-side refusal
---    (attach_entry_evidence's CLR13 source_already_posted, admit_journal_work's own check) is
---    unchanged and stays the law -- this read is advisory only (see this file's header, arm B).
+--    of the documents THIS CLIENT'S PICKER CAN OFFER already back a LIVE posted entry, WHOSE entry
+--    it is, and through which lane. Bookkeeper+, firm+client floored, no-oracle CLR11 on a
+--    cross-firm or absent client. Read-only; the door-side refusal (attach_entry_evidence's CLR13
+--    source_already_posted, admit_journal_work's own check) is unchanged and stays the law -- this
+--    read is advisory only (see this file's header, arm B).
+--
+--    THE CLAIM IS FIRM-WIDE, AND SO IS THIS READ (cross-model review, Codex, 2026-09-11: the first
+--    cut asked a CLIENT-scoped question against a firm-wide invariant). `uq_document_filing_active`
+--    is `(document_id, client_id) where retired_at is null` (0007:93), so ONE document may be
+--    actively filed to TWO clients of a firm at once; `uq_entry_evidence_links_document` (0182:345)
+--    carries no client column at all, and `clara._document_posting_entry` (0182:579-590) scopes its
+--    own lookup to the FIRM for exactly that reason -- its header records the same finding from
+--    #634's review round. A client-scoped read here would call a document FREE for client B while
+--    client A's entry already stands on it, and the person would learn otherwise only from the
+--    door's refusal on submit -- which is the whole defect this item exists to close.
+--
+--    THE CANDIDATE SET IS THE PICKER'S OWN, which is what keeps a firm-wide claim scan bounded and
+--    the answer relevant: a claim is reported only when the document it names is an ACTIVE FILING
+--    of p_client (`clara.document_filings`, `retired_at is null` -- the SAME relation and predicate
+--    `listClientEvidenceDocuments` builds the option list from, apps/web/lib/work/evidence.ts). A
+--    document nobody offers this client is not this client's business, spoken for or not.
+--
+--    ONE ROW PER DOCUMENT, ranked the way clara._document_posting_entry ranks: a LIVE evidence link
+--    beats a coding-lane binding. #718 records that the coding lane can still post on a document
+--    this lane has already bound, so a double claim is a state that exists and the read answers it
+--    deterministically (a picker option carries one reason, not two) rather than assuming it away.
+--
+--    `client_name` IS JOINED IN rather than left to the caller: naming the claimant is the whole
+--    point of the firm-wide scope -- "already backs a posted entry" is unactionable if the person
+--    cannot see WHOSE entry -- and clara.clients is firm-scoped and already readable by this
+--    caller (the same fact clara.get_activity_event returns as its own `client_name`), so this is
+--    a round trip saved, never a disclosure widened.
 -- ==============================================================================================
 create function clara.list_spoken_for_documents(p_client uuid)
-returns table(document_id uuid, entry_id uuid, via text)
+returns table(document_id uuid, entry_id uuid, client_id uuid, client_name text, via text)
   language plpgsql stable security definer set search_path = clara, pg_temp as $$
 declare c record; v_firm uuid;
 begin
@@ -665,32 +693,55 @@ begin
   end if;
 
   return query
-  -- Arm 1: a LIVE clara.entry_evidence_links binding (0182). `released_at is null` is the SAME
-  -- predicate `uq_entry_evidence_links_document` enforces (0182:345-346) -- a reversed entry's
-  -- released binding must not show as "already used", because the correction is free to cite it.
-  select l.document_id, l.entry_id, 'evidence_link'::text as via
-    from clara.entry_evidence_links l
-   where l.client_id = p_client and l.firm_id = c.firm and l.released_at is null
-  union all
-  -- Arm 2: the document-coding lane's own binding -- approved, not reversed. The SAME pair
-  -- migration 0182's clara._document_posting_entry asks per-document (its own header names this
-  -- exact predicate for the exact same reason: LAW 6 leaves a reversed entry's status 'approved',
-  -- so "not reversed" cannot be read off status alone).
-  select je.document_id, je.id, 'coding'::text as via
-    from clara.journal_entries je
-   where je.client_id = p_client and je.firm_id = c.firm
-     and je.document_id is not null and je.status = 'approved' and je.reversed_by is null;
+  select distinct on (s.doc) s.doc, s.ent, s.cli, cl.name, s.lane
+    from (
+      -- Arm 1: a LIVE clara.entry_evidence_links binding (0182), ANY client of the firm.
+      -- `released_at is null` is the SAME predicate `uq_entry_evidence_links_document` enforces
+      -- (0182:345-346) -- a reversed entry's released binding must not show as "already used",
+      -- because the correction is free to cite it.
+      select l.document_id as doc, l.entry_id as ent, l.client_id as cli,
+             'evidence_link'::text as lane, 0 as rank
+        from clara.entry_evidence_links l
+       where l.firm_id = c.firm
+         and l.released_at is null
+         and exists (select 1 from clara.document_filings f
+                      where f.document_id = l.document_id and f.client_id = p_client
+                        and f.firm_id = c.firm and f.retired_at is null)
+      union all
+      -- Arm 2: the document-coding lane's own binding -- approved, not reversed, ANY client of the
+      -- firm. The SAME pair migration 0182's clara._document_posting_entry asks per-document (its
+      -- own header names this exact predicate for the exact same reason: LAW 6 leaves a reversed
+      -- entry's status 'approved', so "not reversed" cannot be read off status alone).
+      select je.document_id, je.id, je.client_id, 'coding'::text, 1
+        from clara.journal_entries je
+       where je.firm_id = c.firm
+         and je.document_id is not null
+         and je.status = 'approved'
+         and je.reversed_by is null
+         and exists (select 1 from clara.document_filings f
+                      where f.document_id = je.document_id and f.client_id = p_client
+                        and f.firm_id = c.firm and f.retired_at is null)
+    ) s
+    -- An INNER join: a claimant whose client row this firm cannot read is not a claim this firm
+    -- may be told about. Every row above is already firm-bound, so this drops nothing in practice
+    -- and is a belt on the one column that leaves the firm's own relations.
+    join clara.clients cl on cl.id = s.cli and cl.firm_id = c.firm
+   order by s.doc, s.rank;
 end $$;
 revoke all on function clara.list_spoken_for_documents(uuid) from public;
 grant execute on function clara.list_spoken_for_documents(uuid) to clara_authenticated;
 comment on function clara.list_spoken_for_documents(uuid) is
-  '#728. Documents of p_client that already back a LIVE posted entry: a live '
-  'clara.entry_evidence_links binding (via=evidence_link, released_at is null) union an approved, '
-  'not-reversed journal_entries.document_id binding (via=coding) -- the same two facts migration '
-  '0182''s clara._document_posting_entry asks per-document, answered here for a whole client at '
-  'once. Bookkeeper+ (_human_ctx), no-oracle CLR11 client_not_found. Advisory only: the picker '
-  'uses this to disable an option, but attach_entry_evidence/admit_journal_work stay the actual '
-  'law and their own typed conflict refusal is unchanged by this door''s existence.';
+  '#728. Documents ACTIVELY FILED to p_client that already back a LIVE posted entry of ANY client '
+  'of the caller''s firm: a live clara.entry_evidence_links binding (via=evidence_link, '
+  'released_at is null) union an approved, not-reversed journal_entries.document_id binding '
+  '(via=coding), one row per document with the live link winning -- the same two facts and the '
+  'same precedence migration 0182''s clara._document_posting_entry applies per document, answered '
+  'here for a whole picker at once. client_id/client_name name the CLAIMANT, which may be a '
+  'sibling client the document is also filed to (uq_document_filing_active is per (document, '
+  'client); the evidence invariant is firm-wide). Bookkeeper+ (_human_ctx), no-oracle CLR11 '
+  'client_not_found. Advisory only: the picker uses this to disable an option, but '
+  'attach_entry_evidence/admit_journal_work stay the actual law and their own typed conflict '
+  'refusal is unchanged by this door''s existence.';
 
 -- ==============================================================================================
 -- 5. GRANTS -- restated for the two recut doors (create or replace preserves an unchanged

@@ -57,6 +57,7 @@ import {
 import { sessionTokenAccessor } from "@/lib/session-accessor";
 import type { SessionTokenAccessor } from "@/lib/session";
 import { landmarkHeadingFor, nextPaint, restoreFocusAfterRow } from "@/components/firm/work-question-affordance";
+import { SpokenForNotes } from "@/components/work/spoken-for-note";
 
 /** One option, as a single readable string. Kept identical in SHAPE to the
  *  composer's own label (filename · kind · date) so the same document reads the
@@ -319,25 +320,7 @@ export function AttachEvidenceDialog({
           {spokenForUnavailable ? (
             <p className="text-xs text-muted-foreground">{tWalk("evidenceSpokenForUnavailable")}</p>
           ) : null}
-          {list
-            .filter((doc) => doc.spokenFor !== null)
-            .map((doc) => (
-              <p key={doc.documentId} className="text-xs text-muted-foreground">
-                {tWalk("evidenceSpokenFor", { name: doc.filename ?? t("evidence.unnamed") })}{" "}
-                <Link
-                  href={journalEntryHref(clientId, doc.spokenFor!.entryId)}
-                  // UNCONDITIONAL underline, not hover:underline — this link sits INLINE inside a
-                  // sentence of plain text (axe's link-in-text-block rule), so a colour cue alone
-                  // (text-primary at 1.33:1 against text-muted-foreground, measured) is not enough
-                  // at rest; the standalone action links elsewhere in this file are their own
-                  // block, never embedded in a sentence, which is why they can rely on
-                  // hover:underline and this one cannot.
-                  className="text-primary underline underline-offset-4"
-                >
-                  {tWalk("evidenceSpokenForLink")}
-                </Link>
-              </p>
-            ))}
+          <SpokenForNotes clientId={clientId} options={list} />
           <AttachOutcome clientId={clientId} conflictEntry={conflictEntry} result={result} />
         </div>
         <DialogFooter>

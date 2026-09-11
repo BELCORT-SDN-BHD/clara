@@ -4101,6 +4101,8 @@
     "agentActorLabel": "Clara",
     "systemActorLabel": "Clara (system)",
     "evidenceSpokenFor": "{name} already backs a posted journal entry.",
+    "evidenceSpokenForElsewhere": "{name} already backs a posted journal entry for {client}.",
+    "evidenceSpokenForUnnamedClient": "another client",
     "evidenceSpokenForLink": "View that journal entry",
     "evidenceSpokenForUnavailable": "We could not check which documents already back a posted entry. Every document is still offered — the system still refuses a conflict when you submit."
   }

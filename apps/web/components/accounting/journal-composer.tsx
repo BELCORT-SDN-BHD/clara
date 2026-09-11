@@ -53,6 +53,7 @@ import { useAsyncRead } from "@/lib/firm/use-async-read";
 import { canOpenClientLeaf, journalEntryHref, workDetailHref, type NavigationScope } from "@/lib/navigation/tree";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
 import { submitJournalWork, type SubmitJournalWorkResult } from "@/lib/work/api";
+import { SpokenForNotes } from "@/components/work/spoken-for-note";
 import {
   listClientEvidenceDocuments,
   listSpokenForDocuments,
@@ -531,23 +532,7 @@ export function JournalComposerView({
         {spokenForRead.error !== null ? (
           <p className="text-xs text-muted-foreground">{tWalk("evidenceSpokenForUnavailable")}</p>
         ) : null}
-        {evidenceOptions
-          .filter((doc) => doc.spokenFor !== null)
-          .map((doc) => (
-            <p key={doc.documentId} className="text-xs text-muted-foreground">
-              {tWalk("evidenceSpokenFor", { name: doc.filename ?? tm("evidence.unnamed") })}{" "}
-              <Link
-                href={journalEntryHref(clientId, doc.spokenFor!.entryId)}
-                // UNCONDITIONAL underline, not hover:underline — this link sits INLINE inside a
-                // sentence of plain text (axe's link-in-text-block rule), so a colour cue alone
-                // (text-primary at 1.33:1 against text-muted-foreground, measured) is not enough
-                // at rest. See attach-evidence-dialog.tsx's own copy of this note.
-                className="text-primary underline underline-offset-4"
-              >
-                {tWalk("evidenceSpokenForLink")}
-              </Link>
-            </p>
-          ))}
+        <SpokenForNotes clientId={clientId} options={evidenceOptions} />
       </div>
 
       {/* THE CHART READ IS A SEPARATE FAILURE FROM THE FORM'S. A preparer who

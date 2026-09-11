@@ -72,7 +72,13 @@ function App(props: {
   storage?: DraftStorage | null;
   loadAccounts?: () => Promise<CoaAccountRow[]>;
   loadDocuments?: () => Promise<typeof DOCUMENTS>;
-  loadSpokenFor?: () => Promise<Array<{ document_id: string; entry_id: string; via: "evidence_link" | "coding" }>>;
+  loadSpokenFor?: () => Promise<Array<{
+    document_id: string;
+    entry_id: string;
+    client_id: string;
+    client_name: string | null;
+    via: "evidence_link" | "coding";
+  }>>;
 }): ReactElement {
   return createElement(NextIntlClientProvider, {
     locale: "en",
@@ -873,7 +879,7 @@ test("t728: a document already spoken for renders DISABLED with a reason and a l
   const OTHER_ENTRY = "e5555555-5555-4555-8555-555555555555";
   const h = await renderComponent(
     App({
-      loadSpokenFor: async () => [{ document_id: DOCUMENTS[0]!.documentId, entry_id: OTHER_ENTRY, via: "evidence_link" }],
+      loadSpokenFor: async () => [{ document_id: DOCUMENTS[0]!.documentId, entry_id: OTHER_ENTRY, client_id: CLIENT, client_name: "Acme Sdn Bhd", via: "evidence_link" }],
     }),
   );
   try {
@@ -906,6 +912,33 @@ test("t728: a FAILED spoken-for read disables nothing and says the check was una
       assert.notEqual((opt as { disabled?: unknown }).disabled, true, "a failed check must never disable a real option");
     }
     assert.match(h.text(), /could not check which documents already back a posted entry/);
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("t728: a SIBLING client's entry holding the document is named, and the link goes to THAT client's journals", async () => {
+  const OTHER_ENTRY = "e6666666-6666-4666-8666-666666666666";
+  // A sibling client of the same firm: uq_document_filing_active is per (document, client)
+  // (0007:93) while the evidence invariant is firm-wide, so the entry already standing on a
+  // document this composer offers may belong to a DIFFERENT client.
+  const OTHER_CLIENT = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+  const h = await renderComponent(
+    App({
+      loadSpokenFor: async () => [
+        { document_id: DOCUMENTS[0]!.documentId, entry_id: OTHER_ENTRY, client_id: OTHER_CLIENT, client_name: "Beta Sdn Bhd", via: "coding" },
+      ],
+    }),
+  );
+  try {
+    await h.settle();
+    assert.match(h.text(), /already backs a posted journal entry for Beta Sdn Bhd/,
+      "the sentence names WHOSE entry holds it");
+    const link = h.find((n) => n.tagName === "A" && String((n as { getAttribute?: (k: string) => string | null }).getAttribute?.("href") ?? "").includes(OTHER_ENTRY));
+    assert.ok(link, "the reason still links to the entry");
+    const href = String((link as { getAttribute?: (k: string) => string | null }).getAttribute?.("href") ?? "");
+    assert.ok(href.includes(OTHER_CLIENT), "the link targets the CLAIMANT client's Journals route");
+    assert.equal(href.includes(CLIENT), false, "…and not the client this composer is drafting for");
   } finally {
     await h.unmount();
   }

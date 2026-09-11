@@ -143,15 +143,18 @@ test("t634: nothing holds the document — a link is never invented", async () =
 // ---------------------------------------------------------------------------
 
 const ENTRY = "e1111111-1111-4111-8111-111111111111";
+/** A SIBLING client of the same firm — the claimant a firm-wide read may name (migration 0183's
+ *  own scope: uq_document_filing_active is per (document, client), the evidence invariant is not). */
+const OTHER_CLIENT = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
 
 test("t728: listSpokenForDocuments reads the RPC and returns the rows verbatim", async () => {
   await withRows(
     (url) => (url.includes("/rest/v1/rpc/list_spoken_for_documents")
-      ? [{ document_id: VERIFIED, entry_id: ENTRY, via: "evidence_link" }]
+      ? [{ document_id: VERIFIED, entry_id: ENTRY, client_id: CLIENT, client_name: "Acme Sdn Bhd", via: "evidence_link" }]
       : []),
     async (urls) => {
       const rows = await listSpokenForDocuments(CLIENT, { session });
-      assert.deepEqual(rows, [{ document_id: VERIFIED, entry_id: ENTRY, via: "evidence_link" }]);
+      assert.deepEqual(rows, [{ document_id: VERIFIED, entry_id: ENTRY, client_id: CLIENT, client_name: "Acme Sdn Bhd", via: "evidence_link" }]);
       assert.ok(urls[0]!.includes("list_spoken_for_documents"));
     },
   );
@@ -167,10 +170,20 @@ const DOC_A: EvidenceDocument = { documentId: "d1", filename: "a.pdf", kind: "in
 const DOC_B: EvidenceDocument = { documentId: "d2", filename: "b.pdf", kind: "receipt", filedAt: "2026-09-02T00:00:00Z", financialDate: null };
 
 test("t728: mergeSpokenFor annotates exactly the named documents, never hides one", async () => {
-  const merged = mergeSpokenFor([DOC_A, DOC_B], [{ document_id: "d1", entry_id: ENTRY, via: "coding" }]);
+  const merged = mergeSpokenFor([DOC_A, DOC_B], [
+    { document_id: "d1", entry_id: ENTRY, client_id: CLIENT, client_name: "Acme Sdn Bhd", via: "coding" },
+  ]);
   assert.deepEqual(merged.map((d) => d.documentId), ["d1", "d2"], "both documents survive the merge — nothing is filtered out");
-  assert.deepEqual(merged[0]!.spokenFor, { entryId: ENTRY, via: "coding" });
+  assert.deepEqual(merged[0]!.spokenFor, { entryId: ENTRY, clientId: CLIENT, clientName: "Acme Sdn Bhd", via: "coding" });
   assert.equal(merged[1]!.spokenFor, null);
+});
+
+test("t728: the CLAIMANT is carried through the merge even when it is a sibling client, and a missing name stays null rather than becoming a string", async () => {
+  const merged = mergeSpokenFor([DOC_A], [
+    { document_id: "d1", entry_id: ENTRY, client_id: OTHER_CLIENT, client_name: null, via: "evidence_link" },
+  ]);
+  assert.deepEqual(merged[0]!.spokenFor, { entryId: ENTRY, clientId: OTHER_CLIENT, clientName: null, via: "evidence_link" },
+    "the claimant client is the one the surface links to — the asking client would send a person to a journal the entry is not in");
 });
 
 test("t728: mergeSpokenFor with an EMPTY successful read disables nothing", async () => {

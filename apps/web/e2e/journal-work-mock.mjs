@@ -1247,15 +1247,22 @@ export async function handleJournalWorkRpc(request, response, path, url, sendJso
   if (path === "/rest/v1/rpc/list_spoken_for_documents") {
     const body = await readJson(request);
     if (body?.p_client !== JOURNAL_WORK.clientId) return false;
+    // `client_id`/`client_name` name the CLAIMANT, which the real door (0183) answers at the
+    // FIRM's scope: one document may be actively filed to two clients at once while the evidence
+    // invariant is firm-wide, so the entry holding a document need not belong to the client whose
+    // picker asked. This mock keeps ONE client, so every claimant here is that client — the
+    // sibling-client sentence and its link are pinned in the RTL cells instead, where a second
+    // client costs nothing.
+    const claimant = { client_id: JOURNAL_WORK.clientId, client_name: JOURNAL_WORK.clientName };
     const rows = [...state.links.values()]
       // A link row in this mock carries NO `released_at` field at all until released (the SAME
       // convention list_entry_links' own handler defaults with `?? null` when reading) — `== null`
       // catches both that absence and an explicit null, never a truthy instant.
       .filter((link) => link.released_at == null)
-      .map((link) => ({ document_id: link.document_id, entry_id: link.entry_id, via: "evidence_link" }));
+      .map((link) => ({ document_id: link.document_id, entry_id: link.entry_id, ...claimant, via: "evidence_link" }));
     for (const entry of state.entries.values()) {
       if (entry.document_id !== null && entry.status === "approved" && entry.reversed_by === null) {
-        rows.push({ document_id: entry.document_id, entry_id: entry.id, via: "coding" });
+        rows.push({ document_id: entry.document_id, entry_id: entry.id, ...claimant, via: "coding" });
       }
     }
     sendJson(response, 200, rows, cors);

@@ -108,11 +108,23 @@ export async function listClientEvidenceDocuments(
 export type SpokenForDocumentRow = {
   document_id: string;
   entry_id: string;
+  /** THE CLAIMANT — the client whose entry holds the document, which need NOT be the client whose
+   *  picker asked. `uq_document_filing_active` is `(document_id, client_id) where retired_at is
+   *  null` (0007:93), so one document may be actively filed to two clients of a firm at once,
+   *  while `uq_entry_evidence_links_document` carries no client column at all: the claim is
+   *  firm-wide and the door answers at that scope (cross-model review, 2026-09-11 — the first cut
+   *  asked a client-scoped question against a firm-wide invariant, so a document already backing
+   *  client A's entry was offered to client B as free). */
+  client_id: string;
+  /** The claimant's name, joined in by the door so a surface can say WHOSE entry holds it without
+   *  a second read. Nullable on the wire only. */
+  client_name: string | null;
   via: "evidence_link" | "coding";
 };
 
 /**
- * Every document of `clientId` that already backs a LIVE posted entry, by document id.
+ * Every document OFFERED to `clientId` (its own active filings) that already backs a LIVE posted
+ * entry of ANY client of the firm, with the claimant named.
  *
  * A SETOF/TABLE function is always an array on the wire (the same shape `lib/firm/timeline.ts`'s
  * own `listFirmTimeline` reads) — anything else is reported as empty rather than coerced into a
@@ -135,7 +147,15 @@ export async function listSpokenForDocuments(
  *  `EvidenceDocument` — `attach-evidence-dialog.tsx`'s own `optionLabel` predates this ticket —
  *  needs to carry it. */
 export type EvidenceOption = EvidenceDocument & {
-  spokenFor: { entryId: string; via: SpokenForDocumentRow["via"] } | null;
+  spokenFor: {
+    entryId: string;
+    /** The CLAIMANT client — see `SpokenForDocumentRow.client_id`. The note's link must target
+     *  THIS client's Journals route, not the asking client's: the entry lives where it was
+     *  posted. */
+    clientId: string;
+    clientName: string | null;
+    via: SpokenForDocumentRow["via"];
+  } | null;
 };
 
 /**
@@ -160,7 +180,17 @@ export function mergeSpokenFor(
   const byDocument = new Map((spokenFor ?? []).map((row) => [row.document_id, row]));
   return documents.map((doc) => {
     const hit = byDocument.get(doc.documentId);
-    return { ...doc, spokenFor: hit ? { entryId: hit.entry_id, via: hit.via } : null };
+    return {
+      ...doc,
+      spokenFor: hit
+        ? {
+            entryId: hit.entry_id,
+            clientId: hit.client_id,
+            clientName: hit.client_name ?? null,
+            via: hit.via,
+          }
+        : null,
+    };
   });
 }
 

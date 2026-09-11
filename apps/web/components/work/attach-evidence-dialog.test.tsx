@@ -31,6 +31,11 @@ const CLIENT = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const ENTRY = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
 const REVISION = "rrrrrrrr-rrrr-4rrr-8rrr-rrrrrrrrrrrr";
 const OTHER_ENTRY = "ffffffff-ffff-4fff-8fff-ffffffffffff";
+/** A SIBLING client of the same firm. One document may be actively filed to two clients at once
+ *  (uq_document_filing_active is per (document, client), 0007:93) while the evidence invariant is
+ *  firm-wide — so the entry that already holds a document may belong to a DIFFERENT client than
+ *  the one this dialog is attaching for, and the note must say so and link THERE. */
+const OTHER_CLIENT = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
 
 const DOCUMENTS: EvidenceDocument[] = [
   { documentId: "d1111111-1111-4111-8111-111111111111", filename: "sept-rent.pdf", kind: "invoice", filedAt: "2026-09-02T03:00:00Z", financialDate: "2026-09-01" },
@@ -415,7 +420,7 @@ test("t728: a document already spoken for renders DISABLED with a reason and a l
   const h = await renderComponent(
     App({
       loadSpokenFor: async () => [
-        { document_id: DOCUMENTS[0]!.documentId, entry_id: OTHER_ENTRY, via: "evidence_link" },
+        { document_id: DOCUMENTS[0]!.documentId, entry_id: OTHER_ENTRY, client_id: CLIENT, client_name: "Acme Sdn Bhd", via: "evidence_link" },
       ],
     }),
   );
@@ -453,6 +458,31 @@ test("t728: a FAILED spoken-for read disables nothing and says the check was una
         "a failed check must never be read as 'nothing is spoken for' — see mergeSpokenFor's own note");
     }
     assert.match(bodyText(), /could not check which documents already back a posted entry/);
+  } finally {
+    await h.unmount();
+    await drain(h);
+  }
+});
+
+test("t728: a SIBLING client's entry holding the document is named, and the link goes to THAT client's journals", async () => {
+  const h = await renderComponent(
+    App({
+      loadSpokenFor: async () => [
+        { document_id: DOCUMENTS[0]!.documentId, entry_id: OTHER_ENTRY, client_id: OTHER_CLIENT, client_name: "Beta Sdn Bhd", via: "coding" },
+      ],
+    }),
+  );
+  try {
+    await openDialog(h);
+    assert.match(bodyText(), /already backs a posted journal entry for Beta Sdn Bhd/,
+      "the sentence names WHOSE entry holds it — 'already backs a posted entry' is unactionable without that");
+    const href = String(
+      (findIn(bodyNode(), (n) => n.tagName === "A" && String((n as { getAttribute?: (k: string) => string | null }).getAttribute?.("href") ?? "").includes(OTHER_ENTRY)) as
+        { getAttribute?: (k: string) => string | null } | null)?.getAttribute?.("href") ?? "",
+    );
+    assert.ok(href.includes(OTHER_CLIENT),
+      "the link targets the CLAIMANT client's Journals route — the asking client's would show a journal the entry is not in");
+    assert.equal(href.includes(CLIENT), false, "…and not this dialog's own client");
   } finally {
     await h.unmount();
     await drain(h);
