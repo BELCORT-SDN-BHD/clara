@@ -313,6 +313,12 @@ export type AttachEvidenceResult =
   | { kind: "refused"; code: string | null; message: string }
   | { kind: "unavailable"; message: string };
 
+export type DocumentClaim = {
+  entryId: string;
+  /** The client whose entry holds the document — NOT necessarily the one that asked. */
+  clientId: string;
+};
+
 /**
  * WHICH POSTED ENTRY ALREADY STANDS ON THIS DOCUMENT — read from the rows, not
  * from the refusal.
@@ -355,12 +361,6 @@ export type AttachEvidenceResult =
  * books, for a document the door has already freed — the exact opposite of the
  * conflict it is explaining.
  */
-export type DocumentClaim = {
-  entryId: string;
-  /** The client whose entry holds the document — NOT necessarily the one that asked. */
-  clientId: string;
-};
-
 export async function findEntryForDocument(
   documentId: string,
   opts: Opts = {},

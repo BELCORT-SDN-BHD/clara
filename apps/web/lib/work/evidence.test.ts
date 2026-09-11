@@ -11,6 +11,7 @@
 // clause `findEntryForDocument` now carries.
 
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
 import { findEntryClient, findEntryForDocument, listClientEvidenceDocuments, listSpokenForDocuments, mergeSpokenFor, type EvidenceDocument } from "./evidence";
@@ -239,4 +240,25 @@ test("t728: mergeSpokenFor with a FAILED read (null) disables nothing — never 
   const merged = mergeSpokenFor([DOC_A, DOC_B], null);
   assert.ok(merged.every((d) => d.spokenFor === null),
     "a failed check must read exactly like an empty one to the picker — no document is disabled on the strength of a read that never happened");
+});
+
+// ---------------------------------------------------------------------------
+// #728 delta review round 3, finding [4] — the contract comment must attach to
+// the FUNCTION, not to a type that drifted in front of it.
+// ---------------------------------------------------------------------------
+
+test("t728e: the FIRM-WIDE contract block is findEntryForDocument's own doc comment, not a stray type's", () => {
+  // TypeScript attaches a leading doc comment to the declaration that IMMEDIATELY follows it, so
+  // a declaration inserted between the two silently steals 35 lines of contract — and four call
+  // sites in this lane tell the reader to go and read it (`attach-evidence-dialog.tsx:125`/`:243`,
+  // `evidence.ts`'s own `source_conflict` arm). This cell reads the raw source and asserts the
+  // adjacency, which is the only thing that decides the attachment.
+  const src = readFileSync(new URL("./evidence.ts", import.meta.url), "utf8");
+  const anchor = src.indexOf("WHICH POSTED ENTRY ALREADY STANDS ON THIS DOCUMENT");
+  assert.notEqual(anchor, -1, "the contract block itself is still in evidence.ts (vacuity control)");
+  const close = src.indexOf("*/", anchor);
+  assert.notEqual(close, -1, "…and it is a closed block comment");
+  const after = src.slice(close + 2).replace(/^\s*/u, "");
+  assert.ok(after.startsWith("export async function findEntryForDocument("),
+    `the contract block must be IMMEDIATELY followed by findEntryForDocument — it currently leads: ${after.slice(0, 80)}`);
 });
