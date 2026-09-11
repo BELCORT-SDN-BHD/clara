@@ -668,17 +668,20 @@ function control(body) {
     state.showQuestionCard = true;
     return { showQuestionCard: true };
   }
-  // #634 — MOVE THE ROW UNDER AN OPEN DIALOG. The late door's CLR06 is a race:
-  // the caller read a revision, something else changed the entry, and the door
-  // must refuse rather than write against a view that is no longer current. The
-  // walk cannot forge a request the client would not make, so it moves the ROW
-  // instead — which is exactly what the race is.
-  // #728 — BREAK THE ADVISORY SPOKEN-FOR READ (see `state.spokenForBroken`). One direction only:
+  // #728 — BREAK THE ADVISORY SPOKEN-FOR READ (see `state.spokenForBroken`), so a walk can reach
+  // the state where the picker offers a document the door will refuse: the advisory check is
+  // unavailable, nothing is disabled, and `admit_journal_work`/`attach_entry_evidence` answer with
+  // their own typed conflict — which is the law, the advisory read never was. One direction only:
   // `reset` is the way back, exactly as every other armed arm in this lane works.
   if (body.op === "break_spoken_for") {
     state.spokenForBroken = true;
     return { spokenForBroken: true };
   }
+  // #634 — MOVE THE ROW UNDER AN OPEN DIALOG. The late door's CLR06 is a race:
+  // the caller read a revision, something else changed the entry, and the door
+  // must refuse rather than write against a view that is no longer current. The
+  // walk cannot forge a request the client would not make, so it moves the ROW
+  // instead — which is exactly what the race is.
   if (body.op === "bump_revision") {
     const entry = state.entries.get(String(body.entryId ?? ""));
     if (entry === undefined) return { error: "no_such_entry" };
@@ -895,8 +898,21 @@ export async function handleJournalWorkSupabase(request, response, path, url, se
   }
 
   if (request.method === "GET" && path === "/rest/v1/journal_entries") {
-    if (eqParam(url, "client_id") !== ours) return false;
     const id = eqParam(url, "id");
+    const documentId = eqParam(url, "document_id");
+    // THREE SCOPES, all of them ids this module minted. The client filter is the original #634
+    // one; the other two are #728's claimant reads (`findEntryClient` by entry id, and
+    // `findEntryForDocument`'s coding arm by document id), which carry NO client filter because
+    // the invariant they ask about is firm-wide.
+    const byEntry = id !== null && state.entries.has(id);
+    const byDocument = documentId !== null && DOCUMENTS.some((d) => d.id === documentId);
+    if (!byEntry && !byDocument && eqParam(url, "client_id") !== ours) return false;
+    if (byDocument && id === null) {
+      const rows = [...state.entries.values()].filter((e) => e.document_id === documentId
+        && e.status === "approved" && e.reversed_by === null);
+      sendJson(response, 200, rows, cors);
+      return true;
+    }
     const row = id === null ? null : (state.entries.get(id) ?? null);
     sendJson(response, 200, row === null ? [] : [row], cors);
     return true;
@@ -933,11 +949,19 @@ export async function handleJournalWorkSupabase(request, response, path, url, se
   // #634 — `findEntryForDocument`'s first read: WHICH entry already stands on a
   // document, answered from the rows rather than from a refusal (a governed
   // refusal carries only `detail.reason` to a browser).
+  //
+  // NO `client_id` FILTER TO SCOPE ON any more (#728 delta review [4]): the evidence invariant is
+  // firm-wide and the read asks at that scope, so the DOCUMENT is the discriminant — only ids this
+  // module minted resolve, exactly the way the `journal_lines` hook below scopes on an entry id.
+  // `client_id` travels back with the row because the caller builds the CLAIMANT's route from it.
   if (request.method === "GET" && path === "/rest/v1/entry_evidence_links") {
-    if (eqParam(url, "client_id") !== ours) return false;
     const documentId = eqParam(url, "document_id");
-    const rows = [...state.links.values()].filter((row) => documentId === null || row.document_id === documentId);
-    sendJson(response, 200, rows.map((row) => ({ entry_id: row.entry_id })), cors);
+    const known = documentId !== null && DOCUMENTS.some((d) => d.id === documentId);
+    if (!known && eqParam(url, "client_id") !== ours) return false;
+    const rows = [...state.links.values()]
+      .filter((row) => row.released_at == null)
+      .filter((row) => documentId === null || row.document_id === documentId);
+    sendJson(response, 200, rows.map((row) => ({ entry_id: row.entry_id, client_id: row.client_id })), cors);
     return true;
   }
 
