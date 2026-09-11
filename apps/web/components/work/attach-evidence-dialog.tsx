@@ -310,9 +310,9 @@ export function AttachEvidenceDialog({
               // #728 finding 5 — DISABLED, never hidden: hiding an option is a claim this
               // advisory read cannot make with certainty (lib/work/evidence.ts's own note on
               // `mergeSpokenFor`). A native `<option disabled>` is announced by every assistive
-              // technology as unselectable on its own (C08.6 — not by colour alone); the reason
-              // and the link to the conflicting entry are rendered BESIDE the select below,
-              // because an `<option>` cannot carry either.
+              // technology as unselectable on its own, and THE REASON RIDES THE LABEL (review
+              // round, N9) so C08.6 holds without colour and without a paragraph per document.
+              // The link to the conflicting entry belongs to the SELECTED document alone, below.
               <option key={doc.documentId} value={doc.documentId} disabled={doc.spokenFor !== null}>
                 {optionLabel(doc, t)}
                 {doc.spokenFor !== null ? ` — ${tWalk("evidenceSpokenForOption")}` : ""}

@@ -504,8 +504,10 @@ export function JournalComposerView({
           {evidenceOptions.map((doc) => (
             // #728 finding 5 — DISABLED, never hidden: see lib/work/evidence.ts's own note on
             // `mergeSpokenFor` for why a document already backing a posted entry stays in the
-            // list rather than being filtered out. The reason and a link to that entry render
-            // BESIDE the select below, an `<option>` having no room for either.
+            // list rather than being filtered out. THE REASON RIDES THE LABEL (review round, N9):
+            // it is the one place a browsing person reads, it is announced with the option, and it
+            // costs no extra node per document — which the paragraph-per-document it replaced did.
+            // The link to the conflicting entry belongs to the SELECTED document alone, below.
             <option key={doc.documentId} value={doc.documentId} disabled={doc.spokenFor !== null}>
               {evidenceOptionLabel(doc, tm)}
               {doc.spokenFor !== null ? ` — ${tWalk("evidenceSpokenForOption")}` : ""}
