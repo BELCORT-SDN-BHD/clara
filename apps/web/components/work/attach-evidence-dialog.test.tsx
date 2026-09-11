@@ -47,7 +47,7 @@ type Attempt = { entryId: string; documentId: string; expectedRevision: string; 
 function App(props: {
   attach?: (input: Attempt) => Promise<AttachEvidenceResult>;
   onAttached?: () => void;
-  findEntry?: () => Promise<string | null>;
+  findEntry?: () => Promise<{ entryId: string; clientId: string } | null>;
   loadDocuments?: () => Promise<EvidenceDocument[]>;
   loadSpokenFor?: () => Promise<SpokenForDocumentRow[]>;
 }): ReactElement {
@@ -191,7 +191,7 @@ test("t634: a SOURCE CONFLICT stays open, keeps the choice, and links to the ent
   const h = await renderComponent(
     App({
       attach: async () => ({ kind: "source_conflict" }),
-      findEntry: async () => OTHER_ENTRY,
+      findEntry: async () => ({ entryId: OTHER_ENTRY, clientId: CLIENT }),
       onAttached: () => {
         reReads += 1;
       },
@@ -479,12 +479,82 @@ test("t728: a FAILED spoken-for read disables nothing and says the check was una
     await openDialog(h);
     const select = selectIn();
     const options = ((select as { childNodes?: Stub[] }).childNodes ?? []).filter((n) => n.tagName === "OPTION");
+    // THE LOOP BELOW IS VACUOUS ON AN EMPTY LIST, and an empty list is exactly what a refactor
+    // that folded the two reads back into one effect would produce — a failing spoken-for read
+    // running the DOCUMENTS catch, leaving `documents = []` and the picker offering nothing at
+    // all, while the banner assertion still matched (delta review [6]). Count first.
+    assert.equal(options.length, DOCUMENTS.length + 1,
+      `the chooser still offers every document plus the "no document" option (saw ${options.length})`);
     for (const opt of options) {
       assert.notEqual((opt as { disabled?: unknown }).disabled, true,
         "a failed check must never be read as 'nothing is spoken for' — see mergeSpokenFor's own note");
     }
     assert.match(bodyText(), /could not check which documents already back a posted entry/);
   } finally {
+    await h.unmount();
+    await drain(h);
+  }
+});
+
+test("t728: a door REFUSAL whose entry belongs to a sibling client links into THAT client's journals", async () => {
+  // The advisory read is not the law: `attach_entry_evidence`'s own CLR13 is, and it resolves the
+  // holding entry FIRM-WIDE. `findEntryForDocument` therefore answers firm-wide too and carries
+  // the claimant with the entry (delta review [4]) — a client-scoped lookup returned null here
+  // and the refusal rendered with no link at all.
+  const h = await renderComponent(
+    App({
+      attach: async () => ({ kind: "source_conflict" }),
+      findEntry: async () => ({ entryId: OTHER_ENTRY, clientId: OTHER_CLIENT }),
+    }),
+  );
+  try {
+    await openDialog(h);
+    await choose(h, DOCUMENTS[0]!.documentId);
+    await pressAttach(h);
+    const href = String(
+      (findIn(bodyNode(), (n) => n.tagName === "A" && String((n as { getAttribute?: (k: string) => string | null }).getAttribute?.("href") ?? "").includes(OTHER_ENTRY)) as
+        { getAttribute?: (k: string) => string | null } | null)?.getAttribute?.("href") ?? "",
+    );
+    assert.ok(href.includes(OTHER_CLIENT),
+      "the refusal's link targets the CLAIMANT client's Journals route");
+    assert.equal(href.includes(CLIENT), false,
+      "…and not the asking client's, whose journal never contains that entry");
+  } finally {
+    await h.unmount();
+    await drain(h);
+  }
+});
+
+test("t728: a REFUSED attach does NOT steal focus the person placed somewhere themselves", async () => {
+  // `busy` does not disable everything — DialogContent renders its own close X with NO disabled
+  // prop (components/ui/dialog.tsx), and Escape and the backdrop are never gated (delta review
+  // [5]). During the write that X is the one live control inside the focus trap, so it is exactly
+  // where a keyboard user ends up; the refusal landing must not yank focus off it. The write is
+  // PARKED on a gate so the focus is placed WHILE `busy` is true, which is the only ordering that
+  // exercises the guard at all.
+  let release!: () => void;
+  const parked = new Promise<void>((resolve) => { release = resolve; });
+  const h = await renderComponent(App({
+    attach: async () => { await parked; return { kind: "invalid_document" }; },
+  }));
+  try {
+    await openDialog(h);
+    await choose(h, DOCUMENTS[0]!.documentId);
+    await pressAttach(h);
+    // Still mid-write: the close X is enabled, and this is the person tabbing to it.
+    const closeX = findIn(bodyNode(),
+      (n) => n.tagName === "BUTTON" && textOf(n as never).includes("Close"));
+    assert.ok(closeX, "the dialog's own close control is rendered and reachable during the write");
+    assert.notEqual((closeX as { disabled?: unknown }).disabled, true,
+      "…and it is NOT disabled by `busy` — the premise of this cell, and of the guard");
+    (closeX as { focus?: () => void }).focus?.();
+    release();
+    for (let i = 0; i < 6; i++) await h.settle();
+    assert.ok(activeElement() === closeX,
+      "focus stays where the person put it — the post-refusal move is guarded, not unconditional");
+    assert.match(bodyText(), /not an active filed document/, "…and the refusal still rendered");
+  } finally {
+    release();
     await h.unmount();
     await drain(h);
   }

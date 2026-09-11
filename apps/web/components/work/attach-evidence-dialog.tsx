@@ -51,6 +51,7 @@ import {
   listSpokenForDocuments,
   mergeSpokenFor,
   type AttachEvidenceResult,
+  type DocumentClaim,
   type EvidenceDocument,
   type SpokenForDocumentRow,
 } from "@/lib/work/evidence";
@@ -117,17 +118,26 @@ export function AttachEvidenceDialog({
   const [documentId, setDocumentId] = useState("");
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<AttachEvidenceResult | null>(null);
-  /** The entry that already stands on the chosen document, resolved FROM THE
-   *  ROWS after a source conflict — a governed refusal carries only its
-   *  `detail.reason` to a browser (lib/wire.ts), so the id is re-read rather
-   *  than invented. Null means "we could not find one", and then no link is
-   *  offered at all. */
-  const [conflictEntry, setConflictEntry] = useState<string | null>(null);
+  /** The entry that already stands on the chosen document AND THE CLIENT WHOSE
+   *  IT IS, resolved FROM THE ROWS after a source conflict — a governed refusal
+   *  carries only its `detail.reason` to a browser (lib/wire.ts), so this is
+   *  re-read rather than invented. The claimant may be a SIBLING client of the
+   *  same firm (the evidence invariant is firm-wide, `findEntryForDocument`'s
+   *  own note), and the link must target THEIR journal: the asking client's
+   *  never contains the entry. Null means "we could not find one", and then no
+   *  link is offered at all. */
+  const [conflictEntry, setConflictEntry] = useState<DocumentClaim | null>(null);
   /** ONE op key per PRESS, minted when the dialog opens and re-minted after any
    *  completed attempt: two clicks on one decision must not attach twice, and a
    *  genuine second decision must not be swallowed as a duplicate of the first. */
   const opKey = useRef<string>("");
   const selectRef = useRef<HTMLSelectElement | null>(null);
+  /** The Attach button, and whether the dialog is STILL OPEN — both read by the post-refusal focus
+   *  guard in `confirm` below, which runs after two awaits and therefore cannot trust the `open`
+   *  its closure captured. */
+  const confirmRef = useRef<HTMLButtonElement | null>(null);
+  const openRef = useRef(false);
+  openRef.current = open;
   /** #728 finding 3 — a container OUTSIDE the portalled `DialogContent` (Base UI
    *  portals open dialog content to `document.body`), so `landmarkHeadingFor`'s
    *  `closest("section")` walk lands on the REAL page section this dialog is
@@ -230,7 +240,9 @@ export function AttachEvidenceDialog({
     // again under a fresh identity.
     if (answer.kind !== "unavailable") opKey.current = crypto.randomUUID();
     if (answer.kind === "source_conflict") {
-      setConflictEntry(await findEntry(clientId, documentId, { session }).catch(() => null));
+      // FIRM-WIDE, not client-scoped: see findEntryForDocument's note. The claim this refusal is
+      // about may be held by a sibling client the document is also filed to.
+      setConflictEntry(await findEntry(documentId, { session }).catch(() => null));
     }
     // ALWAYS re-read, refusal included: a stale-revision refusal in particular
     // means the caller's copy of the entry is wrong, and the fix is a fresh read.
@@ -253,10 +265,36 @@ export function AttachEvidenceDialog({
       // disables the select, Cancel AND Attach for the duration of the write, so the Attach button
       // focus was on is disabled UNDER the person's cursor and the browser drops focus to <body>;
       // re-enabling the controls afterwards does not bring it back. Focus goes to the ONE control
-      // this refusal asks them to change — not to the refusal banner, which is already the single
-      // announcement owner (role="status" inside AttachOutcome) and would be read twice.
+      // this refusal asks them to change — not to the refusal banner, which AttachOutcome renders
+      // through StateBanner, where an error tone computes role="alert" (components/common/state.tsx)
+      // and is therefore announced on its own.
+      //
+      // GUARDED, NOT UNCONDITIONAL (delta review of the fix round, finding [5]). `busy` does NOT
+      // disable everything: DialogContent renders its own close X with no disabled prop, and
+      // Escape and the backdrop are never gated, so the dismiss controls stay live through the
+      // write. If the person dismissed the dialog — or simply tabbed to that X — moving focus here
+      // would YANK it out of where they put it, and on a dialog closing through its exit animation
+      // it would land on <body> when the popup unmounts: the very defect N8 closed. So this moves
+      // focus only when focus is NOWHERE (the disabled-Attach case it exists for) and the dialog
+      // is still open. The sibling fix in this round guards the same way
+      // (components/firm/activity/activity-feed.tsx).
       await nextPaint();
-      selectRef.current?.focus();
+      const active = document.activeElement;
+      // STRANDED = focus is not on an interactive control that someone could have put it on.
+      // MEASURED, three ways this happens and none of them is a deliberate placement: a real
+      // browser drops focus to <body> when the focused Attach button is disabled under the
+      // cursor; Base UI's focus manager pulls it onto the popup DIV instead when the dialog is
+      // open (what this app's own harness records); and some browsers leave it on the Attach
+      // button itself once it re-enables. The complement is the case the guard exists for
+      // (delta review [5]): `busy` does NOT disable everything — DialogContent renders its own
+      // close X with no disabled prop, and Escape and the backdrop are never gated — so anyone
+      // who tabbed to a live BUTTON/A/INPUT keeps it, and a dismissed dialog (openRef) is never
+      // focused into as it animates out.
+      const tag = (active as { tagName?: string } | null)?.tagName ?? "";
+      const onALiveControl = tag === "BUTTON" || tag === "A" || tag === "INPUT"
+        || tag === "SELECT" || tag === "TEXTAREA";
+      const stranded = !onALiveControl || active === confirmRef.current;
+      if (openRef.current && stranded) selectRef.current?.focus();
     }
   };
 
@@ -328,11 +366,11 @@ export function AttachEvidenceDialog({
             <p className="text-xs text-muted-foreground">{tWalk("evidenceSpokenForUnavailable")}</p>
           ) : null}
           <SpokenForNotes clientId={clientId} options={list} selectedDocumentId={documentId} />
-          <AttachOutcome clientId={clientId} conflictEntry={conflictEntry} result={result} />
+          <AttachOutcome conflictEntry={conflictEntry} result={result} />
         </div>
         <DialogFooter>
           <DialogClose render={<Button variant="ghost" disabled={busy} />}>{t("attach.cancel")}</DialogClose>
-          <Button type="button" size="sm" disabled={busy || documentId === ""} onClick={() => void confirm()}>
+          <Button type="button" size="sm" ref={confirmRef} disabled={busy || documentId === ""} onClick={() => void confirm()}>
             {busy ? t("attach.submitting") : t("attach.submit")}
           </Button>
         </DialogFooter>
@@ -346,12 +384,10 @@ export function AttachEvidenceDialog({
  *  red bar: each one names the concrete constraint and the one next action that
  *  exists for it. */
 function AttachOutcome({
-  clientId,
   conflictEntry,
   result,
 }: {
-  clientId: string;
-  conflictEntry: string | null;
+  conflictEntry: DocumentClaim | null;
   result: AttachEvidenceResult | null;
 }) {
   const t = useTranslations("ManualJournal");
@@ -373,7 +409,8 @@ function AttachOutcome({
         action={
           conflictEntry === null ? undefined : (
             <Link
-              href={journalEntryHref(clientId, conflictEntry)}
+              // THE CLAIMANT'S ROUTE, never the asking client's — see conflictEntry's own note.
+              href={journalEntryHref(conflictEntry.clientId, conflictEntry.entryId)}
               className="text-sm font-medium text-primary underline underline-offset-2"
             >
               {t("attach.sourceConflictLink")}
