@@ -710,6 +710,16 @@ test("#727: the Work detail route hydrates with no React fault in the console", 
   const faults: string[] = [];
   page.on("console", (message) => { if (message.type() === "error") faults.push(message.text()); });
   page.on("pageerror", (error) => faults.push(error.message));
+  // The same walk also reported ONE `Failed to load resource: 400` on this route with no
+  // path attached, so this collector is what would name it. Every read this page makes is a
+  // RLS read or a governed RPC that the client is supposed to be able to issue; a 4xx among
+  // them is either a malformed filter (the `22P02` class #614 recorded for a bad uuid
+  // segment) or an affordance asking for something it may not have.
+  const rejected: string[] = [];
+  page.on("response", (response) => {
+    if (response.status() < 400) return;
+    rejected.push(`${response.status()} ${new URL(response.url()).pathname}`);
+  });
 
   // A SEEDED, COMPLETED Work — the fullest version of this page: the facts block, the basis
   // table, the posted-entry block and its links row. A skeleton-only page would hydrate
@@ -732,6 +742,7 @@ test("#727: the Work detail route hydrates with no React fault in the console", 
     /Minified React error #(185|418|423|425)|Maximum update depth exceeded|Hydration failed|hydration-mismatch|didn't match|did not match/i.test(m),
   );
   expect(react, "the Work detail route must hydrate with no React nested-update or hydration fault").toEqual([]);
+  expect(rejected, "no read this route issues may be refused by the server").toEqual([]);
   // The vacuity control on the collector itself: a listener that was never attached, or a
   // page that never loaded, also produces an empty list. `page.evaluate` proves the channel
   // this cell reads is live.
