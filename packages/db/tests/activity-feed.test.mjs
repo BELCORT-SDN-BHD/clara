@@ -957,6 +957,22 @@ test("af.21 the exclusion is SET-BASED in the feed and HOISTED in the detail doo
   assert.equal(body.includes("clara._sweep_events_with_effect(v.event_id)"), false,
     "af.21 the correlated per-row form is gone from the deployed body");
 
+  // THE SET HELPER'S OWN BODY, pinned for the two things that decide its COST and that no
+  // correctness cell can see (delta review round 3, finding [2]). af.20 measures the plan the
+  // planner picks for THIS statement; nothing but this pin notices if the installed body stops
+  // being that statement. `offset 0` is an optimisation fence, not decoration: without it the
+  // planner pulls the correlated probe up into a plain join and reads the firm's WHOLE receipt
+  // history (measured: Merge Join over a Seq Scan, 97-136 ms at 30,000 receipts against 1.6 ms).
+  const setForm = (await rootQuery(
+    "select p.prosrc from pg_proc p where p.oid = 'clara._sweep_events_with_effect()'::regprocedure",
+  )).rows[0].prosrc;
+  assert.match(setForm, /cross join lateral/,
+    "af.21 the set helper probes one receipt per KEPT run through a lateral, not a plain join");
+  assert.match(setForm, /offset 0/,
+    "af.21 …and the lateral carries its optimisation fence, without which the planner flattens it back into that join");
+  assert.equal(/\blimit\b/i.test(setForm), false,
+    "af.21 …and the fence is an OFFSET, never a LIMIT: a run named by two receipts must still contribute both");
+
   // THE DETAIL DOOR'S HALF, which the round left unpinned (delta review [9]) even though 0183's
   // own comment names the hazard for it: a definer call in the WHERE is a filter the planner may
   // run once per row of the whole timeline. Assert it sits AFTER the row is fetched.
@@ -989,10 +1005,27 @@ test("af.22 the optional-parameter helper is GONE, not merely unused — two cal
 
   // The two indexes that make both of them cost the KEPT set rather than the firm's history.
   const idx = (await rootQuery(
-    `select c.relname::text as name from pg_class c join pg_namespace n on n.oid = c.relnamespace
+    `select c.relname::text as name, pg_get_indexdef(c.oid) as def
+       from pg_class c join pg_namespace n on n.oid = c.relnamespace
       where n.nspname = 'clara' and c.relkind = 'i'
         and c.relname in ('ix_domain_events_sweep_run', 'ix_sweep_runs_firm_effect')
-      order by 1`)).rows.map((x) => x.name);
-  assert.deepEqual(idx, ["ix_domain_events_sweep_run", "ix_sweep_runs_firm_effect"],
+      order by 1`)).rows;
+  assert.deepEqual(idx.map((x) => x.name), ["ix_domain_events_sweep_run", "ix_sweep_runs_firm_effect"],
     "af.22 both sweep-attribution indexes are installed");
+
+  // …AND THE RECEIPT INDEX IS THE COMPOSITE ONE (delta review round 3, finding [2]). The
+  // expression-ONLY cut this replaced was never chosen by any plan the planner picked, at any of
+  // three loads, and when forced it was 5x SLOWER than the plan it replaced: the planner AND-ed it
+  // with domain_events_pkey and re-read the firm's whole history per probe. Only the composite
+  // matches the helper's whole correlated predicate — the firm bound AND the run reference — which
+  // is what turns one kept run into one index scan. af.20's row bound reds behaviourally if this
+  // is undone; this cell names WHY, so the next reader does not re-derive it from a plan.
+  const receipts = idx[0].def;
+  assert.match(receipts, /\(firm_id, \(\(payload ->> 'run_id'::text\)\)\)/,
+    `af.22 ix_domain_events_sweep_run must be COMPOSITE on (firm_id, payload->>'run_id') — got ${receipts}`);
+  assert.match(receipts, /WHERE \(event_type = 'sweep\.run_completed'::text\)/,
+    `af.22 …and partial on the receipt type — got ${receipts}`);
+  // The kept-run side, whose partial predicate is the whole premise of the ticket.
+  assert.match(idx[1].def, /WHERE \(\(drafted_count \+ posted_count\) > 0\)/,
+    `af.22 ix_sweep_runs_firm_effect must stay partial on "a run that did something" — got ${idx[1].def}`);
 });
