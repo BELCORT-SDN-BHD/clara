@@ -248,3 +248,102 @@ test("t634: a client with NO filed documents says so instead of offering an empt
     await drain(h);
   }
 });
+
+// ---------------------------------------------------------------------------
+// Review round — the two states that were being told as something they are not.
+// ---------------------------------------------------------------------------
+
+test("t634: an UNOBSERVED outcome keeps the op key, so the retry replays instead of attaching twice", async () => {
+  // THE DEFECT THIS CELL FENCES. The key was re-minted after EVERY attempt,
+  // `unavailable` included — and `unavailable` is precisely the case where
+  // nothing was observed: the request may have reached the door and written the
+  // link, and only the response may have been lost. Under a FRESH key the retry
+  // is a NEW operation as far as `clara._reserve_op` is concerned, so the
+  // database has no way to recognise it as the same press. §3's rule is the
+  // opposite: same operation identity for a retry, a new identity only for a new
+  // intent.
+  const attempts: Attempt[] = [];
+  const h = await renderComponent(
+    App({
+      attach: async (input) => {
+        attempts.push(input);
+        return attempts.length === 1
+          ? { kind: "unavailable", message: "socket hang up" }
+          : { kind: "attached", entryId: ENTRY, documentId: input.documentId, linkId: "l1", workId: "w1", alreadyAttached: true };
+      },
+    }),
+  );
+  try {
+    await openDialog(h);
+    await choose(h, DOCUMENTS[0]!.documentId);
+    await pressAttach(h);
+    assert.match(bodyText(), /could not reach the server/, "the lost answer is reported as unknown, not as a refusal");
+    await pressAttach(h);
+    assert.equal(attempts.length, 2);
+    assert.equal(attempts[1]!.opKey, attempts[0]!.opKey,
+      "a retry after an UNOBSERVED outcome must ride the SAME key — the database decides whether "
+      + "it already happened, not the browser");
+  } finally {
+    await h.unmount();
+    await drain(h);
+  }
+});
+
+test("t634: a SETTLED outcome DOES rotate the key — a second decision is not a duplicate of the first", async () => {
+  // The other half of the rule, and the reason the fix is a condition rather
+  // than a deletion: a typed refusal IS an answer the database stored under that
+  // key, so the next press must not replay it.
+  const attempts: Attempt[] = [];
+  const h = await renderComponent(
+    App({
+      attach: async (input) => {
+        attempts.push(input);
+        return attempts.length === 1
+          ? { kind: "invalid_document" }
+          : { kind: "attached", entryId: ENTRY, documentId: input.documentId, linkId: "l1", workId: "w1", alreadyAttached: false };
+      },
+    }),
+  );
+  try {
+    await openDialog(h);
+    await choose(h, DOCUMENTS[0]!.documentId);
+    await pressAttach(h);
+    await choose(h, DOCUMENTS[1]!.documentId);
+    await pressAttach(h);
+    assert.equal(attempts.length, 2);
+    assert.notEqual(attempts[1]!.opKey, attempts[0]!.opKey,
+      "a new decision under the old key would replay the refusal the database already stored");
+  } finally {
+    await h.unmount();
+    await drain(h);
+  }
+});
+
+test("t634: an UNREADABLE documents list is not the sentence 'this client has none'", async () => {
+  const h = await renderComponent(App({ loadDocuments: async () => { throw new Error("gateway"); } }));
+  try {
+    await openDialog(h);
+    const text = bodyText();
+    assert.match(text, /could not read this client's documents/, "the dialog says what it could not do");
+    assert.ok(!/no filed documents to attach/.test(text),
+      "a failed read must never assert a fact about the client's records");
+  } finally {
+    await h.unmount();
+    await drain(h);
+  }
+});
+
+test("t634: a REVERSED entry's refusal is named, not folded into the generic one", async () => {
+  const h = await renderComponent(App({ attach: async () => ({ kind: "entry_reversed" }) }));
+  try {
+    await openDialog(h);
+    await choose(h, DOCUMENTS[0]!.documentId);
+    await pressAttach(h);
+    assert.match(bodyText(), /has been reversed/, "the one next action is on the entry that replaced it");
+    assert.equal((selectIn() as { value?: unknown }).value, DOCUMENTS[0]!.documentId,
+      "the choice survives the refusal");
+  } finally {
+    await h.unmount();
+    await drain(h);
+  }
+});

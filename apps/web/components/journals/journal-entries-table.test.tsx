@@ -17,6 +17,7 @@ import { enableDomInspection } from "../../test/domInspect";
 import messages from "../../messages/en.json";
 import { PostedPanel } from "./posted-panel";
 import type { CoaAccountRow, JournalEntryRow, JournalLineRow } from "../../lib/journals/types";
+import type { EntryLinkRow } from "../../lib/work/evidence";
 
 enableDomInspection();
 
@@ -61,12 +62,18 @@ type Over = {
   err?: string | null;
   clr?: { code: string; reason: string | null } | null;
   actingId?: string | null;
+  /** #634 — the Work / receipt / source / correction facts the table merges onto
+   *  its rows, and whether that read SUCCEEDED. */
+  links?: readonly EntryLinkRow[];
+  linksUnavailable?: boolean;
 };
 
 function panel(over: Over = {}) {
   return App(
     createElement(PostedPanel, {
       clientId: "c1",
+      links: over.links ?? [],
+      linksUnavailable: over.linksUnavailable ?? false,
       entries: over.entries ?? [BACKDATED, RECENT],
       lines: over.lines ?? LINES,
       linesTruncated: over.linesTruncated ?? false,
@@ -241,6 +248,107 @@ test("a posting-date range excludes what falls outside it", async () => {
     assert.match(h.text(), /RECENT april/);
     assert.doesNotMatch(h.text(), /BACKDATED january/);
     assert.doesNotMatch(h.text(), /DOCUMENT february/);
+  } finally {
+    await h.unmount();
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Review round — the row detail must RENDER what it reads, and a receipt id must
+// be obtainable rather than merely recognisable.
+// ---------------------------------------------------------------------------
+
+/** One `clara.list_entry_links` row, in the door's own shape. */
+function link(over: Partial<EntryLinkRow> = {}): EntryLinkRow {
+  return {
+    entry_id: RECENT.id,
+    status: "approved",
+    origin: "agent",
+    work_id: "w1111111-1111-4111-8111-111111111111",
+    receipt_id: "c1111111-1111-4111-8111-111111111111",
+    logical_op_id: "work:w1:journal_entry:1",
+    purpose: "journal_entry",
+    basis_origin: "user_direct",
+    initiator: "u1",
+    initiator_role: "bookkeeper",
+    document_id: null,
+    document_source: null,
+    attached_at: null,
+    released_at: null,
+    reversal_of: null,
+    reversed_by: null,
+    reversal_reason: null,
+    ...over,
+  };
+}
+
+async function expandRecent(h: Awaited<ReturnType<typeof renderComponent>>): Promise<void> {
+  for (let i = 0; i < 2; i++) await h.settle();
+  const rows = (h.container as unknown as El).querySelectorAll("tbody")[0]!.querySelectorAll("tr");
+  const row = rows.find((r) => /RECENT april/.test(textOf(r as never)));
+  assert.ok(row, "the row under test must render");
+  const toggle = (row as unknown as El).querySelectorAll("button").find((b) => textOf(b as never).trim() === "View");
+  assert.ok(toggle, "the row must offer its disclosure");
+  await h.act(async () => { await clickButton(toggle as never); });
+  await h.settle();
+}
+
+test("the row detail RENDERS the Work's purpose, not merely fetches it", async () => {
+  const h = await renderComponent(panel({ entries: [RECENT], lines: LINES, links: [link()] }));
+  try {
+    await expandRecent(h);
+    assert.match(h.text(), /Purpose/);
+    assert.match(h.text(), /Journal entry/);
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("the receipt id is OBTAINABLE — a copy control, not only a tooltip", async () => {
+  // A `title` attribute is unreachable by keyboard, invisible on touch, and
+  // cannot be selected. A receipt id is a thing a professional quotes to
+  // somebody else, so the row offers the house copy control beside the short
+  // form (components/reports/ArtifactRow.tsx is the pattern).
+  const copied: string[] = [];
+  const nav = globalThis as unknown as { navigator?: { clipboard?: { writeText: (v: string) => Promise<void> } } };
+  const original = nav.navigator;
+  nav.navigator = { clipboard: { writeText: async (v: string) => { copied.push(v); } } } as never;
+  try {
+    const h = await renderComponent(panel({ entries: [RECENT], lines: LINES, links: [link()] }));
+    try {
+      await expandRecent(h);
+      const copy = h.find((n) => n.tagName === "BUTTON" && textOf(n as never).trim() === "Copy");
+      assert.ok(copy, "the row detail must offer a copy control for the receipt");
+      await h.act(async () => { await clickButton(copy as never); });
+      await h.settle();
+      assert.deepEqual(copied, ["c1111111-1111-4111-8111-111111111111"],
+        "the WHOLE id is copied, not the eight characters on screen");
+      assert.match(h.text(), /Copied/, "…and the control says so");
+    } finally {
+      await h.unmount();
+    }
+  } finally {
+    if (original === undefined) delete nav.navigator;
+    else nav.navigator = original;
+  }
+});
+
+test("a RELEASED binding is not presented as the entry's current source", async () => {
+  // Migration 0182 releases a link when its entry is reversed, which frees the
+  // document for the correction. "Attached when the entry was recorded" would
+  // read as the live fact about a document that now backs a different entry.
+  const DOC = "d3333333-3333-4333-8333-333333333333";
+  const h = await renderComponent(
+    panel({
+      entries: [RECENT],
+      lines: LINES,
+      links: [link({ document_id: DOC, document_source: "work_commit", released_at: "2026-09-04T02:00:00Z" })],
+    }),
+  );
+  try {
+    await expandRecent(h);
+    assert.match(h.text(), /Released when this entry was reversed/);
+    assert.doesNotMatch(h.text(), /Attached when the entry was recorded/);
   } finally {
     await h.unmount();
   }

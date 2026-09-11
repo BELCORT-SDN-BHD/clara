@@ -26,6 +26,7 @@ import type { RetryWorkResult } from "../../lib/work/api";
 import type { WorkDetailData } from "../../lib/work/reads";
 import type { AccountingWorkRow } from "../../lib/work/types";
 import type { AgentInterruptionRow } from "../../lib/journals/types";
+import type { EntryLinkRow } from "../../lib/work/evidence";
 import messages from "../../messages/en.json";
 
 enableDomInspection();
@@ -98,6 +99,32 @@ function data(over: Partial<WorkDetailData> = {}): WorkDetailData {
   };
 }
 
+/** One `clara.list_entry_links` row for the posted entry, in the door's shape.
+ *  Every field is nullable there, so the default is the honest "a Work posted
+ *  this entry and it carries no source". */
+function linkRow(over: Partial<EntryLinkRow> = {}): EntryLinkRow {
+  return {
+    entry_id: ENTRY,
+    status: "approved",
+    origin: "agent",
+    work_id: WORK,
+    receipt_id: "cccccccc-cccc-4ccc-8ccc-ccccccccccc1",
+    logical_op_id: `work:${WORK}:journal_entry:1`,
+    purpose: "journal_entry",
+    basis_origin: "user_direct",
+    initiator: USER,
+    initiator_role: "bookkeeper",
+    document_id: null,
+    document_source: null,
+    attached_at: null,
+    released_at: null,
+    reversal_of: null,
+    reversed_by: null,
+    reversal_reason: null,
+    ...over,
+  };
+}
+
 function App(props: {
   workId?: string;
   load?: (clientId: string, workId: string) => Promise<WorkDetailData | null>;
@@ -105,6 +132,9 @@ function App(props: {
   retry?: (auth: unknown, input: { workId: string; opKey: string }) => Promise<RetryWorkResult>;
   scope?: { firmId?: string; userId?: string };
   storage?: DraftStorage | null;
+  /** #634 — the entry's links read. DEFAULTED so no cell reaches a real socket:
+   *  an empty answer is "the read succeeded and this entry has no links row". */
+  loadLinks?: (clientId: string, entryIds: readonly string[]) => Promise<EntryLinkRow[]>;
 }): ReactElement {
   return createElement(NextIntlClientProvider, {
     locale: "en",
@@ -119,6 +149,7 @@ function App(props: {
       session: { getAccessToken: async () => "tok" },
       scope: props.scope,
       storage: props.storage ?? null,
+      loadLinks: (props.loadLinks ?? (async () => [])) as never,
     }),
   });
 }
@@ -691,5 +722,108 @@ test("THE HEADING TAKES FOCUS ON ARRIVAL, and only on arrival", async () => {
   } finally {
     if (original === undefined) delete doc.getElementById;
     else doc.getElementById = original;
+  }
+});
+
+// ---------------------------------------------------------------------------
+// #634 review — the LINKS read is an accounting fact, and a failed read is not
+// the fact "no document".
+// ---------------------------------------------------------------------------
+
+/** The completed Work whose entry is posted, with the links read injectable. */
+function postedApp(over: {
+  loadLinks?: (clientId: string, entryIds: readonly string[]) => Promise<EntryLinkRow[]>;
+} = {}): ReactElement {
+  return App({
+    loadLinks: over.loadLinks,
+    load: async () =>
+      data({
+        work: workRow({ status: "completed", result: { entry_id: ENTRY, receipt_id: "receipt-1", posted_at: "2026-09-01T02:00:00Z" } }),
+        entry: {
+          id: ENTRY, client_id: CLIENT, status: "approved", posting_date: "2026-09-01", memo: "Office rent",
+          origin: "agent", document_id: null, coding_kind: null, revision_token: "rev", maker_actor: null,
+          checker_actor: null, approved_at: "2026-09-01T02:00:00Z", reversal_of: null, reversed_by: null,
+          reversal_reason: null, withdrawn_at: null, withdrawal_reason: null, created_at: "2026-09-01T02:00:00Z",
+        },
+        lines: [
+          { id: "l1", entry_id: ENTRY, line_no: 1, account_code: "6100", debit_cents: 120_000, credit_cents: 0, description: "rent", counterparty_id: null },
+          { id: "l2", entry_id: ENTRY, line_no: 2, account_code: "1100", debit_cents: 0, credit_cents: 120_000, description: null, counterparty_id: null },
+        ],
+      }),
+  });
+}
+
+test("a SUCCESSFUL links read that finds no source says No document, and offers the late door", async () => {
+  const h = await renderComponent(postedApp({ loadLinks: async () => [linkRow()] }));
+  try {
+    await h.settle();
+    assert.match(h.text(), /No document/, "an entry recorded without evidence is a legitimate state, said in words");
+    assert.ok(buttonLabelled(h, "Attach evidence") !== null, "…and the late door is offered");
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("a FAILED links read never renders as the accounting fact 'No document'", async () => {
+  // THE DEFECT THIS CELL FENCES. `loadLinks(...).catch(() => [])` made an
+  // unreadable answer indistinguishable from a read that succeeded and found
+  // nothing — the page asserted, about a posted entry, that it has no source,
+  // on the strength of its own failed request. And it then offered "Attach
+  // evidence" on that guess, sending a preparer into a door that may answer
+  // `evidence_already_attached`.
+  const h = await renderComponent(postedApp({ loadLinks: async () => { throw new Error("gateway"); } }));
+  try {
+    await h.settle();
+    const text = h.text();
+    assert.match(text, /could not read the Work, receipt and source links/,
+      "the page says what it could not read");
+    assert.ok(!/No document/.test(text), "…and never asserts an absence it did not establish");
+    assert.equal(buttonLabelled(h, "Attach evidence"), null,
+      "the late door is gated on a SUCCESSFUL read, not on the absence of an answer");
+    // The entry, its lines and its receipt are the DATABASE's own and stay.
+    assert.match(text, /What was recorded/);
+    assert.match(text, /1,200\.00/, "a failed links read never blanks the money");
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("the PURPOSE of the Work is rendered, not merely fetched", async () => {
+  // `accounting_work.purpose` is read by list_entry_links and by every surface
+  // on this journey, and was rendered by none of them.
+  const h = await renderComponent(postedApp({ loadLinks: async () => [linkRow()] }));
+  try {
+    await h.settle();
+    assert.match(h.text(), /Purpose/);
+    assert.match(h.text(), /Journal entry/);
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("a REVERSED entry is not offered the late door — its source belongs on the correction", async () => {
+  const h = await renderComponent(
+    postedApp({ loadLinks: async () => [linkRow({ reversed_by: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeee9" })] }),
+  );
+  try {
+    await h.settle();
+    assert.equal(buttonLabelled(h, "Attach evidence"), null,
+      "migration 0182 refuses entry_reversed; the affordance must not invite the refusal");
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("an entry that ALREADY carries a source shows it and offers no second attachment", async () => {
+  const DOC = "11111111-2222-4333-8444-555555555555";
+  const h = await renderComponent(
+    postedApp({ loadLinks: async () => [linkRow({ document_id: DOC, document_source: "work_commit" })] }),
+  );
+  try {
+    await h.settle();
+    assert.match(h.text(), new RegExp(DOC));
+    assert.equal(buttonLabelled(h, "Attach evidence"), null);
+  } finally {
+    await h.unmount();
   }
 });

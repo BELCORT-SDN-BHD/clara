@@ -332,6 +332,13 @@ export function JournalComposerView({
   const onSubmit = (e: FormEvent) => {
     e.preventDefault();
     if (busy) return; // the local duplicate-submit guard; the server's idempotency is the real one
+    // …AND THE GUARD LIVES IN THE HANDLER, not only on the button. Measured by
+    // this ticket's own cell: disabling the control leaves `onSubmit` reachable
+    // by any other route to the event, and the one refusal this form must never
+    // re-send is `sourceConflict` — the same intent with the same spoken-for
+    // document gets the same 409 for ever. The chooser's onChange clears the
+    // phase, so a NEW choice is accepted in the tick it is made.
+    if (phase.kind === "sourceConflict") return;
     setShowIssues(true);
     const found = validateJournalDraft(draft, knownCodes);
     if (found.length > 0) {

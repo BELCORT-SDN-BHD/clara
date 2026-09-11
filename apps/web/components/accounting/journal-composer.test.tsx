@@ -792,3 +792,73 @@ test("t634: a FAILED documents read degrades the form rather than blocking it", 
     await h.unmount();
   }
 });
+
+// ---------------------------------------------------------------------------
+// Review round — the Submit control must agree with the banner beside it.
+// ---------------------------------------------------------------------------
+
+test("t634: a SOURCE CONFLICT disables the primary Submit until the choice changes", async () => {
+  // THE DEFECT THIS CELL FENCES. The banner said "no resubmit" and the primary
+  // Submit stayed live, so a press re-sent the SAME intent key with the SAME
+  // document and received the SAME 409 — for ever. A control that accepts a
+  // press the product has just said is pointless is the product contradicting
+  // itself, and on this journey the press is the one move that must not look
+  // available.
+  const sent: Submitted[] = [];
+  const h = await renderComponent(
+    App({
+      submit: async (_auth, input) => {
+        sent.push(input);
+        return { kind: "source_conflict", entryId: "e5555555-5555-4555-8555-555555555555", documentId: DOCUMENTS[0]!.documentId };
+      },
+    }),
+  );
+  try {
+    await h.settle();
+    await fillGoodEntry(h);
+    await h.fireEvent(byId(h, "journal-basis-evidence"), "change", (n) => setFieldValue(n, DOCUMENTS[0]!.documentId));
+    await submitForm(h);
+    assert.equal(sent.length, 1);
+
+    const submit = h.find((n) => n.tagName === "BUTTON" && String((n as { getAttribute?: (k: string) => string | null }).getAttribute?.("type") ?? "") === "submit");
+    assert.ok(submit, "the primary Submit must render");
+    assert.equal((submit as { disabled?: unknown }).disabled, true,
+      "a spoken-for document cannot be freed by pressing again");
+
+    // …and the press really is inert, not merely greyed.
+    await submitForm(h);
+    assert.equal(sent.length, 1, "no second admission attempt under the same intent");
+
+    // CHOOSING ANOTHER DOCUMENT IS THE FORWARD MOVE, and it re-enables the
+    // control in the same tick it retires the Alert.
+    await h.fireEvent(byId(h, "journal-basis-evidence"), "change", (n) => setFieldValue(n, DOCUMENTS[1]!.documentId));
+    await h.settle();
+    const again = h.find((n) => n.tagName === "BUTTON" && String((n as { getAttribute?: (k: string) => string | null }).getAttribute?.("type") ?? "") === "submit");
+    assert.equal((again as { disabled?: unknown }).disabled, false,
+      "a NEW choice is a new question, and the form must accept it");
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("t634: 'No document' is also a forward move out of a source conflict", async () => {
+  // The other escape: record the entry with no evidence at all. This journey's
+  // whole premise is that evidence is optional, so the conflict must not trap a
+  // preparer into needing SOME document.
+  const h = await renderComponent(
+    App({ submit: async () => ({ kind: "source_conflict", entryId: null, documentId: null }) }),
+  );
+  try {
+    await h.settle();
+    await fillGoodEntry(h);
+    await h.fireEvent(byId(h, "journal-basis-evidence"), "change", (n) => setFieldValue(n, DOCUMENTS[0]!.documentId));
+    await submitForm(h);
+    await h.fireEvent(byId(h, "journal-basis-evidence"), "change", (n) => setFieldValue(n, ""));
+    await h.settle();
+    const submit = h.find((n) => n.tagName === "BUTTON" && String((n as { getAttribute?: (k: string) => string | null }).getAttribute?.("type") ?? "") === "submit");
+    assert.equal((submit as { disabled?: unknown }).disabled, false);
+    assert.doesNotMatch(h.text(), /already backs a posted entry/);
+  } finally {
+    await h.unmount();
+  }
+});
