@@ -196,7 +196,17 @@ test("a MOUNT during a parked turn re-attaches the question from the DB — no s
         );
 
         // 裁-132's indicator, on the PARKED wording, off the DB-read start.
-        assert.match(h.text(), /Clara has been waiting on your answer for 0:4[0-9]\./, "the parked elapsed line reads from the runtime's own created_at");
+        //
+        // THE WINDOW IS BOUNDED, NOT TIGHT, and #630's review is why. The fixture stamps
+        // `created_at = now - 42s` and this assertion used to allow `0:4[0-9]` — i.e. 42-49s, so at
+        // most SEVEN SECONDS between the stub answering and this line rendering. `run-tests.mjs`
+        // runs the whole manifest under one `node --test` with per-file parallelism, so that budget
+        // is a claim about how busy the machine is, not about the component: measured at 1497 ms on
+        // a quiet host and 11695 ms on a loaded one, where the line read `0:53` and the gate went
+        // red on a file the branch never touched. The range below (42s-1:59) still fails on every
+        // way this line could actually be WRONG — a client-side stopwatch would read `0:00`, and
+        // the other fixture's 125-second start would read `2:05` — while not failing on load.
+        assert.match(h.text(), /Clara has been waiting on your answer for (0:4[2-9]|0:5[0-9]|1:[0-5][0-9])\./, "the parked elapsed line reads from the runtime's own created_at");
         assert.doesNotMatch(h.text(), /Clara has been working on this/, "a parked turn is not a working turn");
 
         assert.deepEqual(checkAccessibility(h.container as never), []);
