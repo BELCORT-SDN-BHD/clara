@@ -227,6 +227,13 @@ const state = {
    *  DOCUMENT (`uq_entry_evidence_links_document`) — both invariants are modelled
    *  here, because the walk's whole point is that they hold end to end. */
   links: new Map(),
+  /** #630 — WHICH answer the next cancel gives: "act" (the door acts and the Work reads
+   *  `stopping`), "already_completed" (the admitted operation won the race) or "denied". Armed per
+   *  cell because the last two are races the browser cannot produce for itself. */
+  cancelAnswer: "act",
+  /** Every op key a cancel was sent with, so a cell can prove the retry of an UNOBSERVED attempt
+   *  reuses it rather than asking the database a second question. */
+  cancelKeys: [],
   /** `clara.agent_interruptions` rows, in the shape `clara.open_interruption`
    *  writes them: one PENDING row per parked task, its `question` jsonb carrying
    *  the runtime's own `{ type, question, context, framing }`. */
@@ -294,6 +301,10 @@ function seed() {
   state.links.clear();
   state.showParkedCard = false;
   state.spokenForBroken = false;
+  // #630 — the cancel lane's own seed. `act` is the ordinary arm (the door acts); the two others
+  // are armed per cell because they model races the browser cannot produce for itself.
+  state.cancelAnswer = "act";
+  state.cancelKeys.length = 0;
 
   const work = newWorkRow({
     id: JOURNAL_WORK.seededWorkId,
@@ -627,6 +638,114 @@ export async function handleJournalWorkRuntime(request, response, url) {
     return true;
   }
 
+  // #630 — CANCEL WORK. The four answers `clara.cancel_accounting_work` can give, modelled as the
+  // state machine they actually are rather than as a boolean. WHICH one this fixture gives is
+  // chosen by `state.cancelAnswer` (armed through the control endpoint), because the whole point of
+  // the walk is that each one renders DIFFERENTLY — and a fixture that could only produce the happy
+  // one would prove none of that.
+  const cancelRoute = /^\/api\/work\/([^/]+)\/cancel$/.exec(path);
+  if (request.method === "POST" && cancelRoute) {
+    const work = state.works.get(decodeURIComponent(cancelRoute[1]));
+    if (work === undefined) return false;
+    const body = await readJson(request);
+    if (typeof body?.opKey !== "string" || body.opKey.trim() === "") {
+      send(response, 400, { error: "invalid_basis", field: "basis", reason: "invalid_op_key" });
+      return true;
+    }
+    state.cancelKeys.push(body.opKey);
+    const mode = state.cancelAnswer;
+    if (mode === "denied") {
+      send(response, 403, { error: "forbidden", message: "not permitted" });
+      return true;
+    }
+    if (mode === "already_completed") {
+      // THE OPERATION WON THE RACE. The Work is completed by its own receipt and the answer names
+      // the effect, so the surface can link to the entry rather than claim a cancellation.
+      const entryId = JOURNAL_WORK.seededEntryId;
+      work.status = "completed";
+      work.error = null;
+      work.result = { entry_id: entryId, receipt_id: JOURNAL_WORK.seededReceiptId, posted_at: new Date().toISOString() };
+      work.updated_at = new Date().toISOString();
+      send(response, 200, {
+        work_id: work.id, task_id: work.current_task_id, status: "completed", cancelled: false,
+        reason: "already_completed", receipt_id: JOURNAL_WORK.seededReceiptId, entry_id: entryId, replayed: false,
+      });
+      return true;
+    }
+    if (["completed", "refused", "failed", "cancelled", "expired"].includes(work.status)) {
+      send(response, 200, {
+        work_id: work.id, task_id: work.current_task_id, status: work.status, cancelled: false,
+        reason: "already_terminal", replayed: false,
+      });
+      return true;
+    }
+    if (work.status === "queued") {
+      // No engine run to abort — the terminal is reached now.
+      work.status = "cancelled";
+      work.error = {
+        code: "cancelled", reason: "cancelled", recoverable: true,
+        message: "This Work was cancelled before an entry was recorded. Nothing was posted.",
+      };
+      work.updated_at = new Date().toISOString();
+      const t = state.tasks.get(work.current_task_id);
+      if (t !== undefined) t.status = "cancelled";
+      send(response, 200, {
+        work_id: work.id, task_id: work.current_task_id, status: "cancelled", cancelled: true,
+        cancelled_by: SUBJECT, cancelled_at: new Date().toISOString(), replayed: false,
+      });
+      return true;
+    }
+    // A LIVE RUN: the abort is a REQUEST and the Work reads `stopping` until the boundary is known.
+    work.status = "stopping";
+    work.updated_at = new Date().toISOString();
+    const task = state.tasks.get(work.current_task_id);
+    if (task !== undefined) task.status = "cancel_requested";
+    send(response, 200, {
+      work_id: work.id, task_id: work.current_task_id, status: "stopping", cancelled: true,
+      cancelled_by: SUBJECT, cancelled_at: new Date().toISOString(), replayed: false,
+    });
+    return true;
+  }
+
+  // #630 — TAKE RESPONSIBILITY. `basisDigest` is the half that matters: an interpreted basis is
+  // refused 400 `basis_confirmation_required` until the colleague sends back the digest of what they
+  // read, and the fixture refuses on exactly that rule rather than on a flag a walk could set.
+  const takeOver = /^\/api\/work\/([^/]+)\/take-over$/.exec(path);
+  if (request.method === "POST" && takeOver) {
+    const work = state.works.get(decodeURIComponent(takeOver[1]));
+    if (work === undefined) return false;
+    const body = await readJson(request);
+    if (typeof body?.opKey !== "string" || body.opKey.trim() === "") {
+      send(response, 400, { error: "invalid_basis", field: "basis", reason: "invalid_op_key" });
+      return true;
+    }
+    if (!["refused", "failed", "expired"].includes(work.status)) {
+      send(response, 409, { error: "not_takeable", status: work.status });
+      return true;
+    }
+    if (work.basis_origin !== "user_direct" && body.basisDigest !== work.basis_digest) {
+      send(response, 400, {
+        error: "basis_confirmation_required",
+        basis_digest: work.basis_digest,
+        basis_origin: work.basis_origin,
+      });
+      return true;
+    }
+    state.minted += 1;
+    const newTask = `7230${pad(state.minted)}-7230-4723-8723-723072307230`;
+    state.tasks.set(newTask, { id: newTask, status: "queued", error_code: null, created_at: new Date().toISOString(), updated_at: new Date().toISOString() });
+    work.current_task_id = newTask;
+    work.status = "queued";
+    work.error = null;
+    work.updated_at = new Date().toISOString();
+    send(response, 202, {
+      work_id: work.id, task_id: newTask, logical_op_id: work.logical_op_id, status: "queued",
+      responsible: SUBJECT, previous_responsible: work.initiator, initiated_by: work.initiator,
+      taken_over: true, replayed: false,
+    });
+    return true;
+  }
+
   // THIS LANE'S ONE TRANSCRIPT, by EXACT thread id. `handleChat` in
   // `serve-built.mjs` claims the whole `/api/chat/sessions/…/messages` shape and
   // is LAST in the delegate chain, so answering here for one id — and only one —
@@ -682,6 +801,53 @@ function control(body) {
   // must refuse rather than write against a view that is no longer current. The
   // walk cannot forge a request the client would not make, so it moves the ROW
   // instead — which is exactly what the race is.
+  // #630 — ARMS WHICH ANSWER the next cancel gives. Default `act`: the door acts and the Work
+  // reads `stopping`. The other two are the arms that only exist because the DATABASE decides a
+  // race the browser cannot see.
+  if (body.op === "cancel_answer") {
+    state.cancelAnswer = String(body.mode ?? "act");
+    return { cancelAnswer: state.cancelAnswer };
+  }
+  // …and the SETTLE that follows a `stopping` Work once the boundary is known. Driven by hand so
+  // the convergence a walk polls for is a state change it asked for, never a race against a timer.
+  if (body.op === "settle_stopping") {
+    const work = state.works.get(String(body.workId ?? ""));
+    if (work === undefined) return { error: "no_such_work" };
+    const outcome = String(body.outcome ?? "cancelled");
+    work.status = outcome;
+    work.updated_at = new Date().toISOString();
+    if (outcome === "cancelled") {
+      work.error = {
+        code: "cancelled", reason: "cancelled", recoverable: true,
+        message: "This Work was cancelled before an entry was recorded. Nothing was posted.",
+        superseded: { outcome: "failed", error_code: "internal", error: { reason: "work_cancelled" } },
+      };
+    } else {
+      work.error = null;
+      work.result = { entry_id: JOURNAL_WORK.seededEntryId, receipt_id: JOURNAL_WORK.seededReceiptId, posted_at: new Date().toISOString() };
+    }
+    const t = state.tasks.get(work.current_task_id);
+    if (t !== undefined) t.status = outcome === "cancelled" ? "cancelled" : "completed";
+    return { status: work.status };
+  }
+  // #630 — an ORPHANED Work: terminal, and refused for the one reason a colleague can rescue.
+  if (body.op === "orphan") {
+    const work = state.works.get(String(body.workId ?? ""));
+    if (work === undefined) return { error: "no_such_work" };
+    work.status = "refused";
+    work.basis_origin = String(body.origin ?? "user_direct");
+    work.error = {
+      code: "CLR04", reason: "authority_lost", recoverable: true,
+      message: "The person who asked for this Work no longer holds the role needed to post it. Nothing was posted.",
+    };
+    const t = state.tasks.get(work.current_task_id);
+    if (t !== undefined) t.status = "failed";
+    work.updated_at = new Date().toISOString();
+    return { status: work.status, basis_digest: work.basis_digest };
+  }
+  if (body.op === "cancel_keys") {
+    return { keys: state.cancelKeys };
+  }
   if (body.op === "bump_revision") {
     const entry = state.entries.get(String(body.entryId ?? ""));
     if (entry === undefined) return { error: "no_such_entry" };

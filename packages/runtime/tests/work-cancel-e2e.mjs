@@ -564,10 +564,7 @@ async function main() {
 
       gate5.open();
       const settled = await pollRow(workId, (w) => TERMINAL.has(w.status), "leg 5 settles");
-      console.log(`[wc-e2e]   leg 5 diag: status=${settled.status} error=${JSON.stringify(settled.error)}`);
-      console.log(`[wc-e2e]   leg 5 tasks: ${JSON.stringify(await tasksForWork(workId))}`);
-      console.log(`[wc-e2e]   leg 5 child stderr tail:
-${engine.state.stderr.slice(-3000)}`);
+      console.log(`[wc-e2e]   leg 5: the commit was refused — ${JSON.stringify(settled.error)}`);
       assert.equal(settled.status, "refused",
         `leg 5: the Work settles REFUSED (got ${settled.status} / ${JSON.stringify(settled.error)})`);
       assert.equal(await countEntries(ctx.client), 0, "leg 5: no entry was written under lost authority");
@@ -588,7 +585,8 @@ ${engine.state.stderr.slice(-3000)}`);
       assert.equal(taken.status, 202, `leg 5 takeover 202 (got ${taken.status} ${JSON.stringify(taken.body)})`);
       assert.equal(taken.body.taken_over, true);
       assert.equal(String(taken.body.responsible), String(colleagueSub), "leg 5: the colleague is responsible now");
-      assert.equal(String(taken.body.initiator), String(initiatorSub), "leg 5: the INITIATOR is unchanged — it is history");
+      assert.equal(String(taken.body.initiated_by), String(initiatorSub),
+        "leg 5: who ASKED is unchanged — it is history, and `initiated_by` is where 0184 keeps it");
 
       const done = await pollRow(workId, (w) => TERMINAL.has(w.status), "leg 5 takeover run settles", 150000);
       assert.equal(done.status, "completed",

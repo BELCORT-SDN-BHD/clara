@@ -839,7 +839,7 @@ test("an entry that ALREADY carries a source shows it and offers no second attac
 // #630 — CANCEL WORK, and TAKE RESPONSIBILITY.
 // ===========================================================================
 
-test("#630 a STOPPING work says WHY it is not a terminal yet, and offers NO second cancel", async () => {
+test("630 a STOPPING work says WHY it is not a terminal yet, and offers NO second cancel", async () => {
   const h = await renderComponent(App({ load: async () => data({ work: workRow({ status: "stopping" }) }) }));
   try {
     await h.settle();
@@ -854,7 +854,7 @@ test("#630 a STOPPING work says WHY it is not a terminal yet, and offers NO seco
   }
 });
 
-test("#630 a CANCELLED work shows the run's superseded outcome when the settle translated one", async () => {
+test("630 a CANCELLED work shows the run's superseded outcome when the settle translated one", async () => {
   const h = await renderComponent(
     App({
       load: async () =>
@@ -880,7 +880,7 @@ test("#630 a CANCELLED work shows the run's superseded outcome when the settle t
   }
 });
 
-test("#630 an authority_lost refusal offers Take responsibility; a plain failure does not", async () => {
+test("630 an authority_lost refusal offers Take responsibility; a plain failure does not", async () => {
   const taken: Array<{ workId: string; basisDigest?: string | null }> = [];
   const orphaned = () =>
     data({
@@ -922,7 +922,7 @@ test("#630 an authority_lost refusal offers Take responsibility; a plain failure
   }
 });
 
-test("#630 Cancel Work is OFFERED from a cancellable status and withheld from every other one", async () => {
+test("630 Cancel Work is OFFERED from a cancellable status and withheld from every other one", async () => {
   // The dialog's own behaviour lives in work-cancel-dialog.test.tsx (its content is PORTALLED to
   // document.body, which this file's delegation root never reaches). What belongs HERE is the
   // page's decision about whether to offer the control at all.
