@@ -426,3 +426,40 @@ test("take-over: 409 is not_takeable with the status that made it so", async () 
     },
   );
 });
+
+// ===========================================================================================
+// #630 fix round 3 — THE TRANSIENT IS ITS OWN ANSWER, on both doors.
+//
+// `workRoutes.ts` answers `409 {error:'transient', reason:'serialization'}` for a 40P01/40001 the
+// database broke, and its comment claims "the surface says 'that did not go through — try again'".
+// Collapsing it into `conflict`/`not_takeable` made the surface say the opposite: that the database
+// refused the request in the state it found, and that the Work's own row is the explanation — of a
+// statement that never ran, against a row that did not move.
+// ===========================================================================================
+
+test("a 409 TRANSIENT is not a state conflict — on the cancel door", async () => {
+  await withFetch(
+    () => json({ error: "transient", reason: "serialization" }, 409),
+    async () => {
+      assert.deepEqual(await cancelWork(auth, { workId: "w1", opKey: "k" }), { kind: "transient" });
+    },
+  );
+  // …and an ordinary 409 is still a conflict, carrying the row's own status.
+  await withFetch(
+    () => json({ error: "work_cancelled", status: "stopping" }, 409),
+    async () => {
+      const out = await cancelWork(auth, { workId: "w1", opKey: "k" });
+      assert.equal(out.kind, "conflict");
+      assert.equal(out.kind === "conflict" ? out.status : null, "stopping");
+    },
+  );
+});
+
+test("a 409 TRANSIENT is not `not_takeable` — on the take-over door", async () => {
+  await withFetch(
+    () => json({ error: "transient", reason: "serialization" }, 409),
+    async () => {
+      assert.deepEqual(await takeOverWork(auth, { workId: "w1", opKey: "k" }), { kind: "transient" });
+    },
+  );
+});
