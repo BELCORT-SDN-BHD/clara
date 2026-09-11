@@ -386,12 +386,16 @@ async function streamDeltas(page: Page): Promise<number> {
 }
 
 async function setBurst(page: Page, on: boolean): Promise<void> {
+  // THE THREAD ID RIDES IN THE QUERY STRING, not the body. The fixture has to be able to
+  // decline a thread it does not own BEFORE it reads the request — a handler that drains the
+  // body and then falls through leaves the next handler an empty stream — and the app's own
+  // proxy forwards `nextUrl.search` verbatim, so a query parameter survives the trip.
   const answer = await page.evaluate(
     async ([thread, burst]) => {
-      const res = await fetch("/api/runtime/e2e-chat-parity/control", {
+      const res = await fetch(`/api/runtime/e2e-chat-parity/control?thread=${encodeURIComponent(thread as string)}`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ thread, burst }),
+        body: JSON.stringify({ burst }),
       });
       return { status: res.status, body: await res.text() };
     },

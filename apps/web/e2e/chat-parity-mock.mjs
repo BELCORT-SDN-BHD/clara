@@ -399,20 +399,15 @@ export async function handleChatParityRuntime(request, response, url) {
   // the session it already holds. Scoped to this lane's own thread id, so it can never
   // advance another lane's fixture.
   if (request.method === "POST" && path === "/api/e2e-chat-parity/control") {
+    // THE DISCRIMINANT IS ON THE WIRE, NOT IN THE BODY, and that is what makes the
+    // fall-through legal. `return false` means "someone else will read this request", so it
+    // may only be taken while the request is still READABLE — and `readJson` drains it. The
+    // thread id therefore travels as a query parameter (the proxy forwards `nextUrl.search`
+    // verbatim, app/api/runtime/[...path]/route.ts:53), so this lane declines another
+    // lane's thread before it touches the stream, exactly as every other handler in this
+    // module declines on a path or an id it does not own.
+    if (url.searchParams.get("thread") !== CHAT_PARITY.threadId) return false;
     const body = await readJson(request);
-    // ANSWERS, NEVER FALLS THROUGH. The `return false` this replaced was a contract
-    // violation dressed as scoping: every other handler in this module declines BEFORE it
-    // touches the request, because declining means "someone else will read this request" —
-    // and the body has already been drained by the line above, so the next handler would
-    // read an empty stream and mis-parse it. This path belongs to this module either way;
-    // a wrong thread id is a MALFORMED call to an endpoint that is ours, so it is refused
-    // here, in terms the walk can read, instead of arriving somewhere else as a 404 with
-    // no body.
-    if (body?.thread !== CHAT_PARITY.threadId) {
-      response.writeHead(400, { "content-type": "application/json" });
-      response.end(JSON.stringify({ error: "wrong_thread", expected: CHAT_PARITY.threadId, got: body?.thread ?? null }));
-      return true;
-    }
     state.burst = body?.burst === true;
     response.writeHead(200, { "content-type": "application/json" });
     response.end(JSON.stringify({ burst: state.burst }));
