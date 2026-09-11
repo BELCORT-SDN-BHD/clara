@@ -221,7 +221,10 @@ test("#728 finding 5: the composer's OWN evidence picker disables a document tha
   await expect(evidence(page).locator(`option[value="${JOURNAL_WORK.takenDocumentId}"]`)).toBeDisabled();
   await expect(evidence(page).locator(`option[value="${JOURNAL_WORK.freeDocumentId}"]`)).toBeEnabled();
   await expect(page.getByText("already backs a posted journal entry", { exact: false })).toBeVisible();
-  await expect(page.getByRole("link", { name: "Open that journal entry" })).toBeVisible();
+  // Distinct wording from the door's OWN sourceConflictLink ("Open that journal entry") — this
+  // advisory note's own link must never collide with the outcome banner's, which can render at
+  // the same time once a spoken-for document is actually submitted (the C3 conflict test above).
+  await expect(page.getByRole("link", { name: "View that journal entry" })).toBeVisible();
 });
 
 test("B3: LATE attachment on a posted documentless entry — happy, replay, and the two conflicts", async ({ page }) => {
