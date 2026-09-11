@@ -314,6 +314,39 @@ function watchPageErrors(page: Page): { seen: () => string[] } {
 
 const REACT_FAULTS = /Minified React error #(185|418|423|425)|Maximum update depth exceeded|Hydration failed|hydration-mismatch|did not match/i;
 
+/**
+ * COUNT THE TURN CLOCK'S OWN TIMERS, in the real browser.
+ *
+ * WHY THIS AND NOT ONLY THE CONSOLE. React's nested-update ceiling is reached only when the
+ * loop's iterations cross a millisecond — `setNowMs(Date.now())` bails out silently while
+ * two consecutive reads land in the same one — so whether the THROW happens depends on how
+ * expensive one render of the transcript is. The owner's rail was rendering a long
+ * transcript with a clarify card and two Work cards in it and hit the ceiling in about a
+ * minute; this lane's parked thread has an empty transcript and renders far too cheaply to
+ * (measured: the console cell below is green on the pre-fix build). Counting the timers
+ * measures the CAUSE instead of waiting on a race: one turn must arm one timer, and the
+ * pre-fix build arms one per render.
+ *
+ * `1000` is `TURN_PROGRESS_TICK_MS`. Nothing else in the shell arms a one-second interval,
+ * and the assertion reads a DELTA between two samples either way, so a second one-second
+ * timer elsewhere could not make this pass.
+ */
+async function countClockTimers(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const w = window as unknown as { __clara727Timers?: number; setInterval: typeof setInterval };
+    w.__clara727Timers = 0;
+    const real = w.setInterval.bind(window);
+    w.setInterval = ((handler: TimerHandler, ms?: number, ...rest: unknown[]) => {
+      if (ms === 1000) w.__clara727Timers = (w.__clara727Timers ?? 0) + 1;
+      return real(handler, ms, ...rest);
+    }) as typeof setInterval;
+  });
+}
+
+async function clockTimers(page: Page): Promise<number> {
+  return page.evaluate(() => (window as unknown as { __clara727Timers?: number }).__clara727Timers ?? 0);
+}
+
 async function setBurst(page: Page, on: boolean): Promise<void> {
   const answer = await page.evaluate(
     async ([thread, burst]) => {
@@ -338,6 +371,7 @@ test("#727: a clarify asked DURING a live stream is answered in place — the tu
   // `claraThreadStore.emit()`, inside the stream reader's own uncaught `onEvent`, and
   // `useClaraThread` painted the throw as "Could not send that message: stream error: …".
   const faults = watchPageErrors(page);
+  await countClockTimers(page);
   await openThread(page);
   await setBurst(page, true);
   try {
@@ -354,7 +388,20 @@ test("#727: a clarify asked DURING a live stream is answered in place — the tu
     // for a while is the hosted sequence: the owner's view died about a minute in.
     const answerField = page.getByLabel("Your answer");
     await expect(answerField).toBeVisible({ timeout: 20_000 });
+    const timersBefore = await clockTimers(page);
     await page.waitForTimeout(5_000);
+
+    // ONE TURN, ONE TIMER — the measurement that is red on the build this ticket was filed
+    // against and green on the fix. Every delta above re-rendered the thread through
+    // `useSyncExternalStore`; a clock whose effect depends on a fresh `() => Date.now()`
+    // identity re-runs (and calls setState) on every one of them, which is what walks React
+    // to its nested-update ceiling. Measured pre-fix on this very walk: 536 timers armed
+    // across the burst. The bound is 1 because the clock's `startedAt` does not change.
+    const armedDuringBurst = (await clockTimers(page)) - timersBefore;
+    expect(
+      armedDuringBurst,
+      `the turn clock armed ${armedDuringBurst} timers while the stream delivered — one turn is one timer`,
+    ).toBeLessThanOrEqual(1);
 
     // STILL THERE. The failure this ticket records is that the live view was REPLACED by
     // an error banner, taking the answer control with it.
