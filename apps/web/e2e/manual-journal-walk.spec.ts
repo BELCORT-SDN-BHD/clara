@@ -163,7 +163,12 @@ test("C3: evidence is OPTIONAL, and the chosen document survives a reload under 
 test("C3: a document that already backs a posted entry is a persistent Alert with a link, and no second submit", async ({ page }) => {
   await page.goto(COMPOSER_URL);
   await fillBalancedBasis(page);
-  await evidence(page).selectOption(JOURNAL_WORK.takenDocumentId);
+  // #728 finding 5 — the picker ALREADY disables this document (it is the mock's own spoken-for
+  // fixture, seeded at module load), so a real person can no longer reach this door-level refusal
+  // through ordinary interaction — the disabling IS the fix. `force: true` selects it anyway,
+  // proving the DOOR stays the actual authority even past the advisory picker's own guard (the
+  // read is advisory; the door is the law, exactly as this ticket's own contract states).
+  await evidence(page).selectOption(JOURNAL_WORK.takenDocumentId, { force: true });
   await page.getByRole("button", { name: "Submit" }).click();
 
   // A REFUSAL, NOT A TOAST: an inline Alert naming the concrete constraint.
@@ -272,7 +277,12 @@ test("B3: LATE attachment on a posted documentless entry — happy, replay, and 
 
   // THE CONFLICT ARM FIRST, so the walk proves the refusal keeps the dialog open
   // and keeps the choice.
-  await dialog.locator("#attach-evidence-document").selectOption(JOURNAL_WORK.takenDocumentId);
+  // #728 finding 5 — the picker ALREADY disables this document (it is the mock's own spoken-for
+  // fixture, seeded at module load), so a real person can no longer reach this door-level refusal
+  // through ordinary interaction — the disabling IS the fix. `force: true` selects it anyway,
+  // proving the DOOR stays the actual authority even past the advisory picker's own guard (the
+  // read is advisory; the door is the law, exactly as this ticket's own contract states).
+  await dialog.locator("#attach-evidence-document").selectOption(JOURNAL_WORK.takenDocumentId, { force: true });
   await dialog.getByRole("button", { name: "Attach", exact: true }).click();
   await expect(dialog.getByText("already backs another posted entry", { exact: false })).toBeVisible();
   await expect(dialog.locator("#attach-evidence-document")).toHaveValue(JOURNAL_WORK.takenDocumentId);
