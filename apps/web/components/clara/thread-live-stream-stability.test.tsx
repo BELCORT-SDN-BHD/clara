@@ -450,7 +450,7 @@ test("the live clarify is still ANSWERABLE IN PLACE after a burst of deltas", as
 });
 
 /**
- * THE MIS-ATTRIBUTION, PINNED — why a React error was printed as a MESSAGE failure.
+ * THE MIS-ATTRIBUTION — why a React error was printed as a MESSAGE failure.
  *
  * The header of this file, and the comment in `TurnProgress.tsx`, both assert a causal
  * chain: React's throw leaves through `claraThreadStore.emit()`, inside
@@ -459,7 +459,21 @@ test("the live clarify is still ANSWERABLE IN PLACE after a burst of deltas", as
  * `useClaraThread.ts:208` turns into `markSendFailed("stream error: …")`, which
  * `ClaraThreadView` renders as "Could not send that message: …". That is a claim about
  * this code's behaviour, so it is measured here rather than reasoned from a minified
- * stack trace.
+ * stack trace — but only the FIRST half of it is pinned by the cell below. It drives a
+ * throwing store subscriber through the REAL `runClaraTaskStream` (only `fetchImpl` is
+ * faked) and reads `caught` off the resulting rejection: that proves "the stream promise
+ * rejects with the subscriber's error" end to end. The LAST leg — `useClaraThread.ts:208`
+ * turning that rejection into `markSendFailed`'s string, and `ClaraThreadView` rendering
+ * it — is NOT driven through `useClaraThread`'s own `sendMessage`/`attachClaraStream` here
+ * (a fix-round review tried exactly that; `sendMessage`'s own `beginSend`/`markAccepted`/
+ * `markSent` calls emit three times before the stream ever opens, and the composer's Send
+ * button has no `onClick` of its own — native form submission fires it, which this DOM stub
+ * cannot dispatch — leaving only a keyboard-driven path whose async chain proved too easy to
+ * race against this harness's settle points; it belongs to its own attempt, not this fix).
+ * The cell below instead CALLS `markSendFailed` itself with the string `useClaraThread.ts:208`
+ * builds and asserts the banner on that — which pins "`useClaraThread`'s banner is asserted
+ * on the copy it builds", not that `sendMessage` itself reaches this exact call. Unpinned
+ * end-to-end: the store->stream leg is measured; the stream->hook->render leg is re-enacted.
  *
  * WHAT STANDS IN FOR REACT. A store SUBSCRIBER that throws — which is exactly what React's
  * `useSyncExternalStore` subscriber is when `scheduleUpdateOnFiber` is past the
@@ -533,7 +547,8 @@ test("a throw from inside applyStreamEvent leaves through the STREAM, and the ba
     );
     assert.ok(thrown, "the throwing subscriber must actually have been reached by an emit");
 
-    // And now exactly what `useClaraThread.ts:208` does with that rejection.
+    // And now exactly what `useClaraThread.ts:208` does with that rejection — NOT driven
+    // through `useClaraThread`'s own `sendMessage`, per this header's own account of why.
     await h.act(() => {
       claraThreadStore.markSendFailed(THREAD_ID, `stream error: ${(caught as Error).message}`);
     });
@@ -541,7 +556,7 @@ test("a throw from inside applyStreamEvent leaves through the STREAM, and the ba
     assert.match(
       h.text(),
       /Could not send that message: stream error: Minified React error #185/,
-      "the banner the owner read is React's own error, arriving through the stream's rejection",
+      "the banner the owner read is React's own error, arriving through the stream's rejection — unpinned end-to-end: this asserts the copy useClaraThread.ts:208 builds, not that sendMessage itself reaches this call",
     );
   });
 });
