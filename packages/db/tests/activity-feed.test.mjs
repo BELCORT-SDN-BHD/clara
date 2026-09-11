@@ -1032,3 +1032,170 @@ test("af.22 the optional-parameter helper is GONE, not merely unused — two cal
   assert.match(idx[1].def, /WHERE \(\(drafted_count \+ posted_count\) > 0\)/,
     `af.22 ix_sweep_runs_firm_effect must stay partial on "a run that did something" — got ${idx[1].def}`);
 });
+
+// ===========================================================================================
+// af.23 — THE DOOR'S OWN PLAN DISCIPLINE (delta review round 4, BLOCKER [0]).
+//
+// af.20 above pins the two HELPERS. Round 3 pinned the helpers and stopped there, and the door a
+// person actually waits on kept the same defect one level up: `clara.list_activity` binds
+// `c.firm`, `p_client`, `p_kinds`, `p_since`, `p_until`, the cursor pair, `v_limit` AND the new
+// `v_kept_sweeps` array as plpgsql parameters of ONE union statement, which plpgsql caches per
+// SESSION and switches to the GENERIC plan from the sixth execution.
+//
+// WHY THIS CELL PLANTS `clara.operation_receipts` AND NOT A SWEEP HISTORY. af.20's load is the
+// sweep arm; this one is the orx arm (`orr.firm_id = c.firm and orr.outcome = 'committed'`,
+// 0183:701), and it is deliberately planted with ZERO sweep rows — MEASURED on a pristine 0183
+// chain (127.0.0.1:5697, 1,500 sibling firms x 4 committed receipts + 30,000 for the firm under
+// test, sweep history 0, kept 0): calls 1-5 of the door took 229/145/141/145/137 ms and calls
+// 6-10 took 1976/2049/2156/2782/2376 ms — a 13.7x step at exactly the plan-cache boundary, with
+// no sweep row anywhere in the database. So the flip is NOT #728's `v_kept_sweeps` array (that is
+// a SECOND site, measured at 19.5x on 30,000 receipts / 6,000 kept) and it is not the helpers'
+// (their series is flat at 0.5-1.1 ms on this very load): it is the door's own statement, and it
+// was INHERITED FROM 0181. The same load with `set local plan_cache_mode = force_custom_plan` is
+// flat at 147-217 ms across all ten; with `force_generic_plan` it is 2157-2614 ms from call ONE,
+// so the tail plan IS the generic plan. Full series: <scratch>/logs/728-fix4-A-before-default.log.
+//
+// TWO ARMS, BOTH LOAD-BEARING, and they fail for different reasons:
+//   (1) THE CATALOG CLAUSE — true on every database, busy or idle, pristine or populated. It is
+//       the arm that reds the moment the clause is dropped from either door.
+//   (2) THE WALL-CLOCK SERIES at a load big enough to SEE the flip. af.20's 4,000/200 was not:
+//       measured flat there, which is how this shipped past a cell written to catch exactly it.
+//       Proven red on the pre-fix door (the clause reset inside a rolled-back transaction, same
+//       session, same load, one difference — see the same log).
+// ===========================================================================================
+
+// The orx load. `ORX_RECEIPTS` is ~105 days of #623 Work postings at the live cadence; the
+// siblings are what make `orr.firm_id = $1` look CHEAP to a generic plan (the estimate is total
+// rows / n_distinct(firm_id), i.e. the per-firm AVERAGE of a multi-tenant table).
+const ORX_RECEIPTS = 30000;
+
+test("af.23 BOUNDED COST AT THE DOOR: ten consecutive clara.list_activity calls on ONE connection stay flat across the plpgsql plan-cache boundary, and the door pins the custom plan that makes it true", async (t) => {
+  if (await gateSweep(t)) return;
+  const firm = FIRM_A();
+  const claims = JSON.stringify({ sub: BOB(), role: "authenticated" });
+
+  const report = await withRolledBackSession(async (c) => {
+    // (a) THE SKEW: 1,500 sibling firms, each with a handful of committed receipts, so the
+    // per-firm average is small and the firm under test is far above it.
+    await c.query(
+      `insert into clara.firms(id, name)
+       select ('af230000-0000-4000-8000-' || lpad(g::text, 12, '0'))::uuid, 'af23_sibling_' || g
+         from generate_series(1, $1) g`, [SIBLINGS]);
+    await c.query(
+      `insert into clara.clients(id, firm_id, name)
+       select ('af23c000-0000-4000-8000-' || lpad(g::text, 12, '0'))::uuid,
+              ('af230000-0000-4000-8000-' || lpad(g::text, 12, '0'))::uuid, 'af23_sib_client_' || g
+         from generate_series(1, $1) g`, [SIBLINGS]);
+    await c.query(
+      `insert into clara.accounting_work(id, firm_id, client_id, purpose, status, initiator,
+          initiator_role, intent_key, logical_op_id, basis, basis_digest, basis_origin)
+       select ('af23a000-0000-4000-8000-' || lpad(g::text, 12, '0'))::uuid,
+              ('af230000-0000-4000-8000-' || lpad(g::text, 12, '0'))::uuid,
+              ('af23c000-0000-4000-8000-' || lpad(g::text, 12, '0'))::uuid,
+              'journal_entry', 'completed', $2::uuid, 'bookkeeper',
+              'af23_sib_intent_' || g, 'af23_sib_logical_' || g, '{}'::jsonb, repeat('a', 64), 'user_direct'
+         from generate_series(1, $1) g`, [SIBLINGS, BOB()]);
+    await c.query(
+      `insert into clara.agent_tasks(id, firm_id, client_id, kind, status, model_snapshot, created_by)
+       select ('af239000-0000-4000-8000-' || lpad(g::text, 12, '0'))::uuid,
+              ('af230000-0000-4000-8000-' || lpad(g::text, 12, '0'))::uuid,
+              ('af23c000-0000-4000-8000-' || lpad(g::text, 12, '0'))::uuid,
+              'autodraft', 'queued', 'clara-test-model', $2::uuid
+         from generate_series(1, $1) g`, [SIBLINGS, BOB()]);
+    await c.query(
+      `insert into clara.operation_receipts(firm_id, client_id, work_id, purpose, logical_op_id,
+          payload_digest, acting_actor, on_behalf_of, via_wake_kind, bundle_digest, run_id, task_id,
+          outcome, effects, created_at)
+       select ('af230000-0000-4000-8000-' || lpad(g::text, 12, '0'))::uuid,
+              ('af23c000-0000-4000-8000-' || lpad(g::text, 12, '0'))::uuid,
+              ('af23a000-0000-4000-8000-' || lpad(g::text, 12, '0'))::uuid,
+              'journal_entry', 'af23_sib_logical_' || g || '_' || gs, repeat('b', 64),
+              $2::uuid, $2::uuid, 'human', repeat('c', 64), 'af23_sib_run_' || g || '_' || gs,
+              ('af239000-0000-4000-8000-' || lpad(g::text, 12, '0'))::uuid, 'committed',
+              jsonb_build_object('entry_id', gen_random_uuid()::text),
+              now() - (gs || ' minutes')::interval
+         from generate_series(1, $1) g, generate_series(1, $3) gs`, [SIBLINGS, BOB(), PER_SIBLING]);
+
+    // (b) …and the firm under test's OWN committed-receipt history, which is what the generic
+    // plan mis-estimates at that average.
+    await c.query(
+      `insert into clara.clients(id, firm_id, name)
+       values ('af23d000-0000-4000-8000-000000000001'::uuid, $1::uuid, 'af23_target_client')`, [firm]);
+    await c.query(
+      `insert into clara.accounting_work(id, firm_id, client_id, purpose, status, initiator,
+          initiator_role, intent_key, logical_op_id, basis, basis_digest, basis_origin)
+       values ('af23e000-0000-4000-8000-000000000001'::uuid, $1::uuid,
+              'af23d000-0000-4000-8000-000000000001'::uuid, 'journal_entry', 'completed', $2::uuid,
+              'bookkeeper', 'af23_target_intent', 'af23_target_logical', '{}'::jsonb, repeat('a', 64),
+              'user_direct')`, [firm, BOB()]);
+    await c.query(
+      `insert into clara.agent_tasks(id, firm_id, client_id, kind, status, model_snapshot, created_by)
+       values ('af23f000-0000-4000-8000-000000000001'::uuid, $1::uuid,
+              'af23d000-0000-4000-8000-000000000001'::uuid, 'autodraft', 'queued', 'clara-test-model',
+              $2::uuid)`, [firm, BOB()]);
+    await c.query(
+      `insert into clara.operation_receipts(firm_id, client_id, work_id, purpose, logical_op_id,
+          payload_digest, acting_actor, on_behalf_of, via_wake_kind, bundle_digest, run_id, task_id,
+          outcome, effects, created_at)
+       select $1::uuid, 'af23d000-0000-4000-8000-000000000001'::uuid,
+              'af23e000-0000-4000-8000-000000000001'::uuid, 'journal_entry',
+              'af23_target_logical_' || gs, repeat('b', 64), $2::uuid, $2::uuid, 'human',
+              repeat('c', 64), 'af23_target_run_' || gs,
+              'af23f000-0000-4000-8000-000000000001'::uuid, 'committed',
+              jsonb_build_object('entry_id', gen_random_uuid()::text),
+              now() - (gs || ' minutes')::interval
+         from generate_series(1, $3) gs`, [firm, BOB(), ORX_RECEIPTS]);
+    // ANALYZE INSIDE the transaction, for the reason af.20 records: the estimates must be the
+    // same on a pristine database and on one the rest of the suite has already populated.
+    await c.query("analyze clara.operation_receipts");
+    await c.query("analyze clara.accounting_work");
+    await c.query("analyze clara.clients");
+    await c.query("analyze clara.agent_tasks");
+
+    const doorConfig = (await c.query(
+      `select p.proname, coalesce(p.proconfig, '{}'::text[]) as cfg
+         from pg_proc p
+        where p.pronamespace = 'clara'::regnamespace
+          and p.proname in ('list_activity', 'get_activity_event')
+        order by 1`)).rows;
+    const planted = (await c.query(
+      `select count(*)::int as n from clara.operation_receipts
+        where firm_id = $1::uuid and outcome = 'committed'`, [firm])).rows[0].n;
+
+    await c.query("set local role clara_authenticated");
+    await c.query("select set_config('request.jwt.claims', $1, true)", [claims]);
+    const feed = [];
+    for (let i = 0; i < CALLS; i += 1) {
+      feed.push((await timed(c,
+        "select jsonb_array_length(clara.list_activity(null,25,null,null,null,null)->'rows') as n")).ms);
+    }
+    return { feed, doorConfig, planted };
+  });
+
+  const fmt = (a) => a.map((n) => n.toFixed(1)).join(" / ");
+  assert.ok(report.planted >= ORX_RECEIPTS,
+    `af.23 vacuity control: only ${report.planted} committed receipts were planted for the firm under test`);
+
+  // (1) THE STEP, compared MINIMUM-of-tail against MEDIAN-of-head for the reason af.20 records: a
+  // busy host raises a maximum, a generic plan raises EVERY call from the sixth.
+  const head = median(report.feed.slice(0, HEAD));
+  const tail = Math.min(...report.feed.slice(HEAD));
+  assert.ok(tail <= Math.max(FLIP_FACTOR * head, FLIP_FLOOR_MS),
+    `af.23 clara.list_activity STEPPED UP at the plan-cache boundary: calls 1-${HEAD} median ${head.toFixed(1)} ms, `
+    + `cheapest of calls ${HEAD + 1}-${CALLS} ${tail.toFixed(1)} ms — series ${fmt(report.feed)}. `
+    + "A pooled PostgREST connection serves every Activity read after the fifth from that plan.");
+
+  // (2) THE CATALOG CLAUSE. Asserted for BOTH doors: `get_activity_event` measures flat today, but
+  // it binds the same session firm in the same way, and a helper whose two halves disagree about
+  // their own plan discipline is one someone later "tidies" the wrong way (0183 section 1's rule).
+  assert.deepEqual(report.doorConfig.map((r) => r.proname), ["get_activity_event", "list_activity"],
+    "af.23 both activity doors are installed (vacuity control for the pins below)");
+  for (const row of report.doorConfig) {
+    assert.ok(row.cfg.includes("plan_cache_mode=force_custom_plan"),
+      `af.23 clara.${row.proname} does not pin plan_cache_mode=force_custom_plan (proconfig ${JSON.stringify(row.cfg)}) `
+      + "— its union statement binds the session firm, the filters, the cursor and the kept-sweep array as "
+      + "plpgsql parameters, and a generic plan built for the per-firm average is one pooled connection away");
+    assert.ok(row.cfg.includes("search_path=clara, pg_temp"),
+      `af.23 clara.${row.proname} lost its pinned search_path (proconfig ${JSON.stringify(row.cfg)})`);
+  }
+});
