@@ -142,11 +142,30 @@ const INTERRUPTION = {
   expires_at: "2026-09-17T14:45:00.000Z", created_at: "2026-09-03T00:00:00.000Z", answered_at: null,
 };
 
+/**
+ * The request body, PARSED ONCE AND CACHED ON THE REQUEST.
+ *
+ * MEASURED HAZARD, and `serve-built.mjs`'s own dispatch note names it: a node
+ * request stream can be read exactly once, so the FIRST lane in the chain that
+ * calls this for a `/rest/v1/rpc/` POST and then falls through leaves every
+ * later lane reading `{}` — and a lane whose guard is "is this MY client's id"
+ * then refuses its own walk's traffic. Two lanes now answer the SAME verb
+ * (`list_entry_links`, one per fixture client), so falling through after a read
+ * is unavoidable and the stream cannot be the thing they share.
+ *
+ * The cache key is deliberately the same string in both modules, so whichever
+ * runs first pays for the parse and the other reads its answer.
+ */
 async function readJson(request) {
+  if (request.__e2eParsedBody !== undefined) return request.__e2eParsedBody;
   const chunks = [];
   for await (const chunk of request) chunks.push(chunk);
-  if (chunks.length === 0) return {};
-  try { return JSON.parse(Buffer.concat(chunks).toString("utf8")); } catch { return {}; }
+  let parsed = {};
+  if (chunks.length > 0) {
+    try { parsed = JSON.parse(Buffer.concat(chunks).toString("utf8")); } catch { parsed = {}; }
+  }
+  request.__e2eParsedBody = parsed;
+  return parsed;
 }
 
 /** The PostgREST half. Returns true when it answered. */

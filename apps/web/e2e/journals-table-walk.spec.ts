@@ -194,8 +194,18 @@ test("t634: an expanded posted row discloses its Work, its receipt and its sourc
   await expect(page.getByText("Receipt", { exact: true })).toBeVisible();
   const copy = page.getByRole("button", { name: "Copy", exact: true });
   await expect(copy).toBeVisible();
+  // THE PERMISSION IS GRANTED EXPLICITLY, because the control's own honesty rule
+  // depends on it: `navigator.clipboard.writeText` REJECTS without
+  // `clipboard-write`, and the component's `.catch` then leaves the label alone
+  // rather than claiming a copy that did not happen. Without the grant this cell
+  // would be measuring the refusal path while claiming to measure the copy.
+  await page.context().grantPermissions(["clipboard-write"]);
   await copy.click();
   await expect(page.getByRole("button", { name: "Copied", exact: true })).toBeVisible();
+  // …and the WHOLE id reached the clipboard, not the eight characters on screen.
+  await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+  const pasted = await page.evaluate(() => navigator.clipboard.readText());
+  expect(pasted).toBe(JOURNALS.receiptId);
 
   // 2 · THE DOCUMENT-CODED ENTRY, whose source came from the OTHER lane — the
   // surface names the lane rather than guessing from a non-null id.

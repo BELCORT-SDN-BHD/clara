@@ -502,3 +502,35 @@ export const D1_TRIGGER_PREDICTION = [
 export const F_A2_NEW_JE_TRIGGER = {
   tgname: "t_je_agent_post_receipt", deferrable: true, initdeferred: true, tier: "D — the structural receipt wall",
 };
+
+/**
+ * #634 [0182] — the ONE trigger the journal-evidence lane adds to `journal_entries`.
+ *
+ * A PLAIN trigger, not a constraint one, and that is its whole tier: it RAISES NOTHING. It fires
+ * AFTER UPDATE OF `reversed_by` when the column moves null -> non-null, and its entire body
+ * stamps `clara.entry_evidence_links.released_at = now()` for that entry — which is what frees
+ * the document so the CORRECTED entry may cite it (LAW 6: reverse, then re-post). There is no
+ * refusal path to file under a tier, and nothing about the posting ladder changes: an entry with
+ * no evidence link sees a zero-row UPDATE.
+ */
+export const JOURNAL_EVIDENCE_JE_TRIGGER = {
+  tgname: "t_entry_evidence_release", deferrable: false, initdeferred: false,
+  tier: "— not refusal-bearing (it stamps entry_evidence_links.released_at and raises nothing)",
+};
+
+/**
+ * The pinned census for THIS database's frontier.
+ *
+ * FRONTIER-GATED, for the reason the 0042 clock roster's own header gives: `db-slice-frontiers`
+ * runs this battery against databases pinned BELOW 0182, where `t_entry_evidence_release` does
+ * not exist — and an unconditional pin would report it MISSING on every one of those legs, a
+ * one-name diff that says nothing about trigger tiering. Keyed on the migration's STABLE STEM,
+ * never its number.
+ */
+export async function jeTriggerPins() {
+  const pins = [...D1_TRIGGER_PREDICTION, F_A2_NEW_JE_TRIGGER];
+  const r = await rootQuery(
+    "select count(*)::int as n from clara.schema_migrations where version ~ 'journal_work_evidence$'");
+  if (r.rows[0].n > 0) pins.push(JOURNAL_EVIDENCE_JE_TRIGGER);
+  return pins;
+}

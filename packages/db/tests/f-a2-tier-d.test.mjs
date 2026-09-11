@@ -23,7 +23,7 @@ import {
   rootQuery, endPool, buildWorld, printLaneNotes, printSkipCount, noteLane,
   opk, entryRow, approveEntry, postingCoreReady, withTxnOrNull,
   gateCore, wakePostEntry, agentPostable, postReceiptCount, postReceiptRow,
-  jeTriggerCensus, D1_TRIGGER_PREDICTION, F_A2_NEW_JE_TRIGGER,
+  jeTriggerCensus, jeTriggerPins, F_A2_NEW_JE_TRIGGER,
   TIER_D_TOKENS, lastRefusalOf, admitsAll, PR2_PENDING, bodyOfName, AGENT_USER_ID, CHART,
   booksVersion, ensureChart, witnessedFiling,
 } from "./f-a2-post-world.mjs";
@@ -47,7 +47,9 @@ const post = (p, over = {}) => wakePostEntry(p.cred, { ...p.args, ...over });
 test("f-a2.c5.census the pg_trigger replay matches §D.1's table EXACTLY, in BOTH directions", async (t) => {
   if (await gateCore(t)) return;
   const live = await jeTriggerCensus();
-  const expected = [...D1_TRIGGER_PREDICTION, F_A2_NEW_JE_TRIGGER]
+  // FRONTIER-GATED, not a flat constant: #634's `t_entry_evidence_release` joins the census only
+  // on a database that has applied the journal-evidence migration — see `jeTriggerPins`.
+  const expected = (await jeTriggerPins())
     .map(({ tgname, deferrable, initdeferred }) => ({ tgname, deferrable, initdeferred }))
     .sort((a, b) => a.tgname.localeCompare(b.tgname));
   const liveSorted = [...live].sort((a, b) => a.tgname.localeCompare(b.tgname));
