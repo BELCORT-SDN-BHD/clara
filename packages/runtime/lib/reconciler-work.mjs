@@ -318,9 +318,11 @@ export function cancelSettleForWork(result) {
 /**
  * THE CANCELLATION'S OWN WORDS, ONCE ON THIS SIDE. The database's twin is
  * `clara._work_cancelled_error()` (0184 §A0), which every SQL writer of this fact reaches for; this
- * is the JS half, and `work-journal-db.test.mjs` pins the two EQUAL against a live catalog so the
- * claim is checked rather than asserted in a comment. A copy-edit applied to one of them is a
- * failing test, not a Work that describes one event two ways depending on which path settled it.
+ * is the JS half, and `control-work-cancel.test.mjs` (its "pure: the cancellation's words are ONE
+ * object, shared with the database" cell, which reads the helper off the live catalog) pins the two
+ * EQUAL, so the claim is checked rather than asserted in a comment. A copy-edit applied to one of
+ * them is a failing test, not a Work that describes one event two ways depending on which path
+ * settled it.
  * @type {{code:string, reason:string, message:string, recoverable:boolean}}
  */
 export const WORK_CANCELLED_ERROR = Object.freeze({

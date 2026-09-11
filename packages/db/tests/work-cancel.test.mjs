@@ -114,6 +114,14 @@ async function waitingOnLock(pid, ms = 3000) {
   return false;
 }
 
+/** WHICH backends hold what `pid` is waiting for. `waitingOnLock` says a transaction is queued;
+ *  this says who it is queued BEHIND, which is the difference between "something blocked it" and
+ *  "the posting's own row lock blocked it". */
+async function blockingPids(pid) {
+  const r = await rootQuery("select pg_blocking_pids($1) as p", [pid]);
+  return (r.rows[0]?.p ?? []).map(Number);
+}
+
 /** Does `pid` already hold a WRITE lock on a relation? This is how "it blocked BEFORE it wrote
  *  anything" is measured rather than assumed: an INSERT takes RowExclusiveLock on its table the
  *  moment it executes, so a poster that is waiting WITHOUT this lock has not inserted. */
@@ -889,32 +897,60 @@ test("wc.27 the estate's OWN doors take the Work row before the task row", async
       await holder.query("commit");
       await racing;
     } finally {
+      // THE HOLDER IS RELEASED FIRST, and the order is the whole point (wc.28's `finally` carries
+      // the same note). On the ONE failure this cell exists to detect — a door that takes the task
+      // row first — the `nowait` probe raises 55P03 and throws out of the `try`, leaving `caller`
+      // still BLOCKED on the Work row the holder is sitting on. Releasing `caller` first queues its
+      // `rollback` behind that blocked statement, which can only finish once the holder lets go —
+      // which, in that order, never happens. The regression that should produce a red produced a
+      // permanent hang in `packages/db`'s `node --test` instead.
+      await releaseRaw(holder);
       await releaseRaw(probe);
       await releaseRaw(caller);
-      await releaseRaw(holder);
     }
     assert.equal(err, null, `wc.27 ${door} completed once the Work row was free: ${err?.message ?? ""}`);
   }
 });
 
-test("wc.27b a Work-level cancel racing the estate's task-level cancel never deadlocks", async (t) => {
+test("wc.27b a Work-level cancel racing EITHER older door never deadlocks", async (t) => {
   if (await gateCancel(t)) return;
-  // The smoke behind the deterministic pin above. Before the recut this pair raised 40P01 (and the
-  // route answered HTTP 500); with one global order there is no cycle to detect.
-  const N = 12;
+  // The smoke behind the deterministic pin above. Before the recut these pairs raised 40P01 (and
+  // the route answered HTTP 500); with one global order there is no cycle to detect.
+  //
+  // BOTH DOORS, N=20 EACH. `clara.cancel_agent_task` and `clara.open_work_question` are the two
+  // 0184 recut for the lock order, and a race run against only one of them proves the order for
+  // only one of them — the other could take the task row first and no cell would notice.
+  const N = 20;
   const errs = [];
-  for (let i = 0; i < N; i += 1) {
-    const w = await running();
-    const results = await Promise.allSettled([
-      cancelAccountingWork({ work: w.work_id, author: BOB(), opKey: opk("w630-race-a") }),
-      cancelAgentTask(BOB(), { task: w.task_id, opKey: opk("w630-race-b") }),
-    ]);
-    for (const r of results) if (r.status === "rejected") errs.push(r.reason);
+  for (const door of ["cancel_agent_task", "open_work_question"]) {
+    for (let i = 0; i < N; i += 1) {
+      const w = await running();
+      const other = door === "cancel_agent_task"
+        ? cancelAgentTask(BOB(), { task: w.task_id, opKey: opk("w630-race-b") })
+        : roleQuery(ROLES.runtime,
+          `select clara.open_work_question($1::uuid, $2::text, '{"type":"text","text":"q"}'::jsonb,
+                                           '[{"key":"a","label":"A","kind":"text"}]'::jsonb)`,
+          [w.task_id, opk("w630-race-q")]);
+      const results = await Promise.allSettled([
+        cancelAccountingWork({ work: w.work_id, author: BOB(), opKey: opk("w630-race-a") }),
+        other,
+      ]);
+      for (const r of results) {
+        if (r.status !== "rejected") continue;
+        // THE LOSER OF A RACE IS NOT A DEADLOCK. Whichever of the two commits first leaves the
+        // other facing a Work that is already stopping or a run that is already terminal, and the
+        // estate's own typed refusals for that (CLR13) are the CORRECT answer — they are what this
+        // lane exists to produce. Only a serialization failure is a finding here.
+        if (r.reason?.code === "CLR13" || r.reason?.code === "CLR11") continue;
+        errs.push(r.reason);
+      }
+    }
   }
   const deadlocks = errs.filter((e) => e?.code === "40P01" || e?.code === "40001");
   assert.equal(deadlocks.length, 0,
-    `wc.27b ${N} concurrent pairs raised no serialization failure (saw: ${deadlocks.map((e) => e.code).join(",")})`);
-  assert.equal(errs.length, 0, `wc.27b …and no other refusal either: ${errs[0]?.message ?? ""}`);
+    `wc.27b ${N} concurrent pairs per door raised no serialization failure `
+    + `(saw: ${deadlocks.map((e) => e.code).join(",")})`);
+  assert.equal(errs.length, 0, `wc.27b …and no untyped refusal either: ${errs[0]?.message ?? ""}`);
 });
 
 // ===========================================================================================
@@ -1053,6 +1089,24 @@ test("wc.30 the cancellation's words have ONE source: clara._work_cancelled_erro
   const { superseded, ...rest } = translated;
   assert.deepEqual(rest, r.rows[0].e, "wc.30 …and so does a settle the cancel translated");
   assert.equal(superseded.outcome, "failed", "wc.30 with the run's own request preserved underneath");
+
+  // …AND "ONE SOURCE" IS A CLAIM ABOUT THE WRITERS, NOT ABOUT TWO OBSERVED VALUES. The cell above
+  // drives two paths and compares what they wrote; a third writer with its own retyped literal
+  // (the `v_task is null` arm of the cancel door, which no door in the estate can reach today)
+  // passes that untouched and then drifts on the next copy-edit. So every SQL writer of this fact
+  // is asserted to CALL the helper, and none of them to carry the sentence itself.
+  const writers = ["clara.settle_work_run(uuid,text,text,jsonb,jsonb)",
+    "clara.cancel_accounting_work(uuid,uuid,text)",
+    "clara._tf_accounting_work_status_mirror()",
+    "clara._converge_work_terminal(uuid,uuid,text)"];
+  for (const fn of writers) {
+    const src = (await rootQuery(
+      "select prosrc from pg_proc where oid=$1::regprocedure", [fn])).rows[0].prosrc;
+    assert.equal(src.includes("clara._work_cancelled_error()"), true,
+      `wc.30 ${fn} reaches for the shared words`);
+    assert.equal(src.includes("cancelled before an entry was recorded"), false,
+      `wc.30 …and ${fn} does not keep a copy of the sentence itself`);
+  }
 });
 
 test("wc.31 the credential mint TYPES its authority refusal, so the revocation path is recognisable", async (t) => {
@@ -1208,4 +1262,176 @@ test("wc.33b the cancel door's convergence arm is bound to the Work's OWN curren
     "select pg_get_function_identity_arguments(oid) as args from pg_proc where proname='_converge_work_terminal'");
   assert.equal(helper.rows[0].args, "p_work uuid, p_task uuid, p_task_status text",
     "wc.33b the helper cannot be called without naming the run it is reporting about");
+});
+
+// ===========================================================================================
+// §A11 — THE BOUNDARY'S SECOND HALF: THE MEMBERSHIP READ IS SERIALISED WITH REVOCATION.
+//
+// `clara._record_journal_entry_core` re-reads the responsible human's membership FOR SHARE. Until
+// this cell the only guard on that was the migration's own tail census — `position('for share' in
+// v_src) = 0` — which a later recut satisfies by keeping the token ANYWHERE in the body, including
+// on a different SELECT entirely. The estate recuts this function roughly every other migration
+// (0178, 0182, 0184), so "the token is present" is not a property worth pinning; "a revocation
+// cannot commit between the read and the INSERT" is.
+// ===========================================================================================
+
+test("wc.34 a posting HOLDS the responsible human's membership row, so a revocation waits for the books", async (t) => {
+  if (await gateCancel(t)) return;
+  // A DEDICATED HUMAN. This cell ends by demoting the member it uses, and the world is shared
+  // across the whole file — demoting Bob would rewrite the ground under every later cell.
+  const solo = await insertUser(world.prefix, "grace");
+  await addMember(ALICE(), { firm: FIRM_A(), user: solo, role: "bookkeeper", opKey: opk("w630-mem34") });
+  const w = await running({ author: solo });
+  const cred = await mintClientObo({ firm: FIRM_A(), obo: solo, client: w.client });
+  const before = await entryCount(w.client);
+  const membership = (await rootQuery(
+    "select id from clara.firm_memberships where firm_id=$1 and user_id=$2 and status='active'",
+    [FIRM_A(), solo])).rows[0].id;
+
+  let gate = null; let poster = null; let revoker = null; let door = null;
+  let posted = null; let postErr = null; let racing = null;
+  let revoking = null; let revokeErr = null; let doorErr = null; let doorRacing = null;
+  try {
+    // THE GATE. An EXCLUSIVE table lock on clara.journal_entries conflicts with the ROW EXCLUSIVE
+    // an INSERT takes and with nothing the core does BEFORE its writes — so the posting runs its
+    // Work lock, its firm lock and its membership FOR SHARE, and then stops with all three in
+    // hand. That is the only window in which "the poster holds the membership row" is observable
+    // at all: the core is one statement.
+    gate = await rawClient();
+    await gate.query("begin");
+    await gate.query("lock table clara.journal_entries in exclusive mode");
+
+    poster = await rawClient({ role: ROLES.wakeInteractive, wakeSecret: cred.secret });
+    await poster.query("begin");
+    await poster.query("select set_config('clara.wake_secret', $1, true)", [cred.secret]);
+    const posterPid = await backendPid(poster);
+    racing = poster.query(
+      `select clara.wake_record_journal_entry($1::uuid, $2::uuid, $3::text, $4::jsonb, $5::text,
+                                             $6::text, $7::text) as r`,
+      [w.client, w.work_id, w.logical_op_id, JSON.stringify(w.basis), "b".repeat(64),
+        opk("run"), "#630 membership rig"])
+      .then((r) => { posted = r.rows[0].r; }, (e) => { postErr = e; });
+    assert.equal(await waitingOnLock(posterPid), true,
+      "wc.34 the posting is parked on the gate, past its membership read");
+
+    // (1) THE MEMBERSHIP ROW ITSELF, isolated. A BARE UPDATE takes no firm lock and no op key, so
+    //     the only thing that can block it is the row lock the posting is holding — which is the
+    //     property under test, rather than any other serialisation on the way to it.
+    revoker = await rawClient();
+    await revoker.query("begin");
+    const revokerPid = await backendPid(revoker);
+    revoking = revoker.query("update clara.firm_memberships set role='viewer' where id=$1", [membership])
+      .then(() => null, (e) => { revokeErr = e; return null; });
+    assert.equal(await waitingOnLock(revokerPid), true,
+      "wc.34 the membership UPDATE BLOCKS: the posting holds that row FOR SHARE");
+    assert.equal((await blockingPids(revokerPid)).includes(posterPid), true,
+      "wc.34 …and it is blocked by the POSTING itself, not by some other lock in the rig");
+
+    // (2) AND THE ESTATE'S OWN DOOR, which reaches the same row through `clara.firms` first —
+    //     the order this core now shares with it, and the reason neither can deadlock the other.
+    door = await rawClient({ role: ROLES.authenticated, sub: ALICE() });
+    const doorPid = await backendPid(door);
+    doorRacing = door.query(
+      "select clara.set_member_role($1::uuid, $2::text, $3::text)",
+      [membership, "viewer", opk("w630-revoke34")])
+      .then(() => null, (e) => { doorErr = e; return null; });
+    const doorWaits = await waitingOnLock(doorPid);
+    assert.equal(doorWaits, true,
+      `wc.34 clara.set_member_role waits too, rather than racing the books (err=${doorErr?.code ?? ""} ${doorErr?.message ?? ""})`);
+    assert.equal(await entryCount(w.client), before, "wc.34 nothing is on the books yet");
+
+    // Let the books move — and COMMIT them. The row locks this posting holds live until its
+    // transaction ends, not until its statement does: awaiting the two waiters before that commit
+    // is a deadlock of the cell's own making (measured).
+    await gate.query("rollback");
+    await racing;
+    await poster.query("commit");
+    await revoking;
+    await revoker.query("commit");
+    await doorRacing;
+  } finally {
+    await releaseRaw(gate);
+    await releaseRaw(poster);
+    await releaseRaw(revoker);
+    await releaseRaw(door);
+  }
+  assert.equal(postErr ?? null, null,
+    `wc.34 the posting completed: ${postErr?.message ?? ""} | detail=${postErr?.detail ?? ""}`);
+  assert.equal(posted?.posted, true, "wc.34 …and it posted");
+  assert.equal(revokeErr ?? null, null, `wc.34 the role change then proceeded: ${revokeErr?.message ?? ""}`);
+  assert.equal(await entryCount(w.client), before + 1, "wc.34 exactly one entry");
+  assert.equal((await receiptsForWork(w.work_id)).length, 1, "wc.34 …with its receipt");
+  assert.notEqual(
+    (await rootQuery("select role from clara.firm_memberships where id=$1", [membership])).rows[0].role,
+    "bookkeeper", "wc.34 …and the revocation landed afterwards, as the estate recorded it");
+});
+
+test("wc.34c a posting racing a role change on the same firm never raises a serialization failure", async (t) => {
+  if (await gateCancel(t)) return;
+  // THE ORDER, UNDER CONTENTION. wc.34 proves the two serialise; this proves they serialise in ONE
+  // direction. Measured on the rig BEFORE the firm lock was added to the core: the revocation
+  // writers take `clara.firms FOR UPDATE` and then the membership, while the core took the
+  // membership FOR SHARE and reached `clara.firms` only through its inserts' FK key-share — an
+  // inversion PostgreSQL answers with 40P01, which reaches a human as a failed posting.
+  const N = 20;
+  const errs = [];
+  for (let i = 0; i < N; i += 1) {
+    const solo = await insertUser(world.prefix, `race${i}`);
+    await addMember(ALICE(), { firm: FIRM_A(), user: solo, role: "bookkeeper", opKey: opk("w630-mem34c") });
+    const w = await running({ author: solo });
+    const cred = await mintClientObo({ firm: FIRM_A(), obo: solo, client: w.client });
+    const membership = (await rootQuery(
+      "select id from clara.firm_memberships where firm_id=$1 and user_id=$2 and status='active'",
+      [FIRM_A(), solo])).rows[0].id;
+    const results = await Promise.allSettled([
+      wakeRecordJournalEntry(cred.secret, {
+        client: w.client, work: w.work_id, logicalOpId: w.logical_op_id, basis: w.basis,
+      }),
+      humanQuery(ALICE(),
+        "select clara.set_member_role(p_membership => $1::uuid, p_role => $2::text, p_op_key => $3::text)",
+        [membership, "viewer", opk("w630-race34c")]),
+    ]);
+    for (const r of results) {
+      if (r.status !== "rejected") continue;
+      // THE LOSER OF THIS RACE IS NOT AN ERROR EITHER: a revocation that commits first makes the
+      // posting CLR04 `obo_not_active`/`insufficient_role`, which is the whole point of the
+      // commit-time recheck. Only a serialization failure is a finding.
+      if (r.reason?.code === CLR.authz) continue;
+      errs.push(r.reason);
+    }
+  }
+  const deadlocks = errs.filter((e) => e?.code === "40P01" || e?.code === "40001");
+  assert.equal(deadlocks.length, 0,
+    `wc.34c ${N} posting/role-change pairs raised no serialization failure `
+    + `(saw: ${deadlocks.map((e) => e.code).join(",")})`);
+  assert.equal(errs.length, 0, `wc.34c …and no untyped refusal either: ${errs[0]?.message ?? ""}`);
+});
+
+test("wc.34b the INVERSE order refuses the posting — a revocation that commits FIRST wins", async (t) => {
+  if (await gateCancel(t)) return;
+  // The other direction of the same serialisation. Without the FOR SHARE these two orders were not
+  // decided at all: a revocation committing between the membership SELECT and the INSERT let the
+  // entry post under an authority that no longer existed when the books moved (C79.2).
+  const solo = await insertUser(world.prefix, "heidi");
+  await addMember(ALICE(), { firm: FIRM_A(), user: solo, role: "bookkeeper", opKey: opk("w630-mem34b") });
+  const w = await running({ author: solo });
+  const cred = await mintClientObo({ firm: FIRM_A(), obo: solo, client: w.client });
+  const before = await entryCount(w.client);
+  await demoteMember(ALICE(), { firm: FIRM_A(), user: solo, role: "viewer" });
+
+  const err = await wakeRecordJournalEntry(cred.secret, {
+    client: w.client, work: w.work_id, logicalOpId: w.logical_op_id, basis: w.basis,
+  }).then(() => null, (e) => e);
+  assert.ok(err, "wc.34b the posting was refused");
+  // MEASURED, and it is the OUTER wall rather than the inner one: `clara.set_member_role` revokes
+  // the member's wake credentials in the same statement that changes their role (0157:405), so
+  // `clara.wake_context` refuses CLR03 before the core's own commit-time recheck is ever reached.
+  // Both walls are real; this cell asserts the one the estate actually answers with, and wc.31
+  // pins the mint's typed authority refusal behind it. What matters for C79.2 is the same either
+  // way: a revocation that commits first means nothing reaches the books.
+  assert.equal(err.code, CLR.wake, `wc.34b …refused at the credential wall: ${err.message}`);
+  assert.equal(await entryCount(w.client), before, "wc.34b nothing was posted");
+  assert.equal((await receiptsForWork(w.work_id)).length, 0, "wc.34b no receipt exists");
+  assert.equal((await workRow(w.work_id)).status, "running",
+    "wc.34b …and the Work is untouched: a refused posting settles nothing");
 });

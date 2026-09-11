@@ -278,9 +278,21 @@ comment on function clara._work_door_ctx(uuid,uuid,text,text,text,text) is
 -- terminal Work) and unreconciled (the sweep looks at `queued`/`running`/`awaiting_input` tasks).
 -- A Work with no way out is the worst answer the estate can give.
 --
--- Three belts close it and this is the one the other two share: the mirror converges at the source
--- (§B), the cancel door converges before it decides (§G), the runtime's reconciler converges what it
--- finds (reconciler-work.mjs §C), and all three land here so the RECEIPT LAW is stated once.
+-- Three belts close it. TWO of them land here — the cancel door converges before it decides (§G)
+-- and the runtime's reconciler converges what it finds (reconciler-work.mjs §A2, through
+-- `clara.settle_work_run`'s replay arm) — so the receipt law those two apply is written once.
+--
+-- THE THIRD, THE STATUS MIRROR (§B), DELIBERATELY DOES NOT, and an earlier header claiming it did
+-- was wrong (review). The mirror is a TRIGGER on `clara.agent_tasks`: it has no task id to pass
+-- (it is `new.id`, but the transition it is reacting to is the only one it may speak for), it runs
+-- INSIDE `clara.settle_work_run`'s own transaction on every terminal settle, and its job is
+-- narrower — it writes `completed` on a receipt and `cancelled` on a cancelled run with none, and
+-- leaves every other terminal to the settle verb that is about to write it properly. Routing it
+-- through this helper would have it converge and AUDIT a Work one statement before the verb writes
+-- the real answer, i.e. two audit rows and one wrong intermediate for every settle in the lane.
+-- What the two DO share is the cancellation's own words: both reach for
+-- `clara._work_cancelled_error()` (§A0(1)), and `work-cancel.test.mjs` wc.30 pins every writer's
+-- CALL SITE rather than only the values, so "one source" is a checked claim.
 -- Returns the Work status it wrote, or null when there was nothing to converge.
 create function clara._converge_work_terminal(p_work uuid, p_task uuid, p_task_status text)
   returns text
@@ -736,12 +748,9 @@ begin
   v_error_out := case
     when v_outcome = 'completed' then null
     when v_translated is null then p_error
-    else jsonb_build_object(
-           'code', 'cancelled', 'reason', 'cancelled',
-           'message', 'This Work was cancelled before an entry was recorded. Nothing was posted.',
-           'recoverable', true,
-           'superseded', jsonb_build_object('outcome', v_translated,
-             'error_code', p_error_code, 'error', p_error))
+    else clara._work_cancelled_error()
+         || jsonb_build_object('superseded', jsonb_build_object('outcome', v_translated,
+              'error_code', p_error_code, 'error', p_error))
     end;
 
   update clara.agent_tasks set status = v_task_status, error_code = v_err, updated_at = now()
@@ -925,6 +934,17 @@ begin
   -- that arrives first makes this read see it, and one that arrives second waits for this
   -- transaction and then applies to a world where the entry is already posted (and cannot erase
   -- it -- spec §5).
+  -- …AND THE FIRM ROW IS TAKEN FIRST, because the revocation writers take it first. MEASURED on
+  -- the rig (work-cancel.test.mjs wc.34, first cut): `clara.set_member_role` (0157) opens with
+  -- `perform 1 from clara.firms where id = c.firm for update` and only then UPDATEs the
+  -- membership, while this core took the membership FOR SHARE and reached `clara.firms` LATER —
+  -- through the FK key-share every `operation_receipts`/`journal_entries` insert takes. Two
+  -- transactions, two orders, one cycle: PostgreSQL broke it with 40P01, and a serialization
+  -- failure on a posting is precisely the answer #630 exists to make impossible. `for key share`
+  -- is the weakest lock that queues behind the revocation's `for update` (and it is the same mode
+  -- the FK checks below need, so it is taken once rather than twice); two postings never block
+  -- each other on it.
+  perform 1 from clara.firms f where f.id = p_firm for key share;
   select m.role, m.status into v_role, v_member_status from clara.firm_memberships m
    where m.user_id = p_obo and m.firm_id = p_firm
    order by (m.status = 'active') desc, m.created_at desc limit 1
@@ -1289,31 +1309,26 @@ begin
     -- clara.settle_work_run, because ONE verb writes this lane's terminals and a second writer is
     -- how a task row and a Work row come to disagree.
     if v_task is not null then
-      perform clara.settle_work_run(v_task, 'cancelled', null,
-        jsonb_build_object('code','cancelled','reason','cancelled',
-          'message','This Work was cancelled before an entry was recorded. Nothing was posted.',
-          'recoverable', true), null);
+      perform clara.settle_work_run(v_task, 'cancelled', null, clara._work_cancelled_error(), null);
     else
+      -- A WORK WITH NO RUN AT ALL. Reached by nothing the estate ships today (every admitted Work
+      -- is minted with a task), which is exactly why it must not carry its own copy of the words:
+      -- an arm no cell drives is an arm a copy-edit forgets.
       update clara.accounting_work
-         set status = 'cancelled',
-             error = jsonb_build_object('code','cancelled','reason','cancelled',
-               'message','This Work was cancelled before an entry was recorded. Nothing was posted.',
-               'recoverable', true)
+         set status = 'cancelled', error = clara._work_cancelled_error()
        where id = p_work;
     end if;
-  elsif v_task_status in ('completed','failed','cancelled','expired') then
-    -- 6a · THE BELT BEHIND ARM 3. If a terminal run is still paired with a non-terminal Work at
-    -- this point, arm 3's convergence returned without writing (a Work whose status the estate
-    -- does not know how to derive). Refuse in this lane's OWN vocabulary rather than letting
-    -- `clara._tf_agent_task_update`'s untyped "illegal transition" out of a door whose every other
-    -- refusal is typed -- a codeless 409 is a dead end for the surface. The route maps this to
-    -- `409 {error:'run_already_terminal', status}`.
-    raise exception 'this work''s run has already ended (%) -- it cannot be asked to stop',
-      v_task_status
-      using errcode='CLR13',
-        detail=jsonb_build_object('reason','run_already_terminal','status',w.status,
-          'task_status',v_task_status)::text;
   else
+    -- NO ARM FOR A TERMINAL RUN HERE, and its absence is deliberate rather than an omission. An
+    -- earlier cut of this file carried one (a typed CLR13 `run_already_terminal`) as a belt behind
+    -- arm 3; review measured that it could never execute. Arm 3 fires for EVERY terminal
+    -- `v_task_status` and RETURNS, and both rows stay locked from the top of this function, so by
+    -- the time control reaches here `v_task_status` can only be null (caught by the branch above),
+    -- 'queued', 'held', 'cancel_requested' (arm 4) or one of the live statuses. Pinning a refusal
+    -- the database cannot raise is worse than not pinning one: the route arm, its unit cell and
+    -- the web's refusal roster all read as coverage of a path that does not exist. If a future
+    -- change makes arm 3's convergence conditional, THAT change owns re-opening this arm — and
+    -- must bring a cell that reaches it.
     -- 6 · A LIVE ENGINE RUN. The cancel is a REQUEST: the runtime aborts the run and then settles
     -- it (clara.settle_work_run translates whatever it asks for). The Work reads `stopping`
     -- through the status mirror until that boundary is known.
@@ -1980,6 +1995,13 @@ begin
    where p.oid='clara._record_journal_entry_core(uuid,uuid,text,uuid,uuid,text,jsonb,text,text,text)'::regprocedure;
   if position('for share' in v_src) = 0 then
     raise exception '#630 tail: the posting core does not hold the membership row against revocation'
+      using errcode='CLR10';
+  end if;
+  -- …IN THE ESTATE'S ORDER. The revocation writers take clara.firms before the membership row, so
+  -- this core must too, or the two deadlock (measured: wc.34's first cut).
+  if position('for key share' in v_src) = 0
+     or position('for key share' in v_src) > position('for share;' in v_src) then
+    raise exception '#630 tail: the posting core reaches clara.firms after the membership row'
       using errcode='CLR10';
   end if;
 

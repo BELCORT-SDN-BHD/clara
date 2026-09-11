@@ -253,6 +253,19 @@ async function main() {
 
   const countEntries = (client) =>
     rig.rootQuery("select count(*)::int as n from clara.journal_entries where client_id = $1", [client]).then((r) => r.rows[0].n);
+  /** Does `pid` already hold a WRITE lock on a relation? THE difference between "it is waiting"
+   *  and "it is waiting before it wrote": an INSERT takes RowExclusiveLock on its table the moment
+   *  it executes, so a backend that is queued WITHOUT this lock has not inserted. Reading committed
+   *  rows from another session cannot tell the two apart — an uncommitted INSERT is invisible there
+   *  whether or not it happened (the same correction wc.28 already carries in the db battery). */
+  const holdsWriteLock = (pid, relation) =>
+    rig
+      .rootQuery(
+        `select count(*)::int as n from pg_locks
+          where pid = $1 and granted and locktype = 'relation'
+            and relation = $2::regclass and mode in ('RowExclusiveLock','ExclusiveLock')`,
+        [pid, relation])
+      .then((r) => r.rows[0].n > 0);
   const countReceipts = (work) =>
     rig
       .rootQuery("select count(*)::int as n from clara.operation_receipts where work_id = $1 and outcome = 'committed'", [work])
@@ -492,8 +505,17 @@ async function main() {
       // one backend is queued behind the holder, and only then send the cancel.
       gate3.open();
       const posting = await waitBlocked(holderPid, 1, "leg 3: the tool call reaches the boundary");
-      assert.equal(await countEntries(ctx.client), 0,
-        "leg 3: …and it blocked BEFORE it wrote anything — the entry is still unposted");
+      // …AND IT BLOCKED BEFORE IT WROTE ANYTHING, measured through pg_locks on the POSTER's own
+      // backend. The earlier form of this line counted committed `clara.journal_entries` rows from
+      // a different session, which reads 0 whether or not the posting transaction has already
+      // INSERTed — vacuous over exactly the state it claimed to exclude. Delete the `for update`
+      // from `clara._record_journal_entry_core` and the poster inserts first and then blocks on the
+      // tail UPDATE: the count stays 0 and this assertion stays green, while the lock check reds.
+      assert.equal(await holdsWriteLock(posting[0], "clara.journal_entries"), false,
+        "leg 3: …and it blocked BEFORE it wrote anything — no write lock on clara.journal_entries");
+      assert.equal(await holdsWriteLock(posting[0], "clara.operation_receipts"), false,
+        "leg 3: …nor on the receipt it would have written with it");
+      assert.equal(await countEntries(ctx.client), 0, "leg 3: and nothing is committed either");
 
       // The cancel queues BEHIND the posting transaction. Proven the same way: two backends are now
       // waiting on the holder, and the one that arrived first is the posting.

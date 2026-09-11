@@ -428,13 +428,6 @@ export function workErrorResponse(err: unknown): { status: number; body: Record<
       // renders "this Work is not available to take over" beside the status that made it so.
       return { status: 409, body: { error: "not_takeable", status: detailField(err, "status") } };
     }
-    if (reason === "run_already_terminal") {
-      // #630 · THE STRANDED-PAIR BELT'S OWN 409. Before 0184 this shape reached the human as the
-      // task matrix's untyped "illegal agent_task transition" — a codeless conflict banner with
-      // no next move. It now names itself and carries the Work status, so the surface can say the
-      // run has already ended and show what the Work settled as.
-      return { status: 409, body: { error: "run_already_terminal", status: detailField(err, "status") } };
-    }
     if (reason === "work_cancelled" || reason === "work_settled") {
       // #630 · the BOUNDARY's own refusals, reachable here only through a door that calls the
       // posting core. The status is the operable fact: the surface converges on the Work's own row.

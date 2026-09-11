@@ -435,12 +435,18 @@ test("630.route: a serialization failure is a TRANSIENT, never an internal error
   assert.equal(workErrorResponse(raised("40P01", { reason: "not_takeable" })).body.error, "transient");
 });
 
-test("630.route: the stranded-pair refusal is never a codeless 409", () => {
-  // The arm that used to leak `clara._tf_agent_task_update`'s untyped CLR13 ("illegal agent_task
-  // transition cancelled -> cancel_requested") to a human as `{error:"conflict"}` with nothing to
-  // act on. It now names itself and carries the Work status.
-  assert.deepEqual(workErrorResponse(raised("CLR13", { reason: "run_already_terminal", status: "cancelled" })),
-    { status: 409, body: { error: "run_already_terminal", status: "cancelled" } });
+test("630.route: the stranded pair is CONVERGED by the door, so no refusal is mapped for it", () => {
+  // An earlier cut mapped a typed CLR13 `run_already_terminal` here. Review measured the arm that
+  // raised it as unreachable — `clara.cancel_accounting_work` converges and RETURNS for every
+  // terminal run before it can be reached — so the mapping, this cell and the web's refusal roster
+  // were green coverage of a path the database cannot produce. The honest pin is that the token is
+  // not in the map at all: a future change that re-opens the arm has to add both halves together.
+  assert.equal(
+    workErrorResponse(raised("CLR13", { reason: "run_already_terminal", status: "cancelled" })),
+    null,
+    "an unmapped reason is not claimed by this map — the caller logs it and answers 500, which is "
+    + "the honest answer for a shape the estate has no door for",
+  );
 });
 
 test("630.route: the cancel door's authority and identity refusals keep the estate's statuses", () => {
