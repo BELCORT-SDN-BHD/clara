@@ -27,7 +27,7 @@
 // top of it would be decoration over a real signal, and it would need its own
 // reduced-motion arm to say nothing extra.
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
 
 import { elapsedSeconds, formatElapsed } from "@/lib/clara/turnRun";
@@ -53,12 +53,39 @@ export function TurnProgress({
   const t = useTranslations("Clara.thread.turnProgress");
   const [nowMs, setNowMs] = useState(now);
 
+  // THE CLOCK IS READ THROUGH A REF, AND THAT IS #727's WHOLE FIX.
+  //
+  // `now` is a DEFAULT PARAMETER, so its initializer (`() => Date.now()`) runs on every
+  // call: a fresh function identity per render. It used to be a dependency of the effect
+  // below, whose body calls `setNowMs(now())` — render -> effect -> setState -> render,
+  // forever, bailing out only while two consecutive reads landed in the same millisecond.
+  // A cheap render does; a rail rendering a long transcript with a clarify card and two
+  // Work cards in it does not. Measured on the code this replaced: SIX timers armed just
+  // to mount this component, and 439 armed across 200 live stream deltas
+  // (thread-live-stream-stability.test.tsx).
+  //
+  // WHY THAT ENDED THE TURN. Every one of those commits leaves work pending, which is what
+  // React counts toward its nested-update ceiling; past the ceiling the next scheduled
+  // update THROWS (#185, "Maximum update depth exceeded"). During a stream that update is
+  // scheduled by `claraThreadStore.emit()` inside `applyStreamEvent` — i.e. inside
+  // `runClaraTaskStream`'s uncaught `onEvent(evt)` (lib/clara/stream.ts) — so React's error
+  // came back out as the STREAM's rejection and `useClaraThread` painted it as
+  // "Could not send that message: stream error: …". The live clarify went with the view.
+  //
+  // The ref is this repo's own answer to exactly this hazard: lib/parts/hooks.ts carries
+  // `sessionRef`/`loaderRef` for the same reason (its header records the 4GB-heap
+  // measurement that drove them). The effect now depends on `startedAt` alone — one turn,
+  // one timer — while every tick still calls whichever clock is CURRENT, so the injected
+  // seam keeps working and a caller that hands in a fresh closure per render costs nothing.
+  const nowRef = useRef(now);
+  nowRef.current = now;
+
   useEffect(() => {
     if (startedAt === null) return;
-    setNowMs(now());
-    const timer = setInterval(() => setNowMs(now()), TURN_PROGRESS_TICK_MS);
+    setNowMs(nowRef.current());
+    const timer = setInterval(() => setNowMs(nowRef.current()), TURN_PROGRESS_TICK_MS);
     return () => clearInterval(timer);
-  }, [startedAt, now]);
+  }, [startedAt]);
 
   const seconds = elapsedSeconds(startedAt, nowMs);
   // Absence is not evidence: no readable start means no claim about duration.

@@ -358,3 +358,4 @@ tests/streamAuthority.test.mjs
 tests/streamParser.test.mjs
 tests/streamReattach.test.mjs
 tests/token-contrast.test.ts
+components/clara/thread-live-stream-stability.test.tsx
