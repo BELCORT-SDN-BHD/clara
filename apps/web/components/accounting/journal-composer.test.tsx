@@ -1221,10 +1221,16 @@ test("t728f: …and does NOT invent a departure when the claimant is this client
     await fillGoodEntry(h);
     await h.fireEvent(byId(h, "journal-basis-evidence"), "change", (n) => setFieldValue(n, DOCUMENTS[0]!.documentId));
     await submitForm(h);
-    assert.match(h.text(), /One document backs at most one posted journal entry/,
-      "the plain refusal copy stands when the entry is this client's own");
+    // MATCHED ON THE SENTENCE THAT DIFFERS (delta review round 4, NIT [9]). The two messages open
+    // with the same words — "One document backs at most one posted journal entry. Nothing was
+    // recorded." — so an assertion on that opening is satisfied by EITHER, and the cell rested
+    // entirely on the `doesNotMatch` below. The discriminating clause is the tail.
+    assert.match(h.text(), /Open the entry that already stands on it/,
+      "the plain refusal copy — the one that does NOT name another client — stands when the entry is this client's own");
     assert.doesNotMatch(h.text(), /leaves this client/,
       "…and nothing claims the link goes somewhere else");
+    assert.doesNotMatch(h.text(), /belongs to/,
+      "…and no claimant is named, because the claimant is these very books");
   } finally {
     await h.unmount();
   }

@@ -396,9 +396,10 @@ export function JournalComposerView({
       // does (`list_spoken_for_documents` is firm-wide and joins the claimant's
       // name in) — the two reads are a tick apart, so a row that has moved on
       // since is not evidence about THIS entry. When they do not answer, the
-      // banner paints anyway and `useClaimant` below resolves the rest under an
-      // AbortSignal: a refusal is never held back by a read of advisory grade
-      // (delta review round 3, finding [3]).
+      // banner paints anyway and THE CLAIMANT EFFECT ABOVE — the `useEffect` on
+      // `claimantUnresolved`, with its own doc block, ~100 lines up — resolves
+      // the rest under an AbortSignal and a timeout: a refusal is never held
+      // back by a read of advisory grade (delta review round 3, finding [3]).
       const advisory = (spokenForRead.data ?? []).find(
         (r) => r.document_id === result.documentId && r.entry_id === result.entryId,
       ) ?? null;
