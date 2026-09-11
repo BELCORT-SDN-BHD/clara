@@ -11,11 +11,12 @@
 // this union; `packages/db/tests/activity-feed.test.mjs` owns that half.
 //
 // TWO CLIENTS:
-//   ACTIVITY.clientId      — the main fixture: an 8-row first page (upload, posting, a
+//   ACTIVITY.clientId      — the main fixture: a 9-row first page (upload, posting, a
 //                            correction PAIR, a close event, an agent-receipt, a conversation-
-//                            maintenance event, and a report-kind row) that is `truncated`, and
-//                            a second page carrying one new row PLUS a DELIBERATE duplicate of
-//                            the first page's document row (the load-more dedupe cell).
+//                            maintenance event, a report-kind row, and a KEPT sweep-heartbeat row
+//                            — #728 finding 1) that is `truncated`, and a second page carrying one
+//                            new row PLUS a DELIBERATE duplicate of the first page's document row
+//                            (the load-more dedupe cell).
 //   ACTIVITY.flipClientId  — a second, otherwise-empty client whose `list_activity` call COUNT
 //                            (per this server's lifetime — safe only because playwright.config.ts
 //                            pins `workers: 1`, the same precondition journal-work-mock.mjs's own
@@ -47,6 +48,13 @@ export const ACTIVITY = {
   correctionReplacementEventId: "a2a2a2a2-2222-4777-8777-a2a2a2a20108",
   closeEventId: "a2a2a2a2-2222-4777-8777-a2a2a2a20109",
   page2NewEventId: "a2a2a2a2-2222-4777-8777-a2a2a2a2010a",
+  // #728 finding 1 — a KEPT sweep-heartbeat row (0183 excludes the zero-effect ones entirely
+  // BEFORE the door ever returns them, so this fixture — being a FAKE PostgREST answer — models
+  // only the shape a real door would still emit: kind='agent', actor=null, event_type=
+  // 'sweep.run_completed'). The zero-effect case is proven at the door in
+  // packages/db/tests/activity-feed.test.mjs's af.14 (it never reaches this mock's caller at
+  // all), so there is nothing for this browser-level walk to add for that half.
+  sweepEventId: "a2a2a2a2-2222-4777-8777-a2a2a2a2010e",
 };
 
 const PAGE_2_CURSOR = "activity-mock-page-2";
@@ -168,9 +176,21 @@ const REPORT_ROW = eventRow({
   kind: "report",
 });
 
+// #728 finding 1 — the sweep heartbeat that DID draft something: kind='agent' (never
+// 'documents' — the 0181 fall-through 0183 retires for this one event_type), actor stays null
+// (the door's own truth), client_id null (a firm-level receipt, no client to attribute it to).
+const SWEEP_ROW = eventRow({
+  id: ACTIVITY.sweepEventId,
+  event_type: "sweep.run_completed",
+  description: "An autodraft sweep run completed.",
+  occurred_at: "2026-09-01T00:30:00.000Z",
+  actor: null, client_id: null,
+  kind: "agent",
+});
+
 const PAGE_1 = [
   REPORT_ROW, AGENT_RECEIPT_ROW, CONVERSATION_MAINTENANCE_ROW, CLOSE_ROW,
-  CORRECTION_REPLACEMENT_ROW, CORRECTION_ORIGINAL_ROW, WORK_ROW, DOCUMENT_ROW,
+  CORRECTION_REPLACEMENT_ROW, CORRECTION_ORIGINAL_ROW, WORK_ROW, SWEEP_ROW, DOCUMENT_ROW,
 ].sort((a, b) => (a.occurred_at < b.occurred_at ? 1 : -1));
 
 const PAGE_2_NEW_ROW = eventRow({

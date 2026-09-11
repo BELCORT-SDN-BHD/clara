@@ -36,6 +36,7 @@ import {
   type ActivitySource,
 } from "@/lib/firm/activity";
 import { MemberName } from "@/components/common/member-name";
+import { ActivityActorLine } from "./activity-actor-line";
 import type { MemberNameResolver } from "@/lib/members/use-member-names";
 import Link from "next/link";
 
@@ -113,12 +114,7 @@ export function ActivityEventSheet({
 
               <dt className="text-muted-foreground">{t("columnActor")}</dt>
               <dd className="text-card-foreground">
-                <MemberName userId={detail.actor} resolver={memberNames} />
-                {detail.on_behalf_of ? (
-                  <span className="ml-1 text-muted-foreground">
-                    {t("onBehalfOf")} <MemberName userId={detail.on_behalf_of} resolver={memberNames} showRole={false} />
-                  </span>
-                ) : null}
+                <ActivityActorLine row={detail} memberNames={memberNames} />
               </dd>
 
               <dt className="text-muted-foreground">{t("eventTime")}</dt>

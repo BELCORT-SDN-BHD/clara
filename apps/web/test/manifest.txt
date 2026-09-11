@@ -117,6 +117,7 @@ components/firm-admin/firm-admin-pages-a11y.test.tsx
 components/firm-admin/vendor-binding-ceremony.test.tsx
 components/firm/activity/activity-event-sheet.test.tsx
 components/firm/activity/activity-feed.test.tsx
+components/firm/activity/activity-row.test.tsx
 components/firm/activity/use-activity-feed.test.ts
 components/firm/add-client-control.test.tsx
 components/firm/agent-task-detail.test.tsx

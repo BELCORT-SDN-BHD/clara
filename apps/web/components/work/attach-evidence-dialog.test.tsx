@@ -18,9 +18,9 @@ import { createElement, type ReactElement } from "react";
 import { NextIntlClientProvider } from "next-intl";
 
 import { renderComponent, clickButton, setFieldValue, textOf } from "../../test/hookHarness";
-import { enableDomInspection } from "../../test/domInspect";
+import { enableDomInspection, activeElement } from "../../test/domInspect";
 import { AttachEvidenceDialog } from "./attach-evidence-dialog";
-import type { AttachEvidenceResult, EvidenceDocument } from "../../lib/work/evidence";
+import type { AttachEvidenceResult, EvidenceDocument, SpokenForDocumentRow } from "../../lib/work/evidence";
 import messages from "../../messages/en.json";
 
 enableDomInspection();
@@ -44,21 +44,32 @@ function App(props: {
   onAttached?: () => void;
   findEntry?: () => Promise<string | null>;
   loadDocuments?: () => Promise<EvidenceDocument[]>;
+  loadSpokenFor?: () => Promise<SpokenForDocumentRow[]>;
 }): ReactElement {
   return createElement(NextIntlClientProvider, {
     locale: "en",
     messages,
     timeZone: "Asia/Kuala_Lumpur",
-    children: createElement(AttachEvidenceDialog, {
-      clientId: CLIENT,
-      entryId: ENTRY,
-      expectedRevision: REVISION,
-      onAttached: props.onAttached ?? (() => {}),
-      attach: (props.attach ?? (async () => ({ kind: "unavailable", message: "x" }))) as never,
-      findEntry: (props.findEntry ?? (async () => null)) as never,
-      loadDocuments: props.loadDocuments ?? (async () => DOCUMENTS),
-      session: { getAccessToken: async () => "tok" } as never,
-    }),
+    // #728 finding 3 — a <section>/<h2> WRAPPER, the SAME shape work-detail.tsx renders this
+    // dialog inside of (its "What was recorded" SectionHeader): `landmarkHeadingFor` walks up to
+    // the nearest `<section>` and finds the first heading inside it, and without a real one here
+    // the success-focus cell could not prove anything about where focus actually lands.
+    children: createElement(
+      "section",
+      null,
+      createElement("h2", null, "What was recorded"),
+      createElement(AttachEvidenceDialog, {
+        clientId: CLIENT,
+        entryId: ENTRY,
+        expectedRevision: REVISION,
+        onAttached: props.onAttached ?? (() => {}),
+        attach: (props.attach ?? (async () => ({ kind: "unavailable", message: "x" }))) as never,
+        findEntry: (props.findEntry ?? (async () => null)) as never,
+        loadDocuments: props.loadDocuments ?? (async () => DOCUMENTS),
+        loadSpokenFor: props.loadSpokenFor ?? (async () => []),
+        session: { getAccessToken: async () => "tok" } as never,
+      }),
+    ),
   });
 }
 
@@ -342,6 +353,106 @@ test("t634: a REVERSED entry's refusal is named, not folded into the generic one
     assert.match(bodyText(), /has been reversed/, "the one next action is on the entry that replaced it");
     assert.equal((selectIn() as { value?: unknown }).value, DOCUMENTS[0]!.documentId,
       "the choice survives the refusal");
+  } finally {
+    await h.unmount();
+    await drain(h);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// #728 finding 3 — late-attach success no longer drops focus to <body>.
+// ---------------------------------------------------------------------------
+
+test("t728: a SUCCESSFUL attach moves focus to the 'What was recorded' landmark, not <body>", async () => {
+  const h = await renderComponent(
+    App({
+      attach: async (input) => ({ kind: "attached", entryId: ENTRY, documentId: input.documentId, linkId: "l1", workId: "w1", alreadyAttached: false }),
+    }),
+  );
+  try {
+    await openDialog(h);
+    await choose(h, DOCUMENTS[0]!.documentId);
+    await pressAttach(h);
+    // Two extra settle passes: the fix awaits `nextPaint()` (a frame + a macrotask) before moving
+    // focus, on purpose — see attach-evidence-dialog.tsx's own comment on `confirm`.
+    for (let i = 0; i < 4; i++) await h.settle();
+
+    const heading = findIn(bodyNode(), (n) => n.tagName === "H2" && textOf(n as never) === "What was recorded");
+    assert.ok(heading, "the section heading must render");
+    assert.equal(activeElement(), heading, "focus lands on the landmark, never on <body>, once the affordance is gone");
+    assert.equal((heading as { getAttribute?: (k: string) => string | null }).getAttribute?.("tabindex"), "-1",
+      "a heading is not natively focusable — the fix must give it tabIndex=-1 to be a real target");
+  } finally {
+    await h.unmount();
+    await drain(h);
+  }
+});
+
+test("t728: a REFUSED attach leaves the dialog open and does NOT move focus to the landmark", async () => {
+  const h = await renderComponent(App({ attach: async () => ({ kind: "invalid_document" }) }));
+  try {
+    await openDialog(h);
+    await choose(h, DOCUMENTS[0]!.documentId);
+    await pressAttach(h);
+    for (let i = 0; i < 4; i++) await h.settle();
+
+    const heading = findIn(bodyNode(), (n) => n.tagName === "H2" && textOf(n as never) === "What was recorded");
+    assert.notEqual(activeElement(), heading,
+      "a refusal changes nothing about focus — the dialog stays open (this file's own header), so the landmark fix must not fire");
+    // The dialog is still open and showing the refusal, per the existing refusal cells above.
+    assert.match(bodyText(), /not an active filed document/);
+  } finally {
+    await h.unmount();
+    await drain(h);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// #728 finding 5 — the evidence picker disables documents that already back a posted entry.
+// ---------------------------------------------------------------------------
+
+test("t728: a document already spoken for renders DISABLED with a reason and a link to the entry it backs; the other option stays free", async () => {
+  const h = await renderComponent(
+    App({
+      loadSpokenFor: async () => [
+        { document_id: DOCUMENTS[0]!.documentId, entry_id: OTHER_ENTRY, via: "evidence_link" },
+      ],
+    }),
+  );
+  try {
+    await openDialog(h);
+    const select = selectIn();
+    const options = ((select as { childNodes?: Stub[] }).childNodes ?? []).filter((n) => n.tagName === "OPTION");
+    const spokenForOption = options.find((o) => (o as { getAttribute?: (k: string) => string | null }).getAttribute?.("value") === DOCUMENTS[0]!.documentId);
+    const freeOption = options.find((o) => (o as { getAttribute?: (k: string) => string | null }).getAttribute?.("value") === DOCUMENTS[1]!.documentId);
+    assert.ok(spokenForOption, "the spoken-for document is still OFFERED, never hidden");
+    assert.equal((spokenForOption as { disabled?: unknown }).disabled, true, "…but disabled — a native <option disabled> is announced as unselectable on its own (C08.6, not colour alone)");
+    assert.ok(freeOption, "the other document is still offered");
+    assert.notEqual((freeOption as { disabled?: unknown }).disabled, true, "…and stays selectable — the advisory read must not disable what it did not name");
+
+    assert.match(bodyText(), /already backs a posted journal entry/, "the reason renders beside the select, where an <option> has no room for it");
+    const entryLink = findIn(
+      bodyNode(),
+      (n) => n.tagName === "A" && String((n as { getAttribute?: (k: string) => string | null }).getAttribute?.("href") ?? "").includes(OTHER_ENTRY),
+    );
+    assert.ok(entryLink, "the reason links to the entry the document already backs");
+  } finally {
+    await h.unmount();
+    await drain(h);
+  }
+});
+
+test("t728: a FAILED spoken-for read disables nothing and says the check was unavailable — exactly as documentsUnavailable does for the document list", async () => {
+  const h = await renderComponent(App({ loadSpokenFor: async () => { throw new Error("gateway"); } }));
+  try {
+    await openDialog(h);
+    const select = selectIn();
+    const options = ((select as { childNodes?: Stub[] }).childNodes ?? []).filter((n) => n.tagName === "OPTION");
+    for (const opt of options) {
+      assert.notEqual((opt as { disabled?: unknown }).disabled, true,
+        "a failed check must never be read as 'nothing is spoken for' — see mergeSpokenFor's own note");
+    }
+    assert.match(bodyText(), /could not check which documents already back a posted entry/);
   } finally {
     await h.unmount();
     await drain(h);

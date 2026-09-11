@@ -1,6 +1,6 @@
 import { getTranslations } from "next-intl/server";
 import { PageHeader, PageShell } from "@/components/common/page-shell";
-import { ActivityFeed } from "@/components/firm/activity/activity-feed";
+import { ACTIVITY_HEADING_ID, ActivityFeed } from "@/components/firm/activity/activity-feed";
 import { UNWIRED_AGENT_RECEIPT_KINDS } from "@/lib/firm/receipt-kinds";
 
 /**
@@ -31,7 +31,7 @@ export default async function FirmActivityPage() {
 
   return (
     <PageShell>
-      <PageHeader title={t("heading")} description={t("subheading")} />
+      <PageHeader title={t("heading")} description={t("subheading")} headingId={ACTIVITY_HEADING_ID} />
       <p className="max-w-prose text-xs text-muted-foreground">{t("coverageNote", { kinds: unwiredKinds })}</p>
       <ActivityFeed />
     </PageShell>

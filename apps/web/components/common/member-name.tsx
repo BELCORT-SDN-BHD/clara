@@ -13,6 +13,7 @@
 import { useTranslations } from "next-intl";
 
 import { shortId } from "@/lib/registers/money";
+import { isAgentActor } from "@/lib/firm/actor-label";
 import type { MemberNameResolver } from "@/lib/members/use-member-names";
 
 export function MemberName({
@@ -26,9 +27,16 @@ export function MemberName({
   showRole?: boolean;
 }) {
   const t = useTranslations("Members.name");
+  const tWalk = useTranslations("WalkFindings728");
   const resolved = resolver.resolve(userId);
 
   if (!resolved) {
+    // #728 finding 2: the agent identity carries no firm_memberships row (see lib/firm/
+    // actor-label.ts's own header), so the roster read never resolves it — without this branch
+    // every "Clara on behalf of <name>" line printed the agent's raw uuid instead of its name.
+    if (isAgentActor(userId)) {
+      return <span>{tWalk("agentActorLabel")}</span>;
+    }
     return (
       <span className="font-mono text-xs text-muted-foreground" title={userId ?? undefined}>
         {shortId(userId)}

@@ -24,12 +24,13 @@ import { businessDateTime } from "@/lib/business-date";
 import {
   activityJournalsHref,
   describeActivity,
+  formatEventParam,
   isKnownActivityStatus,
   primaryActivityHref,
   type ActivityRow as ActivityRowData,
 } from "@/lib/firm/activity";
 import type { MemberNameResolver } from "@/lib/members/use-member-names";
-import { MemberName } from "@/components/common/member-name";
+import { ActivityActorLine } from "./activity-actor-line";
 
 const STATUS_TONE = {
   approved: "neutral",
@@ -43,11 +44,17 @@ export function ActivityRow({
   clientNames,
   memberNames,
   onOpenDetail,
+  rowRef,
 }: {
   row: ActivityRowData;
   clientNames: ReadonlyMap<string, string>;
   memberNames: MemberNameResolver;
   onOpenDetail: (row: ActivityRowData) => void;
+  /** #728 finding 4 — lets `activity-feed.tsx` remember this row's own clickable element, so a
+   *  history-Back close of the Sheet this row opened can return focus to it. Optional: a caller
+   *  that never opens the Sheet (there is none today, but the type should not lie) need not wire
+   *  it up. */
+  rowRef?: (el: HTMLButtonElement | null) => void;
 }) {
   const t = useTranslations("Activity");
   const tReceipt = useTranslations("FirmActivity");
@@ -69,8 +76,13 @@ export function ActivityRow({
       </div>
 
       <button
+        ref={rowRef}
         type="button"
         onClick={() => onOpenDetail(row)}
+        // #728 finding 4 — the address `activity-feed.tsx` hands back to on a history-Back close
+        // of the Sheet this row opened (the row itself is the "originating row" that fix returns
+        // focus to). tabIndex is unaffected: this attribute is read, never used for focus order.
+        data-activity-row-key={formatEventParam(row.source, row.id)}
         className="rounded text-left text-sm font-medium text-card-foreground underline-offset-4 hover:underline focus-visible:ring-3 focus-visible:ring-ring/70 focus-visible:outline-none"
       >
         {sentence}
@@ -79,12 +91,7 @@ export function ActivityRow({
       <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
         <dt className="text-muted-foreground">{t("columnActor")}</dt>
         <dd className="truncate text-card-foreground">
-          <MemberName userId={row.actor} resolver={memberNames} />
-          {row.on_behalf_of ? (
-            <span className="ml-1 text-muted-foreground">
-              {t("onBehalfOf")} <MemberName userId={row.on_behalf_of} resolver={memberNames} showRole={false} />
-            </span>
-          ) : null}
+          <ActivityActorLine row={row} memberNames={memberNames} />
           {row.via_wake_kind ? (
             // A raw technical token, deliberately not translated: via_wake_kind spans several
             // independently-registered wake-kind vocabularies across the three sources this feed

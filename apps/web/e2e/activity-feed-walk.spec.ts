@@ -131,6 +131,32 @@ test("Back closes the detail Sheet and the list keeps its filters and position",
   await expect(page).not.toHaveURL(/event=/);
   await expect(page).toHaveURL(/kinds=documents/);
   await expect(documentRowButton(page)).toBeVisible();
+  // #728 finding 4 — the physical/history Back path (unlike the in-page Escape/Close, which
+  // browser-walked correctly before this fix) never itself held DOM focus, so without the fix
+  // the Next.js re-render that follows a pop leaves focus on <body>. The row that opened the
+  // Sheet is the address that fix returns focus to.
+  await expect(documentRowButton(page)).toBeFocused();
+});
+
+test("#728 finding 1: a kept sweep heartbeat reads 'Clara (system)' under kind Agent, and no row on the page is unattributed", async ({ page }) => {
+  await signIn(page);
+  await page.goto("/activity");
+  await expect(page.getByText("An autodraft sweep run completed.")).toBeVisible();
+  // C77.3: attribution present on every row — the system marker, not the honest-but-useless
+  // em dash MemberName would otherwise render for the door's own null actor on this row.
+  await expect(page.getByText("Clara (system)")).toBeVisible();
+
+  // The sweep row sorts under kind=Agent (never Documents — the 0181 fall-through 0183 retires
+  // for this event_type). The kind chips are TOGGLES (multi-select, activity-filters.tsx's own
+  // toggleKind), so "Agent" is deselected again before selecting "Documents" rather than the two
+  // filters compounding into kinds=agent,documents.
+  await page.getByRole("button", { name: "Agent", exact: true }).click();
+  await expect(page).toHaveURL(/[?&]kinds=agent(&|$)/);
+  await expect(page.getByText("An autodraft sweep run completed.")).toBeVisible();
+  await page.getByRole("button", { name: "Agent", exact: true }).click();
+  await page.getByRole("button", { name: "Documents", exact: true }).click();
+  await expect(page).toHaveURL(/[?&]kinds=documents(&|$)/);
+  await expect(page.getByText("An autodraft sweep run completed.")).toHaveCount(0);
 });
 
 test("a denied detail (a direct deep link to a refused id) shows a not-found state, never a crash", async ({ page }) => {

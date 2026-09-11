@@ -1238,5 +1238,29 @@ export async function handleJournalWorkRpc(request, response, path, url, sendJso
     return true;
   }
 
+  // #728 finding 5 — clara.list_spoken_for_documents, the evidence pickers' advisory read.
+  // Derived from the SAME `state.links`/`state.entries` this mock already keeps for
+  // list_entry_links/attach_entry_evidence, rather than a separate fixture that could drift from
+  // what those doors already say about a document: arm 1 is a LIVE link (released_at null,
+  // exactly `uq_entry_evidence_links_document`'s own predicate), arm 2 is an approved, not-reversed
+  // document-coding entry (journal_entries.document_id).
+  if (path === "/rest/v1/rpc/list_spoken_for_documents") {
+    const body = await readJson(request);
+    if (body?.p_client !== JOURNAL_WORK.clientId) return false;
+    const rows = [...state.links.values()]
+      // A link row in this mock carries NO `released_at` field at all until released (the SAME
+      // convention list_entry_links' own handler defaults with `?? null` when reading) — `== null`
+      // catches both that absence and an explicit null, never a truthy instant.
+      .filter((link) => link.released_at == null)
+      .map((link) => ({ document_id: link.document_id, entry_id: link.entry_id, via: "evidence_link" }));
+    for (const entry of state.entries.values()) {
+      if (entry.document_id !== null && entry.status === "approved" && entry.reversed_by === null) {
+        rows.push({ document_id: entry.document_id, entry_id: entry.id, via: "coding" });
+      }
+    }
+    sendJson(response, 200, rows, cors);
+    return true;
+  }
+
   return false;
 }

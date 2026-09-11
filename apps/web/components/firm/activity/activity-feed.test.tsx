@@ -12,7 +12,7 @@ import { PathnameContext, SearchParamsContext } from "next/dist/shared/lib/hooks
 import { NextIntlClientProvider } from "next-intl";
 
 import { renderComponent, clickButton, textOf } from "../../../test/hookHarness";
-import { enableDomInspection } from "../../../test/domInspect";
+import { enableDomInspection, activeElement } from "../../../test/domInspect";
 import { configureSessionTokenSource, resetSessionTokenSource } from "../../../lib/session-accessor";
 import messages from "../../../messages/en.json";
 import { ACTIVITY_CLIENT, MEMBERS, activityRow, jsonResponse } from "./activity-test-fixtures";
@@ -232,6 +232,105 @@ test("ActivityFeed: Load more dedupes by (source,id) and reports how many were a
         assert.match(text, /1 event you already saw was skipped/, "the dedupe count is surfaced, not silently dropped");
         const rows = h.find((n) => (n as { tagName?: string }).tagName === "LI");
         assert.ok(rows, "rows still render after the merge");
+      } finally {
+        await h.unmount();
+      }
+    },
+  );
+});
+
+// ---------------------------------------------------------------------------
+// #728 finding 4 — history Back out of the Sheet must not leave focus on <body>.
+// ---------------------------------------------------------------------------
+
+/** `baseFetch` plus `get_activity_event`, for the two cells below that actually open the Sheet
+ *  (every existing cell above only ever exercises the list, never the detail read). */
+function fetchWithDetail(row: ReturnType<typeof activityRow>): typeof fetch {
+  return (async (url: RequestInfo | URL) => {
+    const u = String(url);
+    if (u.includes("/rest/v1/clients")) return jsonResponse([ACTIVITY_CLIENT]);
+    if (u.includes("/rest/v1/firm_members_visible")) return jsonResponse(MEMBERS);
+    if (u.includes("/rest/v1/rpc/list_activity")) return jsonResponse({ rows: [row], next_cursor: null, truncated: false });
+    if (u.includes("/rest/v1/rpc/get_activity_event")) {
+      return jsonResponse({ ...row, id: row.id, client_name: null });
+    }
+    throw new Error(`unexpected fetch ${u}`);
+  }) as typeof fetch;
+}
+
+test("ActivityFeed: history Back out of the Sheet returns focus to the row that opened it", async () => {
+  const ROW = activityRow();
+  await withMockedEnv(
+    fetchWithDetail(ROW),
+    async () => {
+      const h = await renderComponent(App(createElement(ActivityFeed)) as never);
+      try {
+        for (let i = 0; i < 5; i++) await h.settle();
+
+        // Simulate the URL after a row click pushed `?event=...` — `router.push` is a no-op in
+        // this harness (line 33's stub), so the push itself is asserted nowhere here; this cell
+        // is about what happens when that history entry is POPPED, which `rerender` with a
+        // different `SearchParamsContext` value models directly, matching what a real Next.js
+        // navigation does to this component regardless of whether it arrived via push, replace,
+        // or the browser's own Back button.
+        await h.rerender(App(createElement(ActivityFeed), `event=event:${ROW.id}`) as never);
+        for (let i = 0; i < 5; i++) await h.settle();
+        assert.match(textOf(h.container as never), /A document was filed/, "setup: the Sheet is open");
+
+        // THIS HARNESS'S OWN GAP, NAMED: a real browser resets `document.activeElement` to
+        // `<body>` the instant a focused node's subtree is removed (exactly what unmounting the
+        // Sheet does to whatever it last focused) — this stub DOM does not model that automatic
+        // reset (domInspect.ts's own `node.blur()` is the only path that clears `activeElement`,
+        // and nothing calls it on removal). Setting it explicitly here is the honest premise a
+        // physical Back press produces (it never held DOM focus to begin with), not a claim that
+        // this stub reproduces real unmount semantics — the Playwright cell in
+        // activity-feed-walk.spec.ts proves the same fix against a real browser's own behaviour.
+        const doc = globalThis.document as unknown as { activeElement: unknown; body: unknown };
+        doc.activeElement = doc.body;
+
+        await h.rerender(App(createElement(ActivityFeed)) as never);
+        // The fix awaits `nextPaint()` (a frame + a macrotask) before moving focus — several
+        // settle passes give that chain room to resolve.
+        for (let i = 0; i < 6; i++) await h.settle();
+
+        const row = h.find((n) => (n as { getAttribute?: (k: string) => string | null }).getAttribute?.("data-activity-row-key") === `event:${ROW.id}`);
+        assert.ok(row, "the row must still be rendered");
+        assert.equal(activeElement(), row, "focus lands back on the row that opened the Sheet, never on <body>");
+      } finally {
+        await h.unmount();
+      }
+    },
+  );
+});
+
+test("ActivityFeed: an IN-PAGE close (something already holds focus) is left untouched by the Back-focus fix", async () => {
+  // The belt-and-suspenders half of the same effect: it must act ONLY when focus has fallen to
+  // <body>/<html> — an in-page Escape/Close click (browser-walked correctly per the ticket) must
+  // not have its own focus decision overridden.
+  const ROW = activityRow();
+  await withMockedEnv(
+    fetchWithDetail(ROW),
+    async () => {
+      const h = await renderComponent(App(createElement(ActivityFeed)) as never);
+      try {
+        for (let i = 0; i < 5; i++) await h.settle();
+        await h.rerender(App(createElement(ActivityFeed), `event=event:${ROW.id}`) as never);
+        for (let i = 0; i < 5; i++) await h.settle();
+
+        // Something OTHER than the row or the heading already holds focus (e.g. the filter
+        // control an in-page close left focus on) — never reset it to body first.
+        const filterControl = h.find((n) => (n as { tagName?: string }).tagName === "SELECT" || (n as { tagName?: string }).tagName === "INPUT");
+        if (filterControl && typeof (filterControl as { focus?: () => void }).focus === "function") {
+          (filterControl as { focus: () => void }).focus();
+        }
+        const before = activeElement();
+
+        await h.rerender(App(createElement(ActivityFeed)) as never);
+        for (let i = 0; i < 6; i++) await h.settle();
+
+        if (filterControl) {
+          assert.equal(activeElement(), before, "focus that was already somewhere real must not be moved");
+        }
       } finally {
         await h.unmount();
       }

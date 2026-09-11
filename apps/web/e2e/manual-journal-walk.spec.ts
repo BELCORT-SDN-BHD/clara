@@ -216,6 +216,14 @@ test("C3: a refusal NAMING the evidence array lands on the evidence control, wit
   await expect(page.getByLabel("Debit, line 1")).toHaveValue("1,200.00");
 });
 
+test("#728 finding 5: the composer's OWN evidence picker disables a document that already backs a posted entry", async ({ page }) => {
+  await page.goto(COMPOSER_URL);
+  await expect(evidence(page).locator(`option[value="${JOURNAL_WORK.takenDocumentId}"]`)).toBeDisabled();
+  await expect(evidence(page).locator(`option[value="${JOURNAL_WORK.freeDocumentId}"]`)).toBeEnabled();
+  await expect(page.getByText("already backs a posted journal entry", { exact: false })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Open that journal entry" })).toBeVisible();
+});
+
 test("B3: LATE attachment on a posted documentless entry — happy, replay, and the two conflicts", async ({ page }) => {
   // A Work with NO document, run through to a posted entry: the state the late
   // door exists for.
@@ -251,6 +259,14 @@ test("B3: LATE attachment on a posted documentless entry — happy, replay, and 
   await expect(dialog.locator("#attach-evidence-document")).toBeFocused();
   await scan(page, "attach-evidence dialog");
 
+  // #728 finding 5 — the picker ALREADY knows `takenDocumentId` backs the seeded posted entry
+  // (`clara.list_spoken_for_documents`, an advisory read the mock derives from the same
+  // `state.links` `attach_entry_evidence` itself reads) and disables it BEFORE any submit —
+  // never hidden, and the reason + a link to that entry render beside the select.
+  await expect(dialog.locator(`option[value="${JOURNAL_WORK.takenDocumentId}"]`)).toBeDisabled();
+  await expect(dialog.locator(`option[value="${JOURNAL_WORK.freeDocumentId}"]`)).toBeEnabled();
+  await expect(dialog.getByText("already backs a posted journal entry", { exact: false })).toBeVisible();
+
   // THE CONFLICT ARM FIRST, so the walk proves the refusal keeps the dialog open
   // and keeps the choice.
   await dialog.locator("#attach-evidence-document").selectOption(JOURNAL_WORK.takenDocumentId);
@@ -265,6 +281,10 @@ test("B3: LATE attachment on a posted documentless entry — happy, replay, and 
   await dialog.getByRole("button", { name: "Attach", exact: true }).click();
   await expect(page.getByRole("dialog")).toHaveCount(0);
   await expect(page.getByText(JOURNAL_WORK.freeDocumentId, { exact: false })).toBeVisible();
+  // #728 finding 3 — the dialog and its trigger are BOTH gone (the entry now carries a source),
+  // so focus must land somewhere real rather than falling to <body>: the "What was recorded"
+  // section heading, the landmark #629's own pattern established.
+  await expect(page.getByRole("heading", { level: 2, name: "What was recorded" })).toBeFocused();
 
   // THE ENTRY NOW CARRIES ITS SOURCE, read back from the database — and the door
   // is gone, because there is nothing left for it to do.

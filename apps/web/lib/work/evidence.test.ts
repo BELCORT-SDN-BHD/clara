@@ -13,7 +13,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { findEntryForDocument, listClientEvidenceDocuments } from "./evidence";
+import { findEntryForDocument, listClientEvidenceDocuments, listSpokenForDocuments, mergeSpokenFor, type EvidenceDocument } from "./evidence";
 import type { SessionTokenAccessor } from "@/lib/session";
 
 const session: SessionTokenAccessor = { getAccessToken: async () => "tok" };
@@ -136,4 +136,50 @@ test("t634: nothing holds the document — a link is never invented", async () =
   await withRows(() => [], async () => {
     assert.equal(await findEntryForDocument(CLIENT, VERIFIED, { session }), null);
   });
+});
+
+// ---------------------------------------------------------------------------
+// #728 finding 5 — clara.list_spoken_for_documents and the picker's own merge.
+// ---------------------------------------------------------------------------
+
+const ENTRY = "e1111111-1111-4111-8111-111111111111";
+
+test("t728: listSpokenForDocuments reads the RPC and returns the rows verbatim", async () => {
+  await withRows(
+    (url) => (url.includes("/rest/v1/rpc/list_spoken_for_documents")
+      ? [{ document_id: VERIFIED, entry_id: ENTRY, via: "evidence_link" }]
+      : []),
+    async (urls) => {
+      const rows = await listSpokenForDocuments(CLIENT, { session });
+      assert.deepEqual(rows, [{ document_id: VERIFIED, entry_id: ENTRY, via: "evidence_link" }]);
+      assert.ok(urls[0]!.includes("list_spoken_for_documents"));
+    },
+  );
+});
+
+test("t728: listSpokenForDocuments reports a malformed (non-array) envelope as empty, never a crash", async () => {
+  await withRows(() => ({ not: "an array" }), async () => {
+    assert.deepEqual(await listSpokenForDocuments(CLIENT, { session }), []);
+  });
+});
+
+const DOC_A: EvidenceDocument = { documentId: "d1", filename: "a.pdf", kind: "invoice", filedAt: "2026-09-01T00:00:00Z", financialDate: null };
+const DOC_B: EvidenceDocument = { documentId: "d2", filename: "b.pdf", kind: "receipt", filedAt: "2026-09-02T00:00:00Z", financialDate: null };
+
+test("t728: mergeSpokenFor annotates exactly the named documents, never hides one", async () => {
+  const merged = mergeSpokenFor([DOC_A, DOC_B], [{ document_id: "d1", entry_id: ENTRY, via: "coding" }]);
+  assert.deepEqual(merged.map((d) => d.documentId), ["d1", "d2"], "both documents survive the merge — nothing is filtered out");
+  assert.deepEqual(merged[0]!.spokenFor, { entryId: ENTRY, via: "coding" });
+  assert.equal(merged[1]!.spokenFor, null);
+});
+
+test("t728: mergeSpokenFor with an EMPTY successful read disables nothing", async () => {
+  const merged = mergeSpokenFor([DOC_A, DOC_B], []);
+  assert.ok(merged.every((d) => d.spokenFor === null));
+});
+
+test("t728: mergeSpokenFor with a FAILED read (null) disables nothing — never conflated with 'nothing is spoken for'", async () => {
+  const merged = mergeSpokenFor([DOC_A, DOC_B], null);
+  assert.ok(merged.every((d) => d.spokenFor === null),
+    "a failed check must read exactly like an empty one to the picker — no document is disabled on the strength of a read that never happened");
 });

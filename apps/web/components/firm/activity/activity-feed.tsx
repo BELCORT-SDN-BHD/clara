@@ -19,7 +19,7 @@
 // sr-only summary once rows exist — never both, so a screen reader is never told two competing
 // things about the same list.
 
-import { useCallback, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 
@@ -41,6 +41,13 @@ import { ActivityFilters } from "./activity-filters";
 import { ActivityRow } from "./activity-row";
 import { ActivityEventSheet } from "./activity-event-sheet";
 import { useActivityFeed } from "./use-activity-feed";
+import { nextPaint } from "@/components/firm/work-question-affordance";
+
+/** #728 finding 4 — the `<h1>` id this page's `PageHeader` carries (app/(firm)/activity/page.tsx),
+ *  the SAME `headingId` idiom `WORK_HEADING_ID` (components/work/work-detail.tsx) already
+ *  established for "the ONE surface that has to move focus to it" — read by id rather than a ref
+ *  because the heading is rendered by the server component above this one. */
+export const ACTIVITY_HEADING_ID = "activity-feed-heading";
 
 export function ActivityFeed() {
   const t = useTranslations("Activity");
@@ -60,6 +67,14 @@ export function ActivityFeed() {
   });
 
   const openedViaPushRef = useRef(false);
+  // #728 finding 4 — every currently-rendered row's own clickable element, keyed the SAME way the
+  // `?event=` param addresses it (formatEventParam). A Map rather than one ref: any row on the
+  // page can be the one a person opened, and only ONE Sheet is ever open at a time, but the row
+  // that opened it may have scrolled off, been re-sorted, or (a filter change) left the page
+  // entirely by the time it closes — the lookup below treats every one of those as "gone" rather
+  // than guessing.
+  const rowRefs = useRef(new Map<string, HTMLButtonElement>());
+  const lastEventKeyRef = useRef<string | null>(null);
 
   const openDetail = useCallback(
     (row: ActivityRowData) => {
@@ -83,6 +98,46 @@ export function ActivityFeed() {
     },
     [router, pathname, searchParams],
   );
+
+  // #728 finding 4 — HISTORY BACK OUT OF THE SHEET must not leave focus on <body>. The in-page
+  // Close/Escape path already leaves focus somewhere real (whatever the person's own click or
+  // keypress last touched stays put through the `router.back()`/`router.replace()` that follows —
+  // browser-walked correctly, per the ticket), which is exactly why this effect CHECKS first
+  // rather than always acting: the physical browser Back button (or a swipe-back gesture) never
+  // itself held DOM focus, so an SPA re-render that follows a pop leaves focus nowhere, and this
+  // is the belt that catches that path (and any other that leaves focus nowhere) without touching
+  // the path that already works. `nextPaint` (the SAME timing #629's own row-focus fix uses,
+  // components/firm/work-question-affordance.tsx) is awaited before checking `activeElement`,
+  // because the Sheet's own close is not necessarily synchronous with the URL settling.
+  useEffect(() => {
+    const key = state.event ? formatEventParam(state.event.source, state.event.id) : null;
+    const prevKey = lastEventKeyRef.current;
+    lastEventKeyRef.current = key;
+    if (prevKey === null || key !== null) return; // only act exactly when the Sheet just closed
+    if (typeof document === "undefined") return;
+    let cancelled = false;
+    void nextPaint().then(() => {
+      if (cancelled) return;
+      const active = document.activeElement;
+      const activeIsUseless = active === null || active === document.body || active === document.documentElement;
+      if (!activeIsUseless) return; // an in-page close already left focus somewhere real
+      const row = rowRefs.current.get(prevKey);
+      if (row && typeof row.focus === "function") {
+        row.focus();
+        return;
+      }
+      // The row is gone (filters changed, it scrolled past the loaded page) — the list's own
+      // heading landmark, exactly the #629 "nearest enclosing landmark" fallback.
+      const heading = document.getElementById(ACTIVITY_HEADING_ID);
+      if (heading) {
+        if (!heading.hasAttribute("tabindex")) heading.setAttribute("tabindex", "-1");
+        heading.focus();
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [state.event]);
 
   // The very first read, no rows and no error yet — the ONE loading announcement.
   if (feed.loading) {
@@ -169,15 +224,22 @@ export function ActivityFeed() {
             <p className="text-xs text-muted-foreground">{t("duplicatesDropped", { count: feed.duplicatesDropped })}</p>
           ) : null}
           <ul className="flex flex-col gap-2">
-            {feed.rows.map((row) => (
-              <ActivityRow
-                key={formatEventParam(row.source, row.id)}
-                row={row}
-                clientNames={clientNames}
-                memberNames={memberNames}
-                onOpenDetail={openDetail}
-              />
-            ))}
+            {feed.rows.map((row) => {
+              const key = formatEventParam(row.source, row.id);
+              return (
+                <ActivityRow
+                  key={key}
+                  row={row}
+                  clientNames={clientNames}
+                  memberNames={memberNames}
+                  onOpenDetail={openDetail}
+                  rowRef={(el) => {
+                    if (el) rowRefs.current.set(key, el);
+                    else rowRefs.current.delete(key);
+                  }}
+                />
+              );
+            })}
           </ul>
           {feed.nextCursor ? (
             <Button type="button" variant="outline" size="sm" className="w-fit" onClick={feed.loadMore} disabled={feed.loadingMore}>

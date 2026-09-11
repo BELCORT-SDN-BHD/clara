@@ -120,6 +120,21 @@ export function isKnownActivityStatus(value: string): value is ActivityStatus {
   return (ACTIVITY_STATUSES as readonly string[]).includes(value);
 }
 
+/** #728 finding 1 — a KEPT sweep-heartbeat row (migration 0183 excludes the zero-effect ones
+ *  entirely; a row that survives the door DID draft something). The door deliberately adds no new
+ *  output column for this (0183's own header: "a NEW nullable output column is NOT allowed to
+ *  break the contract ordinal... actor stays null, the truth"), so the web recognises it off two
+ *  columns the door already carries: `event_type` (the one literal 0011:3886 registers) and
+ *  `kind` (0183's own recut relabels a kept sweep row 'agent', never 'documents'). Checking BOTH
+ *  rather than `event_type` alone is deliberate — `kind` is the closed, versioned classification
+ *  this feed commits to, and a future door recut could retire the 'agent' relabelling while
+ *  leaving the literal event_type unchanged; checking both means this predicate breaks loudly
+ *  (returns false, the row falls back to the ordinary null-actor rendering) rather than silently
+ *  keeps labelling a row a future migration stopped calling an agent act. */
+export function isSweepReceiptRow(row: Pick<ActivityRow, "source" | "event_type" | "kind">): boolean {
+  return row.source === "event" && row.event_type === "sweep.run_completed" && row.kind === "agent";
+}
+
 /** `clara.get_activity_event`'s return: the same shape, plus the detail-only fields the door adds
  *  (0181's header: "same shape plus client_name..."). `receipt_kind`/`purpose`/`basis_origin`/
  *  `initiator` are present only for the source that carries them (agent_receipt /

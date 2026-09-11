@@ -100,8 +100,11 @@ export async function focusAfterRowReload(
 }
 
 /** One rendered frame, then a macrotask — the point after which React has committed. Falls back to
- *  a plain macrotask where `requestAnimationFrame` is absent (the RTL harness). */
-function nextPaint(): Promise<void> {
+ *  a plain macrotask where `requestAnimationFrame` is absent (the RTL harness). Exported (#728):
+ *  `attach-evidence-dialog.tsx` and `activity-feed.tsx` reuse this EXACT timing rather than a
+ *  second copy — both fix a focus-drops-to-body defect that is this same "the row/trigger I meant
+ *  to check is mid-unmount" race, one frame further along. */
+export function nextPaint(): Promise<void> {
   return new Promise((resolve) => {
     if (typeof globalThis.requestAnimationFrame === "function") {
       globalThis.requestAnimationFrame(() => setTimeout(resolve, 0));

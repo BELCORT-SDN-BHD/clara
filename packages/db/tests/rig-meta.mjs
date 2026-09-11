@@ -1564,6 +1564,25 @@ export const JOURNAL_EVIDENCE_0182_COHORT = [
   ...JOURNAL_EVIDENCE_0182_HUMAN_FNS, ...JOURNAL_EVIDENCE_0182_UNGRANTED_FNS,
 ];
 
+// #728 [0183, hosted-walk findings] — the sweep-attribution recut + the spoken-for-documents
+// read. `clara.list_activity`/`clara.get_activity_event` are 0181's SAME two doors at their SAME
+// signature and grant (ACTIVITY_FEED_0181_HUMAN_FNS above already covers them; 0183 only edits
+// their BODIES, so no roster change is owed for those two names). Two NEW names this cohort
+// tracks:
+//   `_sweep_run_drafted_count` — the ONE clara_authenticated-granted SECURITY DEFINER helper the
+//   sweep exclusion needs, because `clara.sweep_runs` itself carries no clara_authenticated grant
+//   at all (measured on the catalog; 0183's own header records the finding) and an INVOKER
+//   list_activity/get_activity_event cannot read it directly. SELF-SCOPED to clara.jwt_firm()
+//   inside its own body, so it is safe to be clara_authenticated-granted (and therefore
+//   PostgREST-reachable directly despite the leading underscore, 0181's own caveat for
+//   `_human_ctx`) — no argument can make it answer for a firm other than the caller's own.
+//   `list_spoken_for_documents` — the new bookkeeper+ read (advisory only; attach_entry_evidence's
+//   own CLR13 stays the actual law) — clara_authenticated ONLY; no agent/wake/runtime variant
+//   exists or is needed, because naming which documents already back a posted entry is a human
+//   bookkeeping fact, not something the agent lane decides on its own.
+const WALK_FINDINGS_0183_HUMAN_FNS = ["_sweep_run_drafted_count", "list_spoken_for_documents"];
+export const WALK_FINDINGS_0183_COHORT = [...WALK_FINDINGS_0183_HUMAN_FNS];
+
 export const ALLOWED = {
   // Slice-4 governance writers (contract v2.1 §3.2/3.3/3.5): human lane only.
   [ROLES.authenticated]: new Set([
@@ -1707,6 +1726,10 @@ export const ALLOWED = {
     // #634 0182 the journal-evidence pair — see the block above. clara_authenticated ONLY;
     // clara_runtime, the agent role and both wake roles gain ZERO.
     ...JOURNAL_EVIDENCE_0182_HUMAN_FNS,
+    // #728 0183 the sweep-attribution helper + the spoken-for-documents read — see the block
+    // above. clara_authenticated ONLY; clara_runtime, the agent role and both wake roles gain
+    // ZERO on either name.
+    ...WALK_FINDINGS_0183_HUMAN_FNS,
   ]),
   // [S6 §9/C-11] agent lane loses the bare get_journal_entry(uuid) oracle; keeps the other
   // reads and gains the client-pinned S6 reads + get_journal_entry_for.
@@ -2081,6 +2104,7 @@ export async function grantMatrixFailures() {
   failures.push(...cohortFailures("#623 0178 accounting-work lane", WORK_JOURNAL_0178_COHORT, liveNames));
   failures.push(...cohortFailures("#629 0180 shared work-question lane", WORK_QUESTIONS_0180_COHORT, liveNames));
   failures.push(...cohortFailures("#634 0182 journal-evidence lane", JOURNAL_EVIDENCE_0182_COHORT, liveNames));
+  failures.push(...cohortFailures("#728 0183 sweep attribution + spoken-for documents", WALK_FINDINGS_0183_COHORT, liveNames));
   failures.push(...cohortFailures("wave F F-A1 PR-4 bank-statement witness cutover", STATEMENT_F_A1_PR4_COHORT, liveNames));
   // F-A6's cohort is bimodal: wholly present once PR-1 applies, wholly absent before it. Half a
   // cohort is a half-applied migration and is reported as one.

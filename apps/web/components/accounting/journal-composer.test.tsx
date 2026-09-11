@@ -72,6 +72,7 @@ function App(props: {
   storage?: DraftStorage | null;
   loadAccounts?: () => Promise<CoaAccountRow[]>;
   loadDocuments?: () => Promise<typeof DOCUMENTS>;
+  loadSpokenFor?: () => Promise<Array<{ document_id: string; entry_id: string; via: "evidence_link" | "coding" }>>;
 }): ReactElement {
   return createElement(NextIntlClientProvider, {
     locale: "en",
@@ -85,6 +86,7 @@ function App(props: {
       storage: props.storage ?? null,
       loadAccounts: props.loadAccounts ?? (async () => ACCOUNTS),
       loadDocuments: (props.loadDocuments ?? (async () => DOCUMENTS)) as never,
+      loadSpokenFor: (props.loadSpokenFor ?? (async () => [])) as never,
       session: { getAccessToken: async () => "tok" },
     }),
   });
@@ -858,6 +860,52 @@ test("t634: 'No document' is also a forward move out of a source conflict", asyn
     const submit = h.find((n) => n.tagName === "BUTTON" && String((n as { getAttribute?: (k: string) => string | null }).getAttribute?.("type") ?? "") === "submit");
     assert.equal((submit as { disabled?: unknown }).disabled, false);
     assert.doesNotMatch(h.text(), /already backs a posted entry/);
+  } finally {
+    await h.unmount();
+  }
+});
+
+// ---------------------------------------------------------------------------
+// #728 finding 5 — the composer's own evidence picker disables spoken-for documents too.
+// ---------------------------------------------------------------------------
+
+test("t728: a document already spoken for renders DISABLED with a reason and a link; the other document stays free", async () => {
+  const OTHER_ENTRY = "e5555555-5555-4555-8555-555555555555";
+  const h = await renderComponent(
+    App({
+      loadSpokenFor: async () => [{ document_id: DOCUMENTS[0]!.documentId, entry_id: OTHER_ENTRY, via: "evidence_link" }],
+    }),
+  );
+  try {
+    await h.settle();
+    const select = byId(h, "journal-basis-evidence");
+    const options = ((select as { childNodes?: Stub[] }).childNodes ?? []).filter((n) => n.tagName === "OPTION");
+    const attrOf = (n: Stub, name: string) => (n as { getAttribute?: (k: string) => string | null }).getAttribute?.(name) ?? null;
+    const spokenForOption = options.find((o) => attrOf(o, "value") === DOCUMENTS[0]!.documentId);
+    const freeOption = options.find((o) => attrOf(o, "value") === DOCUMENTS[1]!.documentId);
+    assert.ok(spokenForOption, "the spoken-for document is still OFFERED, never hidden");
+    assert.equal((spokenForOption as { disabled?: unknown }).disabled, true, "…but disabled");
+    assert.ok(freeOption, "the other document is still offered");
+    assert.notEqual((freeOption as { disabled?: unknown }).disabled, true, "…and stays selectable");
+
+    assert.match(h.text(), /already backs a posted journal entry/);
+    const link = h.find((n) => n.tagName === "A" && String((n as { getAttribute?: (k: string) => string | null }).getAttribute?.("href") ?? "").includes(OTHER_ENTRY));
+    assert.ok(link, "the reason links to the entry the document already backs");
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("t728: a FAILED spoken-for read disables nothing and says the check was unavailable", async () => {
+  const h = await renderComponent(App({ loadSpokenFor: async () => { throw new Error("gateway"); } }));
+  try {
+    await h.settle();
+    const select = byId(h, "journal-basis-evidence");
+    const options = ((select as { childNodes?: Stub[] }).childNodes ?? []).filter((n) => n.tagName === "OPTION");
+    for (const opt of options) {
+      assert.notEqual((opt as { disabled?: unknown }).disabled, true, "a failed check must never disable a real option");
+    }
+    assert.match(h.text(), /could not check which documents already back a posted entry/);
   } finally {
     await h.unmount();
   }

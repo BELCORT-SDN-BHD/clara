@@ -4096,5 +4096,12 @@
       "highlighted": "Showing the entry you were sent to. Clear the filters to see the rest.",
       "addressedOutsidePage": "That entry is not in this page of the journal. This client has more entries than one read returns, so the one you were sent to may be older than the newest page. Clear the filters and narrow by posting date to reach it."
     }
+  },
+  "WalkFindings728": {
+    "agentActorLabel": "Clara",
+    "systemActorLabel": "Clara (system)",
+    "evidenceSpokenFor": "{name} already backs a posted journal entry.",
+    "evidenceSpokenForLink": "Open that journal entry",
+    "evidenceSpokenForUnavailable": "We could not check which documents already back a posted entry. Every document is still offered — the system still refuses a conflict when you submit."
   }
 }

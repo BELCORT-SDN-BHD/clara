@@ -48,11 +48,15 @@ import {
   attachEntryEvidence,
   findEntryForDocument,
   listClientEvidenceDocuments,
+  listSpokenForDocuments,
+  mergeSpokenFor,
   type AttachEvidenceResult,
   type EvidenceDocument,
+  type SpokenForDocumentRow,
 } from "@/lib/work/evidence";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
 import type { SessionTokenAccessor } from "@/lib/session";
+import { landmarkHeadingFor, nextPaint, restoreFocusAfterRow } from "@/components/firm/work-question-affordance";
 
 /** One option, as a single readable string. Kept identical in SHAPE to the
  *  composer's own label (filename · kind · date) so the same document reads the
@@ -76,6 +80,7 @@ export function AttachEvidenceDialog({
   onAttached,
   attach = attachEntryEvidence,
   loadDocuments,
+  loadSpokenFor,
   findEntry = findEntryForDocument,
   session = sessionTokenAccessor,
 }: {
@@ -85,10 +90,14 @@ export function AttachEvidenceDialog({
   onAttached: () => void | Promise<void>;
   attach?: typeof attachEntryEvidence;
   loadDocuments?: () => Promise<EvidenceDocument[]>;
+  /** #728 finding 5 — injectable for the same reason `loadDocuments` is: a node cell has no
+   *  session to read `clara.list_spoken_for_documents` through. */
+  loadSpokenFor?: () => Promise<SpokenForDocumentRow[]>;
   findEntry?: typeof findEntryForDocument;
   session?: SessionTokenAccessor;
 }) {
   const t = useTranslations("ManualJournal");
+  const tWalk = useTranslations("WalkFindings728");
   const [open, setOpen] = useState(false);
   const [documents, setDocuments] = useState<EvidenceDocument[] | null>(null);
   /** THREE STATES, NOT TWO. `documents === null` is "not read yet",
@@ -97,6 +106,13 @@ export function AttachEvidenceDialog({
    *  did) made a failed read say *this client has no filed documents* — a claim
    *  about the client's records that the browser is in no position to make. */
   const [documentsUnavailable, setDocumentsUnavailable] = useState(false);
+  /** #728 finding 5 — `null` before the first settled read (never rendered as a
+   *  claim either way), an array on a successful read (possibly empty), and the
+   *  UNAVAILABLE flag below on a failed one — `mergeSpokenFor` reads `null` as
+   *  "could not check", never as "nothing is spoken for" (see that function's
+   *  own note in lib/work/evidence.ts). */
+  const [spokenFor, setSpokenFor] = useState<SpokenForDocumentRow[] | null>(null);
+  const [spokenForUnavailable, setSpokenForUnavailable] = useState(false);
   const [documentId, setDocumentId] = useState("");
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<AttachEvidenceResult | null>(null);
@@ -111,6 +127,13 @@ export function AttachEvidenceDialog({
    *  genuine second decision must not be swallowed as a duplicate of the first. */
   const opKey = useRef<string>("");
   const selectRef = useRef<HTMLSelectElement | null>(null);
+  /** #728 finding 3 — a container OUTSIDE the portalled `DialogContent` (Base UI
+   *  portals open dialog content to `document.body`), so `landmarkHeadingFor`'s
+   *  `closest("section")` walk lands on the REAL page section this dialog is
+   *  rendered inside of (`work-detail.tsx`'s own "What was recorded" section),
+   *  not on a detached subtree. Captured the instant the dialog opens a
+   *  successful attempt — see `confirm` below for why that timing matters. */
+  const containerRef = useRef<HTMLDivElement | null>(null);
 
   // INITIAL FOCUS ON THE ONE CONTROL, not on the close button: the whole dialog
   // is a single choice, and landing on the chooser is the shortest keyboard path
@@ -148,10 +171,43 @@ export function AttachEvidenceDialog({
     };
   }, [open, clientId, loadDocuments, session]);
 
+  // #728 finding 5 — the SAME "read when the dialog opens" discipline as the document list, and
+  // a SEPARATE effect (not folded into the one above) so a failure on ONE read never masquerades
+  // as a failure on the other: `documentsUnavailable` and `spokenForUnavailable` are two different
+  // claims about two different reads.
+  useEffect(() => {
+    if (!open) return;
+    let live = true;
+    void (loadSpokenFor ? loadSpokenFor() : listSpokenForDocuments(clientId, { session }))
+      .then((rows) => {
+        if (!live) return;
+        setSpokenFor(rows);
+        setSpokenForUnavailable(false);
+      })
+      .catch(() => {
+        if (!live) return;
+        // null, NEVER []: an empty array here would read as "nothing is spoken for", which
+        // `mergeSpokenFor` would take literally. See that function's own note.
+        setSpokenFor(null);
+        setSpokenForUnavailable(true);
+      });
+    return () => {
+      live = false;
+    };
+  }, [open, clientId, loadSpokenFor, session]);
+
   const confirm = async () => {
     if (busy || documentId === "") return;
     setBusy(true);
     setConflictEntry(null);
+    // #728 finding 3 — captured BEFORE the write: a successful attach removes this WHOLE
+    // affordance from work-detail.tsx's tree (the entry now carries a source, so the section's
+    // own conditional stops rendering it), so the trigger that opened this dialog is about to
+    // unmount along with everything inside it, `containerRef.current` included. The section
+    // heading above ("What was recorded") is the stable landmark #629 established for exactly
+    // this situation (components/firm/work-question-affordance.tsx) — read while this subtree is
+    // still in the document, because afterwards there is nothing left to walk up from.
+    const landmark = landmarkHeadingFor(containerRef.current);
     const answer = await attach(
       { entryId, documentId, expectedRevision, opKey: opKey.current },
       { session },
@@ -182,12 +238,30 @@ export function AttachEvidenceDialog({
       setOpen(false);
       setResult(null);
       setDocumentId("");
+      // #728 finding 3 — `nextPaint` (the SAME timing #629's own row-focus fix uses) is awaited
+      // before moving focus, because the reload above resolves one tick before React actually
+      // commits this affordance's removal — focusing before that commit would target a node the
+      // browser is about to detach, reproducing the exact defect this fix exists to close.
+      // `restoreFocusAfterRow(null, landmark)` is `null` for the trigger deliberately: this
+      // affordance is now known to be gone (the condition that rendered it just became false), so
+      // there is no trigger left to check — the call always lands on the landmark.
+      await nextPaint();
+      restoreFocusAfterRow(null, landmark);
     }
+    // A REFUSED attempt changes nothing about where focus is: the dialog stays open (see this
+    // file's own header, "the choice survives a refusal") and Base UI's Dialog primitive owns
+    // focus while it is open — this fix touches only the path that unmounts something.
   };
 
-  const list = documents ?? [];
+  // `spokenFor` is already `null` both before the first read settles and after a failed one
+  // (the catch above never sets `[]`), so it needs no extra branching here — see mergeSpokenFor's
+  // own note for why `null` must never be conflated with "read succeeded, found nothing".
+  const list = mergeSpokenFor(documents ?? [], spokenFor);
 
   return (
+    // #728 finding 3 — see containerRef's own comment: this wrapper is what `landmarkHeadingFor`
+    // walks up from, and it must sit OUTSIDE the portalled DialogContent to land on the real page.
+    <div ref={containerRef}>
     <Dialog
       open={open}
       onOpenChange={(next) => {
@@ -226,7 +300,13 @@ export function AttachEvidenceDialog({
           >
             <option value="">{t("attach.choose")}</option>
             {list.map((doc) => (
-              <option key={doc.documentId} value={doc.documentId}>
+              // #728 finding 5 — DISABLED, never hidden: hiding an option is a claim this
+              // advisory read cannot make with certainty (lib/work/evidence.ts's own note on
+              // `mergeSpokenFor`). A native `<option disabled>` is announced by every assistive
+              // technology as unselectable on its own (C08.6 — not by colour alone); the reason
+              // and the link to the conflicting entry are rendered BESIDE the select below,
+              // because an `<option>` cannot carry either.
+              <option key={doc.documentId} value={doc.documentId} disabled={doc.spokenFor !== null}>
                 {optionLabel(doc, t)}
               </option>
             ))}
@@ -236,6 +316,22 @@ export function AttachEvidenceDialog({
           ) : documents !== null && list.length === 0 ? (
             <p className="text-xs text-muted-foreground">{t("attach.noDocuments")}</p>
           ) : null}
+          {spokenForUnavailable ? (
+            <p className="text-xs text-muted-foreground">{tWalk("evidenceSpokenForUnavailable")}</p>
+          ) : null}
+          {list
+            .filter((doc) => doc.spokenFor !== null)
+            .map((doc) => (
+              <p key={doc.documentId} className="text-xs text-muted-foreground">
+                {tWalk("evidenceSpokenFor", { name: doc.filename ?? t("evidence.unnamed") })}{" "}
+                <Link
+                  href={journalEntryHref(clientId, doc.spokenFor!.entryId)}
+                  className="text-primary underline-offset-4 hover:underline"
+                >
+                  {tWalk("evidenceSpokenForLink")}
+                </Link>
+              </p>
+            ))}
           <AttachOutcome clientId={clientId} conflictEntry={conflictEntry} result={result} />
         </div>
         <DialogFooter>
@@ -246,6 +342,7 @@ export function AttachEvidenceDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+    </div>
   );
 }
 

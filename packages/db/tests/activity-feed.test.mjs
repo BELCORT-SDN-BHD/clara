@@ -47,6 +47,30 @@ async function gate(t) {
   return true;
 }
 
+// #728 — the sweep-attribution recut lives in ITS OWN migration (0183), a separate frontier from
+// 0181's above: a slice-frontier CI leg can be pinned AT 0181, before 0183 lands, and the cells
+// below must skip cleanly there rather than red on a door that has not yet gained the sweep arm.
+const SWEEP_STEM = "activity_sweep_attribution$";
+let _sweepReady = null;
+async function sweepAttributionReady() {
+  if (_sweepReady === null) {
+    try {
+      const r = await rootQuery(
+        "select count(*)::int as n from clara.schema_migrations where version ~ $1", [SWEEP_STEM]);
+      _sweepReady = r.rows[0].n > 0;
+    } catch {
+      _sweepReady = false;
+    }
+  }
+  return _sweepReady;
+}
+
+async function gateSweep(t) {
+  if (await sweepAttributionReady()) return false;
+  t.skip(`#728 activity-sweep-attribution lane absent (no ${SWEEP_STEM} migration applied)`);
+  return true;
+}
+
 let world = null;
 before(async () => {
   world = await buildWorkWorld();
@@ -120,6 +144,31 @@ async function postWorkEntry({ client, author = BOB(), b = null }) {
 
 function rowsOf(page) {
   return Array.isArray(page?.rows) ? page.rows : [];
+}
+
+/** #728 — a finalized `clara.sweep_runs` row plus the `sweep.run_completed` event it reports,
+ *  the SAME two writes `clara.reconcile_sweep_runs` performs (0011:2753-2764) but constructed
+ *  directly (as root) so a cell can force an EXACT `drafted_count` without driving the whole
+ *  autodraft machinery. `_append_event` is called directly too (root bypasses its ungranted ACL,
+ *  exactly as every other direct-event fixture in this estate's rig does) so the payload carries
+ *  the run's own id, precisely as `clara._sweep_run_drafted_count` (0183) expects. Returns the
+ *  event's OWN id/occurred_at, read back from `clara.domain_events` by (firm_id, seq) — the seq
+ *  `_append_event` hands back, never assumed. */
+async function mkSweepEvent({ firm, draftedCount, expectedCount = null }) {
+  const exp = expectedCount ?? draftedCount;
+  const run = (await rootQuery(
+    `insert into clara.sweep_runs(firm_id, state, window_started_at, window_ended_at,
+        expected_count, drafted_count, finalized_at)
+     values ($1, 'finalized', now(), now(), $2, $3, now()) returning id`,
+    [firm, exp, draftedCount])).rows[0].id;
+  const seq = (await rootQuery(
+    `select clara._append_event($1, 'sweep.run_completed', null, null, null, null, null, null, null,
+        jsonb_build_object('run_id', $2::uuid, 'expected_count', $3::int)) as seq`,
+    [firm, run, exp])).rows[0].seq;
+  const ev = (await rootQuery(
+    `select id::text as id, created_at from clara.domain_events where firm_id = $1 and seq = $2`,
+    [firm, seq])).rows[0];
+  return { runId: run, eventId: ev.id, occurredAt: ev.created_at.toISOString() };
 }
 
 // ===========================================================================================
@@ -415,4 +464,62 @@ test("af.13 p_limit clamps to the door's own [1,100] window on both ends", async
 
   const negative = await listActivity(BOB(), { client: cli, kinds: ["agent"], limit: -5 });
   assert.equal(rowsOf(negative).length, 1, "af.13 a negative limit is also clamped up to the floor of 1");
+});
+
+// ===========================================================================================
+// 9 · #728 — the sweep heartbeat stops flooding the feed without an actor (C77.3). Migration
+// 0183, gated on its OWN stem (SWEEP_STEM) rather than 0181's — see gateSweep's own comment.
+// ===========================================================================================
+
+test("af.14 a finalized sweep with drafted_count=0 is ABSENT from the feed, and its deep link answers the same CLR11 no-oracle refusal as a genuinely absent id", async (t) => {
+  if (await gateSweep(t)) return;
+  const noop = await mkSweepEvent({ firm: FIRM_A(), draftedCount: 0, expectedCount: 3 });
+
+  // Positive control first — the YES that gives the NO meaning: a listActivity read scoped tightly
+  // to this event's own instant (since is inclusive) and to the agent kind it WOULD carry if kept
+  // must come back with nothing named by this id.
+  const page = await listActivity(BOB(), { kinds: ["agent"], since: noop.occurredAt, limit: 100 });
+  assert.equal(rowsOf(page).some((r) => r.id === noop.eventId), false,
+    "af.14 a zero-effect sweep heartbeat never appears in the feed, even asking for exactly its own kind and instant");
+  // And asking under NO kind filter at all (the shape that buried real postings on the live firm)
+  // still never surfaces it.
+  const unfiltered = await listActivity(BOB(), { since: noop.occurredAt, limit: 100 });
+  assert.equal(rowsOf(unfiltered).some((r) => r.id === noop.eventId), false,
+    "af.14 the exclusion holds with no kind filter too, not only under kinds=['agent']");
+
+  const absent = await assertRaises(CLR11, () => getActivityEvent(BOB(), "event", "00000000-0000-0000-0000-000000000000"),
+    "af.14 baseline: a genuinely absent id");
+  const excluded = await assertRaises(CLR11, () => getActivityEvent(BOB(), "event", noop.eventId),
+    "af.14 a deep link to the excluded heartbeat");
+  assert.equal(excluded.message, absent.message,
+    "af.14 no-oracle: an excluded zero-effect heartbeat must read IDENTICALLY to an id that never existed");
+});
+
+test("af.15 a finalized sweep with drafted_count>0 is PRESENT under kind=agent, actor stays null, and the kind filter sorts it correctly", async (t) => {
+  if (await gateSweep(t)) return;
+  const drafted = await mkSweepEvent({ firm: FIRM_A(), draftedCount: 2, expectedCount: 5 });
+
+  const agentPage = await listActivity(BOB(), { kinds: ["agent"], since: drafted.occurredAt, limit: 100 });
+  const row = rowsOf(agentPage).find((r) => r.id === drafted.eventId);
+  assert.ok(row, "af.15 a sweep that drafted something IS in the feed under kinds=['agent']");
+  assert.equal(row.kind, "agent", "af.15 kind is 'agent', never 'documents' — 0181's fall-through is retired for this event_type");
+  assert.equal(row.source, "event");
+  assert.equal(row.event_type, "sweep.run_completed");
+  // ACTOR STAYS NULL — the truth (WO's own "least-surprising marker"): the web lane recognises
+  // kind='agent' + event_type='sweep.run_completed' off columns this door ALREADY outputs and
+  // labels a system marker there; no new column is added or claimed here.
+  assert.equal(row.actor, null, "af.15 actor is null — a kept sweep row is not attributed to a fabricated actor");
+  assert.equal(row.client_id, null, "af.15 the sweep is firm-level — no client to attribute it to either");
+  assert.ok(row.description, "af.15 the row still carries event_types' own sentence (\"An autodraft sweep run completed\")");
+
+  // THE OTHER HALF OF THE SORT: a 'documents' filter must NOT pick it up — the fall-through this
+  // migration retires for exactly this event_type.
+  const documentsPage = await listActivity(BOB(), { kinds: ["documents"], since: drafted.occurredAt, limit: 100 });
+  assert.equal(rowsOf(documentsPage).some((r) => r.id === drafted.eventId), false,
+    "af.15 kinds=['documents'] no longer catches a sweep heartbeat — the 0181 fall-through moved");
+
+  const detail = await getActivityEvent(BOB(), "event", drafted.eventId);
+  assert.equal(detail.kind, "agent", "af.15 get_activity_event agrees with list_activity's own kind");
+  assert.equal(detail.actor, null);
+  assert.equal(detail.event_type, "sweep.run_completed");
 });

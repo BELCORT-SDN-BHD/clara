@@ -53,7 +53,13 @@ import { useAsyncRead } from "@/lib/firm/use-async-read";
 import { canOpenClientLeaf, journalEntryHref, workDetailHref, type NavigationScope } from "@/lib/navigation/tree";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
 import { submitJournalWork, type SubmitJournalWorkResult } from "@/lib/work/api";
-import { listClientEvidenceDocuments, type EvidenceDocument } from "@/lib/work/evidence";
+import {
+  listClientEvidenceDocuments,
+  listSpokenForDocuments,
+  mergeSpokenFor,
+  type EvidenceDocument,
+  type SpokenForDocumentRow,
+} from "@/lib/work/evidence";
 import {
   MEMO_MAX_CHARS,
   charsLeft,
@@ -131,6 +137,7 @@ export function JournalComposerView({
   session = sessionTokenAccessor,
   loadAccounts,
   loadDocuments,
+  loadSpokenFor,
 }: {
   clientId: string;
   scope: NavigationScope & { firm_id?: string; user_id?: string };
@@ -140,6 +147,8 @@ export function JournalComposerView({
   session?: SessionTokenAccessor;
   loadAccounts?: () => Promise<CoaAccountRow[]>;
   loadDocuments?: () => Promise<EvidenceDocument[]>;
+  /** #728 finding 5 — injectable for the same reason `loadDocuments` is. */
+  loadSpokenFor?: () => Promise<SpokenForDocumentRow[]>;
 }) {
   const t = useTranslations("JournalComposer");
   /** #634's own copy lives in its own namespace (`ManualJournal`) rather than
@@ -147,6 +156,10 @@ export function JournalComposerView({
    *  form, the Work detail's late attachment and the journals table, and one
    *  namespace for one journey keeps those three surfaces' words together. */
   const tm = useTranslations("ManualJournal");
+  /** #728's own copy (findings 1-5, this journey's evidence picker included) lives under ONE new
+   *  namespace appended at the end of en.json, deliberately separate from ManualJournal/Activity —
+   *  see WalkFindings728's own header in messages/en.json. */
+  const tWalk = useTranslations("WalkFindings728");
   const go = navigate;
 
   // THE DRAFT SCOPE, or null. A caller whose firm/user could not be read does
@@ -201,6 +214,14 @@ export function JournalComposerView({
     loadDocuments ? loadDocuments() : listClientEvidenceDocuments(clientId, { session }),
   );
   const documents = documentsRead.data ?? [];
+  // #728 finding 5 — the SAME "own failure degrades independently" posture as the documents read
+  // itself: `spokenForRead.error` and `documentsRead.error` are two different claims, and a failed
+  // spoken-for check must never block choosing a document — the admission door's own conflict
+  // refusal is what actually protects the entry either way.
+  const spokenForRead = useAsyncRead<SpokenForDocumentRow[]>(() =>
+    loadSpokenFor ? loadSpokenFor() : listSpokenForDocuments(clientId, { session }),
+  );
+  const evidenceOptions = mergeSpokenFor(documents, spokenForRead.error !== null ? null : spokenForRead.data);
 
   const draft = useMemo(() => ({ postingDate, memo, lines }), [postingDate, memo, lines]);
   const issues: JournalIssue[] = useMemo(
@@ -479,8 +500,12 @@ export function JournalComposerView({
           }}
         >
           <option value="">{tm("evidence.none")}</option>
-          {documents.map((doc) => (
-            <option key={doc.documentId} value={doc.documentId}>
+          {evidenceOptions.map((doc) => (
+            // #728 finding 5 — DISABLED, never hidden: see lib/work/evidence.ts's own note on
+            // `mergeSpokenFor` for why a document already backing a posted entry stays in the
+            // list rather than being filtered out. The reason and a link to that entry render
+            // BESIDE the select below, an `<option>` having no room for either.
+            <option key={doc.documentId} value={doc.documentId} disabled={doc.spokenFor !== null}>
               {evidenceOptionLabel(doc, tm)}
             </option>
           ))}
@@ -503,6 +528,22 @@ export function JournalComposerView({
             {tm("evidence.unavailable")}
           </StateBanner>
         ) : null}
+        {spokenForRead.error !== null ? (
+          <p className="text-xs text-muted-foreground">{tWalk("evidenceSpokenForUnavailable")}</p>
+        ) : null}
+        {evidenceOptions
+          .filter((doc) => doc.spokenFor !== null)
+          .map((doc) => (
+            <p key={doc.documentId} className="text-xs text-muted-foreground">
+              {tWalk("evidenceSpokenFor", { name: doc.filename ?? tm("evidence.unnamed") })}{" "}
+              <Link
+                href={journalEntryHref(clientId, doc.spokenFor!.entryId)}
+                className="text-primary underline-offset-4 hover:underline"
+              >
+                {tWalk("evidenceSpokenForLink")}
+              </Link>
+            </p>
+          ))}
       </div>
 
       {/* THE CHART READ IS A SEPARATE FAILURE FROM THE FORM'S. A preparer who

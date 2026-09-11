@@ -89,6 +89,81 @@ export async function listClientEvidenceDocuments(
     .filter((d): d is EvidenceDocument => d !== null);
 }
 
+// ── #728 finding 5 — which of these documents already back a posted entry ──────────────────────
+//
+// ADVISORY ONLY. `clara.list_spoken_for_documents` (migration 0183) is a NEW read the pickers
+// consult ALONGSIDE `listClientEvidenceDocuments`, never a replacement for the door's own check:
+// `attach_entry_evidence`'s CLR13 `source_already_posted` (this file's own `AttachEvidenceResult`,
+// `source_conflict`) and `admit_journal_work`'s equivalent stay the law. A caller that could not
+// read this list still lets a person choose freely — the door refuses the real conflict on
+// submit exactly as it does today; this list only lets the picker say so BEFORE that round trip.
+
+/** One row of `clara.list_spoken_for_documents` — copied field-for-field from the function's own
+ *  `returns table(...)` declaration (0183). `via` names WHICH lane already claimed the document:
+ *  `evidence_link` is this ticket's own late-attachment/#623-commit relation
+ *  (`clara.entry_evidence_links`, released on reversal), `coding` is the older document-coding
+ *  lane (`journal_entries.document_id`, approved and not reversed). The picker does not need to
+ *  say which lane out loud — see `mergeSpokenFor`'s own note — but the field is not dropped: a
+ *  future surface (or a test) may want it. */
+export type SpokenForDocumentRow = {
+  document_id: string;
+  entry_id: string;
+  via: "evidence_link" | "coding";
+};
+
+/**
+ * Every document of `clientId` that already backs a LIVE posted entry, by document id.
+ *
+ * A SETOF/TABLE function is always an array on the wire (the same shape `lib/firm/timeline.ts`'s
+ * own `listFirmTimeline` reads) — anything else is reported as empty rather than coerced into a
+ * fabricated row. This module never treats a malformed envelope as "call it again"; the merge
+ * below treats an EMPTY array from a genuinely-failed read as indistinguishable from a client with
+ * nothing spoken for, which is why `mergeSpokenFor` takes a THIRD state (unavailable) rather than
+ * inferring it from an empty list.
+ */
+export async function listSpokenForDocuments(
+  clientId: string,
+  opts: Opts = {},
+): Promise<SpokenForDocumentRow[]> {
+  const out = await callDoor<unknown>("list_spoken_for_documents", { p_client: clientId }, opts);
+  return Array.isArray(out) ? (out as SpokenForDocumentRow[]) : [];
+}
+
+/** An `EvidenceDocument` plus the ONE fact the picker renders it with: null when the document is
+ *  free, or the entry it already backs when it is not. Kept as a SEPARATE type from
+ *  `EvidenceDocument` (rather than widening that one) because not every reader of
+ *  `EvidenceDocument` — `attach-evidence-dialog.tsx`'s own `optionLabel` predates this ticket —
+ *  needs to carry it. */
+export type EvidenceOption = EvidenceDocument & {
+  spokenFor: { entryId: string; via: SpokenForDocumentRow["via"] } | null;
+};
+
+/**
+ * Merge a spoken-for read onto a document list, three ways:
+ *   * `spokenFor` is an array (the read succeeded, possibly empty) — each document is annotated
+ *     with the row that names it, or `null` when nothing does.
+ *   * `spokenFor` is `null` (the read FAILED — the caller catches and passes null, never an empty
+ *     array on failure, exactly the `documentsUnavailable` discipline `attach-evidence-dialog.tsx`
+ *     already applies to the document list itself) — every document comes back with `spokenFor:
+ *     null` (nothing is disabled), because "we could not check" must never be silently read as
+ *     "nothing is spoken for". The door's own conflict refusal on submit is what actually protects
+ *     the entry either way.
+ *
+ * NEVER HIDES AN OPTION. A caller that filtered spoken-for documents OUT of the list would be
+ * asserting a certainty this read cannot make with the door's own force — the door is the law, this
+ * read is advisory — so every document stays in the returned array; only `spokenFor` changes.
+ */
+export function mergeSpokenFor(
+  documents: readonly EvidenceDocument[],
+  spokenFor: readonly SpokenForDocumentRow[] | null,
+): EvidenceOption[] {
+  const byDocument = new Map((spokenFor ?? []).map((row) => [row.document_id, row]));
+  return documents.map((doc) => {
+    const hit = byDocument.get(doc.documentId);
+    return { ...doc, spokenFor: hit ? { entryId: hit.entry_id, via: hit.via } : null };
+  });
+}
+
 /** One row of `clara.list_entry_links` — purpose, source, Work, receipt and the
  *  correction chain for one journal entry. Every field is nullable because an
  *  entry may have come from any lane: an older manual door, the document-coding
