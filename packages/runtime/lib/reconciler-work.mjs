@@ -298,7 +298,21 @@ export async function workResultForTask(client, taskId) {
 export function cancelSettleForWork(result) {
   const effect = committedWorkResult(result);
   if (effect !== null) return { outcome: "completed", errorCode: null, error: null, result: effect };
-  return { outcome: "cancelled", errorCode: null, error: { ...WORK_CANCELLED_ERROR }, result: null };
+  // FIELD BY FIELD RATHER THAN A SPREAD, and the census is why: `check-parts-parity.mjs` refuses an
+  // unclassifiable object spread anywhere under packages/runtime (control.mjs states the same rule
+  // at its own cycle result). Each settle still gets its OWN copy of the shared words, so a caller
+  // that mutates what it is handed cannot reach the frozen original.
+  return {
+    outcome: "cancelled",
+    errorCode: null,
+    error: {
+      code: WORK_CANCELLED_ERROR.code,
+      reason: WORK_CANCELLED_ERROR.reason,
+      message: WORK_CANCELLED_ERROR.message,
+      recoverable: WORK_CANCELLED_ERROR.recoverable,
+    },
+    result: null,
+  };
 }
 
 /**
