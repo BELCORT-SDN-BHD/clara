@@ -726,6 +726,15 @@ test("#727: the Work detail route hydrates with no React fault in the console", 
   // clean for the boring reason that it renders almost nothing.
   await page.goto(`/clients/${CLIENT}/work/${JOURNAL_WORK.seededWorkId}`);
   await expect(page.getByText("Completed", { exact: true }).first()).toBeVisible();
+  // AND THE RAIL, which is half of what the owner was actually looking at: the docked
+  // Clara rail is mounted by `app/(firm)/layout.tsx` on every firm route, and on this one
+  // it is rendering this lane's B6 transcript — a `work_accepted` card that hydrates its
+  // Work on mount, a `work_status` line and a `work_result`. That subtree is inside the
+  // same hydration pass as the Work detail below it, so asserting it is on screen is what
+  // stops this cell from proving hydration only for a page with the rail empty.
+  const rail = page.locator("[data-clara-rail]");
+  await expect(rail).toBeVisible();
+  await expect(rail.getByText("Accounting work accepted")).toBeVisible();
   await settle(page);
 
   // And the PARKED face, which mounts the question panel and its form — the subtree #629

@@ -427,7 +427,10 @@ test("the clarify card does not storm its re-read when the part identity churns 
     if (url.includes("/rest/v1/agent_interruptions")) {
       reads += 1;
       // The production ordering: the row lands three durable step boundaries after the
-      // chunk, so the first reads come back empty and the bounded window has to run.
+      // chunk, so the first reads come back empty. The bounded window's ticks are a second
+      // apart and this burst runs in far less than that, so within it the card must issue
+      // its MOUNT read and nothing else — measured: 1 read across 120 deltas, and 121
+      // renders for those 120, which is the render-per-delta bound and no more.
       return json(reads > 2 ? [pendingRow()] : []);
     }
     return json([]);
