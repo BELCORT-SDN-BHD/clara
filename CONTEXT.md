@@ -76,6 +76,22 @@ _Avoid_: A new piece of work; a reason to post the same effect twice.
 The record that one logical operation identity committed its business effect: which run and bundle produced it, which human authority it acted for, and which objects it created. At most one committed receipt exists per logical operation identity; a replay returns it and a changed payload under that identity is refused.
 _Avoid_: A chat message claiming completion; a task status; a second effect.
 
+**Work question**:
+One persistent question a running Accounting work is parked on: the missing fact or decision, why it is needed, one to six typed fields, the supporting source, and the version of the basis it was asked against. It has a stable identity and a monotone version on its Work (a re-asked question is a new version); every surface renders the same record; the database accepts exactly one current authorised answer, replays a repeated one, and shows a later or conflicting answer the authoritative result.
+_Avoid_: A chat message; an approval gate; a separate question per surface; a way to change what the Work already recorded.
+
+**Delivery state**:
+The runtime's record of whether a settled Work question reached the parked run: pending, leased by one worker, delivered, or resting as unreachable when the engine's hook is gone. It is stamped with its own instant so a grace can be measured, and it never reopens a question or replaces its status.
+_Avoid_: A second question status; proof that the Work advanced.
+
+**Evidence link**:
+The append-only record that one client document is the source behind one posted journal entry: which Work and operation identity bound it, who bound it, when, and whether it was bound as the entry was recorded or attached afterwards. A document backs at most one live posted entry; a reversal releases the link so the corrected entry may cite the same document. Evidence is optional — an entry recorded without a document is a complete accounting fact.
+_Avoid_: A column rewritten on the posted entry; a claim that the document was independently verified; "unsourced" as a synonym for "wrong".
+
+**Activity event**:
+One observable, attributable change in the firm's books or work — a domain event, an agent receipt or a committed operation receipt — with its actor and delegation, client, time, status and links to its Work, object, source and replacement outcome.
+_Avoid_: An internal task name or private model reasoning; a pending question (Work owns those); a substitute for the object's own current state.
+
 **Accounting operation**:
 A business action, such as recording an acquisition or settling an invoice, with its required journal effects and related accounting records. Its meaning is the same whether initiated by a person or Clara.
 _Avoid_: An arbitrary collection of journal lines as a complete description of every action.
