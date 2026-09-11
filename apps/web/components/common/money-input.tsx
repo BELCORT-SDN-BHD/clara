@@ -30,6 +30,13 @@ export type MoneyInputProps = Omit<
   zeroIsBlank?: boolean;
   /** Sizes the component's wrapper when it participates in flex/grid rows. */
   containerClassName?: string;
+  /** DROP THE REFUSAL'S LIVE REGION, keeping the refusal itself (#629, §5's one-announcement-owner
+   *  rule). Default FALSE, so every existing call site is byte-identical. It is opted into by a
+   *  control mounted inside a surface that already announces its own updates — the Clara transcript
+   *  is the case that forced it. The copy is unchanged, stays in the reading order, and stays wired
+   *  through `aria-describedby`, so a screen reader still reads it on the field; what goes is the
+   *  unsolicited interruption from inside a log that is already speaking. */
+  silentRefusal?: boolean;
 };
 
 function formattedInputValue(cents: number | null, zeroIsBlank: boolean): string {
@@ -47,6 +54,7 @@ export function MoneyInput({
   onValueChange,
   zeroIsBlank,
   containerClassName,
+  silentRefusal = false,
   className,
   id,
   placeholder,
@@ -120,8 +128,8 @@ export function MoneyInput({
           change instead of discovering the node and its content together. */}
       <p
         id={refusalId}
-        aria-live="polite"
-        aria-atomic="true"
+        aria-live={silentRefusal ? undefined : "polite"}
+        aria-atomic={silentRefusal ? undefined : "true"}
         className={cn("text-xs text-error", refusalCopy === null && "sr-only")}
       >
         {refusalCopy ?? ""}

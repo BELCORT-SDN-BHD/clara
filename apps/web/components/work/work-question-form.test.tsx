@@ -559,6 +559,34 @@ test("ANNOUNCE=NONE renders the same states with NO live region; the default sti
   }
 });
 
+test("ANNOUNCE=NONE silences the MONEY control's own refusal region too", async () => {
+  const s = stubStorage();
+  const money = record({ fields: [{ key: "amount_cents", label: "Amount", kind: "money", required: true }] });
+
+  const speaking = await renderComponent(App({ record: money }));
+  assert.ok(liveRegions(speaking).length >= 1,
+    "the money control opens a polite region for its refusal copy — correct where this form speaks");
+  await speaking.unmount();
+
+  const quiet = await renderComponent(
+    createElement(NextIntlClientProvider, {
+      locale: "en",
+      messages,
+      timeZone: "Asia/Kuala_Lumpur",
+      children: createElement(WorkQuestionForm, { record: money, userId: USER, announce: "none" }),
+    }),
+  );
+  try {
+    assert.equal(liveRegions(quiet).length, 0,
+      "…and NONE inside the transcript: the refusal copy stays, wired through aria-describedby, "
+      + "but the log that is already speaking is not interrupted from inside a field");
+    assert.ok(inputFor(quiet, "amount_cents"), "the control itself is unchanged");
+  } finally {
+    await quiet.unmount();
+    s.restore();
+  }
+});
+
 test("OPERATION_IN_FLIGHT is transient: the form stays a form, and the retry replays the same key", async () => {
   const s = stubStorage();
   let settledCalls = 0;

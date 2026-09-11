@@ -421,6 +421,7 @@ export function WorkQuestionForm({
             disabled={busy}
             accounts={accounts}
             id={idFor(field.key)}
+            silent={silent}
             cents={moneyCents.current[field.key] ?? null}
             onAcceptedCents={(c) => { moneyCents.current[field.key] = c; }}
             t={t}
@@ -533,6 +534,7 @@ function QuestionField({
   accounts,
   cents,
   id,
+  silent,
   register,
   onChange,
   onAcceptedCents,
@@ -552,6 +554,9 @@ function QuestionField({
   onAcceptedCents: (cents: number | null) => void;
   /** This control's DOM id, scoped to the mounted form — see `idFor` in the form itself. */
   id: string;
+  /** TRUE inside a surface that owns the announcement boundary — see the form's `announce` prop.
+   *  The money control is the only FIELD that opens a live region of its own. */
+  silent: boolean;
   t: ReturnType<typeof useTranslations>;
 }) {
   const text = value === undefined || value === null ? "" : String(value);
@@ -604,6 +609,7 @@ function QuestionField({
           id={id}
           mode="signed"
           zeroIsBlank={false}
+          silentRefusal={silent}
           cents={cents}
           disabled={disabled}
           aria-invalid={invalid || undefined}

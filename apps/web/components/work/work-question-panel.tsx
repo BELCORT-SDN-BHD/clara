@@ -14,11 +14,15 @@
 // behind `clara.get_work_question`, and it re-reads them here rather than accepting a projection
 // built for a banner.
 //
-// A BACKGROUND POLL MUST NOT STEAL FOCUS. This panel mounts once per parked Work and does not
-// re-mount on the detail's 3-second poll (the poll re-reads the Work row; this component's own key
-// is the question id, which does not change while a question is pending). §4's rule — "merely
-// opening a background update does not steal focus" — is preserved by construction rather than by
-// a focus guard.
+// A BACKGROUND POLL MUST NOT STEAL FOCUS, AND A RE-ASKED QUESTION MUST NOT BE MISSED. The two pull
+// in opposite directions and the KEY is where they are reconciled: the Work detail keys this panel
+// on the PENDING INTERRUPTION ROW (`work-detail.tsx`), which does not change while one question is
+// open — so the detail's 3-second poll re-reads the Work row and never re-mounts this, and §4's
+// "merely opening a background update does not steal focus" holds by construction rather than by a
+// focus guard — but which DOES change the moment the run asks again, because a re-asked question is
+// a NEW row with the next version (0180). Keying on the Work alone kept question 1's accepted
+// record on screen while question 2 waited; keying on the question is what makes the remount the
+// reload.
 
 import { useCallback } from "react";
 import { useTranslations } from "next-intl";
