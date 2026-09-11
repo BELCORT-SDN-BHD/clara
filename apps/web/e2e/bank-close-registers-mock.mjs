@@ -46,6 +46,13 @@ export function l7AbandonAttempts() {
   return state.abandonAttempts;
 }
 
+/** The ONLY five RPC verbs this lane's own dispatch chain (below) recognises — the allow-list
+ *  `readJson`'s own call site guards on (review finding 10). Exported so a unit can drive the
+ *  handler with a verb NOT in this set and assert the request body is left untouched. */
+export const L7_RPC_VERBS = new Set([
+  "list_fiscal_years", "get_close_plan", "get_close_readiness", "list_agent_act_receipts", "abandon_close",
+]);
+
 async function readJson(request) {
   const chunks = [];
   for await (const chunk of request) chunks.push(chunk);
@@ -203,6 +210,22 @@ export async function handleL7Supabase(request, response, path, url, sendJson, c
 
   if (request.method !== "POST" || !path.startsWith("/rest/v1/rpc/")) return false;
   const verb = path.slice("/rest/v1/rpc/".length);
+  // ROOT CAUSE (#632 review finding 10), not a fourth ordering workaround. `readJson` DRAINS the
+  // request's own stream — Node can only iterate it once — and this dispatcher used to call it
+  // UNCONDITIONALLY for every `/rest/v1/rpc/` POST, before it even knew whether the verb was one
+  // of its own five. A verb this lane does not own (list_activity, chosen because #632's OWN lane
+  // landed after this one and measured it) reached here first if this lane's hook ran earlier in
+  // `serve-built.mjs`'s chain, got its body silently drained, and fell through `return false` —
+  // leaving the NEXT hook's own `readJson(request)` reading an already-empty stream, which
+  // resolves to `{}` rather than erroring. `{}`'s every field is `undefined`, which satisfied
+  // every one of that OTHER lane's own permissive equality checks, so list_activity silently
+  // answered the SAME unfiltered page 1 regardless of what the browser actually asked for — no
+  // error surfaced anywhere. `serve-built.mjs` currently papers over this by running #632's own
+  // hook FIRST (kept as-is below; harmless, and it is not this file's place to undo another
+  // lane's fix) — but the actual defect is HERE: an exact-verb allow-list check, guarding
+  // `readJson` itself, so a verb this lane does not recognise returns false WITHOUT ever touching
+  // the stream, leaving it fully intact for whichever hook runs next, in ANY order.
+  if (!L7_RPC_VERBS.has(verb)) return false;
   const body = await readJson(request);
 
   if (verb === "list_fiscal_years") {

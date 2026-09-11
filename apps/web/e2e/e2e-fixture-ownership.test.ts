@@ -26,6 +26,7 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { P6_5_SESSIONS } from "./agentic-finish-mock.mjs";
+import { handleL7Supabase, L7_RPC_VERBS } from "./bank-close-registers-mock.mjs";
 
 const E2E_DIR = dirname(fileURLToPath(import.meta.url));
 const SERVE_BUILT = join(E2E_DIR, "serve-built.mjs");
@@ -520,5 +521,73 @@ test("N4 (L7) · the close-prep hold fixture's held_by IS the shared subject —
     match[1],
     subject,
     "a held_by outside the published roster resolves to null, and the walk would then be asserting the shortened-id fallback while claiming to assert the name",
+  );
+});
+
+// ---------------------------------------------------------------------------
+// N7 — #632 review finding 10: the mock-lane BODY-DRAIN hazard, root-caused rather than
+// papered over with a third ordering workaround.
+// ---------------------------------------------------------------------------
+//
+// MEASURED: `bank-close-registers-mock.mjs`'s own RPC dispatch used to call `readJson(request)`
+// (which DRAINS Node's request stream — it can only be iterated once) for EVERY
+// `/rest/v1/rpc/` POST, before it even checked whether the verb was one of its own five. When
+// `activity-mock.mjs`'s `list_activity`/`get_activity_event` verbs (which this lane does not
+// recognise) reached this handler first, the body was drained and silently discarded, and the
+// NEXT hook's own `readJson(request)` call saw an already-empty stream — `{}`, not an error —
+// which satisfied every one of that lane's own permissive `undefined` equality checks. Every
+// `list_activity` call therefore answered the SAME unfiltered page 1 regardless of what the
+// browser actually asked for, with no error anywhere (`serve-built.mjs`'s own commit history
+// papered over this by moving that lane's hook to run FIRST — a real fix for THAT ordering, but
+// not a fix for the underlying hazard, which would recur the moment a SIXTH lane's verb landed
+// ahead of this one in the chain).
+//
+// THE FIX, measured directly rather than trusted from a comment: an exact-verb allow-list check
+// (`L7_RPC_VERBS`) guards `readJson` itself, so a verb this lane does not own returns `false`
+// WITHOUT ever touching the stream — leaving it fully intact for whichever hook runs next, in
+// ANY order, which is what actually closes the hazard rather than routing around today's one
+// measured instance of it.
+
+test("N7 (L7) · the exact-verb allow-list runs BEFORE readJson, in source", () => {
+  const source = readFileSync(join(E2E_DIR, "bank-close-registers-mock.mjs"), "utf8");
+  const guardAt = source.indexOf("if (!L7_RPC_VERBS.has(verb)) return false;");
+  const readJsonCallAt = source.indexOf("const body = await readJson(request);");
+  assert.ok(guardAt >= 0, "the allow-list guard must still exist in source");
+  assert.ok(readJsonCallAt >= 0, "the readJson call it exists to protect must still exist");
+  assert.ok(guardAt < readJsonCallAt, "the guard must run BEFORE readJson, or it protects nothing");
+});
+
+test("N7 (L7) · a verb this lane does not own leaves the request body COMPLETELY UNTOUCHED", async () => {
+  // `list_activity` is #632's own lane's verb — never L7's — and is the EXACT verb the drain
+  // hazard was measured against (see this block's own header).
+  assert.equal(L7_RPC_VERBS.has("list_activity"), false, "list_activity must not be one of L7's own verbs, or this test proves nothing");
+
+  let asyncIteratorCalls = 0;
+  const request: AsyncIterable<Buffer> & { method: string } = {
+    method: "POST",
+    [Symbol.asyncIterator]: (): AsyncIterator<Buffer> => {
+      asyncIteratorCalls += 1;
+      let delivered = false;
+      return {
+        async next() {
+          if (delivered) return { value: undefined, done: true };
+          delivered = true;
+          return { value: Buffer.from(JSON.stringify({ p_client: "c1", p_kinds: ["close"] }), "utf8"), done: false };
+        },
+      };
+    },
+  };
+  const url = new URL("https://example.test/rest/v1/rpc/list_activity");
+  let responded = false;
+  const sendJson = () => { responded = true; };
+
+  const handled = await handleL7Supabase(request as never, {} as never, "/rest/v1/rpc/list_activity", url as never, sendJson as never, {} as never);
+
+  assert.equal(handled, false, "a verb L7 does not own must fall through unanswered");
+  assert.equal(responded, false, "and must never have sent a response");
+  assert.equal(
+    asyncIteratorCalls,
+    0,
+    "the request's stream must never even be OPENED — a later hook's own readJson(request) must see the full, undrained body",
   );
 });
