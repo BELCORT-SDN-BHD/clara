@@ -44,6 +44,7 @@ import { WorkQuestionPanel } from "@/components/work/work-question-panel";
 import { SectionHeader } from "@/components/common/section-header";
 import { MemberName } from "@/components/common/member-name";
 import { useFirmScope } from "@/components/firm-scope-provider";
+import { roleRankOf } from "@/lib/identity/caller-context";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -124,7 +125,7 @@ export function WorkDetail({ clientId, workId }: { clientId: string; workId: str
     <WorkDetailView
       clientId={clientId}
       workId={workId}
-      scope={{ firmId: scope.firm_id, userId: scope.user_id }}
+      scope={{ firmId: scope.firm_id, userId: scope.user_id, roleRank: scope.role_rank }}
     />
   );
 }
@@ -164,7 +165,17 @@ export function WorkDetailView({
    *  halves are optional and a MISSING half means no seeding at all — a draft
    *  filed under a guessed scope is worse than a draft that was never saved
    *  (lib/work/journal-draft.ts's own rule). */
-  scope?: { firmId?: string; userId?: string };
+  scope?: {
+    firmId?: string;
+    userId?: string;
+    /**
+     * #630 (review) — THE READER'S RANK, from `clara.caller_context`'s own `role_rank` (the
+     * DATABASE's answer, never re-derived from the role's spelling). Both new controls are
+     * DESTRUCTIVE or authority-moving and both doors floor at bookkeeper, so a viewer or clerk is
+     * offered neither: the press could only land on a 403. Absent rank fails closed.
+     */
+    roleRank?: number | null;
+  };
   storage?: DraftStorage | null;
 }) {
   const t = useTranslations("WorkDetail");
@@ -296,8 +307,9 @@ export function WorkDetailView({
   // caller's live role and the Work's own state and refuse verbatim when they disagree (the same
   // posture `canRetry` states above). `stopping` is deliberately NOT cancellable — an admitted
   // operation is settling and a second press could only answer `already_stopping`.
-  const canCancel = isCancellableWorkStatus(work.status);
-  const canTakeOver = isTakeOverable(work);
+  const bookkeeperPlus = typeof scope?.roleRank === "number" && scope.roleRank >= roleRankOf("bookkeeper");
+  const canCancel = bookkeeperPlus && isCancellableWorkStatus(work.status);
+  const canTakeOver = bookkeeperPlus && isTakeOverable(work);
 
   // THE DRAFT SCOPE, or null — the same three-part key the composer files under,
   // built from the same two context fields. Null when either is missing, which
@@ -395,6 +407,7 @@ export function WorkDetailView({
         onTakeOverAnswer={setTakeOverState}
         session={session}
         interruption={interruption}
+        accountNames={names}
         onEditAsNewDraft={seedDraft}
       />
 
@@ -638,6 +651,7 @@ function WorkOutcome({
   onTakeOverAnswer,
   session,
   interruption,
+  accountNames,
   onEditAsNewDraft,
 }: {
   work: AccountingWorkRow;
@@ -662,6 +676,9 @@ function WorkOutcome({
   session: SessionTokenAccessor;
   /** The row this Work is parked on, when it is parked and visible. */
   interruption: AgentInterruptionRow | null;
+  /** #630 — account code → name, so the takeover's confirm step can render the BASIS it asks a
+   *  colleague to take responsibility for rather than a digest of it. */
+  accountNames: ReadonlyMap<string, string>;
   /** Writes the composer's draft from this basis, before the link navigates. */
   onEditAsNewDraft: () => void;
 }) {
@@ -734,6 +751,8 @@ function WorkOutcome({
             workId={work.id}
             basisOrigin={work.basis_origin}
             basisDigest={work.basis_digest}
+            basis={work.basis}
+            accountNames={accountNames}
             onTakenOver={onConverge}
             onAnswer={onTakeOverAnswer}
             takeOver={takeOver}
@@ -805,7 +824,8 @@ function WorkOutcome({
                 {t("awaiting.link")}
               </Link>
               {/* #630 — a parked Work is still cancellable: nobody has to answer a question just
-                  to stop something they no longer want. */}
+                  to stop something they no longer want. THE WRAPPER IS THE SAME ELEMENT the
+                  queued/running arm uses; see `cancelSlot` below for why that matters. */}
               {cancelAction}
             </div>
           }
@@ -877,9 +897,22 @@ function WorkOutcome({
 
   // queued / running, and any status this build does not know. An OBSERVED state and nothing else:
   // no percentage, no estimate, no animation standing in for progress.
+  //
+  // #630 (review) — THE ACTION SLOT IS THE SAME ELEMENT IN BOTH ARMS, and that is load-bearing
+  // rather than cosmetic. React reconciles a slot by ELEMENT TYPE: this arm used to pass
+  // `cancelAction` (a `CancelWorkDialog`) straight into `action` while the awaiting_input arm
+  // passed a wrapping `div`, so the 3-second poll flipping `running ⇄ awaiting_input` — which this
+  // file's own comment records happening between two polls — destroyed the open modal, took focus
+  // to `<body>` with no dismissal, and threw away the decision's op key mid-submit. One wrapper in
+  // both arms keeps ONE dialog mounted across the transition.
   return (
     <div className="flex flex-col gap-2">
-      <StateBanner tone="info" action={cancelAction ?? undefined}>
+      <StateBanner
+        tone="info"
+        action={cancelAction === null ? undefined : (
+          <div className="flex flex-wrap items-center gap-3">{cancelAction}</div>
+        )}
+      >
         {t("running.body")}
       </StateBanner>
     </div>

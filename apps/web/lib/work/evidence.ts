@@ -211,8 +211,15 @@ export type EntryLinkRow = {
   logical_op_id: string | null;
   purpose: string | null;
   basis_origin: string | null;
-  initiator: string | null;
-  initiator_role: string | null;
+  /** #630 — THREE FIELDS, THREE FACTS, because `clara.accounting_work.initiator` stopped being one
+   *  fact the moment a colleague could take responsibility for a Work. `initiated_by` is who ASKED
+   *  (immutable), `initiated_by_role` is the rank they asked at (the ADMISSION snapshot, which is
+   *  why it describes `initiated_by` and not the live actor), and `responsible` is the human the
+   *  Work is executed as now. Emitting `(initiator, initiator_role)` as a pair after a handover put
+   *  one person's id beside another person's rank. */
+  initiated_by: string | null;
+  initiated_by_role: string | null;
+  responsible: string | null;
   document_id: string | null;
   /** WHICH LANE bound the document: `work_commit` and `late_attachment` are this
    *  ticket's two entry points, `document_coding` is the estate's older

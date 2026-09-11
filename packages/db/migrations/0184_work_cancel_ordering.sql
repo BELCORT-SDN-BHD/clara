@@ -470,6 +470,21 @@ begin
   -- passing through `stopping` for the instant between the abort request and the settle is exactly
   -- what the word means.
   if new.status = 'cancel_requested' then
+    -- …AND `stopping` IS NOT SAID OVER A WORK WHOSE BOUNDARY IS ALREADY KNOWN. A Work that holds a
+    -- committed receipt has WON the race: the entry is on the books, the abort request is about
+    -- the RUN (the model must stop spending), and telling a human "stopping" about a posting that
+    -- already happened is precisely the "no hidden effect" failure this lane exists to prevent.
+    -- The receipt law is the same one the terminal arm below applies, and it outranks every task
+    -- status in both directions.
+    v_receipt := clara._work_committed_receipt(new.work_id);
+    if v_receipt is not null then
+      update clara.accounting_work w
+         set status = 'completed', error = null,
+             result = coalesce(w.result, '{}'::jsonb) || v_receipt
+       where w.id = new.work_id
+         and w.status not in ('completed','refused','failed','cancelled','expired');
+      return null;
+    end if;
     update clara.accounting_work w
        set status = 'stopping'
      where w.id = new.work_id
@@ -1124,11 +1139,19 @@ revoke all on function clara._record_journal_entry_core(uuid,uuid,text,uuid,uuid
 -- human and passes their `sub`), no existence oracle across firms, an op-key reservation before
 -- any effect, and the author's LIVE membership re-read at the door.
 --
--- FOUR ANSWERS, and the order they are asked in IS the contract:
---   1. the Work already settled            -> {cancelled:false, reason:'already_terminal'}   (no raise)
---   2. a committed receipt exists          -> settle `completed`; {reason:'already_completed'}
---   3. the run has not started (queued)    -> terminal `cancelled` through clara.settle_work_run
---   4. the run is live (running/parked)    -> task `cancel_requested`, Work `stopping`, NOTIFY
+-- SIX ANSWERS, and the order they are asked in IS the contract. THE BOOKS ARE ASKED FIRST,
+-- because every other question is only meaningful once the answer to that one is no:
+--   1. a committed receipt exists          -> the operation WON. The RUN is still asked to abort
+--                                             (the model must stop spending) and the Work reads
+--                                             `completed` through the mirror's receipt law;
+--                                             {cancelled:false, reason:'already_completed',
+--                                              receipt_id, entry_id}
+--   2. the Work already settled            -> {cancelled:false, reason:'already_terminal'}   (no raise)
+--   3. the RUN already ended, the Work did not hear -> converge, then answer `already_terminal`
+--   4. the abort is already requested      -> {cancelled:false, reason:'already_stopping'}, and
+--                                             who asked FIRST is not overwritten
+--   5. the run has not started (queued)    -> terminal `cancelled` through clara.settle_work_run
+--   6. the run is live (running/parked)    -> task `cancel_requested`, Work `stopping`, NOTIFY
 -- =====================================================================================
 create function clara.cancel_accounting_work(p_work uuid, p_author uuid, p_op_key text) returns jsonb
   language plpgsql security definer set search_path = clara, pg_temp as $$
@@ -1156,54 +1179,62 @@ begin
       from clara.agent_tasks at where at.id = w.current_task_id for update;
   end if;
 
-  -- 0 · THE RUN IS ALREADY OVER AND THE WORK NEVER HEARD. Reached whenever something other than
-  -- clara.settle_work_run terminalised the run -- `clara.cancel_agent_task` from the /activity
-  -- panel is the measured one. Converge by the receipt law FIRST, then answer about the Work that
-  -- actually exists: the human asked for a terminal and a terminal is what they get, under the
-  -- SAME `already_terminal` word arm 1 already speaks, so no surface needs new vocabulary.
-  if v_task is not null and v_task_status in ('completed','failed','cancelled','expired')
-     and w.status not in ('completed','refused','failed','cancelled','expired') then
-    perform clara._converge_work_terminal(p_work, v_task_status);
-    select * into w from clara.accounting_work aw where aw.id = p_work;
+  -- 1 · THE OPERATION ALREADY WON, AND THE BOOKS ARE ASKED BEFORE ANYTHING ELSE. A cancel does
+  -- NOT reverse a posted entry (ARCHITECTURE §6, "取消不冲销已入账结果"); a correction is a
+  -- separate, explicitly linked operation. The answer names the effect so the surface can link to
+  -- it, and the Work reaches `completed` — never `cancelled`, never `stopping`.
+  --
+  -- THE RUN IS STILL ASKED TO ABORT, and that is the half an earlier cut left out. The WORK is
+  -- finished; the RUN is a separate live thing that keeps taking turns (and spending) until it
+  -- happens to stop on its own. A human who pressed "Cancel Work" one second after the commit was
+  -- told nothing new would start, and that has to be true of the model too. So this arm writes the
+  -- abort REQUEST and NOTIFYs, and leaves the settle to the runtime's cancel sweep, which is the
+  -- only path that also reaches `cancelRun` — settling the task here would hide the row from that
+  -- sweep and the engine would never be told. The WORK does not wait for it: the status mirror's
+  -- receipt law writes `completed` on this very transition.
+  v_receipt := clara._work_committed_receipt(p_work);
+  if v_receipt is not null then
+    if v_task is not null and v_task_status in ('running','awaiting_input') then
+      update clara.agent_tasks set status = 'cancel_requested', cancelled_by = p_author,
+             cancelled_at = now(), updated_at = now()
+       where id = v_task;
+      perform pg_notify('clara_runtime_ctl', '');   -- empty payload (N1)
+    elsif w.status not in ('completed','refused','failed','cancelled','expired') then
+      -- No live run to abort and a Work that never heard: converge it on the same receipt law.
+      perform clara._converge_work_terminal(p_work, coalesce(v_task_status, 'completed'));
+    end if;
+    perform clara._audit(w.firm_id, p_author, null, null, 'cancel_accounting_work', null,
+      jsonb_build_object('work', p_work, 'task', w.current_task_id, 'op_key', p_op_key,
+        'outcome', 'already_completed', 'receipt', v_receipt));
+    v_result := jsonb_build_object('work_id', p_work, 'task_id', w.current_task_id,
+      'status', (select aw.status from clara.accounting_work aw where aw.id = p_work),
+      'cancelled', false, 'reason', 'already_completed',
+      'receipt_id', v_receipt->>'receipt_id', 'entry_id', v_receipt->>'entry_id',
+      'replayed', false);
+    return clara._finish_op(w.firm_id, 'cancel_accounting_work', p_op_key, v_result);
   end if;
 
-  -- 1 · ALREADY TERMINAL. A double cancel is not an error: the human's intent is already true.
+  -- 2 · ALREADY TERMINAL. A double cancel is not an error: the human's intent is already true.
   if w.status in ('completed','refused','failed','cancelled','expired') then
     v_result := jsonb_build_object('work_id', p_work, 'task_id', w.current_task_id,
       'status', w.status, 'cancelled', false, 'reason', 'already_terminal', 'replayed', false);
     return clara._finish_op(w.firm_id, 'cancel_accounting_work', p_op_key, v_result);
   end if;
 
-  -- 2 · THE OPERATION ALREADY WON. A cancel does NOT reverse a posted entry (ARCHITECTURE §6,
-  -- "取消不冲销已入账结果"); a correction is a separate, explicitly linked operation. The Work is
-  -- completed by its receipt, and the answer names the effect so the surface can link to it.
-  v_receipt := clara._work_committed_receipt(p_work);
-  if v_receipt is not null then
-    if v_task is not null and v_task_status not in ('completed','failed','cancelled','expired') then
-      -- #630 · THE ENGINE IS STILL ASKED TO STOP. The WORK is completed by its receipt and will
-      -- never read `cancelled` -- but the RUN is a separate, live thing that keeps taking turns
-      -- (and spending) until it finishes on its own. A human who pressed "Cancel Work" one second
-      -- after the commit was told nothing new would start, and that has to be true of the model
-      -- too. So the abort request is written and the world is notified BEFORE the settle: the
-      -- runtime's cancel sweep aborts the engine run, and clara.settle_work_run's receipt override
-      -- then answers `completed` whatever the aborted run asks for.
-      update clara.agent_tasks set status = 'cancel_requested', cancelled_by = p_author,
-             cancelled_at = now(), updated_at = now()
-       where id = v_task and status in ('running','awaiting_input');
-      perform pg_notify('clara_runtime_ctl', '');   -- empty payload (N1)
-      perform clara.settle_work_run(v_task, 'completed', null, null, v_receipt);
-    end if;
-    perform clara._audit(w.firm_id, p_author, null, null, 'cancel_accounting_work', null,
-      jsonb_build_object('work', p_work, 'task', w.current_task_id, 'op_key', p_op_key,
-        'outcome', 'already_completed', 'receipt', v_receipt));
+  -- 3 · THE RUN IS ALREADY OVER AND THE WORK NEVER HEARD. Reached whenever something other than
+  -- clara.settle_work_run terminalised the run -- `clara.cancel_agent_task` from the /activity
+  -- panel is the measured one. Converge by the receipt law (there is none here, arm 1 answered
+  -- that), then answer about the Work that actually exists, under the SAME `already_terminal` word
+  -- arm 2 speaks, so no surface needs new vocabulary.
+  if v_task is not null and v_task_status in ('completed','failed','cancelled','expired') then
+    perform clara._converge_work_terminal(p_work, v_task_status);
+    select * into w from clara.accounting_work aw where aw.id = p_work;
     v_result := jsonb_build_object('work_id', p_work, 'task_id', w.current_task_id,
-      'status', 'completed', 'cancelled', false, 'reason', 'already_completed',
-      'receipt_id', v_receipt->>'receipt_id', 'entry_id', v_receipt->>'entry_id',
-      'replayed', false);
+      'status', w.status, 'cancelled', false, 'reason', 'already_terminal', 'replayed', false);
     return clara._finish_op(w.firm_id, 'cancel_accounting_work', p_op_key, v_result);
   end if;
 
-  -- 3 · ALREADY STOPPING. The abort is requested and the run is settling; asking twice changes
+  -- 4 · ALREADY STOPPING. The abort is requested and the run is settling; asking twice changes
   -- nothing and must not re-notify the world or overwrite who asked first.
   if v_task is not null and v_task_status = 'cancel_requested' then
     v_result := jsonb_build_object('work_id', p_work, 'task_id', v_task, 'status', w.status,
@@ -1223,7 +1254,7 @@ begin
   end if;
 
   if v_task is null or v_task_status in ('queued','held') then
-    -- 4 · NO ENGINE RUN. Nothing to abort, so the terminal is reached now — through
+    -- 5 · NO ENGINE RUN. Nothing to abort, so the terminal is reached now — through
     -- clara.settle_work_run, because ONE verb writes this lane's terminals and a second writer is
     -- how a task row and a Work row come to disagree.
     if v_task is not null then
@@ -1240,18 +1271,19 @@ begin
        where id = p_work;
     end if;
   elsif v_task_status in ('completed','failed','cancelled','expired') then
-    -- 5a · THE BELT BEHIND ARM 0. If a terminal run is still paired with a non-terminal Work at
-    -- this point, the convergence above could not write (a Work whose status the estate does not
-    -- know how to derive). Refuse in this lane's OWN vocabulary rather than letting
+    -- 6a · THE BELT BEHIND ARM 3. If a terminal run is still paired with a non-terminal Work at
+    -- this point, arm 3's convergence returned without writing (a Work whose status the estate
+    -- does not know how to derive). Refuse in this lane's OWN vocabulary rather than letting
     -- `clara._tf_agent_task_update`'s untyped "illegal transition" out of a door whose every other
-    -- refusal is typed -- a codeless 409 is a dead end for the surface.
+    -- refusal is typed -- a codeless 409 is a dead end for the surface. The route maps this to
+    -- `409 {error:'run_already_terminal', status}`.
     raise exception 'this work''s run has already ended (%) -- it cannot be asked to stop',
       v_task_status
       using errcode='CLR13',
         detail=jsonb_build_object('reason','run_already_terminal','status',w.status,
           'task_status',v_task_status)::text;
   else
-    -- 5 · A LIVE ENGINE RUN. The cancel is a REQUEST: the runtime aborts the run and then settles
+    -- 6 · A LIVE ENGINE RUN. The cancel is a REQUEST: the runtime aborts the run and then settles
     -- it (clara.settle_work_run translates whatever it asks for). The Work reads `stopping`
     -- through the status mirror until that boundary is known.
     update clara.agent_tasks set status = 'cancel_requested', updated_at = now() where id = v_task;

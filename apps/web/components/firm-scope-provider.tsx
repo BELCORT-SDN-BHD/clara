@@ -73,3 +73,16 @@ export function useFirmScope(): FirmScopeValue {
   }
   return scope;
 }
+
+/**
+ * #630 — THE SAME SCOPE, FOR A COMPONENT THAT MAY BE MOUNTED OUTSIDE THE PROVIDER.
+ *
+ * The Clara transcript's part cards render under the rail (which IS inside the firm layout) AND in
+ * node cells that mount one card on its own. `useFirmScope` throwing is right for a page that
+ * cannot work without a firm; a part card that needs the reader's RANK only to decide whether to
+ * OFFER a destructive control must degrade to "do not offer" rather than take the transcript down
+ * with it. Absent context is therefore null, and the caller's floor check fails closed.
+ */
+export function useFirmScopeOrNull(): FirmScopeValue | null {
+  return useContext(FirmScopeContext);
+}

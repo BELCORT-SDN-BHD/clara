@@ -211,7 +211,7 @@ test("pageOf slices, clamps an out-of-range page, and never reports 'page 1 of 0
 function link(over: Partial<EntryLinkRow> & { entry_id: string }): EntryLinkRow {
   return {
     status: "approved", origin: "agent", work_id: null, receipt_id: null, logical_op_id: null,
-    purpose: null, basis_origin: null, initiator: null, initiator_role: null,
+    purpose: null, basis_origin: null, initiated_by: null, initiated_by_role: null, responsible: null,
     document_id: null, document_source: null, attached_at: null, released_at: null,
     reversal_of: null, reversed_by: null, reversal_reason: null,
     ...over,

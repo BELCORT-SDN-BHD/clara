@@ -4130,6 +4130,7 @@
     "notFoundTitle": "We could not find this Work",
     "notFoundBody": "It may belong to another firm, or it may have been addressed wrongly.",
     "conflictTitle": "That could not be cancelled",
+    "conflictBody": "The database refused the request in the state it found. The Work's own row below is the answer \u2014 read it, then decide.",
     "unavailableTitle": "We could not reach the runtime",
     "unavailableBody": "Nothing was cancelled. Try again in a moment.",
     "lostTitle": "We did not hear back",
@@ -4145,12 +4146,19 @@
     "takeOverCancel": "Not now",
     "takeOverAcceptedTitle": "You are responsible for this Work",
     "takeOverAcceptedBody": "A new attempt is queued under your authority. The person who asked for it stays on the record.",
+    "takeOverDeniedTitle": "You cannot take responsibility for this Work",
+    "takeOverDeniedBody": "Taking responsibility for accounting work needs a bookkeeper role in this firm. Ask someone who has one.",
+    "takeOverUnavailableTitle": "We could not reach the runtime",
+    "takeOverUnavailableBody": "Nothing changed. Nobody was made responsible, and the Work is exactly as it was. Try again in a moment.",
+    "takeOverLostTitle": "We did not hear back",
+    "takeOverLostBody": "The handover may or may not have been recorded. This page re-reads the Work below \u2014 that row is the answer, not this message.",
     "notTakeableTitle": "This Work is not available to take over",
     "notTakeableBody": "Its state changed while you were looking at it. The row below is the database's own.",
     "stopReply": "Stop reply",
     "stopping": "Stopping\u2026",
     "stoppedMarker": "Stopped",
     "responsibleNow": "Responsible now",
-    "stopReplyHint": "Stops this reply. Work that has already been accepted keeps running \u2014 use Cancel Work to stop that."
+    "stopReplyHint": "Stops this reply. Work that has already been accepted keeps running \u2014 use Cancel Work to stop that.",
+    "stopFailed": "Could not stop this reply \u2014 it is still running. Stopping a reply needs a bookkeeper role in this firm."
   }
 }

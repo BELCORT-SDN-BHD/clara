@@ -20,11 +20,10 @@
 // timeout instead of a measurement, and a test that can only fail by timing out says nothing about
 // what it was testing.
 
-import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { MockLanguageModelV4, simulateReadableStream } from "ai/test";
 
-void writeFileSync; void readFileSync;   // imported for parity with the sibling serve files
 const GATE = process.env.CLARA_WORK_CANCEL_GATE || null;
 const HELD_MARKER = process.env.CLARA_WORK_CANCEL_HELD || null;
 const HOLD_MS = Number(process.env.CLARA_WORK_CANCEL_HOLD_MS || 20000);

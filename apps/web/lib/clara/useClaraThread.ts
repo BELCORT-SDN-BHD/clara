@@ -113,13 +113,19 @@ export function useClaraThread(
    *  turn started is a separate `clara.agent_tasks` row with no cascade between them
    *  (packages/runtime/tests/control-work-cancel.test.mjs proves it against the real doors), and
    *  stopping a reply must never stop accounting a person already accepted. */
-  stopReply: () => Promise<"stopped" | "idle" | "failed">;
+  stopReply: () => Promise<"stopped" | "pending" | "idle" | "failed">;
 } {
   const state = useClaraThreadState(threadId);
   const loadedRef = useRef<string | null>(null);
   const [loadAttempt, setLoadAttempt] = useState(0);
   /** The live stream's controller, or null when nothing is streaming. */
   const abortRef = useRef<AbortController | null>(null);
+  /** #630 (review) — A STOP PRESSED BEFORE THERE IS ANYTHING TO STOP. `beginSend` makes the control
+   *  visible the moment a person presses Send, and `postTurn` can take several hundred milliseconds
+   *  to come back with the task id. A press inside that window used to abort nothing, answer `idle`,
+   *  and let the whole reply stream in behind a UI that said "Stopped". The intent is remembered
+   *  here and CONSUMED by `sendMessage` the instant the task exists. */
+  const pendingStopRef = useRef(false);
 
   // THE FIRST TRANSCRIPT READ IS RETRYABLE, and this effect is why it has to be (#514's
   // review, found on main). `loadedRef` fires the read once per thread id; a FAILED first
@@ -195,6 +201,21 @@ export function useClaraThread(
       }
       claraThreadStore.markAccepted(threadId, result.taskId);
 
+      // …AND THE STOP THAT ARRIVED WHILE THIS WAS IN FLIGHT IS HONOURED HERE. The turn is admitted
+      // — the runtime has a task and a run — so the honest act is to cancel THAT, not to pretend
+      // the press did nothing. No stream is attached at all: there is nothing for this tab to read
+      // and nothing for the person to wait through.
+      if (pendingStopRef.current) {
+        pendingStopRef.current = false;
+        claraThreadStore.markSent(threadId, parts);
+        try {
+          await cancelAgentTask(result.taskId, { session: auth });
+        } catch {
+          /* the same benign refusals stopReply() swallows: a turn that finished first is CLR11 */
+        }
+        return false;
+      }
+
       // 裁-132: the turn's start comes from the DB's own row for the task the runtime just
       // minted, never from `Date.now()` at the moment this promise resolved. Fired and not
       // awaited — the composer must not wait on a progress indicator — and fail-quiet: no
@@ -228,7 +249,16 @@ export function useClaraThread(
           // AN ABORT IS NOT AN ERROR. The human asked for it, and painting "stream error:
           // AbortError" over their own decision would be the surface arguing with them.
           if (controller.signal.aborted) {
-            if (!opened) resolve(false);
+            // …AND THE SEND STATE MUST LEAVE `sending`. Measured (review): an abort that landed
+            // after the task was accepted but BEFORE the SSE fetch opened resolved the caller
+            // without ever transitioning the store, so the composer and its attachment controls
+            // stayed disabled for the life of the mount. The turn WAS sent — `postTurn` accepted
+            // it — so `markSent` is the true transition, not a cosmetic unlock.
+            if (!opened) {
+              opened = true;
+              claraThreadStore.markSent(threadId, parts);
+              resolve(false);
+            }
             return;
           }
           claraThreadStore.markSendFailed(threadId, `stream error: ${(err as Error).message}`);
@@ -256,13 +286,24 @@ export function useClaraThread(
     }
   }, [auth, threadId]);
 
-  const stopReply = useCallback(async (): Promise<"stopped" | "idle" | "failed"> => {
+  const stopReply = useCallback(async (): Promise<"stopped" | "pending" | "idle" | "failed"> => {
     // THE READ STOPS FIRST, unconditionally. Whatever the door answers, this tab must stop
     // rendering a reply the person has said they do not want.
     abortRef.current?.abort();
     abortRef.current = null;
-    const taskId = claraThreadStore.getThread(threadId).activeTaskId;
-    if (!taskId) return "idle";
+    const thread = claraThreadStore.getThread(threadId);
+    const taskId = thread.activeTaskId;
+    if (!taskId) {
+      // NOTHING TO CANCEL *YET* IS NOT NOTHING TO CANCEL. A turn that is mid-admission
+      // (`sendStatus === "sending"`, no task id back yet) is remembered and cancelled the moment
+      // `sendMessage` has an id; anything else genuinely has no live turn.
+      if (thread.sendStatus === "sending") {
+        pendingStopRef.current = true;
+        return "pending";
+      }
+      return "idle";
+    }
+    pendingStopRef.current = false;
     try {
       await cancelAgentTask(taskId, { session: auth });
       return "stopped";

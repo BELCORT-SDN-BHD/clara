@@ -227,18 +227,32 @@ export function isCancellableWorkStatus(status: string): boolean {
 /**
  * #630 — TRUE when "Take responsibility" is worth offering.
  *
- * The database's own precondition is "terminal AND its responsible human is no longer authorised",
- * and the browser can only see the first half plus the STORED reason. So this predicate is
- * deliberately the narrow one: a Work refused for `authority_lost`, which is the case
- * `claraWork`'s authority recheck writes and the one a colleague can actually rescue. A Work that
- * failed for another reason may ALSO be takeable once its person is gone — the door re-reads
- * membership and decides — but offering the control on that guess would put a button in front of
- * people that answers `not_takeable` almost every time.
+ * THE PREDICATE IS THE DOOR'S FIRST HALF PLUS EVERY REASON THE ESTATE WRITES FOR AN AUTHORITY
+ * LOSS, and the second part is a measurement rather than a preference. An earlier cut keyed on
+ * exactly `authority_lost` — the reason `claraWork`'s RESUME-time recheck writes — and the
+ * revocation path this ticket is actually about does not go through that recheck at all: a
+ * membership pulled mid-run is caught at the next tool call, inside `clara.mint_wake_credential`.
+ * Measured on the rig, the Work settled `refused` with
+ * `{"code":"CLR10","reason":null,"message":"on_behalf_of must be an active bookkeeper+ of the
+ * firm"}` — so the offer never appeared, and the only control on the page was a Retry that mints
+ * the SAME dead credential and dies the same way. 0184 §H2 types that refusal `authority_lost`;
+ * `obo_not_active` is the posting core's own belt behind it, and both name one fact.
+ *
+ * A Work refused for some OTHER reason may also be takeable once its person is gone — the door
+ * re-reads live membership and decides — but the browser cannot see that, and offering the control
+ * on the guess would put a button in front of people that answers `not_takeable` almost every time.
+ * `clara.take_over_accounting_work` is the judge either way; this only decides what to OFFER.
  */
+const TAKE_OVER_REASONS: ReadonlySet<string> = new Set([
+  "authority_lost",   // claraWork's resume-time recheck (claraWork.v2.impl.ts)
+  "obo_not_active",   // clara._record_journal_entry_core's commit-time belt (0184 §F)
+]);
+
 export function isTakeOverable(work: Pick<AccountingWorkRow, "status" | "error">): boolean {
   if (!TERMINAL_WORK_STATUSES.has(work.status)) return false;
   if (work.status === "completed" || work.status === "cancelled") return false;
-  return work.error?.reason === "authority_lost";
+  const reason = work.error?.reason;
+  return typeof reason === "string" && TAKE_OVER_REASONS.has(reason);
 }
 
 /** A persisted jsonb line is not type-checked at the wire, so a cents field can

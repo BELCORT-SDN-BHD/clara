@@ -420,6 +420,29 @@ test("630.route: the boundary's own refusals are 409s naming the Work status", (
     { status: 409, body: { error: "work_settled", status: "refused" } });
 });
 
+test("630.route: a serialization failure is a TRANSIENT, never an internal error", () => {
+  // MEASURED before 0184 made the lock order global: a /activity task-cancel racing a Work-level
+  // cancel of the same Work raised 40P01, `workErrorStatus` returned null, and the human got
+  // `500 {error:"internal"}` for something that had simply not run. Both codes now answer under
+  // their own word, ahead of every reason-keyed arm, because neither carries a detail.
+  for (const code of ["40P01", "40001"]) {
+    assert.equal(workErrorStatus(code, null), 409, `${code} is claimed`);
+    assert.deepEqual(workErrorResponse(raised(code, null)),
+      { status: 409, body: { error: "transient", reason: "serialization" } },
+      `${code} answers as a transient`);
+  }
+  // …and it is not mistaken for a state conflict even when a detail happens to ride along.
+  assert.equal(workErrorResponse(raised("40P01", { reason: "not_takeable" })).body.error, "transient");
+});
+
+test("630.route: the stranded-pair refusal is never a codeless 409", () => {
+  // The arm that used to leak `clara._tf_agent_task_update`'s untyped CLR13 ("illegal agent_task
+  // transition cancelled -> cancel_requested") to a human as `{error:"conflict"}` with nothing to
+  // act on. It now names itself and carries the Work status.
+  assert.deepEqual(workErrorResponse(raised("CLR13", { reason: "run_already_terminal", status: "cancelled" })),
+    { status: 409, body: { error: "run_already_terminal", status: "cancelled" } });
+});
+
 test("630.route: the cancel door's authority and identity refusals keep the estate's statuses", () => {
   assert.equal(workErrorStatus("CLR11", "work_not_found"), 404, "no existence oracle across firms");
   assert.equal(workErrorStatus("CLR04", "actor_not_active"), 403);

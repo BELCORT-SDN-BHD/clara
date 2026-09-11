@@ -258,6 +258,13 @@ export function workErrorStatus(code: string | undefined, reason: string | null)
   // already spoken for", which is the chat route's reading of the same two codes.
   if (code === "CLR08") return 409;
   if (code === "23505") return 409;
+  // #630 · POSTGRESQL'S OWN TRANSIENTS. `40P01` (deadlock_detected) and `40001`
+  // (serialization_failure) say NOTHING ABOUT THE REQUEST: the statement did not run, no effect
+  // exists, and sending it again is the whole remedy. Falling through to `null` answered
+  // `500 {error:"internal"}` — an internal-failure page for something the human could simply press
+  // again. 0184 removed the lock-order cycle that made 40P01 reachable in this lane; this is the
+  // belt behind that fix, not a substitute for it.
+  if (code === "40P01" || code === "40001") return 409;
   return null;
 }
 
@@ -267,7 +274,12 @@ export function workErrorStatus(code: string | undefined, reason: string | null)
  *  `clara.retry_accounting_work`, their call graph and the triggers on the two relations they
  *  write; CLR03 and CLR14 are deliberately ABSENT because neither door can raise them (the
  *  wake lane's CLR03s are classified by claraWork.v1.errors.ts, not by an HTTP status). */
-export const WORK_MAPPED_CODES = Object.freeze(["CLR04", "CLR08", "CLR10", "CLR11", "CLR13", "23505"]);
+export const WORK_MAPPED_CODES = Object.freeze([
+  "CLR04", "CLR08", "CLR10", "CLR11", "CLR13", "23505",
+  // #630 · raised by the SERVER, never by a body — exempted from the prosrc census by name for
+  // exactly the reason 23505 is.
+  "40P01", "40001",
+]);
 
 /** Read the typed `detail.reason` off a raised error. PostgreSQL's own details are plain text, so
  *  a non-JSON detail yields null rather than a guess. */
@@ -342,6 +354,13 @@ export function workErrorResponse(err: unknown): { status: number; body: Record<
   const code = (err as { code?: string })?.code;
   const reason = reasonOf(err);
   const status = workErrorStatus(code, reason);
+  // #630 · A TRANSIENT IS NOT A CONFLICT WITH THE WORLD, and it must not be dressed as one. It
+  // carries no `detail.reason` (PostgreSQL raised it, not a door), so it is answered here BEFORE
+  // every reason-keyed arm below, under its own word: the surface says "that did not go through —
+  // try again" rather than showing a state the Work is not in.
+  if (code === "40P01" || code === "40001") {
+    return { status: 409, body: { error: "transient", reason: "serialization" } };
+  }
   // #630 · THE TAKEOVER'S BASIS GATE IS NOT A MALFORMED BASIS, so it does not wear the 400 body
   // below. `clara.take_over_accounting_work` refuses a `clara_interpreted` Work whose digest the
   // colleague has not confirmed, and the DIGEST IS THE WHOLE POINT OF THE REFUSAL: the surface
@@ -408,6 +427,13 @@ export function workErrorResponse(err: unknown): { status: number; body: Record<
       // #630 · the takeover's own 409, in the same shape and for the same reason: the surface
       // renders "this Work is not available to take over" beside the status that made it so.
       return { status: 409, body: { error: "not_takeable", status: detailField(err, "status") } };
+    }
+    if (reason === "run_already_terminal") {
+      // #630 · THE STRANDED-PAIR BELT'S OWN 409. Before 0184 this shape reached the human as the
+      // task matrix's untyped "illegal agent_task transition" — a codeless conflict banner with
+      // no next move. It now names itself and carries the Work status, so the surface can say the
+      // run has already ended and show what the Work settled as.
+      return { status: 409, body: { error: "run_already_terminal", status: detailField(err, "status") } };
     }
     if (reason === "work_cancelled" || reason === "work_settled") {
       // #630 · the BOUNDARY's own refusals, reachable here only through a door that calls the

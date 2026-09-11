@@ -102,9 +102,18 @@ export function ClaraThreadView({
   const [attachmentClearToken, setAttachmentClearToken] = useState(0);
   const { state, sendMessage, retryConnection, retryLoad, stopReply } = useClaraThread(auth, threadId ?? "");
   /** #630 — whether THIS tab stopped the reply. A marker, not a status: the transcript keeps the
-   *  partial prose exactly as it arrived and this says the stream ended because a person said so. */
+   *  partial prose exactly as it arrived and this says the stream ended because a person said so.
+   *
+   *  IT IS PER TURN, NOT PER MOUNT (review finding). It used to be a one-way latch — set once,
+   *  never cleared — so one stop left the "Stopped" marker sitting under every LATER reply, the
+   *  transcript's one `role="status"` announcer silent for the rest of the session, and the Stop
+   *  control permanently unofferable. It is reset on every submit and on every thread change. */
   const [stopped, setStopped] = useState(false);
   const [stopping, setStopping] = useState(false);
+  /** #630 — the door REFUSED the stop (a rank floor, a turn that finished first). The stream is
+   *  stopped either way, but the run is not, and saying "Stopped" over that would be the surface
+   *  asserting something it does not know. */
+  const [stopFailed, setStopFailed] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const handleAttachmentState = useCallback((next: ComposerAttachmentState) => setAttachments(next), []);
 
@@ -143,6 +152,16 @@ export function ClaraThreadView({
     setAttachments({ parts: [], blocked: false });
   }, [clientId, threadId]);
 
+  // #630 (review) — AND THE STOP MARKER IS A FACT ABOUT ONE TURN IN ONE THREAD. `ClaraRail` mounts
+  // this component with no key on `threadId` (its structural key moved up to `RailMount`, by
+  // `clientId`), so switching threads is a prop change with no remount and the marker would
+  // otherwise follow the reader into a conversation it says nothing about.
+  useEffect(() => {
+    setStopped(false);
+    setStopFailed(false);
+    setStopping(false);
+  }, [threadId]);
+
   // P2 FOLD SEAM C: the ⌘K "Ask" -> composer handoff (ClaraRail's event subscriber
   // requests this; see lib/command/bus.ts's CLARA_FOCUS_RAIL_EVENT contract). A new
   // `token` is applied at most once — prefilling never overwrites a draft the human
@@ -163,6 +182,20 @@ export function ClaraThreadView({
 
   const notSignedIn = state.loadError === "not signed in";
   const busy = state.sendStatus === "sending";
+
+  // #630 (review) — IS THERE A TURN TO STOP? `busy` is `sendStatus === "sending"`, which is true
+  // only between `beginSend` and `markSent` — and `markSent` fires when the stream OPENS, not when
+  // the turn ends. Gating the Stop control on it alone mounted the button for the few hundred
+  // milliseconds of POST-and-connect and unmounted it exactly as the reply began to arrive; for a
+  // turn this tab did not post (a reload onto a running turn, a reattach) it never appeared at all.
+  // The question the control actually answers is "is a turn live?", and these are the four ways the
+  // estate says yes: this tab is posting one, a stream is carrying one, a stream is reconnecting to
+  // one, or the DATABASE's own row for the active task says it is still running or parked.
+  const turnLive = busy
+    || state.stream.status === "streaming"
+    || state.stream.status === "detached"
+    || (state.activeTaskId !== null
+        && (state.turnStatus === "running" || state.turnStatus === "awaiting_input"));
 
   // The parked question, live. It cannot come from `state.messages`: the assistant row
   // is inserted by `clara.settle_chat_turn`, which cancels every still-pending
@@ -215,6 +248,10 @@ export function ClaraThreadView({
 
   async function submitDraft() {
     if (sendDisabled) return;
+    // A NEW TURN IS NOT THE STOPPED ONE. Cleared before the send so the marker, the refusal line
+    // and the control's own gate all speak about the turn that is about to start.
+    setStopped(false);
+    setStopFailed(false);
     const text = draft;
     const opened = await sendMessage(text, attachments.parts);
     // #614 A7 — the draft is forgotten ONLY on a send that actually opened its
@@ -422,10 +459,19 @@ export function ClaraThreadView({
         {stopped && (
           <p role="status" className="text-xs font-medium text-muted-foreground">{tw("stoppedMarker")}</p>
         )}
+        {/* #630 (review) — A REFUSED STOP IS NOT A STOP. `stopReply` answers three ways precisely so
+            the caller can say which one happened: `clara.begin_chat_turn` admits any active member
+            while `clara.cancel_agent_task` floors at bookkeeper, so a viewer or clerk pressing Stop
+            gets CLR04 — this tab stops READING, and the run carries on. Printing "Stopped" over that
+            is the surface telling somebody their reply was stopped when it was not. The control
+            stays offered: the turn is still live. */}
+        {stopFailed && !stopped && (
+          <p role="status" className="text-xs font-medium text-destructive">{tw("stopFailed")}</p>
+        )}
         {/* STOP REPLY. Named in full, everywhere, because the rail also carries "Cancel Work" on a
             Work card and a bare "Stop" on both would be the one confusion this ticket exists to
             remove. The hint says which is which without making the human guess. */}
-        {busy && !stopped ? (
+        {turnLive && !stopped ? (
           <div className="flex items-center gap-2">
             <Button
               type="button"
@@ -435,9 +481,17 @@ export function ClaraThreadView({
               title={tw("stopReplyHint")}
               onClick={() => {
                 setStopping(true);
-                void stopReply().then(() => {
-                  setStopped(true);
+                setStopFailed(false);
+                void stopReply().then((outcome) => {
                   setStopping(false);
+                  // THE HOOK'S ANSWER DECIDES THE SENTENCE, not the press.
+                  //   stopped  — the door cancelled the turn.
+                  //   pending  — the turn was mid-admission; the hook will cancel it the instant
+                  //              the runtime hands back a task id. Stopped from here on either way.
+                  //   failed   — the door refused; the run continues and the reader is told so.
+                  //   idle     — there was no live turn to stop; say nothing rather than invent it.
+                  if (outcome === "stopped" || outcome === "pending") setStopped(true);
+                  else if (outcome === "failed") setStopFailed(true);
                 });
               }}
             >

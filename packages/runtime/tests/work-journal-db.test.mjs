@@ -573,8 +573,12 @@ test("623.db.census: every code the Work doors raise has an HTTP status — no b
 test("623.db.census: the map claims nothing these doors cannot raise", { skip: SKIP }, async () => {
   const found = await reachableCodes();
   // 23505 is PostgreSQL's own unique_violation, raised by an INDEX rather than a RAISE, so it
-  // can never appear in a prosrc census — exempted here by name, not by a wildcard.
-  const claimed = WORK_MAPPED_CODES.filter((c) => c !== "23505");
+  // can never appear in a prosrc census — exempted here by name, not by a wildcard. #630 adds two
+  // of the same shape: 40P01 and 40001 are raised by the SERVER when it breaks a lock cycle or a
+  // snapshot conflict, never by a door body, and they are claimed so a transient answers "try
+  // again" instead of a bare 500.
+  const SERVER_RAISED = new Set(["23505", "40P01", "40001"]);
+  const claimed = WORK_MAPPED_CODES.filter((c) => !SERVER_RAISED.has(c));
   const unreachable = claimed.filter((c) => !found.has(c));
   assert.deepEqual(
     unreachable,

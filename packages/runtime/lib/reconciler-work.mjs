@@ -298,18 +298,23 @@ export async function workResultForTask(client, taskId) {
 export function cancelSettleForWork(result) {
   const effect = committedWorkResult(result);
   if (effect !== null) return { outcome: "completed", errorCode: null, error: null, result: effect };
-  return {
-    outcome: "cancelled",
-    errorCode: null,
-    error: {
-      code: "cancelled",
-      reason: "cancelled",
-      message: "This Work was cancelled before an entry was recorded. Nothing was posted.",
-      recoverable: true,
-    },
-    result: null,
-  };
+  return { outcome: "cancelled", errorCode: null, error: { ...WORK_CANCELLED_ERROR }, result: null };
 }
+
+/**
+ * THE CANCELLATION'S OWN WORDS, ONCE ON THIS SIDE. The database's twin is
+ * `clara._work_cancelled_error()` (0184 §A0), which every SQL writer of this fact reaches for; this
+ * is the JS half, and `work-journal-db.test.mjs` pins the two EQUAL against a live catalog so the
+ * claim is checked rather than asserted in a comment. A copy-edit applied to one of them is a
+ * failing test, not a Work that describes one event two ways depending on which path settled it.
+ * @type {{code:string, reason:string, message:string, recoverable:boolean}}
+ */
+export const WORK_CANCELLED_ERROR = Object.freeze({
+  code: "cancelled",
+  reason: "cancelled",
+  message: "This Work was cancelled before an entry was recorded. Nothing was posted.",
+  recoverable: true,
+});
 
 /** Settle an accounting Work terminally (idempotent by task — an already-terminal task returns
  *  `{"replayed":true}` rather than raising). `result` rides to `p_result` so a receipt-aware
@@ -345,6 +350,10 @@ export async function reconcileAccountingWorkTasks(client, deps) {
   } = deps;
   const out = {
     workReenqueued: 0,
+    // #630 · ITS OWN COUNTER, for the C34.1 reason every other one has one: "a run ended without
+    // ever settling its Work" is a DIFFERENT fact about the estate from "a run died and the
+    // reconciler settled it", and a number that could mean either hides the first.
+    workConverged: 0,
     // The receipt-aware arm gets its OWN counter for the same C34.1 reason the other three have
     // one: "the run died but the entry is on the books" and "the run died and nothing was posted"
     // are different facts about the estate, and one number that could mean either hides the first.
@@ -372,6 +381,39 @@ export async function reconcileAccountingWorkTasks(client, deps) {
       out.workReenqueued += 1;
     } catch (err) {
       log(`[reconcile] accounting-work re-enqueue failed task=${t.id}: ${err?.message ?? err}`);
+    }
+  }
+
+  // §A2 — #630 · A TERMINAL RUN UNDER A LIVE WORK. The third belt behind the status mirror and
+  // the cancel door: a pair that was already broken when 0184 applied, or one made by any future
+  // writer that terminalises a task without settling its Work, is repaired here. MEASURED shape:
+  // `clara.cancel_agent_task` on a QUEUED accounting-work task (one click in /activity) wrote the
+  // task `cancelled` and left the Work `queued` forever — uncancellable, unretryable, and invisible
+  // to every other arm of this sweep (§A wants `queued` TASKS, §B wants running/parked ones).
+  //
+  // `clara.settle_work_run` is still the ONE verb that writes this lane's terminals: on an
+  // already-terminal task it replays without re-settling the run and converges the WORK by the
+  // receipt law, answering `converged` with the status it wrote. This arm does not decide the
+  // terminal and must not: it only asks. Runs BEFORE the `getRun` guard below, because repairing
+  // a broken pair needs no engine at all.
+  const stranded = await client.query(
+    `select t.id, t.status from clara.agent_tasks t
+       join clara.accounting_work w on w.id = t.work_id
+      where t.kind = 'accounting_work'
+        and t.status in ('completed','failed','cancelled','expired')
+        and w.current_task_id = t.id
+        and w.status not in ('completed','refused','failed','cancelled','expired')
+        and ($1::uuid is null or t.firm_id = $1)
+      order by t.created_at limit 20`,
+    [onlyFirm],
+  );
+  for (const t of stranded.rows) {
+    try {
+      await settleWorkTerminal(client, t.id, "cancelled", null, null, null);
+      out.workConverged += 1;
+    } catch (err) {
+      out.workSettleFailed += 1;
+      log(`[reconcile] accounting-work convergence failed task=${t.id} status=${t.status}: ${err?.message ?? err}`);
     }
   }
 

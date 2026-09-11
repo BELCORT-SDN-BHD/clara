@@ -32,12 +32,21 @@ export type SummaryRow = [label: string, value: string | null | undefined];
 
 export function PartSummaryCard({
   title,
+  titleId,
   rows,
   note,
   children,
   link,
 }: {
   title: string;
+  /**
+   * #630 — A LANDMARK TO HAND FOCUS BACK TO. A card whose own control unmounts (an accepted
+   * "Cancel Work" moves the Work out of a cancellable status and takes the trigger with it) leaves
+   * a keyboard reader on `<body>`, which in a long scrolling transcript means losing their place
+   * entirely. Naming the title makes it a `tabIndex={-1}` target the dialog can return to — the
+   * same posture the Work detail page uses for its heading. Absent, nothing changes.
+   */
+  titleId?: string;
   rows: SummaryRow[];
   note?: string | null;
   children?: ReactNode;
@@ -46,7 +55,13 @@ export function PartSummaryCard({
   const present = rows.filter((r): r is [string, string] => r[1] != null && r[1] !== "");
   return (
     <div className="enter-content flex flex-col gap-2 rounded-lg border border-border bg-card p-3 text-sm">
-      <span className="font-medium text-card-foreground">{title}</span>
+      <span
+        id={titleId}
+        tabIndex={titleId === undefined ? undefined : -1}
+        className="font-medium text-card-foreground outline-none"
+      >
+        {title}
+      </span>
       <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
         {present.map(([label, value]) => (
           <Fragment key={label}>

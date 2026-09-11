@@ -239,8 +239,21 @@ test("wc.5 a Work that ALREADY HOLDS a committed receipt answers already_complet
   const row = await workRow(w.work_id);
   assert.equal(row.status, "completed", "wc.5 the Work settles COMPLETED on its own receipt");
   assert.equal(row.error, null, "wc.5 …carrying no error");
-  assert.equal((await taskRow(w.task_id)).status, "completed", "wc.5 the run is settled too");
+  assert.equal(row.result.entry_id, receipt.entry_id, "wc.5 …and the result carries the entry");
+
+  // THE RUN IS STILL ASKED TO STOP. The Work is finished; the model is not, and a human who was
+  // told nothing new would start must not be paying for turns after it. The task therefore holds
+  // the abort REQUEST, which is what the runtime's cancel sweep reads before it calls cancelRun —
+  // settling it here would hide the row from that sweep and the engine would never be told.
+  const task = await taskRow(w.task_id);
+  assert.equal(task.status, "cancel_requested", "wc.5 the engine run is asked to abort");
+  assert.equal(task.cancelled_by, BOB(), "wc.5 …by the human who pressed it");
   assert.equal((await receiptsForWork(w.work_id)).length, 1, "wc.5 exactly one receipt");
+
+  // …and when the sweep settles that run, the receipt override keeps the Work completed.
+  await settleWorkRun({ task: w.task_id, outcome: "cancelled" });
+  assert.equal((await workRow(w.work_id)).status, "completed",
+    "wc.5 the settle that follows the abort still answers COMPLETED — money in the ledger is never cancelled");
 });
 
 test("wc.6 the door is not an existence oracle and holds the bookkeeper floor", async (t) => {

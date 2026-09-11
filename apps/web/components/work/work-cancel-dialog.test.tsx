@@ -38,6 +38,10 @@ const DIGEST = "a".repeat(64);
 
 type Attempt = { workId: string; opKey: string; basisDigest?: string | null };
 
+/** One attribute off a stub node — the house form (`p6-3-a11y.test.tsx`'s own helper). */
+const attrOf = (n: Stub, name: string): string | null =>
+  typeof n.getAttribute === "function" ? (n.getAttribute as (k: string) => string | null)(name) : null;
+
 function findIn(root: Stub, predicate: (n: Stub) => boolean): Stub | null {
   if (predicate(root)) return root;
   for (const c of ((root.childNodes as Stub[] | undefined) ?? [])) {
@@ -101,9 +105,22 @@ function CancelApp(props: {
 /** The page's own shape again: the offer hands its answer up and the PAGE renders it, which is what
  *  keeps "You are responsible for this Work" on screen after the Work goes `queued` and the offer
  *  itself unmounts. */
+/** The interpreted basis a colleague is being asked to take responsibility for — the FIGURES, not
+ *  a hash of them. Cents are integers, as the column is. */
+const BASIS = {
+  posting_date: "2026-09-01",
+  memo: "office rent paid from Maybank",
+  currency: "MYR",
+  lines: [
+    { account_code: "6100", debit_cents: 120000, credit_cents: 0, description: "office rent" },
+    { account_code: "1100", debit_cents: 0, credit_cents: 120000, description: "Maybank" },
+  ],
+};
+
 function TakeOverHost(props: {
   takeOver: (auth: unknown, input: Attempt) => Promise<TakeOverWorkResult>;
   basisOrigin?: string;
+  basis?: unknown;
 }): ReactElement {
   const [answer, setAnswer] = useState<TakeOverWorkResult | null>(null);
   return createElement(
@@ -113,6 +130,8 @@ function TakeOverHost(props: {
       workId: WORK,
       basisOrigin: props.basisOrigin ?? "clara_interpreted",
       basisDigest: DIGEST,
+      basis: (props.basis === undefined ? BASIS : props.basis) as never,
+      accountNames: new Map([["6100", "Rent expense"], ["1100", "Maybank current"]]),
       onTakenOver: () => {},
       onAnswer: setAnswer,
       takeOver: props.takeOver as never,
@@ -125,12 +144,23 @@ function TakeOverHost(props: {
 function TakeOverApp(props: {
   takeOver: (auth: unknown, input: Attempt) => Promise<TakeOverWorkResult>;
   basisOrigin?: string;
+  basis?: unknown;
 }): ReactElement {
   return createElement(NextIntlClientProvider, {
     locale: "en",
     messages,
     timeZone: "Asia/Kuala_Lumpur",
     children: createElement(TakeOverHost, props),
+  });
+}
+
+/** The rail's own composition: the SAME outcome component, mounted with `silent`. */
+function SilentOutcomeApp(result: CancelWorkResult): ReactElement {
+  return createElement(NextIntlClientProvider, {
+    locale: "en",
+    messages,
+    timeZone: "Asia/Kuala_Lumpur",
+    children: createElement("div", null, createElement(CancelOutcome, { result, clientId: CLIENT, silent: true })),
   });
 }
 
@@ -167,12 +197,15 @@ test("630d: opening the dialog calls NOTHING, and the safe action holds initial 
     assert.ok(confirm, "…and so does the destructive one");
     assert.equal(isKeyboardOperable(keep as never), true, "the safe action is a real, focusable control");
     assert.equal(isKeyboardOperable(confirm as never), true);
-    // FOCUS LANDS ON THE SAFE ACTION, asserted by moving it rather than by reading an attribute:
-    // React applies `autoFocus` by CALLING `.focus()`, so the attribute is never in the DOM and a
-    // cell keyed on it would pass on a dialog that focused the destructive button instead.
-    (keep as unknown as { focus: () => void }).focus();
-    assert.equal(activeElement(), keep,
-      "…and focus really reaches it: Enter must never cancel a person's Work for them");
+    // FOCUS LANDS ON THE SAFE ACTION, AND THIS CELL DOES NOT PUT IT THERE. An earlier cut called
+    // `keep.focus()` and then asserted `activeElement() === keep` — an assertion that cannot fail,
+    // whichever control the dialog actually focused. React applies `autoFocus` by CALLING
+    // `.focus()`, and `test/domInspect.ts` records every such call on `document.activeElement`, so
+    // the dialog's OWN choice is observable without the test making it. Move `autoFocus` to the
+    // destructive confirm and this now goes red.
+    assert.ok(activeElement() === keep,
+      "the dialog itself focuses the safe action: Enter must never cancel a person's Work for them");
+    assert.ok(activeElement() !== confirm, "…and never the destructive one");
     assert.deepEqual(checkKeyboardWalk(bodyNode() as never), [],
       "no tabindex-order or focus-visible violations while the dialog is open");
   } finally {
@@ -333,5 +366,106 @@ test("630d: a USER_DIRECT basis needs no confirm step — those figures were typ
     assert.equal(seen[0]!.basisDigest ?? null, null, "no digest is sent — there is nothing interpreted to confirm");
   } finally {
     await h.unmount();
+  }
+});
+
+// ===========================================================================================
+// #630 fix round — the four web findings the seven-lens review raised about this file.
+// ===========================================================================================
+
+test("630f: the confirm step RENDERS the basis it asks a colleague to take responsibility for", async () => {
+  // The copy says "Read it below". Before this there was nothing below it: the component was given
+  // the DIGEST — a hash — and never the figures, so the attestation the door's digest check records
+  // was one nobody had the means to make. A modal is precisely what a reader cannot see past, so
+  // the basis belongs inside it.
+  const h = await renderComponent(TakeOverApp({ takeOver: async () => ({ kind: "denied" }) }));
+  try {
+    await openCancel(h, "Take responsibility");
+    const text = bodyText();
+    assert.match(text, /Clara interpreted this basis from a conversation/, "the ask is still stated");
+    assert.match(text, /office rent paid from Maybank/, "…and the MEMO is on screen");
+    assert.match(text, /6100/, "…the account codes");
+    assert.match(text, /Rent expense/, "…resolved to names, as the page does it");
+    assert.match(text, /1,200\.00/, "…and the amount, in the currency's own units");
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("630f: a takeover answer that keeps the modal open is rendered INSIDE the modal", async () => {
+  // `lost` does not close the dialog — the human's next act is to retry the SAME decision. Rendered
+  // outside `DialogContent` it mounted behind the overlay: present in the tree, invisible and inert
+  // to the person looking at a dialog that appeared to have done nothing.
+  const h = await renderComponent(
+    TakeOverApp({ takeOver: async () => ({ kind: "lost", message: "socket closed" }) }),
+  );
+  try {
+    await openCancel(h, "Take responsibility");
+    const confirm = findIn(bodyNode(), (n) => n.tagName === "BUTTON" && textOf(n as never).includes("take responsibility"));
+    await h.act(async () => { await clickButton(confirm as never); });
+    await drain(h);
+    assert.match(bodyText(), /We did not hear back/, "the unobserved answer is on screen");
+    assert.match(bodyText(), /The handover may or may not have been recorded/,
+      "…in the TAKEOVER's own words, never the cancel's");
+    // …and it is inside the dialog: the dialog is still open, so its Title is still there.
+    assert.match(bodyText(), /Take responsibility for this Work\?/, "the dialog stayed open");
+    const dialogNode = findIn(bodyNode(), (n) => n.tagName === "DIV" && textOf(n as never).includes("Take responsibility for this Work?"));
+    assert.ok(dialogNode, "the dialog element is findable");
+    assert.match(textOf(dialogNode as never), /We did not hear back/,
+      "…and the banner is INSIDE it, not stranded behind the overlay");
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("630f: a REFUSED takeover is told in the takeover's words, not the cancel's", async () => {
+  const h = await renderComponent(TakeOverApp({ takeOver: async () => ({ kind: "denied" }) }));
+  try {
+    await openCancel(h, "Take responsibility");
+    const confirm = findIn(bodyNode(), (n) => n.tagName === "BUTTON" && textOf(n as never).includes("take responsibility"));
+    await h.act(async () => { await clickButton(confirm as never); });
+    await drain(h);
+    assert.match(bodyText(), /You cannot take responsibility for this Work/);
+    assert.equal(/You cannot cancel this Work/.test(bodyText()), false,
+      "a colleague refused a HANDOVER is not told about a cancellation they never attempted");
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("630f: `silent` strips the banner's own live region — the transcript owns the announcement", async () => {
+  // The rail's card lives inside `role="log" aria-live="polite"`. A banner that carries its own
+  // `role="status"`/`role="alert"` in there is a NESTED live region: the DS-04 defect #629 removed
+  // from this exact surface, and one `test/a11yRules.ts` refuses.
+  const loud = await renderComponent(
+    createElement(NextIntlClientProvider, {
+      locale: "en", messages, timeZone: "Asia/Kuala_Lumpur",
+      children: createElement("div", null,
+        createElement(CancelOutcome, { result: { kind: "denied" } as CancelWorkResult, clientId: CLIENT })),
+    }),
+  );
+  let loudRole: unknown = null;
+  try {
+    await loud.settle();
+    const node = findIn(loud.container as never, (n) => attrOf(n, "role") === "alert");
+    loudRole = node;
+    assert.ok(node, "without `silent` the banner announces itself, as it does on a page that owns no log");
+  } finally {
+    await loud.unmount();
+  }
+  assert.ok(loudRole);
+
+  const quiet = await renderComponent(SilentOutcomeApp({ kind: "denied" } as CancelWorkResult));
+  try {
+    await quiet.settle();
+    const node = findIn(quiet.container as never, (n) => {
+      const role = attrOf(n, "role");
+      return role === "alert" || role === "status";
+    });
+    assert.equal(node, null, "with `silent` the banner carries no live region at all");
+    assert.match(textOf(quiet.container as never), /You cannot cancel this Work/,
+      "…while still saying exactly the same thing to a reader");
+  } finally {
+    await quiet.unmount();
   }
 });

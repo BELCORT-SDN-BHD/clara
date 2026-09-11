@@ -21,7 +21,8 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { processCancellations } from "../lib/control.mjs";
 import { reconcileTasks } from "../lib/reconciler.mjs";
-import { cancelSettleForWork, committedWorkResult } from "../lib/reconciler-work.mjs";
+import { reconcileAccountingWorkTasks } from "../lib/reconciler-work.mjs";
+import { cancelSettleForWork, committedWorkResult, WORK_CANCELLED_ERROR } from "../lib/reconciler-work.mjs";
 import * as rig from "./rig.mjs";
 
 async function cancelLaneReady() {
@@ -171,8 +172,10 @@ test("cycle: a cancelled Work that DID post settles completed, carrying its entr
   await rig.humanQuery(w.owner, "select clara.cancel_agent_task($1::uuid,$2::text)",
     [w.taskId, `k-${randomUUID()}`]);
   assert.equal((await rig.readTask(w.taskId)).status, "cancel_requested");
-  assert.equal((await readWork(w.workId)).status, "stopping",
-    "…and the Work reads stopping through the 0184 mirror");
+  assert.equal((await readWork(w.workId)).status, "completed",
+    "…and the Work does NOT read stopping: its boundary is already known — the mirror applies the "
+    + "receipt law on this transition too, because saying 'stopping' about a posting that already "
+    + "happened is the hidden-effect failure this lane exists to prevent");
 
   const res = await rig.asRuntime((c) =>
     processCancellations(c, { cancelRun: async () => {}, onlyFirm: w.firm }));
@@ -292,4 +295,88 @@ test("boundary: a tool call arriving AFTER the cancel is refused work_cancelled 
   try { await postEntry(w); } catch (err) { again = err; }
   assert.equal(JSON.parse(again.detail).reason, "work_cancelled",
     "no new business action is admitted, however many times the model tries");
+});
+
+// ===========================================================================================
+// 6 · #630 fix round — the three edges the seven-lens review found unpinned.
+// ===========================================================================================
+
+test("cycle: a cancel that lost the race STILL aborts the engine run", { skip: SKIP }, async () => {
+  // The Work is completed by its receipt and will never read `cancelled`. The RUN is a separate
+  // live thing, and before this fix nothing ever told it to stop: the door settled the task to
+  // `completed` itself, so `processCancellations` (which selects `cancel_requested` rows) never
+  // saw it and `cancelRun` was never called. The model kept taking turns — and spending — after a
+  // human had been told nothing new would start.
+  const w = await claimedWork("c7");
+  const posted = await postEntry(w);
+  assert.equal(posted.posted, true, "precondition: the entry is on the books");
+
+  const answer = await cancelWork(w.workId, w.owner);
+  assert.equal(answer.reason, "already_completed", "the door says the operation won");
+  assert.equal(answer.status, "completed", "…and the Work is completed, not stopping");
+  assert.equal(answer.entry_id, posted.entry_id, "…naming the entry that won");
+  assert.equal((await rig.readTask(w.taskId)).status, "cancel_requested",
+    "the RUN carries the abort request the sweep reads");
+
+  const aborted = [];
+  const res = await rig.asRuntime((c) =>
+    processCancellations(c, { cancelRun: async (id) => aborted.push(id), onlyFirm: w.firm }));
+  assert.deepEqual(aborted, [w.runId], "the engine run WAS aborted");
+  assert.equal(res.settled, 1);
+  const work = await readWork(w.workId);
+  assert.equal(work.status, "completed", "…and the receipt still outranks the cancellation");
+  assert.equal(work.error, null);
+  assert.equal((await rig.readTask(w.taskId)).status, "completed", "the run is settled once");
+});
+
+test("repair: the sweep converges a Work whose run ended without ever settling it", { skip: SKIP }, async () => {
+  // The third belt behind the status mirror and the cancel door. MEASURED shape: a terminal
+  // accounting-work task under a live Work is invisible to every other arm of this sweep (§A wants
+  // queued TASKS, §B wants running/parked ones), so before this arm the pair sat there forever.
+  const w = await claimedWork("c8");
+  await rig.rootQuery("update clara.agent_tasks set status='cancelled' where id=$1", [w.taskId]);
+  await rig.rootQuery("update clara.accounting_work set status='running', error=null where id=$1", [w.workId]);
+  assert.equal((await readWork(w.workId)).status, "running", "precondition: the pair is broken");
+
+  const out = await rig.asRuntime((c) =>
+    reconcileAccountingWorkTasks(c, { enqueueClaraWork: async () => {}, onlyFirm: w.firm }));
+  assert.equal(out.workConverged, 1, "the sweep converged exactly one broken pair");
+  assert.equal(out.workSettleFailed, 0);
+  const work = await readWork(w.workId);
+  assert.equal(work.status, "cancelled", "…by the run's own terminal, there being no receipt");
+  assert.deepEqual(work.error, WORK_CANCELLED_ERROR, "…in the lane's one set of words");
+
+  // IDEMPOTENT: a converged pair is not converged again.
+  const again = await rig.asRuntime((c) =>
+    reconcileAccountingWorkTasks(c, { enqueueClaraWork: async () => {}, onlyFirm: w.firm }));
+  assert.equal(again.workConverged, 0, "nothing is rewritten on the next sweep");
+});
+
+test("repair: the sweep's convergence obeys the receipt law", { skip: SKIP }, async () => {
+  const w = await claimedWork("c9");
+  const posted = await postEntry(w);
+  await rig.rootQuery("update clara.agent_tasks set status='cancelled' where id=$1", [w.taskId]);
+  await rig.rootQuery("update clara.accounting_work set status='running', error=null where id=$1", [w.workId]);
+
+  const out = await rig.asRuntime((c) =>
+    reconcileAccountingWorkTasks(c, { enqueueClaraWork: async () => {}, onlyFirm: w.firm }));
+  assert.equal(out.workConverged, 1);
+  const work = await readWork(w.workId);
+  assert.equal(work.status, "completed", "a Work that recorded an effect is completed, whatever its run says");
+  assert.equal(work.error, null);
+  assert.equal(work.result.entry_id, posted.entry_id);
+});
+
+test("pure: the cancellation's words are ONE object, shared with the database", { skip: SKIP }, async () => {
+  // The JS half of clara._work_cancelled_error(). Pinned EQUAL against the live catalog so the
+  // migration header's "byte-identical" claim is checked rather than asserted in a comment — a
+  // copy-edit to either side is a failing test, not one event described two ways.
+  const r = await rig.rootQuery("select clara._work_cancelled_error() as e");
+  assert.deepEqual(cancelSettleForWork(null).error, r.rows[0].e,
+    "the runtime's cancelSettleForWork and the database's helper are the same object");
+  assert.deepEqual(WORK_CANCELLED_ERROR, r.rows[0].e);
+  // …and it is frozen, so a caller cannot mutate the shared object out from under the other one.
+  assert.equal(Object.isFrozen(WORK_CANCELLED_ERROR), true);
+  assert.notEqual(cancelSettleForWork(null).error, WORK_CANCELLED_ERROR,
+    "…while each settle still gets its OWN copy to carry");
 });

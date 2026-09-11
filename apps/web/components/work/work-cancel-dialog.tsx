@@ -22,7 +22,7 @@
 // whether the door ran, so the retry rides the SAME key and lets `clara._reserve_op` answer. A
 // fresh key would ask a second question the database cannot connect to the first.
 
-import { useRef, useState } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
 
@@ -38,11 +38,56 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { StateBanner } from "@/components/common/state";
+import { WorkBasisTable } from "@/components/work/work-tables";
 import { journalEntryHref } from "@/lib/navigation/tree";
 import { cancelWork, takeOverWork, type CancelWorkResult, type TakeOverWorkResult } from "@/lib/work/api";
-import { isCancellableWorkStatus } from "@/lib/work/types";
+import { isCancellableWorkStatus, type WorkBasis } from "@/lib/work/types";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
 import type { SessionTokenAccessor } from "@/lib/session";
+
+/**
+ * ONE DECISION, ONE DIALOG, ONE RESET. Both dialogs in this file open the same way — mint a fresh
+ * op key for the new decision, forget the previous answer — and an earlier cut wrote that block out
+ * twice, byte for byte. A later change to WHEN a key is renewed would have had to find both.
+ */
+function useDecisionDialog(): {
+  open: boolean;
+  setOpen: (next: boolean) => void;
+  onOpenChange: (next: boolean) => void;
+  key: () => string;
+} {
+  const [open, setOpen] = useState(false);
+  const decision = useDecisionKey();
+  return {
+    open,
+    setOpen,
+    onOpenChange: (next: boolean) => {
+      setOpen(next);
+      if (next) decision.renew();
+    },
+    key: decision.key,
+  };
+}
+
+/**
+ * THE TWO ANSWERS NOBODY OBSERVED, in one place. `lost` and `unavailable` mean the same thing to a
+ * reader — nobody can say whether the door ran — and they are the two that keep a dialog OPEN,
+ * because the human's next act is to try the SAME decision again. Rendered identically by both
+ * dialogs, from one implementation, so a copy-edit cannot land on one of them.
+ */
+function UnobservedBanner({ kind, noun }: { kind: "lost" | "unavailable"; noun: "cancel" | "takeOver" }) {
+  const t = useTranslations("WorkCancel");
+  // The two key families, written out rather than assembled from fragments: `check-message-keys.mjs`
+  // reads this file for LITERAL keys, and a key built by concatenation is a key it cannot see.
+  const keys = noun === "cancel"
+    ? { lostTitle: "lostTitle", lostBody: "lostBody", unavailableTitle: "unavailableTitle", unavailableBody: "unavailableBody" }
+    : { lostTitle: "takeOverLostTitle", lostBody: "takeOverLostBody", unavailableTitle: "takeOverUnavailableTitle", unavailableBody: "takeOverUnavailableBody" };
+  return (
+    <StateBanner tone="error" title={kind === "lost" ? t(keys.lostTitle) : t(keys.unavailableTitle)}>
+      {kind === "lost" ? t(keys.lostBody) : t(keys.unavailableBody)}
+    </StateBanner>
+  );
+}
 
 /** A stable key per OPEN DECISION. Minted when the dialog opens and reused for every attempt at
  *  that decision, so an unobserved first attempt and its retry are ONE operation to the database.
@@ -94,10 +139,11 @@ export function CancelWorkDialog({
   session?: SessionTokenAccessor;
 }) {
   const t = useTranslations("WorkCancel");
-  const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<CancelWorkResult | null>(null);
-  const decision = useDecisionKey();
+  const dialog = useDecisionDialog();
+  const { open, setOpen } = dialog;
+  const decision = { key: dialog.key };
   void clientId;   // the answer's entry link is rendered by the PAGE, from the same value
 
   const submit = async () => {
@@ -130,11 +176,8 @@ export function CancelWorkDialog({
       <Dialog
         open={open}
         onOpenChange={(next) => {
-          setOpen(next);
-          if (next) {
-            setResult(null);
-            decision.renew();
-          }
+          setResult(null);
+          dialog.onOpenChange(next);
         }}
       >
         <DialogTrigger render={<Button variant="destructive" size="sm" />}>{t("cancelWork")}</DialogTrigger>
@@ -146,9 +189,7 @@ export function CancelWorkDialog({
             <DialogDescription>{t("dialogBody")}</DialogDescription>
           </DialogHeader>
           {result !== null && (result.kind === "lost" || result.kind === "unavailable") ? (
-            <StateBanner tone="error" title={result.kind === "lost" ? t("lostTitle") : t("unavailableTitle")}>
-              {result.kind === "lost" ? t("lostBody") : t("unavailableBody")}
-            </StateBanner>
+            <UnobservedBanner kind={result.kind} noun="cancel" />
           ) : null}
           <DialogFooter>
             {/* THE SAFE ACTION HOLDS INITIAL FOCUS. `autoFocus` on the close, never on the
@@ -170,27 +211,43 @@ export function CancelWorkDialog({
 /** The answer, rendered OUTSIDE the dialog, because by the time it exists the dialog has closed and
  *  the page is what the person is reading. Never a toast: an accounting outcome is a persistent
  *  record, not a thing that disappears after four seconds. */
-export function CancelOutcome({ result, clientId }: { result: CancelWorkResult | null; clientId: string }) {
+export function CancelOutcome({
+  result,
+  clientId,
+  silent = false,
+}: {
+  result: CancelWorkResult | null;
+  clientId: string;
+  /**
+   * #630 (review) — ONE ANNOUNCEMENT OWNER. `StateBanner` computes `role="alert"`/`role="status"`
+   * unless told otherwise, and the Clara transcript is itself a `role="log" aria-live="polite"`
+   * region: a banner mounted inside it is a NESTED live region, which is the DS-04 defect #629
+   * removed from this exact surface and which `apps/web/test/a11yRules.ts`'s `nested-live-region`
+   * gate refuses. The rail's card passes `silent`; the Work detail page, which owns its own
+   * announcement, does not.
+   */
+  silent?: boolean;
+}) {
   const t = useTranslations("WorkCancel");
   if (result === null) return null;
   if (result.kind === "denied") {
     return (
-      <StateBanner tone="warning" title={t("deniedTitle")}>
+      <StateBanner tone="warning" title={t("deniedTitle")} silent={silent}>
         {t("deniedBody")}
       </StateBanner>
     );
   }
   if (result.kind === "not_found") {
     return (
-      <StateBanner tone="neutral" title={t("notFoundTitle")}>
+      <StateBanner tone="neutral" title={t("notFoundTitle")} silent={silent}>
         {t("notFoundBody")}
       </StateBanner>
     );
   }
   if (result.kind === "conflict" || result.kind === "invalid") {
     return (
-      <StateBanner tone="error" title={t("conflictTitle")} code={result.kind === "conflict" ? (result.status ?? undefined) : (result.reason ?? undefined)}>
-        {t("notTakeableBody")}
+      <StateBanner tone="error" title={t("conflictTitle")} silent={silent} code={result.kind === "conflict" ? (result.status ?? undefined) : (result.reason ?? undefined)}>
+        {t("conflictBody")}
       </StateBanner>
     );
   }
@@ -203,6 +260,7 @@ export function CancelOutcome({ result, clientId }: { result: CancelWorkResult |
       <StateBanner
         tone="info"
         title={t("completedAfterCancelTitle")}
+        silent={silent}
         action={
           result.entryId === null ? undefined : (
             <Link
@@ -220,7 +278,7 @@ export function CancelOutcome({ result, clientId }: { result: CancelWorkResult |
   }
   if (result.reason === "already_terminal") {
     return (
-      <StateBanner tone="neutral" title={t("alreadyTerminalTitle")} code={result.status}>
+      <StateBanner tone="neutral" title={t("alreadyTerminalTitle")} silent={silent} code={result.status}>
         {t("alreadyTerminalBody")}
       </StateBanner>
     );
@@ -235,6 +293,8 @@ export function TakeOverWorkAction({
   workId,
   basisOrigin,
   basisDigest,
+  basis,
+  accountNames,
   onTakenOver,
   onAnswer,
   takeOver = takeOverWork,
@@ -245,6 +305,16 @@ export function TakeOverWorkAction({
    *  DATABASE decides whether a digest is required and refuses without one. */
   basisOrigin: string;
   basisDigest: string;
+  /**
+   * #630 (review) — THE BASIS THE COLLEAGUE IS BEING ASKED TO CONFIRM, rendered inside the confirm
+   * dialog. An earlier cut passed only the DIGEST — a hash — under copy that says "Read it below",
+   * with nothing below it to read: the door's digest check proves the digest matches the STORED
+   * basis, never that a human ever saw it, so the confirmation was ceremony. The figures are
+   * already on the same page (`WorkBasisTable`); they belong in the modal that asks about them,
+   * because a modal is exactly what a reader cannot see past.
+   */
+  basis?: WorkBasis | null;
+  accountNames?: ReadonlyMap<string, string>;
   onTakenOver: () => void | Promise<void>;
   /** THE ANSWER GOES TO THE PAGE, for the reason `CancelWorkDialog.onAnswer` records: an accepted
    *  takeover makes the Work `queued`, this whole offer unmounts with that status change, and an
@@ -254,10 +324,11 @@ export function TakeOverWorkAction({
   session?: SessionTokenAccessor;
 }) {
   const t = useTranslations("WorkCancel");
-  const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<TakeOverWorkResult | null>(null);
-  const decision = useDecisionKey();
+  const dialog = useDecisionDialog();
+  const { open, setOpen } = dialog;
+  const decision = { key: dialog.key };
   const interpreted = basisOrigin !== "user_direct";
 
   const submit = async (withDigest: boolean) => {
@@ -275,15 +346,33 @@ export function TakeOverWorkAction({
     await onTakenOver();
   };
 
+  // #630 (review) — THE ANSWERS THAT KEEP THE MODAL OPEN ARE RENDERED INSIDE IT. `lost`,
+  // `unavailable`, `invalid` and `confirm_basis` all leave the dialog open; rendered outside
+  // `DialogContent` they mounted behind the overlay, inert and unreadable, while the human looked
+  // at a dialog that appeared to have done nothing.
+  const inDialog: ReactNode = result === null ? null
+    : result.kind === "lost" || result.kind === "unavailable"
+      ? <UnobservedBanner kind={result.kind} noun="takeOver" />
+      : result.kind === "confirm_basis"
+        ? (
+          <StateBanner tone="warning" title={t("takeOverConfirmTitle")}>
+            {t("takeOverConfirmBody")}
+          </StateBanner>
+        )
+        : result.kind === "invalid"
+          ? (
+            <StateBanner tone="error" title={t("takeOverUnavailableTitle")} code={result.reason ?? undefined}>
+              {t("takeOverUnavailableBody")}
+            </StateBanner>
+          )
+          : null;
+
   const action = interpreted ? (
     <Dialog
       open={open}
       onOpenChange={(next) => {
-        setOpen(next);
-        if (next) {
-          setResult(null);
-          decision.renew();
-        }
+        setResult(null);
+        dialog.onOpenChange(next);
       }}
     >
       <DialogTrigger render={<Button variant="outline" size="sm" />}>{t("takeOver")}</DialogTrigger>
@@ -295,6 +384,15 @@ export function TakeOverWorkAction({
               database gets back is the receipt for that sentence. */}
           <DialogDescription>{t("takeOverConfirmBody")}</DialogDescription>
         </DialogHeader>
+        {/* …AND HERE IS WHAT "IT" IS. The same table the page renders, inside the modal that asks
+            about it, because a person cannot read the page behind a dialog. Absent basis (a row
+            this build could not parse) renders nothing rather than an empty promise. */}
+        {basis ? (
+          <div className="max-h-64 overflow-y-auto rounded-md border border-border p-3">
+            <WorkBasisTable basis={basis} names={accountNames ?? new Map()} />
+          </div>
+        ) : null}
+        {inDialog}
         <DialogFooter>
           <DialogClose render={<Button variant="outline" autoFocus />}>{t("takeOverCancel")}</DialogClose>
           <Button type="button" disabled={busy} onClick={() => void submit(true)}>
@@ -314,13 +412,12 @@ export function TakeOverWorkAction({
       <StateBanner tone="warning" title={t("takeOverHeading")} action={action}>
         {t("takeOverBody")}
       </StateBanner>
-      {/* THE ONE ARM THAT BELONGS HERE: the confirm step the human is still inside. Every other
-          answer is the PAGE's (see `onAnswer`), because an accepted takeover unmounts this offer. */}
-      {result !== null && result.kind === "confirm_basis" ? (
-        <StateBanner tone="warning" title={t("takeOverConfirmTitle")}>
-          {t("takeOverConfirmBody")}
-        </StateBanner>
-      ) : null}
+      {/* THE NON-MODAL PATH'S OWN ARMS. A `user_direct` basis needs no confirm step, so its offer
+          is a bare Button with no dialog to render an answer inside — these are the same arms the
+          modal renders in `inDialog`, shown here only when there is no modal. Every answer that
+          CLOSES the offer is the PAGE's (see `onAnswer`), because an accepted takeover unmounts
+          this whole component with the status change. */}
+      {!interpreted ? inDialog : null}
     </div>
   );
 }
@@ -344,18 +441,17 @@ export function TakeOverOutcome({ result }: { result: TakeOverWorkResult | null 
     );
   }
   if (result.kind === "denied") {
+    // #630 (review) — THE TAKEOVER'S OWN WORDS. An earlier cut reused the cancel's copy here, so a
+    // colleague refused a HANDOVER was told "You cannot cancel this Work" about something they had
+    // not tried to cancel.
     return (
-      <StateBanner tone="warning" title={t("deniedTitle")}>
-        {t("deniedBody")}
+      <StateBanner tone="warning" title={t("takeOverDeniedTitle")}>
+        {t("takeOverDeniedBody")}
       </StateBanner>
     );
   }
   if (result.kind === "unavailable" || result.kind === "lost") {
-    return (
-      <StateBanner tone="error" title={result.kind === "lost" ? t("lostTitle") : t("unavailableTitle")}>
-        {result.kind === "lost" ? t("lostBody") : t("unavailableBody")}
-      </StateBanner>
-    );
+    return <UnobservedBanner kind={result.kind} noun="takeOver" />;
   }
   return null;
 }
