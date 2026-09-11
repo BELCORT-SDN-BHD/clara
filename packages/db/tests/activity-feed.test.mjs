@@ -85,6 +85,7 @@ const ALICE = () => world.users.alice; // owner, firm A
 const BOB = () => world.users.bob; // bookkeeper, firm A
 const CAROL = () => world.users.carol; // viewer, firm A
 const DAVE = () => world.users.dave; // owner, firm B
+const FIRM_B = () => world.firms.B;
 
 // ===========================================================================================
 // Wrappers over the two new doors, positional (the order this migration declares them in).
@@ -540,6 +541,29 @@ async function sweepDraftedCount(sub, eventId) {
   return r.rows[0].n;
 }
 
+/** An event appended to `firm` by root (the only writer that may), returning its own id and
+ *  instant read back from clara.domain_events by the seq `_append_event` hands out. Generalises
+ *  `mkSweepEvent` above for the cells that need a DIFFERENT event_type or a payload no lawful
+ *  sweep would ever write. */
+async function mkRawEvent({ firm, type = "sweep.run_completed", client = null, payload }) {
+  const seq = (await rootQuery(
+    `select clara._append_event($1, $2, $3, null, null, null, null, null, null, $4::jsonb) as seq`,
+    [firm, type, client, JSON.stringify(payload)])).rows[0].seq;
+  const ev = (await rootQuery(
+    `select id::text as id, created_at from clara.domain_events where firm_id = $1 and seq = $2`,
+    [firm, seq])).rows[0];
+  return { eventId: ev.id, occurredAt: ev.created_at.toISOString() };
+}
+
+/** A finalized clara.sweep_runs row in `firm`, with no event pointing at it. */
+async function mkSweepRun({ firm, draftedCount }) {
+  return (await rootQuery(
+    `insert into clara.sweep_runs(firm_id, state, window_started_at, window_ended_at,
+        expected_count, drafted_count, finalized_at)
+     values ($1, 'finalized', now(), now(), $2, $2, now()) returning id`,
+    [firm, draftedCount])).rows[0].id;
+}
+
 test("af.16 the sweep helper carries the feed's OWN bookkeeper floor — a viewer refused by list_activity cannot read a sweep's drafted_count through the helper either", async (t) => {
   if (await gateSweep(t)) return;
   const drafted = await mkSweepEvent({ firm: FIRM_A(), draftedCount: 3, expectedCount: 9 });
@@ -561,3 +585,45 @@ test("af.16 the sweep helper carries the feed's OWN bookkeeper floor — a viewe
     "af.16 and the kept sweep row still reaches a bookkeeper's feed");
 });
 
+test("af.17 a sweep event of THIS firm whose payload names ANOTHER firm's run contributes nothing — the run lookup is bound to the event's own firm", async (t) => {
+  if (await gateSweep(t)) return;
+  // A run that DID draft, in firm B, and a firm-A event pointing at it. The payload is a plain
+  // jsonb field no constraint validates, so this shape is reachable by a bug, a replayed payload
+  // or a restore — and a lookup keyed on `run_id` ALONE would answer firm A's feed with firm B's
+  // count. Constructed as root because only a definer writer may append an event at all.
+  const foreignRun = await mkSweepRun({ firm: FIRM_B(), draftedCount: 4 });
+  const ev = await mkRawEvent({ firm: FIRM_A(), payload: { run_id: foreignRun, expected_count: 4 } });
+
+  assert.equal(await sweepDraftedCount(BOB(), ev.eventId), null,
+    "af.17 the helper resolves NOTHING across the firm boundary — another firm's drafted_count is not this firm's fact to report");
+  const page = await listActivity(BOB(), { since: ev.occurredAt, limit: 100 });
+  assert.equal(rowsOf(page).some((r) => r.id === ev.eventId), false,
+    "af.17 …so the row is treated as the zero-effect heartbeat it is, never kept on a foreign count");
+  await assertRaises(CLR11, () => getActivityEvent(BOB(), "event", ev.eventId),
+    "af.17 and its deep link answers the same no-oracle refusal every excluded heartbeat gets");
+});
+
+test("af.18 the helper answers ONLY for a sweep receipt, and an unresolvable run_id is 'no measured effect' rather than an error that takes the whole feed down", async (t) => {
+  if (await gateSweep(t)) return;
+  const cli = await freshWorkClient(ALICE(), "af18");
+  const run = await mkSweepRun({ firm: FIRM_A(), draftedCount: 5 });
+
+  // (a) A NON-SWEEP event of this firm carrying a `run_id` in its payload. Nothing stops an
+  // unrelated event type from using that key, and this helper must never answer for one: its
+  // whole contract is "the drafted_count of the run THIS SWEEP RECEIPT reports on".
+  const other = await mkRawEvent({
+    firm: FIRM_A(), type: "kb_rule.proposed", client: cli, payload: { run_id: run },
+  });
+  assert.equal(await sweepDraftedCount(BOB(), other.eventId), null,
+    "af.18 a non-sweep event of this firm resolves no run, whatever its payload says");
+
+  // (b) A SWEEP receipt whose `run_id` is not a uuid at all. The cast alone would raise 22P02 —
+  // an untyped error, inside a per-row predicate, which would take the ENTIRE feed down for the
+  // firm rather than hiding one unverifiable heartbeat.
+  const junk = await mkRawEvent({ firm: FIRM_A(), payload: { run_id: "not-a-uuid", expected_count: 1 } });
+  assert.equal(await sweepDraftedCount(BOB(), junk.eventId), null,
+    "af.18 a malformed run_id is an unresolvable run, not an error");
+  const page = await listActivity(BOB(), { since: junk.occurredAt, limit: 100 });
+  assert.equal(rowsOf(page).some((r) => r.id === junk.eventId), false,
+    "af.18 the feed still answers, with the unverifiable heartbeat excluded — never shown by default");
+});

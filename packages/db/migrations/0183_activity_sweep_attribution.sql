@@ -173,44 +173,69 @@ set role clara_fn_owner;
 --    borrowed through a definer helper that the INVOKER bodies may execute -- which means the
 --    helper itself is clara_authenticated-granted and therefore DIRECTLY REACHABLE over PostgREST.
 --
---    SO IT CARRIES THE FEED'S OWN FLOOR, restated from scratch via clara._human_ctx(role_rank(
---    'bookkeeper')) (cross-model review, Codex, 2026-09-11: it did not). Same-firm event ids are
---    readable by ANY member under the firm-only clara.domain_events read policy (0005:379-385), so
---    a floorless helper would let a VIEWER -- refused CLR04 by clara.list_activity itself -- read
---    every sweep's drafted_count one event id at a time. The floor is reachable HERE and not in
---    the two doors above for one measured reason: clara._human_ctx is executable by clara_fn_owner
---    ONLY (0004:299, catalog-confirmed), so a SECURITY INVOKER body running as clara_authenticated
---    cannot call it -- 0174's own note on clara.list_firm_timeline records the same finding --
---    while this DEFINER body, owned by clara_fn_owner, can.
+--    THREE WALLS, ALL INSIDE THE BODY, because a reachable helper is a door whatever its name
+--    says (cross-model review, Codex, 2026-09-11 -- the first two of these were missing):
+--      (a) THE FEED'S OWN FLOOR, restated from scratch via clara._human_ctx(role_rank(
+--          'bookkeeper')). Same-firm event ids are readable by ANY member under the firm-only
+--          clara.domain_events read policy (0005:379-385), so a floorless helper would let a
+--          VIEWER -- refused CLR04 by clara.list_activity itself -- read every sweep's
+--          drafted_count one event id at a time. The floor is reachable here and NOT in the two
+--          doors above for one measured reason: clara._human_ctx is executable by clara_fn_owner
+--          ONLY (0004:299, catalog-confirmed), so a SECURITY INVOKER body running as
+--          clara_authenticated cannot call it -- 0174's own note on clara.list_firm_timeline
+--          records the same finding -- while this DEFINER body, owned by clara_fn_owner, can.
+--      (b) THE FIRM BOUND ON THE RUN ITSELF (`sr.firm_id = de.firm_id`), not only on the event.
+--          `payload` is a free jsonb column no constraint validates: an event of THIS firm whose
+--          run_id names ANOTHER firm's run is reachable by a bug, a replayed payload or a restore,
+--          and a lookup keyed on run_id alone would answer this firm's feed with that firm's count.
+--      (c) THE EVENT TYPE (`de.event_type = 'sweep.run_completed'`). The helper's whole contract is
+--          "the drafted_count of the run THIS SWEEP RECEIPT reports on"; an unrelated event type
+--          that happens to carry a `run_id` key is not a sweep receipt and must resolve nothing.
+--    Plus the uuid-SHAPE guard on the payload text: without it the `::uuid` cast raises an untyped
+--    22P02 from inside a per-row predicate, which would take the ENTIRE feed down for the firm
+--    rather than hiding the one heartbeat nobody can verify.
 --
---    Returns NULL when the event does not exist, is not this caller's firm's, or has no resolvable
---    run -- every one of those collapses to "no measured effect", which is exactly the safe default
---    the caller below wants (an unresolvable run is treated the same as a zero-effect one, never
---    shown by default).
+--    Returns NULL when the event does not exist, is not this caller's firm's, is not a sweep
+--    receipt, or has no resolvable run -- every one of those collapses to "no measured effect",
+--    which is exactly the safe default the caller below wants (an unverifiable run is treated the
+--    same as a zero-effect one, never shown by default).
 -- ==============================================================================================
 create function clara._sweep_run_drafted_count(p_event_id uuid) returns int
   language plpgsql stable security definer set search_path = clara, pg_temp as $$
 declare c record; v_drafted int;
 begin
-  -- THE FLOOR, FIRST and unconditionally: a caller below bookkeeper learns nothing at all -- not
-  -- the count, not whether the id names an event, not whether it is a sweep.
+  -- (a) THE FLOOR, FIRST and unconditionally: a caller below bookkeeper learns nothing at all --
+  -- not the count, not whether the id names an event, not whether it is a sweep.
   c := clara._human_ctx(clara.role_rank('bookkeeper'));
   select sr.drafted_count into v_drafted
     from clara.domain_events de
-    join clara.sweep_runs sr on sr.id = nullif(de.payload ->> 'run_id', '')::uuid
-   where de.id = p_event_id and de.firm_id = c.firm;
+    join clara.sweep_runs sr
+      on sr.id = nullif(de.payload ->> 'run_id', '')::uuid
+     -- (b) the run must belong to the SAME firm as the event that reports it.
+     and sr.firm_id = de.firm_id
+   where de.id = p_event_id
+     and de.firm_id = c.firm
+     -- (c) …and the event must be a sweep receipt.
+     and de.event_type = 'sweep.run_completed'
+     -- …and its run_id must at least be uuid-SHAPED before the cast above ever runs. `and` is
+     -- not a short-circuit operator in SQL, so this is spelled as a separate predicate on the
+     -- OUTER relation (evaluated against de alone) rather than beside the cast in the join
+     -- condition; the planner may reorder the two, but a row failing this one can never reach
+     -- the join's cast because the join has no other row to pair it with.
+     and de.payload ->> 'run_id' ~ '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$';
   return v_drafted;
 end $$;
 revoke all on function clara._sweep_run_drafted_count(uuid) from public;
 grant execute on function clara._sweep_run_drafted_count(uuid) to clara_authenticated;
 comment on function clara._sweep_run_drafted_count(uuid) is
   '#728. The drafted_count of the clara.sweep_runs row a sweep.run_completed domain event (by its '
-  'OWN id) reports on, or null if the event is absent, has no resolvable run, or is not this '
-  'session''s own firm''s. Carries clara.list_activity''s OWN bookkeeper floor (clara._human_ctx) '
-  'because it is clara_authenticated-granted and therefore PostgREST-reachable directly despite '
-  'the leading underscore -- a floorless helper would be a side channel round that floor. Exists '
-  'only because clara.sweep_runs itself carries no clara_authenticated grant and the two doors '
-  'that borrow this fact are SECURITY INVOKER.';
+  'OWN id) reports on, or null if the event is absent, is not a sweep receipt, has no '
+  'uuid-shaped/resolvable run, names a run of another firm, or is not this session''s own firm''s. '
+  'Carries clara.list_activity''s OWN bookkeeper floor (clara._human_ctx) because it is '
+  'clara_authenticated-granted and therefore PostgREST-reachable directly despite the leading '
+  'underscore -- a floorless helper would be a side channel round that floor. Exists only because '
+  'clara.sweep_runs itself carries no clara_authenticated grant and the two doors that borrow this '
+  'fact are SECURITY INVOKER. See 0183''s section 1 header for all three walls.';
 
 -- ==============================================================================================
 -- 2. clara.list_activity -- RECUT. Full 0181 body (sha e8c3b7b8..., pinned above); the ONLY
