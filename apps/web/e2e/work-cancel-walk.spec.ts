@@ -378,3 +378,43 @@ test("B7: a REFUSED stop says the reply is still running — it never prints Sto
   // …and the control stays offered, because the turn is still live.
   await expect(stop).toBeVisible();
 });
+
+test("B7: a stop that KILLED a queued turn says Stopped — and only a turn that had already ended says otherwise", async ({ page }) => {
+  // THE INVERSION THIS LEG EXISTS FOR. `clara.begin_chat_turn` admits every chat turn as `queued`,
+  // and `clara.cancel_agent_task` settles a queued task TERMINALLY — answering `{status:
+  // 'cancelled'}`, the same status it answers for a task that had already ended. Reading the status
+  // alone, the rail printed "Nothing was stopped — this reply had already finished" over a reply
+  // the press had just killed, beside a transcript holding only the person's own message. Whether
+  // it did so was pure timing: the identical press said "Stopped" once the engine had claimed the
+  // task. The door now says which arm answered, and these two presses drive both.
+  await control(page, { op: "live_turn" });
+  await control(page, { op: "stop_answer", mode: "settled" });
+  await page.goto(WORK_LIST_URL);
+  const rail = page.locator("[data-clara-rail]");
+  await expect(rail).toBeVisible();
+
+  const stop = rail.getByRole("button", { name: "Stop reply" });
+  await expect(stop).toBeVisible({ timeout: 20_000 });
+  await stop.click();
+
+  await expect(rail.getByText("Stopped", { exact: true })).toBeVisible({ timeout: 15_000 });
+  await expect(rail.getByText(/Nothing was stopped/),
+    "a press that terminally cancelled a live turn is a STOP, whatever status the task now rests at")
+    .toHaveCount(0, { timeout: 5_000 });
+  // …and the clock stops with it. A stopped turn that keeps counting is the surface arguing with
+  // its own marker.
+  await expect(rail.getByText(/Clara has been working on this for/))
+    .toHaveCount(0, { timeout: 5_000 });
+
+  // AND THE HONEST CASE STILL READS HONESTLY. A turn that really had ended before the press
+  // arrived is the one answer that is not a stop, and the rail must still be able to say so.
+  await control(page, { op: "live_turn" });
+  await control(page, { op: "stop_answer", mode: "over" });
+  await page.reload();
+  await expect(rail).toBeVisible();
+  const stopAgain = rail.getByRole("button", { name: "Stop reply" });
+  await expect(stopAgain).toBeVisible({ timeout: 20_000 });
+  await stopAgain.click();
+  await expect(rail.getByText(/Nothing was stopped/)).toBeVisible({ timeout: 15_000 });
+  await expect(rail.getByText("Stopped", { exact: true })).toHaveCount(0, { timeout: 5_000 });
+});

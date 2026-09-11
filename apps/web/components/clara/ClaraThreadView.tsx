@@ -461,7 +461,9 @@ export function ClaraThreadView({
               ? tw("stopDenied")
               : stopFailedCause === "finished"
                 ? tw("stopAlreadyFinished")
-                : tw("stopUnreachable")}
+                : stopFailedCause === "refused"
+                  ? tw("stopRefused")
+                  : tw("stopUnreachable")}
           </p>
         )}
         {/* STOP REPLY. Named in full, everywhere, because the rail also carries "Cancel Work" on a
@@ -495,7 +497,15 @@ export function ClaraThreadView({
             this component used to have; a per-second announcement is the loudest possible
             version of that defect, and the sentence a screen reader needs ("Clara is
             responding…") is already announced by the line above it. */}
-        <TurnProgress startedAt={state.turnStartedAt} parked={state.turnStatus === "awaiting_input"} />
+        {/* #630 — AND IT STOPS WHEN THE TURN DOES. The store retires `turnStartedAt` the moment a
+            door answers that the turn is over (`markTurnStopped`), which covers a reload and a
+            navigation away and back; this gate is the same fact read from the machine, so the
+            second between the door answering and the store's emit never renders a clock under
+            "Stopped". A REFUSED stop is deliberately not gated: that turn is still running, and
+            an honest elapsed time is what the reader needs to decide what to do next. */}
+        {!stopped && stopFailedCause !== "finished" && (
+          <TurnProgress startedAt={state.turnStartedAt} parked={state.turnStatus === "awaiting_input"} />
+        )}
         {/* Kept as two INDEPENDENT conditions, deliberately: `retryAvailable`
             can stand alone next to `streamStatusLabel`'s own "Connection
             lost." line above, and folding the Retry into the banner would

@@ -31,12 +31,15 @@ import type { AttachmentPart, ClaraPart } from "@/lib/parts/types";
  * (back to `idle`: there is nothing to stop, and the intent must never be spent on a later turn),
  * or the reader leaves (a thread change or an unmount, both of which reset it).
  *
- * Three causes, because the surface may only say what it knows. `denied` is the one refusal that
- * IS about the reader (`clara.cancel_agent_task` floors at bookkeeper while `clara.begin_chat_turn`
- * admits any active member, so a clerk's Stop is CLR04); `finished` is the door's own idempotent
- * answer about a turn that had already ended, or a CLR11 about a turn it cannot find; `transport`
- * is everything else, and it asserts nothing about roles or about the run. */
-export type StopFailureCause = "denied" | "finished" | "transport";
+ * Four causes, because the surface may only say what it knows — and one of them may only be
+ * reached on the door's own word. `denied` is the one refusal that IS about the reader
+ * (`clara.cancel_agent_task` floors at bookkeeper while `clara.begin_chat_turn` admits any active
+ * member, so a clerk's Stop is CLR04). `finished` is reached ONLY when the door SAYS it changed
+ * nothing because the turn had already ended — never inferred from a status, and never from a
+ * refusal. `refused` is every other governed refusal (a CLR10 op-key conflict, a CLR11 about a
+ * turn this firm cannot see): the request was answered and turned down, which is not evidence the
+ * reply is over. `transport` is everything that never reached a door at all. */
+export type StopFailureCause = "denied" | "finished" | "refused" | "transport";
 export type StopReplyState =
   | { phase: "idle" }
   | { phase: "pending" }
@@ -60,24 +63,45 @@ const TURN_TERMINAL = new Set(["completed", "failed", "cancelled", "expired"]);
  *  order as the Work surfaces' own polls (`WORK_POLL_MS`, `WORK_CARD_POLL_MS`). */
 export const CLARA_RUN_POLL_MS = 4000;
 
+/** #630 — HOW MANY CONSECUTIVE "no visible row" READS THIS POLL WILL TAKE before it gives up
+ *  asking. Absence is not an ending (see the effect below), so the poll cannot act on it; but it
+ *  must not spin for the life of the mount against a read that will never answer either. Three
+ *  ticks is ~12 s, long enough to ride out a transient and short enough not to be a background
+ *  request that never stops. */
+export const CLARA_RUN_POLL_MISS_LIMIT = 3;
+
 /** The cause a thrown door failure names — never more than the throw actually said. */
 function stopFailureCause(err: unknown): StopFailureCause {
   if (isDoorRefusal(err)) {
-    // CLR04 is the ONLY code that is about this reader's authority. Everything else governed
-    // (CLR11 for a turn this firm cannot see, which is what a swept-away finished turn looks
-    // like) is a statement about the turn, not about them.
-    return err.code === "CLR04" ? "denied" : "finished";
+    // CLR04 is the ONLY code that is about this reader's authority, and only when it came from a
+    // REAL governed SQLSTATE: `codeSource === "message"` means the code was recovered by a regex
+    // over the message text, which is a coincidence and not proof of a role floor.
+    if (err.code === "CLR04" && err.codeSource === "sqlstate") return "denied";
+    // EVERY OTHER GOVERNED REFUSAL IS A REFUSAL, not a finished turn. A CLR11 ("not in your firm")
+    // used to be read as "the turn was swept away, so it had finished" — an inference the refusal
+    // does not support, and one that told the reader their reply was complete when the door had
+    // simply turned the request down. The reply may still be running; the line says exactly that.
+    return "refused";
   }
   return "transport";
 }
 
-/** `clara.cancel_agent_task` is idempotent: pressing Stop on a turn that finished a moment ago
- *  succeeds and answers that turn's own terminal status. That is not a stop, and saying "Stopped"
- *  over it is the surface claiming an effect it did not have. */
+/** Did the door say it changed NOTHING because the turn had already ended?
+ *
+ *  IT IS THE DOOR'S OWN WORD, NOT A STATUS. `clara.cancel_agent_task` answers
+ *  `{status:'cancelled'}` for BOTH the terminal settle it performs on a queued or held task and
+ *  for a task that was already terminal when the press arrived — every chat turn is admitted
+ *  `queued`, so reading the status alone announced the successful stop of a real reply as
+ *  "Nothing was stopped — this reply had already finished". The 0184 recut answers a
+ *  discriminator on every arm (`changed` + `transition`), and this reads only that.
+ *
+ *  AN ANSWER WITHOUT THE DISCRIMINATOR IS NOT A CLAIM THAT NOTHING HAPPENED. Against a database
+ *  that predates the recut the honest reading of a door that accepted is "stopped": the inversion
+ *  above is the far worse of the two mistakes, and it is the one that loses a person's work. */
 function answerIsAlreadyFinished(answer: unknown): boolean {
   if (answer === null || typeof answer !== "object") return false;
-  const status = (answer as { status?: unknown }).status;
-  return typeof status === "string" && TURN_TERMINAL.has(status);
+  const { changed, transition } = answer as { changed?: unknown; transition?: unknown };
+  return changed === false && transition === "already_terminal";
 }
 
 export function useClaraRailOpen(): boolean {
@@ -189,8 +213,6 @@ export function useClaraThread(
   const state = useClaraThreadState(threadId);
   const loadedRef = useRef<string | null>(null);
   const [loadAttempt, setLoadAttempt] = useState(0);
-  /** The live stream's controller, or null when nothing is streaming. */
-  const abortRef = useRef<AbortController | null>(null);
   const [stopState, setStopState] = useState<StopReplyState>(STOP_IDLE);
   /** #630 — WHICH TURN each send is, so a stop can only ever be spent on the turn it was pressed
    *  for. A bare boolean was a latch: a stop pressed inside an admission window that the runtime
@@ -222,22 +244,51 @@ export function useClaraThread(
     setStop(STOP_IDLE);
   }, [threadId, setStop]);
 
+  /** Open the SSE read for one task and REGISTER its abort handle in the store, keyed by task id.
+   *
+   *  The handle cannot live in this hook. `ClaraRail` unmounts `ClaraThreadView` once its exit
+   *  transition finishes, and the hook deliberately does not abort on unmount (closing the rail
+   *  must not stop the reply) — so a reopened rail's fresh instance held nothing, and its Stop
+   *  press aborted nothing while the first mount's read went on appending chunks under a marker
+   *  that said the reply was stopped. Keyed by TASK because a read belongs to a turn, not to a
+   *  mount. The handle is released when the read ends on its own. */
+  const openStream = useCallback((
+    taskId: string,
+    onOpen?: () => void,
+  ): { controller: AbortController; done: Promise<void> } => {
+    const controller = new AbortController();
+    claraThreadStore.registerStreamAbort(taskId, controller);
+    const done = attachClaraStream(auth, threadId, taskId, onOpen, controller.signal)
+      .finally(() => claraThreadStore.releaseStreamAbort(taskId, controller));
+    return { controller, done };
+  }, [auth, threadId]);
+
   /** Call the door and record what it ANSWERED. Shared by both arms, so the admission window and
    *  the ordinary press can never disagree about what a refusal means. */
-  const spendStop = useCallback(async (taskId: string): Promise<"stopped" | "failed"> => {
+  const spendStop = useCallback(async (taskId: string): Promise<StopReplyState> => {
     try {
       const answer = await cancelAgentTask(taskId, { session: auth });
       if (answerIsAlreadyFinished(answer)) {
-        setStop({ phase: "failed", cause: "finished" });
-        return "failed";
+        // The turn was already over, so the clock over it is not measuring anything either.
+        claraThreadStore.markTurnStopped(threadId);
+        const settled: StopReplyState = { phase: "failed", cause: "finished" };
+        setStop(settled);
+        return settled;
       }
+      // THE CLOCK RETIRES WITH THE TURN. Nothing else on this path clears `turnStartedAt`: an
+      // abort never transitions the stream away from "streaming", so the DB poll that would have
+      // noticed the ending is gated off and the elapsed-time line kept counting under "Stopped".
+      claraThreadStore.markTurnStopped(threadId);
       setStop(STOP_STOPPED);
-      return "stopped";
+      return STOP_STOPPED;
     } catch (err) {
-      setStop({ phase: "failed", cause: stopFailureCause(err) });
-      return "failed";
+      // …AND IT DOES NOT RETIRE ON A REFUSAL. A denied, refused or unreachable stop leaves the run
+      // exactly where it was: the turn is still live, and a clock that says so is the truth.
+      const settled: StopReplyState = { phase: "failed", cause: stopFailureCause(err) };
+      setStop(settled);
+      return settled;
     }
-  }, [auth, setStop]);
+  }, [auth, setStop, threadId]);
 
   // THE FIRST TRANSCRIPT READ IS RETRYABLE, and this effect is why it has to be (#514's
   // review, found on main). `loadedRef` fires the read once per thread id; a FAILED first
@@ -337,7 +388,39 @@ export function useClaraThread(
       if (pendingStopRef.current === generation) {
         pendingStopRef.current = null;
         claraThreadStore.markSent(threadId, parts);
-        await spendStop(result.taskId);
+        const settled = await spendStop(result.taskId);
+        if (settled.phase === "failed" && settled.cause !== "finished") {
+          // A REFUSED STOP LEAVES A LIVE TURN, AND THE TAB MUST NOT ABANDON IT. This arm used to
+          // return unconditionally: on a CLR04 (a clerk pressing Stop — `clara.begin_chat_turn`
+          // admits them, `clara.cancel_agent_task` does not) the run went on server-side while
+          // this tab attached no stream at all, so no reply text ever arrived, the turn clock
+          // never started, and `turnLive` was false — the Stop control was withdrawn at exactly
+          // the moment the copy told the reader the reply was still running. The honest act is
+          // the one a send with no stop would have taken: read the reply, and ask the database
+          // what the turn is doing so the control stays offered while it runs.
+          //
+          // On a `finished` failure the turn really is over and neither is wanted; `spendStop`
+          // has already retired the clock for it, and this branch is not taken.
+          {
+            void readRunByTaskId(result.taskId, { session: auth })
+              .then((run) => {
+                if (!run || TURN_TERMINAL.has(run.status)) return;
+                claraThreadStore.hydrateRun(
+                  threadId,
+                  { taskId: run.id, status: run.status, startedAt: run.created_at },
+                  null,
+                );
+              })
+              .catch(() => {});
+            const { controller, done } = openStream(result.taskId, () => {
+              claraThreadStore.markSent(threadId, parts);
+            });
+            void done.catch((err: unknown) => {
+              if (controller.signal.aborted) return;
+              claraThreadStore.markSendFailed(threadId, `stream error: ${(err as Error).message}`);
+            });
+          }
+        }
         // TRUE, because the turn IS on the record: it was admitted and its bubble is in the
         // transcript. Returning false left the identical text sitting in the composer beside it,
         // and pressing Send again — the natural reading of "it didn't go through" — posted the
@@ -366,15 +449,14 @@ export function useClaraThread(
       // open" law without keeping the form await blocked for the whole agent run.
       return new Promise<boolean>((resolve) => {
         let opened = false;
-        const controller = new AbortController();
-        abortRef.current = controller;
-        void attachClaraStream(auth, threadId, result.taskId, () => {
+        const { controller, done } = openStream(result.taskId, () => {
           claraThreadStore.markSent(threadId, parts);
           if (!opened) {
             opened = true;
             resolve(true);
           }
-        }, controller.signal).catch((err: unknown) => {
+        });
+        void done.catch((err: unknown) => {
           // AN ABORT IS NOT AN ERROR. The human asked for it, and painting "stream error:
           // AbortError" over their own decision would be the surface arguing with them.
           if (controller.signal.aborted) {
@@ -397,7 +479,7 @@ export function useClaraThread(
         });
       });
     },
-    [auth, threadId, setStop, spendStop],
+    [auth, threadId, setStop, spendStop, openStream],
   );
 
   /** The give-up ceiling's manual affordance (FIX 1): re-attaches the SAME
@@ -407,23 +489,21 @@ export function useClaraThread(
     const taskId = claraThreadStore.getThread(threadId).activeTaskId;
     if (!taskId) return;
     claraThreadStore.beginRetry(threadId);
-    const controller = new AbortController();
-    abortRef.current = controller;
+    const { controller, done } = openStream(taskId);
     try {
-      await attachClaraStream(auth, threadId, taskId, undefined, controller.signal);
+      await done;
     } catch (err) {
       if (controller.signal.aborted) return;
       claraThreadStore.markSendFailed(threadId, `stream error: ${(err as Error).message}`);
     }
-  }, [auth, threadId]);
+  }, [threadId, openStream]);
 
   const stopReply = useCallback(async (): Promise<StopReplyAnswer> => {
-    // THE READ STOPS FIRST, unconditionally. Whatever the door answers, this tab must stop
-    // rendering a reply the person has said they do not want.
-    abortRef.current?.abort();
-    abortRef.current = null;
     const thread = claraThreadStore.getThread(threadId);
     const taskId = thread.activeTaskId;
+    // THE READ STOPS FIRST, unconditionally — and it is found by TASK, in the store, so a press
+    // from a rail that was closed and reopened still reaches the read the first mount opened.
+    if (taskId) claraThreadStore.abortStream(taskId);
     if (!taskId) {
       // NOTHING TO CANCEL *YET* IS NOT NOTHING TO CANCEL. A turn that is mid-admission
       // (`sendStatus === "sending"`, no task id back yet) is remembered and cancelled the moment
@@ -438,7 +518,8 @@ export function useClaraThread(
     }
     pendingStopRef.current = null;
     setStop(STOP_PENDING);
-    return await spendStop(taskId);
+    const settled = await spendStop(taskId);
+    return settled.phase === "stopped" ? "stopped" : "failed";
   }, [threadId, setStop, spendStop]);
 
   // #630 — THE DATABASE ARM OF "IS A TURN LIVE?" IS RE-ASKED. `hydrateRun` runs once on mount, so
@@ -454,19 +535,33 @@ export function useClaraThread(
   useEffect(() => {
     if (!threadId || activeTaskId === null || streaming) return;
     if (turnStatus !== "running" && turnStatus !== "awaiting_input") return;
-    let stopped = false;
+    let cancelled = false;
+    let misses = 0;
     const timer = setInterval(() => {
       void readRunByTaskId(activeTaskId, { session: auth })
         .then((run) => {
-          if (stopped) return;
-          // A read that finds no visible row is treated as ended — the fail-closed arm, and the
-          // same one `readThreadRunSnapshot`'s own catch takes. Never the reverse: a failed read
-          // (the `.catch` below) decides nothing and the next tick asks again.
-          if (!run || TURN_TERMINAL.has(run.status)) claraThreadStore.hydrateRun(threadId, null, null);
+          if (cancelled) return;
+          if (!run) {
+            // ABSENCE IS NOT AN ENDING. A read that finds no visible row proves only that this
+            // read saw none — RLS, a transient, a stale id, or a mock that answers this relation
+            // by session and not by task id. It used to be treated as "the turn ended" and
+            // written through `hydrateRun(null)`, which ALSO erases the rehydrated parked
+            // question and the turn clock: a thread parked on a question lost the question, its
+            // Answer control and its clock four seconds after load, with the run still waiting.
+            // Only a row whose status is terminal ends a turn. An absence is a MISS, and after a
+            // bounded few this poll stops asking rather than inventing an answer — the state on
+            // screen is left exactly as the last real read found it.
+            misses += 1;
+            if (misses >= CLARA_RUN_POLL_MISS_LIMIT) { cancelled = true; clearInterval(timer); }
+            return;
+          }
+          misses = 0;
+          if (TURN_TERMINAL.has(run.status)) claraThreadStore.hydrateRun(threadId, null, null);
         })
+        // A failed read decides nothing either, and the next tick asks again.
         .catch(() => {});
     }, CLARA_RUN_POLL_MS);
-    return () => { stopped = true; clearInterval(timer); };
+    return () => { cancelled = true; clearInterval(timer); };
   }, [auth, threadId, activeTaskId, turnStatus, streaming]);
 
   return { state, stop: stopState, sendMessage, retryConnection, retryLoad, stopReply };

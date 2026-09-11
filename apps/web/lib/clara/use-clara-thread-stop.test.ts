@@ -22,11 +22,35 @@ import { enableDomInspection } from "../../test/domInspect";
 import { renderHook } from "../../test/hookHarness";
 import { claraThreadStore } from "./threadStore";
 import type { SessionTokenAccessor } from "@/lib/session";
+import type { StopReplyState } from "./useClaraThread";
 
 enableDomInspection();
 
 const THREAD = "11111111-1111-4111-8111-111111111111";
 const session: SessionTokenAccessor = { getAccessToken: async () => "tok" };
+
+// ===========================================================================================
+// THE DOOR'S OWN ANSWER SHAPES (`clara.cancel_agent_task`, 0184's recut). `status` alone cannot
+// tell the terminal settle of a queued turn from a no-op over a turn that had already ended —
+// both read `cancelled` — so the door answers a discriminator on every arm and these cells drive
+// the REAL shapes. packages/db/tests/work-cancel.test.mjs wc.35 pins the database side of the
+// same four.
+// ===========================================================================================
+function doorAnswer(body: Record<string, unknown>): Response {
+  return new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
+}
+/** A QUEUED turn: no engine run, so this press settled the task terminally. */
+const cancelled = (taskId: string) =>
+  doorAnswer({ task_id: taskId, status: "cancelled", changed: true, transition: "cancelled" });
+/** A RUNNING turn: the engine was asked to abort. */
+const cancelRequested = (taskId: string) =>
+  doorAnswer({ task_id: taskId, status: "cancel_requested", changed: true, transition: "cancel_requested" });
+/** The turn had already ended before the press arrived — the ONE answer that is not a stop. */
+const alreadyTerminal = (taskId: string, status = "completed") =>
+  doorAnswer({ task_id: taskId, status, changed: false, transition: "already_terminal" });
+/** A cancel was already pending. This press changed nothing, but the reply IS stopping. */
+const alreadyRequested = (taskId: string) =>
+  doorAnswer({ task_id: taskId, status: "cancel_requested", changed: false, transition: "already_requested" });
 
 /** Every PostgREST RPC the hook's lifetime issues, by verb. The door wrapper builds a real URL, so
  *  swapping `fetch` records the WIRE rather than a mock of our own reader. */
@@ -42,6 +66,10 @@ async function withRecordedRpc(run: (seen: string[]) => Promise<void>): Promise<
     const url = String(u);
     const rpc = /\/rpc\/([a-z_]+)/.exec(url);
     if (rpc) seen.push(rpc[1]!);
+    // THE CANCEL DOOR ANSWERS AS THE DOOR ANSWERS. `{}` used to stand in for it, which meant no
+    // cell in this file could see the classifier at all: `status` was undefined, so every arm
+    // read "stopped" and the inversion the discriminator exists to end was invisible here.
+    if (rpc?.[1] === "cancel_agent_task") return cancelled("task-1");
     return new Response(JSON.stringify({}), { status: 200, headers: { "content-type": "application/json" } });
   }) as typeof fetch;
   try {
@@ -134,7 +162,11 @@ async function withAdmittingFetch(
     const url = String(u);
     const rpc = /\/rpc\/([a-z_]+)/.exec(url);
     if (rpc) seen.push(rpc[1]!);
-    if (rpc?.[1] === "cancel_agent_task" && opts.cancelAnswer) return opts.cancelAnswer();
+    if (rpc?.[1] === "cancel_agent_task") {
+      // The default is the arm the admission window actually hits: `clara.begin_chat_turn` admits
+      // every chat turn as `queued`, so a press inside that window reaches the TERMINAL-SETTLE arm.
+      return opts.cancelAnswer ? opts.cancelAnswer() : cancelled("task-admitted");
+    }
     if (/\/turns$/.test(url) && (init?.method ?? "GET") === "POST") {
       seen.push("POST:turns");
       await admitted;   // the ADMISSION WINDOW, held open for exactly as long as a cell needs
@@ -393,4 +425,284 @@ test("630 the machine is reset by a NEW turn and by a thread change", async () =
       await h.unmount();
     }
   });
+});
+
+// ===========================================================================================
+// #630 fix round 4 — WHAT THE DOOR ANSWERED, READ AS THE DOOR MEANT IT.
+//
+// `clara.cancel_agent_task` returns `{status:'cancelled'}` for the TERMINAL SETTLE it performs on
+// a queued or held task AND for a task that was already terminal when the press arrived. Reading
+// the status alone classified the first as the second, so a press that killed a real, queued reply
+// printed "Nothing was stopped — this reply had already finished" beside a transcript holding only
+// the person's own message. Every chat turn is admitted `queued`, so this was the ordinary case.
+// The recut answers `changed` + `transition`; these four cells drive all four arms.
+// ===========================================================================================
+
+const THREAD_QUEUED = "99999999-9999-4999-8999-999999999999";
+const THREAD_TERMINAL = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+const THREAD_REQUESTED = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+const THREAD_CONFLICT = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+
+/** Drive one door answer through the real hook on a thread with a live task, and report the
+ *  machine. The store is module-level, so each cell brings its own thread id. */
+async function stopWith(threadId: string, answer: () => Response): Promise<StopReplyState> {
+  const { useClaraThread } = await import("./useClaraThread");
+  let settled: StopReplyState = { phase: "idle" };
+  const original = globalThis.fetch;
+  const originalUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  process.env.NEXT_PUBLIC_SUPABASE_URL = "https://example.supabase.co";
+  globalThis.fetch = (async (u: unknown) => {
+    const url = String(u);
+    if (/\/rpc\/cancel_agent_task/.test(url)) return answer();
+    return new Response(JSON.stringify({}), { status: 200, headers: { "content-type": "application/json" } });
+  }) as typeof fetch;
+  try {
+    const h = await renderHook(() => useClaraThread(session, threadId));
+    try {
+      await h.act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+      claraThreadStore.markAccepted(threadId, `task-${threadId.slice(0, 4)}`);
+      await h.act(async () => { await h.current.stopReply(); });
+      settled = h.current.stop;
+    } finally {
+      await h.unmount();
+    }
+  } finally {
+    globalThis.fetch = original;
+    if (originalUrl === undefined) delete process.env.NEXT_PUBLIC_SUPABASE_URL;
+    else process.env.NEXT_PUBLIC_SUPABASE_URL = originalUrl;
+  }
+  return settled;
+}
+
+test("630 a stop that TERMINALLY CANCELLED a queued turn is a STOP — the inversion is gone", async () => {
+  // The measured defect: `status:'cancelled'` is in TURN_TERMINAL, so the old classifier read this
+  // very success as "the turn had already finished" and the rail told the reader nothing had been
+  // stopped over a turn the press had just killed.
+  const settled = await stopWith(THREAD_QUEUED, () => cancelled("task-9999"));
+  assert.equal(settled.phase, "stopped",
+    "the door settled the task on this press; the surface must say so, not the opposite");
+});
+
+test("630 …and an ALREADY-TERMINAL answer is the one that is not a stop", async () => {
+  const settled = await stopWith(THREAD_TERMINAL, () => alreadyTerminal("task-aaaa", "completed"));
+  assert.equal(settled.phase, "failed", "the turn ended by itself before the press arrived");
+  assert.equal(settled.phase === "failed" ? settled.cause : null, "finished",
+    "…and 'finished' is reached ONLY on the door's own word");
+});
+
+test("630 an ALREADY-REQUESTED cancel is still a stop: the reply is stopping either way", async () => {
+  const settled = await stopWith(THREAD_REQUESTED, () => alreadyRequested("task-bbbb"));
+  assert.equal(settled.phase, "stopped",
+    "this press changed nothing, but a cancel is pending and the reply IS stopping — "
+    + "telling the reader nothing was stopped would be false");
+});
+
+test("630 a governed refusal that is NOT the role floor is never reported as 'finished'", async () => {
+  // CLR10 — an op-key conflict, the refusal `clara._reserve_op` raises when the same key is
+  // replayed with different arguments. It says nothing whatever about whether the reply ended.
+  const settled = await stopWith(THREAD_CONFLICT, () => refusal("CLR10", "op_key conflict", "op_key_conflict"));
+  assert.equal(settled.phase, "failed");
+  assert.equal(settled.phase === "failed" ? settled.cause : null, "refused",
+    "a refusal is a refusal; the reply may still be running and the line must say so");
+});
+
+// ===========================================================================================
+// #630 fix round 4 — THE POLL, THE CLOCK, THE ABANDONED TURN, AND THE REOPENED RAIL.
+// ===========================================================================================
+
+const THREAD_POLL = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+const THREAD_CLOCK = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+const THREAD_ABANDON = "ffffffff-ffff-4fff-8fff-ffffffffffff";
+const THREAD_REOPEN = "12121212-1212-4121-8121-121212121212";
+
+const PARKED = {
+  type: "clarify" as const,
+  tool_call_id: "interruption:parked-1",
+  question: "which bank account is this?",
+  context: null,
+  framing: "",
+};
+
+test("630 the run poll: a read that finds NO ROW keeps the parked question — absence is not an ending", async () => {
+  // MEASURED DEFECT: the poll treated "no visible row" as "the turn ended" and wrote
+  // `hydrateRun(null)`, which also clears `parkedClarify`, `turnStartedAt` and `turnStatus`. A
+  // walk whose mock answers `agent_tasks_visible` by session_id only — and a real read blocked by
+  // RLS, a transient, or a stale id — lost the question card, its Answer control and its clock
+  // four seconds after load, on a run that was still waiting for the answer.
+  const { useClaraThread, CLARA_RUN_POLL_MS } = await import("./useClaraThread");
+  const original = globalThis.fetch;
+  const originalUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  process.env.NEXT_PUBLIC_SUPABASE_URL = "https://example.supabase.co";
+  let runReads = 0;
+  globalThis.fetch = (async (u: unknown) => {
+    const url = String(u);
+    if (/agent_tasks_visible/.test(url)) {
+      runReads += 1;
+      // The shape of a mock (or an RLS predicate) that does not answer this filter: an empty set.
+      return new Response("[]", { status: 200, headers: { "content-type": "application/json" } });
+    }
+    return new Response(JSON.stringify({}), { status: 200, headers: { "content-type": "application/json" } });
+  }) as typeof fetch;
+  try {
+    const h = await renderHook(() => useClaraThread(session, THREAD_POLL));
+    try {
+      await h.act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+      // A thread parked on a question, exactly as the mount's own rehydrate leaves one.
+      claraThreadStore.hydrateRun(
+        THREAD_POLL,
+        { taskId: "task-parked", status: "awaiting_input", startedAt: "2026-09-12T00:00:00.000Z" },
+        PARKED,
+      );
+      await h.act(async () => { await h.rerender(); });
+      const before = runReads;
+      // Let ONE poll tick run and its read settle.
+      await h.act(async () => { await new Promise((r) => setTimeout(r, CLARA_RUN_POLL_MS + 120)); });
+      assert.ok(runReads > before, "precondition: the poll actually ran (it read the run at least once)");
+
+      const after = claraThreadStore.getThread(THREAD_POLL);
+      assert.deepEqual(after.parkedClarify, PARKED,
+        "the question Clara is parked on survives a read that saw no row");
+      assert.equal(after.turnStartedAt, "2026-09-12T00:00:00.000Z", "…so does its clock");
+      assert.equal(after.turnStatus, "awaiting_input", "…and the turn is still known to be parked");
+    } finally {
+      await h.unmount();
+    }
+  } finally {
+    globalThis.fetch = original;
+    if (originalUrl === undefined) delete process.env.NEXT_PUBLIC_SUPABASE_URL;
+    else process.env.NEXT_PUBLIC_SUPABASE_URL = originalUrl;
+  }
+});
+
+test("630 a settled stop RETIRES the turn clock, so nothing counts under the Stopped marker", async () => {
+  // The store is global, so this outlives the mount: someone who navigates away and back must not
+  // find the same stopped turn timing itself again.
+  const { useClaraThread } = await import("./useClaraThread");
+  const original = globalThis.fetch;
+  const originalUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  process.env.NEXT_PUBLIC_SUPABASE_URL = "https://example.supabase.co";
+  globalThis.fetch = (async (u: unknown) => {
+    if (/rpc\/cancel_agent_task/.test(String(u))) return cancelled("task-clock");
+    return new Response(JSON.stringify({}), { status: 200, headers: { "content-type": "application/json" } });
+  }) as typeof fetch;
+  try {
+    const h = await renderHook(() => useClaraThread(session, THREAD_CLOCK));
+    try {
+      await h.act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+      claraThreadStore.hydrateRun(
+        THREAD_CLOCK,
+        { taskId: "task-clock", status: "running", startedAt: "2026-09-12T00:00:00.000Z" },
+        null,
+      );
+      assert.equal(claraThreadStore.getThread(THREAD_CLOCK).turnStartedAt, "2026-09-12T00:00:00.000Z",
+        "precondition: the clock is running");
+      await h.act(async () => { await h.current.stopReply(); });
+      assert.equal(h.current.stop.phase, "stopped");
+      const after = claraThreadStore.getThread(THREAD_CLOCK);
+      assert.equal(after.turnStartedAt, null, "the clock retires with the turn the door stopped");
+      assert.equal(after.turnStatus, null, "…and the turn is no longer claimed to be running");
+      assert.equal(after.activeTaskId, "task-clock",
+        "…but the task id stays: a stopped reply is still a turn the database can be asked about");
+    } finally {
+      await h.unmount();
+    }
+  } finally {
+    globalThis.fetch = original;
+    if (originalUrl === undefined) delete process.env.NEXT_PUBLIC_SUPABASE_URL;
+    else process.env.NEXT_PUBLIC_SUPABASE_URL = originalUrl;
+  }
+});
+
+test("630 a REFUSED stop inside the admission window does not ABANDON the live turn", async () => {
+  // MEASURED DEFECT: the pending arm spent the stop and returned unconditionally. On a CLR04 the
+  // run was still live but this tab attached no stream at all — no reply would ever arrive here —
+  // and `turnLive`'s four arms were all false, so the Stop control was withdrawn at exactly the
+  // moment the copy said the reply was still running.
+  await withAdmittingFetch(async (seen, release) => {
+    const { useClaraThread } = await import("./useClaraThread");
+    const h = await renderHook(() => useClaraThread(session, THREAD_ABANDON));
+    try {
+      await h.act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+      await h.act(async () => {
+        const sending = h.current.sendMessage("hello").then(() => {});
+        await new Promise((r) => setTimeout(r, 0));
+        await h.current.stopReply();
+        release();
+        await sending;
+        await new Promise((r) => setTimeout(r, 30));
+      });
+      assert.equal(h.current.stop.phase, "failed", "precondition: the door refused");
+      assert.equal(h.current.stop.phase === "failed" ? h.current.stop.cause : null, "denied");
+      assert.ok(seen.includes("GET:stream"),
+        "the turn the runtime took is READ: a refused stop must not leave the reply unreadable in this tab");
+    } finally {
+      await h.unmount();
+    }
+  }, { cancelAnswer: () => refusal("CLR04", "stopping a reply requires a bookkeeper", "insufficient_role") });
+});
+
+test("630 Stop after the rail is CLOSED AND REOPENED still aborts the first mount's read", async () => {
+  // `ClaraRail` genuinely unmounts the view (`presence === "closed"` renders the launcher), and the
+  // hook deliberately does not abort on unmount — closing the rail must not stop the reply. With
+  // the controller in a per-instance ref, the reopened rail held nothing and its Stop press aborted
+  // nothing: chunks kept appending under a marker that said the reply was stopped.
+  const { useClaraThread } = await import("./useClaraThread");
+  const original = globalThis.fetch;
+  const originalUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  process.env.NEXT_PUBLIC_SUPABASE_URL = "https://example.supabase.co";
+  let streamSignal: AbortSignal | null = null;
+  // Read through a function: TypeScript cannot see the closure assignment below, so reading the
+  // `let` directly after an `assert.ok` narrows it to `never` for the rest of the cell.
+  const capturedSignal = (): AbortSignal | null => streamSignal;
+  let holdOpen: () => void = () => {};
+  const held = new Promise<void>((resolve) => { holdOpen = resolve; });
+  globalThis.fetch = (async (u: unknown, init?: RequestInit) => {
+    const url = String(u);
+    if (/\/turns$/.test(url) && (init?.method ?? "GET") === "POST") {
+      return new Response(JSON.stringify({ task_id: "task-reopen" }), {
+        status: 202, headers: { "content-type": "application/json" },
+      });
+    }
+    if (/\/stream/.test(url)) {
+      streamSignal = init?.signal ?? null;
+      await held;                       // the read is STILL OPEN across the unmount/remount
+      return new Response("", { status: 200, headers: { "content-type": "text/event-stream" } });
+    }
+    if (/rpc\/cancel_agent_task/.test(url)) return cancelRequested("task-reopen");
+    return new Response(JSON.stringify({}), { status: 200, headers: { "content-type": "application/json" } });
+  }) as typeof fetch;
+  try {
+    // FIRST MOUNT: post a turn, so a read is open for it.
+    const first = await renderHook(() => useClaraThread(session, THREAD_REOPEN));
+    await first.act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    await first.act(async () => {
+      void first.current.sendMessage("hello");
+      for (let i = 0; i < 80 && capturedSignal() === null; i += 1) await new Promise((r) => setTimeout(r, 1));
+    });
+    const opened = capturedSignal();
+    assert.ok(opened, "precondition: a read is open for the admitted turn");
+    assert.equal(opened.aborted, false, "…and it has not been aborted");
+
+    // THE RAIL CLOSES. The view unmounts; the reply must keep running.
+    await first.unmount();
+    assert.equal(opened.aborted, false,
+      "closing the rail does not stop the reply — someone may be coming back to it");
+
+    // THE RAIL REOPENS on a fresh instance, and Stop is pressed there.
+    const second = await renderHook(() => useClaraThread(session, THREAD_REOPEN));
+    try {
+      await second.act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+      await second.act(async () => { await second.current.stopReply(); });
+      assert.equal(opened.aborted, true,
+        "the press reaches the read the FIRST mount opened — the handle lives with the turn, not the mount");
+      assert.equal(second.current.stop.phase, "stopped", "…and the door was called for that same turn");
+    } finally {
+      await second.unmount();
+      holdOpen();
+    }
+  } finally {
+    globalThis.fetch = original;
+    if (originalUrl === undefined) delete process.env.NEXT_PUBLIC_SUPABASE_URL;
+    else process.env.NEXT_PUBLIC_SUPABASE_URL = originalUrl;
+  }
 });

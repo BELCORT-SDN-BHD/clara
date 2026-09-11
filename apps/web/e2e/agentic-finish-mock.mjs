@@ -191,6 +191,20 @@ export async function handleP6_5Supabase(request, response, path, url, sendJson,
     // THREAD-SCOPED, like everything else in this lane: an unscoped claim on a relation every
     // walk's rail now reads would answer for threads this lane does not own. Only the three
     // ids below are ours; anything else falls through.
+    // #630 — BY TASK ID TOO. `useClaraThread` re-asks about the live turn it already knows by
+    // `id=eq.<task>`, with no session filter; this arm used to answer only `session_id`, so that
+    // read fell through to serve-built's honest `[]`. The hook no longer treats an absent row as
+    // an ending, but a fixture that serves a live turn must still answer the read the rail
+    // actually issues about it — otherwise the walk is exercising the miss path, not the lane.
+    const byId = url.searchParams.get("id");
+    if (byId === `eq.${P6_5.taskA}`) {
+      sendJson(response, 200, [{
+        id: P6_5.taskA,
+        status: "awaiting_input",
+        created_at: new Date(Date.now() - 95_000).toISOString(),
+      }], cors);
+      return true;
+    }
     const session = url.searchParams.get("session_id");
     const ours = [P6_5.threadA, P6_5.threadB, P6_5.threadFirm].map((id) => `eq.${id}`);
     if (!session || !ours.includes(session)) return false;

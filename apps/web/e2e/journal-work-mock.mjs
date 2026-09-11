@@ -244,9 +244,20 @@ const state = {
   /** Every `clara.cancel_agent_task` the rail sent, so a cell can prove "Stop reply" pressed ONE
    *  door — and that closing the rail pressed none. */
   stopCalls: [],
-  /** What the next `cancel_agent_task` answers: "ok" or "denied" (CLR04 — `clara.begin_chat_turn`
-   *  admits any active member, that door floors at bookkeeper, so a refusal is reachable in
-   *  production and the surface must not print "Stopped" over it). */
+  /** What the next `cancel_agent_task` answers.
+   *
+   *    "ok"        the door acts on the turn's REAL status (queued/held settle terminally,
+   *                running/awaiting_input become cancel_requested) — production's own branch.
+   *    "denied"    CLR04. `clara.begin_chat_turn` admits any active member and that door floors at
+   *                bookkeeper, so a refusal is reachable in production and the surface must not
+   *                print "Stopped" over it.
+   *    "settled"   the QUEUED arm, forced: the engine had not claimed the turn when the press
+   *                landed, so the door settled the task terminally and answers
+   *                `{status:'cancelled', changed:true}`. This is a race the browser cannot arrange
+   *                for itself, and it is the one that used to be announced as "Nothing was
+   *                stopped — this reply had already finished".
+   *    "over"      the turn had ALREADY ended when the press arrived: `{changed:false,
+   *                transition:'already_terminal'}`, the one answer that is honestly not a stop. */
   stopAnswer: "ok",
   /** `clara.agent_interruptions` rows, in the shape `clara.open_interruption`
    *  writes them: one PENDING row per parked task, its `question` jsonb carrying
@@ -1346,8 +1357,36 @@ export async function handleJournalWorkSupabase(request, response, path, url, se
       }, cors);
       return true;
     }
-    if (state.liveTurn !== null) state.liveTurn.status = "cancel_requested";
-    sendJson(response, 200, { task_id: String(body?.p_task ?? ""), status: "cancel_requested" }, cors);
+    // #630 (fix round 4) — THE ANSWER IS THE DOOR'S ANSWER, PER THE TASK'S REAL STATUS.
+    // `clara.cancel_agent_task` does not always answer `cancel_requested`: a QUEUED or HELD task
+    // has no engine run, so the door settles it terminally and answers `cancelled` — and it says
+    // WHICH arm answered, because `{status:'cancelled'}` alone cannot be told from the same
+    // status over a task that had already ended. This fixture answers all four arms so the walk
+    // drives what production drives, not one convenient case.
+    if (state.stopAnswer === "settled") {
+      state.liveTurn.status = "cancelled";
+      sendJson(response, 200, { task_id: task, status: "cancelled", changed: true, transition: "cancelled" }, cors);
+      return true;
+    }
+    if (state.stopAnswer === "over") {
+      state.liveTurn.status = "completed";
+      sendJson(response, 200,
+        { task_id: task, status: "completed", changed: false, transition: "already_terminal" }, cors);
+      return true;
+    }
+    const was = state.liveTurn.status;
+    if (["completed", "failed", "cancelled", "expired"].includes(was)) {
+      sendJson(response, 200, { task_id: task, status: was, changed: false, transition: "already_terminal" }, cors);
+      return true;
+    }
+    if (was === "cancel_requested") {
+      sendJson(response, 200,
+        { task_id: task, status: "cancel_requested", changed: false, transition: "already_requested" }, cors);
+      return true;
+    }
+    const next = was === "running" || was === "awaiting_input" ? "cancel_requested" : "cancelled";
+    state.liveTurn.status = next;
+    sendJson(response, 200, { task_id: task, status: next, changed: true, transition: next }, cors);
     return true;
   }
 

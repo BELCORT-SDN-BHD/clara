@@ -44,6 +44,9 @@ export interface ClaraThreadUiState {
   stream: ClaraStreamState;
 }
 
+/** #630 — see `registerStreamAbort` below. Module-level and NON-reactive on purpose. */
+const streamAborts = new Map<string, AbortController>();
+
 const emptyThreadState: ClaraThreadUiState = {
   messages: [],
   messagesLoaded: false,
@@ -289,6 +292,21 @@ export const claraThreadStore = {
       : { stream });
   },
 
+  /** #630 — THE TURN CLOCK RETIRES WHEN A DOOR SAYS THE TURN IS OVER. `hydrateRun(null)`, a
+   *  terminal `message` and `markSendFailed` were the only writers of `turnStartedAt: null`, and a
+   *  manual stop calls none of them: an abort never transitions `stream.status` away from
+   *  "streaming", so the DB poll that could have noticed is gated off and the elapsed-time line
+   *  kept counting under the "Stopped" marker for the life of the mount — and, because this store
+   *  is global, across a navigation away and back.
+   *
+   *  IT KEEPS `activeTaskId` AND THE STREAM BUFFER, deliberately. A stopped reply is still what
+   *  Clara said: the partial prose stays on screen, and the task id stays so a re-read can still
+   *  ask the database about the turn that was stopped. Only the two things that ASSERT the turn is
+   *  still running are dropped. */
+  markTurnStopped(threadId: string): void {
+    setThread(threadId, { turnStartedAt: null, turnStatus: null });
+  },
+
   /** FIX 1 — fires right before each backoff sleep. Surfaces the attempt count via
    *  the SAME "detached" status the UI already renders as "reconnecting" (an
    *  explicit `detached` event already set that status via `applyStreamEvent`; an
@@ -319,6 +337,40 @@ export const claraThreadStore = {
    *  "retry" affordance to build its `runClaraTaskStream` call on top of. */
   beginRetry(threadId: string): void {
     setThread(threadId, { stream: initialClaraStreamState });
+  },
+
+  // -------------------------------------------------------------------------------------------
+  // #630 — THE LIVE SSE READ'S ABORT HANDLE, KEYED BY TASK ID AND HELD HERE RATHER THAN IN THE
+  // HOOK.
+  //
+  // `ClaraRail` genuinely UNMOUNTS `ClaraThreadView` when the exit transition finishes, and the
+  // hook deliberately does not abort on unmount — closing the rail must not stop the reply. But a
+  // per-instance `useRef` died with that unmount, so a reopened rail held a fresh null controller
+  // while the FIRST mount's read was still streaming into this store: pressing Stop then aborted
+  // nothing, and assistant chunks kept appending under a marker that said the reply was stopped.
+  //
+  // DELIBERATELY NOT PART OF `ClaraThreadUiState` and deliberately not reactive: an
+  // `AbortController` is a handle, not something a render reads, and putting it in the subscribed
+  // state would re-render every consumer each time a stream opens. It is keyed by TASK id, not by
+  // thread, because the thing being aborted is one turn's read.
+  // -------------------------------------------------------------------------------------------
+  registerStreamAbort(taskId: string, controller: AbortController): void {
+    streamAborts.set(taskId, controller);
+  },
+
+  /** Forget the handle for a read that has ended on its own. Never aborts. */
+  releaseStreamAbort(taskId: string, controller: AbortController): void {
+    if (streamAborts.get(taskId) === controller) streamAborts.delete(taskId);
+  },
+
+  /** Abort the live read for one task, whichever mount opened it. Returns true when there WAS one
+   *  — a caller that needs to know whether "the read stops first" actually stopped anything. */
+  abortStream(taskId: string): boolean {
+    const controller = streamAborts.get(taskId);
+    if (!controller) return false;
+    streamAborts.delete(taskId);
+    controller.abort();
+    return true;
   },
 
   /** #614 A7 — ALSO forgets this threadId's draft, in every altitude it might be

@@ -206,3 +206,89 @@ test("630 the Stop control is withdrawn when the DB says the rehydrated turn has
     globalThis.clearInterval = realClear;
   }
 });
+
+// ---------------------------------------------------------------------------------------------
+// 3 · WHAT THE DOOR ANSWERED, AS WORDS ON THE SCREEN (#630 fix round 4)
+//
+// `clara.cancel_agent_task` answers `{status:'cancelled'}` for BOTH the terminal settle it
+// performs on a still-QUEUED turn and for a turn that had already ended when the press arrived.
+// Reading the status alone, this surface printed "Nothing was stopped — this reply had already
+// finished" over a reply the press had just killed. These three cells drive the rendered end of
+// the discriminator: the stop that worked, the stop that found nothing to do, and the refusal that
+// is neither.
+// ---------------------------------------------------------------------------------------------
+
+const THREAD_KILLED = "dddddddd-4444-4444-8444-444444444444";
+const THREAD_OVER = "eeeeeeee-5555-4555-8555-555555555555";
+const THREAD_REFUSED_VIEW = "ffffffff-6666-4666-8666-666666666666";
+
+/** Mount a live turn, press Stop, and hand back the rendered text once the machine has settled. */
+async function pressStop(threadId: string, answer: Response): Promise<string> {
+  let rendered = "";
+  await withFetch(
+    (url) => {
+      if (url.includes("/messages")) return json({ messages: [] });
+      if (url.includes("agent_tasks_visible")) {
+        // A turn this tab did not post, found running — the reload case, and the one where the
+        // turn clock is on screen with nothing but a door to retire it.
+        return json([{ id: TASK_ID, status: "running", created_at: new Date(Date.now() - 62_000).toISOString() }]);
+      }
+      if (url.includes("agent_interruptions")) return json([]);
+      if (url.includes("caller_context")) return json([]);
+      if (url.includes("/rpc/cancel_agent_task")) return answer.clone();
+      return json([]);
+    },
+    async () => {
+      const h = await renderComponent(App(threadId));
+      try {
+        await settleUntil(h, () => h.find(buttonNamed("Stop reply")) !== null, "the Stop control");
+        assert.match(h.text(), /Clara has been working on this for/,
+          "precondition: the turn clock is on screen, counting from the runtime's own start");
+        const stop = h.find(buttonNamed("Stop reply"));
+        assert.ok(stop, "the Stop control is offered for a live turn");
+        await h.act(() => clickButton(stop));
+        await settleUntil(h, () => h.find(buttonNamed("Stop reply")) === null || /stopped|Could not stop|Nothing was stopped/i.test(h.text()),
+          "the machine to settle");
+        rendered = h.text();
+      } finally {
+        await h.unmount();
+      }
+    },
+  );
+  return rendered;
+}
+
+test("630 a stop that TERMINALLY CANCELLED the turn reads Stopped, and its clock stops with it", async () => {
+  const text = await pressStop(THREAD_KILLED, json({
+    task_id: TASK_ID, status: "cancelled", changed: true, transition: "cancelled",
+  }));
+  assert.match(text, /Stopped/, "the press killed the turn; the marker says so");
+  assert.doesNotMatch(text, /Nothing was stopped/,
+    "…and never the opposite: `status:'cancelled'` is what a SUCCESSFUL stop of a queued turn "
+    + "answers, and reading it as 'already finished' inverted the whole act");
+  assert.doesNotMatch(text, /Clara has been working on this for/,
+    "a stopped turn is not still being worked on — a clock counting under the marker is the "
+    + "surface arguing with itself");
+});
+
+test("630 …and a turn that had ALREADY ENDED still reads honestly", async () => {
+  const text = await pressStop(THREAD_OVER, json({
+    task_id: TASK_ID, status: "completed", changed: false, transition: "already_terminal",
+  }));
+  assert.match(text, /Nothing was stopped/, "the door changed nothing, and said so");
+  assert.doesNotMatch(text, /Clara has been working on this for/,
+    "…and the turn it found was over, so nothing is timing it either");
+});
+
+test("630 a governed refusal that is not the role floor reads as a refusal, never as 'already finished'", async () => {
+  const text = await pressStop(THREAD_REFUSED_VIEW,
+    refusal("CLR10", "op_key conflict", "op_key_conflict"));
+  assert.match(text, /Could not stop this reply/, "the request was turned down, and the line says so");
+  assert.doesNotMatch(text, /Nothing was stopped/,
+    "a refusal is not evidence the reply ended — telling the reader it had finished would send "
+    + "them away from a turn that is still spending");
+  assert.doesNotMatch(text, /needs a bookkeeper role/,
+    "…and it does not blame their role either: CLR10 says nothing whatever about who they are");
+  assert.match(text, /Clara has been working on this for/,
+    "the turn is still live, so an honest elapsed time is exactly what they need");
+});
