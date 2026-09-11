@@ -411,20 +411,22 @@ async function orphaned({ origin = "user_direct" } = {}) {
   return { ...w, initiator };
 }
 
-test("wc.17 a colleague takes responsibility: a new run, the initiator preserved, a timeline event", async (t) => {
+test("wc.17 a colleague takes responsibility: a new run, the admitting human preserved, a timeline event", async (t) => {
   if (await gateCancel(t)) return;
   const w = await orphaned();
   const out = await takeOverAccountingWork({ work: w.work_id, author: colleague });
   assert.equal(out.taken_over, true, "wc.17 the door reports the takeover");
   assert.equal(out.status, "queued", "wc.17 a NEW run is admitted for the SAME Work");
   assert.equal(out.responsible, colleague, "wc.17 the colleague is now responsible");
-  assert.equal(out.initiator, w.initiator, "wc.17 …and the initiator is preserved as the historical fact");
+  assert.equal(out.initiated_by, w.initiator,
+    "wc.17 …and who ASKED is preserved as the immutable historical fact");
+  assert.equal(out.previous_responsible, w.initiator, "wc.17 the answer says who it was taken from");
   assert.equal(out.logical_op_id, w.logical_op_id, "wc.17 the logical identity is unchanged");
   assert.notEqual(out.task_id, w.task_id, "wc.17 a NEW task carries the new run");
 
   const row = await responsibleOf(w.work_id);
-  assert.equal(row.responsible, colleague);
-  assert.equal(row.initiator, w.initiator);
+  assert.equal(row.responsible, colleague, "wc.17 the Work is now executed AS the colleague");
+  assert.equal(row.initiated_by, w.initiator, "wc.17 …and still records who admitted it");
   assert.equal((await tasksForWork(w.work_id)).length, 2, "wc.17 exactly two runs exist");
 
   const events = await timelineEvents(FIRM_A(), "work.taken_over");
@@ -432,6 +434,21 @@ test("wc.17 a colleague takes responsibility: a new run, the initiator preserved
   assert.equal(mine.length, 1, "wc.17 exactly one work.taken_over event");
   assert.equal(mine[0].actor, colleague, "wc.17 …attributed to the colleague");
   assert.equal(mine[0].payload.previous_responsible, w.initiator);
+});
+
+test("wc.17b `initiated_by` is frozen and `initiator` may only be handed to an active bookkeeper", async (t) => {
+  if (await gateCancel(t)) return;
+  const w = await admitted();
+  await assertPair(CLR.immutable, "accounting_work_immutable",
+    () => rootQuery("update clara.accounting_work set initiated_by=$2 where id=$1", [w.work_id, CAROL()]),
+    "wc.17b who ASKED can never be rewritten");
+  await assertPair(CLR.authz, "responsible_not_authorised",
+    () => rootQuery("update clara.accounting_work set initiator=$2 where id=$1", [w.work_id, CAROL()]),
+    "wc.17b …and a Work may not be handed to a viewer");
+  const outsider = await insertUser(world.prefix, "mallory");
+  await assertPair(CLR.authz, "responsible_not_authorised",
+    () => rootQuery("update clara.accounting_work set initiator=$2 where id=$1", [w.work_id, outsider]),
+    "wc.17b …nor to somebody who is not in the firm at all");
 });
 
 test("wc.18 a still-authorised, non-refused Work is NOT takeable", async (t) => {
@@ -493,23 +510,27 @@ test("wc.20 after a takeover the commit binds the RESPONSIBLE human, never the i
   const rows = await receiptsForWork(w.work_id);
   assert.equal(rows.length, 1, "wc.20 exactly one receipt");
   assert.equal(rows[0].on_behalf_of, colleague, "wc.20 …under the colleague's live authority");
-  assert.equal((await responsibleOf(w.work_id)).initiator, w.initiator,
-    "wc.20 the initiator is still the historical fact on the row");
+  assert.equal((await responsibleOf(w.work_id)).initiated_by, w.initiator,
+    "wc.20 who ASKED is still the historical fact on the row");
 });
 
 test("wc.21 work_authority_snapshot answers for the human currently RESPONSIBLE", async (t) => {
   if (await gateCancel(t)) return;
   const w = await orphaned();
   const before = await workAuthoritySnapshot(w.task_id);
-  assert.equal(before.initiator_authorised, false, "wc.21 the revoked initiator is not authorised");
-  assert.equal(before.responsible, w.initiator, "wc.21 …and is still the responsible human");
+  assert.equal(before.initiator_authorised, false, "wc.21 the revoked human is not authorised");
+  assert.equal(before.responsible, w.initiator, "wc.21 …and is still the one the Work runs as");
+  assert.equal(before.taken_over, false, "wc.21 nothing has been handed over yet");
 
   const out = await takeOverAccountingWork({ work: w.work_id, author: colleague });
   const after = await workAuthoritySnapshot(out.task_id);
   assert.equal(after.responsible, colleague, "wc.21 the snapshot names the new responsible human");
-  assert.equal(after.initiator, w.initiator, "wc.21 …keeps the initiator for attribution");
+  assert.equal(after.initiator, colleague,
+    "wc.21 …under the key the DEPLOY-LOCKED closure reads, because that is the human it mints OBO");
+  assert.equal(after.initiated_by, w.initiator, "wc.21 …while who ASKED is kept for attribution");
+  assert.equal(after.taken_over, true, "wc.21 …and the pair is flagged as diverged");
   assert.equal(after.initiator_authorised, true,
-    "wc.21 …and the liveness the frozen closure reads is the RESPONSIBLE human's");
+    "wc.21 the liveness the frozen recheck reads is the human the run acts as");
   assert.equal(after.work_status, "queued");
 });
 

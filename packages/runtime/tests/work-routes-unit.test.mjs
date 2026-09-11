@@ -382,3 +382,50 @@ test("634.route: WORK_MAPPED_CODES still covers every code the evidence arms can
     assert.notEqual(workErrorStatus(code, "invalid_source_ref"), null);
   }
 });
+
+// ===========================================================================================
+// #630 — THE CANCEL AND TAKE-OVER DOORS' OWN WIRE ANSWERS.
+//
+// Both routes hand the DATABASE's jsonb straight back on success, so the only thing a pure cell can
+// hold still is the REFUSAL map — and that is exactly where these two doors are easiest to get
+// wrong, because three of their refusals share a code with something that means something else.
+// ===========================================================================================
+
+test("630.route: the takeover's basis gate is NOT a malformed basis", () => {
+  const out = workErrorResponse(raised("CLR10", {
+    reason: "basis_confirmation_required", basis_origin: "clara_interpreted", basis_digest: "a".repeat(64),
+  }));
+  assert.equal(out.status, 400);
+  assert.deepEqual(out.body, {
+    error: "basis_confirmation_required",
+    basis_digest: "a".repeat(64),
+    basis_origin: "clara_interpreted",
+  }, "the DIGEST is the whole point of the refusal — the colleague confirms what they read");
+  // …and it does NOT collapse into the field-scoped invalid_basis body, which would tell the
+  // human their input was wrong when it was not.
+  assert.notEqual(out.body.error, "invalid_basis");
+});
+
+test("630.route: not_takeable carries the status that made it so, like not_retryable", () => {
+  assert.deepEqual(workErrorResponse(raised("CLR13", { reason: "not_takeable", status: "running" })),
+    { status: 409, body: { error: "not_takeable", status: "running" } });
+  // The Work-status arm the takeover shares with retry: a live run is a 409, never a 500.
+  assert.equal(workErrorStatus("CLR13", "not_takeable"), 409);
+});
+
+test("630.route: the boundary's own refusals are 409s naming the Work status", () => {
+  assert.deepEqual(workErrorResponse(raised("CLR13", { reason: "work_cancelled", status: "stopping" })),
+    { status: 409, body: { error: "work_cancelled", status: "stopping" } });
+  assert.deepEqual(workErrorResponse(raised("CLR13", { reason: "work_settled", status: "refused" })),
+    { status: 409, body: { error: "work_settled", status: "refused" } });
+});
+
+test("630.route: the cancel door's authority and identity refusals keep the estate's statuses", () => {
+  assert.equal(workErrorStatus("CLR11", "work_not_found"), 404, "no existence oracle across firms");
+  assert.equal(workErrorStatus("CLR04", "actor_not_active"), 403);
+  assert.equal(workErrorStatus("CLR04", "insufficient_role"), 403);
+  assert.equal(workErrorStatus("CLR13", "operation_in_flight"), 409);
+  assert.deepEqual(workErrorResponse(raised("CLR10", { reason: "op_key_conflict" })).body,
+    { error: "invalid_basis", field: "basis", reason: "op_key_conflict" },
+    "a reused key with different arguments rides the route's own 400 vocabulary");
+});

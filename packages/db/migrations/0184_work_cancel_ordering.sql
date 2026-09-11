@@ -77,19 +77,21 @@
 -- estate loses a fact. A committed receipt still outranks BOTH (0178's law, unchanged).
 --
 -- =====================================================================================
--- THE THIRD MEASUREMENT: `initiator` CANNOT CARRY RESPONSIBILITY, BECAUSE IT IS IMMUTABLE.
+-- THE THIRD MEASUREMENT: THE COLUMN A TAKEOVER MUST MOVE IS `initiator`, AND NOTHING ELSE WILL DO.
 --
 -- Story 29 asks that a currently authorised colleague be able to take responsibility for a Work
--- whose initiator lost authority. `clara.accounting_work.initiator` is frozen by
--- `clara._tf_accounting_work_immutable` and must stay frozen: it is the estate's record of WHO
--- ASKED, read off the posted entry by a reviewer months later. So responsibility becomes its own
--- column, `responsible`, born equal to `initiator` and moved by exactly one door.
+-- whose person lost authority. The obvious design is a NEW column and an immutable `initiator`. It
+-- does not work, and the reason is measured rather than stylistic: the DEPLOY-LOCKED closure mints
+-- every credential this lane uses OBO `clara.accounting_work.initiator` (claraWork.v2.impl.ts:184
+-- reading claraWork.v1.impl.ts:142's own SELECT, spent at claraWork.v1.tools.ts:199/210). A takeover
+-- that moved a different column would be RECORDED and then fail on the taken-over run's first tool
+-- call — measured on the rig, with `clara.mint_wake_credential` refusing "on_behalf_of must be an
+-- active bookkeeper+ of the firm" and the Work settling `failed` about the chart.
 --
--- `clara._record_journal_entry_core`'s obo binding and `clara.work_authority_snapshot` both switch
--- to `responsible`, because the credential names the human whose LIVE authority is being spent.
--- `initiator` keeps every attribution role it had. The refusal reason for a mismatched credential
--- stays `obo_not_initiator` — the frozen roster knows that token and a rename would make the run
--- classify its own refusal as unmapped.
+-- So §A splits the two facts `initiator` was carrying: it keeps the NAME and becomes the human the
+-- Work is executed AS, and the immutable historical fact moves to `initiated_by`. The refusal reason
+-- for a mismatched credential stays `obo_not_initiator` — the frozen roster knows that token and a
+-- rename would make the run classify its own refusal as unmapped.
 -- =====================================================================================
 
 do $w630_pre$
@@ -104,9 +106,15 @@ begin
     raise exception '#630 prestate: a work-cancel door already exists' using errcode='CLR10';
   end if;
   select count(*)::int into v_n from information_schema.columns
-   where table_schema='clara' and table_name='accounting_work' and column_name='responsible';
+   where table_schema='clara' and table_name='accounting_work' and column_name='initiated_by';
   if v_n <> 0 then
-    raise exception '#630 prestate: clara.accounting_work.responsible already exists' using errcode='CLR10';
+    raise exception '#630 prestate: clara.accounting_work.initiated_by already exists' using errcode='CLR10';
+  end if;
+  select p.prosrc into v_src from pg_proc p where p.oid='clara._tf_accounting_work_immutable()'::regprocedure;
+  if position('initiated_by' in v_src) > 0
+     or position('''purpose'',''initiator'',''initiator_role''' in v_src) = 0 then
+    raise exception '#630 prestate: the immutability trigger is not 0178''s -- re-derive its recut'
+      using errcode='CLR10';
   end if;
   -- The posting core reads its Work WITHOUT a lock and asks nothing about its status. That is the
   -- gap this file closes; pinned so a later reader can see the before-state was real.
@@ -123,47 +131,115 @@ begin
   if position('stopping' in v_src) > 0 then
     raise exception '#630 prestate: the status mirror already writes stopping' using errcode='CLR10';
   end if;
-  raise notice '#630 prestate: clean -- no work-level cancel or takeover door exists, accounting_work has no responsible column, the posting core takes no row lock and knows no cancellation, and the status mirror never writes stopping.';
+  raise notice '#630 prestate: clean -- no work-level cancel or takeover door exists, accounting_work has no initiated_by column and its immutability trigger still freezes initiator, the posting core takes no row lock and knows no cancellation, and the status mirror never writes stopping.';
 end
 $w630_pre$;
 
 set role clara_fn_owner;
 
 -- =====================================================================================
--- §A  clara.accounting_work.responsible — WHO IS ANSWERABLE FOR THIS WORK NOW.
+-- §A  WHO THE WORK RUNS AS, AND WHO ASKED FOR IT — two facts that were one column.
 --
--- Born equal to `initiator` for every existing row and for every future admission (the default
--- trigger below), so nothing about the lane changes until a takeover moves it. It is deliberately
--- NOT added to `clara._tf_accounting_work_immutable`'s frozen set: the takeover door is its one
--- writer and the column has to be able to move.
+-- Story 29 asks that a currently authorised colleague be able to take responsibility for a Work
+-- whose person lost authority. THE MEASUREMENT THAT DECIDES THE SHAPE: the deploy-locked closure
+-- mints EVERY credential this lane uses OBO `clara.accounting_work.initiator` —
+-- `claraWork.v2.impl.ts:184` sets `createdBy: work.initiator` from `loadWorkStep`'s own
+-- `select ... w.initiator ... from clara.accounting_work w` (claraWork.v1.impl.ts:142), and
+-- `claraWork.v1.tools.ts:199/210` mint `interactive_client` / `interactive` OBO exactly that value.
+-- Both files are `@frozen` and `deployed: true` in frozen-workflows.json.
+--
+-- So a takeover that moved a NEW column would be recorded and then FAIL. Measured on the rig
+-- (tests/work-cancel-e2e.mjs leg 5, first cut): the taken-over run's very first tool call
+-- (`list_accounts`) died inside `clara.mint_wake_credential` with "on_behalf_of must be an active
+-- bookkeeper+ of the firm", and the Work settled `failed` saying the chart could not be read. The
+-- column the run acts as IS `initiator`, and there is no way to tell the deployed closure otherwise.
+--
+-- THE SPLIT, THEREFORE: `initiator` keeps its NAME and its every existing reader, and becomes the
+-- human whose LIVE AUTHORITY this Work is executed under — the admitting human until exactly one
+-- door moves it. The historical fact it used to also carry moves to its own immutable column,
+-- `initiated_by`, so nothing is lost: who asked is still frozen forever, it is simply no longer the
+-- same question as who is answerable now.
 -- =====================================================================================
-alter table clara.accounting_work add column responsible uuid references clara.users(id);
--- The backfill runs with the immutability trigger DISABLED for one statement. Not to dodge the
--- trigger's check (nothing frozen moves) but to keep `updated_at` HONEST: that trigger stamps
+alter table clara.accounting_work add column initiated_by uuid references clara.users(id);
+-- The backfill runs with the immutability trigger DISABLED for one statement. Not to dodge its
+-- check (nothing frozen moves) but to keep `updated_at` HONEST: that trigger stamps
 -- `new.updated_at := now()` on every update, and a schema backfill is not a thing that happened to
 -- the Work. Re-enabled immediately; both statements are inside this migration's single transaction.
 alter table clara.accounting_work disable trigger t_accounting_work_immutable;
-update clara.accounting_work set responsible = initiator where responsible is null;
+update clara.accounting_work set initiated_by = initiator where initiated_by is null;
 alter table clara.accounting_work enable trigger t_accounting_work_immutable;
-alter table clara.accounting_work alter column responsible set not null;
+alter table clara.accounting_work alter column initiated_by set not null;
 
-comment on column clara.accounting_work.responsible is
-  '#630: the human whose LIVE authority this Work is executed under. Equal to `initiator` until '
-  'clara.take_over_accounting_work moves it. `initiator` stays the immutable record of who asked.';
+comment on column clara.accounting_work.initiated_by is
+  '#630: the human who ADMITTED this Work. Immutable forever — the estate''s record of who asked, '
+  'read off the posted entry by a reviewer months later. `initiator` is the human the Work is '
+  'currently executed AS, and clara.take_over_accounting_work is the only door that moves it.';
+comment on column clara.accounting_work.initiator is
+  '#630 (was #623): the human whose LIVE AUTHORITY this Work spends — the credential every run of '
+  'it is minted on behalf of, and the `on_behalf_of` of its receipt. Equal to `initiated_by` until '
+  'clara.take_over_accounting_work moves it. `initiator_role` remains the ADMISSION snapshot and '
+  'therefore describes `initiated_by`.';
 
 -- The default. A column DEFAULT cannot read another column, and recutting
--- `clara.admit_journal_work` purely to add one assignment would put a 160-line body under review
--- for a line that belongs to the table. A BEFORE INSERT trigger states the invariant once, for
--- every writer that will ever exist. It reads NO clock.
-create function clara._tf_accounting_work_responsible_default() returns trigger
+-- `clara.admit_journal_work` purely to add one assignment would put a 160-line body under review for
+-- a line that belongs to the table. A BEFORE INSERT trigger states the invariant once, for every
+-- writer that will ever exist. It reads NO clock.
+create function clara._tf_accounting_work_initiated_by_default() returns trigger
   language plpgsql security definer set search_path = clara, pg_temp as $$
 begin
-  if new.responsible is null then new.responsible := new.initiator; end if;
+  if new.initiated_by is null then new.initiated_by := new.initiator; end if;
   return new;
 end $$;
-revoke all on function clara._tf_accounting_work_responsible_default() from public;
-create trigger t_accounting_work_responsible_default before insert on clara.accounting_work
-  for each row execute function clara._tf_accounting_work_responsible_default();
+revoke all on function clara._tf_accounting_work_initiated_by_default() from public;
+create trigger t_accounting_work_initiated_by_default before insert on clara.accounting_work
+  for each row execute function clara._tf_accounting_work_initiated_by_default();
+
+-- -------------------------------------------------------------------------------------
+-- clara._tf_accounting_work_immutable — RECUT. Full 0178 body; TWO changes, both marked.
+--
+--   1. `initiated_by` JOINS the frozen set and `initiator` LEAVES it. The set does not shrink: the
+--      immutable historical fact is still frozen, under the column that now holds it.
+--   2. A MOVE OF `initiator` IS NOT FREE. It is admitted only towards an ACTIVE bookkeeper+ of the
+--      Work's own firm — because the whole point of moving it is that the run will spend that
+--      human's authority, and a column that could be pointed at anybody would be a way to launder a
+--      posting through a member who never agreed to it. The door checks this too; the trigger is the
+--      belt, and it is what makes the claim a property of the DATA rather than of one verb.
+-- -------------------------------------------------------------------------------------
+create or replace function clara._tf_accounting_work_immutable() returns trigger
+  language plpgsql security definer set search_path = clara, pg_temp as $$
+declare
+  v_frozen text[] := array['id','firm_id','client_id','purpose','initiated_by','initiator_role',
+                           'intent_key','logical_op_id','basis','basis_digest','basis_origin',
+                           'created_at'];
+  c text; v_role text; v_status text;
+begin
+  if tg_op = 'DELETE' then
+    raise exception 'accounting work is never deleted (settle it, do not erase it)'
+      using errcode='CLR08', detail='{"reason":"accounting_work_immutable","column":"*"}';
+  end if;
+  foreach c in array v_frozen loop
+    if (to_jsonb(new) -> c) is distinct from (to_jsonb(old) -> c) then
+      raise exception 'accounting work column % is immutable after admission', c
+        using errcode='CLR08',
+          detail=jsonb_build_object('reason','accounting_work_immutable','column',c)::text;
+    end if;
+  end loop;
+  -- #630 · the ONE mutable authority column, and its wall.
+  if new.initiator is distinct from old.initiator then
+    select m.role, m.status into v_role, v_status from clara.firm_memberships m
+     where m.user_id = new.initiator and m.firm_id = new.firm_id
+     order by (m.status = 'active') desc, m.created_at desc limit 1;
+    if v_role is null or v_status <> 'active'
+       or clara.role_rank(v_role) < clara.role_rank('bookkeeper') then
+      raise exception 'accounting work may only be handed to an active bookkeeper of its own firm'
+        using errcode='CLR04',
+          detail=jsonb_build_object('reason','responsible_not_authorised','column','initiator')::text;
+    end if;
+  end if;
+  new.updated_at := now();
+  return new;
+end $$;
+revoke all on function clara._tf_accounting_work_immutable() from public;
 
 -- =====================================================================================
 -- §B  clara._tf_accounting_work_status_mirror — RECUT. Full 0178 body; the addition is marked.
@@ -364,7 +440,18 @@ begin
   -- effect is `completed` even though a cancel was requested (0178's law, and ARCHITECTURE §6's
   -- "取消不冲销已入账结果"). Only a cancel_requested run that posted NOTHING is translated, and the
   -- outcome it asked for is preserved rather than discarded.
-  if v_receipt is null and t.status = 'cancel_requested' and v_outcome <> 'cancelled' then
+  --
+  -- THE ENUMERATION IS CLOSED AND `completed` IS DELIBERATELY OUTSIDE IT. The three listed outcomes
+  -- are the three ways the frozen closure can describe a cancelled run — `failed` (its unrecognised
+  -- CLR13 `work_cancelled` classifies `state_changed`, whose budget exhaustion settles `failed`),
+  -- `refused` (a typed refusal that landed after the cancel) and `expired` (a parked run whose
+  -- question died with it). A run asking for `completed` is ASSERTING it recorded an effect: if it
+  -- did, the receipt override above already answered, and if it did not, writing `cancelled` over
+  -- its claim would bury a disagreement between the run and the books instead of leaving it visible.
+  -- Measured on the rig: `623.db.R2` plants exactly that shape (a Work `result` naming an entry with
+  -- no `clara.operation_receipts` row) and a `<> 'cancelled'` predicate turned it into a cancel.
+  if v_receipt is null and t.status = 'cancel_requested'
+     and v_outcome in ('failed','refused','expired') then
     v_translated := v_outcome;
     v_outcome := 'cancelled';
   end if;
@@ -444,16 +531,15 @@ revoke all on function clara.settle_work_run(uuid,text,text,jsonb,jsonb) from pu
 grant execute on function clara.settle_work_run(uuid,text,text,jsonb,jsonb) to clara_runtime;
 
 -- =====================================================================================
--- §E  clara.work_authority_snapshot — RECUT. The liveness it reports is the RESPONSIBLE human's.
+-- §E  clara.work_authority_snapshot — RECUT, ADDITIVELY.
 --
--- The frozen `recheckAuthorityStep` (claraWork.v2.impl.ts) reads `initiator_active`,
--- `initiator_authorised` and `initiator_role` to decide whether a resumed run may continue. After a
--- takeover the run acts under the COLLEAGUE's authority, so those three keys must describe the
--- colleague or the takeover's new run would die on its first resume under an authority it never
--- used. The key NAMES cannot change (the reader is deploy-locked), so they keep their names and
--- this comment — plus the explicit `responsible*` keys added beside them — carries the meaning.
--- `initiator` itself is untouched and still names who asked. A v3 closure should read the
--- `responsible*` keys and retire the `initiator_*` aliases.
+-- Every key 0180 returned keeps its name, its type and its meaning: the frozen
+-- `recheckAuthorityStep` (claraWork.v2.impl.ts) reads `initiator_active`, `initiator_authorised`
+-- and `initiator_role` to decide whether a resumed run may continue, and after a takeover those
+-- three still describe the human the run acts AS, because §A made `initiator` that human. What is
+-- ADDED is the pair a reader now needs to tell the two facts apart: `initiated_by` (who asked) and
+-- `responsible` (an explicit alias for `initiator`, so a v3 closure can read the honest name
+-- without this door changing shape again).
 -- =====================================================================================
 create or replace function clara.work_authority_snapshot(p_task uuid) returns jsonb
   language sql stable security definer set search_path = clara, pg_temp as $$
@@ -466,20 +552,18 @@ create or replace function clara.work_authority_snapshot(p_task uuid) returns js
     'client_status', cl.status,
     'basis_digest', w.basis_digest,
     'initiator', w.initiator,
-    'responsible', w.responsible,
-    'responsible_role', m.role,
-    'responsible_active', (m.status = 'active'),
-    'responsible_authorised',
-      coalesce(m.status = 'active' and clara.role_rank(m.role) >= clara.role_rank('bookkeeper'), false),
-    -- The deploy-locked aliases. Same three values, under the names the frozen closure reads.
     'initiator_role', m.role,
     'initiator_active', (m.status = 'active'),
     'initiator_authorised',
-      coalesce(m.status = 'active' and clara.role_rank(m.role) >= clara.role_rank('bookkeeper'), false))
+      coalesce(m.status = 'active' and clara.role_rank(m.role) >= clara.role_rank('bookkeeper'), false),
+    -- #630 · the two facts told apart.
+    'initiated_by', w.initiated_by,
+    'responsible', w.initiator,
+    'taken_over', (w.initiator is distinct from w.initiated_by))
   from clara.agent_tasks t
   join clara.accounting_work w on w.id = t.work_id
   join clara.clients cl on cl.id = w.client_id
-  left join clara.firm_memberships m on m.firm_id = w.firm_id and m.user_id = w.responsible
+  left join clara.firm_memberships m on m.firm_id = w.firm_id and m.user_id = w.initiator
   where t.id = p_task and t.kind = 'accounting_work';
 $$;
 revoke all on function clara.work_authority_snapshot(uuid) from public;
@@ -578,14 +662,14 @@ begin
   -- the estate's record of WHOSE AUTHORITY was rechecked -- would attribute the posting to a human
   -- who never authorised it. This is an authority check, not an input check: CLR04.
   --
-  -- #630 · IT BINDS `responsible`, NOT `initiator`. Until a takeover the two are the same column
-  -- value, so nothing changes for any Work admitted before this migration. After one, the credential
-  -- that may spend authority is the COLLEAGUE's -- that is the whole point of story 29 -- while
-  -- `initiator` stays the immutable record of who asked. The reason token is unchanged on purpose:
-  -- `obo_not_initiator` is in the DEPLOY-LOCKED claraWork.v1.errors.ts roster, and renaming it would
+  -- #630 · AND `initiator` NOW MEANS "the human this Work is executed as" (see §A), so after a
+  -- takeover this arm binds the COLLEAGUE and refuses the person who admitted it -- which is exactly
+  -- right, because they are the one who lost authority. The predicate is byte-identical to 0182's;
+  -- only the column's meaning widened. The reason token is deliberately unchanged:
+  -- `obo_not_initiator` is in the DEPLOY-LOCKED claraWork.v1.errors.ts roster and renaming it would
   -- make a run classify its own refusal as an unmapped fault.
-  if p_obo is distinct from w.responsible then
-    raise exception 'this operation is bound to the human responsible for it; the credential names another'
+  if p_obo is distinct from w.initiator then
+    raise exception 'this operation is bound to the human who admitted it; the credential names another'
       using errcode='CLR04', detail='{"reason":"obo_not_initiator"}';
   end if;
 
@@ -1024,13 +1108,13 @@ begin
 
   -- THE BOUNDARY, same first lock as every other writer in this lane.
   select * into w from clara.accounting_work aw where aw.id = p_work for update;
-  v_previous := w.responsible;
+  v_previous := w.initiator;
 
   -- IS IT TAKEABLE? Terminal AND orphaned. "Orphaned" is re-read NOW rather than taken from the
   -- stored error: a Work refused `authority_lost` whose human has since been reinstated is theirs
   -- again, and a Work that failed for another reason is still takeable once its human is gone.
   select m.role, m.status into v_resp_role, v_resp_status from clara.firm_memberships m
-   where m.user_id = w.responsible and m.firm_id = w.firm_id
+   where m.user_id = w.initiator and m.firm_id = w.firm_id
    order by (m.status = 'active') desc, m.created_at desc limit 1;
   v_resp_authorised := coalesce(v_resp_status = 'active'
     and clara.role_rank(v_resp_role) >= clara.role_rank('bookkeeper'), false);
@@ -1058,18 +1142,19 @@ begin
           'basis_origin', w.basis_origin, 'basis_digest', w.basis_digest)::text;
   end if;
 
-  -- THE EFFECT, in this order: responsibility first, so the new run is created under the human who
-  -- will actually execute it.
-  update clara.accounting_work set responsible = p_author where id = p_work;
+  -- THE EFFECT, in this order: responsibility first, so the new run is created under — and minted
+  -- OBO — the human who will actually execute it. `initiated_by` never moves; the immutability
+  -- trigger refuses it and would refuse a handover to anyone who is not an active bookkeeper here.
+  update clara.accounting_work set initiator = p_author where id = p_work;
 
   perform clara._audit(w.firm_id, p_author, null, null, 'take_over_accounting_work', null,
     jsonb_build_object('work', p_work, 'op_key', p_op_key, 'from_status', w.status,
-      'previous_responsible', v_previous, 'initiator', w.initiator,
+      'previous_responsible', v_previous, 'initiated_by', w.initiated_by,
       'logical_op_id', w.logical_op_id));
   perform clara._append_event(w.firm_id, 'work.taken_over', w.client_id, p_author, null, null,
     null, null, null,
     jsonb_build_object('work', p_work, 'previous_responsible', v_previous,
-      'new_responsible', p_author, 'initiator', w.initiator, 'from_status', w.status,
+      'new_responsible', p_author, 'initiated_by', w.initiated_by, 'from_status', w.status,
       'logical_op_id', w.logical_op_id));
 
   -- ONE CODE PATH FOR RUN CREATION. `clara.retry_accounting_work` mints the task, repoints
@@ -1078,7 +1163,7 @@ begin
 
   v_result := jsonb_build_object('work_id', p_work, 'task_id', v_retry->>'task_id',
     'logical_op_id', w.logical_op_id, 'status', v_retry->>'status',
-    'responsible', p_author, 'previous_responsible', v_previous, 'initiator', w.initiator,
+    'responsible', p_author, 'previous_responsible', v_previous, 'initiated_by', w.initiated_by,
     'taken_over', true, 'replayed', false);
   return clara._finish_op(w.firm_id, 'take_over_accounting_work', p_op_key, v_result);
 end $$;
@@ -1086,9 +1171,10 @@ revoke all on function clara.take_over_accounting_work(uuid,uuid,text,text) from
 grant execute on function clara.take_over_accounting_work(uuid,uuid,text,text) to clara_runtime;
 comment on function clara.take_over_accounting_work(uuid,uuid,text,text) is
   '#630 story 29. A currently authorised colleague takes responsibility for a terminal Work whose '
-  'responsible human lost authority. Moves clara.accounting_work.responsible (never `initiator`), '
-  'records a work.taken_over timeline event, and creates the new run through '
-  'clara.retry_accounting_work so there is ONE code path for run creation.';
+  'responsible human lost authority. Moves clara.accounting_work.initiator — the column the '
+  'deploy-locked claraWork closure mints every credential on behalf of — while `initiated_by` keeps '
+  'the immutable record of who asked; records a work.taken_over timeline event; and creates the new '
+  'run through clara.retry_accounting_work so there is ONE code path for run creation.';
 
 reset role;
 
@@ -1134,27 +1220,37 @@ begin
     end if;
   end loop;
 
-  -- The column, its NOT NULL, its default trigger and its ABSENCE from the frozen set.
+  -- The column, its NOT NULL, its default trigger, and the frozen set's SWAP.
   select count(*)::int into v_n from information_schema.columns
-   where table_schema='clara' and table_name='accounting_work' and column_name='responsible'
+   where table_schema='clara' and table_name='accounting_work' and column_name='initiated_by'
      and is_nullable='NO';
-  if v_n <> 1 then raise exception '#630 tail: responsible is missing or nullable' using errcode='CLR10'; end if;
-  select count(*)::int into v_n from clara.accounting_work where responsible is distinct from initiator;
+  if v_n <> 1 then raise exception '#630 tail: initiated_by is missing or nullable' using errcode='CLR10'; end if;
+  select count(*)::int into v_n from clara.accounting_work where initiated_by is distinct from initiator;
   if v_n <> 0 then
-    raise exception '#630 tail: the backfill left % row(s) whose responsible is not the initiator', v_n
+    raise exception '#630 tail: the backfill left % row(s) whose initiated_by is not the initiator', v_n
       using errcode='CLR10';
   end if;
+  -- THE SWAP IS ASSERTED ON THE ARRAY'S OWN TEXT, not on a bare name: `initiator` also appears in
+  -- this body as the handover wall's `detail.column`, so a substring probe for it alone is true
+  -- either way and would prove nothing.
   select p.prosrc into v_src from pg_proc p where p.oid='clara._tf_accounting_work_immutable()'::regprocedure;
-  if position('responsible' in v_src) > 0 then
-    raise exception '#630 tail: responsible is in the FROZEN set -- the takeover could never move it'
+  if position('''purpose'',''initiated_by'',''initiator_role''' in v_src) = 0 then
+    raise exception '#630 tail: initiated_by is NOT in the frozen set -- history could be rewritten'
       using errcode='CLR10';
+  end if;
+  if position('''purpose'',''initiator'',''initiator_role''' in v_src) > 0 then
+    raise exception '#630 tail: initiator is still in the frozen set -- the takeover could never move it'
+      using errcode='CLR10';
+  end if;
+  if position('responsible_not_authorised' in v_src) = 0 then
+    raise exception '#630 tail: the immutability recut lost the handover wall' using errcode='CLR10';
   end if;
 
   -- The four recuts carry their new arms AND the arms they must not have dropped.
   select p.prosrc into v_src from pg_proc p
    where p.oid='clara._record_journal_entry_core(uuid,uuid,text,uuid,uuid,text,jsonb,text,text,text)'::regprocedure;
   if position('for update' in v_src)=0 or position('work_cancelled' in v_src)=0
-     or position('work_settled' in v_src)=0 or position('w.responsible' in v_src)=0 then
+     or position('work_settled' in v_src)=0 then
     raise exception '#630 tail: the commit recut lost one of its new arms' using errcode='CLR10';
   end if;
   if position('obo_not_initiator' in v_src)=0 or position('generic_control_leg' in v_src)=0
@@ -1182,8 +1278,9 @@ begin
     raise exception '#630 tail: the mirror recut lost stopping or the receipt arm' using errcode='CLR10';
   end if;
   select p.prosrc into v_src from pg_proc p where p.oid='clara.work_authority_snapshot(uuid)'::regprocedure;
-  if position('w.responsible' in v_src)=0 or position('initiator_authorised' in v_src)=0 then
-    raise exception '#630 tail: the snapshot recut lost responsible or its deploy-locked alias'
+  if position('initiated_by' in v_src)=0 or position('initiator_authorised' in v_src)=0
+     or position('responsible' in v_src)=0 then
+    raise exception '#630 tail: the snapshot recut lost initiated_by, responsible or its deploy-locked alias'
       using errcode='CLR10';
   end if;
 
@@ -1194,6 +1291,6 @@ begin
    where tt.version=(select version from clara.taxonomy_active) and tt.event_type='work.taken_over';
   if v_n <> 1 then raise exception '#630 tail: work.taken_over is not routed' using errcode='CLR10'; end if;
 
-  raise notice '#630 tail: OK -- clara.cancel_accounting_work and clara.take_over_accounting_work are PUBLIC-revoked and clara_runtime-only; clara.accounting_work.responsible is NOT NULL, equal to initiator on every existing row and absent from the frozen set; the posting core takes the Work row lock and refuses work_cancelled/work_settled with every 0178/0182 arm intact; settle_work_run locks the Work first and translates a cancel_requested settle to cancelled under error.superseded while the receipt still overrides; claim_work_run and the status mirror take the same order and the mirror writes stopping; and work.taken_over is registered and routed at the active taxonomy version.';
+  raise notice '#630 tail: OK -- clara.cancel_accounting_work and clara.take_over_accounting_work are PUBLIC-revoked and clara_runtime-only; clara.accounting_work.initiated_by is NOT NULL, equal to initiator on every existing row and now the frozen historical fact while initiator became the mutable authority column behind a bookkeeper wall; the posting core takes the Work row lock and refuses work_cancelled/work_settled with every 0178/0182 arm intact; settle_work_run locks the Work first and translates a cancel_requested settle to cancelled under error.superseded while the receipt still overrides; claim_work_run and the status mirror take the same order and the mirror writes stopping; and work.taken_over is registered and routed at the active taxonomy version.';
 end
 $w630_tail$;

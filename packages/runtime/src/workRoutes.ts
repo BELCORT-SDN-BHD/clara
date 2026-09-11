@@ -250,7 +250,9 @@ export function workErrorStatus(code: string | undefined, reason: string | null)
   if (code === "CLR03" || code === "CLR04") return 403;
   // CLR13 is the estate's "the state is not the one this act needs". `clara.retry_accounting_work`
   // raises it with reason `not_retryable` (the Work is not terminal, or its run is still live) and
-  // with `operation_in_flight` (an uncommitted sibling holds the retry key). Both are 409s.
+  // with `operation_in_flight` (an uncommitted sibling holds the retry key). #630 adds
+  // `not_takeable` (the Work is not orphaned, or its run is still live) on the same footing. All
+  // are 409s.
   if (code === "CLR13") return 409;
   // An immutability refusal, and PostgreSQL's own unique_violation. Both mean "that state is
   // already spoken for", which is the chat route's reading of the same two codes.
@@ -340,6 +342,22 @@ export function workErrorResponse(err: unknown): { status: number; body: Record<
   const code = (err as { code?: string })?.code;
   const reason = reasonOf(err);
   const status = workErrorStatus(code, reason);
+  // #630 · THE TAKEOVER'S BASIS GATE IS NOT A MALFORMED BASIS, so it does not wear the 400 body
+  // below. `clara.take_over_accounting_work` refuses a `clara_interpreted` Work whose digest the
+  // colleague has not confirmed, and the DIGEST IS THE WHOLE POINT OF THE REFUSAL: the surface
+  // shows the interpreted basis, the human reads it, and the resubmit carries the digest back. A
+  // body saying `{error:"invalid_basis", field:"basis"}` would tell them their input was wrong,
+  // which it was not, and would carry nothing they could act on.
+  if (reason === "basis_confirmation_required") {
+    return {
+      status: 400,
+      body: {
+        error: "basis_confirmation_required",
+        basis_digest: detailField(err, "basis_digest"),
+        basis_origin: detailField(err, "basis_origin"),
+      },
+    };
+  }
   if (status === 400) {
     // `constraint` IS the reason on the wire for a field-scoped CLR10, so the route's own 400s and
     // the database's speak ONE vocabulary (see the WIRE FIELD PATHS note in this file's header).
@@ -385,6 +403,16 @@ export function workErrorResponse(err: unknown): { status: number; body: Record<
       // The contract's 409 body: the machine-readable error AND the Work status that made the
       // retry illegal, which is what the detail's own `status` field carries.
       return { status: 409, body: { error: "not_retryable", status: detailField(err, "status") } };
+    }
+    if (reason === "not_takeable") {
+      // #630 · the takeover's own 409, in the same shape and for the same reason: the surface
+      // renders "this Work is not available to take over" beside the status that made it so.
+      return { status: 409, body: { error: "not_takeable", status: detailField(err, "status") } };
+    }
+    if (reason === "work_cancelled" || reason === "work_settled") {
+      // #630 · the BOUNDARY's own refusals, reachable here only through a door that calls the
+      // posting core. The status is the operable fact: the surface converges on the Work's own row.
+      return { status: 409, body: { error: reason, status: detailField(err, "status") } };
     }
     if (reason === "intent_payload_conflict") {
       // THE WORK ID IS THE WHOLE POINT OF THIS 409. `clara.admit_journal_work` puts the EXISTING
@@ -537,6 +565,108 @@ export function workRoutes(): express.Router {
     } catch (err) {
       if (sendAuthError(res, err)) return;
       sendAdmissionError(res, err, "work retry");
+    }
+  });
+
+  // ---- B3 / B7 cancel: STOP THE REMAINING WORK ---------------------------
+  //
+  // It is NOT `clara.cancel_agent_task`, and the difference is the whole ticket. That door cancels
+  // a RUN; this one cancels the WORK — the durable unit a human named ("Cancel Work") — and the
+  // database decides between the two on ONE ordering boundary. The answer is the door's own jsonb
+  // verbatim, because every arm of it is something the surface must render differently:
+  // `{cancelled:true, status:'stopping'}` shows the stopping arm and keeps polling,
+  // `{cancelled:false, reason:'already_completed', receipt_id, entry_id}` shows the receipt, and
+  // `{cancelled:false, reason:'already_terminal'}` shows what the Work settled as.
+  //
+  // 200, not 202: unlike admission and retry there is nothing to enqueue. Either the terminal is
+  // already written or the runtime's own control listener has been NOTIFYed inside the same
+  // transaction and will abort the run without this route lifting a finger.
+  router.post("/api/work/:workId/cancel", async (req, res) => {
+    if (shuttingDown()) {
+      res.status(503).json({ error: "shutting_down", message: "the runtime is draining — retry shortly" });
+      return;
+    }
+    const workId = req.params.workId;
+    if (!UUID_RE.test(workId)) {
+      res.status(404).json({ error: "not_found", message: "not found" });
+      return;
+    }
+    const body = (req.body ?? {}) as { opKey?: unknown };
+    if (typeof body.opKey !== "string" || body.opKey.trim() === "") {
+      res.status(400).json({ error: "invalid_basis", field: "basis", reason: "invalid_op_key" });
+      return;
+    }
+    try {
+      const cancelled = await withRuntime(async (c) => {
+        const p = await authenticate(c, req.header("authorization"));
+        const r = await c.query("select clara.cancel_accounting_work($1::uuid, $2::uuid, $3::text) as receipt", [
+          workId,
+          p.sub,
+          body.opKey,
+        ]);
+        return (r.rows[0]?.receipt ?? null) as Record<string, unknown> | null;
+      });
+      if (!cancelled) {
+        res.status(404).json({ error: "not_found", message: "not found" });
+        return;
+      }
+      res.status(200).json(cancelled);
+    } catch (err) {
+      if (sendAuthError(res, err)) return;
+      sendAdmissionError(res, err, "work cancel");
+    }
+  });
+
+  // ---- B3 take-over: a colleague picks up an orphaned Work ---------------
+  //
+  // 202 like retry, and for the identical reason: the answer acknowledges a NEW RUN of the SAME
+  // logical identity, which is enqueued below exactly as a retry's is. `basisDigest` is optional on
+  // the wire — a `user_direct` Work needs none, and a `clara_interpreted` one is refused 400
+  // `basis_confirmation_required` carrying the digest the colleague must confirm.
+  router.post("/api/work/:workId/take-over", async (req, res) => {
+    if (shuttingDown()) {
+      res.status(503).json({ error: "shutting_down", message: "the runtime is draining — retry shortly" });
+      return;
+    }
+    const workId = req.params.workId;
+    if (!UUID_RE.test(workId)) {
+      res.status(404).json({ error: "not_found", message: "not found" });
+      return;
+    }
+    const body = (req.body ?? {}) as { opKey?: unknown; basisDigest?: unknown };
+    if (typeof body.opKey !== "string" || body.opKey.trim() === "") {
+      res.status(400).json({ error: "invalid_basis", field: "basis", reason: "invalid_op_key" });
+      return;
+    }
+    // A malformed digest is refused HERE rather than carried to the database, which would answer
+    // `basis_confirmation_required` — true, but it would read as "you did not confirm" when the
+    // honest diagnosis is "that is not a digest".
+    if (body.basisDigest !== undefined && body.basisDigest !== null
+        && (typeof body.basisDigest !== "string" || !/^[0-9a-f]{64}$/.test(body.basisDigest))) {
+      res.status(400).json({ error: "invalid_basis", field: "basis", reason: "invalid_basis_digest" });
+      return;
+    }
+    try {
+      const taken = await withRuntime(async (c) => {
+        const p = await authenticate(c, req.header("authorization"));
+        const r = await c.query(
+          "select clara.take_over_accounting_work($1::uuid, $2::uuid, $3::text, $4::text) as receipt",
+          [workId, p.sub, body.opKey, body.basisDigest ?? null],
+        );
+        return (r.rows[0]?.receipt ?? null) as (Record<string, unknown> & {
+          task_id?: string;
+          replayed?: boolean;
+        }) | null;
+      });
+      if (!taken) {
+        res.status(404).json({ error: "not_found", message: "not found" });
+        return;
+      }
+      if (taken.replayed !== true && typeof taken.task_id === "string") await enqueueWork(taken.task_id);
+      res.status(202).json(taken);
+    } catch (err) {
+      if (sendAuthError(res, err)) return;
+      sendAdmissionError(res, err, "work take-over");
     }
   });
 

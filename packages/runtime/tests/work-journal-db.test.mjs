@@ -537,7 +537,9 @@ async function reachableCodes() {
      )
      select distinct p.oid::regprocedure::text as fn, p.prosrc
        from walk w join pg_proc p on p.oid = w.fn`,
-    [["admit_journal_work", "retry_accounting_work"]],
+    // #630 widens the seed to the two new doors on the same surface: the census's claim is
+    // "every code the Work ROUTES can raise has an HTTP status", and there are now four routes.
+    [["admit_journal_work", "retry_accounting_work", "cancel_accounting_work", "take_over_accounting_work"]],
   );
   const triggers = await rig.rootQuery(
     `select distinct p.oid::regprocedure::text as fn, p.prosrc

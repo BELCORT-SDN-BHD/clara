@@ -1603,10 +1603,10 @@ export const WALK_FINDINGS_0183_COHORT = [...WALK_FINDINGS_0183_HUMAN_FNS];
 //   that could cancel or reassign the Work it is executing would be an agent deciding what it is
 //   authorised to do.
 const WORK_CANCEL_0184_RUNTIME_FNS = ["cancel_accounting_work", "take_over_accounting_work"];
-//   …and the UNGRANTED closure: the one trigger body that keeps `responsible` equal to `initiator`
+//   …and the UNGRANTED closure: the one trigger body that stamps `initiated_by` from `initiator`
 //   for every writer that does not set it. Listed so `cohortFailures` reports a half-applied 0184
 //   rather than a silently narrower boundary.
-const WORK_CANCEL_0184_UNGRANTED_FNS = ["_tf_accounting_work_responsible_default"];
+const WORK_CANCEL_0184_UNGRANTED_FNS = ["_tf_accounting_work_initiated_by_default"];
 export const WORK_CANCEL_0184_COHORT = [
   ...WORK_CANCEL_0184_RUNTIME_FNS, ...WORK_CANCEL_0184_UNGRANTED_FNS,
 ];

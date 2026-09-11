@@ -19,8 +19,8 @@
 //        -> {work_id, task_id, status, cancelled, reason?, receipt_id?, entry_id?,
 //            cancelled_by?, cancelled_at?, replayed}
 //   clara.take_over_accounting_work(p_work, p_author, p_op_key, p_basis_digest)
-//        -> {work_id, task_id, logical_op_id, status, responsible, initiator, taken_over,
-//            replayed}
+//        -> {work_id, task_id, logical_op_id, status, responsible, previous_responsible,
+//            initiated_by, taken_over, replayed}
 
 import {
   ROLES, rootQuery, roleQuery, humanQuery, namedCall, opk, insertUser, addMember,
@@ -159,10 +159,12 @@ export async function interruptionsForTask(task) {
   return r.rows;
 }
 
-/** The Work row's `responsible` column — #630's new one. Read on its own so a cell that only
- *  cares about responsibility does not have to assert the whole row. */
+/** The Work row's TWO authority columns. `initiated_by` is #630's new immutable historical fact;
+ *  `initiator` is the human the Work is currently executed AS — the one the deploy-locked closure
+ *  mints its credentials on behalf of. Read as a pair so a cell can assert they moved apart. */
 export async function responsibleOf(work) {
-  const r = await rootQuery("select initiator, responsible from clara.accounting_work where id=$1", [work]);
+  const r = await rootQuery(
+    "select initiated_by, initiator as responsible from clara.accounting_work where id=$1", [work]);
   return r.rows[0] ?? null;
 }
 

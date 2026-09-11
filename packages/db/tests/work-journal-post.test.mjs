@@ -770,13 +770,33 @@ test("w623.work.immutable the identity columns of a Work never move after admiss
   // `purpose` is probed with a value that is genuinely DIFFERENT. Writing it to itself is not a
   // change and the trigger is right not to raise; the CHECK behind it admits exactly one value,
   // so both doors are shut and the trigger (BEFORE UPDATE) is the one that answers first.
-  for (const [col, value] of [["purpose", "'something_else'"], ["intent_key", "'moved'"],
+  //
+  // #630 SWAPPED ONE MEMBER OF THIS SET, and the swap is the point rather than a loosening.
+  // `initiator` became the human the Work is EXECUTED AS (the column the deploy-locked claraWork
+  // closure mints every credential on behalf of), so `clara.take_over_accounting_work` has to be
+  // able to move it; the immutable historical fact — who ASKED — moved to `initiated_by`, which
+  // joins this loop in its place. The frozen set did not shrink. `initiator` is probed below under
+  // its own, narrower wall.
+  const frozen = [["purpose", "'something_else'"], ["intent_key", "'moved'"],
     ["logical_op_id", "'work:x:journal_entry:1'"], ["basis_digest", `'${"b".repeat(64)}'`],
-    ["basis_origin", "'clara_interpreted'"], ["initiator", `'${AGENT_USER_ID}'`],
-    ["client_id", `'${A2()}'`]]) {
+    ["basis_origin", "'clara_interpreted'"], ["client_id", `'${A2()}'`]];
+  const hasInitiatedBy = (await rootQuery(
+    `select count(*)::int as n from information_schema.columns
+      where table_schema='clara' and table_name='accounting_work' and column_name='initiated_by'`
+  )).rows[0].n === 1;
+  frozen.push(hasInitiatedBy ? ["initiated_by", `'${AGENT_USER_ID}'`] : ["initiator", `'${AGENT_USER_ID}'`]);
+  for (const [col, value] of frozen) {
     await assertRaises(CLR.immutable,
       () => rootQuery(`update clara.accounting_work set ${col}=${value} where id=$1`, [a.work_id]),
       `work.immutable(${col})`);
+  }
+  if (hasInitiatedBy) {
+    // …and the column that CAN move is still walled: only towards an active bookkeeper+ of this
+    // Work's own firm, so a handover can never launder a posting through somebody who never agreed
+    // to it. CLR04, not CLR08: this is an authority refusal, not an immutability one.
+    await assertRaises(CLR.authz,
+      () => rootQuery("update clara.accounting_work set initiator=$2 where id=$1", [a.work_id, AGENT_USER_ID]),
+      "work.immutable(initiator -> the agent user)");
   }
   // …while the mutable half still moves, or the trigger would have frozen the lifecycle.
   await rootQuery("update clara.accounting_work set status='stopping' where id=$1", [a.work_id]);
