@@ -1378,7 +1378,7 @@ test("wc.34c a posting racing a role change on the same firm never raises a seri
   // never by a blanket "any refusal is fine".
   //   CLR04 (`obo_not_active` / `insufficient_role`) — the core's own commit-time membership
   //         recheck saw the demotion. This is the inner wall, and it is what wc.34 measures.
-  //   CLR03 (`no valid wake credential`) — `clara.set_member_role` REVOKES the member's wake
+  //   CLR03 (`no_wake_credential`) — `clara.set_member_role` REVOKES the member's wake
   //         credentials in the same statement that changes their role (0157:405), so a posting
   //         that arrives after the role change is refused at the CREDENTIAL, before the core is
   //         reached at all. wc.34b, thirty lines below, measures exactly this and asserts
@@ -1412,7 +1412,7 @@ test("wc.34c a posting racing a role change on the same firm never raises a seri
       const reason = detailOf(e)?.reason ?? null;
       if (e?.code === CLR.authz && ["obo_not_active", "insufficient_role"].includes(reason)) {
         refused = CLR.authz;
-      } else if (e?.code === CLR.wake && /no valid wake credential/i.test(String(e?.message ?? ""))) {
+      } else if (e?.code === CLR.wake && reason === "no_wake_credential") {
         refused = CLR.wake;
       } else {
         errs.push(e);
@@ -1443,6 +1443,11 @@ test("wc.34c a posting racing a role change on the same firm never raises a seri
     `wc.34c …and no refusal outside the two typed ones: ${errs[0]?.code ?? ""} ${errs[0]?.message ?? ""}`);
   assert.equal(tally.committed + tally[CLR.authz] + tally[CLR.wake], N,
     `wc.34c every iteration reached one of the three outcomes (${JSON.stringify(tally)})`);
+  // The distribution is a RECORD, not an assertion: which side of the race wins is timing, and
+  // pinning a ratio would re-introduce exactly the flake this cell was fixed for. It is noted so a
+  // reader can see that both refusal walls are actually being reached on this rig.
+  noteLane(`wc.34c ${N} posting/role-change pairs → committed=${tally.committed} `
+    + `CLR04=${tally[CLR.authz]} CLR03=${tally[CLR.wake]}`);
 });
 
 test("wc.34b the INVERSE order refuses the posting — a revocation that commits FIRST wins", async (t) => {
