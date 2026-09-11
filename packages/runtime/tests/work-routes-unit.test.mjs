@@ -441,12 +441,20 @@ test("630.route: the stranded pair is CONVERGED by the door, so no refusal is ma
   // terminal run before it can be reached — so the mapping, this cell and the web's refusal roster
   // were green coverage of a path the database cannot produce. The honest pin is that the token is
   // not in the map at all: a future change that re-opens the arm has to add both halves together.
-  assert.equal(
+  // MEASURED, rather than assumed: an unmapped CLR13 reason falls to this map's generic conflict
+  // (`{status:409, body:{error:"conflict"}}`), which is the shape every OTHER unnamed CLR13 gets.
+  // What matters is that the token is gone — nothing can answer `run_already_terminal` any more,
+  // so nothing downstream can pin it as covered.
+  assert.deepEqual(
     workErrorResponse(raised("CLR13", { reason: "run_already_terminal", status: "cancelled" })),
-    null,
-    "an unmapped reason is not claimed by this map — the caller logs it and answers 500, which is "
-    + "the honest answer for a shape the estate has no door for",
+    { status: 409, body: { error: "conflict" } },
+    "the token is not in the map: an unreachable refusal gets no name of its own",
   );
+  const named = ["not_retryable", "not_takeable", "work_cancelled", "work_settled", "intent_payload_conflict"];
+  for (const reason of named) {
+    assert.notEqual(workErrorResponse(raised("CLR13", { reason })).body.error, "conflict",
+      `${reason} still has its own name — removing the dead arm took nothing live with it`);
+  }
 });
 
 test("630.route: the cancel door's authority and identity refusals keep the estate's statuses", () => {
