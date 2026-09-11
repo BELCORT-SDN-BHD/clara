@@ -270,7 +270,7 @@ export function useClaraThread(
       const answer = await cancelAgentTask(taskId, { session: auth });
       if (answerIsAlreadyFinished(answer)) {
         // The turn was already over, so the clock over it is not measuring anything either.
-        claraThreadStore.markTurnStopped(threadId);
+        claraThreadStore.markTurnStopped(threadId, taskId);
         const settled: StopReplyState = { phase: "failed", cause: "finished" };
         setStop(settled);
         return settled;
@@ -278,7 +278,7 @@ export function useClaraThread(
       // THE CLOCK RETIRES WITH THE TURN. Nothing else on this path clears `turnStartedAt`: an
       // abort never transitions the stream away from "streaming", so the DB poll that would have
       // noticed the ending is gated off and the elapsed-time line kept counting under "Stopped".
-      claraThreadStore.markTurnStopped(threadId);
+      claraThreadStore.markTurnStopped(threadId, taskId);
       setStop(STOP_STOPPED);
       return STOP_STOPPED;
     } catch (err) {
@@ -401,25 +401,24 @@ export function useClaraThread(
           //
           // On a `finished` failure the turn really is over and neither is wanted; `spendStop`
           // has already retired the clock for it, and this branch is not taken.
-          {
-            void readRunByTaskId(result.taskId, { session: auth })
-              .then((run) => {
-                if (!run || TURN_TERMINAL.has(run.status)) return;
-                claraThreadStore.hydrateRun(
-                  threadId,
-                  { taskId: run.id, status: run.status, startedAt: run.created_at },
-                  null,
-                );
-              })
-              .catch(() => {});
-            const { controller, done } = openStream(result.taskId, () => {
-              claraThreadStore.markSent(threadId, parts);
-            });
-            void done.catch((err: unknown) => {
-              if (controller.signal.aborted) return;
-              claraThreadStore.markSendFailed(threadId, `stream error: ${(err as Error).message}`);
-            });
-          }
+          void readRunByTaskId(result.taskId, { session: auth })
+            .then((run) => {
+              if (!run || TURN_TERMINAL.has(run.status)) return;
+              if (claraThreadStore.wasTurnStopped(result.taskId)) return;
+              claraThreadStore.hydrateRun(
+                threadId,
+                { taskId: run.id, status: run.status, startedAt: run.created_at },
+                null,
+              );
+            })
+            .catch(() => {});
+          const { controller, done } = openStream(result.taskId, () => {
+            claraThreadStore.markSent(threadId, parts);
+          });
+          void done.catch((err: unknown) => {
+            if (controller.signal.aborted) return;
+            claraThreadStore.markSendFailed(threadId, `stream error: ${(err as Error).message}`);
+          });
         }
         // TRUE, because the turn IS on the record: it was admitted and its bubble is in the
         // transcript. Returning false left the identical text sitting in the composer beside it,
@@ -434,7 +433,11 @@ export function useClaraThread(
       // start read means no elapsed time rendered, which is the honest arm.
       void readRunByTaskId(result.taskId, { session: auth })
         .then((run) => {
-          if (run) {
+          // …AND IT NEVER RE-STARTS A CLOCK ON A TURN A DOOR HAS ALREADY ENDED. This read is fired
+          // and not awaited, so a Stop pressed while it is in flight used to be overwritten by its
+          // `{status:'running', startedAt}` — an elapsed-time line counting under the same
+          // surface's "Stopped" marker.
+          if (run && !claraThreadStore.wasTurnStopped(result.taskId)) {
             claraThreadStore.hydrateRun(
               threadId,
               { taskId: run.id, status: run.status, startedAt: run.created_at },

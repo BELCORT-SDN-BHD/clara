@@ -47,6 +47,9 @@ export interface ClaraThreadUiState {
 /** #630 — see `registerStreamAbort` below. Module-level and NON-reactive on purpose. */
 const streamAborts = new Map<string, AbortController>();
 
+/** #630 — see `markTurnStopped` below. Task ids a door has already ended, bounded. */
+const stoppedTurns = new Set<string>();
+
 const emptyThreadState: ClaraThreadUiState = {
   messages: [],
   messagesLoaded: false,
@@ -303,8 +306,22 @@ export const claraThreadStore = {
    *  Clara said: the partial prose stays on screen, and the task id stays so a re-read can still
    *  ask the database about the turn that was stopped. Only the two things that ASSERT the turn is
    *  still running are dropped. */
-  markTurnStopped(threadId: string): void {
+  markTurnStopped(threadId: string, taskId?: string | null): void {
+    if (taskId) {
+      // A BOUNDED MEMORY OF WHICH TURNS A DOOR HAS ALREADY ENDED. `sendMessage` fires a
+      // `readRunByTaskId` hydrate and does not await it; a stop that settles while that read is in
+      // flight would otherwise be overwritten by `{status:'running', startedAt}` — a clock started
+      // on a turn the same surface has just declared stopped. Held here, not in the hook, because
+      // the press may come from a rail that was closed and reopened.
+      if (stoppedTurns.size >= 128) stoppedTurns.clear();
+      stoppedTurns.add(taskId);
+    }
     setThread(threadId, { turnStartedAt: null, turnStatus: null });
+  },
+
+  /** Has a door already ended this turn? Read by the fire-and-forget run hydrate above. */
+  wasTurnStopped(taskId: string): boolean {
+    return stoppedTurns.has(taskId);
   },
 
   /** FIX 1 — fires right before each backoff sleep. Surfaces the attempt count via
