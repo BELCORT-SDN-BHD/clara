@@ -721,42 +721,52 @@ test("#727: the Work detail route hydrates with no React fault in the console", 
     rejected.push(`${response.status()} ${new URL(response.url()).pathname}`);
   });
 
-  // A SEEDED, COMPLETED Work — the fullest version of this page: the facts block, the basis
-  // table, the posted-entry block and its links row. A skeleton-only page would hydrate
-  // clean for the boring reason that it renders almost nothing.
-  await page.goto(`/clients/${CLIENT}/work/${JOURNAL_WORK.seededWorkId}`);
-  await expect(page.getByText("Completed", { exact: true }).first()).toBeVisible();
-  // AND THE RAIL, which is half of what the owner was actually looking at: the docked
-  // Clara rail is mounted by `app/(firm)/layout.tsx` on every firm route, and on this one
-  // it is rendering this lane's B6 transcript — a `work_accepted` card that hydrates its
-  // Work on mount, a `work_status` line and a `work_result`. That subtree is inside the
-  // same hydration pass as the Work detail below it, so asserting it is on screen is what
-  // stops this cell from proving hydration only for a page with the rail empty.
-  const rail = page.locator("[data-clara-rail]");
-  await expect(rail).toBeVisible();
-  await expect(rail.getByText("Accounting work accepted")).toBeVisible();
-  await settle(page);
+  // `park_card` below arms `state.showParkedCard`, which puts a SECOND `work_accepted`
+  // message into the transcript the Clara rail renders on EVERY route — so a cell that
+  // leaves it armed leaves a second `work-question-*` subtree beside every later cell's
+  // own, which is the strict-mode two-element match journal-work-mock.mjs:245 records.
+  // `reset` is what disarms it, in a `finally`, exactly as work-question-walk.spec.ts's
+  // own B6 cell and this file's `beforeEach` spell it.
+  try {
+    // A SEEDED, COMPLETED Work — the fullest version of this page: the facts block, the
+    // basis table, the posted-entry block and its links row. A skeleton-only page would
+    // hydrate clean for the boring reason that it renders almost nothing.
+    await page.goto(`/clients/${CLIENT}/work/${JOURNAL_WORK.seededWorkId}`);
+    await expect(page.getByText("Completed", { exact: true }).first()).toBeVisible();
+    // AND THE RAIL, which is half of what the owner was actually looking at: the docked
+    // Clara rail is mounted by `app/(firm)/layout.tsx` on every firm route, and on this one
+    // it is rendering this lane's B6 transcript — a `work_accepted` card that hydrates its
+    // Work on mount, a `work_status` line and a `work_result`. That subtree is inside the
+    // same hydration pass as the Work detail below it, so asserting it is on screen is what
+    // stops this cell from proving hydration only for a page with the rail empty.
+    const rail = page.locator("[data-clara-rail]");
+    await expect(rail).toBeVisible();
+    await expect(rail.getByText("Accounting work accepted")).toBeVisible();
+    await settle(page);
 
-  // And the PARKED face, which mounts the question panel and its form — the subtree #629
-  // added to this route, and the one that reads a `localStorage` draft in a lazy state
-  // initialiser (lib/work/questions.ts's `readWorkAnswerDraft`). A read like that during
-  // the FIRST client render is the classic #418 shape, so it is walked rather than reasoned
-  // about.
-  await control(page, { op: "park_card" });
-  await page.goto(`/clients/${CLIENT}/work/${JOURNAL_WORK.parkedCardWorkId}`);
-  await expect(page.getByText("Waiting for an answer").first()).toBeVisible({ timeout: 15_000 });
-  await settle(page);
+    // And the PARKED face, which mounts the question panel and its form — the subtree #629
+    // added to this route, and the one that reads a `localStorage` draft in a lazy state
+    // initialiser (lib/work/questions.ts's `readWorkAnswerDraft`). A read like that during
+    // the FIRST client render is the classic #418 shape, so it is walked rather than
+    // reasoned about.
+    await control(page, { op: "park_card" });
+    await page.goto(`/clients/${CLIENT}/work/${JOURNAL_WORK.parkedCardWorkId}`);
+    await expect(page.getByText("Waiting for an answer").first()).toBeVisible({ timeout: 15_000 });
+    await settle(page);
 
-  const react = faults.filter((m) =>
-    /Minified React error #(185|418|423|425)|Maximum update depth exceeded|Hydration failed|hydration-mismatch|didn't match|did not match/i.test(m),
-  );
-  expect(react, "the Work detail route must hydrate with no React nested-update or hydration fault").toEqual([]);
-  expect(rejected, "no read this route issues may be refused by the server").toEqual([]);
-  // The vacuity control on the collector itself: a listener that was never attached, or a
-  // page that never loaded, also produces an empty list. `page.evaluate` proves the channel
-  // this cell reads is live.
-  await page.evaluate(() => console.error("e2e-727-collector-probe"));
-  expect(faults, "the console collector must actually be receiving errors").toContain("e2e-727-collector-probe");
+    const react = faults.filter((m) =>
+      /Minified React error #(185|418|423|425)|Maximum update depth exceeded|Hydration failed|hydration-mismatch|didn't match|did not match/i.test(m),
+    );
+    expect(react, "the Work detail route must hydrate with no React nested-update or hydration fault").toEqual([]);
+    expect(rejected, "no read this route issues may be refused by the server").toEqual([]);
+    // The vacuity control on the collector itself: a listener that was never attached, or a
+    // page that never loaded, also produces an empty list. `page.evaluate` proves the
+    // channel this cell reads is live.
+    await page.evaluate(() => console.error("e2e-727-collector-probe"));
+    expect(faults, "the console collector must actually be receiving errors").toContain("e2e-727-collector-probe");
+  } finally {
+    await control(page, { op: "reset" }).catch(() => {});
+  }
 });
 
 /**
