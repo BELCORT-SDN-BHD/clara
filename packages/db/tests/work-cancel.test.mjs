@@ -21,7 +21,7 @@ import {
   entryCount, tasksForWork,
   cancelAccountingWork, takeOverAccountingWork, retryAccountingWork, workAuthoritySnapshot,
   deactivateMember, demoteMember, interruptionsForTask, responsibleOf, timelineEvents,
-  basis, REASON, CLR, CANCEL_REASON, CANCEL_ANSWER, assertPair, assertRaises,
+  basis, REASON, CLR, CANCEL_REASON, CANCEL_ANSWER, assertPair, assertRaises, detailOf,
   rootQuery, humanQuery, roleQuery, opk, ROLES, insertUser, addMember,
 } from "./work-cancel-fixtures.mjs";
 import { getPool } from "./rig-helpers.mjs";
@@ -1373,8 +1373,21 @@ test("wc.34c a posting racing a role change on the same firm never raises a seri
   // writers take `clara.firms FOR UPDATE` and then the membership, while the core took the
   // membership FOR SHARE and reached `clara.firms` only through its inserts' FK key-share — an
   // inversion PostgreSQL answers with 40P01, which reaches a human as a failed posting.
+  //
+  // THE RACE HAS EXACTLY TWO LEGITIMATE LOSING ANSWERS, and the cell tolerates both BY TYPE —
+  // never by a blanket "any refusal is fine".
+  //   CLR04 (`obo_not_active` / `insufficient_role`) — the core's own commit-time membership
+  //         recheck saw the demotion. This is the inner wall, and it is what wc.34 measures.
+  //   CLR03 (`no valid wake credential`) — `clara.set_member_role` REVOKES the member's wake
+  //         credentials in the same statement that changes their role (0157:405), so a posting
+  //         that arrives after the role change is refused at the CREDENTIAL, before the core is
+  //         reached at all. wc.34b, thirty lines below, measures exactly this and asserts
+  //         CLR.wake; omitting it here made this cell fail ~25 % of runs on a correct system
+  //         (measured: 2 failures in 8 observations) and read as infrastructure flake.
+  // Only a serialization failure — or any OTHER refusal — is a finding.
   const N = 20;
   const errs = [];
+  const tally = { committed: 0, [CLR.authz]: 0, [CLR.wake]: 0 };
   for (let i = 0; i < N; i += 1) {
     const solo = await insertUser(world.prefix, `race${i}`);
     await addMember(ALICE(), { firm: FIRM_A(), user: solo, role: "bookkeeper", opKey: opk("w630-mem34c") });
@@ -1383,7 +1396,8 @@ test("wc.34c a posting racing a role change on the same firm never raises a seri
     const membership = (await rootQuery(
       "select id from clara.firm_memberships where firm_id=$1 and user_id=$2 and status='active'",
       [FIRM_A(), solo])).rows[0].id;
-    const results = await Promise.allSettled([
+    const before = await entryCount(w.client);
+    const [posting, roleChange] = await Promise.allSettled([
       wakeRecordJournalEntry(cred.secret, {
         client: w.client, work: w.work_id, logicalOpId: w.logical_op_id, basis: w.basis,
       }),
@@ -1391,20 +1405,44 @@ test("wc.34c a posting racing a role change on the same firm never raises a seri
         "select clara.set_member_role(p_membership => $1::uuid, p_role => $2::text, p_op_key => $3::text)",
         [membership, "viewer", opk("w630-race34c")]),
     ]);
-    for (const r of results) {
-      if (r.status !== "rejected") continue;
-      // THE LOSER OF THIS RACE IS NOT AN ERROR EITHER: a revocation that commits first makes the
-      // posting CLR04 `obo_not_active`/`insufficient_role`, which is the whole point of the
-      // commit-time recheck. Only a serialization failure is a finding.
-      if (r.reason?.code === CLR.authz) continue;
-      errs.push(r.reason);
+
+    let refused = null;
+    if (posting.status === "rejected") {
+      const e = posting.reason;
+      const reason = detailOf(e)?.reason ?? null;
+      if (e?.code === CLR.authz && ["obo_not_active", "insufficient_role"].includes(reason)) {
+        refused = CLR.authz;
+      } else if (e?.code === CLR.wake && /no valid wake credential/i.test(String(e?.message ?? ""))) {
+        refused = CLR.wake;
+      } else {
+        errs.push(e);
+      }
+    }
+    if (roleChange.status === "rejected") errs.push(roleChange.reason);
+    if (refused) tally[refused] += 1; else if (posting.status === "fulfilled") tally.committed += 1;
+
+    // THE OUTCOME LAW, asserted per iteration: the books and the refusal agree. Either the
+    // posting committed — one entry, one receipt — or it was refused and NOTHING moved. Never
+    // both (an entry under a refusal), never neither (a "success" that posted nothing).
+    const entries = (await entryCount(w.client)) - before;
+    const receipts = (await receiptsForWork(w.work_id)).length;
+    if (refused) {
+      assert.equal(entries, 0, `wc.34c iteration ${i}: refused ${refused} and yet ${entries} entr(y|ies) posted`);
+      assert.equal(receipts, 0, `wc.34c iteration ${i}: refused ${refused} and yet a receipt exists`);
+    } else if (posting.status === "fulfilled") {
+      assert.equal(posting.value?.posted, true, `wc.34c iteration ${i}: the answer claims a posting`);
+      assert.equal(entries, 1, `wc.34c iteration ${i}: a committed posting is exactly one entry`);
+      assert.equal(receipts, 1, `wc.34c iteration ${i}: …with exactly one receipt`);
     }
   }
   const deadlocks = errs.filter((e) => e?.code === "40P01" || e?.code === "40001");
   assert.equal(deadlocks.length, 0,
     `wc.34c ${N} posting/role-change pairs raised no serialization failure `
     + `(saw: ${deadlocks.map((e) => e.code).join(",")})`);
-  assert.equal(errs.length, 0, `wc.34c …and no untyped refusal either: ${errs[0]?.message ?? ""}`);
+  assert.equal(errs.length, 0,
+    `wc.34c …and no refusal outside the two typed ones: ${errs[0]?.code ?? ""} ${errs[0]?.message ?? ""}`);
+  assert.equal(tally.committed + tally[CLR.authz] + tally[CLR.wake], N,
+    `wc.34c every iteration reached one of the three outcomes (${JSON.stringify(tally)})`);
 });
 
 test("wc.34b the INVERSE order refuses the posting — a revocation that commits FIRST wins", async (t) => {
@@ -1434,4 +1472,52 @@ test("wc.34b the INVERSE order refuses the posting — a revocation that commits
   assert.equal((await receiptsForWork(w.work_id)).length, 0, "wc.34b no receipt exists");
   assert.equal((await workRow(w.work_id)).status, "running",
     "wc.34b …and the Work is untouched: a refused posting settles nothing");
+});
+
+test("wc.35 the cancel door says WHICH arm answered: a stop that killed a queued turn is not the same answer as one that found it already over", async (t) => {
+  if (await gateCancel(t)) return;
+  // THE INVERSION THIS DISCRIMINATOR EXISTS TO END. `clara.cancel_agent_task` answers
+  // `{status:'cancelled'}` for BOTH a terminal settle it performs on a queued/held task AND for a
+  // task that was already terminal when the press arrived. `status` alone cannot tell them apart,
+  // and the rail's Stop-reply surface — the only reader of this answer — classified the FIRST as
+  // the second and printed "Nothing was stopped — this reply had already finished" over a turn the
+  // press had just killed. `changed` is the fact about THIS CALL; `transition` names the act.
+  const w = await admitted();
+  assert.equal((await taskRow(w.task_id)).status, "queued", "wc.35 precondition: the run never started");
+
+  const pressKey = opk("w630-d1");
+  const killed = await cancelAgentTask(BOB(), { task: w.task_id, opKey: pressKey });
+  assert.equal(killed.status, "cancelled", "wc.35 the queued arm settles the task terminally");
+  assert.equal(killed.changed, true, "wc.35 …and says THIS call did it");
+  assert.equal(killed.transition, "cancelled", "wc.35 …naming the act, not just the resting state");
+
+  // The SAME op key is a replay of the same press, so it must still read `changed:true` — that is
+  // the truth about that press, and clara._finish_op returns the stored receipt verbatim.
+  const replay = await cancelAgentTask(BOB(), { task: w.task_id, opKey: pressKey });
+  assert.deepEqual(replay, killed, "wc.35 an op-key replay returns the original receipt unchanged");
+
+  // A DIFFERENT key is a NEW press, on a task that is now terminal: nothing to do, and it says so.
+  const noop = await cancelAgentTask(BOB(), { task: w.task_id, opKey: opk("w630-d2") });
+  assert.equal(noop.status, "cancelled", "wc.35 the second press reads the same resting state…");
+  assert.equal(noop.changed, false, "wc.35 …and is honest that it changed nothing");
+  assert.equal(noop.transition, "already_terminal", "wc.35 …by name");
+
+  // AND THE ENGINE-ACTIVE ARM. A running task's cancel is a REQUEST, and a second request is a
+  // no-op — two more distinct transitions over the same `cancel_requested` status.
+  const live = await running();
+  const asked = await cancelAgentTask(BOB(), { task: live.task_id, opKey: opk("w630-d3") });
+  assert.equal(asked.status, "cancel_requested", "wc.35 a live run is asked to abort");
+  assert.equal(asked.changed, true, "wc.35 …and this call asked it");
+  assert.equal(asked.transition, "cancel_requested");
+  const askedAgain = await cancelAgentTask(BOB(), { task: live.task_id, opKey: opk("w630-d4") });
+  assert.equal(askedAgain.status, "cancel_requested", "wc.35 a second press reads the same state…");
+  assert.equal(askedAgain.changed, false, "wc.35 …and changed nothing");
+  assert.equal(askedAgain.transition, "already_requested", "wc.35 …by its own name");
+
+  // THE DISCRIMINATOR IS ADDITIVE. Every key the answer carried before is still there and still
+  // means what it meant — a caller that reads only `status` is not broken by this.
+  for (const answer of [killed, noop, asked, askedAgain]) {
+    assert.equal(answer.task_id != null, true, "wc.35 task_id survives on every arm");
+    assert.equal(typeof answer.status, "string", "wc.35 status survives on every arm");
+  }
 });

@@ -1508,13 +1508,27 @@ begin
   select * into t from clara.agent_tasks where id = p_task for update;
   if not found or t.firm_id <> c.firm then raise exception 'task not in your firm' using errcode = 'CLR11'; end if;
 
+  -- #630 · WHAT THIS CALL DID, said separately from what the task now IS. `status` alone cannot
+  -- tell a press that TERMINALLY CANCELLED a queued turn ('cancelled', below) from a press that
+  -- found a turn which had already ended by itself ('cancelled' here too) -- and a surface reading
+  -- only `status` announced the successful stop of a queued reply as "Nothing was stopped -- this
+  -- reply had already finished". `changed` is that fact, and `transition` names the act:
+  --   cancel_requested  the engine is active; it was asked to abort      (changed)
+  --   cancelled         no engine run; this call settled the task        (changed)
+  --   already_terminal  the task had already ended; nothing was done     (unchanged)
+  --   already_requested a cancel was already pending; nothing was done   (unchanged)
+  -- ADDITIVE: both keys are new, `task_id`/`status` keep their meaning, and an op-key REPLAY still
+  -- returns the first call's stored receipt verbatim (clara._finish_op) -- so the same press
+  -- retried reads `changed:true`, which is the truth about that press.
   if t.status in ('completed','failed','cancelled','expired') then
     return clara._finish_op(c.firm, 'cancel_agent_task', p_op_key,
-      jsonb_build_object('task_id', p_task, 'status', t.status));      -- idempotent: already terminal
+      jsonb_build_object('task_id', p_task, 'status', t.status,
+        'changed', false, 'transition', 'already_terminal'));          -- idempotent: already terminal
   end if;
   if t.status = 'cancel_requested' then
     return clara._finish_op(c.firm, 'cancel_agent_task', p_op_key,
-      jsonb_build_object('task_id', p_task, 'status', 'cancel_requested'));  -- already requested
+      jsonb_build_object('task_id', p_task, 'status', 'cancel_requested',
+        'changed', false, 'transition', 'already_requested'));         -- already requested
   end if;
 
   -- Cascades (S4-D6): pending interruptions → cancelled; a held wake task's outbox → cancelled.
@@ -1539,7 +1553,8 @@ begin
     jsonb_build_object('task', p_task, 'op_key', p_op_key));
   perform pg_notify('clara_runtime_ctl', '');                         -- empty payload
   return clara._finish_op(c.firm, 'cancel_agent_task', p_op_key,
-    jsonb_build_object('task_id', p_task, 'status', v_new_status));
+    jsonb_build_object('task_id', p_task, 'status', v_new_status,
+      'changed', true, 'transition', v_new_status));                  -- #630: this call DID it
 end $$;
 revoke all on function clara.cancel_agent_task(uuid, text) from public;
 grant execute on function clara.cancel_agent_task(uuid, text) to clara_authenticated;
@@ -1850,6 +1865,14 @@ reset role;
 -- =====================================================================================
 do $w630_tail$
 declare v_src text; v_n int;
+-- #630 (fourth review round) -- EVERY `v_src` BELOW IS THE BODY'S STATEMENTS, NOT ITS PROSE.
+-- plpgsql `prosrc` carries the function's own comments, and a census that greps it can be
+-- satisfied by a sentence ABOUT the code instead of the code. Measured here: the lock-order check
+-- found `for key share` at prosrc offset 6493 -- inside the paragraph explaining why that lock is
+-- taken -- and would have stayed green with the statement itself deleted. `clara._src_statements`
+-- Each probe therefore reads `regexp_replace(prosrc, '--<to end of line>', '')` -- what the
+-- function DOES, with what it says about itself removed. No new catalog object: the strip is the
+-- SELECT's own expression.
 begin
   -- The two new doors exist, are PUBLIC-revoked and reachable by clara_runtime ALONE.
   for v_src in select s from unnest(array[
@@ -1883,7 +1906,7 @@ begin
   -- THE SWAP IS ASSERTED ON THE ARRAY'S OWN TEXT, not on a bare name: `initiator` also appears in
   -- this body as the handover wall's `detail.column`, so a substring probe for it alone is true
   -- either way and would prove nothing.
-  select p.prosrc into v_src from pg_proc p where p.oid='clara._tf_accounting_work_immutable()'::regprocedure;
+  select regexp_replace(p.prosrc, '--[^' || chr(10) || ']*', '', 'g') into v_src from pg_proc p where p.oid='clara._tf_accounting_work_immutable()'::regprocedure;
   if position('''purpose'',''initiated_by'',''initiator_role''' in v_src) = 0 then
     raise exception '#630 tail: initiated_by is NOT in the frozen set -- history could be rewritten'
       using errcode='CLR10';
@@ -1897,7 +1920,7 @@ begin
   end if;
 
   -- The four recuts carry their new arms AND the arms they must not have dropped.
-  select p.prosrc into v_src from pg_proc p
+  select regexp_replace(p.prosrc, '--[^' || chr(10) || ']*', '', 'g') into v_src from pg_proc p
    where p.oid='clara._record_journal_entry_core(uuid,uuid,text,uuid,uuid,text,jsonb,text,text,text)'::regprocedure;
   if position('for update' in v_src)=0 or position('work_cancelled' in v_src)=0
      or position('work_settled' in v_src)=0 then
@@ -1910,7 +1933,7 @@ begin
      or position('operation_in_flight' in v_src)=0 or position('wake_task_unbound' in v_src)=0 then
     raise exception '#630 tail: the commit recut dropped a 0178/0182 arm' using errcode='CLR10';
   end if;
-  select p.prosrc into v_src from pg_proc p where p.oid='clara.settle_work_run(uuid,text,text,jsonb,jsonb)'::regprocedure;
+  select regexp_replace(p.prosrc, '--[^' || chr(10) || ']*', '', 'g') into v_src from pg_proc p where p.oid='clara.settle_work_run(uuid,text,text,jsonb,jsonb)'::regprocedure;
   if position('translated_by_cancel' in v_src)=0 or position('superseded' in v_src)=0
      or position('for update' in v_src)=0 then
     raise exception '#630 tail: the settle recut lost the cancel translation or the boundary lock'
@@ -1919,15 +1942,15 @@ begin
   if position('overridden_by_receipt' in v_src)=0 or position('_work_committed_receipt' in v_src)=0 then
     raise exception '#630 tail: the settle recut dropped 0178''s receipt override' using errcode='CLR10';
   end if;
-  select p.prosrc into v_src from pg_proc p where p.oid='clara.claim_work_run(uuid,text,jsonb)'::regprocedure;
+  select regexp_replace(p.prosrc, '--[^' || chr(10) || ']*', '', 'g') into v_src from pg_proc p where p.oid='clara.claim_work_run(uuid,text,jsonb)'::regprocedure;
   if position('for update' in v_src)=0 or position('invalid_bundle' in v_src)=0 then
     raise exception '#630 tail: the claim recut lost the boundary lock or a 0178 arm' using errcode='CLR10';
   end if;
-  select p.prosrc into v_src from pg_proc p where p.oid='clara._tf_accounting_work_status_mirror()'::regprocedure;
+  select regexp_replace(p.prosrc, '--[^' || chr(10) || ']*', '', 'g') into v_src from pg_proc p where p.oid='clara._tf_accounting_work_status_mirror()'::regprocedure;
   if position('stopping' in v_src)=0 or position('_work_committed_receipt' in v_src)=0 then
     raise exception '#630 tail: the mirror recut lost stopping or the receipt arm' using errcode='CLR10';
   end if;
-  select p.prosrc into v_src from pg_proc p where p.oid='clara.work_authority_snapshot(uuid)'::regprocedure;
+  select regexp_replace(p.prosrc, '--[^' || chr(10) || ']*', '', 'g') into v_src from pg_proc p where p.oid='clara.work_authority_snapshot(uuid)'::regprocedure;
   if position('initiated_by' in v_src)=0 or position('initiator_authorised' in v_src)=0
      or position('responsible' in v_src)=0 then
     raise exception '#630 tail: the snapshot recut lost initiated_by, responsible or its deploy-locked alias'
@@ -1951,7 +1974,7 @@ begin
 
   -- #630 §H2 — THE LOCK ORDER IS GLOBAL. Both older doors reach clara.accounting_work BEFORE the
   -- task row, and each keeps the arm it must not have lost.
-  select p.prosrc into v_src from pg_proc p where p.oid='clara.cancel_agent_task(uuid,text)'::regprocedure;
+  select regexp_replace(p.prosrc, '--[^' || chr(10) || ']*', '', 'g') into v_src from pg_proc p where p.oid='clara.cancel_agent_task(uuid,text)'::regprocedure;
   if position('clara.accounting_work' in v_src) = 0 or position('for update' in v_src) = 0 then
     raise exception '#630 tail: cancel_agent_task does not take the Work row' using errcode='CLR10';
   end if;
@@ -1961,7 +1984,14 @@ begin
   if position('wakes_outbox' in v_src) = 0 or position('cancel_requested' in v_src) = 0 then
     raise exception '#630 tail: the cancel_agent_task recut dropped a 0133 arm' using errcode='CLR10';
   end if;
-  select p.prosrc into v_src from pg_proc p
+  -- …AND IT SAYS WHICH ARM ANSWERED. Without the discriminator a terminal settle of a queued turn
+  -- and a no-op over a turn that had already ended are the same `{status:'cancelled'}`, and the
+  -- only surface that reads this answer announced the first as the second.
+  if position('''changed''' in v_src) = 0 or position('already_terminal' in v_src) = 0
+     or position('already_requested' in v_src) = 0 then
+    raise exception '#630 tail: cancel_agent_task answers no transition discriminator' using errcode='CLR10';
+  end if;
+  select regexp_replace(p.prosrc, '--[^' || chr(10) || ']*', '', 'g') into v_src from pg_proc p
    where p.oid='clara.open_work_question(uuid,text,jsonb,jsonb,text,jsonb)'::regprocedure;
   if position('for no key update' in v_src) > position('set status = ''awaiting_input''' in v_src) then
     raise exception '#630 tail: open_work_question still locks the Work after the task transition'
@@ -1973,12 +2003,12 @@ begin
 
   -- #630 §H2 — the credential mint TYPES its authority refusal, and the C3 provenance door tells
   -- the two people apart.
-  select p.prosrc into v_src from pg_proc p
+  select regexp_replace(p.prosrc, '--[^' || chr(10) || ']*', '', 'g') into v_src from pg_proc p
    where p.oid='clara.mint_wake_credential(text,uuid,uuid,interval,uuid)'::regprocedure;
   if position('authority_lost' in v_src) = 0 or position('interactive_client' in v_src) = 0 then
     raise exception '#630 tail: the mint recut lost the typed refusal or a wake kind' using errcode='CLR10';
   end if;
-  select p.prosrc into v_src from pg_proc p where p.oid='clara.list_entry_links(uuid,uuid[])'::regprocedure;
+  select regexp_replace(p.prosrc, '--[^' || chr(10) || ']*', '', 'g') into v_src from pg_proc p where p.oid='clara.list_entry_links(uuid,uuid[])'::regprocedure;
   if position('initiated_by_role' in v_src) = 0 or position('''responsible''' in v_src) = 0 then
     raise exception '#630 tail: list_entry_links did not gain the split provenance' using errcode='CLR10';
   end if;
@@ -1991,7 +2021,7 @@ begin
 
   -- #630 — the boundary's SECOND half: the membership re-read inside the posting core is
   -- serialised with revocation, not merely fresh.
-  select p.prosrc into v_src from pg_proc p
+  select regexp_replace(p.prosrc, '--[^' || chr(10) || ']*', '', 'g') into v_src from pg_proc p
    where p.oid='clara._record_journal_entry_core(uuid,uuid,text,uuid,uuid,text,jsonb,text,text,text)'::regprocedure;
   if position('for share' in v_src) = 0 then
     raise exception '#630 tail: the posting core does not hold the membership row against revocation'
@@ -2012,6 +2042,6 @@ begin
    where tt.version=(select version from clara.taxonomy_active) and tt.event_type='work.taken_over';
   if v_n <> 1 then raise exception '#630 tail: work.taken_over is not routed' using errcode='CLR10'; end if;
 
-  raise notice '#630 tail: OK -- clara.cancel_accounting_work and clara.take_over_accounting_work are PUBLIC-revoked and clara_runtime-only; clara.accounting_work.initiated_by is NOT NULL, equal to initiator on every existing row and now the frozen historical fact while initiator became the mutable authority column behind a bookkeeper wall; the posting core takes the Work row lock and refuses work_cancelled/work_settled with every 0178/0182 arm intact; settle_work_run locks the Work first and translates a cancel_requested settle to cancelled under error.superseded while the receipt still overrides; claim_work_run and the status mirror take the same order and the mirror writes stopping; and work.taken_over is registered and routed at the active taxonomy version.';
+  raise notice '#630 tail: OK -- clara.cancel_accounting_work and clara.take_over_accounting_work are PUBLIC-revoked and clara_runtime-only; clara.accounting_work.initiated_by is NOT NULL, equal to initiator on every existing row and now the frozen historical fact while initiator became the mutable authority column behind a bookkeeper wall; the posting core takes the Work row lock and refuses work_cancelled/work_settled with every 0178/0182 arm intact; settle_work_run locks the Work first and translates a cancel_requested settle to cancelled under error.superseded while the receipt still overrides; claim_work_run and the status mirror take the same order and the mirror writes stopping; and work.taken_over is registered and routed at the active taxonomy version. clara.cancel_agent_task additionally answers a changed/transition discriminator on EVERY arm (cancel_requested | cancelled | already_terminal | already_requested), so a press that terminally cancelled a queued turn is distinguishable from one that found the turn already over; and every prosrc probe in this census reads the body with its `--` comment tails stripped, so no assertion here can be satisfied by prose about the code.';
 end
 $w630_tail$;
