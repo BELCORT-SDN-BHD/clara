@@ -20,6 +20,30 @@ _Avoid_: Chat session, chat message, journal entry as synonyms for the whole job
 Stopping the remaining work while retaining outcomes already completed. Reversing or correcting a posted outcome is a separate accounting action.
 _Avoid_: Rollback, reversal as synonyms for cancellation.
 
+**Ordering boundary**:
+The `clara.accounting_work` row lock. Admitting an accounting operation and cancelling that Work serialise on it: exactly one side wins; the loser creates no effect and returns a typed refusal.
+_Avoid_: An AbortSignal or in-process flag as a substitute; a guarantee that holds only when nothing races.
+
+**Stopping**:
+A Work that has been asked to cancel while an already admitted operation may still be settling. Not terminal; the terminal is written only once the boundary is known.
+_Avoid_: Cancelled; a synonym for the run's own status.
+
+**Superseded outcome**:
+The outcome the run itself requested (failed/refused/expired), preserved under `accounting_work.error.superseded` after the cancel translation.
+_Avoid_: A second error a person must resolve; proof the run's own report was wrong.
+
+**Initiated by / Responsible**:
+Two facts a Work's `initiator` column used to conflate. `initiated_by` is who asked (immutable). `initiator` is the human whose live authority the Work executes under, moved only by take-over.
+_Avoid_: Treating either as a synonym for the other; assuming `initiated_by` can change.
+
+**Take over**:
+An active colleague assumes responsibility for a terminal Work whose responsible human lost authority: a new run, the same logical identity, `initiated_by` unchanged.
+_Avoid_: A way to seize a Work whose responsible human is still authorised; a second way to create a run.
+
+**Stop reply ≠ Cancel Work**:
+Stop reply aborts the SSE read and cancels the chat-turn task; Cancel Work cancels the persistent Work. Different `clara.agent_tasks` rows with no cascade between them; closing the rail does neither.
+_Avoid_: Assuming either one implies the other; a chat-lane action as a substitute for the Work-level cancel door.
+
 **Work batch**:
 A group of accounting work tracked together. An item waiting for information holds its dependants, while independent items may continue and retain their own outcomes.
 _Avoid_: A single all-or-nothing accounting transaction.
@@ -80,6 +104,10 @@ _Avoid_: A chat message claiming completion; a task status; a second effect.
 One persistent question a running Accounting work is parked on: the missing fact or decision, why it is needed, one to six typed fields, the supporting source, and the version of the basis it was asked against. It has a stable identity and a monotone version on its Work (a re-asked question is a new version); every surface renders the same record; the database accepts exactly one current authorised answer, replays a repeated one, and shows a later or conflicting answer the authoritative result.
 _Avoid_: A chat message; an approval gate; a separate question per surface; a way to change what the Work already recorded.
 
+**Chat clarification**:
+One question Clara asks inside a conversation while a turn is still running, answered in that same conversation. It lives only on the run's live stream — settling the turn cancels it in the same statement sequence that writes the assistant message — so it is answerable during the turn or, after a reload, from the row the run is parked on; it has no expiry enforcer (#720).
+_Avoid_: A Work question as a synonym; an approval gate; a chat message that merely mentions a question.
+
 **Delivery state**:
 The runtime's record of whether a settled Work question reached the parked run: pending, leased by one worker, delivered, or resting as unreachable when the engine's hook is gone. It is stamped with its own instant so a grace can be measured, and it never reopens a question or replaces its status.
 _Avoid_: A second question status; proof that the Work advanced.
@@ -88,9 +116,21 @@ _Avoid_: A second question status; proof that the Work advanced.
 The append-only record that one client document is the source behind one posted journal entry: which Work and operation identity bound it, who bound it, when, and whether it was bound as the entry was recorded or attached afterwards. A document backs at most one live posted entry; a reversal releases the link so the corrected entry may cite the same document. Evidence is optional — an entry recorded without a document is a complete accounting fact.
 _Avoid_: A column rewritten on the posted entry; a claim that the document was independently verified; "unsourced" as a synonym for "wrong".
 
+**Spoken-for document**:
+A document that already backs a live posted entry of any client of the firm — through a live Evidence link or an approved, not-reversed document-coding binding. A picker disables such a document and names its claimant; the posting door's own refusal is the actual law and is unchanged by this advisory.
+_Avoid_: A hard block; proof the document cannot be used at all; a synonym for "already filed".
+
+**Claimant client**:
+The client whose posted entry currently holds a spoken-for document — firm-wide, not necessarily the client being asked about.
+_Avoid_: The asking client; the document's filing client when that differs from who holds the posting.
+
 **Activity event**:
 One observable, attributable change in the firm's books or work — a domain event, an agent receipt or a committed operation receipt — with its actor and delegation, client, time, status and links to its Work, object, source and replacement outcome.
 _Avoid_: An internal task name or private model reasoning; a pending question (Work owns those); a substitute for the object's own current state.
+
+**Kept sweep receipt**:
+A `sweep.run_completed` event whose run drafted or posted at least one item, and so remains in the Activity feed as an attributed agent act. A run that changed nothing is excluded rather than shown as unattributed noise.
+_Avoid_: Every sweep run; a refusal or a skip counted as "effect".
 
 **Accounting operation**:
 A business action, such as recording an acquisition or settling an invoice, with its required journal effects and related accounting records. Its meaning is the same whether initiated by a person or Clara.
