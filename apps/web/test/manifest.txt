@@ -71,6 +71,7 @@ components/clara/thread-live-regions.test.tsx
 components/clara/thread-live-stream-stability.test.tsx
 components/clara/thread-menu.test.tsx
 components/clara/thread-rehydrate.test.tsx
+components/clara/thread-stop-reply.test.tsx
 components/close/close-a11y.test.tsx
 components/close/close-components.test.tsx
 components/close/close-keyboard.test.tsx

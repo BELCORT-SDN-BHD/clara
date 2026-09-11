@@ -114,9 +114,15 @@ test("630 CLOSING THE RAIL does neither — unmounting calls no door at all", as
 // a UI that said "Stopped".
 // ===========================================================================================
 
-/** A fetch that accepts the turn POST, records every RPC, and never opens a stream. */
+/** A fetch that accepts (or refuses) the turn POST, records every RPC, and never opens a stream.
+ *  `admit` decides what the held POST finally answers; `cancelAnswer` decides what the cancel door
+ *  answers, so a cell can drive the machine's `failed` arms without mocking the hook itself. */
 async function withAdmittingFetch(
   run: (seen: string[], release: () => void) => Promise<void>,
+  opts: {
+    admit?: boolean;
+    cancelAnswer?: () => Response;
+  } = {},
 ): Promise<void> {
   const original = globalThis.fetch;
   const originalUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -128,9 +134,15 @@ async function withAdmittingFetch(
     const url = String(u);
     const rpc = /\/rpc\/([a-z_]+)/.exec(url);
     if (rpc) seen.push(rpc[1]!);
+    if (rpc?.[1] === "cancel_agent_task" && opts.cancelAnswer) return opts.cancelAnswer();
     if (/\/turns$/.test(url) && (init?.method ?? "GET") === "POST") {
       seen.push("POST:turns");
       await admitted;   // the ADMISSION WINDOW, held open for exactly as long as a cell needs
+      if (opts.admit === false) {
+        return new Response(JSON.stringify({ error: "rate limited" }), {
+          status: 429, headers: { "content-type": "application/json" },
+        });
+      }
       return new Response(JSON.stringify({ task_id: "task-admitted" }), {
         status: 202, headers: { "content-type": "application/json" },
       });
@@ -148,6 +160,14 @@ async function withAdmittingFetch(
     if (originalUrl === undefined) delete process.env.NEXT_PUBLIC_SUPABASE_URL;
     else process.env.NEXT_PUBLIC_SUPABASE_URL = originalUrl;
   }
+}
+
+/** A governed refusal on the wire, in the shape `lib/wire.ts` classifies into a `RefusalError`. */
+function refusal(code: string, message: string, reason: string | null = null): Response {
+  return new Response(
+    JSON.stringify({ code, message, details: reason === null ? null : JSON.stringify({ reason }) }),
+    { status: 400, headers: { "content-type": "application/json" } },
+  );
 }
 
 /** `claraThreadStore` is module-level and lives for the whole FILE, so a cell that asserts about a
@@ -174,7 +194,10 @@ test("630 a stop pressed DURING admission is remembered, then spent on the task 
       });
       assert.equal(answer, "pending",
         "there is nothing to cancel YET, and that is not the same as nothing to cancel");
-      assert.equal(sent, false, "…and the send reports it did not open a reply");
+      assert.equal(sent, true,
+        "…and the turn WAS admitted, so the composer forgets its text: it is in the transcript");
+      assert.equal(h.current.stop.phase, "stopped",
+        "the deferred door answered, and its answer — not the press — is what the machine records");
       assert.deepEqual(
         seen.filter((fn) => fn === "cancel_agent_task"),
         ["cancel_agent_task"],
@@ -188,17 +211,49 @@ test("630 a stop pressed DURING admission is remembered, then spent on the task 
   });
 });
 
-test("630 a stop AFTER admission leaves the composer usable — the send state must not stay `sending`", async () => {
+test("630 a stop AFTER admission, before the stream opens, leaves the composer usable", async () => {
   const { useClaraThread } = await import("./useClaraThread");
-  await withAdmittingFetch(async (_seen, release) => {
+  // THE CELL HAS TO REACH THE ABORT PATH, and the previous cut did not: pressing Stop while the
+  // POST was still held takes the PENDING branch, which returns before any stream is attached, so
+  // `attachClaraStream`'s abort catch — the code the X2 fix lives in — never ran and the cell was
+  // green against the defect. Here the turn is admitted FIRST (`activeTaskId` is set), the stream
+  // fetch is held open, and only then is Stop pressed: that is the abort path and nothing else.
+  let openStream: () => void = () => {};
+  const streamHeld = new Promise<void>((resolve) => { openStream = resolve; });
+  const original = globalThis.fetch;
+  const originalUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  process.env.NEXT_PUBLIC_SUPABASE_URL = "https://example.supabase.co";
+  globalThis.fetch = (async (u: unknown, init?: RequestInit) => {
+    const url = String(u);
+    if (/\/turns$/.test(url) && (init?.method ?? "GET") === "POST") {
+      return new Response(JSON.stringify({ task_id: "task-abort" }), {
+        status: 202, headers: { "content-type": "application/json" },
+      });
+    }
+    if (/\/stream/.test(url)) {
+      await streamHeld;                       // the window between acceptance and the open SSE read
+      const signal = init?.signal;
+      if (signal?.aborted) throw Object.assign(new Error("aborted"), { name: "AbortError" });
+      return new Response("", { status: 200, headers: { "content-type": "text/event-stream" } });
+    }
+    return new Response(JSON.stringify({}), { status: 200, headers: { "content-type": "application/json" } });
+  }) as typeof fetch;
+  try {
     const h = await renderHook(() => useClaraThread(session, THREAD_ABORT));
     try {
       await h.act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+      let sent: boolean | null = null;
       await h.act(async () => {
-        const sending = h.current.sendMessage("hello");
-        await new Promise((r) => setTimeout(r, 0));
+        const sending = h.current.sendMessage("hello").then((v) => { sent = v; });
+        // Wait for the ACCEPTANCE, so the store holds a task id and `stopReply` takes the direct
+        // arm — the pending arm would return before any stream existed.
+        for (let i = 0; i < 40 && claraThreadStore.getThread(THREAD_ABORT).activeTaskId === null; i += 1) {
+          await new Promise((r) => setTimeout(r, 1));
+        }
+        assert.equal(claraThreadStore.getThread(THREAD_ABORT).activeTaskId, "task-abort",
+          "precondition: the turn is ADMITTED and the stream has not opened");
         await h.current.stopReply();
-        release();
+        openStream();
         await sending;
         await new Promise((r) => setTimeout(r, 0));
       });
@@ -207,6 +262,133 @@ test("630 a stop AFTER admission leaves the composer usable — the send state m
       // disabled for the life of the mount.
       assert.notEqual(claraThreadStore.getThread(THREAD_ABORT).sendStatus, "sending",
         "the turn was sent; the send state must leave `sending` whatever happened to the stream");
+      assert.equal(sent, true,
+        "…and the turn is on the record, so its text is forgotten rather than left to be sent twice");
+    } finally {
+      await h.unmount();
+    }
+  } finally {
+    globalThis.fetch = original;
+    if (originalUrl === undefined) delete process.env.NEXT_PUBLIC_SUPABASE_URL;
+    else process.env.NEXT_PUBLIC_SUPABASE_URL = originalUrl;
+  }
+});
+
+// ===========================================================================================
+// #630 fix round 3 — THE STOP-REPLY STATE MACHINE, stated once and pinned arm by arm.
+//
+//   idle  --press during admission-->  pending  --task id + door--> stopped | failed
+//   idle  --press after admission -->  pending  --abort + door  --> stopped | failed
+//
+// `pending` is an INTENT, never an outcome: nothing says "Stopped" until a door has answered.
+// It is spent on exactly the turn it was pressed for and on no other, and it dies with a turn
+// the runtime refuses.
+// ===========================================================================================
+
+const THREAD_REFUSED = "44444444-4444-4444-8444-444444444444";
+const THREAD_DENIED = "55555555-5555-4555-8555-555555555555";
+const THREAD_TRANSPORT = "66666666-6666-4666-8666-666666666666";
+
+test("630 a pending stop DIES with the turn the runtime refused — it never cancels the next one", async () => {
+  const { useClaraThread } = await import("./useClaraThread");
+  await withAdmittingFetch(async (seen, release) => {
+    const h = await renderHook(() => useClaraThread(session, THREAD_REFUSED));
+    try {
+      await h.act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+      let answer: string | null = null;
+      let sent: boolean | null = null;
+      await h.act(async () => {
+        const sending = h.current.sendMessage("first").then((v) => { sent = v; });
+        await new Promise((r) => setTimeout(r, 0));
+        answer = await h.current.stopReply();
+        release();                    // …and the POST comes back 429
+        await sending;
+        await new Promise((r) => setTimeout(r, 0));
+      });
+      assert.equal(answer, "pending", "the press landed inside the admission window");
+      assert.equal(sent, false,
+        "a turn the runtime never took is NOT on the record — its text stays in the composer to fix and resend");
+      assert.equal(claraThreadStore.getThread(THREAD_REFUSED).pendingUserParts, null,
+        "…and nothing was echoed into the transcript for it either");
+      assert.equal(h.current.stop.phase, "idle",
+        "a turn that was never admitted has nothing to stop — the intent is forgotten, not carried");
+      assert.deepEqual(seen.filter((fn) => fn === "cancel_agent_task"), [],
+        "…and no door was called for a turn the runtime refused");
+    } finally {
+      await h.unmount();
+    }
+  }, { admit: false });
+});
+
+test("630 a REFUSED stop inside the admission window says so — it never prints Stopped", async () => {
+  const { useClaraThread } = await import("./useClaraThread");
+  await withAdmittingFetch(async (seen, release) => {
+    const h = await renderHook(() => useClaraThread(session, THREAD_DENIED));
+    try {
+      await h.act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+      let answer: string | null = null;
+      await h.act(async () => {
+        const sending = h.current.sendMessage("hello").then(() => {});
+        await new Promise((r) => setTimeout(r, 0));
+        answer = await h.current.stopReply();
+        release();
+        await sending;
+        await new Promise((r) => setTimeout(r, 0));
+      });
+      assert.equal(answer, "pending");
+      assert.deepEqual(seen.filter((fn) => fn === "cancel_agent_task"), ["cancel_agent_task"],
+        "the remembered stop IS spent");
+      // `clara.begin_chat_turn` admits any active member; `clara.cancel_agent_task` floors at
+      // bookkeeper. A clerk pressing Stop mid-admission gets CLR04, and the run carries on.
+      assert.equal(h.current.stop.phase, "failed",
+        "the deferred door's refusal reaches the reader instead of being swallowed");
+      assert.equal(h.current.stop.phase === "failed" ? h.current.stop.cause : null, "denied",
+        "…and it is named: the role floor, not the network, not a finished turn");
+    } finally {
+      await h.unmount();
+    }
+  }, { cancelAnswer: () => refusal("CLR04", "stopping a reply requires a bookkeeper", "insufficient_role") });
+});
+
+test("630 a stop that fails at the TRANSPORT is not reported as a role refusal", async () => {
+  const { useClaraThread } = await import("./useClaraThread");
+  await withAdmittingFetch(async (_seen, release) => {
+    const h = await renderHook(() => useClaraThread(session, THREAD_TRANSPORT));
+    try {
+      await h.act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+      await h.act(async () => {
+        const sending = h.current.sendMessage("hello").then(() => {});
+        await new Promise((r) => setTimeout(r, 0));
+        await h.current.stopReply();
+        release();
+        await sending;
+        await new Promise((r) => setTimeout(r, 0));
+      });
+      assert.equal(h.current.stop.phase, "failed");
+      assert.equal(h.current.stop.phase === "failed" ? h.current.stop.cause : null, "transport",
+        "a proxy 502 is not a statement about this reader's role in their own firm");
+    } finally {
+      await h.unmount();
+    }
+  }, { cancelAnswer: () => new Response("upstream is down", { status: 502 }) });
+});
+
+test("630 the machine is reset by a NEW turn and by a thread change", async () => {
+  const { useClaraThread } = await import("./useClaraThread");
+  const A = "77777777-7777-4777-8777-777777777777";
+  const B = "88888888-8888-4888-8888-888888888888";
+  await withRecordedRpc(async () => {
+    let threadId = A;
+    const h = await renderHook(() => useClaraThread(session, threadId));
+    try {
+      await h.act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+      claraThreadStore.markAccepted(A, "task-reset");
+      await h.act(async () => { await h.current.stopReply(); });
+      assert.equal(h.current.stop.phase, "stopped", "precondition: the machine holds a stop");
+      threadId = B;
+      await h.act(async () => { await h.rerender(); });
+      assert.equal(h.current.stop.phase, "idle",
+        "a marker about one turn in one thread must not follow the reader into another");
     } finally {
       await h.unmount();
     }

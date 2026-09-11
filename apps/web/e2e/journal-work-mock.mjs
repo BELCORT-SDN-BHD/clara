@@ -1306,6 +1306,14 @@ export async function handleJournalWorkSupabase(request, response, path, url, se
       sendJson(response, 200, [state.tasks.get(id)], cors);
       return true;
     }
+    // #630 (fix round 3) — THE RAIL RE-ASKS ABOUT ITS OWN LIVE TURN, BY TASK ID. `useClaraThread`
+    // polls `readRunByTaskId` while a DB-known turn is live so the Stop control disappears when the
+    // turn ends; without this arm that read fell through to serve-built's `[]`, the rail concluded
+    // the turn had ended, and the control this walk is about vanished a few seconds into the cell.
+    if (id !== null && state.liveTurn !== null && id === state.liveTurn.id) {
+      sendJson(response, 200, [state.liveTurn], cors);
+      return true;
+    }
     // #630 — THE RAIL'S OWN READ: `session_id=eq.<thread>` filtered to the live statuses. Answered
     // only for THIS lane's one thread, and only while a cell has armed a live turn; unarmed it
     // falls through to serve-built's honest `[]`, which is what "no turn in flight" looks like.

@@ -254,8 +254,14 @@ export const claraThreadStore = {
     });
   },
 
-  /** The ONE place a turn becomes "sent" — call this only once the stream has actually
-   *  opened (`openTaskStream`'s promise resolving), never on `postTurn`'s 202 alone. */
+  /** The ONE place a turn becomes "sent" — call this once the stream has actually opened
+   *  (`openTaskStream`'s promise resolving), never on `postTurn`'s 202 alone.
+   *
+   *  #630 — WITH ONE NAMED EXCEPTION: A TURN THE PERSON STOPPED. A stop pressed between acceptance
+   *  and the first byte means no stream will EVER open for a turn the runtime has already taken and
+   *  recorded. Waiting for an authority that is not coming left the composer disabled for the life
+   *  of the mount, so `useClaraThread`'s two stop paths call this themselves — and they are the only
+   *  callers that may, because they are the only ones holding `postTurn`'s acceptance in hand. */
   markSent(threadId: string, parts: ClaraPart[]): void {
     setThread(threadId, { sendStatus: "sent", pendingUserParts: parts });
   },
