@@ -1606,7 +1606,14 @@ const WORK_CANCEL_0184_RUNTIME_FNS = ["cancel_accounting_work", "take_over_accou
 //   …and the UNGRANTED closure: the one trigger body that stamps `initiated_by` from `initiator`
 //   for every writer that does not set it. Listed so `cohortFailures` reports a half-applied 0184
 //   rather than a silently narrower boundary.
-const WORK_CANCEL_0184_UNGRANTED_FNS = ["_tf_accounting_work_initiated_by_default"];
+//   …plus the three private helpers §A0 factors out so a fact this lane states in four places is
+//   written once: the cancellation's own error object, the two doors' shared authz + reservation
+//   preamble, and the receipt-law convergence the status mirror, the cancel door and the runtime
+//   reconciler all reach for when they find a terminal run under a live Work.
+const WORK_CANCEL_0184_UNGRANTED_FNS = [
+  "_tf_accounting_work_initiated_by_default",
+  "_work_cancelled_error", "_work_door_ctx", "_converge_work_terminal",
+];
 export const WORK_CANCEL_0184_COHORT = [
   ...WORK_CANCEL_0184_RUNTIME_FNS, ...WORK_CANCEL_0184_UNGRANTED_FNS,
 ];

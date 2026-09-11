@@ -41,6 +41,10 @@
 --
 --   clara.cancel_accounting_work      work FOR UPDATE, then the task FOR UPDATE, then its questions
 --   clara.take_over_accounting_work   work FOR UPDATE, then (through retry) the task
+--   clara.cancel_agent_task           work FOR UPDATE first for an accounting_work task -- RECUT
+--                                     in §H2; every other kind is byte-for-byte 0133's.
+--   clara.open_work_question          work FOR NO KEY UPDATE first -- RECUT in §H2; 0180 took it
+--                                     AFTER the task transition, which is the inverse.
 --   clara._record_journal_entry_core  work FOR UPDATE (the task is only FK-referenced)
 --   clara.settle_work_run             work FOR UPDATE first — RECUT HERE for exactly this reason:
 --                                     it used to update `agent_tasks` and THEN
@@ -48,14 +52,43 @@
 --                                     inverse of the boundary and a deadlock against every cancel.
 --   clara.claim_work_run              work FOR UPDATE first — recut for the same reason.
 --
--- ONE INVERSION SURVIVES AND IS NAMED RATHER THAN HIDDEN: `clara.cancel_agent_task` (0133:567) is
--- the ESTATE's own task-level door and this file does not edit it — it locks the TASK first, and
--- the status mirror recut below then writes the Work. A Work-level cancel racing a task-level
--- cancel of the SAME Work can therefore deadlock; PostgreSQL detects it, one side raises 40P01,
--- and both callers already treat 40P01 as transient (claraWork.v1.errors.ts's
--- PG_TRANSIENT_SQLSTATES, and the route's own retry). The alternative — editing the estate's cancel
--- door to lock a table it knows nothing about — would put `clara.accounting_work` inside a verb
--- that must keep working on databases where that relation does not exist.
+-- AND IT IS GLOBAL, NOT LOCAL TO THIS FILE'S OWN WRITERS. An earlier cut left two older doors
+-- taking the TASK first and reaching `clara.accounting_work` afterwards — `clara.cancel_agent_task`
+-- (0133:567) through the recut status mirror, and `clara.open_work_question` (0180:630) through its
+-- own second lock — and argued the resulting cycle was a transient both callers absorb. MEASURED,
+-- and it is not: a human's /activity cancel racing a Work-level cancel of the same Work raised
+-- 40P01 on three probes, the Work-level side lost twice, and NOTHING on the route or in the web
+-- retries it (`grep -rn 40P01 apps/web packages/runtime/src packages/runtime/lib` was empty) — so
+-- the human got HTTP 500 and nothing had happened. `clara.open_work_question` produces the same
+-- cycle with no second human at all: a run parks on a question exactly as its Work is cancelled.
+--
+-- §H2 therefore RECUTS BOTH with their full bodies to take the Work row first, guarded on the
+-- task's own `kind` so every other kind takes the path it always took and nothing becomes dependent
+-- on a relation that might be absent (`clara.accounting_work` exists from 0178, i.e. before this
+-- file can apply). `create or replace` with a full body respects the append-only law: no older
+-- migration is edited. The route additionally maps 40P01/40001 to a typed transient conflict —
+-- defence in depth behind a fixed order, not instead of it.
+--
+-- =====================================================================================
+-- TODO(rebase) — TWO ACTIVITY-FEED PROJECTIONS BELONG IN THIS FILE AND ARE NOT IN IT.
+--
+-- §A splits `clara.accounting_work.initiator` (now: the human the Work is executed AS) from
+-- `initiated_by` (who asked). Two doors created by 0181 still read the old meaning:
+--
+--   1. `clara.get_activity_event` (0181:578) projects `'initiator', w.initiator` in its
+--      operation_receipt arm, and the Activity sheet renders it under the label "Initiator". After
+--      a takeover that names the COLLEAGUE, beside an `on_behalf_of` that is also the colleague —
+--      and who asked is then absent from the firm's only firm-wide history surface. It must also
+--      project `initiated_by`.
+--   2. `clara.list_activity` (0181:307) and `clara.get_activity_event` (0181:521) map an event type
+--      to a closed kind set with `when like 'entry.%' … else 'documents'`. §I registers
+--      `work.taken_over`, the estate's FIRST `work.%` event type, so a handover lands in the
+--      `documents` bucket and is invisible under the `work` filter.
+--
+-- BOTH ARE DELIBERATELY NOT RECUT HERE: lane #728's migration 0183 recuts the same two functions in
+-- the same session, and two lanes emitting two full bodies of one function is a merge that resolves
+-- itself wrongly and silently. The orchestrator applies the recut during the rebase onto 0183, from
+-- 0183's bodies; the exact SQL is in this lane's hand-off report.
 --
 -- =====================================================================================
 -- THE SECOND MEASUREMENT: THE CLOSURE'S ERROR ROSTER IS DEPLOY-LOCKED, SO THE TRANSLATION IS THE
@@ -136,6 +169,171 @@ end
 $w630_pre$;
 
 set role clara_fn_owner;
+
+-- =====================================================================================
+-- §A0  THREE PRIVATE HELPERS THE REST OF THE FILE IS WRITTEN IN TERMS OF.
+--
+-- Each one exists because a fact was about to be written down more than once, and a fact written
+-- twice is a fact that drifts. None is granted to anybody: every caller below is SECURITY DEFINER
+-- and runs as this file's owner.
+-- =====================================================================================
+
+-- (1) THE CANCELLATION'S OWN WORDS, IN ONE PLACE. `clara.settle_work_run`'s translation arm, both
+-- terminal arms of `clara.cancel_accounting_work` and `clara._tf_accounting_work_status_mirror`
+-- all describe the SAME event -- a Work stopped before it recorded anything -- and a copy-edit
+-- applied to three of four literals is how one event comes to have two sentences. The runtime's
+-- `cancelSettleForWork` (reconciler-work.mjs) carries the JS twin, and
+-- `packages/db/tests/work-cancel.test.mjs` pins the two against each other so the claim that they
+-- are byte-identical is CHECKED rather than asserted in a comment.
+create function clara._work_cancelled_error() returns jsonb
+  language sql immutable set search_path = clara, pg_temp as $$
+  select jsonb_build_object(
+    'code', 'cancelled', 'reason', 'cancelled',
+    'message', 'This Work was cancelled before an entry was recorded. Nothing was posted.',
+    'recoverable', true)
+$$;
+revoke all on function clara._work_cancelled_error() from public;
+comment on function clara._work_cancelled_error() is
+  '#630: the one error object a Work cancelled with nothing posted carries. Single source of truth '
+  'for every SQL writer of that fact; the runtime twin lives in reconciler-work.mjs and the two are '
+  'pinned equal by the db battery.';
+
+-- (2) THE WORK-LANE DOOR PREAMBLE. `clara.cancel_accounting_work` and
+-- `clara.take_over_accounting_work` open the same way -- find the Work, answer a non-member and an
+-- absent Work identically, demand an ACTIVE bookkeeper+ re-read at the door, and reserve the op
+-- key with a TYPED re-raise of `_reserve_op`'s untyped conflict. `clara.retry_accounting_work`
+-- (0178) already carried a third copy of the same shape without the typed re-raise. Writing it once
+-- means the bookkeeper floor is ONE line to change when the rule changes, rather than three places
+-- to remember.
+--
+-- The two message words that differ ride in as parameters, so every refusal this helper raises is
+-- byte-identical to the one its caller used to raise itself: `p_noun` is 'cancel' / 'takeover' and
+-- `p_gerund` is 'cancelling' / 'taking responsibility for'.
+--
+-- IT TAKES NO LOCK. The boundary belongs to the caller, which takes `clara.accounting_work FOR
+-- UPDATE` immediately after this returns -- the lane's global order is not something a preamble
+-- gets to decide.
+create function clara._work_door_ctx(p_work uuid, p_author uuid, p_op_key text,
+    p_door text, p_noun text, p_gerund text) returns jsonb
+  language plpgsql security definer set search_path = clara, pg_temp as $$
+declare v_firm uuid; v_role text; v_member_status text; v_dedupe jsonb;
+begin
+  if p_op_key is null or p_op_key ~ '^\s*$' then
+    raise exception 'a % requires its idempotency key', p_noun using errcode='CLR10',
+      detail='{"reason":"invalid_op_key","constraint":"nonempty"}';
+  end if;
+  select aw.firm_id into v_firm from clara.accounting_work aw where aw.id = p_work;
+  if v_firm is null then
+    raise exception 'accounting work not found in your firm' using errcode='CLR11',
+      detail='{"reason":"work_not_found"}';
+  end if;
+  -- NO EXISTENCE ORACLE: a non-member and an absent Work answer identically.
+  select m.role, m.status into v_role, v_member_status from clara.firm_memberships m
+   where m.user_id = p_author and m.firm_id = v_firm
+   order by (m.status = 'active') desc, m.created_at desc limit 1;
+  if v_role is null then
+    raise exception 'accounting work not found in your firm' using errcode='CLR11',
+      detail='{"reason":"work_not_found"}';
+  end if;
+  if v_member_status <> 'active' then
+    raise exception 'the author is not an active member of this firm' using errcode='CLR04',
+      detail='{"reason":"actor_not_active"}';
+  end if;
+  if clara.role_rank(v_role) < clara.role_rank('bookkeeper') then
+    raise exception '% accounting work requires a bookkeeper or above', p_gerund
+      using errcode='CLR04', detail='{"reason":"insufficient_role"}';
+  end if;
+
+  begin
+    v_dedupe := clara._reserve_op(v_firm, p_door, p_op_key,
+      clara._hash(jsonb_build_object('work', p_work, 'author', p_author)));
+  exception when sqlstate 'CLR10' then
+    -- `_reserve_op`'s own untyped "op_key reused with different args", re-raised WITH a detail so
+    -- every refusal these doors emit carries (errcode, detail.reason) -- the answer_work_question
+    -- precedent (0180).
+    raise exception 'this op key was already used for a different %', p_noun using errcode='CLR10',
+      detail='{"reason":"op_key_conflict"}';
+  end;
+  if v_dedupe is not null and v_dedupe ? 'pending' then
+    raise exception 'this % key is held by an in-flight sibling', p_noun using errcode='CLR13',
+      detail='{"reason":"operation_in_flight"}';
+  end if;
+  return jsonb_build_object('firm', v_firm, 'role', v_role)
+       || case when v_dedupe is null then '{}'::jsonb
+               else jsonb_build_object('dedupe', v_dedupe) end;
+end $$;
+revoke all on function clara._work_door_ctx(uuid,uuid,text,text,text,text) from public;
+comment on function clara._work_door_ctx(uuid,uuid,text,text,text,text) is
+  '#630: the shared preamble of the Work-lane human doors -- no existence oracle, an ACTIVE '
+  'bookkeeper+ re-read at the door, and a typed op-key reservation. Takes no lock: the ordering '
+  'boundary is the caller''s to take.';
+
+-- (3) THE STRANDED-WORK BELT. A TERMINAL RUN UNDER A NON-TERMINAL WORK IS A BROKEN PAIR.
+--
+-- MEASURED, not hypothetical: `clara.cancel_agent_task` (0133) terminalises a QUEUED
+-- accounting_work task itself and knows nothing about `clara.accounting_work`, so before this file
+-- the pair (Work `queued`, task `cancelled`) was reachable from the /activity panel in one click
+-- -- and the Work was then uncancellable (the cancel door's live-run arm asks for a transition
+-- `clara._tf_agent_task_update` refuses), unretryable (`clara.retry_accounting_work` wants a
+-- terminal Work) and unreconciled (the sweep looks at `queued`/`running`/`awaiting_input` tasks).
+-- A Work with no way out is the worst answer the estate can give.
+--
+-- Three belts close it and this is the one the other two share: the mirror converges at the source
+-- (§B), the cancel door converges before it decides (§G), the runtime's reconciler converges what it
+-- finds (reconciler-work.mjs §C), and all three land here so the RECEIPT LAW is stated once.
+-- Returns the Work status it wrote, or null when there was nothing to converge.
+create function clara._converge_work_terminal(p_work uuid, p_task_status text) returns text
+  language plpgsql security definer set search_path = clara, pg_temp as $$
+declare v_receipt jsonb; v_status text; v_current text; v_task uuid;
+begin
+  select w.status, w.current_task_id into v_current, v_task
+    from clara.accounting_work w where w.id = p_work for update;
+  if v_current is null then return null; end if;
+  if v_current in ('completed','refused','failed','cancelled','expired') then return null; end if;
+  if p_task_status is null or p_task_status not in ('completed','failed','cancelled','expired') then
+    return null;
+  end if;
+  -- THE BOOKS FIRST, ALWAYS. A Work that recorded an effect is `completed` whatever its run's
+  -- terminal says (0178's law, and ARCHITECTURE §6's "取消不冲销已入账结果").
+  v_receipt := clara._work_committed_receipt(p_work);
+  if v_receipt is not null then
+    update clara.accounting_work
+       set status = 'completed', error = null,
+           result = coalesce(result, '{}'::jsonb) || v_receipt
+     where id = p_work;
+    v_status := 'completed';
+  else
+    v_status := case p_task_status when 'completed' then 'completed'
+                                   when 'expired'   then 'expired'
+                                   when 'cancelled' then 'cancelled'
+                                   else 'failed' end;
+    update clara.accounting_work
+       set status = v_status,
+           error = case
+             when v_status = 'completed' then null
+             when v_status = 'cancelled' then clara._work_cancelled_error()
+             else jsonb_build_object('code','engine_lost','reason','run_ended_without_settling',
+                    'message','This Work''s run ended without settling. Nothing was posted.',
+                    'recoverable', true) end
+     where id = p_work;
+  end if;
+  -- THE PENDING QUESTION DIES WITH THE RUN (S4-D6), exactly as clara.settle_work_run does it.
+  if v_task is not null then
+    update clara.agent_interruptions set status = 'cancelled'
+     where task_id = v_task and status = 'pending';
+  end if;
+  perform clara._audit((select w.firm_id from clara.accounting_work w where w.id = p_work),
+    clara.agent_user_id(), null, null, 'converge_work_terminal', null,
+    jsonb_build_object('work', p_work, 'task', v_task, 'task_status', p_task_status,
+      'from_status', v_current, 'status', v_status,
+      'by_receipt', (v_receipt is not null)));
+  return v_status;
+end $$;
+revoke all on function clara._converge_work_terminal(uuid,text) from public;
+comment on function clara._converge_work_terminal(uuid,text) is
+  '#630: converge a NON-terminal Work whose run has already ended. Receipt first (completed), then '
+  'the run''s own terminal. The one place the receipt law is written for the stranded-pair belts in '
+  'the mirror, the cancel door and the runtime reconciler.';
 
 -- =====================================================================================
 -- §A  WHO THE WORK RUNS AS, AND WHO ASKED FOR IT — two facts that were one column.
@@ -293,7 +491,22 @@ begin
   -- with NO receipt still falls through to settle_work_run untouched.
   if new.status not in ('completed','failed','cancelled','expired') then return null; end if;
   v_receipt := clara._work_committed_receipt(new.work_id);
-  if v_receipt is null then return null; end if;
+  if v_receipt is null then
+    -- #630 · AND THE OTHER HALF OF THE SAME SENTENCE: a run CANCELLED with nothing on the books
+    -- terminalises its Work too. This is the same `clara.cancel_agent_task` path, one click from
+    -- the /activity panel, in the case where no entry was posted: before this arm the task read
+    -- `cancelled` and the Work stayed `queued` FOREVER -- uncancellable (the Work door's live-run
+    -- arm asks for a transition the task matrix refuses), unretryable (Retry wants a terminal
+    -- Work) and unreconciled. The word the Work reaches is the run's own, and the error is the
+    -- lane's single source of truth for it.
+    if new.status = 'cancelled' then
+      update clara.accounting_work w
+         set status = 'cancelled', error = clara._work_cancelled_error()
+       where w.id = new.work_id
+         and w.status not in ('completed','refused','failed','cancelled','expired');
+    end if;
+    return null;
+  end if;
   update clara.accounting_work w
      set status = 'completed', error = null,
          result = coalesce(w.result, '{}'::jsonb) || v_receipt
@@ -385,6 +598,7 @@ declare
   t record; v_task_status text; v_err text; v_work_status text;
   v_receipt jsonb; v_outcome text; v_overridden text;
   v_translated text; v_error_out jsonb;          -- #630
+  v_converged text;                              -- #630
 begin
   if p_outcome is null or p_outcome not in ('completed','refused','failed','cancelled','expired') then
     raise exception 'unknown settle outcome %', p_outcome using errcode='CLR10',
@@ -419,11 +633,18 @@ begin
   select * into t from clara.agent_tasks at where at.id = p_task;
 
   if t.status in ('completed','failed','cancelled','expired') then
+    -- #630 · A REPLAY IS STILL ALLOWED TO REPAIR A BROKEN PAIR. The run is over, so nothing about
+    -- it is settled again -- but a NON-terminal Work under a terminal run is the stranded state
+    -- `clara.cancel_agent_task` can produce in one click, and the estate must not answer "already
+    -- settled" about a Work that is still showing `queued` to a human. Converges by the receipt
+    -- law; a Work that is already terminal is untouched and `converged` reads null.
+    v_converged := clara._converge_work_terminal(t.work_id, t.status);
     return jsonb_build_object('work_id', t.work_id, 'task_id', p_task,
       'task_status', t.status,
       'status', (select w.status from clara.accounting_work w where w.id = t.work_id),
       'requested_outcome', p_outcome, 'overridden_by_receipt', false,
       'translated_by_cancel', false,
+      'converged', v_converged,
       'replayed', true);
   end if;
 
@@ -653,9 +874,21 @@ begin
   -- on_behalf_of stopped being an active bookkeeper+, so in the deployed lane that door answers
   -- first; these two arms are the belt behind it, and they are what makes this core safe for any
   -- future caller whose credential resolution is looser.)
+  --
+  -- #630 · AND THE READ IS SERIALISED WITH REVOCATION, not merely fresh. `for share` on the
+  -- membership row is the second half of the boundary this file is about: without it a revocation
+  -- can commit in the window between this SELECT and the INSERT below, and the entry posts under an
+  -- authority that no longer existed when the books moved -- which is exactly what C79.2
+  -- ("revocation wins before a later commit") forbids. The estate's revocation writers all UPDATE
+  -- this row (`clara.remove_member` / `clara.set_member_role`, 0157:331/405), and an UPDATE
+  -- conflicts with FOR SHARE, so the two orders are now decided rather than raced: a revocation
+  -- that arrives first makes this read see it, and one that arrives second waits for this
+  -- transaction and then applies to a world where the entry is already posted (and cannot erase
+  -- it -- spec §5).
   select m.role, m.status into v_role, v_member_status from clara.firm_memberships m
    where m.user_id = p_obo and m.firm_id = p_firm
-   order by (m.status = 'active') desc, m.created_at desc limit 1;
+   order by (m.status = 'active') desc, m.created_at desc limit 1
+   for share;
   if v_role is null or v_member_status <> 'active' then
     raise exception 'the initiating member is no longer active in this firm' using errcode='CLR04',
       detail='{"reason":"obo_not_active"}';
@@ -900,56 +1133,18 @@ revoke all on function clara._record_journal_entry_core(uuid,uuid,text,uuid,uuid
 create function clara.cancel_accounting_work(p_work uuid, p_author uuid, p_op_key text) returns jsonb
   language plpgsql security definer set search_path = clara, pg_temp as $$
 declare
-  w record; v_role text; v_member_status text; v_dedupe jsonb;
+  w record; v_ctx jsonb;
   v_receipt jsonb; v_result jsonb; v_cancelled_at timestamptz;
   -- The current run is held in SCALARS rather than a record: `w.current_task_id` is nullable
   -- (nothing in the schema requires a Work to have a run), and an unassigned plpgsql record raises
   -- on its first field reference instead of reading NULL.
   v_task uuid; v_task_status text; v_task_cancelled_by uuid; v_task_cancelled_at timestamptz;
 begin
-  if p_op_key is null or p_op_key ~ '^\s*$' then
-    raise exception 'a cancel requires its idempotency key' using errcode='CLR10',
-      detail='{"reason":"invalid_op_key","constraint":"nonempty"}';
-  end if;
-  select * into w from clara.accounting_work aw where aw.id = p_work;
-  if not found then
-    raise exception 'accounting work not found in your firm' using errcode='CLR11',
-      detail='{"reason":"work_not_found"}';
-  end if;
-  -- NO EXISTENCE ORACLE: a non-member and an absent Work answer identically.
-  select m.role, m.status into v_role, v_member_status from clara.firm_memberships m
-   where m.user_id = p_author and m.firm_id = w.firm_id
-   order by (m.status = 'active') desc, m.created_at desc limit 1;
-  if v_role is null then
-    raise exception 'accounting work not found in your firm' using errcode='CLR11',
-      detail='{"reason":"work_not_found"}';
-  end if;
-  if v_member_status <> 'active' then
-    raise exception 'the author is not an active member of this firm' using errcode='CLR04',
-      detail='{"reason":"actor_not_active"}';
-  end if;
-  if clara.role_rank(v_role) < clara.role_rank('bookkeeper') then
-    raise exception 'cancelling accounting work requires a bookkeeper or above'
-      using errcode='CLR04', detail='{"reason":"insufficient_role"}';
-  end if;
-
-  begin
-    v_dedupe := clara._reserve_op(w.firm_id, 'cancel_accounting_work', p_op_key,
-      clara._hash(jsonb_build_object('work', p_work, 'author', p_author)));
-  exception when sqlstate 'CLR10' then
-    -- `_reserve_op`'s own untyped "op_key reused with different args", re-raised WITH a detail so
-    -- every refusal this door emits carries (errcode, detail.reason) — the answer_work_question
-    -- precedent (0180).
-    raise exception 'this op key was already used for a different cancel' using errcode='CLR10',
-      detail='{"reason":"op_key_conflict"}';
-  end;
-  if v_dedupe is not null then
-    if v_dedupe ? 'pending' then
-      raise exception 'this cancel key is held by an in-flight sibling' using errcode='CLR13',
-        detail='{"reason":"operation_in_flight"}';
-    end if;
-    return v_dedupe || '{"replayed":true}'::jsonb;
-  end if;
+  -- THE SHARED PREAMBLE (§A0): no existence oracle, an ACTIVE bookkeeper+ re-read at the door, and
+  -- the typed op-key reservation. It takes NO lock -- the boundary below is this door's to take.
+  v_ctx := clara._work_door_ctx(p_work, p_author, p_op_key,
+    'cancel_accounting_work', 'cancel', 'cancelling');
+  if v_ctx ? 'dedupe' then return (v_ctx->'dedupe') || '{"replayed":true}'::jsonb; end if;
 
   -- THE BOUNDARY. accounting_work -> agent_tasks -> agent_interruptions, in that order, and the
   -- FIRST lock is the same row clara._record_journal_entry_core takes. Everything below reads a
@@ -959,6 +1154,17 @@ begin
     select at.id, at.status, at.cancelled_by, at.cancelled_at
       into v_task, v_task_status, v_task_cancelled_by, v_task_cancelled_at
       from clara.agent_tasks at where at.id = w.current_task_id for update;
+  end if;
+
+  -- 0 · THE RUN IS ALREADY OVER AND THE WORK NEVER HEARD. Reached whenever something other than
+  -- clara.settle_work_run terminalised the run -- `clara.cancel_agent_task` from the /activity
+  -- panel is the measured one. Converge by the receipt law FIRST, then answer about the Work that
+  -- actually exists: the human asked for a terminal and a terminal is what they get, under the
+  -- SAME `already_terminal` word arm 1 already speaks, so no surface needs new vocabulary.
+  if v_task is not null and v_task_status in ('completed','failed','cancelled','expired')
+     and w.status not in ('completed','refused','failed','cancelled','expired') then
+    perform clara._converge_work_terminal(p_work, v_task_status);
+    select * into w from clara.accounting_work aw where aw.id = p_work;
   end if;
 
   -- 1 · ALREADY TERMINAL. A double cancel is not an error: the human's intent is already true.
@@ -974,6 +1180,17 @@ begin
   v_receipt := clara._work_committed_receipt(p_work);
   if v_receipt is not null then
     if v_task is not null and v_task_status not in ('completed','failed','cancelled','expired') then
+      -- #630 · THE ENGINE IS STILL ASKED TO STOP. The WORK is completed by its receipt and will
+      -- never read `cancelled` -- but the RUN is a separate, live thing that keeps taking turns
+      -- (and spending) until it finishes on its own. A human who pressed "Cancel Work" one second
+      -- after the commit was told nothing new would start, and that has to be true of the model
+      -- too. So the abort request is written and the world is notified BEFORE the settle: the
+      -- runtime's cancel sweep aborts the engine run, and clara.settle_work_run's receipt override
+      -- then answers `completed` whatever the aborted run asks for.
+      update clara.agent_tasks set status = 'cancel_requested', cancelled_by = p_author,
+             cancelled_at = now(), updated_at = now()
+       where id = v_task and status in ('running','awaiting_input');
+      perform pg_notify('clara_runtime_ctl', '');   -- empty payload (N1)
       perform clara.settle_work_run(v_task, 'completed', null, null, v_receipt);
     end if;
     perform clara._audit(w.firm_id, p_author, null, null, 'cancel_accounting_work', null,
@@ -1022,6 +1239,17 @@ begin
                'recoverable', true)
        where id = p_work;
     end if;
+  elsif v_task_status in ('completed','failed','cancelled','expired') then
+    -- 5a · THE BELT BEHIND ARM 0. If a terminal run is still paired with a non-terminal Work at
+    -- this point, the convergence above could not write (a Work whose status the estate does not
+    -- know how to derive). Refuse in this lane's OWN vocabulary rather than letting
+    -- `clara._tf_agent_task_update`'s untyped "illegal transition" out of a door whose every other
+    -- refusal is typed -- a codeless 409 is a dead end for the surface.
+    raise exception 'this work''s run has already ended (%) -- it cannot be asked to stop',
+      v_task_status
+      using errcode='CLR13',
+        detail=jsonb_build_object('reason','run_already_terminal','status',w.status,
+          'task_status',v_task_status)::text;
   else
     -- 5 · A LIVE ENGINE RUN. The cancel is a REQUEST: the runtime aborts the run and then settles
     -- it (clara.settle_work_run translates whatever it asks for). The Work reads `stopping`
@@ -1072,65 +1300,35 @@ create function clara.take_over_accounting_work(p_work uuid, p_author uuid, p_op
     p_basis_digest text) returns jsonb
   language plpgsql security definer set search_path = clara, pg_temp as $$
 declare
-  w record; v_role text; v_member_status text; v_dedupe jsonb;
+  w record; v_ctx jsonb;
   v_resp_role text; v_resp_status text; v_resp_authorised boolean;
   v_live text; v_retry jsonb; v_previous uuid; v_result jsonb;
 begin
-  if p_op_key is null or p_op_key ~ '^\s*$' then
-    raise exception 'a takeover requires its idempotency key' using errcode='CLR10',
-      detail='{"reason":"invalid_op_key","constraint":"nonempty"}';
-  end if;
-  select * into w from clara.accounting_work aw where aw.id = p_work;
-  if not found then
-    raise exception 'accounting work not found in your firm' using errcode='CLR11',
-      detail='{"reason":"work_not_found"}';
-  end if;
-  select m.role, m.status into v_role, v_member_status from clara.firm_memberships m
-   where m.user_id = p_author and m.firm_id = w.firm_id
-   order by (m.status = 'active') desc, m.created_at desc limit 1;
-  if v_role is null then
-    raise exception 'accounting work not found in your firm' using errcode='CLR11',
-      detail='{"reason":"work_not_found"}';
-  end if;
-  if v_member_status <> 'active' then
-    raise exception 'the author is not an active member of this firm' using errcode='CLR04',
-      detail='{"reason":"actor_not_active"}';
-  end if;
-  if clara.role_rank(v_role) < clara.role_rank('bookkeeper') then
-    raise exception 'taking responsibility for accounting work requires a bookkeeper or above'
-      using errcode='CLR04', detail='{"reason":"insufficient_role"}';
-  end if;
-
-  begin
-    v_dedupe := clara._reserve_op(w.firm_id, 'take_over_accounting_work', p_op_key,
-      clara._hash(jsonb_build_object('work', p_work, 'author', p_author)));
-  exception when sqlstate 'CLR10' then
-    raise exception 'this op key was already used for a different takeover' using errcode='CLR10',
-      detail='{"reason":"op_key_conflict"}';
-  end;
-  if v_dedupe is not null then
-    if v_dedupe ? 'pending' then
-      raise exception 'this takeover key is held by an in-flight sibling' using errcode='CLR13',
-        detail='{"reason":"operation_in_flight"}';
-    end if;
-    return v_dedupe || '{"replayed":true}'::jsonb;
-  end if;
+  -- THE SHARED PREAMBLE (§A0) -- the same one clara.cancel_accounting_work opens with, so the
+  -- bookkeeper floor of this lane is ONE line to change rather than three to remember.
+  v_ctx := clara._work_door_ctx(p_work, p_author, p_op_key,
+    'take_over_accounting_work', 'takeover', 'taking responsibility for');
+  if v_ctx ? 'dedupe' then return (v_ctx->'dedupe') || '{"replayed":true}'::jsonb; end if;
 
   -- THE BOUNDARY, same first lock as every other writer in this lane.
   select * into w from clara.accounting_work aw where aw.id = p_work for update;
   v_previous := w.initiator;
 
-  -- IS IT TAKEABLE? Terminal AND orphaned. "Orphaned" is re-read NOW rather than taken from the
-  -- stored error: a Work refused `authority_lost` whose human has since been reinstated is theirs
-  -- again, and a Work that failed for another reason is still takeable once its human is gone.
+  -- IS IT TAKEABLE? Terminal AND orphaned, and ORPHANED IS A FACT ABOUT THE WORLD NOW -- never a
+  -- fact about the stored error. A Work refused `authority_lost` whose human has since been
+  -- reinstated is THEIRS AGAIN: their Retry works, and a colleague seizing it would move the
+  -- authority a posted entry is committed under away from the person who asked for it. A Work that
+  -- failed for any other reason is takeable the moment its responsible human is gone.
+  --
+  -- The predicate is therefore ONE live re-read and nothing else. (The earlier cut also admitted a
+  -- stored `authority_lost`, which -- because `or` binds looser than `and` -- made the live re-read
+  -- decide nothing in exactly the case the UI offers the button on.)
   select m.role, m.status into v_resp_role, v_resp_status from clara.firm_memberships m
    where m.user_id = w.initiator and m.firm_id = w.firm_id
    order by (m.status = 'active') desc, m.created_at desc limit 1;
   v_resp_authorised := coalesce(v_resp_status = 'active'
     and clara.role_rank(v_resp_role) >= clara.role_rank('bookkeeper'), false);
-  if w.status not in ('refused','failed','expired')
-     or (v_resp_authorised
-         and coalesce(w.error->>'reason','') is distinct from 'authority_lost') then
+  if w.status not in ('refused','failed','expired') or v_resp_authorised then
     raise exception 'this accounting work is not available to take over'
       using errcode='CLR13',
         detail=jsonb_build_object('reason','not_takeable', 'status', w.status,
@@ -1185,6 +1383,370 @@ comment on function clara.take_over_accounting_work(uuid,uuid,text,text) is
   'deploy-locked claraWork closure mints every credential on behalf of — while `initiated_by` keeps '
   'the immutable record of who asked; records a work.taken_over timeline event; and creates the new '
   'run through clara.retry_accounting_work so there is ONE code path for run creation.';
+
+-- =====================================================================================
+-- §H2  THREE OLDER DOORS, RECUT. The lock order is made global, the credential mint TYPES its
+-- authority refusal, and clara.list_entry_links stops pairing one person's id with another's rank.
+--
+-- An earlier cut of this file left `clara.cancel_agent_task` (0133) and `clara.open_work_question`
+-- (0180) taking the TASK row first and reaching `clara.accounting_work` afterwards -- the inverse
+-- of this lane's boundary -- and named the resulting deadlock as a transient both callers would
+-- absorb. MEASURED, and it does not hold: a human's /activity cancel racing a Work-level cancel
+-- (or a run parking on a question exactly as a human cancels) raises 40P01, and nothing on the
+-- route or in the web retries it -- the human gets a raw 500 and nothing happened.
+--
+-- So both doors are recut here, with their full bodies, to take the Work row FIRST when the task
+-- is an `accounting_work` one. Nothing else about either door changes, and neither becomes
+-- dependent on a relation that might be absent: `clara.accounting_work` exists from 0178, and both
+-- recuts are guarded on the task's own kind, so every other kind takes exactly the path it took
+-- before. (The route also maps 40P01/40001 to a typed transient conflict now -- defence in depth,
+-- not the fix.)
+-- =====================================================================================
+set role clara_fn_owner;
+
+-- ------------------------------------------------------------------------------------
+-- clara.cancel_agent_task -- RECUT. Full 0133 body; the addition is the pre-lock.
+-- ------------------------------------------------------------------------------------
+create or replace function clara.cancel_agent_task(p_task uuid, p_op_key text) returns jsonb
+  language plpgsql security definer set search_path = clara, pg_temp as $$
+declare c record; v_dedupe jsonb; t record; v_new_status text;
+        v_kind text; v_work uuid;                                   -- #630
+begin
+  c := clara._human_ctx(clara.role_rank('bookkeeper'));
+  if p_op_key is null or btrim(p_op_key) = '' then raise exception 'op_key is required' using errcode = 'CLR10'; end if;
+  v_dedupe := clara._reserve_op(c.firm, 'cancel_agent_task', p_op_key, clara._hash(jsonb_build_object('t', p_task)));
+  if v_dedupe is not null then return v_dedupe; end if;
+
+  -- #630 · THE ACCOUNTING-WORK BOUNDARY, TAKEN FIRST. A LOCK-FREE pre-read of two IMMUTABLE task
+  -- columns (`kind` and `work_id` are set at insert and never move), then the Work row, and only
+  -- then the task -- the lane's global order, accounting_work -> agent_tasks -> agent_interruptions.
+  -- Every other task kind is untouched and takes the task row first exactly as before.
+  select at.kind, at.work_id into v_kind, v_work from clara.agent_tasks at where at.id = p_task;
+  if v_kind = 'accounting_work' and v_work is not null then
+    perform 1 from clara.accounting_work w where w.id = v_work for update;
+  end if;
+
+  -- Lock the task, then its interruptions (a single global lock order).
+  select * into t from clara.agent_tasks where id = p_task for update;
+  if not found or t.firm_id <> c.firm then raise exception 'task not in your firm' using errcode = 'CLR11'; end if;
+
+  if t.status in ('completed','failed','cancelled','expired') then
+    return clara._finish_op(c.firm, 'cancel_agent_task', p_op_key,
+      jsonb_build_object('task_id', p_task, 'status', t.status));      -- idempotent: already terminal
+  end if;
+  if t.status = 'cancel_requested' then
+    return clara._finish_op(c.firm, 'cancel_agent_task', p_op_key,
+      jsonb_build_object('task_id', p_task, 'status', 'cancel_requested'));  -- already requested
+  end if;
+
+  -- Cascades (S4-D6): pending interruptions → cancelled; a held wake task's outbox → cancelled.
+  update clara.agent_interruptions set status = 'cancelled' where task_id = p_task and status = 'pending';
+  -- MUST A: the outbox cascade is guarded on t.status = 'held' TOO -- a RUNNING wake task's cancel
+  -- is only a REQUEST (v_new_status below), never a terminal settle, so its outbox twin must stay
+  -- 'held' until the real settlement path (clara._settle_wake_task) says otherwise.
+  if t.kind = 'wake' and t.origin_intent_id is not null and t.status = 'held' then
+    update clara.wakes_outbox set status = 'cancelled' where intent_id = t.origin_intent_id and status = 'held';
+  end if;
+
+  if t.status in ('running','awaiting_input') then
+    v_new_status := 'cancel_requested';                               -- engine still active; runtime aborts + settles
+  else
+    v_new_status := 'cancelled';                                      -- queued/held: no engine run -- terminal settle
+  end if;
+  update clara.agent_tasks
+     set status = v_new_status, cancelled_by = c.actor, cancelled_at = now(), updated_at = now()
+   where id = p_task;
+
+  perform clara._audit(c.firm, c.actor, null, null, 'cancel_agent_task', null,
+    jsonb_build_object('task', p_task, 'op_key', p_op_key));
+  perform pg_notify('clara_runtime_ctl', '');                         -- empty payload
+  return clara._finish_op(c.firm, 'cancel_agent_task', p_op_key,
+    jsonb_build_object('task_id', p_task, 'status', v_new_status));
+end $$;
+revoke all on function clara.cancel_agent_task(uuid, text) from public;
+grant execute on function clara.cancel_agent_task(uuid, text) to clara_authenticated;
+
+-- ------------------------------------------------------------------------------------
+-- clara.open_work_question -- RECUT. Full 0180 body; the Work lock MOVES ahead of the task
+-- transition, and the second (now redundant) lock becomes a plain re-read under it.
+-- ------------------------------------------------------------------------------------
+create or replace function clara.open_work_question(p_task uuid, p_hook_token text, p_question jsonb,
+    p_fields jsonb, p_reason text default null, p_source_ref jsonb default null) returns jsonb
+  language plpgsql security definer set search_path = clara, pg_temp as $$
+declare
+  v_id uuid; v_task uuid; v_upd int; t record; w record; v_version int; v_expires timestamptz;
+  v_constraint text;
+begin
+  if p_hook_token is null or p_hook_token ~ '^\s*$' then
+    raise exception 'a hook_token is required' using errcode='CLR10',
+      detail='{"reason":"invalid_hook_token"}';
+  end if;
+  perform clara._assert_work_question_fields(p_fields);
+
+  -- (1) IDEMPOTENT replay on the globally-unique hook token.
+  select id, task_id into v_id, v_task from clara.agent_interruptions where hook_token = p_hook_token;
+  if v_id is not null then
+    if v_task <> p_task then
+      raise exception 'hook_token is already bound to a different task' using errcode='CLR13',
+        detail='{"reason":"hook_token_bound"}';
+    end if;
+    select id, work_id, question_version, expires_at into v_id, v_task, v_version, v_expires
+      from clara.agent_interruptions where id = v_id;
+    return jsonb_build_object('question_id', v_id, 'work_id', v_task,
+      'question_version', v_version, 'expires_at', v_expires, 'replayed', true);
+  end if;
+
+  select at.id, at.kind, at.status, at.work_id into t
+    from clara.agent_tasks at where at.id = p_task;
+  if t.id is null then
+    raise exception 'task not found' using errcode='CLR11', detail='{"reason":"task_not_found"}';
+  end if;
+  if t.kind <> 'accounting_work' then
+    raise exception 'open_work_question is for accounting-work runs only (got kind %)', t.kind
+      using errcode='CLR10', detail=jsonb_build_object('reason','wrong_task_kind','kind',t.kind)::text;
+  end if;
+  if t.work_id is null then
+    raise exception 'this accounting-work task is bound to no Work' using errcode='CLR10',
+      detail='{"reason":"work_unbound"}';
+  end if;
+  select aw.id, aw.client_id, aw.basis_digest into w
+    from clara.accounting_work aw where aw.id = t.work_id;
+
+  -- (2) #630 · SERIALISE ON THE WORK **BEFORE** THE TASK IS TOUCHED. 0180 took this lock AFTER
+  -- the task transition, on the reasoning that the transition had already touched the Work through
+  -- the status mirror -- true, and it is the wrong order: `clara.cancel_accounting_work` takes the
+  -- Work first and the task second, so a park racing a cancel of the same Work was an ABBA cycle
+  -- that PostgreSQL broke with 40P01. The lane's order is accounting_work -> agent_tasks
+  -- -> agent_interruptions and this door now takes it that way, with no other change: everything
+  -- below still reads a snapshot taken AFTER any competing open committed.
+  perform 1 from clara.accounting_work where id = w.id for no key update;
+
+  -- (3) Linearisation: a DIFFERENT pending question already blocks this task, or another task of
+  --     the SAME Work is already parked on one. Both raise the same typed refusal because they are
+  --     the same fact to the caller: this Work is already waiting.
+  if exists (select 1 from clara.agent_interruptions
+              where status = 'pending' and (task_id = p_task or work_id = w.id)) then
+    raise exception 'a question is already pending for task % (work %)', p_task, w.id
+      using errcode='CLR13', detail='{"reason":"question_already_pending"}';
+  end if;
+
+  -- (4) Conditional transition; zero rows ⇒ not running ⇒ CLR13 and NO insert.
+  update clara.agent_tasks set status = 'awaiting_input', updated_at = now()
+    where id = p_task and status = 'running';
+  get diagnostics v_upd = row_count;
+  if v_upd = 0 then
+    select id into v_id from clara.agent_interruptions where hook_token = p_hook_token and task_id = p_task;
+    if v_id is not null then
+      select id, work_id, question_version, expires_at into v_id, v_task, v_version, v_expires
+        from clara.agent_interruptions where id = v_id;
+      return jsonb_build_object('question_id', v_id, 'work_id', v_task,
+        'question_version', v_version, 'expires_at', v_expires, 'replayed', true);
+    end if;
+    raise exception 'cannot open a question: task % is not running', p_task using errcode='CLR13',
+      detail='{"reason":"task_not_running"}';
+  end if;
+
+  -- (5) ASK AGAIN UNDER THE LOCK. Redundant now that the lock is taken in (2) -- kept because it
+  --     costs one index probe and it is what makes the linearisation a property of the DATA rather
+  --     than of the order two statements happen to sit in.
+  if exists (select 1 from clara.agent_interruptions
+              where status = 'pending' and (task_id = p_task or work_id = w.id)) then
+    raise exception 'a question is already pending for work % (raced)', w.id
+      using errcode='CLR13', detail='{"reason":"question_already_pending"}';
+  end if;
+
+  select coalesce(max(question_version), 0) + 1 into v_version
+    from clara.agent_interruptions where work_id = w.id;
+
+  -- (6) THE INSERT, with the unique indexes as the belt behind the lock. A duplicate that reaches
+  --     here anyway is re-raised INSIDE 0180's published roster; a raw 23505 escaping a
+  --     runtime-lane verb would be classified `conflict` by claraWork's router and settle a Work
+  --     `refused` with "that operation identity is already used by a different payload", which is
+  --     not what happened.
+  begin
+    insert into clara.agent_interruptions
+        (task_id, hook_token, question, expires_at, work_id, client_id, question_version,
+         basis_digest, fields, reason, source_ref)
+      values (p_task, p_hook_token, coalesce(p_question, '{}'::jsonb), now() + interval '14 days',
+         w.id, w.client_id, v_version, w.basis_digest, p_fields,
+         nullif(btrim(coalesce(p_reason,'')), ''), p_source_ref)
+      returning id, expires_at into v_id, v_expires;
+  exception when unique_violation then
+    get stacked diagnostics v_constraint = constraint_name;
+    if v_constraint = 'agent_interruptions_hook_token_key' then
+      raise exception 'hook_token is already bound to a different task' using errcode='CLR13',
+        detail='{"reason":"hook_token_bound"}';
+    end if;
+    raise exception 'a question is already pending for work % (index %)', w.id, coalesce(v_constraint,'?')
+      using errcode='CLR13', detail='{"reason":"question_already_pending"}';
+  end;
+
+  return jsonb_build_object('question_id', v_id, 'work_id', w.id,
+    'question_version', v_version, 'expires_at', v_expires, 'replayed', false);
+end $$;
+revoke all on function clara.open_work_question(uuid,text,jsonb,jsonb,text,jsonb) from public;
+grant execute on function clara.open_work_question(uuid,text,jsonb,jsonb,text,jsonb) to clara_runtime;
+
+-- ------------------------------------------------------------------------------------
+-- clara.mint_wake_credential -- RECUT. Full 0133 body; the change is ONE `detail` clause.
+--
+-- MEASURED ON THE RIG, and it is the reason B3 could not offer the right action. When a human's
+-- membership is revoked mid-run, the refusal the Work actually settles on is not the posting core's
+-- typed `obo_not_active` -- it is THIS door's, raised on the run's next tool call, and it carried
+-- NO detail. The frozen roster classifies an unrecognised CLR10 as a refusal (right), so the Work
+-- settled `refused` with `error.reason = null` (wrong): every surface that asks "was this an
+-- authority loss?" got null, `isTakeOverable` said no, and the only action the page could offer was
+-- a Retry that mints the SAME dead credential and dies the same way.
+--
+-- The token is `authority_lost` -- the same word `recheckAuthorityStep` (claraWork.v2) already
+-- settles a resumed run on, so one fact has one name however it is discovered. Nothing else in the
+-- body moves: same signature, same gates, same grants.
+-- ------------------------------------------------------------------------------------
+create or replace function clara.mint_wake_credential(p_wake_kind text, p_firm uuid, p_on_behalf_of uuid DEFAULT NULL::uuid, p_ttl interval DEFAULT '00:15:00'::interval, p_client uuid DEFAULT NULL::uuid)
+ RETURNS TABLE(credential_id uuid, secret text)
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'clara', 'pg_temp'
+AS $function$
+declare v_secret text; v_id uuid;
+begin
+  -- F-A2 (D34/GB-3), F-A3 (Annex D), F-A7 beta (D-12), Gate G1 (ANNEX-B CORRECTION): the EARLY
+  -- kind gate.
+  if p_wake_kind is null or p_wake_kind not in ('interactive','proactive','autodraft','interactive_client','bank_agent','filing','close_prep') then
+    raise exception 'bad wake_kind' using errcode='CLR10';
+  end if;
+  if p_firm is null or not exists(select 1 from clara.firms where id=p_firm) then
+    raise exception 'unknown firm' using errcode='CLR10';
+  end if;
+  -- (No TTL-positivity guard: unpinned; a non-positive TTL mints an already-dead
+  -- credential -- harmless, and the rig's expiry probes rely on it.)
+  if p_on_behalf_of is not null and not exists(
+      select 1 from clara.firm_memberships where user_id=p_on_behalf_of
+        and firm_id=p_firm and status='active'
+        and clara.role_rank(role)>=clara.role_rank('bookkeeper')) then
+    -- #630 -- TYPED. This is an AUTHORITY LOSS and it is now said so, in the one word the lane
+    -- already uses for it.
+    raise exception 'on_behalf_of must be an active bookkeeper+ of the firm'
+      using errcode='CLR10', detail='{"reason":"authority_lost"}';
+  end if;
+  if p_wake_kind='autodraft' then
+    if p_client is null or p_on_behalf_of is not null or not exists(
+        select 1 from clara.clients where id=p_client and firm_id=p_firm and status='active') then
+      raise exception 'autodraft wake requires a firm-congruent active client and no on_behalf_of'
+        using errcode='CLR10';
+    end if;
+  elsif p_wake_kind='interactive_client' then
+    -- The pinned chat kind: a firm-congruent ACTIVE client exactly as autodraft demands, and
+    -- on_behalf_of is KEPT (the generic bookkeeper+ membership check above still governs it).
+    if p_client is null or not exists(
+        select 1 from clara.clients where id=p_client and firm_id=p_firm and status='active') then
+      raise exception 'interactive_client wake requires a firm-congruent active client'
+        using errcode='CLR10';
+    end if;
+  elsif p_wake_kind='bank_agent' then
+    if p_client is null or p_on_behalf_of is not null or not exists(
+        select 1 from clara.clients where id=p_client and firm_id=p_firm and status='active') then
+      raise exception 'bank_agent wake requires a firm-congruent active client and no on_behalf_of'
+        using errcode='CLR10';
+    end if;
+  elsif p_wake_kind='close_prep' then
+    if p_client is null or p_on_behalf_of is not null or not exists(
+        select 1 from clara.clients where id=p_client and firm_id=p_firm and status='active') then
+      raise exception 'close_prep wake requires a firm-congruent active client and no on_behalf_of'
+        using errcode='CLR10';
+    end if;
+  elsif p_wake_kind='filing' then
+    if p_client is not null then
+      raise exception 'filing wake requires no client binding (attribution has no client yet)'
+        using errcode='CLR10';
+    end if;
+  elsif p_client is not null then
+    raise exception 'legacy wake kinds do not accept a client binding' using errcode='CLR10';
+  end if;
+  v_secret:=gen_random_uuid()::text||gen_random_uuid()::text;
+  insert into clara.wake_credentials(wake_kind,firm_id,on_behalf_of,client_id,
+      secret_hash,expires_at)
+    values(p_wake_kind,p_firm,p_on_behalf_of,p_client,
+      sha256(convert_to(v_secret,'UTF8')),statement_timestamp()+p_ttl)
+    returning id into v_id;
+  return query select v_id,v_secret;
+end $function$;
+revoke all on function clara.mint_wake_credential(text,uuid,uuid,interval,uuid) from public;
+grant execute on function clara.mint_wake_credential(text,uuid,uuid,interval,uuid) to clara_runtime;
+
+-- ------------------------------------------------------------------------------------
+-- clara.list_entry_links -- RECUT. Full 0182 body; the change is the PROVENANCE PAIR.
+--
+-- 0182 emitted `('initiator', aw.initiator)` beside `('initiator_role', aw.initiator_role)` as one
+-- fact. Section A split that column into two: `initiator` is now the human the Work is EXECUTED AS
+-- and moves on a takeover, while `initiator_role` stayed the ADMISSION snapshot -- so after a
+-- handover the old pair reports one person's id beside another person's rank, on the estate's own
+-- journal-provenance door. Three fields, each true on its own: who asked (`initiated_by`), at what
+-- rank they asked (`initiated_by_role`), and who is answerable now (`responsible`).
+-- ------------------------------------------------------------------------------------
+create or replace function clara.list_entry_links(p_client uuid, p_entries uuid[]) returns jsonb
+  language plpgsql stable security definer set search_path = clara, pg_temp as $$
+declare c record; v_firm uuid; v_n int;
+begin
+  c := clara._human_ctx(clara.role_rank('bookkeeper'));
+  select cl.firm_id into v_firm from clara.clients cl where cl.id = p_client;
+  if v_firm is null or v_firm <> c.firm then
+    raise exception 'client not found in your firm' using errcode='CLR11',
+      detail='{"reason":"client_not_found"}';
+  end if;
+  v_n := coalesce(array_length(p_entries, 1), 0);
+  if v_n > 500 then
+    raise exception 'too many entries in one links read (% > 500)', v_n using errcode='CLR10',
+      detail=jsonb_build_object('reason','too_many_entries','limit',500)::text;
+  end if;
+  if v_n = 0 then return '[]'::jsonb; end if;
+
+  return coalesce((
+    select jsonb_agg(jsonb_build_object(
+        'entry_id',        je.id,
+        'status',          je.status,
+        'origin',          je.origin,
+        'work_id',         coalesce(o.work_id, l.work_id),
+        'receipt_id',      o.id,
+        'logical_op_id',   coalesce(o.logical_op_id, l.logical_op_id),
+        'purpose',         aw.purpose,
+        'basis_origin',    aw.basis_origin,
+        -- #630 -- TWO PEOPLE, TOLD APART (see the note above this function).
+        'initiated_by',      aw.initiated_by,
+        'initiated_by_role', aw.initiator_role,
+        'responsible',       aw.initiator,
+        -- ONE FIELD FOR "the source document", whichever lane bound it, plus the lane itself so
+        -- the surface can say HOW it was bound rather than guessing from a null.
+        'document_id',     coalesce(l.document_id, je.document_id),
+        'document_source', case when l.document_id is not null then l.attached_via
+                                when je.document_id is not null then 'document_coding'
+                                else null end,
+        'attached_at',     l.attached_at,
+        -- #634 (reviewed finding) - WHEN THE BINDING STOPPED BEING THE LIVE ONE, or null. A
+        -- reversed entry keeps reporting the document it was backed by - the chain stays
+        -- inspectable - and this instant is what says the document is now free for the
+        -- correction.
+        'released_at',     l.released_at,
+        'reversal_of',     je.reversal_of,
+        'reversed_by',     je.reversed_by,
+        'reversal_reason', je.reversal_reason)
+      order by je.id)
+      from clara.journal_entries je
+      left join clara.entry_evidence_links l on l.entry_id = je.id
+      left join clara.operation_receipts o
+        on o.effects->>'entry_id' = je.id::text and o.outcome = 'committed'
+      left join clara.accounting_work aw on aw.id = coalesce(o.work_id, l.work_id)
+     where je.client_id = p_client and je.firm_id = c.firm
+       and je.id = any(p_entries)), '[]'::jsonb);
+end $$;
+revoke all on function clara.list_entry_links(uuid,uuid[]) from public;
+grant execute on function clara.list_entry_links(uuid,uuid[]) to clara_authenticated;
+comment on function clara.list_entry_links(uuid, uuid[]) is
+  '#634 C3 journal surface, #630 provenance recut. Per entry: Work, operation receipt, logical '
+  'operation id, purpose, basis origin, who ADMITTED it and at what rank (initiated_by / '
+  'initiated_by_role), who is RESPONSIBLE now, source document (evidence link OR the '
+  'document-coding column, with the lane named and released_at when a reversal freed the binding) '
+  'and the correction chain. Bookkeeper+, firm+client floored, batch cap 500.';
 
 reset role;
 
@@ -1291,6 +1853,70 @@ begin
   if position('initiated_by' in v_src)=0 or position('initiator_authorised' in v_src)=0
      or position('responsible' in v_src)=0 then
     raise exception '#630 tail: the snapshot recut lost initiated_by, responsible or its deploy-locked alias'
+      using errcode='CLR10';
+  end if;
+
+  -- #630 §A0 — the three private helpers exist and are granted to NOBODY.
+  for v_src in select s from unnest(array[
+      'clara._work_cancelled_error()',
+      'clara._work_door_ctx(uuid,uuid,text,text,text,text)',
+      'clara._converge_work_terminal(uuid,text)']) s loop
+    if to_regprocedure(v_src) is null then
+      raise exception '#630 tail: % did not land', v_src using errcode='CLR10';
+    end if;
+    if pg_catalog.has_function_privilege('public', v_src, 'execute')
+       or pg_catalog.has_function_privilege('clara_runtime', v_src, 'execute')
+       or pg_catalog.has_function_privilege('clara_authenticated', v_src, 'execute') then
+      raise exception '#630 tail: private helper % is reachable by a role', v_src using errcode='CLR10';
+    end if;
+  end loop;
+
+  -- #630 §H2 — THE LOCK ORDER IS GLOBAL. Both older doors reach clara.accounting_work BEFORE the
+  -- task row, and each keeps the arm it must not have lost.
+  select p.prosrc into v_src from pg_proc p where p.oid='clara.cancel_agent_task(uuid,text)'::regprocedure;
+  if position('clara.accounting_work' in v_src) = 0 or position('for update' in v_src) = 0 then
+    raise exception '#630 tail: cancel_agent_task does not take the Work row' using errcode='CLR10';
+  end if;
+  if position('clara.accounting_work' in v_src) > position('from clara.agent_tasks where id = p_task for update' in v_src) then
+    raise exception '#630 tail: cancel_agent_task still locks the task before the Work' using errcode='CLR10';
+  end if;
+  if position('wakes_outbox' in v_src) = 0 or position('cancel_requested' in v_src) = 0 then
+    raise exception '#630 tail: the cancel_agent_task recut dropped a 0133 arm' using errcode='CLR10';
+  end if;
+  select p.prosrc into v_src from pg_proc p
+   where p.oid='clara.open_work_question(uuid,text,jsonb,jsonb,text,jsonb)'::regprocedure;
+  if position('for no key update' in v_src) > position('set status = ''awaiting_input''' in v_src) then
+    raise exception '#630 tail: open_work_question still locks the Work after the task transition'
+      using errcode='CLR10';
+  end if;
+  if position('question_already_pending' in v_src) = 0 or position('hook_token_bound' in v_src) = 0 then
+    raise exception '#630 tail: the open_work_question recut dropped a 0180 arm' using errcode='CLR10';
+  end if;
+
+  -- #630 §H2 — the credential mint TYPES its authority refusal, and the C3 provenance door tells
+  -- the two people apart.
+  select p.prosrc into v_src from pg_proc p
+   where p.oid='clara.mint_wake_credential(text,uuid,uuid,interval,uuid)'::regprocedure;
+  if position('authority_lost' in v_src) = 0 or position('interactive_client' in v_src) = 0 then
+    raise exception '#630 tail: the mint recut lost the typed refusal or a wake kind' using errcode='CLR10';
+  end if;
+  select p.prosrc into v_src from pg_proc p where p.oid='clara.list_entry_links(uuid,uuid[])'::regprocedure;
+  if position('initiated_by_role' in v_src) = 0 or position('''responsible''' in v_src) = 0 then
+    raise exception '#630 tail: list_entry_links did not gain the split provenance' using errcode='CLR10';
+  end if;
+  if position('''initiator'',' in v_src) > 0 then
+    raise exception '#630 tail: list_entry_links still emits the desynchronised pair' using errcode='CLR10';
+  end if;
+  if position('released_at' in v_src) = 0 or position('reversal_reason' in v_src) = 0 then
+    raise exception '#630 tail: the list_entry_links recut dropped a 0182 field' using errcode='CLR10';
+  end if;
+
+  -- #630 — the boundary's SECOND half: the membership re-read inside the posting core is
+  -- serialised with revocation, not merely fresh.
+  select p.prosrc into v_src from pg_proc p
+   where p.oid='clara._record_journal_entry_core(uuid,uuid,text,uuid,uuid,text,jsonb,text,text,text)'::regprocedure;
+  if position('for share' in v_src) = 0 then
+    raise exception '#630 tail: the posting core does not hold the membership row against revocation'
       using errcode='CLR10';
   end if;
 

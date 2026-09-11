@@ -980,12 +980,21 @@ const JOURNAL_EVIDENCE_0182_CLOCK_NAMES = ["_tf_entry_evidence_release"];
 // `clara.retry_accounting_work` (already reached through WORK_JOURNAL_0178_CLOCK_NAMES' cohort and
 // itself clock-free) and its own writes carry no timestamp — `accounting_work.updated_at` is
 // stamped by `_tf_accounting_work_immutable`, which is on this roster already.
-// `_tf_accounting_work_responsible_default` is a BEFORE INSERT default with one assignment and no
-// clock. `work_authority_snapshot` is a projection. `settle_work_run`, `claim_work_run` and
+// `_tf_accounting_work_initiated_by_default` — the BEFORE INSERT default 0184 actually creates, and
+// the name `rig-meta.mjs`'s cohort uses; there is no `_responsible_default`, because the column a
+// handover moves is `initiator` itself — is one assignment and no clock. `work_authority_snapshot`
+// is a projection. `settle_work_run`, `claim_work_run` and
 // `_record_journal_entry_core` are RECUT here but already sit in WORK_JOURNAL_0178_CLOCK_NAMES, and
 // none of the three recuts introduces a new clock read (the same `updated_at` / `approved_at` /
 // `posted_at` stamps). `_tf_accounting_work_status_mirror` is recut and stays clock-free — its new
-// `stopping` arm is one UPDATE of `status`.
+// `stopping` and `cancelled` arms are one UPDATE of `status` each.
+//
+// The three §A0 helpers add nothing either: `_work_cancelled_error` is an immutable jsonb literal,
+// `_work_door_ctx` reads memberships and reserves an op key, and `_converge_work_terminal` writes
+// `clara.accounting_work`, whose `updated_at` is stamped by `_tf_accounting_work_immutable` — on
+// this roster already. §H2's three recuts are OLDER functions and each keeps exactly the clock
+// reads it already had: `cancel_agent_task` and `open_work_question` sit in the estate's earlier
+// rosters, and `mint_wake_credential` reads `statement_timestamp()` as 0133 left it.
 const WORK_CANCEL_0184_CLOCK_NAMES = ["cancel_accounting_work"];
 
 /** The arm (D) roster for the database under test, sorted as the catalog sorts it. */
