@@ -85,6 +85,14 @@ export const JOURNAL_WORK = {
   seededTaskId: "72309001-7230-4723-8723-723072309001",
   seededEntryId: "82309001-8230-4823-8823-823082309001",
   seededReceiptId: "92309001-9230-4923-8923-923092309001",
+  /** #629 (B6) — a SECOND Work, minted on demand (`op: "park_card"`) and left `awaiting_input` from
+   *  the moment it exists — never completed, unlike `seededWorkId` above. This is the gap's OWN
+   *  fixture: a `work_accepted` part whose Work is genuinely parked, so the walk can prove the
+   *  durable card finds the question and answers it, after a reload, rather than merely linking to
+   *  an already-settled record. */
+  parkedCardWorkId: "62309002-6230-4623-8623-623062309002",
+  parkedCardTaskId: "72309002-7230-4723-8723-723072309002",
+  parkedCardQuestionId: "a2309002-a230-4a23-8a23-a230a230a002",
   /** The two chart codes the composer picks from, and one that is NOT in the
    *  chart — the unknown-account rule needs a code the select cannot offer. */
   rentAccount: "6100",
@@ -240,6 +248,11 @@ const state = {
    *  mode then refused every `getByTestId` in this walk as a two-element match. The B6 cell arms it;
    *  `reset` disarms it. */
   showQuestionCard: false,
+  /** #629 (B6) — whether the transcript also carries the SECOND `work_accepted` message, for
+   *  `parkedCardWorkId`. Same reasoning as `showQuestionCard` above (armed on demand, so every
+   *  other cell's rail stays free of it) — armed by `op: "park_card"`, which also mints the Work
+   *  and its pending question; `reset` disarms it and drops both. */
+  showParkedCard: false,
 };
 
 /** The two-field question this lane asks by default: a date and an amount in integer cents — the
@@ -267,6 +280,7 @@ function seed() {
   state.nextAnswerRefusal = null;
   state.showQuestionCard = false;
   state.links.clear();
+  state.showParkedCard = false;
 
   const work = newWorkRow({
     id: JOURNAL_WORK.seededWorkId,
@@ -652,6 +666,55 @@ function control(body) {
     entry.revision_token = `rev-${entry.id}-moved`;
     return { revision_token: entry.revision_token };
   }
+  // #629 (B6) — MINTS A SECOND WORK, LEFT `awaiting_input` FROM THE START, and arms the transcript
+  // message that carries its `work_accepted` part (`state.showParkedCard`; see `card` above for why
+  // this is armed rather than default-on). Distinct from the SEEDED question above (already
+  // `answered`/`completed` — a convergence a reload merely has to DISPLAY): this Work has never been
+  // answered, so the walk can prove the durable card actually ANSWERS it, from the rail, after a
+  // reload — the exact gap the follow-up review named.
+  if (body.op === "park_card") {
+    const work = newWorkRow({
+      id: JOURNAL_WORK.parkedCardWorkId,
+      taskId: JOURNAL_WORK.parkedCardTaskId,
+      intentKey: "parked-card-intent",
+      basis: seededBasis(),
+      origin: "clara_interpreted",
+      sourceRefs: [{ kind: "chat_task", task_id: JOURNAL_WORK.parkedCardTaskId, session_id: JOURNAL_WORK.threadId }],
+    });
+    const at = new Date().toISOString();
+    work.status = "awaiting_input";
+    work.bundle = BUNDLE;
+    state.works.set(work.id, work);
+    state.intents.set(work.intent_key, work.id);
+    state.tasks.set(JOURNAL_WORK.parkedCardTaskId, { id: JOURNAL_WORK.parkedCardTaskId, status: "awaiting_input", error_code: null, created_at: at, updated_at: at });
+    state.questions.set(JOURNAL_WORK.parkedCardQuestionId, {
+      question_id: JOURNAL_WORK.parkedCardQuestionId,
+      work_id: work.id,
+      client_id: JOURNAL_WORK.clientId,
+      task_id: JOURNAL_WORK.parkedCardTaskId,
+      firm_id: FIRM_ID,
+      question_version: 1,
+      status: "pending",
+      question: "Which date should the September rent be posted on?",
+      context: null,
+      reason: "The admitted basis named no posting date.",
+      fields: [{ key: "posting_date", label: "Posting date", kind: "date", required: true }],
+      source_ref: null,
+      basis_digest: work.basis_digest,
+      expires_at: "2026-09-30T00:00:00.000Z",
+      created_at: at,
+      answer: null,
+      answered_by: null,
+      answered_at: null,
+      answered_role: null,
+      delivery_state: "pending",
+      delivery_attempts: 0,
+      work_status: "awaiting_input",
+      work_basis_digest: work.basis_digest,
+    });
+    state.showParkedCard = true;
+    return { status: work.status, workId: work.id };
+  }
   if (body.op === "refuse_basis") {
     state.nextBasisRefusal = { field: String(body.field ?? "basis"), reason: String(body.reason ?? "invalid_basis") };
     return { armed: state.nextBasisRefusal };
@@ -1027,6 +1090,33 @@ export function journalWorkTranscript() {
       seq: 2,
       created_at: "2026-09-05T00:00:02.000Z",
     },
+    // #629 (B6) — A SECOND `work_accepted`, for a Work that is genuinely PARKED (never answered),
+    // armed only by `op: "park_card"` (see `state.showParkedCard`'s own header for why this is
+    // opt-in). This is the gap itself, staged: the run's live stream is long gone by the time a
+    // walk replays this transcript, so `work_accepted` — durable, minted by `chatTurn_v18` — is the
+    // ONLY thing left that names the Work, and the card must still find and answer its question.
+    ...(state.showParkedCard
+      ? [
+          {
+            id: `message-${JOURNAL_WORK.threadId}-3`,
+            role: "assistant",
+            parts: [
+              { type: "text", text: "I have admitted a second entry as accounting work." },
+              {
+                type: "work_accepted",
+                work_id: JOURNAL_WORK.parkedCardWorkId,
+                client_id: JOURNAL_WORK.clientId,
+                purpose: "journal_entry",
+                logical_op_id: `work:${JOURNAL_WORK.parkedCardWorkId}:journal_entry:1`,
+              },
+            ],
+            turn_key: null,
+            task_id: JOURNAL_WORK.parkedCardTaskId,
+            seq: 3,
+            created_at: "2026-09-05T00:00:05.000Z",
+          },
+        ]
+      : []),
   ];
 }
 

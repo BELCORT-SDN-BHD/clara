@@ -431,6 +431,50 @@ test("B6: a transcript's work_question part renders the ACCEPTED record, and ann
   await scan(page, "the Clara transcript's work_question card");
 });
 
+test("B6: the DURABLE card finds a PARKED Work's question after a reload, and answers it there", async ({ page }) => {
+  // #629's follow-up review, the gap this cell closes: `work_question` (the live-stream part, above)
+  // only exists while a run is executing and reaches this transcript through `GET /api/tasks/:id/
+  // stream`; a browser that opens the rail after the run has already parked — or after any reload —
+  // never sees it. `work_accepted` is the ONE part on this Work that is durable (minted by
+  // `chatTurn_v18` into `clara.chat_messages.parts`), so it must be the one that still finds the
+  // question. `park_card` mints a Work that has genuinely NEVER been answered — unlike the seeded
+  // `work_question` fixture above, which is already settled before the walk starts.
+  await control(page, { op: "reset" });
+  await control(page, { op: "park_card" });
+  await page.goto(`/clients/${CLIENT}/work`);
+  const rail = page.locator("[data-clara-rail]");
+  await expect(rail).toBeVisible();
+
+  // A RELOAD — the literal defect report: a cold load of the rail, with no live run behind it, must
+  // still find the parked question and offer a way to answer it.
+  await page.reload();
+  await expect(rail).toBeVisible();
+
+  const form = rail.getByTestId("work-question-form");
+  await expect(form).toBeVisible({ timeout: 20_000 });
+  await expect(rail.getByTestId("work-question-text")).toContainText(
+    "Which date should the September rent be posted on?",
+  );
+  // §5, one announcement owner — the TRANSCRIPT's own `role="log"` (`ClaraThreadView`'s log region,
+  // `aria-live="polite"`) is that owner and is DELIBERATELY present; what must be ABSENT is a SECOND
+  // one nested inside this card's own subtree, exactly what `work-detail.test.tsx`'s and the B6
+  // `work_question` cell above scope their own identical assertion to.
+  await expect(form.locator("[role=alert], [role=status], [aria-live]:not([aria-live=off])")).toHaveCount(0);
+
+  // ANSWER IT, right there in the card — the same door B3 and B4 post to, never a second one.
+  await rail.getByLabel(/Posting date/).fill("2026-09-08");
+  await rail.getByTestId("work-question-submit").click();
+
+  // THE WORK CONVERGES: the SAME mounted panel re-reads and shows the accepted record, in place —
+  // never a navigation, never a second question offered for the same Work.
+  const accepted = rail.getByTestId("work-question-accepted");
+  await expect(accepted).toBeVisible({ timeout: 15_000 });
+  await expect(rail.getByTestId("work-question-accepted-posting_date")).toContainText("2026-09-08");
+  await expect(rail.getByTestId("work-question-submit")).toHaveCount(0);
+  await expect(accepted.locator("[role=alert], [role=status], [aria-live]:not([aria-live=off])")).toHaveCount(0);
+  await scan(page, "the Clara transcript's durable card, answering a genuinely parked Work");
+});
+
 test("the SUPPORTING SOURCE the run named is rendered beside the question", async ({ page }) => {
   await parkOnQuestion(page, { source_ref: { kind: "document", id: "INV-2026-0912" } });
   await expect(page.getByTestId("work-question-source")).toContainText("document INV-2026-0912");
