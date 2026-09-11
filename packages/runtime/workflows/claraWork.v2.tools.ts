@@ -128,11 +128,34 @@ export const workQuestionFieldSchema = z
  * every surface to render "the missing fact, reason and supporting source"; a reason the model did
  * not supply is a reason no surface can show, and "the agent needs more information" is not one.
  */
+/**
+ * WHERE THE MISSING FACT WAS SUPPOSED TO BE — the "supporting source" #629 asks every surface to
+ * render beside the question and the reason.
+ *
+ * THREE KINDS, CLOSED, because they are the only three a Work run can actually be looking at: the
+ * DOCUMENT it was admitted against, the CHAT TASK that started it, or a LINE of the admitted basis.
+ * An open-ended string would be a place for the model to write prose that no surface could resolve
+ * to anything; a closed kind plus an optional id is a thing a person can be shown and, later, a
+ * thing a surface can link to.
+ *
+ * OPTIONAL, and honestly so: a question about a fact that simply is not in the basis has no source,
+ * and inventing one would be worse than an absent field. The database stores it as an opaque jsonb
+ * object (0180's `source_ref` column, CHECKed to be an object or null) and neither validates the
+ * kind nor resolves the id — this schema is the wall, and the column is the record.
+ */
+export const workQuestionSourceRefSchema = z
+  .object({
+    kind: z.enum(["document", "chat_task", "basis_line"]).describe("What kind of thing supports this question."),
+    id: z.string().trim().min(1).max(200).optional().describe("Its identifier, where you have one (a document id, a task id, a line number)."),
+  })
+  .strict();
+
 export const askQuestionInputSchemaV2 = z
   .object({
     question: z.string().trim().min(1).max(2000).describe("The single decision or fact you need a human to supply."),
     reason: z.string().trim().min(1).max(2000).describe("WHY you cannot proceed without it, naming what you already read or were given."),
     context: z.string().max(4000).optional().describe("What you already know, so the human is not asked to repeat it."),
+    source_ref: workQuestionSourceRefSchema.optional().describe("The document, chat task or basis line this question is about, where there is one."),
     fields: z.array(workQuestionFieldSchema).min(1).max(6).describe("One to six typed fields the answer must fill."),
   })
   .strict();
@@ -271,7 +294,8 @@ export function buildClaraWorkToolsV2(ctx: WorkToolCtx, ledger: WorkBudgetLedger
     [ASK_QUESTION_TOOL]: tool({
       description:
         "Ask the human for the ONE fact or decision you are missing, instead of guessing. Give the question, the " +
-        "REASON it blocks you, and one to six TYPED fields the answer must fill (text, money in integer cents, " +
+        "REASON it blocks you, the SUPPORTING SOURCE where there is one (the document, chat task or basis line " +
+        "this is about), and one to six TYPED fields the answer must fill (text, money in integer cents, " +
         "date, choice with options, or an account code from this client's chart). This parks the Work; the answer " +
         "is rechecked against the authority that is current when they answer. Do not use this to confirm figures " +
         "you were already given.",

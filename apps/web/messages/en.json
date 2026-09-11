@@ -3920,6 +3920,7 @@
   },
   "WorkQuestion": {
     "reasonLabel": "Why it is needed:",
+    "sourceLabel": "Supporting source:",
     "versionLabel": "Question {version}",
     "noQuestionText": "A question is waiting on this Work, and its text could not be read.",
     "required": "Required",

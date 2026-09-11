@@ -79,11 +79,22 @@ function noEffectPayload(): Record<string, unknown> {
   };
 }
 
-/** An authority refusal is NOT recoverable, and saying so is the whole point of the field. A Retry
- *  would run under the same absent authority and be refused again at the same place; what the
- *  human needs is the membership or the client restored, or somebody else to start the Work. */
-function authorityLostPayload(reason: string, message: string): Record<string, unknown> {
-  return { code: reason, reason, message, recoverable: false };
+/**
+ * The payload the post-resume recheck settles with.
+ *
+ * AN AUTHORITY REFUSAL IS NOT RECOVERABLE, and saying so is the whole point of the field. A Retry
+ * would run under the same absent authority and be refused again at the same place; what the human
+ * needs is the membership or the client restored, or somebody else to start the Work.
+ *
+ * `work_unreadable` IS RECOVERABLE, AND IT IS NOT AN AUTHORITY REFUSAL AT ALL (reviewed finding).
+ * `clara.work_authority_snapshot` returns NULL when its join finds nothing — a task that is not
+ * `kind='accounting_work'`, a Work row this read could not reach, a transient read failure. None of
+ * those is "you may not", and telling a human their Retry cannot help is false: a Retry makes a new
+ * run that re-reads the same rows and, in every transient case, succeeds. Riding it on the
+ * authority payload spent a person's one honest recovery on a shrug.
+ */
+function recheckRefusalPayload(reason: string, message: string): Record<string, unknown> {
+  return { code: reason, reason, message, recoverable: reason === "work_unreadable" };
 }
 
 export async function claraWork_v2(input: { taskId: string }): Promise<{ taskId: string; outcome: string; segments: number }> {
@@ -166,6 +177,7 @@ export async function claraWork_v2(input: { taskId: string }): Promise<{ taskId:
           question: seg.question.question,
           reason: seg.question.reason,
           context: seg.question.context,
+          sourceRef: seg.question.sourceRef,
           fields: seg.question.fields,
         });
         await emitWorkQuestionStep(opened, work.clientId);
@@ -180,7 +192,7 @@ export async function claraWork_v2(input: { taskId: string }): Promise<{ taskId:
           // thing to notice.
           const authority = await recheckAuthorityStep(taskId);
           if (!authority.ok) {
-            await settle("refused", taskErrorCodeFor("refusal"), authorityLostPayload(authority.reason, authority.message), null);
+            await settle("refused", taskErrorCodeFor("refusal"), recheckRefusalPayload(authority.reason, authority.message), null);
             break;
           }
           messages.push({

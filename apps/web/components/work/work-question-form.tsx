@@ -445,6 +445,16 @@ function QuestionHeading({ record }: { record: WorkQuestionRecord }) {
         </p>
       ) : null}
       {record.context ? <p className="text-xs text-secondary-ink">{record.context}</p> : null}
+      {/* THE SUPPORTING SOURCE (#629's own acceptance line: "the missing fact, reason and supporting
+          source"). Rendered from the record, identically on B3, B4 and B6, and only when the run
+          actually named one — an absent source prints nothing rather than "unknown". It is NOT a
+          link: `source_ref` is an opaque object the database stores and does not resolve, so a
+          route built from it here would be a 404 dressed as an affordance. */}
+      {sourceRefText(record.source_ref) ? (
+        <p className="text-xs text-secondary-ink" data-testid="work-question-source">
+          {t("sourceLabel")} {sourceRefText(record.source_ref)}
+        </p>
+      ) : null}
       <p className="text-xs text-secondary-ink" data-testid="work-question-version">
         {t("versionLabel", { version: String(record.question_version) })}
       </p>
@@ -724,6 +734,16 @@ function KeptDraft({
       </dl>
     </div>
   );
+}
+
+/** The supporting source as one readable line, or null. Exported so the cell that pins it drives
+ *  the real reducer rather than a copy. */
+export function sourceRefText(source: Record<string, unknown> | null | undefined): string | null {
+  if (source === null || source === undefined || typeof source !== "object") return null;
+  const kind = typeof source.kind === "string" && source.kind.trim() !== "" ? source.kind.trim() : null;
+  if (kind === null) return null;
+  const id = typeof source.id === "string" && source.id.trim() !== "" ? source.id.trim() : null;
+  return id === null ? kind : `${kind} ${id}`;
 }
 
 function formatAnswerValue(value: unknown): string {

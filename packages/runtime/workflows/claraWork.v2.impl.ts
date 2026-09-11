@@ -84,6 +84,10 @@ export type AskedQuestion = {
   question: string;
   reason: string;
   context?: string;
+  /** The document / chat task / basis line the question is about, where the model named one. Rides
+   *  into `clara.open_work_question`'s `p_source_ref` and out again through
+   *  `clara.get_work_question`, so B3, B4 and B6 render the same supporting source. */
+  sourceRef?: AskQuestionInputV2["source_ref"];
   fields: AskQuestionInputV2["fields"];
 };
 
@@ -144,13 +148,22 @@ export function findAskQuestionCallV2(
   for (let i = steps.length - 1; i >= 0; i -= 1) {
     for (const part of steps[i]?.content ?? []) {
       if (part.type !== "tool-call" || part.toolName !== ASK_QUESTION_TOOL) continue;
-      const input = (part.input ?? {}) as { question?: unknown; reason?: unknown; context?: unknown; fields?: unknown };
+      const input = (part.input ?? {}) as {
+        question?: unknown; reason?: unknown; context?: unknown; source_ref?: unknown; fields?: unknown;
+      };
       const question = typeof input.question === "string" ? input.question.trim() : "";
       const reason = typeof input.reason === "string" ? input.reason.trim() : "";
       const fields = Array.isArray(input.fields) ? (input.fields as AskQuestionInputV2["fields"]) : [];
       if (!question || !reason || fields.length === 0) continue;
       const context = typeof input.context === "string" && input.context.trim() ? input.context.trim() : undefined;
-      return { toolCallId: String(part.toolCallId ?? ""), question, reason, context, fields };
+      // The SOURCE is optional and is taken only when it is an object with a kind — a half-formed
+      // one is dropped rather than parked on, exactly as a half-formed question is skipped above.
+      const raw = input.source_ref;
+      const sourceRef =
+        raw !== null && typeof raw === "object" && typeof (raw as { kind?: unknown }).kind === "string"
+          ? (raw as AskQuestionInputV2["source_ref"])
+          : undefined;
+      return { toolCallId: String(part.toolCallId ?? ""), question, reason, context, sourceRef, fields };
     }
   }
   return null;
@@ -292,7 +305,13 @@ export type OpenedQuestion = {
 export async function openWorkQuestionStep(
   taskId: string,
   hookToken: string,
-  asked: { question: string; reason: string; context?: string; fields: AskQuestionInputV2["fields"] },
+  asked: {
+    question: string;
+    reason: string;
+    context?: string;
+    sourceRef?: AskQuestionInputV2["source_ref"];
+    fields: AskQuestionInputV2["fields"];
+  },
 ): Promise<OpenedQuestion> {
   "use step";
   return pools().withRuntime(async (c: PgExec) => {
@@ -304,7 +323,7 @@ export async function openWorkQuestionStep(
         JSON.stringify({ type: "clarify", question: asked.question, context: asked.context ?? null, framing: "work_question" }),
         JSON.stringify(asked.fields),
         asked.reason,
-        null,
+        asked.sourceRef === undefined ? null : JSON.stringify(asked.sourceRef),
       ],
     );
     const out = (r.rows[0]?.r ?? {}) as { question_id?: string; work_id?: string; question_version?: number; expires_at?: string };
