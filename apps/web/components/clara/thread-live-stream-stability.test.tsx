@@ -46,12 +46,13 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { Component, createElement, useRef, useState, type ReactElement, type ReactNode } from "react";
+import { Component, Profiler, createElement, useRef, useState, type ReactElement, type ReactNode } from "react";
 import { NextIntlClientProvider } from "next-intl";
 
 import { ClaraThreadView } from "./ClaraThreadView";
 import { TURN_PROGRESS_TICK_MS, TurnProgress } from "./TurnProgress";
 import { ClarifyCard, CLARIFY_ROW_ATTEMPTS } from "../parts/ClarifyCard";
+import { WorkAcceptedCard } from "../parts/WorkCards";
 import { clickButton, renderComponent, setFieldValue, textOf } from "../../test/hookHarness";
 import { enableDomInspection } from "../../test/domInspect";
 import { claraThreadStore } from "../../lib/clara/threadStore";
@@ -250,6 +251,12 @@ function pendingRow(status = "pending", answer: Record<string, unknown> | null =
 
 type Counts = { interruptionReads: number };
 
+/** Commits of the transcript subtree — the one containing the clarify card and both Work
+ *  cards. `Profiler` is React's own instrument for this and needs no access to the
+ *  components it measures, which is what makes it usable on a tree this cell renders
+ *  through `ClaraThreadView` rather than assembling by hand. */
+const transcriptCommits = { count: 0 };
+
 async function withLiveTurn(
   run: (h: Awaited<ReturnType<typeof renderComponent>>, counts: Counts, boundaryErrors: Error[]) => Promise<void>,
 ): Promise<void> {
@@ -265,7 +272,12 @@ async function withLiveTurn(
     const url = String(input);
     if (url.includes("/api/runtime/chat/sessions/")) return json({ messages: TRANSCRIPT });
     if (url.includes("agent_tasks_visible")) {
-      return json([{ id: TASK_ID, status: "running", created_at: "2026-09-11T00:00:00.000Z" }]);
+      // RELATIVE TO NOW, and that is load-bearing rather than tidy. `elapsedSeconds`
+      // (lib/clara/turnRun.ts:167) returns null — and `TurnProgress` therefore renders
+      // NOTHING — for a start that is in the future of the browser's own clock. A fixed
+      // literal makes "is the clock on screen?" depend on what day the suite runs, which
+      // is exactly the kind of silent skip the assertion below exists to prevent.
+      return json([{ id: TASK_ID, status: "running", created_at: new Date(Date.now() - 5_000).toISOString() }]);
     }
     if (url.includes("/rest/v1/rpc/answer_interruption")) {
       void init;
@@ -282,11 +294,16 @@ async function withLiveTurn(
   }) as typeof fetch;
 
   const boundaryErrors: Error[] = [];
+  transcriptCommits.count = 0;
   const h = await renderComponent(
     intl(
       createElement(Boundary, {
         onError: (e: Error) => boundaryErrors.push(e),
-        children: createElement(ClaraThreadView, { auth: session, threadId: THREAD_ID, variant: "full" }),
+        children: createElement(Profiler, {
+          id: "clara-transcript",
+          onRender: () => { transcriptCommits.count += 1; },
+          children: createElement(ClaraThreadView, { auth: session, threadId: THREAD_ID, variant: "full" }),
+        }),
       }),
     ),
   );
@@ -330,8 +347,21 @@ test("a live clarify survives a 200-delta stream: no nested-update ceiling, and 
       });
       await h.settle();
       assert.match(h.text(), new RegExp(QUESTION), "the live clarify must be on screen before the burst");
+      // THE VACUITY CONTROL ON THE TIMER CENSUS BELOW. `countTurnClockTimers` counts
+      // one-second intervals, and a transcript with NO turn clock in it arms none — so
+      // "the clock re-armed at most one timer" would be trivially true on a screen where
+      // the component carrying the defect was never mounted at all. `TurnProgress` renders
+      // null unless the run's start is readable and in the past (turnRun.ts's
+      // `elapsedSeconds`), so reading its sentence off the screen is the one way to know
+      // the instrument has a subject.
+      assert.match(
+        h.text(),
+        /working on this for/,
+        "the turn clock must be ON SCREEN before its timers are counted — an absent clock arms no intervals and would pass the census for the wrong reason",
+      );
       const afterClarify = timers.armed();
       const readsAfterClarify = counts.interruptionReads;
+      const commitsAfterClarify = transcriptCommits.count;
 
       await pumpDeltas(h, 20, 200);
 
@@ -355,6 +385,18 @@ test("a live clarify survives a 200-delta stream: no nested-update ceiling, and 
       assert.ok(
         counts.interruptionReads - readsAfterClarify <= CLARIFY_ROW_ATTEMPTS,
         `the clarify card issued ${counts.interruptionReads - readsAfterClarify} reads across 200 deltas — the window is ${CLARIFY_ROW_ATTEMPTS} ticks and a delta is not a tick`,
+      );
+      // (b) THE TRANSCRIPT'S OWN RENDER BUDGET — the WO's "renders <= deltas + a small
+      // constant", measured on the subtree that actually mounts the clarify card and both
+      // Work cards. A `Profiler` commits once per commit of the tree it wraps, so this is
+      // an upper bound on how many times each card inside it rendered; the per-CARD
+      // counters live in the churn cell below, which mounts the two components directly
+      // and can therefore count their own calls rather than their parent's.
+      // Measured on the fix: 204 commits for 200 deltas.
+      const commitsDuringBurst = transcriptCommits.count - commitsAfterClarify;
+      assert.ok(
+        commitsDuringBurst <= 200 + 8,
+        `the transcript committed ${commitsDuringBurst} times for 200 deltas — one commit per delta plus a small constant is the bound, and anything beyond it is a component updating itself`,
       );
       // The failure the owner actually saw. `markSendFailed` is the only writer of this
       // banner, and during a stream its only caller is the rejection of `runClaraTaskStream`.
@@ -392,7 +434,15 @@ test("the live clarify is still ANSWERABLE IN PLACE after a burst of deltas", as
 // ---------------------------------------------------------------------------
 
 let churn: (() => void) | null = null;
+/** THE WO's A.1(b) COUNTERS, one per card. Each wrapper renders exactly when its card
+ *  does — the card's `part` prop is a NEW object on every parent render, so React can
+ *  never bail out of re-rendering it — which is what makes a count of the wrapper a count
+ *  of the card, and why the churn has to be the production churn rather than a contrived
+ *  one. `WorkAcceptedCard` is in here because #629/#725 mounted it INSIDE the transcript
+ *  between the previous hosted walk and the one that failed: it hydrates the Work on
+ *  mount, so a card that re-read per render would have been the second candidate cause. */
 const clarifyRenders = { count: 0 };
+const workAcceptedRenders = { count: 0 };
 
 function CountingClarify(props: { answerable: boolean; question: string }): ReactElement {
   clarifyRenders.count += 1;
@@ -408,52 +458,99 @@ function CountingClarify(props: { answerable: boolean; question: string }): Reac
   });
 }
 
+function CountingWorkAccepted(): ReactElement {
+  workAcceptedRenders.count += 1;
+  return createElement(WorkAcceptedCard, {
+    // The same fresh-object-per-render shape as the clarify above, for the same reason:
+    // the transcript's parts come out of `state.messages`, which the store replaces
+    // wholesale on every stream event.
+    part: {
+      type: "work_accepted" as const,
+      work_id: WORK_ID,
+      client_id: CLIENT_ID,
+      purpose: "journal_entry",
+      logical_op_id: `work:${WORK_ID}:journal_entry:1`,
+    },
+  });
+}
+
 function ChurningParent(): ReactElement {
   const [n, setN] = useState(0);
   const seen = useRef(0);
   seen.current += 1;
   churn = () => setN((v) => v + 1);
   void n;
-  return createElement(CountingClarify, { answerable: true, question: QUESTION });
+  return createElement(
+    "div",
+    null,
+    createElement(CountingClarify, { answerable: true, question: QUESTION }),
+    createElement(CountingWorkAccepted, null),
+  );
 }
 
-test("the clarify card does not storm its re-read when the part identity churns on every delta", async () => {
+test("neither card storms its re-read when the part identity churns on every delta", async () => {
   const originalFetch = globalThis.fetch;
   const originalUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   process.env.NEXT_PUBLIC_SUPABASE_URL = "https://example.supabase.co";
+  // `WorkAcceptedCard` hydrates through the blessed singleton (`sessionTokenAccessor`),
+  // which otherwise waits out its own bounded timeout before every read here.
+  configureSessionTokenSource(async () => "tok");
   let reads = 0;
+  let workReads = 0;
   globalThis.fetch = (async (input: RequestInfo | URL) => {
     const url = String(input);
+    if (url.includes("/rest/v1/accounting_work")) {
+      workReads += 1;
+      // NOT `awaiting_input`: a parked Work would mount `WorkQuestionPanel` under this
+      // card, and what this cell measures is the card's OWN render budget under churn,
+      // not the panel's. The panel has its own walk (work-question-walk.spec.ts).
+      return json([{ id: WORK_ID, client_id: CLIENT_ID, status: "completed" }]);
+    }
     if (url.includes("/rest/v1/agent_interruptions")) {
       reads += 1;
       // The production ordering: the row lands three durable step boundaries after the
       // chunk, so the first reads come back empty. The bounded window's ticks are a second
       // apart and this burst runs in far less than that, so within it the card must issue
-      // its MOUNT read and nothing else — measured: 1 read across 120 deltas, and 121
-      // renders for those 120, which is the render-per-delta bound and no more.
+      // its MOUNT read and nothing else — measured on the fix: 1 interruption read across
+      // 120 deltas, 121 clarify renders and 121 accepted-Work renders for those 120, and
+      // ONE Work read, which is the render-per-delta bound and no more.
       return json(reads > 2 ? [pendingRow()] : []);
     }
     return json([]);
   }) as typeof fetch;
   clarifyRenders.count = 0;
+  workAcceptedRenders.count = 0;
   try {
     const h = await renderComponent(intl(createElement(ChurningParent)));
     try {
+      await h.settle();
       const DELTAS = 120;
       for (let i = 0; i < DELTAS; i += 1) await h.act(() => churn!());
       await h.settle();
       assert.ok(
         clarifyRenders.count <= DELTAS + 8,
-        `the card rendered ${clarifyRenders.count} times for ${DELTAS} deltas — a render per delta plus a small constant is the bound`,
+        `the clarify card rendered ${clarifyRenders.count} times for ${DELTAS} deltas — a render per delta plus a small constant is the bound`,
+      );
+      assert.ok(
+        workAcceptedRenders.count <= DELTAS + 8,
+        `the accepted-Work card rendered ${workAcceptedRenders.count} times for ${DELTAS} deltas — a render per delta plus a small constant is the bound`,
       );
       assert.ok(
         reads <= CLARIFY_ROW_ATTEMPTS + 2,
         `the card issued ${reads} reads across ${DELTAS} deltas; the window is ${CLARIFY_ROW_ATTEMPTS} ticks and a fresh \`part\` object is not a tick`,
       );
+      // The accepted card's own read is a MOUNT read (`useHydratedPart` over a `useCallback`
+      // whose deps are the part's three ids, all primitives), so a churning `part` object
+      // must buy no further reads at all.
+      assert.ok(
+        workReads <= 2,
+        `the accepted-Work card issued ${workReads} Work reads across ${DELTAS} deltas — it hydrates ONCE on mount, and a fresh \`part\` object is not a new Work`,
+      );
     } finally {
       await h.unmount();
     }
   } finally {
+    resetSessionTokenSource();
     globalThis.fetch = originalFetch;
     if (originalUrl === undefined) delete process.env.NEXT_PUBLIC_SUPABASE_URL;
     else process.env.NEXT_PUBLIC_SUPABASE_URL = originalUrl;
