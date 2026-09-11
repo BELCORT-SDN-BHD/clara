@@ -32,7 +32,12 @@ import Link from "next/link";
 import { useTranslations } from "next-intl";
 
 import { AttachEvidenceDialog } from "@/components/work/attach-evidence-dialog";
-import { CancelOutcome, CancelWorkDialog, TakeOverWorkAction } from "@/components/work/work-cancel-dialog";
+import {
+  CancelOutcome,
+  CancelWorkDialog,
+  TakeOverOutcome,
+  TakeOverWorkAction,
+} from "@/components/work/work-cancel-dialog";
 import { PostedLinesTable, WorkBasisTable } from "@/components/work/work-tables";
 import { StateBanner } from "@/components/common/state";
 import { WorkQuestionPanel } from "@/components/work/work-question-panel";
@@ -48,7 +53,14 @@ import { readClarifyQuestion } from "@/lib/journals/governance-doors";
 import { useMemberNames, type MemberNameResolver } from "@/lib/members/use-member-names";
 import { WORK_NEEDS_YOU_HREF, clientBase, journalComposerHref } from "@/lib/navigation/tree";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
-import { cancelWork, retryWork, takeOverWork, type CancelWorkResult, type RetryWorkResult } from "@/lib/work/api";
+import {
+  cancelWork,
+  retryWork,
+  takeOverWork,
+  type CancelWorkResult,
+  type RetryWorkResult,
+  type TakeOverWorkResult,
+} from "@/lib/work/api";
 import { accountNames, type WorkDetailData } from "@/lib/work/reads";
 import { listEntryLinks, type EntryLinkRow } from "@/lib/work/evidence";
 import { useWorkDetail } from "@/lib/work/use-work-detail";
@@ -175,6 +187,9 @@ export function WorkDetailView({
    *  trigger unmounts the moment the Work leaves a cancellable status — which is exactly when the
    *  answer matters most (the `already_completed` arm carries the receipt and the entry link). */
   const [cancelState, setCancelState] = useState<CancelWorkResult | null>(null);
+  /** #630 — and the takeover's, for the same reason: an accepted takeover makes the Work `queued`
+   *  and the offer that produced the answer unmounts with it. */
+  const [takeOverState, setTakeOverState] = useState<TakeOverWorkResult | null>(null);
   /** #634 — the posted entry's links row, or null while unread / unreadable. A
    *  failed links read NEVER blocks the page: the entry, its lines and its
    *  receipt are the database's own and stay on screen; only the source line
@@ -377,6 +392,7 @@ export function WorkDetailView({
         cancel={cancel}
         takeOver={takeOver}
         onCancelAnswer={setCancelState}
+        onTakeOverAnswer={setTakeOverState}
         session={session}
         interruption={interruption}
         onEditAsNewDraft={seedDraft}
@@ -385,6 +401,7 @@ export function WorkDetailView({
       {/* #630 — THE CANCEL'S OWN ANSWER, outside every status arm so it survives the status change
           that produced it. `null` renders nothing. */}
       <CancelOutcome result={cancelState} clientId={clientId} />
+      <TakeOverOutcome result={takeOverState} />
 
       <section className="flex flex-col gap-2">
         <SectionHeader level={2}>{t("basisHeading")}</SectionHeader>
@@ -618,6 +635,7 @@ function WorkOutcome({
   cancel,
   takeOver,
   onCancelAnswer,
+  onTakeOverAnswer,
   session,
   interruption,
   onEditAsNewDraft,
@@ -640,6 +658,7 @@ function WorkOutcome({
   takeOver: typeof takeOverWork;
   /** Hands the cancel's answer to the page, which renders it outside every status arm. */
   onCancelAnswer: (result: CancelWorkResult) => void;
+  onTakeOverAnswer: (result: TakeOverWorkResult) => void;
   session: SessionTokenAccessor;
   /** The row this Work is parked on, when it is parked and visible. */
   interruption: AgentInterruptionRow | null;
@@ -716,6 +735,7 @@ function WorkOutcome({
             basisOrigin={work.basis_origin}
             basisDigest={work.basis_digest}
             onTakenOver={onConverge}
+            onAnswer={onTakeOverAnswer}
             takeOver={takeOver}
             session={session}
           />

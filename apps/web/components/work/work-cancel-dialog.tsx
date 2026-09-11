@@ -236,6 +236,7 @@ export function TakeOverWorkAction({
   basisOrigin,
   basisDigest,
   onTakenOver,
+  onAnswer,
   takeOver = takeOverWork,
   session = sessionTokenAccessor,
 }: {
@@ -245,6 +246,10 @@ export function TakeOverWorkAction({
   basisOrigin: string;
   basisDigest: string;
   onTakenOver: () => void | Promise<void>;
+  /** THE ANSWER GOES TO THE PAGE, for the reason `CancelWorkDialog.onAnswer` records: an accepted
+   *  takeover makes the Work `queued`, this whole offer unmounts with that status change, and an
+   *  outcome rendered here would vanish at the moment it was supposed to be read. */
+  onAnswer?: (result: TakeOverWorkResult) => void;
   takeOver?: typeof takeOverWork;
   session?: SessionTokenAccessor;
 }) {
@@ -264,6 +269,7 @@ export function TakeOverWorkAction({
       basisDigest: withDigest ? basisDigest : null,
     });
     setResult(answer);
+    onAnswer?.(answer);
     setBusy(false);
     if (answer.kind === "accepted" || answer.kind === "not_takeable" || answer.kind === "denied") setOpen(false);
     await onTakenOver();
@@ -308,31 +314,48 @@ export function TakeOverWorkAction({
       <StateBanner tone="warning" title={t("takeOverHeading")} action={action}>
         {t("takeOverBody")}
       </StateBanner>
-      {result !== null && result.kind === "accepted" ? (
-        <StateBanner tone="info" title={t("takeOverAcceptedTitle")}>
-          {t("takeOverAcceptedBody")}
-        </StateBanner>
-      ) : null}
-      {result !== null && result.kind === "not_takeable" ? (
-        <StateBanner tone="error" title={t("notTakeableTitle")} code={result.status ?? undefined}>
-          {t("notTakeableBody")}
-        </StateBanner>
-      ) : null}
+      {/* THE ONE ARM THAT BELONGS HERE: the confirm step the human is still inside. Every other
+          answer is the PAGE's (see `onAnswer`), because an accepted takeover unmounts this offer. */}
       {result !== null && result.kind === "confirm_basis" ? (
         <StateBanner tone="warning" title={t("takeOverConfirmTitle")}>
           {t("takeOverConfirmBody")}
         </StateBanner>
       ) : null}
-      {result !== null && result.kind === "denied" ? (
-        <StateBanner tone="warning" title={t("deniedTitle")}>
-          {t("deniedBody")}
-        </StateBanner>
-      ) : null}
-      {result !== null && (result.kind === "unavailable" || result.kind === "lost") ? (
-        <StateBanner tone="error" title={result.kind === "lost" ? t("lostTitle") : t("unavailableTitle")}>
-          {result.kind === "lost" ? t("lostBody") : t("unavailableBody")}
-        </StateBanner>
-      ) : null}
     </div>
   );
+}
+
+/** The takeover's answer, rendered by the PAGE so it survives the status change that produced it. */
+export function TakeOverOutcome({ result }: { result: TakeOverWorkResult | null }) {
+  const t = useTranslations("WorkCancel");
+  if (result === null) return null;
+  if (result.kind === "accepted") {
+    return (
+      <StateBanner tone="info" title={t("takeOverAcceptedTitle")}>
+        {t("takeOverAcceptedBody")}
+      </StateBanner>
+    );
+  }
+  if (result.kind === "not_takeable") {
+    return (
+      <StateBanner tone="error" title={t("notTakeableTitle")} code={result.status ?? undefined}>
+        {t("notTakeableBody")}
+      </StateBanner>
+    );
+  }
+  if (result.kind === "denied") {
+    return (
+      <StateBanner tone="warning" title={t("deniedTitle")}>
+        {t("deniedBody")}
+      </StateBanner>
+    );
+  }
+  if (result.kind === "unavailable" || result.kind === "lost") {
+    return (
+      <StateBanner tone="error" title={result.kind === "lost" ? t("lostTitle") : t("unavailableTitle")}>
+        {result.kind === "lost" ? t("lostBody") : t("unavailableBody")}
+      </StateBanner>
+    );
+  }
+  return null;
 }

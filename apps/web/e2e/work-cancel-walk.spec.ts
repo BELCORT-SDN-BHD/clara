@@ -161,7 +161,9 @@ test("B3 cancel: STOPPING is shown while an admitted operation settles, and only
   const settled = await control(page, { op: "settle_stopping", workId, outcome: "cancelled" });
   expect(settled.status, "the fixture actually settled the Work").toBe("cancelled");
   await expect(page.getByText("Cancelled", { exact: true }).first()).toBeVisible({ timeout: 20_000 });
-  await expect(page.getByText("Nothing was posted.")).toBeVisible();
+  // THE PAGE'S OWN WORDS for a cancelled Work, verbatim from WorkDetail.cancelled.body — a cancel
+  // does not reverse what was already recorded, and the copy says exactly that.
+  await expect(page.getByText("Anything already recorded stays recorded")).toBeVisible();
   // …CARRYING WHAT THE RUN ASKED FOR, which `clara.settle_work_run` superseded. Asserted on the
   // WIRE first and on the page second: the two are different claims, and a page assertion alone
   // could fail for a rendering reason while the data was fine — or pass while the estate had

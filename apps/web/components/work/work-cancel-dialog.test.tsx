@@ -23,7 +23,7 @@ import { NextIntlClientProvider } from "next-intl";
 import { renderComponent, clickButton, textOf } from "../../test/hookHarness";
 import { enableDomInspection, activeElement } from "../../test/domInspect";
 import { checkKeyboardWalk, isKeyboardOperable } from "../../test/keyboardWalk";
-import { CancelOutcome, CancelWorkDialog, TakeOverWorkAction } from "./work-cancel-dialog";
+import { CancelOutcome, CancelWorkDialog, TakeOverOutcome, TakeOverWorkAction } from "./work-cancel-dialog";
 import type { CancelWorkResult, TakeOverWorkResult } from "../../lib/work/api";
 import messages from "../../messages/en.json";
 
@@ -98,6 +98,30 @@ function CancelApp(props: {
   });
 }
 
+/** The page's own shape again: the offer hands its answer up and the PAGE renders it, which is what
+ *  keeps "You are responsible for this Work" on screen after the Work goes `queued` and the offer
+ *  itself unmounts. */
+function TakeOverHost(props: {
+  takeOver: (auth: unknown, input: Attempt) => Promise<TakeOverWorkResult>;
+  basisOrigin?: string;
+}): ReactElement {
+  const [answer, setAnswer] = useState<TakeOverWorkResult | null>(null);
+  return createElement(
+    "div",
+    null,
+    createElement(TakeOverWorkAction, {
+      workId: WORK,
+      basisOrigin: props.basisOrigin ?? "clara_interpreted",
+      basisDigest: DIGEST,
+      onTakenOver: () => {},
+      onAnswer: setAnswer,
+      takeOver: props.takeOver as never,
+      session: { getAccessToken: async () => "tok" } as never,
+    }),
+    createElement(TakeOverOutcome, { result: answer }),
+  );
+}
+
 function TakeOverApp(props: {
   takeOver: (auth: unknown, input: Attempt) => Promise<TakeOverWorkResult>;
   basisOrigin?: string;
@@ -106,14 +130,7 @@ function TakeOverApp(props: {
     locale: "en",
     messages,
     timeZone: "Asia/Kuala_Lumpur",
-    children: createElement(TakeOverWorkAction, {
-      workId: WORK,
-      basisOrigin: props.basisOrigin ?? "clara_interpreted",
-      basisDigest: DIGEST,
-      onTakenOver: () => {},
-      takeOver: props.takeOver as never,
-      session: { getAccessToken: async () => "tok" } as never,
-    }),
+    children: createElement(TakeOverHost, props),
   });
 }
 
