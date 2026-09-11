@@ -192,10 +192,24 @@ set role clara_fn_owner;
 --     `clara.domain_events`. Both relations grow 288 rows a DAY on the live firm and are
 --     append-only, so that cost never comes back down.
 --
---     WITH THEM the planner can drive from the SMALL side -- the runs that actually drafted or
---     posted something, which is the whole premise of this ticket (most five-minute windows
---     change nothing) -- and probe the receipts one index lookup at a time. `run_id` is a run's
---     own uuid, so each probe returns at most one row.
+--     AND THE FIRST CUT OF THE RECEIPT INDEX DID NOT FIX IT -- MEASURED, NOT ASSUMED (delta
+--     review round 3, finding [2]). That cut indexed the expression ALONE,
+--     `domain_events((payload ->> 'run_id')) where event_type = 'sweep.run_completed'`, and NO
+--     plan the planner actually chose ever used it: with the kept set held at 200 and the firm's
+--     history grown 1,000 -> 6,000 -> 30,000 receipts, section 1's join stayed a Merge Join over a
+--     Seq Scan of `clara.domain_events` (3.3 / 7.2 / 134.2 ms), and DROPPING the index changed
+--     nothing (2.2 / 4.9 / 96.9 ms -- if anything faster). An index nobody reads is a write cost
+--     on every one of the 288 sweep receipts a firm appends a day, so it does not stay.
+--
+--     WHAT EARNS ITS PLACE IS THE COMPOSITE, and it only earns it TOGETHER WITH THE LATERAL FENCE
+--     in section 1: `(firm_id, (payload ->> 'run_id')) where event_type = 'sweep.run_completed'`
+--     matches the WHOLE correlated predicate -- the firm bound and the run reference -- so one
+--     kept run is one index scan returning one row, with no BitmapAnd against
+--     `domain_events_pkey` (the single-column cut's plan re-read the firm's ENTIRE history per
+--     probe: `Bitmap Index Scan[domain_events_pkey] rows=30031 x200`, 469 ms). MEASURED at the
+--     same three loads, kept set fixed at 200: 1.8 / 1.9 / 1.6 ms -- FLAT. That is the cost of the
+--     KEPT SET, which is what this section's first line claims and what the single-column cut
+--     could not deliver.
 --
 --     AN INDEX IS NOT A WRITE. `clara.domain_events` carries the estate's append-only/no-truncate
 --     belts (`t_domain_events_append_only`) and an immutability trigger; those are row triggers on
@@ -211,13 +225,18 @@ set role clara_fn_owner;
 --     (0178:454-455, an index ON a `->>` expression, joined the same cast-the-other-side way).
 -- ==============================================================================================
 create index ix_domain_events_sweep_run
-  on clara.domain_events((payload ->> 'run_id'))
+  on clara.domain_events(firm_id, (payload ->> 'run_id'))
   where event_type = 'sweep.run_completed';
 comment on index clara.ix_domain_events_sweep_run is
-  '#728. The sweep receipt that reports a given clara.sweep_runs id. Partial on the receipt type '
-  'and built ON THE TEXT EXPRESSION, because clara._sweep_events_with_effect compares '
-  'payload->>''run_id'' to sr.id::text rather than casting free jsonb text to uuid (0183 section 1, '
-  'wall four) -- an index on a different expression would never be matched.';
+  '#728. The sweep receipt of a given firm that reports a given clara.sweep_runs id. Partial on '
+  'the receipt type and COMPOSITE on (firm_id, payload->>''run_id''), which is the whole of '
+  'clara._sweep_events_with_effect''s correlated predicate: the firm bound (wall b) and the run '
+  'reference, so one kept run is ONE index scan returning ONE row. Built ON THE TEXT EXPRESSION '
+  'because that helper compares payload->>''run_id'' to sr.id::text rather than casting free jsonb '
+  'text to uuid (0183 section 1, wall four) -- an index on a different expression would never be '
+  'matched. The expression-ONLY form this replaced was never chosen by any plan at any load '
+  '(1k/6k/30k receipts, kept set fixed at 200) and, when forced, cost 469 ms because the planner '
+  'AND-ed it with domain_events_pkey and re-read the firm''s whole history per probe.';
 
 create index ix_sweep_runs_firm_effect
   on clara.sweep_runs(firm_id)
@@ -303,18 +322,73 @@ comment on index clara.ix_sweep_runs_firm_effect is
 --    PostgREST pools long-lived connections, so that is every Activity read from the sixth on.
 --    The rule this file now keeps: NEVER one statement with `x is null or ...` in a plpgsql body
 --    two callers share. Each caller gets its own function, and each function's single statement
---    gets its own cached plan whose generic form is safe because its shape is FIXED:
+--    gets its own cached plan whose shape is FIXED -- necessary, and (the next paragraph
+--    measures it) not sufficient:
 --      * clara._sweep_events_with_effect()  -- the firm's kept receipt ids (the FEED's shape).
 --      * clara._sweep_event_has_effect(uuid) -- one receipt, yes or no (the DETAIL door's shape).
---    Both are bounded by the KEPT set thanks to section 0b's two indexes, not by the history.
 --    An absent event, another firm's, a non-sweep, an unresolvable run and a zero-effect run all
 --    answer NO ROW / false, which is exactly the safe default both callers want.
+--
+--    …AND SPLITTING THE CALLERS WAS NOT ENOUGH: THE FIRM IS STILL A PARAMETER (delta review
+--    round 3, 2026-09-11, BLOCKER [0]). The split lowered the cliff; it did not remove it. The
+--    set form's one remaining variable is `c.firm`, which plpgsql passes as `$1`, and a GENERIC
+--    plan estimates `sr.firm_id = $1` at the per-firm AVERAGE of a MULTI-TENANT table -- which is
+--    exactly wrong for any firm whose sweep history is above average, i.e. every firm this ticket
+--    is about. MEASURED on a PRISTINE database (fresh 0183 chain, 1,500 sibling firms sweeping,
+--    4,000 receipts / 200 kept for the caller, ANALYZE inside the transaction, ONE session,
+--    default plan_cache_mode): calls 1-5 of `clara._sweep_events_with_effect()` took
+--    4.9/4.4/4.1/4.2/4.3 ms and calls 6-10 took 174.1/177.3/178.0/168.1/161.6 ms -- a 35x step at
+--    exactly the sixth execution, the plpgsql plan-cache boundary. No rewrite of the statement can
+--    close this: a parameter is a parameter.
+--
+--    SO THE FUNCTION ITSELF PINS CUSTOM PLANS. `set plan_cache_mode = force_custom_plan` sits on
+--    BOTH helpers beside their `set search_path`; a function-level GUC is in force for the
+--    duration of the call, so every statement plpgsql caches inside these bodies is re-planned
+--    against the REAL firm id, every time. It costs one planning pass (~1 ms against a 4 ms
+--    query) and it is the only remedy no future edit can quietly undo, because it does not depend
+--    on the shape of the statement at all. Same load, same session, after: 4.9/4.4/4.1/4.2/4.3/
+--    4.3/4.9/4.7/4.6/4.8 ms -- FLAT across the boundary. `explain (generic_plan)` of the bare
+--    statement text still renders that Nested Loop; it is simply never the plan these functions
+--    run, which is why af.20 pins the plan the catalog says will BE run (proconfig) and the plan
+--    the planner actually chooses (`explain (analyze)`), and never the generic rendering.
+--
+--    AND THE COST IS BOUNDED BY THE KEPT SET, WHICH TOOK A LATERAL FENCE (delta review round 3,
+--    finding [2]). Written as a plain join, the planner reads the firm's WHOLE receipt history
+--    (Merge Join over a Seq Scan: 3.3 / 7.2 / 134.2 ms at 1,000 / 6,000 / 30,000 receipts with the
+--    kept set held at 200) and never touches section 0b's receipt index. `cross join lateral
+--    (... offset 0)` is what stops the planner flattening the correlated probe back into that
+--    join -- measured: WITHOUT the `offset 0` the lateral is flattened and the plan is the same
+--    Merge Join + Seq Scan (97-136 ms at 30,000); WITH it, and with the composite index of
+--    section 0b, the plan is `Nested Loop -> Index Scan using ix_domain_events_sweep_run
+--    (loops=200, 1 row each)` at 1.8 / 1.9 / 1.6 ms -- the same cost at 3.5 days, 21 days and 105
+--    days of sweeping. `offset 0` is an optimisation fence and nothing else: no LIMIT, no
+--    ordering, so the rows it yields are exactly the join's rows (a run named by two receipts
+--    still contributes both).
+--
+--    AND BOTH REMEDIES STAY, WHICH IS WORTH SAYING BECAUSE THEY OVERLAP. Once the composite index
+--    and the fence are in, the GENERIC plan for this statement is the same Nested Loop -> Index
+--    Scan the custom plan is, so at the loads above the flip no longer shows even with the
+--    plan_cache_mode clause removed (measured on the fixed chain, clause dropped by ALTER
+--    FUNCTION: 1.8/1.2/1.0/1.0/0.9/0.9/0.8/0.7/0.7/0.7 ms at 4,000 receipts, and
+--    27.6/19.1/22.3/26.8/22.5/22.3/19.8/27.8/27.7/33.8 ms at 30,000 with 1,500 kept). That is a
+--    STATISTICS ACCIDENT, not a guarantee: the generic estimate for `sr.firm_id = $1` is still
+--    the per-firm average, and it is the estimate -- not the index -- that decides which plan is
+--    cheapest on a table whose shape this file cannot see. The clause is what makes the answer
+--    independent of that, for ~1 ms a call, and af.20's catalog arm is what keeps it here (it is
+--    the arm that reds when the clause alone is removed; the wall-clock arm, on this fixed body,
+--    does not).
 -- ==============================================================================================
--- THE FEED'S SHAPE: the whole kept set of this firm, no parameters at all, so the one statement
--- below has exactly one plan and that plan's generic form is the same join as its custom form.
+-- THE FEED'S SHAPE: the whole kept set of this firm. One statement, one plan, re-planned per call
+-- against the real firm id (plan_cache_mode above), probing ONE receipt per kept run.
 create function clara._sweep_events_with_effect()
 returns table(event_id uuid)
-  language plpgsql stable security definer set search_path = clara, pg_temp as $$
+  language plpgsql stable security definer
+  set search_path = clara, pg_temp
+  -- THE FIRM IS A PARAMETER AND ALWAYS WILL BE: re-plan every call against its real value rather
+  -- than let plpgsql settle on a generic plan built for the per-firm average. See this section's
+  -- header for the 35x step at the sixth call this removes, and its cost (~1 ms of planning).
+  set plan_cache_mode = force_custom_plan
+  as $$
 declare c record;
 begin
   -- (a) THE FLOOR, FIRST and unconditionally: a caller below bookkeeper learns nothing at all --
@@ -324,16 +398,23 @@ begin
   -- Driven from clara.sweep_runs THROUGH ix_sweep_runs_firm_effect (section 0b): the rows this
   -- reads are the firm's runs that DID something, and each one probes at most one receipt through
   -- ix_domain_events_sweep_run. The firm's zero-effect history is never touched.
-  select de.id
+  select e.id
     from clara.sweep_runs sr
-    join clara.domain_events de
-      -- (b) the run must belong to the SAME firm as the event that reports it -- `payload` is a
-      -- free jsonb column no constraint validates, and a run_id alone would cross the boundary.
-      on de.firm_id = sr.firm_id
-     -- (c) …and the event must be a sweep receipt.
-     and de.event_type = 'sweep.run_completed'
-     -- …compared as TEXT, never cast to uuid: see this section's header, wall four.
-     and de.payload ->> 'run_id' = sr.id::text
+    cross join lateral (
+      select de.id
+        from clara.domain_events de
+        -- (b) the run must belong to the SAME firm as the event that reports it -- `payload` is a
+        -- free jsonb column no constraint validates, and a run_id alone would cross the boundary.
+       where de.firm_id = sr.firm_id
+         -- (c) …and the event must be a sweep receipt.
+         and de.event_type = 'sweep.run_completed'
+         -- …compared as TEXT, never cast to uuid: see this section's header, wall four.
+         and de.payload ->> 'run_id' = sr.id::text
+         -- THE FENCE, and it is load-bearing rather than decorative: without it the planner pulls
+         -- this subquery up into a plain join and reads the firm's whole history (measured in this
+         -- section's header). No LIMIT and no ORDER BY, so the rows are exactly the join's rows.
+       offset 0
+    ) e
    where sr.firm_id = c.firm
      and sr.drafted_count + sr.posted_count > 0;
 end $$;
@@ -349,15 +430,24 @@ comment on function clara._sweep_events_with_effect() is
   'clara_authenticated-granted and therefore PostgREST-reachable directly despite the leading '
   'underscore. TAKES NO ARGUMENT ON PURPOSE: the optional-parameter form it replaced shared one '
   'cached plan with the detail door and flipped to a generic Nested Loop on the 6th call of a '
-  'session (13.8 s a page, measured) -- see 0183 section 1. The point lookup is '
+  'session (13.8 s a page, measured) -- see 0183 section 1. PINS plan_cache_mode = '
+  'force_custom_plan, because the session firm is still a parameter and a generic plan estimates '
+  'it at the per-firm average of a multi-tenant table (4 ms -> 174 ms at the 6th call, measured); '
+  'and probes one receipt per KEPT run through a lateral fence, so its cost is the kept set and '
+  'not the firm''s 288-a-day receipt history. The point lookup is '
   'clara._sweep_event_has_effect(uuid).';
 
 -- THE DETAIL DOOR'S SHAPE: one receipt, yes or no. A SEPARATE function, not a parameter on the
--- one above, so its statement gets its OWN cached plan -- and that plan's generic form is safe
--- because `de.id = $2` really does select one row, which is exactly what the estimate says.
+-- one above, so its statement gets its OWN cached plan -- re-planned per call for the same reason
+-- the set form's is, and for symmetry: `de.id = $2` really does select one row, but `sr.firm_id =
+-- $1` is the same multi-tenant average the set form flipped on, and a helper whose two halves
+-- disagree about their own plan discipline is a helper someone will later "tidy" the wrong way.
 create function clara._sweep_event_has_effect(p_event uuid)
 returns boolean
-  language plpgsql stable security definer set search_path = clara, pg_temp as $$
+  language plpgsql stable security definer
+  set search_path = clara, pg_temp
+  set plan_cache_mode = force_custom_plan
+  as $$
 declare c record; v_has boolean;
 begin
   -- The SAME floor, restated: this function is granted and therefore PostgREST-reachable too, and
@@ -385,7 +475,8 @@ comment on function clara._sweep_event_has_effect(uuid) is
   'non-sweep, an unresolvable or non-uuid run_id and a zero-effect run are all FALSE -- the same '
   'answer, so the boolean is no existence oracle. Bookkeeper-floored (clara._human_ctx) and '
   'self-scoped to the session firm for the same reason the set form is. Separate from the set '
-  'form so the two callers never share one cached plan: see 0183 section 1.';
+  'form so the two callers never share one cached plan, and pins plan_cache_mode = '
+  'force_custom_plan for the same reason the set form does: see 0183 section 1.';
 
 -- ==============================================================================================
 -- 2. clara.list_activity -- RECUT. Full 0181 body (sha e8c3b7b8..., pinned above); the ONLY
@@ -959,6 +1050,26 @@ begin
     raise exception 'activity_sweep_attribution tail: the optional-parameter clara._sweep_events_with_effect(uuid) still resolves -- the two callers must not share one cached plan'
       using errcode = 'CLR10';
   end if;
+  -- BOTH helpers pin custom plans. This is the remedy for the generic-plan flip (section 1), and
+  -- it is asserted HERE rather than only in the battery because a body re-shipped without the
+  -- clause answers correctly and slowly -- the failure mode a correctness test cannot see.
+  select count(*) into v_n from pg_proc p
+   where p.pronamespace = 'clara'::regnamespace
+     and p.proname in ('_sweep_events_with_effect', '_sweep_event_has_effect')
+     and 'plan_cache_mode=force_custom_plan' = any(coalesce(p.proconfig, '{}'::text[]));
+  if v_n <> 2 then
+    raise exception 'activity_sweep_attribution tail: % of 2 sweep helpers pin plan_cache_mode=force_custom_plan -- without it the session firm is planned at the per-firm average and the 6th call of a session flips to a generic Nested Loop', v_n
+      using errcode = 'CLR10';
+  end if;
+  -- …and both still pin their search_path, which the clause above sits BESIDE and never replaces.
+  select count(*) into v_n from pg_proc p
+   where p.pronamespace = 'clara'::regnamespace
+     and p.proname in ('_sweep_events_with_effect', '_sweep_event_has_effect')
+     and 'search_path=clara, pg_temp' = any(coalesce(p.proconfig, '{}'::text[]));
+  if v_n <> 2 then
+    raise exception 'activity_sweep_attribution tail: % of 2 sweep helpers still pin search_path=clara, pg_temp', v_n
+      using errcode = 'CLR10';
+  end if;
   -- Section 0b's two indexes, without which the kept-set read is a scan of the firm's whole
   -- append-only sweep history.
   select count(*) into v_n from pg_class c join pg_namespace n on n.oid = c.relnamespace
@@ -1049,5 +1160,5 @@ begin
       using errcode = 'CLR10';
   end if;
 
-  raise notice 'activity_sweep_attribution tail: OK -- clara.list_activity/get_activity_event still SECURITY INVOKER, PUBLIC-revoked, clara_authenticated-granted, and now exclude a zero-effect sweep.run_completed row (relabelling a kept one to kind=agent, actor untouched); clara._sweep_events_with_effect() (the feed''s set) and clara._sweep_event_has_effect(uuid) (the detail door''s point lookup) are the two SECURITY DEFINER helpers this needed -- ONE query shape each, so neither caller can drag the other onto a generic plan, both bounded by ix_sweep_runs_firm_effect/ix_domain_events_sweep_run (bookkeeper-floored and self-scoped to the session firm inside its own body, read once per call rather than once per row, clara.sweep_runs itself still ungranted to clara_authenticated); clara.list_spoken_for_documents is a new bookkeeper+ SECURITY DEFINER read, clara_authenticated-only, reachable by no agent/wake/runtime role, unioning a live entry_evidence_links binding with an approved not-reversed document-coding binding.';
+  raise notice 'activity_sweep_attribution tail: OK -- clara.list_activity/get_activity_event still SECURITY INVOKER, PUBLIC-revoked, clara_authenticated-granted, and now exclude a zero-effect sweep.run_completed row (relabelling a kept one to kind=agent, actor untouched); clara._sweep_events_with_effect() (the feed''s set) and clara._sweep_event_has_effect(uuid) (the detail door''s point lookup) are the two SECURITY DEFINER helpers this needed -- ONE query shape each AND plan_cache_mode = force_custom_plan on both, so neither caller can drag the other onto a shared cached plan and neither can be planned for the per-firm average of a multi-tenant table (measured: 4 ms -> 174 ms from the 6th call of a session without it, flat with it); the set form probes ONE receipt per KEPT run through a lateral fence and ix_domain_events_sweep_run (firm_id, payload->>''run_id''), measured flat at 1.8/1.9/1.6 ms across 1,000/6,000/30,000 receipts of history, while ix_sweep_runs_firm_effect supplies the kept runs themselves (bookkeeper-floored and self-scoped to the session firm inside its own body, read once per call rather than once per row, clara.sweep_runs itself still ungranted to clara_authenticated); clara.list_spoken_for_documents is a new bookkeeper+ SECURITY DEFINER read, clara_authenticated-only, reachable by no agent/wake/runtime role, unioning a live entry_evidence_links binding with an approved not-reversed document-coding binding.';
 end $tail$;
