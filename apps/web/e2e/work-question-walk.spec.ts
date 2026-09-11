@@ -334,10 +334,16 @@ test("B4: the SAME question is answered from Needs-you, and the row leaves witho
   // stable landmark this list lives under — the section's own heading.
   const focused = await page.evaluate(() => {
     const el = document.activeElement;
-    return { tag: el?.tagName ?? null, text: (el?.textContent ?? "").trim().slice(0, 40) };
+    return {
+      tag: el?.tagName ?? null,
+      text: (el?.textContent ?? "").trim().slice(0, 40),
+      tabindex: el?.getAttribute("tabindex") ?? null,
+    };
   });
   expect(focused.tag, "focus was dumped onto the document body when the row disappeared").not.toBe("BODY");
   expect(focused.tag, "focus landed on the section heading this list is rendered under").toBe("H2");
+  expect(focused.text, "…this list's OWN heading, not some other section's").toContain("Needs you");
+  expect(focused.tabindex, "made programmatically focusable, and NOT a tab stop").toBe("-1");
   await scan(page, "needs-you after the question was answered inline");
 });
 

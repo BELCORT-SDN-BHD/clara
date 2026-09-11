@@ -86,9 +86,29 @@ export async function focusAfterRowReload(
   act: (fn: () => Promise<void>) => Promise<boolean>,
   getTrigger: () => HTMLElement | null,
   landmark: HTMLElement | null,
+  afterFlush: () => Promise<void> = nextPaint,
 ): Promise<void> {
   await act(async () => undefined);
+  // LET REACT COMMIT THE REMOVAL BEFORE ASKING WHERE TO PUT FOCUS. `act()` resolves when the RELOAD
+  // resolves, which is one state update BEFORE the row is actually unmounted — MEASURED in a browser
+  // as `trigger.isConnected === true` at that instant, so the old code focused a node React removed
+  // microseconds later and the browser dropped focus to `<body>`: the precise §4 violation this
+  // whole seam exists to prevent, reproduced one tick further along. One frame plus a macrotask is
+  // after the commit, and the `isConnected`/ref checks below then answer about the settled DOM.
+  await afterFlush();
   restoreFocusAfterRow(getTrigger(), landmark);
+}
+
+/** One rendered frame, then a macrotask — the point after which React has committed. Falls back to
+ *  a plain macrotask where `requestAnimationFrame` is absent (the RTL harness). */
+function nextPaint(): Promise<void> {
+  return new Promise((resolve) => {
+    if (typeof globalThis.requestAnimationFrame === "function") {
+      globalThis.requestAnimationFrame(() => setTimeout(resolve, 0));
+    } else {
+      setTimeout(resolve, 0);
+    }
+  });
 }
 
 /** Put focus somewhere a person can work from, AFTER the list has settled. */
