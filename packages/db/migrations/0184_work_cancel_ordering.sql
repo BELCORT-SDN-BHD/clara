@@ -282,13 +282,24 @@ comment on function clara._work_door_ctx(uuid,uuid,text,text,text,text) is
 -- (§B), the cancel door converges before it decides (§G), the runtime's reconciler converges what it
 -- finds (reconciler-work.mjs §C), and all three land here so the RECEIPT LAW is stated once.
 -- Returns the Work status it wrote, or null when there was nothing to converge.
-create function clara._converge_work_terminal(p_work uuid, p_task_status text) returns text
+create function clara._converge_work_terminal(p_work uuid, p_task uuid, p_task_status text)
+  returns text
   language plpgsql security definer set search_path = clara, pg_temp as $$
 declare v_receipt jsonb; v_status text; v_current text; v_task uuid;
 begin
   select w.status, w.current_task_id into v_current, v_task
     from clara.accounting_work w where w.id = p_work for update;
   if v_current is null then return null; end if;
+  -- A RUN SPEAKS ONLY FOR THE WORK IT IS STILL ON. `clara.retry_accounting_work` (0178) leaves the
+  -- OLD run terminal and points `current_task_id` at a NEW one, so a LATE report about the old run
+  -- -- a durable settle step re-executing after an uncheckpointed crash (`settleWorkStep` is a
+  -- `"use step"`, and the respawn-before-checkpoint shape is MEASURED on the rig), an operator
+  -- replay, a sweep row read before the retry -- describes a run this Work has moved on from.
+  -- Converging from it would write a terminal over a live run, cancel the NEW run's pending
+  -- question, and leave the posting core refusing that run for ever (CLR13 `work_settled`): the
+  -- stranded pair this helper exists to repair, created by the repair itself. Nothing is written
+  -- and the caller is told so; the run it asked about keeps its own terminal, which is true.
+  if v_task is distinct from p_task then return null; end if;
   if v_current in ('completed','refused','failed','cancelled','expired') then return null; end if;
   if p_task_status is null or p_task_status not in ('completed','failed','cancelled','expired') then
     return null;
@@ -329,11 +340,13 @@ begin
       'by_receipt', (v_receipt is not null)));
   return v_status;
 end $$;
-revoke all on function clara._converge_work_terminal(uuid,text) from public;
-comment on function clara._converge_work_terminal(uuid,text) is
-  '#630: converge a NON-terminal Work whose run has already ended. Receipt first (completed), then '
-  'the run''s own terminal. The one place the receipt law is written for the stranded-pair belts in '
-  'the mirror, the cancel door and the runtime reconciler.';
+revoke all on function clara._converge_work_terminal(uuid,uuid,text) from public;
+comment on function clara._converge_work_terminal(uuid,uuid,text) is
+  '#630: converge a NON-terminal Work whose CURRENT run has already ended. Receipt first '
+  '(completed), then the run''s own terminal. Takes the run it is reporting about and writes '
+  'nothing when that run is no longer the Work''s: a retry or a takeover must survive a late '
+  'settle. The one place the receipt law is written for the stranded-pair belts in the mirror, the '
+  'cancel door and the runtime reconciler.';
 
 -- =====================================================================================
 -- §A  WHO THE WORK RUNS AS, AND WHO ASKED FOR IT — two facts that were one column.
@@ -613,7 +626,7 @@ declare
   t record; v_task_status text; v_err text; v_work_status text;
   v_receipt jsonb; v_outcome text; v_overridden text;
   v_translated text; v_error_out jsonb;          -- #630
-  v_converged text;                              -- #630
+  v_converged text; v_work_task uuid;            -- #630
 begin
   if p_outcome is null or p_outcome not in ('completed','refused','failed','cancelled','expired') then
     raise exception 'unknown settle outcome %', p_outcome using errcode='CLR10',
@@ -644,7 +657,8 @@ begin
   -- This is the lane's global lock order (accounting_work -> agent_tasks), and it is also what
   -- makes the receipt read below a decision rather than a guess: a posting transaction that is
   -- mid-flight holds this row, so this settle waits and then sees its receipt.
-  perform 1 from clara.accounting_work w where w.id = t.work_id for update;
+  select w.current_task_id into v_work_task
+    from clara.accounting_work w where w.id = t.work_id for update;
   select * into t from clara.agent_tasks at where at.id = p_task;
 
   if t.status in ('completed','failed','cancelled','expired') then
@@ -653,13 +667,20 @@ begin
     -- `clara.cancel_agent_task` can produce in one click, and the estate must not answer "already
     -- settled" about a Work that is still showing `queued` to a human. Converges by the receipt
     -- law; a Work that is already terminal is untouched and `converged` reads null.
-    v_converged := clara._converge_work_terminal(t.work_id, t.status);
+    --
+    -- ...AND ONLY ABOUT THE RUN THIS WORK IS STILL ON. A settle replayed for a SUPERSEDED run (a
+    -- Retry, or the take-over that retries underneath, moved `current_task_id` on between the
+    -- crash and the respawn) says nothing about the Work: `clara._converge_work_terminal` refuses
+    -- it, and the answer carries `stale_task` so a sweep can count what it saw rather than guess
+    -- from a null. The RUN's own reply is unchanged -- it really is already terminal.
+    v_converged := clara._converge_work_terminal(t.work_id, p_task, t.status);
     return jsonb_build_object('work_id', t.work_id, 'task_id', p_task,
       'task_status', t.status,
       'status', (select w.status from clara.accounting_work w where w.id = t.work_id),
       'requested_outcome', p_outcome, 'overridden_by_receipt', false,
       'translated_by_cancel', false,
       'converged', v_converged,
+      'stale_task', (v_work_task is distinct from p_task),
       'replayed', true);
   end if;
 
@@ -761,6 +782,10 @@ begin
     'task_status', v_task_status, 'status', v_work_status,
     'requested_outcome', p_outcome, 'overridden_by_receipt', (v_overridden is not null),
     'translated_by_cancel', (v_translated is not null),
+    -- Always present, so a reader never has to tell "not stale" from "an older settle that did not
+    -- know the word". A live run IS its Work's current one: `clara.retry_accounting_work` refuses
+    -- to re-open a Work whose run has not settled (0178:1009-1014), so this reads false here.
+    'stale_task', (v_work_task is distinct from p_task),
     'replayed', false);
 end $$;
 revoke all on function clara.settle_work_run(uuid,text,text,jsonb,jsonb) from public;
@@ -1207,7 +1232,7 @@ begin
       perform clara.settle_work_run(v_task, 'completed', null, null, v_receipt);
     elsif w.status not in ('completed','refused','failed','cancelled','expired') then
       -- A terminal run (or none at all) and a Work that never heard: converge on the receipt law.
-      perform clara._converge_work_terminal(p_work, coalesce(v_task_status, 'completed'));
+      perform clara._converge_work_terminal(p_work, v_task, coalesce(v_task_status, 'completed'));
     end if;
     perform clara._audit(w.firm_id, p_author, null, null, 'cancel_accounting_work', null,
       jsonb_build_object('work', p_work, 'task', w.current_task_id, 'op_key', p_op_key,
@@ -1233,7 +1258,7 @@ begin
   -- that), then answer about the Work that actually exists, under the SAME `already_terminal` word
   -- arm 2 speaks, so no surface needs new vocabulary.
   if v_task is not null and v_task_status in ('completed','failed','cancelled','expired') then
-    perform clara._converge_work_terminal(p_work, v_task_status);
+    perform clara._converge_work_terminal(p_work, v_task, v_task_status);
     select * into w from clara.accounting_work aw where aw.id = p_work;
     v_result := jsonb_build_object('work_id', p_work, 'task_id', w.current_task_id,
       'status', w.status, 'cancelled', false, 'reason', 'already_terminal', 'replayed', false);
@@ -1898,7 +1923,7 @@ begin
   for v_src in select s from unnest(array[
       'clara._work_cancelled_error()',
       'clara._work_door_ctx(uuid,uuid,text,text,text,text)',
-      'clara._converge_work_terminal(uuid,text)']) s loop
+      'clara._converge_work_terminal(uuid,uuid,text)']) s loop
     if to_regprocedure(v_src) is null then
       raise exception '#630 tail: % did not land', v_src using errcode='CLR10';
     end if;

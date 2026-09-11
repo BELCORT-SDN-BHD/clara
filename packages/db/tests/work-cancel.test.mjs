@@ -19,7 +19,7 @@ import {
   admitJournalWork, claimWorkRun, mintClientObo, wakeRecordJournalEntry, freshWorkClient,
   settleWorkRun, cancelAgentTask, taskRow, workRow, receiptsForWork, entriesForClient,
   entryCount, tasksForWork,
-  cancelAccountingWork, takeOverAccountingWork, workAuthoritySnapshot,
+  cancelAccountingWork, takeOverAccountingWork, retryAccountingWork, workAuthoritySnapshot,
   deactivateMember, demoteMember, interruptionsForTask, responsibleOf, timelineEvents,
   basis, REASON, CLR, CANCEL_REASON, CANCEL_ANSWER, assertPair, assertRaises,
   rootQuery, humanQuery, roleQuery, opk, ROLES, insertUser, addMember,
@@ -1129,4 +1129,83 @@ test("wc.32 no cascade edge exists from a chat turn's task to the Work that turn
   assert.equal(/update clara\.accounting_work/.test(src), false,
     "wc.32 …and the task-level door writes no Work row itself: the mirror is the only path, and it "
     + "is guarded on this task's own work_id");
+});
+
+// -------------------------------------------------------------------------------------------
+// A LATE SETTLE SPEAKS ONLY FOR THE RUN THE WORK IS STILL ON.
+//
+// The convergence belt (wc.26) exists so a terminal run under a live Work is repaired rather than
+// left stranded. It must not become a second way to KILL a live Work: `settleWorkStep` is a
+// durable step (`claraWork.v1.impl.ts:392`) whose re-execution after an uncheckpointed crash is
+// the measured respawn shape, and between the crash and the respawn a human may press Retry (or a
+// colleague Take responsibility, which retries underneath). The replayed settle then arrives about
+// a task that is no longer `accounting_work.current_task_id`.
+// -------------------------------------------------------------------------------------------
+test("wc.33 a replayed settle for a SUPERSEDED run never speaks for the Work its retry re-opened", async (t) => {
+  if (await gateCancel(t)) return;
+  const w = await running();
+  const before = await entryCount(w.client);
+
+  // The run ends failed, the Work with it — and the settle step's result is never checkpointed.
+  const first = await settleWorkRun({
+    task: w.task_id, outcome: "failed", errorCode: "internal",
+    error: { code: "internal", reason: "run_failed", message: "gone", recoverable: true },
+  });
+  assert.equal(first.replayed, false, "wc.33 precondition: the first settle is the real one");
+  assert.equal((await workRow(w.work_id)).status, "failed", "wc.33 precondition: the Work heard it");
+
+  // A human presses Retry: a NEW run becomes the Work's current one, and it reaches a question.
+  const retried = await retryAccountingWork({ work: w.work_id, author: BOB() });
+  const task2 = retried.task_id;
+  assert.notEqual(task2, w.task_id, "wc.33 precondition: Retry opened a SECOND run");
+  await claimWorkRun({ task: task2, runId: opk("run2") });
+  const question = await park(task2);
+  assert.equal((await workRow(w.work_id)).status, "awaiting_input",
+    "wc.33 precondition: the live Work is parked on the new run's question");
+
+  // …and NOW the crashed run's uncheckpointed settle step re-executes for the OLD task.
+  const replay = await settleWorkRun({
+    task: w.task_id, outcome: "failed", errorCode: "internal",
+    error: { code: "internal", reason: "run_failed", message: "gone", recoverable: true },
+  });
+  assert.equal(replay.replayed, true, "wc.33 the old run is not settled twice");
+  assert.equal(replay.converged, null, "wc.33 …and it converges NOTHING: it is not this Work's run");
+  assert.equal(replay.stale_task, true, "wc.33 …and the answer says exactly that, by name");
+
+  const row = await workRow(w.work_id);
+  assert.equal(row.status, "awaiting_input", "wc.33 the LIVE Work is untouched by the dead run's word");
+  assert.equal(row.current_task_id, task2, "wc.33 …still on the run the human retried onto");
+  assert.equal(row.error, null, "wc.33 …with no error written over it");
+  assert.equal((await taskRow(task2)).status, "awaiting_input", "wc.33 the live run is untouched too");
+  const qs = await interruptionsForTask(task2);
+  assert.equal(qs.find((q) => q.id === question)?.status, "pending",
+    "wc.33 …and its pending question was not cancelled out from under it");
+  assert.equal(await entryCount(w.client), before, "wc.33 nothing was posted");
+
+  // The belt still works for the pair it exists for: break THIS Work's own current run and replay.
+  await rootQuery("update clara.agent_interruptions set status='cancelled' where task_id=$1", [task2]);
+  await rootQuery("update clara.agent_tasks set status='cancelled' where id=$1", [task2]);
+  await rootQuery("update clara.accounting_work set status='queued', error=null where id=$1", [w.work_id]);
+  const repair = await settleWorkRun({ task: task2, outcome: "cancelled" });
+  assert.equal(repair.stale_task, false, "wc.33 a replay for the CURRENT run is not stale");
+  assert.equal(repair.converged, "cancelled", "wc.33 …and it still repairs the broken pair");
+  assert.equal((await workRow(w.work_id)).status, "cancelled", "wc.33 the row moved");
+});
+
+test("wc.33b the cancel door's convergence arm is bound to the Work's OWN current run", async (t) => {
+  if (await gateCancel(t)) return;
+  // The door reads `w.current_task_id` under the lock and converges from THAT row, so the arm
+  // cannot be pointed at a superseded run — pinned on the door's own source, because the door has
+  // no parameter through which a stale task could be handed to it.
+  const src = await rootQuery(
+    "select prosrc from pg_proc where oid='clara.cancel_accounting_work(uuid,uuid,text)'::regprocedure");
+  const body = src.rows[0].prosrc;
+  assert.equal(/_converge_work_terminal\(p_work, v_task,/.test(body), true,
+    "wc.33b every convergence the door asks for names the run it read under the lock");
+  assert.equal(/_converge_work_terminal\(p_work, coalesce/.test(body), false,
+    "wc.33b …and none of them omits it");
+  const helper = await rootQuery(
+    "select pg_get_function_identity_arguments(oid) as args from pg_proc where proname='_converge_work_terminal'");
+  assert.equal(helper.rows[0].args, "p_work uuid, p_task uuid, p_task_status text",
+    "wc.33b the helper cannot be called without naming the run it is reporting about");
 });

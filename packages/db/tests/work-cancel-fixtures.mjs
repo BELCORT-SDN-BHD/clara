@@ -104,6 +104,17 @@ export async function cancelAccountingWork({ work, author, opKey = null }) {
   return r.rows[0].result;
 }
 
+/** Re-open a terminal Work through 0178's own door: a NEW queued task becomes
+ *  `accounting_work.current_task_id` and the old, terminal one stays on the row's history. The
+ *  cells that prove a late settle cannot speak for a Work it no longer runs need exactly this. */
+export async function retryAccountingWork({ work, author, opKey = null }) {
+  const r = await roleQuery(RUNTIME, namedCall("retry_accounting_work", [
+    { name: "p_work", cast: "uuid" }, { name: "p_author", cast: "uuid" },
+    { name: "p_op_key", cast: "text" },
+  ]), [work, author, opKey ?? opk("w630-retry")]);
+  return r.rows[0].result;
+}
+
 export async function takeOverAccountingWork({ work, author, opKey = null, basisDigest = null }) {
   const r = await roleQuery(RUNTIME, namedCall("take_over_accounting_work", [
     { name: "p_work", cast: "uuid" }, { name: "p_author", cast: "uuid" },

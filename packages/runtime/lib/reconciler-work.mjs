@@ -332,15 +332,24 @@ export const WORK_CANCELLED_ERROR = Object.freeze({
 
 /** Settle an accounting Work terminally (idempotent by task — an already-terminal task returns
  *  `{"replayed":true}` rather than raising). `result` rides to `p_result` so a receipt-aware
- *  `completed` carries the entry it is completed BY, rather than an empty success. */
+ *  `completed` carries the entry it is completed BY, rather than an empty success.
+ *
+ *  RETURNS THE DOOR'S OWN ANSWER, because "I called settle" and "settle wrote something" are
+ *  different facts and only the door knows the second. `stale_task` is true when the run this
+ *  settle is about is no longer `accounting_work.current_task_id` — a Retry or a take-over moved
+ *  the Work onto a new run while this row was in flight — and in that case the Work is deliberately
+ *  untouched (0184 §A0(3)). A caller that counts convergences must count THAT, not its own
+ *  intention. */
 export async function settleWorkTerminal(client, taskId, outcome, errorCode, error, result = null) {
-  await client.query("select clara.settle_work_run($1::uuid, $2::text, $3::text, $4::jsonb, $5::jsonb) as r", [
-    taskId,
-    outcome,
-    errorCode,
-    error == null ? null : JSON.stringify(error),
-    result == null ? null : JSON.stringify(result),
-  ]);
+  const r = await client.query(
+    "select clara.settle_work_run($1::uuid, $2::text, $3::text, $4::jsonb, $5::jsonb) as r", [
+      taskId,
+      outcome,
+      errorCode,
+      error == null ? null : JSON.stringify(error),
+      result == null ? null : JSON.stringify(result),
+    ]);
+  return r?.rows?.[0]?.r ?? null;
 }
 
 /**
@@ -368,6 +377,10 @@ export async function reconcileAccountingWorkTasks(client, deps) {
     // ever settling its Work" is a DIFFERENT fact about the estate from "a run died and the
     // reconciler settled it", and a number that could mean either hides the first.
     workConverged: 0,
+    // …and its twin: a pair that repaired ITSELF between the scan and the settle, because a human
+    // retried the Work onto a live run. Nothing is wrong and nothing was written; a sweep that
+    // counted it as a convergence would report repairs it never made.
+    workConvergeSuperseded: 0,
     // The receipt-aware arm gets its OWN counter for the same C34.1 reason the other three have
     // one: "the run died but the entry is on the books" and "the run died and nothing was posted"
     // are different facts about the estate, and one number that could mean either hides the first.
@@ -423,8 +436,14 @@ export async function reconcileAccountingWorkTasks(client, deps) {
   );
   for (const t of stranded.rows) {
     try {
-      await settleWorkTerminal(client, t.id, "cancelled", null, null, null);
-      out.workConverged += 1;
+      // THE ROW WAS READ BEFORE THE LOCK WAS TAKEN, so between the scan and this call a human may
+      // have pressed Retry (or a colleague Take responsibility) and moved the Work onto a NEW run.
+      // The door refuses to speak for a Work it no longer runs and answers `stale_task`; this
+      // sweep counts what the DOOR did, never what it meant to do — a convergence number that
+      // includes the rows nothing was written for is how a broken pair comes to look repaired.
+      const answer = await settleWorkTerminal(client, t.id, "cancelled", null, null, null);
+      if (answer?.converged != null) out.workConverged += 1;
+      else if (answer?.stale_task === true) out.workConvergeSuperseded += 1;
     } catch (err) {
       out.workSettleFailed += 1;
       log(`[reconcile] accounting-work convergence failed task=${t.id} status=${t.status}: ${err?.message ?? err}`);

@@ -37,15 +37,23 @@ import {
  *  `results` — { [taskId]: <clara.accounting_work.result jsonb> }, what the books say this Work
  *              already recorded. Absent = no result at all, which is the ordinary case.
  *  `settle`  — optional (taskId) => void, to make one settle THROW.
+ *  `settleAnswers` — optional {taskId: jsonb}, the ANSWER `clara.settle_work_run` gives back. The
+ *              default is the ordinary one; a `{stale_task:true, converged:null}` entry is the
+ *              door refusing to speak for a Work that was retried onto a new run while the sweep's
+ *              row was in flight.
  *  `resultRead` — optional (taskId) => void, to make the BOOKS READ throw. */
-function mockWorkClient({ queued = [], open = [], stranded = [], results = {}, settle, resultRead } = {}) {
+function mockWorkClient({ queued = [], open = [], stranded = [], results = {}, settle, settleAnswers = {},
+  resultRead } = {}) {
   const calls = { queuedSelections: [], openSelections: [], strandedSelections: [], settles: [], resultReads: [] };
+  const statements = [];
   const live = new Map(open.map((t) => [t.id, { id: t.id, status: t.status }]));
   const client = {
     calls,
     live,
+    statements,
     query: async (sql, params) => {
       const s = String(sql);
+      statements.push({ sql: s, params });
       if (/kind = 'accounting_work'/.test(s) && /status = 'queued'/.test(s)) {
         calls.queuedSelections.push(queued.map((q) => q.id));
         return { rows: queued.map((q) => ({ id: q.id })), rowCount: queued.length };
@@ -81,7 +89,10 @@ function mockWorkClient({ queued = [], open = [], stranded = [], results = {}, s
           result: result == null ? null : JSON.parse(result),
         });
         live.delete(taskId); // a settled task leaves the open population
-        return { rows: [{ r: { replayed: false } }], rowCount: 1 };
+        return {
+          rows: [{ r: settleAnswers[taskId] ?? { replayed: false, converged: "cancelled", stale_task: false } }],
+          rowCount: 1,
+        };
       }
       throw new Error(`mockWorkClient: unexpected statement ${s}`);
     },
@@ -113,6 +124,7 @@ test("623.reconcile: an un-wired belt is a clean no-op, never a crash", async ()
   assert.deepEqual(out, {
     workReenqueued: 0,
     workConverged: 0,
+    workConvergeSuperseded: 0,
     workSettledCompleted: 0,
     workSettledFailed: 0,
     workSettledExpired: 0,
@@ -508,4 +520,41 @@ test("623.reconcile: neither cancel select names a relation migration 0178 intro
     assert.match(select, /kind/, `${file}'s cancel select reads the kind it must dispatch on`);
     assert.doesNotMatch(select, /accounting_work/, `${file}'s cancel select stays parseable pre-0178`);
   }
+});
+
+// #630 · §A2 COUNTS WHAT THE DOOR DID, NOT WHAT IT MEANT TO DO. The stranded scan reads its rows
+// before it takes any lock, so a human pressing Retry between the scan and the settle is ordinary.
+// `clara.settle_work_run` then refuses to speak for a Work it no longer runs and answers
+// `stale_task` with a null `converged`; a sweep that counted its own intention would report a
+// repair it never made — the exact way a broken pair comes to look repaired in the numbers.
+test("630.reconcile: §A2 counts a convergence only when the door wrote one", async () => {
+  const client = mockWorkClient({
+    stranded: [{ id: "repaired", status: "cancelled" }, { id: "superseded", status: "failed" }],
+    settleAnswers: {
+      repaired: { replayed: true, converged: "cancelled", stale_task: false },
+      // The Work moved onto a NEW run between the scan and this call: nothing was written.
+      superseded: { replayed: true, converged: null, stale_task: true },
+    },
+  });
+  const out = await reconcileAccountingWorkTasks(client, { enqueueClaraWork: async () => {}, getRun: () => ({
+    get status() { return Promise.resolve(null); }, cancel: async () => {},
+  }) });
+  assert.deepEqual(client.calls.settles.map((c) => c.taskId), ["repaired", "superseded"],
+    "630.reconcile: both rows are still ASKED — only the door decides which one it may answer for");
+  assert.equal(out.workConverged, 1, "630.reconcile: one pair was actually repaired");
+  assert.equal(out.workConvergeSuperseded, 1, "630.reconcile: …and the retried one is counted apart");
+  assert.equal(out.workSettleFailed, 0, "630.reconcile: a superseded row is not a failure");
+});
+
+// …and the scan itself never offers the door a Work whose current run is a different task: the
+// SQL is joined on `w.current_task_id = t.id`, which is the first of the two belts.
+test("630.reconcile: §A2's scan asks only about runs their Work is still on", async () => {
+  const client = mockWorkClient({ stranded: [] });
+  await reconcileAccountingWorkTasks(client, { enqueueClaraWork: async () => {}, getRun: () => ({
+    get status() { return Promise.resolve(null); }, cancel: async () => {},
+  }) });
+  const scan = client.statements.find((st) => /status in \('completed','failed','cancelled','expired'\)/.test(st.sql));
+  assert.ok(scan, "630.reconcile: the stranded scan ran");
+  assert.match(scan.sql, /w\.current_task_id = t\.id/,
+    "630.reconcile: the scan is bound to the Work's own current run");
 });
