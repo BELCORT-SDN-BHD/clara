@@ -82,4 +82,10 @@ function run(args) {
 console.log("[e2e] building @clara/web before starting the browser walk");
 run(["--filter", "@clara/web", "build"]);
 console.log("[e2e] starting next start and Playwright against the built app");
-run(["--filter", "@clara/web", "exec", "playwright", "test"]);
+// #630 — EXTRA ARGUMENTS REACH PLAYWRIGHT. `pnpm --filter @clara/web e2e -- work-cancel-walk`
+// runs ONE spec through this harness rather than the whole walk. It changes nothing about a bare
+// run (the list is empty), and it exists so a lane can gate on the spec it touched without
+// borrowing the whole suite's wall-clock — the alternative, calling `playwright test` directly,
+// is what makes every sign-in hit the real Supabase (this file's own header states why).
+const passthrough = process.argv.slice(2);
+run(["--filter", "@clara/web", "exec", "playwright", "test", ...passthrough]);

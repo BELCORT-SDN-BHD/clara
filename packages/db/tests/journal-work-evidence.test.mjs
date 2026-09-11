@@ -783,8 +783,13 @@ test("w634.links.shape list_entry_links exposes purpose, source, Work, receipt a
   assert.equal(d.logical_op_id, withDoc.logical_op_id, "links.shape: the operation identity");
   assert.equal(d.purpose, "journal_entry");
   assert.equal(d.basis_origin, "user_direct", "links.shape: how the basis was authored");
-  assert.equal(d.initiator, BOB(), "links.shape: the human behind it, not the agent");
-  assert.equal(d.initiator_role, "bookkeeper");
+  // #630 — THREE FIELDS, THREE FACTS. `clara.accounting_work.initiator` became the human the Work
+  // is EXECUTED AS (clara.take_over_accounting_work moves it), so this door no longer emits it
+  // beside `initiator_role`, which is the ADMISSION snapshot and therefore describes whoever
+  // ASKED. Before a handover all three name the same person, which is the case here.
+  assert.equal(d.initiated_by, BOB(), "links.shape: who ASKED — the human behind it, not the agent");
+  assert.equal(d.initiated_by_role, "bookkeeper", "links.shape: …at the rank they asked at");
+  assert.equal(d.responsible, BOB(), "links.shape: …and who is answerable now, equal until a handover");
   assert.equal(d.document_id, doc.documentId, "links.shape: the source document");
   assert.equal(d.document_source, "work_commit", "links.shape: …and HOW it was bound");
   assert.equal(d.released_at, null,
