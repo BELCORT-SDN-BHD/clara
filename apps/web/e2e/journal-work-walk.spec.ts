@@ -758,3 +758,130 @@ test("#727: the Work detail route hydrates with no React fault in the console", 
   await page.evaluate(() => console.error("e2e-727-collector-probe"));
   expect(faults, "the console collector must actually be receiving errors").toContain("e2e-727-collector-probe");
 });
+
+/**
+ * #727 — THE SAME ROUTE, ARRIVED AT BY A BROWSER THAT HAS BEEN HERE BEFORE.
+ *
+ * WHY A SECOND CELL EXISTS AT ALL. The cell above loads the route in a browser context
+ * Playwright has just minted: empty `localStorage`, empty `sessionStorage`, no cookies
+ * beyond the sign-in the `beforeEach` performed. The owner's browser was nothing like
+ * that — it had been driving this app for a session, so it carried a collapsed-sidebar
+ * cookie, a motion preference, and whatever half-typed drafts the app files. A hydration
+ * mismatch is by definition a disagreement between a render that had NO client state (the
+ * server's) and the first render that did, so persisted state is the one input a fresh
+ * context structurally cannot supply — and therefore the one this cell supplies on purpose.
+ *
+ * WHAT IS SEEDED, AND WHY EACH ONE. Each is a real key this product writes, named with the
+ * module that owns it, not a plausible-looking invention:
+ *   1. `sidebar_state=false` — a COOKIE, and the only seeded item the SERVER can read
+ *      (`app/(firm)/layout.tsx` reads it through `cookies()` and passes `defaultOpen`).
+ *      It changes what the server renders, which is the half of a mismatch a client-side
+ *      seed cannot move.
+ *   2. `clara:motion-preference` (lib/settings/motion-preference.ts's
+ *      `MOTION_LOCAL_STORAGE_KEY`) — the repeat-visit paint cache
+ *      `components/app-shell/motion-preference-sync.tsx` reads.
+ *   3. The work-answer draft (lib/work/questions.ts's `workAnswerDraftKey`) — read in a
+ *      LAZY `useState` INITIALISER at `components/work/work-question-form.tsx:156-157`,
+ *      which is the textbook #418 shape: `globalThis.localStorage` is undefined on the
+ *      server and full on the client, so the two first renders disagree by construction
+ *      wherever that subtree is server-rendered.
+ *   4. The journal draft (`sessionStorage`, lib/work/journal-draft.ts) — the same hazard
+ *      one module over, and the state a person who was mid-entry would be carrying.
+ *
+ * WHAT IS NOT SEEDED, AND WHY NOT: the Clara rail's own state. `lib/clara/threadStore.ts`
+ * is memory-only and says so at :100 ("no localStorage, no reload recovery promised"), and
+ * `railOpen` initialises to `true` at :105 on the server and the client alike — there is no
+ * persisted rail state in this product to carry into a first render.
+ */
+const RETURNING_BROWSER = {
+  /** `MOTION_LOCAL_STORAGE_KEY`, re-typed for the same reason `DRAFT_KEY` above is. */
+  motionKey: "clara:motion-preference",
+  /** `workAnswerDraftKey({userId, firmId, clientId, questionId, version})` — all five
+   *  segments, in that order, joined with "." after the `clara.wq.draft` prefix. */
+  answerDraftKey:
+    `clara.wq.draft.11111111-1111-1111-1111-111111111111.33333333-3333-4333-8333-333333333333.` +
+    `${CLIENT}.${JOURNAL_WORK.parkedCardQuestionId}.1`,
+  /** A HALF-ANSWERED question: the date filled, the amount still missing. A complete draft
+   *  would be a less interesting first render (the form would offer review, not editing). */
+  answerDraft: { posting_date: "2026-09-30" },
+} as const;
+
+test("#727: the Work detail route hydrates clean for a browser carrying a PRIOR VISIT's state", async ({ page, baseURL }) => {
+  const faults: string[] = [];
+  page.on("console", (message) => { if (message.type() === "error") faults.push(message.text()); });
+  page.on("pageerror", (error) => faults.push(error.message));
+
+  // THE COOKIE FIRST, because it is the one the server reads. `addCookies` on the context
+  // rather than `document.cookie` in the page: the value has to be on the REQUEST that
+  // produces the server render, not written after it came back.
+  await page.context().addCookies([
+    { name: "sidebar_state", value: "false", url: baseURL ?? "https://127.0.0.1:3100" },
+  ]);
+  // `addInitScript` runs in a fresh document BEFORE any of the page's own script, so the
+  // values are already in storage when React's first client render reads them — which is
+  // exactly the ordering a returning browser has and a fresh context never does.
+  await page.addInitScript(
+    (seed: { motionKey: string; answerDraftKey: string; answerDraft: unknown; journalKey: string; journalDraft: unknown }) => {
+      try {
+        window.localStorage.setItem(seed.motionKey, "reduced");
+        window.localStorage.setItem(seed.answerDraftKey, JSON.stringify(seed.answerDraft));
+        window.sessionStorage.setItem(seed.journalKey, JSON.stringify(seed.journalDraft));
+      } catch {
+        /* a context with storage blocked would fail the assertions below, loudly */
+      }
+    },
+    {
+      motionKey: RETURNING_BROWSER.motionKey,
+      answerDraftKey: RETURNING_BROWSER.answerDraftKey,
+      answerDraft: RETURNING_BROWSER.answerDraft,
+      journalKey: DRAFT_KEY,
+      journalDraft: {
+        intentKey: "returning-browser-intent",
+        postingDate: "2026-09-01",
+        memo: "Left half-typed in an earlier tab",
+        lines: [
+          { account_code: JOURNAL_WORK.rentAccount, debit_cents: 90_000, credit_cents: 0, description: "" },
+          { account_code: JOURNAL_WORK.bankAccount, debit_cents: 0, credit_cents: 90_000, description: "" },
+        ],
+      },
+    },
+  );
+
+  try {
+    await control(page, { op: "park_card" });
+    await page.goto(`/clients/${CLIENT}/work/${JOURNAL_WORK.parkedCardWorkId}`);
+
+    const workbench = page.locator("[data-firm-workbench]");
+    await expect(workbench.getByText("Waiting for an answer").first()).toBeVisible({ timeout: 15_000 });
+    // THE SEED REACHED THE RENDER — the vacuity control for this whole cell, and the reason
+    // it asserts a VALUE rather than merely that the page loaded. An `addInitScript` that
+    // silently threw, a key whose five segments drifted from `workAnswerDraftKey`, or a
+    // form that stopped reading its draft would each leave this cell walking the same empty
+    // browser the cell above already walks, and it would still be green.
+    await expect(workbench.getByLabel("Posting date").first())
+      .toHaveValue(RETURNING_BROWSER.answerDraft.posting_date);
+    // And the SERVER's half of the seed: the collapsed cookie produced a collapsed shell.
+    // An ATTRIBUTE, not visibility — `collapsible="offcanvas"` collapses the sidebar to
+    // zero width, which is precisely what Playwright calls invisible.
+    await expect(page.locator("[data-slot=sidebar]").first()).toHaveAttribute("data-state", "collapsed");
+    await settle(page);
+
+    // The COMPLETED face too, under the same carried state: a different subtree of this
+    // route (facts, basis table, posted entry) inside the same hydration pass.
+    await page.goto(`/clients/${CLIENT}/work/${JOURNAL_WORK.seededWorkId}`);
+    await expect(page.getByText("Completed", { exact: true }).first()).toBeVisible();
+    await settle(page);
+
+    const react = faults.filter((m) =>
+      /Minified React error #(185|418|423|425)|Maximum update depth exceeded|Hydration failed|hydration-mismatch|didn't match|did not match/i.test(m),
+    );
+    expect(
+      react,
+      "a browser carrying a prior visit's cookie, motion preference and drafts must still hydrate this route clean",
+    ).toEqual([]);
+    await page.evaluate(() => console.error("e2e-727-seeded-collector-probe"));
+    expect(faults, "the console collector must actually be receiving errors").toContain("e2e-727-seeded-collector-probe");
+  } finally {
+    await control(page, { op: "reset" }).catch(() => {});
+  }
+});
