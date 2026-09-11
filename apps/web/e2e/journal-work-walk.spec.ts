@@ -3,6 +3,7 @@ import { expect, test, type Page } from "@playwright/test";
 
 import { ensureRealFocus, watchReactFaults } from "./helpers";
 import { JOURNAL_WORK } from "./journal-work-mock.mjs";
+import { MOTION_LOCAL_STORAGE_KEY } from "../lib/settings/motion-preference";
 
 /**
  * #623 · THE BROWSER LEG for the first persistent Clara successor — journeys C3
@@ -797,25 +798,32 @@ test("#727: the Work detail route hydrates with no React fault in the console", 
  *      (`app/(firm)/layout.tsx:73` reads it through `cookies()` and passes `defaultOpen`).
  *      It is the half of a mismatch a client-side seed cannot move. See the assertion
  *      below for what this build actually did with it.
- *   2. `clara:motion-preference` (lib/settings/motion-preference.ts's
- *      `MOTION_LOCAL_STORAGE_KEY`) — the repeat-visit paint cache
- *      `components/app-shell/motion-preference-sync.tsx` reads.
+ *   2. `MOTION_LOCAL_STORAGE_KEY` (lib/settings/motion-preference.ts) — the repeat-visit
+ *      paint cache `components/app-shell/motion-preference-sync.tsx` reads. The route also
+ *      needs `clara.get_my_preferences()` (the async authority the same sync effect always
+ *      defers to, per that file's own header) answered with `motion: "reduced"` — otherwise
+ *      the fixture's default "nothing saved yet" answer (serve-built.mjs's `get_my_preferences`
+ *      handler) overwrites the cache-seeded hint the instant that fetch resolves, and a
+ *      returning browser's motion preference was never merely a paint-cache question to begin
+ *      with. The `page.route` override below is the SAME per-test pattern
+ *      personal-settings-walk.spec.ts uses for the identical RPC.
  *   3. The work-answer draft (lib/work/questions.ts's `workAnswerDraftKey`) — read in a
  *      LAZY `useState` INITIALISER at `components/work/work-question-form.tsx:156-157`,
  *      which is the textbook #418 shape: `globalThis.localStorage` is undefined on the
  *      server and full on the client, so the two first renders disagree by construction
  *      wherever that subtree is server-rendered.
- *   4. The journal draft (`sessionStorage`, lib/work/journal-draft.ts) — the same hazard
- *      one module over, and the state a person who was mid-entry would be carrying.
  *
- * WHAT IS NOT SEEDED, AND WHY NOT: the Clara rail's own state. `lib/clara/threadStore.ts`
- * is memory-only and says so at :100 ("no localStorage, no reload recovery promised"), and
+ * WHAT IS NOT SEEDED, AND WHY NOT. The Clara rail's own state: `lib/clara/threadStore.ts` is
+ * memory-only and says so at :100 ("no localStorage, no reload recovery promised"), and
  * `railOpen` initialises to `true` at :105 on the server and the client alike — there is no
- * persisted rail state in this product to carry into a first render.
+ * persisted rail state in this product to carry into a first render. AND the journal draft
+ * (`sessionStorage`, lib/work/journal-draft.ts) — a fix-round review found this cell seeding
+ * it anyway: `readJournalDraft` is called from exactly one place, `journal-composer.tsx:168`,
+ * which this route (`WorkDetailView`, components/work/work-detail.tsx) never mounts — so the
+ * seed reached storage and reached nothing else. Its own walk is the composer's hydration
+ * cell above, which mounts the component that actually reads it.
  */
 const RETURNING_BROWSER = {
-  /** `MOTION_LOCAL_STORAGE_KEY`, re-typed for the same reason `DRAFT_KEY` above is. */
-  motionKey: "clara:motion-preference",
   /** `workAnswerDraftKey({userId, firmId, clientId, questionId, version})` — all five
    *  segments, in that order, joined with "." after the `clara.wq.draft` prefix. */
   answerDraftKey:
@@ -835,33 +843,36 @@ test("#727: the Work detail route hydrates clean for a browser carrying a PRIOR 
   await page.context().addCookies([
     { name: "sidebar_state", value: "false", url: baseURL ?? "https://127.0.0.1:3100" },
   ]);
+  // The motion seed's OTHER half — see the doc block's item 2. Without this, the fixture's
+  // generic "nothing saved yet" `get_my_preferences` answer (serve-built.mjs) overwrites the
+  // cache-seeded "reduced" hint the instant `MotionPreferenceSync`'s own fetch resolves,
+  // exactly as that component's header documents ("its answer always wins"). Registered
+  // before `page.goto` so it is in place for the very first navigation, the same
+  // last-registered-wins ordering personal-settings-walk.spec.ts's `installStatefulPreferences`
+  // relies on.
+  await page.route("**/e2e-supabase/rest/v1/rpc/get_my_preferences", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ version: 1, interface: { motion: "reduced" }, notifications: {}, updated_at: "2026-09-10T00:00:00.000Z" }),
+    }),
+  );
   // `addInitScript` runs in a fresh document BEFORE any of the page's own script, so the
   // values are already in storage when React's first client render reads them — which is
   // exactly the ordering a returning browser has and a fresh context never does.
   await page.addInitScript(
-    (seed: { motionKey: string; answerDraftKey: string; answerDraft: unknown; journalKey: string; journalDraft: unknown }) => {
+    (seed: { motionKey: string; answerDraftKey: string; answerDraft: unknown }) => {
       try {
         window.localStorage.setItem(seed.motionKey, "reduced");
         window.localStorage.setItem(seed.answerDraftKey, JSON.stringify(seed.answerDraft));
-        window.sessionStorage.setItem(seed.journalKey, JSON.stringify(seed.journalDraft));
       } catch {
         /* a context with storage blocked would fail the assertions below, loudly */
       }
     },
     {
-      motionKey: RETURNING_BROWSER.motionKey,
+      motionKey: MOTION_LOCAL_STORAGE_KEY,
       answerDraftKey: RETURNING_BROWSER.answerDraftKey,
       answerDraft: RETURNING_BROWSER.answerDraft,
-      journalKey: DRAFT_KEY,
-      journalDraft: {
-        intentKey: "returning-browser-intent",
-        postingDate: "2026-09-01",
-        memo: "Left half-typed in an earlier tab",
-        lines: [
-          { account_code: JOURNAL_WORK.rentAccount, debit_cents: 90_000, credit_cents: 0, description: "" },
-          { account_code: JOURNAL_WORK.bankAccount, debit_cents: 0, credit_cents: 90_000, description: "" },
-        ],
-      },
     },
   );
 
@@ -878,25 +889,41 @@ test("#727: the Work detail route hydrates clean for a browser carrying a PRIOR 
     // browser the cell above already walks, and it would still be green.
     await expect(workbench.getByLabel("Posting date").first())
       .toHaveValue(RETURNING_BROWSER.answerDraft.posting_date);
+    // The MOTION seed reached the render too — `MOTION_DATA_ATTRIBUTE` on the shell
+    // (personal-settings-walk.spec.ts:173's own instrument), stable here because the
+    // `page.route` above keeps the async authority agreeing with the cache-seeded hint —
+    // see this file's motion-preference-sync.tsx citation for why an unmocked RPC would
+    // make this assertion true for one frame and false by the time anything reads it.
+    await expect(page.locator("html")).toHaveAttribute("data-motion", "reduced");
     // And the SERVER'S half of the seed: the collapsed-sidebar cookie is in the jar for
     // this origin, so it rode the request that produced the server render.
-    //
-    // IT IS ASSERTED AS A COOKIE, NOT AS A COLLAPSED SHELL, AND THAT IS A FINDING RATHER
-    // THAN A SOFTENING. Measured here on this build: with `sidebar_state=false` in the jar
-    // (confirmed in the page as `document.cookie`), `[data-slot=sidebar]` rendered
-    // `data-state="expanded"` on the first load AND after a full reload — i.e.
-    // `app/(firm)/layout.tsx:73`'s `cookies().get(SIDEBAR_COOKIE_NAME)?.value !== "false"`
-    // did not reach `SidebarProvider`'s `defaultOpen` in this harness. Nothing in the
-    // repository tested that read before this cell (grep: `sidebar_state` appears only in
-    // components/ui/sidebar.tsx, that layout, a comment in account-settings.tsx, and here),
-    // so it is UNVERIFIED product behaviour and belongs to its own ticket — #727 is about
-    // hydration, and a sidebar that does not collapse is not a hydration fault. What this
-    // cell needs from the cookie is that the SERVER saw a client-carried value it did not
-    // have on a fresh context, and that is exactly what the jar assertion states.
     const jarred = (await page.context().cookies(baseURL ?? "https://127.0.0.1:3100"))
       .filter((c) => c.name === "sidebar_state")
       .map((c) => c.value);
     expect(jarred, "the collapsed-sidebar cookie must be on the request that produced this render").toEqual(["false"]);
+    // THE SHELL ITSELF STAYS EXPANDED, RE-MEASURED (a fix-round review's own claim here
+    // used to say the cookie "did not reach `defaultOpen`" — TRUE in its symptom, wrong
+    // about the mechanism, and worth re-measuring rather than trusting). `defaultOpen`
+    // never receives this cookie's value AT ALL: `app/(firm)/layout.tsx:10` imports
+    // `SIDEBAR_COOKIE_NAME` from `components/ui/sidebar.tsx`, which opens with `"use
+    // client"` (sidebar.tsx:1). A Server Component may import a CLIENT COMPONENT from a
+    // `"use client"` module and render it (that is the whole mechanism — `SidebarProvider`/
+    // `SidebarInset`, imported the same line, work exactly this way) — but a PLAIN VALUE
+    // export from that same module carries no such reference; the RSC bundler has no
+    // client-reference machinery for a bare string constant, so the server-side import
+    // resolves to `undefined`. `layout.tsx:73`'s `cookies().get(SIDEBAR_COOKIE_NAME)` is
+    // therefore always `cookies().get(undefined)` on THIS server, which finds nothing
+    // regardless of what the request's cookie jar holds — MEASURED by sending the raw SSR
+    // request (bypassing the browser and its own cookie jar entirely) with an EXPLICIT
+    // `sidebar_state=false` header and then again with `sidebar_state=true`: both render
+    // `data-state="expanded"`, byte-identical, which is what a name that never reaches the
+    // read looks like (a genuine parse of "false" would tell the two apart). This is a
+    // real product defect — the cookie the client sets on every toggle is silently inert
+    // on the very layout that reads it back — but it is not a HYDRATION fault (server and
+    // client agree, both wrongly, on "expanded") and repairing the `"use client"` boundary
+    // is its own ticket, not #727's. What this cell can assert honestly is today's actual,
+    // measured behaviour.
+    await expect(page.locator("[data-slot=sidebar]").first()).toHaveAttribute("data-state", "expanded");
     await settle(page);
 
     // The COMPLETED face too, under the same carried state: a different subtree of this
