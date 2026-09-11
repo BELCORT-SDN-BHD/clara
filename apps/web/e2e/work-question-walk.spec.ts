@@ -394,16 +394,20 @@ test("B4: the URL is stable and BACK returns to where the person was", async ({ 
 
 test("B6: a transcript's work_question part renders the ACCEPTED record, and announces NOTHING", async ({ page }) => {
   await control(page, { op: "reset" });
-  await page.goto(`/chat/${JOURNAL_WORK.threadId}`);
+  // THE CLARA RAIL, on the page #623's own transcript cell reads it from — there is no `/chat/<id>`
+  // route in this product; the rail is a shell surface that carries this lane's one thread.
+  await page.goto(`/clients/${CLIENT}/work`);
+  const rail = page.locator("[data-clara-rail]");
+  await expect(rail).toBeVisible();
 
   // The card hydrates `clara.get_work_question` for the id the part names. The question was
   // answered elsewhere long before this transcript is replayed, so what the card must render is
   // the authoritative accepted record — never a form offering a second answer.
-  const accepted = page.getByTestId("work-question-accepted");
+  const accepted = rail.getByTestId("work-question-accepted");
   await expect(accepted).toBeVisible({ timeout: 20_000 });
-  await expect(page.getByTestId("work-question-accepted-posting_date")).toContainText("2026-09-01");
-  await expect(page.getByTestId("work-question-attribution")).toContainText("bookkeeper");
-  await expect(page.getByTestId("work-question-submit")).toHaveCount(0);
+  await expect(rail.getByTestId("work-question-accepted-posting_date")).toContainText("2026-09-01");
+  await expect(rail.getByTestId("work-question-attribution")).toContainText("bookkeeper");
+  await expect(rail.getByTestId("work-question-submit")).toHaveCount(0);
 
   // ONE ANNOUNCEMENT OWNER (§5, and the reviewed finding). The transcript is a log that announces
   // its own updates; a card inside it that opened `role="alert"`/`"status"` regions of its own
