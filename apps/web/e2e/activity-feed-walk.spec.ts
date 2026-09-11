@@ -48,8 +48,11 @@ test("initial read: representative rows carry actor, client, the DB's own senten
   // The client name resolves through the register read, not a raw id.
   await expect(page.getByText(ACTIVITY.clientName).first()).toBeVisible();
 
-  // The page fixture is deliberately truncated.
-  await expect(page.getByText(/may not show every matching event/)).toBeVisible();
+  // The page fixture is deliberately truncated. Review finding 12 renamed this copy — the old
+  // "may not show every matching event yet" fired on every non-final page and read as a false
+  // claim that SOME matching event might be missing, when `truncated` only ever means "there is
+  // more to load".
+  await expect(page.getByText(/There is more to load below/)).toBeVisible();
   await expect(page.getByRole("button", { name: "Load more" })).toBeVisible();
 });
 
