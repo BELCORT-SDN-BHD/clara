@@ -44,7 +44,7 @@
 // exactly as the journal composer's line editor does. A question that asks for an amount and the
 // composer that posts one must not disagree about what "1234,56" means.
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
 
 import { Button } from "@/components/ui/button";
@@ -115,6 +115,11 @@ export type WorkQuestionFormProps = {
   /** Who announces (§5). Default "self". Pass "none" inside a surface that already owns the
    *  announcement boundary — the Clara transcript is the one that does. */
   announce?: WorkQuestionAnnounce;
+  /** TRUE while a submit is in flight. A surface that can UNMOUNT this form (the Needs-you row's
+   *  Close toggle) must not offer that while the write is out: unmounting cancels the form's own
+   *  `alive` guard, the accepted answer never reaches `onAnswered`, and the row stays in a queue
+   *  that has no poll to correct it. */
+  onBusy?: (busy: boolean) => void;
   /** The client's chart, for an `account` field. Absent or empty means the control degrades to a
    *  typed code — honestly, and with the same server-side validation behind it. */
   accounts?: readonly WorkQuestionAccount[] | null;
@@ -123,11 +128,17 @@ export type WorkQuestionFormProps = {
 type Phase = "editing" | "submitting" | "accepted" | "converged" | "denied";
 
 export function WorkQuestionForm({
-  record, userId, onAnswered, onSettled, onLeavePending,
+  record, userId, onAnswered, onSettled, onLeavePending, onBusy,
   announce = "self", accounts = null,
 }: WorkQuestionFormProps) {
   const t = useTranslations("WorkQuestion");
   const silent = announce === "none";
+  /** EVERY CONTROL ID IN THIS FORM IS SCOPED TO THIS MOUNT. Needs-you lets two rows be expanded at
+   *  once, and a `wq-posting_date` shared between them makes one row's `<label>` point at the
+   *  other's input and one row's `aria-describedby` name the other's error. React's own per-mount
+   *  id, sanitised the way `MoneyInput` sanitises it, is the scope. */
+  const uid = useId().replace(/[^A-Za-z0-9_-]/g, "");
+  const idFor = useCallback((key: string) => `${uid}-wq-${key}`, [uid]);
   const fields = useMemo(() => (Array.isArray(record.fields) ? record.fields : []), [record.fields]);
   const single = isSingleField(fields);
   const draftKey = useMemo(
@@ -148,6 +159,11 @@ export function WorkQuestionForm({
   const [phase, setPhase] = useState<Phase>(record.status === "pending" ? "editing" : "converged");
   const [problems, setProblems] = useState<Record<string, string>>({});
   const [refusal, setRefusal] = useState<AnswerRefusal | null>(null);
+  /** A field the SERVER named, to be focused once the step carrying it has actually rendered. A
+   *  multi-field question submits from the REVIEW step, where no control is mounted, so focusing
+   *  inside the submit handler reached a null ref and the refusal was invisible: the step is moved
+   *  first, and the focus happens in an effect after that render. */
+  const [focusTarget, setFocusTarget] = useState<string | null>(null);
   const [authoritative, setAuthoritative] = useState<WorkQuestionRecord>(record);
   const controlRefs = useRef<Record<string, HTMLElement | null>>({});
   /**
@@ -212,6 +228,13 @@ export function WorkQuestionForm({
     }
   }, []);
 
+  useEffect(() => {
+    if (focusTarget === null) return;
+    const el = controlRefs.current[focusTarget];
+    if (el) el.focus();
+    setFocusTarget(null);
+  }, [focusTarget]);
+
   const reread = useCallback(async (): Promise<WorkQuestionRecord | null> => {
     const fresh = await getWorkQuestion(record.question_id).catch(() => null);
     if (fresh && alive.current) setAuthoritative(fresh);
@@ -241,8 +264,24 @@ export function WorkQuestionForm({
       clearWorkAnswerDraft(draftKey);
       const fresh = await reread();
       if (!alive.current) return;
+      // THE RECEIPT IS AUTHORITY ENOUGH. A transient `get_work_question` failure after the door
+      // ACCEPTED the answer used to leave `authoritative` on the pending record, so the accepted
+      // view rendered dashes for the values and for the attribution — about an answer the database
+      // had taken. The door's own receipt carries who, when and which version, and the answer is
+      // the object this form just sent, so the settled record is reconstructed from the two rather
+      // than from a read that did not happen.
+      const settledRecord: WorkQuestionRecord = fresh ?? {
+        ...authoritative,
+        status: "answered",
+        answer,
+        answered_by: outcome.receipt.answered_by,
+        answered_role: outcome.receipt.answered_role,
+        answered_at: outcome.receipt.answered_at,
+        question_version: outcome.receipt.question_version,
+      };
+      if (fresh === null) setAuthoritative(settledRecord);
       setPhase("accepted");
-      if (fresh) onAnswered?.(fresh);
+      onAnswered?.(settledRecord);
       onSettled?.();
       return;
     }
@@ -250,8 +289,16 @@ export function WorkQuestionForm({
     if (outcome.refusal.kind === "invalid") {
       setPhase("editing");
       if (outcome.refusal.field) {
-        setProblems({ [outcome.refusal.field]: outcome.refusal.constraint ?? "invalid" });
-        focusFirstProblem([outcome.refusal.field]);
+        const field = outcome.refusal.field;
+        setProblems({ [field]: outcome.refusal.constraint ?? "invalid" });
+        // BRING THE REFUSED FIELD BACK INTO VIEW. A bounded walk submits from the review step,
+        // where the control the server named is not mounted at all — so the error rendered
+        // nowhere and the focus call reached a null ref. The step is moved to the field first
+        // (`note` is on the review step already, and so is every field of a single-field
+        // question), and the focus happens in the effect above, after that render.
+        const index = fields.findIndex((f) => f.key === field);
+        if (index >= 0 && !single) setStep(index);
+        setFocusTarget(field);
       }
       return;
     }
@@ -282,6 +329,9 @@ export function WorkQuestionForm({
     // again — the next press replays rather than answers twice.
     setPhase("editing");
   }, [draft, draftKey, fields, focusFirstProblem, note, onAnswered, onSettled, record.question_id, record.question_version, reread]);
+
+  const submitting = phase === "submitting";
+  useEffect(() => { onBusy?.(submitting); }, [onBusy, submitting]);
 
   // ---------------------------------------------------------------------
   // Settled renderings.
@@ -370,6 +420,7 @@ export function WorkQuestionForm({
             problem={problems[field.key] ?? ""}
             disabled={busy}
             accounts={accounts}
+            id={idFor(field.key)}
             cents={moneyCents.current[field.key] ?? null}
             onAcceptedCents={(c) => { moneyCents.current[field.key] = c; }}
             t={t}
@@ -385,20 +436,32 @@ export function WorkQuestionForm({
         ) : null}
 
         {single || reviewing ? (
-          <Field>
+          <Field data-invalid={problems.note ? true : undefined}>
             <FieldContent>
-              <FieldLabel htmlFor="wq-note">
+              <FieldLabel htmlFor={idFor("note")}>
                 <FieldTitle>{t("noteLabel")}</FieldTitle>
                 <FieldDescription>{t("noteHelp")}</FieldDescription>
               </FieldLabel>
             </FieldContent>
             <Textarea
-              id="wq-note"
+              id={idFor("note")}
               value={note}
               rows={2}
               disabled={busy}
+              aria-invalid={problems.note ? true : undefined}
+              aria-describedby={problems.note ? `${idFor("note")}-error` : undefined}
+              // REGISTERED LIKE ANY OTHER CONTROL. `clara._assert_work_answer` can refuse the note
+              // (it is the one key an answer may carry beyond the declared fields, and it has a
+              // length cap), and an unregistered control is one the first-invalid focus cannot
+              // reach and whose error nothing renders.
+              ref={(el) => { controlRefs.current.note = el; }}
               onChange={(e) => setNoteValue(e.target.value)}
             />
+            {problems.note ? (
+              <FieldError id={`${idFor("note")}-error`} data-testid="work-question-error-note">
+                {t(`constraint.${problems.note}` as never)}
+              </FieldError>
+            ) : null}
           </Field>
         ) : null}
       </FieldGroup>
@@ -469,6 +532,7 @@ function QuestionField({
   disabled,
   accounts,
   cents,
+  id,
   register,
   onChange,
   onAcceptedCents,
@@ -486,9 +550,10 @@ function QuestionField({
    *  derived from the draft. */
   cents: number | null;
   onAcceptedCents: (cents: number | null) => void;
+  /** This control's DOM id, scoped to the mounted form — see `idFor` in the form itself. */
+  id: string;
   t: ReturnType<typeof useTranslations>;
 }) {
-  const id = `wq-${field.key}`;
   const text = value === undefined || value === null ? "" : String(value);
   const invalid = problem !== "";
   const describedBy = invalid ? `${id}-error` : undefined;
@@ -649,12 +714,37 @@ function ReviewList({
         {fields.map((field) => (
           <div key={field.key} className="flex flex-wrap gap-2">
             <dt className="text-secondary-ink">{field.label}</dt>
-            <dd className="wrap-anywhere text-foreground">{String(draft[field.key] ?? "—")}</dd>
+            <dd className="wrap-anywhere text-foreground">{formatFieldValue(field, draft[field.key])}</dd>
           </div>
         ))}
       </dl>
     </div>
   );
+}
+
+/**
+ * ONE ANSWER VALUE, AS THE PERSON WHO GAVE IT WOULD READ IT.
+ *
+ * MONEY IS THE REASON THIS IS FIELD-AWARE. The answer object stores integer minor units, because
+ * that is the only representation that cannot drift — but `String(120000)` on a settled surface
+ * tells a person who typed `1,200.00` that the Work recorded one hundred and twenty thousand
+ * ringgit. The stored value is right and the rendering was a misreport of money, which is the same
+ * class of defect as a parser that multiplies by a hundred.
+ *
+ * A CHOICE RESOLVES TO ITS LABEL for the same reason: the answer carries the option's VALUE, which
+ * is a token the question's author chose for the database, not the sentence the person clicked.
+ */
+function formatFieldValue(field: WorkQuestionField, value: unknown): string {
+  if (value === undefined || value === null) return "—";
+  if (field.kind === "money") {
+    const cents = typeof value === "number" ? value : parseMoneyToCents(String(value));
+    return cents === null ? String(value) : formatCents(cents);
+  }
+  if (field.kind === "choice") {
+    const option = optionsOf(field).find((o) => o.value === String(value));
+    return option ? option.label : String(value);
+  }
+  return String(value);
 }
 
 /** The ACCEPTED record: who, when, which version, and the exact values. This is what replaces the
@@ -678,7 +768,7 @@ function AcceptedAnswer({
           <div key={field.key} className="flex flex-wrap gap-2">
             <dt className="text-secondary-ink">{field.label}</dt>
             <dd className="wrap-anywhere text-foreground" data-testid={`work-question-accepted-${field.key}`}>
-              {formatAnswerValue(answer[field.key])}
+              {formatFieldValue(field, answer[field.key])}
             </dd>
           </div>
         ))}
@@ -722,7 +812,7 @@ function KeptDraft({
         {filled.map((field) => (
           <div key={field.key} className="flex flex-wrap gap-2">
             <dt className="text-secondary-ink">{field.label}</dt>
-            <dd className="wrap-anywhere text-foreground">{String(draft[field.key])}</dd>
+            <dd className="wrap-anywhere text-foreground">{formatFieldValue(field, draft[field.key])}</dd>
           </div>
         ))}
         {note.trim() !== "" ? (
@@ -744,11 +834,6 @@ export function sourceRefText(source: Record<string, unknown> | null | undefined
   if (kind === null) return null;
   const id = typeof source.id === "string" && source.id.trim() !== "" ? source.id.trim() : null;
   return id === null ? kind : `${kind} ${id}`;
-}
-
-function formatAnswerValue(value: unknown): string {
-  if (value === undefined || value === null) return "—";
-  return String(value);
 }
 
 /** WHICH convergence sentence to show. The refusal's own reason when there is one; otherwise the

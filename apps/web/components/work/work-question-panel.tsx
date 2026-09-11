@@ -39,6 +39,13 @@ export type WorkQuestionPanelProps = {
   questionId?: string;
   /** Called after an accepted answer, so the surface can re-read what it owns. */
   onAnswered?: () => void;
+  /** Called when the question SETTLES for any reason — accepted here, or converged onto an answer,
+   *  an expiry or a cancellation that happened elsewhere. A surface that lists pending questions
+   *  has to re-read on the second case too: `use-review-queue.ts` loads on mount and on `act` and
+   *  has no poll, so a row that converged without this callback stayed in Needs-you for ever. */
+  onSettled?: () => void;
+  /** TRUE while the form's submit is in flight — see `WorkQuestionFormProps.onBusy`. */
+  onBusy?: (busy: boolean) => void;
   onLeavePending?: () => void;
   /** The run's own words, read from the interruption ROW by the calling page, rendered ONLY when
    *  this door cannot be. B3 owns such a read already (`loadWorkDetail`); handing it down is what
@@ -48,7 +55,7 @@ export type WorkQuestionPanelProps = {
 };
 
 export function WorkQuestionPanel({
-  workId, questionId, onAnswered, onLeavePending, fallbackQuestion = null,
+  workId, questionId, onAnswered, onSettled, onBusy, onLeavePending, fallbackQuestion = null,
 }: WorkQuestionPanelProps) {
   const t = useTranslations("WorkQuestion.inbox");
   const load = useCallback(async () => {
@@ -95,6 +102,8 @@ export function WorkQuestionPanel({
         userId={data.identity.userId}
         accounts={data.accounts}
         onAnswered={onAnswered}
+        onSettled={onSettled}
+        onBusy={onBusy}
         onLeavePending={onLeavePending}
       />
       {/* THE ROUTE TO THE WORK, built from the HYDRATED record rather than from whatever the

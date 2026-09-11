@@ -105,6 +105,11 @@ export function restoreFocusAfterRow(trigger: HTMLElement | null, landmark: HTML
 export function WorkQuestionAffordance({ row, busy, error, act }: NeedsYouAffordanceProps) {
   const t = useTranslations("WorkQuestion.inbox");
   const [open, setOpen] = useState(false);
+  /** TRUE while the nested form's write is out. The row's own `busy` is the QUEUE's `act` state and
+   *  the form does not go through `act`, so Close stayed enabled during a submit — and collapsing
+   *  unmounts the form, whose `alive` guard then swallows the accepted answer and leaves this row
+   *  in a queue with no poll to correct it. */
+  const [submitting, setSubmitting] = useState(false);
   const trigger = useRef<HTMLButtonElement | null>(null);
   const container = useRef<HTMLDivElement | null>(null);
 
@@ -127,7 +132,7 @@ export function WorkQuestionAffordance({ row, busy, error, act }: NeedsYouAfford
           type="button"
           size="sm"
           variant={open ? "outline" : "default"}
-          disabled={busy}
+          disabled={busy || submitting}
           ref={trigger}
           aria-expanded={open}
           data-testid="needs-you-work-question-toggle"
@@ -142,7 +147,18 @@ export function WorkQuestionAffordance({ row, busy, error, act }: NeedsYouAfford
             affordance, which this estate refuses to render. The route to the Work is built inside
             the panel below, from the HYDRATED record, where the work id actually exists. */}
       </div>
-      {open ? <WorkQuestionPanel questionId={questionId} onAnswered={onAnswered} onLeavePending={() => setOpen(false)} /> : null}
+      {open ? (
+        <WorkQuestionPanel
+          questionId={questionId}
+          onAnswered={onAnswered}
+          // A CONVERGENCE IS A SETTLEMENT TOO. Somebody else answered it, it expired, or the Work
+          // was cancelled — the row is no longer answerable either way, and the same reload-then-
+          // focus path is what takes it out of the list without dumping focus.
+          onSettled={onAnswered}
+          onBusy={setSubmitting}
+          onLeavePending={() => setOpen(false)}
+        />
+      ) : null}
     </div>
   );
 }

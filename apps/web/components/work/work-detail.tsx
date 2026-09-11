@@ -608,7 +608,13 @@ function WorkOutcome({
             date. `key` is the WORK, so the detail's 3-second poll never re-mounts it and never
             steals focus mid-sentence. */}
         <WorkQuestionPanel
-          key={work.id}
+          // KEYED ON THE PENDING QUESTION'S OWN ROW, not on the Work. A re-asked question is a NEW
+          // interruption row with the next version (0180), and a Work can go
+          // awaiting_input -> running -> awaiting_input between two three-second polls, so a
+          // Work-keyed panel kept showing question 1's accepted record while question 2 waited.
+          // `useHydratedPart` does not re-run on a loader change and the form seeds its state once,
+          // so the remount is the reload.
+          key={interruption?.id ?? work.id}
           workId={work.id}
           fallbackQuestion={clarify === null ? null : { question: clarify.question, context: clarify.context }}
         />

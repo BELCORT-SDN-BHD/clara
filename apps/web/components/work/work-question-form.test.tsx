@@ -136,8 +136,11 @@ async function press(h: { act: (fn?: () => void | Promise<void>) => Promise<void
 const byTestId = (h: { find: (p: (n: Stub) => boolean) => Stub | null }, id: string) =>
   h.find((n) => (n as { getAttribute?: (k: string) => string | null }).getAttribute?.("data-testid") === id);
 
+/** A control by FIELD KEY. Ids are scoped to the mounted form (`<useId>-wq-<key>`, so two expanded
+ *  Needs-you rows cannot share a label target), so the lookup matches the suffix rather than the
+ *  whole id. */
 const inputFor = (h: { find: (p: (n: Stub) => boolean) => Stub | null }, key: string) =>
-  h.find((n) => (n as { getAttribute?: (k: string) => string | null }).getAttribute?.("id") === `wq-${key}`);
+  h.find((n) => ((n as { getAttribute?: (k: string) => string | null }).getAttribute?.("id") ?? "").endsWith(`-wq-${key}`));
 
 /** A CONTROLLED input's rendered value, read off React's own props rather than off the stub node:
  *  the harness's nodes carry whatever `setFieldValue` last wrote, which is exactly the value a
@@ -147,6 +150,19 @@ function valueOf(node: Stub | null): string {
   const key = Object.keys(node).find((k) => k.startsWith("__reactProps"));
   const props = key ? (node as Record<string, { value?: unknown }>)[key] : undefined;
   return props?.value === undefined || props.value === null ? "" : String(props.value);
+}
+
+/** The rendered TEXT of one test-id'd node. */
+function textOfTestId(h: { find: (p: (n: Stub) => boolean) => Stub | null }, id: string): string {
+  const node = byTestId(h, id);
+  if (!node) return "";
+  const out: string[] = [];
+  const walk = (n: Stub) => {
+    if ((n as { nodeType?: number }).nodeType === 3) out.push(String((n as { nodeValue?: string }).nodeValue ?? ""));
+    for (const c of ((n as { childNodes?: Stub[] }).childNodes ?? [])) walk(c);
+  };
+  walk(node);
+  return out.join("").trim();
 }
 
 test("the question, its REASON and its version are rendered — the shared record, not a summary", async () => {
@@ -626,6 +642,163 @@ test("an ACCOUNT field offers the client's chart when it has one, and a typed co
       "an unreadable chart degrades to a typed code, never to an empty picker");
   } finally {
     await withoutChart.unmount();
+    s.restore();
+  }
+});
+
+// ===========================================================================================
+// THE CROSS-MODEL REVIEW'S CONFIRMED FINDINGS.
+// ===========================================================================================
+
+test("a SETTLED money value reads as the amount a person entered, never as its cents", async () => {
+  const s = stubStorage();
+  const settled = record({
+    status: "answered",
+    fields: [
+      { key: "amount_cents", label: "Amount", kind: "money", required: true },
+      {
+        key: "leg", label: "Which leg?", kind: "choice", required: true,
+        options: [{ value: "expense", label: "Expense" }, { value: "asset", label: "Asset" }],
+      },
+    ],
+    answer: { amount_cents: 120000, leg: "expense" },
+    answered_by: USER,
+    answered_role: "bookkeeper",
+    answered_at: "2026-09-11T02:00:00.000Z",
+  });
+  const h = await renderComponent(App({ record: settled }));
+  try {
+    // The ANSWER OBJECT is right — integer minor units, which is the only representation that
+    // cannot drift. The RENDERING was the defect: `String(120000)` told a person who typed
+    // 1,200.00 that this Work recorded one hundred and twenty thousand ringgit.
+    assert.equal(textOfTestId(h, "work-question-accepted-amount_cents"), "1,200.00");
+    assert.equal(
+      textOfTestId(h, "work-question-accepted-leg"),
+      "Expense",
+      "a choice resolves to the LABEL a person clicked, not the token the question's author chose",
+    );
+  } finally {
+    await h.unmount();
+    s.restore();
+  }
+});
+
+test("a SERVER-named field on the review step is brought back into view, not refused invisibly", async () => {
+  const s = stubStorage();
+  const doors = stubDoors((call) =>
+    call.fn === "answer_work_question"
+      ? {
+          status: 400,
+          body: {
+            code: "CLR10",
+            message: "that account code is not active in this client's chart",
+            details: JSON.stringify({ reason: "invalid_answer", field: "account", constraint: "active_account" }),
+          },
+        }
+      : { status: 200, body: record() },
+  );
+  const h = await renderComponent(
+    App({
+      record: record({
+        fields: [
+          { key: "posting_date", label: "Posting date", kind: "date", required: true },
+          { key: "account", label: "Which account?", kind: "account", required: true },
+        ],
+      }),
+    }),
+  );
+  try {
+    await h.fireEvent(inputFor(h, "posting_date")!, "change", (n) => setFieldValue(n, "2026-09-05"));
+    await press(h, byTestId(h, "work-question-next")!);
+    await h.fireEvent(inputFor(h, "account")!, "change", (n) => setFieldValue(n, "9999"));
+    await press(h, byTestId(h, "work-question-next")!);
+    assert.ok(byTestId(h, "work-question-review"), "the walk submits from the REVIEW step");
+
+    await press(h, byTestId(h, "work-question-submit")!);
+    // The refused control is MOUNTED again — on the review step it was not, so the error rendered
+    // nowhere at all and the focus call reached a null ref.
+    assert.ok(byTestId(h, "work-question-error-account"), "the refusal is rendered beside its control");
+    assert.match(h.text(), /not active in this client's chart/);
+    assert.equal(activeElement(), inputFor(h, "account"), "…and the control takes focus");
+  } finally {
+    await h.unmount();
+    doors.restore();
+    s.restore();
+  }
+});
+
+test("an accepted answer whose RE-READ fails still shows the accepted record, from the receipt", async () => {
+  const s = stubStorage();
+  const doors = stubDoors((call) =>
+    call.fn === "answer_work_question"
+      ? {
+          status: 200,
+          body: {
+            question_id: QUESTION, work_id: WORK, question_version: 1, status: "answered",
+            answered_by: USER, answered_role: "bookkeeper", answered_at: "2026-09-11T03:00:00.000Z",
+          },
+        }
+      // The re-read fails. The database has ALREADY accepted the answer.
+      : { status: 503, body: { message: "gateway lost" } },
+  );
+  const h = await renderComponent(
+    App({ record: record({ fields: [{ key: "amount_cents", label: "Amount", kind: "money", required: true }] }) }),
+  );
+  try {
+    await h.fireEvent(inputFor(h, "amount_cents")!, "change", (n) => setFieldValue(n, "1,200.00"));
+    await press(h, byTestId(h, "work-question-submit")!);
+    assert.ok(byTestId(h, "work-question-accepted"), "the acceptance is real and is shown as such");
+    assert.equal(
+      textOfTestId(h, "work-question-accepted-amount_cents"),
+      "1,200.00",
+      "the VALUES come from the answer the door accepted, never from a read that did not happen",
+    );
+    assert.match(h.text(), /Answered by a bookkeeper/, "…and the attribution comes from the receipt");
+  } finally {
+    await h.unmount();
+    doors.restore();
+    s.restore();
+  }
+});
+
+test("two forms on one page do not share a control id — Needs-you expands more than one row", async () => {
+  const s = stubStorage();
+  const both = createElement(NextIntlClientProvider, {
+    locale: "en",
+    messages,
+    timeZone: "Asia/Kuala_Lumpur",
+    children: createElement(
+      "div",
+      null,
+      createElement(WorkQuestionForm, {
+        key: "one",
+        record: record({ question_id: QUESTION, fields: [{ key: "memo", label: "Memo", kind: "text", required: true }] }),
+        userId: USER,
+      }),
+      createElement(WorkQuestionForm, {
+        key: "two",
+        record: record({
+          question_id: "99999999-9999-4999-8999-999999999999",
+          fields: [{ key: "memo", label: "Memo", kind: "text", required: true }],
+        }),
+        userId: USER,
+      }),
+    ),
+  });
+  const h = await renderComponent(both);
+  try {
+    const ids: string[] = [];
+    const walk = (n: Stub) => {
+      const id = (n as { getAttribute?: (k: string) => string | null }).getAttribute?.("id");
+      if (typeof id === "string" && id.endsWith("-wq-memo")) ids.push(id);
+      for (const c of ((n as { childNodes?: Stub[] }).childNodes ?? [])) walk(c);
+    };
+    walk(h.container as Stub);
+    assert.equal(ids.length, 2, "both forms rendered their memo control");
+    assert.notEqual(ids[0], ids[1],
+      "…under DIFFERENT ids: a shared one makes one row's label point at the other row's input");
+  } finally {
+    await h.unmount();
     s.restore();
   }
 });
