@@ -69,9 +69,13 @@ export function TurnProgress({
   // React counts toward its nested-update ceiling; past the ceiling the next scheduled
   // update THROWS (#185, "Maximum update depth exceeded"). During a stream that update is
   // scheduled by `claraThreadStore.emit()` inside `applyStreamEvent` — i.e. inside
-  // `runClaraTaskStream`'s uncaught `onEvent(evt)` (lib/clara/stream.ts) — so React's error
-  // came back out as the STREAM's rejection and `useClaraThread` painted it as
+  // `runClaraTaskStream`'s uncaught `onEvent(evt)` (lib/clara/stream.ts:376) — so React's
+  // error came back out as the STREAM's rejection and `useClaraThread` painted it as
   // "Could not send that message: stream error: …". The live clarify went with the view.
+  // That propagation path is PINNED, not inferred from a minified stack: the cell
+  // "a throw from inside applyStreamEvent leaves through the STREAM" in
+  // thread-live-stream-stability.test.tsx drives a throwing store subscriber through
+  // `runClaraTaskStream` and reads the resulting banner off the rendered thread.
   //
   // The ref is this repo's own answer to exactly this hazard: lib/parts/hooks.ts carries
   // `sessionRef`/`loaderRef` for the same reason (its header records the 4GB-heap

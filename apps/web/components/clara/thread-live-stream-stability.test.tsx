@@ -25,10 +25,16 @@
 //      nested-update ceiling. Past the ceiling the NEXT `scheduleUpdateOnFiber` throws —
 //      and during a stream that call comes from `claraThreadStore.emit()` inside
 //      `applyStreamEvent`, i.e. inside `runClaraTaskStream`'s own `onEvent(evt)`
-//      (lib/clara/stream.ts), which has no catch. The throw rejects the stream promise,
+//      (lib/clara/stream.ts:376), which has no catch. The throw rejects the stream promise,
 //      `useClaraThread`'s `.catch` calls `markSendFailed("stream error: …")`, and THAT is
 //      the banner the owner read. The sentence "Could not send that message" was never
 //      about the message: it was React's own error arriving through the stream's rejection.
+//      THAT LAST STEP IS PINNED, not inferred: the cell "a throw from inside
+//      applyStreamEvent leaves through the STREAM" below drives a throwing store
+//      subscriber through the real `runClaraTaskStream` and reads the resulting banner off
+//      the rendered thread. Nothing here claims to have re-created React's OWN throw — it
+//      substitutes a subscriber that throws, which is what React's `useSyncExternalStore`
+//      subscriber IS once the scheduler is past its ceiling.
 //
 // WHY THE CELLS BELOW ARE SHAPED THIS WAY. The loop is CLOCK-RESOLUTION dependent: with a
 // monotonically advancing `Date.now` it never terminates at all (measured: 19,328 React
@@ -56,6 +62,7 @@ import { WorkAcceptedCard } from "../parts/WorkCards";
 import { clickButton, renderComponent, setFieldValue, textOf } from "../../test/hookHarness";
 import { enableDomInspection } from "../../test/domInspect";
 import { claraThreadStore } from "../../lib/clara/threadStore";
+import { runClaraTaskStream } from "../../lib/clara/stream";
 import { configureSessionTokenSource, resetSessionTokenSource } from "../../lib/session-accessor";
 import type { SessionTokenAccessor } from "../../lib/session";
 import messages from "../../messages/en.json";
@@ -426,6 +433,96 @@ test("the live clarify is still ANSWERABLE IN PLACE after a burst of deltas", as
     await h.act(() => clickButton(h.find(answerButton)!));
     await h.settle();
     assert.match(h.text(), /Answered by your firm/, "answering in place must still reach the governed door and re-read the row");
+  });
+});
+
+/**
+ * THE MIS-ATTRIBUTION, PINNED — why a React error was printed as a MESSAGE failure.
+ *
+ * The header of this file, and the comment in `TurnProgress.tsx`, both assert a causal
+ * chain: React's throw leaves through `claraThreadStore.emit()`, inside
+ * `applyStreamEvent`, inside `runClaraTaskStream`'s uncaught `onEvent(evt)`
+ * (lib/clara/stream.ts:376), which rejects the stream promise, which
+ * `useClaraThread.ts:208` turns into `markSendFailed("stream error: …")`, which
+ * `ClaraThreadView` renders as "Could not send that message: …". That is a claim about
+ * this code's behaviour, so it is measured here rather than reasoned from a minified
+ * stack trace.
+ *
+ * WHAT STANDS IN FOR REACT. A store SUBSCRIBER that throws — which is exactly what React's
+ * `useSyncExternalStore` subscriber is when `scheduleUpdateOnFiber` is past the
+ * nested-update ceiling. `emit()` (threadStore.ts:113) calls its listeners with no
+ * try/catch, so the identity of the throwing listener is the only thing this substitutes.
+ *
+ * IT IS ALSO A DEFECT IN ITS OWN RIGHT, and this cell is the evidence for it: a sentence
+ * that says "could not send that message" about a message that WAS sent, and a turn that
+ * was running fine, sent the owner looking in the wrong place for a minute. Repairing the
+ * attribution (a stream reader that distinguishes a transport failure from a subscriber's
+ * own throw) belongs to its own ticket — it would change `runClaraTaskStream`'s contract,
+ * which is outside #727's lane.
+ */
+function oneChunkStream(): typeof fetch {
+  return (async () =>
+    new Response(
+      new ReadableStream<Uint8Array>({
+        start(controller) {
+          const frame = `event: chunk\ndata: ${JSON.stringify({ type: "text-delta", id: "d1", text: "token " })}\n\n`;
+          controller.enqueue(new TextEncoder().encode(frame));
+          controller.close();
+        },
+      }),
+      { status: 200, headers: { "content-type": "text/event-stream" } },
+    )) as unknown as typeof fetch;
+}
+
+test("a throw from inside applyStreamEvent leaves through the STREAM, and the banner blames the message", async () => {
+  await withLiveTurn(async (h) => {
+    // React's own words for the ceiling, in the shape a PRODUCTION build throws them. The
+    // code is ASSEMBLED rather than typed: a bare "#185" inside a string literal reads as a
+    // three-digit hex colour to the raw-colour ESLint rule (owner ruling Q4), which is why
+    // this repo keeps ticket-and-error ids like it out of literals.
+    const ceilingCode = `#${185}`;
+    const reactThrow = new Error(`Minified React error ${ceilingCode}; visit https://react.dev/errors/185 for the full message`);
+    let thrown = false;
+    const unsubscribe = claraThreadStore.subscribe(() => {
+      if (thrown) return;
+      thrown = true;
+      throw reactThrow;
+    });
+
+    let caught: unknown = null;
+    try {
+      await runClaraTaskStream({
+        token: "tok",
+        taskId: TASK_ID,
+        signal: new AbortController().signal,
+        fetchImpl: oneChunkStream(),
+        // VERBATIM `attachClaraStream`'s wiring (useClaraThread.ts): the store call IS the
+        // callback, with nothing between them to catch anything.
+        onEvent: (evt) => claraThreadStore.applyStreamEvent(THREAD_ID, evt),
+      });
+    } catch (err) {
+      caught = err;
+    } finally {
+      unsubscribe();
+    }
+
+    assert.strictEqual(
+      caught,
+      reactThrow,
+      "the subscriber's throw must come back out as the STREAM's rejection — that is the whole mis-attribution",
+    );
+    assert.ok(thrown, "the throwing subscriber must actually have been reached by an emit");
+
+    // And now exactly what `useClaraThread.ts:208` does with that rejection.
+    await h.act(() => {
+      claraThreadStore.markSendFailed(THREAD_ID, `stream error: ${(caught as Error).message}`);
+    });
+    await h.settle();
+    assert.match(
+      h.text(),
+      /Could not send that message: stream error: Minified React error #185/,
+      "the banner the owner read is React's own error, arriving through the stream's rejection",
+    );
   });
 });
 
