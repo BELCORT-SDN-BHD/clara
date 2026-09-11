@@ -543,6 +543,20 @@ test("630 the run poll: a read that finds NO ROW keeps the parked question — a
     }
     return new Response(JSON.stringify({}), { status: 200, headers: { "content-type": "application/json" } });
   }) as typeof fetch;
+  // THE INTERVAL IS CAPTURED, NOT WAITED ON. Sleeping four real seconds per assertion measures the
+  // host's scheduler, and in a suite whose files run in parallel it is four seconds of somebody
+  // else's budget. The BODY is still run — a spy that only records the delay would pass against an
+  // interval that does nothing, which is the defect itself. (The same shape
+  // `components/clara/thread-stop-reply.test.tsx` uses for this poll.)
+  const ticks: Array<() => void> = [];
+  const scheduled: number[] = [];
+  const realSet = globalThis.setInterval;
+  const realClear = globalThis.clearInterval;
+  globalThis.setInterval = ((fn: () => void, ms?: number) => {
+    scheduled.push(Number(ms));
+    ticks.push(fn);
+    return realSet(fn, 1_000_000);
+  }) as typeof globalThis.setInterval;
   try {
     const h = await renderHook(() => useClaraThread(session, THREAD_POLL));
     try {
@@ -554,9 +568,15 @@ test("630 the run poll: a read that finds NO ROW keeps the parked question — a
         PARKED,
       );
       await h.act(async () => { await h.rerender(); });
+      assert.ok(scheduled.includes(CLARA_RUN_POLL_MS),
+        `precondition: the DB arm is polled on its own interval; saw ${JSON.stringify(scheduled)}`);
       const before = runReads;
-      // Let ONE poll tick run and its read settle.
-      await h.act(async () => { await new Promise((r) => setTimeout(r, CLARA_RUN_POLL_MS + 120)); });
+      // Fire ONE tick from a SNAPSHOT — every re-render re-registers the interval this cell is
+      // capturing, so iterating the live array would keep firing bodies the loop is still creating.
+      await h.act(async () => {
+        for (const tick of [...ticks]) tick();
+        await new Promise((r) => setTimeout(r, 10));
+      });
       assert.ok(runReads > before, "precondition: the poll actually ran (it read the run at least once)");
 
       const after = claraThreadStore.getThread(THREAD_POLL);
@@ -568,6 +588,8 @@ test("630 the run poll: a read that finds NO ROW keeps the parked question — a
       await h.unmount();
     }
   } finally {
+    globalThis.setInterval = realSet;
+    globalThis.clearInterval = realClear;
     globalThis.fetch = original;
     if (originalUrl === undefined) delete process.env.NEXT_PUBLIC_SUPABASE_URL;
     else process.env.NEXT_PUBLIC_SUPABASE_URL = originalUrl;
