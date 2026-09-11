@@ -1590,6 +1590,27 @@ const WALK_FINDINGS_0183_HUMAN_FNS = [
 ];
 export const WALK_FINDINGS_0183_COHORT = [...WALK_FINDINGS_0183_HUMAN_FNS];
 
+// #630 [0184, settling admitted operations under cancel/revoke/lock-period races] — the
+// CANCEL-AND-TAKEOVER lane, its own cohort for the same "wholly present or wholly absent" reason
+// 0178's carries: folding these names into an older roster would red every database between the
+// two frontiers, and `cohortFailures()` fails a PARTIAL cohort by design.
+//
+//   the TWO doors — clara_runtime ONLY, mirroring clara.retry_accounting_work's own grant
+//   (0178:1032). Both are reached by a human THROUGH the runtime's authenticated route
+//   (`POST /api/runtime/work/:id/cancel|take-over`), never by PostgREST: a door that the browser
+//   could call directly would be a second admission path into a lane whose whole point is that one
+//   ordering boundary decides everything. The wake roles and clara_authenticated gain ZERO — a lane
+//   that could cancel or reassign the Work it is executing would be an agent deciding what it is
+//   authorised to do.
+const WORK_CANCEL_0184_RUNTIME_FNS = ["cancel_accounting_work", "take_over_accounting_work"];
+//   …and the UNGRANTED closure: the one trigger body that keeps `responsible` equal to `initiator`
+//   for every writer that does not set it. Listed so `cohortFailures` reports a half-applied 0184
+//   rather than a silently narrower boundary.
+const WORK_CANCEL_0184_UNGRANTED_FNS = ["_tf_accounting_work_responsible_default"];
+export const WORK_CANCEL_0184_COHORT = [
+  ...WORK_CANCEL_0184_RUNTIME_FNS, ...WORK_CANCEL_0184_UNGRANTED_FNS,
+];
+
 export const ALLOWED = {
   // Slice-4 governance writers (contract v2.1 §3.2/3.3/3.5): human lane only.
   [ROLES.authenticated]: new Set([
@@ -1883,6 +1904,10 @@ export const ALLOWED = {
     // [#629, 0180] the shared question's open verb, its expiry sweep and the authority snapshot a
     // resumed run reads — clara_runtime ONLY, the same lane clara.open_interruption sits in.
     ...WORK_QUESTIONS_0180_RUNTIME_FNS,
+    // [#630, 0184] the Work-level cancel and the takeover — clara_runtime ONLY, the same lane
+    // clara.retry_accounting_work sits in. Both are reached by a human through the runtime's own
+    // authenticated route, never by PostgREST.
+    ...WORK_CANCEL_0184_RUNTIME_FNS,
     // [F-A2 PR-2, GM-10] the withdrawal re-admit door — clara_runtime ONLY (the consumer's
     // sole caller); proves the event->entry->attempt->task->filing chain then delegates to
     // 0053's one_click exception. Declared here so any wider grant FAILS the matrix.
@@ -2112,6 +2137,7 @@ export async function grantMatrixFailures() {
   failures.push(...cohortFailures("#629 0180 shared work-question lane", WORK_QUESTIONS_0180_COHORT, liveNames));
   failures.push(...cohortFailures("#634 0182 journal-evidence lane", JOURNAL_EVIDENCE_0182_COHORT, liveNames));
   failures.push(...cohortFailures("#728 0183 sweep attribution + spoken-for documents", WALK_FINDINGS_0183_COHORT, liveNames));
+  failures.push(...cohortFailures("#630 0184 work-cancel/takeover lane", WORK_CANCEL_0184_COHORT, liveNames));
   failures.push(...cohortFailures("wave F F-A1 PR-4 bank-statement witness cutover", STATEMENT_F_A1_PR4_COHORT, liveNames));
   // F-A6's cohort is bimodal: wholly present once PR-1 applies, wholly absent before it. Half a
   // cohort is a half-applied migration and is reported as one.

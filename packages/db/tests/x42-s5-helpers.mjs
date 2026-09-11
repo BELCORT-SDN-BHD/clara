@@ -970,6 +970,24 @@ const WORK_QUESTIONS_0180_CLOCK_NAMES = [
 // `_tf_entry_evidence_link_append_only` are all clock-free.
 const JOURNAL_EVIDENCE_0182_CLOCK_NAMES = ["_tf_entry_evidence_release"];
 
+// #630 [0184] — settling admitted operations under cancel / revoke / lock-period races. EXACTLY
+// ONE name, and every other body in the migration is measured out rather than omitted.
+// `cancel_accounting_work` stamps `agent_tasks.cancelled_at = now()` and returns the same instant
+// in its answer — an INSTANT, never a date derived from one, which is the property arm (D) exists
+// to protect.
+//
+// The rest add nothing. `take_over_accounting_work` reads NO clock: it delegates run creation to
+// `clara.retry_accounting_work` (already reached through WORK_JOURNAL_0178_CLOCK_NAMES' cohort and
+// itself clock-free) and its own writes carry no timestamp — `accounting_work.updated_at` is
+// stamped by `_tf_accounting_work_immutable`, which is on this roster already.
+// `_tf_accounting_work_responsible_default` is a BEFORE INSERT default with one assignment and no
+// clock. `work_authority_snapshot` is a projection. `settle_work_run`, `claim_work_run` and
+// `_record_journal_entry_core` are RECUT here but already sit in WORK_JOURNAL_0178_CLOCK_NAMES, and
+// none of the three recuts introduces a new clock read (the same `updated_at` / `approved_at` /
+// `posted_at` stamps). `_tf_accounting_work_status_mirror` is recut and stays clock-free — its new
+// `stopping` arm is one UPDATE of `status`.
+const WORK_CANCEL_0184_CLOCK_NAMES = ["cancel_accounting_work"];
+
 /** The arm (D) roster for the database under test, sorted as the catalog sorts it. */
 export async function s5BareTokenRoster(query) {
   const applied = async (pat) => (await query(
@@ -1071,6 +1089,7 @@ export async function s5BareTokenRoster(query) {
   if (await appliedStem("user_preferences$")) names.push(...USER_PREFERENCES_0179_CLOCK_NAMES);
   if (await appliedStem("work_questions$")) names.push(...WORK_QUESTIONS_0180_CLOCK_NAMES);
   if (await appliedStem("journal_work_evidence$")) names.push(...JOURNAL_EVIDENCE_0182_CLOCK_NAMES);
+  if (await appliedStem("work_cancel_ordering$")) names.push(...WORK_CANCEL_0184_CLOCK_NAMES);
   return names.sort();
 }
 
