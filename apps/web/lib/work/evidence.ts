@@ -298,7 +298,7 @@ export type AttachEvidenceResult =
    *  is what hydrate-never-trust asks for anyway) and shows what is there. */
   | { kind: "evidence_already_attached" }
   /** The chosen document already backs another posted entry. `findEntryForDocument`
-   *  resolves WHICH one from the rows — see its note for why not from here. */
+   *  resolves WHICH one — and WHOSE — from the rows; see its note for why not from here. */
   | { kind: "source_conflict" }
   | { kind: "entry_not_approved" }
   /** The entry has been REVERSED. LAW 6 leaves it `approved`, so this is its own
@@ -332,6 +332,22 @@ export type AttachEvidenceResult =
  * lane's own `clara.journal_entries.document_id` (approved, not reversed).
  * Returns null when nothing holds it — a link is never invented.
  *
+ * FIRM-WIDE, AND IT NAMES THE CLAIMANT (delta review of the fix round,
+ * 2026-09-11, finding [4]). Both arms used to filter `client_id=eq.<the asking
+ * client>`, which asks a CLIENT-scoped question against a FIRM-wide invariant:
+ * `uq_entry_evidence_links_document` carries no client column (0182:345) and
+ * `_document_posting_entry`'s own body joins on `c.firm_id`, never on the
+ * client — so a document actively filed to two clients of one firm
+ * (`uq_document_filing_active` is per (document, client), 0007:93) could be
+ * held by client A's entry while client B's dialog, refused for exactly that
+ * reason, resolved NOTHING and showed a refusal with no way to reach the entry
+ * it is about. The reads below are firm-scoped by RLS alone
+ * (`p_journal_entries_human`: `firm_id = clara.jwt_firm()`), which is the
+ * scope of the invariant. The CLAIMANT client comes back with the entry
+ * because the caller needs it to build the route: `/clients/<claimant>/journals`
+ * is where the entry actually is, and the asking client's journal never
+ * contains it (see `spoken-for-note.tsx`'s own note on the same rule).
+ *
  * BOTH ARMS IGNORE A REVERSAL, and the two spellings of that are the two lanes'
  * own: `released_at is null` here (0182's `t_entry_evidence_release` stamps it
  * when the entry is reversed) and `reversed_by is null` there. Without the first
@@ -339,25 +355,53 @@ export type AttachEvidenceResult =
  * books, for a document the door has already freed — the exact opposite of the
  * conflict it is explaining.
  */
+export type DocumentClaim = {
+  entryId: string;
+  /** The client whose entry holds the document — NOT necessarily the one that asked. */
+  clientId: string;
+};
+
 export async function findEntryForDocument(
-  clientId: string,
   documentId: string,
   opts: Opts = {},
-): Promise<string | null> {
+): Promise<DocumentClaim | null> {
   const doc = encodeURIComponent(documentId);
-  const client = encodeURIComponent(clientId);
-  const links = await getRows<{ entry_id: string }>(
-    `entry_evidence_links?document_id=eq.${doc}&client_id=eq.${client}&released_at=is.null&select=entry_id`,
+  const links = await getRows<{ entry_id: string; client_id: string }>(
+    `entry_evidence_links?document_id=eq.${doc}&released_at=is.null&select=entry_id,client_id`,
     opts,
   );
   const link = links[0];
-  if (link !== undefined) return link.entry_id;
-  const coded = await getRows<{ id: string }>(
-    `journal_entries?document_id=eq.${doc}&client_id=eq.${client}&status=eq.approved&reversed_by=is.null&select=id`,
+  if (link !== undefined) return { entryId: link.entry_id, clientId: link.client_id };
+  const coded = await getRows<{ id: string; client_id: string }>(
+    `journal_entries?document_id=eq.${doc}&status=eq.approved&reversed_by=is.null&select=id,client_id`,
     opts,
   );
   const entry = coded[0];
-  return entry === undefined ? null : entry.id;
+  return entry === undefined ? null : { entryId: entry.id, clientId: entry.client_id };
+}
+
+/**
+ * WHOSE ENTRY IS THIS — the claimant client of one posted entry id, read
+ * firm-wide.
+ *
+ * The composer's `source_already_posted` refusal carries an `entry_id` and no
+ * client (`admit_journal_work`'s CLR13 detail), and `_document_posting_entry`
+ * resolves that entry across the WHOLE FIRM, so the id may name a sibling
+ * client's entry. This is the narrowest read that turns it into a route: one
+ * row of `clara.journal_entries`, firm-scoped by its own human policy. Returns
+ * null when the id resolves to nothing the caller may read — and the caller
+ * then renders no link rather than a link into a journal the entry is not in.
+ */
+export async function findEntryClient(
+  entryId: string,
+  opts: Opts = {},
+): Promise<string | null> {
+  const id = encodeURIComponent(entryId);
+  const rows = await getRows<{ client_id: string }>(
+    `journal_entries?id=eq.${id}&select=client_id`,
+    opts,
+  );
+  return rows[0]?.client_id ?? null;
 }
 
 /**

@@ -13,13 +13,17 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { findEntryForDocument, listClientEvidenceDocuments, listSpokenForDocuments, mergeSpokenFor, type EvidenceDocument } from "./evidence";
+import { findEntryClient, findEntryForDocument, listClientEvidenceDocuments, listSpokenForDocuments, mergeSpokenFor, type EvidenceDocument } from "./evidence";
 import type { SessionTokenAccessor } from "@/lib/session";
 
 const session: SessionTokenAccessor = { getAccessToken: async () => "tok" };
 const CLIENT = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const VERIFIED = "d1111111-1111-4111-8111-111111111111";
 const UNVERIFIED = "d2222222-2222-4222-8222-222222222222";
+/** A SIBLING client of the same firm: the document is actively filed to both
+ *  (`uq_document_filing_active` is per (document, client), 0007:93) and this one holds the
+ *  posted entry. Every claimant-scope cell below is about telling the two apart. */
+const SIBLING = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 
 function filing(documentId: string): Record<string, unknown> {
   return {
@@ -111,20 +115,55 @@ test("t634: the conflict lookup ignores a RELEASED binding", async () => {
   // a document the door has already freed — the opposite of the conflict it is
   // explaining.
   await withRows(
-    (url) => (url.includes("entry_evidence_links") ? [{ entry_id: "e1" }] : []),
+    (url) => (url.includes("entry_evidence_links") ? [{ entry_id: "e1", client_id: CLIENT }] : []),
     async (urls) => {
-      assert.equal(await findEntryForDocument(CLIENT, VERIFIED, { session }), "e1");
+      assert.deepEqual(await findEntryForDocument(VERIFIED, { session }), { entryId: "e1", clientId: CLIENT });
       assert.ok(urls[0]!.includes("released_at=is.null"),
         `the links read must exclude released bindings (asked: ${urls[0]})`);
     },
   );
 });
 
+test("t728d: the conflict lookup is FIRM-WIDE and names the claimant — a sibling client's entry resolves, with a route into THAT client's journal", async () => {
+  // The evidence invariant has no client column: `uq_entry_evidence_links_document` is per
+  // document alone (0182:345) and `_document_posting_entry` joins on the FIRM. A document
+  // actively filed to two clients of one firm can therefore be held by a sibling's entry, and a
+  // client-scoped read (which both arms carried until the delta review) answered null — a refusal
+  // with no way to reach the entry it is about.
+  await withRows(
+    (url) => (url.includes("entry_evidence_links") ? [{ entry_id: "sib-1", client_id: SIBLING }] : []),
+    async (urls) => {
+      assert.deepEqual(await findEntryForDocument(VERIFIED, { session }),
+        { entryId: "sib-1", clientId: SIBLING },
+        "the claimant travels with the entry, because the route is built from it");
+      assert.equal(urls[0]!.includes("client_id=eq."), false,
+        `the read must not narrow to the asking client (asked: ${urls[0]})`);
+      assert.ok(urls[0]!.includes("select=entry_id,client_id"), urls[0]);
+    },
+  );
+});
+
+test("t728d: findEntryClient names the claimant of one entry id, firm-scoped by RLS alone", async () => {
+  await withRows(
+    () => [{ client_id: SIBLING }],
+    async (urls) => {
+      assert.equal(await findEntryClient("e-9", { session }), SIBLING);
+      assert.ok(urls[0]!.includes("journal_entries?id=eq.e-9"), urls[0]);
+      assert.equal(urls[0]!.includes("client_id=eq."), false,
+        `the composer's fallback must not narrow to the asking client either (asked: ${urls[0]})`);
+    },
+  );
+  // …and an id that resolves to nothing readable is null, never a guessed route.
+  await withRows(() => [], async () => {
+    assert.equal(await findEntryClient("e-9", { session }), null);
+  });
+});
+
 test("t634: the conflict lookup falls through to the DOCUMENT-CODING lane, approved and not reversed", async () => {
   await withRows(
-    (url) => (url.includes("entry_evidence_links") ? [] : [{ id: "coded-1" }]),
+    (url) => (url.includes("entry_evidence_links") ? [] : [{ id: "coded-1", client_id: SIBLING }]),
     async (urls) => {
-      assert.equal(await findEntryForDocument(CLIENT, VERIFIED, { session }), "coded-1");
+      assert.deepEqual(await findEntryForDocument(VERIFIED, { session }), { entryId: "coded-1", clientId: SIBLING });
       const coded = urls[1] ?? "";
       assert.ok(coded.includes("status=eq.approved"), coded);
       assert.ok(coded.includes("reversed_by=is.null"), coded);
@@ -134,7 +173,7 @@ test("t634: the conflict lookup falls through to the DOCUMENT-CODING lane, appro
 
 test("t634: nothing holds the document — a link is never invented", async () => {
   await withRows(() => [], async () => {
-    assert.equal(await findEntryForDocument(CLIENT, VERIFIED, { session }), null);
+    assert.equal(await findEntryForDocument(VERIFIED, { session }), null);
   });
 });
 
