@@ -29,6 +29,36 @@ function localPath(key) {
   return join(testRoot(), ...safeKey(key).split("/"));
 }
 
+/**
+ * Open a RELAY_TEST_MODE object EAGERLY and hand back a stream that is already attached to the
+ * open file handle.
+ *
+ * A BARE `createReadStream(path)` IS A LOADED GUN IN A CRASH-ONLY PROCESS (#630). It is lazy: the
+ * `open()` runs on a later libuv turn and its failure arrives as an `'error'` EVENT, not as a
+ * rejected promise. Every reader below has at least one `await` between creating that stream and
+ * the `pipeline()` that would listen to it (`downloadCanonical`'s destination `mkdir` is the
+ * measured one), so on a missing object the event fired into an EMPTY listener set, Node re-raised
+ * it as an uncaughtException, and `scripts/serve.mjs`'s fatal handler took the whole supervisor
+ * down at startup. One absent file under `packages/runtime/test-storage` — the ordinary state of a
+ * rebuilt rig whose database still holds `clara.documents` rows — was enough.
+ *
+ * Opening first also makes the LOCAL failure the SAME failure the deployed one is: a typed,
+ * retryable `storage_error`, not a bare ENOENT a route's error mapper reads as an unrecognised
+ * internal fault. `artifactResponseFor` below already took this cure for the artifact family and
+ * records the same reasoning; this is that cure, shared by the other three.
+ */
+async function openLocalStream(path, what) {
+  let fh;
+  try {
+    fh = await open(path, "r");
+  } catch {
+    throw new StorageError("storage_error", `${what} storage read failed (object absent)`);
+  }
+  // `FileHandle.createReadStream` owns the handle and closes it on end/error/destroy, and the fd
+  // is already open — so there is no second `open()` left to fail asynchronously.
+  return fh.createReadStream();
+}
+
 function decodeJwtClaims(jwt) {
   try {
     return JSON.parse(Buffer.from(String(jwt).split(".")[1], "base64url").toString("utf8"));
@@ -116,7 +146,7 @@ async function responseFor(key) {
   if (process.env.RELAY_TEST_MODE === "1") {
     const injected = globalThis.__claraStorageForTest;
     if (injected?.get) return injected.get(key);
-    return createReadStream(localPath(key));
+    return openLocalStream(localPath(key), "canonical");
   }
   const { base, jwt } = realConfig();
   const response = await fetch(objectUrl(base, key), {
@@ -229,7 +259,7 @@ async function wikiResponseFor(key) {
   if (process.env.RELAY_TEST_MODE === "1") {
     const injected = globalThis.__claraStorageForTest;
     if (injected?.get) return injected.get(key);
-    return createReadStream(wikiLocalPath(key));
+    return openLocalStream(wikiLocalPath(key), "wiki");
   }
   const { base, jwt } = realConfig();
   const response = await fetch(wikiObjectUrl(base, key), { headers: { authorization: `Bearer ${jwt}`, apikey: jwt } });
@@ -332,7 +362,7 @@ async function reportResponseFor(key) {
   if (process.env.RELAY_TEST_MODE === "1") {
     const injected = globalThis.__claraStorageForTest;
     if (injected?.get) return injected.get(key);
-    return createReadStream(reportLocalPath(key));
+    return openLocalStream(reportLocalPath(key), "report");
   }
   const { base, jwt } = realConfig();
   const response = await fetch(reportObjectUrl(base, key), { headers: { authorization: `Bearer ${jwt}`, apikey: jwt } });
