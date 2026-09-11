@@ -15,7 +15,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { probeWork, retryWork, submitJournalWork, type JournalBasisWire } from "./api";
+import { cancelWork, probeWork, retryWork, submitJournalWork, takeOverWork, type JournalBasisWire } from "./api";
 import type { SessionTokenAccessor } from "@/lib/session";
 
 const auth: SessionTokenAccessor = { getAccessToken: async () => "tok" };
@@ -262,6 +262,167 @@ test("the probe reads the runtime's own view, and never reports a run id", async
     () => json({ error: "not_found" }, 404),
     async () => {
       assert.equal((await probeWork(auth, "nope")).kind, "not_found");
+    },
+  );
+});
+
+// ===========================================================================
+// #630 — CANCEL WORK, and TAKE RESPONSIBILITY.
+//
+// THE CLASSIFICATION TABLE IS THE POINT, again, and here it carries one extra
+// burden: a 200 from the cancel door is FOUR different true things, and the one
+// that must never be misread is `already_completed` — the operation won the
+// race, an entry exists, and a surface that reported "cancelled" over it would
+// be telling a person their books say something they do not.
+// ===========================================================================
+
+test("cancel posts to the proxy path with the caller's op key", async () => {
+  await withFetch(
+    () => json({ work_id: "w1", task_id: "t1", status: "stopping", cancelled: true, replayed: false }, 200),
+    async (seen) => {
+      await cancelWork(auth, { workId: "w 1", opKey: "k1" });
+      assert.equal(seen[0]!.url, "/api/runtime/work/w%201/cancel", "the work id is encoded, and /api is REPLACED");
+      assert.equal(JSON.parse(String(seen[0]!.init?.body)).opKey, "k1");
+      assert.equal((seen[0]!.init?.headers as Record<string, string>).authorization, "Bearer tok");
+    },
+  );
+});
+
+test("cancel: stopping is NOT a terminal, and the answer says so", async () => {
+  await withFetch(
+    () => json({ work_id: "w1", task_id: "t1", status: "stopping", cancelled: true, cancelled_by: "u1", cancelled_at: "2026-09-11T00:00:00Z", replayed: false }, 200),
+    async () => {
+      const out = await cancelWork(auth, { workId: "w1", opKey: "k" });
+      assert.equal(out.kind, "answered");
+      if (out.kind !== "answered") return;
+      assert.equal(out.status, "stopping");
+      assert.equal(out.cancelled, true);
+      assert.equal(out.reason, null, "an acting cancel carries no `already_*` reason");
+      assert.equal(out.cancelledBy, "u1");
+    },
+  );
+});
+
+test("cancel: already_completed carries the effect that WON, so the surface can link to it", async () => {
+  await withFetch(
+    () => json({
+      work_id: "w1", task_id: "t1", status: "completed", cancelled: false,
+      reason: "already_completed", receipt_id: "r1", entry_id: "e1", replayed: false,
+    }, 200),
+    async () => {
+      const out = await cancelWork(auth, { workId: "w1", opKey: "k" });
+      assert.equal(out.kind, "answered");
+      if (out.kind !== "answered") return;
+      assert.equal(out.cancelled, false, "nothing was cancelled — the operation committed first");
+      assert.equal(out.reason, "already_completed");
+      assert.equal(out.entryId, "e1");
+      assert.equal(out.receiptId, "r1");
+      assert.equal(out.status, "completed");
+    },
+  );
+});
+
+test("cancel: already_terminal is not an error", async () => {
+  await withFetch(
+    () => json({ work_id: "w1", task_id: null, status: "refused", cancelled: false, reason: "already_terminal", replayed: false }, 200),
+    async () => {
+      const out = await cancelWork(auth, { workId: "w1", opKey: "k" });
+      assert.equal(out.kind, "answered");
+      if (out.kind !== "answered") return;
+      assert.equal(out.reason, "already_terminal");
+      assert.equal(out.status, "refused");
+    },
+  );
+});
+
+test("cancel: every refusal status maps to exactly one typed outcome", async () => {
+  const cases: Array<[number, unknown, string]> = [
+    [401, {}, "denied"],
+    [403, {}, "denied"],
+    [404, { error: "not_found" }, "not_found"],
+    [409, { error: "work_cancelled", status: "stopping" }, "conflict"],
+    [400, { error: "invalid_basis", reason: "invalid_op_key" }, "invalid"],
+    [503, { error: "shutting_down" }, "unavailable"],
+  ];
+  for (const [status, body, kind] of cases) {
+    await withFetch(
+      () => json(body, status),
+      async () => {
+        const out = await cancelWork(auth, { workId: "w1", opKey: "k" });
+        assert.equal(out.kind, kind, `HTTP ${status} classifies as ${kind}`);
+      },
+    );
+  }
+});
+
+test("cancel: no session is denied before anything is sent; a transport failure is LOST, never unavailable", async () => {
+  await withFetch(
+    () => {
+      throw new Error("should not be called");
+    },
+    async (seen) => {
+      assert.equal((await cancelWork(noSession, { workId: "w1", opKey: "k" })).kind, "denied");
+      assert.equal(seen.length, 0, "nothing was sent");
+    },
+  );
+  await withFetch(
+    () => Promise.reject(new Error("socket hang up")),
+    async () => {
+      const out = await cancelWork(auth, { workId: "w1", opKey: "k" });
+      assert.equal(out.kind, "lost", "no answer was OBSERVED — the cancel may or may not have run");
+    },
+  );
+});
+
+test("take-over sends the digest slot on every call, and 202 names both humans", async () => {
+  await withFetch(
+    () => json({
+      work_id: "w1", task_id: "t2", logical_op_id: "op", status: "queued", replayed: false,
+      responsible: "u2", previous_responsible: "u1", initiated_by: "u1", taken_over: true,
+    }, 202),
+    async (seen) => {
+      const out = await takeOverWork(auth, { workId: "w1", opKey: "k" });
+      assert.equal(seen[0]!.url, "/api/runtime/work/w1/take-over");
+      assert.deepEqual(JSON.parse(String(seen[0]!.init?.body)), { opKey: "k", basisDigest: null },
+        "the slot is always present — the DATABASE decides whether a digest is required");
+      assert.equal(out.kind, "accepted");
+      if (out.kind !== "accepted") return;
+      assert.equal(out.responsible, "u2");
+      assert.equal(out.initiatedBy, "u1", "who ASKED is preserved");
+      assert.equal(out.takenOver, true);
+      assert.equal(out.taskId, "t2", "a NEW run of the SAME logical identity");
+    },
+  );
+});
+
+test("take-over: the basis gate is its OWN outcome, carrying the digest to confirm", async () => {
+  await withFetch(
+    () => json({ error: "basis_confirmation_required", basis_digest: "a".repeat(64), basis_origin: "clara_interpreted" }, 400),
+    async () => {
+      const out = await takeOverWork(auth, { workId: "w1", opKey: "k" });
+      assert.equal(out.kind, "confirm_basis");
+      if (out.kind !== "confirm_basis") return;
+      assert.equal(out.basisDigest, "a".repeat(64), "the digest is what the resubmit must carry back");
+      assert.equal(out.basisOrigin, "clara_interpreted");
+    },
+  );
+  // …and a plain 400 is still an ordinary invalid, not a confirm step.
+  await withFetch(
+    () => json({ error: "invalid_basis", reason: "invalid_op_key" }, 400),
+    async () => {
+      assert.equal((await takeOverWork(auth, { workId: "w1", opKey: "k" })).kind, "invalid");
+    },
+  );
+});
+
+test("take-over: 409 is not_takeable with the status that made it so", async () => {
+  await withFetch(
+    () => json({ error: "not_takeable", status: "running" }, 409),
+    async () => {
+      const out = await takeOverWork(auth, { workId: "w1", opKey: "k" });
+      assert.equal(out.kind, "not_takeable");
+      if (out.kind !== "not_takeable") return;
+      assert.equal(out.status, "running");
     },
   );
 });

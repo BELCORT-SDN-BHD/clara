@@ -22,7 +22,7 @@ import { ReadError } from "../../lib/read";
 import { WORK_HEADING_ID, WorkDetailView } from "./work-detail";
 import { WORK_STALE_AFTER_MS } from "../../lib/work/use-work-detail";
 import { journalDraftKey, type DraftStorage } from "../../lib/work/journal-draft";
-import type { RetryWorkResult } from "../../lib/work/api";
+import type { CancelWorkResult, RetryWorkResult, TakeOverWorkResult } from "../../lib/work/api";
 import type { WorkDetailData } from "../../lib/work/reads";
 import type { AccountingWorkRow } from "../../lib/work/types";
 import type { AgentInterruptionRow } from "../../lib/journals/types";
@@ -130,6 +130,9 @@ function App(props: {
   load?: (clientId: string, workId: string) => Promise<WorkDetailData | null>;
   now?: () => number;
   retry?: (auth: unknown, input: { workId: string; opKey: string }) => Promise<RetryWorkResult>;
+  /** #630 — the two runtime writes, injected so a cell drives the DECISION with no socket. */
+  cancel?: (auth: unknown, input: { workId: string; opKey: string }) => Promise<CancelWorkResult>;
+  takeOver?: (auth: unknown, input: { workId: string; opKey: string; basisDigest?: string | null }) => Promise<TakeOverWorkResult>;
   scope?: { firmId?: string; userId?: string };
   storage?: DraftStorage | null;
   /** #634 — the entry's links read. DEFAULTED so no cell reaches a real socket:
@@ -146,6 +149,10 @@ function App(props: {
       load: props.load,
       now: props.now,
       retry: (props.retry ?? (async () => ({ kind: "accepted", workId: WORK, taskId: "t", logicalOpId: "op", status: "queued", replayed: false }))) as never,
+      cancel: (props.cancel
+        ?? (async () => ({ kind: "answered", workId: WORK, taskId: TASK, status: "stopping", cancelled: true, reason: null, receiptId: null, entryId: null, cancelledBy: USER, cancelledAt: "2026-09-11T00:00:00.000Z", replayed: false }))) as never,
+      takeOver: (props.takeOver
+        ?? (async () => ({ kind: "accepted", workId: WORK, taskId: "t2", logicalOpId: "op", status: "queued", replayed: false, responsible: "user-2", previousResponsible: USER, initiatedBy: USER, takenOver: true }))) as never,
       session: { getAccessToken: async () => "tok" },
       scope: props.scope,
       storage: props.storage ?? null,
@@ -825,5 +832,116 @@ test("an entry that ALREADY carries a source shows it and offers no second attac
     assert.equal(buttonLabelled(h, "Attach evidence"), null);
   } finally {
     await h.unmount();
+  }
+});
+
+// ===========================================================================
+// #630 — CANCEL WORK, and TAKE RESPONSIBILITY.
+// ===========================================================================
+
+test("#630 a STOPPING work says WHY it is not a terminal yet, and offers NO second cancel", async () => {
+  const h = await renderComponent(App({ load: async () => data({ work: workRow({ status: "stopping" }) }) }));
+  try {
+    await h.settle();
+    assert.match(h.text(), /Stopping/);
+    assert.match(h.text(), /already accepted is finishing/, "the reason the terminal is not shown yet");
+    assert.equal(buttonLabelled(h, "Cancel Work"), null,
+      "a Work that is already stopping has nothing left to cancel");
+    // …and emphatically NOT the terminal, early.
+    assert.ok(!/Nothing was posted\./.test(h.text()), "never a cancellation this page cannot prove");
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("#630 a CANCELLED work shows the run's superseded outcome when the settle translated one", async () => {
+  const h = await renderComponent(
+    App({
+      load: async () =>
+        data({
+          work: workRow({
+            status: "cancelled",
+            error: {
+              code: "cancelled", reason: "cancelled", recoverable: true,
+              message: "This Work was cancelled before an entry was recorded. Nothing was posted.",
+              superseded: { outcome: "failed", error_code: "internal", error: { reason: "work_cancelled" } },
+            } as never,
+          }),
+        }),
+    }),
+  );
+  try {
+    await h.settle();
+    assert.match(h.text(), /Cancelled/);
+    assert.match(h.text(), /The run reported failed as it stopped\./,
+      "what the run asked for is kept, never discarded");
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("#630 an authority_lost refusal offers Take responsibility; a plain failure does not", async () => {
+  const taken: Array<{ workId: string; basisDigest?: string | null }> = [];
+  const orphaned = () =>
+    data({
+      work: workRow({
+        status: "refused",
+        error: { code: "CLR04", reason: "authority_lost", message: "The person who asked for this Work is no longer an active member of the firm.", recoverable: true },
+      }),
+    });
+  const h = await renderComponent(
+    App({ load: async () => orphaned(), takeOver: async (_a, input) => { taken.push(input); return { kind: "accepted", workId: WORK, taskId: "t2", logicalOpId: "op", status: "queued", replayed: false, responsible: "user-2", previousResponsible: USER, initiatedBy: USER, takenOver: true }; } }),
+  );
+  try {
+    await h.settle();
+    assert.match(h.text(), /waiting for someone who can finish it/);
+    const take = buttonLabelled(h, "Take responsibility");
+    assert.ok(take, "a colleague is offered the Work");
+    // A `user_direct` basis needs NO confirm step — the figures were typed by a human.
+    await h.fireEvent(take, "click");
+    await h.settle();
+    assert.equal(taken.length, 1);
+    assert.equal(taken[0]!.basisDigest ?? null, null, "no digest is sent for a user_direct basis");
+    assert.match(h.text(), /You are responsible for this Work/);
+  } finally {
+    await h.unmount();
+  }
+
+  const plain = await renderComponent(
+    App({
+      load: async () =>
+        data({ work: workRow({ status: "failed", error: { code: "internal", reason: "no_effect", message: "nothing", recoverable: true } }) }),
+    }),
+  );
+  try {
+    await plain.settle();
+    assert.equal(buttonLabelled(plain, "Take responsibility"), null,
+      "a Work whose person is still authorised is the Retry's job, not a takeover's");
+  } finally {
+    await plain.unmount();
+  }
+});
+
+test("#630 Cancel Work is OFFERED from a cancellable status and withheld from every other one", async () => {
+  // The dialog's own behaviour lives in work-cancel-dialog.test.tsx (its content is PORTALLED to
+  // document.body, which this file's delegation root never reaches). What belongs HERE is the
+  // page's decision about whether to offer the control at all.
+  for (const status of ["queued", "running", "awaiting_input"]) {
+    const h = await renderComponent(App({ load: async () => data({ work: workRow({ status }) }) }));
+    try {
+      await h.settle();
+      assert.ok(buttonLabelled(h, "Cancel Work"), `a ${status} Work can be cancelled`);
+    } finally {
+      await h.unmount();
+    }
+  }
+  for (const status of ["stopping", "completed", "cancelled", "refused", "failed", "expired"]) {
+    const h = await renderComponent(App({ load: async () => data({ work: workRow({ status }) }) }));
+    try {
+      await h.settle();
+      assert.equal(buttonLabelled(h, "Cancel Work"), null, `a ${status} Work has nothing left to cancel`);
+    } finally {
+      await h.unmount();
+    }
   }
 });

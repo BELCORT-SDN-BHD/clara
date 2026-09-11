@@ -360,3 +360,4 @@ tests/streamAuthority.test.mjs
 tests/streamParser.test.mjs
 tests/streamReattach.test.mjs
 tests/token-contrast.test.ts
+components/work/work-cancel-dialog.test.tsx

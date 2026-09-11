@@ -48,7 +48,7 @@ import { readClarifyQuestion } from "@/lib/journals/governance-doors";
 import { useMemberNames, type MemberNameResolver } from "@/lib/members/use-member-names";
 import { WORK_NEEDS_YOU_HREF, clientBase, journalComposerHref } from "@/lib/navigation/tree";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
-import { retryWork, type RetryWorkResult } from "@/lib/work/api";
+import { cancelWork, retryWork, takeOverWork, type RetryWorkResult } from "@/lib/work/api";
 import { accountNames, type WorkDetailData } from "@/lib/work/reads";
 import { listEntryLinks, type EntryLinkRow } from "@/lib/work/evidence";
 import { useWorkDetail } from "@/lib/work/use-work-detail";
@@ -124,6 +124,8 @@ export function WorkDetailView({
   load,
   now,
   retry = retryWork,
+  cancel = cancelWork,
+  takeOver = takeOverWork,
   session = sessionTokenAccessor,
   scope,
   storage,
@@ -134,6 +136,10 @@ export function WorkDetailView({
   load?: (clientId: string, workId: string) => Promise<WorkDetailData | null>;
   now?: () => number;
   retry?: typeof retryWork;
+  /** #630 — the two runtime writes this page adds, open as seams for the same reason `retry` is:
+   *  a cell must be able to drive the DECISION without a socket. */
+  cancel?: typeof cancelWork;
+  takeOver?: typeof takeOverWork;
   session?: SessionTokenAccessor;
   /** #634 — the entry's CURRENT source, Work, receipt and correction chain, read
    *  through `clara.list_entry_links`. Separate from `load` because it is read
@@ -362,6 +368,8 @@ export function WorkDetailView({
         retryState={retryState}
         onRetry={() => void runRetry()}
         onConverge={() => state.reload()}
+        cancel={cancel}
+        takeOver={takeOver}
         session={session}
         interruption={interruption}
         onEditAsNewDraft={seedDraft}
@@ -577,6 +585,8 @@ function WorkOutcome({
   retryState,
   onRetry,
   onConverge,
+  cancel,
+  takeOver,
   session,
   interruption,
   onEditAsNewDraft,
@@ -595,6 +605,8 @@ function WorkOutcome({
    *  this component paints nothing it was not told by a fresh read, and the 3-second poll keeps
    *  converging on `stopping` → terminal afterwards. */
   onConverge: () => void | Promise<void>;
+  cancel: typeof cancelWork;
+  takeOver: typeof takeOverWork;
   session: SessionTokenAccessor;
   /** The row this Work is parked on, when it is parked and visible. */
   interruption: AgentInterruptionRow | null;
@@ -611,6 +623,7 @@ function WorkOutcome({
       workId={work.id}
       clientId={clientId}
       onCancelled={onConverge}
+      cancel={cancel}
       session={session}
     />
   ) : null;
@@ -668,6 +681,7 @@ function WorkOutcome({
             basisOrigin={work.basis_origin}
             basisDigest={work.basis_digest}
             onTakenOver={onConverge}
+            takeOver={takeOver}
             session={session}
           />
         ) : null}
