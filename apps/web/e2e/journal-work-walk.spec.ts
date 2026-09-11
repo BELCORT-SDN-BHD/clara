@@ -715,10 +715,22 @@ test("#727: the Work detail route hydrates with no React fault in the console", 
   // RLS read or a governed RPC that the client is supposed to be able to issue; a 4xx among
   // them is either a malformed filter (the `22P02` class #614 recorded for a bad uuid
   // segment) or an affordance asking for something it may not have.
+  //
+  // SCOPED TO THIS ROUTE'S OWN DATA READS (review C6). An unscoped collector claims EVERY
+  // 4xx the browser ever sees — a missing favicon, a font, a Next chunk probed after a
+  // redeploy, anything the harness serves — and reds a HYDRATION cell over a request that
+  // has nothing to do with hydration. The two prefixes below are the only doors this page
+  // has: `/e2e-supabase/rest/v1/…` is where `NEXT_PUBLIC_SUPABASE_URL` points
+  // (serve-built.mjs:68), covering both `getRows` table reads and `callDoor` RPCs, and
+  // `/api/runtime/…` is the app's own same-origin proxy, which is how `lib/work/api.ts`
+  // reaches `/api/runtime/work/*`. A refusal at either is a real finding about this route.
+  const ROUTE_READS = /^\/e2e-supabase\/rest\/v1\/|^\/api\/runtime\//;
   const rejected: string[] = [];
   page.on("response", (response) => {
     if (response.status() < 400) return;
-    rejected.push(`${response.status()} ${new URL(response.url()).pathname}`);
+    const path = new URL(response.url()).pathname;
+    if (!ROUTE_READS.test(path)) return;
+    rejected.push(`${response.status()} ${path}`);
   });
 
   // `park_card` below arms `state.showParkedCard`, which puts a SECOND `work_accepted`
