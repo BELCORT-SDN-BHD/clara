@@ -345,9 +345,11 @@ export function JournalComposerView({
       // settled, or the refusal names a document the picker never saw), one
       // firm-scoped `journal_entries` read resolves it. If BOTH come back empty
       // the banner renders without a link — see the phase's own note.
-      const advisory = result.documentId === null
-        ? null
-        : (spokenForRead.data ?? []).find((r) => r.document_id === result.documentId)?.client_id ?? null;
+      // …and the advisory row is used ONLY when it names the SAME entry the refusal does. The two
+      // reads are a tick apart; a row that has moved on since is not evidence about this entry.
+      const advisory = (spokenForRead.data ?? []).find(
+        (r) => r.document_id === result.documentId && r.entry_id === result.entryId,
+      )?.client_id ?? null;
       const owner = advisory ?? (result.entryId === null
         ? null
         : await resolveEntryClient(result.entryId, { session }).catch(() => null));
