@@ -21,7 +21,7 @@ import {
   entryCount, committedReceiptCount, tasksForWork,
   cancelAccountingWork, takeOverAccountingWork, workAuthoritySnapshot,
   deactivateMember, demoteMember, interruptionsForTask, responsibleOf, timelineEvents,
-  basis, WCHART, REASON, CLR, CANCEL_REASON, CANCEL_ANSWER, assertPair, assertRaises,
+  basis, REASON, CLR, CANCEL_REASON, CANCEL_ANSWER, assertPair, assertRaises,
   rootQuery, humanQuery, roleQuery, opk, ROLES, insertUser, addMember,
 } from "./work-cancel-fixtures.mjs";
 import { getPool } from "./rig-helpers.mjs";
@@ -83,12 +83,6 @@ async function post(w, { author = null } = {}) {
   });
 }
 
-/** Assert a Work produced NO accounting effect at all. Both halves, always. */
-async function assertNoEffect(w, label) {
-  assert.equal(await entryCount(w.client), w.entriesBefore ?? (await entryCount(w.client)),
-    `${label}: the client's journal is unmoved`);
-  assert.equal((await receiptsForWork(w.work_id)).length, 0, `${label}: no operation receipt exists`);
-}
 
 // ===========================================================================================
 // §A1 — clara.cancel_accounting_work: the door and its matrix.
