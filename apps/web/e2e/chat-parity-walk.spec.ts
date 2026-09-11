@@ -46,7 +46,18 @@ async function scan(page: Page, what: string): Promise<void> {
   expect(results.violations, `${what} axe violations`).toEqual([]);
 }
 
+// IDEMPOTENT (#727's burst backstop, below, is what needs this): a SECOND full form
+// sign-in on a context that already holds a session does not land back on "/" — measured
+// running this file's own beforeEach followed by a test's own `openThread` unmodified, the
+// first test in the file failed with the page STUCK on "/login" after the click, 5s
+// timeout, no redirect. This repo's mock auth is not exercised for that shape (nothing
+// else in this suite signs in twice on one context), so this guards the ONE new caller
+// that now can — `page.context().cookies()` is a cheap, no-navigation check for the
+// session cookie `lib/supabase/cookie-options.ts`'s `AUTH_COOKIE_NAME` names, and every
+// OTHER call site keeps behaving exactly as before (a fresh context has no such cookie).
 async function signIn(page: Page): Promise<void> {
+  const alreadySignedIn = (await page.context().cookies()).some((c) => c.name === "__Host-clara-auth");
+  if (alreadySignedIn) return;
   await page.goto("/login");
   await page.getByLabel("Email").fill("owner@example.test");
   await page.getByLabel("Password").fill("Clara-e2e-password-1!");
@@ -98,6 +109,25 @@ function watchChatWire(page: Page): { urls: string[]; streamContentType: () => s
   });
   return { urls, streamContentType: () => streamContentType };
 }
+
+// #727 — THE BURST BACKSTOP, mirroring journal-work-walk.spec.ts's own `beforeEach`
+// reset (:144-148, `control(page, { op: "reset" })`). The burst cell below arms
+// `state.burst` (chat-parity-mock.mjs) and disarms it in its own `finally` — but that
+// disarm is `setBurst(page, false).catch(() => {})`, deliberately swallowed so a failed
+// cleanup request cannot turn a passing walk into a failing one. Swallowed means SILENT:
+// if that one `fetch` ever fails (the page already tearing down, a flaky request), nothing
+// reports it, and `state.burst` stays `true` for every test that runs after it in this
+// file — a live `agent_tasks_visible` row and a 900-delta, 15ms-interval stream tail that
+// no other cell asked for or accounts for. `resetPark()` (chat-parity-mock.mjs) cannot be
+// the fix: it fires on EVERY turn POST, including the burst cell's OWN — folding `burst`
+// into it would clear the arm the instant that cell sends its turn, before the stream ever
+// serves a single delta. A `beforeEach` reset is therefore the backstop, independent of
+// which test ran last or whether its own disarm succeeded — the self-disarm above stays,
+// this only covers for it failing.
+test.beforeEach(async ({ page }) => {
+  await signIn(page);
+  await setBurst(page, false);
+});
 
 test("a parked clarify is answered inline, in the thread, and the card shows the answered state", async ({ page }) => {
   const wire = watchChatWire(page);
