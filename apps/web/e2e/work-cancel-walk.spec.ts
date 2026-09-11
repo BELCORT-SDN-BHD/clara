@@ -310,3 +310,65 @@ test("reduced motion: the cancel dialog does not MOVE, and the opacity that rema
   );
   expect(moved, "an element on the stopping Work detail is transformed under reduced motion").toBe(0);
 });
+
+// ===========================================================================================
+// B7 — THE TWO LABELS, AND THE TWO DOORS BEHIND THEM. The ticket's own acceptance line.
+// ===========================================================================================
+
+test("B7: Stop reply and Cancel Work are different controls doing different things, and closing the rail does neither", async ({ page }) => {
+  // THE TURN THIS TAB DID NOT POST. `sendStatus` is a fact about a send THIS tab made, so a rail
+  // opened onto a turn that is already running — a reload, a reattach, a second tab — has no such
+  // fact, and an earlier cut of the control (gated on `sendStatus === "sending"`) therefore never
+  // rendered at all there. The rail learns it from the DATABASE's own row, and the fixture arms one.
+  await control(page, { op: "live_turn" });
+  await control(page, { op: "card" });
+  await page.goto(WORK_LIST_URL);
+  const rail = page.locator("[data-clara-rail]");
+  await expect(rail).toBeVisible();
+
+  // 1 · TWO CONTROLS, TWO NAMES. Never a bare "Stop" on either, because a person who pressed the
+  //     wrong one would either lose a reply they wanted or keep an operation they meant to stop.
+  const stop = rail.getByRole("button", { name: "Stop reply" });
+  const cancel = rail.getByRole("button", { name: "Cancel Work" });
+  await expect(stop, "the Stop control renders for the WHOLE live turn, not only while posting")
+    .toBeVisible({ timeout: 20_000 });
+  await expect(cancel, "…beside the Work card's own, separately named act").toBeVisible();
+  await expect(rail.getByRole("button", { name: "Stop", exact: true }))
+    .toHaveCount(0, { timeout: 5_000 });
+
+  // 2 · STOP REPLY PRESSES ONE DOOR — the chat turn's — and the Work is untouched.
+  await stop.click();
+  await expect(rail.getByText("Stopped", { exact: true })).toBeVisible({ timeout: 15_000 });
+  const afterStop = await control(page, { op: "stop_calls" });
+  expect((afterStop.stopCalls as unknown[]).length, "exactly one cancel_agent_task").toBe(1);
+  expect((afterStop.cancelKeys as unknown[]).length, "…and NO Work-level cancel").toBe(0);
+  await expect(cancel, "the Work a person already accepted keeps running").toBeVisible();
+
+  // 3 · CLOSING THE RAIL DOES NEITHER. Not the reply, not the Work — a person may come back to it.
+  await rail.getByRole("button", { name: "Collapse Clara" }).click();
+  await expect(rail).toBeHidden();
+  const afterClose = await control(page, { op: "stop_calls" });
+  expect((afterClose.stopCalls as unknown[]).length, "closing the rail stops nothing").toBe(1);
+  expect((afterClose.cancelKeys as unknown[]).length, "…and cancels nothing").toBe(0);
+});
+
+test("B7: a REFUSED stop says the reply is still running — it never prints Stopped over a live run", async ({ page }) => {
+  // `clara.begin_chat_turn` admits any ACTIVE member of the firm; `clara.cancel_agent_task` floors
+  // at bookkeeper. So a viewer or clerk can start a turn they cannot stop, and the honest answer is
+  // to say so: this tab stops READING, and the run carries on.
+  await control(page, { op: "live_turn" });
+  await control(page, { op: "stop_answer", mode: "denied" });
+  await page.goto(WORK_LIST_URL);
+  const rail = page.locator("[data-clara-rail]");
+  await expect(rail).toBeVisible();
+
+  const stop = rail.getByRole("button", { name: "Stop reply" });
+  await expect(stop).toBeVisible({ timeout: 20_000 });
+  await stop.click();
+
+  await expect(rail.getByText(/Could not stop this reply/)).toBeVisible({ timeout: 15_000 });
+  await expect(rail.getByText("Stopped", { exact: true }))
+    .toHaveCount(0, { timeout: 5_000 });
+  // …and the control stays offered, because the turn is still live.
+  await expect(stop).toBeVisible();
+});

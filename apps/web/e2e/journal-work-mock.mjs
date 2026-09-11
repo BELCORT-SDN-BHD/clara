@@ -234,6 +234,20 @@ const state = {
   /** Every op key a cancel was sent with, so a cell can prove the retry of an UNOBSERVED attempt
    *  reuses it rather than asking the database a second question. */
   cancelKeys: [],
+  /** #630 (fix round) — A CHAT TURN THIS TAB DID NOT POST, found already RUNNING. It is the state
+   *  a reload lands in, and the one the B7 rail's Stop control has to render for: the browser has
+   *  no `sendStatus` of its own for a turn it did not start, so the only thing that can say "there
+   *  is a reply to stop" is the DATABASE's own row. Armed per cell; absent by default, because the
+   *  rail renders on every page of this walk and a permanently live turn would put a Stop control
+   *  beside every other cell's subject. */
+  liveTurn: null,
+  /** Every `clara.cancel_agent_task` the rail sent, so a cell can prove "Stop reply" pressed ONE
+   *  door — and that closing the rail pressed none. */
+  stopCalls: [],
+  /** What the next `cancel_agent_task` answers: "ok" or "denied" (CLR04 — `clara.begin_chat_turn`
+   *  admits any active member, that door floors at bookkeeper, so a refusal is reachable in
+   *  production and the surface must not print "Stopped" over it). */
+  stopAnswer: "ok",
   /** `clara.agent_interruptions` rows, in the shape `clara.open_interruption`
    *  writes them: one PENDING row per parked task, its `question` jsonb carrying
    *  the runtime's own `{ type, question, context, framing }`. */
@@ -289,6 +303,9 @@ function seed() {
   state.minted = 0;
   state.works.clear();
   state.tasks.clear();
+  state.liveTurn = null;          // #630
+  state.stopCalls = [];           // #630
+  state.stopAnswer = "ok";        // #630
   state.intents.clear();
   state.entries.clear();
   state.lines.clear();
@@ -806,6 +823,26 @@ function control(body) {
   // #630 — ARMS WHICH ANSWER the next cancel gives. Default `act`: the door acts and the Work
   // reads `stopping`. The other two are the arms that only exist because the DATABASE decides a
   // race the browser cannot see.
+  // #630 (fix round) — ARM A TURN THIS TAB DID NOT POST. `status` defaults to `running`, which is
+  // the shape a reload onto a live turn produces and the one the Stop control must render for.
+  if (body.op === "live_turn") {
+    state.liveTurn = {
+      id: String(body.taskId ?? "aaaaaaaa-0000-4000-8000-00000000c0de"),
+      status: String(body.status ?? "running"),
+      created_at: new Date().toISOString(),
+    };
+    return { liveTurn: state.liveTurn };
+  }
+  // …and which answer its cancel gives.
+  if (body.op === "stop_answer") {
+    state.stopAnswer = String(body.mode ?? "ok");
+    return { stopAnswer: state.stopAnswer };
+  }
+  // …and what the rail actually pressed. Read rather than inferred from the screen: "closing the
+  // rail does neither" is a claim about DOORS, and only the door count can carry it.
+  if (body.op === "stop_calls") {
+    return { stopCalls: state.stopCalls, cancelKeys: state.cancelKeys };
+  }
   if (body.op === "cancel_answer") {
     state.cancelAnswer = String(body.mode ?? "act");
     return { cancelAnswer: state.cancelAnswer };
@@ -1263,11 +1300,40 @@ export async function handleJournalWorkSupabase(request, response, path, url, se
   }
 
   if (request.method === "GET" && path === "/rest/v1/agent_tasks_visible") {
-    // Scoped to tasks this module minted. The rail reads the same relation with
-    // `session_id`, and the journals lane with `id=in.(…)`; both fall through.
+    // Scoped to tasks this module minted. The journals lane reads `id=in.(…)`; that falls through.
     const id = eqParam(url, "id");
-    if (id === null || !state.tasks.has(id)) return false;
-    sendJson(response, 200, [state.tasks.get(id)], cors);
+    if (id !== null && state.tasks.has(id)) {
+      sendJson(response, 200, [state.tasks.get(id)], cors);
+      return true;
+    }
+    // #630 — THE RAIL'S OWN READ: `session_id=eq.<thread>` filtered to the live statuses. Answered
+    // only for THIS lane's one thread, and only while a cell has armed a live turn; unarmed it
+    // falls through to serve-built's honest `[]`, which is what "no turn in flight" looks like.
+    const session = eqParam(url, "session_id");
+    if (session === JOURNAL_WORK.threadId) {
+      sendJson(response, 200, state.liveTurn === null ? [] : [state.liveTurn], cors);
+      return true;
+    }
+    if (id !== null || session !== null) return false;
+    return false;
+  }
+
+  // #630 — STOP REPLY's door. The rail calls it through `callDoor`, so the wire path is the real
+  // one; what this fixture owns is the ANSWER, because both of its arms (accepted, and CLR04 for a
+  // member below the bookkeeper floor) are reachable in production and the surface must say
+  // different things about them.
+  if (request.method === "POST" && path === "/rest/v1/rpc/cancel_agent_task") {
+    const body = await readJson(request);
+    state.stopCalls.push({ task: String(body?.p_task ?? ""), opKey: String(body?.p_op_key ?? "") });
+    if (state.stopAnswer === "denied") {
+      sendJson(response, 403, {
+        code: "CLR04", message: "cancelling an agent task requires a bookkeeper or above",
+        details: JSON.stringify({ reason: "insufficient_role" }), hint: null,
+      }, cors);
+      return true;
+    }
+    if (state.liveTurn !== null) state.liveTurn.status = "cancel_requested";
+    sendJson(response, 200, { task_id: String(body?.p_task ?? ""), status: "cancel_requested" }, cors);
     return true;
   }
 
