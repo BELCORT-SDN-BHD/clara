@@ -155,13 +155,14 @@ function rowsOf(page) {
  *  the run's own id, precisely as `clara._sweep_events_with_effect` (0183) expects. Returns the
  *  event's OWN id/occurred_at, read back from `clara.domain_events` by (firm_id, seq) — the seq
  *  `_append_event` hands back, never assumed. */
-async function mkSweepEvent({ firm, draftedCount, postedCount = 0, refusedCount = 0, expectedCount = null }) {
+async function mkSweepEvent({ firm, draftedCount, postedCount = 0, refusedCount = 0,
+  skippedCount = 0, expectedCount = null }) {
   const exp = expectedCount ?? draftedCount;
   const run = (await rootQuery(
     `insert into clara.sweep_runs(firm_id, state, window_started_at, window_ended_at,
-        expected_count, drafted_count, posted_count, refused_count, finalized_at)
-     values ($1, 'finalized', now(), now(), $2, $3, $4, $5, now()) returning id`,
-    [firm, exp, draftedCount, postedCount, refusedCount])).rows[0].id;
+        expected_count, drafted_count, posted_count, refused_count, skipped_count, finalized_at)
+     values ($1, 'finalized', now(), now(), $2, $3, $4, $5, $6, now()) returning id`,
+    [firm, exp, draftedCount, postedCount, refusedCount, skippedCount])).rows[0].id;
   const seq = (await rootQuery(
     `select clara._append_event($1, 'sweep.run_completed', null, null, null, null, null, null, null,
         jsonb_build_object('run_id', $2::uuid, 'expected_count', $3::int)) as seq`,
@@ -476,19 +477,30 @@ test("af.14 a finalized sweep with drafted_count=0 is ABSENT from the feed, and 
   if (await gateSweep(t)) return;
   const cli = await freshWorkClient(ALICE(), "af14");
   const noop = await mkSweepEvent({ firm: FIRM_A(), draftedCount: 0, expectedCount: 3 });
-  // A REAL agent row in the SAME window, so the absence below is a measured exclusion rather than
-  // a read that happened to return nothing (native review N14: af.14 had no positive control, so a
-  // door that answered [] for every kind would have passed it).
+  // THREE POSITIVE CONTROLS in the SAME window, so the absence below is a measured exclusion
+  // rather than a read that happened to return nothing (native review N14). The first two are in
+  // the arm the exclusion actually edits — `ev_base`, the clara.firm_timeline_visible arm (delta
+  // review [7]: the round's first control rode `agent_act_receipts`, a DIFFERENT union arm, so a
+  // regression that emptied ev_base entirely would have passed).
+  const kept = await mkSweepEvent({ firm: FIRM_A(), draftedCount: 1, expectedCount: 3 });
+  const plain = await mkRawEvent({ firm: FIRM_A(), type: "kb_rule.proposed", client: cli, payload: {} });
   const control = await mkAgentAct({ firm: FIRM_A(), client: cli });
 
   const page = await listActivity(BOB(), { kinds: ["agent"], since: noop.occurredAt, limit: 100 });
+  assert.ok(rowsOf(page).some((r) => r.id === kept.eventId),
+    "af.14 POSITIVE CONTROL, SAME ARM AND SAME PREDICATE: a sweep receipt that DID draft is returned by this very read");
   assert.ok(rowsOf(page).some((r) => r.id === `agent_act:${control.id}`),
-    "af.14 POSITIVE CONTROL: a real agent row in the same window and kind IS returned by this very read");
+    "af.14 POSITIVE CONTROL: a real agent-receipt row in the same window and kind IS returned too");
   assert.equal(rowsOf(page).some((r) => r.id === noop.eventId), false,
     "af.14 a zero-effect sweep heartbeat never appears in the feed, even asking for exactly its own kind and instant");
   // And asking under NO kind filter at all (the shape that buried real postings on the live firm)
-  // still never surfaces it.
+  // still never surfaces it — with its own ev_base control, since this read carries no kind filter
+  // to keep the arm honest.
   const unfiltered = await listActivity(BOB(), { since: noop.occurredAt, limit: 100 });
+  assert.ok(rowsOf(unfiltered).some((r) => r.id === plain.eventId),
+    "af.14 POSITIVE CONTROL for the unfiltered read: an ordinary timeline event of the same window IS returned");
+  assert.ok(rowsOf(unfiltered).some((r) => r.id === kept.eventId),
+    "af.14 …and so is the kept sweep receipt, which is the exclusion's own YES");
   assert.equal(rowsOf(unfiltered).some((r) => r.id === noop.eventId), false,
     "af.14 the exclusion holds with no kind filter too, not only under kinds=['agent']");
 
@@ -559,12 +571,20 @@ async function mkSweepRun({ firm, draftedCount }) {
     [firm, draftedCount])).rows[0].id;
 }
 
-/** The KEPT sweep receipts this caller's firm has, read through the door's own definer helper --
- *  the shape PostgREST exposes it as. `eventId` narrows to one id (null asks for the firm's set). */
-async function keptSweepEvents(sub, eventId = null) {
+/** The KEPT sweep receipts this caller's firm has, read through the feed's own definer helper --
+ *  the shape PostgREST exposes it as. Takes NO argument: 0183 splits the set read from the point
+ *  lookup so the two callers never share one cached plan (delta review, BLOCKER [0]). */
+async function keptSweepEvents(sub) {
   const r = await humanQuery(sub,
-    "select event_id::text as event_id from clara._sweep_events_with_effect($1::uuid)", [eventId]);
+    "select event_id::text as event_id from clara._sweep_events_with_effect()");
   return r.rows.map((row) => row.event_id);
+}
+
+/** The DETAIL door's half of the same fact: does THIS receipt name a run that did something? */
+async function sweepEventHasEffect(sub, eventId) {
+  const r = await humanQuery(sub,
+    "select clara._sweep_event_has_effect($1::uuid) as has", [eventId]);
+  return r.rows[0].has;
 }
 
 test("af.16 the sweep helper carries the feed's OWN bookkeeper floor — a viewer refused by list_activity cannot read a sweep's drafted_count through the helper either", async (t) => {
@@ -577,12 +597,18 @@ test("af.16 the sweep helper carries the feed's OWN bookkeeper floor — a viewe
   // clara.domain_events read policy (0005), so a floorless clara_authenticated-granted helper
   // would hand a VIEWER every sweep's drafted_count one id at a time — a side channel round the
   // floor the door in front of it spends three checks establishing.
-  await assertRaises(CLR04, () => keptSweepEvents(CAROL(), drafted.eventId),
-    "af.16 the helper refuses the SAME viewer, with the SAME code the door uses");
+  await assertRaises(CLR04, () => keptSweepEvents(CAROL()),
+    "af.16 the set helper refuses the SAME viewer, with the SAME code the door uses");
+  // BOTH halves carry it: 0183 splits the fact into a set read and a point lookup, and a floor on
+  // only one of them is no floor at all.
+  await assertRaises(CLR04, () => sweepEventHasEffect(CAROL(), drafted.eventId),
+    "af.16 the point-lookup helper refuses that viewer too");
 
   // AND THE DOOR IT EXISTS FOR IS UNHARMED — the floor is a floor, not a wall.
-  assert.deepEqual(await keptSweepEvents(BOB(), drafted.eventId), [drafted.eventId],
+  assert.ok((await keptSweepEvents(BOB())).includes(drafted.eventId),
     "af.16 a bookkeeper still reads the one fact the feed borrows");
+  assert.equal(await sweepEventHasEffect(BOB(), drafted.eventId), true,
+    "af.16 …through either half");
   const page = await listActivity(BOB(), { kinds: ["agent"], since: drafted.occurredAt, limit: 100 });
   assert.ok(rowsOf(page).some((r) => r.id === drafted.eventId),
     "af.16 and the kept sweep row still reaches a bookkeeper's feed");
@@ -597,8 +623,10 @@ test("af.17 a sweep event of THIS firm whose payload names ANOTHER firm's run co
   const foreignRun = await mkSweepRun({ firm: FIRM_B(), draftedCount: 4 });
   const ev = await mkRawEvent({ firm: FIRM_A(), payload: { run_id: foreignRun, expected_count: 4 } });
 
-  assert.deepEqual(await keptSweepEvents(BOB(), ev.eventId), [],
+  assert.equal(await sweepEventHasEffect(BOB(), ev.eventId), false,
     "af.17 the helper resolves NOTHING across the firm boundary — another firm's effect is not this firm's fact to report");
+  assert.equal((await keptSweepEvents(BOB())).includes(ev.eventId), false,
+    "af.17 …and the set form leaves it out for the same reason");
   const page = await listActivity(BOB(), { since: ev.occurredAt, limit: 100 });
   assert.equal(rowsOf(page).some((r) => r.id === ev.eventId), false,
     "af.17 …so the row is treated as the zero-effect heartbeat it is, never kept on a foreign count");
@@ -617,15 +645,17 @@ test("af.18 the helper answers ONLY for a sweep receipt, and an unresolvable run
   const other = await mkRawEvent({
     firm: FIRM_A(), type: "kb_rule.proposed", client: cli, payload: { run_id: run },
   });
-  assert.deepEqual(await keptSweepEvents(BOB(), other.eventId), [],
+  assert.equal(await sweepEventHasEffect(BOB(), other.eventId), false,
     "af.18 a non-sweep event of this firm resolves no run, whatever its payload says");
 
   // (b) A SWEEP receipt whose `run_id` is not a uuid at all. The cast alone would raise 22P02 —
   // an untyped error, inside a per-row predicate, which would take the ENTIRE feed down for the
   // firm rather than hiding one unverifiable heartbeat.
   const junk = await mkRawEvent({ firm: FIRM_A(), payload: { run_id: "not-a-uuid", expected_count: 1 } });
-  assert.deepEqual(await keptSweepEvents(BOB(), junk.eventId), [],
+  assert.equal(await sweepEventHasEffect(BOB(), junk.eventId), false,
     "af.18 a malformed run_id is an unresolvable run, not an error");
+  assert.equal((await keptSweepEvents(BOB())).includes(junk.eventId), false,
+    "af.18 …and the firm's kept set never names it either");
   const page = await listActivity(BOB(), { since: junk.occurredAt, limit: 100 });
   assert.equal(rowsOf(page).some((r) => r.id === junk.eventId), false,
     "af.18 the feed still answers, with the unverifiable heartbeat excluded — never shown by default");
@@ -642,7 +672,7 @@ test("af.19 EFFECT IS drafted + posted: a sweep that POSTED entries and drafted 
   const row = rowsOf(page).find((r) => r.id === posted.eventId);
   assert.ok(row, "af.19 a sweep that posted entries and drafted none IS in the feed");
   assert.equal(row.kind, "agent");
-  assert.deepEqual(await keptSweepEvents(BOB(), posted.eventId), [posted.eventId],
+  assert.ok((await keptSweepEvents(BOB())).includes(posted.eventId),
     "af.19 …and the helper itself names it, which is where the drafted+posted sum lives");
 
   // REFUSALS AND SKIPS ARE DELIBERATELY OUT of the sum: neither moved a cent, a refusal already
@@ -655,26 +685,257 @@ test("af.19 EFFECT IS drafted + posted: a sweep that POSTED entries and drafted 
     "af.19 a run that only REFUSED is not an effect on the books — excluded, by decision (see 0183 section 1)");
   await assertRaises(CLR11, () => getActivityEvent(BOB(), "event", refusedOnly.eventId),
     "af.19 …and its deep link is the same no-oracle refusal");
+
+  // SKIPS TOO, and pinned for the same reason (delta review [8]: 0183's header and function
+  // comment both name skipped_count as excluded, and no cell could express it — mkSweepEvent did
+  // not even accept one, so "widen the sum to + skipped_count" was a green change).
+  const skippedOnly = await mkSweepEvent({ firm: FIRM_A(), draftedCount: 0, skippedCount: 4, expectedCount: 4 });
+  const afterSkip = await listActivity(BOB(), { since: skippedOnly.occurredAt, limit: 100 });
+  assert.equal(rowsOf(afterSkip).some((r) => r.id === skippedOnly.eventId), false,
+    "af.19 a run that only SKIPPED is not an effect on the books either — a firm whose windows all skip must not be back to 288 rows a day");
+  assert.equal(await sweepEventHasEffect(BOB(), skippedOnly.eventId), false,
+    "af.19 …and the helper agrees, which is where the sum actually lives");
+  await assertRaises(CLR11, () => getActivityEvent(BOB(), "event", skippedOnly.eventId),
+    "af.19 …with the same no-oracle deep-link refusal");
 });
 
-test("af.20 the sweep exclusion is SET-BASED — list_activity's installed body borrows the helper ONCE per call, never once per row", async (t) => {
+// ===========================================================================================
+// 9c · #728 DELTA REVIEW OF THE FIX ROUND (2026-09-11, BLOCKER [0] + [1]/[2]/[9]). The round's
+// only pin for the exclusion's COST was textual, and it was green while the shipped door answered
+// its sixth read in 32-48 s: `clara._sweep_events_with_effect(p_event uuid default null)` carried
+// an optional-parameter predicate, plpgsql cached that ONE statement for BOTH callers, and after
+// five custom-plan executions it switched to the generic plan — a Nested Loop that estimates
+// `clara.domain_events` at ONE row (default eq-selectivity for `$2 IS NULL OR id = $2`) and
+// rescans `clara.sweep_runs` once per sweep receipt of the firm. The cells below are the two
+// halves a textual pin cannot have: a WALL-CLOCK series across the plan-cache boundary, and the
+// SHAPE of the generic plan itself.
+// ===========================================================================================
+
+/** A dedicated pooled connection held open across many statements inside ONE transaction that is
+ *  ALWAYS rolled back — the pooled-connection shape PostgREST holds, and the only way to put a
+ *  synthetic sweep history on an append-only table without leaving it there (clara.domain_events
+ *  refuses DELETE, so an inserted event is permanent unless the transaction is thrown away). */
+async function withRolledBackSession(fn) {
+  const { getPool } = await import("./rig-helpers.mjs");
+  const c = await getPool().connect();
+  try {
+    await c.query("begin");
+    return await fn(c);
+  } finally {
+    await c.query("rollback").catch(() => {});
+    await c.query("reset role").catch(() => {});
+    await c.query("reset all").catch(() => {});
+    c.release();
+  }
+}
+
+/** Wall-clock milliseconds for one statement on an already-open client. */
+async function timed(c, sql, params = []) {
+  const t0 = process.hrtime.bigint();
+  const r = await c.query(sql, params);
+  return { ms: Number(process.hrtime.bigint() - t0) / 1e6, rows: r.rows };
+}
+
+/** Walk an EXPLAIN (FORMAT JSON) plan tree, yielding every node. */
+function planNodes(node) {
+  const out = [node];
+  for (const child of node.Plans ?? []) out.push(...planNodes(child));
+  return out;
+}
+function mentionsRelation(node, relation) {
+  return planNodes(node).some((n) => n["Relation Name"] === relation);
+}
+
+// A GENEROUS bound. The measured flip was 13.8-16.4 SECONDS a call against an 11-53 ms
+// baseline on this rig; anything within two orders of magnitude of the baseline passes, so this
+// reds on a plan regression and not on a busy host.
+const CALL_BUDGET_MS = 1500;
+const CALLS = 8;
+
+test("af.20 BOUNDED COST: eight consecutive feed reads and eight deep links on ONE connection stay flat across the plpgsql plan-cache boundary, under a synthetic sweep history", async (t) => {
   if (await gateSweep(t)) return;
-  // THE BLOCKER THE NATIVE REVIEW MEASURED: a SECURITY DEFINER function with its own search_path
-  // can never be inlined, and the first cut called one from inside ev_base's WHERE — a predicate
-  // that runs BEFORE the order/limit, so the cost grew with the firm's whole append-only sweep
-  // history (142 ms -> 4.8 s at 6,000 sweep events, 21 days at the live five-minute cadence).
-  // Read from the INSTALLED body rather than from the file, the same way this migration's own
-  // prestate sha-pins and its tail's kind-ladder check read it: what is deployed is what matters.
+  const firm = FIRM_A();
+  const claims = JSON.stringify({ sub: BOB(), role: "authenticated" });
+
+  const report = await withRolledBackSession(async (c) => {
+    // 60 SIBLING FIRMS also running the five-minute sweep. This is not decoration: the generic
+    // plan only looks cheap to the planner when `sr.firm_id = $1` is a SMALL fraction of
+    // clara.sweep_runs, which is exactly what a multi-tenant estate is. With one firm in the
+    // table the planner keeps choosing custom plans and the regression hides.
+    await c.query(
+      `insert into clara.firms(id, name)
+       select ('afc00000-0000-4000-8000-' || lpad(g::text, 12, '0'))::uuid, 'af20_sibling_' || g
+         from generate_series(1, 60) g`);
+    await c.query(
+      `with r as (
+         insert into clara.sweep_runs(firm_id, state, window_started_at, window_ended_at,
+             expected_count, drafted_count, posted_count, finalized_at)
+         select ('afc00000-0000-4000-8000-' || lpad(f::text, 12, '0'))::uuid, 'finalized',
+                now() - (g || ' minutes')::interval, now() - (g || ' minutes')::interval, 0,
+                case when g % 20 = 0 then 2 else 0 end, 0, now() - (g || ' minutes')::interval
+           from generate_series(1, 60) f, generate_series(1, 40) g
+         returning id, firm_id
+       )
+       insert into clara.domain_events(firm_id, seq, event_type, payload, created_at)
+       select r.firm_id, row_number() over (partition by r.firm_id), 'sweep.run_completed',
+              jsonb_build_object('run_id', r.id, 'expected_count', 0),
+              now() - (row_number() over () || ' minutes')::interval
+         from r`);
+    // …and 4,000 sweep receipts for the firm under test (14 days at the live five-minute
+    // cadence), 200 of them KEPT. The exclusion must cost the KEPT set, not the history.
+    await c.query(
+      `with r as (
+         insert into clara.sweep_runs(firm_id, state, window_started_at, window_ended_at,
+             expected_count, drafted_count, posted_count, finalized_at)
+         select $1::uuid, 'finalized',
+                now() - (g || ' minutes')::interval, now() - (g || ' minutes')::interval, 0,
+                case when g % 20 = 0 then 2 else 0 end, 0, now() - (g || ' minutes')::interval
+           from generate_series(1, 4000) g
+         returning id
+       )
+       insert into clara.domain_events(firm_id, seq, event_type, payload, created_at)
+       select $1::uuid,
+              (select coalesce(max(seq), 0) from clara.domain_events where firm_id = $1::uuid)
+                + row_number() over (),
+              'sweep.run_completed', jsonb_build_object('run_id', r.id, 'expected_count', 0),
+              now() - (row_number() over () || ' minutes')::interval
+         from r`, [firm]);
+    await c.query("analyze clara.domain_events");
+    await c.query("analyze clara.sweep_runs");
+
+    const kept = (await c.query(
+      `select de.id::text as id
+         from clara.domain_events de
+         join clara.sweep_runs sr on sr.id::text = de.payload ->> 'run_id'
+        where de.firm_id = $1::uuid and de.event_type = 'sweep.run_completed'
+          and sr.drafted_count + sr.posted_count > 0
+        limit 1`, [firm])).rows[0].id;
+
+    // THE GENERIC PLANS FIRST, while the session is still root: these are the two statements the
+    // installed bodies run, written with the parameters plpgsql passes them as.
+    const feedPlan = (await c.query(
+      `explain (generic_plan, format json)
+       select de.id
+         from clara.sweep_runs sr
+         join clara.domain_events de
+           on de.firm_id = sr.firm_id
+          and de.event_type = 'sweep.run_completed'
+          and de.payload ->> 'run_id' = sr.id::text
+        where sr.firm_id = $1
+          and sr.drafted_count + sr.posted_count > 0`)).rows[0]["QUERY PLAN"][0].Plan;
+    const detailPlan = (await c.query(
+      `explain (generic_plan, format json)
+       select exists (
+         select 1
+           from clara.sweep_runs sr
+           join clara.domain_events de
+             on de.firm_id = sr.firm_id
+            and de.event_type = 'sweep.run_completed'
+            and de.payload ->> 'run_id' = sr.id::text
+          where sr.firm_id = $1
+            and sr.drafted_count + sr.posted_count > 0
+            and de.id = $2)`)).rows[0]["QUERY PLAN"][0].Plan;
+
+    // …then the wall-clock series, as the bookkeeper, on this SAME connection.
+    await c.query("set local role clara_authenticated");
+    await c.query("select set_config('request.jwt.claims', $1, true)", [claims]);
+    const feed = [];
+    for (let i = 0; i < CALLS; i += 1) {
+      feed.push((await timed(c,
+        "select jsonb_array_length(clara.list_activity(null,25,null,null,null,null)->'rows') as n")).ms);
+    }
+    const detail = [];
+    for (let i = 0; i < CALLS; i += 1) {
+      detail.push((await timed(c,
+        "select clara.get_activity_event('event', $1) is not null as got", [kept])).ms);
+    }
+    return { feed, detail, feedPlan, detailPlan };
+  });
+
+  const fmt = (a) => a.map((n) => n.toFixed(1)).join(" / ");
+  // (1) THE SERIES. plpgsql switches to the generic plan on the SIXTH execution of a statement in
+  // a session, so calls 6-8 are the ones that matter; a flip is three orders of magnitude, never
+  // a near miss.
+  for (const [i, ms] of report.feed.entries()) {
+    assert.ok(ms < CALL_BUDGET_MS,
+      `af.20 list_activity call ${i + 1} took ${ms.toFixed(1)} ms (budget ${CALL_BUDGET_MS} ms) — series ${fmt(report.feed)}`);
+  }
+  for (const [i, ms] of report.detail.entries()) {
+    assert.ok(ms < CALL_BUDGET_MS,
+      `af.20 get_activity_event call ${i + 1} took ${ms.toFixed(1)} ms (budget ${CALL_BUDGET_MS} ms) — series ${fmt(report.detail)}`);
+  }
+
+  // (2) THE SHAPE. The feed's statement must never put clara.sweep_runs on the INNER side of a
+  // Nested Loop: that is the generic plan that rescanned the firm's whole sweep history once per
+  // receipt. A Hash/Merge join over the partial index, or a Nested Loop with sweep_runs OUTSIDE,
+  // are all fine — this asserts the failure shape, not one blessed plan.
+  const badLoops = planNodes(report.feedPlan).filter(
+    (n) => n["Node Type"] === "Nested Loop" && mentionsRelation((n.Plans ?? [])[1] ?? {}, "sweep_runs"));
+  assert.equal(badLoops.length, 0,
+    `af.20 the FEED statement's GENERIC plan rescans clara.sweep_runs per outer row: ${JSON.stringify(report.feedPlan)}`);
+  // The detail statement is allowed a Nested Loop — `de.id = $2` really does select one row, so
+  // the inner side runs at most once — but its OUTER side must be that single-row lookup.
+  for (const loop of planNodes(report.detailPlan).filter((n) => n["Node Type"] === "Nested Loop")) {
+    assert.ok((loop.Plans ?? [])[0]?.["Plan Rows"] <= 1,
+      `af.20 the DETAIL statement's GENERIC plan drives a Nested Loop from more than one row: ${JSON.stringify(report.detailPlan)}`);
+  }
+});
+
+test("af.21 the exclusion is SET-BASED in the feed and HOISTED in the detail door — the two installed bodies, read from the catalog", async (t) => {
+  if (await gateSweep(t)) return;
+  // A LIGHT TEXTUAL GUARD, kept only because af.20 above measures the cost (delta review [2]: on
+  // its own this shape is both blind — it was green at 48 s a page — and brittle). It catches the
+  // one thing a cost cell on a small rig can miss: the correlated per-row form creeping back.
+  // Read from the INSTALLED body, the same way this migration's own prestate sha-pins read it.
   const body = (await rootQuery(
     "select p.prosrc from pg_proc p where p.oid = 'clara.list_activity(text,int,uuid,text[],timestamptz,timestamptz)'::regprocedure",
   )).rows[0].prosrc;
   const calls = body.split("clara._sweep_events_with_effect(").length - 1;
   assert.equal(calls, 1,
-    "af.20 EXACTLY ONE textual call site — a second one would almost certainly be a per-row predicate again");
+    "af.21 EXACTLY ONE textual call site — a second one would almost certainly be a per-row predicate again");
   assert.match(body, /v_kept_sweeps uuid\[\]/,
-    "af.20 …and it is materialised into a local array before the union");
+    "af.21 …and it is materialised into a local array before the union");
   assert.match(body, /v\.event_id = any\(v_kept_sweeps\)/,
-    "af.20 …which the union's own predicate tests, so no plan can turn it back into a call per row");
+    "af.21 …which the union's own predicate tests, so no plan can turn it back into a call per row");
   assert.equal(body.includes("clara._sweep_events_with_effect(v.event_id)"), false,
-    "af.20 the correlated per-row form is gone from the deployed body");
+    "af.21 the correlated per-row form is gone from the deployed body");
+
+  // THE DETAIL DOOR'S HALF, which the round left unpinned (delta review [9]) even though 0183's
+  // own comment names the hazard for it: a definer call in the WHERE is a filter the planner may
+  // run once per row of the whole timeline. Assert it sits AFTER the row is fetched.
+  const detail = (await rootQuery(
+    "select p.prosrc from pg_proc p where p.oid = 'clara.get_activity_event(text,text)'::regprocedure",
+  )).rows[0].prosrc;
+  assert.equal(detail.split("clara._sweep_event_has_effect(").length - 1, 1,
+    "af.21 get_activity_event calls the point-lookup helper exactly once");
+  assert.equal(detail.includes("clara._sweep_events_with_effect("), false,
+    "af.21 …and never the SET form: one cached plan per caller shape is the whole point of the split");
+  const beforeFetch = detail.slice(0, detail.indexOf("where v.event_id::text = p_id;"));
+  assert.ok(beforeFetch.length > 0, "af.21 the event arm's own WHERE is still where this cell expects it");
+  assert.equal(beforeFetch.includes("clara._sweep_event_has_effect("), false,
+    "af.21 the helper is HOISTED out of the row-fetching statement, never another predicate beside `v.event_id::text = p_id`");
+});
+
+test("af.22 the optional-parameter helper is GONE, not merely unused — two callers may not share one cached plan", async (t) => {
+  if (await gateSweep(t)) return;
+  // The shape the delta review measured at 13.8-16.4 s a call: ONE plpgsql statement carrying
+  // `(p_event is null or de.id = p_event)`, cached per session and shared by both doors. An
+  // overload that still resolves is an overload a later caller can reach.
+  const r = await rootQuery(
+    `select to_regprocedure('clara._sweep_events_with_effect(uuid)') is null as gone,
+            to_regprocedure('clara._sweep_events_with_effect()') is not null as set_form,
+            to_regprocedure('clara._sweep_event_has_effect(uuid)') is not null as point_form`);
+  assert.equal(r.rows[0].gone, true,
+    "af.22 clara._sweep_events_with_effect(uuid) no longer resolves");
+  assert.equal(r.rows[0].set_form, true, "af.22 the zero-argument set form is the feed's door");
+  assert.equal(r.rows[0].point_form, true, "af.22 …and the boolean point lookup is the detail door's");
+
+  // The two indexes that make both of them cost the KEPT set rather than the firm's history.
+  const idx = (await rootQuery(
+    `select c.relname::text as name from pg_class c join pg_namespace n on n.oid = c.relnamespace
+      where n.nspname = 'clara' and c.relkind = 'i'
+        and c.relname in ('ix_domain_events_sweep_run', 'ix_sweep_runs_firm_effect')
+      order by 1`)).rows.map((x) => x.name);
+  assert.deepEqual(idx, ["ix_domain_events_sweep_run", "ix_sweep_runs_firm_effect"],
+    "af.22 both sweep-attribution indexes are installed");
 });
