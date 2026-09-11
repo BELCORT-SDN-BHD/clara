@@ -778,25 +778,56 @@ const HEAD = 5;
 const FLIP_FACTOR = 4;
 const FLIP_FLOOR_MS = 40;
 
+/** THE STATEMENT THE INSTALLED SET HELPER ACTUALLY RUNS, made runnable for an EXPLAIN.
+ *
+ *  Read from `pg_proc.prosrc` — the same raw column 0183's own prestate sha-pins and af.21 read —
+ *  then: `--` comment tails stripped, the `return query` prefix and the trailing `;` removed, and
+ *  the one plpgsql variable the statement carries (`c.firm`, the session firm the body took from
+ *  clara._human_ctx) rewritten to `$1` so a cell can explain it for a literal firm id.
+ *
+ *  WHY EXTRACTION AND NOT A COPY (delta review round 4, NIT [3]). af.20 explained a HELPER_SQL
+ *  literal that sat beside the body and was kept in step by hand. Nothing tied the two: a recut
+ *  that changed the driving side, added a predicate or introduced a second lateral would keep
+ *  af.21's `cross join lateral` / `offset 0` substrings green AND leave af.20 measuring the old
+ *  text — a cost cell certifying a plan nobody runs. Extracted, the failure is loud: either the
+ *  shape assertions below fire, or af.20's own row bound reds on the plan the new body picks. */
+async function installedSetHelperStatement() {
+  const src = (await rootQuery(
+    "select p.prosrc from pg_proc p where p.oid = 'clara._sweep_events_with_effect()'::regprocedure",
+  )).rows[0].prosrc.replace(/--[^\n]*/g, "");
+  const marker = "return query";
+  const start = src.indexOf(marker);
+  assert.ok(start >= 0,
+    "af.20 the installed clara._sweep_events_with_effect() body has no `return query` — this cell "
+    + "can no longer derive the statement it measures, which is exactly when it must fail loudly");
+  const rest = src.slice(start + marker.length);
+  const end = rest.lastIndexOf(";");
+  assert.ok(end > 0, "af.20 the installed body's statement is not terminated by a `;`");
+  // A function replacement, never the string "$1": in String.replace a "$1" is a capture group.
+  const stmt = rest.slice(0, end).trim().replace(/\bc\.firm\b/g, () => "$1");
+  // VACUITY CONTROLS on the extraction itself, so a botched slice explains something meaningless
+  // rather than quietly passing.
+  assert.match(stmt, /^select\b/i, `af.20 the extracted statement does not start with select: ${stmt}`);
+  assert.match(stmt, /clara\.sweep_runs/, "af.20 …and it must still read clara.sweep_runs");
+  assert.match(stmt, /clara\.domain_events/, "af.20 …and clara.domain_events");
+  assert.equal(stmt.split("$1").length - 1, 1,
+    `af.20 the extracted statement must carry EXACTLY ONE firm placeholder: ${stmt}`);
+  assert.equal(stmt.includes("c.firm"), false,
+    "af.20 …and no un-rewritten plpgsql variable, which an EXPLAIN could not bind");
+  return stmt;
+}
+
 test("af.20 BOUNDED COST: ten consecutive calls of each caller on ONE connection stay flat across the plpgsql plan-cache boundary, and the plan they run reads the KEPT set rather than the firm's history", async (t) => {
   if (await gateSweep(t)) return;
   const firm = FIRM_A();
   const claims = JSON.stringify({ sub: BOB(), role: "authenticated" });
 
-  // The statement `clara._sweep_events_with_effect` runs, spelled exactly as the installed body
-  // spells it — so the plan measured here is the plan the door runs, not a paraphrase.
-  const HELPER_SQL = `select e.id
-      from clara.sweep_runs sr
-      cross join lateral (
-        select de.id
-          from clara.domain_events de
-         where de.firm_id = sr.firm_id
-           and de.event_type = 'sweep.run_completed'
-           and de.payload ->> 'run_id' = sr.id::text
-         offset 0
-      ) e
-     where sr.firm_id = $1
-       and sr.drafted_count + sr.posted_count > 0`;
+  // The statement `clara._sweep_events_with_effect` runs — EXTRACTED FROM THE INSTALLED BODY,
+  // not hand-copied beside it (delta review round 4, NIT [3]). A copy is a copy: a later recut
+  // that changed the driving side or added a predicate would leave af.20 explaining the OLD text
+  // and certifying a plan nobody runs, while af.21's two substring pins stayed green. Read from
+  // the catalog, the plan measured below is the plan the door runs, by construction.
+  const HELPER_SQL = await installedSetHelperStatement();
 
   const report = await withRolledBackSession(async (c) => {
     await c.query(
