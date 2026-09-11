@@ -380,6 +380,8 @@ function newWorkRow({ id, taskId, intentKey, basis, origin, sourceRefs }) {
     purpose: "journal_entry",
     status: "queued",
     initiator: SUBJECT,
+    // #630 — WHO ASKED, immutable. Equal to `initiator` until a takeover moves that column.
+    initiated_by: SUBJECT,
     initiator_role: "owner",
     intent_key: intentKey,
     logical_op_id: `work:${id}:journal_entry:1`,

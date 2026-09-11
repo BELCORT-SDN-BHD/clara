@@ -147,15 +147,32 @@ export type AccountingWorkRow = {
   updated_at: string | null;
 };
 
-// `initiated_by` is NOT in this projection, and that is a deploy-order decision rather than an
-// omission: PostgREST refuses the WHOLE select when one named column does not exist, so listing a
-// column 0184 introduces would break the Work detail on every database below that frontier —
-// including, for one deploy window, production. The page reads `initiator` (the human the Work runs
-// as) and shows the handover through the timeline instead; a later ticket adds the column here once
-// the frontier is everywhere.
+// `initiated_by` IS in this projection, and it carries a DEPLOY-ORDER OBLIGATION with it: PostgREST
+// refuses the WHOLE select when one named column does not exist, so this app must not reach a
+// database below the 0184 frontier. The estate's release order already guarantees that (migrations,
+// then the runtime image, then the web), and the alternative was worse — without the column the
+// detail page says "Entered by" over `initiator`, which after a takeover is the COLLEAGUE and not
+// the person who entered the figures. A provenance line that is wrong is not a smaller problem than
+// a read that fails loudly.
 export const ACCOUNTING_WORK_SELECT =
-  "id,firm_id,client_id,purpose,status,initiator,initiator_role,intent_key,logical_op_id," +
+  "id,firm_id,client_id,purpose,status,initiator,initiated_by,initiator_role,intent_key,logical_op_id," +
   "basis,basis_digest,basis_origin,source_refs,current_task_id,bundle,result,error,created_at,updated_at";
+
+/** #630 — WHO ENTERED THE FIGURES, for display. `initiated_by` until a takeover moves `initiator`
+ *  away from it; falls back to `initiator` for a row read from a database below the 0184 frontier,
+ *  which is the state in which the two were the same value anyway. */
+export function enteredBy(work: Pick<AccountingWorkRow, "initiator" | "initiated_by">): string {
+  const asked = work.initiated_by;
+  return typeof asked === "string" && asked !== "" ? asked : work.initiator;
+}
+
+/** #630 — TRUE when responsibility has moved: the human the Work now runs as is not the one who
+ *  asked for it. Both halves must be present and different; an absent `initiated_by` is a row from
+ *  an older frontier, never a handover. */
+export function wasTakenOver(work: Pick<AccountingWorkRow, "initiator" | "initiated_by">): boolean {
+  const asked = work.initiated_by;
+  return typeof asked === "string" && asked !== "" && asked !== work.initiator;
+}
 
 /** `clara.operation_receipts` — the authoritative record that ONE logical
  *  operation had ONE effect. `effects.entry_id` is what ties it to the ledger. */

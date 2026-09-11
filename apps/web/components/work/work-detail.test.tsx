@@ -58,6 +58,7 @@ function workRow(over: Partial<AccountingWorkRow> = {}): AccountingWorkRow {
     purpose: "journal_entry",
     status: "queued",
     initiator: "user-1",
+    initiated_by: "user-1",
     initiator_role: "bookkeeper",
     intent_key: "intent-1",
     logical_op_id: `work:${WORK}:journal_entry:1`,
@@ -943,5 +944,39 @@ test("630 Cancel Work is OFFERED from a cancellable status and withheld from eve
     } finally {
       await h.unmount();
     }
+  }
+});
+
+test("630 after a HANDOVER the page attributes the figures to who ENTERED them, and names who is answerable now", async () => {
+  // The two columns diverge only after `clara.take_over_accounting_work`. Before that they are the
+  // same value and this page says exactly what it always said — which is why the handover row is
+  // conditional rather than always present.
+  const h = await renderComponent(
+    App({
+      load: async () =>
+        data({ work: workRow({ status: "queued", initiator: "user-2", initiated_by: "user-1" }) }),
+    }),
+  );
+  try {
+    await h.settle();
+    const text = h.text();
+    assert.match(text, /Responsible now/, "the handover is visible on the page that shows the Work");
+    // `MemberName` falls back to a shortened raw id when it cannot resolve a name, which is what
+    // this harness produces — so both ids are on the page and neither is invented.
+    assert.match(text, /user-1/, "who ENTERED the figures is still named");
+    assert.match(text, /user-2/, "…and so is who is answerable now");
+  } finally {
+    await h.unmount();
+  }
+
+  const untouched = await renderComponent(
+    App({ load: async () => data({ work: workRow({ status: "queued" }) }) }),
+  );
+  try {
+    await untouched.settle();
+    assert.ok(!/Responsible now/.test(untouched.text()),
+      "a Work nobody took over carries no handover row — it would be noise on every Work");
+  } finally {
+    await untouched.unmount();
   }
 });

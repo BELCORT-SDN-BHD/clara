@@ -4153,6 +4153,7 @@
     "stopReply": "Stop reply",
     "stopping": "Stopping\u2026",
     "stoppedMarker": "Stopped",
+    "responsibleNow": "Responsible now",
     "stopReplyHint": "Stops this reply. Work that has already been accepted keeps running \u2014 use Cancel Work to stop that."
   }
 }

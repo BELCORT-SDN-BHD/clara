@@ -60,9 +60,11 @@ import {
   type JournalDraftScope,
 } from "@/lib/work/journal-draft";
 import {
+  enteredBy,
   isCancellableWorkStatus,
   isRetryableWorkStatus,
   isTakeOverable,
+  wasTakenOver,
   type AccountingWorkRow,
 } from "@/lib/work/types";
 import type { AgentInterruptionRow } from "@/lib/journals/types";
@@ -482,6 +484,8 @@ function WorkFacts({
   members: MemberNameResolver;
 }) {
   const t = useTranslations("WorkDetail");
+  /** #630 — the handover row's own word. */
+  const tc = useTranslations("WorkCancel");
   const documentless = Array.isArray(work.source_refs) && work.source_refs.length === 0;
   const chatRef = (work.source_refs ?? []).find((ref) => ref.kind === "chat_task") ?? null;
   const bundleId = work.bundle?.id ?? null;
@@ -513,6 +517,19 @@ function WorkFacts({
             initiator's LIVE membership, so this is history and must never read
             as a current permission. */}
         <dd className="text-foreground">{t("roleAtAdmission", { role: work.initiator_role })}</dd>
+        {/* #630 — WHO IS ANSWERABLE NOW, and it appears ONLY when it has moved. A row that always
+            said "responsible: <the person who asked>" would be noise on every Work; a row that
+            appears the moment the two diverge is the fact a reader actually needs, and it is the
+            only place the handover is visible on this page. `initiator_role` above stays an
+            ADMISSION snapshot and therefore still describes the person who asked. */}
+        {wasTakenOver(work) ? (
+          <>
+            <dt className="text-muted-foreground">{tc("responsibleNow")}</dt>
+            <dd className="text-foreground">
+              <MemberName userId={work.initiator} resolver={members} showRole={false} />
+            </dd>
+          </>
+        ) : null}
         <dt className="text-muted-foreground">{t("source")}</dt>
         <dd className="text-foreground">
           {documentless
@@ -540,7 +557,11 @@ function WorkFacts({
             // shortened raw id rather than guessing a name.
             <span className="inline-flex flex-wrap items-baseline gap-1">
               <span>{t("basisOrigin.userDirect")}</span>
-              <MemberName userId={work.initiator} resolver={members} showRole={false} />
+              {/* #630 — WHO ENTERED THE FIGURES, which after a takeover is NOT who the Work now
+                  runs as. `initiator` moves when a colleague takes responsibility (it is the column
+                  the deploy-locked closure mints credentials on behalf of); `initiated_by` is the
+                  immutable record of who asked, and it is what this line must name. */}
+              <MemberName userId={enteredBy(work)} resolver={members} showRole={false} />
             </span>
           ) : (
             <span className="inline-flex flex-wrap items-baseline gap-2">
