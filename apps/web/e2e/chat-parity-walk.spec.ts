@@ -314,9 +314,17 @@ test("裁-117: the rail creates a thread only when asked, and its menu switches 
  * measures the CAUSE instead of waiting on a race: one turn must arm one timer, and the
  * pre-fix build arms one per render.
  *
- * `1000` is `TURN_PROGRESS_TICK_MS`. Nothing else in the shell arms a one-second interval,
- * and the assertion reads a DELTA between two samples either way, so a second one-second
- * timer elsewhere could not make this pass.
+ * WHY THE FILTER IS `1000`, AND HOW THE CELL PROVES IT SELECTED THE RIGHT TIMER (review C8).
+ * `1000` is `TURN_PROGRESS_TICK_MS` (components/clara/TurnProgress.tsx), re-typed rather
+ * than imported because importing that module into a spec would pull React and next-intl
+ * into Playwright's own process for one integer. A period is a weak name, so the cell does
+ * not rely on it alone: it reads this counter on the thread route BEFORE any turn exists
+ * and asserts ZERO, then reads it again once the clock's own sentence is on screen and
+ * asserts it has appeared. A one-second interval that arrives exactly when the turn clock
+ * mounts, on a page that had none before, is the turn clock. Anything else the shell might
+ * arm at the same period would break that baseline and fail the cell loudly rather than
+ * quietly inflating the census — and the burst assertion reads a DELTA between two later
+ * samples in any case.
  */
 async function countClockTimers(page: Page): Promise<void> {
   await page.addInitScript(() => {
@@ -404,6 +412,15 @@ test("#727: a clarify asked DURING a live stream is answered in place — the tu
   await countClockTimers(page);
   await countStreamDeltas(page);
   await openThread(page);
+  // THE BASELINE THAT NAMES THE TIMER (review C8). No turn has been posted, so
+  // `readThreadRunSnapshot` reports no run and `TurnProgress` renders nothing at all — and
+  // this page must therefore be arming NO one-second intervals. That zero is what turns the
+  // period filter into an identification: whatever appears next at 1000ms appeared with the
+  // turn clock.
+  expect(
+    await clockTimers(page),
+    "a thread with no turn behind it must arm no one-second interval — a non-zero baseline means this census is counting something other than the turn clock",
+  ).toBe(0);
   await setBurst(page, true);
   try {
     await page.getByLabel(COMPOSER).fill("Record RM 2.00 of bank charges; ask me which posting date to use");
@@ -414,6 +431,12 @@ test("#727: a clarify asked DURING a live stream is answered in place — the tu
     // `agent_tasks_visible` row the turn clock renders nothing at all, and a green here
     // would mean "the component that carried the defect was never on screen".
     await expect(page.getByText(/Clara has been working on this for \d+:\d\d/)).toBeVisible({ timeout: 15_000 });
+    // …and the other half of the naming: the one-second interval this census counts came
+    // with that sentence. Baseline zero above, at least one here.
+    expect(
+      await clockTimers(page),
+      "the turn clock is on screen, so it must have armed its own one-second interval — a zero here means the census is blind to the very component it measures",
+    ).toBeGreaterThanOrEqual(1);
 
     // The burst runs for ~13.5s (900 deltas at 15ms). Answering AFTER it has been flowing
     // for a while is the hosted sequence: the owner's view died about a minute in.
