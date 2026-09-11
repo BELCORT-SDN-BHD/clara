@@ -127,6 +127,11 @@ function linkRow(over: Partial<EntryLinkRow> = {}): EntryLinkRow {
   };
 }
 
+/** `clara.role_rank('bookkeeper')` as `caller_context` projects it — the index into FIRM_ROLES,
+ *  which is the DATABASE's ladder rather than a spelling this file re-derives. */
+const BOOKKEEPER_RANK = 1;
+const VIEWER_RANK = 0;
+
 function App(props: {
   workId?: string;
   load?: (clientId: string, workId: string) => Promise<WorkDetailData | null>;
@@ -135,7 +140,10 @@ function App(props: {
   /** #630 — the two runtime writes, injected so a cell drives the DECISION with no socket. */
   cancel?: (auth: unknown, input: { workId: string; opKey: string }) => Promise<CancelWorkResult>;
   takeOver?: (auth: unknown, input: { workId: string; opKey: string; basisDigest?: string | null }) => Promise<TakeOverWorkResult>;
-  scope?: { firmId?: string; userId?: string };
+  /** #630 — `roleRank` is the reader's own rank from `clara.caller_context`. It DEFAULTS to
+   *  bookkeeper here because the page's two new controls floor there and almost every cell is about
+   *  something else; the floor itself has its own cell below, which passes a viewer's rank. */
+  scope?: { firmId?: string; userId?: string; roleRank?: number | null };
   storage?: DraftStorage | null;
   /** #634 — the entry's links read. DEFAULTED so no cell reaches a real socket:
    *  an empty answer is "the read succeeded and this entry has no links row". */
@@ -156,7 +164,7 @@ function App(props: {
       takeOver: (props.takeOver
         ?? (async () => ({ kind: "accepted", workId: WORK, taskId: "t2", logicalOpId: "op", status: "queued", replayed: false, responsible: "user-2", previousResponsible: USER, initiatedBy: USER, takenOver: true }))) as never,
       session: { getAccessToken: async () => "tok" },
-      scope: props.scope,
+      scope: { roleRank: BOOKKEEPER_RANK, ...props.scope },
       storage: props.storage ?? null,
       loadLinks: (props.loadLinks ?? (async () => [])) as never,
     }),
@@ -203,6 +211,22 @@ function hrefs(container: Stub): string[] {
 
 function buttonLabelled(h: { find: (p: (n: Stub) => boolean) => Stub | null }, text: string): Stub | null {
   return h.find((n) => n.tagName === "BUTTON" && String((n as { textContent?: string }).textContent ?? "").includes(text));
+}
+
+/** #630 — THE ELEMENT THE ACTION SLOT HOLDS, as a tag+class signature. React reconciles a slot by
+ *  ELEMENT TYPE, so a slot whose signature changes between two status arms is a slot that tears its
+ *  subtree down — taking an open dialog, its focus trap and its op key with it. */
+function slotOf(h: { find: (p: (n: Stub) => boolean) => Stub | null }, label: string): string | null {
+  const slot = h.find((n) => {
+    const cls = typeof n.getAttribute === "function"
+      ? (n.getAttribute as (k: string) => string | null)("class")
+      : null;
+    return n.tagName === "DIV" && cls !== null && cls.includes("flex-wrap")
+      && String((n as { textContent?: string }).textContent ?? "").includes(label);
+  });
+  if (slot === null) return null;
+  const cls = (slot.getAttribute as (k: string) => string | null)("class");
+  return `${String(slot.tagName)}:${cls ?? ""}`;
 }
 
 test("A MALFORMED WORK ID IS THE NOT-FOUND STATE, and fires no read at all", async () => {
@@ -979,5 +1003,83 @@ test("630 after a HANDOVER the page attributes the figures to who ENTERED them, 
       "a Work nobody took over carries no handover row — it would be noise on every Work");
   } finally {
     await untouched.unmount();
+  }
+});
+
+test("630 a VIEWER is offered neither destructive control — both doors floor at bookkeeper", async () => {
+  // `clara.cancel_accounting_work` and `clara.take_over_accounting_work` both raise CLR04
+  // `insufficient_role` below bookkeeper, so offering either to a viewer is a destructive button in
+  // front of somebody who can only ever be handed a 403. The rank is the DATABASE's own
+  // `role_rank`, never re-derived from the role's spelling.
+  const running = await renderComponent(
+    App({ scope: { roleRank: VIEWER_RANK }, load: async () => data({ work: workRow({ status: "running" }) }) }),
+  );
+  try {
+    await running.settle();
+    assert.equal(buttonLabelled(running, "Cancel Work"), null, "a viewer is not offered Cancel Work");
+  } finally {
+    await running.unmount();
+  }
+
+  const orphaned = await renderComponent(
+    App({
+      scope: { roleRank: VIEWER_RANK },
+      load: async () =>
+        data({
+          work: workRow({
+            status: "refused",
+            error: { code: "CLR10", reason: "authority_lost", message: "no longer a member", recoverable: true },
+          }),
+        }),
+    }),
+  );
+  try {
+    await orphaned.settle();
+    assert.equal(buttonLabelled(orphaned, "Take responsibility"), null,
+      "…nor Take responsibility, which moves who a posting is committed under");
+  } finally {
+    await orphaned.unmount();
+  }
+
+  // …and an ABSENT rank fails closed rather than open.
+  const unknown = await renderComponent(
+    App({ scope: { roleRank: null }, load: async () => data({ work: workRow({ status: "running" }) }) }),
+  );
+  try {
+    await unknown.settle();
+    assert.equal(buttonLabelled(unknown, "Cancel Work"), null, "an unreadable rank meets no floor");
+  } finally {
+    await unknown.unmount();
+  }
+});
+
+test("630 the cancel control survives the poll flipping awaiting_input to running", async () => {
+  // MEASURED SHAPE (review): `cancelAction` was mounted at two different slot positions — inside a
+  // wrapping `div` for `awaiting_input` and bare for queued/running. React reconciles a slot by
+  // ELEMENT TYPE, so the three-second poll flipping between the two arms destroyed the dialog and
+  // mounted a fresh, closed one: an open modal vanished with no dismissal, focus fell to `<body>`,
+  // and a submit in flight lost its decision's op key. One wrapper in both arms keeps ONE dialog.
+  //
+  // What a node cell can hold still is the COMPOSITION: the same element type in the action slot on
+  // both sides of the transition. The dialog's own survival across it is the browser walk's.
+  let status = "awaiting_input";
+  const h = await renderComponent(
+    App({ load: async () => data({ work: workRow({ status }) }) }),
+  );
+  try {
+    await h.settle();
+    const before = buttonLabelled(h, "Cancel Work");
+    assert.ok(before, "a parked Work is cancellable");
+    const parkedSlot = slotOf(h, "Cancel Work");
+
+    status = "running";
+    await h.act(async () => { await h.rerender(App({ load: async () => data({ work: workRow({ status }) }) })); });
+    await h.settle();
+    const after = buttonLabelled(h, "Cancel Work");
+    assert.ok(after, "…and so is a running one");
+    assert.equal(slotOf(h, "Cancel Work"), parkedSlot,
+      "the control sits under the SAME element type in both arms, so the slot is not torn down");
+  } finally {
+    await h.unmount();
   }
 });

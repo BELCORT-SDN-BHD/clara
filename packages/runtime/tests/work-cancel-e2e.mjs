@@ -299,6 +299,32 @@ async function main() {
     throw new Error(`pollRow timeout (${label}); last status=${last?.status ?? "-"}`);
   }
 
+  /**
+   * WHO IS QUEUED BEHIND THIS BACKEND, asked of PostgreSQL rather than assumed from a sleep. A
+   * transaction waiting on a row lock reports `wait_event_type = 'Lock'` and names its blockers in
+   * `pg_blocking_pids`, so "the tool call is now blocked on the holder's lock" becomes something
+   * the leg MEASURES instead of a comment beside a timer.
+   */
+  const blockedBy = (pid) =>
+    rig
+      .rootQuery(
+        `select pid from pg_stat_activity
+          where wait_event_type = 'Lock' and $1 = any(pg_blocking_pids(pid))`,
+        [pid],
+      )
+      .then((r) => r.rows.map((row) => row.pid));
+
+  async function waitBlocked(pid, n, label, deadlineMs = 30000) {
+    const end = Date.now() + deadlineMs;
+    let last = [];
+    while (Date.now() < end) {
+      last = await blockedBy(pid);
+      if (last.length >= n) return last;
+      await sleep(50);
+    }
+    throw new Error(`waitBlocked timeout (${label}): expected >= ${n} blocked, saw ${last.length}`);
+  }
+
   const admit = (port, ctx, memo, intentKey) =>
     api(port, "POST", "/api/work/journal", { clientId: ctx.client, intentKey, basis: basisFor(memo) }, ctx.jwt);
 
@@ -443,16 +469,28 @@ async function main() {
       // posting transaction — the "after admission, before commit" window, which IS a lock wait.
       await holder.query("begin");
       await holder.query("select 1 from clara.accounting_work where id = $1 for update", [workId]);
+      const holderPid = (await holder.query("select pg_backend_pid() as p")).rows[0].p;
 
+      // THE ARRIVAL ORDER IS OBSERVED, NOT TIMED. This leg's whole claim is that the POSTING enters
+      // the Work row's lock queue BEFORE the cancel does; PostgreSQL grants a contended row lock in
+      // arrival order, so a `sleep()` here would be a guess about how long the path from gate-open
+      // to `for update` takes on a loaded runner — and on a slow one the leg would invert and fail
+      // a system that behaved correctly. Instead: open the gate, WAIT until PostgreSQL itself says
+      // one backend is queued behind the holder, and only then send the cancel.
       gate3.open();
-      await sleep(1500); // the tool call is now blocked on the holder's lock
+      const posting = await waitBlocked(holderPid, 1, "leg 3: the tool call reaches the boundary");
+      assert.equal(await countEntries(ctx.client), 0,
+        "leg 3: …and it blocked BEFORE it wrote anything — the entry is still unposted");
 
-      // The cancel queues BEHIND the posting transaction, so it cannot be awaited yet.
+      // The cancel queues BEHIND the posting transaction. Proven the same way: two backends are now
+      // waiting on the holder, and the one that arrived first is the posting.
       let cancelAnswer = null;
       let cancelError = null;
       const racing = cancel(PORT, ctx, workId, `cancel-${randomUUID()}`)
         .then((v) => { cancelAnswer = v; }, (e) => { cancelError = e; });
-      await sleep(1000);
+      const queue = await waitBlocked(holderPid, 2, "leg 3: the cancel queues behind the posting");
+      assert.ok(queue.includes(posting[0]),
+        "leg 3: the posting is STILL queued — it did not slip past while the cancel arrived");
       assert.equal(cancelAnswer, null, "leg 3: the cancel is BLOCKED while the boundary is held");
 
       await holder.query("commit");
@@ -673,11 +711,16 @@ async function main() {
       workId = admitted.body.work_id;
       await gate7.waitHeld(workId);
 
-      const cancelled = await cancel(PORT, ctx, workId, `cancel-${randomUUID()}`);
-      assert.equal(cancelled.body.status, "stopping");
-
-      // KILL between the cancel write and the settle. The gate is never opened for this engine:
-      // the held model dies with it.
+      // THE KILL COMES FIRST, AND THAT IS WHAT MAKES THIS LEG DETERMINISTIC. `clara.cancel_
+      // accounting_work` pg_notifies `clara_runtime_ctl` inside its own transaction, and the control
+      // listener living in THIS child wakes on that notification immediately — so cancelling first
+      // and killing second is a race between a SIGKILL and a settle that has already been triggered,
+      // which the test only usually wins. Killing the worker BEFORE the cancel write removes the
+      // race entirely: there is no listener left to hear the NOTIFY, and "stranded between the
+      // cancel write and the settle" becomes the state the leg actually constructs.
+      //
+      // The cancel therefore goes through the DOOR rather than the route (the route died with the
+      // engine). Legs 1 and 3 already prove the route reaches the same door.
       engine.child.kill("SIGKILL");
       await waitExit(engine.child);
     } finally {
@@ -685,6 +728,13 @@ async function main() {
       await waitExit(engine.child).catch(() => {});
     }
 
+    const cancelled = await rig
+      .asRuntime((c) =>
+        c.query("select clara.cancel_accounting_work($1::uuid,$2::uuid,$3::text) as r", [
+          workId, ctx.owner, `cancel-${randomUUID()}`,
+        ]))
+      .then((r) => r.rows[0].r);
+    assert.equal(cancelled.status, "stopping", "leg 7: the cancel was written while nothing was alive to settle it");
     assert.equal((await readWork(workId)).status, "stopping", "leg 7: the Work is stranded at stopping");
     const respawned = spawnServe(PORT, gate7.env);
     try {
@@ -707,7 +757,17 @@ async function main() {
   }
 
   // =========================================================================
-  // 8. Stop reply is NOT Cancel Work.
+  // 8. Stop reply is NOT Cancel Work — TWO ROWS, NO CASCADE.
+  //
+  // WHAT THIS LEG PROVES, EXACTLY: cancelling a chat turn's task does not touch an accounting_work
+  // task or Work of the same firm, client and author. It does NOT admit the Work through
+  // `chatTurn_v18`'s `start_journal_work` — that closure is FROZEN and cannot call `start()`, so a
+  // chat-originated Work sits `queued` with `workflow_run_id` null until the reconciler's re-enqueue
+  // grace dispatches it, and driving a scripted chat model through the whole turn to reach that
+  // state would be a second engine harness for one assertion. The STRUCTURAL claim underneath —
+  // that no cascade edge exists for a future change to travel along — is pinned in the database
+  // battery instead (`packages/db/tests/work-cancel.test.mjs`, wc.32), which reads the catalog for
+  // a parent/child column, an FK and a trigger path rather than inferring one from a passing test.
   // =========================================================================
   {
     const ctx = await seedClient("wc-stopreply");
@@ -739,7 +799,7 @@ async function main() {
       const turnRow = await rig.readTask(turnTask);
       assert.ok(["cancel_requested", "cancelled"].includes(turnRow.status),
         `leg 8: and the chat turn itself IS cancelled (${turnRow.status})`);
-      console.log("[wc-e2e] PASS 8: Stop reply and Cancel Work are separate acts on separate rows");
+      console.log("[wc-e2e] PASS 8: Stop reply and Cancel Work are separate acts on separate rows (no cascade between two live tasks; the catalog-level claim is wc.32)");
     } finally {
       if (!engine.state.exited) engine.child.kill("SIGKILL");
       await waitExit(engine.child).catch(() => {});

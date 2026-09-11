@@ -109,7 +109,7 @@ import type { WorkAcceptedPart, WorkQuestionPart, WorkResultPart, WorkStatusPart
  */
 /** #630 — the rail card's convergence interval. The same 3 s the Work detail page polls on
  *  (`lib/work/use-work-detail.ts`'s WORK_POLL_MS): one Work, two surfaces, one rhythm. */
-const WORK_CARD_POLL_MS = 3_000;
+export const WORK_CARD_POLL_MS = 3_000;
 
 export function WorkAcceptedCard({ part }: { part: WorkAcceptedPart }) {
   const t = useTranslations("Clara.parts.workAccepted");

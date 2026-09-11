@@ -1060,3 +1060,61 @@ test("wc.31 the credential mint TYPES its authority refusal, so the revocation p
   const out = await takeOverAccountingWork({ work: w.work_id, author: colleague });
   assert.equal(out.taken_over, true, "wc.31 the revocation path is takeable");
 });
+
+// ===========================================================================================
+// §A12 — STOP REPLY IS NOT CANCEL WORK, as a property of the SCHEMA rather than of one scenario.
+// ===========================================================================================
+
+test("wc.32 no cascade edge exists from a chat turn's task to the Work that turn started", async (t) => {
+  if (await gateCancel(t)) return;
+  // The runtime e2e's leg 8 cancels a chat turn beside a running Work and reads the Work
+  // afterwards: true, and it would stay true if a cascade were added tomorrow along an edge nothing
+  // exercised. THIS cell reads the catalog for the edge itself, which is the claim the acceptance
+  // line actually makes.
+
+  // (1) THERE IS NO PARENT/CHILD EDGE BETWEEN TASKS. A chat turn that "starts" a Work mints a
+  //     SEPARATE clara.agent_tasks row and records no pointer to it, so there is no column a
+  //     cascade could travel down.
+  const selfFk = await rootQuery(
+    `select c.conname
+       from pg_constraint c
+      where c.contype = 'f'
+        and c.conrelid = 'clara.agent_tasks'::regclass
+        and c.confrelid = 'clara.agent_tasks'::regclass`);
+  assert.deepEqual(selfFk.rows.map((r) => r.conname), [],
+    "wc.32 clara.agent_tasks references no other task row");
+
+  // (2) THE ONE COLUMN THAT COULD CARRY IT IS `work_id`, AND A CHAT TASK'S IS NULL — which is the
+  //     first statement of the status mirror, i.e. the point at which every task-level write stops
+  //     being able to reach clara.accounting_work at all.
+  const mirror = await rootQuery(
+    "select prosrc from pg_proc where oid='clara._tf_accounting_work_status_mirror()'::regprocedure");
+  assert.match(mirror.rows[0].prosrc.slice(0, 120), /new[.]work_id is null/,
+    "wc.32 the mirror returns before anything else when the task is bound to no Work");
+
+  // (3) EVERY TRIGGER ON clara.agent_tasks THAT MENTIONS clara.accounting_work IS GUARDED ON THAT
+  //     SAME NULL. A future trigger that wrote the Work lane without the guard fails here.
+  const triggers = await rootQuery(
+    `select p.proname, p.prosrc
+       from pg_trigger tg
+       join pg_proc p on p.oid = tg.tgfoid
+      where tg.tgrelid = 'clara.agent_tasks'::regclass and not tg.tgisinternal`);
+  const touching = triggers.rows.filter((r) => r.prosrc.includes("clara.accounting_work"));
+  assert.ok(touching.length > 0, "wc.32 precondition: the mirror is one of them");
+  for (const fn of touching) {
+    assert.match(fn.prosrc, /work_id is null/,
+      `wc.32 ${fn.proname} reaches clara.accounting_work only for a task BOUND to one`);
+  }
+
+  // (4) …AND THE ESTATE'S TASK-LEVEL CANCEL CASCADES ONLY WITHIN ITS OWN TASK. Its two cascades are
+  //     `agent_interruptions.task_id = p_task` and the wake outbox keyed on this task's own intent;
+  //     neither can name a second task, and the Work row it now takes FIRST is THIS task's own.
+  const door = await rootQuery(
+    "select prosrc from pg_proc where oid='clara.cancel_agent_task(uuid,text)'::regprocedure");
+  const src = door.rows[0].prosrc;
+  assert.match(src, /update clara\.agent_interruptions set status = 'cancelled' where task_id = p_task/,
+    "wc.32 the question cascade is scoped to this task");
+  assert.equal(/update clara\.accounting_work/.test(src), false,
+    "wc.32 …and the task-level door writes no Work row itself: the mirror is the only path, and it "
+    + "is guarded on this task's own work_id");
+});

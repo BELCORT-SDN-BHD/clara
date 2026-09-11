@@ -50,6 +50,8 @@ import { renderComponent } from "../../test/hookHarness";
 import { enableDomInspection } from "../../test/domInspect";
 import { configureSessionTokenSource, resetSessionTokenSource } from "../../lib/session-accessor";
 import { PartRenderer, FALLBACK_UNSUPPORTED_PREFIX } from "./PartRenderer";
+import { FirmScopeProvider } from "../firm-scope-provider";
+import { WORK_CARD_POLL_MS } from "./WorkCards";
 import type { ClaraPart } from "../../lib/parts/types";
 import messages from "../../messages/en.json";
 
@@ -63,6 +65,21 @@ function App(part: ClaraPart): ReactElement {
     messages,
     timeZone: "Asia/Kuala_Lumpur",
     children: createElement(PartRenderer, { part }),
+  });
+}
+
+/** #630 — the SAME card, under a firm scope carrying a rank. The rail is always inside the firm
+ *  layout's provider in production; a node cell that mounts one card on its own is not, which is
+ *  why the card reads the scope through `useFirmScopeOrNull` and fails closed without it. */
+function ScopedApp(part: ClaraPart, roleRank: number | null): ReactElement {
+  return createElement(NextIntlClientProvider, {
+    locale: "en",
+    messages,
+    timeZone: "Asia/Kuala_Lumpur",
+    children: createElement(FirmScopeProvider, {
+      scope: { role_rank: roleRank, is_operator: false } as never,
+      children: createElement(PartRenderer, { part }),
+    }),
   });
 }
 
@@ -343,5 +360,78 @@ test("work_result with no usable client renders without a link", async () => {
     assert.deepEqual(hrefs(h.container), []);
   } finally {
     await h.unmount();
+  }
+});
+
+// ===========================================================================================
+// #630 fix round — THE RAIL CARD'S OWN THREE FINDINGS.
+// ===========================================================================================
+
+test("630 the rail card offers Cancel Work only to a bookkeeper+, and never without a scope", async () => {
+  const running = { ...ACCEPTED, work_id: PARKED_WORK, client_id: PARKED_CLIENT } as ClaraPart;
+  const backend = stubBackend((call) =>
+    call.fn === "accounting_work"
+      ? { status: 200, body: [{ id: PARKED_WORK, client_id: PARKED_CLIENT, status: "running" }] }
+      : { status: 404, body: {} });
+  try {
+    for (const [rank, offered] of [[1, true], [0, false], [null, false]] as const) {
+      const h = await renderComponent(ScopedApp(running, rank));
+      try {
+        await settleUntil(h, () => backend.calls.some((c) => c.fn === "accounting_work"), "the Work status was read");
+        for (let i = 0; i < 6; i += 1) await h.settle();
+        const has = /Cancel Work/.test(h.text());
+        assert.equal(has, offered,
+          `rank=${String(rank)} — clara.cancel_accounting_work floors at bookkeeper, so a viewer or `
+          + "an unreadable rank must be offered no destructive control at all");
+      } finally {
+        await h.unmount();
+      }
+    }
+  } finally {
+    backend.restore();
+  }
+});
+
+test("630 the rail card POLLS while the Work is live and schedules NOTHING once it is terminal", async () => {
+  // MEASURED SHAPE (review): `useHydratedPart` reads on mount and on an explicit `reload()` only,
+  // so the single re-read a cancel triggers landed while the Work was still `stopping` and the card
+  // then showed `stopping` for ever — on a row the database had long since settled. The card's own
+  // sentence ("this Work will show its final state once that is settled") was false.
+  //
+  // The INTERVAL is what is pinned here rather than elapsed wall-clock: a cell that waited three
+  // real seconds per assertion would be slow and, worse, would be measuring the host's scheduler.
+  const scheduled: number[] = [];
+  const cleared: unknown[] = [];
+  const realSet = globalThis.setInterval;
+  const realClear = globalThis.clearInterval;
+  globalThis.setInterval = ((fn: () => void, ms?: number) => {
+    scheduled.push(Number(ms));
+    return realSet(fn, 1_000_000);   // never actually fires inside the cell
+  }) as typeof globalThis.setInterval;
+  globalThis.clearInterval = ((id: unknown) => { cleared.push(id); return realClear(id as never); }) as typeof globalThis.clearInterval;
+
+  const part = { ...ACCEPTED, work_id: PARKED_WORK, client_id: PARKED_CLIENT } as ClaraPart;
+  try {
+    for (const [status, polls] of [["running", true], ["stopping", true], ["cancelled", false], ["completed", false]] as const) {
+      scheduled.length = 0;
+      const backend = stubBackend((call) =>
+        call.fn === "accounting_work"
+          ? { status: 200, body: [{ id: PARKED_WORK, client_id: PARKED_CLIENT, status }] }
+          : { status: 404, body: {} });
+      const h = await renderComponent(ScopedApp(part, 1));
+      try {
+        await settleUntil(h, () => backend.calls.some((c) => c.fn === "accounting_work"), "the Work status was read");
+        for (let i = 0; i < 6; i += 1) await h.settle();
+        assert.equal(scheduled.includes(WORK_CARD_POLL_MS), polls,
+          `${status}: the card ${polls ? "converges" : "is finished and schedules nothing"}`);
+      } finally {
+        await h.unmount();
+        backend.restore();
+      }
+    }
+    assert.ok(cleared.length > 0, "…and every interval it did schedule is cleared on unmount");
+  } finally {
+    globalThis.setInterval = realSet;
+    globalThis.clearInterval = realClear;
   }
 });
