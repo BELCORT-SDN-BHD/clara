@@ -81,12 +81,19 @@ const SETTLED_PARTS = [
  *  way a timer would. */
 const ROW_APPEARS_AFTER_EMPTY_READS = 1;
 
-/** #727 — HOW MANY TEXT DELTAS THE BURST ARM STREAMS, and why the number is this one.
+/** #727 — HOW MANY TEXT DELTAS THE BURST ARM STREAMS, and why the numbers are these.
  *  React's nested-update ceiling is 50 commits; the defect #727 records armed a fresh
  *  one-second timer (and therefore a fresh setState) on EVERY render of the thread, so
- *  every delta past ~50 was a candidate for the throw. 300 is six times the ceiling, at a
- *  cadence slow enough that the turn clock is certainly mounted before they start. */
-const BURST_DELTAS = 300;
+ *  every delta past ~50 was a candidate for the throw.
+ *
+ *  THE LENGTH IS A VACUITY REQUIREMENT, not a load one (review C3). The walk's timer
+ *  census reads a DELTA between two samples, and a burst that had already finished before
+ *  the first sample would give a delta of zero timers for zero deltas — green on the
+ *  pre-fix build, for the worst possible reason. 900 at 15ms is 13.5 seconds of stream,
+ *  which comfortably outlasts sign-in, the turn, and the window the walk samples across;
+ *  the walk then WAITS on its own count of arrived deltas rather than on a clock, so the
+ *  bound it asserts is always measured over a burst that was demonstrably still running. */
+const BURST_DELTAS = 900;
 const BURST_INTERVAL_MS = 15;
 
 const state = {

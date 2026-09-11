@@ -347,6 +347,49 @@ async function clockTimers(page: Page): Promise<number> {
   return page.evaluate(() => (window as unknown as { __clara727Timers?: number }).__clara727Timers ?? 0);
 }
 
+/**
+ * COUNT THE DELTAS THE BROWSER ACTUALLY CONSUMED — the vacuity control on the timer
+ * census above (review C3).
+ *
+ * WHY THIS IS NEEDED. "The clock armed at most one timer while the stream delivered" is a
+ * claim about a WINDOW, and it is trivially true of a window in which nothing was
+ * delivered. A fixture that failed to arm, a stream that closed early, a burst that had
+ * already run out — each would leave the assertion green on the very build this cell
+ * exists to red. So the cell waits on ARRIVED DELTAS, not on a clock, and states the
+ * number it waited for.
+ *
+ * WHY `TextDecoder` AND NOT THE FIXTURE'S OWN COUNT. A counter on the server proves bytes
+ * were WRITTEN; it says nothing about whether the browser read them, which is the half
+ * that re-renders the thread. `lib/clara/stream.ts:212-218` reads the SSE body through
+ * `reader.read()` and one `TextDecoder`, so counting `text-delta` payloads as they are
+ * decoded is a direct measurement of what reached `applyStreamEvent` — the same events
+ * that drive `claraThreadStore.emit()` and therefore every render being counted.
+ *
+ * A frame split across two `read()` calls is undercounted (its `"type":"text-delta"` is
+ * cut in half), which is safe in this direction: the count is a LOWER bound, and the
+ * assertion below is a floor.
+ */
+async function countStreamDeltas(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const w = window as unknown as { __clara727Deltas?: number };
+    w.__clara727Deltas = 0;
+    const proto = TextDecoder.prototype as unknown as {
+      decode: (this: TextDecoder, input?: unknown, options?: unknown) => string;
+    };
+    const real = proto.decode;
+    proto.decode = function decodeCounting(this: TextDecoder, input?: unknown, options?: unknown): string {
+      const text = real.call(this, input, options);
+      const hits = typeof text === "string" ? text.match(/"type":"text-delta"/g) : null;
+      if (hits) w.__clara727Deltas = (w.__clara727Deltas ?? 0) + hits.length;
+      return text;
+    };
+  });
+}
+
+async function streamDeltas(page: Page): Promise<number> {
+  return page.evaluate(() => (window as unknown as { __clara727Deltas?: number }).__clara727Deltas ?? 0);
+}
+
 async function setBurst(page: Page, on: boolean): Promise<void> {
   const answer = await page.evaluate(
     async ([thread, burst]) => {
@@ -372,6 +415,7 @@ test("#727: a clarify asked DURING a live stream is answered in place — the tu
   // `useClaraThread` painted the throw as "Could not send that message: stream error: …".
   const faults = watchPageErrors(page);
   await countClockTimers(page);
+  await countStreamDeltas(page);
   await openThread(page);
   await setBurst(page, true);
   try {
@@ -384,23 +428,41 @@ test("#727: a clarify asked DURING a live stream is answered in place — the tu
     // would mean "the component that carried the defect was never on screen".
     await expect(page.getByText(/Clara has been working on this for \d+:\d\d/)).toBeVisible({ timeout: 15_000 });
 
-    // The burst runs for ~4.5s (300 deltas at 15ms). Answering AFTER it has been flowing
+    // The burst runs for ~13.5s (900 deltas at 15ms). Answering AFTER it has been flowing
     // for a while is the hosted sequence: the owner's view died about a minute in.
     const answerField = page.getByLabel("Your answer");
     await expect(answerField).toBeVisible({ timeout: 20_000 });
     const timersBefore = await clockTimers(page);
-    await page.waitForTimeout(5_000);
+    const deltasBefore = await streamDeltas(page);
+
+    // THE SAMPLING WINDOW IS DEFINED BY DELTAS, NOT BY A CLOCK (review C3). Waiting a
+    // fixed five seconds would measure an empty window whenever the burst had already
+    // finished, stalled, or never armed — and an empty window arms no timers on ANY build,
+    // including the one this cell exists to red. So the window closes when 200 further
+    // deltas have been DECODED BY THIS BROWSER, and it fails loudly if they never arrive.
+    const WINDOW_DELTAS = 200;
+    await page.waitForFunction(
+      (target) => ((window as unknown as { __clara727Deltas?: number }).__clara727Deltas ?? 0) >= target,
+      deltasBefore + WINDOW_DELTAS,
+      { timeout: 20_000 },
+    );
+    const deltasDuringWindow = (await streamDeltas(page)) - deltasBefore;
+    expect(
+      deltasDuringWindow,
+      `only ${deltasDuringWindow} deltas reached the browser while the timer census ran — a census over a window with no stream in it proves nothing`,
+    ).toBeGreaterThanOrEqual(WINDOW_DELTAS);
 
     // ONE TURN, ONE TIMER — the measurement that is red on the build this ticket was filed
-    // against and green on the fix. Every delta above re-rendered the thread through
-    // `useSyncExternalStore`; a clock whose effect depends on a fresh `() => Date.now()`
-    // identity re-runs (and calls setState) on every one of them, which is what walks React
-    // to its nested-update ceiling. Measured pre-fix on this very walk: 536 timers armed
-    // across the burst. The bound is 1 because the clock's `startedAt` does not change.
+    // against and green on the fix, now taken over a window 200 decoded deltas wide.
+    // Every one of those deltas re-rendered the thread through `useSyncExternalStore`; a
+    // clock whose effect depends on a fresh `() => Date.now()` identity re-runs (and calls
+    // setState) on every one of them, which is what walks React to its nested-update
+    // ceiling. Measured pre-fix on this very walk: 536 timers armed across the burst. The
+    // bound is 1 because the clock's `startedAt` does not change.
     const armedDuringBurst = (await clockTimers(page)) - timersBefore;
     expect(
       armedDuringBurst,
-      `the turn clock armed ${armedDuringBurst} timers while the stream delivered — one turn is one timer`,
+      `the turn clock armed ${armedDuringBurst} timers while ${deltasDuringWindow} deltas were delivered — one turn is one timer`,
     ).toBeLessThanOrEqual(1);
 
     // STILL THERE. The failure this ticket records is that the live view was REPLACED by
