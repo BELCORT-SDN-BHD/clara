@@ -594,25 +594,24 @@ function WorkOutcome({
             </Link>
           }
         >
-          {clarify === null ? (
-            t("awaiting.body")
-          ) : (
-            <span className="flex flex-col gap-1">
-              {/* The RUN'S OWN WORDS, verbatim — the same posture the refusal arm
-                  takes about the database's. */}
-              <span className="font-medium text-foreground">{clarify.question}</span>
-              {clarify.context === null ? null : (
-                <span className="text-xs text-muted-foreground">{clarify.context}</span>
-              )}
-            </span>
-          )}
+          {/* ONE OWNER FOR THE QUESTION TEXT (reviewed finding). This banner used to render the
+              run's own words AND the panel below rendered them again from the shared record — the
+              same sentence twice, a screen reader reading it twice, and two places to disagree the
+              moment the question is re-asked. The banner now says only WHAT STATE the Work is in;
+              the question itself belongs to the thing that can be answered. The table read is not
+              discarded — it rides into the panel as the FALLBACK the door-unreachable arm renders,
+              so the run's own words still appear when `clara.get_work_question` cannot be read. */}
+          {t("awaiting.body")}
         </StateBanner>
-        {/* #629 — THE ANSWER, HERE. The banner above still says WHAT is waiting (and still falls
-            back to the table read when the door is unreachable); this renders the SAME form
-            Needs-you and the Clara rail render, so a person who is already looking at the Work
-            does not have to go anywhere to answer one date. `key` is the WORK, so the detail's
-            3-second poll never re-mounts it and never steals focus mid-sentence. */}
-        <WorkQuestionPanel key={work.id} workId={work.id} />
+        {/* #629 — THE ANSWER, HERE. This renders the SAME form Needs-you and the Clara rail render,
+            so a person who is already looking at the Work does not have to go anywhere to answer one
+            date. `key` is the WORK, so the detail's 3-second poll never re-mounts it and never
+            steals focus mid-sentence. */}
+        <WorkQuestionPanel
+          key={work.id}
+          workId={work.id}
+          fallbackQuestion={clarify === null ? null : { question: clarify.question, context: clarify.context }}
+        />
       </div>
     );
   }

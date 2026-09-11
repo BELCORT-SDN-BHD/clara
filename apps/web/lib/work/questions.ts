@@ -26,6 +26,8 @@
 
 import { callDoor } from "@/lib/doors";
 import { isUuidShape } from "@/lib/client-id";
+import { listCoaAccounts } from "@/lib/journals/api";
+import { sessionTokenAccessor } from "@/lib/session-accessor";
 import { RefusalError } from "@/lib/wire";
 import type { SessionTokenAccessor } from "@/lib/session";
 
@@ -162,6 +164,38 @@ export async function getPendingWorkQuestion(workId: string, opts: Opts = {}): P
   if (!isUuidShape(workId)) return null;
   const out = await callDoor<WorkQuestionRecord | null>("get_work_pending_question", { p_work: workId }, opts);
   return out ?? null;
+}
+
+/** One row of the client's chart, as an `account` field offers it. The subset of
+ *  `CoaAccountRow` the control needs, so `listCoaAccounts`'s rows satisfy it unprojected. */
+export type WorkQuestionAccount = { account_code: string; name: string | null; is_active: boolean };
+
+/** Does this question declare an `account` field at all? The chart is a CLIENT-SCOPED read, and a
+ *  question asking for a date has no business issuing one — least of all from a card in a chat
+ *  transcript, where it would be a second request per rendered part. */
+export function questionNeedsChart(record: WorkQuestionRecord | null): boolean {
+  return record !== null && Array.isArray(record.fields) && record.fields.some((f) => f.kind === "account");
+}
+
+/**
+ * The chart an `account` field picks from, or null.
+ *
+ * NULL IS A REAL ANSWER, not an error swallowed: the form degrades to a typed account code when the
+ * chart is unavailable, which is honest and still fully validated (`clara._assert_work_answer` is
+ * the authority on whether a code is active in this client's chart, and it does not care how the
+ * person entered it). A failed chart read must never block answering a question.
+ */
+export async function accountsForQuestion(
+  record: WorkQuestionRecord | null,
+  opts: Opts = {},
+): Promise<WorkQuestionAccount[] | null> {
+  if (!questionNeedsChart(record) || record === null) return null;
+  try {
+    const rows = await listCoaAccounts(opts.session ?? sessionTokenAccessor, record.client_id, opts.signal);
+    return rows.map((r) => ({ account_code: r.account_code, name: r.name ?? null, is_active: r.is_active }));
+  } catch {
+    return null;
+  }
 }
 
 // ---------------------------------------------------------------------------

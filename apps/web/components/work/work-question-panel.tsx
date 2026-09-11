@@ -30,7 +30,7 @@ import { workDetailHref } from "@/lib/navigation/tree";
 import { useHydratedPart } from "@/lib/parts/hooks";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
 import { getSessionIdentity } from "@/lib/settings/account-identity";
-import { getPendingWorkQuestion, getWorkQuestion } from "@/lib/work/questions";
+import { accountsForQuestion, getPendingWorkQuestion, getWorkQuestion } from "@/lib/work/questions";
 
 export type WorkQuestionPanelProps = {
   /** Address by WORK when the caller knows the Work (B3), by QUESTION when it knows the question
@@ -40,14 +40,22 @@ export type WorkQuestionPanelProps = {
   /** Called after an accepted answer, so the surface can re-read what it owns. */
   onAnswered?: () => void;
   onLeavePending?: () => void;
+  /** The run's own words, read from the interruption ROW by the calling page, rendered ONLY when
+   *  this door cannot be. B3 owns such a read already (`loadWorkDetail`); handing it down is what
+   *  lets the Work detail's banner stop printing the question a second time (§5's one-owner rule
+   *  applied to text, not only to announcements) without losing the fallback. */
+  fallbackQuestion?: { question: string | null; context: string | null } | null;
 };
 
-export function WorkQuestionPanel({ workId, questionId, onAnswered, onLeavePending }: WorkQuestionPanelProps) {
+export function WorkQuestionPanel({
+  workId, questionId, onAnswered, onLeavePending, fallbackQuestion = null,
+}: WorkQuestionPanelProps) {
   const t = useTranslations("WorkQuestion.inbox");
   const load = useCallback(async () => {
     const record = questionId ? await getWorkQuestion(questionId) : workId ? await getPendingWorkQuestion(workId) : null;
     const identity = await getSessionIdentity();
-    return { record, identity };
+    // The chart, ONLY when the question declares an `account` field — see accountsForQuestion.
+    return { record, identity, accounts: await accountsForQuestion(record) };
   }, [questionId, workId]);
   const { data, loading, err } = useHydratedPart(sessionTokenAccessor, load);
 
@@ -59,14 +67,33 @@ export function WorkQuestionPanel({ workId, questionId, onAnswered, onLeavePendi
       </div>
     );
   }
-  if (err !== null) return <StateBanner tone="warning">{t("loadFailed")}</StateBanner>;
-  if (!data?.record || !data.identity) return null;
+  if (err !== null || !data?.record || !data.identity) {
+    // Nothing to read and nothing to fall back on: render nothing, exactly as before.
+    if (err === null && !fallbackQuestion?.question) return null;
+    // THE DOOR COULD NOT BE READ, or admitted nothing to this caller. The question does not
+    // disappear from the page when that happens: the calling surface's own row read is rendered
+    // here instead, which is where the question text now lives on B3.
+    return (
+      <div className="flex flex-col gap-2" data-testid="work-question-fallback">
+        {fallbackQuestion?.question ? (
+          <p className="text-sm font-medium text-foreground" data-testid="work-question-fallback-text">
+            {fallbackQuestion.question}
+          </p>
+        ) : null}
+        {fallbackQuestion?.context ? (
+          <p className="text-xs text-secondary-ink">{fallbackQuestion.context}</p>
+        ) : null}
+        {err !== null ? <StateBanner tone="warning">{t("loadFailed")}</StateBanner> : null}
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col gap-2">
       <WorkQuestionForm
         record={data.record}
         userId={data.identity.userId}
+        accounts={data.accounts}
         onAnswered={onAnswered}
         onLeavePending={onLeavePending}
       />

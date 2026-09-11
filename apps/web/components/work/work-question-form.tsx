@@ -30,9 +30,19 @@
 //     the contract refuses to discard, and the person may need it for a correction.
 //   · It will not emit a second effect from a stale card. Every convergence RE-READS the
 //     authoritative record and renders that; nothing here retries a write on its own.
-//   · It will not announce. The transcript, the inbox and the Work detail each own their own
-//     announcement boundary (§5, one announcement owner per transition); this form renders inline
-//     status into the existing region rather than opening a second live one.
+//   · It will not announce WHERE SOMETHING ELSE ALREADY DOES. `announce` decides, and the default
+//     is "self" because the honest default is the one that speaks: mounted on the Work detail or
+//     expanded in a Needs-you row, this form IS the thing that changed and its banners carry the
+//     computed `role` `StateBanner` gives them. Mounted in the Clara transcript — a log that
+//     announces its own updates — it is passed `announce="none"`, and every state renders as the
+//     same box with the same text and no live region at all. §5: one announcement owner per
+//     transition, never two saying the same thing.
+//
+// THIS FORM OWNS NO MONEY PARSER AND NO MONEY CONTROL. `components/common/money-input.tsx` is the
+// product's one cents-entry module — raw keystroke fidelity, exact string parsing, a typed
+// accepted/refused result and the visible refusal copy — and the money field renders through it,
+// exactly as the journal composer's line editor does. A question that asks for an amount and the
+// composer that posts one must not disagree about what "1234,56" means.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
@@ -41,6 +51,14 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { MoneyInput } from "@/components/common/money-input";
 import {
   Field,
   FieldContent,
@@ -69,9 +87,16 @@ import {
   isRequired,
   isSingleField,
   optionsOf,
+  parseMoneyToCents,
   validateDraft,
   validateField,
 } from "@/lib/work/question-fields";
+import { formatCents } from "@/lib/bank/money";
+import type { WorkAnswerValue, WorkQuestionAccount } from "@/lib/work/questions";
+
+/** Who speaks when this form changes state. See the header: "self" is the default and the honest
+ *  one; "none" is for a surface that already owns the announcement boundary. */
+export type WorkQuestionAnnounce = "self" | "none";
 
 export type WorkQuestionFormProps = {
   record: WorkQuestionRecord;
@@ -87,12 +112,22 @@ export type WorkQuestionFormProps = {
   /** "Leave pending" — the surface decides what closing means (collapse the row, close the sheet).
    *  Absent means the affordance is not offered, which is correct on a page that IS the question. */
   onLeavePending?: () => void;
+  /** Who announces (§5). Default "self". Pass "none" inside a surface that already owns the
+   *  announcement boundary — the Clara transcript is the one that does. */
+  announce?: WorkQuestionAnnounce;
+  /** The client's chart, for an `account` field. Absent or empty means the control degrades to a
+   *  typed code — honestly, and with the same server-side validation behind it. */
+  accounts?: readonly WorkQuestionAccount[] | null;
 };
 
 type Phase = "editing" | "submitting" | "accepted" | "converged" | "denied";
 
-export function WorkQuestionForm({ record, userId, onAnswered, onSettled, onLeavePending }: WorkQuestionFormProps) {
+export function WorkQuestionForm({
+  record, userId, onAnswered, onSettled, onLeavePending,
+  announce = "self", accounts = null,
+}: WorkQuestionFormProps) {
   const t = useTranslations("WorkQuestion");
+  const silent = announce === "none";
   const fields = useMemo(() => (Array.isArray(record.fields) ? record.fields : []), [record.fields]);
   const single = isSingleField(fields);
   const draftKey = useMemo(
@@ -115,6 +150,30 @@ export function WorkQuestionForm({ record, userId, onAnswered, onSettled, onLeav
   const [refusal, setRefusal] = useState<AnswerRefusal | null>(null);
   const [authoritative, setAuthoritative] = useState<WorkQuestionRecord>(record);
   const controlRefs = useRef<Record<string, HTMLElement | null>>({});
+  /**
+   * THE LAST ACCEPTED CENTS PER MONEY FIELD, and it exists for one measured reason.
+   *
+   * `MoneyInput` is CONTROLLED by `cents` and re-syncs its own raw text whenever that prop moves
+   * away from what it last emitted (components/common/money-input.tsx:65-71) — which is right, and
+   * which means a `cents` derived from the draft would CLEAR the box the instant a keystroke made
+   * the draft unparseable: type `1200`, then a third decimal, and the text a person is in the
+   * middle of correcting vanishes. So the prop is fed from the last value the control itself
+   * accepted, which does not move on a refusal; the DRAFT still takes the refused text, so the
+   * field's own validation names `integer_cents` and the draft survives a convergence with what
+   * was actually typed.
+   */
+  const moneyCents = useRef<Record<string, number | null>>({});
+  const moneySeeded = useRef(false);
+  if (!moneySeeded.current) {
+    // A RESTORED DRAFT must reach the control as cents, or a person who comes back to a half-filled
+    // question sees an empty amount box beside a filled one.
+    moneySeeded.current = true;
+    for (const field of fields) {
+      if (field.kind !== "money") continue;
+      const raw = draft[field.key];
+      moneyCents.current[field.key] = typeof raw === "number" ? raw : parseMoneyToCents(String(raw ?? ""));
+    }
+  }
   const alive = useRef(true);
   useEffect(() => () => { alive.current = false; }, []);
 
@@ -122,7 +181,7 @@ export function WorkQuestionForm({ record, userId, onAnswered, onSettled, onLeav
   // mid-sentence has already lost the timer's window, and there is nothing expensive about a
   // handful of small string writes.
   const setValue = useCallback(
-    (key: string, value: string) => {
+    (key: string, value: WorkAnswerValue) => {
       setDraft((prev) => {
         const next = { ...prev, [key]: value };
         writeWorkAnswerDraft(draftKey, { ...next, note });
@@ -196,6 +255,16 @@ export function WorkQuestionForm({ record, userId, onAnswered, onSettled, onLeav
       }
       return;
     }
+    if (outcome.refusal.kind === "in_flight") {
+      // NOTHING MOVED. The same op key is held by this browser's own uncommitted previous press, so
+      // the form stays a form: re-read (cheap, and it is what proves nothing moved), return to
+      // editing with the draft intact, and leave the SAME Submit — which replays the SAME key —
+      // in front of the person. Emphatically NOT `onSettled`: on Needs-you that drops the row.
+      await reread();
+      if (!alive.current) return;
+      setPhase("editing");
+      return;
+    }
     if (outcome.refusal.kind === "converge") {
       // THE DRAFT SURVIVES. It is kept in state and in storage, and rendered as a note beside the
       // authoritative answer, because it may be exactly what a correction needs.
@@ -225,23 +294,23 @@ export function WorkQuestionForm({ record, userId, onAnswered, onSettled, onLeav
   if (phase === "converged" || (record.status !== "pending" && phase !== "submitting" && phase !== "accepted")) {
     return (
       <div className="flex flex-col gap-3" data-testid="work-question-converged">
-        <StateBanner tone="warning">
+        <StateBanner tone="warning" silent={silent}>
           {t(convergeKeyFor(refusal, authoritative))}
         </StateBanner>
-        {authoritative.status === "answered" ? <AcceptedAnswer record={authoritative} fields={fields} /> : null}
+        {authoritative.status === "answered" ? <AcceptedAnswer record={authoritative} fields={fields} silent={silent} /> : null}
         <KeptDraft draft={draft} note={note} fields={fields} label={t("draftKept")} />
       </div>
     );
   }
 
   if (phase === "accepted" || (phase !== "submitting" && authoritative.status === "answered")) {
-    return <AcceptedAnswer record={authoritative} fields={fields} />;
+    return <AcceptedAnswer record={authoritative} fields={fields} silent={silent} />;
   }
 
   if (phase === "denied") {
     return (
       <div className="flex flex-col gap-3" data-testid="work-question-denied">
-        <StateBanner tone="error">{refusal?.message ?? t("denied")}</StateBanner>
+        <StateBanner tone="error" silent={silent}>{refusal?.message ?? t("denied")}</StateBanner>
         <KeptDraft draft={draft} note={note} fields={fields} label={t("draftKept")} />
       </div>
     );
@@ -280,9 +349,16 @@ export function WorkQuestionForm({ record, userId, onAnswered, onSettled, onLeav
         </p>
       ) : null}
 
-      {refusal?.kind === "failed" ? <StateBanner tone="error">{t("failed")}</StateBanner> : null}
+      {refusal?.kind === "failed" ? (
+        <StateBanner tone="error" silent={silent} data-testid="work-question-failed">{t("failed")}</StateBanner>
+      ) : null}
+      {refusal?.kind === "in_flight" ? (
+        <StateBanner tone="info" silent={silent}>
+          <span data-testid="work-question-in-flight">{t("inFlight")}</span>
+        </StateBanner>
+      ) : null}
       {refusal?.kind === "invalid" && refusal.constraint === "op_key_conflict" ? (
-        <StateBanner tone="warning">{t("opKeyConflict")}</StateBanner>
+        <StateBanner tone="warning" silent={silent}>{t("opKeyConflict")}</StateBanner>
       ) : null}
 
       <FieldGroup>
@@ -293,6 +369,9 @@ export function WorkQuestionForm({ record, userId, onAnswered, onSettled, onLeav
             value={draft[field.key]}
             problem={problems[field.key] ?? ""}
             disabled={busy}
+            accounts={accounts}
+            cents={moneyCents.current[field.key] ?? null}
+            onAcceptedCents={(c) => { moneyCents.current[field.key] = c; }}
             t={t}
             register={(el) => {
               controlRefs.current[field.key] = el;
@@ -378,16 +457,25 @@ function QuestionField({
   value,
   problem,
   disabled,
+  accounts,
+  cents,
   register,
   onChange,
+  onAcceptedCents,
   t,
 }: {
   field: WorkQuestionField;
   value: string | number | null | undefined;
   problem: string;
   disabled: boolean;
+  accounts: readonly WorkQuestionAccount[] | null;
   register: (el: HTMLElement | null) => void;
-  onChange: (value: string) => void;
+  onChange: (value: WorkAnswerValue) => void;
+  /** The cents a money control is CONTROLLED by, and the callback that moves it. See the
+   *  `moneyCents` ref in the form: it is the last value this control ACCEPTED, never a value
+   *  derived from the draft. */
+  cents: number | null;
+  onAcceptedCents: (cents: number | null) => void;
   t: ReturnType<typeof useTranslations>;
 }) {
   const id = `wq-${field.key}`;
@@ -430,6 +518,74 @@ function QuestionField({
             </label>
           ))}
         </RadioGroup>
+      ) : field.kind === "money" ? (
+        // THE PRODUCT'S ONE CENTS CONTROL, the same one the journal composer's line editor mounts.
+        // The DRAFT holds integer cents (a number), never the typed text: `buildAnswer` and
+        // `validateField` both read a number straight through, and a draft that stored "1,200.00"
+        // would have to be re-parsed by whatever read it next — which is how a second parser gets
+        // born. A refused keystroke writes NOTHING to the draft (so the control keeps what was
+        // typed and shows its own refusal copy) and raises the field's constraint instead.
+        <MoneyInput
+          id={id}
+          mode="signed"
+          zeroIsBlank={false}
+          cents={cents}
+          disabled={disabled}
+          aria-invalid={invalid || undefined}
+          aria-describedby={describedBy}
+          ref={register}
+          onValueChange={(change) => {
+            if (change.ok) {
+              onAcceptedCents(change.cents);
+              onChange(change.cents === null ? "" : formatCents(change.cents));
+            } else {
+              // The REFUSED TEXT, kept: `validateField` then names `integer_cents` by itself, and
+              // the last accepted cents is deliberately NOT moved, so the control keeps showing
+              // what the person is editing.
+              onChange(change.refusal.input);
+            }
+          }}
+        />
+      ) : field.kind === "account" ? (
+        // A CODE FROM THIS CLIENT'S CHART, offered rather than remembered — the header names a
+        // Select and this is it. The chart is the caller's to supply (it is a client-scoped read,
+        // and the form does not own one); WITHOUT it the control degrades to a typed code rather
+        // than to an empty list, because an account picker with no accounts is worse than a box.
+        // Either way `clara._assert_work_answer` is still the authority on whether the code is
+        // active in this client's chart — this control only saves a person from typing it.
+        accounts !== null && accounts.length > 0 ? (
+          <Select value={text} onValueChange={(v) => onChange(typeof v === "string" ? v : "")} disabled={disabled}>
+            <SelectTrigger
+              id={id}
+              aria-label={field.label}
+              aria-invalid={invalid || undefined}
+              aria-describedby={describedBy}
+              className="w-full"
+              ref={register as (el: HTMLButtonElement | null) => void}
+              data-testid={`work-question-account-${field.key}`}
+            >
+              <SelectValue placeholder={t("accountPlaceholder")} />
+            </SelectTrigger>
+            <SelectContent>
+              {accounts.filter((a) => a.is_active).map((a) => (
+                <SelectItem key={a.account_code} value={a.account_code}>
+                  {a.name ? `${a.account_code} · ${a.name}` : a.account_code}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        ) : (
+          <Input
+            id={id}
+            value={text}
+            disabled={disabled}
+            placeholder={t("accountCodePlaceholder")}
+            aria-invalid={invalid || undefined}
+            aria-describedby={describedBy}
+            ref={register}
+            onChange={(e) => onChange(e.target.value)}
+          />
+        )
       ) : field.kind === "text" ? (
         <Textarea
           id={id}
@@ -449,8 +605,8 @@ function QuestionField({
           // A TYPED ISO date, not a native date input: the contract asks for precise typing
           // alongside a picker, and a `type="date"` control renders a LOCALE-GUESSED order that a
           // person reading MYT cannot verify. `inputMode` keeps a numeric keypad on a phone.
-          inputMode={field.kind === "money" ? "decimal" : field.kind === "date" ? "numeric" : undefined}
-          placeholder={field.kind === "date" ? "YYYY-MM-DD" : field.kind === "money" ? "0.00" : undefined}
+          inputMode={field.kind === "date" ? "numeric" : undefined}
+          placeholder={field.kind === "date" ? "YYYY-MM-DD" : undefined}
           aria-invalid={invalid || undefined}
           aria-describedby={describedBy}
           ref={register}
@@ -493,12 +649,20 @@ function ReviewList({
 
 /** The ACCEPTED record: who, when, which version, and the exact values. This is what replaces the
  *  form — a persistent outcome, never a toast. */
-function AcceptedAnswer({ record, fields }: { record: WorkQuestionRecord; fields: readonly WorkQuestionField[] }) {
+function AcceptedAnswer({
+  record,
+  fields,
+  silent = false,
+}: {
+  record: WorkQuestionRecord;
+  fields: readonly WorkQuestionField[];
+  silent?: boolean;
+}) {
   const t = useTranslations("WorkQuestion");
   const answer = record.answer ?? {};
   return (
     <div className="flex flex-col gap-2" data-testid="work-question-accepted">
-      <StateBanner tone="info">{t("accepted")}</StateBanner>
+      <StateBanner tone="info" silent={silent}>{t("accepted")}</StateBanner>
       <dl className="grid gap-1 text-sm">
         {fields.map((field) => (
           <div key={field.key} className="flex flex-wrap gap-2">
@@ -587,8 +751,6 @@ export function convergeKeyFor(refusal: AnswerRefusal | null, record: WorkQuesti
       return "convergeBasisChanged";
     case "state_changed":
       return "convergeStateChanged";
-    case "operation_in_flight":
-      return "convergeInFlight";
     default:
       return "convergeStateChanged";
   }

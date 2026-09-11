@@ -131,6 +131,7 @@ components/firm/open-question-detail-labels.test.tsx
 components/firm/open-question-detail.test.tsx
 components/firm/staff-advance-incomplete-affordance.test.tsx
 components/firm/sweep-status-panel.test.tsx
+components/firm/work-question-affordance.test.tsx
 components/invite-accept-a11y.test.tsx
 components/invite-accept-form.test.tsx
 components/invite-accept-keyboard.test.tsx

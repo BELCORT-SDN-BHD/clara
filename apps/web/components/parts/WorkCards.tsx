@@ -67,7 +67,7 @@ import { WorkQuestionForm } from "@/components/work/work-question-form";
 import { useHydratedPart } from "@/lib/parts/hooks";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
 import { getSessionIdentity } from "@/lib/settings/account-identity";
-import { getWorkQuestion } from "@/lib/work/questions";
+import { accountsForQuestion, getWorkQuestion } from "@/lib/work/questions";
 import type { WorkAcceptedPart, WorkQuestionPart, WorkResultPart, WorkStatusPart } from "@/lib/parts/types";
 
 /** The accepted-Work receipt. Links to the durable detail — the persistent
@@ -155,19 +155,26 @@ export function WorkResultCard({ part }: { part: WorkResultPart }) {
  * is that the three surfaces show one question and post one answer, and a card with its own inputs
  * would be a second question wearing the first one's identifiers.
  *
- * NO LIVE REGION, exactly like its three siblings above. The transcript owns the one announcement
- * boundary (§5); a card that announced its own acceptance would say the same result twice.
+ * NO LIVE REGION, exactly like its three siblings above — and it is passed, not assumed. The form
+ * renders `StateBanner`s, which compute `role="alert"`/`"status"`, so a card that simply mounted it
+ * would open up to six live regions inside a log that already announces its own updates: one
+ * accepted answer spoken twice, and a converging card speaking a state the transcript had already
+ * said. `announce="none"` renders exactly the same boxes with exactly the same text and no role at
+ * all. §5, one announcement owner per transition.
  */
 export function WorkQuestionCard({ part }: { part: WorkQuestionPart }) {
   const t = useTranslations("WorkQuestion.card");
   const addressable = usableId(part.work_id) && usableId(part.client_id);
-  const load = useCallback(
-    async () => ({
-      record: await getWorkQuestion(part.question_id),
+  const load = useCallback(async () => {
+    const record = await getWorkQuestion(part.question_id);
+    return {
+      record,
       identity: await getSessionIdentity(),
-    }),
-    [part.question_id],
-  );
+      // ONLY WHEN THE QUESTION ACTUALLY ASKS FOR ONE. The chart is a client-scoped read and a card
+      // in a transcript should not issue it to render a date field.
+      accounts: await accountsForQuestion(record),
+    };
+  }, [part.question_id]);
   const { data, loading } = useHydratedPart(sessionTokenAccessor, load);
 
   return (
@@ -178,7 +185,12 @@ export function WorkQuestionCard({ part }: { part: WorkQuestionPart }) {
       link={addressable ? { href: workDetailHref(part.client_id, part.work_id), label: t("openWork") } : null}
     >
       {data?.record && data.identity ? (
-        <WorkQuestionForm record={data.record} userId={data.identity.userId} />
+        <WorkQuestionForm
+          record={data.record}
+          userId={data.identity.userId}
+          announce="none"
+          accounts={data.accounts}
+        />
       ) : null}
     </PartSummaryCard>
   );

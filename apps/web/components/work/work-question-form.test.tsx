@@ -313,7 +313,11 @@ test("ANSWERED ELSEWHERE converges on the authoritative record and KEEPS the dra
     assert.match(h.text(), /Answered by a owner/);
     const kept = byTestId(h, "work-question-kept-draft");
     assert.ok(kept, "the still-useful draft survives");
-    assert.match(h.text(), /1200\.00/, "…and is still readable");
+    // THE PRODUCT'S OWN MONEY FORMAT. The draft now holds what the cents control ACCEPTED, rendered
+    // through `formatCents` — the same grouped text the composer and every balance in this product
+    // show — rather than the raw keystrokes. "1,200.00" is the amount; "1200.00" was a transcript
+    // of typing.
+    assert.match(h.text(), /1,200\.00/, "…and is still readable");
     assert.equal(
       doors.calls.filter((c) => c.fn === "answer_work_question").length,
       1,
@@ -441,6 +445,187 @@ test("LEAVE PENDING is offered beside Submit — a person is never forced to gue
     assert.equal(left, 1, "…and closing it writes nothing");
   } finally {
     await h.unmount();
+    s.restore();
+  }
+});
+
+// ===========================================================================================
+// THE REVIEWED FINDINGS. Each cell below is the one that would have caught its finding.
+// ===========================================================================================
+
+/** Every live region in the rendered tree: a node carrying a computed `role="alert"`/`"status"`,
+ *  or an explicit `aria-live`. The count is the point — §5 asks for ONE announcement owner. */
+function liveRegions(h: { container: Stub }): Stub[] {
+  const out: Stub[] = [];
+  const walk = (n: Stub) => {
+    const get = (n as { getAttribute?: (k: string) => string | null }).getAttribute;
+    const role = get ? get.call(n, "role") : null;
+    const live = get ? get.call(n, "aria-live") : null;
+    if (role === "alert" || role === "status" || (live !== null && live !== "off")) out.push(n);
+    for (const c of ((n as { childNodes?: Stub[] }).childNodes ?? [])) walk(c);
+  };
+  walk(h.container);
+  return out;
+}
+
+test("A DECIMAL COMMA is refused by the control, and never sent as a hundred times the amount", async () => {
+  const s = stubStorage();
+  const doors = stubDoors(() => ({ status: 200, body: null }));
+  const h = await renderComponent(
+    App({ record: record({ fields: [{ key: "amount_cents", label: "Amount", kind: "money", required: true }] }) }),
+  );
+  try {
+    // "1234,56" is RM1,234.56 to the person who typed it. Under the parser this lane used to own —
+    // a blanket comma strip before validation — it became 123456 cents: RM123,456.00, a hundredfold.
+    await h.fireEvent(inputFor(h, "amount_cents")!, "change", (n) => setFieldValue(n, "1234,56"));
+    await press(h, byTestId(h, "work-question-submit")!);
+    assert.equal(
+      doors.calls.filter((c) => c.fn === "answer_work_question").length,
+      0,
+      "the hundred-fold reading is never sent — the submit is refused locally",
+    );
+    assert.ok(byTestId(h, "work-question-error-amount_cents"), "…and the field says why");
+  } finally {
+    await h.unmount();
+    doors.restore();
+    s.restore();
+  }
+});
+
+test("the money control sends EXACT cents through the product's one parser", async () => {
+  const s = stubStorage();
+  const doors = stubDoors((call) =>
+    call.fn === "answer_work_question"
+      ? { status: 200, body: { question_id: QUESTION, work_id: WORK, question_version: 1, status: "answered" } }
+      : { status: 200, body: record({ status: "answered", answer: { amount_cents: 100000 } }) },
+  );
+  const h = await renderComponent(
+    App({ record: record({ fields: [{ key: "amount_cents", label: "Amount", kind: "money", required: true }] }) }),
+  );
+  try {
+    await h.fireEvent(inputFor(h, "amount_cents")!, "change", (n) => setFieldValue(n, "1,000.00"));
+    await press(h, byTestId(h, "work-question-submit")!);
+    const write = doors.calls.find((c) => c.fn === "answer_work_question")!;
+    assert.deepEqual((write.body.p_answer as Record<string, unknown>).amount_cents, 100000);
+  } finally {
+    await h.unmount();
+    doors.restore();
+    s.restore();
+  }
+});
+
+test("ANNOUNCE=NONE renders the same states with NO live region; the default still speaks", async () => {
+  const s = stubStorage();
+  const settled = record({ status: "expired", fields: [{ key: "memo", label: "Memo", kind: "text" }] });
+
+  const speaking = await renderComponent(App({ record: settled }));
+  const spoke = liveRegions(speaking).length;
+  const spokenText = speaking.text();
+  await speaking.unmount();
+  assert.ok(spoke >= 1, "the default owns its own announcement — it IS the thing that changed");
+
+  const quiet = await renderComponent(
+    createElement(NextIntlClientProvider, {
+      locale: "en",
+      messages,
+      timeZone: "Asia/Kuala_Lumpur",
+      children: createElement(WorkQuestionForm, { record: settled, userId: USER, announce: "none" }),
+    }),
+  );
+  try {
+    assert.equal(liveRegions(quiet).length, 0,
+      "inside a surface that already announces, this form opens NO live region of its own");
+    assert.equal(quiet.text(), spokenText,
+      "…and says exactly the same words, in the same order — silent is unannounced, never hidden");
+  } finally {
+    await quiet.unmount();
+    s.restore();
+  }
+});
+
+test("OPERATION_IN_FLIGHT is transient: the form stays a form, and the retry replays the same key", async () => {
+  const s = stubStorage();
+  let settledCalls = 0;
+  let attempt = 0;
+  const doors = stubDoors((call) => {
+    if (call.fn !== "answer_work_question") return { status: 200, body: record() };
+    attempt += 1;
+    if (attempt === 1) {
+      return {
+        status: 400,
+        body: {
+          code: "CLR13",
+          message: "another operation with this key is in flight",
+          details: JSON.stringify({ reason: "operation_in_flight" }),
+        },
+      };
+    }
+    return { status: 200, body: { question_id: QUESTION, work_id: WORK, question_version: 1, status: "answered" } };
+  });
+  const h = await renderComponent(
+    App({
+      record: record({ fields: [{ key: "memo", label: "Memo", kind: "text", required: true }] }),
+      onSettled: () => { settledCalls += 1; },
+    }),
+  );
+  try {
+    await h.fireEvent(inputFor(h, "memo")!, "change", (n) => setFieldValue(n, "September rent"));
+    await press(h, byTestId(h, "work-question-submit")!);
+
+    assert.equal(byTestId(h, "work-question-converged"), null,
+      "in-flight is NOT a convergence — nothing about the question moved");
+    assert.equal(settledCalls, 0,
+      "…so the surface is not told to drop the row; on Needs-you that would remove it mid-submit");
+    assert.ok(byTestId(h, "work-question-in-flight"), "the person is told their own send is still going");
+    const submit = byTestId(h, "work-question-submit");
+    assert.ok(submit, "…and the action is still in front of them");
+
+    await press(h, submit!);
+    const writes = doors.calls.filter((c) => c.fn === "answer_work_question");
+    assert.equal(writes.length, 2);
+    assert.equal(writes[0]!.body.p_op_key, writes[1]!.body.p_op_key,
+      "the retry REPLAYS the same key rather than answering twice");
+    assert.ok(byTestId(h, "work-question-accepted"), "and the second press lands");
+  } finally {
+    await h.unmount();
+    doors.restore();
+    s.restore();
+  }
+});
+
+test("an ACCOUNT field offers the client's chart when it has one, and a typed code when it does not", async () => {
+  const s = stubStorage();
+  const withChart = await renderComponent(
+    createElement(NextIntlClientProvider, {
+      locale: "en",
+      messages,
+      timeZone: "Asia/Kuala_Lumpur",
+      children: createElement(WorkQuestionForm, {
+        record: record({ fields: [{ key: "account", label: "Which account?", kind: "account", required: true }] }),
+        userId: USER,
+        accounts: [
+          { account_code: "6100", name: "Rent", is_active: true },
+          { account_code: "9999", name: "Retired", is_active: false },
+        ],
+      }),
+    }),
+  );
+  try {
+    assert.ok(byTestId(withChart, "work-question-account-account"),
+      "the header names a Select over the client chart, and this is one");
+  } finally {
+    await withChart.unmount();
+  }
+
+  const withoutChart = await renderComponent(
+    App({ record: record({ fields: [{ key: "account", label: "Which account?", kind: "account", required: true }] }) }),
+  );
+  try {
+    assert.equal(byTestId(withoutChart, "work-question-account-account"), null);
+    assert.ok(inputFor(withoutChart, "account"),
+      "an unreadable chart degrades to a typed code, never to an empty picker");
+  } finally {
+    await withoutChart.unmount();
     s.restore();
   }
 });

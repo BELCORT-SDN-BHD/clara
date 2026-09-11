@@ -3949,7 +3949,9 @@
     "convergeCancelled": "This Work was stopped, so its question is closed.",
     "convergeBasisChanged": "What this Work is recording has changed since the question was asked, so the answer no longer applies.",
     "convergeStateChanged": "This Work is no longer waiting on this question.",
-    "convergeInFlight": "This answer is already being recorded. Give it a moment and read the Work again.",
+    "inFlight": "Your previous send is still going through. Wait a moment and send again — it will not be recorded twice.",
+    "accountPlaceholder": "Choose an account",
+    "accountCodePlaceholder": "Account code, e.g. 6100",
     "constraint": {
       "required": "This is needed before the Work can continue.",
       "integer_cents": "Enter an exact amount in ringgit and sen, with at most two decimal places.",
