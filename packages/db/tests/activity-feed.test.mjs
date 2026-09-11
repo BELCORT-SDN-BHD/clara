@@ -742,47 +742,84 @@ function planNodes(node) {
   for (const child of node.Plans ?? []) out.push(...planNodes(child));
   return out;
 }
-function mentionsRelation(node, relation) {
-  return planNodes(node).some((n) => n["Relation Name"] === relation);
+
+/** The median of a series, and its minimum — the two statistics a plan flip cannot hide behind.
+ *  A busy host raises the MAXIMUM of a series (one GC pause, one checkpoint); a generic plan
+ *  raises EVERY call from the sixth on, so the MINIMUM of the tail is the honest detector. */
+function median(xs) {
+  const s = [...xs].sort((a, b) => a - b);
+  return s[Math.floor(s.length / 2)];
 }
 
-// A GENEROUS bound. The measured flip was 13.8-16.4 SECONDS a call against an 11-53 ms
-// baseline on this rig; anything within two orders of magnitude of the baseline passes, so this
-// reds on a plan regression and not on a busy host.
-const CALL_BUDGET_MS = 1500;
-const CALLS = 8;
+// THE LOAD, AND WHY IT IS SHAPED LIKE THIS (delta review round 3, finding [0]/[1]). A generic plan
+// is only CHEAP-LOOKING when `sr.firm_id = $1` selects a small fraction of a MULTI-TENANT table:
+// the estimate is total rows / n_distinct(firm_id), so the flip appears exactly for a firm whose
+// sweep history is above the per-firm average — which is every firm this ticket is about. The
+// first cut of this cell planted 60 sibling firms and reproduced the flip only on a database the
+// rest of the suite had already populated with ~1,650 firms (it was GREEN on a pristine one, which
+// is how a 1.9 s regression shipped past it). So the cell now plants the skew ITSELF, and ANALYZEs
+// both relations inside its own transaction, so the estimates are the same on a pristine database
+// and on a used one.
+const SIBLINGS = 1500;      // sibling firms also running the five-minute sweep
+const PER_SIBLING = 4;      // …each with a handful of receipts, so the per-firm average is small
+const RECEIPTS = 4000;      // …and 14 days of sweeping for the firm under test
+const KEPT = RECEIPTS / 20; // …200 of which actually drafted something
 
-test("af.20 BOUNDED COST: eight consecutive feed reads and eight deep links on ONE connection stay flat across the plpgsql plan-cache boundary, under a synthetic sweep history", async (t) => {
+// A GENEROUS ABSOLUTE bound: the measured flips were 13.8-16.4 SECONDS a call (the shared-plan
+// form) and 0.16-2.0 s (the split form), against a 4-50 ms baseline on this rig. Anything within
+// two orders of magnitude of the baseline passes, so this reds on a plan regression, not on a
+// busy host.
+const CALL_BUDGET_MS = 1500;
+const CALLS = 10;
+// plpgsql plans a statement CUSTOM for its first five executions in a session and considers the
+// GENERIC plan from the sixth: the boundary this cell exists to walk across.
+const HEAD = 5;
+// The step a flip makes, with a floor so a 0.5 ms baseline cannot make noise look like one.
+const FLIP_FACTOR = 4;
+const FLIP_FLOOR_MS = 40;
+
+test("af.20 BOUNDED COST: ten consecutive calls of each caller on ONE connection stay flat across the plpgsql plan-cache boundary, and the plan they run reads the KEPT set rather than the firm's history", async (t) => {
   if (await gateSweep(t)) return;
   const firm = FIRM_A();
   const claims = JSON.stringify({ sub: BOB(), role: "authenticated" });
 
+  // The statement `clara._sweep_events_with_effect` runs, spelled exactly as the installed body
+  // spells it — so the plan measured here is the plan the door runs, not a paraphrase.
+  const HELPER_SQL = `select e.id
+      from clara.sweep_runs sr
+      cross join lateral (
+        select de.id
+          from clara.domain_events de
+         where de.firm_id = sr.firm_id
+           and de.event_type = 'sweep.run_completed'
+           and de.payload ->> 'run_id' = sr.id::text
+         offset 0
+      ) e
+     where sr.firm_id = $1
+       and sr.drafted_count + sr.posted_count > 0`;
+
   const report = await withRolledBackSession(async (c) => {
-    // 60 SIBLING FIRMS also running the five-minute sweep. This is not decoration: the generic
-    // plan only looks cheap to the planner when `sr.firm_id = $1` is a SMALL fraction of
-    // clara.sweep_runs, which is exactly what a multi-tenant estate is. With one firm in the
-    // table the planner keeps choosing custom plans and the regression hides.
     await c.query(
       `insert into clara.firms(id, name)
        select ('afc00000-0000-4000-8000-' || lpad(g::text, 12, '0'))::uuid, 'af20_sibling_' || g
-         from generate_series(1, 60) g`);
+         from generate_series(1, $1) g`, [SIBLINGS]);
     await c.query(
       `with r as (
          insert into clara.sweep_runs(firm_id, state, window_started_at, window_ended_at,
              expected_count, drafted_count, posted_count, finalized_at)
          select ('afc00000-0000-4000-8000-' || lpad(f::text, 12, '0'))::uuid, 'finalized',
                 now() - (g || ' minutes')::interval, now() - (g || ' minutes')::interval, 0,
-                case when g % 20 = 0 then 2 else 0 end, 0, now() - (g || ' minutes')::interval
-           from generate_series(1, 60) f, generate_series(1, 40) g
+                0, 0, now() - (g || ' minutes')::interval
+           from generate_series(1, $1) f, generate_series(1, $2) g
          returning id, firm_id
        )
        insert into clara.domain_events(firm_id, seq, event_type, payload, created_at)
        select r.firm_id, row_number() over (partition by r.firm_id), 'sweep.run_completed',
               jsonb_build_object('run_id', r.id, 'expected_count', 0),
               now() - (row_number() over () || ' minutes')::interval
-         from r`);
-    // …and 4,000 sweep receipts for the firm under test (14 days at the live five-minute
-    // cadence), 200 of them KEPT. The exclusion must cost the KEPT set, not the history.
+         from r`, [SIBLINGS, PER_SIBLING]);
+    // …and the firm under test's own history, one twentieth of which is KEPT. The exclusion must
+    // cost the kept set, not the history.
     await c.query(
       `with r as (
          insert into clara.sweep_runs(firm_id, state, window_started_at, window_ended_at,
@@ -790,7 +827,7 @@ test("af.20 BOUNDED COST: eight consecutive feed reads and eight deep links on O
          select $1::uuid, 'finalized',
                 now() - (g || ' minutes')::interval, now() - (g || ' minutes')::interval, 0,
                 case when g % 20 = 0 then 2 else 0 end, 0, now() - (g || ' minutes')::interval
-           from generate_series(1, 4000) g
+           from generate_series(1, $2) g
          returning id
        )
        insert into clara.domain_events(firm_id, seq, event_type, payload, created_at)
@@ -799,7 +836,7 @@ test("af.20 BOUNDED COST: eight consecutive feed reads and eight deep links on O
                 + row_number() over (),
               'sweep.run_completed', jsonb_build_object('run_id', r.id, 'expected_count', 0),
               now() - (row_number() over () || ' minutes')::interval
-         from r`, [firm]);
+         from r`, [firm, RECEIPTS]);
     await c.query("analyze clara.domain_events");
     await c.query("analyze clara.sweep_runs");
 
@@ -811,34 +848,27 @@ test("af.20 BOUNDED COST: eight consecutive feed reads and eight deep links on O
           and sr.drafted_count + sr.posted_count > 0
         limit 1`, [firm])).rows[0].id;
 
-    // THE GENERIC PLANS FIRST, while the session is still root: these are the two statements the
-    // installed bodies run, written with the parameters plpgsql passes them as.
+    // THE PLAN THE HELPER ACTUALLY RUNS, captured while the session is still root. NOT
+    // `explain (generic_plan)`: the helpers pin `plan_cache_mode = force_custom_plan`, so the
+    // generic rendering of this text is a plan PostgreSQL will never execute for them, and
+    // asserting on it would pin a plan nobody runs. What is asserted instead is (a) the catalog
+    // clause that makes that true and (b) the plan the planner picks for the real firm id.
     const feedPlan = (await c.query(
-      `explain (generic_plan, format json)
-       select de.id
-         from clara.sweep_runs sr
-         join clara.domain_events de
-           on de.firm_id = sr.firm_id
-          and de.event_type = 'sweep.run_completed'
-          and de.payload ->> 'run_id' = sr.id::text
-        where sr.firm_id = $1
-          and sr.drafted_count + sr.posted_count > 0`)).rows[0]["QUERY PLAN"][0].Plan;
-    const detailPlan = (await c.query(
-      `explain (generic_plan, format json)
-       select exists (
-         select 1
-           from clara.sweep_runs sr
-           join clara.domain_events de
-             on de.firm_id = sr.firm_id
-            and de.event_type = 'sweep.run_completed'
-            and de.payload ->> 'run_id' = sr.id::text
-          where sr.firm_id = $1
-            and sr.drafted_count + sr.posted_count > 0
-            and de.id = $2)`)).rows[0]["QUERY PLAN"][0].Plan;
+      `explain (analyze, format json) ${HELPER_SQL}`, [firm])).rows[0]["QUERY PLAN"][0].Plan;
+    const helperConfig = (await c.query(
+      `select p.proname, coalesce(p.proconfig, '{}'::text[]) as cfg
+         from pg_proc p
+        where p.pronamespace = 'clara'::regnamespace
+          and p.proname in ('_sweep_events_with_effect', '_sweep_event_has_effect')
+        order by 1`)).rows;
 
     // …then the wall-clock series, as the bookkeeper, on this SAME connection.
     await c.query("set local role clara_authenticated");
     await c.query("select set_config('request.jwt.claims', $1, true)", [claims]);
+    const helper = [];
+    for (let i = 0; i < CALLS; i += 1) {
+      helper.push((await timed(c, "select count(*) from clara._sweep_events_with_effect()")).ms);
+    }
     const feed = [];
     for (let i = 0; i < CALLS; i += 1) {
       feed.push((await timed(c,
@@ -849,35 +879,62 @@ test("af.20 BOUNDED COST: eight consecutive feed reads and eight deep links on O
       detail.push((await timed(c,
         "select clara.get_activity_event('event', $1) is not null as got", [kept])).ms);
     }
-    return { feed, detail, feedPlan, detailPlan };
+    return { helper, feed, detail, feedPlan, helperConfig };
   });
 
   const fmt = (a) => a.map((n) => n.toFixed(1)).join(" / ");
-  // (1) THE SERIES. plpgsql switches to the generic plan on the SIXTH execution of a statement in
-  // a session, so calls 6-8 are the ones that matter; a flip is three orders of magnitude, never
-  // a near miss.
-  for (const [i, ms] of report.feed.entries()) {
-    assert.ok(ms < CALL_BUDGET_MS,
-      `af.20 list_activity call ${i + 1} took ${ms.toFixed(1)} ms (budget ${CALL_BUDGET_MS} ms) — series ${fmt(report.feed)}`);
-  }
-  for (const [i, ms] of report.detail.entries()) {
-    assert.ok(ms < CALL_BUDGET_MS,
-      `af.20 get_activity_event call ${i + 1} took ${ms.toFixed(1)} ms (budget ${CALL_BUDGET_MS} ms) — series ${fmt(report.detail)}`);
+  // (1) THE STEP, on the set helper called DIRECTLY — the narrowest place the flip shows, with
+  // none of the feed's other work averaging it away. Compared MINIMUM-of-tail against
+  // MEDIAN-of-head: a busy host raises a maximum, a generic plan raises every call from the sixth.
+  const head = median(report.helper.slice(0, HEAD));
+  const tail = Math.min(...report.helper.slice(HEAD));
+  assert.ok(tail <= Math.max(FLIP_FACTOR * head, FLIP_FLOOR_MS),
+    `af.20 clara._sweep_events_with_effect() STEPPED UP at the plan-cache boundary: calls 1-${HEAD} median ${head.toFixed(1)} ms, `
+    + `cheapest of calls ${HEAD + 1}-${CALLS} ${tail.toFixed(1)} ms — series ${fmt(report.helper)}`);
+
+  // (2) THE ABSOLUTE BUDGET on both doors, which is what a person actually waits for.
+  for (const [label, series] of [["list_activity", report.feed], ["get_activity_event", report.detail]]) {
+    for (const [i, ms] of series.entries()) {
+      assert.ok(ms < CALL_BUDGET_MS,
+        `af.20 ${label} call ${i + 1} took ${ms.toFixed(1)} ms (budget ${CALL_BUDGET_MS} ms) — series ${fmt(series)}`);
+    }
+    const feedHead = median(series.slice(0, HEAD));
+    const feedTail = Math.min(...series.slice(HEAD));
+    assert.ok(feedTail <= Math.max(FLIP_FACTOR * feedHead, FLIP_FLOOR_MS),
+      `af.20 ${label} STEPPED UP at the plan-cache boundary: calls 1-${HEAD} median ${feedHead.toFixed(1)} ms, `
+      + `cheapest of calls ${HEAD + 1}-${CALLS} ${feedTail.toFixed(1)} ms — series ${fmt(series)}`);
   }
 
-  // (2) THE SHAPE. The feed's statement must never put clara.sweep_runs on the INNER side of a
-  // Nested Loop: that is the generic plan that rescanned the firm's whole sweep history once per
-  // receipt. A Hash/Merge join over the partial index, or a Nested Loop with sweep_runs OUTSIDE,
-  // are all fine — this asserts the failure shape, not one blessed plan.
-  const badLoops = planNodes(report.feedPlan).filter(
-    (n) => n["Node Type"] === "Nested Loop" && mentionsRelation((n.Plans ?? [])[1] ?? {}, "sweep_runs"));
-  assert.equal(badLoops.length, 0,
-    `af.20 the FEED statement's GENERIC plan rescans clara.sweep_runs per outer row: ${JSON.stringify(report.feedPlan)}`);
-  // The detail statement is allowed a Nested Loop — `de.id = $2` really does select one row, so
-  // the inner side runs at most once — but its OUTER side must be that single-row lookup.
-  for (const loop of planNodes(report.detailPlan).filter((n) => n["Node Type"] === "Nested Loop")) {
-    assert.ok((loop.Plans ?? [])[0]?.["Plan Rows"] <= 1,
-      `af.20 the DETAIL statement's GENERIC plan drives a Nested Loop from more than one row: ${JSON.stringify(report.detailPlan)}`);
+  // (3) THE PLAN, by the rows it READ rather than by the name of its top node. The pathology is
+  // "one side is rescanned per row of the other", and it wears a different node type each time it
+  // appears (Nested Loop with sweep_runs inner, Nested Loop with sweep_runs outer and a
+  // Materialize of the receipts inner, Merge Join over a Seq Scan of the whole history) — so what
+  // this asserts is the thing all three have in common and the good plan does not: how many rows
+  // of `clara.domain_events` the plan touches. The contract is the KEPT set (one receipt per run
+  // that did something), never the firm's 288-a-day history.
+  const deRows = planNodes(report.feedPlan)
+    .filter((n) => n["Relation Name"] === "domain_events")
+    .reduce((sum, n) => sum + (n["Actual Rows"] ?? 0) * (n["Actual Loops"] ?? 1), 0);
+  assert.ok(deRows > 0,
+    `af.20 vacuity control: the measured plan never read clara.domain_events at all — ${JSON.stringify(report.feedPlan)}`);
+  assert.ok(deRows <= 3 * KEPT,
+    `af.20 the helper's own plan read ${deRows} rows of clara.domain_events for a KEPT set of ${KEPT} `
+    + `(history ${RECEIPTS}) — its cost tracks the firm's sweep history, not the work it reports: ${JSON.stringify(report.feedPlan)}`);
+
+  // (4) THE CATALOG CLAUSE that makes (3) the plan the FUNCTION runs and not merely a plan the
+  // planner would pick for a literal. Without it the session firm is planned at the per-firm
+  // AVERAGE of a multi-tenant table from the sixth call of every pooled connection — which is the
+  // defect (1) measures, asserted here in the one form that is true on every database, busy or
+  // idle, pristine or populated.
+  assert.deepEqual(report.helperConfig.map((r) => r.proname),
+    ["_sweep_event_has_effect", "_sweep_events_with_effect"],
+    "af.20 both sweep helpers are installed (vacuity control for the pin below)");
+  for (const row of report.helperConfig) {
+    assert.ok(row.cfg.includes("plan_cache_mode=force_custom_plan"),
+      `af.20 clara.${row.proname} does not pin plan_cache_mode=force_custom_plan (proconfig ${JSON.stringify(row.cfg)}) — `
+      + "a generic plan built for the per-firm average is one pooled connection away");
+    assert.ok(row.cfg.includes("search_path=clara, pg_temp"),
+      `af.20 clara.${row.proname} lost its pinned search_path (proconfig ${JSON.stringify(row.cfg)})`);
   }
 });
 
