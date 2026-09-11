@@ -20,10 +20,11 @@
 // timeout instead of a measurement, and a test that can only fail by timing out says nothing about
 // what it was testing.
 
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { MockLanguageModelV4, simulateReadableStream } from "ai/test";
 
+void writeFileSync; void readFileSync;   // imported for parity with the sibling serve files
 const GATE = process.env.CLARA_WORK_CANCEL_GATE || null;
 const HELD_MARKER = process.env.CLARA_WORK_CANCEL_HELD || null;
 const HOLD_MS = Number(process.env.CLARA_WORK_CANCEL_HOLD_MS || 20000);
@@ -94,15 +95,26 @@ function admittedBasis(text) {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-/** Announce that the model has reached the hold, then wait for the gate. The marker is written
- *  BEFORE the first poll so a cell can wait for "the model is now inside the window" rather than
- *  sleeping a guessed number of milliseconds. */
-async function waitForGate() {
+const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
+
+/**
+ * Announce that the model has reached the hold, then wait for the gate. The marker is written
+ * BEFORE the first poll so a cell can wait for "the model is now inside the window" rather than
+ * sleeping a guessed number of milliseconds.
+ *
+ * IT NAMES WHICH WORK IS HELD, AND IT APPENDS. Measured on the rig: one supervisor serves EVERY
+ * queued accounting Work, leftovers from earlier legs included, so a bare "somebody is held" marker
+ * let a cell revoke a membership while a DIFFERENT leg's Work sat in the window and its own Work had
+ * not started yet. The marker now carries every identifier the run envelope shows, and it appends
+ * rather than overwrites, so a cell waits for ITS OWN Work to be inside the window.
+ */
+async function waitForGate(text) {
   if (GATE === null) return "no_gate";
   if (HELD_MARKER !== null) {
     try {
       mkdirSync(dirname(HELD_MARKER), { recursive: true });
-      writeFileSync(HELD_MARKER, String(Date.now()));
+      const ids = [...new Set(String(text ?? "").match(UUID_RE) ?? [])];
+      appendFileSync(HELD_MARKER, `${Date.now()} ${ids.join(" ")}\n`);
     } catch {
       /* a marker we cannot write is not worth failing the run over */
     }
@@ -173,7 +185,7 @@ const model = new MockLanguageModelV4({
       // THE WINDOW. Everything the cancel legs need happens while this await is pending: the Work
       // is `running`, the run holds the task, and NOTHING has been admitted.
       console.error("[wc-serve] branch: record_journal_entry (entering hold)");
-      const gate = await waitForGate();
+      const gate = await waitForGate(text);
       console.error(`[wc-serve] hold released: ${gate}`);
       return {
         content: [

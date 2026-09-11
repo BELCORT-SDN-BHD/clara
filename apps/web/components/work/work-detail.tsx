@@ -32,6 +32,7 @@ import Link from "next/link";
 import { useTranslations } from "next-intl";
 
 import { AttachEvidenceDialog } from "@/components/work/attach-evidence-dialog";
+import { CancelWorkDialog, TakeOverWorkAction } from "@/components/work/work-cancel-dialog";
 import { PostedLinesTable, WorkBasisTable } from "@/components/work/work-tables";
 import { StateBanner } from "@/components/common/state";
 import { WorkQuestionPanel } from "@/components/work/work-question-panel";
@@ -58,7 +59,12 @@ import {
   type DraftStorage,
   type JournalDraftScope,
 } from "@/lib/work/journal-draft";
-import { isRetryableWorkStatus, type AccountingWorkRow } from "@/lib/work/types";
+import {
+  isCancellableWorkStatus,
+  isRetryableWorkStatus,
+  isTakeOverable,
+  type AccountingWorkRow,
+} from "@/lib/work/types";
 import type { AgentInterruptionRow } from "@/lib/journals/types";
 import type { SessionTokenAccessor } from "@/lib/session";
 
@@ -259,6 +265,12 @@ export function WorkDetailView({
   const names = accountNames(accounts);
   const committed = receipts.find((r) => r.outcome === "committed") ?? null;
   const canRetry = isRetryableWorkStatus(work.status);
+  // #630 — the two acts this ticket adds. Both are OFFERS, not judgements: the doors recheck the
+  // caller's live role and the Work's own state and refuse verbatim when they disagree (the same
+  // posture `canRetry` states above). `stopping` is deliberately NOT cancellable — an admitted
+  // operation is settling and a second press could only answer `already_stopping`.
+  const canCancel = isCancellableWorkStatus(work.status);
+  const canTakeOver = isTakeOverable(work);
 
   // THE DRAFT SCOPE, or null — the same three-part key the composer files under,
   // built from the same two context fields. Null when either is missing, which
@@ -344,9 +356,13 @@ export function WorkDetailView({
         work={work}
         clientId={clientId}
         canRetry={canRetry}
+        canCancel={canCancel}
+        canTakeOver={canTakeOver}
         retrying={retrying}
         retryState={retryState}
         onRetry={() => void runRetry()}
+        onConverge={() => state.reload()}
+        session={session}
         interruption={interruption}
         onEditAsNewDraft={seedDraft}
       />
@@ -555,24 +571,49 @@ function WorkOutcome({
   work,
   clientId,
   canRetry,
+  canCancel,
+  canTakeOver,
   retrying,
   retryState,
   onRetry,
+  onConverge,
+  session,
   interruption,
   onEditAsNewDraft,
 }: {
   work: AccountingWorkRow;
   clientId: string;
   canRetry: boolean;
+  /** #630 — whether "Cancel Work" is worth offering from this status. */
+  canCancel: boolean;
+  /** #630 — whether "Take responsibility" is worth offering for this refusal. */
+  canTakeOver: boolean;
   retrying: boolean;
   retryState: RetryWorkResult | null;
   onRetry: () => void;
+  /** RE-READ THE WORK. Called after every completed cancel or takeover attempt, refusal included:
+   *  this component paints nothing it was not told by a fresh read, and the 3-second poll keeps
+   *  converging on `stopping` → terminal afterwards. */
+  onConverge: () => void | Promise<void>;
+  session: SessionTokenAccessor;
   /** The row this Work is parked on, when it is parked and visible. */
   interruption: AgentInterruptionRow | null;
   /** Writes the composer's draft from this basis, before the link navigates. */
   onEditAsNewDraft: () => void;
 }) {
   const t = useTranslations("WorkDetail");
+  const tc = useTranslations("WorkCancel");
+
+  /** #630 — ONE instance, rendered into whichever arm is live. Mounting it twice would give the
+   *  page two dialogs with the same Title and two op-key decisions for one intent. */
+  const cancelAction = canCancel ? (
+    <CancelWorkDialog
+      workId={work.id}
+      clientId={clientId}
+      onCancelled={onConverge}
+      session={session}
+    />
+  ) : null;
 
   const retryButton = canRetry ? (
     <Button type="button" variant="outline" size="sm" disabled={retrying} onClick={onRetry}>
@@ -618,6 +659,18 @@ function WorkOutcome({
     const error = work.error ?? {};
     return (
       <div className="flex flex-col gap-2">
+        {/* #630 — THE ONE REFUSAL A COLLEAGUE CAN RESCUE. Above the refusal rather than inside it:
+            the refusal is the database's own words about what happened, and this is a different
+            thing entirely — an offer to somebody else. */}
+        {canTakeOver ? (
+          <TakeOverWorkAction
+            workId={work.id}
+            basisOrigin={work.basis_origin}
+            basisDigest={work.basis_digest}
+            onTakenOver={onConverge}
+            session={session}
+          />
+        ) : null}
         <StateBanner
           tone="error"
           title={t("refused.title")}
@@ -678,9 +731,14 @@ function WorkOutcome({
           tone="warning"
           title={t("awaiting.title")}
           action={
-            <Link href={WORK_NEEDS_YOU_HREF} className="text-sm font-medium text-primary underline underline-offset-2">
-              {t("awaiting.link")}
-            </Link>
+            <div className="flex flex-wrap items-center gap-3">
+              <Link href={WORK_NEEDS_YOU_HREF} className="text-sm font-medium text-primary underline underline-offset-2">
+                {t("awaiting.link")}
+              </Link>
+              {/* #630 — a parked Work is still cancellable: nobody has to answer a question just
+                  to stop something they no longer want. */}
+              {cancelAction}
+            </div>
           }
         >
           {/* ONE OWNER FOR THE QUESTION TEXT (reviewed finding). This banner used to render the
@@ -712,8 +770,17 @@ function WorkOutcome({
   }
 
   if (work.status === "cancelled") {
+    // #630 — THE SUPERSEDED OUTCOME, when there is one. `clara.settle_work_run` translates a run
+    // that asked for `failed`/`refused`/`expired` over a cancellation into `cancelled` and keeps
+    // what it asked for under `error.superseded`, so nothing the run believed is lost. Shown as a
+    // CODE rather than prose: it is the run's own vocabulary, not a sentence for a human.
+    const superseded = supersededOutcome(work.error);
     return (
-      <StateBanner tone="neutral" title={t("cancelled.title")}>
+      <StateBanner
+        tone="neutral"
+        title={t("cancelled.title")}
+        code={superseded === null ? undefined : tc("cancelledSuperseded", { outcome: superseded })}
+      >
         {t("cancelled.body")}
       </StateBanner>
     );
@@ -727,12 +794,36 @@ function WorkOutcome({
     );
   }
 
-  // queued / running / stopping, and any status this build does not know. An
-  // OBSERVED state and nothing else: no percentage, no estimate, no animation
-  // standing in for progress.
+  // #630 — STOPPING IS ITS OWN ARM NOW, and it says WHY it is not a terminal yet: an operation
+  // that was already admitted may still be settling, and showing "cancelled" before that boundary
+  // is known would be reporting an outcome the database has not decided. The 3-second poll on this
+  // page is what converges it.
+  if (work.status === "stopping") {
+    return (
+      <StateBanner tone="warning" title={tc("stoppingTitle")}>
+        {tc("stoppingBody")}
+      </StateBanner>
+    );
+  }
+
+  // queued / running, and any status this build does not know. An OBSERVED state and nothing else:
+  // no percentage, no estimate, no animation standing in for progress.
   return (
-    <StateBanner tone="info">
-      {work.status === "stopping" ? t("stopping.body") : t("running.body")}
-    </StateBanner>
+    <div className="flex flex-col gap-2">
+      <StateBanner tone="info" action={cancelAction ?? undefined}>
+        {t("running.body")}
+      </StateBanner>
+    </div>
   );
+}
+
+/** The outcome a cancellation SUPERSEDED, or null. `clara.accounting_work.error.superseded` is
+ *  written by `clara.settle_work_run` (0184) and is the run's own requested outcome; a row without
+ *  one was cancelled before any run had an opinion. Read defensively — the column is jsonb and a
+ *  shape this build has not seen renders as nothing rather than as `[object Object]`. */
+function supersededOutcome(error: AccountingWorkRow["error"]): string | null {
+  const raw = (error as { superseded?: unknown } | null)?.superseded;
+  if (raw === null || typeof raw !== "object") return null;
+  const outcome = (raw as { outcome?: unknown }).outcome;
+  return typeof outcome === "string" && outcome !== "" ? outcome : null;
 }

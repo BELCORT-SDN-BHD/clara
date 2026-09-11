@@ -605,30 +605,40 @@ begin
   -- They sit BEFORE clara._reserve_op deliberately, so a refused operation leaves the logical
   -- identity unspent and a later Retry (or a takeover) can still use it.
   --
+  -- A REPLAY IS NOT AN ADMISSION, AND THIS GUARD IS WHY THE WHOLE BLOCK IS CONDITIONAL. Measured on
+  -- the rig (tests/work-cancel-e2e.mjs leg 4, first cut): a run that COMMITTED and then died before
+  -- checkpointing re-executes its step on respawn, reaches this core again, and found the Work
+  -- `completed` -- which an unconditional `work_settled` arm refused, breaking the one idempotency
+  -- guarantee 0178 was built for. The effect is already on the books; returning it changes nothing
+  -- and admits nothing, so a Work that HOLDS a committed receipt falls straight through to the
+  -- reservation below, which answers with the stored result and `replayed:true`.
+  --
   -- CLR13 is the estate's "the state is not the one this act needs" -- the same code
   -- clara.retry_accounting_work raises for `not_retryable` and 0182 raises for `source_conflict`.
-  if w.status in ('stopping','cancelled') then
-    raise exception 'this accounting work was cancelled; no operation is admitted'
-      using errcode='CLR13',
-        detail=jsonb_build_object('reason','work_cancelled', 'status', w.status,
-          'cancelled_by', (select t.cancelled_by from clara.agent_tasks t where t.id = w.current_task_id),
-          'cancelled_at', (select t.cancelled_at from clara.agent_tasks t where t.id = w.current_task_id))::text;
-  end if;
-  if w.status in ('completed','refused','failed','expired') then
-    raise exception 'this accounting work already settled; no operation is admitted'
-      using errcode='CLR13',
-        detail=jsonb_build_object('reason','work_settled', 'status', w.status)::text;
-  end if;
-  -- …and the RUN's own abort request, which reaches the Work through the status mirror but may be
-  -- read here first by a transaction that started before the mirror's update became visible.
-  select t.status into v_task_status from clara.agent_tasks t where t.id = w.current_task_id;
-  if v_task_status = 'cancel_requested' then
-    raise exception 'this accounting work was cancelled; no operation is admitted'
-      using errcode='CLR13',
-        detail=jsonb_build_object('reason','work_cancelled', 'status', w.status,
-          'task_status', v_task_status,
-          'cancelled_by', (select t.cancelled_by from clara.agent_tasks t where t.id = w.current_task_id),
-          'cancelled_at', (select t.cancelled_at from clara.agent_tasks t where t.id = w.current_task_id))::text;
+  if clara._work_committed_receipt(p_work) is null then
+    if w.status in ('stopping','cancelled') then
+      raise exception 'this accounting work was cancelled; no operation is admitted'
+        using errcode='CLR13',
+          detail=jsonb_build_object('reason','work_cancelled', 'status', w.status,
+            'cancelled_by', (select t.cancelled_by from clara.agent_tasks t where t.id = w.current_task_id),
+            'cancelled_at', (select t.cancelled_at from clara.agent_tasks t where t.id = w.current_task_id))::text;
+    end if;
+    if w.status in ('completed','refused','failed','expired') then
+      raise exception 'this accounting work already settled; no operation is admitted'
+        using errcode='CLR13',
+          detail=jsonb_build_object('reason','work_settled', 'status', w.status)::text;
+    end if;
+    -- …and the RUN's own abort request, which reaches the Work through the status mirror but may be
+    -- read here first by a transaction that started before the mirror's update became visible.
+    select t.status into v_task_status from clara.agent_tasks t where t.id = w.current_task_id;
+    if v_task_status = 'cancel_requested' then
+      raise exception 'this accounting work was cancelled; no operation is admitted'
+        using errcode='CLR13',
+          detail=jsonb_build_object('reason','work_cancelled', 'status', w.status,
+            'task_status', v_task_status,
+            'cancelled_by', (select t.cancelled_by from clara.agent_tasks t where t.id = w.current_task_id),
+            'cancelled_at', (select t.cancelled_at from clara.agent_tasks t where t.id = w.current_task_id))::text;
+    end if;
   end if;
 
   if w.logical_op_id is distinct from p_logical_op_id then

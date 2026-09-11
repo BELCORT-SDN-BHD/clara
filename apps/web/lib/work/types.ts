@@ -58,6 +58,20 @@ export const TERMINAL_WORK_STATUSES: ReadonlySet<string> = new Set([
  */
 export const RETRYABLE_WORK_STATUSES: ReadonlySet<string> = new Set(["refused", "failed", "expired"]);
 
+/**
+ * #630 — the three statuses a "Cancel Work" control is worth offering from.
+ *
+ * `stopping` IS DELIBERATELY NOT HERE, and the reason is the ticket's own: a Work that is already
+ * stopping has an admitted operation settling, and the only honest thing to show while that
+ * boundary is unknown is "stopping" — not a second button that could do nothing. The door agrees
+ * (`already_stopping`), so offering it would only produce a press with no effect.
+ *
+ * OFFERING THE CONTROL IS NOT RE-DERIVING THE DOOR'S JUDGEMENT, exactly as
+ * `RETRYABLE_WORK_STATUSES` states above: `clara.cancel_accounting_work` rechecks the author's live
+ * role and the Work's state at call time, and its refusal renders verbatim when it comes.
+ */
+export const CANCELLABLE_WORK_STATUSES: ReadonlySet<string> = new Set(["queued", "running", "awaiting_input"]);
+
 export type WorkBasisOrigin = "user_direct" | "clara_interpreted" | (string & {});
 
 /** One line of `accounting_work.basis.lines`. CENTS ARE INTEGERS — the column is
@@ -105,9 +119,19 @@ export type AccountingWorkRow = {
   client_id: string;
   purpose: string;
   status: AccountingWorkStatus;
+  /** #630 — THE HUMAN THIS WORK IS EXECUTED AS, and whose live authority every
+   *  run of it spends. Equal to `initiated_by` until a colleague takes
+   *  responsibility for it (`clara.take_over_accounting_work`). This is the
+   *  column the runtime mints its credentials on behalf of, which is why the
+   *  takeover has to move it rather than a column beside it. */
   initiator: string;
-  /** The role at ADMISSION — an authority snapshot for display. The commit
-   *  rereads live membership, so this is history, never a current permission. */
+  /** #630 — WHO ASKED, immutable forever. Optional on the read because a
+   *  database below the 0184 frontier does not have the column, and a UI that
+   *  crashed on its absence would be asserting a schema it cannot see. */
+  initiated_by?: string | null;
+  /** The role at ADMISSION — an authority snapshot for display, and it describes
+   *  `initiated_by`. The commit rereads live membership, so this is history,
+   *  never a current permission. */
   initiator_role: string;
   intent_key: string;
   logical_op_id: string;
@@ -123,6 +147,12 @@ export type AccountingWorkRow = {
   updated_at: string | null;
 };
 
+// `initiated_by` is NOT in this projection, and that is a deploy-order decision rather than an
+// omission: PostgREST refuses the WHOLE select when one named column does not exist, so listing a
+// column 0184 introduces would break the Work detail on every database below that frontier —
+// including, for one deploy window, production. The page reads `initiator` (the human the Work runs
+// as) and shows the handover through the timeline instead; a later ticket adds the column here once
+// the frontier is everywhere.
 export const ACCOUNTING_WORK_SELECT =
   "id,firm_id,client_id,purpose,status,initiator,initiator_role,intent_key,logical_op_id," +
   "basis,basis_digest,basis_origin,source_refs,current_task_id,bundle,result,error,created_at,updated_at";
@@ -171,6 +201,27 @@ export function isTerminalWorkStatus(status: string): boolean {
 
 export function isRetryableWorkStatus(status: string): boolean {
   return RETRYABLE_WORK_STATUSES.has(status);
+}
+
+export function isCancellableWorkStatus(status: string): boolean {
+  return CANCELLABLE_WORK_STATUSES.has(status);
+}
+
+/**
+ * #630 — TRUE when "Take responsibility" is worth offering.
+ *
+ * The database's own precondition is "terminal AND its responsible human is no longer authorised",
+ * and the browser can only see the first half plus the STORED reason. So this predicate is
+ * deliberately the narrow one: a Work refused for `authority_lost`, which is the case
+ * `claraWork`'s authority recheck writes and the one a colleague can actually rescue. A Work that
+ * failed for another reason may ALSO be takeable once its person is gone — the door re-reads
+ * membership and decides — but offering the control on that guess would put a button in front of
+ * people that answers `not_takeable` almost every time.
+ */
+export function isTakeOverable(work: Pick<AccountingWorkRow, "status" | "error">): boolean {
+  if (!TERMINAL_WORK_STATUSES.has(work.status)) return false;
+  if (work.status === "completed" || work.status === "cancelled") return false;
+  return work.error?.reason === "authority_lost";
 }
 
 /** A persisted jsonb line is not type-checked at the wire, so a cents field can

@@ -59,6 +59,9 @@
 import { useCallback } from "react";
 import { useTranslations } from "next-intl";
 
+import { CancelWorkDialog } from "@/components/work/work-cancel-dialog";
+import { isCancellableWorkStatus } from "@/lib/work/types";
+
 import { Badge } from "./PartBadge";
 import { PartSummaryCard } from "./PartSummaryCard";
 import { usableId } from "./PartCardShell";
@@ -103,13 +106,22 @@ import type { WorkAcceptedPart, WorkQuestionPart, WorkResultPart, WorkStatusPart
  */
 export function WorkAcceptedCard({ part }: { part: WorkAcceptedPart }) {
   const t = useTranslations("Clara.parts.workAccepted");
+  const tw = useTranslations("WorkCancel");
   const addressable = usableId(part.work_id) && usableId(part.client_id);
   const load = useCallback(async () => {
     if (!addressable) return null;
     return await getAccountingWork(part.client_id, part.work_id);
   }, [addressable, part.client_id, part.work_id]);
-  const { data: work } = useHydratedPart(sessionTokenAccessor, load);
+  const { data: work, reload } = useHydratedPart(sessionTokenAccessor, load);
   const parked = work?.status === "awaiting_input";
+  // #630 — CANCEL WORK LIVES ON *THIS* CARD, not on the `work_status` line, and the reason is a
+  // measurement rather than a preference: `work_status` carries no client id (this file's own header
+  // records it), so a control there could not build the entry link the `already_completed` answer
+  // needs, and the dialog would have to render an outcome it cannot address. This card already
+  // hydrates the LIVE Work row, so the offer is made against the database's current status rather
+  // than against the status the part was written with — which for a part in a transcript is almost
+  // always stale.
+  const cancellable = work !== null && isCancellableWorkStatus(work.status);
 
   return (
     <PartSummaryCard
@@ -123,6 +135,21 @@ export function WorkAcceptedCard({ part }: { part: WorkAcceptedPart }) {
       link={addressable ? { href: workDetailHref(part.client_id, part.work_id), label: t("link") } : null}
     >
       {parked ? <WorkQuestionPanel workId={part.work_id} announce="none" /> : null}
+      {cancellable ? (
+        <CancelWorkDialog
+          workId={part.work_id}
+          clientId={part.client_id}
+          onCancelled={reload}
+        />
+      ) : null}
+      {/* THE CONVERGED STATE, from the SAME hydrated row the offer was made against. `stopping` is
+          rendered by name so the rail says the same word the Work detail does while an admitted
+          operation settles — one vocabulary across both surfaces. */}
+      {work !== null && (work.status === "stopping" || work.status === "cancelled") ? (
+        <p className="text-xs text-secondary-ink">
+          {work.status === "stopping" ? tw("stoppingBody") : tw("cancelledBody")}
+        </p>
+      ) : null}
     </PartSummaryCard>
   );
 }

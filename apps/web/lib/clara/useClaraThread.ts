@@ -10,6 +10,8 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "
 
 import { onFocusRail } from "@/lib/command/bus";
 
+import { cancelAgentTask } from "@/lib/coding/doors";
+
 import { getMessages, postTurn, resolveStreamAuth } from "./api";
 import type { SessionTokenAccessor } from "@/lib/session";
 import { runClaraTaskStream } from "./stream";
@@ -66,12 +68,17 @@ function attachClaraStream(
   threadId: string,
   taskId: string,
   onOpen?: () => void,
+  /** #630 — THE ABORT SIGNAL IS THE CALLER'S NOW. It used to be a freshly constructed
+   *  `AbortController` nobody kept a reference to, which meant the SSE read could never be stopped:
+   *  "Stop reply" had no seam to pull. The controller lives in the hook so one press can both abort
+   *  the read and cancel the turn behind it. */
+  signal?: AbortSignal,
 ): Promise<void> {
   return resolveStreamAuth(auth).then(({ token }) =>
     runClaraTaskStream({
       token,
       taskId,
-      signal: new AbortController().signal,
+      signal: signal ?? new AbortController().signal,
       onOpen,
       onEvent: (evt) => {
         claraThreadStore.applyStreamEvent(threadId, evt);
@@ -98,10 +105,21 @@ export function useClaraThread(
   sendMessage: (text: string, attachments?: AttachmentPart[]) => Promise<boolean>;
   retryConnection: () => Promise<void>;
   retryLoad: () => Promise<void>;
+  /** #630 — STOP THE REPLY. Two acts under one press, and both are needed: aborting the SSE read
+   *  alone would leave the run writing to a stream nobody is listening to, and cancelling the task
+   *  alone would leave this tab rendering deltas from a turn the human has already stopped.
+   *
+   *  IT IS NOT "CANCEL WORK". `clara.cancel_agent_task` is called on the CHAT-TURN task; a Work that
+   *  turn started is a separate `clara.agent_tasks` row with no cascade between them
+   *  (packages/runtime/tests/control-work-cancel.test.mjs proves it against the real doors), and
+   *  stopping a reply must never stop accounting a person already accepted. */
+  stopReply: () => Promise<"stopped" | "idle" | "failed">;
 } {
   const state = useClaraThreadState(threadId);
   const loadedRef = useRef<string | null>(null);
   const [loadAttempt, setLoadAttempt] = useState(0);
+  /** The live stream's controller, or null when nothing is streaming. */
+  const abortRef = useRef<AbortController | null>(null);
 
   // THE FIRST TRANSCRIPT READ IS RETRYABLE, and this effect is why it has to be (#514's
   // review, found on main). `loadedRef` fires the read once per thread id; a FAILED first
@@ -198,13 +216,21 @@ export function useClaraThread(
       // open" law without keeping the form await blocked for the whole agent run.
       return new Promise<boolean>((resolve) => {
         let opened = false;
+        const controller = new AbortController();
+        abortRef.current = controller;
         void attachClaraStream(auth, threadId, result.taskId, () => {
           claraThreadStore.markSent(threadId, parts);
           if (!opened) {
             opened = true;
             resolve(true);
           }
-        }).catch((err: unknown) => {
+        }, controller.signal).catch((err: unknown) => {
+          // AN ABORT IS NOT AN ERROR. The human asked for it, and painting "stream error:
+          // AbortError" over their own decision would be the surface arguing with them.
+          if (controller.signal.aborted) {
+            if (!opened) resolve(false);
+            return;
+          }
           claraThreadStore.markSendFailed(threadId, `stream error: ${(err as Error).message}`);
           if (!opened) resolve(false);
         });
@@ -220,12 +246,33 @@ export function useClaraThread(
     const taskId = claraThreadStore.getThread(threadId).activeTaskId;
     if (!taskId) return;
     claraThreadStore.beginRetry(threadId);
+    const controller = new AbortController();
+    abortRef.current = controller;
     try {
-      await attachClaraStream(auth, threadId, taskId);
+      await attachClaraStream(auth, threadId, taskId, undefined, controller.signal);
     } catch (err) {
+      if (controller.signal.aborted) return;
       claraThreadStore.markSendFailed(threadId, `stream error: ${(err as Error).message}`);
     }
   }, [auth, threadId]);
 
-  return { state, sendMessage, retryConnection, retryLoad };
+  const stopReply = useCallback(async (): Promise<"stopped" | "idle" | "failed"> => {
+    // THE READ STOPS FIRST, unconditionally. Whatever the door answers, this tab must stop
+    // rendering a reply the person has said they do not want.
+    abortRef.current?.abort();
+    abortRef.current = null;
+    const taskId = claraThreadStore.getThread(threadId).activeTaskId;
+    if (!taskId) return "idle";
+    try {
+      await cancelAgentTask(taskId, { session: auth });
+      return "stopped";
+    } catch {
+      // A REFUSAL IS NOT A CRASH, and it is usually the benign one: `clara.cancel_agent_task` is
+      // idempotent on a terminal task and answers CLR11 for a turn that already finished between
+      // the press and the call. The stream is stopped either way; the caller decides what to say.
+      return "failed";
+    }
+  }, [auth, threadId]);
+
+  return { state, sendMessage, retryConnection, retryLoad, stopReply };
 }

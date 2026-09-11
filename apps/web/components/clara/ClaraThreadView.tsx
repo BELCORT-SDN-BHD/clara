@@ -67,6 +67,8 @@ export function ClaraThreadView({
   clientId?: string;
 }) {
   const t = useTranslations("Clara.thread");
+  /** #630 — the Stop reply / Cancel Work vocabulary lives with the cancellation journey's own words. */
+  const tw = useTranslations("WorkCancel");
   // #614 A7 — `FIRM_ALTITUDE`, `useActiveThread.ts`'s own name for firm
   // altitude's store key, now exported and imported rather than repeated as a
   // bare "firm" literal (#614 code review). This is the draft store's scope
@@ -98,7 +100,11 @@ export function ClaraThreadView({
   );
   const [attachments, setAttachments] = useState<ComposerAttachmentState>({ parts: [], blocked: false });
   const [attachmentClearToken, setAttachmentClearToken] = useState(0);
-  const { state, sendMessage, retryConnection, retryLoad } = useClaraThread(auth, threadId ?? "");
+  const { state, sendMessage, retryConnection, retryLoad, stopReply } = useClaraThread(auth, threadId ?? "");
+  /** #630 — whether THIS tab stopped the reply. A marker, not a status: the transcript keeps the
+   *  partial prose exactly as it arrived and this says the stream ended because a person said so. */
+  const [stopped, setStopped] = useState(false);
+  const [stopping, setStopping] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const handleAttachmentState = useCallback((next: ComposerAttachmentState) => setAttachments(next), []);
 
@@ -405,9 +411,40 @@ export function ClaraThreadView({
             clarify group out would have left it the last thing in a region it
             does not belong to. It is a connection STATE, not a transcript
             entry. */}
-        {streamStatusLabel(state, t) && (
+        {streamStatusLabel(state, t) && !stopped && (
           <p role="status" className="text-xs text-muted-foreground italic">{streamStatusLabel(state, t)}</p>
         )}
+        {/* #630 — THE STOPPED MARKER, and it REPLACES the stream-status line rather than sitting
+            beside it: two `role="status"` siblings would announce twice, and "Clara is responding…"
+            beside "Stopped" is two surfaces disagreeing about the same turn. The partial prose above
+            is untouched — a stopped reply is still what Clara said, and deleting it would throw away
+            the only record of the turn. */}
+        {stopped && (
+          <p role="status" className="text-xs font-medium text-muted-foreground">{tw("stoppedMarker")}</p>
+        )}
+        {/* STOP REPLY. Named in full, everywhere, because the rail also carries "Cancel Work" on a
+            Work card and a bare "Stop" on both would be the one confusion this ticket exists to
+            remove. The hint says which is which without making the human guess. */}
+        {busy && !stopped ? (
+          <div className="flex items-center gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="xs"
+              disabled={stopping}
+              title={tw("stopReplyHint")}
+              onClick={() => {
+                setStopping(true);
+                void stopReply().then(() => {
+                  setStopped(true);
+                  setStopping(false);
+                });
+              }}
+            >
+              {stopping ? tw("stopping") : tw("stopReply")}
+            </Button>
+          </div>
+        ) : null}
         {/* 裁-132. Rendered off the DB-read start alone, so it appears for a turn this tab
             posted AND for one it found already running after a reload — the two cases a
             client-side stopwatch cannot tell apart honestly.

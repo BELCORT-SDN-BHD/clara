@@ -327,3 +327,200 @@ export async function probeWork(
   if (res.status === 404) return { kind: "not_found" };
   return { kind: "unavailable", message: str(body.error) ?? `the runtime answered ${res.status}` };
 }
+
+// ===========================================================================
+// #630 — CANCEL WORK, and TAKE RESPONSIBILITY.
+//
+// BOTH ARE RUNTIME WRITES FOR THE SAME REASON ADMISSION IS: `clara.cancel_accounting_work` and
+// `clara.take_over_accounting_work` are granted to the runtime's pool role alone, and a cancel
+// also has to reach the ENGINE (the door NOTIFYs `clara_runtime_ctl` inside its own transaction,
+// which the control listener is waiting on). PostgREST could do neither.
+//
+// THE CANCEL'S ANSWER IS NOT A BOOLEAN, and that is the whole shape of this ticket. The database
+// decides between admission and cancellation on ONE row lock, and there are four different true
+// things it can come back with:
+//
+//   stopping            the abort is requested and an already-admitted operation may still be
+//                       settling. NOT a terminal — the surface shows "stopping" and keeps reading.
+//   cancelled           there was no run to abort, so the Work is terminal now and nothing posted.
+//   already_completed   the operation WON the race. An entry and a receipt exist, the Work is
+//                       `completed`, and the answer names both so the surface can link to them.
+//                       A cancel never reverses a posted entry — that is a separate, linked act.
+//   already_terminal    the Work had already settled. A second cancel is not an error.
+//
+// Collapsing those into `{ok:true}` would leave the composer guessing, and the one guess that
+// matters ("did anything get posted?") is the one it must never make.
+// ===========================================================================
+
+/** `POST /api/work/:id/cancel` — the door's own jsonb, field by field. */
+export type WorkCancelAnswer = {
+  workId: string;
+  taskId: string | null;
+  /** `clara.accounting_work.status` AS THE DOOR LEFT IT. Never derived here. */
+  status: string;
+  /** TRUE only when this call is what stopped it. `already_*` answers are false. */
+  cancelled: boolean;
+  /** `already_terminal` | `already_completed` | `already_stopping`, or null when this call acted. */
+  reason: string | null;
+  /** Present only on `already_completed`: the effect that won the race. */
+  receiptId: string | null;
+  entryId: string | null;
+  cancelledBy: string | null;
+  cancelledAt: string | null;
+  replayed: boolean;
+};
+
+export type CancelWorkResult =
+  | ({ kind: "answered" } & WorkCancelAnswer)
+  /** 409 with the DB's own `status` — rendered verbatim beside the refusal. */
+  | { kind: "conflict"; reason: string | null; status: string | null }
+  | { kind: "denied" }
+  | { kind: "not_found" }
+  | { kind: "invalid"; reason: string | null }
+  | { kind: "unavailable"; message: string }
+  | { kind: "lost"; message: string };
+
+function cancelAnswerOf(body: Record<string, unknown>): WorkCancelAnswer | null {
+  const workId = str(body.work_id);
+  if (workId === null) return null;
+  return {
+    workId,
+    taskId: str(body.task_id),
+    status: str(body.status) ?? "stopping",
+    cancelled: body.cancelled === true,
+    reason: str(body.reason),
+    receiptId: str(body.receipt_id),
+    entryId: str(body.entry_id),
+    cancelledBy: str(body.cancelled_by),
+    cancelledAt: str(body.cancelled_at),
+    replayed: body.replayed === true,
+  };
+}
+
+/**
+ * Cancel the remaining Work.
+ *
+ * `opKey` IS THE CALLER'S, AND IT MUST SURVIVE AN UNOBSERVED OUTCOME. `lost` and `unavailable`
+ * both mean nobody can say whether the door ran, so the retry rides the SAME key and lets
+ * `clara._reserve_op` answer — a fresh key would ask the database a second question it has no way
+ * to connect to the first. A deliberate SECOND cancel (a human pressing it again after seeing an
+ * answer) is a new decision and takes a new key; the door answers `already_terminal` either way.
+ */
+export async function cancelWork(
+  auth: SessionTokenAccessor,
+  input: { workId: string; opKey: string },
+  signal?: AbortSignal,
+): Promise<CancelWorkResult> {
+  const token = await auth.getAccessToken();
+  if (!token) return { kind: "denied" };
+
+  let res: Response;
+  try {
+    res = await runtimePost(
+      `${WORK_BASE}/${encodeURIComponent(input.workId)}/cancel`,
+      token,
+      { opKey: input.opKey },
+      signal,
+    );
+  } catch (err) {
+    return { kind: "lost", message: (err as Error).message };
+  }
+  if (res.type === "opaqueredirect") return { kind: "denied" };
+
+  const body = (await readBody(res)) ?? {};
+  if (res.status === 200) {
+    const answer = cancelAnswerOf(body);
+    return answer === null
+      ? { kind: "lost", message: "the runtime answered without naming the Work" }
+      : { kind: "answered", ...answer };
+  }
+  if (res.status === 401 || res.status === 403) return { kind: "denied" };
+  if (res.status === 404) return { kind: "not_found" };
+  if (res.status === 409) return { kind: "conflict", reason: str(body.error), status: str(body.status) };
+  if (res.status === 400) return { kind: "invalid", reason: str(body.reason) ?? str(body.error) };
+  return {
+    kind: "unavailable",
+    message: str(body.error) ?? str(body.message) ?? `the runtime answered ${res.status}`,
+  };
+}
+
+/** The 202 body of `POST /api/work/:id/take-over` — a NEW run of the SAME logical identity, plus
+ *  the two humans the handover told apart. */
+export type WorkTakeOver = WorkAdmission & {
+  responsible: string | null;
+  previousResponsible: string | null;
+  /** Who ASKED for this Work. Immutable; a takeover never rewrites it. */
+  initiatedBy: string | null;
+  takenOver: boolean;
+};
+
+export type TakeOverWorkResult =
+  | ({ kind: "accepted" } & WorkTakeOver)
+  /** 409 — the Work is not available to take over (still authorised, or its run is live). */
+  | { kind: "not_takeable"; status: string | null }
+  /** 400 — the basis was INTERPRETED and the colleague has not confirmed the one they read.
+   *  `basisDigest` is what the resubmit must carry back. */
+  | { kind: "confirm_basis"; basisDigest: string | null; basisOrigin: string | null }
+  | { kind: "denied" }
+  | { kind: "not_found" }
+  | { kind: "invalid"; reason: string | null }
+  | { kind: "unavailable"; message: string }
+  | { kind: "lost"; message: string };
+
+/**
+ * Take responsibility for a Work whose person lost authority.
+ *
+ * `basisDigest` is OMITTED on the first attempt on purpose. A `user_direct` basis is the human's
+ * own typed figures and needs no confirmation, so asking for one every time would be ceremony; a
+ * `clara_interpreted` one is refused 400 `basis_confirmation_required` CARRYING the digest, and the
+ * surface then shows the interpreted basis and resubmits with it. The database decides which case
+ * this is — the browser never guesses from `basis_origin` it happens to have read.
+ */
+export async function takeOverWork(
+  auth: SessionTokenAccessor,
+  input: { workId: string; opKey: string; basisDigest?: string | null },
+  signal?: AbortSignal,
+): Promise<TakeOverWorkResult> {
+  const token = await auth.getAccessToken();
+  if (!token) return { kind: "denied" };
+
+  let res: Response;
+  try {
+    res = await runtimePost(
+      `${WORK_BASE}/${encodeURIComponent(input.workId)}/take-over`,
+      token,
+      { opKey: input.opKey, basisDigest: input.basisDigest ?? null },
+      signal,
+    );
+  } catch (err) {
+    return { kind: "lost", message: (err as Error).message };
+  }
+  if (res.type === "opaqueredirect") return { kind: "denied" };
+
+  const body = (await readBody(res)) ?? {};
+  if (res.status === 202) {
+    const admission = admissionOf(body);
+    if (admission === null) return { kind: "lost", message: "the runtime accepted the takeover without naming it" };
+    return {
+      kind: "accepted",
+      ...admission,
+      responsible: str(body.responsible),
+      previousResponsible: str(body.previous_responsible),
+      initiatedBy: str(body.initiated_by),
+      takenOver: body.taken_over === true,
+    };
+  }
+  if (res.status === 401 || res.status === 403) return { kind: "denied" };
+  if (res.status === 404) return { kind: "not_found" };
+  if (res.status === 409) return { kind: "not_takeable", status: str(body.status) };
+  if (res.status === 400) {
+    if (str(body.error) === "basis_confirmation_required") {
+      return { kind: "confirm_basis", basisDigest: str(body.basis_digest), basisOrigin: str(body.basis_origin) };
+    }
+    return { kind: "invalid", reason: str(body.reason) ?? str(body.error) };
+  }
+  return {
+    kind: "unavailable",
+    message: str(body.error) ?? str(body.message) ?? `the runtime answered ${res.status}`,
+  };
+}

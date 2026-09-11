@@ -45,7 +45,7 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
-import { mkdirSync, rmSync, existsSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { SignJWT } from "jose";
@@ -215,13 +215,20 @@ function makeGate(label) {
   return {
     env: { CLARA_WORK_CANCEL_GATE: gate, CLARA_WORK_CANCEL_HELD: held },
     open: () => writeFileSync(gate, "open"),
-    async waitHeld(deadlineMs = 90000) {
+    /** Wait until THIS Work is inside the window. One supervisor serves every queued Work, so a
+     *  bare "somebody is held" marker let a leg act on a sibling leg's leftover — see
+     *  work-cancel-serve.mjs's `waitForGate` for the measurement. */
+    async waitHeld(workId, deadlineMs = 120000) {
       const end = Date.now() + deadlineMs;
+      let seen = "";
       while (Date.now() < end) {
-        if (existsSync(held)) return true;
+        if (existsSync(held)) {
+          seen = readFileSync(held, "utf8");
+          if (workId === undefined || seen.includes(workId)) return true;
+        }
         await sleep(100);
       }
-      throw new Error(`the model never reached the hold (${id})`);
+      throw new Error(`the model never reached the hold for work ${workId ?? "(any)"} (${id}); saw: ${seen}`);
     },
     cleanup: () => {
       rmSync(gate, { force: true });
@@ -364,7 +371,7 @@ async function main() {
       assert.equal(admitted.status, 202, `leg 2 admission 202 (got ${admitted.status} ${JSON.stringify(admitted.body)})`);
       workId = admitted.body.work_id;
 
-      await gate2.waitHeld();
+      await gate2.waitHeld(workId);
       // The model is INSIDE the window: running, nothing admitted.
       const live = await api(PORT, "GET", `/api/work/${workId}`, undefined, ctx.jwt);
       assert.equal(live.body.work.status, "running", "leg 2: the run holds the Work while the model decides");
@@ -430,7 +437,7 @@ async function main() {
       const admitted = await admit(PORT, ctx, "office rent — boundary race", randomUUID());
       assert.equal(admitted.status, 202);
       workId = admitted.body.work_id;
-      await gate3.waitHeld();
+      await gate3.waitHeld(workId);
 
       // A THIRD party holds the Work row. The released tool call will block on it INSIDE the
       // posting transaction — the "after admission, before commit" window, which IS a lock wait.
@@ -545,7 +552,7 @@ async function main() {
         { clientId: ctx.client, intentKey: randomUUID(), basis: basisFor("office rent — revoked mid-run") }, initiatorJwt);
       assert.equal(admitted.status, 202, `leg 5 admission 202 (got ${admitted.status} ${JSON.stringify(admitted.body)})`);
       workId = admitted.body.work_id;
-      await gate5.waitHeld();
+      await gate5.waitHeld(workId);
 
       // REVOKE while the model is held — after admission, before the write.
       const membership = await rig.rootQuery(
@@ -627,7 +634,7 @@ ${engine.state.stderr.slice(-3000)}`);
       const admitted = await admit(PORT, ctx, "office rent — period locked mid-run", randomUUID());
       assert.equal(admitted.status, 202);
       workId = admitted.body.work_id;
-      await gate6.waitHeld();
+      await gate6.waitHeld(workId);
 
       // LOCK THE PERIOD while the model is held. open -> closing -> closed is the estate's own
       // lifecycle; no other edge is admitted.
@@ -666,7 +673,7 @@ ${engine.state.stderr.slice(-3000)}`);
       const admitted = await admit(PORT, ctx, "office rent — killed while stopping", randomUUID());
       assert.equal(admitted.status, 202);
       workId = admitted.body.work_id;
-      await gate7.waitHeld();
+      await gate7.waitHeld(workId);
 
       const cancelled = await cancel(PORT, ctx, workId, `cancel-${randomUUID()}`);
       assert.equal(cancelled.body.status, "stopping");
