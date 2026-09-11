@@ -1,15 +1,45 @@
 // The three durable-Work transcript cards (B6), under test.
 //
-// WHAT A GREEN HERE MEANS. These cards render the WIRE and stop — there is no
-// hydrate to prove, so the questions are narrower and sharper than the v16
-// cards' three: does the branch exist at all, does it render the DB's own
-// identifiers verbatim, does it build a REAL route, and does it refuse to build
-// one when the payload cannot address anything.
+// WHAT A GREEN HERE MEANS. Two of the three still render the WIRE and stop —
+// there is no hydrate to prove for `work_status`/`work_result`, so those
+// questions stay narrower and sharper than the v16 cards' three: does the
+// branch exist at all, does it render the DB's own identifiers verbatim, does
+// it build a REAL route, and does it refuse to build one when the payload
+// cannot address anything.
 //
-// THE LINK CELLS ARE THE LOAD-BEARING ONES. `/clients//work/work-1` is a 404
-// dressed as an affordance, and the emitter can genuinely construct a part
-// before `client_id` is filled — `entry_posted` has done exactly that since
-// chatTurn.v13. So "no client, no link" is asserted, not assumed.
+// THE LINK CELLS ARE THE LOAD-BEARING ONES for those two. `/clients//work/
+// work-1` is a 404 dressed as an affordance, and the emitter can genuinely
+// construct a part before `client_id` is filled — `entry_posted` has done
+// exactly that since chatTurn.v13. So "no client, no link" is asserted, not
+// assumed.
+//
+// #629 (B6) — `work_accepted` NO LONGER STOPS AT THE WIRE. It now hydrates the
+// Work's own status (one light `accounting_work` row read) and, while that
+// status reads `awaiting_input`, mounts `WorkQuestionPanel` — the gap the
+// follow-up review named: a Work that parks on a question becomes
+// unanswerable from here after a reload, because `work_question` (below) lives
+// only on the run's live stream. Three states are under test: PARKED (the
+// panel mounts), NOT PARKED (renders exactly as it always has) and — the one
+// this file CANNOT prove — ACCEPTED (the panel's form actually shows a
+// submitted or already-settled answer).
+//
+// WHY "ACCEPTED" IS NOT HERE. `WorkQuestionPanel` (and `WorkQuestionCard`
+// below it, which has carried the same shape since P6-2 with no test of its
+// own) only renders `WorkQuestionForm` once BOTH `clara.get_work_pending_
+// question` AND `getSessionIdentity()` resolve. The second one is a REAL
+// `@supabase/ssr` browser client reading a `__Host-`-prefixed, chunked,
+// `base64-`-encoded session cookie — machinery this harness has no seam for
+// and no business reverse-engineering one test at a time (measured: even
+// constructing a plausible cookie needs an HTTPS origin jsdom does not
+// provide, on top of the library's own private encoding). `work-detail.
+// test.tsx`'s own "AWAITING INPUT" cells record the identical limitation and
+// take the identical way around it: PROVE THE WIRING through the panel's
+// door-unreachable fallback arm, which still renders and still has no live
+// region, and leave the full answer to a browser. `work-question-walk.
+// spec.ts`'s B6 cell is that browser — a real signed-in session, a real
+// answer, a real convergence.
+//
+// THE LINK CELLS stay load-bearing for the two wire-only cards below.
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
@@ -18,6 +48,7 @@ import { NextIntlClientProvider } from "next-intl";
 
 import { renderComponent } from "../../test/hookHarness";
 import { enableDomInspection } from "../../test/domInspect";
+import { configureSessionTokenSource, resetSessionTokenSource } from "../../lib/session-accessor";
 import { PartRenderer, FALLBACK_UNSUPPORTED_PREFIX } from "./PartRenderer";
 import type { ClaraPart } from "../../lib/parts/types";
 import messages from "../../messages/en.json";
@@ -49,6 +80,92 @@ function hrefs(container: Stub): string[] {
   return out;
 }
 
+/** First node (depth-first) carrying `data-testid="id"`, or null. */
+function byTestId(container: Stub, id: string): Stub | null {
+  const walk = (n: Stub): Stub | null => {
+    if ((n as { getAttribute?: (k: string) => string | null }).getAttribute?.("data-testid") === id) return n;
+    for (const c of (n.childNodes as Stub[] | undefined) ?? []) {
+      const found = walk(c);
+      if (found) return found;
+    }
+    return null;
+  };
+  return walk(container);
+}
+
+/** Every element that ANNOUNCES itself — `role="alert"`/`"status"`, or a live
+ *  `aria-live` — anywhere under `container`. §5's "one announcement owner"
+ *  is asserted by proving this list is empty, never by spot-checking one node. */
+function liveRegions(container: Stub): Stub[] {
+  const out: Stub[] = [];
+  const walk = (n: Stub) => {
+    const get = (n as { getAttribute?: (k: string) => string | null }).getAttribute;
+    const role = get?.("role");
+    const ariaLive = get?.("aria-live");
+    if (role === "alert" || role === "status" || (ariaLive != null && ariaLive !== "off")) out.push(n);
+    for (const c of (n.childNodes as Stub[] | undefined) ?? []) walk(c);
+  };
+  walk(container);
+  return out;
+}
+
+/** The wire shape `lib/work/questions.ts`'s `callDoor`/`getRows` build, keyed by the
+ *  final path segment (the relation or RPC function name) — the same technique
+ *  `work-question-form.test.tsx`'s own `stubDoors` uses, generalised to GETs too
+ *  (a filtered `accounting_work` GET's URL ends in `accounting_work` exactly the
+ *  same way an RPC POST's ends in the function name). */
+type Call = { fn: string; method: string; body: Record<string, unknown> };
+
+function stubBackend(handler: (call: Call) => { status: number; body: unknown }): { calls: Call[]; restore: () => void } {
+  const calls: Call[] = [];
+  const originalFetch = globalThis.fetch;
+  const originalUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  process.env.NEXT_PUBLIC_SUPABASE_URL = "https://example.supabase.co";
+  globalThis.fetch = (async (input: unknown, init?: { method?: string; body?: string }) => {
+    const url = String(input);
+    const fn = url.slice(url.lastIndexOf("/") + 1).split("?")[0] ?? "";
+    const body = init?.body ? (JSON.parse(init.body) as Record<string, unknown>) : {};
+    const call: Call = { fn, method: init?.method ?? "GET", body };
+    calls.push(call);
+    const { status, body: out } = handler(call);
+    return {
+      ok: status >= 200 && status < 300,
+      status,
+      headers: { get: () => "application/json" },
+      json: async () => out,
+      text: async () => JSON.stringify(out),
+    } as unknown as Response;
+  }) as typeof globalThis.fetch;
+  configureSessionTokenSource(async () => "test-token");
+  return {
+    calls,
+    restore: () => {
+      globalThis.fetch = originalFetch;
+      if (originalUrl === undefined) delete process.env.NEXT_PUBLIC_SUPABASE_URL;
+      else process.env.NEXT_PUBLIC_SUPABASE_URL = originalUrl;
+      resetSessionTokenSource();
+    },
+  };
+}
+
+/** Poll `h.settle()` (one real macrotask hop) until `condition()` holds, bounded
+ *  by a wall-clock timeout — never a fixed hop count (`sweep-receipt-card.test.
+ *  tsx`'s own header records why a fixed count is load-sensitive and flaky). */
+async function settleUntil(
+  h: { settle: () => Promise<void> },
+  condition: () => boolean,
+  description: string,
+  timeoutMs = 5000,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!condition()) {
+    if (Date.now() >= deadline) {
+      throw new Error(`settleUntil: timed out after ${timeoutMs}ms waiting for: ${description}`);
+    }
+    await h.settle();
+  }
+}
+
 const ACCEPTED: ClaraPart = {
   type: "work_accepted",
   work_id: "work-1",
@@ -58,19 +175,107 @@ const ACCEPTED: ClaraPart = {
 };
 
 test("work_accepted renders the operation identity and links to the WORK'S OWN page", async () => {
-  const h = await renderComponent(App(ACCEPTED));
+  // #629 (B6) — the card now hydrates the Work's own status to decide whether to offer the parked
+  // question panel. This cell's Work reads back NOT FOUND (the fixture never seeded one), which is
+  // exactly "not parked": the card renders as it always has, and no panel appears.
+  const backend = stubBackend((call) => (call.fn === "accounting_work" ? { status: 200, body: [] } : { status: 404, body: {} }));
   try {
-    const text = h.text();
-    assert.match(text, /Accounting work accepted/);
-    assert.match(text, /journal_entry/, "the DB's own purpose token, verbatim");
-    assert.match(text, /work-1/);
-    // The logical operation identity is what makes a replayed commit resolve the
-    // ORIGINAL receipt. A professional can match it against the Work page.
-    assert.match(text, /work:work-1:journal_entry:1/);
-    assert.deepEqual(hrefs(h.container), ["/clients/client-1/work/work-1"]);
-    assert.ok(!text.includes(FALLBACK_UNSUPPORTED_PREFIX), "the branch exists — this is not the unsupported chip");
+    const h = await renderComponent(App(ACCEPTED));
+    try {
+      await settleUntil(h, () => backend.calls.some((c) => c.fn === "accounting_work"), "the Work status was read");
+      await h.settle();
+      const text = h.text();
+      assert.match(text, /Accounting work accepted/);
+      assert.match(text, /journal_entry/, "the DB's own purpose token, verbatim");
+      assert.match(text, /work-1/);
+      // The logical operation identity is what makes a replayed commit resolve the
+      // ORIGINAL receipt. A professional can match it against the Work page.
+      assert.match(text, /work:work-1:journal_entry:1/);
+      assert.deepEqual(hrefs(h.container), ["/clients/client-1/work/work-1"]);
+      assert.ok(!text.includes(FALLBACK_UNSUPPORTED_PREFIX), "the branch exists — this is not the unsupported chip");
+      assert.equal(byTestId(h.container, "work-question-fallback"), null, "no panel when the Work read admits none");
+    } finally {
+      await h.unmount();
+    }
   } finally {
-    await h.unmount();
+    backend.restore();
+  }
+});
+
+test("work_accepted whose Work reads NOT PARKED renders exactly as before — no panel at all", async () => {
+  const backend = stubBackend((call) =>
+    call.fn === "accounting_work"
+      ? { status: 200, body: [{ id: "work-1", client_id: "client-1", status: "completed" }] }
+      : { status: 404, body: {} },
+  );
+  try {
+    const h = await renderComponent(App(ACCEPTED));
+    try {
+      await settleUntil(h, () => backend.calls.some((c) => c.fn === "accounting_work"), "the Work status was read");
+      await h.settle();
+      assert.match(h.text(), /Accounting work accepted/);
+      assert.equal(byTestId(h.container, "work-question-fallback"), null);
+      assert.equal(byTestId(h.container, "work-question-form"), null);
+      assert.equal(byTestId(h.container, "work-question-accepted"), null);
+      assert.deepEqual(liveRegions(h.container), []);
+    } finally {
+      await h.unmount();
+    }
+  } finally {
+    backend.restore();
+  }
+});
+
+// `lib/work/questions.ts`'s `getPendingWorkQuestion` refuses a malformed id BEFORE ever calling the
+// door (`isUuidShape`, the same defence-in-depth `lib/client-id.ts` argues for) — unlike
+// `getAccountingWork`, which has no such guard. `ACCEPTED`'s "work-1"/"client-1" satisfy the first
+// but not the second, so the PARKED cell below needs ids shaped like the real thing to ever REACH
+// the door it is testing.
+const PARKED_WORK = "11111111-1111-4111-8111-111111111111";
+const PARKED_CLIENT = "22222222-2222-4222-8222-222222222222";
+const PARKED: ClaraPart = { ...ACCEPTED, work_id: PARKED_WORK, client_id: PARKED_CLIENT };
+
+test("work_accepted whose Work reads PARKED mounts the SAME question panel, announcing NOTHING", async () => {
+  // #629 (B6) — the durable card's own gap: after a reload, `work_question` (the live-stream face)
+  // is gone, and this is the ONE part left that can still find the question. `getAccountingWork`
+  // reading `awaiting_input` is what must make `WorkAcceptedCard` reach for `WorkQuestionPanel`,
+  // addressed by THIS work's id, exactly as B3 (the Work detail) and B4 (Needs-you) address it.
+  //
+  // `get_work_pending_question` is made to FAIL here rather than to succeed — see this file's own
+  // header for why: the panel's `WorkQuestionForm` branch also needs `getSessionIdentity()`, a REAL
+  // `@supabase/ssr` browser-client read this harness cannot seed, so a SUCCEEDING door here would
+  // still resolve to nothing rendered and this cell would prove nothing. Failing it instead reaches
+  // the panel's door-unreachable fallback arm, which DOES render (`work-detail.test.tsx`'s own
+  // "AWAITING INPUT" cells take the identical route for the identical reason) — enough to prove the
+  // WIRING: the right panel, addressed by the right work id, with no live region of its own.
+  const backend = stubBackend((call) => {
+    if (call.fn === "accounting_work") {
+      return { status: 200, body: [{ id: PARKED_WORK, client_id: PARKED_CLIENT, status: "awaiting_input" }] };
+    }
+    if (call.fn === "get_work_pending_question") {
+      return { status: 500, body: { message: "unreachable in this harness — see the file header" } };
+    }
+    return { status: 404, body: {} };
+  });
+  try {
+    const h = await renderComponent(App(PARKED));
+    try {
+      await settleUntil(
+        h,
+        () => byTestId(h.container, "work-question-fallback") !== null,
+        "the panel's fallback renders once the Work reads awaiting_input",
+      );
+      const askedFor = backend.calls.find((c) => c.fn === "get_work_pending_question");
+      assert.ok(askedFor, "the card asked the door for THIS work's pending question");
+      assert.equal(askedFor?.body.p_work, PARKED_WORK);
+      // §5, one announcement owner. The transcript already has one; `announce="none"` must hold
+      // even on the panel's OWN door-unreachable banner, not only on the form's.
+      assert.deepEqual(liveRegions(h.container), []);
+    } finally {
+      await h.unmount();
+    }
+  } finally {
+    backend.restore();
   }
 });
 

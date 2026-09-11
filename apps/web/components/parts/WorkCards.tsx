@@ -64,17 +64,53 @@ import { PartSummaryCard } from "./PartSummaryCard";
 import { usableId } from "./PartCardShell";
 import { workDetailHref } from "@/lib/navigation/tree";
 import { WorkQuestionForm } from "@/components/work/work-question-form";
+import { WorkQuestionPanel } from "@/components/work/work-question-panel";
 import { useHydratedPart } from "@/lib/parts/hooks";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
 import { getSessionIdentity } from "@/lib/settings/account-identity";
+import { getAccountingWork } from "@/lib/work/reads";
 import { accountsForQuestion, getWorkQuestion } from "@/lib/work/questions";
 import type { WorkAcceptedPart, WorkQuestionPart, WorkResultPart, WorkStatusPart } from "@/lib/parts/types";
 
-/** The accepted-Work receipt. Links to the durable detail — the persistent
- *  outcome §3 requires an accepted long operation to have. */
+/**
+ * The accepted-Work receipt. Links to the durable detail — the persistent outcome §3 requires an
+ * accepted long operation to have.
+ *
+ * #629 (B6) — THE GAP THIS CLOSES. `work_question` above is the run's LIVE-STREAM face and this
+ * file's own header states plainly that it does not survive past the run: a Work that parks on a
+ * question while nobody is watching the transcript used to become unanswerable from here after a
+ * reload, because the ONLY durable part on the Work is this one, and it never looked past its own
+ * three identifiers. `work_accepted` IS durable (minted by `chatTurn_v18` into
+ * `clara.chat_messages.parts`), so it is the one card that can still FIND the question later.
+ *
+ * ONE LIGHT READ, ON MOUNT, DECIDES WHETHER TO OFFER IT. `getAccountingWork` is the Work queue's
+ * own single-row read — not `loadWorkDetail`'s whole bundle (task, receipts, chart, entry, lines,
+ * interruption), which is built for a page that also renders a basis table and has no business
+ * being spent by a chat card that only needs one column. When that read says `awaiting_input`, this
+ * card mounts the SAME `WorkQuestionPanel` B3 (the Work detail) and B4 (Needs-you) render,
+ * addressed by WORK id — `getPendingWorkQuestion` / `clara.get_work_pending_question`, exactly as
+ * B3 addresses it — so the three surfaces keep answering one question rather than three.
+ * `announce="none"`: this card sits inside the transcript's own announcement boundary (this file's
+ * header, §5), so the panel's banners render as plain boxes with no role, the same posture
+ * `WorkQuestionCard` already takes below for the live-stream question.
+ *
+ * NO NEW POLLING, and the gate is read ONCE. After an accepted or converged answer, it is the
+ * PANEL's own form that re-reads `clara.get_work_question` and switches to its accepted/converged
+ * rendering in place (`work-question-form.tsx`'s `reread`) — this card does not need to ask "is the
+ * Work still parked" again to keep showing that outcome, and doing so would risk unmounting the
+ * very panel that just rendered the accepted record. A Work that is NOT parked at mount renders
+ * exactly as it always has — no panel, no read beyond the one status check.
+ */
 export function WorkAcceptedCard({ part }: { part: WorkAcceptedPart }) {
   const t = useTranslations("Clara.parts.workAccepted");
   const addressable = usableId(part.work_id) && usableId(part.client_id);
+  const load = useCallback(async () => {
+    if (!addressable) return null;
+    return await getAccountingWork(part.client_id, part.work_id);
+  }, [addressable, part.client_id, part.work_id]);
+  const { data: work } = useHydratedPart(sessionTokenAccessor, load);
+  const parked = work?.status === "awaiting_input";
+
   return (
     <PartSummaryCard
       title={t("title")}
@@ -85,7 +121,9 @@ export function WorkAcceptedCard({ part }: { part: WorkAcceptedPart }) {
       ]}
       note={t("note")}
       link={addressable ? { href: workDetailHref(part.client_id, part.work_id), label: t("link") } : null}
-    />
+    >
+      {parked ? <WorkQuestionPanel workId={part.work_id} announce="none" /> : null}
+    </PartSummaryCard>
   );
 }
 

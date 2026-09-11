@@ -29,7 +29,7 @@ import { useTranslations } from "next-intl";
 
 import { StateBanner } from "@/components/common/state";
 import { Skeleton } from "@/components/ui/skeleton";
-import { WorkQuestionForm } from "@/components/work/work-question-form";
+import { WorkQuestionForm, type WorkQuestionAnnounce } from "@/components/work/work-question-form";
 import { workDetailHref } from "@/lib/navigation/tree";
 import { useHydratedPart } from "@/lib/parts/hooks";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
@@ -56,12 +56,18 @@ export type WorkQuestionPanelProps = {
    *  lets the Work detail's banner stop printing the question a second time (§5's one-owner rule
    *  applied to text, not only to announcements) without losing the fallback. */
   fallbackQuestion?: { question: string | null; context: string | null } | null;
+  /** Who announces (§5) — passed straight through to `WorkQuestionForm`, and to this panel's OWN
+   *  door-unreachable banner below (which the form never sees). Default "self": B3 and B4 each own
+   *  their surface's announcement boundary. #629 (B6) passes "none" from inside the Clara
+   *  transcript, which already announces its own updates. */
+  announce?: WorkQuestionAnnounce;
 };
 
 export function WorkQuestionPanel({
-  workId, questionId, onAnswered, onSettled, onBusy, onLeavePending, fallbackQuestion = null,
+  workId, questionId, onAnswered, onSettled, onBusy, onLeavePending, fallbackQuestion = null, announce,
 }: WorkQuestionPanelProps) {
   const t = useTranslations("WorkQuestion.inbox");
+  const silent = announce === "none";
   const load = useCallback(async () => {
     const record = questionId ? await getWorkQuestion(questionId) : workId ? await getPendingWorkQuestion(workId) : null;
     const identity = await getSessionIdentity();
@@ -108,7 +114,7 @@ export function WorkQuestionPanel({
         {fallbackQuestion?.context ? (
           <p className="text-xs text-secondary-ink">{fallbackQuestion.context}</p>
         ) : null}
-        {err !== null ? <StateBanner tone="warning">{t("loadFailed")}</StateBanner> : null}
+        {err !== null ? <StateBanner tone="warning" silent={silent}>{t("loadFailed")}</StateBanner> : null}
       </div>
     );
   }
@@ -123,6 +129,7 @@ export function WorkQuestionPanel({
         onSettled={onSettled}
         onBusy={onBusy}
         onLeavePending={onLeavePending}
+        announce={announce}
       />
       {/* THE ROUTE TO THE WORK, built from the HYDRATED record rather than from whatever the
           calling surface happened to have. Offered only where this panel is NOT already on the
