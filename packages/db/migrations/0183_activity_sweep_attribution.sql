@@ -41,7 +41,8 @@
 -- door has no reason to expose wholesale; (2) a NEW, NARROW `security definer` helper that reads
 -- exactly the one fact this door needs (which of this firm's sweep receipts report a run that
 -- actually drafted or posted something) and returns nothing else -- taken.
--- `clara._sweep_events_with_effect(uuid)` is SELF-SCOPED to the session's own firm and FLOORED at
+-- `clara._sweep_events_with_effect()` (and its point-lookup twin `clara._sweep_event_has_effect
+-- (uuid)`) is SELF-SCOPED to the session's own firm and FLOORED at
 -- bookkeeper INSIDE its own body (never a caller-supplied firm argument),
 -- so calling it directly (it must carry a `clara_authenticated` grant for an INVOKER caller to
 -- reach it at all, and PostgREST exposes any granted function as its own RPC endpoint regardless
@@ -129,9 +130,20 @@ begin
   if exists (
     select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
      where n.nspname = 'clara'
-       and p.proname in ('_sweep_events_with_effect', 'list_spoken_for_documents')
+       and p.proname in ('_sweep_events_with_effect', '_sweep_event_has_effect',
+                         'list_spoken_for_documents')
   ) then
     raise exception 'activity_sweep_attribution prestate: a new function name already resolves'
+      using errcode = 'CLR10';
+  end if;
+
+  -- …and neither may the two indexes section 0b creates.
+  if exists (
+    select 1 from pg_class c join pg_namespace n on n.oid = c.relnamespace
+     where n.nspname = 'clara' and c.relkind = 'i'
+       and c.relname in ('ix_domain_events_sweep_run', 'ix_sweep_runs_firm_effect')
+  ) then
+    raise exception 'activity_sweep_attribution prestate: a new index name already resolves'
       using errcode = 'CLR10';
   end if;
 
@@ -168,8 +180,58 @@ end $pre$;
 set role clara_fn_owner;
 
 -- ==============================================================================================
--- 1. clara._sweep_events_with_effect -- the ONE fact list_activity/get_activity_event borrow from
---    clara.sweep_runs, answered AS A SET rather than one row at a time.
+-- 0b. TWO INDEXES, so the cost of the sweep exclusion is the size of the KEPT SET, not of the
+--     firm's whole append-only sweep history (delta review of the fix round, 2026-09-11,
+--     finding [1]).
+--
+--     WHAT WAS WRONG WITHOUT THEM. Nothing indexed `de.payload ->> 'run_id'` and nothing indexed
+--     "a run that did something", so even the GOOD plan for section 1's join sorted EVERY
+--     `sweep.run_completed` event of the firm and EVERY `clara.sweep_runs` row of the firm and
+--     merge-joined the two, on EVERY feed read. Measured on this rig at 30,000 kept sweep
+--     receipts: Merge Join, 592 ms, `Sort Method: external sort Disk: 4936kB` over a Seq Scan of
+--     `clara.domain_events`. Both relations grow 288 rows a DAY on the live firm and are
+--     append-only, so that cost never comes back down.
+--
+--     WITH THEM the planner can drive from the SMALL side -- the runs that actually drafted or
+--     posted something, which is the whole premise of this ticket (most five-minute windows
+--     change nothing) -- and probe the receipts one index lookup at a time. `run_id` is a run's
+--     own uuid, so each probe returns at most one row.
+--
+--     AN INDEX IS NOT A WRITE. `clara.domain_events` carries the estate's append-only/no-truncate
+--     belts (`t_domain_events_append_only`) and an immutability trigger; those are row triggers on
+--     UPDATE/DELETE and constrain DML, not DDL, so `create index` is lawful here -- and it runs
+--     WITHOUT `concurrently`, which is what keeps this migration ONE transaction (the estate's
+--     first law for a migration file). Both tables are owned by `clara_fn_owner`, the role this
+--     file has already assumed, so no ownership change is needed either.
+--
+--     NAMING follows the estate's own `ix_<table>_<subject>` habit, and the partial-expression
+--     shape follows two live precedents: `ix_domain_events_classified_document` (0020:292-294, a
+--     partial index on this very table, added for the same reason -- an existence probe that
+--     would otherwise be a full relation scan on every append) and `ix_operation_receipts_entry`
+--     (0178:454-455, an index ON a `->>` expression, joined the same cast-the-other-side way).
+-- ==============================================================================================
+create index ix_domain_events_sweep_run
+  on clara.domain_events((payload ->> 'run_id'))
+  where event_type = 'sweep.run_completed';
+comment on index clara.ix_domain_events_sweep_run is
+  '#728. The sweep receipt that reports a given clara.sweep_runs id. Partial on the receipt type '
+  'and built ON THE TEXT EXPRESSION, because clara._sweep_events_with_effect compares '
+  'payload->>''run_id'' to sr.id::text rather than casting free jsonb text to uuid (0183 section 1, '
+  'wall four) -- an index on a different expression would never be matched.';
+
+create index ix_sweep_runs_firm_effect
+  on clara.sweep_runs(firm_id)
+  where drafted_count + posted_count > 0;
+comment on index clara.ix_sweep_runs_firm_effect is
+  '#728. The runs of a firm that actually did something (drafted_count + posted_count > 0 -- a '
+  'post is not a draft, 0108). This is the SMALL side of the sweep-attribution join and the side '
+  'the planner drives from; without it "which of this firm''s runs had an effect" is a scan of '
+  'the firm''s entire append-only sweep history, which grows 288 rows a day.';
+
+-- ==============================================================================================
+-- 1. clara._sweep_events_with_effect / clara._sweep_event_has_effect -- the ONE fact
+--    list_activity/get_activity_event borrow from clara.sweep_runs. TWO functions, one query
+--    shape each.
 --
 --    WHY A SET AND NOT A SCALAR (native seven-lens review, 2026-09-11, BLOCKER). The first cut of
 --    this file spelled the exclusion as a per-row scalar call inside `ev_base`'s WHERE. That
@@ -228,12 +290,29 @@ set role clara_fn_owner;
 --    this ticket exists to close (a firm whose sweeps refuse every window would be back to 288
 --    rows a day). If that turns out to be the wrong product call, it is a ONE-TERM change here.
 --
---    p_event NARROWS the set to a single event id (the detail door's shape) or, when null, answers
---    for the whole firm (the feed's). Returns the ids that are KEPT; an absent event, another
---    firm's, a non-sweep, an unresolvable run and a zero-effect run all answer with NO ROW, which
---    is exactly the safe default both callers want.
+--    TWO FUNCTIONS, NOT ONE WITH AN OPTIONAL PARAMETER (delta review of the fix round,
+--    2026-09-11, BLOCKER [0]). The first cut of THIS section spelled both callers' needs as one
+--    `return query` carrying `and (p_event is null or de.id = p_event)`. plpgsql caches that
+--    statement per SESSION and, after five custom-plan executions, switches to the GENERIC plan;
+--    the generic plan gives `($2 IS NULL) OR (id = $2)` default eq-selectivity, estimates
+--    `clara.domain_events` at ONE row, puts it on the OUTER side of a Nested Loop and rescans
+--    `clara.sweep_runs` once per sweep receipt of the firm. MEASURED on this rig (6,000 receipts
+--    for the caller's firm, 200 sibling firms also sweeping, ONE psql session, default
+--    plan_cache_mode, all in a rolled-back transaction): calls 1-5 of clara.list_activity took
+--    46/18/19/18/18 ms and calls 6-10 took 13.8 / 14.3 / 16.4 / 13.9 / 13.5 SECONDS.
+--    PostgREST pools long-lived connections, so that is every Activity read from the sixth on.
+--    The rule this file now keeps: NEVER one statement with `x is null or ...` in a plpgsql body
+--    two callers share. Each caller gets its own function, and each function's single statement
+--    gets its own cached plan whose generic form is safe because its shape is FIXED:
+--      * clara._sweep_events_with_effect()  -- the firm's kept receipt ids (the FEED's shape).
+--      * clara._sweep_event_has_effect(uuid) -- one receipt, yes or no (the DETAIL door's shape).
+--    Both are bounded by the KEPT set thanks to section 0b's two indexes, not by the history.
+--    An absent event, another firm's, a non-sweep, an unresolvable run and a zero-effect run all
+--    answer NO ROW / false, which is exactly the safe default both callers want.
 -- ==============================================================================================
-create function clara._sweep_events_with_effect(p_event uuid default null)
+-- THE FEED'S SHAPE: the whole kept set of this firm, no parameters at all, so the one statement
+-- below has exactly one plan and that plan's generic form is the same join as its custom form.
+create function clara._sweep_events_with_effect()
 returns table(event_id uuid)
   language plpgsql stable security definer set search_path = clara, pg_temp as $$
 declare c record;
@@ -242,6 +321,9 @@ begin
   -- not which sweeps had an effect, not whether an id names an event, not whether it is a sweep.
   c := clara._human_ctx(clara.role_rank('bookkeeper'));
   return query
+  -- Driven from clara.sweep_runs THROUGH ix_sweep_runs_firm_effect (section 0b): the rows this
+  -- reads are the firm's runs that DID something, and each one probes at most one receipt through
+  -- ix_domain_events_sweep_run. The firm's zero-effect history is never touched.
   select de.id
     from clara.sweep_runs sr
     join clara.domain_events de
@@ -253,24 +335,57 @@ begin
      -- …compared as TEXT, never cast to uuid: see this section's header, wall four.
      and de.payload ->> 'run_id' = sr.id::text
    where sr.firm_id = c.firm
-     and sr.drafted_count + sr.posted_count > 0
-     and (p_event is null or de.id = p_event);
+     and sr.drafted_count + sr.posted_count > 0;
 end $$;
-revoke all on function clara._sweep_events_with_effect(uuid) from public;
-grant execute on function clara._sweep_events_with_effect(uuid) to clara_authenticated;
-comment on function clara._sweep_events_with_effect(uuid) is
+revoke all on function clara._sweep_events_with_effect() from public;
+grant execute on function clara._sweep_events_with_effect() to clara_authenticated;
+comment on function clara._sweep_events_with_effect() is
   '#728. The sweep.run_completed domain events of THIS session''s firm whose clara.sweep_runs row '
   'actually did something (drafted_count + posted_count > 0 -- a post is not a draft, 0108; '
-  'refused/skipped deliberately excluded, see 0183 section 1). p_event narrows to one event id, '
-  'null answers for the whole firm. An absent event, another firm''s, a non-sweep, an unresolvable '
-  'or non-uuid run_id, and a zero-effect run all answer with NO ROW (the run_id is compared as '
-  'TEXT, never cast, so a malformed one matches nothing instead of raising). Carries '
-  'clara.list_activity''s '
-  'OWN bookkeeper floor (clara._human_ctx) because it is clara_authenticated-granted and therefore '
-  'PostgREST-reachable directly despite the leading underscore. SET-BASED on purpose: the scalar '
-  'per-row form it replaced cost 4.8 s a page at 6,000 sweep events (measured); this one is '
-  'invoked once per read. Exists only because clara.sweep_runs carries no clara_authenticated '
-  'grant and both callers are SECURITY INVOKER.';
+  'refused/skipped deliberately excluded, see 0183 section 1). An absent event, another firm''s, a '
+  'non-sweep, an unresolvable or non-uuid run_id, and a zero-effect run all contribute NO ROW (the '
+  'run_id is compared as TEXT, never cast, so a malformed one matches nothing instead of raising). '
+  'Carries clara.list_activity''s OWN bookkeeper floor (clara._human_ctx) because it is '
+  'clara_authenticated-granted and therefore PostgREST-reachable directly despite the leading '
+  'underscore. TAKES NO ARGUMENT ON PURPOSE: the optional-parameter form it replaced shared one '
+  'cached plan with the detail door and flipped to a generic Nested Loop on the 6th call of a '
+  'session (13.8 s a page, measured) -- see 0183 section 1. The point lookup is '
+  'clara._sweep_event_has_effect(uuid).';
+
+-- THE DETAIL DOOR'S SHAPE: one receipt, yes or no. A SEPARATE function, not a parameter on the
+-- one above, so its statement gets its OWN cached plan -- and that plan's generic form is safe
+-- because `de.id = $2` really does select one row, which is exactly what the estimate says.
+create function clara._sweep_event_has_effect(p_event uuid)
+returns boolean
+  language plpgsql stable security definer set search_path = clara, pg_temp as $$
+declare c record; v_has boolean;
+begin
+  -- The SAME floor, restated: this function is granted and therefore PostgREST-reachable too, and
+  -- "did this sweep do anything" is the very fact the floor above exists to withhold.
+  c := clara._human_ctx(clara.role_rank('bookkeeper'));
+  select exists (
+    select 1
+      from clara.sweep_runs sr
+      join clara.domain_events de
+        on de.firm_id = sr.firm_id
+       and de.event_type = 'sweep.run_completed'
+       and de.payload ->> 'run_id' = sr.id::text
+     where sr.firm_id = c.firm
+       and sr.drafted_count + sr.posted_count > 0
+       and de.id = p_event)
+    into v_has;
+  return coalesce(v_has, false);
+end $$;
+revoke all on function clara._sweep_event_has_effect(uuid) from public;
+grant execute on function clara._sweep_event_has_effect(uuid) to clara_authenticated;
+comment on function clara._sweep_event_has_effect(uuid) is
+  '#728. TRUE when p_event names a sweep.run_completed receipt of THIS session''s firm whose '
+  'clara.sweep_runs row actually did something (the same drafted_count + posted_count > 0 rule '
+  'clara._sweep_events_with_effect applies to the set). An absent event, another firm''s, a '
+  'non-sweep, an unresolvable or non-uuid run_id and a zero-effect run are all FALSE -- the same '
+  'answer, so the boolean is no existence oracle. Bookkeeper-floored (clara._human_ctx) and '
+  'self-scoped to the session firm for the same reason the set form is. Separate from the set '
+  'form so the two callers never share one cached plan: see 0183 section 1.';
 
 -- ==============================================================================================
 -- 2. clara.list_activity -- RECUT. Full 0181 body (sha e8c3b7b8..., pinned above); the ONLY
@@ -345,8 +460,22 @@ begin
   -- array the union's predicate can test with a plain `= any(...)`. Placed AFTER the floor checks
   -- (a refused caller never pays for it) and BEFORE the union, so no plan the planner might choose
   -- can turn it back into a per-row call.
-  select coalesce(array_agg(k.event_id), '{}'::uuid[]) into v_kept_sweeps
-    from clara._sweep_events_with_effect() k;
+  --
+  -- …and NOT paid at all when no sweep row could survive this read's own filters (delta review of
+  -- the fix round, finding [1]: the read was unconditional). A sweep receipt's `kind` is
+  -- unconditionally 'agent' -- ev_base's FIRST case arm below, ahead of the 0181 ladder -- so a
+  -- p_kinds list that omits 'agent' can never return one, and an EMPTY kept set then excludes
+  -- every sweep row in ev_base, which is where those rows were headed anyway. The guard is on
+  -- p_kinds ONLY and deliberately not on p_client: a sweep receipt written by
+  -- clara.reconcile_sweep_runs is firm-level (client_id null, 0011:2763-2764), but `client_id` is
+  -- a column on the event, not a law about it, and a client-scoped read must not start deciding
+  -- what a row IS from what this file expects it to be.
+  if p_kinds is null or 'agent' = any(p_kinds) then
+    select coalesce(array_agg(k.event_id), '{}'::uuid[]) into v_kept_sweeps
+      from clara._sweep_events_with_effect() k;
+  else
+    v_kept_sweeps := '{}'::uuid[];
+  end if;
 
   with
   ev_base as (
@@ -617,11 +746,13 @@ begin
     -- excluded heartbeat must not read differently from one that never existed).
     --
     -- AFTER the row is fetched, not as another WHERE predicate beside `v.event_id::text = p_id`
-    -- (native review, N1): a definer set function in the WHERE is a filter the planner is free to
+    -- (native review, N1): a definer function in the WHERE is a filter the planner is free to
     -- order however it costs it, and one bad estimate would run it once per row of the whole
     -- timeline. Hoisted out like this it runs at most once per call, and only for a sweep receipt.
+    -- It calls clara._sweep_event_has_effect, NOT the set form the feed calls: one cached plan per
+    -- caller shape is the whole point of splitting them (0183 section 1, BLOCKER [0]).
     if v_row is not null and v_row ->> 'event_type' = 'sweep.run_completed'
-       and not exists (select 1 from clara._sweep_events_with_effect((v_row ->> 'id')::uuid)) then
+       and not clara._sweep_event_has_effect((v_row ->> 'id')::uuid) then
       v_row := null;
     end if;
 
@@ -816,8 +947,26 @@ reset role;
 do $tail$
 declare v_n int; v_mode boolean; v_kind_count int; v_body text;
 begin
-  if to_regprocedure('clara._sweep_events_with_effect(uuid)') is null then
+  if to_regprocedure('clara._sweep_events_with_effect()') is null then
     raise exception 'activity_sweep_attribution tail: clara._sweep_events_with_effect is absent' using errcode = 'CLR10';
+  end if;
+  if to_regprocedure('clara._sweep_event_has_effect(uuid)') is null then
+    raise exception 'activity_sweep_attribution tail: clara._sweep_event_has_effect is absent' using errcode = 'CLR10';
+  end if;
+  -- The optional-parameter form is GONE, not merely unused: one statement serving both callers is
+  -- what flipped to a generic Nested Loop on the 6th call of a session (0183 section 1).
+  if to_regprocedure('clara._sweep_events_with_effect(uuid)') is not null then
+    raise exception 'activity_sweep_attribution tail: the optional-parameter clara._sweep_events_with_effect(uuid) still resolves -- the two callers must not share one cached plan'
+      using errcode = 'CLR10';
+  end if;
+  -- Section 0b's two indexes, without which the kept-set read is a scan of the firm's whole
+  -- append-only sweep history.
+  select count(*) into v_n from pg_class c join pg_namespace n on n.oid = c.relnamespace
+   where n.nspname = 'clara' and c.relkind = 'i'
+     and c.relname in ('ix_domain_events_sweep_run', 'ix_sweep_runs_firm_effect');
+  if v_n <> 2 then
+    raise exception 'activity_sweep_attribution tail: expected both sweep-attribution indexes, found %', v_n
+      using errcode = 'CLR10';
   end if;
   if to_regprocedure('clara.list_spoken_for_documents(uuid)') is null then
     raise exception 'activity_sweep_attribution tail: clara.list_spoken_for_documents is absent' using errcode = 'CLR10';
@@ -843,9 +992,14 @@ begin
     raise exception 'activity_sweep_attribution tail: get_activity_event is not SECURITY INVOKER' using errcode = 'CLR10';
   end if;
   select prosecdef into v_mode from pg_proc
-   where oid = 'clara._sweep_events_with_effect(uuid)'::regprocedure;
+   where oid = 'clara._sweep_events_with_effect()'::regprocedure;
   if v_mode is distinct from true then
     raise exception 'activity_sweep_attribution tail: _sweep_events_with_effect is not SECURITY DEFINER' using errcode = 'CLR10';
+  end if;
+  select prosecdef into v_mode from pg_proc
+   where oid = 'clara._sweep_event_has_effect(uuid)'::regprocedure;
+  if v_mode is distinct from true then
+    raise exception 'activity_sweep_attribution tail: _sweep_event_has_effect is not SECURITY DEFINER' using errcode = 'CLR10';
   end if;
   select prosecdef into v_mode from pg_proc
    where oid = 'clara.list_spoken_for_documents(uuid)'::regprocedure;
@@ -853,25 +1007,25 @@ begin
     raise exception 'activity_sweep_attribution tail: list_spoken_for_documents is not SECURITY DEFINER' using errcode = 'CLR10';
   end if;
 
-  -- PUBLIC holds no EXECUTE on any of the four functions this file touches.
+  -- PUBLIC holds no EXECUTE on any of the five functions this file touches.
   select count(*) into v_n from information_schema.routine_privileges
    where routine_schema = 'clara'
      and routine_name in ('list_activity', 'get_activity_event', '_sweep_events_with_effect',
-                           'list_spoken_for_documents')
+                           '_sweep_event_has_effect', 'list_spoken_for_documents')
      and grantee = 'PUBLIC';
   if v_n <> 0 then
     raise exception 'activity_sweep_attribution tail: PUBLIC holds an EXECUTE grant on one of this file''s functions'
       using errcode = 'CLR10';
   end if;
 
-  -- clara_authenticated holds EXECUTE on all four, and on nothing else new (this file grants no
+  -- clara_authenticated holds EXECUTE on all five, and on nothing else new (this file grants no
   -- other role anything).
   select count(*) into v_n from information_schema.role_routine_grants
    where routine_schema = 'clara' and grantee = 'clara_authenticated'
      and routine_name in ('list_activity', 'get_activity_event', '_sweep_events_with_effect',
-                           'list_spoken_for_documents');
-  if v_n <> 4 then
-    raise exception 'activity_sweep_attribution tail: expected exactly 4 clara_authenticated grants across this file''s functions, found %', v_n
+                           '_sweep_event_has_effect', 'list_spoken_for_documents');
+  if v_n <> 5 then
+    raise exception 'activity_sweep_attribution tail: expected exactly 5 clara_authenticated grants across this file''s functions, found %', v_n
       using errcode = 'CLR10';
   end if;
   if exists (
@@ -895,5 +1049,5 @@ begin
       using errcode = 'CLR10';
   end if;
 
-  raise notice 'activity_sweep_attribution tail: OK -- clara.list_activity/get_activity_event still SECURITY INVOKER, PUBLIC-revoked, clara_authenticated-granted, and now exclude a zero-effect sweep.run_completed row (relabelling a kept one to kind=agent, actor untouched); clara._sweep_events_with_effect is the one SECURITY DEFINER helper this needed (bookkeeper-floored and self-scoped to the session firm inside its own body, read once per call rather than once per row, clara.sweep_runs itself still ungranted to clara_authenticated); clara.list_spoken_for_documents is a new bookkeeper+ SECURITY DEFINER read, clara_authenticated-only, reachable by no agent/wake/runtime role, unioning a live entry_evidence_links binding with an approved not-reversed document-coding binding.';
+  raise notice 'activity_sweep_attribution tail: OK -- clara.list_activity/get_activity_event still SECURITY INVOKER, PUBLIC-revoked, clara_authenticated-granted, and now exclude a zero-effect sweep.run_completed row (relabelling a kept one to kind=agent, actor untouched); clara._sweep_events_with_effect() (the feed''s set) and clara._sweep_event_has_effect(uuid) (the detail door''s point lookup) are the two SECURITY DEFINER helpers this needed -- ONE query shape each, so neither caller can drag the other onto a generic plan, both bounded by ix_sweep_runs_firm_effect/ix_domain_events_sweep_run (bookkeeper-floored and self-scoped to the session firm inside its own body, read once per call rather than once per row, clara.sweep_runs itself still ungranted to clara_authenticated); clara.list_spoken_for_documents is a new bookkeeper+ SECURITY DEFINER read, clara_authenticated-only, reachable by no agent/wake/runtime role, unioning a live entry_evidence_links binding with an approved not-reversed document-coding binding.';
 end $tail$;
