@@ -20,7 +20,7 @@ import {
   auditForQuestion, getWorkPendingQuestion,
   twoFields, oneField, twoFieldAnswer, questionPayload, QREASON, CLR,
   assertPair, assertRaises, detailOf, rootQuery, opk, workRow, taskRow, freshWorkClient, basis,
-  WCHART,
+  WCHART, cloneRunningTask, raceTwoOpens,
 } from "./work-question-fixtures.mjs";
 
 let world = null;
@@ -514,4 +514,60 @@ test("w629.answer.one-effect a single-field question answered once leaves the Wo
     "answer.one-effect: exactly one question, exactly one answer");
   assert.equal((await taskRow(p.taskId)).status, "awaiting_input");
   void basis;
+});
+
+// ===========================================================================================
+// 4 · ONE PENDING QUESTION PER WORK — the invariant `get_work_pending_question` assumes.
+//
+// Reviewed finding: `question_version` was minted by a `max+1` read that took NO lock, while §D's
+// own docblock claimed it was counted "under the row lock the insert takes on the partial unique
+// index". `clara.agent_tasks(work_id)` is non-unique (0178:519), so two tasks of ONE Work could
+// each read max=0; whatever the outcome was (a second pending row on one Work, or a raw 23505
+// escaping the typed roster), neither is what the file says happens. Both cells below are about
+// the OUTCOME a caller sees, not about the mechanism that produces it.
+// ===========================================================================================
+
+test("w629.open.one-per-work a SECOND task of the same Work cannot open a second pending question", async (t) => {
+  if (await gateQuestion(t)) return;
+  // Both tasks reach `running` BEFORE either asks, so the second open is refused by the
+  // question's own linearisation rather than by the task-status gate in front of it.
+  const admitted = await admitJournalWork({ client: A1(), author: BOB() });
+  await claimWorkRun({ task: admitted.task_id, runId: opk("w629-one-per-work") });
+  const second = await cloneRunningTask(admitted.task_id);
+  const opened = await openWorkQuestion({ task: admitted.task_id });
+  const p = { workId: admitted.work_id, taskId: admitted.task_id, questionId: opened.question_id };
+  assert.equal((await taskRow(second)).status, "running",
+    "open.one-per-work: the second task is genuinely open, not parked or terminal");
+  await assertPair(CLR.conflict, QREASON.questionAlreadyPending,
+    () => openWorkQuestion({ task: second }),
+    "open.one-per-work");
+  const rows = await interruptionsForWork(p.workId);
+  assert.equal(rows.length, 1,
+    "open.one-per-work: a Work parked on a question has exactly ONE pending row, whatever asked");
+  assert.equal(rows[0].question_version, 1);
+  const pending = await getWorkPendingQuestion(BOB(), p.workId);
+  assert.equal(pending.question_id, p.questionId,
+    "open.one-per-work: …so 'the question this Work is parked on' is an answer, not a choice");
+});
+
+test("w629.open.raced two CONCURRENT opens on one Work: one wins, the loser is TYPED", async (t) => {
+  if (await gateQuestion(t)) return;
+  const admitted = await admitJournalWork({ client: A1(), author: BOB() });
+  await claimWorkRun({ task: admitted.task_id, runId: opk("w629-race") });
+  const second = await cloneRunningTask(admitted.task_id);
+
+  const race = await raceTwoOpens({ taskA: admitted.task_id, taskB: second });
+  assert.equal(race.provedBlocked, true,
+    "open.raced: the schedule must actually BLOCK — a race that never contended proves nothing");
+  assert.equal(race.a.ok, true, `open.raced: the holder wins (${race.a.message ?? ""})`);
+  assert.equal(race.a.result.question_version, 1);
+  assert.equal(race.b.ok, false, "open.raced: the loser does NOT open a second question");
+  assert.equal(race.b.code, CLR.conflict,
+    `open.raced: the loser is refused inside this file's roster, never a raw SQLSTATE (got ${race.b.code}: ${race.b.message})`);
+  assert.equal(race.b.reason, QREASON.questionAlreadyPending,
+    "open.raced: …by the SAME typed reason a serialised second open gets");
+
+  const rows = await interruptionsForWork(admitted.work_id);
+  assert.equal(rows.length, 1, "open.raced: exactly one question row exists on the Work");
+  assert.equal(rows.filter((r) => r.status === "pending").length, 1);
 });

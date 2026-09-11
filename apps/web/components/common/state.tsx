@@ -87,6 +87,7 @@ export function StateBanner({
   title,
   code,
   action,
+  silent = false,
   children,
   className,
 }: {
@@ -103,13 +104,24 @@ export function StateBanner({
   code?: ReactNode;
   /** A recovery control (a Retry button), where one genuinely exists. */
   action?: ReactNode;
+  /** DROP THE LIVE REGION, keeping everything else (#629, §5's one-announcement-owner rule).
+   *
+   *  Default FALSE, so all 57 existing call sites are byte-identical. It is opted into by a banner
+   *  rendered INSIDE a surface that already owns an announcement boundary — the Clara transcript is
+   *  the case that forced it: a question card mounted there rendered up to six computed
+   *  `role="alert"`/`"status"` boxes inside a log that announces its own updates, so one accepted
+   *  answer was announced twice and a converging card announced a state the transcript had already
+   *  spoken. Silent means UNANNOUNCED, never hidden: the same text, in the same reading order, with
+   *  the same tint — an assistive-technology user reads it exactly where a sighted one sees it. */
+  silent?: boolean;
   children: ReactNode;
   className?: string;
 }) {
   return (
     <div
-      // A failure or a withheld capability interrupts; a plain state does not.
-      role={tone === "error" || tone === "warning" ? "alert" : "status"}
+      // A failure or a withheld capability interrupts; a plain state does not — unless the caller
+      // owns an announcement boundary of its own, in which case this box says nothing on its own.
+      role={silent ? undefined : tone === "error" || tone === "warning" ? "alert" : "status"}
       className={cn(
         // `max-w-prose` on the BOX, not on the text inside it: measured in the
         // harness at 1440px, a full-bleed tinted bar carrying one sentence

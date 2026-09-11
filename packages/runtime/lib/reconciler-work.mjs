@@ -29,14 +29,20 @@
 // (at most) one leader poll interval. With the defaults that is ~2s + ~2s ≈ 4s worst case.
 // Both are env-tunable, and the route-originated path still enqueues immediately.
 
-const WORK_GRACE_REENQUEUE = process.env.CLARA_WORK_REENQUEUE_GRACE || "2 seconds";
+// THE ONE run-not-found predicate in this package, imported from the module that DECLARES it
+// (reconciler-documents.mjs) rather than restated. The local copy this replaces tested
+// `/not\s*found/i` over the message, which matches every estate refusal containing those two
+// words — and a false positive here classifies a LIVE run `lost` and settles its Work `failed`.
+// The declared predicate requires the error to name a RUN. Imported from the declaring module,
+// not from reconciler.mjs's re-export, so this module still has no edge back into the sweep
+// that calls it.
+import { isRunNotFound } from "./reconciler-documents.mjs";
 
-/** WDK "run not found" — the engine forgot a run we still have an id for (reconciler.mjs's own
- *  predicate, kept local so this module has no import cycle back into it). */
-function isRunNotFound(err) {
-  const m = String(err?.message ?? err ?? "");
-  return /not\s*found/i.test(m) || err?.code === "RUN_NOT_FOUND";
-}
+const WORK_GRACE_REENQUEUE = process.env.CLARA_WORK_REENQUEUE_GRACE || "2 seconds";
+/** How long a `hook_missing` stamp must REST before it is evidence. See §B's own comment and
+ *  `confirmQuestionUnreachable` below; the default follows the re-enqueue grace because both
+ *  answer the same question — has the estate had a fair chance to finish what it started. */
+const WORK_QUESTION_GRACE = process.env.CLARA_WORK_QUESTION_GRACE || WORK_GRACE_REENQUEUE;
 
 /**
  * THE BOOKS COME FIRST. Reviewed finding (#623 R1): every arm below used to translate the
@@ -178,28 +184,95 @@ export function committedWorkResult(result) {
  * and never loses it, while a FALSE answer must stay re-askable so a long-lived process picks the
  * new lane up after the migration lands.
  *
+ * IT IS GATED ON A GRACE, and the window that makes the grace necessary is real: the control
+ * listener probes BETWEEN the engine consuming the hook and the resumed run's own
+ * `markRunningStep`, so it can see a live run with no hook while the answer is in fact landing.
+ * A stamp written moments ago is therefore not yet evidence of anything; one that has RESTED
+ * past the grace is. `delivery_state_at` is the instant the listener wrote the state (0180);
+ * `created_at` stands in for a row stamped by an image that predates that column, which is
+ * always older and so reproduces today's ungraced behaviour for it exactly.
+ *
  * @param {import("pg").ClientBase} client  a clara_runtime connection
  * @param {string} taskId
+ * @param {{graceInterval?: string}} [opts]
  */
 let deliveryStateColumnPresent = false;
-export async function questionUnreachableForTask(client, taskId) {
+export async function questionUnreachableForTask(client, taskId, opts = {}) {
+  const graceInterval = opts.graceInterval ?? WORK_QUESTION_GRACE;
   if (!deliveryStateColumnPresent) {
     const probe = await client.query(
       `select count(*)::int as n from information_schema.columns
         where table_schema = 'clara' and table_name = 'agent_interruptions'
-          and column_name in ('work_id','delivery_state')`,
+          and column_name in ('work_id','delivery_state','delivery_state_at')`,
     );
-    deliveryStateColumnPresent = (probe.rows[0]?.n ?? 0) === 2;
+    deliveryStateColumnPresent = (probe.rows[0]?.n ?? 0) === 3;
     if (!deliveryStateColumnPresent) return false;
   }
   const r = await client.query(
     `select 1 from clara.agent_interruptions
       where task_id = $1 and work_id is not null
         and delivery_state = 'hook_missing' and delivered_at is null
+        and coalesce(delivery_state_at, created_at) < clock_timestamp() - ($2)::interval
       limit 1`,
-    [taskId],
+    [taskId, graceInterval],
   );
   return r.rowCount > 0;
+}
+
+/**
+ * ASK AGAIN, RIGHT BEFORE SETTLING (#629 reviewed finding).
+ *
+ * The grace above buys TIME; this buys a second LOOK, and the two catch different halves of the
+ * same race. A resume that landed DURING the grace leaves the stamp old and the Work perfectly
+ * alive, and a belt that settled on the aged stamp alone would expire a Work that had already
+ * continued — telling a human their answer could not be delivered, about an answer that
+ * arrived. Three questions, and every one of them is a reason NOT to settle:
+ *
+ *   · has the TASK left `awaiting_input`? Then `markRunningStep` ran and the answer landed.
+ *   · is the question still resting unreachable and undelivered? A late delivery clears it.
+ *   · does the ENGINE still say the run is in flight? A terminal run is `terminalForWork`'s
+ *     arm, not this one's, and the next sweep will take it there with the right terminal.
+ *
+ * A probe that FAILS decides nothing and returns false: the row stays open and the next sweep
+ * asks again. Not knowing is never rounded to "expire it".
+ *
+ * @param {import("pg").ClientBase} client  a clara_runtime connection
+ * @param {string} taskId
+ * @param {{getRun?:Function, log?:Function}} deps
+ */
+export async function confirmQuestionUnreachable(client, taskId, { getRun, log = () => {} } = {}) {
+  let task;
+  try {
+    const r = await client.query(
+      "select status, workflow_run_id from clara.agent_tasks where id = $1", [taskId]);
+    task = r.rows[0] ?? null;
+  } catch (err) {
+    log(`[reconcile] accounting-work re-probe failed task=${taskId}: ${err?.message ?? err}`);
+    return false;
+  }
+  if (task === null || task.status !== "awaiting_input") return false;
+  try {
+    const still = await client.query(
+      `select 1 from clara.agent_interruptions
+        where task_id = $1 and work_id is not null
+          and delivery_state = 'hook_missing' and delivered_at is null
+        limit 1`,
+      [taskId],
+    );
+    if (still.rowCount === 0) return false;
+  } catch (err) {
+    log(`[reconcile] accounting-work question re-probe failed task=${taskId}: ${err?.message ?? err}`);
+    return false;
+  }
+  if (typeof getRun !== "function" || !task.workflow_run_id) return true;
+  try {
+    const status = await getRun(task.workflow_run_id).status;
+    return !(status === "completed" || status === "failed" || status === "cancelled");
+  } catch (err) {
+    if (isRunNotFound(err)) return false;   // the engine forgot the run — terminalForWork's arm
+    log(`[reconcile] accounting-work run re-probe failed task=${taskId}: ${err?.message ?? err}`);
+    return false;
+  }
 }
 
 export async function workResultForTask(client, taskId) {
@@ -263,10 +336,13 @@ export async function settleWorkTerminal(client, taskId, outcome, errorCode, err
  *
  * @param {import("pg").ClientBase} client  a clara_runtime connection
  * @param {{enqueueClaraWork?:Function, getRun?:Function, onlyFirm?:string|null,
- *          graceInterval?:string, log?:Function}} deps
+ *          graceInterval?:string, questionGrace?:string, log?:Function}} deps
  */
 export async function reconcileAccountingWorkTasks(client, deps) {
-  const { enqueueClaraWork, getRun, onlyFirm = null, graceInterval = WORK_GRACE_REENQUEUE, log = () => {} } = deps;
+  const {
+    enqueueClaraWork, getRun, onlyFirm = null, graceInterval = WORK_GRACE_REENQUEUE,
+    questionGrace = WORK_QUESTION_GRACE, log = () => {},
+  } = deps;
   const out = {
     workReenqueued: 0,
     // The receipt-aware arm gets its OWN counter for the same C34.1 reason the other three have
@@ -330,11 +406,14 @@ export async function reconcileAccountingWorkTasks(client, deps) {
     let unreachable = false;
     if (!engine && t.status === "awaiting_input") {
       try {
-        unreachable = await questionUnreachableForTask(client, t.id);
+        unreachable = await questionUnreachableForTask(client, t.id, { graceInterval: questionGrace });
       } catch (err) {
         log(`[reconcile] accounting-work question probe failed task=${t.id}: ${err?.message ?? err}`);
         continue;
       }
+      // …and ASK AGAIN before acting on it. The grace says the stamp is old; the second probe
+      // says the world still agrees with it.
+      if (unreachable) unreachable = await confirmQuestionUnreachable(client, t.id, { getRun, log });
     }
     if (!engine && !unreachable) continue; // still in flight
     // ASK THE BOOKS BEFORE NAMING A TERMINAL. A read failure here does NOT fall through to the

@@ -61,7 +61,9 @@
 --   CLR10 wrong_task_kind          + kind; the task is not an accounting_work run
 --   CLR10 work_unbound             an accounting_work task with no Work row
 --   CLR13 hook_token_bound         the token is already bound to a DIFFERENT task
---   CLR13 question_already_pending another pending question already blocks this task
+--   CLR13 question_already_pending another pending question already blocks this task OR this
+--                                 Work; also the LOSER of two concurrent opens on one Work,
+--                                 re-raised from the (work_id, question_version) unique index
 --   CLR13 task_not_running         the task is not `running`, so it cannot park
 --
 -- clara.answer_work_question                                 (human lane — THE FIRST-ANSWER GATE)
@@ -159,7 +161,7 @@ set role clara_fn_owner;
 -- =====================================================================================
 -- §A  THE WORK IDENTITY, THE TYPED FIELDS AND THE DELIVERY STATE.
 --
--- ELEVEN COLUMNS, EVERY ONE NULLABLE OR DEFAULTED. A chat clarify written by
+-- TWELVE COLUMNS, EVERY ONE NULLABLE OR DEFAULTED. A chat clarify written by
 -- `clara.open_interruption` gets `work_id NULL`, `fields '[]'`, `question_version 1` and
 -- `delivery_state 'pending'`, and every predicate below is `work_id is not null`-gated, so the
 -- chat lane's behaviour is byte-identical after this migration.
@@ -183,7 +185,8 @@ alter table clara.agent_interruptions
   add column answered_role    text,
   add column delivery_state   text not null default 'pending'
                               check (delivery_state in ('pending','leased','delivered','hook_missing')),
-  add column delivery_attempts int not null default 0 check (delivery_attempts >= 0);
+  add column delivery_attempts int not null default 0 check (delivery_attempts >= 0),
+  add column delivery_state_at timestamptz;
 
 comment on column clara.agent_interruptions.work_id is
   '#629: the clara.accounting_work row this question belongs to, or NULL for a chat clarify. Every '
@@ -191,6 +194,12 @@ comment on column clara.agent_interruptions.work_id is
 comment on column clara.agent_interruptions.question_version is
   '#629: 1 + the number of interruptions this Work had already opened when this row was written. '
   'Immutable. A re-asked question is a NEW row with the NEXT version; the old row stays as history.';
+comment on column clara.agent_interruptions.delivery_state_at is
+  '#629: WHEN delivery_state was last written, by the control listener. It is what makes the '
+  'Work reconciler''s GRACE real: a `hook_missing` stamped moments ago may still be an answer '
+  'landing between the hook consumption and the resumed run''s markRunningStep, and settling on '
+  'it would expire a Work that is about to continue. NULL on every row written before 0180 and '
+  'on every chat clarify.';
 comment on column clara.agent_interruptions.delivery_state is
   '#629: the RUNTIME''s record of whether the terminal answer reached the parked run. '
   'pending -> leased -> delivered, or leased -> hook_missing when the engine hook is gone and the '
@@ -220,10 +229,19 @@ create index ix_agent_interruptions_delivery
 --   FROZEN (the question's identity and content): work_id, client_id, question_version,
 --     basis_digest, fields, reason, source_ref. A question whose FIELDS could be rewritten after
 --     a human started answering it is a question nobody can be held to.
---   FREE (runtime/answer bookkeeping): answer_key, answered_role, delivery_state,
---     delivery_attempts — with two ratchets, because "free" is not the same as "arbitrary":
---     `delivered` is TERMINAL for delivery_state (nothing un-delivers an answer), and
---     delivery_attempts only ever increases.
+--   FREE (runtime bookkeeping): delivery_state, delivery_state_at, delivery_attempts — with
+--     two ratchets, because "free" is not the same as "arbitrary": `delivered` is TERMINAL for
+--     delivery_state (nothing un-delivers an answer), and delivery_attempts only ever increases.
+--   FROZEN ONCE THE QUESTION IS TERMINAL (the answer itself): answer, answered_by, answered_at,
+--     answer_key, answered_role. They are WRITABLE while the row is still `pending`, because
+--     that is the transition `clara.answer_work_question` and `clara.answer_interruption` make;
+--     the instant the row leaves `pending` they are the RECORD of who answered what, and the
+--     record is the whole point of this ticket. 0006's own belt does not cover them — it was
+--     written before an answer was a shared, re-rendered artefact — and `clara_runtime` holds
+--     UPDATE on this table (0006:784), so without this ratchet the lane that executes model
+--     output could rewrite an accepted human answer after the fact. THE STATUS ITSELF IS LEFT
+--     FREE: 0006's transition allowlist already governs it, and `clara.expire_due_interruptions`
+--     and the settle cascades legitimately move a terminal-adjacent row.
 --
 -- A SEPARATE TRIGGER, NOT A REPLACEMENT. 0006's body is unedited; both fire BEFORE UPDATE and
 -- PostgreSQL orders them by NAME, so `t_interruption_update` runs first and this one second.
@@ -234,6 +252,7 @@ create function clara._tf_work_question_immutable() returns trigger
 declare
   v_frozen text[] := array['work_id','client_id','question_version','basis_digest','fields',
                            'reason','source_ref'];
+  v_answer text[] := array['answer','answered_by','answered_at','answer_key','answered_role'];
   c text;
 begin
   -- SCOPED TO WORK QUESTIONS, and it is the same scoping every other predicate in this file
@@ -250,6 +269,18 @@ begin
           detail=jsonb_build_object('reason','work_question_immutable','column',c)::text;
     end if;
   end loop;
+  -- THE TERMINAL RATCHET ON THE ANSWER. Once the question has left `pending` its answer is the
+  -- RECORD three surfaces render and an auditor reads; nothing rewrites it, including the runtime
+  -- lane that holds UPDATE on this table.
+  if old.status <> 'pending' then
+    foreach c in array v_answer loop
+      if (to_jsonb(new) -> c) is distinct from (to_jsonb(old) -> c) then
+        raise exception 'a settled question''s answer column % is immutable', c
+          using errcode='CLR08',
+            detail=jsonb_build_object('reason','work_answer_immutable','column',c)::text;
+      end if;
+    end loop;
+  end if;
   if old.delivery_state = 'delivered' and new.delivery_state <> 'delivered' then
     raise exception 'a delivered question is never un-delivered'
       using errcode='CLR08', detail='{"reason":"work_question_immutable","column":"delivery_state"}';
@@ -527,8 +558,19 @@ revoke all on function clara._work_question_record(uuid) from public;
 --     first-answer gate below would have nothing to check.
 --   * work_id / client_id / basis_digest are STAMPED FROM THE WORK ROW, never from an argument.
 --     That is what makes `basis_changed` a wall rather than a formality at answer time.
---   * question_version is COUNTED, in the same statement, under the row lock the insert takes on
---     the partial unique index. Two racing opens cannot both mint version N.
+--   * question_version is COUNTED under a ROW LOCK ON THE WORK, taken immediately after the
+--     task transition (so the lock ORDER stays the estate's own task-then-Work order, the one
+--     0178's status mirror already establishes on every agent_tasks status write). The count
+--     alone is not atomic — it is `max+1` over a snapshot — so the lock is what serialises two
+--     opens on DIFFERENT tasks of ONE Work (`agent_tasks(work_id)` is deliberately non-unique,
+--     0178:519), and the partial unique index on (work_id, question_version) is the belt behind
+--     it: a duplicate that reached the insert anyway is CAUGHT and re-raised as the SAME typed
+--     CLR13 `question_already_pending` the serialised loser gets, never as a raw 23505 outside
+--     the roster this file publishes.
+--   * ONE PENDING QUESTION PER WORK, not merely per task. `clara.get_work_pending_question`
+--     answers "the question this Work is parked on" with a single row, and two pending rows
+--     would make that answer arbitrary — the exact "two records of the question this Work is
+--     waiting on, each believing itself authoritative" this file's own header refuses.
 --   * the fields are validated HERE, before a human ever sees them: a question declaring a
 --     malformed field would be unanswerable, and the honest place to refuse it is the lane that
 --     wrote it.
@@ -538,6 +580,7 @@ create function clara.open_work_question(p_task uuid, p_hook_token text, p_quest
   language plpgsql security definer set search_path = clara, pg_temp as $$
 declare
   v_id uuid; v_task uuid; v_upd int; t record; w record; v_version int; v_expires timestamptz;
+  v_constraint text;
 begin
   if p_hook_token is null or p_hook_token ~ '^\s*$' then
     raise exception 'a hook_token is required' using errcode='CLR10',
@@ -574,10 +617,13 @@ begin
   select aw.id, aw.client_id, aw.basis_digest into w
     from clara.accounting_work aw where aw.id = t.work_id;
 
-  -- (2) Linearisation: a DIFFERENT pending question already blocks this task.
-  if exists (select 1 from clara.agent_interruptions where task_id = p_task and status = 'pending') then
-    raise exception 'a question is already pending for task %', p_task using errcode='CLR13',
-      detail='{"reason":"question_already_pending"}';
+  -- (2) Linearisation, the fast path: a DIFFERENT pending question already blocks this task,
+  --     or another task of the SAME Work is already parked on one. Both raise the same typed
+  --     refusal because they are the same fact to the caller: this Work is already waiting.
+  if exists (select 1 from clara.agent_interruptions
+              where status = 'pending' and (task_id = p_task or work_id = w.id)) then
+    raise exception 'a question is already pending for task % (work %)', p_task, w.id
+      using errcode='CLR13', detail='{"reason":"question_already_pending"}';
   end if;
 
   -- (3) Conditional transition; zero rows ⇒ not running ⇒ CLR13 and NO insert.
@@ -596,16 +642,42 @@ begin
       detail='{"reason":"task_not_running"}';
   end if;
 
+  -- (4) SERIALISE ON THE WORK, then ask again under the lock. The transition above has already
+  --     locked the task and (through 0178's status mirror) touched the Work, so taking the Work
+  --     row here keeps the estate's task-then-Work lock order rather than inverting it. Everything
+  --     after this point reads a snapshot taken AFTER any competing open committed.
+  perform 1 from clara.accounting_work where id = w.id for no key update;
+  if exists (select 1 from clara.agent_interruptions
+              where status = 'pending' and (task_id = p_task or work_id = w.id)) then
+    raise exception 'a question is already pending for work % (raced)', w.id
+      using errcode='CLR13', detail='{"reason":"question_already_pending"}';
+  end if;
+
   select coalesce(max(question_version), 0) + 1 into v_version
     from clara.agent_interruptions where work_id = w.id;
 
-  insert into clara.agent_interruptions
-      (task_id, hook_token, question, expires_at, work_id, client_id, question_version,
-       basis_digest, fields, reason, source_ref)
-    values (p_task, p_hook_token, coalesce(p_question, '{}'::jsonb), now() + interval '14 days',
-       w.id, w.client_id, v_version, w.basis_digest, p_fields,
-       nullif(btrim(coalesce(p_reason,'')), ''), p_source_ref)
-    returning id, expires_at into v_id, v_expires;
+  -- (5) THE INSERT, with the unique indexes as the belt behind the lock. A duplicate that reaches
+  --     here anyway is re-raised INSIDE this file's published roster; a raw 23505 escaping a
+  --     runtime-lane verb would be classified `conflict` by claraWork's router and settle a Work
+  --     `refused` with "that operation identity is already used by a different payload", which is
+  --     not what happened.
+  begin
+    insert into clara.agent_interruptions
+        (task_id, hook_token, question, expires_at, work_id, client_id, question_version,
+         basis_digest, fields, reason, source_ref)
+      values (p_task, p_hook_token, coalesce(p_question, '{}'::jsonb), now() + interval '14 days',
+         w.id, w.client_id, v_version, w.basis_digest, p_fields,
+         nullif(btrim(coalesce(p_reason,'')), ''), p_source_ref)
+      returning id, expires_at into v_id, v_expires;
+  exception when unique_violation then
+    get stacked diagnostics v_constraint = constraint_name;
+    if v_constraint = 'agent_interruptions_hook_token_key' then
+      raise exception 'hook_token is already bound to a different task' using errcode='CLR13',
+        detail='{"reason":"hook_token_bound"}';
+    end if;
+    raise exception 'a question is already pending for work % (index %)', w.id, coalesce(v_constraint,'?')
+      using errcode='CLR13', detail='{"reason":"question_already_pending"}';
+  end;
 
   return jsonb_build_object('question_id', v_id, 'work_id', w.id,
     'question_version', v_version, 'expires_at', v_expires, 'replayed', false);
@@ -800,6 +872,17 @@ grant execute on function clara.answer_work_question(uuid,int,jsonb,text) to cla
 -- `clara.accounting_work` (for `work_status`) not reachable at all under the human role, because
 -- 0178 grants no client-scoping predicate that PostgREST could express here in one request. One
 -- door returning one record is what makes "the same record on B3, B4 and B6" mechanical.
+--
+-- THE BOOKKEEPER FLOOR ON THESE TWO READS IS ERGONOMIC, NOT A CONFIDENTIALITY BOUNDARY, and
+-- saying so is the honest reading rather than a hedge. `clara.agent_interruptions` carries a
+-- FIRM-WIDE select policy for `clara_authenticated` (0006), which is the estate's own ruling
+-- that a clarification is firm-visible — so a VIEWER who is refused here can still SELECT the
+-- same row, its question and its answer directly through PostgREST. What the floor buys is that
+-- a surface offering an ANSWER control does not hand it to somebody the write door will refuse
+-- anyway (`clara.answer_work_question` holds the real wall at bookkeeper+). A TRUE read
+-- boundary would have to be a row-level policy on 0006's table, which would change what every
+-- chat clarify is visible to as a side effect of a Work ticket — the one thing this migration's
+-- header promises it does not do. Recorded as a finding rather than dressed up as a wall.
 -- =====================================================================================
 create function clara.get_work_question(p_question uuid) returns jsonb
   language plpgsql stable security definer set search_path = clara, pg_temp as $$
@@ -1153,14 +1236,15 @@ begin
     raise exception '#629 tail: a wake role holds EXECUTE on one of this migration''s doors' using errcode='CLR10';
   end if;
 
-  -- The eleven columns are on the table, and the partial unique index behind `question_version`
+  -- The twelve columns are on the table, and the partial unique index behind `question_version`
   -- is there (an identity without its index is a label).
   select count(*) into v_n from information_schema.columns
    where table_schema='clara' and table_name='agent_interruptions'
      and column_name in ('work_id','client_id','question_version','basis_digest','fields','reason',
-       'source_ref','answer_key','answered_role','delivery_state','delivery_attempts');
-  if v_n <> 11 then
-    raise exception '#629 tail: % of 11 new agent_interruptions columns are present', v_n using errcode='CLR10';
+       'source_ref','answer_key','answered_role','delivery_state','delivery_attempts',
+       'delivery_state_at');
+  if v_n <> 12 then
+    raise exception '#629 tail: % of 12 new agent_interruptions columns are present', v_n using errcode='CLR10';
   end if;
   if to_regclass('clara.uq_agent_interruptions_work_version') is null then
     raise exception '#629 tail: the (work_id, question_version) unique index is absent' using errcode='CLR10';

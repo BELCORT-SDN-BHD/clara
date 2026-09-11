@@ -10,13 +10,20 @@
 // this runtime — the cell proves it — so a parser built on that multiplication would post 123434
 // or 123435 depending on the rounding mode somebody picked. Exact cents is an accounting law here,
 // not a preference.
+//
+// THERE IS EXACTLY ONE MONEY PARSER IN THIS PRODUCT, and these cells drive IT (`lib/bank/money.ts`
+// `parseAmountToCents`) rather than a local re-implementation. The re-implementation this file used
+// to test stripped every comma before validating — the precise defect `lib/bank/money.ts:65-74`
+// records off PR #489's first finding — so `1234,56`, a European-style decimal comma and a live
+// day-one input on a Malaysian bank workbench, parsed as RM123,456.00: a HUNDRED-FOLD error, with
+// no refusal and no echo of what was understood. The comma roster below is that finding, pinned on
+// the question form's own lane.
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
   buildAnswer,
-  centsToText,
   isBlank,
   isIsoDate,
   isRequired,
@@ -62,10 +69,26 @@ test("money parses to EXACT integer cents, by string surgery and never by multip
 
   assert.equal(parseMoneyToCents("1234.35"), 123435);
   assert.equal(parseMoneyToCents("1,200.00"), 120000);
+  assert.equal(parseMoneyToCents("1,000.00"), 100000, "a strictly grouped amount still parses exactly");
   assert.equal(parseMoneyToCents("1200"), 120000);
-  assert.equal(parseMoneyToCents(".50"), 50);
+  assert.equal(parseMoneyToCents("0.5"), 50, "one decimal place is a real amount, padded not guessed");
   assert.equal(parseMoneyToCents("-42.07"), -4207);
   assert.equal(parseMoneyToCents("0"), 0);
+});
+
+test("money is THE checked parser: a decimal comma is REFUSED, never read as thousands", () => {
+  // PR #489 FINDING 1, on this lane. Each of these silently became a different number under a
+  // blanket comma strip; the first one became RM123,456.00 for somebody who typed RM1,234.56.
+  assert.equal(parseMoneyToCents("1234,56"), null, "a decimal comma is not a thousands separator");
+  assert.equal(parseMoneyToCents("12,3"), null, "…and neither is a comma in any other position");
+  assert.equal(parseMoneyToCents("1,23,456.00"), null, "grouping is groups of three or nothing");
+  assert.equal(parseMoneyToCents("1 234.00"), null, "a space is not a separator this product accepts");
+  assert.equal(parseMoneyToCents(".50"), null, "an amount states its whole part, even when it is zero");
+  assert.equal(parseMoneyToCents("12."), null);
+  assert.equal(parseMoneyToCents("-"), null, "a lone sign is not yet an amount");
+  assert.equal(parseMoneyToCents("."), null);
+  assert.equal(parseMoneyToCents("0.005"), null, "a tenth of a cent is not a number this lane has");
+  assert.equal(parseMoneyToCents("1e3"), null);
 });
 
 test("money REFUSES what it cannot represent, rather than rounding it into existence", () => {
@@ -74,11 +97,10 @@ test("money REFUSES what it cannot represent, rather than rounding it into exist
   }
 });
 
-test("cents render back exactly, including under a ringgit and negative", () => {
-  assert.equal(centsToText(123435), "1234.35");
-  assert.equal(centsToText(5), "0.05");
-  assert.equal(centsToText(0), "0.00");
-  assert.equal(centsToText(-4207), "-42.07");
+test("the form's money parser IS lib/bank/money's, by identity — not a fourth copy of it", async () => {
+  const { parseAmountToCents } = await import("../bank/money");
+  assert.equal(parseMoneyToCents, parseAmountToCents,
+    "one product, one money parser: a second implementation is a second set of bugs");
 });
 
 test("an ISO date must be a REAL calendar date, not merely the right shape", () => {

@@ -123,7 +123,7 @@ export const REVIEWED_DYNAMIC_SQL_BARRIERS = new Map<string, ReviewedDynamicSqlB
     "0180_work_questions.sql",
     {
       reason: "Reviewed pg_get_functiondef splice recuts exactly ONE FUNCTION — clara.list_review_queue(jsonb,jsonb,integer), read at a literal signature and re-installed with one added CTE, one union arm, one counts aggregate and one counts key. The block emits no view definition at all, so neither P4 scope view can be a target, and its own postcheck re-derives every pre-existing row-kind marker at its prestate count. Same family as 0146's and 0168's splices of the same queue function.",
-      sha256: "8f8db4eb2804a143c3ced5302cc0b9134f0571231ab982ccec7e9cef2bd99898",
+      sha256: "6ca91d9850c4623996baaea7225143ab7885f216311edefa1014aaef576625ff",
     },
   ],
 ]);

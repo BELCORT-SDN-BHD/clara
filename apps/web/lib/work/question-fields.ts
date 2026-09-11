@@ -14,11 +14,21 @@
 // refusal therefore render through one copy path, and a divergence shows up as a server refusal on
 // a field the browser passed — which is a finding about this file, not a mystery.
 //
-// MONEY IS INTEGER MINOR UNITS AND NOTHING ELSE. The composer's own exact-cent discipline, applied
-// to a question field: what a person types is parsed to an integer number of cents or refused, and
-// no float ever exists in between. `1200.5` is not "rounded to 1201" — it is refused, because the
-// alternative is inventing half a cent nobody entered.
+// MONEY IS INTEGER MINOR UNITS AND NOTHING ELSE, AND THIS FILE OWNS NO PARSER FOR IT. There is
+// exactly ONE money parser in this product — `lib/bank/money.ts`'s `parseAmountToCents`, which the
+// bank workbench, the registers and the journal composer all cross — and this module re-exports it
+// rather than restating it.
+//
+// THE FOURTH IMPLEMENTATION THAT USED TO LIVE HERE WAS WRONG IN THE EXACT WAY THAT ONE RECORDS.
+// It began `raw.trim().replace(/,/g, "")`: every comma stripped BEFORE validating. So `1234,56` —
+// a European-style decimal comma, and a live day-one input on a Malaysian bank workbench — became
+// `123456`, i.e. RM123,456.00 for somebody who meant RM1,234.56. A hundred-fold error, silently
+// accepted, with no refusal and no echo of the amount that was understood. `lib/bank/money.ts:60-74`
+// carries that finding (PR #489, finding 1) and the hardening that answers it: a comma is accepted
+// ONLY as a thousands separator in a strictly valid position, and any other placement is refused.
+// A second parser is a second set of bugs; this lane crosses the checked one.
 
+import { parseAmountToCents } from "@/lib/bank/money";
 import type { WorkAnswerDraft, WorkAnswerValue, WorkQuestionField } from "./questions";
 
 export type FieldProblem = { field: string; constraint: string };
@@ -46,36 +56,14 @@ export function isBlank(value: WorkAnswerValue | undefined): boolean {
 /**
  * Parse a typed money string to INTEGER CENTS, or null when it is not one.
  *
- * ACCEPTS what a person actually types for an amount in ringgit and sen — `1200.00`, `1,200.00`,
- * `1200`, `.50`, a leading `-` — and converts it EXACTLY, by string surgery on the two decimal
- * places rather than by `Math.round(Number(x) * 100)`. That multiplication is the defect this
- * function exists to avoid: `Number("1234.35") * 100` is 123434.99999999999, and rounding it is a
- * coin flip the ledger pays for.
- *
- * REFUSES more than two decimal places rather than truncating: `1200.555` is not 1200.55 or
- * 1200.56, it is a number this lane has no representation for, and the person needs to be told.
+ * THE PRODUCT'S ONE PARSER, re-exported under this lane's own name so a reader of the question form
+ * finds it where they look for it and a caller cannot accidentally reach a second one. It accepts
+ * what a person actually types for an amount in ringgit and sen — `1200.00`, `1,200.00` (strict
+ * groups of three), `1200`, `0.5`, a leading `-` — converts it EXACTLY with BigInt string surgery
+ * rather than `Math.round(Number(x) * 100)` (which gives 123434.99999999999 for `1234.35` in this
+ * runtime), and REFUSES everything else, a decimal comma included, rather than guessing.
  */
-export function parseMoneyToCents(raw: string): number | null {
-  const text = raw.trim().replace(/,/g, "");
-  if (text === "") return null;
-  const m = /^(-?)(\d*)(?:\.(\d{0,2}))?$/.exec(text);
-  if (m === null) return null;
-  const [, sign, whole, frac] = m;
-  if ((whole ?? "") === "" && (frac ?? "") === "") return null;
-  const cents = Number(`${whole || "0"}${(frac ?? "").padEnd(2, "0")}`);
-  if (!Number.isSafeInteger(cents)) return null;
-  return sign === "-" ? -cents : cents;
-}
-
-/** Integer cents back to the text a person edits. Exact by construction: a division would
- *  reintroduce the float this lane refuses. */
-export function centsToText(cents: number): string {
-  const negative = cents < 0;
-  const digits = String(Math.abs(cents)).padStart(3, "0");
-  const whole = digits.slice(0, -2);
-  const frac = digits.slice(-2);
-  return `${negative ? "-" : ""}${whole}.${frac}`;
-}
+export const parseMoneyToCents = parseAmountToCents;
 
 /** A real calendar date in ISO form. `2026-02-30` matches the shape and is not a date, so the
  *  round-trip through `Date` is the check rather than the regex alone. */

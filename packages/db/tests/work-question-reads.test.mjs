@@ -320,6 +320,51 @@ test("w629.immutable.delivery delivery is a RATCHET: delivered is terminal and a
     "immutable.delivery attempts");
 });
 
+test("w629.immutable.answer a SETTLED question's answer is the RECORD — the runtime cannot rewrite it", async (t) => {
+  if (await gateQuestion(t)) return;
+  const p = await parkedWork({ client: A1(), author: BOB() });
+  await answerWorkQuestion(BOB(), { question: p.questionId, version: 1, answer: twoFieldAnswer() });
+  const before = await interruptionRow(p.questionId);
+  assert.equal(before.status, "answered");
+
+  // `clara_runtime` holds UPDATE on this table (0006:784) — it is the lane that stamps delivery —
+  // so the belt has to bind the ROLE that actually executes model output, not only the rig's root.
+  const cases = [
+    ["answer", `update clara.agent_interruptions set answer='{"posting_date":"1999-01-01","amount_cents":1}'::jsonb where id=$1`],
+    ["answered_by", "update clara.agent_interruptions set answered_by=null where id=$1"],
+    ["answered_at", "update clara.agent_interruptions set answered_at=now() where id=$1"],
+    ["answer_key", "update clara.agent_interruptions set answer_key='somebody-elses-key' where id=$1"],
+    ["answered_role", "update clara.agent_interruptions set answered_role='owner' where id=$1"],
+  ];
+  for (const [column, sql] of cases) {
+    const { err } = await assertPair(CLR.immutable, "work_answer_immutable",
+      () => roleQuery(ROLES.runtime, sql, [p.questionId]), `immutable.answer ${column}`);
+    assert.equal(detailOf(err).column, column,
+      `immutable.answer ${column}: the refusal names the column it protected`);
+  }
+  const after_ = await interruptionRow(p.questionId);
+  assert.deepEqual(after_.answer, before.answer, "immutable.answer: the accepted values are untouched");
+  assert.equal(String(after_.answered_by), String(before.answered_by));
+  assert.equal(after_.answered_role, before.answered_role);
+
+  // …and the DELIVERY columns stay free on the very same settled row, because that is what the
+  // control listener still has to write after an answer is accepted.
+  await roleQuery(ROLES.runtime,
+    "update clara.agent_interruptions set delivery_state='leased', delivery_state_at=now(),"
+    + " delivery_attempts=delivery_attempts+1 where id=$1", [p.questionId]);
+  assert.equal((await interruptionRow(p.questionId)).delivery_state, "leased",
+    "immutable.answer: the ratchet freezes the ANSWER, never the delivery bookkeeping beside it");
+});
+
+test("w629.immutable.pending an answer is still WRITABLE while the question is pending", async (t) => {
+  if (await gateQuestion(t)) return;
+  const p = await parkedWork({ client: A1(), author: BOB() });
+  // The transition the estate's own doors make: pending -> answered, in ONE update.
+  await answerWorkQuestion(BOB(), { question: p.questionId, version: 1, answer: twoFieldAnswer({ cents: 4200 }) });
+  assert.equal((await interruptionRow(p.questionId)).answer.amount_cents, 4200,
+    "immutable.pending: the ratchet must not fire on the write that SETTLES the question");
+});
+
 test("w629.immutable.chat the new belt leaves a CHAT clarify's own lifecycle alone", async (t) => {
   if (await gateQuestion(t)) return;
   const chat = await rootQuery(

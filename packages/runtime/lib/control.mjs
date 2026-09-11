@@ -29,6 +29,18 @@ import { resumeHook as apiResumeHook, getRun as apiGetRun } from "workflow/api";
 import { makeRuntimeClient, setRuntimeRoleOn } from "./pools.mjs";
 import { isConnErr, waitForNudge } from "./listen.mjs";
 import { settleCancelledByKind } from "./reconciler.mjs";
+// THE ONE run-not-found predicate in this package, imported from the module that DECLARES it
+// rather than restated here. Reviewed finding: this module carried a fourth copy whose body
+// was `/not\s*found/i` over the message — a substring test that matches "client not found",
+// "task not found" and every other estate refusal that happens to contain those two words, and
+// a false positive there means `resumeAlreadyLanded` answers TRUE and the row is stamped
+// delivered on the strength of an error about something else entirely. The declared predicate
+// (reconciler-documents.mjs) requires the error to NAME a run — `/RunNotFound/i` on the class
+// name, or `/run .*not found/i` on the message — so an unknown error now falls through to
+// "the run state could not be read", which decides nothing. Imported from the declaring module
+// and not from reconciler.mjs's re-export: this module already imports reconciler.mjs, and the
+// direct edge keeps the dependency honest about where the body lives.
+import { isRunNotFound } from "./reconciler-documents.mjs";
 
 /** The control NOTIFY channel (empty-payload nudge — the poll is the guarantee). */
 export const CONTROL_CHANNEL = "clara_runtime_ctl";
@@ -49,13 +61,6 @@ export const LISTENER_ID = `${os.hostname()}:${process.pid}:${randomUUID().slice
 /** True iff the error is the engine's single-shot "hook already gone" signal. */
 export function isHookNotFound(err) {
   return err != null && (err.name === "HookNotFoundError" || /hook not found/i.test(String(err.message || "")));
-}
-
-/** WDK "run not found" — the engine forgot a run we still hold an id for. Same predicate
- *  reconciler-work.mjs carries, kept local so this module has no import cycle into it. */
-function isRunNotFound(err) {
-  const m = String(err?.message ?? err ?? "");
-  return /not\s*found/i.test(m) || err?.code === "RUN_NOT_FOUND";
 }
 
 /** An instant, as the wire carries it. `pg` hands a timestamptz back as a Date; a WDK resume
@@ -121,9 +126,10 @@ export async function hasWorkQuestionColumns(client) {
   const r = await client.query(
     `select count(*)::int as n from information_schema.columns
       where table_schema = 'clara' and table_name = 'agent_interruptions'
-        and column_name in ('work_id','question_version','answered_role','delivery_state','delivery_attempts')`,
+        and column_name in ('work_id','question_version','answered_role','delivery_state',
+                            'delivery_attempts','delivery_state_at')`,
   );
-  workQuestionColumnsPresent = (r.rows[0]?.n ?? 0) === 5;
+  workQuestionColumnsPresent = (r.rows[0]?.n ?? 0) === 6;
   return workQuestionColumnsPresent;
 }
 
@@ -171,7 +177,8 @@ export async function deliverInterruptions(client, deps) {
     ? await client.query(
         `update clara.agent_interruptions
             set claimed_by = $1, claim_lease_until = now() + ($2 || ' seconds')::interval,
-                delivery_state = 'leased', delivery_attempts = delivery_attempts + 1
+                delivery_state = 'leased', delivery_state_at = now(),
+                delivery_attempts = delivery_attempts + 1
           where id in (
             select id from clara.agent_interruptions
              where status in ('answered','expired','cancelled')
@@ -216,7 +223,7 @@ export async function deliverInterruptions(client, deps) {
     const r = await client.query(
       modern
         ? `update clara.agent_interruptions
-              set delivered_at = now(), delivery_state = 'delivered'
+              set delivered_at = now(), delivery_state = 'delivered', delivery_state_at = now()
             where id = $1 and delivered_at is null and claimed_by = $2
               and claim_lease_until > clock_timestamp()`
         : `update clara.agent_interruptions set delivered_at = now()
@@ -305,7 +312,8 @@ export async function deliverInterruptions(client, deps) {
     }
     const r = await client.query(
       `update clara.agent_interruptions
-          set delivery_state = 'hook_missing', claimed_by = null, claim_lease_until = null
+          set delivery_state = 'hook_missing', delivery_state_at = now(),
+              claimed_by = null, claim_lease_until = null
         where id = $1 and delivered_at is null and claimed_by = $2`,
       [row.id, listenerId],
     );

@@ -234,3 +234,88 @@ export function twoFieldAnswer({ postingDate = "2026-09-01", cents = 120000, not
   if (note !== null) a.note = note;
   return a;
 }
+
+// ===========================================================================================
+// 6 · TWO OPEN TASKS ON ONE WORK — the shape `agent_tasks(work_id)` permits and no verb produces.
+//
+// `clara.agent_tasks.work_id` is deliberately NON-UNIQUE (0178:519): a human's Retry makes a NEW
+// task for the SAME Work, which is the whole recovery story. Nothing in the estate produces two
+// CONCURRENTLY-RUNNING tasks on one Work today — `clara.retry_accounting_work` refuses until the
+// Work is terminal — so a cell that needs that shape has to build it, and building it by CLONING a
+// real admitted task (every column but the id, the timestamps and the run binding) is the honest
+// way: it asserts nothing about how the row got there, only about what the doors do once it has.
+// ===========================================================================================
+
+/**
+ * Clone one accounting_work task onto the same Work and CLAIM it, so the Work has a second
+ * `running` task.
+ *
+ * THE CLONE IS INSERTED `queued`, NEVER `running`: 0178's own insert guard refuses an
+ * accounting_work row that is not queued ("accounting_work task requires prevalidated firm/client,
+ * no session/intent, queued status, a model snapshot and a firm/client-congruent work id" —
+ * MEASURED, not assumed). The queued->running transition is then made by the REAL verb
+ * `clara.claim_work_run`, so the second task reaches `running` exactly the way the first did,
+ * status mirror and all.
+ */
+export async function cloneRunningTask(taskId) {
+  const cols = await rootQuery(
+    `select column_name from information_schema.columns
+      where table_schema='clara' and table_name='agent_tasks'
+        and is_generated='NEVER' and identity_generation is null
+        and column_name not in ('id','status','created_at','updated_at','workflow_run_id')
+      order by ordinal_position`);
+  const list = cols.rows.map((r) => `"${r.column_name}"`).join(", ");
+  const r = await rootQuery(
+    `insert into clara.agent_tasks (${list}, status) select ${list}, 'queued'
+       from clara.agent_tasks where id = $1 returning id`, [taskId]);
+  const cloned = r.rows[0].id;
+  await claimWorkRun({ task: cloned, runId: opk("w629-clone") });
+  return cloned;
+}
+
+/**
+ * THE FORCED SCHEDULE (X7's own law: PROVE the block before releasing it).
+ *
+ * Session A opens a question on `taskA` and HOLDS its transaction; session B fires the same verb on
+ * `taskB` — a different task of the SAME Work — and must BLOCK, proven through `pg_blocking_pids`,
+ * until A commits. A schedule where B never blocked proves nothing about what the loser gets.
+ */
+export async function raceTwoOpens({ taskA, taskB }) {
+  const { getPool } = await import("./rig-helpers.mjs");
+  const { waitBlockedBy } = await import("./rig-runtime-race.mjs");
+  const call = "select clara.open_work_question($1::uuid, $2::text, $3::jsonb, $4::jsonb, $5::text, $6::jsonb) as result";
+  const args = (task) => [task, `hook-${randomUUID()}`, JSON.stringify(questionPayload()),
+    JSON.stringify(twoFields()), "raced open", null];
+  const outcome = (e) => ({ ok: false, code: e.code, reason: detailOf(e).reason ?? null, message: e.message });
+  const pool = getPool();
+  const c1 = await pool.connect();
+  const c2 = await pool.connect();
+  const out = { a: null, b: null, provedBlocked: false };
+  try {
+    await c1.query(`set role ${ROLES.runtime}`);
+    await c1.query("begin");
+    const pid1 = (await c1.query("select pg_backend_pid() as pid")).rows[0].pid;
+    try { out.a = { ok: true, result: (await c1.query(call, args(taskA))).rows[0].result }; }
+    catch (e) { out.a = outcome(e); }
+
+    await c2.query(`set role ${ROLES.runtime}`);
+    await c2.query("begin");
+    const pid2 = (await c2.query("select pg_backend_pid() as pid")).rows[0].pid;
+    const fired = c2.query(call, args(taskB))
+      .then((r) => { out.b = { ok: true, result: r.rows[0].result }; })
+      .catch((e) => { out.b = outcome(e); });
+
+    out.provedBlocked = await waitBlockedBy(pid2, pid1);
+    await c1.query("commit").catch(() => c1.query("rollback").catch(() => {}));
+    await fired;
+    await c2.query("commit").catch(() => c2.query("rollback").catch(() => {}));
+  } finally {
+    for (const c of [c1, c2]) {
+      await c.query("rollback").catch(() => {});
+      await c.query("reset role").catch(() => {});
+      await c.query("reset all").catch(() => {});
+      c.release();
+    }
+  }
+  return out;
+}

@@ -93,6 +93,12 @@ export type WorkAnswerDraft = Record<string, WorkAnswerValue>;
  *               expired, cancelled, the Work's basis or state changed). The form re-reads the
  *               authoritative record and shows it; the draft is KEPT VISIBLE as a note, because a
  *               still-useful draft is exactly what the interaction contract refuses to throw away.
+ *   in_flight — NOTHING moved. `clara._reserve_op` found this exact key reserved by an UNCOMMITTED
+ *               sibling — the person's own previous press, still in flight — so the right act is
+ *               the SAME submit again in a moment, with the same key, which replays. It is a
+ *               TRANSIENT state and must not be rendered as a convergence: a convergence is
+ *               terminal, replaces the form with a settled record and tells a person their answer
+ *               did not take, and none of that is true here.
  *   denied    — the caller may no longer act (an inactive client, a lost role). Read-only.
  *   failed    — transport. Nothing is known about whether the answer landed, so the next attempt
  *               must REPLAY the same op key rather than answer twice.
@@ -100,6 +106,7 @@ export type WorkAnswerDraft = Record<string, WorkAnswerValue>;
 export type AnswerRefusal =
   | { kind: "invalid"; field: string | null; constraint: string | null; message: string }
   | { kind: "converge"; reason: string; current: Record<string, unknown> | null; message: string }
+  | { kind: "in_flight"; message: string }
   | { kind: "denied"; reason: string | null; message: string }
   | { kind: "failed"; message: string };
 
@@ -125,8 +132,12 @@ export const CONVERGE_REASONS = [
   "cancelled",
   "basis_changed",
   "state_changed",
-  "operation_in_flight",
 ] as const;
+
+/** The ONE CLR13 reason that is NOT a convergence. `_reserve_op` raises it when the same key is
+ *  held by an uncommitted sibling transaction — i.e. this very browser's previous press has not
+ *  finished. Nothing about the question has moved, so the form stays on the form. */
+export const IN_FLIGHT_REASON = "operation_in_flight";
 
 export function isConvergeReason(reason: string | null): boolean {
   return reason !== null && (CONVERGE_REASONS as readonly string[]).includes(reason);
@@ -260,6 +271,13 @@ export function mapAnswerRefusal(e: RefusalError): AnswerRefusal {
     // is handled as `invalid` with no field, so the form keeps the draft and lets the person
     // submit again (a changed draft mints a new key, which is the fix).
     return { kind: "invalid", field: null, constraint: "op_key_conflict", message: e.message };
+  }
+  if (e.code === "CLR13" && reason === IN_FLIGHT_REASON) {
+    // TRANSIENT, and the distinction is the whole point of keying on the PAIR. Rendered as a
+    // convergence this told a person "the question moved on without you" about their own
+    // half-second-old press, replaced the form with a settled record they could not act on, and
+    // called `onSettled` — which on Needs-you drops the row out of the list.
+    return { kind: "in_flight", message: e.message };
   }
   if (e.code === "CLR13") {
     return {

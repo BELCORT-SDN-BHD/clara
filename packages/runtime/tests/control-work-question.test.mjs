@@ -340,6 +340,10 @@ test("reconcile: a parked Work whose question rests at hook_missing settles expi
   await rig.asRuntime((c) =>
     deliverInterruptions(c, { resumeHook: hookNotFound, getRun: runStatus("running"), onlyFirm: p.firm }));
   assert.equal((await rig.readInterruption(p.questionId)).delivery_state, "hook_missing");
+  // …and it has RESTED there past the grace. A stamp written moments ago is not yet evidence (see
+  // the grace cell below); ageing it is what makes this cell about the settle rather than a race
+  // with a sleep in it.
+  await ageHookMissing(p.questionId);
 
   // The engine still believes the run is in flight. Before #629 this row was skipped for ever.
   const out = await rig.asRuntime((c) =>
@@ -356,4 +360,98 @@ test("reconcile: a parked Work whose question rests at hook_missing settles expi
   assert.equal(work.error.reason, "question_unreachable");
   assert.equal(work.error.recoverable, true, "reconcile: …and a human can Retry it");
   assert.equal(work.result, null, "reconcile: nothing was posted, and the row says so");
+});
+
+/** Push a `hook_missing` stamp back past any plausible grace. `delivery_state_at` is in the
+ *  trigger's FREE set (runtime bookkeeping), so this is a lawful write, not a doctored row. */
+async function ageHookMissing(questionId, interval = "1 hour") {
+  await rig.rootQuery(
+    `update clara.agent_interruptions set delivery_state_at = clock_timestamp() - ($2)::interval where id = $1`,
+    [questionId, interval]);
+}
+
+// ===========================================================================================
+// 7 · THE GRACE AND THE SECOND PROBE (reviewed finding).
+//
+// A Work was settled `expired` on the FIRST sweep after a `hook_missing` stamp, with no grace and
+// no second look. The window that makes that wrong is real and narrow: the control listener probes
+// between the engine CONSUMING the hook and the resumed run's own `markRunningStep`, sees a live
+// run with no hook, and writes `hook_missing` — while the answer is in fact landing. One sweep
+// later the Work is expired and the human is told their answer could not be delivered, about an
+// answer that arrived.
+//
+// TWO BELTS, because either alone still loses the race: the stamp must have RESTED past a grace,
+// AND the task/run must be RE-PROBED at settle time. The second is what catches a resume that
+// landed DURING the grace.
+// ===========================================================================================
+
+test("reconcile: a hook_missing stamped MOMENTS ago is not yet evidence — the grace holds", { skip: SKIP }, async () => {
+  const p = await parkedWorkQuestion("wq13");
+  await answer(p.owner, p.questionId);
+  await rig.asRuntime((c) =>
+    deliverInterruptions(c, { resumeHook: hookNotFound, getRun: runStatus("running"), onlyFirm: p.firm }));
+  const row = await rig.readInterruption(p.questionId);
+  assert.equal(row.delivery_state, "hook_missing");
+  assert.ok(row.delivery_state_at instanceof Date,
+    "grace: the listener records WHEN it decided, or the grace has nothing to measure");
+
+  const out = await rig.asRuntime((c) =>
+    reconcileAccountingWorkTasks(c, {
+      enqueueClaraWork: async () => {},
+      getRun: runStatus("running"),
+      onlyFirm: p.firm,
+    }));
+  assert.equal(out.workSettledExpired, 0, "grace: a fresh stamp does not settle a Work");
+  const work = await rig.rootQuery("select status from clara.accounting_work where id=$1", [p.workId])
+    .then((r) => r.rows[0]);
+  assert.equal(work.status, "awaiting_input", "grace: …the Work is still parked, exactly as it should be");
+});
+
+test("reconcile: the SECOND probe sees the run moved on, and the settle is abandoned", { skip: SKIP }, async () => {
+  const p = await parkedWorkQuestion("wq14");
+  await answer(p.owner, p.questionId);
+  await rig.asRuntime((c) =>
+    deliverInterruptions(c, { resumeHook: hookNotFound, getRun: runStatus("running"), onlyFirm: p.firm }));
+  await ageHookMissing(p.questionId);
+
+  // THE INJECTED WORLD MOVES THE TASK BETWEEN THE TWO PROBES. The sweep reads its open rows first
+  // (`awaiting_input`), then asks the engine; this getRun answers "running" AND lets the resumed
+  // run do what a resumed run does — `markRunningStep`. A belt that read the task once would settle
+  // a Work that had already continued.
+  let probes = 0;
+  const movingWorld = (runId) => {
+    probes += 1;
+    if (probes === 1) {
+      return {
+        status: rig
+          .asRuntime((c) => c.query("update clara.agent_tasks set status='running' where id=$1", [p.taskId]))
+          .then(() => "running"),
+      };
+    }
+    void runId;
+    return { status: Promise.resolve("running") };
+  };
+
+  const out = await rig.asRuntime((c) =>
+    reconcileAccountingWorkTasks(c, { enqueueClaraWork: async () => {}, getRun: movingWorld, onlyFirm: p.firm }));
+  assert.ok(probes >= 2, `reconcile: the run state is asked AGAIN before settling (probes=${probes})`);
+  assert.equal(out.workSettledExpired, 0, "reconcile: an answer that landed during the grace is not expired away");
+  const work = await rig.rootQuery("select status, error from clara.accounting_work where id=$1", [p.workId])
+    .then((r) => r.rows[0]);
+  assert.notEqual(work.status, "expired");
+  assert.equal(work.error, null, "reconcile: …and nothing false was written about it");
+});
+
+test("deliver: every delivery_state write records WHEN it was written", { skip: SKIP }, async () => {
+  const p = await parkedWorkQuestion("wq15");
+  await answer(p.owner, p.questionId);
+  const before = await rig.readInterruption(p.questionId);
+  assert.equal(before.delivery_state, "pending");
+  assert.equal(before.delivery_state_at, null, "deliver: an unopened delivery has no decision to time");
+
+  await rig.asRuntime((c) =>
+    deliverInterruptions(c, { resumeHook: async () => {}, getRun: runStatus("running"), onlyFirm: p.firm }));
+  const after_ = await rig.readInterruption(p.questionId);
+  assert.equal(after_.delivery_state, "delivered");
+  assert.ok(after_.delivery_state_at instanceof Date, "deliver: the delivered stamp carries its own instant");
 });
