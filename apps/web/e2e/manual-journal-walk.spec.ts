@@ -247,12 +247,17 @@ test("#728 finding 5: the composer's OWN evidence picker disables a document tha
   expect(selectError, "a disabled option cannot be chosen — the call must not succeed").not.toBeNull();
   await expect(evidence(page)).toHaveValue("");
 
-  // THE SELECTED DOCUMENT'S OWN REASON, with the link, is the one paragraph that earns a link —
-  // reached here by choosing the FREE document (no note) and then the conflicted one through the
-  // only route a person has left: the advisory read going unavailable.
+  // AND THE PICKER DEGRADES HONESTLY when the advisory read does not answer: it says so, offers
+  // every document again, and claims nothing about which are free — the summary line and the
+  // disabled options both go, because "we could not check" must never be rendered as "we checked".
+  // (The SELECTED document's own reason-and-link is the one paragraph that earns a link; it needs
+  // the conflicted document to BE the selection, which only a restored draft produces, so it is
+  // pinned in the RTL cells rather than here.)
   await control(page, { op: "break_spoken_for" });
   await page.reload();
   await expect(page.getByText("could not check which documents already back a posted entry", { exact: false })).toBeVisible();
+  await expect(page.getByText("already backs a posted journal entry and cannot be chosen", { exact: false })).toHaveCount(0);
+  await expect(evidence(page).locator(`option[value="${JOURNAL_WORK.takenDocumentId}"]`)).toBeEnabled();
   await expect(page.getByRole("link", { name: "View that journal entry" })).toHaveCount(0);
 });
 
