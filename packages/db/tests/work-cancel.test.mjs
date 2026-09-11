@@ -18,7 +18,7 @@ import {
   gateCancel, buildWorkWorld, endPool, printLaneNotes, printSkipCount, noteLane,
   admitJournalWork, claimWorkRun, mintClientObo, wakeRecordJournalEntry, freshWorkClient,
   settleWorkRun, cancelAgentTask, taskRow, workRow, receiptsForWork, entriesForClient,
-  entryCount, committedReceiptCount, tasksForWork,
+  entryCount, tasksForWork,
   cancelAccountingWork, takeOverAccountingWork, workAuthoritySnapshot,
   deactivateMember, demoteMember, interruptionsForTask, responsibleOf, timelineEvents,
   basis, REASON, CLR, CANCEL_REASON, CANCEL_ANSWER, assertPair, assertRaises,
