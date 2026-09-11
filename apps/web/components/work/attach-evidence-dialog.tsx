@@ -326,7 +326,13 @@ export function AttachEvidenceDialog({
                 {tWalk("evidenceSpokenFor", { name: doc.filename ?? t("evidence.unnamed") })}{" "}
                 <Link
                   href={journalEntryHref(clientId, doc.spokenFor!.entryId)}
-                  className="text-primary underline-offset-4 hover:underline"
+                  // UNCONDITIONAL underline, not hover:underline — this link sits INLINE inside a
+                  // sentence of plain text (axe's link-in-text-block rule), so a colour cue alone
+                  // (text-primary at 1.33:1 against text-muted-foreground, measured) is not enough
+                  // at rest; the standalone action links elsewhere in this file are their own
+                  // block, never embedded in a sentence, which is why they can rely on
+                  // hover:underline and this one cannot.
+                  className="text-primary underline underline-offset-4"
                 >
                   {tWalk("evidenceSpokenForLink")}
                 </Link>

@@ -538,7 +538,11 @@ export function JournalComposerView({
               {tWalk("evidenceSpokenFor", { name: doc.filename ?? tm("evidence.unnamed") })}{" "}
               <Link
                 href={journalEntryHref(clientId, doc.spokenFor!.entryId)}
-                className="text-primary underline-offset-4 hover:underline"
+                // UNCONDITIONAL underline, not hover:underline — this link sits INLINE inside a
+                // sentence of plain text (axe's link-in-text-block rule), so a colour cue alone
+                // (text-primary at 1.33:1 against text-muted-foreground, measured) is not enough
+                // at rest. See attach-evidence-dialog.tsx's own copy of this note.
+                className="text-primary underline underline-offset-4"
               >
                 {tWalk("evidenceSpokenForLink")}
               </Link>
