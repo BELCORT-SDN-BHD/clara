@@ -171,6 +171,14 @@ const state = {
    *  — the convergence arms cannot be provoked from a browser, so they are injected exactly as
    *  the basis refusal above is. */
   nextAnswerRefusal: null,
+  /** #629 (B6) — whether this lane's transcript carries its `work_question` part.
+   *
+   *  ARMED, NEVER DEFAULT ON, and the reason is measured rather than tidy: the Clara rail renders on
+   *  EVERY page of this app, so a transcript that always carried the part put a second
+   *  `work-question-*` subtree beside the Work detail's own on every B3 cell — Playwright's strict
+   *  mode then refused every `getByTestId` in this walk as a two-element match. The B6 cell arms it;
+   *  `reset` disarms it. */
+  showQuestionCard: false,
 };
 
 /** The two-field question this lane asks by default: a date and an amount in integer cents — the
@@ -196,6 +204,7 @@ function seed() {
   state.interruptions.length = 0;
   state.questions.clear();
   state.nextAnswerRefusal = null;
+  state.showQuestionCard = false;
 
   const work = newWorkRow({
     id: JOURNAL_WORK.seededWorkId,
@@ -484,6 +493,11 @@ function control(body) {
   // the caller, so a walk states the exact wire path it expects the composer to
   // resolve — and a wrong `fieldForServerPath` reds the walk instead of quietly
   // focusing another row.
+  if (body.op === "card") {
+    // Arm the transcript's `work_question` part for the B6 cell. See `state.showQuestionCard`.
+    state.showQuestionCard = true;
+    return { showQuestionCard: true };
+  }
   if (body.op === "refuse_basis") {
     state.nextBasisRefusal = { field: String(body.field ?? "basis"), reason: String(body.reason ?? "invalid_basis") };
     return { armed: state.nextBasisRefusal };
@@ -532,7 +546,10 @@ function control(body) {
       client_id: JOURNAL_WORK.clientId,
       task_id: work.current_task_id,
       firm_id: FIRM_ID,
-      question_version: state.questions.size + 1,
+      // PER WORK, exactly as `clara.open_work_question` counts it (0180: 1 + the number of
+      // interruptions this Work has already opened) — never per fixture. A fixture-wide counter made
+      // the FIRST question a walk asks "Question 2" the moment this module seeded any other one.
+      question_version: [...state.questions.values()].filter((q) => q.work_id === work.id).length + 1,
       status: "pending",
       question: String(body.question ?? "Which Maybank account did this rent leave from?"),
       context: String(body.context ?? "This client has two accounts coded 1100."),
@@ -816,7 +833,9 @@ export function journalWorkTranscript() {
         { type: "text", text: "I have admitted that as accounting work." },
         { type: "work_accepted", work_id: JOURNAL_WORK.seededWorkId, client_id: JOURNAL_WORK.clientId, purpose: "journal_entry", logical_op_id: `work:${JOURNAL_WORK.seededWorkId}:journal_entry:1` },
         { type: "work_status", work_id: JOURNAL_WORK.seededWorkId, status: "running" },
-        { type: "work_question", work_id: JOURNAL_WORK.seededWorkId, client_id: JOURNAL_WORK.clientId, question_id: JOURNAL_WORK.seededQuestionId, question_version: 1, status: "pending" },
+        ...(state.showQuestionCard
+          ? [{ type: "work_question", work_id: JOURNAL_WORK.seededWorkId, client_id: JOURNAL_WORK.clientId, question_id: JOURNAL_WORK.seededQuestionId, question_version: 1, status: "pending" }]
+          : []),
         { type: "work_result", work_id: JOURNAL_WORK.seededWorkId, client_id: JOURNAL_WORK.clientId, entry_id: JOURNAL_WORK.seededEntryId, receipt_id: JOURNAL_WORK.seededReceiptId },
       ],
       turn_key: null,

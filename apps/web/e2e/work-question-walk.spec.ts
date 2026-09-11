@@ -345,9 +345,13 @@ test("B4: the inbox row's own form stays usable at 320 CSS px and under reduced 
   await page.emulateMedia({ reducedMotion: "reduce" });
   await parkOnQuestion(page);
   await page.goto(NEEDS_YOU_URL);
-  await page.setViewportSize({ width: 320, height: 720 });
+  // EXPANDED FIRST, THEN NARROWED. At 320 CSS px the Clara rail is an overlay that covers the page,
+  // so a click on a row control there is intercepted by the rail rather than refused by the layout —
+  // measured here, as a 30s click timeout naming the rail's own subtree. What this cell is about is
+  // whether the FORM is usable at that width, which is what the assertions below ask.
   await page.getByTestId("needs-you-work-question-toggle").click();
   await expect(page.getByTestId("work-question-form")).toBeVisible({ timeout: 15_000 });
+  await page.setViewportSize({ width: 320, height: 720 });
   await settle(page);
 
   await expect(page.getByTestId("work-question-text")).toBeVisible();
@@ -394,6 +398,10 @@ test("B4: the URL is stable and BACK returns to where the person was", async ({ 
 
 test("B6: a transcript's work_question part renders the ACCEPTED record, and announces NOTHING", async ({ page }) => {
   await control(page, { op: "reset" });
+  // ARM the transcript's `work_question` part. It is off by default because the Clara rail renders
+  // on every page: an always-on card would sit beside the Work detail's own form in every other
+  // cell of this walk (see the mock's `showQuestionCard`).
+  await control(page, { op: "card" });
   // THE CLARA RAIL, on the page #623's own transcript cell reads it from — there is no `/chat/<id>`
   // route in this product; the rail is a shell surface that carries this lane's one thread.
   await page.goto(`/clients/${CLIENT}/work`);
