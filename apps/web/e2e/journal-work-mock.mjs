@@ -253,6 +253,18 @@ const state = {
    *  other cell's rail stays free of it) — armed by `op: "park_card"`, which also mints the Work
    *  and its pending question; `reset` disarms it and drops both. */
   showParkedCard: false,
+  /** #728 — whether `clara.list_spoken_for_documents` is currently ANSWERING. Armed by
+   *  `op: "break_spoken_for"`; `reset` clears it.
+   *
+   *  WHY A BROKEN ARM EXISTS AT ALL (review round, N16). The picker disables a document that
+   *  already backs a posted entry, which is the fix — and it also means a real person can no
+   *  longer reach the DOOR's own `source_already_posted` refusal through ordinary interaction. The
+   *  walk still has to prove that refusal is live, because the read is advisory and the door is the
+   *  law. The user-reachable route to it is exactly this: the advisory check FAILS (a 503 the
+   *  picker reports as "we could not check"), every option stays selectable, and the person meets
+   *  the typed conflict on submit — which is precisely what production does when the read is
+   *  unavailable. That is a real state, not a lever no user can pull. */
+  spokenForBroken: false,
 };
 
 /** The two-field question this lane asks by default: a date and an amount in integer cents — the
@@ -281,6 +293,7 @@ function seed() {
   state.showQuestionCard = false;
   state.links.clear();
   state.showParkedCard = false;
+  state.spokenForBroken = false;
 
   const work = newWorkRow({
     id: JOURNAL_WORK.seededWorkId,
@@ -660,6 +673,12 @@ function control(body) {
   // must refuse rather than write against a view that is no longer current. The
   // walk cannot forge a request the client would not make, so it moves the ROW
   // instead — which is exactly what the race is.
+  // #728 — BREAK THE ADVISORY SPOKEN-FOR READ (see `state.spokenForBroken`). One direction only:
+  // `reset` is the way back, exactly as every other armed arm in this lane works.
+  if (body.op === "break_spoken_for") {
+    state.spokenForBroken = true;
+    return { spokenForBroken: true };
+  }
   if (body.op === "bump_revision") {
     const entry = state.entries.get(String(body.entryId ?? ""));
     if (entry === undefined) return { error: "no_such_entry" };
@@ -1247,6 +1266,12 @@ export async function handleJournalWorkRpc(request, response, path, url, sendJso
   if (path === "/rest/v1/rpc/list_spoken_for_documents") {
     const body = await readJson(request);
     if (body?.p_client !== JOURNAL_WORK.clientId) return false;
+    if (state.spokenForBroken) {
+      // A read that did not answer — NOT an empty array, which would mean "nothing is spoken for"
+      // and would be the one lie this whole advisory lane is built to avoid.
+      sendJson(response, 503, { message: "the spoken-for check is unavailable" }, cors);
+      return true;
+    }
     // `client_id`/`client_name` name the CLAIMANT, which the real door (0183) answers at the
     // FIRM's scope: one document may be actively filed to two clients at once while the evidence
     // invariant is firm-wide, so the entry holding a document need not belong to the client whose
