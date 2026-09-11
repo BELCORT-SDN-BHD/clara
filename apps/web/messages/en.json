@@ -292,24 +292,6 @@
     }
   },
   "FirmActivity": {
-    "heading": "Activity",
-    "body": "The firm-wide receipts and open-register feed.",
-    "subheading": "A record of what the agent did across every client — not a queue of what awaits you. Work is where what awaits you lives.",
-    "visibilityNote": "Receipts are visible to bookkeeper-and-above roles. A more limited role sees an empty feed for that reason, not because nothing happened.",
-    "coverageNote": "This feed can currently show four kinds of agent act: freeform reads, filings, client onboarding and vendor bindings. Posted entries, bank-agent acts, general agent acts, report-agent acts and web fetches are not recorded here yet, so an empty feed does not mean the agent has been idle.",
-    "showingRecent": "Showing the 100 most recent receipts. There is no paging past that, so older receipts are not reachable from this page.",
-    "emptyMessage": "No agent activity has been recorded yet.",
-    "columnAct": "Act",
-    "columnActor": "Actor",
-    "columnClient": "Client",
-    "columnBasis": "Basis",
-    "columnOccurred": "Occurred",
-    "columnScope": "Scope",
-    "platformScope": "Platform-wide",
-    "firmScopeNoClient": "Firm-wide (no client)",
-    "noRationale": "No stated rationale.",
-    "timelineHeading": "Everything that happened",
-    "timelineNotBuilt": "The complete firm timeline is available on Firm Home, but this Activity page has not been connected to it yet. This page currently shows agent receipts only; running agent tasks are on Work.",
     "receiptKinds": {
       "entry_post": "Journal entry posted",
       "bank_agent": "Bank agent act",
@@ -3982,7 +3964,8 @@
   },
   "Activity": {
     "heading": "Activity",
-    "subheading": "An attributable record of what happened across every client — documents, journal entries, closes, reports and agent acts — linked to the Work, object and source behind each one.",
+    "subheading": "An attributable record of what happened across every client — documents, journal entries, closes and agent acts — linked to the Work, object and source behind each one.",
+    "coverageNote": "This feed cannot yet show {kinds} — those kinds of agent act are not wired to a receipt yet, so their absence here does not mean nothing happened.",
     "filterClient": "Client",
     "filterClientAll": "All clients",
     "filterSince": "Since",
@@ -4019,7 +4002,7 @@
     "loading": "Loading activity…",
     "refreshing": "Refreshing activity…",
     "rowCount": "{count, plural, =0 {No activity shown} =1 {1 event shown} other {# events shown}}",
-    "partialProjection": "This page may not show every matching event yet — load more to see the rest.",
+    "moreToLoad": "There is more to load below.",
     "duplicatesDropped": "{count, plural, =1 {1 event you already saw was skipped} other {# events you already saw were skipped}} while loading more.",
     "loadMore": "Load more",
     "loadingMore": "Loading more…",
@@ -4039,6 +4022,9 @@
     "eventDescription": "What happened",
     "eventStatus": "Status",
     "eventOriginal": "Original",
-    "eventReplacement": "Replacement"
+    "eventReplacement": "Replacement",
+    "eventReceiptId": "Receipt",
+    "eventBasisOrigin": "Basis origin",
+    "eventInitiator": "Initiator"
   }
 }

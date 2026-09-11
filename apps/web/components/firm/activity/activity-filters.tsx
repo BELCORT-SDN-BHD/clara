@@ -6,9 +6,11 @@
 // change is `router.replace`, never `push` — it is a REFINEMENT of the current view, not a new
 // place, so it must not grow the back-stack the way opening the event Sheet deliberately does.
 //
-// A filter change also clears `cursor` (a stale keyset cursor from the PRIOR filter set does not
-// address anything meaningful under a new one) — every other param, including an open `event`
-// Sheet, is left exactly as `applyActivityUrlState` leaves an unnamed field: untouched.
+// THERE IS NO `cursor` TO CLEAR (lib/firm/activity.ts's own header: pagination position is
+// in-memory hook state, never a URL param) — a filter change resets it simply by being a new
+// `filtersKey` that `use-activity-feed.ts`'s own effect reloads page 1 for. Every param this bar
+// does not name, including an open `event` Sheet, is left exactly as `applyActivityUrlState`
+// leaves an unnamed field: untouched.
 
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
@@ -33,7 +35,7 @@ export function ActivityFilters({
   const searchParams = useSearchParams();
 
   const apply = (patch: Partial<ActivityUrlState>) => {
-    const next = applyActivityUrlState(searchParams, { cursor: null, ...patch });
+    const next = applyActivityUrlState(searchParams, patch);
     router.replace(`${pathname}?${next.toString()}`);
   };
 

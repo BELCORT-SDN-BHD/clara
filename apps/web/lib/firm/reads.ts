@@ -55,19 +55,6 @@ const AGENT_RECEIPT_COLS =
   "occurred_at,model,model_version,rationale,verdict,failing_rungs,via_wake_kind," +
   "trigger_kind,trigger_id,authorization_id,adopted_verbatim,scope";
 
-/** The firm activity feed — the receipts/open-register inversion made surface
- *  (ADR-0074, Q3). One session's RLS already floors this to the caller's own
- *  firm (0103:408-410); no client_id filter is applied here — this is the
- *  FIRM-altitude, cross-client feed. */
-export function loadFirmActivity(session: SessionTokenAccessor, limit = 100): Promise<AgentReceiptRow[]> {
-  return getRows<AgentReceiptRow>("agent_receipts_visible", {
-    select: AGENT_RECEIPT_COLS,
-    order: "occurred_at.desc",
-    limit,
-    session,
-  });
-}
-
 /** ONE receipt, addressed by the PAIR `(receipt_kind, receipt_id)` — the hydrate
  *  behind the `agent_receipt` transcript card (P6-2).
  *

@@ -161,6 +161,17 @@
 -- approximation. Fetching one extra row is what lets `truncated`/`next_cursor` be computed
 -- without a second round trip: when the pool holds more than `p_limit` rows after filtering, the
 -- page is `truncated=true` and `next_cursor` is minted from the last INCLUDED row.
+--
+-- P_SINCE IS INCLUSIVE (`occurred_at >= p_since`), P_UNTIL IS EXCLUSIVE (`occurred_at <
+-- p_until`) -- deliberately asymmetric, and the reason is `occurred_at`'s own microsecond
+-- precision. `apps/web/lib/firm/activity.ts` sends a business-timezone CALENDAR DAY for each
+-- bound: `since` as that day's 00:00:00.000 (inclusive start, correct as a `>=` bound) and
+-- `until` as the NEXT day's 00:00:00.000 (an exclusive upper fence). A same-day `<=` bound built
+-- from `23:59:59.999` would silently drop any row timestamped in the last sub-millisecond of that
+-- day (occurred_at carries microsecond precision; `.999` is only millisecond-resolution) -- a real
+-- boundary loss, not a hypothetical one. The exclusive next-day fence has no such gap: every
+-- instant strictly before the next calendar day begins is included, to the microsecond, with one
+-- comparison operator rather than a manufactured near-midnight literal.
 
 set local statement_timeout = '2min';
 set local lock_timeout = '5s';
@@ -303,14 +314,19 @@ begin
       on v.object_kind = 'entry' and je.id = v.object_id and je.firm_id = c.firm
     left join clara.operation_receipts orr
       on v.object_kind = 'entry' and orr.firm_id = c.firm and orr.outcome = 'committed'
-     and nullif(orr.effects->>'entry_id', '')::uuid = v.object_id
+     -- Text comparison, not a uuid cast of the jsonb text expression: `ix_operation_receipts_entry`
+     -- (0178:454-455) is built ON THE TEXT EXPRESSION `(effects->>'entry_id')`, and casting that
+     -- expression to uuid before comparing defeats the index (the planner cannot match an
+     -- expression index against a different expression on the same column, even a semantically
+     -- equivalent one) -- cast the OTHER side instead, which is already a plain uuid column.
+     and nullif(orr.effects->>'entry_id', '') = v.object_id::text
   ),
   ev as (
     select * from ev_base
      where (p_client is null or client_id = p_client)
        and (p_kinds is null or kind = any(p_kinds))
        and (p_since is null or occurred_at >= p_since)
-       and (p_until is null or occurred_at <= p_until)
+       and (p_until is null or occurred_at < p_until)
        and (v_cursor_ts is null or (occurred_at, id) < (v_cursor_ts, v_cursor_id))
      order by occurred_at desc, id desc
      limit v_limit + 1
@@ -342,7 +358,7 @@ begin
      where (p_client is null or client_id = p_client)
        and (p_kinds is null or kind = any(p_kinds))
        and (p_since is null or occurred_at >= p_since)
-       and (p_until is null or occurred_at <= p_until)
+       and (p_until is null or occurred_at < p_until)
        and (v_cursor_ts is null or (occurred_at, id) < (v_cursor_ts, v_cursor_id))
      order by occurred_at desc, id desc
      limit v_limit + 1
@@ -376,7 +392,8 @@ begin
     from clara.operation_receipts orr
     left join clara.accounting_work w on w.id = orr.work_id and w.firm_id = c.firm
     left join clara.journal_entries je2
-      on je2.id = nullif(orr.effects->>'entry_id', '')::uuid and je2.firm_id = c.firm
+      -- Same index-preserving text comparison as the ev_base join above.
+      on je2.id::text = nullif(orr.effects->>'entry_id', '') and je2.firm_id = c.firm
     where orr.firm_id = c.firm and orr.outcome = 'committed'
   ),
   orx as (
@@ -384,7 +401,7 @@ begin
      where (p_client is null or client_id = p_client)
        and (p_kinds is null or kind = any(p_kinds))
        and (p_since is null or occurred_at >= p_since)
-       and (p_until is null or occurred_at <= p_until)
+       and (p_until is null or occurred_at < p_until)
        and (v_cursor_ts is null or (occurred_at, id) < (v_cursor_ts, v_cursor_id))
      order by occurred_at desc, id desc
      limit v_limit + 1
@@ -392,7 +409,14 @@ begin
   unioned as (
     select * from ev union all select * from ar union all select * from orx
   )
-  select coalesce(jsonb_agg(to_jsonb(u.*)), '[]'::jsonb) into v_all
+  -- `jsonb_agg(to_jsonb(u.*))` with NO `order by` INSIDE the aggregate call is not guaranteed to
+  -- respect the subquery's own `order by` -- an aggregate over a subquery may see its input rows
+  -- in whatever order the planner chooses to feed them (a parallel worker, a different join
+  -- strategy on a future replan), so the page and its `next_cursor` must never be minted from an
+  -- order the aggregate itself did not pin. `order by u.occurred_at desc, u.id desc` INSIDE
+  -- `jsonb_agg` makes that order part of the aggregate's own contract, not an incidental property
+  -- borrowed from the subquery underneath it.
+  select coalesce(jsonb_agg(to_jsonb(u.*) order by u.occurred_at desc, u.id desc), '[]'::jsonb) into v_all
     from (
       select * from unioned
        order by occurred_at desc, id desc
@@ -403,9 +427,14 @@ begin
   v_truncated := v_total > v_limit;
 
   if v_truncated then
-    select jsonb_agg(elem) into v_page
+    -- Same guarantee on the truncation slice: `ord` (the ordinality `jsonb_array_elements` mints
+    -- over the ALREADY-ordered `v_all`) is projected back OUT to the aggregate's own `order by`
+    -- rather than being dropped after the `where` filters on it -- the prior shape selected only
+    -- `elem`, so the page these rows became had no aggregate-level order guarantee, only the
+    -- current statement's plan happening to preserve one.
+    select jsonb_agg(x.elem order by x.ord) into v_page
       from (
-        select elem from jsonb_array_elements(v_all) with ordinality as t(elem, ord)
+        select elem, ord from jsonb_array_elements(v_all) with ordinality as t(elem, ord)
          where ord <= v_limit
       ) x;
     v_last := v_page -> (v_limit - 1);
@@ -501,7 +530,8 @@ begin
         on v.object_kind = 'entry' and je.id = v.object_id and je.firm_id = c.firm
       left join clara.operation_receipts orr
         on v.object_kind = 'entry' and orr.firm_id = c.firm and orr.outcome = 'committed'
-       and nullif(orr.effects->>'entry_id', '')::uuid = v.object_id
+       -- Same index-preserving text comparison as list_activity's ev_base join.
+       and nullif(orr.effects->>'entry_id', '') = v.object_id::text
       left join clara.clients cl on cl.id = v.client_id and cl.firm_id = c.firm
      where v.event_id::text = p_id;
 
@@ -551,13 +581,18 @@ begin
       from clara.operation_receipts orr
       left join clara.accounting_work w on w.id = orr.work_id and w.firm_id = c.firm
       left join clara.journal_entries je2
-        on je2.id = nullif(orr.effects->>'entry_id', '')::uuid and je2.firm_id = c.firm
+        -- Same index-preserving text comparison as list_activity's orx_base join.
+        on je2.id::text = nullif(orr.effects->>'entry_id', '') and je2.firm_id = c.firm
       left join clara.clients cl on cl.id = orr.client_id and cl.firm_id = c.firm
      where orr.id::text = p_id and orr.firm_id = c.firm and orr.outcome = 'committed';
 
   else
-    raise exception 'unknown activity source' using errcode = 'CLR11',
-      detail = jsonb_build_object('reason', 'activity_source_unknown')::text;
+    -- Folded into the SAME shared refusal below rather than raised here with its own distinct
+    -- 'activity_source_unknown' reason -- this function's own comment already claims "an unknown
+    -- source... refuse the SAME CLR11 activity_event_not_found", and a caller-visible SECOND
+    -- reason token for the identical no-oracle situation would make that claim false. Leaving
+    -- `v_row` at its declared NULL lets the common check right below raise the one shared refusal.
+    v_row := null;
   end if;
 
   if v_row is null then

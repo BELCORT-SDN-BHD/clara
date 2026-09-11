@@ -27,13 +27,14 @@ import { LoadingState } from "@/components/common/state";
 import { ErrorMessage } from "@/components/firm/data-state";
 import { businessDateTime } from "@/lib/business-date";
 import {
-  agentReceiptKindOf,
+  activityJournalsHref,
+  describeActivity,
   getActivityEvent,
+  isKnownActivityStatus,
   primaryActivityHref,
   type ActivityDetail,
   type ActivitySource,
 } from "@/lib/firm/activity";
-import { isKnownAgentReceiptKind } from "@/lib/firm/receipt-kinds";
 import { MemberName } from "@/components/common/member-name";
 import type { MemberNameResolver } from "@/lib/members/use-member-names";
 import Link from "next/link";
@@ -96,7 +97,7 @@ export function ActivityEventSheet({
         <SheetHeader>
           {/* tabIndex=-1 + an explicit focus() on open: the WAI Dialog pattern's own initial-
               focus recommendation when no form control should get it by default (this is a
-              READ, not an edit) — apps/web/AGENTS.md's "initial focus" contract. */}
+              READ, not an edit) — AGENTS.md's "initial focus" contract. */}
           <SheetTitle ref={titleRef} tabIndex={-1}>
             {loading ? t("eventLoading") : t("eventHeading")}
           </SheetTitle>
@@ -124,25 +125,76 @@ export function ActivityEventSheet({
               <dd className="text-card-foreground">{businessDateTime(detail.occurred_at)}</dd>
 
               <dt className="text-muted-foreground">{t("eventDescription")}</dt>
-              <dd className="text-card-foreground">{describeDetail(detail, t, tReceipt)}</dd>
+              <dd className="text-card-foreground">{describeActivity(detail, t, tReceipt)}</dd>
 
               {detail.status ? (
                 <>
                   <dt className="text-muted-foreground">{t("eventStatus")}</dt>
-                  <dd className="text-card-foreground">{detail.status}</dd>
+                  {/* The SAME checked lookup the row uses (review finding 11) — a status this
+                      build has not registered a label for renders its own raw value rather than
+                      a fabricated translation, exactly as the row's own badge does. */}
+                  <dd className="text-card-foreground">
+                    {isKnownActivityStatus(detail.status) ? t(`statusLabels.${detail.status}`) : detail.status}
+                  </dd>
                 </>
               ) : null}
 
               {detail.original_entry_id ? (
                 <>
                   <dt className="text-muted-foreground">{t("eventOriginal")}</dt>
-                  <dd className="text-card-foreground">{t("linksToOriginal")}</dd>
+                  <dd className="text-card-foreground">
+                    {detail.client_id ? (
+                      <Link
+                        href={activityJournalsHref(detail.client_id, detail.original_entry_id)}
+                        className="text-primary underline-offset-4 hover:underline"
+                      >
+                        {t("linksToOriginal")}
+                      </Link>
+                    ) : (
+                      t("linksToOriginal")
+                    )}
+                  </dd>
                 </>
               ) : null}
               {detail.replacement_entry_id ? (
                 <>
                   <dt className="text-muted-foreground">{t("eventReplacement")}</dt>
-                  <dd className="text-card-foreground">{t("linksToReplacement")}</dd>
+                  <dd className="text-card-foreground">
+                    {detail.client_id ? (
+                      <Link
+                        href={activityJournalsHref(detail.client_id, detail.replacement_entry_id)}
+                        className="text-primary underline-offset-4 hover:underline"
+                      >
+                        {t("linksToReplacement")}
+                      </Link>
+                    ) : (
+                      t("linksToReplacement")
+                    )}
+                  </dd>
+                </>
+              ) : null}
+
+              {/* C88.10: the operation_receipt door already returns receipt_id/basis_origin/
+                  initiator (0181's own detail shape) — rendered here beside the actor/time this
+                  Sheet already shows, not merely present on the wire. */}
+              {detail.source === "operation_receipt" ? (
+                <>
+                  <dt className="text-muted-foreground">{t("eventReceiptId")}</dt>
+                  <dd className="text-card-foreground">{detail.receipt_id}</dd>
+                  {detail.basis_origin ? (
+                    <>
+                      <dt className="text-muted-foreground">{t("eventBasisOrigin")}</dt>
+                      <dd className="text-card-foreground">{detail.basis_origin}</dd>
+                    </>
+                  ) : null}
+                  {detail.initiator ? (
+                    <>
+                      <dt className="text-muted-foreground">{t("eventInitiator")}</dt>
+                      <dd className="text-card-foreground">
+                        <MemberName userId={detail.initiator} resolver={memberNames} showRole={false} />
+                      </dd>
+                    </>
+                  ) : null}
                 </>
               ) : null}
             </dl>
@@ -156,18 +208,4 @@ export function ActivityEventSheet({
       </SheetContent>
     </Sheet>
   );
-}
-
-function describeDetail(
-  detail: ActivityDetail,
-  t: (key: string, values?: Record<string, string>) => string,
-  tReceipt: (key: string) => string,
-): string {
-  if (detail.source === "event") return detail.description ?? detail.event_type ?? t("unlabeledEvent");
-  if (detail.source === "agent_receipt") {
-    const kind = detail.receipt_kind ?? agentReceiptKindOf(detail);
-    return kind && isKnownAgentReceiptKind(kind) ? tReceipt(`receiptKinds.${kind}`) : (kind ?? t("unlabeledEvent"));
-  }
-  if (!detail.purpose) return t("unlabeledEvent");
-  return detail.purpose === "journal_entry" ? t("workPurposes.journal_entry") : detail.purpose;
 }

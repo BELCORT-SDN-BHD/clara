@@ -10,20 +10,20 @@ import {
   agentReceiptKindOf,
   activityDocumentsHref,
   activityJournalsHref,
-  activityReportsHref,
-  activityUrlStateEqual,
   activityWorkHref,
   applyActivityUrlState,
-  EMPTY_ACTIVITY_URL_STATE,
+  describeActivity,
   formatEventParam,
   getActivityEvent,
   isActivityKind,
   isDateOnly,
+  isKnownActivityStatus,
   listActivity,
   parseActivityUrlState,
   parseEventParam,
   primaryActivityHref,
   ACTIVITY_MAX_LIMIT,
+  type ActivityUrlState,
 } from "./activity";
 import { fixedTokenAccessor } from "../supabase/server-session";
 
@@ -47,7 +47,7 @@ async function withFetch(impl: typeof fetch, run: () => Promise<void>): Promise<
 
 // ── wire pins ──────────────────────────────────────────────────────────────────
 
-test("listActivity: posts exactly 0181's six named parameters, converting since/until to the inclusive business-day instant range", async () => {
+test("listActivity: posts exactly 0181's six named parameters — since is that day's inclusive start, until is the NEXT day's exclusive start", async () => {
   let seenUrl = "";
   let seenBody: Record<string, unknown> = {};
   await withFetch(
@@ -68,7 +68,24 @@ test("listActivity: posts exactly 0181's six named parameters, converting since/
       assert.equal(seenBody.p_limit, 10);
       assert.deepEqual(seenBody.p_kinds, ["journal", "close"]);
       assert.equal(seenBody.p_since, "2026-01-01T00:00:00.000+08:00");
-      assert.equal(seenBody.p_until, "2026-01-31T23:59:59.999+08:00");
+      // EXCLUSIVE: the day AFTER "until", not "2026-01-31T23:59:59.999+08:00" — a millisecond-
+      // resolution literal would silently drop a row in the last sub-millisecond of the 31st,
+      // since occurred_at carries microsecond precision (0181's own door compares `< p_until`).
+      assert.equal(seenBody.p_until, "2026-02-01T00:00:00.000+08:00");
+    },
+  );
+});
+
+test("listActivity: the until boundary rolls over a month AND a year correctly", async () => {
+  let seenBody: Record<string, unknown> = {};
+  await withFetch(
+    async (_u, init) => {
+      seenBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      return jsonResponse({ rows: [], next_cursor: null, truncated: false });
+    },
+    async () => {
+      await listActivity({ until: "2026-12-31" }, { session: fixedTokenAccessor("tok") });
+      assert.equal(seenBody.p_until, "2027-01-01T00:00:00.000+08:00", "31 Dec rolls into next year");
     },
   );
 });
@@ -178,22 +195,31 @@ function params(query: string): URLSearchParams {
   return new URLSearchParams(query);
 }
 
+const C1 = "11111111-1111-1111-1111-111111111111";
+
 test("parseActivityUrlState: every field, including a comma-joined, de-duplicated kinds list", () => {
   const state = parseActivityUrlState(
-    params("client=c1&kinds=journal,close,journal&since=2026-01-01&until=2026-01-31&cursor=abc&event=event:e1"),
+    params(`client=${C1}&kinds=journal,close,journal&since=2026-01-01&until=2026-01-31&event=event:e1`),
   );
   assert.deepEqual(state, {
-    client: "c1",
+    client: C1,
     kinds: ["journal", "close"],
     since: "2026-01-01",
     until: "2026-01-31",
-    cursor: "abc",
     event: { source: "event", id: "e1" },
   });
 });
 
 test("parseActivityUrlState: an empty query is the empty state", () => {
-  assert.deepEqual(parseActivityUrlState(params("")), EMPTY_ACTIVITY_URL_STATE);
+  assert.deepEqual(parseActivityUrlState(params("")), {
+    client: null, kinds: [], since: null, until: null, event: null,
+  });
+});
+
+test("parseActivityUrlState: there is no cursor field at all — a stale ?cursor= is silently ignored", () => {
+  const state = parseActivityUrlState(params("client=" + C1 + "&cursor=some-stale-page-token"));
+  assert.equal("cursor" in state, false);
+  assert.deepEqual(Object.keys(state).sort(), ["client", "event", "kinds", "since", "until"]);
 });
 
 test("parseActivityUrlState: an unrecognised kind token is dropped, not sent to the door as garbage", () => {
@@ -207,15 +233,21 @@ test("parseActivityUrlState: a malformed since/until degrades to absent rather t
   assert.equal(state.until, null);
 });
 
+test("parseActivityUrlState: a non-uuid-shaped ?client= is DROPPED, never posted to the door's uuid column", () => {
+  assert.equal(parseActivityUrlState(params("client=not-a-client")).client, null);
+  assert.equal(parseActivityUrlState(params("client=../../etc")).client, null);
+  assert.equal(parseActivityUrlState(params(`client=${C1}`)).client, C1, "a real uuid still passes through");
+});
+
 test("applyActivityUrlState: patches one field and leaves every other param untouched", () => {
   const base = params("client=c1&kinds=journal&since=2026-01-01");
-  const next = applyActivityUrlState(base, { cursor: "page2" });
+  const next = applyActivityUrlState(base, { until: "2026-01-31" });
   assert.equal(next.get("client"), "c1");
   assert.equal(next.get("kinds"), "journal");
   assert.equal(next.get("since"), "2026-01-01");
-  assert.equal(next.get("cursor"), "page2");
+  assert.equal(next.get("until"), "2026-01-31");
   // the input is not mutated
-  assert.equal(base.get("cursor"), null);
+  assert.equal(base.get("until"), null);
 });
 
 test("applyActivityUrlState: an explicit null/empty DELETES the key rather than writing an empty string", () => {
@@ -227,11 +259,19 @@ test("applyActivityUrlState: an explicit null/empty DELETES the key rather than 
 });
 
 test("applyActivityUrlState: a field absent from the patch object is left exactly as it was", () => {
-  const base = params("client=c1&cursor=abc");
+  const base = params("client=c1&until=2026-01-31");
   const next = applyActivityUrlState(base, { since: "2026-01-01" });
   assert.equal(next.get("client"), "c1", "untouched by a patch that never named it");
-  assert.equal(next.get("cursor"), "abc", "untouched");
+  assert.equal(next.get("until"), "2026-01-31", "untouched");
   assert.equal(next.get("since"), "2026-01-01");
+});
+
+test("applyActivityUrlState: there is no cursor key to patch — the type has no such field", () => {
+  const base = params("client=c1");
+  // @ts-expect-error — `cursor` is not part of ActivityUrlState any more (#632 review finding 6).
+  const patch: Partial<ActivityUrlState> = { cursor: "x" };
+  const next = applyActivityUrlState(base, patch);
+  assert.equal(next.has("cursor"), false, "even if a caller smuggled the field in, it is never written to the URL");
 });
 
 test("applyActivityUrlState: opening/closing the event Sheet round-trips through the same param", () => {
@@ -244,14 +284,15 @@ test("applyActivityUrlState: opening/closing the event Sheet round-trips through
   assert.equal(closed.get("kinds"), "journal");
 });
 
-test("activityUrlStateEqual: filters equal, order-sensitive on kinds, event compared by (source,id)", () => {
-  const a = parseActivityUrlState(params("client=c1&kinds=journal,close&event=event:e1"));
-  const b = parseActivityUrlState(params("client=c1&kinds=journal,close&event=event:e1"));
-  assert.equal(activityUrlStateEqual(a, b), true);
-  const c = parseActivityUrlState(params("client=c1&kinds=close,journal"));
-  assert.equal(activityUrlStateEqual(a, c), false, "kind order differs");
-  const d = parseActivityUrlState(params("client=c2&kinds=journal,close&event=event:e1"));
-  assert.equal(activityUrlStateEqual(a, d), false, "client differs");
+test("parseActivityUrlState/applyActivityUrlState round trip, compared with plain deepEqual", () => {
+  const C2 = "22222222-2222-2222-2222-222222222222";
+  const a = parseActivityUrlState(params(`client=${C1}&kinds=journal,close&event=event:e1`));
+  const b = parseActivityUrlState(params(`client=${C1}&kinds=journal,close&event=event:e1`));
+  assert.deepEqual(a, b);
+  const c = parseActivityUrlState(params(`client=${C1}&kinds=close,journal`));
+  assert.notDeepEqual(a, c, "kind order differs");
+  const d = parseActivityUrlState(params(`client=${C2}&kinds=journal,close&event=event:e1`));
+  assert.notDeepEqual(a, d, "client differs");
 });
 
 // ── agentReceiptKindOf: the client-side re-derivation of the same id encoding ──
@@ -273,22 +314,83 @@ test("activityWorkHref: the durable Work record's own address", () => {
   assert.equal(activityWorkHref("c1", "w1"), "/clients/c1/work/w1");
 });
 
-test("activityJournalsHref/activityDocumentsHref/activityReportsHref: the stable tab, not a per-row deep link", () => {
+test("activityJournalsHref/activityDocumentsHref: the stable tab by default, and an `?entry=` deep link when an entry id is given", () => {
   assert.equal(activityJournalsHref("c1"), "/clients/c1/journals");
+  assert.equal(activityJournalsHref("c1", "e1"), "/clients/c1/journals?entry=e1");
+  assert.equal(activityJournalsHref("c1", null), "/clients/c1/journals", "a null entry id is the same as none");
   assert.equal(activityDocumentsHref("c1"), "/clients/c1/documents");
-  assert.equal(activityReportsHref("c1"), "/clients/c1/reports");
 });
 
 test("primaryActivityHref: prefers the Work link over an object link when both are present", () => {
-  const href = primaryActivityHref({ client_id: "c1", work_id: "w1", object_kind: "entry" });
+  const href = primaryActivityHref({ client_id: "c1", work_id: "w1", object_kind: "entry", object_id: "e1" });
   assert.equal(href, "/clients/c1/work/w1");
 });
 
-test("primaryActivityHref: falls back to the object's tab when there is no Work", () => {
-  assert.equal(primaryActivityHref({ client_id: "c1", work_id: null, object_kind: "entry" }), "/clients/c1/journals");
-  assert.equal(primaryActivityHref({ client_id: "c1", work_id: null, object_kind: "document" }), "/clients/c1/documents");
+test("primaryActivityHref: falls back to the object's tab when there is no Work, deep-linking an entry by its own id", () => {
+  assert.equal(
+    primaryActivityHref({ client_id: "c1", work_id: null, object_kind: "entry", object_id: "e1" }),
+    "/clients/c1/journals?entry=e1",
+  );
+  assert.equal(
+    primaryActivityHref({ client_id: "c1", work_id: null, object_kind: "document", object_id: "d1" }),
+    "/clients/c1/documents",
+  );
 });
 
 test("primaryActivityHref: null when there is no client to scope the link to (e.g. a platform-scope receipt)", () => {
-  assert.equal(primaryActivityHref({ client_id: null, work_id: null, object_kind: null }), null);
+  assert.equal(primaryActivityHref({ client_id: null, work_id: null, object_kind: null, object_id: null }), null);
+});
+
+// ── isKnownActivityStatus: the one checked narrowing over the closed status set ─
+
+test("isKnownActivityStatus: the four states 0181's derivation can produce, nothing else", () => {
+  assert.equal(isKnownActivityStatus("approved"), true);
+  assert.equal(isKnownActivityStatus("reversed"), true);
+  assert.equal(isKnownActivityStatus("superseded"), true);
+  assert.equal(isKnownActivityStatus("withdrawn"), true);
+  assert.equal(isKnownActivityStatus("draft"), false, "the raw je.status pass-through is not a member");
+  assert.equal(isKnownActivityStatus(""), false);
+});
+
+// ── describeActivity: the ONE sentence-picking function shared by the row and the Sheet ────────
+
+const tActivity = (key: string) => (key === "unlabeledEvent" ? "Unlabelled event" : `Activity.${key}`);
+const tReceipt = (key: string) => `FirmActivity.${key}`;
+
+test("describeActivity: an event row uses its own description, falling back to event_type, then the unlabelled copy", () => {
+  assert.equal(
+    describeActivity({ source: "event", description: "A document was filed.", event_type: "document.filed", id: "e1" }, tActivity, tReceipt),
+    "A document was filed.",
+  );
+  assert.equal(
+    describeActivity({ source: "event", description: null, event_type: "document.filed", id: "e1" }, tActivity, tReceipt),
+    "document.filed",
+  );
+  assert.equal(
+    describeActivity({ source: "event", description: null, event_type: null, id: "e1" }, tActivity, tReceipt),
+    "Unlabelled event",
+  );
+});
+
+test("describeActivity: an agent_receipt LIST row re-derives its kind from the id; a DETAIL row's own receipt_kind field takes precedence", () => {
+  const listRow = { source: "agent_receipt" as const, description: null, event_type: null, id: "freeform_read:42" };
+  assert.equal(describeActivity(listRow, tActivity, tReceipt), "FirmActivity.receiptKinds.freeform_read");
+
+  const detailRow = { ...listRow, id: "bogus:1", receipt_kind: "freeform_read" };
+  assert.equal(
+    describeActivity(detailRow, tActivity, tReceipt),
+    "FirmActivity.receiptKinds.freeform_read",
+    "the detail door's own receipt_kind field wins over re-deriving one from a (possibly stale) id",
+  );
+});
+
+test("describeActivity: an operation_receipt row prefers `purpose` over `event_type`, with the journal_entry label", () => {
+  const listRow = { source: "operation_receipt" as const, description: null, event_type: "journal_entry", id: "r1" };
+  assert.equal(describeActivity(listRow, tActivity, tReceipt), "Activity.workPurposes.journal_entry");
+
+  const detailRow = { ...listRow, event_type: null, purpose: "journal_entry" };
+  assert.equal(describeActivity(detailRow, tActivity, tReceipt), "Activity.workPurposes.journal_entry");
+
+  const unregistered = { source: "operation_receipt" as const, description: null, event_type: "some_future_purpose", id: "r2" };
+  assert.equal(describeActivity(unregistered, tActivity, tReceipt), "some_future_purpose", "an unregistered purpose renders itself, not a guess");
 });

@@ -1,7 +1,16 @@
 // The attributable Activity feed (#632, refresh spec #612 journey B5) — the wire contract for
 // `clara.list_activity`/`clara.get_activity_event` (packages/db/migrations/0181_activity_feed.sql),
-// the feed's URL-state model (`?client=&kinds=&since=&until=&cursor=&event=<source>:<id>`), its
-// closed kind-group vocabulary, and the link builders into Work/Journals/Documents/Reports.
+// the feed's URL-state model (`?client=&kinds=&since=&until=&event=<source>:<id>`), its
+// closed kind-group vocabulary, and the link builders into Work/Journals/Documents.
+//
+// NO `?cursor=` PARAM. Pagination position is IN-MEMORY state (`use-activity-feed.ts`'s own
+// `nextCursor`), never a URL param — the Sheet is the only "return to where you were" surface this
+// feed needs (spec appendix C §4, "the Sheet is supporting context, not the durable URL"), and it
+// is in-page, so closing it never re-navigates and never loses the loaded pages. A `?cursor=`
+// param existed in an earlier cut of this file and was parsed but never wired to a read — the URL
+// advertised a page the feed never actually loaded. Removed rather than wired up: a caller
+// following a bookmarked or shared `?cursor=...` link has no page-1 rows loaded yet to append that
+// cursor's page onto, so the parameter could never have meant what it looked like it meant.
 //
 // GROUNDING (0181's own header + body, as measured against the migration this file is written
 // against — never the other way round):
@@ -22,20 +31,25 @@
 // ORDER and CURSOR are part of the contract (the same reasoning lib/firm/timeline.ts's own header
 // gives for `list_firm_timeline`): a caller that composed its own order/limit over the union could
 // page incorrectly without ever being wrong about one row. `callDoor` is the transport, exactly as
-// a read-flavoured RPC always rides it (apps/web/AGENTS.md).
+// a read-flavoured RPC always rides it (AGENTS.md).
 //
 // THE OBJECT LINK BUILDERS ARE HONEST ABOUT WHAT THEY CAN NAME. `workDetailHref` names ONE durable
-// Work record — that route genuinely exists (lib/navigation/tree.ts). Journals, Documents and
-// Reports have NO per-object or per-tab URL parameter today (measured: neither
-// components/journals/journals-workbench.tsx nor the Documents/Reports pages read
-// `useSearchParams`/`searchParams` at all) — so an entry/document/report link below lands on the
-// STABLE OBJECT PAGE, not the specific row, and says so in its own name
-// (`activityJournalsHref`, not `activityEntryHref`). Inventing a query parameter neither page
-// consumes would be a link that silently does nothing; this module does not do that.
+// Work record — that route genuinely exists (lib/navigation/tree.ts). Journals and Documents have
+// NO per-object or per-tab URL parameter today (measured: neither
+// components/journals/journals-workbench.tsx nor the Documents page reads
+// `useSearchParams`/`searchParams` at all) — so an entry/document link below lands on the STABLE
+// OBJECT PAGE, not the specific row, and says so in its own name (`activityJournalsHref`, not
+// `activityEntryHref`). Inventing a query parameter neither page consumes would be a link that
+// silently does nothing; this module does not do that. There is no `activityReportsHref`:
+// `object_kind` (the only field `primaryActivityHref` branches on below `work_id`) is one of
+// `'entry' | 'document' | 'resolution' | null` — never `'report'` — so a report-object link
+// builder would have no caller that could ever reach it; `report` is a FILTER kind on the union
+// (`report_agent` receipts), not an object kind this feed can address a specific row of.
 
 import { callDoor } from "@/lib/doors";
 import type { SessionTokenAccessor } from "@/lib/session";
-import { CLARA_BUSINESS_TIMEZONE } from "@/lib/business-date";
+import { isClientIdShape } from "@/lib/client-id";
+import { isKnownAgentReceiptKind } from "@/lib/firm/receipt-kinds";
 import {
   ACCOUNTING_ITEMS,
   CLIENT_NAV,
@@ -82,9 +96,29 @@ export type ActivityRow = {
   document_id: string | null;
   original_entry_id: string | null;
   replacement_entry_id: string | null;
-  status: "approved" | "reversed" | "superseded" | "withdrawn" | string | null;
+  /** One of `ACTIVITY_STATUSES` (0181's own four-state derivation, its header's "THE ENTRY STATUS
+   *  DERIVATION"), a raw `je.status` pass-through for a still-`draft` entry, or `null` for a row
+   *  that addresses no journal entry at all. Typed plainly as `string | null` rather than a
+   *  literal union WITH a `string` fallback bolted on — TypeScript collapses
+   *  `"approved" | ... | string` to `string` outright, so the literals bought no actual checking;
+   *  `isKnownActivityStatus` below is the one place that checks membership, and every caller that
+   *  cares uses it rather than re-deriving its own guess at the closed set. */
+  status: string | null;
   kind: ActivityKind;
 };
+
+/** The four states 0181's own status derivation can produce (that migration's header, "THE ENTRY
+ *  STATUS DERIVATION"). The one checked narrowing over `ActivityRow`/`ActivityDetail`'s `status`
+ *  field — exported so a row's own status badge (activity-row.tsx) and its detail Sheet
+ *  (activity-event-sheet.tsx) share ONE membership check rather than two copies that could drift
+ *  (a status this build has not registered a label for, e.g. the raw `je.status` 'draft'
+ *  pass-through, renders itself rather than a fabricated translation). */
+export const ACTIVITY_STATUSES = ["approved", "reversed", "superseded", "withdrawn"] as const;
+export type ActivityStatus = (typeof ACTIVITY_STATUSES)[number];
+
+export function isKnownActivityStatus(value: string): value is ActivityStatus {
+  return (ACTIVITY_STATUSES as readonly string[]).includes(value);
+}
 
 /** `clara.get_activity_event`'s return: the same shape, plus the detail-only fields the door adds
  *  (0181's header: "same shape plus client_name..."). `receipt_kind`/`purpose`/`basis_origin`/
@@ -108,7 +142,10 @@ export type ActivityPage = {
 export type ActivityFilters = {
   client?: string | null;
   kinds?: readonly ActivityKind[] | null;
-  /** `YYYY-MM-DD`, inclusive, in the business timezone — never a bare Date or a browser-local day. */
+  /** `YYYY-MM-DD`, in the business timezone — never a bare Date or a browser-local day.
+   *  `since` is INCLUSIVE (that calendar day's own start); `until` is its own EXCLUSIVE upper
+   *  fence (the NEXT calendar day's start) — see `businessDayEnd`'s own comment for why the two
+   *  bounds are not symmetric. */
   since?: string | null;
   until?: string | null;
 };
@@ -118,15 +155,35 @@ export type ActivityFilters = {
 export const ACTIVITY_MAX_LIMIT = 100;
 export const ACTIVITY_DEFAULT_LIMIT = 25;
 
-/** A business-timezone calendar day's exact start, as an offset ISO instant. Malaysia carries no
- *  DST (CLARA_BUSINESS_TIMEZONE is a fixed UTC+8), so the offset is a literal rather than a
- *  computed one — see business-date.ts's own header for why the business day is not the browser's
- *  local day at all. */
+/** A business-timezone calendar day's exact start, as an offset ISO instant. The business
+ *  timezone (Malaysia, `lib/business-date.ts`'s own `CLARA_BUSINESS_TIMEZONE`) carries no DST, so
+ *  the `+08:00` offset is a literal rather than a computed one — see that module's own header for
+ *  why the business day is not the browser's local day at all. */
 function businessDayStart(dateOnly: string): string {
   return `${dateOnly}T00:00:00.000+08:00`;
 }
+
+/** The EXCLUSIVE upper fence for a business-timezone calendar day: the NEXT day's own start, not
+ *  this day's last representable instant. 0181 compares `occurred_at < p_until` (not `<=`)
+ *  precisely so this function can hand it a clean boundary instead of a manufactured
+ *  near-midnight literal — `occurred_at` carries MICROSECOND precision, and a same-day `<=` bound
+ *  built from `23:59:59.999` (millisecond resolution) would silently drop any row timestamped in
+ *  that day's last sub-millisecond, a real boundary loss the exclusive next-day form has no room
+ *  for: every instant strictly before the next calendar day begins is included, to the
+ *  microsecond, with one comparison operator. Deliberately NOT named `businessDayEnd` returning an
+ *  inclusive `23:59:59.999` literal — see 0181's own header, "P_SINCE IS INCLUSIVE... P_UNTIL IS
+ *  EXCLUSIVE", for the fuller rationale this mirrors on the wire side. */
 function businessDayEnd(dateOnly: string): string {
-  return `${dateOnly}T23:59:59.999+08:00`;
+  const parts = dateOnly.split("-").map(Number);
+  const year = parts[0] ?? 0;
+  const month = parts[1] ?? 0;
+  const day = parts[2] ?? 0;
+  // `Date.UTC` normalises an out-of-range day (e.g. day 32 of a 31-day month) into the correct
+  // next month/year on its own — the same overflow behaviour every native Date arithmetic relies
+  // on — so this rolls over a month/year boundary correctly with no special-cased calendar math.
+  const nextDay = new Date(Date.UTC(year, month - 1, day + 1));
+  const nextDateOnly = nextDay.toISOString().slice(0, 10);
+  return `${nextDateOnly}T00:00:00.000+08:00`;
 }
 
 const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
@@ -150,10 +207,11 @@ export type ListActivityOptions = {
 };
 
 /** A page of the activity feed, newest first. `filters.since`/`until` are calendar days in the
- *  business timezone (CLARA_BUSINESS_TIMEZONE) and are converted here to the inclusive instant
- *  range the door expects — the ONE place that conversion happens, so a caller never hand-rolls a
- *  timezone offset. `opts.cursor` is round-tripped verbatim from a previous page's `next_cursor`;
- *  passing anything else is a malformed-cursor CLR10 refusal, by the door's own contract. */
+ *  business timezone and are converted here to the `[since, until)` instant range the door
+ *  expects (inclusive start, exclusive end — see `businessDayEnd`'s own comment) — the ONE place
+ *  that conversion happens, so a caller never hand-rolls a timezone offset. `opts.cursor` is
+ *  round-tripped verbatim from a previous page's `next_cursor`; passing anything else is a
+ *  malformed-cursor CLR10 refusal, by the door's own contract. */
 export async function listActivity(
   filters: ActivityFilters,
   opts: ListActivityOptions = {},
@@ -227,18 +285,20 @@ export type ActivityUrlState = {
   kinds: ActivityKind[];
   since: string | null;
   until: string | null;
-  cursor: string | null;
   event: { source: ActivitySource; id: string } | null;
 };
 
-const EMPTY_STATE: ActivityUrlState = { client: null, kinds: [], since: null, until: null, cursor: null, event: null };
-
-/** Parse the feed's own five query params off a `URLSearchParams` (or any string-keyed reader
- *  with a compatible `.get`). Every field degrades to its empty default on a malformed value
- *  rather than throwing — the URL is user-editable input, not a trusted wire contract. `kinds` is
- *  comma-joined in the URL (`?kinds=journal,close`) and de-duplicated; an unrecognised kind token
- *  is DROPPED rather than sent to the door, so a stale bookmark from a retired kind degrades to
- *  "no filter on that axis" instead of a CLR10 the user never asked for. */
+/** Parse the feed's own FOUR query params off a `URLSearchParams` (or any string-keyed reader with
+ *  a compatible `.get`) — `client`, `kinds`, `since`/`until` and `event`; there is deliberately no
+ *  `cursor` (this file's own header explains why pagination is not a URL concern). Every field
+ *  degrades to its empty default on a malformed value rather than throwing — the URL is
+ *  user-editable input, not a trusted wire contract. `kinds` is comma-joined in the URL
+ *  (`?kinds=journal,close`) and de-duplicated; an unrecognised kind token is DROPPED rather than
+ *  sent to the door, so a stale bookmark from a retired kind degrades to "no filter on that axis"
+ *  instead of a CLR10 the user never asked for. `client` is SHAPE-CHECKED the same way
+ *  (`isClientIdShape`, `lib/client-id.ts`): a hand-edited or stale non-uuid value is dropped here
+ *  rather than posted to the door's `p_client uuid` parameter, where PostgREST would answer a raw
+ *  400 `22P02` this module has no chance to turn into an honest state. */
 export function parseActivityUrlState(params: Pick<URLSearchParams, "get">): ActivityUrlState {
   const client = params.get("client");
   const kindsRaw = params.get("kinds");
@@ -247,14 +307,12 @@ export function parseActivityUrlState(params: Pick<URLSearchParams, "get">): Act
     : [];
   const since = params.get("since");
   const until = params.get("until");
-  const cursor = params.get("cursor");
   const event = parseEventParam(params.get("event"));
   return {
-    client: client && client.length > 0 ? client : null,
+    client: client && isClientIdShape(client) ? client : null,
     kinds,
     since: since && isDateOnly(since) ? since : null,
     until: until && isDateOnly(until) ? until : null,
-    cursor: cursor && cursor.length > 0 ? cursor : null,
     event,
   };
 }
@@ -281,25 +339,9 @@ export function applyActivityUrlState(
   }
   if ("since" in patch) setOrDelete("since", patch.since);
   if ("until" in patch) setOrDelete("until", patch.until);
-  if ("cursor" in patch) setOrDelete("cursor", patch.cursor);
   if ("event" in patch) setOrDelete("event", patch.event ? formatEventParam(patch.event.source, patch.event.id) : null);
   return next;
 }
-
-export function activityUrlStateEqual(a: ActivityUrlState, b: ActivityUrlState): boolean {
-  return (
-    a.client === b.client &&
-    a.since === b.since &&
-    a.until === b.until &&
-    a.cursor === b.cursor &&
-    a.kinds.length === b.kinds.length &&
-    a.kinds.every((k, i) => b.kinds[i] === k) &&
-    ((a.event === null && b.event === null) ||
-      (a.event !== null && b.event !== null && a.event.source === b.event.source && a.event.id === b.event.id))
-  );
-}
-
-export { EMPTY_STATE as EMPTY_ACTIVITY_URL_STATE };
 
 /** For an `agent_receipt` row, the `receipt_kind` half of its `id` (see this file's header —
  *  the id IS `receipt_kind:receipt_id`, so this is a client-side re-derivation of the SAME
@@ -320,13 +362,21 @@ export function activityWorkHref(clientId: string, workId: string): string {
   return workDetailHref(clientId, workId);
 }
 
-/** `/clients/:clientId/journals` — the Journals tab. See this file's header: no per-entry or
- *  per-tab query parameter exists for the workbench to land on, so every journal-entry-kind
- *  activity row (a posting, a correction, a withdrawal) links to the SAME stable destination. */
-export function activityJournalsHref(clientId: string): string {
+/** `/clients/:clientId/journals`, or `/clients/:clientId/journals?entry=<entryId>` when an entry
+ *  is named — the Journals tab. See this file's header: no per-entry or per-tab query parameter
+ *  is READ by the workbench yet (#634's lane is adding that `?entry=` read and merges after this
+ *  branch), so every link built here lands on the STABLE TAB either way today — the query
+ *  parameter is honest about the destination it names without depending on the reader existing
+ *  yet, and starts working the moment #634 lands with no change on this side. ONE builder for
+ *  every journal-entry destination this feed offers (the plain object-kind='entry' fallback link,
+ *  and the correction chain's original/replacement links below) — a second, differently-shaped
+ *  builder for the "same tab, different entry" case would be the thing this file's own header
+ *  warns against inventing a query parameter for. */
+export function activityJournalsHref(clientId: string, entryId?: string | null): string {
   const item = ACCOUNTING_ITEMS.find((i) => i.id === "journals");
   if (!item) throw new Error("activityJournalsHref: the journals accounting item is missing from the registry");
-  return accountingHref(clientId, item);
+  const base = accountingHref(clientId, item);
+  return entryId ? `${base}?entry=${entryId}` : base;
 }
 
 /** `/clients/:clientId/documents` — the Documents tab; see the Journals link's own note. */
@@ -336,25 +386,57 @@ export function activityDocumentsHref(clientId: string): string {
   return clientNavHref(clientId, item);
 }
 
-/** `/clients/:clientId/reports` — the Reports tab; see the Journals link's own note. */
-export function activityReportsHref(clientId: string): string {
-  const item = CLIENT_NAV.find((i) => i.id === "reports");
-  if (!item) throw new Error("activityReportsHref: the reports client-nav item is missing from the registry");
-  return clientNavHref(clientId, item);
-}
-
 /** Resolve the ONE primary link a row should offer, honouring the priority the spec's own
  *  language implies (Work is the durable record; an object link is the fallback when there is no
  *  Work). `null` when a row genuinely has nothing to link to (e.g. an agent_receipt row with no
- *  client_id — a platform-scope receipt). */
-export function primaryActivityHref(row: Pick<ActivityRow, "client_id" | "work_id" | "object_kind">): string | null {
+ *  client_id — a platform-scope receipt). An entry-kind row's link names the entry itself
+ *  (`object_id`), the same `?entry=` shape the correction-chain links use, so a plain posting and
+ *  a corrected one deep-link the same way. */
+export function primaryActivityHref(
+  row: Pick<ActivityRow, "client_id" | "work_id" | "object_kind" | "object_id">,
+): string | null {
   if (!row.client_id) return null;
   if (row.work_id) return activityWorkHref(row.client_id, row.work_id);
-  if (row.object_kind === "entry") return activityJournalsHref(row.client_id);
+  if (row.object_kind === "entry") return activityJournalsHref(row.client_id, row.object_id);
   if (row.object_kind === "document") return activityDocumentsHref(row.client_id);
   return null;
 }
 
-/** Re-exported for the timezone-day-boundary tests and for a page-level "today" default —
- *  named here rather than re-imported everywhere `since`/`until` defaults are computed. */
-export { CLARA_BUSINESS_TIMEZONE };
+// ── the one sentence a row/detail shows ──────────────────────────────────────
+
+type Translate = (key: string, values?: Record<string, string>) => string;
+
+/** The one sentence a row or its detail shows — always a DB-provided fact, never a composed
+ *  guess. Shared by activity-row.tsx and activity-event-sheet.tsx (a second, near-identical copy
+ *  per component is exactly the drift this module's other shared helpers already guard against):
+ *  a plain `ActivityRow` carries no `receipt_kind`/`purpose` fields of its own, so the
+ *  agent_receipt/operation_receipt branches fall back to `agentReceiptKindOf`/`event_type` in that
+ *  shape, while an `ActivityDetail` carries the door's own `receipt_kind`/`purpose` and those take
+ *  precedence when present — the SAME function handles both without the caller telling it which
+ *  shape it has.
+ *    event: `description` (event_types' own sentence).
+ *    agent_receipt: the pinned receipt-kind label (`lib/firm/receipt-kinds.ts`).
+ *    operation_receipt: the Work purpose label (`purpose`/`event_type` carries
+ *    `clara.accounting_work.purpose`, per 0181's own header — the door's ONE allowed substitute
+ *    for a fabricated sentence). */
+export function describeActivity(
+  row: Pick<ActivityRow, "source" | "description" | "event_type" | "id"> & {
+    receipt_kind?: string;
+    purpose?: string;
+  },
+  t: Translate,
+  tReceipt: (key: string) => string,
+): string {
+  if (row.source === "event") return row.description ?? row.event_type ?? t("unlabeledEvent");
+  if (row.source === "agent_receipt") {
+    const kind = row.receipt_kind ?? agentReceiptKindOf(row);
+    return kind && isKnownAgentReceiptKind(kind) ? tReceipt(`receiptKinds.${kind}`) : (kind ?? t("unlabeledEvent"));
+  }
+  // operation_receipt: `purpose` (the detail door's own field) if present, else the list row's
+  // `event_type` — both carry clara.accounting_work.purpose, a closed CHECK ('journal_entry'
+  // today, 0178:305) — a purpose this build has not registered a label for renders itself rather
+  // than a guessed translation.
+  const purpose = row.purpose ?? row.event_type;
+  if (!purpose) return t("unlabeledEvent");
+  return purpose === "journal_entry" ? t("workPurposes.journal_entry") : purpose;
+}

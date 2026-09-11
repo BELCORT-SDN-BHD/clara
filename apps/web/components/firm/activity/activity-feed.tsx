@@ -26,12 +26,14 @@ import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { LoadingState, StateBanner } from "@/components/common/state";
 import { EmptyState } from "@/components/common/state";
+import { isDoorError, isDoorRefusal } from "@/lib/doors";
 import { useAsyncRead } from "@/lib/firm/use-async-read";
 import { loadClientRegister, type ClientRow } from "@/lib/firm/reads";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
 import { useMemberNames } from "@/lib/members/use-member-names";
 import {
   applyActivityUrlState,
+  formatEventParam,
   parseActivityUrlState,
   type ActivityRow as ActivityRowData,
 } from "@/lib/firm/activity";
@@ -149,18 +151,27 @@ export function ActivityFeed() {
         <EmptyState>{isFirstUse ? t("emptyFirstUse") : t("emptyFiltered")}</EmptyState>
       ) : (
         <>
-          {/* The one status announcement once data is on screen — refreshing, or a plain count. */}
-          <p role="status" aria-live="polite" className="sr-only">
+          {/* The ONE status announcement once data is on screen — refreshing, or a plain count —
+              and the ONLY one: while the event Sheet is open it owns the live region instead (its
+              own loading/error text is `role="status"` too, `components/common/state.tsx`'s
+              `LoadingState`), so this line drops its role rather than fighting the Sheet's for the
+              same announcement slot (review finding 9). The paragraph stays mounted either way —
+              only the role/aria-live toggle, so nothing else about this branch's layout shifts. */}
+          <p
+            role={state.event ? undefined : "status"}
+            aria-live={state.event ? undefined : "polite"}
+            className="sr-only"
+          >
             {feed.refreshing ? t("refreshing") : t("rowCount", { count: feed.rows.length })}
           </p>
-          {feed.truncated ? <p className="text-xs text-muted-foreground">{t("partialProjection")}</p> : null}
+          {feed.truncated ? <p className="text-xs text-muted-foreground">{t("moreToLoad")}</p> : null}
           {feed.duplicatesDropped > 0 ? (
             <p className="text-xs text-muted-foreground">{t("duplicatesDropped", { count: feed.duplicatesDropped })}</p>
           ) : null}
           <ul className="flex flex-col gap-2">
             {feed.rows.map((row) => (
               <ActivityRow
-                key={`${row.source}:${row.id}`}
+                key={formatEventParam(row.source, row.id)}
                 row={row}
                 clientNames={clientNames}
                 memberNames={memberNames}
@@ -181,20 +192,32 @@ export function ActivityFeed() {
   );
 }
 
+/** Review finding 8: `error instanceof Error` is true for EVERY real door failure (DoorError and
+ *  DoorRefusal both extend it, `lib/doors.ts`), so `t("deniedGeneric")` was dead code and a user
+ *  who lost access saw the DB's own raw text ("insufficient role") with no explanation at all —
+ *  exactly backwards from the intent. This now always renders the honest explanation as the
+ *  banner's body, and puts the governed code/message in the banner's own `code` slot, the same
+ *  split `components/firm/data-state.tsx`'s `ErrorMessage` already uses for a DoorRefusal. */
 function DeniedBanner({ error, retry }: { error: unknown; retry: () => void }) {
   const t = useTranslations("Activity");
-  const message = error instanceof Error ? error.message : t("deniedGeneric");
+  let code: string | null = null;
+  if (isDoorRefusal(error)) {
+    code = error.reason ? `${error.code} · ${error.reason}` : error.code;
+  } else if (isDoorError(error)) {
+    code = error.kind;
+  }
   return (
     <StateBanner
       tone="warning"
       title={t("deniedTitle")}
+      code={code}
       action={
         <Button type="button" variant="outline" size="sm" onClick={retry}>
           {t("retry")}
         </Button>
       }
     >
-      {message}
+      {t("deniedGeneric")}
     </StateBanner>
   );
 }

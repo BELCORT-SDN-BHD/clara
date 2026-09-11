@@ -6,7 +6,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { loadFirmActivity, loadClientRegister, loadClientRegisterFacts, loadClientById } from "./reads";
+import { loadClientRegister, loadClientRegisterFacts, loadClientById } from "./reads";
 import type { SessionTokenAccessor } from "@/lib/session";
 
 function fakeSession(token: string | null): SessionTokenAccessor {
@@ -28,23 +28,6 @@ function withMockedFetch(impl: typeof fetch, run: () => Promise<void>): Promise<
     else process.env.NEXT_PUBLIC_SUPABASE_URL = originalUrl;
   });
 }
-
-test("loadFirmActivity: reads agent_receipts_visible, newest first, the 19-column contract", async () => {
-  let seenUrl = "";
-  await withMockedFetch(
-    async (url) => {
-      seenUrl = String(url);
-      return jsonResponse([], 200);
-    },
-    async () => {
-      await loadFirmActivity(fakeSession("tok"));
-    },
-  );
-  assert.match(seenUrl, /\/rest\/v1\/agent_receipts_visible\?/);
-  assert.match(seenUrl, /select=receipt_kind%2Creceipt_id/);
-  assert.match(seenUrl, /order=occurred_at\.desc/);
-  assert.match(seenUrl, /limit=100/);
-});
 
 test("loadClientRegister: reads clients, ordered by name, no client_id filter (RLS floors it)", async () => {
   let seenUrl = "";
@@ -129,17 +112,4 @@ test("loadClientById: a MALFORMED id resolves null WITHOUT issuing a request (#6
     },
   );
   assert.equal(called, false, "a malformed id must never reach fetch");
-});
-
-test("loadFirmActivity: a 403 (RLS/grant refusal) propagates as a typed ReadError, never masked", async () => {
-  await withMockedFetch(
-    async () => jsonResponse({ message: "permission denied for table agent_receipts_visible" }, 403),
-    async () => {
-      const { isReadError } = await import("../read");
-      await assert.rejects(loadFirmActivity(fakeSession("tok")), (e: unknown) => {
-        assert.ok(isReadError(e));
-        return true;
-      });
-    },
-  );
 });

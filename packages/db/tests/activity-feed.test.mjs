@@ -366,3 +366,53 @@ test("af.10 neither door reads a bare now()/clock_timestamp() — no x42 bare-cl
     assert.doesNotMatch(row.def, /clock_timestamp\s*\(/i, `af.10 ${row.proname} must not call clock_timestamp()`);
   }
 });
+
+// ===========================================================================================
+// 8 · Review findings #5/#15 — the until boundary is EXCLUSIVE, and p_limit clamps both ends.
+// ===========================================================================================
+
+test("af.11 the until boundary is EXCLUSIVE at the microsecond — a row AT p_until is excluded, one microsecond before is included", async (t) => {
+  if (await gate(t)) return;
+  const cli = await freshWorkClient(ALICE(), "af11");
+  const boundary = "2028-03-01T00:00:00.000000Z";
+  const justBefore = await mkAgentAct({ firm: FIRM_A(), client: cli, occurredAt: "2028-02-28T23:59:59.999999Z" });
+  const atBoundary = await mkAgentAct({ firm: FIRM_A(), client: cli, occurredAt: boundary });
+
+  const page = await listActivity(BOB(), { client: cli, kinds: ["agent"], until: boundary, limit: 100 });
+  const ids = rowsOf(page).map((r) => r.id);
+  assert.ok(ids.includes(`agent_act:${justBefore.id}`), "af.11 the row one microsecond before p_until is included");
+  assert.equal(ids.includes(`agent_act:${atBoundary.id}`), false,
+    "af.11 the row exactly AT p_until is excluded — the boundary is exclusive, not inclusive");
+});
+
+test("af.12 a malformed cursor refuses CLR10 invalid_cursor, never a raw decode exception", async (t) => {
+  if (await gate(t)) return;
+  await assertRaises(CLR10, () => listActivity(BOB(), { cursor: "not-valid-base64-at-all!!" }),
+    "af.12 garbage that is not valid base64");
+  await assertRaises(CLR10, () => listActivity(BOB(), { cursor: Buffer.from("no-pipe-in-here", "utf8").toString("base64") }),
+    "af.12 valid base64 whose decoded text has no pipe separator");
+  await assertRaises(CLR10,
+    () => listActivity(BOB(), { cursor: Buffer.from("not-a-timestamp|some-id", "utf8").toString("base64") }),
+    "af.12 a pipe-separated pair whose first half does not parse as a timestamptz");
+});
+
+test("af.13 p_limit clamps to the door's own [1,100] window on both ends", async (t) => {
+  if (await gate(t)) return;
+  const cli = await freshWorkClient(ALICE(), "af13");
+  // 105 real rows — enough to prove the UPPER clamp (100), not merely that a huge limit does not
+  // error. `kinds:['agent']` isolates these from freshWorkClient's own client.created noise.
+  for (let i = 0; i < 105; i += 1) {
+    await mkAgentAct({ firm: FIRM_A(), client: cli });
+  }
+
+  const capped = await listActivity(BOB(), { client: cli, kinds: ["agent"], limit: 100000 });
+  assert.equal(rowsOf(capped).length, 100, "af.13 a limit far above the ceiling is clamped DOWN to 100, not honoured literally");
+  assert.equal(capped.truncated, true, "af.13 105 real rows behind a 100 cap is a truncated page");
+
+  const floored = await listActivity(BOB(), { client: cli, kinds: ["agent"], limit: 0 });
+  assert.equal(rowsOf(floored).length, 1, "af.13 a limit of 0 is clamped UP to 1, not treated as 'no rows'");
+  assert.equal(floored.truncated, true, "af.13 one row out of 105 is certainly a truncated page");
+
+  const negative = await listActivity(BOB(), { client: cli, kinds: ["agent"], limit: -5 });
+  assert.equal(rowsOf(negative).length, 1, "af.13 a negative limit is also clamped up to the floor of 1");
+});

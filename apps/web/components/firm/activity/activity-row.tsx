@@ -22,15 +22,14 @@ import { useTranslations } from "next-intl";
 import { Badge } from "@/components/parts/PartBadge";
 import { businessDateTime } from "@/lib/business-date";
 import {
-  agentReceiptKindOf,
+  activityJournalsHref,
+  describeActivity,
+  isKnownActivityStatus,
   primaryActivityHref,
   type ActivityRow as ActivityRowData,
 } from "@/lib/firm/activity";
-import { isKnownAgentReceiptKind } from "@/lib/firm/receipt-kinds";
 import type { MemberNameResolver } from "@/lib/members/use-member-names";
 import { MemberName } from "@/components/common/member-name";
-
-type Translate = (key: string, values?: Record<string, string>) => string;
 
 const STATUS_TONE = {
   approved: "neutral",
@@ -38,14 +37,6 @@ const STATUS_TONE = {
   superseded: "warning",
   withdrawn: "warning",
 } as const;
-
-/** The four states 0181's own status derivation can produce (this migration's header). Anything
- *  else — e.g. the raw `je.status` pass-through for a still-`draft` entry — renders its own
- *  value rather than a fabricated label; the checked lookup is what keeps that honest instead of
- *  guessing at a translation key that may not exist. */
-function isKnownActivityStatus(value: string): value is keyof typeof STATUS_TONE {
-  return value in STATUS_TONE;
-}
 
 export function ActivityRow({
   row,
@@ -63,7 +54,7 @@ export function ActivityRow({
   const clientLabel = row.client_id ? (clientNames.get(row.client_id) ?? t("clientUnnamed")) : t("noClient");
   const href = primaryActivityHref(row);
 
-  const sentence = describeRow(row, t, tReceipt);
+  const sentence = describeActivity(row, t, tReceipt);
 
   return (
     <li className="enter-content flex flex-col gap-2 rounded-lg border border-border bg-card p-3 text-sm">
@@ -116,11 +107,25 @@ export function ActivityRow({
         </dd>
       </dl>
 
-      {row.original_entry_id || row.replacement_entry_id ? (
-        <p className="text-xs text-muted-foreground">
-          {row.original_entry_id ? t("linksToOriginal") : null}
-          {row.replacement_entry_id ? t("linksToReplacement") : null}
-        </p>
+      {/* Two SEPARATE lines, each a REAL anchor — a corrected entry links to both the original
+          and the replacement it was corrected into/from (review finding 7). Both land on the
+          Journals tab with `?entry=<id>` today (#634's lane reads that param; until it merges the
+          page lands on the tab regardless, which is the honest destination either way). */}
+      {row.client_id && row.original_entry_id ? (
+        <Link
+          href={activityJournalsHref(row.client_id, row.original_entry_id)}
+          className="w-fit text-xs text-primary underline-offset-4 hover:underline"
+        >
+          {t("linksToOriginal")}
+        </Link>
+      ) : null}
+      {row.client_id && row.replacement_entry_id ? (
+        <Link
+          href={activityJournalsHref(row.client_id, row.replacement_entry_id)}
+          className="w-fit text-xs text-primary underline-offset-4 hover:underline"
+        >
+          {t("linksToReplacement")}
+        </Link>
       ) : null}
 
       {href ? (
@@ -130,21 +135,4 @@ export function ActivityRow({
       ) : null}
     </li>
   );
-}
-
-/** The one sentence a row shows — always a DB-provided fact, never a composed guess.
- *  event: `description` (event_types' own sentence). agent_receipt: the pinned receipt-kind
- *  label. operation_receipt: the Work purpose label (`event_type` carries the purpose, per
- *  0181's own header — the door's ONE allowed substitute for a fabricated sentence). */
-function describeRow(row: ActivityRowData, t: Translate, tReceipt: Translate): string {
-  if (row.source === "event") return row.description ?? row.event_type ?? t("unlabeledEvent");
-  if (row.source === "agent_receipt") {
-    const kind = agentReceiptKindOf(row);
-    return kind && isKnownAgentReceiptKind(kind) ? tReceipt(`receiptKinds.${kind}`) : (kind ?? t("unlabeledEvent"));
-  }
-  // operation_receipt: event_type carries clara.accounting_work.purpose, a closed CHECK
-  // ('journal_entry' today, 0178:305) — a purpose this build has not registered a label for
-  // renders itself rather than a guessed translation.
-  if (!row.event_type) return t("unlabeledEvent");
-  return row.event_type === "journal_entry" ? t("workPurposes.journal_entry") : row.event_type;
 }
