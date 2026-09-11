@@ -369,6 +369,7 @@ test("a live clarify survives a 200-delta stream: no nested-update ceiling, and 
       const afterClarify = timers.armed();
       const readsAfterClarify = counts.interruptionReads;
       const commitsAfterClarify = transcriptCommits.count;
+      const burstStartedAt = Date.now();
 
       await pumpDeltas(h, 20, 200);
 
@@ -399,11 +400,23 @@ test("a live clarify survives a 200-delta stream: no nested-update ceiling, and 
       // an upper bound on how many times each card inside it rendered; the per-CARD
       // counters live in the churn cell below, which mounts the two components directly
       // and can therefore count their own calls rather than their parent's.
-      // Measured on the fix: 204 commits for 200 deltas.
+      //
+      // THE BUDGET IS SPELLED OUT RATHER THAN GUESSED, because two of its terms are REAL
+      // TIME and this cell runs on a shared machine: 200 deltas, plus one commit per second
+      // the burst actually took (the turn clock ticks once a second, by design — that IS
+      // the component working correctly), plus the clarify card's own bounded re-read
+      // window, plus a small constant for the settles. Measured: 204 commits for 200 deltas
+      // running alone (a ~5s burst), 212 under the full suite (a ~15s burst) — i.e. the
+      // whole difference between the two was the clock ticking, which is exactly the term
+      // added here rather than absorbed into a fudged constant. The pre-fix build is
+      // nowhere near this bound: its own census armed 439 one-second timers across this
+      // same burst, and every one of those arms follows a commit.
+      const burstSeconds = Math.ceil((Date.now() - burstStartedAt) / 1000);
+      const commitBudget = 200 + burstSeconds + CLARIFY_ROW_ATTEMPTS + 8;
       const commitsDuringBurst = transcriptCommits.count - commitsAfterClarify;
       assert.ok(
-        commitsDuringBurst <= 200 + 8,
-        `the transcript committed ${commitsDuringBurst} times for 200 deltas — one commit per delta plus a small constant is the bound, and anything beyond it is a component updating itself`,
+        commitsDuringBurst <= commitBudget,
+        `the transcript committed ${commitsDuringBurst} times for 200 deltas over ${burstSeconds}s (budget ${commitBudget}) — one commit per delta, one per second of turn clock, the card's bounded re-read and a small constant is the bound; anything beyond it is a component updating itself`,
       );
       // The failure the owner actually saw. `markSendFailed` is the only writer of this
       // banner, and during a stream its only caller is the rejection of `runClaraTaskStream`.
@@ -491,17 +504,24 @@ test("a throw from inside applyStreamEvent leaves through the STREAM, and the ba
 
     let caught: unknown = null;
     try {
-      await runClaraTaskStream({
-        token: "tok",
-        taskId: TASK_ID,
-        signal: new AbortController().signal,
-        fetchImpl: oneChunkStream(),
-        // VERBATIM `attachClaraStream`'s wiring (useClaraThread.ts): the store call IS the
-        // callback, with nothing between them to catch anything.
-        onEvent: (evt) => claraThreadStore.applyStreamEvent(THREAD_ID, evt),
+      // INSIDE `act`, because the event this drives really does update the mounted thread —
+      // running it outside would make React print its "not wrapped in act(...)" warning and
+      // leave the re-render this cell then reads unflushed.
+      await h.act(async () => {
+        try {
+          await runClaraTaskStream({
+            token: "tok",
+            taskId: TASK_ID,
+            signal: new AbortController().signal,
+            fetchImpl: oneChunkStream(),
+            // VERBATIM `attachClaraStream`'s wiring (useClaraThread.ts): the store call IS
+            // the callback, with nothing between them to catch anything.
+            onEvent: (evt) => claraThreadStore.applyStreamEvent(THREAD_ID, evt),
+          });
+        } catch (err) {
+          caught = err;
+        }
       });
-    } catch (err) {
-      caught = err;
     } finally {
       unsubscribe();
     }
