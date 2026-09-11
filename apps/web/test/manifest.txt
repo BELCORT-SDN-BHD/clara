@@ -221,6 +221,7 @@ lib/clara/rail-presence.test.ts
 lib/clara/thread-resolution.test.ts
 lib/clara/threadStore.test.ts
 lib/clara/turnRun.test.ts
+lib/clara/use-clara-thread-stop.test.ts
 lib/clara/useActiveThread.test.ts
 lib/clara/welcomeState.test.ts
 lib/client-id.test.ts
