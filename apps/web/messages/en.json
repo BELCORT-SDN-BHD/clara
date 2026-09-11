@@ -1078,9 +1078,6 @@
     "running": {
       "body": "This work is running. You can leave this page — it keeps its own state, and this page rereads it."
     },
-    "stopping": {
-      "body": "This work is stopping. Anything already admitted is finishing; no new operations will start."
-    },
     "completed": {
       "title": "Completed",
       "body": "One balanced journal entry was recorded, with the receipt below."
