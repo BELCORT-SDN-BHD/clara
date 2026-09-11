@@ -196,6 +196,15 @@ describe("#634 — the composer's refusal roster is BOUND to its producers", () 
       // AuthError's own tokens, answered by `sendAuthError` on the same route.
       unauthenticated: 401,
       no_session: 401,
+      // #630 — the cancel and take-over doors' own tokens, on the SAME route. They are not
+      // reachable from `POST /api/work/journal` (the door this cell's producer drives), but the
+      // census reads the whole FILE, and that is the point: a token the route can answer with and
+      // the browser has never been taught is exactly what this cell exists to catch. Their browser
+      // readers are `cancelWork` / `takeOverWork` in lib/work/api.ts, pinned in its own suite.
+      basis_confirmation_required: 400,
+      not_takeable: 409,
+      work_cancelled: 409,
+      work_settled: 409,
     };
     const kinds = new Set(submitResultKinds());
     for (const token of tokens) {
