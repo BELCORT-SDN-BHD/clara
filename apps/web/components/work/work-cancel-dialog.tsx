@@ -22,7 +22,7 @@
 // whether the door ran, so the retry rides the SAME key and lets `clara._reserve_op` answer. A
 // fresh key would ask a second question the database cannot connect to the first.
 
-import { useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
 
@@ -157,6 +157,14 @@ export function CancelWorkDialog({
   const decision = { key: dialog.key };
   void clientId;   // the answer's entry link is rendered by the PAGE, from the same value
 
+  // OPENNESS IS REPORTED FROM THE STATE, NOT FROM THE HANDLER. Measured (browser walk): `submit`
+  // closes this dialog by calling `setOpen(false)` directly, which is a React state write and does
+  // NOT run Base UI's `onOpenChange` — so a caller told only by that handler believed the decision
+  // was still open after an ACCEPTED cancel, kept the trigger mounted, and the page offered a
+  // second "Cancel Work" on a Work that was already stopping. An effect on `open` sees every
+  // transition, whoever caused it.
+  useEffect(() => { onOpenChange?.(open); }, [open, onOpenChange]);
+
   const submit = async () => {
     if (busy) return;
     setBusy(true);
@@ -190,7 +198,6 @@ export function CancelWorkDialog({
         open={open}
         onOpenChange={(next) => {
           setResult(null);
-          onOpenChange?.(next);
           dialog.onOpenChange(next);
         }}
       >

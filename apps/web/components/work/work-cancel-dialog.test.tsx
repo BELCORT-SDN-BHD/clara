@@ -568,3 +568,65 @@ test("630f: `silent` strips the banner's own live region — the transcript owns
     await quiet.unmount();
   }
 });
+
+// ===========================================================================================
+// #630 fix round 3 — OPENNESS IS REPORTED FROM THE STATE, NOT FROM THE HANDLER.
+//
+// Both surfaces that offer this control keep it mounted while a decision is open, so a poll that
+// changes the Work's status cannot destroy a modal somebody is reading. That gate is only as good
+// as the flag behind it: `submit` closes the dialog with a direct `setOpen(false)`, which does NOT
+// run Base UI's `onOpenChange` — and a caller told only by that handler believed the decision was
+// still open after an ACCEPTED cancel and went on offering "Cancel Work" on a Work that was already
+// stopping. Measured in the browser walk (work-cancel-walk.spec.ts:151).
+// ===========================================================================================
+
+function GatedCancelHost(props: {
+  cancel: (auth: unknown, input: Attempt) => Promise<CancelWorkResult>;
+}): ReactElement {
+  const [cancellable, setCancellable] = useState(true);
+  const [open, setOpen] = useState(false);
+  return createElement(
+    "div",
+    null,
+    cancellable || open
+      ? createElement(CancelWorkDialog, {
+        workId: WORK,
+        clientId: CLIENT,
+        // The status change an accepted cancel produces: the page re-reads and the Work is no
+        // longer cancellable.
+        onCancelled: () => setCancellable(false),
+        onOpenChange: setOpen,
+        cancel: props.cancel as never,
+        session: { getAccessToken: async () => "tok" } as never,
+      })
+      : null,
+  );
+}
+
+test("630f: an ACCEPTED cancel closes the decision, so the control is not offered a second time", async () => {
+  const h = await renderComponent(createElement(NextIntlClientProvider, {
+    locale: "en",
+    messages,
+    timeZone: "Asia/Kuala_Lumpur",
+    children: createElement(GatedCancelHost, {
+      cancel: async () => ({
+        kind: "answered", workId: WORK, taskId: null, status: "stopping", cancelled: true,
+        reason: null, receiptId: null, entryId: null, cancelledBy: null, cancelledAt: null,
+        replayed: false,
+      } as CancelWorkResult),
+    }),
+  }));
+  try {
+    await openCancel(h);
+    assert.ok(buttonIn("Cancel this Work"), "precondition: the decision is open");
+    await h.act(async () => { await clickButton(buttonIn("Cancel this Work") as never); });
+    await drain(h);
+    // `assert.ok(x === null)`: formatting a stub node for the failure message walks a cyclic tree
+    // and exhausts the heap before the assertion is ever reported.
+    assert.ok(buttonIn("Cancel Work") === null,
+      "the trigger is gone: a Work that is already stopping is offered no second cancel");
+    assert.equal(/Cancel this Work\?/.test(bodyText()), false, "…and the dialog is closed");
+  } finally {
+    await h.unmount();
+  }
+});
