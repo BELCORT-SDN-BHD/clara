@@ -99,7 +99,11 @@ runs:
         # CLEANLY (exit 0, printed reason) when migration 0180 is absent, so it is safe to merge
         # before the DB half lands. It spawns its own ephemeral ports rather than reusing this
         # step's, so it can hold two engines up at once without colliding with anything above.
-        PGPORT=$PGC_PORT \n        PGDATABASE=clara_wave_b_ci \n        RELAY_TEST_MODE=1 \n        WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGC_PORT/clara_wave_b_ci" \n          node tests/work-question-e2e.mjs
+        PGPORT=$PGC_PORT \
+        PGDATABASE=clara_wave_b_ci \
+        RELAY_TEST_MODE=1 \
+        WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGC_PORT/clara_wave_b_ci" \
+          node tests/work-question-e2e.mjs
 
     - name: DR backup/restore self-test (ephemeral postgres:17)
       shell: bash -e {0}
