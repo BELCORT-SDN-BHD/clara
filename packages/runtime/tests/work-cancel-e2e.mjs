@@ -35,9 +35,11 @@
 //      respawn the reconciler settles the Work per the receipt law and the terminal is read back.
 //   8. STOP REPLY IS NOT CANCEL WORK. Cancelling the CHAT-TURN task that started a Work leaves the
 //      Work running, and it goes on to complete.
-//   9. A REPLAYED SETTLE FOR A SUPERSEDED RUN. A run ends failed, a human retries, and the dead
-//      run's uncheckpointed settle arrives afterwards: it answers `stale_task`, writes nothing, and
-//      the retried run is still one the estate will let post.
+//   9. THE DOOR'S STALE GUARD, ON THE REAL RIG — and it is NOT a crash leg. Unlike 4 and 7, this
+//      one spawns no engine: it calls `clara.settle_work_run` directly, twice, around a human's
+//      Retry. The database battery's wc.33 drives the identical sequence more thoroughly (it also
+//      pins the pending question's survival); what this adds is the CONSEQUENCE on a rig that has
+//      run real engines — that the retried Work is still one the posting core will admit.
 //
 // THE HOLD IS A TEST-FILE AFFORDANCE, NOT A NEW FROZEN FAULT. `claraWork_v2` is deploy-locked, so a
 // new `CLARA_WORK_TEST_FAULT` arm inside it would mean a whole new version file set for a test
@@ -845,16 +847,25 @@ async function main() {
   }
 
   // =========================================================================
-  // 9. A REPLAYED SETTLE FOR A SUPERSEDED RUN — the retry survives it.
+  // 9. THE DOOR'S STALE GUARD, ON THE REAL RIG — NOT a crash shape, and the title says so.
   //
-  // THE MEASURED SHAPE leg 4 CANNOT CARRY. `settleWorkStep` is a durable step, and a run that
-  // dies between its effect and its checkpoint re-executes it on respawn — which is leg 4's whole
+  // BE HONEST ABOUT WHAT THIS DRIVES. There is no `spawnServe` and no `CLARA_WORK_TEST_FAULT`
+  // here: the settle is issued twice through `rig.asRuntime`, around a human's Retry. That is the
+  // sequence `packages/db/tests/work-cancel.test.mjs` wc.33 already drives — and drives further,
+  // since it also asserts the pending question survives — in a far cheaper gate. An earlier cut
+  // of this header announced it beside legs 4 and 7 as a replayed settle from a respawned engine,
+  // which a reader would reasonably take to mean the durable-step replay path is covered
+  // end-to-end. It is not; only the door is.
+  //
+  // WHY LEG 4 CANNOT CARRY THE CRASH SHAPE EITHER. `settleWorkStep` is a durable step and a run
+  // that dies between its effect and its checkpoint re-executes it on respawn — leg 4's whole
   // subject. What leg 4 cannot add is a RETRY inside that window: its Work reaches `completed`
   // (the receipt on disk is the witness with standing), and `clara.retry_accounting_work` refuses
-  // any Work that is not `refused`/`failed`/`expired` (0178:1005). So the same window is walked
-  // here with no engine at all: a run that ended FAILED with nothing posted, a human's Retry, and
-  // then the dead run's settle arriving late. The database battery's wc.33 pins the pending
-  // question's survival; this leg pins that the retried run is still a run the estate will honour.
+  // any Work that is not `refused`/`failed`/`expired` (0178:1005).
+  //
+  // WHAT THIS LEG THEREFORE BUYS, on a rig where real engines have run: the CONSEQUENCE. A Work a
+  // stale settle had terminalised would be refused by the posting core for ever
+  // (CLR13 `work_settled`); this one is still admissible.
   // =========================================================================
   {
     const ctx = await seedClient("wc-stale");
@@ -907,7 +918,7 @@ async function main() {
     ).then((r) => r.rows[0].status);
     assert.equal(TERMINAL.has(guard), false, "leg 9: the Work is not settled, so its run may still post");
     assert.equal(await countEntries(ctx.client), 0, "leg 9: and nothing was posted along the way");
-    console.log("[wc-e2e] PASS 9: a settle replayed for a superseded run says so and writes nothing");
+    console.log("[wc-e2e] PASS 9: the door's stale guard on the real rig — a settle for a superseded run says so, writes nothing, and leaves the retried Work admissible (no engine is crashed here; wc.33 is the fuller pin)");
   }
 
   rmSync(GATE_DIR, { recursive: true, force: true });
