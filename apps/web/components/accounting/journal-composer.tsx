@@ -87,6 +87,13 @@ import {
 import type { CoaAccountRow } from "@/lib/journals/types";
 import type { SessionTokenAccessor } from "@/lib/session";
 
+/** How long the composer waits for the CLAIMANT of a `source_conflict` refusal before it stops
+ *  waiting. The refusal is already painted by then, so this bounds a cosmetic upgrade and nothing
+ *  a person is blocked on: when it fires, the banner keeps its sentence and simply offers no link
+ *  (delta review round 3, finding [3] — the read it replaces had no timeout and no signal at all,
+ *  and `fetch` with neither never gives up). */
+const CLAIMANT_READ_TIMEOUT_MS = 5000;
+
 /** What the form is doing right now. Every arm is a state a human can be told
  *  about; there is no combined "error" bucket, because "the server refused
  *  these figures", "the connection dropped" and "you may not do this" need
@@ -115,6 +122,11 @@ type Phase =
        *  than none (`journal-entries-table.tsx`'s no-matches advice can never
        *  reach it). */
       entryClientId: string | null;
+      /** THE CLAIMANT'S NAME, for the sentence rather than the route (delta review round 3,
+       *  finding [5]). The advisory read joins it in; the fallback read fetches it; and when
+       *  neither could, the banner says "another client" rather than naming nobody — but it
+       *  never STAYS SILENT about leaving this client's books. */
+      entryClientName: string | null;
     }
   | { kind: "denied" }
   | { kind: "notFound" }
@@ -269,6 +281,40 @@ export function JournalComposerView({
 
   const busy = phase.kind === "submitting" || phase.kind === "checking";
 
+  /**
+   * THE CLAIMANT, RESOLVED AFTER THE REFUSAL IS ALREADY ON SCREEN.
+   *
+   * An effect rather than an await inside `apply` (delta review round 3, finding
+   * [3]): the banner must not wait on this, and this must not outlive the banner.
+   * So it is bounded three ways — an `AbortSignal` the cleanup fires when the
+   * phase moves on or the composer unmounts, a timeout that fires it anyway, and
+   * a re-check of the phase before the answer is written, because the person may
+   * have chosen another document while the read was in flight.
+   *
+   * It runs ONLY when the advisory rows did not already answer (`entryClientId`
+   * still null), so the common path costs no read at all.
+   */
+  const conflictEntryId = phase.kind === "sourceConflict" ? phase.entryId : null;
+  const claimantUnresolved = phase.kind === "sourceConflict" && phase.entryClientId === null;
+  useEffect(() => {
+    if (!claimantUnresolved || conflictEntryId === null) return;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), CLAIMANT_READ_TIMEOUT_MS);
+    void (async () => {
+      const claimant = await resolveEntryClient(conflictEntryId, { session, signal: controller.signal })
+        .catch(() => null);
+      if (controller.signal.aborted || claimant === null) return;
+      setPhase((current) => (
+        current.kind === "sourceConflict" && current.entryId === conflictEntryId
+          ? { ...current, entryClientId: claimant.clientId, entryClientName: claimant.clientName }
+          : current));
+    })();
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [claimantUnresolved, conflictEntryId, resolveEntryClient, session]);
+
   // THE FOCUS TARGETS, held as REFS rather than looked up by id — see
   // `RegisterField`'s own note for why. A field that unmounts (a removed line)
   // clears its entry, so `focusField` never calls `.focus()` on a detached node.
@@ -310,11 +356,18 @@ export function JournalComposerView({
    *  it for a second attempt, and two copies of this mapping would be two places
    *  a status could be classified differently.
    *
-   *  ASYNC because ONE arm needs a read before it can paint: `source_conflict`
-   *  must name the CLAIMANT client of the entry it points at, and the refusal
-   *  itself does not carry one (delta review [3]). Every other arm returns
-   *  without awaiting anything. */
-  const apply = async (result: SubmitJournalWorkResult): Promise<void> => {
+   *  SYNCHRONOUS ON PURPOSE, and that is a fix rather than a tidy (delta review
+   *  round 3, finding [3]). The round before this one awaited a claimant read
+   *  INSIDE the `source_conflict` arm, before setting the phase — so a refusal the
+   *  runtime had already returned was withheld behind a second, cosmetic
+   *  PostgREST read with no signal and no timeout. A read that accepts the
+   *  connection and then stalls froze the whole form: `busy` stayed true, every
+   *  control stayed `disabled`, the banner rendered null and the live region said
+   *  "Submitting…" for ever (`fetch` with no signal never gives up, and
+   *  `.catch()` handles a rejection, not a hang). Nothing here may await
+   *  anything: every arm paints from the answer it was given, and the one arm
+   *  that wants more resolves it AFTERWARDS, in an effect that can be aborted. */
+  const apply = (result: SubmitJournalWorkResult): void => {
     if (result.kind === "accepted") {
       // The draft is retired ONLY now: until the runtime named the Work, the
       // typed figures were the only copy that existed.
@@ -338,22 +391,23 @@ export function JournalComposerView({
       // the only forward moves are "open that entry" or "choose another
       // document" — never a resubmit of this same intent.
       //
-      // WHOSE ENTRY IT IS, IN TWO STEPS AND NO MORE THAN ONE EXTRA READ. First
-      // the advisory rows this picker already holds: `list_spoken_for_documents`
-      // answers firm-wide and names the claimant, so when that read landed the
-      // route costs nothing. When it did not (the read failed, or has not
-      // settled, or the refusal names a document the picker never saw), one
-      // firm-scoped `journal_entries` read resolves it. If BOTH come back empty
-      // the banner renders without a link — see the phase's own note.
-      // …and the advisory row is used ONLY when it names the SAME entry the refusal does. The two
-      // reads are a tick apart; a row that has moved on since is not evidence about this entry.
+      // WHOSE ENTRY IT IS, WITHOUT WAITING FOR IT. The advisory rows this picker
+      // already holds answer for free when they name the same entry the refusal
+      // does (`list_spoken_for_documents` is firm-wide and joins the claimant's
+      // name in) — the two reads are a tick apart, so a row that has moved on
+      // since is not evidence about THIS entry. When they do not answer, the
+      // banner paints anyway and `useClaimant` below resolves the rest under an
+      // AbortSignal: a refusal is never held back by a read of advisory grade
+      // (delta review round 3, finding [3]).
       const advisory = (spokenForRead.data ?? []).find(
         (r) => r.document_id === result.documentId && r.entry_id === result.entryId,
-      )?.client_id ?? null;
-      const owner = advisory ?? (result.entryId === null
-        ? null
-        : await resolveEntryClient(result.entryId, { session }).catch(() => null));
-      setPhase({ kind: "sourceConflict", entryId: result.entryId, entryClientId: owner });
+      ) ?? null;
+      setPhase({
+        kind: "sourceConflict",
+        entryId: result.entryId,
+        entryClientId: advisory?.client_id ?? null,
+        entryClientName: advisory?.client_name ?? null,
+      });
       focusField("evidence");
       return;
     }
@@ -378,7 +432,7 @@ export function JournalComposerView({
     setPhase({ kind: "submitting" });
     const first = await submit(session, { clientId, intentKey, basis, ...evidence });
     if (first.kind !== "lost") {
-      await apply(first);
+      apply(first);
       return;
     }
     // THE LOST-RESPONSE RESOLUTION. No answer was observed, so the Work may
@@ -387,7 +441,7 @@ export function JournalComposerView({
     // Exactly once — a loop here would be a client deciding to hammer a runtime
     // that is already not answering.
     setPhase({ kind: "checking" });
-    await apply(await submit(session, { clientId, intentKey, basis, ...evidence }));
+    apply(await submit(session, { clientId, intentKey, basis, ...evidence }));
   };
 
   const onSubmit = (e: FormEvent) => {
@@ -651,6 +705,7 @@ function ComposerPhaseBanner({
 }) {
   const t = useTranslations("JournalComposer");
   const tm = useTranslations("ManualJournal");
+  const tWalk = useTranslations("WalkFindings728");
   if (phase.kind === "editing" || phase.kind === "submitting" || phase.kind === "checking") return null;
 
   if (phase.kind === "rejected") {
@@ -696,6 +751,15 @@ function ComposerPhaseBanner({
     // is "press submit again", which is why this arm offers no retry and no new
     // intent key, AND why the form's primary Submit is disabled for as long as
     // this phase stands (see its call site).
+    //
+    // …AND WHEN THE ENTRY IS A SIBLING CLIENT'S, THE BANNER SAYS SO (delta review
+    // round 3, finding [5]). The link leaves this client's books for another
+    // client's Journals route — a new client-scope epoch, with the abandoned
+    // composer behind it — so the sentence names the claimant BEFORE the person
+    // follows it. The same comparison `spoken-for-note.tsx` makes for the
+    // advisory sentence, and the same fallback when the name could not be read:
+    // "another client" is vaguer but true, "undefined" is neither.
+    const elsewhere = phase.entryClientId !== null && phase.entryClientId !== clientId;
     return (
       <StateBanner
         tone="error"
@@ -713,7 +777,11 @@ function ComposerPhaseBanner({
           )
         }
       >
-        {tm("sourceConflict.body")}
+        {elsewhere
+          ? tWalk("sourceConflictElsewhere", {
+              client: phase.entryClientName ?? tWalk("evidenceSpokenForUnnamedClient"),
+            })
+          : tm("sourceConflict.body")}
       </StateBanner>
     );
   }

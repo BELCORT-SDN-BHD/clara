@@ -4106,6 +4106,8 @@
     "evidenceSpokenForElsewhere": "{name} already backs a posted journal entry for {client}.",
     "evidenceSpokenForUnnamedClient": "another client",
     "evidenceSpokenForLink": "View that journal entry",
-    "evidenceSpokenForUnavailable": "We could not check which documents already back a posted entry. Every document is still offered — the system still refuses a conflict when you submit."
+    "evidenceSpokenForUnavailable": "We could not check which documents already back a posted entry. Every document is still offered — the system still refuses a conflict when you submit.",
+    "sourceConflictElsewhere": "One document backs at most one posted journal entry. Nothing was recorded. The entry that already stands on it belongs to {client}, so opening it leaves this client. Open it to see its impact or correct it, or choose a different document.",
+    "attachSourceConflictElsewhere": "That document already backs a posted entry of {client}. Nothing was recorded — opening that entry leaves this client."
   }
 }

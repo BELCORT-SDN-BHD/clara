@@ -313,11 +313,38 @@ export type AttachEvidenceResult =
   | { kind: "refused"; code: string | null; message: string }
   | { kind: "unavailable"; message: string };
 
-export type DocumentClaim = {
-  entryId: string;
+/** WHOSE posted entry a document is already spoken for by. Two fields, because a refusal that
+ *  sends a person into a SIBLING client's books needs both: the id to build the route with, and
+ *  the name to say out loud before they follow it (delta review round 3, finding [5] — the
+ *  refusal banners linked into another client's journals without naming the client, while the
+ *  advisory note for the identical fact did name it). */
+export type EntryClaimant = {
   /** The client whose entry holds the document — NOT necessarily the one that asked. */
   clientId: string;
+  /** The claimant's own name. NULL is a real answer — the clients row may be unreadable, or the
+   *  name genuinely absent — and a surface then says "another client" rather than "undefined".
+   *  A failed NAME read never costs the claim itself: the link is the more useful half. */
+  clientName: string | null;
 };
+
+export type DocumentClaim = EntryClaimant & {
+  entryId: string;
+};
+
+/** The claimant's own name, read separately because neither relation that can hold a claim
+ *  carries one. Firm-scoped by `clara.clients`' own RLS policy, exactly like every other read in
+ *  this module. A failure here is not a failure of the claim — see `EntryClaimant.clientName`. */
+async function readClientName(clientId: string, opts: Opts): Promise<string | null> {
+  const rows = await getRows<{ name: string | null }>(
+    `clients?id=eq.${encodeURIComponent(clientId)}&select=name`,
+    opts,
+  ).catch((e: unknown) => {
+    // An ABORT is the caller's own decision and must reach it; anything else costs the name only.
+    if (opts.signal?.aborted === true) throw e;
+    return [] as { name: string | null }[];
+  });
+  return rows[0]?.name ?? null;
+}
 
 /**
  * WHICH POSTED ENTRY ALREADY STANDS ON THIS DOCUMENT — read from the rows, not
@@ -371,13 +398,16 @@ export async function findEntryForDocument(
     opts,
   );
   const link = links[0];
-  if (link !== undefined) return { entryId: link.entry_id, clientId: link.client_id };
+  if (link !== undefined) {
+    return { entryId: link.entry_id, clientId: link.client_id, clientName: await readClientName(link.client_id, opts) };
+  }
   const coded = await getRows<{ id: string; client_id: string }>(
     `journal_entries?document_id=eq.${doc}&status=eq.approved&reversed_by=is.null&select=id,client_id`,
     opts,
   );
   const entry = coded[0];
-  return entry === undefined ? null : { entryId: entry.id, clientId: entry.client_id };
+  if (entry === undefined) return null;
+  return { entryId: entry.id, clientId: entry.client_id, clientName: await readClientName(entry.client_id, opts) };
 }
 
 /**
@@ -388,20 +418,30 @@ export async function findEntryForDocument(
  * client (`admit_journal_work`'s CLR13 detail), and `_document_posting_entry`
  * resolves that entry across the WHOLE FIRM, so the id may name a sibling
  * client's entry. This is the narrowest read that turns it into a route: one
- * row of `clara.journal_entries`, firm-scoped by its own human policy. Returns
- * null when the id resolves to nothing the caller may read — and the caller
- * then renders no link rather than a link into a journal the entry is not in.
+ * row of `clara.journal_entries`, firm-scoped by its own human policy, plus the
+ * claimant's own name. Returns null when the id resolves to nothing the caller
+ * may read — and the caller then renders no link rather than a link into a
+ * journal the entry is not in.
+ *
+ * NOT ON THE REFUSAL'S CRITICAL PATH (delta review round 3, finding [3]). The
+ * composer paints its `source_conflict` banner from the door's own answer and
+ * calls this AFTERWARDS, under an `AbortSignal` and a timeout: a PostgREST read
+ * that accepts the connection and then stalls used to leave the whole form
+ * disabled with "Submitting…" in the live region for ever, because `fetch` with
+ * no signal never gives up. Pass `opts.signal`.
  */
 export async function findEntryClient(
   entryId: string,
   opts: Opts = {},
-): Promise<string | null> {
+): Promise<EntryClaimant | null> {
   const id = encodeURIComponent(entryId);
   const rows = await getRows<{ client_id: string }>(
     `journal_entries?id=eq.${id}&select=client_id`,
     opts,
   );
-  return rows[0]?.client_id ?? null;
+  const clientId = rows[0]?.client_id ?? null;
+  if (clientId === null) return null;
+  return { clientId, clientName: await readClientName(clientId, opts) };
 }
 
 /**

@@ -587,3 +587,45 @@ test("t728: a SIBLING client's entry holding the document is named, and the link
     await drain(h);
   }
 });
+
+test("t728f: the dialog's refusal NAMES the sibling client its link leads to, and says nothing of the kind for this client's own entry", async () => {
+  // Delta review round 3, finding [5] — the same defect as the composer's, on the other surface:
+  // the link leaves this client's books for a sibling's Journals route, and the copy said only
+  // "That document already backs another posted entry".
+  const named = await renderComponent(
+    App({
+      attach: async () => ({ kind: "source_conflict" }),
+      findEntry: async () => ({ entryId: OTHER_ENTRY, clientId: OTHER_CLIENT, clientName: "Beta Sdn Bhd" }),
+    }),
+  );
+  try {
+    await openDialog(named);
+    await choose(named, DOCUMENTS[0]!.documentId);
+    await pressAttach(named);
+    assert.match(textOf(bodyNode()), /a posted entry of Beta Sdn Bhd/,
+      "the refusal names the claimant before offering the door out of this client");
+  } finally {
+    await named.unmount();
+    await drain(named);
+  }
+
+  // …and the claimant that IS this client keeps the plain sentence: nothing is being left.
+  const own = await renderComponent(
+    App({
+      attach: async () => ({ kind: "source_conflict" }),
+      findEntry: async () => ({ entryId: OTHER_ENTRY, clientId: CLIENT, clientName: "Acme Sdn Bhd" }),
+    }),
+  );
+  try {
+    await openDialog(own);
+    await choose(own, DOCUMENTS[0]!.documentId);
+    await pressAttach(own);
+    assert.match(textOf(bodyNode()), /already backs another posted entry/,
+      "this client's own entry keeps the plain refusal");
+    assert.doesNotMatch(textOf(bodyNode()), /leaves this client/,
+      "…and nothing claims the link goes somewhere else");
+  } finally {
+    await own.unmount();
+    await drain(own);
+  }
+});

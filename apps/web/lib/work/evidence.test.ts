@@ -116,9 +116,11 @@ test("t634: the conflict lookup ignores a RELEASED binding", async () => {
   // a document the door has already freed — the opposite of the conflict it is
   // explaining.
   await withRows(
-    (url) => (url.includes("entry_evidence_links") ? [{ entry_id: "e1", client_id: CLIENT }] : []),
+    (url) => (url.includes("entry_evidence_links") ? [{ entry_id: "e1", client_id: CLIENT }]
+      : url.includes("clients?") ? [{ name: "Acme Sdn Bhd" }] : []),
     async (urls) => {
-      assert.deepEqual(await findEntryForDocument(VERIFIED, { session }), { entryId: "e1", clientId: CLIENT });
+      assert.deepEqual(await findEntryForDocument(VERIFIED, { session }),
+        { entryId: "e1", clientId: CLIENT, clientName: "Acme Sdn Bhd" });
       assert.ok(urls[0]!.includes("released_at=is.null"),
         `the links read must exclude released bindings (asked: ${urls[0]})`);
     },
@@ -132,28 +134,84 @@ test("t728d: the conflict lookup is FIRM-WIDE and names the claimant — a sibli
   // client-scoped read (which both arms carried until the delta review) answered null — a refusal
   // with no way to reach the entry it is about.
   await withRows(
-    (url) => (url.includes("entry_evidence_links") ? [{ entry_id: "sib-1", client_id: SIBLING }] : []),
+    (url) => (url.includes("entry_evidence_links") ? [{ entry_id: "sib-1", client_id: SIBLING }]
+      : url.includes("clients?") ? [{ name: "Beta Sdn Bhd" }] : []),
     async (urls) => {
       assert.deepEqual(await findEntryForDocument(VERIFIED, { session }),
-        { entryId: "sib-1", clientId: SIBLING },
-        "the claimant travels with the entry, because the route is built from it");
+        { entryId: "sib-1", clientId: SIBLING, clientName: "Beta Sdn Bhd" },
+        "the claimant travels with the entry, because the route is built from it — and now its NAME, because the copy has to say whose books the link leads to");
       assert.equal(urls[0]!.includes("client_id=eq."), false,
         `the read must not narrow to the asking client (asked: ${urls[0]})`);
       assert.ok(urls[0]!.includes("select=entry_id,client_id"), urls[0]);
+      assert.ok(urls[1]!.includes(`clients?id=eq.${SIBLING}&select=name`), urls[1]);
     },
   );
 });
 
+test("t728f: a claim survives a failed NAME read — the link is the half that matters", async () => {
+  // Delta review round 3, finding [5]. The name is for the sentence, the id is for the route: a
+  // clients read that fails (RLS, a dropped connection) must cost the sentence its specificity
+  // and nothing else. The surfaces fall back to "another client", which is vaguer but true.
+  const original = globalThis.fetch;
+  const originalUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  process.env.NEXT_PUBLIC_SUPABASE_URL = "https://example.supabase.co";
+  globalThis.fetch = (async (u: unknown) => (String(u).includes("clients?")
+    ? new Response("nope", { status: 500 })
+    : new Response(JSON.stringify([{ entry_id: "sib-2", client_id: SIBLING }]), {
+        status: 200, headers: { "content-type": "application/json" },
+      }))) as typeof fetch;
+  try {
+    assert.deepEqual(await findEntryForDocument(VERIFIED, { session }),
+      { entryId: "sib-2", clientId: SIBLING, clientName: null },
+      "the claim stands with a null name — never no claim at all");
+  } finally {
+    globalThis.fetch = original;
+    if (originalUrl === undefined) delete process.env.NEXT_PUBLIC_SUPABASE_URL;
+    else process.env.NEXT_PUBLIC_SUPABASE_URL = originalUrl;
+  }
+});
+
 test("t728d: findEntryClient names the claimant of one entry id, firm-scoped by RLS alone", async () => {
   await withRows(
-    () => [{ client_id: SIBLING }],
+    (url) => (url.includes("clients?") ? [{ name: "Beta Sdn Bhd" }] : [{ client_id: SIBLING }]),
     async (urls) => {
-      assert.equal(await findEntryClient("e-9", { session }), SIBLING);
+      assert.deepEqual(await findEntryClient("e-9", { session }),
+        { clientId: SIBLING, clientName: "Beta Sdn Bhd" });
       assert.ok(urls[0]!.includes("journal_entries?id=eq.e-9"), urls[0]);
       assert.equal(urls[0]!.includes("client_id=eq."), false,
         `the composer's fallback must not narrow to the asking client either (asked: ${urls[0]})`);
+      assert.ok(urls[1]!.includes(`clients?id=eq.${SIBLING}&select=name`), urls[1]);
     },
   );
+  // …and the ABORT the composer arms is not swallowed into "a claimant with no name": a caller
+  // that gave up mid-read must be told so, not handed a half-answer a tick later (delta review
+  // round 3, finding [3] — the composer aborts this read when the phase moves on or the timeout
+  // fires, and an effect that then wrote a stale claimant into a phase the person has left is
+  // exactly the class of bug the abort exists to prevent).
+  const original = globalThis.fetch;
+  const originalUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  process.env.NEXT_PUBLIC_SUPABASE_URL = "https://example.supabase.co";
+  const controller = new AbortController();
+  globalThis.fetch = (async (u: unknown) => {
+    if (!String(u).includes("clients?")) {
+      return new Response(JSON.stringify([{ client_id: SIBLING }]), {
+        status: 200, headers: { "content-type": "application/json" },
+      });
+    }
+    // The caller gave up between the two reads — which is what a timeout looks like from here.
+    controller.abort();
+    throw new DOMException("The operation was aborted.", "AbortError");
+  }) as typeof fetch;
+  try {
+    await assert.rejects(
+      () => findEntryClient("e-9", { session, signal: controller.signal }),
+      "an aborted name read reaches the caller rather than degrading to clientName: null",
+    );
+  } finally {
+    globalThis.fetch = original;
+    if (originalUrl === undefined) delete process.env.NEXT_PUBLIC_SUPABASE_URL;
+    else process.env.NEXT_PUBLIC_SUPABASE_URL = originalUrl;
+  }
   // …and an id that resolves to nothing readable is null, never a guessed route.
   await withRows(() => [], async () => {
     assert.equal(await findEntryClient("e-9", { session }), null);
@@ -162,9 +220,11 @@ test("t728d: findEntryClient names the claimant of one entry id, firm-scoped by 
 
 test("t634: the conflict lookup falls through to the DOCUMENT-CODING lane, approved and not reversed", async () => {
   await withRows(
-    (url) => (url.includes("entry_evidence_links") ? [] : [{ id: "coded-1", client_id: SIBLING }]),
+    (url) => (url.includes("entry_evidence_links") ? []
+      : url.includes("clients?") ? [{ name: "Beta Sdn Bhd" }] : [{ id: "coded-1", client_id: SIBLING }]),
     async (urls) => {
-      assert.deepEqual(await findEntryForDocument(VERIFIED, { session }), { entryId: "coded-1", clientId: SIBLING });
+      assert.deepEqual(await findEntryForDocument(VERIFIED, { session }),
+        { entryId: "coded-1", clientId: SIBLING, clientName: "Beta Sdn Bhd" });
       const coded = urls[1] ?? "";
       assert.ok(coded.includes("status=eq.approved"), coded);
       assert.ok(coded.includes("reversed_by=is.null"), coded);

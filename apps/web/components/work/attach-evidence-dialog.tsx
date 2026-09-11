@@ -60,6 +60,11 @@ import type { SessionTokenAccessor } from "@/lib/session";
 import { landmarkHeadingFor, nextPaint, restoreFocusAfterRow } from "@/components/firm/work-question-affordance";
 import { SpokenForNotes } from "@/components/work/spoken-for-note";
 
+/** The claimant read that upgrades a source-conflict refusal with a link and a name is bounded,
+ *  because the refusal is already painted and nothing a person waits for depends on it (delta
+ *  review round 3, finding [3]). Same budget as the composer's own. */
+const CLAIMANT_READ_TIMEOUT_MS = 5000;
+
 /** One option, as a single readable string. Kept identical in SHAPE to the
  *  composer's own label (filename · kind · date) so the same document reads the
  *  same way wherever it is chosen. */
@@ -239,14 +244,23 @@ export function AttachEvidenceDialog({
     // `operation_in_flight` or with the original result rather than attaching
     // again under a fresh identity.
     if (answer.kind !== "unavailable") opKey.current = crypto.randomUUID();
-    if (answer.kind === "source_conflict") {
-      // FIRM-WIDE, not client-scoped: see findEntryForDocument's note. The claim this refusal is
-      // about may be held by a sibling client the document is also filed to.
-      setConflictEntry(await findEntry(documentId, { session }).catch(() => null));
-    }
     // ALWAYS re-read, refusal included: a stale-revision refusal in particular
     // means the caller's copy of the entry is wrong, and the fix is a fresh read.
     await onAttached();
+    if (answer.kind === "source_conflict") {
+      // FIRM-WIDE, not client-scoped: see findEntryForDocument's note. The claim this refusal is
+      // about may be held by a sibling client the document is also filed to.
+      //
+      // LAST, AND BOUNDED (delta review round 3, finding [3], applied here too). The refusal is
+      // already on screen — `setResult` ran before the await above — so this read only upgrades
+      // the banner with a link and a name. It therefore goes AFTER the authoritative re-read
+      // rather than in front of it, and it carries a timeout: `fetch` with no signal never gives
+      // up, and a PostgREST worker that accepts the connection and stalls must cost a link, not
+      // the dialog.
+      setConflictEntry(await findEntry(documentId, {
+        session, signal: AbortSignal.timeout(CLAIMANT_READ_TIMEOUT_MS),
+      }).catch(() => null));
+    }
     if (answer.kind === "attached") {
       setOpen(false);
       setResult(null);
@@ -366,7 +380,7 @@ export function AttachEvidenceDialog({
             <p className="text-xs text-muted-foreground">{tWalk("evidenceSpokenForUnavailable")}</p>
           ) : null}
           <SpokenForNotes clientId={clientId} options={list} selectedDocumentId={documentId} />
-          <AttachOutcome conflictEntry={conflictEntry} result={result} />
+          <AttachOutcome clientId={clientId} conflictEntry={conflictEntry} result={result} />
         </div>
         <DialogFooter>
           <DialogClose render={<Button variant="ghost" disabled={busy} />}>{t("attach.cancel")}</DialogClose>
@@ -384,13 +398,18 @@ export function AttachEvidenceDialog({
  *  red bar: each one names the concrete constraint and the one next action that
  *  exists for it. */
 function AttachOutcome({
+  clientId,
   conflictEntry,
   result,
 }: {
+  /** The client whose entry is being attached to — the comparison that decides whether the
+   *  refusal has to say WHOSE entry already holds the document (delta review round 3, [5]). */
+  clientId: string;
   conflictEntry: DocumentClaim | null;
   result: AttachEvidenceResult | null;
 }) {
   const t = useTranslations("ManualJournal");
+  const tWalk = useTranslations("WalkFindings728");
   if (result === null) return null;
   if (result.kind === "attached") {
     return (
@@ -403,6 +422,10 @@ function AttachOutcome({
     );
   }
   if (result.kind === "source_conflict") {
+    // WHEN THE CLAIMANT IS A SIBLING CLIENT, SAY SO BEFORE OFFERING THE DOOR OUT (delta review
+    // round 3, finding [5]): the link leaves this client's books, and the advisory surface for the
+    // identical fact already names the claimant (`spoken-for-note.tsx`). Same fallback as there.
+    const elsewhere = conflictEntry !== null && conflictEntry.clientId !== clientId;
     return (
       <StateBanner
         tone="error"
@@ -418,7 +441,11 @@ function AttachOutcome({
           )
         }
       >
-        {t("attach.sourceConflict")}
+        {elsewhere
+          ? tWalk("attachSourceConflictElsewhere", {
+              client: conflictEntry.clientName ?? tWalk("evidenceSpokenForUnnamedClient"),
+            })
+          : t("attach.sourceConflict")}
       </StateBanner>
     );
   }

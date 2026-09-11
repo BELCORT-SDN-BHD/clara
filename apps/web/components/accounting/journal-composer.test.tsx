@@ -80,8 +80,13 @@ function App(props: {
     via: "evidence_link" | "coding";
   }>>;
   /** The fallback that names the CLAIMANT client of the entry a `source_already_posted` refusal
-   *  points at, when the advisory read did not settle or did not carry that document. */
-  resolveEntryClient?: (entryId: string) => Promise<string | null>;
+   *  points at, when the advisory read did not settle or did not carry that document. Takes the
+   *  read options too, because what this fixture most needs to exercise is the AbortSignal the
+   *  composer arms (delta review round 3, finding [3]). */
+  resolveEntryClient?: (
+    entryId: string,
+    opts?: { signal?: AbortSignal },
+  ) => Promise<{ clientId: string; clientName: string | null } | null>;
 }): ReactElement {
   return createElement(NextIntlClientProvider, {
     locale: "en",
@@ -96,7 +101,8 @@ function App(props: {
       loadAccounts: props.loadAccounts ?? (async () => ACCOUNTS),
       loadDocuments: (props.loadDocuments ?? (async () => DOCUMENTS)) as never,
       loadSpokenFor: (props.loadSpokenFor ?? (async () => [])) as never,
-      resolveEntryClient: (props.resolveEntryClient ?? (async () => CLIENT)) as never,
+      resolveEntryClient: (props.resolveEntryClient
+        ?? (async () => ({ clientId: CLIENT, clientName: "Acme Sdn Bhd" }))) as never,
       session: { getAccessToken: async () => "tok" },
     }),
   });
@@ -1109,6 +1115,145 @@ test("t728: a SIBLING client's entry holding the document is named, and the link
     const href = String((link as { getAttribute?: (k: string) => string | null }).getAttribute?.("href") ?? "");
     assert.ok(href.includes(OTHER_CLIENT), "the link targets the CLAIMANT client's Journals route");
     assert.equal(href.includes(CLIENT), false, "…and not the client this composer is drafting for");
+  } finally {
+    await h.unmount();
+  }
+});
+
+// ---------------------------------------------------------------------------
+// #728 delta review round 3 — the refusal is never held behind a cosmetic read,
+// and it names the client whose books its link leads to.
+// ---------------------------------------------------------------------------
+
+test("t728f: a claimant read that NEVER settles does not withhold the refusal, and is aborted on unmount", async () => {
+  // Finding [3]. The round before this one awaited `resolveEntryClient` INSIDE the
+  // `source_conflict` arm, before `setPhase` — so a refusal the runtime had already returned was
+  // withheld behind a second, advisory-grade PostgREST read with no signal and no timeout. A read
+  // that accepts the connection and then stalls left `busy` true for ever: every control
+  // disabled, the banner rendering null, and the live region stuck on "Submitting…". `.catch()`
+  // answers a rejection, not a hang, so only ordering (and a signal) can fix it.
+  const STALLED_ENTRY = "e9999999-9999-4999-8999-999999999999";
+  let armed: AbortSignal | null = null;
+  const h = await renderComponent(
+    App({
+      loadSpokenFor: async () => [],
+      // Never resolves. This is the whole point: the assertions below run WHILE it is outstanding.
+      resolveEntryClient: (_entryId, opts) => {
+        armed = opts?.signal ?? null;
+        return new Promise(() => {});
+      },
+      submit: async () => ({ kind: "source_conflict", entryId: STALLED_ENTRY, documentId: DOCUMENTS[0]!.documentId }),
+    }),
+  );
+  try {
+    await h.settle();
+    await fillGoodEntry(h);
+    await h.fireEvent(byId(h, "journal-basis-evidence"), "change", (n) => setFieldValue(n, DOCUMENTS[0]!.documentId));
+    await submitForm(h);
+
+    assert.match(h.text(), /already backs a posted entry/,
+      "the refusal is on screen although the claimant read has not settled");
+    assert.doesNotMatch(h.text(), /Submitting…/,
+      "…and the pending live region is gone: the form is no longer submitting");
+    assert.notEqual((byId(h, "journal-basis-evidence") as { disabled?: unknown }).disabled, true,
+      "…and the evidence chooser is usable again, so the person can pick another document");
+    // No link yet — nothing has named the claimant — but that costs a link, not the refusal.
+    assert.equal(
+      h.find((n) => n.tagName === "A"
+        && String((n as { getAttribute?: (k: string) => string | null }).getAttribute?.("href") ?? "").includes(STALLED_ENTRY)),
+      null,
+      "the link waits for the claimant; the refusal does not wait for the link");
+    assert.ok(armed !== null, "the read is armed with an AbortSignal (vacuity control)");
+    assert.equal((armed as AbortSignal).aborted, false, "…which is still live while the phase stands");
+  } finally {
+    await h.unmount();
+  }
+  assert.equal((armed as unknown as AbortSignal | null)?.aborted, true,
+    "unmounting the composer aborts the outstanding claimant read rather than leaking it");
+});
+
+test("t728f: the refusal NAMES the sibling client whose books its link leads to", async () => {
+  // Finding [5]. The link leaves this client for another client's Journals route — a new
+  // client-scope epoch, with the abandoned composer behind it — and the copy said only "That
+  // document already backs a posted entry", while the ADVISORY surface for the identical fact
+  // already named the claimant. Strictly less informative on the path that matters more.
+  const SIB_ENTRY = "e7777777-7777-4777-8777-777777777777";
+  const SIB_CLIENT = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+  const h = await renderComponent(
+    App({
+      loadSpokenFor: async () => [
+        { document_id: DOCUMENTS[0]!.documentId, entry_id: SIB_ENTRY, client_id: SIB_CLIENT, client_name: "Beta Sdn Bhd", via: "coding" },
+      ],
+      submit: async () => ({ kind: "source_conflict", entryId: SIB_ENTRY, documentId: DOCUMENTS[0]!.documentId }),
+    }),
+  );
+  try {
+    await h.settle();
+    await fillGoodEntry(h);
+    await h.fireEvent(byId(h, "journal-basis-evidence"), "change", (n) => setFieldValue(n, DOCUMENTS[0]!.documentId));
+    await submitForm(h);
+    // MATCHED ON THE BANNER'S OWN SENTENCE, not on the name alone: the advisory note below the
+    // chooser already prints "Beta Sdn Bhd" for the same fact, so a bare name match would go green
+    // on a refusal that still says nothing (measured — it did, against the pre-fix copy).
+    assert.match(h.text(), /belongs to Beta Sdn Bhd/,
+      "the refusal banner says WHOSE entry holds the document before offering the door out of this client");
+    assert.match(h.text(), /leaves this client/,
+      "…and says plainly that following the link leaves these books");
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("t728f: …and does NOT invent a departure when the claimant is this client's own entry", async () => {
+  // The common case. `journalEntryHref(thisClient, …)` stays inside these books, so a sentence
+  // about leaving them would be false — the same comparison `spoken-for-note.tsx` makes.
+  const OWN_ENTRY = "e6666666-6666-4666-8666-666666666666";
+  const h = await renderComponent(
+    App({
+      loadSpokenFor: async () => [
+        { document_id: DOCUMENTS[0]!.documentId, entry_id: OWN_ENTRY, client_id: CLIENT, client_name: "Acme Sdn Bhd", via: "evidence_link" },
+      ],
+      submit: async () => ({ kind: "source_conflict", entryId: OWN_ENTRY, documentId: DOCUMENTS[0]!.documentId }),
+    }),
+  );
+  try {
+    await h.settle();
+    await fillGoodEntry(h);
+    await h.fireEvent(byId(h, "journal-basis-evidence"), "change", (n) => setFieldValue(n, DOCUMENTS[0]!.documentId));
+    await submitForm(h);
+    assert.match(h.text(), /One document backs at most one posted journal entry/,
+      "the plain refusal copy stands when the entry is this client's own");
+    assert.doesNotMatch(h.text(), /leaves this client/,
+      "…and nothing claims the link goes somewhere else");
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("t728f: a claimant the advisory read did not name is resolved AFTER the banner, and the link appears", async () => {
+  // The other half of finding [3]: deferring the read must not silently drop the link. The
+  // fallback still runs — just behind the refusal instead of in front of it.
+  const LATE_ENTRY = "e5555555-5555-4555-8555-555555555555";
+  const LATE_CLIENT = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+  const h = await renderComponent(
+    App({
+      loadSpokenFor: async () => [],
+      resolveEntryClient: async () => ({ clientId: LATE_CLIENT, clientName: "Gamma Sdn Bhd" }),
+      submit: async () => ({ kind: "source_conflict", entryId: LATE_ENTRY, documentId: DOCUMENTS[0]!.documentId }),
+    }),
+  );
+  try {
+    await h.settle();
+    await fillGoodEntry(h);
+    await h.fireEvent(byId(h, "journal-basis-evidence"), "change", (n) => setFieldValue(n, DOCUMENTS[0]!.documentId));
+    await submitForm(h);
+    await h.settle();
+    const link = h.find((n) => n.tagName === "A"
+      && String((n as { getAttribute?: (k: string) => string | null }).getAttribute?.("href") ?? "").includes(`entry=${LATE_ENTRY}`));
+    assert.ok(link, "the late-resolved claimant still produces the link");
+    const href = String((link as { getAttribute?: (k: string) => string | null }).getAttribute?.("href") ?? "");
+    assert.ok(href.includes(LATE_CLIENT), `…targeting the CLAIMANT's journals (got ${href})`);
+    assert.match(h.text(), /Gamma Sdn Bhd/, "…and the sentence names them too");
   } finally {
     await h.unmount();
   }
