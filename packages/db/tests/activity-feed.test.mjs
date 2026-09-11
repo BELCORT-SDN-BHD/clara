@@ -963,9 +963,12 @@ test("af.21 the exclusion is SET-BASED in the feed and HOISTED in the detail doo
   // being that statement. `offset 0` is an optimisation fence, not decoration: without it the
   // planner pulls the correlated probe up into a plain join and reads the firm's WHOLE receipt
   // history (measured: Merge Join over a Seq Scan, 97-136 ms at 30,000 receipts against 1.6 ms).
+  // The pins read the SQL, not its prose: `--` comment tails are stripped first, because the
+  // body's own comment says "No LIMIT and no ORDER BY" and a word-match on the raw prosrc reds
+  // on exactly the sentence that documents the property (measured on CI, PR #731).
   const setForm = (await rootQuery(
     "select p.prosrc from pg_proc p where p.oid = 'clara._sweep_events_with_effect()'::regprocedure",
-  )).rows[0].prosrc;
+  )).rows[0].prosrc.replace(/--[^\n]*/g, "");
   assert.match(setForm, /cross join lateral/,
     "af.21 the set helper probes one receipt per KEPT run through a lateral, not a plain join");
   assert.match(setForm, /offset 0/,
