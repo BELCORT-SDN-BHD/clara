@@ -408,6 +408,37 @@ comment on index clara.ix_sweep_runs_firm_effect is
 --    packages/db/tests/activity-feed.test.mjs carries the door's catalog pin plus a wall-clock
 --    series at the orx load -- af.20's 4,000/200 is measured FLAT, which is how a 2 s page shipped
 --    past a cell written to catch exactly this.
+--
+--    THE KEPT SET IS STILL THE FIRM'S WHOLE KEPT SET, AND THAT IS A MEASURED DECISION, not an
+--    oversight (delta review round 4, SHOULD-FIX [2]). `v_kept_sweeps` is read once per call from
+--    clara._sweep_events_with_effect() with no bound at all, so its cost grows with the firm's
+--    kept history for ever. MEASURED on the fixed (pinned) door, sweep history held at 30,000,
+--    ONE session, ANALYZE inside a rolled-back transaction, kept varied:
+--        kept    200 -> helper   0.8-1.1 ms, default page  13-32 ms
+--        kept  1,500 -> helper   5.5-7.2 ms, default page  33-142 ms
+--        kept  6,000 -> helper  21.6-27.1 ms, default page  30-70 ms
+--        kept 15,000 -> helper  64.0-71.6 ms, default page  60-162 ms
+--        kept 30,000 -> helper 110.1-122.9 ms, default page 187-231 ms
+--    LINEAR, ~3.8 ms per 1,000 kept, no cliff -- and the last row is every one of 105 days of
+--    five-minute sweeps having drafted or posted something, which is the case this whole ticket
+--    exists because it does NOT happen. So the kept read is carried as it is.
+--
+--    AND THE OBVIOUS NARROWING IS THE WRONG ONE, which is worth writing down so the follow-up
+--    does not start there. Bounding the helper by the READ'S OWN WINDOW -- adding
+--    `de.created_at >= p_since` inside the lateral probe -- is measurably SLOWER, not faster:
+--    at 6,000 kept 29.4-36.6 ms against 24.8-30.3 ms unbounded, and at 30,000 kept 107.7-145.8 ms
+--    against 96.0-108.9 ms. The reason is in section 0b's index: the statement's cost is the
+--    number of KEPT RUNS IT DRIVES FROM, and `ix_sweep_runs_firm_effect` is `(firm_id)` partial
+--    on "did something" with NO time column, so a predicate inside the probe removes no driving
+--    row and only adds a comparison per probe. A DRIVER-side bound does work -- with
+--    `sr.finalized_at >= p_since` the same statement is 4.5-6.0 ms at 6,000 kept and
+--    15.4-18.3 ms at 30,000 (5-6x) -- but it windows on the RUN'S clock while the feed orders and
+--    filters on the EVENT'S `created_at`, and those two are not tied by any constraint (the same
+--    reason wall two of this section refuses to trust `payload`). A kept sweep whose run finalised
+--    on the far side of the boundary would silently vanish from that page: an agent act that moved
+--    the books, missing from an audit surface. Closing that needs the two clocks related first
+--    (a constraint, or an index on `(firm_id, finalized_at) where drafted_count + posted_count > 0`
+--    plus a stated slack), which is a data-model decision and its own ticket -- not a tweak here.
 -- ==============================================================================================
 -- THE FEED'S SHAPE: the whole kept set of this firm. One statement, one plan, re-planned per call
 -- against the real firm id (plan_cache_mode above), probing ONE receipt per kept run.
