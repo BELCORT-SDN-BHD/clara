@@ -38,7 +38,7 @@
 // unconditionally left a CLR10/CLR31 refusal nowhere to render). LAW 6 still
 // holds: there is no delete affordance anywhere on this surface.
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
 
 import { Button } from "@/components/ui/button";
@@ -188,6 +188,24 @@ export function JournalEntriesTable({
   const [reason, setReason] = useState("");
   const [diffId, setDiffId] = useState<string | null>(null);
 
+  // …AND A LATER `?entry=` IS A NEW OPENING STATE. Cross-model review, confirmed:
+  // the two initialisers above run ONCE, and Next does not remount a client
+  // component when only the query changes — so following a correction link from
+  // inside this page, or pressing Back between two `?entry=` addresses, left the
+  // table filtered and expanded on the PREVIOUS entry while the URL named
+  // another. The address is the state, so it is tracked rather than sampled.
+  // `""` (no `?entry=`) deliberately does NOT clear a filter the reader set by
+  // hand: only an ADDRESS moves this.
+  const seenEntryId = useRef(initialEntryId);
+  useEffect(() => {
+    if (seenEntryId.current === initialEntryId) return;
+    seenEntryId.current = initialEntryId;
+    if (initialEntryId === "") return;
+    setFilters((f) => ({ ...f, entry: initialEntryId }));
+    setExpandedId(initialEntryId);
+    setPage(1);
+  }, [initialEntryId]);
+
   const totalsSortable = !linesTruncated;
   const all = useMemo(() => buildEntryRows(entries, lines, links), [entries, lines, links]);
   const filtered = useMemo(() => filterEntryRows(all, filters), [all, filters]);
@@ -292,7 +310,18 @@ export function JournalEntriesTable({
       {all.length === 0 ? (
         <EmptyState>{tp("empty")}</EmptyState>
       ) : filtered.length === 0 ? (
-        <EmptyState>{t("noMatches")}</EmptyState>
+        // AN ADDRESSED ENTRY THAT IS NOT IN THIS PAGE IS ITS OWN STATE, not
+        // "no matches". Cross-model review, confirmed: `?entry=` filters IN
+        // MEMORY over `loadJournalsWorkbench`'s newest-1000 read
+        // (lib/journals/api.ts's FETCH_CAP), so a correction or conflict link to
+        // an older entry lands on a table that can only say "nothing matched
+        // your filters" — which reads as "that entry does not exist" about an
+        // entry the database has. Fetching it independently of the browse page
+        // is the real fix and belongs with the read; saying which of the two
+        // things happened costs one line and is true today.
+        <EmptyState>
+          {filters.entry !== "" && entriesTruncated ? tm("filters.addressedOutsidePage") : t("noMatches")}
+        </EmptyState>
       ) : (
         <>
           <DataTableCard label={t("tableLabel")}>

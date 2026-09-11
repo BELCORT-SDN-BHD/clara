@@ -26,7 +26,7 @@ import {
   gateEvidence, EVIDENCE_REASON, EVIDENCE_CLR, attachEntryEvidence, listEntryLinks,
   evidenceDocument, retireFiling, docRef, linksForEntry, linksForDocument, linkCount,
   entryRow, opReceiptCount, reverseEntry, holdThenContend, recordJournalEntryOn,
-  attachEntryEvidenceOn, ROLES, withTxnOrNull,
+  attachEntryEvidenceOn, ROLES, withTxnOrNull, fileSameDocumentTo,
 } from "./journal-work-evidence-fixtures.mjs";
 
 let world = null;
@@ -900,4 +900,90 @@ test("w634.race.role an evidence-bearing Work whose initiator lost the floor ref
       "update clara.firm_memberships set role='bookkeeper' where user_id=$1 and firm_id=$2",
       [BOB(), FIRM_A()]);
   }
+});
+
+// ===========================================================================================
+// 8 · CROSS-MODEL REVIEW (Codex). Two claims measured against the catalog and fixed: the
+// binding lookup's SCOPE, and the ORDER of the mutable-world checks against a replay.
+// ===========================================================================================
+
+test("w634.conflict.crossclient a document live in TWO clients of one firm binds ONCE, by name", async (t) => {
+  if (await gateEvidence(t)) return;
+  // `uq_document_filing_active` is (document_id, client_id) WHERE retired_at is null (0007:93),
+  // so ONE document may be actively filed to two clients of a firm — while
+  // `uq_entry_evidence_links_document` carries NO client column. A client-scoped lookup would
+  // answer "free" for the sibling's binding and let the write reach the index as a raw 23505.
+  const other = await freshWorkClient(ALICE(), "w634cross");
+  const doc = await evidenceDocument(ALICE(), { firm: FIRM_A(), client: A1() });
+  const second = await fileSameDocumentTo(ALICE(), { document: doc.documentId, client: other })
+    .catch((e) => ({ error: e }));
+  if (second && second.error) {
+    // If the estate ever narrows the filing key to the document alone, this cell's PREMISE is
+    // gone — say so loudly rather than going green on a scenario that cannot happen.
+    t.diagnostic(`conflict.crossclient: the same document could not be filed twice (${second.error.code}: ${second.error.message}) -- re-derive _document_posting_entry's scope`);
+    return;
+  }
+
+  const first = await armed({ sourceRefs: [docRef(doc.documentId)],
+    b: basis({ cents: 88800, memo: `w634 cross one ${opk("memo")}` }) });
+  const posted = await post(first);
+
+  // assertPair itself is the "typed, never a raw 23505" claim: it fails unless the raise carries
+  // BOTH the CLR13 sqlstate and `detail.reason = source_already_posted`, which a bare unique
+  // violation cannot.
+  const { detail, err } = await assertPair(CLR.conflict, EVIDENCE_REASON.sourceAlreadyPosted,
+    () => admitJournalWork({ client: other, author: BOB(), sourceRefs: [docRef(doc.documentId)] }),
+    "conflict.crossclient");
+  assert.notEqual(err.code, "23505", "the index's own refusal never reaches a caller unnamed");
+  assert.equal(detail.entry_id, posted.entry_id,
+    "conflict.crossclient: it names the SIBLING client's entry — which this firm's member may "
+    + "already read (journal_entries' human policy is firm-scoped), so nothing leaks");
+  assert.equal((await linksForDocument(doc.documentId)).length, 1,
+    "conflict.crossclient: one document, one live binding, firm-wide");
+});
+
+test("w634.intent.replay_after_retire a lost-response retry RESOLVES even if the filing moved", async (t) => {
+  if (await gateEvidence(t)) return;
+  // THE PATH THIS CLOSES. A Work is admitted with a document; the response is lost; the filing is
+  // retired; the composer re-sends the SAME intent key. With the filing check BEFORE the replay
+  // lookup the retry answered `invalid_source_ref` — a field refusal for a Work that already
+  // existed — and the composer's next move (a different document under the same key) is a payload
+  // conflict, which rotates the key, which admits a SECOND Work for figures already admitted.
+  const doc = await evidenceDocument(ALICE(), { firm: FIRM_A(), client: A1() });
+  const key = `w634-replay-${opk("k")}`;
+  const first = await admitJournalWork({
+    client: A1(), author: BOB(), intentKey: key, sourceRefs: [docRef(doc.documentId)] });
+  assert.equal(first.replayed, false);
+
+  await retireFiling(ALICE(), { filing: doc.filingId });
+
+  const again = await admitJournalWork({
+    client: A1(), author: BOB(), intentKey: key, sourceRefs: [docRef(doc.documentId)] });
+  assert.equal(again.replayed, true,
+    "intent.replay_after_retire: the SAME key resolves to the Work it already admitted, whatever "
+    + "the world did in between");
+  assert.equal(again.work_id, first.work_id);
+
+  // …and a NEW intent naming the same, now-retired document is STILL refused by name: the
+  // deferral moved the check, it did not remove it.
+  const { detail } = await assertPair(CLR.badRequest, EVIDENCE_REASON.invalidSourceRef,
+    () => admitJournalWork({ client: A1(), author: BOB(), sourceRefs: [docRef(doc.documentId)] }),
+    "intent.replay_after_retire (a new intent)");
+  assert.equal(detail.constraint, "not_filed");
+  assert.equal(detail.field, "source_refs[1]");
+});
+
+test("w634.intent.shape a MALFORMED ref is refused before the replay lookup, on any key", async (t) => {
+  if (await gateEvidence(t)) return;
+  // The other half of the split: SHAPE is a property of the payload and stays in front of
+  // everything, so a malformed ref can never mint a Work and is never answered as a conflict.
+  const key = `w634-shape-${opk("k")}`;
+  const { detail } = await assertPair(CLR.badRequest, EVIDENCE_REASON.invalidSourceRef,
+    () => admitJournalWork({ client: A1(), author: BOB(), intentKey: key,
+      sourceRefs: [{ kind: "document", document_id: "not-a-uuid" }] }), "intent.shape");
+  assert.equal(detail.constraint, "uuid");
+  const works = await rootQuery(
+    "select count(*)::int as n from clara.accounting_work where client_id=$1 and intent_key=$2",
+    [A1(), key]);
+  assert.equal(works.rows[0].n, 0, "intent.shape: nothing durable was minted");
 });

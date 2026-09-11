@@ -504,6 +504,13 @@ export type RenderHarness = {
   fireEvent(node: Stub, type: string, mutate?: (n: Stub) => void): Promise<void>;
   act: (fn?: () => void | Promise<void>) => Promise<void>;
   settle: () => Promise<void>;
+  /** Render a DIFFERENT element into the SAME root — an update, not a remount,
+   *  which is exactly what Next does to a client component when only the route's
+   *  query changes. A cell that needs to prove a component tracks a changing
+   *  PROP (rather than sampling it once into `useState`) cannot do it any other
+   *  way: unmounting and mounting again would run the initialisers afresh and
+   *  pass for the wrong reason. */
+  rerender(next: ReactElement): Promise<void>;
   unmount: () => Promise<void>;
 };
 
@@ -539,6 +546,7 @@ export async function renderComponent(element: ReactElement): Promise<RenderHarn
     },
     act,
     settle: async () => { await act(async () => { await new Promise((r) => setTimeout(r, 0)); }); },
+    rerender: async (next: ReactElement) => { await act(() => { root.render(next); }); },
     unmount: async () => { await act(() => { root.unmount(); }); },
   };
 }

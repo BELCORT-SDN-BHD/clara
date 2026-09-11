@@ -103,6 +103,20 @@ export async function evidenceDocument(sub, { firm, client, kind = "invoice" }) 
   return filedDocument(sub, { firm, client, kind });
 }
 
+/** File an EXISTING document to a SECOND client, through the estate's own `clara.file_document`.
+ *  `uq_document_filing_active` is `(document_id, client_id) where retired_at is null` (0007:93),
+ *  so one document may be live in two clients of a firm at once — the shape
+ *  `clara._document_posting_entry` has to reckon with, because
+ *  `uq_entry_evidence_links_document` carries no client column. Returns the new filing id. */
+export async function fileSameDocumentTo(sub, { document, client }) {
+  const { fileDocument, freshResolution } = await import("./s6-helpers.mjs");
+  return fileDocument(sub, {
+    document,
+    client,
+    resolution: await freshResolution(sub, client, { subjectKind: "document", subjectId: document }),
+  });
+}
+
 /** Retire a filing through clara.retire_document_filing — the estate's own human door, never a
  *  hand-set `retired_at` (which `ck_document_filings_retirement` would refuse anyway). */
 export async function retireFiling(sub, { filing, reason = "#634 rig: source withdrawn" }) {

@@ -184,6 +184,10 @@ describe("#634 — the composer's refusal roster is BOUND to its producers", () 
       not_found: 404,
       forbidden: 403,
       shutting_down: 503,
+      // The unclassified-error answer. `workErrorResponse` returns null for an
+      // error its map does not claim, and the handler logs it and answers 500 —
+      // which the browser must read as "nobody can tell yet", never as a refusal.
+      internal: 500,
       // AuthError's own tokens, answered by `sendAuthError` on the same route.
       unauthenticated: 401,
       no_session: 401,

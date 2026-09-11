@@ -670,10 +670,15 @@ test("634.db: the recut verb's refusal carries the (code, reason, field) triple 
   assert.equal(bad.detail.reason, "invalid_source_ref");
   assert.equal(bad.detail.field, "source_refs[1]", "the DATABASE's own 1-BASED path");
   assert.equal(bad.detail.constraint, "not_filed");
-  // …and the route turns exactly that into a 400 the composer can place beside its control.
+  // …and the route turns exactly that into a 400 the composer can place beside its control,
+  // with the DATABASE's `constraint` FOLDED INTO `reason` — reviewed finding. `lib/wire.ts`
+  // surfaces `detail.reason` and discards every other key of a governed refusal, so without the
+  // fold `not_filed` — the one arm only the database can reach, and the only one a preparer can
+  // act on — never reached the browser at all, and the route's OWN evidence refusals (which
+  // answer the bare constraint token) spoke a different vocabulary for the same refusal.
   assert.deepEqual(
     workErrorResponse(Object.assign(new Error("refused"), { code: bad.code, detail: JSON.stringify(bad.detail) })),
-    { status: 400, body: { error: "invalid_basis", field: "sourceRefs[1]", reason: "invalid_source_ref" } },
+    { status: 400, body: { error: "invalid_basis", field: "sourceRefs[1]", reason: "not_filed" } },
   );
 
   // Nothing durable was written by the refusal.

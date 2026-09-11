@@ -69,6 +69,15 @@ export async function listClientEvidenceDocuments(
       // than rendered as a blank option: an option nobody can identify is worse
       // than one fewer option, and the admission door would refuse it anyway.
       if (!doc) return null;
+      // …and so is one whose BYTES WERE NEVER VERIFIED. Migration 0182's
+      // `clara._journal_document_filed` applies the estate's custody floor
+      // (`bytes_verified_at is not null`, `clara._active_document_filing`'s own
+      // rule since 0007:982): an unverified upload is not evidence. Offering it
+      // here builds a chooser whose option can only ever come back
+      // `invalid_source_ref` / `not_filed` — the form inviting a refusal it
+      // could have predicted. Cross-model review, confirmed against the
+      // migration and against `listDocumentsByIds`' own column list.
+      if (doc.bytes_verified_at === null) return null;
       return {
         documentId: doc.id,
         filename: doc.original_filename,

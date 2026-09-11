@@ -477,7 +477,10 @@ async function main() {
         ev.jwt,
       );
       assert.equal(bad.status, 400, `an unfiled document is a 400 (got ${bad.status} ${JSON.stringify(bad.body)})`);
-      assert.deepEqual(bad.body, { error: "invalid_basis", field: "sourceRefs[1]", reason: "invalid_source_ref" });
+      // `reason` is the DATABASE's own `constraint` token, folded in by `workErrorResponse` —
+      // reviewed finding. `not_filed` is the arm only the database can reach, and `lib/wire.ts`
+      // surfaces nothing but `detail.reason`, so unfolded it never reached the browser at all.
+      assert.deepEqual(bad.body, { error: "invalid_basis", field: "sourceRefs[1]", reason: "not_filed" });
       console.log("[work-e2e] PASS 8: evidence rides admission -> commit -> link + receipt; a second Work on the same document is refused with no effect");
     } else {
       console.log("[work-e2e] PASS 8: SKIPPED — migration 0182 (clara.entry_evidence_links) is not on this database");

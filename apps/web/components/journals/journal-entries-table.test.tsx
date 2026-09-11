@@ -353,3 +353,60 @@ test("a RELEASED binding is not presented as the entry's current source", async 
     await h.unmount();
   }
 });
+
+// ---------------------------------------------------------------------------
+// Cross-model review — the URL is the state, and an unreachable address says so.
+// ---------------------------------------------------------------------------
+
+test("a LATER ?entry= re-opens the table on the newly addressed entry", async () => {
+  // THE DEFECT THIS CELL FENCES. `initialEntryId` fed two `useState` initialisers
+  // and nothing else, and Next does not remount a client component when only the
+  // query changes — so following a correction link from inside this page, or
+  // pressing Back between two `?entry=` addresses, left the table filtered and
+  // expanded on the PREVIOUS entry while the URL named another.
+  const h = await renderComponent(
+    App(createElement(PostedPanel, {
+      clientId: "c1", entries: [BACKDATED, RECENT], lines: LINES, linesTruncated: false,
+      entriesTruncated: false, accounts: ACCOUNTS, busy: false, err: null, clr: null,
+      actingId: null, onReverse: () => {}, links: [], linksUnavailable: false,
+      initialEntryId: RECENT.id,
+    })),
+  );
+  try {
+    for (let i = 0; i < 2; i++) await h.settle();
+    assert.match(h.text(), /RECENT april/);
+    assert.doesNotMatch(h.text(), /BACKDATED january/, "the address opened the table on ONE entry");
+
+    await h.rerender(App(createElement(PostedPanel, {
+      clientId: "c1", entries: [BACKDATED, RECENT], lines: LINES, linesTruncated: false,
+      entriesTruncated: false, accounts: ACCOUNTS, busy: false, err: null, clr: null,
+      actingId: null, onReverse: () => {}, links: [], linksUnavailable: false,
+      initialEntryId: BACKDATED.id,
+    })));
+    for (let i = 0; i < 2; i++) await h.settle();
+    assert.match(h.text(), /BACKDATED january/, "a NEW address is a new opening state");
+    assert.doesNotMatch(h.text(), /RECENT april/);
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("an ADDRESSED entry outside the read's page is a named state, not 'no matches'", async () => {
+  // `?entry=` filters in memory over the newest-1000 read, so a link to an older
+  // entry lands on an empty table. "Nothing matched your filters" reads as "that
+  // entry does not exist" about an entry the database has.
+  const h = await renderComponent(
+    App(createElement(PostedPanel, {
+      clientId: "c1", entries: [RECENT], lines: LINES, linesTruncated: false,
+      entriesTruncated: true, accounts: ACCOUNTS, busy: false, err: null, clr: null,
+      actingId: null, onReverse: () => {}, links: [], linksUnavailable: false,
+      initialEntryId: "f0000000-0000-4000-8000-00000000ffff",
+    })),
+  );
+  try {
+    for (let i = 0; i < 2; i++) await h.settle();
+    assert.match(h.text(), /not in this page of the journal/);
+  } finally {
+    await h.unmount();
+  }
+});

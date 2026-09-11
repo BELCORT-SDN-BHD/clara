@@ -357,3 +357,4 @@ tests/streamParser.test.mjs
 tests/streamReattach.test.mjs
 tests/token-contrast.test.ts
 tests/journal-refusal-roster.test.ts
+lib/work/evidence.test.ts

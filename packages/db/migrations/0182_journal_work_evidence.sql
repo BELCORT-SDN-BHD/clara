@@ -482,7 +482,19 @@ revoke all on function clara._journal_source_document(jsonb) from public;
 -- `with ordinality` counts from one and the path is generated FROM that ordinal — 0178's header
 -- states this law and says zero-based consumers subtract one at THEIR edge. The DB never pretends
 -- to a convention it does not use internally.
-create function clara._assert_journal_source_refs(p_firm uuid, p_client uuid, p_source_refs jsonb)
+--
+-- TWO CLASSES OF CHECK, AND `p_check_filed` IS WHICH ONE (Codex review, confirmed). The SHAPE
+-- half is a property of the PAYLOAD and never changes: an element that is not an object, an
+-- unsupported kind, a missing or malformed document id, a second document. The FILING half is a
+-- property of the WORLD and changes under the caller's feet: a filing can be retired between an
+-- admission and the retry of that same admission. Running the second half before the replay
+-- lookup made a LOST-RESPONSE RETRY answer `invalid_source_ref` for a Work that already existed
+-- — and the composer's next move for a field refusal is to change the document, which under the
+-- same intent key is a payload conflict, which rotates the key, which admits a SECOND Work for
+-- figures already admitted. So admission calls this twice: shape before the replay branch,
+-- filing after it.
+create function clara._assert_journal_source_refs(p_firm uuid, p_client uuid, p_source_refs jsonb,
+    p_check_filed boolean default true)
   returns void
   language plpgsql stable security definer set search_path = clara, pg_temp as $$
 declare r record; v_docs int := 0; v_doc uuid;
@@ -528,7 +540,7 @@ begin
       -- NO EXISTENCE ORACLE: a document of another firm, a document filed to another client and
       -- a uuid naming nothing all answer identically. The caller already knows which client they
       -- picked from, so nothing actionable is withheld and nothing enumerable is leaked.
-      if not clara._journal_document_filed(p_firm, p_client, v_doc) then
+      if p_check_filed and not clara._journal_document_filed(p_firm, p_client, v_doc) then
         raise exception 'source ref % is not an active verified document of this client', r.idx
           using errcode='CLR10', detail=jsonb_build_object('reason','invalid_source_ref',
             'field','source_refs[' || r.idx || ']', 'constraint','not_filed')::text;
@@ -536,7 +548,7 @@ begin
     end if;
   end loop;
 end $$;
-revoke all on function clara._assert_journal_source_refs(uuid,uuid,jsonb) from public;
+revoke all on function clara._assert_journal_source_refs(uuid,uuid,jsonb,boolean) from public;
 
 -- WHICH POSTED ENTRY ALREADY STANDS ON THIS DOCUMENT, or NULL. Asked in exactly one place so the
 -- three askers (admission, commit, the late door) can never disagree, and so the answer always
@@ -550,14 +562,29 @@ revoke all on function clara._assert_journal_source_refs(uuid,uuid,jsonb) from p
 -- predicates now say the same thing about the same event, which is what makes the answer agree
 -- with `uq_entry_evidence_links_document`'s own `where released_at is null`: the door's reckoning
 -- and the index's can never disagree, in either direction.
+--
+-- THE SCOPE IS THE FIRM, NOT THE CLIENT, and that is the index's own scope (Codex review,
+-- confirmed against the catalog). `uq_document_filing_active` is `(document_id, client_id) where
+-- retired_at is null` (0007:93) — so ONE document may be actively filed to TWO clients of a firm,
+-- and both may cite it. `uq_entry_evidence_links_document` has no client column, so it refuses the
+-- second binding wherever it comes from; a client-scoped lookup would MISS the sibling's binding,
+-- answer "free", and let the write reach the index as a raw 23505 that the handlers below cannot
+-- translate. Asking the same question the index asks is what keeps the typed refusal total.
+--
+-- IT IS NOT AN ORACLE. `clara.documents` is firm-scoped and `clara.journal_entries`' own human
+-- read policy is `firm_id = clara.jwt_firm()` with no per-client clause, so the entry this names
+-- is one the caller may already read. The firm floor comes from the CLIENT the caller passed,
+-- never from a caller-supplied firm id.
 create function clara._document_posting_entry(p_client uuid, p_document uuid) returns uuid
   language sql stable security definer set search_path = clara, pg_temp as $$
   select e.entry_id from (
     select l.entry_id, 0 as rank from clara.entry_evidence_links l
-      where l.client_id = p_client and l.document_id = p_document and l.released_at is null
+      join clara.clients c on c.id = p_client and c.firm_id = l.firm_id
+      where l.document_id = p_document and l.released_at is null
     union all
     select j.id, 1 from clara.journal_entries j
-      where j.client_id = p_client and j.document_id = p_document
+      join clara.clients c2 on c2.id = p_client and c2.firm_id = j.firm_id
+      where j.document_id = p_document
         and j.status = 'approved' and j.reversed_by is null
   ) e order by e.rank limit 1;
 $$;
@@ -617,10 +644,15 @@ begin
     raise exception 'source refs must be a JSON array (empty means documentless)'
       using errcode='CLR10', detail='{"reason":"invalid_source_refs"}';
   end if;
-  -- #634 · EVERY ELEMENT, BY NAME. The array shape above is 0178's; this is the element-level
-  -- assertion that makes an evidence claim mean something. It runs BEFORE the model gate and
-  -- before any durable write, for the same reason the key gate does.
-  perform clara._assert_journal_source_refs(v_firm, p_client, p_source_refs);
+  -- #634 · EVERY ELEMENT'S SHAPE, BY NAME. The array shape above is 0178's; this is the
+  -- element-level assertion that makes an evidence claim mean something. It runs BEFORE the model
+  -- gate and before any durable write, for the same reason the key gate does.
+  --
+  -- SHAPE ONLY, HERE. The FILING check is deferred past the replay branch below — a property of
+  -- the payload may be asserted against a replay, a property of the WORLD may not (see
+  -- `_assert_journal_source_refs`'s own header for the lost-response path that made this a
+  -- second admission).
+  perform clara._assert_journal_source_refs(v_firm, p_client, p_source_refs, false);
   v_source_document := clara._journal_source_document(p_source_refs);
   -- The run records WHICH MODEL served it (C88.8's half that lives on the task). The agent_tasks
   -- INSERT guard refuses a blank snapshot with an UNTYPED CLR10, so it is refused here first,
@@ -656,7 +688,20 @@ begin
       'logical_op_id', x.logical_op_id, 'status', x.status, 'replayed', true);
   end if;
 
-  -- #634 · ONE DOCUMENT, ONE POSTED ENTRY. Asked AFTER the replay branch so a replay of an
+  -- #634 · THE WORLD'S HALF OF THE EVIDENCE CHECK, both arms, AFTER the replay branch.
+  --
+  -- IS THE DOCUMENT STILL AN ACTIVE VERIFIED FILING OF THIS CLIENT? Deferred to here from the
+  -- shape assertion above (Codex review, confirmed): a lost-response retry under the SAME intent
+  -- key must resolve to the Work it already admitted, and a filing retired in the meantime is a
+  -- fact about the world rather than about the payload. Refusing it before the replay lookup sent
+  -- the composer a field refusal for a Work that existed — and its next move, a different
+  -- document under the same key, is a payload conflict, which rotates the key, which admits a
+  -- SECOND Work for figures already admitted.
+  -- The SAME assertion as above with its filing arm ON, so the refusal's `field` path and its
+  -- `not_filed` constraint are generated in exactly one place rather than restated here.
+  perform clara._assert_journal_source_refs(v_firm, p_client, p_source_refs, true);
+
+  -- ONE DOCUMENT, ONE POSTED ENTRY. Asked AFTER the replay branch so a replay of an
   -- already-admitted Work still replays (its own commit owns the document), and BEFORE anything
   -- durable so a conflicting attachment never mints a Work or spends a run. An attachment
   -- conflict OPENS IMPACT/CORRECTION -- the refusal carries the entry that already stands on the
