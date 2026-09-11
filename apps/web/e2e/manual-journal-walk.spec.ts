@@ -1,5 +1,5 @@
 import AxeBuilder from "@axe-core/playwright";
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 
 import { ensureRealFocus } from "./helpers";
 import { JOURNAL_WORK } from "./journal-work-mock.mjs";
@@ -98,6 +98,34 @@ function workIdIn(url: string): string {
 
 const evidence = (page: Page) => page.locator("#journal-basis-evidence");
 
+/** #728 finding 5 disables an already-posted document in BOTH evidence pickers — a
+ *  real person can no longer reach the door's own `source_already_posted`/
+ *  `source_conflict` refusal through ordinary interaction (the disabling IS the
+ *  fix). Playwright's `selectOption({ force: true })` does NOT reach past this:
+ *  read against playwright-core's own DOM-injection source
+ *  (`node_modules/.../playwright-core/lib/coreBundle.js`), the
+ *  `error:optionnotenabled` branch never consults `options.force` at all — it
+ *  always retries until the option becomes enabled or the call times out. `force`
+ *  only turns SOME other actionability failures (not-visible, outside-viewport)
+ *  into an immediate throw; a disabled `<option>` is not one of them.
+ *
+ *  So this sets the `<select>`'s value directly and dispatches the native
+ *  `change` event a real selection would fire, through the property setter React
+ *  itself patches for value tracking (the same workaround React's own controlled
+ *  `<input>`/`<select>` testing guidance uses) — the SAME app code path a genuine
+ *  selection reaches runs from there. It proves the picker's disabling is
+ *  advisory: even a client that never asked the picker still meets the door's own
+ *  refusal, which is the property these two tests exist to hold. */
+async function forceSelectDisabled(select: Locator, value: string): Promise<void> {
+  await select.evaluate((node, v) => {
+    const el = node as HTMLSelectElement;
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, "value")?.set;
+    if (setter) setter.call(el, v);
+    else el.value = v;
+    el.dispatchEvent(new Event("change", { bubbles: true }));
+  }, value);
+}
+
 /** One Work composed with NO document and run through to a posted entry — the
  *  state the late door exists for. Returns the Work id. */
 async function postedDocumentlessWork(page: Page): Promise<string> {
@@ -165,10 +193,11 @@ test("C3: a document that already backs a posted entry is a persistent Alert wit
   await fillBalancedBasis(page);
   // #728 finding 5 — the picker ALREADY disables this document (it is the mock's own spoken-for
   // fixture, seeded at module load), so a real person can no longer reach this door-level refusal
-  // through ordinary interaction — the disabling IS the fix. `force: true` selects it anyway,
-  // proving the DOOR stays the actual authority even past the advisory picker's own guard (the
-  // read is advisory; the door is the law, exactly as this ticket's own contract states).
-  await evidence(page).selectOption(JOURNAL_WORK.takenDocumentId, { force: true });
+  // through ordinary interaction — the disabling IS the fix. `forceSelectDisabled` reaches past
+  // the picker's own advisory guard (see its own comment for why `selectOption({force:true})`
+  // does not), proving the DOOR stays the actual authority (the read is advisory; the door is
+  // the law, exactly as this ticket's own contract states).
+  await forceSelectDisabled(evidence(page), JOURNAL_WORK.takenDocumentId);
   await page.getByRole("button", { name: "Submit" }).click();
 
   // A REFUSAL, NOT A TOAST: an inline Alert naming the concrete constraint.
@@ -279,10 +308,11 @@ test("B3: LATE attachment on a posted documentless entry — happy, replay, and 
   // and keeps the choice.
   // #728 finding 5 — the picker ALREADY disables this document (it is the mock's own spoken-for
   // fixture, seeded at module load), so a real person can no longer reach this door-level refusal
-  // through ordinary interaction — the disabling IS the fix. `force: true` selects it anyway,
-  // proving the DOOR stays the actual authority even past the advisory picker's own guard (the
-  // read is advisory; the door is the law, exactly as this ticket's own contract states).
-  await dialog.locator("#attach-evidence-document").selectOption(JOURNAL_WORK.takenDocumentId, { force: true });
+  // through ordinary interaction — the disabling IS the fix. `forceSelectDisabled` reaches past
+  // the picker's own advisory guard (see its own comment for why `selectOption({force:true})`
+  // does not), proving the DOOR stays the actual authority (the read is advisory; the door is
+  // the law, exactly as this ticket's own contract states).
+  await forceSelectDisabled(dialog.locator("#attach-evidence-document"), JOURNAL_WORK.takenDocumentId);
   await dialog.getByRole("button", { name: "Attach", exact: true }).click();
   await expect(dialog.getByText("already backs another posted entry", { exact: false })).toBeVisible();
   await expect(dialog.locator("#attach-evidence-document")).toHaveValue(JOURNAL_WORK.takenDocumentId);
