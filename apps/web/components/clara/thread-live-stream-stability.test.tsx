@@ -52,7 +52,7 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { Component, Profiler, createElement, useRef, useState, type ReactElement, type ReactNode } from "react";
+import { Component, Profiler, createElement, useState, type ReactElement, type ReactNode } from "react";
 import { NextIntlClientProvider } from "next-intl";
 
 import { ClaraThreadView } from "./ClaraThreadView";
@@ -551,50 +551,58 @@ test("a throw from inside applyStreamEvent leaves through the STREAM, and the ba
 // ---------------------------------------------------------------------------
 
 let churn: (() => void) | null = null;
-/** THE WO's A.1(b) COUNTERS, one per card. Each wrapper renders exactly when its card
- *  does — the card's `part` prop is a NEW object on every parent render, so React can
- *  never bail out of re-rendering it — which is what makes a count of the wrapper a count
- *  of the card, and why the churn has to be the production churn rather than a contrived
- *  one. `WorkAcceptedCard` is in here because #629/#725 mounted it INSIDE the transcript
- *  between the previous hosted walk and the one that failed: it hydrates the Work on
- *  mount, so a card that re-read per render would have been the second candidate cause. */
+/** THE WO's A.1(b) COUNTERS, one per card — now a `Profiler` around EACH card, the same
+ *  instrument `withLiveTurn` already uses for the transcript (see `transcriptCommits`
+ *  above). A counter that lives in the wrapper's own function body only fires when the
+ *  WRAPPER is re-invoked, which happens exactly once per parent render — it can never see
+ *  a commit the CARD schedules on itself (its bounded re-read's `setTimeout`, its own
+ *  hydration `setState`), so it silently measures the churn loop instead of the card. A
+ *  `Profiler`'s `onRender` fires on every commit of the subtree it wraps, parent-driven or
+ *  self-driven, which is what makes counting it a genuine count of the card. `WorkAcceptedCard`
+ *  is in here because #629/#725 mounted it INSIDE the transcript between the previous hosted
+ *  walk and the one that failed: it hydrates the Work on mount, so a card that re-read per
+ *  render would have been the second candidate cause. */
 const clarifyRenders = { count: 0 };
 const workAcceptedRenders = { count: 0 };
 
 function CountingClarify(props: { answerable: boolean; question: string }): ReactElement {
-  clarifyRenders.count += 1;
-  return createElement(ClarifyCard, {
-    // A NEW `part` OBJECT EVERY RENDER, which is the production shape and not a contrivance:
-    // `foldLiveClarifyParts` rebuilds its array inside a `useMemo` keyed on the chunk buffer,
-    // and `applyClaraStreamEvent` makes that buffer a NEW array on every chunk — so this
-    // prop's identity genuinely churns once per delta on a streaming turn.
-    part: { type: "clarify" as const, tool_call_id: "call-727", question: props.question, context: null, framing: "" },
-    taskId: TASK_ID,
-    session,
-    answerable: props.answerable,
+  return createElement(Profiler, {
+    id: "clarify-card",
+    onRender: () => { clarifyRenders.count += 1; },
+    children: createElement(ClarifyCard, {
+      // A NEW `part` OBJECT EVERY RENDER, which is the production shape and not a contrivance:
+      // `foldLiveClarifyParts` rebuilds its array inside a `useMemo` keyed on the chunk buffer,
+      // and `applyClaraStreamEvent` makes that buffer a NEW array on every chunk — so this
+      // prop's identity genuinely churns once per delta on a streaming turn.
+      part: { type: "clarify" as const, tool_call_id: "call-727", question: props.question, context: null, framing: "" },
+      taskId: TASK_ID,
+      session,
+      answerable: props.answerable,
+    }),
   });
 }
 
 function CountingWorkAccepted(): ReactElement {
-  workAcceptedRenders.count += 1;
-  return createElement(WorkAcceptedCard, {
-    // The same fresh-object-per-render shape as the clarify above, for the same reason:
-    // the transcript's parts come out of `state.messages`, which the store replaces
-    // wholesale on every stream event.
-    part: {
-      type: "work_accepted" as const,
-      work_id: WORK_ID,
-      client_id: CLIENT_ID,
-      purpose: "journal_entry",
-      logical_op_id: `work:${WORK_ID}:journal_entry:1`,
-    },
+  return createElement(Profiler, {
+    id: "work-accepted-card",
+    onRender: () => { workAcceptedRenders.count += 1; },
+    children: createElement(WorkAcceptedCard, {
+      // The same fresh-object-per-render shape as the clarify above, for the same reason:
+      // the transcript's parts come out of `state.messages`, which the store replaces
+      // wholesale on every stream event.
+      part: {
+        type: "work_accepted" as const,
+        work_id: WORK_ID,
+        client_id: CLIENT_ID,
+        purpose: "journal_entry",
+        logical_op_id: `work:${WORK_ID}:journal_entry:1`,
+      },
+    }),
   });
 }
 
 function ChurningParent(): ReactElement {
   const [n, setN] = useState(0);
-  const seen = useRef(0);
-  seen.current += 1;
   churn = () => setN((v) => v + 1);
   void n;
   return createElement(
@@ -628,9 +636,9 @@ test("neither card storms its re-read when the part identity churns on every del
       // The production ordering: the row lands three durable step boundaries after the
       // chunk, so the first reads come back empty. The bounded window's ticks are a second
       // apart and this burst runs in far less than that, so within it the card must issue
-      // its MOUNT read and nothing else — measured on the fix: 1 interruption read across
-      // 120 deltas, 121 clarify renders and 121 accepted-Work renders for those 120, and
-      // ONE Work read, which is the render-per-delta bound and no more.
+      // its MOUNT read and nothing else — measured on the fix: 1 interruption read and 1
+      // Work read across 120 deltas (both counters below), which is the read-per-mount
+      // bound and no more.
       return json(reads > 2 ? [pendingRow()] : []);
     }
     return json([]);
@@ -644,13 +652,25 @@ test("neither card storms its re-read when the part identity churns on every del
       const DELTAS = 120;
       for (let i = 0; i < DELTAS; i += 1) await h.act(() => churn!());
       await h.settle();
+      // THE BOUND, DERIVED, not guessed: a `Profiler`-measured commit count is one commit
+      // per churned delta (each delta hands the card a fresh `part` object it cannot bail
+      // out of), plus the ONE mount commit, plus the two SELF-DRIVEN commits the mount-time
+      // hydration read itself always produces regardless of churn — `useHydratedPart`'s
+      // `setLoading(true)` fires as its own commit before the awaited read, then the
+      // resolved `data`/`err`/`loading(false)` triple batches into a second commit after it
+      // — plus a small constant for scheduler jitter. MEASURED on this fix, four runs,
+      // stable every time: 123 commits each for the clarify card and the accepted-Work
+      // card across 120 deltas, i.e. exactly 121 (delta + mount) + 2 (the one hydration
+      // read's own two commits) — the DELTAS + 8 headroom below is not the true count, only
+      // its ceiling.
+      const cardCommitBudget = DELTAS + 1 /* mount */ + 2 /* mount hydration read */ + 5 /* jitter */;
       assert.ok(
-        clarifyRenders.count <= DELTAS + 8,
-        `the clarify card rendered ${clarifyRenders.count} times for ${DELTAS} deltas — a render per delta plus a small constant is the bound`,
+        clarifyRenders.count <= cardCommitBudget,
+        `the clarify card committed ${clarifyRenders.count} times for ${DELTAS} deltas (budget ${cardCommitBudget}) — one commit per delta, one mount, two commits for the mount-time hydration read, and a small constant is the bound`,
       );
       assert.ok(
-        workAcceptedRenders.count <= DELTAS + 8,
-        `the accepted-Work card rendered ${workAcceptedRenders.count} times for ${DELTAS} deltas — a render per delta plus a small constant is the bound`,
+        workAcceptedRenders.count <= cardCommitBudget,
+        `the accepted-Work card committed ${workAcceptedRenders.count} times for ${DELTAS} deltas (budget ${cardCommitBudget}) — one commit per delta, one mount, two commits for the mount-time hydration read, and a small constant is the bound`,
       );
       assert.ok(
         reads <= CLARIFY_ROW_ATTEMPTS + 2,
