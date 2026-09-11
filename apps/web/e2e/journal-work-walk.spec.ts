@@ -1,7 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
-import { ensureRealFocus } from "./helpers";
+import { ensureRealFocus, watchReactFaults } from "./helpers";
 import { JOURNAL_WORK } from "./journal-work-mock.mjs";
 
 /**
@@ -707,9 +707,7 @@ test("focus: the heading takes focus on arrival, and a background update never t
  * parser are all the production ones.
  */
 test("#727: the Work detail route hydrates with no React fault in the console", async ({ page }) => {
-  const faults: string[] = [];
-  page.on("console", (message) => { if (message.type() === "error") faults.push(message.text()); });
-  page.on("pageerror", (error) => faults.push(error.message));
+  const collector = watchReactFaults(page);
   // The same walk also reported ONE `Failed to load resource: 400` on this route with no
   // path attached, so this collector is what would name it. Every read this page makes is a
   // RLS read or a governed RPC that the client is supposed to be able to issue; a 4xx among
@@ -766,16 +764,16 @@ test("#727: the Work detail route hydrates with no React fault in the console", 
     await expect(page.getByText("Waiting for an answer").first()).toBeVisible({ timeout: 15_000 });
     await settle(page);
 
-    const react = faults.filter((m) =>
-      /Minified React error #(185|418|423|425)|Maximum update depth exceeded|Hydration failed|hydration-mismatch|didn't match|did not match/i.test(m),
-    );
-    expect(react, "the Work detail route must hydrate with no React nested-update or hydration fault").toEqual([]);
+    expect(
+      collector.faults(),
+      "the Work detail route must hydrate with no React nested-update or hydration fault",
+    ).toEqual([]);
     expect(rejected, "no read this route issues may be refused by the server").toEqual([]);
     // The vacuity control on the collector itself: a listener that was never attached, or a
     // page that never loaded, also produces an empty list. `page.evaluate` proves the
     // channel this cell reads is live.
     await page.evaluate(() => console.error("e2e-727-collector-probe"));
-    expect(faults, "the console collector must actually be receiving errors").toContain("e2e-727-collector-probe");
+    expect(collector.seen(), "the console collector must actually be receiving errors").toContain("e2e-727-collector-probe");
   } finally {
     await control(page, { op: "reset" }).catch(() => {});
   }
@@ -829,9 +827,7 @@ const RETURNING_BROWSER = {
 } as const;
 
 test("#727: the Work detail route hydrates clean for a browser carrying a PRIOR VISIT's state", async ({ page, baseURL }) => {
-  const faults: string[] = [];
-  page.on("console", (message) => { if (message.type() === "error") faults.push(message.text()); });
-  page.on("pageerror", (error) => faults.push(error.message));
+  const collector = watchReactFaults(page);
 
   // THE COOKIE FIRST, because it is the one the server reads. `addCookies` on the context
   // rather than `document.cookie` in the page: the value has to be on the REQUEST that
@@ -894,15 +890,12 @@ test("#727: the Work detail route hydrates clean for a browser carrying a PRIOR 
     await expect(page.getByText("Completed", { exact: true }).first()).toBeVisible();
     await settle(page);
 
-    const react = faults.filter((m) =>
-      /Minified React error #(185|418|423|425)|Maximum update depth exceeded|Hydration failed|hydration-mismatch|didn't match|did not match/i.test(m),
-    );
     expect(
-      react,
+      collector.faults(),
       "a browser carrying a prior visit's cookie, motion preference and drafts must still hydrate this route clean",
     ).toEqual([]);
     await page.evaluate(() => console.error("e2e-727-seeded-collector-probe"));
-    expect(faults, "the console collector must actually be receiving errors").toContain("e2e-727-seeded-collector-probe");
+    expect(collector.seen(), "the console collector must actually be receiving errors").toContain("e2e-727-seeded-collector-probe");
   } finally {
     await control(page, { op: "reset" }).catch(() => {});
   }

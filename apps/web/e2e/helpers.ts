@@ -41,3 +41,41 @@ export async function ensureRealFocus(page: Page): Promise<void> {
   await page.bringToFront();
   await page.waitForFunction(() => document.hasFocus());
 }
+
+/**
+ * EVERY WAY REACT SAYS IT LOST ITS FOOTING, in ONE regex (#727).
+ *
+ * The four minified codes are the ones a production `next build` throws instead of a
+ * sentence: 185 is the nested-update ceiling ("Maximum update depth exceeded"), 418/423/425
+ * are the hydration family (mismatch, an error while hydrating, text content that did not
+ * match). The prose alternatives catch a DEVELOPMENT build saying the same things, so one
+ * instrument covers both kinds of run — and the apostrophe is spelled both ways because
+ * React's own copy has used each.
+ *
+ * NO `g` FLAG, deliberately: a global regex carries `lastIndex` between `.test()` calls and
+ * would silently skip every other message it was handed.
+ */
+export const REACT_FAULTS =
+  /Minified React error #(185|418|423|425)|Maximum update depth exceeded|Hydration failed|hydration-mismatch|did(?:n['’]t| not) match/i;
+
+/**
+ * The shared console/`pageerror` collector for the faults above.
+ *
+ * BOTH CHANNELS OR NEITHER. React reports a RECOVERABLE hydration mismatch through
+ * `onRecoverableError`, which reaches the console; a thrown one reaches `pageerror`. A cell
+ * that listened to only one of them would be green about the half it never watched, which
+ * is the failure mode this helper exists to make impossible to reproduce by hand.
+ *
+ * `seen()` is every console error the page produced — a cell uses it for its own vacuity
+ * probe (push a known `console.error` through and assert it arrives, so an empty
+ * `faults()` is evidence rather than an artefact of a listener that was never attached).
+ * `faults()` is the subset this repo treats as a defect.
+ */
+export function watchReactFaults(page: Page): { seen: () => string[]; faults: () => string[] } {
+  const seen: string[] = [];
+  page.on("console", (message) => {
+    if (message.type() === "error") seen.push(message.text());
+  });
+  page.on("pageerror", (error) => seen.push(error.message));
+  return { seen: () => seen, faults: () => seen.filter((m) => REACT_FAULTS.test(m)) };
+}

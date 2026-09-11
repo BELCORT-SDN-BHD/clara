@@ -18,6 +18,8 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
+import { watchReactFaults } from "./helpers";
+
 const CLIENT_ID = "55555555-5555-4555-8555-555555555555";
 const THREAD_ID = "66666666-6666-4666-8666-666666666666";
 /** C6 — this lane's SETTLED thread; its ids mirror `CHAT_PARITY` in chat-parity-mock.mjs. */
@@ -299,21 +301,6 @@ test("裁-117: the rail creates a thread only when asked, and its menu switches 
 // #727 — THE LIVE TURN UNDER ITS OWN STREAM.
 // ---------------------------------------------------------------------------
 
-/** Everything the page said went wrong, in the browser's own words. React reports a
- *  hydration mismatch (#418) and a nested-update ceiling (#185) through DIFFERENT channels
- *  — `onRecoverableError` reaches the console, a thrown one reaches `pageerror` — so both
- *  are collected or the cell can be green about the half it did not watch. */
-function watchPageErrors(page: Page): { seen: () => string[] } {
-  const seen: string[] = [];
-  page.on("console", (message) => {
-    if (message.type() === "error") seen.push(message.text());
-  });
-  page.on("pageerror", (error) => seen.push(error.message));
-  return { seen: () => seen };
-}
-
-const REACT_FAULTS = /Minified React error #(185|418|423|425)|Maximum update depth exceeded|Hydration failed|hydration-mismatch|did not match/i;
-
 /**
  * COUNT THE TURN CLOCK'S OWN TIMERS, in the real browser.
  *
@@ -413,7 +400,7 @@ test("#727: a clarify asked DURING a live stream is answered in place — the tu
   // setState per render — until React's nested-update ceiling threw #185 out of
   // `claraThreadStore.emit()`, inside the stream reader's own uncaught `onEvent`, and
   // `useClaraThread` painted the throw as "Could not send that message: stream error: …".
-  const faults = watchPageErrors(page);
+  const faults = watchReactFaults(page);
   await countClockTimers(page);
   await countStreamDeltas(page);
   await openThread(page);
@@ -488,7 +475,7 @@ test("#727: a clarify asked DURING a live stream is answered in place — the tu
       .toBeLessThanOrEqual(overflow.clientWidth);
 
     expect(
-      faults.seen().filter((m) => REACT_FAULTS.test(m)),
+      faults.faults(),
       "no React nested-update or hydration fault may reach the console during a live clarify",
     ).toEqual([]);
   } finally {
