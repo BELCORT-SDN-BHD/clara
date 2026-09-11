@@ -260,6 +260,30 @@ async function main() {
   }
 
   /** Wait for the run to PARK on a question, read from the database. */
+  /**
+   * Wait for a Work's question row to reach `delivered`.
+   *
+   * THE DELIVERED STAMP IS NOT SYNCHRONOUS WITH THE WORK'S OWN SETTLEMENT, and pretending it is
+   * makes a stopwatch out of an assertion. The stamp is CONDITIONED on the stamping listener still
+   * holding a live lease (control.mjs), so under leg 5's deliberately tiny two-second lease the
+   * winner can deliver the answer and then lose its own lease before the stamp lands — MEASURED
+   * here as a row resting at `leased` with the entry posted and the Work `completed`. The estate's
+   * own answer to that is the next control cycle: the row is terminal and undelivered, so it is
+   * re-leased, its hook is gone, `resumeAlreadyLanded` finds the run moved on, and it is stamped
+   * delivered. What the leg is about is that the bookkeeping CONVERGES on one delivery; polling for
+   * it is the honest way to say so.
+   */
+  async function pollDelivered(workId, label, deadlineMs = 60000) {
+    const end = Date.now() + deadlineMs;
+    let last = null;
+    while (Date.now() < end) {
+      last = (await questionsFor(workId))[0];
+      if (last?.delivery_state === "delivered") return last;
+      await sleep(500);
+    }
+    throw new Error(`pollDelivered timeout (${label}); last delivery_state=${last?.delivery_state ?? "-"}`);
+  }
+
   async function pollQuestion(workId, label, deadlineMs = 90000) {
     const end = Date.now() + deadlineMs;
     while (Date.now() < end) {
@@ -574,7 +598,7 @@ async function main() {
       assert.equal(settled.work.status, "completed", `one of the two workers delivered (got ${settled.work.status})`);
       assert.equal(await countEntries(ctx.client), 1, "EXACTLY ONE entry, with two workers racing the same answer");
       assert.equal(await countReceipts(workId), 1, "EXACTLY ONE committed receipt");
-      const row = (await questionsFor(workId))[0];
+      const row = await pollDelivered(workId, "leg 5");
       assert.equal(row.delivery_state, "delivered");
       assert.ok(row.delivery_attempts >= 2, `both workers attempted (attempts=${row.delivery_attempts})`);
       console.log(`[wq-e2e] PASS 5: two workers, a lost lease, ONE delivery and ONE entry (attempts=${row.delivery_attempts})`);
