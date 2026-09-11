@@ -830,6 +830,18 @@ test("wc.26b the receipt still wins the convergence: a terminal run over a poste
   assert.equal(row.status, "completed");
   assert.equal(row.error, null, "wc.26b a completed Work carries no error");
   assert.equal(row.result.entry_id, receipt.entry_id, "wc.26b …and the receipt is on the result");
+
+  // …and the THIRD shape of the same arm: a run that never started under a Work that already
+  // posted. Nothing in the estate requires a run to have CLAIMED before it posts, so this pair is
+  // reachable; the task has nothing to abort and reaches its terminal now, through settle_work_run.
+  const u = await admitted();
+  const r2 = await post({ ...u, author: u.author });
+  assert.equal(r2.posted, true, "wc.26b precondition: a QUEUED Work posted its entry");
+  const out2 = await cancelAccountingWork({ work: u.work_id, author: BOB(), opKey: opk("w630-conv3") });
+  assert.equal(out2.reason, CANCEL_ANSWER.alreadyCompleted, "wc.26b the operation won here too");
+  assert.equal(out2.status, "completed");
+  assert.equal((await taskRow(u.task_id)).status, "completed",
+    "wc.26b …and the run that never started is settled rather than left queued for ever");
 });
 
 // ===========================================================================================

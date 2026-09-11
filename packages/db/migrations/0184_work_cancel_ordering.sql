@@ -1199,8 +1199,14 @@ begin
              cancelled_at = now(), updated_at = now()
        where id = v_task;
       perform pg_notify('clara_runtime_ctl', '');   -- empty payload (N1)
+    elsif v_task is not null and v_task_status in ('queued','held') then
+      -- A run that never started and a Work that already posted: nothing to abort, so the terminal
+      -- is reached now, through the ONE verb that writes this lane's terminals. (Reachable because
+      -- nothing in the estate requires a run to have CLAIMED before it posts — the core attributes
+      -- the receipt to `w.current_task_id` when the credential binds no task.)
+      perform clara.settle_work_run(v_task, 'completed', null, null, v_receipt);
     elsif w.status not in ('completed','refused','failed','cancelled','expired') then
-      -- No live run to abort and a Work that never heard: converge it on the same receipt law.
+      -- A terminal run (or none at all) and a Work that never heard: converge on the receipt law.
       perform clara._converge_work_terminal(p_work, coalesce(v_task_status, 'completed'));
     end if;
     perform clara._audit(w.firm_id, p_author, null, null, 'cancel_accounting_work', null,
