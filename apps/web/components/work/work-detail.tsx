@@ -644,6 +644,7 @@ function WorkOutcome({
       workId={work.id}
       clientId={clientId}
       onCancelled={onConverge}
+      returnFocusTo={WORK_HEADING_ID}
       cancel={cancel}
       session={session}
     />

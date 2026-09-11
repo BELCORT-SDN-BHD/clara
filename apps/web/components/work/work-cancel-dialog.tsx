@@ -40,6 +40,7 @@ import { Button } from "@/components/ui/button";
 import { StateBanner } from "@/components/common/state";
 import { journalEntryHref } from "@/lib/navigation/tree";
 import { cancelWork, takeOverWork, type CancelWorkResult, type TakeOverWorkResult } from "@/lib/work/api";
+import { isCancellableWorkStatus } from "@/lib/work/types";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
 import type { SessionTokenAccessor } from "@/lib/session";
 
@@ -63,6 +64,7 @@ export function CancelWorkDialog({
   workId,
   clientId,
   onCancelled,
+  returnFocusTo,
   cancel = cancelWork,
   session = sessionTokenAccessor,
 }: {
@@ -70,6 +72,15 @@ export function CancelWorkDialog({
   clientId: string;
   /** Re-read the Work after ANY completed attempt, refusal included — hydrate-never-trust. */
   onCancelled: () => void | Promise<void>;
+  /**
+   * WHERE FOCUS GOES WHEN THE TRIGGER IS NOT THERE TO RETURN TO. Base UI returns focus to the
+   * control that opened the dialog, which is exactly right for a dismissal — and impossible after
+   * an accepted cancel, because the Work's status moves and this component's own trigger unmounts
+   * with it. Measured in the browser walk: focus fell to `<body>` and a keyboard reader lost their
+   * place on the page. The id names a focusable landmark (the Work's heading carries `tabIndex=-1`
+   * for the same reason the page focuses it on arrival); absent, nothing is moved.
+   */
+  returnFocusTo?: string;
   cancel?: typeof cancelWork;
   session?: SessionTokenAccessor;
 }) {
@@ -88,6 +99,18 @@ export function CancelWorkDialog({
     // AN OUTCOME NOBODY OBSERVED KEEPS THE DIALOG OPEN and keeps the key: the human's next act is
     // to try the same decision again, not to start a different one.
     if (answer.kind !== "lost" && answer.kind !== "unavailable") setOpen(false);
+    // …and when the answer moves the Work OUT of a cancellable status, this trigger is about to
+    // unmount. Hand focus to the named landmark on the next tick, AFTER the close has run its own
+    // focus return — otherwise the return wins and lands on a node that no longer exists.
+    if (returnFocusTo !== undefined
+        && answer.kind === "answered"
+        && !isCancellableWorkStatus(answer.status)) {
+      setTimeout(() => {
+        const doc: { getElementById?: (id: string) => { focus?: () => void } | null } | undefined =
+          typeof document === "undefined" ? undefined : document;
+        doc?.getElementById?.(returnFocusTo)?.focus?.();
+      }, 0);
+    }
     await onCancelled();
   };
 
