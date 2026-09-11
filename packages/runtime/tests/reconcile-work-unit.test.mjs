@@ -38,8 +38,8 @@ import {
  *              already recorded. Absent = no result at all, which is the ordinary case.
  *  `settle`  — optional (taskId) => void, to make one settle THROW.
  *  `resultRead` — optional (taskId) => void, to make the BOOKS READ throw. */
-function mockWorkClient({ queued = [], open = [], results = {}, settle, resultRead } = {}) {
-  const calls = { queuedSelections: [], openSelections: [], settles: [], resultReads: [] };
+function mockWorkClient({ queued = [], open = [], stranded = [], results = {}, settle, resultRead } = {}) {
+  const calls = { queuedSelections: [], openSelections: [], strandedSelections: [], settles: [], resultReads: [] };
   const live = new Map(open.map((t) => [t.id, { id: t.id, status: t.status }]));
   const client = {
     calls,
@@ -54,6 +54,15 @@ function mockWorkClient({ queued = [], open = [], results = {}, settle, resultRe
         const rows = [...live.values()].map((t) => ({ id: t.id, status: t.status, workflow_run_id: `wf-${t.id}` }));
         calls.openSelections.push(rows.map((r) => r.id));
         return { rows, rowCount: rows.length };
+      }
+      // #630 §A2 — the STRANDED-PAIR scan. It joins the same two relations as the books read
+      // below, so it is matched FIRST and on its own discriminant: a TERMINAL task status. A mock
+      // that let it fall through to the books read handed `reconcileAccountingWorkTasks` a row with
+      // no `id`, and threw whatever `resultRead` was armed to throw.
+      if (/join clara\.accounting_work w on w\.id = t\.work_id/.test(s)
+          && /status in \('completed','failed','cancelled','expired'\)/.test(s)) {
+        calls.strandedSelections.push(stranded.map((t) => t.id));
+        return { rows: stranded.map((t) => ({ id: t.id, status: t.status })), rowCount: stranded.length };
       }
       if (/join clara\.accounting_work w on w\.id = t\.work_id/.test(s)) {
         const taskId = params[0];
@@ -103,6 +112,7 @@ test("623.reconcile: an un-wired belt is a clean no-op, never a crash", async ()
   const out = await reconcileAccountingWorkTasks(client, {});
   assert.deepEqual(out, {
     workReenqueued: 0,
+    workConverged: 0,
     workSettledCompleted: 0,
     workSettledFailed: 0,
     workSettledExpired: 0,
