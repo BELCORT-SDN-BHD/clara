@@ -407,39 +407,64 @@ test("reconcile: a hook_missing stamped MOMENTS ago is not yet evidence — the 
   assert.equal(work.status, "awaiting_input", "grace: …the Work is still parked, exactly as it should be");
 });
 
-test("reconcile: the SECOND probe sees the run moved on, and the settle is abandoned", { skip: SKIP }, async () => {
+test("reconcile: the TASK moved on between the two probes, and the settle is abandoned", { skip: SKIP }, async () => {
   const p = await parkedWorkQuestion("wq14");
   await answer(p.owner, p.questionId);
   await rig.asRuntime((c) =>
     deliverInterruptions(c, { resumeHook: hookNotFound, getRun: runStatus("running"), onlyFirm: p.firm }));
   await ageHookMissing(p.questionId);
 
-  // THE INJECTED WORLD MOVES THE TASK BETWEEN THE TWO PROBES. The sweep reads its open rows first
-  // (`awaiting_input`), then asks the engine; this getRun answers "running" AND lets the resumed
-  // run do what a resumed run does — `markRunningStep`. A belt that read the task once would settle
-  // a Work that had already continued.
+  // THE INJECTED WORLD MOVES THE TASK BETWEEN THE TWO PROBES. The sweep reads its open rows FIRST
+  // (`awaiting_input`) and only then asks the engine, so a getRun that also lets the resumed run do
+  // what a resumed run does — `markRunningStep` — reproduces the race exactly: the sweep is holding
+  // a task row that says parked while the database says running. A belt that read the task once
+  // would expire a Work that had already continued.
   let probes = 0;
   const movingWorld = (runId) => {
     probes += 1;
-    if (probes === 1) {
-      return {
-        status: rig
-          .asRuntime((c) => c.query("update clara.agent_tasks set status='running' where id=$1", [p.taskId]))
-          .then(() => "running"),
-      };
-    }
     void runId;
-    return { status: Promise.resolve("running") };
+    if (probes > 1) return { status: Promise.resolve("running") };
+    return {
+      status: rig
+        .asRuntime((c) => c.query("update clara.agent_tasks set status='running' where id=$1", [p.taskId]))
+        .then(() => "running"),
+    };
   };
 
   const out = await rig.asRuntime((c) =>
     reconcileAccountingWorkTasks(c, { enqueueClaraWork: async () => {}, getRun: movingWorld, onlyFirm: p.firm }));
-  assert.ok(probes >= 2, `reconcile: the run state is asked AGAIN before settling (probes=${probes})`);
   assert.equal(out.workSettledExpired, 0, "reconcile: an answer that landed during the grace is not expired away");
   const work = await rig.rootQuery("select status, error from clara.accounting_work where id=$1", [p.workId])
     .then((r) => r.rows[0]);
   assert.notEqual(work.status, "expired");
   assert.equal(work.error, null, "reconcile: …and nothing false was written about it");
+  assert.equal((await rig.readInterruption(p.questionId)).delivery_state, "hook_missing",
+    "reconcile: the question is left exactly as it was — the next sweep decides with fresh facts");
+});
+
+test("reconcile: the RUN state is asked AGAIN before settling, not trusted from the sweep's first look", { skip: SKIP }, async () => {
+  const p = await parkedWorkQuestion("wq16");
+  await answer(p.owner, p.questionId);
+  await rig.asRuntime((c) =>
+    deliverInterruptions(c, { resumeHook: hookNotFound, getRun: runStatus("running"), onlyFirm: p.firm }));
+  await ageHookMissing(p.questionId);
+
+  // The task stays parked, so the re-probe reaches the ENGINE — which by then says the run
+  // finished. `terminalForWork`'s own arm owns that outcome, with the terminal the engine's status
+  // actually implies; this belt must stand down rather than write `expired` over it.
+  let probes = 0;
+  const settlingWorld = () => {
+    probes += 1;
+    return { status: Promise.resolve(probes === 1 ? "running" : "completed") };
+  };
+
+  const out = await rig.asRuntime((c) =>
+    reconcileAccountingWorkTasks(c, { enqueueClaraWork: async () => {}, getRun: settlingWorld, onlyFirm: p.firm }));
+  assert.equal(probes, 2, "reconcile: exactly two probes — the sweep's, and the one before settling");
+  assert.equal(out.workSettledExpired, 0, "reconcile: a run that finished during the grace is not expired away");
+  const work = await rig.rootQuery("select status from clara.accounting_work where id=$1", [p.workId])
+    .then((r) => r.rows[0]);
+  assert.equal(work.status, "awaiting_input", "reconcile: nothing is written on a cycle that decided nothing");
 });
 
 test("deliver: every delivery_state write records WHEN it was written", { skip: SKIP }, async () => {

@@ -508,32 +508,31 @@ async function handleSupabase(request, response, url) {
   // above: it consumes the body on every RPC POST before checking the verb, which would starve
   // this lane's `list_review_queue` reads of theirs if this ran after it).
   if (await handleD4Supabase(request, response, path, url, sendJson, cors)) return;
-  // #629 MOVED THIS LANE AHEAD OF L7's, and it is the same measured hazard the two notes above
-  // describe rather than a preference. `handleJournalWorkSupabase` gained three `/rest/v1/rpc/`
-  // verbs (`get_work_question`, `get_work_pending_question`, `answer_work_question`), and L7's hook
-  // calls `readJson` on EVERY rpc POST before checking whether the verb is its own — so with this
-  // lane after it, every one of those three read `{}` , fell through its own id guard, and the Work
-  // detail's question form never appeared. This lane still reads the body only INSIDE a matched
-  // verb, so running it earlier starves nothing: its rpc paths are disjoint from every lane above
-  // and it falls through for anything else.
+  // THE JOURNAL-WORK LANE, AND ITS POSITION IS MEASURED TWICE OVER.
+  //
+  // AHEAD OF L7 (#629): `handleJournalWorkSupabase` gained three `/rest/v1/rpc/` verbs
+  // (`get_work_question`, `get_work_pending_question`, `answer_work_question`), and L7's hook calls
+  // `readJson` on EVERY rpc POST before checking whether the verb is its own — so with this lane
+  // after it, all three read `{}`, fell through their own id guards, and the Work detail's question
+  // form never appeared. This lane reads a body only INSIDE a matched verb, so running it earlier
+  // starves nothing: its rpc paths are disjoint from every lane above and it falls through
+  // otherwise.
+  //
+  // AHEAD OF THE HOME BOARD (#623, and still true): `home-board-mock.mjs`'s `EMPTY_RELATIONS`
+  // answers `/rest/v1/coa_accounts` and `/rest/v1/agent_tasks_visible` with an honest `[]` for
+  // EVERY subject (its own header names that as deliberate), so with this hook after it the journal
+  // composer's account picker held nothing but its placeholder and the Work detail could never read
+  // its run's task. Running first costs that lane nothing: every branch here is scoped to its own
+  // client (or to an id it minted) and falls through otherwise, so the honest empties still answer
+  // every other walk.
   if (await handleJournalWorkSupabase(request, response, path, url, sendJson, cors)) return;
   if (await handleL7Supabase(request, response, path, url, sendJson, cors)) return;
   // LAST among the lane hooks, and still BEFORE the generic fixtures — see home-board-mock.mjs's
   // header. It has to precede the generic `/rest/v1/clients` branch below to serve its ONE
   // id-scoped client row (a SERVER-side layout read `page.route` cannot reach), and it falls
   // through for every other id, so the unfiltered register stays exactly as this file has it.
-  // #623's lane runs BEFORE the home board's, and that ordering is LOAD-BEARING rather than
-  // a preference — measured, not reasoned. `home-board-mock.mjs`'s `EMPTY_RELATIONS` answers
-  // `/rest/v1/coa_accounts` and `/rest/v1/agent_tasks_visible` with an honest `[]` for EVERY
-  // subject (its own header names that as deliberate), so with this hook after it the journal
-  // composer's account picker held nothing but its placeholder and the Work detail could never
-  // read its run's task. Running first costs that lane nothing: every branch in this module is
-  // scoped to its own client (or to an id it minted) and falls through otherwise, so the honest
-  // empties still answer every other walk. It never calls `readJson` in the PostgREST half, so
-  // an earlier hook that already drained a POST body costs its GET branches nothing either — but
-  // its three rpc POSTs are not so lucky, which is why the call itself now sits ABOVE L7's hook
-  // (see the #629 note there). This position is kept as the record of the ordering it must keep
-  // relative to the home board.
+  // The home board is LAST because the journal-work lane must precede it (see that lane's own
+  // note above, which carries the measurement).
   if (await handleHomeBoardSupabase(request, response, path, url, sendJson, cors)) return;
 
   if (request.method === "GET" && path === "/rest/v1/clients") {

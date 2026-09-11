@@ -69,6 +69,9 @@ const FIRM_ID = "33333333-3333-4333-8333-333333333333";
 export const JOURNAL_WORK = {
   clientId: "62362362-6236-4623-8623-623623623623",
   clientName: "PENANG SPICE TRADING",
+  /** #629 (B6) — the question the seeded transcript's `work_question` part names. Answered before
+   *  the transcript is ever replayed, which is the state that makes the card a convergence. */
+  seededQuestionId: "a2309999-a230-4a23-8a23-a230a230a230",
   /** This lane's ONE chat thread — the B6 transcript that carries the
    *  `work_accepted` card. */
   threadId: "62362362-1111-4111-8111-623623623623",
@@ -203,6 +206,37 @@ function seed() {
     sourceRefs: [{ kind: "chat_task", task_id: JOURNAL_WORK.seededTaskId, session_id: JOURNAL_WORK.threadId }],
   });
   state.works.set(work.id, work);
+  // #629 (B6) — THE QUESTION THE SEEDED TRANSCRIPT'S `work_question` PART NAMES, already ANSWERED.
+  // A card mounted on a settled record IS the "answered elsewhere" convergence: the transcript is
+  // replayed long after somebody answered the question from the Work detail or from Needs-you, and
+  // what the card must then render is the AUTHORITATIVE accepted record — who, when, which version
+  // — rather than a form offering a second answer. Seeded (not asked through the control endpoint)
+  // precisely because nobody in this walk answers it: it was answered elsewhere.
+  state.questions.set(JOURNAL_WORK.seededQuestionId, {
+    question_id: JOURNAL_WORK.seededQuestionId,
+    work_id: JOURNAL_WORK.seededWorkId,
+    client_id: JOURNAL_WORK.clientId,
+    task_id: JOURNAL_WORK.seededTaskId,
+    firm_id: FIRM_ID,
+    question_version: 1,
+    status: "answered",
+    question: "Which date should the September rent be posted on?",
+    context: null,
+    reason: "The admitted basis named no posting date.",
+    fields: [{ key: "posting_date", label: "Posting date", kind: "date", required: true }],
+    source_ref: { kind: "chat_task", id: JOURNAL_WORK.seededTaskId },
+    basis_digest: "a".repeat(64),
+    expires_at: "2026-09-30T00:00:00.000Z",
+    created_at: "2026-09-05T00:00:03.000Z",
+    answer: { posting_date: "2026-09-01" },
+    answered_by: SUBJECT,
+    answered_at: "2026-09-05T00:00:04.000Z",
+    answered_role: "bookkeeper",
+    delivery_state: "delivered",
+    delivery_attempts: 1,
+    work_status: "completed",
+    work_basis_digest: "a".repeat(64),
+  });
   // THE SEEDED WORK OWNS ITS INTENT KEY, exactly as an admitted row does in the
   // database: `clara.accounting_work` carries `unique (firm_id, intent_key)`, so
   // every Work that exists has already claimed one. Registering it is what lets
@@ -504,7 +538,10 @@ function control(body) {
       context: String(body.context ?? "This client has two accounts coded 1100."),
       reason: String(body.reason ?? "The admitted basis names no posting date and no amount."),
       fields: Array.isArray(body.fields) && body.fields.length > 0 ? body.fields : DEFAULT_QUESTION_FIELDS,
-      source_ref: null,
+      // #629 — THE SUPPORTING SOURCE. `clara.open_work_question` takes it from the run's own
+      // `ask_question` call (claraWork.v2.tools.ts's closed `{kind, id?}`), so the walk arms it the
+      // same way it arms everything else about the question.
+      source_ref: body.source_ref ?? null,
       basis_digest: "a".repeat(64),
       expires_at: "2026-09-30T00:00:00.000Z",
       created_at: at,
@@ -642,6 +679,44 @@ export async function handleJournalWorkSupabase(request, response, path, url, se
   // shapes `apps/web/lib/work/questions.ts` builds and the exact refusal envelope
   // `apps/web/lib/wire.ts` classifies (`code` = the SQLSTATE, `details` = the typed detail JSON).
   // Every one is ID-SCOPED to a question this module minted and falls through otherwise.
+  // #629 (B4) — THE FIRM INBOX, but ONLY while this lane actually holds a pending work question.
+  //
+  // SCOPED THAT WAY ON PURPOSE. `clara.list_review_queue` is firm-wide and carries no client filter
+  // a lane hook could key on, so answering it unconditionally would hand every OTHER spec's
+  // Needs-you page this lane's row. Gating on "a pending question exists" makes the hook inert for
+  // every walk that never drove this lane's control endpoint, and `serve-built.mjs`'s generic
+  // empty-envelope default keeps answering them. A spec that wants a different queue installs its
+  // own `page.route`, which wins over the server either way.
+  if (request.method === "POST" && path === "/rest/v1/rpc/list_review_queue") {
+    const pending = [...state.questions.values()].filter((q) => q.status === "pending");
+    if (pending.length === 0) return false;
+    sendJson(response, 200, {
+      counts: {
+        ready: 0, needs_review: 0, needs_you: pending.length, open_drafts: 0, open_questions: 0,
+        open_tasks: 0, compliance_watches: 0, lint_findings: 0, work_questions: pending.length,
+      },
+      sweep: null,
+      compliance: { stale_evaluator: false, clients: [] },
+      lint: null,
+      // The EXACT 30-key row shape `clara.list_review_queue` returns — #629 added a row KIND, never
+      // a key (0180's header states why), so a row that carried an extra one would be a fixture
+      // lying about the door.
+      rows: pending.map((q) => ({
+        row_kind: "work_question", section: "needs_you", sort: q.created_at,
+        client_id: q.client_id, counterparty_id: null, filing_id: null, entry_id: null,
+        question_id: q.question_id, task_id: q.task_id, document_id: null,
+        lane: "needs_you", auto: false, rule_backed: false, high_stakes: false,
+        aged_since: q.created_at, amount_cents: null, period: null,
+        question_text: q.question, created_at: q.created_at, id: q.question_id,
+        coding_kind: null, watch_id: null, tier: null, finding_id: null, asset_id: null,
+        advance_id: null, autodraft: null, client_name: null, batch_ids: null,
+        open_proposal_count: null,
+      })),
+      next_cursor: null,
+    }, cors);
+    return true;
+  }
+
   if (request.method === "POST" && path === "/rest/v1/rpc/get_work_pending_question") {
     const body = await readJson(request);
     const work = state.works.get(String(body?.p_work ?? ""));
@@ -741,6 +816,7 @@ export function journalWorkTranscript() {
         { type: "text", text: "I have admitted that as accounting work." },
         { type: "work_accepted", work_id: JOURNAL_WORK.seededWorkId, client_id: JOURNAL_WORK.clientId, purpose: "journal_entry", logical_op_id: `work:${JOURNAL_WORK.seededWorkId}:journal_entry:1` },
         { type: "work_status", work_id: JOURNAL_WORK.seededWorkId, status: "running" },
+        { type: "work_question", work_id: JOURNAL_WORK.seededWorkId, client_id: JOURNAL_WORK.clientId, question_id: JOURNAL_WORK.seededQuestionId, question_version: 1, status: "pending" },
         { type: "work_result", work_id: JOURNAL_WORK.seededWorkId, client_id: JOURNAL_WORK.clientId, entry_id: JOURNAL_WORK.seededEntryId, receipt_id: JOURNAL_WORK.seededReceiptId },
       ],
       turn_key: null,

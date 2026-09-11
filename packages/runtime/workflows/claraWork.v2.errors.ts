@@ -61,9 +61,16 @@ export function classifyWorkError(error: unknown): WorkErrorClass {
   const base = classifyWorkErrorV1(error);
   for (const [code, reason, kind] of V2_OVERRIDES) {
     if (base.code !== code || base.reason !== reason) continue;
+    // EVERY FIELD NAMED, never `{...base, kind}`. The parts-parity census walks every frozen
+    // workflow file and refuses an object spread it cannot classify (check-parts-parity.mjs:320),
+    // because a spread is exactly how an unreviewed `type:` discriminant reaches a transcript part
+    // without anyone seeing it. Writing the six fields out costs nothing and keeps this file
+    // outside the exemption list entirely.
     return {
-      ...base,
       kind,
+      code: base.code,
+      reason: base.reason,
+      message: base.message,
       // The same two derivations v1's own `classified` makes from a kind, restated here because
       // v1 does not export it. A refusal is terminal for the loop and recoverable by a human.
       terminal: kind === "refusal" || kind === "conflict" || kind === "cancelled" || kind === "invariant",

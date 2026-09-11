@@ -207,13 +207,19 @@ export function classifyPgrestFailure(
   // --- CLR second, only once the status has cleared the auth branch. ---
   const clr = parseClrCode(body.code, body.message);
   if (clr) {
-    const reason = parseReasonToken(body.details);
+    // ONE PARSE. `parseReasonToken` and `parseRefusalDetail` each `JSON.parse(body.details)`, and
+    // calling both here parsed the same string twice and — worse — let the two disagree about a
+    // malformed body, since each degrades to its own null independently. The reason is now READ OFF
+    // the object the detail parse already produced, so the pair every consumer keys on comes from
+    // one read of one string.
+    const detail = parseRefusalDetail(body.details);
+    const reason = typeof detail?.reason === "string" ? detail.reason : null;
     return new RefusalError(clr, body.message || clr, {
       reason,
       status,
       pgCode: body.code ?? null,
       codeSource: clrSource(body.code),
-      detail: parseRefusalDetail(body.details),
+      detail,
     });
   }
   const detail = [body.code, body.message].filter(Boolean).join(" — ");

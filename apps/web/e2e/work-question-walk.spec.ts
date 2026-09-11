@@ -297,3 +297,123 @@ test("LEAVE PENDING is not offered on the Work's own page — that page IS the q
   await expect(page.getByTestId("work-question-leave")).toHaveCount(0);
   await expect(page.getByText("You do not have to guess")).toBeVisible();
 });
+
+// ===========================================================================================
+// B4 (Needs-you) and B6 (the Clara rail). The reviewed findings that only a browser can hold.
+// ===========================================================================================
+
+const NEEDS_YOU_URL = "/work?view=needs-you";
+
+test("B4: the SAME question is answered from Needs-you, and the row leaves without dumping focus", async ({ page }) => {
+  await parkOnQuestion(page);
+  await page.goto(NEEDS_YOU_URL);
+
+  // The tenth row kind, from `clara.list_review_queue`'s own envelope.
+  const row = page.getByTestId("needs-you-work-question");
+  await expect(row).toBeVisible({ timeout: 15_000 });
+
+  // "Answer" expands the SAME form B3 renders — same test ids, same record, same version.
+  await page.getByTestId("needs-you-work-question-toggle").click();
+  await expect(page.getByTestId("work-question-form")).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByTestId("work-question-text")).toContainText("Which Maybank account did this rent leave from?");
+  await expect(page.getByTestId("work-question-version")).toContainText("Question 1");
+
+  // Answer it, through the bounded stepper, exactly as B3 does.
+  await page.getByLabel(/Posting date/).fill("2026-09-05");
+  await page.getByTestId("work-question-next").click();
+  await page.getByLabel(/Amount/).fill("1200.00");
+  await page.getByTestId("work-question-next").click();
+  await expect(page.getByTestId("work-question-review")).toBeVisible();
+  await page.getByTestId("work-question-submit").click();
+
+  // THE ROW LEAVES — the question is no longer pending, so the queue stops returning it.
+  await expect(row).toHaveCount(0, { timeout: 15_000 });
+
+  // …AND FOCUS DOES NOT LAND ON `<body>` (§4, and the reviewed finding this cell exists for: the
+  // old code focused the trigger BEFORE asking for the reload that unmounts it). It lands on the
+  // stable landmark this list lives under — the section's own heading.
+  const focused = await page.evaluate(() => {
+    const el = document.activeElement;
+    return { tag: el?.tagName ?? null, text: (el?.textContent ?? "").trim().slice(0, 40) };
+  });
+  expect(focused.tag, "focus was dumped onto the document body when the row disappeared").not.toBe("BODY");
+  expect(focused.tag, "focus landed on the section heading this list is rendered under").toBe("H2");
+  await scan(page, "needs-you after the question was answered inline");
+});
+
+test("B4: the inbox row's own form stays usable at 320 CSS px and under reduced motion", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await parkOnQuestion(page);
+  await page.goto(NEEDS_YOU_URL);
+  await page.setViewportSize({ width: 320, height: 720 });
+  await page.getByTestId("needs-you-work-question-toggle").click();
+  await expect(page.getByTestId("work-question-form")).toBeVisible({ timeout: 15_000 });
+  await settle(page);
+
+  await expect(page.getByTestId("work-question-text")).toBeVisible();
+  await expect(page.getByLabel(/Posting date/)).toBeVisible();
+  // The inbox DOES offer "leave pending" — it collapses rather than navigates, so there is
+  // something for the affordance to mean here that there is not on the Work's own page.
+  await expect(page.getByTestId("work-question-leave")).toBeVisible();
+  expect(
+    await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1),
+    "the inbox does not scroll horizontally at 320 CSS px with a question expanded",
+  ).toBe(true);
+
+  const motion = await page.getByTestId("work-question-form").evaluate((root) =>
+    [root, ...root.querySelectorAll("button, input, textarea")].map((el) => getComputedStyle(el as Element).animationName),
+  );
+  expect(motion.length, "the expanded row actually rendered controls to measure").toBeGreaterThan(1);
+  for (const name of motion) {
+    expect(name, "no control inside the inbox's expanded form animates under prefers-reduced-motion").toBe("none");
+  }
+  await scan(page, "needs-you with a question expanded at 320 CSS px");
+});
+
+test("B4: the URL is stable and BACK returns to where the person was", async ({ page }) => {
+  const workId = await parkOnQuestion(page);
+  const workUrl = page.url();
+
+  await page.goto(NEEDS_YOU_URL);
+  await expect(page.getByTestId("needs-you-work-question")).toBeVisible({ timeout: 15_000 });
+  await page.getByTestId("needs-you-work-question-toggle").click();
+  await expect(page.getByTestId("work-question-form")).toBeVisible({ timeout: 15_000 });
+  // EXPANDING THE ROW IS NOT A NAVIGATION. The inbox is one address; the form is a disclosure
+  // inside it, so nothing has been pushed onto history and nothing has been bookmarked that a
+  // person could not come back to.
+  await expect(page).toHaveURL(/\/work\?view=needs-you$/);
+
+  // …and the route to the Work is offered from the HYDRATED record, so Back returns to the inbox.
+  await page.getByRole("link", { name: "Open the Work" }).click();
+  await expect(page).toHaveURL(new RegExp(`/work/${workId}$`));
+  await page.goBack();
+  await expect(page).toHaveURL(/\/work\?view=needs-you$/);
+  await expect(page.getByTestId("needs-you-work-question")).toBeVisible({ timeout: 15_000 });
+  expect(workUrl, "the Work detail keeps the address it was minted at").toContain(`/work/${workId}`);
+});
+
+test("B6: a transcript's work_question part renders the ACCEPTED record, and announces NOTHING", async ({ page }) => {
+  await control(page, { op: "reset" });
+  await page.goto(`/chat/${JOURNAL_WORK.threadId}`);
+
+  // The card hydrates `clara.get_work_question` for the id the part names. The question was
+  // answered elsewhere long before this transcript is replayed, so what the card must render is
+  // the authoritative accepted record — never a form offering a second answer.
+  const accepted = page.getByTestId("work-question-accepted");
+  await expect(accepted).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByTestId("work-question-accepted-posting_date")).toContainText("2026-09-01");
+  await expect(page.getByTestId("work-question-attribution")).toContainText("bookkeeper");
+  await expect(page.getByTestId("work-question-submit")).toHaveCount(0);
+
+  // ONE ANNOUNCEMENT OWNER (§5, and the reviewed finding). The transcript is a log that announces
+  // its own updates; a card inside it that opened `role="alert"`/`"status"` regions of its own
+  // would say the same result twice.
+  await expect(accepted.locator("[role=alert], [role=status], [aria-live]:not([aria-live=off])"))
+    .toHaveCount(0);
+  await scan(page, "the Clara transcript's work_question card");
+});
+
+test("the SUPPORTING SOURCE the run named is rendered beside the question", async ({ page }) => {
+  await parkOnQuestion(page, { source_ref: { kind: "document", id: "INV-2026-0912" } });
+  await expect(page.getByTestId("work-question-source")).toContainText("document INV-2026-0912");
+});
