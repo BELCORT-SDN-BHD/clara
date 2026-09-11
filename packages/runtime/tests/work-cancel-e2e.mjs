@@ -305,11 +305,24 @@ async function main() {
    * `pg_blocking_pids`, so "the tool call is now blocked on the holder's lock" becomes something
    * the leg MEASURES instead of a comment beside a timer.
    */
+  //
+  // THE QUEUE IS TRANSITIVE, and that is measured rather than assumed. `pg_blocking_pids` names the
+  // sessions DIRECTLY blocking one backend: the posting waits on the holder, and the cancel that
+  // arrives behind it waits on the POSTING, not on the holder — so a flat probe against the holder
+  // sees one waiter however long the queue is. The recursive walk below is the whole queue standing
+  // behind `pid`, which is what "the cancel queued behind the posting" actually means.
   const blockedBy = (pid) =>
     rig
       .rootQuery(
-        `select pid from pg_stat_activity
-          where wait_event_type = 'Lock' and $1 = any(pg_blocking_pids(pid))`,
+        `with recursive queue(pid) as (
+             select $1::int
+           union
+             select a.pid
+               from pg_stat_activity a, queue q
+              where a.wait_event_type = 'Lock'
+                and q.pid = any(pg_blocking_pids(a.pid))
+         )
+         select pid from queue where pid <> $1::int`,
         [pid],
       )
       .then((r) => r.rows.map((row) => row.pid));
