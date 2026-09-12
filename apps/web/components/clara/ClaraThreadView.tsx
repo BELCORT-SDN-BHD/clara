@@ -111,6 +111,12 @@ export function ClaraThreadView({
   const stopped = stop.phase === "stopped";
   const stopping = stop.phase === "pending";
   const stopFailedCause = stop.phase === "failed" ? stop.cause : null;
+  /** #630 (round-6 finding [4]) — WHETHER THE READ IS ACTUALLY BACK. The three refusal copies used
+   *  to end with "…this tab has gone back to reading it" unconditionally, painted from `spendStop`'s
+   *  synchronous answer while the re-attach had not been asked for yet — and an attach failure is
+   *  never retried, so on a CLR11 or an unreachable proxy the claim stayed false while the
+   *  stream-lost banner underneath said the opposite. Each state now owns its own sentence. */
+  const stopReattach = stop.phase === "failed" ? stop.reattach : "none";
   // #630 (round-5 finding [6]) — THE POLL GAVE UP, and the surface is allowed to say so exactly
   // once. Set by `markRunUnobservable` after CLARA_RUN_POLL_MISS_LIMIT reads found no visible row;
   // cleared by any read that finds one again, which is what the line asks the reader to cause.
@@ -479,6 +485,13 @@ export function ClaraThreadView({
                 : stopFailedCause === "refused"
                   ? tw("stopRefused")
                   : tw("stopUnreachable")}
+            {/* THE SECOND SENTENCE IS THE SECOND FACT, and it is inside the SAME `role="status"`
+                so one press is still one announcement. It appears only once `openTaskStream` has
+                resolved; while the attach is in flight the reader is told the reply is still
+                running, which is all that is known. The `lost` state deliberately adds nothing
+                here — the stream-lost banner and its Retry below are already exactly that
+                sentence, and repeating it would be the same defect in the other direction. */}
+            {stopReattach === "reading" ? ` ${tw("stopReattachReading")}` : null}
           </p>
         )}
         {/* #630 (round-5 finding [6]) — THE BOUNDED GIVE-UP LINE. The DB arm of "is a turn live?"

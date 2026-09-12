@@ -377,6 +377,23 @@ export const claraThreadStore = {
     });
   },
 
+  /** #630 (round-6 finding [5]) — THE RE-ATTACH AFTER A REFUSED STOP COULD NOT OPEN.
+   *
+   *  Same state as `markStreamEndedUnexpectedly` above, MINUS the buffer wipe, and the difference
+   *  is whether another attach is coming. That method serves `runClaraTaskStream`'s reconnect
+   *  loop, which replays the run's readable from index 0 — keeping the old chunks there would
+   *  print the reply so far twice. `useClaraThread`'s refused-stop arm has no next attach at all
+   *  (`runClaraTaskStream` never retries an attach FAILURE, only detaches), so `provisionalChunks`
+   *  is simply the last true record of what reached this tab — including the parked clarify parts
+   *  `foldLiveClarifyParts` renders the question and its Answer control from. Emptying it left the
+   *  run parked on a question the surface no longer offered any way to answer. */
+  markReattachFailed(threadId: string): void {
+    const current = state.threads[threadId] ?? emptyThreadState;
+    setThread(threadId, {
+      stream: { ...current.stream, status: "detached", streamEndedUnexpectedly: true },
+    });
+  },
+
   /** FIX 1 — the give-up ceiling was reached. Reattaching has stopped; only a manual
    *  retry (`beginRetry` + a fresh `runClaraTaskStream`) can resume it. */
   markConnectionLost(threadId: string): void {

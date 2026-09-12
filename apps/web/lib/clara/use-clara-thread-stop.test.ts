@@ -1022,3 +1022,136 @@ test("630 a re-attach that FAILS marks the stream, never the send — the live t
     else process.env.NEXT_PUBLIC_SUPABASE_URL = originalUrl;
   }
 });
+
+// ===========================================================================================
+// #630 (round-6 review, findings [4] and [5]) — THE RE-ATTACH IS A STATE, NOT AN ASSERTION.
+//
+// Round 5 gave the ordinary refused press a re-attach and then said so in the copy for all three
+// non-`finished` causes, unconditionally: "…this tab has gone back to reading it". Two things were
+// wrong with that.
+//
+//   [5] `beginRetry` fired BEFORE the attach was known to open, and it resets the stream slot to
+//       `initialClaraStreamState` — `provisionalChunks: []`. That buffer is the ONLY source of the
+//       live clarify card (ClaraThreadView's `foldLiveClarifyParts`), so a stop refused while
+//       Clara was parked on a question deleted the question and its Answer control; and when the
+//       re-attach then failed, `markStreamEndedUnexpectedly` emptied the buffer a second time, so
+//       nothing ever refilled it. The run sat parked, waiting for an answer the surface no longer
+//       offered.
+//   [4] `openTaskStream` throws on a non-ok response and `runClaraTaskStream` NEVER retries an
+//       attach failure (its own header). So on a CLR11, or against a proxy that cannot reach the
+//       runtime, the sentence was false at the moment it was painted — and the error banner
+//       underneath contradicted it.
+//
+// The cure for both is one ordering: attach FIRST, clear the buffer only when the attach OPENS
+// (the replay from index 0 then lands in an empty buffer, which is the only duplication the clear
+// ever existed to prevent), and let the copy read a re-attach STATE the machine actually carries.
+// ===========================================================================================
+
+const THREAD_PARKED_REFUSAL = "b1b1b1b1-1111-4111-8111-b1b1b1b1b1b1";
+const THREAD_REATTACH_OPEN = "b2b2b2b2-2222-4222-8222-b2b2b2b2b2b2";
+
+/** `stopReply`'s re-attach state, or null when the machine is not in a failed phase. */
+function reattachOf(stop: StopReplyState): string | null {
+  return stop.phase === "failed" ? stop.reattach : null;
+}
+
+test("630 a refused stop whose re-attach FAILS keeps the live buffer — the parked question survives", async () => {
+  const { useClaraThread } = await import("./useClaraThread");
+  const original = globalThis.fetch;
+  const originalUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  process.env.NEXT_PUBLIC_SUPABASE_URL = "https://example.supabase.co";
+  globalThis.fetch = (async (u: unknown) => {
+    const url = String(u);
+    // The measured shape: no lane serves this task's stream (a CLR11 turn, a proxy that cannot
+    // reach the runtime), so the re-attach 404s and `runClaraTaskStream` never retries it.
+    if (/\/stream/.test(url)) return new Response("no such task", { status: 404 });
+    if (/agent_tasks_visible/.test(url)) {
+      return new Response(
+        JSON.stringify([{ id: "task-parked", status: "awaiting_input", created_at: "2026-09-12T00:00:00.000Z" }]),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    }
+    if (/rpc\/cancel_agent_task/.test(url)) return refusal("CLR11", "no such task in this firm", "task_not_found");
+    return new Response(JSON.stringify([]), { status: 200, headers: { "content-type": "application/json" } });
+  }) as typeof fetch;
+  try {
+    const h = await renderHook(() => useClaraThread(session, THREAD_PARKED_REFUSAL));
+    try {
+      await h.act(async () => { await new Promise((r) => setTimeout(r, 10)); });
+      claraThreadStore.markAccepted(THREAD_PARKED_REFUSAL, "task-parked");
+      // Clara is mid-answer and parked: the SSE buffer holds what has arrived, and it is the only
+      // place the live clarify card comes from.
+      await h.act(async () => {
+        claraThreadStore.applyStreamEvent(THREAD_PARKED_REFUSAL, { event: "chunk", data: "which VAT code?" });
+      });
+      assert.ok(claraThreadStore.getThread(THREAD_PARKED_REFUSAL).stream.provisionalChunks.length > 0,
+        "precondition: the live buffer holds the parked turn's parts");
+
+      await h.act(async () => { await h.current.stopReply(); await new Promise((r) => setTimeout(r, 40)); });
+
+      assert.equal(h.current.stop.phase, "failed", "precondition: the door refused");
+      assert.equal(reattachOf(h.current.stop), "lost",
+        "the machine records that the re-attach did NOT open — the copy may not claim it did");
+      assert.ok(claraThreadStore.getThread(THREAD_PARKED_REFUSAL).stream.provisionalChunks.length > 0,
+        "the live buffer survives a refused stop whose re-attach failed: it is the only source of "
+        + "the parked clarify card, and clearing it left the run waiting for an answer the surface "
+        + "no longer offered");
+    } finally {
+      await h.unmount();
+    }
+  } finally {
+    globalThis.fetch = original;
+    if (originalUrl === undefined) delete process.env.NEXT_PUBLIC_SUPABASE_URL;
+    else process.env.NEXT_PUBLIC_SUPABASE_URL = originalUrl;
+  }
+});
+
+test("630 a refused stop whose re-attach OPENS says so, and clears the buffer the replay refills", async () => {
+  const { useClaraThread } = await import("./useClaraThread");
+  const original = globalThis.fetch;
+  const originalUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  process.env.NEXT_PUBLIC_SUPABASE_URL = "https://example.supabase.co";
+  globalThis.fetch = (async (u: unknown) => {
+    const url = String(u);
+    if (/\/stream/.test(url)) {
+      // A real, OPEN SSE body that never ends — the attach succeeds and the read is live, which is
+      // the only state in which "this tab has gone back to reading it" is a true sentence.
+      const body = new ReadableStream<Uint8Array>({ start() { /* held open */ } });
+      return new Response(body, { status: 200, headers: { "content-type": "text/event-stream" } });
+    }
+    if (/agent_tasks_visible/.test(url)) {
+      return new Response(
+        JSON.stringify([{ id: "task-open", status: "running", created_at: "2026-09-12T00:00:00.000Z" }]),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    }
+    if (/rpc\/cancel_agent_task/.test(url)) {
+      return refusal("CLR04", "stopping a reply requires a bookkeeper", "insufficient_role");
+    }
+    return new Response(JSON.stringify([]), { status: 200, headers: { "content-type": "application/json" } });
+  }) as typeof fetch;
+  try {
+    const h = await renderHook(() => useClaraThread(session, THREAD_REATTACH_OPEN));
+    try {
+      await h.act(async () => { await new Promise((r) => setTimeout(r, 10)); });
+      claraThreadStore.markAccepted(THREAD_REATTACH_OPEN, "task-open");
+      await h.act(async () => {
+        claraThreadStore.applyStreamEvent(THREAD_REATTACH_OPEN, { event: "chunk", data: "half an answer" });
+      });
+
+      await h.act(async () => { await h.current.stopReply(); await new Promise((r) => setTimeout(r, 40)); });
+
+      assert.equal(reattachOf(h.current.stop), "reading",
+        "the attach opened, so — and only now — the machine may say this tab is reading again");
+      assert.deepEqual(claraThreadStore.getThread(THREAD_REATTACH_OPEN).stream.provisionalChunks, [],
+        "…and THAT is when the stale buffer is cleared: the runtime replays the run's readable "
+        + "from index 0, so a buffer kept past the open would print the reply so far twice");
+    } finally {
+      await h.unmount();
+    }
+  } finally {
+    globalThis.fetch = original;
+    if (originalUrl === undefined) delete process.env.NEXT_PUBLIC_SUPABASE_URL;
+    else process.env.NEXT_PUBLIC_SUPABASE_URL = originalUrl;
+  }
+});

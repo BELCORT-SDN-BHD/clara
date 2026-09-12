@@ -361,7 +361,14 @@ test("B7: Stop reply and Cancel Work are different controls doing different thin
 test("B7: a REFUSED stop says the reply is still running — it never prints Stopped over a live run", async ({ page }) => {
   // `clara.begin_chat_turn` admits any ACTIVE member of the firm; `clara.cancel_agent_task` floors
   // at bookkeeper. So a viewer or clerk can start a turn they cannot stop, and the honest answer is
-  // to say so: this tab stops READING, and the run carries on.
+  // to say so: the run carries on, and this tab puts its read back if it can.
+  //
+  // IT CANNOT HERE, AND THAT IS THE POINT OF THE LAST ASSERTION (round-6 finding [4]). No lane in
+  // this walk serves the armed task's `/api/tasks/:id/stream`, so the re-attach 404s and
+  // `runClaraTaskStream` never retries an attach failure. Round 5's copy asserted the re-attach as
+  // an accomplished fact for every refusal, so THIS screen printed "this tab has gone back to
+  // reading it" over a tab that was reading nothing. The clause is now gated on the attach
+  // actually opening, and this leg is the evidence-of-record that the ungated sentence is gone.
   await control(page, { op: "live_turn" });
   await control(page, { op: "stop_answer", mode: "denied" });
   await page.goto(WORK_LIST_URL);
@@ -374,6 +381,11 @@ test("B7: a REFUSED stop says the reply is still running — it never prints Sto
 
   await expect(rail.getByText(/Could not stop this reply/)).toBeVisible({ timeout: 15_000 });
   await expect(rail.getByText("Stopped", { exact: true }))
+    .toHaveCount(0, { timeout: 5_000 });
+  await expect(rail.getByText(/it is still running/),
+    "the refusal states the one thing it establishes").toBeVisible();
+  await expect(rail.getByText(/gone back to reading it/),
+    "…and never a re-attach this walk's own runtime lane cannot serve")
     .toHaveCount(0, { timeout: 5_000 });
   // …and the control stays offered, because the turn is still live.
   await expect(stop).toBeVisible();

@@ -430,3 +430,107 @@ test("630 Stop reply is offered for EVERY non-terminal status the run row can ho
     );
   }
 });
+
+// ---------------------------------------------------------------------------------------------
+// 6 · THE REFUSAL COPY STATES WHAT IS TRUE AT RENDER TIME (#630 fix round 6, findings [4]/[5])
+//
+// Round 5's three refusal copies all ended "…this tab has gone back to reading it", painted from
+// `spendStop`'s synchronous answer — before the re-attach had even been asked for. `openTaskStream`
+// throws on a non-ok response and `runClaraTaskStream` never retries an attach failure, so against
+// a task no lane serves (a CLR11 turn; the B7 walk's own armed task, whose stream route 404s) the
+// sentence was false the moment it was painted and the stream-lost banner underneath said so.
+//
+// The refusal is now painted first and alone; the "reading again" clause joins it — inside the SAME
+// `role="status"`, so one press is still one announcement — only once the attach has opened.
+// ---------------------------------------------------------------------------------------------
+
+const THREAD_REFUSE_DEAD = "c6c6c6c6-1111-4111-8111-c6c6c6c6c6c6";
+const THREAD_REFUSE_LIVE = "c6c6c6c6-2222-4222-8222-c6c6c6c6c6c6";
+const TASK_REFUSE_DEAD = "d6d6d6d6-1111-4111-8111-d6d6d6d6d6d6";
+const TASK_REFUSE_LIVE = "d6d6d6d6-2222-4222-8222-d6d6d6d6d6d6";
+
+/** Mount a live turn, press Stop into a CLR04 refusal, and hand back what the rail SAYS once the
+ *  re-attach has settled one way or the other. `streamAnswer` is what the re-attach's own
+ *  `/api/runtime/tasks/:id/stream` returns. */
+async function refusedStopText(
+  threadId: string,
+  taskId: string,
+  streamAnswer: () => Response,
+): Promise<{ text: string; announcers: string[]; container: Stub }> {
+  let out = { text: "", announcers: [] as string[], container: {} as Stub };
+  await withFetch(
+    (url) => {
+      if (url.includes("/stream")) return streamAnswer();
+      if (url.includes("/messages")) return json({ messages: [] });
+      if (url.includes("agent_tasks_visible")) {
+        return json([{ id: taskId, status: "running", created_at: new Date(Date.now() - 9_000).toISOString() }]);
+      }
+      if (url.includes("agent_interruptions")) return json([]);
+      if (url.includes("caller_context")) return json([]);
+      if (url.includes("/rpc/cancel_agent_task")) {
+        return refusal("CLR04", "stopping a reply requires a bookkeeper", "insufficient_role");
+      }
+      return json([]);
+    },
+    async () => {
+      const h = await renderComponent(App(threadId));
+      try {
+        await settleUntil(h, () => h.find(buttonNamed("Stop reply")) !== null, "the Stop control");
+        await h.act(() => {
+          claraThreadStore.applyStreamEvent(threadId, { event: "chunk", data: "half an answer" });
+        });
+        const stop = h.find(buttonNamed("Stop reply"));
+        assert.ok(stop, "the Stop control is offered for a live turn");
+        await h.act(() => clickButton(stop));
+        await settleUntil(h, () => /needs a bookkeeper role/.test(h.text()), "the refusal line");
+        // Let the re-attach settle: it either opens (the clause appears) or fails (it must not).
+        for (let i = 0; i < 8; i += 1) await h.settle();
+        out = {
+          text: h.text(),
+          announcers: collect(h.container as Stub, (n) => attrOf(n, "role") === "status")
+            .filter((n) => /responding|stop|Stopped|reading it/i.test(textOf(n)))
+            .map((n) => textOf(n)),
+          container: h.container as Stub,
+        };
+      } finally {
+        await h.unmount();
+      }
+    },
+  );
+  return out;
+}
+
+test("630 a refusal whose re-attach CANNOT open never claims this tab is reading again", async () => {
+  const { text, announcers } = await refusedStopText(
+    THREAD_REFUSE_DEAD,
+    TASK_REFUSE_DEAD,
+    () => new Response("no such task", { status: 404 }),
+  );
+
+  assert.match(text, /needs a bookkeeper role/, "precondition: the role refusal is on screen");
+  assert.match(text, /it is still running/,
+    "the one thing the refusal establishes: the door turned the request down, so the reply is live");
+  assert.doesNotMatch(text, /gone back to reading it/,
+    "…and NOT that the read is back. The attach 404'd and attach failures are never retried, so "
+    + "this sentence would be false beside a banner saying the connection ended");
+  assert.equal(announcers.length, 1,
+    `one press, one announcement; saw ${JSON.stringify(announcers)}`);
+});
+
+test("630 …and once the re-attach OPENS, the same line says so", async () => {
+  const { text, announcers } = await refusedStopText(
+    THREAD_REFUSE_LIVE,
+    TASK_REFUSE_LIVE,
+    // A real SSE body that stays open: the read is genuinely back.
+    () => new Response(new ReadableStream<Uint8Array>({ start() { /* held open */ } }), {
+      status: 200, headers: { "content-type": "text/event-stream" },
+    }),
+  );
+
+  assert.match(text, /needs a bookkeeper role/, "the refusal is still the first fact");
+  assert.match(text, /gone back to reading it/,
+    "…and now the second fact is true, so it is said");
+  assert.equal(announcers.length, 1,
+    `both sentences live in ONE role=status: two regions is two announcements for one press; `
+    + `saw ${JSON.stringify(announcers)}`);
+});

@@ -40,11 +40,28 @@ import type { AttachmentPart, ClaraPart } from "@/lib/parts/types";
  * turn this firm cannot see): the request was answered and turned down, which is not evidence the
  * reply is over. `transport` is everything that never reached a door at all. */
 export type StopFailureCause = "denied" | "finished" | "refused" | "transport";
+
+/** #630 (round-6 finding [4]) — WHAT HAPPENED TO THIS TAB'S READ AFTER THE REFUSAL, as a fact the
+ *  copy can be gated on instead of a claim it was written to assume.
+ *
+ *  `stopReply` aborts the SSE read BEFORE it calls the door, so every non-`finished` refusal has
+ *  to put a read back. Round 5 did that and then said so unconditionally — but `openTaskStream`
+ *  throws on a non-ok response and `runClaraTaskStream` never retries an attach failure (its own
+ *  header), so on a CLR11 or an unreachable proxy the sentence "this tab has gone back to reading
+ *  it" was false at the instant it was painted, with the stream-lost banner contradicting it
+ *  directly underneath.
+ *
+ *    none        the cause is `finished` — the turn is over, there is nothing to read.
+ *    attempting  the attach has been asked for and has not answered yet.
+ *    reading     `openTaskStream` resolved: the read is genuinely open again.
+ *    lost        the attach failed, or the re-opened read ended — no more text will arrive here. */
+export type StopReattach = "none" | "attempting" | "reading" | "lost";
+
 export type StopReplyState =
   | { phase: "idle" }
   | { phase: "pending" }
   | { phase: "stopped" }
-  | { phase: "failed"; cause: StopFailureCause };
+  | { phase: "failed"; cause: StopFailureCause; reattach: StopReattach };
 
 /** What `stopReply()` tells its caller it did. `pending` means the door has not been called yet —
  *  the machine, not this word, carries what finally happened. */
@@ -271,7 +288,7 @@ export function useClaraThread(
       if (answerIsAlreadyFinished(answer)) {
         // The turn was already over, so the clock over it is not measuring anything either.
         claraThreadStore.markTurnStopped(threadId, taskId);
-        const settled: StopReplyState = { phase: "failed", cause: "finished" };
+        const settled: StopReplyState = { phase: "failed", cause: "finished", reattach: "none" };
         setStop(settled);
         return settled;
       }
@@ -284,7 +301,13 @@ export function useClaraThread(
     } catch (err) {
       // …AND IT DOES NOT RETIRE ON A REFUSAL. A denied, refused or unreachable stop leaves the run
       // exactly where it was: the turn is still live, and a clock that says so is the truth.
-      const settled: StopReplyState = { phase: "failed", cause: stopFailureCause(err) };
+      // `attempting` is the honest starting point for every non-`finished` refusal: both callers
+      // below immediately ask for a re-attach, and neither knows yet whether it will open. The
+      // `finished` arm above is the one that never asks, and it says `none`.
+      const cause = stopFailureCause(err);
+      const settled: StopReplyState = {
+        phase: "failed", cause, reattach: cause === "finished" ? "none" : "attempting",
+      };
       setStop(settled);
       return settled;
     }
@@ -423,11 +446,18 @@ export function useClaraThread(
               );
             })
             .catch(() => {});
+          // The SAME re-attach state the ordinary press records (round-6 finding [4]), so the one
+          // set of refusal copies cannot be true on one arm and false on the other. There is no
+          // buffer to preserve here — no stream was ever opened for this turn — so this arm only
+          // reports; it does not call `beginRetry`.
+          const admissionCause = settled.cause;
           const { controller, done } = openStream(result.taskId, () => {
             claraThreadStore.markSent(threadId, parts);
+            setStop({ phase: "failed", cause: admissionCause, reattach: "reading" });
           });
           void done.catch((err: unknown) => {
             if (controller.signal.aborted) return;
+            setStop({ phase: "failed", cause: admissionCause, reattach: "lost" });
             claraThreadStore.markSendFailed(threadId, `stream error: ${(err as Error).message}`);
           });
         }
@@ -549,8 +579,21 @@ export function useClaraThread(
     // `finished` is excluded: the door said the turn was already over, so there is nothing left
     // to read and `spendStop` has already retired its clock.
     if (settled.phase === "failed" && settled.cause !== "finished") {
-      claraThreadStore.beginRetry(threadId);
-      const { controller, done } = openStream(taskId);
+      const cause = settled.cause;
+      const { controller, done } = openStream(taskId, () => {
+        // …AND THE BUFFER IS CLEARED HERE, NOT BEFORE (round-6 finding [5]). `beginRetry` resets
+        // the stream slot to `initialClaraStreamState`, `provisionalChunks: []` — and that buffer
+        // is the ONLY source of the live clarify card (ClaraThreadView's `foldLiveClarifyParts`).
+        // Clearing it up front deleted the parked question and its Answer control the instant a
+        // stop was refused, and `markStreamEndedUnexpectedly` below then emptied it a second time,
+        // so a re-attach that never opened left the run parked forever behind a surface that no
+        // longer offered a way to answer it. Moving the clear onto the OPEN keeps both properties:
+        // a refusal that could not re-read costs the reader nothing, and a re-attach that did open
+        // still lands the runtime's index-0 replay in an empty buffer, which is the only
+        // duplication the clear ever existed to prevent.
+        claraThreadStore.beginRetry(threadId);
+        setStop({ phase: "failed", cause, reattach: "reading" });
+      });
       void done.catch(() => {
         if (controller.signal.aborted) return;
         // A FAILED RE-ATTACH IS NOT A FAILED SEND. `markSendFailed` clears `activeTaskId`,
@@ -558,7 +601,13 @@ export function useClaraThread(
         // told the reader is still running, which is the defect this arm exists to fix, arriving
         // by another road. The turn stays exactly as it is; the STREAM is marked ended, which is
         // the true statement and the one the existing banner and Retry affordance already read.
-        claraThreadStore.markStreamEndedUnexpectedly(threadId);
+        //
+        // AND IT KEEPS THE BUFFER. `markStreamEndedUnexpectedly` empties `provisionalChunks`
+        // because the reattach LOOP replays from index 0 and would otherwise duplicate — but this
+        // path has no next attach (`runClaraTaskStream` never retries an attach failure), so the
+        // buffer is simply the last true record of what reached this tab, parked question and all.
+        claraThreadStore.markReattachFailed(threadId);
+        setStop({ phase: "failed", cause, reattach: "lost" });
       });
     }
     return settled.phase === "stopped" ? "stopped" : "failed";
