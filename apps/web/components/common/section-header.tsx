@@ -32,18 +32,24 @@ export function SectionHeader({
   children,
   action,
   className,
+  id,
 }: {
   level: SectionHeadingLevel;
   children: ReactNode;
   /** A control that belongs to this section (e.g. "Register recipient"). */
   action?: ReactNode;
   className?: string;
+  /** For the one case a surface has to MOVE FOCUS to a heading — the exported-heading-id idiom
+   *  `WORK_HEADING_ID` (components/work/work-detail.tsx) and `ACTIVITY_HEADING_ID`
+   *  (components/firm/activity/activity-feed.tsx) already established. Read by id rather than by a
+   *  ref because the focusing surface is usually an ancestor that does not render this element. */
+  id?: string;
 }) {
   // An explicit branch, never a `as "h2" | "h3" | "h4"` cast on a template
   // literal — this repo's own "spelling is not identity" discipline: the tag
   // is chosen, not asserted.
   const Tag: "h2" | "h3" | "h4" = level === 2 ? "h2" : level === 3 ? "h3" : "h4";
-  const heading = <Tag className={cn(LEVEL_CLASS[level], className)}>{children}</Tag>;
+  const heading = <Tag id={id} className={cn(LEVEL_CLASS[level], className)}>{children}</Tag>;
 
   if (!action) return heading;
   return (

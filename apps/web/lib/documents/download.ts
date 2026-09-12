@@ -57,7 +57,8 @@ const EXTENSION_FOR_MIME: Readonly<Record<string, string>> = {
  *
  *  The browser sanitises `download` itself; this is the second wall, and it is the cheap one. */
 export function safeDownloadName(name: string): string {
-  // eslint-disable-next-line no-control-regex -- the control range IS the subject: these bytes must never reach a filename.
+  // The escaped range below IS the subject: a control character in an uploader-supplied name must
+  // never reach a filename.
   const flattened = name.replace(/[\u0000-\u001f\u007f]/g, "");
   const segments = flattened.split(/[\\/]+/).filter((part) => part.trim().length > 0);
   const base = (segments.length > 0 ? segments[segments.length - 1]! : "").trim();

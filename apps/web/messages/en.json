@@ -1364,6 +1364,8 @@
     "eInvoiceBadge": "e-invoice — stored, not parsed",
     "detailHeading": "Detail",
     "detailEmpty": "Select a document to see its evidence, filings and doors.",
+    "closeDetail": "Close",
+    "documentNotAvailable": "That document isn't available in this client. It may have been filed elsewhere, retired, or the link may be out of date.",
     "documentNotReachable": "This document is not reachable today.",
     "openDocument": "Open original",
     "openingDocument": "Opening…",

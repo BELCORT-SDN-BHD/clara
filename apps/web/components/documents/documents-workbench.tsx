@@ -1,17 +1,21 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useHydratedPart } from "@/lib/parts/hooks";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
 import { loadFiledDocuments, loadFirmClients, loadOpenCandidates } from "@/lib/documents/loaders";
+import { applyDocumentParam, documentUrl, parseDocumentParam } from "@/lib/documents/url-state";
+import { Button } from "@/components/ui/button";
 import { PageHeader, PageShell } from "@/components/common/page-shell";
 import { SectionHeader } from "@/components/common/section-header";
 import { EmptyState, LoadingState } from "@/components/common/state";
+import { nextPaint } from "@/components/firm/work-question-affordance";
 import { FiledDocumentList } from "./filed-document-list";
 import { OpenCandidateList } from "./open-candidate-list";
 import { UploadPanel } from "./upload-panel";
-import { DocumentDetail } from "./document-detail";
+import { DocumentDetail, DOCUMENT_HEADING_ID } from "./document-detail";
 import { DoorFeedback } from "./door-feedback";
 import { CodingLanePanel } from "./coding-lane-panel";
 
@@ -22,14 +26,137 @@ import { CodingLanePanel } from "./coding-lane-panel";
  * every door action; the selected document's detail panel is a FOURTH cell, React-
  * `key`ed by `documentId` per lib/parts/hooks.ts's consumer contract (a card whose
  * captured id changes must unmount/remount, never rely on a loader swap alone).
+ *
+ * THE SELECTION LIVES IN THE URL (#719's Documents half), not in `useState`. It used
+ * to be React state alone, so a refresh lost it, a link could not name a document,
+ * and Back left the tab. See `lib/documents/url-state.ts` for the parameter's own
+ * contract and `openedViaPushRef` below for how the two close paths differ.
  */
 export function DocumentsWorkbench({ clientId }: { clientId: string }) {
   const t = useTranslations("ClientDocuments");
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+
+  const selection = useMemo(() => parseDocumentParam(searchParams), [searchParams]);
+  const selectedId = selection.kind === "document" ? selection.id : null;
 
   const filed = useHydratedPart(sessionTokenAccessor, () => loadFiledDocuments(clientId, t));
   const candidates = useHydratedPart(sessionTokenAccessor, () => loadOpenCandidates(clientId, t));
   const clients = useHydratedPart(sessionTokenAccessor, () => loadFirmClients(t));
+
+  /** The id a URL named that this client cannot show — a hand-edited or stale link, or a
+   *  well-formed uuid whose read came back empty. Held so the aside can say "not available in this
+   *  client" AFTER the parameter has been cleared: clearing it alone would drop the person onto
+   *  "Select a document…", which is not an answer to the address they followed. */
+  const [missing, setMissing] = useState<string | null>(null);
+
+  /** Tells the two close paths apart (Activity's own idiom, activity-feed.tsx:79-100): a row click
+   *  PUSHES a real history entry and closing that one pops it, so Back and the in-page close agree.
+   *  A page loaded DIRECTLY at `?document=…` — a bookmark, a shared link — has no entry to pop, so
+   *  closing that one rewrites the URL instead of stepping the person out of the tab entirely. */
+  const openedViaPushRef = useRef(false);
+
+  /** Every rendered filed row's own clickable element, keyed by document id. A Map rather than one
+   *  ref: any row on the page can be the one a person opened, only one detail is ever open, and the
+   *  row that opened it may have been re-sorted or filtered away by the time it closes — the lookup
+   *  treats all of those as "gone" rather than guessing. */
+  const rowRefs = useRef(new Map<string, HTMLTableRowElement>());
+  const lastSelectedRef = useRef<string | null>(null);
+
+  const replaceUrl = useCallback((documentId: string | null) => {
+    router.replace(documentUrl(pathname, applyDocumentParam(searchParams, documentId)));
+  }, [router, pathname, searchParams]);
+
+  const select = useCallback((documentId: string) => {
+    setMissing(null);
+    if (documentId === selectedId) return;
+    if (selectedId !== null) {
+      // ALREADY OPEN ⇒ REPLACE. Stepping from one document to the next is a change of what this
+      // one view is showing, not a new place to come back to; pushing each hop would make Back
+      // walk the person backwards through every row they clicked before finally reaching the list.
+      // The same reasoning Activity applies to a filter change.
+      router.replace(documentUrl(pathname, applyDocumentParam(searchParams, documentId)));
+      return;
+    }
+    openedViaPushRef.current = true;
+    router.push(documentUrl(pathname, applyDocumentParam(searchParams, documentId)));
+  }, [router, pathname, searchParams, selectedId]);
+
+  const close = useCallback(() => {
+    if (openedViaPushRef.current) {
+      openedViaPushRef.current = false;
+      router.back();
+      return;
+    }
+    replaceUrl(null);
+  }, [router, replaceUrl]);
+
+  /** A URL naming something this client cannot show: clear the parameter so the address stops
+   *  repeating it, and remember the id so the aside can answer the question that was asked. */
+  const reportMissing = useCallback((raw: string) => {
+    setMissing(raw);
+    openedViaPushRef.current = false;
+    replaceUrl(null);
+  }, [replaceUrl]);
+
+  const malformed = selection.kind === "malformed" ? selection.raw : null;
+  useEffect(() => {
+    if (malformed !== null) reportMissing(malformed);
+  }, [malformed, reportMissing]);
+
+  /** FOCUS, BOTH DIRECTIONS, and exactly one transition each.
+   *
+   *  OPEN: the detail's own heading takes focus, so a keyboard reader who activated a row lands in
+   *  what they opened rather than continuing down the table behind it.
+   *  CLOSE: focus returns to the row that opened it. The in-page close path already leaves focus
+   *  somewhere real (whatever the person's click or keypress last touched stays put), which is why
+   *  this CHECKS first — the physical Back button never held DOM focus, so an SPA re-render after a
+   *  pop leaves focus nowhere at all.
+   *
+   *  `nextPaint` before either (the SAME timing #629's row-focus fix and #728's Activity fix use):
+   *  React has not committed the new subtree when this effect runs, and the heading is rendered by
+   *  a child that mounts a frame later. A short POLL after it, because a panel that mounts
+   *  @base-ui/react primitives parks focus on a guard element for one frame before settling — a
+   *  single `focus()` fired into that frame is silently undone. */
+  useEffect(() => {
+    const previous = lastSelectedRef.current;
+    lastSelectedRef.current = selectedId;
+    if (previous === selectedId) return;
+    if (typeof document === "undefined") return;
+
+    let cancelled = false;
+    const doc = document as unknown as { getElementById?: (id: string) => HTMLElement | null };
+
+    const focusHeading = async () => {
+      if (typeof doc.getElementById !== "function") return;
+      for (let attempt = 0; attempt < 8 && !cancelled; attempt++) {
+        await nextPaint();
+        if (cancelled) return;
+        const heading = doc.getElementById(DOCUMENT_HEADING_ID);
+        if (!heading) continue;
+        if (!heading.hasAttribute("tabindex")) heading.setAttribute("tabindex", "-1");
+        heading.focus();
+        if (document.activeElement === heading) return; // settled; a focus guard would have taken it back
+      }
+    };
+
+    const restoreRow = async () => {
+      await nextPaint();
+      if (cancelled) return;
+      const active = document.activeElement;
+      const activeIsUseless = active === null || active === document.body || active === document.documentElement;
+      if (!activeIsUseless) return; // an in-page close already left focus somewhere real
+      const row = previous ? rowRefs.current.get(previous) : null;
+      if (row && typeof row.focus === "function") { row.focus(); return; }
+      if (typeof doc.getElementById !== "function") return;
+      const heading = doc.getElementById(DOCUMENT_HEADING_ID);
+      if (heading && typeof heading.focus === "function") heading.focus();
+    };
+
+    void (selectedId !== null ? focusHeading() : previous !== null ? restoreRow() : Promise.resolve());
+    return () => { cancelled = true; };
+  }, [selectedId]);
 
   /** SIBLING FLAW P1 — the coding lane's staleness, closed structurally.
    *
@@ -106,7 +233,15 @@ export function DocumentsWorkbench({ clientId }: { clientId: string }) {
               <LoadingState>{t("loading")}</LoadingState>
             ) : (
               <>
-                <FiledDocumentList entries={filed.data ?? []} selectedId={selectedId} onSelect={setSelectedId} />
+                <FiledDocumentList
+                  entries={filed.data ?? []}
+                  selectedId={selectedId}
+                  onSelect={select}
+                  rowRef={(documentId, el) => {
+                    if (el) rowRefs.current.set(documentId, el);
+                    else rowRefs.current.delete(documentId);
+                  }}
+                />
                 <DoorFeedback err={filed.err} clr={filed.clr} />
               </>
             )}
@@ -117,9 +252,24 @@ export function DocumentsWorkbench({ clientId }: { clientId: string }) {
             primitive uses (rounded-xl) rather than the row-card one — the two
             rungs were reading the same before this pass. */}
         <aside className="flex min-w-0 flex-1 flex-col gap-3 rounded-xl border border-border bg-surface p-4 lg:max-w-md">
-          <SectionHeader level={2}>{t("detailHeading")}</SectionHeader>
+          <SectionHeader
+            level={2}
+            action={selectedId ? (
+              <Button type="button" size="sm" variant="ghost" data-testid="document-detail-close" onClick={close}>
+                {t("closeDetail")}
+              </Button>
+            ) : undefined}
+          >
+            {t("detailHeading")}
+          </SectionHeader>
           {!selectedId ? (
-            <EmptyState>{t("detailEmpty")}</EmptyState>
+            missing !== null ? (
+              <div data-testid="document-not-available">
+                <EmptyState>{t("documentNotAvailable")}</EmptyState>
+              </div>
+            ) : (
+              <EmptyState>{t("detailEmpty")}</EmptyState>
+            )
           ) : clients.loading && !clients.data ? (
             <LoadingState>{t("loading")}</LoadingState>
           ) : (
@@ -131,6 +281,7 @@ export function DocumentsWorkbench({ clientId }: { clientId: string }) {
               clientsErr={clients.err}
               clientsClr={clients.clr}
               onFiledChanged={refreshFiled}
+              onNotFound={() => reportMissing(selectedId)}
             />
           )}
         </aside>

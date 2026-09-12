@@ -53,7 +53,7 @@ function badgeKey(badge: DocumentBadge): string {
  *  subject (reading the stored original) and they now live in one file; this one
  *  is back to being what its name says. */
 export function DocumentMetadata({
-  document: doc, tasks, clientId, onShowExtraction,
+  document: doc, tasks, clientId, headingId, onShowExtraction,
 }: {
   document: DocumentRow;
   tasks: ProcessingTaskRow[];
@@ -61,6 +61,11 @@ export function DocumentMetadata({
    *  read addressed from the wrong client answers "not available in this client"
    *  rather than serving bytes. */
   clientId: string;
+  /** The id the DETAIL panel exports so a surface one rung up can move focus here when a
+   *  document is opened — `DOCUMENT_HEADING_ID`, document-detail.tsx. This heading is the
+   *  document's own name, which is the right thing for a keyboard reader to land on; the
+   *  workbench's "Detail" heading above it names the panel, not the object. */
+  headingId?: string;
   /** C-07 / 裁-175 — the honest alternative offered for a type no browser tab can
    *  show. Opens the SAME structured extraction view that lives further down this
    *  panel (document-detail.tsx owns its open state). */
@@ -76,7 +81,7 @@ export function DocumentMetadata({
           320px — without the wrap the two buttons sat outside the viewport and
           the page scrolled sideways, which §4 forbids. */}
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <SectionHeader level={3} className="min-w-0 truncate">{doc.original_filename ?? doc.id}</SectionHeader>
+        <SectionHeader level={3} id={headingId} className="min-w-0 truncate">{doc.original_filename ?? doc.id}</SectionHeader>
       </div>
 
       <DocumentSourceActions document={doc} clientId={clientId} onShowExtraction={onShowExtraction} />

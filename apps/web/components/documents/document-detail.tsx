@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
 import { useHydratedPart, type PartClr } from "@/lib/parts/hooks";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
@@ -26,8 +26,10 @@ import { EmptyState, LoadingState } from "@/components/common/state";
  * any act here that can change it — retiring a filing, or a wrong-client correction
  * moving the document away.
  */
+export const DOCUMENT_HEADING_ID = "document-detail-heading";
+
 export function DocumentDetail({
-  documentId, clientId, clients, clientsErr, clientsClr, onFiledChanged,
+  documentId, clientId, clients, clientsErr, clientsClr, onFiledChanged, onNotFound,
 }: {
   documentId: string;
   clientId: string;
@@ -35,6 +37,12 @@ export function DocumentDetail({
   clientsErr: string | null;
   clientsClr: PartClr;
   onFiledChanged: () => void;
+  /** The read settled and this client cannot show this document — a stale link, another client's
+   *  document, or a row that is simply not there (the door collapses all three into one shape, on
+   *  purpose: no existence oracle). The WORKBENCH owns what happens next, because the answer is a
+   *  URL change plus a standing "not available in this client" state, and neither belongs to a
+   *  panel that is about to unmount. Called once per settled read, never while one is in flight. */
+  onNotFound?: () => void;
 }) {
   const t = useTranslations("ClientDocuments");
   const { data, loading, busy, err, clr, act, reload } = useHydratedPart(
@@ -47,6 +55,33 @@ export function DocumentDetail({
   // A refusal that names an alternative the human then has to go and find is
   // half an answer.
   const [extractOpen, setExtractOpen] = useState(false);
+  /** Fires `onNotFound` at most once per mounted document. This component is React-`key`ed by
+   *  `documentId` (documents-workbench.tsx), so a fresh id is a fresh mount and a fresh ref — the
+   *  guard is per document, not per session. */
+  const notifiedNotFound = useRef(false);
+  /** Whether this mount has ever actually been in flight — see the effect below. */
+  const sawLoading = useRef(false);
+
+  /** REPORTED, NOT RENDERED IN PLACE, when the read SETTLED and found nothing: the address named a
+   *  document this client cannot show, and the honest answer includes clearing the parameter that
+   *  keeps saying otherwise. A thrown `err` is a different thing — a failure to READ proves nothing
+   *  about whether the document is there — so that one keeps its own banner below.
+   *
+   *  In an EFFECT rather than in the render branch it belongs to: the callback changes the parent's
+   *  state and its URL, and doing that during this component's render is the "cannot update a
+   *  component while rendering a different one" class. */
+  useEffect(() => {
+    // A READ THAT HAS NOT STARTED IS NOT A READ THAT FOUND NOTHING, and telling the two apart is
+    // the whole correctness of this effect. `useHydratedPart` initialises `loading` to FALSE and
+    // flips it inside its own mount effect, so the first commit shows {loading:false, data:null,
+    // err:null} — indistinguishable, by value, from a settled empty read. Measured, not supposed:
+    // without the latch below every open of a perfectly good document immediately cleared its own
+    // `?document=` and painted "not available in this client".
+    if (loading) { sawLoading.current = true; return; }
+    if (!sawLoading.current || data || err || notifiedNotFound.current) return;
+    notifiedNotFound.current = true;
+    onNotFound?.();
+  }, [loading, data, err, onNotFound]);
 
   if (loading && !data) {
     return <LoadingState>{t("loading")}</LoadingState>;
@@ -67,6 +102,7 @@ export function DocumentDetail({
         document={data.document}
         tasks={data.processingTasks}
         clientId={clientId}
+        headingId={DOCUMENT_HEADING_ID}
         onShowExtraction={() => setExtractOpen(true)}
       />
 

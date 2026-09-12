@@ -19,12 +19,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createElement } from "react";
-import { NextIntlClientProvider } from "next-intl";
 import { renderComponent, clickButton, textOf, setFieldValue } from "../../test/hookHarness";
 import { enableDomInspection } from "../../test/domInspect";
 import { configureSessionTokenSource, resetSessionTokenSource } from "../../lib/session-accessor";
 import { DocumentsWorkbench } from "./documents-workbench";
-import messages from "../../messages/en.json";
+import { documentsApp, makeNavigation } from "./documents-test-fixtures";
 
 // The detail panel mounts @base-ui/react primitives (DocumentAdmin's Select,
 // the door dialogs) whose floating-ui internals feature-detect against
@@ -33,13 +32,25 @@ import messages from "../../messages/en.json";
 // out of React's act() — see test/domInspect.ts:435-460.
 enableDomInspection();
 
-function App(children: ReturnType<typeof createElement>) {
-  return createElement(NextIntlClientProvider, { locale: "en", messages, children });
-}
+// THE NAVIGATION STUB IS STATEFUL AND THAT IS LOAD-BEARING HERE. Selecting a
+// document is a `router.push` and the selection is read back out of `?document=`
+// (#719), so a router whose push does nothing would leave the workbench reading its
+// original URL, the detail panel would never mount, and the Retire control these
+// cells act on would not exist — every assertion below would then be measuring the
+// absence of a button rather than the re-read it claims to measure.
+// `documents-test-fixtures.ts` keeps the real history stack; `sync()` re-renders the
+// tree with the new search params, which is what the App Router does to a client
+// component when only the query changes.
 
-const CLIENT = "client-1";
-const DOCUMENT = "doc-1";
-const FILING = "filing-1";
+const CLIENT = "c1111111-1111-4111-8111-111111111111";
+// A REAL UUID, not "doc-1". The selection now travels through `?document=` and
+// `lib/documents/url-state.ts` SHAPE-CHECKS it before use (a malformed id reaching a
+// PostgREST `id=eq.` filter on a uuid column is a 400 22P02 that throws, so the page
+// would render its error boundary instead of an honest state). A non-uuid fixture id
+// is therefore parsed as "malformed", the detail never mounts, and the cells below
+// would measure a missing Retire button rather than the re-read they claim to.
+const DOCUMENT = "d1111111-1111-4111-8111-111111111111";
+const FILING = "f1111111-1111-4111-8111-111111111111";
 
 const DOC_ROW = {
   id: DOCUMENT, sha256: "abc123", original_filename: "invoice-april.pdf", mime_type: "application/pdf",
@@ -83,14 +94,24 @@ function makeFetch(counts: Record<string, number>): typeof fetch {
   }) as typeof fetch;
 }
 
-async function withWorkbench(run: (h: Awaited<ReturnType<typeof renderComponent>>, counts: Record<string, number>) => Promise<void>): Promise<void> {
+type Workbench = Awaited<ReturnType<typeof renderComponent>> & { sync: () => Promise<void> };
+
+async function withWorkbench(run: (h: Workbench, counts: Record<string, number>) => Promise<void>): Promise<void> {
   const counts: Record<string, number> = {};
   const originalFetch = globalThis.fetch;
   const originalUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   process.env.NEXT_PUBLIC_SUPABASE_URL = "https://example.supabase.co";
   globalThis.fetch = makeFetch(counts);
   configureSessionTokenSource(async () => "tok");
-  const h = await renderComponent(App(createElement(DocumentsWorkbench, { clientId: CLIENT })));
+  const nav = makeNavigation();
+  const tree = () => documentsApp(createElement(DocumentsWorkbench, { clientId: CLIENT }), nav);
+  const base = await renderComponent(tree());
+  const h: Workbench = Object.assign(base, {
+    sync: async () => {
+      await base.rerender(tree());
+      for (let i = 0; i < 8; i++) await base.settle();
+    },
+  });
   try {
     for (let i = 0; i < 8; i++) await h.settle();
     await run(h, counts);
@@ -114,6 +135,8 @@ test("[the defect] retiring a filing re-reads the CANDIDATES cell, not only the 
     const row = h.find((n) => n.tagName === "TR" && textOf(n).includes("invoice-april.pdf"));
     assert.ok(row, "the filed document's row must render");
     await h.fireEvent(row!, "click");
+    for (let i = 0; i < 8; i++) await h.settle();
+    await h.sync(); // the push landed in the stub's history; re-render with the new ?document=
     for (let i = 0; i < 8; i++) await h.settle();
 
     // Retire needs a reason before its button admits a click; `clickButton`
@@ -153,6 +176,8 @@ test("SIBLING P1: a filing-changing act also re-hydrates the coding lane's own c
 
     const row = h.find((n) => n.tagName === "TR" && textOf(n).includes("invoice-april.pdf"));
     await h.fireEvent(row!, "click");
+    for (let i = 0; i < 8; i++) await h.settle();
+    await h.sync(); // the push landed in the stub's history; re-render with the new ?document=
     for (let i = 0; i < 8; i++) await h.settle();
     const reasonField = h.find((n) => n.tagName === "INPUT" && (n as { getAttribute?: (k: string) => unknown }).getAttribute?.("aria-label") === "Reason (required to retire)");
     await h.act(() => { setFieldValue(reasonField!, "filed to the wrong period"); });

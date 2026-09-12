@@ -93,9 +93,11 @@ components/documents/coding-lane-a11y.test.tsx
 components/documents/coding-lane-keyboard.test.tsx
 components/documents/document-facts-table.test.tsx
 components/documents/document-metadata-viewer-gate.test.tsx
+components/documents/document-source-actions.test.tsx
 components/documents/documents-a11y.test.tsx
 components/documents/documents-governance-a11y.test.tsx
 components/documents/documents-governance-keyboard.test.tsx
+components/documents/documents-url-state.test.tsx
 components/documents/documents-workbench-refresh.test.tsx
 components/documents/lint-finding-detail.test.tsx
 components/e2e/money-input-harness-route.test.tsx
