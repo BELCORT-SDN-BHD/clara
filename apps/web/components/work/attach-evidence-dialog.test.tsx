@@ -36,6 +36,9 @@ const OTHER_ENTRY = "ffffffff-ffff-4fff-8fff-ffffffffffff";
  *  firm-wide — so the entry that already holds a document may belong to a DIFFERENT client than
  *  the one this dialog is attaching for, and the note must say so and link THERE. */
 const OTHER_CLIENT = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+/** A SECOND claimant entry, distinct from `OTHER_ENTRY` — t728h's proof that a repeat refusal on
+ *  the same document actually RE-READS rather than serving the first answer stale. */
+const SECOND_CLAIM_ENTRY = "99999999-9999-4999-8999-999999999999";
 
 const DOCUMENTS: EvidenceDocument[] = [
   { documentId: "d1111111-1111-4111-8111-111111111111", filename: "sept-rent.pdf", kind: "invoice", filedAt: "2026-09-02T03:00:00Z", financialDate: "2026-09-01" },
@@ -854,6 +857,58 @@ test("t728g: a re-read that never answers does not hold the refusal's focus reco
       "focus is on the document chooser although the re-read has not answered — an unbounded "
       + `read must not hold a person's place inside an open modal (active element was `
       + `${String((activeElement() as { tagName?: string } | null)?.tagName ?? "none")})`);
+  } finally {
+    await h.unmount();
+    await drain(h);
+  }
+});
+
+test("t728h: a SECOND source_conflict on the SAME document still re-reads and renders the claimant link — the first refusal's clear must not be the last word", async () => {
+  // #728 finding 0 (final review) — the defect this cell fences. `conflictDocumentId` is derived
+  // from `result.kind` + `documentId`, both primitives that read IDENTICAL across a retry on the
+  // unchanged document: without `refusalGeneration` riding beside it, the claimant effect's
+  // dependency array would not move on the second press, `confirm` would still have cleared
+  // `conflictEntry` to null on the way in, and the refusal would stand with the claimant sentence
+  // and its link gone for the rest of that selection — the ONE forward move a source-conflict
+  // refusal offers.
+  let findCalls = 0;
+  const h = await renderComponent(
+    App({
+      attach: async () => ({ kind: "source_conflict" }),
+      findEntry: async () => {
+        findCalls += 1;
+        // A DIFFERENT claimant on the second call — proof this is a FRESH read, not a stale
+        // render of the first answer left behind in state.
+        return findCalls === 1
+          ? { entryId: OTHER_ENTRY, clientId: CLIENT }
+          : { entryId: SECOND_CLAIM_ENTRY, clientId: CLIENT };
+      },
+    }),
+  );
+  try {
+    await openDialog(h);
+    await choose(h, DOCUMENTS[0]!.documentId);
+
+    await pressAttach(h);
+    assert.match(bodyText(), /already backs another posted entry/, "the first refusal renders");
+    assert.ok(
+      findIn(bodyNode(), (n) => n.tagName === "A"
+        && String((n as { getAttribute?: (k: string) => string | null }).getAttribute?.("href") ?? "").includes(OTHER_ENTRY)),
+      "the first refusal's claimant link renders",
+    );
+
+    // THE SAME DOCUMENT, pressed again: `documentId` does not change and `result.kind` stays
+    // `source_conflict`, so `conflictDocumentId` computes to the identical string both times —
+    // exactly the two-press flow t634's op-key cells already exercise for the reservation rule.
+    await pressAttach(h);
+    assert.equal(findCalls, 2,
+      "the claimant is re-read on the second refusal, not served from the first answer");
+    assert.match(bodyText(), /already backs another posted entry/, "the second refusal renders");
+    assert.ok(
+      findIn(bodyNode(), (n) => n.tagName === "A"
+        && String((n as { getAttribute?: (k: string) => string | null }).getAttribute?.("href") ?? "").includes(SECOND_CLAIM_ENTRY)),
+      "the SECOND refusal's claimant link renders too — this is the finding: it used to stay gone",
+    );
   } finally {
     await h.unmount();
     await drain(h);

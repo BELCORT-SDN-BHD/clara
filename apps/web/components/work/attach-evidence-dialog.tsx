@@ -132,6 +132,15 @@ export function AttachEvidenceDialog({
    *  never contains the entry. Null means "we could not find one", and then no
    *  link is offered at all. */
   const [conflictEntry, setConflictEntry] = useState<DocumentClaim | null>(null);
+  /** #728 finding 0 (final review) — bumped on every `source_conflict` ANSWER, never on the
+   *  document choice: a repeat refusal on the SAME document leaves `conflictDocumentId` below
+   *  (derived from `result.kind` + `documentId`, both primitives) at the IDENTICAL value across
+   *  the retry, so the claimant effect's dependency array would not change and would never
+   *  re-run — exactly the composer's `claimantUnresolved` problem (journal-composer.tsx), except
+   *  the composer's `phase` object passes through a non-conflict kind between attempts and this
+   *  dialog's `result` does not (it is kept on screen through `busy` on purpose, so the banner
+   *  never flashes empty mid-retry). This counter is the seam that changes anyway. */
+  const [refusalGeneration, setRefusalGeneration] = useState(0);
   /** ONE op key per PRESS, minted when the dialog opens and re-minted after any
    *  completed attempt: two clicks on one decision must not attach twice, and a
    *  genuine second decision must not be swallowed as a duplicate of the first. */
@@ -224,6 +233,13 @@ export function AttachEvidenceDialog({
    * is replaced or the dialog unmounts, a timeout that fires it anyway, and a re-check that the
    * same document is still the one refused before the answer is written — the person may have
    * chosen another while the read was in flight.
+   *
+   * `refusalGeneration` RIDES BESIDE `conflictDocumentId` (#728 finding 0, final review): a
+   * repeat `source_conflict` on the SAME document leaves `conflictDocumentId` at the identical
+   * string across the retry (`result.kind` and `documentId` both unchanged), so that dependency
+   * alone would never re-fire this effect and the refusal would stand with `conflictEntry`
+   * cleared by `confirm` and never refilled. The generation is bumped once per `source_conflict`
+   * answer regardless of the document, which is exactly the seam this effect needs to see move.
    */
   const conflictDocumentId = result?.kind === "source_conflict" ? documentId : null;
   useEffect(() => {
@@ -242,7 +258,7 @@ export function AttachEvidenceDialog({
       clearTimeout(timer);
       controller.abort();
     };
-  }, [conflictDocumentId, findEntry, session]);
+  }, [conflictDocumentId, refusalGeneration, findEntry, session]);
 
   const confirm = async () => {
     if (busy || documentId === "") return;
@@ -261,6 +277,10 @@ export function AttachEvidenceDialog({
       { session },
     );
     setResult(answer);
+    // #728 finding 0 (final review) — see `refusalGeneration`'s own comment above: bumped on
+    // every `source_conflict` answer so a repeat refusal on the SAME document still moves the
+    // claimant effect's dependency array, even though `conflictDocumentId` itself does not.
+    if (answer.kind === "source_conflict") setRefusalGeneration((generation) => generation + 1);
     setBusy(false);
     // A NEW KEY FOR THE NEXT DECISION — BUT ONLY AFTER A SETTLED OUTCOME. The old
     // key names an answer the database has STORED (an attachment, or a typed
