@@ -1,5 +1,7 @@
 // #620 — PROVIDER-CONTRACT CELLS for the Storage READ path
-// (packages/runtime/lib/storage.mjs's `classifyGetFailure` / `responseFor` / `downloadCanonical`).
+// (packages/runtime/lib/storage.mjs's `classifyGetFailure` / `responseFor` / `downloadCanonical`),
+// and for the ONE upload-side envelope that shares their cause: the wrapped duplicate (P3 below,
+// all four key families in one differential family).
 //
 // ============================== WHAT CLASS OF EVIDENCE THIS IS ==============================
 // PROVIDER CONTRACT (class P), and every cell in this file is labelled so deliberately. It proves
@@ -41,8 +43,12 @@ const storage = await import("../lib/storage.mjs");
 const { classifyGetFailure, StorageError, hashCanonical, downloadCanonical } = storage;
 
 const FIRM = "11111111-1111-4111-8111-111111111111";
+const CLIENT = "22222222-2222-4222-8222-222222222222";
 const SHA = "a".repeat(64);
 const KEY = `firms/${FIRM}/docs/${SHA}.pdf`;
+const WIKI_KEY = `firms/${FIRM}/wiki/${CLIENT}/${SHA}.md`;
+const REPORT_KEY = `firms/${FIRM}/reports/${SHA}.pdf`;
+const SANDBOX_KEY = `firms/${FIRM}/sandbox/${SHA}.pdf`;
 
 /** The real-config environment `responseFor` demands before it will make a request at all: a URL,
  *  a dedicated custom role, and a syntactically valid unexpired role JWT whose `role` claim equals
@@ -213,6 +219,98 @@ test("P2.7 [PROVIDER CONTRACT] a key that is not a canonical docs address never 
     assert.equal(err.reason, "invalid_key",
       "a key-shape refusal is NOT one of the four provider outcomes — it happened before any request");
     assert.equal(called, 0);
+  });
+});
+
+// =============================================================================================
+// P3 — THE UPLOAD SIDE'S WRAPPED DUPLICATE, ACROSS ALL FOUR KEY FAMILIES.
+//
+// WHY IT BELONGS BESIDE THE READ CELLS. It is the same provider quirk and the same 2026-07-26
+// capture source (1. above): Supabase's storage-api puts its real status INSIDE the body, so a
+// duplicate object arrives as **HTTP 400** carrying {"statusCode":"409","error":"Duplicate"} and
+// `response.status === 409` is never true. For a content-addressed key a duplicate is idempotent
+// SUCCESS — the key IS the sha256, so a second write puts the same bytes at the same address —
+// which is what makes an at-least-once writer safe. Treating it as fatal is what broke the docs
+// family for a day.
+//
+// THE FOUR FAMILIES ARE ONE FAMILY OF CELLS ON PURPOSE. Three of them parsed the body; the WIKI
+// one tested `response.status === 409` alone, so the hosted wrapped-409 was a fatal
+// StorageError("wiki storage upload failed (400)") and `wiki-projection.mjs`'s idempotent redrive
+// (:434) died on the ordinary case. A single-family cell would have been passed by that bug;
+// asserting all four against the identical envelope is what catches a fifth writer adopting the
+// same mistake.
+//
+// AND IT CANNOT BE CAUGHT ANYWHERE ELSE TODAY: wave-b-wiki-projection-unit.test.mjs sets
+// RELAY_TEST_MODE=1 at its top, so its idempotency cell exercises the local-file EEXIST shim and
+// never the provider envelope at all.
+// =============================================================================================
+const DUPLICATE_BODY = JSON.stringify({
+  statusCode: "409", error: "Duplicate", message: "The resource already exists",
+});
+const REFUSED_BODY = JSON.stringify({
+  statusCode: "403", error: "Unauthorized", message: "permission denied for table objects",
+});
+
+/**
+ * One throwaway file in its OWN directory, for an upload whose `fetch` is mocked.
+ *
+ * THE OWN DIRECTORY IS THE POINT, not tidiness. Every put opens a `createReadStream` that the
+ * mocked fetch never consumes, so the handle stays open — and on Windows an open handle makes a
+ * recursive `rm` fail, which fails the whole FILE and masks every passing cell in it. The same
+ * trap intake-unit.test.mjs:300-303 records for the same reason.
+ */
+async function withUploadFixture(fn) {
+  const { mkdtemp, writeFile, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const dir = await mkdtemp(join(tmpdir(), "d620-upload-"));
+  const file = join(dir, "payload.bin");
+  await writeFile(file, Buffer.from("d620 upload fixture"));
+  try {
+    return await fn(file);
+  } finally {
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+const UPLOADERS = () => [
+  ["docs", storage.putCanonical, KEY],
+  ["wiki", storage.putWikiCanonical, WIKI_KEY],
+  ["reports", storage.putReportCanonical, REPORT_KEY],
+  ["sandbox", storage.putSandboxCanonical, SANDBOX_KEY],
+];
+
+test("P3.1 [PROVIDER CONTRACT] the captured wrapped-409 is idempotent SUCCESS for every family, wiki included", async (t) => {
+  await withRealConfig(async () => {
+    await withUploadFixture(async (file) => {
+      for (const [label, put, key] of UPLOADERS()) {
+        t.mock.restoreAll();
+        t.mock.method(globalThis, "fetch", async () => new Response(DUPLICATE_BODY, { status: 400 }));
+        assert.deepEqual(await put(file, key), { created: false, existed: true },
+          `${label}: a wrapped 409 is a benign re-write of the same content address, not a fatal error`);
+      }
+    });
+  });
+});
+
+test("P3.2 [PROVIDER CONTRACT] a wrapped 403 is still FATAL for every family, and still carries the body", async (t) => {
+  await withRealConfig(async () => {
+    await withUploadFixture(async (file) => {
+      for (const [label, put, key] of UPLOADERS()) {
+        t.mock.restoreAll();
+        t.mock.method(globalThis, "fetch", async () => new Response(REFUSED_BODY, { status: 400 }));
+        await assert.rejects(() => put(file, key), (err) => {
+          assert.ok(err instanceof StorageError, `${label}: a refused upload is a StorageError`);
+          assert.equal(err.code, "storage_error", label);
+          // THE BODY, NOT JUST THE STATUS. `(400)` alone cannot tell a duplicate from a permission
+          // denial from a bad key, and discarding it cost a full day of diagnosis — the lesson
+          // putCanonical's own comment records. It is a server-side log line, never a client body.
+          assert.match(err.message, /permission denied for table objects/,
+            `${label}: the failure must carry the BODY`);
+          return true;
+        }, `${label}: a wrapped 403 must not be read as a duplicate`);
+      }
+    });
   });
 });
 

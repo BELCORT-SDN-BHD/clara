@@ -149,6 +149,39 @@ function realConfig() {
   return { base: base.replace(/\/+$/, ""), jwt };
 }
 
+/**
+ * IS THIS FAILED UPLOAD THE PROVIDER SAYING "that object is already there"?
+ *
+ * ONE PREDICATE FOR FOUR WRITERS, because the answer is a property of the PROVIDER, not of a key
+ * family. Supabase's storage-api puts its real status INSIDE the body: a duplicate arrives as
+ * **HTTP 400** carrying `{"statusCode":"409","error":"Duplicate",…}`, so `response.status === 409`
+ * is never true against the hosted service (found 2026-07-26 by re-uploading an already-ingested
+ * document — the ordinary case — and the diagnosis cost a day; the captured envelope is in
+ * packages/runtime/tests/intake-unit.test.mjs:285-325).
+ *
+ * FOR A CONTENT-ADDRESSED KEY A DUPLICATE IS IDEMPOTENT SUCCESS, never an error: the key IS the
+ * sha256, so a second write puts the same bytes at the same address. That is what makes an
+ * at-least-once writer safe, and it is why every one of the four families uploads with
+ * `x-upsert:false` and then treats the refusal as "existed".
+ *
+ * WHY IT IS EXTRACTED (#620 review, F5). The docs, report and sandbox families each carried this
+ * test inline and the WIKI family did not — it tested the transport status alone, so the hosted
+ * wrapped-409 was a fatal `StorageError("wiki storage upload failed (400)")` and
+ * wiki-projection.mjs's idempotent redrive (:434) died on the ordinary re-projection. Three copies
+ * and one divergence is the shape a bug hides in; one helper cannot diverge. The predicate is the
+ * three siblings' own, character for character, so their behaviour is unchanged — the vendor also
+ * documents a symbolic `ResourceAlreadyExists` for 409, which this repository has never captured
+ * and which is therefore NOT read here rather than guessed at.
+ *
+ * @param {number} status the transport status
+ * @param {string} body   the response body, already read once (every caller needs it for the log)
+ */
+function isDuplicateUpload(status, body) {
+  let inner = null;
+  try { inner = JSON.parse(body ?? ""); } catch { /* not JSON — the transport status is all there is */ }
+  return status === 409 || String(inner?.statusCode) === "409" || inner?.error === "Duplicate";
+}
+
 function objectUrl(base, key) {
   return `${base}/${safeKey(key).split("/").map(encodeURIComponent).join("/")}`;
 }
@@ -187,11 +220,7 @@ export async function putCanonical(filePath, key, mime) {
   // a human re-dropping a file they already sent. Read the body ONCE and branch on what it says.
   if (response.ok) return { created: true, existed: false };
   const body = await response.text().catch(() => "");
-  let inner = null;
-  try { inner = JSON.parse(body); } catch { /* not JSON — fall through to the raw body */ }
-  if (response.status === 409 || String(inner?.statusCode) === "409" || inner?.error === "Duplicate") {
-    return { created: false, existed: true };
-  }
+  if (isDuplicateUpload(response.status, body)) return { created: false, existed: true };
   // Carry the BODY, not just the HTTP status: `(400)` alone cannot distinguish a duplicate from
   // a permission denial from a bad key, and discarding it cost a full day of diagnosis.
   throw new StorageError(
@@ -386,9 +415,18 @@ export async function putWikiCanonical(filePath, key, mime = "text/markdown") {
     body: createReadStream(filePath),
     duplex: "half",
   });
-  if (response.status === 409) return { created: false, existed: true };
-  if (!response.ok) throw new StorageError("storage_error", `wiki storage upload failed (${response.status})`);
-  return { created: true, existed: false };
+  if (response.ok) return { created: true, existed: false };
+  // THE SHARED PREDICATE, not a local one. This arm used to test `response.status === 409` alone,
+  // which the hosted service never returns for a duplicate (it wraps 409 inside an HTTP 400), so a
+  // re-projection of an unchanged page — the ordinary redrive at wiki-projection.mjs:434 — was a
+  // fatal error. The body is read once and carried in the log line for the same reason the docs
+  // family carries it: `(400)` alone cannot tell a duplicate from a permission denial.
+  const body = await response.text().catch(() => "");
+  if (isDuplicateUpload(response.status, body)) return { created: false, existed: true };
+  throw new StorageError(
+    "storage_error",
+    `wiki storage upload failed (${response.status})${body ? ` ${body.slice(0, 200)}` : ""}`,
+  );
 }
 
 async function wikiResponseFor(key) {
@@ -478,16 +516,12 @@ export async function putReportCanonical(filePath, key, mime = "application/pdf"
     duplex: "half",
   });
   if (response.ok) return { created: true, existed: false };
-  // Supabase wraps its real status inside the BODY (the 2026-07-26 finding the docs family
-  // documents above): a duplicate comes back as HTTP 400 with {"statusCode":"409",...}. Read the
-  // body once and branch on what it says — a duplicate report object is idempotent SUCCESS, and
-  // treating it as a fatal error is exactly what would make an at-least-once render unsafe.
+  // `isDuplicateUpload` is the shared reading of Supabase's wrapped status (the 2026-07-26 finding
+  // the helper's own header records): a duplicate comes back as HTTP 400 with
+  // {"statusCode":"409",...}, and a duplicate report object is idempotent SUCCESS — treating it as
+  // fatal is exactly what would make an at-least-once render unsafe.
   const body = await response.text().catch(() => "");
-  let inner = null;
-  try { inner = JSON.parse(body); } catch { /* not JSON — fall through to the raw body */ }
-  if (response.status === 409 || String(inner?.statusCode) === "409" || inner?.error === "Duplicate") {
-    return { created: false, existed: true };
-  }
+  if (isDuplicateUpload(response.status, body)) return { created: false, existed: true };
   throw new StorageError(
     "storage_error",
     `report storage upload failed (${response.status})${body ? ` ${body.slice(0, 200)}` : ""}`,
@@ -646,11 +680,7 @@ export async function putSandboxCanonical(filePath, key, mime = "application/pdf
   });
   if (response.ok) return { created: true, existed: false };
   const raw = await response.text().catch(() => "");
-  let inner = null;
-  try { inner = JSON.parse(raw); } catch { /* not JSON — fall through to the raw body */ }
-  if (response.status === 409 || String(inner?.statusCode) === "409" || inner?.error === "Duplicate") {
-    return { created: false, existed: true };
-  }
+  if (isDuplicateUpload(response.status, raw)) return { created: false, existed: true };
   throw new StorageError(
     "storage_error",
     `sandbox storage upload failed (${response.status})${raw ? ` ${raw.slice(0, 200)}` : ""}`,
