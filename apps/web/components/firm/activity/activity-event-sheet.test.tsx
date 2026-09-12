@@ -282,3 +282,20 @@ test("ActivityEventSheet: a receipt with no Work behind it renders neither line"
   assert.doesNotMatch(text, /Initiated by/, "no Work, no provenance pair");
   assert.doesNotMatch(text, /Responsible/, "no Work, no provenance pair");
 });
+
+test("ActivityEventSheet: a database BELOW the 0184 frontier reads `initiator` as both facts", async () => {
+  // The deploy order is migrations, then the runtime image, then the web — but this is a jsonb
+  // key, not a PostgREST column list, so an old door does not fail the read: it simply sends
+  // `initiator` alone. Before 0184 that column was frozen at admission, so it genuinely IS both
+  // who asked and who is answerable, and reading it as both is the honest rendering of that row
+  // rather than a guess. The alternative — two labelled rows over two blanks — would be the
+  // surface hiding a fact it was given.
+  const text = await openReceipt({
+    ...receiptDetail({ initiator: ASKED }),
+    initiated_by: undefined, responsible: undefined,
+  });
+
+  assert.match(text, /Initiated by/, "the pair still renders off the one key the old door sends");
+  assert.match(text, /Responsible/, "…both halves of it");
+  assert.match(text, new RegExp(ASKED.slice(0, 8)), "…naming the one human that row knows about");
+});
