@@ -5,9 +5,11 @@
 // confirmation, the firm form, and the firm form carrying a governed refusal.
 //
 // FS-4 C-6: the DPA checkbox this file used to drive on the ACCOUNT step is
-// gone (checkout-gate-design.md §1.1 moved the real DPA e-sign to a later
-// step — `signup-dpa-form.test.tsx` covers that surface's own a11y instead).
-// This form now gates on ordinary field validation only.
+// gone (checkout-gate-design.md §1.1 moved the real e-sign to a later step).
+// #621 replaced that single-document step outright with the TWO-agreement
+// legal stage, so the surface's own a11y now lives in
+// `signup-legal-stage.test.tsx`. This form gates on ordinary field validation
+// only.
 //
 // NO SYNTHETIC <h1> WRAPPER, deliberately — and this is the one thing worth
 // reading before copying the invite-accept a11y file's idiom. That file wraps
@@ -23,7 +25,7 @@ import { createElement, type ReactElement } from "react";
 import { NextIntlClientProvider } from "next-intl";
 import { AppRouterContext } from "next/dist/shared/lib/app-router-context.shared-runtime";
 
-import { renderComponent, textOf, setFieldValue } from "../../test/hookHarness";
+import { renderComponent, textOf, setFieldValue, clickButton } from "../../test/hookHarness";
 import { enableDomInspection } from "../../test/domInspect";
 import { checkAccessibility } from "../../test/a11yRules";
 import { configureSessionTokenSource, resetSessionTokenSource } from "../../lib/session-accessor";
@@ -336,6 +338,26 @@ test("H-35 — THE CHECK-EMAIL CARD RENDERS A ROUTE TO /auth/confirm, and promis
       // VACUITY CONTROL: the matcher fires on the sentence this change removed.
       assert.match("We can't resend one from here in this build.", RESEND_REFUSED_CLAIM);
       assert.doesNotMatch("You can ask for another one on the code screen.", RESEND_REFUSED_CLAIM);
+
+      // #621 review item 6 — THE WAY OUT OF A MISTYPED ADDRESS. This card is
+      // reached for a fresh signup AND for a duplicate account (flattened so
+      // the screen is not an account-existence oracle), so a typo lands here
+      // looking exactly like a correct address, and everything on the card told
+      // the person to go wait for mail that will never come. `/signup` IS this
+      // route, so starting again is an act rather than a link: the control
+      // clears the remembered address and returns this form to its first stage.
+      assert.match(text, /Wrong email address/i, "the check-email card offers no way out of a typo");
+      const startAgain = findIn(h.container as never, (n) =>
+        n.tagName === "BUTTON" && /Start again with a different one/i.test(textOf(n as never)));
+      assert.ok(startAgain, "no control to start again with a different address");
+      assert.deepEqual(checkAccessibility(h.container as never), []);
+      await clickButton(startAgain as never);
+      for (let i = 0; i < 4; i++) await h.settle();
+      const restarted = textOf(h.container as never);
+      assert.match(restarted, /Create your account/, "starting again did not return to the account step");
+      assert.equal(recalledSignupEmail(), null,
+        "the mistyped address is still remembered, and would prefill the confirm form");
+
       assert.deepEqual(checkAccessibility(h.container as never), []);
     } finally {
       await h.unmount();

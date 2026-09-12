@@ -132,6 +132,14 @@ _Avoid_: A hard block; proof the document cannot be used at all; a synonym for "
 The client whose posted entry currently holds a spoken-for document — firm-wide, not necessarily the client being asked about.
 _Avoid_: The asking client; the document's filing client when that differs from who holds the posting.
 
+**Legal document**:
+One versioned text Clara asks a person to accept — the Terms of Service or the Data Processing Agreement — with a kind, an integer version, a status (draft, published, superseded) and the exact bytes' hash. Only a published version can be accepted; a draft is shown as not final.
+_Avoid_: A placeholder as a signable agreement; one "current agreement" that stands for both kinds.
+
+**Legal acceptance**:
+The append-only record that one person accepted one published legal document at one exact version and hash, with its instant and the operation key that made it idempotent. Both kinds must be accepted at their current versions before checkout opens; the intent pins the versions it was opened against.
+_Avoid_: A checkbox state kept in the browser; acceptance of one kind counting for the other.
+
 **Activity event**:
 One observable, attributable change in the firm's books or work — a domain event, an agent receipt or a committed operation receipt — with its actor and delegation, client, time, status and links to its Work, object, source and replacement outcome.
 _Avoid_: An internal task name or private model reasoning; a pending question (Work owns those); a substitute for the object's own current state.

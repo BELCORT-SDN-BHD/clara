@@ -158,6 +158,15 @@ test("in-range flash payloads, at and inside the ceiling, render exactly the sub
   });
   assert.deepEqual(waitAtCeiling.props.state, { kind: "locked", waitSeconds: 900 });
 
+  // A CLAMPED wait carries `atLeast` through to the card's state (the verify
+  // wall's identical correction to the resend limb's, `verify/
+  // confirmation-wall.ts`).
+  const waitClamped = await ConfirmEmailPage({
+    searchParams: Promise.resolve({ flash: "n1" }),
+    readConfirmFlash: flashOf({ nonce: "n1", kind: "locked", waitSeconds: 900, atLeast: true }),
+  });
+  assert.deepEqual(waitClamped.props.state, { kind: "locked", waitSeconds: 900, atLeast: true });
+
   const unavailable = await ConfirmEmailPage({
     searchParams: Promise.resolve({ flash: "n1" }),
     readConfirmFlash: flashOf({ nonce: "n1", kind: "unavailable" }),

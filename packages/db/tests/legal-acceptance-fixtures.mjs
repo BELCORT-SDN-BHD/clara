@@ -22,14 +22,14 @@
 
 import { createHash, randomUUID } from "node:crypto";
 import {
-  CLR, PG, ROLES, assertRaises, endPool, humanQuery, insertUser, namedCall, opk, roleQuery,
+  CLR, PG, ROLES, assertRaises, endPool, getPool, humanQuery, insertUser, namedCall, opk, roleQuery,
   rootQuery, withActor,
 } from "./rig-fixtures.mjs";
 import { clearOperator, markOperator } from "./p4t2-fixtures.mjs";
 import { markSkip } from "./wave-a-helpers.mjs";
 
 export {
-  CLR, PG, ROLES, assertRaises, clearOperator, endPool, humanQuery, insertUser, markOperator,
+  CLR, PG, ROLES, assertRaises, clearOperator, endPool, getPool, humanQuery, insertUser, markOperator,
   namedCall, opk, roleQuery, rootQuery, withActor,
 };
 

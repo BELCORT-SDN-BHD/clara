@@ -327,6 +327,37 @@ test("locked renders its own distinct flash and installs no session", async () =
   }
 });
 
+test("a CLAMPED locked wait carries `atLeast` into the flash; an exact one carries neither", async () => {
+  // Mirrors the resend handler's identical plumbing (`resend/handler.ts`):
+  // `confirmation-wall.ts` only ever sets `atLeast` to `true`, never an
+  // explicit `false`, so this handler must not invent the field when the
+  // wall left it out.
+  const clamped = await handleEmailConfirmationPost(
+    postRequest(confirmFields()),
+    async () => fakeClient(sessionInstalled(), [], []),
+    async () => ({ kind: "locked", scope: "origin", retryAfterSeconds: 900, atLeast: true }),
+  );
+  assert.deepEqual(readFlashPayload(clamped), {
+    nonce: locationFlashNonce(clamped),
+    kind: "locked",
+    waitSeconds: 900,
+    atLeast: true,
+    email: "aisyah@example.com",
+  });
+
+  const exact = await handleEmailConfirmationPost(
+    postRequest(confirmFields()),
+    async () => fakeClient(sessionInstalled(), [], []),
+    async () => ({ kind: "locked", scope: "origin", retryAfterSeconds: 300 }),
+  );
+  assert.deepEqual(readFlashPayload(exact), {
+    nonce: locationFlashNonce(exact),
+    kind: "locked",
+    waitSeconds: 300,
+    email: "aisyah@example.com",
+  });
+});
+
 test("FOLD 4 + F1: the cookie's own SECURITY ATTRIBUTES are pinned, not just its lifetime", async () => {
   // F1, MEDIUM — the ENTIRE N1 unforgeability claim rests on httpOnly +
   // sameSite:"strict" + secure. Mutant-tested by the reviewer: delete

@@ -36,7 +36,20 @@ const buttonVariants = cva(
   {
     variants: {
       variant: {
-        default: "bg-primary text-primary-foreground hover:bg-primary/80",
+        // HOVER IS /90, NOT /80, AND THAT IS AN AA FIX RATHER THAN A TASTE ONE.
+        // `--primary` (#1d4ed8) at 80% over the three grounds a Button actually
+        // sits on (--background/--card/--popover, all #ffffff) composites to
+        // #4a71e0, which measures 4.440:1 against #ffffff 14px text — under
+        // WCAG 1.4.3's 4.5 floor, on the most-used control in the product. Two
+        // browser walks were parking the pointer off-screen before their axe
+        // scan to avoid measuring it (`e2e/checkout-gate-walk.spec.ts`'s own
+        // note recorded the finding). At 90% the composite is #3460dc =
+        // 5.451:1, still visibly lighter than the resting #1d4ed8 (6.702:1) so
+        // the hover still reads as a hover. The RESTING pair is untouched.
+        // Measured with `scripts/check-token-contrast.mjs`'s own
+        // `alphaBlend`/`contrastRatio`, which now pins this pair as
+        // `primary-foreground-on-primary-hover`.
+        default: "bg-primary text-primary-foreground hover:bg-primary/90",
         outline:
           "border-border bg-background hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground",
         secondary:

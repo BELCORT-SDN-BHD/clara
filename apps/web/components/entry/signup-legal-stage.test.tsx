@@ -1,5 +1,5 @@
 // THE LEGAL STAGE (#621) — GATE (b) and GATE (c) folded into one file, the same
-// call `signup-dpa-form.test.tsx` made for the step this replaces: the stage has
+// call the retired single-document DPA step's own test file made: the stage has
 // few enough controls that a separate keyboard file would be one assertion
 // repeated with a different import.
 //
@@ -16,7 +16,7 @@ import { NextIntlClientProvider } from "next-intl";
 import { AppRouterContext } from "next/dist/shared/lib/app-router-context.shared-runtime";
 
 import { renderComponent, textOf, clickButton } from "../../test/hookHarness";
-import { enableDomInspection } from "../../test/domInspect";
+import { activeElement, enableDomInspection } from "../../test/domInspect";
 import { checkAccessibility } from "../../test/a11yRules";
 import { focusableElements, checkKeyboardWalk } from "../../test/keyboardWalk";
 import messages from "../../messages/en.json";
@@ -69,12 +69,14 @@ const byLinkText = (re: RegExp) => (n: Node) => n.tagName === "A" && re.test(tex
 const attr = (n: Node, name: string) => (typeof n.getAttribute === "function" ? n.getAttribute(name) : null);
 
 /** The DB's own posture (`ck_legal_documents_body_sha`): `body_sha256 =
- *  sha256(convert_to(body,'UTF8'))`, rendered by PostgREST as `\x`-prefixed
- *  hex. Computed here rather than hand-typed so the fixture is a REAL hash of
- *  the body it accompanies — a placeholder would let a "forwards whatever is in
+ *  encode(sha256(convert_to(body,'UTF8')),'hex')` on a `text` column, so
+ *  PostgREST renders PLAIN LOWERCASE HEX — never the prefixed form, which is
+ *  `bytea`'s wire shape and belonged to the retired `dpa_documents` column.
+ *  Computed here rather than hand-typed so the fixture is a REAL hash of the
+ *  body it accompanies — a placeholder would let a "forwards whatever is in
  *  the fixture" bug pass as easily as a correct implementation. */
 function bodyHash(body: string): string {
-  return `\\x${createHash("sha256").update(body, "utf8").digest("hex")}`;
+  return createHash("sha256").update(body, "utf8").digest("hex");
 }
 
 const TERMS_BODY = "Clara beta terms of service. Clause one.";
@@ -197,6 +199,50 @@ test("ACCEPTING ONE DOES NOT OPEN CHECKOUT; accepting BOTH does, through a real 
       "the accepted agreement still offers its control",
     );
     assert.deepEqual(checkAccessibility(h.container as never), []);
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("FOCUS LANDS ON THE RECEIPT, never on <body> and never past it onto the next control", async () => {
+  // The defect: accepting REMOVES the control that was just pressed, so the
+  // browser drops focus on `<body>` and a keyboard user restarts at the top of
+  // the page with no announcement of what happened.
+  //
+  // THE RULE THIS PINS (`signup-legal-stage.tsx`'s own header owns it): focus
+  // moves to THAT agreement's accepted banner — the receipt carrying the
+  // timestamp and version — and deliberately NOT to the other agreement's
+  // control, even though that is the next thing to do. Reading what you just
+  // signed comes before being asked to sign the next one; the control is one
+  // Tab away in DOM order.
+  const { accept } = recordingAccept({
+    kind: "accepted", documentKind: "terms", version: 3, acceptedAt: "2026-09-02T04:30:00.000Z", replay: false,
+  });
+  const { h } = await mount(bothPublished(), accept);
+  try {
+    const other = findIn(h.container as never, byButtonText(/accept the Data Processing Agreement/i));
+    await clickButton(findIn(h.container as never, byButtonText(/accept the Terms of Service/i)) as never);
+    for (let i = 0; i < 6; i++) await h.settle();
+
+    const focused = activeElement() as Node | null;
+    assert.ok(focused, "nothing holds focus after an acceptance");
+    assert.notEqual((focused as { tagName?: string }).tagName, "BODY",
+      "focus was dumped on <body> when the control was replaced");
+    assert.match(textOf(focused as never), /Accepted on .*version 3/s,
+      "focus did not land on the receipt for the agreement that was just accepted");
+    // Focusable, but NOT in the tab order — a destination focus is sent to.
+    assert.equal(attr(focused as Node, "tabindex") ?? attr(focused as Node, "tabIndex"), "-1");
+    assert.equal(
+      focusableElements(h.container as never).includes(focused as never),
+      false,
+      "the receipt joined the tab order instead of being a programmatic target only",
+    );
+    // AND NOT THE NEXT CONTROL — which is still there, still offered.
+    assert.ok(other, "the other agreement's control vanished");
+    assert.notEqual(focused, other, "focus skipped past the receipt onto the next control");
+    assert.ok(findIn(h.container as never, byButtonText(/accept the Data Processing Agreement/i)));
+    assert.deepEqual(checkAccessibility(h.container as never), []);
+    assert.deepEqual(checkKeyboardWalk(h.container as never), []);
   } finally {
     await h.unmount();
   }

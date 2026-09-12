@@ -412,8 +412,29 @@ comment on table clara.dpa_signatures is
 -- an intent opened before this file has no terms pin, and `claim_paid_firm` treats NULL as "this
 -- flow never had a terms gate" rather than as "terms unaccepted". A hosted applicant who paid on
 -- Tuesday must be able to claim their firm on Thursday. Every intent opened AFTER this file is
--- pinned by `open_checkout_intent`, which refuses to open at all without both acceptances, so the
--- NULL arm closes by itself as the pre-0185 intents are consumed.
+-- pinned by `open_checkout_intent`, which refuses to open at all without both acceptances.
+--
+-- AND THE NULL ARM DOES NOT CLOSE BY ITSELF (#621 review, SEC-2). THIS PARAGRAPH USED TO SAY IT
+-- DID -- "so the NULL arm closes by itself as the pre-0185 intents are consumed" -- and that was
+-- wrong about the one path that consumes them. `open_checkout_intent` REUSES an applicant's
+-- unstamped current-plan intent rather than opening a second one (§G, the money-surface rule), and
+-- a pre-0185 intent IS such a row: it is unstamped, it is the applicant's, and its plan is still
+-- current. So a legacy intent could be reused by a caller the door had JUST verified to have
+-- accepted both kinds, carry `terms_version` NULL into payment, and be waved through the terms
+-- half of `claim_paid_firm` on a carve-out meant for somebody else entirely -- a checkout that
+-- ends in a claimed firm with no terms evidence anywhere, on a database where terms ARE published.
+--
+-- SO THE REUSE ARM STAMPS THE PIN. When it reuses an intent whose `terms_version` is NULL it
+-- writes the terms version that same call has just proven the caller accepted (the single
+-- observation of §G, under the publish locks -- never a fresh read). The NULL arm therefore
+-- survives in EXACTLY ONE place: an intent that was already SESSION-STAMPED before 0185, which no
+-- door can revisit and whose applicant paid under the pre-0185 rules. `claim_paid_firm` keeps its
+-- tolerance for precisely that row and for no other.
+--
+-- That write is the SECOND and last update `clara.checkout_intents` admits. 0158's session-stamp
+-- trigger froze the row against everything except the first `session_id` stamp; it now also admits
+-- `terms_version` NULL -> value WHILE the row is unstamped, with every other column (`session_id`
+-- included) unmoved. Two permitted moves, each one-way, neither able to rewrite a pin that exists.
 --
 -- The two `*_kind` columns are GENERATED constants, which is what lets the pins be real FOREIGN
 -- KEYS onto (kind, version) rather than a trigger's opinion: a generated column cannot be written
@@ -459,10 +480,24 @@ alter table clara.checkout_intents
 
 -- 0158's session-stamp trigger froze the row by listing its columns, so the two new pins would be
 -- rewritable during the one permitted UPDATE. Recut with both of them in the frozen tuple; every
--- other word is 0158:230-243's.
+-- other word of the wall is 0158:230-243's, and the ONE arm placed above it is #621's (SEC-2).
 create or replace function clara._tf_checkout_intents_session_stamp() returns trigger
   language plpgsql security definer set search_path=clara,pg_temp as $$
 begin
+  -- THE LEGACY TERMS PIN: NULL -> value, on an UNSTAMPED row, with nothing else moving. This is
+  -- the only update `open_checkout_intent`'s reuse arm performs (§G) and it is one-way twice over
+  -- -- once `terms_version` is not null this arm can never match the row again, and once
+  -- `session_id` is stamped the row is closed to it. It sits BEFORE the 0158 wall rather than
+  -- folded into it so the wall keeps 0158's exact shape and its exact message.
+  if old.session_id is null and new.session_id is null
+     and old.terms_version is null and new.terms_version is not null
+     and row(new.id,new.registration_id,new.applicant,new.price_local_key,new.dpa_version,
+             new.opened_at)
+         is not distinct from
+         row(old.id,old.registration_id,old.applicant,old.price_local_key,old.dpa_version,
+             old.opened_at) then
+    return new;
+  end if;
   if old.session_id is not null
      or new.session_id is null
      or btrim(new.session_id)=''
@@ -517,6 +552,33 @@ comment on column clara.firm_registration_payments.consumed_dpa_signature is
 -- nothing acceptable, and saying "stale" would imply there is). If it HAS one and the caller named
 -- another version, the answer is `stale_version` and carries the current version, because that
 -- caller is holding a page that has moved and the surface must re-fetch rather than retry.
+--
+-- ALL THREE PIN `plan_cache_mode = force_custom_plan`, BESIDE their `search_path` and never in
+-- place of it (#621 review H-1; 0183's house rule for a plpgsql door, restated unchanged at
+-- 0184:1902/1930). Every one of these bodies caches a statement that binds a PER-USER or PER-KIND
+-- value as a plpgsql parameter -- `v_actor` in the read's `current_docs` join and in the
+-- acceptance door's op_key/natural-key probes, `p_kind` in the publish door's `max(version)`
+-- allocation and its published-row `for update` -- and plpgsql switches a cached statement to the
+-- GENERIC plan from its SIXTH execution of a session. PostgREST pools long-lived connections, so
+-- that is every call from the sixth on, for the life of the connection.
+--
+-- WHAT THAT COSTS WHEN IT IS LEFT OFF IS MEASURED IN 0183, NOT HERE. 0183:315-321 measured its own
+-- door on this rig at 6,000 receipts: calls 1-5 took 46/18/19/18/18 ms and calls 6-10 took
+-- 13.8/14.3/16.4/13.9/13.5 SECONDS, because a generic plan estimates `x = $1` at the per-tenant
+-- AVERAGE of a multi-tenant table and re-shapes the join around that estimate. `clara.legal_acceptances`
+-- is one row per person per kind and is small TODAY, so this file measures no step of its own and
+-- claims none; it pins the clause for the reason 0183 gives at its own `get_activity_event`, which
+-- was likewise pinned without a measurement: one planning pass (~1 ms) buys an answer that does
+-- not depend on a statistics accident a later edit cannot be trusted to preserve. §H asserts the
+-- clause from `pg_proc.proconfig`, because a body re-shipped without it answers CORRECTLY and
+-- slowly -- the failure mode a correctness test cannot see.
+--
+-- THE TWO §G RECUTS ARE DELIBERATELY NOT PINNED. 0163 shipped `open_checkout_intent` and
+-- `claim_paid_firm` with `search_path` alone and neither 0183 nor 0184 re-pinned them (MEASURED,
+-- not assumed: `grep -rn plan_cache_mode packages/db/migrations` matches only 0183 and 0184, and
+-- 0163:394/562 carry `set search_path=clara,pg_temp` and nothing else). This file recuts their
+-- BODIES for the legal gate; it does not change how they are planned, and §H asserts that absence
+-- as positively as it asserts the three pins.
 -- =====================================================================================
 
 -- Frontend home: apps/web/lib/registration (the /signup legal step and the account's legal page).
@@ -538,7 +600,14 @@ create function clara.get_current_legal_documents()
 returns table(kind text, version integer, status text, title text, body text, body_sha256 text,
               effective_from timestamptz, published_at timestamptz,
               accepted_at timestamptz, accepted_version integer)
-  language plpgsql stable security definer set search_path=clara,pg_temp as $$
+  language plpgsql stable security definer
+  set search_path=clara,pg_temp
+  -- THE CALLER IS A PARAMETER AND ALWAYS WILL BE: `v_actor` is bound into the acceptance join and
+  -- the latest-accepted-version subquery of this body's ONE statement. Re-plan every call against
+  -- the real actor rather than let plpgsql settle, from the sixth call of a pooled connection, on
+  -- a plan built for the per-person average. See §E's header for the rule and its measurement.
+  set plan_cache_mode = force_custom_plan
+  as $$
 declare
   v_actor uuid;
 begin
@@ -568,7 +637,9 @@ grant execute on function clara.get_current_legal_documents() to clara_authentic
 comment on function clara.get_current_legal_documents() is
   '#621: the current legal text of EVERY kind for the calling person -- the published row if there '
   'is one, else the newest draft (status says which), with the caller''s own acceptance of that '
-  'exact version and their latest accepted version of that kind. Refuses CLR04 no_actor.';
+  'exact version and their latest accepted version of that kind. Refuses CLR04 no_actor. Pins '
+  'plan_cache_mode = force_custom_plan beside its search_path: its ONE statement binds the calling '
+  'person as a parameter -- see 0185 section E.';
 
 -- THE ACCEPTANCE DOOR. Idempotent twice over: by `op_key` (a lost response replays, and the same
 -- key against a different document is a typed conflict rather than a second acceptance) and by
@@ -578,7 +649,12 @@ comment on function clara.get_current_legal_documents() is
 create function clara.accept_legal_document(
   p_kind text, p_version integer, p_body_sha256 text, p_op_key text
 ) returns jsonb
-  language plpgsql security definer set search_path=clara,pg_temp as $$
+  language plpgsql security definer
+  set search_path=clara,pg_temp
+  -- Both replay probes bind `v_actor` (and one of them `p_kind`/`p_version`) into cached
+  -- statements over clara.legal_acceptances. §E's header for why that must be re-planned per call.
+  set plan_cache_mode = force_custom_plan
+  as $$
 declare
   v_actor uuid;
   v_is_agent boolean;
@@ -677,7 +753,8 @@ comment on function clara.accept_legal_document(text,integer,text,text) is
   'Human actors only. Idempotent by op_key and by (user, kind, version); a replay returns the '
   'ORIGINAL accepted_at. Refusals carry detail.reason: invalid_op_key | invalid_kind | '
   'op_key_conflict | hash_mismatch (CLR10), not_published | stale_version (CLR09), '
-  'no_actor | unknown_actor | agent_actor (CLR04).';
+  'no_actor | unknown_actor | agent_actor (CLR04). Pins plan_cache_mode = force_custom_plan '
+  'beside its search_path -- see 0185 section E.';
 
 -- THE PUBLISH DOOR — the "configurable versioned content" half of #612 §8. Authority is the same
 -- predicate `clara.approve_firm_registration` uses (0145:782): `clara._human_ctx(role_rank('owner'))`
@@ -692,7 +769,12 @@ create function clara.publish_legal_document(
   p_kind text, p_title text, p_body text, p_source_path text,
   p_effective_from timestamptz, p_op_key text
 ) returns jsonb
-  language plpgsql security definer set search_path=clara,pg_temp as $$
+  language plpgsql security definer
+  set search_path=clara,pg_temp
+  -- `p_kind` is bound into the published-row `for update` and the `max(version)+1` allocation --
+  -- the two statements the version ladder depends on. §E's header for why that must be re-planned.
+  set plan_cache_mode = force_custom_plan
+  as $$
 declare
   c record;
   v_dedupe jsonb;
@@ -773,7 +855,9 @@ comment on function clara.publish_legal_document(text,text,text,text,timestamptz
   'one. Owner of the OPERATOR firm only (the approve_firm_registration predicate, re-derived at '
   'call time). op_receipts-idempotent. Refusals carry detail.reason: invalid_op_key | invalid_kind '
   '| empty_body | op_key_conflict (CLR10), identical_body (CLR09), operation_in_flight (CLR13), '
-  'not_operator_firm (CLR04).';
+  'not_operator_firm (CLR04). Pins plan_cache_mode = force_custom_plan beside its search_path -- '
+  'see 0185 section E. Serialises per kind on pg_advisory_xact_lock(''clara.legal-publish:''||kind), '
+  'the SAME lock clara.open_checkout_intent takes for BOTH kinds before it checks and pins.';
 
 -- =====================================================================================
 -- §F  THE DEPRECATED DPA WRAPPERS. Same signatures, same return types, same grants, delegating
@@ -858,7 +942,10 @@ comment on function clara.get_own_dpa_signature() is
 --                             a BOTH-KINDS arm that names WHICH kinds are missing, and the intent
 --                             now pins terms_version beside dpa_version.
 --       claim_paid_firm       the pinned-version check covers the intent's terms_version too --
---                             UNLESS it is NULL, which is a pre-0185 intent (see §D).
+--                             UNLESS it is NULL, which after SEC-2 can only be an intent that was
+--                             SESSION-STAMPED before 0185 (see §D: the opening door now stamps the
+--                             pin on any legacy intent it reuses, so an unstamped NULL never
+--                             reaches payment).
 --
 --     `detail.missing` is an ARRAY because a fresh applicant is missing both, and a surface that
 --     can only say "something is missing" sends them to the wrong step half the time.
@@ -914,22 +1001,59 @@ begin
   -- there is no legal acceptance behind this checkout either way. Replaces 0163's single
   -- "the data processing agreement is not signed" arm, whose sentence is kept in detail.message
   -- so a caller that matched on it still has it.
-  select coalesce(jsonb_agg(k.kind order by k.kind),'[]'::jsonb) into v_missing
+  --
+  -- THE CHECK AND THE PIN ARE ONE OBSERVATION (#621 review, SEC-1). The first cut asked THREE
+  -- questions in THREE statements: which kinds are missing, then `dpa`'s published version, then
+  -- `terms`'s. Under READ COMMITTED each statement takes its own snapshot, so a
+  -- `publish_legal_document` that commits BETWEEN them is invisible to the check and visible to
+  -- the pin. The applicant is then let through on v1 -- which they did accept -- and the intent is
+  -- pinned to v2, which they have never seen. They pay. `claim_paid_firm` re-checks the PINNED
+  -- version, finds no acceptance of v2, and refuses `legal_not_accepted` on a PAID registration:
+  -- money taken, firm unclaimable, and nothing in this file can undo it from the applicant's side.
+  -- Two changes close it, and BOTH are here because either alone leaves a window:
+  --   · THE PUBLISH DOOR'S OWN PER-KIND LOCKS, taken here too. `publish_legal_document` (§E)
+  --     serialises on `pg_advisory_xact_lock(hashtextextended('clara.legal-publish:'||kind,0))`
+  --     before it reads the current row `for update`; this door takes the SAME two keys, so a
+  --     publish that starts while an applicant is inside the door BLOCKS until this transaction
+  --     commits, rather than landing between the check and the pin. Taken in a FIXED ORDER --
+  --     terms, then dpa -- so two callers can never take them in opposite orders; the publish door
+  --     takes exactly ONE of them, so it can only ever wait, never hold one and want the other.
+  --   · ONE STATEMENT yielding the missing list AND both versions, so the refusal and the pin are
+  --     decided from the SAME rows even if the lock above were ever loosened.
+  -- WHAT THE FIRST CUT HAD INSTEAD WAS AN ACCIDENT, AND IT ARRIVED TOO LATE. Measured on the rig
+  -- (0185 applied, the pre-fix bodies restored by CREATE OR REPLACE, one applicant held open
+  -- mid-door and one operator publishing): the publish DID stall -- on a `transactionid` ShareLock,
+  -- because the applicant's `checkout_intents` INSERT takes FK KEY SHARE row locks on the two
+  -- `legal_documents` rows it pins, and the supersede UPDATE moves `status`, which is a key column
+  -- of `uq_legal_documents_published`. That lock is real and it is useless here: it is taken by the
+  -- LAST statement of the door, long after the check and the version reads it would have to
+  -- protect, and on the REUSE path (§G's unstamped-intent arm) there is no insert at all, so it is
+  -- not taken. The same scene with the applicant's transaction doing nothing shows no block, which
+  -- is how that dependency was identified rather than guessed.
+  -- The cost is that two applicants opening a checkout in the same instant serialise on these two
+  -- keys for the remainder of their transactions. This door is taken once per registration and
+  -- everything after it here is an indexed point read, so that is the cheap half of the trade.
+  perform pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtextextended('clara.legal-publish:terms', 0));
+  perform pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtextextended('clara.legal-publish:dpa', 0));
+  select coalesce(jsonb_agg(k.kind order by k.kind) filter (where v.version is null),'[]'::jsonb),
+         max(v.version) filter (where k.kind='dpa'),
+         max(v.version) filter (where k.kind='terms')
+    into v_missing, v_dpa_version, v_terms_version
     from (select unnest(array['dpa','terms']) as kind) k
-   where not exists (
-     select 1 from clara.legal_documents d
-      join clara.legal_acceptances a
-        on a.user_id=v_actor and a.kind=d.kind and a.version=d.version and a.body_sha256=d.body_sha256
-      where d.kind=k.kind and d.status='published');
+    left join lateral (
+      select d.version
+        from clara.legal_documents d
+        join clara.legal_acceptances a
+          on a.user_id=v_actor and a.kind=d.kind and a.version=d.version and a.body_sha256=d.body_sha256
+       where d.kind=k.kind and d.status='published'
+    ) v on true;
   if jsonb_array_length(v_missing)>0 then
     raise exception 'the required legal agreements are not accepted' using errcode='CLR09',
       detail=jsonb_build_object('reason','legal_not_accepted','missing',v_missing,
         'message','the data processing agreement is not signed')::text;
   end if;
-  select d.version into v_dpa_version
-    from clara.legal_documents d where d.kind='dpa' and d.status='published';
-  select d.version into v_terms_version
-    from clara.legal_documents d where d.kind='terms' and d.status='published';
   if p_origin_digest is null or octet_length(p_origin_digest)<>32 then
     raise exception 'an origin digest is required' using errcode='CLR10';
   end if;
@@ -980,6 +1104,18 @@ begin
    limit 1
    for update;
   if found then
+    -- A REUSED PRE-0185 INTENT LEAVES THE DOOR FULLY PINNED (#621 review, SEC-2). An intent opened
+    -- before this file carries `terms_version` NULL, and the arm above matches it like any other
+    -- unstamped current-plan intent -- so without this write the applicant walks the #621 door, is
+    -- verified to have accepted BOTH kinds, and still pays against an intent with no terms pin,
+    -- which `claim_paid_firm` then waves through on the legacy carve-out §D describes. The value
+    -- written is `v_terms_version` from the SINGLE observation above, under the publish locks: the
+    -- version this caller has just been proven to accept, never a fresh read that could have moved.
+    -- Only NULL -> value, and only while the intent is unstamped: that is the one other update
+    -- `_tf_checkout_intents_session_stamp` admits (§D), and it refuses every other rewrite.
+    update clara.checkout_intents
+       set terms_version=v_terms_version
+     where id=v_intent and terms_version is null;
     return jsonb_build_object(
       'intent_id',v_intent,'price_local_key',v_price_local_key,'stripe_price_id',v_stripe_price_id);
   end if;
@@ -1080,8 +1216,10 @@ begin
       detail='{"reason":"legal_not_accepted","missing":["dpa","terms"],"cause":"intent_not_found"}';
   end if;
   -- #621: the acceptance must exist at the version the INTENT pinned, for every kind the intent
-  -- pinned. `terms_version` NULL is a pre-0185 intent (§D) and passes the terms half: an applicant
-  -- who paid before this file existed must still be able to claim their firm.
+  -- pinned. `terms_version` NULL passes the terms half: after SEC-2 the only intent that can still
+  -- carry a NULL pin is one SESSION-STAMPED before 0185 (§D -- the opening door stamps the pin on
+  -- any legacy intent it REUSES), i.e. an applicant who paid before this file existed, and they
+  -- must still be able to claim their firm.
   v_missing:='[]'::jsonb;
   if not exists (
     select 1 from clara.legal_acceptances a
@@ -1294,6 +1432,31 @@ begin
         using errcode='CLR10';
     end if;
   end loop;
+  -- …AND THE THREE DOORS THIS FILE MINTS PIN plan_cache_mode = force_custom_plan BESIDE THAT
+  --    search_path (#621 review H-1; 0183's house rule, restated at 0184:1930). Read from
+  --    proconfig rather than from any body, because a door re-shipped without the clause answers
+  --    CORRECTLY and slowly -- the failure mode a correctness test cannot see.
+  select count(*)::int into v_n from pg_proc p
+   where p.oid in ('clara.accept_legal_document(text,integer,text,text)'::regprocedure,
+                   'clara.publish_legal_document(text,text,text,text,timestamptz,text)'::regprocedure,
+                   'clara.get_current_legal_documents()'::regprocedure)
+     and 'plan_cache_mode=force_custom_plan' = any(coalesce(p.proconfig,'{}'::text[]));
+  if v_n <> 3 then
+    raise exception '#621 tail: % of 3 legal doors pin plan_cache_mode=force_custom_plan -- without it each body binds the calling person (or the kind) into ONE cached statement and serves every call after the fifth of a pooled connection from a generic plan', v_n
+      using errcode='CLR10';
+  end if;
+  -- …and the two §G RECUTS do NOT, because 0163 never did and neither 0183 nor 0184 re-pinned
+  --    them. This file changes their bodies, not how they are planned; the absence is asserted as
+  --    positively as the presence above so a later reader does not have to take the claim on trust.
+  select count(*)::int into v_n from pg_proc p
+   where p.oid in ('clara.open_checkout_intent(uuid,bytea,text)'::regprocedure,
+                   'clara.claim_paid_firm(uuid,text)'::regprocedure)
+     and 'plan_cache_mode=force_custom_plan' = any(coalesce(p.proconfig,'{}'::text[]));
+  if v_n <> 0 then
+    raise exception '#621 tail: % of the 2 recut 0163 doors gained a plan_cache_mode pin this file never decided to add', v_n
+      using errcode='CLR10';
+  end if;
+
   -- The two write doors are SECURITY DEFINER; the reads are too (they cross the owner-only RLS).
   select count(*)::int into v_n from pg_proc p
    where p.oid in ('clara.accept_legal_document(text,integer,text,text)'::regprocedure,
@@ -1370,6 +1533,29 @@ begin
         using errcode='CLR10';
     end if;
   end loop;
+  -- SEC-1: THE CHECK AND THE PIN ARE ONE OBSERVATION, TAKEN UNDER THE PUBLISH DOOR'S OWN KEYS.
+  -- Both halves are probed: the two per-kind advisory keys (so a publish landing mid-door blocks
+  -- instead of slipping between the two reads) AND the single lateral statement that yields the
+  -- missing list and both versions together.
+  foreach v_sig in array array['clara.legal-publish:terms','clara.legal-publish:dpa',
+      'pg_advisory_xact_lock','left join lateral','into v_missing, v_dpa_version, v_terms_version'] loop
+    if position(v_sig in v_src) = 0 then
+      raise exception '#621 tail: open_checkout_intent does not decide the legal check and the version pin as ONE locked observation (% absent) -- a publish committing between them pins a version the applicant never accepted, and claim_paid_firm then refuses a PAID registration', v_sig
+        using errcode='CLR10';
+    end if;
+  end loop;
+  if position('select d.version into v_dpa_version' in v_src) > 0
+     or position('select d.version into v_terms_version' in v_src) > 0 then
+    raise exception '#621 tail: open_checkout_intent still re-reads a published version in its own statement AFTER the acceptance check -- that is exactly the READ COMMITTED window SEC-1 closes'
+      using errcode='CLR10';
+  end if;
+  -- SEC-2: the reuse arm stamps a legacy (pre-0185) intent's missing terms pin, from the value the
+  -- same observation just proved accepted, and only while that pin is NULL.
+  if position('set terms_version=v_terms_version' in v_src) = 0
+     or position('and terms_version is null' in v_src) = 0 then
+    raise exception '#621 tail: open_checkout_intent''s reuse arm does not pin a reused pre-0185 intent''s terms version -- the §D NULL arm would survive a reuse and carry an unpinned intent into payment'
+      using errcode='CLR10';
+  end if;
   v_src := v_bodies ->> 'clara.claim_paid_firm(uuid,text)';
   if position('legal_not_accepted' in v_src) = 0
      or position('v_terms_version is not null' in v_src) = 0 then
@@ -1390,6 +1576,13 @@ begin
   v_src := v_bodies ->> 'clara._tf_checkout_intents_session_stamp()';
   if position('new.terms_version' in v_src) = 0 or position('old.terms_version' in v_src) = 0 then
     raise exception '#621 tail: the session-stamp trigger does not freeze the terms pin' using errcode='CLR10';
+  end if;
+  -- …and admits the ONE other move SEC-2 needs: NULL -> value on an unstamped row. Without this
+  -- arm the reuse-arm write above raises 0158's own "only the first session_id stamp" and the
+  -- whole door fails closed on every legacy intent.
+  if position('old.terms_version is null and new.terms_version is not null' in v_src) = 0 then
+    raise exception '#621 tail: the session-stamp trigger admits no NULL->value terms pin, so open_checkout_intent cannot close the reused-legacy-intent gap'
+      using errcode='CLR10';
   end if;
   -- …AND IT IS ARMED AGAIN. §D disables it for the width of the mapping UPDATE; a file that left
   -- it disabled would hand the estate a silently rewritable money-surface row.
@@ -1500,6 +1693,6 @@ begin
       using errcode='CLR10';
   end if;
 
-  raise notice '#621 tail: OK -- clara.legal_documents and clara.legal_acceptances exist under forced RLS with ONE clara_fn_owner policy and ZERO application-role grants, the one-published-per-kind partial unique index, a DB-recomputed body digest, the draft->published->superseded transition trigger and an acceptance bound to the document BYTES by composite FK; clara.accept_legal_document, clara.publish_legal_document and clara.get_current_legal_documents are SECURITY DEFINER, clara_fn_owner-owned, search_path-pinned, PUBLIC-revoked and clara_authenticated-ONLY (no agent, runtime or wake role reaches them), and each raises its whole typed roster; the publish door carries the approve_firm_registration operator-owner predicate verbatim and reserves through op_receipts; clara.sign_dpa, clara.get_current_dpa_document and clara.get_own_dpa_signature keep their signatures and grants and delegate onto kind=dpa without touching the retired relations; clara.open_checkout_intent and clara.claim_paid_firm refuse legal_not_accepted naming the missing kinds, pin and re-check BOTH versions (terms NULL on a pre-0185 intent passing deliberately), and keep every 0163 arm; every 0158 document and signature carried over by its BYTES -- the signature keeping its own id, which firm_registration_payments.consumed_dpa_signature now references in clara.legal_acceptances -- the 0158 placeholder is a DRAFT and therefore unacceptable, and this file seeds NO legal text of either kind.';
+  raise notice '#621 tail: OK -- clara.legal_documents and clara.legal_acceptances exist under forced RLS with ONE clara_fn_owner policy and ZERO application-role grants, the one-published-per-kind partial unique index, a DB-recomputed body digest, the draft->published->superseded transition trigger and an acceptance bound to the document BYTES by composite FK; clara.accept_legal_document, clara.publish_legal_document and clara.get_current_legal_documents are SECURITY DEFINER, clara_fn_owner-owned, search_path-pinned, PUBLIC-revoked and clara_authenticated-ONLY (no agent, runtime or wake role reaches them), each raises its whole typed roster, and all three additionally pin plan_cache_mode = force_custom_plan in proconfig (0183''s house rule: each body binds the calling person or the kind into a cached statement that plpgsql would otherwise serve from a generic plan from the sixth call of a pooled connection) while the two recut 0163 doors deliberately carry NO such pin, because 0163 never did and neither 0183 nor 0184 re-pinned them; the publish door carries the approve_firm_registration operator-owner predicate verbatim and reserves through op_receipts; clara.sign_dpa, clara.get_current_dpa_document and clara.get_own_dpa_signature keep their signatures and grants and delegate onto kind=dpa without touching the retired relations; clara.open_checkout_intent and clara.claim_paid_firm refuse legal_not_accepted naming the missing kinds, pin and re-check BOTH versions (terms NULL on an intent SESSION-STAMPED before 0185 passing deliberately), and keep every 0163 arm; clara.open_checkout_intent decides that check and that pin as ONE observation -- a single lateral statement taken while it holds the SAME per-kind advisory keys clara.publish_legal_document takes (terms then dpa, a fixed order against a door that takes only one), so a publish landing mid-checkout blocks until the applicant''s transaction commits instead of pinning a version they never accepted onto a registration they are about to pay for -- and its reuse arm STAMPS a reused pre-0185 intent''s NULL terms pin from that same observation, with clara._tf_checkout_intents_session_stamp admitting exactly that one further move (terms_version NULL -> value on an unstamped row, everything else frozen) and nothing more; every 0158 document and signature carried over by its BYTES -- the signature keeping its own id, which firm_registration_payments.consumed_dpa_signature now references in clara.legal_acceptances -- the 0158 placeholder is a DRAFT and therefore unacceptable, and this file seeds NO legal text of either kind.';
 end
 $w621_tail$;

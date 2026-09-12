@@ -11,7 +11,11 @@ const badgeVariants = cva(
   {
     variants: {
       variant: {
-        default: "bg-primary text-primary-foreground [a]:hover:bg-primary/80",
+        // /90 for the same measured reason `components/ui/button.tsx` moved:
+        // `--primary` at 80% over white composites to 4.440:1 under white text,
+        // below AA. This variant's hover only fires on a LINK badge, but it is
+        // the same token pair and the gate now measures it once for both.
+        default: "bg-primary text-primary-foreground [a]:hover:bg-primary/90",
         secondary: "bg-secondary text-secondary-foreground [a]:hover:bg-secondary/80",
         destructive:
           "bg-destructive/10 text-destructive focus-visible:ring-destructive/20 [a]:hover:bg-destructive/20",

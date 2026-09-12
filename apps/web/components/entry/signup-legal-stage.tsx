@@ -3,7 +3,7 @@
 import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { businessDate, businessDateTime } from "@/lib/business-date";
 import {
@@ -66,6 +66,29 @@ import { StateBanner } from "@/components/common/state";
  *    bytes this render shows, which is what makes the door's `hash_mismatch`
  *    refusal mean anything at all.
  *
+ * WHERE FOCUS GOES WHEN AN AGREEMENT IS ACCEPTED — ONE RULE, AND IT IS THE
+ * RECEIPT, NEVER THE NEXT CONTROL.
+ *
+ * Accepting replaces the control the person just pressed with the accepted
+ * banner, so the element holding focus is removed from the document and the
+ * browser drops focus on `<body>`: a keyboard user restarts from the top of
+ * the page and a screen-reader user is told nothing about what just happened.
+ *
+ * THE RULE: focus moves to THAT agreement's own accepted banner (`tabIndex={-1}`
+ * so it can receive focus without joining the tab order), after the state
+ * commit and after `router.refresh()` is asked for.
+ *
+ * WHY NOT THE OTHER AGREEMENT'S CONTROL, which is the genuine "next logical
+ * element" when one is still outstanding. Because the acceptance of a legal
+ * agreement is the event, and the banner IS the receipt for it — carrying the
+ * timestamp, the version, and the door's `already_accepted` replay note when
+ * there is one. Jumping past it would put focus on a control to sign a SECOND
+ * agreement while the confirmation of the FIRST was never announced, which is
+ * the one place on this journey where "keep moving" is the wrong instinct. The
+ * next control is one Tab away — the banner sits immediately before it in DOM
+ * order — so nothing is lost, and the person reads what they just signed
+ * before being asked to sign anything else.
+ *
  * THE CONTINUE CONTROL IS A REAL FORM POST, not a link: `/checkout` is
  * POST-only by design (a GET there could be run by a prefetch or a pasted link,
  * and it opens a Stripe Session and spends a rate-wall attempt). It renders
@@ -104,6 +127,18 @@ export function SignupLegalStage({
   // a fresh one. (`signup-firm-form.tsx` and the retired DPA step used the same
   // idiom for the same reason — see `lib/registration/op-key.ts`.)
   const opKeys = useRef(new Map<string, string>());
+  // ONE HANDLE PER KIND, and a one-shot request that the effect below consumes.
+  // The focus cannot be moved inside `handleAccept`: the banner does not exist
+  // until React has committed the render that removed the control. Asking for
+  // it as state and acting in an effect is what makes "after the transition"
+  // an actual ordering rather than a hope.
+  const acceptedBanners = useRef(new Map<LegalKind, HTMLDivElement | null>());
+  const [focusRequest, setFocusRequest] = useState<LegalKind | null>(null);
+  useEffect(() => {
+    if (focusRequest === null) return;
+    acceptedBanners.current.get(focusRequest)?.focus();
+    setFocusRequest(null);
+  }, [focusRequest]);
   const opKeyFor = useCallback((kind: LegalKind, version: number): string => {
     const slot = `${kind}:${version}`;
     const held = opKeys.current.get(slot);
@@ -139,6 +174,10 @@ export function SignupLegalStage({
       // above is what the person sees immediately; this is what makes the
       // server's own answer the one the continue control is derived from.
       router.refresh();
+      // THE RECEIPT, NOT THE BODY (see this file's header). Requested after the
+      // refresh is asked for, so the move is the last thing this handler does
+      // and the effect runs on the render that actually holds the banner.
+      setFocusRequest(doc.kind);
       return;
     }
     if (answer.kind === "refused" && answer.stale) {
@@ -269,7 +308,13 @@ export function SignupLegalStage({
                   )}
 
                   {accepted && acceptedAt !== null ? (
-                    <StateBanner tone="info">
+                    <StateBanner
+                      tone="info"
+                      tabIndex={-1}
+                      ref={(node) => {
+                        acceptedBanners.current.set(doc.kind, node);
+                      }}
+                    >
                       {t("legalAcceptedOn", {
                         when: businessDateTime(acceptedAt),
                         version: doc.version,

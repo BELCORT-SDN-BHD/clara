@@ -37,10 +37,12 @@
 
 export const SUPABASE_URL_VAR = "CLARA_SUPABASE_URL";
 export const SUPABASE_ANON_KEY_VAR = "CLARA_SUPABASE_ANON_KEY";
-/** GoTrue's own path, under the project's `/auth/v1` mount. */
-export const VERIFY_PATH = "/auth/v1/verify";
+/** GoTrue's own path, under the project's `/auth/v1` mount. Named `GOTRUE_*` (not `VERIFY_PATH`)
+ *  because `authWallRoutes.ts` exports its own unrelated `RESEND_PATH` — the wall's own
+ *  `/api/auth-wall/resend` route — and the two must not collide on the same bare name. */
+export const GOTRUE_VERIFY_PATH = "/auth/v1/verify";
 /** GoTrue's own path for a resend (#621 lane B's completion — see this file's `resendSignupOtp`). */
-export const RESEND_PATH = "/auth/v1/resend";
+export const GOTRUE_RESEND_PATH = "/auth/v1/resend";
 const VERIFY_TIMEOUT_MS = Number(process.env.CLARA_SUPABASE_VERIFY_TIMEOUT_MS || 10000);
 /** GoTrue's own documented default cooldown for a resend, used only when the provider's own
  *  response carries no retry-after number of its own (#621 contract item 6). */
@@ -68,12 +70,69 @@ export function supabaseVerifyConfigured(env = process.env) {
   return Boolean(env[SUPABASE_URL_VAR]) && Boolean(env[SUPABASE_ANON_KEY_VAR]);
 }
 
-function verifyEndpoint(env) {
+/** Thrown by `gotrueFetch` in place of whatever `fetch` itself threw (a network failure, or our
+ *  own `VERIFY_TIMEOUT_MS` abort) — never a provider refusal, which surfaces as an ordinary
+ *  response instead. Callers catch this ONE type and translate it into their own never-throws
+ *  outcome; `transport` preserves the original error's `name` for `verifySignupOtp`'s response
+ *  shape. */
+class GotrueTransportError extends Error {
+  constructor(cause) {
+    super("gotrue_transport_failed");
+    this.name = "GotrueTransportError";
+    this.transport = (cause && cause.name) || "fetch_failed";
+  }
+}
+
+/**
+ * Shared GoTrue call: resolves the endpoint from `path`, requires both config vars, and issues
+ * the request with the one fetch init both `verifySignupOtp` and `resendSignupOtp` send —
+ * `AbortController` + `VERIFY_TIMEOUT_MS`, the apikey/bearer/content-type headers, `redirect:
+ * "manual"` (never follow a redirect out of the configured origin), `cache: "no-store"`. Returns
+ * the raw `Response` on any completed request (including a non-2xx — that is a provider outcome,
+ * not a transport failure) and throws `GotrueTransportError` only for a network failure or our own
+ * timeout. Throws `SupabaseVerifyError` for OUR OWN missing configuration, same as before this was
+ * split out — that is not the applicant's to absorb and is not expected to surface in practice
+ * (`authWallRoutes.ts` checks `supabaseVerifyConfigured` first).
+ *
+ * @param {string} path one of `GOTRUE_VERIFY_PATH` / `GOTRUE_RESEND_PATH`
+ * @param {string} body the JSON body string, already assembled by the caller — this function owns
+ *   WHERE the request goes, never WHAT is sent
+ * @param {{fetchImpl?: typeof fetch, env?: NodeJS.ProcessEnv}} [deps] test seam
+ * @returns {Promise<Response>}
+ */
+async function gotrueFetch(path, body, deps = {}) {
+  const env = deps.env ?? process.env;
+  const doFetch = deps.fetchImpl ?? fetch;
   const base = env[SUPABASE_URL_VAR];
   if (typeof base !== "string" || base.trim() === "") {
     throw new SupabaseVerifyError("supabase_url_absent", `${SUPABASE_URL_VAR} is not configured`);
   }
-  return `${base.trim().replace(/\/+$/, "")}${VERIFY_PATH}`;
+  const apikey = env[SUPABASE_ANON_KEY_VAR];
+  if (typeof apikey !== "string" || apikey.trim() === "") {
+    throw new SupabaseVerifyError("supabase_key_absent", `${SUPABASE_ANON_KEY_VAR} is not configured`);
+  }
+  const url = `${base.trim().replace(/\/+$/, "")}${path}`;
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), VERIFY_TIMEOUT_MS);
+  try {
+    return await doFetch(url, {
+      method: "POST",
+      headers: {
+        apikey,
+        Authorization: `Bearer ${apikey}`,
+        "Content-Type": "application/json",
+      },
+      body,
+      signal: controller.signal,
+      redirect: "manual",
+      cache: "no-store",
+    });
+  } catch (err) {
+    throw new GotrueTransportError(err);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /**
@@ -92,41 +151,19 @@ function verifyEndpoint(env) {
  * @returns {Promise<{verified: boolean, session: Record<string, unknown>|null, status: number|null}>}
  */
 export async function verifySignupOtp({ email, token, type: otpType = "signup" }, deps = {}) {
-  const env = deps.env ?? process.env;
-  const doFetch = deps.fetchImpl ?? fetch;
-  const url = verifyEndpoint(env);
-  const apikey = env[SUPABASE_ANON_KEY_VAR];
-  if (typeof apikey !== "string" || apikey.trim() === "") {
-    throw new SupabaseVerifyError("supabase_key_absent", `${SUPABASE_ANON_KEY_VAR} is not configured`);
-  }
-
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), VERIFY_TIMEOUT_MS);
+  // The exact body shape `supabase-js` sends (GoTrueClient.js:2046-2051).
+  // `type` is built by key rather than written as a shorthand property: the parts-parity
+  // census (`scripts/check-parts-parity.mjs`) refuses a `type` key it cannot resolve to a
+  // string literal, because that is the shape of a typed `parts[]` member.
   let res;
   try {
-    res = await doFetch(url, {
-      method: "POST",
-      headers: {
-        apikey,
-        Authorization: `Bearer ${apikey}`,
-        "Content-Type": "application/json",
-      },
-      // The exact body shape `supabase-js` sends (GoTrueClient.js:2046-2051).
-      // `type` is built by key rather than written as a shorthand property: the parts-parity
-      // census (`scripts/check-parts-parity.mjs`) refuses a `type` key it cannot resolve to a
-      // string literal, because that is the shape of a typed `parts[]` member.
-      body: verifyRequestBody(otpType, email, token),
-      signal: controller.signal,
-      redirect: "manual", // never follow a redirect out of the configured origin
-      cache: "no-store",
-    });
+    res = await gotrueFetch(GOTRUE_VERIFY_PATH, verifyRequestBody(otpType, email, token), deps);
   } catch (err) {
+    if (!(err instanceof GotrueTransportError)) throw err;
     // A network failure is NOT a verification. It is reported as unverified so the attempt
     // settles 'rejected' and the applicant retries — never as an acceptance, and never as a
     // throw that would leave the attempt row unsettled for an unrelated reason.
-    return { verified: false, session: null, status: null, transport: (err && err.name) || "fetch_failed" };
-  } finally {
-    clearTimeout(timer);
+    return { verified: false, session: null, status: null, transport: err.transport };
   }
 
   if (!res.ok) return { verified: false, session: null, status: res.status };
@@ -156,14 +193,6 @@ export async function verifySignupOtp({ email, token, type: otpType = "signup" }
 // call, and the route settles the attempt either way. It throws only for OUR OWN configuration
 // being absent, which `authWallRoutes.ts` already refuses before calling this (via
 // `supabaseVerifyConfigured`), so that throw is not expected to surface in practice.
-
-function resendEndpoint(env) {
-  const base = env[SUPABASE_URL_VAR];
-  if (typeof base !== "string" || base.trim() === "") {
-    throw new SupabaseVerifyError("supabase_url_absent", `${SUPABASE_URL_VAR} is not configured`);
-  }
-  return `${base.trim().replace(/\/+$/, "")}${RESEND_PATH}`;
-}
 
 /** The exact body `supabase-js` sends to `POST /resend` for an email credential — see the
  *  header above for the line reference. */
@@ -215,36 +244,14 @@ function providerRetryAfterSeconds(res, body) {
  * >}
  */
 export async function resendSignupOtp({ email, type: otpType = "signup" }, deps = {}) {
-  const env = deps.env ?? process.env;
-  const doFetch = deps.fetchImpl ?? fetch;
-  const url = resendEndpoint(env);
-  const apikey = env[SUPABASE_ANON_KEY_VAR];
-  if (typeof apikey !== "string" || apikey.trim() === "") {
-    throw new SupabaseVerifyError("supabase_key_absent", `${SUPABASE_ANON_KEY_VAR} is not configured`);
-  }
-
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), VERIFY_TIMEOUT_MS);
   let res;
   try {
-    res = await doFetch(url, {
-      method: "POST",
-      headers: {
-        apikey,
-        Authorization: `Bearer ${apikey}`,
-        "Content-Type": "application/json",
-      },
-      body: resendRequestBody(otpType, email),
-      signal: controller.signal,
-      redirect: "manual",
-      cache: "no-store",
-    });
-  } catch {
+    res = await gotrueFetch(GOTRUE_RESEND_PATH, resendRequestBody(otpType, email), deps);
+  } catch (err) {
+    if (!(err instanceof GotrueTransportError)) throw err;
     // A network failure (including our own timeout) is not the provider refusing — it is us
     // unable to reach it, which is `unavailable`, never a fabricated `sent`.
     return { outcome: "unavailable" };
-  } finally {
-    clearTimeout(timer);
   }
 
   if (res.ok) return { outcome: "sent" };

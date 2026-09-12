@@ -33,7 +33,14 @@ const EXPECTED_CELLS = 68; // +8 fold cells: c3.23a-d, c3.30f and c3.52a/b/c
 // signed" arm became the both-kinds `legal_not_accepted` wall and the intent now pins
 // terms_version beside dpa_version. The pin is re-taken from the reviewed body, which is exactly
 // what this constant's own instruction below says to do on a real, reviewed change.
-const OPEN_CHECKOUT_INTENT_PROSRC_SHA12 = "31cddf321f6e";
+// #621 REVIEW (SEC-1/SEC-2) recut it AGAIN, deliberately, and the pin moves with it:
+// 31cddf321f6e -> the value below. Two changes, both reviewed: (1) the acceptance check and the
+// version pin became ONE lateral statement taken while the door holds the SAME per-kind advisory
+// keys clara.publish_legal_document takes (terms, then dpa), closing the READ COMMITTED window in
+// which a publish landing between the check and the pin pinned a version the applicant never
+// accepted; (2) the reuse arm now stamps a reused pre-0185 intent's NULL terms_version from that
+// same observation. Proven by legal-acceptance.test.mjs la.16/la.17.
+const OPEN_CHECKOUT_INTENT_PROSRC_SHA12 = "29f505b137c1";
 
 let live = false;
 let executed = 0;

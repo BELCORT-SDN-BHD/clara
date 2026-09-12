@@ -90,6 +90,26 @@ describe("parseConfirmFlash — the single validated read", () => {
       { nonce: "n1", kind: "locked", waitSeconds: 900 },
     );
   });
+
+  it("`locked`'s own `atLeast` rides only when the writer set it true — its absence still means exact", () => {
+    // `verify/handler.ts` never writes an explicit `atLeast: false`, so a
+    // payload with none must decode identically to one that never had the
+    // field — the same discipline `email` already gets via `withEmail`.
+    assert.deepEqual(
+      parseConfirmFlash(
+        JSON.stringify({ nonce: "n1", kind: "locked", waitSeconds: 900, atLeast: true }),
+        "n1",
+      ),
+      { nonce: "n1", kind: "locked", waitSeconds: 900, atLeast: true },
+    );
+    assert.deepEqual(
+      parseConfirmFlash(
+        JSON.stringify({ nonce: "n1", kind: "locked", waitSeconds: 300, atLeast: false }),
+        "n1",
+      ),
+      { nonce: "n1", kind: "locked", waitSeconds: 300 },
+    );
+  });
 });
 
 describe("confirmFlashMaxAgeSeconds — FOLD 4, per-variant lifetime", () => {

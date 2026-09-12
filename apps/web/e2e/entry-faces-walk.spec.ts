@@ -12,7 +12,8 @@ import { ensureRealFocus } from "./helpers";
  * lands at FS-12, not here.
  *
  * FS-4 C-6 (裁-92) UPDATE: the account step's DPA checkbox is gone (the real
- * e-sign moved to a later step, `signup-dpa-form.tsx`) and the confirm face
+ * e-sign moved to a later step, and #621 replaced it with the two-agreement
+ * `components/entry/signup-legal-stage.tsx`) and the confirm face
  * is now a six-digit code form, never a link — the cells below are trued to
  * both, and W-H's own e2e leg (the address never comes from a URL) is added
  * here since it is pure GET rendering, in scope for this file.
@@ -129,9 +130,9 @@ test("login keyboard pass: tab order is Email -> Password -> Sign in, with a vis
 
 test("the signup face renders on the identity canvas with Create account open — no DPA gate on this step", async ({ page }) => {
   // FS-4 C-6: the DPA e-sign moved OFF this step (checkout-gate-design.md
-  // §1.1) to a later one reached once a registration is open
-  // (`signup-dpa-form.tsx`); the account step gates on ordinary field
-  // validation only.
+  // §1.1) to a later one reached once a registration is open — #621's
+  // two-agreement legal stage (`components/entry/signup-legal-stage.tsx`);
+  // the account step gates on ordinary field validation only.
   const errors = collectConsoleErrors(page);
 
   await page.goto("/signup");

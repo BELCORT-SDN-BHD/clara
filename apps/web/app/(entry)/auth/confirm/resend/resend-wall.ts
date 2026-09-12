@@ -37,16 +37,30 @@
 // on — an unconfigured variable, a 500, a timeout, a network fault, a body in
 // a shape this build does not recognise — lands on `unavailable`, which is
 // never a claim that anything was sent.
+//
+// A WAIT LONGER THAN THIS CARD WILL PRINT IS STILL A WAIT. `../wait-seconds.ts`'s
+// `WAIT_SECONDS_CEILING` is a DISPLAY bound; the runtime's
+// `providerRetryAfterSeconds` is uncapped, so an hour-long cooldown is an
+// ordinary answer. It is clamped and flagged (`atLeast`, which the copy
+// renders as "at least"), never turned into `unavailable` — "we couldn't
+// send" would be a plain falsehood about a wall that answered perfectly, and
+// it would invite a retry that spends another attempt. Only a 429 carrying NO
+// usable number falls back to a default.
 
 import { AUTH_WALL_CLIENT_IP_HEADER } from "@/lib/rate-wall-courier";
+import { waitSeconds } from "../wait-seconds";
 
 export type ResendOutcome =
   /** The provider accepted the send. Never inferred from a 2xx alone. */
   | { readonly kind: "sent" }
-  /** The C1/C2 attempt wall refused — the same budget a wrong guess spends. */
-  | { readonly kind: "locked"; readonly retryAfterSeconds: number }
-  /** The provider's own per-address send cooldown. */
-  | { readonly kind: "rate_limited"; readonly retryAfterSeconds: number }
+  /** The C1/C2 attempt wall refused — the same budget a wrong guess spends.
+   *  `atLeast` is set when the answer's own wait exceeded the shared
+   *  `WAIT_SECONDS_CEILING` (`../wait-seconds.ts`) and was CLAMPED to it: the
+   *  card must then say "at least", because the number it prints is a floor
+   *  this app chose, not the wait the wall named. */
+  | { readonly kind: "locked"; readonly retryAfterSeconds: number; readonly atLeast?: boolean }
+  /** The provider's own per-address send cooldown. Same `atLeast` contract. */
+  | { readonly kind: "rate_limited"; readonly retryAfterSeconds: number; readonly atLeast?: boolean }
   /** The address is not one the provider will accept. */
   | { readonly kind: "invalid_email" }
   /** The wall could not be reached, is not configured, or answered something
@@ -77,16 +91,20 @@ export type ResendConfirmationCodeDeps = {
   readonly env?: Record<string, string | undefined>;
 };
 
-/** The same clamp the confirm limb applies, and for the same reason: nothing
- *  here recomputes a bound the DB owns, it only refuses a value that could not
- *  have come from the shipped door — deploy-skew evidence, not policy. */
-const RETRY_AFTER_MAX = 900;
-
-function boundedInt(value: unknown, max: number): number | null {
-  return typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= max
-    ? value
-    : null;
-}
+/** What a MISSING or unusable wait falls back to, per outcome. Different
+ *  numbers because they are different mechanisms: `rate_limited` is a
+ *  per-address send cooldown measured in tens of seconds, `locked` is the
+ *  C1/C2 attempt window, which is 15 minutes wide.
+ *
+ *  The CLAMP-AND-FLAG rule itself — the correction this file was carrying a
+ *  lie about (the previous `boundedInt` refused anything above the display
+ *  ceiling, and the caller turned a `null` into `{kind:"unavailable"}`, whose
+ *  card reads "we couldn't send a new code": FALSE for the case it actually
+ *  fires on, an hour-long wait from a wall that answered perfectly) — now
+ *  lives in `../wait-seconds.ts`, shared with the verify wall so the ceiling
+ *  and the rule have one owner. */
+const DEFAULT_LOCKED_SECONDS = 900;
+const DEFAULT_RATE_LIMITED_SECONDS = 60;
 
 export const resendConfirmationCode: ResendConfirmationCode = async (params) =>
   resendConfirmationCodeWith(params, {});
@@ -146,10 +164,18 @@ export async function resendConfirmationCodeWith(
     return answer.outcome === "sent" ? { kind: "sent" } : { kind: "unavailable" };
   }
   if (response.status === 429) {
-    const retryAfterSeconds = boundedInt(answer.retryAfterSeconds, RETRY_AFTER_MAX);
-    if (retryAfterSeconds === null) return { kind: "unavailable" };
-    if (answer.outcome === "locked") return { kind: "locked", retryAfterSeconds };
-    if (answer.outcome === "rate_limited") return { kind: "rate_limited", retryAfterSeconds };
+    // THE OUTCOME IS DECIDED BY THE OUTCOME FIELD, never by whether the wait
+    // parsed. A 429 whose `outcome` this build does not recognise is still
+    // `unavailable` — that is a shape refusal, which is a different thing from
+    // a wait it could not read.
+    if (answer.outcome === "locked") {
+      const wait = waitSeconds(answer.retryAfterSeconds, DEFAULT_LOCKED_SECONDS);
+      return { kind: "locked", retryAfterSeconds: wait.seconds, atLeast: wait.atLeast };
+    }
+    if (answer.outcome === "rate_limited") {
+      const wait = waitSeconds(answer.retryAfterSeconds, DEFAULT_RATE_LIMITED_SECONDS);
+      return { kind: "rate_limited", retryAfterSeconds: wait.seconds, atLeast: wait.atLeast };
+    }
     return { kind: "unavailable" };
   }
   if (response.status === 400 && answer.outcome === "invalid_email") {

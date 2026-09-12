@@ -4,9 +4,8 @@ import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
-import { recalledSignupEmail } from "@/lib/registration/signup-email-storage";
+import { forgetSignupEmail, recalledSignupEmail } from "@/lib/registration/signup-email-storage";
 import { StateBanner } from "@/components/common/state";
-import { NotBuiltNote } from "@/components/common/not-built-note";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -64,7 +63,9 @@ import { Input } from "@/components/ui/input";
  *   wrong-code    a wrong code, an expired one, an unknown address or a banned
  *                 account — Supabase cannot reliably tell them apart, so
  *                 neither does this card. Carries the wall's OWN remaining count.
- *   locked        C1/C2 refused — carries the wall's OWN wait
+ *   locked        C1/C2 refused — carries the wall's OWN wait, clamped and
+ *                 flagged (`atLeast`) rather than downgraded when the door's
+ *                 own wait exceeds this card's display ceiling
  *   unavailable   the wall could not be reached; the code is still good
  *   invalid       a malformed submission, or an unauthenticated/mismatched
  *                 flash marker — both mean "nothing here can be trusted"
@@ -87,12 +88,20 @@ import { Input } from "@/components/ui/input";
 export type ConfirmCodeState =
   | { readonly kind: "form" }
   | { readonly kind: "wrong-code"; readonly remaining: number }
-  | { readonly kind: "locked"; readonly waitSeconds: number }
+  /** `atLeast` — the C1/C2 wait the verify wall named exceeded this app's
+   *  display ceiling and was CLAMPED to it (`verify/confirmation-wall.ts`).
+   *  Same contract as the resend faces below: the copy says "at least" only
+   *  when this is `true`. */
+  | { readonly kind: "locked"; readonly waitSeconds: number; readonly atLeast?: boolean }
   | { readonly kind: "unavailable" }
   | { readonly kind: "invalid" }
   | { readonly kind: "resent" }
-  | { readonly kind: "resend-locked"; readonly waitSeconds: number }
-  | { readonly kind: "resend-rate-limited"; readonly waitSeconds: number }
+  /** `atLeast` — the wait the wall named exceeded this app's display ceiling
+   *  and was CLAMPED to it (`resend/resend-wall.ts`). The copy then says "at
+   *  least", because printing a bare "900 seconds" for an hour-long cooldown
+   *  would be this card inventing a number nobody measured. */
+  | { readonly kind: "resend-locked"; readonly waitSeconds: number; readonly atLeast?: boolean }
+  | { readonly kind: "resend-rate-limited"; readonly waitSeconds: number; readonly atLeast?: boolean }
   | { readonly kind: "resend-invalid-email" }
   | { readonly kind: "resend-unavailable" };
 
@@ -150,7 +159,9 @@ export function EmailConfirmationCard({
         )}
         {state.kind === "locked" && (
           <StateBanner tone="warning" title={t("lockedTitle")}>
-            {t("lockedDescription", { wait: WAIT_MINUTES(state.waitSeconds) })}
+            {state.atLeast === true
+              ? t("lockedDescriptionAtLeast", { wait: WAIT_MINUTES(state.waitSeconds) })
+              : t("lockedDescription", { wait: WAIT_MINUTES(state.waitSeconds) })}
           </StateBanner>
         )}
         {state.kind === "invalid" && (
@@ -168,16 +179,30 @@ export function EmailConfirmationCard({
             {email === ""
               ? t("resentDescription")
               : t("resentDescriptionAddressed", { email })}
+            {/* WHAT A RESEND COSTS, SAID ON THE FACE THAT SPENDS IT. The
+                runtime settles each resend as an attempt of the SAME
+                5-per-15-minute budget a wrong code spends
+                (`resend/resend-wall.ts`'s own contract (1) — "a resend spree
+                counts against the identical budget a guess spree would"). The
+                `resend-locked` card already says so AFTER the budget is gone;
+                somebody who has not spent it yet has to be told BEFORE, or the
+                lockout arrives as a surprise from a control that looked free.
+                One plain sentence, on the face that just spent one. */}
+            <p className="mt-1.5">{t("resentAttemptCost")}</p>
           </StateBanner>
         )}
         {state.kind === "resend-locked" && (
           <StateBanner tone="warning" title={t("resendLockedTitle")}>
-            {t("resendLockedDescription", { seconds: state.waitSeconds })}
+            {state.atLeast === true
+              ? t("resendLockedDescriptionAtLeast", { seconds: state.waitSeconds })
+              : t("resendLockedDescription", { seconds: state.waitSeconds })}
           </StateBanner>
         )}
         {state.kind === "resend-rate-limited" && (
           <StateBanner tone="warning" title={t("resendRateLimitedTitle")}>
-            {t("resendRateLimitedDescription", { seconds: state.waitSeconds })}
+            {state.atLeast === true
+              ? t("resendRateLimitedDescriptionAtLeast", { seconds: state.waitSeconds })
+              : t("resendRateLimitedDescription", { seconds: state.waitSeconds })}
           </StateBanner>
         )}
         {state.kind === "resend-invalid-email" && (
@@ -185,11 +210,18 @@ export function EmailConfirmationCard({
             {t("resendInvalidEmailDescription")}
           </StateBanner>
         )}
+        {/* `StateBanner tone="error"`, and deliberately NOT the dashed
+            "named, not delivered" note — the same correction the code
+            attempt's own `unavailable` face above already carries. The dashed
+            edge means exactly one thing in this estate, and the resend IS
+            delivered: `POST /auth/confirm/resend` runs the C1/C2 wall and then
+            asks the provider. A call that failed is a failure, not an unbuilt
+            feature, and saying otherwise sends somebody away from a control
+            that works. */}
         {state.kind === "resend-unavailable" && (
-          <NotBuiltNote>
-            <p className="font-medium">{t("resendUnavailableTitle")}</p>
-            <p>{t("resendUnavailableDescription")}</p>
-          </NotBuiltNote>
+          <StateBanner tone="error" title={t("resendUnavailableTitle")}>
+            {t("resendUnavailableDescription")}
+          </StateBanner>
         )}
 
         {/* ONE FORM, TWO DESTINATIONS. The resend control is a second submit
@@ -259,6 +291,31 @@ export function EmailConfirmationCard({
           </Button>
         </form>
 
+        {/* WRONG ADDRESS? THE ONE FACE THAT NEEDS A WAY OUT (#621 review).
+            The runtime deliberately answers `sent` for an address it has never
+            seen — the card must not become an account-existence oracle — so
+            "we sent it to …" is exactly the sentence a person reads after
+            mistyping their own address, and until now the screen offered them
+            nothing but a code that will never arrive. This is a real link to
+            `/signup` (the account step owns starting over), and it CLEARS the
+            remembered address first: leaving it behind would prefill the very
+            typo they came here to correct. Rendered only on `resent`, because
+            every other face already carries its own true next step. */}
+        {state.kind === "resent" && (
+          <p className="text-sm text-muted-foreground">
+            {t.rich("wrongAddress", {
+              link: (chunks) => (
+                <Link
+                  className="text-primary underline"
+                  href="/signup"
+                  onClick={() => forgetSignupEmail()}
+                >
+                  {chunks}
+                </Link>
+              ),
+            })}
+          </p>
+        )}
         <p className="text-sm text-muted-foreground">
           {t.rich("alreadyConfirmed", {
             link: (chunks) => (

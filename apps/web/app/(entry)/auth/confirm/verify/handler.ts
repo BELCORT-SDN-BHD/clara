@@ -128,10 +128,17 @@ export async function handleEmailConfirmationPost(
     return sealResponse(confirmFlashRedirect(proof.origin, { kind: "unavailable" }, email));
   }
   if (outcome.kind === "locked") {
+    // `atLeast` TRAVELS ONLY WHEN THE WALL SET IT — `confirmation-wall.ts`
+    // only returns it `true`, never explicit `false`, so its absence already
+    // means "exact" and `confirm-flash.ts`'s decoder reads a missing field the
+    // same way. Same reasoning as the resend limb's `atLeast` (`resend/
+    // handler.ts`, `resend/resend-wall.ts`): a wait the door named exactly
+    // needs no "at least" hedge.
+    const atLeastFields = outcome.atLeast === true ? { atLeast: true as const } : {};
     return sealResponse(
       confirmFlashRedirect(
         proof.origin,
-        { kind: "locked", waitSeconds: outcome.retryAfterSeconds },
+        { kind: "locked", waitSeconds: outcome.retryAfterSeconds, ...atLeastFields },
         email,
       ),
     );

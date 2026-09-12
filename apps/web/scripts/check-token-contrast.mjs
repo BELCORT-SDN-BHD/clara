@@ -243,6 +243,20 @@ export const PAIR_SPECS = [
   // --- Interactive-control pairs ---
   { id: "primary-foreground-on-primary", fg: (h) => h("primary-foreground"), bg: (h) => h("primary"), threshold: 4.5,
     source: "components/ui/button.tsx default variant (bg-primary text-primary-foreground), components/ui/badge.tsx default variant, components/firm/needs-you-row.tsx's approve/resolve <Button> (no variant prop — the default). components/bank/bank-workbench.tsx's active tab moved off this pattern onto the shared components/common/section-tabs.tsx underline in the P3 polish (that file's own header note: \"the filled-primary pill strip became the shared <SectionTabs> underline\")." },
+  // THE HOVER STATE OF THAT SAME CONTROL — gate (a)'s first non-resting pair,
+  // and it is here because the resting row above could not see the defect. Two
+  // browser walks (`e2e/checkout-gate-walk.spec.ts`, `e2e/signup-confirm-
+  // pending.spec.ts`) were parking the pointer off-screen before their axe scan
+  // specifically to avoid measuring a hovered primary Button, whose former
+  // `hover:bg-primary/80` composited to #4a71e0 = 4.440:1 under white 14px
+  // text. The walks' workaround is gone and the hover is /90; this row is what
+  // stops the alpha drifting back. Composited over `--background` because that,
+  // `--card` and `--popover` are the three grounds a Button sits on and all
+  // three resolve to the same hex — the lightest possible ground is also the
+  // worst case for white text, so one row measures the real floor.
+  { id: "primary-foreground-on-primary-hover", fg: (h) => h("primary-foreground"),
+    bg: (h, composite) => composite("primary", 0.90, h("background")), threshold: 4.5,
+    source: "components/ui/button.tsx default variant hover:bg-primary/90 and components/ui/badge.tsx default variant [a]:hover:bg-primary/90 — the same token pair, hovered." },
   { id: "accent-foreground-on-accent", fg: (h) => h("accent-foreground"), bg: (h) => h("accent"), threshold: 4.5,
     source: "components/ui/select.tsx item focus:bg-accent focus:text-accent-foreground. components/ui/command.tsx's own selected item moved onto data-selected:bg-muted data-selected:text-foreground in the P3 polish (now a foreground-on-muted consumer, below) — select.tsx alone keeps this pair real." },
   { id: "sidebar-foreground-on-sidebar", fg: (h) => h("sidebar-foreground"), bg: (h) => h("sidebar"), threshold: 4.5,

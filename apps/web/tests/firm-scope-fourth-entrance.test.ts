@@ -247,6 +247,24 @@ describe("WALL 1 — every layout-adjacent special file classifies, or this suit
         "neither of which this module is.",
     },
     {
+      path: "app/(entry)/auth/confirm/wait-seconds.ts",
+      reason:
+        "NOT A ROUTER FILE. The shared wait-bounding rule (2026-09-12 correction): " +
+        "one `WAIT_SECONDS_CEILING` and one `waitSeconds()` function, used by both " +
+        "`resend/resend-wall.ts` and `verify/confirmation-wall.ts` so a wall's own " +
+        "wait that exceeds this app's display ceiling is CLAMPED and flagged " +
+        "(`atLeast`) identically in both places, rather than each wall carrying its " +
+        "own copy that could drift. Extracted from `resend/resend-wall.ts` (which " +
+        "had the only copy) the moment the verify wall needed the identical rule — " +
+        "the verify wall used to turn an over-long wait into a false `unavailable`, " +
+        "the same lie the resend wall's own correction had already fixed once. It " +
+        "exports two plain values, no page/route/HTTP-method surface, its basename " +
+        "matches no LEAF or SPECIAL_FILE pattern, and Next.js never routes to it, " +
+        "auto-imports it, or treats it as any kind of special file. Colocated one " +
+        "level above both walls for the same reason `confirm-flash.ts` is: neither " +
+        "wall imports \"down\" into the other's own directory.",
+    },
+    {
       path: "app/(entry)/auth/confirm/post-outcome.ts",
       reason:
         "NOT A ROUTER FILE. #621: the two things BOTH confirm POSTs do — mint the 303-plus-" +

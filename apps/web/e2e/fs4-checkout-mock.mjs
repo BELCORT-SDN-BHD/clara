@@ -46,7 +46,14 @@ import { createHash } from "node:crypto";
  *  `get_current_legal_documents()` returns one row per kind, each with its own
  *  version, publication status and per-caller acceptance — which is what makes
  *  the draft arm below expressible at all. */
-const sha = (body) => `\\x${createHash("sha256").update(body, "utf8").digest("hex")}`;
+/** PLAIN LOWERCASE HEX, no `\x` prefix — the shape migration 0185 actually
+ *  stores. `legal_documents.body_sha256` is a `text` column whose CHECK is
+ *  `body_sha256 = encode(sha256(convert_to(body,'UTF8')),'hex')`, so PostgREST
+ *  serialises it as the 64 hex characters and nothing else. The `\x` prefix
+ *  this used to mint is `bytea`'s wire form — the shape the RETIRED
+ *  `dpa_documents` column had — and a fixture wearing it made the walk prove
+ *  that the app forwards a hash the real door would never send. */
+const sha = (body) => createHash("sha256").update(body, "utf8").digest("hex");
 
 export const E2E_TERMS_VERSION = 2;
 export const E2E_TERMS_TITLE = "ClaraBook Beta Terms of Service";

@@ -71,13 +71,13 @@ export async function handleConfirmationResendPost(
     case "locked":
       return confirmFlashRedirect(
         proof.origin,
-        { kind: "resend-locked", waitSeconds: outcome.retryAfterSeconds },
+        { kind: "resend-locked", waitSeconds: outcome.retryAfterSeconds, atLeast: outcome.atLeast },
         email,
       );
     case "rate_limited":
       return confirmFlashRedirect(
         proof.origin,
-        { kind: "resend-rate-limited", waitSeconds: outcome.retryAfterSeconds },
+        { kind: "resend-rate-limited", waitSeconds: outcome.retryAfterSeconds, atLeast: outcome.atLeast },
         email,
       );
     case "invalid_email":

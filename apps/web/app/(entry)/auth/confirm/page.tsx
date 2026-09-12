@@ -60,7 +60,9 @@ function confirmCodeState(flash: ConfirmFlashPayload | null, hasMarker: boolean)
     case "wrong":
       return { kind: "wrong-code", remaining: flash.remaining };
     case "locked":
-      return { kind: "locked", waitSeconds: flash.waitSeconds };
+      return flash.atLeast === true
+        ? { kind: "locked", waitSeconds: flash.waitSeconds, atLeast: true }
+        : { kind: "locked", waitSeconds: flash.waitSeconds };
     case "unavailable":
       return { kind: "unavailable" };
     case "invalid":
@@ -70,9 +72,9 @@ function confirmCodeState(flash: ConfirmFlashPayload | null, hasMarker: boolean)
     case "resent":
       return { kind: "resent" };
     case "resend-locked":
-      return { kind: "resend-locked", waitSeconds: flash.waitSeconds };
+      return { kind: "resend-locked", waitSeconds: flash.waitSeconds, atLeast: flash.atLeast };
     case "resend-rate-limited":
-      return { kind: "resend-rate-limited", waitSeconds: flash.waitSeconds };
+      return { kind: "resend-rate-limited", waitSeconds: flash.waitSeconds, atLeast: flash.atLeast };
     case "resend-invalid-email":
       return { kind: "resend-invalid-email" };
     case "resend-unavailable":

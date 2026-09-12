@@ -113,14 +113,10 @@ test("a 429 becomes locked with the door's OWN scope and wait, and neither is re
     { kind: "locked", scope: "origin", retryAfterSeconds: 837 },
   );
 
-  // OUT-OF-CONTRACT VALUES FAIL CLOSED rather than render. The door's own
-  // clamps put `retry_after_seconds` in [0,900] and `scope` in
-  // {email,origin}; anything else crossed two process boundaries wrong, and
-  // an honest "not working" beats a card claiming a 9-hour lockout.
+  // AN INVALID SCOPE IS STILL A SHAPE REFUSAL, unrelated to the wait's own
+  // bound: a door answering neither `"email"` nor `"origin"` crossed the
+  // boundary wrong regardless of what it said about the wait.
   for (const body of [
-    { allowed: false, remaining: 0, scope: "origin", retry_after_seconds: 901 },
-    { allowed: false, remaining: 0, scope: "origin", retry_after_seconds: -1 },
-    { allowed: false, remaining: 0, scope: "origin", retry_after_seconds: 12.5 },
     { allowed: false, remaining: 0, scope: "elsewhere", retry_after_seconds: 60 },
     { allowed: false, remaining: 0, retry_after_seconds: 60 },
     { allowed: true, remaining: 0, scope: "origin", retry_after_seconds: 60 },
@@ -128,6 +124,64 @@ test("a 429 becomes locked with the door's OWN scope and wait, and neither is re
     assert.deepEqual(
       await confirmEmailCodeWith(params, { env, fetchImpl: refuse(body) }),
       { kind: "unavailable" },
+      JSON.stringify(body),
+    );
+  }
+});
+
+test("A WAIT LONGER THAN THE CARD WILL PRINT IS STILL A WAIT — clamped and flagged, never downgraded to `unavailable`", async () => {
+  // The correction this cell pins (2026-09-12): `retry_after_seconds > 900`
+  // used to fall to `{kind:"unavailable"}`, whose card reads "we couldn't
+  // check your code just now" — a LIE for a wall that answered perfectly and
+  // simply named a longer wait than this app displays. Same rule as the
+  // resend wall (`resend/resend-wall.ts`), same shared `waitSeconds`
+  // (`../../app/(entry)/auth/confirm/wait-seconds`).
+  const refuse = (body: unknown): typeof fetch => async () =>
+    new Response(JSON.stringify(body), { status: 429, headers: { "content-type": "application/json" } });
+  const env = { CLARA_RUNTIME_URL: "https://runtime.example", CLARA_AUTH_WALL_SERVICE_TOKEN: "t" };
+  const params = { email: "a@b.test", token: "123456", clientIp: "203.0.113.7" };
+
+  const cases: Array<[unknown, Record<string, unknown>]> = [
+    // OVER THE CEILING: clamped to 900 and flagged, never unavailable.
+    [
+      { allowed: false, remaining: 0, scope: "origin", retry_after_seconds: 3600 },
+      { kind: "locked", scope: "origin", retryAfterSeconds: 900, atLeast: true },
+    ],
+    // NaN CARRIES NO READING AT ALL: the outcome stands and the 15-minute
+    // C1/C2 default is served, unflagged.
+    [
+      { allowed: false, remaining: 0, scope: "origin", retry_after_seconds: Number.NaN },
+      { kind: "locked", scope: "origin", retryAfterSeconds: 900 },
+    ],
+    // ZERO IS A REAL ANSWER, not a missing one — kept verbatim.
+    [
+      { allowed: false, remaining: 0, scope: "origin", retry_after_seconds: 0 },
+      { kind: "locked", scope: "origin", retryAfterSeconds: 0 },
+    ],
+    // INSIDE THE CEILING: rendered exactly, no "at least" hedge.
+    [
+      { allowed: false, remaining: 0, scope: "origin", retry_after_seconds: 300 },
+      { kind: "locked", scope: "origin", retryAfterSeconds: 300 },
+    ],
+    // A negative or non-numeric wait has no honest reading either: the default.
+    [
+      { allowed: false, remaining: 0, scope: "origin", retry_after_seconds: -1 },
+      { kind: "locked", scope: "origin", retryAfterSeconds: 900 },
+    ],
+    [
+      { allowed: false, remaining: 0, scope: "origin" },
+      { kind: "locked", scope: "origin", retryAfterSeconds: 900 },
+    ],
+    // A fractional wait is rounded UP — never promise a shorter one.
+    [
+      { allowed: false, remaining: 0, scope: "origin", retry_after_seconds: 12.5 },
+      { kind: "locked", scope: "origin", retryAfterSeconds: 13 },
+    ],
+  ];
+  for (const [body, expected] of cases) {
+    assert.deepEqual(
+      await confirmEmailCodeWith(params, { env, fetchImpl: refuse(body) }),
+      expected,
       JSON.stringify(body),
     );
   }

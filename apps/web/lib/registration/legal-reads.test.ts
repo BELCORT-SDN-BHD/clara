@@ -6,6 +6,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 
 import {
   CURRENT_LEGAL_DOCUMENTS_DOOR,
@@ -34,14 +35,24 @@ function withMockedFetch(impl: typeof fetch, run: () => Promise<void>): Promise<
   });
 }
 
+/** THE SHAPE 0185 ACTUALLY SHIPS — `body_sha256 text not null` under
+ *  `check (body_sha256 = encode(sha256(convert_to(body,'UTF8')),'hex'))`, so
+ *  PostgREST renders 64 lowercase hex characters and nothing else. This
+ *  fixture used to carry `"\\xaa"`, the `bytea` wire form of the RETIRED
+ *  `dpa_documents` column, which meant every cell in this file was decoding a
+ *  row the shipped door could not produce. Computed from the body rather than
+ *  hand-typed, for the same reason the e2e fixture is. */
+const TERMS_BODY = "Terms text.";
+const TERMS_SHA = createHash("sha256").update(TERMS_BODY, "utf8").digest("hex");
+
 function row(over: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     kind: "terms",
     version: 3,
     status: "published",
     title: "Clara Terms of Service",
-    body: "Terms text.",
-    body_sha256: "\\xaa",
+    body: TERMS_BODY,
+    body_sha256: TERMS_SHA,
     effective_from: "2026-09-01T00:00:00.000Z",
     published_at: "2026-08-30T00:00:00.000Z",
     accepted_at: null,
@@ -110,6 +121,18 @@ test("a row this build cannot fully read is DROPPED, never half-rendered", async
     ["an empty title", row({ title: "" })],
     ["an empty body", row({ body: "" })],
     ["an empty hash", row({ body_sha256: "" })],
+    // THE HASH SHAPE (#621 review). `\x`-prefixed is `bytea`'s wire form —
+    // the RETIRED `dpa_documents` column's shape, and the one the e2e fixture
+    // was still minting. 0185 stores plain lowercase hex, so each of these is
+    // a value the shipped door cannot have produced, and forwarding one to
+    // `accept_legal_document` would spend an op key to be told
+    // `CLR10 / hash_mismatch`.
+    ["a bytea-prefixed hash", row({ body_sha256: `\\x${TERMS_SHA}` })],
+    ["an UPPERCASE hash", row({ body_sha256: TERMS_SHA.toUpperCase() })],
+    ["a truncated hash", row({ body_sha256: TERMS_SHA.slice(0, 63) })],
+    ["an over-long hash", row({ body_sha256: `${TERMS_SHA}00` })],
+    ["a non-hex hash", row({ body_sha256: "z".repeat(64) })],
+    ["a non-string hash", row({ body_sha256: 12345 })],
     ["a non-string effective_from", row({ effective_from: 20260901 })],
     ["a non-integer accepted_version", row({ accepted_at: "x", accepted_version: "3" })],
   ];
@@ -127,8 +150,10 @@ test("a row this build cannot fully read is DROPPED, never half-rendered", async
       },
     );
   }
-  // POSITIVE CONTROL: the decoder still says yes to the shape the door ships.
+  // POSITIVE CONTROL: the decoder still says yes to the shape the door ships —
+  // 64 lowercase hex characters, no prefix.
   assert.equal(isLegalDocumentRow(row()), true);
+  assert.match(TERMS_SHA, /^[0-9a-f]{64}$/, "the fixture itself is not the shape 0185 stores");
 });
 
 test("the kind vocabulary is closed, and it is the ONE list every surface reads", () => {

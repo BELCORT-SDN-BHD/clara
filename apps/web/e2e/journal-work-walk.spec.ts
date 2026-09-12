@@ -89,20 +89,22 @@ async function control(page: Page, body: Record<string, unknown>): Promise<void>
  * measure.
  */
 async function settle(page: Page): Promise<void> {
-  // AND TAKE THE POINTER OFF WHATEVER IT WAS LAST CLICKING, for the same reason.
-  // `fill()` never moves the mouse, so a cell that clicked Submit and then kept
-  // typing leaves that button in `:hover` for the rest of the test — and axe then
-  // measures `hover:bg-primary/80` (#4a71e0 under white, 4.44:1) instead of
-  // `bg-primary` (#1d4ed8, 6.7:1, the pair the token gate actually pins).
+  // AND TAKE THE POINTER OFF WHATEVER IT WAS LAST CLICKING, so this measures the
+  // RESTING page it claims to measure. `fill()` never moves the mouse, so a cell
+  // that clicked Submit and then kept typing leaves that button in `:hover` for
+  // the rest of the test, and which element is hovered then depends on nothing
+  // but the last click's coordinates.
   //
-  // THAT HOVER SHORTFALL IS REAL AND IT IS NOT THIS TICKET'S, recorded here
-  // rather than silently stepped around: EVERY default `Button` in the product
-  // carries `hover:bg-primary/80` (components/ui/button.tsx, vendored), so the
-  // 4.44:1 is product-wide and predates #623. Changing it means changing
-  // `--primary` or that opacity for every button in the app, plus the token
-  // contrast gate's pinned pairs — a design-token decision, not a walk's. What
-  // this walk measures is the resting page, which is what every sibling scan
-  // measures too; they simply never left a pointer on a primary button.
+  // THE AA SHORTFALL THIS NOTE USED TO RECORD IS FIXED, and the record is
+  // corrected rather than left standing: `hover:bg-primary/80` composited to
+  // #4a71e0 under white 14px text = 4.440:1, below AA, product-wide. The #621
+  // review round raised it to `/90` in `components/ui/button.tsx` and
+  // `components/ui/badge.tsx` (#3460dc = 5.451:1) and pinned the hovered pair
+  // in `scripts/check-token-contrast.mjs`
+  // (`primary-foreground-on-primary-hover`). This line is therefore a
+  // MEASUREMENT-STABILITY choice now, not a workaround for a known failure —
+  // `e2e/checkout-gate-walk.spec.ts` and `e2e/signup-confirm-pending.spec.ts`
+  // dropped their copies of it and scan the hover state for real.
   await page.mouse.move(0, 0);
   await page.waitForFunction(() =>
     document.getAnimations().every((a) => {

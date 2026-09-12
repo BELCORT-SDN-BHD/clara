@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import type { ReactNode, Ref } from "react";
 
 import { cn } from "@/lib/utils";
 
@@ -90,6 +90,8 @@ export function StateBanner({
   silent = false,
   children,
   className,
+  ref,
+  tabIndex,
 }: {
   tone: BannerTone;
   /** An emphasised first line naming WHAT happened, when the domain draws a
@@ -116,9 +118,22 @@ export function StateBanner({
   silent?: boolean;
   children: ReactNode;
   className?: string;
+  /** A HANDLE FOR FOCUS, and that is the only reason it exists (#621's legal
+   *  stage). When a banner REPLACES the control a person just operated, focus
+   *  has nowhere to go and the browser drops it on `<body>`; moving it here
+   *  deliberately is the fix, and that needs the element itself. Both props are
+   *  optional and default to nothing, so every existing call site renders
+   *  byte-identically. */
+  ref?: Ref<HTMLDivElement>;
+  /** `-1` makes the banner programmatically focusable WITHOUT adding it to the
+   *  tab order — the standard treatment for a destination focus is sent to
+   *  rather than tabbed to. */
+  tabIndex?: number;
 }) {
   return (
     <div
+      ref={ref}
+      tabIndex={tabIndex}
       // A failure or a withheld capability interrupts; a plain state does not — unless the caller
       // owns an announcement boundary of its own, in which case this box says nothing on its own.
       role={silent ? undefined : tone === "error" || tone === "warning" ? "alert" : "status"}

@@ -156,8 +156,8 @@ test("THE WALL IS FED THE TRUSTED-HEADER ADDRESS, never the Origin header", asyn
 test("EACH OF THE WALL'S FIVE ANSWERS PAINTS ITS OWN FLASH, with the address echoed back", async () => {
   const cases: Array<[ResendOutcome, Record<string, unknown>]> = [
     [{ kind: "sent" }, { kind: "resent" }],
-    [{ kind: "locked", retryAfterSeconds: 300 }, { kind: "resend-locked", waitSeconds: 300 }],
-    [{ kind: "rate_limited", retryAfterSeconds: 47 }, { kind: "resend-rate-limited", waitSeconds: 47 }],
+    [{ kind: "locked", retryAfterSeconds: 300, atLeast: false }, { kind: "resend-locked", waitSeconds: 300, atLeast: false }],
+    [{ kind: "rate_limited", retryAfterSeconds: 47, atLeast: false }, { kind: "resend-rate-limited", waitSeconds: 47, atLeast: false }],
     [{ kind: "invalid_email" }, { kind: "resend-invalid-email" }],
     [{ kind: "unavailable" }, { kind: "resend-unavailable" }],
   ];
@@ -187,7 +187,7 @@ test("EACH OF THE WALL'S FIVE ANSWERS PAINTS ITS OWN FLASH, with the address ech
 test("THE FLASH COOKIE'S SECURITY ATTRIBUTES are the verify path's, not a second weaker copy", async () => {
   const response = await handleConfirmationResendPost(
     postRequest([["email", "aisyah@example.com"]]),
-    async () => ({ kind: "locked", retryAfterSeconds: 300 }),
+    async () => ({ kind: "locked", retryAfterSeconds: 300, atLeast: false }),
   );
   const setCookie = response.headers.get("set-cookie") ?? "";
   assert.match(setCookie, /HttpOnly/i, "the outcome cookie is readable by script");
@@ -235,16 +235,39 @@ test("THE SEAM CALLS ONE ENDPOINT, with the bearer, the forwarded address, and E
 test("THE SEAM READS EACH STATUS FOR WHAT IT IS, and never invents a send", async () => {
   const cases: Array<[number, unknown, ResendOutcome]> = [
     [200, { outcome: "sent" }, { kind: "sent" }],
-    [429, { outcome: "locked", retryAfterSeconds: 300 }, { kind: "locked", retryAfterSeconds: 300 }],
-    [429, { outcome: "rate_limited", retryAfterSeconds: 47 }, { kind: "rate_limited", retryAfterSeconds: 47 }],
+    [429, { outcome: "locked", retryAfterSeconds: 300 }, { kind: "locked", retryAfterSeconds: 300, atLeast: false }],
+    [429, { outcome: "rate_limited", retryAfterSeconds: 47 }, { kind: "rate_limited", retryAfterSeconds: 47, atLeast: false }],
     [400, { outcome: "invalid_email" }, { kind: "invalid_email" }],
     [503, { outcome: "unavailable" }, { kind: "unavailable" }],
     // A 200 that does not SAY sent is not evidence a code went out.
     [200, { outcome: "queued" }, { kind: "unavailable" }],
     [200, {}, { kind: "unavailable" }],
-    // A wait outside the door's own clamp is deploy-skew evidence, not policy.
-    [429, { outcome: "locked", retryAfterSeconds: 9000 }, { kind: "unavailable" }],
-    [429, { outcome: "locked" }, { kind: "unavailable" }],
+    // A WAIT LONGER THAN THE CARD WILL PRINT IS STILL A WAIT (#621 review). The
+    // runtime's `providerRetryAfterSeconds` is uncapped, so "wait an hour" is an
+    // ordinary answer from a wall that worked perfectly. It used to become
+    // `unavailable`, whose card says "we couldn't send a new code" — a plain
+    // falsehood that also invites a retry against the budget that just refused.
+    // It is CLAMPED to the display ceiling and FLAGGED instead.
+    [429, { outcome: "locked", retryAfterSeconds: 3600 }, { kind: "locked", retryAfterSeconds: 900, atLeast: true }],
+    [429, { outcome: "rate_limited", retryAfterSeconds: 3600 }, { kind: "rate_limited", retryAfterSeconds: 900, atLeast: true }],
+    // NaN is a `number` to `typeof` and nothing to arithmetic — the one shape a
+    // naive bound lets through as a wait. It carries no reading at all, so the
+    // outcome STANDS and the per-outcome default is served: 15 minutes for the
+    // C1/C2 attempt window, a minute for the provider's send cooldown.
+    [429, { outcome: "locked", retryAfterSeconds: Number.NaN }, { kind: "locked", retryAfterSeconds: 900, atLeast: false }],
+    [429, { outcome: "rate_limited", retryAfterSeconds: Number.NaN }, { kind: "rate_limited", retryAfterSeconds: 60, atLeast: false }],
+    // ZERO IS A REAL ANSWER, not a missing one — "you may ask again now". It is
+    // kept verbatim rather than replaced by a default the wall never said.
+    [429, { outcome: "locked", retryAfterSeconds: 0 }, { kind: "locked", retryAfterSeconds: 0, atLeast: false }],
+    [429, { outcome: "rate_limited", retryAfterSeconds: 0 }, { kind: "rate_limited", retryAfterSeconds: 0, atLeast: false }],
+    // A negative or non-numeric wait has no honest reading either: the default.
+    [429, { outcome: "locked", retryAfterSeconds: -5 }, { kind: "locked", retryAfterSeconds: 900, atLeast: false }],
+    [429, { outcome: "rate_limited", retryAfterSeconds: "47" }, { kind: "rate_limited", retryAfterSeconds: 60, atLeast: false }],
+    [429, { outcome: "locked" }, { kind: "locked", retryAfterSeconds: 900, atLeast: false }],
+    // A fractional wait is rounded UP — never promise a shorter one.
+    [429, { outcome: "rate_limited", retryAfterSeconds: 46.2 }, { kind: "rate_limited", retryAfterSeconds: 47, atLeast: false }],
+    // AN OUTCOME THIS BUILD DOES NOT RECOGNISE is still `unavailable`: a shape
+    // refusal, which is a different thing from a wait that could not be read.
     [429, { outcome: "something_else", retryAfterSeconds: 5 }, { kind: "unavailable" }],
     [500, { outcome: "sent" }, { kind: "unavailable" }],
   ];

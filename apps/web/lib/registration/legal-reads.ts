@@ -56,9 +56,12 @@ export type LegalDocumentRow = {
   readonly status: LegalDocumentStatus;
   readonly title: string;
   readonly body: string;
-  /** PostgREST's own text rendering of `bytea` — `\x`-prefixed lowercase hex.
-   *  OPAQUE here: forwarded to `accept_legal_document`'s `p_body_sha256`
-   *  verbatim, never parsed, compared or recomputed on this side. */
+  /** A `text` column holding plain lowercase hex (0185 §A: the CHECK recomputes
+   *  it from the body). OPAQUE here: forwarded to `accept_legal_document`'s
+   *  `p_body_sha256` verbatim, never parsed, compared or recomputed on this side.
+   *  Its SHAPE is checked (see `BODY_SHA256`) — that is a decode, not a
+   *  recompute: it says "this is a sha256 hex digest", never "this is the
+   *  digest of this body". */
   readonly body_sha256: string;
   readonly effective_from: string | null;
   readonly published_at: string | null;
@@ -67,6 +70,19 @@ export type LegalDocumentRow = {
   readonly accepted_at: string | null;
   readonly accepted_version: number | null;
 };
+
+/** THE SHAPE 0185 GUARANTEES, and the ONLY thing checked about the hash here.
+ *  `legal_documents.body_sha256` is `text not null` under
+ *  `check (body_sha256 = encode(sha256(convert_to(body,'UTF8')),'hex'))`, so a
+ *  row that actually came from the shipped door carries exactly 64 lowercase
+ *  hex characters. Anything else — a `\x`-prefixed `bytea` rendering (the
+ *  RETIRED `dpa_documents` shape), an uppercase digest, a truncated one — is
+ *  a value `accept_legal_document` would refuse `CLR10 / hash_mismatch` on
+ *  anyway, and forwarding it would spend an op key to learn that. Dropping the
+ *  row instead is what the decoder already does for every other field it
+ *  cannot vouch for. NOT a recompute: this never asserts the digest MATCHES
+ *  the body, which is the door's wall and must stay the door's wall. */
+const BODY_SHA256 = /^[0-9a-f]{64}$/;
 
 function isNullableString(value: unknown): value is string | null {
   return value === null || typeof value === "string";
@@ -94,7 +110,7 @@ export function isLegalDocumentRow(value: unknown): value is LegalDocumentRow {
     typeof row.body === "string" &&
     row.body.length > 0 &&
     typeof row.body_sha256 === "string" &&
-    row.body_sha256.length > 0 &&
+    BODY_SHA256.test(row.body_sha256) &&
     isNullableString(row.effective_from) &&
     isNullableString(row.published_at) &&
     isNullableString(row.accepted_at) &&

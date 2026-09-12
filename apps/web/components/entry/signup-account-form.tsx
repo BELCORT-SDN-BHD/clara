@@ -6,7 +6,7 @@ import { useState } from "react";
 
 import { PASSWORD_MIN_LENGTH } from "@/lib/auth/password-policy";
 import { createClient } from "@/lib/supabase/client";
-import { rememberSignupEmail } from "@/lib/registration/signup-email-storage";
+import { forgetSignupEmail, rememberSignupEmail } from "@/lib/registration/signup-email-storage";
 import { cn } from "@/lib/utils";
 import { Button, buttonVariants } from "@/components/ui/button";
 import {
@@ -335,6 +335,36 @@ export function SignupAccountForm({
               runs and then asks the provider, so the card points at the control
               that exists instead of at a second signup. */}
           <p className="text-sm text-muted-foreground">{t("checkEmailNoCode")}</p>
+          {/* WRONG ADDRESS? THE WAY OUT THIS CARD DID NOT HAVE (#621 review).
+              This face is reached for a fresh signup AND for a duplicate
+              account (the two are flattened so the screen is not an
+              account-existence oracle), which means a mistyped address lands
+              here looking exactly like a correct one — and the only thing on
+              the card was "go enter the code we sent", for mail that will
+              never arrive. Starting again is a real act, not a navigation:
+              `/signup` IS this route, so a link back to it would re-render the
+              same card. The control clears the remembered address (otherwise
+              the confirm form would prefill the very typo) and returns this
+              form to its empty first stage. */}
+          <p className="text-sm text-muted-foreground">
+            {t.rich("checkEmailWrongAddress", {
+              action: (chunks) => (
+                <button
+                  type="button"
+                  className="text-primary underline"
+                  onClick={() => {
+                    forgetSignupEmail();
+                    setEmail("");
+                    setPassword("");
+                    setError(null);
+                    setStage("form");
+                  }}
+                >
+                  {chunks}
+                </button>
+              ),
+            })}
+          </p>
           {/* THE TWO RECOVERABLE PATHS FOR SOMEBODY WHO IS ALREADY REGISTERED,
               and they are on THIS card deliberately. The duplicate-account arm
               flattens into this exact card so the screen is not an

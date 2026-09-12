@@ -98,7 +98,11 @@ const EMAIL_MAX_CHARS = 254;
 export type ConfirmFlashOutcome =
   // ── the CODE attempt (the verify POST) ────────────────────────────────────
   | { readonly kind: "wrong"; readonly remaining: number }
-  | { readonly kind: "locked"; readonly waitSeconds: number }
+  // `atLeast` — the C1/C2 wait the verify wall named exceeded this app's
+  // display ceiling and was CLAMPED to it (`verify/confirmation-wall.ts`).
+  // Same contract as the resend outcomes below: absent means the number is
+  // exact, present-and-true means the card must say "at least".
+  | { readonly kind: "locked"; readonly waitSeconds: number; readonly atLeast?: boolean }
   | { readonly kind: "unavailable" }
   | { readonly kind: "invalid" }
   // ── the RESEND attempt (#621) ─────────────────────────────────────────────
@@ -111,8 +115,12 @@ export type ConfirmFlashOutcome =
   // wrong guess would), `resend-rate-limited` is the provider's own per-address
   // send cooldown. Both carry a real wait; neither is guessed here.
   | { readonly kind: "resent" }
-  | { readonly kind: "resend-locked"; readonly waitSeconds: number }
-  | { readonly kind: "resend-rate-limited"; readonly waitSeconds: number }
+  // `atLeast` travels with both waits: the resend wall CLAMPS a longer answer
+  // to its display ceiling rather than downgrading the outcome, and the card
+  // has to say "at least" when the number it prints is this app's floor rather
+  // than the wall's own measurement (`resend/resend-wall.ts`).
+  | { readonly kind: "resend-locked"; readonly waitSeconds: number; readonly atLeast?: boolean }
+  | { readonly kind: "resend-rate-limited"; readonly waitSeconds: number; readonly atLeast?: boolean }
   | { readonly kind: "resend-invalid-email" }
   | { readonly kind: "resend-unavailable" };
 
@@ -178,6 +186,22 @@ function boundedInt(value: unknown, max: number): number | null {
     : null;
 }
 
+/** THE `atLeast` FLAG, as the payload carries it: absent means "the number is
+ *  exact". It is a boolean, so there is no range to bound — and note that the
+ *  CLAMP it reports lives upstream of this cookie, in `../wait-seconds.ts`
+ *  (shared by `resend/resend-wall.ts` and `verify/confirmation-wall.ts`), NOT
+ *  here. `boundedInt` above stays strict on purpose: a `waitSeconds` this
+ *  server could not have written is deploy-skew or tampering evidence and
+ *  still fails the whole payload closed (pinned by
+ *  `tests/confirm-flash.test.ts` and `components/entry/
+ *  email-confirmation-page.test.tsx`). Because both walls clamp BEFORE the
+ *  cookie is sealed, an out-of-range wait can no longer reach this decoder
+ *  through either limb at all — the correction is upstream, and this bound
+ *  keeps meaning exactly what it always meant. */
+function boundedAtLeast(value: unknown): boolean {
+  return value === true;
+}
+
 /** The echoed address, or nothing. An absent, empty, over-long or non-string
  *  value is simply DROPPED — the field then renders from this browser's own
  *  remembered address exactly as it always did. A malformed echo never fails
@@ -227,19 +251,36 @@ export function parseConfirmFlash(
     }
     case "locked": {
       const waitSeconds = boundedInt(candidate.waitSeconds, LOCKED_MAX_WAIT_SECONDS);
-      return waitSeconds === null ? null : { nonce, ...withEmail, kind: "locked", waitSeconds };
+      if (waitSeconds === null) return null;
+      // `atLeast` RIDES ONLY WHEN TRUE — the writer (`verify/handler.ts`) never
+      // sets an explicit `false`, so its absence already means "exact" and this
+      // decoder keeps meaning that rather than growing a second spelling of it.
+      const atLeastFields = boundedAtLeast(candidate.atLeast) ? { atLeast: true as const } : {};
+      return { nonce, ...withEmail, kind: "locked", waitSeconds, ...atLeastFields };
     }
     case "resend-locked": {
       const waitSeconds = boundedInt(candidate.waitSeconds, LOCKED_MAX_WAIT_SECONDS);
       return waitSeconds === null
         ? null
-        : { nonce, ...withEmail, kind: "resend-locked", waitSeconds };
+        : {
+            nonce,
+            ...withEmail,
+            kind: "resend-locked",
+            waitSeconds,
+            atLeast: boundedAtLeast(candidate.atLeast),
+          };
     }
     case "resend-rate-limited": {
       const waitSeconds = boundedInt(candidate.waitSeconds, LOCKED_MAX_WAIT_SECONDS);
       return waitSeconds === null
         ? null
-        : { nonce, ...withEmail, kind: "resend-rate-limited", waitSeconds };
+        : {
+            nonce,
+            ...withEmail,
+            kind: "resend-rate-limited",
+            waitSeconds,
+            atLeast: boundedAtLeast(candidate.atLeast),
+          };
     }
     case "unavailable":
       return { nonce, ...withEmail, kind: "unavailable" };

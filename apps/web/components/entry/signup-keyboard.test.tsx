@@ -6,11 +6,12 @@
 // journey's own keyboard file makes, for the other entrance.
 //
 // FS-4 C-6 MOVED THE DPA GATE OFF THIS STEP. checkout-gate-design.md §1.1
-// places the real e-sign at a LATER step (`signup-dpa-form.tsx`, reached once
-// an open registration exists) rather than as a checkbox on account creation
-// — that file's own keyboard/a11y coverage lives beside it
-// (`signup-dpa-form.test.tsx`). The account step below now gates on nothing
-// but ordinary field validation.
+// places the real e-sign at a LATER step, reached once an open registration
+// exists, rather than as a checkbox on account creation; #621 then replaced
+// that single-document step with the two-agreement legal stage
+// (`components/entry/signup-legal-stage.tsx`), whose own keyboard/a11y
+// coverage lives beside it (`signup-legal-stage.test.tsx`). The account step
+// below now gates on nothing but ordinary field validation.
 //
 // `clickButton` is deliberately absent from this file. It invokes an `onClick`
 // prop and THROWS when there is none, and every submit here is a `type="submit"`
@@ -125,9 +126,10 @@ class BrowserCookieJar {
 
 test("THE ACCOUNT STEP IS KEYBOARD-OPERABLE, and a keyboard-only run creates the account", async () => {
   // FS-4 C-6: the checkbox gate this cell used to prove is gone from THIS
-  // step (checkout-gate-design.md §1.1 moved the real DPA e-sign to
-  // `signup-dpa-form.tsx`, reached later once a registration is open). What
-  // remains to prove here is simpler and unchanged: every control reachable,
+  // step (checkout-gate-design.md §1.1 moved the real e-sign later, once a
+  // registration is open; #621's `signup-legal-stage.tsx` is the surface that
+  // carries it now). What remains to prove here is simpler and unchanged:
+  // every control reachable,
   // no tabindex/focus-visible violations, and a keyboard-only submit works.
   let created = false;
   const router: Router = { replaced: [] };

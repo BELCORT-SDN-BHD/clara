@@ -314,11 +314,47 @@ test("c5db.5 the ACCEPTANCE WALK — signed event to a minted firm, end to end",
     [`price_${randomUUID().replaceAll("-", "")}`],
   );
 
-  const dpa = await rig.rootQuery("select version,body_sha256 from clara.dpa_documents where effective_to is null");
+  // 0185: the placeholder `dpa_documents` row is now `status='draft'` and structurally
+  // unsignable — `open_checkout_intent` refuses CLR09 `legal_not_accepted` unless BOTH a
+  // published `terms` and a published `dpa` are accepted at their current versions. Publish a
+  // fixture of each kind as root (superseding whatever is currently published, same as
+  // checkout-gate-c3.test.mjs's `publishRootLegal`), then accept both as the applicant — the
+  // DPA through `sign_dpa` itself, since that is the wrapper this cell exercises.
+  for (const kind of ["dpa", "terms"]) {
+    await rig.rootQuery(
+      "update clara.legal_documents set status='superseded' where kind=$1 and status='published'",
+      [kind],
+    );
+  }
+  const dpaDoc = await rig.rootQuery(
+    `insert into clara.legal_documents(
+       kind,version,status,title,body,body_sha256,source_path,effective_from,published_at)
+     select 'dpa', coalesce(max(version),0)+1, 'published', $1, $2,
+            encode(sha256(convert_to($2,'UTF8')),'hex'), 'tests/fixture', now(), now()
+       from clara.legal_documents where kind='dpa'
+     returning version, body_sha256`,
+    [`c5 fixture dpa`, `c5 acceptance walk dpa body ${tag} ${randomUUID()}`],
+  );
+  const termsDoc = await rig.rootQuery(
+    `insert into clara.legal_documents(
+       kind,version,status,title,body,body_sha256,source_path,effective_from,published_at)
+     select 'terms', coalesce(max(version),0)+1, 'published', $1, $2,
+            encode(sha256(convert_to($2,'UTF8')),'hex'), 'tests/fixture', now(), now()
+       from clara.legal_documents where kind='terms'
+     returning version, body_sha256`,
+    [`c5 fixture terms`, `c5 acceptance walk terms body ${tag} ${randomUUID()}`],
+  );
+
   await asApplicant(applicant, email, "select clara.sign_dpa($1,$2,$3) as r", [
-    dpa.rows[0].version,
-    dpa.rows[0].body_sha256,
+    String(dpaDoc.rows[0].version),
+    Buffer.from(dpaDoc.rows[0].body_sha256, "hex"),
     `c5sign_${tag}`,
+  ]);
+  await asApplicant(applicant, email, "select clara.accept_legal_document($1,$2,$3,$4) as r", [
+    "terms",
+    termsDoc.rows[0].version,
+    termsDoc.rows[0].body_sha256,
+    `c5terms_${tag}`,
   ]);
 
   const reg = await rig.rootQuery(

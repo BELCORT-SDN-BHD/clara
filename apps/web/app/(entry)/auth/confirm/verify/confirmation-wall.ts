@@ -79,8 +79,21 @@
 // re-clamps them either. The clamps in `confirm-flash.ts` therefore stop being
 // a guess about the door and become what they should be: a fail-closed check
 // on a value that crossed two process boundaries.
+//
+// CORRECTION, 2026-09-12 — "BY THE DOOR'S OWN CLAMP" WAS TRUSTED TOO FAR. This
+// module used to refuse (`{kind:"unavailable"}`) a `retry_after_seconds`
+// outside [0,900], on the theory above that the door's own `least(900, …)`
+// makes that impossible. But `unavailable` here renders "we couldn't check
+// your code just now" — a LIE for the one case that actually reaches it: the
+// wall answered perfectly and the wait merely exceeded this app's display
+// bound (a future door change, or a rolling deploy skew). The resend wall
+// (`../resend/resend-wall.ts`) carries the identical correction for its own
+// provider cooldown, which is uncapped by construction rather than by deploy
+// skew — same rule, shared now in `../wait-seconds.ts`: an over-long wait is
+// CLAMPED to the ceiling and FLAGGED (`atLeast: true`), never downgraded.
 
 import { AUTH_WALL_CLIENT_IP_HEADER } from "@/lib/rate-wall-courier";
+import { waitSeconds } from "../wait-seconds";
 
 /** What the wall decided, told apart from "the wall was not reachable". */
 export type ConfirmationOutcome =
@@ -97,8 +110,16 @@ export type ConfirmationOutcome =
    *  every verification failure into this one outcome deliberately, so a
    *  banned and an unknown address are indistinguishable, N3). */
   | { readonly kind: "wrong"; readonly remaining: number }
-  /** C1 or C2 refused BEFORE any verification happened. */
-  | { readonly kind: "locked"; readonly scope: "email" | "origin"; readonly retryAfterSeconds: number }
+  /** C1 or C2 refused BEFORE any verification happened. `atLeast` is set when
+   *  the door's own wait exceeded `WAIT_SECONDS_CEILING` (`../wait-seconds.ts`)
+   *  and was CLAMPED to it: the card must then say "at least", because the
+   *  number it prints is a floor this app chose, not the wait the door named. */
+  | {
+      readonly kind: "locked";
+      readonly scope: "email" | "origin";
+      readonly retryAfterSeconds: number;
+      readonly atLeast?: boolean;
+    }
   /** The wall could not be reached or is not configured. Never a bypass. */
   | { readonly kind: "unavailable" };
 
@@ -142,7 +163,10 @@ function boundedInt(value: unknown, max: number): number | null {
 }
 
 const REMAINING_MAX = 5;
-const RETRY_AFTER_MAX = 900;
+/** What a MISSING or unusable C1/C2 wait falls back to — the same 15-minute
+ *  attempt window `../resend/resend-wall.ts`'s own `DEFAULT_LOCKED_SECONDS`
+ *  names for the identical wall, reused over this limb. */
+const DEFAULT_LOCKED_SECONDS = 900;
 
 /**
  * The ONE call. Every failure class — unconfigured, unauthorised, 503, a
@@ -211,12 +235,19 @@ export async function confirmEmailCodeWith(
 
   if (response.status === 429) {
     if (answer.allowed !== false) return { kind: "unavailable" };
-    const retryAfterSeconds = boundedInt(answer.retry_after_seconds, RETRY_AFTER_MAX);
+    // THE SCOPE IS STILL A SHAPE CHECK, UNRELATED TO THE WAIT'S OWN BOUND: a
+    // door answering neither `"email"` nor `"origin"` crossed the boundary
+    // wrong regardless of what it said about the wait, and stays `unavailable`.
     const scope = answer.scope;
-    if (retryAfterSeconds === null || (scope !== "email" && scope !== "origin")) {
-      return { kind: "unavailable" };
-    }
-    return { kind: "locked", scope, retryAfterSeconds };
+    if (scope !== "email" && scope !== "origin") return { kind: "unavailable" };
+    // THE WAIT ITSELF NO LONGER FAILS CLOSED ABOVE THE CEILING (see the
+    // correction note above this file's header). `waitSeconds` CLAMPS an
+    // over-long answer and flags it, rather than turning a wall that answered
+    // perfectly into a false "we couldn't check your code".
+    const wait = waitSeconds(answer.retry_after_seconds, DEFAULT_LOCKED_SECONDS);
+    return wait.atLeast
+      ? { kind: "locked", scope, retryAfterSeconds: wait.seconds, atLeast: true }
+      : { kind: "locked", scope, retryAfterSeconds: wait.seconds };
   }
 
   if (answer.allowed !== true) return { kind: "unavailable" };

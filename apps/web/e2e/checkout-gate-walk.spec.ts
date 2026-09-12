@@ -106,23 +106,43 @@ function assertNoCheckoutDoors(state: ControlState) {
 }
 
 async function scan(page: Page, label: string) {
-  // PARK THE POINTER FIRST, and this is a real finding rather than a tidy-up.
-  // Playwright leaves the mouse wherever the last click landed, so after the
-  // navigation onto the legal stage the cursor sat on an acceptance control and
-  // axe measured that button in its HOVER state: `hover:bg-primary/80`
-  // composites to #4a71e0 under white text = 4.44:1, just under AA's 4.5. The
-  // shortfall is REAL and it is ESTATE-WIDE (`components/ui/button.tsx`'s
-  // default variant, every primary button in the product), not something this
-  // stage introduced — the token gate only measures the resting pair
-  // (`primary-foreground-on-primary`, 6.7:1) and no other walk had happened to
-  // park a pointer on a primary button before scanning. Reported rather than
-  // fixed here, because retuning the hover alpha is a design-system change
-  // across every surface. What this line does is make the scan measure the
-  // state it CLAIMS to measure — the resting stage — instead of a hover state
-  // that happens to depend on where the previous click was.
-  await page.mouse.move(0, 0);
+  // THE POINTER IS DELIBERATELY LEFT WHERE THE LAST CLICK PUT IT. This used to
+  // park it at (0,0) first, because a cursor resting on an acceptance control
+  // made axe measure that button HOVERED — `hover:bg-primary/80` composites to
+  // #4a71e0 under white 14px text = 4.440:1, under AA's 4.5. That shortfall was
+  // real and estate-wide, and it is now FIXED AT THE SOURCE
+  // (`components/ui/button.tsx`, `components/ui/badge.tsx`: `/90`, composites
+  // to #3460dc = 5.451:1, pinned by `scripts/check-token-contrast.mjs`'s
+  // `primary-foreground-on-primary-hover` row). Removing the workaround is the
+  // point: a scan that dodges the hover state cannot catch the next one.
   const results = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
   expect(results.violations, `${label} has a11y violations`).toEqual([]);
+}
+
+/** No page-wide horizontal scroll at whatever width the caller just set — the
+ *  same instrument `responsive-shell-walk.spec.ts` and `work-question-walk`
+ *  use, and the property the legal stage owed and never had. */
+async function expectNoSidewaysScroll(page: Page, face: string) {
+  const overflow = await page.evaluate(() => ({
+    scrollWidth: document.documentElement.scrollWidth,
+    innerWidth: window.innerWidth,
+  }));
+  expect(
+    overflow.scrollWidth,
+    `${face}: the document scrolls sideways (${overflow.scrollWidth} > ${overflow.innerWidth})`,
+  ).toBeLessThanOrEqual(overflow.innerWidth + 1);
+}
+
+/** What currently holds focus, described the way an assertion can read it. */
+function focusDescription(page: Page) {
+  return page.evaluate(() => {
+    const el = document.activeElement as HTMLElement | null;
+    return {
+      tag: el?.tagName ?? "NONE",
+      role: el?.getAttribute("role") ?? "",
+      text: (el?.textContent ?? "").trim().slice(0, 120),
+    };
+  });
 }
 
 /** Sign up, confirm and register — the only way to reach the legal stage. Every
@@ -215,6 +235,27 @@ test("THE WHOLE JOURNEY: confirm → DPA → checkout → success → the firm o
   // ONE of two is still not enough — the state the single-document step could
   // not even express.
   await acceptAgreement(page, "Terms of Service");
+
+  // ── FOCUS AFTER AN ACCEPTANCE, IN A REAL BROWSER ─────────────────────────
+  // The control the person just pressed is REMOVED and replaced by the accepted
+  // banner, so without a deliberate move the browser drops focus on `<body>`
+  // and a keyboard user restarts at the top of the page. The component's rule
+  // (its own header, and `signup-legal-stage.test.tsx` pins it at unit level)
+  // is: focus goes to THAT agreement's accepted banner — the receipt — never
+  // past it to the other agreement's control. Polled, because the move happens
+  // after `router.refresh()` is asked for.
+  await expect.poll(async () => (await focusDescription(page)).text, {
+    message: "focus was dumped on <body> (or skipped past the receipt) after an acceptance",
+  }).toContain("Accepted on");
+  const afterAccept = await focusDescription(page);
+  expect(afterAccept.tag, "the accepted receipt is not what holds focus").toBe("DIV");
+  expect(afterAccept.role, "the focused receipt lost its announcement role").toBe("status");
+  // AND NOT THE NEXT CONTROL: the other agreement is still outstanding and
+  // still offers its own control, which focus deliberately did NOT jump to.
+  await expect(
+    page.getByRole("button", { name: "I have read and accept the Data Processing Agreement" }),
+  ).toBeVisible();
+
   await expect(page.getByRole("button", { name: "Continue to checkout" })).toHaveCount(0);
   expect((await control(page, {})).missingLegal, "the terms acceptance never reached the door").toEqual(["dpa"]);
 
@@ -241,6 +282,7 @@ test("THE WHOLE JOURNEY: confirm → DPA → checkout → success → the firm o
   await expect(page.getByText(/could not reach the payment provider/i)).toBeVisible();
   await scan(page, "the stripe-unavailable card");
 
+
   const afterCheckout = await control(page, {});
   // THE ORDER, on the real wire: the checkout route opened the intent and read
   // the plan IMMEDIATELY after, before it reached for Stripe. Asserted as an
@@ -259,6 +301,19 @@ test("THE WHOLE JOURNEY: confirm → DPA → checkout → success → the firm o
   // And the doors BEFORE Stripe did run — otherwise the arm above would be
   // green for the wrong reason (a route that refused earlier).
   expect(afterCheckout.missingLegal).toEqual([]);
+  // ── BROWSER BACK KEEPS WHAT WAS SIGNED ───────────────────────────────────
+  // The card invites a retry, and the way a person retries is the Back button.
+  // The acceptances are the DB's fact, re-derived on every load (the stage
+  // holds nothing in this browser), so Back must land on a legal stage that
+  // still shows two receipts and still offers checkout — never one asking for
+  // signatures already recorded, and never a bfcache snapshot of the
+  // pre-acceptance page.
+  await page.goBack();
+  await expect(page).toHaveURL(`${APP_ORIGIN}/signup`, NAV);
+  await expect(page.getByRole("heading", { name: "Two agreements before checkout" })).toBeVisible();
+  expect(await page.getByText(/Accepted on /).count(), "Back lost an acceptance").toBe(2);
+  await expect(page.getByRole("button", { name: /I have read and accept/ })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Continue to checkout" })).toBeVisible();
 
   // ── ⑥/⑦ the payment lands (the applier's effect, stood in for) ────────────
   // A real run replays a signed `checkout.session.completed` through C-5's
@@ -277,6 +332,67 @@ test("THE WHOLE JOURNEY: confirm → DPA → checkout → success → the firm o
   const after = await control(page, {});
   expect(after.firmOpened, "claim_paid_firm never ran").toBe(true);
   expect(after.paidUnconsumed, "the payment was not consumed").toBe(false);
+});
+
+test("THE LEGAL STAGE AT 320 CSS px, AT 200% ZOOM, AND UNDER REDUCED MOTION", async ({ page }) => {
+  // The journey-state gap this round closed: the stage that asks somebody to
+  // sign two agreements had no geometry and no motion assertion at all. It is
+  // ONE extra reach of the existing journey rather than a second copy of it —
+  // `reachLegalStage` is the same helper every other cell here uses.
+  //
+  // REDUCED MOTION FIRST, and it is emulated BEFORE the navigation so every
+  // load-time decision this page makes runs under it. The claim being pinned is
+  // deliberately narrow and checkable: the stage renders IDENTICALLY under
+  // `reduce` — same cards, same controls, same acceptance path — because it
+  // animates nothing of its own. No animation class is required of it; a stage
+  // that started animating would have to come back here and say what it does
+  // under `reduce`.
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  const email = `e2e-narrow-${Date.now()}@example.test`;
+  await reachLegalStage(page, email);
+  await expect(page.getByRole("heading", { name: "ClaraBook Beta Terms of Service" })).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "I have read and accept the Terms of Service" }),
+  ).toBeVisible();
+
+  for (const [label, size] of [
+    ["320 CSS px", { width: 320, height: 640 }],
+    // 200% browser zoom IS a halving of the CSS viewport, so 640×512 is the
+    // 1280×720-at-200% case (`responsive-shell-walk.spec.ts`'s own note).
+    ["200% zoom", { width: 640, height: 512 }],
+  ] as const) {
+    await page.setViewportSize(size);
+    await expectNoSidewaysScroll(page, `the legal stage at ${label}`);
+    // THE PRIMARY ACT IS ON SCREEN. A long agreement must not push the thing
+    // the person came here to press off the viewport — the stage's scrollable
+    // text region is capped precisely so it cannot.
+    const accept = page.getByRole("button", { name: "I have read and accept the Terms of Service" });
+    await accept.scrollIntoViewIfNeeded();
+    await expect(accept).toBeInViewport();
+    await scan(page, `the legal stage at ${label} under reduced motion`);
+  }
+
+  // ── THE HOVERED PRIMARY BUTTON, SCANNED ON PURPOSE ───────────────────────
+  // This file used to park the pointer at (0,0) before every scan precisely so
+  // axe would never measure this. `hover:bg-primary/80` composited to #4a71e0
+  // under white 14px text = 4.440:1, under AA — a real, estate-wide failure
+  // that the workaround hid. The alpha is `/90` now (#3460dc = 5.451:1,
+  // measured by `scripts/check-token-contrast.mjs` and pinned there as
+  // `primary-foreground-on-primary-hover`), so the pointer is put ON the
+  // control DELIBERATELY and the scan is allowed to see it. This is the cell
+  // that would go red if the alpha drifted back.
+  await page.setViewportSize({ width: 1280, height: 720 });
+  const hovered = page.getByRole("button", { name: "I have read and accept the Terms of Service" });
+  await hovered.hover();
+  await scan(page, "the legal stage with the pointer ON a primary button");
+
+  // AND IT STILL WORKS at the narrow width under `reduce` — a layout cell that
+  // never drives the act would pass on a stage whose control had stopped
+  // functioning.
+  await page.setViewportSize({ width: 320, height: 640 });
+  await acceptAgreement(page, "Terms of Service");
+  expect((await control(page, {})).missingLegal).toEqual(["dpa"]);
+  await expect(page.getByText(/Accepted on /)).toBeVisible();
 });
 
 test("REFUSAL POLARITY — a wrong code and a LOCKED wall render their own cards", async ({ page }) => {

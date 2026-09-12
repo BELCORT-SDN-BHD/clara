@@ -74,15 +74,24 @@ async function controlResend(page: Page, body: Record<string, unknown>): Promise
 const CONFIRM_WALL_WIRED = process.env.CLARA_E2E_CONFIRM_WALL_WIRED === "1";
 
 async function expectAccessible(page: Page, face: string): Promise<void> {
-  // Park the pointer first, so the scan measures the RESTING face rather than
-  // whatever control the previous click left the cursor sitting on — a hover
-  // state's composited colours are a different measurement, and which element
-  // inherits one depends on nothing but the last click's coordinates.
-  // `checkout-gate-walk.spec.ts`'s own `scan()` records the finding that made
-  // this necessary.
-  await page.mouse.move(0, 0);
   const result = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
   expect(result.violations, `${face} axe violations`).toEqual([]);
+}
+
+/** No page-wide horizontal scroll, at whatever width the caller just set.
+ *  `responsive-shell-walk.spec.ts`'s own instrument, narrowed to the one
+ *  property these entry faces owe: a person on a 320 CSS px phone must never
+ *  have to scroll sideways to read a card that asks them for a code. */
+async function expectNoSidewaysScroll(page: Page, face: string): Promise<void> {
+  const overflow = await page.evaluate(() => ({
+    scrollWidth: document.documentElement.scrollWidth,
+    clientWidth: document.documentElement.clientWidth,
+    innerWidth: window.innerWidth,
+  }));
+  expect(
+    overflow.scrollWidth,
+    `${face}: the document scrolls sideways (${overflow.scrollWidth} > ${overflow.innerWidth})`,
+  ).toBeLessThanOrEqual(overflow.innerWidth + 1);
 }
 
 test("signup account step -> check-your-email, with the confirm code form reachable and honest", async ({ page }) => {
@@ -208,6 +217,27 @@ test("signup account step -> check-your-email, with the confirm code form reacha
   await page.goto(`/auth/confirm?email=${encodeURIComponent("victim@example.test")}&token=999999`);
   await expect(page.getByRole("heading", { name: "Enter your confirmation code" })).toBeVisible();
   await expect(page.getByLabel("Email")).not.toHaveValue("victim@example.test");
+
+  // ── 320 CSS px AND 200% ZOOM, on the face a person actually types into ────
+  // The journey faces had no geometry assertion at all until this round: a
+  // confirm card that pushed its own submit off a 320px screen would have
+  // passed every cell above. 200% browser zoom is exactly a halving of the CSS
+  // viewport (`responsive-shell-walk.spec.ts`'s own note), so 640×512 IS the
+  // 1280×720-at-200% case; no `deviceScaleFactor` is involved.
+  for (const [label, size] of [
+    ["320 CSS px", { width: 320, height: 640 }],
+    ["200% zoom", { width: 640, height: 512 }],
+  ] as const) {
+    await page.setViewportSize(size);
+    await page.goto("/auth/confirm");
+    await expect(page.getByRole("heading", { name: "Enter your confirmation code" })).toBeVisible();
+    await expectNoSidewaysScroll(page, `confirmation code form at ${label}`);
+    // THE PRIMARY ACTION IS ON SCREEN, not merely in the DOM — a submit the
+    // person cannot see is the failure this measures.
+    await expect(page.getByRole("button", { name: "Confirm my email" })).toBeInViewport();
+    await expect(page.getByLabel("Six-digit code")).toBeEditable();
+  }
+  await page.setViewportSize({ width: 1280, height: 720 });
 
   console.log("E2E WALK (Lane A scope): signup -> check-your-email -> confirm code form (referrer-policy + W-H honoured)");
   console.log("AXE: 3 journey faces scanned, 0 WCAG 2.1 A/AA violations");

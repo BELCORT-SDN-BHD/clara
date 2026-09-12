@@ -12,6 +12,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 
 import { loadLegalStageState } from "./legal-server-reads";
 import {
@@ -21,14 +22,21 @@ import {
   type LegalStageState,
 } from "./legal-reads";
 
+/** PLAIN LOWERCASE HEX — the shape 0185's `body_sha256 text` column actually
+ *  holds (its CHECK recomputes it as `encode(sha256(...),'hex')`). The earlier
+ *  fixture wore `bytea`'s prefixed wire form, inherited from the RETIRED
+ *  `dpa_documents` column, and `isLegalDocumentRow` now drops such a row. */
+const TERMS_BODY = "Terms text.";
+const TERMS_SHA = createHash("sha256").update(TERMS_BODY, "utf8").digest("hex");
+
 function row(over: Partial<LegalDocumentRow> = {}): LegalDocumentRow {
   return {
     kind: "terms",
     version: 3,
     status: "published",
     title: "Clara Terms of Service",
-    body: "Terms text.",
-    body_sha256: "\\xaa",
+    body: TERMS_BODY,
+    body_sha256: TERMS_SHA,
     effective_from: "2026-09-01T00:00:00.000Z",
     published_at: "2026-08-30T00:00:00.000Z",
     accepted_at: null,
@@ -52,7 +60,7 @@ test("published + not accepted is the ONLY face that may carry a control", () =>
   const faces = legalFaces([row({ status: "published", accepted_at: null })]);
   const terms = faces.find((f) => f.kind === "terms");
   assert.equal(terms?.face, "acceptable");
-  assert.equal(terms?.face === "acceptable" ? terms.bodySha256 : null, "\\xaa",
+  assert.equal(terms?.face === "acceptable" ? terms.bodySha256 : null, TERMS_SHA,
     "the hash of the bytes the person will be shown did not survive the derivation");
 });
 

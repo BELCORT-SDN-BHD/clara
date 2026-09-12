@@ -2191,6 +2191,7 @@
     "checkEmailBanner": "We've sent you a six-digit code. Use the button below to enter it, and you'll come straight back here to name your firm.",
     "checkEmailEnterCode": "Enter my code",
     "checkEmailNoCode": "No code yet? Check the spam folder. You can ask for another one on the code screen.",
+    "checkEmailWrongAddress": "Wrong email address? <action>Start again with a different one</action>.",
     "checkEmailSignIn": "Already confirmed? <link>Sign in</link>.",
     "checkEmailForgotPassword": "Already have an account and can't get in? <link>Reset your password</link>.",
     "configurationErrorTitle": "Sign-up is not configured safely",
@@ -2246,6 +2247,7 @@
     "wrongCodeDescription": "It may be wrong, it may have expired, or the address may not have a pending signup — we can't tell which from here. {remaining, plural, =0 {No attempts are left for this address right now.} =1 {One attempt is left for this address.} other {# attempts are left for this address.}} If you need a fresh code, start signup again with the same address.",
     "lockedTitle": "Too many attempts",
     "lockedDescription": "{wait, plural, =1 {Wait about a minute, then try the code again.} other {Wait about # minutes, then try the code again.}}",
+    "lockedDescriptionAtLeast": "{wait, plural, =1 {Wait at least a minute, then try the code again — the wall asked for longer than we show here.} other {Wait at least # minutes, then try the code again — the wall asked for longer than we show here.}}",
     "unavailableTitle": "We couldn't check your code just now",
     "unavailableDescription": "Nothing was counted as an attempt and your code is still good — try again in a moment.",
     "codeHint": "Six digits from the email. You can paste it; spaces and dashes are ignored.",
@@ -2253,10 +2255,14 @@
     "resentTitle": "A new code is on its way",
     "resentDescription": "It can take a minute to arrive. Check the spam folder if it doesn't.",
     "resentDescriptionAddressed": "We sent it to {email}. It can take a minute to arrive — check the spam folder if it doesn't.",
+    "resentAttemptCost": "Asking for a new code counts as one of your attempts; after several, code entry pauses for 15 minutes.",
+    "wrongAddress": "Wrong email address? <link>Start again with a different one</link>.",
     "resendLockedTitle": "Too many attempts on this address",
     "resendLockedDescription": "{seconds, plural, =1 {Wait 1 second, then ask again.} other {Wait # seconds, then ask again.}} Asking for a code counts the same as trying one, so this pause covers both.",
+    "resendLockedDescriptionAtLeast": "Wait at least {seconds} seconds, then ask again — the wall asked for longer than we show here. Asking for a code counts the same as trying one, so this pause covers both.",
     "resendRateLimitedTitle": "A code was just sent",
     "resendRateLimitedDescription": "{seconds, plural, =1 {We can send another in 1 second.} other {We can send another in # seconds.}} Check your inbox and the spam folder while you wait — the code already on its way still works.",
+    "resendRateLimitedDescriptionAtLeast": "We can send another in at least {seconds} seconds — the provider asked for longer than we show here. Check your inbox and the spam folder while you wait; the code already on its way still works.",
     "resendInvalidEmailTitle": "We can't send to that address",
     "resendInvalidEmailDescription": "Check the address above for a typo, then ask again. Nothing was sent.",
     "resendUnavailableTitle": "We can't send a new code from here right now",
@@ -2318,7 +2324,7 @@
       "no_registration": "There is no open firm application on your account to check out for.",
       "unavailable": "Checkout could not be started. Nothing was charged. Try again in a moment.",
       "already_member": "You already belong to a firm, so there is nothing to buy here — one person can hold one firm. Nothing was charged. Use the link above to go to your firm.",
-    "legal_not_accepted": "Checkout needs every agreement accepted first. Nothing was charged and nothing was opened. These are still outstanding:"
+      "legal_not_accepted": "Checkout needs every agreement accepted first. Nothing was charged and nothing was opened. These are still outstanding:"
     }
   },
   "Logout": {

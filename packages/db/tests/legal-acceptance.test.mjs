@@ -17,12 +17,43 @@ import { randomUUID } from "node:crypto";
 import {
   CLR, LEGAL_REASON, PG, ROLES,
   acceptBoth, acceptLegal, assertPair, assertRaises, claimPaidFirm, clearOperator, currentLegal,
-  detailOf, endPool, ensureOperatorOwner, gateLegal, humanQuery, insertRegistration, insertUser,
-  openIntent, opk, ordinaryFirm, payFor, publishLegal, rootIntent, rootQuery, roleQuery,
-  sha256Bytes, sha256Hex, bodyText, intentRow, userEmail,
+  detailOf, endPool, ensureOperatorOwner, ensurePriceMap, gateLegal, getPool, humanQuery,
+  insertRegistration, insertUser, openIntent, opk, ordinaryFirm, originDigest, payFor, publishLegal,
+  rootIntent, rootQuery, roleQuery, sha256Bytes, sha256Hex, bodyText, intentRow, userEmail,
 } from "./legal-acceptance-fixtures.mjs";
 
 const AGENT_USER_ID = "00000000-0000-4000-8000-000000c1a7a0";
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/** Poll (bounded) until backend `pid` is observably WAITING on a lock held by `blockerPid`, and
+ *  return the wait_event that proves WHICH lock. The house idiom (p4t2-approval.test.mjs,
+ *  work-cancel.test.mjs), copied locally rather than cross-imported from another area's helper —
+ *  db-tests.md: "never a sleep, which proves nothing about whether the block actually happened". */
+async function waitBlockedByOrThrow(pid, blockerPid, timeoutMs = 10_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const r = await rootQuery(
+      `select wait_event_type as wet, wait_event as we, pg_blocking_pids(pid) as blockers
+         from pg_stat_activity where pid = $1`, [pid]);
+    const row = r.rows[0];
+    if (row && row.wet === "Lock" && (row.blockers || []).map(Number).includes(Number(blockerPid))) {
+      return row.we;
+    }
+    await sleep(25);
+  }
+  throw new Error(
+    `waitBlockedByOrThrow: backend ${pid} never observably blocked on ${blockerPid} within ${timeoutMs}ms`);
+}
+
+/** Advisory-lock census for one backend, split by granted/ungranted — the interleave premise,
+ *  pinned from pg_locks rather than inferred from a body. */
+async function advisoryLocks(pid) {
+  const r = await rootQuery(
+    `select count(*) filter (where granted)::int as held,
+            count(*) filter (where not granted)::int as waiting
+       from pg_locks where pid = $1 and locktype = 'advisory'`, [pid]);
+  return r.rows[0];
+}
 const PLACEHOLDER_BODY =
   "This is Clara's beta data-processing agreement, pending review by the owner's lawyer before launch.";
 
@@ -530,4 +561,205 @@ cell("la.15 the deprecated DPA wrappers still work, and refuse the placeholder t
     () => humanQuery(who, "select clara.sign_dpa($1,$2,$3)",
       [`no-such-${randomUUID()}`, sha256Bytes(d.body), opk("w621-unknown")]),
     "la.15 an unknown DPA spelling");
+});
+
+// ------------------------------------------------------------------------------------------
+// G · THE TWO RACES THE FIRST CUT LEFT OPEN (#621 review), AND THE PLAN PINS.
+// ------------------------------------------------------------------------------------------
+cell("la.16 SEC-1: a publish landing mid-checkout BLOCKS on open_checkout_intent's own locks, and the intent is pinned to the version the applicant actually accepted", async () => {
+  // THE BUG THIS CELL EXISTS FOR: the first cut computed the missing kinds, then re-read each
+  // kind's published version in SEPARATE statements. Under READ COMMITTED a publish committing
+  // between them is invisible to the check and visible to the pin, so the door opens on v1 and
+  // pins v2 — and after payment claim_paid_firm refuses legal_not_accepted on a PAID registration.
+  //
+  // WHY THIS CELL ASSERTS wait_event='advisory' AND NOT MERELY "it blocked". Against the PRE-FIX
+  // bodies this same scene still blocks — on a `transactionid` ShareLock, because the intent
+  // INSERT takes FK KEY SHARE locks on the two legal_documents rows and the supersede UPDATE moves
+  // `status`, a key column of uq_legal_documents_published. That lock is taken by the LAST
+  // statement of the door, after the reads it would have to protect, and the reuse path never
+  // takes it at all. So "some lock, somewhere" is exactly the assertion that would have passed on
+  // the broken body; the advisory key is the one that names the wall.
+  const who = await insertUser("w621", "sec1");
+  const email = await userEmail(who);
+  const registration = await insertRegistration(who, "sec1");
+  const docs = await acceptBoth(operator.owner, who, { tag: "sec1" });
+  await ensurePriceMap();
+  const nextBody = bodyText("sec1-terms-v2");
+
+  const a = await getPool().connect();
+  const b = await getPool().connect();
+  let waitEvent = null;
+  let locksA = null;
+  let locksB = null;
+  let published = null;
+  let intentId = null;
+  try {
+    // A — the applicant, HELD INSIDE THE DOOR: open_checkout_intent has returned but its
+    // transaction (and therefore its two `xact` advisory locks) is still open.
+    await a.query("set role clara_authenticated");
+    await a.query("begin");
+    await a.query("select set_config('request.jwt.claims',$1,true)",
+      [JSON.stringify({ sub: who, role: "authenticated", email })]);
+    const opened = await a.query(
+      "select clara.open_checkout_intent(p_registration=>$1,p_origin_digest=>$2,p_op_key=>$3) as result",
+      [registration.id, originDigest("w621-sec1"), opk("w621-sec1-open")]);
+    intentId = opened.rows[0].result.intent_id;
+    const pidA = (await a.query("select pg_backend_pid() as pid")).rows[0].pid;
+
+    // B — the operator publishes a NEW Terms version, fired while A is still uncommitted. This is
+    // the exact interleaving the first cut lost: it must WAIT, not slip between check and pin.
+    await b.query("set role clara_authenticated");
+    await b.query("select set_config('request.jwt.claims',$1,false)",
+      [JSON.stringify({ sub: operator.owner, role: "authenticated" })]);
+    const pidB = (await b.query("select pg_backend_pid() as pid")).rows[0].pid;
+    const bPromise = b.query(
+      "select clara.publish_legal_document($1,$2,$3,$4,$5,$6) as result",
+      ["terms", "#621 sec1 v2", nextBody, "docs/ops/legal/terms.md", null, opk("w621-sec1-pub")])
+      .then((r) => ({ ok: true, r }), (e) => ({ ok: false, e }));
+
+    waitEvent = await waitBlockedByOrThrow(pidB, pidA);
+    locksA = await advisoryLocks(pidA);
+    locksB = await advisoryLocks(pidB);
+
+    await a.query("commit");
+    published = await bPromise;
+  } finally {
+    for (const c of [a, b]) {
+      await c.query("rollback").catch(() => {});
+      await c.query("reset role").catch(() => {});
+      await c.query("reset all").catch(() => {});
+      c.release();
+    }
+  }
+
+  // (1) THE PREMISE, PINNED: B was blocked BY A, on an ADVISORY lock — the publish door's own
+  //     per-kind key — while A held its (terms, dpa, origin) keys granted.
+  assert.equal(waitEvent, "advisory",
+    "la.16 the publish must wait on an ADVISORY lock, not merely on 'some lock somewhere'");
+  assert.ok(locksA.held >= 2,
+    `la.16 the applicant inside the door must HOLD both per-kind keys (held=${locksA.held})`);
+  assert.deepEqual({ held: locksB.held, waiting: locksB.waiting }, { held: 0, waiting: 1 },
+    "la.16 the publish must hold nothing and be waiting on exactly one key");
+
+  // (2) THE CONSEQUENCE: the publish succeeded only AFTER the commit, and the intent is pinned to
+  //     the version the applicant accepted — never the one that landed while they were inside.
+  assert.equal(published.ok, true, `la.16 the publish must complete once A commits (${published.e?.message})`);
+  const newer = published.r.rows[0].result;
+  assert.equal(newer.version, docs.terms.version + 1, "la.16 …allocating the next Terms version");
+  const row = await intentRow(intentId);
+  assert.equal(row.terms_version, docs.terms.version,
+    "la.16 the pin is the ACCEPTED version, not the one published mid-door");
+  assert.equal(row.dpa_version, docs.dpa.version);
+  const accepted = await rootQuery(
+    "select count(*)::int as n from clara.legal_acceptances where user_id=$1 and kind='terms' and version=$2",
+    [who, row.terms_version]);
+  assert.equal(accepted.rows[0].n, 1, "la.16 …and an acceptance of the PINNED version exists");
+
+  // (3) THE OTHER INTERLEAVING, driven to completion. The publish that had to WAIT is visible to
+  //     the very next open: the SAME applicant, on the SAME still-open registration, is now
+  //     refused by name — and that refusal does not disturb the intent already pinned at v1.
+  //     (One open registration per applicant is 0145's own law — uq_firm_registration_requests_
+  //     open_applicant — so the second observation must be this registration, not another.)
+  const refused = await assertPair(CLR.lastOwner, LEGAL_REASON.legalNotAccepted,
+    () => openIntent(who, email, registration.id), "la.16 re-opening under the newly published Terms");
+  assert.deepEqual(refused.detail.missing, ["terms"],
+    "la.16 the publish that had to wait is visible to the very next open");
+  const unmoved = await intentRow(intentId);
+  assert.equal(unmoved.terms_version, docs.terms.version,
+    "la.16 …and the refused re-open left the already-pinned intent exactly where it was");
+
+  // …and once the applicant accepts the version that landed, the door opens again — proving the
+  // refusal above is the version gate, not a wedged registration.
+  await acceptLegal(who, { kind: "terms", version: newer.version, sha: sha256Hex(nextBody) });
+  const reopened = await openIntent(who, email, registration.id);
+  assert.equal(reopened.intent_id, intentId, "la.16 the unstamped intent is reused, not duplicated");
+});
+
+cell("la.17 SEC-2: reusing a pre-0185 intent STAMPS its missing terms pin, and that pin is one-way", async () => {
+  const who = await insertUser("w621", "sec2");
+  const email = await userEmail(who);
+  const registration = await insertRegistration(who, "sec2");
+  const docs = await acceptBoth(operator.owner, who, { tag: "sec2" });
+
+  // THE PRE-0185 SHAPE, insertable only as root: unstamped, current plan, NO terms pin. This is
+  // exactly the row open_checkout_intent's reuse arm matches, and the row §D used to claim would
+  // "close by itself".
+  const legacy = await rootIntent({
+    registration: registration.id, applicant: who, dpaVersion: docs.dpa.version, termsVersion: null,
+  });
+  assert.equal((await intentRow(legacy)).terms_version, null, "la.17 the legacy intent starts unpinned");
+
+  const opened = await openIntent(who, email, registration.id);
+  assert.equal(opened.intent_id, legacy, "la.17 the unstamped legacy intent is REUSED, not replaced");
+  const after = await intentRow(legacy);
+  assert.equal(after.terms_version, docs.terms.version,
+    "la.17 …and the reuse pinned the Terms version this call just verified the caller accepted");
+  assert.equal(after.dpa_version, docs.dpa.version, "la.17 the DPA pin is untouched");
+  assert.equal(after.session_id, null, "la.17 the intent is still unstamped — only the pin moved");
+  assert.equal((await rootQuery(
+    "select count(*)::int as n from clara.checkout_intents where registration_id=$1",
+    [registration.id])).rows[0].n, 1, "la.17 no second intent was opened");
+
+  // A second open reuses the same row and moves nothing.
+  const again = await openIntent(who, email, registration.id);
+  assert.equal(again.intent_id, legacy);
+  assert.equal((await intentRow(legacy)).terms_version, docs.terms.version,
+    "la.17 the pin is written once and then left alone");
+
+  // THE PIN IS ONE-WAY, AND NOTHING ELSE RIDES ALONG. The session-stamp trigger admits exactly
+  // NULL -> value on an unstamped row: a rewrite of an existing pin, and a pin write that also
+  // moves another column, are both 0158's refusal.
+  await assertRaises(CLR.badRequest,
+    () => rootQuery("update clara.checkout_intents set terms_version=$2 where id=$1",
+      [legacy, docs.terms.version]),
+    "la.17 rewriting a pin that already exists");
+  // A SECOND applicant, because 0145 admits one open registration per applicant
+  // (uq_firm_registration_requests_open_applicant).
+  const someoneElse = await insertUser("w621", "sec2b");
+  const other = await insertRegistration(someoneElse, "sec2b");
+  const bare = await rootIntent({
+    registration: other.id, applicant: someoneElse, dpaVersion: docs.dpa.version, termsVersion: null,
+  });
+  await assertRaises(CLR.badRequest,
+    () => rootQuery(
+      "update clara.checkout_intents set terms_version=$2, price_local_key=$3 where id=$1",
+      [bare, docs.terms.version, "not-the-plan"]),
+    "la.17 a pin write that also moves another column");
+  assert.equal((await intentRow(bare)).terms_version, null, "la.17 …and that refusal left the row alone");
+});
+
+cell("la.18 H-1: the three #621 doors pin plan_cache_mode=force_custom_plan; the two recut 0163 doors deliberately do not", async () => {
+  const cfg = async (sig) => (await rootQuery(
+    "select coalesce(p.proconfig,'{}'::text[]) as cfg from pg_proc p where p.oid = to_regprocedure($1)",
+    [sig])).rows[0]?.cfg ?? null;
+
+  // 0183's house rule (0183:1186-1201): a plpgsql door whose ONE cached statement binds a
+  // per-tenant/per-user/per-kind value is re-planned per call, or plpgsql serves it from a generic
+  // plan from the sixth call of a pooled connection (0183 measured 18-46 ms -> 13.5-16.4 s).
+  // Asserted from the CATALOG because a door re-shipped without the clause answers correctly and
+  // slowly — the failure mode a correctness test cannot see.
+  for (const sig of [
+    "clara.accept_legal_document(text,integer,text,text)",
+    "clara.publish_legal_document(text,text,text,text,timestamptz,text)",
+    "clara.get_current_legal_documents()",
+  ]) {
+    const c = await cfg(sig);
+    assert.ok(c, `la.18 ${sig} must resolve`);
+    assert.ok(c.includes("plan_cache_mode=force_custom_plan"),
+      `la.18 ${sig} must pin plan_cache_mode=force_custom_plan (got ${JSON.stringify(c)})`);
+    assert.ok(c.includes("search_path=clara, pg_temp"),
+      `la.18 ${sig} must still pin its search_path — the clause sits BESIDE it, never in place of it`);
+  }
+
+  // …and the two §G recuts keep 0163's own proconfig exactly: 0163 shipped them without the
+  // clause and neither 0183 nor 0184 re-pinned them, so #621 does not change how they are planned.
+  for (const sig of [
+    "clara.open_checkout_intent(uuid,bytea,text)",
+    "clara.claim_paid_firm(uuid,text)",
+  ]) {
+    const c = await cfg(sig);
+    assert.ok(c, `la.18 ${sig} must resolve`);
+    assert.deepEqual(c, ["search_path=clara, pg_temp"],
+      `la.18 ${sig} must carry 0163's proconfig unchanged (got ${JSON.stringify(c)})`);
+  }
 });
