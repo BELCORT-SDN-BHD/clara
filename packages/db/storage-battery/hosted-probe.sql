@@ -71,12 +71,30 @@ select r as base_role,
   from unnest(array['postgres','supabase_storage_admin','supabase_admin','service_role','authenticated','anon']) r
  order by 1;
 
-\echo '=== 3b. what clara_storage_docs IS granted to (expected: exactly authenticator) ==='
-select m.rolname as granted_to, a.admin_option
+\echo '=== 3b. who may SET ROLE clara_storage_docs (expected: exactly authenticator) ==='
+\echo '    `GRANT <role> TO <member>` records roleid=<role>, member=<member> — so the members of'
+\echo '    clara_storage_docs are read from the roleid side, not the member side. Storage executes'
+\echo '    as authenticator and SET ROLEs to the JWT role claim; without this membership that SET'
+\echo '    ROLE fails outright (storage-provision.sql:57-59), which is the whole custody path.'
+\echo '    The ceremony principal (`postgres`) is ALSO expected here and is not a finding:'
+\echo '    PostgreSQL 16+ grants a CREATEROLE role membership in every role it creates. Anything'
+\echo '    BEYOND authenticator and postgres is a finding.'
+select m.rolname as member, a.admin_option
   from pg_auth_members a
-  join pg_roles r on r.oid = a.member
-  join pg_roles m on m.oid = a.roleid
+  join pg_roles r on r.oid = a.roleid
+  join pg_roles m on m.oid = a.member
  where r.rolname = 'clara_storage_docs'
+ order by 1;
+
+\echo '=== 3c. roles clara_storage_docs is itself a MEMBER of (expected: NONE) ==='
+\echo '    The open-world half of section 3: that list is a fixed roster and can only find the'
+\echo '    escalations someone thought of. This finds any parent role at all, including one this'
+\echo '    repository has never heard of.'
+select r.rolname as parent_role, a.admin_option
+  from pg_auth_members a
+  join pg_roles m on m.oid = a.member
+  join pg_roles r on r.oid = a.roleid
+ where m.rolname = 'clara_storage_docs'
  order by 1;
 
 \echo '=== 4. EVERY policy on storage.objects — docs pair, any wiki pair, any reports pair ==='

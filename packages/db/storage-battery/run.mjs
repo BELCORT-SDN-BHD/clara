@@ -518,6 +518,37 @@ async function main() {
       if (inherited !== "") b10ok = false;
       b10notes.push(`admin inheritance: ${inherited === "" ? "none of postgres/supabase_storage_admin/service_role/supabase_admin/anon/authenticated" : `INHERITS ${inherited}`}`);
 
+      // (c2) THE OPEN-WORLD HALF. (c) is a fixed roster and can only catch the escalations
+      //      someone thought to name. This one catches ANY parent role, including one this
+      //      repository has never heard of — and asserts the membership the ceremony DOES
+      //      create still points the documented way round (`grant clara_storage_docs to
+      //      authenticator` records roleid=clara_storage_docs, member=authenticator; reading it
+      //      from the wrong side silently returns zero rows, which is how a missing membership
+      //      would look too).
+      const parents = await client.query(
+        `select coalesce(string_agg(r.rolname, ','), '') as parents
+           from pg_auth_members a join pg_roles m on m.oid = a.member join pg_roles r on r.oid = a.roleid
+          where m.rolname = 'clara_storage_docs'`,
+      );
+      const members = await client.query(
+        `select coalesce(string_agg(m.rolname, ','), '') as members
+           from pg_auth_members a join pg_roles r on r.oid = a.roleid join pg_roles m on m.oid = a.member
+          where r.rolname = 'clara_storage_docs'`,
+      );
+      // THE CEREMONY PRINCIPAL IS A LAWFUL MEMBER, AND PRETENDING OTHERWISE WOULD BE A FALSE
+      // ASSERTION. PostgreSQL 16+ grants the CREATEROLE role that creates a role membership in
+      // it automatically, so the principal that runs storage-provision.sql (`postgres` on both
+      // the CLI stack and the hosted project — the file says "run this in the Supabase SQL
+      // editor as the project owner") always appears here. Measured on the first run of this
+      // assertion. What matters is that `authenticator` IS a member — that SET ROLE is the whole
+      // custody path — and that nothing ELSE is.
+      const ceremonyPrincipal = decodeURIComponent(new URL(dbUrl).username);
+      const memberList = members.rows[0].members ? members.rows[0].members.split(",") : [];
+      const unexpectedMembers = memberList.filter((m) => m !== "authenticator" && m !== ceremonyPrincipal);
+      if (parents.rows[0].parents !== "") b10ok = false;
+      if (!memberList.includes("authenticator") || unexpectedMembers.length) b10ok = false;
+      b10notes.push(`memberships: parents=${parents.rows[0].parents || "none"}, members=${memberList.join(",") || "NONE"} (authenticator required; ${ceremonyPrincipal} is the ceremony principal, granted automatically by CREATEROLE${unexpectedMembers.length ? `; UNEXPECTED=${unexpectedMembers.join(",")}` : ""})`);
+
       // (d) exactly the two policies the ceremony creates, no more.
       const policies = await client.query(
         `select policyname, cmd from pg_policies
