@@ -40,6 +40,14 @@ _Avoid_: Treating either as a synonym for the other; assuming `initiated_by` can
 An active colleague assumes responsibility for a terminal Work whose responsible human lost authority: a new run, the same logical identity, `initiated_by` unchanged.
 _Avoid_: A way to seize a Work whose responsible human is still authorised; a second way to create a run.
 
+**Stale settle**:
+A settle replayed for a run that is no longer its Work's current run (a Retry or take-over has since opened another). It writes nothing and answers `stale_task`; only the current run's settle may move the Work.
+_Avoid_: Treating any terminal task as authority over the Work; a duplicate settle as an error.
+
+**Lost sight of a reply**:
+The bounded state a Clara tab enters when its run poll has missed three consecutive reads of the turn's row: the Stop control and the turn clock are withdrawn and the tab says so, while the task id, the live buffer and a parked question are kept; one successful read clears it.
+_Avoid_: "The turn ended" (absence of a row is not evidence of that); a silent control that stays offered forever.
+
 **Stop reply ≠ Cancel Work**:
 Stop reply aborts the SSE read and cancels the chat-turn task; Cancel Work cancels the persistent Work. Different `clara.agent_tasks` rows with no cascade between them; closing the rail does neither.
 _Avoid_: Assuming either one implies the other; a chat-lane action as a substitute for the Work-level cancel door.
