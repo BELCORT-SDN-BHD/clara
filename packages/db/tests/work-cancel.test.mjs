@@ -1378,12 +1378,28 @@ test("wc.34c a posting racing a role change on the same firm never raises a seri
   // never by a blanket "any refusal is fine".
   //   CLR04 (`obo_not_active` / `insufficient_role`) — the core's own commit-time membership
   //         recheck saw the demotion. This is the inner wall, and it is what wc.34 measures.
-  //   CLR03 (`no_wake_credential`) — `clara.set_member_role` REVOKES the member's wake
-  //         credentials in the same statement that changes their role (0157:405), so a posting
-  //         that arrives after the role change is refused at the CREDENTIAL, before the core is
-  //         reached at all. wc.34b, thirty lines below, measures exactly this and asserts
-  //         CLR.wake; omitting it here made this cell fail ~25 % of runs on a correct system
-  //         (measured: 2 failures in 8 observations) and read as infrastructure flake.
+  //   CLR03 (`no_wake_credential`) — the posting is refused at the CREDENTIAL, before the core is
+  //         reached at all, and TWO independent mechanisms produce it once the demotion commits
+  //         (both re-measured on this rig; the earlier note here cited 0157:405, which is inside
+  //         `clara.remove_member`, not `set_member_role`):
+  //           1. THE MEMBERSHIP FILTER, which fires for ANY demotion below bookkeeper and is the
+  //              dominant one. `clara.wake_context()` only returns a credential whose
+  //              `on_behalf_of` still holds an ACTIVE membership of rank >= bookkeeper
+  //              (installed body, read from the live catalog: `and m.status='active' and
+  //              clara.role_rank(m.role)>=clara.role_rank('bookkeeper')`), so a demotion to
+  //              `viewer` makes the credential invisible whether or not anything revoked it.
+  //           2. THE REVOKE ARM of `clara.set_member_role` (defined 0157:248), which is a
+  //              SEPARATE and CONDITIONAL statement: 0157:332 guards it on
+  //              `clara.role_rank(p_role) < clara.role_rank('bookkeeper')` and 0157:333 sets
+  //              `revoked_at`. This cell demotes to `viewer`, so the arm does fire here — but a
+  //              future variant that moved the member to another bookkeeper+ role would still
+  //              get CLR03 from (1) alone, and would get it from nothing else.
+  //         Either way `clara.assert_wake_ctx` raises CLR03 `no_wake_credential` (0178:1443-1444)
+  //         and the core's own commit-time recheck is never reached. wc.34b, thirty lines below,
+  //         drives the same refusal DETERMINISTICALLY (demote, then post) and asserts CLR.wake.
+  //         The tolerance is here because this cell races the two, and which wall answers is
+  //         timing; the run's actual distribution is recorded by the `noteLane` line at the end
+  //         rather than asserted, and CLR03 has been 0 on every green run measured so far.
   // Only a serialization failure — or any OTHER refusal — is a finding.
   const N = 20;
   const errs = [];
@@ -1466,9 +1482,12 @@ test("wc.34b the INVERSE order refuses the posting — a revocation that commits
     client: w.client, work: w.work_id, logicalOpId: w.logical_op_id, basis: w.basis,
   }).then(() => null, (e) => e);
   assert.ok(err, "wc.34b the posting was refused");
-  // MEASURED, and it is the OUTER wall rather than the inner one: `clara.set_member_role` revokes
-  // the member's wake credentials in the same statement that changes their role (0157:405), so
-  // `clara.wake_context` refuses CLR03 before the core's own commit-time recheck is ever reached.
+  // MEASURED, and it is the OUTER wall rather than the inner one. `clara.wake_context()` (live
+  // body) only returns a credential whose `on_behalf_of` still holds an ACTIVE membership of rank
+  // >= bookkeeper, so the demotion alone hides it; `clara.set_member_role` (0157:248) ALSO
+  // revokes it here, in a separate statement guarded on the new rank being below bookkeeper
+  // (0157:332-333) — a guard `viewer` satisfies. Either way `clara.assert_wake_ctx` raises CLR03
+  // `no_wake_credential` (0178:1443-1444) before the core's own commit-time recheck is reached.
   // Both walls are real; this cell asserts the one the estate actually answers with, and wc.31
   // pins the mint's typed authority refusal behind it. What matters for C79.2 is the same either
   // way: a revocation that commits first means nothing reaches the books.
