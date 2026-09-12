@@ -791,18 +791,32 @@ const FLIP_FLOOR_MS = 40;
  *  af.21's `cross join lateral` / `offset 0` substrings green AND leave af.20 measuring the old
  *  text — a cost cell certifying a plan nobody runs. Extracted, the failure is loud: either the
  *  shape assertions below fire, or af.20's own row bound reds on the plan the new body picks. */
-async function installedSetHelperStatement() {
-  const src = (await rootQuery(
-    "select p.prosrc from pg_proc p where p.oid = 'clara._sweep_events_with_effect()'::regprocedure",
-  )).rows[0].prosrc.replace(/--[^\n]*/g, "");
+/** THE PURE SLICE, split out of `installedSetHelperStatement` (final review, SHOULD-FIX [3]) so
+ *  af.20a below can feed it a SYNTHETIC body and prove the slice point without needing a live
+ *  database whose installed function happens to end the one way that hid the original defect. */
+function extractReturnQueryStatement(rawSrc) {
+  const src = rawSrc.replace(/--[^\n]*/g, "");
   const marker = "return query";
   const start = src.indexOf(marker);
   assert.ok(start >= 0,
     "af.20 the installed clara._sweep_events_with_effect() body has no `return query` — this cell "
     + "can no longer derive the statement it measures, which is exactly when it must fail loudly");
   const rest = src.slice(start + marker.length);
-  const end = rest.lastIndexOf(";");
-  assert.ok(end > 0, "af.20 the installed body's statement is not terminated by a `;`");
+  // THE STATEMENT'S OWN TERMINATOR, not the body's last `;` (final review, SHOULD-FIX [3]).
+  // `return query <stmt>;` is ONE plpgsql statement, so its FIRST `;` is where it ends — the
+  // body's LAST `;` is only the same character today because 0183 happens to close with a bare
+  // `end` (no semicolon) right before the dollar-quote (measured on 127.0.0.1:5698's installed
+  // prosrc: it ends `...> 0;\nend `, no trailing `;`). A recut written the other, equally valid
+  // way — `... > 0;\nend;\n$$` — would shift `lastIndexOf`'s match PAST the statement onto the
+  // block's own `end;`, and every vacuity guard below still passes on the resulting
+  // `select ... > 0;\nend`: it starts with `select`, still names both relations, still carries
+  // exactly one `$1`. The failure would surface later as a raw PostgreSQL syntax error from the
+  // EXPLAIN this statement feeds, not as one of this function's own named assertions.
+  const end = rest.indexOf(";");
+  assert.notEqual(end, -1,
+    "af.20 the installed body's `return query` statement has no `;` terminator of its own — "
+    + "this cell cannot derive the statement it measures, which is exactly when it must fail "
+    + "loudly rather than hand af.20 an unbounded or truncated string");
   // A function replacement, never the string "$1": in String.replace a "$1" is a capture group.
   const stmt = rest.slice(0, end).trim().replace(/\bc\.firm\b/g, () => "$1");
   // VACUITY CONTROLS on the extraction itself, so a botched slice explains something meaningless
@@ -816,6 +830,39 @@ async function installedSetHelperStatement() {
     "af.20 …and no un-rewritten plpgsql variable, which an EXPLAIN could not bind");
   return stmt;
 }
+
+async function installedSetHelperStatement() {
+  const src = (await rootQuery(
+    "select p.prosrc from pg_proc p where p.oid = 'clara._sweep_events_with_effect()'::regprocedure",
+  )).rows[0].prosrc;
+  return extractReturnQueryStatement(src);
+}
+
+test("af.20a the extractor slices at the STATEMENT'S OWN terminator, not the body's last `;` — a synthetic `end;` body proves the fix rather than assuming 0183's own `end` (no semicolon) exercises it", () => {
+  // The regression af.20's own comment above names: 0183 today closes `... > 0;\nend` (NO
+  // trailing `;`, confirmed against 127.0.0.1:5698's installed prosrc), which happens to make
+  // `lastIndexOf(";")` and `indexOf(";")` agree — so a live-database cell alone could pass before
+  // AND after this fix, proving nothing about the regression it claims to close. This cell feeds
+  // BOTH shapes directly and asserts the extractor lands on the statement's own `;` either way.
+  const bareEnd =
+    "declare c record;\nbegin\n  c := clara._human_ctx(clara.role_rank('bookkeeper'));\n"
+    + "  return query\n  select e.id\n    from clara.sweep_runs sr\n"
+    + "    cross join clara.domain_events de\n"
+    + "   where sr.firm_id = c.firm\n     and sr.drafted_count + sr.posted_count > 0;\nend ";
+  const semicolonEnd =
+    "declare c record;\nbegin\n  c := clara._human_ctx(clara.role_rank('bookkeeper'));\n"
+    + "  return query\n  select e.id\n    from clara.sweep_runs sr\n"
+    + "    cross join clara.domain_events de\n"
+    + "   where sr.firm_id = c.firm\n     and sr.drafted_count + sr.posted_count > 0;\nend;\n";
+  const fromBareEnd = extractReturnQueryStatement(bareEnd);
+  const fromSemicolonEnd = extractReturnQueryStatement(semicolonEnd);
+  assert.equal(fromSemicolonEnd, fromBareEnd,
+    "af.20a the SAME return-query statement must come out of both a bare `end` body (0183 today) "
+    + `and an \`end;\` body (an equally valid recut) — got bare=${JSON.stringify(fromBareEnd)} `
+    + `semicolon=${JSON.stringify(fromSemicolonEnd)}`);
+  assert.doesNotMatch(fromSemicolonEnd, /\bend\b/,
+    `af.20a the \`end;\` body's block terminator must not leak into the extracted statement — got ${fromSemicolonEnd}`);
+});
 
 test("af.20 BOUNDED COST: ten consecutive calls of each caller on ONE connection stay flat across the plpgsql plan-cache boundary, and the plan they run reads the KEPT set rather than the firm's history", async (t) => {
   if (await gateSweep(t)) return;
