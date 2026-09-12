@@ -404,10 +404,16 @@ comment on index clara.ix_sweep_runs_firm_effect is
 --    id on every call of every pooled connection. `clara.get_activity_event` is pinned for
 --    symmetry rather than for a measurement: it was flat at the load that flips the feed
 --    (2.0 -> 0.9 ms at 30,000 receipts / 1,500 kept).
---    THE TAIL OF THIS FILE REFUSES WITHOUT ALL FOUR CLAUSES, and af.23 in
---    packages/db/tests/activity-feed.test.mjs carries the door's catalog pin plus a wall-clock
---    series at the orx load -- af.20's 4,000/200 is measured FLAT, which is how a 2 s page shipped
---    past a cell written to catch exactly this.
+--    AND SO DOES THE THIRD DOOR THIS FILE SHIPS (final review, SHOULD-FIX [1]). Section 4's
+--    `clara.list_spoken_for_documents` has the identical shape: one cached statement binding the
+--    session firm and `p_client` against multi-tenant `clara.journal_entries` /
+--    `clara.entry_evidence_links`, called once per composer mount and once per dialog open on
+--    pooled connections. The round that pinned the two activity doors shipped this one without
+--    the clause; it carries the same pin for the same reason, checked beside them below.
+--    THE TAIL OF THIS FILE REFUSES WITHOUT ALL FOUR CLAUSES (two on the helpers, two on what are
+--    now THREE doors), and af.23 in packages/db/tests/activity-feed.test.mjs carries the door
+--    catalog pin plus a wall-clock series at the orx load -- af.20's 4,000/200 is measured FLAT,
+--    which is how a 2 s page shipped past a cell written to catch exactly this.
 --
 --    THE KEPT SET IS STILL THE FIRM'S WHOLE KEPT SET, AND THAT IS A MEASURED DECISION, not an
 --    oversight (delta review round 4, SHOULD-FIX [2]). `v_kept_sweeps` is read once per call from
@@ -1044,7 +1050,16 @@ comment on function clara.get_activity_event(text, text) is
 -- ==============================================================================================
 create function clara.list_spoken_for_documents(p_client uuid)
 returns table(document_id uuid, entry_id uuid, client_id uuid, client_name text, via text)
-  language plpgsql stable security definer set search_path = clara, pg_temp as $$
+  language plpgsql stable security definer
+  set search_path = clara, pg_temp
+  -- #728 (final review, SHOULD-FIX [1]): THIS DOOR TOO. It has the identical shape section 1
+  -- declared a BLOCKER for -- one cached plpgsql statement binding the session firm (`c.firm`)
+  -- and `p_client` against multi-tenant clara.journal_entries/clara.entry_evidence_links, called
+  -- once per composer mount and once per dialog open on pooled PostgREST connections. Shipping a
+  -- fifth door without this clause reopens the exact 145 ms -> 2.0-2.8 s step the file's own
+  -- header measures for its sibling; the tail below now refuses without it.
+  set plan_cache_mode = force_custom_plan
+  as $$
 declare c record; v_firm uuid;
 begin
   c := clara._human_ctx(clara.role_rank('bookkeeper'));
@@ -1104,7 +1119,10 @@ comment on function clara.list_spoken_for_documents(uuid) is
   'client); the evidence invariant is firm-wide). Bookkeeper+ (_human_ctx), no-oracle CLR11 '
   'client_not_found. Advisory only: the picker uses this to disable an option, but '
   'attach_entry_evidence/admit_journal_work stay the actual law and their own typed conflict '
-  'refusal is unchanged by this door''s existence.';
+  'refusal is unchanged by this door''s existence. Pins plan_cache_mode = force_custom_plan '
+  'beside search_path: its one union statement binds the session firm and p_client the same way '
+  'section 1''s helpers do, and a generic plan built for the per-firm average is one pooled '
+  'connection away (final review, SHOULD-FIX [1]).';
 
 -- ==============================================================================================
 -- 5. GRANTS -- restated for the two recut doors (create or replace preserves an unchanged
@@ -1157,25 +1175,29 @@ begin
     raise exception 'activity_sweep_attribution tail: % of 2 sweep helpers still pin search_path=clara, pg_temp', v_n
       using errcode = 'CLR10';
   end if;
-  -- …AND SO DO BOTH DOORS (delta review round 4, BLOCKER [0]). Pinning the helpers left the door
+  -- …AND SO DO ALL THREE DOORS (delta review round 4, BLOCKER [0]; joined by
+  -- list_spoken_for_documents, final review, SHOULD-FIX [1]). Pinning the helpers left the door
   -- itself planned for the per-firm average of a multi-tenant table: 145 ms -> 2.0-2.8 s from the
   -- sixth call of a pooled connection at 30,000 committed operation_receipts, with no sweep row
-  -- anywhere. Asserted here, beside the helpers' own, because a door re-shipped without the
-  -- clause answers correctly and slowly -- the failure mode a correctness test cannot see.
+  -- anywhere. list_spoken_for_documents has the identical shape (session firm + p_client bound
+  -- into one cached union over journal_entries/entry_evidence_links) and shipped in section 4
+  -- without the clause -- the round that pinned the other two doors never named it. Asserted
+  -- here, beside the helpers' own, because a door re-shipped without the clause answers
+  -- correctly and slowly -- the failure mode a correctness test cannot see.
   select count(*) into v_n from pg_proc p
    where p.pronamespace = 'clara'::regnamespace
-     and p.proname in ('list_activity', 'get_activity_event')
+     and p.proname in ('list_activity', 'get_activity_event', 'list_spoken_for_documents')
      and 'plan_cache_mode=force_custom_plan' = any(coalesce(p.proconfig, '{}'::text[]));
-  if v_n <> 2 then
-    raise exception 'activity_sweep_attribution tail: % of 2 activity doors pin plan_cache_mode=force_custom_plan -- without it clara.list_activity binds the session firm, the filters, the cursor and the kept-sweep array into ONE cached statement and serves every read after the fifth of a pooled connection from a generic plan', v_n
+  if v_n <> 3 then
+    raise exception 'activity_sweep_attribution tail: % of 3 activity doors pin plan_cache_mode=force_custom_plan -- without it clara.list_activity binds the session firm, the filters, the cursor and the kept-sweep array (and clara.list_spoken_for_documents binds the session firm and p_client) into ONE cached statement and serves every read after the fifth of a pooled connection from a generic plan', v_n
       using errcode = 'CLR10';
   end if;
   select count(*) into v_n from pg_proc p
    where p.pronamespace = 'clara'::regnamespace
-     and p.proname in ('list_activity', 'get_activity_event')
+     and p.proname in ('list_activity', 'get_activity_event', 'list_spoken_for_documents')
      and 'search_path=clara, pg_temp' = any(coalesce(p.proconfig, '{}'::text[]));
-  if v_n <> 2 then
-    raise exception 'activity_sweep_attribution tail: % of 2 activity doors still pin search_path=clara, pg_temp -- the plan_cache_mode clause sits BESIDE it, never in place of it', v_n
+  if v_n <> 3 then
+    raise exception 'activity_sweep_attribution tail: % of 3 activity doors still pin search_path=clara, pg_temp -- the plan_cache_mode clause sits BESIDE it, never in place of it', v_n
       using errcode = 'CLR10';
   end if;
   -- Section 0b's two indexes, without which the kept-set read is a scan of the firm's whole
@@ -1268,5 +1290,5 @@ begin
       using errcode = 'CLR10';
   end if;
 
-  raise notice 'activity_sweep_attribution tail: OK -- clara.list_activity/get_activity_event still SECURITY INVOKER, PUBLIC-revoked, clara_authenticated-granted, and now exclude a zero-effect sweep.run_completed row (relabelling a kept one to kind=agent, actor untouched); clara._sweep_events_with_effect() (the feed''s set) and clara._sweep_event_has_effect(uuid) (the detail door''s point lookup) are the two SECURITY DEFINER helpers this needed -- ONE query shape each AND plan_cache_mode = force_custom_plan on both, so neither caller can drag the other onto a shared cached plan and neither can be planned for the per-firm average of a multi-tenant table (measured: 4 ms -> 174 ms from the 6th call of a session without it, flat with it); BOTH DOORS pin plan_cache_mode = force_custom_plan TOO, because pinning the helpers left the door''s own union statement -- which binds the session firm, every filter, the cursor pair and the kept-sweep array as plpgsql parameters -- to flip on its own from the 6th call of a pooled connection (measured on a pristine chain: 145 ms -> 2.0-2.8 s at 30,000 committed operation_receipts with ZERO sweep rows, an 0181-inherited site; and 89 ms -> 1.7-2.5 s at 30,000 sweep receipts / 6,000 kept, this file''s array; flat under force_custom_plan, slow from call ONE under force_generic_plan); the set form probes ONE receipt per KEPT run through a lateral fence and ix_domain_events_sweep_run (firm_id, payload->>''run_id''), measured flat at 1.8/1.9/1.6 ms across 1,000/6,000/30,000 receipts of history, while ix_sweep_runs_firm_effect supplies the kept runs themselves (bookkeeper-floored and self-scoped to the session firm inside its own body, read once per call rather than once per row, clara.sweep_runs itself still ungranted to clara_authenticated); clara.list_spoken_for_documents is a new bookkeeper+ SECURITY DEFINER read, clara_authenticated-only, reachable by no agent/wake/runtime role, unioning a live entry_evidence_links binding with an approved not-reversed document-coding binding.';
+  raise notice 'activity_sweep_attribution tail: OK -- clara.list_activity/get_activity_event still SECURITY INVOKER, PUBLIC-revoked, clara_authenticated-granted, and now exclude a zero-effect sweep.run_completed row (relabelling a kept one to kind=agent, actor untouched); clara._sweep_events_with_effect() (the feed''s set) and clara._sweep_event_has_effect(uuid) (the detail door''s point lookup) are the two SECURITY DEFINER helpers this needed -- ONE query shape each AND plan_cache_mode = force_custom_plan on both, so neither caller can drag the other onto a shared cached plan and neither can be planned for the per-firm average of a multi-tenant table (measured: 4 ms -> 174 ms from the 6th call of a session without it, flat with it); ALL THREE DOORS pin plan_cache_mode = force_custom_plan TOO (list_spoken_for_documents joining the other two in the final review), because pinning the helpers left each door''s own union statement -- which binds the session firm, every filter, the cursor pair and the kept-sweep array as plpgsql parameters -- to flip on its own from the 6th call of a pooled connection (measured on a pristine chain: 145 ms -> 2.0-2.8 s at 30,000 committed operation_receipts with ZERO sweep rows, an 0181-inherited site; and 89 ms -> 1.7-2.5 s at 30,000 sweep receipts / 6,000 kept, this file''s array; flat under force_custom_plan, slow from call ONE under force_generic_plan); the set form probes ONE receipt per KEPT run through a lateral fence and ix_domain_events_sweep_run (firm_id, payload->>''run_id''), measured flat at 1.8/1.9/1.6 ms across 1,000/6,000/30,000 receipts of history, while ix_sweep_runs_firm_effect supplies the kept runs themselves (bookkeeper-floored and self-scoped to the session firm inside its own body, read once per call rather than once per row, clara.sweep_runs itself still ungranted to clara_authenticated); clara.list_spoken_for_documents is a new bookkeeper+ SECURITY DEFINER read, clara_authenticated-only, reachable by no agent/wake/runtime role, unioning a live entry_evidence_links binding with an approved not-reversed document-coding binding, and (final review, SHOULD-FIX [1]) itself pins plan_cache_mode = force_custom_plan beside its search_path for the same reason as the other two doors.';
 end $tail$;

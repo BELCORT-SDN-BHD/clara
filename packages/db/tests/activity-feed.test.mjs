@@ -1093,6 +1093,13 @@ test("af.22 the optional-parameter helper is GONE, not merely unused — two cal
 //       measured flat there, which is how this shipped past a cell written to catch exactly it.
 //       Proven red on the pre-fix door (the clause reset inside a rolled-back transaction, same
 //       session, same load, one difference — see the same log).
+//
+// ARM (1) NOW COVERS A THIRD DOOR (final review, SHOULD-FIX [1]). This round shipped
+// `clara.list_spoken_for_documents` (0183 section 4) with the identical shape — one cached
+// statement binding the session firm and `p_client` — but without the clause, and nothing here
+// named it. The catalog-clause arm below now asserts all three; only `list_activity`'s own
+// series is wall-clock measured (arm 2), the same asymmetry af.20 already accepts for
+// `get_activity_event`.
 // ===========================================================================================
 
 // The orx load. `ORX_RECEIPTS` is ~105 days of #623 Work postings at the live cadence; the
@@ -1187,7 +1194,7 @@ test("af.23 BOUNDED COST AT THE DOOR: ten consecutive clara.list_activity calls 
       `select p.proname, coalesce(p.proconfig, '{}'::text[]) as cfg
          from pg_proc p
         where p.pronamespace = 'clara'::regnamespace
-          and p.proname in ('list_activity', 'get_activity_event')
+          and p.proname in ('list_activity', 'get_activity_event', 'list_spoken_for_documents')
         order by 1`)).rows;
     const planted = (await c.query(
       `select count(*)::int as n from clara.operation_receipts
@@ -1216,16 +1223,20 @@ test("af.23 BOUNDED COST AT THE DOOR: ten consecutive clara.list_activity calls 
     + `cheapest of calls ${HEAD + 1}-${CALLS} ${tail.toFixed(1)} ms — series ${fmt(report.feed)}. `
     + "A pooled PostgREST connection serves every Activity read after the fifth from that plan.");
 
-  // (2) THE CATALOG CLAUSE. Asserted for BOTH doors: `get_activity_event` measures flat today, but
-  // it binds the same session firm in the same way, and a helper whose two halves disagree about
-  // their own plan discipline is one someone later "tidies" the wrong way (0183 section 1's rule).
-  assert.deepEqual(report.doorConfig.map((r) => r.proname), ["get_activity_event", "list_activity"],
-    "af.23 both activity doors are installed (vacuity control for the pins below)");
+  // (2) THE CATALOG CLAUSE. Asserted for ALL THREE doors (final review, SHOULD-FIX [1] joined
+  // `list_spoken_for_documents` to the `get_activity_event`/`list_activity` pair this cell already
+  // held): each one measures flat today or binds a small parameter set, but each binds the SAME
+  // session firm the same way, and a surface whose members disagree about their own plan
+  // discipline is one someone later "tidies" the wrong way (0183 section 1's rule).
+  assert.deepEqual(report.doorConfig.map((r) => r.proname),
+    ["get_activity_event", "list_activity", "list_spoken_for_documents"],
+    "af.23 all three activity/evidence doors are installed (vacuity control for the pins below)");
   for (const row of report.doorConfig) {
     assert.ok(row.cfg.includes("plan_cache_mode=force_custom_plan"),
       `af.23 clara.${row.proname} does not pin plan_cache_mode=force_custom_plan (proconfig ${JSON.stringify(row.cfg)}) `
-      + "— its union statement binds the session firm, the filters, the cursor and the kept-sweep array as "
-      + "plpgsql parameters, and a generic plan built for the per-firm average is one pooled connection away");
+      + "— its own statement binds the session firm (list_activity also the filters, cursor and kept-sweep array; "
+      + "list_spoken_for_documents also p_client) as plpgsql parameters, and a generic plan built for the "
+      + "per-firm average is one pooled connection away");
     assert.ok(row.cfg.includes("search_path=clara, pg_temp"),
       `af.23 clara.${row.proname} lost its pinned search_path (proconfig ${JSON.stringify(row.cfg)})`);
   }
