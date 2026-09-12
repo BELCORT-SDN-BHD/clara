@@ -45,6 +45,7 @@ const express = (await import("express")).default;
 const route = await import("../src/documentRoutes.ts");
 const { _resetJwtConfigForTest } = await import("../lib/authz.mjs");
 const { getRuntimePool, endPools } = await import("../lib/pools.mjs");
+const { StorageError, hashCanonical } = await import("../lib/storage.mjs");
 const {
   documentRoutes, documentContentDisposition, derivedDocumentFilename,
 } = route;
@@ -183,6 +184,68 @@ async function tempLeak(baseline, { timeoutMs = 3000 } = {}) {
     if (Date.now() >= deadline) return leaked;
     await new Promise((resolve) => setTimeout(resolve, 25));
   }
+}
+
+/**
+ * Drive the route's STORAGE layer into one specific failure, through the seam storage.mjs ships
+ * (`globalThis.__claraStorageForTest`, the same one storage-probe.test.mjs and intake-db.test.mjs
+ * use). Nothing about the route, the door or the JWT path changes: only what Storage answers.
+ */
+async function withInjectedStorage(get, fn) {
+  const prev = globalThis.__claraStorageForTest;
+  globalThis.__claraStorageForTest = { get };
+  try {
+    return await fn();
+  } finally {
+    if (prev === undefined) delete globalThis.__claraStorageForTest;
+    else globalThis.__claraStorageForTest = prev;
+  }
+}
+
+/**
+ * CAPTURE THE REAL StorageError THE DEPLOYED PATH RAISES, rather than hand-writing one.
+ *
+ * A cell that constructed `new StorageError("storage_error", …, 503, "unconfigured")` itself would
+ * pin the ROUTE's mapping against a literal this test file invented, and would keep passing if
+ * realConfig or `classifyGetFailure` ever answered a different status or reason. So the error is
+ * taken FROM storage.mjs: RELAY_TEST_MODE is lifted for the duration (which is what puts
+ * `responseFor` on its deployed arm), the environment is shaped for the case under test, `fetch`
+ * is mocked where a response is needed, and whatever storage.mjs throws is what gets injected
+ * below. The mock is torn down BEFORE any request is made to the route, because `get()` in this
+ * file goes through the same `globalThis.fetch`.
+ */
+async function capturedStorageError(t, { env = {}, respond = null } = {}) {
+  const prev = { ...process.env };
+  process.env.RELAY_TEST_MODE = "";
+  for (const key of ["CLARA_STORAGE_URL", "CLARA_STORAGE_ROLE", "CLARA_STORAGE_ROLE_JWT"]) {
+    delete process.env[key];
+  }
+  Object.assign(process.env, env);
+  if (respond) t.mock.method(globalThis, "fetch", respond);
+  try {
+    await hashCanonical(`firms/${firmA.firm}/docs/${"a".repeat(64)}.pdf`);
+    return null;
+  } catch (err) {
+    return err;
+  } finally {
+    t.mock.restoreAll();
+    for (const key of Object.keys(process.env)) if (!(key in prev)) delete process.env[key];
+    Object.assign(process.env, prev);
+  }
+}
+
+/** A real-config environment: a URL, a dedicated custom role, and a syntactically valid unexpired
+ *  role JWT whose `role` claim equals it (never verified locally — realConfig only decodes it).
+ *  storage-read-contract.test.mjs's `withRealConfig` builds the identical shape. */
+function realConfigEnv() {
+  const claims = Buffer.from(JSON.stringify({
+    role: "clara_storage_docs", exp: Math.floor(Date.now() / 1000) + 3600,
+  })).toString("base64url");
+  return {
+    CLARA_STORAGE_URL: "https://example.supabase.co/storage/v1/object/firm-docs",
+    CLARA_STORAGE_ROLE: "clara_storage_docs",
+    CLARA_STORAGE_ROLE_JWT: `x.${claims}.y`,
+  };
 }
 
 const auditCount = async (documentId) => (await rig.rootQuery(
@@ -498,6 +561,58 @@ test("E2.14 — a row whose byte_size disagrees with the stored object still ser
   const body = Buffer.from(await res.arrayBuffer());
   assert.equal(body.length, payload.length, "a killed connection is not an answer");
   assert.equal(createHash("sha256").update(body).digest("hex"), skewed.sha);
+  assert.deepEqual(await tempLeak(before_), []);
+});
+
+test("E2.15 — an UNCONFIGURED runtime reaches the reader as 503 storage_error/unconfigured", async (t) => {
+  if (skipHttp()) return t.skip(skipHttp());
+  // THE JOIN NOTHING ELSE MAKES. P2.6 in storage-read-contract.test.mjs proves realConfig raises a
+  // 503/unconfigured; E2.9 proves a 502/object_missing on the wire. Between them sat the route's
+  // OWN mapping — `{ status: err.status ?? 502, code: err.code }` plus the typed reason — and no
+  // cell at any layer exercised the 503 arm or the credential_refused reason end to end. The
+  // reason matters because the four outcomes want four different human answers: "fix the
+  // deployment" is not "retry", and the route is where that word reaches the reader.
+  //
+  // SCOPED HONESTLY: apps/web collapses 502 and 503 into one `storage_unavailable` state (pinned
+  // at apps/web/lib/documents/bytes.test.ts:292-293), so this is contract conformance and drift
+  // protection, not a user-visible defect today.
+  const real = await capturedStorageError(t);
+  assert.ok(real instanceof StorageError, "realConfig must refuse an unconfigured runtime");
+  assert.equal(real.status, 503, "captured from storage.mjs, not written here");
+  assert.equal(real.reason, "unconfigured");
+  const token = await mint(firmA.owner);
+  const before_ = new Set(tempFiles());
+  const res = await withInjectedStorage(() => { throw real; }, () => get(doc.id, token));
+  assert.equal(res.status, 503, "a deployment fault is a 503, not a 502 about the provider");
+  assert.deepEqual(await res.json(),
+    { error: "storage_error", message: "document unavailable", reason: "unconfigured" });
+  assert.deepEqual(await tempLeak(before_), []);
+});
+
+test("E2.16 — a REFUSED custody credential reaches the reader as 502 storage_error/credential_refused", async (t) => {
+  if (skipHttp()) return t.skip(skipHttp());
+  // The documented InvalidJWT envelope, classified by storage.mjs itself and injected verbatim:
+  // a rotated or expired custody credential must tell the operator "rotate", which is a different
+  // instruction from "re-upload" (object_missing) and from "retry" (unavailable).
+  const real = await capturedStorageError(t, {
+    env: realConfigEnv(),
+    respond: async () => new Response(JSON.stringify({ code: "InvalidJWT", message: "jwt expired" }),
+      { status: 401 }),
+  });
+  assert.ok(real instanceof StorageError);
+  assert.equal(real.status, 502);
+  assert.equal(real.reason, "credential_refused", "captured from classifyGetFailure, not written here");
+  assert.match(real.message, /jwt expired/, "the vendor body stays IN the server-side error…");
+  const token = await mint(firmA.owner);
+  const before_ = new Set(tempFiles());
+  const res = await withInjectedStorage(() => { throw real; }, () => get(doc.id, token));
+  assert.equal(res.status, 502);
+  const body = await res.json();
+  assert.deepEqual(body,
+    { error: "storage_error", message: "document unavailable", reason: "credential_refused" });
+  // …AND NEVER ON THE WIRE. The reader gets the estate's word, not the provider's prose.
+  assert.equal(JSON.stringify(body).includes("jwt expired"), false,
+    "vendor body text must not reach the client");
   assert.deepEqual(await tempLeak(before_), []);
 });
 
