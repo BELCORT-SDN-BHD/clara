@@ -110,8 +110,14 @@ async function proxy(req: NextRequest, path: string[], accessToken: string): Pro
   // DELIBERATELY by the runtime (`private, no-store` so an artifact is never held in a shared
   // cache; `nosniff` so a mistyped body is never re-interpreted), and a security header that the
   // proxy silently drops is a security header that does not exist.
+  // `etag` joins it for #620's source-document bytes route. That route sets the ETag to the
+  // document row's OWN sha256 — the content address the bytes were verified against en route —
+  // so the header is the estate's integrity receipt reaching the reader, not a cache hint (the
+  // response is `private, no-store`). A proxy that dropped it would leave the browser unable to
+  // tell two different documents' responses apart by anything but their bodies, and would make
+  // the one header a reader can check against the record invisible.
   const RESPONSE_HEADERS = ["content-type", "content-length", "content-disposition",
-    "cache-control", "x-content-type-options"] as const;
+    "cache-control", "x-content-type-options", "etag"] as const;
   const outHeaders = new Headers();
   for (const name of RESPONSE_HEADERS) {
     const value = res.headers.get(name);

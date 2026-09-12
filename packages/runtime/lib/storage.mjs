@@ -4,19 +4,35 @@ import { mkdir, open, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { pipeline } from "node:stream/promises";
 
+/**
+ * A typed Storage failure.
+ *
+ * `reason` (#620) IS THE FOURTH FIELD AND IT IS OPTIONAL BY DESIGN. `code` says which FAMILY of
+ * failure this is (`storage_error` vs `checksum_mismatch`) and `status` says what HTTP answer it
+ * deserves; neither can tell an operator — or a reader's UI — whether the object is MISSING, the
+ * CREDENTIAL was refused, the service is DOWN, or the runtime was never configured. Those four
+ * outcomes want four different human answers ("re-upload", "rotate the JWT", "retry", "fix the
+ * deployment") and a bare 502 gives them one. Every existing construction site that does not pass
+ * a reason keeps its exact previous shape — `reason` is simply `null` there — so nothing that
+ * reads `code`/`status`/`message` today changes behaviour.
+ */
 export class StorageError extends Error {
-  constructor(code, message, status = 502) {
+  constructor(code, message, status = 502, reason = null) {
     super(message);
     this.name = "StorageError";
     this.code = code;
     this.status = status;
+    this.reason = reason;
   }
 }
 
 function safeKey(key) {
   const value = String(key || "");
   if (!/^firms\/[0-9a-f-]{36}\/docs\/[0-9a-f]{64}\.[a-z0-9]{1,12}$/i.test(value)) {
-    throw new StorageError("storage_error", "canonical storage key is invalid");
+    // NOT one of the four GET-side reasons below: this refusal happens BEFORE any request, and it
+    // means the key the caller handed in is not a canonical docs address at all — a row whose
+    // storage_path drifted, never a Storage outcome.
+    throw new StorageError("storage_error", "canonical storage key is invalid", 502, "invalid_key");
   }
   return value;
 }
@@ -50,11 +66,18 @@ function localPath(key) {
  */
 export function localOpenFailure(err, what) {
   const code = err?.code;
+  // #620 — THE REASON IS THE SAME VOCABULARY THE DEPLOYED PATH USES, and it has to be, because
+  // every storage-touching local test runs through here while production runs through
+  // `classifyGetFailure`. If the local arm answered a different word for "the object is not
+  // there", the route battery would be measuring a classification production never emits. The
+  // MESSAGES are byte-identical to what this function has always returned.
   if (code === "ENOENT" || code === "ENOTDIR") {
-    return new StorageError("storage_error", `${what} storage read failed (object absent)`);
+    return new StorageError("storage_error", `${what} storage read failed (object absent)`,
+      502, "object_missing");
   }
   return new StorageError("storage_error",
-    `${what} storage read failed (${code || "open failed, no errno"})`);
+    `${what} storage read failed (${code || "open failed, no errno"})`,
+    502, code === "EACCES" || code === "EPERM" ? "credential_refused" : "unavailable");
 }
 
 /**
@@ -104,21 +127,24 @@ function realConfig() {
   const jwt = process.env.CLARA_STORAGE_ROLE_JWT;
   const designatedRole = process.env.CLARA_STORAGE_ROLE
     || (process.env.RELAY_TEST_MODE === "1" ? "clara_storage_docs" : "");
+  // #620 — ALL FOUR OF THESE ARE `unconfigured`, and they keep their 503. They are not failures of
+  // a request: no request was made. An operator reading `unavailable` would go looking at Supabase;
+  // `unconfigured` sends them to the deployment's own environment, which is where the fault is.
   if (!base || !jwt || !designatedRole) {
-    throw new StorageError("storage_error", "Storage custom-role configuration is missing", 503);
+    throw new StorageError("storage_error", "Storage custom-role configuration is missing", 503, "unconfigured");
   }
   if (["anon", "authenticated", "service_role"].includes(designatedRole)) {
-    throw new StorageError("storage_error", "Storage designated role must be a dedicated custom role", 503);
+    throw new StorageError("storage_error", "Storage designated role must be a dedicated custom role", 503, "unconfigured");
   }
   const claims = decodeJwtClaims(jwt);
   const exp = Number(claims?.exp);
   if (!Number.isFinite(exp) || exp * 1000 <= Date.now() + 30_000) {
-    throw new StorageError("storage_error", "Storage role credential is expired or malformed", 503);
+    throw new StorageError("storage_error", "Storage role credential is expired or malformed", 503, "unconfigured");
   }
   if (typeof claims?.role !== "string"
       || ["anon", "authenticated", "service_role"].includes(claims.role)
       || claims.role !== designatedRole) {
-    throw new StorageError("storage_error", "Storage credential does not assume the designated custom-role", 503);
+    throw new StorageError("storage_error", "Storage credential does not assume the designated custom-role", 503, "unconfigured");
   }
   return { base: base.replace(/\/+$/, ""), jwt };
 }
@@ -174,6 +200,44 @@ export async function putCanonical(filePath, key, mime) {
   );
 }
 
+/**
+ * #620 — THE GET SIDE'S CLASSIFIER. Turn one failed Storage read into a typed `reason`.
+ *
+ * THE WRAPPED STATUS IS THE WHOLE REASON THIS EXISTS. Supabase's storage-api returns its own
+ * status INSIDE the body — a duplicate upload arrives as **HTTP 400** carrying
+ * `{"statusCode":"409","error":"Duplicate",...}` — which is the 2026-07-26 incident `putCanonical`
+ * above documents at length: `response.status === 409` was never true, every duplicate became a
+ * fatal error, and the diagnosis cost a day. That parsing has lived on the UPLOAD side only. The
+ * READ side had one arm — `Storage read failed (<http status>)` — so a 400-wrapped 404 (the object
+ * is gone) and a 400-wrapped 403 (the JWT lost its role) were the same sentence, and a route could
+ * only ever answer "502, something went wrong".
+ *
+ * Source for the envelope shape: the storage-api service's own error responses, as captured
+ * VERBATIM in packages/runtime/tests/intake-unit.test.mjs's 2026-07-26 outage bodies and asserted
+ * against here by packages/runtime/tests/storage-read-contract.test.mjs. A live hosted capture of
+ * the GET side is still outstanding — see that file's header.
+ *
+ * FOUR REASONS, AND NO FIFTH. `object_missing` (the row points at bytes that are not there —
+ * re-upload), `credential_refused` (the custody JWT was rejected — rotate), `unavailable` (5xx,
+ * network, timeout — retry), and `unconfigured` (realConfig never let a request happen — fix the
+ * deployment, and that one is raised in realConfig itself with its 503).
+ *
+ * @param {number} status the HTTP status
+ * @param {string} body   the response body, already read (it is discarded either way)
+ * @returns {{reason: string, status: number}}
+ */
+export function classifyGetFailure(status, body) {
+  let inner = null;
+  try { inner = JSON.parse(body ?? ""); } catch { /* not JSON — the HTTP status is all there is */ }
+  const wrapped = Number(inner?.statusCode);
+  // The BODY's status wins when it is present and plausible: that is the service's own word about
+  // what happened, and the transport status is the envelope it arrived in.
+  const effective = Number.isFinite(wrapped) && wrapped >= 100 && wrapped <= 599 ? wrapped : status;
+  if (effective === 404 || effective === 410) return { reason: "object_missing", status: 502 };
+  if (effective === 401 || effective === 403) return { reason: "credential_refused", status: 502 };
+  return { reason: "unavailable", status: 502 };
+}
+
 async function responseFor(key) {
   if (process.env.RELAY_TEST_MODE === "1") {
     const injected = globalThis.__claraStorageForTest;
@@ -181,11 +245,29 @@ async function responseFor(key) {
     return openLocalStream(localPath(key), "canonical");
   }
   const { base, jwt } = realConfig();
-  const response = await fetch(objectUrl(base, key), {
-    headers: { authorization: `Bearer ${jwt}`, apikey: jwt },
-  });
-  if (!response.ok || !response.body) throw new StorageError("storage_error", `Storage read failed (${response.status})`);
-  return response.body;
+  let response;
+  try {
+    response = await fetch(objectUrl(base, key), {
+      headers: { authorization: `Bearer ${jwt}`, apikey: jwt },
+    });
+  } catch (err) {
+    // A REJECTED FETCH IS `unavailable`, NEVER `object_missing`. DNS failure, a refused connection
+    // and an aborted timeout all land here, and none of them is evidence about the object. The
+    // cause's own message is carried for the operator; it never reaches a client (the route
+    // answers `{error:"storage_error", reason}` and nothing else).
+    throw new StorageError("storage_error",
+      `Storage read failed (network: ${String(err?.message ?? err).slice(0, 200)})`, 502, "unavailable");
+  }
+  if (response.ok && response.body) return response.body;
+  // An `ok` response with no body is a broken read, not a missing object — it falls through to the
+  // classifier as its own transport status, which is `unavailable` for a 2xx.
+  const body = await response.text().catch(() => "");
+  const { reason, status } = classifyGetFailure(response.status, body);
+  // THE BODY IS CARRIED, CAPPED AT 200 CHARACTERS — the same discipline `putCanonical` adopted
+  // after discarding it cost a full day of diagnosis, and the same cap, so a vendor error page can
+  // never become the bulk of a log line. It stays server-side.
+  throw new StorageError("storage_error",
+    `Storage read failed (${response.status})${body ? ` ${body.slice(0, 200)}` : ""}`, status, reason);
 }
 
 export async function hashCanonical(key) {
