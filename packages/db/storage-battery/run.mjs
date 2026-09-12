@@ -55,7 +55,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 import pg from "pg";
 
-import { absent, deniedWith, refusal } from "./verdicts.mjs";
+import { absent, deniedWith, refusal, wikiWireStatus } from "./verdicts.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const DB_PKG = resolve(HERE, "..");
@@ -366,14 +366,18 @@ async function main() {
       body: tamper,
     });
     const afterWrite = await door.hashCanonical(keyA).catch((err) => `error ${err.message}`);
-    verdictOf(!upsert.ok && !replace.ok && afterWrite === shaA, "B4",
-      `upsert (x-upsert:true) ${refusal(upsert)} and PUT ${refusal(replace)} -> both refused, bytes unchanged`);
+    // A DENIAL IS A STATUS, NOT A BOOLEAN. `!ok` is equally true of a 500, a proxy timeout and a
+    // wrapped 409 duplicate; only the wrapped 403 says the POLICY answered. The byte read-back
+    // stays beside it — together they say "the write did not land AND it was refused for the
+    // reason this cell exists to measure".
+    verdictOf(deniedWith(upsert, [403]) && deniedWith(replace, [403]) && afterWrite === shaA, "B4",
+      `upsert (x-upsert:true) ${refusal(upsert)} and PUT ${refusal(replace)} -> both refused with a wrapped 403, bytes unchanged`);
 
     // B5 -----------------------------------------------------------------------
     const removed = await rawObject(apiUrl, "DELETE", BUCKET, keyA, jwtA);
     const afterDelete = await door.hashCanonical(keyA).catch((err) => `error ${err.message}`);
-    verdictOf(!removed.ok && afterDelete === shaA, "B5",
-      `DELETE ${refusal(removed)} -> refused, object still readable (delete-never, storage-provision.sql:80-83)`);
+    verdictOf(deniedWith(removed, [403]) && afterDelete === shaA, "B5",
+      `DELETE ${refusal(removed)} -> refused with a wrapped 403, object still readable (delete-never, storage-provision.sql:80-83)`);
 
     // B6 -----------------------------------------------------------------------
     const shortSha = shaA.slice(0, 63);
@@ -439,7 +443,11 @@ async function main() {
       body: payload,
     });
     const crossBucketGet = await rawObject(apiUrl, "GET", OTHER_BUCKET, strangerKey, jwtA);
-    verdictOf(plantedElsewhere.ok && !crossBucketGet.ok, "B7",
+    // A DENIED READ IS LAWFULLY EITHER STATUS. The vendor answers a read the SELECT policy hides
+    // as "not found" (measured: wrapped 404) rather than "forbidden"; both are refusals of the
+    // same request, and pinning only one would be pinning an implementation detail. What is NOT
+    // accepted is a 500 or an unwrapped answer, which say nothing about the policy.
+    verdictOf(plantedElsewhere.ok && deniedWith(crossBucketGet, [403, 404]), "B7",
       `GET the SAME conforming key in bucket ${OTHER_BUCKET} -> ${refusal(crossBucketGet)} (the policy is bucket-scoped; planted with the service key: HTTP ${plantedElsewhere.status})`);
 
     // B8 -----------------------------------------------------------------------
@@ -460,11 +468,13 @@ async function main() {
         body: payload,
       });
       const get = await rawObject(apiUrl, "GET", BUCKET, keyA, jwt);
-      const refused = doorVerdict !== "ACCEPTED" && !post.ok && !get.ok;
+      const postDenied = deniedWith(post, [403]);
+      const getDenied = deniedWith(get, [403, 404]);
+      const refused = doorVerdict !== "ACCEPTED" && postDenied && getDenied;
       if (!refused) b8ok = false;
-      b8notes.push(`${label}: door ${doorVerdict}, POST ${refusal(post)}, GET ${refusal(get)}`);
+      b8notes.push(`${label}: door ${doorVerdict}, POST ${refusal(post)}${postDenied ? "" : " <-- NOT A 403 POLICY DENIAL"}, GET ${refusal(get)}${getDenied ? "" : " <-- NOT A 403/404 DENIED READ"}`);
     }
-    verdictOf(b8ok, "B8", `a non-designated and an expired credential -> refused on POST and GET — ${b8notes.join("; ")}`);
+    verdictOf(b8ok, "B8", `a non-designated and an expired credential -> refused on POST (wrapped 403) and GET (wrapped 403/404) — ${b8notes.join("; ")}`);
 
     // B9 — the documented honest limit --------------------------------------------
     const foreignKey = `firms/${firmB}/docs/${shaA}.bin`;
@@ -589,23 +599,34 @@ async function main() {
     const wikiFixture = join(scratch, "wiki.md");
     await writeFile(wikiFixture, wikiBody);
     const wikiKey = `firms/${firmA}/wiki/${randomUUID()}/${sha256(wikiBody)}.md`;
-    let wikiRefused = false;
+    let wikiThrew = false;
+    let wikiWire = null;
     let wikiVerdict = "ACCEPTED (an object was created)";
     try {
       await door.putWikiCanonical(wikiFixture, wikiKey, "text/markdown");
     } catch (err) {
-      wikiRefused = true;
+      wikiThrew = true;
+      // THE REFUSAL MUST CARRY A POST-REQUEST MARKER. `safeWikiKey` (storage.mjs:349-355) runs
+      // BEFORE the fetch and throws the SAME StorageError class the wire branch throws, so "it
+      // threw" is fully compatible with Storage never having been asked: a fixture key that
+      // merely failed the client-side grammar would print this LIMIT line after zero network
+      // requests, and the scope statement it carries would rest on nothing. Only the post-fetch
+      // branch (storage.mjs:387) puts the HTTP status into its message — that status is the marker.
+      wikiWire = wikiWireStatus(err.message);
       wikiVerdict = `refused (${err.code ?? "error"}: ${String(err.message).slice(0, 90)})`;
     }
     // Pinned in BOTH directions, like B9: if this ceremony ever starts admitting a wiki key, the
     // README's scope statement and the wiki hosted-pending question are stale, and silence would
     // be the wrong answer.
-    if (wikiRefused) {
-      cell("LIMIT", "B12",
-        `a conforming WIKI key through putWikiCanonical -> ${wikiVerdict}. This ceremony creates NO wiki policy pair (packages/db/deploy carries none), so the wiki family is OUT OF SCOPE for what this battery certifies — whether the live project has one out of band is hosted-pending via hosted-probe.sql.`);
-    } else {
+    if (!wikiThrew) {
       cell("FAIL", "B12",
         `a conforming WIKI key was ${wikiVerdict} — this ceremony creates no wiki policy pair, so an admitted wiki write means the policy set changed. Re-derive README.md's scope statement and B10's expected policy list.`);
+    } else if (wikiWire === null) {
+      cell("FAIL", "B12",
+        `a conforming WIKI key through putWikiCanonical -> ${wikiVerdict}, but the failure carries NO wire status: it happened before any request (safeWikiKey's grammar, storage.mjs:349-355), so this cell measured no Storage boundary at all. Fix the fixture key, then re-read the verdict.`);
+    } else {
+      cell("LIMIT", "B12",
+        `a conforming WIKI key through putWikiCanonical -> ${wikiVerdict} — answered BY STORAGE (HTTP ${wikiWire}), so the request was really made. This ceremony creates NO wiki policy pair (packages/db/deploy carries none), so the wiki family is OUT OF SCOPE for what this battery certifies — whether the live project has one out of band is hosted-pending via hosted-probe.sql.`);
     }
 
     // B11 — fixture cleanup, with the SERVICE key, never the custody role --------

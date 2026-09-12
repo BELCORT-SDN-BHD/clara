@@ -24,15 +24,27 @@ Through the **repository's own production door** — `putCanonical` / `verifyCan
 | B1 | A conforming key POSTs and is created. |
 | B2 | The same POST again returns `existed`, not a fatal error — the wrapped-409 branch, the exact code path of the 2026-07-26 incident. |
 | B3 | GET read-back verifies: `verifyCanonical` and `downloadCanonical` both match the sha, bytes byte-identical. |
-| B4 | `x-upsert:true` and `PUT` on the same key are both refused and the stored bytes are unchanged. |
-| B5 | `DELETE` is refused and the object is still readable — delete-never, asserted positively. |
+| B4 | `x-upsert:true` and `PUT` on the same key are both refused with a wrapped **403** and the stored bytes are unchanged. |
+| B5 | `DELETE` is refused with a wrapped **403** and the object is still readable — delete-never, asserted positively. |
 | B6 | A non-conforming key (wrong prefix, 63-hex sha, uppercase extension, path traversal) is refused, on every variant, on three independent counts: the production door created **nothing**, the raw POST was answered with a wrapped **403** (a wrapped 409 duplicate is never read as a denial), and a privileged service-key GET reports the key **absent**. |
-| B7 | The same conforming key in a **different bucket** is refused — the policy is bucket-scoped. |
-| B8 | A non-designated role JWT and an expired JWT are refused on POST *and* GET, at the runtime pre-flight and on the wire. |
+| B7 | The same conforming key in a **different bucket** is refused with a wrapped **403 or 404** — the policy is bucket-scoped. |
+| B8 | A non-designated role JWT and an expired JWT are refused on POST (wrapped **403**) *and* GET (wrapped **403/404**), at the runtime pre-flight and on the wire. |
 | B9 | **LIMIT** — a conforming key in another firm's namespace is allowed (see below). |
 | B10 | Catalog assertions on the stack DB: no escalation bit on `clara_storage_docs`; `update`/`delete`/`truncate`/`references`/`trigger` on `storage.objects` all false while `insert`/`select` are true; the role inherits none of `postgres` / `supabase_storage_admin` / `service_role` / `supabase_admin` / `anon` / `authenticated` (the temporary-admin-grant detector); `pg_policies` lists exactly `clara_storage_docs_insert` and `clara_storage_docs_select` for the role. |
 | B11 | Fixture cleanup with the stack's **service** key (never the custody role), then zero rows left in either bucket. B6's candidate keys are on the cleanup list too, so a weakened policy reds B6 — the cell that names the weakening — and not this one. |
-| B12 | **LIMIT** — the wiki key family (see below). |
+| B12 | **LIMIT** — the wiki key family (see below), refused *by Storage*: the cell requires the failure to carry the HTTP status only the post-request branch can produce. |
+
+### What a refusal has to look like
+
+Every denial cell asserts the **status**, not a boolean. Supabase Storage answers a policy denial
+as outer `HTTP 400` with the real status wrapped in the body (`{"statusCode":"403",…}`), and it
+answers a *duplicate* under `x-upsert:false`, a *missing object* and a *server fault* with the same
+outer 400 or with no wrapper at all. So `!response.ok` cannot tell a denial from a write that
+landed, and `verdicts.mjs` is where that distinction lives: `403` for a policy or permission
+denial, `403`-or-`404` for a denied read (the vendor hides a read the SELECT policy forbids as
+"not found"), `404` from a privileged service-key probe to assert **absence**. A response with no
+wrapped status is judged on its own HTTP status and can never pass for a policy answer it never
+carried.
 
 `PASS|FAIL|LIMIT <id> <what>`, one line per cell, then a table. Any `FAIL` exits non-zero.
 `LIMIT` is a measured, deliberately-accepted boundary — reported, never quietly passed. A LIMIT
