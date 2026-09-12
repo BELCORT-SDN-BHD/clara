@@ -414,6 +414,65 @@ function downloadState(page: Page) {
   }).__claraDownloads);
 }
 
+type FocusSample = { focus: string; busy: string | null };
+type FocusWatch = { samples: FocusSample[]; stop: () => void };
+
+/** WHERE KEYBOARD FOCUS IS, CONTINUOUSLY, across a source read — the one thing no unit harness can
+ *  answer, because there is no focus manager in a stub DOM and "disabled elements cannot hold
+ *  focus" is a browser rule rather than a React one.
+ *
+ *  TWO INSTRUMENTS, on purpose. A 10ms poll can in principle straddle a very fast read and see
+ *  nothing; a `MutationObserver` on the panel's own `aria-busy`/`aria-disabled`/`disabled`
+ *  attributes fires as a microtask at the exact instant the press takes effect, which is precisely
+ *  when a natively-disabled control blurs. Each sample also records the pressed control's
+ *  `aria-busy`, so a cell can prove it actually OBSERVED the in-flight window rather than passing
+ *  because it sampled nothing. Install immediately before the keypress; read back with
+ *  `focusSamples`, which stops both. */
+async function watchSourceFocus(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const w = window as unknown as { __claraFocus: FocusWatch };
+    const label = () => {
+      const el = document.activeElement;
+      if (!el || el === document.body || el === document.documentElement) return "BODY";
+      return el.getAttribute("data-testid") ?? el.tagName;
+    };
+    const read = () => {
+      const button = document.querySelector('[data-testid="document-download-original"]');
+      return { focus: label(), busy: button ? button.getAttribute("aria-busy") : null };
+    };
+    const samples: FocusSample[] = [];
+    const timer = window.setInterval(() => samples.push(read()), 10);
+    const observer = new MutationObserver(() => samples.push(read()));
+    const panel = document.querySelector('[data-testid="document-source-actions"]');
+    if (panel) {
+      observer.observe(panel, { attributes: true, subtree: true, attributeFilter: ["aria-busy", "aria-disabled", "disabled"] });
+    }
+    w.__claraFocus = { samples, stop: () => { window.clearInterval(timer); observer.disconnect(); } };
+  });
+}
+
+/** The samples as one run-line: `label×count` in the order observed, with how many of them caught
+ *  the control mid-read. RECORDED IN THE RUN'S OUTPUT, the way the CSP cell records its own
+ *  measurement, because "BODY×12" is the shape this defect had and a reviewer should be able to
+ *  read the before and after off two logs rather than re-deriving them. */
+function summariseFocus(samples: FocusSample[]): string {
+  const runs: string[] = [];
+  for (const s of samples) {
+    const last = runs[runs.length - 1];
+    if (last && last.startsWith(`${s.focus}×`)) runs[runs.length - 1] = `${s.focus}×${Number(last.split("×")[1]) + 1}`;
+    else runs.push(`${s.focus}×1`);
+  }
+  return `${runs.join(",")} | samples=${samples.length} while-busy=${samples.filter((s) => s.busy === "true").length}`;
+}
+
+async function focusSamples(page: Page): Promise<FocusSample[]> {
+  return page.evaluate(() => {
+    const w = window as unknown as { __claraFocus: FocusWatch };
+    w.__claraFocus.stop();
+    return w.__claraFocus.samples;
+  });
+}
+
 /** The widest any element extends past the viewport, and the document's own scroll width. Measured
  *  from the browser's layout rather than reasoned about from CSS — a `max-w` class that is beaten
  *  by an inline width or by an unbreakable string looks correct in source and scrolls in fact. */
@@ -618,8 +677,65 @@ test.describe("#620 — source custody: preview, download and the state ladder (
     const download = page.getByTestId("document-download-original");
     await download.focus();
     await expect(download).toBeFocused();
+    await watchSourceFocus(page);
     await page.keyboard.press("Enter");
     await expect.poll(async () => (await downloadState(page)).anchors.length, { timeout: 15_000 }).toBe(1);
+
+    // FOCUS SURVIVES THE PRESS, and this is the assertion the cell was missing.
+    //
+    // `disabled={busy !== null}` put the NATIVE `disabled` attribute on both controls while a read
+    // was in flight, and a natively-disabled element cannot hold focus — so the browser blurred it
+    // to <body> the instant the press took effect and nothing brought it back. Measured on that
+    // code: `FOCUS SAMPLES WHILE BUSY: BODY×12`, `FOCUS AFTER FAILURE SETTLES: BODY`. A keyboard
+    // reader was left with no position at all: the sr-only status region announced a control the
+    // browser no longer considered focused, and the Retry that appears beside it on a failure had
+    // to be reached by re-entering the page's tab order.
+    //
+    // THE VACUITY CONTROL COMES FIRST. An assertion that focus was "never on <body>" is trivially
+    // true if the sampler never ran while the read was in flight, so the busy window itself must
+    // appear in the samples before their focus values mean anything.
+    const successSamples = await focusSamples(page);
+    console.log(`[#620 F9] FOCUS ACROSS A SUCCEEDING READ: ${summariseFocus(successSamples)}`);
+    expect(
+      successSamples.some((s) => s.busy === "true"),
+      `control: the sampler never observed the read in flight — ${JSON.stringify(successSamples.slice(0, 40))}`,
+    ).toBe(true);
+    expect(
+      successSamples.filter((s) => s.focus === "BODY"),
+      "keyboard focus must never fall to <body> while a source read is in flight",
+    ).toEqual([]);
+    await expect(download, "…and it is still on the control that was pressed once the read settles").toBeFocused();
+
+    // THE SAME PROPERTY ON A FAILING READ, which is the case that actually matters: this is where a
+    // recovery control appears beside the one just pressed, so this is where losing the position
+    // costs the reader something.
+    await page.goto(`${DOCUMENTS_URL}?document=${DOCS.docUnavailable}`);
+    const failing = page.getByTestId("document-download-original");
+    await expect(failing).toBeVisible({ timeout: 20_000 });
+    await failing.focus();
+    await expect(failing).toBeFocused();
+    await watchSourceFocus(page);
+    await page.keyboard.press("Enter");
+    await expect(page.getByText(/document store couldn't be reached/)).toBeVisible({ timeout: 15_000 });
+
+    const failureSamples = await focusSamples(page);
+    console.log(`[#620 F9] FOCUS ACROSS A REFUSED READ: ${summariseFocus(failureSamples)}`);
+    expect(
+      failureSamples.some((s) => s.busy === "true"),
+      `control: the sampler never observed the failing read in flight — ${JSON.stringify(failureSamples.slice(0, 40))}`,
+    ).toBe(true);
+    expect(
+      failureSamples.filter((s) => s.focus === "BODY"),
+      "keyboard focus must never fall to <body> across a REFUSED source read either",
+    ).toEqual([]);
+    await expect(failing, "after the refusal settles, focus is still on the control the reader pressed").toBeFocused();
+
+    // DELIBERATELY NOT ASSERTED HERE: "how many Tab presses to reach Retry". Measured on the
+    // defective code, a live Tab from the blurred position reached Retry in ONE press anyway —
+    // Chromium keeps a sequential-navigation anchor where the removed element was — so that count
+    // passes in both directions and would be an assertion that cannot fail. The cost this cell
+    // pins is the real one: no position at all for the whole read, and a live region announcing a
+    // control the browser no longer considers focused.
   });
 
   test("RESPONSIVE: no horizontal page scroll at 320px, nor at 200% zoom, with a document open", async ({ page }) => {

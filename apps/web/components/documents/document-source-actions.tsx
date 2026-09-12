@@ -217,10 +217,16 @@ export function DocumentSourceActions({
             size="sm"
             variant="outline"
             data-testid="document-open-original"
+            // SHUT, AND STILL FOCUSABLE — see the note above `focusableWhenDisabled`'s other use
+            // below; a keyboard reader who pressed this must not be standing on <body> while it
+            // works. `aria-disabled:opacity-50` restores the dimming the native attribute's own
+            // `disabled:opacity-50` used to give, so the look is unchanged.
             disabled={busy !== null}
+            focusableWhenDisabled
+            className="aria-disabled:opacity-50"
             aria-busy={busy === "preview"}
             aria-label={busy === "preview" ? t("openOriginalProgress", { name }) : t("openOriginalLabel", { name })}
-            onClick={() => { void run("preview"); }}
+            onClick={() => { if (busy !== null) return; void run("preview"); }}
           >
             {busy === "preview" ? t("openingDocument") : t("openDocument")}
           </Button>
@@ -230,10 +236,29 @@ export function DocumentSourceActions({
           size="sm"
           variant="outline"
           data-testid="document-download-original"
+          // FOCUS SURVIVES THE PRESS. `disabled={busy !== null}` alone put the NATIVE `disabled`
+          // attribute on the control, and a disabled element cannot hold focus: pressing either
+          // control with the keyboard sent `document.activeElement` to <body> for the whole read
+          // and nothing brought it back (measured: `FOCUS SAMPLES WHILE BUSY: BODY×12`, `FOCUS
+          // AFTER FAILURE SETTLES: BODY`) — so the sr-only region announced a control the browser
+          // no longer considered focused, and the Retry that then appeared beside it was reached
+          // only by re-entering the page's tab order.
+          //
+          // `focusableWhenDisabled` is Base UI's own answer and the house Button forwards it
+          // straight through (`@base-ui/react@1.7.0`, button/Button.mjs -> internals/use-button):
+          // with it set, `useFocusableWhenDisabled` writes `aria-disabled` and LEAVES OFF the
+          // native `disabled` attribute, keeping `tabIndex` at 0 — and `useButton`'s own handlers
+          // still gate click, keydown, keyup and pointerdown on its `disabled` PROP, so the press
+          // stays a genuine no-op while busy. The `if (busy !== null) return` guard below is the
+          // second wall, held locally so this stays a no-op even if the primitive underneath
+          // changes: two concurrent reads of one document would produce two saves and two audit
+          // lines for one human intention.
           disabled={busy !== null}
+          focusableWhenDisabled
+          className="aria-disabled:opacity-50"
           aria-busy={busy === "download"}
           aria-label={busy === "download" ? t("downloadOriginalProgress", { name }) : t("downloadOriginalLabel", { name })}
-          onClick={() => { void run("download"); }}
+          onClick={() => { if (busy !== null) return; void run("download"); }}
         >
           {busy === "download" ? t("downloadingOriginal") : t("downloadOriginal")}
         </Button>

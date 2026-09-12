@@ -189,7 +189,20 @@ test("BUSY is announced and is a real gate: aria-busy, a progress name, and both
 
       // THE OTHER control must be shut too — two concurrent reads of the same document would
       // produce two saves and two audit lines for one human intention.
-      assert.equal(findButton(h, "Open original")?.disabled, true);
+      //
+      // SHUT VIA `aria-disabled`, AND THE NATIVE ATTRIBUTE IS ASSERTED ABSENT. That is not a
+      // weaker claim, it is the fix: a natively-disabled element cannot hold focus, so pressing
+      // either control with the keyboard dropped `document.activeElement` to <body> for the whole
+      // read (measured: BODY×12 while busy, BODY after it settled). `focusableWhenDisabled` keeps
+      // the control in the tab order while @base-ui/react's `useButton` keeps gating click,
+      // keydown, keyup and pointerdown on its own `disabled` prop — the press is still a no-op.
+      // Whether focus actually STAYS on the pressed control is a real-browser property and is
+      // pinned in the KEYBOARD ONLY cell of e2e/documents-viewer-walk.spec.ts; this harness has no
+      // focus manager, so it asserts only what the DOM can show.
+      const other = findButton(h, "Open original");
+      assert.equal(other?.getAttribute?.("aria-disabled"), "true", "the other control must be shut while a read is in flight");
+      assert.equal(other?.getAttribute?.("disabled"), null, "…and NOT by the native attribute, which would take it out of the tab order");
+      assert.notEqual(other?.getAttribute?.("tabindex"), "-1", "…nor by parking it at tabindex -1, which is the same defect spelled differently");
 
       release?.();
       for (let i = 0; i < 8; i++) await h.settle();
