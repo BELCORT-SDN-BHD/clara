@@ -91,8 +91,16 @@ jobs:
                 # the same role, the battery, the two runtime modules that drive the door, and
                 # this workflow. Same fail-closed polarity as code/db: missing ranges, schedule
                 # and dispatch keep it true.
+                #
+                # NARROWER THAN DB, BUT NOT NARROWER THAN THE JOB'S OWN INPUTS. The battery leg
+                # runs `uses: ./.github/actions/setup-workspace` and imports `pg` from the frozen
+                # install, so the composite action and the lockfile/manifest are inputs to what it
+                # measures just as much as the ceremony is -- and their omission was not a
+                # conservative skip but a silent one: the leg's own `if:` turns storage=false into
+                # a skip, and the meta-gate's else-arm accepts `skipped` as lawful, so a PR
+                # touching only the composite would have merged without the battery ever running.
                 case "$f" in
-                  packages/db/deploy/storage-provision.sql|packages/db/deploy/roles-bootstrap.sql|packages/db/storage-battery/*|packages/runtime/lib/storage.mjs|packages/runtime/lib/storage-probe.mjs|.github/workflows/ci.yml) STORAGE=true ;;
+                  packages/db/deploy/storage-provision.sql|packages/db/deploy/roles-bootstrap.sql|packages/db/storage-battery/*|packages/runtime/lib/storage.mjs|packages/runtime/lib/storage-probe.mjs|.github/workflows/ci.yml|.github/actions/*|pnpm-lock.yaml|package.json) STORAGE=true ;;
                 esac
               done <<< "$FILES"
             fi

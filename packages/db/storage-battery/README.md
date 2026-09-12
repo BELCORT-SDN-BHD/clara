@@ -118,11 +118,14 @@ vendor response shapes.
 `.github/workflows/ci.yml`'s `storage-policy-battery` job. It is gated by the `changes` job's
 `storage` classifier output (true when the diff touches `storage-provision.sql`,
 `roles-bootstrap.sql`, `packages/db/storage-battery/**`, `packages/runtime/lib/storage.mjs`,
-`packages/runtime/lib/storage-probe.mjs`, or the workflow itself; fail-closed true on a missing
-range, on `schedule` and on `workflow_dispatch`), installs the pinned CLI with
+`packages/runtime/lib/storage-probe.mjs`, the workflow itself, `.github/actions/**`,
+`pnpm-lock.yaml` or the root `package.json` — the last three because the job runs
+`./.github/actions/setup-workspace` and imports `pg` from the frozen install, so they are inputs
+to what it measures; fail-closed true on a missing range, on `schedule` and on
+`workflow_dispatch`), installs the pinned CLI with
 `supabase/setup-cli`, and is asserted in both directions by the terminal `ci` meta-gate. No
 secrets: every value the battery uses belongs to the throwaway stack. CI is the weaker environment
-for the two teardown assertions above and is meant to be: every job gets a fresh VM and an
+for the two teardown assertions below and is meant to be: every job gets a fresh VM and an
 `always()` dispose step, so what they actually protect is a dev box, where the next run has to live
 with whatever the last one left behind.
 
