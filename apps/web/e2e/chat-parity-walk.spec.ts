@@ -213,6 +213,19 @@ test("a document attached from the composer rides the sent turn as its document 
   await expect(page.getByText("Attached document")).toBeVisible();
   await expect(page.getByText(DOCUMENT_ID)).toBeVisible();
 
+  // The mock reopens the SAME clarify on every turn (chat-parity-mock.mjs's `resetPark()`),
+  // so this turn incidentally mounts a second live ClarifyCard this test does not otherwise
+  // touch. Its `enter-content` wrapper fades opacity 0->1 over `--motion-duration-standard`
+  // (160 ms, globals.css) on mount, and axe measures whatever frame it lands on: a scan
+  // mid-fade read the resting muted-foreground/card pair (4.636:1) as #727a7a on white
+  // (4.39:1) — a transition artefact, not a colour. Measured 2026-09-12: the same spec on the
+  // same tree failed and passed on consecutive runs with zero changes; it became frequent once
+  // e2e/run.mjs stopped forwarding the `--` separator and this spec ran standalone. Wait for
+  // the fade to settle so the scan measures RESTING colours.
+  const clarifyGroup = page.locator(".enter-content").first();
+  if (await clarifyGroup.count()) {
+    await expect(clarifyGroup).toHaveCSS("opacity", "1");
+  }
   await scan(page, "composer attachment face");
 });
 
