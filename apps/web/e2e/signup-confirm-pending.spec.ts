@@ -28,6 +28,16 @@ async function controlResend(page: Page, body: Record<string, unknown>): Promise
   expect(response.ok(), "the e2e control surface did not answer").toBeTruthy();
 }
 
+/** The mock's journey state is process-wide and nothing resets it between spec
+ *  files. `checkout-gate-walk.spec.ts` runs before this file and ends with a
+ *  claimed firm (`firmOpened`), which makes `/signup` render the member state
+ *  instead of the firm form — measured 2026-09-13 as a full-suite-only failure
+ *  of the second-context skeleton below (green standalone). Reset first, the
+ *  way that spec does. */
+test.beforeEach(async ({ page }) => {
+  await controlResend(page, { reset: true });
+});
+
 /**
  * FS-4 C-6 (裁-92) rewrote this spec's own subject: `/auth/confirm` is now a
  * six-digit CODE form, never a link, and confirming it goes through the
