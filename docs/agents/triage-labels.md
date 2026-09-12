@@ -13,3 +13,9 @@ The skills speak in terms of five canonical triage roles. This file maps those r
 When a skill mentions a role (e.g. "apply the AFK-ready triage label"), use the corresponding label string from this table.
 
 Edit the right-hand column to match whatever vocabulary you actually use.
+
+## Repo-specific labels
+
+| Label               | Meaning                                                                                                                                                                                                   |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `awaiting-release`  | Merged to `main`; hosted release and hosted evidence still pending. The lane that merged the ticket sets it (replacing `ready-for-agent`) and leaves the issue open; only the release session removes it, when it records the hosted evidence and closes the issue. |
