@@ -87,7 +87,7 @@ export function DocumentPageOverlay({
   if (!data) return err ? <StateBanner tone="error" code={clr ? clr.code : undefined}>{err}</StateBanner> : null;
   if (data.result === null) return <StateBanner tone="neutral">{t("overlayNotAvailable")}</StateBanner>;
 
-  return <DocumentPageOverlayContent data={data.result} documentId={documentId} mimeType={mimeType} />;
+  return <DocumentPageOverlayContent data={data.result} documentId={documentId} clientId={clientId} mimeType={mimeType} />;
 }
 
 /** The pure, fixed-prop body — mountable by an a11y scan with fixture data,
@@ -98,10 +98,16 @@ export function DocumentPageOverlay({
 export function DocumentPageOverlayContent({
   data,
   documentId,
+  clientId,
   mimeType,
 }: {
   data: DocumentExtractResult;
   documentId: string;
+  /** The page's client scope, forwarded to the byte door (#620). Optional so the a11y fixture that
+   *  mounts this body with no bytes at all stays a one-line mount; production always supplies it,
+   *  and the effect's own dependency list carries it, so a scope change re-reads rather than
+   *  painting the previous client's page. */
+  clientId?: string;
   mimeType: string | null;
 }) {
   const t = useTranslations("ClientDocuments");
@@ -141,6 +147,7 @@ export function DocumentPageOverlayContent({
         ) : (
           <PageWithOverlay
             documentId={documentId}
+            clientId={clientId}
             page={page}
             regions={data.regions}
             boxesByExtraction={boxesByExtraction}
@@ -176,6 +183,7 @@ type PageState =
  *  against an assumed width. */
 function PageWithOverlay({
   documentId,
+  clientId,
   page,
   regions,
   boxesByExtraction,
@@ -183,6 +191,13 @@ function PageWithOverlay({
   onSelect,
 }: {
   documentId: string;
+  /** The page's client scope, forwarded to the byte door as `?client=` — the SAME scope the
+   *  detail's own preview and download controls send (#620). Without it this one read of the same
+   *  document would be admitted on firm membership alone while the two controls beside it required
+   *  an active filing to THIS client: one document, one page, two different answers to "may I read
+   *  this", which is the kind of inconsistency a permission review has to chase rather than read.
+   *  Not a geometry prop: nothing below draws with it. */
+  clientId: string | undefined;
   page: number;
   regions: readonly DocumentExtractRegion[];
   boxesByExtraction: Map<string, Map<number, PageBox>>;
@@ -206,7 +221,7 @@ function PageWithOverlay({
     setState({ kind: "loading" });
     void (async () => {
       try {
-        const bytes = await fetchDocumentBytes(documentId, { signal: controller.signal });
+        const bytes = await fetchDocumentBytes(documentId, { client: clientId, purpose: "preview", signal: controller.signal });
         revoke = bytes.revoke;
         if (cancelled) { bytes.revoke(); return; }
 
@@ -234,7 +249,7 @@ function PageWithOverlay({
       controller.abort();
       revoke?.();
     };
-  }, [documentId, page]);
+  }, [documentId, clientId, page]);
 
   /** The PDF page's intrinsic size, taken ONCE as the first scale estimate.
    *  `measure()` below overwrites it from the DOM as soon as the observer

@@ -304,9 +304,12 @@ export async function handleDocumentsViewerSupabase(request, response, path, url
     const client = eqParam(url, "client_id");
     const document = eqParam(url, "document_id");
     if (client === DOCS.clientId) return json(sendJson, response, FILINGS, cors);
-    // SCOPED TO THIS LANE'S OWN DOCUMENTS, still — `DOC_ROWS` is the roster, so a document added
-    // for a new refusal cell is covered without a second list to keep in step.
-    if (document !== null && DOC_ROWS[document] !== undefined) {
+    // SCOPED BY THIS LANE'S OWN ID SPACE rather than by "do I have a row for it". A well-formed id
+    // this lane deliberately files nothing under must answer an EMPTY SET — what real PostgREST
+    // answers — because falling through handed the request to a handler that 404s, and a 404 is a
+    // read FAILURE ("this isn't reachable today"), which is a different state for a different
+    // reason than "that document isn't available in this client".
+    if (document !== null && document.startsWith(LANE_DOCUMENT_PREFIX)) {
       return json(sendJson, response, FILINGS.filter((f) => f.document_id === document), cors);
     }
     return false;
@@ -345,7 +348,7 @@ export async function handleDocumentsViewerSupabase(request, response, path, url
 
   if (request.method === "GET" && path === "/rest/v1/document_extractions") {
     const document = eqParam(url, "document_id");
-    if (document === null || DOC_ROWS[document] === undefined) return false;
+    if (document === null || !document.startsWith(LANE_DOCUMENT_PREFIX)) return false;
     if (document !== DOCS.docPdf) return json(sendJson, response, [], cors);
     return json(sendJson, response, [{
       id: DOCS.extraction, document_id: DOCS.docPdf,
@@ -369,7 +372,8 @@ export async function handleDocumentsViewerSupabase(request, response, path, url
 
   if (request.method === "GET" && path === "/rest/v1/document_processing_tasks_visible") {
     const document = eqParam(url, "document_id");
-    if (document === null || DOC_ROWS[document] === undefined) return false;
+    if (document === null || !document.startsWith(LANE_DOCUMENT_PREFIX)) return false;
+    if (DOC_ROWS[document] === undefined) return json(sendJson, response, [], cors);
     return json(sendJson, response, [{
       id: `task-${document}`, document_id: document, lane: document === DOCS.docPdf ? "ocr" : "none",
       status: "done", version_n: 1, attempt_count: 1, error_code: null,
