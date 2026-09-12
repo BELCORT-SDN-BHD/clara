@@ -35,12 +35,21 @@ const roleName = (tok) => ROLES[tok];
  * then asserting its grants only if it does would make the §13 cell vacuous for exactly the name a
  * lost door would remove. Asking the ledger asks a different question — "should this database have
  * it at all" — and a database that HAS applied the migration is then held to the full matrix.
+ *
+ * MATCHED ON THE STABLE SUFFIX, NOT ON THE NUMBER (#620 review, F11). `right(version, length($1))
+ * = $1` is a plain string comparison on the tail, so no LIKE metacharacter in the name can widen
+ * it — `like '0185_%'` treated its own `_` as a single-character wildcard — and a merge-time
+ * renumber of the very same migration cannot make the gate stop firing. Measured on a disposable
+ * copy: with the ledger row renamed 0185→0186 and EXECUTE over-granted to clara_authenticated,
+ * the number-keyed form reported 6 pass / 0 fail plus "the door is not expected yet"; this form
+ * fails on the over-grant.
  */
 async function mintedHere(fn) {
   const since = WA_GRANTS_SINCE[fn];
   if (since === undefined) return true;
   const r = await rootQuery(
-    "select count(*)::int as n from clara.schema_migrations where version like $1", [`${since}%`]);
+    "select count(*)::int as n from clara.schema_migrations where right(version, length($1)) = $1",
+    [since]);
   return r.rows[0].n > 0;
 }
 
@@ -48,7 +57,7 @@ test("§13 the new granted fns hold EXACTLY their lane grants; every other app r
   if (skipUnready(t, ready)) return;
   for (const [fn, tokens] of Object.entries(WA_GRANTS)) {
     if (!(await mintedHere(fn))) {
-      noteLane(`${fn}: this database's ledger is below ${WA_GRANTS_SINCE[fn]} — the door is not expected yet`);
+      noteLane(`${fn}: no applied migration ends in '${WA_GRANTS_SINCE[fn]}' — the door is not expected on this chain yet`);
       continue;
     }
     const present = await rootQuery(
