@@ -23,6 +23,7 @@ import { sessionTokenAccessor } from "@/lib/session-accessor";
 import { claraThreadStore, type ClaraThreadUiState } from "@/lib/clara/threadStore";
 import { useClaraThread, useComposerFocusRequest } from "@/lib/clara/useClaraThread";
 import { FIRM_ALTITUDE } from "@/lib/clara/useActiveThread";
+import { THREAD_RUN_LIVE_STATUSES } from "@/lib/clara/turnRun";
 import { foldLiveClarifyParts } from "@/lib/clara/liveClarify";
 import { ThreadActionCoordinatorProvider } from "@/lib/parts/thread-action-coordinator";
 import { cn } from "@/lib/utils";
@@ -180,12 +181,22 @@ export function ClaraThreadView({
   // turn this tab did not post (a reload onto a running turn, a reattach) it never appeared at all.
   // The question the control actually answers is "is a turn live?", and these are the four ways the
   // estate says yes: this tab is posting one, a stream is carrying one, a stream is reconnecting to
-  // one, or the DATABASE's own row for the active task says it is still running or parked.
+  // one, or the DATABASE's own row for the active task says it has not reached a terminal.
+  //
+  // THE DB ARM IS THE SHARED CONSTANT, not a hand-picked pair (round-6 finding [3]). This gate used
+  // to name `running` and `awaiting_input` only, while `turnRun.ts` reads — and `hydrateRun` stores
+  // — all five non-terminal statuses. The three it dropped are the ones a reload is most likely to
+  // land on: `queued` is what every chat turn is ADMITTED at, `held` is a leased or backed-up
+  // runtime, `cancel_requested` is a stop already in flight. Worse, nothing could repair it later:
+  // `hydrateRun` is the only writer of a non-null `turnStatus` and the poll rewrites it only on a
+  // TERMINAL, so a turn hydrated as `queued` stayed `queued` for the life of the mount — the clock
+  // climbing (it reads `turnStartedAt` alone) over a Stop control that never appeared.
   const turnLive = busy
     || state.stream.status === "streaming"
     || state.stream.status === "detached"
     || (state.activeTaskId !== null
-        && (state.turnStatus === "running" || state.turnStatus === "awaiting_input"));
+        && state.turnStatus !== null
+        && (THREAD_RUN_LIVE_STATUSES as readonly string[]).includes(state.turnStatus));
 
   // The parked question, live. It cannot come from `state.messages`: the assistant row
   // is inserted by `clara.settle_chat_turn`, which cancels every still-pending

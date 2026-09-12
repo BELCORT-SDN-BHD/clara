@@ -25,6 +25,7 @@ import { clickButton, renderComponent, textOf } from "../../test/hookHarness";
 import { enableDomInspection } from "../../test/domInspect";
 import { CLARA_RUN_POLL_MS } from "../../lib/clara/useClaraThread";
 import { claraThreadStore } from "../../lib/clara/threadStore";
+import { THREAD_RUN_LIVE_STATUSES } from "../../lib/clara/turnRun";
 import type { SessionTokenAccessor } from "../../lib/session";
 import messages from "../../messages/en.json";
 
@@ -374,5 +375,58 @@ test("630 a poll that has given up retires the clock and the control, and says w
   } finally {
     globalThis.setInterval = realSet;
     globalThis.clearInterval = realClear;
+  }
+});
+
+// ---------------------------------------------------------------------------------------------
+// 5 · EVERY LIVE STATUS THE DATABASE CAN HOLD (#630 fix round 6, review finding [3])
+//
+// `turnLive` was the third reader of "is this run live?" and the one that never adopted
+// `THREAD_RUN_LIVE_STATUSES`: it hardcoded `running` and `awaiting_input`. The three it dropped
+// are not hypothetical — `queued` is the status EVERY chat turn is admitted at, `held` is a leased
+// or backed-up runtime, and `cancel_requested` is a stop already in flight. And the store cannot
+// repair it: `hydrateRun` is the only writer of a non-null `turnStatus`, and the poll writes only
+// terminals, so a turn hydrated as `queued` stays `queued` for the life of the mount. The reader
+// then watched "Clara has been working on this for 0:12…" climb with no way to stop it.
+//
+// The cell reads the constant itself rather than a list copied here, so a sixth non-terminal
+// status added to `turnRun.ts` arrives with a failing assertion instead of a silent hole.
+// ---------------------------------------------------------------------------------------------
+
+test("630 Stop reply is offered for EVERY non-terminal status the run row can hold", async () => {
+  assert.ok(THREAD_RUN_LIVE_STATUSES.length >= 5,
+    "precondition: the shared constant still lists the five non-terminal statuses");
+
+  for (const [index, status] of THREAD_RUN_LIVE_STATUSES.entries()) {
+    // Unique ids per cell: `claraThreadStore` remembers ended turns in a module-level set, and the
+    // mount hydrate consults it, so a reused task id would mount the next status with no live turn.
+    const threadId = `a5a5a5a5-7777-4777-8777-77777777777${index}`;
+    const taskId = `b5b5b5b5-8888-4888-8888-88888888888${index}`;
+    await withFetch(
+      (url) => {
+        if (url.includes("/messages")) return json({ messages: [] });
+        if (url.includes("agent_tasks_visible")) {
+          return json([{ id: taskId, status, created_at: new Date(Date.now() - 12_000).toISOString() }]);
+        }
+        if (url.includes("agent_interruptions")) return json([]);
+        if (url.includes("caller_context")) return json([]);
+        return json([]);
+      },
+      async () => {
+        const h = await renderComponent(App(threadId));
+        try {
+          // Either wording of the clock: `awaiting_input` renders TurnProgress's `parked` arm
+          // ("Clara has been waiting on your answer for …"), the other four its `running` arm.
+          await settleUntil(h, () => /Clara has been (working on this|waiting on your answer) for/.test(h.text()),
+            `the turn clock for status ${status}`);
+          assert.ok(h.find(buttonNamed("Stop reply")),
+            `a turn the database reports as '${status}' is live, so the reader is offered a way to `
+            + "stop it — a clock climbing over a control that never mounts is the surface telling "
+            + "them a turn is running and refusing to act on it");
+        } finally {
+          await h.unmount();
+        }
+      },
+    );
   }
 });
