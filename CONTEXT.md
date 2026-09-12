@@ -148,6 +148,14 @@ _Avoid_: A browser redirect as proof of payment; a Stripe event as a substitute 
 The estate-wide limit on how many non-operator firms may exist, set by the operator firm's owner. The firm claim checks it last, under one lock, so two claims into the last slot yield one firm; the loser keeps its payment unconsumed and can claim once room is made.
 _Avoid_: A per-firm seat count; a check done only when the checkout opens.
 
+**Document custody**:
+The state in which a document's original bytes are durably held and verified: the content-addressed object has been written once and read back with a matching hash, recorded on the document as its storage path and verification time. A firm member may already see a document — it is filed, listed, coded — while custody is still pending; that gap is named (`custody_pending`) and answered with a wait-or-re-upload fix, never folded into "not found".
+_Avoid_: "the document exists" as a synonym for "the bytes can be served"; treating a pending object as a permission refusal.
+
+**Source read**:
+A human previewing or downloading a document's own stored bytes, as distinct from the typed facts, regions or extracted text derived from it. Every source read is receipted — who, which document, under which client scope, to preview or to download — and is scoped by live firm membership and the document's active filing, never by a separate per-user document permission list.
+_Avoid_: Conflating a source read with reading the extracted facts or overlay drawn on top of it; treating preview and download as the same audited purpose.
+
 **Activity event**:
 One observable, attributable change in the firm's books or work — a domain event, an agent receipt or a committed operation receipt — with its actor and delegation, client, time, status and links to its Work, object, source and replacement outcome.
 _Avoid_: An internal task name or private model reasoning; a pending question (Work owns those); a substitute for the object's own current state.
