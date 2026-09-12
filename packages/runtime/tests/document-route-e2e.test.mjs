@@ -692,7 +692,18 @@ test("E2.12 — a removed member is refused on the very NEXT request, with the s
   await served.arrayBuffer();
   await rig.removeMember(firmA.owner, { membership, opKey: rig.opk("d620rm") });
   const refused = await get(doc.id, token);
-  assert.ok(refused.status === 403 || refused.status === 404,
-    `a removed member must be refused on the next request (got ${refused.status})`);
-  assert.equal((await refused.text()).includes("%PDF"), false);
+  // 403 OUTRIGHT, NOT "403 OR 404". The answer is determinate and the disjunct only read as
+  // uncertainty about a settled contract point: this user is a member of firm A and of nothing
+  // else, so after removeMember `clara.resolve_chat_principal` returns no active row and
+  // `resolvePrincipal` (authz.mjs:146-152) raises AuthError(403, "no_membership") — BEFORE the
+  // door query on the next line ever runs. E2.6 pins the same ordering for a principal who never
+  // had a firm; this cell pins it for one who had a firm a moment ago, which is the case a
+  // still-valid JWT makes interesting. It reds if the door is ever moved ahead of
+  // resolvePrincipal, because the door's own membership predicate answers CLR11 -> 404.
+  assert.equal(refused.status, 403,
+    "a removed member is refused by the PRINCIPAL check, which is a 403, not the door's 404");
+  const body = await refused.json();
+  assert.deepEqual(body, { error: "no_membership", message: "document unavailable" });
+  assert.equal(JSON.stringify(body).includes("%PDF"), false,
+    "a refusal must never carry document bytes");
 });
