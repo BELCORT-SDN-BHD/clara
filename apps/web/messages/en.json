@@ -4106,8 +4106,7 @@
     "evidenceSpokenForUnavailable": "We could not check which documents already back a posted entry. Every document is still offered — the system still refuses a conflict when you submit.",
     "sourceConflictElsewhere": "That entry belongs to {client}, so opening it leaves this client.",
     "attachSourceConflictElsewhere": "That entry belongs to {client}, so opening it leaves this client."
-  }
-  ,
+  },
   "WorkCancel": {
     "cancelWork": "Cancel Work",
     "cancelling": "Cancelling\u2026",
