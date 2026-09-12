@@ -34,7 +34,14 @@ import { useTranslations } from "next-intl";
 import { useHydratedPart } from "@/lib/parts/hooks";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
 import { getDocumentExtract } from "@/lib/documents/reads";
-import { fetchDocumentBytes } from "@/lib/documents/bytes";
+import {
+  fetchDocumentBytes,
+  documentSourceStateKey,
+  documentSourceStateOf,
+  isRetryableDocumentSourceState,
+  type DocumentSourceState,
+} from "@/lib/documents/bytes";
+import { DOCUMENT_SOURCE_STATE_TONE } from "./document-source-actions";
 import {
   canRenderPage,
   pageBoxesFromEnvelope,
@@ -179,7 +186,16 @@ type PageState =
    *  image icon, which reads as "the document is damaged" rather than "this
    *  viewer does not draw that type". */
   | { kind: "unrenderable"; mime: string }
-  | { kind: "error"; message: string };
+  /** THE BYTE DOOR REFUSED, on the rung #620 owns. The STATE is stored, never the caught error's
+   *  message: the message is the library's own English ("document bytes failed"), which is neither
+   *  translated nor a description of what a reader can do about it. Classified by
+   *  `documentSourceStateOf`, rendered through the SAME sentence and the SAME tone map the two
+   *  controls beside this panel use for the identical response, with the SAME Retry gate. */
+  | { kind: "door"; state: DocumentSourceState }
+  /** pdf.js could not draw a page it was handed. NOT a door state and not on the ladder — the
+   *  bytes arrived and hash-verified; the RENDERER failed on them, and its own message is the only
+   *  thing that says anything useful about why. This is the one arm `overlayPageFailed` keeps. */
+  | { kind: "page_failed"; message: string };
 
 /** The page element plus its polygon layer. Owns the byte fetch, the object-URL
  *  lifetime, and the RENDERED size measurement — the polygons are scaled
@@ -212,6 +228,11 @@ function PageWithOverlay({
   const [state, setState] = useState<PageState>({ kind: "idle" });
   const [size, setSize] = useState<{ width: number; height: number } | null>(null);
   const hostRef = useRef<HTMLDivElement | null>(null);
+  /** RETRY, for the rungs where a second attempt can genuinely answer differently. The effect
+   *  below owns the whole byte lifetime, so the honest way to run it again is to change one of its
+   *  inputs — a nonce — rather than to lift the fetch out of the effect and re-invent the
+   *  abort/revoke discipline beside it. */
+  const [readNonce, setReadNonce] = useState(0);
 
   // ONE effect owns the whole byte lifetime: fetch, render, revoke. `cancelled`
   // guards every setState after an await so an unmount mid-fetch cannot write
@@ -244,7 +265,12 @@ function PageWithOverlay({
       } catch (e) {
         if (cancelled) return;
         if (e instanceof Error && e.name === "AbortError") return;
-        setState({ kind: "error", message: e instanceof Error ? e.message : String(e) });
+        // THE LADDER #620 OWNS, not the caught message. This panel's OTHER byte read — the two
+        // controls a few pixels away — classifies with `documentSourceStateOf` and renders one
+        // honest sentence per rung with a Retry only where a second attempt can answer
+        // differently. This one printed `overlayPageFailed` with the library's own untranslated
+        // English and offered nothing, so the same 502 read two different ways on one panel.
+        setState({ kind: "door", state: documentSourceStateOf(e) });
       }
     })();
 
@@ -253,7 +279,7 @@ function PageWithOverlay({
       controller.abort();
       revoke?.();
     };
-  }, [documentId, clientId, page]);
+  }, [documentId, clientId, page, readNonce]);
 
   /** The PDF page's intrinsic size, taken ONCE as the first scale estimate.
    *  `measure()` below overwrites it from the DOM as soon as the observer
@@ -265,7 +291,7 @@ function PageWithOverlay({
   }, []);
 
   const onPdfFailed = useCallback((message: string) => {
-    setState({ kind: "error", message });
+    setState({ kind: "page_failed", message });
   }, []);
 
   const measure = useCallback(() => {
@@ -346,7 +372,30 @@ function PageWithOverlay({
         <div ref={hostRef} className="relative mx-auto w-full">
           {state.kind === "loading" || state.kind === "idle" ? (
             <LoadingState>{t("overlayPageLoading")}</LoadingState>
-          ) : state.kind === "error" ? (
+          ) : state.kind === "door" ? (
+            // ONE SENTENCE PER RUNG, ONE TONE MAP, ONE RETRY GATE — all three shared with
+            // DocumentSourceActions rather than restated here, so the two reads of this one
+            // document cannot describe the same answer differently.
+            <StateBanner
+              tone={DOCUMENT_SOURCE_STATE_TONE[state.state]}
+              className="text-xs"
+              action={isRetryableDocumentSourceState(state.state) ? (
+                <Button
+                  type="button"
+                  size="xs"
+                  variant="outline"
+                  data-testid="document-overlay-retry"
+                  onClick={() => { setReadNonce((n) => n + 1); }}
+                >
+                  {t("retry")}
+                </Button>
+              ) : undefined}
+            >
+              {t(documentSourceStateKey(state.state))}
+            </StateBanner>
+          ) : state.kind === "page_failed" ? (
+            // The RENDERER's failure, and the only arm that quotes a message: the bytes arrived
+            // and hash-verified, so nothing on the door's ladder describes this.
             <StateBanner tone="error" className="text-xs">{t("overlayPageFailed", { message: state.message })}</StateBanner>
           ) : state.kind === "raster" ? (
             // A PLAIN <img>, deliberately, not next/image: the source is a
@@ -400,7 +449,10 @@ function PageWithOverlay({
         </div>
       </div>
 
-      {state.kind !== "loading" && state.kind !== "error" && polygons.length === 0 ? (
+      {/* The geometry note belongs to a page that was actually SHOWN. Suppressed while the page is
+          loading, while the door has refused, and when the renderer failed — "nothing was extracted
+          from page 1" under a refusal answers a question nobody got to ask. */}
+      {state.kind !== "loading" && state.kind !== "door" && state.kind !== "page_failed" && polygons.length === 0 ? (
         <p className="text-xs text-muted-foreground">
           {!pageHasRegions
             ? t("overlayNoRegionsOnPage", { page })

@@ -63,8 +63,13 @@ type Outcome =
  *    neutral   it genuinely is not there yet / not here
  *    error     it failed, or the bytes cannot be vouched for
  *  Written as a total record over the union so a state added later cannot silently inherit a
- *  tone that misdescribes it — tsc names the omission. */
-const STATE_TONE: Record<DocumentSourceState, BannerTone> = {
+ *  tone that misdescribes it — tsc names the omission.
+ *
+ *  EXPORTED, and deliberately not copied: the page overlay on this same panel performs a SECOND
+ *  read of the SAME document through the SAME door, and renders the same ladder for it (#620/F6).
+ *  Two hand-kept tone maps would be free to disagree about one response — the same "spelling is
+ *  not identity" class the fetch/viewer list drift cell exists for. One map, two faces. */
+export const DOCUMENT_SOURCE_STATE_TONE: Record<DocumentSourceState, BannerTone> = {
   unauthenticated: "info",
   denied: "warning",
   not_found: "neutral",
@@ -165,7 +170,7 @@ export function DocumentSourceActions({
     const retryable = isRetryableDocumentSourceState(state);
     return (
       <StateBanner
-        tone={STATE_TONE[state]}
+        tone={DOCUMENT_SOURCE_STATE_TONE[state]}
         className="text-xs"
         action={
           state === "unauthenticated" ? (

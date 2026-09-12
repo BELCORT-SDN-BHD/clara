@@ -27,7 +27,7 @@ import assert from "node:assert/strict";
 import { createElement } from "react";
 import { NextIntlClientProvider } from "next-intl";
 
-import { renderComponent } from "../../test/hookHarness";
+import { renderComponent, clickButton, textOf } from "../../test/hookHarness";
 import { enableDomInspection } from "../../test/domInspect";
 import { configureSessionTokenSource, resetSessionTokenSource } from "../../lib/session-accessor";
 import { DocumentPageOverlayContent } from "./document-page-overlay";
@@ -90,6 +90,19 @@ async function withEnv(impl: typeof fetch, run: () => Promise<void>): Promise<vo
   }
 }
 
+type StubNode = { tagName?: string; childNodes?: StubNode[]; getAttribute?: (n: string) => string | null };
+
+function findButton(h: { find: (p: (n: StubNode) => boolean) => unknown }, label: string): StubNode | null {
+  return h.find((n) => n.tagName === "BUTTON" && textOf(n as never).includes(label)) as StubNode | null;
+}
+
+/** The byte door's OWN refusal shape — `{error, reason}` and nothing else, exactly what the route
+ *  answers (it never leaks SQL or vendor body text), so a cell cannot pass on a body production
+ *  could not produce. */
+function refusalFetch(status: number, body: Record<string, string>): typeof fetch {
+  return (async () => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } })) as typeof fetch;
+}
+
 async function mount(): Promise<Awaited<ReturnType<typeof renderComponent>>> {
   const h = await renderComponent(App(createElement(DocumentPageOverlayContent, {
     data: EXTRACT, documentId: DOCUMENT_ID, clientId: CLIENT, mimeType: "application/pdf",
@@ -116,6 +129,57 @@ test("THE OVERLAY'S BYTE READ CARRIES THE PAGE'S CLIENT SCOPE — the same scope
       assert.doesNotMatch(urls[0]!, /disposition=/, "the overlay is a preview, and writing a disposition would change the audited purpose");
       // SAME-ORIGIN, never a storage host — the browser holds no storage credential (PIN-DELTA-4).
       assert.ok(urls[0]!.startsWith("/api/runtime/"), "the read goes through this app's own proxy");
+    } finally { await h.unmount(); }
+  });
+});
+
+test("A REFUSED PAGE READ RENDERS THE LADDER, not the library's English — and Retry where a second attempt can answer", async () => {
+  // THE IDENTICAL RESPONSE THE CONTROLS BESIDE THIS PANEL ALREADY HANDLE: the byte route's real
+  // 502 `{error:"storage_error", reason:"unavailable"}`. Measured before the fix, for this very
+  // mock: the overlay rendered "The page couldn't be loaded: document bytes failed" — the caught
+  // error's own untranslated message — with no recovery control, while DocumentSourceActions
+  // rendered "The document store couldn't be reached, so the file wasn't sent." with a Retry.
+  // One document, one panel, one answer from the door, two different things said about it.
+  let calls = 0;
+  await withEnv(async (url) => {
+    calls += 1;
+    // First read refuses; a Retry that actually re-reaches the wire gets the bytes. Without the
+    // second arm a cell could not tell a real second read from a repaint of the first outcome.
+    if (calls === 1) return refusalFetch(502, { error: "storage_error", reason: "unavailable" })(url);
+    return new Response(new Blob(["%PDF-1.4"]), { status: 200, headers: { "content-type": "application/pdf" } });
+  }, async () => {
+    const h = await mount();
+    try {
+      assert.match(
+        h.text(), /The document store couldn't be reached, so the file wasn't sent\./,
+        "the overlay must render the ladder's own sentence for this rung — the SAME one the controls beside it render",
+      );
+      assert.doesNotMatch(h.text(), /The page couldn't be loaded/, "`overlayPageFailed` belongs to pdf.js's failures, not to the door's");
+      assert.doesNotMatch(h.text(), /document bytes failed/, "the library's internal message must never reach a reader");
+      // …and the geometry note must not answer a question nobody got to ask.
+      assert.doesNotMatch(h.text(), /Nothing was extracted from page/);
+
+      const retry = findButton(h, "Retry");
+      assert.ok(retry, "storage_unavailable recovers on its own — withholding Retry strands the reader on a failure that fixes itself");
+
+      await clickButton(retry as never);
+      for (let i = 0; i < 10; i++) await h.settle();
+      assert.equal(calls, 2, "Retry must issue a SECOND read, not repaint the first one's outcome");
+      assert.doesNotMatch(h.text(), /The document store couldn't be reached/, "a recovered read must clear the standing failure");
+    } finally { await h.unmount(); }
+  });
+});
+
+test("…and NO Retry on a rung a second attempt answers identically", async () => {
+  // THE OTHER DIRECTION, which is the sharper half: a Retry beside "the stored bytes no longer
+  // match the record Clara holds" is a control that cannot work — the next read returns the same
+  // wrong bytes. The gate is `RETRYABLE_DOCUMENT_SOURCE_STATES` in bytes.ts, named once for both
+  // faces rather than re-decided here.
+  await withEnv(refusalFetch(502, { error: "checksum_mismatch" }), async () => {
+    const h = await mount();
+    try {
+      assert.match(h.text(), /no longer matches the record Clara holds/);
+      assert.equal(findButton(h, "Retry"), null, "integrity answers identically on a second attempt");
     } finally { await h.unmount(); }
   });
 });
