@@ -231,9 +231,11 @@ cell("c6.7 BOTH FACTS are read positively, and each moves on its own evidence", 
 
   // An UNSTAMPED intent is not "checkout open" — the fact is a non-null
   // session_id, never the mere existence of an intent row.
+  // #621 (0185): dpa_version is now clara.legal_documents' integer version, read from the catalog.
   await rootQuery(
     `insert into clara.checkout_intents(registration_id,applicant,price_local_key,dpa_version)
-     values ($1,$2,'clara-beta-2026','clara-beta-2026-08-a')`,
+     select $1,$2,'clara-beta-2026',version from clara.legal_documents
+      where kind='dpa' and legacy_version='clara-beta-2026-08-a'`,
     [registration, applicant],
   );
   assert.equal((await read()).rows[0].checkout_open, false, "an unstamped intent read as checkout_open");

@@ -5,7 +5,11 @@ import {
   EmailConfirmationCard,
   type ConfirmCodeState,
 } from "@/components/entry/email-confirmation-card";
-import { confirmFlashCookie, parseConfirmFlash } from "./confirm-flash";
+import {
+  confirmFlashCookie,
+  parseConfirmFlash,
+  type ConfirmFlashPayload,
+} from "./confirm-flash";
 
 export async function generateMetadata() {
   const t = await getTranslations("ConfirmEmail");
@@ -39,17 +43,17 @@ async function defaultReadConfirmFlash(): Promise<string | undefined> {
  * — the marker's mere presence claims "a submission just happened", and
  * that claim needs corroboration it did not get.
  *
- * Only THIS BUILD's own fixed outcome vocabulary affects the rendering —
- * never the address (part 1 §3.3 / cell W-H). This function is not handed
- * `email` or `token` from anywhere: neither the URL nor the cookie carries
- * either field.
+ * Only THIS BUILD's own fixed outcome vocabulary affects the RENDERING — never
+ * the address (part 1 §3.3 / cell W-H). The URL still carries neither `email`
+ * nor `token`, and no code ever crosses this boundary at all. What the cookie
+ * may now carry (#621) is the address THIS BROWSER's own POST just submitted,
+ * echoed back so the redirect does not empty the field the person filled in;
+ * it chooses no card and changes no outcome, and `ConfirmFlashPayload`'s own
+ * note records why an unforgeable same-origin cookie honours the W-H wall
+ * where a query parameter would break it.
  */
-function confirmCodeState(query: SearchParams, rawFlash: string | undefined): ConfirmCodeState {
-  const marker = query.flash;
-  const hasMarker = typeof marker === "string" && marker.length > 0;
+function confirmCodeState(flash: ConfirmFlashPayload | null, hasMarker: boolean): ConfirmCodeState {
   if (!hasMarker) return { kind: "form" };
-
-  const flash = parseConfirmFlash(rawFlash, marker);
   if (flash === null) return { kind: "invalid" };
 
   switch (flash.kind) {
@@ -61,7 +65,26 @@ function confirmCodeState(query: SearchParams, rawFlash: string | undefined): Co
       return { kind: "unavailable" };
     case "invalid":
       return { kind: "invalid" };
+    // The resend POST's own five (#621). They travel the identical cookie and
+    // are read the identical way; only the card they choose differs.
+    case "resent":
+      return { kind: "resent" };
+    case "resend-locked":
+      return { kind: "resend-locked", waitSeconds: flash.waitSeconds };
+    case "resend-rate-limited":
+      return { kind: "resend-rate-limited", waitSeconds: flash.waitSeconds };
+    case "resend-invalid-email":
+      return { kind: "resend-invalid-email" };
+    case "resend-unavailable":
+      return { kind: "resend-unavailable" };
   }
+}
+
+/** The flash's echoed address, or null. NOT exported: an App Router page may
+ *  export only its route symbols (the reason `signup-route.tsx` exists one
+ *  directory over), so this stays local and is driven through the page itself. */
+function confirmPrefillEmail(flash: ConfirmFlashPayload | null): string | null {
+  return flash?.email ?? null;
 }
 
 /**
@@ -78,5 +101,13 @@ export default async function ConfirmEmailPage({
   readConfirmFlash?: ReadConfirmFlash;
 }) {
   const [query, rawFlash] = await Promise.all([searchParams, readConfirmFlash()]);
-  return <EmailConfirmationCard state={confirmCodeState(query, rawFlash)} />;
+  const marker = query.flash;
+  const hasMarker = typeof marker === "string" && marker.length > 0;
+  const flash = hasMarker ? parseConfirmFlash(rawFlash, marker) : null;
+  return (
+    <EmailConfirmationCard
+      state={confirmCodeState(flash, hasMarker)}
+      prefillEmail={confirmPrefillEmail(flash)}
+    />
+  );
 }

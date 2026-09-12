@@ -39,7 +39,12 @@ export const SUPABASE_URL_VAR = "CLARA_SUPABASE_URL";
 export const SUPABASE_ANON_KEY_VAR = "CLARA_SUPABASE_ANON_KEY";
 /** GoTrue's own path, under the project's `/auth/v1` mount. */
 export const VERIFY_PATH = "/auth/v1/verify";
+/** GoTrue's own path for a resend (#621 lane B's completion — see this file's `resendSignupOtp`). */
+export const RESEND_PATH = "/auth/v1/resend";
 const VERIFY_TIMEOUT_MS = Number(process.env.CLARA_SUPABASE_VERIFY_TIMEOUT_MS || 10000);
+/** GoTrue's own documented default cooldown for a resend, used only when the provider's own
+ *  response carries no retry-after number of its own (#621 contract item 6). */
+const DEFAULT_RESEND_RETRY_AFTER_SECONDS = 60;
 
 /** The exact body `supabase-js` v2.112.4 sends to `POST /verify` (GoTrueClient.js:2046-2051),
  *  assembled by key assignment — see the call site for why it is not an object literal. */
@@ -134,4 +139,138 @@ export async function verifySignupOtp({ email, token, type: otpType = "signup" }
   // `_sessionResponse`'s own test: a session exists iff `access_token` is present.
   const verified = typeof body?.access_token === "string" && body.access_token.length > 0;
   return { verified, session: verified ? body : null, status: res.status };
+}
+
+// -------------------------------------------------------------------------------------------
+// #621 (Ticket #621, journey A2) — THE RESEND LEG. Same reasoning as `verifySignupOtp` above for
+// why this is raw `fetch` and not `@supabase/supabase-js`: what follows is exactly what
+// `supabase-js` v2.112.4 issues for an email credential (GoTrueClient.js:2277-2286) — `POST
+// ${url}/resend` with `{email, type, gotrue_meta_security:{captcha_token:undefined},
+// code_challenge, code_challenge_method}`. `code_challenge`/`code_challenge_method` are always
+// `null` here: those two are only populated when the calling client runs the PKCE flow, and this
+// server-side caller has no PKCE verifier storage to challenge — it is a plain server-to-server
+// resend, not a browser completing a code exchange.
+//
+// IT NEVER THROWS FOR A PROVIDER REFUSAL, same discipline as `verifySignupOtp`: a rate-limited
+// provider, an already-confirmed address, or an unknown address are ordinary outcomes of this
+// call, and the route settles the attempt either way. It throws only for OUR OWN configuration
+// being absent, which `authWallRoutes.ts` already refuses before calling this (via
+// `supabaseVerifyConfigured`), so that throw is not expected to surface in practice.
+
+function resendEndpoint(env) {
+  const base = env[SUPABASE_URL_VAR];
+  if (typeof base !== "string" || base.trim() === "") {
+    throw new SupabaseVerifyError("supabase_url_absent", `${SUPABASE_URL_VAR} is not configured`);
+  }
+  return `${base.trim().replace(/\/+$/, "")}${RESEND_PATH}`;
+}
+
+/** The exact body `supabase-js` sends to `POST /resend` for an email credential — see the
+ *  header above for the line reference. */
+function resendRequestBody(otpType, email) {
+  // `type` is built by key assignment, exactly as `verifyRequestBody` above does and for the
+  // SAME reason (see that function's comment): the parts-parity census
+  // (`scripts/check-parts-parity.mjs`) refuses a `type` key inside an object LITERAL that it
+  // cannot resolve to a string constant, because that is the shape of a typed `parts[]` member —
+  // measured (`not ok ... unclassifiable discriminant at .../supabase-verify.mjs`) when this was
+  // first written as `{ email, type: otpType, ... }`.
+  const body = {
+    email,
+    gotrue_meta_security: { captcha_token: undefined },
+    code_challenge: null,
+    code_challenge_method: null,
+  };
+  body.type = otpType;
+  return JSON.stringify(body);
+}
+
+/** The provider's own retry-after number, read from whichever place it chose to put it — the
+ *  `Retry-After` HTTP header (seconds, the standard place) or a `retry_after`/`retry_after_seconds`
+ *  body field — or null when neither is present, so the caller falls back to the documented
+ *  default. Never throws on a malformed value; it just yields null. */
+function providerRetryAfterSeconds(res, body) {
+  // `Number(null)` is `0`, not `NaN` — a header that is genuinely ABSENT (`get` returns `null`)
+  // must fall through to the body, and then to the caller's default, never read as "0 seconds".
+  const rawHeader = res.headers?.get?.("retry-after");
+  if (typeof rawHeader === "string") {
+    const headerValue = Number(rawHeader);
+    if (Number.isFinite(headerValue) && headerValue >= 0) return Math.trunc(headerValue);
+  }
+  const bodyValue = Number(body?.retry_after_seconds ?? body?.retry_after);
+  if (Number.isFinite(bodyValue) && bodyValue >= 0) return Math.trunc(bodyValue);
+  return null;
+}
+
+/**
+ * Resend a signup confirmation email. NEVER logs `email` or the provider's response body — the
+ * caller (`authWallRoutes.ts`) must not either.
+ *
+ * @param {{email: string, type?: string}} args
+ * @param {{fetchImpl?: typeof fetch, env?: NodeJS.ProcessEnv}} [deps] test seam — substitutes
+ *   WHERE the request goes, never WHAT is sent
+ * @returns {Promise<
+ *   | {outcome: "sent"}
+ *   | {outcome: "rate_limited", retryAfterSeconds: number}
+ *   | {outcome: "unavailable"}
+ * >}
+ */
+export async function resendSignupOtp({ email, type: otpType = "signup" }, deps = {}) {
+  const env = deps.env ?? process.env;
+  const doFetch = deps.fetchImpl ?? fetch;
+  const url = resendEndpoint(env);
+  const apikey = env[SUPABASE_ANON_KEY_VAR];
+  if (typeof apikey !== "string" || apikey.trim() === "") {
+    throw new SupabaseVerifyError("supabase_key_absent", `${SUPABASE_ANON_KEY_VAR} is not configured`);
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), VERIFY_TIMEOUT_MS);
+  let res;
+  try {
+    res = await doFetch(url, {
+      method: "POST",
+      headers: {
+        apikey,
+        Authorization: `Bearer ${apikey}`,
+        "Content-Type": "application/json",
+      },
+      body: resendRequestBody(otpType, email),
+      signal: controller.signal,
+      redirect: "manual",
+      cache: "no-store",
+    });
+  } catch {
+    // A network failure (including our own timeout) is not the provider refusing — it is us
+    // unable to reach it, which is `unavailable`, never a fabricated `sent`.
+    return { outcome: "unavailable" };
+  } finally {
+    clearTimeout(timer);
+  }
+
+  if (res.ok) return { outcome: "sent" };
+
+  let body = null;
+  try {
+    body = await res.json();
+  } catch {
+    body = null;
+  }
+
+  // GoTrue's own rate-limit signal is HTTP 429, sometimes carrying `error_code:
+  // "over_email_send_rate_limit"` — either is treated as the same outcome.
+  if (res.status === 429 || body?.error_code === "over_email_send_rate_limit") {
+    return {
+      outcome: "rate_limited",
+      retryAfterSeconds: providerRetryAfterSeconds(res, body) ?? DEFAULT_RESEND_RETRY_AFTER_SECONDS,
+    };
+  }
+
+  // Any OTHER 4xx is the provider telling us something about THIS address specifically — already
+  // confirmed, unknown, malformed as far as it's concerned. None of that is ours to leak: the
+  // applicant sees the same `sent` a genuine send would produce (never confirm/deny an account).
+  if (res.status >= 400 && res.status < 500) return { outcome: "sent" };
+
+  // A provider-side failure (5xx) that is neither of the above — genuinely not our fault and not
+  // the applicant's either.
+  return { outcome: "unavailable" };
 }

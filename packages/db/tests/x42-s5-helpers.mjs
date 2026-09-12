@@ -997,6 +997,26 @@ const JOURNAL_EVIDENCE_0182_CLOCK_NAMES = ["_tf_entry_evidence_release"];
 // rosters, and `mint_wake_credential` reads `statement_timestamp()` as 0133 left it.
 const WORK_CANCEL_0184_CLOCK_NAMES = ["cancel_accounting_work"];
 
+// #621 [0185] -- versioned legal content and acceptance. EXACTLY ONE name, and every other body
+// in the migration is measured out rather than omitted.
+// `publish_legal_document` samples `now()` ONCE into a local and writes that same instant to both
+// `legal_documents.published_at` and (when the caller supplied none) `effective_from`, returning
+// it in its receipt. An INSTANT, never a date derived from one -- which is the property arm (D)
+// exists to protect -- and sampling once is what makes the stamp, the effective date and the
+// answer the same moment.
+//
+// The rest add nothing. `accept_legal_document` writes NO clock token: `legal_acceptances
+// .accepted_at` is a column DEFAULT (`now()`), which lives in pg_attrdef and not in any prosrc,
+// and the door reads the stored value back through RETURNING. `get_current_legal_documents` is a
+// projection. `_tf_legal_documents_transition` compares columns and stamps nothing. The three
+// deprecated wrappers (`sign_dpa`, `get_current_dpa_document`, `get_own_dpa_signature`) delegate
+// and project. `open_checkout_intent` and `claim_paid_firm` are RECUT here but already sit in
+// CHECKOUT_GATE_C3_CLOCK_NAMES, and neither recut introduces a clock read the 0163 body did not
+// already have (the rate window's `now() - interval '24 hours'` and the claim's `decided_at` /
+// `consumed_at` stamps are 0163's own). `_tf_checkout_intents_session_stamp` is recut and stays
+// clock-free -- it gains two column comparisons and nothing else.
+const LEGAL_ACCEPTANCE_0185_CLOCK_NAMES = ["publish_legal_document"];
+
 /** The arm (D) roster for the database under test, sorted as the catalog sorts it. */
 export async function s5BareTokenRoster(query) {
   const applied = async (pat) => (await query(
@@ -1099,6 +1119,7 @@ export async function s5BareTokenRoster(query) {
   if (await appliedStem("work_questions$")) names.push(...WORK_QUESTIONS_0180_CLOCK_NAMES);
   if (await appliedStem("journal_work_evidence$")) names.push(...JOURNAL_EVIDENCE_0182_CLOCK_NAMES);
   if (await appliedStem("work_cancel_ordering$")) names.push(...WORK_CANCEL_0184_CLOCK_NAMES);
+  if (await appliedStem("legal_acceptance$")) names.push(...LEGAL_ACCEPTANCE_0185_CLOCK_NAMES);
   return names.sort();
 }
 

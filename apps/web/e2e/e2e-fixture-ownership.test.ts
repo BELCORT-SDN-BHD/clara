@@ -233,8 +233,10 @@ const LANE_DECLARATIONS: Record<string, { unscopeable: string[]; debt: string[] 
   "fs4-checkout-mock.mjs": {
     unscopeable: [],
     // Stores the request and answers unconditionally, while the body it already parses carries
-    // the signup identity the walk sends. Could scope; does not.
-    debt: ["/api/auth-wall/confirm"],
+    // the signup identity the walk sends. Could scope; does not. The RESEND limb (#621) is the
+    // same handler shape with the same property and the same reason — one act per endpoint,
+    // both keyed on an address the mock does not check against its own fixture.
+    debt: ["/api/auth-wall/confirm", "/api/auth-wall/resend"],
   },
   "journals-table-mock.mjs": { unscopeable: [], debt: [] },
   // #623's durable-Work lane. Nothing is declared: every literal-path handler in it

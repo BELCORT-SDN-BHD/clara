@@ -81,7 +81,10 @@ const NAV = { timeout: 20_000 };
 type ControlState = {
   authWallRequests: Array<{ body: { email?: string; token?: string }; authorization: string | null; clientIp: string | null }>;
   doorCalls: string[];
-  dpaSigned: boolean;
+  /** #621: one acceptance PER AGREEMENT (the version accepted, or null). */
+  legalAccepted: { terms: number | null; dpa: number | null };
+  /** What `open_checkout_intent` would refuse on right now. */
+  missingLegal: string[];
   checkoutOpen: boolean;
   paidUnconsumed: boolean;
   firmOpened: boolean;
@@ -103,14 +106,29 @@ function assertNoCheckoutDoors(state: ControlState) {
 }
 
 async function scan(page: Page, label: string) {
+  // PARK THE POINTER FIRST, and this is a real finding rather than a tidy-up.
+  // Playwright leaves the mouse wherever the last click landed, so after the
+  // navigation onto the legal stage the cursor sat on an acceptance control and
+  // axe measured that button in its HOVER state: `hover:bg-primary/80`
+  // composites to #4a71e0 under white text = 4.44:1, just under AA's 4.5. The
+  // shortfall is REAL and it is ESTATE-WIDE (`components/ui/button.tsx`'s
+  // default variant, every primary button in the product), not something this
+  // stage introduced — the token gate only measures the resting pair
+  // (`primary-foreground-on-primary`, 6.7:1) and no other walk had happened to
+  // park a pointer on a primary button before scanning. Reported rather than
+  // fixed here, because retuning the hover alpha is a design-system change
+  // across every surface. What this line does is make the scan measure the
+  // state it CLAIMS to measure — the resting stage — instead of a hover state
+  // that happens to depend on where the previous click was.
+  await page.mouse.move(0, 0);
   const results = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
   expect(results.violations, `${label} has a11y violations`).toEqual([]);
 }
 
-/** Sign up, confirm and register — the only way to reach the DPA step. Every
+/** Sign up, confirm and register — the only way to reach the legal stage. Every
  *  selector matches `signup-confirm-pending.spec.ts`'s, which is the file that
  *  owns this half of the journey. */
-async function reachDpaStep(page: Page, email: string) {
+async function reachLegalStage(page: Page, email: string) {
   await page.goto("/signup");
   await page.getByLabel("Email").fill(email);
   await page.getByLabel("Password").fill("Clara-e2e-password-1!");
@@ -136,7 +154,19 @@ async function reachDpaStep(page: Page, email: string) {
   await expect(page.getByText(/it's yours to take below/i)).toBeVisible();
 
   await page.getByRole("link", { name: "Continue to checkout" }).click();
-  await expect(page.getByRole("heading", { name: "One more thing before checkout" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Two agreements before checkout" })).toBeVisible();
+}
+
+/** Accept ONE agreement, named the way the CONTROL names it (the agreement's
+ *  short name, which `Common` owns and both this stage and /pending's refusal
+ *  card read). The wait is on the control DISAPPEARING, which is the property
+ *  that matters: an accepted agreement stops offering an acceptance, and it
+ *  stops offering it because the server was re-read — not because this browser
+ *  remembered a click. */
+async function acceptAgreement(page: Page, shortName: string) {
+  const control = page.getByRole("button", { name: `I have read and accept the ${shortName}` });
+  await control.click();
+  await expect(control).toHaveCount(0, NAV);
 }
 
 test.beforeEach(async ({ page }) => {
@@ -145,7 +175,7 @@ test.beforeEach(async ({ page }) => {
 
 test("THE WHOLE JOURNEY: confirm → DPA → checkout → success → the firm opens", async ({ page }) => {
   const email = `e2e-checkout-${Date.now()}@example.test`;
-  await reachDpaStep(page, email);
+  await reachLegalStage(page, email);
 
   // ── ② the confirm leg actually went through C-5's ONE endpoint ────────────
   const afterConfirm = await control(page, {});
@@ -170,15 +200,37 @@ test("THE WHOLE JOURNEY: confirm → DPA → checkout → success → the firm o
   expect(wallCall.clientIp).not.toContain("clarabook");
   expect(wallCall.clientIp).not.toContain(new URL(APP_ORIGIN).host);
 
-  // ── ④ the DPA step ────────────────────────────────────────────────────────
-  await scan(page, "the DPA step");
-  // 裁-129: the terms are NAMED and not signed — the follow-up line, not a
-  // second checkbox recording nothing.
-  await expect(page.getByText(/separate document/i)).toBeVisible();
-  await page.getByRole("button", { name: "I have read this and agree" }).click();
-  await expect(page.getByText(/signature is recorded/i)).toBeVisible();
-  expect((await control(page, {})).dpaSigned, "sign_dpa was never called").toBe(true);
-  await scan(page, "the signed DPA step");
+  // ── ④ the LEGAL STAGE — two agreements, two acceptances (#621) ────────────
+  await scan(page, "the legal stage");
+  // 裁-129's follow-up line is GONE because the thing it named now exists: both
+  // documents are presented, and each is accepted on its own.
+  await expect(page.getByText(/separate document/i)).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "ClaraBook Beta Terms of Service" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "ClaraBook Beta Data Processing Agreement" })).toBeVisible();
+  // NEITHER ACCEPTED ⇒ NO ROUTE TO CHECKOUT. Not a disabled-looking button: the
+  // control is absent, and the card says what is still owed.
+  await expect(page.getByRole("button", { name: "Continue to checkout" })).toHaveCount(0);
+  await expect(page.getByText(/Both agreements have to be accepted/i)).toBeVisible();
+
+  // ONE of two is still not enough — the state the single-document step could
+  // not even express.
+  await acceptAgreement(page, "Terms of Service");
+  await expect(page.getByRole("button", { name: "Continue to checkout" })).toHaveCount(0);
+  expect((await control(page, {})).missingLegal, "the terms acceptance never reached the door").toEqual(["dpa"]);
+
+  await acceptAgreement(page, "Data Processing Agreement");
+  expect((await control(page, {})).missingLegal, "accept_legal_document was never called for both").toEqual([]);
+  await expect(page.getByRole("button", { name: "Continue to checkout" })).toBeVisible();
+  await scan(page, "the accepted legal stage");
+
+  // A RELOAD RESUMES FROM WHAT THE SERVER HOLDS, not from anything this browser
+  // remembers: both receipts and the checkout control survive a fresh GET, and
+  // no acceptance control comes back.
+  await page.reload();
+  await expect(page.getByText(/Accepted on /).first()).toBeVisible();
+  expect(await page.getByText(/Accepted on /).count()).toBe(2);
+  await expect(page.getByRole("button", { name: /I have read and accept/ })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Continue to checkout" })).toBeVisible();
 
   // ── ⑤ POST /checkout, driven for real up to the Stripe seam ──────────────
   await page.getByRole("button", { name: "Continue to checkout" }).click();
@@ -206,7 +258,7 @@ test("THE WHOLE JOURNEY: confirm → DPA → checkout → success → the firm o
   expect(afterCheckout.checkoutOpen, "the intent was stamped for a Session that does not exist").toBe(false);
   // And the doors BEFORE Stripe did run — otherwise the arm above would be
   // green for the wrong reason (a route that refused earlier).
-  expect(afterCheckout.dpaSigned).toBe(true);
+  expect(afterCheckout.missingLegal).toEqual([]);
 
   // ── ⑥/⑦ the payment lands (the applier's effect, stood in for) ────────────
   // A real run replays a signed `checkout.session.completed` through C-5's
@@ -265,29 +317,63 @@ test("REFUSAL POLARITY — a wrong code and a LOCKED wall render their own cards
   await expect(page.getByText("That code didn't work")).toHaveCount(0);
 });
 
-test("REFUSAL POLARITY — checkout before a signature refuses VERBATIM on /pending", async ({ page }) => {
-  const email = `e2e-unsigned-${Date.now()}@example.test`;
-  await reachDpaStep(page, email);
+test("REFUSAL POLARITY — checkout before the agreements are accepted lands on a card with a WAY BACK", async ({ page }) => {
+  const email = `e2e-unaccepted-${Date.now()}@example.test`;
+  await reachLegalStage(page, email);
 
-  // The DPA step's own control is the only route to /checkout, so drive the
+  // The legal stage's own control is the only route to /checkout, so drive the
   // route the way /pending's resume arm does — a real same-origin form POST —
-  // without signing first. `open_checkout_intent` refuses CLR09.
+  // without accepting first. `open_checkout_intent` refuses CLR09 with
+  // `legal_not_accepted`, which is the ONE checkout refusal whose fix belongs
+  // to the person: it names what is outstanding and links back to the stage.
   await page.goto("/pending");
   await control(page, { checkoutOpen: true });
   await page.reload();
   await page.getByRole("button", { name: "Resume checkout" }).click();
 
   await expect(page).toHaveURL(/\/pending\?checkout=/, NAV);
-  // The DOOR'S OWN sentence and code, verbatim — never re-worded.
-  await expect(page.getByText("the data processing agreement is not signed")).toBeVisible();
-  await expect(page.getByText("CLR09")).toBeVisible();
-  await scan(page, "the checkout refusal card");
+  await expect(page.getByText(/needs every agreement accepted first/i)).toBeVisible();
+  // THE DOOR'S OWN LIST, rendered by name.
+  await expect(page.getByRole("listitem").filter({ hasText: "Terms of Service" })).toBeVisible();
+  await expect(page.getByRole("listitem").filter({ hasText: "Data Processing Agreement" })).toBeVisible();
+  const back = page.getByRole("link", { name: "Go back and accept them" });
+  await expect(back).toBeVisible();
+  await scan(page, "the legal-not-accepted card");
 
   // The refusal never rides the URL: the marker is opaque and carries nothing.
   const url = new URL(page.url());
   expect([...url.searchParams.keys()]).toEqual(["checkout"]);
   expect(url.search).not.toContain("CLR09");
   expect(url.search).not.toContain("agreement");
+
+  // AND THE WAY BACK ACTUALLY LEADS SOMEWHERE THE PERSON CAN ACT.
+  await back.click();
+  await expect(page.getByRole("heading", { name: "Two agreements before checkout" })).toBeVisible();
+});
+
+test("AN UNPUBLISHED AGREEMENT IS PREVIEWED, NEVER ACCEPTED, and closes checkout", async ({ page }) => {
+  // The draft arm is the one this train exists for: the estate used to present
+  // ONE agreement and say in print that the terms of service were coming. A
+  // draft is now shown — so a person can read where it is heading — as a
+  // labelled preview with no acceptance control at all, because the door would
+  // refuse it (`CLR09 not_published`) and inviting the acceptance anyway is how
+  // somebody ends up believing they signed something still being written.
+  const email = `e2e-draft-${Date.now()}@example.test`;
+  await reachLegalStage(page, email);
+
+  await expect(page.getByText(/Not final/i)).toBeVisible();
+  await expect(page.getByText(/can't be accepted until it is published/i)).toBeVisible();
+  await expect(page.getByText(/DRAFT: these beta terms of service/)).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "I have read and accept the Terms of Service" }),
+  ).toHaveCount(0);
+  await scan(page, "the draft legal stage");
+
+  // The OTHER agreement is published and still acceptable — a draft closes the
+  // stage, it does not blank it.
+  await acceptAgreement(page, "Data Processing Agreement");
+  await expect(page.getByRole("button", { name: "Continue to checkout" })).toHaveCount(0);
+  expect((await control(page, {})).missingLegal).toEqual(["terms"]);
 });
 
 test("FAIL CLOSED in a real browser: no trusted client-IP header ⇒ checkout refuses", async ({ page }) => {
@@ -307,9 +393,9 @@ test("FAIL CLOSED in a real browser: no trusted client-IP header ⇒ checkout re
   // the first cut of this test read `stripe_unavailable` instead of the
   // refusal because the header was still there.
   const email = `e2e-nodigest-${Date.now()}@example.test`;
-  await reachDpaStep(page, email);
-  await page.getByRole("button", { name: "I have read this and agree" }).click();
-  await expect(page.getByText(/signature is recorded/i)).toBeVisible();
+  await reachLegalStage(page, email);
+  await acceptAgreement(page, "Terms of Service");
+  await acceptAgreement(page, "Data Processing Agreement");
 
   await page.context().setExtraHTTPHeaders({});
   await page.getByRole("button", { name: "Continue to checkout" }).click();

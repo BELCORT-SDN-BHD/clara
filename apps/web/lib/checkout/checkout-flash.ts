@@ -26,6 +26,8 @@
 // VERBATIM (code + message), never retried"). The bounded `kind` set is what
 // chooses the CARD; the door's sentence is what the person reads inside it.
 
+import { isLegalKind, type LegalKind } from "@/lib/registration/legal-reads";
+
 const PROD_COOKIE_NAME = "__Host-clara-checkout-flash";
 const DEV_COOKIE_NAME = "clara-checkout-flash";
 
@@ -56,6 +58,17 @@ export type CheckoutFlashOutcome =
   /** The caller has no OPEN registration to check out for. */
   | { readonly kind: "no_registration" }
   /**
+   * `open_checkout_intent` refused `CLR09` with `detail.reason =
+   * "legal_not_accepted"` — one or both of the two agreements is not accepted
+   * at its CURRENT version (#621). Its own card rather than the generic
+   * `refused` one, because this refusal has a real next step: the person goes
+   * back to `/signup`, where the legal stage shows each agreement's actual
+   * state and offers the acceptance it is still owed. `missing` is the door's
+   * own list, carried so the card names what is outstanding instead of making
+   * somebody re-read both documents to find out.
+   */
+  | { readonly kind: "legal_not_accepted"; readonly missing: readonly LegalKind[] }
+  /**
    * The caller ALREADY BELONGS TO A FIRM, so `claim_paid_firm` could never
    * serve them — `_create_firm_core` refuses `CLR10 actor already belongs to a
    * firm`, and `uq_membership_active_user` makes one active membership a
@@ -69,6 +82,20 @@ export type CheckoutFlashOutcome =
   | { readonly kind: "unavailable" };
 
 export type CheckoutFlashPayload = CheckoutFlashOutcome & { readonly nonce: string };
+
+/** The door's `detail.missing`, decoded. Anything that is not one of the two
+ *  known kinds is DROPPED rather than rendered: a card that printed whatever
+ *  string arrived would be this app repeating a value it cannot name. An empty
+ *  result is fine — the card then says only that something is outstanding, and
+ *  the legal stage itself is the authority on which. */
+function boundedKinds(value: unknown): LegalKind[] {
+  if (!Array.isArray(value)) return [];
+  const out: LegalKind[] = [];
+  for (const entry of value) {
+    if (isLegalKind(entry) && !out.includes(entry)) out.push(entry);
+  }
+  return out;
+}
 
 function insecureLoopbackAllowed(env: Record<string, string | undefined> = process.env): boolean {
   return (
@@ -124,6 +151,8 @@ export function parseCheckoutFlash(
       const message = boundedText(candidate.message, MAX_MESSAGE_CHARS);
       return code === null || message === null ? null : { nonce, kind: "refused", code, message };
     }
+    case "legal_not_accepted":
+      return { nonce, kind: "legal_not_accepted", missing: boundedKinds(candidate.missing) };
     case "no_origin_digest":
     case "stripe_unavailable":
     case "plan_rotated":

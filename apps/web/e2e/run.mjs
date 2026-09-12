@@ -87,5 +87,12 @@ console.log("[e2e] starting next start and Playwright against the built app");
 // run (the list is empty), and it exists so a lane can gate on the spec it touched without
 // borrowing the whole suite's wall-clock — the alternative, calling `playwright test` directly,
 // is what makes every sign-in hit the real Supabase (this file's own header states why).
-const passthrough = process.argv.slice(2);
+// STRIP A LEADING `--` (measured 2026-09-12, pnpm 10.33.0): `pnpm --filter
+// @clara/web e2e -- work-cancel-walk` forwards the separator ITSELF in argv, so
+// playwright received `test -- work-cancel-walk`, treated the separator as end
+// of options and ran the WHOLE suite — the documented "gate on the spec you
+// touched" form silently borrowed the entire suite's wall-clock. A separator is
+// never a spec filter, so dropping it costs nothing and makes the sentence above
+// true.
+const passthrough = process.argv.slice(2).filter((arg) => arg !== "--");
 run(["--filter", "@clara/web", "exec", "playwright", "test", ...passthrough]);

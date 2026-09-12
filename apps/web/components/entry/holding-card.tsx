@@ -49,8 +49,8 @@ import { LogoutButton } from "@/components/logout-button";
  * ===========================================================================
  * Under 裁-68 the tier-3 gate is three walls plus payment, and **Stripe checkout
  * success IS the approval** — there is no operator queue for a self-serve firm
- * (裁-43, restated by 裁-57). Every piece of that now exists: the DPA door
- * (`sign_dpa`), `POST /checkout`, C-5's webhook and applier, and the folded
+ * (裁-43, restated by 裁-57). Every piece of that now exists: the legal
+ * acceptance door (`accept_legal_document`), `POST /checkout`, C-5's webhook and applier, and the folded
  * `claim_paid_firm`. So the `NotBuiltNote` this card used to carry is REMOVED
  * rather than narrowed — design part 1 §2.1's own instruction, "removed by this
  * train because the thing it names now exists, not edited to say less".
@@ -73,8 +73,9 @@ import { LogoutButton } from "@/components/logout-button";
  * FS-4 C-6 (裁-92, checkout-gate-design.md §2.1) — THE THREE ARMS, ALL LIVE
  * ===========================================================================
  * `pending` — "continue to checkout" links to `/signup`, which, once an open
- * registration exists, renders the DPA step (`signup-dpa-form.tsx`) instead of
- * the firm form again. A `<Link>`, because that destination is a real GET page.
+ * registration exists, renders the LEGAL STAGE (`signup-legal-stage.tsx` —
+ * both agreements, each accepted on its own) instead of the firm form again. A
+ * `<Link>`, because that destination is a real GET page.
  *
  * `checkout_open` — "resume checkout" is a FORM POST to `/checkout`, not a
  * link, and the difference is load-bearing twice over. `/checkout` is POST-only
@@ -107,6 +108,9 @@ export function HoldingCard({
   checkoutRefusal?: CheckoutFlashPayload | null;
 }) {
   const t = useTranslations("Pending");
+  // The agreements' names live in `Common`, once — `signup-legal-stage.tsx`
+  // reads the same two keys (7.3).
+  const tCommon = useTranslations("Common");
 
   return (
     <Card>
@@ -120,7 +124,36 @@ export function HoldingCard({
             application stands. A door's refusal renders its own CLR code and
             its own sentence, verbatim (apps/web/AGENTS.md); every other arm
             has one typed card and no invented cause. */}
-        {checkoutRefusal !== null && (
+        {checkoutRefusal !== null && checkoutRefusal.kind === "legal_not_accepted" && (
+          /* THE ONE REFUSAL WITH A NEXT STEP (#621). Every other arm tells the
+             person what happened; this one also tells them where to go, because
+             the fix is theirs to make and it is one link away. The outstanding
+             agreements are the DOOR'S OWN list, named from `Common` so this card
+             and the legal stage cannot drift apart about what they are called. */
+          <StateBanner
+            tone="error"
+            action={
+              <Link
+                href="/signup"
+                className={cn(buttonVariants({ variant: "outline", size: "sm" }))}
+              >
+                {t("checkoutRefusalLegalAction")}
+              </Link>
+            }
+          >
+            <p>{t("checkoutRefusal.legal_not_accepted")}</p>
+            {checkoutRefusal.missing.length > 0 && (
+              <ul className="mt-1.5 list-disc pl-4">
+                {checkoutRefusal.missing.map((kind) => (
+                  <li key={kind}>
+                    {kind === "terms" ? tCommon("legalKindTerms") : tCommon("legalKindDpa")}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </StateBanner>
+        )}
+        {checkoutRefusal !== null && checkoutRefusal.kind !== "legal_not_accepted" && (
           <StateBanner
             tone="error"
             code={checkoutRefusal.kind === "refused" ? checkoutRefusal.code : undefined}
@@ -136,7 +169,7 @@ export function HoldingCard({
             <StateBanner tone="info" title={state.firmName}>
               {t("pending.banner")}
             </StateBanner>
-            {/* A REAL link — /signup renders the DPA step for an open
+            {/* A REAL link — /signup renders the legal stage for an open
                 registration (signup-step.tsx's third fork). Not a Button:
                 this is navigation and must work as a link (§ header). */}
             <Link

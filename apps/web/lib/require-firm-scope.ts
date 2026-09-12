@@ -585,6 +585,27 @@ export const SCOPE_EXEMPT_SURFACES: ReadonlyArray<{
       "to fixed entry URLs. A firm-scope check would refuse every new signup.",
   },
   {
+    path: "app/(entry)/auth/confirm/resend/route.ts",
+    // #621. The confirmation card's "send me a new code" control, wired to the
+    // runtime's own C1/C2 wall (`app/(entry)/auth/confirm/resend/resend-wall.ts`).
+    reason:
+      "EXEMPT BY NECESSITY. PUBLIC PRE-SESSION POST, the sibling of the verify route two " +
+      "directories over and exempt for the identical reason: a person who cannot yet confirm " +
+      "their address has no session and therefore no firm, so requireFirmScope() would redirect " +
+      "every applicant who never received their code — and it would redirect them to /pending, a " +
+      "page that itself requires the session they are trying to earn. It returns no firm data at " +
+      "all: its only response is a 403 to a cross-origin caller, or a 303 back to /auth/confirm " +
+      "carrying an opaque marker whose payload rides an httpOnly, SameSite=Strict flash cookie. " +
+      "ITS OWN WALLS, in the order they run: (1) proveSameOrigin — a state-changing POST that " +
+      "spends a C1/C2 attempt and asks a provider to send mail, refused before the body is read; " +
+      "(2) exactly one non-empty email field, a duplicated or blank one refused outright; (3) the " +
+      "proxy-observed client address, FAIL-CLOSED inside the seam — with none, the request is " +
+      "never sent, because a wall keyed on a placeholder is keyed on one value for the whole " +
+      "deployment; then the runtime's own attempt wall, which judges the request independently " +
+      "and answers locked, rate_limited, invalid_email or unavailable on its own authority. This " +
+      "route builds no auth client, reads no relation and seals no session.",
+  },
+  {
     path: "app/(entry)/checkout/route.ts",
     // FS-4 C-6 Lane B. Server entry 2 of 3 (checkout-gate-design part 1 §1.1).
     reason:

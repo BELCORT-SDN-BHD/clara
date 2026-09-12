@@ -92,13 +92,21 @@ const inviteClient = (): InviteAuthClient => ({
 
 // N3 CLOSED (裁-109): "expired" no longer exists as a distinct
 // ConfirmCodeState — it flattened into "wrong-code" (verify/handler.ts's
-// header explains why). Five states remain.
+// header explains why). Five code states remain, and #621 adds the RESEND
+// POST's own five beside them — every one of the ten is scanned here, so a
+// face that ships with an unresolved catalogue key goes red on this cell
+// rather than in somebody's inbox.
 const CONFIRM_CODE_STATES: ConfirmCodeState[] = [
   { kind: "form" },
   { kind: "wrong-code", remaining: 3 },
   { kind: "locked", waitSeconds: 300 },
   { kind: "unavailable" },
   { kind: "invalid" },
+  { kind: "resent" },
+  { kind: "resend-locked", waitSeconds: 300 },
+  { kind: "resend-rate-limited", waitSeconds: 47 },
+  { kind: "resend-invalid-email" },
+  { kind: "resend-unavailable" },
 ];
 
 const HOLDING_STATES: HoldingState[] = [
@@ -170,7 +178,7 @@ const TRANSLATION_SOURCES = {
   Signup: [
     "components/entry/signup-account-form.tsx",
     "components/entry/signup-firm-form.tsx",
-    "components/entry/signup-dpa-form.tsx",
+    "components/entry/signup-legal-stage.tsx",
     "app/(entry)/signup/page.tsx",
   ],
   Pending: [
@@ -296,37 +304,36 @@ test("N6: live entry prose names only the moved route-group paths", () => {
   }
 });
 
-test("LOW-4: the DPA gate lives on its own step, and the door call is real", () => {
+test("LOW-4: the legal gate lives on its own step, and BOTH door calls are real", () => {
   // v1 carried a checkbox on THIS form; checkout-gate-design.md §1.1 moved
-  // the real DPA e-sign to /signup step 2 (signup-dpa-form.tsx), once an
-  // open registration exists to sign against. This form must no longer
-  // claim any DPA gate of its own.
+  // the real acceptance to /signup step 2 (signup-legal-stage.tsx), once an
+  // open registration exists to accept against. This form must no longer
+  // claim any legal gate of its own.
   const accountSource = readFileSync(
     join(WEB_ROOT, "components/entry/signup-account-form.tsx"),
     "utf8",
   );
   assert.doesNotMatch(
     accountSource,
-    /dpaAccepted|id="signup-dpa"|dpaLabel|dpaNotBuilt/,
-    "a DPA checkbox reappeared on the account step",
+    /dpaAccepted|id="signup-dpa"|dpaLabel|dpaNotBuilt|legalAccepted=/,
+    "a legal checkbox reappeared on the account step",
   );
 
-  // TRUED BY LANE B. This used to require the DPA form to describe its click
-  // as an honest not-wired SEAM; the seam is gone and `sign_dpa` is called for
-  // real, so requiring that sentence would now force the form to lie in the
-  // opposite direction. What the cell asserts instead is the property that
-  // outlives both states: the door's own answer decides what renders, and the
-  // form never fabricates a signature.
-  const dpaDoorSource = readCode(join(WEB_ROOT, "lib/registration/dpa-doors.ts")).code;
+  // THE DOOR IS CALLED FOR REAL. What this cell asserts is the property that
+  // outlives every rewording of the step: the door's own answer decides what
+  // renders, and the stage never fabricates an acceptance.
+  const legalDoorSource = readCode(join(WEB_ROOT, "lib/registration/legal-doors.ts")).code;
   assert.match(
-    dpaDoorSource,
-    /callDoor(?:<[\s\S]*?>)?\(\s*SIGN_DPA_DOOR/,
-    "sign_dpa is not actually called — the seam is back",
+    legalDoorSource,
+    /callDoor(?:<[\s\S]*?>)?\(\s*ACCEPT_LEGAL_DOCUMENT_DOOR/,
+    "accept_legal_document is not actually called — the seam is back",
   );
-  // The three arguments the door requires, by name. A dropped `p_op_key` is
-  // the exact defect PR #488's fix round found in the seam's own shape.
-  for (const param of ["p_version", "p_body_sha256", "p_op_key"]) {
-    assert.ok(dpaDoorSource.includes(param), `sign_dpa is called without ${param}`);
+  // The four arguments the door requires, by name. A dropped `p_op_key` is the
+  // exact defect PR #488's fix round found in this journey's earlier seam, and
+  // `p_kind` is the one #621 adds — a call without it would accept the wrong
+  // agreement, or the same one twice.
+  for (const param of ["p_kind", "p_version", "p_body_sha256", "p_op_key"]) {
+    assert.ok(legalDoorSource.includes(param), `accept_legal_document is called without ${param}`);
   }
   // AND THE HASH IS NOT RECOMPUTED. 裁-90's byte-identity law lives or dies on
   // `p_body_sha256` being the hash of the bytes the person was SHOWN; a fresh
@@ -341,8 +348,29 @@ test("LOW-4: the DPA gate lives on its own step, and the door call is real", () 
   assert.match("await crypto.subtle.digest('SHA-256', x)", computesHash);
   assert.doesNotMatch("params.bodySha256", computesHash);
   assert.equal(
-    computesHash.test(dpaDoorSource),
+    computesHash.test(legalDoorSource),
     false,
-    "dpa-doors.ts computes a hash; it must forward the caller's verbatim",
+    "legal-doors.ts computes a hash; it must forward the caller's verbatim",
   );
+
+  // THE RETIRED DOOR IS GONE FROM THIS APP, not merely unused: `sign_dpa` and
+  // `get_current_dpa_document` survive on the database as deprecated wrappers,
+  // and a web surface still calling one would be reading a single agreement on
+  // a journey that now has two.
+  for (const module of [
+    "components/entry/signup-legal-stage.tsx",
+    "components/entry/signup-step.tsx",
+    "components/entry/signup-route.tsx",
+    "lib/registration/legal-doors.ts",
+    "lib/registration/legal-reads.ts",
+    "lib/registration/legal-server-reads.ts",
+    "app/(entry)/checkout/handler.ts",
+  ]) {
+    const source = readFileSync(join(WEB_ROOT, module), "utf8");
+    assert.doesNotMatch(
+      source.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, ""),
+      /sign_dpa|get_current_dpa_document/,
+      `${module} still calls a retired DPA door`,
+    );
+  }
 });

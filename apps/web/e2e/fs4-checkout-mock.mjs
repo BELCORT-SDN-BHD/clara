@@ -28,21 +28,106 @@
 // letting a green browser run imply more than it measured.
 //
 // THE JOURNEY IS STATEFUL, and it advances only on the acts that advance it in
-// production: `sign_dpa` sets `dpaSigned`, `record_checkout_session` sets
+// production: `accept_legal_document` records one acceptance per agreement,
+// `record_checkout_session` sets
 // `checkoutOpen`, the synthetic "payment applied" step sets `paidUnconsumed`,
 // `claim_paid_firm` sets `firmOpened` and clears the payment. A spec that
 // skipped a step therefore reads the state a person who skipped it would.
 
 import { createHash } from "node:crypto";
 
-/** A REAL body/hash pair — the hash is sha256 of the exact bytes served.
- *  裁-90's byte-identity law is that `sign_dpa` compares the SUBMITTED hash
- *  against the document's own, so a fixture whose hash could not fail that
- *  check would prove nothing about the app forwarding it verbatim. */
-export const E2E_DPA_VERSION = "e2e-beta-2026-09-a";
+/** REAL body/hash pairs — each hash is sha256 of the exact bytes served.
+ *  裁-90's byte-identity law is that `accept_legal_document` compares the
+ *  SUBMITTED hash against the document's own, so a fixture whose hash could not
+ *  fail that check would prove nothing about the app forwarding it verbatim.
+ *
+ *  TWO DOCUMENTS, NOT ONE (#621). `dpa_documents` had no `kind` column, so the
+ *  old fixture could only ever serve the one agreement the old step could show.
+ *  `get_current_legal_documents()` returns one row per kind, each with its own
+ *  version, publication status and per-caller acceptance — which is what makes
+ *  the draft arm below expressible at all. */
+const sha = (body) => `\\x${createHash("sha256").update(body, "utf8").digest("hex")}`;
+
+export const E2E_TERMS_VERSION = 2;
+export const E2E_TERMS_TITLE = "ClaraBook Beta Terms of Service";
+export const E2E_TERMS_BODY =
+  "These are ClaraBook's beta terms of service, pending review by the owner's lawyer before launch.";
+export const E2E_TERMS_SHA = sha(E2E_TERMS_BODY);
+
+/** The DRAFT arm's own text. A DIFFERENT body and therefore a different hash,
+ *  so a walk that somehow accepted it would not accidentally pass the published
+ *  document's byte-identity check. */
+export const E2E_TERMS_DRAFT_VERSION = 3;
+export const E2E_TERMS_DRAFT_BODY =
+  "DRAFT: these beta terms of service are still being written and have not been published.";
+export const E2E_TERMS_DRAFT_SHA = sha(E2E_TERMS_DRAFT_BODY);
+
+export const E2E_DPA_VERSION = 4;
+export const E2E_DPA_TITLE = "ClaraBook Beta Data Processing Agreement";
 export const E2E_DPA_BODY =
   "This is Clara's beta data-processing agreement, pending review by the owner's lawyer before launch.";
-export const E2E_DPA_SHA = `\\x${createHash("sha256").update(E2E_DPA_BODY, "utf8").digest("hex")}`;
+export const E2E_DPA_SHA = sha(E2E_DPA_BODY);
+
+/** THE DRAFT ARM IS SELECTED BY THE SIGNUP ADDRESS, not by a control call the
+ *  walk has to remember to make: an email beginning `e2e-draft-` reads a terms
+ *  of service that is still unpublished. A spec can also force it through the
+ *  control surface (`legalDraftTerms`), which is what the checkout walk does
+ *  when it wants the draft face for an address it already signed up with. */
+function termsIsDraft(state) {
+  return state.legalDraftTerms === true || String(state.email ?? "").startsWith("e2e-draft-");
+}
+
+/** The two rows the door returns, shaped exactly as `0185` declares them. */
+function legalDocuments(state) {
+  const accepted = state.legalAccepted ?? { terms: null, dpa: null };
+  const draft = termsIsDraft(state);
+  const terms = draft
+    ? {
+        kind: "terms",
+        version: E2E_TERMS_DRAFT_VERSION,
+        status: "draft",
+        title: E2E_TERMS_TITLE,
+        body: E2E_TERMS_DRAFT_BODY,
+        body_sha256: E2E_TERMS_DRAFT_SHA,
+        effective_from: null,
+        published_at: null,
+      }
+    : {
+        kind: "terms",
+        version: E2E_TERMS_VERSION,
+        status: "published",
+        title: E2E_TERMS_TITLE,
+        body: E2E_TERMS_BODY,
+        body_sha256: E2E_TERMS_SHA,
+        effective_from: "2026-09-01T00:00:00.000Z",
+        published_at: "2026-08-30T00:00:00.000Z",
+      };
+  const dpa = {
+    kind: "dpa",
+    version: E2E_DPA_VERSION,
+    status: "published",
+    title: E2E_DPA_TITLE,
+    body: E2E_DPA_BODY,
+    body_sha256: E2E_DPA_SHA,
+    effective_from: "2026-09-01T00:00:00.000Z",
+    published_at: "2026-08-30T00:00:00.000Z",
+  };
+  return [terms, dpa].map((row) => ({
+    ...row,
+    // The caller's acceptance of THAT version — version-exact, exactly as the
+    // real door reports it.
+    accepted_at: accepted[row.kind] === row.version ? "2026-09-02T04:30:00.000Z" : null,
+    accepted_version: accepted[row.kind] === row.version ? row.version : null,
+  }));
+}
+
+/** Which kinds are NOT accepted at their current version — the list
+ *  `open_checkout_intent` carries in its own refusal detail. */
+function missingLegalKinds(state) {
+  return legalDocuments(state)
+    .filter((row) => row.accepted_at === null)
+    .map((row) => row.kind);
+}
 
 export const E2E_INTENT_ID = "44444444-4444-4444-8444-444444444444";
 export const E2E_PLAN_KEY = "e2e-beta-plan";
@@ -64,26 +149,31 @@ export async function handleCheckoutMock(ctx) {
   if (request.method === "POST" && path === CONTROL_PATH) {
     const body = await readJson(request);
     if (body.authWall) state.authWall = body.authWall;
+    if (body.authWallResend) state.authWallResend = body.authWallResend;
     if (typeof body.paidUnconsumed === "boolean") state.paidUnconsumed = body.paidUnconsumed;
     if (typeof body.checkoutOpen === "boolean") state.checkoutOpen = body.checkoutOpen;
-    if (typeof body.dpaSigned === "boolean") state.dpaSigned = body.dpaSigned;
+    if (typeof body.legalDraftTerms === "boolean") state.legalDraftTerms = body.legalDraftTerms;
+    if (body.legalAccepted) state.legalAccepted = { ...state.legalAccepted, ...body.legalAccepted };
     if (body.reset) {
       // The registration is part of the journey state: leaving it open made a
       // later test land on the DPA step instead of the firm form, which read
       // as "no session" and cost a debugging round.
       state.registrationOpen = false;
-      state.dpaSigned = false;
+      state.legalAccepted = { terms: null, dpa: null };
+      state.legalDraftTerms = false;
       state.checkoutOpen = false;
       state.paidUnconsumed = false;
       state.firmOpened = false;
       state.authWall = { mode: "verify" };
+      state.authWallResend = { mode: "sent" };
       state.authWallRequests = [];
       state.doorCalls = [];
     }
     sendJson(response, 200, {
       authWallRequests: state.authWallRequests,
       doorCalls: state.doorCalls,
-      dpaSigned: state.dpaSigned,
+      legalAccepted: state.legalAccepted,
+      missingLegal: missingLegalKinds(state),
       checkoutOpen: state.checkoutOpen,
       paidUnconsumed: state.paidUnconsumed,
       firmOpened: state.firmOpened,
@@ -105,52 +195,78 @@ async function handleCheckoutDoors(ctx, { registrationId }) {
   // and creates tenants.
   (state.doorCalls ??= []).push(fn);
 
-  if (fn === "get_current_dpa_document") {
-    sendJson(response, 200, [{
-      version: E2E_DPA_VERSION,
-      body: E2E_DPA_BODY,
-      body_sha256: E2E_DPA_SHA,
-      published_at: "2026-09-01T00:00:00.000Z",
-    }], cors);
+  if (fn === "get_current_legal_documents") {
+    sendJson(response, 200, legalDocuments(state), cors);
     return true;
   }
 
-  if (fn === "sign_dpa") {
+  if (fn === "accept_legal_document") {
     const body = await readJson(request);
-    // 裁-90 IS ENFORCED HERE, not waved through: a hash that is not the
-    // document's refuses CLR10, exactly as the real door does. This is what
-    // makes the walk's happy arm evidence that the app forwarded the served
-    // bytes' own hash rather than something it recomputed.
-    if (body.p_body_sha256 !== E2E_DPA_SHA) {
+    const current = legalDocuments(state).find((row) => row.kind === body.p_kind);
+    // EVERY REFUSAL THE REAL DOOR RAISES, in the order it raises them, with the
+    // DETAIL discriminant the app classifies on. A walk that could accept a
+    // draft, a stale version or a mismatched hash would be walking a different
+    // product.
+    if (current === undefined) {
       sendJson(response, 400, {
         code: "CLR10",
-        message: "the signed text does not match the current agreement",
+        message: "unknown legal document kind",
+        details: JSON.stringify({ reason: "invalid_kind" }),
       }, cors);
       return true;
     }
-    if (body.p_version !== E2E_DPA_VERSION) {
-      sendJson(response, 400, { code: "CLR10", message: "unknown dpa version" }, cors);
+    if (current.status !== "published") {
+      sendJson(response, 400, {
+        code: "CLR09",
+        message: "that legal document is not published",
+        details: JSON.stringify({ reason: "not_published" }),
+      }, cors);
       return true;
     }
-    const replay = state.dpaSigned;
-    state.dpaSigned = true;
+    if (body.p_version !== current.version) {
+      sendJson(response, 400, {
+        code: "CLR09",
+        message: "that version of the agreement is no longer current",
+        details: JSON.stringify({ reason: "stale_version", current: current.version }),
+      }, cors);
+      return true;
+    }
+    // 裁-90 IS ENFORCED HERE, not waved through. This is what makes the walk's
+    // happy arm evidence that the app forwarded the SERVED bytes' own hash
+    // rather than something it recomputed on its way past.
+    if (body.p_body_sha256 !== current.body_sha256) {
+      sendJson(response, 400, {
+        code: "CLR10",
+        message: "the accepted text does not match the current agreement",
+        details: JSON.stringify({ reason: "hash_mismatch" }),
+      }, cors);
+      return true;
+    }
+    const replay = state.legalAccepted[current.kind] === current.version;
+    state.legalAccepted[current.kind] = current.version;
     sendJson(response, 200, {
-      signature_id: "55555555-5555-4555-8555-555555555555",
-      signed_at: "2026-09-02T00:00:00.000Z",
-      ...(replay ? { replay: true } : {}),
+      status: replay ? "already_accepted" : "accepted",
+      kind: current.kind,
+      version: current.version,
+      body_sha256: current.body_sha256,
+      accepted_at: "2026-09-02T04:30:00.000Z",
     }, cors);
     return true;
   }
 
   if (fn === "open_checkout_intent") {
     const body = await readJson(request);
-    // The DPA wall, and the digest length wall, both as the real door has
-    // them — a walk that could open a checkout without a signature, or with a
-    // short digest, would be walking a different product.
-    if (!state.dpaSigned) {
+    // The LEGAL wall, and the digest length wall, both as the real door has
+    // them — a walk that could open a checkout with an unaccepted agreement, or
+    // with a short digest, would be walking a different product. The refusal
+    // carries its own reason AND the list of what is outstanding, which is what
+    // `/pending`'s card renders.
+    const missing = missingLegalKinds(state);
+    if (missing.length > 0) {
       sendJson(response, 400, {
         code: "CLR09",
-        message: "the data processing agreement is not signed",
+        message: "a required legal document is not accepted",
+        details: JSON.stringify({ reason: "legal_not_accepted", missing }),
       }, cors);
       return true;
     }
@@ -269,6 +385,44 @@ export async function handleAuthWallMock(ctx) {
     return true;
   }
 
+  // #621 — THE RESEND LIMB, the same shape and the same wall as the confirm one
+  // above. It is a SEPARATE endpoint because it is a separate act: asking for a
+  // code spends an attempt of the same C1/C2 budget a guess does, and the
+  // provider ALSO keeps its own per-address send cooldown, so the two waits a
+  // person can hit are told apart on the wire rather than flattened here.
+  if (request.method === "POST" && path === "/api/auth-wall/resend") {
+    const body = await readJson(request);
+    state.authWallRequests.push({
+      body,
+      authorization: request.headers.authorization ?? null,
+      clientIp: request.headers["x-clara-client-ip"] ?? null,
+    });
+    const wall = state.authWallResend ?? { mode: "sent" };
+    if (wall.mode === "locked") {
+      sendJson(response, 429, {
+        outcome: "locked",
+        retryAfterSeconds: wall.retryAfterSeconds ?? 300,
+      }, cors);
+      return true;
+    }
+    if (wall.mode === "rate_limited") {
+      sendJson(response, 429, {
+        outcome: "rate_limited",
+        retryAfterSeconds: wall.retryAfterSeconds ?? 47,
+      }, cors);
+      return true;
+    }
+    if (wall.mode === "invalid_email") {
+      sendJson(response, 400, { outcome: "invalid_email" }, cors);
+      return true;
+    }
+    if (wall.mode === "unavailable") {
+      sendJson(response, 503, { outcome: "unavailable" }, cors);
+      return true;
+    }
+    sendJson(response, 200, { outcome: "sent" }, cors);
+    return true;
+  }
 
   return false;
 }

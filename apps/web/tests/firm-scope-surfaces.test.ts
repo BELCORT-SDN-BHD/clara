@@ -284,7 +284,8 @@ describe("MEDIUM-3 — every route leaf is classified, or this suite reds", () =
     // nothing checks. Pinning the one old spelling would have caught the one old
     // sentence; this catches the shape.
     const entryLeaves = leaves.filter((leaf) => leaf.file.startsWith("app/(entry)/"));
-    assert.equal(entryLeaves.length, 12, "the current entry route-leaf census changed");
+    // 13 since #621 added `app/(entry)/auth/confirm/resend/route.ts`.
+    assert.equal(entryLeaves.length, 13, "the current entry route-leaf census changed");
     const layout = SCOPE_UNSCOPED_SURFACES.find((surface) => surface.path === "app/(entry)/layout.tsx");
     assert.ok(layout, "the entry layout is absent from the unscoped registry");
 
@@ -692,6 +693,7 @@ describe("the deliberate exemptions stay exempt", () => {
   it("the registry names every exemption, each with a substantial reason", () => {
     const paths = SCOPE_EXEMPT_SURFACES.map((e) => e.path).sort();
     const expectedPaths = [
+      "app/(entry)/auth/confirm/resend/route.ts",
       "app/(entry)/auth/confirm/verify/route.ts",
       "app/(entry)/auth/recover/route.ts",
       "app/(entry)/checkout/route.ts",

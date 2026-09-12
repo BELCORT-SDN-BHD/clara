@@ -429,6 +429,54 @@ test("a governed refusal renders the door's OWN code and sentence, verbatim, and
   assert.deepEqual(rec.doorCalls.map((c) => c.fn), ["open_checkout_intent"]);
 });
 
+test("#621: `legal_not_accepted` gets its OWN card, carrying the door's list — not the generic refusal", async () => {
+  // A generic refusal tells the person what the DB said and leaves them on
+  // /pending with nothing to do. This one has a next step — the legal stage,
+  // where the agreement that moved under them can be read and accepted — so it
+  // is classified by CODE AND REASON and routed to a card that offers it.
+  const rec = recorder();
+  const response = await withDoors(
+    rec,
+    {
+      ...HAPPY_DOORS,
+      open_checkout_intent: () =>
+        json({
+          code: "CLR09",
+          message: "a required legal document is not accepted",
+          details: JSON.stringify({ reason: "legal_not_accepted", missing: ["terms"] }),
+        }, 400),
+    },
+    () => handleCheckoutPost(postRequest(), deps(rec)),
+  );
+  assert.deepEqual(
+    { ...readFlash(response), nonce: undefined },
+    { nonce: undefined, kind: "legal_not_accepted", missing: ["terms"] },
+  );
+  assert.deepEqual(rec.stripeCalls, [], "Stripe was called after the door refused");
+  assert.deepEqual(rec.doorCalls.map((c) => c.fn), ["open_checkout_intent"]);
+});
+
+test("#621: a CLR09 that is NOT `legal_not_accepted` still renders the door's own sentence verbatim", async () => {
+  // The discriminating negative: the new arm keys on the DETAIL's reason, not
+  // on the code alone, so every other CLR09 keeps the generic card it had.
+  const rec = recorder();
+  const response = await withDoors(
+    rec,
+    {
+      ...HAPPY_DOORS,
+      open_checkout_intent: () =>
+        json({
+          code: "CLR09",
+          message: "no current checkout plan",
+          details: JSON.stringify({ reason: "no_plan" }),
+        }, 400),
+    },
+    () => handleCheckoutPost(postRequest(), deps(rec)),
+  );
+  assert.equal(readFlash(response).kind, "refused");
+  assert.equal((readFlash(response) as { message?: string }).message, "no current checkout plan");
+});
+
 test("a PLAN ROTATION between the two reads refuses rather than mixing two plans", async () => {
   const rec = recorder();
   const response = await withDoors(

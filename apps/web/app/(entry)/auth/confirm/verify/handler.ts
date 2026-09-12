@@ -4,12 +4,7 @@ import {
   confirmEmailCode as defaultConfirmEmailCode,
   type ConfirmEmailCode,
 } from "./confirmation-wall";
-import {
-  confirmFlashCookie,
-  confirmFlashMaxAgeSeconds,
-  type ConfirmFlashOutcome,
-  type ConfirmFlashPayload,
-} from "../confirm-flash";
+import { confirmFlashRedirect, singleNonEmptyField } from "../post-outcome";
 import { proxyObservedClientIp } from "@/lib/rate-wall-courier";
 import { proveSameOrigin } from "@/lib/same-origin";
 import { createRouteClient } from "@/lib/supabase/server";
@@ -68,47 +63,16 @@ export interface EmailConfirmationRouteClient {
 
 export type CreateEmailConfirmationRouteClient = () => Promise<EmailConfirmationRouteClient>;
 
-/**
- * Mints the redirect and its unforgeable flash cookie together.
- *
- * Both redirects are built from the WALL'S OWN PROVEN origin, never
- * `request.url`'s authority — independent review of #455, MEDIUM-2, kept
- * verbatim: behind a proxy those two diverge, and `request.url` can read an
- * internal, plain-HTTP hop. One validated value, every consumer.
- */
-function confirmRedirect(origin: string, outcome: ConfirmFlashOutcome): NextResponse {
-  const nonce = crypto.randomUUID();
-  const target = new URL("/auth/confirm", origin);
-  target.search = "";
-  target.hash = "";
-  target.searchParams.set("flash", nonce);
-  const response = NextResponse.redirect(target, { status: 303 });
-  const payload: ConfirmFlashPayload = { nonce, ...outcome };
-  const cookie = confirmFlashCookie();
-  response.cookies.set(cookie.name, JSON.stringify(payload), {
-    httpOnly: true,
-    secure: cookie.secure,
-    sameSite: "strict",
-    path: "/",
-    maxAge: confirmFlashMaxAgeSeconds(outcome),
-  });
-  return response;
-}
+/** THE REDIRECT MINTER MOVED, NOT CHANGED (#621). It is now
+ *  `confirmFlashRedirect` in `../post-outcome.ts`, because the resend POST
+ *  mints the identical redirect-plus-cookie pair and a second copy of the N1
+ *  fix is exactly how one of them eventually ships without `httpOnly`. */
 
 function fixedSignupRedirect(origin: string): NextResponse {
   const target = new URL("/signup", origin);
   target.search = "";
   target.hash = "";
   return NextResponse.redirect(target, { status: 303 });
-}
-
-/** Exactly one non-empty string field, or `null` — the same "reject a
- *  duplicated or blank field outright" discipline the prior handler used. */
-function singleNonEmptyField(form: FormData, name: string): string | null {
-  const values = form.getAll(name);
-  return values.length === 1 && typeof values[0] === "string" && values[0].length > 0
-    ? values[0]
-    : null;
 }
 
 /**
@@ -135,7 +99,7 @@ export async function handleEmailConfirmationPost(
   const email = singleNonEmptyField(form, "email");
   const token = singleNonEmptyField(form, "token");
   if (email === null || token === null) {
-    return sealResponse(confirmRedirect(proof.origin, { kind: "invalid" }));
+    return sealResponse(confirmFlashRedirect(proof.origin, { kind: "invalid" }, email));
   }
 
   // THE C2 INPUT — the address THIS app's edge observed, never `proof.origin`.
@@ -153,18 +117,28 @@ export async function handleEmailConfirmationPost(
   // after," so a killed connection still costs an attempt — the ordering is
   // the door's, and this app cannot reorder it even by accident because it
   // cannot reach the two verbs separately.
+  // EVERY NON-TERMINAL ARM ECHOES THE ADDRESS BACK (#621). A person who
+  // mistypes one digit used to land on a card whose email field had been
+  // emptied by the redirect unless THIS BROWSER happened to remember it — on a
+  // second device, the cross-device journey 裁-92 exists for, they retyped the
+  // whole address every attempt. The echo rides the same unforgeable cookie as
+  // the outcome; nothing about it reaches the URL.
   const outcome = await confirmCode({ email, token, clientIp });
   if (outcome.kind === "unavailable") {
-    return sealResponse(confirmRedirect(proof.origin, { kind: "unavailable" }));
+    return sealResponse(confirmFlashRedirect(proof.origin, { kind: "unavailable" }, email));
   }
   if (outcome.kind === "locked") {
     return sealResponse(
-      confirmRedirect(proof.origin, { kind: "locked", waitSeconds: outcome.retryAfterSeconds }),
+      confirmFlashRedirect(
+        proof.origin,
+        { kind: "locked", waitSeconds: outcome.retryAfterSeconds },
+        email,
+      ),
     );
   }
   if (outcome.kind === "wrong") {
     return sealResponse(
-      confirmRedirect(proof.origin, { kind: "wrong", remaining: outcome.remaining }),
+      confirmFlashRedirect(proof.origin, { kind: "wrong", remaining: outcome.remaining }, email),
     );
   }
 
@@ -184,7 +158,7 @@ export async function handleEmailConfirmationPost(
     // already settled the attempt `accepted`. Saying "that code didn't work"
     // would be false and would send the person to burn another one. This is
     // our failure, and `unavailable` is the one outcome that says so.
-    return sealResponse(confirmRedirect(proof.origin, { kind: "unavailable" }));
+    return sealResponse(confirmFlashRedirect(proof.origin, { kind: "unavailable" }, email));
   }
   return sealResponse(fixedSignupRedirect(proof.origin));
 }

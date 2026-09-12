@@ -1298,6 +1298,23 @@ export const CHECKOUT_GATE_C3_COHORT = [
   ...CHECKOUT_GATE_C3_HUMAN_FNS, ...CHECKOUT_GATE_C3_AUTH_WALL_FNS,
 ];
 
+// #621 (0185 legal acceptance): versioned legal CONTENT and ACCEPTANCE, for both kinds.
+//   get_current_legal_documents — the current text of every kind for the calling person (the
+//     published row, else the newest draft) with that caller's own acceptance beside it. A door
+//     rather than a table grant for 0163's own reason: the text is a global row with no tenant
+//     predicate, and the caller-scoped half is derived from jwt_sub(), not from a row filter.
+//   accept_legal_document — the acceptance write. Human actors only (body-enforced), idempotent
+//     by op_key on the row itself, because a pre-firm actor has no op_receipts scope.
+//   publish_legal_document — the operator OWNER's configurable-content door. The rank and
+//     operator-firm predicate are body-enforced (approve_firm_registration's own), so the grant
+//     is the same clara_authenticated every other pre-firm door holds.
+// 0185's three DEPRECATED wrappers (get_current_dpa_document, sign_dpa, get_own_dpa_signature)
+// keep their existing cohort memberships above: their signatures and grants did not move.
+const LEGAL_ACCEPTANCE_0185_HUMAN_FNS = [
+  "get_current_legal_documents", "accept_legal_document", "publish_legal_document",
+];
+export const LEGAL_ACCEPTANCE_0185_COHORT = [...LEGAL_ACCEPTANCE_0185_HUMAN_FNS];
+
 // 裁-21 PR-a (`coa_template_pr_a` — number claimed at merge prep): the firm-level standard
 // chart of accounts, TEMPLATE half. NINE human doors, clara_authenticated ONLY — agent + both
 // wake roles + clara_runtime gain ZERO, and that is the design's own claim rather than an
@@ -1737,6 +1754,8 @@ export const ALLOWED = {
     // FS-4 C-3: DPA, checkout and folded paid-registration claim doors. Every identity and
     // ownership floor is body-enforced; the pre-session OTP pair lives on its isolated role.
     ...CHECKOUT_GATE_C3_HUMAN_FNS,
+    // #621 (0185): the legal content/acceptance doors — see the block above.
+    ...LEGAL_ACCEPTANCE_0185_HUMAN_FNS,
     // 裁-18b PR-1 the four human binding doors — see the block above.
     ...BINDING_PROPOSAL_PR1_HUMAN_FNS,
     // 裁-21 PR-a [the firm-level standard chart of accounts, TEMPLATE half] the seven admin
@@ -2209,6 +2228,9 @@ export async function grantMatrixFailures() {
   failures.push(...cohortFailures("FS-4 C-2 projected Stripe store", CHECKOUT_GATE_C2_COHORT, liveNames));
   failures.push(...cohortFailures("FS-4 C-6 apps/web read doors", CHECKOUT_GATE_C6_COHORT, liveNames));
   failures.push(...cohortFailures("FS-4 C-3 folded checkout door", CHECKOUT_GATE_C3_COHORT, liveNames));
+  // #621 — frontier-tolerant like every cohort here: absent entirely on a pre-0185 chain, and a
+  // PARTIAL cohort (one of the three retired or renamed without truing this roster) is named.
+  failures.push(...cohortFailures("#621 legal acceptance", LEGAL_ACCEPTANCE_0185_COHORT, liveNames));
   // 裁-190 — frontier-tolerant like every cohort above: entirely absent on a chain that has not
   // applied the two UNNUMBERED files (which is every CI chain until merge prep, 裁-108), and a
   // PARTIAL cohort is caught by name.

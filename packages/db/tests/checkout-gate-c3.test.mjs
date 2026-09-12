@@ -29,13 +29,23 @@ const EXPECTED_CELLS = 68; // +8 fold cells: c3.23a-d, c3.30f and c3.52a/b/c
 // BLOCKER 2 (opus cross-family leg on #493): open_checkout_intent's body is frozen from here,
 // same idiom as create_firm's W-E3 pin (59fa533d9c03) elsewhere in this same migration. Computed
 // from the plan-current reuse body on this round's throwaway rig; update deliberately on real edits.
-const OPEN_CHECKOUT_INTENT_PROSRC_SHA12 = "4b89b80d4710";
+// #621 (0185) RECUT this body deliberately: the single "the data processing agreement is not
+// signed" arm became the both-kinds `legal_not_accepted` wall and the intent now pins
+// terms_version beside dpa_version. The pin is re-taken from the reviewed body, which is exactly
+// what this constant's own instruction below says to do on a real, reviewed change.
+const OPEN_CHECKOUT_INTENT_PROSRC_SHA12 = "31cddf321f6e";
 
 let live = false;
 let executed = 0;
 let admissionBaseline = null;
 let admissionRowBaseline = null;
 let operatorOwner = null;
+// #621 (0185): the 0158 placeholder is carried over as a DRAFT and is no longer signable, so this
+// battery publishes its OWN fixture documents -- one per kind -- exactly as the ticket requires
+// ("tests publish their own fixture documents ... or a root insert helper"). The root insert is
+// used rather than clara.publish_legal_document so this file keeps ONE operator-firm claim
+// (c3.52a's) instead of taking the estate's single-operator lock in a before() hook.
+
 
 async function cohortApplied() {
   const rows = await rootQuery(
@@ -156,6 +166,10 @@ async function assertMonotonic(beforeSnapshot, label) {
 before(async () => {
   live = await cohortApplied();
   if (live) {
+    await publishRootLegal("dpa", "before");
+    await publishRootLegal("terms", "before");
+  }
+  if (live) {
     admissionBaseline = await admissionShape();
     admissionRowBaseline = await admissionRowFingerprints();
   }
@@ -221,20 +235,62 @@ async function beginRoleTxn(client, role, claims = null) {
   return Number((await client.query("select pg_backend_pid() as pid")).rows[0].pid);
 }
 
+/** Publish one fixture document of `kind` as root: supersede whatever is published and insert the
+ *  next version. Returns the shape the deprecated sign_dpa wrappers speak (a TEXT version and a
+ *  BYTEA digest) beside the integer the new relations use. */
+async function publishRootLegal(kind, tag) {
+  const body = `#621 c3 ${tag} ${kind} ${randomUUID()}`;
+  await rootQuery(
+    "update clara.legal_documents set status='superseded' where kind=$1 and status='published'", [kind]);
+  const row = await rootQuery(
+    `insert into clara.legal_documents(
+       kind,version,status,title,body,body_sha256,source_path,effective_from,published_at)
+     select $1, coalesce(max(version),0)+1, 'published', $2, $3,
+            encode(sha256(convert_to($3,'UTF8')),'hex'), $4, now(), now()
+       from clara.legal_documents where kind=$1
+     returning version, body, decode(body_sha256,'hex') as body_sha256`,
+    [kind, `C-3 fixture ${kind}`, body, `docs/ops/legal/c3-${tag}-${kind}.md`],
+  );
+  return {
+    version: String(row.rows[0].version), intVersion: row.rows[0].version,
+    body: row.rows[0].body, body_sha256: row.rows[0].body_sha256,
+  };
+}
+
+/** The CURRENT published DPA, in the wrapper's own vocabulary. */
 async function currentDpa() {
   const row = await rootQuery(
-    "select version,body_sha256 from clara.dpa_documents where effective_to is null",
+    `select version::text as version, body, decode(body_sha256,'hex') as body_sha256
+       from clara.legal_documents where kind='dpa' and status='published'`,
   );
-  assert.equal(row.rowCount, 1, "fixture requires exactly one current DPA");
+  assert.equal(row.rowCount, 1, "fixture requires exactly one published DPA");
   return row.rows[0];
 }
 
+async function currentTerms() {
+  const row = await rootQuery(
+    `select version, decode(body_sha256,'hex') as body_sha256, body_sha256 as hex
+       from clara.legal_documents where kind='terms' and status='published'`,
+  );
+  assert.equal(row.rowCount, 1, "fixture requires exactly one published Terms");
+  return row.rows[0];
+}
+
+// #621 (0185): the checkout gate now requires BOTH legal kinds. This helper keeps its name and its
+// meaning for every caller -- "this applicant has completed the legal step" -- and therefore accepts
+// Terms as well. The cells that are ABOUT sign_dpa itself call the door directly, not this helper.
 async function signDpa(user, email = `${randomUUID()}@rig.test`, opKey = opk("c3sign")) {
   const dpa = await currentDpa();
   const row = await authenticatedQuery(
     user, email,
     "select clara.sign_dpa(p_version=>$1,p_body_sha256=>$2,p_op_key=>$3) as result",
     [dpa.version, dpa.body_sha256, opKey],
+  );
+  const terms = await currentTerms();
+  await authenticatedQuery(
+    user, email,
+    "select clara.accept_legal_document(p_kind=>'terms',p_version=>$1,p_body_sha256=>$2,p_op_key=>$3)",
+    [terms.version, terms.hex, opk("c3terms")],
   );
   return { ...dpa, result: row.rows[0].result, email };
 }
@@ -293,8 +349,11 @@ async function recordStripeEvent(eventId, projection, type = "checkout.session.c
   return row.rows[0].result;
 }
 
+// The terms pin is deliberately left NULL: a root-inserted intent is the PRE-0185 shape, which
+// claim_paid_firm must keep admitting (0185 §D). The cells that exercise the terms pin itself live
+// in legal-acceptance.test.mjs.
 async function directIntent({ registration, applicant, dpaVersion = null, session = null, id = null }) {
-  const version = dpaVersion ?? (await currentDpa()).version;
+  const version = dpaVersion ?? (await currentDpa()).intVersion ?? Number((await currentDpa()).version);
   const row = await rootQuery(
     `insert into clara.checkout_intents(id,registration_id,applicant,price_local_key,dpa_version)
      values (coalesce($1,gen_random_uuid()),$2,$3,'clara-beta-2026',$4) returning id`,
@@ -341,15 +400,18 @@ async function claim(chain, opKey = opk("c3claim")) {
   return row.rows[0].result;
 }
 
+/** A SUPERSEDED DPA document -- 0158's `effective_to` became 0185's `status`. */
 async function createNoncurrentDpa(tag = "old") {
-  const version = `c3-${tag}-${randomUUID()}`;
   const body = `C-3 ${tag} DPA ${randomUUID()}`;
   const row = await rootQuery(
-    `insert into clara.dpa_documents(
-       version,body,body_sha256,source_path,effective_from,effective_to)
-     values ($1,$2,sha256(convert_to($2,'UTF8')),$3,now()-interval '2 days',now()-interval '1 day')
-     returning version,body_sha256`,
-    [version, body, `docs/ops/legal/${version}.md`],
+    `insert into clara.legal_documents(
+       kind,version,status,title,body,body_sha256,source_path,effective_from,published_at)
+     select 'dpa', coalesce(max(version),0)+1, 'superseded', $1, $2,
+            encode(sha256(convert_to($2,'UTF8')),'hex'), $3, now()-interval '2 days',
+            now()-interval '2 days'
+       from clara.legal_documents where kind='dpa'
+     returning version::text as version, version as int_version, decode(body_sha256,'hex') as body_sha256`,
+    [`C-3 ${tag}`, body, `docs/ops/legal/c3-${tag}.md`],
   );
   return row.rows[0];
 }
@@ -448,8 +510,9 @@ cell("c3.1 catalog -- exact C-3 tables, two payment uniques, seed, RLS and grant
     "select version,body,body_sha256,effective_from from clara.dpa_documents",
   ), /permission denied/, "authenticated caller has no direct DPA table read");
   const currentDpa = await rootQuery(
-    `select version,body,body_sha256,effective_from as published_at
-       from clara.dpa_documents where effective_to is null`,
+    `select version::text as version, body, decode(body_sha256,'hex') as body_sha256,
+            published_at
+       from clara.legal_documents where kind='dpa' and status='published'`,
   );
   const visibleDpa = await roleQuery(
     ROLES.authenticated,
@@ -523,7 +586,7 @@ cell("c3.5 sign W3 -- agent cannot sign", async () => {
   const dpa = await currentDpa();
   await expectRefusal(CLR.authz, () => humanQuery(
     AGENT_USER_ID, "select clara.sign_dpa($1,$2,$3)", [dpa.version, dpa.body_sha256, opk()],
-  ), /agent identity cannot sign/, "sign agent");
+  ), /agent identity cannot accept a legal document/, "sign agent");
 });
 
 cell("c3.6 sign W4 -- op_key is required", async () => {
@@ -546,7 +609,7 @@ cell("c3.8 sign W6 -- non-current DPA refuses", async () => {
   const old = await createNoncurrentDpa("sign-old");
   await expectRefusal(CLR.lastOwner, () => humanQuery(
     user, "select clara.sign_dpa($1,$2,$3)", [old.version, old.body_sha256, opk()],
-  ), /not current/, "sign non-current");
+  ), /no longer the published one/, "sign non-current");
 });
 
 cell("c3.9 sign W7 -- body digest mismatch", async () => {
@@ -554,7 +617,7 @@ cell("c3.9 sign W7 -- body digest mismatch", async () => {
   const dpa = await currentDpa();
   await expectRefusal(CLR.badRequest, () => humanQuery(
     user, "select clara.sign_dpa($1,$2,$3)", [dpa.version, digest("wrong"), opk()],
-  ), /signed text does not match/, "sign SHA mismatch");
+  ), /accepted text does not match the published document/, "sign SHA mismatch");
 });
 
 cell("c3.10 sign replay -- same user/version is one evidence row", async () => {
@@ -565,7 +628,8 @@ cell("c3.10 sign replay -- same user/version is one evidence row", async () => {
   assert.equal(second.result.signed_at, first.result.signed_at);
   assert.equal(second.result.replay, true);
   const count = await rootQuery(
-    "select count(*)::int as n from clara.dpa_signatures where user_id=$1 and dpa_version=$2",
+    `select count(*)::int as n from clara.legal_acceptances
+      where user_id=$1 and kind='dpa' and version=$2::int`,
     [user, first.version],
   );
   assert.equal(count.rows[0].n, 1);
@@ -638,7 +702,7 @@ cell("c3.18 open X7 -- current DPA signature required", async () => {
   const req = await insertRegistration(user, "open_unsigned");
   await expectRefusal(CLR.lastOwner, () => humanQuery(
     user, "select clara.open_checkout_intent($1,$2,$3)", [req.id, digest("x7"), opk()],
-  ), /data processing agreement is not signed/, "open unsigned");
+  ), /required legal agreements are not accepted/, "open unsigned");
 });
 
 cell("c3.19 open X8 -- real 32-byte digest admits; 16-byte digest refuses", async () => {
@@ -1636,23 +1700,25 @@ cell("c3.40 claim sequential replay -- one firm, membership and event pair; firm
 
 cell("c3.41 claim W8 -- signature at a different version cannot satisfy the pinned intent", async () => {
   const old = await createNoncurrentDpa("w8-pinned");
-  const chain = await buildPaidChain({ tag: "w8", dpaVersion: old.version, sign: false });
+  const chain = await buildPaidChain({ tag: "w8", dpaVersion: old.int_version, sign: false });
   await signDpa(chain.user, chain.email); // a real signature, but at the current (different) version
   await expectRefusal(CLR.lastOwner, () => claim(chain),
-    /data processing agreement is not signed/, "claim wrong DPA version");
+    /required legal agreements are not accepted/, "claim wrong DPA version");
 });
 
 cell("c3.42 W-I3 -- superseding after checkout does not move the intent's DPA pin", async () => {
   const chain = await buildPaidChain({ tag: "wi3" });
   await withTxn(async (c) => {
-    const prior = await c.query("select version from clara.dpa_documents where effective_to is null");
-    await c.query("update clara.dpa_documents set effective_to=now() where version=$1", [prior.rows[0].version]);
-    const version = `c3-wi3-new-${randomUUID()}`;
+    await c.query(
+      "update clara.legal_documents set status='superseded' where kind='dpa' and status='published'");
     const body = `C-3 W-I3 newer text ${randomUUID()}`;
     await c.query(
-      `insert into clara.dpa_documents(version,body,body_sha256,source_path,effective_from)
-       values ($1,$2,sha256(convert_to($2,'UTF8')),$3,now())`,
-      [version, body, `docs/ops/legal/${version}.md`],
+      `insert into clara.legal_documents(
+         kind,version,status,title,body,body_sha256,source_path,effective_from,published_at)
+       select 'dpa', coalesce(max(version),0)+1, 'published', 'C-3 W-I3 successor', $1,
+              encode(sha256(convert_to($1,'UTF8')),'hex'), $2, now(), now()
+         from clara.legal_documents where kind='dpa'`,
+      [body, `docs/ops/legal/c3-wi3-${randomUUID()}.md`],
     );
     await c.query(`set role ${ROLES.authenticated}`);
     await c.query("select set_config('request.jwt.claims',$1,true)", [

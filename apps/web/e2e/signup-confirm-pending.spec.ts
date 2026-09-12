@@ -9,7 +9,24 @@ import { expect, test, type Page } from "@playwright/test";
 // perfectly. Recorded together because one train fixing it looks like a local tidy-up;
 // two trains fixing it the same way is the harness telling you the literal was wrong.
 const APP_ORIGIN = process.env.CLARA_E2E_APP_ORIGIN ?? "https://127.0.0.1:3100";
+const CONTROL = `${APP_ORIGIN}/e2e-supabase/e2e-control`;
 const WCAG_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"];
+/** Every URL assertion here waits on a REAL full-page navigation a form POST
+ *  has to complete first — a route handler, a runtime call, a 303 and the next
+ *  render. Playwright's 5s default lost that race once on this host for the
+ *  sibling walk; this raises the WAIT, never the bar (the exact URL is still
+ *  demanded). Scoped to this file, as `checkout-gate-walk.spec.ts` scopes its
+ *  own copy and for the same measured reason. */
+const NAV = { timeout: 20_000 };
+
+/** Scripts the mock auth wall's RESEND verdict (#621). The resend limb is a
+ *  separate endpoint from the confirm one because it is a separate act, and it
+ *  answers two different waits — the C1/C2 attempt budget and the provider's own
+ *  per-address send cooldown — which the card must never flatten together. */
+async function controlResend(page: Page, body: Record<string, unknown>): Promise<void> {
+  const response = await page.request.post(CONTROL, { data: body });
+  expect(response.ok(), "the e2e control surface did not answer").toBeTruthy();
+}
 
 /**
  * FS-4 C-6 (裁-92) rewrote this spec's own subject: `/auth/confirm` is now a
@@ -57,6 +74,13 @@ const WCAG_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"];
 const CONFIRM_WALL_WIRED = process.env.CLARA_E2E_CONFIRM_WALL_WIRED === "1";
 
 async function expectAccessible(page: Page, face: string): Promise<void> {
+  // Park the pointer first, so the scan measures the RESTING face rather than
+  // whatever control the previous click left the cursor sitting on — a hover
+  // state's composited colours are a different measurement, and which element
+  // inherits one depends on nothing but the last click's coordinates.
+  // `checkout-gate-walk.spec.ts`'s own `scan()` records the finding that made
+  // this necessary.
+  await page.mouse.move(0, 0);
   const result = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
   expect(result.violations, `${face} axe violations`).toEqual([]);
 }
@@ -73,11 +97,19 @@ test("signup account step -> check-your-email, with the confirm code form reacha
   await expect(page.getByRole("heading", { name: "Confirm your email" })).toBeVisible();
   await expectAccessible(page, "check email");
 
-  // H-35 — THE CARD IS HONEST ABOUT THE RESEND. The build refuses every
-  // resend (`lib/registration/confirmation-resend.ts`'s production default),
-  // so the card may say so and may NOT tell the person to ask for one.
-  await expect(page.getByText(/can't resend one from here/i)).toBeVisible();
-  await expect(page.getByText(/request a new (one|code)/i)).toHaveCount(0);
+  // THE CARD IS HONEST ABOUT THE RESEND, and what is honest CHANGED (#621).
+  // The build used to refuse every resend, so the card said so; `POST
+  // /auth/confirm/resend` now runs the same C1/C2 wall a code attempt runs, so
+  // the card must stop claiming a resend is impossible and point at the control
+  // that exists.
+  await expect(page.getByText(/can't resend one from here/i)).toHaveCount(0);
+  await expect(page.getByText(/ask for another one on the code screen/i)).toBeVisible();
+  // AND THE TWO RECOVERABLE PATHS FOR AN EXISTING ACCOUNT are on this card. The
+  // duplicate-account arm flattens into this exact card so the screen is not an
+  // account-existence oracle, which means somebody who already has an account
+  // is told to confirm an address that is already confirmed.
+  await expect(page.getByRole("link", { name: "Sign in" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Reset your password" })).toBeVisible();
 
   // H-35 — AND THE PERSON CAN ACTUALLY REACH THE CODE FORM. Before this the
   // card had no route to /auth/confirm at all and the mail carries no link
@@ -152,6 +184,24 @@ test("signup account step -> check-your-email, with the confirm code form reacha
   // never a caller-supplied one.
   await expect(page.getByLabel("Email")).toHaveValue(email);
 
+  // #621 — THE CODE FIELD TAKES A PASTE. A mail client hands over "654 321" or
+  // "654-321" as readily as six bare digits, and every one of them has to reach
+  // the wall as six digits.
+  //
+  // `insertText` IS THE INSTRUMENT, not `fill`: it inserts text at the caret
+  // and fires the same `input` event a real paste (and an OS code autofill)
+  // fires, which is the exact path the field's normaliser sits on. `fill` sets
+  // the value directly and would prove less.
+  const codeField = page.getByLabel("Six-digit code");
+  await codeField.click();
+  await page.keyboard.insertText("654 321");
+  await expect(codeField, "a pasted code kept its spaces").toHaveValue("654321");
+  await codeField.fill("");
+  await codeField.click();
+  await page.keyboard.insertText("12ab34cd56");
+  await expect(codeField, "letters reached the code field").toHaveValue("123456");
+  await codeField.fill("");
+
   // The address wall's refuse limb (part 1 §3.3 / cell W-H, part 3 §6 item 1):
   // a query-string email must not override the remembered one, and a fresh
   // load with no signup state must render blank, never a URL-sourced value.
@@ -184,8 +234,56 @@ test("submitting an attempt while the wall is unwired renders the honest not-ava
   // an httpOnly cookie this test cannot (and need not) inspect directly.
   // The visible-text assertion below is the real behavioural proof.
   await expect(page).toHaveURL(new RegExp(`^${APP_ORIGIN}/auth/confirm\\?flash=`));
-  await expect(page.getByText(/isn't available yet/i)).toBeVisible();
+  await expect(page.getByText(/couldn't check your code just now/i)).toBeVisible();
   await expectAccessible(page, "confirmation unavailable");
+});
+
+test("#621 RESEND: a sent code and a provider cooldown are DIFFERENT cards, and the wait is the server's own", async ({ page }) => {
+  const email = `resend-${Date.now()}@example.test`;
+  await page.goto("/signup");
+  await page.getByLabel("Email").fill(email);
+  await page.getByLabel("Password").fill("Clara-e2e-password-1!");
+  await page.getByRole("button", { name: "Create account" }).click();
+  await expect(page.getByRole("heading", { name: "Confirm your email" })).toBeVisible();
+
+  // ── SENT ─────────────────────────────────────────────────────────────────
+  await controlResend(page, { authWallResend: { mode: "sent" } });
+  await page.goto("/auth/confirm");
+  await expect(page.getByLabel("Email")).toHaveValue(email);
+  await page.getByRole("button", { name: "Send me a new code" }).click();
+
+  // A REAL NAVIGATION, and the outcome lives in the unforgeable flash cookie —
+  // the URL carries only an opaque marker, exactly as the verify POST's does.
+  await expect(page).toHaveURL(new RegExp(`^${APP_ORIGIN}/auth/confirm\\?flash=`), NAV);
+  await expect(page.getByText("A new code is on its way")).toBeVisible();
+  // THE ADDRESS SURVIVED THE REDIRECT. Without the echo the person would be
+  // retyping it on every attempt — on a second device, which is the whole
+  // cross-device point of a code, this browser remembers nothing.
+  await expect(page.getByText(`We sent it to ${email}`)).toBeVisible();
+  await expect(page.getByLabel("Email")).toHaveValue(email);
+  expect(new URL(page.url()).search).not.toContain(email.split("@")[0] as string);
+  await expectAccessible(page, "resend sent");
+
+  // ── RATE LIMITED ─────────────────────────────────────────────────────────
+  await controlResend(page, { authWallResend: { mode: "rate_limited", retryAfterSeconds: 47 } });
+  await page.getByRole("button", { name: "Send me a new code" }).click();
+  await expect(page).toHaveURL(new RegExp(`^${APP_ORIGIN}/auth/confirm\\?flash=`), NAV);
+  await expect(page.getByText("A code was just sent")).toBeVisible();
+  // The SERVER'S OWN Retry-After seconds, rendered exactly — never rounded into
+  // a friendlier number nobody measured.
+  await expect(page.getByText(/47 seconds/)).toBeVisible();
+  // And the control is disabled while that wait stands: pressing it again would
+  // spend another attempt against a budget that has already refused.
+  await expect(page.getByRole("button", { name: "Send me a new code" })).toBeDisabled();
+  // The CODE form stays live underneath — a wait is not a dead end.
+  await expect(page.getByLabel("Six-digit code")).toBeEditable();
+  await expectAccessible(page, "resend rate-limited");
+
+  // ── AND THE TWO ARE DIFFERENT PAGES, the property one shared card would pass
+  // every assertion above on.
+  await expect(page.getByText("A new code is on its way")).toHaveCount(0);
+
+  await controlResend(page, { authWallResend: { mode: "sent" } });
 });
 
 test("SKELETON: signup -> confirm by code, in a SECOND browser context -> firm step -> DPA step -> /pending", async ({ browser }) => {
@@ -236,7 +334,7 @@ test("SKELETON: signup -> confirm by code, in a SECOND browser context -> firm s
   await expectAccessible(confirmPage, "holding page");
 
   await confirmPage.getByRole("link", { name: "Continue to checkout" }).click();
-  await expect(confirmPage.getByRole("heading", { name: "One more thing before checkout" })).toBeVisible();
+  await expect(confirmPage.getByRole("heading", { name: "Two agreements before checkout" })).toBeVisible();
 
   console.log("AXE (SKELETON): 2 further journey faces scanned, 0 WCAG 2.1 A/AA violations");
 

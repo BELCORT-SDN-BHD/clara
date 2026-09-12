@@ -190,7 +190,14 @@ test("THE PRODUCTION SEAM REFUSES rather than fakes success when the runtime is 
   assert.deepEqual(installs, [], "a session was installed with no wall verdict at all");
   assert.equal(response.status, 303);
   const nonce = locationFlashNonce(response);
-  assert.deepEqual(readFlashPayload(response), { nonce, kind: "unavailable" });
+  // #621: the submitted address rides back in the flash cookie so the redirect
+  // does not empty the field the person filled in. It is ECHOED, never chosen —
+  // `confirmFields()`'s own address and nothing else.
+  assert.deepEqual(readFlashPayload(response), {
+    nonce,
+    kind: "unavailable",
+    email: "aisyah@example.com",
+  });
 });
 
 test("M1 — the handler feeds the wall the TRUSTED-HEADER address, never the Origin header", async () => {
@@ -276,7 +283,11 @@ test("a session the client could NOT install renders `unavailable`, never `wrong
       async () => verifiedWall(),
     );
     const nonce = locationFlashNonce(response);
-    assert.deepEqual(readFlashPayload(response), { nonce, kind: "unavailable" });
+    assert.deepEqual(readFlashPayload(response), {
+      nonce,
+      kind: "unavailable",
+      email: "aisyah@example.com",
+    });
   }
 });
 
@@ -288,7 +299,12 @@ test("`wrong` renders the wall's own remaining, and installs no session", async 
     async () => ({ kind: "wrong", remaining: 3 }),
   );
   const nonce = locationFlashNonce(response);
-  assert.deepEqual(readFlashPayload(response), { nonce, kind: "wrong", remaining: 3 });
+  assert.deepEqual(readFlashPayload(response), {
+    nonce,
+    kind: "wrong",
+    remaining: 3,
+    email: "aisyah@example.com",
+  });
   assert.deepEqual(installs, [], "a failed verification installed a session");
 });
 
@@ -301,7 +317,12 @@ test("locked renders its own distinct flash and installs no session", async () =
       async () => ({ kind: "locked", scope, retryAfterSeconds: 300 }),
     );
     const nonce = locationFlashNonce(locked);
-    assert.deepEqual(readFlashPayload(locked), { nonce, kind: "locked", waitSeconds: 300 });
+    assert.deepEqual(readFlashPayload(locked), {
+      nonce,
+      kind: "locked",
+      waitSeconds: 300,
+      email: "aisyah@example.com",
+    });
     assert.deepEqual(installs, []);
   }
 });
@@ -405,7 +426,10 @@ test("N1: a malformed submission redirects to the invalid flash and never reache
     wall,
   );
   const missingNonce = locationFlashNonce(missing);
-  assert.deepEqual(readFlashPayload(missing), { nonce: missingNonce, kind: "invalid" });
+  // A MISSING CODE still echoes the ADDRESS: the address field itself was
+  // well-formed, and emptying it would make the person retype it to correct a
+  // mistake they made one field over.
+  assert.deepEqual(readFlashPayload(missing), { nonce: missingNonce, kind: "invalid", email: "aisyah@example.com" });
 
   const duplicated = await handleEmailConfirmationPost(
     postRequest([...confirmFields(), ["token", "999999"]]),
@@ -413,7 +437,18 @@ test("N1: a malformed submission redirects to the invalid flash and never reache
     wall,
   );
   const duplicatedNonce = locationFlashNonce(duplicated);
-  assert.deepEqual(readFlashPayload(duplicated), { nonce: duplicatedNonce, kind: "invalid" });
+  assert.deepEqual(readFlashPayload(duplicated), { nonce: duplicatedNonce, kind: "invalid", email: "aisyah@example.com" });
+
+  // AND A MALFORMED ADDRESS ECHOES NOTHING (#621). There is no single
+  // well-formed `email` field here, so there is nothing this handler trusts
+  // enough to write back into the person's own form.
+  const noAddress = await handleEmailConfirmationPost(
+    postRequest([["token", "123456"], ["email", "a@example.com"], ["email", "b@example.com"]]),
+    async () => fakeClient(sessionInstalled(), [], []),
+    wall,
+  );
+  const noAddressNonce = locationFlashNonce(noAddress);
+  assert.deepEqual(readFlashPayload(noAddress), { nonce: noAddressNonce, kind: "invalid" });
 
   assert.deepEqual(seen, [], "a malformed submission must not consume a wall attempt");
 });

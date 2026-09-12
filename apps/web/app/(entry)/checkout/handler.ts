@@ -14,6 +14,7 @@ import {
   type CheckoutSessionRequest,
 } from "@/lib/checkout/stripe-session";
 import { isDoorRefusal } from "@/lib/doors";
+import { isLegalKind } from "@/lib/registration/legal-reads";
 import {
   getCurrentCheckoutPlan,
   openCheckoutIntent,
@@ -167,7 +168,7 @@ export async function handleCheckoutPost(
   // REACHABLE WITHOUT A PAGE: `/pending` redirects members to `/`, so the
   // resume control is never offered — but a same-origin POST from a stale tab
   // in the member's own browser satisfies every other check (a session, an own
-  // OPEN registration, a signed DPA, a digest, an unpaid registration, a
+  // OPEN registration, accepted agreements, a digest, an unpaid registration, a
   // current plan).
   //
   // HARMLESS TODAY, NOT TOMORROW. At RM0 with `if_required` nothing is charged,
@@ -267,8 +268,27 @@ export async function handleCheckoutPost(
     return NextResponse.redirect(created.url, { status: 303 });
   } catch (err) {
     if (isDoorRefusal(err)) {
-      // The DB's own considered answer, carried verbatim — code and sentence
-      // untouched, never retried (apps/web/AGENTS.md).
+      // ONE REFUSAL IS TOLD APART FROM THE REST, BECAUSE IT HAS A NEXT STEP
+      // (#621). `open_checkout_intent` refuses `CLR09` with
+      // `detail.reason = "legal_not_accepted"` when an agreement is not
+      // accepted at its current version — which happens honestly, e.g. a new
+      // version was published between the legal stage and this POST. The door's
+      // sentence alone would leave the person on `/pending` with nothing to do;
+      // this arm renders a card that says what is outstanding and sends them
+      // back to the stage that can fix it. Classified by CODE AND REASON, never
+      // by matching the sentence (`lib/wire.ts` parses the DETAIL's
+      // discriminant off every refusal for exactly this).
+      if (err.code === "CLR09" && err.reason === "legal_not_accepted") {
+        const missing = err.detail?.missing;
+        return checkoutRefusal(proof.origin, {
+          kind: "legal_not_accepted",
+          missing: Array.isArray(missing)
+            ? missing.filter(isLegalKind)
+            : [],
+        });
+      }
+      // Every other refusal: the DB's own considered answer, carried verbatim —
+      // code and sentence untouched, never retried (apps/web/AGENTS.md).
       return checkoutRefusal(proof.origin, {
         kind: "refused",
         code: err.code ?? "CLR",

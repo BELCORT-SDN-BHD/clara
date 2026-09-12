@@ -28,6 +28,9 @@ test("every typed outcome round-trips, and the nonce comes back with it", () => 
     { kind: "plan_rotated" },
     { kind: "no_registration" },
     { kind: "unavailable" },
+    // #621's own arm, and the ONLY one carrying a list: the door's `detail.missing`.
+    { kind: "legal_not_accepted", missing: ["terms", "dpa"] },
+    { kind: "legal_not_accepted", missing: [] },
   ];
   for (const outcome of outcomes) {
     assert.deepEqual(parseCheckoutFlash(wrap({ ...outcome }), NONCE), { nonce: NONCE, ...outcome });
@@ -44,6 +47,25 @@ test("THE NONCE BINDING: a mismatched, absent or blank marker is exactly as untr
   // MUST-NOT-RED CONTROL: the matched pair still parses, so the refusals above
   // are the binding rather than a parser that rejects everything.
   assert.deepEqual(parseCheckoutFlash(good, NONCE), { nonce: NONCE, kind: "unavailable" });
+});
+
+test("#621: the outstanding-agreement list is DECODED, never echoed — an unknown kind is dropped", () => {
+  // The list reaches this card from a door's `detail`, so it is transport
+  // output like any other: a kind this build cannot name would be printed as a
+  // bullet nobody can act on. Dropping it leaves the honest general sentence,
+  // and the legal stage itself is the authority on what is outstanding.
+  assert.deepEqual(
+    parseCheckoutFlash(wrap({ kind: "legal_not_accepted", missing: ["terms", "privacy", "dpa", "terms"] }), NONCE),
+    { nonce: NONCE, kind: "legal_not_accepted", missing: ["terms", "dpa"] },
+    "an unknown kind, or a duplicate, survived the decode",
+  );
+  for (const missing of [undefined, null, "terms", 3, {}]) {
+    assert.deepEqual(
+      parseCheckoutFlash(wrap({ kind: "legal_not_accepted", missing }), NONCE),
+      { nonce: NONCE, kind: "legal_not_accepted", missing: [] },
+      `a ${JSON.stringify(missing)} list must degrade to the plain sentence, never fail the whole card`,
+    );
+  }
 });
 
 test("a malformed, unknown or over-long payload fails closed", () => {

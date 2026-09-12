@@ -176,6 +176,48 @@ test("THE CHECKOUT REFUSAL CARD renders each kind's OWN copy, and a door's own s
   }
 });
 
+test("ticket 621: the `legal_not_accepted` refusal NAMES what is outstanding and offers the way back", async () => {
+  // Every other refusal arm tells the person what happened. This one is the
+  // only refusal on this card whose fix is theirs to make, so it must also
+  // carry the route to the stage that can take the acceptance — and the
+  // agreements it names are the DOOR'S OWN list, not a guess made here.
+  const h = await renderComponent(App(createElement(HoldingCard, {
+    state: { kind: "pending", firmName: "ROME PROPERTIES" },
+    checkoutRefusal: { nonce: "n", kind: "legal_not_accepted", missing: ["terms", "dpa"] },
+  })));
+  try {
+    for (let i = 0; i < 2; i++) await h.settle();
+    const text = textOf(h.container as never);
+    assert.match(text, /needs every agreement accepted first/i);
+    assert.match(text, /Terms of Service/);
+    assert.match(text, /Data Processing Agreement/);
+    assert.doesNotMatch(text, /\bRM\s*\d/i);
+    const back = query(h.container)('a[href="/signup"]');
+    assert.ok(back, "the legal refusal offers no route back to the stage that can fix it");
+    assert.match(textOf(back as never), /accept them/i);
+    assert.deepEqual(checkAccessibility(h.container as never), []);
+    assert.deepEqual(checkKeyboardWalk(h.container as never), []);
+  } finally {
+    await h.unmount();
+  }
+
+  // WITH AN EMPTY LIST the card still says the true general thing rather than
+  // rendering an empty bullet list — the door's detail is evidence, not a
+  // precondition for telling somebody why checkout refused.
+  const bare = await renderComponent(App(createElement(HoldingCard, {
+    state: { kind: "pending", firmName: "ROME PROPERTIES" },
+    checkoutRefusal: { nonce: "n", kind: "legal_not_accepted", missing: [] },
+  })));
+  try {
+    for (let i = 0; i < 2; i++) await bare.settle();
+    assert.match(textOf(bare.container as never), /needs every agreement accepted first/i);
+    assert.equal(findIn(bare.container as never, (n) => n.tagName === "UL"), null, "an empty list rendered an empty bullet list");
+    assert.deepEqual(checkAccessibility(bare.container as never), []);
+  } finally {
+    await bare.unmount();
+  }
+});
+
 test("THE HEADING IS REAL — no synthetic h1 is propping these scans up", async () => {
   const h = await renderComponent(App(createElement(HoldingCard, { state: { kind: "invite-expected" } })));
   try {

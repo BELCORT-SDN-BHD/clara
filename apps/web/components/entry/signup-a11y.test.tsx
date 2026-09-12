@@ -311,23 +311,31 @@ test("H-35 — THE CHECK-EMAIL CARD RENDERS A ROUTE TO /auth/confirm, and promis
       // pass by the primary control having replaced it.
       assert.ok(anchors.includes("/login"), "the 'already confirmed' route was lost");
 
-      // NOTHING INSTRUCTS A RESEND while `confirmation-resend.ts`'s production
-      // default refuses every one. The distinction is deliberate and is the
-      // whole shape of the honest fix: the card MAY say a code cannot be
-      // resent (it does, and that sentence is the recovery path), and it may
-      // NOT tell the person to ask for one. So the matcher hunts the
-      // INSTRUCTION, not the word.
-      const RESEND_INSTRUCTION = /request a new (one|code)|send me a new|resend (it|your|the)|we'?ll (re)?send you another/i;
-      assert.doesNotMatch(text, RESEND_INSTRUCTION,
-        "the check-email card tells the person to ask for a resend this build refuses");
-      // VACUITY CONTROL: the matcher fires on the sentences it hunts — both
-      // the ones this fix removed from ConfirmEmail's own copy.
-      assert.match("Request a new one below.", RESEND_INSTRUCTION);
-      assert.match("Wait about 5 minutes, or request a new code.", RESEND_INSTRUCTION);
-      assert.match("Send me a new code", RESEND_INSTRUCTION);
-      // And the honest sentence is NOT what it fires on — otherwise the cell
-      // would forbid saying the true thing.
-      assert.doesNotMatch("We can't resend one from here in this build.", RESEND_INSTRUCTION);
+      // THE TWO RECOVERABLE PATHS FOR AN EXISTING ACCOUNT (#621). The
+      // duplicate-account arm flattens into this exact card so the screen is
+      // not an account-existence oracle, which means somebody who already has
+      // an account is told to confirm an address that is already confirmed.
+      // Both ways out must be on the card, and both must be on EVERY arm (this
+      // cell drives the fresh-signup arm; the oracle would be reopened by a
+      // link that rendered on only one of them).
+      assert.ok(
+        anchors.includes("/forgot-password"),
+        `the check-email card offers no password-reset route (hrefs: ${anchors.join(", ") || "none"})`,
+      );
+
+      // THE RESEND SENTENCE IS TRUE AGAIN, AND THE OLD PROHIBITION IS GONE
+      // WITH THE THING IT DESCRIBED. This cell used to forbid any instruction
+      // to ask for a new code, because the only path to a resend refused
+      // unconditionally — telling somebody to press a control that always
+      // failed was the defect. `POST /auth/confirm/resend` now runs the same
+      // C1/C2 wall a code attempt runs, so the inverted assertion is what is
+      // pinned instead: the card must NOT keep claiming a resend is impossible.
+      const RESEND_REFUSED_CLAIM = /can'?t resend|cannot resend|resending isn'?t wired|not built yet/i;
+      assert.doesNotMatch(text, RESEND_REFUSED_CLAIM,
+        "the check-email card still claims a resend is impossible, which the build no longer makes true");
+      // VACUITY CONTROL: the matcher fires on the sentence this change removed.
+      assert.match("We can't resend one from here in this build.", RESEND_REFUSED_CLAIM);
+      assert.doesNotMatch("You can ask for another one on the code screen.", RESEND_REFUSED_CLAIM);
       assert.deepEqual(checkAccessibility(h.container as never), []);
     } finally {
       await h.unmount();

@@ -17,11 +17,12 @@
 // limb deleted. So the digest is computed in the same server request that
 // calls the door, and never leaves it.
 //
-// ④'s `sign_dpa` IS the client call the design names (part 1 §1.1: "sign_dpa
+// ④'s acceptance IS the client call the design names (part 1 §1.1: "sign_dpa
 // is called the same way ③ calls its doors — from the client, over PostgREST")
-// and it lives in `./dpa-doors.ts`, not here. It carries no server-only value:
-// its three arguments are the version, the hash of the bytes the person was
-// shown, and the caller's own op key.
+// and it lives in `./legal-doors.ts`, not here — `accept_legal_document`, one
+// call per agreement, since #621 replaced the single-document `sign_dpa`. It
+// carries no server-only value: its arguments are the kind, the version, the
+// hash of the bytes the person was shown, and the caller's own op key.
 //
 // NO REGISTRATION ID CROSSES THE WIRE. Each caller below is handed a
 // registration the SERVER read from the caller's own session

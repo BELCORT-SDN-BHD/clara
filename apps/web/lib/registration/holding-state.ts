@@ -125,8 +125,9 @@ export function isRegistrationRequestRow(
 }
 
 /**
- * WHETHER `/signup` OWES THE DPA STEP INSTEAD OF THE FIRM FORM
- * (`signup-step.tsx`'s third fork, FS-4 C-6). The SAME validation the holding
+ * WHETHER `/signup` OWES THE LEGAL STAGE INSTEAD OF THE FIRM FORM
+ * (`signup-step.tsx`'s third fork, FS-4 C-6; #621 repointed that fork from the
+ * one-document DPA e-sign to the two-document legal stage). The SAME validation the holding
  * mapper itself uses — a validated row, bound to the verified subject, whose
  * status is `open` — reused rather than re-derived, so the gate and the
  * decision can never quietly disagree (review law 3). A read that failed, or

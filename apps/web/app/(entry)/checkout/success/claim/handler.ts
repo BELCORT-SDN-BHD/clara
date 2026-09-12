@@ -38,8 +38,8 @@ import { fixedTokenAccessor, resolveServerSession, type ServerSession } from "@/
  * THE PRE-CHECK IS NOT A GUARD, AND SAYING SO MATTERS. `claim_paid_firm`
  * refuses on its own authority for every wrong: a foreign registration
  * (`CLR04 not your registration request`), an unverified email claim, a
- * registration that is not open, no completed payment, no DPA signature at
- * the intent's own version. The decision below chooses WHICH CARD to render
+ * registration that is not open, no completed payment, an agreement that is
+ * not accepted at its current version. The decision below chooses WHICH CARD to render
  * for a caller who has nothing to claim; it never admits anything the door
  * would refuse, and the door still judges every request independently.
  */

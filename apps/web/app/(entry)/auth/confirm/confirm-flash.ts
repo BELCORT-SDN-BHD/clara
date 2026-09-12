@@ -88,14 +88,51 @@ const LOCKED_MAX_AGE_PADDING_SECONDS = 60;
 const LOCKED_MAX_WAIT_SECONDS = 900;
 /** C1/C2's own attempt ceiling (part 1 §3.4) — same ownership note. */
 const REMAINING_MAX = 5;
+/** The longest address this payload will carry back. RFC 5321's own limit on a
+ *  forward-path is 254 octets, so anything longer was never a deliverable
+ *  address; bounding it here stops the cookie being grown into a storage
+ *  channel and keeps a malformed payload failing closed rather than echoing an
+ *  arbitrary blob into a form field. */
+const EMAIL_MAX_CHARS = 254;
 
 export type ConfirmFlashOutcome =
+  // ── the CODE attempt (the verify POST) ────────────────────────────────────
   | { readonly kind: "wrong"; readonly remaining: number }
   | { readonly kind: "locked"; readonly waitSeconds: number }
   | { readonly kind: "unavailable" }
-  | { readonly kind: "invalid" };
+  | { readonly kind: "invalid" }
+  // ── the RESEND attempt (#621) ─────────────────────────────────────────────
+  // Five outcomes, kept DISTINCT from the four above rather than folded into
+  // them: "we sent you another code" and "your code was wrong" are different
+  // events, and a person who asked for a new code and hit the SEND cooldown
+  // must not read a card telling them their guess was refused. The two waiting
+  // outcomes are also distinct from each other — `resend-locked` is the C1/C2
+  // attempt wall (a resend spends an attempt of the same email+origin budget a
+  // wrong guess would), `resend-rate-limited` is the provider's own per-address
+  // send cooldown. Both carry a real wait; neither is guessed here.
+  | { readonly kind: "resent" }
+  | { readonly kind: "resend-locked"; readonly waitSeconds: number }
+  | { readonly kind: "resend-rate-limited"; readonly waitSeconds: number }
+  | { readonly kind: "resend-invalid-email" }
+  | { readonly kind: "resend-unavailable" };
 
-export type ConfirmFlashPayload = ConfirmFlashOutcome & { readonly nonce: string };
+/**
+ * `email` — THE ADDRESS THE PERSON JUST SUBMITTED, echoed back so the POST's
+ * own redirect does not empty the field they filled in (and so the "we sent
+ * another code" card can name where it went).
+ *
+ * IT DOES NOT WEAKEN THE W-H WALL (part 1 §3.3), it honours it. The wall's
+ * property is that NOBODY ELSE can choose what address a person's form is
+ * prefilled with: a crafted link still cannot, because this value rides the
+ * same `httpOnly`, `SameSite=Strict`, `__Host-`-prefixed cookie every other
+ * value here does, and an attacker cannot set a cookie for this origin in
+ * somebody else's browser. The only address that can ever appear is the one
+ * this browser's own POST carried, a moment ago, to this server.
+ */
+export type ConfirmFlashPayload = ConfirmFlashOutcome & {
+  readonly nonce: string;
+  readonly email?: string;
+};
 
 /** Mirrors `lib/same-origin.ts`'s `readSameOriginConfig` dev/loopback
  *  carve-out exactly (same three conditions) — see this module's header
@@ -122,7 +159,11 @@ export function confirmFlashCookie(
  *  copy's own promise would let someone who obeys it and reloads land on
  *  `invalid` instead of the same true card. */
 export function confirmFlashMaxAgeSeconds(outcome: ConfirmFlashOutcome): number {
-  if (outcome.kind === "locked") {
+  if (
+    outcome.kind === "locked" ||
+    outcome.kind === "resend-locked" ||
+    outcome.kind === "resend-rate-limited"
+  ) {
     return Math.min(outcome.waitSeconds, LOCKED_MAX_WAIT_SECONDS) + LOCKED_MAX_AGE_PADDING_SECONDS;
   }
   return DEFAULT_MAX_AGE_SECONDS;
@@ -135,6 +176,17 @@ function boundedInt(value: unknown, max: number): number | null {
   return typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= max
     ? value
     : null;
+}
+
+/** The echoed address, or nothing. An absent, empty, over-long or non-string
+ *  value is simply DROPPED — the field then renders from this browser's own
+ *  remembered address exactly as it always did. A malformed echo never fails
+ *  the whole payload, because the outcome the person needs to read does not
+ *  depend on it. */
+function boundedEmail(value: unknown): string | undefined {
+  return typeof value === "string" && value.length > 0 && value.length <= EMAIL_MAX_CHARS
+    ? value
+    : undefined;
 }
 
 /**
@@ -164,19 +216,41 @@ export function parseConfirmFlash(
   if (typeof candidate.nonce !== "string" || candidate.nonce.length === 0) return null;
   if (candidate.nonce !== marker) return null;
 
+  const nonce = candidate.nonce;
+  const email = boundedEmail(candidate.email);
+  const withEmail = email === undefined ? {} : { email };
+
   switch (candidate.kind) {
     case "wrong": {
       const remaining = boundedInt(candidate.remaining, REMAINING_MAX);
-      return remaining === null ? null : { nonce: candidate.nonce, kind: "wrong", remaining };
+      return remaining === null ? null : { nonce, ...withEmail, kind: "wrong", remaining };
     }
     case "locked": {
       const waitSeconds = boundedInt(candidate.waitSeconds, LOCKED_MAX_WAIT_SECONDS);
-      return waitSeconds === null ? null : { nonce: candidate.nonce, kind: "locked", waitSeconds };
+      return waitSeconds === null ? null : { nonce, ...withEmail, kind: "locked", waitSeconds };
+    }
+    case "resend-locked": {
+      const waitSeconds = boundedInt(candidate.waitSeconds, LOCKED_MAX_WAIT_SECONDS);
+      return waitSeconds === null
+        ? null
+        : { nonce, ...withEmail, kind: "resend-locked", waitSeconds };
+    }
+    case "resend-rate-limited": {
+      const waitSeconds = boundedInt(candidate.waitSeconds, LOCKED_MAX_WAIT_SECONDS);
+      return waitSeconds === null
+        ? null
+        : { nonce, ...withEmail, kind: "resend-rate-limited", waitSeconds };
     }
     case "unavailable":
-      return { nonce: candidate.nonce, kind: "unavailable" };
+      return { nonce, ...withEmail, kind: "unavailable" };
     case "invalid":
-      return { nonce: candidate.nonce, kind: "invalid" };
+      return { nonce, ...withEmail, kind: "invalid" };
+    case "resent":
+      return { nonce, ...withEmail, kind: "resent" };
+    case "resend-invalid-email":
+      return { nonce, ...withEmail, kind: "resend-invalid-email" };
+    case "resend-unavailable":
+      return { nonce, ...withEmail, kind: "resend-unavailable" };
     default:
       return null;
   }

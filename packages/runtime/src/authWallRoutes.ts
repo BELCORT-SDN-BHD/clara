@@ -54,10 +54,19 @@ import {
   authWallLaneConfigured,
 } from "../lib/checkout-pools.mjs";
 import { emailDigestFor, originDigestFrom } from "../lib/rate-wall-courier.mjs";
-import { verifySignupOtp, supabaseVerifyConfigured } from "../lib/supabase-verify.mjs";
+import { verifySignupOtp, resendSignupOtp, supabaseVerifyConfigured } from "../lib/supabase-verify.mjs";
 
 export const CONFIRM_PATH = "/api/auth-wall/confirm";
+export const RESEND_PATH = "/api/auth-wall/resend";
 export const SERVICE_TOKEN_VAR = "CLARA_AUTH_WALL_SERVICE_TOKEN";
+
+/** A deliberately loose shape check — this is not the applicant's only line of defense (GoTrue
+ *  itself validates the address), it only keeps an obviously-malformed body from spending a
+ *  claim on the wall. */
+const EMAIL_SHAPE_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+function isValidEmailShape(email: unknown): email is string {
+  return typeof email === "string" && EMAIL_SHAPE_RE.test(email.trim());
+}
 
 /** Fields whose PRESENCE is a refusal, not an ignorable extra (property 2 above). */
 export const FORBIDDEN_REQUEST_FIELDS = Object.freeze(["attempt_id", "attemptId", "outcome"]);
@@ -220,6 +229,124 @@ export function authWallRoutes(): express.Router {
     // header for why the tokens travel this hop rather than being re-verified downstream.
     // `attempt_id` is NOT in this body either.
     res.status(200).json({ allowed: true, remaining: claim.remaining, verified, session });
+  });
+
+  // ============================================================================================
+  // #621 (journey A2) — THE RESEND LEG, WALLED THE SAME WAY. `apps/web/lib/registration/
+  // confirmation-resend.ts`'s header is the design of record: a resend spree must spend the SAME
+  // C1/C2 budget a guess spree would, so it runs claim → resend → settle inside one request here,
+  // exactly as `/confirm` runs claim → verify → settle — same digests, same door, same wall.
+  //
+  // THE SETTLE OUTCOME. `settle_confirmation_attempt` accepts only `'accepted'`/`'rejected'`
+  // (0163:843-845) — there is no third value for "an attempt was spent but nothing was verified".
+  // A resend is settled `'rejected'`: it is never an acceptance (nothing was verified), and
+  // `'accepted'` is the one outcome the counting predicate excludes from both limbs' windows
+  // (see this file's header) — settling a resend `'accepted'` would silently refund the budget
+  // it is supposed to spend.
+  //
+  // EVERY RESPONSE HERE IS `{outcome, ...}` — including the two shared infra gates below — so a
+  // caller never has to branch on a DIFFERENT body shape depending on which gate refused. The two
+  // config-absence 503s (auth-wall lane DSN, GoTrue endpoint) collapse to the SAME `unavailable`
+  // outcome rather than confirm's two distinct error strings, deliberately: distinguishing them
+  // would tell a prober which half of the backend is unwired.
+  router.post(RESEND_PATH, express.json({ limit: "16kb" }), async (req, res) => {
+    const expectedToken = process.env[SERVICE_TOKEN_VAR];
+    if (typeof expectedToken !== "string" || expectedToken.trim() === "") {
+      console.error(`[clara-runtime] auth wall resend REFUSED: ${SERVICE_TOKEN_VAR} is not configured`);
+      res.status(503).json({ outcome: "unavailable" });
+      return;
+    }
+    if (!bearerMatches(req.header("authorization"), expectedToken)) {
+      res.status(401).json({ error: "unauthorized" });
+      return;
+    }
+    if (!authWallLaneConfigured()) {
+      console.error("[clara-runtime] auth wall resend REFUSED: the auth-wall lane DSN is not configured");
+      res.status(503).json({ outcome: "unavailable" });
+      return;
+    }
+    if (!supabaseVerifyConfigured()) {
+      console.error("[clara-runtime] auth wall resend REFUSED: the Supabase endpoint is not configured");
+      res.status(503).json({ outcome: "unavailable" });
+      return;
+    }
+
+    const rawEmail = (req.body as { email?: unknown } | null)?.email;
+    if (!isValidEmailShape(rawEmail)) {
+      res.status(400).json({ outcome: "invalid_email" });
+      return;
+    }
+    const email = rawEmail.trim();
+
+    // THE SAME TWO DIGESTS `/confirm` computes, so a resend spree and a guess spree land in the
+    // SAME email+origin bucket. Unavailable when either is absent — a resend must not proceed
+    // without the wall able to key it, any more than a verify attempt may.
+    const originDigest = originDigestFrom((name: string) => req.header(name));
+    if (originDigest === null) {
+      console.error("[clara-runtime] auth wall resend REFUSED: no trusted client-IP digest (header or pepper absent/unparseable)");
+      res.status(503).json({ outcome: "unavailable" });
+      return;
+    }
+    const emailDigest = emailDigestFor(email);
+    if (emailDigest === null) {
+      console.error("[clara-runtime] auth wall resend REFUSED: no email digest (the rate-wall pepper is absent)");
+      res.status(503).json({ outcome: "unavailable" });
+      return;
+    }
+
+    let claim: {
+      attempt_id: string;
+      allowed: boolean;
+      remaining: number;
+      scope: string | null;
+      retry_after_seconds: number | null;
+    };
+    try {
+      claim = (await claimConfirmationAttempt(emailDigest, originDigest)) as typeof claim;
+    } catch (err) {
+      console.error(`[clara-runtime] auth wall resend claim failed: ${(err as Error)?.message ?? err}`);
+      res.status(500).json({ outcome: "unavailable" });
+      return;
+    }
+
+    if (claim.allowed !== true) {
+      const retryAfterSeconds = claim.retry_after_seconds ?? 0;
+      res.status(429).set("Retry-After", String(retryAfterSeconds)).json({ outcome: "locked", retryAfterSeconds });
+      return;
+    }
+
+    // THE RESEND, inside this same request — never throws for a provider refusal (see
+    // `resendSignupOtp`'s header); a throw here would mean OUR configuration broke between the
+    // check above and this call, not anything the applicant did.
+    let outcome: { outcome: "sent" } | { outcome: "rate_limited"; retryAfterSeconds: number } | { outcome: "unavailable" };
+    try {
+      outcome = await resendSignupOtp({ email });
+    } catch (err) {
+      console.error(`[clara-runtime] auth wall resend provider call failed: ${(err as Error)?.message ?? err}`);
+      outcome = { outcome: "unavailable" };
+    }
+
+    // THE SETTLE. Always 'rejected' — see this route's header. Runs regardless of the resend
+    // outcome above: a resend spent an attempt whether GoTrue accepted, rate-limited, or errored.
+    try {
+      await settleConfirmationAttempt(claim.attempt_id, "rejected");
+    } catch (err) {
+      // Loud, and not fatal to the caller's answer — an unsettled attempt stays `outcome IS
+      // NULL` and counts against C1/C2 as rejected anyway (fail-closed reading, same as confirm).
+      console.error(
+        `[clara-runtime] auth wall resend settle(rejected) failed — the attempt stays unsettled and counts as rejected: ${(err as Error)?.message ?? err}`,
+      );
+    }
+
+    if (outcome.outcome === "rate_limited") {
+      res.status(429).set("Retry-After", String(outcome.retryAfterSeconds)).json(outcome);
+      return;
+    }
+    if (outcome.outcome === "unavailable") {
+      res.status(503).json(outcome);
+      return;
+    }
+    res.status(200).json(outcome);
   });
 
   return router;

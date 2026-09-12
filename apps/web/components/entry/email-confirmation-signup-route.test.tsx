@@ -24,10 +24,10 @@ import {
 } from "../../lib/supabase/server";
 import { resolveServerSession } from "../../lib/supabase/server-session";
 import { SignupAccountForm } from "./signup-account-form";
-import { SignupDpaForm } from "./signup-dpa-form";
+import { SignupLegalStage } from "./signup-legal-stage";
 import {
   renderSignupRoute,
-  type LoadSignupDpaDocument,
+  type LoadSignupLegalState,
   type LoadSignupRegistration,
 } from "./signup-route";
 import { SignupStep } from "./signup-step";
@@ -197,23 +197,23 @@ test("NEW-5: the confirmation response cookie drives the next /signup request", 
     // M5, fix round 2026-09-01: the 3rd/4th args are STUBBED EXPLICITLY.
     // Before this fix they were omitted, so this cell passed only because
     // the REAL default loaders (`loadOwnRegistrationRequests` /
-    // `loadCurrentDpaDocumentState`) throw under this test's stubbed
+    // `loadLegalStageState`) throw under this test's stubbed
     // `fetch` (no live request scope for `next/headers`), get caught by
     // `renderSignupRoute`'s own try/catch, and degrade to `hasOpenRegistration
     // = false` — the SAME answer this stub gives, but for an unstated reason
     // that would have flipped this assertion's meaning silently if either
-    // real loader ever started succeeding under a stubbed `fetch`. `dpaCalls`
+    // real loader ever started succeeding under a stubbed `fetch`. `legalCalls`
     // proves the second read is never reached when the first says "no open
     // registration" — the two-step short-circuit `renderSignupRoute` itself
     // implements.
     let registrationCalls = 0;
-    let dpaCalls = 0;
+    let legalCalls = 0;
     const noOpenRegistration: LoadSignupRegistration = async () => {
       registrationCalls += 1;
       return { ok: false, reason: "no_session" };
     };
-    const unreachableDpaDocument: LoadSignupDpaDocument = async () => {
-      dpaCalls += 1;
+    const unreachableLegalState: LoadSignupLegalState = async () => {
+      legalCalls += 1;
       return { kind: "unavailable" };
     };
 
@@ -221,11 +221,11 @@ test("NEW-5: the confirmation response cookie drives the next /signup request", 
       async () => resolveServerSession(async () => serverClient),
       async () => serverClient,
       noOpenRegistration,
-      unreachableDpaDocument,
+      unreachableLegalState,
     );
     assert.equal(step.type, SignupFirmForm, "the cookie-backed /signup visit did not render the firm step");
     assert.equal(registrationCalls, 1, "the registration read was not reached exactly once");
-    assert.equal(dpaCalls, 0, "the DPA read ran despite no open registration");
+    assert.equal(legalCalls, 0, "the legal read ran despite no open registration");
 
     const noCookieClient = await createServerClient({
       cookieStore: new MemoryCookieStore() as unknown as ServerCookieStore,
@@ -234,7 +234,7 @@ test("NEW-5: the confirmation response cookie drives the next /signup request", 
       async () => resolveServerSession(async () => noCookieClient),
       async () => noCookieClient,
       noOpenRegistration,
-      unreachableDpaDocument,
+      unreachableLegalState,
     );
     assert.equal(noCookieStep.type, SignupAccountForm, "a cookieless /signup request reached the firm step");
     // An unconfirmed/no-session caller must not even REACH the registration
@@ -292,29 +292,36 @@ test("NEW-2 RESIDUAL: a direct hosted-Auth caller under autoconfirm drift reache
   );
 });
 
-test("R3, fix round 2026-09-01: a confirmed session with hasOpenRegistration:true renders SignupDpaForm, not the firm form again", () => {
-  // The one line wiring the PR's central new routing predicate to its
+test("R3, fix round 2026-09-01 (ticket 621 repoints the fork at the LEGAL STAGE): a confirmed session with hasOpenRegistration:true renders SignupLegalStage, not the firm form again", () => {
+  // The one line wiring this route's central routing predicate to its
   // component (signup-step.tsx: `if (hasOpenRegistration) return
-  // <SignupDpaForm .../>`) had zero direct coverage before this cell — every
+  // <SignupLegalStage .../>`) had zero direct coverage before this cell — every
   // existing test either omitted the prop (defaulting to false) or exercised
   // it only indirectly through a full renderSignupRoute() integration that
   // never actually set it true. This is the POSITIVE arm.
   const session = { subject: SUBJECT, accessToken: "confirmed-token", email: null };
   const user = { id: SUBJECT, email_confirmed_at: "2026-08-31T01:02:03Z" };
+  const legal = {
+    kind: "ready" as const,
+    documents: [
+      {
+        kind: "terms" as const,
+        face: "acceptable" as const,
+        title: "Clara Terms of Service",
+        version: 2,
+        body: "Terms text.",
+        bodySha256: "\\xabc",
+        effectiveFrom: "2026-09-01T00:00:00.000Z",
+      },
+    ],
+  };
 
-  const step = SignupStep({
-    session,
-    user,
-    hasOpenRegistration: true,
-    dpaDocument: { kind: "ready", version: "clara-beta-2026-08-a", body: "Beta text.", bodySha256: "\\xabc" },
-  });
-  assert.equal(step.type, SignupDpaForm, "hasOpenRegistration:true did not route to the DPA step");
-  // The document prop itself must reach the component unmodified — never
-  // swapped for a default, and never dropped.
-  assert.deepEqual(
-    (step.props as { document: unknown }).document,
-    { kind: "ready", version: "clara-beta-2026-08-a", body: "Beta text.", bodySha256: "\\xabc" },
-  );
+  const step = SignupStep({ session, user, hasOpenRegistration: true, legal });
+  assert.equal(step.type, SignupLegalStage, "hasOpenRegistration:true did not route to the legal stage");
+  // The server-read state itself must reach the component unmodified — never
+  // swapped for a default, and never dropped. It is the ONLY thing the stage
+  // derives "may this person reach checkout" from.
+  assert.deepEqual((step.props as { state: unknown }).state, legal);
 
   // The discriminating negative, same session/user, only the flag differs:
   // false (or omitted) must still land on the firm form, exactly as the

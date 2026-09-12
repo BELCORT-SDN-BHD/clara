@@ -116,6 +116,23 @@ async function expectCode(code, fn, label) {
 
 /** One transaction that is ALWAYS rolled back, so a cell that has to move estate-wide state
  *  (publishing a superseding DPA version) never leaks into a sibling battery on the same rig. */
+/** #621 (0185): publish a fresh DPA document as root -- the 0158 placeholder is now a DRAFT and is
+ *  deliberately unsignable, so a cell that needs a signable agreement publishes its own. Returns
+ *  the (version, body, body_sha256) shape the deprecated sign_dpa wrapper speaks. */
+async function publishFixtureDpa(tag) {
+  const body = `wr fixture DPA ${tag} ${Math.random().toString(36).slice(2)}`;
+  await rootQuery(
+    "update clara.legal_documents set status='superseded' where kind='dpa' and status='published'");
+  return rootQuery(
+    `insert into clara.legal_documents(
+       kind, version, status, title, body, body_sha256, source_path, effective_from, published_at)
+     select 'dpa', coalesce(max(version),0)+1, 'published', $1, $2,
+            encode(sha256(convert_to($2,'UTF8')),'hex'), $3, now(), now()
+       from clara.legal_documents where kind='dpa'
+     returning version::text as version, body, decode(body_sha256,'hex') as body_sha256`,
+    [`wr fixture ${tag}`, body, `rig://wr-${tag}`]);
+}
+
 async function inRolledBackTx(fn) {
   const client = await getPool().connect();
   try {
@@ -155,9 +172,11 @@ cell("wr.1 the DPA read is clara_authenticated-only and refuses an unauthenticat
 cell("wr.2 the DPA read is SELF-scoped: a signature is visible to its signer and to nobody else", async () => {
   const signer = await insertUser(world.prefix, "dpa1");
   const other = await insertUser(world.prefix, "dpa2");
-  const doc = await rootQuery(
-    "select version, body_sha256 from clara.dpa_documents where effective_to is null");
-  assert.equal(doc.rowCount, 1, "wr.2 exactly one current DPA document");
+  // #621 (0185): publication state lives in clara.legal_documents.status, and the 0158 placeholder
+  // is a DRAFT that can no longer be signed -- so this cell publishes its own fixture text and
+  // reads the door's answer against THAT. The claim is unchanged.
+  const doc = await publishFixtureDpa("wr2");
+  assert.equal(doc.rowCount, 1, "wr.2 exactly one published DPA document");
   await humanQuery(signer,
     "select clara.sign_dpa(p_version => $1, p_body_sha256 => $2, p_op_key => $3) as r",
     [doc.rows[0].version, doc.rows[0].body_sha256, opk("wr-sign")]);
@@ -176,23 +195,25 @@ cell("wr.2 the DPA read is SELF-scoped: a signature is visible to its signer and
 
 cell("wr.3 a signature against SUPERSEDED bytes reads is_current=false, not as signed", async () => {
   const signer = await insertUser(world.prefix, "dpa3");
-  const doc = (await rootQuery(
-    "select version, body, body_sha256 from clara.dpa_documents where effective_to is null")).rows[0];
+  const doc = (await publishFixtureDpa("wr3")).rows[0];
   await humanQuery(signer,
     "select clara.sign_dpa(p_version => $1, p_body_sha256 => $2, p_op_key => $3) as r",
     [doc.version, doc.body_sha256, opk("wr-sign2")]);
 
   await inRolledBackTx(async (client) => {
-    // Publish a superseding version. Order matters: uq_dpa_documents_current is a unique index
-    // on ((true)) WHERE effective_to IS NULL, so the standing row is stamped FIRST.
+    // Publish a superseding version. Order matters: uq_legal_documents_published is a unique index
+    // on (kind) WHERE status = 'published', so the standing row is superseded FIRST.
     await client.query("set local role clara_fn_owner");
     await client.query(
-      "update clara.dpa_documents set effective_to = now() where effective_to is null");
+      "update clara.legal_documents set status='superseded' where kind='dpa' and status='published'");
     const nextBody = `${doc.body}\n-- wr.3 superseding text`;
     await client.query(
-      `insert into clara.dpa_documents(version, body, body_sha256, source_path, effective_from)
-       values ($1, $2, sha256(convert_to($2,'UTF8')), 'rig://wr.3', now())`,
-      [`${doc.version}-wr3`, nextBody]);
+      `insert into clara.legal_documents(
+         kind, version, status, title, body, body_sha256, source_path, effective_from, published_at)
+       select 'dpa', coalesce(max(version),0)+1, 'published', 'wr.3 successor', $1,
+              encode(sha256(convert_to($1,'UTF8')),'hex'), 'rig://wr.3', now(), now()
+         from clara.legal_documents where kind='dpa'`,
+      [nextBody]);
     await client.query("reset role");
 
     await client.query("set local role clara_authenticated");
@@ -205,7 +226,7 @@ cell("wr.3 a signature against SUPERSEDED bytes reads is_current=false, not as s
 
   // AND THE ROLLBACK HELD: the estate's current document is unchanged for every sibling battery.
   const after = await rootQuery(
-    "select count(*)::int as n from clara.dpa_documents where effective_to is null");
+    "select count(*)::int as n from clara.legal_documents where kind='dpa' and status='published'");
   assert.equal(after.rows[0].n, 1, "wr.3 the superseding fixture was rolled back");
 });
 

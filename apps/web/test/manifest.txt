@@ -101,6 +101,7 @@ components/documents/lint-finding-detail.test.tsx
 components/e2e/money-input-harness-route.test.tsx
 components/entry/email-confirmation-origin.test.tsx
 components/entry/email-confirmation-page.test.tsx
+components/entry/email-confirmation-resend.test.tsx
 components/entry/email-confirmation-signup-route.test.tsx
 components/entry/email-confirmation-wall.test.tsx
 components/entry/email-confirmation.test.tsx
@@ -109,9 +110,9 @@ components/entry/password-recovery.test.tsx
 components/entry/pending-a11y.test.tsx
 components/entry/recovery-faces-a11y.test.tsx
 components/entry/signup-a11y.test.tsx
-components/entry/signup-dpa-form.test.tsx
 components/entry/signup-firm-form.test.tsx
 components/entry/signup-keyboard.test.tsx
+components/entry/signup-legal-stage.test.tsx
 components/firm-admin/firm-admin-a11y.test.tsx
 components/firm-admin/firm-admin-keyboard.test.tsx
 components/firm-admin/firm-admin-pages-a11y.test.tsx
@@ -307,9 +308,10 @@ lib/registers/staff-advances-doors.test.ts
 lib/registers/staff-advances.test.ts
 lib/registration/checkout-doors.test.ts
 lib/registration/checkout-progress-reads.test.ts
-lib/registration/confirmation-resend.test.ts
 lib/registration/doors.test.ts
-lib/registration/dpa-reads.test.ts
+lib/registration/legal-doors.test.ts
+lib/registration/legal-reads.test.ts
+lib/registration/legal-server-reads.test.ts
 lib/reports/api.test.ts
 lib/session-accessor.test.ts
 lib/settings/motion-preference.test.ts
@@ -332,6 +334,7 @@ tests/checkout-claim-route.test.ts
 tests/checkout-route.test.ts
 tests/client-scope.test.ts
 tests/confirm-flash.test.ts
+tests/confirm-resend-handler.test.ts
 tests/csp-report-only.test.ts
 tests/firm-scope-db-pins.test.ts
 tests/firm-scope-fourth-entrance.test.ts

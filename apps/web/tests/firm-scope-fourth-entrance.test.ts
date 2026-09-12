@@ -247,6 +247,45 @@ describe("WALL 1 — every layout-adjacent special file classifies, or this suit
         "neither of which this module is.",
     },
     {
+      path: "app/(entry)/auth/confirm/post-outcome.ts",
+      reason:
+        "NOT A ROUTER FILE. #621: the two things BOTH confirm POSTs do — mint the 303-plus-" +
+        "flash-cookie pair that carries an outcome across the POST→GET boundary, and read " +
+        "exactly one non-empty field out of a submitted form. Extracted the moment the resend " +
+        "POST landed beside the verify POST, because two handlers each minting their own copy " +
+        "of the N1 fix (裁-109) is how one of them eventually ships without httpOnly or with the " +
+        "outcome back in the query string. It exports two plain functions, no page/route/" +
+        "HTTP-method surface, its basename matches no LEAF or SPECIAL_FILE pattern, and Next.js " +
+        "never routes to it, auto-imports it, or treats it as any kind of special file. The real " +
+        "entrances `firm-scope-surfaces.test.ts` governs are the two route.ts POST exports, both " +
+        "registered in `SCOPE_EXEMPT_SURFACES`.",
+    },
+    {
+      path: "app/(entry)/auth/confirm/resend/handler.ts",
+      reason:
+        "NOT A ROUTER FILE. #621: the extracted body of `POST /auth/confirm/resend`, the " +
+        "confirmation card's 'send me a new code' control, called by the sibling " +
+        "app/(entry)/auth/confirm/resend/route.ts whose only export is a POST that forwards to " +
+        "`handleConfirmationResendPost`. Extracted for the same reason its verify sibling was: " +
+        "every branch — cross-origin, a malformed field, and each of the wall's five answers — " +
+        "is driven directly by a cell instead of only through a live request scope. It exports " +
+        "no page/route/HTTP-method surface, its basename matches no LEAF or SPECIAL_FILE " +
+        "pattern, and Next.js never routes to it or treats it as any kind of special file. The " +
+        "real entrance is route.ts's POST export, registered in `SCOPE_EXEMPT_SURFACES`.",
+    },
+    {
+      path: "app/(entry)/auth/confirm/resend/resend-wall.ts",
+      reason:
+        "NOT A ROUTER FILE. #621: the seam for `POST {CLARA_RUNTIME_URL}/api/auth-wall/resend`, " +
+        "the ONE server-to-server call that runs the C1/C2 attempt wall and only then asks the " +
+        "provider to send — closing the completion contract the retired browser-side resend seam " +
+        "was left holding. It is the exact sibling of `../verify/confirmation-wall.ts` and sits " +
+        "two calls behind the real entrance for the same reason that one does. It exports typed " +
+        "functions only, no page/route/HTTP-method surface, its basename matches no LEAF or " +
+        "SPECIAL_FILE pattern, and Next.js never routes to it, auto-imports it, or treats it as " +
+        "any kind of special file.",
+    },
+    {
       path: "app/(entry)/checkout/handler.ts",
       reason:
         "NOT A ROUTER FILE. FS-4 C-6 Lane B: the extracted body of `POST /checkout` " +

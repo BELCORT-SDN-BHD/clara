@@ -29,6 +29,17 @@ import { truncateGuardError, withTxn } from "./rig-txn.mjs";
 const TABLES = ["stripe_events", "stripe_event_problems", "stripe_object_map"];
 const EXPECTED_CELLS = 17;
 const BETA_VERSION = "clara-beta-2026-08-a";
+// #621 (0185) retyped checkout_intents.dpa_version to clara.legal_documents' integer version.
+// Read the beta row's integer from the catalog rather than assume it.
+let _betaLegalVersion = null;
+async function betaLegalVersion() {
+  if (_betaLegalVersion === null) {
+    _betaLegalVersion = (await rootQuery(
+      "select version from clara.legal_documents where kind='dpa' and legacy_version=$1",
+      [BETA_VERSION])).rows[0].version;
+  }
+  return _betaLegalVersion;
+}
 
 let live = false;
 let executed = 0;
@@ -102,7 +113,7 @@ async function insertIntent({ registration, applicant, session }) {
   const row = await rootQuery(
     `insert into clara.checkout_intents(registration_id,applicant,price_local_key,dpa_version)
      values ($1,$2,'beta_trial',$3) returning id`,
-    [registration, applicant, BETA_VERSION],
+    [registration, applicant, await betaLegalVersion()],
   );
   await rootQuery("update clara.checkout_intents set session_id=$2 where id=$1", [row.rows[0].id, session]);
   return row.rows[0].id;

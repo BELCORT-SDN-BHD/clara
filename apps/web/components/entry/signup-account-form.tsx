@@ -69,22 +69,23 @@ import { StateBanner } from "@/components/common/state";
  * v1 of this file carried a checkbox here, gating THIS submit on DPA
  * acceptance and naming the missing durable half in a `NotBuiltNote`. The
  * checkout-gate design (`docs/plan/active/checkout-gate-design.md` §1.1)
- * places the real DPA step LATER — at "/signup" step 2, AFTER `claim_identity`
- * and `request_firm_registration`, once a `clara.users` row and an open
- * registration exist to sign against — and the delegated beta text is read
- * from `clara.dpa_documents` there, not authored as a checkbox label here
- * (`signup-dpa-form.tsx`, rendered by `signup-step.tsx`'s third fork). A
+ * places the real legal step LATER — at "/signup" step 2, AFTER
+ * `claim_identity` and `request_firm_registration`, once a `clara.users` row
+ * and an open registration exist to accept against — and the agreements are
+ * READ FROM THE DATABASE there, not authored as a checkbox label here
+ * (`signup-legal-stage.tsx`, rendered by `signup-step.tsx`'s third fork). A
  * checkbox on THIS screen that recorded nothing was already the fake receipt
- * `apps/web/AGENTS.md` forbids; moving the gate to where a real signature can
- * eventually be recorded is the fix, not a smaller version of the same
- * checkbox. This form now gates on nothing but the ordinary field validation
- * every signup form has.
+ * `apps/web/AGENTS.md` forbids; moving the gate to where a real acceptance can
+ * be recorded is the fix, not a smaller version of the same checkbox. This
+ * form now gates on nothing but the ordinary field validation every signup
+ * form has.
  *
- * The legal text itself is `docs/ops/legal/` — the beta placeholder body
- * (`clara-beta-dpa.md`, 裁-90) plus three research drafts (the OpenAI DPA
- * brief, the client authorization letter, the PDPA s.129 cross-border basis
- * memo). `signup-dpa-form.tsx`'s own header carries the up-to-date account of
- * what is and is not durably recorded today.
+ * TWO documents are now presented and accepted separately (#621) — the terms
+ * of service and the data processing agreement, each with its own version, its
+ * own publication status and its own recorded acceptance. `signup-legal-stage.
+ * tsx`'s own header carries the account of what that step will and will not
+ * do, including why an unpublished draft is shown as a labelled preview that
+ * cannot be accepted.
  *
  * ===========================================================================
  * THE CONFIRM PAGE NEEDS THE ADDRESS, AND MAY NEVER READ IT FROM A URL (裁-92)
@@ -326,17 +327,36 @@ export function SignupAccountForm({
           >
             {t("checkEmailEnterCode")}
           </Link>
-          {/* HONEST ABOUT THE RESEND, because the build refuses one.
-              `lib/registration/confirmation-resend.ts`'s production default
-              unconditionally answers `unavailable` and no /resend route
-              exists in the runtime, so this line points at the recovery path
-              that actually works instead of promising a send. Retune it in
-              the same change that wires the real resend, never before. */}
+          {/* RETUNED IN THE CHANGE THAT WIRED THE RESEND (#621), which is the
+              condition the previous version of this comment set. This line used
+              to say "we can't resend one from here in this build", because the
+              only path to a resend refused unconditionally; `POST
+              /auth/confirm/resend` now runs the same C1/C2 wall a code attempt
+              runs and then asks the provider, so the card points at the control
+              that exists instead of at a second signup. */}
           <p className="text-sm text-muted-foreground">{t("checkEmailNoCode")}</p>
+          {/* THE TWO RECOVERABLE PATHS FOR SOMEBODY WHO IS ALREADY REGISTERED,
+              and they are on THIS card deliberately. The duplicate-account arm
+              flattens into this exact card so the screen is not an
+              account-existence oracle (see `handleSubmit`'s own note) — which
+              means a person who already has an account reads a card telling
+              them to confirm an address that is already confirmed, and needs a
+              way out that is not "sign up again". Sign in covers the one who
+              remembers their password; reset covers the one who does not.
+              Neither link discloses anything: both render for every arm. */}
           <p className="text-sm text-muted-foreground">
             {t.rich("checkEmailSignIn", {
               link: (chunks) => (
                 <Link className="text-primary underline" href="/login">
+                  {chunks}
+                </Link>
+              ),
+            })}
+          </p>
+          <p className="text-sm text-muted-foreground">
+            {t.rich("checkEmailForgotPassword", {
+              link: (chunks) => (
+                <Link className="text-primary underline" href="/forgot-password">
                   {chunks}
                 </Link>
               ),

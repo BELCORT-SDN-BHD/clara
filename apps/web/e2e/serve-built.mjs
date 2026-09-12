@@ -127,7 +127,12 @@ const state = {
   // FS-4 C-6: the checkout journey's own progression, advanced only by the
   // acts that advance it in production — a signature, a stamped session, an
   // applied payment, a claim.
-  dpaSigned: false,
+  // #621: one acceptance PER AGREEMENT (the version accepted, or null), which
+  // is what replaced the single DPA signature. `legalDraftTerms` is the
+  // unpublished-text arm the walk drives — see `fs4-checkout-mock.mjs`.
+  legalAccepted: { terms: null, dpa: null },
+  legalDraftTerms: false,
+  authWallResend: { mode: "sent" },
   checkoutOpen: false,
   paidUnconsumed: false,
   firmOpened: false,

@@ -1,9 +1,9 @@
 import { SignupAccountForm } from "./signup-account-form";
-import { SignupDpaForm } from "./signup-dpa-form";
 import { SignupFirmForm } from "./signup-firm-form";
+import { SignupLegalStage } from "./signup-legal-stage";
 
 import { isConfirmedUser } from "@/lib/auth/confirmed-user";
-import type { DpaDocumentState } from "@/lib/registration/dpa-server-reads";
+import type { LegalStageState } from "@/lib/registration/legal-reads";
 import type { ServerSession } from "@/lib/supabase/server-session";
 
 /**
@@ -40,8 +40,9 @@ export function isUsableConfirmedSession(
  * Pure rendering fork kept outside the App Router page so its outcomes can be
  * pinned without exporting a non-route symbol from `page.tsx`.
  *
- * THE THIRD FORK (FS-4 C-6, checkout-gate-design.md §1.1 step ④). An open
- * registration means `claim_identity` + `request_firm_registration` already
+ * THE THIRD FORK (FS-4 C-6, checkout-gate-design.md §1.1 step ④; #621 repoints
+ * its destination from the one-document DPA e-sign to the two-document legal
+ * stage). An open registration means `claim_identity` + `request_firm_registration` already
  * ran — `SignupFirmForm` would re-attempt them with a fresh op_key and be
  * refused CLR09 "an open registration request already exists"
  * (`uq_firm_registration_requests_open_applicant`), a broken loop for a
@@ -55,14 +56,18 @@ export function SignupStep({
   session,
   user,
   hasOpenRegistration = false,
-  dpaDocument = { kind: "unavailable" },
+  legal = { kind: "unavailable" },
 }: {
   session: ServerSession | null;
   user: unknown;
   hasOpenRegistration?: boolean;
-  dpaDocument?: DpaDocumentState;
+  /** The SERVER-READ legal state (`legal-server-reads.ts`). The default is the
+   *  honest "we could not read them" answer, which offers no acceptance control
+   *  and no route to checkout — absence of a document is never evidence that
+   *  nothing needs accepting. */
+  legal?: LegalStageState;
 }) {
   if (!isUsableConfirmedSession(session, user)) return <SignupAccountForm />;
-  if (hasOpenRegistration) return <SignupDpaForm document={dpaDocument} />;
+  if (hasOpenRegistration) return <SignupLegalStage state={legal} />;
   return <SignupFirmForm />;
 }

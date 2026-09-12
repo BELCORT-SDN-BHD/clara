@@ -110,18 +110,35 @@ async function insertRegistration(applicant, tag = "c1") {
   return row.rows[0].id;
 }
 
-async function insertIntent({ registration, applicant, dpaVersion = BETA_VERSION, price = "beta_trial" }) {
+// #621 (0185) retyped checkout_intents.dpa_version from the dpa_documents TEXT spelling to the
+// integer version of clara.legal_documents. The beta row's integer version is read from the
+// catalog rather than assumed, so this file keeps asserting about the SAME document it always did.
+let _betaLegalVersion = null;
+async function betaLegalVersion() {
+  if (_betaLegalVersion === null) {
+    const row = await rootQuery(
+      "select version from clara.legal_documents where kind='dpa' and legacy_version=$1", [BETA_VERSION]);
+    _betaLegalVersion = row.rows[0].version;
+  }
+  return _betaLegalVersion;
+}
+
+async function insertIntent({ registration, applicant, dpaVersion = null, price = "beta_trial" }) {
   const row = await rootQuery(
     `insert into clara.checkout_intents(registration_id,applicant,price_local_key,dpa_version)
      values ($1,$2,$3,$4) returning id`,
-    [registration, applicant, price, dpaVersion],
+    [registration, applicant, price, dpaVersion ?? await betaLegalVersion()],
   );
   return row.rows[0].id;
 }
 
 cell("c1.1 catalog -- the four tables have the exact C-1 column shapes", async () => {
   const expected = new Map([
-    ["checkout_intents", "id,registration_id,applicant,price_local_key,dpa_version,session_id,opened_at"],
+    // #621 (0185): dpa_version was retyped to integer (add/map/drop/rename, so it moved to the
+    // tail of the tuple) and terms_version plus the two generated *_kind constants joined it --
+    // the pins that make BOTH legal kinds real foreign keys onto clara.legal_documents.
+    ["checkout_intents",
+      "id,registration_id,applicant,price_local_key,session_id,opened_at,terms_version,dpa_version,dpa_kind,terms_kind"],
     ["dpa_documents", "version,body,body_sha256,source_path,effective_from,effective_to,created_at"],
     ["dpa_signatures", "id,user_id,dpa_version,signed_at,body_sha256"],
     ["registration_rate_events", "id,applicant,origin_digest,observed_at"],
@@ -345,6 +362,7 @@ cell("c1.7a registration rate events -- digests are 32-byte, indexed, append-onl
 });
 
 cell("c1.7 M8 foundation -- an intent is bound to its applicant and keeps its own DPA version through supersession", async () => {
+  const betaVersion = await betaLegalVersion();
   const applicantA = await insertUser("fs4c1", "intent_a");
   const applicantB = await insertUser("fs4c1", "intent_b");
   const registration = await insertRegistration(applicantA, "m8");
@@ -356,28 +374,37 @@ cell("c1.7 M8 foundation -- an intent is bound to its applicant and keeps its ow
       () => client.query(
         `insert into clara.checkout_intents(registration_id,applicant,price_local_key,dpa_version)
          values ($1,$2,'beta_trial',$3)`,
-        [registration, applicantB, BETA_VERSION],
+        [registration, applicantB, betaVersion],
       ),
       "a registration/applicant mismatch",
     );
   }, { commit: false });
 
+  // #621 (0185) moved publication state out of dpa_documents.effective_to and into
+  // legal_documents.status, so the successor this cell publishes is a legal_documents row. The
+  // CLAIM is unchanged: a mid-flow intent keeps the version it opened under.
   await withTxn(async (client) => {
-    await client.query("update clara.dpa_documents set effective_to=now() where version=$1", [BETA_VERSION]);
-    const next = `m8_${randomUUID()}`;
     await client.query(
-      `insert into clara.dpa_documents(version,body,body_sha256,source_path,effective_from)
-       values ($1,$2,sha256(convert_to($2,'UTF8')),$3,now())`,
-      [next, "M8 successor", BETA_SOURCE],
+      "update clara.legal_documents set status='superseded' where kind='dpa' and status='published'");
+    const body = `M8 successor ${randomUUID()}`;
+    await client.query(
+      `insert into clara.legal_documents(
+         kind,version,status,title,body,body_sha256,source_path,effective_from,published_at)
+       select 'dpa', coalesce(max(version),0)+1, 'published', 'M8 successor', $1,
+              encode(sha256(convert_to($1,'UTF8')),'hex'), $2, now(), now()
+         from clara.legal_documents where kind='dpa'`,
+      [body, BETA_SOURCE],
     );
     const pinned = (await client.query(
       "select dpa_version from clara.checkout_intents where id=$1", [intent],
     )).rows[0].dpa_version;
-    assert.equal(pinned, BETA_VERSION, "the mid-flow intent stays pinned to the version it opened under");
+    assert.equal(pinned, betaVersion,
+      "the mid-flow intent stays pinned to the version it opened under");
   }, { commit: false });
 });
 
 cell("c1.8 checkout intent lifecycle -- session_id stamps once; every other rewrite/delete/truncate refuses", async () => {
+  const betaVersion = await betaLegalVersion();
   const applicant = await insertUser("fs4c1", "stamp");
   const registration = await insertRegistration(applicant, "stamp");
   const intent = await insertIntent({ registration, applicant });
@@ -393,7 +420,7 @@ cell("c1.8 checkout intent lifecycle -- session_id stamps once; every other rewr
     const other = await client.query(
       `insert into clara.checkout_intents(registration_id,applicant,price_local_key,dpa_version)
        values ($1,$2,'beta_trial',$3) returning id`,
-      [otherRegistration, otherApplicant, BETA_VERSION],
+      [otherRegistration, otherApplicant, betaVersion],
     );
     await expectCode("23505", () => client.query(
       "update clara.checkout_intents set session_id=$2 where id=$1", [other.rows[0].id, session],

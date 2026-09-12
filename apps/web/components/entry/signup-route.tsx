@@ -5,10 +5,8 @@ import {
   loadOwnRegistrationRequests,
   type OwnRegistrationResult,
 } from "@/lib/registration/server-reads";
-import {
-  loadCurrentDpaDocumentState,
-  type DpaDocumentState,
-} from "@/lib/registration/dpa-server-reads";
+import type { LegalStageState } from "@/lib/registration/legal-reads";
+import { loadLegalStageState } from "@/lib/registration/legal-server-reads";
 import { createClient } from "@/lib/supabase/server";
 import {
   resolveServerSession,
@@ -27,7 +25,7 @@ export interface SignupServerAuthClient {
 export type ResolveSignupSession = () => Promise<ServerSession | null>;
 export type CreateSignupServerAuthClient = () => Promise<SignupServerAuthClient>;
 export type LoadSignupRegistration = () => Promise<OwnRegistrationResult>;
-export type LoadSignupDpaDocument = () => Promise<DpaDocumentState>;
+export type LoadSignupLegalState = () => Promise<LegalStageState>;
 
 /**
  * The request-time `/signup` rendering root, kept outside `page.tsx` so the
@@ -45,16 +43,16 @@ export type LoadSignupDpaDocument = () => Promise<DpaDocumentState>;
  * authenticated-but-UNCONFIRMED caller too; the rendering stayed safe
  * because `SignupStep` re-checked, but the reads ran, and the header claimed
  * otherwise). Both reads are ALSO independently fail-safe:
- * `loadOwnRegistrationRequests`'s `!ok` branch and
- * `loadCurrentDpaDocumentState`'s own catch-all both degrade to the SAFE
- * default (`SignupFirmForm`, an "unavailable" document) rather than ever
- * throwing this page into the framework's error boundary.
+ * `loadOwnRegistrationRequests`'s `!ok` branch and `loadLegalStageState`'s own
+ * catch-all both degrade to the SAFE default (`SignupFirmForm`, an
+ * "unavailable" legal state) rather than ever throwing this page into the
+ * framework's error boundary.
  */
 export async function renderSignupRoute(
   resolveSession: ResolveSignupSession = resolveServerSession,
   createSupabaseClient: CreateSignupServerAuthClient = createClient,
   loadRegistration: LoadSignupRegistration = loadOwnRegistrationRequests,
-  loadDpaDocument: LoadSignupDpaDocument = loadCurrentDpaDocumentState,
+  loadLegal: LoadSignupLegalState = loadLegalStageState,
 ) {
   const session = await resolveSession();
   if (session === null) return SignupStep({ session: null, user: null });
@@ -68,10 +66,10 @@ export async function renderSignupRoute(
   // The two extra reads are POSITIVE evidence, never inferred from `user`
   // alone — a confirmed-but-unregistered caller must still reach
   // `SignupFirmForm`, and only a validated OPEN row (`hasOpenRegistrationFor`)
-  // reroutes to the DPA step. The GATE below is the real guard the header
+  // reroutes to the legal stage. The GATE below is the real guard the header
   // above describes — `isUsableConfirmedSession`, not a bare object check.
   let hasOpenRegistration = false;
-  let dpaDocument: DpaDocumentState = { kind: "unavailable" };
+  let legal: LegalStageState = { kind: "unavailable" };
   if (isUsableConfirmedSession(session, user)) {
     // WRAPPED, deliberately (the same discipline `/pending`'s page.tsx
     // applies to this exact read): a transport failure here must fall back
@@ -89,12 +87,12 @@ export async function renderSignupRoute(
     }
     if (hasOpenRegistration) {
       try {
-        dpaDocument = await loadDpaDocument();
+        legal = await loadLegal();
       } catch {
-        dpaDocument = { kind: "unavailable" };
+        legal = { kind: "unavailable" };
       }
     }
   }
 
-  return SignupStep({ session, user, hasOpenRegistration, dpaDocument });
+  return SignupStep({ session, user, hasOpenRegistration, legal });
 }

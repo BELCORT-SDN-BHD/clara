@@ -35,8 +35,8 @@ The checked-in suite currently contains 22 specs:
 | Spec | What it exercises |
 |---|---|
 | `entry-faces-walk.spec.ts` | Login, signup validation, invite refusal, confirmation, holding redirect, and global not-found |
-| `signup-confirm-pending.spec.ts` | Signup, six-digit confirmation, firm step, DPA step, and pending state |
-| `checkout-gate-walk.spec.ts` | Confirmation-to-checkout-to-claim journey and fail-closed request boundaries |
+| `signup-confirm-pending.spec.ts` | Signup, six-digit confirmation (including a pasted code), the resend control's sent and cooldown faces, firm step, legal stage, and pending state |
+| `checkout-gate-walk.spec.ts` | Confirmation-to-checkout-to-claim journey and fail-closed request boundaries, including the two-agreement legal stage: an unpublished draft previewed but never accepted, each agreement accepted on its own, a reload that resumes from the server's own record, and the `legal_not_accepted` checkout refusal with its route back |
 | `firm-navigation-walk.spec.ts` | Rank-shaped sidebar and settings hub, Work's saved "Needs you" view, and the Work/Activity agent-task split |
 | `home-board-walk.spec.ts` | Firm and client home boards, responsive composition, and activity summary |
 | `responsive-shell-walk.spec.ts` | Narrow/zoomed shell, the mobile sheet and docked-rail behavior, keyboard focus, tabs, assets, and accessibility |
