@@ -137,7 +137,7 @@ test("documents workbench: DocumentMetadata + DocumentEvidence + DocumentEntries
       null,
       createElement("h1", null, "Documents"),
       createElement("h2", null, "Detail"),
-      createElement(DocumentMetadata, { document: DOCUMENT, tasks: [TASK] }),
+      createElement(DocumentMetadata, { document: DOCUMENT, tasks: [TASK], clientId: "c11e0000-1111-4111-8111-111111111111" }),
       createElement(DocumentEvidence, {
         regions: [REGION],
         documentId: "doc-1",

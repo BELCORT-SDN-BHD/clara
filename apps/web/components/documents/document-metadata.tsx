@@ -1,13 +1,11 @@
 "use client";
 
 import { useTranslations } from "next-intl";
-import { useEffect, useRef, useState } from "react";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { documentBadges, type DocumentBadge } from "@/lib/documents/copy";
-import { openDocumentInNewTab } from "@/lib/documents/open-in-new-tab";
 import { SectionHeader } from "@/components/common/section-header";
-import { EmptyState, StateBanner } from "@/components/common/state";
+import { EmptyState } from "@/components/common/state";
+import { DocumentSourceActions } from "./document-source-actions";
 import type { DocumentRow, ProcessingTaskRow } from "@/lib/documents/types";
 
 /** The next-intl KEY for a processing task's status — never English text here
@@ -45,94 +43,43 @@ function badgeKey(badge: DocumentBadge): string {
   return badge.kind === "documentKind" ? `documentKind:${badge.value}` : badge.kind;
 }
 
-/** Metadata badges + the evidence viewer's entry point (fetchDocumentBytes,
- *  PIN-DELTA-4) + the extraction/processing task list. Every badge names a REAL
- *  DB-owned field (lib/documents/copy.ts); the byte fetch is honest about failure —
- *  it never leaves a dead link on click. */
+/** Metadata badges + the source-custody affordances + the extraction/processing
+ *  task list. Every badge names a REAL DB-owned field (lib/documents/copy.ts).
+ *
+ *  THE PREVIEW/DOWNLOAD PAIR AND ITS WHOLE STATE LADDER MOVED OUT, to
+ *  `document-source-actions.tsx` — this component used to own three local
+ *  useState slots, an AbortController and one flattened "could not open" error
+ *  string for a door that answers seven distinct refusals. Those are one
+ *  subject (reading the stored original) and they now live in one file; this one
+ *  is back to being what its name says. */
 export function DocumentMetadata({
-  document: doc, tasks, onShowExtraction,
+  document: doc, tasks, clientId, onShowExtraction,
 }: {
   document: DocumentRow;
   tasks: ProcessingTaskRow[];
-  /** C-07 / 裁-175 — the honest alternative offered when the viewer gate refuses
-   *  this document's type. Opens the SAME structured extraction view that lives
-   *  further down this panel (document-detail.tsx owns its open state), rather
-   *  than leaving the human at a refusal with nowhere to go. Optional: a caller
-   *  with no such view renders the reason alone, never a dead control. */
+  /** The page's client scope — forwarded to the byte door as `?client=` so a
+   *  read addressed from the wrong client answers "not available in this client"
+   *  rather than serving bytes. */
+  clientId: string;
+  /** C-07 / 裁-175 — the honest alternative offered for a type no browser tab can
+   *  show. Opens the SAME structured extraction view that lives further down this
+   *  panel (document-detail.tsx owns its open state). */
   onShowExtraction?: () => void;
 }) {
   const t = useTranslations("ClientDocuments");
-  const [openState, setOpenState] = useState<"idle" | "loading" | "error">("idle");
-  const [openError, setOpenError] = useState<string | null>(null);
-  const [notViewableMime, setNotViewableMime] = useState<string | null>(null);
-  const abortRef = useRef<AbortController | null>(null);
-
-  useEffect(() => () => abortRef.current?.abort(), []);
-
-  const openDocument = () => {
-    setOpenState("loading");
-    setOpenError(null);
-    setNotViewableMime(null);
-
-    const controller = new AbortController();
-    abortRef.current = controller;
-
-    // openDocumentInNewTab opens the tab SYNCHRONOUSLY inside this click handler
-    // (see its own header — R1: a features string of "noreferrer"/"noopener"
-    // makes window.open return null UNCONDITIONALLY, which the previous cut here
-    // got backwards).
-    void openDocumentInNewTab(doc.id, { signal: controller.signal })
-      .then((result) => {
-        if (result.ok) { setOpenState("idle"); return; }
-        // C-07 / 裁-175: `not_viewable` is NOT an error — nothing failed. The
-        // gate refused a type a browser tab cannot show inertly, and the honest
-        // answer names the type and points at the view that CAN show it. It
-        // therefore gets its own state and its own tone, never the red
-        // "could not open" banner, which would be a lie about the cause.
-        if (result.reason === "not_viewable") {
-          setOpenState("idle");
-          setNotViewableMime(result.mime || t("openDocumentUnknownType"));
-          return;
-        }
-        setOpenState("error");
-        // FOUND BY THE BROWSER LEG: `openError` holds a FINISHED SENTENCE, and
-        // the banner below used to wrap it in `openDocumentFailed` a SECOND
-        // time — the page read "Could not open this document: Could not open
-        // this document: document bytes failed". Only one of the two writers
-        // may apply the template, and it is this one, because the catch arm
-        // below carries a bare `Error.message` that needs framing too.
-        setOpenError(result.reason === "popup_blocked" ? t("openDocumentPopupBlocked") : t("openDocumentFailed", { message: result.message }));
-      })
-      .catch((e: unknown) => {
-        if (e instanceof Error && e.name === "AbortError") return; // unmounted mid-fetch — no state left to update
-        setOpenState("error");
-        setOpenError(t("openDocumentFailed", { message: e instanceof Error ? e.message : String(e) }));
-      });
-  };
 
   return (
     <div className="flex flex-col gap-2">
-      <div className="flex items-center justify-between gap-2">
-        <SectionHeader level={3} className="truncate">{doc.original_filename ?? doc.id}</SectionHeader>
-        <Button size="sm" variant="outline" disabled={openState === "loading"} onClick={openDocument}>
-          {openState === "loading" ? t("openingDocument") : t("openDocument")}
-        </Button>
+      {/* WRAPS AT NARROW WIDTHS rather than pushing the controls off-screen: the
+          filename is the long, unpredictable half, so it takes `min-w-0
+          truncate` and the action pair keeps its intrinsic size. Measured at
+          320px — without the wrap the two buttons sat outside the viewport and
+          the page scrolled sideways, which §4 forbids. */}
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <SectionHeader level={3} className="min-w-0 truncate">{doc.original_filename ?? doc.id}</SectionHeader>
       </div>
-      {/* `openError` is already a finished sentence (see the two setters above) —
-          rendered VERBATIM, never re-wrapped in its own template. */}
-      {openError ? <StateBanner tone="error" className="text-xs">{openError}</StateBanner> : null}
-      {notViewableMime ? (
-        <StateBanner tone="neutral" className="text-xs">
-          <span className="flex flex-wrap items-center gap-2">
-            <span>{t("openDocumentNotViewable", { mime: notViewableMime })}</span>
-            {onShowExtraction ? (
-              <Button type="button" size="xs" variant="outline" onClick={onShowExtraction}>
-                {t("openDocumentShowExtraction")}
-              </Button>
-            ) : null}
-          </span>
-        </StateBanner>
-      ) : null}
+
+      <DocumentSourceActions document={doc} clientId={clientId} onShowExtraction={onShowExtraction} />
 
       <div className="flex flex-wrap gap-1.5">
         {documentBadges(doc).map((badge) => (

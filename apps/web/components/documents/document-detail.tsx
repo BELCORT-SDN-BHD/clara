@@ -66,6 +66,7 @@ export function DocumentDetail({
       <DocumentMetadata
         document={data.document}
         tasks={data.processingTasks}
+        clientId={clientId}
         onShowExtraction={() => setExtractOpen(true)}
       />
 
