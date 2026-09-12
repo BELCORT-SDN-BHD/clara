@@ -299,6 +299,15 @@ test("E2.5 — every 404 is BYTE-IDENTICAL: malformed, nonexistent, foreign-firm
   const token = await mint(firmA.owner);
   const foreign = await seedDoc(firmB.firm, firmB.client);
   const before_ = new Set(tempFiles());
+  const auditBefore = await auditCount(doc.id);
+  // THE LAST THREE ARE THE HOSTILE SPELLINGS OF THE SAME PARAMETER, and they are here because a
+  // scope the route cannot read is not a scope the route may ignore. Measured against express
+  // 5.2.1's default "simple" query parser ($SCRATCH/logs/620-fix1-rt/F7-qparser-probe.log):
+  // a REPEATED key yields an ARRAY, and a BRACKETED key yields a different key name entirely
+  // (`client[]`), so `typeof clientRaw === "string"` is false in both cases. Coercing that to
+  // "no scope" served the real PDF for a client the caller explicitly narrowed away from, and
+  // wrote an egress receipt claiming args.client = null. All three answer the route's own single
+  // 404, per its no-oracle comment and the contract's "malformed `client` → 404".
   const responses = {
     malformed: await get("not-a-uuid", token),
     absent: await get(randomUUID(), token),
@@ -306,6 +315,9 @@ test("E2.5 — every 404 is BYTE-IDENTICAL: malformed, nonexistent, foreign-firm
     wrongClient: await get(doc.id, token, `?client=${clientA2}`),
     foreignClient: await get(doc.id, token, `?client=${firmB.client}`),
     malformedClient: await get(doc.id, token, "?client=not-a-uuid"),
+    repeatedClient: await get(doc.id, token, `?client=${firmA.client}&client=${firmA.client}`),
+    bracketedClient: await get(doc.id, token, `?client[]=${firmA.client}`),
+    keyedClient: await get(doc.id, token, `?client[a]=${firmA.client}`),
   };
   const bodies = {};
   for (const [label, res] of Object.entries(responses)) {
@@ -319,6 +331,11 @@ test("E2.5 — every 404 is BYTE-IDENTICAL: malformed, nonexistent, foreign-firm
   // A reason field on SOME 404s would tell them apart just as well as a different status.
   assert.equal(Object.prototype.hasOwnProperty.call(first, "reason"), false);
   assert.equal(await auditCount(foreign.id), 0, "a refused read is not an egress");
+  // NOT ONE of these nine is an egress, and the repeated/bracketed pair is the reason to say it
+  // here: their old answer was a 200 that wrote an audit line recording `client: null` — a receipt
+  // asserting an unscoped read the caller never asked for.
+  assert.equal(await auditCount(doc.id), auditBefore,
+    "nine refusals must add nothing to the egress ledger");
   assert.deepEqual(await tempLeak(before_), [], "a refusal must leave no temp file behind");
 });
 
@@ -354,6 +371,16 @@ test("E2.8 — a bad disposition is 400 invalid_input, and it is not an existenc
   assert.equal(absent.status, 400, "a malformed request is answered before existence is decided");
   assert.deepEqual(await mine.json(), await absent.json());
   assert.equal((await (await get(doc.id, token, "?disposition=INLINE")).json()).error, "invalid_input");
+  // THE HOSTILE SPELLINGS, the disposition half of E2.5's client trio. A bracketed key is a
+  // different key name under express's "simple" parser and a repeated one is an array, so neither
+  // is the string this route will act on — and `inline` is the default, so silently accepting
+  // either would serve a document INLINE to a caller who asked for an attachment.
+  for (const q of ["?disposition[]=attachment", "?disposition[a]=attachment",
+    "?disposition=attachment&disposition=inline"]) {
+    const res = await get(doc.id, token, q);
+    assert.equal(res.status, 400, `${q} must be a 400, never a served inline preview`);
+    assert.equal((await res.json()).error, "invalid_input", q);
+  }
   // …and the two supported values are the differential twin.
   assert.equal((await get(doc.id, token, "?disposition=inline")).status, 200);
   assert.equal((await get(doc.id, token, "?disposition=attachment")).status, 200);

@@ -156,6 +156,44 @@ export function derivedDocumentFilename(sha256: unknown, storagePath: unknown): 
   return ext ? `${hex}.${ext.toLowerCase()}` : hex;
 }
 
+/**
+ * READ ONE SCALAR QUERY PARAMETER, OR REFUSE THE REQUEST. Never coerce a shape this route cannot
+ * read into that parameter's DEFAULT.
+ *
+ * `{ok:false}` means the caller sent this parameter in a spelling the route will not act on, and
+ * the caller's own refusal status is the answer (404 for `client`, 400 for `disposition`).
+ * `{ok:true, value:null}` means genuinely absent (or empty), which is the sanctioned default.
+ *
+ * TWO HOSTILE SPELLINGS, BOTH MEASURED against express 5.2.1's default "simple" query parser
+ * (the probe is $SCRATCH/logs/620-fix1-rt/F7-qparser-probe.log in the fix-round evidence):
+ *   · A REPEATED key — `?client=<uuid>&client=<uuid>` — arrives as an ARRAY, so a
+ *     `typeof raw === "string"` test is false and the old code read it as "no client scope". The
+ *     measured consequence was the real PDF served for a document the caller had explicitly
+ *     narrowed AWAY from, under a 200, with an egress receipt recording `args.client = null`.
+ *   · A BRACKETED key — `?client[]=<uuid>`, `?client[a]=<uuid>` — arrives under a DIFFERENT key
+ *     NAME (`client[]`), so `req.query.client` is undefined and the parameter looked absent. It is
+ *     not absent: it is how several HTTP clients serialise a list, so the caller did ask for a
+ *     scope. A key that differs from a known parameter only by a bracket suffix is therefore
+ *     treated as a MALFORMED SPELLING OF THAT PARAMETER, not as an unrelated query key. Nothing
+ *     legitimate sends one, so this refuses no real caller.
+ *
+ * WHY NOT JUST TAKE THE FIRST ELEMENT OF THE ARRAY. Because the route would then be guessing which
+ * of two scopes the caller meant, and the estate's rule for a request it cannot read is to refuse
+ * it, not to pick. The client scope is an opt-in narrowing today and omitting it is a sanctioned
+ * 200 for any active member — so this is not a privilege escalation. It is the hole that opens the
+ * moment the scope is load-bearing, and the receipt is wrong about a real read in the meantime.
+ */
+export function scalarQueryParam(query: unknown, name: string): { ok: true; value: string | null } | { ok: false } {
+  const q = (query ?? {}) as Record<string, unknown>;
+  for (const key of Object.keys(q)) {
+    if (key !== name && key.startsWith(`${name}[`)) return { ok: false };
+  }
+  const raw = q[name];
+  if (raw === undefined) return { ok: true, value: null };
+  if (typeof raw !== "string") return { ok: false };
+  return { ok: true, value: raw === "" ? null : raw };
+}
+
 export function documentRoutes(): express.Router {
   const router = express.Router();
 
@@ -178,9 +216,12 @@ export function documentRoutes(): express.Router {
     // `client` is a 404 rather than a 400 deliberately: a 400 here would tell a caller that the
     // DOCUMENT id was fine, which is exactly the oracle the single 404 exists to close.
     const documentId = req.params.id;
-    const clientRaw = req.query.client;
-    const client = typeof clientRaw === "string" && clientRaw !== "" ? clientRaw : null;
-    if (!isDocumentId(documentId) || (client !== null && !isDocumentId(client))) {
+    const clientQuery = scalarQueryParam(req.query, "client");
+    const client = clientQuery.ok ? clientQuery.value : null;
+    // A SHAPE THIS ROUTE CANNOT READ IS A REFUSAL, NOT A DEFAULT. `!clientQuery.ok` covers the
+    // repeated and bracketed spellings `scalarQueryParam` documents; it joins the same 404 as a
+    // malformed uuid, so the byte-identical set does not grow a tenth shape.
+    if (!clientQuery.ok || !isDocumentId(documentId) || (client !== null && !isDocumentId(client))) {
       res.status(404).json({ error: "not_found", message: "not found" });
       return;
     }
@@ -188,8 +229,12 @@ export function documentRoutes(): express.Router {
     // 3. The disposition. It is the caller's OWN request shape, so a bad one is a 400 — and it is
     // decided BEFORE any read, so "bad disposition" answers 400 for a real id and a fabricated one
     // alike and cannot be used to probe existence.
-    const dispositionRaw = req.query.disposition;
-    const disposition = dispositionRaw === undefined || dispositionRaw === "" ? "inline" : dispositionRaw;
+    const dispositionQuery = scalarQueryParam(req.query, "disposition");
+    const disposition = dispositionQuery.ok ? (dispositionQuery.value ?? "inline") : null;
+    // The same refusal for the same two spellings, at this parameter's OWN status. It matters more
+    // here than it reads: `inline` is the default, so accepting `?disposition[]=attachment` as
+    // absent would serve a document INLINE — and audit it as a `preview` — to a caller who asked
+    // for a download.
     if (disposition !== "inline" && disposition !== "attachment") {
       res.status(400).json({ error: "invalid_input", message: "disposition must be inline or attachment" });
       return;
