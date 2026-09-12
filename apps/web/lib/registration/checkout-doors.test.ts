@@ -9,13 +9,19 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { readFileSync, readdirSync } from "node:fs";
+import { dirname, join, relative } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import {
+  cancelCheckoutIntent,
   claimPaidFirm,
   getCurrentCheckoutPlan,
+  getOwnCheckoutIntentSession,
   openCheckoutIntent,
   recordCheckoutSession,
 } from "./checkout-doors";
+import { CHECKOUT_INTENT_STATUSES } from "./checkout-progress-reads";
 import type { SessionTokenAccessor } from "@/lib/session";
 
 const accessor: SessionTokenAccessor = { getAccessToken: async () => "test-token" };
@@ -135,4 +141,102 @@ test("recordCheckoutSession sends exactly the three door parameters", async () =
     else process.env.NEXT_PUBLIC_SUPABASE_URL = originalUrl;
   }
   assert.deepEqual(sent, { p_intent: "int-1", p_session_id: "cs_1", p_op_key: "o" });
+});
+
+// ===========================================================================
+// #628 REVIEW — THE INTENT'S STATUS IS A CLOSED UNION, DECODED AS ONE
+// ===========================================================================
+
+const REGISTRATION = "11111111-1111-1111-1111-111111111111";
+const INTENT = "44444444-4444-4444-8444-444444444444";
+
+test("#628 review — every status in the CLOSED vocabulary decodes, and nothing else does", async () => {
+  // WHAT WAS WRONG. `OwnCheckoutIntentSession.status` was typed `string` beside
+  // a `CheckoutIntentStatus` union that already spelled the column's CHECK. The
+  // cost was not theoretical: `cancel/handler.ts` branches on
+  // `status === "expired"`, and against a bare `string` TypeScript accepts a
+  // comparison to a literal that can never occur — a typo there would have
+  // compiled into an arm that never fires, silently, forever.
+  for (const status of CHECKOUT_INTENT_STATUSES) {
+    const row = await withDoor(
+      () => json([{ intent_id: INTENT, session_id: "cs_628", status }]),
+      () => getOwnCheckoutIntentSession(REGISTRATION, accessor),
+    );
+    assert.deepEqual(row, { intentId: INTENT, sessionId: "cs_628", status }, status);
+  }
+
+  // A STATUS OUTSIDE THE VOCABULARY IS NO ROW — not a weaker observation of a
+  // known one. The caller would otherwise go on to decide, on the surface that
+  // ENDS A PAYMENT, whether to cancel an intent whose state it cannot name.
+  // `null` reaches the cancel route as `nothing_to_cancel`, which is honest.
+  for (const status of ["", "refunded", "PAID", 9, null, undefined, {}]) {
+    assert.equal(
+      await withDoor(
+        () => json([{ intent_id: INTENT, session_id: "cs_628", status }]),
+        () => getOwnCheckoutIntentSession(REGISTRATION, accessor),
+      ),
+      null,
+      JSON.stringify(status),
+    );
+  }
+});
+
+test("#628 review — cancel_checkout_intent's own status is decoded the same way", async () => {
+  // The value the handler compares to `"expired"`. A door answering a status
+  // this build cannot name is a door this build must not translate into a
+  // sentence for a person: it THROWS, and the cancel route's catch renders
+  // `unavailable` — the honest card for "the door answered something we do not
+  // understand".
+  for (const status of CHECKOUT_INTENT_STATUSES) {
+    const out = await withDoor(
+      () => json({ status, session_id: "cs_628" }),
+      () => cancelCheckoutIntent({ intentId: INTENT, opKey: "k" }, accessor),
+    );
+    assert.deepEqual(out, { status, sessionId: "cs_628", replay: false }, status);
+  }
+  for (const status of ["refunded", "Cancelled"]) {
+    await assert.rejects(
+      () => withDoor(
+        () => json({ status, session_id: "cs_628" }),
+        () => cancelCheckoutIntent({ intentId: INTENT, opKey: "k" }, accessor),
+      ),
+      /does not know how to read/,
+      status,
+    );
+  }
+});
+
+test("#628's DB round — the web NEVER calls `get_admission_capacity`", () => {
+  // IT IS OPERATOR-ONLY. The applicant-facing verdict rides on
+  // `get_own_checkout_progress`'s `capacity_full` column, which is why the two
+  // pre-firm faces can refuse to offer a pay control the door would refuse
+  // anyway. A browser-side call to the operator read would be this app asking a
+  // question it has no standing to ask, and it would go RED at the door rather
+  // than in review — which is a refusal an applicant reads, on a money surface.
+  //
+  // SCANNED AT THE SOURCE, not asserted about this module alone: the property
+  // is "no path in this app", and a roster that only watched its own file would
+  // miss the next one.
+  const webRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
+  const skip = new Set(["node_modules", ".next", ".open-next", ".wrangler", ".git"]);
+  const offenders: string[] = [];
+  const walk = (dir: string): void => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (entry.name.startsWith(".") || skip.has(entry.name)) continue;
+      const abs = join(dir, entry.name);
+      if (entry.isDirectory()) { walk(abs); continue; }
+      // APPLICATION paths only. A cell (this one included) may name the door in
+      // a string; what must not exist is a shipped path that calls it.
+      if (!/\.(ts|tsx|mjs|js)$/.test(entry.name) || /\.test\./.test(entry.name)) continue;
+      // The QUOTED name — a door name as a `callDoor` argument or an RPC path.
+      // Prose mentions (`get_admission_capacity()`, in this module's own
+      // headers) carry a paren and are deliberately not matched: the property
+      // is about calls, not about whether the door may be named in a comment.
+      if (/(["'`])get_admission_capacity\1/.test(readFileSync(abs, "utf8"))) {
+        offenders.push(relative(webRoot, abs));
+      }
+    }
+  };
+  walk(webRoot);
+  assert.deepEqual(offenders, [], "an application path names the operator-only capacity door");
 });

@@ -12,7 +12,11 @@ import { test } from "node:test";
 
 import { NextResponse } from "next/server";
 
-import { handleCheckoutPost, openRegistrationFrom } from "../app/(entry)/checkout/handler";
+import {
+  handleCheckoutPost,
+  isStripeHostedCheckoutUrl,
+  openRegistrationFrom,
+} from "../app/(entry)/checkout/handler";
 import { checkoutFlashCookie } from "@/lib/checkout/checkout-flash";
 import {
   checkoutIdempotencyKey,
@@ -836,4 +840,131 @@ test("#628: a REAL Stripe outage still reads as an outage, not as a misconfigura
   assert.match(said[0] as string, /stripe_unavailable \(refused\)/);
   // AND THE ONE-SHOT INTENT IS UNSTAMPED, so the retry the card invites is safe.
   assert.deepEqual(rec.doorCalls.filter((c) => c.fn === "record_checkout_session"), []);
+});
+
+// ===========================================================================
+// #628 REVIEW — THE REDIRECT TARGET IS VALIDATED BEFORE ANYONE IS SENT TO IT
+// ===========================================================================
+
+test("#628 review — the hosted-checkout host check is an ALLOWLIST, anchored on a dot", async () => {
+  // THE UNIT, DRIVEN DIRECTLY, because the interesting inputs are the ones a
+  // route fixture cannot conveniently produce in bulk.
+  for (const good of [
+    "https://checkout.stripe.com/c/pay/cs_test_123",
+    "https://checkout.stripe.com/pay/cs_live_628#fragment",
+    "https://pay.stripe.com/x",
+    "https://stripe.com/x",
+  ]) {
+    assert.equal(isStripeHostedCheckoutUrl(good), true, good);
+  }
+  for (const bad of [
+    // THE SUFFIX TRAP. `endsWith("stripe.com")` waves this through; the dot
+    // anchor is what makes the allowlist an allowlist.
+    "https://evilstripe.com/c/pay/cs_test_123",
+    "https://checkout.stripe.com.attacker.example/c/pay",
+    // SCHEME. A payment page is https or it is not a payment page.
+    "http://checkout.stripe.com/c/pay/cs_test_123",
+    "javascript:alert(1)",
+    "data:text/html,<h1>pay</h1>",
+    // CREDENTIALS IN THE AUTHORITY — the classic way to make a URL LOOK like
+    // one host while the browser resolves another.
+    "https://checkout.stripe.com@attacker.example/pay",
+    // NOT A URL AT ALL.
+    "/c/pay/cs_test_123",
+    "",
+  ]) {
+    assert.equal(isStripeHostedCheckoutUrl(bad), false, bad);
+  }
+});
+
+test("#628 review — a RESUME to a non-Stripe URL is refused, and nobody is redirected", async () => {
+  // THE DEFECT. `resumeCheckout` 303'd the browser to `live.url` taken straight
+  // out of a JSON body — on the one route whose whole job is to send somebody
+  // somewhere to type card details. "We trusted the upstream" is the sentence
+  // at the start of every open-redirect post-mortem, and the value is a
+  // REDIRECT TARGET derived from a third party's response.
+  const rec = recorder();
+  const response = await withDoors(
+    rec,
+    { ...HAPPY_DOORS, open_checkout_intent: inProgress() },
+    () => handleCheckoutPost(postRequest(), {
+      ...deps(rec),
+      retrieveSession: async (id: string) => ({
+        id,
+        status: "open" as const,
+        url: "https://evilstripe.com/c/pay/cs_live_628",
+      }),
+    }),
+  );
+
+  // NOT A REDIRECT TO IT. The card is the outage one, which is true in the only
+  // sense that matters to the person: this app could not hand them a checkout
+  // page it was willing to send them to.
+  assert.equal(readFlash(response).kind, "stripe_unavailable");
+  assert.notEqual(response.headers.get("location"), "https://evilstripe.com/c/pay/cs_live_628");
+  // AND NOTHING WAS WRITTEN. A resume is a read plus a redirect; a refused one
+  // is a read plus a card.
+  assert.equal(rec.stripeCalls.length, 0, "a refused resume minted a Session");
+  assert.deepEqual(rec.doorCalls.filter((c) => c.fn === "record_checkout_session"), []);
+});
+
+test("#628 review — a CREATED Session with a non-Stripe URL is refused BEFORE the stamp", async () => {
+  // The same hazard on the create hop, and the order is the property: the check
+  // runs before `record_checkout_session`, so a URL this app will not send
+  // anyone to never spends the intent's one stampable Session slot.
+  const rec = recorder();
+  const response = await withDoors(rec, HAPPY_DOORS, () =>
+    handleCheckoutPost(postRequest(), deps(rec, {
+      createSession: async (r: CheckoutSessionRequest) => {
+        rec.stripeCalls.push(r);
+        return { id: "cs_test_123", url: "https://attacker.example/c/pay/cs_test_123" };
+      },
+    })),
+  );
+
+  assert.equal(readFlash(response).kind, "stripe_unavailable");
+  assert.deepEqual(
+    rec.doorCalls.filter((c) => c.fn === "record_checkout_session"),
+    [],
+    "a one-shot intent was stamped with a Session nobody will ever be sent to",
+  );
+});
+
+// ===========================================================================
+// #628 REVIEW — A BROKEN DEADLOCK IS "TRY AGAIN", NOT "UNAVAILABLE"
+// ===========================================================================
+
+test("#628 review — 40P01 / 40001 on a door reach the try_again card, and nothing is retried", async () => {
+  // The DB fix round changes `claim_paid_firm`'s lock order and the applier's
+  // arms, so two writers meeting is an ordinary event. PostgreSQL breaks it by
+  // aborting one transaction WHOLE — nothing opened, nothing stamped, nothing
+  // charged — and the honest next step is the same press again. `unavailable`
+  // does not say that; `try_again` does, exactly as `workRoutes.ts` answers 409
+  // `{error:'transient'}` on the work lane.
+  for (const sqlstate of ["40P01", "40001"] as const) {
+    const rec = recorder();
+    const response = await withDoors(
+      rec,
+      { ...HAPPY_DOORS, open_checkout_intent: () => json({ code: sqlstate, message: "deadlock detected" }, 500) },
+      () => handleCheckoutPost(postRequest(), deps(rec)),
+    );
+    assert.equal(readFlash(response).kind, "try_again", sqlstate);
+    assert.equal(rec.stripeCalls.length, 0, `${sqlstate} reached Stripe`);
+    assert.equal(
+      rec.doorCalls.filter((c) => c.fn === "open_checkout_intent").length,
+      1,
+      `${sqlstate} was retried in-process`,
+    );
+  }
+
+  // THE DISCRIMINATING CONTROL: an ordinary failure keeps `unavailable`, or
+  // this arm would tell somebody to keep pressing through a state that pressing
+  // will not fix.
+  const rec = recorder();
+  const response = await withDoors(
+    rec,
+    { ...HAPPY_DOORS, open_checkout_intent: () => json({ code: "58030", message: "io error" }, 500) },
+    () => handleCheckoutPost(postRequest(), deps(rec)),
+  );
+  assert.equal(readFlash(response).kind, "unavailable", "a non-transient failure borrowed the try-again card");
 });

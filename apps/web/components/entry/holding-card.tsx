@@ -3,6 +3,7 @@ import Link from "next/link";
 
 import type { CheckoutFlashPayload } from "@/lib/checkout/checkout-flash";
 import { paymentFailureKindFrom } from "@/lib/checkout/payment-failure";
+import type { PaymentsMode } from "@/lib/checkout/payments-mode";
 import type { HoldingState } from "@/lib/registration/holding-state";
 import { businessDateTime } from "@/lib/business-date";
 import { cn } from "@/lib/utils";
@@ -15,6 +16,8 @@ import {
 import { Button, buttonVariants } from "@/components/ui/button";
 import { StateBanner } from "@/components/common/state";
 import { TechnicalDetail } from "@/components/common/technical-detail";
+import { PostControl } from "@/components/entry/post-control";
+import { RegistrationReference } from "@/components/entry/registration-reference";
 import { Badge } from "@/components/ui/badge";
 import { LogoutButton } from "@/components/logout-button";
 
@@ -125,9 +128,10 @@ import { LogoutButton } from "@/components/logout-button";
  * not a grant.
  */
 /** The deployment's declared Stripe mode, as the page resolved it server-side
- *  from `CLARA_STRIPE_LIVEMODE`. `"unconfigured"` is a real state, not an
- *  absence to paper over: checkout refuses in it, and the card says so. */
-export type PaymentsMode = "live" | "test" | "unconfigured";
+ *  from `CLARA_STRIPE_LIVEMODE`. Moved to `lib/checkout/payments-mode.ts` when
+ *  `/checkout/success` grew the same badge (#628 review, 7.3) and re-exported
+ *  here so this card's existing callers keep one name for it. */
+export type { PaymentsMode };
 
 /** The faces where a payment is still AHEAD of the person, and therefore the
  *  faces that owe a statement about what a payment would do. `paid`,
@@ -166,8 +170,13 @@ export function HoldingCard({
 }) {
   const t = useTranslations("Pending");
   // The agreements' names live in `Common`, once — `signup-legal-stage.tsx`
-  // reads the same two keys (7.3).
+  // reads the same two keys (7.3). So, now, do the two payments-mode statements
+  // and the reference label, which `/checkout/success` renders too.
   const tCommon = useTranslations("Common");
+  // The seven failure sentences: ONE namespace, read by this face and by
+  // `checkout-success-card.tsx`. They used to be duplicated under `Pending` and
+  // `CheckoutSuccess`, two copies of one decision free to drift (7.3).
+  const tFailure = useTranslations("PaymentFailure");
 
   return (
     <Card>
@@ -253,11 +262,7 @@ export function HoldingCard({
                 reuses only an UNSTAMPED current-plan intent, so a stale
                 session_id can never produce a dead link (N4, closed by the
                 control's shape rather than by a freshness field). */}
-            <form method="post" action="/checkout" className="w-full">
-              <Button type="submit" variant="outline" className="w-full">
-                {t("checkout_open.resume")}
-              </Button>
-            </form>
+            <PostControl action="/checkout" label={t("checkout_open.resume")} />
           </>
         )}
 
@@ -279,21 +284,40 @@ export function HoldingCard({
                 refuses `checkout_in_progress` for a live Session and the route
                 sends the person back to that same Session's hosted page. One
                 live Session per applicant is the DB's rule; this control obeys
-                it instead of racing it. */}
-            <form method="post" action="/checkout" className="w-full">
-              <Button type="submit" variant="outline" className="w-full">
-                {t("checkout_awaiting_payment.resume")}
-              </Button>
-            </form>
-            {/* ONLY WITH A STAMPED SESSION. `cancel_checkout_intent` would have
-                nothing for Stripe to expire otherwise, and a control that ends
-                a payment must not appear where there is no payment to end. */}
+                it instead of racing it.
+
+                GATED ON `resumable` (#628 review). `paid` and `consumed` reach
+                this face too — money landed, no claimable payment row observed
+                yet — and over those there is nothing to pick up and nothing to
+                end. Both controls used to render anyway, because both keyed on
+                a stamped Session id rather than on the status; pressing either
+                bought a round trip to a refusal (`already_paid`). See
+                `waitingActsFrom`. */}
+            {state.resumable && (
+              <PostControl action="/checkout" label={t("checkout_awaiting_payment.resume")} />
+            )}
+            {/* ONLY WITH A STAMPED SESSION THAT IS STILL ENDABLE.
+                `cancel_checkout_intent` would have nothing for Stripe to expire
+                otherwise, and a control that ends a payment must not appear
+                where there is no payment left to end. */}
             {state.sessionId !== null && (
-              <form method="post" action="/checkout/cancel" className="w-full">
-                <Button type="submit" variant="outline" className="w-full">
-                  {t("checkout_awaiting_payment.cancel")}
-                </Button>
-              </form>
+              <PostControl action="/checkout/cancel" label={t("checkout_awaiting_payment.cancel")} />
+            )}
+            {/* NOTHING TO RESUME AND NOTHING TO CANCEL — the settled arm. A
+                face with no act at all would leave somebody staring at a
+                sentence; a re-read is the one honest thing left, and it is the
+                same GET form the processing face uses. */}
+            {!state.resumable && (
+              <>
+                <StateBanner tone="neutral">
+                  {t("checkout_awaiting_payment.settledBanner")}
+                </StateBanner>
+                <form method="get" action="/pending" className="w-full">
+                  <Button type="submit" variant="outline" className="w-full">
+                    {t("checkoutCheckAgain")}
+                  </Button>
+                </form>
+              </>
             )}
           </>
         )}
@@ -328,27 +352,25 @@ export function HoldingCard({
               {/* The PROVIDER's token becomes OUR sentence; see
                   lib/checkout/payment-failure.ts for why it is never printed
                   raw into prose. */}
-              {t(`paymentFailure.${paymentFailureKindFrom(state.reason)}`)}
+              {tFailure(paymentFailureKindFrom(state.reason))}
             </StateBanner>
             {state.reason !== null && <TechnicalDetail>{state.reason}</TechnicalDetail>}
-            <form method="post" action="/checkout" className="w-full">
-              <Button type="submit" variant="outline" className="w-full">
-                {t("checkout_failed.retry")}
-              </Button>
-            </form>
+            <PostControl action="/checkout" label={t("checkout_failed.retry")} />
           </>
         )}
 
         {state.kind === "checkout_expired" && (
           <>
+            {/* THE SWEPT-TIMEOUT EXPIRY IS ITS OWN SENTENCE — `0186`'s applier
+                moves a `processing` intent nobody answered for 24 hours to
+                `expired` with `status_reason='processing_timeout'`, which is
+                "the bank never came back", not "the checkout page ran out". */}
             <StateBanner tone="warning" title={state.firmName}>
-              {t("checkout_expired.banner")}
+              {paymentFailureKindFrom(state.reason) === "processing_timeout"
+                ? tFailure("processing_timeout")
+                : t("checkout_expired.banner")}
             </StateBanner>
-            <form method="post" action="/checkout" className="w-full">
-              <Button type="submit" variant="outline" className="w-full">
-                {t("checkout_expired.startAgain")}
-              </Button>
-            </form>
+            <PostControl action="/checkout" label={t("checkout_expired.startAgain")} />
           </>
         )}
 
@@ -357,11 +379,7 @@ export function HoldingCard({
             <StateBanner tone="neutral" title={state.firmName}>
               {t("checkout_cancelled.banner")}
             </StateBanner>
-            <form method="post" action="/checkout" className="w-full">
-              <Button type="submit" variant="outline" className="w-full">
-                {t("checkout_cancelled.startAgain")}
-              </Button>
-            </form>
+            <PostControl action="/checkout" label={t("checkout_cancelled.startAgain")} />
           </>
         )}
 
@@ -370,7 +388,15 @@ export function HoldingCard({
           // `open_checkout_intent` refuses `capacity_reached`, so a checkout
           // button here would be an invitation to a refusal.
           <StateBanner tone="warning" title={state.firmName}>
-            {t("capacity_full.banner")}
+            <p>{t("capacity_full.banner")}</p>
+            {/* THE REFERENCE THE COPY SENDS THEM TO SUPPORT WITH. The success
+                page's own `capacity_full` promised one and rendered none
+                (#628 review); both faces now keep the promise, through the one
+                shared component. */}
+            <RegistrationReference
+              registration={state.registration}
+              label={tCommon("registrationReferenceLabel")}
+            />
           </StateBanner>
         )}
 
@@ -430,7 +456,7 @@ export function HoldingCard({
             state, so it belongs beside the states rather than inside one. */}
         {PRE_PAYMENT_FACES.has(state.kind) && paymentsMode === "test" && (
           <Badge variant="secondary" className="h-auto w-fit py-1 whitespace-normal">
-            {t("paymentsTestMode")}
+            {tCommon("paymentsTestMode")}
           </Badge>
         )}
         {PRE_PAYMENT_FACES.has(state.kind) && paymentsMode === "unconfigured" && (
@@ -438,7 +464,7 @@ export function HoldingCard({
           // `stripe_unavailable` refusal above says "try again in a moment";
           // this says the deployment has not been configured to take payments
           // at all, which no amount of trying again changes.
-          <StateBanner tone="warning">{t("paymentsNotConfigured")}</StateBanner>
+          <StateBanner tone="warning">{tCommon("paymentsNotConfigured")}</StateBanner>
         )}
 
         {/* THE ONE ACTION — secondary variant, full width. See

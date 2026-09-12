@@ -526,6 +526,7 @@ describe("#628: the intent's status splits checkout_open into five honest faces"
         kind: "checkout_awaiting_payment",
         firmName: "BEE CREATIVE SOLUTION",
         statusAt: "2026-09-12T04:30:00.000Z",
+        resumable: true,
         sessionId: "cs_628",
       },
     );
@@ -539,11 +540,59 @@ describe("#628: the intent's status splits checkout_open into five honest faces"
     );
     assert.deepEqual(
       holdingStateFrom(ok([OPEN_ROW], NO_MEMBERSHIP, withStatus({ intentStatus: "expired" }))),
-      { kind: "checkout_expired", firmName: "BEE CREATIVE SOLUTION" },
+      { kind: "checkout_expired", firmName: "BEE CREATIVE SOLUTION", reason: null },
     );
     assert.deepEqual(
       holdingStateFrom(ok([OPEN_ROW], NO_MEMBERSHIP, withStatus({ intentStatus: "cancelled" }))),
       { kind: "checkout_cancelled", firmName: "BEE CREATIVE SOLUTION" },
+    );
+  });
+
+  it("#628 review — A PAID INTENT LEAVES NOTHING TO RESUME AND NOTHING TO CANCEL", () => {
+    // THE DEFECT. `paid` and `consumed` reach the `checkout_awaiting_payment`
+    // face by design (money landed, no claimable payment row observed yet) —
+    // and they reach it with the intent's Stripe Session id still stamped. This
+    // face offered "Resume checkout" unconditionally and "Cancel and start
+    // again" off that id, so somebody whose money was already gone was handed
+    // two controls that can only end in a refusal (`already_paid`, and an
+    // `open_checkout_intent` with nothing left to open).
+    for (const status of ["paid", "consumed"] as const) {
+      assert.deepEqual(
+        holdingStateFrom(ok([OPEN_ROW], NO_MEMBERSHIP, withStatus({ intentStatus: status, intentSessionId: "cs_628" }))),
+        {
+          kind: "checkout_awaiting_payment",
+          firmName: "BEE CREATIVE SOLUTION",
+          statusAt: null,
+          resumable: false,
+          sessionId: null,
+        },
+        status,
+      );
+    }
+    // MUST-NOT-RED CONTROL: a genuinely live Session keeps BOTH controls, or
+    // this fix would have removed them from the one state that needs them.
+    const live = holdingStateFrom(
+      ok([OPEN_ROW], NO_MEMBERSHIP, withStatus({ intentStatus: "session_created", intentSessionId: "cs_628" })),
+    );
+    assert.deepEqual(
+      live,
+      {
+        kind: "checkout_awaiting_payment",
+        firmName: "BEE CREATIVE SOLUTION",
+        statusAt: null,
+        resumable: true,
+        sessionId: "cs_628",
+      },
+    );
+  });
+
+  it("#628 review — the EXPIRED face carries the DB's reason, so a swept timeout reads as one", () => {
+    // `0186`'s applier sweeps a `processing` intent nobody answered for 24
+    // hours to `expired` with `status_reason='processing_timeout'` — "your bank
+    // never came back", which is not the hosted page running out of time.
+    assert.deepEqual(
+      holdingStateFrom(ok([OPEN_ROW], NO_MEMBERSHIP, withStatus({ intentStatus: "expired", intentStatusReason: "processing_timeout" }))),
+      { kind: "checkout_expired", firmName: "BEE CREATIVE SOLUTION", reason: "processing_timeout" },
     );
   });
 
@@ -563,7 +612,9 @@ describe("#628: the intent's status splits checkout_open into five honest faces"
   it("capacity_full ranks BELOW anything in flight and ABOVE nothing else", () => {
     assert.deepEqual(
       holdingStateFrom(ok([OPEN_ROW], NO_MEMBERSHIP, { ...NO_CHECKOUT_PROGRESS, capacityFull: true })),
-      { kind: "capacity_full", firmName: "BEE CREATIVE SOLUTION" },
+      // THE REFERENCE RIDES ALONG (#628 review) — the card's copy tells the
+      // person to quote it, so the card has to be able to render it.
+      { kind: "capacity_full", firmName: "BEE CREATIVE SOLUTION", registration: OPEN_ROW.id },
     );
     assert.equal(
       holdingStateFrom(ok([OPEN_ROW], NO_MEMBERSHIP, { ...withStatus({ intentStatus: "processing" }), capacityFull: true })).kind,

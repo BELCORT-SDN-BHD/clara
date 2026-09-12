@@ -312,3 +312,46 @@ test("#628: two CONCURRENT claims on one paid registration converge on ONE firm"
   }
   assert.equal(calls.length, 1, "both racers called the tenant-creating door");
 });
+
+test("#628 review — A DEADLOCK OR SERIALIZATION FAILURE IS `try_again`, NOT `unavailable`", async () => {
+  // WHAT CHANGED AND WHY IT LANDS HERE. The DB fix round changes
+  // `claim_paid_firm`'s lock order and the applier's arms, which makes two
+  // writers meeting on one payment an ORDINARY event rather than a curiosity —
+  // the applicant's claim and the applier's own write, on the same rows.
+  // PostgreSQL breaks that by aborting one transaction WHOLE: no firm, no
+  // membership, no consumed payment, nothing half-done.
+  //
+  // SO THE SENTENCE MATTERS. `unavailable` says "we could not read where your
+  // application stands", which to somebody who has just paid money reads as
+  // "your payment is in limbo" and sends them to support. `try_again` says
+  // nothing was changed and offers the same act again — which is the truth, and
+  // which `workRoutes.ts` already says for the work lane's 409 transient.
+  //
+  // NEITHER CODE IS A CLR REFUSAL: no door said no, so this can never be the
+  // `refused` card either.
+  for (const sqlstate of ["40P01", "40001"] as const) {
+    const calls: Array<{ fn: string; args: Record<string, unknown> }> = [];
+    const response = await withDoor(
+      calls,
+      () => json({ code: sqlstate, message: "deadlock detected" }, 500),
+      () => handleClaimPaidFirmPost(postRequest(), deps()),
+    );
+    const flash = readFlash(response);
+    assert.equal(flash.kind, "try_again", sqlstate);
+    // NOT RETRIED BY THE ROUTE. The PERSON retries, deliberately, from a card
+    // that says nothing was changed — this module has never had a retry helper
+    // and this arm does not introduce one.
+    assert.equal(calls.filter((c) => c.fn === "claim_paid_firm").length, 1, `${sqlstate} was retried in-process`);
+  }
+
+  // THE DISCRIMINATING CONTROL: an ordinary transport failure is still
+  // `unavailable`, or this arm would have swallowed every failure class into a
+  // cheerful "try again" about states that trying again will not fix.
+  const calls: Array<{ fn: string; args: Record<string, unknown> }> = [];
+  const response = await withDoor(
+    calls,
+    () => json({ code: "58030", message: "io error" }, 500),
+    () => handleClaimPaidFirmPost(postRequest(), deps()),
+  );
+  assert.equal(readFlash(response).kind, "unavailable", "a non-transient failure borrowed the try-again card");
+});

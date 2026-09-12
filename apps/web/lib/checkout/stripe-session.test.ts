@@ -20,6 +20,7 @@ import { test } from "node:test";
 
 import {
   CHECKOUT_TIMEOUT_MS,
+  STRIPE_API_BASE,
   STRIPE_API_VERSION,
   STRIPE_LIVEMODE_VAR,
   STRIPE_SECRET_KEY_VAR,
@@ -735,4 +736,67 @@ test("#628: both new verbs are BOUNDED and carry the create path's own failure c
   }
   // The SHIPPED bound is still the module's own constant, never a test's.
   assert.equal(CHECKOUT_TIMEOUT_MS, 10_000);
+});
+
+test("#628 review — ALL THREE VERBS SHARE ONE HOP: identical request discipline on the wire", () => {
+  // WHAT WAS DUPLICATED. `stripeFetch` was extracted FROM `createCheckoutSession`
+  // for the two new verbs, and the create path kept its own copy: its own
+  // AbortController, its own `CHECKOUT_TIMEOUT_MS` read, its own
+  // `redirect: "manual"` / `cache: "no-store"` pair, its own status check and
+  // its own JSON hop. Two implementations of "how we talk to Stripe" in one
+  // module is the shape where a deadline is tightened on one path and a header
+  // added to the other, with nothing going red (7.3).
+  //
+  // MEASURED ON THE WIRE, not by reading the source: each verb is driven once
+  // and the fetch init it produced is compared field by field. A refactor that
+  // quietly reintroduced a second hop would have to reproduce every one of
+  // these to pass, which is the point.
+  const seen: Array<{ url: string; init: RequestInit }> = [];
+  // ONE body all three verbs accept, so the only thing that varies between the
+  // three calls is the verb itself.
+  const fetchImpl = (async (url: unknown, init: RequestInit) => {
+    seen.push({ url: String(url), init });
+    return new Response(
+      JSON.stringify({ id: "cs_test_123", status: "open", url: "https://checkout.stripe.com/c/pay/cs_test_123" }),
+      { status: 200, headers: { "content-type": "application/json" } },
+    );
+  }) as unknown as typeof fetch;
+
+  return Promise.all([
+    createCheckoutSession(REQUEST, { env: CONFIGURED, fetchImpl }),
+    retrieveCheckoutSession(SESSION_ID, { env: CONFIGURED, fetchImpl }),
+    expireCheckoutSession(SESSION_ID, { env: CONFIGURED, fetchImpl }),
+  ]).then(() => {
+    assert.equal(seen.length, 3, "a verb did not reach the wire");
+    for (const { url, init } of seen) {
+      assert.ok(url.startsWith(`${STRIPE_API_BASE}/`), url);
+      // THE FOUR DISCIPLINES, ON EVERY VERB. `redirect: "manual"` so a 3xx is
+      // never followed to somewhere this app did not intend; `no-store` so a
+      // money response is never cached; a live `signal` so the deadline can
+      // actually abort; the pinned API version so a silent Stripe upgrade
+      // cannot change a response shape under a running deployment.
+      assert.equal(init.redirect, "manual", url);
+      assert.equal(init.cache, "no-store", url);
+      assert.ok(init.signal instanceof AbortSignal, `${url} has no abort signal`);
+      const headers = init.headers as Record<string, string>;
+      assert.equal(headers["Stripe-Version"], STRIPE_API_VERSION, url);
+      assert.equal(headers.Authorization, `Bearer ${FIXTURE_KEY}`, url);
+    }
+    // AND THE PER-VERB DIFFERENCES ARE EXACTLY THE INTENDED ONES: a body (and
+    // therefore a POST and a content type) on the two that write, none on the
+    // read; an idempotency key on the two that are replayable.
+    const [create, retrieve, expire] = seen as [typeof seen[number], typeof seen[number], typeof seen[number]];
+    assert.equal(create.init.method, "POST");
+    assert.equal(retrieve.init.method, "GET");
+    assert.equal(expire.init.method, "POST");
+    assert.equal(retrieve.init.body, undefined, "the read sent a body");
+    assert.equal((retrieve.init.headers as Record<string, string>)["Idempotency-Key"], undefined);
+    assert.equal((create.init.headers as Record<string, string>)["Idempotency-Key"], REQUEST.idempotencyKey);
+    assert.equal(
+      (expire.init.headers as Record<string, string>)["Idempotency-Key"],
+      expireIdempotencyKey(SESSION_ID),
+    );
+    // The create path's own body is unchanged — the form builder still owns it.
+    assert.equal(create.init.body, checkoutSessionForm(REQUEST).toString());
+  });
 });

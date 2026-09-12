@@ -39,6 +39,13 @@ export const PAYMENT_FAILURE_KINDS = [
   "incorrect_details",
   "authentication_failed",
   "processing_error",
+  /** #628's DB round — the applier sweeps a `processing` intent that has gone
+   *  unanswered for 24 hours to `expired` with `status_reason =
+   *  'processing_timeout'`. It is the DB's own token like every other member
+   *  here, and it owes its own sentence: "the bank never came back" is a
+   *  different fact from "the card was declined" and from an ordinary hosted-
+   *  page expiry. */
+  "processing_timeout",
   "unknown",
 ] as const;
 
@@ -51,6 +58,15 @@ export type PaymentFailureKind = (typeof PAYMENT_FAILURE_KINDS)[number];
  * this table does not carry is `unknown` — deliberately, and the table is
  * widened only when a real token is observed, never on a guess about what the
  * applier might one day write.
+ */
+/**
+ * PROTOTYPE-FREE BY CONSTRUCTION. This table is indexed with a value that came
+ * off the wire, and a plain object literal answers `"constructor"`,
+ * `"__proto__"`, `"toString"` and every other `Object.prototype` member with
+ * something that is not a `PaymentFailureKind` at all — which `?? "unknown"`
+ * does NOT catch, because those lookups are not nullish. `paymentFailureKindFrom`
+ * therefore asks `Object.hasOwn` before it reads, so the only keys that can
+ * answer are the ones written below.
  */
 const BY_TOKEN: Readonly<Record<string, PaymentFailureKind>> = {
   card_declined: "card_declined",
@@ -71,6 +87,8 @@ const BY_TOKEN: Readonly<Record<string, PaymentFailureKind>> = {
   payment_intent_authentication_failure: "authentication_failed",
   processing_error: "processing_error",
   try_again_later: "processing_error",
+  // The APPLIER'S own token, not Stripe's — `0186`'s 24-hour sweep.
+  processing_timeout: "processing_timeout",
 };
 
 /**
@@ -83,5 +101,12 @@ const BY_TOKEN: Readonly<Record<string, PaymentFailureKind>> = {
  */
 export function paymentFailureKindFrom(reason: string | null): PaymentFailureKind {
   if (typeof reason !== "string") return "unknown";
-  return BY_TOKEN[reason.trim().toLowerCase()] ?? "unknown";
+  const token = reason.trim().toLowerCase();
+  // OWN KEYS ONLY. `BY_TOKEN["constructor"]` is a function and
+  // `BY_TOKEN["__proto__"]` an object — both truthy, so `?? "unknown"` would
+  // have let either straight through as if it were a copy key, and
+  // `t("paymentFailure.function Object() ...")` is what the person would have
+  // read. The reason is a value a third party's error code supplies; the table
+  // answers for the tokens it declares and for nothing else.
+  return Object.hasOwn(BY_TOKEN, token) ? BY_TOKEN[token] as PaymentFailureKind : "unknown";
 }

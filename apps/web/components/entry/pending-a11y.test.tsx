@@ -47,6 +47,9 @@ type QueriedNode = { getAttribute(name: string): string | null };
  */
 const STALE_NOT_BUILT = /Not built yet|isn't wired up|not wired/i;
 
+/** #628 review — the reference the `capacity_full` copy tells a person to quote. */
+const REGISTRATION = "11111111-1111-1111-1111-111111111111";
+
 const query = (container: unknown) => (selector: string): QueriedNode | null =>
   (container as { querySelector(s: string): QueriedNode | null }).querySelector(selector);
 
@@ -89,12 +92,12 @@ const STATES: { state: HoldingState; distinctive: RegExp }[] = [
   // capacity one. Each is scanned and keyboard-walked exactly like the rest:
   // three of them carry a control that ENDS or RESTARTS a payment, which is
   // precisely the class of control a happy-path-only scan never sees.
-  { state: { kind: "checkout_awaiting_payment", firmName: "ROME PROPERTIES", statusAt: "2026-09-12T04:30:00.000Z", sessionId: "cs_628" }, distinctive: /checkout is open and not paid yet/i },
+  { state: { kind: "checkout_awaiting_payment", firmName: "ROME PROPERTIES", statusAt: "2026-09-12T04:30:00.000Z", resumable: true, sessionId: "cs_628" }, distinctive: /checkout is open and not paid yet/i },
   { state: { kind: "checkout_processing", firmName: "ROME PROPERTIES", statusAt: "2026-09-12T04:30:00.000Z" }, distinctive: /bank is confirming/i },
   { state: { kind: "checkout_failed", firmName: "ROME PROPERTIES", reason: "card_declined" }, distinctive: /card was declined/i },
-  { state: { kind: "checkout_expired", firmName: "ROME PROPERTIES" }, distinctive: /That checkout expired/i },
+  { state: { kind: "checkout_expired", firmName: "ROME PROPERTIES", reason: null }, distinctive: /That checkout expired/i },
   { state: { kind: "checkout_cancelled", firmName: "ROME PROPERTIES" }, distinctive: /That checkout was cancelled/i },
-  { state: { kind: "capacity_full", firmName: "ROME PROPERTIES" }, distinctive: /Admission is currently full/i },
+  { state: { kind: "capacity_full", firmName: "ROME PROPERTIES", registration: REGISTRATION }, distinctive: /Admission is currently full/i },
   { state: { kind: "paid", firmName: "ROME PROPERTIES" }, distinctive: /finish opening your firm/i },
   { state: { kind: "rejected", firmName: "ROME PROPERTIES", reason: "the firm name matches an existing member firm" }, distinctive: /the firm name matches an existing member firm/ },
   { state: { kind: "rejected", firmName: "ROME PROPERTIES", reason: null }, distinctive: /No reason was recorded/ },
@@ -494,14 +497,25 @@ test("ticket 628 — each face offers EXACTLY the acts that are available in it"
   // all got the same POST. Two of those mint a second checkout for somebody who
   // must not have one; one of them invites a second payment.
   assert.deepEqual(
-    await actionsOf({ kind: "checkout_awaiting_payment", firmName: "F", statusAt: null, sessionId: "cs_628" }),
+    await actionsOf({ kind: "checkout_awaiting_payment", firmName: "F", statusAt: null, resumable: true, sessionId: "cs_628" }),
     ["post /checkout", "post /checkout/cancel"],
     "the unpaid-session face must offer both picking it up and ending it",
   );
   assert.deepEqual(
-    await actionsOf({ kind: "checkout_awaiting_payment", firmName: "F", statusAt: null, sessionId: null }),
+    await actionsOf({ kind: "checkout_awaiting_payment", firmName: "F", statusAt: null, resumable: true, sessionId: null }),
     ["post /checkout"],
     "a cancel control was offered with no Session to cancel",
+  );
+  // #628 REVIEW — THE SETTLED ARM. `paid` and `consumed` reach this same face
+  // (money landed, no claimable payment row observed yet) with the intent's
+  // Session id still stamped. Both controls used to render off that id alone,
+  // so the person was offered "Resume checkout" and "Cancel and start again"
+  // over money that was already gone — and pressing either bought a round trip
+  // to `already_paid`. The only honest act left is to look again.
+  assert.deepEqual(
+    await actionsOf({ kind: "checkout_awaiting_payment", firmName: "F", statusAt: null, resumable: false, sessionId: null }),
+    ["get /pending"],
+    "a settled checkout still offered an act the door refuses",
   );
   assert.deepEqual(
     await actionsOf({ kind: "checkout_processing", firmName: "F", statusAt: null }),
@@ -510,7 +524,7 @@ test("ticket 628 — each face offers EXACTLY the acts that are available in it"
   );
   for (const state of [
     { kind: "checkout_failed", firmName: "F", reason: "card_declined" },
-    { kind: "checkout_expired", firmName: "F" },
+    { kind: "checkout_expired", firmName: "F", reason: null },
     { kind: "checkout_cancelled", firmName: "F" },
   ] as const) {
     assert.deepEqual(await actionsOf(state), ["post /checkout"], state.kind);
@@ -518,7 +532,54 @@ test("ticket 628 — each face offers EXACTLY the acts that are available in it"
   // THE ONE FACE WITH NO ACT AT ALL. `open_checkout_intent` refuses
   // `capacity_reached`, so any control here would be an invitation to a
   // refusal.
-  assert.deepEqual(await actionsOf({ kind: "capacity_full", firmName: "F" }), []);
+  assert.deepEqual(await actionsOf({ kind: "capacity_full", firmName: "F", registration: REGISTRATION }), []);
+});
+
+test("ticket 628 review — capacity_full RENDERS the reference its copy tells the person to quote", async () => {
+  // The success page's own `capacity_full` promised a reference and rendered
+  // none; both faces now make the same promise and both keep it, through the
+  // one shared component (7.3).
+  const h = await renderComponent(App(createElement(HoldingCard, {
+    state: { kind: "capacity_full", firmName: "ROME PROPERTIES", registration: REGISTRATION },
+  })));
+  try {
+    for (let i = 0; i < 2; i++) await h.settle();
+    const text = textOf(h.container as never);
+    assert.match(text, /quote your registration reference/i, "the promise is gone from the copy");
+    assert.ok(text.includes(REGISTRATION), "the reference the copy promises is not on screen");
+    assert.deepEqual(checkAccessibility(h.container as never), []);
+    assert.deepEqual(checkKeyboardWalk(h.container as never), []);
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("ticket 628 review — the SWEPT-TIMEOUT expiry is its own sentence on the holding face too", async () => {
+  // `0186`'s applier moves a `processing` intent nobody answered for 24 hours to
+  // `expired` with `status_reason='processing_timeout'`. "Your bank never came
+  // back" is not "the checkout page ran out of time".
+  const swept = await renderComponent(App(createElement(HoldingCard, {
+    state: { kind: "checkout_expired", firmName: "F", reason: "processing_timeout" },
+  })));
+  try {
+    for (let i = 0; i < 2; i++) await swept.settle();
+    const text = textOf(swept.container as never);
+    assert.match(text, /did not hear back from your bank/i);
+    assert.doesNotMatch(text, /no longer open, so it cannot be paid/i);
+  } finally {
+    await swept.unmount();
+  }
+  const ordinary = await renderComponent(App(createElement(HoldingCard, {
+    state: { kind: "checkout_expired", firmName: "F", reason: null },
+  })));
+  try {
+    for (let i = 0; i < 2; i++) await ordinary.settle();
+    const text = textOf(ordinary.container as never);
+    assert.match(text, /no longer open, so it cannot be paid/i);
+    assert.doesNotMatch(text, /did not hear back from your bank/i);
+  } finally {
+    await ordinary.unmount();
+  }
 });
 
 test("ticket 628 — the failed face says what happened in PLAIN WORDS, and never the provider's token in prose", async () => {
@@ -594,20 +655,22 @@ test("ticket 628 — the payments badge is the SERVER'S declared mode, on the fa
   for (const state of [
     { kind: "paid", firmName: "F" },
     { kind: "checkout_processing", firmName: "F", statusAt: null },
-    { kind: "capacity_full", firmName: "F" },
+    { kind: "capacity_full", firmName: "F", registration: REGISTRATION },
   ] as const) {
     assert.doesNotMatch(await read("test", state), /Test mode/, state.kind);
     assert.doesNotMatch(await read("unconfigured", state), /has not been set up to take payments/i, state.kind);
   }
 });
 
-test("ticket 628 — the seven new checkout refusal kinds each render their OWN copy", async () => {
+test("ticket 628 — the eight new checkout outcome kinds each render their OWN copy", async () => {
   // The same property the existing refusal cell pins for the original six: a
   // card that says the same thing for a misconfigured deployment, a full house,
   // a payment mid-authorisation and a successful cancellation is a card that
-  // tells nobody anything.
+  // tells nobody anything. The review adds the eighth — `try_again`, the broken
+  // deadlock — for the same reason: it must not read as the generic failure.
   const kinds = ["payments_misconfigured", "checkout_in_progress", "checkout_expired",
-    "capacity_reached", "payment_in_flight", "cancelled", "nothing_to_cancel"] as const;
+    "capacity_reached", "payment_in_flight", "cancelled", "nothing_to_cancel",
+    "try_again"] as const;
   const rendered = new Map<string, string>();
   for (const kind of kinds) {
     const h = await renderComponent(App(createElement(HoldingCard, {
@@ -633,4 +696,10 @@ test("ticket 628 — the seven new checkout refusal kinds each render their OWN 
   // THE CANCEL SUCCESS IS NOT A FAILURE SENTENCE.
   assert.match(rendered.get("cancelled") as string, /Nothing was charged/i);
   assert.doesNotMatch(rendered.get("cancelled") as string, /could not|failed/i);
+  // THE BROKEN DEADLOCK SAYS NOTHING WAS CHANGED — which is the whole reason it
+  // is not the `unavailable` card. A rolled-back transaction opened nothing,
+  // stamped nothing and charged nothing, and the person's next step is the same
+  // press again.
+  assert.match(rendered.get("try_again") as string, /nothing was changed/i);
+  assert.match(rendered.get("try_again") as string, /try again/i);
 });

@@ -67,6 +67,35 @@ export function isDoorError(e: unknown): e is DoorError {
   return e instanceof DoorError;
 }
 
+/**
+ * POSTGRESQL'S TWO "NOTHING HAPPENED — DO THE SAME THING AGAIN" SQLSTATES.
+ *
+ * `40P01` is a deadlock the server broke by aborting one of the parties;
+ * `40001` a serialization failure under a stricter isolation level. Neither is
+ * a refusal: no door said no, and no CLR code is raised — PostgreSQL rolled the
+ * whole transaction back precisely so nothing could be left half-done. The
+ * honest answer to a person is therefore "that didn't go through, nothing was
+ * changed, try again", which is a materially better sentence than the generic
+ * "we could not do this" a caller would otherwise render.
+ *
+ * WHY THIS LIVES HERE AND NOT IN A ROUTE. `apps/web/lib/work/api.ts` already
+ * consumes the SAME classification through the work runtime's own
+ * `409 {error:'transient'}` translation; the checkout routes talk to PostgREST
+ * directly and so must read the SQLSTATE themselves. One spelling of the two
+ * codes, in the module that owns door failures, rather than a pair of string
+ * literals in each route that happens to need them (7.3).
+ *
+ * IT IS NOT A RETRY HELPER, and this module still offers none. It classifies;
+ * whether to retry is the caller's decision, and on the money surfaces the
+ * answer is "the PERSON retries, deliberately, from a card that says nothing
+ * was changed".
+ */
+export const TRANSIENT_SQLSTATES: ReadonlySet<string> = new Set(["40P01", "40001"]);
+
+export function isTransientDoorFailure(e: unknown): boolean {
+  return e instanceof WireError && e.pgCode !== null && TRANSIENT_SQLSTATES.has(e.pgCode);
+}
+
 export type CallDoorOptions = {
   /** Defaults to the blessed singleton (./session-accessor) — pass an explicit
    *  accessor only for a test, or a call site with a genuinely different

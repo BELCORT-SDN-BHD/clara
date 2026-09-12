@@ -18,6 +18,7 @@
 import { isRegistrationRequestRow } from "@/lib/registration/holding-state";
 import {
   checkoutStandingFrom,
+  waitingActsFrom,
   type CheckoutProgress,
 } from "@/lib/registration/checkout-progress-reads";
 import type { OwnRegistrationResult } from "@/lib/registration/server-reads";
@@ -50,24 +51,36 @@ export type CheckoutSuccessDecision =
       readonly kind: "awaiting_payment";
       readonly statusAt: string | null;
       /** Non-null ⇒ there is a live Session to cancel, so the card may offer
-       *  "cancel and start again". Null ⇒ it must not, because
-       *  `cancel_checkout_intent` would have nothing to expire at Stripe. */
+       *  "cancel and start again". Null ⇒ it must not — either the intent was
+       *  never stamped, or (the #628 review's defect) the money already landed
+       *  and `cancel_checkout_intent` would refuse `already_paid`. Derived by
+       *  `waitingActsFrom`, never read straight off `intentSessionId`. */
       readonly sessionId: string | null;
       readonly registration: string;
     }
   /** The payment was refused. Terminal, and the only arm whose next step is a
    *  NEW checkout rather than waiting. */
   | { readonly kind: "payment_failed"; readonly reason: string | null }
-  /** The Session ran out of time before it was paid. */
-  | { readonly kind: "expired" }
+  /** The Session ran out of time before it was paid. `reason` is the DB's own
+   *  machine token for WHY, which is `processing_timeout` when the applier
+   *  swept a `processing` intent that had not been answered for a day — a
+   *  different sentence from an ordinary hosted-page expiry, and the person is
+   *  owed it. */
+  | { readonly kind: "expired"; readonly reason: string | null }
   /** The applicant cancelled it themselves, here or in another tab. */
   | { readonly kind: "cancelled" }
   /** Admission is full. Rendered with NO pay control: `open_checkout_intent`
    *  and `claim_paid_firm` both refuse `capacity_reached`, and offering a
    *  payment the door will refuse is how somebody believes they bought a firm. */
-  | { readonly kind: "capacity_full" }
+  | { readonly kind: "capacity_full"; readonly registration: string }
   | { readonly kind: "no_registration" }
-  | { readonly kind: "unavailable" };
+  | { readonly kind: "unavailable" }
+  /** #628 review — the DATABASE broke a deadlock or a serialization conflict
+   *  (SQLSTATE 40P01 / 40001) under this request. NOTHING was changed, and a
+   *  fresh attempt is the honest next step — which is a different sentence from
+   *  `unavailable`'s "something went wrong reading where your application
+   *  stands". `workRoutes.ts` draws the same line for the work lane. */
+  | { readonly kind: "try_again" };
 
 /**
  * `progress` is the applicant's OWN checkout progress
@@ -115,13 +128,16 @@ export function checkoutSuccessDecisionFrom(
     return { kind: "processing", statusAt: progress.intentStatusAt, registration: newest.id };
   }
   if (standing === "payment_failed") return { kind: "payment_failed", reason: progress.intentStatusReason };
-  if (standing === "expired") return { kind: "expired" };
+  if (standing === "expired") return { kind: "expired", reason: progress.intentStatusReason };
   if (standing === "cancelled") return { kind: "cancelled" };
   if (standing === "awaiting_payment") {
     return {
       kind: "awaiting_payment",
       statusAt: progress.intentStatusAt,
-      sessionId: progress.intentSessionId,
+      // NOT `intentSessionId`. `paid` and `consumed` land on this arm with a
+      // stamped Session, and offering to cancel a payment that already landed
+      // is a control the door refuses — see `waitingActsFrom`.
+      sessionId: waitingActsFrom(progress).cancelSessionId,
       registration: newest.id,
     };
   }
@@ -129,7 +145,7 @@ export function checkoutSuccessDecisionFrom(
   // 3. CAPACITY, only once no payment and no live intent is in the way. A
   //    person mid-payment is not helped by being told the house is full; a
   //    person about to start one is.
-  if (progress.capacityFull) return { kind: "capacity_full" };
+  if (progress.capacityFull) return { kind: "capacity_full", registration: newest.id };
 
   // 4. THE PRE-#628 READING, unchanged, and it is what an older door still
   //    produces: an open registration with no observed payment is AWAITING, and
@@ -137,7 +153,7 @@ export function checkoutSuccessDecisionFrom(
   return {
     kind: "awaiting_payment",
     statusAt: progress.intentStatusAt,
-    sessionId: progress.intentSessionId,
+    sessionId: waitingActsFrom(progress).cancelSessionId,
     registration: newest.id,
   };
 }

@@ -2,9 +2,9 @@ import { cookies } from "next/headers";
 import { getTranslations } from "next-intl/server";
 import { redirect } from "next/navigation";
 
-import { HoldingCard, type PaymentsMode } from "@/components/entry/holding-card";
+import { HoldingCard } from "@/components/entry/holding-card";
 import { checkoutFlashCookie, parseCheckoutFlash } from "@/lib/checkout/checkout-flash";
-import { expectedStripeLivemode } from "@/lib/checkout/stripe-session";
+import { paymentsModeFrom } from "@/lib/checkout/payments-mode";
 import { holdingStateFrom, type HoldingDecision } from "@/lib/registration/holding-state";
 import { loadOwnRegistrationRequests } from "@/lib/registration/server-reads";
 
@@ -68,21 +68,14 @@ export async function generateMetadata() {
 /**
  * #628 — THE DEPLOYMENT'S DECLARED STRIPE MODE, RESOLVED SERVER-SIDE.
  *
- * `expectedStripeLivemode` is imported rather than re-derived: it is the SAME
- * parser the key-class gate refuses on and the same closed vocabulary the
- * runtime's webhook gate uses, so the badge a person reads and the gate that
- * would refuse their payment can never disagree about what "test" means (7.3).
- * A typo in the variable is `null` here exactly as it is there — unconfigured,
- * never "assume test".
- *
- * IT NEVER REACHES THE BROWSER AS A VARIABLE. Only the three-valued verdict
- * crosses into the component; the environment itself stays on the server.
+ * The resolver itself moved to `lib/checkout/payments-mode.ts` when
+ * `/checkout/success` grew the same statement (#628 review, AC3): two pages
+ * needing one verdict is the moment a private function becomes a shared source
+ * of truth rather than a second copy. Its header carries the reasoning about
+ * why the parser is imported and why `null` is "unconfigured", not "assume
+ * test". What stays true here is that the ENVIRONMENT never crosses into the
+ * component — only the three-valued verdict does.
  */
-function paymentsModeFrom(env: Record<string, string | undefined>): PaymentsMode {
-  const declared = expectedStripeLivemode(env);
-  if (declared === null) return "unconfigured";
-  return declared ? "live" : "test";
-}
 
 export default async function PendingPage({
   searchParams,

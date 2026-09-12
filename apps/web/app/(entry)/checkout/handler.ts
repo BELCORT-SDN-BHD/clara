@@ -15,7 +15,7 @@ import {
   type CheckoutSessionRequest,
   type StripeCheckoutSessionSnapshot,
 } from "@/lib/checkout/stripe-session";
-import { isDoorRefusal } from "@/lib/doors";
+import { isDoorRefusal, isTransientDoorFailure } from "@/lib/doors";
 import { isLegalKind } from "@/lib/registration/legal-reads";
 import {
   getCurrentCheckoutPlan,
@@ -296,6 +296,19 @@ export async function handleCheckoutPost(
       idempotencyKey: checkoutIdempotencyKey(intent.intentId, plan.paymentMethodCollection),
     });
 
+    // THE SAME HOST CHECK THE RESUME HOP APPLIES, and for the same reason: this
+    // is a redirect target taken out of a response body, and the person
+    // following it is about to type card details. Checked BEFORE the stamp, so
+    // a URL this app will not send anyone to never spends the intent's one
+    // stampable Session slot.
+    if (!isStripeHostedCheckoutUrl(created.url)) {
+      console.error(
+        "[checkout] a created Session's hosted URL was not a Stripe checkout URL and was refused; " +
+          "nothing was stamped and nothing was charged",
+      );
+      return checkoutRefusal(proof.origin, { kind: "stripe_unavailable" });
+    }
+
     await recordCheckoutSession(
       { intentId: intent.intentId, sessionId: created.id, opKey },
       accessor,
@@ -371,8 +384,57 @@ export async function handleCheckoutPost(
     if (err instanceof StripeSessionError) {
       return checkoutRefusal(proof.origin, stripeFailureOutcome(err));
     }
+    // #628 REVIEW — THE DATABASE BROKE A DEADLOCK OR A SERIALIZATION CONFLICT
+    // (40P01 / 40001). NOT `unavailable`: the transaction rolled back whole, so
+    // nothing was opened, nothing was stamped and nothing was charged, and the
+    // person's next step is the same press again. The DB fix round changes
+    // `claim_paid_firm`'s lock order and the applier's arms, which makes two
+    // writers meeting an ordinary event rather than a curiosity — the same
+    // reason `workRoutes.ts` answers 409 `{error:'transient'}` on the work lane
+    // instead of folding it into its generic failure.
+    if (isTransientDoorFailure(err)) {
+      return checkoutRefusal(proof.origin, { kind: "try_again" });
+    }
     return checkoutRefusal(proof.origin, { kind: "unavailable" });
   }
+}
+
+/**
+ * #628 REVIEW — IS THIS REALLY STRIPE'S HOSTED CHECKOUT?
+ *
+ * THE DEFECT THIS CLOSES. `resumeCheckout` 303'd the browser to `live.url`
+ * taken straight out of a JSON body. Every hop that produces that body is
+ * authenticated and TLS-pinned by the platform, so this is not a live
+ * vulnerability — but the value is a REDIRECT TARGET derived from a third
+ * party's response, on the one route in the product whose whole job is to send
+ * a person somewhere to type card details, and "we trusted the upstream" is the
+ * sentence at the start of every open-redirect post-mortem. A compromised or
+ * misconfigured upstream, a proxy in front of `STRIPE_API_BASE`, or a future
+ * edit that lets a non-Stripe body reach this line all end the same way: the
+ * applicant lands on an attacker's page wearing Stripe's flow.
+ *
+ * VALIDATED POSITIVELY, NEVER BY DENYLIST. `https:` and a host that is
+ * `checkout.stripe.com` or a subdomain of `stripe.com` — an allowlist, so a
+ * host nobody anticipated is refused rather than admitted. The suffix check is
+ * anchored on a DOT (`.stripe.com`), because `evilstripe.com` ends with
+ * `stripe.com` and a naive `endsWith` would wave it through. `URL` does the
+ * parsing, so no hand-rolled prefix match decides what the browser will treat
+ * as a host.
+ *
+ * A FAILURE RENDERS `stripe_unavailable`, which is true in the only sense that
+ * matters to the person: this app could not hand them a checkout page it was
+ * willing to send them to. Nothing was charged and the intent is untouched.
+ */
+export function isStripeHostedCheckoutUrl(raw: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    return false;
+  }
+  if (url.protocol !== "https:") return false;
+  const host = url.hostname.toLowerCase();
+  return host === "checkout.stripe.com" || host === "stripe.com" || host.endsWith(".stripe.com");
 }
 
 /**
@@ -407,8 +469,17 @@ async function resumeCheckout(
   }
   if (live.status === "expired") return checkoutRefusal(origin, { kind: "checkout_expired" });
   // 303, so the browser re-issues the navigation as a GET at Stripe — the same
-  // shape the create path uses.
+  // shape the create path uses. THE HOST IS CHECKED FIRST: this is a redirect
+  // target that came out of a response body, and the person following it is
+  // about to type card details. See `isStripeHostedCheckoutUrl`.
   if (live.status === "open" && live.url !== null) {
+    if (!isStripeHostedCheckoutUrl(live.url)) {
+      console.error(
+        "[checkout] a resume target was not a Stripe hosted checkout URL and was refused; " +
+          "nothing was charged and the intent is untouched",
+      );
+      return checkoutRefusal(origin, { kind: "stripe_unavailable" });
+    }
     return NextResponse.redirect(live.url, { status: 303 });
   }
   // `complete`, or an `open` Session Stripe returned without a hosted URL. Both

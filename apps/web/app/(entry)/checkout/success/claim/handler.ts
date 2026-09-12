@@ -7,7 +7,7 @@ import {
   type CheckoutFlashPayload,
 } from "@/lib/checkout/checkout-flash";
 import { checkoutSuccessDecisionFrom } from "@/lib/checkout/success-state";
-import { isDoorRefusal } from "@/lib/doors";
+import { isDoorRefusal, isTransientDoorFailure } from "@/lib/doors";
 import { claimPaidFirm } from "@/lib/registration/checkout-doors";
 import { NO_CHECKOUT_PROGRESS } from "@/lib/registration/checkout-progress-reads";
 import {
@@ -121,6 +121,20 @@ export async function handleClaimPaidFirmPost(
         code: err.code ?? "CLR",
         message: err.message,
       });
+    }
+    // #628 REVIEW — THE DATABASE BROKE A DEADLOCK OR A SERIALIZATION CONFLICT
+    // (40P01 / 40001) UNDER THE DOOR THAT CREATES A TENANT.
+    //
+    // THIS IS THE ROUTE WHERE THE DISTINCTION MATTERS MOST. The DB fix round
+    // changes `claim_paid_firm`'s lock order, so two writers meeting here — the
+    // applicant's claim and the applier's own write against the same payment —
+    // is an ordinary event, not a curiosity. A rolled-back transaction created
+    // NOTHING: no firm, no membership, no consumed payment. Telling somebody
+    // who has just paid "we could not read your status" about a transaction
+    // that simply needs pressing again is the difference between a person
+    // trying once more and a person contacting support about their money.
+    if (isTransientDoorFailure(err)) {
+      return claimOutcomeRedirect(proof.origin, { kind: "try_again" });
     }
     return claimOutcomeRedirect(proof.origin, { kind: "unavailable" });
   }

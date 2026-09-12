@@ -415,6 +415,26 @@ async function handleCheckoutDoors(ctx, { registrationId }) {
   // one raises. A walk that could cancel a payment the bank was mid-way through
   // confirming would be walking a different product.
   if (fn === "cancel_checkout_intent") {
+    // #628 REVIEW — THE INTENT ID IS CHECKED, NOT IGNORED.
+    //
+    // The route's whole security property on this surface is that it names the
+    // intent from `get_own_checkout_intent_session` — the door's own,
+    // caller-scoped read — and NEVER from the request. A mock that accepted any
+    // `p_intent` (or none) could not tell those two apart: a route that started
+    // reading an intent id out of a form field would walk green. So the fixture
+    // asserts the id it receives IS the one it just served, and refuses
+    // anything else with the DB round's own single refusal for both an absent
+    // and a foreign intent (`CLR04 not_your_intent` — `intent_not_found` is
+    // gone, so a caller learns nothing about whether an intent exists).
+    const body = await readJson(request);
+    if (body.p_intent !== E2E_INTENT_ID) {
+      sendJson(response, 400, {
+        code: "CLR04",
+        message: "not your checkout intent",
+        details: JSON.stringify({ reason: "not_your_intent" }),
+      }, cors);
+      return true;
+    }
     if (state.intentStatus === "processing") {
       sendJson(response, 400, {
         code: "CLR09",

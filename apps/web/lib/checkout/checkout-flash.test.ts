@@ -44,6 +44,7 @@ const SAMPLES: Record<CheckoutFlashOutcome["kind"], CheckoutFlashOutcome> = {
   plan_rotated: { kind: "plan_rotated" },
   no_registration: { kind: "no_registration" },
   already_member: { kind: "already_member" },
+  try_again: { kind: "try_again" },
   unavailable: { kind: "unavailable" },
   // #621's own arm, and the ONLY one carrying a list: the door's `detail.missing`.
   legal_not_accepted: { kind: "legal_not_accepted", missing: ["terms", "dpa"] },

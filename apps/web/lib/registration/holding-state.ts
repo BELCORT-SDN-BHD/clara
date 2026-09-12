@@ -56,7 +56,7 @@ import type {
   RegistrationRequestRow,
 } from "./reads";
 import type { CheckoutProgress } from "./checkout-progress-reads";
-import { checkoutStandingFrom, NO_CHECKOUT_PROGRESS } from "./checkout-progress-reads";
+import { checkoutStandingFrom, waitingActsFrom, NO_CHECKOUT_PROGRESS } from "./checkout-progress-reads";
 import type { OwnRegistrationResult } from "./server-reads";
 import type { CallerContextDenial } from "@/lib/identity/doors";
 
@@ -94,6 +94,13 @@ export type HoldingState =
       readonly kind: "checkout_awaiting_payment";
       readonly firmName: string;
       readonly statusAt: string | null;
+      /** Whether a live hosted checkout is still there to be picked up. FALSE
+       *  over a `paid`/`consumed` intent, which reaches this face with a
+       *  stamped Session but nothing left to resume — see `waitingActsFrom`.
+       *  The face then offers only a re-read. */
+      readonly resumable: boolean;
+      /** The Session a cancel control may end, or `null` when no cancel may be
+       *  offered. Derived by `waitingActsFrom`, never `intentSessionId` itself. */
       readonly sessionId: string | null;
     }
   /** #628 — the bank is confirming an asynchronous payment. */
@@ -110,15 +117,24 @@ export type HoldingState =
       readonly firmName: string;
       readonly reason: string | null;
     }
-  /** #628 — the Session ran out of time before it was paid. */
-  | { readonly kind: "checkout_expired"; readonly firmName: string }
+  /** #628 — the Session ran out of time before it was paid. `reason` carries
+   *  the DB's own token for why, which is `processing_timeout` when the applier
+   *  swept a `processing` intent nobody answered for a day. */
+  | { readonly kind: "checkout_expired"; readonly firmName: string; readonly reason: string | null }
   /** #628 — the applicant cancelled it, here or in another tab. */
   | { readonly kind: "checkout_cancelled"; readonly firmName: string }
   /** #628 — admission is full and no payment or live intent is in the way.
    *  Rendered with NO checkout control at all: `open_checkout_intent` refuses
    *  `capacity_reached`, and a button whose only outcome is a refusal is worse
    *  than no button. */
-  | { readonly kind: "capacity_full"; readonly firmName: string }
+  | {
+      readonly kind: "capacity_full";
+      readonly firmName: string;
+      /** The registration reference, rendered because the copy sends the person
+       *  to support and tells them to quote it. A promise the card never kept
+       *  was the #628 review's own finding. */
+      readonly registration: string;
+    }
   /** §2.1's "paid, unconsumed" arm: a `firm_registration_payments` row
    *  landed and `claim_paid_firm` has not yet run. */
   | { readonly kind: "paid"; readonly firmName: string }
@@ -255,13 +271,19 @@ export function holdingStateFrom(
             firmName: newest.firm_name,
             statusAt: progress.intentStatusAt,
           };
-        case "awaiting_payment":
+        case "awaiting_payment": {
+          // NOT `intentSessionId`, and not an unconditional resume:
+          // `paid`/`consumed` reach this face with a stamped Session and
+          // nothing left to pick up or to end (`waitingActsFrom`).
+          const acts = waitingActsFrom(progress);
           return {
             kind: "checkout_awaiting_payment",
             firmName: newest.firm_name,
             statusAt: progress.intentStatusAt,
-            sessionId: progress.intentSessionId,
+            resumable: acts.resume,
+            sessionId: acts.cancelSessionId,
           };
+        }
         case "payment_failed":
           return {
             kind: "checkout_failed",
@@ -269,7 +291,11 @@ export function holdingStateFrom(
             reason: progress.intentStatusReason,
           };
         case "expired":
-          return { kind: "checkout_expired", firmName: newest.firm_name };
+          return {
+            kind: "checkout_expired",
+            firmName: newest.firm_name,
+            reason: progress.intentStatusReason,
+          };
         case "cancelled":
           return { kind: "checkout_cancelled", firmName: newest.firm_name };
         case null:
@@ -277,7 +303,9 @@ export function holdingStateFrom(
       }
       // CAPACITY, only once nothing is in flight. A person mid-payment is not
       // helped by being told the house is full; a person about to start one is.
-      if (progress.capacityFull) return { kind: "capacity_full", firmName: newest.firm_name };
+      if (progress.capacityFull) {
+        return { kind: "capacity_full", firmName: newest.firm_name, registration: newest.id };
+      }
       if (progress.checkoutOpen) return { kind: "checkout_open", firmName: newest.firm_name };
       return { kind: "pending", firmName: newest.firm_name };
     }

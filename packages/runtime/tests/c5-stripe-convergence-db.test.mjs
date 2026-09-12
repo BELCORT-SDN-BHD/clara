@@ -295,10 +295,12 @@ async function eventually(read, done, { timeoutMs = 10_000, stepMs = 100 } = {})
 }
 
 /** Call the applier explicitly so a cell never depends on the route's best-effort fire having
- *  won the race. `c5cv.9` is the one cell that deliberately does NOT do this. */
+ *  won the race. `c5cv.9` is the one cell that deliberately does NOT do this. Returns the door's
+ *  own `{examined,applied,problems}` receipt so a cell can assert on the sweep, not just its
+ *  aftermath. */
 const sweep = async () => {
   const { applyStripeEvents } = await import("../lib/checkout-pools.mjs");
-  await applyStripeEvents(200);
+  return await applyStripeEvents(200);
 };
 
 // --- the runtime half: provable without 0186 --------------------------------
@@ -624,8 +626,18 @@ test("c5cv.10 an expired session expires the intent", { skip: skip186 }, async (
 
 test("c5cv.11 THE REORDER PAIR — async_payment_succeeded BEFORE completed is ONE payment", { skip: skip186 }, async () => {
   // Stripe does not promise delivery order, and both of these events describe the SAME settled
-  // session. Two payment rows for one registration is the failure that costs money; the intent
-  // must also not walk backwards from `paid`.
+  // session. The FIRST one to settle owns the one `firm_registration_payments` row; the SECOND is
+  // not silently dropped -- `uq_frp_registration` surfaces it as a `duplicate_payment` problem for
+  // an operator (0160 BLOCKER-4; db cell `cc.12` in `packages/db/tests/checkout-convergence.test
+  // .mjs`), and the intent must not walk backwards off `paid` either.
+  //
+  // Both events go through the SHIPPED webhook route (`deliver`), and c5cv.13 is the proof that
+  // route fires its OWN best-effort apply outside the response path for every one of these four
+  // types. That means an explicit `sweep()` called right after `deliver()` races that background
+  // fire: whichever side loses a given race legitimately sees `{applied:0,problems:0}` for an
+  // event the OTHER side just finished -- not a bug, just two appliers reaching for the same row.
+  // `eventually()` waits the race out on OBSERVABLE STATE; a sweep taken only once nothing is left
+  // pending is the deterministic moment to assert its receipt is quiescent.
   const fx = await newIntent("reord");
   const late = eventId("late");
   const done = eventId("done");
@@ -638,8 +650,21 @@ test("c5cv.11 THE REORDER PAIR — async_payment_succeeded BEFORE completed is O
   };
   assert.equal((await deliver(sessionEvent({ id: late, type: "checkout.session.async_payment_succeeded", ...common }))).status, 200);
   await sweep();
+  await eventually(() => readIntent(fx.intent), (row) => row?.status === "paid");
+  assert.deepEqual(
+    await sweep(),
+    { examined: 0, applied: 0, problems: 0 },
+    "the FIRST event is fully settled -- a later sweep finds nothing left to do",
+  );
+
   assert.equal((await deliver(sessionEvent({ id: done, type: "checkout.session.completed", ...common }))).status, 200);
   await sweep();
+  await eventually(() => openProblems(done), (probs) => probs.length > 0);
+  assert.deepEqual(
+    await sweep(),
+    { examined: 0, applied: 0, problems: 0 },
+    "the SECOND event is filed exactly once -- not re-examined by a later sweep",
+  );
 
   const payments = await rig.rootQuery(
     "select stripe_event_id from clara.firm_registration_payments where registration_id=$1",
@@ -647,10 +672,9 @@ test("c5cv.11 THE REORDER PAIR — async_payment_succeeded BEFORE completed is O
   );
   assert.equal(payments.rowCount, 1, "the two events describe ONE settlement — a second row is a double charge on the books");
   assert.equal(payments.rows[0].stripe_event_id, late, "the FIRST event to settle owns the row");
-  assert.equal((await readIntent(fx.intent)).status, "paid");
-  // The second event is not an error — it is the same truth arriving twice — so it must not fill
-  // the operator queue either.
-  assert.deepEqual(await openProblems(done), []);
+  assert.equal((await readIntent(fx.intent)).status, "paid", "a filed duplicate does not walk the intent back off paid");
+  // The second event IS a problem an operator must see -- uq_frp_registration, never a bare 23505.
+  assert.deepEqual((await openProblems(done)).map((p) => p.problem), ["duplicate_payment"]);
 });
 
 test("c5cv.12 EXPIRED AFTER PAID is a problem an operator can see", { skip: skip186 }, async () => {

@@ -140,6 +140,14 @@ _Avoid_: A placeholder as a signable agreement; one "current agreement" that sta
 The append-only record that one person accepted one published legal document at one exact version and hash, with its instant and the operation key that made it idempotent. Both kinds must be accepted at their current versions before checkout opens; the intent pins the versions it was opened against.
 _Avoid_: A checkbox state kept in the browser; acceptance of one kind counting for the other.
 
+**Checkout intent**:
+One applicant's one attempt to pay for one registration: opened, then bound to one live Stripe Checkout Session, then processing (the bank has not answered yet), paid, consumed by the firm claim, or ended as expired, failed or cancelled. One registration has at most one live session at a time; every move is written by one database trigger, and a settled payment is the authority over any earlier terminal state.
+_Avoid_: A browser redirect as proof of payment; a Stripe event as a substitute for the intent's own state; cancelling as a refund.
+
+**Admission capacity**:
+The estate-wide limit on how many non-operator firms may exist, set by the operator firm's owner. The firm claim checks it last, under one lock, so two claims into the last slot yield one firm; the loser keeps its payment unconsumed and can claim once room is made.
+_Avoid_: A per-firm seat count; a check done only when the checkout opens.
+
 **Activity event**:
 One observable, attributable change in the firm's books or work — a domain event, an agent receipt or a committed operation receipt — with its actor and delegation, client, time, status and links to its Work, object, source and replacement outcome.
 _Avoid_: An internal task name or private model reasoning; a pending question (Work owns those); a substitute for the object's own current state.

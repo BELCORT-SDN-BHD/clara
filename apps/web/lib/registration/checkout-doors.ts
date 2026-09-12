@@ -34,6 +34,10 @@
 // name crosses the wire at all").
 
 import { callDoor } from "@/lib/doors";
+import {
+  isCheckoutIntentStatus,
+  type CheckoutIntentStatus,
+} from "@/lib/registration/checkout-progress-reads";
 import type { SessionTokenAccessor } from "@/lib/session";
 
 /** `clara.open_checkout_intent(uuid,bytea,text)`'s jsonb return (`0163`). */
@@ -180,7 +184,21 @@ export type OwnCheckoutIntentSession = {
   readonly intentId: string;
   /** `null` when the intent was never stamped with a Stripe Session. */
   readonly sessionId: string | null;
-  readonly status: string;
+  /**
+   * #628 REVIEW — THE CLOSED UNION, NOT A BARE `string`.
+   *
+   * `checkout_intents.status` has a CLOSED vocabulary (migration 0186) which
+   * `CheckoutIntentStatus` already spells, and this field was typed `string`
+   * beside it. The cost was not theoretical: the cancel handler compares
+   * `cancelled.status === "expired"`, and against a `string` TypeScript will
+   * cheerfully accept a comparison to a value that can never occur — a typo in
+   * that literal would have compiled and silently stopped that arm firing
+   * forever. With the union, the compiler checks the spelling.
+   *
+   * DECODED DEFENSIVELY, and a value outside the vocabulary is treated as NO
+   * ROW (see below) rather than widened back to `string` at the boundary.
+   */
+  readonly status: CheckoutIntentStatus;
 };
 
 export async function getOwnCheckoutIntentSession(
@@ -201,7 +219,14 @@ export async function getOwnCheckoutIntentSession(
   // build could not fully read would be acting on a shape it does not
   // understand, on the surface that ends a payment.
   if (typeof intentId !== "string" || intentId.length === 0) return null;
-  if (typeof status !== "string" || status.length === 0) return null;
+  // A STATUS OUTSIDE THE CLOSED VOCABULARY IS ALSO NO ROW (#628 review). It is
+  // not a weaker observation of a known status — it is a status this build has
+  // never seen, and the caller would go on to decide, on a MONEY surface,
+  // whether to end a payment it cannot name the state of. `null` here reaches
+  // the cancel route as `nothing_to_cancel`, which is honest: nothing this
+  // build can act on was found. The same fail-closed reading
+  // `checkout-progress-reads.ts` applies to the same column.
+  if (!isCheckoutIntentStatus(status)) return null;
   return {
     intentId,
     sessionId: typeof row.session_id === "string" && row.session_id.length > 0 ? row.session_id : null,
@@ -226,7 +251,11 @@ export async function getOwnCheckoutIntentSession(
  * the world is in the same state either way.
  */
 export type CancelCheckoutIntentResult = {
-  readonly status: string;
+  /** #628 REVIEW — the SAME closed union `OwnCheckoutIntentSession` carries,
+   *  and for the same reason: `cancel/handler.ts` branches on
+   *  `status === "expired"`, and against a bare `string` a typo in that literal
+   *  compiles to an arm that can never fire. */
+  readonly status: CheckoutIntentStatus;
   /** The Session the door knew about, so the caller can ask Stripe to expire
    *  it. Absent on a replay, which is why the caller reads the session id from
    *  `get_own_checkout_intent_session` as well and never depends on this one. */
@@ -244,8 +273,20 @@ export async function cancelCheckoutIntent(
     { p_intent: args.intentId, p_op_key: args.opKey },
     { session, signal },
   );
+  const status = requireString(out?.status, "status", "cancel_checkout_intent");
+  if (!isCheckoutIntentStatus(status)) {
+    // A STATUS THIS BUILD CANNOT NAME, on the surface that ends a payment. It
+    // throws rather than being widened back to `string`, and the cancel route's
+    // catch renders `unavailable` — which is the honest card: the door answered
+    // something this build does not understand, so it cannot tell the person
+    // what happened. Narrow (the column's CHECK admits exactly the eight this
+    // build spells) and deliberately loud if a migration ever adds a ninth.
+    throw new Error(
+      "cancel_checkout_intent: the door reported a status this build does not know how to read",
+    );
+  }
   return {
-    status: requireString(out?.status, "status", "cancel_checkout_intent"),
+    status,
     sessionId:
       typeof out?.session_id === "string" && out.session_id.length > 0 ? out.session_id : null,
     replay: out?.replay === true,

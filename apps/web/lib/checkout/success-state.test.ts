@@ -104,7 +104,7 @@ test("#628: each intent status reaches its OWN face, and no two share one", () =
   );
   assert.deepEqual(
     checkoutSuccessDecisionFrom(result(), withStatus({ intentStatus: "expired" })),
-    { kind: "expired" },
+    { kind: "expired", reason: null },
   );
   assert.deepEqual(
     checkoutSuccessDecisionFrom(result(), withStatus({ intentStatus: "cancelled" })),
@@ -131,6 +131,62 @@ test("#628: `paid` and `consumed` with NO unconsumed payment row are a WAIT, nev
   }
 });
 
+test("#628 review — A PAID INTENT REACHES THE WAIT WITH NOTHING TO CANCEL", () => {
+  // THE DEFECT, EXACTLY. `paid` and `consumed` land on the `awaiting_payment`
+  // arm by design — and they land there with the intent's Stripe Session still
+  // stamped, because a paid intent keeps its session id. The card offered
+  // "Cancel and start again" off that id alone, and pressing it bought a round
+  // trip to `cancel_checkout_intent`'s `already_paid` refusal: a control whose
+  // only possible outcome was a refusal, on the surface where somebody's money
+  // already is.
+  //
+  // `processing` is in the same family for a different reason — the bank is
+  // mid-authorisation and NOBODY may cancel — and it reaches its own arm, which
+  // carries no session id at all.
+  for (const status of ["paid", "consumed"] as const) {
+    assert.deepEqual(
+      checkoutSuccessDecisionFrom(result(), withStatus({ intentStatus: status, intentSessionId: "cs_test_628" })),
+      { kind: "awaiting_payment", statusAt: null, sessionId: null, registration: REGISTRATION },
+      status,
+    );
+  }
+  // THE MUST-NOT-RED CONTROL: a genuinely live Session still carries its id
+  // through, or this fix would have removed the cancel control from the one
+  // state that needs it. And the PRE-0186 window is untouched: with no readable
+  // status this build knows nothing that would justify withdrawing a control it
+  // has always offered.
+  assert.deepEqual(
+    checkoutSuccessDecisionFrom(
+      result(),
+      withStatus({ intentStatus: "session_created", intentSessionId: "cs_test_628" }),
+    ),
+    { kind: "awaiting_payment", statusAt: null, sessionId: "cs_test_628", registration: REGISTRATION },
+    "the live-Session face lost its cancel control",
+  );
+  assert.deepEqual(
+    checkoutSuccessDecisionFrom(
+      result(),
+      { ...NO_CHECKOUT_PROGRESS, checkoutOpen: true, intentSessionId: "cs_test_628" },
+    ),
+    { kind: "awaiting_payment", statusAt: null, sessionId: "cs_test_628", registration: REGISTRATION },
+    "the migration window lost its cancel control",
+  );
+});
+
+test("#628 review — the EXPIRED face carries the DB's own reason, so a swept timeout is its own sentence", () => {
+  // `0186`'s applier sweeps a `processing` intent nobody answered for 24 hours
+  // to `expired` with `status_reason='processing_timeout'`. That is "your bank
+  // never came back", not "the checkout page ran out of time", and the decision
+  // has to carry the token or the card cannot tell them apart.
+  assert.deepEqual(
+    checkoutSuccessDecisionFrom(
+      result(),
+      withStatus({ intentStatus: "expired", intentStatusReason: "processing_timeout" }),
+    ),
+    { kind: "expired", reason: "processing_timeout" },
+  );
+});
+
 test("#628: AN OBSERVED UNCONSUMED PAYMENT OUTRANKS EVERY STATUS, INCLUDING A FULL HOUSE", () => {
   // This is the arm where the applicant's money is already in Clara's hands.
   // A capacity card over it would take somebody's payment and then close the
@@ -152,7 +208,9 @@ test("#628: capacity_full renders only when NOTHING is in flight", () => {
   // status and below an observed payment, and above nothing else.
   assert.deepEqual(
     checkoutSuccessDecisionFrom(result(), { ...NO_CHECKOUT_PROGRESS, capacityFull: true }),
-    { kind: "capacity_full" },
+    // THE REFERENCE RIDES ALONG (#628 review): the card's own copy sends the
+    // person to support and tells them to quote it, and it rendered none.
+    { kind: "capacity_full", registration: REGISTRATION },
   );
   assert.equal(
     checkoutSuccessDecisionFrom(result(), withStatus({ intentStatus: "processing", capacityFull: true })).kind,

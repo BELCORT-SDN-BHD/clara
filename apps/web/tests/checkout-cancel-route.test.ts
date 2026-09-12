@@ -260,7 +260,10 @@ test("`payment_in_flight` is its OWN card, and Stripe is never asked to expire a
 test("every OTHER door refusal renders VERBATIM — code and sentence, never re-worded", async () => {
   for (const [code, message, reason] of [
     ["CLR09", "this registration is already paid", "already_paid"],
-    ["CLR04", "not your checkout intent", null],
+    // CLR04 IS NO LONGER IN THIS TABLE — it has its own cell below. #628's DB
+    // round collapsed "absent" and "foreign" into one `CLR04 not_your_intent`,
+    // which makes the door's sentence wrong for the only way this route can
+    // meet it. See the cell.
     ["CLR10", "an operation key is required", null],
   ] as const) {
     const calls: Call[] = [];
@@ -284,6 +287,42 @@ test("every OTHER door refusal renders VERBATIM — code and sentence, never re-
     assert.equal(calls.filter((c) => c.fn === "cancel_checkout_intent").length, 1, "a refusal was retried");
     assert.equal(expiries, 0);
   }
+});
+
+test("#628's DB round — CLR04 not_your_intent is NOTHING TO CANCEL, not 'that is not yours'", async () => {
+  // WHAT CHANGED AT THE DB END. `cancel_checkout_intent` used to distinguish an
+  // ABSENT intent from a FOREIGN one; it now answers ONE refusal, `CLR04
+  // not_your_intent`, for both — correctly, because a caller must not learn
+  // from a refusal whether somebody else's intent exists.
+  //
+  // WHY THAT REFUSAL MUST NOT RENDER VERBATIM HERE, which is the whole point of
+  // this cell. This route NEVER accepts an intent id: it names the one
+  // `get_own_checkout_intent_session` just handed it, scoped to the caller
+  // inside the door. So "not your intent" cannot mean a probe — it can only
+  // mean the intent stopped being live between the read and the cancel (the
+  // applier swept it, another tab cancelled it). Rendering the door's sentence
+  // verbatim would tell somebody their own checkout belongs to someone else.
+  // The truthful card is the one they get when the read found nothing at all.
+  const calls: Call[] = [];
+  let expiries = 0;
+  const response = await withDoors(
+    calls,
+    {
+      ...LIVE_INTENT,
+      cancel_checkout_intent: () => json({
+        code: "CLR04",
+        message: "not your checkout intent",
+        details: JSON.stringify({ reason: "not_your_intent" }),
+      }, 400),
+    },
+    () => handleCheckoutCancelPost(postRequest(), deps({ expireSession: async () => { expiries += 1; } })),
+  );
+  const flash = readFlash(response);
+  assert.equal(flash.kind, "nothing_to_cancel", "the door's 'not yours' sentence reached the applicant");
+  // NOTHING WAS RETRIED and Stripe was never asked to expire anything: a
+  // refusal is the DB's considered answer, whichever card it chooses.
+  assert.equal(calls.filter((c) => c.fn === "cancel_checkout_intent").length, 1, "a refusal was retried");
+  assert.equal(expiries, 0, "a refused cancel still expired the Session at Stripe");
 });
 
 test("A FAILED STRIPE EXPIRY DOES NOT UN-CANCEL THE INTENT, and the log carries no identifier", async () => {

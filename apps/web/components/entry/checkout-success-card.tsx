@@ -4,10 +4,14 @@ import Link from "next/link";
 import { StateBanner } from "@/components/common/state";
 import { TechnicalDetail } from "@/components/common/technical-detail";
 import { CheckoutWaitingRefresh } from "@/components/entry/checkout-waiting";
+import { PostControl } from "@/components/entry/post-control";
+import { RegistrationReference } from "@/components/entry/registration-reference";
+import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader } from "@/components/ui/card";
 import { businessDateTime } from "@/lib/business-date";
 import { paymentFailureKindFrom } from "@/lib/checkout/payment-failure";
+import type { PaymentsMode } from "@/lib/checkout/payments-mode";
 import { cn } from "@/lib/utils";
 
 /**
@@ -80,18 +84,25 @@ export type CheckoutSuccessState =
   /** #628 — the payment was REFUSED. The one waiting-shaped state whose answer
    *  is a new checkout rather than more waiting. */
   | { readonly kind: "payment_failed"; readonly reason: string | null }
-  /** #628 — the Session ran out of time. */
-  | { readonly kind: "expired" }
+  /** #628 — the Session ran out of time. `reason` is the DB's own token for
+   *  why; `processing_timeout` (the applier's 24-hour sweep of an unanswered
+   *  `processing` intent) owes a different sentence from an ordinary expiry. */
+  | { readonly kind: "expired"; readonly reason: string | null }
   /** #628 — the applicant cancelled it, here or in another tab. */
   | { readonly kind: "cancelled" }
-  /** #628 — admission is full. No pay control, deliberately. */
-  | { readonly kind: "capacity_full" }
+  /** #628 — admission is full. No pay control, deliberately — but the
+   *  reference the copy tells the person to quote, because it does. */
+  | { readonly kind: "capacity_full"; readonly registration: string }
   /** No open registration for this caller at all. */
   | { readonly kind: "no_registration" }
   /** The reads did not answer. Named, never rendered as "nothing to do". */
   | { readonly kind: "unavailable" }
   /** The claim POST came back with the door's own refusal — verbatim. */
-  | { readonly kind: "refused"; readonly code: string; readonly message: string };
+  | { readonly kind: "refused"; readonly code: string; readonly message: string }
+  /** #628 review — the DATABASE broke a deadlock or a serialization conflict
+   *  (40P01 / 40001). Its own card, because "nothing was changed, try again" is
+   *  a different and much better sentence than `unavailable`'s. */
+  | { readonly kind: "try_again" };
 
 /** The DB's own timestamp, in the business timezone, or nothing at all. A
  *  value that does not parse renders NO line rather than "Invalid Date" — an
@@ -140,21 +151,43 @@ function CheckAgain({ label }: { label: string }) {
   );
 }
 
-/** A same-origin POST to one of the two checkout routes. Never a `<Link>`:
- *  both are POST-only precisely so that a prefetch, a mail scanner or a
- *  restored tab cannot start or end a payment. */
-function PostControl({ action, label }: { action: string; label: string }) {
-  return (
-    <form method="post" action={action} className="w-full">
-      <Button type="submit" variant="outline" className="w-full">
-        {label}
-      </Button>
-    </form>
-  );
-}
+/** #628 REVIEW — THE FACES WHERE THE DEPLOYMENT'S STRIPE MODE IS STILL A FACT
+ *  THE PERSON NEEDS. AC3 asks for a visibly distinct test/unconfigured
+ *  deployment, and `/pending` alone is not where that applies: this is the page
+ *  somebody lands on immediately AFTER paying, and "did that just take real
+ *  money?" is the first question a test-mode checkout leaves them with.
+ *
+ *  The set is the money faces: one where a payment just landed (`claimable`),
+ *  two where it is in flight (`processing`, `awaiting_payment`) and the three
+ *  whose next act is a NEW payment (`payment_failed`, `expired`, `cancelled`).
+ *  `already_open` is past it, `capacity_full` offers no payment to qualify, and
+ *  the three fail-closed faces are statements about a READ, not about money. */
+const PAYMENT_FACES: ReadonlySet<CheckoutSuccessState["kind"]> = new Set([
+  "claimable",
+  "processing",
+  "awaiting_payment",
+  "payment_failed",
+  "expired",
+  "cancelled",
+]);
 
-export function CheckoutSuccessCard({ state }: { state: CheckoutSuccessState }) {
+export function CheckoutSuccessCard({
+  state,
+  paymentsMode = "unconfigured",
+}: {
+  state: CheckoutSuccessState;
+  /** #628 review — the SERVER's declared Stripe mode, resolved the one way
+   *  `/pending` resolves it (`lib/checkout/payments-mode.ts`). Defaults to the
+   *  most cautious true statement rather than silently implying a live
+   *  deployment. */
+  paymentsMode?: PaymentsMode;
+}) {
   const t = useTranslations("CheckoutSuccess");
+  // The seven failure sentences live in ONE namespace and are read by both
+  // faces (7.3) — they used to exist twice, under `Pending` and here, free to
+  // drift word by word.
+  const tFailure = useTranslations("PaymentFailure");
+  const tCommon = useTranslations("Common");
 
   return (
     <Card>
@@ -169,11 +202,11 @@ export function CheckoutSuccessCard({ state }: { state: CheckoutSuccessState }) 
             {/* A REAL form POST to a sibling route, not a fetch: this is the
                 act that creates the firm, and it must be an explicit,
                 non-idempotent, same-origin navigation the person chose. */}
-            <form method="post" action="/checkout/success/claim">
-              <Button type="submit" className="w-full">
-                {t("claimable.open")}
-              </Button>
-            </form>
+            <PostControl
+              action="/checkout/success/claim"
+              label={t("claimable.open")}
+              variant="default"
+            />
           </>
         )}
 
@@ -223,7 +256,7 @@ export function CheckoutSuccessCard({ state }: { state: CheckoutSuccessState }) 
         {state.kind === "payment_failed" && (
           <>
             <StateBanner tone="error">
-              {t(`paymentFailure.${paymentFailureKindFrom(state.reason)}`)}
+              {tFailure(paymentFailureKindFrom(state.reason))}
             </StateBanner>
             {/* THE PROVIDER'S OWN TOKEN, in the estate's one sanctioned place
                 for an internal identifier to reach a human. See
@@ -236,7 +269,18 @@ export function CheckoutSuccessCard({ state }: { state: CheckoutSuccessState }) 
 
         {state.kind === "expired" && (
           <>
-            <StateBanner tone="warning">{t("expired.banner")}</StateBanner>
+            {/* THE SWEPT-TIMEOUT EXPIRY IS ITS OWN SENTENCE. `0186`'s applier
+                moves a `processing` intent nobody answered for 24 hours to
+                `expired` with `status_reason='processing_timeout'` — which is
+                not "the checkout page ran out of time", it is "the bank never
+                came back". Both are expiries; only one of them is about the
+                person's bank, and telling them the wrong one would have them
+                looking for a hosted page that was never the problem. */}
+            <StateBanner tone="warning">
+              {paymentFailureKindFrom(state.reason) === "processing_timeout"
+                ? tFailure("processing_timeout")
+                : t("expired.banner")}
+            </StateBanner>
             <PostControl action="/checkout" label={t("expired.startAgain")} />
           </>
         )}
@@ -254,8 +298,14 @@ export function CheckoutSuccessCard({ state }: { state: CheckoutSuccessState }) 
           // here would be an invitation to a refusal — the exact shape the
           // legal stage avoids by not offering an acceptance the door would
           // reject. The person is told plainly and given the reference support
-          // needs.
-          <StateBanner tone="warning">{t("capacity_full.banner")}</StateBanner>
+          // needs — WHICH THIS USED TO PROMISE AND NOT RENDER (#628 review).
+          <StateBanner tone="warning">
+            <p>{t("capacity_full.banner")}</p>
+            <RegistrationReference
+              registration={state.registration}
+              label={tCommon("registrationReferenceLabel")}
+            />
+          </StateBanner>
         )}
 
         {state.kind === "no_registration" && (
@@ -266,12 +316,38 @@ export function CheckoutSuccessCard({ state }: { state: CheckoutSuccessState }) 
           <StateBanner tone="error">{t("unavailable.banner")}</StateBanner>
         )}
 
+        {state.kind === "try_again" && (
+          // NOTHING WAS CHANGED, AND SAYING SO IS THE POINT. A 40P01/40001 is
+          // PostgreSQL breaking a deadlock or a serialization conflict: the
+          // transaction was rolled back whole, so the honest next step is the
+          // same act again — which `unavailable` ("something went wrong reading
+          // where your application stands") does not say. `workRoutes.ts` draws
+          // the identical line for the work lane's 409 transient.
+          <>
+            <StateBanner tone="warning">{t("try_again.banner")}</StateBanner>
+            <PostControl action="/checkout/success/claim" label={t("try_again.retry")} />
+          </>
+        )}
+
         {state.kind === "refused" && (
           // The door's OWN sentence and code, verbatim — never re-worded and
           // never retried (apps/web/AGENTS.md).
           <StateBanner tone="error" code={state.code}>
             {state.message}
           </StateBanner>
+        )}
+
+        {/* #628 review — WHAT A PAYMENT ON THIS DEPLOYMENT ACTUALLY DOES. One
+            call site, beside the states rather than inside one, exactly as
+            `holding-card.tsx` places the same two statements: the fact is about
+            the DEPLOYMENT, not about this applicant. */}
+        {PAYMENT_FACES.has(state.kind) && paymentsMode === "test" && (
+          <Badge variant="secondary" className="h-auto w-fit py-1 whitespace-normal">
+            {tCommon("paymentsTestMode")}
+          </Badge>
+        )}
+        {PAYMENT_FACES.has(state.kind) && paymentsMode === "unconfigured" && (
+          <StateBanner tone="warning">{tCommon("paymentsNotConfigured")}</StateBanner>
         )}
 
         <Link href="/pending" className="text-sm text-primary underline">

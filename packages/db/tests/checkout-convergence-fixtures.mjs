@@ -122,6 +122,7 @@ export const CONVERGENCE_REASON = {
 export const PROBLEM = {
   expiredAfterPaid: "expired_after_paid",
   paidAfterTerminal: "paid_after_terminal",
+  processingTimeout: "processing_timeout",
   duplicatePayment: "duplicate_payment",
   intentNotFound: "intent_not_found",
   intentMismatch: "intent_mismatch",
@@ -186,9 +187,20 @@ export async function deliver({ type, intent, registration, applicant, session, 
 
 export async function problemsFor(event) {
   const r = await rootQuery(
-    `select problem, detail, resolved_at from clara.stripe_event_problems
+    `select id, problem, detail, resolved_at from clara.stripe_event_problems
       where event_id=$1 order by problem`, [event]);
   return r.rows;
+}
+
+/** The operator's own resolve door (0160 §5), driven as the operator-firm owner. #628 review S3
+ *  and the C-10 recovery cells need it: resolving a problem is what USED to hand an
+ *  `expired_after_paid` event back to the next sweep, forever. */
+export async function resolveProblem(owner, problem, resolution = "#628 rig resolution") {
+  const r = await humanQuery(owner, namedCall("resolve_stripe_event_problem", [
+    { name: "p_problem", cast: "uuid" }, { name: "p_resolution", cast: "text" },
+    { name: "p_op_key", cast: "text" },
+  ]), [problem, resolution, opk("cc-resolve")]);
+  return r.rows[0].result;
 }
 
 export async function applicationFor(event) {
@@ -231,6 +243,22 @@ export async function stampSession(intent, session = null) {
   const value = session ?? stripeSessionId("stamp");
   await rootQuery("update clara.checkout_intents set session_id=$2 where id=$1", [intent, value]);
   return value;
+}
+
+/** Backdate an intent's `status_at` WITHOUT moving its status — the one shape 0158's stamp wall
+ *  refuses outright (cc.4 pins that refusal), so the trigger is disabled for the width of this one
+ *  root-owned UPDATE and re-armed immediately. That is 0186 §A's own measured idiom for the same
+ *  problem, and it is the only way to age a clock the estate writes itself: #628 review S5's
+ *  timeout arm reads `status_at`, and a cell that waited 24 real hours would not be a cell. */
+export async function backdateStatus(intent, interval = "25 hours") {
+  await rootQuery("alter table clara.checkout_intents disable trigger t_checkout_intents_session_stamp");
+  try {
+    await rootQuery(
+      `update clara.checkout_intents set status_at = now() - $2::interval where id=$1`,
+      [intent, interval]);
+  } finally {
+    await rootQuery("alter table clara.checkout_intents enable trigger t_checkout_intents_session_stamp");
+  }
 }
 
 /** Move `intent` to `status` by a bare status write (root). Every caller below walks only

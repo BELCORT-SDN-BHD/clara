@@ -23,6 +23,7 @@ import {
   checkoutProgressFrom,
   checkoutStandingFrom,
   probeCheckoutProgress,
+  waitingActsFrom,
 } from "./checkout-progress-reads";
 import type { SessionTokenAccessor } from "@/lib/session";
 
@@ -285,4 +286,55 @@ test("the retired relation reads are gone: no request names either C-3 table", a
   for (const url of urls) {
     assert.equal(/checkout_intents|firm_registration_payments/.test(url), false, url);
   }
+});
+
+// ===========================================================================
+// #628 REVIEW — WHAT A WAITING FACE MAY ACTUALLY OFFER
+// ===========================================================================
+
+test("#628 review — only a LIVE Session is resumable or cancellable; a paid one is neither", () => {
+  // THE DEFECT THIS DECIDES AWAY. `checkoutStandingFrom` maps `paid` and
+  // `consumed` onto `awaiting_payment` — correctly: both are reached only when
+  // no claimable payment row was observed, so a wait with a re-read is the
+  // honest face. But a paid intent KEEPS its stamped Session id, and both
+  // waiting faces keyed their controls on that id alone. So somebody whose
+  // money had already landed was shown "Cancel and start again" (which
+  // `cancel_checkout_intent` refuses `already_paid`) and, on `/pending`,
+  // "Resume checkout" as well. Both could only end in a refusal.
+  //
+  // THE ALLOWLIST IS WALKED IN FULL, so a status added by a later migration is
+  // excluded by default rather than silently admitted.
+  const withStatus = (status: (typeof CHECKOUT_INTENT_STATUSES)[number]) => ({
+    ...NO_CHECKOUT_PROGRESS,
+    checkoutOpen: true,
+    intentStatus: status,
+    intentSessionId: "cs_628",
+  });
+
+  assert.deepEqual(
+    waitingActsFrom(withStatus("session_created")),
+    { resume: true, cancelSessionId: "cs_628" },
+    "the ONE status with a live hosted page lost its controls",
+  );
+  for (const status of CHECKOUT_INTENT_STATUSES.filter((s) => s !== "session_created")) {
+    assert.deepEqual(
+      waitingActsFrom(withStatus(status)),
+      { resume: false, cancelSessionId: null },
+      `${status} still offers an act the door would refuse`,
+    );
+  }
+
+  // THE MIGRATION WINDOW IS UNTOUCHED. With no status this build can read — an
+  // older door, between the two deploys — nothing is known that would justify
+  // withdrawing a control the product has always offered.
+  assert.deepEqual(
+    waitingActsFrom({ ...NO_CHECKOUT_PROGRESS, checkoutOpen: true, intentSessionId: "cs_628" }),
+    { resume: true, cancelSessionId: "cs_628" },
+    "the pre-0186 window lost its controls",
+  );
+  // AND NO SESSION IS STILL NO CANCEL, whatever the status says.
+  assert.deepEqual(
+    waitingActsFrom({ ...NO_CHECKOUT_PROGRESS, checkoutOpen: true, intentStatus: "session_created" }),
+    { resume: true, cancelSessionId: null },
+  );
 });

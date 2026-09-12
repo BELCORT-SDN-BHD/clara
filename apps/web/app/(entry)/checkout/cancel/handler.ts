@@ -147,6 +147,26 @@ export async function handleCheckoutCancelPost(
       if (err.code === "CLR09" && err.reason === "payment_in_flight") {
         return checkoutRefusal(proof.origin, { kind: "payment_in_flight" });
       }
+      // #628's DB ROUND — ONE REFUSAL FOR "NOT YOURS" AND FOR "NOT THERE".
+      //
+      // `cancel_checkout_intent` used to tell an absent intent apart from a
+      // foreign one (`intent_not_found` vs a CLR04); it now answers `CLR04
+      // not_your_intent` for BOTH, which is the right call at the DB end — a
+      // caller asking about somebody else's intent must not learn from the
+      // refusal whether that intent exists.
+      //
+      // WHAT THAT MEANS HERE IS NARROW AND WORTH STATING. This route never
+      // accepts an intent id: it names the one `get_own_checkout_intent_session`
+      // just handed it, scoped to the caller inside the door. So "not your
+      // intent" cannot mean a probe — it can only mean the intent stopped being
+      // live between the read and this call (the applier swept it, or another
+      // tab cancelled it). The honest sentence for the person is the same one
+      // they get when the read found nothing at all: there was no open checkout
+      // to cancel. Rendering the door's own "not your intent" verbatim would
+      // tell somebody their own checkout belongs to someone else.
+      if (err.code === "CLR04") {
+        return checkoutRefusal(proof.origin, { kind: "nothing_to_cancel" });
+      }
       return checkoutRefusal(proof.origin, {
         kind: "refused",
         code: err.code ?? "CLR",

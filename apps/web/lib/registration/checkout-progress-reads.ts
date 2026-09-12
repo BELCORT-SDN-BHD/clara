@@ -105,9 +105,11 @@ export type CheckoutProgress = {
    *  one. Its ONLY use is deciding whether a cancel control has anything to
    *  cancel — no surface renders it. */
   readonly intentSessionId: string | null;
-  /** `get_admission_capacity()`'s verdict, carried on the progress row so the
-   *  two pre-firm faces can refuse to offer a pay control that the door would
-   *  refuse anyway. */
+  /** `get_own_checkout_progress`'s own verdict (backed by
+   *  `clara._admission_capacity_state()` — `get_admission_capacity()` itself
+   *  is operator-only after #628's review round), carried on the progress row
+   *  so the two pre-firm faces can refuse to offer a pay control that the
+   *  door would refuse anyway. */
   readonly capacityFull: boolean;
 };
 
@@ -166,6 +168,66 @@ export function checkoutStandingFrom(progress: CheckoutProgress): CheckoutStandi
     case null:
       return null;
   }
+}
+
+/**
+ * #628 REVIEW — WHAT A WAITING FACE MAY ACTUALLY OFFER, decided once.
+ *
+ * ===========================================================================
+ * THE DEFECT THIS CLOSES: CANCEL OFFERED OVER A PAID CHECKOUT
+ * ===========================================================================
+ * `checkoutStandingFrom` maps `paid` and `consumed` onto `awaiting_payment`,
+ * and that mapping is right — both are reached only when no claimable payment
+ * row was observed, so a waiting face with a re-read control is the honest
+ * thing to show. What was WRONG was what the two waiting faces then did with
+ * `intentSessionId`: a `paid` intent is still stamped with its Session, so both
+ * surfaces rendered "Cancel and start again" over money that had already
+ * landed, and `/pending` rendered "Resume checkout" beside it. Pressing either
+ * spends a round trip to be told no — `cancel_checkout_intent` refuses
+ * `already_paid`, and `open_checkout_intent` has nothing left to open. A
+ * control whose only outcome is a refusal is worse than no control (the same
+ * rule `capacity_full` already obeys by rendering none).
+ *
+ * SO THE ACTS ARE DERIVED FROM THE STATUS, NOT FROM THE PRESENCE OF A SESSION
+ * ID. A stamped Session proves a checkout was opened; it does not prove the
+ * checkout is still endable.
+ *
+ * ONE ALLOWLIST, NOT A DENYLIST. `session_created` is the only status where a
+ * live hosted page genuinely exists to pick up or to end — which is also the
+ * exact filter `get_own_checkout_intent_session` applies inside the door, so
+ * the control this renders and the read the cancel route performs agree by
+ * construction (review law 3). `processing` is excluded for its own reason: the
+ * bank is mid-authorisation and NOBODY may pull the rug out, which is why the
+ * processing face says so in words.
+ *
+ * A STATUS THIS BUILD CANNOT READ (`null` — an older door, mid-deploy) KEEPS
+ * THE PRE-#628 READING: the session id rides through exactly as it did before
+ * the status column existed, because in that window the app knows nothing that
+ * would justify withdrawing a control it has always offered.
+ */
+export type WaitingActs = {
+  /** Whether "resume checkout" may be offered — a live hosted page to go back
+   *  to. False over a payment that already landed. */
+  readonly resume: boolean;
+  /** The Session id a cancel control may act on, or `null` when no cancel may
+   *  be offered at all. Never merely `intentSessionId`. */
+  readonly cancelSessionId: string | null;
+};
+
+/** The statuses whose intent still carries a checkout a person can pick up or
+ *  end. Spelled as a set so a status added by a later migration is EXCLUDED by
+ *  default rather than silently admitted. */
+const RESUMABLE_INTENT_STATUSES: ReadonlySet<CheckoutIntentStatus> = new Set(["session_created"]);
+
+export function waitingActsFrom(progress: CheckoutProgress): WaitingActs {
+  // The pre-#628 window: no status this build can read, so nothing is withdrawn.
+  if (progress.intentStatus === null) {
+    return { resume: true, cancelSessionId: progress.intentSessionId };
+  }
+  if (!RESUMABLE_INTENT_STATUSES.has(progress.intentStatus)) {
+    return { resume: false, cancelSessionId: null };
+  }
+  return { resume: true, cancelSessionId: progress.intentSessionId };
 }
 
 type ProgressRow = { readonly checkout_open: unknown; readonly paid_unconsumed: unknown };

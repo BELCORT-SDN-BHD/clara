@@ -124,6 +124,23 @@ export type CheckoutFlashOutcome =
    * money at ⑤ and discovering it at ⑧.
    */
   | { readonly kind: "already_member" }
+  /**
+   * #628 REVIEW — THE DATABASE BROKE A DEADLOCK OR A SERIALIZATION CONFLICT
+   * (SQLSTATE `40P01` / `40001`), so the whole transaction rolled back.
+   *
+   * ITS OWN ARM, BECAUSE THE SENTENCE IS DIFFERENT AND BETTER. `unavailable`
+   * says "we could not do this and we cannot tell you why"; this says "nothing
+   * was changed, and the same act again will very likely work". The DB fix
+   * round changes `claim_paid_firm`'s lock order and the applier's arms, which
+   * is exactly the kind of change that makes a 40P01 a real, ordinary outcome
+   * of two writers meeting. `workRoutes.ts` already draws this line for the
+   * work lane (409 `{error:'transient'}`); the checkout lane now draws it too.
+   *
+   * NEVER A `refused`: no door said no. PostgreSQL aborted one of two
+   * transactions so neither could be half-done, which is the database keeping
+   * its promise rather than refusing a request.
+   */
+  | { readonly kind: "try_again" }
   /** Anything else this route could not classify. Distinct from every arm
    *  above so a card never claims a cause that was not observed. */
   | { readonly kind: "unavailable" };
@@ -212,6 +229,7 @@ export function parseCheckoutFlash(
     case "plan_rotated":
     case "no_registration":
     case "already_member":
+    case "try_again":
     case "unavailable":
       return { nonce, kind: candidate.kind };
     default:

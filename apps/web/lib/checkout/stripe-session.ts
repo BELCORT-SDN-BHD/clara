@@ -541,56 +541,28 @@ export async function createCheckoutSession(
   deps: StripeSessionDeps = {},
 ): Promise<CheckoutSessionCreated> {
   const env = deps.env ?? process.env;
-  const doFetch = deps.fetchImpl ?? fetch;
   const key = resolveStripeKey(env);
-
-  // The bound. `clearTimeout` in `finally` so a fast answer does not leave a
-  // pending timer holding the request open — the same shape, deliberately,
-  // that `confirmation-wall.ts` uses for the confirm hop.
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), deps.timeoutMs ?? CHECKOUT_TIMEOUT_MS);
-  let response: Response;
-  try {
-    response = await doFetch(`${STRIPE_API_BASE}/checkout/sessions`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${key}`,
-        "Content-Type": "application/x-www-form-urlencoded",
-        "Stripe-Version": STRIPE_API_VERSION,
-        "Idempotency-Key": request.idempotencyKey,
-      },
-      body: checkoutSessionForm(request).toString(),
-      redirect: "manual",
-      cache: "no-store",
-      signal: controller.signal,
-    });
-  } catch (err) {
-    // An abort arrives here as `AbortError`, so the deadline produces the same
-    // typed refusal as a dead socket — unavailable, never an acceptance.
-    throw new StripeSessionError(
-      "transport",
-      `the Stripe Checkout Sessions call did not complete: ${(err as Error)?.name ?? "fetch_failed"}`,
-    );
-  } finally {
-    clearTimeout(timer);
-  }
-
-  if (!response.ok) {
-    // The status only. Stripe's error body can echo request parameters, and
-    // nothing that could carry the key or the applicant's data is logged.
-    throw new StripeSessionError(
-      "refused",
-      `Stripe refused the Checkout Session with status ${response.status}`,
-      response.status,
-    );
-  }
-
-  let body: unknown;
-  try {
-    body = await response.json();
-  } catch {
-    throw new StripeSessionError("malformed", "Stripe's response was not JSON", response.status);
-  }
+  // #628 REVIEW — THROUGH `stripeFetch`, NOT BESIDE IT.
+  //
+  // This function carried its own AbortController, its own `CHECKOUT_TIMEOUT_MS`
+  // read, its own `redirect: "manual"` / `cache: "no-store"` pair, its own
+  // status check and its own JSON hop — every one of them a second copy of what
+  // `stripeFetch` (extracted FROM this function for the two new verbs) already
+  // does. Three Stripe calls leaving one module with two implementations of
+  // "how we talk to Stripe" is the shape where a deadline gets tightened on one
+  // path, a header added to one path, and nobody notices the other (7.3). The
+  // behaviour is unchanged byte for byte: same bound (and the same injectable
+  // `deps.timeoutMs`), same abort-becomes-`transport`, same status-becomes-
+  // `refused`, same non-JSON-becomes-`malformed`, same key-class gate above,
+  // and the same rule that Stripe's BODY never reaches a message.
+  //
+  // WHAT STAYS HERE is the only part that is genuinely this verb's: the
+  // POSITIVE check on the pair `{id, url}` below.
+  const body = await stripeFetch(
+    "/checkout/sessions",
+    { key, body: checkoutSessionForm(request), idempotencyKey: request.idempotencyKey },
+    deps,
+  );
   const session = body as { id?: unknown; url?: unknown } | null;
   const id = session?.id;
   const url = session?.url;
@@ -601,7 +573,6 @@ export async function createCheckoutSession(
     throw new StripeSessionError(
       "malformed",
       "Stripe returned 200 without both a session id and a hosted url",
-      response.status,
     );
   }
   return { id, url };

@@ -47,6 +47,75 @@
 --   `duplicate_payment` row in an operator queue.
 --
 -- =====================================================================================
+-- THE REVIEW ROUND, AND THE SEVEN THINGS IT MOVED IN THIS FILE (#628 review, ranked).
+--
+-- Every one below is a defect of an EARLIER CUT OF THIS FILE. 0186 is unmerged, so the body moves
+-- here rather than in a successor -- which also means every database that applied the earlier cut
+-- refuses this one on checksum drift and must be rebuilt. Each item is pinned by a cell in
+-- `packages/db/tests/checkout-convergence.test.mjs` and by a probe in §J.
+--
+--   S1 · MONEY. The settlement test was 0160's disjunct `payment_status='paid' OR
+--        (mode='subscription' AND session_status='complete')`. EVERY Clara Checkout Session is
+--        created with `mode: "subscription"` (apps/web/lib/checkout/stripe-session.ts:334, checkoutSessionForm), and
+--        Stripe sends `checkout.session.completed` with `status='complete'` and
+--        `payment_status='unpaid'` the instant a delayed-notification customer (Malaysian FPX,
+--        and every other asynchronous method) leaves the page. So the second disjunct was TRUE
+--        for every completed session this estate can ever receive: an UNPAID completed event
+--        recorded a `firm_registration_payments` row and flipped the intent to `paid`, the
+--        `async_payment_failed` that followed answered `no_change` against an already-paid
+--        intent, and a REFUSED payment had minted a claimable firm. The disjunct is replaced by
+--        `payment_status in ('paid','no_payment_required')` -- `no_payment_required` is the thing
+--        the mode clause was STANDING IN FOR (Stripe's own answer for the RM0 beta flow, whose
+--        plan amount is 0), and it is a statement about the money rather than about the session's
+--        shape. This RETIRES review item A4. `checkout.session.async_payment_succeeded` is still
+--        settled BY ITS TYPE, which is unchanged.
+--
+--   S2 · THE COHORT'S LOCK ORDER IS `checkout_intents` -> `firm_registration_requests`, AND IT IS
+--        STATED HERE ONCE. The earlier cut had `clara.claim_paid_firm` writing the intent while
+--        holding the registration `for update`, and `clara.apply_stripe_events` holding the
+--        intent `for update` while inserting a payment row whose `fk_frp_registration_applicant`
+--        takes KEY SHARE on that same registration (0163:231). Registration->intent against
+--        intent->registration is a cycle, and a webhook sweep racing a claim on one registration
+--        raises 40P01 on a money path with no retry behind it. `claim_paid_firm` now resolves the
+--        applicant's intent id WITHOUT a lock, takes the INTENT row lock, and only then the
+--        registration row lock (§H). `clara.open_checkout_intent` is deliberately NOT in this
+--        ordering claim and does not need to be: the only intent row it locks is an UNSTAMPED
+--        `open` one, and an applier resolves an intent only from a stamped session id, so the two
+--        bodies' intent lock sets are disjoint by construction.
+--
+--   S3 · `expired_after_paid` filed a problem, wrote NO application row and `continue`d. The only
+--        other exclusion is the open problem itself, so an operator RESOLVING it handed the event
+--        straight back to the next sweep, which filed the identical problem again, forever. It
+--        now writes an application row with outcome `no_change` beside the problem, exactly as
+--        `paid_after_terminal` already wrote one with outcome `paid` (§D, §E).
+--
+--   S4 · `clara.get_admission_capacity` handed `firms_count` -- how many firms this estate has
+--        sold, a business-confidential number -- to ANY authenticated person. It now carries
+--        `clara.set_admission_capacity`'s own predicate (operator-firm owner) and refuses CLR04
+--        `not_operator_firm` otherwise. Applicants lose nothing: the only capacity fact their
+--        surfaces ever needed is the BOOLEAN `capacity_full`, which travels on
+--        `clara.get_own_checkout_progress` (§I) and is what `apps/web` actually reads
+--        (apps/web/lib/registration/checkout-progress-reads.ts:108, the capacityFull field); no web lane calls this door.
+--
+--   S5 · A `processing` INTENT HAD NO EXIT. `open_checkout_intent` refuses `checkout_in_progress`
+--        and `cancel_checkout_intent` refuses `payment_in_flight`, so if the terminal asynchronous
+--        webhook never arrives the applicant can never pay again -- forever, with no operator
+--        visibility. `clara.apply_stripe_events` (the runtime leader sweeps it every 60s) now
+--        carries a second arm that expires a `processing` intent whose `status_at` is older than
+--        a Stripe Checkout Session can live and files the operator problem `processing_timeout`
+--        (§E). A payment landing afterwards is the existing `paid_after_terminal` path, unchanged.
+--
+--   S6 · THE STAMP TRIGGER WAS `before update` ONLY, so on INSERT the eight-value CHECK was the
+--        whole law and a definer could insert an intent that was born `paid`, with a `status_at`
+--        of its own choosing. A sibling BEFORE INSERT trigger now writes the three state columns
+--        itself (§B).
+--
+--   B7 · `cancel_checkout_intent` answered CLR10 `intent_not_found` for an absent intent and
+--        CLR04 `not_your_intent` for somebody else's -- a two-answer probe that tells an attacker
+--        which checkout intent ids exist. Both are now ONE refusal, CLR04 `not_your_intent` (§F),
+--        matching `get_own_checkout_intent_session`'s zero-row posture.
+--
+-- =====================================================================================
 -- THE SHAPE OF THE FIX: A STATUS THE DATABASE OWNS, AND A TRIGGER THAT IS THE ONLY LAW.
 --
 -- `clara.checkout_intents.status` is an eight-value enumeration under a CHECK, and EVERY move
@@ -108,9 +177,16 @@
 -- applier (the rig's own fixtures do exactly that, and so does an operator repair) still excludes
 -- its event, exactly as it did before this file. Two independent exclusions, neither weakened.
 --
--- A PROBLEM ROW IS STILL THE OTHER EXCLUSION, AND IT STILL RELEASES ON RESOLUTION. An arm that
--- ends in a problem writes NO application row (0160's semantics, and `checkout-gate-c3`'s c3.52
--- pins it): resolving the problem is what hands the event back to the next sweep.
+-- A PROBLEM ROW IS THE OTHER EXCLUSION, AND IT RELEASES ON RESOLUTION -- FOR THE ARMS THAT DID
+-- NOT FINISH. 0160's four problem arms (`metadata_missing`, `intent_not_found`, `intent_mismatch`,
+-- `duplicate_payment`) end WITHOUT having applied the event, so they write no application row and
+-- resolving the problem is what hands the event back to the next sweep (`checkout-gate-c3`'s
+-- c3.52 pins exactly that, and it is unchanged here). #628's own two problems are different in
+-- kind: `paid_after_terminal` and `expired_after_paid` are RECEIPTS an operator must see about an
+-- event the applier has ALREADY finished with, so both write an application row beside the
+-- problem -- `paid_after_terminal` an outcome of `paid`, `expired_after_paid` one of `no_change`.
+-- Without that row (#628 review S3) resolving an `expired_after_paid` problem handed the event to
+-- a sweep that filed the identical problem again, and no operator could ever clear it.
 --
 -- =====================================================================================
 -- CAPACITY: THE COUNT AND THE INSERT ARE ONE TRANSACTION, OR IT IS NOT A WALL.
@@ -239,7 +315,8 @@ begin
     raise exception '#628 prestate: ck_stripe_event_problems_problem is not 0160''s five-value list (%)',
       coalesce(v_names,'(absent)') using errcode='CLR10';
   end if;
-  if position('''expired_after_paid''' in v_names)>0 or position('''paid_after_terminal''' in v_names)>0 then
+  if position('''expired_after_paid''' in v_names)>0 or position('''paid_after_terminal''' in v_names)>0
+     or position('''processing_timeout''' in v_names)>0 then
     raise exception '#628 prestate: the problem vocabulary already carries a #628 value' using errcode='CLR10';
   end if;
 
@@ -451,6 +528,45 @@ comment on function clara._tf_checkout_intents_session_stamp() is
   'violation CLR10 with 0158''s own sentence and an unlawful move CLR09 detail.reason '
   'invalid_transition naming from/to.';
 
+-- THE INSERT ARM (#628 review S6). Everything above is BEFORE UPDATE, so on an INSERT the
+-- eight-value CHECK was the whole law: `insert into clara.checkout_intents(...,status) values
+-- (...,'paid')` satisfied it and produced an intent that was BORN paid, carrying whatever
+-- `status_at` its writer chose -- a fabricated state on the one relation this file exists to make
+-- authoritative. A checkout is born `open`; that is the first line of the transition table, not a
+-- column default a writer may override. So a SIBLING before-insert trigger writes the three state
+-- columns itself and refuses every other spelling CLR09 `invalid_transition` with `from` null.
+--
+-- A sibling rather than a fourth arm of the body above, because that body is written entirely in
+-- terms of `old`, which does not exist on an INSERT. This file's own backfill is an UPDATE and is
+-- untouched by it, and `clara.open_checkout_intent` names no status column at all, so it takes
+-- the default and passes.
+create function clara._tf_checkout_intents_insert_stamp() returns trigger
+  language plpgsql security definer set search_path=clara,pg_temp as $$
+begin
+  if new.status is distinct from 'open' then
+    raise exception 'a checkout intent is born open, not %', coalesce(new.status,'(null)')
+      using errcode='CLR09', detail=jsonb_build_object(
+        'reason','invalid_transition','from',null::text,'to',new.status)::text;
+  end if;
+  new.status := 'open';
+  new.status_at := now();
+  new.status_reason := null;
+  return new;
+end $$;
+-- 0158:254's own posture for the trigger function beside it: a trigger body is called by the
+-- system, never by a caller, and leaving PUBLIC's default EXECUTE on it widens `clara_stripe_
+-- webhook`'s routine set -- which checkout-gate-c2's c2.8 asserts as an EXACT set equality.
+revoke all on function clara._tf_checkout_intents_insert_stamp() from public;
+
+create trigger t_checkout_intents_insert_stamp before insert on clara.checkout_intents
+  for each row execute function clara._tf_checkout_intents_insert_stamp();
+
+comment on function clara._tf_checkout_intents_insert_stamp() is
+  '#628 (review S6): a checkout intent is BORN open. Forces status=open, status_at=now() and a '
+  'NULL status_reason on every INSERT, and refuses an insert naming any other status CLR09 '
+  'detail.reason invalid_transition with from=null -- the state a row starts in is the transition '
+  'table''s first line, not a default a writer may override.';
+
 -- =====================================================================================
 -- §C  ADMISSION CAPACITY. One configuration row, one predicate body, two doors.
 -- =====================================================================================
@@ -597,25 +713,35 @@ comment on function clara.set_admission_capacity(integer,text,text) is
   '| reason_required | reason_too_long | op_key_conflict | capacity_row_missing (CLR10), '
   'operation_in_flight (CLR13), not_operator_firm (CLR04).';
 
+-- THE READER, BEHIND THE SAME WALL AS THE WRITER (#628 review S4). The first cut handed this to
+-- ANY authenticated person, which handed every applicant `firms_count` -- how many firms this
+-- estate has sold. That is a business-confidential number and no applicant surface needs it: the
+-- only capacity fact they are ever shown is the BOOLEAN `capacity_full`, which travels on
+-- `clara.get_own_checkout_progress` (§I) and is the thing apps/web actually reads
+-- (apps/web/lib/registration/checkout-progress-reads.ts:108, the capacityFull field). No web lane calls this door at all;
+-- it is the operator's own read of the estate's admission policy, so it carries the operator's own
+-- predicate -- `clara.set_admission_capacity`'s, byte-for-byte, re-derived at call time.
 create function clara.get_admission_capacity() returns jsonb
   language plpgsql stable security definer
   set search_path=clara,pg_temp
   set plan_cache_mode = force_custom_plan
   as $$
-declare
-  v_actor uuid;
 begin
-  v_actor := clara.jwt_sub();
-  if v_actor is null then
-    raise exception 'no authenticated actor' using errcode='CLR04', detail='{"reason":"no_actor"}';
+  perform clara._human_ctx(clara.role_rank('owner'));
+  if not exists (select 1 from clara.firms f where f.id = clara.jwt_firm() and f.is_operator) then
+    raise exception 'insufficient role' using errcode='CLR04', detail='{"reason":"not_operator_firm"}';
   end if;
   return clara._admission_capacity_state();
 end $$;
 revoke all on function clara.get_admission_capacity() from public;
 grant execute on function clara.get_admission_capacity() to clara_authenticated;
 comment on function clara.get_admission_capacity() is
-  '#628: {max_firms, firms_count, full} for any authenticated person -- the honest reason a '
-  'checkout may refuse. firms_count counts NON-operator firms. CLR04 detail.reason no_actor.';
+  '#628 (review S4): {max_firms, firms_count, full} for the OPERATOR FIRM''s owner only -- the '
+  'same predicate clara.set_admission_capacity carries, re-derived at call time. firms_count is '
+  'business-confidential, so an applicant gets the boolean capacity_full on '
+  'clara.get_own_checkout_progress instead, and no web lane calls this door. Refuses CLR04 '
+  '(_human_ctx: no authenticated actor / no active membership / insufficient role) and CLR04 '
+  'detail.reason not_operator_firm.';
 
 -- =====================================================================================
 -- §D  THE APPLICATION LEDGER AND THE WIDENED PROBLEM VOCABULARY.
@@ -646,17 +772,21 @@ comment on table clara.stripe_event_applications is
   '#628: one append-only row per Stripe event clara.apply_stripe_events has ACTED on, carrying '
   'what it did. It exists because three of the applier''s four arms have a real effect and write '
   'no payment row, so 0160''s payment-row exclusion alone would re-select them forever and starve '
-  'the LIMIT window (0160 section 4''s C-5 fix; checkout-gate-c2 c2.13). An arm that ends in a '
-  'PROBLEM writes no row here, so resolving the problem still hands the event back to the next '
-  'sweep (checkout-gate-c3 c3.52).';
+  'the LIMIT window (0160 section 4''s C-5 fix; checkout-gate-c2 c2.13). An arm that ends WITHOUT '
+  'having applied the event -- 0160''s four problem arms -- writes no row here, so resolving the '
+  'problem hands the event back to the next sweep (checkout-gate-c3 c3.52). #628''s own two '
+  'problems are receipts about an event the applier HAS finished with, so both write a row: '
+  'paid_after_terminal outcome paid, expired_after_paid outcome no_change (review S3).';
 
--- The vocabulary widens by exactly two, both #628's, both about an event that arrives after the
--- outcome is already settled.
+-- The vocabulary widens by exactly three, all #628's: two about an event that arrives after the
+-- outcome is already settled, and `processing_timeout` (review S5) about an asynchronous payment
+-- whose terminal event NEVER arrived -- the one state in which nothing at all will arrive to
+-- release the applicant, so the estate must notice the silence itself.
 alter table clara.stripe_event_problems drop constraint ck_stripe_event_problems_problem;
 alter table clara.stripe_event_problems add constraint ck_stripe_event_problems_problem check (
   problem in ('payment_not_settled','metadata_missing','intent_not_found',
               'intent_mismatch','duplicate_payment',
-              'expired_after_paid','paid_after_terminal')
+              'expired_after_paid','paid_after_terminal','processing_timeout')
 );
 
 -- =====================================================================================
@@ -681,16 +811,33 @@ alter table clara.stripe_event_problems add constraint ck_stripe_event_problems_
 --     asserts that relation present, so the body is one static query and the duplicated loop is
 --     not carried forward. Nothing about what the applier DOES changed with it.
 --
---     THE 裁-58/裁-28 SETTLEMENT TRIPWIRE IS KEPT VERBATIM for `checkout.session.completed`.
---     `checkout.session.async_payment_succeeded` does not consult it: that event type IS Stripe's
---     statement that the asynchronous payment settled, and a projection that disagreed with its
---     own type would be a recorder defect, not a settlement question.
+--     THE SETTLEMENT TEST IS THE PAYMENT STATUS, AND ONLY THE PAYMENT STATUS (#628 review S1).
+--     0160's second disjunct -- `mode='subscription' and session_status='complete'` -- is GONE:
+--     every Clara Session is created with `mode: "subscription"`, so it made every completed
+--     session settled, including the UNPAID one Stripe sends the moment an FPX customer leaves
+--     the page. `payment_status in ('paid','no_payment_required')` is what it was standing in for.
+--     `checkout.session.async_payment_succeeded` does not consult the test at all: that event type
+--     IS Stripe's statement that the asynchronous payment settled, and a projection that disagreed
+--     with its own type would be a recorder defect, not a settlement question.
+--
+--     AND ONE ARM THAT IS NOT ABOUT AN EVENT AT ALL (#628 review S5). After the event loop the
+--     applier sweeps for `processing` intents older than a Stripe Checkout Session can live and
+--     expires them with `processing_timeout`. It lives HERE because this body is the one thing the
+--     runtime leader already runs every 60 seconds, and because the state it clears is the only
+--     one in this file that NOTHING will ever arrive to clear: the exit from `processing` is a
+--     terminal webhook, and the failure being handled is precisely that no terminal webhook came.
 -- =====================================================================================
 create or replace function clara.apply_stripe_events(p_limit integer default 100) returns jsonb
   language plpgsql security definer set search_path = clara, pg_temp as $$
 declare
+  -- #628 review S5. A Stripe Checkout Session's own lifetime: `expires_at` defaults to 24 hours
+  -- after creation (Stripe API, Checkout Session `expires_at`), so an intent still `processing`
+  -- after that is waiting on a session Stripe itself no longer honours. Named once, here, because
+  -- a bare `interval '24 hours'` buried in a predicate is a policy nobody can find.
+  c_processing_timeout constant interval := interval '24 hours';
   e record;
   i record;
+  t record;
   v_examined integer := 0;
   v_applied integer := 0;
   v_problems integer := 0;
@@ -699,6 +846,7 @@ declare
   v_reason text;
   v_outcome text;
   v_prior text;
+  v_timeout_event text;
 begin
   if p_limit is null or p_limit<1 then
     raise exception 'limit must be positive' using errcode='CLR10';
@@ -782,6 +930,14 @@ begin
           'intent_id',i.id,'intent_status',i.status,'session_id',e.session_id))
         on conflict (event_id,problem) where resolved_at is null do nothing;
         if found then v_problems := v_problems+1; end if;
+        -- …AND THE APPLIER IS DONE WITH THIS EVENT (#628 review S3). The problem is the OPERATOR's
+        -- receipt; this row is the applier's own mark that it has finished. Without it the open
+        -- problem was the only exclusion, so an operator RESOLVING it handed the event straight
+        -- back to the next sweep, which filed the identical problem again -- a queue item that
+        -- could never be cleared. `paid_after_terminal` already wrote both rows; this arm now
+        -- does the same, with the outcome it actually had.
+        insert into clara.stripe_event_applications(event_id,outcome,intent_id)
+        values (e.event_id,'no_change',i.id) on conflict (event_id) do nothing;
         continue;
       end if;
       if i.status in ('session_created','processing','payment_failed') then
@@ -834,13 +990,21 @@ begin
     if e.type='checkout.session.async_payment_succeeded' then
       v_settled := true;
     else
-      -- 裁-58/裁-28 tripwire, kept verbatim from 0160: this second disjunct is an RM0-only
-      -- relaxation. When amounts are ruled it MUST tighten to proof of settled payment; it is
-      -- deliberately not a paid-price rule.
-      v_settled := (
-        e.payment_status='paid'
-        or (e.mode='subscription' and e.session_status='complete')
-      ) is true;
+      -- #628 REVIEW S1 -- SETTLEMENT IS THE PAYMENT STATUS, AND ONLY THE PAYMENT STATUS.
+      -- 0160's second disjunct was `mode='subscription' and session_status='complete'`, written
+      -- when the RM0 beta plan's amount was 0 and the question it was really asking was "is
+      -- anything owed at all". It names the MODE rather than the answer, and every Clara Checkout
+      -- Session is created with mode subscription (apps/web/lib/checkout/stripe-session.ts:334, checkoutSessionForm) --
+      -- so it was TRUE for every completed session this estate can receive, including the
+      -- `status=complete, payment_status=unpaid` one Stripe sends the instant a delayed-
+      -- notification customer (FPX) leaves the page. On that disjunct an UNPAID completed event
+      -- recorded a payment row and flipped the intent to `paid`, the `async_payment_failed` that
+      -- followed answered `no_change` against an already-paid intent, and a REFUSED payment had
+      -- minted a claimable firm. `no_payment_required` IS the thing the mode clause stood in for,
+      -- and it is Stripe's own statement that nothing is owed -- about the money, not the shape.
+      -- 裁-58/裁-28 remains the standing tripwire: when amounts are ruled, this must tighten again
+      -- to proof of the AMOUNT settled; it is still deliberately not a paid-price rule.
+      v_settled := (e.payment_status in ('paid','no_payment_required')) is true;
     end if;
 
     if not v_settled then
@@ -908,16 +1072,77 @@ begin
     values (e.event_id,'paid',i.id) on conflict (event_id) do nothing;
   end loop;
 
+  -- =================================================================================
+  -- ARM (e): THE PROCESSING TIMEOUT (#628 review S5). NOT ABOUT AN EVENT -- ABOUT A SILENCE.
+  --
+  -- `processing` has exactly one exit, a terminal asynchronous webhook, and until it arrives
+  -- `clara.open_checkout_intent` refuses `checkout_in_progress` and `clara.cancel_checkout_intent`
+  -- refuses `payment_in_flight`. So an applicant whose terminal event never comes -- Stripe never
+  -- sends it, or every delivery of it fails -- can NEVER pay again, and nothing in the estate
+  -- notices. This arm is the estate noticing: after `c_processing_timeout`, which is a Stripe
+  -- Checkout Session's own default lifetime, the intent is expired with `processing_timeout` (the
+  -- applicant may open a fresh checkout immediately) and an operator problem is filed so a human
+  -- also looks at the money. A payment landing afterwards is unchanged: it is the existing
+  -- `paid_after_terminal` path, and money is still the authority.
+  --
+  -- THE PROBLEM IS ANCHORED ON AN EVENT THIS APPLIER HAS ALREADY APPLIED. `stripe_event_problems`
+  -- is keyed to an event by a NOT NULL foreign key, so the row must name one; the honest choice is
+  -- the very event that recorded `processing`, found through its application row. That event
+  -- already carries an application row, so the open problem this arm files can never re-expose it
+  -- to the event loop above -- the exclusions are independent, and the weaker one being satisfied
+  -- twice changes nothing. An intent that reached `processing` by any route OTHER than that arm
+  -- (only a direct relation write can, since the relation grants every application role nothing)
+  -- is still expired, without a problem row: the state is cleared either way, which is the half
+  -- the applicant is stuck behind.
+  --
+  -- IDEMPOTENT AND CONCURRENCY-SAFE WITHOUT A NEW LOCK: the UPDATE re-states `status='processing'`
+  -- in its own predicate, so a second sweep racing this one moves nothing and files nothing, and
+  -- the lock it takes is the INTENT row -- first in the cohort's lock order, and the only row lock
+  -- this arm takes at all.
+  for t in
+    select ci.id, ci.registration_id, ci.status_at
+      from clara.checkout_intents ci
+     where ci.status='processing'
+       and ci.status_at < now() - c_processing_timeout
+     order by ci.status_at, ci.id
+     limit p_limit
+  loop
+    update clara.checkout_intents
+       set status='expired', status_reason='processing_timeout'
+     where id=t.id and status='processing';
+    if not found then
+      continue;                                       -- another sweep got there first
+    end if;
+    v_applied := v_applied+1;
+    select sea.event_id into v_timeout_event
+      from clara.stripe_event_applications sea
+     where sea.intent_id=t.id and sea.outcome='processing'
+     order by sea.applied_at desc, sea.event_id desc
+     limit 1;
+    if v_timeout_event is not null then
+      insert into clara.stripe_event_problems(event_id,problem,detail)
+      values (v_timeout_event,'processing_timeout',jsonb_build_object(
+        'intent_id',t.id,'registration_id',t.registration_id,'status_at',t.status_at))
+      on conflict (event_id,problem) where resolved_at is null do nothing;
+      if found then v_problems := v_problems+1; end if;
+    end if;
+  end loop;
+
   return jsonb_build_object('examined',v_examined,'applied',v_applied,'problems',v_problems);
 end $$;
 
 comment on function clara.apply_stripe_events(integer) is
   '#628 (recut of 0160 section 4): applies checkout.session.completed / '
-  'async_payment_succeeded / async_payment_failed / expired. A completed-but-unsettled session '
-  'becomes the intent state `processing`, never a problem row. Problems: metadata_missing, '
-  'intent_not_found, intent_mismatch, duplicate_payment (all 0160''s), plus expired_after_paid '
-  'and paid_after_terminal. Idempotent by three independent exclusions -- an open problem, a '
-  'payment row carrying the event id, and a clara.stripe_event_applications row.';
+  'async_payment_succeeded / async_payment_failed / expired. Settlement is payment_status in '
+  '(paid, no_payment_required) -- never the session mode (review S1) -- and async_payment_succeeded '
+  'is settled by its type. A completed-but-unsettled session becomes the intent state '
+  '`processing`, never a problem row. Problems: metadata_missing, intent_not_found, '
+  'intent_mismatch, duplicate_payment (all 0160''s), plus expired_after_paid, paid_after_terminal '
+  'and processing_timeout. Idempotent by three independent exclusions -- an open problem, a '
+  'payment row carrying the event id, and a clara.stripe_event_applications row. After the event '
+  'loop it also expires intents stuck in `processing` beyond a Checkout Session''s 24h lifetime '
+  '(review S5); those count into `applied` and `problems` like any other effect, while `examined` '
+  'counts EVENTS only.';
 
 -- =====================================================================================
 -- §F  clara.cancel_checkout_intent — the applicant's own way out of a checkout.
@@ -963,12 +1188,16 @@ begin
   -- Serialize the decision itself: a concurrent webhook sweep holding this row wakes this call
   -- onto the COMMITTED state, so it takes the replay/refusal branch the committed state deserves
   -- rather than deciding from a stale snapshot. Ownership is proved before any UPDATE (W-S/M2).
+  --
+  -- ONE REFUSAL FOR "IT IS NOT THERE" AND "IT IS NOT YOURS" (#628 review B7). The first cut
+  -- answered CLR10 `intent_not_found` for an absent intent and CLR04 `not_your_intent` for
+  -- somebody else's, which is an existence oracle: a caller holding no intent at all could sort
+  -- any id into real / not-real by the refusal it got back. Both are now the SAME answer, which is
+  -- exactly the posture `clara.get_own_checkout_intent_session` takes by returning zero rows for
+  -- a foreign registration and for an absent one alike. The applicant loses nothing: an id they
+  -- actually hold is never either case.
   select i.* into v_intent from clara.checkout_intents i where i.id=p_intent for update;
-  if not found then
-    raise exception 'unknown checkout intent' using errcode='CLR10',
-      detail='{"reason":"intent_not_found"}';
-  end if;
-  if v_intent.applicant is distinct from v_actor then
+  if not found or v_intent.applicant is distinct from v_actor then
     raise exception 'not your checkout intent' using errcode='CLR04',
       detail='{"reason":"not_your_intent"}';
   end if;
@@ -1003,8 +1232,9 @@ comment on function clara.cancel_checkout_intent(uuid,text) is
   '-> cancelled, returning {status:"cancelled", intent_id, session_id} so the web can expire the '
   'Stripe session. expired | cancelled replay {status, intent_id, session_id, replay:true}. '
   'Refusals carry detail.reason: no_actor | unknown_actor | agent_actor | not_your_intent (CLR04), '
-  'invalid_op_key | invalid_intent | intent_not_found (CLR10), payment_in_flight | already_paid '
-  '(CLR09). op_key is validated, not reserved -- pre-firm idempotency is structural (0163 '
+  'invalid_op_key | invalid_intent (CLR10), payment_in_flight | already_paid '
+  '(CLR09). An ABSENT intent and a FOREIGN one answer the SAME CLR04 not_your_intent -- no '
+  'existence oracle (review B7). op_key is validated, not reserved -- pre-firm idempotency is structural (0163 '
   'section 4): the durable retry identity is the intent''s own terminal state.';
 
 -- =====================================================================================
@@ -1245,6 +1475,33 @@ end $$;
 --         written by anything other than the applier (an operator repair, the rig's own fixtures)
 --         leaves an intent whose state has not caught up, and the claim itself is proof the
 --         payment exists.
+--
+--     …AND ONE MORE, FROM THE REVIEW (S2): THE LOCK ORDER, WHICH IS THE COHORT'S AND IS STATED
+--     HERE ONCE — `clara.checkout_intents` FIRST, `clara.firm_registration_requests` SECOND.
+--
+--     The cut above took the registration `for update` and then wrote the intent, while
+--     `clara.apply_stripe_events` takes the INTENT `for update` and then inserts a payment row
+--     whose `fk_frp_registration_applicant` (0163:231) takes KEY SHARE on that same registration.
+--     Registration->intent against intent->registration is a cycle: a webhook sweep applying an
+--     event for a registration whose applicant is claiming their firm at that instant deadlocks,
+--     one of the two dies with 40P01, and NOTHING on the claim path retries it -- the applicant
+--     sees a raw failure on the one call that turns their money into a firm.
+--
+--     So this body now resolves the applicant's intent id WITHOUT a lock (from the unconsumed
+--     payment's session, the same evidence it has always used), takes the INTENT row lock, and
+--     only then the registration row lock. Every authoritative read below is unchanged and still
+--     happens under both locks; the pre-read decides only WHICH row to lock first.
+--
+--     WHY THE PRE-READ CANNOT BE STALE IN A WAY THAT MATTERS: `uq_frp_registration` admits exactly
+--     ONE payment row per registration, so a payment seen before the locks is the same payment
+--     seen after them, and the only divergence possible is a payment COMMITTING in between -- in
+--     which case the applier that wrote it has already committed and released the intent it held.
+--
+--     `clara.open_checkout_intent` is deliberately outside this claim and does not need to be in
+--     it: the ONLY intent row it locks is an UNSTAMPED, `open` one, and an applier only ever
+--     resolves an intent that a Stripe session id points at, so the two bodies' intent lock sets
+--     cannot intersect. §J probes the order of THIS body, by literal, in the direction that
+--     matters.
 -- =====================================================================================
 -- The unlocked probe gives settled later retries a receipt. The locked re-read deliberately has
 -- no replay carve-out: a concurrent loser wakes onto W7 and raises CLR09 (W-K).
@@ -1314,10 +1571,23 @@ begin
   perform pg_catalog.pg_advisory_xact_lock(
     pg_catalog.hashtextextended('clara.admission-capacity', 0));
 
-  select r.* into v_req
-    from clara.firm_registration_requests r
-   where r.id=p_registration
-   for update;
+  -- #628 REVIEW S2 · THE COHORT'S LOCK ORDER: THE INTENT, THEN THE REGISTRATION. Resolved with NO
+  -- lock, from the same evidence this body has always used -- the unconsumed payment's session --
+  -- purely to learn WHICH intent row to take first. `uq_frp_registration` makes that payment
+  -- unique per registration, so this read cannot name a different intent than the authoritative
+  -- reads below; if no payment exists yet there is no intent to lock and the refusal further down
+  -- is unchanged. Taking the registration first and reaching the intent afterwards is the 40P01
+  -- cycle against clara.apply_stripe_events, which holds the intent and then takes KEY SHARE on
+  -- the registration through fk_frp_registration_applicant.
+  select p.stripe_session_id into v_payment_session
+    from clara.firm_registration_payments p
+   where p.registration_id=p_registration and p.consumed_at is null;
+  select i.id into v_intent from clara.checkout_intents i where i.session_id = v_payment_session;
+  if v_intent is not null then
+    perform 1 from clara.checkout_intents i where i.id = v_intent for update;
+  end if;
+
+  select r.* into v_req from clara.firm_registration_requests r where r.id=p_registration for update;
   -- NIT7 (opus review on #493): without this, a vanished row leaves v_req an all-NULL record
   -- (plpgsql's documented INTO behavior on zero rows) and the wall below reads
   -- `NULL is not null or NULL<>'open'` = `false or NULL` = NULL -- three-valued logic reads a
@@ -1547,6 +1817,7 @@ declare
 begin
   foreach v_sig in array array[
       'clara._tf_checkout_intents_session_stamp()',
+      'clara._tf_checkout_intents_insert_stamp()',
       'clara.apply_stripe_events(integer)',
       'clara.cancel_checkout_intent(uuid,text)',
       'clara.open_checkout_intent(uuid,bytea,text)',
@@ -1691,6 +1962,30 @@ begin
     raise exception '#628 tail: the trigger lost one of its two refusal shapes (CLR09 invalid_transition / 0158''s CLR10 sentence)'
       using errcode='CLR10';
   end if;
+  -- THE INSERT ARM (review S6): a sibling BEFORE INSERT trigger, ARMED, that writes the three
+  -- state columns itself. Without it the eight-value CHECK was the whole law on an INSERT and a
+  -- definer could mint an intent that was born `paid`.
+  select count(*)::int into v_n from pg_trigger
+   where tgrelid='clara.checkout_intents'::regclass
+     and tgname='t_checkout_intents_insert_stamp' and tgenabled='O'
+     and tgfoid='clara._tf_checkout_intents_insert_stamp()'::regprocedure;
+  if v_n <> 1 then
+    raise exception '#628 tail: t_checkout_intents_insert_stamp is absent or not armed'
+      using errcode='CLR10';
+  end if;
+  if pg_catalog.has_function_privilege('public','clara._tf_checkout_intents_insert_stamp()','execute') then
+    raise exception '#628 tail: the insert arm is PUBLIC-executable -- a trigger body is the system''s to call, and PUBLIC''s default EXECUTE widens every application role''s routine set (checkout-gate-c2 c2.8 reads it as an exact equality)'
+      using errcode='CLR10';
+  end if;
+  v_src := v_bodies ->> 'clara._tf_checkout_intents_insert_stamp()';
+  if position('new.status := ''open''' in v_src) = 0
+     or position('new.status_at := now()' in v_src) = 0
+     or position('new.status_reason := null' in v_src) = 0
+     or position('''invalid_transition''' in v_src) = 0 then
+    raise exception '#628 tail: the insert arm does not force open/now()/NULL and refuse invalid_transition'
+      using errcode='CLR10';
+  end if;
+
   -- …and `clara.record_checkout_session` is NOT recut by this file: it still stamps a session and
   -- still says nothing about status. If it ever did, the structural claim above would be a
   -- convention instead.
@@ -1707,9 +2002,13 @@ begin
       '''checkout.session.async_payment_failed''','''checkout.session.expired''',
       '''metadata_missing''','''intent_not_found''','''intent_mismatch''','''duplicate_payment''',
       '''expired_after_paid''','''paid_after_terminal''',
+      '''processing_timeout''',
       'uq_frp_registration','clara.stripe_event_applications','for update',
       'status=''processing''','status=''payment_failed''','status=''expired''','status=''paid''',
-      'e.mode=''subscription'' and e.session_status=''complete'''] loop
+      'e.payment_status in (''paid'',''no_payment_required'')',
+      'c_processing_timeout constant interval := interval ''24 hours''',
+      'ci.status_at < now() - c_processing_timeout',
+      '(e.event_id,''no_change'',i.id)'] loop
     if position(v_sig in v_src) = 0 then
       raise exception '#628 tail: the apply_stripe_events recut carries no % arm', v_sig using errcode='CLR10';
     end if;
@@ -1718,6 +2017,25 @@ begin
   -- the applier must no longer be able to file `payment_not_settled` at all.
   if position('''payment_not_settled''' in v_src) > 0 then
     raise exception '#628 tail: apply_stripe_events still files payment_not_settled -- an asynchronous method''s ordinary wait would go on being written into an operator queue as a fault'
+      using errcode='CLR10';
+  end if;
+  -- #628 REVIEW S1 · THE MODE DISJUNCT IS GONE, and the probe is NEGATIVE because its presence is
+  -- the defect: every Clara Session is mode=subscription, so a settlement test that reads the mode
+  -- calls an UNPAID completed session settled and records a payment for money that never landed.
+  if position('e.mode' in v_src) > 0 then
+    raise exception '#628 tail: apply_stripe_events still decides settlement from the session MODE -- an unpaid completed session would record a payment and mint a claimable firm'
+      using errcode='CLR10';
+  end if;
+  -- #628 REVIEW S2 · THE OTHER HALF OF THE COHORT'S LOCK ORDER: the applier holds the INTENT
+  -- before it inserts a payment row that takes KEY SHARE on the registration. Positional, and
+  -- anchored on the single row lock this body takes.
+  select count(*)::int into v_n from regexp_matches(v_src,'for update','g') m;
+  if v_n <> 1 then
+    raise exception '#628 tail: apply_stripe_events carries % row locks, not the single intent lock this probe anchors on', v_n
+      using errcode='CLR10';
+  end if;
+  if position('for update' in v_src) > position('insert into clara.firm_registration_payments' in v_src) then
+    raise exception '#628 tail: apply_stripe_events inserts the payment row before it locks the intent -- the lock order it shares with claim_paid_firm is intent -> registration'
       using errcode='CLR10';
   end if;
   -- …and 0160's TWO-BRANCH dynamic body is gone with its forward reference, not carried forward.
@@ -1729,7 +2047,8 @@ begin
   select pg_get_constraintdef(oid) into v_src from pg_constraint
    where conrelid='clara.stripe_event_problems'::regclass and conname='ck_stripe_event_problems_problem';
   foreach v_sig in array array['payment_not_settled','metadata_missing','intent_not_found',
-      'intent_mismatch','duplicate_payment','expired_after_paid','paid_after_terminal'] loop
+      'intent_mismatch','duplicate_payment','expired_after_paid','paid_after_terminal',
+      'processing_timeout'] loop
     if position(''''||v_sig||'''' in v_src) = 0 then
       raise exception '#628 tail: the problem vocabulary lost %', v_sig using errcode='CLR10';
     end if;
@@ -1850,6 +2169,16 @@ begin
     raise exception '#628 tail: get_own_checkout_progress''s OUT columns are % -- 0164''s first two must stay first, in order and by name', coalesce(v_src,'(none)')
       using errcode='CLR10';
   end if;
+  -- #628 REVIEW S4 · THE CAPACITY READ IS THE OPERATOR'S, NOT EVERY APPLICANT'S. firms_count is
+  -- how many firms this estate has sold; the door carries set_admission_capacity's own predicate.
+  v_src := v_bodies ->> 'clara.get_admission_capacity()';
+  if position('clara._human_ctx(clara.role_rank(''owner''))' in v_src) = 0
+     or position('f.is_operator' in v_src) = 0
+     or position('not_operator_firm' in v_src) = 0 then
+    raise exception '#628 tail: get_admission_capacity does not carry the operator-firm owner predicate -- firms_count would be readable by any authenticated person'
+      using errcode='CLR10';
+  end if;
+
   -- The capacity predicate is ONE body, and NOBODY may call it directly.
   if pg_catalog.has_function_privilege('public','clara._admission_capacity_state()','execute')
      or pg_catalog.has_function_privilege('clara_authenticated','clara._admission_capacity_state()','execute') then
@@ -1868,12 +2197,18 @@ begin
   -- 6 · THE CANCEL DOOR'S OWN ROSTER, read from the stripped body.
   v_src := v_bodies ->> 'clara.cancel_checkout_intent(uuid,text)';
   foreach v_sig in array array['no_actor','unknown_actor','agent_actor','invalid_op_key',
-      'invalid_intent','intent_not_found','not_your_intent','payment_in_flight','already_paid',
+      'invalid_intent','not_your_intent','payment_in_flight','already_paid',
       'for update','status=''cancelled'''] loop
     if position(v_sig in v_src) = 0 then
       raise exception '#628 tail: cancel_checkout_intent carries no %', v_sig using errcode='CLR10';
     end if;
   end loop;
+  -- #628 REVIEW B7 · NO EXISTENCE ORACLE. An absent intent and a foreign one answer the SAME
+  -- refusal, so the door cannot be used to sort ids into real and not-real.
+  if position('intent_not_found' in v_src) > 0 then
+    raise exception '#628 tail: cancel_checkout_intent still answers intent_not_found -- an absent intent and a foreign one must be ONE refusal'
+      using errcode='CLR10';
+  end if;
 
   -- 7 · THE TWO MONEY-SURFACE RECUTS: #628's arms landed AND no 0163/0185 arm was dropped.
   v_src := v_bodies ->> 'clara.open_checkout_intent(uuid,bytea,text)';
@@ -1916,21 +2251,37 @@ begin
   if position('clara.dpa_signatures' in v_src) > 0 then
     raise exception '#628 tail: claim_paid_firm reaches the retired evidence table' using errcode='CLR10';
   end if;
-  -- THE CAPACITY LOCK PRECEDES THE REGISTRATION ROW LOCK. Positional for the same reason: taken
-  -- after it, the count and the insert would no longer be one serialized act. `for update` occurs
-  -- EXACTLY ONCE in this body -- the locked registration re-read -- so it is the anchor; the
-  -- unlocked replay probe above it deliberately takes no lock at all.
-  select count(*)::int into v_n
-    from regexp_matches(v_src,'for update','g') m;
-  if v_n <> 1 then
-    raise exception '#628 tail: claim_paid_firm carries % row locks, not the single registration re-read this probe anchors on', v_n
+  -- #628 REVIEW S2 · THE COHORT'S LOCK ORDER, BY LITERAL PROBE: THE INTENT LOCK PRECEDES THE
+  -- REGISTRATION LOCK. This body takes EXACTLY TWO row locks and each has its own spelling, so the
+  -- probe is positional on the two spellings rather than on a bare `for update` — and the negative
+  -- direction is the one that matters: registration-then-intent here is a deadlock cycle with
+  -- clara.apply_stripe_events, which holds the intent and then takes KEY SHARE on the registration
+  -- through fk_frp_registration_applicant (0163:231).
+  if position('where i.id = v_intent for update' in v_src) = 0
+     or position('where r.id=p_registration for update' in v_src) = 0 then
+    raise exception '#628 tail: claim_paid_firm does not take BOTH the intent lock and the registration lock in their probed spellings'
       using errcode='CLR10';
   end if;
-  if position('clara.admission-capacity' in v_src) > position('for update' in v_src) then
-    raise exception '#628 tail: claim_paid_firm takes the admission lock AFTER its registration row lock -- two callers could then both read the same pre-insert count'
+  select count(*)::int into v_n
+    from regexp_matches(v_src,'for update','g') m;
+  if v_n <> 2 then
+    raise exception '#628 tail: claim_paid_firm carries % row locks, not the intent-then-registration pair this probe anchors on', v_n
+      using errcode='CLR10';
+  end if;
+  if position('where i.id = v_intent for update' in v_src)
+     > position('where r.id=p_registration for update' in v_src) then
+    raise exception '#628 tail: claim_paid_firm locks the REGISTRATION before the INTENT -- that is the 40P01 cycle with apply_stripe_events, on the one call that turns an applicant''s money into a firm'
+      using errcode='CLR10';
+  end if;
+  -- THE CAPACITY LOCK PRECEDES BOTH ROW LOCKS. Positional for its own reason: taken after them,
+  -- the count and the insert would no longer be one serialized act. The unlocked replay probe and
+  -- the unlocked intent RESOLUTION above it deliberately take no lock at all.
+  if position('clara.admission-capacity' in v_src)
+     > position('where i.id = v_intent for update' in v_src) then
+    raise exception '#628 tail: claim_paid_firm takes the admission lock AFTER its first row lock -- two callers could then both read the same pre-insert count'
       using errcode='CLR10';
   end if;
 
-  raise notice '#628 tail: OK -- clara.checkout_intents carries status/status_at/status_reason under a CHECK over the eight #628 values, backfilled from the payment evidence (matched on stripe_session_id, never on registration alone) and re-derived here rather than trusted, with no stamped row left `open`; clara._tf_checkout_intents_session_stamp is ARMED again after the backfill and is the ONLY authority over the state -- it keeps 0185 SEC-2''s NULL->value terms pin, EXECUTES open -> session_created as part of the first session_id stamp (so clara.record_checkout_session stays uncut and a stamped intent is structurally session_created), admits exactly the fourteen lawful status writes plus the session stamp -- including the three MONEY-IS-THE-AUTHORITY arms expired/cancelled/payment_failed -> paid that #628''s applier contract requires -- and refuses anything else CLR09 invalid_transition beside 0158''s own CLR10 sentence; clara.apply_stripe_events now applies FOUR event types, files a completed-but-unsettled session as the intent state `processing` instead of the operator problem payment_not_settled (which it can no longer file at all), keeps every 0160 problem arm including the uq_frp_registration duplicate_payment subtransaction, adds expired_after_paid and paid_after_terminal, drops 0160''s two-branch dynamic body with the C-2 forward reference it existed for, and is idempotent by three independent exclusions (an open problem, a payment row carrying the event id, and the new append-only clara.stripe_event_applications row); clara.admission_capacity holds exactly ONE unlimited row under forced RLS with one owner policy, and clara._admission_capacity_state is the single predicate all five capacity surfaces read, granted to nobody; clara.claim_paid_firm takes pg_advisory_xact_lock(''clara.admission-capacity'') BEFORE its registration row lock so its count and its firm are one serialized act, refuses capacity_reached LAST (after payment and legal both pass) and moves the intent to consumed in two admitted steps, while clara.open_checkout_intent checks the SAME predicate advisorily BEFORE the origin rate wall and refuses checkout_in_progress for a session_created/processing intent so one registration can never carry two live Stripe sessions; clara.cancel_checkout_intent, clara.set_admission_capacity, clara.get_admission_capacity and clara.get_own_checkout_intent_session are clara_fn_owner-owned SECURITY DEFINERs, PUBLIC-revoked, clara_authenticated-ONLY (no agent, runtime, wake or webhook role reaches them) with BOTH search_path and plan_cache_mode = force_custom_plan pinned, the re-minted clara.get_own_checkout_progress keeps 0164''s first two OUT columns byte for byte in front of its five new ones and gains the same plan pin; and not one of the four touched relations carries a table ACL -- relacl IS NULL throughout, so this file''s DR round-trip is grant-identical.';
+  raise notice '#628 tail: OK -- clara.checkout_intents carries status/status_at/status_reason under a CHECK over the eight #628 values, backfilled from the payment evidence (matched on stripe_session_id, never on registration alone) and re-derived here rather than trusted, with no stamped row left `open`; clara._tf_checkout_intents_session_stamp is ARMED again after the backfill and is the ONLY authority over the state -- it keeps 0185 SEC-2''s NULL->value terms pin, EXECUTES open -> session_created as part of the first session_id stamp (so clara.record_checkout_session stays uncut and a stamped intent is structurally session_created), admits exactly the fourteen lawful status writes plus the session stamp -- including the three MONEY-IS-THE-AUTHORITY arms expired/cancelled/payment_failed -> paid that #628''s applier contract requires -- and refuses anything else CLR09 invalid_transition beside 0158''s own CLR10 sentence; clara.apply_stripe_events now applies FOUR event types, files a completed-but-unsettled session as the intent state `processing` instead of the operator problem payment_not_settled (which it can no longer file at all), keeps every 0160 problem arm including the uq_frp_registration duplicate_payment subtransaction, adds expired_after_paid and paid_after_terminal, drops 0160''s two-branch dynamic body with the C-2 forward reference it existed for, and is idempotent by three independent exclusions (an open problem, a payment row carrying the event id, and the new append-only clara.stripe_event_applications row); clara.admission_capacity holds exactly ONE unlimited row under forced RLS with one owner policy, and clara._admission_capacity_state is the single predicate all five capacity surfaces read, granted to nobody; clara.claim_paid_firm takes pg_advisory_xact_lock(''clara.admission-capacity'') BEFORE its registration row lock so its count and its firm are one serialized act, refuses capacity_reached LAST (after payment and legal both pass) and moves the intent to consumed in two admitted steps, while clara.open_checkout_intent checks the SAME predicate advisorily BEFORE the origin rate wall and refuses checkout_in_progress for a session_created/processing intent so one registration can never carry two live Stripe sessions; clara.cancel_checkout_intent, clara.set_admission_capacity, clara.get_admission_capacity and clara.get_own_checkout_intent_session are clara_fn_owner-owned SECURITY DEFINERs, PUBLIC-revoked, clara_authenticated-ONLY (no agent, runtime, wake or webhook role reaches them) with BOTH search_path and plan_cache_mode = force_custom_plan pinned, the re-minted clara.get_own_checkout_progress keeps 0164''s first two OUT columns byte for byte in front of its five new ones and gains the same plan pin; and not one of the four touched relations carries a table ACL -- relacl IS NULL throughout, so this file''s DR round-trip is grant-identical. AND THE REVIEW ROUND: settlement is payment_status in (paid, no_payment_required) with the session-MODE disjunct gone from the body entirely (S1); clara.claim_paid_firm and clara.apply_stripe_events share ONE lock order, checkout_intents before firm_registration_requests, probed positionally in both bodies (S2); expired_after_paid writes an application row with outcome no_change beside its problem, so resolving it cannot re-file it forever (S3); clara.get_admission_capacity carries set_admission_capacity''s operator-firm owner predicate, so firms_count is no longer readable by every authenticated person (S4); the applier expires a `processing` intent older than a Checkout Session''s own 24h lifetime and files processing_timeout, which is the only exit from a state whose terminal webhook never arrived (S5); t_checkout_intents_insert_stamp forces a newborn intent to open/now()/NULL and refuses any other status CLR09 invalid_transition from=null (S6); and clara.cancel_checkout_intent answers ONE refusal for an absent and a foreign intent alike, with no intent_not_found left in its body (B7).';
 end
 $w628_tail$;

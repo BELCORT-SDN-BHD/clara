@@ -28,12 +28,13 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import {
   ADMITTED_STATUS_WRITES, CLR, CONVERGENCE_REASON, EVENT, PG, PROBLEM, ROLES, STATUS,
-  applicationFor, applyEvents, assertPair, assertRaises, cancelIntent, claimPaidFirm,
-  clearOperator, convergenceLaneReady, deliver, endPool, ensureOperatorOwner, gateConvergence,
-  getCapacity, getPool, humanQuery, insertUser, intentState, intentsOf,
+  applicationFor, applyEvents, assertPair, assertRaises, backdateStatus, cancelIntent,
+  claimPaidFirm, clearOperator, convergenceLaneReady, deliver, endPool, ensureOperatorOwner,
+  gateConvergence, getCapacity, getPool, humanQuery, insertUser, intentState, intentsOf,
   liveCheckout, namedCall, openIntent, openedCheckout, opk, ordinaryFirm, ownIntentSession,
-  ownProgress, paymentsFor, problemsFor, rawCapacity, recordEvent, releaseCapacity, roleQuery,
-  rootQuery, setCapacity, stampSession, stripeSessionId, waitBlockedByOrThrow,
+  ownProgress, paymentsFor, problemsFor, rawCapacity, recordEvent, releaseCapacity, resolveProblem,
+  roleQuery, rootQuery, setCapacity, stampSession, stripeEventId, stripeSessionId,
+  waitBlockedByOrThrow,
 } from "./checkout-convergence-fixtures.mjs";
 import { withTxn } from "./rig-txn.mjs";
 
@@ -42,7 +43,7 @@ const CAPACITY_KEY = "clara.admission-capacity";
 
 let operator = null;
 let executed = 0;
-const EXPECTED_CELLS = 25;
+const EXPECTED_CELLS = 35;
 
 before(async () => {
   if (!(await convergenceLaneReady())) return;
@@ -101,6 +102,11 @@ cell("cc.1 catalog -- the intent carries a CHECK-bounded state, its instant and 
     const row = (await c.query(
       `select registration_id, applicant, price_local_key, dpa_version
          from clara.checkout_intents where id=$1`, [world.intent])).rows[0];
+    // …and since #628 review S6 the CHECK is behind a BEFORE INSERT arm as well, which answers
+    // CLR09 invalid_transition first (cc.18 drives THAT wall). It is disabled for the width of
+    // this one rolled-back probe -- 0186 §A's own idiom -- so the question below is still the
+    // CHECK's own closure and not the trigger's.
+    await c.query("alter table clara.checkout_intents disable trigger t_checkout_intents_insert_stamp");
     await assertRaises(PG.checkViolation, () => c.query(
       `insert into clara.checkout_intents(registration_id,applicant,price_local_key,dpa_version,status)
        values ($1,$2,$3,$4,'settled')`,
@@ -316,16 +322,72 @@ cell("cc.4 status_at and status_reason belong to the transition, and the frozen 
   }, { commit: false });
 });
 
+cell("cc.18 A CHECKOUT INTENT IS BORN OPEN -- the insert arm, not the CHECK, is the law", async () => {
+  // #628 review S6. The transition wall was BEFORE UPDATE only, so on an INSERT the eight-value
+  // CHECK was the whole law: a definer could mint an intent that was already `paid`, carrying a
+  // status_at of its own choosing, and every surface downstream would believe it.
+  const world = await openedCheckout(operator.owner, { tag: "cc18" });
+  const row = (await rootQuery(
+    `select registration_id, applicant, price_local_key, dpa_version
+       from clara.checkout_intents where id=$1`, [world.intent])).rows[0];
+  const args = [row.registration_id, row.applicant, row.price_local_key, row.dpa_version];
+
+  // A DEFINER INSERTING A STATE is refused CLR09 invalid_transition, naming `from` null -- there
+  // is no state to come from, which is exactly what the refusal says.
+  for (const born of ["paid", "consumed", "processing", "cancelled"]) {
+    await withTxn(async (c) => {
+      const err = await assertRaises(CLR.lastOwner, () => c.query(
+        `insert into clara.checkout_intents(registration_id,applicant,price_local_key,dpa_version,status)
+         values ($1,$2,$3,$4,$5)`, [...args, born]), `an intent inserted already ${born}`);
+      const detail = JSON.parse(err.detail);
+      assert.deepEqual({ reason: detail.reason, from: detail.from, to: detail.to },
+        { reason: CONVERGENCE_REASON.invalidTransition, from: null, to: born },
+        `${born}: the refusal names from=null`);
+    }, { commit: false });
+  }
+
+  // …and a well-formed insert has its instant and its reason WRITTEN, not honoured: status_at is
+  // the transaction clock and a newborn intent has no reason to carry.
+  await withTxn(async (c) => {
+    const born = (await c.query(
+      `insert into clara.checkout_intents(registration_id,applicant,price_local_key,dpa_version,
+         status,status_at,status_reason)
+       values ($1,$2,$3,$4,'open','1999-01-01T00:00:00Z','invented')
+       returning status, status_at, status_reason`, args)).rows[0];
+    assert.equal(born.status, "open");
+    assert.equal(born.status_reason, null, "a newborn intent carries no reason");
+    assert.ok(born.status_at > new Date("2020-01-01T00:00:00Z"),
+      "status_at is the transaction clock, never the writer's");
+  }, { commit: false });
+
+  // The real door agrees because it is the same wall: open_checkout_intent names no status at all.
+  assert.equal((await intentState(world.intent)).status, "open");
+  assert.equal((await intentState(world.intent)).status_reason, null);
+
+  // The arm is a SIBLING of the update wall, armed, and both are on the relation.
+  const triggers = await rootQuery(
+    `select tgname from pg_trigger where tgrelid='clara.checkout_intents'::regclass
+       and not tgisinternal and tgenabled='O' order by tgname`);
+  assert.deepEqual(triggers.rows.map((r) => r.tgname), [
+    "t_checkout_intents_append_only", "t_checkout_intents_insert_stamp",
+    "t_checkout_intents_no_truncate", "t_checkout_intents_session_stamp",
+  ]);
+});
+
 // ===========================================================================================
 // 2 · THE APPLIER.
 // ===========================================================================================
 
 cell("cc.5 async-unpaid completed is a STATE, not a problem -- and replays are inert", async () => {
+  // `mode: "subscription"` is THE PRODUCTION SHAPE and is deliberate: every Clara Checkout Session
+  // is created with it (apps/web/lib/checkout/stripe-session.ts:334), so this is the exact event
+  // Stripe sends when an FPX customer leaves the page. cc.14 keeps the mode=payment control the
+  // product never emits.
   const world = await liveCheckout(operator.owner, { tag: "cc5" });
   const { event, result } = await deliver({
     type: EVENT.completed, intent: world.intent, registration: world.registration,
     applicant: world.sub, session: world.session,
-    projection: { payment_status: "unpaid", mode: "payment", session_status: "complete" },
+    projection: { payment_status: "unpaid", mode: "subscription", session_status: "complete" },
   });
   assert.deepEqual(result, { examined: 1, applied: 1, problems: 0 });
   const state = await intentState(world.intent);
@@ -340,7 +402,7 @@ cell("cc.5 async-unpaid completed is a STATE, not a problem -- and replays are i
   const replay = await recordEvent(event, EVENT.completed, {
     livemode: false, session_id: world.session, intent_id: world.intent,
     registration_id: world.registration, applicant: world.sub,
-    payment_status: "unpaid", mode: "payment", session_status: "complete",
+    payment_status: "unpaid", mode: "subscription", session_status: "complete",
   });
   assert.deepEqual(replay, { event_id: event, recorded: false });
   assert.deepEqual(await applyEvents(), { examined: 0, applied: 0, problems: 0 },
@@ -353,7 +415,7 @@ cell("cc.6 async_payment_succeeded settles -- one payment row, intent paid", asy
   await deliver({
     type: EVENT.completed, intent: world.intent, registration: world.registration,
     applicant: world.sub, session: world.session,
-    projection: { payment_status: "unpaid", mode: "payment", session_status: "complete" },
+    projection: { payment_status: "unpaid", mode: "subscription", session_status: "complete" },
   });
   assert.equal((await intentState(world.intent)).status, "processing");
 
@@ -379,7 +441,7 @@ cell("cc.7 async_payment_failed carries the provider's own reason", async () => 
   await deliver({
     type: EVENT.completed, intent: world.intent, registration: world.registration,
     applicant: world.sub, session: world.session,
-    projection: { payment_status: "unpaid", mode: "payment", session_status: "complete" },
+    projection: { payment_status: "unpaid", mode: "subscription", session_status: "complete" },
   });
   const { event, result } = await deliver({
     type: EVENT.asyncFailed, intent: world.intent, registration: world.registration,
@@ -424,7 +486,7 @@ cell("cc.8 a DELAYED completed event cannot lose the failure -- session_created 
   const { event: late, result: lateResult } = await deliver({
     type: EVENT.completed, intent: world.intent, registration: world.registration,
     applicant: world.sub, session: world.session,
-    projection: { payment_status: "unpaid", mode: "payment", session_status: "complete" },
+    projection: { payment_status: "unpaid", mode: "subscription", session_status: "complete" },
   });
   assert.deepEqual(lateResult, { examined: 1, applied: 0, problems: 0 });
   assert.equal((await intentState(world.intent)).status, "payment_failed");
@@ -478,8 +540,10 @@ cell("cc.10 an expiry arriving AFTER the money is an operator problem, and moves
     { status: after.status, status_at: after.status_at.toISOString() },
     { status: "paid", status_at: paid.status_at.toISOString() },
     "the intent did not move, instant included");
-  assert.equal(await applicationFor(event), null,
-    "an arm that ends in a problem writes no application row, so resolving it hands the event back");
+  assert.deepEqual(await applicationFor(event), { outcome: "no_change", intent_id: world.intent },
+    "#628 review S3: the problem is the OPERATOR's receipt and the application row is the applier's "
+    + "own mark that it is DONE -- without it, resolving the problem handed the event straight back "
+    + "to the next sweep, which filed the identical problem again, forever (cc.16)");
   assert.equal((await paymentsFor(world.registration)).length, 1);
 });
 
@@ -539,7 +603,7 @@ cell("cc.12 REORDER -- async_payment_succeeded BEFORE completed yields ONE payme
   const third = await deliver({
     type: EVENT.completed, intent: world.intent, registration: world.registration,
     applicant: world.sub, session: world.session,
-    projection: { payment_status: "unpaid", mode: "payment", session_status: "complete" },
+    projection: { payment_status: "unpaid", mode: "subscription", session_status: "complete" },
   });
   assert.deepEqual(third.result, { examined: 1, applied: 0, problems: 0 });
   assert.equal((await intentState(world.intent)).status, "paid");
@@ -554,6 +618,10 @@ cell("cc.13 payment_not_settled is unreachable, and the vocabulary still carries
   const before = await rootQuery(
     "select count(*)::int as n from clara.stripe_event_problems where problem=$1",
     [PROBLEM.paymentNotSettled]);
+  // Three shapes that used to file `payment_not_settled` on the 0160 body. Under #628 review S1
+  // the middle one SETTLES -- `no_payment_required` is Stripe's own "nothing is owed", and it is
+  // exactly what the retired `mode='subscription'` disjunct was standing in for (cc.14) -- while
+  // the other two are waits. None of the three is a problem row, which is the claim here.
   for (const projection of [
     { payment_status: "unpaid", mode: "payment", session_status: "open" },
     { payment_status: "no_payment_required", mode: "payment", session_status: "complete" },
@@ -579,6 +647,213 @@ cell("cc.13 payment_not_settled is unreachable, and the vocabulary still carries
   }
 });
 
+cell("cc.14 SETTLEMENT IS THE PAYMENT STATUS -- an unpaid completed SUBSCRIPTION session buys nothing", async () => {
+  // #628 review S1, and the production shape exactly: every Clara Checkout Session is created with
+  // `mode: "subscription"` (apps/web/lib/checkout/stripe-session.ts:334), and Stripe sends
+  // checkout.session.completed with status='complete', payment_status='unpaid' the moment a
+  // delayed-notification customer (FPX) leaves the page. On the retired disjunct
+  // (`mode='subscription' AND session_status='complete'`) that event was SETTLED.
+  const world = await liveCheckout(operator.owner, { tag: "cc14" });
+  const { event, result } = await deliver({
+    type: EVENT.completed, intent: world.intent, registration: world.registration,
+    applicant: world.sub, session: world.session,
+    projection: { payment_status: "unpaid", mode: "subscription", session_status: "complete" },
+  });
+  assert.deepEqual(result, { examined: 1, applied: 1, problems: 0 });
+  assert.equal((await intentState(world.intent)).status, "processing");
+  assert.deepEqual(await paymentsFor(world.registration), [],
+    "ZERO payment rows: nothing has been paid, whatever the session mode says");
+  assert.deepEqual(await applicationFor(event), { outcome: "processing", intent_id: world.intent });
+
+  // …AND THE FAILURE THAT FOLLOWS IS STILL HEARD. This is the half that made S1 a money defect:
+  // with the intent already `paid`, async_payment_failed answered `no_change` and a REFUSED
+  // payment had left a claimable firm behind.
+  const failed = await deliver({
+    type: EVENT.asyncFailed, intent: world.intent, registration: world.registration,
+    applicant: world.sub, session: world.session,
+    projection: { payment_status: "unpaid", last_payment_error: "fpx_bank_declined" },
+  });
+  assert.deepEqual(failed.result, { examined: 1, applied: 1, problems: 0 });
+  assert.equal((await intentState(world.intent)).status, "payment_failed");
+  assert.deepEqual(await paymentsFor(world.registration), [], "a refused payment bought nothing");
+
+  // THE mode='payment' CONTROL -- the shape the product never emits. The answer does not depend on
+  // the mode at all any more, which is the whole point.
+  const control = await liveCheckout(operator.owner, { tag: "cc14b" });
+  await deliver({
+    type: EVENT.completed, intent: control.intent, registration: control.registration,
+    applicant: control.sub, session: control.session,
+    projection: { payment_status: "unpaid", mode: "payment", session_status: "complete" },
+  });
+  assert.equal((await intentState(control.intent)).status, "processing");
+  assert.deepEqual(await paymentsFor(control.registration), []);
+
+  // …and `no_payment_required` -- the RM0 beta answer the mode clause was STANDING IN FOR -- is
+  // settled, in subscription mode, with no amount owed.
+  const free = await liveCheckout(operator.owner, { tag: "cc14c" });
+  const settled = await deliver({
+    type: EVENT.completed, intent: free.intent, registration: free.registration,
+    applicant: free.sub, session: free.session,
+    projection: { payment_status: "no_payment_required", mode: "subscription",
+      session_status: "complete" },
+  });
+  assert.deepEqual(settled.result, { examined: 1, applied: 1, problems: 0 });
+  assert.equal((await intentState(free.intent)).status, "paid");
+  assert.equal((await paymentsFor(free.registration)).length, 1,
+    "nothing owed is still a settlement, and it is the ONE disjunct that survives");
+});
+
+cell("cc.15 RED ON THE OLD DISJUNCT -- restoring it mints a payment for money that never landed", async () => {
+  // The mutant panel, the way checkout-gate-c3's W-L cell drives one: the LIVE body, with exactly
+  // one expression put back to its earlier cut, installed and driven inside a transaction that is
+  // rolled back. Without it, cc.14 could be green because the applier is broken for everyone.
+  const world = await liveCheckout(operator.owner, { tag: "cc15" });
+  await applyEvents(500);
+  const projection = {
+    livemode: false, session_id: world.session, intent_id: world.intent,
+    registration_id: world.registration, applicant: world.sub, currency: "myr", amount_total: 0,
+    payment_status: "unpaid", mode: "subscription", session_status: "complete",
+  };
+
+  await withTxn(async (c) => {
+    const body = (await c.query(
+      "select prosrc from pg_proc where oid='clara.apply_stripe_events(integer)'::regprocedure"))
+      .rows[0].prosrc;
+    const needle = "v_settled := (e.payment_status in ('paid','no_payment_required')) is true;";
+    assert.ok(body.includes(needle),
+      "the S1 mutant anchor must match the live settlement test exactly");
+    const mutant = body.replace(needle,
+      "v_settled := (e.payment_status='paid' "
+      + "or (e.mode='subscription' and e.session_status='complete')) is true;");
+    await c.query(`create or replace function clara.apply_stripe_events(p_limit integer default 100)
+      returns jsonb language plpgsql security definer set search_path=clara,pg_temp as $mut$${mutant}$mut$`);
+
+    await c.query("set role clara_stripe_webhook");
+    await c.query("select clara.record_stripe_event($1,$2,$3::jsonb)",
+      [stripeEventId("cc15mut"), EVENT.completed, JSON.stringify(projection)]);
+    const swept = (await c.query("select clara.apply_stripe_events(100) as result")).rows[0].result;
+    await c.query("reset role");
+    assert.deepEqual(swept, { examined: 1, applied: 1, problems: 0 });
+    assert.equal((await c.query(
+      "select status from clara.checkout_intents where id=$1", [world.intent])).rows[0].status,
+    "paid", "THE DEFECT, REPRODUCED: an UNPAID completed session was ruled settled");
+    assert.equal((await c.query(
+      "select count(*)::int as n from clara.firm_registration_payments where registration_id=$1",
+      [world.registration])).rows[0].n, 1,
+    "…and it minted a claimable payment row for money that never landed");
+  }, { commit: false });
+
+  // THE SAME EVENT SHAPE, against the body this file actually ships: a wait, and no money.
+  const { result } = await deliver({
+    type: EVENT.completed, intent: world.intent, registration: world.registration,
+    applicant: world.sub, session: world.session,
+    projection: { payment_status: "unpaid", mode: "subscription", session_status: "complete" },
+  });
+  assert.deepEqual(result, { examined: 1, applied: 1, problems: 0 });
+  assert.equal((await intentState(world.intent)).status, "processing");
+  assert.deepEqual(await paymentsFor(world.registration), []);
+  const live = (await rootQuery(
+    "select prosrc from pg_proc where oid='clara.apply_stripe_events(integer)'::regprocedure"))
+    .rows[0].prosrc;
+  assert.ok(!live.includes("e.mode="), "the mutant did not survive its own transaction");
+});
+
+cell("cc.16 an expired_after_paid problem RESOLVES ONCE -- the sweep never re-files it", async () => {
+  // #628 review S3. The arm filed a problem and wrote no application row, so the open problem was
+  // the only thing excluding the event: an operator resolving it handed the event straight back to
+  // the next sweep, which filed the identical problem again. Forever, and un-clearable.
+  const world = await liveCheckout(operator.owner, { tag: "cc16" });
+  await deliver({
+    type: EVENT.asyncSucceeded, intent: world.intent, registration: world.registration,
+    applicant: world.sub, session: world.session,
+    projection: { payment_status: "paid", mode: "subscription", session_status: "complete" },
+  });
+  const { event } = await deliver({
+    type: EVENT.expired, intent: world.intent, registration: world.registration,
+    applicant: world.sub, session: world.session, projection: { session_status: "expired" },
+  });
+  const filed = await problemsFor(event);
+  assert.equal(filed.length, 1);
+  assert.equal(filed[0].problem, PROBLEM.expiredAfterPaid);
+  assert.deepEqual(await applicationFor(event), { outcome: "no_change", intent_id: world.intent });
+
+  await resolveProblem(operator.owner, filed[0].id, "#628 cc.16 reconciled with Stripe");
+  assert.ok((await problemsFor(event))[0].resolved_at, "the operator's resolution stands");
+
+  // TWO further sweeps, because "it comes back" is a claim about the NEXT one and the one after.
+  for (const pass of [1, 2]) {
+    await applyEvents(500);
+    const after = await problemsFor(event);
+    assert.equal(after.length, 1, `pass ${pass}: no second expired_after_paid row for one event`);
+    assert.ok(after[0].resolved_at, `pass ${pass}: the resolved problem stayed resolved`);
+  }
+  assert.equal((await intentState(world.intent)).status, "paid", "and nothing moved");
+  assert.equal((await paymentsFor(world.registration)).length, 1);
+});
+
+cell("cc.17 a PROCESSING intent whose terminal webhook never comes expires, and releases the applicant", async () => {
+  // #628 review S5. `processing` has exactly one exit -- a terminal asynchronous webhook -- and
+  // until it arrives open_checkout_intent refuses checkout_in_progress and cancel_checkout_intent
+  // refuses payment_in_flight. If it never arrives the applicant can never pay again.
+  const world = await liveCheckout(operator.owner, { tag: "cc17" });
+  const { event } = await deliver({
+    type: EVENT.completed, intent: world.intent, registration: world.registration,
+    applicant: world.sub, session: world.session,
+    projection: { payment_status: "unpaid", mode: "subscription", session_status: "complete" },
+  });
+  assert.equal((await intentState(world.intent)).status, "processing");
+
+  // The two doors are shut, which is what makes the timeout the ONLY exit.
+  await assertPair(CLR.lastOwner, CONVERGENCE_REASON.paymentInFlight,
+    () => cancelIntent(world.sub, world.intent), "cancelling while the payment is in flight");
+  await assertPair(CLR.lastOwner, CONVERGENCE_REASON.checkoutInProgress,
+    () => openIntent(world.sub, world.email, world.registration), "opening a second checkout");
+
+  await applyEvents(500);
+  // A sweep BEFORE the session could even have expired moves nothing: the timeout is a real
+  // interval, not "any processing intent".
+  const early = await applyEvents();
+  assert.deepEqual(early, { examined: 0, applied: 0, problems: 0 },
+    "a processing intent younger than a Checkout Session's lifetime is left alone");
+  assert.equal((await intentState(world.intent)).status, "processing");
+
+  // Aged past Stripe's own 24h Checkout Session lifetime (expires_at's default).
+  await backdateStatus(world.intent, "25 hours");
+  const swept = await applyEvents();
+  assert.deepEqual(swept, { examined: 0, applied: 1, problems: 1 },
+    "the timeout is an APPLIED effect and a filed problem, and it examined no event to do it");
+  const expired = await intentState(world.intent);
+  assert.equal(expired.status, "expired");
+  assert.equal(expired.status_reason, "processing_timeout");
+
+  // THE OPERATOR SEES IT, anchored on the very event that recorded `processing`.
+  const problems = await problemsFor(event);
+  assert.equal(problems.length, 1);
+  assert.equal(problems[0].problem, PROBLEM.processingTimeout);
+  assert.equal(problems[0].detail.intent_id, world.intent);
+  assert.equal(problems[0].detail.registration_id, world.registration);
+  assert.ok(problems[0].detail.status_at, "…and WHEN the wait started");
+
+  // THE APPLICANT IS RELEASED: a fresh intent, beside the expired one.
+  const reopened = await openIntent(world.sub, world.email, world.registration);
+  assert.notEqual(reopened.intent_id, world.intent);
+  assert.equal((await intentsOf(world.registration)).length, 2);
+
+  // …and a second sweep is inert -- the arm is idempotent by the state it just left behind.
+  assert.deepEqual(await applyEvents(), { examined: 0, applied: 0, problems: 0 });
+  assert.equal((await problemsFor(event)).length, 1);
+
+  // MONEY IS STILL THE AUTHORITY: a payment landing afterwards is the paid_after_terminal path.
+  const late = await deliver({
+    type: EVENT.asyncSucceeded, intent: world.intent, registration: world.registration,
+    applicant: world.sub, session: world.session,
+    projection: { payment_status: "paid", mode: "subscription", session_status: "complete" },
+  });
+  assert.deepEqual(late.result, { examined: 1, applied: 1, problems: 1 });
+  assert.equal((await intentState(world.intent)).status, "paid");
+  assert.deepEqual((await problemsFor(late.event)).map((p) => p.problem), [PROBLEM.paidAfterTerminal]);
+});
+
 // ===========================================================================================
 // 3 · THE CANCEL DOOR.
 // ===========================================================================================
@@ -602,12 +877,20 @@ cell("cc.20 cancel entrance walls -- actor, agent, op_key, unknown intent, someb
   await assertPair(CLR.badRequest, CONVERGENCE_REASON.invalidIntent, () => humanQuery(
     world.sub, "select clara.cancel_checkout_intent($1,$2)", [null, opk("cc20")]),
   "a null intent");
-  await assertPair(CLR.badRequest, CONVERGENCE_REASON.intentNotFound, () => humanQuery(
+  // #628 review B7 · NO EXISTENCE ORACLE. An ABSENT intent and a FOREIGN one are ONE refusal --
+  // the first cut answered CLR10 intent_not_found for the first and CLR04 not_your_intent for the
+  // second, which let any caller sort ids into real and not-real. Asserted as a PAIR of identical
+  // (errcode, reason) answers rather than twice over, because "identical" is the claim.
+  const absent = await assertPair(CLR.authz, CONVERGENCE_REASON.notYourIntent, () => humanQuery(
     world.sub, "select clara.cancel_checkout_intent($1,$2)", [randomUUID(), opk("cc20")]),
   "an unknown intent");
-  await assertPair(CLR.authz, CONVERGENCE_REASON.notYourIntent, () => humanQuery(
+  const foreign = await assertPair(CLR.authz, CONVERGENCE_REASON.notYourIntent, () => humanQuery(
     stranger, "select clara.cancel_checkout_intent($1,$2)", [world.intent, opk("cc20")]),
   "somebody else's checkout intent");
+  assert.deepEqual(
+    { code: absent.error.code, message: absent.error.message, detail: absent.error.detail },
+    { code: foreign.error.code, message: foreign.error.message, detail: foreign.error.detail },
+    "an absent intent and a foreign one are BYTE-IDENTICAL refusals -- nothing to probe with");
 
   assert.equal((await intentState(world.intent)).status, "session_created",
     "every refusal above left the intent exactly where it was");
@@ -663,7 +946,7 @@ cell("cc.22 cancel refuses payment_in_flight and already_paid -- and neither ref
   await deliver({
     type: EVENT.completed, intent: inFlight.intent, registration: inFlight.registration,
     applicant: inFlight.sub, session: inFlight.session,
-    projection: { payment_status: "unpaid", mode: "payment", session_status: "complete" },
+    projection: { payment_status: "unpaid", mode: "subscription", session_status: "complete" },
   });
   const processing = await intentState(inFlight.intent);
   assert.equal(processing.status, "processing");
@@ -715,7 +998,7 @@ cell("cc.23 ONE LIVE SESSION per registration, and a terminal intent opens a fre
   await deliver({
     type: EVENT.completed, intent: world.intent, registration: world.registration,
     applicant: world.sub, session: world.session,
-    projection: { payment_status: "unpaid", mode: "payment", session_status: "complete" },
+    projection: { payment_status: "unpaid", mode: "subscription", session_status: "complete" },
   });
   const inFlight = await assertPair(CLR.lastOwner, CONVERGENCE_REASON.checkoutInProgress,
     () => openIntent(world.sub, world.email, world.registration),
@@ -843,32 +1126,52 @@ cell("cc.26 a capacity change is receipted and op_key-idempotent", async () => {
   assert.equal((await rawCapacity()).max_firms, null);
 });
 
-cell("cc.27 get_admission_capacity is the honest reason a checkout may refuse", async () => {
-  const reader = await insertUser("cc", "cc27_reader");
-  const unlimited = await getCapacity(reader);
+cell("cc.27 get_admission_capacity is the OPERATOR's read -- firms_count is not an applicant's business", async () => {
+  // #628 review S4. The first cut answered any authenticated person, which handed every applicant
+  // `firms_count`: how many firms this estate has sold. The door now carries
+  // set_admission_capacity's own predicate, and the applicant's honest answer -- the BOOLEAN
+  // capacity_full -- travels on get_own_checkout_progress instead (cc.30).
   const raw = await rawCapacity();
+  const unlimited = await getCapacity(operator.owner);
   assert.deepEqual(unlimited,
     { max_firms: null, firms_count: raw.firms_count, full: false },
     "an unlimited estate is never full, however many firms it holds");
 
   await setCapacity(operator.owner, { maxFirms: raw.firms_count, reason: "#628 cc.27" });
   try {
-    assert.deepEqual(await getCapacity(reader),
+    assert.deepEqual(await getCapacity(operator.owner),
       { max_firms: raw.firms_count, firms_count: raw.firms_count, full: true });
   } finally {
     await releaseCapacity(operator.owner);
   }
 
-  await assertPair(CLR.authz, CONVERGENCE_REASON.noActor,
+  // AN APPLICANT -- the person this door used to answer -- is refused, and an ordinary firm's
+  // owner with it. Both by the operator predicate, not by rank alone.
+  const applicant = await insertUser("cc", "cc27_applicant");
+  await assertRaises(CLR.authz, () => getCapacity(applicant),
+    "an authenticated person with no firm at all");
+  const outsider = await insertUser("cc", "cc27_outsider");
+  await ordinaryFirm(outsider, "owner");
+  await assertPair(CLR.authz, CONVERGENCE_REASON.notOperatorFirm, () => getCapacity(outsider),
+    "an ordinary firm's owner reading the estate's capacity");
+  const bookkeeper = await insertUser("cc", "cc27_bookkeeper");
+  await rootQuery("insert into clara.firm_memberships(firm_id,user_id,role) values ($1,$2,'bookkeeper')",
+    [operator.firm, bookkeeper]);
+  await assertRaises(CLR.authz, () => getCapacity(bookkeeper),
+    "an operator-firm bookkeeper is below the owner floor");
+
+  await assertRaises(CLR.authz,
     () => roleQuery(ROLES.authenticated, "select clara.get_admission_capacity()"),
     "an unauthenticated capacity read");
 
-  // The count is of NON-operator firms: the estate does not spend a beta slot on itself.
+  // The count is of NON-operator firms: the estate does not spend a beta slot on itself. Read
+  // FRESH, because the refusal probes above minted an ordinary firm of their own.
   const operatorCounted = await rootQuery(
     "select count(*)::int as n from clara.firms where is_operator");
   assert.ok(operatorCounted.rows[0].n >= 1, "there IS an operator firm to exclude");
   const total = await rootQuery("select count(*)::int as n from clara.firms");
-  assert.equal(unlimited.firms_count, total.rows[0].n - operatorCounted.rows[0].n);
+  assert.equal((await getCapacity(operator.owner)).firms_count,
+    total.rows[0].n - operatorCounted.rows[0].n);
 });
 
 cell("cc.28 THE RACE -- two concurrent claims into the last slot yield exactly ONE firm", async () => {
@@ -998,7 +1301,7 @@ cell("cc.30 get_own_checkout_progress carries the state, its instant, its reason
 
   await deliver({
     type: EVENT.completed, intent: world.intent, registration: world.registration,
-    applicant: world.sub, session, projection: { payment_status: "unpaid", mode: "payment" },
+    applicant: world.sub, session, projection: { payment_status: "unpaid", mode: "subscription" },
   });
   const waiting = await ownProgress(world.sub, world.registration);
   assert.equal(waiting.intent_status, "processing");
@@ -1037,7 +1340,7 @@ cell("cc.31 get_own_checkout_intent_session answers about the LIVE intent, and i
   await deliver({
     type: EVENT.completed, intent: world.intent, registration: world.registration,
     applicant: world.sub, session: world.session,
-    projection: { payment_status: "unpaid", mode: "payment", session_status: "complete" },
+    projection: { payment_status: "unpaid", mode: "subscription", session_status: "complete" },
   });
   assert.deepEqual(await ownIntentSession(world.sub, world.registration),
     [{ intent_id: world.intent, session_id: world.session, status: "processing" }],
@@ -1136,6 +1439,251 @@ cell("cc.32 the four doors are clara_authenticated-ONLY definers with both plan 
       (await rootQuery("select has_function_privilege('clara_stripe_webhook',$1,'execute') as can",
         [sig])).rows[0].can, false, `${sig} must not be reachable by the Stripe webhook lane`);
   }
+});
+
+// ===========================================================================================
+// 7 · THE LOCK ORDER (#628 review S2). One order for the whole cohort: clara.checkout_intents
+//     BEFORE clara.firm_registration_requests. The applier holds the intent `for update` and then
+//     inserts a payment row whose fk_frp_registration_applicant (0163:231) takes KEY SHARE on the
+//     registration; the claim door therefore resolves its intent WITHOUT a lock, locks the INTENT,
+//     and only then the registration. The earlier cut locked the registration first, which is a
+//     deadlock cycle on the one call that turns an applicant's money into a firm.
+// ===========================================================================================
+
+cell("cc.33 the two directions BLOCK, and neither deadlocks -- driven by a deterministic barrier", async () => {
+  // DIRECTION 1 · a sweep is mid-arm holding the INTENT; the claim must WAIT for it.
+  // The barrier is the applier's own row lock, held by a session that does nothing else, so the
+  // scene is deterministic rather than a race that happens to be caught.
+  const a = await liveCheckout(operator.owner, { tag: "cc33a" });
+  await deliver({
+    type: EVENT.asyncSucceeded, intent: a.intent, registration: a.registration,
+    applicant: a.sub, session: a.session,
+    projection: { payment_status: "paid", mode: "subscription", session_status: "complete" },
+  });
+  const holder = await getPool().connect();
+  const claimer = await getPool().connect();
+  try {
+    await holder.query("begin");
+    await holder.query("select 1 from clara.checkout_intents where id=$1 for update", [a.intent]);
+    const holderPid = Number((await holder.query("select pg_backend_pid() as pid")).rows[0].pid);
+
+    await claimer.query(`set role ${ROLES.authenticated}`);
+    await claimer.query("begin");
+    await claimer.query("select set_config('request.jwt.claims',$1,true)",
+      [JSON.stringify({ sub: a.sub, role: "authenticated", email: a.email })]);
+    const claimerPid = Number((await claimer.query("select pg_backend_pid() as pid")).rows[0].pid);
+    const claiming = claimer.query("select clara.claim_paid_firm($1,$2) as result",
+      [a.registration, opk("cc33a")])
+      .then((r) => ({ result: r.rows[0].result })).catch((error) => ({ error }));
+
+    const waitEvent = await waitBlockedByOrThrow(claimerPid, holderPid);
+    assert.ok(["transactionid", "tuple"].includes(waitEvent),
+      `the claim waits on the INTENT ROW held by the sweep (got ${waitEvent})`);
+
+    await holder.query("commit");
+    const claimed = await claiming;
+    assert.equal(claimed.error, undefined,
+      `the claim completed once the sweep let go -- it did not deadlock (${claimed.error?.code})`);
+    assert.ok(claimed.result.firm_id);
+    await claimer.query("commit");
+    assert.equal((await intentState(a.intent)).status, "consumed");
+  } finally {
+    for (const c of [holder, claimer]) {
+      await c.query("rollback").catch(() => {});
+      await c.query("reset role").catch(() => {});
+      await c.query("reset all").catch(() => {});
+      c.release();
+    }
+  }
+
+  // DIRECTION 2 · THE REVERSE. A claim is mid-flight holding the REGISTRATION; the sweep's payment
+  // insert must WAIT for it on the foreign key's KEY SHARE, rather than deadlock against it.
+  const b = await liveCheckout(operator.owner, { tag: "cc33b" });
+  await applyEvents(500);
+  const event = stripeEventId("cc33b");
+  await recordEvent(event, EVENT.asyncSucceeded, {
+    livemode: false, session_id: b.session, intent_id: b.intent, registration_id: b.registration,
+    applicant: b.sub, currency: "myr", amount_total: 0, payment_status: "paid",
+    mode: "subscription", session_status: "complete",
+  });
+  const regHolder = await getPool().connect();
+  const sweeper = await getPool().connect();
+  try {
+    await regHolder.query("begin");
+    await regHolder.query(
+      "select 1 from clara.firm_registration_requests where id=$1 for update", [b.registration]);
+    const regPid = Number((await regHolder.query("select pg_backend_pid() as pid")).rows[0].pid);
+
+    await sweeper.query("set role clara_stripe_webhook");
+    await sweeper.query("begin");
+    const sweepPid = Number((await sweeper.query("select pg_backend_pid() as pid")).rows[0].pid);
+    const sweeping = sweeper.query("select clara.apply_stripe_events(100) as result")
+      .then((r) => ({ result: r.rows[0].result })).catch((error) => ({ error }));
+
+    const waitEvent = await waitBlockedByOrThrow(sweepPid, regPid);
+    assert.ok(["transactionid", "tuple"].includes(waitEvent),
+      `the sweep waits on the REGISTRATION ROW its payment's foreign key needs (got ${waitEvent})`);
+
+    await regHolder.query("commit");
+    const swept = await sweeping;
+    assert.equal(swept.error, undefined,
+      `the sweep completed once the claim let go (${swept.error?.code})`);
+    assert.deepEqual(swept.result, { examined: 1, applied: 1, problems: 0 });
+    await sweeper.query("commit");
+  } finally {
+    for (const c of [regHolder, sweeper]) {
+      await c.query("rollback").catch(() => {});
+      await c.query("reset role").catch(() => {});
+      await c.query("reset all").catch(() => {});
+      c.release();
+    }
+  }
+  assert.equal((await intentState(b.intent)).status, "paid");
+  assert.equal((await paymentsFor(b.registration)).length, 1);
+});
+
+cell("cc.34 TWENTY interleavings of a sweep and a claim on ONE registration -- zero 40P01", async () => {
+  // One registration, ONE payment, both bodies entering at the same instant, twenty times. Under
+  // the earlier cut this is the deadlock: the claim held the registration and wanted the intent
+  // while the applier held the intent and wanted the registration's KEY SHARE.
+  const failures = [];
+  for (let i = 0; i < 20; i += 1) {
+    const w = await liveCheckout(operator.owner, { tag: `cc34x${i}` });
+    await applyEvents(500);
+    await recordEvent(stripeEventId("cc34"), EVENT.asyncSucceeded, {
+      livemode: false, session_id: w.session, intent_id: w.intent, registration_id: w.registration,
+      applicant: w.sub, currency: "myr", amount_total: 0, payment_status: "paid",
+      mode: "subscription", session_status: "complete",
+    });
+    const [swept, claimed] = await Promise.all([
+      applyEvents(100).then((result) => ({ result })).catch((error) => ({ error })),
+      claimPaidFirm(w.sub, w.email, w.registration)
+        .then((result) => ({ result })).catch((error) => ({ error })),
+    ]);
+    for (const outcome of [swept, claimed]) {
+      if (outcome.error) failures.push({ pass: i, code: outcome.error.code });
+    }
+    // …AND THE PAIR CONVERGES. A claim that lost the race (its payment was not committed yet)
+    // refuses CLR09 and the retry claims the firm the money already bought -- exactly one.
+    const claim = claimed.result ?? await claimPaidFirm(w.sub, w.email, w.registration);
+    assert.ok(claim.firm_id, `pass ${i}: the registration ends in a firm`);
+    assert.equal((await intentState(w.intent)).status, "consumed", `pass ${i}: intent consumed`);
+    assert.equal((await paymentsFor(w.registration)).length, 1, `pass ${i}: ONE payment row`);
+  }
+  assert.deepEqual(failures.filter((f) => f.code === "40P01" || f.code === "40001"), [],
+    "not one interleaving deadlocked or serialization-failed -- the cohort takes ONE lock order");
+  // The refusals that DID happen are the ordinary lost-race ones, never a transient the caller has
+  // no way to interpret.
+  for (const f of failures) {
+    assert.equal(f.code, CLR.lastOwner, `pass ${f.pass}: an unexpected refusal ${f.code}`);
+  }
+});
+
+// ===========================================================================================
+// 8 · STRANDED-PAYMENT RECOVERY (spec row C-10). Every path by which money lands without a firm
+//     ends in exactly ONE claim -- and an operator's own repair changes nothing twice.
+// ===========================================================================================
+
+cell("cc.35 RECOVERY (i) -- the capacity loser's payment claims ONE firm when the estate reopens", async () => {
+  const world = await liveCheckout(operator.owner, { tag: "cc35" });
+  await deliver({
+    type: EVENT.asyncSucceeded, intent: world.intent, registration: world.registration,
+    applicant: world.sub, session: world.session,
+    projection: { payment_status: "paid", mode: "subscription", session_status: "complete" },
+  });
+  const { firms_count: count } = await rawCapacity();
+  await setCapacity(operator.owner, { maxFirms: count, reason: "#628 cc.35 closed beta" });
+  try {
+    const refusal = await assertPair(CLR.lastOwner, CONVERGENCE_REASON.capacityReached,
+      () => claimPaidFirm(world.sub, world.email, world.registration),
+      "claiming into a full estate");
+    assert.equal(refusal.detail.firms_count, count);
+    // THE MONEY IS UNCONSUMED, THE REGISTRATION IS OPEN, and the applicant's own surface says so.
+    assert.equal((await paymentsFor(world.registration))[0].consumed_at, null);
+    assert.deepEqual((await rootQuery(
+      "select status, firm_id from clara.firm_registration_requests where id=$1",
+      [world.registration])).rows[0], { status: "open", firm_id: null });
+    const waiting = await ownProgress(world.sub, world.registration);
+    assert.equal(waiting.paid_unconsumed, true, "the applicant is told the money is waiting");
+    assert.equal(waiting.capacity_full, true, "…and why -- by the BOOLEAN, not by firms_count");
+    assert.equal(waiting.intent_status, "paid");
+  } finally {
+    await releaseCapacity(operator.owner);
+  }
+
+  const claimed = await claimPaidFirm(world.sub, world.email, world.registration);
+  assert.ok(claimed.firm_id, "the loser is admitted the moment a slot exists");
+  assert.equal((await intentState(world.intent)).status, "consumed");
+  assert.ok((await paymentsFor(world.registration))[0].consumed_at);
+  // ONE CLAIM: the retry is the SAME firm, replayed.
+  const replay = await claimPaidFirm(world.sub, world.email, world.registration);
+  assert.equal(replay.firm_id, claimed.firm_id);
+  assert.equal(replay.replay, true);
+  assert.equal((await rootQuery(
+    "select count(*)::int as n from clara.firms where name=$1", [world.firmName])).rows[0].n, 1,
+  "exactly one firm exists for this registration, after a refusal and two claims");
+});
+
+cell("cc.36 RECOVERY (ii) -- a payment on a CANCELLED intent reads as paid_unconsumed and claims ONE firm", async () => {
+  const world = await liveCheckout(operator.owner, { tag: "cc36" });
+  await cancelIntent(world.sub, world.intent);
+  const { event } = await deliver({
+    type: EVENT.asyncSucceeded, intent: world.intent, registration: world.registration,
+    applicant: world.sub, session: world.session,
+    projection: { payment_status: "paid", mode: "subscription", session_status: "complete" },
+  });
+  assert.deepEqual((await problemsFor(event)).map((p) => p.problem), [PROBLEM.paidAfterTerminal]);
+  assert.deepEqual(await applicationFor(event), { outcome: "paid", intent_id: world.intent });
+
+  // THE APPLICANT'S OWN SURFACE is what makes this recoverable rather than merely recorded.
+  const stranded = await ownProgress(world.sub, world.registration);
+  assert.equal(stranded.paid_unconsumed, true);
+  assert.equal(stranded.intent_status, "paid");
+
+  const claimed = await claimPaidFirm(world.sub, world.email, world.registration);
+  assert.ok(claimed.firm_id);
+  assert.equal((await intentState(world.intent)).status, "consumed",
+    "the claim moved the intent through paid to consumed in its two admitted steps");
+  assert.equal((await paymentsFor(world.registration)).length, 1);
+  const replay = await claimPaidFirm(world.sub, world.email, world.registration);
+  assert.equal(replay.firm_id, claimed.firm_id);
+  assert.equal((await rootQuery(
+    "select count(*)::int as n from clara.firms where name=$1", [world.firmName])).rows[0].n, 1);
+});
+
+cell("cc.37 RECOVERY (iii) -- an operator RESOLVING paid_after_terminal and re-sweeping changes nothing", async () => {
+  const world = await liveCheckout(operator.owner, { tag: "cc37" });
+  await cancelIntent(world.sub, world.intent);
+  const { event } = await deliver({
+    type: EVENT.asyncSucceeded, intent: world.intent, registration: world.registration,
+    applicant: world.sub, session: world.session,
+    projection: { payment_status: "paid", mode: "subscription", session_status: "complete" },
+  });
+  const filed = await problemsFor(event);
+  assert.equal(filed.length, 1);
+  assert.equal(filed[0].problem, PROBLEM.paidAfterTerminal);
+  const before = {
+    intent: (await intentState(world.intent)).status,
+    payments: (await paymentsFor(world.registration)).map((r) => r.stripe_event_id),
+    application: await applicationFor(event),
+  };
+
+  await resolveProblem(operator.owner, filed[0].id, "#628 cc.37 operator admitted the payment");
+  for (const pass of [1, 2]) {
+    await applyEvents(500);
+    assert.equal((await problemsFor(event)).length, 1,
+      `pass ${pass}: the resolved problem is not re-filed -- the application row already excludes it`);
+  }
+  assert.deepEqual({
+    intent: (await intentState(world.intent)).status,
+    payments: (await paymentsFor(world.registration)).map((r) => r.stripe_event_id),
+    application: await applicationFor(event),
+  }, before, "a resolution plus two sweeps moved nothing at all");
+
+  // …and the firm is still claimable exactly once afterwards.
+  const claimed = await claimPaidFirm(world.sub, world.email, world.registration);
+  assert.ok(claimed.firm_id);
+  assert.equal((await paymentsFor(world.registration)).length, 1);
 });
 
 test("cc.VACUITY CONTROL -- every declared #628 cell executed", async (t) => {

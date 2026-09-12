@@ -1033,19 +1033,29 @@ const LEGAL_ACCEPTANCE_0185_CLOCK_NAMES = ["publish_legal_document"];
 // (0185) does with `published_at`: sampling once is what makes the stored stamp and the answer the
 // caller is handed the same moment.
 //
+// TWO MORE ARRIVED WITH #628's REVIEW ROUND, and both are real clock reads rather than bookkeeping:
+//   · `_tf_checkout_intents_insert_stamp` (review S6) is the BEFORE INSERT sibling of the stamp
+//     wall. It writes `new.status_at := now()` for the same reason the UPDATE wall does -- a
+//     newborn intent's instant belongs to the transaction, not to whatever a writer supplied --
+//     so it reads the clock in exactly the way its sibling above does.
+//   · `apply_stripe_events` (review S5) gained ONE clock read with the processing-timeout arm:
+//     `ci.status_at < now() - c_processing_timeout`, the sweep that expires an intent whose
+//     terminal asynchronous webhook never arrived. Everything else about the applier still reads
+//     no clock -- `stripe_event_applications.applied_at` and the problem queue's `noticed_at` are
+//     column DEFAULTS, which live in pg_attrdef and not in any prosrc, and every status move it
+//     makes is stamped by the trigger.
+//
 // The rest add nothing. `cancel_checkout_intent` proposes a status write and lets the trigger stamp
-// the instant (which is the whole design). `apply_stripe_events` is RECUT and reads no clock at
-// all: `stripe_event_applications.applied_at` and the problem queue's `noticed_at` are column
-// DEFAULTS, which live in pg_attrdef and not in any prosrc, and every status move it makes is
-// likewise stamped by the trigger. `_admission_capacity_state`, `get_admission_capacity`,
+// the instant (which is the whole design). `_admission_capacity_state`, `get_admission_capacity`,
 // `get_own_checkout_intent_session` and the re-minted `get_own_checkout_progress` are projections.
 // `open_checkout_intent` and `claim_paid_firm` are RECUT here but already sit in
 // CHECKOUT_GATE_C3_CLOCK_NAMES, and neither recut introduces a clock read the 0163 body did not
 // already have (the rate window's `now() - interval '24 hours'` and the claim's `decided_at` /
-// `consumed_at` stamps are 0163's own; #628 adds an advisory lock, a capacity read and two status
-// writes, none of which reads a clock).
+// `consumed_at` stamps are 0163's own; #628 adds an advisory lock, a capacity read, an unlocked
+// intent resolution, a row lock and two status writes, none of which reads a clock).
 const CHECKOUT_CONVERGENCE_0186_CLOCK_NAMES = [
-  "_tf_checkout_intents_session_stamp", "set_admission_capacity",
+  "_tf_checkout_intents_session_stamp", "_tf_checkout_intents_insert_stamp",
+  "apply_stripe_events", "set_admission_capacity",
 ];
 
 /** The arm (D) roster for the database under test, sorted as the catalog sorts it. */

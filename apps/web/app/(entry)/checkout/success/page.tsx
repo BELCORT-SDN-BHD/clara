@@ -9,6 +9,7 @@ import {
   checkoutFlashCookie,
   parseCheckoutFlash,
 } from "@/lib/checkout/checkout-flash";
+import { paymentsModeFrom } from "@/lib/checkout/payments-mode";
 import { checkoutSuccessDecisionFrom } from "@/lib/checkout/success-state";
 import { NO_CHECKOUT_PROGRESS } from "@/lib/registration/checkout-progress-reads";
 import { loadOwnRegistrationRequests } from "@/lib/registration/server-reads";
@@ -52,13 +53,30 @@ export default async function CheckoutSuccessPage({
   const marker = typeof params.claim === "string" ? params.claim : undefined;
   const jar = await cookies();
   const flash = parseCheckoutFlash(jar.get(checkoutFlashCookie().name)?.value, marker);
+  // #628 review — the SERVER's declared Stripe mode, resolved the one way
+  // `/pending` resolves it. AC3's "visibly distinct" test/unconfigured
+  // deployment applies here MOST of all: this is where a person lands after
+  // paying, and whether that took real money is the question the badge answers.
+  const paymentsMode = paymentsModeFrom(process.env);
   if (flash !== null) {
-    // The claim route only ever sets `refused` or `unavailable` on this
-    // surface; anything else in the cookie is a shape this page will not
+    // The claim route only ever sets `refused`, `try_again` or `unavailable` on
+    // this surface; anything else in the cookie is a shape this page will not
     // render, and `unavailable` is the honest card for it.
-    return flash.kind === "refused"
-      ? <CheckoutSuccessCard state={{ kind: "refused", code: flash.code, message: flash.message }} />
-      : <CheckoutSuccessCard state={{ kind: "unavailable" }} />;
+    if (flash.kind === "refused") {
+      return (
+        <CheckoutSuccessCard
+          state={{ kind: "refused", code: flash.code, message: flash.message }}
+          paymentsMode={paymentsMode}
+        />
+      );
+    }
+    // NOTHING WAS CHANGED, so the card says exactly that rather than the
+    // generic read failure — a 40P01/40001 is a rolled-back transaction, and
+    // the next step is the same act again.
+    if (flash.kind === "try_again") {
+      return <CheckoutSuccessCard state={{ kind: "try_again" }} paymentsMode={paymentsMode} />;
+    }
+    return <CheckoutSuccessCard state={{ kind: "unavailable" }} paymentsMode={paymentsMode} />;
   }
 
   try {
@@ -75,8 +93,8 @@ export default async function CheckoutSuccessPage({
     // `components/entry/checkout-waiting.tsx`.
     const state: CheckoutSuccessState =
       decision.kind === "claimable" ? { kind: "claimable" } : decision;
-    return <CheckoutSuccessCard state={state} />;
+    return <CheckoutSuccessCard state={state} paymentsMode={paymentsMode} />;
   } catch {
-    return <CheckoutSuccessCard state={{ kind: "unavailable" }} />;
+    return <CheckoutSuccessCard state={{ kind: "unavailable" }} paymentsMode={paymentsMode} />;
   }
 }

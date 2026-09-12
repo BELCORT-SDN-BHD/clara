@@ -56,6 +56,7 @@ import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 
 import { StateBanner } from "@/components/common/state";
+import { RegistrationReference } from "@/components/entry/registration-reference";
 
 /** Every 5 seconds. Slow enough that a slow render never overlaps itself, fast
  *  enough that a settled payment is on screen before somebody reaches for the
@@ -80,6 +81,7 @@ export function CheckoutWaitingRefresh({
   budgetMs?: number;
 }) {
   const t = useTranslations("CheckoutSuccess");
+  const tCommon = useTranslations("Common");
   const router = useRouter();
   const [stopped, setStopped] = useState(false);
 
@@ -104,8 +106,13 @@ export function CheckoutWaitingRefresh({
           NIT-6 keeps identifiers OFF the wire — nothing here is posted, and no
           hidden field carries it. What it does is put on screen the one value a
           support operator needs to find this applicant's payment, at the exact
-          moment the product has run out of things to tell them. */}
-      <p className="mt-1.5 font-mono text-xs wrap-anywhere">{registration}</p>
+          moment the product has run out of things to tell them. The markup is
+          `registration-reference.tsx`'s, shared with the two `capacity_full`
+          faces that make the same promise (7.3). */}
+      <RegistrationReference
+        registration={registration}
+        label={tCommon("registrationReferenceLabel")}
+      />
     </StateBanner>
   );
 }
