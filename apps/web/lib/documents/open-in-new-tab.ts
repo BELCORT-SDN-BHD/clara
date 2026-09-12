@@ -32,7 +32,12 @@ export type OpenDocumentResult =
    *  revoked, and `mime` is carried out VERBATIM so the caller can name the
    *  actual type rather than guessing at one. */
   | { ok: false; reason: "not_viewable"; mime: string }
-  | { ok: false; reason: "fetch_failed"; message: string };
+  /** The read itself failed or was refused. `cause` is the THROWN error, carried
+   *  out UNCHANGED (never re-wrapped) so the caller can classify it onto the
+   *  source-state ladder — `documentSourceStateOf` in bytes.ts — rather than
+   *  painting every one of the door's seven distinct refusals as one "could not
+   *  open" sentence. `message` stays for a caller that only wants prose. */
+  | { ok: false; reason: "fetch_failed"; message: string; cause: unknown };
 
 /** A minimal structural subset of `Window` — enough to navigate the opened tab
  *  and (best-effort) sever its `opener` back-reference, no more. */
@@ -68,6 +73,12 @@ export async function openDocumentInNewTab(
   opts: {
     session?: SessionTokenAccessor;
     signal?: AbortSignal;
+    /** The page's client scope, forwarded to the door so a preview is admitted
+     *  only when the document has an ACTIVE filing to THAT client. Absent here
+     *  ⇒ firm-membership only, which is what every caller sent before the scope
+     *  existed; it is the SURFACE's job to supply it, never this module's to
+     *  guess one. */
+    client?: string | null;
     windowOpen?: (url: string, target: string) => OpenedTab | null;
   } = {},
 ): Promise<OpenDocumentResult> {
@@ -75,7 +86,12 @@ export async function openDocumentInNewTab(
   const tab = open("about:blank", "_blank");
 
   try {
-    const bytes = await fetchDocumentBytes(documentId, { session: opts.session ?? sessionTokenAccessor, signal: opts.signal });
+    const bytes = await fetchDocumentBytes(documentId, {
+      session: opts.session ?? sessionTokenAccessor,
+      signal: opts.signal,
+      client: opts.client,
+      purpose: "preview",
+    });
 
     // C-07 / 裁-175 — THE VIEWER GATE, and it runs BEFORE anything else the
     // resolved bytes could be used for. A `blob:` URL inherits THIS page's
@@ -103,6 +119,6 @@ export async function openDocumentInNewTab(
   } catch (e) {
     tab?.close();
     if (e instanceof Error && e.name === "AbortError") throw e; // cancelled, not failed — the caller drops it
-    return { ok: false, reason: "fetch_failed", message: e instanceof Error ? e.message : String(e) };
+    return { ok: false, reason: "fetch_failed", message: e instanceof Error ? e.message : String(e), cause: e };
   }
 }

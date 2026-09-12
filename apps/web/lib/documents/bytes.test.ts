@@ -3,7 +3,12 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { fetchDocumentBytes, ALLOWED_BYTES_CONTENT_TYPES, VIEWABLE_IN_NEW_TAB } from "./bytes";
+import {
+  fetchDocumentBytes, ALLOWED_BYTES_CONTENT_TYPES, VIEWABLE_IN_NEW_TAB,
+  documentSourceStateOf, documentSourceStateKey, documentBytesPath,
+  isDocumentBytesError, isRetryableDocumentSourceState, requestDocumentBytes,
+  type DocumentSourceState,
+} from "./bytes";
 import { isRuntimeError } from "./runtime-wire";
 import type { SessionTokenAccessor } from "@/lib/session";
 
@@ -238,5 +243,168 @@ test("fetchDocumentBytes still FETCHES application/xml — the split gates viewi
   } finally {
     globalThis.fetch = original;
     URL.createObjectURL = originalCreate;
+  }
+});
+
+// --- #620 — THE KIND BRANCHING, AND WHY IT IS NOT kindForStatus ----------------
+//
+// The byte route answers SEVEN distinct refusals, and a human is told a different
+// true thing by each. Five of them are status-only and were already classified;
+// the two that are NOT are the whole point of these cells:
+//
+//   · 409 `custody_pending`  — kindForStatus(409) says "unexpected", which is a
+//     lie about a state the estate models explicitly (the row is readable, its
+//     bytes are not durably verified yet) and which would withhold the Retry
+//     that is the honest recovery for it.
+//   · 502 `checksum_mismatch` — kindForStatus(502) says "server_error", which
+//     would OFFER a Retry. Retrying re-reads the same wrong bytes. Sharing a
+//     kind with a transient server failure would share its affordance.
+//
+// So both are read off the route's OWN typed `{error}` token. These cells drive
+// the classifier through every status the route contract names, and the control
+// at the end is what stops the ladder collapsing into one bucket.
+
+/** One failed response, exactly as the route shapes it. */
+function refusal(status: number, body: Record<string, string> | null): typeof fetch {
+  return (async () => body === null
+    ? new Response("", { status })
+    : new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } })) as typeof fetch;
+}
+
+async function stateFor(status: number, body: Record<string, string> | null): Promise<DocumentSourceState> {
+  const original = globalThis.fetch;
+  globalThis.fetch = refusal(status, body);
+  try {
+    return await fetchDocumentBytes("doc-1", { session: session() }).then(
+      () => { throw new Error(`a ${status} must not resolve`); },
+      (e: unknown) => documentSourceStateOf(e),
+    );
+  } finally {
+    globalThis.fetch = original;
+  }
+}
+
+test("#620: every refusal the route contract names lands on its OWN state — no shared bucket", async () => {
+  assert.equal(await stateFor(401, { error: "unauthenticated" }), "unauthenticated");
+  assert.equal(await stateFor(403, { error: "no_membership" }), "denied");
+  assert.equal(await stateFor(404, { error: "not_found" }), "not_found");
+  assert.equal(await stateFor(409, { error: "custody_pending" }), "custody_pending");
+  assert.equal(await stateFor(502, { error: "storage_error", reason: "unavailable" }), "storage_unavailable");
+  assert.equal(await stateFor(503, { error: "storage_error", reason: "unconfigured" }), "storage_unavailable");
+  assert.equal(await stateFor(502, { error: "checksum_mismatch" }), "integrity");
+  assert.equal(await stateFor(500, null), "server_error");
+
+  // THE CONTROL. Without it every line above passes against a classifier that
+  // returned one constant.
+  const distinct = new Set([
+    await stateFor(401, { error: "unauthenticated" }),
+    await stateFor(403, { error: "no_membership" }),
+    await stateFor(404, { error: "not_found" }),
+    await stateFor(409, { error: "custody_pending" }),
+    await stateFor(502, { error: "storage_error" }),
+    await stateFor(502, { error: "checksum_mismatch" }),
+    await stateFor(500, null),
+  ]);
+  assert.equal(distinct.size, 7, "seven refusals must produce seven states");
+});
+
+test("#620: a 502 with NO typed token is a server failure, NOT a storage verdict", async () => {
+  // The same-origin proxy answers 502 `{error:"runtime_redirected"}` when the
+  // runtime redirects. Keying "storage unavailable" off the STATUS would tell a
+  // human the document store is down when the runtime is what misbehaved.
+  assert.equal(await stateFor(502, { error: "runtime_redirected" }), "server_error");
+  assert.equal(await stateFor(502, null), "server_error");
+});
+
+test("#620: the typed tokens are CARRIED, and the vendor body text is not", async () => {
+  const original = globalThis.fetch;
+  globalThis.fetch = (async () => new Response(
+    JSON.stringify({ error: "storage_error", reason: "credential_refused", message: "signature verification failed for role clara_storage_docs" }),
+    { status: 502, headers: { "content-type": "application/json" } },
+  )) as typeof fetch;
+  try {
+    await assert.rejects(fetchDocumentBytes("doc-1", { session: session() }), (e: unknown) => {
+      assert.ok(isDocumentBytesError(e));
+      assert.equal(e.error, "storage_error");
+      assert.equal(e.reason, "credential_refused");
+      assert.equal(e.status, 502);
+      assert.doesNotMatch(e.message, /signature verification|storage_docs/, "vendor body text must never reach the message");
+      return true;
+    });
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+test("#620: an opaqueredirect (this app's own 307-to-/login) is the EXPIRED-SESSION state, not a transport failure", async () => {
+  const original = globalThis.fetch;
+  globalThis.fetch = (async () => {
+    const res = new Response(null, { status: 200 });
+    Object.defineProperty(res, "type", { value: "opaqueredirect" });
+    return res;
+  }) as typeof fetch;
+  try {
+    const state = await fetchDocumentBytes("doc-1", { session: session() }).then(() => null, (e: unknown) => documentSourceStateOf(e));
+    assert.equal(state, "unauthenticated");
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+test("#620: RETRY is offered exactly where a second attempt can answer differently", () => {
+  for (const state of ["custody_pending", "storage_unavailable", "transport", "server_error"] as const) {
+    assert.equal(isRetryableDocumentSourceState(state), true, `${state} recovers on its own — Retry is honest`);
+  }
+  for (const state of ["denied", "not_found", "integrity", "malformed", "unauthenticated"] as const) {
+    assert.equal(isRetryableDocumentSourceState(state), false, `${state} answers identically on a second attempt — a Retry button there is a control that cannot work`);
+  }
+});
+
+test("#620: every state maps to its OWN copy key, and the key is a KEY (never English)", () => {
+  const states: DocumentSourceState[] = [
+    "unauthenticated", "denied", "not_found", "custody_pending",
+    "storage_unavailable", "integrity", "malformed", "transport", "server_error",
+  ];
+  const keys = states.map(documentSourceStateKey);
+  assert.equal(new Set(keys).size, states.length, "no two states may share copy");
+  assert.equal(documentSourceStateKey("integrity"), "sourceState.integrity");
+  for (const key of keys) assert.match(key, /^sourceState\.[a-z_]+$/);
+});
+
+test("#620: the client scope and the download disposition travel in the QUERY, and a preview adds neither", () => {
+  assert.equal(documentBytesPath("doc-1"), "/api/runtime/documents/doc-1/bytes");
+  assert.equal(documentBytesPath("doc-1", { purpose: "preview" }), "/api/runtime/documents/doc-1/bytes");
+  assert.equal(
+    documentBytesPath("doc-1", { client: "c-1" }),
+    "/api/runtime/documents/doc-1/bytes?client=c-1",
+  );
+  assert.equal(
+    documentBytesPath("doc-1", { client: "c-1", purpose: "download" }),
+    "/api/runtime/documents/doc-1/bytes?client=c-1&disposition=attachment",
+  );
+  // The id is ENCODED into the path, so a hostile id cannot add a segment.
+  assert.equal(documentBytesPath("../../secrets").includes("../"), false);
+});
+
+test("#620: requestDocumentBytes SENDS the client + disposition it was given, and reads the server's filename", async () => {
+  let seenUrl = "";
+  const original = globalThis.fetch;
+  globalThis.fetch = (async (url: RequestInfo | URL) => {
+    seenUrl = String(url);
+    return new Response(new Blob(["x"]), {
+      status: 200,
+      headers: {
+        "content-type": "application/pdf",
+        "content-disposition": "attachment; filename=\"april.pdf\"; filename*=UTF-8''april%20invoice.pdf",
+      },
+    });
+  }) as typeof fetch;
+  try {
+    const out = await requestDocumentBytes("doc-1", { session: session(), client: "c-9", purpose: "download" });
+    assert.equal(seenUrl, "/api/runtime/documents/doc-1/bytes?client=c-9&disposition=attachment");
+    assert.equal(out.mime, "application/pdf");
+    assert.equal(out.filename, "april invoice.pdf", "RFC 5987's filename* wins, which is the order the spec requires");
+  } finally {
+    globalThis.fetch = original;
   }
 });
