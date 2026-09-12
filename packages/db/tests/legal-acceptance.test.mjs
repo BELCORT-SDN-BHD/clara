@@ -102,7 +102,7 @@ async function draft(kind, tag) {
 // ------------------------------------------------------------------------------------------
 // A · SHAPE. The two relations carry 0158's confinement and its two structural laws.
 // ------------------------------------------------------------------------------------------
-cell("la.1 the cohort is owner-confined with forced RLS and ZERO application-role grants", async () => {
+cell("la.1 the cohort is owner-confined with forced RLS, ZERO application-role grants and NO table ACL", async () => {
   const rows = await rootQuery(
     `select c.relname, c.relrowsecurity, c.relforcerowsecurity, pg_get_userbyid(c.relowner) as owner,
             (select count(*)::int from pg_policy p where p.polrelid=c.oid) as policies,
@@ -122,6 +122,58 @@ cell("la.1 the cohort is owner-confined with forced RLS and ZERO application-rol
   await assertRaises(PG.insufficientPrivilege,
     () => roleQuery(ROLES.authenticated, "select 1 from clara.legal_documents limit 1"),
     "la.1 direct table read");
+
+  // AND `relacl IS NULL` — on the new pair AND on the pair 0185 retires. Stronger than "no
+  // application-role grant", and the assertion that keeps the DR round-trip honest: the FIRST
+  // explicit grant/revoke on a relation MATERIALISES the owner's until-then-implicit ACL
+  // (clara_fn_owner=arwdDxtm/clara_fn_owner), pg_dump emits nothing for an ACL equal to the owner
+  // default, and dr-verify's relation-grant matrix then reports one source-only row PER PRIVILEGE
+  // forever. 0185's first cut revoked insert/update/delete/truncate FROM PUBLIC on
+  // dpa_documents/dpa_signatures — PUBLIC held none of them, so the only effect was 16 phantom DR
+  // diff rows. The estate grants nothing on tables; this cell is why that stays true.
+  const acls = await rootQuery(
+    `select c.relname, c.relacl::text as acl
+       from pg_class c join pg_namespace n on n.oid=c.relnamespace
+      where n.nspname='clara'
+        and c.relname in ('legal_documents','legal_acceptances','dpa_documents','dpa_signatures')
+      order by c.relname`);
+  assert.equal(acls.rowCount, 4, "la.1 all four legal relations exist");
+  assert.deepEqual(
+    acls.rows.filter((r) => r.acl !== null).map((r) => `${r.relname}=${r.acl}`), [],
+    "la.1 no legal relation carries a materialised table ACL");
+  // Same law for any sequence the cohort owns (none today — uuid/composite keys).
+  const seqAcls = await rootQuery(
+    `select sq.relname, sq.relacl::text as acl
+       from pg_class sq join pg_namespace n on n.oid=sq.relnamespace
+       join pg_depend d on d.objid=sq.oid and d.deptype='a'
+       join pg_class t on t.oid=d.refobjid
+      where n.nspname='clara' and sq.relkind='S' and sq.relacl is not null
+        and t.relname in ('legal_documents','legal_acceptances','dpa_documents','dpa_signatures')`);
+  assert.deepEqual(seqAcls.rows, [], "la.1 no cohort sequence carries a materialised ACL");
+});
+
+cell("la.1b the retired DPA pair is read-only history by TRIGGER, not by a revoke", async () => {
+  // §C demotes dpa_documents/dpa_signatures without touching their ACL, so the guarantee has to be
+  // 0158's triggers — which dump and restore identically. Pinned by name and enabled state, and
+  // then EXERCISED: a delete and a truncate must refuse even as the table owner.
+  const trg = await rootQuery(
+    `select c.relname, t.tgname
+       from pg_trigger t join pg_class c on c.oid=t.tgrelid
+       join pg_namespace n on n.oid=c.relnamespace
+      where n.nspname='clara' and c.relname in ('dpa_documents','dpa_signatures')
+        and not t.tgisinternal and t.tgenabled='O'
+      order by 1,2`);
+  assert.deepEqual(trg.rows.map((r) => `${r.relname}.${r.tgname}`), [
+    "dpa_documents.t_dpa_documents_append_only",
+    "dpa_documents.t_dpa_documents_no_truncate",
+    "dpa_documents.t_dpa_documents_supersede_only",
+    "dpa_signatures.t_dpa_signatures_append_only",
+    "dpa_signatures.t_dpa_signatures_no_truncate",
+  ], "la.1b 0158's five write-refusing triggers are present and enabled");
+  await assertRaises(CLR.immutable,
+    () => rootQuery("delete from clara.dpa_documents"), "la.1b delete a retired document");
+  await assertRaises(CLR.immutable,
+    () => rootQuery("truncate clara.dpa_signatures"), "la.1b truncate the retired signatures");
 });
 
 cell("la.2 a document's text is immutable and its status moves only draft->published->superseded", async () => {

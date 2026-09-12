@@ -225,7 +225,11 @@ set role clara_fn_owner;
 --       rendered hex instead of bytea so a caller can send the digest it hashed in JSON);
 --     · at most ONE `published` row per kind, by partial unique index;
 --     · the row is IMMUTABLE apart from its two legal status transitions (§A2);
---     · no application role holds any grant — every reach is through a definer door.
+--     · no application role holds any grant — every reach is through a definer door. Which this
+--       file achieves by GRANTING NOTHING ON THE TABLE AT ALL: `relacl` stays NULL, the way every
+--       other clara relation's does. A `grant`/`revoke` that changes no effective privilege still
+--       materialises the owner's ACL, and `pg_dump` cannot reproduce a materialised owner-default
+--       ACL — see §C and the tail census cell 1b.
 -- =====================================================================================
 create table clara.legal_documents (
   kind           text        not null check (kind in ('terms','dpa')),
@@ -351,7 +355,10 @@ comment on table clara.legal_acceptances is
   '(the accepting actor has no firm, so op_receipts cannot scope it).';
 
 -- =====================================================================================
--- §C  THE BACKFILL, AND THE DEMOTION OF THE OLD PAIR TO READ-ONLY HISTORY.
+-- §C  THE BACKFILL, AND THE DEMOTION OF THE OLD PAIR TO READ-ONLY HISTORY — carried by 0158's
+--     triggers and by the fact that no body writes them, NEVER by a grant or a revoke. The
+--     paragraph just above the two `comment on table` statements below says why a revoke here
+--     was both a no-op on effective privileges AND a permanent DR restore diff.
 --
 -- The rule is the header's, implemented once: the placeholder BY ITS DIGEST becomes a draft;
 -- every other document keeps the publication state 0158's `effective_to` already recorded.
@@ -395,7 +402,35 @@ select s.id, s.user_id, 'dpa', l.version, encode(s.body_sha256,'hex'), s.signed_
 -- THE OLD PAIR IS HISTORY NOW. It is not dropped -- an append-only consent record is not a thing
 -- this estate deletes -- and it is not written again either: `sign_dpa` delegates from §F, and no
 -- other body in the schema writes them (the tail census proves that by reading every prosrc).
-revoke insert, update, delete, truncate on clara.dpa_documents, clara.dpa_signatures from public;
+--
+-- AND THE DEMOTION IS CARRIED BY TRIGGERS AND BODIES, NEVER BY A `revoke` (#621 CI, DR round-trip).
+-- This paragraph used to be followed by
+--   `revoke insert, update, delete, truncate on clara.dpa_documents, clara.dpa_signatures
+--    from public;`
+-- and that statement was TWO things at once: a no-op on effective privileges, and a permanent DR
+-- drift. A no-op, because PUBLIC never held a single privilege on either table -- neither 0158 nor
+-- anything between it and this file ever granted one to PUBLIC, so there was nothing to take away;
+-- measured on a database stopped at 0184, `pg_class.relacl` is NULL on both relations, which is
+-- the catalog saying exactly that. A DR drift, because the
+-- FIRST explicit grant or revoke on a relation MATERIALISES its ACL: Postgres must then write the
+-- owner's until-then-implicit privileges into `pg_class.relacl` as an explicit
+-- `clara_fn_owner=arwdDxtm/clara_fn_owner` entry. `pg_dump` emits nothing for an ACL that equals
+-- the owner default, so the restored copy keeps `relacl IS NULL` and dr-verify's
+-- "relation-grant matrix" cell reported 16 source-only rows (8 privileges x 2 relations) on every
+-- run -- a backup that is by construction unable to reproduce its source.
+--
+-- SO THE READ-ONLY GUARANTEE IS THE ONE 0158 ALREADY BUILT, WHICH DUMPS AND RESTORES IDENTICALLY:
+--   · `t_dpa_documents_supersede_only` (0158:157) admits exactly one UPDATE -- stamping
+--     effective_to -- and nothing else about a document may move;
+--   · `t_dpa_documents_append_only` / `t_dpa_signatures_append_only` (0158:159,185) raise CLR08 on
+--     DELETE (and on UPDATE for signatures), and the two `_no_truncate` statement triggers refuse
+--     TRUNCATE;
+--   · NO function in the schema writes either relation -- census cell 7 reads every `prosrc`;
+--   · neither relation carries an application-role grant, so no application role reaches them at
+--     all except through a definer door -- and after this file no door writes them.
+-- The estate's table convention is therefore literal and now asserted: forced RLS + definer doors,
+-- and NOT ONE table-level `grant` or `revoke`, ever. Census cell 1 pins `relacl IS NULL` on all
+-- four relations (and on any sequence of theirs) so this class of drift cannot return unnoticed.
 comment on table clara.dpa_documents is
   '#621 (0185): READ-ONLY HISTORY. Superseded by clara.legal_documents (kind=''dpa''); every row '
   'was carried over with its spelling in legal_documents.legacy_version. No door writes this '
@@ -1359,6 +1394,42 @@ begin
     end if;
   end loop;
 
+  -- 1b · AND NOT ONE OF THE FOUR RELATIONS CARRIES A TABLE ACL AT ALL -- the new pair OR the pair
+  --      §C retires. `relacl IS NULL` is strictly stronger than "no application-role grant", and
+  --      it is the assertion that keeps this file's DR round-trip honest. The FIRST explicit
+  --      `grant` or `revoke` on a relation MATERIALISES its ACL: the owner's until-then-implicit
+  --      privileges are written into pg_class.relacl as `clara_fn_owner=arwdDxtm/clara_fn_owner`.
+  --      `pg_dump` emits nothing for an ACL equal to the owner default, so the restored copy keeps
+  --      relacl NULL and dr-verify's relation-grant matrix reports one source-only row PER
+  --      PRIVILEGE, forever. #621's first cut revoked four privileges FROM PUBLIC on the retired
+  --      pair -- PUBLIC held none of them, so nothing changed except 16 phantom DR diff rows (see
+  --      §C). The estate's convention is literal: forced RLS + definer doors, and no table-level
+  --      grant or revoke, ever. Asserted here so it cannot regress silently.
+  foreach v_sig in array array['legal_documents','legal_acceptances',
+                               'dpa_documents','dpa_signatures'] loop
+    select count(*)::int into v_n
+      from pg_class c join pg_namespace n on n.oid=c.relnamespace
+     where n.nspname='clara' and c.relname=v_sig and c.relacl is not null;
+    if v_n <> 0 then
+      raise exception '#621 tail: clara.% carries a MATERIALISED table ACL (%) -- some grant/revoke touched it; the estate grants nothing on tables, and a materialised owner-default ACL is a permanent DR restore diff',
+        v_sig, (select c.relacl::text from pg_class c join pg_namespace n on n.oid=c.relnamespace
+                 where n.nspname='clara' and c.relname=v_sig)
+        using errcode='CLR10';
+    end if;
+  end loop;
+  -- The same law for any sequence the cohort owns. (0185 creates none -- both keys are uuid/
+  -- composite -- so this reads zero today and catches the day one of them becomes an identity.)
+  select count(*)::int into v_n
+    from pg_class sq join pg_namespace n on n.oid=sq.relnamespace
+    join pg_depend d on d.objid=sq.oid and d.deptype='a'
+    join pg_class t on t.oid=d.refobjid
+   where n.nspname='clara' and sq.relkind='S' and sq.relacl is not null
+     and t.relname in ('legal_documents','legal_acceptances','dpa_documents','dpa_signatures');
+  if v_n <> 0 then
+    raise exception '#621 tail: % sequence(s) of the legal cohort carry a materialised ACL', v_n
+      using errcode='CLR10';
+  end if;
+
   -- 2 · THE CONSTRAINTS THAT ARE THE LAW, by name and by definition.
   select count(*)::int into v_n from pg_constraint
    where conrelid='clara.legal_documents'::regclass
@@ -1614,6 +1685,19 @@ begin
   if v_n <> 0 then
     raise exception '#621 tail: the retired DPA relations carry % writer grant(s)', v_n using errcode='CLR10';
   end if;
+  -- Their read-only-ness is 0158's triggers, not a revoke: supersede-only on documents, append-only
+  -- on both, no-truncate on both. Pinned by name and by enabled state, because §C now relies on
+  -- exactly these and on nothing else (cell 1b asserts the absent ACL that used to stand here).
+  select count(*)::int into v_n from pg_trigger
+   where tgrelid in ('clara.dpa_documents'::regclass,'clara.dpa_signatures'::regclass)
+     and not tgisinternal and tgenabled='O'
+     and tgname in ('t_dpa_documents_supersede_only','t_dpa_documents_append_only',
+                    't_dpa_documents_no_truncate','t_dpa_signatures_append_only',
+                    't_dpa_signatures_no_truncate');
+  if v_n <> 5 then
+    raise exception '#621 tail: the retired DPA relations carry % of 0158''s 5 enabled write-refusing triggers -- the demotion to read-only history rests on them', v_n
+      using errcode='CLR10';
+  end if;
 
   -- 8 · THE BACKFILL, ROW FOR ROW, AND THE PLACEHOLDER'S DEMOTION.
   v_placeholder := encode(sha256(convert_to(
@@ -1693,6 +1777,6 @@ begin
       using errcode='CLR10';
   end if;
 
-  raise notice '#621 tail: OK -- clara.legal_documents and clara.legal_acceptances exist under forced RLS with ONE clara_fn_owner policy and ZERO application-role grants, the one-published-per-kind partial unique index, a DB-recomputed body digest, the draft->published->superseded transition trigger and an acceptance bound to the document BYTES by composite FK; clara.accept_legal_document, clara.publish_legal_document and clara.get_current_legal_documents are SECURITY DEFINER, clara_fn_owner-owned, search_path-pinned, PUBLIC-revoked and clara_authenticated-ONLY (no agent, runtime or wake role reaches them), each raises its whole typed roster, and all three additionally pin plan_cache_mode = force_custom_plan in proconfig (0183''s house rule: each body binds the calling person or the kind into a cached statement that plpgsql would otherwise serve from a generic plan from the sixth call of a pooled connection) while the two recut 0163 doors deliberately carry NO such pin, because 0163 never did and neither 0183 nor 0184 re-pinned them; the publish door carries the approve_firm_registration operator-owner predicate verbatim and reserves through op_receipts; clara.sign_dpa, clara.get_current_dpa_document and clara.get_own_dpa_signature keep their signatures and grants and delegate onto kind=dpa without touching the retired relations; clara.open_checkout_intent and clara.claim_paid_firm refuse legal_not_accepted naming the missing kinds, pin and re-check BOTH versions (terms NULL on an intent SESSION-STAMPED before 0185 passing deliberately), and keep every 0163 arm; clara.open_checkout_intent decides that check and that pin as ONE observation -- a single lateral statement taken while it holds the SAME per-kind advisory keys clara.publish_legal_document takes (terms then dpa, a fixed order against a door that takes only one), so a publish landing mid-checkout blocks until the applicant''s transaction commits instead of pinning a version they never accepted onto a registration they are about to pay for -- and its reuse arm STAMPS a reused pre-0185 intent''s NULL terms pin from that same observation, with clara._tf_checkout_intents_session_stamp admitting exactly that one further move (terms_version NULL -> value on an unstamped row, everything else frozen) and nothing more; every 0158 document and signature carried over by its BYTES -- the signature keeping its own id, which firm_registration_payments.consumed_dpa_signature now references in clara.legal_acceptances -- the 0158 placeholder is a DRAFT and therefore unacceptable, and this file seeds NO legal text of either kind.';
+  raise notice '#621 tail: OK -- clara.legal_documents and clara.legal_acceptances exist under forced RLS with ONE clara_fn_owner policy, ZERO application-role grants and NO table ACL at all (relacl IS NULL on all four legal relations -- the retired pair included, because a no-op revoke that materialises the owner-default ACL is a permanent DR restore diff and this file therefore issues none), the one-published-per-kind partial unique index, a DB-recomputed body digest, the draft->published->superseded transition trigger and an acceptance bound to the document BYTES by composite FK; clara.accept_legal_document, clara.publish_legal_document and clara.get_current_legal_documents are SECURITY DEFINER, clara_fn_owner-owned, search_path-pinned, PUBLIC-revoked and clara_authenticated-ONLY (no agent, runtime or wake role reaches them), each raises its whole typed roster, and all three additionally pin plan_cache_mode = force_custom_plan in proconfig (0183''s house rule: each body binds the calling person or the kind into a cached statement that plpgsql would otherwise serve from a generic plan from the sixth call of a pooled connection) while the two recut 0163 doors deliberately carry NO such pin, because 0163 never did and neither 0183 nor 0184 re-pinned them; the publish door carries the approve_firm_registration operator-owner predicate verbatim and reserves through op_receipts; clara.sign_dpa, clara.get_current_dpa_document and clara.get_own_dpa_signature keep their signatures and grants and delegate onto kind=dpa without touching the retired relations; clara.open_checkout_intent and clara.claim_paid_firm refuse legal_not_accepted naming the missing kinds, pin and re-check BOTH versions (terms NULL on an intent SESSION-STAMPED before 0185 passing deliberately), and keep every 0163 arm; clara.open_checkout_intent decides that check and that pin as ONE observation -- a single lateral statement taken while it holds the SAME per-kind advisory keys clara.publish_legal_document takes (terms then dpa, a fixed order against a door that takes only one), so a publish landing mid-checkout blocks until the applicant''s transaction commits instead of pinning a version they never accepted onto a registration they are about to pay for -- and its reuse arm STAMPS a reused pre-0185 intent''s NULL terms pin from that same observation, with clara._tf_checkout_intents_session_stamp admitting exactly that one further move (terms_version NULL -> value on an unstamped row, everything else frozen) and nothing more; every 0158 document and signature carried over by its BYTES -- the signature keeping its own id, which firm_registration_payments.consumed_dpa_signature now references in clara.legal_acceptances -- the 0158 placeholder is a DRAFT and therefore unacceptable, and this file seeds NO legal text of either kind.';
 end
 $w621_tail$;
