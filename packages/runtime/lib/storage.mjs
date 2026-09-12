@@ -30,6 +30,34 @@ function localPath(key) {
 }
 
 /**
+ * WHAT A LOCAL OPEN FAILURE MEANS (#630, fifth review round, finding [3]).
+ *
+ * The eager-open cure below used to swallow `err` and report every failure as "(object absent)".
+ * A permission failure, a directory standing where the object should be, or fd exhaustion then
+ * read to an operator as MISSING BYTES — and since `storage_error` is in local-facts.mjs's
+ * RETRYABLE set (:48), the lane logs `retryable=true ... (object absent)` and re-drives a task
+ * whose object is in fact present and unreadable. `localObjectExists` in this same file already
+ * keeps ENOENT and everything else apart (:191-199); this is the same discipline for the readers.
+ *
+ * THE TYPE DOES NOT CHANGE, only the diagnosis. Every arm stays `storage_error`: the retry is
+ * bounded (the task stays `running` until requeueStranded's window and the DB attempt cap), and
+ * moving EACCES out of the retryable set would be a behaviour change this finding did not ask
+ * for and no cell measures. What changes is that the message names the errno instead of
+ * asserting something the process never checked.
+ *
+ * ENOTDIR joins ENOENT: a path component that is not a directory means the object is not there,
+ * which is the same fact by a different route. Everything else names itself.
+ */
+export function localOpenFailure(err, what) {
+  const code = err?.code;
+  if (code === "ENOENT" || code === "ENOTDIR") {
+    return new StorageError("storage_error", `${what} storage read failed (object absent)`);
+  }
+  return new StorageError("storage_error",
+    `${what} storage read failed (${code || "open failed, no errno"})`);
+}
+
+/**
  * Open a RELAY_TEST_MODE object EAGERLY and hand back a stream that is already attached to the
  * open file handle.
  *
@@ -51,8 +79,8 @@ async function openLocalStream(path, what) {
   let fh;
   try {
     fh = await open(path, "r");
-  } catch {
-    throw new StorageError("storage_error", `${what} storage read failed (object absent)`);
+  } catch (err) {
+    throw localOpenFailure(err, what);
   }
   // `FileHandle.createReadStream` owns the handle and closes it on end/error/destroy, and the fd
   // is already open — so there is no second `open()` left to fail asynchronously.
@@ -427,8 +455,11 @@ async function artifactResponseFor(key) {
     try {
       const fh = await open(path, "r");
       await fh.close();
-    } catch {
-      throw new StorageError("storage_error", "artifact storage read failed (object absent)");
+    } catch (err) {
+      // Through the SAME classifier as the other three families (#630 finding [3]): this catch
+      // carried the identical "always absent" claim. For ENOENT the message is byte-identical to
+      // what it was, so nothing that reads it changes; a permission failure now says so.
+      throw localOpenFailure(err, "artifact");
     }
     return createReadStream(path);
   }

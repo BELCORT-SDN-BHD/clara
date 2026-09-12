@@ -34,6 +34,7 @@ import {
   hashReportCanonical,
   hashWikiCanonical,
   localObjectExists,
+  localOpenFailure,
 } from "../lib/storage.mjs";
 
 const FIRM = "87dba009-1c2d-4e5f-8a9b-0c1d2e3f4a5b";
@@ -131,4 +132,60 @@ test("storage (docs): a PRESENT object still downloads and hashes — the cure i
   const result = await downloadCanonical(presentKey, destination, sha);
   assert.equal(result.sha256, sha);
   assert.equal(await hashCanonical(presentKey), sha);
+});
+
+// ===========================================================================================
+// #630 (fifth review round, finding [3]) — AN OPEN FAILURE IS NOT ALWAYS AN ABSENT OBJECT.
+//
+// The cure above turned every local open failure into ONE message: "(object absent)". A
+// permission failure, a directory standing where the object should be, or fd exhaustion then
+// reaches an operator as a missing object — and because `storage_error` is in local-facts.mjs's
+// RETRYABLE set, the lane keeps re-driving the task while its log says bytes are gone that are
+// in fact present and unreadable. `localObjectExists` in the same file already keeps ENOENT and
+// everything else apart (:191-199); the stream opener did not.
+//
+// WHY THE NON-ENOENT ARM IS PINNED AT THE CLASSIFIER RATHER THAN THROUGH A REAL FAILURE. There
+// is no portable way to force EACCES / EMFILE / EISDIR from a test that must pass on both this
+// Windows rig and Linux CI: opening a DIRECTORY raises EISDIR on Linux and SUCCEEDS on Windows
+// (measured on this rig with node v22.23.2), a deny-ACL is a no-op for a container's root, and
+// the only deterministic Windows codes (EPERM on config\SAM, EBUSY on pagefile.sys — also
+// measured) are system paths a sandboxed test must not touch. So the DECISION is the seam: the
+// four cells below drive `localOpenFailure` with the errno shapes libuv actually produces, and
+// the ENOENT cells above prove the real opener routes through it unchanged.
+// ===========================================================================================
+
+test("storage: ENOENT (and a parent that is not a directory) is the ONLY failure reported as an absent object", () => {
+  for (const code of ["ENOENT", "ENOTDIR"]) {
+    const err = localOpenFailure(Object.assign(new Error("boom"), { code }), "canonical");
+    assert.ok(err instanceof StorageError, `${code} must still be a StorageError`);
+    assert.equal(err.code, "storage_error", `${code} keeps the retryable storage code`);
+    assert.equal(err.message, "canonical storage read failed (object absent)",
+      `${code} is the absent-object message this lane's callers already read`);
+  }
+});
+
+test("storage: EACCES / EMFILE / EISDIR are reported as themselves, never as an absent object", () => {
+  for (const code of ["EACCES", "EMFILE", "EISDIR", "EPERM", "EBUSY"]) {
+    const err = localOpenFailure(Object.assign(new Error("boom"), { code }), "wiki");
+    assert.ok(err instanceof StorageError, `${code} must still be a StorageError`);
+    assert.equal(err.code, "storage_error",
+      `${code} keeps the retryable storage code — the retry is bounded, and downgrading it here `
+      + "would change the lane's behaviour rather than its diagnosis");
+    assert.equal(err.message, `wiki storage read failed (${code})`,
+      `${code} must name itself so an operator is not sent looking for bytes that are present`);
+    assert.equal(err.message.includes("object absent"), false,
+      `${code} must NOT claim the object is absent`);
+  }
+});
+
+test("storage: an open failure with no errno says so rather than inventing one", () => {
+  const err = localOpenFailure(new Error("boom"), "report");
+  assert.equal(err.message, "report storage read failed (open failed, no errno)");
+  assert.equal(err.message.includes("object absent"), false);
+});
+
+test("storage: the classifier survives a non-Error rejection", () => {
+  const err = localOpenFailure(undefined, "artifact");
+  assert.ok(err instanceof StorageError);
+  assert.equal(err.message, "artifact storage read failed (open failed, no errno)");
 });
