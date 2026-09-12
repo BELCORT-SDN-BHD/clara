@@ -190,3 +190,75 @@ test("the detail exports a heading id, and it is on the document's own name", as
     assert.match(textOf(heading!), /invoice-april\.pdf/, "the heading a reader lands on must name the DOCUMENT, not the panel");
   });
 });
+
+// ---------------------------------------------------------------------------------------------
+// THE READ'S OWN RECOVERY CONTROL — the gap the matrix named "no retry anywhere in the documents
+// surface". `DoorFeedback` never populated StateBanner's `action` slot, though `useHydratedPart`
+// had exposed `reload` all along, so a document detail that failed to load was a dead end whatever
+// the reason. It is wired now, and the KIND decides: a transport or server failure recovers by
+// itself, a 401/403/404 answers identically however many times it is asked, and a governed refusal
+// is a decision rather than a failure.
+// ---------------------------------------------------------------------------------------------
+
+/** A workbench whose FILED read fails the way `impl` says, so the failure banner is on screen. */
+async function withFailingFiled(
+  impl: typeof fetch,
+  run: (h: Awaited<ReturnType<typeof renderComponent>>) => Promise<void>,
+): Promise<void> {
+  const originalFetch = globalThis.fetch;
+  const originalUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  process.env.NEXT_PUBLIC_SUPABASE_URL = "https://example.supabase.co";
+  globalThis.fetch = impl;
+  configureSessionTokenSource(async () => "tok");
+  const nav = makeNavigation("");
+  const h = await renderComponent(documentsApp(createElement(DocumentsWorkbench, { clientId: DOCUMENTS_CLIENT }), nav));
+  try {
+    for (let i = 0; i < 10; i++) await h.settle();
+    await run(h);
+  } finally {
+    await h.unmount();
+    globalThis.fetch = originalFetch;
+    if (originalUrl === undefined) delete process.env.NEXT_PUBLIC_SUPABASE_URL;
+    else process.env.NEXT_PUBLIC_SUPABASE_URL = originalUrl;
+    resetSessionTokenSource();
+  }
+}
+
+/** Fails `document_filings` with `status`, answers everything else honestly. */
+function filedFails(status: number, calls: { n: number }): typeof fetch {
+  const ok = documentsFetch({});
+  return (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url.includes("/rest/v1/document_filings")) {
+      calls.n += 1;
+      return new Response(JSON.stringify({ message: "nope" }), { status, headers: { "content-type": "application/json" } });
+    }
+    return ok(input as never, init as never);
+  }) as typeof fetch;
+}
+
+test("[the gap] a failed filed read now offers RETRY, and pressing it re-reads", async () => {
+  const calls = { n: 0 };
+  await withFailingFiled(filedFails(500, calls), async (h) => {
+    const retry = h.find((n) => (n as StubNode).getAttribute?.("data-testid") === "documents-filed-retry");
+    assert.ok(retry, "a server failure recovers by itself — the banner must carry a control that says so");
+    const before = calls.n;
+    assert.ok(before > 0, "control: the read must actually have been attempted");
+    await clickButton(retry as never);
+    for (let i = 0; i < 8; i++) await h.settle();
+    assert.ok(calls.n > before, `Retry must issue a SECOND read — saw ${calls.n}, unchanged from ${before}`);
+  });
+});
+
+test("a DENIED filed read offers no Retry — a control that cannot work is worse than none", async () => {
+  const calls = { n: 0 };
+  await withFailingFiled(filedFails(403, calls), async (h) => {
+    assert.equal(
+      h.find((n) => (n as StubNode).getAttribute?.("data-testid") === "documents-filed-retry"),
+      null,
+      "a 403 answers identically however many times it is asked",
+    );
+    // …and the honest sentence is still there: withholding the control is not withholding the news.
+    assert.match(h.text(), /You don't have access to this/);
+  });
+});

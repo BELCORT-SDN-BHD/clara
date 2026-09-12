@@ -1,3 +1,5 @@
+import type { ReactNode } from "react";
+
 import type { PartClr } from "@/lib/parts/hooks";
 
 import { StateBanner } from "@/components/common/state";
@@ -14,12 +16,24 @@ import { StateBanner } from "@/components/common/state";
  * chip — it was `bg-error-muted` text sitting on an `bg-error-muted` card, i.e. a
  * chip with no visible edge at all, everywhere a CLR code appeared here.
  */
-export function DoorFeedback({ err, clr }: { err: string | null; clr: PartClr }) {
+export function DoorFeedback({ err, clr, action }: {
+  err: string | null;
+  clr: PartClr;
+  /** A RECOVERY CONTROL, where one genuinely exists — the StateBanner slot this component had
+   *  never populated, which is why nothing anywhere in the documents surface offered a Retry on a
+   *  failed read while `useHydratedPart` had exposed `reload` all along. Deliberately a NODE rather
+   *  than an `onRetry` callback: whether retrying can honestly answer differently depends on the
+   *  failure's KIND, and this component is handed a finished sentence with the kind already gone.
+   *  The caller holds the kind (`useReadErrKind`) and decides; see document-detail.tsx. A caller
+   *  that passes nothing renders exactly what it rendered before. */
+  action?: ReactNode;
+}) {
   if (!err) return null;
   return (
     <StateBanner
       tone="error"
       code={clr ? `${clr.code}${clr.reason ? ` · ${clr.reason}` : ""}` : undefined}
+      action={action}
     >
       {err}
     </StateBanner>

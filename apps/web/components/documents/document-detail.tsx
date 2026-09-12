@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
 import { useHydratedPart, type PartClr } from "@/lib/parts/hooks";
+import { useReadErrKind } from "@/lib/parts/read-err-kind";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
 import { loadDocumentDetail } from "@/lib/documents/loaders";
 import type { ClientRow } from "@/lib/documents/types";
@@ -14,6 +15,7 @@ import { DocumentAdmin } from "./document-admin";
 import { DocumentExtractPanel } from "./document-extract-panel";
 import { CorrectionWizard } from "./correction-wizard";
 import { DoorFeedback } from "./door-feedback";
+import { Button } from "@/components/ui/button";
 import { SectionHeader } from "@/components/common/section-header";
 import { EmptyState, LoadingState } from "@/components/common/state";
 
@@ -45,9 +47,13 @@ export function DocumentDetail({
   onNotFound?: () => void;
 }) {
   const t = useTranslations("ClientDocuments");
+  /** CAPTURES THE FAILURE'S KIND on its way past, so this panel can tell a transport failure from a
+   *  denial. `useHydratedPart` keeps only a finished sentence, which is why the banner below could
+   *  never decide whether a Retry would be honest — and so offered none for anything. */
+  const readKind = useReadErrKind();
   const { data, loading, busy, err, clr, act, reload } = useHydratedPart(
     sessionTokenAccessor,
-    () => loadDocumentDetail(documentId, clientId, t),
+    () => readKind.wrap(() => loadDocumentDetail(documentId, clientId, t)),
   );
   const [correcting, setCorrecting] = useState(false);
   // C-07: lifted out of DocumentExtractPanel so the metadata control's
@@ -83,6 +89,19 @@ export function DocumentDetail({
     onNotFound?.();
   }, [loading, data, err, onNotFound]);
 
+  /** RETRY ONLY WHERE A SECOND ATTEMPT CAN ANSWER DIFFERENTLY — the Activity feed's own per-state
+   *  discipline. A read that failed in transit or on the server recovers by itself; a 401/403/404
+   *  answers identically however many times it is asked, and a governed refusal (`clr`) is a
+   *  DECISION rather than a failure. Offering a control there would be offering a control that
+   *  cannot work. `null` kind means the failure was not a typed wire error at all (a write's
+   *  refusal sharing this cell's err slot, say) — withheld for the same reason. */
+  const retryable = clr === null && (readKind.kind === "transport" || readKind.kind === "server_error");
+  const retryAction = retryable ? (
+    <Button type="button" variant="outline" size="sm" data-testid="document-detail-retry" onClick={() => { void reload(); }}>
+      {t("retry")}
+    </Button>
+  ) : undefined;
+
   if (loading && !data) {
     return <LoadingState>{t("loading")}</LoadingState>;
   }
@@ -91,7 +110,9 @@ export function DocumentDetail({
     // loadDocumentDetail resolves null when the document itself could not be read —
     // an honest "not reachable today" (reportsApi precedent), never a crash, and
     // distinct from a thrown err (rendered below via DoorFeedback).
-    return err ? <DoorFeedback err={err} clr={clr} /> : <EmptyState>{t("documentNotReachable")}</EmptyState>;
+    return err
+      ? <DoorFeedback err={err} clr={clr} action={retryAction} />
+      : <EmptyState>{t("documentNotReachable")}</EmptyState>;
   }
 
   const actAndRefreshFiled = (fn: () => Promise<void>) => act(fn, onFiledChanged);
@@ -132,7 +153,7 @@ export function DocumentDetail({
 
       <DocumentAdmin document={data.document} busy={busy} act={act} onCorrect={() => setCorrecting(true)} />
 
-      <DoorFeedback err={err} clr={clr} />
+      <DoorFeedback err={err} clr={clr} action={retryAction} />
 
       <CorrectionWizard
         open={correcting}

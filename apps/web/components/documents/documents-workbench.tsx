@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useHydratedPart } from "@/lib/parts/hooks";
+import { useReadErrKind } from "@/lib/parts/read-err-kind";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
 import { loadFiledDocuments, loadFirmClients, loadOpenCandidates } from "@/lib/documents/loaders";
 import { applyDocumentParam, documentUrl, parseDocumentParam } from "@/lib/documents/url-state";
@@ -41,7 +42,11 @@ export function DocumentsWorkbench({ clientId }: { clientId: string }) {
   const selection = useMemo(() => parseDocumentParam(searchParams), [searchParams]);
   const selectedId = selection.kind === "document" ? selection.id : null;
 
-  const filed = useHydratedPart(sessionTokenAccessor, () => loadFiledDocuments(clientId, t));
+  /** CAPTURES THE FAILURE'S KIND for the filed list, so its banner can offer a Retry for a read that
+   *  failed in transit or on the server and withhold one for a denial — `useHydratedPart` keeps only
+   *  a finished sentence, which is why no read on this whole surface had a recovery control. */
+  const filedKind = useReadErrKind();
+  const filed = useHydratedPart(sessionTokenAccessor, () => filedKind.wrap(() => loadFiledDocuments(clientId, t)));
   const candidates = useHydratedPart(sessionTokenAccessor, () => loadOpenCandidates(clientId, t));
   const clients = useHydratedPart(sessionTokenAccessor, () => loadFirmClients(t));
 
@@ -242,7 +247,15 @@ export function DocumentsWorkbench({ clientId }: { clientId: string }) {
                     else rowRefs.current.delete(documentId);
                   }}
                 />
-                <DoorFeedback err={filed.err} clr={filed.clr} />
+                <DoorFeedback
+                  err={filed.err}
+                  clr={filed.clr}
+                  action={filed.clr === null && (filedKind.kind === "transport" || filedKind.kind === "server_error") ? (
+                    <Button type="button" variant="outline" size="sm" data-testid="documents-filed-retry" onClick={() => { void filed.reload(); }}>
+                      {t("retry")}
+                    </Button>
+                  ) : undefined}
+                />
               </>
             )}
           </section>
