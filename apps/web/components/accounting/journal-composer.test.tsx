@@ -1172,6 +1172,98 @@ test("t728f: a claimant read that NEVER settles does not withhold the refusal, a
     "unmounting the composer aborts the outstanding claimant read rather than leaking it");
 });
 
+test("t728f: the claimant read is abandoned by its own TIMEOUT, not only by unmounting the composer", async () => {
+  // #728 finding 2 (final review) — the branch the cell above never exercised. That cell proves
+  // the AbortSignal fires on UNMOUNT; nothing proved `setTimeout(() => controller.abort(),
+  // CLAIMANT_READ_TIMEOUT_MS)` at journal-composer.tsx:302 ever actually FIRES. Delete that line
+  // (or change 5000 to Infinity) and the whole apps/web suite stayed green — a stalled PostgREST
+  // claimant read would then hold a fetch for the tab's lifetime with no cell noticing, exactly
+  // the vacuity attach-evidence-dialog.test.tsx's t728g cell was written to close for the
+  // dialog's identical timer, which only the dialog got. This cell moves the clock instead of
+  // waiting on it (the same instrument), and lets the read settle LATE — after the abort — to
+  // prove the answer is DISCARDED rather than merely delayed: a real fetch can race its own
+  // AbortController and still resolve, and only the composer's own re-check
+  // (`controller.signal.aborted || claimant === null`) stands between that and a state write for
+  // a phase the person has already moved past.
+  const STALLED_ENTRY = "e8888888-8888-4888-8888-888888888888";
+  let armed: AbortSignal | null = null;
+  let settleLate: ((v: { clientId: string; clientName: string | null } | null) => void) | null = null;
+  const realSetTimeout = globalThis.setTimeout;
+  const timers: Array<() => void> = [];
+  (globalThis as { setTimeout: unknown }).setTimeout = ((fn: () => void, ms?: number, ...rest: unknown[]) => {
+    if (ms === 5000) {
+      timers.push(fn);
+      return 0 as unknown as ReturnType<typeof setTimeout>;
+    }
+    return (realSetTimeout as (...a: unknown[]) => unknown)(fn, ms, ...rest) as ReturnType<typeof setTimeout>;
+  }) as typeof setTimeout;
+  const realConsoleError = console.error;
+  const errors: string[] = [];
+  console.error = ((...args: unknown[]) => {
+    errors.push(args.map((a) => (a instanceof Error ? a.message : String(a))).join(" "));
+  }) as typeof console.error;
+  try {
+    const h = await renderComponent(
+      App({
+        loadSpokenFor: async () => [],
+        // Never resolves until `settleLate` is called by hand — the assertions below fire the
+        // abort timer FIRST, then settle this late, so both halves of the guard are exercised.
+        resolveEntryClient: (_entryId, opts) => {
+          armed = opts?.signal ?? null;
+          return new Promise((resolve) => { settleLate = resolve; });
+        },
+        submit: async () => ({ kind: "source_conflict", entryId: STALLED_ENTRY, documentId: DOCUMENTS[0]!.documentId }),
+      }),
+    );
+    try {
+      await h.settle();
+      await fillGoodEntry(h);
+      await h.fireEvent(byId(h, "journal-basis-evidence"), "change", (n) => setFieldValue(n, DOCUMENTS[0]!.documentId));
+      await submitForm(h);
+
+      assert.match(h.text(), /already backs a posted entry/,
+        "the refusal is on screen although the claimant read has not settled");
+      assert.equal(timers.length, 1,
+        `the claimant read arms exactly one 5000 ms abort timer — found ${timers.length}`);
+      assert.ok(armed !== null, "…and the read is armed with the signal that timer fires");
+      assert.equal((armed as AbortSignal).aborted, false, "…which is live while the read is outstanding");
+
+      await h.act(() => { timers[0]!(); });
+      await h.settle();
+
+      assert.equal((armed as AbortSignal).aborted, true,
+        "the timeout ABORTS the read — without it the fetch outlives the phase and the alert waits "
+        + "for a link that will never come");
+      assert.match(h.text(), /already backs a posted entry/, "the alert stands after the read is abandoned");
+      assert.equal(
+        h.find((n) => n.tagName === "A"
+          && String((n as { getAttribute?: (k: string) => string | null }).getAttribute?.("href") ?? "").includes(STALLED_ENTRY)),
+        null,
+        "no link was invented for a claimant nobody read",
+      );
+
+      // THE LATE ANSWER, arriving AFTER the abort — the exact race a plain `.catch()` with no
+      // signal re-check could not close.
+      await h.act(() => { settleLate?.({ clientId: CLIENT, clientName: "Acme Sdn Bhd" }); });
+      await h.settle();
+
+      assert.equal(
+        h.find((n) => n.tagName === "A"
+          && String((n as { getAttribute?: (k: string) => string | null }).getAttribute?.("href") ?? "").includes(STALLED_ENTRY)),
+        null,
+        "…a late answer arriving after the abort writes no state either — still no link",
+      );
+      assert.match(h.text(), /already backs a posted entry/, "…and still the one alert, unchanged");
+      assert.deepEqual(errors, [], `no console error from the abandoned read — saw: ${JSON.stringify(errors)}`);
+    } finally {
+      await h.unmount();
+    }
+  } finally {
+    (globalThis as { setTimeout: unknown }).setTimeout = realSetTimeout;
+    console.error = realConsoleError;
+  }
+});
+
 test("t728f: the refusal NAMES the sibling client whose books its link leads to", async () => {
   // Finding [5]. The link leaves this client for another client's Journals route — a new
   // client-scope epoch, with the abandoned composer behind it — and the copy said only "That
