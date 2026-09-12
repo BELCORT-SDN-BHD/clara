@@ -55,6 +55,8 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 import pg from "pg";
 
+import { absent, deniedWith, refusal } from "./verdicts.mjs";
+
 const HERE = dirname(fileURLToPath(import.meta.url));
 const DB_PKG = resolve(HERE, "..");
 const REPO = resolve(HERE, "..", "..", "..");
@@ -189,18 +191,6 @@ async function rawObject(apiUrl, method, bucket, key, jwt, { headers = {}, body 
   });
   const text = await response.text().catch(() => "");
   return { ok: response.ok, status: response.status, body: text.slice(0, 300) };
-}
-
-/** Supabase wraps its real status inside the body; report both so a refusal is legible. */
-function refusal(res) {
-  let inner = null;
-  try {
-    inner = JSON.parse(res.body);
-  } catch {
-    /* not JSON */
-  }
-  const wrapped = inner?.statusCode ? `/${inner.statusCode}` : "";
-  return `HTTP ${res.status}${wrapped}`;
 }
 
 function sha256(buffer) {
@@ -391,15 +381,29 @@ async function main() {
       { id: "wrong prefix", key: `firms/${firmA}/reports/${shaA}.bin` },
       { id: "63-hex sha", key: `firms/${firmA}/docs/${shortSha}.bin` },
       { id: "uppercase ext", key: `firms/${firmA}/docs/${shaA}.BIN` },
+      // WHAT THIS ONE ACTUALLY PUTS ON THE WIRE. `%2E%2E` is a double-dot path segment to WHATWG
+      // URL parsing, so `fetch` collapses `docs/%2E%2E/` before the request leaves the process:
+      // the vendor is asked for `firms/<uuid>/<sha>.bin`, a key with no `docs/` segment at all.
+      // Non-conforming either way, and the `rawPath` is reused byte-for-byte by the service-key
+      // read below and by B11's cleanup so that all three requests name one single target.
       { id: "path traversal", key: `firms/${firmA}/docs/../${shaA}.bin`, rawPath: `${BUCKET}/firms/${firmA}/docs/%2E%2E/${shaA}.bin` },
     ];
+    // THREE INDEPENDENT ASSERTIONS PER CANDIDATE, because each one alone can be satisfied by the
+    // wrong thing happening:
+    //   (1) the production door must have created NOTHING. `safeKey` carries an `/i` flag
+    //       (storage.mjs:31) while the SQL policy's regex is case-SENSITIVE, so an uppercase
+    //       extension passes the runtime validator and reaches the wire — and if the POLICY is
+    //       ever weakened to admit it too, `putCanonical` quietly succeeds right here.
+    //   (2) the raw POST must be refused with a wrapped **403**, not merely be `!ok`. Once (1) has
+    //       created the object, the follow-up `x-upsert:false` POST to the SAME key answers as a
+    //       wrapped 409 DUPLICATE — also `!ok`, and precisely why a weakened policy used to read
+    //       as "refused by the policy on every variant" (measured, #620 review round 1).
+    //   (3) a raw GET with the stack's PRIVILEGED service key must report the key ABSENT. Nothing
+    //       is hidden from the service key, so this is the assertion that states no object exists
+    //       instead of inferring it from two refusals.
     const b6notes = [];
     let b6ok = true;
     for (const candidate of nonConforming) {
-      // The door's own outcome is recorded but is NOT what the cell asserts: the boundary under
-      // test is the POLICY. `safeKey` carries an `/i` flag (storage.mjs:18) while the SQL policy's
-      // regex is case-SENSITIVE, so an uppercase extension passes the runtime validator and is
-      // refused on the wire — a real, visible asymmetry this cell measures rather than assumes.
       let doorVerdict = "ACCEPTED";
       try {
         await door.putCanonical(fixture, candidate.key, "application/octet-stream");
@@ -413,10 +417,20 @@ async function main() {
         body: payload,
         rawPath: candidate.rawPath ?? null,
       });
-      if (wire.ok) b6ok = false;
-      b6notes.push(`${candidate.id}: door ${doorVerdict}, raw POST ${refusal(wire)}`);
+      const serviceRead = await rawObject(apiUrl, "GET", BUCKET, candidate.key, serviceKey, {
+        rawPath: candidate.rawPath ?? null,
+      });
+      const admitted = doorVerdict === "ACCEPTED";
+      const denied = deniedWith(wire, [403]);
+      const gone = absent(serviceRead);
+      if (admitted || !denied || !gone) b6ok = false;
+      b6notes.push(
+        `${candidate.id}: door ${doorVerdict}${admitted ? " <-- THE POLICY ADMITTED IT" : ""}` +
+          `, raw POST ${refusal(wire)}${denied ? "" : " <-- NOT A 403 POLICY DENIAL"}` +
+          `, service-key GET ${refusal(serviceRead)}${gone ? " (absent)" : " <-- THE OBJECT EXISTS"}`,
+      );
     }
-    verdictOf(b6ok, "B6", `POST to a non-conforming key -> refused by the policy on every variant — ${b6notes.join("; ")}`);
+    verdictOf(b6ok, "B6", `POST to a non-conforming key -> the door created nothing, the policy answered 403, and the key is absent to the stack's service key, on every variant — ${b6notes.join("; ")}`);
 
     // B7 -----------------------------------------------------------------------
     const strangerKey = `firms/${firmA}/docs/${shaA}.bin`;
@@ -600,10 +614,15 @@ async function main() {
       { bucket: BUCKET, key: foreignKey },
       { bucket: BUCKET, key: wikiKey },
       { bucket: OTHER_BUCKET, key: strangerKey },
+      // THE B6 CANDIDATES. An unweakened policy never lets these land, so each delete is a no-op
+      // the service key answers 400/404 — and the row count below is what says so. They are on
+      // this list so that a WEAKENED policy reds **B6**, the cell that names the weakening, rather
+      // than reding B11, whose message only ever talks about fixture cleanup.
+      ...nonConforming.map((c) => ({ bucket: BUCKET, key: c.key, rawPath: c.rawPath ?? null })),
     ];
     const deletions = [];
     for (const item of planted) {
-      const res = await rawObject(apiUrl, "DELETE", item.bucket, item.key, serviceKey);
+      const res = await rawObject(apiUrl, "DELETE", item.bucket, item.key, serviceKey, { rawPath: item.rawPath ?? null });
       deletions.push(`${item.bucket}:${res.status}`);
     }
     const audit = new pg.Client({ connectionString: dbUrl });

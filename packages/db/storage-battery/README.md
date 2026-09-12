@@ -8,6 +8,7 @@ CLI boots (`supabase start`). It is the first thing in this repository that touc
 | File | What it is |
 |---|---|
 | `run.mjs` | The battery. Boots the stack, applies the ceremony, runs the cells, disposes the stack. |
+| `verdicts.mjs` | The pure response-verdict vocabulary the denial cells assert with (`deniedWith`, `absent`, …). Split out so a reviewer can feed it a fabricated response — a wrapped 409 duplicate, a bare 500 — and watch the verdicts differ without booting a stack. |
 | `supabase/config.toml` | The CLI project config — Postgres + Storage + the API/auth pieces Storage needs, everything else off. |
 | `hosted-probe.sql` | A **read-only** probe for the release session to run against the LIVE project through the DSN pipe. Local evidence cannot answer what the hosted estate carries. |
 
@@ -25,12 +26,12 @@ Through the **repository's own production door** — `putCanonical` / `verifyCan
 | B3 | GET read-back verifies: `verifyCanonical` and `downloadCanonical` both match the sha, bytes byte-identical. |
 | B4 | `x-upsert:true` and `PUT` on the same key are both refused and the stored bytes are unchanged. |
 | B5 | `DELETE` is refused and the object is still readable — delete-never, asserted positively. |
-| B6 | A non-conforming key (wrong prefix, 63-hex sha, uppercase extension, path traversal) is refused by the policy, on every variant. |
+| B6 | A non-conforming key (wrong prefix, 63-hex sha, uppercase extension, path traversal) is refused, on every variant, on three independent counts: the production door created **nothing**, the raw POST was answered with a wrapped **403** (a wrapped 409 duplicate is never read as a denial), and a privileged service-key GET reports the key **absent**. |
 | B7 | The same conforming key in a **different bucket** is refused — the policy is bucket-scoped. |
 | B8 | A non-designated role JWT and an expired JWT are refused on POST *and* GET, at the runtime pre-flight and on the wire. |
 | B9 | **LIMIT** — a conforming key in another firm's namespace is allowed (see below). |
 | B10 | Catalog assertions on the stack DB: no escalation bit on `clara_storage_docs`; `update`/`delete`/`truncate`/`references`/`trigger` on `storage.objects` all false while `insert`/`select` are true; the role inherits none of `postgres` / `supabase_storage_admin` / `service_role` / `supabase_admin` / `anon` / `authenticated` (the temporary-admin-grant detector); `pg_policies` lists exactly `clara_storage_docs_insert` and `clara_storage_docs_select` for the role. |
-| B11 | Fixture cleanup with the stack's **service** key (never the custody role), then zero rows left in either bucket. |
+| B11 | Fixture cleanup with the stack's **service** key (never the custody role), then zero rows left in either bucket. B6's candidate keys are on the cleanup list too, so a weakened policy reds B6 — the cell that names the weakening — and not this one. |
 | B12 | **LIMIT** — the wiki key family (see below). |
 
 `PASS|FAIL|LIMIT <id> <what>`, one line per cell, then a table. Any `FAIL` exits non-zero.
