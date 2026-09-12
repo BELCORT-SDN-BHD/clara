@@ -123,11 +123,17 @@ export function isDocumentBytesError(e: unknown): e is DocumentBytesError {
  * THE UI STATE LADDER for a source read — one name per state a human is told
  * apart, which is NOT the same vocabulary as the coarse wire kind:
  *
- *   unauthenticated     the session expired mid-read (401, or the app's own
- *                        307-to-/login surfacing as an opaqueredirect). The
- *                        "expired link" of the acceptance criteria: there is no
- *                        signed URL in this estate, so the only thing that can
- *                        expire is the READER's session.
+ *   unauthenticated     there is no live session. Three ways in, ONE rung,
+ *                        because a reader cannot tell them apart and the
+ *                        recovery is identical for all three: the accessor
+ *                        resolved no token so no request was made at all
+ *                        (`kind: "no_session"`); the runtime answered 401; or
+ *                        this app's own 307-to-/login surfaced as an
+ *                        opaqueredirect. The "expired link" of the acceptance
+ *                        criteria: there is no signed URL in this estate, so
+ *                        the only thing that can expire is the READER's
+ *                        session. Recovered by signing in (the return URL is
+ *                        preserved), never by a Retry.
  *   denied              403 — this caller holds no live membership in the
  *                        document's firm. No retry: retrying changes nothing.
  *   not_found           404 — absent, another firm's, or not filed to THIS
@@ -273,7 +279,21 @@ export async function requestDocumentBytes(
 ): Promise<DocumentBytesBody> {
   const session = opts.session ?? sessionTokenAccessor;
   const token = await session.getAccessToken();
-  if (!token) throw new Error("not signed in — no live session");
+  // TYPED, and it is the state ladder's own `unauthenticated` rung — not a bare `Error`.
+  //
+  // WHAT A BARE ERROR DID, measured: `documentSourceStateOf`'s first line is
+  // `if (!(e instanceof RuntimeError)) return "server_error"`, so a signed-out reader pressing
+  // either control was told "The server had a problem sending this file — try again shortly." and
+  // handed a Retry that re-reads a token that is still null. The `case "no_session"` arm below it
+  // was dead code the whole time. A session that is gone is the ONE failure this surface has a real
+  // recovery for (re-authenticate, return URL preserved), and it was the one it never offered.
+  //
+  // `kind: "no_session"` rather than `"unauthenticated"`: law 2's absence posture — no request was
+  // ever made, so this is not a 401 the server answered. Same convention as the two siblings that
+  // already do it (`lib/doors.ts:98`, `lib/read.ts:129`), and `status: null` for the same reason.
+  if (!token) {
+    throw new DocumentBytesError("document bytes: no live session", { status: null, kind: "no_session" });
+  }
 
   const res = await safeRuntimeFetch(
     documentBytesPath(documentId, opts),

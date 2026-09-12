@@ -230,6 +230,34 @@ test("unauthenticated: the expired-session rung gets a RE-AUTHENTICATE action, n
   });
 });
 
+test("NO LIVE SESSION AT ALL: the same rung as a 401, reached without a request — re-authenticate, never Retry", async () => {
+  // THE OTHER WAY A SESSION CAN BE GONE, and it never reaches the wire: `requestDocumentBytes`
+  // refuses before fetching when the accessor resolves null (law 2 — no fabricated request). Before
+  // the fix that refusal was a BARE `Error`, which `documentSourceStateOf` classified `server_error`
+  // because it is not a `RuntimeError` — so a signed-out reader read "The server had a problem
+  // sending this file — try again shortly." beside a Retry that re-reads a token that is still null,
+  // while the ONE control that recovers this (sign in again, return URL preserved) was withheld.
+  //
+  // The pair of assertions at the end is the point: the rung must match the 401 cell above it
+  // EXACTLY, because a reader cannot tell the two causes apart and neither should the surface.
+  let calls = 0;
+  await withEnv(async () => { calls += 1; return new Response(new Blob(["x"]), { status: 200, headers: { "content-type": "application/pdf" } }); }, async (saved) => {
+    // Overrides the token `withEnv` installed; its `finally` still resets the source.
+    configureSessionTokenSource(async () => null);
+    const h = await mount(PDF);
+    try {
+      await pressDownload(h);
+      assert.equal(calls, 0, "a read with no session must never reach the wire");
+      assert.deepEqual(saved, [], "…and must never reach the anchor");
+
+      assert.match(h.text(), /Your session expired while this file was being read/);
+      assert.ok(findButton(h, "Sign in again"), "the only control that can recover a dead session");
+      assert.equal(findButton(h, "Retry"), null, "retrying with no session reads the same null token");
+      assert.doesNotMatch(h.text(), /problem sending this file/, "this is not a server fault, and naming it one sends the reader nowhere");
+    } finally { await h.unmount(); }
+  });
+});
+
 test("the re-authenticate destination preserves the RETURN URL, query included", async () => {
   // `lib/supabase/proxy.ts` sends an unauthenticated request to /login?next=<pathname> and drops
   // the query wholesale. This builder keeps the search too, which is what makes a reader whose

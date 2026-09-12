@@ -16,16 +16,34 @@ function session(token: string | null = "tok"): SessionTokenAccessor {
   return { getAccessToken: async () => token };
 }
 
-test("fetchDocumentBytes: a null token throws WITHOUT calling fetch", async () => {
+test("fetchDocumentBytes: a null token throws WITHOUT calling fetch, and lands on the UNAUTHENTICATED rung — never a retryable server error", async () => {
+  // THE ASSERTION IS THE RUNG, not the message. This cell used to match `/not signed in/` only,
+  // which passed against a BARE `Error` — and a bare Error is not a `RuntimeError`, so
+  // `documentSourceStateOf` classified it `server_error`: a signed-out reader was told the server
+  // had a problem and handed a Retry that re-reads a token that is still null. The message is the
+  // one thing about this throw that no surface renders; the rung is what every surface renders.
   let called = false;
   const original = globalThis.fetch;
   globalThis.fetch = (async () => { called = true; throw new Error("must not be called"); }) as typeof fetch;
+  let thrown: unknown;
   try {
-    await assert.rejects(fetchDocumentBytes("doc-1", { session: session(null) }), /not signed in/);
+    await fetchDocumentBytes("doc-1", { session: session(null) }).then(
+      () => { throw new Error("a null token must not resolve bytes"); },
+      (e: unknown) => { thrown = e; },
+    );
   } finally {
     globalThis.fetch = original;
   }
-  assert.equal(called, false);
+  assert.equal(called, false, "no request may be fabricated without a session (law 2's absence posture)");
+  assert.ok(isDocumentBytesError(thrown), "the throw must carry the door's own typed shape, not a bare Error");
+  assert.equal((thrown as { kind: string }).kind, "no_session");
+  assert.equal((thrown as { status: number | null }).status, null, "nothing was asked, so there is no status to report");
+  const state = documentSourceStateOf(thrown);
+  assert.equal(state, "unauthenticated", "a session that is gone is recovered by signing in, which is a DIFFERENT rung from a failed server");
+  assert.equal(
+    isRetryableDocumentSourceState(state), false,
+    "pressing the same button again reads the same null token — a Retry here is a control that cannot work",
+  );
 });
 
 test("fetchDocumentBytes: GETs the same-origin runtime proxy route with a Bearer token, returns a revocable object URL for an allow-listed content-type", async () => {
