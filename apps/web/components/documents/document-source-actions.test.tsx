@@ -102,6 +102,20 @@ function findButton(h: { find: (p: (n: StubNode) => boolean) => unknown }, label
   return h.find((n) => n.tagName === "BUTTON" && textOf(n as never).includes(label)) as StubNode | null;
 }
 
+/** Splices `open` onto the harness's LIVE window (which only exists once `renderComponent` has
+ *  run) and hands back the undo — the same idiom, and for the same measured reason, as
+ *  document-metadata-viewer-gate.test.tsx: replacing `window` wholesale breaks the `instanceof`
+ *  feature detection @base-ui/react's floating-ui internals run against it. The fake tab is the
+ *  minimal structural subset `openDocumentInNewTab` touches. */
+function installWindowOpen(): () => void {
+  const win = (globalThis as unknown as { window?: Record<string, unknown> }).window;
+  assert.ok(win, "the render harness must have installed a window stub before this point");
+  const had = Object.prototype.hasOwnProperty.call(win, "open");
+  const previous = win.open;
+  win.open = () => ({ closed: false, location: { href: "about:blank" }, opener: {}, close() {} });
+  return () => { if (had) win.open = previous; else delete win.open; };
+}
+
 async function mount(document_: DocumentRow) {
   const h = await renderComponent(App(createElement(DocumentSourceActions, { document: document_, clientId: CLIENT })));
   for (let i = 0; i < 4; i++) await h.settle();
@@ -345,7 +359,7 @@ test("the outcome is PERSISTENT, and it is announced — a refusal is never a to
   });
 });
 
-test("the client scope travels on BOTH controls — a read that silently dropped it would widen the door", async () => {
+test("the client scope travels on the DOWNLOAD — a read that silently dropped it would widen the door", async () => {
   const urls: string[] = [];
   await withEnv(async (url) => {
     urls.push(String(url));
@@ -357,5 +371,39 @@ test("the client scope travels on BOTH controls — a read that silently dropped
       assert.equal(urls.length, 1);
       assert.match(urls[0]!, new RegExp(`\\?client=${CLIENT}&disposition=attachment$`));
     } finally { await h.unmount(); }
+  });
+});
+
+test("…and on the PREVIEW, which carries the scope and NO disposition — the half that was unmeasured", async () => {
+  // THE MIRROR OF THE CELL ABOVE, and it is the one the branch was missing. The download cell used
+  // to be titled "BOTH controls" while pressing only one of them, so `client: opts.client` in
+  // open-in-new-tab.ts and `client: clientId` in this component's preview branch were both
+  // deletable with the whole web unit set staying green — measured: 85/85 under each revert.
+  //
+  // `disposition` is asserted ABSENT, not merely un-checked. `inline` is the route's own default
+  // and the door maps it to `p_purpose='preview'`, which is the word the AUDIT LINE records: a
+  // preview that sent `disposition=attachment` would write "download" into `clara._audit` for an
+  // act nobody performed.
+  const urls: string[] = [];
+  await withEnv(async (url) => {
+    urls.push(String(url));
+    return new Response(new Blob(["x"]), { status: 200, headers: { "content-type": "application/pdf" } });
+  }, async () => {
+    const h = await mount(PDF);
+    const undo = installWindowOpen();
+    try {
+      const open = findButton(h, "Open original");
+      assert.ok(open, "control: a PDF must be offered the tab, or this cell measures nothing");
+      await clickButton(open as never);
+      for (let i = 0; i < 8; i++) await h.settle();
+
+      assert.equal(urls.length, 1, "the preview must reach the wire exactly once");
+      assert.match(
+        urls[0]!, new RegExp(`^/api/runtime/documents/${PDF.id}/bytes\\?client=${CLIENT}$`),
+        "the page's own client scope must travel with a PREVIEW too — without it the door admits on firm membership alone",
+      );
+      assert.doesNotMatch(urls[0]!, /disposition=/, "a preview is the route's default disposition; writing one would change the audited purpose");
+      assert.doesNotMatch(h.text(), /couldn't be reached|isn't available in this client|problem sending this file/, "control: the read succeeded");
+    } finally { undo(); await h.unmount(); }
   });
 });

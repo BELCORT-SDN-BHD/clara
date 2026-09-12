@@ -491,6 +491,20 @@ export async function handleDocumentsViewerRuntime(request, response, url) {
   const id = decodeURIComponent(match[1]);
   if (DOC_ROWS[id] === undefined) return false;
 
+  // #620 — THE CLIENT SCOPE IS ENFORCED, exactly as the v2 door enforces it: `p_client` given and
+  // no ACTIVE filing to THAT client collapses into the SAME `not_found` shape as absent and as
+  // another firm's (no existence oracle). A mock that ignored `?client=` let every browser cell
+  // pass against a surface that had silently dropped the scope — which is precisely the revert the
+  // web unit set was measured to stay green under, so the browser half must not be blind to it too.
+  // Absent is NOT admitted here: every read on this surface stands in a client.
+  const client = url.searchParams.get("client");
+  if (client !== DOCS.clientId) {
+    const body = Buffer.from(JSON.stringify({ error: "not_found" }), "utf8");
+    response.writeHead(404, { "content-type": "application/json", "content-length": String(body.length) });
+    response.end(body);
+    return true;
+  }
+
   // #620 — THE REFUSALS, TYPED. Each one carries the route's own `{error, reason}` discriminant and
   // NOTHING ELSE: the real route never leaks SQL or vendor body text, so a mock that did would let
   // the face pass a cell it could not pass in production.

@@ -103,11 +103,15 @@ export function DocumentPageOverlayContent({
 }: {
   data: DocumentExtractResult;
   documentId: string;
-  /** The page's client scope, forwarded to the byte door (#620). Optional so the a11y fixture that
-   *  mounts this body with no bytes at all stays a one-line mount; production always supplies it,
-   *  and the effect's own dependency list carries it, so a scope change re-reads rather than
-   *  painting the previous client's page. */
-  clientId?: string;
+  /** The page's client scope, forwarded to the byte door (#620). REQUIRED, and that is the fix:
+   *  while it was optional a caller could omit the scope and still typecheck, so the overlay's byte
+   *  read would be admitted on firm membership alone while the two controls beside it required an
+   *  active filing to THIS client — one document, one page, two different answers to "may I read
+   *  this". The fixture mounts that used the optionality now pass an explicit value, which is the
+   *  honest shape anyway: a fixture standing in for a real page has a client. The effect's own
+   *  dependency list carries it, so a scope change re-reads rather than painting the previous
+   *  client's page. */
+  clientId: string;
   mimeType: string | null;
 }) {
   const t = useTranslations("ClientDocuments");
@@ -197,7 +201,7 @@ function PageWithOverlay({
    *  an active filing to THIS client: one document, one page, two different answers to "may I read
    *  this", which is the kind of inconsistency a permission review has to chase rather than read.
    *  Not a geometry prop: nothing below draws with it. */
-  clientId: string | undefined;
+  clientId: string;
   page: number;
   regions: readonly DocumentExtractRegion[];
   boxesByExtraction: Map<string, Map<number, PageBox>>;

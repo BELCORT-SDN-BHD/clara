@@ -204,6 +204,10 @@ test("[N1] clearing the highlight passes NULL, and the overlay ends with no row 
   const h = await renderComponent(App(createElement(DocumentPageOverlayContent, {
     data: OVERLAY_FIXTURE,
     documentId: "doc-1",
+    // EXPLICIT, not omitted (#620): the client scope is a required prop, because an omitted one
+    // meant the overlay's byte read was admitted on firm membership alone while the controls
+    // beside it required an active filing to this client.
+    clientId: "c1111111-1111-4111-8111-111111111111",
     mimeType: "application/pdf",
   })));
   try {

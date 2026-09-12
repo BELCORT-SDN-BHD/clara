@@ -232,7 +232,11 @@ test("documents workbench: the page-overlay viewer has zero violations, with the
       createElement("h1", null, "Documents"),
       createElement("h2", null, "Detail"),
       createElement("h3", null, "Evidence"),
-      createElement(DocumentPageOverlayContent, { data: EXTRACT, documentId: "doc-1", mimeType: "application/pdf" }),
+      createElement(DocumentPageOverlayContent, {
+        data: EXTRACT, documentId: "doc-1", mimeType: "application/pdf",
+        // The client scope is REQUIRED (#620) — a fixture standing in for a real page has one.
+        clientId: "c1111111-1111-4111-8111-111111111111",
+      }),
     ),
   );
   assert.deepEqual(violations, [], JSON.stringify(violations));
