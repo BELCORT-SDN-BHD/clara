@@ -25,9 +25,27 @@ conditions. The approved simplification of human attestations/maker-checker rema
 work; removing old documentation does not remove those SQL checks.
 
 Document intake streams to a local spool, checks file type and malware, stores immutable private
-objects, reads them back by hash, and commits custody. OCR supplies layout/text; the active invoice
-and statement fact lanes use text/image witness pairs. CSV/OFX and structured-format paths have
-different processing routes. Earlier workflow versions remain available for compatibility.
+objects, reads them back by hash, and commits custody. A custody failure before the canonical write
+— a transient Storage fault included — creates no `clara.documents` row, leaves a terminal typed
+intake failure, and deletes the spooled bytes: re-upload is the recovery, and
+`tests/intake-db.test.mjs` pins that. OCR supplies layout/text; the active invoice and statement
+fact lanes use text/image witness pairs. CSV/OFX and structured-format paths have different
+processing routes. Earlier workflow versions remain available for compatibility.
+
+Reading those bytes back is `GET /api/documents/:id/bytes` (`src/documentRoutes.ts`), the only
+source-bytes path. It validates the session JWT before any database round trip, then runs one
+`clara_runtime` transaction that resolves the live principal and calls
+`clara.get_document_for_human_read_v2`, which decides firm membership and client scope and writes
+the egress audit line. `?client=<uuid>` carries the reader's current client scope;
+`?disposition=attachment` makes the response a download and is audited as purpose `download`
+rather than `preview`. Bytes are fetched to a per-request temp file and hash-verified against the
+row's own `sha256` before anything is streamed, so a substituted object never reaches the reader;
+the temp file is removed on every path. Refusals are typed: one byte-identical 404 for absent,
+foreign-firm and out-of-client-scope, 403 `no_membership`, 409 `custody_pending`, 400
+`invalid_input`, 502 `checksum_mismatch`, and 502/503 `storage_error` with a `reason` of
+`object_missing`, `credential_refused`, `unavailable` or `unconfigured`. Success carries
+`ETag` (the content address), `Content-Length`, `Cache-Control: private, no-store` and
+`X-Content-Type-Options: nosniff`. No SQL text and no vendor response body reach the client.
 
 The bank-agent and close-prep wake engine/bodies exist. Their cadence sources ship disabled and
 their producer/activation work remains open. Reporting uses a separate
@@ -84,7 +102,15 @@ Other configuration groups:
   `CLARA_CLAMD_MANAGED`. The Fly volume mounts at `/data`.
 - Storage: `CLARA_STORAGE_URL`, `CLARA_STORAGE_ROLE`, `CLARA_STORAGE_ROLE_JWT`.
   Runtime custody requires the dedicated insert/read role; browser requests receive neither
-  this credential nor a signed Storage URL.
+  this credential nor a signed Storage URL. `realConfig()` refuses `anon`, `authenticated`
+  and `service_role` as the designated role, requires the JWT's own `role` claim to equal it,
+  and requires more than 30 seconds of validity left; each of those refusals is a 503 with
+  `reason: "unconfigured"` and makes no request. Read failures are classified from the response —
+  including the status Supabase wraps inside the body — into `object_missing`,
+  `credential_refused` or `unavailable`, so a caller can tell "re-upload" from "rotate the
+  credential" from "retry". The bucket's RLS policies scope by bucket and key shape only, so this
+  credential can read any firm's conforming object: cross-firm denial for source bytes rests on
+  `clara.get_document_for_human_read_v2` and the route above, not on Storage.
 - OCR: `AZURE_DI_ENDPOINT`, `AZURE_DI_KEY`, and the `CLARA_DOC_EGRESS_APPROVED` switch.
   Typed consent/activation checks remain part of current SQL; the switch alone is not consent.
 - Checkout: `STRIPE_WEBHOOK_SECRET`, `CLARA_STRIPE_LIVEMODE`, and the lane-specific environment
