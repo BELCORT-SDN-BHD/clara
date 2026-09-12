@@ -212,10 +212,17 @@ export async function putCanonical(filePath, key, mime) {
  * is gone) and a 400-wrapped 403 (the JWT lost its role) were the same sentence, and a route could
  * only ever answer "502, something went wrong".
  *
- * Source for the envelope shape: the storage-api service's own error responses, as captured
- * VERBATIM in packages/runtime/tests/intake-unit.test.mjs's 2026-07-26 outage bodies and asserted
- * against here by packages/runtime/tests/storage-read-contract.test.mjs. A live hosted capture of
- * the GET side is still outstanding — see that file's header.
+ * TWO ENVELOPE SHAPES ARE IN THE WILD, AND BOTH ARE READ HERE.
+ *   · `{"statusCode":"409","error":"Duplicate","message":"…"}` — the shape this repository has
+ *     CAPTURED VERBATIM against live storage (packages/runtime/tests/intake-unit.test.mjs:285-325,
+ *     observed 2026-07-26), and the one `putCanonical` above already parses.
+ *   · `{"code":"NoSuchKey","message":"The specified key does not exist."}` — the shape the vendor
+ *     documents today at https://supabase.com/docs/guides/storage/debugging/error-codes (fetched
+ *     2026-09-12), which also states that older responses may carry `httpStatusCode` beside
+ *     `code`/`message`, and pins NoSuchKey=404, InvalidJWT=401, AccessDenied=403.
+ * A numeric status inside the body wins; then the symbolic code; then the transport status. The
+ * hosted capture of the GET side is still outstanding — packages/runtime/tests/
+ * storage-read-contract.test.mjs says so in its own header rather than implying it has one.
  *
  * FOUR REASONS, AND NO FIFTH. `object_missing` (the row points at bytes that are not there —
  * re-upload), `credential_refused` (the custody JWT was rejected — rotate), `unavailable` (5xx,
@@ -229,13 +236,28 @@ export async function putCanonical(filePath, key, mime) {
 export function classifyGetFailure(status, body) {
   let inner = null;
   try { inner = JSON.parse(body ?? ""); } catch { /* not JSON — the HTTP status is all there is */ }
-  const wrapped = Number(inner?.statusCode);
+  const wrapped = Number(inner?.statusCode ?? inner?.httpStatusCode);
   // The BODY's status wins when it is present and plausible: that is the service's own word about
   // what happened, and the transport status is the envelope it arrived in.
-  const effective = Number.isFinite(wrapped) && wrapped >= 100 && wrapped <= 599 ? wrapped : status;
-  if (effective === 404 || effective === 410) return { reason: "object_missing", status: 502 };
-  if (effective === 401 || effective === 403) return { reason: "credential_refused", status: 502 };
-  return { reason: "unavailable", status: 502 };
+  if (Number.isFinite(wrapped) && wrapped >= 100 && wrapped <= 599) {
+    return { reason: reasonForStatus(wrapped), status: 502 };
+  }
+  // THE SYMBOLIC CODE IS READ TOO, and matched case-insensitively against the documented names
+  // rather than by substring: `NoSuchBucket` and `NoSuchKey` mean the same thing to a reader (the
+  // bytes are not there) but a `includes("NoSuchKey")` test would also match a message that merely
+  // QUOTED the code back, which is how a classifier starts agreeing with prose.
+  const code = typeof inner?.code === "string" ? inner.code.toLowerCase() : null;
+  if (code === "nosuchkey" || code === "nosuchbucket") return { reason: "object_missing", status: 502 };
+  if (code === "invalidjwt" || code === "accessdenied" || code === "unauthorized") {
+    return { reason: "credential_refused", status: 502 };
+  }
+  return { reason: reasonForStatus(status), status: 502 };
+}
+
+function reasonForStatus(status) {
+  if (status === 404 || status === 410) return "object_missing";
+  if (status === 401 || status === 403) return "credential_refused";
+  return "unavailable";
 }
 
 async function responseFor(key) {
