@@ -1526,3 +1526,78 @@ test("wc.35 the cancel door says WHICH arm answered: a stop that killed a queued
     assert.equal(typeof answer.status, "string", "wc.35 status survives on every arm");
   }
 });
+
+// -------------------------------------------------------------------------------------------
+// THE ACTIVITY FEED'S TWO DOORS, positional (0181's declaration order, unchanged by 0183/0184).
+// Called as a HUMAN: both are SECURITY INVOKER with a bookkeeper floor of their own.
+// -------------------------------------------------------------------------------------------
+
+async function listActivity(sub, { cursor = null, limit = 50, client = null, kinds = null, since = null, until = null } = {}) {
+  const r = await humanQuery(sub,
+    "select clara.list_activity($1::text,$2::int,$3::uuid,$4::text[],$5::timestamptz,$6::timestamptz) as result",
+    [cursor, limit, client, kinds, since, until]);
+  return r.rows[0].result;
+}
+
+async function getActivityEvent(sub, source, id) {
+  const r = await humanQuery(sub, "select clara.get_activity_event($1::text,$2::text) as result", [source, id]);
+  return r.rows[0].result;
+}
+
+// ===========================================================================================
+// §A11 — THE FIRM'S OWN HISTORY SURFACE. 0184 registers `work.taken_over`, the estate's FIRST
+// `work.%` event type, and splits `clara.accounting_work.initiator` into two facts. Both reach
+// the Activity feed, whose two doors 0181 wrote and 0183 recut — so 0184 recuts them AGAIN, from
+// 0183's bodies, for exactly two additions. Without them a handover lands in the `documents`
+// bucket (the closed kind ladder's `else`), and the firm-wide detail record names the colleague
+// under a label that means "who asked".
+// ===========================================================================================
+
+test("wc.36 a handover is `work` on the firm's Activity feed, and its detail record tells the two people apart", async (t) => {
+  if (await gateCancel(t)) return;
+  const w = await orphaned();
+  await takeOverAccountingWork({ work: w.work_id, author: colleague });
+
+  const ev = (await rootQuery(
+    `select id::text as id from clara.domain_events
+      where firm_id=$1 and event_type='work.taken_over' and payload->>'work'=$2`,
+    [FIRM_A(), w.work_id])).rows;
+  assert.equal(ev.length, 1, "wc.36 precondition: exactly one handover event exists");
+  const eventId = ev[0].id;
+
+  // THE KIND FILTER. `work` must find it; `documents` — where the closed ladder's `else` sends
+  // every unrecognised prefix — must not. Both halves, because a door that answered `work` for
+  // EVERYTHING would pass the first assertion alone.
+  const asWork = await listActivity(ALICE(), { kinds: ["work"], limit: 100 });
+  const found = asWork.rows.filter((r) => r.source === "event" && r.id === eventId);
+  assert.equal(found.length, 1, "wc.36 the handover lists under the `work` filter");
+  assert.equal(found[0].kind, "work", "wc.36 …carrying `work` as its own kind, not the fallback");
+  assert.equal(found[0].event_type, "work.taken_over", "wc.36 …and its real event type");
+
+  const asDocs = await listActivity(ALICE(), { kinds: ["documents"], limit: 100 });
+  assert.equal(asDocs.rows.some((r) => r.id === eventId), false,
+    "wc.36 …and never under `documents`, which is where the unrecognised-prefix fallback sends it");
+
+  // THE DETAIL DOOR'S SAME LADDER. A deep link to the row must agree with the row.
+  const detail = await getActivityEvent(ALICE(), "event", eventId);
+  assert.equal(detail.kind, "work", "wc.36 get_activity_event maps the same event to the same kind");
+
+  // THE OPERATION RECEIPT'S PROVENANCE PAIR. After the handover the Work is EXECUTED AS the
+  // colleague and was ASKED FOR by the revoked human; the detail record must carry both, because
+  // the feed is the firm's only firm-wide history surface and `initiator` alone now answers only
+  // the first question.
+  const receipt = await post({ ...w, author: colleague });
+  assert.equal(receipt.posted, true, "wc.36 precondition: the responsible colleague commits");
+  const rows = await receiptsForWork(w.work_id);
+  assert.equal(rows.length, 1, "wc.36 precondition: exactly one committed receipt");
+  const opDetail = await getActivityEvent(ALICE(), "operation_receipt", rows[0].id);
+  assert.equal(opDetail.kind, "work", "wc.36 an operation receipt is `work` (0181's own rule, unchanged)");
+  assert.equal(opDetail.initiated_by, w.initiator,
+    "wc.36 the detail record names WHO ASKED, which no 0181/0183 body carried");
+  assert.equal(opDetail.responsible, colleague,
+    "wc.36 …and who is answerable NOW, under a key that says so");
+  assert.equal(opDetail.initiator, colleague,
+    "wc.36 …while `initiator` keeps its 0181 key and its post-0184 meaning (the human the Work runs as)");
+  assert.notEqual(opDetail.initiated_by, opDetail.responsible,
+    "wc.36 vacuity control: the two people really are different on this Work");
+});

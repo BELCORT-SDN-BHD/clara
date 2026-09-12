@@ -70,25 +70,24 @@
 -- defence in depth behind a fixed order, not instead of it.
 --
 -- =====================================================================================
--- TODO(rebase) — TWO ACTIVITY-FEED PROJECTIONS BELONG IN THIS FILE AND ARE NOT IN IT.
+-- THE ACTIVITY FEED'S TWO PROJECTIONS ARE RECUT IN §I2 BELOW, FROM 0183's BODIES.
 --
 -- §A splits `clara.accounting_work.initiator` (now: the human the Work is executed AS) from
--- `initiated_by` (who asked). Two doors created by 0181 still read the old meaning:
+-- `initiated_by` (who asked), and §I registers `work.taken_over`, the estate's FIRST `work.%`
+-- event type. Two doors 0181 created read the old meaning:
 --
---   1. `clara.get_activity_event` (0181:578) projects `'initiator', w.initiator` in its
---      operation_receipt arm, and the Activity sheet renders it under the label "Initiator". After
---      a takeover that names the COLLEAGUE, beside an `on_behalf_of` that is also the colleague —
---      and who asked is then absent from the firm's only firm-wide history surface. It must also
---      project `initiated_by`.
---   2. `clara.list_activity` (0181:307) and `clara.get_activity_event` (0181:521) map an event type
---      to a closed kind set with `when like 'entry.%' … else 'documents'`. §I registers
---      `work.taken_over`, the estate's FIRST `work.%` event type, so a handover lands in the
+--   1. `clara.get_activity_event` projects `'initiator', w.initiator` in its operation_receipt
+--      arm, and the Activity sheet renders it. After a takeover that names the COLLEAGUE, beside
+--      an `on_behalf_of` that is also the colleague — and who asked is then absent from the
+--      firm's only firm-wide history surface. It must also project `initiated_by`.
+--   2. `clara.list_activity` and `clara.get_activity_event` map an event type to a closed kind
+--      set with `when like 'entry.%' … else 'documents'`, so a `work.%` handover lands in the
 --      `documents` bucket and is invisible under the `work` filter.
 --
--- BOTH ARE DELIBERATELY NOT RECUT HERE: lane #728's migration 0183 recuts the same two functions in
--- the same session, and two lanes emitting two full bodies of one function is a merge that resolves
--- itself wrongly and silently. The orchestrator applies the recut during the rebase onto 0183, from
--- 0183's bodies; the exact SQL is in this lane's hand-off report.
+-- THE RECUT WAITED FOR 0183. Lane #728's migration recuts the same two functions in the same
+-- session, and two lanes emitting two full bodies of one function is a merge that resolves itself
+-- wrongly and silently. §I2 below is therefore derived from 0183's INSTALLED text — sha-pinned in
+-- the prestate block, the way 0183 pinned 0181's — and adds nothing else to it.
 --
 -- =====================================================================================
 -- THE SECOND MEASUREMENT: THE CLOSURE'S ERROR ROSTER IS DEPLOY-LOCKED, SO THE TRANSLATION IS THE
@@ -163,6 +162,22 @@ begin
   select p.prosrc into v_src from pg_proc p where p.oid='clara._tf_accounting_work_status_mirror()'::regprocedure;
   if position('stopping' in v_src) > 0 then
     raise exception '#630 prestate: the status mirror already writes stopping' using errcode='CLR10';
+  end if;
+  -- THE TWO LIVE BODIES §I2 RECUTS, pinned by prosrc sha-256 at the 0183 frontier — the same
+  -- discipline 0183 applied to 0181's two bodies, for the same reason: §I2 is a FULL-BODY rewrite
+  -- of these exact texts plus two marked arms, and a drifted body may carry an arm this file would
+  -- delete without ever having read it. A drift is REFUSED, never silently overwritten.
+  select encode(sha256(convert_to(p.prosrc, 'UTF8')), 'hex') into v_src from pg_proc p
+   where p.oid = 'clara.list_activity(text,int,uuid,text[],timestamptz,timestamptz)'::regprocedure;
+  if v_src is distinct from 'd7b6e9e3a48a2723bc6d80bb5d467d43bf9ccfeffe8dc24de876c0827762dd4e' then
+    raise exception '#630 prestate: clara.list_activity has DRIFTED from the pinned 0183 body (sha %) -- re-derive section I2 against the live body before applying', v_src
+      using errcode='CLR10';
+  end if;
+  select encode(sha256(convert_to(p.prosrc, 'UTF8')), 'hex') into v_src from pg_proc p
+   where p.oid = 'clara.get_activity_event(text,text)'::regprocedure;
+  if v_src is distinct from 'ebcc569f634dba2fef9339c14b88ac84d83fa9172ac374c27a8bb5d419facdee' then
+    raise exception '#630 prestate: clara.get_activity_event has DRIFTED from the pinned 0183 body (sha %) -- re-derive section I2 against the live body before applying', v_src
+      using errcode='CLR10';
   end if;
   raise notice '#630 prestate: clean -- no work-level cancel or takeover door exists, accounting_work has no initiated_by column and its immutability trigger still freezes initiator, the posting core takes no row lock and knows no cancellation, and the status mirror never writes stopping.';
 end
@@ -1861,6 +1876,521 @@ insert into clara.trigger_taxonomy(version, event_type, decision, note)
 reset role;
 
 -- =====================================================================================
+-- §I2  THE ACTIVITY FEED'S TWO DOORS — RECUT, from 0183's FINAL bodies.
+--
+-- These two were carried in this file's header as a TODO while #728's 0183 was in flight: two
+-- lanes emitting two full bodies of one function is a merge that resolves itself wrongly and
+-- silently, so the recut waited for 0183 to land and is derived from 0183's installed text
+-- (prosrc-sha-pinned in the prestate block above, exactly the way 0183 pinned 0181's). The
+-- bodies below are 0183's, byte-for-byte, plus TWO additions, each marked `#630`:
+--
+--   1. `when v.event_type like 'work.%' then 'work'` in BOTH kind ladders (list_activity's
+--      ev_base and get_activity_event's 'event' arm). §I registers `work.taken_over`, the
+--      estate's FIRST `work.%` type; without the arm the closed ladder's `else` files a
+--      handover under `documents`.
+--   2. `initiated_by` and `responsible` beside the unchanged `initiator` on the
+--      operation_receipt arm of the detail door — §A's split, reaching the surface that reads it.
+--
+-- EVERYTHING ELSE IS 0183's AND STAYS 0183's: `set plan_cache_mode = force_custom_plan` on both
+-- (0183's own BLOCKER [0]), `set search_path = clara, pg_temp`, SECURITY INVOKER, the bookkeeper
+-- floor, the 18-column projection, `v_kept_sweeps` read once and tested with `= any(...)`, the
+-- detail door's HOISTED `clara._sweep_event_has_effect` call after the row is fetched. The
+-- `activity-feed` battery's af.20/af.21/af.22/af.23 read the LIVE catalog for exactly those
+-- properties and are the gate on this claim, not this comment.
+--
+-- Grants are NOT re-issued: `create or replace` preserves them, and 0183's revoke/grant pair
+-- already put both doors at clara_authenticated-only. The tail census re-reads that.
+-- =====================================================================================
+set role clara_fn_owner;
+
+
+create or replace function clara.list_activity(
+  p_cursor text default null,
+  p_limit  int  default 50,
+  p_client uuid default null,
+  p_kinds  text[] default null,
+  p_since  timestamptz default null,
+  p_until  timestamptz default null
+) returns jsonb
+  language plpgsql stable security invoker
+  set search_path = clara, pg_temp
+  -- #728 (delta review round 4, BLOCKER [0]): THE DOOR RE-PLANS ITSELF, EVERY CALL. Round 3 put
+  -- this clause on the two helpers and stopped there; the union below binds `c.firm`, `p_client`,
+  -- `p_kinds`, `p_since`, `p_until`, the cursor pair, `v_limit` AND `v_kept_sweeps` as plpgsql
+  -- parameters of ONE cached statement, so the door carried the identical defect one level up.
+  -- See section 1's header for the two measured flip sites and their series.
+  set plan_cache_mode = force_custom_plan
+as $$
+declare
+  c record;
+  v_limit int;
+  v_cursor_ts timestamptz := null;
+  v_cursor_id text := null;
+  v_decoded text;
+  v_pipe int;
+  v_kind text;
+  v_all jsonb;
+  v_total int;
+  v_truncated boolean;
+  v_page jsonb;
+  v_last jsonb;
+  v_next_cursor text;
+  -- #728 (N1): the KEPT sweep receipts of this firm, read ONCE per call -- see the predicate
+  -- inside ev_base below, and section 1's header for why this is not a per-row call.
+  v_kept_sweeps uuid[];
+begin
+  select clara.jwt_sub() as actor, clara.jwt_firm() as firm into c;
+  if c.actor is null then
+    raise exception 'no authenticated actor' using errcode = 'CLR04';
+  end if;
+  if c.firm is null then
+    raise exception 'actor has no active membership' using errcode = 'CLR04';
+  end if;
+  if coalesce(clara.actor_role_rank(), -1) < clara.role_rank('bookkeeper') then
+    raise exception 'insufficient role' using errcode = 'CLR04';
+  end if;
+
+  v_limit := least(greatest(coalesce(p_limit, 50), 1), 100);
+
+  if p_kinds is not null then
+    foreach v_kind in array p_kinds loop
+      if v_kind not in ('documents', 'journal', 'close', 'report', 'agent', 'work') then
+        raise exception 'unknown activity kind %', v_kind using errcode = 'CLR10',
+          detail = jsonb_build_object('reason', 'invalid_kind', 'kind', v_kind)::text;
+      end if;
+    end loop;
+  end if;
+
+  if p_cursor is not null and btrim(p_cursor) <> '' then
+    begin
+      v_decoded := convert_from(decode(p_cursor, 'base64'), 'UTF8');
+      v_pipe := position('|' in v_decoded);
+      if v_pipe < 2 or v_pipe = length(v_decoded) then
+        raise exception 'malformed cursor shape';
+      end if;
+      v_cursor_ts := substr(v_decoded, 1, v_pipe - 1)::timestamptz;
+      v_cursor_id := substr(v_decoded, v_pipe + 1);
+    exception when others then
+      raise exception 'malformed activity cursor' using errcode = 'CLR10',
+        detail = jsonb_build_object('reason', 'invalid_cursor')::text;
+    end;
+  end if;
+
+  -- #728 (N1): ONE invocation of the definer set helper per feed read, materialised into a local
+  -- array the union's predicate can test with a plain `= any(...)`. Placed AFTER the floor checks
+  -- (a refused caller never pays for it) and BEFORE the union, so no plan the planner might choose
+  -- can turn it back into a per-row call.
+  --
+  -- …and NOT paid at all when no sweep row could survive this read's own filters (delta review of
+  -- the fix round, finding [1]: the read was unconditional). A sweep receipt's `kind` is
+  -- unconditionally 'agent' -- ev_base's FIRST case arm below, ahead of the 0181 ladder -- so a
+  -- p_kinds list that omits 'agent' can never return one, and an EMPTY kept set then excludes
+  -- every sweep row in ev_base, which is where those rows were headed anyway. The guard is on
+  -- p_kinds ONLY and deliberately not on p_client: a sweep receipt written by
+  -- clara.reconcile_sweep_runs is firm-level (client_id null, 0011:2763-2764), but `client_id` is
+  -- a column on the event, not a law about it, and a client-scoped read must not start deciding
+  -- what a row IS from what this file expects it to be.
+  if p_kinds is null or 'agent' = any(p_kinds) then
+    select coalesce(array_agg(k.event_id), '{}'::uuid[]) into v_kept_sweeps
+      from clara._sweep_events_with_effect() k;
+  else
+    v_kept_sweeps := '{}'::uuid[];
+  end if;
+
+  with
+  ev_base as (
+    select
+      v.event_id::text                                                    as id,
+      'event'::text                                                       as source,
+      v.event_type                                                        as event_type,
+      v.event_description                                                 as description,
+      v.client_id                                                         as client_id,
+      v.actor                                                             as actor,
+      v.on_behalf_of                                                      as on_behalf_of,
+      v.via_wake_kind                                                     as via_wake_kind,
+      v.created_at                                                        as occurred_at,
+      v.object_kind                                                       as object_kind,
+      v.object_id                                                         as object_id,
+      orr.work_id                                                         as work_id,
+      orr.id::text                                                        as receipt_id,
+      case when v.object_kind = 'document' then v.object_id end           as document_id,
+      case when v.object_kind = 'entry' then je.reversal_of end           as original_entry_id,
+      case when v.object_kind = 'entry' then je.reversed_by end           as replacement_entry_id,
+      case
+        when v.object_kind <> 'entry' then null
+        when je.status = 'approved' and je.reversed_by is not null then 'reversed'
+        when je.status = 'approved' then 'approved'
+        when je.status = 'withdrawn' and je.withdrawal_reason = 'superseded-by-correction' then 'superseded'
+        when je.status = 'withdrawn' then 'withdrawn'
+        else je.status
+      end                                                                 as status,
+      case
+        -- #728 (C77.3): a sweep heartbeat is an AGENT ACT on the books, never a document act --
+        -- checked FIRST, ahead of the untouched 0181 ladder below, because 'sweep.run_completed'
+        -- matches none of those prefixes anyway and this keeps the one new rule visually apart
+        -- from the three it does not change.
+        when v.event_type = 'sweep.run_completed' then 'agent'
+        when v.event_type like 'entry.%' then 'journal'
+        when v.event_type like 'document.%' then 'documents'
+        when v.event_type like 'close.%' then 'close'
+        -- #630: `work.taken_over` is the estate's FIRST `work.%` event type (0184 §I). Without
+        -- this arm the closed ladder's `else` files a handover under `documents`, where the
+        -- `work` filter can never find it and the `documents` filter shows a row about no
+        -- document at all. Matched on the PREFIX, not the one name, because the kind set is a
+        -- closed vocabulary this door owns and every later `work.%` type belongs in the same
+        -- bucket by construction.
+        when v.event_type like 'work.%' then 'work'
+        else 'documents'
+      end                                                                 as kind
+    from clara.firm_timeline_visible v
+    left join clara.journal_entries je
+      on v.object_kind = 'entry' and je.id = v.object_id and je.firm_id = c.firm
+    left join clara.operation_receipts orr
+      on v.object_kind = 'entry' and orr.firm_id = c.firm and orr.outcome = 'committed'
+     -- Text comparison, not a uuid cast of the jsonb text expression: `ix_operation_receipts_entry`
+     -- (0178:454-455) is built ON THE TEXT EXPRESSION `(effects->>'entry_id')`, and casting that
+     -- expression to uuid before comparing defeats the index (the planner cannot match an
+     -- expression index against a different expression on the same column, even a semantically
+     -- equivalent one) -- cast the OTHER side instead, which is already a plain uuid column.
+     and nullif(orr.effects->>'entry_id', '') = v.object_id::text
+    -- #728: EXCLUDE a sweep heartbeat that changed nothing. `v_kept_sweeps` holds the receipts
+    -- whose run actually drafted or posted something (clara._sweep_events_with_effect, read once
+    -- above); a run that cannot be resolved at all contributes no id and is therefore treated the
+    -- SAME as a zero-effect one -- an unverifiable heartbeat is not evidence of one, and is never
+    -- shown by default. Every non-sweep row is untouched: the left side of the `or` is true for
+    -- all of them, so this predicate can only ever remove sweep.run_completed rows, nothing else.
+   where v.event_type <> 'sweep.run_completed' or v.event_id = any(v_kept_sweeps)
+  ),
+  ev as (
+    select * from ev_base
+     where (p_client is null or client_id = p_client)
+       and (p_kinds is null or kind = any(p_kinds))
+       and (p_since is null or occurred_at >= p_since)
+       and (p_until is null or occurred_at < p_until)
+       and (v_cursor_ts is null or (occurred_at, id) < (v_cursor_ts, v_cursor_id))
+     order by occurred_at desc, id desc
+     limit v_limit + 1
+  ),
+  ar_base as (
+    select
+      (r.receipt_kind || ':' || r.receipt_id)                             as id,
+      'agent_receipt'::text                                               as source,
+      null::text                                                          as event_type,
+      null::text                                                          as description,
+      r.client_id                                                         as client_id,
+      r.acting_actor                                                      as actor,
+      r.on_behalf_of                                                      as on_behalf_of,
+      r.via_wake_kind                                                     as via_wake_kind,
+      r.occurred_at                                                       as occurred_at,
+      null::text                                                          as object_kind,
+      null::uuid                                                          as object_id,
+      null::uuid                                                          as work_id,
+      (r.receipt_kind || ':' || r.receipt_id)                             as receipt_id,
+      null::uuid                                                          as document_id,
+      null::uuid                                                          as original_entry_id,
+      null::uuid                                                          as replacement_entry_id,
+      null::text                                                          as status,
+      case when r.receipt_kind = 'report_agent' then 'report' else 'agent' end as kind
+    from clara.agent_receipts_visible r
+  ),
+  ar as (
+    select * from ar_base
+     where (p_client is null or client_id = p_client)
+       and (p_kinds is null or kind = any(p_kinds))
+       and (p_since is null or occurred_at >= p_since)
+       and (p_until is null or occurred_at < p_until)
+       and (v_cursor_ts is null or (occurred_at, id) < (v_cursor_ts, v_cursor_id))
+     order by occurred_at desc, id desc
+     limit v_limit + 1
+  ),
+  orx_base as (
+    select
+      orr.id::text                                                       as id,
+      'operation_receipt'::text                                          as source,
+      w.purpose                                                          as event_type,
+      null::text                                                         as description,
+      orr.client_id                                                      as client_id,
+      orr.acting_actor                                                   as actor,
+      orr.on_behalf_of                                                   as on_behalf_of,
+      orr.via_wake_kind                                                  as via_wake_kind,
+      orr.created_at                                                     as occurred_at,
+      'entry'::text                                                      as object_kind,
+      nullif(orr.effects->>'entry_id', '')::uuid                         as object_id,
+      orr.work_id                                                        as work_id,
+      orr.id::text                                                       as receipt_id,
+      null::uuid                                                         as document_id,
+      je2.reversal_of                                                    as original_entry_id,
+      je2.reversed_by                                                    as replacement_entry_id,
+      case
+        when je2.status = 'approved' and je2.reversed_by is not null then 'reversed'
+        when je2.status = 'approved' then 'approved'
+        when je2.status = 'withdrawn' and je2.withdrawal_reason = 'superseded-by-correction' then 'superseded'
+        when je2.status = 'withdrawn' then 'withdrawn'
+        else je2.status
+      end                                                                as status,
+      'work'::text                                                       as kind
+    from clara.operation_receipts orr
+    left join clara.accounting_work w on w.id = orr.work_id and w.firm_id = c.firm
+    left join clara.journal_entries je2
+      -- Same index-preserving text comparison as the ev_base join above.
+      on je2.id::text = nullif(orr.effects->>'entry_id', '') and je2.firm_id = c.firm
+    where orr.firm_id = c.firm and orr.outcome = 'committed'
+  ),
+  orx as (
+    select * from orx_base
+     where (p_client is null or client_id = p_client)
+       and (p_kinds is null or kind = any(p_kinds))
+       and (p_since is null or occurred_at >= p_since)
+       and (p_until is null or occurred_at < p_until)
+       and (v_cursor_ts is null or (occurred_at, id) < (v_cursor_ts, v_cursor_id))
+     order by occurred_at desc, id desc
+     limit v_limit + 1
+  ),
+  unioned as (
+    select * from ev union all select * from ar union all select * from orx
+  )
+  -- `jsonb_agg(to_jsonb(u.*))` with NO `order by` INSIDE the aggregate call is not guaranteed to
+  -- respect the subquery's own `order by` -- an aggregate over a subquery may see its input rows
+  -- in whatever order the planner chooses to feed them (a parallel worker, a different join
+  -- strategy on a future replan), so the page and its `next_cursor` must never be minted from an
+  -- order the aggregate itself did not pin. `order by u.occurred_at desc, u.id desc` INSIDE
+  -- `jsonb_agg` makes that order part of the aggregate's own contract, not an incidental property
+  -- borrowed from the subquery underneath it.
+  select coalesce(jsonb_agg(to_jsonb(u.*) order by u.occurred_at desc, u.id desc), '[]'::jsonb) into v_all
+    from (
+      select * from unioned
+       order by occurred_at desc, id desc
+       limit v_limit + 1
+    ) u;
+
+  v_total := jsonb_array_length(v_all);
+  v_truncated := v_total > v_limit;
+
+  if v_truncated then
+    -- Same guarantee on the truncation slice: `ord` (the ordinality `jsonb_array_elements` mints
+    -- over the ALREADY-ordered `v_all`) is projected back OUT to the aggregate's own `order by`
+    -- rather than being dropped after the `where` filters on it -- the prior shape selected only
+    -- `elem`, so the page these rows became had no aggregate-level order guarantee, only the
+    -- current statement's plan happening to preserve one.
+    select jsonb_agg(x.elem order by x.ord) into v_page
+      from (
+        select elem, ord from jsonb_array_elements(v_all) with ordinality as t(elem, ord)
+         where ord <= v_limit
+      ) x;
+    v_last := v_page -> (v_limit - 1);
+    v_next_cursor := encode(
+      convert_to((v_last->>'occurred_at') || '|' || (v_last->>'id'), 'UTF8'), 'base64');
+  else
+    v_page := v_all;
+    v_next_cursor := null;
+  end if;
+
+  return jsonb_build_object('rows', v_page, 'next_cursor', v_next_cursor, 'truncated', v_truncated);
+end $$;
+
+comment on function clara.list_activity(text, int, uuid, text[], timestamptz, timestamptz) is
+  '#632 B5, recut #728, recut #630. The firm activity feed: a keyset-paged union of '
+  'clara.firm_timeline_visible (domain events), clara.agent_receipts_visible (agent act receipts) '
+  'and clara.operation_receipts (#623 committed operation receipts), newest first over '
+  '(occurred_at desc, id desc). SECURITY INVOKER over three already-clara_authenticated-granted '
+  'sources; refuses CLR04 below bookkeeper before running. p_kinds is the closed set '
+  '{documents,journal,close,report,agent,work}, refused CLR10 invalid_kind otherwise. p_limit '
+  'clamps 1..100. p_cursor is an opaque base64 pair minted by a previous page''s next_cursor; a '
+  'malformed one refuses CLR10 invalid_cursor. #728: a sweep.run_completed event with no drafted '
+  'effect is excluded entirely; one that drafted something is kind=agent (never documents), actor '
+  'stays null. #630: a work.% event type (work.taken_over is the first) is kind=work, so a '
+  'handover is findable under the filter that names it instead of falling into the documents '
+  'bucket. PINS plan_cache_mode = force_custom_plan: its ONE union statement binds the session '
+  'firm, every filter, the cursor pair and the kept-sweep array as plpgsql parameters, and from '
+  'the sixth execution of a pooled connection plpgsql would otherwise serve it from a generic plan '
+  'built for the per-firm AVERAGE of multi-tenant tables (measured: 145 ms -> 2.0-2.8 s at 30,000 '
+  'committed operation_receipts with no sweep row at all, and 89 ms -> 1.7-2.5 s at 30,000 sweep '
+  'receipts / 6,000 kept; flat with the clause). See 0183''s and 0181''s headers for the full '
+  'rationale.';
+
+
+create or replace function clara.get_activity_event(p_source text, p_id text) returns jsonb
+  language plpgsql stable security invoker
+  set search_path = clara, pg_temp
+  -- #728 (delta review round 4, BLOCKER [0]): FOR SYMMETRY, and measured. This door's series is
+  -- flat today at the load that flips the feed (2.0 -> 0.9 ms at 30,000 receipts), but it binds
+  -- the SAME session firm into the same three sources, and two halves of one surface that
+  -- disagree about their own plan discipline are two halves someone later tidies the wrong way --
+  -- the rule section 1 already states for the two helpers.
+  set plan_cache_mode = force_custom_plan
+as $$
+declare
+  c record;
+  v_row jsonb;
+  v_kind text;
+  v_rid text;
+  v_colon int;
+begin
+  select clara.jwt_sub() as actor, clara.jwt_firm() as firm into c;
+  if c.actor is null then
+    raise exception 'no authenticated actor' using errcode = 'CLR04';
+  end if;
+  if c.firm is null then
+    raise exception 'actor has no active membership' using errcode = 'CLR04';
+  end if;
+  if coalesce(clara.actor_role_rank(), -1) < clara.role_rank('bookkeeper') then
+    raise exception 'insufficient role' using errcode = 'CLR04';
+  end if;
+
+  if p_source is null or p_id is null or btrim(p_id) = '' then
+    raise exception 'source and id are required' using errcode = 'CLR10',
+      detail = jsonb_build_object('reason', 'activity_source_or_id_missing')::text;
+  end if;
+
+  if p_source = 'event' then
+    select jsonb_build_object(
+        'id', v.event_id::text, 'source', 'event', 'event_type', v.event_type,
+        'description', v.event_description, 'client_id', v.client_id, 'actor', v.actor,
+        'on_behalf_of', v.on_behalf_of, 'via_wake_kind', v.via_wake_kind, 'occurred_at', v.created_at,
+        'object_kind', v.object_kind, 'object_id', v.object_id,
+        'work_id', orr.work_id, 'receipt_id', orr.id::text,
+        'document_id', case when v.object_kind = 'document' then v.object_id end,
+        'original_entry_id', case when v.object_kind = 'entry' then je.reversal_of end,
+        'replacement_entry_id', case when v.object_kind = 'entry' then je.reversed_by end,
+        'status', case
+          when v.object_kind <> 'entry' then null
+          when je.status = 'approved' and je.reversed_by is not null then 'reversed'
+          when je.status = 'approved' then 'approved'
+          when je.status = 'withdrawn' and je.withdrawal_reason = 'superseded-by-correction' then 'superseded'
+          when je.status = 'withdrawn' then 'withdrawn'
+          else je.status
+        end,
+        'kind', case
+          -- #728: same rule as list_activity's ev_base -- see that function's own comment.
+          when v.event_type = 'sweep.run_completed' then 'agent'
+          when v.event_type like 'entry.%' then 'journal'
+          when v.event_type like 'document.%' then 'documents'
+          when v.event_type like 'close.%' then 'close'
+          -- #630: the same arm as list_activity's ev_base -- see that function's own comment.
+          when v.event_type like 'work.%' then 'work'
+          else 'documents'
+        end,
+        'client_name', cl.name
+      ) into v_row
+      from clara.firm_timeline_visible v
+      left join clara.journal_entries je
+        on v.object_kind = 'entry' and je.id = v.object_id and je.firm_id = c.firm
+      left join clara.operation_receipts orr
+        on v.object_kind = 'entry' and orr.firm_id = c.firm and orr.outcome = 'committed'
+       -- Same index-preserving text comparison as list_activity's ev_base join.
+       and nullif(orr.effects->>'entry_id', '') = v.object_id::text
+      left join clara.clients cl on cl.id = v.client_id and cl.firm_id = c.firm
+     where v.event_id::text = p_id;
+
+    -- #728: the SAME exclusion list_activity applies -- a deep link to a zero-effect sweep
+    -- heartbeat is dropped here, falls through to `v_row is null` below, and answers the SAME
+    -- CLR11 activity_event_not_found every other denied/absent id already gets (no oracle: an
+    -- excluded heartbeat must not read differently from one that never existed).
+    --
+    -- AFTER the row is fetched, not as another WHERE predicate beside `v.event_id::text = p_id`
+    -- (native review, N1): a definer function in the WHERE is a filter the planner is free to
+    -- order however it costs it, and one bad estimate would run it once per row of the whole
+    -- timeline. Hoisted out like this it runs at most once per call, and only for a sweep receipt.
+    -- It calls clara._sweep_event_has_effect, NOT the set form the feed calls: one cached plan per
+    -- caller shape is the whole point of splitting them (0183 section 1, BLOCKER [0]).
+    if v_row is not null and v_row ->> 'event_type' = 'sweep.run_completed'
+       and not clara._sweep_event_has_effect((v_row ->> 'id')::uuid) then
+      v_row := null;
+    end if;
+
+  elsif p_source = 'agent_receipt' then
+    v_colon := position(':' in p_id);
+    if v_colon < 2 or v_colon = length(p_id) then
+      raise exception 'activity event not found' using errcode = 'CLR11',
+        detail = jsonb_build_object('reason', 'activity_event_not_found')::text;
+    end if;
+    v_kind := substr(p_id, 1, v_colon - 1);
+    v_rid := substr(p_id, v_colon + 1);
+    select jsonb_build_object(
+        'id', (r.receipt_kind || ':' || r.receipt_id), 'source', 'agent_receipt',
+        'event_type', null, 'description', null, 'client_id', r.client_id,
+        'actor', r.acting_actor, 'on_behalf_of', r.on_behalf_of, 'via_wake_kind', r.via_wake_kind,
+        'occurred_at', r.occurred_at, 'object_kind', null, 'object_id', null,
+        'work_id', null, 'receipt_id', (r.receipt_kind || ':' || r.receipt_id),
+        'document_id', null, 'original_entry_id', null, 'replacement_entry_id', null,
+        'status', null,
+        'kind', case when r.receipt_kind = 'report_agent' then 'report' else 'agent' end,
+        'receipt_kind', r.receipt_kind, 'client_name', cl.name
+      ) into v_row
+      from clara.agent_receipts_visible r
+      left join clara.clients cl on cl.id = r.client_id and cl.firm_id = c.firm
+     where r.receipt_kind = v_kind and r.receipt_id = v_rid;
+
+  elsif p_source = 'operation_receipt' then
+    select jsonb_build_object(
+        'id', orr.id::text, 'source', 'operation_receipt', 'event_type', w.purpose,
+        'description', null, 'client_id', orr.client_id, 'actor', orr.acting_actor,
+        'on_behalf_of', orr.on_behalf_of, 'via_wake_kind', orr.via_wake_kind,
+        'occurred_at', orr.created_at, 'object_kind', 'entry',
+        'object_id', nullif(orr.effects->>'entry_id', '')::uuid,
+        'work_id', orr.work_id, 'receipt_id', orr.id::text, 'document_id', null,
+        'original_entry_id', je2.reversal_of, 'replacement_entry_id', je2.reversed_by,
+        'status', case
+          when je2.status = 'approved' and je2.reversed_by is not null then 'reversed'
+          when je2.status = 'approved' then 'approved'
+          when je2.status = 'withdrawn' and je2.withdrawal_reason = 'superseded-by-correction' then 'superseded'
+          when je2.status = 'withdrawn' then 'withdrawn'
+          else je2.status
+        end,
+        'kind', 'work',
+        'purpose', w.purpose, 'basis_origin', w.basis_origin, 'initiator', w.initiator,
+        -- #630 -- TWO PEOPLE, TOLD APART, on the firm's only firm-wide history surface. 0184 §A
+        -- split `clara.accounting_work.initiator` into the human the Work is EXECUTED AS (that
+        -- column, which a handover moves) and the immutable `initiated_by` (who asked). 0181's
+        -- lone `initiator` key therefore answers only the first question, and after a takeover it
+        -- names the colleague beside an `on_behalf_of` that is also the colleague -- who asked is
+        -- absent from the record entirely. ADDITIVE: `initiator` keeps its key and its value, so
+        -- every existing reader is unbroken; `responsible` is the same fact under a name that
+        -- says what it is, matching clara.list_entry_links' own triple (0184 §H2).
+        'initiated_by', w.initiated_by, 'responsible', w.initiator,
+        'client_name', cl.name
+      ) into v_row
+      from clara.operation_receipts orr
+      left join clara.accounting_work w on w.id = orr.work_id and w.firm_id = c.firm
+      left join clara.journal_entries je2
+        -- Same index-preserving text comparison as list_activity's orx_base join.
+        on je2.id::text = nullif(orr.effects->>'entry_id', '') and je2.firm_id = c.firm
+      left join clara.clients cl on cl.id = orr.client_id and cl.firm_id = c.firm
+     where orr.id::text = p_id and orr.firm_id = c.firm and orr.outcome = 'committed';
+
+  else
+    -- Folded into the SAME shared refusal below rather than raised here with its own distinct
+    -- 'activity_source_unknown' reason -- this function's own comment already claims "an unknown
+    -- source... refuse the SAME CLR11 activity_event_not_found", and a caller-visible SECOND
+    -- reason token for the identical no-oracle situation would make that claim false. Leaving
+    -- `v_row` at its declared NULL lets the common check right below raise the one shared refusal.
+    v_row := null;
+  end if;
+
+  if v_row is null then
+    raise exception 'activity event not found' using errcode = 'CLR11',
+      detail = jsonb_build_object('reason', 'activity_event_not_found')::text;
+  end if;
+  return v_row;
+end $$;
+
+comment on function clara.get_activity_event(text, text) is
+  '#632 B5, recut #728, recut #630. The detail record for one clara.list_activity row, addressed '
+  'by (source, id) -- see that function''s own comment for the shapes. Another firm''s row, an '
+  'unknown source, a malformed agent_receipt pair, a genuinely absent id, or an EXCLUDED '
+  'zero-effect sweep heartbeat (#728) all refuse the SAME CLR11 activity_event_not_found (no '
+  'oracle). #630: a work.% event type is kind=work (the same ladder as the feed), and the '
+  'operation_receipt arm carries the Work''s provenance as THREE facts -- initiated_by (who '
+  'asked, immutable), responsible (who it is executed as now) and initiator (the same human as '
+  'responsible, under 0181''s original key, kept so no reader breaks). p_id is TEXT -- see this '
+  'function''s header comment for why. Pins plan_cache_mode = force_custom_plan for symmetry with '
+  'clara.list_activity rather than for a measurement of its own: it binds the same session firm '
+  'into the same three sources, and its series was flat (2.0 -> 0.9 ms) at the load that flipped '
+  'the feed.';
+
+reset role;
+
+-- =====================================================================================
 -- §J  TAIL CENSUS. Every claim re-READ from the live catalog.
 -- =====================================================================================
 do $w630_tail$
@@ -2035,6 +2565,61 @@ begin
       using errcode='CLR10';
   end if;
 
+  -- §I2 — THE ACTIVITY FEED'S TWO DOORS, recut from 0183's bodies. Both halves of each claim:
+  -- what this file ADDED, and what 0183's body must not have lost under a full-body rewrite.
+  select regexp_replace(p.prosrc, '--[^' || chr(10) || ']*', '', 'g') into v_src from pg_proc p
+   where p.oid='clara.list_activity(text,int,uuid,text[],timestamptz,timestamptz)'::regprocedure;
+  if position('like ''work.%'' then ''work''' in v_src) = 0 then
+    raise exception '#630 tail: list_activity has no work.%% kind arm -- a handover would file under documents'
+      using errcode='CLR10';
+  end if;
+  if position('v_kept_sweeps' in v_src) = 0
+     or position('clara._sweep_events_with_effect()' in v_src) = 0 then
+    raise exception '#630 tail: the list_activity recut dropped 0183''s kept-sweep set' using errcode='CLR10';
+  end if;
+  if position('''report''' in v_src) = 0 or position('like ''close.%''' in v_src) = 0 then
+    raise exception '#630 tail: the list_activity recut dropped a 0181 kind arm' using errcode='CLR10';
+  end if;
+  select regexp_replace(p.prosrc, '--[^' || chr(10) || ']*', '', 'g') into v_src from pg_proc p
+   where p.oid='clara.get_activity_event(text,text)'::regprocedure;
+  if position('like ''work.%'' then ''work''' in v_src) = 0 then
+    raise exception '#630 tail: get_activity_event has no work.%% kind arm -- the row and its deep link would disagree'
+      using errcode='CLR10';
+  end if;
+  if position('''initiated_by'', w.initiated_by' in v_src) = 0
+     or position('''responsible'', w.initiator' in v_src) = 0 then
+    raise exception '#630 tail: get_activity_event does not project the split provenance -- who ASKED is absent from the firm''s history surface'
+      using errcode='CLR10';
+  end if;
+  if position('''initiator'', w.initiator' in v_src) = 0 then
+    raise exception '#630 tail: the get_activity_event recut DROPPED 0181''s initiator key -- the change must be additive'
+      using errcode='CLR10';
+  end if;
+  if position('clara._sweep_event_has_effect(' in v_src) = 0
+     or position('clara._sweep_events_with_effect(' in v_src) > 0 then
+    raise exception '#630 tail: the get_activity_event recut lost 0183''s hoisted point lookup, or took the set form'
+      using errcode='CLR10';
+  end if;
+  -- …and BOTH keep the two SET clauses 0183 pinned on them. proconfig, not prosrc: a `set` on the
+  -- function header never appears in the body, so no textual probe can see it.
+  select count(*)::int into v_n from pg_proc p
+   where p.oid in ('clara.list_activity(text,int,uuid,text[],timestamptz,timestamptz)'::regprocedure,
+                   'clara.get_activity_event(text,text)'::regprocedure)
+     and coalesce(p.proconfig, '{}'::text[]) @> array['plan_cache_mode=force_custom_plan',
+                                                     'search_path=clara, pg_temp'];
+  if v_n <> 2 then
+    raise exception '#630 tail: an Activity door lost plan_cache_mode=force_custom_plan or its pinned search_path (% of 2 carry both)', v_n
+      using errcode='CLR10';
+  end if;
+  -- …and neither gained a grant it must not have. 0183 left both clara_authenticated-only.
+  if pg_catalog.has_function_privilege('public', 'clara.list_activity(text,int,uuid,text[],timestamptz,timestamptz)', 'execute')
+     or pg_catalog.has_function_privilege('public', 'clara.get_activity_event(text,text)', 'execute')
+     or not pg_catalog.has_function_privilege('clara_authenticated', 'clara.list_activity(text,int,uuid,text[],timestamptz,timestamptz)', 'execute')
+     or not pg_catalog.has_function_privilege('clara_authenticated', 'clara.get_activity_event(text,text)', 'execute') then
+    raise exception '#630 tail: create-or-replace did not preserve 0183''s grants on the Activity doors'
+      using errcode='CLR10';
+  end if;
+
   -- The timeline type is registered AND routed at the active version.
   select count(*)::int into v_n from clara.event_types where name='work.taken_over';
   if v_n <> 1 then raise exception '#630 tail: work.taken_over is not registered' using errcode='CLR10'; end if;
@@ -2042,6 +2627,6 @@ begin
    where tt.version=(select version from clara.taxonomy_active) and tt.event_type='work.taken_over';
   if v_n <> 1 then raise exception '#630 tail: work.taken_over is not routed' using errcode='CLR10'; end if;
 
-  raise notice '#630 tail: OK -- clara.cancel_accounting_work and clara.take_over_accounting_work are PUBLIC-revoked and clara_runtime-only; clara.accounting_work.initiated_by is NOT NULL, equal to initiator on every existing row and now the frozen historical fact while initiator became the mutable authority column behind a bookkeeper wall; the posting core takes the Work row lock and refuses work_cancelled/work_settled with every 0178/0182 arm intact; settle_work_run locks the Work first and translates a cancel_requested settle to cancelled under error.superseded while the receipt still overrides; claim_work_run and the status mirror take the same order and the mirror writes stopping; and work.taken_over is registered and routed at the active taxonomy version. clara.cancel_agent_task additionally answers a changed/transition discriminator on EVERY arm (cancel_requested | cancelled | already_terminal | already_requested), so a press that terminally cancelled a queued turn is distinguishable from one that found the turn already over; and every prosrc probe in this census reads the body with its `--` comment tails stripped, so no assertion here can be satisfied by prose about the code.';
+  raise notice '#630 tail: OK -- clara.cancel_accounting_work and clara.take_over_accounting_work are PUBLIC-revoked and clara_runtime-only; clara.accounting_work.initiated_by is NOT NULL, equal to initiator on every existing row and now the frozen historical fact while initiator became the mutable authority column behind a bookkeeper wall; the posting core takes the Work row lock and refuses work_cancelled/work_settled with every 0178/0182 arm intact; settle_work_run locks the Work first and translates a cancel_requested settle to cancelled under error.superseded while the receipt still overrides; claim_work_run and the status mirror take the same order and the mirror writes stopping; and work.taken_over is registered and routed at the active taxonomy version. clara.cancel_agent_task additionally answers a changed/transition discriminator on EVERY arm (cancel_requested | cancelled | already_terminal | already_requested), so a press that terminally cancelled a queued turn is distinguishable from one that found the turn already over; clara.list_activity and clara.get_activity_event are recut from 0183''s own bodies with a work.%% kind arm and, on the detail door, initiated_by/responsible beside the unchanged initiator, both still pinned to plan_cache_mode=force_custom_plan and clara_authenticated-only; and every prosrc probe in this census reads the body with its `--` comment tails stripped, so no assertion here can be satisfied by prose about the code.';
 end
 $w630_tail$;
