@@ -4013,8 +4013,7 @@
     "eventOriginal": "Original",
     "eventReplacement": "Replacement",
     "eventReceiptId": "Receipt",
-    "eventBasisOrigin": "Basis origin",
-    "eventInitiator": "Initiator"
+    "eventBasisOrigin": "Basis origin"
   },
   "ManualJournal": {
     "evidence": {
@@ -4164,6 +4163,8 @@
     "stopAlreadyFinished": "Nothing was stopped — this reply had already finished. What is above is the whole of it.",
     "stopUnreachable": "We could not reach the runtime, so nothing was stopped. The reply may still be running, and this tab has gone back to reading it. Try again.",
     "stopRefused": "Could not stop this reply. The database refused the request in the state it found, so the reply may still be running — this tab has gone back to reading it. Try again, or reload to see where the turn got to.",
-    "runLostSight": "Lost sight of this reply — reload to re-check. What is above is what reached this tab."
+    "runLostSight": "Lost sight of this reply — reload to re-check. What is above is what reached this tab.",
+    "activityInitiatedBy": "Initiated by",
+    "activityResponsible": "Responsible"
   }
 }

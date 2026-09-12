@@ -145,8 +145,41 @@ export type ActivityDetail = ActivityRow & {
   receipt_kind?: string;
   purpose?: string;
   basis_origin?: string;
-  initiator?: string;
+  /** #630 — THE HUMAN THE WORK IS EXECUTED AS, which 0184 §A made MUTABLE: a handover
+   *  (`clara.take_over_accounting_work`) moves it. Kept, with its key and its value, because
+   *  0184's projection is additive and every existing reader of it is unbroken — but it is no
+   *  longer the person who asked, so nothing may label it "Initiator". */
+  initiator?: string | null;
+  /** #630 — WHO ASKED, immutable forever (0184:2350, `w.initiated_by`). NULLABLE on the wire in
+   *  two honest ways: the operation_receipt arm LEFT JOINs `clara.accounting_work`, so a receipt
+   *  with no Work carries null, and a database below the 0184 frontier does not project the key
+   *  at all (there, `initiator` was itself immutable and IS who asked — which is what
+   *  `activityProvenance` below falls back to). */
+  initiated_by?: string | null;
+  /** #630 — the same fact as `initiator`, under a name that says what it is (0184 §H2 gives
+   *  `clara.list_entry_links` the identical triple). */
+  responsible?: string | null;
 };
+
+/** #630 — THE TWO PROVENANCE HUMANS OF ONE OPERATION RECEIPT, or null when the receipt has no
+ *  Work behind it.
+ *
+ *  WHY A FALLBACK TO `initiator` RATHER THAN A BLANK. A database below the 0184 frontier answers
+ *  with `initiator` alone — and there that column was frozen at admission, so it genuinely is
+ *  both facts at once. Reading it as both is the honest rendering of that row, not a guess; on
+ *  or above the frontier the door sends all three and the fallback never fires.
+ *
+ *  BOTH HALVES OR NEITHER. A receipt whose `work_id` is null left-joins to nulls across the
+ *  board, and a labelled row over a blank would be the surface claiming a provenance the door
+ *  never gave it. */
+export function activityProvenance(
+  detail: Pick<ActivityDetail, "initiator" | "initiated_by" | "responsible">,
+): { initiatedBy: string; responsible: string } | null {
+  const responsible = detail.responsible ?? detail.initiator ?? null;
+  const initiatedBy = detail.initiated_by ?? detail.initiator ?? null;
+  if (!responsible || !initiatedBy) return null;
+  return { initiatedBy, responsible };
+}
 
 export type ActivityPage = {
   rows: ActivityRow[];

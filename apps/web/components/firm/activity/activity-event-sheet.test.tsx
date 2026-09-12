@@ -161,3 +161,124 @@ test("ActivityEventSheet: a denied/failed detail read renders the error state in
     },
   );
 });
+
+// =============================================================================================
+// #630 (round-6 review, findings [0]/[2]) — TWO PEOPLE, TOLD APART, ON THE AUDIT SURFACE.
+//
+// 0184 §A made `clara.accounting_work.initiator` MUTABLE: `clara.take_over_accounting_work` moves
+// it to the colleague who takes responsibility, and the immutable "who asked" moved to
+// `initiated_by`. `get_activity_event`'s operation_receipt arm projects all three (0184:2350), and
+// until this round the Sheet rendered only `initiator` under a label reading "Initiator" — so a
+// receipt from a Work that had been handed over told every reader that the TAKER had asked for the
+// posting, and the person who actually asked appeared nowhere on the firm's only firm-wide
+// history surface.
+//
+// THE PAIR IS UNCONDITIONAL, and that is the pinned decision. `work-detail.tsx` shows
+// "Responsible now" only when it has MOVED, which is right for a page that already names who
+// asked; this is an audit record, where "who asked" must be STATED rather than inferred from the
+// absence of a second row. Two lines always, equal or not.
+// =============================================================================================
+
+const RECEIPT_ID = "0e17f24c-9d2b-4a53-8f61-2b7c9f0a1d34";
+const ASKED = "ab56fe9f-1111-4111-8111-111111111111";
+const TOOK_OVER = "bbf06337-2222-4222-8222-222222222222";
+
+function ReceiptRowHarness() {
+  const [event, setEvent] = useState<{ source: ActivitySource; id: string } | null>(null);
+  return createElement(
+    "div",
+    null,
+    createElement(
+      "button",
+      { type: "button", id: "row-open-button", onClick: () => setEvent({ source: "operation_receipt", id: RECEIPT_ID }) },
+      "Open row",
+    ),
+    createElement(ActivityEventSheet, {
+      event,
+      onOpenChange: (open: boolean) => { if (!open) setEvent(null); },
+      memberNames: NO_MEMBERS,
+    }),
+  );
+}
+
+/** The operation_receipt arm's detail, as 0184:2341-2350 projects it. */
+function receiptDetail(extra: Record<string, unknown>) {
+  return {
+    id: RECEIPT_ID, source: "operation_receipt", event_type: null,
+    description: "An operation was committed.", client_id: null, client_name: null,
+    actor: TOOK_OVER, on_behalf_of: TOOK_OVER, via_wake_kind: null,
+    occurred_at: "2026-06-01T00:00:00Z", object_kind: "entry", object_id: "e1",
+    work_id: "9c0f1d2e-3333-4333-8333-333333333333", receipt_id: RECEIPT_ID, document_id: null,
+    original_entry_id: null, replacement_entry_id: null, status: "approved", kind: "work",
+    purpose: "post_journal_entry", basis_origin: "user_direct",
+    ...extra,
+  };
+}
+
+async function openReceipt(detail: Record<string, unknown>): Promise<string> {
+  let rendered = "";
+  await withMockedEnv(
+    async (url) => {
+      const u = String(url);
+      if (u.includes("get_activity_event")) return jsonResponse(detail);
+      throw new Error(`unexpected fetch ${u}`);
+    },
+    async () => {
+      const h = await renderComponent(App(createElement(ReceiptRowHarness)) as never);
+      const body = (globalThis as unknown as { document: { body: StubNode & { appendChild: (c: unknown) => void } } }).document.body;
+      body.appendChild(h.container as unknown as StubNode);
+      try {
+        for (let i = 0; i < 3; i++) await h.settle();
+        const rowButton = findIn(body, (n) => n.tagName === "BUTTON" && textOf(n as never) === "Open row");
+        await h.act(async () => { await clickButton(rowButton as never); });
+        for (let i = 0; i < 5; i++) await h.settle();
+        rendered = textOf(body as never);
+      } finally {
+        await h.unmount();
+      }
+    },
+  );
+  return rendered;
+}
+
+test("ActivityEventSheet: a HANDED-OVER Work's receipt names who asked AND who is responsible", async () => {
+  const text = await openReceipt(receiptDetail({
+    initiator: TOOK_OVER, responsible: TOOK_OVER, initiated_by: ASKED,
+  }));
+
+  assert.match(text, /Initiated by/, "the person who ASKED is a labelled fact on the audit surface");
+  assert.match(text, /Responsible/, "…and so is the person the Work now runs as");
+  assert.doesNotMatch(text, /Initiator/,
+    "the old label is retired: after 0184 §A it named the TAKER, so 'Initiator' asserted the one "
+    + "thing this row cannot claim");
+
+  // `MemberName` falls back to a shortened raw id when no resolver knows the user (NO_MEMBERS
+  // here), which is what makes the two humans distinguishable in this harness at all.
+  assert.match(text, new RegExp(ASKED.slice(0, 8)),
+    "the human who asked appears on the record — before this round they appeared nowhere");
+  assert.match(text, new RegExp(TOOK_OVER.slice(0, 8)),
+    "…beside the human who took responsibility");
+});
+
+test("ActivityEventSheet: a Work nobody took over still renders BOTH lines, naming the same person twice", async () => {
+  const text = await openReceipt(receiptDetail({
+    initiator: ASKED, responsible: ASKED, initiated_by: ASKED,
+  }));
+
+  assert.match(text, /Initiated by/, "the pair is unconditional: an audit row STATES who asked");
+  assert.match(text, /Responsible/,
+    "…and states who is answerable, rather than making the reader infer 'nobody took it over' "
+    + "from a row that is not there");
+});
+
+test("ActivityEventSheet: a receipt with no Work behind it renders neither line", async () => {
+  // `get_activity_event` LEFT JOINs clara.accounting_work, so a receipt with no work_id carries
+  // all three keys as null. Two labelled rows over two blanks would be the surface inventing a
+  // provenance it was not given.
+  const text = await openReceipt(receiptDetail({
+    work_id: null, initiator: null, responsible: null, initiated_by: null,
+  }));
+
+  assert.doesNotMatch(text, /Initiated by/, "no Work, no provenance pair");
+  assert.doesNotMatch(text, /Responsible/, "no Work, no provenance pair");
+});

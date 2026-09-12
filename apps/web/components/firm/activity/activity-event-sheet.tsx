@@ -28,6 +28,7 @@ import { ErrorMessage } from "@/components/firm/data-state";
 import { businessDateTime } from "@/lib/business-date";
 import {
   activityJournalsHref,
+  activityProvenance,
   describeActivity,
   getActivityEvent,
   isKnownActivityStatus,
@@ -51,12 +52,14 @@ export function ActivityEventSheet({
 }) {
   const t = useTranslations("Activity");
   const tReceipt = useTranslations("FirmActivity");
+  const tWork = useTranslations("WorkCancel");
   const [detail, setDetail] = useState<ActivityDetail | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const titleRef = useRef<HTMLHeadingElement>(null);
 
   const open = event !== null;
+  const provenance = detail === null ? null : activityProvenance(detail);
 
   useEffect(() => {
     if (!event) {
@@ -183,11 +186,27 @@ export function ActivityEventSheet({
                       <dd className="text-card-foreground">{detail.basis_origin}</dd>
                     </>
                   ) : null}
-                  {detail.initiator ? (
+                  {/* #630 — TWO PEOPLE, TOLD APART. 0184 §A made `clara.accounting_work.initiator`
+                      MUTABLE (a handover moves it) and froze "who asked" into `initiated_by`; the
+                      door projects both (0184:2350). This Sheet used to render `initiator` alone
+                      under a label reading "Initiator", so a handed-over Work's receipt told the
+                      firm that the TAKER had asked for the posting and the person who actually
+                      asked appeared nowhere on the only firm-wide history surface there is.
+
+                      THE PAIR IS UNCONDITIONAL, unlike work-detail.tsx's "Responsible now" row,
+                      which appears only when responsibility has MOVED. That page already names
+                      who asked; this is an audit record, and "who asked" has to be STATED, not
+                      inferred by a reader from the absence of a second row. Equal names print
+                      twice, and that is the correct reading of a Work nobody took over. */}
+                  {provenance ? (
                     <>
-                      <dt className="text-muted-foreground">{t("eventInitiator")}</dt>
+                      <dt className="text-muted-foreground">{tWork("activityInitiatedBy")}</dt>
                       <dd className="text-card-foreground">
-                        <MemberName userId={detail.initiator} resolver={memberNames} showRole={false} />
+                        <MemberName userId={provenance.initiatedBy} resolver={memberNames} showRole={false} />
+                      </dd>
+                      <dt className="text-muted-foreground">{tWork("activityResponsible")}</dt>
+                      <dd className="text-card-foreground">
+                        <MemberName userId={provenance.responsible} resolver={memberNames} showRole={false} />
                       </dd>
                     </>
                   ) : null}
