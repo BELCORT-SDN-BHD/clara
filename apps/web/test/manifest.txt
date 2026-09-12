@@ -339,6 +339,7 @@ tests/client-scope.test.ts
 tests/confirm-flash.test.ts
 tests/confirm-resend-handler.test.ts
 tests/csp-report-only.test.ts
+tests/documents-download.test.ts
 tests/firm-scope-db-pins.test.ts
 tests/firm-scope-fourth-entrance.test.ts
 tests/firm-scope-surfaces.test.ts
