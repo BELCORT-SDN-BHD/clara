@@ -51,12 +51,11 @@ const RAISE_RE = /raise exception\s+'((?:[^']|'')*)'([\s\S]{0,300}?)errcode\s*=\
 /** 裁-58/裁-28's RM0 settlement relaxation, as it appears in `apply_stripe_events`'s body. */
 const RELAXATION_RE = /e\.mode\s*=\s*'subscription'\s+and\s+e\.session_status\s*=\s*'complete'/g;
 /**
- * How many times it appears — TWO, and the number is load-bearing rather than incidental. C-2
- * duplicated the whole applier loop (once for the branch where `firm_registration_payments`
- * exists, once for the pre-C-3 fallback) so the wiki dynamic-SQL gate could prove a literal AT
- * the EXECUTE site. `c5sclr.5` pins the count for the reason spelled out there.
+ * How many times it appears — ZERO since 0186 (#628 review S1). It used to be two (C-2 duplicated
+ * the applier loop for the pre-C-3 fallback); 0186 hoisted the loop and retired the relaxation
+ * because it settled unpaid subscription-mode sessions. `c5sclr.5` pins the count at zero.
  */
-const RELAXATION_SITES = 2;
+const RELAXATION_SITES = 0;
 
 async function doorRaises() {
   const r = await rig.rootQuery(
@@ -329,17 +328,25 @@ test("c5sclr.6 #628 — the pre-emptions cover EVERY applied type, not just the 
   }
 });
 
-test("c5sclr.5 r3-1 — the RM0 relaxation still carries a NULLED payment_status, and a tripwire for the day it stops", { skip }, async () => {
-  // WHAT THIS CELL IS. Not a wall — a DRIFT GUARD with a date on it. `apply_stripe_events`'s
-  // settlement test is `payment_status='paid' OR (mode='subscription' AND session_status=
-  // 'complete')`, and 0160's own comment marks that second disjunct as an RM0-ONLY relaxation
-  // that MUST tighten to proof of settled payment when 裁-58/裁-28 rule the amounts.
+test("c5sclr.5 r3-1 — the RM0 relaxation is GONE (#628 S1) and a NULLED payment_status is NOT settled", { skip }, async () => {
+  // WHAT THIS CELL WAS. A drift guard with a date on it: 0160's settlement test read
+  // `payment_status='paid' OR (mode='subscription' AND session_status='complete')`, and the
+  // second disjunct — 裁-58/裁-28's RM0-only relaxation — carried a NULLED `payment_status`
+  // through the gate. The old cell pinned the relaxation's count at TWO and said: on the day it
+  // tightens, a NULLED status must become NOT SETTLED, or a garbage status on a real-money
+  // session sails through.
   //
-  // Today that relaxation is what carries a NULLED `payment_status` through the gate — measured,
-  // and it refuted this fold's own earlier claim that nulling makes the applier file
-  // `payment_not_settled`. On the day the relaxation tightens, a NULLED `payment_status` becomes
-  // load-bearing and must be treated as NOT SETTLED, or a garbage status on a real-money session
-  // sails through. A comment cannot make that lane notice. A red cell can.
+  // THAT DAY IS 0186 (#628, review S1). Every Clara Session is subscription-mode, so the
+  // relaxation made every unpaid FPX `completed` event settle — the applier recorded a payment
+  // and the intent read `paid` before the bank had answered. 0186 replaced the disjunct with
+  // `(e.payment_status in ('paid','no_payment_required')) is true`: `no_payment_required` is
+  // what the mode clause stood in for (the RM0 beta flow), and the `is true` makes a NULL — the
+  // projector NULLS an over-long or non-ASCII status — evaluate to NOT settled, so the event
+  // parks the intent in `processing` instead of paying it. The behaviour is measured at the
+  // door in packages/db/tests/checkout-convergence.test.mjs (cc.14 unpaid → processing, zero
+  // payment rows; cc.15 the red-on-old mutant panel) and at the route in
+  // c5-stripe-convergence-db.test.mjs (c5cv.7). This cell keeps the GUARD: the relaxation must
+  // not come back, and the tightened gate must keep its NULL-safe form.
   const src = await rig.rootQuery(
     `select p.prosrc from pg_proc p join pg_namespace n on n.oid=p.pronamespace
       where n.nspname='clara' and p.proname='apply_stripe_events'`,
@@ -347,68 +354,28 @@ test("c5sclr.5 r3-1 — the RM0 relaxation still carries a NULLED payment_status
   assert.equal(src.rowCount, 1, "exactly one apply_stripe_events body");
   const body = src.rows[0].prosrc;
 
-  // COUNTED, NOT MERELY PRESENT — the r4 review, and the distinction is the whole guard.
-  //
-  // C-2 DUPLICATED the loop body rather than hoisting it, so the wiki dynamic-SQL gate could
-  // prove a literal AT the EXECUTE site. The relaxation therefore appears TWICE: once in the
-  // `to_regclass('clara.firm_registration_payments') is not null` branch — the LIVE one once 0161
-  // is applied — and once in the pre-C-3 fallback. An `assert.match` is satisfied by EITHER copy,
-  // so a lane tightening the LIVE site alone would leave the fallback copy behind and this guard
-  // would stay GREEN while the path that actually runs had been tightened. That is precisely the
-  // failure it exists to prevent, and it is the direction that costs money.
-  //
-  // An EXACT count catches all three drifts: 1 (either site tightened, or a hoist that reduced
-  // them to one — legitimate, but it changes what "the relaxation" means and needs a human), 3
-  // (a refactor adding a site nobody accounted for), and 0 (both tightened).
   const occurrences = (body.match(RELAXATION_RE) ?? []).length;
   assert.equal(
     occurrences,
     RELAXATION_SITES,
-    `THE 裁-58/裁-28 RM0 RELAXATION COUNT MOVED IN apply_stripe_events: expected ` +
-      `${RELAXATION_SITES}, found ${occurrences}. Read this before going further. While both ` +
-      "copies existed, a NULLED `payment_status` PASSED the settlement gate on that disjunct — " +
-      "identical to a legal 'no_payment_required'. Once it is tightened, `payment_status` is " +
-      "load-bearing, and `lib/stripe-projection.mjs`'s `scalarBounded` NULLS an over-long or " +
-      "non-ASCII one. A NULLED payment_status MUST then be treated as NOT SETTLED, or a garbage " +
-      "status on a real-money session sails through the tightened gate. If you tightened ONE of " +
-      "the two sites, tighten the other too — a half-tightened applier is the worst of both. Fix " +
-      "the applier (or the projector) BEFORE changing this number.",
+    `THE 裁-58/裁-28 RM0 RELAXATION IS BACK IN apply_stripe_events: expected ${RELAXATION_SITES}, ` +
+      `found ${occurrences}. #628 (0186) retired it because every Clara Session is subscription-mode ` +
+      "and the clause settled UNPAID delayed-notification payments. Settlement is payment_status " +
+      "in ('paid','no_payment_required') — never the session mode.",
   );
 
-  // And the behaviour the assertion above stands for, measured rather than inferred: with the
-  // relaxation live, a nulled payment_status and a legal `no_payment_required` reach the SAME
-  // gate, and `payment_not_settled` appears only once the relaxation cannot carry it.
-  const { recordStripeEvent, applyStripeEvents } = await import("../lib/checkout-pools.mjs");
-  const gateFor = async (over) => {
-    const eventId = `evt_c5r3${Math.random().toString(16).slice(2)}${Date.now().toString(16)}`;
-    await recordStripeEvent({
-      eventId,
-      eventType: "checkout.session.completed",
-      projection: {
-        livemode: false,
-        session_id: `cs_c5r3${Math.random().toString(16).slice(2)}`,
-        mode: "subscription",
-        session_status: "complete",
-        payment_status: "paid",
-        ...over,
-      },
-    });
-    await applyStripeEvents(500);
-    const r = await rig.rootQuery(
-      "select problem from clara.stripe_event_problems where event_id=$1 and resolved_at is null",
-      [eventId],
-    );
-    return r.rows[0]?.problem ?? "(settlement passed)";
-  };
-
-  const nulled = await gateFor({ payment_status: null });
-  const legal = await gateFor({ payment_status: "no_payment_required" });
-  assert.notEqual(nulled, "payment_not_settled", "a NULLED payment_status must NOT stop at settlement while the relaxation lives");
-  assert.equal(nulled, legal, "a NULLED payment_status and a legal 'no_payment_required' must reach the identical gate");
-  // …and the relaxation-unavailable arms DO stop there, so the cell is not merely observing that
-  // nothing ever files payment_not_settled.
-  assert.equal(await gateFor({ payment_status: null, mode: "payment" }), "payment_not_settled");
-  assert.equal(await gateFor({ payment_status: null, session_status: null }), "payment_not_settled");
+  // The tightened gate, in its NULL-safe spelling, exactly once: `is true` is what turns a NULLED
+  // payment_status into NOT settled. A bare `in (...)` would yield NULL and depend on how the
+  // caller reads it.
+  const TIGHTENED_RE = /\(\s*e\.payment_status\s+in\s*\(\s*'paid'\s*,\s*'no_payment_required'\s*\)\s*\)\s+is\s+true/g;
+  const tightened = (body.match(TIGHTENED_RE) ?? []).length;
+  assert.equal(
+    tightened,
+    1,
+    `the NULL-safe settlement gate "(e.payment_status in ('paid','no_payment_required')) is true" must ` +
+      `appear exactly once in apply_stripe_events; found ${tightened}. If you moved or reworded it, a ` +
+      "NULLED payment_status must still read NOT SETTLED — prove it in cc.14 before changing this.",
+  );
 });
 
 test("c5sclr.3 LIVE, both polarities: the malformed event records and becomes a problem row", { skip }, async () => {
