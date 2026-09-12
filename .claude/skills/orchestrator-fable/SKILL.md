@@ -52,10 +52,10 @@ Heavy implementation may require detailed technical reasoning. The orchestrator 
 
 ## Cross-model review
 
-When a substantial change warrants an independent review pass, use the review mechanisms that are actually available in this harness.
-- **Methodlogy/Philosophy** — The engineer thinking in review an inplementation: refer mattpock's skill `/code-review` in aspect of the procedures, coding standards and bars of code review.
+When a substantial change warrants an independent review pass, use the review mechanisms that are actually available in this harness. 
+
 - **Native review lanes** — spawn a Claude's native review agent `/code-review` scoped to the diff for a standards/spec pass. It picks up your session effort setting automatically, or you can pass a level explicitly (e.g. "/code-review high").`low` effort runs a single pass over the diff. It's fast and cheap enough to run before every push. `medium` effort reads the changed code in context, runs multiple finder passes from different angles, then verifies every finding before surfacing it. `high` effort runs the finders and verifiers as subagents with fresh context, so they aren't anchored on the reasoning of the agent that just wrote the code. `xhigh` goes even further, sweeping for impacts to code outside of the change itself.
-- **Codex read-only review** —  `/codex:review` for a normal read-only Codex review ,  `/codex:adversarial-review` for a steerable challenge review. These run through the Codex companion queue, which has been unreliable — if it stalls, fall back to a native `/code-review`.
+- **Codex read-only review** —  `/codex:review` for a normal read-only Codex review ,  `/codex:adversarial-review` for a steerable challenge review. These run through the Codex companion queue, which has been unreliable — if it stalls, fall back to a native `/code-review`. **Back to native lane IF codex usage is finished or cant connect.**
 
 `/codex:review`: Runs a normal Codex review on your current work. It gives you the same quality of code review as running `/review` inside Codex directly.
 
