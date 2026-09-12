@@ -980,3 +980,45 @@ test("630 a stop the door says had ALREADY FINISHED does not re-attach — there
     net.restore();
   }
 });
+
+test("630 a re-attach that FAILS marks the stream, never the send — the live turn survives it", async () => {
+  // The regression the re-attach could otherwise introduce. `markSendFailed` clears
+  // `activeTaskId`, `turnStartedAt` and `turnStatus`; using it here would erase the turn the
+  // refusal has just told the reader is still running — the same defect, arriving by another road.
+  const { useClaraThread } = await import("./useClaraThread");
+  const thread = `${THREAD_REATTACH.slice(0, -1)}2`;
+  const original = globalThis.fetch;
+  const originalUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  process.env.NEXT_PUBLIC_SUPABASE_URL = "https://example.supabase.co";
+  globalThis.fetch = (async (u: unknown) => {
+    const url = String(u);
+    if (/\/stream/.test(url)) return new Response("nope", { status: 502 });
+    if (/agent_tasks_visible/.test(url)) {
+      return new Response(JSON.stringify([{ id: "task-dead", status: "running", created_at: "2026-09-12T00:00:00.000Z" }]),
+        { status: 200, headers: { "content-type": "application/json" } });
+    }
+    if (/rpc\/cancel_agent_task/.test(url)) {
+      return refusal("CLR04", "stopping a reply requires a bookkeeper", "insufficient_role");
+    }
+    return new Response(JSON.stringify([]), { status: 200, headers: { "content-type": "application/json" } });
+  }) as typeof fetch;
+  try {
+    const h = await renderHook(() => useClaraThread(session, thread));
+    try {
+      await h.act(async () => { await new Promise((r) => setTimeout(r, 10)); });
+      claraThreadStore.markAccepted(thread, "task-dead");
+      await h.act(async () => { await h.current.stopReply(); await new Promise((r) => setTimeout(r, 40)); });
+      const after = claraThreadStore.getThread(thread);
+      assert.equal(after.activeTaskId, "task-dead",
+        "the turn is still addressable — a re-attach that could not connect proves nothing about the run");
+      assert.notEqual(after.sendStatus, "error",
+        "…and nothing claims the SEND failed: it succeeded, and the reply is still being produced");
+    } finally {
+      await h.unmount();
+    }
+  } finally {
+    globalThis.fetch = original;
+    if (originalUrl === undefined) delete process.env.NEXT_PUBLIC_SUPABASE_URL;
+    else process.env.NEXT_PUBLIC_SUPABASE_URL = originalUrl;
+  }
+});

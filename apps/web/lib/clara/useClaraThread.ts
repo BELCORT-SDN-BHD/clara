@@ -551,9 +551,14 @@ export function useClaraThread(
     if (settled.phase === "failed" && settled.cause !== "finished") {
       claraThreadStore.beginRetry(threadId);
       const { controller, done } = openStream(taskId);
-      void done.catch((err: unknown) => {
+      void done.catch(() => {
         if (controller.signal.aborted) return;
-        claraThreadStore.markSendFailed(threadId, `stream error: ${(err as Error).message}`);
+        // A FAILED RE-ATTACH IS NOT A FAILED SEND. `markSendFailed` clears `activeTaskId`,
+        // `turnStartedAt` and `turnStatus` — it would erase the very turn the refusal has just
+        // told the reader is still running, which is the defect this arm exists to fix, arriving
+        // by another road. The turn stays exactly as it is; the STREAM is marked ended, which is
+        // the true statement and the one the existing banner and Retry affordance already read.
+        claraThreadStore.markStreamEndedUnexpectedly(threadId);
       });
     }
     return settled.phase === "stopped" ? "stopped" : "failed";
