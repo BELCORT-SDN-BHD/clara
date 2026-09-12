@@ -921,3 +921,62 @@ test("630 after the miss limit the poll gives up OUT LOUD — the clock and the 
     net.restore();
   }
 });
+
+test("630 a REFUSED ordinary stop re-attaches this tab's read, the way the admission arm does", async () => {
+  // MEASURED DEFECT (round-5 finding [7]): `stopReply` aborts the SSE read FIRST, unconditionally,
+  // on every arm. Only the admission-window arm re-attached after a refusal; an ordinary press on
+  // an already-streaming turn never did — so a clerk's denied stop left a truncated answer on
+  // screen, told them the reply was still running, and no further text could ever arrive in this
+  // tab. The read is re-opened from a CLEAN stream state because the runtime's own stream route
+  // replays a run's readable from index 0 (packages/runtime/src/streamRoute.ts:106) — the same
+  // reason `retryConnection` calls `beginRetry` before re-attaching.
+  const { useClaraThread } = await import("./useClaraThread");
+  const net = withRunFetch({
+    row: () => ({ id: "task-reattach", status: "running", created_at: "2026-09-12T00:00:00.000Z" }),
+    cancel: () => refusal("CLR04", "stopping a reply requires a bookkeeper", "insufficient_role"),
+  });
+  try {
+    const h = await renderHook(() => useClaraThread(session, THREAD_REATTACH));
+    try {
+      await h.act(async () => { await new Promise((r) => setTimeout(r, 10)); });
+      claraThreadStore.markAccepted(THREAD_REATTACH, "task-reattach");
+      const before = net.streams.length;
+      await h.act(async () => { await h.current.stopReply(); await new Promise((r) => setTimeout(r, 20)); });
+      assert.equal(h.current.stop.phase, "failed", "precondition: the door refused");
+      assert.equal(h.current.stop.phase === "failed" ? h.current.stop.cause : null, "denied");
+      assert.ok(net.streams.length > before,
+        "the read is re-opened for the turn the refusal left running — otherwise this tab is blind "
+        + `to the rest of a reply it says is still going; saw ${net.streams.length - before} new stream open(s)`);
+      assert.ok(net.streams.some((u) => u.includes("task-reattach")),
+        "…and it is THAT turn's read, not another one");
+    } finally {
+      await h.unmount();
+    }
+  } finally {
+    net.restore();
+  }
+});
+
+test("630 a stop the door says had ALREADY FINISHED does not re-attach — there is nothing left to read", async () => {
+  const { useClaraThread } = await import("./useClaraThread");
+  const net = withRunFetch({
+    row: () => ({ id: "task-over", status: "running", created_at: "2026-09-12T00:00:00.000Z" }),
+    cancel: () => alreadyTerminal("task-over"),
+  });
+  try {
+    const h = await renderHook(() => useClaraThread(session, `${THREAD_REATTACH.slice(0, -1)}1`));
+    try {
+      await h.act(async () => { await new Promise((r) => setTimeout(r, 10)); });
+      claraThreadStore.markAccepted(`${THREAD_REATTACH.slice(0, -1)}1`, "task-over");
+      const before = net.streams.length;
+      await h.act(async () => { await h.current.stopReply(); await new Promise((r) => setTimeout(r, 20)); });
+      assert.equal(h.current.stop.phase === "failed" ? h.current.stop.cause : null, "finished");
+      assert.equal(net.streams.length, before,
+        "a turn that had already ended has no more bytes to hand this tab");
+    } finally {
+      await h.unmount();
+    }
+  } finally {
+    net.restore();
+  }
+});

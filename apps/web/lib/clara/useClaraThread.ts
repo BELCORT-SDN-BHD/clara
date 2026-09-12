@@ -533,8 +533,31 @@ export function useClaraThread(
     pendingStopRef.current = null;
     setStop(STOP_PENDING);
     const settled = await spendStop(taskId);
+    // #630 (round-5 finding [7]) — A REFUSAL PUTS THE READ BACK. The abort at the top of this
+    // function is unconditional and fires BEFORE the door is called, so a denied, refused or
+    // unreachable stop left this tab reading nothing while the copy told the reader the reply was
+    // still running: no further text could ever arrive here, and the person sat in front of a
+    // truncated answer believing it was live. The admission-window arm in `sendMessage` already
+    // re-attaches after a refusal; this is the same act on the ordinary press, so the two arms
+    // cannot disagree about what a refusal costs.
+    //
+    // FROM A CLEAN STREAM STATE, because the runtime's stream route replays a run's readable from
+    // index 0 (packages/runtime/src/streamRoute.ts:106) — re-attaching onto the existing buffer
+    // would print the reply so far twice. That is exactly why `retryConnection` calls
+    // `beginRetry` first, and this borrows its shape rather than inventing another.
+    //
+    // `finished` is excluded: the door said the turn was already over, so there is nothing left
+    // to read and `spendStop` has already retired its clock.
+    if (settled.phase === "failed" && settled.cause !== "finished") {
+      claraThreadStore.beginRetry(threadId);
+      const { controller, done } = openStream(taskId);
+      void done.catch((err: unknown) => {
+        if (controller.signal.aborted) return;
+        claraThreadStore.markSendFailed(threadId, `stream error: ${(err as Error).message}`);
+      });
+    }
     return settled.phase === "stopped" ? "stopped" : "failed";
-  }, [threadId, setStop, spendStop]);
+  }, [threadId, setStop, spendStop, openStream]);
 
   // #630 — THE DATABASE ARM OF "IS A TURN LIVE?" IS RE-ASKED. `hydrateRun` runs once on mount, so
   // a turn this tab did not post (a reload onto a running reply) was known to be live and then

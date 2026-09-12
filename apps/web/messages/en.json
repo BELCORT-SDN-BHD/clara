@@ -4161,10 +4161,10 @@
     "stoppedMarker": "Stopped",
     "responsibleNow": "Responsible now",
     "stopReplyHint": "Stops this reply. Work that has already been accepted keeps running \u2014 use Cancel Work to stop that.",
-    "stopDenied": "Could not stop this reply — it is still running. Stopping a reply needs a bookkeeper role in this firm.",
+    "stopDenied": "Could not stop this reply — it is still running, and this tab has gone back to reading it. Stopping a reply needs a bookkeeper role in this firm.",
     "stopAlreadyFinished": "Nothing was stopped — this reply had already finished. What is above is the whole of it.",
-    "stopUnreachable": "We could not reach the runtime, so nothing was stopped. This tab stopped reading; the reply may still be running. Try again.",
-    "stopRefused": "Could not stop this reply. The database refused the request in the state it found, so the reply may still be running. This tab stopped reading it — try again, or reload to see where the turn got to.",
+    "stopUnreachable": "We could not reach the runtime, so nothing was stopped. The reply may still be running, and this tab has gone back to reading it. Try again.",
+    "stopRefused": "Could not stop this reply. The database refused the request in the state it found, so the reply may still be running — this tab has gone back to reading it. Try again, or reload to see where the turn got to.",
     "runLostSight": "Lost sight of this reply — reload to re-check. What is above is what reached this tab."
   }
 }
