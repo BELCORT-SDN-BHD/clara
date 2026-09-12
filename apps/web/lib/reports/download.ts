@@ -19,7 +19,15 @@
 import { sessionTokenAccessor } from "@/lib/session-accessor";
 import { safeRuntimeFetch, RuntimeError } from "@/lib/documents/runtime-wire";
 import { kindForStatus } from "@/lib/wire-error-kind";
+import { filenameFromDisposition, triggerDownload } from "@/lib/download-mechanism";
 import type { SessionTokenAccessor } from "@/lib/session";
+
+/** RE-EXPORTED, NOT RE-IMPLEMENTED. Both live in `lib/download-mechanism.ts` now that a second
+ *  family (source documents) saves bytes the same way — see that module's header for why the
+ *  mechanism was extracted rather than mirrored. The two names stay importable from here because
+ *  this file is where every reports caller and `tests/reports-download.test.ts` already read them,
+ *  and moving the IMPORT SITES would have been churn with no behavioural meaning. */
+export { filenameFromDisposition, triggerDownload };
 
 /** What the door can serve. Mirrored as VALUES from `clara._artifact_download_core`'s own
  *  `content_type` projection (pdf → application/pdf, json → application/json; the sandbox family
@@ -46,30 +54,6 @@ export class ArtifactDownloadRefusal extends Error {
 
 export function isArtifactDownloadRefusal(e: unknown): e is ArtifactDownloadRefusal {
   return e instanceof ArtifactDownloadRefusal;
-}
-
-/**
- * The filename the SERVER derived, read off `Content-Disposition`.
- *
- * RFC 5987's `filename*` is preferred over the quoted `filename` when both are present, which is
- * the order the spec requires. A header this app cannot parse yields `null` and the caller falls
- * back to its own derived name — never to a string taken from anywhere else in the response.
- */
-export function filenameFromDisposition(header: string | null): string | null {
-  if (!header) return null;
-  const star = /filename\*\s*=\s*UTF-8''([^;]+)/i.exec(header);
-  if (star?.[1]) {
-    try {
-      const decoded = decodeURIComponent(star[1].trim());
-      if (decoded) return decoded;
-    } catch {
-      // fall through to the quoted form
-    }
-  }
-  const quoted = /filename\s*=\s*"([^"]*)"/i.exec(header);
-  if (quoted?.[1]) return quoted[1];
-  const bare = /filename\s*=\s*([^;]+)/i.exec(header);
-  return bare?.[1] ? bare[1].trim() : null;
 }
 
 export type ArtifactBytes = { blob: Blob; filename: string; mime: string };
@@ -127,34 +111,6 @@ export async function fetchArtifactBytes(
     ?? opts.fallbackFilename
     ?? `clara-artifact-${artifactId.slice(0, 8)}.pdf`;
   return { blob: await res.blob(), filename, mime };
-}
-
-/**
- * Hand the fetched bytes to the browser as a save.
- *
- * AN OBJECT URL AND A SYNTHETIC CLICK, revoked on the next tick. The alternative — pointing an
- * `<a href>` straight at the runtime path — cannot work and must not be tried: the request needs
- * an `Authorization` header, and a navigation carries none.
- *
- * Split out from the fetch so the fetch stays testable in Node, where there is no `document`.
- */
-export function triggerDownload({ blob, filename }: { blob: Blob; filename: string }): void {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  a.rel = "noopener";
-  a.style.display = "none";
-  document.body.appendChild(a);
-  a.click();
-  // THE ANCHOR AND THE OBJECT URL BOTH OUTLIVE THE CLICK BY A TICK. Removing the element or
-  // revoking the URL in the SAME task has historically cancelled an in-flight download in more
-  // than one engine, and the failure mode is the worst kind: the click looks like it worked and
-  // no file arrives. A tick costs nothing and removes the whole class.
-  setTimeout(() => {
-    a.remove();
-    URL.revokeObjectURL(url);
-  }, 0);
 }
 
 /** Fetch and save, the one call a surface makes. */
