@@ -130,6 +130,14 @@ export const WA_GRANTS = {
   get_entry_diff: ["authenticated", "agentRo"],
   get_doc_entry_diff: ["authenticated", "agentRo"],
   get_document_for_human_read: ["runtime"],
+  // [#620, 0185] THE SUCCESSOR source-document byte door. Same lane as v1 and for the same reason:
+  // it returns `storage_path`, so clara_runtime holds it and no browser, agent or wake role ever
+  // does. Listed BESIDE v1, never instead of it — #620 adds a successor and leaves 0011's own
+  // grant-matrix assertion (0011:4238) true; v1's retirement is a later, deliberate migration.
+  // FRONTIER-GATED through WA_GRANTS_SINCE below: `db-slice-frontiers` runs this battery against
+  // databases pinned BELOW 0185, where an unconditional entry would fail as "absent" while saying
+  // nothing about grants.
+  get_document_for_human_read_v2: ["runtime"],
   // human writers
   add_counterparty_alias: ["authenticated"],
   retire_counterparty_alias: ["authenticated"],
@@ -153,6 +161,22 @@ export const WA_GRANTS = {
   list_autodraft_candidates: ["runtime"],
   list_document_autodraft_candidates: ["runtime"], // PIN-ADD-1 — the event-path resolver
 };
+
+/**
+ * WA_GRANTS members that a chain BELOW a given migration cannot have yet: name -> the
+ * `clara.schema_migrations.version` prefix that mints it.
+ *
+ * WHY THE GATE IS A ROSTER AND NOT A `noteLane` INSIDE THE LOOP. The §13 cell's whole value is
+ * that a missing name is `assert.fail`, not a note — an absent door is exactly the drift it exists
+ * to catch. Softening the loop for one late arrival would soften it for every genuine loss too. So
+ * the expectation stays EXACT in both directions and the LEDGER decides which direction applies:
+ * below the named migration the name is not expected at all, at or above it the full grant matrix
+ * is asserted. This is the `has0046` shape wave-a-grants.test.mjs already carries for
+ * settle_autodraft_task's ratified second arity, keyed on the ledger for the same reason.
+ */
+export const WA_GRANTS_SINCE = Object.freeze({
+  get_document_for_human_read_v2: "0185_", // [#620] the successor source-document byte door
+});
 
 /** Ungranted internal cores 0011 adds (companion §8/§13: granted to NO app role). */
 export const WA_UNGRANTED_FNS = ["_open_question_blocks"];
