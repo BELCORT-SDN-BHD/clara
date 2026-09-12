@@ -136,15 +136,19 @@ function putLocal(firm, bytes, ext = "pdf") {
  * import a sibling package's test helpers (the g1-wake-bank-fixtures.mjs precedent).
  */
 async function seedDoc(firm, client, { bytes, filename = "rig.pdf", mime = "application/pdf",
-  ghost = false } = {}) {
+  ghost = false, byteSize = null } = {}) {
   const payload = bytes ?? Buffer.from(`%PDF-1.7\nd620 ${randomUUID()}\n%%EOF\n`);
   const sha = ghost
     ? createHash("sha256").update(`no-object-${randomUUID()}`).digest("hex")
     : putLocal(firm, payload).sha;
   const storagePath = `firms/${firm}/docs/${sha}.pdf`;
+  // `byteSize` overrides what the ROW records without touching the OBJECT — the only way to build
+  // the disagreement E2.14 measures. No CHECK ties the two, and nothing in intake can produce it
+  // (spool.mjs measures the length off the same stream it hashes), which is why the fixture has to
+  // be made by hand.
   const r = await rig.rootQuery(
     "select clara._seed_verified_document($1,$2,$3,$4,$5,$6,$7,$8) as r",
-    [firm, client, sha, filename, mime, payload.length, storagePath, null]);
+    [firm, client, sha, filename, mime, byteSize ?? payload.length, storagePath, null]);
   return { id: r.rows[0].r.document_id, sha, bytes: payload, storagePath };
 }
 
@@ -466,6 +470,35 @@ test("E2.13 — a client that ABORTS mid-stream leaves no spooled copy of the do
   await reader.cancel().catch(() => {});
   assert.deepEqual(await tempLeak(before_), [],
     "an aborted read must not leave the reader's own document spooled in os.tmpdir()");
+});
+
+test("E2.14 — a row whose byte_size disagrees with the stored object still serves a CORRECT 200", async (t) => {
+  if (skipHttp()) return t.skip(skipHttp());
+  // TWO AUTHORITIES FOR ONE NUMBER IS THE DEFECT. The body is the file `downloadCanonical` just
+  // wrote and hash-verified against the row's sha256; the Content-Length header was taken from
+  // `clara.documents.byte_size`, a column no CHECK ties to the stored object and which
+  // `clara._seed_verified_document` (and any direct writer) can set freely. When they disagree
+  // Node kills the connection mid-body, so the reader gets an opaque transport failure instead of
+  // either the document or the typed answer the error ladder exists to give.
+  //
+  // DEFENSIVE, NOT A LIVE BUG: ordinary intake measures the length off the same stream it hashes
+  // (spool.mjs:270 -> intake.mjs:229), so real rows agree. This cell pins which of the two
+  // authorities wins when they do not.
+  const payload = Buffer.from(`%PDF-1.7\nd620 skew ${randomUUID()}\n%%EOF\n`);
+  const skewed = await seedDoc(firmA.firm, firmA.client,
+    { bytes: payload, byteSize: payload.length + 4096, filename: "skew.pdf" });
+  const before_ = new Set(tempFiles());
+  const res = await get(skewed.id, await mint(firmA.owner));
+  assert.equal(res.status, 200);
+  assert.equal(res.headers.get("content-length"), String(payload.length),
+    "the header must describe the ARTEFACT it precedes, not a column that disagrees with it");
+  // The ETag stays the ROW's content address: that is the estate's integrity receipt, and it is
+  // the number the bytes were actually verified against.
+  assert.equal(res.headers.get("etag"), `"${skewed.sha}"`);
+  const body = Buffer.from(await res.arrayBuffer());
+  assert.equal(body.length, payload.length, "a killed connection is not an answer");
+  assert.equal(createHash("sha256").update(body).digest("hex"), skewed.sha);
+  assert.deepEqual(await tempLeak(before_), []);
 });
 
 test("E2.12 — a removed member is refused on the very NEXT request, with the same token", async (t) => {

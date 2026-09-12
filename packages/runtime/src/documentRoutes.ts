@@ -38,7 +38,7 @@
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createReadStream } from "node:fs";
-import { rm } from "node:fs/promises";
+import { rm, stat } from "node:fs/promises";
 import { pipeline } from "node:stream/promises";
 import { randomUUID } from "node:crypto";
 import express from "express";
@@ -56,6 +56,8 @@ export function isDocumentId(s: unknown): s is string {
 type DocRead = {
   storage_path?: string;
   mime_type?: string;
+  // The door still returns it and the audit ladder still records the read; the ROUTE no longer
+  // derives a header from it (F8) — Content-Length comes from the spool it describes.
   byte_size?: number | string;
   sha256?: string;
   original_filename?: string | null;
@@ -296,7 +298,15 @@ export function documentRoutes(): express.Router {
           ? documentContentDisposition(String(doc.original_filename ?? ""), fallbackName)
           : "inline",
       });
-      if (doc.byte_size != null) res.set("Content-Length", String(doc.byte_size));
+      // CONTENT-LENGTH DESCRIBES THE ARTEFACT, NOT THE ROW. It used to be
+      // `clara.documents.byte_size`, which is a SECOND authority for one number: no CHECK ties it
+      // to the stored object, `clara._seed_verified_document` and any direct writer can set it
+      // freely, and the body being sent is the file `downloadCanonical` just wrote and verified
+      // against the row's sha256. When the two disagreed Node killed the connection mid-body and
+      // the reader saw an opaque transport failure rather than the document or a typed refusal.
+      // One `stat` of the spool removes the disagreement by construction. The ETag keeps the ROW's
+      // sha256 — that is the integrity receipt, and the bytes were just verified against it.
+      res.set("Content-Length", String((await stat(tmp)).size));
       // ONE await THAT SETTLES ON EVERY OUTCOME, including the client going away.
       //
       // The hand-rolled promise this replaced resolved on the read stream's `end` and rejected on
