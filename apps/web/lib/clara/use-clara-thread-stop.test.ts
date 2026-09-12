@@ -950,6 +950,14 @@ test("630 a REFUSED ordinary stop re-attaches this tab's read, the way the admis
       assert.ok(net.streams.some((u) => u.includes("task-reattach")),
         "…and it is THAT turn's read, not another one");
     } finally {
+      // RETIRE THE RE-ATTACH BEFORE THE NEXT CELL. The hook deliberately does NOT abort on
+      // unmount (closing the rail must not stop the reply), and `runClaraTaskStream` reattaches
+      // after a ~1 s backoff when a body ends with no terminal event -- which is what this stub's
+      // empty 200 does. Left alone, that timer fires a `/stream` fetch into whatever `fetch` stub
+      // is installed by then, and the NEXT cell counts it as its own. Measured: the "already
+      // finished does not re-attach" cell below failed exactly that way under a loaded full-suite
+      // run while passing 5/5 in isolation. Aborting by TASK is the same handle `stopReply` uses.
+      claraThreadStore.abortStream("task-reattach");
       await h.unmount();
     }
   } finally {
@@ -1147,6 +1155,9 @@ test("630 a refused stop whose re-attach OPENS says so, and clears the buffer th
         "…and THAT is when the stale buffer is cleared: the runtime replays the run's readable "
         + "from index 0, so a buffer kept past the open would print the reply so far twice");
     } finally {
+      // See the "re-attaches this tab's read" cell's own note: this stub's body never closes, so
+      // the read outlives the unmount unless the task's own abort handle retires it.
+      claraThreadStore.abortStream("task-open");
       await h.unmount();
     }
   } finally {
