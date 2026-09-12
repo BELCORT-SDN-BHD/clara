@@ -16,8 +16,25 @@
 // exercised two pure helpers with no server, no database and no storage.
 //
 // EVERY REFUSAL CELL ALSO ASSERTS WHAT DID **NOT** HAPPEN: no bytes in the body, no egress audit
-// line, and no leftover temp file. A route that refuses correctly but leaves the reader's document
-// spooled in /tmp has not refused.
+// line, and — where the route got far enough to create one — no leftover temp file. A route that
+// refuses correctly but leaves the reader's document spooled in /tmp has not refused.
+//
+// WHICH OF THOSE tempLeak() ASSERTIONS CAN ACTUALLY FAIL, MEASURED RATHER THAN CLAIMED (#620
+// review, F14). The header used to promise that every refusal cell measured the cleanup. It does
+// not, and cannot: E2.5 and E2.7 refuse in step 4, BEFORE `const tmp = join(...)` exists at all,
+// and E2.9 — like every other `storage_error` reason raised inside `responseFor` — throws before
+// `downloadCanonical` mkdirs the destination and opens its write stream. Their assertions are true
+// of a file that was never created. They are kept, as cheap insurance against a future reordering
+// that spools before the door decides, but they are not evidence. The cells that DO exercise a
+// cleanup, each established by deleting that cleanup and running this file:
+//   · delete the ROUTE's `finally { rm(tmp) }` (documentRoutes.ts) → 17 pass / 4 fail: E2.1 (the
+//     success path), E2.13 (a client abort mid-stream), E2.14 (a byte_size/object disagreement)
+//     and E2.17 (a storage failure AFTER the write stream opens).
+//   · ALSO delete storage.mjs's checksum-mismatch `rm(destination)` → 16 pass / 5 fail: E2.10
+//     joins them.
+//   · delete ONLY that storage cleanup → 21 pass / 0 fail. Nothing in this file measures that line
+//     in isolation, because the route's own `finally` unlinks the very same path. Said plainly
+//     rather than left to be inferred from the pair above.
 
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
@@ -248,6 +265,18 @@ function realConfigEnv() {
   };
 }
 
+/** Wait (bounded) for this route to CREATE a new spool, and return the ones it created. The
+ *  mirror of `tempLeak`: that one proves a file is gone, this one proves it was ever there. */
+async function tempAppeared(baseline, { timeoutMs = 3000 } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const fresh = tempFiles().filter((f) => !baseline.has(f));
+    if (fresh.length > 0) return fresh;
+    if (Date.now() >= deadline) return [];
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+}
+
 const auditCount = async (documentId) => (await rig.rootQuery(
   "select count(*)::int n from clara.audit_log where fn='get_document_for_human_read_v2' and entry_id=$1",
   [documentId])).rows[0].n;
@@ -369,7 +398,7 @@ test("E2.5 — every 404 is BYTE-IDENTICAL: malformed, nonexistent, foreign-firm
   const auditBefore = await auditCount(doc.id);
   // THE LAST THREE ARE THE HOSTILE SPELLINGS OF THE SAME PARAMETER, and they are here because a
   // scope the route cannot read is not a scope the route may ignore. Measured against express
-  // 5.2.1's default "simple" query parser ($SCRATCH/logs/620-fix1-rt/F7-qparser-probe.log):
+  // 5.2.1's default "simple" query parser (`app.get("query parser") === "simple"`):
   // a REPEATED key yields an ARRAY, and a BRACKETED key yields a different key name entirely
   // (`client[]`), so `typeof clientRaw === "string"` is false in both cases. Coercing that to
   // "no scope" served the real PDF for a client the caller explicitly narrowed away from, and
@@ -614,6 +643,38 @@ test("E2.16 — a REFUSED custody credential reaches the reader as 502 storage_e
   assert.equal(JSON.stringify(body).includes("jwt expired"), false,
     "vendor body text must not reach the client");
   assert.deepEqual(await tempLeak(before_), []);
+});
+
+test("E2.17 — a storage failure AFTER the write stream opens CREATES a spool and then removes it", async (t) => {
+  if (skipHttp()) return t.skip(skipHttp());
+  // THE ONE STORAGE-FAILURE SHAPE THE OTHER CELLS CANNOT REACH. E2.9's missing object and every
+  // other `storage_error` reason are raised inside `responseFor`, i.e. BEFORE
+  // `downloadCanonical` mkdirs the destination and opens its write stream — so their "no leftover
+  // temp file" assertion is true of a file that was never created, and it could not fail. This
+  // cell fails the stream MID-BODY instead: one chunk is written, the spool is observed on disk,
+  // and only then does the source throw. It is the only cell in which the storage-failure path's
+  // cleanup is a measurement rather than a tautology.
+  const token = await mint(firmA.owner);
+  const before_ = new Set(tempFiles());
+  let release;
+  const held = new Promise((resolve) => { release = resolve; });
+  const body = (async function* () {
+    yield Buffer.alloc(256 * 1024, 0x41);
+    await held;      // hold the stream open so the spool is observable on disk
+    throw new StorageError("storage_error",
+      "Storage read failed (network: connection reset by peer)", 502, "unavailable");
+  })();
+  const pending = withInjectedStorage(async () => body, () => get(doc.id, token));
+  const created = await tempAppeared(before_);
+  release();
+  const res = await pending;
+  assert.equal(created.length, 1,
+    "the route must have SPOOLED a file before the failure — otherwise this cell proves nothing");
+  assert.equal(res.status, 502);
+  assert.deepEqual(await res.json(),
+    { error: "storage_error", message: "document unavailable", reason: "unavailable" });
+  assert.deepEqual(await tempLeak(before_), [],
+    "the partially written spool must be removed on the storage-failure path");
 });
 
 test("E2.12 — a removed member is refused on the very NEXT request, with the same token", async (t) => {
