@@ -256,6 +256,32 @@ test("the derived filename is what actually reaches the anchor, and the object U
 });
 
 // ---------------------------------------------------------------------------------------------
+// 3b. THE PROXY'S RESPONSE HEADER ALLOW-LIST, read off the shipped source.
+//
+// The byte route sets five headers that MEAN something and one of them was being dropped. An
+// allow-list that silently omits a header is a header that does not exist, however carefully the
+// route sets it: `content-disposition` is what makes a download a download rather than an inline
+// render inside this app's origin, `etag` is the served bytes' own content address, and
+// `cache-control: private, no-store` plus `nosniff` are the two that keep a client's source
+// document out of a shared cache and out of a re-interpreted content type.
+// ---------------------------------------------------------------------------------------------
+const PROXY = join(WEB, "app", "api", "runtime", "[...path]", "route.ts");
+
+test("the runtime proxy forwards every header the byte route's contract sets — etag included", () => {
+  const src = readFileSync(PROXY, "utf8");
+  const block = /const RESPONSE_HEADERS = \[([\s\S]*?)\] as const;/.exec(src);
+  assert.ok(block, "the proxy must carry a named RESPONSE_HEADERS allow-list");
+  const names = [...(block[1] ?? "").matchAll(/"([a-z-]+)"/g)].map((m) => m[1]);
+  for (const required of ["content-type", "content-length", "content-disposition",
+    "cache-control", "x-content-type-options", "etag"]) {
+    assert.ok(names.includes(required), `the proxy drops ${required}`);
+  }
+  // AN ALLOW-LIST, still: the header set is BUILT by name, never copied wholesale from the
+  // upstream response — the same discipline the outbound half already carries.
+  assert.doesNotMatch(src, /res\.headers\.forEach|new Headers\(res\.headers\)/);
+});
+
+// ---------------------------------------------------------------------------------------------
 // 4. ABSENCE, SCOPED AND INSTRUMENTED: no plain link, no client-side storage URL.
 //
 // SCOPE, stated: every `.ts`/`.tsx` file, recursively, under `apps/web/lib/documents` and
