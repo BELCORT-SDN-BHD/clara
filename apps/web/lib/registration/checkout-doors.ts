@@ -161,3 +161,93 @@ export async function claimPaidFirm(
     replay: out?.replay === true,
   };
 }
+
+/**
+ * #628 — THE APPLICANT'S LIVE INTENT AND ITS STRIPE SESSION
+ * (`clara.get_own_checkout_intent_session(uuid)`, migration 0186).
+ *
+ * A NARROW READ, AND THE ONLY ONE `POST /checkout/cancel` NEEDS. The cancel
+ * route has to name an intent to `cancel_checkout_intent`, and the one thing it
+ * must NOT do is accept that id from the request — a caller-supplied intent is
+ * a value an attacker fills in, and the same reasoning that keeps the
+ * registration id off the wire (this file's own header, NIT-6) applies with
+ * more force to the identifier of a live payment.
+ *
+ * `null` FOR NO ROW, never a throw: an applicant with no intent has nothing to
+ * cancel, which is a state and not a fault.
+ */
+export type OwnCheckoutIntentSession = {
+  readonly intentId: string;
+  /** `null` when the intent was never stamped with a Stripe Session. */
+  readonly sessionId: string | null;
+  readonly status: string;
+};
+
+export async function getOwnCheckoutIntentSession(
+  registration: string,
+  session: SessionTokenAccessor,
+  signal?: AbortSignal,
+): Promise<OwnCheckoutIntentSession | null> {
+  const rows = await callDoor<unknown>(
+    "get_own_checkout_intent_session",
+    { p_registration: registration },
+    { session, signal },
+  );
+  const row = Array.isArray(rows) ? (rows[0] as Record<string, unknown> | undefined) : undefined;
+  if (row === undefined || row === null) return null;
+  const intentId = row.intent_id;
+  const status = row.status;
+  // POSITIVELY decoded. A partial row is no row: cancelling an intent this
+  // build could not fully read would be acting on a shape it does not
+  // understand, on the surface that ends a payment.
+  if (typeof intentId !== "string" || intentId.length === 0) return null;
+  if (typeof status !== "string" || status.length === 0) return null;
+  return {
+    intentId,
+    sessionId: typeof row.session_id === "string" && row.session_id.length > 0 ? row.session_id : null,
+    status,
+  };
+}
+
+/**
+ * #628 — CANCEL THE APPLICANT'S OWN CHECKOUT INTENT
+ * (`clara.cancel_checkout_intent(uuid,text)`, migration 0186).
+ *
+ * THE DOOR DECIDES, AND IT DECIDES FIRST. This runs BEFORE the best-effort
+ * Stripe expiry, never after: the intent's status is the fact the rest of the
+ * product reads, and expiring a Stripe Session for an intent the DB then
+ * refused to cancel would leave the applicant holding a dead hosted page with a
+ * live intent behind it. Its own refusals are `payment_in_flight` (the bank is
+ * still confirming — nobody may cancel that) and `already_paid`.
+ *
+ * A REPLAY IS A SUCCESS. `{status, replay:true}` is what a second press, or a
+ * retry whose first response was lost, receives; the caller renders the same
+ * cancelled outcome for both, because the person cannot tell the two apart and
+ * the world is in the same state either way.
+ */
+export type CancelCheckoutIntentResult = {
+  readonly status: string;
+  /** The Session the door knew about, so the caller can ask Stripe to expire
+   *  it. Absent on a replay, which is why the caller reads the session id from
+   *  `get_own_checkout_intent_session` as well and never depends on this one. */
+  readonly sessionId: string | null;
+  readonly replay: boolean;
+};
+
+export async function cancelCheckoutIntent(
+  args: { intentId: string; opKey: string },
+  session: SessionTokenAccessor,
+  signal?: AbortSignal,
+): Promise<CancelCheckoutIntentResult> {
+  const out = await callDoor<Record<string, unknown>>(
+    "cancel_checkout_intent",
+    { p_intent: args.intentId, p_op_key: args.opKey },
+    { session, signal },
+  );
+  return {
+    status: requireString(out?.status, "status", "cancel_checkout_intent"),
+    sessionId:
+      typeof out?.session_id === "string" && out.session_id.length > 0 ? out.session_id : null,
+    replay: out?.replay === true,
+  };
+}

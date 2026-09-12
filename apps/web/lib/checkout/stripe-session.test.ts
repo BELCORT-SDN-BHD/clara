@@ -28,6 +28,9 @@ import {
   checkoutSessionForm,
   createCheckoutSession,
   expectedStripeLivemode,
+  expireCheckoutSession,
+  expireIdempotencyKey,
+  retrieveCheckoutSession,
   reportStripeKeyClassAtStartup,
   stripeKeyLivemode,
   type CheckoutSessionRequest,
@@ -556,4 +559,180 @@ test("H-38: the IDEMPOTENCY KEY moved with the body, so a mid-deploy retry mints
     checkoutIdempotencyKey("b", "always"),
     "the intent left the key",
   );
+});
+
+// ===========================================================================
+// #628 — THE TWO NEW STRIPE VERBS: RETRIEVE (resume) AND EXPIRE (cancel)
+// ===========================================================================
+//
+// THE GATE HAD TO MOVE WITH THEM, AND THAT IS WHAT THESE CELLS GUARD FIRST.
+// CB-AE2E-003's whole value is that a live key on a beta deployment cannot
+// transact. "Cannot transact" has to mean EVERY verb, not the one somebody
+// remembered to gate — a resume that sent a live-key request while the create
+// path refused would be a gate with a hole in exactly the shape of this ticket.
+
+const SESSION_ID = "cs_test_628_resume";
+
+test("#628: RETRIEVE pins its wire shape — a GET, one bearer, no body, and the id in the path", async () => {
+  let seen: { url: string; init: RequestInit } | null = null;
+  const snapshot = await retrieveCheckoutSession(SESSION_ID, {
+    env: CONFIGURED,
+    fetchImpl: async (url, init) => {
+      seen = { url: String(url), init: init as RequestInit };
+      return new Response(
+        JSON.stringify({ id: SESSION_ID, status: "open", url: "https://checkout.stripe.com/c/pay/x" }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    },
+  });
+  const call = seen as unknown as { url: string; init: RequestInit };
+  assert.equal(call.url, `https://api.stripe.com/v1/checkout/sessions/${SESSION_ID}`);
+  assert.equal(call.init.method, "GET");
+  assert.equal(call.init.body, undefined, "a GET carried a body");
+  const headers = new Headers(call.init.headers);
+  assert.equal(headers.get("authorization"), `Bearer ${FIXTURE_KEY}`);
+  assert.equal(headers.get("stripe-version"), STRIPE_API_VERSION);
+  // THE SECRET IS NOT IN THE URL. It never has been on the create path and it
+  // must not start being here, where the path carries a value.
+  assert.equal(call.url.includes(FIXTURE_KEY), false);
+  assert.deepEqual(snapshot, { id: SESSION_ID, status: "open", url: "https://checkout.stripe.com/c/pay/x" });
+});
+
+test("#628: ALL THREE Session statuses are read, and a fourth is `malformed` — never guessed", async () => {
+  // This value decides whether a person is redirected to a payment page. A
+  // status this build cannot read must refuse rather than fall through to
+  // whichever arm happens to be last.
+  for (const [status, url, expected] of [
+    ["open", "https://checkout.stripe.com/c/pay/x", "https://checkout.stripe.com/c/pay/x"],
+    ["complete", null, null],
+    ["expired", null, null],
+    // A hosted URL that is present but empty is an ABSENCE, not a destination.
+    ["open", "", null],
+  ] as const) {
+    const snapshot = await retrieveCheckoutSession(SESSION_ID, {
+      env: CONFIGURED,
+      fetchImpl: async () => new Response(JSON.stringify({ id: SESSION_ID, status, url }), { status: 200 }),
+    });
+    assert.equal(snapshot.status, status);
+    assert.equal(snapshot.url, expected, `${status}/${String(url)}`);
+  }
+  for (const body of [{ id: SESSION_ID, status: "pending" }, { id: SESSION_ID }, { status: "open" }, { id: "", status: "open" }]) {
+    await assert.rejects(
+      () => retrieveCheckoutSession(SESSION_ID, {
+        env: CONFIGURED,
+        fetchImpl: async () => new Response(JSON.stringify(body), { status: 200 }),
+      }),
+      (err: unknown) => {
+        assert.ok(err instanceof StripeSessionError, JSON.stringify(body));
+        assert.equal(err.reason, "malformed", JSON.stringify(body));
+        return true;
+      },
+      JSON.stringify(body),
+    );
+  }
+});
+
+test("#628: EXPIRE pins its wire shape — a POST to /expire, idempotent by key", async () => {
+  let seen: { url: string; init: RequestInit } | null = null;
+  await expireCheckoutSession(SESSION_ID, {
+    env: CONFIGURED,
+    fetchImpl: async (url, init) => {
+      seen = { url: String(url), init: init as RequestInit };
+      return new Response(JSON.stringify({ id: SESSION_ID, status: "expired" }), { status: 200 });
+    },
+  });
+  const call = seen as unknown as { url: string; init: RequestInit };
+  assert.equal(call.url, `https://api.stripe.com/v1/checkout/sessions/${SESSION_ID}/expire`);
+  assert.equal(call.init.method, "POST");
+  // IDEMPOTENT, so a retry of the cancel route does not turn Stripe's "already
+  // expired" 400 into a second failure the applicant reads about.
+  const headers = new Headers(call.init.headers);
+  assert.equal(headers.get("idempotency-key"), expireIdempotencyKey(SESSION_ID));
+  assert.match(expireIdempotencyKey(SESSION_ID), new RegExp(`^expire:${SESSION_ID}:`));
+  // The key MOVES WITH THE PARAMETER SHAPE, the same discipline the create
+  // path's own key carries.
+  assert.equal(
+    expireIdempotencyKey(SESSION_ID).split(":")[2],
+    checkoutIdempotencyKey("i", "if_required").split(":")[2],
+  );
+});
+
+test("#628: BOTH NEW VERBS PASS THE KEY-CLASS GATE, and neither reaches fetch when it refuses", async () => {
+  // The hole this cell exists to keep closed. Each of the three refusal
+  // conditions is driven against BOTH verbs: no key at all, no declared mode,
+  // and a key whose class contradicts the declared mode.
+  const verbs: ReadonlyArray<[string, (deps: Record<string, unknown>) => Promise<unknown>]> = [
+    ["retrieve", (deps) => retrieveCheckoutSession(SESSION_ID, deps)],
+    ["expire", (deps) => expireCheckoutSession(SESSION_ID, deps)],
+  ];
+  const envs: ReadonlyArray<[string, Record<string, string | undefined>]> = [
+    ["no key", { ...TEST_MODE }],
+    ["no declared mode", { [STRIPE_SECRET_KEY_VAR]: FIXTURE_KEY }],
+    ["a live key under a test deployment", { [STRIPE_SECRET_KEY_VAR]: "sk_live_628-cell-fixture-not-a-real-key", ...TEST_MODE }],
+    ["a test key under a live deployment", { [STRIPE_SECRET_KEY_VAR]: "sk_test_628-cell-fixture-not-a-real-key", [STRIPE_LIVEMODE_VAR]: "live" }],
+  ];
+  for (const [verbLabel, call] of verbs) {
+    for (const [envLabel, env] of envs) {
+      let reached = false;
+      await assert.rejects(
+        () => call({ env, fetchImpl: async () => { reached = true; throw new Error("fetch must not be reached"); } }),
+        (err: unknown) => {
+          assert.ok(err instanceof StripeSessionError, `${verbLabel}/${envLabel}`);
+          assert.equal(err.reason, "unconfigured", `${verbLabel}/${envLabel}`);
+          return true;
+        },
+        `${verbLabel}/${envLabel}`,
+      );
+      assert.equal(reached, false, `${verbLabel}/${envLabel}: the network was reached anyway`);
+    }
+  }
+});
+
+test("#628: both new verbs are BOUNDED and carry the create path's own failure classes", async () => {
+  // The money hop's deadline applies to the two verbs that resume and end a
+  // payment, or a hanging Stripe holds those routes open to the platform's
+  // ceiling — the exact defect NIT 5 closed on the create path.
+  for (const [label, call] of [
+    ["retrieve", (deps: Record<string, unknown>) => retrieveCheckoutSession(SESSION_ID, deps)],
+    ["expire", (deps: Record<string, unknown>) => expireCheckoutSession(SESSION_ID, deps)],
+  ] as const) {
+    await assert.rejects(
+      () => call({
+        env: CONFIGURED,
+        timeoutMs: 10,
+        fetchImpl: (_url: unknown, init: RequestInit) =>
+          new Promise((_resolve, reject) => {
+            (init.signal as AbortSignal).addEventListener("abort", () => {
+              reject(Object.assign(new Error("aborted"), { name: "AbortError" }));
+            });
+          }),
+      }),
+      (err: unknown) => {
+        assert.ok(err instanceof StripeSessionError, label);
+        assert.equal(err.reason, "transport", label);
+        assert.match(err.message, /AbortError/, label);
+        return true;
+      },
+      label,
+    );
+    // A refusal names the PATH and the status, and never Stripe's body — which
+    // can echo request parameters.
+    await assert.rejects(
+      () => call({
+        env: CONFIGURED,
+        fetchImpl: async () => new Response(JSON.stringify({ error: { message: "No such checkout.session: cs_x" } }), { status: 404 }),
+      }),
+      (err: unknown) => {
+        assert.ok(err instanceof StripeSessionError, label);
+        assert.equal(err.reason, "refused", label);
+        assert.equal(err.status, 404, label);
+        assert.doesNotMatch(err.message, /No such checkout.session/, label);
+        assert.equal(err.message.includes(FIXTURE_KEY), false, label);
+        return true;
+      },
+      label,
+    );
+  }
+  // The SHIPPED bound is still the module's own constant, never a test's.
+  assert.equal(CHECKOUT_TIMEOUT_MS, 10_000);
 });

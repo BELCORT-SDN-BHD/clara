@@ -1315,6 +1315,35 @@ const LEGAL_ACCEPTANCE_0185_HUMAN_FNS = [
 ];
 export const LEGAL_ACCEPTANCE_0185_COHORT = [...LEGAL_ACCEPTANCE_0185_HUMAN_FNS];
 
+// #628 (0186 checkout convergence): the four doors the converged checkout adds, all
+// clara_authenticated ONLY -- no agent, wake, runtime or Stripe-webhook sibling, by the design's
+// own shape rather than by omission. Nothing here is an agent act, and the webhook lane's exact
+// two-verb surface (record_stripe_event / apply_stripe_events) is unchanged by this file.
+//   cancel_checkout_intent          — the APPLICANT's own way out of their checkout, so an
+//     abandoned Stripe session becomes a terminal state instead of a live one nobody can clear.
+//     Self-scoped on jwt_sub() and body-enforced; op_key is validated, not reserved, because a
+//     pre-firm actor has no op_receipts scope (0163 §4's structural finding, taken verbatim).
+//   set_admission_capacity          — the operator OWNER's estate-wide admission switch (the
+//     approve_firm_registration predicate, re-derived at call time), op_receipts-idempotent with
+//     a clara._audit receipt, exactly as set_wake_source_enabled (0133) does it.
+//   get_admission_capacity          — {max_firms, firms_count, full} for any authenticated
+//     person: the honest reason a checkout may refuse. A door rather than a table grant because
+//     clara.admission_capacity is forced-RLS with a single clara_fn_owner policy, like every
+//     other relation on this train.
+//   get_own_checkout_intent_session — the applicant's LIVE intent (session_created | processing)
+//     so the web can resume or expire its Stripe session. Deliberately NO existence oracle: a
+//     foreign registration answers no row exactly as an absent one does, because this door is
+//     reached from a resume control that may carry any id at all.
+// The recut 0163/0164 doors (open_checkout_intent, claim_paid_firm, get_own_checkout_progress)
+// keep their existing cohort memberships above: their grants did not move. 0186's ONE internal,
+// clara._admission_capacity_state, is granted to NOBODY and is therefore expected-false for every
+// role in the live sweep rather than listed here.
+const CHECKOUT_CONVERGENCE_0186_HUMAN_FNS = [
+  "cancel_checkout_intent", "set_admission_capacity", "get_admission_capacity",
+  "get_own_checkout_intent_session",
+];
+export const CHECKOUT_CONVERGENCE_0186_COHORT = [...CHECKOUT_CONVERGENCE_0186_HUMAN_FNS];
+
 // 裁-21 PR-a (`coa_template_pr_a` — number claimed at merge prep): the firm-level standard
 // chart of accounts, TEMPLATE half. NINE human doors, clara_authenticated ONLY — agent + both
 // wake roles + clara_runtime gain ZERO, and that is the design's own claim rather than an
@@ -1756,6 +1785,9 @@ export const ALLOWED = {
     ...CHECKOUT_GATE_C3_HUMAN_FNS,
     // #621 (0185): the legal content/acceptance doors — see the block above.
     ...LEGAL_ACCEPTANCE_0185_HUMAN_FNS,
+    // #628 (0186): the converged checkout's four doors — the applicant's cancel, the operator
+    // owner's admission capacity, its read, and the live-intent resume read. See the block above.
+    ...CHECKOUT_CONVERGENCE_0186_HUMAN_FNS,
     // 裁-18b PR-1 the four human binding doors — see the block above.
     ...BINDING_PROPOSAL_PR1_HUMAN_FNS,
     // 裁-21 PR-a [the firm-level standard chart of accounts, TEMPLATE half] the seven admin
@@ -2231,6 +2263,10 @@ export async function grantMatrixFailures() {
   // #621 — frontier-tolerant like every cohort here: absent entirely on a pre-0185 chain, and a
   // PARTIAL cohort (one of the three retired or renamed without truing this roster) is named.
   failures.push(...cohortFailures("#621 legal acceptance", LEGAL_ACCEPTANCE_0185_COHORT, liveNames));
+  // #628 — frontier-tolerant like every cohort here: absent entirely on a pre-0186 chain, and a
+  // PARTIAL cohort (one of the four retired or renamed without truing this roster) is named.
+  failures.push(...cohortFailures("#628 checkout convergence",
+    CHECKOUT_CONVERGENCE_0186_COHORT, liveNames));
   // 裁-190 — frontier-tolerant like every cohort above: entirely absent on a chain that has not
   // applied the two UNNUMBERED files (which is every CI chain until merge prep, 裁-108), and a
   // PARTIAL cohort is caught by name.

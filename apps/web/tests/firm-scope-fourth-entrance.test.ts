@@ -319,6 +319,20 @@ describe("WALL 1 — every layout-adjacent special file classifies, or this suit
         "route.ts's POST export, and it is registered in `SCOPE_EXEMPT_SURFACES`.",
     },
     {
+      path: "app/(entry)/checkout/cancel/handler.ts",
+      reason:
+        "NOT A ROUTER FILE. #628: the extracted body of `POST /checkout/cancel` (server " +
+        "entry 4 of 4 — the one that ENDS a checkout), called by the sibling " +
+        "app/(entry)/checkout/cancel/route.ts, whose only export is a POST that forwards to " +
+        "`handleCheckoutCancelPost`. It exports no page/route/HTTP-method surface, its " +
+        "basename matches no LEAF or SPECIAL_FILE pattern, and Next.js never routes to it, " +
+        "auto-imports it, or treats it as any kind of special file. Extracted for the same " +
+        "reason as its two siblings above: every branch is a cell, including the two the " +
+        "product most needs proved — `cancel_checkout_intent` running BEFORE the Stripe " +
+        "expiry, and a failed expiry leaving the intent cancelled anyway. The real entrance " +
+        "is route.ts's POST export, registered in `SCOPE_EXEMPT_SURFACES`.",
+    },
+    {
       path: "app/(entry)/checkout/success/claim/handler.ts",
       reason:
         "NOT A ROUTER FILE. FS-4 C-6 Lane B: the extracted body of " +

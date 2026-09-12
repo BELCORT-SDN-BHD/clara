@@ -26,6 +26,7 @@ import { register } from "tsx/esm/api";
 import * as rig from "./rig.mjs";
 import { cohortGate } from "./c5-cohort-gate.mjs";
 import {
+  APPLIED_EVENT_TYPES,
   BOUNDED_STATUS_KEYS,
   MALFORMED_METADATA_KEY,
   METADATA_KEYS,
@@ -66,13 +67,14 @@ async function doorRaises() {
   return [...r.rows[0].prosrc.matchAll(RAISE_RE)].map((m) => ({ message: m[1], code: m[3] }));
 }
 
-/** A `checkout.session.completed` whose metadata — and, optionally, whose status fields — are
- *  whatever the caller says. */
-function eventWithMetadata(metadata, objectOver = {}) {
+/** A Checkout Session event — `checkout.session.completed` unless the caller names another of
+ *  `APPLIED_EVENT_TYPES` — whose metadata and, optionally, whose status fields are whatever the
+ *  caller says. */
+function eventWithMetadata(metadata, objectOver = {}, type = "checkout.session.completed") {
   return {
     id: `evt_c5clr${Math.random().toString(16).slice(2)}`,
     object: "event",
-    type: "checkout.session.completed",
+    type,
     api_version: "2026-08-27",
     created: 1_772_000_000,
     livemode: false,
@@ -274,6 +276,57 @@ test("c5sclr.4 NEW-1 — the three CHECK-bounded status fields, both polarities 
       return true;
     },
   );
+});
+
+test("c5sclr.6 #628 — the pre-emptions cover EVERY applied type, not just the completed one", { skip }, async () => {
+  // WHY THIS CELL EXISTS AT ALL. `c5sclr.1` reads the refusers off the live catalog and `c5sclr.2`
+  // / `c5sclr.4` prove the projector pre-empts each one — but both drove ONLY
+  // `checkout.session.completed`, because that was the only type whose `data.object` was read.
+  // #628 routed three more types into the same cell, so three more types can now reach every one
+  // of those refusers. A projector that grew a second cell for the new types — or a fifth type
+  // added to `APPLIED_EVENT_TYPES` without going through `projectCheckoutSession` — would leave
+  // `c5sclr.1`'s "no bare 500" claim true for one type and false for the others, which is exactly
+  // the shape NEW-1 already cost this file once.
+  //
+  // The assertion is PER TYPE and the values are the SAME ones the completed arm is measured on,
+  // so this is a coverage widening of a proven wall rather than a new claim.
+  const { recordStripeEvent } = await import("../lib/checkout-pools.mjs");
+  for (const type of APPLIED_EVENT_TYPES) {
+    const { projection, malformed, eventId } = projectStripeEvent(
+      eventWithMetadata(
+        {
+          [METADATA_KEYS.registration]: "not-a-uuid",
+          [METADATA_KEYS.applicant]: "person@example.test",
+          [METADATA_KEYS.intent]: "11111111-1111-4111-8111-111111111111",
+        },
+        { payment_status: "p".repeat(STATUS_MAX_LENGTH + 1), mode: "subscription", status: "complete" },
+        type,
+      ),
+    );
+    // The function's three uuid arms…
+    assert.equal(projection.registration_id, null, type);
+    assert.equal(projection.applicant, null, type);
+    assert.equal(projection.intent_id, "11111111-1111-4111-8111-111111111111", type);
+    // …and the table's `ck_stripe_events_status_shape`, both pre-empted on this type.
+    assert.equal(projection.payment_status, null, type);
+    assert.deepEqual(
+      [...malformed].sort(),
+      [METADATA_KEYS.applicant, METADATA_KEYS.registration, "payment_status"].sort(),
+      `${type}: every pre-empted field must be NAMED`,
+    );
+    assert.deepEqual([...projection[MALFORMED_METADATA_KEY]].sort(), [...malformed].sort(), type);
+    assert.equal(JSON.stringify(projection).includes("person@example.test"), false, type);
+
+    // LIVE: the door accepts it. This is the trip that used to be a permanent 500 for the
+    // completed type and would have been one for these three the day they started being read.
+    const receipt = await recordStripeEvent({ eventId, eventType: type, projection });
+    assert.equal(receipt.recorded, true, `${type}: the pre-empted event must be RECORDED, not refused`);
+    const stored = await rig.rootQuery("select type,payment_status from clara.stripe_events where event_id=$1", [
+      eventId,
+    ]);
+    assert.equal(stored.rows[0].type, type);
+    assert.equal(stored.rows[0].payment_status, null, type);
+  }
 });
 
 test("c5sclr.5 r3-1 — the RM0 relaxation still carries a NULLED payment_status, and a tripwire for the day it stops", { skip }, async () => {

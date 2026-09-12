@@ -359,12 +359,18 @@ export function checkoutSessionForm(request: CheckoutSessionRequest): URLSearchP
  * class, each distinguishable, so the route can render an honest card instead
  * of a spinner; it never resolves with a partial or invented Session.
  */
-export async function createCheckoutSession(
-  request: CheckoutSessionRequest,
-  deps: StripeSessionDeps = {},
-): Promise<CheckoutSessionCreated> {
-  const env = deps.env ?? process.env;
-  const doFetch = deps.fetchImpl ?? fetch;
+/**
+ * THE SECRET, AND THE GATE IT MUST PASS — resolved once, by every call in this
+ * module (#628 added two more of them).
+ *
+ * EXTRACTED RATHER THAN COPIED. Three Stripe calls now leave this app, and a
+ * key-class gate that ran on one of them would be a gate with two holes: the
+ * whole value of CB-AE2E-003 is that a live key on a beta deployment cannot
+ * transact, and "cannot transact" has to mean every verb, not the one somebody
+ * remembered. Both new callers therefore go through here, and both refuse
+ * `unconfigured` before any socket is opened.
+ */
+function resolveStripeKey(env: Record<string, string | undefined>): string {
   const key = env[STRIPE_SECRET_KEY_VAR];
   if (typeof key !== "string" || key.trim() === "") {
     throw new StripeSessionError(
@@ -372,7 +378,6 @@ export async function createCheckoutSession(
       `${STRIPE_SECRET_KEY_VAR} is not configured — checkout refuses rather than calling Stripe unauthenticated`,
     );
   }
-
   // THE KEY-CLASS GATE, BEFORE THE NETWORK CALL AND BEFORE THE TIMER
   // (CB-AE2E-003). Request-time and not only at startup, because the
   // environment can change under a running worker — a secret rotated to the
@@ -382,6 +387,162 @@ export async function createCheckoutSession(
   if (classRefusal !== null) {
     throw new StripeSessionError("unconfigured", classRefusal);
   }
+  return key.trim();
+}
+
+/**
+ * ONE BOUNDED HTTP HOP TO STRIPE, and the only place in this module that opens
+ * a socket. Same deadline, same `redirect: "manual"`, same `no-store`, same
+ * typed failure classes as the Session create it was extracted from — see
+ * `CHECKOUT_TIMEOUT_MS` for why the bound is on the money hop.
+ *
+ * NOTHING FROM STRIPE'S BODY REACHES A MESSAGE. A refusal carries the status
+ * and the path's own name, never the response body, which can echo request
+ * parameters (and, on a misrouted request, the identifiers in them).
+ */
+async function stripeFetch(
+  path: string,
+  init: { key: string; body?: URLSearchParams; idempotencyKey?: string },
+  deps: StripeSessionDeps,
+): Promise<unknown> {
+  const doFetch = deps.fetchImpl ?? fetch;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), deps.timeoutMs ?? CHECKOUT_TIMEOUT_MS);
+  let response: Response;
+  try {
+    response = await doFetch(`${STRIPE_API_BASE}${path}`, {
+      method: init.body === undefined ? "GET" : "POST",
+      headers: {
+        Authorization: `Bearer ${init.key}`,
+        "Stripe-Version": STRIPE_API_VERSION,
+        ...(init.body === undefined
+          ? {}
+          : { "Content-Type": "application/x-www-form-urlencoded" }),
+        ...(init.idempotencyKey === undefined ? {} : { "Idempotency-Key": init.idempotencyKey }),
+      },
+      ...(init.body === undefined ? {} : { body: init.body.toString() }),
+      redirect: "manual",
+      cache: "no-store",
+      signal: controller.signal,
+    });
+  } catch (err) {
+    throw new StripeSessionError(
+      "transport",
+      `the Stripe ${path} call did not complete: ${(err as Error)?.name ?? "fetch_failed"}`,
+    );
+  } finally {
+    clearTimeout(timer);
+  }
+  if (!response.ok) {
+    throw new StripeSessionError(
+      "refused",
+      `Stripe refused ${path} with status ${response.status}`,
+      response.status,
+    );
+  }
+  try {
+    return await response.json();
+  } catch {
+    throw new StripeSessionError("malformed", "Stripe's response was not JSON", response.status);
+  }
+}
+
+/**
+ * #628 — WHAT STRIPE SAYS THE SESSION IS NOW (`GET /v1/checkout/sessions/{id}`).
+ *
+ * WHY THE RESUME CONTROL NEEDS THIS AT ALL. `open_checkout_intent` refuses
+ * `checkout_in_progress` when a live Session already exists for the
+ * registration — one live Session per applicant is the DB's rule, and minting a
+ * second is what that rule exists to prevent. So the resume path cannot create;
+ * it has to send the person back to the Session they already have, and only
+ * Stripe knows that Session's hosted URL and whether it is still open.
+ *
+ * THE STATUS IS READ, NOT ASSUMED. A Session can be `open`, `complete` (the
+ * money is with the applier now) or `expired`, and each of those is a different
+ * sentence to a person waiting on a firm. `url` is null on a Session that is no
+ * longer open, which is exactly why it is typed nullable here rather than
+ * required: a caller that demanded a URL would turn an expired checkout into a
+ * transport error.
+ *
+ * AN UNKNOWN STATUS IS `malformed`, never guessed into one of the three: this
+ * value decides whether a person is sent to a payment page.
+ */
+export type StripeCheckoutSessionStatus = "open" | "complete" | "expired";
+
+export type StripeCheckoutSessionSnapshot = {
+  readonly id: string;
+  readonly status: StripeCheckoutSessionStatus;
+  readonly url: string | null;
+};
+
+export async function retrieveCheckoutSession(
+  sessionId: string,
+  deps: StripeSessionDeps = {},
+): Promise<StripeCheckoutSessionSnapshot> {
+  const env = deps.env ?? process.env;
+  const key = resolveStripeKey(env);
+  // The id is path-segment encoded. Stripe's own ids never need it; a value
+  // that did would be a value this app should not be splicing into a URL at
+  // all, and encoding it is cheaper than trusting that it never happens.
+  const body = await stripeFetch(`/checkout/sessions/${encodeURIComponent(sessionId)}`, { key }, deps);
+  const session = body as { id?: unknown; status?: unknown; url?: unknown } | null;
+  const id = session?.id;
+  const status = session?.status;
+  if (typeof id !== "string" || id === "") {
+    throw new StripeSessionError("malformed", "Stripe returned a Session with no id");
+  }
+  if (status !== "open" && status !== "complete" && status !== "expired") {
+    throw new StripeSessionError(
+      "malformed",
+      `Stripe reported a Checkout Session status this build does not know how to read`,
+    );
+  }
+  return {
+    id,
+    status,
+    url: typeof session?.url === "string" && session.url !== "" ? session.url : null,
+  };
+}
+
+/**
+ * #628 — ASK STRIPE TO EXPIRE A SESSION
+ * (`POST /v1/checkout/sessions/{id}/expire`), BEST EFFORT AND SAID SO.
+ *
+ * THE DOOR IS THE AUTHORITY, NOT STRIPE. `cancel_checkout_intent` runs first
+ * and the intent is cancelled the moment it returns; this call is the courtesy
+ * that stops a hosted page the applicant may still have open in another tab
+ * from taking their money. A failure here is LOGGED and swallowed by the
+ * caller — the intent stays cancelled, and money that lands anyway is the
+ * applier's `paid_after_terminal` case, which exists precisely because this
+ * call is not guaranteed to win the race.
+ *
+ * IDEMPOTENT BY KEY, so a retry of the cancel route does not turn Stripe's
+ * "already expired" 400 into a second failure the applicant reads about.
+ */
+export function expireIdempotencyKey(sessionId: string): string {
+  return `expire:${sessionId}:${PARAMETER_SHAPE}`;
+}
+
+export async function expireCheckoutSession(
+  sessionId: string,
+  deps: StripeSessionDeps = {},
+): Promise<void> {
+  const env = deps.env ?? process.env;
+  const key = resolveStripeKey(env);
+  await stripeFetch(
+    `/checkout/sessions/${encodeURIComponent(sessionId)}/expire`,
+    { key, body: new URLSearchParams(), idempotencyKey: expireIdempotencyKey(sessionId) },
+    deps,
+  );
+}
+
+export async function createCheckoutSession(
+  request: CheckoutSessionRequest,
+  deps: StripeSessionDeps = {},
+): Promise<CheckoutSessionCreated> {
+  const env = deps.env ?? process.env;
+  const doFetch = deps.fetchImpl ?? fetch;
+  const key = resolveStripeKey(env);
 
   // The bound. `clearTimeout` in `finally` so a fast answer does not leave a
   // pending timer holding the request open — the same shape, deliberately,
@@ -393,7 +554,7 @@ export async function createCheckoutSession(
     response = await doFetch(`${STRIPE_API_BASE}/checkout/sessions`, {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${key.trim()}`,
+        Authorization: `Bearer ${key}`,
         "Content-Type": "application/x-www-form-urlencoded",
         "Stripe-Version": STRIPE_API_VERSION,
         "Idempotency-Key": request.idempotencyKey,

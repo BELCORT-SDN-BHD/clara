@@ -52,7 +52,7 @@
 import express from "express";
 import { recordStripeEvent, applyStripeEvents, stripeWebhookLaneConfigured } from "../lib/checkout-pools.mjs";
 import { verifyStripeSignature, StripeSignatureError } from "../lib/stripe-signature.mjs";
-import { projectStripeEvent, StripeProjectionError, APPLIED_EVENT_TYPE } from "../lib/stripe-projection.mjs";
+import { projectStripeEvent, StripeProjectionError, APPLIED_EVENT_TYPES } from "../lib/stripe-projection.mjs";
 import { assertLivemodeMatches, StripeLivemodeError } from "../lib/stripe-livemode.mjs";
 import { logSafe } from "../lib/log-safe.mjs";
 
@@ -235,7 +235,14 @@ export function stripeWebhookRoutes(): express.Router {
         // 7. Best-effort, OUTSIDE the response path (design step 5). Its failure is logged and
         //    swallowed BECAUSE the periodic sweep is the real guarantee (step 6), not because
         //    the error does not matter.
-        if (projected.eventType === APPLIED_EVENT_TYPE) {
+        //
+        //    #628 WIDENED THE TRIGGER, AND NOTHING ELSE ON THIS ROUTE. It used to name the single
+        //    `checkout.session.completed`; `apply_stripe_events` now converges FOUR terminal
+        //    Session outcomes, so all four must wake it. The membership test reads the projector's
+        //    own list rather than a second copy of it — one list, one place to add the fifth type,
+        //    and no way for a type to be projected but never applied. The response matrix above is
+        //    unchanged: this fires AFTER the 200 has been written.
+        if (APPLIED_EVENT_TYPES.includes(projected.eventType)) {
           applyStripeEvents(100).catch((err: unknown) => {
             console.error(
               `[clara-runtime] stripe applier (post-webhook, best effort) failed for ${eventId}: ${(err as Error)?.message ?? err} — the periodic sweep will retry`,

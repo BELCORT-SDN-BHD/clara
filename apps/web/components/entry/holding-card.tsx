@@ -2,7 +2,9 @@ import { useTranslations } from "next-intl";
 import Link from "next/link";
 
 import type { CheckoutFlashPayload } from "@/lib/checkout/checkout-flash";
+import { paymentFailureKindFrom } from "@/lib/checkout/payment-failure";
 import type { HoldingState } from "@/lib/registration/holding-state";
+import { businessDateTime } from "@/lib/business-date";
 import { cn } from "@/lib/utils";
 import {
   Card,
@@ -12,6 +14,8 @@ import {
 } from "@/components/ui/card";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { StateBanner } from "@/components/common/state";
+import { TechnicalDetail } from "@/components/common/technical-detail";
+import { Badge } from "@/components/ui/badge";
 import { LogoutButton } from "@/components/logout-button";
 
 /**
@@ -92,20 +96,73 @@ import { LogoutButton } from "@/components/logout-button";
  * explicit POST on that page (M9): a GET that minted a tenant would be run by
  * a prefetch, a mail scanner or a restored tab.
  *
+ * ===========================================================================
+ * #628 — `checkout_open` SPLITS INTO FIVE FACES, AND THE MODE IS DECLARED
+ * ===========================================================================
+ * `checkout_open` said one thing — "a session is open, resume it" — about five
+ * different worlds, and the resume control was offered in all of them. An
+ * applicant whose card was DECLINED read "it won't complete on its own — resume
+ * it below" and pressed a button that opened a second checkout; an applicant
+ * whose bank was still confirming read the same sentence and was invited to pay
+ * twice. Migration 0186's `checkout_intents.status` is what makes the five
+ * separable, and each now carries the ONE act that is actually available:
+ * resume, wait, try again, start again, or nothing at all.
+ *
+ * THE BETA/TEST BADGE IS THE SERVER'S DECLARED MODE, NOT A GUESS.
+ * `CLARA_STRIPE_LIVEMODE` is the same variable `stripe-session.ts`'s key-class
+ * gate and the runtime's webhook gate both read, parsed by that module's own
+ * closed vocabulary — never `Boolean(raw)`, because `Boolean("false")` is true
+ * and a deployment meaning test mode would be badged live. Test ⇒ a visible
+ * badge saying nothing is charged; live ⇒ no badge (a live deployment does not
+ * need to reassure anyone); UNSET ⇒ a plain statement that payments are not
+ * configured, which is a DIFFERENT sentence from "temporarily unavailable"
+ * because no amount of waiting fixes it.
+ *
  * BOTH NEW ARMS ARE NOW REACHABLE FROM A LIVE READ.
  * `checkout-progress-reads.ts` calls `clara.get_own_checkout_progress`, the
  * self-scoped door this train adds — the two C-3 tables themselves stay
  * ungranted to every application role, permanently, which is why a door and
  * not a grant.
  */
+/** The deployment's declared Stripe mode, as the page resolved it server-side
+ *  from `CLARA_STRIPE_LIVEMODE`. `"unconfigured"` is a real state, not an
+ *  absence to paper over: checkout refuses in it, and the card says so. */
+export type PaymentsMode = "live" | "test" | "unconfigured";
+
+/** The faces where a payment is still AHEAD of the person, and therefore the
+ *  faces that owe a statement about what a payment would do. `paid`,
+ *  `checkout_processing` and `capacity_full` are deliberately absent: the money
+ *  is already committed, or there is no pay control to qualify. */
+const PRE_PAYMENT_FACES: ReadonlySet<HoldingState["kind"]> = new Set([
+  "pending",
+  "checkout_open",
+  "checkout_awaiting_payment",
+  "checkout_failed",
+  "checkout_expired",
+  "checkout_cancelled",
+]);
+
+/** The DB's own timestamp in the business timezone, or nothing. An unreadable
+ *  value renders NO line rather than "Invalid Date". */
+function statusTimeLine(statusAt: string | null): string | null {
+  if (statusAt === null) return null;
+  const parsed = new Date(statusAt);
+  return Number.isFinite(parsed.getTime()) ? businessDateTime(parsed) : null;
+}
+
 export function HoldingCard({
   state,
   checkoutRefusal = null,
+  paymentsMode = "unconfigured",
 }: {
   state: HoldingState;
   /** The outcome of a `POST /checkout` that refused and redirected here, read
    *  from its unforgeable flash cookie. `null` on an ordinary visit. */
   checkoutRefusal?: CheckoutFlashPayload | null;
+  /** #628 — the SERVER's declared Stripe mode. Defaults to `"unconfigured"`
+   *  so a caller that has not resolved it says the most cautious true thing
+   *  rather than silently implying a live deployment. */
+  paymentsMode?: PaymentsMode;
 }) {
   const t = useTranslations("Pending");
   // The agreements' names live in `Common`, once — `signup-legal-stage.tsx`
@@ -204,6 +261,119 @@ export function HoldingCard({
           </>
         )}
 
+        {/* #628 — THE FIVE INTENT FACES. Each carries the one act that is
+            genuinely available to the person in that state, and NONE of them
+            carries "resume checkout" unless resuming is actually possible. */}
+        {state.kind === "checkout_awaiting_payment" && (
+          <>
+            <StateBanner tone="info" title={state.firmName}>
+              <p>{t("checkout_awaiting_payment.banner")}</p>
+              {statusTimeLine(state.statusAt) !== null && (
+                <p className="mt-1.5">
+                  {t("checkoutSince", { when: statusTimeLine(state.statusAt) as string })}
+                </p>
+              )}
+            </StateBanner>
+            {/* A form POST, never a <Link>: /checkout is POST-only, and the
+                route now RESUMES rather than mints — `open_checkout_intent`
+                refuses `checkout_in_progress` for a live Session and the route
+                sends the person back to that same Session's hosted page. One
+                live Session per applicant is the DB's rule; this control obeys
+                it instead of racing it. */}
+            <form method="post" action="/checkout" className="w-full">
+              <Button type="submit" variant="outline" className="w-full">
+                {t("checkout_awaiting_payment.resume")}
+              </Button>
+            </form>
+            {/* ONLY WITH A STAMPED SESSION. `cancel_checkout_intent` would have
+                nothing for Stripe to expire otherwise, and a control that ends
+                a payment must not appear where there is no payment to end. */}
+            {state.sessionId !== null && (
+              <form method="post" action="/checkout/cancel" className="w-full">
+                <Button type="submit" variant="outline" className="w-full">
+                  {t("checkout_awaiting_payment.cancel")}
+                </Button>
+              </form>
+            )}
+          </>
+        )}
+
+        {state.kind === "checkout_processing" && (
+          <>
+            <StateBanner tone="info" title={state.firmName}>
+              <p>{t("checkout_processing.banner")}</p>
+              {statusTimeLine(state.statusAt) !== null && (
+                <p className="mt-1.5">
+                  {t("checkoutSince", { when: statusTimeLine(state.statusAt) as string })}
+                </p>
+              )}
+            </StateBanner>
+            {/* NO PAY CONTROL AND NO CANCEL. The money is with the bank; the
+                only honest act is to look again. A GET form, so it is a real
+                navigation that re-runs the server read rather than a cached
+                router entry — and the bounded automatic re-read lives on
+                `/checkout/success`, which is the page a person actually waits
+                on after paying. This one is a status page they visit. */}
+            <form method="get" action="/pending" className="w-full">
+              <Button type="submit" variant="outline" className="w-full">
+                {t("checkoutCheckAgain")}
+              </Button>
+            </form>
+          </>
+        )}
+
+        {state.kind === "checkout_failed" && (
+          <>
+            <StateBanner tone="warning" title={state.firmName}>
+              {/* The PROVIDER's token becomes OUR sentence; see
+                  lib/checkout/payment-failure.ts for why it is never printed
+                  raw into prose. */}
+              {t(`paymentFailure.${paymentFailureKindFrom(state.reason)}`)}
+            </StateBanner>
+            {state.reason !== null && <TechnicalDetail>{state.reason}</TechnicalDetail>}
+            <form method="post" action="/checkout" className="w-full">
+              <Button type="submit" variant="outline" className="w-full">
+                {t("checkout_failed.retry")}
+              </Button>
+            </form>
+          </>
+        )}
+
+        {state.kind === "checkout_expired" && (
+          <>
+            <StateBanner tone="warning" title={state.firmName}>
+              {t("checkout_expired.banner")}
+            </StateBanner>
+            <form method="post" action="/checkout" className="w-full">
+              <Button type="submit" variant="outline" className="w-full">
+                {t("checkout_expired.startAgain")}
+              </Button>
+            </form>
+          </>
+        )}
+
+        {state.kind === "checkout_cancelled" && (
+          <>
+            <StateBanner tone="neutral" title={state.firmName}>
+              {t("checkout_cancelled.banner")}
+            </StateBanner>
+            <form method="post" action="/checkout" className="w-full">
+              <Button type="submit" variant="outline" className="w-full">
+                {t("checkout_cancelled.startAgain")}
+              </Button>
+            </form>
+          </>
+        )}
+
+        {state.kind === "capacity_full" && (
+          // NO CONTROL AT ALL, and the absence is the feature:
+          // `open_checkout_intent` refuses `capacity_reached`, so a checkout
+          // button here would be an invitation to a refusal.
+          <StateBanner tone="warning" title={state.firmName}>
+            {t("capacity_full.banner")}
+          </StateBanner>
+        )}
+
         {state.kind === "paid" && (
           <>
             <StateBanner tone="info" title={state.firmName}>
@@ -252,6 +422,23 @@ export function HoldingCard({
         )}
         {state.kind === "read-failed" && (
           <StateBanner tone="error">{t("read-failed.banner")}</StateBanner>
+        )}
+
+        {/* #628 — WHAT A PAYMENT WOULD DO, ON EVERY FACE WHERE ONE IS STILL
+            AHEAD. One call site, not a badge repeated inside six arms: the
+            statement is about the DEPLOYMENT, not about this applicant's
+            state, so it belongs beside the states rather than inside one. */}
+        {PRE_PAYMENT_FACES.has(state.kind) && paymentsMode === "test" && (
+          <Badge variant="secondary" className="h-auto w-fit py-1 whitespace-normal">
+            {t("paymentsTestMode")}
+          </Badge>
+        )}
+        {PRE_PAYMENT_FACES.has(state.kind) && paymentsMode === "unconfigured" && (
+          // DISTINCT FROM "temporarily unavailable", deliberately. The
+          // `stripe_unavailable` refusal above says "try again in a moment";
+          // this says the deployment has not been configured to take payments
+          // at all, which no amount of trying again changes.
+          <StateBanner tone="warning">{t("paymentsNotConfigured")}</StateBanner>
         )}
 
         {/* THE ONE ACTION — secondary variant, full width. See

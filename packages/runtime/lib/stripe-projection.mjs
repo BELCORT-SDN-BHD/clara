@@ -24,6 +24,10 @@
 // function whatever the key is called — rather than a list of nested keys somebody has to keep
 // current.
 //
+// FOUR TYPES ARE PROJECTED, NOT ONE (#628). `APPLIED_EVENT_TYPES` below names them; they are the
+// four terminal outcomes of a Checkout Session, they all carry a Session as `data.object`, and
+// they all go through the SAME cell so no type can acquire a shape nobody reviewed.
+//
 // AN UNRECOGNISED EVENT TYPE IS RECORDED, NOT DROPPED, AND NOT REJECTED. Design part 3 §1:
 // "Every other type is still RECORDED — the store is the record — and applied by nothing."
 // The work order's "an unrecognised event is answered with a non-2xx" is reconciled the only
@@ -51,8 +55,46 @@ export const METADATA_KEYS = Object.freeze({
   intent: "clara_intent_id",
 });
 
-/** The one event type the applier acts on at beta (design part 3 §1). */
-export const APPLIED_EVENT_TYPE = "checkout.session.completed";
+/**
+ * THE EVENT TYPES WHOSE `data.object` IS READ — and, by the same list, the types whose arrival
+ * fires the route's best-effort apply. #628 widened this from ONE to FOUR, and the widening is a
+ * CONVERGENCE contract rather than a feature: a Checkout Session does not always end at
+ * `completed`, and until #628 the three other terminal outcomes were recorded envelope-only and
+ * applied by nothing, so an applicant whose async payment failed or whose session expired sat on
+ * a checkout screen that never resolved.
+ *
+ * ALL FOUR CARRY THE SAME `data.object` — a Checkout Session — so all four go through the SAME
+ * cell (`projectCheckoutSession`) and therefore the same allow-list, the same nested-PII strip
+ * wall and the same CHECK pre-emptions. That is the point of one list rather than four cells:
+ * a new type added here cannot acquire a projection shape nobody reviewed.
+ *
+ * EVERY OTHER TYPE IS STILL ENVELOPE-ONLY, exactly as design part 3 §1 says. The list is an
+ * allow-list of TYPES on top of the allow-list of FIELDS.
+ */
+export const APPLIED_EVENT_TYPES = Object.freeze([
+  "checkout.session.completed",
+  "checkout.session.async_payment_succeeded",
+  "checkout.session.async_payment_failed",
+  "checkout.session.expired",
+]);
+
+/** The one of the four whose failure code is read. See `failureReason`. */
+export const FAILURE_EVENT_TYPE = "checkout.session.async_payment_failed";
+
+/**
+ * THE PROJECTION KEY CARRYING THE FAILURE CODE, and the ONE name shared across the runtime/DB
+ * boundary for #628. `clara.apply_stripe_events` (0186) reads `projection->>'last_payment_error'` on
+ * an `async_payment_failed` event and stamps it on the intent it fails; nothing else reads it,
+ * and it is NOT one of `PROJECTION_COLUMN_KEYS` — `record_stripe_event` has no column for it, so
+ * it lives in the `projection` jsonb only.
+ *
+ * IT IS A CODE, NEVER A MESSAGE. `last_payment_error.message` is human prose Stripe composes for
+ * the cardholder and can name them ("your card ending 4242…"); `code` / `decline_code` are closed
+ * machine vocabularies. Only the codes are read, and they pass the same 64-character printable-
+ * ASCII bound the three CHECK-bounded status columns pass, so a lengthened Stripe enum nulls the
+ * field and names it rather than reaching a column nobody sized for it.
+ */
+export const FAILURE_REASON_KEY = "last_payment_error";
 
 /** The projection keys `record_stripe_event` reads into typed columns. Named here so the db
  *  battery can compare them with the live `clara.stripe_events` column set rather than trust
@@ -261,11 +303,54 @@ function envelope(event, dropped) {
   };
 }
 
-/** The `checkout.session.completed` cell — the ONLY type whose `data.object` is read. */
-function projectCheckoutSession(event, dropped, malformed) {
+/**
+ * THE ONE NESTED READ IN THIS FILE, AND IT READS TWO NAMED SCALAR LEAVES — NEVER THE OBJECT.
+ *
+ * `last_payment_error` is an object, so `scalarOrNull` would drop it whole and #628 would have no
+ * reason to stamp on a failed intent. The exception is therefore written as an allow-list one
+ * level deeper rather than as a relaxation of the wall: the object is opened, exactly two leaves
+ * (`code`, then `decline_code`) are considered, each passes `scalarBounded`, and nothing else
+ * inside it — `message`, `payment_method`, `charge`, `source` — is reachable from here at all.
+ * An object arriving where a leaf was expected is still nulled and named by the same wall.
+ *
+ * `decline_code` FIRST, `code` SECOND, AND THE ORDER IS DECIDED BY THE READER. On a card decline
+ * Stripe sets `code:'card_declined'` and puts the issuer's actual reason in
+ * `decline_code:'insufficient_funds'`, so preferring `code` would collapse every card decline to
+ * one token. `apps/web/lib/checkout/payment-failure.ts`'s copy table carries
+ * `insufficient_funds`, `do_not_honor`, `withdrawal_count_limit_exceeded` and
+ * `transaction_not_allowed` — all `decline_code`-ONLY values — so preferring `code` would make
+ * those rows unreachable and show a generic "your card was declined" where the estate has a
+ * specific sentence. `code` is the fallback and covers the non-card failures
+ * (`payment_intent_authentication_failure`, `processing_error`), which carry no `decline_code`.
+ *
+ * WHY `last_payment_error` MAY BE ABSENT ALTOGETHER, and why that is not a refusal: it is a field
+ * of the PaymentIntent, and a Checkout Session carries it only when the Session was created or
+ * retrieved with the PaymentIntent expanded. The projector records `null` in that case — "we
+ * looked and Stripe sent nothing" is a different fact from "nobody looked", and on an append-only
+ * table the difference is not recoverable later.
+ */
+function failureReason(object, dropped, malformed) {
+  const err = object?.last_payment_error;
+  if (err === undefined || err === null) return null;
+  if (typeof err !== "object" || Array.isArray(err)) {
+    dropped.push("last_payment_error");
+    return null;
+  }
+  const raw = err.decline_code === undefined || err.decline_code === null ? err.code : err.decline_code;
+  return scalarBounded(raw, FAILURE_REASON_KEY, dropped, malformed);
+}
+
+/**
+ * The Checkout Session cell — the ONE cell every `APPLIED_EVENT_TYPES` member goes through.
+ *
+ * `eventType` is passed in rather than re-read from the event because it has already been matched
+ * against `APPLIED_EVENT_TYPES`: the value interpolated into the refusal message below is one of
+ * four literals from this file, never attacker-supplied text that could forge a log line.
+ */
+function projectCheckoutSession(event, eventType, dropped, malformed) {
   const object = event?.data?.object;
   if (object === null || typeof object !== "object" || Array.isArray(object)) {
-    throw new StripeProjectionError("object_absent", `${APPLIED_EVENT_TYPE} carries no data.object`);
+    throw new StripeProjectionError("object_absent", `${eventType} carries no data.object`);
   }
   // BUILT BY ASSIGNMENT, NOT BY SPREAD, AND THAT IS A GATE OBLIGATION RATHER THAN A STYLE
   // CHOICE. `packages/runtime/scripts/check-parts-parity.mjs:302` refuses ANY object spread
@@ -294,6 +379,11 @@ function projectCheckoutSession(event, dropped, malformed) {
   projection.registration_id = metadataUuid(object, METADATA_KEYS.registration, dropped, malformed);
   projection.applicant = metadataUuid(object, METADATA_KEYS.applicant, dropped, malformed);
   projection.intent_id = metadataUuid(object, METADATA_KEYS.intent, dropped, malformed);
+  // #628: the failure code, and ONLY on the type that can carry one. Set unconditionally for that
+  // type — a stored `null` says the projector looked, which an absent key cannot say.
+  if (eventType === FAILURE_EVENT_TYPE) {
+    projection[FAILURE_REASON_KEY] = failureReason(object, dropped, malformed);
+  }
   if (malformed.length > 0) projection[MALFORMED_METADATA_KEY] = [...malformed];
   return projection;
 }
@@ -322,8 +412,10 @@ export function projectStripeEvent(event) {
 
   const dropped = [];
   const malformed = [];
-  const recognised = eventType === APPLIED_EVENT_TYPE;
-  const projection = recognised ? projectCheckoutSession(event, dropped, malformed) : envelope(event, dropped);
+  const recognised = APPLIED_EVENT_TYPES.includes(eventType);
+  const projection = recognised
+    ? projectCheckoutSession(event, eventType, dropped, malformed)
+    : envelope(event, dropped);
 
   // THE MISTAKE-NET, RUN HERE TOO, AND ON PURPOSE. The allow-list above already makes a denied
   // key unreachable — there is no code path that writes one. This re-reads the produced object

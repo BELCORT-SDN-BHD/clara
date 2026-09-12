@@ -187,6 +187,10 @@ cell("c6.5 THE SELF-SCOPE WALL -- a foreign registration is CLR04, its own read 
   assert.equal(own.rowCount, 1);
   assert.equal(own.rows[0].checkout_open, false);
   assert.equal(own.rows[0].paid_unconsumed, false);
+  // #628 (0186): the door gained five columns and still answers exactly ONE row for a registration
+  // with no intent at all -- the intent columns are NULL rather than the row being absent.
+  assert.equal(own.rows[0].intent_status, null, "a registration with no intent has no intent status");
+  assert.equal(own.rows[0].intent_session_id, null);
 });
 
 cell("c6.6 an ANONYMOUS caller and an UNKNOWN registration each refuse, distinctly", async () => {
@@ -222,12 +226,14 @@ cell("c6.7 BOTH FACTS are read positively, and each moves on its own evidence", 
   const applicant = await insertUser("c6d");
   const registration = await insertRegistration(applicant, "c6prog");
   const read = () => humanQuery(applicant, `select * from clara.get_own_checkout_progress($1)`, [registration]);
-
-  assert.deepEqual(
-    { ...(await read()).rows[0] },
-    { checkout_open: false, paid_unconsumed: false },
-    "a bare registration must show no progress",
-  );
+  // #628 (0186) widened this door from two columns to seven. The two 0164 facts below are asserted
+  // by NAME rather than by whole-row deepEqual, so this cell keeps saying exactly what it always
+  // said -- "each fact moves on its own evidence" -- and the five #628 columns are the subject of
+  // checkout-convergence.test.mjs cc.30/cc.31 rather than of an incidental shape assertion here.
+  const bare = (await read()).rows[0];
+  assert.equal(bare.checkout_open, false, "a bare registration must show no checkout");
+  assert.equal(bare.paid_unconsumed, false, "a bare registration must show no payment");
+  assert.equal(bare.intent_status, null, "a bare registration has no intent state");
 
   // An UNSTAMPED intent is not "checkout open" — the fact is a non-null
   // session_id, never the mere existence of an intent row.

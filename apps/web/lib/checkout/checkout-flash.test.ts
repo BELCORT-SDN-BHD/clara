@@ -20,21 +20,46 @@ import {
 const NONCE = "6f1c2f1a-0d1a-4b3e-9f2a-1c2d3e4f5a6b";
 const wrap = (payload: Record<string, unknown>) => JSON.stringify({ nonce: NONCE, ...payload });
 
+/**
+ * ONE SAMPLE PER KIND, TYPED AS A TOTAL MAP — so a kind added to the union
+ * without a sample is a TYPE error rather than a silently untested arm.
+ *
+ * THE HOLE THIS CLOSES WAS REAL AND WAS ALREADY OPEN: `already_member` shipped
+ * in #517 and never appeared in the round-trip list below, so the parser arm
+ * that admits it had no cell at all. #628 added seven more kinds, which is
+ * seven more chances for the same omission; the map's own type is what makes
+ * the omission impossible rather than merely unlikely.
+ */
+const SAMPLES: Record<CheckoutFlashOutcome["kind"], CheckoutFlashOutcome> = {
+  refused: { kind: "refused", code: "CLR09", message: "the data processing agreement is not signed" },
+  no_origin_digest: { kind: "no_origin_digest" },
+  stripe_unavailable: { kind: "stripe_unavailable" },
+  payments_misconfigured: { kind: "payments_misconfigured" },
+  checkout_in_progress: { kind: "checkout_in_progress" },
+  checkout_expired: { kind: "checkout_expired" },
+  capacity_reached: { kind: "capacity_reached" },
+  payment_in_flight: { kind: "payment_in_flight" },
+  cancelled: { kind: "cancelled" },
+  nothing_to_cancel: { kind: "nothing_to_cancel" },
+  plan_rotated: { kind: "plan_rotated" },
+  no_registration: { kind: "no_registration" },
+  already_member: { kind: "already_member" },
+  unavailable: { kind: "unavailable" },
+  // #621's own arm, and the ONLY one carrying a list: the door's `detail.missing`.
+  legal_not_accepted: { kind: "legal_not_accepted", missing: ["terms", "dpa"] },
+};
+
 test("every typed outcome round-trips, and the nonce comes back with it", () => {
   const outcomes: CheckoutFlashOutcome[] = [
-    { kind: "refused", code: "CLR09", message: "the data processing agreement is not signed" },
-    { kind: "no_origin_digest" },
-    { kind: "stripe_unavailable" },
-    { kind: "plan_rotated" },
-    { kind: "no_registration" },
-    { kind: "unavailable" },
-    // #621's own arm, and the ONLY one carrying a list: the door's `detail.missing`.
-    { kind: "legal_not_accepted", missing: ["terms", "dpa"] },
+    ...Object.values(SAMPLES),
     { kind: "legal_not_accepted", missing: [] },
   ];
   for (const outcome of outcomes) {
     assert.deepEqual(parseCheckoutFlash(wrap({ ...outcome }), NONCE), { nonce: NONCE, ...outcome });
   }
+  // VACUITY CONTROL: the map must actually be covering every arm the parser
+  // admits, not a handful of them.
+  assert.ok(outcomes.length >= 15, `only ${outcomes.length} outcomes were exercised`);
 });
 
 test("THE NONCE BINDING: a mismatched, absent or blank marker is exactly as untrustworthy as no cookie", () => {

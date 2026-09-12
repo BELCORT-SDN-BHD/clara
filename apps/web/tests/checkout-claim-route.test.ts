@@ -13,6 +13,10 @@ import { NextResponse } from "next/server";
 
 import { handleClaimPaidFirmPost } from "../app/(entry)/checkout/success/claim/handler";
 import { checkoutFlashCookie } from "@/lib/checkout/checkout-flash";
+import {
+  NO_CHECKOUT_PROGRESS,
+  type CheckoutProgress,
+} from "@/lib/registration/checkout-progress-reads";
 import type { OwnRegistrationResult } from "@/lib/registration/server-reads";
 
 const SUBJECT = "22222222-2222-2222-2222-222222222222";
@@ -35,7 +39,10 @@ function postRequest(headers: Record<string, string> = {}): Request {
   });
 }
 
-function registrationResult(over: Record<string, unknown> = {}, progress = { checkoutOpen: true, paidUnconsumed: true }): OwnRegistrationResult {
+function registrationResult(
+  over: Record<string, unknown> = {},
+  progress: CheckoutProgress = { ...NO_CHECKOUT_PROGRESS, checkoutOpen: true, paidUnconsumed: true },
+): OwnRegistrationResult {
   return {
     ok: true,
     subject: SUBJECT,
@@ -151,8 +158,8 @@ test("a caller with NOTHING TO CLAIM never reaches the door", async () => {
   // rendering decision, and the door still judges independently — but a door
   // call that cannot succeed is a wasted op key on a money surface.
   for (const [label, result] of [
-    ["no payment observed", registrationResult({}, { checkoutOpen: true, paidUnconsumed: false })],
-    ["no registration at all", { ok: true, subject: SUBJECT, rows: [], context: { ok: false, reason: "no_membership" }, checkoutProgress: { checkoutOpen: false, paidUnconsumed: false } } as OwnRegistrationResult],
+    ["no payment observed", registrationResult({}, { ...NO_CHECKOUT_PROGRESS, checkoutOpen: true, paidUnconsumed: false })],
+    ["no registration at all", { ok: true, subject: SUBJECT, rows: [], context: { ok: false, reason: "no_membership" }, checkoutProgress: NO_CHECKOUT_PROGRESS } as OwnRegistrationResult],
     ["no session", { ok: false, reason: "no_session" } as OwnRegistrationResult],
     ["a malformed row", registrationResult({ id: 7 })],
     ["somebody else's row", registrationResult({ applicant: "33333333-3333-3333-3333-333333333333" })],
@@ -234,4 +241,74 @@ test("a 200 the door could not have meant is NOT a firm — unavailable, never a
     () => handleClaimPaidFirmPost(postRequest(), deps()),
   );
   assert.equal(new URL(ok.headers.get("location") as string).pathname, "/");
+});
+
+test("#628: A LOST ACKNOWLEDGEMENT answers the SAME outcome and mints nothing", async () => {
+  // JOURNEY A1's own wording: "Do not infer paid/claimed from a browser
+  // redirect." The first POST creates the firm and its 303 never reaches the
+  // browser; the person presses again with the SAME op key. The second must
+  // answer the same outcome — the firm is open, go to it — WITHOUT calling the
+  // tenant-creating door a second time.
+  //
+  // THE STATE ADVANCES THE WAY IT DOES IN PRODUCTION, not by a flag flipped in
+  // the fixture: `claim_paid_firm` sets the registration's `firm_id` and
+  // consumes the payment, and the second request's own read observes that.
+  let firmOpened = false;
+  const load = async (): Promise<OwnRegistrationResult> =>
+    firmOpened
+      ? registrationResult({ firm_id: FIRM, status: "approved" }, { ...NO_CHECKOUT_PROGRESS, checkoutOpen: true, paidUnconsumed: false })
+      : registrationResult();
+
+  const calls: Array<{ fn: string; args: Record<string, unknown> }> = [];
+  const first = await withDoor(
+    calls,
+    () => { firmOpened = true; return json({ firm_id: FIRM, plan_id: "plan-1", registration_id: REGISTRATION }); },
+    () => handleClaimPaidFirmPost(postRequest(), deps({ loadRegistration: load })),
+  );
+  assert.equal(first.status, 303);
+  assert.equal(first.headers.get("location"), `${ORIGIN}/`);
+  assert.deepEqual(calls.map((c) => c.fn), ["claim_paid_firm"]);
+
+  // …the response is lost. The person presses again.
+  const second = await withDoor(
+    calls,
+    () => { throw new Error("the door must not be called a second time"); },
+    () => handleClaimPaidFirmPost(postRequest(), deps({ loadRegistration: load })),
+  );
+  assert.equal(second.status, 303, "the retry did not answer");
+  assert.equal(second.headers.get("location"), `${ORIGIN}/`, "the retry did not land on the firm");
+  assert.equal(calls.length, 1, "the retry called the tenant-creating door again");
+  // AND NO REFUSAL CARD. A person who pressed twice must not be shown an error
+  // about the second press; the world is in the state they asked for.
+  assert.equal((second as NextResponse).cookies.get(checkoutFlashCookie().name), undefined);
+});
+
+test("#628: two CONCURRENT claims on one paid registration converge on ONE firm", async () => {
+  // Two browser contexts, one payment. The DOOR serialises (`FOR UPDATE` on the
+  // registration, celled against a real Postgres in
+  // `packages/db/tests/checkout-gate-c6.test.mjs`); what this route owes is
+  // that the loser is not shown a failure. The second request observes the firm
+  // the first created and goes there — the same answer, reached by a read
+  // rather than by a second door call.
+  let firmOpened = false;
+  const load = async (): Promise<OwnRegistrationResult> =>
+    firmOpened
+      ? registrationResult({ firm_id: FIRM, status: "approved" }, { ...NO_CHECKOUT_PROGRESS, paidUnconsumed: false })
+      : registrationResult();
+  const calls: Array<{ fn: string; args: Record<string, unknown> }> = [];
+  const winner = await withDoor(
+    calls,
+    () => { firmOpened = true; return json({ firm_id: FIRM, plan_id: "plan-1", registration_id: REGISTRATION }); },
+    () => handleClaimPaidFirmPost(postRequest(), deps({ loadRegistration: load })),
+  );
+  const loser = await withDoor(
+    calls,
+    () => json({ firm_id: FIRM, plan_id: "plan-1", registration_id: REGISTRATION, replay: true }),
+    () => handleClaimPaidFirmPost(postRequest(), deps({ loadRegistration: load })),
+  );
+  for (const [label, response] of [["winner", winner], ["loser", loser]] as const) {
+    assert.equal(response.status, 303, label);
+    assert.equal(new URL(response.headers.get("location") as string).pathname, "/", label);
+  }
+  assert.equal(calls.length, 1, "both racers called the tenant-creating door");
 });

@@ -85,6 +85,16 @@ const byButtonText = (re: RegExp) => (n: Node) => n.tagName === "BUTTON" && re.t
 const STATES: { state: HoldingState; distinctive: RegExp }[] = [
   { state: { kind: "pending", firmName: "ROME PROPERTIES" }, distinctive: /Your registration is with us/ },
   { state: { kind: "checkout_open", firmName: "ROME PROPERTIES" }, distinctive: /Your firm is not open yet/ },
+  // #628 — the five faces the single `checkout_open` arm used to hide, plus the
+  // capacity one. Each is scanned and keyboard-walked exactly like the rest:
+  // three of them carry a control that ENDS or RESTARTS a payment, which is
+  // precisely the class of control a happy-path-only scan never sees.
+  { state: { kind: "checkout_awaiting_payment", firmName: "ROME PROPERTIES", statusAt: "2026-09-12T04:30:00.000Z", sessionId: "cs_628" }, distinctive: /checkout is open and not paid yet/i },
+  { state: { kind: "checkout_processing", firmName: "ROME PROPERTIES", statusAt: "2026-09-12T04:30:00.000Z" }, distinctive: /bank is confirming/i },
+  { state: { kind: "checkout_failed", firmName: "ROME PROPERTIES", reason: "card_declined" }, distinctive: /card was declined/i },
+  { state: { kind: "checkout_expired", firmName: "ROME PROPERTIES" }, distinctive: /That checkout expired/i },
+  { state: { kind: "checkout_cancelled", firmName: "ROME PROPERTIES" }, distinctive: /That checkout was cancelled/i },
+  { state: { kind: "capacity_full", firmName: "ROME PROPERTIES" }, distinctive: /Admission is currently full/i },
   { state: { kind: "paid", firmName: "ROME PROPERTIES" }, distinctive: /finish opening your firm/i },
   { state: { kind: "rejected", firmName: "ROME PROPERTIES", reason: "the firm name matches an existing member firm" }, distinctive: /the firm name matches an existing member firm/ },
   { state: { kind: "rejected", firmName: "ROME PROPERTIES", reason: null }, distinctive: /No reason was recorded/ },
@@ -364,13 +374,28 @@ test("PR 541 stage 7 — NO STATE SAYS 'nothing more to do' BESIDE ITS OWN NEXT-
   }
 
   // TWO VACUITY CONTROLS, because this cell has two ways to pass for the wrong
-  // reason. (1) The derivation must actually find the three FS-4 C-6 arms —
-  // an intersection bug that swallowed every control would leave the roster
-  // empty and the loop above would assert nothing at all.
+  // reason. (1) The derivation must actually find the arms that carry a
+  // control — an intersection bug that swallowed every control would leave the
+  // roster empty and the loop above would assert nothing at all.
+  //
+  // #628 GREW THIS LIST FROM THREE TO NINE, which is the roster doing exactly
+  // what its own comment promised: "a state added later with a control is
+  // covered the day it lands rather than the day somebody remembers this file".
+  // `capacity_full` is deliberately NOT here — it is the one new face with no
+  // control at all, because every act it could offer is one the door refuses.
   assert.deepEqual(
     withControls.sort(),
-    ["checkout_open", "paid", "pending"],
-    "the derived roster is not the three states that carry a next-step control",
+    [
+      "checkout_awaiting_payment",
+      "checkout_cancelled",
+      "checkout_expired",
+      "checkout_failed",
+      "checkout_open",
+      "checkout_processing",
+      "paid",
+      "pending",
+    ],
+    "the derived roster is not the states that carry a next-step control",
   );
   // (2) The matcher must be able to fire. Absence of a match is evidence only
   // if the matcher can produce one (review law 2, pointed at an instrument).
@@ -439,4 +464,173 @@ test("THE TWO PAID-ROAD ARMS carry REAL controls, and the firm-creating one is n
   } finally {
     await paid.unmount();
   }
+});
+
+// ===========================================================================
+// #628 — THE ACT EACH FACE OFFERS, AND THE DEPLOYMENT'S DECLARED MODE
+// ===========================================================================
+
+/** The form actions a state renders, by `action` attribute. The property under
+ *  test is WHICH ROUTE a face can reach, so it is read off the form rather than
+ *  off a label: a button renamed is still the same act, and a button pointed at
+ *  a different route is a different one. */
+async function actionsOf(state: HoldingState): Promise<string[]> {
+  const h = await renderComponent(App(createElement(HoldingCard, { state })));
+  try {
+    for (let i = 0; i < 2; i++) await h.settle();
+    const forms = (h.container as unknown as {
+      querySelectorAll(s: string): ArrayLike<{ getAttribute(n: string): string | null }>;
+    }).querySelectorAll("form");
+    return Array.from(forms, (f) => `${f.getAttribute("method") ?? "get"} ${f.getAttribute("action") ?? ""}`).sort();
+  } finally {
+    await h.unmount();
+  }
+}
+
+test("ticket 628 — each face offers EXACTLY the acts that are available in it", async () => {
+  // THE DEFECT THIS CLOSES, stated as a table. `checkout_open` offered
+  // "resume checkout" in all five worlds: a declined card, an expired Session,
+  // a cancelled checkout and a payment the bank was mid-way through confirming
+  // all got the same POST. Two of those mint a second checkout for somebody who
+  // must not have one; one of them invites a second payment.
+  assert.deepEqual(
+    await actionsOf({ kind: "checkout_awaiting_payment", firmName: "F", statusAt: null, sessionId: "cs_628" }),
+    ["post /checkout", "post /checkout/cancel"],
+    "the unpaid-session face must offer both picking it up and ending it",
+  );
+  assert.deepEqual(
+    await actionsOf({ kind: "checkout_awaiting_payment", firmName: "F", statusAt: null, sessionId: null }),
+    ["post /checkout"],
+    "a cancel control was offered with no Session to cancel",
+  );
+  assert.deepEqual(
+    await actionsOf({ kind: "checkout_processing", firmName: "F", statusAt: null }),
+    ["get /pending"],
+    "the processing face must offer a re-read and NOTHING that starts or ends a payment",
+  );
+  for (const state of [
+    { kind: "checkout_failed", firmName: "F", reason: "card_declined" },
+    { kind: "checkout_expired", firmName: "F" },
+    { kind: "checkout_cancelled", firmName: "F" },
+  ] as const) {
+    assert.deepEqual(await actionsOf(state), ["post /checkout"], state.kind);
+  }
+  // THE ONE FACE WITH NO ACT AT ALL. `open_checkout_intent` refuses
+  // `capacity_reached`, so any control here would be an invitation to a
+  // refusal.
+  assert.deepEqual(await actionsOf({ kind: "capacity_full", firmName: "F" }), []);
+});
+
+test("ticket 628 — the failed face says what happened in PLAIN WORDS, and never the provider's token in prose", async () => {
+  // `payment_intent_authentication_failure` is an identifier, not a sentence.
+  // It is allowed to reach a human — support reads it off a screenshot — but
+  // only inside the estate's collapsed technical disclosure, never as the thing
+  // the applicant is asked to understand.
+  const h = await renderComponent(App(createElement(HoldingCard, {
+    state: { kind: "checkout_failed", firmName: "F", reason: "payment_intent_authentication_failure" },
+  })));
+  try {
+    for (let i = 0; i < 2; i++) await h.settle();
+    const text = textOf(h.container as never);
+    assert.match(text, /security check with your bank/i, "the plain sentence is missing");
+    assert.ok(query(h.container)("details"), "the provider's token has nowhere to live");
+    assert.doesNotMatch(text, /webhook/i, "jargon reached the person");
+    assert.deepEqual(checkAccessibility(h.container as never), []);
+    assert.deepEqual(checkKeyboardWalk(h.container as never), []);
+  } finally {
+    await h.unmount();
+  }
+
+  // AN UNKNOWN TOKEN STILL GETS A TRUE SENTENCE rather than a blank or the
+  // token itself: the copy that is true without knowing anything.
+  const unknown = await renderComponent(App(createElement(HoldingCard, {
+    state: { kind: "checkout_failed", firmName: "F", reason: "some_token_nobody_mapped" },
+  })));
+  try {
+    for (let i = 0; i < 2; i++) await unknown.settle();
+    const text = textOf(unknown.container as never);
+    assert.match(text, /Your bank can tell you why/i);
+    assert.doesNotMatch(text.split("Technical")[0] as string, /some_token_nobody_mapped/);
+  } finally {
+    await unknown.unmount();
+  }
+});
+
+test("ticket 628 — the payments badge is the SERVER'S declared mode, on the faces where a payment is still ahead", async () => {
+  // 裁-58's words are TRIAL, never an amount, and #628 adds the deployment's
+  // own declaration beside them. The three modes are three different sentences:
+  // test says nothing is charged, live says nothing at all (a live deployment
+  // does not reassure anyone), and UNSET says payments are not configured —
+  // which is deliberately NOT "temporarily unavailable", because no amount of
+  // waiting fixes a missing variable.
+  const read = async (mode: "live" | "test" | "unconfigured", state: HoldingState) => {
+    const h = await renderComponent(App(createElement(HoldingCard, { state, paymentsMode: mode })));
+    try {
+      for (let i = 0; i < 2; i++) await h.settle();
+      assert.deepEqual(checkAccessibility(h.container as never), [], `${mode}/${state.kind}`);
+      return textOf(h.container as never);
+    } finally {
+      await h.unmount();
+    }
+  };
+  const pending: HoldingState = { kind: "pending", firmName: "ROME PROPERTIES" };
+
+  assert.match(await read("test", pending), /Test mode — nothing is charged/);
+  assert.doesNotMatch(await read("live", pending), /Test mode/);
+  const unset = await read("unconfigured", pending);
+  assert.match(unset, /has not been set up to take payments/i);
+  assert.doesNotMatch(unset, /Test mode/);
+  // DISTINCT FROM THE OUTAGE SENTENCE, which is the whole reason this is its
+  // own state rather than a reuse of `stripe_unavailable`.
+  assert.doesNotMatch(unset, /try again in a moment/i);
+  // AND NO AMOUNT, on any of them (裁-42's design wall).
+  for (const mode of ["live", "test", "unconfigured"] as const) {
+    assert.doesNotMatch(await read(mode, pending), /\bRM\s*\d/i, mode);
+  }
+
+  // NOT ON A FACE WHERE THE MONEY IS ALREADY COMMITTED, or where there is no
+  // pay control to qualify: a badge about what a payment would cost is noise
+  // beside a payment that already happened.
+  for (const state of [
+    { kind: "paid", firmName: "F" },
+    { kind: "checkout_processing", firmName: "F", statusAt: null },
+    { kind: "capacity_full", firmName: "F" },
+  ] as const) {
+    assert.doesNotMatch(await read("test", state), /Test mode/, state.kind);
+    assert.doesNotMatch(await read("unconfigured", state), /has not been set up to take payments/i, state.kind);
+  }
+});
+
+test("ticket 628 — the seven new checkout refusal kinds each render their OWN copy", async () => {
+  // The same property the existing refusal cell pins for the original six: a
+  // card that says the same thing for a misconfigured deployment, a full house,
+  // a payment mid-authorisation and a successful cancellation is a card that
+  // tells nobody anything.
+  const kinds = ["payments_misconfigured", "checkout_in_progress", "checkout_expired",
+    "capacity_reached", "payment_in_flight", "cancelled", "nothing_to_cancel"] as const;
+  const rendered = new Map<string, string>();
+  for (const kind of kinds) {
+    const h = await renderComponent(App(createElement(HoldingCard, {
+      state: { kind: "pending", firmName: "ROME PROPERTIES" },
+      checkoutRefusal: { nonce: "n", kind },
+    })));
+    try {
+      for (let i = 0; i < 2; i++) await h.settle();
+      rendered.set(kind, textOf(h.container as never));
+      assert.deepEqual(checkAccessibility(h.container as never), [], `${kind} has a11y violations`);
+      assert.deepEqual(checkKeyboardWalk(h.container as never), [], `${kind} is not keyboard-operable`);
+    } finally {
+      await h.unmount();
+    }
+  }
+  assert.equal(new Set(rendered.values()).size, kinds.length,
+    "two of the new checkout outcome kinds render identical text");
+  // THE CONFIGURATION ONE IS NOT THE OUTAGE ONE. This is the split the ticket
+  // exists for: an operator has to act, and the applicant must be told to stop
+  // pressing rather than to try again in a moment.
+  assert.match(rendered.get("payments_misconfigured") as string, /not a temporary outage/i);
+  assert.doesNotMatch(rendered.get("payments_misconfigured") as string, /try again in a moment/i);
+  // THE CANCEL SUCCESS IS NOT A FAILURE SENTENCE.
+  assert.match(rendered.get("cancelled") as string, /Nothing was charged/i);
+  assert.doesNotMatch(rendered.get("cancelled") as string, /could not|failed/i);
 });

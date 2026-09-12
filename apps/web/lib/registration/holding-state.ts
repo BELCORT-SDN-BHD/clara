@@ -56,7 +56,7 @@ import type {
   RegistrationRequestRow,
 } from "./reads";
 import type { CheckoutProgress } from "./checkout-progress-reads";
-import { NO_CHECKOUT_PROGRESS } from "./checkout-progress-reads";
+import { checkoutStandingFrom, NO_CHECKOUT_PROGRESS } from "./checkout-progress-reads";
 import type { OwnRegistrationResult } from "./server-reads";
 import type { CallerContextDenial } from "@/lib/identity/doors";
 
@@ -76,8 +76,49 @@ export type HoldingState =
    *  verbatim. */
   | { readonly kind: "pending"; readonly firmName: string }
   /** §2.1's "checkout_open, no payment" arm: a `checkout_intents` row for
-   *  this registration carries a Stripe session id. */
+   *  this registration carries a Stripe session id, and the intent states no
+   *  status this build can read.
+   *
+   *  #628 KEPT THIS ARM RATHER THAN REPLACING IT, and the reason is the
+   *  migration boundary. The five arms below are derived from
+   *  `checkout_intents.status`, which migration 0186 adds; between the web
+   *  deploy and the DB deploy — in either order — `intentStatus` is null and
+   *  this is still the only true thing that can be said about a stamped
+   *  intent. Deleting it would have made that window render `pending`, which
+   *  tells an applicant mid-checkout that they have not started one. */
   | { readonly kind: "checkout_open"; readonly firmName: string }
+  /** #628 — the Session exists and nothing has come back about it yet. The
+   *  honest wait, with a re-read control and (when a Session is stamped) a way
+   *  to cancel and start over. */
+  | {
+      readonly kind: "checkout_awaiting_payment";
+      readonly firmName: string;
+      readonly statusAt: string | null;
+      readonly sessionId: string | null;
+    }
+  /** #628 — the bank is confirming an asynchronous payment. */
+  | {
+      readonly kind: "checkout_processing";
+      readonly firmName: string;
+      readonly statusAt: string | null;
+    }
+  /** #628 — the payment was refused. The DB's own machine token rides along
+   *  and is turned into a sentence by `lib/checkout/payment-failure.ts`; it is
+   *  never printed raw into prose. */
+  | {
+      readonly kind: "checkout_failed";
+      readonly firmName: string;
+      readonly reason: string | null;
+    }
+  /** #628 — the Session ran out of time before it was paid. */
+  | { readonly kind: "checkout_expired"; readonly firmName: string }
+  /** #628 — the applicant cancelled it, here or in another tab. */
+  | { readonly kind: "checkout_cancelled"; readonly firmName: string }
+  /** #628 — admission is full and no payment or live intent is in the way.
+   *  Rendered with NO checkout control at all: `open_checkout_intent` refuses
+   *  `capacity_reached`, and a button whose only outcome is a refusal is worse
+   *  than no button. */
+  | { readonly kind: "capacity_full"; readonly firmName: string }
   /** §2.1's "paid, unconsumed" arm: a `firm_registration_payments` row
    *  landed and `claim_paid_firm` has not yet run. */
   | { readonly kind: "paid"; readonly firmName: string }
@@ -194,11 +235,49 @@ export function holdingStateFrom(
       // widening the type keeps every existing `{ok:true, rows, context}`
       // fixture producing the exact same `pending` answer it always did.
       const progress: CheckoutProgress = result.checkoutProgress ?? NO_CHECKOUT_PROGRESS;
-      // PAID outranks CHECKOUT_OPEN: a payment can only exist once a session
-      // was opened, so if both were somehow observed the more-advanced fact
-      // is the true one. Neither is ever inferred from the other's absence —
-      // each is its own positive read (checkout-progress-reads.ts).
+      // PAID outranks EVERYTHING, including a full house: a payment can only
+      // exist once a session was opened, so if both were somehow observed the
+      // more-advanced fact is the true one, and a capacity card shown over an
+      // unconsumed payment would take somebody's money and then close the door
+      // on them with no next step. Neither fact is ever inferred from the
+      // other's absence — each is its own positive read
+      // (checkout-progress-reads.ts).
       if (progress.paidUnconsumed) return { kind: "paid", firmName: newest.firm_name };
+      // #628 — THE INTENT'S OWN STATUS, through the SAME mapper
+      // `/checkout/success` reads (`checkoutStandingFrom`). One intent, two
+      // surfaces, one answer about which wait a person is in; a second copy of
+      // this mapping here would be free to drift from the success page's
+      // (review law 3).
+      switch (checkoutStandingFrom(progress)) {
+        case "processing":
+          return {
+            kind: "checkout_processing",
+            firmName: newest.firm_name,
+            statusAt: progress.intentStatusAt,
+          };
+        case "awaiting_payment":
+          return {
+            kind: "checkout_awaiting_payment",
+            firmName: newest.firm_name,
+            statusAt: progress.intentStatusAt,
+            sessionId: progress.intentSessionId,
+          };
+        case "payment_failed":
+          return {
+            kind: "checkout_failed",
+            firmName: newest.firm_name,
+            reason: progress.intentStatusReason,
+          };
+        case "expired":
+          return { kind: "checkout_expired", firmName: newest.firm_name };
+        case "cancelled":
+          return { kind: "checkout_cancelled", firmName: newest.firm_name };
+        case null:
+          break;
+      }
+      // CAPACITY, only once nothing is in flight. A person mid-payment is not
+      // helped by being told the house is full; a person about to start one is.
+      if (progress.capacityFull) return { kind: "capacity_full", firmName: newest.firm_name };
       if (progress.checkoutOpen) return { kind: "checkout_open", firmName: newest.firm_name };
       return { kind: "pending", firmName: newest.firm_name };
     }

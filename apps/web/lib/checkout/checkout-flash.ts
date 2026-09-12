@@ -51,6 +51,53 @@ export type CheckoutFlashOutcome =
    *  this build will not act on. The intent is open and unstamped, so
    *  retrying is safe and the card says so. */
   | { readonly kind: "stripe_unavailable" }
+  /**
+   * #628 — THE CONFIGURATION ARM, SPLIT OUT OF `stripe_unavailable`.
+   *
+   * `StripeSessionError` has always distinguished `unconfigured` (no secret,
+   * no declared mode, or a key whose class contradicts the declared mode) from
+   * the three failures that mean Stripe itself did not answer — and every one
+   * of them collapsed into the same card, which told the applicant "try again
+   * in a moment" about a state no number of retries can change. The two are
+   * different facts and they owe different sentences: an outage is waited out,
+   * a misconfiguration is fixed by an operator and the person needs to be told
+   * to stop pressing and ask for help. `stripe-session.ts`'s key-class gate
+   * already draws the line internally; this kind is that line reaching a face.
+   */
+  | { readonly kind: "payments_misconfigured" }
+  /**
+   * #628 — `open_checkout_intent` refused `CLR09 checkout_in_progress`: a live
+   * Stripe Session already exists for this registration (one per applicant),
+   * AND the resume could not hand the person back to it — either Stripe said
+   * the Session is `complete` (the money is with the applier now) or the route
+   * could not ask. Never rendered as a failure: nothing is wrong, the payment
+   * is somewhere between the applicant and the bank, and the holding card
+   * beneath this banner carries the intent's own waiting face.
+   */
+  | { readonly kind: "checkout_in_progress" }
+  /** #628 — Stripe says the Session the applicant was resuming has EXPIRED.
+   *  The applier owns the intent's own expiry; this card exists so the person
+   *  is told why the resume went nowhere and is offered a fresh start. */
+  | { readonly kind: "checkout_expired" }
+  /** #628 — `open_checkout_intent` or `claim_paid_firm` refused `CLR09
+   *  capacity_reached`. Its own card, with NO pay control: admission is full,
+   *  and inviting a payment that the door will refuse is how somebody ends up
+   *  believing they bought something. */
+  | { readonly kind: "capacity_reached" }
+  /** #628 — `cancel_checkout_intent` refused `CLR09 payment_in_flight`: the
+   *  bank is still confirming, and nobody — not the applicant, not this app —
+   *  may cancel a payment mid-authorisation. An honest wait, not a failure. */
+  | { readonly kind: "payment_in_flight" }
+  /** #628 — the cancel SUCCEEDED. The one non-refusal outcome this cookie
+   *  carries, and it rides the same channel for the same reason every refusal
+   *  does: the route ends in a redirect, so the outcome has to survive one
+   *  navigation, and a linkable "your checkout was cancelled" is a sentence an
+   *  attacker could hand a victim. */
+  | { readonly kind: "cancelled" }
+  /** #628 — a cancel POST for an applicant whose registration carries no
+   *  intent at all. Not a refusal (no door said no) and not a failure: there
+   *  was simply nothing to cancel, which is what the card says. */
+  | { readonly kind: "nothing_to_cancel" }
   /** `open_checkout_intent`'s plan and `get_current_checkout_plan()`'s plan
    *  disagree — the plan rotated mid-request. Not a door refusal and not a
    *  transport failure: a retry lands wholly on the new plan. */
@@ -155,6 +202,13 @@ export function parseCheckoutFlash(
       return { nonce, kind: "legal_not_accepted", missing: boundedKinds(candidate.missing) };
     case "no_origin_digest":
     case "stripe_unavailable":
+    case "payments_misconfigured":
+    case "checkout_in_progress":
+    case "checkout_expired":
+    case "capacity_reached":
+    case "payment_in_flight":
+    case "cancelled":
+    case "nothing_to_cancel":
     case "plan_rotated":
     case "no_registration":
     case "already_member":

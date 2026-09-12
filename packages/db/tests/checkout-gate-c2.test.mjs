@@ -580,7 +580,24 @@ cell("c2.11 operator problems -- owner+operator wall, list filter, one resolutio
   assert.deepEqual(included.rows, [{ id: target.problemId, resolution: "metadata corrected" }]);
 });
 
-cell("c2.12 settled-payment gate -- unsettled refuses before metadata; settled reaches metadata wall", async () => {
+// #628 (0186) RESHAPED THIS CELL, and the reshape is the ticket rather than a concession.
+//
+// 0160 asked "is it settled" FIRST, because the only thing it could do with an unsettled event was
+// file `payment_not_settled`. That is exactly the shape of a Malaysian FPX (and every other
+// asynchronous method) checkout -- Stripe sends `checkout.session.completed` with
+// `payment_status='unpaid'` the moment the customer leaves the page, and the money lands minutes
+// later -- so the estate wrote an ordinary, self-resolving wait into an operator queue as a fault.
+// 0186 makes that a STATE on the intent (`processing`) and therefore resolves metadata, the intent
+// and intent/session agreement FIRST, for every event type, because every arm now needs the intent.
+//
+// TWO CELLS' WORTH OF CLAIM SURVIVES, SHARPENED RATHER THAN WEAKENED. An unsettled event naming an
+// intent that does not exist is now `intent_not_found` and an event with no metadata at all is now
+// `metadata_missing` -- in both cases the MORE SPECIFIC true statement about the event, and in both
+// cases still exactly one problem row and still `applied: 0`. The settled-but-metadata-less arm is
+// unchanged. The positive limb of the new behaviour -- an unsettled event against a REAL intent
+// becoming `processing` with NO problem row -- is added below, because a cell that only proves the
+// old name is gone proves nothing about what replaced it.
+cell("c2.12 settled-payment gate -- an unsettled event resolves the intent first, and an unsettled REAL intent becomes processing", async () => {
   const unsettledEvent = stripeEventId("unsettled");
   await recordEvent(unsettledEvent, "checkout.session.completed", {
     livemode: false,
@@ -597,7 +614,44 @@ cell("c2.12 settled-payment gate -- unsettled refuses before metadata; settled r
   const unsettledProblem = await rootQuery(
     "select problem from clara.stripe_event_problems where event_id=$1", [unsettledEvent],
   );
-  assert.deepEqual(unsettledProblem.rows, [{ problem: "payment_not_settled" }]);
+  assert.deepEqual(unsettledProblem.rows, [{ problem: "intent_not_found" }],
+    "an unsettled event naming no real intent is named by the intent it cannot find");
+
+  // THE POSITIVE LIMB. A real, stamped intent + a completed-but-unpaid session = `processing`,
+  // no problem row, and the payment store untouched.
+  const asyncApplicant = await insertUser("fs4c2", "async_unpaid");
+  const asyncRegistration = await insertRegistration(asyncApplicant, "asyncunpaid");
+  const asyncSession = `cs_async_${randomUUID()}`;
+  const asyncIntent = await insertIntent({
+    registration: asyncRegistration, applicant: asyncApplicant, session: asyncSession,
+  });
+  const asyncEvent = stripeEventId("asyncunpaid");
+  await recordEvent(asyncEvent, "checkout.session.completed", {
+    livemode: false,
+    session_id: asyncSession,
+    intent_id: asyncIntent,
+    registration_id: asyncRegistration,
+    applicant: asyncApplicant,
+    payment_status: "unpaid",
+    mode: "payment",
+    session_status: "complete",
+  });
+  const processing = await roleQuery("clara_stripe_webhook", "select clara.apply_stripe_events(100) as result");
+  assert.deepEqual(processing.rows[0].result, { examined: 1, applied: 1, problems: 0 },
+    "an asynchronous method's ordinary wait is an APPLIED state, not a problem");
+  const processedIntent = await rootQuery(
+    "select status,status_reason from clara.checkout_intents where id=$1", [asyncIntent],
+  );
+  assert.equal(processedIntent.rows[0].status, "processing");
+  assert.equal(processedIntent.rows[0].status_reason, "unpaid");
+  const noProblem = await rootQuery(
+    "select count(*)::int as n from clara.stripe_event_problems where event_id=$1", [asyncEvent],
+  );
+  assert.equal(noProblem.rows[0].n, 0, "payment_not_settled is not filed for a state the estate can hold");
+  const noPayment = await rootQuery(
+    "select count(*)::int as n from clara.firm_registration_payments where stripe_event_id=$1", [asyncEvent],
+  );
+  assert.equal(noPayment.rows[0].n, 0, "an unsettled session bought nothing");
 
   const missingEvent = stripeEventId("settledmissing");
   await recordEvent(missingEvent, "checkout.session.completed", {
@@ -624,8 +678,10 @@ cell("c2.12 settled-payment gate -- unsettled refuses before metadata; settled r
   const nullSettlementProblem = await rootQuery(
     "select problem from clara.stripe_event_problems where event_id=$1", [nullSettlementEvent],
   );
-  assert.deepEqual(nullSettlementProblem.rows, [{ problem: "payment_not_settled" }],
-    "omitted settlement fields become SQL NULL and fail closed at step 1");
+  assert.deepEqual(nullSettlementProblem.rows, [{ problem: "metadata_missing" }],
+    "omitted fields become SQL NULL and fail closed at step 1 -- which under 0186 is the metadata "
+    + "wall, the more specific true statement about an event carrying no session, intent, "
+    + "registration or applicant at all");
 });
 
 cell("c2.13 consumed rows are excluded before LIMIT and cannot starve a fresh event", async () => {

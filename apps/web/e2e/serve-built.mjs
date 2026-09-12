@@ -136,6 +136,14 @@ const state = {
   checkoutOpen: false,
   paidUnconsumed: false,
   firmOpened: false,
+  // #628 — migration 0186's intent lifecycle, driven by the control surface the
+  // way C-5's applier drives it in production (processing → paid /
+  // payment_failed / expired) plus the capacity verdict that closes admission.
+  intentStatus: null,
+  intentStatusAt: null,
+  intentStatusReason: null,
+  intentSessionId: null,
+  capacityFull: false,
   // The auth wall's scripted verdict, so a spec can drive the locked and
   // wrong-code polarities without inventing a rate wall in the browser.
   authWall: { mode: "verify" },
@@ -438,16 +446,26 @@ async function handleSupabase(request, response, url) {
   }
 
   if (request.method === "GET" && path === "/rest/v1/firm_registration_requests_visible") {
+    // #628 — THE CLAIM'S EFFECT ON THE REGISTRATION ROW, which this fixture used
+    // to leave out. `clara.claim_paid_firm` stamps `firm_id` and closes the
+    // request in the SAME transaction that creates the firm, and `/checkout/
+    // success` reads exactly those two columns to decide that a second claim is
+    // a no-op rather than something to run again. Without them, a second tab
+    // pressing "Open my firm" read as "nothing to claim" and landed on an
+    // `unavailable` card for a firm that exists — a fixture gap that made the
+    // concurrent-claim walk measure the wrong thing. Every spec that never
+    // claims is untouched: `firmOpened` is false until `claim_paid_firm` runs
+    // and the control surface's `reset` clears it.
     sendJson(response, 200, state.registrationOpen ? [{
       id: REQUEST_ID,
       applicant: SUBJECT,
       firm_name: state.firmName,
       note: state.note,
-      status: "open",
+      status: state.firmOpened ? "approved" : "open",
       decided_by: null,
-      decided_at: null,
+      decided_at: state.firmOpened ? "2026-09-12T04:35:00.000Z" : null,
       reason: null,
-      firm_id: null,
+      firm_id: state.firmOpened ? FIRM_ID : null,
       created_at: "2026-08-31T00:05:00.000Z",
     }] : [], cors);
     return;

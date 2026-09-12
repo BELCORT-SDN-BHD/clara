@@ -40,7 +40,22 @@ const EXPECTED_CELLS = 68; // +8 fold cells: c3.23a-d, c3.30f and c3.52a/b/c
 // which a publish landing between the check and the pin pinned a version the applicant never
 // accepted; (2) the reuse arm now stamps a reused pre-0185 intent's NULL terms_version from that
 // same observation. Proven by legal-acceptance.test.mjs la.16/la.17.
-const OPEN_CHECKOUT_INTENT_PROSRC_SHA12 = "29f505b137c1";
+// #628 (0186) recut it AGAIN, deliberately, and the pin moves with it: 29f505b137c1 -> the value
+// below. THREE changes, all reviewed, every other arm and comment 0185's word for word:
+//   (1) a CAPACITY PRE-CHECK -- clara._admission_capacity_state(), the one predicate body
+//       clara.claim_paid_firm enforces under its advisory lock -- placed BEFORE the origin rate
+//       wall, so an applicant the estate is not admitting is refused capacity_reached before they
+//       are also charged an origin slot and long before Stripe;
+//   (2) ONE LIVE SESSION PER REGISTRATION: an intent already in `session_created` or `processing`
+//       now refuses CLR09 checkout_in_progress naming {intent_id, session_id, status, status_at}
+//       instead of silently minting a SECOND live Stripe session against one registration, of
+//       which at most one can ever become a payment (uq_frp_registration) and the other becomes a
+//       customer who paid and a duplicate_payment row in an operator queue;
+//   (3) the reuse arm is scoped to `status='open'` beside 0163's `session_id is null` -- the two
+//       were equivalent until 0186 and are not any more, because a CANCELLED intent is also
+//       unstamped and reusing one would resurrect a checkout its own applicant ended.
+// Proven by checkout-convergence.test.mjs cc.20-cc.24 and by c3.23b below.
+const OPEN_CHECKOUT_INTENT_PROSRC_SHA12 = "84c633cbd8b1";
 
 let live = false;
 let executed = 0;
@@ -859,7 +874,17 @@ cell("c3.23a open idempotency -- same op_key reuses one unstamped intent and one
 
 // POSITIVE CONTROL (same class as c3.30b): every pre-fold call already minted a new intent, so
 // c3.23a (+ c3.53) discriminates A-M1 while this cell proves reuse stops after a session stamp.
-cell("c3.23b positive control -- a stamped intent is consumed and a later call opens a fresh one", async () => {
+// #628 (0186) RESHAPED THIS CELL, and the reshape is the ticket.
+//
+// The claim this cell made -- "a session-stamped intent is consumed and a LATER CALL OPENS A FRESH
+// ONE" -- was the defect #628's spec names: an applicant who abandoned a live Stripe Checkout
+// Session and re-POSTed /checkout ended up with TWO live sessions against one registration, of
+// which at most one can ever become a payment (uq_frp_registration) and the other becomes a
+// customer who paid and a duplicate_payment row in an operator queue. So the SECOND call now
+// REFUSES, naming the live intent, and the "later call opens a fresh one" limb is kept in full --
+// it just has to go through a terminal state first, which is exactly what makes retry after an
+// abandoned or failed payment work. Both limbs are asserted; neither is dropped.
+cell("c3.23b positive control -- a stamped intent refuses a second checkout, and a cancelled one lets a fresh intent open", async () => {
   const user = await insertUser("c3", "open_after_stamp");
   const email = (await rootQuery("select email from clara.users where id=$1", [user])).rows[0].email;
   const req = await insertRegistration(user, "open_after_stamp");
@@ -871,13 +896,41 @@ cell("c3.23b positive control -- a stamped intent is consumed and a later call o
     user, email,
     "select clara.open_checkout_intent($1,$2,$3) as result", [req.id, origin, opKey],
   )).rows[0].result;
-  await recordSession(user, first.intent_id, stripeSessionId("open-after-stamp"), email);
+  const session = stripeSessionId("open-after-stamp");
+  await recordSession(user, first.intent_id, session, email);
+
+  // LIMB 1 -- ONE LIVE SESSION PER REGISTRATION.
+  const refused = await expectRefusal(CLR.lastOwner, () => authenticatedQuery(
+    user, email,
+    "select clara.open_checkout_intent($1,$2,$3) as result", [req.id, origin, opKey],
+  ), /this registration already has a checkout in progress/, "a second live checkout session");
+  const detail = JSON.parse(refused.detail);
+  assert.equal(detail.reason, "checkout_in_progress");
+  assert.equal(detail.intent_id, first.intent_id);
+  assert.equal(detail.session_id, session);
+  assert.equal(detail.status, "session_created");
+  assert.ok(detail.status_at, "the refusal says WHEN the live session was created");
+  const afterRefusal = await rootQuery(
+    `select
+       (select count(*)::int from clara.checkout_intents where registration_id=$1) as intents,
+       (select count(*)::int from clara.registration_rate_events
+         where applicant=$2 and origin_digest=$3) as rate_events`,
+    [req.id, user, origin],
+  );
+  assert.deepEqual(afterRefusal.rows[0], { intents: 1, rate_events: 1 },
+    "the refusal minted no intent and burned no origin slot");
+
+  // LIMB 2 -- and the retry path is still open, through the applicant's own cancellation.
+  await authenticatedQuery(
+    user, email, "select clara.cancel_checkout_intent($1,$2) as result",
+    [first.intent_id, opk("open-after-stamp-cancel")],
+  );
   const second = (await authenticatedQuery(
     user, email,
     "select clara.open_checkout_intent($1,$2,$3) as result", [req.id, origin, opKey],
   )).rows[0].result;
   assert.notEqual(second.intent_id, first.intent_id,
-    "a session-stamped intent is consumed and cannot satisfy a later open");
+    "a cancelled intent is never reused -- a fresh one is minted beside it");
   const counts = await rootQuery(
     `select
        (select count(*)::int from clara.checkout_intents where registration_id=$1) as intents,

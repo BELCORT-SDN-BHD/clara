@@ -2286,6 +2286,53 @@
       "banner": "A checkout session is open for this registration. It won't complete on its own — resume it below, and you'll be able to sign in to your firm once payment goes through.",
       "resume": "Resume checkout"
     },
+    "checkout_awaiting_payment": {
+      "title": "Your checkout is open and not paid yet",
+      "description": "You started a checkout and nothing has come back about it. Pick it up, or cancel it and start over.",
+      "banner": "A checkout is open for this registration and no payment has reached us yet. It won't complete on its own — pick it up below, and you'll be able to sign in to your firm once payment goes through.",
+      "resume": "Resume checkout",
+      "cancel": "Cancel and start again"
+    },
+    "checkout_processing": {
+      "title": "Your bank is confirming the payment",
+      "description": "Nothing is wrong and there is nothing for you to do. This can take a few minutes.",
+      "banner": "Your bank is still confirming this payment. We will open your firm as soon as it clears. Nothing is charged twice by waiting, and this checkout cannot be cancelled while the bank is deciding."
+    },
+    "checkout_failed": {
+      "title": "That payment did not go through",
+      "description": "Nothing was charged and your firm was not opened. You can start a new checkout.",
+      "retry": "Try again"
+    },
+    "paymentFailure": {
+      "card_declined": "Your card was declined. Nothing was charged. Your bank can tell you why; a different card usually works.",
+      "insufficient_funds": "There were not enough funds available on the card. Nothing was charged.",
+      "expired_card": "That card has expired. Nothing was charged.",
+      "incorrect_details": "Some of the card details did not match. Nothing was charged.",
+      "authentication_failed": "The extra security check with your bank was not completed, so the payment stopped. Nothing was charged.",
+      "processing_error": "Something went wrong at the payment provider while taking the payment. Nothing was charged, and trying again usually works.",
+      "unknown": "The payment did not go through. Nothing was charged. Your bank can tell you why."
+    },
+    "checkout_expired": {
+      "title": "That checkout expired",
+      "description": "Checkout pages do not stay open forever. Nothing was charged.",
+      "banner": "The checkout you started is no longer open, so it cannot be paid. Nothing was charged and your application is untouched — start a new one below.",
+      "startAgain": "Start checkout again"
+    },
+    "checkout_cancelled": {
+      "title": "That checkout was cancelled",
+      "description": "Nothing was charged and your application is untouched.",
+      "banner": "This checkout was cancelled, here or in another tab. You can start a new one whenever you are ready.",
+      "startAgain": "Start checkout again"
+    },
+    "capacity_full": {
+      "title": "Admission is currently full",
+      "description": "This is not about your application. We cannot take new firms right now.",
+      "banner": "We are not admitting new firms at the moment, so checkout is closed. Nothing was charged and your application stays where it is. Contact support if you need to know when this opens again."
+    },
+    "checkoutSince": "This has been the state since {when}.",
+    "checkoutCheckAgain": "Check again",
+    "paymentsTestMode": "Test mode — nothing is charged",
+    "paymentsNotConfigured": "This deployment has not been set up to take payments, so checkout cannot start. This is not a temporary outage and trying again will not change it — whoever runs this deployment has to configure it.",
     "paid": {
       "title": "Payment received — finish opening your firm",
       "description": "Your payment landed. One step is left, and it's yours to take below.",
@@ -2324,7 +2371,14 @@
       "no_registration": "There is no open firm application on your account to check out for.",
       "unavailable": "Checkout could not be started. Nothing was charged. Try again in a moment.",
       "already_member": "You already belong to a firm, so there is nothing to buy here — one person can hold one firm. Nothing was charged. Use the link above to go to your firm.",
-      "legal_not_accepted": "Checkout needs every agreement accepted first. Nothing was charged and nothing was opened. These are still outstanding:"
+      "legal_not_accepted": "Checkout needs every agreement accepted first. Nothing was charged and nothing was opened. These are still outstanding:",
+      "payments_misconfigured": "Payments are switched off on this deployment until its configuration is fixed. Nothing was charged. This is not a temporary outage — trying again will not change it. Please contact support.",
+      "checkout_in_progress": "A checkout is already running for this registration, so we did not start a second one. Nothing extra was charged. Where it stands is below.",
+      "checkout_expired": "The checkout you were picking up is no longer open, so it could not be paid. Nothing was charged — start a new one below.",
+      "capacity_reached": "We are not admitting new firms at the moment, so checkout could not start. Nothing was charged and your application stays where it is.",
+      "payment_in_flight": "Your bank is still confirming this payment, so it cannot be cancelled right now. Nothing extra was charged. Wait a moment and check again.",
+      "cancelled": "Your checkout was cancelled. Nothing was charged, and your application is untouched — you can start a new checkout whenever you are ready.",
+      "nothing_to_cancel": "There was no open checkout to cancel. Nothing was charged and nothing changed."
     }
   },
   "Logout": {
@@ -3908,7 +3962,50 @@
     "awaiting_payment": {
       "title": "We have not seen your payment yet",
       "description": "Your money is not lost. We cannot open your firm until the payment is recorded.",
-      "banner": "Stripe has not told us about this payment yet, and it retries on its own. Leave this page and come back, or check your status. If it has not cleared after a while, contact support and tell them you paid but your firm is not open — they can see the payment."
+      "banner": "Your payment provider has not told us about this payment yet, and it keeps trying on its own. This page checks again for you every few seconds. If it still has not cleared, contact support and tell them you paid but your firm is not open — they can see the payment.",
+      "since": "Checkout was started on {when}.",
+      "cancel": "Cancel and start again"
+    },
+    "processing": {
+      "title": "Your bank is confirming the payment",
+      "description": "Nothing is wrong and there is nothing for you to do. This can take a few minutes.",
+      "banner": "Your bank is still confirming this payment. We will open your firm as soon as it clears. Nothing is charged twice by waiting here, and this page checks again for you every few seconds.",
+      "since": "Confirmation started on {when}."
+    },
+    "payment_failed": {
+      "title": "That payment did not go through",
+      "description": "Nothing was charged and your firm was not opened. You can start a new checkout.",
+      "retry": "Try again"
+    },
+    "paymentFailure": {
+      "card_declined": "Your card was declined. Nothing was charged. Your bank can tell you why; a different card usually works.",
+      "insufficient_funds": "There were not enough funds available on the card. Nothing was charged.",
+      "expired_card": "That card has expired. Nothing was charged.",
+      "incorrect_details": "Some of the card details did not match. Nothing was charged.",
+      "authentication_failed": "The extra security check with your bank was not completed, so the payment stopped. Nothing was charged.",
+      "processing_error": "Something went wrong at the payment provider while taking the payment. Nothing was charged, and trying again usually works.",
+      "unknown": "The payment did not go through. Nothing was charged. Your bank can tell you why."
+    },
+    "expired": {
+      "title": "That checkout expired",
+      "description": "Checkout pages do not stay open forever. Nothing was charged.",
+      "banner": "The checkout you started is no longer open, so it cannot be paid. Nothing was charged and your application is untouched — start a new checkout below.",
+      "startAgain": "Start checkout again"
+    },
+    "cancelled": {
+      "title": "That checkout was cancelled",
+      "description": "Nothing was charged and your application is untouched.",
+      "banner": "This checkout was cancelled, here or in another tab. You can start a new one whenever you are ready.",
+      "startAgain": "Start checkout again"
+    },
+    "capacity_full": {
+      "title": "Admission is currently full",
+      "description": "This is not about your application. We cannot take new firms right now.",
+      "banner": "We are not admitting new firms at the moment, so checkout is closed. Nothing was charged. Your application stays where it is — contact support if you need to know when this opens again, and quote your registration reference."
+    },
+    "checkAgain": "Check again",
+    "waiting": {
+      "stopped": "We have stopped checking automatically. Nothing is wrong and nothing was charged twice — use \"Check again\" above whenever you want to look, or contact support and quote this reference:"
     },
     "no_registration": {
       "title": "There is no firm application to finish",

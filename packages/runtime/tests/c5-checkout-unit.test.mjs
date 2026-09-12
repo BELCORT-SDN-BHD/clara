@@ -19,8 +19,10 @@ import {
   verifyStripeSignature,
 } from "../lib/stripe-signature.mjs";
 import {
-  APPLIED_EVENT_TYPE,
+  APPLIED_EVENT_TYPES,
   DENIED_PROJECTION_KEYS,
+  FAILURE_EVENT_TYPE,
+  FAILURE_REASON_KEY,
   PROJECTION_COLUMN_KEYS,
   StripeProjectionError,
   projectStripeEvent,
@@ -55,6 +57,11 @@ import { logSafe } from "../lib/log-safe.mjs";
 const WHSEC_A = "whsec_c5unitfixture0000000000000000000";
 const WHSEC_B = "whsec_c5unitfixture1111111111111111111";
 
+/** Spelled as a LITERAL rather than taken from `APPLIED_EVENT_TYPES[0]`: a test that indexes the
+ *  list under test cannot notice the list being reordered or a member being renamed. `c5.proj.7`
+ *  pins the whole list against these literals. */
+const COMPLETED_EVENT_TYPE = "checkout.session.completed";
+
 const session = (over = {}) => ({
   id: "cs_test_c5fixture",
   object: "checkout.session",
@@ -76,7 +83,7 @@ const session = (over = {}) => ({
 const event = (over = {}, objectOver = {}) => ({
   id: "evt_c5fixture",
   object: "event",
-  type: APPLIED_EVENT_TYPE,
+  type: COMPLETED_EVENT_TYPE,
   api_version: "2026-08-27",
   created: 1_772_000_000,
   livemode: false,
@@ -245,7 +252,7 @@ test("c5.proj.2 the NESTED-PII STRIP WALL: an EXPANDED customer becomes null and
 test("c5.proj.3 the recognised type carries every key record_stripe_event reads", () => {
   const { projection, recognised, eventType } = projectStripeEvent(event());
   assert.equal(recognised, true);
-  assert.equal(eventType, APPLIED_EVENT_TYPE);
+  assert.equal(eventType, COMPLETED_EVENT_TYPE);
   for (const key of PROJECTION_COLUMN_KEYS) {
     assert.equal(Object.hasOwn(projection, key), true, `the projection must carry ${key}`);
   }
@@ -304,6 +311,175 @@ test("c5.proj.6 non-string metadata is stripped rather than coerced", () => {
   assert.deepEqual(malformed, []);
   // A metadata bag that is itself an array is dropped whole.
   assert.equal(projectStripeEvent(event({}, { metadata: ["x"] })).projection.applicant, null);
+});
+
+// ---------------------------------------------------------------------------
+// #628 — the projector across all FOUR applied types (checkout convergence).
+// ---------------------------------------------------------------------------
+
+test("c5.proj.7 APPLIED_EVENT_TYPES is exactly the four terminal Session outcomes", () => {
+  // PINNED AS LITERALS. These four strings are a contract with Stripe's event vocabulary on one
+  // side and with `clara.apply_stripe_events` (0186) on the other; neither end can be renamed by
+  // editing this file, so a typo here is a webhook that records envelope-only forever and an
+  // applicant whose checkout never resolves. The list is also the route's best-effort-apply
+  // trigger, so a member missing from it is a projected event nothing ever applies.
+  assert.deepEqual([...APPLIED_EVENT_TYPES], [
+    "checkout.session.completed",
+    "checkout.session.async_payment_succeeded",
+    "checkout.session.async_payment_failed",
+    "checkout.session.expired",
+  ]);
+  assert.ok(APPLIED_EVENT_TYPES.includes(FAILURE_EVENT_TYPE));
+});
+
+test("c5.proj.8 every applied type is projected through the SAME cell — full shape, no envelope-only", () => {
+  for (const type of APPLIED_EVENT_TYPES) {
+    const { projection, recognised, eventType } = projectStripeEvent(event({ type }));
+    assert.equal(recognised, true, `${type} must be recognised`);
+    assert.equal(eventType, type);
+    for (const key of PROJECTION_COLUMN_KEYS) {
+      assert.equal(Object.hasOwn(projection, key), true, `${type}: the projection must carry ${key}`);
+    }
+    assert.equal(projection.session_id, "cs_test_c5fixture");
+    assert.equal(projection.intent_id, "33333333-3333-4333-8333-333333333333");
+  }
+  // THE CONTROL: a NEIGHBOURING checkout.session type that is NOT on the list stays envelope-only.
+  // Without this the cell would pass for a projector that recognised every `checkout.session.*`.
+  const { projection, recognised } = projectStripeEvent(event({ type: "checkout.session.async_payment_pending" }));
+  assert.equal(recognised, false);
+  assert.deepEqual(Object.keys(projection).sort(), ["api_version", "created", "livemode"]);
+});
+
+test("c5.proj.9 the per-type facts each arm is applied on survive verbatim", () => {
+  // The applier's arms read these three columns and nothing else about the outcome, so the values
+  // an UNPAID completed and an EXPIRED session carry are the whole input to `processing` vs
+  // `paid` vs `expired`. A projector that normalised them would decide the outcome here instead.
+  const unpaid = projectStripeEvent(event({}, { payment_status: "unpaid", status: "open" })).projection;
+  assert.equal(unpaid.payment_status, "unpaid");
+  assert.equal(unpaid.session_status, "open");
+
+  const expired = projectStripeEvent(
+    event({ type: "checkout.session.expired" }, { payment_status: "unpaid", status: "expired" }),
+  ).projection;
+  assert.equal(expired.session_status, "expired");
+
+  const async_ok = projectStripeEvent(
+    event({ type: "checkout.session.async_payment_succeeded" }, { payment_status: "paid", amount_total: 12_900 }),
+  ).projection;
+  assert.equal(async_ok.payment_status, "paid");
+  assert.equal(async_ok.amount_total, 12_900);
+  assert.equal(async_ok.currency, "myr");
+});
+
+test("c5.proj.10 the failure code: decline_code, then code, and NOTHING else out of last_payment_error", () => {
+  const failed = (over) => projectStripeEvent(event({ type: FAILURE_EVENT_TYPE }, over));
+
+  // `decline_code` wins when both are present — it is the issuer's ACTUAL reason, and the copy
+  // table that consumes this token (`apps/web/lib/checkout/payment-failure.ts`) carries entries
+  // that exist only as decline codes. Preferring `code` would collapse every card decline to the
+  // single token `card_declined` and make those entries unreachable.
+  const both = failed({
+    payment_status: "unpaid",
+    last_payment_error: { code: "card_declined", decline_code: "insufficient_funds", message: "Your card was declined." },
+  });
+  assert.equal(both.projection[FAILURE_REASON_KEY], "insufficient_funds");
+  // …and the human MESSAGE — which Stripe composes for the cardholder and which can name them —
+  // never reaches the projection at all.
+  assert.equal(JSON.stringify(both.projection).includes("Your card was declined."), false);
+  assert.deepEqual(both.malformed, []);
+
+  // …and `code` is the fallback when there is no decline code, which is every NON-card failure.
+  for (const over of [
+    { last_payment_error: { code: "payment_intent_authentication_failure" } },
+    { last_payment_error: { code: "payment_intent_authentication_failure", decline_code: null } },
+  ]) {
+    assert.equal(failed(over).projection[FAILURE_REASON_KEY], "payment_intent_authentication_failure");
+  }
+
+  // ABSENT IS NULL AND THE KEY IS STILL THERE: "we looked, Stripe sent nothing" is a different
+  // fact from "nobody looked", and `clara.stripe_events` is append-only.
+  const absent = failed({ payment_status: "unpaid" });
+  assert.equal(Object.hasOwn(absent.projection, FAILURE_REASON_KEY), true);
+  assert.equal(absent.projection[FAILURE_REASON_KEY], null);
+
+  // The strip wall still applies one level down: a non-object `last_payment_error` is DROPPED,
+  // and a nested OBJECT where a code leaf was expected is nulled and NAMED.
+  const scalarErr = failed({ last_payment_error: "card_declined" });
+  assert.equal(scalarErr.projection[FAILURE_REASON_KEY], null);
+  assert.ok(scalarErr.dropped.includes("last_payment_error"));
+  const nested = failed({ last_payment_error: { decline_code: { expanded: "object" } } });
+  assert.equal(nested.projection[FAILURE_REASON_KEY], null);
+  assert.ok(nested.dropped.includes(FAILURE_REASON_KEY));
+
+  // The 64-character printable-ASCII bound the status columns carry applies here too — over-long
+  // is NULLED AND NAMED, never truncated into a value Stripe never sent.
+  const long = failed({ last_payment_error: { decline_code: "d".repeat(65) } });
+  assert.equal(long.projection[FAILURE_REASON_KEY], null);
+  assert.deepEqual(long.malformed, [FAILURE_REASON_KEY]);
+  assert.equal(JSON.stringify(long.projection).includes("d".repeat(65)), false);
+
+  // THE OTHER THREE TYPES NEVER CARRY THE KEY, even when the session object does carry the field.
+  for (const type of APPLIED_EVENT_TYPES.filter((t) => t !== FAILURE_EVENT_TYPE)) {
+    const { projection } = projectStripeEvent(event({ type }, { last_payment_error: { code: "card_declined" } }));
+    assert.equal(Object.hasOwn(projection, FAILURE_REASON_KEY), false, `${type} must not carry ${FAILURE_REASON_KEY}`);
+    assert.equal(JSON.stringify(projection).includes("card_declined"), false);
+  }
+});
+
+test("c5.proj.11 PII SMUGGLED THROUGH METADATA is refused on every applied type", () => {
+  // The three metadata slots are OURS and uuid-typed at the door. Somebody putting an email or an
+  // address in one — by mistake or on purpose — must not get it into an append-only table with no
+  // erasure door, and a metadata bag carrying a denied KEY must not get that key in either: the
+  // projector reads three named keys out of the bag, never the bag.
+  for (const type of APPLIED_EVENT_TYPES) {
+    const { projection, malformed } = projectStripeEvent(
+      event({ type }, {
+        metadata: {
+          clara_registration_id: "person@example.test",
+          clara_applicant: "12 Jalan Example, Kuala Lumpur",
+          clara_intent_id: "33333333-3333-4333-8333-333333333333",
+          customer_email: "leak@example.test",
+          customer_details: "A Person",
+          note: "whatever Stripe's dashboard let somebody type",
+        },
+      }),
+    );
+    assert.equal(projection.registration_id, null, type);
+    assert.equal(projection.applicant, null, type);
+    assert.equal(projection.intent_id, "33333333-3333-4333-8333-333333333333", `${type}: the well-formed sibling survives`);
+    assert.deepEqual(
+      [...malformed].sort(),
+      ["clara_applicant", "clara_registration_id"],
+      `${type}: both malformed slots are NAMED`,
+    );
+    for (const denied of DENIED_PROJECTION_KEYS) assert.equal(Object.hasOwn(projection, denied), false, `${type}/${denied}`);
+    const serialised = JSON.stringify(projection);
+    for (const leak of ["person@example.test", "Jalan Example", "leak@example.test", "A Person", "whatever Stripe"]) {
+      assert.equal(serialised.includes(leak), false, `${type}: ${leak} reached the projection`);
+    }
+  }
+});
+
+test("c5.proj.12 a malformed data.object refuses by NAME on every applied type", () => {
+  // Item 1's own requirement: the widening must not turn a malformed object on one of the three
+  // new types into a 500. Each refusal is the SAME typed error the completed arm has always
+  // raised, which `webhookRefusal` maps to the 400 the response matrix documents — and the
+  // message names the type that failed, which is how an operator finds it in the log.
+  for (const type of APPLIED_EVENT_TYPES) {
+    for (const data of [{ object: null }, { object: "not an object" }, { object: ["array"] }, {}]) {
+      assert.throws(
+        () => projectStripeEvent(event({ type, data })),
+        (e) => {
+          assert.ok(e instanceof StripeProjectionError, `${type}: not a StripeProjectionError`);
+          assert.equal(e.code, "object_absent", `${type} with ${JSON.stringify(data)}`);
+          // The message names the TYPE that failed — and it is one of this module's own four
+          // literals, never the wire's `type` string, so it cannot forge a log line.
+          assert.ok(String(e.message).startsWith(type), `the refusal must name ${type}: ${e.message}`);
+          return true;
+        },
+      );
+    }
+  }
 });
 
 // ---------------------------------------------------------------------------

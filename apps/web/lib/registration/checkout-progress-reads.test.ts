@@ -17,9 +17,11 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
+  CHECKOUT_INTENT_STATUSES,
   NO_CHECKOUT_PROGRESS,
   OWN_CHECKOUT_PROGRESS_DOOR,
   checkoutProgressFrom,
+  checkoutStandingFrom,
   probeCheckoutProgress,
 } from "./checkout-progress-reads";
 import type { SessionTokenAccessor } from "@/lib/session";
@@ -98,6 +100,7 @@ test("the door's own two booleans are carried through, both polarities, in ONE c
       (async () => { calls += 1; return jsonResponse([row]); }) as typeof fetch,
       async () => {
         assert.deepEqual(await probeCheckoutProgress(accessor, REGISTRATION, APPLICANT), {
+          ...NO_CHECKOUT_PROGRESS,
           checkoutOpen: row.checkout_open,
           paidUnconsumed: row.paid_unconsumed,
         });
@@ -142,9 +145,131 @@ test("a malformed row is NO observation, not a weak one", () => {
   }
   // MUST-NOT-RED control: the well-formed shape is still read.
   assert.deepEqual(checkoutProgressFrom([{ checkout_open: true, paid_unconsumed: true }]), {
+    ...NO_CHECKOUT_PROGRESS,
     checkoutOpen: true,
     paidUnconsumed: true,
   });
+});
+
+// ===========================================================================
+// #628 — MIGRATION 0186's FIVE NEW FIELDS
+// ===========================================================================
+
+test("#628: the five new fields are carried through, each in its own right", () => {
+  assert.deepEqual(
+    checkoutProgressFrom([{
+      checkout_open: true,
+      paid_unconsumed: false,
+      intent_status: "processing",
+      intent_status_at: "2026-09-12T04:30:00.000Z",
+      intent_status_reason: "card_declined",
+      intent_session_id: "cs_test_628",
+      capacity_full: true,
+    }]),
+    {
+      checkoutOpen: true,
+      paidUnconsumed: false,
+      intentStatus: "processing",
+      intentStatusAt: "2026-09-12T04:30:00.000Z",
+      intentStatusReason: "card_declined",
+      intentSessionId: "cs_test_628",
+      capacityFull: true,
+    },
+  );
+});
+
+test("#628: ALL EIGHT statuses the door can return are read, and a ninth is not", () => {
+  // The vocabulary is closed on purpose. A status this build has never seen is
+  // not a weaker observation of a known one — every face falls back to the
+  // reading it had before the status column existed, rather than guessing which
+  // known status an unknown one most resembles.
+  for (const status of CHECKOUT_INTENT_STATUSES) {
+    assert.equal(
+      checkoutProgressFrom([{ checkout_open: true, paid_unconsumed: false, intent_status: status }]).intentStatus,
+      status,
+      status,
+    );
+  }
+  for (const bogus of ["refunded", "PAID", "", null, 7, {}, ["paid"]]) {
+    assert.equal(
+      checkoutProgressFrom([{ checkout_open: true, paid_unconsumed: false, intent_status: bogus }]).intentStatus,
+      null,
+      JSON.stringify(bogus),
+    );
+  }
+});
+
+test("#628: A DOOR THAT PREDATES 0186 STILL YIELDS ITS TWO BOOLEANS", () => {
+  // THE MIGRATION-WINDOW PROPERTY, and the reason the new fields are decoded
+  // separately from the two booleans rather than all-or-nothing with them.
+  // Between the web deploy and the DB deploy — in EITHER order — the door
+  // returns the old two-column row. If that degraded the whole observation to
+  // NO_CHECKOUT_PROGRESS, an applicant with a live checkout would be told on
+  // /pending that they have not started one.
+  assert.deepEqual(checkoutProgressFrom([{ checkout_open: true, paid_unconsumed: false }]), {
+    ...NO_CHECKOUT_PROGRESS,
+    checkoutOpen: true,
+    paidUnconsumed: false,
+  });
+});
+
+test("#628: a nullable text column that is not a usable string is an ABSENCE", () => {
+  // `"null"`, `""` and `[object Object]` are the three shapes a careless
+  // decoder puts on screen beside somebody's payment. None of them is a time.
+  for (const bad of [null, "", 0, {}, []]) {
+    const decoded = checkoutProgressFrom([{
+      checkout_open: true,
+      paid_unconsumed: false,
+      intent_status_at: bad,
+      intent_status_reason: bad,
+      intent_session_id: bad,
+    }]);
+    assert.equal(decoded.intentStatusAt, null, JSON.stringify(bad));
+    assert.equal(decoded.intentStatusReason, null, JSON.stringify(bad));
+    assert.equal(decoded.intentSessionId, null, JSON.stringify(bad));
+  }
+});
+
+test("#628: capacity_full is TRUE only when the door said true", () => {
+  // A capacity card closes the door on somebody. `"false"`, `0` and `"yes"` are
+  // all truthy-or-falsy in ways that do not survive a shape change, so the test
+  // is identity against `true` and nothing else.
+  for (const value of [true]) {
+    assert.equal(checkoutProgressFrom([{ checkout_open: false, paid_unconsumed: false, capacity_full: value }]).capacityFull, true);
+  }
+  for (const value of [false, "true", 1, null, undefined, {}]) {
+    assert.equal(
+      checkoutProgressFrom([{ checkout_open: false, paid_unconsumed: false, capacity_full: value }]).capacityFull,
+      false,
+      JSON.stringify(value),
+    );
+  }
+});
+
+test("#628: checkoutStandingFrom is TOTAL over the closed status vocabulary", () => {
+  // The mapper `/pending` and `/checkout/success` BOTH read. A status with no
+  // arm would fall off the end of the switch and produce `undefined`, which
+  // renders as no face at all — the silent hole this cell exists to close.
+  const expected: Record<string, string | null> = {
+    open: null,
+    session_created: "awaiting_payment",
+    processing: "processing",
+    paid: "awaiting_payment",
+    consumed: "awaiting_payment",
+    expired: "expired",
+    payment_failed: "payment_failed",
+    cancelled: "cancelled",
+  };
+  for (const status of CHECKOUT_INTENT_STATUSES) {
+    assert.equal(
+      checkoutStandingFrom({ ...NO_CHECKOUT_PROGRESS, intentStatus: status }),
+      expected[status],
+      status,
+    );
+  }
+  // An unreadable status keeps the PRE-#628 reading, which is the whole point
+  // of the null arm.
+  assert.equal(checkoutStandingFrom(NO_CHECKOUT_PROGRESS), null);
 });
 
 test("the retired relation reads are gone: no request names either C-3 table", async () => {

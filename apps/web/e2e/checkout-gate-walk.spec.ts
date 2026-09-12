@@ -1,5 +1,5 @@
 import AxeBuilder from "@axe-core/playwright";
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Browser, type Page } from "@playwright/test";
 
 // Read from the environment, matching `signup-confirm-pending.spec.ts` and the
 // Playwright config. A hardcoded origin here silently defeats the lane's
@@ -88,6 +88,10 @@ type ControlState = {
   checkoutOpen: boolean;
   paidUnconsumed: boolean;
   firmOpened: boolean;
+  /** #628 — migration 0186's intent lifecycle, as the mock currently holds it. */
+  intentStatus: string | null;
+  intentSessionId: string | null;
+  capacityFull: boolean;
 };
 
 async function control(page: Page, body: Record<string, unknown>): Promise<ControlState> {
@@ -278,9 +282,23 @@ test("THE WHOLE JOURNEY: confirm → DPA → checkout → success → the firm o
   // The Stripe seam refuses on this harness (see this file's header), so the
   // design's own typed card is what must render — never a spinner, never a
   // silent stay. The person is back on the holding page with a true sentence.
+  //
+  // #628 CHANGED WHICH CARD THAT IS, AND THE CHANGE IS THE POINT. The harness
+  // leaves `STRIPE_SECRET_KEY` unset, so the seam refuses `unconfigured` — a
+  // CONFIGURATION failure, which used to render as "we could not reach the
+  // payment provider … try again in a moment". That sentence told an applicant
+  // to keep pressing a button that could never work. The card now says payments
+  // are switched off until an operator fixes the deployment, and says
+  // explicitly that retrying will not change it.
   await expect(page).toHaveURL(/\/pending\?checkout=/, NAV);
-  await expect(page.getByText(/could not reach the payment provider/i)).toBeVisible();
-  await scan(page, "the stripe-unavailable card");
+  await expect(page.getByText(/Payments are switched off on this deployment/i)).toBeVisible();
+  // `.first()` because this harness declares NO Stripe mode either, so the card
+  // is accompanied by the holding page's own "payments are not configured" note
+  // — two true statements about the same deployment, which is exactly what an
+  // unconfigured beta box should say.
+  await expect(page.getByText(/not a temporary outage/i).first()).toBeVisible();
+  await expect(page.getByText(/could not reach the payment provider/i)).toHaveCount(0);
+  await scan(page, "the payments-misconfigured card");
 
 
   const afterCheckout = await control(page, {});
@@ -542,4 +560,359 @@ test("A GET can never open a Checkout Session, and never create a firm", async (
   // side effect rather than the response.
   expect(after.doorCalls, "a GET reached a door").toEqual([]);
   expect(after.firmOpened, "a GET created a firm").toBe(false);
+});
+
+// ===========================================================================
+// #628 — THE INTENT'S LIFECYCLE, WALKED
+// ===========================================================================
+//
+// WHAT THESE CELLS REACH AND WHAT THEY DO NOT, stated before the first one so a
+// green run is never read as more than it measured.
+//
+// REAL: `/pending` and `/checkout/success` re-derived from the door on every
+// load, the five status faces, the controls each offers, `POST /checkout`'s
+// resume arm running through `open_checkout_intent`'s own `checkout_in_progress`
+// refusal, `POST /checkout/cancel` running `cancel_checkout_intent` for real,
+// the flash cookies, the redirects, and the claim.
+//
+// STOOD IN FOR: the C-3/C-6/0186 doors (`fs4-checkout-mock.mjs`) and the
+// APPLIER — a real run replays a signed Stripe event through C-5's webhook, and
+// here the applier's OBSERVABLE effect (the intent's status, and the payment
+// row) is set through the control surface instead.
+//
+// NOT STOOD IN FOR AT ALL: Stripe. There is no base override (this file's
+// header, and `lib/checkout/stripe-session.ts`'s), so the harness leaves
+// `STRIPE_SECRET_KEY` unset and every Stripe hop refuses `unconfigured` before
+// a socket opens. For CANCEL that costs nothing — the door runs first and the
+// expiry is best effort by design, so the walk is the production journey. For
+// RESUME it means the walk reaches the configuration card rather than Stripe's
+// hosted page, and what it proves there is the property that actually matters:
+// NO SECOND SESSION WAS MINTED. The two calls' own wire shapes are pinned field
+// by field in `lib/checkout/stripe-session.test.ts`.
+
+/** Reach the holding page with both agreements accepted — the state every cell
+ *  below starts from, because an unaccepted agreement refuses at
+ *  `open_checkout_intent` before any of this is reachable. */
+async function reachAcceptedHolding(page: Page, prefix: string) {
+  await reachLegalStage(page, `${prefix}-${Date.now()}@example.test`);
+  await acceptAgreement(page, "Terms of Service");
+  await acceptAgreement(page, "Data Processing Agreement");
+  await page.goto("/pending");
+}
+
+test("THE WAIT CONVERGES: session → processing → paid → the firm opens", async ({ page }) => {
+  // JOURNEY A1's core claim, walked: "stages resume from persisted
+  // intent/webhook/claim" and "late payment confirmation has a waiting
+  // explanation and recovery link". Every transition below is applied to the
+  // DATABASE and then READ BACK by the page — the browser is never told what
+  // state it is in.
+  await reachAcceptedHolding(page, "e2e-converge");
+
+  // ── the Session exists and nothing has come back ─────────────────────────
+  await control(page, { checkoutOpen: true, intentStatus: "session_created", intentSessionId: "cs_e2e_live" });
+  await page.goto("/checkout/success");
+  await expect(page.getByRole("heading", { name: "We have not seen your payment yet" })).toBeVisible();
+  // A RE-READ, NOT A GUESS, and a way out of a checkout the person no longer
+  // wants. Both are real form submissions to the server.
+  await expect(page.getByRole("button", { name: "Check again" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Cancel and start again" })).toBeVisible();
+  await scan(page, "the awaiting-payment face");
+
+  // ── the bank starts confirming (the applier's own transition) ────────────
+  await control(page, { intentStatus: "processing" });
+  await page.getByRole("button", { name: "Check again" }).click();
+  await expect(page).toHaveURL(`${APP_ORIGIN}/checkout/success`, NAV);
+  await expect(page.getByRole("heading", { name: "Your bank is confirming the payment" })).toBeVisible();
+  // THE DB's OWN TIME, not an ETA. The card says when the state began; nothing
+  // on it predicts when it will end.
+  await expect(page.getByText(/Confirmation started on /)).toBeVisible();
+  // AND NO CLAIM CONTROL: there is no payment row yet, so pressing one could
+  // only produce a refusal.
+  await expect(page.getByRole("button", { name: "Open my firm" })).toHaveCount(0);
+  // NOR A CANCEL: the bank is mid-authorisation and nobody may pull the rug.
+  await expect(page.getByRole("button", { name: "Cancel and start again" })).toHaveCount(0);
+  await scan(page, "the processing face");
+  expect((await control(page, {})).firmOpened, "a waiting face created a firm").toBe(false);
+
+  // ── the payment clears ───────────────────────────────────────────────────
+  await control(page, { intentStatus: "paid", paidUnconsumed: true });
+  await page.getByRole("button", { name: "Check again" }).click();
+  await expect(page.getByRole("heading", { name: "Your payment went through" })).toBeVisible();
+  // THE GET STILL CREATED NOTHING. M9's law survives every one of these
+  // re-reads.
+  expect((await control(page, {})).firmOpened).toBe(false);
+
+  await page.getByRole("button", { name: "Open my firm" }).click();
+  const after = await control(page, {});
+  expect(after.firmOpened, "claim_paid_firm never ran").toBe(true);
+  expect(after.paidUnconsumed, "the payment was not consumed").toBe(false);
+});
+
+test("A FAILED PAYMENT SAYS SO, and Try again opens a NEW intent", async ({ page }) => {
+  // THE DEFECT THIS WALKS. Before 0186 a declined card read as "we have not
+  // seen your payment yet … it keeps trying on its own" — about a payment that
+  // was refused and never will arrive. The card now names the cause in plain
+  // words and offers the only act that helps: a new checkout.
+  await reachAcceptedHolding(page, "e2e-declined");
+  await control(page, {
+    checkoutOpen: true,
+    intentStatus: "payment_failed",
+    intentStatusReason: "card_declined",
+    intentSessionId: null,
+  });
+  await page.reload();
+
+  await expect(page.getByRole("heading", { name: "That payment did not go through" })).toBeVisible();
+  await expect(page.getByText(/Your card was declined/i)).toBeVisible();
+  await expect(page.getByText(/Nothing was charged/i).first()).toBeVisible();
+  // NO JARGON REACHES THE PERSON: the provider's token lives in the collapsed
+  // technical disclosure, never in the sentence.
+  await expect(page.getByText(/webhook/i)).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Resume checkout" })).toHaveCount(0);
+  await scan(page, "the payment-failed face");
+
+  const before = await control(page, {});
+  const opensBefore = before.doorCalls.filter((fn) => fn === "open_checkout_intent").length;
+  await page.getByRole("button", { name: "Try again" }).click();
+  await expect(page).toHaveURL(/\/pending\?checkout=/, NAV);
+  const after = await control(page, {});
+  // A TERMINAL INTENT IS NOT LIVE, so the door opens a NEW one rather than
+  // refusing `checkout_in_progress` — which is exactly what "try again" has to
+  // mean for a payment that failed.
+  expect(
+    after.doorCalls.filter((fn) => fn === "open_checkout_intent").length,
+    "Try again did not reach open_checkout_intent",
+  ).toBe(opensBefore + 1);
+  expect(after.intentStatus, "the new intent did not replace the failed one").toBe("open");
+});
+
+test("AN EXPIRED CHECKOUT offers a fresh start, and a CANCELLED one says so", async ({ page }) => {
+  await reachAcceptedHolding(page, "e2e-expired");
+  await control(page, { checkoutOpen: true, intentStatus: "expired", intentSessionId: null });
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "That checkout expired" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Start checkout again" })).toBeVisible();
+  await scan(page, "the expired face");
+
+  await control(page, { intentStatus: "cancelled" });
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "That checkout was cancelled" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Start checkout again" })).toBeVisible();
+  await scan(page, "the cancelled face");
+});
+
+test("CANCEL AND START AGAIN: the door decides, the intent ends, and nothing was charged", async ({ page }) => {
+  // THE RELEASE VALVE. One live Session per registration is what stops a
+  // double-press from minting two subscriptions; without this route the same
+  // rule traps anybody who opened a checkout they no longer want.
+  //
+  // THE STRIPE EXPIRY REFUSES ON THIS HARNESS (no key), WHICH IS THE INTERESTING
+  // HALF. `cancel_checkout_intent` runs FIRST and the expiry is best effort by
+  // design, so a failed expiry must leave the intent cancelled and the person
+  // told their checkout was cancelled — which is true. This walk is therefore
+  // the production journey, not a reduced one.
+  await reachAcceptedHolding(page, "e2e-cancel");
+  await control(page, { checkoutOpen: true, intentStatus: "session_created", intentSessionId: "cs_e2e_live" });
+  await page.reload();
+
+  await expect(page.getByRole("heading", { name: "Your checkout is open and not paid yet" })).toBeVisible();
+  await page.getByRole("button", { name: "Cancel and start again" }).click();
+  await expect(page).toHaveURL(/\/pending\?checkout=/, NAV);
+  await expect(page.getByText(/Your checkout was cancelled/i).first()).toBeVisible();
+  await expect(page.getByText(/Nothing was charged/i).first()).toBeVisible();
+  await scan(page, "the cancelled outcome");
+
+  const after = await control(page, {});
+  expect(after.doorCalls, "the cancel door never ran").toContain("cancel_checkout_intent");
+  expect(after.intentStatus, "the intent was not cancelled at the door").toBe("cancelled");
+  expect(after.checkoutOpen).toBe(false);
+  expect(after.firmOpened, "a cancellation created a firm").toBe(false);
+
+  // AND THE PERSON CAN START OVER, from the face the re-read produced.
+  await expect(page.getByRole("button", { name: "Start checkout again" })).toBeVisible();
+
+  // The outcome never rides the URL: the marker is opaque and carries nothing.
+  const url = new URL(page.url());
+  expect([...url.searchParams.keys()]).toEqual(["checkout"]);
+  expect(url.search).not.toContain("cancel");
+});
+
+test("A PAYMENT IN FLIGHT CANNOT BE CANCELLED, and the card says why", async ({ page }) => {
+  // The door's own refusal, reached the way a person reaches it: the cancel
+  // control is offered on the unpaid face, the bank starts confirming in
+  // another tab, and the press lands on a door that refuses.
+  await reachAcceptedHolding(page, "e2e-inflight");
+  await control(page, { checkoutOpen: true, intentStatus: "session_created", intentSessionId: "cs_e2e_live" });
+  await page.goto("/checkout/success");
+  await expect(page.getByRole("button", { name: "Cancel and start again" })).toBeVisible();
+
+  await control(page, { intentStatus: "processing" });
+  await page.getByRole("button", { name: "Cancel and start again" }).click();
+  await expect(page).toHaveURL(/\/pending\?checkout=/, NAV);
+  await expect(page.getByText(/still confirming this payment, so it cannot be cancelled/i)).toBeVisible();
+  await scan(page, "the payment-in-flight card");
+  // THE INTENT SURVIVED. A refused cancel must not half-cancel anything.
+  expect((await control(page, {})).intentStatus).toBe("processing");
+});
+
+test("RESUME NEVER MINTS A SECOND SESSION", async ({ page }) => {
+  // `open_checkout_intent` refuses `checkout_in_progress`, and the route's
+  // answer is to hand the person back the Session they already have rather
+  // than create another. Stripe is unreachable on this harness, so the walk
+  // stops at the configuration card — but the property that matters is
+  // measurable either way and is measured here: the one-shot intent was never
+  // stamped a second time and no second checkout was opened.
+  await reachAcceptedHolding(page, "e2e-resume");
+  await control(page, { checkoutOpen: true, intentStatus: "session_created", intentSessionId: "cs_e2e_live" });
+  await page.reload();
+
+  await page.getByRole("button", { name: "Resume checkout" }).click();
+  await expect(page).toHaveURL(/\/pending\?checkout=/, NAV);
+  await expect(page.getByText(/Payments are switched off on this deployment/i)).toBeVisible();
+
+  const after = await control(page, {});
+  expect(after.doorCalls, "the resume stamped the intent again").not.toContain("record_checkout_session");
+  expect(after.intentSessionId, "the live Session was replaced").toBe("cs_e2e_live");
+  expect(after.intentStatus).toBe("session_created");
+});
+
+test("ADMISSION FULL: the face offers no way to pay, and the door refuses before it is asked to", async ({ page }) => {
+  await reachAcceptedHolding(page, "e2e-capacity");
+  await control(page, { capacityFull: true });
+  await page.reload();
+
+  await expect(page.getByRole("heading", { name: "Admission is currently full" })).toBeVisible();
+  // NO PAY CONTROL AT ALL, which is the point: every act this face could offer
+  // is one the door refuses.
+  await expect(page.getByRole("button", { name: "Resume checkout" })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "Continue to checkout" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Start checkout again" })).toHaveCount(0);
+  await scan(page, "the capacity-full face");
+
+  // AND THE DOOR IS STILL THE WALL. Reached the way a stale tab reaches it —
+  // through the legal stage's own control, which is the one route to
+  // `POST /checkout` that exists while the face above is on screen elsewhere.
+  await page.goto("/signup");
+  await page.getByRole("button", { name: "Continue to checkout" }).click();
+  await expect(page).toHaveURL(/\/pending\?checkout=/, NAV);
+  // TWO of them, deliberately: the refusal banner reporting what just happened,
+  // above the capacity face reporting where the application stands. `.first()`
+  // reads the refusal; the face beneath it is asserted by its own heading.
+  await expect(page.getByText(/not admitting new firms at the moment/i).first()).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Admission is currently full" })).toBeVisible();
+  await scan(page, "the capacity-reached refusal card");
+});
+
+test("TWO CONTEXTS RACE THE CLAIM: one firm, and the loser is not shown a failure", async ({ page, browser }) => {
+  // 裁-89's folded door serialises on the registration (`FOR UPDATE`, celled
+  // against a real Postgres in `packages/db/tests/checkout-gate-c6.test.mjs`);
+  // the mock serialises the same way. What THIS walk owes is the browser half:
+  // two signed-in contexts, one paid registration, and neither person left
+  // reading an error about a firm that exists.
+  await reachAcceptedHolding(page, "e2e-race");
+  await control(page, { checkoutOpen: true, intentStatus: "paid", paidUnconsumed: true });
+
+  // A SECOND CONTEXT FOR THE SAME PERSON — their other device, or the tab they
+  // opened from the receipt email. Seeded from the first context's own storage
+  // so it is genuinely the same session rather than a second applicant.
+  const second = await (browser as Browser).newContext({
+    storageState: await page.context().storageState(),
+    ignoreHTTPSErrors: true,
+    baseURL: APP_ORIGIN,
+    extraHTTPHeaders: { "x-clara-e2e-client-ip": "203.0.113.7" },
+  });
+  const other = await second.newPage();
+  try {
+    await page.goto("/checkout/success");
+    await other.goto("/checkout/success");
+    // BOTH see the claim, because both read the same true state.
+    await expect(page.getByRole("button", { name: "Open my firm" })).toBeVisible();
+    await expect(other.getByRole("button", { name: "Open my firm" })).toBeVisible();
+
+    // BOTH PRESSES ARE 303s TO THE FIRM HOME. This harness's caller-context
+    // fixture does not grant a membership on a claim (it is keyed on the
+    // sign-in address), so the firm shell's scope spine forwards a still-
+    // membership-less session on to /pending — which is itself the correct
+    // behaviour and is what the whole-journey cell above deliberately does not
+    // assert either. What is under test here is the CLAIM's convergence, so the
+    // assertions are: neither press landed back on a refusal card, and the
+    // door ran exactly once.
+    await page.getByRole("button", { name: "Open my firm" }).click();
+    await expect(page).toHaveURL(`${APP_ORIGIN}/pending`, NAV);
+    expect(page.url(), "the winner was sent back to a refusal card").not.toContain("claim=");
+
+    // THE LOSER. Their page still shows a claim control — it was true when it
+    // rendered — and pressing it must converge on the SAME firm rather than
+    // refuse, because the door has already run and the registration carries a
+    // firm the second read observes.
+    await other.getByRole("button", { name: "Open my firm" }).click();
+    await expect(other).toHaveURL(`${APP_ORIGIN}/pending`, NAV);
+    expect(other.url(), "the loser was shown a refusal for a firm that exists").not.toContain("claim=");
+    await expect(other.getByText(/CLR\d/)).toHaveCount(0);
+
+    const after = await control(page, {});
+    expect(after.firmOpened, "the race produced no firm").toBe(true);
+    expect(after.paidUnconsumed, "the payment was consumed twice or not at all").toBe(false);
+  } finally {
+    await other.close();
+    await second.close();
+  }
+});
+
+test("THE WAITING FACES AT 320 CSS px, AT 200% ZOOM, UNDER REDUCED MOTION, AND ACROSS BACK", async ({ page }) => {
+  // The journey-state gap this closes: two faces a person can sit on for
+  // minutes — the one where their bank is deciding and the one where their card
+  // was refused — had no geometry, no motion and no history assertion at all.
+  //
+  // REDUCED MOTION FIRST, emulated BEFORE the navigation so every load-time
+  // decision runs under it. The claim being pinned is narrow and checkable:
+  // these faces render IDENTICALLY under `reduce`, because they animate nothing
+  // of their own — the bounded re-read changes TEXT, never movement.
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await reachAcceptedHolding(page, "e2e-narrow-wait");
+  await control(page, { checkoutOpen: true, intentStatus: "processing" });
+  await page.goto("/checkout/success");
+  await expect(page.getByRole("heading", { name: "Your bank is confirming the payment" })).toBeVisible();
+
+  for (const [label, size] of [
+    ["320 CSS px", { width: 320, height: 640 }],
+    // 200% browser zoom IS a halving of the CSS viewport, so 640×512 is the
+    // 1280×720-at-200% case (`responsive-shell-walk.spec.ts`'s own note).
+    ["200% zoom", { width: 640, height: 512 }],
+  ] as const) {
+    await page.setViewportSize(size);
+    await expectNoSidewaysScroll(page, `the processing face at ${label}`);
+    const again = page.getByRole("button", { name: "Check again" });
+    await again.scrollIntoViewIfNeeded();
+    await expect(again).toBeInViewport();
+    await scan(page, `the processing face at ${label} under reduced motion`);
+  }
+
+  // THE FAILED FACE, at the same two widths — it carries the longest sentence
+  // on this surface plus a collapsed disclosure, which is where a narrow
+  // viewport bites first.
+  await control(page, { intentStatus: "payment_failed", intentStatusReason: "insufficient_funds" });
+  await page.goto("/pending");
+  await expect(page.getByText(/not enough funds available/i)).toBeVisible();
+  for (const size of [{ width: 320, height: 640 }, { width: 640, height: 512 }]) {
+    await page.setViewportSize(size);
+    await expectNoSidewaysScroll(page, `the payment-failed face at ${size.width}px`);
+    await scan(page, `the payment-failed face at ${size.width}px under reduced motion`);
+  }
+
+  // ── A STABLE URL, AND BACK GOES BACK ─────────────────────────────────────
+  // The URL a person can bookmark, share with support, or return to. Nothing
+  // about these faces rides the query string, so Back lands on the page it left
+  // and the page re-derives its face from the door rather than from history.
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await page.goto("/checkout/success");
+  expect(new URL(page.url()).search, "the success page put state in the URL").toBe("");
+  await page.goto("/pending");
+  await page.goBack();
+  await expect(page).toHaveURL(`${APP_ORIGIN}/checkout/success`, NAV);
+  // AND IT IS RE-READ, NOT REPLAYED FROM A SNAPSHOT: the state moved on while
+  // the person was away, and Back shows the state the DATABASE holds now.
+  await control(page, { intentStatus: "processing", intentStatusReason: null });
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "Your bank is confirming the payment" })).toBeVisible();
 });

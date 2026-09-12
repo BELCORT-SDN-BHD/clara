@@ -1,7 +1,10 @@
 import { cookies } from "next/headers";
 import { getTranslations } from "next-intl/server";
 
-import { CheckoutSuccessCard } from "@/components/entry/checkout-success-card";
+import {
+  CheckoutSuccessCard,
+  type CheckoutSuccessState,
+} from "@/components/entry/checkout-success-card";
 import {
   checkoutFlashCookie,
   parseCheckoutFlash,
@@ -62,10 +65,17 @@ export default async function CheckoutSuccessPage({
     const result = await loadOwnRegistrationRequests();
     const progress = result.ok ? result.checkoutProgress : NO_CHECKOUT_PROGRESS;
     const decision = checkoutSuccessDecisionFrom(result, progress);
-    // `claimable` carries the registration id for the POST's own use; the card
-    // never renders it and no hidden field carries it (NIT-6).
-    const kind = decision.kind === "claimable" ? "claimable" : decision.kind;
-    return <CheckoutSuccessCard state={{ kind }} />;
+    // `claimable` carries the registration id for the CLAIM ROUTE's own use;
+    // the card's claimable arm neither needs nor renders it, and no hidden
+    // field carries it (NIT-6). Every other arm is passed through UNCHANGED —
+    // the decision's shape IS the card's shape, deliberately, so a state can
+    // never be renamed on one side of this line and not the other (review law
+    // 3). The two waiting arms do carry the registration, and the card renders
+    // it only once its bounded wait has given up; see
+    // `components/entry/checkout-waiting.tsx`.
+    const state: CheckoutSuccessState =
+      decision.kind === "claimable" ? { kind: "claimable" } : decision;
+    return <CheckoutSuccessCard state={state} />;
   } catch {
     return <CheckoutSuccessCard state={{ kind: "unavailable" }} />;
   }

@@ -21,8 +21,8 @@ const SUBJECT = "22222222-2222-2222-2222-222222222222";
 const REGISTRATION = "11111111-1111-1111-1111-111111111111";
 const FIRM = "44444444-4444-4444-4444-444444444444";
 
-const PAID: CheckoutProgress = { checkoutOpen: true, paidUnconsumed: true };
-const UNPAID: CheckoutProgress = { checkoutOpen: true, paidUnconsumed: false };
+const PAID: CheckoutProgress = { ...NO_CHECKOUT_PROGRESS, checkoutOpen: true, paidUnconsumed: true };
+const UNPAID: CheckoutProgress = { ...NO_CHECKOUT_PROGRESS, checkoutOpen: true, paidUnconsumed: false };
 
 function result(over: Record<string, unknown> = {}, subject = SUBJECT): OwnRegistrationResult {
   return {
@@ -57,10 +57,118 @@ test("A-M4: an open registration with NO observed payment is awaiting_payment, n
   // The distinction is the whole point. "We have not seen it yet" is true;
   // "you did not pay" is a claim about the world this app cannot make, and it
   // is the sentence that would send a paying customer away.
-  assert.deepEqual(checkoutSuccessDecisionFrom(result(), UNPAID), { kind: "awaiting_payment" });
+  //
+  // #628 added three fields to this arm and changed NONE of that reading: the
+  // status time and the session id are what let the card say "since when" and
+  // whether a cancel control has anything to cancel, and the registration is
+  // the reference support needs once the bounded wait gives up.
+  assert.deepEqual(checkoutSuccessDecisionFrom(result(), UNPAID), {
+    kind: "awaiting_payment",
+    statusAt: null,
+    sessionId: null,
+    registration: REGISTRATION,
+  });
   assert.deepEqual(checkoutSuccessDecisionFrom(result(), NO_CHECKOUT_PROGRESS), {
     kind: "awaiting_payment",
+    statusAt: null,
+    sessionId: null,
+    registration: REGISTRATION,
   });
+});
+
+// ===========================================================================
+// #628 — THE FIVE FACES THE OLD `awaiting_payment` WAS HIDING
+// ===========================================================================
+
+/** Progress for an open registration with NO observed payment, carrying one
+ *  intent status. Every cell below differs from the last ONLY in the status,
+ *  which is what makes each one about the status rather than about a fixture. */
+const withStatus = (over: Partial<CheckoutProgress>): CheckoutProgress => ({
+  ...NO_CHECKOUT_PROGRESS,
+  checkoutOpen: true,
+  ...over,
+});
+
+test("#628: each intent status reaches its OWN face, and no two share one", () => {
+  // THE DEFECT THIS CELL EXISTS FOR. Before 0186 all five of these were
+  // `awaiting_payment`, whose copy says the payment "keeps trying on its own" —
+  // told to a person whose card was DECLINED, whose checkout EXPIRED, and to a
+  // person who CANCELLED it themselves. Three lies from one missing column.
+  assert.deepEqual(
+    checkoutSuccessDecisionFrom(result(), withStatus({ intentStatus: "processing", intentStatusAt: "2026-09-12T04:30:00.000Z" })),
+    { kind: "processing", statusAt: "2026-09-12T04:30:00.000Z", registration: REGISTRATION },
+  );
+  assert.deepEqual(
+    checkoutSuccessDecisionFrom(result(), withStatus({ intentStatus: "payment_failed", intentStatusReason: "card_declined" })),
+    { kind: "payment_failed", reason: "card_declined" },
+  );
+  assert.deepEqual(
+    checkoutSuccessDecisionFrom(result(), withStatus({ intentStatus: "expired" })),
+    { kind: "expired" },
+  );
+  assert.deepEqual(
+    checkoutSuccessDecisionFrom(result(), withStatus({ intentStatus: "cancelled" })),
+    { kind: "cancelled" },
+  );
+  assert.deepEqual(
+    checkoutSuccessDecisionFrom(result(), withStatus({ intentStatus: "session_created", intentSessionId: "cs_test_628" })),
+    { kind: "awaiting_payment", statusAt: null, sessionId: "cs_test_628", registration: REGISTRATION },
+  );
+});
+
+test("#628: `paid` and `consumed` with NO unconsumed payment row are a WAIT, never a claim", () => {
+  // The intent says money landed; the payment probe saw nothing claimable. The
+  // one thing this must not do is offer the claim control — `claim_paid_firm`
+  // would refuse, and a person who pressed it would read a refusal about a
+  // payment they can see succeeded. `checkoutStandingFrom`'s own header carries
+  // the two ways this state is reached.
+  for (const status of ["paid", "consumed"] as const) {
+    assert.equal(
+      checkoutSuccessDecisionFrom(result(), withStatus({ intentStatus: status })).kind,
+      "awaiting_payment",
+      status,
+    );
+  }
+});
+
+test("#628: AN OBSERVED UNCONSUMED PAYMENT OUTRANKS EVERY STATUS, INCLUDING A FULL HOUSE", () => {
+  // This is the arm where the applicant's money is already in Clara's hands.
+  // A capacity card over it would take somebody's payment and then close the
+  // door with no way forward; a `payment_failed` card over it would tell
+  // somebody their successful payment failed. The door still judges the claim
+  // on its own authority — this page simply refuses to pre-empt it.
+  for (const status of ["processing", "payment_failed", "expired", "cancelled", "session_created"] as const) {
+    assert.deepEqual(
+      checkoutSuccessDecisionFrom(result(), { ...withStatus({ intentStatus: status }), paidUnconsumed: true, capacityFull: true }),
+      { kind: "claimable", registration: REGISTRATION },
+      status,
+    );
+  }
+});
+
+test("#628: capacity_full renders only when NOTHING is in flight", () => {
+  // A person mid-payment is not helped by being told the house is full; a
+  // person about to start one is. So capacity ranks BELOW every live intent
+  // status and below an observed payment, and above nothing else.
+  assert.deepEqual(
+    checkoutSuccessDecisionFrom(result(), { ...NO_CHECKOUT_PROGRESS, capacityFull: true }),
+    { kind: "capacity_full" },
+  );
+  assert.equal(
+    checkoutSuccessDecisionFrom(result(), withStatus({ intentStatus: "processing", capacityFull: true })).kind,
+    "processing",
+    "a full house was reported over a payment the bank is confirming",
+  );
+});
+
+test("#628: the pre-0186 reading is UNCHANGED when the door states no status", () => {
+  // The migration window, from the success page's side. An older door yields
+  // `intentStatus: null`, and this page must render exactly what it rendered
+  // before the column existed — never `no_registration`, never a blank.
+  assert.deepEqual(
+    checkoutSuccessDecisionFrom(result(), { ...NO_CHECKOUT_PROGRESS, checkoutOpen: true }),
+    { kind: "awaiting_payment", statusAt: null, sessionId: null, registration: REGISTRATION },
+  );
 });
 
 test("A FIRM ON THE REGISTRATION outranks everything, including an unconsumed payment", () => {

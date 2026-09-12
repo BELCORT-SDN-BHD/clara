@@ -134,17 +134,28 @@ describe("holdingStateFrom — the six renderings, one per observable fact", () 
     assert.deepEqual(holdingStateFrom(ok([ROW({ status: "" })])), { kind: "read-failed" });
   });
 
-  it("all eight kinds are reachable — no branch is dead", () => {
+  it("all fourteen kinds are reachable — no branch is dead", () => {
     // Absence is not evidence: without this cell, a mapper that could never
     // produce (say) `approved` would still pass every cell above that does not
     // exercise it. This enumerates the reachable set and pins its size.
     // FS-4 C-6 widened six to eight: `checkout_open` and `paid` are new
     // SIBLING kinds of an open registration (holding-state.ts's header), each
-    // reached only via a POSITIVE `checkoutProgress` read.
+    // reached only via a POSITIVE `checkoutProgress` read. #628 widened eight
+    // to FOURTEEN — five intent-status faces plus `capacity_full`, each again
+    // reached only from a positive read, and `checkout_open` KEPT as the arm an
+    // older door still produces.
+    const withStatus = (over: Partial<CheckoutProgress>): CheckoutProgress =>
+      ({ ...NO_CHECKOUT_PROGRESS, checkoutOpen: true, ...over });
     const reached = new Set([
       holdingStateFrom(ok([ROW({ status: "open" })])).kind,
-      holdingStateFrom(ok([ROW({ status: "open" })], NO_MEMBERSHIP, { checkoutOpen: true, paidUnconsumed: false })).kind,
-      holdingStateFrom(ok([ROW({ status: "open" })], NO_MEMBERSHIP, { checkoutOpen: false, paidUnconsumed: true })).kind,
+      holdingStateFrom(ok([ROW({ status: "open" })], NO_MEMBERSHIP, { ...NO_CHECKOUT_PROGRESS, checkoutOpen: true, paidUnconsumed: false })).kind,
+      holdingStateFrom(ok([ROW({ status: "open" })], NO_MEMBERSHIP, { ...NO_CHECKOUT_PROGRESS, checkoutOpen: false, paidUnconsumed: true })).kind,
+      holdingStateFrom(ok([ROW({ status: "open" })], NO_MEMBERSHIP, withStatus({ intentStatus: "session_created" }))).kind,
+      holdingStateFrom(ok([ROW({ status: "open" })], NO_MEMBERSHIP, withStatus({ intentStatus: "processing" }))).kind,
+      holdingStateFrom(ok([ROW({ status: "open" })], NO_MEMBERSHIP, withStatus({ intentStatus: "payment_failed" }))).kind,
+      holdingStateFrom(ok([ROW({ status: "open" })], NO_MEMBERSHIP, withStatus({ intentStatus: "expired" }))).kind,
+      holdingStateFrom(ok([ROW({ status: "open" })], NO_MEMBERSHIP, withStatus({ intentStatus: "cancelled" }))).kind,
+      holdingStateFrom(ok([ROW({ status: "open" })], NO_MEMBERSHIP, { ...NO_CHECKOUT_PROGRESS, capacityFull: true })).kind,
       holdingStateFrom(ok([ROW({ status: "rejected" })])).kind,
       holdingStateFrom(ok([ROW({ status: "approved" })])).kind,
       holdingStateFrom(ok([])).kind,
@@ -155,7 +166,13 @@ describe("holdingStateFrom — the six renderings, one per observable fact", () 
       [...reached].sort(),
       [
         "approved",
+        "capacity_full",
+        "checkout_awaiting_payment",
+        "checkout_cancelled",
+        "checkout_expired",
+        "checkout_failed",
         "checkout_open",
+        "checkout_processing",
         "invite-expected",
         "paid",
         "pending",
@@ -185,33 +202,33 @@ describe("FS-4 C-6, §2.1: checkout_open and paid — POSITIVELY read, never gue
 
   it("checkoutOpen observed → checkout_open, carrying the DB's own firm name", () => {
     const state = holdingStateFrom(
-      ok([OPEN_ROW], NO_MEMBERSHIP, { checkoutOpen: true, paidUnconsumed: false }),
+      ok([OPEN_ROW], NO_MEMBERSHIP, { ...NO_CHECKOUT_PROGRESS, checkoutOpen: true, paidUnconsumed: false }),
     );
     assert.deepEqual(state, { kind: "checkout_open", firmName: "BEE CREATIVE SOLUTION" });
   });
 
   it("paidUnconsumed observed → paid", () => {
     const state = holdingStateFrom(
-      ok([OPEN_ROW], NO_MEMBERSHIP, { checkoutOpen: false, paidUnconsumed: true }),
+      ok([OPEN_ROW], NO_MEMBERSHIP, { ...NO_CHECKOUT_PROGRESS, checkoutOpen: false, paidUnconsumed: true }),
     );
     assert.deepEqual(state, { kind: "paid", firmName: "BEE CREATIVE SOLUTION" });
   });
 
   it("PAID OUTRANKS checkout_open when (implausibly) both were observed", () => {
     const state = holdingStateFrom(
-      ok([OPEN_ROW], NO_MEMBERSHIP, { checkoutOpen: true, paidUnconsumed: true }),
+      ok([OPEN_ROW], NO_MEMBERSHIP, { ...NO_CHECKOUT_PROGRESS, checkoutOpen: true, paidUnconsumed: true }),
     );
     assert.equal(state.kind, "paid", "the more-advanced fact must win, never the earlier one");
   });
 
   it("checkout progress is IGNORED for every non-open status — a decided registration owes no checkout read", () => {
     const rejected = holdingStateFrom(
-      ok([ROW({ status: "rejected", reason: "no" })], NO_MEMBERSHIP, { checkoutOpen: true, paidUnconsumed: true }),
+      ok([ROW({ status: "rejected", reason: "no" })], NO_MEMBERSHIP, { ...NO_CHECKOUT_PROGRESS, checkoutOpen: true, paidUnconsumed: true }),
     );
     assert.equal(rejected.kind, "rejected", "checkout progress leaked into a decided registration's rendering");
 
     const approved = holdingStateFrom(
-      ok([ROW({ status: "approved" })], NO_MEMBERSHIP, { checkoutOpen: true, paidUnconsumed: true }),
+      ok([ROW({ status: "approved" })], NO_MEMBERSHIP, { ...NO_CHECKOUT_PROGRESS, checkoutOpen: true, paidUnconsumed: true }),
     );
     assert.equal(approved.kind, "approved");
   });
@@ -488,6 +505,106 @@ describe("RED-BEFORE — each mutant is measured to give a DIFFERENT answer", ()
       ["E", scanForOpen],
     ] as const) {
       assert.deepEqual(mutant(ORDINARY), shipped, `mutant ${name} differs on an ordinary open request`);
+    }
+  });
+});
+
+describe("#628: the intent's status splits checkout_open into five honest faces", () => {
+  const OPEN_ROW = ROW({ status: "open", firm_name: "BEE CREATIVE SOLUTION" });
+  const withStatus = (over: Partial<CheckoutProgress>): CheckoutProgress =>
+    ({ ...NO_CHECKOUT_PROGRESS, checkoutOpen: true, ...over });
+
+  it("each status carries the ONE act that is actually available", () => {
+    // THE DEFECT THIS CELL EXISTS FOR. `checkout_open` offered "resume
+    // checkout" for all five worlds. An applicant whose card was declined was
+    // invited to resume a dead Session; an applicant whose bank was confirming
+    // was invited to pay a second time. The kinds below are what let the card
+    // offer resume, wait, try again, start again or nothing.
+    assert.deepEqual(
+      holdingStateFrom(ok([OPEN_ROW], NO_MEMBERSHIP, withStatus({ intentStatus: "session_created", intentSessionId: "cs_628", intentStatusAt: "2026-09-12T04:30:00.000Z" }))),
+      {
+        kind: "checkout_awaiting_payment",
+        firmName: "BEE CREATIVE SOLUTION",
+        statusAt: "2026-09-12T04:30:00.000Z",
+        sessionId: "cs_628",
+      },
+    );
+    assert.deepEqual(
+      holdingStateFrom(ok([OPEN_ROW], NO_MEMBERSHIP, withStatus({ intentStatus: "processing", intentStatusAt: "2026-09-12T05:00:00.000Z" }))),
+      { kind: "checkout_processing", firmName: "BEE CREATIVE SOLUTION", statusAt: "2026-09-12T05:00:00.000Z" },
+    );
+    assert.deepEqual(
+      holdingStateFrom(ok([OPEN_ROW], NO_MEMBERSHIP, withStatus({ intentStatus: "payment_failed", intentStatusReason: "insufficient_funds" }))),
+      { kind: "checkout_failed", firmName: "BEE CREATIVE SOLUTION", reason: "insufficient_funds" },
+    );
+    assert.deepEqual(
+      holdingStateFrom(ok([OPEN_ROW], NO_MEMBERSHIP, withStatus({ intentStatus: "expired" }))),
+      { kind: "checkout_expired", firmName: "BEE CREATIVE SOLUTION" },
+    );
+    assert.deepEqual(
+      holdingStateFrom(ok([OPEN_ROW], NO_MEMBERSHIP, withStatus({ intentStatus: "cancelled" }))),
+      { kind: "checkout_cancelled", firmName: "BEE CREATIVE SOLUTION" },
+    );
+  });
+
+  it("PAID still outranks every status — including one that says the payment failed", () => {
+    // An observed unconsumed payment is money in Clara's hands. A `failed` card
+    // over it would tell somebody their successful payment failed and offer
+    // them a second checkout for a firm they have already bought.
+    for (const status of ["processing", "payment_failed", "expired", "cancelled", "session_created"] as const) {
+      assert.equal(
+        holdingStateFrom(ok([OPEN_ROW], NO_MEMBERSHIP, { ...withStatus({ intentStatus: status }), paidUnconsumed: true })).kind,
+        "paid",
+        status,
+      );
+    }
+  });
+
+  it("capacity_full ranks BELOW anything in flight and ABOVE nothing else", () => {
+    assert.deepEqual(
+      holdingStateFrom(ok([OPEN_ROW], NO_MEMBERSHIP, { ...NO_CHECKOUT_PROGRESS, capacityFull: true })),
+      { kind: "capacity_full", firmName: "BEE CREATIVE SOLUTION" },
+    );
+    assert.equal(
+      holdingStateFrom(ok([OPEN_ROW], NO_MEMBERSHIP, { ...withStatus({ intentStatus: "processing" }), capacityFull: true })).kind,
+      "checkout_processing",
+      "a full house was reported over a payment the bank is confirming",
+    );
+    assert.equal(
+      holdingStateFrom(ok([OPEN_ROW], NO_MEMBERSHIP, { ...NO_CHECKOUT_PROGRESS, paidUnconsumed: true, capacityFull: true })).kind,
+      "paid",
+      "a full house was reported over money already taken",
+    );
+  });
+
+  it("THE MIGRATION WINDOW: a door with no status column still renders checkout_open", () => {
+    // Between the web deploy and the DB deploy — in EITHER order — the door
+    // returns the pre-0186 row. Deleting `checkout_open` in favour of the five
+    // new arms would have made that window render `pending`, which tells an
+    // applicant mid-checkout that they never started one.
+    assert.deepEqual(
+      holdingStateFrom(ok([OPEN_ROW], NO_MEMBERSHIP, { ...NO_CHECKOUT_PROGRESS, checkoutOpen: true })),
+      { kind: "checkout_open", firmName: "BEE CREATIVE SOLUTION" },
+    );
+  });
+
+  it("an intent that is merely OPEN — no Session yet — is still the pending arm", () => {
+    // `open` means an intent row exists and Stripe was never reached. There is
+    // nothing to resume, nothing to wait for and nothing to cancel, so the
+    // person belongs on the arm that offers the legal stage and checkout.
+    assert.deepEqual(
+      holdingStateFrom(ok([OPEN_ROW], NO_MEMBERSHIP, { ...NO_CHECKOUT_PROGRESS, intentStatus: "open" })),
+      { kind: "pending", firmName: "BEE CREATIVE SOLUTION" },
+    );
+  });
+
+  it("every status is IGNORED for a decided registration", () => {
+    for (const status of ["processing", "payment_failed", "expired", "cancelled"] as const) {
+      assert.equal(
+        holdingStateFrom(ok([ROW({ status: "rejected", reason: "no" })], NO_MEMBERSHIP, withStatus({ intentStatus: status }))).kind,
+        "rejected",
+        status,
+      );
     }
   });
 });

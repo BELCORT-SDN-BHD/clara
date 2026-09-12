@@ -20,6 +20,7 @@ import {
   type CheckoutSessionRequest,
 } from "@/lib/checkout/stripe-session";
 import { PEPPER_VAR, TRUSTED_HEADER_VAR } from "@/lib/rate-wall-courier";
+import { NO_CHECKOUT_PROGRESS } from "@/lib/registration/checkout-progress-reads";
 import type { OwnRegistrationResult } from "@/lib/registration/server-reads";
 
 const SUBJECT = "22222222-2222-2222-2222-222222222222";
@@ -61,7 +62,7 @@ const openRegistration = (): OwnRegistrationResult => ({
     created_at: "2026-09-02T00:00:00Z",
   }],
   context: { ok: false, reason: "no_membership" },
-  checkoutProgress: { checkoutOpen: false, paidUnconsumed: false },
+  checkoutProgress: NO_CHECKOUT_PROGRESS,
 });
 
 function readFlash(response: Response): Record<string, unknown> {
@@ -332,9 +333,12 @@ test("review-544: the key-class refusal REACHES A LOG, and the line carries no k
     console.error = realError;
   }
 
-  // The applicant's own answer is unchanged — the honest card, nothing charged,
-  // and an UNSTAMPED intent so the retry it invites is safe.
-  assert.equal(readFlash(response).kind, "stripe_unavailable");
+  // #628 SPLIT THE CARD, AND THIS IS THE HALF THAT MOVED. The applicant used
+  // to be told "we could not reach the payment provider — try again in a
+  // moment" about a KEY-CLASS MISMATCH, which no number of retries fixes. The
+  // card is now the configuration one; everything else about this cell — the
+  // gate running for real, nothing charged, an UNSTAMPED intent — is unchanged.
+  assert.equal(readFlash(response).kind, "payments_misconfigured");
   assert.deepEqual(
     rec.doorCalls.filter((c) => c.fn === "record_checkout_session"),
     [],
@@ -611,4 +615,225 @@ test("the refusal cookie is httpOnly, SameSite=Strict and Secure — the forgery
       { httpOnly: true, sameSite: "strict", secure: true, path: "/" },
     );
   });
+});
+
+// ===========================================================================
+// #628 — RESUME, CAPACITY, AND THE CONFIGURATION/OUTAGE SPLIT
+// ===========================================================================
+
+/** `open_checkout_intent`'s new refusal: a live Session already exists for this
+ *  registration. The DETAIL is what the route resumes from, and it is the
+ *  DOOR'S — there is no request parameter that could carry one. */
+const inProgress = (detail: Record<string, unknown> = { session_id: "cs_live_628" }) => () =>
+  json({
+    code: "CLR09",
+    message: "a checkout is already in progress for this registration",
+    details: JSON.stringify({ reason: "checkout_in_progress", ...detail }),
+  }, 400);
+
+test("#628: `checkout_in_progress` RESUMES the live Session — it never mints a second one", async () => {
+  // THE DEFECT THIS CLOSES IS THE ONE THE DB's RULE CREATED. One live Session
+  // per registration is what stops a double-press from producing two
+  // subscriptions; without a resume, the same rule traps the person pressing
+  // the button, who does not want a new checkout but the one they already have.
+  const rec = recorder();
+  const retrieved: string[] = [];
+  const response = await withDoors(
+    rec,
+    { ...HAPPY_DOORS, open_checkout_intent: inProgress() },
+    () => handleCheckoutPost(postRequest(), {
+      ...deps(rec),
+      retrieveSession: async (id: string) => {
+        retrieved.push(id);
+        return { id, status: "open" as const, url: "https://checkout.stripe.com/c/pay/cs_live_628" };
+      },
+    }),
+  );
+
+  assert.equal(response.status, 303);
+  assert.equal(response.headers.get("location"), "https://checkout.stripe.com/c/pay/cs_live_628");
+  assert.deepEqual(retrieved, ["cs_live_628"], "the resume asked Stripe about the wrong Session");
+  // NOT A SINGLE STRIPE CREATE, AND NOT A SECOND STAMP. This is the property
+  // the whole arm exists for.
+  assert.equal(rec.stripeCalls.length, 0, "the resume minted a second Checkout Session");
+  assert.deepEqual(
+    rec.doorCalls.filter((c) => c.fn === "record_checkout_session"),
+    [],
+    "the resume stamped the intent again",
+  );
+  // And no flash cookie: a successful resume is a redirect, not an outcome
+  // card.
+  assert.equal((response as NextResponse).cookies.get(checkoutFlashCookie().name), undefined);
+});
+
+test("#628: A LOST ACKNOWLEDGEMENT resolves to the SAME Session, never a second one", async () => {
+  // The journey-A1 case, driven end to end: the first POST creates a Session
+  // and its 303 never reaches the browser; the person presses again. The door
+  // refuses `checkout_in_progress` on the second attempt, and the route hands
+  // back the SAME hosted page — so one press and two presses cost one Session,
+  // one subscription and one charge.
+  const rec = recorder();
+  let intentIsStamped = false;
+  const doors = {
+    ...HAPPY_DOORS,
+    open_checkout_intent: () =>
+      intentIsStamped
+        ? inProgress({ session_id: "cs_test_123" })()
+        : json({ intent_id: "int-1", price_local_key: "clara-beta-2026", stripe_price_id: "price_123" }),
+    record_checkout_session: () => { intentIsStamped = true; return json({ intent_id: "int-1", recorded: true }); },
+  };
+  const withResume = () => ({
+    ...deps(rec),
+    retrieveSession: async (id: string) => ({ id, status: "open" as const, url: SESSION_URL }),
+  });
+
+  const first = await withDoors(rec, doors, () => handleCheckoutPost(postRequest(), withResume()));
+  assert.equal(first.headers.get("location"), SESSION_URL);
+  // …the response is lost. The person presses again.
+  const second = await withDoors(rec, doors, () => handleCheckoutPost(postRequest(), withResume()));
+  assert.equal(second.status, 303);
+  assert.equal(second.headers.get("location"), SESSION_URL, "the retry did not land on the same Session");
+
+  assert.equal(rec.stripeCalls.length, 1, "the retry minted a SECOND Checkout Session");
+  assert.equal(
+    rec.doorCalls.filter((c) => c.fn === "record_checkout_session").length,
+    1,
+    "the one-shot intent was stamped twice",
+  );
+});
+
+test("#628: Stripe's own verdict on the Session decides the card — open, complete, expired", async () => {
+  // Each of these is a different sentence to a person waiting on a firm, and
+  // guessing between them is how somebody is told their live checkout expired
+  // (or, worse, is sent to pay for one that already completed).
+  for (const [snapshot, expected] of [
+    [{ status: "expired" as const, url: null }, "checkout_expired"],
+    [{ status: "complete" as const, url: null }, "checkout_in_progress"],
+    // An `open` Session Stripe returned WITHOUT a hosted URL is not somewhere a
+    // person can be sent; it reads as in-progress rather than as a redirect to
+    // nowhere.
+    [{ status: "open" as const, url: null }, "checkout_in_progress"],
+  ] as const) {
+    const rec = recorder();
+    const response = await withDoors(
+      rec,
+      { ...HAPPY_DOORS, open_checkout_intent: inProgress() },
+      () => handleCheckoutPost(postRequest(), {
+        ...deps(rec),
+        retrieveSession: async (id: string) => ({ id, ...snapshot }),
+      }),
+    );
+    assert.equal(readFlash(response).kind, expected, snapshot.status);
+    assert.equal(rec.stripeCalls.length, 0, `${snapshot.status}: a Session was created anyway`);
+  }
+});
+
+test("#628: a door that says `checkout_in_progress` and names NO Session gets the honest card", async () => {
+  // Inventing a resume target out of an absent value is the one thing this
+  // must not do on a surface that redirects people to pay.
+  for (const detail of [{}, { session_id: "" }, { session_id: 7 }, { session_id: null }]) {
+    const rec = recorder();
+    let retrievals = 0;
+    const response = await withDoors(
+      rec,
+      { ...HAPPY_DOORS, open_checkout_intent: inProgress(detail) },
+      () => handleCheckoutPost(postRequest(), {
+        ...deps(rec),
+        retrieveSession: async (id: string) => { retrievals += 1; return { id, status: "open" as const, url: SESSION_URL }; },
+      }),
+    );
+    assert.equal(readFlash(response).kind, "checkout_in_progress", JSON.stringify(detail));
+    assert.equal(retrievals, 0, "Stripe was asked about a Session the door never named");
+  }
+});
+
+test("#628: a resume that cannot reach Stripe tells the person WHICH kind of failure it was", async () => {
+  // The split this ticket exists for, on the resume hop as well as the create
+  // one: `unconfigured` is fixed by an operator and no number of retries
+  // changes it; the other three are an outage and waiting genuinely helps.
+  for (const [failure, expected] of [
+    [new StripeSessionError("unconfigured", "STRIPE_SECRET_KEY is not configured"), "payments_misconfigured"],
+    [new StripeSessionError("refused", "Stripe refused /checkout/sessions/x with status 500", 500), "stripe_unavailable"],
+    [new StripeSessionError("transport", "the Stripe call did not complete: AbortError"), "stripe_unavailable"],
+    [new StripeSessionError("malformed", "Stripe returned a Session with no id"), "stripe_unavailable"],
+    [new Error("ECONNRESET"), "unavailable"],
+  ] as const) {
+    const rec = recorder();
+    const said: string[] = [];
+    const realError = console.error;
+    console.error = (...args: unknown[]) => { said.push(args.map(String).join(" ")); };
+    let response: Response;
+    try {
+      response = await withDoors(
+        rec,
+        { ...HAPPY_DOORS, open_checkout_intent: inProgress() },
+        () => handleCheckoutPost(postRequest(), {
+          ...deps(rec),
+          retrieveSession: async () => { throw failure; },
+        }),
+      );
+    } finally {
+      console.error = realError;
+    }
+    assert.equal(readFlash(response).kind, expected, String(failure));
+    assert.equal(rec.stripeCalls.length, 0, "a failed resume created a Session");
+    if (failure instanceof StripeSessionError) {
+      assert.equal(said.length, 1, `expected one log line for ${failure.reason}`);
+      assert.match(said[0] as string, new RegExp(failure.reason));
+      assert.doesNotMatch(said[0] as string, /\b(sk|rk|pk)_(live|test)_/, "the logged line carries a key prefix");
+    }
+  }
+});
+
+test("#628: `capacity_reached` is its OWN card, and no Stripe call is made", async () => {
+  // Admission is full. The card must not leave a pay control beside a door that
+  // will refuse it — which is why this is not folded into the generic
+  // `refused` arm, whose card carries the door's sentence and nothing else.
+  const rec = recorder();
+  const response = await withDoors(
+    rec,
+    {
+      ...HAPPY_DOORS,
+      open_checkout_intent: () => json({
+        code: "CLR09",
+        message: "admission is currently full",
+        details: JSON.stringify({ reason: "capacity_reached", max_firms: 50, firms_count: 50 }),
+      }, 400),
+    },
+    () => handleCheckoutPost(postRequest(), deps(rec)),
+  );
+  assert.equal(readFlash(response).kind, "capacity_reached");
+  assert.equal(rec.stripeCalls.length, 0);
+  assert.deepEqual(
+    rec.doorCalls.map((c) => c.fn),
+    ["open_checkout_intent"],
+    "a full house still read the plan or stamped the intent",
+  );
+});
+
+test("#628: a REAL Stripe outage still reads as an outage, not as a misconfiguration", async () => {
+  // The must-not-red control for the split above. If every failure had simply
+  // been renamed, the key-class cell would still pass while every genuine
+  // outage started telling people to call support about a variable.
+  const rec = recorder();
+  const said: string[] = [];
+  const realError = console.error;
+  console.error = (...args: unknown[]) => { said.push(args.map(String).join(" ")); };
+  let response: Response;
+  try {
+    response = await withDoors(rec, HAPPY_DOORS, () =>
+      handleCheckoutPost(postRequest(), {
+        ...deps(rec),
+        createSession: async () => {
+          throw new StripeSessionError("refused", "Stripe refused the Checkout Session with status 503", 503);
+        },
+      }),
+    );
+  } finally {
+    console.error = realError;
+  }
+  assert.equal(readFlash(response).kind, "stripe_unavailable");
+  assert.match(said[0] as string, /stripe_unavailable \(refused\)/);
+  // AND THE ONE-SHOT INTENT IS UNSTAMPED, so the retry the card invites is safe.
+  assert.deepEqual(rec.doorCalls.filter((c) => c.fn === "record_checkout_session"), []);
 });

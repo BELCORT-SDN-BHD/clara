@@ -99,6 +99,7 @@ components/documents/documents-governance-keyboard.test.tsx
 components/documents/documents-workbench-refresh.test.tsx
 components/documents/lint-finding-detail.test.tsx
 components/e2e/money-input-harness-route.test.tsx
+components/entry/checkout-faces-a11y.test.tsx
 components/entry/email-confirmation-origin.test.tsx
 components/entry/email-confirmation-page.test.tsx
 components/entry/email-confirmation-resend.test.tsx
@@ -215,6 +216,7 @@ lib/bank/reload-on-change.test.ts
 lib/bank/table-reads.test.ts
 lib/business-date.test.ts
 lib/checkout/checkout-flash.test.ts
+lib/checkout/payment-failure.test.ts
 lib/checkout/stripe-session.test.ts
 lib/checkout/success-state.test.ts
 lib/clara/api.test.ts
@@ -330,6 +332,7 @@ test/keyboardWalk.test.ts
 tests/apiLimitBanner.test.mjs
 tests/app-icons.test.ts
 tests/build-info-route.test.ts
+tests/checkout-cancel-route.test.ts
 tests/checkout-claim-route.test.ts
 tests/checkout-route.test.ts
 tests/client-scope.test.ts

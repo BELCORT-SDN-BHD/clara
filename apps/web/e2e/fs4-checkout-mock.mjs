@@ -10,6 +10,20 @@
 // flash cookies, the redirects, the forms and every card. That is exactly the
 // layer a browser leg is for.
 //
+// #628 DID NOT CHANGE THAT, AND THE DECISION IS WORTH STATING. The resume and
+// cancel routes each make a NEW Stripe call (`GET /v1/checkout/sessions/{id}`
+// and `POST …/expire`), and standing either of them in would need the base
+// override this module's next paragraph records as deliberately removed. So
+// they are not stood in for either: with no `STRIPE_SECRET_KEY` the seam
+// refuses `unconfigured` before any socket opens, and the walk asserts the
+// honest outcome that follows — for CANCEL that is the full journey, because
+// `cancel_checkout_intent` runs FIRST and the Stripe expiry is best effort by
+// design, so a refused expiry leaves the intent cancelled and the person on
+// `/pending` exactly as production would. For RESUME it is the configuration
+// card plus the property that actually matters (no second Session was minted).
+// The two calls' own wire shapes are pinned field by field in
+// `lib/checkout/stripe-session.test.ts` against the shipped request.
+//
 // STRIPE IS NOT STOOD IN FOR, AND THAT IS DELIBERATE. An earlier cut of this
 // module served `/v1/checkout/sessions` and a hosted-page stand-in, reached
 // through a base override in `lib/checkout/stripe-session.ts`. That override
@@ -136,6 +150,13 @@ function missingLegalKinds(state) {
     .map((row) => row.kind);
 }
 
+/** #628 — the statuses that mean a Stripe Session is still LIVE for this
+ *  registration, and therefore that `open_checkout_intent` must refuse a second
+ *  one. `paid`/`consumed`/`expired`/`payment_failed`/`cancelled` are terminal:
+ *  a new checkout is exactly the right answer for those, which is what the
+ *  "try again" and "start again" controls post. */
+const LIVE_INTENT_STATUSES = new Set(["session_created", "processing"]);
+
 export const E2E_INTENT_ID = "44444444-4444-4444-8444-444444444444";
 export const E2E_PLAN_KEY = "e2e-beta-plan";
 export const E2E_STRIPE_PRICE = "price_e2e_fixture";
@@ -159,6 +180,18 @@ export async function handleCheckoutMock(ctx) {
     if (body.authWallResend) state.authWallResend = body.authWallResend;
     if (typeof body.paidUnconsumed === "boolean") state.paidUnconsumed = body.paidUnconsumed;
     if (typeof body.checkoutOpen === "boolean") state.checkoutOpen = body.checkoutOpen;
+    // #628 — THE INTENT'S OWN LIFECYCLE, driven the way C-5's applier drives it
+    // in production: `processing` for an async completed session, `paid` on
+    // async success, `payment_failed` (with a reason) on async failure,
+    // `expired` on session expiry. A spec moves an intent through those the way
+    // the applier would, and the app reads the result through the same door.
+    if (typeof body.intentStatus === "string") {
+      state.intentStatus = body.intentStatus;
+      state.intentStatusAt = "2026-09-12T04:30:00.000Z";
+    }
+    if ("intentStatusReason" in body) state.intentStatusReason = body.intentStatusReason ?? null;
+    if ("intentSessionId" in body) state.intentSessionId = body.intentSessionId ?? null;
+    if (typeof body.capacityFull === "boolean") state.capacityFull = body.capacityFull;
     if (typeof body.legalDraftTerms === "boolean") state.legalDraftTerms = body.legalDraftTerms;
     if (body.legalAccepted) state.legalAccepted = { ...state.legalAccepted, ...body.legalAccepted };
     if (body.reset) {
@@ -171,6 +204,11 @@ export async function handleCheckoutMock(ctx) {
       state.checkoutOpen = false;
       state.paidUnconsumed = false;
       state.firmOpened = false;
+      state.intentStatus = null;
+      state.intentStatusAt = null;
+      state.intentStatusReason = null;
+      state.intentSessionId = null;
+      state.capacityFull = false;
       state.authWall = { mode: "verify" };
       state.authWallResend = { mode: "sent" };
       state.authWallRequests = [];
@@ -184,6 +222,9 @@ export async function handleCheckoutMock(ctx) {
       checkoutOpen: state.checkoutOpen,
       paidUnconsumed: state.paidUnconsumed,
       firmOpened: state.firmOpened,
+      intentStatus: state.intentStatus ?? null,
+      intentSessionId: state.intentSessionId ?? null,
+      capacityFull: state.capacityFull === true,
     }, cors);
     return true;
   }
@@ -277,11 +318,46 @@ async function handleCheckoutDoors(ctx, { registrationId }) {
       }, cors);
       return true;
     }
+    // #628 — ADMISSION IS FULL (0186). Refused BEFORE the origin rate wall, in the
+    // door's own order, so a refused applicant is not also charged a rate-limit
+    // slot for a checkout the estate was never going to admit.
+    if (state.capacityFull === true) {
+      sendJson(response, 400, {
+        code: "CLR09",
+        message: "admission is currently full",
+        details: JSON.stringify({ reason: "capacity_reached", max_firms: 50, firms_count: 50 }),
+      }, cors);
+      return true;
+    }
     const digest = String(body.p_origin_digest ?? "");
     if (!/^\\x[0-9a-f]{64}$/.test(digest)) {
       sendJson(response, 400, { code: "CLR10", message: "an origin digest is required" }, cors);
       return true;
     }
+    // #628 — ONE LIVE SESSION PER REGISTRATION (0186). The refusal carries the
+    // intent AND the session the app resumes from; the app never accepts either
+    // from the request, so a mock that omitted them would let a broken resume
+    // pass by inventing its own target.
+    if (state.intentSessionId && LIVE_INTENT_STATUSES.has(state.intentStatus)) {
+      sendJson(response, 400, {
+        code: "CLR09",
+        message: "a checkout is already in progress for this registration",
+        details: JSON.stringify({
+          reason: "checkout_in_progress",
+          intent_id: E2E_INTENT_ID,
+          session_id: state.intentSessionId,
+          status: state.intentStatus,
+          status_at: state.intentStatusAt,
+        }),
+      }, cors);
+      return true;
+    }
+    // A fresh (or reused) intent. `open` is an intent with no Session yet —
+    // exactly what the real door leaves behind until `record_checkout_session`
+    // stamps one.
+    state.intentStatus = "open";
+    state.intentStatusAt = "2026-09-12T04:30:00.000Z";
+    state.intentStatusReason = null;
     sendJson(response, 200, {
       intent_id: E2E_INTENT_ID,
       price_local_key: E2E_PLAN_KEY,
@@ -301,7 +377,71 @@ async function handleCheckoutDoors(ctx, { registrationId }) {
   if (fn === "record_checkout_session") {
     const body = await readJson(request);
     state.checkoutOpen = true;
+    // #628 — the stamp is what moves an intent to `session_created`, which is
+    // the status the waiting face and the cancel control both key on.
+    state.intentStatus = "session_created";
+    state.intentStatusAt = "2026-09-12T04:30:00.000Z";
+    state.intentSessionId = body.p_session_id ?? null;
     sendJson(response, 200, { intent_id: body.p_intent, recorded: true }, cors);
+    return true;
+  }
+
+  // #628 — the narrow read `POST /checkout/cancel` names its intent from. No
+  // row when this registration has no intent at all, which is a STATE and not
+  // a refusal.
+  if (fn === "get_own_checkout_intent_session") {
+    const body = await readJson(request);
+    if (body.p_registration !== registrationId) {
+      sendJson(response, 400, { code: "CLR04", message: "not your registration request" }, cors);
+      return true;
+    }
+    // THE DOOR'S OWN FILTER, mirrored: `0186` selects only a `session_created`
+    // or `processing` intent, so a terminal one is NO ROW and the cancel route
+    // answers "nothing to cancel". A mock that returned every status would let
+    // a UI that offered cancel on a failed payment pass this walk.
+    if (!LIVE_INTENT_STATUSES.has(state.intentStatus)) {
+      sendJson(response, 200, [], cors);
+      return true;
+    }
+    sendJson(response, 200, [{
+      intent_id: E2E_INTENT_ID,
+      session_id: state.intentSessionId ?? null,
+      status: state.intentStatus,
+    }], cors);
+    return true;
+  }
+
+  // #628 — THE DOOR THAT DECIDES A CANCELLATION, with the two refusals the real
+  // one raises. A walk that could cancel a payment the bank was mid-way through
+  // confirming would be walking a different product.
+  if (fn === "cancel_checkout_intent") {
+    if (state.intentStatus === "processing") {
+      sendJson(response, 400, {
+        code: "CLR09",
+        message: "a payment is in flight for this checkout",
+        details: JSON.stringify({ reason: "payment_in_flight" }),
+      }, cors);
+      return true;
+    }
+    if (state.paidUnconsumed || state.intentStatus === "paid") {
+      sendJson(response, 400, {
+        code: "CLR09",
+        message: "this registration is already paid",
+        details: JSON.stringify({ reason: "already_paid" }),
+      }, cors);
+      return true;
+    }
+    const replay = state.intentStatus === "cancelled";
+    const sessionId = state.intentSessionId ?? null;
+    state.intentStatus = "cancelled";
+    state.intentStatusAt = "2026-09-12T04:30:00.000Z";
+    state.checkoutOpen = false;
+    state.intentSessionId = null;
+    // A replay carries no session id — the real door has nothing to hand back
+    // the second time, which is why the app keeps the one its own read saw.
+    sendJson(response, 200, replay
+      ? { status: "cancelled", replay: true }
+      : { status: "cancelled", session_id: sessionId }, cors);
     return true;
   }
 
@@ -314,6 +454,15 @@ async function handleCheckoutDoors(ctx, { registrationId }) {
     sendJson(response, 200, [{
       checkout_open: state.checkoutOpen,
       paid_unconsumed: state.paidUnconsumed,
+      // #628 — migration 0186's five additions, served EXACTLY as the door
+      // declares them (snake_case, nullable text, one boolean). A fixture that
+      // shaped them any other way would prove the app can read a shape the real
+      // door never sends.
+      intent_status: state.intentStatus ?? null,
+      intent_status_at: state.intentStatusAt ?? null,
+      intent_status_reason: state.intentStatusReason ?? null,
+      intent_session_id: state.intentSessionId ?? null,
+      capacity_full: state.capacityFull === true,
     }], cors);
     return true;
   }

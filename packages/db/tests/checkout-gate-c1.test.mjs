@@ -137,8 +137,13 @@ cell("c1.1 catalog -- the four tables have the exact C-1 column shapes", async (
     // #621 (0185): dpa_version was retyped to integer (add/map/drop/rename, so it moved to the
     // tail of the tuple) and terms_version plus the two generated *_kind constants joined it --
     // the pins that make BOTH legal kinds real foreign keys onto clara.legal_documents.
+    // #628 (0186): the intent gained a STATE -- status/status_at/status_reason. The intent used to
+    // be `unstamped` or `stamped` and nothing else, so "the bank is still deciding", "the applicant
+    // walked away", "Stripe expired the session" and "the payment failed" all rendered as the same
+    // checkout_open. status is the eight-value enumeration; status_at and status_reason are written
+    // by clara._tf_checkout_intents_session_stamp, never by a caller.
     ["checkout_intents",
-      "id,registration_id,applicant,price_local_key,session_id,opened_at,terms_version,dpa_version,dpa_kind,terms_kind"],
+      "id,registration_id,applicant,price_local_key,session_id,opened_at,terms_version,dpa_version,dpa_kind,terms_kind,status,status_at,status_reason"],
     ["dpa_documents", "version,body,body_sha256,source_path,effective_from,effective_to,created_at"],
     ["dpa_signatures", "id,user_id,dpa_version,signed_at,body_sha256"],
     ["registration_rate_events", "id,applicant,origin_digest,observed_at"],

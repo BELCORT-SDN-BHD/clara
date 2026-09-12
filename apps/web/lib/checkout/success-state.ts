@@ -16,13 +16,56 @@
 // failed is `unavailable`, never any of the three.
 
 import { isRegistrationRequestRow } from "@/lib/registration/holding-state";
-import type { CheckoutProgress } from "@/lib/registration/checkout-progress-reads";
+import {
+  checkoutStandingFrom,
+  type CheckoutProgress,
+} from "@/lib/registration/checkout-progress-reads";
 import type { OwnRegistrationResult } from "@/lib/registration/server-reads";
 
+/**
+ * #628 WIDENED THIS FROM FIVE ARMS TO TEN, and every one of the five new arms
+ * is a fact the DB now states rather than a shade of "we are not sure".
+ *
+ * The old `awaiting_payment` carried FOUR different worlds under one sentence:
+ * a Session that was opened and never paid, a payment the bank is still
+ * confirming, a payment that FAILED, and a checkout the applicant abandoned.
+ * A person in the third of those was told "we have not seen your payment yet,
+ * it usually resolves on its own" — about a payment that was declined and
+ * never will. Migration 0186's `checkout_intents.status` is what makes the four
+ * separable, and separating them is the whole of this ticket's §2.
+ */
 export type CheckoutSuccessDecision =
   | { readonly kind: "claimable"; readonly registration: string }
   | { readonly kind: "already_open" }
-  | { readonly kind: "awaiting_payment" }
+  /** The bank is confirming an asynchronous payment. A WAIT with an end, not a
+   *  failure — and never a claim control, because there is no payment row yet. */
+  | {
+      readonly kind: "processing";
+      readonly statusAt: string | null;
+      readonly registration: string;
+    }
+  /** A Stripe Session exists and nothing has come back about it. The honest
+   *  name for "we have not been told", and NEVER for "you did not pay". */
+  | {
+      readonly kind: "awaiting_payment";
+      readonly statusAt: string | null;
+      /** Non-null ⇒ there is a live Session to cancel, so the card may offer
+       *  "cancel and start again". Null ⇒ it must not, because
+       *  `cancel_checkout_intent` would have nothing to expire at Stripe. */
+      readonly sessionId: string | null;
+      readonly registration: string;
+    }
+  /** The payment was refused. Terminal, and the only arm whose next step is a
+   *  NEW checkout rather than waiting. */
+  | { readonly kind: "payment_failed"; readonly reason: string | null }
+  /** The Session ran out of time before it was paid. */
+  | { readonly kind: "expired" }
+  /** The applicant cancelled it themselves, here or in another tab. */
+  | { readonly kind: "cancelled" }
+  /** Admission is full. Rendered with NO pay control: `open_checkout_intent`
+   *  and `claim_paid_firm` both refuse `capacity_reached`, and offering a
+   *  payment the door will refuse is how somebody believes they bought a firm. */
+  | { readonly kind: "capacity_full" }
   | { readonly kind: "no_registration" }
   | { readonly kind: "unavailable" };
 
@@ -51,7 +94,50 @@ export function checkoutSuccessDecisionFrom(
     return { kind: "already_open" };
   }
   if (newest.status !== "open") return { kind: "no_registration" };
-  return progress.paidUnconsumed
-    ? { kind: "claimable", registration: newest.id }
-    : { kind: "awaiting_payment" };
+
+  // THE ORDER BELOW IS THE DECISION, and each step outranks the next for a
+  // stated reason rather than by accident of writing.
+  //
+  // 1. AN OBSERVED UNCONSUMED PAYMENT OUTRANKS EVERYTHING, INCLUDING A FULL
+  //    HOUSE. This is the one arm where the applicant's money is already in
+  //    Clara's hands, and a `capacity_full` card shown over it would take
+  //    somebody's payment and then tell them the door is closed with no way
+  //    forward. `claim_paid_firm` may still refuse `capacity_reached` — that is
+  //    the DB's call to make on its own authority, and its refusal renders
+  //    verbatim — but this page will not pre-empt it by hiding the claim.
+  if (progress.paidUnconsumed) return { kind: "claimable", registration: newest.id };
+
+  // 2. THE INTENT'S OWN STATUS, when it states one. `checkoutStandingFrom` is
+  //    the single mapper `/pending` reads too, so the two surfaces cannot
+  //    disagree about which wait a person is in (review law 3).
+  const standing = checkoutStandingFrom(progress);
+  if (standing === "processing") {
+    return { kind: "processing", statusAt: progress.intentStatusAt, registration: newest.id };
+  }
+  if (standing === "payment_failed") return { kind: "payment_failed", reason: progress.intentStatusReason };
+  if (standing === "expired") return { kind: "expired" };
+  if (standing === "cancelled") return { kind: "cancelled" };
+  if (standing === "awaiting_payment") {
+    return {
+      kind: "awaiting_payment",
+      statusAt: progress.intentStatusAt,
+      sessionId: progress.intentSessionId,
+      registration: newest.id,
+    };
+  }
+
+  // 3. CAPACITY, only once no payment and no live intent is in the way. A
+  //    person mid-payment is not helped by being told the house is full; a
+  //    person about to start one is.
+  if (progress.capacityFull) return { kind: "capacity_full" };
+
+  // 4. THE PRE-#628 READING, unchanged, and it is what an older door still
+  //    produces: an open registration with no observed payment is AWAITING, and
+  //    that is never inferred into "you did not pay".
+  return {
+    kind: "awaiting_payment",
+    statusAt: progress.intentStatusAt,
+    sessionId: progress.intentSessionId,
+    registration: newest.id,
+  };
 }

@@ -1017,6 +1017,37 @@ const WORK_CANCEL_0184_CLOCK_NAMES = ["cancel_accounting_work"];
 // clock-free -- it gains two column comparisons and nothing else.
 const LEGAL_ACCEPTANCE_0185_CLOCK_NAMES = ["publish_legal_document"];
 
+// #628 [0186] -- checkout convergence. EXACTLY TWO names, and every other body in the migration is
+// measured out rather than omitted.
+//
+// `_tf_checkout_intents_session_stamp` joins this roster and the 0185 note above says it did not,
+// which was true of the 0185 recut and is no longer true of this one: 0186 makes the trigger the
+// ONLY authority over `clara.checkout_intents.status`, and it writes `new.status_at := now()`
+// itself on every transition precisely so that no caller can move a state without moving its
+// instant or move the instant without moving the state. `status_at` is a `timestamptz` column --
+// an INSTANT, never a date derived from one, which is the property arm (D) exists to protect --
+// and there is no date anywhere in the checkout-intent tuple for an assignment cast to reach.
+//
+// `set_admission_capacity` samples `now()` ONCE into a local and writes that same instant to
+// `admission_capacity.updated_at` and into its own receipt, exactly as `publish_legal_document`
+// (0185) does with `published_at`: sampling once is what makes the stored stamp and the answer the
+// caller is handed the same moment.
+//
+// The rest add nothing. `cancel_checkout_intent` proposes a status write and lets the trigger stamp
+// the instant (which is the whole design). `apply_stripe_events` is RECUT and reads no clock at
+// all: `stripe_event_applications.applied_at` and the problem queue's `noticed_at` are column
+// DEFAULTS, which live in pg_attrdef and not in any prosrc, and every status move it makes is
+// likewise stamped by the trigger. `_admission_capacity_state`, `get_admission_capacity`,
+// `get_own_checkout_intent_session` and the re-minted `get_own_checkout_progress` are projections.
+// `open_checkout_intent` and `claim_paid_firm` are RECUT here but already sit in
+// CHECKOUT_GATE_C3_CLOCK_NAMES, and neither recut introduces a clock read the 0163 body did not
+// already have (the rate window's `now() - interval '24 hours'` and the claim's `decided_at` /
+// `consumed_at` stamps are 0163's own; #628 adds an advisory lock, a capacity read and two status
+// writes, none of which reads a clock).
+const CHECKOUT_CONVERGENCE_0186_CLOCK_NAMES = [
+  "_tf_checkout_intents_session_stamp", "set_admission_capacity",
+];
+
 /** The arm (D) roster for the database under test, sorted as the catalog sorts it. */
 export async function s5BareTokenRoster(query) {
   const applied = async (pat) => (await query(
@@ -1120,6 +1151,7 @@ export async function s5BareTokenRoster(query) {
   if (await appliedStem("journal_work_evidence$")) names.push(...JOURNAL_EVIDENCE_0182_CLOCK_NAMES);
   if (await appliedStem("work_cancel_ordering$")) names.push(...WORK_CANCEL_0184_CLOCK_NAMES);
   if (await appliedStem("legal_acceptance$")) names.push(...LEGAL_ACCEPTANCE_0185_CLOCK_NAMES);
+  if (await appliedStem("checkout_convergence$")) names.push(...CHECKOUT_CONVERGENCE_0186_CLOCK_NAMES);
   return names.sort();
 }
 

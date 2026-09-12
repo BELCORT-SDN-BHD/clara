@@ -627,6 +627,31 @@ export const SCOPE_EXEMPT_SURFACES: ReadonlyArray<{
       "none of the four checks above can admit anything the door would refuse.",
   },
   {
+    path: "app/(entry)/checkout/cancel/route.ts",
+    // #628. Server entry 4 of 4 — the one that ENDS a checkout.
+    reason:
+      "EXEMPT BY NECESSITY. THE WAY OUT OF A CHECKOUT, WHICH RUNS BEFORE A FIRM " +
+      "EXISTS — by construction the caller has no firm (the firm is what the " +
+      "payment they are cancelling would have bought), so requireFirmScope() would " +
+      "redirect every applicant to /pending, which is the page whose own button " +
+      "posts here. It returns no firm-scoped data at all: its only response is a " +
+      "303 back to /pending carrying an opaque outcome marker. ITS OWN WALLS, in " +
+      "the order they run: (1) proveSameOrigin — a state-changing POST that ends a " +
+      "payment, refused cross-origin before anything else, because a page on " +
+      "another origin must not be able to cancel somebody's checkout from inside " +
+      "their own browser; (2) a resolved server session, or a redirect to /login; " +
+      "(3) the caller's OWN open registration, read server-side from their own " +
+      "session; (4) the caller's own intent, read through " +
+      "clara.get_own_checkout_intent_session — the request body is never read at " +
+      "all, so no intent id, session id or registration id is ever accepted from " +
+      "the caller, which matters more here than anywhere else on this train " +
+      "because the identifier would name a live payment. THE DB IS THE WALL: " +
+      "clara.cancel_checkout_intent judges every request on its own authority and " +
+      "refuses CLR09 payment_in_flight while the bank is confirming and " +
+      "already_paid once the money has landed. The Stripe Session expiry that " +
+      "follows is best effort and can never change the door's answer.",
+  },
+  {
     path: "app/(entry)/checkout/success/claim/route.ts",
     // FS-4 C-6 Lane B. Server entry 3 of 3 — the one that creates the tenant.
     reason:

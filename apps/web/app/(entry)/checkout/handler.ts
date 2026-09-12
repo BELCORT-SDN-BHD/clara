@@ -9,9 +9,11 @@ import {
 import {
   checkoutIdempotencyKey,
   createCheckoutSession,
+  retrieveCheckoutSession,
   StripeSessionError,
   type CheckoutSessionCreated,
   type CheckoutSessionRequest,
+  type StripeCheckoutSessionSnapshot,
 } from "@/lib/checkout/stripe-session";
 import { isDoorRefusal } from "@/lib/doors";
 import { isLegalKind } from "@/lib/registration/legal-reads";
@@ -84,9 +86,43 @@ type CheckoutDeps = {
   readonly resolveSession?: () => Promise<ServerSession | null>;
   readonly loadRegistration?: () => Promise<OwnRegistrationResult>;
   readonly createSession?: (request: CheckoutSessionRequest) => Promise<CheckoutSessionCreated>;
+  /** #628 — the RESUME hop. Injected so every arm of it (open, complete,
+   *  expired, unconfigured, unreachable) is driven by a cell rather than
+   *  reachable only against a live Stripe. */
+  readonly retrieveSession?: (sessionId: string) => Promise<StripeCheckoutSessionSnapshot>;
   readonly env?: Record<string, string | undefined>;
   readonly newOpKey?: () => string;
 };
+
+/**
+ * #628 — A STRIPE FAILURE'S CARD, AND THE ONE LINE IN THE LOG THAT NAMES IT.
+ *
+ * THE SPLIT THIS ADDS. Every `StripeSessionError` used to collapse into
+ * `stripe_unavailable` — "we could not reach the payment provider … try again
+ * in a moment" — including `unconfigured`, which is the class that CANNOT be
+ * fixed by trying again: no secret, no declared mode, or a key whose class
+ * contradicts the declared mode. An applicant on a deployment with a missing
+ * variable was told to keep pressing a button that would never work, and the
+ * only record of the real cause was a server log nobody was reading. The card
+ * now says which of the two it is; the log line is unchanged in shape.
+ *
+ * THE MESSAGE IS KEY-FREE BY CONSTRUCTION and must stay that way: every
+ * `StripeSessionError` in that module is built from variable names, a status
+ * code, an error NAME, or the two livemode booleans — never from the secret,
+ * and never from Stripe's response body (which can echo request parameters).
+ * `tests/checkout-route.test.ts` pins that the logged line carries no key and
+ * no key prefix.
+ */
+export function stripeFailureOutcome(err: StripeSessionError): CheckoutFlashOutcome {
+  // THE REASON REACHES A LOG, OR NOBODY EVER LEARNS IT (review-544 MAJOR). The
+  // key-class gate's whole value is that a mode mix-up is LOUD, and its startup
+  // arm cannot help on Workers, where the deployment's variables reach
+  // `process.env` per request and module scope sees none of them
+  // (`lib/checkout/stripe-session.ts`'s own note).
+  const kind = err.reason === "unconfigured" ? "payments_misconfigured" : "stripe_unavailable";
+  console.error(`[checkout] ${kind} (${err.reason}): ${err.message}`);
+  return { kind };
+}
 
 /** The one place a refusal becomes a response: a 303 back to the holding page
  *  carrying an opaque marker, plus the unforgeable cookie the card is rendered
@@ -287,6 +323,43 @@ export async function handleCheckoutPost(
             : [],
         });
       }
+      // #628 — ADMISSION IS FULL (`CLR09 capacity_reached`). Its own card
+      // rather than the generic `refused` one, because the person's next step
+      // is not "try again" and the card must not leave a pay control beside a
+      // door that will refuse it. Classified by CODE AND REASON, never by
+      // matching the sentence.
+      if (err.code === "CLR09" && err.reason === "capacity_reached") {
+        return checkoutRefusal(proof.origin, { kind: "capacity_reached" });
+      }
+      // #628 — ONE LIVE STRIPE SESSION PER REGISTRATION (`CLR09
+      // checkout_in_progress`), AND THIS IS THE RESUME.
+      //
+      // WHY A RESUME AND NOT A RETRY. `open_checkout_intent` refuses when the
+      // applicant already has a live Session, and that rule is what stops a
+      // double-press, a restored tab or a LOST ACKNOWLEDGEMENT — a POST whose
+      // response never reached the browser — from minting a second Session and
+      // a second subscription. The person pressing the button again does not
+      // want a new checkout; they want the one they already have. Only Stripe
+      // knows that Session's hosted URL and whether it is still open, so the
+      // route asks, and 303s them to it.
+      //
+      // THE STATUS IS STRIPE'S ANSWER, NOT A GUESS. `complete` means the money
+      // is with the applier now and there is nothing to pay — the holding page
+      // beneath this banner renders the intent's own waiting face. `expired`
+      // means the hosted page is dead; the intent's OWN expiry is the applier's
+      // job and this route never writes it, so the card says what happened and
+      // offers a fresh start rather than cancelling something behind the
+      // person's back.
+      if (err.code === "CLR09" && err.reason === "checkout_in_progress") {
+        const liveSession = err.detail?.session_id;
+        if (typeof liveSession !== "string" || liveSession.length === 0) {
+          // The door says a checkout is in progress but named no Session. The
+          // honest card is the in-progress one; inventing a resume target from
+          // a value that is not there is the one thing this must not do.
+          return checkoutRefusal(proof.origin, { kind: "checkout_in_progress" });
+        }
+        return await resumeCheckout(liveSession, proof.origin, deps, env);
+      }
       // Every other refusal: the DB's own considered answer, carried verbatim —
       // code and sentence untouched, never retried (apps/web/AGENTS.md).
       return checkoutRefusal(proof.origin, {
@@ -296,26 +369,50 @@ export async function handleCheckoutPost(
       });
     }
     if (err instanceof StripeSessionError) {
-      // THE REASON REACHES A LOG, OR NOBODY EVER LEARNS IT (review-544 MAJOR).
-      // Every `StripeSessionError` collapses into ONE card here — the applicant
-      // is told "we could not reach the payment provider", which is the right
-      // thing to tell them and the wrong thing to be the only record. The
-      // key-class gate's whole value is that a mode mix-up is LOUD, and its
-      // startup arm cannot help on Workers, where the deployment's variables
-      // reach `process.env` per request and module scope sees none of them
-      // (`lib/checkout/stripe-session.ts`'s own note). Without this line a live
-      // key on the beta deployment would refuse every checkout in complete
-      // silence, which looks exactly like Stripe being down.
-      //
-      // THE MESSAGE IS KEY-FREE BY CONSTRUCTION and must stay that way: every
-      // `StripeSessionError` in that module is built from variable names, a
-      // status code, an error NAME, or the two livemode booleans — never from
-      // the secret, and never from Stripe's response body (which can echo
-      // request parameters). `tests/checkout-route.test.ts` pins that the
-      // logged line carries no key and no key prefix.
-      console.error(`[checkout] stripe_unavailable (${err.reason}): ${err.message}`);
-      return checkoutRefusal(proof.origin, { kind: "stripe_unavailable" });
+      return checkoutRefusal(proof.origin, stripeFailureOutcome(err));
     }
     return checkoutRefusal(proof.origin, { kind: "unavailable" });
   }
+}
+
+/**
+ * #628 — HAND THE PERSON BACK THE SESSION THEY ALREADY HAVE.
+ *
+ * A SEPARATE FUNCTION so every arm is drivable by a cell: Stripe says open
+ * (303 to the hosted page), complete (the applier owns it), expired (start
+ * again), unconfigured (an operator has to fix something), or does not answer
+ * at all. Reached ONLY from `open_checkout_intent`'s own
+ * `checkout_in_progress` refusal, so the Session id is always the DOOR's —
+ * never a value from the request, which is why there is no parameter on this
+ * route that could carry one.
+ *
+ * IT WRITES NOTHING. No door is called here, the intent is not touched, and
+ * nothing is expired: a resume is a read plus a redirect. Expiry belongs to
+ * the applier, and cancellation is a deliberate act on its own route
+ * (`POST /checkout/cancel`).
+ */
+async function resumeCheckout(
+  sessionId: string,
+  origin: string,
+  deps: CheckoutDeps,
+  env: Record<string, string | undefined>,
+): Promise<Response> {
+  const retrieve = deps.retrieveSession ?? ((id: string) => retrieveCheckoutSession(id, { env }));
+  let live: StripeCheckoutSessionSnapshot;
+  try {
+    live = await retrieve(sessionId);
+  } catch (err) {
+    if (err instanceof StripeSessionError) return checkoutRefusal(origin, stripeFailureOutcome(err));
+    return checkoutRefusal(origin, { kind: "unavailable" });
+  }
+  if (live.status === "expired") return checkoutRefusal(origin, { kind: "checkout_expired" });
+  // 303, so the browser re-issues the navigation as a GET at Stripe — the same
+  // shape the create path uses.
+  if (live.status === "open" && live.url !== null) {
+    return NextResponse.redirect(live.url, { status: 303 });
+  }
+  // `complete`, or an `open` Session Stripe returned without a hosted URL. Both
+  // mean the same thing to the person: there is nothing for them to pay right
+  // now, and the holding page's own face says where the payment stands.
+  return checkoutRefusal(origin, { kind: "checkout_in_progress" });
 }
