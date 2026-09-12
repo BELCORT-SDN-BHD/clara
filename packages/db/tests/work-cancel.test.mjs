@@ -1593,6 +1593,21 @@ test("wc.36 a handover is `work` on the firm's Activity feed, and its detail rec
   assert.equal(found[0].kind, "work", "wc.36 …carrying `work` as its own kind, not the fallback");
   assert.equal(found[0].event_type, "work.taken_over", "wc.36 …and its real event type");
 
+  // THE ROW CAN BE OPENED (round-6 review, finding [1]). `work_id` on an event row comes from the
+  // operation-receipt join, which is gated on `object_kind = 'entry'` — and a handover event has
+  // no object_kind at all (clara.firm_timeline_visible derives it from entry_id/document_id/
+  // resolution_id, and `_append_event` passes none of the three). So the estate's FIRST `work.%`
+  // row reached the feed as the only row on it with nothing to link to, while the Work it is
+  // entirely about sat one payload key away. `primaryActivityHref` (apps/web/lib/firm/activity.ts)
+  // returns null for a row with neither work_id nor a linkable object_kind.
+  assert.equal(found[0].work_id, w.work_id,
+    "wc.36 …and it names the Work it is about, so the row deep-links to /clients/:id/work/:workId");
+  assert.equal(found[0].object_kind, null,
+    "wc.36 vacuity control: the id did NOT arrive through the object_kind='entry' receipt join — "
+    + "a handover event has no object_kind, which is exactly why the payload had to be read");
+  assert.equal(found[0].client_id !== null, true,
+    "wc.36 …and the link's other half is on the row too");
+
   const asDocs = await listActivity(ALICE(), { kinds: ["documents"], limit: 100 });
   assert.equal(asDocs.rows.some((r) => r.id === eventId), false,
     "wc.36 …and never under `documents`, which is where the unrecognised-prefix fallback sends it");
@@ -1600,6 +1615,9 @@ test("wc.36 a handover is `work` on the firm's Activity feed, and its detail rec
   // THE DETAIL DOOR'S SAME LADDER. A deep link to the row must agree with the row.
   const detail = await getActivityEvent(ALICE(), "event", eventId);
   assert.equal(detail.kind, "work", "wc.36 get_activity_event maps the same event to the same kind");
+  assert.equal(detail.work_id, w.work_id,
+    "wc.36 …and the same Work: a detail Sheet that offered no link where its row offers one "
+    + "would be the two doors disagreeing about the same event");
 
   // THE OPERATION RECEIPT'S PROVENANCE PAIR. After the handover the Work is EXECUTED AS the
   // colleague and was ASKED FOR by the revoked human; the detail record must carry both, because

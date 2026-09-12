@@ -1882,7 +1882,7 @@ reset role;
 -- lanes emitting two full bodies of one function is a merge that resolves itself wrongly and
 -- silently, so the recut waited for 0183 to land and is derived from 0183's installed text
 -- (prosrc-sha-pinned in the prestate block above, exactly the way 0183 pinned 0181's). The
--- bodies below are 0183's, byte-for-byte, plus TWO additions, each marked `#630`:
+-- bodies below are 0183's, byte-for-byte, plus THREE additions, each marked `#630`:
 --
 --   1. `when v.event_type like 'work.%' then 'work'` in BOTH kind ladders (list_activity's
 --      ev_base and get_activity_event's 'event' arm). §I registers `work.taken_over`, the
@@ -1890,6 +1890,14 @@ reset role;
 --      handover under `documents`.
 --   2. `initiated_by` and `responsible` beside the unchanged `initiator` on the
 --      operation_receipt arm of the detail door — §A's split, reaching the surface that reads it.
+--   3. `work_id` FILLED for a `work.%` row, from the event's own payload, in BOTH bodies. The
+--      0181/0183 expression is `orr.work_id` — the operation-receipt join, gated on
+--      `object_kind = 'entry'` — and a handover event has no object_kind at all, so addition 1
+--      alone would have put the estate's first `work.%` row on the feed as the only row in it
+--      with nothing to link to, one payload key away from the Work it is entirely about. The
+--      payload is not projected by `clara.firm_timeline_visible`, so both bodies reach past the
+--      view to `clara.domain_events` by primary key, inside a CASE no non-`work.%` row evaluates.
+--      Widening the VIEW instead would touch every reader of it and belongs to #719.
 --
 -- EVERYTHING ELSE IS 0183's AND STAYS 0183's: `set plan_cache_mode = force_custom_plan` on both
 -- (0183's own BLOCKER [0]), `set search_path = clara, pg_temp`, SECURITY INVOKER, the bookkeeper
@@ -2011,7 +2019,34 @@ begin
       v.created_at                                                        as occurred_at,
       v.object_kind                                                       as object_kind,
       v.object_id                                                         as object_id,
-      orr.work_id                                                         as work_id,
+      -- #630 (round-6 review, finding [1]) -- AND THE HANDOVER ROW GETS A DEEP LINK. `orr.work_id`
+      -- is the operation-receipt join's, gated on `object_kind = 'entry'`, and a `work.taken_over`
+      -- event has NO object_kind at all: clara.firm_timeline_visible derives it from
+      -- entry_id/document_id/resolution_id and `_append_event` passes none of the three. So the
+      -- estate's first `work.%` row reached the feed as the only row with nothing to link to,
+      -- while the Work it is entirely about sat one payload key away.
+      --
+      -- READ FROM clara.domain_events, NOT THE VIEW: the view projects no `payload` column, and
+      -- widening it is a change to a surface far beyond this door (left to #719). A correlated
+      -- primary-key lookup inside a CASE is the cheapest honest reach -- CASE evaluates only the
+      -- branch it selects, so a feed of entry and document rows pays nothing at all, and the one
+      -- work.% row pays one index probe. `de.firm_id = c.firm` repeats the fence the view already
+      -- applies; the row is one the caller can already see, and only its `work` key is read.
+      --
+      -- THE UUID SHAPE IS CHECKED BEFORE THE CAST. `work.taken_over` always writes a uuid, but a
+      -- later `work.%` type with a differently shaped `work` key would otherwise raise 22P02 out
+      -- of a READ -- turning a feed page into a failure over a row it could simply not link.
+      coalesce(
+        orr.work_id,
+        case when v.event_type like 'work.%' then (
+          select case
+            when de.payload->>'work' ~ '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+            then (de.payload->>'work')::uuid
+          end
+          from clara.domain_events de
+          where de.id = v.event_id and de.firm_id = c.firm
+        ) end
+      )                                                                   as work_id,
       orr.id::text                                                        as receipt_id,
       case when v.object_kind = 'document' then v.object_id end           as document_id,
       case when v.object_kind = 'entry' then je.reversal_of end           as original_entry_id,
@@ -2200,7 +2235,8 @@ comment on function clara.list_activity(text, int, uuid, text[], timestamptz, ti
   'effect is excluded entirely; one that drafted something is kind=agent (never documents), actor '
   'stays null. #630: a work.% event type (work.taken_over is the first) is kind=work, so a '
   'handover is findable under the filter that names it instead of falling into the documents '
-  'bucket. PINS plan_cache_mode = force_custom_plan: its ONE union statement binds the session '
+  'bucket, and its work_id is read from the event payload so the row deep-links to the Work it is '
+  'about. PINS plan_cache_mode = force_custom_plan: its ONE union statement binds the session '
   'firm, every filter, the cursor pair and the kept-sweep array as plpgsql parameters, and from '
   'the sixth execution of a pooled connection plpgsql would otherwise serve it from a generic plan '
   'built for the per-firm AVERAGE of multi-tenant tables (measured: 145 ms -> 2.0-2.8 s at 30,000 '
@@ -2248,7 +2284,20 @@ begin
         'description', v.event_description, 'client_id', v.client_id, 'actor', v.actor,
         'on_behalf_of', v.on_behalf_of, 'via_wake_kind', v.via_wake_kind, 'occurred_at', v.created_at,
         'object_kind', v.object_kind, 'object_id', v.object_id,
-        'work_id', orr.work_id, 'receipt_id', orr.id::text,
+        -- #630 (round-6 review, finding [1]): the SAME reach list_activity's ev_base makes -- see
+        -- that function's own comment. A deep link to the row must agree with the row.
+        'work_id', coalesce(
+          orr.work_id,
+          case when v.event_type like 'work.%' then (
+            select case
+              when de.payload->>'work' ~ '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+              then (de.payload->>'work')::uuid
+            end
+            from clara.domain_events de
+            where de.id = v.event_id and de.firm_id = c.firm
+          ) end
+        ),
+        'receipt_id', orr.id::text,
         'document_id', case when v.object_kind = 'document' then v.object_id end,
         'original_entry_id', case when v.object_kind = 'entry' then je.reversal_of end,
         'replacement_entry_id', case when v.object_kind = 'entry' then je.reversed_by end,
@@ -2379,7 +2428,8 @@ comment on function clara.get_activity_event(text, text) is
   'by (source, id) -- see that function''s own comment for the shapes. Another firm''s row, an '
   'unknown source, a malformed agent_receipt pair, a genuinely absent id, or an EXCLUDED '
   'zero-effect sweep heartbeat (#728) all refuse the SAME CLR11 activity_event_not_found (no '
-  'oracle). #630: a work.% event type is kind=work (the same ladder as the feed), and the '
+  'oracle). #630: a work.% event type is kind=work (the same ladder as the feed) and carries '
+  'the work_id its payload names, so the detail record links where its row links; the '
   'operation_receipt arm carries the Work''s provenance as THREE facts -- initiated_by (who '
   'asked, immutable), responsible (who it is executed as now) and initiator (the same human as '
   'responsible, under 0181''s original key, kept so no reader breaks). p_id is TEXT -- see this '
@@ -2394,7 +2444,7 @@ reset role;
 -- §J  TAIL CENSUS. Every claim re-READ from the live catalog.
 -- =====================================================================================
 do $w630_tail$
-declare v_src text; v_n int;
+declare v_src text; v_n int; v_probe text;
   -- #630 (fifth round, finding [2]) -- the literal-aware strip's own state; see the build below.
   v_bodies jsonb := '{}'::jsonb; v_sig text; v_line text;
   v_body text; v_out text; v_par int; v_kept text; v_rest text; v_head text; v_p int;
@@ -2656,7 +2706,23 @@ begin
   if position('''report''' in v_src) = 0 or position('like ''close.%''' in v_src) = 0 then
     raise exception '#630 tail: the list_activity recut dropped a 0181 kind arm' using errcode='CLR10';
   end if;
+  v_probe := 'clara.list_activity';
+  -- …and the row it files under `work` can be OPENED. Read from the stripped body, so a probe
+  -- cannot be satisfied by the paragraph that explains the reach.
+  if position('de.payload->>''work''' in v_src) = 0
+     or position('from clara.domain_events de' in v_src) = 0 then
+    raise exception '#630 tail: % does not reach the event payload for a work.%% row -- the handover would be the one feed row with nothing to link to', v_probe
+      using errcode='CLR10';
+  end if;
   v_src := v_bodies ->> 'clara.get_activity_event(text,text)';
+  v_probe := 'clara.get_activity_event';
+  -- …and the row it files under `work` can be OPENED. Read from the stripped body, so a probe
+  -- cannot be satisfied by the paragraph that explains the reach.
+  if position('de.payload->>''work''' in v_src) = 0
+     or position('from clara.domain_events de' in v_src) = 0 then
+    raise exception '#630 tail: % does not reach the event payload for a work.%% row -- the handover would be the one feed row with nothing to link to', v_probe
+      using errcode='CLR10';
+  end if;
   if position('like ''work.%'' then ''work''' in v_src) = 0 then
     raise exception '#630 tail: get_activity_event has no work.%% kind arm -- the row and its deep link would disagree'
       using errcode='CLR10';
