@@ -72,8 +72,12 @@ export function localOpenFailure(err, what) {
  *
  * Opening first also makes the LOCAL failure the SAME failure the deployed one is: a typed,
  * retryable `storage_error`, not a bare ENOENT a route's error mapper reads as an unrecognised
- * internal fault. `artifactResponseFor` below already took this cure for the artifact family and
- * records the same reasoning; this is that cure, shared by the other three.
+ * internal fault — the reasoning `artifactResponseFor` below records for the artifact family.
+ *
+ * ALL FOUR FAMILIES GO THROUGH HERE (#630 round-6 finding [4]). An earlier draft of this header
+ * said the artifact family "already took this cure"; it had only adopted the CLASSIFIER, and still
+ * returned a lazy `createReadStream` after its stat. Sharing a classifier is not sharing an eager
+ * open, and the difference is a second, unprotected `open()`. Do not re-introduce one.
  */
 async function openLocalStream(path, what) {
   let fh;
@@ -445,23 +449,23 @@ async function artifactResponseFor(key) {
   if (process.env.RELAY_TEST_MODE === "1") {
     const injected = globalThis.__claraStorageForTest;
     if (injected?.get) return injected.get(key);
-    // A MISSING OBJECT IS A StorageError IN BOTH MODES, and that costs one stat to guarantee.
+    // A MISSING OBJECT IS A StorageError IN BOTH MODES, and that costs one open to guarantee.
     // Without it the local path raises a bare ENOENT from the stream, which a route's error mapper
     // reads as an unrecognised internal fault (500) while the real Supabase path raises a
     // StorageError (502) for the identical condition — so the local test would have been measuring
     // a different failure than the deployed one. Measured, not assumed: this is the divergence the
     // FS-7 e2 route battery's missing-object cell actually caught.
-    const path = artifactLocalPath(key);
-    try {
-      const fh = await open(path, "r");
-      await fh.close();
-    } catch (err) {
-      // Through the SAME classifier as the other three families (#630 finding [3]): this catch
-      // carried the identical "always absent" claim. For ENOENT the message is byte-identical to
-      // what it was, so nothing that reads it changes; a permission failure now says so.
-      throw localOpenFailure(err, "artifact");
-    }
-    return createReadStream(path);
+    //
+    // ONE open, HELD (#630 round-6 finding [4]). This arm used to stat with an `open`/`close` pair
+    // and then hand back a fresh, LAZY `createReadStream(path)` — a SECOND open, on a later libuv
+    // turn, that the stat did nothing to protect. The steady-state miss was covered; an object
+    // that vanished inside the stat→open window (a rig sweep) or an open that failed there
+    // (a Windows sharing violation, fd pressure) fired 'error' into an empty listener set, because
+    // `downloadArtifactCanonical` below `await`s the destination `mkdir` before `pipeline()`
+    // attaches anything. `openLocalStream` is the same cure the other three families take, and it
+    // keeps this arm's messages byte-identical: it throws through the very `localOpenFailure` this
+    // catch used to call.
+    return openLocalStream(artifactLocalPath(key), "artifact");
   }
   const { base, jwt } = realConfig();
   const response = await fetch(artifactObjectUrl(base, key), {

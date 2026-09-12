@@ -11,13 +11,13 @@
 // e2es could not run at all on a rebuilt rig (the local_facts lane sweeps `clara.documents` rows
 // whose bytes are not in `packages/runtime/test-storage`).
 //
-// The artifact family already had the cure (`artifactResponseFor`: open/stat first, then stream)
-// and its header records WHY — the local path must raise the SAME typed, retryable
-// `storage_error` the real Supabase path raises for the identical condition, or the local test is
-// measuring a different failure from the deployed one. These cells hold the other three families
-// to that contract and, crucially, assert the NEGATIVE: no `'error'` reaches the process while a
-// read of a missing object is in flight, including across an `await` between the open and the
-// pipeline.
+// `artifactResponseFor` records WHY the cure is needed — the local path must raise the SAME typed,
+// retryable `storage_error` the real Supabase path raises for the identical condition, or the
+// local test is measuring a different failure from the deployed one — but until round 6 it had
+// adopted only the CLASSIFIER and still handed back a lazy stream after its stat (see the artifact
+// cells at the end of this file). These cells hold every family to that contract and, crucially,
+// assert the NEGATIVE: no `'error'` reaches the process while a read of a missing object is in
+// flight, including across an `await` between the open and the pipeline.
 //
 // Unit level: storage.mjs's own RELAY_TEST_MODE seam, a temp CLARA_TEST_STORAGE_DIR, no rig.
 
@@ -29,12 +29,15 @@ import { join } from "node:path";
 
 import {
   StorageError,
+  downloadArtifactCanonical,
   downloadCanonical,
   hashCanonical,
   hashReportCanonical,
+  hashSandboxCanonical,
   hashWikiCanonical,
   localObjectExists,
   localOpenFailure,
+  verifySandboxCanonical,
 } from "../lib/storage.mjs";
 
 const FIRM = "87dba009-1c2d-4e5f-8a9b-0c1d2e3f4a5b";
@@ -188,4 +191,87 @@ test("storage: the classifier survives a non-Error rejection", () => {
   const err = localOpenFailure(undefined, "artifact");
   assert.ok(err instanceof StorageError);
   assert.equal(err.message, "artifact storage read failed (open failed, no errno)");
+});
+
+// ===========================================================================================
+// #630 (sixth review round, finding [4]) — THE ARTIFACT FAMILY ACTUALLY TAKES THE CURE.
+//
+// The header above (and storage.mjs's own, until this round) claimed the artifact family "already
+// had the cure". It did not: `artifactResponseFor` stat'd the object with an `open`/`close` pair,
+// shared the CLASSIFIER, and then handed back a fresh, LAZY `createReadStream(path)` — a SECOND,
+// unprotected open on a later libuv turn. The stat only closes the steady-state miss; an object
+// that disappears (a rig sweep) or an open that fails (a Windows sharing violation, fd pressure)
+// INSIDE the stat→open window fired 'error' into an empty listener set, and
+// `scripts/serve.mjs`'s fatal handler exits 1. `downloadArtifactCanonical` holds that window open
+// deliberately: it `await`s the destination `mkdir` before `pipeline()` attaches anything.
+//
+// Both cells below are one-sided on purpose. They assert the NEGATIVE this file exists for — no
+// error reaches the process — and accept either real outcome (the bytes, or a typed StorageError),
+// because which of the two a vanishing object yields is a genuine race and pinning it would be
+// pinning the scheduler.
+// ===========================================================================================
+
+const SANDBOX_KEY = `firms/${FIRM}/sandbox/${SHA}.pdf`;
+const ARTIFACT_KEY = `firms/${FIRM}/reports/${SHA}.pdf`;
+
+test("storage (artifact + sandbox): an ABSENT object is the same typed miss the other three families give", async () => {
+  // No `localObjectExists` precondition here: that helper validates through `safeKey`, the DOCS
+  // family's own validator, which refuses a `reports/`-or-`sandbox/` key by design. Nothing has
+  // ever written under this temp storage root, so the object's absence is the fixture itself.
+  const destination = join(root, "artifact-out", "deep", "nested", `${SHA}.pdf`);
+
+  assertTypedStorageMiss(
+    await withUncaughtWatch(() => downloadArtifactCanonical(ARTIFACT_KEY, destination, SHA)),
+    "downloadArtifactCanonical",
+  );
+  assertTypedStorageMiss(
+    await withUncaughtWatch(() => hashSandboxCanonical(SANDBOX_KEY)),
+    "hashSandboxCanonical",
+  );
+  assertTypedStorageMiss(
+    await withUncaughtWatch(() => verifySandboxCanonical(SANDBOX_KEY, SHA)),
+    "verifySandboxCanonical",
+  );
+});
+
+test("storage (artifact): an object that VANISHES after the stat never reaches the process as an 'error'", async () => {
+  const { createHash } = await import("node:crypto");
+  const bytes = "%PDF-1.7\n% a sealed sandbox export\n";
+  const sha = createHash("sha256").update(bytes).digest("hex");
+  const key = `firms/${FIRM}/sandbox/${sha}.pdf`;
+  const objectDir = join(process.env.CLARA_TEST_STORAGE_DIR, "firms", FIRM, "sandbox");
+  const objectPath = join(objectDir, `${sha}.pdf`);
+  await mkdir(objectDir, { recursive: true });
+
+  const caught = [];
+  const onUncaught = (err) => { caught.push(err); };
+  process.on("uncaughtException", onUncaught);
+  try {
+    // A sweeper removing the bytes while a read is in flight — the ordinary state of a rebuilt rig
+    // whose database still holds rows for objects the sweep took. 40 rounds: the lazy re-open lost
+    // this race within the first handful every time it was measured.
+    for (let i = 0; i < 40; i += 1) {
+      await writeFile(objectPath, bytes);
+      const destination = join(root, "vanish", String(i), `${sha}.pdf`);
+      const read = downloadArtifactCanonical(key, destination, sha).then(
+        () => "downloaded",
+        (err) => (err instanceof StorageError ? `storage:${err.code}` : `OTHER:${err?.code ?? err}`),
+      );
+      // Windows refuses to unlink a file an eager handle still holds — that refusal is the cure
+      // working, not a test failure, so the sweep's own error is swallowed and the round counted.
+      const sweep = rm(objectPath, { force: true }).catch(() => {});
+      const [outcome] = await Promise.all([read, sweep]);
+      assert.ok(outcome === "downloaded" || outcome.startsWith("storage:"),
+        `round ${i}: a vanishing object is the bytes or a typed StorageError, never a bare fs error `
+        + `— saw ${outcome}`);
+      await rm(objectPath, { force: true }).catch(() => {});
+    }
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(caught.map((e) => `${e?.code ?? ""}:${e?.message ?? e}`), [],
+      "a lost race must not reach the process as an uncaughtException — scripts/serve.mjs treats "
+      + "one as fatal and exits 1, taking the crash-only supervisor down over one absent object");
+  } finally {
+    process.off("uncaughtException", onUncaught);
+  }
 });
