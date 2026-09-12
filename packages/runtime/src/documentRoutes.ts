@@ -167,7 +167,8 @@ export function derivedDocumentFilename(sha256: unknown, storagePath: unknown): 
  * `{ok:true, value:null}` means genuinely absent (or empty), which is the sanctioned default.
  *
  * TWO HOSTILE SPELLINGS, BOTH MEASURED against express 5.2.1's default "simple" query parser
- * (the probe is $SCRATCH/logs/620-fix1-rt/F7-qparser-probe.log in the fix-round evidence):
+ * (`app.get("query parser") === "simple"`; the shapes below are what a bare handler receives in
+ * `req.query` for each spelling, and any `?client=…` variant can be re-measured that way):
  *   · A REPEATED key — `?client=<uuid>&client=<uuid>` — arrives as an ARRAY, so a
  *     `typeof raw === "string"` test is false and the old code read it as "no client scope". The
  *     measured consequence was the real PDF served for a document the caller had explicitly
