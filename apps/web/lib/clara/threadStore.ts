@@ -41,6 +41,13 @@ export interface ClaraThreadUiState {
    *  is still waiting for it. Cleared the moment the live stream carries the same question
    *  (`ClaraThreadView` prefers the live fold) and on every terminal `message`. */
   parkedClarify: LiveClarifyPart | null;
+  /** #630 (round-5 finding [6]) — TRUE once the run poll has given up on a turn it can no longer
+   *  see. Not "the turn ended": the poll stops after `CLARA_RUN_POLL_MISS_LIMIT` reads that
+   *  found no visible row (RLS, a transient, a stale id), and the honest statement is that this
+   *  TAB lost sight of it, not that the run is over. It exists because the alternative round 4
+   *  shipped was silence: the poll stopped asking and wrote nothing, so the Stop control and the
+   *  clock stayed mounted for the life of the mount over a turn nothing could observe. */
+  turnLostSight: boolean;
   stream: ClaraStreamState;
 }
 
@@ -61,6 +68,7 @@ const emptyThreadState: ClaraThreadUiState = {
   turnStartedAt: null,
   turnStatus: null,
   parkedClarify: null,
+  turnLostSight: false,
   stream: initialClaraStreamState,
 };
 
@@ -228,6 +236,8 @@ export const claraThreadStore = {
   },
 
   markAccepted(threadId: string, taskId: string): void {
+    // #630 — a NEW turn is never the one this tab lost sight of.
+    setThread(threadId, { turnLostSight: false });
     setThread(threadId, {
       activeTaskId: taskId,
       // The new turn's start is not known until the DB is asked for it (`hydrateRun`).
@@ -249,14 +259,20 @@ export const claraThreadStore = {
     parkedClarify: LiveClarifyPart | null,
   ): void {
     if (run === null) {
-      setThread(threadId, { turnStartedAt: null, turnStatus: null, parkedClarify: null });
+      setThread(threadId, {
+        turnStartedAt: null, turnStatus: null, parkedClarify: null, turnLostSight: false,
+      });
       return;
     }
+    // #630 — SEEING THE ROW IS THE END OF HAVING LOST SIGHT OF IT. A reload (or a poll that starts
+    // answering again) is exactly the re-check the give-up line asks the reader for, so the state
+    // it set is cleared by the read that succeeds rather than left for someone to clear by hand.
     setThread(threadId, {
       activeTaskId: run.taskId,
       turnStartedAt: run.startedAt,
       turnStatus: run.status,
       parkedClarify,
+      turnLostSight: false,
     });
   },
 
@@ -322,6 +338,24 @@ export const claraThreadStore = {
   /** Has a door already ended this turn? Read by the fire-and-forget run hydrate above. */
   wasTurnStopped(taskId: string): boolean {
     return stoppedTurns.has(taskId);
+  },
+
+  /** #630 (round-5 finding [6]) — THE RUN POLL HAS STOPPED ASKING, and the surface says so.
+   *
+   *  After `CLARA_RUN_POLL_MISS_LIMIT` reads that found no visible row the poll gives up. What it
+   *  leaves behind used to be the LAST REAL READ — `running`, with a start time — so the Stop
+   *  control stayed offered and the clock kept counting, for the life of the mount, about a turn
+   *  this tab had provably stopped being able to observe. Pressing Stop then reached the door,
+   *  got CLR11, and printed a claim about a reply nobody here could see.
+   *
+   *  IT IS NOT `markTurnStopped`, and deliberately does not join `stoppedTurns`: no door ended
+   *  this turn, and a remount that CAN see the row again must get its clock back. That is what
+   *  the line's own copy tells the reader to do.
+   *
+   *  Everything that is still true is kept: the task id, the stream buffer, and the parked
+   *  question. Only the two facts that ASSERT a live run are dropped. */
+  markRunUnobservable(threadId: string): void {
+    setThread(threadId, { turnStartedAt: null, turnStatus: null, turnLostSight: true });
   },
 
   /** FIX 1 — fires right before each backoff sleep. Surfaces the attempt count via

@@ -4164,6 +4164,7 @@
     "stopDenied": "Could not stop this reply — it is still running. Stopping a reply needs a bookkeeper role in this firm.",
     "stopAlreadyFinished": "Nothing was stopped — this reply had already finished. What is above is the whole of it.",
     "stopUnreachable": "We could not reach the runtime, so nothing was stopped. This tab stopped reading; the reply may still be running. Try again.",
-    "stopRefused": "Could not stop this reply. The database refused the request in the state it found, so the reply may still be running. This tab stopped reading it — try again, or reload to see where the turn got to."
+    "stopRefused": "Could not stop this reply. The database refused the request in the state it found, so the reply may still be running. This tab stopped reading it — try again, or reload to see where the turn got to.",
+    "runLostSight": "Lost sight of this reply — reload to re-check. What is above is what reached this tab."
   }
 }

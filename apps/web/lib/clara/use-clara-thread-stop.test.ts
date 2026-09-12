@@ -728,3 +728,196 @@ test("630 Stop after the rail is CLOSED AND REOPENED still aborts the first moun
     else process.env.NEXT_PUBLIC_SUPABASE_URL = originalUrl;
   }
 });
+
+// ===========================================================================================
+// #630 (fifth review round) — THE THREE READERS OF `turnStartedAt` THAT ROUND 4 LEFT BEHIND.
+// ===========================================================================================
+
+const THREAD_REMOUNT = "77777777-7777-4777-8777-777777777777";
+const THREAD_STATUSES = "88888888-8888-4888-8888-888888888888";
+const THREAD_GIVEUP = "99999999-9999-4999-8999-999999999999";
+const THREAD_REATTACH = "aaaaaaaa-9999-4999-8999-999999999999";
+
+/** The mount hydrate + the poll both read `agent_tasks_visible`; a cell drives them by handing
+ *  this a row (or none) and swapping it between mounts. `/stream` opens are recorded, because
+ *  R8's claim is about a read being re-attached. */
+function withRunFetch(opts: {
+  row: () => Record<string, unknown> | null;
+  cancel?: () => Response;
+}): { restore: () => void; streams: string[]; runReads: () => number } {
+  const original = globalThis.fetch;
+  const originalUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  process.env.NEXT_PUBLIC_SUPABASE_URL = "https://example.supabase.co";
+  const streams: string[] = [];
+  let reads = 0;
+  globalThis.fetch = (async (u: unknown) => {
+    const url = String(u);
+    if (/\/stream/.test(url)) {
+      streams.push(url);
+      return new Response("", { status: 200, headers: { "content-type": "text/event-stream" } });
+    }
+    if (/agent_tasks_visible/.test(url)) {
+      reads += 1;
+      const row = opts.row();
+      return new Response(JSON.stringify(row ? [row] : []), {
+        status: 200, headers: { "content-type": "application/json" },
+      });
+    }
+    if (/rpc\/cancel_agent_task/.test(url)) return (opts.cancel ?? (() => cancelRequested("task-x")))();
+    return new Response(JSON.stringify([]), { status: 200, headers: { "content-type": "application/json" } });
+  }) as typeof fetch;
+  return {
+    streams,
+    runReads: () => reads,
+    restore: () => {
+      globalThis.fetch = original;
+      if (originalUrl === undefined) delete process.env.NEXT_PUBLIC_SUPABASE_URL;
+      else process.env.NEXT_PUBLIC_SUPABASE_URL = originalUrl;
+    },
+  };
+}
+
+/** Capture the poll's interval instead of sleeping four real seconds per tick. Returns a snapshot
+ *  firer, because every re-render re-registers the interval this is capturing. */
+function withCapturedInterval(): { fire: () => void; scheduled: number[]; restore: () => void } {
+  const ticks: Array<() => void> = [];
+  const scheduled: number[] = [];
+  const realSet = globalThis.setInterval;
+  const realClear = globalThis.clearInterval;
+  globalThis.setInterval = ((fn: () => void, ms?: number) => {
+    scheduled.push(Number(ms));
+    ticks.push(fn);
+    return realSet(fn, 1_000_000);
+  }) as typeof globalThis.setInterval;
+  return {
+    scheduled,
+    fire: () => { for (const tick of [...ticks]) tick(); },
+    restore: () => { globalThis.setInterval = realSet; globalThis.clearInterval = realClear; },
+  };
+}
+
+test("630 a REMOUNT does not re-start the clock on a turn the door already stopped", async () => {
+  // MEASURED DEFECT (round-5 finding [4]): `markTurnStopped` retires the clock, and the two
+  // fire-and-forget hydrates consult `wasTurnStopped` — but the MOUNT hydrate did not, and it is
+  // the only one a remount runs. `clara.cancel_agent_task` leaves a RUNNING turn at
+  // `cancel_requested`, which `THREAD_RUN_LIVE_STATUSES` still calls live, so closing and
+  // reopening the rail (a real unmount: ClaraRail renders the launcher at `presence === "closed"`)
+  // read the row straight back and started the clock again — from the ORIGINAL created_at, with
+  // the "Stopped" marker gone, on a reply the person had stopped.
+  const { useClaraThread } = await import("./useClaraThread");
+  let status = "running";
+  const net = withRunFetch({
+    row: () => ({ id: "task-remount", status, created_at: "2026-09-12T00:00:00.000Z" }),
+    cancel: () => cancelRequested("task-remount"),
+  });
+  try {
+    const first = await renderHook(() => useClaraThread(session, THREAD_REMOUNT));
+    await first.act(async () => { await new Promise((r) => setTimeout(r, 10)); });
+    assert.equal(claraThreadStore.getThread(THREAD_REMOUNT).turnStartedAt, "2026-09-12T00:00:00.000Z",
+      "precondition: the mount hydrate started the clock from the DB's own created_at");
+
+    await first.act(async () => { await first.current.stopReply(); });
+    assert.equal(first.current.stop.phase, "stopped", "precondition: the door stopped the turn");
+    assert.equal(claraThreadStore.getThread(THREAD_REMOUNT).turnStartedAt, null, "…and the clock retired");
+    await first.unmount();
+
+    // THE DOOR'S OWN RESTING STATE for a stopped running turn: still non-terminal, still returned.
+    status = "cancel_requested";
+    const second = await renderHook(() => useClaraThread(session, THREAD_REMOUNT));
+    try {
+      await second.act(async () => { await new Promise((r) => setTimeout(r, 10)); });
+      const after = claraThreadStore.getThread(THREAD_REMOUNT);
+      assert.equal(after.turnStartedAt, null,
+        "the reopened rail must not time a reply this surface has already said was stopped");
+      assert.equal(after.turnStatus, null, "…nor claim it is running");
+      assert.equal(after.activeTaskId, "task-remount",
+        "…while the task id stays, so the turn can still be asked about");
+    } finally {
+      await second.unmount();
+    }
+  } finally {
+    net.restore();
+  }
+});
+
+test("630 the run poll runs for EVERY non-terminal status the hydrate can produce", async () => {
+  // MEASURED DEFECT (round-5 finding [5]): the poll was gated to `running`/`awaiting_input`, two of
+  // the five statuses `turnRun.ts` hydrates a clock for. A turn hydrated as `queued` (every chat
+  // turn is admitted queued), `held` or `cancel_requested` had no stream, no poll and no terminal
+  // `message` — so `turnStartedAt` had no writer that could ever clear it, and the rail counted
+  // upward for the life of the mount about a run that had long since settled.
+  const { useClaraThread, CLARA_RUN_POLL_MS } = await import("./useClaraThread");
+  const { THREAD_RUN_LIVE_STATUSES } = await import("./turnRun");
+  for (const status of THREAD_RUN_LIVE_STATUSES) {
+    const thread = `${THREAD_STATUSES.slice(0, -1)}${THREAD_RUN_LIVE_STATUSES.indexOf(status)}`;
+    let answer: Record<string, unknown> | null = { id: `task-${status}`, status, created_at: "2026-09-12T00:00:00.000Z" };
+    const net = withRunFetch({ row: () => answer });
+    const clock = withCapturedInterval();
+    try {
+      const h = await renderHook(() => useClaraThread(session, thread));
+      try {
+        await h.act(async () => { await new Promise((r) => setTimeout(r, 10)); });
+        assert.equal(claraThreadStore.getThread(thread).turnStatus, status,
+          `precondition: a ${status} run is hydrated with a clock`);
+        assert.ok(clock.scheduled.includes(CLARA_RUN_POLL_MS),
+          `${status}: the DB arm must be polled — otherwise nothing can ever retire this clock; `
+          + `saw ${JSON.stringify(clock.scheduled)}`);
+
+        // …and the poll is what ENDS it. The run settles server-side; only this can notice.
+        answer = { id: `task-${status}`, status: "completed", created_at: "2026-09-12T00:00:00.000Z" };
+        await h.act(async () => { clock.fire(); await new Promise((r) => setTimeout(r, 10)); });
+        assert.equal(claraThreadStore.getThread(thread).turnStartedAt, null,
+          `${status}: a terminal read retires the clock`);
+        assert.equal(claraThreadStore.getThread(thread).turnStatus, null,
+          `${status}: …and stops claiming the turn is live`);
+      } finally {
+        await h.unmount();
+      }
+    } finally {
+      clock.restore();
+      net.restore();
+    }
+  }
+});
+
+test("630 after the miss limit the poll gives up OUT LOUD — the clock and the control retire", async () => {
+  // MEASURED DEFECT (round-5 finding [6]): after `CLARA_RUN_POLL_MISS_LIMIT` misses the poll
+  // stopped asking and wrote NOTHING. `turnStatus` stayed at the last real read, so the Stop
+  // control stayed mounted and the clock kept counting for the life of the mount, about a turn
+  // this tab had provably stopped being able to see. Work order B1 asked for "a bounded label";
+  // round 4 delivered the bound without the label.
+  const { useClaraThread, CLARA_RUN_POLL_MISS_LIMIT } = await import("./useClaraThread");
+  let visible = true;
+  const net = withRunFetch({
+    row: () => (visible ? { id: "task-lost", status: "running", created_at: "2026-09-12T00:00:00.000Z" } : null),
+  });
+  const clock = withCapturedInterval();
+  try {
+    const h = await renderHook(() => useClaraThread(session, THREAD_GIVEUP));
+    try {
+      await h.act(async () => { await new Promise((r) => setTimeout(r, 10)); });
+      await h.act(() => { claraThreadStore.hydrateRun(THREAD_GIVEUP,
+        { taskId: "task-lost", status: "running", startedAt: "2026-09-12T00:00:00.000Z" }, PARKED); });
+      await h.act(async () => { await h.rerender(); });
+      assert.equal(claraThreadStore.getThread(THREAD_GIVEUP).turnLostSight, false,
+        "precondition: nothing has been lost sight of yet");
+
+      visible = false;
+      for (let i = 0; i < CLARA_RUN_POLL_MISS_LIMIT; i += 1) {
+        await h.act(async () => { clock.fire(); await new Promise((r) => setTimeout(r, 10)); });
+      }
+      const after = claraThreadStore.getThread(THREAD_GIVEUP);
+      assert.equal(after.turnLostSight, true, "the give-up is a STATE, not merely a stopped timer");
+      assert.equal(after.turnStartedAt, null, "…the clock retires: it was asserting a run this tab cannot see");
+      assert.equal(after.turnStatus, null, "…and so does the control's own DB arm");
+      assert.equal(after.activeTaskId, "task-lost", "…while the turn stays addressable");
+      assert.deepEqual(after.parkedClarify, PARKED,
+        "…and the transcript, parked question included, is kept — losing sight is not an ending");
+    } finally {
+      await h.unmount();
+    }
+  } finally {
+    clock.restore();
+    net.restore();
+  }
+});

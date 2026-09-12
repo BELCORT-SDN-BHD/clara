@@ -17,7 +17,7 @@ import { getMessages, postTurn, resolveStreamAuth } from "./api";
 import type { SessionTokenAccessor } from "@/lib/session";
 import { runClaraTaskStream } from "./stream";
 import { claraThreadStore, type ClaraThreadUiState, type ComposerFocusRequest } from "./threadStore";
-import { readRunByTaskId, readThreadRunSnapshot } from "./turnRun";
+import { readRunByTaskId, readThreadRunSnapshot, THREAD_RUN_LIVE_STATUSES } from "./turnRun";
 import type { AttachmentPart, ClaraPart } from "@/lib/parts/types";
 
 /** #630 — THE STOP-REPLY STATE MACHINE, as one value.
@@ -340,6 +340,17 @@ export function useClaraThread(
           run ? { taskId: run.id, status: run.status, startedAt: run.created_at } : null,
           parkedClarify,
         );
+        // #630 (round-5 finding [4]) — …AND THIS ONE CONSULTS THE STOP MEMORY TOO. It is the only
+        // run-hydrate a REMOUNT performs, and it was the one that did not ask. `cancel_agent_task`
+        // leaves a RUNNING turn at `cancel_requested`, which turnRun.ts still counts as live, so
+        // closing and reopening the rail (ClaraRail really unmounts the view at
+        // `presence === "closed"`) read the row straight back and re-started the clock from the
+        // original `created_at` — under a surface whose "Stopped" marker had gone with the
+        // unmounted machine. The row is still hydrated: the task id and the parked question are
+        // facts. Only the two fields that ASSERT the turn is running are retired.
+        if (run && claraThreadStore.wasTurnStopped(run.id)) {
+          claraThreadStore.markTurnStopped(threadId, run.id);
+        }
       })
       .catch(() => {
         if (!cancelled) claraThreadStore.hydrateRun(threadId, null, null);
@@ -537,7 +548,14 @@ export function useClaraThread(
   const streaming = state.stream.status === "streaming";
   useEffect(() => {
     if (!threadId || activeTaskId === null || streaming) return;
-    if (turnStatus !== "running" && turnStatus !== "awaiting_input") return;
+    // #630 (round-5 finding [5]) — EVERY STATUS THE HYDRATE CAN PRODUCE, not two of the five.
+    // `turnRun.ts` hydrates a clock for all of THREAD_RUN_LIVE_STATUSES; the gate here named
+    // `running` and `awaiting_input` only, so a turn hydrated as `queued` (every chat turn is
+    // admitted queued), `held` or `cancel_requested` (where a stop of a running reply leaves it)
+    // had no stream, no poll and no terminal `message` — nothing that could ever clear its
+    // `turnStartedAt`. The rail counted upward indefinitely about a run that had settled seconds
+    // after the reload. Read from the SAME constant the hydrate reads, so the two cannot drift.
+    if (turnStatus === null || !(THREAD_RUN_LIVE_STATUSES as readonly string[]).includes(turnStatus)) return;
     let cancelled = false;
     let misses = 0;
     const timer = setInterval(() => {
@@ -555,7 +573,19 @@ export function useClaraThread(
             // bounded few this poll stops asking rather than inventing an answer — the state on
             // screen is left exactly as the last real read found it.
             misses += 1;
-            if (misses >= CLARA_RUN_POLL_MISS_LIMIT) { cancelled = true; clearInterval(timer); }
+            if (misses >= CLARA_RUN_POLL_MISS_LIMIT) {
+              cancelled = true;
+              clearInterval(timer);
+              // #630 (round-5 finding [6]) — AND IT SAYS SO. Round 4 stopped asking and wrote
+              // nothing, which left the last real read (`running`, with a start time) standing:
+              // the Stop control stayed mounted and the clock kept counting for the life of the
+              // mount, about a turn this tab had provably stopped being able to see. Pressing
+              // Stop then reached the door, got CLR11, and printed a claim about a reply nobody
+              // here could observe. The transcript, the task id and the parked question are kept
+              // — only the two facts that assert a live run are retired, and the surface prints
+              // one bounded line telling the reader to reload if they want it re-checked.
+              claraThreadStore.markRunUnobservable(threadId);
+            }
             return;
           }
           misses = 0;

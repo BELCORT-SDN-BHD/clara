@@ -110,6 +110,10 @@ export function ClaraThreadView({
   const stopped = stop.phase === "stopped";
   const stopping = stop.phase === "pending";
   const stopFailedCause = stop.phase === "failed" ? stop.cause : null;
+  // #630 (round-5 finding [6]) — THE POLL GAVE UP, and the surface is allowed to say so exactly
+  // once. Set by `markRunUnobservable` after CLARA_RUN_POLL_MISS_LIMIT reads found no visible row;
+  // cleared by any read that finds one again, which is what the line asks the reader to cause.
+  const runLostSight = state.turnLostSight && !stopped && stopFailedCause === null;
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const handleAttachmentState = useCallback((next: ComposerAttachmentState) => setAttachments(next), []);
 
@@ -433,7 +437,7 @@ export function ClaraThreadView({
             clarify group out would have left it the last thing in a region it
             does not belong to. It is a connection STATE, not a transcript
             entry. */}
-        {streamStatusLabel(state, t) && !stopped && stopFailedCause === null && (
+        {streamStatusLabel(state, t) && !stopped && stopFailedCause === null && !runLostSight && (
           <p role="status" className="text-xs text-muted-foreground italic">{streamStatusLabel(state, t)}</p>
         )}
         {/* #630 — THE STOPPED MARKER, and it REPLACES the stream-status line rather than sitting
@@ -465,6 +469,16 @@ export function ClaraThreadView({
                   ? tw("stopRefused")
                   : tw("stopUnreachable")}
           </p>
+        )}
+        {/* #630 (round-5 finding [6]) — THE BOUNDED GIVE-UP LINE. The DB arm of "is a turn live?"
+            stops asking after three reads that found no visible row (RLS, a transient, a stale id,
+            a firm switch). Round 4 stopped asking SILENTLY, which left the last real read standing:
+            an enabled "Stop reply" and a clock climbing past the hour, about a turn nothing here
+            could observe. One sentence, one `role="status"` — and it is exclusive with the other
+            two above for the same reason they are exclusive with each other. The transcript above
+            is untouched; the reader is told what this tab knows and what would re-check it. */}
+        {runLostSight && (
+          <p role="status" className="text-xs font-medium text-muted-foreground">{tw("runLostSight")}</p>
         )}
         {/* STOP REPLY. Named in full, everywhere, because the rail also carries "Cancel Work" on a
             Work card and a bare "Stop" on both would be the one confusion this ticket exists to

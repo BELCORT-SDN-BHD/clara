@@ -221,9 +221,18 @@ test("630 the Stop control is withdrawn when the DB says the rehydrated turn has
 const THREAD_KILLED = "dddddddd-4444-4444-8444-444444444444";
 const THREAD_OVER = "eeeeeeee-5555-4555-8555-555555555555";
 const THREAD_REFUSED_VIEW = "ffffffff-6666-4666-8666-666666666666";
+const TASK_OVER = "cccccccc-3333-4333-8333-333333333334";
+const TASK_REFUSED = "cccccccc-3333-4333-8333-333333333335";
+const TASK_LOST = "cccccccc-3333-4333-8333-333333333336";
 
-/** Mount a live turn, press Stop, and hand back the rendered text once the machine has settled. */
-async function pressStop(threadId: string, answer: Response): Promise<string> {
+/** Mount a live turn, press Stop, and hand back the rendered text once the machine has settled.
+ *
+ *  EACH CELL BRINGS ITS OWN TASK ID (#630 round 5). `claraThreadStore` remembers which turns a
+ *  door has already ended in a module-level set — that is the point of it, and the mount hydrate
+ *  now consults it so a reopened rail cannot re-start a stopped turn's clock. Task ids are unique
+ *  in production; reusing ONE constant across these cells made the second cell inherit the first
+ *  cell's stop and mount with no live turn at all. */
+async function pressStop(threadId: string, answer: Response, taskId: string = TASK_ID): Promise<string> {
   let rendered = "";
   await withFetch(
     (url) => {
@@ -231,7 +240,7 @@ async function pressStop(threadId: string, answer: Response): Promise<string> {
       if (url.includes("agent_tasks_visible")) {
         // A turn this tab did not post, found running — the reload case, and the one where the
         // turn clock is on screen with nothing but a door to retire it.
-        return json([{ id: TASK_ID, status: "running", created_at: new Date(Date.now() - 62_000).toISOString() }]);
+        return json([{ id: taskId, status: "running", created_at: new Date(Date.now() - 62_000).toISOString() }]);
       }
       if (url.includes("agent_interruptions")) return json([]);
       if (url.includes("caller_context")) return json([]);
@@ -273,8 +282,8 @@ test("630 a stop that TERMINALLY CANCELLED the turn reads Stopped, and its clock
 
 test("630 …and a turn that had ALREADY ENDED still reads honestly", async () => {
   const text = await pressStop(THREAD_OVER, json({
-    task_id: TASK_ID, status: "completed", changed: false, transition: "already_terminal",
-  }));
+    task_id: TASK_OVER, status: "completed", changed: false, transition: "already_terminal",
+  }), TASK_OVER);
   assert.match(text, /Nothing was stopped/, "the door changed nothing, and said so");
   assert.doesNotMatch(text, /Clara has been working on this for/,
     "…and the turn it found was over, so nothing is timing it either");
@@ -282,7 +291,7 @@ test("630 …and a turn that had ALREADY ENDED still reads honestly", async () =
 
 test("630 a governed refusal that is not the role floor reads as a refusal, never as 'already finished'", async () => {
   const text = await pressStop(THREAD_REFUSED_VIEW,
-    refusal("CLR10", "op_key conflict", "op_key_conflict"));
+    refusal("CLR10", "op_key conflict", "op_key_conflict"), TASK_REFUSED);
   assert.match(text, /Could not stop this reply/, "the request was turned down, and the line says so");
   assert.doesNotMatch(text, /Nothing was stopped/,
     "a refusal is not evidence the reply ended — telling the reader it had finished would send "
@@ -291,4 +300,79 @@ test("630 a governed refusal that is not the role floor reads as a refusal, neve
     "…and it does not blame their role either: CLR10 says nothing whatever about who they are");
   assert.match(text, /Clara has been working on this for/,
     "the turn is still live, so an honest elapsed time is exactly what they need");
+});
+
+// ---------------------------------------------------------------------------------------------
+// 4 · THE POLL GIVES UP OUT LOUD (#630 fix round 5, finding [6])
+//
+// The DB arm stops asking after CLARA_RUN_POLL_MISS_LIMIT reads that found no visible row — RLS, a
+// transient, a stale id, a firm switch. Round 4 stopped asking SILENTLY, which left the last real
+// read standing: an enabled "Stop reply" and a clock still climbing, about a turn this tab had
+// provably stopped being able to observe. The hook cells own the state; this owns the words.
+// ---------------------------------------------------------------------------------------------
+
+const THREAD_LOST = "cccccccc-4444-4444-8444-444444444444";
+
+test("630 a poll that has given up retires the clock and the control, and says why", async () => {
+  let visible = true;
+  const ticks: Array<() => void> = [];
+  const realSet = globalThis.setInterval;
+  const realClear = globalThis.clearInterval;
+  globalThis.setInterval = ((fn: () => void, ms?: number) => {
+    void ms;
+    ticks.push(fn);
+    return realSet(fn, 1_000_000);
+  }) as typeof globalThis.setInterval;
+  globalThis.clearInterval = ((id: unknown) => realClear(id as never)) as typeof globalThis.clearInterval;
+  try {
+    await withFetch(
+      (url) => {
+        if (url.includes("/messages")) return json({ messages: [] });
+        if (url.includes("agent_tasks_visible")) {
+          return visible
+            ? json([{ id: TASK_LOST, status: "running", created_at: new Date().toISOString() }])
+            : json([]);
+        }
+        if (url.includes("agent_interruptions")) return json([]);
+        if (url.includes("caller_context")) return json([]);
+        return json([]);
+      },
+      async () => {
+        const h = await renderComponent(App(THREAD_LOST));
+        try {
+          await settleUntil(h, () => h.find(buttonNamed("Stop reply")) !== null, "the Stop control");
+          assert.match(h.text(), /Clara has been working on this for/,
+            "precondition: the clock is up, off the DB's own created_at");
+
+          // The row goes out of view. Three misses is the bound the hook already carried.
+          visible = false;
+          for (let i = 0; i < 3; i += 1) {
+            await h.act(async () => {
+              for (const tick of [...ticks]) tick();
+              await new Promise((r) => setTimeout(r, 0));
+            });
+          }
+          await settleUntil(h, () => /Lost sight of this reply/.test(h.text()), "the give-up line");
+
+          assert.equal(h.find(buttonNamed("Stop reply")), null,
+            "a turn this tab cannot see is offered no Stop control — the press would reach the door "
+            + "and print a claim about a reply nobody here can observe");
+          assert.doesNotMatch(h.text(), /Clara has been working on this for/,
+            "…and the clock retires with it: an elapsed time is an assertion about a live run");
+          assert.doesNotMatch(h.text(), /^Stopped$/m,
+            "…and nothing says the reply was stopped, because nothing stopped it");
+
+          const announcers = collect(h.container as Stub, (n) => attrOf(n, "role") === "status")
+            .filter((n) => /responding|Lost sight|Stopped/i.test(textOf(n)));
+          assert.equal(announcers.length, 1,
+            `exactly one status region speaks; saw ${announcers.map((n) => textOf(n)).join(" | ")}`);
+        } finally {
+          await h.unmount();
+        }
+      },
+    );
+  } finally {
+    globalThis.setInterval = realSet;
+    globalThis.clearInterval = realClear;
+  }
 });
