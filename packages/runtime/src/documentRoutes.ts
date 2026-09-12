@@ -39,6 +39,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createReadStream } from "node:fs";
 import { rm } from "node:fs/promises";
+import { pipeline } from "node:stream/promises";
 import { randomUUID } from "node:crypto";
 import express from "express";
 import { validateJwt, resolvePrincipal, AuthError } from "../lib/authz.mjs";
@@ -251,15 +252,28 @@ export function documentRoutes(): express.Router {
           : "inline",
       });
       if (doc.byte_size != null) res.set("Content-Length", String(doc.byte_size));
-      await new Promise<void>((resolve, reject) => {
-        const stream = createReadStream(tmp);
-        stream.on("error", reject);
-        res.on("close", () => stream.destroy());
-        stream.on("end", () => resolve());
-        stream.pipe(res, { end: true });
-      });
+      // ONE await THAT SETTLES ON EVERY OUTCOME, including the client going away.
+      //
+      // The hand-rolled promise this replaced resolved on the read stream's `end` and rejected on
+      // its `error`, and destroyed the stream when the RESPONSE closed — but destroying a stream
+      // emits `close`, not `end`, so an aborted transfer settled NOTHING. The await never returned,
+      // the `finally` below never ran, and the per-request spool — a byte-identical decrypted copy
+      // of the reader's own document — stayed in os.tmpdir() with no owner and no sweeper (this
+      // route is the only producer of a clara-docbytes-* file in the repository). #620 is the change
+      // that makes that abort routine: the viewer overlay's cleanup aborts the in-flight read on
+      // every document and page switch.
+      //
+      // `pipeline` settles on all three: the source's end, the source's error, and the destination
+      // closing early (ERR_STREAM_PREMATURE_CLOSE), and it destroys the other half in each case.
+      // The catch below then does what it already did — headers are out, so it destroys the
+      // response — and the `finally` unlinks. Measured by document-route-e2e's E2.13.
+      await pipeline(createReadStream(tmp), res);
     } catch (err) {
-      if (!res.headersSent) {
+      // `res.destroyed` IS PART OF THE CONDITION, not decoration. When the client aborts BEFORE
+      // the first byte is written, the headers set above are still only staged — `headersSent` is
+      // false — yet the socket is gone, so the refusal branch would be writing JSON into a
+      // destroyed response. There is nobody left to answer; the spool is what still matters.
+      if (!res.headersSent && !res.destroyed) {
         const m = documentRouteStatus(err);
         const reason = (err as { reason?: string })?.reason;
         const body: { error: string; message: string; reason?: string } = {

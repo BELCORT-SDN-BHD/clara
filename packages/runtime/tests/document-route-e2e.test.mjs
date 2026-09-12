@@ -216,9 +216,9 @@ after(async () => {
 
 const skipHttp = () => (ready ? false : "#620 route: no rig target, or migration 0185 is not applied");
 
-function get(id, token, query = "") {
+function get(id, token, query = "", init = {}) {
   return fetch(`${baseUrl}/api/documents/${id}/bytes${query}`,
-    token ? { headers: { authorization: `Bearer ${token}` } } : {});
+    token ? { ...init, headers: { authorization: `Bearer ${token}` } } : init);
 }
 
 test("E2.1 — an own-firm member previews the real bytes INLINE, with the integrity headers", async (t) => {
@@ -406,6 +406,39 @@ test("E2.11 — a storage failure AFTER the door still carries the door's audit 
   await res.json();
   assert.equal(await auditCount(ghost.id), 1,
     "the door committed its decision; a 502 after it does not un-commit the receipt");
+});
+
+test("E2.13 — a client that ABORTS mid-stream leaves no spooled copy of the document behind", async (t) => {
+  if (skipHttp()) return t.skip(skipHttp());
+  // THE ABORT IS THE ORDINARY CASE, NOT A CORNER ONE. #620 is the change that makes it routine:
+  // the viewer overlay's own useEffect cleanup aborts the in-flight byte read on every document
+  // and page switch, and a reader who closes the tab or hits Cancel does the same thing. The route
+  // spools the WHOLE decrypted object to os.tmpdir() before it writes a byte — downloadCanonical
+  // verifies the content address en route, which is the reason the door downloads-then-streams —
+  // so a stream whose promise never settles means the `finally` that unlinks the spool never runs.
+  // What is left behind is a byte-identical, unowned copy of the CLIENT'S SOURCE DOCUMENT, and
+  // nothing in the estate ever removes it: this route is the only producer of a clara-docbytes-*
+  // file anywhere in the repository, so there is no sweeper to catch up later.
+  //
+  // MULTI-MEGABYTE ON PURPOSE. A small document is written to the socket in one turn and the
+  // stream ends before any client could abort, so the cell would pass on broken code. 8 MiB is
+  // larger than the socket and undici buffers together, so the server is genuinely mid-pipe and
+  // under backpressure when the abort lands.
+  const big = Buffer.alloc(8 * 1024 * 1024, 0x41);
+  big.write("%PDF-1.7\n620 abort\n");
+  const bulky = await seedDoc(firmA.firm, firmA.client, { bytes: big, filename: "bulky.pdf" });
+  const before_ = new Set(tempFiles());
+  const ac = new AbortController();
+  const res = await get(bulky.id, await mint(firmA.owner), "", { signal: ac.signal });
+  assert.equal(res.status, 200);
+  const reader = res.body.getReader();
+  const first = await reader.read();
+  assert.ok((first.value?.length ?? 0) > 0, "the stream must have STARTED before the abort");
+  assert.ok(first.value.length < big.length, "the abort must land mid-transfer, not after the end");
+  ac.abort();
+  await reader.cancel().catch(() => {});
+  assert.deepEqual(await tempLeak(before_), [],
+    "an aborted read must not leave the reader's own document spooled in os.tmpdir()");
 });
 
 test("E2.12 — a removed member is refused on the very NEXT request, with the same token", async (t) => {

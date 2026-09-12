@@ -27,6 +27,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createReadStream } from "node:fs";
 import { rm } from "node:fs/promises";
+import { pipeline } from "node:stream/promises";
 import { randomUUID } from "node:crypto";
 import express from "express";
 import { validateJwt, resolvePrincipal, AuthError } from "../lib/authz.mjs";
@@ -181,15 +182,21 @@ export function reportRoutes(): express.Router {
         "Content-Disposition": contentDisposition(String(artifact.filename || "clara-artifact.pdf")),
       });
       if (artifact.byte_size != null) res.set("Content-Length", String(artifact.byte_size));
-      await new Promise<void>((resolve, reject) => {
-        const stream = createReadStream(tmp);
-        stream.on("error", reject);
-        res.on("close", () => stream.destroy());
-        stream.on("end", () => resolve());
-        stream.pipe(res, { end: true });
-      });
+      // ONE await THAT SETTLES ON EVERY OUTCOME, including the client going away. The hand-rolled
+      // promise this replaced resolved on the read stream's `end` and rejected on its `error`, and
+      // destroyed the stream when the RESPONSE closed — but destroying a stream emits `close`, not
+      // `end`, so an aborted download settled nothing: the await never returned, the `finally`
+      // below never ran, and the spooled copy of the sealed artifact stayed in os.tmpdir() with no
+      // owner and no sweeper. `pipeline` settles on the source's end, the source's error and the
+      // destination closing early (ERR_STREAM_PREMATURE_CLOSE), destroying the other half each
+      // time. documentRoutes.ts carries the identical change for the identical block; the two are
+      // pinned by fs7-e2-artifact-route's R3.9 and document-route-e2e's E2.13.
+      await pipeline(createReadStream(tmp), res);
     } catch (err) {
-      if (!res.headersSent) {
+      // `res.destroyed` IS PART OF THE CONDITION: a client that aborts before the first byte leaves
+      // `headersSent` false on a socket that is already gone, and the refusal branch would be
+      // writing JSON into a destroyed response.
+      if (!res.headersSent && !res.destroyed) {
         const m = artifactRouteStatus(err);
         res.status(m.status).json({ error: m.code, message: "artifact unavailable" });
       } else {
