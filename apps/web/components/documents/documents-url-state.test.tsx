@@ -3,8 +3,14 @@
 //
 // WHAT WAS WRONG. Selecting a filed document set React state and nothing else: a refresh lost it, a
 // link could not name a document, and Back left the tab entirely. Every claim below is about a
-// property the parser alone cannot have — which History verb was used, what a reload restores, and
-// where focus is standing afterwards.
+// property the parser alone cannot have — which History verb was used, and what a reload restores.
+//
+// FOCUS IS NOT ONE OF THIS FILE'S CLAIMS, and saying so is the point. There is no focus manager,
+// no `requestAnimationFrame` and no @base-ui/react focus guard in this environment, so every
+// assertion this file could write about focus is either unfailable or a restatement of how its own
+// subject was selected — both of which it used to contain (see the close cell's own note).
+// `document.activeElement` after a real Back is measured in e2e/documents-viewer-walk.spec.ts, and
+// only there.
 //
 // THE HISTORY VERBS ARE THE SUBJECT, not the resulting address. A push and a replace reach the same
 // URL and differ only in what Back then does, so a cell that asserted the address would pass on the
@@ -16,7 +22,7 @@ import assert from "node:assert/strict";
 import { createElement } from "react";
 
 import { renderComponent, clickButton, textOf } from "../../test/hookHarness";
-import { enableDomInspection, activeElement } from "../../test/domInspect";
+import { enableDomInspection } from "../../test/domInspect";
 import { configureSessionTokenSource, resetSessionTokenSource } from "../../lib/session-accessor";
 import { DocumentsWorkbench } from "./documents-workbench";
 import { DOCUMENT_HEADING_ID } from "./document-detail";
@@ -117,9 +123,33 @@ test("stepping to ANOTHER document REPLACES — Back returns to the list, not ba
   });
 });
 
-test("Back closes the detail and returns focus to the row that opened it", async () => {
+test("Closing a pushed detail POPS its entry, clears the address, and leaves the originating row on the page", async () => {
+  // RETITLED TO WHAT THIS HARNESS CAN SEE, because the previous title ("…and returns focus to the
+  // row that opened it") claimed a property it could not measure and its two focus assertions were
+  // both structurally unfailable:
+  //
+  //   · `assert.notEqual(activeElement(), null)` — test/domInspect.ts:436 initialises
+  //     `activeElement` to `doc.body` and :254 resets it to `doc.body` on blur. It is never null,
+  //     so that line could not fail for any implementation.
+  //   · `active === row || textOf(row).includes("invoice-april.pdf")` — `row` was SELECTED by the
+  //     predicate `textOf(n).includes(filename)`, so the right-hand disjunct is the selection
+  //     criterion restated. It is true by construction, which made the whole assertion true
+  //     regardless of the left-hand one.
+  //
+  // Measured consequence: deleting the WHOLE focus effect (documents-workbench.tsx — both
+  // `focusHeading` and `restoreRow`) left this file at 10 pass / 0 fail, unchanged from baseline.
+  //
+  // FOCUS RETURN IS MEASURED IN THE BROWSER, and only there: "the row that opened it takes focus
+  // back after the pop" is a claim about a real focus manager, a real `requestAnimationFrame` and
+  // @base-ui/react's one-frame focus guard, none of which exist here. Its home is the
+  // `URL: ?document= survives a reload, and the browser's own Back button closes the detail` cell
+  // in e2e/documents-viewer-walk.spec.ts, which polls `document.activeElement` after
+  // `page.goBack()` and requires it to be the row rather than <body>. What THIS cell owns is the
+  // part the DOM harness can see: the history verb, the address, the detail being gone, and the
+  // originating row being back in the tree at all — the precondition without which focus return
+  // has no target to reach.
   await withWorkbench({}, async (h) => {
-    const row = await openRow(h, "invoice-april.pdf");
+    await openRow(h, "invoice-april.pdf");
     assert.match(h.text(), /invoice-april\.pdf/);
 
     const close = h.find((n) => n.tagName === "BUTTON" && textOf(n) === "Close");
@@ -132,15 +162,10 @@ test("Back closes the detail and returns focus to the row that opened it", async
     assert.equal(h.nav.search(), "", "…and the address stops naming a document that is no longer open");
     assert.match(h.text(), /Select a document to see its evidence/);
 
-    // FOCUS. The harness has no real focus manager, so what is asserted is the honest claim every
-    // other dialog cell in this repo makes: focus is not STRANDED on the document body. The row is
-    // back on the page and reachable.
-    const active = activeElement();
-    assert.notEqual(active, null, "focus must not be stranded after the detail closes");
-    assert.ok(
-      active === (row as unknown) || textOf(row as never).includes("invoice-april.pdf"),
-      "the originating row must still be on the page for focus to return to",
-    );
+    // THE ROW IS BACK IN THE TREE — re-queried after the close rather than reusing the node the
+    // open returned, which would be the same tautology in a new spelling.
+    const reopened = h.find((n) => n.tagName === "TR" && textOf(n).includes("invoice-april.pdf"));
+    assert.ok(reopened, "the originating row must be back on the page — without it focus return has nothing to return to");
   });
 });
 
