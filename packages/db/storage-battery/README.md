@@ -121,14 +121,24 @@ vendor response shapes.
 `packages/runtime/lib/storage-probe.mjs`, or the workflow itself; fail-closed true on a missing
 range, on `schedule` and on `workflow_dispatch`), installs the pinned CLI with
 `supabase/setup-cli`, and is asserted in both directions by the terminal `ci` meta-gate. No
-secrets: every value the battery uses belongs to the throwaway stack.
+secrets: every value the battery uses belongs to the throwaway stack. CI is the weaker environment
+for the two teardown assertions above and is meant to be: every job gets a fresh VM and an
+`always()` dispose step, so what they actually protect is a dev box, where the next run has to live
+with whatever the last one left behind.
 
 ## Teardown guarantee
 
 * The stack is disposed with `supabase stop --no-backup` (which deletes the data volumes) inside a
   `finally`, and again on `SIGINT`/`SIGTERM`; the disposal is idempotent.
-* `run.mjs` prints, before starting, any container still named `supabase_*_clara-storage-battery`.
-  A second consecutive run reporting `none` is the proof that the first disposed cleanly.
+* **A failed disposal reds the run.** A non-zero `supabase stop` prints `::error::` and sets a
+  non-zero exit code even when every cell passed, so "the stack was disposed" is an assertion and
+  not a line a human has to notice in a log.
+* **A leftover stack aborts the next run.** Before starting, `run.mjs` asks `docker` for
+  containers named `supabase_*_clara-storage-battery`; a non-empty answer stops the run instead of
+  narrating it, because `supabase start` would otherwise adopt them and the battery would report on
+  a ceremony it did not apply. A second consecutive run that gets *past* that line is therefore the
+  evidence that the first disposed cleanly. Where `docker` itself is unavailable the question cannot
+  be asked at all, and the preflight says so rather than claiming a clean slate.
 * B11 removes the battery's own objects *before* disposal and asserts both buckets are empty, so
   cleanup is a measurement and not a consequence of throwing the stack away.
 * Disposing the whole stack is the **only** correct cleanup here: `clara_storage_docs` is

@@ -209,9 +209,23 @@ function dispose(workdir) {
     stdio: ["ignore", "inherit", "inherit"],
   });
   console.log(`teardown: supabase stop exited ${res.status}`);
+  // A FAILED DISPOSAL IS A FAILED RUN. This status used to be interpolated into the line above
+  // and then dropped, so "the stack was disposed" was a claim a human had to read the log to
+  // check — and a green battery with a surviving stack printed exactly like a green battery with
+  // none. Now it reds the process. CI has a second line of defence (an `always()` dispose step on
+  // a VM that is thrown away regardless), so what this protects is the dev box, where the next
+  // run has to live with whatever this one left behind.
+  if (res.status !== 0) {
+    console.error(`::error::supabase stop exited ${res.status} — the stack was NOT disposed. Containers named supabase_*_${PROJECT_ID} may still be running; dispose them before the next run.`);
+    process.exitCode = 1;
+  }
 }
 
-/** Diagnostic: what, if anything, this project left behind before we start. */
+/**
+ * What, if anything, this project left behind before we start. `null` means the question could
+ * not be asked (no usable `docker` CLI) — which is NOT the same answer as "nothing", and the
+ * preflight treats the two differently.
+ */
 function leftovers() {
   const res = spawnSync("docker", ["ps", "-a", "--filter", `name=supabase_.*_${PROJECT_ID}`, "--format", "{{.Names}}"], {
     encoding: "utf8",
@@ -236,7 +250,19 @@ async function main() {
   console.log(`door:     ${STORAGE_MJS}`);
 
   const before = leftovers();
-  console.log(`preflight: containers named supabase_*_${PROJECT_ID} before start: ${before === null ? "(docker CLI unavailable)" : before.length === 0 ? "none" : before.join(", ")}`);
+  console.log(`preflight: containers named supabase_*_${PROJECT_ID} before start: ${before === null ? "(docker CLI unavailable — this run cannot assert a clean slate)" : before.length === 0 ? "none" : before.join(", ")}`);
+  // A LEFTOVER STACK IS A STOP, NOT A NOTE. `supabase start` adopts containers that are already
+  // up, so continuing here would measure a stack this run did not build: an unknown ceremony,
+  // unknown policy state and unknown fixtures on it, reported as if it were freshly provisioned.
+  // Aborting also makes the disposal claim checkable from the outside — a second consecutive run
+  // that gets past this line is itself the evidence that the first one disposed cleanly.
+  if (before !== null && before.length > 0) {
+    throw new Error(
+      `preflight: ${before.length} container(s) from a previous run are still present (${before.join(", ")}). `
+        + `A run on an adopted stack would measure a ceremony it did not apply, so this one stops here. `
+        + `Dispose them first: supabase stop --project-id ${PROJECT_ID} --no-backup`,
+    );
+  }
 
   // A DISPOSABLE WORKDIR, never the repo. The CLI writes `.temp/` state into its project
   // directory and mounts that directory into containers; copying the committed config into a
