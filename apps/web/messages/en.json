@@ -1369,7 +1369,6 @@
     "documentNotReachable": "This document is not reachable today.",
     "openDocument": "Open original",
     "openingDocument": "Opening…",
-    "openDocumentFailed": "Could not open this document: {message}",
     "openDocumentPopupBlocked": "Your browser blocked the new tab — allow pop-ups for this site and try again.",
     "openDocumentNotViewable": "This file type ({mime}) can't be shown in a browser tab — only PDFs and page images can. Read what was extracted from it instead.",
     "openDocumentShowExtraction": "Show what was extracted",
