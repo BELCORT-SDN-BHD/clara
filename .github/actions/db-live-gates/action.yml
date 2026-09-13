@@ -119,6 +119,21 @@ runs:
         RELAY_TEST_MODE=1 \
         WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGC_PORT/clara_wave_b_ci" \
           node tests/work-cancel-e2e.mjs
+        # #643 — the PERIODIC-ADJUSTMENT e2e, AFTER its three siblings and on the same rig. It
+        # drives the one window the unit and DB cells cannot: a run that COMMITS three rows in one
+        # transaction (the marked entry, the operation receipt and the clara.periodic_adjustments
+        # row) and then dies before the workflow checkpoint, so the respawned engine re-executes
+        # the step and must replay onto the SAME identity rather than write a second adjustment. It
+        # also proves the two halves nothing else can: that a periodic-adjustment Work runs through
+        # the UNCHANGED frozen clara-work/v2 bundle (the typed particulars ride a column the run
+        # never reads), and that a sealed fiscal year is a typed 400 at the HTTP boundary instead of
+        # a bare 500. It SKIPS CLEANLY (exit 0, printed reason) when migration 0194 is absent, so it
+        # is safe to merge before the DB half lands.
+        PGPORT=$PGC_PORT \
+        PGDATABASE=clara_wave_b_ci \
+        RELAY_TEST_MODE=1 \
+        WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGC_PORT/clara_wave_b_ci" \
+          node tests/periodic-adjustment-e2e.mjs
 
     - name: DR backup/restore self-test (ephemeral postgres:17)
       shell: bash -e {0}
