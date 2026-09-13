@@ -1664,6 +1664,37 @@ export const WORK_CANCEL_0184_COHORT = [
   ...WORK_CANCEL_0184_RUNTIME_FNS, ...WORK_CANCEL_0184_UNGRANTED_FNS,
 ];
 
+// #624 [0191, the document capability registry] — the four READERS this slice publishes, one
+// cohort for the same "wholly present or wholly absent" reason 0178's roster carries: folding these
+// names into an older cohort would red every database between the two frontiers, and
+// `cohortFailures()` fails a PARTIAL cohort by design.
+//
+//   the FOUR shared readers — clara_authenticated AND clara_agent_ro, and the second half is the
+//   point rather than a convenience: the capability registry exists so that neither lane can infer
+//   from a filename what Clara can do with a file, and an agent that could not read the registry
+//   would be exactly the lane most likely to guess. None of the four writes anything;
+//   `get_document_state` resolves its own scope through the SAME dual-lane wake/human context
+//   clara.get_document_extract uses (0090:1558-1584) and returns NULL for a document the caller
+//   may not read, so the coarse grant is a door, never the authority.
+//     _document_capability · the registry's one reader (honest defaults in both directions)
+//     _document_format     · a stored documents.mime_type -> the detector's format token
+//     _assert_field_path   · the canonical field_path grammar (C33.4), enforced at the persist
+//                            boundary; granted so a surface can pre-validate a path it will cite
+//     get_document_state   · custody / byte extraction / facts / operation, read independently
+const DOCUMENT_CAPABILITY_0191_SHARED_FNS = [
+  "_document_capability", "_document_format", "_assert_field_path", "get_document_state",
+];
+//   …and the UNGRANTED closure: the two deferrable constraint-trigger bodies that record the
+//   arithmetic validations at commit. Listed so `cohortFailures` reports a half-applied 0191
+//   rather than a silently narrower boundary, and so a future accidental grant on a trigger body
+//   FAILS instead of passing quietly.
+const DOCUMENT_CAPABILITY_0191_UNGRANTED_FNS = [
+  "_tf_document_fact_validate", "_tf_bank_statement_validate",
+];
+export const DOCUMENT_CAPABILITY_0191_COHORT = [
+  ...DOCUMENT_CAPABILITY_0191_SHARED_FNS, ...DOCUMENT_CAPABILITY_0191_UNGRANTED_FNS,
+];
+
 export const ALLOWED = {
   // Slice-4 governance writers (contract v2.1 §3.2/3.3/3.5): human lane only.
   [ROLES.authenticated]: new Set([
@@ -1816,6 +1847,9 @@ export const ALLOWED = {
     // above. clara_authenticated ONLY; clara_runtime, the agent role and both wake roles gain
     // ZERO on either name.
     ...WALK_FINDINGS_0183_HUMAN_FNS,
+    // #624 0191 the document capability registry's four readers — see the block above. BOTH
+    // application read lanes hold these; the agent half is listed on the agent row below.
+    ...DOCUMENT_CAPABILITY_0191_SHARED_FNS,
   ]),
   // [S6 §9/C-11] agent lane loses the bare get_journal_entry(uuid) oracle; keeps the other
   // reads and gains the client-pinned S6 reads + get_journal_entry_for.
@@ -1823,7 +1857,11 @@ export const ALLOWED = {
     // [DB-A, H-53] the agent lane reads clara.list_uncoded_filings (0011:4080's own grant, and
     // 0011:4271's ACL census pins it), and that reader is SECURITY INVOKER — so the agent role
     // must hold the predicate it calls, or the agent's coding-lane read 42501s.
-    ...DBA_CODEABILITY_SHARED_FNS]),
+    ...DBA_CODEABILITY_SHARED_FNS,
+    // #624 0191: the capability registry and the four states exist precisely so that neither
+    // lane infers from a filename what Clara can do with a file. An agent that could not read
+    // the registry would be the lane most likely to guess, so all four readers are shared.
+    ...DOCUMENT_CAPABILITY_0191_SHARED_FNS]),
   [ROLES.wakeInteractive]: new Set(["wake_draft_entry", "wake_record_client_resolution", "wake_record_notification", ...WAVE_A_WAKE_INTERACTIVE_FNS, ...BINDING_PROPOSAL_PR1_WAKE_FNS, ...AUTHORING_0077_WAKE_FNS, ...POSTING_F_A2_WAKE_FNS, ...F_A5_PR2_WAKE_FNS, ...F_A5B_PR1_WAKE_FNS, ...CARD1_SEAM_WAKE_FNS,
     // [Wave-F Track A, F-A5b card 1] wake_compose_metric_preview_v2 -- 'interactive' ONLY,
     // permanently (CD-16), beside its untouched v1 twin in AUTHORING_0077_WAKE_FNS.
@@ -2196,6 +2234,7 @@ export async function grantMatrixFailures() {
   failures.push(...cohortFailures("#634 0182 journal-evidence lane", JOURNAL_EVIDENCE_0182_COHORT, liveNames));
   failures.push(...cohortFailures("#728 0183 sweep attribution + spoken-for documents", WALK_FINDINGS_0183_COHORT, liveNames));
   failures.push(...cohortFailures("#630 0184 work-cancel/takeover lane", WORK_CANCEL_0184_COHORT, liveNames));
+  failures.push(...cohortFailures("#624 0191 document capability registry", DOCUMENT_CAPABILITY_0191_COHORT, liveNames));
   failures.push(...cohortFailures("wave F F-A1 PR-4 bank-statement witness cutover", STATEMENT_F_A1_PR4_COHORT, liveNames));
   // F-A6's cohort is bimodal: wholly present once PR-1 applies, wholly absent before it. Half a
   // cohort is a half-applied migration and is reported as one.
