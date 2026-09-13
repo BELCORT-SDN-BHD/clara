@@ -52,6 +52,20 @@
 //            For a non-field CLR10 the reason is the database's typed `detail.reason` instead
 //            (`invalid_intent_key`, …).
 //
+//            #643 adds ONE MORE PREFIX on the same footing: `adjustment.<key>`, the typed
+//            particulars of a periodic stock adjustment or a supplied payroll obligation
+//            (migration 0194's own spelling). The database spells the key snake_case and the
+//            browser posts it camelCase, so `toWireField` re-spells it — the SECOND and last
+//            translation this route performs, beside `source_refs` → `sourceRefs`, and it is a
+//            total function rather than a table so a new field cannot fall out of step. Its
+//            reasons are the database's own: `invalid_adjustment` folds to its `constraint`
+//            exactly as `invalid_basis` does, and `adjustment_all_zero`, `adjustment_lines_mismatch`,
+//            `adjustment_account_relationship`, `advance_not_enrolled`, `scope_overbroad`,
+//            `stale_basis` and the three `correction_target_*` tokens ride back under their own
+//            names. A locked period is CLR19 `write_into_closed_period`, which `workErrorStatus`
+//            maps for the first time here — see its own note for why that code could not reach
+//            this surface before.
+//
 // WHY IT MATTERS ENOUGH TO STATE. `apps/web/lib/work/journal-basis.ts`'s `fieldForServerPath` is
 // the ONE mapper from a wire path onto a focusable control, and it was written against the
 // database's spelling. This route used to answer `basis.postingDate` / `basis.lines[0].accountCode`
@@ -226,13 +240,137 @@ export function toDbSourceRefs(
   return { ok: true, sourceRefs: refs };
 }
 
+/**
+ * #643 — THE TYPED PARTICULARS OF A PERIODIC ADJUSTMENT, translated into the database's own shape.
+ *
+ * SHAPE ONLY, AND DELIBERATELY THIN. `clara._assert_adjustment_basis` (migration 0194) is the
+ * authority and re-checks every rule — the method vocabulary, the derived movement, the counted
+ * date inside its own period, the all-zero refusal, every length cap — at admission AND again at
+ * commit. This function exists to name the FIELD for the composer and to refuse the two things the
+ * database cannot diagnose helpfully: a payload that is not an object at all, and a number that is
+ * not an integer (jsonb `->>` coerces a string to text, so `"1200"` would be ADMITTED and then be
+ * a stored figure nobody typed).
+ *
+ * THE PURPOSE DECIDES THE SHAPE. A discriminated union, not one object with optional halves: a
+ * payroll obligation carrying `inventoryAccountCode` is not a shape the database can refuse
+ * helpfully — it is a shape this door must never produce.
+ *
+ * NOTHING IS DEFAULTED AND NOTHING IS COMPUTED. Every value below is the caller's; the one
+ * arithmetic the lane does (`closing − opening`) is the DATABASE's own consistency check against
+ * the movement the caller supplied.
+ */
+export type WireAdjustment = Record<string, unknown>;
+
+const ADJUSTMENT_STRINGS: Record<string, ReadonlyArray<[string, string, number, boolean]>> = {
+  // [wire key, db key, max chars, required]
+  periodic_stock_adjustment: [
+    ["method", "method", 64, true],
+    ["inventoryAccountCode", "inventory_account_code", 64, true],
+    ["costAccountCode", "cost_account_code", 64, true],
+    ["countedAt", "counted_at", 10, false],
+    ["countReference", "count_reference", 200, false],
+    ["instruction", "instruction", MEMO_MAX_CHARS, true],
+  ],
+  payroll_obligation: [
+    ["obligationKind", "obligation_kind", 64, true],
+    ["expenseAccountCode", "expense_account_code", 64, true],
+    ["liabilityAccountCode", "liability_account_code", 64, true],
+    ["advanceAccountCode", "advance_account_code", 64, false],
+    ["paymentAccountCode", "payment_account_code", 64, false],
+    ["particularsSource", "particulars_source", 500, true],
+    ["instruction", "instruction", MEMO_MAX_CHARS, true],
+  ],
+};
+
+const ADJUSTMENT_CENTS: Record<string, ReadonlyArray<[string, string, boolean]>> = {
+  // [wire key, db key, required]
+  periodic_stock_adjustment: [
+    ["openingCents", "opening_cents", false],
+    ["closingCents", "closing_cents", false],
+    ["adjustmentCents", "adjustment_cents", true],
+  ],
+  payroll_obligation: [["amountCents", "amount_cents", true]],
+};
+
+function adjustmentInvalid(key: string, reason: string): InvalidBasis {
+  return { error: "invalid_basis", field: `adjustment.${key}`, reason };
+}
+
+export function toDbAdjustment(
+  purpose: string,
+  raw: unknown,
+): { ok: true; adjustment: Record<string, unknown> } | { ok: false; error: InvalidBasis } {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return { ok: false, error: { error: "invalid_basis", field: "adjustment", reason: "object" } };
+  }
+  const wire = raw as WireAdjustment;
+  const out: Record<string, unknown> = { currency: "MYR" };
+
+  for (const key of ["periodStart", "periodEnd"] as const) {
+    const db = key === "periodStart" ? "period_start" : "period_end";
+    const value = wire[key];
+    if (typeof value !== "string" || value.trim() === "") return { ok: false, error: adjustmentInvalid(db, "present") };
+    if (!DATE_RE.test(value)) return { ok: false, error: adjustmentInvalid(db, "iso_date") };
+    out[db] = value;
+  }
+  if (String(out.period_end) < String(out.period_start)) {
+    return { ok: false, error: adjustmentInvalid("period_end", "order") };
+  }
+
+  for (const [key, db, max, required] of ADJUSTMENT_STRINGS[purpose] ?? []) {
+    const value = wire[key];
+    if (value === undefined || value === null || (typeof value === "string" && value.trim() === "")) {
+      if (required) return { ok: false, error: adjustmentInvalid(db, db === "instruction" ? "nonempty" : "present") };
+      continue;
+    }
+    if (typeof value !== "string") return { ok: false, error: adjustmentInvalid(db, "text") };
+    // The TRIMMED length, for the reason `MEMO_MAX_CHARS` states: the database measures the
+    // trimmed string, and a door that measured the raw one would refuse a value it would accept.
+    if (value.trim().length > max) return { ok: false, error: adjustmentInvalid(db, "max_length") };
+    if (db === "counted_at" && !DATE_RE.test(value)) return { ok: false, error: adjustmentInvalid(db, "iso_date") };
+    out[db] = value;
+  }
+
+  for (const [key, db, required] of ADJUSTMENT_CENTS[purpose] ?? []) {
+    const value = wire[key];
+    if (value === undefined || value === null) {
+      if (required) return { ok: false, error: adjustmentInvalid(db, "present") };
+      continue;
+    }
+    if (!isInteger(value)) return { ok: false, error: adjustmentInvalid(db, "integer_cents") };
+    // A STOCK MOVEMENT IS SIGNED (a count below opening is a real, negative movement); everything
+    // else is unsigned, exactly as the database's own `clara._adjustment_cents` reads them.
+    if (db !== "adjustment_cents" && value < 0) {
+      return { ok: false, error: adjustmentInvalid(db, "nonnegative_integer_cents") };
+    }
+    out[db] = value;
+  }
+
+  if (wire.correctsAdjustmentId !== undefined && wire.correctsAdjustmentId !== null) {
+    if (typeof wire.correctsAdjustmentId !== "string" || !UUID_RE.test(wire.correctsAdjustmentId)) {
+      return { ok: false, error: adjustmentInvalid("corrects_adjustment_id", "uuid") };
+    }
+    out.corrects_adjustment_id = wire.correctsAdjustmentId;
+  }
+  return { ok: true, adjustment: out };
+}
+
 /** The WIRE spelling of a field path the DATABASE raised. Every path is the database's already —
- *  EXCEPT its evidence array, which it spells `source_refs` and the browser posts as `sourceRefs`.
- *  This is the ONE place that translation happens, for the same reason `linePath` is the one place
- *  the 1-based arithmetic happens. */
+ *  EXCEPT its evidence array, which it spells `source_refs` and the browser posts as `sourceRefs`,
+ *  and #643's typed particulars, which it spells `adjustment.<snake_case>` and the browser posts
+ *  as `adjustment.<camelCase>`. This is the ONE place those translations happen, for the same
+ *  reason `linePath` is the one place the 1-based arithmetic happens.
+ *
+ *  THE PARTICULARS' HALF IS A FUNCTION, NOT A TABLE. Every key under `adjustment.` is a plain
+ *  snake_case identifier, so `_x` → `X` is total and cannot fall out of step with a schema that
+ *  gains a field; a hand-written map would be a second place to remember. */
 function toWireField(field: string | null): string | null {
   if (field === null) return null;
-  return field.startsWith("source_refs") ? `sourceRefs${field.slice("source_refs".length)}` : field;
+  if (field.startsWith("source_refs")) return `sourceRefs${field.slice("source_refs".length)}`;
+  if (field.startsWith("adjustment.")) {
+    return `adjustment.${field.slice("adjustment.".length).replace(/_([a-z])/g, (_m, c: string) => c.toUpperCase())}`;
+  }
+  return field;
 }
 
 /**
@@ -248,6 +386,15 @@ export function workErrorStatus(code: string | undefined, reason: string | null)
   }
   if (code === "CLR11") return 404; // unknown / foreign client, or a Work that is not this firm's
   if (code === "CLR03" || code === "CLR04") return 403;
+  // #643 · THE CLOSED-PERIOD WALL, reachable at ADMISSION for the first time on this surface.
+  // `clara._assert_adjustment_relationships` raises CLR19 `write_into_closed_period` with a
+  // `field` of `adjustment.period_end` before a Work row exists, so the honest answer is the
+  // SAME 400 shape every other field-scoped refusal wears: the preparer changes the period, or
+  // the firm reopens the year. Left unmapped it fell through to `{error:"internal"}` — a 500 for
+  // an ordinary, actionable, entirely expected refusal. (The journal door reaches CLR19 only at
+  // COMMIT, inside the run, where `claraWork.v1.errors.ts` classifies it; this door reaches it at
+  // the HTTP boundary.)
+  if (code === "CLR19") return 400;
   // CLR13 is the estate's "the state is not the one this act needs". `clara.retry_accounting_work`
   // raises it with reason `not_retryable` (the Work is not terminal, or its run is still live) and
   // with `operation_in_flight` (an uncommitted sibling holds the retry key). #630 adds
@@ -276,6 +423,8 @@ export function workErrorStatus(code: string | undefined, reason: string | null)
  *  wake lane's CLR03s are classified by claraWork.v1.errors.ts, not by an HTTP status). */
 export const WORK_MAPPED_CODES = Object.freeze([
   "CLR04", "CLR08", "CLR10", "CLR11", "CLR13", "23505",
+  // #643 · the periodic-adjustment door's typed closed-period pre-check, raised at ADMISSION.
+  "CLR19",
   // #630 · raised by the SERVER, never by a body — exempted from the prosrc census by name for
   // exactly the reason 23505 is.
   "40P01", "40001",
@@ -536,6 +685,97 @@ export function workRoutes(): express.Router {
     }
   });
 
+  // ---- C8/C11 admission: a PERIODIC ADJUSTMENT -------------------------------
+  //
+  // A SIBLING OF `/api/work/journal`, not a widened version of it, and the reason is the same one
+  // migration 0194 gives for keeping two database doors: the two take different payloads, are
+  // reached by different surfaces, and one of them is named by a FROZEN chat tool whose signature
+  // may not move. A single route with an optional `adjustment` would have made "no purpose" a
+  // reachable state on the frozen lane.
+  //
+  // 202 FOR THE SAME REASON: the response acknowledges an ADMITTED intent, never a posted entry.
+  // The entry, its `closing_stock` / `payroll_obligation` marker and its
+  // `clara.periodic_adjustments` row are written seconds later by a claraWork run under a wake
+  // credential minted OBO this same human — through the SAME frozen bundle a documentless journal
+  // entry uses, because the typed particulars ride a column the run never reads.
+  router.post("/api/work/periodic-adjustment", async (req, res) => {
+    if (shuttingDown()) {
+      res.status(503).json({ error: "shutting_down", message: "the runtime is draining — retry shortly" });
+      return;
+    }
+    const body = (req.body ?? {}) as {
+      clientId?: unknown; intentKey?: unknown; purpose?: unknown; basis?: unknown;
+      adjustment?: unknown; sourceRefs?: unknown;
+    };
+    if (typeof body.clientId !== "string" || !UUID_RE.test(body.clientId)) {
+      res.status(404).json({ error: "not_found", message: "not found" });
+      return;
+    }
+    if (typeof body.intentKey !== "string" || body.intentKey.trim() === "") {
+      res.status(400).json({ error: "invalid_basis", field: "basis", reason: "invalid_intent_key" });
+      return;
+    }
+    // THE PURPOSE IS A CLOSED SET AT THE DOOR. The database refuses an unknown one too
+    // (`invalid_purpose`), and this answers with that same body so the two halves of one
+    // validation cannot be told apart by a client.
+    if (body.purpose !== "periodic_stock_adjustment" && body.purpose !== "payroll_obligation") {
+      res.status(400).json({ error: "invalid_basis", field: "purpose", reason: "invalid_purpose" });
+      return;
+    }
+    const translated = toDbBasis(body.basis);
+    if (!translated.ok) {
+      res.status(400).json(translated.error);
+      return;
+    }
+    const particulars = toDbAdjustment(body.purpose, body.adjustment);
+    if (!particulars.ok) {
+      res.status(400).json(particulars.error);
+      return;
+    }
+    const refs = toDbSourceRefs(body.sourceRefs);
+    if (!refs.ok) {
+      res.status(400).json(refs.error);
+      return;
+    }
+
+    try {
+      const admitted = await withRuntime(async (c) => {
+        const p = await authenticate(c, req.header("authorization"));
+        const r = await c.query(
+          "select clara.admit_periodic_adjustment_work($1::uuid, $2::uuid, $3::text, $4::text,"
+          + " $5::jsonb, $6::jsonb, $7::text, $8::jsonb, $9::text) as receipt",
+          [
+            body.clientId, p.sub, body.intentKey, body.purpose,
+            JSON.stringify(translated.basis), JSON.stringify(particulars.adjustment),
+            "user_direct", JSON.stringify(refs.sourceRefs), DEFAULT_MODEL,
+          ],
+        );
+        return (r.rows[0]?.receipt ?? null) as {
+          work_id: string;
+          task_id: string;
+          logical_op_id: string;
+          status: string;
+          replayed: boolean;
+        } | null;
+      });
+      if (!admitted) {
+        res.status(500).json({ error: "internal" });
+        return;
+      }
+      if (admitted.replayed !== true) await enqueueWork(admitted.task_id);
+      res.status(202).json({
+        work_id: admitted.work_id,
+        task_id: admitted.task_id,
+        logical_op_id: admitted.logical_op_id,
+        status: admitted.status,
+        replayed: admitted.replayed === true,
+      });
+    } catch (err) {
+      if (sendAuthError(res, err)) return;
+      sendAdmissionError(res, err, "periodic adjustment admission");
+    }
+  });
+
   // ---- B3 retry: a NEW run for the SAME Work (same logical identity) ------
   router.post("/api/work/:workId/retry", async (req, res) => {
     if (shuttingDown()) {
@@ -702,6 +942,7 @@ export function workRoutes(): express.Router {
         const w = await c.query(
           `select w.id, w.firm_id, w.client_id, w.purpose, w.status, w.initiator, w.initiator_role,
                   w.intent_key, w.logical_op_id, w.basis, w.basis_digest, w.basis_origin, w.source_refs,
+                  w.adjustment_basis,
                   w.current_task_id, w.bundle, w.result, w.error, w.created_at, w.updated_at,
                   t.id as task_id, t.status as task_status, t.error_code as task_error_code,
                   (t.workflow_run_id is not null) as task_bound
@@ -731,6 +972,9 @@ export function workRoutes(): express.Router {
           basis_digest: found.basis_digest,
           basis_origin: found.basis_origin,
           source_refs: found.source_refs,
+          // #643 · the TYPED PARTICULARS, when the Work has any. NULL for a journal entry, by the
+          // column's own CHECK — the Work detail renders the block only when it is present.
+          adjustment_basis: found.adjustment_basis,
           current_task_id: found.current_task_id,
           bundle: found.bundle,
           result: found.result,
