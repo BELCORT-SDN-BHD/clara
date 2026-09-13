@@ -287,8 +287,15 @@ const LANE_DECLARATIONS: Record<string, { unscopeable: string[]; debt: string[] 
   // above, which is the state a lane mock should be in.
   "tax-boundary-mock.mjs": { unscopeable: [], debt: [] },
   // #643 — every handler is scoped to this lane's own client id (`PA.clientId`) and falls through
-  // otherwise, including the RUNTIME admission route and the control endpoint. The state a walk
-  // injects through the control endpoint is this lane's alone.
+  // otherwise: the PostgREST reads (clients, coa_accounts, document_filings, list_spoken_for_documents
+  // by `p_client`; documents by ids this module minted), the RUNTIME admission route by `body.clientId`,
+  // and the CONTROL ENDPOINT by `body.client` — that last one is a fix rather than a restatement. A
+  // standards review measured this declaration ahead of the code: the control endpoint's five ops
+  // (`refuse_next`, `seed_intent`, `received`, `empty_history`, `reset`) mutated shared fixture state
+  // for ANY body at all, which is a lane claiming a shared endpoint — the exact shape this census
+  // exists to prevent — while this comment said it did not. It now carries `journal-work-mock.mjs`'s
+  // own guard (`if (body?.client !== PA.clientId) return false;`) and the walk's `control()` helper
+  // names the lane on every call. The state a walk injects is this lane's alone.
   "periodic-adjustment-mock.mjs": { unscopeable: [], debt: [] },
 };
 

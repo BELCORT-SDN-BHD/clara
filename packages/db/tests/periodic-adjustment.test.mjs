@@ -30,11 +30,11 @@ import {
   buildWorkWorld, endPool, printLaneNotes, printSkipCount,
   claimWorkRun, mintClientObo, wakeRecordJournalEntry, freshWorkClient,
   WCHART, REASON, CLR, BUNDLE_DIGEST, assertPair, assertRaises,
-  rootQuery, opk, workRow, receiptsForWork, entriesForClient, linesOf,
+  rootQuery, opk, workRow, receiptsForWork, entriesForClient, linesOf, admitJournalWork,
   entryCount, committedReceiptCount, AGENT_USER_ID,
   // #643
   gatePa, PA_REASON, PA_PURPOSE, PACHART, ensurePaChart, retireAdvance,
-  stockAdjustment, payrollObligation, basisForStock, basisForPayroll,
+  stockAdjustment, payrollObligation, basisForStock, basisForPayroll, PA_PERIOD,
   admitPeriodicAdjustmentWork, listPeriodicAdjustments, reverseEntry,
   adjustmentsForClient, adjustmentRow, adjustmentCount, entryFlags, entryLinksFor,
   seedFiscalYear,
@@ -551,6 +551,61 @@ test("pa.refusals.wrong-door the journal purpose is refused at the periodic-adju
     () => admitPeriodicAdjustmentWork({
       client: A1(), author: ALICE(), purpose: "journal_entry", adjustment: adj, basis: basisForStock(adj),
     }), "refusals.wrong-door");
+});
+
+test("pa.answer-shape a journal_entry commit carries NO adjustment_id key — one lane, one shape", async (t) => {
+  if (await gatePa(t)) return;
+  // ONE LANE MUST HAVE ONE ANSWER SHAPE (adversarial migration-safety review, S2). The recut posting
+  // core carried `adjustment_id` unconditionally, so a FRESH journal_entry commit answered
+  // `"adjustment_id": null` while a REPLAYED pre-0194 one — whose `clara._finish_op` payload was
+  // stored before this migration existed — carried no such key at all. Two shapes for one lane,
+  // distinguishable only by whether the caller happened to replay. The key is now emitted only when
+  // there IS an adjustment, which is the same rule `effects` and the Work's `result` already follow
+  // for `document_id`'s sibling.
+  const client = await paClient("answer-shape");
+  const work = await admitJournalWork({
+    client, author: ALICE(),
+    basis: {
+      posting_date: PA_PERIOD.end, memo: "a plain journal entry, no particulars", currency: "MYR",
+      lines: [
+        { account_code: PACHART.inventory, debit_cents: 1000, credit_cents: 0, description: null },
+        { account_code: PACHART.cost, debit_cents: 0, credit_cents: 1000, description: null },
+      ],
+    },
+  });
+  await claimWorkRun({ task: work.task_id, runId: opk("pa-shape-run") });
+  const cred = await mintClientObo({ firm: FIRM_A(), obo: ALICE(), client });
+  const out = await wakeRecordJournalEntry(cred.secret, {
+    client, work: work.work_id, logicalOpId: work.logical_op_id,
+    basis: {
+      posting_date: PA_PERIOD.end, memo: "a plain journal entry, no particulars", currency: "MYR",
+      lines: [
+        { account_code: PACHART.inventory, debit_cents: 1000, credit_cents: 0, description: null },
+        { account_code: PACHART.cost, debit_cents: 0, credit_cents: 1000, description: null },
+      ],
+    },
+  });
+  assert.equal(out.posted, true, "answer-shape: the journal lane still posts through the recut core");
+  assert.equal(Object.prototype.hasOwnProperty.call(out, "adjustment_id"), false,
+    "answer-shape: the RETURNED answer names no adjustment, because there is none");
+
+  const row = await workRow(work.work_id);
+  assert.equal(Object.prototype.hasOwnProperty.call(row.result, "adjustment_id"), false,
+    "answer-shape: …and neither does the Work's own result");
+  assert.equal(row.result.entry_id, out.entry_id, "answer-shape: while every key that IS a fact is there");
+  assert.ok(Object.prototype.hasOwnProperty.call(row.result, "document_id"),
+    "answer-shape: `document_id` is unchanged — it has always been emitted, null and all");
+
+  const receipt = (await receiptsForWork(work.work_id)).find((r) => r.outcome === "committed");
+  assert.equal(Object.prototype.hasOwnProperty.call(receipt.effects, "adjustment_id"), false,
+    "answer-shape: the receipt's effects agree with both");
+
+  // AND THE OTHER LANE STILL NAMES ITS OWN. The rule is "name the effect you had", not "drop the key".
+  const a = await armedPa({ client });
+  const posted = await post(a);
+  assert.ok(posted.adjustment_id, "answer-shape: a periodic adjustment's answer DOES name its row");
+  const paWork = await workRow(a.work_id);
+  assert.equal(paWork.result.adjustment_id, posted.adjustment_id);
 });
 
 // ===========================================================================================

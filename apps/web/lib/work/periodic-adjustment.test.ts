@@ -235,6 +235,15 @@ test("643.web: a server field path lands on a control in BOTH spellings of one p
   assert.equal(fieldForAdjustmentPath("adjustment.advance_account_code"), "advanceAccountCode");
   assert.equal(fieldForAdjustmentPath("adjustment.corrects_adjustment_id"), null,
     "a path with no control of its own renders as a form-level message, never a focused guess");
+  // `settledCents` IS NOT A SERVER PATH (adversarial migration-safety review, N3). It is a
+  // client-side derivation input: neither `packages/runtime/src/workRoutes.ts`'s `ADJUSTMENT_CENTS`
+  // table nor migration 0194's `clara._assert_adjustment_basis` has a `settled_cents` particular, so
+  // no refusal can ever carry that path — and a mapper that claimed it would be promising to focus a
+  // control for something that cannot arrive. Its LOCAL validation still names it, which is a
+  // different thing and is pinned by the issue table above.
+  assert.equal(fieldForAdjustmentPath("adjustment.settled_cents"), null,
+    "no DB particular, no server path — the roster claims only what the server can name");
+  assert.equal(fieldForAdjustmentPath("adjustment.settledCents"), null);
   assert.equal(fieldForAdjustmentPath("adjustment"), null);
   assert.equal(fieldForAdjustmentPath("lines[1].account_code"), null, "the basis keeps its own mapper");
   assert.equal(fieldForAdjustmentPath(null), null);

@@ -14,6 +14,10 @@
 //   5. THE DERIVED ENTRY IS ON SCREEN AND IS NOT EDITABLE — the C-29 rung, made visible: what is
 //      submitted is the entry the particulars produce, and the line grid is a preview.
 //   6. Each server answer renders as an INLINE state with the right next action — never a toast.
+//   7. THE EVIDENCE CHOOSER IS REALLY WIRED — #643's upload/reference entrance. The chosen document
+//      reaches the SUBMITTED BODY as `sourceRefs [{kind:'document'}]`, a `not_filed` refusal about
+//      it lands on THAT control as an inline state, and a document already backing a posted entry
+//      refuses without ever offering a resubmit of the same intent.
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
@@ -81,7 +85,15 @@ type Submitted = {
   purpose: string;
   basis: { lines: ReadonlyArray<Record<string, unknown>>; [k: string]: unknown };
   adjustment: Record<string, unknown>;
+  sourceRefs?: ReadonlyArray<{ kind: string; documentId: string }>;
 };
+
+/** Two filed, byte-verified documents of this client — the shape `listClientEvidenceDocuments`
+ *  answers with, so the chooser under test is the production one and not a stub of it. */
+const DOCUMENTS = [
+  { documentId: "d1111111-1111-4111-8111-111111111111", filename: "stocktake-2026-12.pdf", kind: "other", filedAt: "2026-12-31T03:00:00Z", financialDate: "2026-12-31" },
+  { documentId: "d2222222-2222-4222-8222-222222222222", filename: "payroll-aug-2026.pdf", kind: "other", filedAt: "2026-09-02T03:00:00Z", financialDate: "2026-08-31" },
+];
 
 function App(props: {
   scope?: typeof BOOKKEEPER;
@@ -89,6 +101,12 @@ function App(props: {
   navigate?: (href: string) => void;
   storage?: DraftStorage | null;
   loadAccounts?: () => Promise<CoaAccountRow[]>;
+  loadDocuments?: () => Promise<typeof DOCUMENTS>;
+  loadSpokenFor?: () => Promise<Array<{
+    document_id: string; entry_id: string; client_id: string; client_name: string | null;
+    via: "evidence_link" | "coding";
+  }>>;
+  resolveEntryClient?: (entryId: string, opts?: unknown) => Promise<{ clientId: string; clientName: string | null } | null>;
 }): ReactElement {
   return createElement(NextIntlClientProvider, {
     locale: "en",
@@ -101,6 +119,12 @@ function App(props: {
       submit: (props.submit ?? (async () => ({ kind: "denied" }) as SubmitJournalWorkResult)) as never,
       storage: props.storage ?? null,
       loadAccounts: props.loadAccounts ?? (async () => ACCOUNTS),
+      // DEFAULTED so every cell that is not about evidence renders the chooser with a real,
+      // successful, EMPTY read rather than a failed network one — the state a client with no filed
+      // documents is genuinely in.
+      loadDocuments: (props.loadDocuments ?? (async () => DOCUMENTS)) as never,
+      loadSpokenFor: (props.loadSpokenFor ?? (async () => [])) as never,
+      resolveEntryClient: (props.resolveEntryClient ?? (async () => null)) as never,
       session: { getAccessToken: async () => "tok" },
     }),
   });
@@ -490,5 +514,172 @@ test("a failed chart read degrades to a free-text code, and does NOT block a sub
     assert.equal(sent[0]!.adjustment.inventoryAccountCode, "1200");
   } finally {
     await h.unmount();
+  }
+});
+
+// ---------------------------------------------------------------------------------------------
+// #643's UPLOAD/REFERENCE ENTRANCE — the composer's own evidence chooser, on this door.
+//
+// The control is `components/accounting/evidence-chooser.tsx`, mounted by BOTH admission forms, so
+// its id is the basis vocabulary's `journal-basis-evidence` on both. That is not an accident of
+// naming: `fieldForServerPath` already maps the wire's `source_refs[N]` / `sourceRefs[N]` onto the
+// `evidence` field, so a refusal about the citation lands on the control with no second mapper.
+// ---------------------------------------------------------------------------------------------
+
+const EVIDENCE_ID = "journal-basis-evidence";
+
+test("a CITED DOCUMENT reaches the submitted body as source_refs, and no citation sends none", async () => {
+  const none: Submitted[] = [];
+  const bare = await renderComponent(App({ submit: recorder(none) }));
+  try {
+    await bare.settle();
+    await fillStock(bare);
+    await submitForm(bare);
+    assert.equal(none.length, 1);
+    assert.equal(none[0]!.sourceRefs, undefined,
+      "an evidenceless adjustment sends NO sourceRefs at all — the route reads absent and [] alike");
+  } finally {
+    await bare.unmount();
+  }
+
+  const sent: Submitted[] = [];
+  const h = await renderComponent(App({ submit: recorder(sent) }));
+  try {
+    await h.settle();
+    // The chooser is on the page, and it offers this client's filed documents by name.
+    assert.match(h.text(), /stocktake-2026-12\.pdf/, "the chooser lists the client's filed documents");
+    await fillStock(h);
+    await h.fireEvent(byId(h, EVIDENCE_ID), "change", (n) => setFieldValue(n, DOCUMENTS[0]!.documentId));
+    await h.settle();
+    await submitForm(h);
+    assert.equal(sent.length, 1, `expected one submit, got ${JSON.stringify(sent)}`);
+    assert.deepEqual(sent[0]!.sourceRefs, [{ kind: "document", documentId: DOCUMENTS[0]!.documentId }],
+      "the citation crosses the wire in the route's own shape — this is AC3's upload/reference entrance");
+    // …and the particulars are unaffected: evidence rides BESIDE them, never inside them.
+    assert.equal(sent[0]!.adjustment.adjustmentCents, 250_000);
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("an UNFILED cited document refuses on the CHOOSER, inline, with the server's own reason", async () => {
+  for (const field of ["sourceRefs[1]", "source_refs[1]"] as const) {
+    const h = await renderComponent(App({
+      // The shape `workErrorResponse` builds when `clara._assert_journal_source_refs` raises CLR10
+      // `invalid_source_ref` with `detail.constraint = 'not_filed'`: the route FOLDS the constraint
+      // into `reason`, because it is the only half a preparer can act on.
+      submit: async () => ({ kind: "invalid_basis", field, reason: "not_filed" }),
+    }));
+    try {
+      await h.settle();
+      await fillStock(h);
+      await h.fireEvent(byId(h, EVIDENCE_ID), "change", (n) => setFieldValue(n, DOCUMENTS[1]!.documentId));
+      await h.settle();
+      await submitForm(h);
+      assert.equal(focusedId(), EVIDENCE_ID, `${field} must focus the chooser, not nothing`);
+      // A BUSINESS REFUSAL IS NEVER A TOAST — an inline state carrying the server's own word.
+      assert.match(h.text(), /The server did not accept these particulars/);
+      assert.match(h.text(), /not_filed/, "the server's own reason rides the banner, never re-worded");
+      // THE CHOICE IS PRESERVED, so a preparer can see WHICH document was refused.
+      assert.equal((byId(h, EVIDENCE_ID) as { value?: unknown }).value, DOCUMENTS[1]!.documentId);
+    } finally {
+      await h.unmount();
+    }
+  }
+});
+
+test("a STALE cited basis and a SPOKEN-FOR document are two refusals with two next actions", async () => {
+  // (a) `stale_basis` — the count sits outside its own period. Renders as an inline state on the
+  //     control the server named, and the form may still be resubmitted once it is corrected.
+  const stale = await renderComponent(App({
+    submit: async () => ({ kind: "invalid_basis", field: "adjustment.counted_at", reason: "stale_basis" }),
+  }));
+  try {
+    await stale.settle();
+    await fillStock(stale);
+    await stale.fireEvent(byId(stale, EVIDENCE_ID), "change", (n) => setFieldValue(n, DOCUMENTS[0]!.documentId));
+    await stale.settle();
+    await submitForm(stale);
+    assert.equal(focusedId(), F("countedAt"));
+    assert.match(stale.text(), /stale_basis/);
+    const submit = stale.find((n) => n.tagName === "BUTTON"
+      && (n as { getAttribute?: (k: string) => string | null }).getAttribute?.("type") === "submit");
+    assert.notEqual((submit as { disabled?: unknown }).disabled, true,
+      "a correctable refusal leaves the door open — the figures are the preparer's to fix");
+  } finally {
+    await stale.unmount();
+  }
+
+  // (b) `source_conflict` — the document already backs a POSTED entry. The opposite next action:
+  //     open that entry, or choose another document. NEVER a resubmit of this same intent, so the
+  //     primary control is disabled for as long as the phase stands.
+  const SIB_ENTRY = "e5555555-5555-4555-8555-555555555555";
+  const calls: unknown[] = [];
+  const conflict = await renderComponent(App({
+    loadSpokenFor: async () => [
+      { document_id: DOCUMENTS[0]!.documentId, entry_id: SIB_ENTRY, client_id: CLIENT, client_name: "Acme Sdn Bhd", via: "evidence_link" },
+    ],
+    submit: async (_a, input) => {
+      calls.push(input);
+      return { kind: "source_conflict", entryId: SIB_ENTRY, documentId: DOCUMENTS[0]!.documentId };
+    },
+  }));
+  try {
+    await conflict.settle();
+    await fillStock(conflict);
+    await conflict.fireEvent(byId(conflict, EVIDENCE_ID), "change", (n) => setFieldValue(n, DOCUMENTS[0]!.documentId));
+    await conflict.settle();
+    await submitForm(conflict);
+    assert.match(conflict.text(), /already backs a posted/i);
+    assert.equal(focusedId(), EVIDENCE_ID);
+    const submit = conflict.find((n) => n.tagName === "BUTTON"
+      && (n as { getAttribute?: (k: string) => string | null }).getAttribute?.("type") === "submit");
+    assert.equal((submit as { disabled?: unknown }).disabled, true,
+      "the same intent with the same spoken-for document gets the same 409 for ever");
+    // …AND THE HANDLER ITSELF REFUSES A SECOND PRESS, because disabling a control leaves `onSubmit`
+    // reachable by any other route to the event.
+    await submitForm(conflict);
+    assert.equal(calls.length, 1, "no second admission is attempted while the conflict stands");
+    // CHOOSING ANOTHER DOCUMENT RETIRES THE REFUSAL in the tick the choice is made.
+    await conflict.fireEvent(byId(conflict, EVIDENCE_ID), "change", (n) => setFieldValue(n, DOCUMENTS[1]!.documentId));
+    await conflict.settle();
+    const again = conflict.find((n) => n.tagName === "BUTTON"
+      && (n as { getAttribute?: (k: string) => string | null }).getAttribute?.("type") === "submit");
+    assert.notEqual((again as { disabled?: unknown }).disabled, true);
+  } finally {
+    await conflict.unmount();
+  }
+});
+
+test("the CITED DOCUMENT rides the draft — a reload carries the same claim under the same key", async () => {
+  const storage = memoryStorage();
+  const first = await renderComponent(App({ storage }));
+  try {
+    await first.settle();
+    await fillStock(first);
+    await first.fireEvent(byId(first, EVIDENCE_ID), "change", (n) => setFieldValue(n, DOCUMENTS[0]!.documentId));
+    await first.settle();
+  } finally {
+    await first.unmount();
+  }
+  const key = adjustmentDraftKey({ userId: USER, firmId: FIRM, clientId: CLIENT });
+  const stored = JSON.parse(storage.map.get(key)!) as { documentId: string | null; intentKey: string };
+  assert.equal(stored.documentId, DOCUMENTS[0]!.documentId,
+    "the citation is part of the SAME intent as the figures, so it is filed with them");
+
+  const sent: Submitted[] = [];
+  const second = await renderComponent(App({ storage, submit: recorder(sent) }));
+  try {
+    await second.settle();
+    // THE RESTORE IS PROVEN BY WHAT IS SUBMITTED, not by the select's `value` — this harness's node
+    // stub reflects a value written by an EVENT and not one React rendered as a prop, which is the
+    // same limitation `journal-composer.test.tsx`'s own restore cell records. The submitted body is
+    // the stronger claim anyway: it is the thing the door actually receives.
+    await submitForm(second);
+    assert.equal(sent.length, 1, `expected one submit, got ${JSON.stringify(sent)}`);
+    assert.equal(sent[0]!.intentKey, stored.intentKey, "the SAME identity, carrying the SAME evidence");
+    assert.deepEqual(sent[0]!.sourceRefs, [{ kind: "document", documentId: DOCUMENTS[0]!.documentId }]);
+  } finally {
+    await second.unmount();
   }
 });

@@ -36,7 +36,11 @@ async function signInTo(page: Page, destination: string): Promise<void> {
 }
 
 /** Drive the fixture through the app's OWN proxy — the same instrument the journal walks use, and
- *  for the same reason: it carries the real session through the real firm-scope guard. */
+ *  for the same reason: it carries the real session through the real firm-scope guard.
+ *
+ *  EVERY CALL NAMES THIS LANE'S CLIENT, because the fixture's control endpoint now requires it: a
+ *  control that mutated shared state for any body at all was a lane claiming a shared endpoint
+ *  (standards review), and the sibling `journal-work-mock.mjs` has always scoped its own. */
 async function control(page: Page, body: Record<string, unknown>): Promise<unknown> {
   const answer = await page.evaluate(
     async (call: { path: string; payload: Record<string, unknown> }) => {
@@ -47,7 +51,7 @@ async function control(page: Page, body: Record<string, unknown>): Promise<unkno
       });
       return { status: res.status, body: await res.json().catch(() => null) };
     },
-    { path: PA.controlPath, payload: body },
+    { path: PA.controlPath, payload: { client: PA.clientId, ...body } },
   );
   expect(answer.status, `the fixture control endpoint answered ${answer.status}`).toBe(200);
   return answer.body;
@@ -169,6 +173,43 @@ test("t643 the type switch keeps both halves and submits only the active one", a
   await field(page, "purpose").selectOption("periodic_stock_adjustment");
   await expect(field(page, "closingCents")).toHaveValue(CLOSING_VALUE);
   await expect(field(page, "countReference")).toHaveValue("STOCKTAKE-2026-12");
+});
+
+test("t643 a CITED DOCUMENT crosses the wire with the particulars, and the history discloses it", async ({ page }) => {
+  await page.goto(FORM_URL);
+  await fillStocktake(page);
+
+  // THE UPLOAD/REFERENCE ENTRANCE, in the browser. It is the COMPOSER'S OWN CHOOSER, mounted on this
+  // door (`components/accounting/evidence-chooser.tsx`), which is why its id is the basis
+  // vocabulary's `journal-basis-evidence` here too — and why a refusal about the citation lands on
+  // it with no second mapper.
+  const chooser = page.locator("#journal-basis-evidence");
+  await expect(chooser).toBeVisible();
+  // …and the advisory rule is live: a document already backing a posted entry stays in the list and
+  // is DISABLED with the reason on the option, never filtered out.
+  await expect(chooser.locator(`option[value="${PA.spokenForDocumentId}"]`)).toBeDisabled();
+  await expect(chooser.locator(`option[value="${PA.documentId}"]`)).toBeEnabled();
+
+  await chooser.selectOption(PA.documentId);
+  await scan(page, "periodic-adjustment form, with a cited document");
+  await page.getByRole("button", { name: "Submit" }).click();
+  await expect(page).toHaveURL(new RegExp(`/work/${PA.workId}$`), { timeout: 20_000 });
+
+  const received = (await control(page, { op: "received" })) as {
+    received: Array<{ sourceRefs: Array<{ kind: string; documentId: string }> | null; adjustment: Record<string, unknown> }>;
+  };
+  expect(received.received.length, "exactly one admission").toBe(1);
+  expect(received.received[0]!.sourceRefs, "the citation crosses the wire in the route's own shape")
+    .toEqual([{ kind: "document", documentId: PA.documentId }]);
+  // …BESIDE the particulars, never inside them: the two travel as separate halves of one intent.
+  expect(received.received[0]!.adjustment.adjustmentCents).toBe(250_000);
+
+  // AND THE HISTORY DISCLOSES THE SOURCE — the other end of the same entrance.
+  await page.goto(HISTORY_URL);
+  const live = page.getByRole("table", { name: "Periodic adjustments" })
+    .getByRole("row").filter({ hasText: "2026-01-01 — 2026-12-31" });
+  await live.getByText("Particulars and links").click();
+  await expect(live).toContainText(PA.documentId);
 });
 
 // ---------------------------------------------------------------------------------------------
@@ -350,6 +391,9 @@ test("t643 the history names the exact fields, the sources and the Work/JE/recei
   await expect(live.getByRole("link", { name: PA.entryId })).toHaveAttribute("href", new RegExp(`entry=${PA.entryId}$`));
   await expect(live.getByRole("link", { name: PA.seededWorkId })).toHaveAttribute("href", new RegExp(`/work/${PA.seededWorkId}$`));
   await expect(live).toContainText(PA.receiptId);
+  // THE SOURCE, disclosed after the fact: the document this adjustment was recorded from, which is
+  // #643's upload/reference entrance seen from the other end.
+  await expect(live).toContainText(PA.documentId);
   await expect(live).toContainText("STOCKTAKE-2026-12");
   await expect(live).toContainText("opening_cents");
 
