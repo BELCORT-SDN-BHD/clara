@@ -67,10 +67,21 @@
 --
 -- THE field_path GRAMMAR IS CENSUSED, NOT INVENTED (C33.4). The in-repo producers emit numeric
 -- segments (`pages.1.lines.0`, `rows.0`, `paragraphs.0`) and MIXED-CASE spreadsheet cell refs
--- (`sheets.0.A1` -- structured-worker.mjs interpolates the XLSX `r=` attribute verbatim), so a
--- lowercase-only grammar would have refused the hot OCR and XLSX ingest paths on the first real
--- upload. The accepted shape is stated in clara._assert_field_path's own comment, and the tail
--- probe below runs every censused producer path through it.
+-- (`sheets.0.A1`), so a lowercase-only grammar would have refused the hot OCR and XLSX ingest
+-- paths on the first real upload. The accepted shape is stated in clara._assert_field_path's own
+-- comment, and the tail probe below runs every censused producer path through it.
+--
+-- THE XLSX PRODUCER MEETS THIS GRAMMAR HALFWAY, and it had to. The `r=` attribute of an XLSX
+-- `<c>` element is whatever the workbook says it is -- `A1:B1` on a merged range, `$A$1` from a
+-- hand edit, an entity-escaped or wholly junk value -- and NONE of those is a legal field_path.
+-- Interpolating it verbatim (which is what structured-worker.mjs did before this cohort) would
+-- have made the validator below refuse the whole persist with CLR10, roll the transaction back
+-- and leave the task `running`, so the lane would retry the same workbook until its attempt cap
+-- burned. packages/runtime/lib/structured-worker.mjs therefore CLAMPS `r=` to an A1 reference
+-- (`^[A-Za-z]{1,3}[0-9]{1,7}$`) at the point the path is born, and falls back to `cell_<ordinal>`
+-- -- a shape an A1 reference can never take, so the fallback cannot collide with a declared ref
+-- in the same sheet. The raw attribute is kept in the region's locator, so nothing is lost.
+-- Pinned by packages/runtime/tests/structured-worker-cell-ref.test.mjs.
 --
 -- RISK, STATED. Section S6 replaces the LIVE body of clara.persist_document_extraction, which
 -- sits on the hot ingest path. It uses the 0177 ceremony: a pre-image sha256 pin, a
@@ -483,22 +494,30 @@ grant execute on function clara._document_capability(text,text) to clara_authent
 --
 -- MIXED CASE AND BARE INTEGERS ARE ADMITTED DELIBERATELY, and this is the census talking rather
 -- than a taste: packages/runtime/lib/egress.mjs emits `pages.1.lines.0` and `tables.0.cells.3`
--- on the hot OCR path, and packages/runtime/lib/structured-worker.mjs emits `sheets.0.A1` --
--- the XLSX `r=` attribute interpolated verbatim, so uppercase column letters are ordinary. A
--- lowercase-only grammar would have refused both lanes on the first real upload. What the
--- grammar DOES refuse is everything that is not a path at all: empty segments, whitespace,
--- statement terminators, traversal shapes, markup, an unbounded length, and -- the term that
--- carries the most weight -- a first segment no producer in this estate owns.
+-- on the hot OCR path, and packages/runtime/lib/structured-worker.mjs emits `sheets.0.A1` -- an
+-- A1 cell reference, so uppercase column letters are ordinary. A lowercase-only grammar would
+-- have refused both lanes on the first real upload. What the grammar DOES refuse is everything
+-- that is not a path at all: empty segments, whitespace, statement terminators, traversal shapes,
+-- markup, an unbounded length, and -- the term that carries the most weight -- a first segment no
+-- producer in this estate owns.
 --
--- THE NAMESPACE ROSTER IS CENSUSED, not speculative. Ten namespaces, each with a named producer:
+-- THE NAMESPACE ROSTER IS CENSUSED, not speculative. Ten namespaces, nine with a named PRODUCER
+-- and one (`statement`) with a named READER, which is said plainly rather than blurred:
 --   pages, tables        -- egress.mjs normalizeAzureLayout (the `ocr` lane)
 --   rows, sheets, paragraphs -- structured-worker.mjs parseCsv / parseXlsx / parseDocx
 --   myinvois             -- myinvois.mjs parseUblIdentity
 --   opening_tb           -- opening-tb-cells.mjs
 --   prior_gl             -- seeding-parse.mjs's prior-GL regions
---   invoice              -- persist_invoice_facts' closed seven, persist_witness_facts' belt +
---                           optional arrays, and myinvois.mjs mapFactsFields
---   statement            -- the statement vocabulary the web extract surface labels
+--   invoice              -- persist_invoice_facts' closed seven (widened by 0022/0052 to the
+--                           twenty-one it holds today), persist_witness_facts' belt + optional
+--                           arrays, and myinvois.mjs mapFactsFields
+--   statement            -- NO in-repo writer emits a `statement.*` region today: the typed
+--                           statement facts live in clara.bank_statements / _lines, not in
+--                           clara.document_regions. It is admitted because it is the vocabulary
+--                           apps/web/lib/documents/extract-shape.ts tiers and labels, and the
+--                           statement reader is the next producer in line. That is a deliberate
+--                           one-namespace exception to "no namespace without a producer", and
+--                           naming it here is cheaper than a reader discovering it later.
 -- A namespace with no producer was NOT added: widening the accepted surface for nothing is how
 -- a validator stops being one. A future producer's namespace is a one-line append-only change,
 -- and the migration's prestate refuses a cutover while any stored path is outside the roster.
@@ -604,6 +623,16 @@ begin
     from pg_proc p
    where p.oid = 'clara.persist_document_extraction(uuid,text,integer,jsonb,jsonb,text,text,text)'::regprocedure;
 
+  -- THE POST-IMAGE SHA, PINNED. The substring probes below say the splice did the right things;
+  -- only a whole-body hash says it did NOTHING ELSE, and it is what lets the NEXT recut of this
+  -- function pin its own pre-image against a value someone measured rather than one it discovers
+  -- (0177:107-111 set that precedent for exactly this function family, and the first cut of this
+  -- file dropped it). Measured on a PG17 rig whose pre-image was the pinned 0123 body.
+  if encode(sha256(convert_to(v_src, 'UTF8')), 'hex') <>
+      '0230031fe7d3f18332310fc19f39936b1408cb89ba597f77ce576017fea35905' then
+    raise exception 'dcr splice poststate: body sha256 is % -- the splice produced a body nobody measured; do not trust the substring probes below it',
+      encode(sha256(convert_to(v_src, 'UTF8')), 'hex') using errcode = 'CLR10';
+  end if;
   if position($needle$perform clara._assert_field_path(elem->>'field_path');$needle$ in v_src) = 0 then
     raise exception 'dcr splice poststate: the field_path assertion is absent' using errcode = 'CLR10';
   end if;
@@ -645,17 +674,42 @@ end $dcr_splice_post$;
 -- have had to change (clara.persist_witness_facts, clara.persist_statement_facts*) are large,
 -- audited, frozen-adjacent bodies on the egress path; three splices to record a derived fact
 -- would be three chances to break a persist that works. Instead the validation is computed by
--- two DEFERRABLE CONSTRAINT TRIGGERS that fire AT COMMIT, by which time the facts rows AND their
+-- DEFERRABLE CONSTRAINT TRIGGERS that fire AT COMMIT, by which time the facts rows AND their
 -- regions are all present in the same transaction the persist ran in. One object per family,
 -- every writer covered, and not one line of a live persist body touched.
 --
 -- APPEND-ONLY. A validation is a measurement taken at a moment; it is never updated or deleted.
 -- The unique key is (extraction_id, check_name) for the invoice family and
 -- (statement_id, check_name) for the statement family, so a replayed persist cannot double-write.
+-- No application role holds INSERT, UPDATE or DELETE on this table at all: the only writers are
+-- the definer trigger bodies below. There is no trigger forbidding an OWNER-level UPDATE, which
+-- is stated here rather than implied by the word "append-only".
+--
+-- THE WRITE-PATH INVARIANT THIS RESTS ON, STATED because the triggers alone do not imply it:
+-- VALIDATION IS COMPUTED AT COMMIT FROM THE HEADER INSERT. A lone later insert into the CHILD
+-- table -- clara.document_regions, or clara.bank_statement_lines -- against a header committed in
+-- an EARLIER transaction is NOT a supported writer path. Every in-repo writer
+-- (clara.persist_document_extraction, clara.persist_invoice_facts, clara.persist_witness_facts,
+-- clara.persist_statement_facts*) inserts the header AND its children inside ONE transaction, so
+-- the deferred triggers always see a complete child set.
+--
+-- BOTH SIDES ENFORCE IT, and neither is left to the invariant's good name (the 0038:2300-2305
+-- lesson: a belt that fires only on the parent is structurally blind to the child):
+--   * STATEMENTS -- already enforced, and not by this file. 0038's own `_tf_bank_statement_belt`
+--     is attached to clara.bank_statement_lines as well as to clara.bank_statements, and it
+--     re-derives line_count congruence, so a lone later line is refused CLR10. Measured on the
+--     PG17 rig (2026-09-14): a chain-NEUTRAL pair of later lines -- which would have slipped past
+--     a chain-only check while still moving the printed-totals sums -- was refused with
+--     "statement % declares % line(s) but carries %" (0038's own wording). Nothing is owed here;
+--     packages/db/tests/document-fact-validation-belt.test.mjs cell 4 records it.
+--   * REGIONS -- NOT previously enforced, measured, and closed by S7a-bis below. A lone later
+--     region was ACCEPTED and left the recorded verdict describing regions that no longer
+--     matched, because `_tf_append_only` on clara.document_regions is UPDATE/DELETE-only.
 --
 -- BLOCKING IS NOT THIS TABLE'S JOB. A `fail` row does not stop the facts from being readable and
 -- does not by itself stop anything: clara._invoice_fact_state's own verdict already governs what
--- dependent work may proceed. This table makes the reason VISIBLE.
+-- dependent work may proceed. This table makes the reason VISIBLE. (The region-side belt's
+-- refusal is a different thing entirely: it refuses a WRITE nobody supports, never a fact.)
 -- =====================================================================================
 set role clara_fn_owner;
 
@@ -693,9 +747,17 @@ alter table clara.document_fact_validations force row level security;
 
 create policy p_document_fact_validations_owner on clara.document_fact_validations
   for all to clara_fn_owner using (true) with check (true);
-create policy p_document_fact_validations_read on clara.document_fact_validations
-  for select to clara_authenticated, clara_agent_ro
-  using (firm_id = clara.actor_firm_id());
+-- TWO POLICIES, ONE PER LANE -- the shape every sibling document table already uses
+-- (0007:788-791 for clara.document_extractions and clara.document_regions). The first cut used a
+-- single policy over `clara.actor_firm_id()`, which is `coalesce(wake_firm(), jwt_firm())`, and
+-- 0002:440-443's own comment says that resolver is never to carry an authorization decision: it
+-- answers whichever lane happens to be present, so a human session that also carried a wake GUC
+-- would be scoped by the AGENT's firm. Splitting the lanes makes each policy answer exactly one
+-- question, and makes this table's RLS read the same as the rows it describes.
+create policy p_document_fact_validations_human on clara.document_fact_validations
+  for select to clara_authenticated using (firm_id = clara.jwt_firm());
+create policy p_document_fact_validations_agent on clara.document_fact_validations
+  for select to clara_agent_ro using (firm_id = clara.wake_firm());
 
 reset role;
 
@@ -716,17 +778,41 @@ grant select on clara.document_fact_validations to clara_authenticated, clara_ag
 -- ------------------------------------------------------------------------------------
 set role clara_fn_owner;
 
-create function clara._tf_document_fact_validate() returns trigger
-  language plpgsql security definer set search_path = clara, pg_temp as $fn$
+-- ONE READER, TWO TRIGGERS. The identity is derived HERE and nowhere else, so the header-side
+-- writer and the region-side belt below cannot drift into two arithmetics that disagree about
+-- the same extraction -- which is the failure mode a second transcribed copy would eventually
+-- produce, and the one 0038's "two triggers, ONE body" note exists to prevent.
+--
+-- IT RE-QUERIES BY ID and never reads a NEW tuple (the 0009:524-529 idiom, as 0037 and 0038
+-- apply it). At deferred time a NEW tuple is a snapshot of the row as it was when the trigger
+-- was QUEUED; a later statement in the same transaction may have changed it, and a body that
+-- trusted the snapshot would certify a row that no longer exists in that shape.
+create function clara._invoice_identity_verdict(p_extraction uuid)
+  returns table (outcome text, residual_cents bigint, detail jsonb)
+  language plpgsql stable security definer set search_path = clara, pg_temp as $fn$
 declare
   v_total bigint; v_net bigint; v_tax bigint;
   v_sc bigint; v_disc bigint; v_dlv bigint; v_round bigint;
-  v_outcome text; v_residual bigint;
+  v_total_c int; v_net_c int; v_tax_c int;
+  v_sc_c int; v_disc_c int; v_dlv_c int; v_round_c int;
+  v_outcome text; v_residual bigint; v_reason text; v_counts jsonb;
 begin
-  if new.status <> 'done' or new.engine_kind not in ('invoice_facts','llm_text_facts') then
-    return null;
-  end if;
+  -- CARDINALITY IS READ ALONGSIDE THE VALUE, and that is not defensive noise -- it is what keeps
+  -- this record from contradicting the live authority. clara.evaluate_witness_fact_state_v1
+  -- (0092:444,456) requires EXACTLY ONE region for total / net / tax and AT MOST ONE for each
+  -- optional component, and REFUSES otherwise. A `max(...) filter (...)` alone silently picks the
+  -- larger of two differing `invoice.total` regions, so the first cut of this body could record
+  -- `pass` on an extraction the authority refuses. The asymmetry below is 0092's, mirrored rather
+  -- than reinvented: exactly-one for the three load-bearing terms, at-most-one for the four
+  -- optional ones.
   select
+    count(*) filter (where field_path = 'invoice.total'),
+    count(*) filter (where field_path = 'invoice.total_excl_tax'),
+    count(*) filter (where field_path = 'invoice.tax_total'),
+    count(*) filter (where field_path = 'invoice.service_charge'),
+    count(*) filter (where field_path = 'invoice.discount'),
+    count(*) filter (where field_path = 'invoice.delivery'),
+    count(*) filter (where field_path = 'invoice.rounding'),
     max(monetary_cents) filter (where field_path = 'invoice.total'),
     max(monetary_cents) filter (where field_path = 'invoice.total_excl_tax'),
     max(monetary_cents) filter (where field_path = 'invoice.tax_total'),
@@ -734,43 +820,187 @@ begin
     max(monetary_cents) filter (where field_path = 'invoice.discount'),
     max(monetary_cents) filter (where field_path = 'invoice.delivery'),
     max(monetary_cents) filter (where field_path = 'invoice.rounding')
-    into v_total, v_net, v_tax, v_sc, v_disc, v_dlv, v_round
-    from clara.document_regions where extraction_id = new.id;
+    into v_total_c, v_net_c, v_tax_c, v_sc_c, v_disc_c, v_dlv_c, v_round_c,
+         v_total, v_net, v_tax, v_sc, v_disc, v_dlv, v_round
+    from clara.document_regions where extraction_id = p_extraction;
 
-  if v_total is null then return null; end if;   -- nothing monetary landed: no claim to make
+  v_counts := jsonb_build_object(
+    'invoice.total', v_total_c, 'invoice.total_excl_tax', v_net_c, 'invoice.tax_total', v_tax_c,
+    'invoice.service_charge', v_sc_c, 'invoice.discount', v_disc_c,
+    'invoice.delivery', v_dlv_c, 'invoice.rounding', v_round_c);
 
-  if v_net is null or v_tax is null then
-    v_outcome := 'unmeasured';
-    v_residual := null;
+  -- A ROW IS ALWAYS WRITTEN, and that is the point of this branch order. The first cut returned
+  -- NOTHING when no `invoice.total` had landed, which left `get_document_state` publishing
+  -- `validations: []` -- indistinguishable from "not evaluated yet" on a surface whose whole job
+  -- is telling those apart. `unmeasured` with a NAMED reason is the honest answer: Clara looked,
+  -- and there was nothing it could measure.
+  if v_total_c = 0 then
+    v_outcome := 'unmeasured'; v_reason := 'no_total_persisted';
+  elsif v_total_c > 1 or v_net_c > 1 or v_tax_c > 1
+        or v_sc_c > 1 or v_disc_c > 1 or v_dlv_c > 1 or v_round_c > 1 then
+    -- Ordered BEFORE the missing-term arm deliberately: a duplicated term is the case where this
+    -- record could have disagreed with the authority, so it is the reason worth surfacing.
+    v_outcome := 'unmeasured'; v_reason := 'term_not_single';
+  elsif v_net_c = 0 or v_tax_c = 0 then
+    v_outcome := 'unmeasured'; v_reason := 'net_or_tax_not_persisted';
   else
     v_residual := (v_net + coalesce(v_sc,0) + coalesce(v_dlv,0) + v_tax + coalesce(v_round,0)
                    - coalesce(v_disc,0)) - v_total;
     v_outcome := case when v_residual = 0 then 'pass' else 'fail' end;
   end if;
 
-  insert into clara.document_fact_validations(firm_id, document_id, extraction_id, check_name,
-      outcome, engine_id, detail)
-  values (new.firm_id, new.document_id, new.id, 'invoice.six_term_identity', v_outcome, new.engine_id,
+  return query select v_outcome, v_residual,
     jsonb_strip_nulls(jsonb_build_object(
       'total_cents', v_total, 'total_excl_tax_cents', v_net, 'tax_total_cents', v_tax,
       'service_charge_cents', v_sc, 'discount_cents', v_disc, 'delivery_cents', v_dlv,
       'rounding_cents', v_round, 'residual_cents', v_residual,
       'identity', 'total_excl_tax + service_charge + delivery + tax_total + rounding - discount = total',
-      'note', case when v_outcome = 'unmeasured'
-                   then 'the net and tax terms were not persisted as cents by this regime, so the identity cannot be evaluated'
-              end)))
+      'reason', v_reason,
+      'term_count', case when v_reason is not null then v_counts end,
+      'note', case v_reason
+        when 'no_total_persisted' then 'this extraction persisted no invoice.total, so the identity has no left-hand side to check'
+        when 'term_not_single' then 'a term is persisted more than once; the live authority (clara.evaluate_witness_fact_state_v1) refuses this shape, so no verdict is recorded for it'
+        when 'net_or_tax_not_persisted' then 'the net and tax terms were not persisted as cents by this regime, so the identity cannot be evaluated'
+        end));
+end $fn$;
+revoke all on function clara._invoice_identity_verdict(uuid) from public;
+alter function clara._invoice_identity_verdict(uuid) owner to clara_fn_owner;
+comment on function clara._invoice_identity_verdict(uuid) is
+  'The invoice six-term identity over one extraction''s regions, derived ONCE: net + service_charge + delivery + tax + rounding - discount = total, in cents. Returns no row when nothing monetary landed. Read by BOTH validation triggers so the recorder and the belt cannot disagree about the same extraction (#624).';
+
+create function clara._tf_document_fact_validate() returns trigger
+  language plpgsql security definer set search_path = clara, pg_temp as $fn$
+declare v_v record; v_e record;
+begin
+  -- Re-read the extraction BY ID rather than trusting the queued snapshot (see the reader's
+  -- own note above): at deferred time `new` is what the row looked like when this trigger was
+  -- queued, and a later statement in the same transaction may have moved it.
+  select e.id, e.firm_id, e.document_id, e.engine_id, e.engine_kind, e.status
+    into v_e from clara.document_extractions e where e.id = new.id;
+  if not found or v_e.status <> 'done'
+     or v_e.engine_kind not in ('invoice_facts','llm_text_facts') then
+    return null;
+  end if;
+
+  -- The reader ALWAYS returns exactly one row for a done invoice-facts extraction (see its own
+  -- branch-order note): a row on file therefore means "Clara evaluated this", and its absence
+  -- means "not evaluated", which is the distinction get_document_state has to be able to draw.
+  select * into v_v from clara._invoice_identity_verdict(v_e.id);
+
+  insert into clara.document_fact_validations(firm_id, document_id, extraction_id, check_name,
+      outcome, engine_id, detail)
+  values (v_e.firm_id, v_e.document_id, v_e.id, 'invoice.six_term_identity',
+    v_v.outcome, v_e.engine_id, v_v.detail)
   on conflict do nothing;
   return null;
 end $fn$;
 revoke all on function clara._tf_document_fact_validate() from public;
 alter function clara._tf_document_fact_validate() owner to clara_fn_owner;
 comment on function clara._tf_document_fact_validate() is
-  'Deferred constraint-trigger body: records the invoice six-term identity for a done invoice_facts/llm_text_facts extraction at COMMIT, when its regions are all present. Writes pass/fail/unmeasured; never raises, never blocks (#624).';
+  'Deferred constraint-trigger body on clara.document_extractions: RECORDS the invoice six-term identity for a done invoice_facts/llm_text_facts extraction at COMMIT, when its regions are all present. Writes pass/fail/unmeasured; never raises, never blocks (#624).';
 
 create constraint trigger t_document_extractions_fact_validate
   after insert on clara.document_extractions
   deferrable initially deferred
   for each row execute function clara._tf_document_fact_validate();
+
+-- ------------------------------------------------------------------------------------
+-- S7a-bis -- THE REGION-SIDE BELT, and why it is a REFUSAL rather than a second recorder.
+--
+-- THE BLIND SPOT, measured rather than reasoned about (PG17 rig, 2026-09-14). A trigger that
+-- fires only on clara.document_extractions is STRUCTURALLY BLIND to a lone
+-- `insert into clara.document_regions` against an extraction committed in an EARLIER
+-- transaction: that write touches no extraction row, so it dodges the recorder entirely. Probed
+-- directly -- a lone later region carrying `invoice.discount = 5000` was ACCEPTED and the
+-- recorded verdict was NOT refreshed, so the row on file no longer described the regions on
+-- file. `_tf_append_only` on clara.document_regions does not catch it: that trigger is
+-- UPDATE/DELETE-only (tgtype 27), by design, because regions are inserted and never revised.
+--
+-- 0038:2300-2305 names this exact hazard for the statement/line pair and answers it by putting
+-- the SAME belt on the child table. This is that answer, applied here -- with one deliberate
+-- difference in what the child-side trigger DOES.
+--
+-- IT REFUSES; IT DOES NOT RE-RECORD, and the reason is the table's own contract. A validation is
+-- a measurement taken at a moment, append-only, one row per (extraction, check) -- so a
+-- child-side recorder would have to either UPDATE the row (destroying the append-only property
+-- the surfaces and the runtime battery both rely on) or silently lose its recomputation to the
+-- unique key's `on conflict do nothing`, which is the stale row again wearing a fix. Refusing is
+-- the honest third option: the recorded verdict cannot go stale because the write that would
+-- have staled it cannot commit.
+--
+-- IT IS QUEUED FOR SEVEN PATHS ONLY. The verdict is a function of the seven identity terms, so
+-- the trigger carries a `when` naming them -- see the trigger's own comment for why that is a
+-- cost argument on the hot ingest path rather than a narrowing of what is protected.
+--
+-- IT IS A NO-OP ON THE SUPPORTED PATH, and that is the whole design. Every in-repo writer --
+-- clara.persist_document_extraction, clara.persist_invoice_facts, clara.persist_witness_facts --
+-- inserts the extraction AND its regions inside ONE transaction, so both triggers are queued
+-- together and see the identical region set. Whichever fires first: if the belt runs before the
+-- recorder there is no row yet and it returns; if after, it re-derives through the same reader
+-- and agrees by construction. A region arriving in a LATER transaction is the one case that
+-- differs, and it is the case with no supported writer.
+--
+-- THE INVARIANT, STATED so a future reader does not have to re-derive it: validation is computed
+-- at COMMIT from the header insert; a lone later insert into clara.document_regions or
+-- clara.bank_statement_lines is NOT a supported writer path. The statement side already enforces
+-- that (0038's own belt on clara.bank_statement_lines re-derives line_count congruence and
+-- refuses a lone later line with CLR10 -- measured, and celled in
+-- packages/db/tests/document-fact-validation-belt.test.mjs). This trigger gives the region side
+-- the same property.
+-- ------------------------------------------------------------------------------------
+create function clara._tf_document_region_fact_validate() returns trigger
+  language plpgsql security definer set search_path = clara, pg_temp as $fn$
+declare v_recorded record; v_now record;
+begin
+  select v.outcome, v.detail
+    into v_recorded
+    from clara.document_fact_validations v
+   where v.extraction_id = new.extraction_id
+     and v.check_name = 'invoice.six_term_identity';
+  -- No recorded verdict yet: either this extraction owes none, or the recorder is queued behind
+  -- this trigger in the SAME commit and will write it. Either way there is nothing to protect.
+  if not found then return null; end if;
+
+  select * into v_now from clara._invoice_identity_verdict(new.extraction_id);
+
+  -- COMPARE THE WHOLE `detail`, not just the outcome. Two later regions can leave the outcome
+  -- alone while moving the terms under it (an added `invoice.discount` that happens to keep the
+  -- residual at zero; a duplicated term that flips the reason). jsonb equality is key-order
+  -- independent, so this is a value comparison rather than a text one.
+  if v_now.outcome is distinct from v_recorded.outcome
+     or v_now.detail is distinct from v_recorded.detail then
+    raise exception 'a lone later region insert would change extraction %''s recorded invoice identity (% -> %) -- the validation row is append-only and this is not a supported writer path',
+      new.extraction_id, v_recorded.outcome, v_now.outcome
+      using errcode = 'CLR10', detail = '{"reason":"fact_validation_would_go_stale"}';
+  end if;
+  return null;
+end $fn$;
+revoke all on function clara._tf_document_region_fact_validate() from public;
+alter function clara._tf_document_region_fact_validate() owner to clara_fn_owner;
+comment on function clara._tf_document_region_fact_validate() is
+  'Deferred constraint-trigger body on clara.document_regions: the region-side BELT. A region arriving in a LATER transaction than its extraction would silently stale the recorded invoice-identity verdict, so it is REFUSED (CLR10) rather than re-recorded -- the validation row is append-only. Queued only for the seven field_paths the verdict is a function of (the trigger''s own `when`), and inert on the supported path, where extraction and regions land in one transaction (0038:2300-2305''s blind-spot lesson, #624).';
+
+-- THE `when` CLAUSE IS LOAD-BEARING, and it is a cost argument rather than a correctness one.
+-- The verdict this belt protects is a function of SEVEN field_paths and nothing else (see
+-- clara._invoice_identity_verdict), so no other region can stale it. Without the clause the
+-- trigger would be queued for EVERY region row: packages/runtime/lib/structured-worker.mjs caps
+-- a spreadsheet at MAX_ITEMS = 50,000 cells, so one ordinary XLSX ingest would put fifty thousand
+-- entries on the deferred-trigger queue and run fifty thousand index probes at COMMIT, on the hot
+-- ingest path, to protect a verdict that pair can never have. PostgreSQL evaluates a CONSTRAINT
+-- trigger's `when` at the time of the row operation and simply does not queue the row when it is
+-- false (CREATE TRIGGER, "the evaluation of the WHEN condition is not deferred"), which is
+-- exactly the property needed here -- and `new.field_path` is fixed at insert, so immediate
+-- evaluation and deferred evaluation would agree anyway. Verified on the PG17 rig: a lone later
+-- `pages.1.lines.0` region is admitted, a lone later `invoice.discount` region is refused
+-- (packages/db/tests/document-fact-validation-belt.test.mjs).
+create constraint trigger t_document_regions_fact_validate
+  after insert on clara.document_regions
+  deferrable initially deferred
+  for each row
+  when (new.field_path in ('invoice.total','invoice.total_excl_tax','invoice.tax_total',
+                           'invoice.service_charge','invoice.discount','invoice.delivery',
+                           'invoice.rounding'))
+  execute function clara._tf_document_region_fact_validate();
 
 -- ------------------------------------------------------------------------------------
 -- S7b -- the statement chain and printed-totals checks, recorded.
@@ -800,9 +1030,14 @@ begin
 
   insert into clara.document_fact_validations(firm_id, document_id, statement_id, check_name,
       outcome, engine_id, detail)
+  -- NO `unmeasured` ARM HERE, and its absence is measured rather than assumed: 0038:383-384
+  -- declares clara.bank_statements.opening_cents and closing_cents NOT NULL, so a statement that
+  -- reached this table always states both endpoints. A null-guard arm would have been dead code
+  -- wearing the appearance of care -- and worse, it would have implied a reachable state the
+  -- surfaces would then have had to render. (The printed-totals check below DOES keep its
+  -- non-applicable arm: those two columns are genuinely nullable, which is the OFX case.)
   values (new.firm_id, new.document_id, new.id, 'statement.chain_closes',
-    case when new.opening_cents is null or new.closing_cents is null then 'unmeasured'
-         when new.opening_cents + v_sum = new.closing_cents then 'pass' else 'fail' end,
+    case when new.opening_cents + v_sum = new.closing_cents then 'pass' else 'fail' end,
     v_engine,
     jsonb_strip_nulls(jsonb_build_object(
       'opening_cents', new.opening_cents, 'closing_cents', new.closing_cents,
@@ -995,8 +1230,8 @@ do $dcr_tail$
 declare
   v_kinds text[]; v_rows int; v_formats int; v_expected int;
   v_missing text[]; v_extra text[];
-  v_pol int; v_forced boolean; v_enabled boolean;
-  v_path text; v_bad text[]; v_survivors text[];
+  v_pol int; v_forced boolean; v_enabled boolean; v_role text; v_priv text;
+  v_path text; v_bad text[]; v_survivors text[]; v_census int := 0; v_refused int := 0;
   v_cap jsonb;
   v_probe record;
 begin
@@ -1081,7 +1316,7 @@ begin
   v_survivors := array[]::text[];
   foreach v_path in array array[
       'pages.1.lines.0','pages.17.lines.412','tables.0.cells.3','tables.12.cells.980',
-      'rows.0','rows.19999','sheets.0.A1','sheets.11.AA128','sheets.0.C1','paragraphs.0',
+      'rows.0','rows.19999','sheets.0.A1','sheets.11.AA128','sheets.0.cell_1','paragraphs.0',
       'myinvois.supplier_tin','myinvois.supplier_brn','myinvois.buyer_id_primary',
       'myinvois.buyer_id_secondary','opening_tb.line','prior_gl.line',
       'invoice.total','invoice.amount_due','invoice.currency','invoice.vendor_name',
@@ -1089,8 +1324,9 @@ begin
       'invoice.tax_total','invoice.rounding','invoice.service_charge','invoice.discount',
       'invoice.delivery','invoice.type_code','invoice.customer_name',
       'invoice.customer_registration','invoice.customer_taxid','invoice.vendor_registration',
-      'invoice.tax_breakdown','invoice.myinvois_uuid','invoice.contact_person',
-      'invoice.grand_total','statement.closing_balance'] loop
+      'invoice.tax_breakdown','invoice.myinvois_uuid','invoice.myinvois_longid',
+      'invoice.contact_person','invoice.grand_total','statement.closing_balance'] loop
+    v_census := v_census + 1;
     begin
       perform clara._assert_field_path(v_path);
     exception when others then
@@ -1107,6 +1343,7 @@ begin
   foreach v_path in array array['invoice..total','Invoice.Total','.invoice.total','invoice.total.',
       'evil.total','invoice.tot al','pages.1.lines.0.<script>', repeat('a', 200),
       'invoice.' || repeat('a.', 20) || 'z'] loop
+    v_refused := v_refused + 1;
     begin
       perform clara._assert_field_path(v_path);
       v_bad := v_bad || v_path;
@@ -1119,7 +1356,21 @@ begin
   end if;
 
   -- (5) RLS AND GRANTS, read from the catalog and not from this file's own text.
-  for v_probe in select unnest(array['document_capabilities','document_fact_validations']) as t loop
+  --
+  -- THE EXPECTED POLICY COUNT DIFFERS BY TABLE, and the difference is the design rather than an
+  -- inconsistency. clara.document_capabilities is a GLOBAL vocabulary with no tenant column: its
+  -- read predicate is `true`, so ONE policy serves both lanes honestly and a split would be
+  -- theatre. clara.document_fact_validations is firm-scoped, so it takes the estate's per-lane
+  -- shape (0007:788-791) -- jwt_firm() for the human lane, wake_firm() for the agent lane -- and
+  -- carries THREE.
+  --
+  -- THE WRITE SWEEP IS SYMMETRIC ACROSS ALL THREE APPLICATION ROLES. The first cut checked
+  -- INSERT/UPDATE/DELETE for clara_authenticated but only INSERT for clara_agent_ro and nothing
+  -- at all for clara_runtime -- so a stray UPDATE grant to the lane that PRODUCES the facts would
+  -- have passed the very sweep written to catch it. Driven off arrays now, so a fourth role or a
+  -- fourth privilege is one word rather than a new conjunct nobody remembers to add.
+  for v_probe in select * from (values
+      ('document_capabilities', 2), ('document_fact_validations', 3)) as t(t, want_pol) loop
     select c.relrowsecurity, c.relforcerowsecurity into v_enabled, v_forced
       from pg_class c join pg_namespace n on n.oid = c.relnamespace
      where n.nspname = 'clara' and c.relname = v_probe.t;
@@ -1128,30 +1379,48 @@ begin
         using errcode = 'CLR10';
     end if;
     select count(*)::int into v_pol from pg_policies where schemaname = 'clara' and tablename = v_probe.t;
-    if v_pol <> 2 then
-      raise exception 'dcr tail: clara.% carries % policies, expected 2 (owner ALL + application SELECT)', v_probe.t, v_pol
+    if v_pol <> v_probe.want_pol then
+      raise exception 'dcr tail: clara.% carries % policies, expected %', v_probe.t, v_pol, v_probe.want_pol
         using errcode = 'CLR10';
     end if;
-    if pg_catalog.has_table_privilege('clara_authenticated', 'clara.' || v_probe.t, 'INSERT')
-       or pg_catalog.has_table_privilege('clara_authenticated', 'clara.' || v_probe.t, 'UPDATE')
-       or pg_catalog.has_table_privilege('clara_authenticated', 'clara.' || v_probe.t, 'DELETE')
-       or pg_catalog.has_table_privilege('clara_agent_ro', 'clara.' || v_probe.t, 'INSERT') then
-      raise exception 'dcr tail: an application role holds a WRITE privilege on clara.%', v_probe.t using errcode = 'CLR10';
-    end if;
+    foreach v_role in array array['clara_authenticated','clara_agent_ro','clara_runtime'] loop
+      foreach v_priv in array array['INSERT','UPDATE','DELETE','TRUNCATE'] loop
+        if pg_catalog.has_table_privilege(v_role, 'clara.' || v_probe.t, v_priv) then
+          raise exception 'dcr tail: % holds % on clara.% -- every write to these tables goes through a definer trigger body, never a role', v_role, v_priv, v_probe.t
+            using errcode = 'CLR10';
+        end if;
+      end loop;
+    end loop;
     if not pg_catalog.has_table_privilege('clara_authenticated', 'clara.' || v_probe.t, 'SELECT')
        or not pg_catalog.has_table_privilege('clara_agent_ro', 'clara.' || v_probe.t, 'SELECT') then
       raise exception 'dcr tail: an application read lane cannot SELECT clara.%', v_probe.t using errcode = 'CLR10';
     end if;
   end loop;
 
-  -- (6) THE TWO CONSTRAINT TRIGGERS EXIST AND ARE DEFERRED. A trigger that fired immediately
+  -- (6) THE THREE CONSTRAINT TRIGGERS EXIST AND ARE DEFERRED. A trigger that fired immediately
   -- would read an extraction whose regions have not landed yet and record `unmeasured` for every
-  -- invoice in the estate -- a silently wrong answer, which is the worst kind.
-  if not exists (select 1 from pg_trigger where tgname = 't_document_extractions_fact_validate'
-                   and tgrelid = 'clara.document_extractions'::regclass and tgdeferrable and tginitdeferred)
-     or not exists (select 1 from pg_trigger where tgname = 't_bank_statements_fact_validate'
-                   and tgrelid = 'clara.bank_statements'::regclass and tgdeferrable and tginitdeferred) then
-    raise exception 'dcr tail: a fact-validation trigger is missing or is not DEFERRABLE INITIALLY DEFERRED'
+  -- invoice in the estate -- a silently wrong answer, which is the worst kind. The THIRD is the
+  -- region-side belt: parent-only would be structurally blind to a lone later child insert
+  -- (0038:2300-2305), which was measured as ACCEPTED before this file closed it.
+  for v_probe in select * from (values
+      ('t_document_extractions_fact_validate', 'clara.document_extractions'),
+      ('t_bank_statements_fact_validate',      'clara.bank_statements'),
+      ('t_document_regions_fact_validate',     'clara.document_regions')) as t(tg, rel) loop
+    if not exists (select 1 from pg_trigger
+                    where tgname = v_probe.tg and tgrelid = v_probe.rel::regclass
+                      and tgdeferrable and tginitdeferred) then
+      raise exception 'dcr tail: % on % is missing or is not DEFERRABLE INITIALLY DEFERRED', v_probe.tg, v_probe.rel
+        using errcode = 'CLR10';
+    end if;
+  end loop;
+  -- …and the statement side's own child-table belt, which this file RELIES ON rather than
+  -- duplicating: 0038 attached `_tf_bank_statement_belt` to clara.bank_statement_lines, and that
+  -- is what makes a lone later line impossible. If it ever leaves, the invariant this file's
+  -- header states stops being true on the statement side and nothing else here would notice.
+  if not exists (select 1 from pg_trigger g join pg_proc p on p.oid = g.tgfoid
+                  where g.tgrelid = 'clara.bank_statement_lines'::regclass
+                    and p.proname = '_tf_bank_statement_belt' and not g.tgisinternal) then
+    raise exception 'dcr tail: 0038''s statement belt is no longer attached to clara.bank_statement_lines -- the child-side invariant this file documents is unenforced'
       using errcode = 'CLR10';
   end if;
 
@@ -1165,6 +1434,6 @@ begin
     raise exception 'dcr tail: a new reader is not executable by the lanes that must reach it' using errcode = 'CLR10';
   end if;
 
-  raise notice 'dcr tail: OK -- clara.document_capabilities holds % rows, TOTAL over % derived kinds x % canonical intake formats in BOTH directions, one mime/custody/byte-engine per format, one registry_version. ofx x bank_statement reads byte_extraction=stored_only and typed_facts<>supported (the measured OFX finding); csv x bank_statement reads supported; a skipped_kind pair never reads operation-supported; consent_evidence is unsupported everywhere. clara._assert_field_path accepts all 39 censused producer paths and NULL, refuses 9 malformed shapes, and is spliced into clara.persist_document_extraction ONCE with owner/ACL/DEFINER/search_path and every pre-existing gate carried verbatim. clara.document_fact_validations is append-only behind two DEFERRABLE INITIALLY DEFERRED constraint triggers, so no live persist body was recut. Both new tables are forced-RLS with exactly two policies and no application write grant. No table in workflow/graphile_worker/spike touched.',
-    v_rows, coalesce(array_length(v_kinds, 1), 0), v_formats;
+  raise notice 'dcr tail: OK -- clara.document_capabilities holds % rows, TOTAL over % derived kinds x % canonical intake formats in BOTH directions, one mime/custody/byte-engine per format, one registry_version. ofx x bank_statement reads byte_extraction=stored_only and typed_facts<>supported (the measured OFX finding); csv x bank_statement reads supported; a skipped_kind pair never reads operation-supported; consent_evidence is unsupported everywhere. clara._assert_field_path accepts all % censused producer paths and NULL, refuses % malformed shapes, and is spliced into clara.persist_document_extraction ONCE with owner/ACL/DEFINER/search_path and every pre-existing gate carried verbatim. clara.document_fact_validations is append-only behind THREE DEFERRABLE INITIALLY DEFERRED constraint triggers (two recorders on the header tables plus the region-side belt that refuses a lone later child insert), so no live persist body was recut; 0038''s own belt on clara.bank_statement_lines is asserted present because the statement half of that invariant rests on it. Both new tables are forced-RLS with exactly two policies and no application write grant. No table in workflow/graphile_worker/spike touched.',
+    v_rows, coalesce(array_length(v_kinds, 1), 0), v_formats, v_census, v_refused;
 end $dcr_tail$;
