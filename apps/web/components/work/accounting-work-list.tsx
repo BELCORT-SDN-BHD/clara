@@ -42,8 +42,9 @@
 //
 // NARROW WIDTHS KEEP THE MEANING. Below `md` the Client/Origin/Entered-by/Submitted columns are
 // withdrawn from the table and re-expressed in the row's own primary cell, so nothing is clipped
-// silently; the table itself sits in its own `overflow-x-auto` viewport so the PAGE never scrolls
-// horizontally at 320px. Status and the row's own link stay visible at every width.
+// silently; the table primitive's OWN focusable `overflow-x-auto` region (components/ui/table.tsx)
+// is what keeps the PAGE from scrolling horizontally at 320px. Status and the row's own link stay
+// visible at every width.
 
 import { useMemo } from "react";
 import Link from "next/link";
@@ -272,32 +273,36 @@ function WorkListTable({
         {list.refreshing ? t("refreshing") : t("rowCount", { count: list.rows.length })}
       </p>
 
-      {/* The table gets its OWN horizontal viewport so the PAGE never scrolls sideways at 320px
-          or at 200% zoom (appendix C §4's "own labelled horizontal viewport"). */}
-      <div className="overflow-x-auto">
-        <Table aria-label={t("tableLabel")}>
-          <TableHeader>
-            <TableRow>
-              <TableHead>{t("columnWork")}</TableHead>
-              {scope.kind === "firm" ? (
-                <TableHead className="hidden md:table-cell">{t("columnClient")}</TableHead>
-              ) : null}
-              <TableHead>{t("columnStatus")}</TableHead>
-              <TableHead className="hidden md:table-cell">{t("columnOrigin")}</TableHead>
-              <TableHead className="hidden lg:table-cell">{t("columnEnteredBy")}</TableHead>
-              <TableHead className="hidden md:table-cell">{t("columnSubmitted")}</TableHead>
-              <TableHead>
-                <span className="sr-only">{t("columnActions")}</span>
-              </TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {list.rows.map((row) => (
-              <WorkRow key={row.id} row={row} scope={scope} memberNames={memberNames} />
-            ))}
-          </TableBody>
-        </Table>
-      </div>
+      {/* NO EXTRA `overflow-x-auto` WRAPPER HERE, deliberately: `components/ui/table.tsx` already
+          renders one, and it is the one that carries `tabIndex={0}` + `role="region"` + the
+          `aria-label` this call passes (that file's own provenance note, and
+          `table-scroll-region.test.tsx`'s cells). A second scroll container around it would be a
+          scrollable region with NO tab stop of its own — axe `scrollable-region-focusable`,
+          SERIOUS — which is the exact defect the primitive was changed to fix. The table's own
+          labelled viewport is what keeps the PAGE from scrolling sideways at 320px and at 200%
+          zoom (appendix C §4). */}
+      <Table aria-label={t("tableLabel")}>
+        <TableHeader>
+          <TableRow>
+            <TableHead>{t("columnWork")}</TableHead>
+            {scope.kind === "firm" ? (
+              <TableHead className="hidden md:table-cell">{t("columnClient")}</TableHead>
+            ) : null}
+            <TableHead>{t("columnStatus")}</TableHead>
+            <TableHead className="hidden md:table-cell">{t("columnOrigin")}</TableHead>
+            <TableHead className="hidden lg:table-cell">{t("columnEnteredBy")}</TableHead>
+            <TableHead className="hidden md:table-cell">{t("columnSubmitted")}</TableHead>
+            <TableHead>
+              <span className="sr-only">{t("columnActions")}</span>
+            </TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {list.rows.map((row) => (
+            <WorkRow key={row.id} row={row} scope={scope} memberNames={memberNames} />
+          ))}
+        </TableBody>
+      </Table>
 
       <WorkListPager
         hasPrevious={state.cursor !== null}
@@ -413,7 +418,17 @@ function WorkRow({
 
 /** Previous/Next over the door's keyset. THERE IS NO PAGE NUMBER AND NO "of N", deliberately:
  *  a keyset pager knows whether there is a next page and nothing about how many there are, and
- *  appendix D row 42 is explicit — "Never infer a total from the current page". */
+ *  appendix D row 42 is explicit — "Never infer a total from the current page".
+ *
+ *  MEASURED LIMIT OF THE VENDORED PRIMITIVE, recorded rather than hidden: `PaginationLink`
+ *  (components/ui/pagination.tsx, shipped by the shadcn CLI for `base-nova`) renders its anchor
+ *  through Base UI's Button with `nativeButton={false}`, which stamps `role="button"` onto the
+ *  `<a href>`. So these controls navigate like links — the href is real, middle-click and
+ *  open-in-new-tab work, and `onClick`'s `preventDefault` only upgrades that to a client-side
+ *  push — while assistive tech announces them as buttons. That name/role mismatch belongs to the
+ *  registry file, not to this composition, so it is reported as a follow-up rather than patched
+ *  into a primitive other tickets also install; `e2e/work-list-walk.spec.ts` asserts the role as
+ *  it actually is so the gap stays visible instead of being asserted away. */
 function WorkListPager({
   hasPrevious,
   nextCursor,

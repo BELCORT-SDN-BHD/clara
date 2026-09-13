@@ -1079,6 +1079,62 @@ function eqParam(url, name) {
 
 /** Returns true when it answered. Every branch is gated on THIS lane's client (or
  *  on an id this module minted) and falls through otherwise. */
+/**
+ * #641 — THIS LANE'S ANSWER to ONE `clara.list_accounting_work` call, as a PURE function of an
+ * already-parsed request body: `{status, body}` for this lane's own client, `null` otherwise.
+ *
+ * WHY THIS EXISTS AT ALL. `/clients/:id/work` used to read `clara.accounting_work` as a plain
+ * filtered GET (this module's own `/rest/v1/accounting_work` handler below still serves the DETAIL
+ * page, which reads it that way). #641 moved the LIST onto a door, so the three cells in
+ * `journal-work-walk.spec.ts` that count this lane's Work rows on that page now go through
+ * `list_accounting_work` — and without this, they would be answered by serve-built's honest generic
+ * empty and the walk would stop proving that an admitted Work reaches the list at all.
+ *
+ * IT PROJECTS `state.works`, which is the same live Map the walk's own admissions write to, so the
+ * count a cell asserts is still the count this lane actually minted. WHY A PURE FUNCTION rather
+ * than a handler: see `work-list-mock.mjs`'s `answerWorkListPage` — two lanes own Work now, and
+ * `readJson` drains the stream once, so serve-built.mjs reads the body and offers it to each lane.
+ *
+ * THE FILTER AXES ARE NOT MODELLED HERE, deliberately: this lane's three cells read the UNFILTERED
+ * list, and #641's own lane owns the filter/paging/refusal cells against a fixture built for them.
+ * A second, thinner implementation of the door's semantics would be a second thing to keep true.
+ */
+export function journalWorkListPage(body) {
+  const client = body.p_client ?? null;
+  if (client !== JOURNAL_WORK.clientId) return null;
+  const rows = [...state.works.values()]
+    .sort((a, b) => (a.created_at < b.created_at ? 1 : -1))
+    .map((w) => ({
+      id: w.id,
+      client_id: w.client_id,
+      client_name: JOURNAL_WORK.clientName,
+      purpose: w.purpose,
+      status: w.status,
+      initiator: w.initiator,
+      initiated_by: w.initiated_by,
+      initiator_role: w.initiator_role,
+      basis_origin: w.basis_origin,
+      memo: w.basis?.memo ?? null,
+      posting_date: w.basis?.posting_date ?? null,
+      currency: w.basis?.currency ?? null,
+      source_ref_count: Array.isArray(w.source_refs) ? w.source_refs.length : 0,
+      current_task_id: w.current_task_id,
+      entry_id: w.result?.entry_id ?? null,
+      receipt_id: w.result?.receipt_id ?? null,
+      error_code: w.error?.code ?? null,
+      error_reason: w.error?.reason ?? null,
+      // ONE run each: this lane admits and settles, it never retries through the list, so every
+      // row's canonical attempt count is 1 and no row may render as "Retrying".
+      attempts: 1,
+      current_run_status: w.status,
+      pending_question_id: null,
+      pending_question_version: null,
+      created_at: w.created_at,
+      updated_at: w.updated_at,
+    }));
+  return { status: 200, body: { rows, next_cursor: null, truncated: false } };
+}
+
 export async function handleJournalWorkSupabase(request, response, path, url, sendJson, cors) {
   const ours = JOURNAL_WORK.clientId;
 

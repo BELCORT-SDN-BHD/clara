@@ -31,6 +31,17 @@
 // EVERY LOADER READS THROUGH A REF (`filtersRef`, `loadRef`), the #746 class `use-work-detail.ts`
 // was hardened for: a state update must never re-arm a loader, and the LATEST-STARTED read's
 // answer is the only one ever committed (`epochRef`), regardless of which response returns first.
+//
+// C77.12 — THIS HOOK ADDS NO TIMER AT ALL, and that is the finding rather than an omission. The
+// estate's one duration contract for durable Work lives in `lib/work/use-work-detail.ts`
+// (`WORK_POLL_MS` = 3 s, `WORK_STALE_AFTER_MS` = 60 s) and belongs to the DETAIL page, which
+// watches ONE non-terminal Work and stops the moment it settles. A LIST has no such subject: most
+// of its rows are terminal, a three-second poll over a hundred of them would be a hundred times
+// the cost for a page nobody is watching a single row on, and a second interval constant here
+// would be exactly the duplicated duration C77.12 asks not to exist. The list re-reads on the two
+// events that actually mean something — the URL naming a different page or filter set, and the tab
+// regaining focus (which is also the live permission-loss check) — and the detail page keeps the
+// clock. Reviewed no-gap: one contract, one owner, extended by reference rather than copied.
 
 import { useCallback, useEffect, useRef, useState } from "react";
 

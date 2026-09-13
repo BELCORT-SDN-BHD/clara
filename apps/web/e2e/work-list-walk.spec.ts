@@ -45,8 +45,13 @@ test("the firm list renders the door's rows with their state WORD, client and or
   // a colour alone (C08.6).
   await expect(workTable(page).getByText("Retrying")).toBeVisible();
   await expect(workTable(page).getByText("period_locked")).toBeVisible();
-  // The client column resolves through the door, not through a second register read.
-  await expect(workTable(page).getByText(WORK_LIST.clientName).first()).toBeVisible();
+  // The client column resolves through the door, not through a second register read. Addressed as
+  // a CELL whose whole text is the name, not as any text node containing it: the row primary cell
+  // also carries the client name in the `md:hidden` stacked line that re-expresses the withdrawn
+  // columns at narrow widths, and that node is present-but-hidden here.
+  await expect(
+    workTable(page).getByRole("cell", { name: WORK_LIST.clientName, exact: true }).first(),
+  ).toBeVisible();
   // #629's finding: a Work started from a conversation is listed like any other, and says so.
   await expect(workTable(page).getByText("Asked of Clara").first()).toBeVisible();
 });
@@ -88,7 +93,13 @@ test("the two EMPTY states are different: no filter matches vs a client with no 
   // A client with no durable Work at all reads as FIRST USE — what will appear here, and no
   // control to clear filters that were never applied.
   await page.goto(`/clients/${WORK_LIST.emptyClient}/work`);
-  await expect(page.getByText("No work yet")).toBeVisible();
+  // A LONGER WINDOW THAN THE 5 s DEFAULT, and it buys nothing but patience: a cold client route
+  // mounts the shell, the client layout's own server read, the review queue, the Clara rail and
+  // this list at once, and on a loaded host the list's first read had not settled inside the
+  // default expect timeout (measured: the sr-only "Loading this firm's durable work…" was still
+  // the standing state at 5 s). Nothing about the ASSERTION is weakened — the first-use Empty is
+  // still what must appear, and a hang would still fail here.
+  await expect(page.getByText("No work yet")).toBeVisible({ timeout: 20_000 });
   await expect(page.getByText(/Every job Clara is asked to do/)).toBeVisible();
   await expect(page.getByText("No work matches these filters")).toHaveCount(0);
 });
@@ -109,7 +120,13 @@ test("pagination is a keyset: Next writes ?cursor=, Back returns to the first pa
 
   const pager = page.getByRole("navigation", { name: "Work list pages" });
   await expect(pager).toBeVisible();
-  await pager.getByRole("link", { name: "Next page" }).click();
+  // ROLE "button", NOT "link", and that is the vendored primitive being measured rather than a
+  // preference: shadcn base-nova's `PaginationLink` renders a real `<a href>` through Base UI's
+  // Button with `nativeButton={false}`, which stamps `role="button"` onto the anchor. So the
+  // control navigates like a link (the href is real, middle-click and open-in-new-tab work) while
+  // assistive tech announces it as a button. Asserted as it actually is; the mismatch is reported
+  // as a follow-up rather than patched into a primitive other lanes also install.
+  await pager.getByRole("button", { name: "Next page" }).click();
 
   await expect(page).toHaveURL(/[?&]cursor=/);
   await expect(rowLink(page, "Opening balances tie-out")).toBeVisible();

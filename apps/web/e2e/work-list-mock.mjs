@@ -187,45 +187,52 @@ const KNOWN_STATUSES = new Set([
   "completed", "refused", "failed", "cancelled", "expired",
 ]);
 
-export async function handleWorkListSupabase(request, response, path, url, sendJson, cors) {
-  if (request.method === "POST" && path === "/rest/v1/rpc/list_accounting_work") {
-    const body = await readJson(request);
-    const client = body.p_client ?? null;
+/**
+ * THIS LANE'S ANSWER to ONE `list_accounting_work` call, as a PURE function of an
+ * already-parsed request body: `{status, body}` when the call names a client this lane owns, and
+ * `null` when it does not.
+ *
+ * WHY NOT A HANDLER LIKE ITS SIBLINGS. Two lane mocks now own durable Work for their own clients —
+ * this one's fixture rows and `journal-work-mock.mjs`'s runtime-minted ones — and `readJson`'s
+ * `for await (const chunk of request)` drains the stream exactly once. Whichever lane read the body
+ * first would leave the other reading `{}`, whose undefined `p_client` satisfies a permissive match
+ * and answers the WRONG fixture with no error anywhere: the measured consume-then-fall-through
+ * hazard `serve-built.mjs` already records twice against `bank-close-registers-mock.mjs`. So
+ * serve-built.mjs reads the body ONCE and offers it to each lane's answerer in turn; neither lane
+ * touches the request itself.
+ */
+export function answerWorkListPage(body) {
+  const client = body.p_client ?? null;
 
-    if (client === WORK_LIST.deniedClient) {
-      const { status, body: refusal } = clr(400, "CLR04", "insufficient role", "e2e_work_list_denied");
-      sendJson(response, status, refusal, cors);
-      return true;
-    }
-    if (client === WORK_LIST.emptyClient) {
-      sendJson(response, 200, { rows: [], next_cursor: null, truncated: false }, cors);
-      return true;
-    }
-    // The firm-wide read (no client) and this lane's own client both answer from the same nine
-    // rows: `/work` lists every client's Work, and this lane owns the only fixture Work there is.
-    if (client !== null && client !== WORK_LIST.clientId) return false;
+  if (client === WORK_LIST.deniedClient) {
+    return clr(400, "CLR04", "insufficient role", "e2e_work_list_denied");
+  }
+  if (client === WORK_LIST.emptyClient) {
+    return { status: 200, body: { rows: [], next_cursor: null, truncated: false } };
+  }
+  // The firm-wide read (no client) and this lane's own client both answer from the same nine rows:
+  // `/work` lists every client's Work, and among the lanes that own any, this one owns the fixture
+  // roster. A call naming ANOTHER lane's client returns null and falls through to that lane.
+  if (client !== null && client !== WORK_LIST.clientId) return null;
 
-    if (Array.isArray(body.p_status)) {
-      const bad = body.p_status.find((s) => !KNOWN_STATUSES.has(s));
-      if (bad !== undefined) {
-        const { status, body: refusal } = clr(400, "CLR10", `unknown work status ${bad}`, "invalid_status");
-        sendJson(response, status, refusal, cors);
-        return true;
-      }
+  if (Array.isArray(body.p_status)) {
+    const bad = body.p_status.find((s) => !KNOWN_STATUSES.has(s));
+    if (bad !== undefined) {
+      return clr(400, "CLR10", `unknown work status ${bad}`, "invalid_status");
     }
-
-    const filtered = applyFilters(ROWS, body);
-    const start = body.p_cursor === PAGE_2_CURSOR ? PAGE_SIZE : 0;
-    const slice = filtered.slice(start, start + PAGE_SIZE);
-    const truncated = filtered.length > start + PAGE_SIZE;
-    sendJson(response, 200, {
-      rows: slice,
-      next_cursor: truncated ? PAGE_2_CURSOR : null,
-      truncated,
-    }, cors);
-    return true;
   }
 
+  const filtered = applyFilters(ROWS, body);
+  const start = body.p_cursor === PAGE_2_CURSOR ? PAGE_SIZE : 0;
+  const slice = filtered.slice(start, start + PAGE_SIZE);
+  const truncated = filtered.length > start + PAGE_SIZE;
+  return {
+    status: 200,
+    body: { rows: slice, next_cursor: truncated ? PAGE_2_CURSOR : null, truncated },
+  };
+}
+
+export async function handleWorkListSupabase(request, response, path, url, sendJson, cors) {
   if (request.method === "POST" && path === "/rest/v1/rpc/get_accounting_work_row") {
     const body = await readJson(request);
     const match = ROWS.find((r) => r.id === body.p_work);
@@ -236,5 +243,99 @@ export async function handleWorkListSupabase(request, response, path, url, sendJ
     return false;
   }
 
+  // ── the DETAIL page's own four relation reads ────────────────────────────────────────────
+  //
+  // The list links every row to `/clients/:id/work/:workId`, and that page reads
+  // `clara.accounting_work` DIRECTLY through PostgREST (`lib/work/reads.ts` — a plain filtered
+  // GET, not this ticket's door). Its loader runs four reads in one `Promise.all` and only TWO of
+  // them are wrapped in a `.catch`: an unanswered `operation_receipts` or `accounting_work` would
+  // reject the whole loader and render the page's read-failure banner instead of the Work. So the
+  // lane answers both, plus the two journal relations a completed Work's result id reaches for.
+  //
+  // EVERY ONE IS SCOPED TO THIS LANE'S OWN CLIENT and falls through otherwise, so
+  // `journal-work-mock.mjs` (which owns the same four routes for ITS ids) keeps answering its own
+  // walk unchanged.
+  if (request.method === "GET" && path === "/rest/v1/accounting_work") {
+    if (eq(url, "client_id") !== WORK_LIST.clientId) return false;
+    const id = eq(url, "id");
+    const rows = ROWS.filter((r) => id === null || r.id === id).map(detailRow);
+    sendJson(response, 200, rows, cors);
+    return true;
+  }
+
+  if (request.method === "GET" && path === "/rest/v1/operation_receipts") {
+    if (eq(url, "client_id") !== WORK_LIST.clientId) return false;
+    // Honestly empty: this lane models no committed receipt, and the detail page renders the
+    // absence of one as "no receipt yet" rather than as a failed read.
+    sendJson(response, 200, [], cors);
+    return true;
+  }
+
+  // TWO BRANCHES, NOT ONE `||` LINE, and that is about the GATE rather than about style:
+  // `e2e-fixture-ownership.test.ts`'s census reads ONE handler opener per source LINE, and
+  // cross-checks that count against a whole-source match — so two `path === "…"` tests sharing a
+  // line make the two instruments disagree and red the gate that watches every lane.
+  if (request.method === "GET" && path === "/rest/v1/journal_entries") {
+    if (eq(url, "client_id") !== WORK_LIST.clientId) return false;
+    sendJson(response, 200, [], cors);
+    return true;
+  }
+
+  if (request.method === "GET" && path === "/rest/v1/journal_lines") {
+    if (eq(url, "client_id") !== WORK_LIST.clientId) return false;
+    sendJson(response, 200, [], cors);
+    return true;
+  }
+
   return false;
+}
+
+/** `?client_id=eq.<value>` -> `<value>`, or null when the parameter is absent or not an `eq.`. */
+function eq(url, key) {
+  const raw = url.searchParams.get(key);
+  return raw !== null && raw.startsWith("eq.") ? raw.slice(3) : null;
+}
+
+/** The DETAIL page's row shape (`AccountingWorkRow`, `lib/work/types.ts`) built from this lane's
+ *  own list row — the two projections share a client, a status and a memo, and the columns only
+ *  the detail reads (`basis`, `basis_digest`, `intent_key`, `logical_op_id`, `bundle`, `result`,
+ *  `error`) are filled in here rather than duplicated into the list fixture above.
+ *
+ *  `result` IS LEFT NULL even for the completed rows, and that is deliberate rather than lazy:
+ *  this lane answers `journal_entries` with an honest empty, so a `result.entry_id` would name an
+ *  entry the fixture does not have and the page would render a posted section with nothing in it.
+ *  The posted-entry surface belongs to `journal-work-mock.mjs`'s own walk, which owns that half. */
+function detailRow(row) {
+  return {
+    id: row.id,
+    firm_id: "11111111-1111-4111-8111-111111111111",
+    client_id: row.client_id,
+    purpose: row.purpose,
+    status: row.status,
+    initiator: row.initiator,
+    initiated_by: row.initiated_by,
+    initiator_role: row.initiator_role,
+    intent_key: `intent-${row.id}`,
+    logical_op_id: `work:${row.id}:journal_entry:1`,
+    basis: {
+      posting_date: row.posting_date,
+      memo: row.memo,
+      currency: row.currency,
+      lines: [
+        { account_code: "6100", debit_cents: 120000, credit_cents: 0, description: "rent" },
+        { account_code: "1150", debit_cents: 0, credit_cents: 120000, description: "bank" },
+      ],
+    },
+    basis_digest: "a".repeat(64),
+    basis_origin: row.basis_origin,
+    source_refs: row.basis_origin === "clara_interpreted" ? [{ kind: "clara_chat" }] : [],
+    current_task_id: row.current_task_id,
+    bundle: null,
+    result: null,
+    error: row.error_code === null
+      ? null
+      : { code: row.error_code, reason: row.error_reason, message: "the period is locked", recoverable: false },
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+  };
 }
