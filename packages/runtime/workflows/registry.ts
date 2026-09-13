@@ -1,6 +1,9 @@
 // Workflow registry — names the NEWEST version of each workflow class.
 //
-// Appendix A policy (b): enqueue sites import from HERE so they always target
+// The versioning law lives in docs/ARCHITECTURE.md §10, anchor
+// #workflow-versioning-and-rollback (which also carries the supersession pointer for the
+// "ARCHITECTURE Appendix A" the frozen bodies cite and can never be edited to re-cite).
+// Policy (b): enqueue sites import from HERE so they always target
 // the newest version. When a behavioural change is needed, add
 // closeExample.v2.ts and repoint the entry below; keep the old export until
 // zero non-terminal runs reference it (never rename/delete an export with
@@ -723,5 +726,116 @@ export { autoDraft_v7 };
 export { autoDraft_v8 };
 export { autoDraft_v9 };
 export { autoDraft_v10 };
+// #637 — THE EIGHT PINNED-BUT-UNEXPORTED BODIES, exported now for the same reason every
+// superseded body above is: `workflowBodies` below is this image's answer to "which bodies can
+// this process actually run", and the rollback preflight, the boot line and `/api/build-info`
+// all read it. A body that is dispatched through `workflows` but carries no own export was
+// invisible to `scripts/check-workflow-bundle.mjs`'s resumability rule and could not be named
+// as an OWN export here — so a preflight would have read a perfectly runnable `bankAgent_v1`
+// run as stranded. These are the CURRENT pins of their classes, so nothing about the freeze
+// policy changes: they are already required to ship by the bundle gate's pin check, and this
+// only makes the roster uniform.
+export { closeExampleV1 };
+export { documentIngest_v2 };
+export { invoiceFacts_v1 };
+export { witnessFacts_v3 };
+export { firmInterview_v3 };
+export { clientOnboarding_v4 };
+export { bankAgent_v1 };
+export { closePrep_v1 };
 
 export const workflowNames: string[] = Object.keys(workflows);
+
+// #637 (C88.8 / C-70) — PROVENANCE, as data. `workflowNames` above answers "which CLASSES",
+// which was never the question a cutover or a rollback asks. These two answer the two that
+// matter, and they are read by three surfaces that must never disagree: the ONE boot line in
+// plugins/startWorld.ts, `/api/build-info`'s `bodies`/`pins`, and the rollback preflight
+// (packages/runtime/lib/rollback-preflight.mjs), whose whole job is to compare a target image's
+// carried bodies against the bodies live runs are parked on.
+//
+// THEY ARE STRINGS, DELIBERATELY, AND THAT IS THE WHOLE SAFETY ARGUMENT. A second export
+// carrying FUNCTION references would be a second dynamic-dispatch view of the registry, and the
+// enqueue-provenance law (scripts/freeze-lint-checks.mjs capability (e)) trusts ANY identifier
+// imported from this file by name alone — which is only sound because exactly one such view
+// (`workflowsByName`) exists and is provably `workflows` itself. Inert string data adds nothing
+// to that trust surface; freeze-lint's REGISTRY-VIEW-INTEGRITY check enforces the shape
+// structurally (`Object.freeze` over a literal of string literals, nothing else), and
+// scripts/check-frozen-workflows.selftest.mjs positive-controls both the good and the bad shape.
+//
+// THEY ARE HAND-WRITTEN, because a module cannot enumerate its own exports without
+// `import * as self`, which the closed-world census rejects on sight. The guard against drift is
+// tests/registry-view.test.mjs, which reads the REAL module namespace and fails if this roster
+// misses a body the file exports, if a pin is absent from the roster, or if a pin names a
+// different function from the one `workflows` dispatches. A successor version therefore needs
+// exactly two edits in this file and no edit anywhere else: its `export { x_vN }` line and its
+// entry here.
+export const workflowBodies: readonly string[] = Object.freeze([
+  "closeExampleV1",
+  "chatTurn_v1",
+  "chatTurn_v2",
+  "chatTurn_v3",
+  "chatTurn_v4",
+  "chatTurn_v5",
+  "chatTurn_v6",
+  "chatTurn_v7",
+  "chatTurn_v8",
+  "chatTurn_v9",
+  "chatTurn_v10",
+  "chatTurn_v11",
+  "chatTurn_v12",
+  "chatTurn_v13",
+  "chatTurn_v14",
+  "chatTurn_v15",
+  "chatTurn_v16",
+  "chatTurn_v17",
+  "chatTurn_v18",
+  "claraWork_v1",
+  "claraWork_v2",
+  "documentIngest_v1",
+  "documentIngest_v2",
+  "invoiceFacts_v1",
+  "statementFacts_v1",
+  "statementFacts_v2",
+  "statementFacts_v3",
+  "witnessFacts_v1",
+  "witnessFacts_v2",
+  "witnessFacts_v3",
+  "autoDraft_v1",
+  "autoDraft_v2",
+  "autoDraft_v3",
+  "autoDraft_v4",
+  "autoDraft_v5",
+  "autoDraft_v6",
+  "autoDraft_v7",
+  "autoDraft_v8",
+  "autoDraft_v9",
+  "autoDraft_v10",
+  "firmInterview_v1",
+  "firmInterview_v2",
+  "firmInterview_v3",
+  "clientOnboarding_v1",
+  "clientOnboarding_v2",
+  "clientOnboarding_v3",
+  "clientOnboarding_v4",
+  "bankAgent_v1",
+  "closePrep_v1",
+]);
+
+/** Which body each class DISPATCHES to, as the identifier name — the `workflows` object above
+ *  read as provenance rather than as a call table. A parked run whose body is not this class's
+ *  pin is a run on a RETAINED body: legal, expected at a cutover, and exactly what a rollback
+ *  preflight has to enumerate. */
+export const workflowPins: Readonly<Record<string, string>> = Object.freeze({
+  closeExample: "closeExampleV1",
+  chatTurn: "chatTurn_v18",
+  claraWork: "claraWork_v2",
+  documentIngest: "documentIngest_v2",
+  invoiceFacts: "invoiceFacts_v1",
+  statementFacts: "statementFacts_v3",
+  witnessFacts: "witnessFacts_v3",
+  autoDraft: "autoDraft_v10",
+  firmInterview: "firmInterview_v3",
+  clientOnboarding: "clientOnboarding_v4",
+  bankAgent: "bankAgent_v1",
+  closePrep: "closePrep_v1",
+});

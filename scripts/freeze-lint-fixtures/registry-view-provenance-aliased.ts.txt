@@ -1,0 +1,17 @@
+// Fixture: #637 — `workflowBodies` smuggled in as an ALIASED RE-EXPORT of a locally declared
+// array rather than as an `export const` the shape rule can inspect. The provenance checker only
+// recognizes `export const workflowBodies = ...`; any other export shape carrying that name must
+// be REJECTED rather than silently ignored (the same fail-closed posture `workflowsByName`
+// already takes against `export { x as workflowsByName }`).
+// (.ts.txt so the repo's eslint/tsc sweeps never parse fixture code — DATA.)
+import { closeExampleV1 } from "./closeExample.v1.js";
+
+export const workflows = {
+  closeExample: closeExampleV1,
+} as const;
+
+export const workflowsByName: Readonly<Record<string, (input: any) => Promise<unknown>>> = Object.freeze(workflows);
+
+const roster = ["closeExampleV1"];
+
+export { roster as workflowBodies };
