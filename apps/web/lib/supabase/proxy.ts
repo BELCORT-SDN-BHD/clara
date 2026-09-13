@@ -217,11 +217,31 @@ export async function updateSession(request: NextRequest) {
   if (isUnauthenticated) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
-    // Drop the original query string wholesale before writing `next` — an
-    // attacker-supplied param on the blocked URL has no business riding into
-    // the login page's own query string.
+    // Drop the ORIGINAL query string wholesale before writing this page's own
+    // `?next=` — an attacker-supplied param on the blocked URL has no
+    // business riding unescaped into the login page's own query string. The
+    // blocked destination's pathname AND search travel instead, as ONE
+    // value, inside `next` (#698): `next` used to carry the bare pathname,
+    // so a signed-out saved-view link (`/work?view=needs-you`) or a register
+    // tab (`?tab=…`) landed on the destination's bare route after sign-in,
+    // silently dropping the view/tab the link promised. `request.nextUrl.hash`
+    // is deliberately never read here — a browser never sends the fragment to
+    // the server in the first place, so there is nothing to forward and
+    // nothing to strip. `lib/safe-redirect.ts`'s `resolveSameOriginPath` is
+    // the READ side of this value (login-form.tsx) and already accepted
+    // `pathname + search + hash`; this was the one WRITE side that fell short
+    // of what that wall could already parse.
+    //
+    // `url.search = ""` FIRST is load-bearing, not tidying: `url` was cloned
+    // from `request.nextUrl` above and so still carries the BLOCKED
+    // destination's own query string (e.g. `?view=needs-you`) until this
+    // line clears it. Without it, `searchParams.set("next", …)` below would
+    // APPEND `next` onto that surviving query string instead of replacing
+    // it, and the blocked URL's own params would ride straight into
+    // `/login`'s query string unescaped — exactly the leak the comment above
+    // describes refusing.
     url.search = "";
-    url.searchParams.set("next", request.nextUrl.pathname);
+    url.searchParams.set("next", `${request.nextUrl.pathname}${request.nextUrl.search}`);
     response = NextResponse.redirect(url);
   } else {
     // IMPORTANT: this response must be built from the (cookie-mutated)
