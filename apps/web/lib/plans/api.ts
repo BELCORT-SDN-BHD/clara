@@ -115,6 +115,11 @@ export type PlanDetail = {
    *  revision may start earlier, so no catch-up window can reach past it. Distinct from the live
    *  revision's `effective_from`, which a revision may move FORWARD. */
   authority_from: string;
+  /** THE LAST DAY THIS PLAN HAS ALREADY RUN THROUGH — the end of the newest period whose Work
+   *  still stands (0193's `clara._plan_covered_through`). Null when nothing has run. The revise
+   *  form mirrors `period_already_covered` against it: a FREQUENCY change re-aligns every period
+   *  key, so one starting inside an already-run period would post that period a second time. */
+  covered_through: string | null;
   created_by: string;
   created_at: string;
   paused_at: string | null;
@@ -175,6 +180,21 @@ export type PlanOccurrenceRow = {
   work_error: { reason?: string; message?: string } | null;
   receipt_id: string | null;
   entry_id: string | null;
+  /** THE ENTRY A REVERSAL LEG UNDOES. An admitted reversal always names one — 0193 admits a
+   *  reversal only against an accrual that has POSTED — and an accrual leg never does. */
+  reverses_entry_id: string | null;
+  /** EVERY ADMISSION THIS DUE EVENT TOOK, oldest first. `work_id` is the current one; a re-attempt
+   *  over a cancelled or failed Work keeps its predecessor here rather than dropping it out of the
+   *  plan's view. */
+  attempts: readonly PlanOccurrenceAttempt[];
+};
+
+export type PlanOccurrenceAttempt = {
+  attempt: number;
+  work_id: string;
+  intent_key: string;
+  revision: number;
+  admitted_at: string;
 };
 
 export type PlanOverlapWarning = {
@@ -224,6 +244,13 @@ export type WorkPlanOrigin = {
   due_date: string;
   authorised_by: string;
   authority_kind: string;
+  /** The occurrence's CURRENT Work. Equal to the Work asked about unless that one was superseded
+   *  by a re-attempt. */
+  work_id: string | null;
+  /** True when the Work asked about is a SUPERSEDED attempt: it was cancelled or failed and a
+   *  catch-up re-admitted the period under a new Work. The origin is still this plan. */
+  superseded: boolean;
+  attempt: number | null;
 };
 
 // ── reads ───────────────────────────────────────────────────────────────────

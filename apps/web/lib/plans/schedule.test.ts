@@ -11,7 +11,7 @@ import assert from "node:assert/strict";
 import {
   PLAN_DAY_OF_MONTH_MAX, PLAN_TIMEZONE,
   firstInvalidPlanField, dayOfMonthForWire, effectiveToForWire, isCalendarDate, planControls,
-  validateCatchUpWindow, validatePlanSchedule, type PlanScheduleDraft,
+  validateCatchUpWindow, validatePlanSchedule, planPeriodStart, type PlanScheduleDraft,
 } from "./schedule";
 
 const CLEAN: PlanScheduleDraft = {
@@ -161,4 +161,54 @@ test("isCalendarDate is the composer's own test, not a second spelling of it", (
   assert.equal(isCalendarDate("2024-02-29"), true);
   assert.equal(isCalendarDate("2026-9-1"), false, "an unpadded date is not the ISO shape a date column takes");
   assert.equal(isCalendarDate(""), false);
+});
+
+test("a FREQUENCY change cannot start inside a period this plan has already run, in both directions", () => {
+  // 0193's `clara.revise_accounting_plan` refuses CLR10 `period_already_covered` (review finding
+  // SHOULD-1): `unique (plan_id, leg, period_key)` is exact per alignment and blind across
+  // alignments, so a monthly September and a quarterly July-to-September are two different keys
+  // naming one September. The plan below is anchored 2026-07-01 and has run through 2026-09-30.
+  const floor = "2026-07-01";
+  const opts = (frequency: string, effectiveFrom: string) =>
+    validatePlanSchedule(draft({ frequency, effectiveFrom }), {
+      requireAuthority: false, authorityFrom: floor,
+      currentFrequency: "monthly", coveredThrough: "2026-09-30",
+    }).map((i) => `${i.field}:${i.code}`);
+
+  assert.deepEqual(opts("quarterly", "2026-09-15"), ["effectiveFrom:periodAlreadyCovered"],
+    "the quarterly period containing 2026-09-15 starts 2026-07-01 and covers a September already run");
+  assert.deepEqual(opts("quarterly", "2026-10-01"), [],
+    "the next quarter starts after everything already run — a legitimate schedule change");
+  assert.deepEqual(opts("monthly", "2026-09-15"), [],
+    "and an unchanged frequency is not walled here at all: the period a due day belongs to has not moved");
+
+  // THE OTHER DIRECTION. A quarterly plan that has run 2026-08-01's quarter (August to October)
+  // cannot be re-aligned onto months from inside it.
+  const fromQuarterly = (frequency: string, effectiveFrom: string) =>
+    validatePlanSchedule(draft({ frequency, effectiveFrom }), {
+      requireAuthority: false, authorityFrom: "2026-08-01",
+      currentFrequency: "quarterly", coveredThrough: "2026-10-31",
+    }).map((i) => i.code);
+  assert.deepEqual(fromQuarterly("monthly", "2026-09-01"), ["periodAlreadyCovered"]);
+  assert.deepEqual(fromQuarterly("monthly", "2026-11-01"), [],
+    "the day after the covered quarter is the first lawful start");
+
+  // A CREATE has no predecessor alignment and nothing has run, so the wall cannot fire.
+  assert.deepEqual(codes(draft({ frequency: "quarterly", effectiveFrom: "2026-09-15" })), []);
+});
+
+test("planPeriodStart anchors on the plan's own authority, floors before the anchor, and mirrors clara._plan_period_start", () => {
+  // The tail census of 0193 asserts the SAME four answers on the database's own function.
+  assert.equal(planPeriodStart("2026-02-10", "quarterly", "2026-04-30"), "2026-02-01",
+    "a quarterly plan anchored in February has periods Feb-Apr, May-Jul — not the calendar's quarters");
+  assert.equal(planPeriodStart("2026-02-10", "quarterly", "2026-05-01"), "2026-05-01");
+  assert.equal(planPeriodStart("2026-02-10", "monthly", "2026-01-31"), "2026-01-01",
+    "a date BEFORE the anchor floors into its own earlier period");
+  assert.equal(planPeriodStart("2026-07-01", "quarterly", "2026-09-15"), "2026-07-01");
+  assert.equal(planPeriodStart("2026-07-01", "annual", "2027-06-30"), "2026-07-01");
+  assert.equal(planPeriodStart("2026-07-01", "annual", "2027-07-01"), "2027-07-01");
+  assert.equal(planPeriodStart("2026-07-01", "weekly", "2026-09-15"), null,
+    "an unknown frequency answers NULL rather than guessing a period");
+  assert.equal(planPeriodStart("2026-07-01", "monthly", "2026-02-30"), null,
+    "and so does a date that is not a day");
 });

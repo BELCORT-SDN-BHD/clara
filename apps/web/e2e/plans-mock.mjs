@@ -161,6 +161,9 @@ const PLAN_DETAIL = () => ({
   authorised_by: "11111111-1111-1111-1111-111111111111",
   authorised_at: "2026-06-28T02:00:00.000Z",
   authority_from: "2026-07-01",
+  // The last period this plan has already run through — the revise form's own mirror of 0193's
+  // `period_already_covered` reads it (review finding SHOULD-1).
+  covered_through: "2026-09-30",
   created_by: "11111111-1111-1111-1111-111111111111",
   created_at: "2026-06-28T02:00:00.000Z",
   paused_at: state.paused ? "2026-09-14T02:00:00.000Z" : null,

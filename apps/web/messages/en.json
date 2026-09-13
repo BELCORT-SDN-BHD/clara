@@ -4397,6 +4397,7 @@
       "issueEffectiveFromRequired": "Name the day this plan's authority starts.",
       "issueEffectiveFromInvalid": "That is not a calendar date.",
       "issueEffectiveFromBeforeAuthority": "This plan was authorised from {date}. A revision cannot start earlier.",
+      "issuePeriodAlreadyCovered": "This plan has already run through {date}. Changing the frequency from a date inside that period would post it a second time — start the new schedule after it.",
       "issueEffectiveToInvalid": "That is not a calendar date.",
       "issueEffectiveToBeforeFrom": "The authority cannot end before it starts.",
       "issueReversalCollides": "A monthly reversing plan cannot accrue on the 1st: its reversal would land on the next accrual's own day.",

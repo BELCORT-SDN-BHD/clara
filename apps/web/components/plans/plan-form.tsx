@@ -129,7 +129,14 @@ export function PlanForm({
   // A REVISION CARRIES THE PLAN'S AUTHORITY FLOOR (0193's `effective_from_before_authority`); a
   // CREATE is the act that SETS it, so there is nothing to be below.
   const authorityFrom = revising && plan !== null ? plan.authority_from : null;
-  const scheduleIssues: PlanIssue[] = validatePlanSchedule(schedule, { requireAuthority: !revising, authorityFrom });
+  // A REVISION ALSO CARRIES THE ALIGNMENT WALL (0193's `period_already_covered`): a FREQUENCY
+  // change re-aligns every period key, so one that would cover a period this plan has already run
+  // is named at the control instead of arriving as a refusal. A CREATE has no predecessor
+  // alignment and nothing has run.
+  const currentFrequency = revising && plan !== null ? plan.live_revision?.frequency ?? null : null;
+  const coveredThrough = revising && plan !== null ? plan.covered_through ?? null : null;
+  const scheduleOpts = { requireAuthority: !revising, authorityFrom, currentFrequency, coveredThrough };
+  const scheduleIssues: PlanIssue[] = validatePlanSchedule(schedule, scheduleOpts);
   const basisIssues: JournalIssue[] = validateJournalDraft(
     { postingDate: schedule.effectiveFrom, memo, lines },
     knownAccounts,
@@ -158,6 +165,7 @@ export function PlanForm({
       effectiveFromRequired: t("issueEffectiveFromRequired"),
       effectiveFromInvalid: t("issueEffectiveFromInvalid"),
       effectiveFromBeforeAuthority: t("issueEffectiveFromBeforeAuthority", { date: authorityFrom ?? "" }),
+      periodAlreadyCovered: t("issuePeriodAlreadyCovered", { date: coveredThrough ?? "" }),
       effectiveToInvalid: t("issueEffectiveToInvalid"),
       effectiveToBeforeFrom: t("issueEffectiveToBeforeFrom"),
       reversalCollides: t("issueReversalCollides"),
@@ -167,7 +175,7 @@ export function PlanForm({
 
   const submit = async () => {
     setAttempted(true);
-    const s = validatePlanSchedule(schedule, { requireAuthority: !revising, authorityFrom });
+    const s = validatePlanSchedule(schedule, scheduleOpts);
     const b = validateJournalDraft({ postingDate: schedule.effectiveFrom, memo, lines }, knownAccounts);
     if (s.length > 0) {
       fields.current.get(`s:${firstInvalidPlanField(s)}`)?.focus();

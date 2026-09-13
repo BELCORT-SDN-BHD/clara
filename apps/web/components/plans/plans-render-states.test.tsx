@@ -119,6 +119,9 @@ const PLAN_DETAIL = {
   authorised_by: "u1",
   authorised_at: "2026-09-01T00:00:00Z",
   authority_from: "2026-07-01",
+  // How far the plan has already run. The revise form mirrors 0193's `period_already_covered`
+  // against it (review finding SHOULD-1).
+  covered_through: "2026-09-30",
   created_by: "u1",
   created_at: "2026-09-01T00:00:00Z",
   paused_at: null, paused_by: null, paused_reason: null,

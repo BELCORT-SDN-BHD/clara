@@ -53,6 +53,7 @@ export type PlanIssueCode =
   | "effectiveFromRequired"
   | "effectiveFromInvalid"
   | "effectiveFromBeforeAuthority"
+  | "periodAlreadyCovered"
   | "effectiveToInvalid"
   | "effectiveToBeforeFrom"
   | "reversalCollides";
@@ -80,6 +81,31 @@ export type PlanScheduleDraft = {
 export { isCalendarDate };
 
 /**
+ * THE PERIOD A DATE BELONGS TO, anchored on the plan's own `authority_from` rather than on the
+ * calendar — `clara._plan_period_start`'s mirror, and the arithmetic the alignment wall below
+ * stands on. A quarterly plan anchored in February has periods Feb–Apr, May–Jul, …, which
+ * `Date`-based quarter arithmetic would answer Jan, Apr, … instead.
+ *
+ * Integer months, never a `Date`: a date built from `new Date("2026-03-01")` is UTC midnight and
+ * reading its month back in MYT (UTC+8) is still March, but adding months across a DST-free zone
+ * by milliseconds is how a schedule quietly slips a day. The whole lane is about exact dates.
+ */
+export function planPeriodStart(anchor: string, frequency: PlanFrequencyId | string, on: string): string | null {
+  const step = frequency === "monthly" ? 1 : frequency === "quarterly" ? 3 : frequency === "annual" ? 12 : null;
+  if (step === null || !isCalendarDate(anchor) || !isCalendarDate(on)) return null;
+  const ay = Number(anchor.slice(0, 4));
+  const am = Number(anchor.slice(5, 7));
+  const months = (Number(on.slice(0, 4)) - ay) * 12 + (Number(on.slice(5, 7)) - am);
+  // FLOOR, not truncate-toward-zero: a date before the anchor belongs to an EARLIER period, and
+  // JavaScript's `/` plus `Math.trunc` would pull it forward into the anchor's own.
+  const k = months >= 0 ? Math.floor(months / step) : -Math.ceil(-months / step);
+  const total = am - 1 + k * step;
+  const year = ay + Math.floor(total / 12);
+  const month = ((total % 12) + 12) % 12 + 1;
+  return `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-01`;
+}
+
+/**
  * Every schedule rule 0193's `clara._assert_plan_schedule` enforces, in the order a preparer
  * should read them. The list's order IS the focus order (`firstInvalidPlanField`).
  */
@@ -93,6 +119,14 @@ export function validatePlanSchedule(
      *  authority backwards would dissolve `catch_up_before_authority` with it. Null on CREATE,
      *  where the draft's own `effective_from` IS the floor being set. */
     authorityFrom?: string | null;
+    /** THE LIVE REVISION'S frequency, and how far this plan has already run
+     *  (`get_accounting_plan.covered_through`). Together they mirror 0193's
+     *  `period_already_covered`: a frequency CHANGE re-aligns every period key, so a revision whose
+     *  new alignment's first period starts on or before the end of the last period already run
+     *  would post that period a second time. Both null on CREATE, where there is no predecessor
+     *  alignment and nothing has run. */
+    currentFrequency?: PlanFrequencyId | string | null;
+    coveredThrough?: string | null;
   },
 ): PlanIssue[] {
   const issues: PlanIssue[] = [];
@@ -128,6 +162,21 @@ export function validatePlanSchedule(
     && draft.effectiveFrom < opts.authorityFrom
   ) {
     issues.push({ field: "effectiveFrom", code: "effectiveFromBeforeAuthority" });
+  }
+  // THE ALIGNMENT WALL, mirrored (0193's `period_already_covered`). Only a FREQUENCY CHANGE
+  // re-aligns the period keys; with the frequency unchanged the period a due day belongs to is
+  // unchanged and 0193's own `period_already_admitted` still binds a moved due day.
+  else if (
+    opts.currentFrequency !== undefined && opts.currentFrequency !== null
+    && opts.coveredThrough !== undefined && opts.coveredThrough !== null
+    && opts.authorityFrom !== undefined && opts.authorityFrom !== null
+    && draft.frequency !== opts.currentFrequency
+    && (PLAN_FREQUENCIES as readonly string[]).includes(draft.frequency)
+  ) {
+    const first = planPeriodStart(opts.authorityFrom, draft.frequency, draft.effectiveFrom);
+    if (first !== null && first <= opts.coveredThrough) {
+      issues.push({ field: "effectiveFrom", code: "periodAlreadyCovered" });
+    }
   }
 
   if (draft.effectiveTo.trim() !== "") {
