@@ -238,7 +238,12 @@ JWT 的 `role` claim 携一枚专用 Postgres 角色）的严格子集：`clara_
 部署脚本对每一个升级位取反断言、任一为真即整段中止（storage-provision.sql:39-55），仅被 `grant` 给
 `authenticator` 以满足 Storage 自身对 JWT `role` claim 的 `SET ROLE`（:60），只 `grant select, insert on
 storage.objects`（:62-64），两条策略都以 `bucket_id='firm-docs'` 加内容寻址 key 正则收口（:67-80），
-UPDATE／DELETE 永不授予（:82-83）。vendor 配方里的 `grant anon to <role>` 被省略，但这是纵深防御的卫生
+UPDATE／DELETE 永不授予（:82-83）。边界因此是两段而非一段，storage-battery 也照此分两半断言：vendor 明
+载 Postgres 先判表级 grant、再套 RLS，两种失败形状不同（缺 grant 报权限错误、策略不匹配返回空集；
+supabase.com/docs/guides/getting-started/api-keys §"Postgres roles and Row Level Security"，2026-09-13
+经 Context7 复核），所以 B10 既断言 `has_table_privilege` 矩阵（insert／select 为真，update／delete／
+truncate／references／trigger 为假），也断言 `pg_policy` 上恰好那两条策略的谓词文本。同一页也是排除
+`service_role` 的依据：它带 `BYPASSRLS`，策略对它根本不生效，用它做保管凭据等于没有边界。vendor 配方里的 `grant anon to <role>` 被省略，但这是纵深防御的卫生
 做法，不是防线本身——`clara_storage_docs` 本已 `NOLOGIN NOINHERIT`，真正拒绝该角色继承 anon 更宽权限的
 是这个角色属性，缺那条 grant 与之无关（角色成员的 INHERIT 未指定时取新成员自身的继承属性，不取被继承角
 色的）。2026-07-26 有一次可作前车之鉴的误诊：把一次用 **PUT**（Storage 的 replace／UPDATE 端点，
@@ -252,7 +257,11 @@ membership 的即时吊销（authz.mjs:146-152，无缓存）；"expired link"�
 只认该文件在同一 firm 下 `retired_at is null` 的 ACTIVE filing，未命中并入与"不存在"相同的 CLR11 形状，
 不新增 existence oracle（:214-239）；`storage_path`／`bytes_verified_at` 任一为空答 CLR13
 `custody_pending`——唯一被允许与"不存在"区分的拒绝，因为文件确实是调用者自己的（:246-249）；每次成功在
-返回前写一行 `clara._audit`（:256-257），这是 v1 从未做、而 0162 的 artifact 门一直做的对称。函数钉
+返回前写一行 `clara._audit`（:256-257），这是 v1 从未做、而 0162 的 artifact 门一直做的对称。**刻意没
+有加第四样：职级门槛。** 来源字节的读取门槛仍是"该 firm 在职成员"，与 v1 一致——viewer 读得到，
+`rig-docs-download-door.test.mjs` D1.2 正面钉住这一点。这是一次明确的裁定而非疏漏：本票据把范围收在
+firm＋client 两层，per-user 的文件 ACL 属另一张票，而把 bookkeeper+ 悄悄装进一扇读门会让"谁能看见这份
+文件"变成两套互不知情的规则。若日后要收紧，改动点就是这句话与 D1.2。函数钉
 `plan_cache_mode=force_custom_plan`（0183 纪律，从 proconfig 断言而非 prosrc，:357-363），只 `grant
 execute` 给 `clara_runtime`（:284-285），尾部对 8 条 walled role 逐一反向断言不可执行，v1 的函数体与
 EXECUTE 授权都以运行本迁移前 pin 的字面量 sha／ACL 核对未变（:126-143,421-441）。AC3『versioned』
@@ -426,6 +435,15 @@ halt 记录在 `checks.leader`（halt 在调用 onHalt 之前写入），held:fa
 会话在真实项目上以只读方式运行、结果标为 hosted 证据，与本地 provider-stack 证据分开报告
 （packages/db/storage-battery/README.md）。
 
+已实测（2026-09-13，Windows 宿主的 WSL2 Ubuntu，docker 29.7.2 + `npx supabase@2.117.0`，栈随即
+`supabase stop --no-backup` 归零、exit 0）：**PASS 10 / LIMIT 2 / FAIL 0**，LIMIT 恰为上述 B9 与 B12。
+B8 的三枚凭据——`role=authenticated` 的 JWT、过期 JWT、以及这一栈自己发布的 **anon key（浏览器实际持有
+的那一枚）**——POST 均得包体 403、GET 均得包体 403／404，运行时 `realConfig()` 在上线前就先拒了它们
+（storage_error/503）。这是 provider 证据，不是 hosted 证据：它说明本 ceremony 从零建出的边界是什么，
+不说明 live 项目今天携带什么。battery 该指向哪个栈由 `packages/db/storage-battery/stack.mjs` 单独决定
+（adopted／boot／具名 skip），该决定本身由 `packages/db/tests/storage-battery-contract.test.mjs` 在
+无栈、无库、无网络的条件下逐条断言，因而在每台机器上都有证据，与上面那次 wire 证据分列。
+
 Workflow registry 决定新接收的版本，旧非终态运行继续拥有其原 body 与相容依赖。
 目前 frozen closure 有 hash 检查；目标进一步固定 instruction／skill／tool registry manifest、
 schema 和依赖解析。发布新 successor 时保留旧导出，rollback 也必须支持全部非终态 bundle 或先验证 drain。
@@ -447,7 +465,7 @@ Web、runtime、DB frontier 和 renderer 分别记录发布身份；源代码通
 | Agent 与宿主 | #623 已合入：`claraWork_v1`（ToolLoopAgent + 冻结 bundle `clara-work/v1`）与 `chatTurn_v18`；本地证据：runtime suite 2211／2209 pass／1 fail（Windows-only EICAR）／1 skip，world／version-cutover／work-journal e2e 在真实 Postgres World 上通过（含 commit 后、checkpoint 前 SIGKILL 重放恰好一条分录一条回执，及真实 chatTurn_v18 回合准入同一 basis）；hosted 证据以 #623 记录为准。#629 已合入 `claraWork_v2`（registry 重指向；v1 保留；`claraWork.v2.errors.ts` 委托 v1 名册并覆盖 `(CLR13, source_conflict)`；冻结清单相对 main 仅追加 7 项；本地：runtime suite 2233／2226 pass／1 fail（EICAR）／6 skip，world／version-cutover／work-journal／work-question e2e 全部通过——后者 7 条腿含两个 worker 竞争一个过期租约、resume 前崩溃、commit 后 checkpoint 前崩溃、过期→Retry→版本 2、角色丢失；CI `db-live-gates` 绿）。其余仍是分散冻结流程；根／CI／runtime image 已统一 Node 22.23.2（#616 已关闭，本地 + hosted 证据：Linux runners CI 绿，image `refresh-10b99a73` 以 v76 发布于 `clara-runtime`，`/ready` 200 且镜像内 Node v22.23.2）；`packages/backup` 已随 #686 改为 `node:22-bookworm-slim`（镜像尚未部署），`packages/reporting-render` 仍按 digest 钉 Node 20 基底，属独立待决事项（#691）。 | 首个 ToolLoopAgent successor 与显式版本 bundle；保留旧运行。 |
 | Work 与控制 | tasks、interruptions、回执、SSE、租约已有；#623（0178）加入 `accounting_work`／`operation_receipts`、逻辑操作身份、client 范围的 intent 幂等、retry 保留身份、任务状态镜像、receipt-aware 结算与待答问题级联（本地 db suite 4152／4058 pass／0 fail／94 skip）；#629（0180）加入共享 Work question（`agent_interruptions` 上的 Work 链接、单调版本、类型化字段、依据 digest、回答归因、带时间戳的 delivery state；一个 Work 至多一个待答问题；首答闸门 `answer_work_question`；读门 `get_work_question`／`get_work_pending_question`；`list_review_queue` 的 `work_question` 行）与正确投递（claimant+租约条件的 delivered 戳、续租、HookNotFound 按真实 run 状态核对、`hook_missing` 静置 + 宽限 + 二次探测后才结算 `expired`、14 天期限的执行者）；本地 db suite 4208／4114 pass／0 fail／94 skip；CI 绿。取消排序仍由 #630 承接；chat 车道的 clarify 期限与 HookNotFound 假设未变（#720）；答案不能补全不完整的 basis（#721）。 | 统一业务 Work，共享问题与稳定操作身份，真实重启／竞争下保持完整结果。 |
 | 会计能力 | JE、subledger、结算、资产、close 基础存在；#623 的无附件手工分录已是完整 operation（`wake_record_journal_entry`：无 attestation 仪式、当前授权与硬约束在提交时重查、回执墙接受两种回执形态）；#634（0182）使该 operation 的凭据可选且可迟到而不改写已入账历史（`entry_evidence_links`、全事务所一份文件一条在世分录、冲销释放、`attach_entry_evidence`、`list_entry_links`；`admit_journal_work`／`_record_journal_entry_core` 全文重切，0178 各拒绝臂逐一保留并经文本 diff 核对；本地 db suite 4193／4099 pass／0 fail／94 skip，work-journal e2e 第 8 条腿；CI 待记录）；文件编码车道仍不回看凭据链接（#718）。其余入口能力及人工／agent 行为仍不一致。 | 全范围领域操作与必要关联影响；去掉普通入账额外仪式，保留实际权限与硬约束。 |
-| 文件 | 0177 与 extraction-aware facts_gate consumer 已合入 main 并在本地 PG17 全链验证：未知 kind 的 PDF／图片在成功提取前返回 awaiting_extraction；hosted 发布已由 #606 记录（consumer v76 先行、0177 落地 live DB（frontier 0177）、runtime v77，真实上传旅程中 classify 任务在 extraction 完成后 98 ms 创建）。#620（0190）已合入来源文件字节的第二道保管门：`clara.get_document_for_human_read_v2` 的 firm-membership＋active-filing 客户范围与 `custody_pending` 类型化拒绝、每次成功读的 `clara._audit` 回执、`GET /api/documents/:id/bytes` 的七种类型化拒绝与下载头、Documents 工作台的九态状态梯与 `?document=` 定址（#719 的 Documents 半已一并解决；Journals／Reports 的条目级深链接仍缺）、以及针对 `storage-provision.sql` 的首个 Storage grant/policy battery（`supabase start` 一次性栈，B1–B12，B9／B12 为记录在案的 LIMIT）均已落地；证据是本地 DB／runtime／web 套件、浏览器 walk 与 provider-stack battery。hosted 证据未补：凭据的 role claim／`SET ROLE` 是否仍如 2026-07-19 ceremony-proven 那样成立、2026-07-26 的 UPDATE 授权是否确已从线上撤回、真实登录会话下的预览／下载／denied 走查、renderer／backup 凭据的线上范围，均待发布会话用 `hosted-probe.sql` 及签入的浏览器 walk 补齐。 | 能力分层与 source／facts／operation 状态一致；提取失败不产生分类目前只有本地证据，hosted 证据仍待补。#620 的 storage 凭据、successor 门与 web 状态梯同样只有本地证据。 |
+| 文件 | 0177 与 extraction-aware facts_gate consumer 已合入 main 并在本地 PG17 全链验证：未知 kind 的 PDF／图片在成功提取前返回 awaiting_extraction；hosted 发布已由 #606 记录（consumer v76 先行、0177 落地 live DB（frontier 0177）、runtime v77，真实上传旅程中 classify 任务在 extraction 完成后 98 ms 创建）。#620（0190）已合入来源文件字节的第二道保管门：`clara.get_document_for_human_read_v2` 的 firm-membership＋active-filing 客户范围与 `custody_pending` 类型化拒绝、每次成功读的 `clara._audit` 回执、`GET /api/documents/:id/bytes` 的七种类型化拒绝与下载头、Documents 工作台的九态状态梯与 `?document=` 定址（#719 的 Documents 半已一并解决；Journals／Reports 的条目级深链接仍缺）、以及针对 `storage-provision.sql` 的首个 Storage grant/policy battery（`supabase start` 一次性栈，B1–B12，B9／B12 为记录在案的 LIMIT；2026-09-13 在 WSL2 Ubuntu 上实测 PASS 10／LIMIT 2／FAIL 0，栈已归零）均已落地；证据是本地 DB／runtime／web 套件、浏览器 walk 与 provider-stack battery。hosted 证据未补：凭据的 role claim／`SET ROLE` 是否仍如 2026-07-19 ceremony-proven 那样成立、2026-07-26 的 UPDATE 授权是否确已从线上撤回、真实登录会话下的预览／下载／denied 走查、renderer／backup 凭据的线上范围，均待发布会话用 `hosted-probe.sql` 及签入的浏览器 walk 补齐。 | 能力分层与 source／facts／operation 状态一致；提取失败不产生分类目前只有本地证据，hosted 证据仍待补。#620 的 storage 凭据、successor 门与 web 状态梯同样只有本地证据。 |
 | Knowledge | facts、wiki 与 advisory pattern pack 分开；检索偏固定 priority／recency；部分 claim metadata 缺失，chat pack 错误会降为 null。 | 统一捕获、身份、版本、按需检索、纠正和投影；必需知识不可用时诚实暂停。 |
 | 自动计划与 close | 日常 reconciler／资产／调整机制已有；bank_agent／close_prep wake sources 默认关闭，生产／激活链路不完整。 | 显式授权计划到期产生 Work，普通自主执行含满足条件的 recon／close；技术开关不成为用户 opt-in。 |
 | 财务界面与输出 | 统一导航壳已实现（#614：注册表驱动的 Sidebar／scope switcher／Breadcrumb，Work／Settings／Accounting 目的地，旧链接 307 迁移；本地单元与浏览器证据，hosted：clara-web 版本 5dcee6d8（3f4c5f8b，含畸形 client id 的 not-found 守卫）已推广，登录 smoke、旧链接 307 矩阵与 owner 登录后的 shell 旅程在线验证）；#623 的 C3 composer／B3 Work detail／B6 Work 卡片已落地（本地：web unit 2923／2923、browser 152 passed／0 failed／7 fixture-gated skips；hosted 证据以 #623 记录为准）。#626 的 `/settings/account`（账户、界面与通知偏好）已落地：`clara.user_preferences`／`get_my_preferences`／`save_my_preferences`（0179_user_preferences.sql，PATCH 语义、CLR06 乐观并发、CLR10 校验、op_key 重放，own-row RLS）落库，界面偏好集刻意收窄为两个有真实消费者的项（motion 驱动 `data-motion` 属性叠加 OS `prefers-reduced-motion`；sidebarDefault 写回既有 `sidebar_state` cookie），通知偏好尚无消费者、页面如实呈现"尚未配置"而非死控件；本地 DB／单元／浏览器套件验证，hosted 证据未补；A Home 仪表、B Work 列表／详情与 Settings 其余分区仍是目标，由 #641／#650／#659／#635 承接。#629 的 B3／B4／B6 共享问题面、#632 的 `/activity` 事件流（CB-AE2E-018 已解除）与 #634 的 composer 凭据选择器／Attach evidence 对话框／Journals 表链接与筛选已落地（本地：web unit 3003／3003（#629）、3001／3002（#632，1 个已知负载 flake）、2995／2995（#634）；浏览器全套 186／1、183／3、182／1，失败项均为未触及的负载敏感 spec 并单独通过；各自的 walk 全绿；hosted 证据以各 ticket 记录为准）。Journals／Reports 的条目级深链接仍缺（#719）；Documents 的条目级深链接（`?document=` 寻址）已由 #620 落地。工作台与 card readers 仍是旧形态；sealed renderer 已有，sandbox worker、完整管理模板和交付验证仍不齐。 | 完整旅程、统一 metric pack、可靠 AI UI、可复现且可下载的报表。 |
