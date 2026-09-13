@@ -289,8 +289,12 @@ const LANE_DECLARATIONS: Record<string, { unscopeable: string[]; debt: string[] 
   // #641's Work-list lane. `list_accounting_work`/`get_accounting_work_row` are brand-new RPCs no
   // other lane calls, and each carries its own `return false;` fall-through — the list handler on
   // an unmatched `p_client` (the firm-wide `null` read is deliberately answered, because this lane
-  // owns the only fixture Work the suite has), the row handler on an id it did not mint. Neither
-  // column has anything to declare, which is the state a lane mock should be in.
+  // owns the only fixture Work the suite has), the row handler on an id OUTSIDE this lane's own
+  // `c641c641-2222-` Work-id space. That door takes no client at all, so the Work id IS the
+  // request's own subject: an id in this lane's space that it did not mint gets this lane's CLR11
+  // (0189's no-oracle not-found, which the addressed-row walk needs), and anything else falls
+  // through to whichever lane minted it. Neither column has anything to declare, which is the
+  // state a lane mock should be in.
   "work-list-mock.mjs": { unscopeable: [], debt: [] },
 };
 

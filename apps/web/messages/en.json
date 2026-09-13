@@ -1164,6 +1164,14 @@
     "paginationLabel": "Work list pages",
     "previousPage": "First page",
     "nextPage": "Next page",
+    "addressedLabel": "The work you were sent to",
+    "addressedLoading": "Looking up the work this link names…",
+    "addressedOnThisPage": "The work this link names is on this page, highlighted below.",
+    "addressedOutsidePage": "The work this link names is not on this page of the list.",
+    "addressedNotFoundTitle": "That work could not be opened",
+    "addressedNotFoundBody": "The link names work that does not exist, or that is not yours to read. The list below is unaffected.",
+    "addressedFailedTitle": "The work this link names could not be read",
+    "addressedFailedBody": "Nothing was returned, so this says nothing about whether that work exists. Try again.",
     "stateLabels": {
       "queued": "Queued",
       "executing": "Executing",
@@ -1221,6 +1229,8 @@
     "saveViewCancel": "Cancel",
     "savingView": "Saving…",
     "saveViewFailed": "That view could not be saved.",
+    "saveViewTooMany": "You already have {max} saved views. Remove one before saving another.",
+    "saveViewQueryTooLong": "These filters are too long to save as a view (the limit is {max} characters). Narrow the search text and try again.",
     "deleteViewLabel": "Remove “{name}”"
   },
   "ClientAccounting": {

@@ -286,3 +286,43 @@ test("/work is axe-clean at 320px with the list rendered", async ({ page }) => {
   const result = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
   expect(result.violations, "/work at 320px").toEqual([]);
 });
+
+test("an addressed ?work= row OUTSIDE the page window is fetched, announced and focused; an unknown one is an honest not-found", async ({ page }) => {
+  await signIn(page);
+
+  // #719's own shape, made real: the URL both FILTERS the list (to the parked Work) and ADDRESSES
+  // a completed one that the filter excludes. A surface that could only see its page would show
+  // the person a list their Work is simply not in, and say nothing about it.
+  await page.goto(`/work?status=awaiting_input&work=${WORK_LIST.oldestWorkId}`);
+
+  const addressed = page.locator('[data-slot="addressed-work"]');
+  await expect(addressed).toBeVisible();
+  await expect(addressed.getByText("The work this link names is not on this page of the list")).toBeVisible();
+  await expect(addressed.getByRole("link", { name: "Opening balances tie-out" })).toBeVisible();
+  // The page itself still shows what the FILTER asked for, unchanged by the visitor above it.
+  await expect(rowLink(page, "Quarterly rent — which Maybank account?")).toBeVisible();
+  await expect(rowLink(page, "Opening balances tie-out")).toHaveCount(0);
+
+  // FOCUS LANDS ON IT. A `?work=` link is a request to be taken to one row; for a keyboard or
+  // screen-reader user that is only true if the caret moves there.
+  await expect(addressed.getByRole("link", { name: "Opening balances tie-out" })).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(page).toHaveURL(new RegExp(`/work/${WORK_LIST.oldestWorkId}$`));
+
+  // WHEN IT IS ON THE PAGE, the row itself is marked current and nothing extra is rendered.
+  await page.goto(`/work?work=${WORK_LIST.parkedWorkId}`);
+  await expect(workTable(page).locator('tr[data-addressed="true"]')).toHaveCount(1);
+  await expect(
+    workTable(page).locator('tr[data-addressed="true"]')
+      .getByRole("link", { name: "Quarterly rent — which Maybank account?" }),
+  ).toBeVisible();
+  await expect(page.locator('[data-slot="addressed-work"]')).toHaveCount(0);
+
+  // AND AN ID THE DOOR REFUSES IS SAID OUT LOUD. 0189 answers the same CLR11 for absent, foreign
+  // and unreadable alike, so the browser cannot tell them apart either — but it must never drop
+  // the request silently, which reads as "your link worked and there was nothing there".
+  await page.goto(`/work?work=${WORK_LIST.missingWorkId}`);
+  await expect(page.getByText("That work could not be opened")).toBeVisible();
+  await expect(page.getByText(/does not exist, or that is not yours to read/)).toBeVisible();
+  await expect(rowLink(page, "Quarterly rent — which Maybank account?")).toBeVisible();
+});

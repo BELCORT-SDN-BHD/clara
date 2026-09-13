@@ -117,8 +117,14 @@ function row(over: Partial<WorkListRow> = {}): WorkListRow {
 }
 
 type Load = Parameters<typeof AccountingWorkList>[0]["load"];
+type LoadRow = Parameters<typeof AccountingWorkList>[0]["loadRow"];
 
-function App(opts: { search?: string; load?: Load; scope?: WorkListScope }): ReactElement {
+function App(opts: {
+  search?: string;
+  load?: Load;
+  loadRow?: LoadRow;
+  scope?: WorkListScope;
+}): ReactElement {
   return createElement(NextIntlClientProvider, {
     locale: "en", messages, timeZone: "Asia/Kuala_Lumpur",
     children: createElement(
@@ -133,6 +139,7 @@ function App(opts: { search?: string; load?: Load; scope?: WorkListScope }): Rea
           createElement(AccountingWorkList, {
             scope: opts.scope ?? { kind: "firm" },
             load: opts.load,
+            loadRow: opts.loadRow,
           }),
         ),
       ),
@@ -326,6 +333,145 @@ test("the client surface pins its own client and offers no client filter", async
         return node.getAttribute?.("id") === "work-filter-client";
       });
       assert.equal(clientFilter, null, "no client picker on a route that already pins the client");
+    } finally {
+      await h.unmount();
+    }
+  });
+});
+
+// #641 fix round — THE ADDRESSED ROW (`?work=<id>`), #719's own lesson.
+//
+// The cell that matters is the THIRD one: a `?work=` naming a Work that is not on the page the
+// URL also describes must be FETCHED by id and rendered, because the alternative is a link that
+// silently shows the person a list their Work is not in. The first two cells fence that: the door
+// is not called at all when the page can already answer, and a CLR11 is said out loud rather than
+// dropped.
+
+test("an addressed row that IS on this page is marked current, and no addressed-row read is made", async () => {
+  await withMockedEnv(async () => {
+    let rowReads = 0;
+    const h = await renderComponent(App({
+      search: `work=${WORK}`,
+      load: async () => ({ rows: [row()], next_cursor: null, truncated: false }),
+      loadRow: async (id) => { rowReads += 1; return row({ id }); },
+    }));
+    try {
+      await h.settle();
+      assert.equal(rowReads, 0, "the page already holds the row; a second read of it would be a second truth");
+      const marked = h.find((n) => {
+        const node = n as { tagName?: string; getAttribute?: (k: string) => string | null };
+        return node.tagName === "TR" && node.getAttribute?.("data-addressed") === "true";
+      });
+      assert.ok(marked !== null, "the row the link names is marked as the current one");
+      assert.match(h.text(), /The work this link names is on this page/);
+      assert.doesNotMatch(h.text(), /not on this page of the list/);
+    } finally {
+      await h.unmount();
+    }
+  });
+});
+
+test("an addressed row OUTSIDE the page window is fetched by id and rendered above the page", async () => {
+  // The exact #719 shape: the URL carries filters that exclude the addressed Work AND names it.
+  // A surface that could only see its page would show nothing and say nothing.
+  const AWAY = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+  await withMockedEnv(async () => {
+    let asked: string | null = null;
+    const h = await renderComponent(App({
+      search: `status=awaiting_input&work=${AWAY}`,
+      load: async () => ({ rows: [row()], next_cursor: "page2", truncated: true }),
+      loadRow: async (id) => {
+        asked = id;
+        return row({ id, memo: "Opening balances tie-out", status: "completed", attempts: 1 });
+      },
+    }));
+    try {
+      await h.settle();
+      assert.equal(asked, AWAY, "the addressed-row door is asked for the id the URL named");
+      const region = h.find((n) => {
+        const node = n as { getAttribute?: (k: string) => string | null };
+        return node.getAttribute?.("data-slot") === "addressed-work";
+      });
+      assert.ok(region !== null, "the addressed row gets its own labelled region above the page");
+      const text = h.text();
+      assert.match(text, /The work this link names is not on this page of the list/);
+      assert.match(text, /Opening balances tie-out/);
+      // It is the SAME projection a row carries, so its state word is derived the same way.
+      assert.match(text, /Completed/);
+      // …and it is NOT spliced into the table, where the ordering never put it.
+      const inTable = h.find((n) => {
+        const node = n as { tagName?: string; textContent?: string };
+        return node.tagName === "TABLE" && /Opening balances tie-out/.test(String(node.textContent ?? ""));
+      });
+      assert.equal(inTable, null, "a visitor is not a row of an ordered, paged list");
+    } finally {
+      await h.unmount();
+    }
+  });
+});
+
+test("an addressed id the door refuses CLR11 is said out loud, never silently dropped", async () => {
+  const GONE = "ffffffff-ffff-4fff-8fff-ffffffffffff";
+  await withMockedEnv(async () => {
+    const h = await renderComponent(App({
+      search: `work=${GONE}`,
+      load: emptyPage,
+      loadRow: async () => {
+        throw new RefusalError("CLR11", "accounting work not found", {
+          reason: "accounting_work_not_found", status: 400, pgCode: "CLR11", codeSource: "sqlstate",
+        });
+      },
+    }));
+    try {
+      await h.settle();
+      const text = h.text();
+      assert.match(text, /That work could not be opened/);
+      assert.match(text, /does not exist, or that is not yours to read/);
+      // The LIST is unaffected: an unopenable addressed row is not a broken list.
+      assert.match(text, /No work yet/, "the page still tells its own honest story");
+    } finally {
+      await h.unmount();
+    }
+  });
+});
+
+test("an addressed-row read FAILURE is distinct from not-found, and offers Retry", async () => {
+  const AWAY = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+  await withMockedEnv(async () => {
+    const h = await renderComponent(App({
+      search: `work=${AWAY}`,
+      load: async () => ({ rows: [row()], next_cursor: null, truncated: false }),
+      loadRow: async () => { throw new DoorError("boom", { status: 500, kind: "transport" }); },
+    }));
+    try {
+      await h.settle();
+      const text = h.text();
+      assert.match(text, /The work this link names could not be read/);
+      assert.doesNotMatch(text, /does not exist, or that is not yours to read/,
+        "'we could not ask' says nothing about whether the row exists");
+    } finally {
+      await h.unmount();
+    }
+  });
+});
+
+test("a DENIED list asks the addressed-row door nothing — one banner, not two", async () => {
+  await withMockedEnv(async () => {
+    let rowReads = 0;
+    const h = await renderComponent(App({
+      search: `work=${WORK}`,
+      load: async () => {
+        throw new RefusalError("CLR04", "insufficient role", {
+          reason: null, status: 400, pgCode: "CLR04", codeSource: "sqlstate",
+        });
+      },
+      loadRow: async (id) => { rowReads += 1; return row({ id }); },
+    }));
+    try {
+      await h.settle();
+      assert.equal(rowReads, 0, "a door that would refuse identically is not asked");
+      assert.match(h.text(), /Work is not available/);
+      assert.doesNotMatch(h.text(), /not on this page of the list/);
     } finally {
       await h.unmount();
     }

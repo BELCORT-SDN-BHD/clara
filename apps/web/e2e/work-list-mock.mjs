@@ -40,7 +40,16 @@ export const WORK_LIST = {
   completedWorkId: "c641c641-2222-4777-8777-c641c6410104",
   chatOriginWorkId: "c641c641-2222-4777-8777-c641c6410105",
   oldestWorkId: "c641c641-2222-4777-8777-c641c6410109",
+  // An id in THIS lane's own space that this lane deliberately did not mint — the addressed-row
+  // door's CLR11 arm, which every walk needs and no fixture row may satisfy.
+  missingWorkId: "c641c641-2222-4777-8777-c641c64109ff",
 };
+
+/** This lane's id space. `get_accounting_work_row` is scoped by it rather than by a client id,
+ *  because that door takes NO client: it is addressed by Work id alone. An id shaped like this
+ *  lane's is this lane's to answer — including with the door's own not-found — and anything else
+ *  falls through to whichever lane minted it. */
+const WORK_ID_PREFIX = "c641c641-2222-";
 
 const PAGE_2_CURSOR = "work-list-mock-page-2";
 const SUBJECT = "11111111-1111-1111-1111-111111111111";
@@ -238,6 +247,15 @@ export async function handleWorkListSupabase(request, response, path, url, sendJ
     const match = ROWS.find((r) => r.id === body.p_work);
     if (match) {
       sendJson(response, 200, match, cors);
+      return true;
+    }
+    // AN ID IN THIS LANE'S OWN SPACE THAT THIS LANE DID NOT MINT IS THIS LANE'S CLR11. 0189 gives
+    // no oracle — absent, another firm's and unreadable all refuse identically — so the walk that
+    // proves the browser says "no such work, or it is not yours" needs exactly this arm. Scoped by
+    // the id prefix, so an id another lane minted still falls through to it.
+    if (typeof body.p_work === "string" && body.p_work.startsWith(WORK_ID_PREFIX)) {
+      const refusal = clr(400, "CLR11", "accounting work not found", "accounting_work_not_found");
+      sendJson(response, refusal.status, refusal.body, cors);
       return true;
     }
     return false;

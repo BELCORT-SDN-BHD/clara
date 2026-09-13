@@ -46,7 +46,7 @@
 // is what keeps the PAGE from scrolling horizontally at 320px. Status and the row's own link stay
 // visible at every width.
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
@@ -96,10 +96,12 @@ import {
   applyWorkListUrlState,
   hasWorkListFilters,
   parseWorkListUrlState,
+  EMPTY_WORK_LIST_FILTERS,
   type WorkListUrlState,
 } from "@/lib/work/work-list-url-state";
 import { WorkListFilterBar } from "./work-list-filters";
 import { WorkSavedViews } from "./work-saved-views";
+import { useAddressedWork, type AddressedWorkState } from "./use-addressed-work";
 import { useWorkList, type WorkListState } from "./use-work-list";
 
 export type WorkListScope = { kind: "firm" } | { kind: "client"; clientId: string };
@@ -116,10 +118,13 @@ export function AccountingWorkList({
   scope,
   /** Injected by the cells; production reads the door. */
   load,
+  /** The ADDRESSED-row door, injected the same way (`clara.get_accounting_work_row`). */
+  loadRow,
   clientsOverride,
 }: {
   scope: WorkListScope;
   load?: React.ComponentProps<typeof WorkListTable>["load"];
+  loadRow?: React.ComponentProps<typeof WorkListTable>["loadRow"];
   clientsOverride?: readonly ClientRow[];
 }) {
   const t = useTranslations("WorkList");
@@ -163,7 +168,14 @@ export function AccountingWorkList({
         showClient={scope.kind === "firm"}
         members={memberOptions}
       />
-      <WorkListTable scope={scope} state={state} filters={filters} memberNames={memberNames} load={load} />
+      <WorkListTable
+        scope={scope}
+        state={state}
+        filters={filters}
+        memberNames={memberNames}
+        load={load}
+        loadRow={loadRow}
+      />
     </section>
   );
 }
@@ -174,12 +186,14 @@ function WorkListTable({
   filters,
   memberNames,
   load,
+  loadRow,
 }: {
   scope: WorkListScope;
   state: WorkListUrlState;
   filters: WorkListFilters;
   memberNames: ReturnType<typeof useMemberNames>;
   load?: Parameters<typeof useWorkList>[0]["load"];
+  loadRow?: Parameters<typeof useAddressedWork>[0]["load"];
 }) {
   const t = useTranslations("WorkList");
   const router = useRouter();
@@ -187,6 +201,19 @@ function WorkListTable({
   const searchParams = useSearchParams();
 
   const list: WorkListState = useWorkList({ filters, cursor: state.cursor, load });
+
+  // THE ADDRESSED ROW (#719). `?work=<id>` names a Work the caller arrived pointing at, which may
+  // sit outside this page entirely — three pages down, or excluded by the filters the same URL
+  // carries. When it IS on this page the row itself carries the treatment and nothing is read;
+  // otherwise the addressed-row door answers it beside the page. A DENIED list asks nothing: that
+  // door would refuse identically and the surface would carry two banners saying one thing.
+  const addressedInPage =
+    state.work !== null && list.rows.some((row) => row.id === state.work);
+  const addressed = useAddressedWork({
+    workId: state.work,
+    skip: addressedInPage || list.loading || list.denied !== null,
+    load: loadRow,
+  });
 
   // PAGING IS A `push`, unlike a filter change's `replace` — page 3's Back goes to page 2, which
   // is what a person means by Back inside a paged list.
@@ -196,14 +223,25 @@ function WorkListTable({
     router.push(query === "" ? pathname : `${pathname}?${query}`);
   };
 
+  // ONE definition of "clear everything", shared with the filter bar's own Clear button
+  // (`lib/work/work-list-url-state.ts`): two hand-written copies of the same seven-axis literal
+  // were one axis away from disagreeing about what a cleared list is.
   const clearFilters = () => {
-    const next = applyWorkListUrlState(searchParams, {
-      client: null, status: [], purpose: [], initiator: null,
-      since: null, until: null, q: null, view: null, cursor: null,
-    });
+    const next = applyWorkListUrlState(searchParams, EMPTY_WORK_LIST_FILTERS);
     const query = next.toString();
     router.replace(query === "" ? pathname : `${pathname}?${query}`);
   };
+
+  // Rendered ABOVE whatever the page itself has to say, in every state except a permission loss —
+  // including over an Empty, which is exactly the case a `?work=` link into a filtered list hits.
+  const addressedBlock =
+    state.work === null || list.denied !== null || addressedInPage ? null : (
+      <AddressedWorkCallout
+        addressed={addressed}
+        scope={scope}
+        memberNames={memberNames}
+      />
+    );
 
   if (list.loading) {
     return (
@@ -224,17 +262,20 @@ function WorkListTable({
 
   if (list.failedFirstRead) {
     return (
-      <StateBanner
-        tone="error"
-        title={t("failedReadTitle")}
-        action={
-          <Button type="button" variant="outline" size="sm" onClick={list.reload}>
-            {t("retry")}
-          </Button>
-        }
-      >
-        {t("failedReadBody")}
-      </StateBanner>
+      <div className="flex flex-col gap-3">
+        {addressedBlock}
+        <StateBanner
+          tone="error"
+          title={t("failedReadTitle")}
+          action={
+            <Button type="button" variant="outline" size="sm" onClick={list.reload}>
+              {t("retry")}
+            </Button>
+          }
+        >
+          {t("failedReadBody")}
+        </StateBanner>
+      </div>
     );
   }
 
@@ -243,6 +284,7 @@ function WorkListTable({
   if (list.rows.length === 0) {
     return (
       <div className="flex flex-col gap-2">
+        {addressedBlock}
         {list.staleError !== null ? <StaleBanner retry={list.reload} /> : null}
         <Empty className="border">
           <EmptyHeader>
@@ -265,6 +307,7 @@ function WorkListTable({
 
   return (
     <div className="flex flex-col gap-3">
+      {addressedBlock}
       {list.staleError !== null ? <StaleBanner retry={list.reload} /> : null}
 
       {/* THE ONE STATUS ANNOUNCEMENT once rows are on screen: refreshing, or a plain count of what
@@ -299,7 +342,13 @@ function WorkListTable({
         </TableHeader>
         <TableBody>
           {list.rows.map((row) => (
-            <WorkRow key={row.id} row={row} scope={scope} memberNames={memberNames} />
+            <WorkRow
+              key={row.id}
+              row={row}
+              scope={scope}
+              memberNames={memberNames}
+              addressed={row.id === state.work}
+            />
           ))}
         </TableBody>
       </Table>
@@ -313,28 +362,69 @@ function WorkListTable({
   );
 }
 
+/**
+ * MOVE FOCUS TO THE THING THE URL ASKED FOR, ONCE.
+ *
+ * A `?work=<id>` link is a request to be taken to one row, so landing the caret on that row's own
+ * link is what makes the request true for a keyboard or screen-reader user rather than only for a
+ * sighted one scanning for a highlight. Guarded by the id it last focused, so a re-render, a poll
+ * or a filter change never yanks focus back from wherever the person has since moved it; and
+ * feature-detected, because this app's unit harness mounts through a DOM shim whose nodes carry no
+ * `focus` at all (`apps/web/test/hookHarness.ts`) — the e2e walk is where real focus is measured.
+ */
+function useFocusAddressed(active: boolean, workId: string | null) {
+  const ref = useRef<HTMLAnchorElement | null>(null);
+  const focusedRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!active || workId === null || focusedRef.current === workId) return;
+    const node = ref.current;
+    if (node && typeof node.focus === "function") {
+      focusedRef.current = workId;
+      node.focus();
+    }
+  }, [active, workId]);
+  return ref;
+}
+
 function WorkRow({
   row,
   scope,
   memberNames,
+  addressed,
 }: {
   row: WorkListRow;
   scope: WorkListScope;
   memberNames: ReturnType<typeof useMemberNames>;
+  /** TRUE when `?work=` names THIS row and it happens to be on the page being shown. */
+  addressed: boolean;
 }) {
   const t = useTranslations("WorkList");
   const label = workStateLabel(row);
   const href = workDetailHref(row.client_id, row.id);
+  const focusRef = useFocusAddressed(addressed, addressed ? row.id : null);
 
   return (
-    <TableRow>
+    // `aria-current="true"` rather than a colour alone: the addressed row is a FACT about this
+    // list ("this is the one you asked for"), and a tinted background is not a fact anybody can
+    // hear. The tint is the same `accent` the rest of the app uses for a current row.
+    <TableRow
+      aria-current={addressed ? true : undefined}
+      data-addressed={addressed ? "true" : undefined}
+      className={addressed ? "bg-accent/60" : undefined}
+    >
       <TableCell className="align-top">
         <div className="flex flex-col gap-0.5">
+          {addressed ? (
+            <p role="status" className="sr-only">
+              {t("addressedOnThisPage")}
+            </p>
+          ) : null}
           {/* THE PRIMARY ACTION IS A VISIBLE LINK ON THE ROW, never only inside the overflow menu
               (appendix C §3's "Important pending questions and primary next actions stay outside
               overflow menus"). It is a real route, so Back from the detail restores this list's
               own URL — filters, page and all. */}
           <Link
+            ref={focusRef}
             href={href}
             className="text-sm font-medium text-primary underline underline-offset-2 wrap-anywhere"
           >
@@ -416,6 +506,120 @@ function WorkRow({
   );
 }
 
+/**
+ * THE ADDRESSED ROW, WHEN IT IS NOT ON THIS PAGE — #719's own lesson, rendered.
+ *
+ * A `?work=<id>` link names one Work. If it is three pages down, or excluded by the filters the
+ * same URL carries, a surface that could only see its current page would show the person NOTHING
+ * and say nothing about it: the row they were sent a link to, silently absent from a list that
+ * looks complete. So it is fetched by id from `clara.get_accounting_work_row` and rendered HERE,
+ * above the page, saying plainly that it is not on it.
+ *
+ * IT IS NOT A ROW OF THE TABLE, and that is deliberate rather than cosmetic. Splicing it into the
+ * table body would put a record in an ordered, paged list at a position the ordering never gave
+ * it — the reader would have no way to know which rows are the page and which one is the visitor.
+ * A labelled region above the table is the honest shape: appendix D row 33's Item anatomy is what
+ * this would be composed from, and that primitive is not installed (and this ticket installs only
+ * `pagination` and `empty`), so it is composed from the same Badge/Link vocabulary the rows use.
+ *
+ * NOT-FOUND IS SAID OUT LOUD. The door answers the SAME CLR11 for an id that never existed, one
+ * belonging to another firm, and one this caller may not read — it gives no oracle, so neither
+ * does this. What it must never do is drop the request silently, which is indistinguishable from
+ * "your link worked and there was nothing interesting there".
+ */
+function AddressedWorkCallout({
+  addressed,
+  scope,
+  memberNames,
+}: {
+  addressed: AddressedWorkState;
+  scope: WorkListScope;
+  memberNames: ReturnType<typeof useMemberNames>;
+}) {
+  const t = useTranslations("WorkList");
+  const row = addressed.row;
+  const focusRef = useFocusAddressed(row !== null, row?.id ?? null);
+
+  if (addressed.loading) {
+    return (
+      <p role="status" className="text-sm text-muted-foreground">
+        {t("addressedLoading")}
+      </p>
+    );
+  }
+
+  if (addressed.notFound) {
+    return (
+      <StateBanner tone="warning" title={t("addressedNotFoundTitle")} code="CLR11">
+        {t("addressedNotFoundBody")}
+      </StateBanner>
+    );
+  }
+
+  if (addressed.error !== null) {
+    return (
+      <StateBanner
+        tone="error"
+        title={t("addressedFailedTitle")}
+        action={
+          <Button type="button" variant="outline" size="sm" onClick={addressed.reload}>
+            {t("retry")}
+          </Button>
+        }
+      >
+        {t("addressedFailedBody")}
+      </StateBanner>
+    );
+  }
+
+  if (row === null) return null;
+
+  const label = workStateLabel(row);
+  const href = workDetailHref(row.client_id, row.id);
+
+  return (
+    <section
+      aria-label={t("addressedLabel")}
+      data-slot="addressed-work"
+      className="flex flex-col gap-1.5 rounded-lg border border-primary/40 bg-accent/40 p-3"
+    >
+      <p role="status" className="text-xs font-medium text-muted-foreground">
+        {t("addressedOutsidePage")}
+      </p>
+      <div className="flex flex-wrap items-center gap-2">
+        <Link
+          ref={focusRef}
+          href={href}
+          className="text-sm font-medium text-primary underline underline-offset-2 wrap-anywhere"
+        >
+          {row.memo && row.memo.trim() !== "" ? row.memo : t("untitledWork")}
+        </Link>
+        <Badge variant={workStateTone(label)}>
+          {label === "unknown" ? row.status : t(`stateLabels.${label}`)}
+        </Badge>
+      </div>
+      <p className="text-xs text-muted-foreground">
+        {[
+          scope.kind === "firm" ? (row.client_name ?? t("unknownClient")) : null,
+          KNOWN_ORIGIN_LABELS.has(row.basis_origin)
+            ? t(`originLabels.${row.basis_origin}`)
+            : row.basis_origin,
+          row.created_at === null ? null : businessDateTime(row.created_at),
+        ]
+          .filter((part): part is string => typeof part === "string" && part !== "")
+          .join(" · ")}
+      </p>
+      <p className="text-xs text-muted-foreground">
+        <MemberName
+          userId={row.initiated_by ?? row.initiator}
+          resolver={memberNames}
+          showRole={false}
+        />
+      </p>
+    </section>
+  );
+}
+
 /** Previous/Next over the door's keyset. THERE IS NO PAGE NUMBER AND NO "of N", deliberately:
  *  a keyset pager knows whether there is a next page and nothing about how many there are, and
  *  appendix D row 42 is explicit — "Never infer a total from the current page".
@@ -426,9 +630,10 @@ function WorkRow({
  *  `<a href>`. So these controls navigate like links — the href is real, middle-click and
  *  open-in-new-tab work, and `onClick`'s `preventDefault` only upgrades that to a client-side
  *  push — while assistive tech announces them as buttons. That name/role mismatch belongs to the
- *  registry file, not to this composition, so it is reported as a follow-up rather than patched
- *  into a primitive other tickets also install; `e2e/work-list-walk.spec.ts` asserts the role as
- *  it actually is so the gap stays visible instead of being asserted away. */
+ *  registry file, not to this composition, so it is FILED AS A FOLLOW-UP ISSUE against
+ *  `components/ui/pagination.tsx` at integration rather than patched here into a primitive other
+ *  tickets also install; `e2e/work-list-walk.spec.ts` asserts the role as it actually is so the
+ *  gap stays visible instead of being asserted away. */
 function WorkListPager({
   hasPrevious,
   nextCursor,
