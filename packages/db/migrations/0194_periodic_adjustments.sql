@@ -305,7 +305,31 @@ revoke all on function clara._tf_accounting_work_immutable() from public;
 -- NULL → an id ONCE, stamped by the CORRECTING row's own insert in the same transaction, so the
 -- chain is readable in both directions without any row being rewritten. Everything else, and
 -- DELETE, and TRUNCATE, refuse.
+--
+-- EVERY FOREIGN KEY CARRIES THE TENANT, and that is a correction rather than a flourish
+-- (adversarial migration-safety review, S4). A single-column `entry_id uuid references
+-- clara.journal_entries(id)` is satisfied by ANY firm's entry: the row could structurally cite
+-- another tenant's entry, receipt or document, and the only thing preventing it would be that
+-- `clara._record_journal_entry_core` is the sole writer — a property of code, not of the data.
+-- The estate's own idiom is `clara.entry_evidence_links` (0182:320-326): carry the tenant columns
+-- INTO the reference, against the composite unique the referenced table exposes. Each of the
+-- three is matched to the widest composite that table actually has:
+--   * `clara.journal_entries`     → `uq_journal_entries_id_firm_client` (0009:799) — firm+client
+--   * `clara.operation_receipts`  → nothing existed; §C.0 below adds the same three-column unique
+--   * `clara.documents`           → `uq_documents_id_firm` (0007:58) — FIRM only, and correctly
+--     so: `clara.documents` has no client column at all, the FILING is what binds a document to a
+--     client, and 0182's own document FK is the identical two-column shape.
+-- `source_document_id` is NULLABLE and the reference is MATCH SIMPLE (the default), so a row with
+-- no document skips the check entirely — exactly how 0182's nullable `work_id` behaves.
 -- =====================================================================================
+
+-- §C.0 · THE COMPOSITE UNIQUE `clara.operation_receipts` did not have. Purely additive: it grants
+-- nothing, refuses nothing that `id`'s primary key already admits (firm_id and client_id are both
+-- NOT NULL, so the triple is unique exactly when `id` is), and exists so the FK below can carry
+-- the tenant. The identical move 0009:799 made for `clara.journal_entries`.
+alter table clara.operation_receipts
+  add constraint uq_operation_receipts_id_firm_client unique (id, firm_id, client_id);
+
 create table clara.periodic_adjustments (
   id                         uuid        primary key default gen_random_uuid(),
   firm_id                    uuid        not null references clara.firms(id),
@@ -324,8 +348,11 @@ create table clara.periodic_adjustments (
   -- for a payroll obligation. Exact minor units; never a float anywhere in this lane.
   amount_cents               bigint      not null,
   currency                   text        not null check (currency = 'MYR'),
-  entry_id                   uuid        not null references clara.journal_entries(id),
-  receipt_id                 uuid        not null references clara.operation_receipts(id),
+  -- The three CITATIONS. Each is a composite reference carrying this row's own tenant columns —
+  -- see THE TENANT note in this section's header for why, and for which composite each one lands
+  -- on. The constraints themselves are declared at the foot of this table beside the other FKs.
+  entry_id                   uuid        not null,
+  receipt_id                 uuid        not null,
   source_document_id         uuid,
   corrects_adjustment_id     uuid        references clara.periodic_adjustments(id),
   corrected_by_adjustment_id uuid        references clara.periodic_adjustments(id),
@@ -340,6 +367,14 @@ create table clara.periodic_adjustments (
     references clara.clients(id, firm_id),
   constraint fk_periodic_adjustments_work foreign key (work_id, firm_id, client_id)
     references clara.accounting_work(id, firm_id, client_id),
+  constraint fk_periodic_adjustments_entry foreign key (entry_id, firm_id, client_id)
+    references clara.journal_entries(id, firm_id, client_id),
+  constraint fk_periodic_adjustments_receipt foreign key (receipt_id, firm_id, client_id)
+    references clara.operation_receipts(id, firm_id, client_id),
+  -- FIRM-WIDE, because `clara.documents` carries no client column: the filing binds a document to
+  -- a client, and `clara._assert_journal_source_refs` is what checks THIS client's live filing.
+  constraint fk_periodic_adjustments_document foreign key (source_document_id, firm_id)
+    references clara.documents(id, firm_id),
   -- ONE adjustment per logical operation identity — the structural half of "duplicate / lost
   -- acknowledgement / restart yields ONE effect", beside `uq_operation_receipts_committed`.
   constraint uq_periodic_adjustments_logical unique (logical_op_id),
@@ -1303,13 +1338,28 @@ comment on function clara.admit_periodic_adjustment_work(uuid,uuid,text,text,jso
 --   5. a `clara.periodic_adjustments` row is written inside the posting transaction and its id
 --      joins the receipt's `effects`, the Work's `result` and the answer.
 --
+-- A NAMED EXCEPTION TO 0182's ORDERING RULE, stated here so the next recut does not "fix" it.
+-- 0182's rule is that PAYLOAD-SHAPED arms run BEFORE `clara._reserve_op` (so a malformed input
+-- leaves the operation identity unspent) and WORLD-SHAPED arms after it. INSERTION 2 is
+-- payload-shaped and nevertheless sits AFTER the reservation. The reason is the paragraph below;
+-- the cost is measured rather than assumed: `_reserve_op` and every arm after it run inside the
+-- SAME transaction as the caller, so a raise from INSERTION 2 rolls the reservation back with
+-- everything else and the identity is still unspent — re-posting the same logical identity
+-- afterwards behaves exactly as it does for an arm that ran before the reservation (checked
+-- adversarially on rig643: a world refusal at commit leaves `clara.op_receipts` rows = 0 for that
+-- identity and the same identity re-posts). INSERTION 1 — the particulars' SHAPE — does keep the
+-- rule and runs before the reservation, so a malformed set never even reaches this arm.
+--
 -- WHY THE LINES-RELATIONSHIP ARM SITS AFTER THE BASIS-ECHO WALL rather than before the
 -- reservation with the shape check. Both are payload arms, but they read DIFFERENT payloads: the
 -- shape check reads `accounting_work.adjustment_basis`, a frozen column no run can touch, so it
 -- is safe anywhere; the relationship check reads the ECHOED lines, and an echo that has drifted
 -- from the admitted basis must be diagnosed `basis_mismatch` — the name the frozen
 -- `claraWork.v1.errors.ts` roster knows — and not as a relationship failure about figures the
--- human never submitted. Putting it one statement later is what keeps that diagnosis true.
+-- human never submitted. The echo wall is at step 5b, which is itself after the reservation
+-- (5), so an arm that must follow the wall cannot precede the reservation: the two orderings are
+-- in direct conflict and this one wins, because a MIS-DIAGNOSED refusal reaches the frozen
+-- workflow's error roster and a spent-then-rolled-back reservation reaches nobody.
 -- =====================================================================================
 create or replace function clara._record_journal_entry_core(p_firm uuid, p_obo uuid, p_wake_kind text,
     p_client uuid, p_work uuid, p_logical_op_id text, p_basis jsonb, p_bundle_digest text,
@@ -1726,10 +1776,18 @@ begin
   end if;
   -- ---- #643 INSERTION 5 ends -------------------------------------------------------------
 
+  -- #643 · THE ANSWER SHAPE IS ONE SHAPE PER LANE, and the key is emitted only when there IS an
+  -- adjustment (adversarial migration-safety review, S2). Carried unconditionally, a fresh
+  -- `journal_entry` commit answered `"adjustment_id": null` while a REPLAYED pre-0194 one — whose
+  -- payload `clara._finish_op` stored before this migration existed — carried no such key at all:
+  -- two shapes for one lane, distinguishable only by whether the caller happened to replay. The
+  -- `||` fold is the same one `v_effects` above already uses for `document_id`, so the receipt,
+  -- the Work's result and the returned answer now agree on one rule: name the effect you had.
   update clara.accounting_work
      set result = jsonb_build_object('entry_id', v_entry, 'receipt_id', v_receipt,
-                                     'posted_at', now(), 'document_id', v_source_document,
-                                     'adjustment_id', v_adjustment)
+                                     'posted_at', now(), 'document_id', v_source_document)
+                  || case when v_adjustment is null then '{}'::jsonb
+                          else jsonb_build_object('adjustment_id', v_adjustment) end
    where id = p_work;
 
   perform clara._audit(p_firm, clara.agent_user_id(), p_obo, p_wake_kind,
@@ -1738,9 +1796,12 @@ begin
       'receipt', v_receipt, 'bundle_digest', p_bundle_digest, 'rationale', p_rationale,
       'document_id', v_source_document, 'purpose', w.purpose, 'adjustment_id', v_adjustment));
 
+  -- …AND THE RETURNED ANSWER FOLLOWS THE SAME RULE as the Work's `result` above (S2).
   v_result := jsonb_build_object('posted', true, 'entry_id', v_entry, 'revision_token', v_token,
     'receipt_id', v_receipt, 'logical_op_id', p_logical_op_id, 'work_id', p_work,
-    'document_id', v_source_document, 'adjustment_id', v_adjustment, 'replayed', false);
+    'document_id', v_source_document, 'replayed', false)
+    || case when v_adjustment is null then '{}'::jsonb
+            else jsonb_build_object('adjustment_id', v_adjustment) end;
   return clara._finish_op(p_firm, 'record_journal_entry', p_logical_op_id, v_result);
 end $$;
 revoke all on function clara._record_journal_entry_core(uuid,uuid,text,uuid,uuid,text,jsonb,text,text,text) from public;
@@ -1818,6 +1879,12 @@ begin
     -- about STOCK rather than an acceptance of a missing verb. A marker with no adjustment row
     -- (a pre-#643 entry, or a fixture) reports the entry and null for the rest.
     'closing_stock_entry_id', v_marker.entry_id,
+    -- …AND WHEN. `je.posting_date` was selected into `v_marker` and never emitted (adversarial
+    -- migration-safety review, N2). Emitted rather than dropped: it is the one fact about the
+    -- marker a close reviewer reads without opening anything — WHICH day inside the year the
+    -- stock was declared — it is already the first ORDER BY key, and it costs no extra read. A
+    -- marker with no adjustment row (a pre-#643 entry, or a fixture) still has one.
+    'closing_stock_posted_on', v_marker.posting_date,
     'closing_stock_adjustment_id', v_marker.adjustment_id,
     'closing_stock_work_id', v_marker.work_id,
     'closing_stock_period_start', v_marker.period_start,
@@ -1971,6 +2038,34 @@ begin
     raise exception '#643 tail: the one-adjustment-per-logical-identity unique is absent'
       using errcode='CLR10';
   end if;
+  -- EVERY CITATION CARRIES THE TENANT (S4). Read as the catalog's own constraint definitions, so
+  -- a future single-column FK — the shape that would let a row cite another firm's entry, receipt
+  -- or document — cannot be added without this failing. The two three-column ones are asserted by
+  -- their exact text; the document one is firm-only because `clara.documents` has no client
+  -- column (see §C's header).
+  for v_def, v_expect in
+    select * from (values
+      ('fk_periodic_adjustments_entry',
+       'FOREIGN KEY (entry_id, firm_id, client_id) REFERENCES clara.journal_entries(id, firm_id, client_id)'),
+      ('fk_periodic_adjustments_receipt',
+       'FOREIGN KEY (receipt_id, firm_id, client_id) REFERENCES clara.operation_receipts(id, firm_id, client_id)'),
+      ('fk_periodic_adjustments_document',
+       'FOREIGN KEY (source_document_id, firm_id) REFERENCES clara.documents(id, firm_id)')
+    ) as t(name, def)
+  loop
+    if (select pg_get_constraintdef(oid) from pg_constraint
+         where conrelid='clara.periodic_adjustments'::regclass and conname=v_def) is distinct from v_expect then
+      raise exception '#643 tail: % is not the tenant-carrying composite reference this file declared (got %)',
+        v_def, (select pg_get_constraintdef(oid) from pg_constraint
+                 where conrelid='clara.periodic_adjustments'::regclass and conname=v_def)
+        using errcode='CLR10';
+    end if;
+  end loop;
+  if not exists (select 1 from pg_constraint where conrelid='clara.operation_receipts'::regclass
+                   and conname='uq_operation_receipts_id_firm_client') then
+    raise exception '#643 tail: the composite unique the receipt FK references is absent from clara.operation_receipts'
+      using errcode='CLR10';
+  end if;
   -- THE LANE SHIPS EMPTY. A migration that arrived with rows would mean it had run somewhere else.
   select count(*)::int into v_n from clara.periodic_adjustments;
   if v_n <> 0 then
@@ -2113,7 +2208,67 @@ begin
     raise exception '#643 tail: the closing_stock_present catalog row no longer names this evaluator'
       using errcode='CLR10';
   end if;
+  -- …and the gate now EMITS the marker's posting date rather than selecting it into nothing (N2).
+  if position('closing_stock_posted_on' in v_src) = 0 then
+    raise exception '#643 tail: the recut closing-stock gate selects je.posting_date and emits nothing'
+      using errcode='CLR10';
+  end if;
 
-  raise notice '#643 tail: OK -- both purpose CHECKs carry journal_entry + periodic_stock_adjustment + payroll_obligation and lost nothing; clara.accounting_work.adjustment_basis is a frozen jsonb column, null iff the purpose is journal_entry, inside the immutability trigger''s frozen array beside 0184''s surviving initiator authority wall; clara.periodic_adjustments ships EMPTY with forced RLS, a clara_authenticated-only SELECT (clara_runtime reaches nothing), ZERO DML to every application role, the append-only + no-truncate belts, one-adjustment-per-logical-identity and one-correction-per-target; admit_periodic_adjustment_work reaches clara_runtime and nobody else, list_periodic_adjustments reaches clara_authenticated and nobody else, and all twelve predicates/cores/triggers are EXECUTE-reachable by no application role at all; clara.admit_journal_work keeps its 7-argument signature and its grant and is now EXACTLY the one-statement delegation, with every one of 0182''s twelve admission arms re-read inside the extracted core; the posting core''s recut kept all nineteen 0184/0182 arms, gained this file''s five insertions, widened the purpose filter to the closed set and left the journal lane''s reservation payload byte-identical; and the closing-stock gate no longer confesses no_producer_verb and names the clara.periodic_adjustments row that produced its marker.';
+  -- (T.8) THE POSTURE CEREMONY, COMPLETED — owner, SECURITY DEFINER, search_path AND the exact
+  -- ACL, for every function this file creates or recuts.
+  --
+  -- WHY THIS BLOCK EXISTS (adversarial migration-safety review, S1). The §I census above re-read
+  -- prosrc and asked `has_function_privilege` grantee by grantee — which catches a MISSING or an
+  -- EXTRA grant, but says nothing about the other three legs of the estate's posture. A body that
+  -- shipped as INVOKER, or under the wrong owner, or without a pinned `search_path`, would pass
+  -- every assertion in this file and still be a hole: a SECURITY DEFINER function with a mutable
+  -- search_path is the textbook privilege-escalation shape, and a definer function owned by the
+  -- wrong role runs with the wrong authority. All four legs are now read from the catalog.
+  --
+  -- THE ACL IS ASSERTED AS ITS EXACT TEXT rather than by privilege probes, and that is the
+  -- stronger claim: `array_to_string(proacl, ',')` shows every grantee AND every grantor, so a
+  -- grant made by somebody other than `clara_fn_owner` — a WITH GRANT OPTION, a grant to PUBLIC
+  -- that `has_function_privilege` would report as "clara_runtime can execute" — cannot hide.
+  -- Three shapes only: ungranted, +clara_runtime (the admission door), +clara_authenticated (the
+  -- read). Measured live on the 0001→0187+0194 chain before it was written here.
+  for v_def, v_expect in
+    select * from (values
+      ('clara._tf_accounting_work_immutable()', 'clara_fn_owner=X/clara_fn_owner'),
+      ('clara._tf_periodic_adjustment_append_only()', 'clara_fn_owner=X/clara_fn_owner'),
+      ('clara._adjustment_cents_value(jsonb,text)', 'clara_fn_owner=X/clara_fn_owner'),
+      ('clara._adjustment_cents(jsonb,text,boolean,boolean)', 'clara_fn_owner=X/clara_fn_owner'),
+      ('clara._adjustment_date(jsonb,text,boolean)', 'clara_fn_owner=X/clara_fn_owner'),
+      ('clara._adjustment_text(jsonb,text,int,boolean)', 'clara_fn_owner=X/clara_fn_owner'),
+      ('clara._assert_adjustment_basis(text,jsonb)', 'clara_fn_owner=X/clara_fn_owner'),
+      ('clara._adjustment_basis_canonical(text,jsonb)', 'clara_fn_owner=X/clara_fn_owner'),
+      ('clara._adjustment_amount_cents(text,jsonb)', 'clara_fn_owner=X/clara_fn_owner'),
+      ('clara._adjustment_net_cents(jsonb,text)', 'clara_fn_owner=X/clara_fn_owner'),
+      ('clara._assert_adjustment_relationships(uuid,text,jsonb,jsonb,boolean)', 'clara_fn_owner=X/clara_fn_owner'),
+      ('clara._assert_adjustment_account(uuid,text,text,text,text)', 'clara_fn_owner=X/clara_fn_owner'),
+      ('clara._admit_accounting_work_core(uuid,uuid,text,text,jsonb,jsonb,text,jsonb,text)', 'clara_fn_owner=X/clara_fn_owner'),
+      ('clara._record_journal_entry_core(uuid,uuid,text,uuid,uuid,text,jsonb,text,text,text)', 'clara_fn_owner=X/clara_fn_owner'),
+      ('clara._close_gate_closing_stock(uuid,uuid)', 'clara_fn_owner=X/clara_fn_owner'),
+      ('clara.admit_journal_work(uuid,uuid,text,jsonb,text,jsonb,text)',
+       'clara_fn_owner=X/clara_fn_owner,clara_runtime=X/clara_fn_owner'),
+      ('clara.admit_periodic_adjustment_work(uuid,uuid,text,text,jsonb,jsonb,text,jsonb,text)',
+       'clara_fn_owner=X/clara_fn_owner,clara_runtime=X/clara_fn_owner'),
+      ('clara.list_periodic_adjustments(uuid,date,date)',
+       'clara_fn_owner=X/clara_fn_owner,clara_authenticated=X/clara_fn_owner')
+    ) as t(sig, acl)
+  loop
+    if to_regprocedure(v_def) is null then
+      raise exception '#643 tail: % does not resolve for the posture census', v_def using errcode='CLR10';
+    end if;
+    select pg_get_userbyid(p.proowner) || ' | ' || p.prosecdef::text || ' | '
+           || coalesce(array_to_string(p.proconfig, ','), '<none>') || ' | '
+           || coalesce(array_to_string(p.proacl, ','), '<null>')
+      into v_src from pg_proc p where p.oid = to_regprocedure(v_def);
+    if v_src is distinct from ('clara_fn_owner | true | search_path=clara, pg_temp | ' || v_expect) then
+      raise exception '#643 tail: % has the wrong posture -- expected owner clara_fn_owner, SECURITY DEFINER, search_path=clara, pg_temp and ACL {%}; got {%}',
+        v_def, v_expect, v_src using errcode='CLR10';
+    end if;
+  end loop;
+
+  raise notice '#643 tail: OK -- both purpose CHECKs carry journal_entry + periodic_stock_adjustment + payroll_obligation and lost nothing; clara.accounting_work.adjustment_basis is a frozen jsonb column, null iff the purpose is journal_entry, inside the immutability trigger''s frozen array beside 0184''s surviving initiator authority wall; clara.periodic_adjustments ships EMPTY with forced RLS, a clara_authenticated-only SELECT (clara_runtime reaches nothing), ZERO DML to every application role, the append-only + no-truncate belts, one-adjustment-per-logical-identity and one-correction-per-target; admit_periodic_adjustment_work reaches clara_runtime and nobody else, list_periodic_adjustments reaches clara_authenticated and nobody else, and all twelve predicates/cores/triggers are EXECUTE-reachable by no application role at all; clara.admit_journal_work keeps its 7-argument signature and its grant and is now EXACTLY the one-statement delegation, with every one of 0182''s twelve admission arms re-read inside the extracted core; the posting core''s recut kept all nineteen 0184/0182 arms, gained this file''s five insertions, widened the purpose filter to the closed set and left the journal lane''s reservation payload byte-identical; and the closing-stock gate no longer confesses no_producer_verb and names the clara.periodic_adjustments row -- and the posting date -- that produced its marker. THE FOUR REVIEWED FINDINGS are re-read from the catalog too: every citation clara.periodic_adjustments makes carries its own tenant (entry and receipt against three-column composites, the document against clara.documents'' firm-only one, which is the widest that table has), so a row cannot structurally name another firm''s entry, receipt or document; the posting core emits adjustment_id ONLY when there is an adjustment, so the journal lane keeps ONE answer shape; the lines-relationship arm''s position after clara._reserve_op is a NAMED exception to 0182''s ordering rule with its reason and its measured cost stated in the section header; and all eighteen functions this file creates or recuts are re-read for owner, SECURITY DEFINER, pinned search_path and their EXACT ACL text -- grantor included -- rather than for grants alone.';
 end
 $w643_tail$;
