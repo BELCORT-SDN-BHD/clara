@@ -108,7 +108,10 @@ declare
   v_n int;
   v_bad text[];
 begin
-  foreach v_def in array array['clara_fn_owner','clara_authenticated','clara_agent_ro'] loop
+  -- clara_runtime is in this list because the TAIL sweeps its privileges on both new tables;
+  -- has_table_privilege() on a role that does not exist raises a confusing catalog error three
+  -- hundred lines later instead of a named one here.
+  foreach v_def in array array['clara_fn_owner','clara_authenticated','clara_agent_ro','clara_runtime'] loop
     if not exists (select 1 from pg_roles where rolname = v_def) then
       raise exception 'dcr prestate: role % is missing', v_def using errcode = 'CLR10';
     end if;
@@ -170,8 +173,19 @@ begin
       or fp !~ '^([A-Za-z_][A-Za-z0-9_]*|[0-9]+)(\.([A-Za-z_][A-Za-z0-9_]*|[0-9]+)){0,11}$'
       or split_part(fp, '.', 1) not in ('invoice','statement','myinvois','opening_tb','prior_gl',
                                         'pages','tables','rows','sheets','paragraphs');
+  -- TWO CAUSES, AND THEY WANT OPPOSITE ANSWERS, so the message names both rather than sending
+  -- the reader down the wrong one. On a DEPLOYED database a refusal means a live PRODUCER writes
+  -- a shape this file has not been taught: census it (packages/db/deploy/0191-field-path-census.sql
+  -- probe 1), identify the producer, and widen the roster in a NEW append-only migration. On a
+  -- developer RIG it almost certainly means a TEST FIXTURE inserted straight into
+  -- clara.document_regions before this file was applied -- packages/runtime/tests'
+  -- f-a1-witness-fixtures.mjs writes `ocr_total`, `ocr_net` and friends, and
+  -- rig-docs-fixtures.mjs's seedRegion defaults to a bare `total`. None of those is a producer
+  -- (they never pass through clara.persist_document_extraction), so the answer there is a fresh
+  -- database, NEVER a wider grammar. Measured on the PG17 rig 2026-09-14: a cluster that had run
+  -- the F-A1 witness battery before 0191 carried 42 such rows.
   if coalesce(array_length(v_bad, 1), 0) > 0 then
-    raise exception 'dcr prestate: % stored field_path value(s) would be refused by the new grammar (first ten: %) -- a live producer emits a shape this file has not been taught; census it and widen the roster before retrying',
+    raise exception 'dcr prestate: % stored field_path value(s) would be refused by the new grammar (first ten: %) -- on a deployed database this is a live producer emitting an untaught shape: census it and widen the roster in a NEW migration. On a rig it is almost certainly a TEST FIXTURE that inserted into clara.document_regions directly (ocr_*, a bare total); those are not producers, so apply this file to a database migrated from scratch instead of widening the grammar for them.',
       coalesce(array_length(v_bad, 1), 0), v_bad[1:10] using errcode = 'CLR10';
   end if;
 
