@@ -3,7 +3,7 @@
 import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { resolveSameOriginPath } from "@/lib/safe-redirect";
 import { createClient } from "@/lib/supabase/client";
@@ -94,6 +94,24 @@ export function LoginForm({
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
 
+  // FOCUS LANDS ON THE FAILURE BANNER (appendix D's pending-submit-identity
+  // gap; `signup-legal-stage.tsx`'s own header carries the underlying
+  // argument, restated in `password-recovery-form.tsx`'s identical addition).
+  // Disabling every input below while `isLoading` is true can drop the
+  // browser's focus onto `<body>` if the person was still focused in a field
+  // when the pending state committed; a failed sign-in must not leave a
+  // keyboard/screen-reader user stranded there. The banner cannot be focused
+  // from inside `handleLogin` itself — it does not exist until React commits
+  // the render that shows it — so the request is asked for as state and
+  // carried out in an effect.
+  const bannerRef = useRef<HTMLDivElement>(null);
+  const [focusBanner, setFocusBanner] = useState(false);
+  useEffect(() => {
+    if (!focusBanner) return;
+    bannerRef.current?.focus();
+    setFocusBanner(false);
+  }, [focusBanner]);
+
   async function handleLogin(event: React.FormEvent) {
     event.preventDefault();
     const supabase = createSupabaseClient();
@@ -108,6 +126,7 @@ export function LoginForm({
     if (signInError) {
       setError(signInError.message);
       setIsLoading(false);
+      setFocusBanner(true);
       return;
     }
 
@@ -137,7 +156,7 @@ export function LoginForm({
             one label-to-field gap — and the sign-in failure now renders in the
             same <StateBanner> as every other failure in the app. Supabase's
             own `signInError.message` is still passed through verbatim. */}
-        <form onSubmit={handleLogin} className="flex flex-col gap-6">
+        <form onSubmit={handleLogin} className="flex flex-col gap-6" aria-busy={isLoading}>
           <div className="grid gap-1.5">
             <Label htmlFor="email">{t("emailLabel")}</Label>
             <Input
@@ -145,6 +164,7 @@ export function LoginForm({
               type="email"
               autoComplete="email"
               required
+              disabled={isLoading}
               value={email}
               onChange={(event) => setEmail(event.target.value)}
             />
@@ -156,11 +176,12 @@ export function LoginForm({
               type="password"
               autoComplete="current-password"
               required
+              disabled={isLoading}
               value={password}
               onChange={(event) => setPassword(event.target.value)}
             />
           </div>
-          {error && <StateBanner tone="error">{error}</StateBanner>}
+          {error && <StateBanner ref={bannerRef} tabIndex={-1} tone="error">{error}</StateBanner>}
           <Button type="submit" className="w-full" disabled={isLoading}>
             {isLoading ? t("submitting") : t("submit")}
           </Button>

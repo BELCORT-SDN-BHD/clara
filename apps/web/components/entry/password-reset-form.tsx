@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useTranslations } from "next-intl";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { StateBanner } from "@/components/common/state";
 import { PasswordRecoveryForm } from "@/components/entry/password-recovery-form";
@@ -54,6 +54,20 @@ export function PasswordResetForm({
   const [sessionInvalid, setSessionInvalid] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // FOCUS LANDS ON THE FAILURE BANNER — same rule and shape as
+  // `password-recovery-form.tsx`'s own (appendix D's pending-submit-identity
+  // gap; `signup-legal-stage.tsx`'s header owns the underlying argument).
+  // `sessionInvalid` is excluded on purpose: that fork replaces this whole
+  // component with `PasswordRecoveryForm`, whose OWN mount is not something
+  // this effect should reach across into.
+  const bannerRef = useRef<HTMLDivElement>(null);
+  const [focusBanner, setFocusBanner] = useState(false);
+  useEffect(() => {
+    if (!focusBanner) return;
+    bannerRef.current?.focus();
+    setFocusBanner(false);
+  }, [focusBanner]);
+
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setSaving(true);
@@ -69,6 +83,7 @@ export function PasswordResetForm({
       // refusal remains byte-for-byte visible instead of being reclassified here.
       setError(updateError.message);
       setSaving(false);
+      setFocusBanner(true);
       return;
     }
     setSaved(true);
@@ -98,7 +113,7 @@ export function PasswordResetForm({
         <CardDescription>{t("description")}</CardDescription>
       </CardHeader>
       <CardContent>
-        <form className="flex flex-col gap-6" onSubmit={submit}>
+        <form className="flex flex-col gap-6" onSubmit={submit} aria-busy={saving}>
           <div className="grid gap-1.5">
             <Label htmlFor="new-password">{t("passwordLabel")}</Label>
             {/* THE RULE, BEFORE THE TYPING (PR 541 stage 2). This face used to
@@ -119,11 +134,12 @@ export function PasswordResetForm({
               minLength={PASSWORD_MIN_LENGTH}
               aria-describedby="new-password-policy"
               required
+              disabled={saving}
               value={password}
               onChange={(event) => setPassword(event.target.value)}
             />
           </div>
-          {error ? <StateBanner tone="error">{error}</StateBanner> : null}
+          {error ? <StateBanner ref={bannerRef} tabIndex={-1} tone="error">{error}</StateBanner> : null}
           <Button type="submit" className="w-full" disabled={saving}>
             {saving ? t("saving") : t("submit")}
           </Button>

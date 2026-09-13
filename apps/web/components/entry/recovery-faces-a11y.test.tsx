@@ -133,6 +133,25 @@ test("the invalid-link arm renders its refusal and still scans clean", async () 
   }
 });
 
+// #622 — the four classified link-failure arms (`/forgot-password?status=`,
+// read by `forgot-password/page.tsx`): each is its own gate (b) scan, since
+// each renders different copy and a StateBanner `title` this file's other
+// arms do not exercise.
+for (const linkFailure of ["expired", "used_or_unknown", "refused", "rate_limited"] as const) {
+  test(`the ${linkFailure} link-failure arm renders and scans clean`, async () => {
+    const h = await mount(
+      createElement(PasswordRecoveryForm, { linkFailure, createSupabaseClient: recoveryClient(null) }),
+    );
+    try {
+      assert.ok(findIn(h.container as never, byLabelledInput(/Email/)), "the email field must still render — this face's whole job is requesting a fresh link");
+      assert.deepEqual(checkAccessibility(h.container as never), []);
+      assert.deepEqual(checkKeyboardWalk(h.container as never), []);
+    } finally {
+      await h.unmount();
+    }
+  });
+}
+
 // NOTE ON THE NAME: "PR 507", not "#507". The colour-value lint reads a
 // three-hex-digit `#507` in a string literal as a raw colour and reds the
 // build — a real catch by a blunt rule, avoided rather than suppressed.

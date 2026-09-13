@@ -2172,6 +2172,17 @@
     "sentTitle": "Check your email",
     "sentDescription": "If an account can receive a reset link, the instructions are on their way.",
     "invalidLink": "That reset link is invalid or has expired. Request a new one.",
+    "linkExpiredTitle": "That reset link expired",
+    "linkExpiredDescription": "Reset links expire after a while for your security. Request a new one below.",
+    "linkUsedOrUnknownTitle": "That reset link isn't valid anymore",
+    "linkUsedOrUnknownDescription": "It may already have been used, or we no longer recognize it. Request a new one below.",
+    "linkRefusedTitle": "We couldn't verify that reset link",
+    "linkRefusedDescription": "Request a new reset link below.",
+    "linkRateLimitedTitle": "Too many attempts",
+    "linkRateLimitedDescription": "Wait a few minutes, then request a new reset link below.",
+    "requestRateLimitedTitle": "A reset link was just sent",
+    "requestRateLimitedDescription": "{seconds, plural, =1 {We can send another in 1 second.} other {We can send another in # seconds.}} Check your inbox and the spam folder while you wait.",
+    "requestRateLimitedDescriptionAtLeast": "We can send another in at least {seconds} seconds — the provider asked for longer than we show here. Check your inbox and the spam folder while you wait.",
     "backToLogin": "Back to sign in"
   },
   "PasswordReset": {

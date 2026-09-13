@@ -21,6 +21,13 @@ import { ensureRealFocus } from "./helpers";
  * SCOPE, DELIBERATELY: pre-auth rendering, client-side validation, and
  * routing/refusal faces only. The signup SUBMISSION arm (mail -> confirm ->
  * /signup) is excluded — that is `signup-confirm-pending.spec.ts`'s walk.
+ *
+ * #622 ONE NAMED EXCEPTION: a real sign-in submission, because the thing
+ * under test — the auth wall's `?next=` round trip (#698) — can only be
+ * observed by actually crossing the unauthenticated -> authenticated
+ * boundary. `firm-navigation-walk.spec.ts` owns the broader authenticated
+ * surface; this file's own `signIn` below is a one-shot walk, not a new
+ * pattern this file otherwise adopts.
  */
 
 /**
@@ -126,6 +133,33 @@ test("login keyboard pass: tab order is Email -> Password -> Sign in, with a vis
     return style.outlineStyle !== "none" || style.boxShadow !== "none";
   });
   expect(hasVisibleFocus).toBe(true);
+});
+
+// #698, folded into #622 — the auth wall used to drop the query string from
+// `?next=`: `lib/supabase/proxy.ts`'s unauthenticated redirect wrote `next`
+// from `request.nextUrl.pathname` ALONE, so a signed-out saved-view link
+// landed on the BARE destination after sign-in. `tests/
+// proxy-recover-next-query.test.ts` pins the redirect's own `Location`
+// header at the unit level; this is the round trip a unit test cannot
+// see — a real sign-in submission, through the real proxy redirect, back
+// through `login-form.tsx`'s `resolveSameOriginPath` read.
+test("sign in from a `next=` with a query string lands on that exact destination, with its saved view selected (#698)", async ({ page }) => {
+  await page.goto("/login?next=%2Fwork%3Fview%3Dneeds-you");
+  await page.getByLabel("Email").fill("owner@example.test");
+  await page.getByLabel("Password").fill("Clara-e2e-password-1!");
+  await page.getByRole("button", { name: "Sign in" }).click();
+
+  // THE EXACT DESTINATION — proving the round trip, not merely "somewhere
+  // under /work".
+  await expect(page).toHaveURL(/\/work\?view=needs-you$/);
+  // AND the saved view is genuinely SELECTED, not a coincidence of the URL:
+  // `components/common/nav-pills.tsx`'s own `aria-current="page"` is the real
+  // selection signal a set of LINKS owes (its header explains why this is
+  // `aria-current`, not `aria-selected` — these navigate, they do not swap a
+  // panel in place), and `WorkViews`'s "Needs you" heading is the view's own
+  // — neither renders for the default `/work` list.
+  await expect(page.getByRole("link", { name: "Needs you" })).toHaveAttribute("aria-current", "page");
+  await expect(page.getByRole("heading", { name: "Needs you", level: 2 })).toBeVisible();
 });
 
 test("the signup face renders on the identity canvas with Create account open — no DPA gate on this step", async ({ page }) => {

@@ -1,7 +1,11 @@
-// THE ONE WAIT-BOUNDING RULE ON THIS LANE — shared by the resend wall
-// (`resend/resend-wall.ts`) and the verify wall (`verify/confirmation-wall.ts`)
+// THE ONE WAIT-BOUNDING RULE, shared wherever this app prints a provider- or
+// door-measured cooldown: the confirm lane's resend wall (`resend/
+// resend-wall.ts`) and verify wall (`verify/confirmation-wall.ts`), and — as
+// of #622 — `components/entry/password-recovery-form.tsx`'s own
+// `over_email_send_rate_limit` state (a DIFFERENT provider cooldown, the
+// `/recover` endpoint's SMTP send limit rather than the confirm endpoint's),
 // so the display ceiling and the clamp-not-downgrade rule have exactly one
-// owner instead of two copies that could drift apart.
+// owner instead of copies that could drift apart.
 //
 // A WAIT LONGER THAN A CARD ON THIS LANE WILL PRINT IS STILL A WAIT. Both
 // walls guard a number a caller measured — the resend wall's provider cooldown
