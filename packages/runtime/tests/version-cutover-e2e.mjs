@@ -191,7 +191,12 @@ async function deriveNewestChatTurnExport() {
  *  unsupported", which is exactly the per-name question this helper asks. */
 async function rollbackPreflight(rig, name) {
   const out = await preflight({ query: (sql, params) => rig.rootQuery(sql, params), supported: [], scope: { nameLike: name } });
-  return out.verdict;
+  // #637 review B2 — the module now returns TWO verdicts: `verdict` is the GLOBAL one (what the
+  // CLI's exit code follows, because a parked run of another class strands just as hard) and
+  // `scoped.verdict` is the narrowed one. THIS helper asks a per-NAME question, so it must read
+  // the narrowed view; reading the global one here would make "closeExample has zero runs" answer
+  // `refused` because some other name has one — which is not what the line above it asserts.
+  return out.scoped.verdict;
 }
 
 /** The runbook's INVENTORY-shaped preflight: a real rollback doesn't ask "does THIS ONE name
@@ -206,11 +211,16 @@ async function rollbackPreflight(rig, name) {
  *  defect that survives CI indefinitely. The supported set is given as run NAMES here (this file's
  *  own idiom) and mapped to BODY identifiers, which is what the module compares. */
 async function rollbackPreflightInventory(rig, supportedNames, runIds) {
-  return preflight({
+  const out = await preflight({
     query: (sql, params) => rig.rootQuery(sql, params),
     supported: supportedNames.map(bodyIdentifierOf),
     scope: { runIds },
   });
+  // The NARROWED view when this caller narrowed, the GLOBAL one when it did not — which is exactly
+  // the #708 line below: the same helper, called with and without the ids, must answer about
+  // different populations. `preflight` always measures both and never lets one stand in for the
+  // other, so the choice is made HERE and visibly.
+  return out.scoped ?? out;
 }
 
 async function answerClarify(rig, taskId, ownerSub, answerText, opKey) {
@@ -360,9 +370,18 @@ async function main() {
     try {
       const unscoped = await rollbackPreflightInventory(rig, [v7RowName, closeExampleName], null);
       assert.equal(unscoped.verdict, "refused", "UNSCOPED, the noise dominates the answer — which is the #708 defect, reproduced");
-      const scoped = await rollbackPreflightInventory(rig, [v7RowName, closeExampleName], stagedRunIds);
-      assert.equal(scoped.verdict, "allowed", "#708: SCOPED to this e2e's own runs, 20 unrelated parked runs change nothing");
-      assert.equal(scoped.scoped, true, "…and the result says it was narrowed, so it can never be read as a global verdict");
+      // The FULL result here, not the helper's narrowed view: this leg is about the two verdicts
+      // being reported SEPARATELY (#637 review B2). A scoped "allowed" must never be readable as a
+      // global one, so the module returns both and says which is which.
+      const full = await preflight({
+        query: (sql, params) => rig.rootQuery(sql, params),
+        supported: [v7RowName, closeExampleName].map(bodyIdentifierOf),
+        scope: { runIds: stagedRunIds },
+      });
+      assert.equal(full.scoped.verdict, "allowed", "#708: SCOPED to this e2e's own runs, 20 unrelated parked runs change nothing");
+      assert.equal(full.scope.given, true, "…and the result SAYS it was narrowed, so it can never be read as a global verdict");
+      assert.equal(full.verdict, "refused", "…while the GLOBAL verdict beside it still sees the noise — that is the one an exit code follows");
+      assert.ok(full.outside.some((row) => row.name === noiseName), "…and the global census names the noise it refused on");
       console.log("[cutover-e2e] #708: with 20 unrelated parked runs present, the unscoped inventory refuses and the SCOPED one still allows");
     } finally {
       await rig.rootQuery("delete from workflow.workflow_runs where id = any($1::text[])", [noiseIds]);

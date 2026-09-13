@@ -46,14 +46,23 @@
 // "correct" classification in a drill that does not exercise it would be a claim about a table
 // rather than about this cutover.
 //
-// IT REFUSES TO START ON A DIRTY INVENTORY, with a named reason, and that is not fussiness — it is
-// a MEASURED hazard. A first run of this drill was interrupted mid-way and left a non-terminal
-// successor run behind; on the next run, build A booted, its engine re-enqueued a run whose body it
-// does not export, and the replay raised `ReplayDivergenceError`. The crash-only supervisor then
-// exited 1. So the honest reading of a rollback to a body-less image is stronger than the README's
-// old "the lane PARKS": the ENGINE can crash-loop. That is the whole reason the preflight is a gate
-// rather than a note, and it is why this file checks the inventory BEFORE it builds anything —
-// failing at the door with an instruction beats failing deep in a later leg (the #708 posture).
+// IT HAS TWO DOORS, BOTH NAMED, BOTH BEFORE ANYTHING IS BUILT (#637 review S4).
+//   · THE ARTIFACT GATE. This file runs `.output/server/index.mjs` as build B and scans it to prove
+//     build A differs by exactly one body. A bundle that was never built, or that predates the
+//     sources it claims to be, would let every assertion below pass about code nobody is shipping —
+//     the worst outcome available to a drill. tests/built-bundle-gate.mjs is that refusal, with its
+//     own unit cells.
+//   · THE INVENTORY GATE, and it is not fussiness either — it is a MEASURED hazard. A first run of
+//     this drill was interrupted mid-way and left a non-terminal successor run behind; on the next
+//     run, build A booted, its engine re-enqueued a run whose body it does not export, and the
+//     replay raised `ReplayDivergenceError`. The crash-only supervisor then exited 1. So the honest
+//     reading of a rollback to a body-less image is stronger than the README's old "the lane
+//     PARKS": the ENGINE can crash-loop — which is what made the boot census a REFUSAL rather than
+//     a warning (#637 review S5), and why the preflight is a gate rather than a note. The gate runs
+//     the preflight's OWN censuses over the whole database against this tree's artifact, because
+//     this file later asserts GLOBAL verdicts and a global verdict only means something if the
+//     estate started clean. Failing at the door with an instruction beats failing deep in a later
+//     leg (the #708 posture).
 //
 // IT CLEANS UP AFTER ITSELF on every exit path: its own non-terminal tasks are cancelled and its
 // own non-terminal runs are marked cancelled, so an interrupted run does not poison the next one.
@@ -69,6 +78,7 @@ import { fileURLToPath } from "node:url";
 import { SignJWT } from "jose";
 import { ephemeralPort } from "./ephemeral-port.mjs";
 import { buildPreviousVersionImage, removeScratchTree } from "./scratch-image.mjs";
+import { RUNTIME_SOURCE_ROOTS, assertBuiltBundleFresh } from "./built-bundle-gate.mjs";
 import { bodyIdentifierOf, preflight, supportedBodiesFromBundle } from "../lib/rollback-preflight.mjs";
 
 if (process.env.CLARA_SKIP_WORK_E2E === "1") {
@@ -246,31 +256,59 @@ async function main() {
 
   const query = (sql, params) => rig.rootQuery(sql, params);
 
-  // REFUSE TO START ON A DIRTY INVENTORY. See this file's header for the measured reason: an image
-  // booting against a non-terminal run it cannot replay does not park quietly, it crashes.
+  // ==========================================================================
+  // THE DOOR. Two refusals, both named, both BEFORE anything is built or spawned.
+  // ==========================================================================
+
+  // (1) #637 review S4 — THE ARTIFACT MUST BE A REAL, CURRENT BUILD. This drill spawns
+  // `.output/server/index.mjs` as build B and scans it for build A's diff; a missing or stale
+  // bundle would let every assertion below pass about code nobody is shipping. The gate is its own
+  // module with its own unit cells (tests/built-bundle-gate.test.mjs) so this refusal is proven
+  // rather than merely present.
+  assertBuiltBundleFresh({
+    bundlePath: runtimeBundle,
+    sourceRoots: RUNTIME_SOURCE_ROOTS.map((p) => fileURLToPath(new URL(`../${p}`, import.meta.url))),
+    registryPath: fileURLToPath(new URL("../workflows/registry.ts", import.meta.url)),
+  });
+  console.log("[tb-e2e] build gate: .output/server/index.mjs is present, newer than every bundled source, and agrees with registry.ts");
+
+  // (2) REFUSE TO START ON A DIRTY INVENTORY. See this file's header for the measured reason: an
+  // image booting against a non-terminal run it cannot replay does not park quietly, it crashes.
+  // The census is the PREFLIGHT'S OWN — one implementation, two consumers — read over the whole
+  // database against the bodies this tree's artifact actually carries.
+  //
+  // WHAT IT REFUSES ON, and the line is drawn where the DRILL's own correctness is:
+  //   · ANY non-terminal workflow run. Not "any claraWork run": build A exports 48 of 49 bodies, and
+  //     a parked run of a body it lacks is precisely the condition that crashed it once. A run this
+  //     drill did not stage is also a run it cannot tell from its own.
+  //   · Any live unbound `accounting_work` task, for the same reason — the last leg admits one
+  //     deliberately and asserts about it by id.
+  // What it does NOT refuse on is unrelated live state of other lanes (a held wake task left by an
+  // earlier suite on a shared rig). That is #708's own lesson applied to this file: the drill SCOPES
+  // its own verdicts to the Works it staged, so foreign rows cannot decide them, and refusing on
+  // them would make the drill unrunnable on every rig that has ever run anything else.
   {
-    const live = await rig.rootQuery(
-      `select name, status, count(*)::int as n
-         from workflow.workflow_runs
-        where status not in ('completed','failed','cancelled') and name like '%claraWork%'
-        group by 1, 2`,
-    );
-    const unbound = await rig.rootQuery(
-      "select id, work_id from clara.agent_tasks where kind = 'accounting_work' and status in ('queued','running') and workflow_run_id is null",
-    );
-    if (live.rowCount > 0 || unbound.rowCount > 0) {
+    const inventory = await preflight({ query, supported: supportedBodiesFromBundle(readFileSync(runtimeBundle, "utf8")) });
+    const liveWorkTasks = inventory.unbound.tasks.filter((t) => t.kind === "accounting_work");
+    if (inventory.runs.length > 0 || liveWorkTasks.length > 0) {
       console.error(
-        "\nTWO-BUILD CUTOVER E2E: REFUSING TO START — this database already carries live accounting-Work state, "
-          + "and a two-build drill cannot tell its own runs from those:\n"
-          + live.rows.map((r) => `  - ${r.n} ${r.status} run(s) of ${r.name}`).join("\n")
-          + (live.rowCount > 0 && unbound.rowCount > 0 ? "\n" : "")
-          + unbound.rows.map((r) => `  - unbound accounting_work task ${r.id} (work ${r.work_id})`).join("\n")
+        "\nTWO-BUILD CUTOVER E2E: REFUSING TO START — this database already carries live state a two-build drill "
+          + "cannot tell from its own:\n"
+          + inventory.runs.map((r) => `  - ${r.count} non-terminal run(s) of ${r.body} (${r.name})`).join("\n")
+          + (inventory.runs.length > 0 && liveWorkTasks.length > 0 ? "\n" : "")
+          + liveWorkTasks.map((t) => `  - unbound accounting_work task ${t.id} [${t.status}] (work ${t.workId})`).join("\n")
           + "\n\nUse a fresh database, or settle/cancel those rows first. Named refusal at the door beats "
-          + "failing deep in a later leg — and build A CANNOT boot against a non-terminal successor run "
-          + "(ReplayDivergenceError, then a crash-only exit).",
+          + "failing deep in a later leg — and build A CANNOT boot against a non-terminal run of a body it "
+          + "does not export (ReplayDivergenceError, then a crash-only exit; since #637's review it refuses "
+          + "to start the world at all).",
       );
       process.exit(1);
     }
+    const otherLive = inventory.unbound.tasks.length;
+    console.log(
+      `[tb-e2e] inventory gate: no non-terminal runs and no unbound accounting_work tasks`
+        + (otherLive > 0 ? ` (${otherLive} unrelated live task(s) present — every verdict below is SCOPED, so they decide nothing)` : ""),
+    );
   }
   const readWork = (id) => rig.rootQuery("select * from clara.accounting_work where id = $1", [id]).then((r) => r.rows[0] ?? null);
   const readTask = (id) => rig.rootQuery("select * from clara.agent_tasks where id = $1", [id]).then((r) => r.rows[0] ?? null);
@@ -407,11 +445,16 @@ async function main() {
     // --- PREFLIGHT while only W1 is live ----------------------------------
     // Rolling FORWARD to B is fine: B carries the predecessor. Rolling back to an image that does
     // NOT carry it refuses, and names it.
+    // EVERY VERDICT IN THIS DRILL IS THE SCOPED ONE (#708 / review B2). `preflight` returns two:
+    // `verdict` is the GLOBAL authority the CLI's exit code follows, and `scoped.verdict` answers
+    // only about the rows this caller named. A drill on a shared rig must read the scoped one or a
+    // stranger's parked row decides its assertions — and the two are deliberately never merged, so
+    // the divergence itself is asserted below, once, where this drill CREATES it.
     const fwd = await preflight({ query, supported: bodiesB, scope: { workIds: [w1.work_id] } });
-    assert.equal(fwd.verdict, "allowed", "a target that carries the predecessor allows the cutover");
+    assert.equal(fwd.scoped.verdict, "allowed", "a target that carries the predecessor allows the cutover");
     const backLessV1 = await preflight({ query, supported: bodiesB.filter((b) => b !== pair.previous), scope: { workIds: [w1.work_id] } });
-    assert.equal(backLessV1.verdict, "refused", `a target WITHOUT ${pair.previous} refuses while W1 is parked on it`);
-    assert.ok(backLessV1.outside.some((row) => row.body === pair.previous), "…and the refusal names the body");
+    assert.equal(backLessV1.scoped.verdict, "refused", `a target WITHOUT ${pair.previous} refuses while W1 is parked on it`);
+    assert.ok(backLessV1.scoped.outside.some((row) => row.body === pair.previous), "…and the refusal names the body");
     console.log(`[tb-e2e] preflight: target-with-${pair.previous} allowed; target-without-${pair.previous} REFUSED naming it`);
 
     // --- STOP A. Sequenced, not raced: one leader at a time. ---------------
@@ -462,10 +505,24 @@ async function main() {
 
     // --- PREFLIGHT while BOTH are live ------------------------------------
     const backToA = await preflight({ query, supported: bodiesA, scope: { workIds: [w1.work_id, w2.work_id] } });
-    assert.equal(backToA.verdict, "refused", "rolling back to build A REFUSES while W2 is live on the successor");
-    assert.ok(backToA.outside.some((row) => row.body === pair.pinned), `…naming ${pair.pinned} as the body A does not carry`);
-    assert.equal(backToA.outside.some((row) => row.body === pair.previous), false, "…and NOT naming the predecessor, which A does carry");
+    assert.equal(backToA.scoped.verdict, "refused", "rolling back to build A REFUSES while W2 is live on the successor");
+    assert.ok(backToA.scoped.outside.some((row) => row.body === pair.pinned), `…naming ${pair.pinned} as the body A does not carry`);
+    assert.equal(backToA.scoped.outside.some((row) => row.body === pair.previous), false, "…and NOT naming the predecessor, which A does carry");
     console.log(`[tb-e2e] preflight: rollback to A REFUSED, naming ${pair.pinned}`);
+
+    // REVIEW B2, created by this drill rather than staged: ask the SAME question about W1 alone.
+    // Its own lane is clear — W1 is parked on a body build A carries — and the honest scoped answer
+    // is "allowed". The GLOBAL verdict over the same read is REFUSED, because W2 is parked on a body
+    // A does not carry, and that is the verdict the CLI's exit code follows. A scope narrows the
+    // question; it may never widen the answer.
+    const scopedToW1 = await preflight({ query, supported: bodiesA, scope: { workIds: [w1.work_id] } });
+    assert.equal(scopedToW1.scoped.verdict, "allowed", "scoped to W1, the answer is honestly yes");
+    assert.equal(scopedToW1.verdict, "refused", "…and the GLOBAL verdict, which the exit code follows, is NO");
+    assert.ok(
+      scopedToW1.outside.some((row) => row.body === pair.pinned),
+      `the global census names W2's body even though the scope never mentioned it; got ${JSON.stringify(scopedToW1.outside)}`,
+    );
+    console.log(`[tb-e2e] preflight B2: scoped-to-W1 ALLOWED while the global verdict REFUSES, naming ${pair.pinned}`);
 
     // --- RESUME W1 on its ORIGINAL body, inside build B --------------------
     // The bare clarify's own door. B carries the predecessor body, so the hook resumes into it.
@@ -517,7 +574,7 @@ async function main() {
 
     // --- PREFLIGHT once both have settled ---------------------------------
     const drained = await preflight({ query, supported: bodiesA, scope: { workIds: [w1.work_id, w2.work_id] } });
-    assert.equal(drained.verdict, "allowed", "with BOTH Works terminal, the SAME build-A target now ALLOWS — the inventory tracks live state, not a snapshot");
+    assert.equal(drained.scoped.verdict, "allowed", "with BOTH Works terminal, the SAME build-A target now ALLOWS — the inventory tracks live state, not a snapshot");
     console.log("[tb-e2e] preflight: with both Works settled, rollback to A is now ALLOWED");
 
     // --- STOP B, then the UNBOUND-WORK leg --------------------------------
@@ -549,11 +606,15 @@ async function main() {
       const orphanTask = await readTask(orphan.task_id);
       assert.equal(orphanTask.workflow_run_id, null, "with no engine running, the admitted task is bound to NO workflow run");
       const noClaraWork = await preflight({ query, supported: bodiesA.filter((b) => !b.startsWith("claraWork")), scope: { workIds: [orphan.work_id] } });
-      assert.equal(noClaraWork.verdict, "refused", "a target with NO claraWork body refuses on the unbound task ALONE");
-      assert.deepEqual(noClaraWork.outside, [], "…and it is not a workflow-run refusal: there is no run to be outside anything");
-      assert.ok(noClaraWork.reasons.includes("unbound_accounting_work"), `…the reason is its own (got ${JSON.stringify(noClaraWork.reasons)})`);
+      assert.equal(noClaraWork.scoped.verdict, "refused", "a target with NO claraWork body refuses on the unbound task ALONE");
+      assert.deepEqual(noClaraWork.scoped.outside, [], "…and it is not a workflow-run refusal: there is no run to be outside anything");
+      // `unbound_task`, not `unbound_accounting_work`: the census covers EVERY kind whose task can
+      // become a run (#637 review B3), so the reason names the SHAPE — a live task bound to no run
+      // — and the task list names which row and which class.
+      assert.ok(noClaraWork.scoped.reasons.includes("unbound_task"), `…the reason is its own (got ${JSON.stringify(noClaraWork.scoped.reasons)})`);
+      assert.deepEqual(noClaraWork.scoped.unbound.strandedClasses, ["claraWork"], "…and the stranded CLASS is named");
       const withClaraWork = await preflight({ query, supported: bodiesA, scope: { workIds: [orphan.work_id] } });
-      assert.equal(withClaraWork.verdict, "allowed", "a target that carries ANY claraWork body can run it — an unbound task has not chosen a version yet");
+      assert.equal(withClaraWork.scoped.verdict, "allowed", "a target that carries ANY claraWork body can run it — an unbound task has not chosen a version yet");
       console.log("[tb-e2e] unbound Work: refuses on its own against a claraWork-less target; allowed against build A");
     } finally {
       // CANCELLED, never deleted: clara.agent_tasks refuses a DELETE (CLR08) and
