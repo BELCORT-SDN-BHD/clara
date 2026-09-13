@@ -35,7 +35,8 @@
    1. Release the #637 image normally (build-only + push, record the immutable reference, then release
       that same reference). Read the new boot line in `fly logs`: `[clara-runtime] serving git_sha=…
       frontier=…(…) bodies=49 pins … claraWork=claraWork_v2 …`. The two `bundle clara-work/v1|v2
-      digest=` banners must be unchanged, and `stranded bodies n=0` should follow.
+      digest=` banners must be unchanged, and `stranded bodies n=0` must PRECEDE `durable world
+      started` — the census is a gate that runs before the world, so its line comes first.
    2. Confirm the same four facts over HTTP: signed-in `GET /api/build-info` must report the same
       `git_sha`, `pins.claraWork`, and a `bodies` array of 49 — and `/ready` must carry
       `checks.bodies.measured: true` with `stranded: 0`.
@@ -49,7 +50,15 @@
       either drain and re-run until exit 0, or release a compatibility build that retains them.
       **Do not roll back on a non-zero preflight**: measured in #637, an engine that boots against a
       non-terminal run whose body it does not export raises `ReplayDivergenceError` and the crash-only
-      supervisor exits 1 — a crash loop, not a quiet park.
-   5. After the rollback, read `/ready` `checks.bodies` on the rolled-back image: a non-zero
-      `stranded` with named bodies is the expected, warning-level reading, and it is what tells the
-      operator which image to bring back.
+      supervisor exits 1 — a crash loop, not a quiet park. Read the GLOBAL verdict, not a scoped one:
+      `--scope*` narrows the report and never the exit code, precisely because a parked run of another
+      class strands just as hard.
+   5. After the rollback, read `/ready` `checks.bodies` on the rolled-back image. Since #637's review
+      the boot census is a GATE, not a warning: if anything is stranded the image **refuses to start
+      the durable world**, `/ready` is 503 with `checks.bodies.world_start_refused: true` and the
+      bodies named, and HTTP stays up so you can read exactly that. Nothing is lost — the runs are
+      parked — and the fix is to release an image that carries those bodies. `fly logs` carries the
+      same line: `[clara-runtime] stranded bodies n=… names=… — REFUSING TO START THE DURABLE WORLD`.
+      Do NOT reach for `CLARA_ALLOW_STRANDED_BODIES=1` to get past it during the drill: it starts the
+      world anyway and the process may then crash-loop on replay, which is the condition being
+      demonstrated. The expected ceremony reading is the refusal itself.

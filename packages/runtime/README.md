@@ -231,12 +231,43 @@ trusting either alone:
 was not baked or the frontier read could not answer — never a fabricated value.
 
 `checks.bodies` on `/ready` is the LIVE half: how many non-terminal workflow runs are parked on
-bodies THIS image does not carry, and which bodies those are. It is **warning level and
-fail-open**, following `checks.leader`: a stranded body means this process cannot RESUME those
-runs, not that it should stop serving the ones it can. Read it as three answers, like every other
-check here — `measured:false` with no error means the boot census has not run in this process,
+bodies THIS image does not carry, and which bodies those are. Read it as three answers, like every
+other check here — `measured:false` with no error means the boot census has not run in this process,
 `measured:false` with an `error` means the read failed (never a clean zero), and a measured census
-warns only when something is actually stranded.
+is silent when nothing is stranded.
+
+### The boot census REFUSES to start the world when a body is stranded
+
+The census runs **before** `getWorld().start()`, and a non-zero count stops the world:
+
+```
+[clara-runtime] stranded bodies n=3 names=claraWork_v2 — REFUSING TO START THE DURABLE WORLD …
+```
+
+This overturns the warning-only reading that shipped first, and a measurement is why. An engine that
+boots against a non-terminal run whose body this image does not export re-enqueues it, the replay
+raises `ReplayDivergenceError`, and the crash-only supervisor exits 1 — under Fly that is a restart
+loop, not a park. A warning printed by a process about to die in a loop is not a reading anyone gets
+to act on.
+
+What a refusal does and does not do:
+
+- **HTTP stays up.** `/health`, `/ready` and `/api/build-info` remain readable, which is the whole
+  point: an operator must be able to see WHY. No lane runs — no leader, no control listener, no
+  reconciler — and nothing is lost, because the runs are parked.
+- **`/ready` is 503**, with `checks.bodies.world_start_refused: true` and the bodies NAMED. It is a
+  hard conjunct rather than an inference from a missing heartbeat: the heartbeat row is shared estate
+  state, and a beat from the process that stopped seconds ago stays fresh for a whole staleness
+  window — exactly the window in which a refused process would otherwise report itself ready.
+- **`CLARA_ALLOW_STRANDED_BODIES=1` overrides it**, restoring the old warning-only posture visibly:
+  the world starts, `/ready` warns and stays ready, and the process MAY then crash on replay. That is
+  an operator decision, and the log line says so.
+- A census that could not be TAKEN is not a refusal. The read fails open: the world starts and
+  `/ready` reports it as unmeasured with a sanitized code.
+
+The fix for a refusal is the same as for a refused preflight: release an image that carries those
+bodies (a compatibility build), or drain them. `node packages/runtime/scripts/rollback-preflight.mjs`
+answers the same question before you deploy, which is the cheaper place to learn it.
 
 ## Deployment and rollback
 
@@ -302,11 +333,32 @@ same will eventually ship on the second one. The database target comes from the 
 sources fails closed.
 
 It counts **two** things, because it is two questions. Non-terminal `workflow.workflow_runs`,
-grouped by name with the parked body derived from the row itself; **and** live
-`clara.agent_tasks` of kind `accounting_work` with `workflow_run_id IS NULL`. The second is
-invisible to a run census by construction — the task exists from the moment
-`clara.admit_journal_work` commits and the run only exists once a worker claims it — so a run
-census alone reports a clean estate while admitted Work waits for a body the target does not carry.
+grouped by name with the parked body derived from the row itself; **and** live tasks bound to NO
+run, across both tables that carry that shape. The second is invisible to a run census by
+construction — a task exists from the moment its admission commits and the run only exists once a
+worker claims it — so a run census alone reports a clean estate while admitted work waits for a body
+the target does not carry.
+
+That second census covers **every** kind whose task can become a run, not only `accounting_work`:
+
+| Row | Class it needs | How that class is decided |
+|---|---|---|
+| `clara.agent_tasks` `chat_turn` / `autodraft` / `accounting_work` | `chatTurn` / `autoDraft` / `claraWork` | statically, from the registry-resolved enqueue deps in `plugins/startWorld.ts` |
+| `clara.agent_tasks` `wake` / `close_prep` | whatever `clara.wake_engine_sources.workflow_export` says | READ from the database per row, the way `lib/wake-engine.mjs` dispatches it (by the originating event's type for `wake`, by `task_kind` for the `direct_queue` carrier) |
+| `clara.document_processing_tasks` (7 lanes) | `documentIngest` / `invoiceFacts` / `statementFacts` / `witnessFacts` | the same allowlist `reconciler-documents.mjs` enqueues by |
+| `clara.document_processing_tasks` `classify` / `local_facts` | none | they ride a consumer loop; named explicitly so they are not mistaken for unknown lanes |
+
+`held` counts as live: a wake task is BORN held and only becomes `running` when the engine claims it,
+so a `queued/running` census would miss every wake task waiting for its source. `cancel_requested`
+does not: the reconciler settles an unbound one without starting any body. The kind, lane and status
+vocabularies are checked against the relations' own CHECK constraints by
+`tests/rollback-preflight.test.mjs`, so a migration that adds one reds a test instead of quietly
+falling outside a census that advertises itself as complete.
+
+**A kind or lane this command cannot place fails CLOSED** — it counts as stranding. The case you
+will actually meet is a `held` wake task whose source row was deleted: it is already unrunnable (the
+reconciler logs it and waits), and the answer is to settle it or re-register its source, not to roll
+back past it. `--scope` narrows the REPORT; it never narrows the exit code.
 
 **A refusal has exactly two admissible answers, and elapsed time is neither.**
 
@@ -340,9 +392,12 @@ do. The reverse order is free: 0178 against a pre-#623 image adds tables and ver
 
 Rollback is NOT symmetric here, and the runbook should say so plainly. A rollback to a
 `claraWork`-less image leaves already-admitted `clara.accounting_work` rows with queued
-`accounting_work` tasks that no export can run: the lane PARKS rather than losing work, and those
-Works resume when a `claraWork`-carrying image returns. Inventory them the same way parked runs are
-inventoried, and expect `clara.agent_tasks` rows of kind `accounting_work` in `queued`/`running`.
+`accounting_work` tasks that no export can run. Nothing is LOST — those Works resume when a
+`claraWork`-carrying image returns — but "the lane parks" was too kind about the process: if any of
+those Works has reached a RUN, the rolled-back image's engine crashes on the replay, which is why
+#637 made the boot census a refusal and the preflight a gate. Inventory them before you roll back
+(`scripts/rollback-preflight.mjs` does both censuses), and expect `clara.agent_tasks` rows of kind
+`accounting_work` in `queued`/`running` alongside the runs.
 
 Build identity gained a `bundles` field: `GET /api/build-info` serves `{id, digest, instructions,
 skills, tools, budgets}` for `clara-work/v1`, and the process logs the same digest once at world
@@ -357,8 +412,9 @@ itself is unchanged and still owed by every NEW closure: run
 image is live — locking before deploy would freeze a body that no parked run can yet exist for.
 
 #637 adds no frozen closure and no migration. What it adds is the preflight above, the provenance
-boot line, `bodies`/`pins` on `/api/build-info`, warning-level `checks.bodies`, and the two-build
-drill. The HOSTED half — two releases and one deliberate rollback on Fly — is a production
+boot line, `bodies`/`pins` on `/api/build-info`, the boot-time stranded-body census that REFUSES to
+start the world (with `CLARA_ALLOW_STRANDED_BODIES=1` as the operator override) and reports itself at
+`checks.bodies`, and the two-build drill. The HOSTED half — two releases and one deliberate rollback on Fly — is a production
 ceremony the owner schedules; docs/PROGRESS.md carries the exact step order. Hosted evidence for
 #637 is pending.
 
