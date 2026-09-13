@@ -119,6 +119,22 @@ runs:
         RELAY_TEST_MODE=1 \
         WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGC_PORT/clara_wave_b_ci" \
           node tests/work-cancel-e2e.mjs
+        # #640 — the accounting-PLAN occurrence e2e, AFTER its three siblings and on the same rig.
+        # It drives the two things only a real world can show about a scheduled occurrence: two
+        # belt passes issued CONCURRENTLY on two clara_runtime connections leave exactly one
+        # occurrence and one Work (the plan row lock plus `unique (plan_id, due_date)`, measured
+        # through the real belt), and a plan-admitted Work — which has no post-commit enqueue at
+        # all, because the admission happens inside a database function — is dispatched by the
+        # reconciler's accounting_work arm, crashed by CLARA_WORK_TEST_FAULT=exit_after_commit
+        # between the commit and the checkpoint, and replayed onto the same logical identity, so
+        # the estate ends with one entry, one receipt and one occurrence. It SKIPS CLEANLY
+        # (exit 0, printed reason) when migration 0193 is absent, so it is safe to merge before
+        # the DB half lands.
+        PGPORT=$PGC_PORT \
+        PGDATABASE=clara_wave_b_ci \
+        RELAY_TEST_MODE=1 \
+        WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGC_PORT/clara_wave_b_ci" \
+          node tests/plan-occurrence-e2e.mjs
 
     - name: DR backup/restore self-test (ephemeral postgres:17)
       shell: bash -e {0}

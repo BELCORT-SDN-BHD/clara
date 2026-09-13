@@ -29,6 +29,7 @@ import { reconcileSstWatches } from "./reconciler-sst.mjs";
 import { reconcileLintBelt } from "./reconciler-lint.mjs";
 import { reconcileFaRuns } from "./reconciler-fa.mjs";
 import { reconcileAdjustmentRuns } from "./reconciler-adjustments.mjs";
+import { reconcilePlanOccurrences } from "./plan-occurrences.mjs";
 import { reconcileWakeEngineTasks } from "./reconciler-wake.mjs";
 import { cancelSettleForWork, reconcileAccountingWorkTasks, settleWorkTerminal, workResultForTask } from "./reconciler-work.mjs";
 
@@ -587,6 +588,13 @@ export { reconcileFaRuns };
 // The Wave D-b adjustment belt (design §2.3/§2.7 / migration 0045) lives in reconciler-adjustments.mjs.
 export { reconcileAdjustmentRuns };
 
+// #640 the accounting-plan due scan (migration 0193) lives in plan-occurrences.mjs. Registered
+// UNCONDITIONALLY — EVERY cycle, not on a daily flag — because its whole cost is ONE call whose
+// candidate query is gated in SQL on the due date in the revision timezone, and because the
+// acceptance is about a due EVENT rather than a nightly batch. See that module header for the
+// C54.3 cadence argument in full.
+export { reconcilePlanOccurrences };
+
 // Gate G1's own belt (design Annex C / migration 0133_g1_wake_engine) lives in
 // reconciler-wake.mjs under the same module-size budget. Registered UNCONDITIONALLY (every
 // cycle, not a daily flag) — mirrors reconcileAutoDraftTasks's own registration exactly, since
@@ -715,6 +723,9 @@ export async function runReconcilerSweep(client, deps) {
   const lint = deps.lintBelt ? await belt("lint belt", () => reconcileLintBelt(client, { log }), { lintOk: false }) : {};
   const fa = deps.faRuns ? await belt("fa runs", () => reconcileFaRuns(client, { log }), { faOk: false }) : {};
   const adj = deps.adjRuns ? await belt("adjustment runs", () => reconcileAdjustmentRuns(client, { log }), { adjOk: false }) : {}; // Wave D-b belt (0045)
+  // #640 belt (0193) — unconditional, like the render dispatch: one SQL-gated call, dormant
+  // (feature-detected) until 0193 applies. Its own module header carries the cadence argument.
+  const plans = await belt("plan occurrences", () => reconcilePlanOccurrences(client, { log }), { planOk: false });
   const wake = await belt("wake engine reconcile", () => reconcileWakeEngineTasks(client, deps)); // Gate G1 belt — unconditional, like autodraft reconcile
   // #623 belt — unconditional, like the autodraft and wake reconciles. Pre-0178 the kind CHECK
   // excludes 'accounting_work', so every query inside returns empty and this costs one round trip.
@@ -725,5 +736,5 @@ export async function runReconcilerSweep(client, deps) {
   // assertion pass for a belt that never ran. `beltErrors` names them positively instead — the
   // autodraft edge's own law (a failure that is COUNTED stays visible; a failure that is only
   // logged is one grep away from invisible).
-  return { heartbeatOk: true, beltErrors, ...expiry, ...tasks, ...autodraftTasks, ...documentTasks, ...documentIntakes, ...intakeRecovery, ...spool, ...sst, ...lint, ...fa, ...adj, ...wake, ...work, ...prune };
+  return { heartbeatOk: true, beltErrors, ...expiry, ...tasks, ...autodraftTasks, ...documentTasks, ...documentIntakes, ...intakeRecovery, ...spool, ...sst, ...lint, ...fa, ...adj, ...plans, ...wake, ...work, ...prune };
 }

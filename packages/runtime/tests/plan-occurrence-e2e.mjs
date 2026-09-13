@@ -1,0 +1,339 @@
+// STANDALONE accounting-plan occurrence e2e (#640). NOT a `node --test` file: it SPAWNS
+// scripts/serve.mjs (through tests/work-journal-serve.mjs, which installs the scripted model
+// first) as a CHILD process, so the engine can be crashed between a database commit and its
+// workflow checkpoint and respawned against the SAME database — the pattern
+// tests/work-journal-e2e.mjs established. Run:
+//
+//   PGHOST=127.0.0.1 PGPORT=5544 PGUSER=postgres PGDATABASE=clara_rt_test \
+//   WORKFLOW_POSTGRES_URL=postgres://postgres@127.0.0.1:5544/clara_rt_test \
+//   RELAY_TEST_MODE=1 node tests/plan-occurrence-e2e.mjs
+//
+// WHAT IT PROVES, and each of these needs a real Postgres world rather than a unit fake:
+//
+//   1. TWO BELT PASSES IN ONE CYCLE CONVERGE. Two `reconcilePlanOccurrences` calls issued
+//      CONCURRENTLY on two independent clara_runtime connections — the shape a leader handover,
+//      a doubled supervisor or a retried cycle actually produces — leave EXACTLY ONE occurrence
+//      row and EXACTLY ONE `clara.accounting_work` row for the due event. One pass reports it
+//      admitted, the other reports it converged on the same work id. The database's plan-row lock
+//      and its `unique (plan_id, due_date)` are what make that true; this leg measures it through
+//      the real belt rather than asserting it about the SQL.
+//
+//   2. NO ENGINE IS NEEDED TO ADMIT, AND THE RECONCILER DISPATCHES WHAT THE BELT ADMITTED. The
+//      Work is admitted with the process that will run it not yet started. That is the ordinary
+//      shape for this lane — a plan occurrence has no post-commit enqueue, because the admission
+//      happens inside a database function — so `reconciler-work.mjs` §A is the ONLY thing that
+//      can start it. This leg starts an engine afterwards and watches the Work run to completion.
+//
+//   3. A CRASH BETWEEN THE COMMIT AND THE CHECKPOINT REPLAYS ONTO THE SAME IDENTITY.
+//      `CLARA_WORK_TEST_FAULT=exit_after_commit` exits the process the instant the database
+//      returns a receipt for the plan-initiated posting. On respawn the WDK re-executes the step,
+//      the tool call replays onto the same `logical_op_id`, and the estate ends with exactly ONE
+//      journal entry, ONE committed receipt and ONE occurrence — and the occurrence still names
+//      the same Work it named before the crash.
+//
+//   4. A THIRD BELT PASS AFTER ALL OF THAT ADMITS NOTHING NEW. The occurrence row is the due
+//      event's identity whatever happened to its Work.
+//
+// WHY THE SCRIPTED MODEL IS work-journal-serve.mjs's. A plan-initiated Work is an ordinary
+// `accounting_work` run: the same frozen bundle, the same envelope, the same admitted basis to be
+// echoed verbatim. Reusing that bootstrap is the point — if a plan-initiated run needed its own
+// model script, the two admission paths would not be producing the same kind of Work.
+//
+// GATED. `CLARA_SKIP_PLAN_E2E=1` opts out, and the file SKIPS CLEANLY (exit 0, with a printed
+// reason) when migration 0193 is absent — its runtime half merges alongside its DB half, and a
+// green e2e against a database with no `clara.accounting_plans` would be a lie, not a pass.
+
+import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
+import { spawn } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import { ephemeralPort } from "./ephemeral-port.mjs";
+import { reconcilePlanOccurrences } from "../lib/plan-occurrences.mjs";
+
+if (process.env.CLARA_SKIP_PLAN_E2E === "1") {
+  console.log("[plan-e2e] skipped (CLARA_SKIP_PLAN_E2E=1)");
+  process.exit(0);
+}
+
+// --- Fail-closed local gate (the work-journal-e2e precedent, widened by ONE arm).
+//
+// THE NUMERIC ARM IS THE PER-TICKET RIG DATABASE (`clara_640`, `clara_615`, …) the local
+// implementation rigs use, and it is deliberately narrow: three or four digits and nothing else,
+// still on a loopback host, still with the parsed-DSN gate below agreeing on host, port and
+// database. It exists so this file can be driven on the machine the work is done on rather than
+// only in CI; it widens nothing about where the e2e may point.
+const LOCAL_HOSTS = new Set(["127.0.0.1", "localhost"]);
+const ALLOWED_DB = /^clara_(rt_test|wave_b_ci|[0-9]{3,4})$/;
+if (!LOCAL_HOSTS.has(process.env.PGHOST) || !ALLOWED_DB.test(process.env.PGDATABASE ?? "")) {
+  throw new Error("plan-occurrence-e2e is hard-gated to a loopback host + PGDATABASE in {clara_rt_test,clara_wave_b_ci,clara_<digits>}");
+}
+{
+  if (!process.env.WORKFLOW_POSTGRES_URL) throw new Error("plan-occurrence-e2e needs WORKFLOW_POSTGRES_URL");
+  const u = new URL(process.env.WORKFLOW_POSTGRES_URL);
+  const ok =
+    u.protocol === "postgres:"
+    && LOCAL_HOSTS.has(u.hostname)
+    && u.port === String(process.env.PGPORT ?? "")
+    && u.pathname === "/" + (process.env.PGDATABASE ?? "")
+    && [...u.searchParams.keys()].length === 0;
+  if (!ok) throw new Error("plan-occurrence-e2e: WORKFLOW_POSTGRES_URL failed the parsed DSN gate");
+}
+
+const PORT = process.env.PLAN_E2E_PORT || (await ephemeralPort());
+const ISSUER = "https://clara-plan-e2e.test/auth/v1";
+const AUD = "authenticated";
+const jwtSecret = "plan-" + randomUUID().replace(/-/g, "");
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const serveScript = fileURLToPath(new URL("./work-journal-serve.mjs", import.meta.url));
+const BASE = `http://127.0.0.1:${PORT}`;
+const FETCH_TIMEOUT_MS = 15000;
+
+const WATCHDOG_MS = 12 * 60 * 1000;
+setTimeout(() => {
+  console.error(`\nPLAN OCCURRENCE E2E: WATCHDOG — exceeded ${WATCHDOG_MS}ms; forcing exit(1) (a genuine hang)`);
+  process.exit(1);
+}, WATCHDOG_MS);
+
+function childEnv(extra = {}) {
+  const base = Object.assign({}, process.env, {
+    PORT: String(PORT),
+    RELAY_TEST_MODE: "1",
+    CLARA_START_WORLD: "1",
+    WORKFLOW_TARGET_WORLD: "@workflow/world-postgres",
+    SUPABASE_JWT_ISSUER: ISSUER,
+    SUPABASE_JWT_AUD: AUD,
+    SUPABASE_JWT_SECRET: jwtSecret,
+  });
+  delete base.CLARA_WORK_TEST_FAULT;
+  delete base.CLARA_WORK_TEST_SCRIPT;
+  delete base.CLARA_CHAT_TEST_BASIS;
+  return Object.assign(base, extra);
+}
+
+function spawnServe(extra = {}) {
+  const child = spawn(process.execPath, [serveScript], { env: childEnv(extra), stdio: ["ignore", "pipe", "pipe"] });
+  const state = { exited: false, exitInfo: null };
+  child.on("exit", (code, signal) => {
+    state.exited = true;
+    state.exitInfo = { code, signal };
+  });
+  child.stdout.setEncoding("utf8");
+  child.stdout.on("data", () => {});
+  child.stderr.setEncoding("utf8");
+  child.stderr.on("data", (d) => {
+    if (/FATAL|Error:|exit_after_commit/.test(d)) process.stderr.write(`[child] ${d}`);
+  });
+  return { child, state };
+}
+
+function waitExit(child, timeoutMs = 30000) {
+  return new Promise((resolve, reject) => {
+    if (child.exitCode !== null || child.signalCode !== null) return resolve();
+    const t = setTimeout(() => reject(new Error("timeout waiting for serve child exit")), timeoutMs);
+    child.once("exit", () => {
+      clearTimeout(t);
+      resolve();
+    });
+  });
+}
+
+async function waitReady(deadlineMs = 60000) {
+  const end = Date.now() + deadlineMs;
+  let healthy = false;
+  while (Date.now() < end) {
+    try {
+      if (!healthy && (await fetch(`${BASE}/health`, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) })).ok) healthy = true;
+      if (healthy) {
+        const r = await fetch(`${BASE}/ready`, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
+        if (r.status === 200) return;
+      }
+    } catch {
+      /* booting */
+    }
+    await sleep(250);
+  }
+  throw new Error("serve child did not become ready (/health + /ready 200)");
+}
+
+async function main() {
+  const rig = await import("./rig.mjs");
+  if (!(await rig.runtimeReady())) throw new Error("the 0006 runtime surface is absent — migrate the target first");
+
+  const probe = await rig.rootQuery(`
+    select to_regclass('clara.accounting_plans') is not null as plans_tbl,
+           to_regprocedure('clara.wake_due_plan_occurrences(integer,text)') is not null as scan,
+           to_regprocedure('clara.create_accounting_plan(uuid,text,text,text,jsonb,text,text,int,text,date,date,jsonb,text,text)') is not null as create_door
+  `);
+  if (!probe.rows[0]?.plans_tbl || !probe.rows[0]?.scan || !probe.rows[0]?.create_door) {
+    console.log("[plan-e2e] SKIPPED — migration 0193 (clara.accounting_plans + clara.wake_due_plan_occurrences) is not on this database");
+    process.exit(0);
+  }
+
+  const countEntries = (client) =>
+    rig.rootQuery("select count(*)::int as n from clara.journal_entries where client_id = $1", [client]).then((r) => r.rows[0].n);
+  const countCommitted = (work) =>
+    rig.rootQuery("select count(*)::int as n from clara.operation_receipts where work_id = $1 and outcome = 'committed'", [work])
+      .then((r) => r.rows[0].n);
+  const readWork = (id) => rig.rootQuery("select * from clara.accounting_work where id = $1", [id]).then((r) => r.rows[0] ?? null);
+  const occurrencesOf = (plan) =>
+    rig.rootQuery(
+      "select id, due_date::text as due_date, leg, revision, intent_key, work_id, outcome from clara.accounting_plan_occurrences where plan_id = $1 order by due_date",
+      [plan]).then((r) => r.rows);
+
+  // ---- the world: a firm, a client, the two accounts the basis posts to ---------------------
+  const { owner, firm, client } = await rig.buildFirm("plan-e2e");
+  for (const [code, name, type] of [["6100", "Rent expense", "expense"], ["1100", "Maybank current account", "asset"]]) {
+    await rig.humanQuery(owner, "select clara.upsert_account(p_client=>$1,p_code=>$2,p_name=>$3,p_type=>$4,p_op_key=>$5) as r",
+      [client, code, name, type, rig.opk("acct")]);
+  }
+
+  // TODAY IN THE PLAN'S OWN ZONE. Never `new Date()`: the due arithmetic is Asia/Kuala_Lumpur's,
+  // and a UTC "today" is a different calendar day for eight hours of every day.
+  const zone = await rig.rootQuery(
+    "select ((now() at time zone 'Asia/Kuala_Lumpur')::date)::text as today, (((now() at time zone 'Asia/Kuala_Lumpur')::date - interval '2 months')::date)::text as back");
+  const today = zone.rows[0].today;
+  const effectiveFrom = `${zone.rows[0].back.slice(0, 7)}-01`;
+  const dueDate = `${today.slice(0, 7)}-01`;
+
+  // THE AUTHORITY IS A REAL ROW: an admitted Work carrying the instruction, exactly as the door
+  // requires. A plan citing anything this database does not hold is refused at creation.
+  const instruction = await rig.withActor({ role: "clara_runtime" }, (c) =>
+    c.query(
+      `select clara.admit_journal_work($1::uuid,$2::uuid,$3::text,$4::jsonb,'user_direct','[]'::jsonb,$5::text) as r`,
+      [client, owner, `plan-e2e-instruction-${randomUUID()}`,
+        JSON.stringify({
+          posting_date: effectiveFrom, memo: "standing instruction: book the monthly rent", currency: "MYR",
+          lines: [
+            { account_code: "6100", debit_cents: 120000, credit_cents: 0, description: "office rent" },
+            { account_code: "1100", debit_cents: 0, credit_cents: 120000, description: "Maybank" },
+          ],
+        }), "gpt-5.6-terra"]));
+  const instructionWork = instruction.rows[0].r.work_id;
+
+  const planBasis = {
+    posting_date: effectiveFrom,
+    memo: "monthly office rent (plan e2e)",
+    currency: "MYR",
+    lines: [
+      { account_code: "6100", debit_cents: 120000, credit_cents: 0, description: "office rent" },
+      { account_code: "1100", debit_cents: 0, credit_cents: 120000, description: "Maybank" },
+    ],
+  };
+  const created = await rig.humanQuery(owner,
+    `select clara.create_accounting_plan(
+        p_client => $1::uuid, p_kind => 'recurring_journal', p_purpose => $2::text,
+        p_authority_kind => 'explicit_instruction', p_authority_ref => $3::jsonb,
+        p_frequency => 'monthly', p_day_rule => 'day_of_month', p_day_of_month => 1,
+        p_timezone => 'Asia/Kuala_Lumpur', p_effective_from => $4::date, p_effective_to => null,
+        p_basis => $5::jsonb, p_reversal_day_rule => null, p_op_key => $6::text) as r`,
+    [client, "Monthly office rent", JSON.stringify({ kind: "accounting_work", id: instructionWork }),
+      effectiveFrom, JSON.stringify(planBasis), rig.opk("plan")]);
+  const plan = created.rows[0].r.plan_id;
+  console.log(`[plan-e2e] plan ${plan} authorised by ${owner}; effective_from=${effectiveFrom}, due=${dueDate}`);
+
+  // =========================================================================
+  // 1. TWO BELT PASSES IN ONE CYCLE.
+  // =========================================================================
+  const entriesBefore = await countEntries(client);
+  const [passA, passB] = await Promise.all([
+    rig.withActor({ role: "clara_runtime" }, (c) => reconcilePlanOccurrences(c, { limit: 50, log: () => {} })),
+    rig.withActor({ role: "clara_runtime" }, (c) => reconcilePlanOccurrences(c, { limit: 50, log: () => {} })),
+  ]);
+  assert.equal(passA.planOk, true, "belt pass A succeeded");
+  assert.equal(passB.planOk, true, "belt pass B succeeded");
+  assert.equal(passA.planDormant, false, "the belt is not dormant on a 0193 database");
+
+  const occ1 = await occurrencesOf(plan);
+  assert.equal(occ1.length, 1, `two concurrent belt passes leave ONE occurrence, got ${JSON.stringify(occ1)}`);
+  assert.equal(occ1[0].due_date, dueDate, "the occurrence is this month's due day");
+  assert.equal(occ1[0].intent_key, `plan:${plan}:r1:${dueDate}`);
+  assert.ok(occ1[0].work_id, "the occurrence names its Work");
+
+  const works = await rig.rootQuery(
+    "select id from clara.accounting_work where client_id=$1 and intent_key=$2", [client, occ1[0].intent_key]);
+  assert.equal(works.rows.length, 1, "exactly ONE Work carries the due event's intent key");
+  const work = works.rows[0].id;
+  assert.equal(work, occ1[0].work_id);
+  assert.equal(await countEntries(client), entriesBefore, "admission posts nothing by itself");
+
+  // Across the two passes: one admitted it, one converged on it.
+  const admittedCount = (passA.planAdmitted ?? 0) + (passB.planAdmitted ?? 0);
+  const convergedCount = (passA.planConverged ?? 0) + (passB.planConverged ?? 0);
+  console.log(`[plan-e2e] PASS 1: two concurrent belt passes → admitted=${admittedCount} converged=${convergedCount}, one occurrence, one Work (${work})`);
+  assert.ok(admittedCount >= 1, "at least one pass admitted the due event");
+
+  const admittedRow = await readWork(work);
+  assert.equal(admittedRow.status, "queued", "the Work is queued with NO engine running");
+  assert.equal(admittedRow.purpose, "journal_entry");
+  assert.equal(admittedRow.initiator, owner, "it runs under the plan's authorising human");
+  assert.equal(admittedRow.basis.posting_date, dueDate, "…posting on the occurrence's own due date");
+
+  // =========================================================================
+  // 2 + 3. THE ENGINE DISPATCHES IT, AND A CRASH BETWEEN COMMIT AND CHECKPOINT REPLAYS.
+  // =========================================================================
+  const faulty = spawnServe({ CLARA_WORK_TEST_FAULT: "exit_after_commit", CLARA_WORK_TEST_SCRIPT: "post" });
+  try {
+    await waitReady();
+    console.log("[plan-e2e] engine up with exit_after_commit armed; waiting for the reconciler to dispatch the plan's Work");
+    // The reconciler's accounting_work §A re-enqueues a queued Work with no run past its grace
+    // (2s by default). The fault then exits the process the instant the DB returns a receipt.
+    await waitExit(faulty.child, 120000);
+    console.log(`[plan-e2e] engine exited as scripted: ${JSON.stringify(faulty.state.exitInfo)}`);
+  } finally {
+    if (!faulty.state.exited) faulty.child.kill("SIGKILL");
+  }
+
+  // The receipt is on the books even though the run never checkpointed.
+  const committedAfterCrash = await countCommitted(work);
+  assert.equal(committedAfterCrash, 1, `exactly one committed receipt survived the crash (got ${committedAfterCrash})`);
+  const entriesAfterCrash = await countEntries(client);
+  assert.equal(entriesAfterCrash, entriesBefore + 1, "exactly one journal entry exists after the crash");
+
+  const respawn = spawnServe({ CLARA_WORK_TEST_SCRIPT: "post" });
+  try {
+    await waitReady();
+    const end = Date.now() + 180000;
+    let row = null;
+    const TERMINAL = new Set(["completed", "refused", "failed", "cancelled", "expired"]);
+    while (Date.now() < end) {
+      row = await readWork(work);
+      if (row && TERMINAL.has(row.status)) break;
+      await sleep(500);
+    }
+    assert.ok(row && TERMINAL.has(row.status), `the Work reached a terminal (last=${JSON.stringify(row?.status)})`);
+    assert.equal(row.status, "completed",
+      `the replayed run settles COMPLETED over a committed receipt, never failed (error=${JSON.stringify(row.error)})`);
+  } finally {
+    respawn.child.kill("SIGKILL");
+    await waitExit(respawn.child).catch(() => {});
+  }
+
+  assert.equal(await countEntries(client), entriesBefore + 1,
+    "STILL exactly one journal entry after the replay — the tool call replayed onto the same logical identity");
+  assert.equal(await countCommitted(work), 1, "STILL exactly one committed receipt");
+  const occ2 = await occurrencesOf(plan);
+  assert.equal(occ2.length, 1, "STILL exactly one occurrence");
+  assert.equal(occ2[0].work_id, work, "…and it still names the same Work it named before the crash");
+  assert.equal(occ2[0].outcome.state, "admitted");
+  console.log("[plan-e2e] PASS 2+3: the reconciler dispatched a plan-admitted Work, the crash between commit and checkpoint replayed onto the same identity, and the estate holds one entry, one receipt, one occurrence");
+
+  // =========================================================================
+  // 4. A BELT PASS AFTER ALL OF THAT ADMITS NOTHING NEW.
+  // =========================================================================
+  const after = await rig.withActor({ role: "clara_runtime" }, (c) =>
+    reconcilePlanOccurrences(c, { limit: 50, log: () => {} }));
+  assert.equal(after.planOk, true);
+  const occ3 = await occurrencesOf(plan);
+  assert.equal(occ3.length, 1, "the due event's identity is its occurrence row, whatever happened to its Work");
+  assert.equal(await countEntries(client), entriesBefore + 1);
+  console.log("[plan-e2e] PASS 4: a further belt pass admitted nothing new");
+
+  console.log(`[plan-e2e] OK — plan=${plan} work=${work} firm=${firm}`);
+  await rig.endPool?.();
+  process.exit(0);
+}
+
+main().catch(async (err) => {
+  console.error("[plan-e2e] FAILED:", err?.stack ?? err);
+  process.exit(1);
+});
