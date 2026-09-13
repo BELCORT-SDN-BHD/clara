@@ -470,14 +470,33 @@ export function WorkDetailView({
       <TakeOverOutcome result={takeOverState} />
 
       {/*
+        THE BASIS STAYS OUTSIDE THE TABS, and #641 deliberately left it there rather than filing it
+        under "Sources". It is the REQUEST — what this Work was admitted with, frozen, the thing a
+        refusal has to be read against — so it belongs with the Work's identity rather than being
+        one of three alternative views of its outcome. Four walks already read it that way
+        (`journal-work-walk` alone asserts the exact cents in it on a queued Work, on a replayed
+        intent, on a rotated one and at both 320 px and 200 % zoom on a COMPLETED one), and putting
+        it behind a tab would have made every one of those readings conditional on opening a tab.
+      */}
+      <section className="flex flex-col gap-2">
+        <SectionHeader level={2}>{t("basisHeading")}</SectionHeader>
+        <p className="max-w-prose text-sm text-muted-foreground">{t("basisNote")}</p>
+        {work.basis === null ? (
+          <p className="text-sm text-muted-foreground">{t("basisUnreadable")}</p>
+        ) : (
+          <WorkBasisTable basis={work.basis} names={names} />
+        )}
+      </section>
+
+      {/*
         #641 (journey B3) — THE THREE RELATED VIEWS OF THIS ONE WORK, and they sit HERE, BELOW
         everything above, for the acceptance criterion's own reason: "Work detail keeps the current
         question above Results/Sources/Activity views". The parked question is rendered by
-        `WorkOutcome` (its `awaiting_input` arm mounts `WorkQuestionPanel`), which is the sibling
-        directly above this element in DOM order — so a person reading down the page, and a screen
-        reader walking it, both meet the thing that is waiting BEFORE the three views of what has
-        already happened. A Tabs strip placed above the outcome band would bury a live question
-        behind a tab a person might never open.
+        `WorkOutcome` (its `awaiting_input` arm mounts `WorkQuestionPanel`), which is a sibling
+        ABOVE this element in DOM order — so a person reading down the page, and a screen reader
+        walking it, both meet the thing that is waiting BEFORE the three views of what has already
+        happened. A Tabs strip placed above the outcome band would bury a live question behind a tab
+        a person might never open.
 
         TABS AND NOT ROUTES (appendix C §4, appendix D row 58): these are adjacent views of ONE
         object at ONE address, not destinations. The state is LOCAL — a tab is not a filter, it
@@ -509,18 +528,12 @@ export function WorkDetailView({
         </TabsContent>
 
         <TabsContent value="sources" keepMounted className="flex flex-col gap-2">
-          <SectionHeader level={2}>{t("basisHeading")}</SectionHeader>
-          <p className="max-w-prose text-sm text-muted-foreground">{t("basisNote")}</p>
-          {work.basis === null ? (
-            <p className="text-sm text-muted-foreground">{t("basisUnreadable")}</p>
-          ) : (
-            <WorkBasisTable basis={work.basis} names={names} />
-          )}
-          {/* THE SOURCES THEMSELVES. `source_refs` is an ARRAY and an EMPTY one is the
-              documentless case this journey is largely about — it says "no source document"
-              rather than leaving a blank, because an entry recorded without evidence is a
-              legitimate state and not a gap. */}
-          <SectionHeader level={3}>{t("sourcesHeading")}</SectionHeader>
+          {/* THE SOURCES THEMSELVES, ENUMERATED — not the one-line "is there a source at all"
+              summary the identity block above already carries. `source_refs` is an ARRAY and an
+              EMPTY one is the documentless case this journey is largely about, so it says so in
+              words: a Work admitted on a person's own figures is a legitimate state, not a gap. */}
+          <SectionHeader level={2}>{t("sourcesHeading")}</SectionHeader>
+          <p className="max-w-prose text-sm text-muted-foreground">{t("sourcesNote")}</p>
           {work.source_refs === null || work.source_refs.length === 0 ? (
             <p className="text-sm text-muted-foreground">{t("noSourceDocument")}</p>
           ) : (

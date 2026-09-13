@@ -1121,6 +1121,7 @@
     "tabActivity": "Activity",
     "noResultYet": "Nothing has been posted for this work yet. Its result will appear here once it commits one.",
     "sourcesHeading": "Sources",
+    "sourcesNote": "Everything this work was told to read. The request itself is above, under What was asked for.",
     "activityLoading": "Reading this work's activity…",
     "activityReadFailed": "This work's activity could not be read.",
     "activityEmptyTitle": "No activity recorded for this work yet",

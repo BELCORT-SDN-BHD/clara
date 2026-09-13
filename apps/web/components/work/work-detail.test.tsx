@@ -1208,8 +1208,16 @@ test("641 switching a tab fires NO write and no further read of the Work", async
     await h.settle();
     assert.equal(writes, 0, "a tab press is not an act on the Work");
     assert.equal(loads, loadsBefore, "and it does not re-read the Work either");
-    // The panel it revealed is the Work's own basis — the sources view, not an empty region.
-    assert.match(h.text(), /Office rent, September/);
+    // The tab it revealed is genuinely the current one — asserted on the tab's own ARIA state
+    // rather than on text, because both non-Activity panels are `keepMounted` (so their text is in
+    // the DOM either way, hidden while they are not current).
+    assert.equal(
+      typeof sources.getAttribute === "function"
+        ? (sources.getAttribute as (k: string) => string | null)("aria-selected")
+        : null,
+      "true",
+      "the Sources tab is the selected one after the press",
+    );
   } finally {
     await h.unmount();
   }
