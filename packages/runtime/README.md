@@ -217,6 +217,27 @@ Authenticated `GET /api/build-info` reports baked build identity, workflow names
 migration frontier. Use this together with the actual Fly image and Worker version to establish
 what is serving; local registry values alone cannot do that.
 
+It also reports `bodies` and `pins` (#637). `workflows` names the registry's CLASSES, which is not
+a question a cutover or a rollback asks; `bodies` is every workflow body this image can RUN (the
+pins plus every retained superseded export) and `pins` maps each class to the body it dispatches
+to. The same four facts appear in one boot line, so a log and an HTTP read can be compared without
+trusting either alone:
+
+```
+[clara-runtime] serving git_sha=<sha> frontier=<version>(<count>) bodies=<n> pins chatTurn=chatTurn_v18 claraWork=claraWork_v2 …
+```
+
+`git_sha=<unset>` and `frontier=<unavailable: reason>` are the honest readings when the build arg
+was not baked or the frontier read could not answer — never a fabricated value.
+
+`checks.bodies` on `/ready` is the LIVE half: how many non-terminal workflow runs are parked on
+bodies THIS image does not carry, and which bodies those are. It is **warning level and
+fail-open**, following `checks.leader`: a stranded body means this process cannot RESUME those
+runs, not that it should stop serving the ones it can. Read it as three answers, like every other
+check here — `measured:false` with no error means the boot census has not run in this process,
+`measured:false` with an `error` means the read failed (never a clean zero), and a measured census
+warns only when something is actually stranded.
+
 ## Deployment and rollback
 
 The image builds and runs on Node 22 (`node:22-bookworm-slim`, both stages), the same line as
@@ -257,9 +278,56 @@ only positively identified stale runtime sessions after confirming the old proce
 
 Frozen workflows and their relative-import closures are hash-checked. Behavioral changes need a
 successor version and registry repoint. Retain old exports while non-terminal runs reference them.
-Before rollback, inventory non-terminal `workflow.workflow_runs` and verify the target image
-contains every referenced workflow name/version. A rollback to an image missing a parked version
-strands that run.
+
+### The rollback preflight is a command, and it is a required step
+
+Run it **before** `fly deploy --image <previous>`, never after:
+
+```sh
+# Strongest form: scan the TARGET image's own built bundle for the WDK body directives it registers.
+node packages/runtime/scripts/rollback-preflight.mjs --target-bundle <path-to-target>/.output/server/index.mjs
+
+# Or take the target's own answer about itself, through a scoped session.
+curl -fsS -H "authorization: Bearer $JWT" "$BASE/api/build-info" \
+  | node packages/runtime/scripts/rollback-preflight.mjs --target-build-info -
+
+# Narrow it (a shared rig, a single lane) — explicit, and the output says it was narrowed.
+node packages/runtime/scripts/rollback-preflight.mjs --target-bundle <path> --scope-name claraWork
+```
+
+Exit **0** allowed, **1** REFUSED with the offending body names, **2** could not answer. Two and
+one are deliberately distinct: a deploy script that treats "I refuse" and "I could not look" the
+same will eventually ship on the second one. The database target comes from the environment only
+(`DATABASE_URL` / `WORKFLOW_POSTGRES_URL`, else libpq `PG*`), and a split between two present
+sources fails closed.
+
+It counts **two** things, because it is two questions. Non-terminal `workflow.workflow_runs`,
+grouped by name with the parked body derived from the row itself; **and** live
+`clara.agent_tasks` of kind `accounting_work` with `workflow_run_id IS NULL`. The second is
+invisible to a run census by construction — the task exists from the moment
+`clara.admit_journal_work` commits and the run only exists once a worker claims it — so a run
+census alone reports a clean estate while admitted Work waits for a body the target does not carry.
+
+**A refusal has exactly two admissible answers, and elapsed time is neither.**
+
+1. **Retain every non-terminal bundle.** Ship a compatibility build that still exports the bodies
+   live runs are parked on while new admission points at the previous version. The preflight then
+   allows because the target genuinely carries them.
+2. **Verified drain.** Let the parked runs settle and re-run the preflight until it allows. A
+   verdict from ten minutes ago is not a drain; the census tracks live state, which is why it is
+   cheap to re-run.
+
+**A rollback to an image missing a parked body is worse than "the lane parks."** Measured while
+building the two-build drill (#637): an engine that boots against a non-terminal run whose body it
+does not export raised `ReplayDivergenceError` on the re-enqueue, and the crash-only supervisor
+exited 1 — a crash loop under Fly, not a quiet park. That is why the preflight is a gate and not a
+note. Rollback POINTS are an input to this decision, not a substitute for it: knowing which image
+you would go back to tells you which bundle to scan, nothing more.
+
+`tests/two-build-cutover-e2e.mjs` is the executable proof of the whole shape — it builds a
+predecessor image, admits Work to it, stops it, releases this tree's build, admits Work to the
+successor, and resumes the first Work on its ORIGINAL body inside the second image, with two
+distinct bundle digests and one receipt each. It is wired into the per-PR `db-live-gates` job.
 
 ### #623 — the accounting-Work lane (`claraWork_v1`, `chatTurn_v18`)
 
@@ -282,11 +350,17 @@ start (`[clara-runtime] bundle clara-work/v1 digest=<sha256>`). Those two and th
 column on every `clara.accounting_work` row are the three places the serving bundle can be read;
 a deploy check should see the same hex in all three.
 
-The frozen manifest ceremony is still OWED for this change: the thirteen new entries
-(`chatTurn.v18.*`, `claraWork.v1.*`) are registered with hashes but carry no `deployed: true`.
-Run `node scripts/check-frozen-workflows.mjs --lock-deployed` and commit the manifest **after**
-the image is live, exactly as every prior closure did — locking before deploy would freeze a body
-that no parked run can yet exist for.
+The frozen manifest ceremony for that change has since RUN: all 264 manifest entries carry
+`deployed: true` (verified against `frozen-workflows.json` at the #637 commit). The ceremony
+itself is unchanged and still owed by every NEW closure: run
+`node scripts/check-frozen-workflows.mjs --lock-deployed` and commit the manifest **after** the
+image is live — locking before deploy would freeze a body that no parked run can yet exist for.
+
+#637 adds no frozen closure and no migration. What it adds is the preflight above, the provenance
+boot line, `bodies`/`pins` on `/api/build-info`, warning-level `checks.bodies`, and the two-build
+drill. The HOSTED half — two releases and one deliberate rollback on Fly — is a production
+ceremony the owner schedules; docs/PROGRESS.md carries the exact step order. Hosted evidence for
+#637 is pending.
 
 [Fly build and deploy behavior](https://www.fly.io/docs/blueprints/working-with-docker/)
 

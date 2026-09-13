@@ -104,6 +104,22 @@ _Avoid_: Every change to product or accounting state.
 One execution attempt of an Accounting work: the durable task and workflow run that claims the work, runs Clara's bundle and settles an outcome. A retry is a new run under the same work and the same logical operation identity.
 _Avoid_: A new piece of work; a reason to post the same effect twice.
 
+**Workflow body**:
+One immutable, deployed version of a workflow class — the code a run executes and stays bound to for its whole life. A class names its newest body (its **pin**); every earlier body an image still carries is **retained**, because a run parked on one resumes into exactly the body it left.
+_Avoid_: Workflow class as a synonym; a version number in a name as proof the code is present in an image.
+
+**Body roster**:
+Which bodies a running image can actually execute, as a readable fact rather than an inference: the registry's pins plus every retained body, reported in one boot line, on `/api/build-info`, and derivable from the built bundle's own WDK directives. It answers "can this image run that parked run", which a list of workflow class names cannot.
+_Avoid_: The registry's class list; the repository's source tree as evidence about a deployed image.
+
+**Stranded body**:
+A body that live, non-terminal runs are parked on and that the image now serving does not carry. Those runs are parked rather than lost — a release of an image that carries the body resumes them — but the serving process cannot advance them, and an engine asked to replay one can crash rather than wait.
+_Avoid_: A failed run; a reason to treat the Work as cancelled; a condition safe to discover after a rollback.
+
+**Rollback preflight**:
+The check run before releasing an earlier image: does that target carry every body live runs are parked on, and every class an already-admitted Work still needs. A refusal has two admissible answers — retain the bodies in a compatibility build, or complete a verified drain — and elapsed time is neither.
+_Avoid_: Rollback points as a substitute for it; "nothing looked busy" as a drain.
+
 **Operation receipt**:
 The record that one logical operation identity committed its business effect: which run and bundle produced it, which human authority it acted for, and which objects it created. At most one committed receipt exists per logical operation identity; a replay returns it and a changed payload under that identity is refused.
 _Avoid_: A chat message claiming completion; a task status; a second effect.

@@ -29,3 +29,27 @@
 1. Next session: `/implement` on the wayfinder tickets the owner picks (#612 children, frontier per #597). Ready-for-agent riders by lane: web #732 #698 #715 #733 #734 #736 #741 #743 #746 #719 #760 #706 #740 #722 #755; db #692 #718 #720 #742 #744 #750 #709 #690; runtime tests #754 #756 #708 #745 #693 #707 #714; infra #691.
 2. When the lawyer-reviewed Terms/DPA wording arrives: publish it as v2 through `clara.publish_legal_document` (as the BELCORT owner) or a seed migration; the beta v1 rows become superseded.
 3. When the admission beta should stop taking firms: `set_admission_capacity` (BELCORT owner).
+4. **#637's hosted half — the two-release + deliberate-rollback ceremony (owner-scheduled; local and CI
+   evidence are in, hosted evidence is pending).** #637 ships no migration and no frozen closure, so the
+   DB is not in the order. Steps, in this order:
+   1. Release the #637 image normally (build-only + push, record the immutable reference, then release
+      that same reference). Read the new boot line in `fly logs`: `[clara-runtime] serving git_sha=…
+      frontier=…(…) bodies=49 pins … claraWork=claraWork_v2 …`. The two `bundle clara-work/v1|v2
+      digest=` banners must be unchanged, and `stranded bodies n=0` should follow.
+   2. Confirm the same four facts over HTTP: signed-in `GET /api/build-info` must report the same
+      `git_sha`, `pins.claraWork`, and a `bodies` array of 49 — and `/ready` must carry
+      `checks.bodies.measured: true` with `stranded: 0`.
+   3. Park real Work on the CURRENT body, then release the NEXT image (the #631 successor when it
+      lands). Confirm the parked Work resumes on its ORIGINAL body: its `operation_receipts.bundle_digest`
+      must be the OLD bundle's digest while newly admitted Work records the new one.
+   4. THE ROLLBACK, deliberately, and only through the gate. Run
+      `node packages/runtime/scripts/rollback-preflight.mjs --target-bundle <previous image bundle>`
+      (or pipe the previous image's `/api/build-info`) BEFORE `fly deploy --image <previous>`. Expect
+      exit 1 while anything is parked on a body that image lacks, and record the named bodies. Then
+      either drain and re-run until exit 0, or release a compatibility build that retains them.
+      **Do not roll back on a non-zero preflight**: measured in #637, an engine that boots against a
+      non-terminal run whose body it does not export raises `ReplayDivergenceError` and the crash-only
+      supervisor exits 1 — a crash loop, not a quiet park.
+   5. After the rollback, read `/ready` `checks.bodies` on the rolled-back image: a non-zero
+      `stranded` with named bodies is the expected, warning-level reading, and it is what tells the
+      operator which image to bring back.

@@ -150,6 +150,16 @@ flowchart TD
 #629 把 `claraWork` 重指向 `claraWork_v2`（`packages/runtime/workflows/claraWork.v2.*`，冻结的新闭包，v1 保留给在途 run）：`ask_question` 带 reason、1..6 个类型化 fields（text／money／date／choice／account）与可选 supporting source，经 `clara.open_work_question` 停靠；答案以「answer + 回答者角色 + 时间 + question_version」作为工具结果回到同一 segment，续跑前 `recheckAuthorityStep` 重读发起人当前 membership／角色与 client 状态（失去授权结算为不可恢复的 `refused/authority_lost`；Work 行不可读则可恢复）。v2 自带错误表 `claraWork.v2.errors.ts`——委托 v1 名册并只覆盖具名的 (errcode, reason) 对，把 0182 在提交时抛出的 `(CLR13, source_conflict)` 归类为终态可恢复 refusal——这是一个冻结闭包在不改动已部署闭包的前提下学会新拒绝对的方式。bundle `clara-work/v2` 的 digest 与 v1 一样由单元测试钉死并写入 world 启动日志。
 #623 落地了首个持久 successor：`claraWork_v1`（`packages/runtime/workflows/claraWork.v1.*`）在一个 `"use step"` 内运行 AI SDK 7.0.77 `ToolLoopAgent`，显式加载冻结的 bundle `clara-work/v1`（instructions、skill、server-owned tools `list_accounts`／`record_journal_entry`／`ask_question`，有限的 segment／model／tool／replan／retry 预算；canonical-JSON sha256 digest 由单元测试钉死，记录在 Work 的 bundle 清单、回执、world 启动日志与 `/api/build-info`）。错误按 0178 的 (errcode, detail.reason) 名册分类为 invalid_input／state_changed／conflict／transient／refusal／cancelled／invariant，refusal 与 conflict 对模型是终态（不得改参重试），预算耗尽结算为可恢复的 `failed/limit`。`chatTurn_v18` 只增加 `start_journal_work` 工具与 `work_accepted` part。其余流程仍是手工版本化注册；统一能力目录尚待实现。
 
+#637 把「版本切换」从一次具体的 v1→v2 事件提炼为一个通用机制，且机制本身不认识任何具体版本号。
+registry 除 `workflows`／`workflowsByName`／`workflowNames` 外再导出两份**惰性数据**（冻结的字符串
+字面量，绝不是函数引用，因此不构成第二个动态派发视图，freeze-lint 的 REGISTRY-PROVENANCE-EXPORTS
+以 AST 结构强制这一形状）：`workflowBodies`（这个镜像**能运行**的全部 body 标识符，当前 49 个，恰好等于
+WDK manifest 注册的数量）与 `workflowPins`（class → body 标识符）。三个面读同一份数据且不得互相矛盾：
+world 启动时的一行 provenance 日志（git sha、migration frontier、body 数、每个 class 的 pin；未烘入 sha
+时写 `<unset>`，frontier 读不到时写 `<unavailable: reason>`，绝不编造）、`/api/build-info` 的
+`bodies`／`pins`、以及 rollback preflight。切换演练（`tests/two-build-cutover-e2e.mjs`）从 registry 的
+活 pin 与保留导出名册**推导**版本对，因此下一个 successor 落地时演练自动变成 vN→vN+1，无需改动演练代码。
+
 产品 agent 的 instructions、accounting skills、tool schemas／implementations、context builder、
 model 和预算组成显式加载、可追溯的版本 bundle。仓库给编程 agent 的 AGENTS.md／skills 不会自动
 进入 Clara 的上下文。工具集合由服务器按实际能力与 scope 提供，文件内容不能注册工具或扩权。
@@ -348,10 +358,44 @@ halt 记录在 `checks.leader`（halt 在调用 onHalt 之前写入），held:fa
 `pending` 表示尚未测量，`stalled` 是警告；不可把尚未完成的探测当成健康证明。
 所有已配置连接通道和存储的完整硬性 readiness 检查仍未完成；上述新增读数全部是告警级别。
 
+<a id="workflow-versioning-and-rollback"></a>
+
+**版本、冻结与回退（supersession pointer）。** 历史上冻结的 workflow body 在自己的文件头引用
+“ARCHITECTURE Appendix A”。本仓库没有、也不会有 Appendix A——那些文件是冻结的，**其引用永远不能被修改**，
+所以取代它的不是一次改名，而是本小节这个锚点：`#workflow-versioning-and-rollback`。任何读到
+“ARCHITECTURE Appendix A”的人应当读这里。可编辑的引用方（`workflows/registry.ts`、
+`scripts/check-frozen-workflows.mjs`、`scripts/check-workflow-bundle.mjs`）已在 #637 改为引用本锚点；
+仍指向 Appendix A 的文件全部是冻结闭包成员（以及 `nitro.config.ts`／`lib/malaysian-registration.mjs`
+两处待清理的旁注）。法条本身三句：(a) 已部署的 body 不可变，行为变更以新的 `_vN` 导出发布；
+(b) 入队站点通过 registry 解析，因此永远指向当前 pin；(c) 带在途 run 的导出不可改名或删除。
+
 Workflow registry 决定新接收的版本，旧非终态运行继续拥有其原 body 与相容依赖。
 目前 frozen closure 有 hash 检查；目标进一步固定 instruction／skill／tool registry manifest、
 schema 和依赖解析。发布新 successor 时保留旧导出，rollback 也必须支持全部非终态 bundle 或先验证 drain。
 SQL 迁移是有顺序、校验和的追加输入；回退使用相容发布或新迁移，不改写历史 migration。
+
+当前实现（#637）：上一句的 rollback 前提从散文变成了**一个带退出码的命令**。
+`packages/runtime/scripts/rollback-preflight.mjs`（逻辑在 `packages/runtime/lib/rollback-preflight.mjs`）
+在 `fly deploy --image <previous>` 之前运行，数出两件事而不是一件：非终态
+`workflow.workflow_runs`（按 name 分组，停靠的 body 从行本身推导，绝不硬编码版本字面量），**以及**
+`clara.agent_tasks` 中 kind=`accounting_work`、`workflow_run_id IS NULL` 的在世任务——后者按构造对
+run 普查不可见（任务在 `clara.admit_journal_work` 提交时就存在，run 只在 worker 认领后才存在），因此
+只数 run 会在已接收的 Work 正等着目标镜像没有的 body 时报告「干净」。目标镜像支持的 body 集合取自**目标
+产物**：扫描其已构建 bundle 的 WDK body directive，或读它自己的 `/api/build-info` `bodies`（两种推导在
+当前构建上完全一致，均为 49）。退出码 0 允许、1 拒绝（列出具名 body）、2 无法回答——1 与 2 刻意不同：
+把「我拒绝」和「我看不到」当成同一件事的发布脚本，终将在第二种情况下发车。`--scope`（run id／name 过滤／
+work id）是显式且默认关闭的窄化，结果里带 `scoped: true`，解决 #708（共享 rig 上他人留下的停靠 run 会
+让判决与被测切换无关）。
+
+拒绝只有两个可接受的出路，**经过的时间不是其中之一**：保留全部非终态 bundle（发布一个仍导出这些 body、
+但把新接收指向上一版本的兼容构建），或先完成**经过验证的 drain** 再重跑 preflight。并且「回退只是让车道
+停靠」这一说法过于温和：#637 的实测是，引擎在启动时对一个自己不导出 body 的非终态 run 做 re-enqueue 会抛
+`ReplayDivergenceError`，crash-only supervisor 随即 exit 1——在 Fly 上是崩溃循环而不是安静停靠。这正是
+preflight 必须是闸门而不是备注的原因。启动时的 stranded-body 普查与 `/ready` 的 `checks.bodies` 是
+**告警级、fail-open**（遵循 `checks.leader` 先例）：这个进程无法**恢复**那些 run，但不该因此停止服务它
+能服务的；未测量与读取失败各是一种答案，绝不报成干净的 0。两版本切换的可执行证据是
+`packages/runtime/tests/two-build-cutover-e2e.mjs`（真正构建第二个镜像，本地全绿，已接入 per-PR
+`db-live-gates`）；hosted 的两次发布 + 一次故意回退仍待 owner 安排，证据未补。
 
 Web、runtime、DB frontier 和 renderer 分别记录发布身份；源代码通过不能替代已部署版本证据。
 备份需要账务／schema、角色与 ACL、对象清单和可解密制品，且必须实际恢复并核对账与重渲染结果。
@@ -366,7 +410,7 @@ Web、runtime、DB frontier 和 renderer 分别记录发布身份；源代码通
 
 | 领域 | 当前实现的事实／限制 | 已接受目标 |
 |---|---|---|
-| Agent 与宿主 | #623 已合入：`claraWork_v1`（ToolLoopAgent + 冻结 bundle `clara-work/v1`）与 `chatTurn_v18`；本地证据：runtime suite 2211／2209 pass／1 fail（Windows-only EICAR）／1 skip，world／version-cutover／work-journal e2e 在真实 Postgres World 上通过（含 commit 后、checkpoint 前 SIGKILL 重放恰好一条分录一条回执，及真实 chatTurn_v18 回合准入同一 basis）；hosted 证据以 #623 记录为准。#629 已合入 `claraWork_v2`（registry 重指向；v1 保留；`claraWork.v2.errors.ts` 委托 v1 名册并覆盖 `(CLR13, source_conflict)`；冻结清单相对 main 仅追加 7 项；本地：runtime suite 2233／2226 pass／1 fail（EICAR）／6 skip，world／version-cutover／work-journal／work-question e2e 全部通过——后者 7 条腿含两个 worker 竞争一个过期租约、resume 前崩溃、commit 后 checkpoint 前崩溃、过期→Retry→版本 2、角色丢失；CI `db-live-gates` 绿）。其余仍是分散冻结流程；根／CI／runtime image 已统一 Node 22.23.2（#616 已关闭，本地 + hosted 证据：Linux runners CI 绿，image `refresh-10b99a73` 以 v76 发布于 `clara-runtime`，`/ready` 200 且镜像内 Node v22.23.2）；`packages/backup` 已随 #686 改为 `node:22-bookworm-slim`（镜像尚未部署），`packages/reporting-render` 仍按 digest 钉 Node 20 基底，属独立待决事项（#691）。 | 首个 ToolLoopAgent successor 与显式版本 bundle；保留旧运行。 |
+| Agent 与宿主 | #623 已合入：`claraWork_v1`（ToolLoopAgent + 冻结 bundle `clara-work/v1`）与 `chatTurn_v18`；本地证据：runtime suite 2211／2209 pass／1 fail（Windows-only EICAR）／1 skip，world／version-cutover／work-journal e2e 在真实 Postgres World 上通过（含 commit 后、checkpoint 前 SIGKILL 重放恰好一条分录一条回执，及真实 chatTurn_v18 回合准入同一 basis）；hosted 证据以 #623 记录为准。#629 已合入 `claraWork_v2`（registry 重指向；v1 保留；`claraWork.v2.errors.ts` 委托 v1 名册并覆盖 `(CLR13, source_conflict)`；冻结清单相对 main 仅追加 7 项；本地：runtime suite 2233／2226 pass／1 fail（EICAR）／6 skip，world／version-cutover／work-journal／work-question e2e 全部通过——后者 7 条腿含两个 worker 竞争一个过期租约、resume 前崩溃、commit 后 checkpoint 前崩溃、过期→Retry→版本 2、角色丢失；CI `db-live-gates` 绿）。其余仍是分散冻结流程；根／CI／runtime image 已统一 Node 22.23.2（#616 已关闭，本地 + hosted 证据：Linux runners CI 绿，image `refresh-10b99a73` 以 v76 发布于 `clara-runtime`，`/ready` 200 且镜像内 Node v22.23.2）；`packages/backup` 已随 #686 改为 `node:22-bookworm-slim`（镜像尚未部署），`packages/reporting-render` 仍按 digest 钉 Node 20 基底，属独立待决事项（#691）。#637 已合入版本切换的**通用机制**（无新 migration、无新冻结闭包）：registry 的 `workflowBodies`／`workflowPins` 惰性数据（freeze-lint 新增 capability (g) 以 AST 强制其形状，(h) 拒绝 `tests/` 下的冻结清单键，C77.2）、一行 provenance 启动日志（git sha／frontier／body 数／每个 class 的 pin）、`/api/build-info` 的 `bodies`／`pins`、告警级 `/ready` `checks.bodies`（stranded body，fail-open，三种答案）、以及可执行的 rollback preflight（`lib/rollback-preflight.mjs` + `scripts/rollback-preflight.mjs`，退出码 0／1／2，同时数非终态 run 与未绑定 run 的 `accounting_work` 任务，`--scope` 解决 #708）。本地证据：`tests/two-build-cutover-e2e.mjs` **真正构建第二个镜像**（scratch nitro build 82.6s，整个文件 3m25s）并全绿——A 固定 `claraWork_v1`（48 body）接收 W1 并停靠 bare clarify，A 停止，B 固定 `claraWork_v2`（49 body）接收 W2 并停靠类型化 Work question，回退到 A 被拒绝并具名 `claraWork_v2`，W1 在 B 内**恢复到原 body**（run name 不变）并以 v1 digest 结出唯一回执，W2 以 v2 digest 结出唯一回执（两个不同 digest、各一条分录），两者终态后同一 A 目标转为允许，未绑定 Work 独立拒绝；`tests/version-cutover-e2e.mjs`（含 #708 的 20 条噪声 run 验收腿）、`tests/rollback-preflight.test.mjs` 10／10、`tests/ready.test.mjs` 20／20、freeze-lint 与 selftest 全绿；CI 已接入 `db-live-gates`（记录待 PR）。**实测发现**：回退到缺少某 body 的镜像不止是「车道停靠」——引擎在启动 re-enqueue 时抛 `ReplayDivergenceError`，crash-only supervisor exit 1（Fly 上是崩溃循环）；这是 preflight 必须是闸门的理由。hosted 证据（两次发布 + 一次故意回退）未补。 | 首个 ToolLoopAgent successor 与显式版本 bundle；保留旧运行。 |
 | Work 与控制 | tasks、interruptions、回执、SSE、租约已有；#623（0178）加入 `accounting_work`／`operation_receipts`、逻辑操作身份、client 范围的 intent 幂等、retry 保留身份、任务状态镜像、receipt-aware 结算与待答问题级联（本地 db suite 4152／4058 pass／0 fail／94 skip）；#629（0180）加入共享 Work question（`agent_interruptions` 上的 Work 链接、单调版本、类型化字段、依据 digest、回答归因、带时间戳的 delivery state；一个 Work 至多一个待答问题；首答闸门 `answer_work_question`；读门 `get_work_question`／`get_work_pending_question`；`list_review_queue` 的 `work_question` 行）与正确投递（claimant+租约条件的 delivered 戳、续租、HookNotFound 按真实 run 状态核对、`hook_missing` 静置 + 宽限 + 二次探测后才结算 `expired`、14 天期限的执行者）；本地 db suite 4208／4114 pass／0 fail／94 skip；CI 绿。取消排序仍由 #630 承接；chat 车道的 clarify 期限与 HookNotFound 假设未变（#720）；答案不能补全不完整的 basis（#721）。 | 统一业务 Work，共享问题与稳定操作身份，真实重启／竞争下保持完整结果。 |
 | 会计能力 | JE、subledger、结算、资产、close 基础存在；#623 的无附件手工分录已是完整 operation（`wake_record_journal_entry`：无 attestation 仪式、当前授权与硬约束在提交时重查、回执墙接受两种回执形态）；#634（0182）使该 operation 的凭据可选且可迟到而不改写已入账历史（`entry_evidence_links`、全事务所一份文件一条在世分录、冲销释放、`attach_entry_evidence`、`list_entry_links`；`admit_journal_work`／`_record_journal_entry_core` 全文重切，0178 各拒绝臂逐一保留并经文本 diff 核对；本地 db suite 4193／4099 pass／0 fail／94 skip，work-journal e2e 第 8 条腿；CI 待记录）；文件编码车道仍不回看凭据链接（#718）。其余入口能力及人工／agent 行为仍不一致。 | 全范围领域操作与必要关联影响；去掉普通入账额外仪式，保留实际权限与硬约束。 |
 | 文件 | 0177 与 extraction-aware facts_gate consumer 已合入 main 并在本地 PG17 全链验证：未知 kind 的 PDF／图片在成功提取前返回 awaiting_extraction；hosted 发布已由 #606 记录（consumer v76 先行、0177 落地 live DB（frontier 0177）、runtime v77，真实上传旅程中 classify 任务在 extraction 完成后 98 ms 创建）。 | 能力分层与 source／facts／operation 状态一致；提取失败不产生分类目前只有本地证据，hosted 证据仍待补。 |
