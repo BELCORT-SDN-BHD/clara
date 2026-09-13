@@ -62,7 +62,20 @@ describe("裁-117 prototype-parity wiring", () => {
   });
 
   it("wires the recovery request and PKCE callback faces from login", () => {
-    assert.match(read("components/login-form.tsx"), /href=["']\/forgot-password["']/);
+    const loginForm = read("components/login-form.tsx");
+    // #622 review round: this link's `href` is now a COMPUTED value (it
+    // forwards `?next=` when the login page itself was reached with one —
+    // see the sibling assertion below), never a bare literal `href=` prop
+    // any more. Matching either a plain `"/forgot-password"` string or the
+    // `` `/forgot-password?next=…` `` template it computes from still proves
+    // the wiring — the destination path — without over-fitting to one
+    // literal `href=` spelling a real fix legitimately outgrew.
+    assert.match(loginForm, /[`"']\/forgot-password(\?next=|[`"'])/);
+    // AND the return target is genuinely forwarded, not merely a path that
+    // happens to start with /forgot-password: the computed href template
+    // itself, and the `next` query param this component reads to build it.
+    assert.match(loginForm, /`\/forgot-password\?next=/);
+    assert.match(loginForm, /searchParams\.get\("next"\)/);
     assert.equal(existsSync(join(WEB_ROOT, "app/(entry)/forgot-password/page.tsx")), true);
     assert.equal(existsSync(join(WEB_ROOT, "app/(entry)/auth/recover/route.ts")), true);
     assert.equal(existsSync(join(WEB_ROOT, "app/(entry)/auth/recover/password/page.tsx")), true);
