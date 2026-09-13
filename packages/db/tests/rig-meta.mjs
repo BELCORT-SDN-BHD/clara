@@ -1664,6 +1664,37 @@ export const WORK_CANCEL_0184_COHORT = [
   ...WORK_CANCEL_0184_RUNTIME_FNS, ...WORK_CANCEL_0184_UNGRANTED_FNS,
 ];
 
+// #643 [0194, periodic stock adjustments + supplied payroll obligations] — the PERIODIC-ADJUSTMENT
+// lane, its own cohort for the same "wholly present or wholly absent" reason 0178's carries:
+// folding these names into an older roster would red every database between the two frontiers, and
+// `cohortFailures()` fails a PARTIAL cohort by design.
+//
+//   the ONE admission door — clara_runtime ONLY, mirroring clara.admit_journal_work's own grant
+//   (0178:1032 / 0182). The wake roles and clara_authenticated gain ZERO: a lane that could admit
+//   its own accounting work would be an agent deciding what it is authorised to do, and the
+//   browser reaches this door through the runtime's authenticated route, never through PostgREST.
+const PERIODIC_ADJUSTMENTS_0194_RUNTIME_FNS = ["admit_periodic_adjustment_work"];
+//   the ONE read — clara_authenticated ONLY, viewer-floored inside its own body (the same class as
+//   clara.list_journal_entries / clara.get_close_readiness). No agent, wake or runtime variant
+//   exists: the run is told its effect by the wake verb's answer and never reads this history.
+const PERIODIC_ADJUSTMENTS_0194_HUMAN_FNS = ["list_periodic_adjustments"];
+//   …and the UNGRANTED closure: the admission core 0194 EXTRACTS from clara.admit_journal_work (so
+//   the journal door and the periodic-adjustment door cannot drift apart), the particulars'
+//   predicates that admission and commit share, the two total readers the canonical form is built
+//   from, and the append-only trigger body. Listed so `cohortFailures` reports a half-applied 0194
+//   rather than a silently narrower boundary.
+const PERIODIC_ADJUSTMENTS_0194_UNGRANTED_FNS = [
+  "_admit_accounting_work_core",
+  "_assert_adjustment_basis", "_assert_adjustment_relationships", "_assert_adjustment_account",
+  "_adjustment_basis_canonical", "_adjustment_amount_cents", "_adjustment_net_cents",
+  "_adjustment_cents", "_adjustment_cents_value", "_adjustment_date", "_adjustment_text",
+  "_tf_periodic_adjustment_append_only",
+];
+export const PERIODIC_ADJUSTMENTS_0194_COHORT = [
+  ...PERIODIC_ADJUSTMENTS_0194_RUNTIME_FNS, ...PERIODIC_ADJUSTMENTS_0194_HUMAN_FNS,
+  ...PERIODIC_ADJUSTMENTS_0194_UNGRANTED_FNS,
+];
+
 export const ALLOWED = {
   // Slice-4 governance writers (contract v2.1 §3.2/3.3/3.5): human lane only.
   [ROLES.authenticated]: new Set([
@@ -1816,6 +1847,10 @@ export const ALLOWED = {
     // above. clara_authenticated ONLY; clara_runtime, the agent role and both wake roles gain
     // ZERO on either name.
     ...WALK_FINDINGS_0183_HUMAN_FNS,
+    // #643 0194 the periodic-adjustment history read — see the block above. clara_authenticated
+    // ONLY, viewer-floored in its own body; clara_runtime, the agent role and both wake roles
+    // gain ZERO.
+    ...PERIODIC_ADJUSTMENTS_0194_HUMAN_FNS,
   ]),
   // [S6 §9/C-11] agent lane loses the bare get_journal_entry(uuid) oracle; keeps the other
   // reads and gains the client-pinned S6 reads + get_journal_entry_for.
@@ -1966,6 +2001,10 @@ export const ALLOWED = {
     // clara.retry_accounting_work sits in. Both are reached by a human through the runtime's own
     // authenticated route, never by PostgREST.
     ...WORK_CANCEL_0184_RUNTIME_FNS,
+    // [#643, 0194] the periodic-adjustment admission door — clara_runtime ONLY, the same lane
+    // clara.admit_journal_work sits in. Reached by a human through the runtime's own
+    // authenticated route, never by PostgREST.
+    ...PERIODIC_ADJUSTMENTS_0194_RUNTIME_FNS,
     // [F-A2 PR-2, GM-10] the withdrawal re-admit door — clara_runtime ONLY (the consumer's
     // sole caller); proves the event->entry->attempt->task->filing chain then delegates to
     // 0053's one_click exception. Declared here so any wider grant FAILS the matrix.
@@ -2196,6 +2235,7 @@ export async function grantMatrixFailures() {
   failures.push(...cohortFailures("#634 0182 journal-evidence lane", JOURNAL_EVIDENCE_0182_COHORT, liveNames));
   failures.push(...cohortFailures("#728 0183 sweep attribution + spoken-for documents", WALK_FINDINGS_0183_COHORT, liveNames));
   failures.push(...cohortFailures("#630 0184 work-cancel/takeover lane", WORK_CANCEL_0184_COHORT, liveNames));
+  failures.push(...cohortFailures("#643 0194 periodic-adjustment lane", PERIODIC_ADJUSTMENTS_0194_COHORT, liveNames));
   failures.push(...cohortFailures("wave F F-A1 PR-4 bank-statement witness cutover", STATEMENT_F_A1_PR4_COHORT, liveNames));
   // F-A6's cohort is bimodal: wholly present once PR-1 applies, wholly absent before it. Half a
   // cohort is a half-applied migration and is reported as one.
