@@ -1696,7 +1696,7 @@ const KNOWLEDGE_0192_UNGRANTED_FNS = [
   "_knowledge_assert_value", "_knowledge_assert_applies_when", "_knowledge_source_pins",
   "_knowledge_trust_of", "_knowledge_applies_when_digest", "_knowledge_floor",
   "_knowledge_insert_revision", "_knowledge_capture_core", "_knowledge_row_json",
-  "_knowledge_live_revision", "_next_knowledge_version",
+  "_knowledge_legacy_rows", "_knowledge_live_revision", "_next_knowledge_version",
   "_tf_knowledge_records_supersede_only", "_tf_knowledge_authority",
 ];
 export const KNOWLEDGE_0192_COHORT = [

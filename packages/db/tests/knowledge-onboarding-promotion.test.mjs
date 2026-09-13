@@ -8,11 +8,12 @@
 // and that an item key OUTSIDE it is deliberately not promoted.
 
 import { after, before, test } from "node:test";
+import { randomUUID } from "node:crypto";
 import assert from "node:assert/strict";
 import { assertRaises, endPool, humanQuery, roleQuery, rootQuery, opk, ROLES } from "./rig-fixtures.mjs";
 import { committedPlan, knowledgeCohortApplied, knowledgeWorld } from "./knowledge-fixtures.mjs";
 
-const EXPECTED_CELLS = 12;
+const EXPECTED_CELLS = 13;
 let live = false;
 let executed = 0;
 
@@ -280,8 +281,8 @@ cell("kp.10 promoted answers reach BOTH the C13 register and the runtime knowled
   assert.ok(register.knowledge_version > 0);
   assert.equal(register.records.every((r) => r.source_kind === "interview" && r.trust === "asserted"), true);
   const pack = await roleQuery(ROLES.runtime,
-    "select clara.get_knowledge_pack(p_client => $1, p_purpose => $2) as r", [w.clientA, "wiki_coding"])
-    .then((r) => r.rows[0].r);
+    `select clara.get_knowledge_pack(p_client => $1, p_purpose => $2, p_firm => $3) as r`,
+    [w.clientA, "wiki_coding", w.firm]).then((r) => r.rows[0].r);
   assert.equal(pack.status, "ok");
   assert.equal(pack.records.length, 10);
   assert.equal(Number(pack.knowledge_version), Number(register.knowledge_version),
@@ -380,4 +381,68 @@ cell("kp.12 the MACHINE lane cannot promote without an explicit firm binding, an
   assert.equal(ok.promoted.length, 2, JSON.stringify(ok));
   const replay = await promoteAsHuman(w.admin, plan, { firm: w.firm });
   assert.equal(replay.skipped.length, 2, JSON.stringify(replay));
+});
+
+// =============================================================================================
+// REVIEW ROUND 2 — SHOULD-1: NO EXISTENCE ORACLE BELOW THE FLOOR.
+//
+// Closing the tenancy hole left one seam open. The door fetched the plan — `select … for update`
+// — BEFORE it discriminated the lane and BEFORE it applied the admin floor, so a caller who
+// could never promote anything still learned something from the refusal it got: a REAL plan id
+// belonging to another firm answered CLR04 (the floor), while a random uuid answered CLR11 (not
+// found). That is an existence oracle for a guessed id, and it also took a ROW LOCK on another
+// firm's plan on the way to refusing.
+//
+// 0021's rule is that absent and foreign answer alike. The same reasoning applies one level up:
+// a refusal must not depend on whether the object exists when the caller was never admitted to
+// ask. The fix is a reorder — lane and floor first, then a plan lookup SCOPED to the firm the
+// caller has already proved — so both arms answer with one SQLSTATE and one sentence.
+// =============================================================================================
+
+cell("kp.13 a BELOW-FLOOR caller learns nothing: a real foreign plan and a random uuid answer identically", async () => {
+  const w = await knowledgeWorld("p13");
+  const other = await knowledgeWorld("p13b");
+  const plan = await committedPlan({ firm: w.firm, client: w.clientA, committedBy: w.admin,
+    answers: { msic: { value: "47211", answeredBy: w.admin },
+               turnover: { value: "RM1M-5M", answeredBy: w.admin } } });
+
+  // THE ORACLE, REPRODUCED. Firm B's bookkeeper cannot promote anything anywhere; what the two
+  // calls must not do is tell it apart.
+  const real = await assertRaises("CLR04", () => promoteAsHuman(other.bookkeeper, plan),
+    "a foreign bookkeeper naming a REAL plan of another firm");
+  const absent = await assertRaises("CLR04", () => promoteAsHuman(other.bookkeeper, randomUUID()),
+    "the same caller naming a plan id that exists nowhere");
+  assert.equal(real.code, absent.code, "the two arms must answer with the SAME SQLSTATE");
+  assert.equal(real.message, absent.message, "…and the same sentence");
+  assert.equal(reasonOf(real), reasonOf(absent), "…and the same reason");
+
+  // The ADMIN arms were already clean and stay clean: absent and foreign are both CLR11.
+  const adminReal = await assertRaises("CLR11", () => promoteAsHuman(other.admin, plan),
+    "a foreign ADMIN naming a real plan of another firm");
+  const adminAbsent = await assertRaises("CLR11", () => promoteAsHuman(other.admin, randomUUID()),
+    "a foreign admin naming a plan id that exists nowhere");
+  assert.equal(adminReal.message, adminAbsent.message);
+
+  // The MACHINE lane answers alike too, once it has named its firm (a firm it owns, a plan it
+  // does not): the plan is looked up INSIDE that firm, so an id from elsewhere is simply absent.
+  const machineForeign = await assertRaises("CLR11",
+    () => promoteAsRuntime(plan, { firm: other.firm }),
+    "the runtime naming its own firm and another firm's plan");
+  const machineAbsent = await assertRaises("CLR11",
+    () => promoteAsRuntime(randomUUID(), { firm: other.firm }),
+    "the runtime naming its own firm and a plan id that exists nowhere");
+  assert.equal(machineForeign.message, machineAbsent.message);
+
+  // kp.11's claim survives the reorder: a below-floor human of the RIGHT firm is still CLR04…
+  await assertRaises("CLR04", () => promoteAsHuman(w.bookkeeper, plan),
+    "a bookkeeper of the plan's own firm");
+  // …and nothing landed, in either firm.
+  const none = await rootQuery(
+    "select count(*)::int as n from clara.knowledge_records where firm_id in ($1,$2)",
+    [w.firm, other.firm]);
+  assert.equal(none.rows[0].n, 0, "a refused promotion must leave no record behind");
+
+  // The gate is still a gate: the plan's own admin promotes it.
+  const ok = await promoteAsHuman(w.admin, plan);
+  assert.equal(ok.promoted.length, 2, JSON.stringify(ok));
 });

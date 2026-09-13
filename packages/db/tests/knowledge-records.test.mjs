@@ -16,10 +16,10 @@
 
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
-import { assertRaises, endPool, humanQuery, roleQuery, rootQuery, opk, ROLES } from "./rig-fixtures.mjs";
+import { assertRaises, endPool, humanQuery, roleQuery, rootQuery, opk, withActor, ROLES } from "./rig-fixtures.mjs";
 import { knowledgeCohortApplied, knowledgeWorld } from "./knowledge-fixtures.mjs";
 
-const EXPECTED_CELLS = 25;
+const EXPECTED_CELLS = 27;
 let live = false;
 let executed = 0;
 
@@ -84,9 +84,16 @@ const listClientKnowledge = (sub, client) =>
   humanQuery(sub, "select clara.list_client_knowledge(p_client => $1) as r", [client])
     .then((r) => r.rows[0].r);
 
-const knowledgePack = (client, purpose = "wiki_coding") =>
-  roleQuery(ROLES.runtime, "select clara.get_knowledge_pack(p_client => $1, p_purpose => $2) as r",
-    [client, purpose]).then((r) => r.rows[0].r);
+// TWO CALL SHAPES FOR THE PACK, and the difference is the point -- the same split the promotion
+// door already carries. The MACHINE lane carries no claims, so it must NAME the firm it reads and
+// the door verifies that name against the client; the HUMAN lane takes its firm from the session
+// and treats a supplied p_firm as a belt that must agree.
+const PACK_UNBOUND = "select clara.get_knowledge_pack(p_client => $1, p_purpose => $2) as r";
+const PACK_BOUND = `select clara.get_knowledge_pack(
+  p_client => $1, p_purpose => $2, p_firm => $3) as r`;
+
+const packAs = (firm, client, purpose = "wiki_coding") =>
+  roleQuery(ROLES.runtime, PACK_BOUND, [client, purpose, firm]).then((r) => r.rows[0].r);
 
 const knowledgeHistory = (sub, record) =>
   humanQuery(sub, "select clara.get_knowledge_history(p_record => $1) as r", [record])
@@ -474,9 +481,7 @@ cell("kn.18 the runtime pack answers status ok with the version it used, and rea
   await capture(other.bookkeeper, { key: "turnover_band", client: other.clientA, value: "RM100M+",
     basis: "another firm entirely" });
 
-  const pack = await roleQuery(ROLES.runtime,
-    "select clara.get_knowledge_pack(p_client => $1, p_purpose => $2) as r", [w.clientA, "wiki_coding"])
-    .then((r) => r.rows[0].r);
+  const pack = await packAs(w.firm, w.clientA);
   assert.equal(pack.status, "ok");
   assert.equal(pack.purpose, "wiki_coding");
   assert.equal(pack.records.length, 2, "the pack must carry the client row and the firm default");
@@ -485,12 +490,11 @@ cell("kn.18 the runtime pack answers status ok with the version it used, and rea
   assert.equal(Number(pack.knowledge_version), maxVersion,
     "knowledge_version must be the greatest stamp the pack actually used");
   // A purpose is required — the pack never answers a question nobody asked.
-  await assertRaises("CLR10", () => roleQuery(ROLES.runtime,
-    "select clara.get_knowledge_pack(p_client => $1, p_purpose => $2) as r", [w.clientA, "  "]),
+  await assertRaises("CLR10", () => roleQuery(ROLES.runtime, PACK_BOUND, [w.clientA, "  ", w.firm]),
     "a knowledge pack with no purpose");
   // The human lane does NOT hold the runtime pack, and the runtime lane does not hold the C13 reads.
   const acl = await rootQuery(
-    `select has_function_privilege('clara_authenticated','clara.get_knowledge_pack(uuid,text)'::regprocedure,'EXECUTE') as human_pack,
+    `select has_function_privilege('clara_authenticated','clara.get_knowledge_pack(uuid,text,uuid)'::regprocedure,'EXECUTE') as human_pack,
             has_function_privilege('clara_runtime','clara.list_client_knowledge(uuid)'::regprocedure,'EXECUTE') as runtime_list`);
   assert.equal(acl.rows[0].human_pack, false);
   assert.equal(acl.rows[0].runtime_list, false);
@@ -531,9 +535,7 @@ cell("kn.19 a client row scoped to ONE condition shadows only the firm row with 
   assert.equal(firmRow.value, "service_tax", "the firm default must survive verbatim");
 
   // The RUNTIME pack reads the same way — a run must not lose the default either.
-  const pack = await roleQuery(ROLES.runtime,
-    "select clara.get_knowledge_pack(p_client => $1, p_purpose => $2) as r", [w.clientA, "wiki_coding"])
-    .then((r) => r.rows[0].r);
+  const pack = await packAs(w.firm, w.clientA);
   const packRows = pack.records.filter((r) => r.knowledge_key === "sst_regime");
   assert.equal(packRows.length, 2,
     `the knowledge pack must carry both -- got ${JSON.stringify(packRows.map((r) => [r.scope_kind, r.applies_when]))}`);
@@ -596,7 +598,7 @@ cell("kn.21 the watermark is TEXT and never moves backwards on a withdrawal; bot
   // A bigint through jsonb_build_object becomes a JSON NUMBER, which is a lossy claim for a
   // watermark #631's trace compares -- every envelope emits it as text.
   assert.equal(typeof one.knowledge_version, "string", "the receipt's watermark must be text");
-  const pack1 = await knowledgePack(w.clientA);
+  const pack1 = await packAs(w.firm, w.clientA);
   const reg1 = await listClientKnowledge(w.bookkeeper, w.clientA);
   assert.equal(typeof pack1.knowledge_version, "string");
   assert.equal(typeof reg1.knowledge_version, "string");
@@ -617,7 +619,7 @@ cell("kn.21 the watermark is TEXT and never moves backwards on a withdrawal; bot
   // since I recorded it?" would read "nothing changed" across the one event most likely to
   // invalidate the work.
   await withdraw(w.bookkeeper, { record: two.record_id, reason: "the band was withdrawn" });
-  const pack2 = await knowledgePack(w.clientA);
+  const pack2 = await packAs(w.firm, w.clientA);
   const reg2 = await listClientKnowledge(w.bookkeeper, w.clientA);
   assert.ok(BigInt(pack2.knowledge_version) > BigInt(pack1.knowledge_version),
     `the pack watermark stalled or went backwards across a withdrawal: ${pack1.knowledge_version} -> ${pack2.knowledge_version}`);
@@ -750,4 +752,141 @@ cell("kn.25 the live-uniqueness RACE answers by name: the writer body maps 23505
   assert.match(src, /uq_knowledge_records_revision/, "…and the revision race onto its own");
   assert.match(src, /knowledge_revision_raced/);
   assert.match(src, /\braise;/, "…re-raising anything it does not recognise, fail-closed");
+});
+
+// =============================================================================================
+// REVIEW ROUND 2 — SHOULD-2: THE RUNTIME PACK NAMES THE TENANT IT READS.
+//
+// clara.promote_plan_answers_to_knowledge now demands an explicit `p_firm` of its machine lane,
+// and clara.capture_knowledge_for is bound by the named human's active membership. The pack was
+// the one runtime surface with NO binding at all: `get_knowledge_pack(p_client => X)` derived the
+// firm FROM the client and verified nothing, so a wrong (or model-influenced) client id put
+// another tenant's knowledge into the model's context. "Derive it from the argument" is not a
+// tenancy check; it is the absence of one.
+//
+// The shape is the promotion door's, verbatim: the machine lane NAMES the firm and a firm that
+// does not own the client answers the no-existence-oracle refusal; the human lane takes the
+// session firm and a supplied p_firm must agree; anything that is neither lane is CLR03.
+// =============================================================================================
+
+cell("kn.26 the runtime pack NAMES the tenant it reads, and neither lane is open by default", async () => {
+  const w = await knowledgeWorld("t26");
+  const other = await knowledgeWorld("t26b");
+  await capture(w.bookkeeper, { key: "turnover_band", client: w.clientA, value: "RM1M-5M",
+    basis: "management accounts FY24" });
+  await capture(other.bookkeeper, { key: "turnover_band", client: other.clientA, value: "RM100M+",
+    basis: "another firm entirely" });
+
+  // ARM 1 — THE MACHINE LANE WITH NO BINDING AT ALL. Before the fix this SUCCEEDED and handed
+  // back the client's firm's knowledge on the strength of a client id alone.
+  const unbound = await assertRaises("CLR10",
+    () => roleQuery(ROLES.runtime, PACK_UNBOUND, [w.clientA, "wiki_coding"]),
+    "the runtime reading a pack for a firm it named nowhere");
+  assert.equal(reasonOf(unbound), "pack_firm_required");
+
+  // ARM 2 — a binding that does NOT own the client is the no-existence-oracle refusal, and it is
+  // the SAME refusal an id that exists nowhere gets.
+  const foreign = await assertRaises("CLR11",
+    () => roleQuery(ROLES.runtime, PACK_BOUND, [other.clientA, "wiki_coding", w.firm]),
+    "the runtime naming firm A and firm B's client");
+  const absent = await assertRaises("CLR11",
+    () => roleQuery(ROLES.runtime, PACK_BOUND,
+      ["00000000-0000-4000-8000-0000000000ff", "wiki_coding", w.firm]),
+    "the runtime naming a client that exists nowhere");
+  assert.equal(foreign.message, absent.message, "absent and foreign must answer alike");
+
+  // ARM 3 — the correct binding reads, and reads only this firm.
+  const ok = await roleQuery(ROLES.runtime, PACK_BOUND, [w.clientA, "wiki_coding", w.firm])
+    .then((r) => r.rows[0].r);
+  assert.equal(ok.status, "ok");
+  assert.equal(ok.firm_id, w.firm);
+  assert.equal(ok.records.length, 1);
+  assert.equal(ok.records[0].value, "RM1M-5M");
+
+  // ARM 4 — AN IDENTIFIED HUMAN takes the firm from the SESSION, and a supplied p_firm is a belt.
+  // The human lane holds no EXECUTE on this door today (kn.18 pins that, and this round does not
+  // widen it), so the arm is exercised through a claims-carrying superuser session: that is
+  // exactly what the function BODY sees, which is what is under test here.
+  const asClaims = (sub, sql, params) => withActor({ jwtSub: sub }, (c) => c.query(sql, params));
+  const human = await asClaims(w.bookkeeper, PACK_UNBOUND, [w.clientA, "wiki_coding"])
+    .then((r) => r.rows[0].r);
+  assert.equal(human.firm_id, w.firm, "the human lane reads its own session firm");
+  assert.equal(human.records.length, 1);
+  await assertRaises("CLR11",
+    () => asClaims(w.bookkeeper, PACK_BOUND, [w.clientA, "wiki_coding", other.firm]),
+    "a human naming a firm that is not their own");
+  await assertRaises("CLR11",
+    () => asClaims(w.bookkeeper, PACK_UNBOUND, [other.clientA, "wiki_coding"]),
+    "a human reading another firm's client");
+
+  // ARM 5 — NEITHER LANE. A session that is neither an identified human nor the runtime role is
+  // refused CLR03, the authority class, rather than falling through to the cheaper arm.
+  const nobody = await assertRaises("CLR03", () => rootQuery(PACK_UNBOUND, [w.clientA, "wiki_coding"]),
+    "a claims-less, role-less session reading a pack");
+  assert.equal(reasonOf(nobody), "no_pack_context");
+});
+
+// =============================================================================================
+// REVIEW ROUND 2 — WORKER FOLLOW-UP (f): THE PACK CARRIES THE LEGACY FACTS THAT STILL GOVERN.
+//
+// The register unions clara.client_facts in and flags each row `authoritative` because those are
+// the rows the estate actually reads (decision 1 names the four readers). The PACK did not, so
+// the two reads disagreed about the same client: C13 showed the legacy `trade_nature` beside the
+// newer knowledge row, while a Work reading the pack saw only the knowledge row -- and would have
+// coded on 'mixed' while clara._close_gate_closing_stock (0056:1283) went on gating on
+// 'services'. One register, one pack, one answer: the union is the same union, read-only,
+// labelled `legacy_client_fact` with `authoritative` true.
+// =============================================================================================
+
+cell("kn.27 the runtime pack carries the LEGACY facts that still govern, marked as the rows in force", async () => {
+  const w = await knowledgeWorld("t27");
+  await rootQuery(
+    `insert into clara.client_facts(firm_id, client_id, fact_key, fact_value, basis, basis_kind,
+        validated_against, recorded_by)
+     values ($1,$2,'trade_nature','"services"'::jsonb,'the engagement letter','owner_instruction',
+        'enum:TRADE_NATURE_V1',$3)`, [w.firm, w.clientA, w.admin]);
+  await capture(w.admin, {
+    key: "trade_nature", client: w.clientA, value: "mixed",
+    basis: "the client added a goods line in August",
+  });
+
+  const pack = await packAs(w.firm, w.clientA);
+  const trade = pack.records.filter((r) => r.knowledge_key === "trade_nature");
+  assert.equal(trade.length, 2,
+    `the pack dropped the legacy fact the close gate still reads -- got ${JSON.stringify(trade.map((r) => [r.source_kind, r.value]))}`);
+  const legacy = trade.find((r) => r.source_kind === "legacy_client_fact");
+  assert.ok(legacy, "the pack must carry the legacy row");
+  assert.equal(legacy.value, "services", "…carrying the value 0056's close gate actually reads");
+  assert.equal(legacy.authoritative, true, "…and saying it is the row that still governs");
+  assert.equal(legacy.editable, false, "…with no door behind it");
+  assert.equal(legacy.knowledge_version, null, "a legacy fact has no knowledge revision to stamp");
+  const governed = trade.find((r) => r.source_kind === "user_statement");
+  assert.equal(governed.value, "mixed");
+  assert.equal(typeof governed.knowledge_version, "string",
+    "a governed row still emits its watermark as text");
+  assert.equal(governed.authoritative, undefined,
+    "a governed knowledge record must not claim to be the row the estate enforces");
+
+  // THE TWO READS AGREE, row for row, on the legacy half.
+  const reg = await listClientKnowledge(w.admin, w.clientA);
+  const shape = (rows) => rows.filter((r) => r.source_kind === "legacy_client_fact")
+    .map((r) => [r.knowledge_key, r.value, r.authoritative, r.editable, r.trust, r.state])
+    .sort();
+  assert.deepEqual(shape(pack.records), shape(reg.records),
+    "the register and the pack must not carry two dialects of the same legacy fact");
+  assert.equal(pack.knowledge_version, reg.knowledge_version);
+
+  // …AND THE WATERMARK IS UNCHANGED BY THE UNION. It is taken over knowledge REVISIONS, so a
+  // legacy row arriving (or leaving) must not move the number a resumed run compares.
+  const before_ = pack.knowledge_version;
+  await rootQuery(
+    `insert into clara.client_facts(firm_id, client_id, fact_key, fact_value, basis, basis_kind,
+        validated_against, recorded_by)
+     values ($1,$2,'entity_type','"sdn_bhd"'::jsonb,'the SSM certificate','owner_instruction',
+        'enum:ENTITY_TYPES_V2',$3)`, [w.firm, w.clientA, w.admin]);
+  const after_ = await packAs(w.firm, w.clientA);
+  assert.equal(after_.knowledge_version, before_,
+    "a legacy fact moved the knowledge watermark; the watermark is over knowledge revisions alone");
+  assert.equal(after_.records.filter((r) => r.source_kind === "legacy_client_fact").length, 2);
+  assert.equal(typeof after_.knowledge_version, "string");
 });

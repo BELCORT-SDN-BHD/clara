@@ -23,7 +23,10 @@ export async function knowledgeCohortApplied() {
                                                            is not null as correct_door,
        to_regprocedure('clara.withdraw_knowledge(uuid,text,text)')      is not null as withdraw_door,
        to_regprocedure('clara.list_client_knowledge(uuid)')             is not null as list_read,
-       to_regprocedure('clara.get_knowledge_pack(uuid,text)')           is not null as pack_read,
+       -- BY NAME, for the reason the promotion probe below gives: the pack gained its explicit
+       -- firm binding (p_firm) in the #644 review round, and a cohort probe pinned to one arity
+       -- would call a schema PARTIAL for a reason that is not a partial cohort.
+       to_regproc('clara.get_knowledge_pack')                           is not null as pack_read,
        -- BY NAME, not by signature. The promotion door gained its explicit firm binding
        -- (p_firm) in the #644 review round, and a cohort probe pinned to one arity would call a
        -- schema PARTIAL for a reason that is not a partial cohort. The name is unambiguous:
