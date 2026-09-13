@@ -10,13 +10,19 @@
 //
 // WHAT IT PROVES, and each of these needs a real Postgres world rather than a unit fake:
 //
-//   1. TWO BELT PASSES IN ONE CYCLE CONVERGE. Two `reconcilePlanOccurrences` calls issued
-//      CONCURRENTLY on two independent clara_runtime connections — the shape a leader handover,
-//      a doubled supervisor or a retried cycle actually produces — leave EXACTLY ONE occurrence
-//      row and EXACTLY ONE `clara.accounting_work` row for the due event. One pass reports it
-//      admitted, the other reports it converged on the same work id. The database's plan-row lock
-//      and its `unique (plan_id, due_date)` are what make that true; this leg measures it through
-//      the real belt rather than asserting it about the SQL.
+//   1. TWO BELT PASSES IN ONE CYCLE LEAVE ONE OCCURRENCE. Two `reconcilePlanOccurrences` calls
+//      issued CONCURRENTLY on two independent clara_runtime connections — the shape a leader
+//      handover, a doubled supervisor or a retried cycle actually produces — leave EXACTLY ONE
+//      occurrence row and EXACTLY ONE `clara.accounting_work` row for the due event. The
+//      database's plan-row lock and its `unique (plan_id, due_date)` are what make that true;
+//      this leg measures it through the real belt rather than asserting it about the SQL.
+//
+//      WHICH of the two answers "converged" is NOT asserted here, deliberately: whether the
+//      loser converges on the occurrence or simply finds nothing due depends on where its own
+//      candidate query fell relative to the winner's commit, and both are correct. The converge
+//      ANSWER itself is pinned under a real lock barrier by
+//      `packages/db/tests/accounting-plan-occurrences.test.mjs`'s p640.occ.duplicate, which can
+//      hold both callers at the plan row and therefore force the case.
 //
 //   2. NO ENGINE IS NEEDED TO ADMIT, AND THE RECONCILER DISPATCHES WHAT THE BELT ADMITTED. The
 //      Work is admitted with the process that will run it not yet started. That is the ordinary
@@ -318,12 +324,21 @@ async function main() {
 
   const faulty = spawnServe({ CLARA_WORK_TEST_FAULT: "exit_after_commit", CLARA_WORK_TEST_SCRIPT: "post" });
   try {
-    await waitReady(faulty);
-    console.log("[plan-e2e] engine up with exit_after_commit armed; waiting for the reconciler to dispatch the plan's Work");
-    // The reconciler's accounting_work §A re-enqueues a queued Work with no run past its grace
-    // (2s by default). The fault then exits the process the instant the DB returns a receipt.
-    await waitExit(faulty.child, 120000);
+    // THIS LEG DELIBERATELY DOES NOT WAIT FOR `/ready`. The reconciler's accounting_work §A
+    // re-enqueues a queued Work past its 2-second grace and the commit follows immediately, so the
+    // fault can — and on a warm rig usually does — fire BEFORE the readiness probe would first
+    // answer 200. Waiting for readiness here would turn the leg's own expected outcome into a boot
+    // failure. The EXIT is the outcome this leg is about, so the exit is what it waits for.
+    console.log("[plan-e2e] engine spawned with exit_after_commit armed; waiting for the reconciler to dispatch the plan's Work and the commit fault to fire");
+    await waitExit(faulty.child, 240000);
     console.log(`[plan-e2e] engine exited as scripted: ${JSON.stringify(faulty.state.exitInfo)}`);
+    assert.notEqual(faulty.state.exitInfo?.code, 0,
+      "the engine must have exited through the commit fault, not shut down cleanly");
+    assert.ok(
+      (faulty.state.tail ?? []).join("").includes(`exit_after_commit — exiting after commit, before checkpoint (work=${work})`),
+      `the fault must have fired on THIS plan's Work (${work}); tail was:
+${(faulty.state.tail ?? []).join("")}`,
+    );
   } finally {
     if (!faulty.state.exited) faulty.child.kill("SIGKILL");
   }
