@@ -20,6 +20,29 @@ _Avoid_: Chat session, chat message, journal entry as synonyms for the whole job
 Stopping the remaining work while retaining outcomes already completed. Reversing or correcting a posted outcome is a separate accounting action.
 _Avoid_: Rollback, reversal as synonyms for cancellation.
 
+**Accounting plan**:
+An explicitly authorised schedule for future accounting. It records what it posts, the schedule it
+follows, the calendar days that schedule produces in a named timezone, the window its authority
+covers, and the instruction that authorised it — a row this database holds, not a remembered
+sentence. It can be revised (a new version, the predecessor kept), paused (future due events stop;
+work already admitted is untouched) and ended (terminal).
+_Avoid_: A recurring adjustment template as a synonym; a preference, a calculation policy or a
+repeated bank debit as a source of authority; an instruction to move money — a plan creates journal
+Work and never initiates a bank payment or a mandate.
+
+**Plan occurrence**:
+One due event of one plan. It is the identity of that event: one plan and one due date have exactly
+one occurrence, whatever happened to it. An admitted occurrence names the Accounting work it
+created; a refused one records the refusal and creates nothing, and re-attempting it is an explicit
+catch-up rather than the next scan's business.
+_Avoid_: The journal entry as a synonym; a second scan's answer as a second occurrence; treating a
+missed period as something the schedule will pick up on its own.
+
+**Plan catch-up**:
+Admitting due events that already passed, over a window a person names. Oldest first, bounded per
+request, and never reaching back past the date the plan's authority starts.
+_Avoid_: An automatic backfill; a future schedule read as authority over history.
+
 **Ordering boundary**:
 The `clara.accounting_work` row lock. Admitting an accounting operation and cancelling that Work serialise on it: exactly one side wins; the loser creates no effect and returns a typed refusal.
 _Avoid_: An AbortSignal or in-process flag as a substitute; a guarantee that holds only when nothing races.

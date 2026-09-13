@@ -58,6 +58,7 @@ const LANE_MOCKS = [
   "home-board-mock.mjs",
   "journal-work-mock.mjs",
   "journals-table-mock.mjs",
+  "plans-mock.mjs",
   "tax-boundary-mock.mjs",
 ] as const;
 
@@ -285,6 +286,10 @@ const LANE_DECLARATIONS: Record<string, { unscopeable: string[]; debt: string[] 
   // before it answers, and falls through otherwise — same shape as documents-viewer-mock.mjs
   // above, which is the state a lane mock should be in.
   "tax-boundary-mock.mjs": { unscopeable: [], debt: [] },
+  // #640's C9 lane. Every handler names this lane's own client id or plan id before it answers
+  // and falls through otherwise, including all nine RPC verbs — the shape a new lane mock should
+  // aim for, declaring neither list.
+  "plans-mock.mjs": { unscopeable: [], debt: [] },
 };
 
 test("N5 · every lane handler either scopes by the request's own subject, or is a NAMED exception", () => {

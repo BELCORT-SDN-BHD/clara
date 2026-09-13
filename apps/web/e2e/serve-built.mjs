@@ -60,6 +60,10 @@ import { handleD4Supabase } from "./tax-boundary-mock.mjs";
 // replacing) because the Activity page's client Select is this train's first consumer of the
 // UNFILTERED client register — see that export's own header in activity-mock.mjs.
 import { ACTIVITY_CLIENTS, handleActivitySupabase } from "./activity-mock.mjs";
+// #640's C9 lane — the accounting-plan doors. Every handler is id-scoped and its RPC half
+// guards `readJson` on an exact-verb allow-list, so it drains no other lane's request stream and
+// can run anywhere in the chain below.
+import { handlePlansSupabase } from "./plans-mock.mjs";
 
 const e2eRoot = dirname(fileURLToPath(import.meta.url));
 const webRoot = resolve(e2eRoot, "..");
@@ -589,6 +593,11 @@ async function handleSupabase(request, response, url) {
   // through for every other id, so the unfiltered register stays exactly as this file has it.
   // The home board is LAST because the journal-work lane must precede it (see that lane's own
   // note above, which carries the measurement).
+  // #640's C9 lane. Position is not load-bearing: every branch is scoped to this lane's own
+  // client or plan ids and falls through otherwise, and its RPC verbs are disjoint from every
+  // lane above. Placed before the home board for the same reason the journal-work lane is — that
+  // lane answers `/rest/v1/clients` with an honest id-scoped row and this one must reach its own.
+  if (await handlePlansSupabase(request, response, path, url, sendJson, cors)) return;
   if (await handleHomeBoardSupabase(request, response, path, url, sendJson, cors)) return;
 
   if (request.method === "GET" && path === "/rest/v1/clients") {

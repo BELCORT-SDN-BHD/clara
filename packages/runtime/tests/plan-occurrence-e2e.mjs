@@ -112,15 +112,22 @@ function childEnv(extra = {}) {
 
 function spawnServe(extra = {}) {
   const child = spawn(process.execPath, [serveScript], { env: childEnv(extra), stdio: ["ignore", "pipe", "pipe"] });
-  const state = { exited: false, exitInfo: null };
+  // THE TAIL IS KEPT so a readiness timeout can PRINT what the child was doing. A boot failure
+  // that reports only "did not become ready" is a diagnosis nobody can act on.
+  const state = { exited: false, exitInfo: null, tail: [] };
+  const keep = (d) => {
+    state.tail.push(String(d));
+    if (state.tail.length > 40) state.tail.shift();
+  };
   child.on("exit", (code, signal) => {
     state.exited = true;
     state.exitInfo = { code, signal };
   });
   child.stdout.setEncoding("utf8");
-  child.stdout.on("data", () => {});
+  child.stdout.on("data", keep);
   child.stderr.setEncoding("utf8");
   child.stderr.on("data", (d) => {
+    keep(d);
     if (/FATAL|Error:|exit_after_commit/.test(d)) process.stderr.write(`[child] ${d}`);
   });
   return { child, state };
@@ -137,22 +144,32 @@ function waitExit(child, timeoutMs = 30000) {
   });
 }
 
-async function waitReady(deadlineMs = 60000) {
+async function waitReady(spawned, deadlineMs = 180000) {
   const end = Date.now() + deadlineMs;
   let healthy = false;
+  let lastReady = null;
   while (Date.now() < end) {
+    if (spawned?.state?.exited) {
+      throw new Error(`serve child exited during boot: ${JSON.stringify(spawned.state.exitInfo)}
+${(spawned.state.tail ?? []).join("")}`);
+    }
     try {
       if (!healthy && (await fetch(`${BASE}/health`, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) })).ok) healthy = true;
       if (healthy) {
         const r = await fetch(`${BASE}/ready`, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
         if (r.status === 200) return;
+        lastReady = `${r.status} ${await r.text().catch(() => "")}`.slice(0, 600);
       }
     } catch {
       /* booting */
     }
     await sleep(250);
   }
-  throw new Error("serve child did not become ready (/health + /ready 200)");
+  throw new Error(
+    `serve child did not become ready (/health ${healthy ? "ok" : "never ok"}; last /ready = ${lastReady ?? "never answered"})
+`
+    + (spawned?.state?.tail ?? []).join(""),
+  );
 }
 
 async function main() {
@@ -271,9 +288,37 @@ async function main() {
   // =========================================================================
   // 2 + 3. THE ENGINE DISPATCHES IT, AND A CRASH BETWEEN COMMIT AND CHECKPOINT REPLAYS.
   // =========================================================================
+  //
+  // QUIESCE EVERY OTHER QUEUED WORK FIRST, AND SAY WHY. `CLARA_WORK_TEST_FAULT=exit_after_commit`
+  // is a PROCESS-wide fault: it exits on the FIRST commit the engine makes, whichever Work that
+  // belongs to. `reconciler-work.mjs` §A dispatches oldest-first, so on a database that already
+  // holds queued accounting_work from other batteries — which is exactly what a local per-ticket
+  // rig looks like, because packages/db's plan batteries admit Work they never run — the crash
+  // would land on a stranger's Work and this leg would measure nothing about the plan's.
+  //
+  // It is a NO-OP on the CI rig (`clara_wave_b_ci` reaches this step with the three sibling e2es'
+  // Work already settled), and it terminalises through the estate's OWN verb rather than an
+  // UPDATE: `clara.settle_work_run` is what the reconciler itself calls for a stranded pair.
+  const strays = await rig.rootQuery(
+    `select t.id from clara.agent_tasks t
+       join clara.accounting_work w on w.id = t.work_id
+      where t.kind = 'accounting_work' and t.status in ('queued','running')
+        and w.id <> $1 and w.status not in ('completed','refused','failed','cancelled','expired')`,
+    [work]);
+  for (const row of strays.rows) {
+    await rig.withActor({ role: "clara_runtime" }, (c) =>
+      c.query(
+        "select clara.settle_work_run($1::uuid,'expired'::text,null::text,$2::jsonb,null::jsonb) as r",
+        [row.id, JSON.stringify({ reason: "quiesced by plan-occurrence-e2e so the process-wide commit fault lands on the plan's own Work" })],
+      )).catch(() => {});
+  }
+  if (strays.rows.length > 0) {
+    console.log(`[plan-e2e] quiesced ${strays.rows.length} unrelated queued Work item(s) so the commit fault lands on this plan's own`);
+  }
+
   const faulty = spawnServe({ CLARA_WORK_TEST_FAULT: "exit_after_commit", CLARA_WORK_TEST_SCRIPT: "post" });
   try {
-    await waitReady();
+    await waitReady(faulty);
     console.log("[plan-e2e] engine up with exit_after_commit armed; waiting for the reconciler to dispatch the plan's Work");
     // The reconciler's accounting_work §A re-enqueues a queued Work with no run past its grace
     // (2s by default). The fault then exits the process the instant the DB returns a receipt.
@@ -291,7 +336,7 @@ async function main() {
 
   const respawn = spawnServe({ CLARA_WORK_TEST_SCRIPT: "post" });
   try {
-    await waitReady();
+    await waitReady(respawn);
     const end = Date.now() + 180000;
     let row = null;
     const TERMINAL = new Set(["completed", "refused", "failed", "cancelled", "expired"]);
