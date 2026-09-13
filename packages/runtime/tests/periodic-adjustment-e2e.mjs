@@ -27,6 +27,12 @@
 //      the process the instant the database returns a receipt. On respawn the WDK re-executes the
 //      step, the tool call REPLAYS onto the same logical identity, and exactly ONE entry, ONE
 //      committed receipt and ONE adjustment row exist.
+//   6. #643's UPLOAD/REFERENCE ENTRANCE. A Work admitted with `sourceRefs:[{kind:'document'}]` —
+//      what the form's evidence chooser sends — reaches commit with an `entry_evidence_links` row
+//      born inside the posting transaction, a receipt whose effects name the document, and a
+//      `clara.periodic_adjustments.source_document_id` that keeps it; an UNFILED citation is a
+//      typed 400 naming `sourceRefs[1]` / `not_filed`, which is the refusal the chooser renders.
+//      Skipped cleanly when 0182 is absent.
 //   5. A LOCKED PERIOD, THROUGH THE REAL BOUNDARY. A sealed fiscal year is refused at ADMISSION
 //      with a typed 400 naming `adjustment.periodEnd` — the CLR19 mapping `workErrorStatus` gained
 //      for this door, which unmapped answered a bare 500 for an ordinary, actionable refusal.
@@ -231,6 +237,27 @@ async function main() {
     process.exit(0);
   }
 
+  // #634's relation, probed separately: the evidence leg below is a claim about 0182 and this file
+  // must skip it honestly on a database that predates it rather than red on a missing table.
+  const EVIDENCE_READY = (await rig.rootQuery(
+    "select to_regclass('clara.entry_evidence_links') is not null as ok")).rows[0]?.ok === true;
+
+  /** One byte-verified document, actively filed to this client — the estate's own seeding verb, the
+   *  same one `work-journal-e2e.mjs` uses. An unverified upload is not evidence
+   *  (`clara._journal_document_filed`'s custody floor), so a hand-written INSERT here would be
+   *  seeding a state the door refuses by name. */
+  const seedFiledDocument = async (firm, client, tag) => {
+    const sha256 = (randomUUID() + randomUUID()).replace(/-/g, "").slice(0, 64);
+    const r = await rig.rootQuery(
+      `select clara._seed_verified_document(
+         p_firm => $1::uuid, p_client => $2::uuid, p_sha256 => $3::text, p_filename => $4::text,
+         p_mime => 'application/pdf', p_bytes => 1024::bigint, p_storage_path => $5::text,
+         p_document_kind => 'other') as receipt`,
+      [firm, client, sha256, `${tag}.pdf`, `firms/${firm}/docs/${sha256}.pdf`],
+    );
+    return r.rows[0].receipt.document_id;
+  };
+
   const countEntries = (client) =>
     rig.rootQuery("select count(*)::int as n from clara.journal_entries where client_id = $1", [client]).then((r) => r.rows[0].n);
   const countReceipts = (work) =>
@@ -387,6 +414,75 @@ async function main() {
       "…beside the control that caused it, in the wire spelling the browser's mapper reads");
     assert.equal(await countEntries(sealed.client), 0, "and nothing was admitted");
     console.log("[pa-e2e] PASS 5: a locked period is a typed 400 at admission, beside its own control");
+
+    // ---- 6. #643's UPLOAD/REFERENCE ENTRANCE, END TO END ------------------
+    // AC3 asks this operation to be reachable "from the direct Accounting entry point AND from an
+    // upload/reference". On this door the second entrance is the CITATION: the form's evidence
+    // chooser (`apps/web/components/accounting/evidence-chooser.tsx`, the composer's own component)
+    // sends `sourceRefs:[{kind:'document'}]`, and this leg walks that claim the whole way — through
+    // the real HTTP route, the real admission door, the real run, to the evidence link the posting
+    // core writes inside the posting transaction and the `source_document_id` the adjustment row
+    // keeps. Only a real World can show the last two: they are written by the RUN, not by the door.
+    if (EVIDENCE_READY) {
+      const ev = await seedClient("pa-evidence");
+      const doc = await seedFiledDocument(ev.firm, ev.client, "pa-count-sheet");
+      const evAdmit = await api("POST", "/api/work/periodic-adjustment", {
+        clientId: ev.client,
+        intentKey: randomUUID(),
+        purpose: "periodic_stock_adjustment",
+        basis: stockBasis("2026 stocktake, with the count sheet"),
+        adjustment: stockAdjustment(),
+        sourceRefs: [{ kind: "document", documentId: doc }],
+      }, ev.jwt);
+      assert.equal(evAdmit.status, 202,
+        `a cited admission is a 202 (got ${evAdmit.status} ${JSON.stringify(evAdmit.body)})`);
+      const evWork = await readWork(evAdmit.body.work_id);
+      assert.equal(evWork.source_refs?.[0]?.kind, "document",
+        "the Work carries the document the preparer chose — the route really threads p_source_refs");
+      assert.equal(evWork.source_refs[0].document_id, doc);
+      assert.ok(evWork.adjustment_basis, "…beside the typed particulars, never inside them");
+
+      const evDone = await pollWork(evAdmit.body.work_id, ev.jwt, (b) => TERMINAL.has(b.work.status), "cited work settles");
+      assert.equal(evDone.work.status, "completed",
+        `the cited Work completes (got ${evDone.work.status} / ${JSON.stringify(evDone.work.error)})`);
+      assert.equal(await countEntries(ev.client), 1, "exactly ONE journal entry");
+
+      const evReceipt = (await rig.rootQuery(
+        "select effects from clara.operation_receipts where work_id=$1 and outcome='committed'", [evAdmit.body.work_id])).rows[0];
+      assert.equal(evReceipt.effects.document_id, doc, "the receipt's effects NAME the evidence");
+      assert.ok(evReceipt.effects.adjustment_id, "…and its adjustment");
+
+      const evLinks = await rig.rootQuery("select * from clara.entry_evidence_links where entry_id=$1",
+        [evDone.work.result.entry_id]);
+      assert.equal(evLinks.rows.length, 1, "exactly ONE evidence link, born inside the posting transaction");
+      assert.equal(evLinks.rows[0].document_id, doc);
+      assert.equal(evLinks.rows[0].attached_via, "work_commit");
+
+      const evRows = await adjustments(ev.client);
+      assert.equal(evRows.length, 1);
+      assert.equal(evRows[0].source_document_id, doc,
+        "the durable adjustment row keeps the document it was recorded from — the history's 'Source'");
+
+      // AN UNFILED DOCUMENT IS A 400 NAMING THE CONTROL, never a 500 and never a silent drop. This
+      // is the refusal the form's chooser renders (`fieldForServerPath` maps `sourceRefs[N]` onto
+      // the `evidence` control), and the token is the DATABASE's own `constraint`, folded into
+      // `reason` by `workErrorResponse` because `lib/wire.ts` surfaces nothing else.
+      const unfiled = await api("POST", "/api/work/periodic-adjustment", {
+        clientId: ev.client,
+        intentKey: randomUUID(),
+        purpose: "periodic_stock_adjustment",
+        basis: stockBasis("a document this client does not have"),
+        adjustment: stockAdjustment(),
+        sourceRefs: [{ kind: "document", documentId: "00000000-0000-4000-8000-000000643fff" }],
+      }, ev.jwt);
+      assert.equal(unfiled.status, 400,
+        `an unfiled citation is a 400 (got ${unfiled.status} ${JSON.stringify(unfiled.body)})`);
+      assert.deepEqual(unfiled.body, { error: "invalid_basis", field: "sourceRefs[1]", reason: "not_filed" });
+      assert.equal(await countEntries(ev.client), 1, "…and nothing else was admitted");
+      console.log("[pa-e2e] PASS 6: a cited document rides admission -> commit -> evidence link + adjustment row; an unfiled one is a typed 400 on the chooser");
+    } else {
+      console.log("[pa-e2e] PASS 6: SKIPPED — migration 0182 (clara.entry_evidence_links) is not on this database");
+    }
   } finally {
     if (!first.state.exited) first.child.kill("SIGKILL");
     await waitExit(first.child).catch(() => {});

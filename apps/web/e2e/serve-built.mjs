@@ -51,9 +51,11 @@ import { handleHomeBoardSupabase } from "./home-board-mock.mjs";
 // below rather than answered from a second one. Its runtime half owns `/api/work/*` and
 // one control path; see that module's header for what the walk does and does not prove.
 import { JOURNAL_WORK_SESSIONS, handleJournalWorkRpc, handleJournalWorkRuntime, handleJournalWorkSupabase } from "./journal-work-mock.mjs";
-// #643's own lane — the periodic-adjustment form, its refusals and its history. Its PostgREST hook
-// runs beside the journal-work lane's and is scoped to its own client id; its RUNTIME hook answers
-// the one admission route and its own control endpoint. See periodic-adjustment-mock.mjs.
+// #643's own lane — the periodic-adjustment form, its evidence chooser, its refusals and its
+// history. Its PostgREST hook runs beside the journal-work lane's and is scoped to its own client
+// id; its RUNTIME hook answers the one admission route and its own control endpoint, and THAT ONE
+// is scoped too (it takes `client` and falls through otherwise — the sibling lane's shape, adopted
+// after a standards review found the declaration ahead of the code). See periodic-adjustment-mock.mjs.
 import { handlePeriodicAdjustmentRuntime, handlePeriodicAdjustmentSupabase } from "./periodic-adjustment-mock.mjs";
 // #627's own lane (the D4 tax-boundary walk). ID-scoped like its siblings — five client ids,
 // one per five/six-state read outcome — hooked in ONE place below, before `handleL7Supabase`

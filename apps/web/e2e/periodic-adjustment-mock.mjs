@@ -24,7 +24,11 @@
 //   409 `{ "error": "intent_payload_conflict", "work_id" }` — the id of the Work that intent key
 //   ALREADY names, which is what lets the form offer a route to it instead of an apology.
 //
-// EVERY HANDLER IS SCOPED TO THIS LANE'S OWN CLIENT and falls through otherwise
+// EVERY HANDLER IS SCOPED TO THIS LANE'S OWN CLIENT — the CONTROL ENDPOINT INCLUDED, which is the
+// one this file used to claim and not do (standards review): its five ops mutated shared state for
+// any body at all, so the declaration in `e2e-fixture-ownership.test.ts` was ahead of the code. It
+// now takes `client` and falls through when it is not this lane's, exactly as
+// `journal-work-mock.mjs`'s own control endpoint does. Every handler falls through otherwise
 // (`e2e-fixture-ownership.test.ts` exists because three lanes learned the hard way that a handler
 // claiming a SHARED endpoint replaces everyone else's fixture). This lane claims no unfiltered
 // register, no shared session list and no firm-wide read.
@@ -51,6 +55,11 @@ export const PA = {
   reversedAdjustmentId: "64309ddd-6430-4643-8643-643064309ddd",
   reversedEntryId: "64309eee-6430-4643-8643-643064309eee",
   correctionId: "64309fff-6430-4643-8643-643064309fff",
+  /** #643's upload/reference entrance: one FREE filed document the walk cites, and one that
+   *  already backs a posted entry so the chooser's disabled/advisory arm is exercised too. */
+  documentId: "643d0001-643d-4643-8643-643d643d0001",
+  documentName: "stocktake-2026-12.pdf",
+  spokenForDocumentId: "643d0002-643d-4643-8643-643d643d0002",
   /** The control endpoint, as the BROWSER addresses it: the same-origin proxy maps
    *  `/api/runtime/<p>` onto the runtime's `/api/<p>`. */
   controlPath: "/api/runtime/e2e-periodic-adjustment/control",
@@ -74,6 +83,58 @@ const ACCOUNTS = [
   // An INACTIVE row, so the form's `is_active` filter is exercised by a real fixture: it must never
   // appear as an option.
   { client_id: PA.clientId, account_code: "1299", name: "Inventory (retired)", account_type: "asset", is_active: false },
+];
+
+/** #643's UPLOAD/REFERENCE ENTRANCE — the two documents this client has FILED, in the shape
+ *  `listDocumentsByIds` reads (`DOC_COLS`, column for column). One is free; the other already backs
+ *  a posted entry, so the chooser must offer it DISABLED and say why — the advisory rule
+ *  `mergeSpokenFor` states and the door enforces. */
+const DOCUMENTS = [
+  {
+    id: PA.documentId, sha256: "a".repeat(64), original_filename: "stocktake-2026-12.pdf",
+    mime_type: "application/pdf", byte_size: 20480, storage_path: `docs/${PA.documentId}.pdf`,
+    uploaded_by: "00000000-0000-4000-8000-000000000001", created_at: "2026-12-31T03:00:00.000Z",
+    bytes_verified_at: "2026-12-31T03:00:01.000Z", page_count: 1, extraction_status: "done",
+    document_kind: "other", financial_date: "2026-12-31",
+    retention_state: "anchored", retain_until: "2033-12-31", retention_basis: "statutory",
+    legal_hold: false, legal_hold_reason: null,
+  },
+  {
+    id: PA.spokenForDocumentId, sha256: "b".repeat(64), original_filename: "payroll-aug-2026.pdf",
+    mime_type: "application/pdf", byte_size: 20481, storage_path: `docs/${PA.spokenForDocumentId}.pdf`,
+    uploaded_by: "00000000-0000-4000-8000-000000000001", created_at: "2026-09-02T03:00:00.000Z",
+    bytes_verified_at: "2026-09-02T03:00:01.000Z", page_count: 1, extraction_status: "done",
+    document_kind: "other", financial_date: "2026-08-31",
+    retention_state: "anchored", retain_until: "2033-08-31", retention_basis: "statutory",
+    legal_hold: false, legal_hold_reason: null,
+  },
+];
+
+/** The ACTIVE filings that make those documents THIS CLIENT's — `clara.documents` has no client
+ *  column at all, so the filing is the binding (`listActiveFilingsForClient`'s own note). */
+const FILINGS = DOCUMENTS.map((doc, i) => ({
+  id: `64364f0${i + 1}-6436-4643-8643-64364364f0${i + 1}`,
+  document_id: doc.id,
+  client_id: PA.clientId,
+  filed_at: doc.created_at,
+  filed_by: "00000000-0000-4000-8000-000000000001",
+  basis: "human",
+  retired_at: null,
+  retirement_reason: null,
+  revision_token: `rev-filing-${i + 1}`,
+}));
+
+/** `clara.list_spoken_for_documents` (0183) — ADVISORY, never the law: the door's own conflict
+ *  refusal is what actually protects the entry. One row, so the walk sees a disabled option with a
+ *  reason rather than only a free list. */
+const SPOKEN_FOR = [
+  {
+    document_id: PA.spokenForDocumentId,
+    entry_id: PA.reversedEntryId,
+    client_id: PA.clientId,
+    client_name: PA.clientName,
+    via: "evidence_link",
+  },
 ];
 
 /** The history `clara.list_periodic_adjustments` answers with — the function's own projection,
@@ -110,7 +171,10 @@ const HISTORY = [
     posting_date: "2026-12-31",
     reversed_by: null,
     receipt_id: PA.receiptId,
-    source_document_id: null,
+    // THE SOURCE THE ADJUSTMENT WAS RECORDED FROM — `clara.periodic_adjustments.source_document_id`,
+    // written by the posting core from the Work's own `source_refs`. The history discloses it, which
+    // is what makes the upload/reference entrance visible after the fact rather than only at submit.
+    source_document_id: PA.documentId,
     corrects_adjustment_id: null,
     corrected_by_adjustment_id: null,
     recorded_by: "00000000-0000-4000-8000-000000000001",
@@ -219,8 +283,35 @@ export async function handlePeriodicAdjustmentSupabase(request, response, path, 
     return false;
   }
 
+  // #643's evidence chooser reads — the SAME two `lib/work/evidence.ts` makes on the composer's
+  // door, because it is the same component. Both are scoped to THIS lane's client (the filings read
+  // by `client_id`, the documents read by ids this module minted) and fall through otherwise.
+  if (request.method === "GET" && path === "/rest/v1/document_filings") {
+    const client = clientFilter?.startsWith("eq.") ? clientFilter.slice(3) : null;
+    if (client !== PA.clientId) return false;
+    sendJson(response, 200, FILINGS, cors);
+    return true;
+  }
+
+  if (request.method === "GET" && path === "/rest/v1/documents") {
+    const inList = url.searchParams.get("id");
+    if (inList === null || !inList.startsWith("in.(")) return false;
+    const ids = inList.slice(4, -1).split(",").map((v) => decodeURIComponent(v));
+    const rows = DOCUMENTS.filter((d) => ids.includes(d.id));
+    if (rows.length === 0) return false;
+    sendJson(response, 200, rows, cors);
+    return true;
+  }
+
   if (request.method !== "POST" || !path.startsWith("/rest/v1/rpc/")) return false;
   const verb = path.slice("/rest/v1/rpc/".length);
+
+  if (verb === "list_spoken_for_documents") {
+    const body = await readJson(request);
+    if (body?.p_client !== PA.clientId) return false;
+    sendJson(response, 200, SPOKEN_FOR, cors);
+    return true;
+  }
 
   if (verb === "list_periodic_adjustments") {
     const body = await readJson(request);
@@ -248,6 +339,12 @@ export async function handlePeriodicAdjustmentRuntime(request, response, url) {
 
   if (request.method === "POST" && path === "/api/e2e-periodic-adjustment/control") {
     const body = await readJson(request);
+    // SCOPED LIKE EVERY OTHER HANDLER HERE, and for the reason the file's header now states: a
+    // control endpoint that mutates shared fixture state for ANY body is a lane claiming a shared
+    // endpoint, which is exactly what `e2e-fixture-ownership.test.ts` exists to prevent. The sibling
+    // `journal-work-mock.mjs:645` is the shape (`if (body?.client !== JOURNAL_WORK.clientId) return
+    // false;`) and this now matches it.
+    if (body?.client !== PA.clientId) return false;
     if (body?.op === "refuse_next") {
       state.nextRefusal = { field: String(body.field ?? "adjustment.periodEnd"), reason: String(body.reason ?? "scope_overbroad") };
       send(response, 200, { ok: true });
@@ -292,6 +389,10 @@ export async function handlePeriodicAdjustmentRuntime(request, response, url) {
       purpose: String(body?.purpose ?? ""),
       adjustment: body?.adjustment ?? null,
       basis: body?.basis ?? null,
+      // #643's upload/reference entrance, as it crosses the wire. Recorded rather than asserted
+      // about here: the walk reads it back and pins the exact shape the route's `toDbSourceRefs`
+      // accepts, which is the only thing a browser can prove about a citation.
+      sourceRefs: body?.sourceRefs ?? null,
     });
     // NO DROPPED-SOCKET ARM LIVES HERE, and its absence is a measurement rather than an omission.
     // A fixture that destroyed its own socket would reach the page as the same-origin proxy's OWN
@@ -317,6 +418,10 @@ export async function handlePeriodicAdjustmentRuntime(request, response, url) {
       purpose: body?.purpose ?? null,
       basis: body?.basis ?? null,
       adjustment: body?.adjustment ?? null,
+      // THE CITATION IS PART OF THE INTENT, exactly as it is in the database: 0182 folded the
+      // canonical source refs into the intent-payload comparison beside the basis digest, so one
+      // key re-sent with a DIFFERENT document is a conflict rather than a replay.
+      sourceRefs: body?.sourceRefs ?? null,
     });
     const known = state.intents.get(intentKey);
     if (known !== undefined) {
