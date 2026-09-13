@@ -29,7 +29,10 @@ import { buildInfo } from "../lib/build-info.mjs";
 // The registry is imported HERE rather than inside lib/build-info.mjs: it is TypeScript, so a
 // plain-Node .mjs cannot resolve it without a build, which would make that module untestable.
 // This file is TS and compiles with it, so the names are passed in.
-import { workflowNames } from "../workflows/registry.js";
+// #637 — `workflowBodies` (every body this image can run) and `workflowPins`
+// ({class: identifier}) ride the same import-here-pass-in shape. `workflowNames` answers
+// "which CLASSES", which is not the question a rollback preflight asks; these two are.
+import { workflowBodies, workflowNames, workflowPins } from "../workflows/registry.js";
 // #623 / C88.8 — the serving bundle identity rides the SAME import-here-pass-in shape as the
 // registry names above, and for the same reason: lib/build-info.mjs is plain-Node .mjs and cannot
 // resolve a TypeScript module without a build.
@@ -54,7 +57,14 @@ export function buildInfoRoutes(): express.Router {
     }
     // Past the gate, nothing here can throw: buildInfo swallows the frontier read's failures
     // into `frontier: null` + a reason by construction.
-    res.json(await buildInfo({ names: workflowNames, bundles: [claraWorkBundleIdentityV2(), claraWorkBundleIdentity()] }));
+    res.json(
+      await buildInfo({
+        names: workflowNames,
+        bodies: workflowBodies,
+        pins: workflowPins,
+        bundles: [claraWorkBundleIdentityV2(), claraWorkBundleIdentity()],
+      }),
+    );
   });
 
   return router;

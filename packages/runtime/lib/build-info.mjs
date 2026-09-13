@@ -21,7 +21,8 @@
 // resolves inside the nitro build and from `src/*.ts`, but a plain-Node `.mjs` importing
 // `../workflows/registry.js` fails to resolve (proven — ERR_MODULE_NOT_FOUND), which would make
 // this module untestable without a build. The workflow names are therefore passed IN by
-// `src/buildInfoRoutes.ts`, which can import the registry, and a cell pins that it does.
+// `src/buildInfoRoutes.ts`, which can import the registry, and a cell pins that it does. #637
+// adds `bodies` and `pins` to that same passed-in set, and for the same reason.
 import { withRuntime } from "./pools.mjs";
 
 /** Postgres `undefined_function`. The verb ships in DB-B's web-reads migration; a runtime
@@ -89,7 +90,17 @@ export async function readMigrationFrontier(deps = {}) {
  * `{id, digest, instructions, skills, tools, budgets}` — identity and budgets, never the
  * instruction prose (a build-info payload is a version report, not a prompt dump).
  *
+ * #637 / C-70 — `bodies` and `pins` ride the SAME import-here-pass-in shape, for the same
+ * reason again: they are declared in `workflows/registry.ts`, which is TypeScript. `workflows`
+ * above names the registry's CLASSES, which is not a question a cutover or a rollback asks.
+ * `bodies` is every body identifier this image can RUN (the pins plus every retained superseded
+ * export) and `pins` is `{class: identifier}`. Together they are what a rollback preflight
+ * compares a TARGET image against: a run parked on a body the target does not carry is a run the
+ * target would strand. Both are COPIED rather than aliased, so a caller cannot mutate the
+ * registry's frozen roster through the response.
+ *
  * @param {{env?:NodeJS.ProcessEnv, names?:ReadonlyArray<string>, bundles?:ReadonlyArray<object>,
+ *          bodies?:ReadonlyArray<string>, pins?:Readonly<Record<string,string>>,
  *          withRuntime?:Function, timeoutMs?:number}} [deps]
  */
 export async function buildInfo(deps = {}) {
@@ -110,6 +121,16 @@ export async function buildInfo(deps = {}) {
     // route existed, kept here so one read answers "which workflows, from which commit". Copied
     // rather than aliased so a caller cannot mutate the registry's array through the response.
     workflows: [...(deps.names ?? [])],
+    // #637 — the BODY roster and the class PINS. Always present, empty when nothing was passed:
+    // an absent key reads as "nothing to report", and a rollback preflight reading a target
+    // image's build-info must be able to tell "this image carries no bodies" (impossible) from
+    // "this image predates the field" (the real answer) — it gets the latter from a payload whose
+    // `bodies` is an empty array beside a `workflows` list that is not.
+    // `Object.fromEntries(Object.entries(...))` rather than a spread: check-parts-parity.mjs
+    // refuses any object spread under packages/runtime outside tests/ (checkout-pools.mjs states
+    // the reason); the result is the same fresh, unaliased object.
+    bodies: [...(deps.bodies ?? [])],
+    pins: Object.fromEntries(Object.entries(deps.pins ?? {})),
     // The frozen agent bundles this image serves, by id + digest. Copied rather than aliased so a
     // caller cannot mutate a frozen module's object through the response.
     bundles: (deps.bundles ?? []).map((b) => JSON.parse(JSON.stringify(b))),
