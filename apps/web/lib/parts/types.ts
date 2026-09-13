@@ -338,7 +338,15 @@ export type WorkAcceptedPart = {
  *  to that turn's stream, and it addresses nothing a reader can navigate to on
  *  its own. So the card renders a compact line and offers NO link — a link built
  *  from a client id this part does not carry would be invented. */
-export type WorkStatusPart = { type: "work_status"; work_id: string; status: string };
+/** #631/#738: `client_id` rides here now. The DECLARER moved with it —
+ *  `packages/runtime/workflows/claraWork.v3.parts.ts` replaces v1's file in
+ *  `check-parts-parity.mjs`'s declarer set, because a discriminant may be
+ *  declared in exactly one scanned file and v1's is frozen. It is OPTIONAL on
+ *  this side and that is not a hedge: a Work parked on a claraWork_v1 or _v2
+ *  hook resumes into a body that emits the three-field shape, so a card must
+ *  render a status line that has no client — with the client-scoped actions
+ *  (Cancel Work, the route to the Work detail) unavailable rather than broken. */
+export type WorkStatusPart = { type: "work_status"; work_id: string; client_id?: string; status: string };
 
 /** The COMMITTED effect: one journal entry, one receipt, both named by the
  *  database. Identifier-only, like every other receipt kind here — the entry's

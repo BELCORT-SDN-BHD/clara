@@ -894,7 +894,12 @@ create function clara.record_work_execution_trace(
 declare
   c_keys constant text[] := array['knowledge_version','books_version','chart_revision',
                                   'basis_digest','source_sha256','question_version'];
-  w record; a record; v_id uuid; v_key text; v_started timestamptz; v_skills jsonb; v_rev jsonb;
+  w record; v_id uuid; v_key text; v_started timestamptz; v_skills jsonb; v_rev jsonb;
+  -- SCALARS, never a `record`: plpgsql raises 55000 ("record is not assigned yet") the moment an
+  -- unassigned record variable is dereferenced, and the authorization is OPTIONAL here — a
+  -- dispatch trace row is written before one exists. Measured on the rig
+  -- (work-trace-redaction.test.mjs 631.trace.persisted, first cut).
+  v_auth uuid; v_consent uuid; v_activation uuid; v_auth_purpose text;
 begin
   if p_task is null or p_run is null or btrim(p_run)='' then
     raise exception 'an execution trace names a task and a run' using errcode='CLR10',
@@ -959,9 +964,9 @@ begin
   -- THE AUTHORITY IS DERIVED, NEVER ASSERTED. An authorization id that is not this firm's and
   -- this client's is dropped rather than recorded: a trace row may not claim an authority the
   -- estate cannot corroborate.
-  a := null;
   if p_authorization_id is not null then
-    select ea.id, ea.consent_id, ea.activation_id, ea.purpose into a
+    select ea.id, ea.consent_id, ea.activation_id, ea.purpose
+      into v_auth, v_consent, v_activation, v_auth_purpose
       from clara.egress_dispatch_authorizations ea
      where ea.id = p_authorization_id and ea.firm_id = w.firm_id and ea.client_id = w.client_id;
   end if;
@@ -976,8 +981,8 @@ begin
       nullif(btrim(coalesce(p_bundle_id,'')),''), p_bundle_digest,
       nullif(btrim(coalesce(p_instructions_id,'')),''), v_skills,
       nullif(btrim(coalesce(p_tools_id,'')),''), nullif(btrim(coalesce(p_model_id,'')),''),
-      coalesce(a.purpose, nullif(btrim(coalesce(p_purpose,'')),'')), a.id, a.consent_id,
-      a.activation_id, p_input_digest, v_rev, v_started, p_ended_at,
+      coalesce(v_auth_purpose, nullif(btrim(coalesce(p_purpose,'')),'')), v_auth, v_consent,
+      v_activation, p_input_digest, v_rev, v_started, p_ended_at,
       case when p_ended_at is null then null
            else greatest(0, (extract(epoch from (p_ended_at - v_started)) * 1000)::int) end,
       p_outcome, p_refusal, p_receipt_id)

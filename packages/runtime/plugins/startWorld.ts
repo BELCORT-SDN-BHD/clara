@@ -35,6 +35,7 @@ import { workflows, workflowsByName } from "../workflows/registry.js";
 // every operation receipt — never a second copy that could disagree.
 import { CLARA_WORK_BUNDLE_V1_BANNER } from "../workflows/claraWork.v1.bundle.js";
 import { CLARA_WORK_BUNDLE_V2_BANNER } from "../workflows/claraWork.v2.bundle.js";
+import { CLARA_WORK_BUNDLE_V3_BANNER } from "../workflows/claraWork.v3.bundle.js";
 import { makeDocumentServices, recoverPendingDocumentIntakes } from "../lib/intake.mjs";
 import { makeInvoiceFactsServices } from "../workflows/invoiceFacts.v1.services.mjs";
 import { makeStatementFactsServices } from "../workflows/statementFacts.v1.services.mjs";
@@ -166,6 +167,12 @@ export default definePlugin(() => {
       // rollback preflight unable to tell, from the logs alone, which bodies this process
       // actually carries — which is the question C88.8's line exists to answer.
       console.log(CLARA_WORK_BUNDLE_V2_BANNER);
+      // #631 — THE THIRD LINE, for the reason #629 gave for the second: v3 is what
+      // `workflows.claraWork` now dispatches, and v1/v2 are still carried for parked runs.
+      // A rollback preflight reads these three lines to know which bodies this process has,
+      // and the pinned digest is the SAME constant /api/build-info serves and
+      // `clara.claim_work_run` writes onto every Work row.
+      console.log(CLARA_WORK_BUNDLE_V3_BANNER);
     } catch (err) {
       console.error("[clara-runtime] durable world FAILED to start:", err instanceof Error ? err.message : String(err));
       process.exit(1); // crash-only: world-start failure is fatal (S4-D10)

@@ -33,7 +33,7 @@ import assert from "node:assert/strict";
 import {
   gateEgress, buildWorkWorld, endPool, printLaneNotes, printSkipCount, noteLane,
   admitJournalWork, claimWorkRun, mintClientObo, wakeRecordJournalEntry, freshWorkClient,
-  basis, CLR, assertPair, assertRaises, rootQuery, opk, entryCount, committedReceiptCount,
+  basis, CLR, assertPair, rootQuery, opk, entryCount, committedReceiptCount,
   acceptLegalNow, publishNewerLegal, publishedLegal,
   prepareEgressDispatch, consumeEgressDispatch, prepareWorkEgressDispatch, workEgressEventSeq,
   authoriseWorkRun, authorizationRow, authorizationsFor, synthesisedConsent,
