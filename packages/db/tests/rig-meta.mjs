@@ -1344,6 +1344,26 @@ const CHECKOUT_CONVERGENCE_0186_HUMAN_FNS = [
 ];
 export const CHECKOUT_CONVERGENCE_0186_COHORT = [...CHECKOUT_CONVERGENCE_0186_HUMAN_FNS];
 
+// #615 (0188 operator support console): the TWO reads the operator's support destination rides,
+// clara_authenticated ONLY -- no agent, wake, runtime or Stripe-webhook sibling, by the design's
+// own shape rather than by omission. Neither is an agent act and neither is reachable from any
+// lane that executes model output.
+//   list_operator_support_queue  — one row per support case across three arms (an undecided
+//     registration with NO payment row, an unconsumed registration payment, an open Stripe event
+//     problem), each carrying the affected entity, the checkout intent's current state and the
+//     decision receipt. Authority is clara.approve_firm_registration's own predicate, body-
+//     enforced and re-derived at call time, so the grant is the same clara_authenticated every
+//     other operator door holds.
+//   get_operator_support_case    — one case by (kind, id), with NO existence oracle: an unknown
+//     id, a kind outside the closed three and a mismatched pair all answer one CLR11.
+// 0188's ONE internal, clara._operator_support_cases, is granted to NOBODY and is therefore
+// expected-false for every role in the live sweep rather than listed here -- the same disposition
+// 0186's clara._admission_capacity_state carries.
+const OPERATOR_SUPPORT_0188_HUMAN_FNS = [
+  "list_operator_support_queue", "get_operator_support_case",
+];
+export const OPERATOR_SUPPORT_0188_COHORT = [...OPERATOR_SUPPORT_0188_HUMAN_FNS];
+
 // 裁-21 PR-a (`coa_template_pr_a` — number claimed at merge prep): the firm-level standard
 // chart of accounts, TEMPLATE half. NINE human doors, clara_authenticated ONLY — agent + both
 // wake roles + clara_runtime gain ZERO, and that is the design's own claim rather than an
@@ -1788,6 +1808,10 @@ export const ALLOWED = {
     // #628 (0186): the converged checkout's four doors — the applicant's cancel, the operator
     // owner's admission capacity, its read, and the live-intent resume read. See the block above.
     ...CHECKOUT_CONVERGENCE_0186_HUMAN_FNS,
+    // #615 (0188): the operator support console's two reads — see the block above.
+    // clara_authenticated ONLY; agent, both wake roles, clara_runtime and the Stripe webhook
+    // role gain ZERO.
+    ...OPERATOR_SUPPORT_0188_HUMAN_FNS,
     // 裁-18b PR-1 the four human binding doors — see the block above.
     ...BINDING_PROPOSAL_PR1_HUMAN_FNS,
     // 裁-21 PR-a [the firm-level standard chart of accounts, TEMPLATE half] the seven admin
@@ -2267,6 +2291,10 @@ export async function grantMatrixFailures() {
   // PARTIAL cohort (one of the four retired or renamed without truing this roster) is named.
   failures.push(...cohortFailures("#628 checkout convergence",
     CHECKOUT_CONVERGENCE_0186_COHORT, liveNames));
+  // #615 — frontier-tolerant like every cohort here: absent entirely on a pre-0188 chain, and a
+  // PARTIAL cohort (one of the two retired or renamed without truing this roster) is named.
+  failures.push(...cohortFailures("#615 operator support console",
+    OPERATOR_SUPPORT_0188_COHORT, liveNames));
   // 裁-190 — frontier-tolerant like every cohort above: entirely absent on a chain that has not
   // applied the two UNNUMBERED files (which is every CI chain until merge prep, 裁-108), and a
   // PARTIAL cohort is caught by name.
