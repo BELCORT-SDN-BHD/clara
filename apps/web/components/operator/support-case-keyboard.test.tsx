@@ -225,6 +225,12 @@ test("ticket 615 AC4 — the op key is a PURE function of (case, caller, text): 
   assert.notEqual(capacityOpKey(CALLER_USER_ID, 10, "beta"), capacityOpKey(CALLER_USER_ID, 11, "beta"));
   assert.notEqual(capacityOpKey(CALLER_USER_ID, null, "beta"), capacityOpKey(CALLER_USER_ID, 0, "beta"),
     "unlimited and zero are different policies and must never share an operation identity");
+  // The DISCRIMINATING case for the reason digest: two reasons of the SAME LENGTH are two different
+  // operations. A key derived from `reason.length` (this function's first cut) shared one identity
+  // between them, so editing only the wording met `op_key_conflict` instead of being accepted.
+  assert.notEqual(capacityOpKey(CALLER_USER_ID, 10, "beta cap"), capacityOpKey(CALLER_USER_ID, 10, "beta CAP"),
+    "two same-length reasons are two different operations");
+  assert.notEqual(capacityOpKey(CALLER_USER_ID, 10, "abc"), capacityOpKey(CALLER_USER_ID, 10, "cba"));
 });
 
 // ── APPROVE: one press, one RPC, one re-read ─────────────────────────────────
