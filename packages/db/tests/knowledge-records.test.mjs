@@ -19,7 +19,7 @@ import assert from "node:assert/strict";
 import { assertRaises, endPool, humanQuery, roleQuery, rootQuery, opk, ROLES } from "./rig-fixtures.mjs";
 import { knowledgeCohortApplied, knowledgeWorld } from "./knowledge-fixtures.mjs";
 
-const EXPECTED_CELLS = 18;
+const EXPECTED_CELLS = 25;
 let live = false;
 let executed = 0;
 
@@ -80,8 +80,16 @@ function withdraw(sub, o) {
   ).then((r) => r.rows[0].r);
 }
 
-const listKnowledge = (sub, client) =>
+const listClientKnowledge = (sub, client) =>
   humanQuery(sub, "select clara.list_client_knowledge(p_client => $1) as r", [client])
+    .then((r) => r.rows[0].r);
+
+const knowledgePack = (client, purpose = "wiki_coding") =>
+  roleQuery(ROLES.runtime, "select clara.get_knowledge_pack(p_client => $1, p_purpose => $2) as r",
+    [client, purpose]).then((r) => r.rows[0].r);
+
+const knowledgeHistory = (sub, record) =>
+  humanQuery(sub, "select clara.get_knowledge_history(p_record => $1) as r", [record])
     .then((r) => r.rows[0].r);
 
 const reasonOf = (err) => {
@@ -163,10 +171,10 @@ cell("kn.04 the belt survives the doors: a direct fn_owner INSERT of an inferred
 
 cell("kn.05 capture -> correct leaves TWO revisions: revision 1 superseded, stamped, and still readable", async () => {
   const w = await knowledgeWorld("t5");
-  const one = await capture(w.bookkeeper, {
+  const one = await capture(w.admin, {
     key: "msic", client: w.clientA, value: "46900", basis: "the SSM profile the client sent",
   });
-  const two = await correct(w.bookkeeper, {
+  const two = await correct(w.admin, {
     record: one.record_id, value: "47211", reason: "the client corrected the code by email on 12 Sep",
   });
   assert.equal(two.status, "corrected");
@@ -183,13 +191,13 @@ cell("kn.05 capture -> correct leaves TWO revisions: revision 1 superseded, stam
   assert.equal(rows.rows[1].state, "live");
   assert.equal(rows.rows[1].revision_kind, "correction");
   assert.equal(rows.rows[1].revision_reason, "the client corrected the code by email on 12 Sep");
-  assert.equal(rows.rows[1].asserted_by, w.bookkeeper, "the correcting actor is not recorded");
+  assert.equal(rows.rows[1].asserted_by, w.admin, "the correcting actor is not recorded");
 });
 
 cell("kn.06 a correction without a reason is refused: an attributable revision without its reason is an edit", async () => {
   const w = await knowledgeWorld("t6");
-  const one = await capture(w.bookkeeper, { key: "msic", client: w.clientA, value: "46900" });
-  const err = await assertRaises("CLR10", () => correct(w.bookkeeper, {
+  const one = await capture(w.admin, { key: "msic", client: w.clientA, value: "46900" });
+  const err = await assertRaises("CLR10", () => correct(w.admin, {
     record: one.record_id, value: "47211", reason: "   ",
   }), "correct_knowledge with a blank reason");
   assert.equal(reasonOf(err), "knowledge_reason_required");
@@ -197,9 +205,9 @@ cell("kn.06 a correction without a reason is refused: an attributable revision w
 
 cell("kn.07 withdrawal adds revision 3, is TERMINAL, and carries the retired value verbatim", async () => {
   const w = await knowledgeWorld("t7");
-  const one = await capture(w.bookkeeper, { key: "msic", client: w.clientA, value: "46900" });
-  await correct(w.bookkeeper, { record: one.record_id, value: "47211", reason: "client correction" });
-  const three = await withdraw(w.bookkeeper, {
+  const one = await capture(w.admin, { key: "msic", client: w.clientA, value: "46900" });
+  await correct(w.admin, { record: one.record_id, value: "47211", reason: "client correction" });
+  const three = await withdraw(w.admin, {
     record: one.record_id, reason: "the client ceased that trade on 30 Jun",
   });
   assert.equal(three.status, "withdrawn");
@@ -211,7 +219,7 @@ cell("kn.07 withdrawal adds revision 3, is TERMINAL, and carries the retired val
   assert.deepEqual(rows.rows.map((r) => r.state), ["superseded", "superseded", "withdrawn"]);
   assert.equal(rows.rows[2].v, "47211", "a withdrawal must carry the value it retires");
   // TERMINAL: nothing may be appended to a withdrawn record.
-  const err = await assertRaises("CLR10", () => correct(w.bookkeeper, {
+  const err = await assertRaises("CLR10", () => correct(w.admin, {
     record: one.record_id, value: "46900", reason: "changed my mind",
   }), "correcting a withdrawn record");
   assert.equal(reasonOf(err), "knowledge_withdrawn");
@@ -219,7 +227,7 @@ cell("kn.07 withdrawal adds revision 3, is TERMINAL, and carries the retired val
 
 cell("kn.08 no role but a door writes: direct UPDATE and DELETE as clara_fn_owner are refused", async () => {
   const w = await knowledgeWorld("t8");
-  const one = await capture(w.bookkeeper, { key: "msic", client: w.clientA, value: "46900" });
+  const one = await capture(w.admin, { key: "msic", client: w.clientA, value: "46900" });
   const upd = await assertRaises("CLR10", () => roleQuery(ROLES.fnOwner,
     "update clara.knowledge_records set value = '\"11111\"'::jsonb where record_id = $1", [one.record_id]),
     "direct UPDATE of a knowledge value");
@@ -240,8 +248,8 @@ cell("kn.08 no role but a door writes: direct UPDATE and DELETE as clara_fn_owne
 cell("kn.09 an exact op_key retry REPLAYS its receipt instead of minting a second revision", async () => {
   const w = await knowledgeWorld("t9");
   const key = opk("kn_replay");
-  const first = await capture(w.bookkeeper, { key: "msic", client: w.clientA, value: "46900", opKey: key });
-  const again = await capture(w.bookkeeper, { key: "msic", client: w.clientA, value: "46900", opKey: key });
+  const first = await capture(w.admin, { key: "msic", client: w.clientA, value: "46900", opKey: key });
+  const again = await capture(w.admin, { key: "msic", client: w.clientA, value: "46900", opKey: key });
   assert.equal(again.revision_id, first.revision_id, "a replay minted a second revision");
   const n = await rootQuery(
     "select count(*)::int as n from clara.knowledge_records where client_id = $1", [w.clientA]);
@@ -258,8 +266,8 @@ cell("kn.10 a client preference is invisible to another client of the same firm"
     key: "coa_seed_decision", client: w.clientA, value: { seed: "manual" },
     basis: "the client keeps its own chart",
   });
-  const a = await listKnowledge(w.bookkeeper, w.clientA);
-  const b = await listKnowledge(w.bookkeeper, w.clientB);
+  const a = await listClientKnowledge(w.bookkeeper, w.clientA);
+  const b = await listClientKnowledge(w.bookkeeper, w.clientB);
   assert.equal(a.records.filter((r) => r.knowledge_key === "coa_seed_decision").length, 1);
   assert.equal(b.records.filter((r) => r.knowledge_key === "coa_seed_decision").length, 0,
     "a client-private preference leaked to another client");
@@ -279,7 +287,7 @@ cell("kn.12 an admin CAN, and the firm default reaches a client that holds no ro
     key: "coa_seed_decision", scope: "firm", client: null, value: { seed: "lhdn_mpers_standard" },
     basis: "the firm standardises on the LHDN chart",
   });
-  const b = await listKnowledge(w.bookkeeper, w.clientB);
+  const b = await listClientKnowledge(w.bookkeeper, w.clientB);
   const row = b.records.find((r) => r.knowledge_key === "coa_seed_decision");
   assert.ok(row, "the firm default did not reach a client without its own row");
   assert.equal(row.scope_kind, "firm");
@@ -296,13 +304,13 @@ cell("kn.13 a client's OWN live row SHADOWS the firm default (#603 Q22: exceptio
     key: "coa_seed_decision", scope: "firm", client: null, value: { seed: "lhdn_mpers_standard" },
     basis: "the firm standardises on the LHDN chart",
   });
-  const a = await listKnowledge(w.bookkeeper, w.clientA);
+  const a = await listClientKnowledge(w.bookkeeper, w.clientA);
   const rows = a.records.filter((r) => r.knowledge_key === "coa_seed_decision");
   assert.equal(rows.length, 1, "both the client exception and the firm default were rendered");
   assert.equal(rows[0].scope_kind, "client");
   assert.equal(rows[0].value.seed, "manual");
   // …and the other client still sees the firm default.
-  const b = await listKnowledge(w.bookkeeper, w.clientB);
+  const b = await listClientKnowledge(w.bookkeeper, w.clientB);
   assert.equal(b.records.find((r) => r.knowledge_key === "coa_seed_decision").scope_kind, "firm");
 });
 
@@ -324,7 +332,7 @@ cell("kn.14 a second live row of one key needs a DIFFERENT applicability; the sa
   });
   assert.equal(two.status, "captured");
   assert.notEqual(two.applies_when_digest, one.applies_when_digest);
-  const a = await listKnowledge(w.bookkeeper, w.clientA);
+  const a = await listClientKnowledge(w.bookkeeper, w.clientA);
   assert.equal(a.records.filter((r) => r.knowledge_key === "turnover_band" && r.state === "live").length, 2);
 });
 
@@ -403,7 +411,7 @@ cell("kn.16 an extracted fact is LINKED, not copied: the pins are real FKs and a
   assert.equal(reasonOf(stray), "knowledge_source_unexpected");
 });
 
-cell("kn.17 the C13 register UNIONs the byte-untouched legacy client_facts, and a knowledge record shadows one", async () => {
+cell("kn.17 the C13 register UNIONs the byte-untouched legacy client_facts, and a knowledge record never hides one", async () => {
   const w = await knowledgeWorld("t17");
   // A legacy fact, written exactly as 0055's door leaves it (root insert: the subject here is the
   // READ, and record_client_fact's own admin ceremony is proven in the x55 battery).
@@ -418,25 +426,37 @@ cell("kn.17 the C13 register UNIONs the byte-untouched legacy client_facts, and 
      values ($1,$2,'trade_nature','"services"'::jsonb,'the engagement letter','owner_instruction',
         'enum:TRADE_NATURE_V1',$3)`, [w.firm, w.clientA, w.admin]);
 
-  let a = await listKnowledge(w.bookkeeper, w.clientA);
+  let a = await listClientKnowledge(w.bookkeeper, w.clientA);
   const legacy = a.records.filter((r) => r.source_kind === "legacy_client_fact");
   assert.equal(legacy.length, 2, "the legacy facts are not in the register");
   assert.equal(legacy.every((r) => r.editable === false), true,
     "a legacy fact must not offer a correct/withdraw control it has no door for");
-  assert.equal(a.knowledge_version, 0, "legacy rows must not invent a knowledge version");
+  assert.equal(a.knowledge_version, "0", "legacy rows must not invent a knowledge version");
 
-  // A knowledge record of the same key SHADOWS the legacy one; the other legacy fact survives.
+  // A knowledge record of the same key does NOT hide the legacy one. 0192 does not dual-write,
+  // and the rest of the estate still READS clara.client_facts for every one of the five carried
+  // keys -- entity_type and msic through the 0055 S6 splice into clara.get_context_pack
+  // (0055:765), trade_nature through clara._close_gate_closing_stock (0056:1283),
+  // customer_identity_policy through the 0062 name-only guard (0062:226) and
+  // banking_arrangement through 0121:4797. So a shadow would have this register report the NEW
+  // value while the books went on being prepared from the OLD one, with nothing on screen to say so.
   await capture(w.admin, {
     key: "entity_type", client: w.clientA, value: "llp",
     basis: "the client converted to an LLP on 1 Jul; SSM notice attached to the engagement file",
   });
-  a = await listKnowledge(w.bookkeeper, w.clientA);
+  a = await listClientKnowledge(w.bookkeeper, w.clientA);
   const entity = a.records.filter((r) => r.knowledge_key === "entity_type");
-  assert.equal(entity.length, 1, "the legacy fact was not shadowed by its knowledge record");
-  assert.equal(entity[0].source_kind, "user_statement");
-  assert.equal(entity[0].editable, true);
+  assert.equal(entity.length, 2,
+    `the legacy fact the estate still reads was hidden by its knowledge record -- got ${JSON.stringify(entity.map((r) => [r.source_kind, r.value]))}`);
+  const entityLegacy = entity.find((r) => r.source_kind === "legacy_client_fact");
+  const entityRecord = entity.find((r) => r.source_kind === "user_statement");
+  assert.equal(entityLegacy.value, "sdn_bhd", "the legacy row keeps the value get_context_pack reads");
+  assert.equal(entityLegacy.authoritative, true, "…and says it is the row that still governs");
+  assert.equal(entityLegacy.editable, false);
+  assert.equal(entityRecord.value, "llp");
+  assert.equal(entityRecord.editable, true);
   assert.equal(a.records.filter((r) => r.knowledge_key === "trade_nature").length, 1);
-  assert.ok(a.knowledge_version > 0);
+  assert.ok(Number(a.knowledge_version) > 0);
   // The legacy row itself is untouched.
   const untouched = await rootQuery(
     "select count(*)::int as n from clara.client_facts where client_id = $1 and superseded_at is null",
@@ -474,4 +494,260 @@ cell("kn.18 the runtime pack answers status ok with the version it used, and rea
             has_function_privilege('clara_runtime','clara.list_client_knowledge(uuid)'::regprocedure,'EXECUTE') as runtime_list`);
   assert.equal(acl.rows[0].human_pack, false);
   assert.equal(acl.rows[0].runtime_list, false);
+});
+
+// =============================================================================================
+// SEAM 3 (review round) — THE SHADOW IS PER-APPLICABILITY, NOT PER-KEY.
+//
+// The write side already treats two live rows of one key as INDEPENDENT facts whenever their
+// `applies_when_digest` differs (`uq_knowledge_live` is over the digest). The reads' shadow has to
+// agree, or a client row scoped to one narrow condition silently hides an UNCONDITIONAL firm
+// default from that client's whole register — a default that may well apply where the narrow row
+// does not. #603 Q22 is explicit that a firm default preserves client EXCEPTIONS; an exception is
+// per-condition, so the shadow is too.
+// =============================================================================================
+
+cell("kn.19 a client row scoped to ONE condition shadows only the firm row with the SAME condition", async () => {
+  const w = await knowledgeWorld("t19");
+  // An UNCONDITIONAL firm default…
+  await capture(w.admin, {
+    key: "sst_regime", scope: "firm", client: null, value: "service_tax",
+    basis: "the firm's standing treatment where nothing else is recorded",
+  });
+  // …and a client row that applies to ONE segment only.
+  await capture(w.bookkeeper, {
+    key: "sst_regime", client: w.clientA, value: "not_registered",
+    appliesWhen: { segment: "digital" }, basis: "the digital-services segment alone",
+  });
+
+  const a = await listClientKnowledge(w.bookkeeper, w.clientA);
+  const rows = a.records.filter((r) => r.knowledge_key === "sst_regime");
+  assert.equal(rows.length, 2,
+    `a client row scoped to one condition must not hide the unconditional firm default -- got ${JSON.stringify(rows.map((r) => [r.scope_kind, r.applies_when]))}`);
+  const clientRow = rows.find((r) => r.scope_kind === "client");
+  const firmRow = rows.find((r) => r.scope_kind === "firm");
+  assert.deepEqual(clientRow.applies_when, { segment: "digital" });
+  assert.deepEqual(firmRow.applies_when, {});
+  assert.equal(firmRow.value, "service_tax", "the firm default must survive verbatim");
+
+  // The RUNTIME pack reads the same way — a run must not lose the default either.
+  const pack = await roleQuery(ROLES.runtime,
+    "select clara.get_knowledge_pack(p_client => $1, p_purpose => $2) as r", [w.clientA, "wiki_coding"])
+    .then((r) => r.rows[0].r);
+  const packRows = pack.records.filter((r) => r.knowledge_key === "sst_regime");
+  assert.equal(packRows.length, 2,
+    `the knowledge pack must carry both -- got ${JSON.stringify(packRows.map((r) => [r.scope_kind, r.applies_when]))}`);
+
+  // …AND THE SAME-DIGEST PAIR STILL SHADOWS, which is the half that makes this a shadow at all:
+  // the client's own UNCONDITIONAL row hides the firm's unconditional one, and only that one.
+  await capture(w.bookkeeper, {
+    key: "sst_regime", client: w.clientA, value: "both",
+    basis: "the client's own unconditional position",
+  });
+  const b = await listClientKnowledge(w.bookkeeper, w.clientA);
+  const after = b.records.filter((r) => r.knowledge_key === "sst_regime");
+  assert.equal(after.length, 2,
+    `the client's unconditional row must shadow the firm's unconditional one -- got ${JSON.stringify(after.map((r) => [r.scope_kind, r.applies_when]))}`);
+  assert.equal(after.every((r) => r.scope_kind === "client"), true,
+    "both remaining rows are the client's own: the firm default is now genuinely overridden");
+  assert.deepEqual(
+    after.map((r) => r.value).sort(),
+    ["both", "not_registered"],
+    "the client's unconditional value and its digital-segment exception both stand");
+});
+
+// =============================================================================================
+// REVIEW ROUND — the adversarial migration-safety findings, each with its own cell.
+// =============================================================================================
+
+cell("kn.20 a QUOTED/escaped applies_when stores and digests -- the old bytea-cast digest raised 22P02 on it", async () => {
+  const w = await knowledgeWorld("t20");
+  // `jsonb_pretty(x)::bytea` compiles and then raises 22P02 on any value containing a quote,
+  // because bytea's input grammar reads the backslash and the quote for itself. That made a whole
+  // class of model-supplied condition UNSTORABLE, and lib/knowledge.mjs classifies a non-CLR
+  // failure as `unavailable` -- i.e. a deterministic retry loop over a row that can never land.
+  const hostile = { note: 'a "quoted" value with a \\ backslash', segment: "digital" };
+  const r = await capture(w.bookkeeper, {
+    key: "turnover_band", client: w.clientA, value: "RM1M-5M", appliesWhen: hostile,
+    basis: "the condition a model would actually write",
+  });
+  assert.equal(r.status, "captured");
+  assert.match(r.applies_when_digest, /^[0-9a-f]{64}$/, "the stored digest must be a real sha256");
+  // …and the digest the doors compute is the digest the trigger stamped.
+  const same = await rootQuery(
+    "select applies_when_digest = clara._knowledge_applies_when_digest(applies_when) as agree, applies_when from clara.knowledge_records where id = $1",
+    [r.revision_id]);
+  assert.equal(same.rows[0].agree, true, "the stamped digest and the helper must agree");
+  assert.deepEqual(same.rows[0].applies_when, hostile, "the condition is stored verbatim");
+  // The digest is key-order-insensitive, so the SAME condition written the other way round is the
+  // same live slot (a second capture of it is refused, not a second live row).
+  const err = await assertRaises("CLR10", () => capture(w.bookkeeper, {
+    key: "turnover_band", client: w.clientA, value: "RM5M-25M",
+    appliesWhen: { segment: "digital", note: 'a "quoted" value with a \\ backslash' },
+    basis: "the same condition, keys reordered",
+  }), "the same condition written key-reversed");
+  assert.equal(reasonOf(err), "knowledge_already_live");
+});
+
+cell("kn.21 the watermark is TEXT and never moves backwards on a withdrawal; both reads agree", async () => {
+  const w = await knowledgeWorld("t21");
+  const one = await capture(w.admin, { key: "msic", client: w.clientA, value: "46900" });
+  const two = await capture(w.bookkeeper, { key: "turnover_band", client: w.clientA, value: "RM1M-5M" });
+  // A bigint through jsonb_build_object becomes a JSON NUMBER, which is a lossy claim for a
+  // watermark #631's trace compares -- every envelope emits it as text.
+  assert.equal(typeof one.knowledge_version, "string", "the receipt's watermark must be text");
+  const pack1 = await knowledgePack(w.clientA);
+  const reg1 = await listClientKnowledge(w.bookkeeper, w.clientA);
+  assert.equal(typeof pack1.knowledge_version, "string");
+  assert.equal(typeof reg1.knowledge_version, "string");
+  assert.equal(pack1.knowledge_version, reg1.knowledge_version,
+    "the pack and the register must never disagree about the version they read");
+  // EVERY ENVELOPE, not just the two headers: the per-ROW stamp is the number a resumed run
+  // compares against a trace, and clara._knowledge_row_json is the one shaper all four reads use.
+  const rowVersions = [...pack1.records, ...reg1.records.filter((r) => r.editable)]
+    .map((r) => typeof r.knowledge_version);
+  assert.equal(rowVersions.every((x) => x === "string"), true,
+    `a row emitted its watermark as a JSON number: ${JSON.stringify(rowVersions)}`);
+  const hist = await knowledgeHistory(w.bookkeeper, one.record_id);
+  assert.equal(typeof hist.revisions[0].knowledge_version, "string",
+    "the history shaper must emit the same text");
+
+  // THE WITHDRAWAL. It appends a revision and REMOVES a live row, so a watermark taken over the
+  // emitted rows alone would go BACKWARDS -- and a resume check of the form "has the version moved
+  // since I recorded it?" would read "nothing changed" across the one event most likely to
+  // invalidate the work.
+  await withdraw(w.bookkeeper, { record: two.record_id, reason: "the band was withdrawn" });
+  const pack2 = await knowledgePack(w.clientA);
+  const reg2 = await listClientKnowledge(w.bookkeeper, w.clientA);
+  assert.ok(BigInt(pack2.knowledge_version) > BigInt(pack1.knowledge_version),
+    `the pack watermark stalled or went backwards across a withdrawal: ${pack1.knowledge_version} -> ${pack2.knowledge_version}`);
+  assert.equal(pack2.knowledge_version, reg2.knowledge_version,
+    "…and the two reads still agree afterwards");
+  assert.notEqual(one.record_id, two.record_id);
+});
+
+cell("kn.22 a carried legacy key keeps its LEGACY floor: entity_type is admin+, customer_identity_policy is OWNER", async () => {
+  const w = await knowledgeWorld("t22");
+  // clara.record_client_fact is admin+ for all five carried keys (0055:510); a knowledge capture
+  // of the same subject must not be the cheaper route to the same claim.
+  await assertRaises("CLR04", () => capture(w.bookkeeper, {
+    key: "entity_type", client: w.clientA, value: "sdn_bhd", basis: "a bookkeeper's word",
+  }), "entity_type as a bookkeeper");
+  const byAdmin = await capture(w.admin, {
+    key: "entity_type", client: w.clientA, value: "sdn_bhd", basis: "the SSM certificate",
+  });
+  assert.equal(byAdmin.status, "captured");
+
+  // …and lifting customer_identity_policy off 'name_only' is an OWNER act (0063:156-166), so an
+  // ADMIN cannot record 'unrestricted' here either.
+  await assertRaises("CLR04", () => capture(w.admin, {
+    key: "customer_identity_policy", client: w.clientA, value: "unrestricted",
+    basis: "an admin's word",
+  }), "customer_identity_policy as an admin");
+  const byOwner = await capture(w.owner, {
+    key: "customer_identity_policy", client: w.clientA, value: "unrestricted",
+    basis: "the owner's instruction, recorded in the engagement file",
+  });
+  assert.equal(byOwner.status, "captured");
+  // A key with NO legacy floor still admits a bookkeeper at client scope.
+  const pref = await capture(w.bookkeeper, {
+    key: "coa_seed_decision", client: w.clientA, value: { seed: "manual" },
+    basis: "the client keeps its own chart",
+  });
+  assert.equal(pref.status, "captured");
+});
+
+cell("kn.23 NO legacy fact is shadowed: every one of the five is still read by the estate, and says so", async () => {
+  const w = await knowledgeWorld("t23");
+  // 0062's name-only guard reads clara.client_facts, NOT this register. So a knowledge row of
+  // customer_identity_policy that HID the legacy fact would have C13 and the pack both report
+  // "unrestricted" while that trigger went on refusing on the row nobody could see. The SAME is
+  // true of the other four carried keys -- entity_type/msic (clara.get_context_pack, 0055:765),
+  // trade_nature (clara._close_gate_closing_stock, 0056:1283) and banking_arrangement
+  // (0121:4797) -- so the rule is not "authority-bearing keys are exempt" but "a legacy fact is
+  // never shadowed", and `authoritative` says which row the estate reads.
+  await rootQuery(
+    `insert into clara.client_facts(firm_id, client_id, fact_key, fact_value, basis, basis_kind,
+        validated_against, recorded_by)
+     values ($1,$2,'customer_identity_policy','"name_only"'::jsonb,'the owner armed it',
+        'owner_instruction','enum:CUSTOMER_IDENTITY_POLICY_V1',$3)`,
+    [w.firm, w.clientA, w.owner]);
+  // …and a NON-authority-bearing legacy fact, which 0056's close gate still reads.
+  await rootQuery(
+    `insert into clara.client_facts(firm_id, client_id, fact_key, fact_value, basis, basis_kind,
+        validated_against, recorded_by)
+     values ($1,$2,'trade_nature','"services"'::jsonb,'the engagement letter','owner_instruction',
+        'enum:TRADE_NATURE_V1',$3)`,
+    [w.firm, w.clientA, w.owner]);
+
+  await capture(w.owner, {
+    key: "customer_identity_policy", client: w.clientA, value: "unrestricted",
+    basis: "the owner lifted it in writing on 14 September",
+  });
+  await capture(w.admin, {
+    key: "trade_nature", client: w.clientA, value: "mixed",
+    basis: "the client added a goods line",
+  });
+
+  const a = await listClientKnowledge(w.owner, w.clientA);
+  const policy = a.records.filter((r) => r.knowledge_key === "customer_identity_policy");
+  assert.equal(policy.length, 2,
+    `an authority-bearing legacy fact must NOT be shadowed -- got ${JSON.stringify(policy.map((r) => r.source_kind))}`);
+  const legacy = policy.find((r) => r.source_kind === "legacy_client_fact");
+  assert.ok(legacy, "the legacy row must still be on screen");
+  assert.equal(legacy.authoritative, true, "…flagged as the row that still governs");
+  assert.equal(legacy.value, "name_only", "…carrying the value the 0062 guard actually enforces");
+  assert.equal(legacy.editable, false);
+  // AND THE DESCRIPTIVE KEY TOO. clara._close_gate_closing_stock (0056:1283) reads the LEGACY
+  // trade_nature, so 'services' still decides the closing-stock gate while the register's newer
+  // record says 'mixed'. Both rows show; the legacy one is flagged as the one in force.
+  const trade = a.records.filter((r) => r.knowledge_key === "trade_nature");
+  assert.equal(trade.length, 2,
+    `a descriptive legacy fact the close gate still reads was hidden -- got ${JSON.stringify(trade.map((r) => [r.source_kind, r.value]))}`);
+  const tradeLegacy = trade.find((r) => r.source_kind === "legacy_client_fact");
+  assert.equal(tradeLegacy.value, "services", "the value 0056's gate actually reads");
+  assert.equal(tradeLegacy.authoritative, true);
+  assert.equal(trade.filter((r) => r.source_kind === "user_statement").length, 1);
+  // A GOVERNED record is never flagged authoritative: the flag means "the estate reads THIS row",
+  // and nothing outside this register reads clara.knowledge_records yet.
+  assert.equal(a.records.filter((r) => r.editable && r.authoritative === true).length, 0,
+    "a governed knowledge record must not claim to be the row the estate enforces");
+});
+
+cell("kn.24 correctable is DERIVED, so no surface offers a door a superseded or withdrawn revision has not got", async () => {
+  const w = await knowledgeWorld("t24");
+  const one = await capture(w.admin, { key: "msic", client: w.clientA, value: "46900" });
+  await correct(w.admin, { record: one.record_id, value: "47211", reason: "client correction" });
+  const hist = await knowledgeHistory(w.admin, one.record_id);
+  assert.equal(hist.revisions.length, 2);
+  assert.equal(hist.revisions[0].state, "superseded");
+  assert.equal(hist.revisions[0].correctable, false, "a superseded revision is immutable at the table");
+  assert.equal(hist.revisions[0].editable, true, "…but it is still a governed record with a detail route");
+  assert.equal(hist.revisions[1].correctable, true);
+
+  await withdraw(w.admin, { record: one.record_id, reason: "the trade ceased" });
+  const after = await knowledgeHistory(w.admin, one.record_id);
+  assert.equal(after.revisions.length, 3);
+  assert.equal(after.revisions[2].state, "withdrawn");
+  assert.equal(after.revisions[2].correctable, false, "a withdrawal is terminal - no door accepts it");
+});
+
+cell("kn.25 the live-uniqueness RACE answers by name: the writer body maps 23505 onto its own reasons", async () => {
+  // NOT A PROVOKED RACE, and labelled so. Two writers capturing the same (scope, subject, key,
+  // applicability) both find no live predecessor to lock, so the loser meets uq_knowledge_live at
+  // the INSERT rather than at the core's lookup. Provoking that needs two interleaved transactions
+  // inside one governed door call, which this harness cannot arrange; what IS checked here is that
+  // the writer names both constraints and both reasons, so the loser gets a typed refusal instead
+  // of a bare 23505 no caller maps. The refusal's own wording is exercised by kn.14 (the
+  // single-threaded second capture), which takes the same reason through the lookup arm.
+  const body = await rootQuery(
+    `select prosrc from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+      where n.nspname = 'clara' and p.proname = '_knowledge_insert_revision'`);
+  const src = body.rows[0].prosrc;
+  assert.match(src, /exception when unique_violation/, "the insert must catch unique_violation");
+  assert.match(src, /uq_knowledge_live/, "…and name the live-uniqueness constraint");
+  assert.match(src, /knowledge_already_live/, "…mapping it onto the door's own reason");
+  assert.match(src, /uq_knowledge_records_revision/, "…and the revision race onto its own");
+  assert.match(src, /knowledge_revision_raced/);
+  assert.match(src, /\braise;/, "…re-raising anything it does not recognise, fail-closed");
 });

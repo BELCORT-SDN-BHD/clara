@@ -24,8 +24,11 @@ export async function knowledgeCohortApplied() {
        to_regprocedure('clara.withdraw_knowledge(uuid,text,text)')      is not null as withdraw_door,
        to_regprocedure('clara.list_client_knowledge(uuid)')             is not null as list_read,
        to_regprocedure('clara.get_knowledge_pack(uuid,text)')           is not null as pack_read,
-       to_regprocedure('clara.promote_plan_answers_to_knowledge(uuid,text,boolean)')
-                                                           is not null as promote_door`,
+       -- BY NAME, not by signature. The promotion door gained its explicit firm binding
+       -- (p_firm) in the #644 review round, and a cohort probe pinned to one arity would call a
+       -- schema PARTIAL for a reason that is not a partial cohort. The name is unambiguous:
+       -- 0192 creates exactly one overload of it.
+       to_regproc('clara.promote_plan_answers_to_knowledge') is not null as promote_door`,
   );
   const row = r.rows[0];
   const flags = Object.values(row);

@@ -12,7 +12,7 @@ import assert from "node:assert/strict";
 import { assertRaises, endPool, humanQuery, roleQuery, rootQuery, opk, ROLES } from "./rig-fixtures.mjs";
 import { committedPlan, knowledgeCohortApplied, knowledgeWorld } from "./knowledge-fixtures.mjs";
 
-const EXPECTED_CELLS = 10;
+const EXPECTED_CELLS = 12;
 let live = false;
 let executed = 0;
 
@@ -40,13 +40,23 @@ function cell(name, fn) {
   });
 }
 
+// TWO CALL SHAPES, and the difference is the point. The HUMAN lane carries its firm in the
+// session (clara.jwt_firm()), so `p_firm` is an optional belt there. The MACHINE lane carries no
+// claims at all, so `p_firm` is REQUIRED of it and verified against the plan's own firm —
+// otherwise the only thing deciding which tenant a promotion writes into is a plan id.
 const PROMOTE = `select clara.promote_plan_answers_to_knowledge(
   p_plan => $1, p_op_key => $2, p_promote_firm_scope => $3) as r`;
+const PROMOTE_BOUND = `select clara.promote_plan_answers_to_knowledge(
+  p_plan => $1, p_op_key => $2, p_promote_firm_scope => $3, p_firm => $4) as r`;
 
-const promoteAsHuman = (sub, plan, { opKey = opk("kn_pr"), firmScope = false } = {}) =>
-  humanQuery(sub, PROMOTE, [plan, opKey, firmScope]).then((r) => r.rows[0].r);
-const promoteAsRuntime = (plan, { opKey = opk("kn_pr"), firmScope = false } = {}) =>
-  roleQuery(ROLES.runtime, PROMOTE, [plan, opKey, firmScope]).then((r) => r.rows[0].r);
+const promoteAsHuman = (sub, plan, { opKey = opk("kn_pr"), firmScope = false, firm } = {}) =>
+  (firm === undefined
+    ? humanQuery(sub, PROMOTE, [plan, opKey, firmScope])
+    : humanQuery(sub, PROMOTE_BOUND, [plan, opKey, firmScope, firm])).then((r) => r.rows[0].r);
+const promoteAsRuntime = (plan, { opKey = opk("kn_pr"), firmScope = false, firm } = {}) =>
+  (firm === undefined
+    ? roleQuery(ROLES.runtime, PROMOTE, [plan, opKey, firmScope])
+    : roleQuery(ROLES.runtime, PROMOTE_BOUND, [plan, opKey, firmScope, firm])).then((r) => r.rows[0].r);
 const listKnowledge = (sub, client) =>
   humanQuery(sub, "select clara.list_client_knowledge(p_client => $1) as r", [client])
     .then((r) => r.rows[0].r);
@@ -108,7 +118,7 @@ cell("kp.02 CB-AE2E-030: a COMMITTED plan alone puts nothing into Knowledge", as
   const before_ = await listKnowledge(w.admin, w.clientA);
   assert.deepEqual(before_.records, [],
     "committing an onboarding plan must not, by itself, have written Knowledge");
-  assert.equal(before_.knowledge_version, 0);
+  assert.equal(before_.knowledge_version, "0", "the watermark is emitted as text, never a lossy JSON number");
 });
 
 cell("kp.03 promotion writes ONE asserted/interview record per MAPPED item, attributed to the answerer", async () => {
@@ -229,7 +239,8 @@ cell("kp.08 an OPEN plan promotes nothing, and a firm plan needs the explicit fi
   const noFlag = await assertRaises("CLR10", () => promoteAsHuman(w.admin, firmPlan),
     "promoting a firm plan without saying so");
   assert.equal(reasonOf(noFlag), "firm_scope_not_requested");
-  const runtimeFirm = await assertRaises("CLR04", () => promoteAsRuntime(firmPlan, { firmScope: true }),
+  const runtimeFirm = await assertRaises("CLR04",
+    () => promoteAsRuntime(firmPlan, { firmScope: true, firm: w.firm }),
     "the runtime lane promoting a firm default");
   assert.equal(reasonOf(runtimeFirm), "firm_scope_requires_admin");
 
@@ -248,7 +259,7 @@ cell("kp.09 the RUNTIME lane promotes a committed client plan with no JWT, recor
   const plan = await committedPlan({ firm: w.firm, client: w.clientA, committedBy: w.admin,
     answers: { turnover: { value: "RM5M-25M", answeredBy: w.bookkeeper },
                msic: { value: "47211", answeredBy: w.bookkeeper } } });
-  const r = await promoteAsRuntime(plan);
+  const r = await promoteAsRuntime(plan, { firm: w.firm });
   assert.equal(r.promoted.length, 2);
   const rows = await rootQuery(
     "select recorded_via, asserted_by, trust from clara.knowledge_records where client_id=$1", [w.clientA]);
@@ -275,4 +286,98 @@ cell("kp.10 promoted answers reach BOTH the C13 register and the runtime knowled
   assert.equal(pack.records.length, 10);
   assert.equal(Number(pack.knowledge_version), Number(register.knowledge_version),
     "the human register and the runtime pack must agree on the version they read");
+});
+
+// =============================================================================================
+// REVIEW ROUND — B1: the promotion lane is picked from the CALLER, not from an absent claim.
+// =============================================================================================
+
+cell("kp.11 a claims-less or malformed-claims clara_authenticated session CANNOT reach the machine lane", async () => {
+  const w = await knowledgeWorld("p11");
+  const other = await knowledgeWorld("p11b");
+  const plan = await committedPlan({ firm: w.firm, client: w.clientA, committedBy: w.admin,
+    answers: { msic: { value: "47211", answeredBy: w.admin },
+               turnover: { value: "RM1M-5M", answeredBy: w.admin } } });
+
+  // THE HOLE, EXACTLY. clara.jwt_sub() answers NULL for absent claims, unparseable claims and a
+  // non-uuid `sub` (0002:339-352). The first cut read that null as "therefore the runtime" and the
+  // machine arm had no firm check at all -- so any session on clara_authenticated whose claims were
+  // missing or malformed could promote ANY firm's committed plan. 0042:396-418 closed the same
+  // class; the fix here is 0042's own role witness.
+  const noClaims = await assertRaises("CLR03",
+    () => roleQuery(ROLES.authenticated, PROMOTE, [plan, opk("kn_pr"), false]),
+    "promotion from clara_authenticated with NO claims");
+  assert.equal(reasonOf(noClaims), "no_promotion_context");
+
+  const badSub = await assertRaises("CLR03",
+    () => humanQuery("not-a-uuid", PROMOTE, [plan, opk("kn_pr"), false]),
+    "promotion with a non-uuid sub (clara.jwt_sub() answers null)");
+  assert.equal(reasonOf(badSub), "no_promotion_context");
+
+  // …and NOTHING landed on either attempt.
+  const none = await rootQuery(
+    "select count(*)::int as n from clara.knowledge_records where client_id = $1", [w.clientA]);
+  assert.equal(none.rows[0].n, 0, "a refused promotion must leave no record behind");
+
+  // The HUMAN lane still refuses another firm's plan with the no-existence-oracle refusal…
+  await assertRaises("CLR11", () => promoteAsHuman(other.admin, plan),
+    "a human admin of ANOTHER firm promoting this plan");
+  // …a below-floor human of the RIGHT firm is still CLR04…
+  await assertRaises("CLR04", () => promoteAsHuman(w.bookkeeper, plan),
+    "a bookkeeper of the right firm");
+  // …and the runtime role witness still works, which is the half that makes this a gate and not a
+  // wall: the same plan promotes cleanly for clara_runtime.
+  const ok = await promoteAsRuntime(plan, { firm: w.firm });
+  assert.equal(ok.promoted.length, 2, JSON.stringify(ok));
+});
+
+// =============================================================================================
+// REVIEW ROUND — B1, THE OTHER HALF: the machine lane needs an EXPLICIT, VERIFIED firm binding.
+//
+// Refusing a claims-less human-shaped call (kp.11) closes only one side of the hole. The other
+// side is that the machine arm, once entered, decided WHICH TENANT IT WROTE INTO from the plan id
+// alone: `select * into p from clara.onboarding_plans where id = p_plan` inside a clara_fn_owner
+// definer sees every firm's plans, so a mis-addressed or attacker-chosen id promoted into
+// whichever firm owned it, with nothing in the call saying which firm the caller meant.
+//
+// clara.capture_knowledge_for is the shape this follows: the runtime lane NAMES the subject it
+// means and the door verifies it. So the promotion door takes `p_firm`, REQUIRES it of the
+// machine lane, and refuses (CLR11, the no-existence-oracle refusal) when it is not the plan's own
+// firm. The human lane keeps deriving its firm from the session and treats a supplied `p_firm` as
+// a belt that must agree.
+// =============================================================================================
+
+cell("kp.12 the MACHINE lane cannot promote without an explicit firm binding, and a wrong one is CLR11", async () => {
+  const w = await knowledgeWorld("p12");
+  const other = await knowledgeWorld("p12b");
+  const plan = await committedPlan({ firm: w.firm, client: w.clientA, committedBy: w.admin,
+    answers: { msic: { value: "47211", answeredBy: w.admin },
+               turnover: { value: "RM1M-5M", answeredBy: w.admin } } });
+
+  // THE HOLE, REPRODUCED. Before the fix this call SUCCEEDED: the runtime lane promoted a plan it
+  // named nothing about, into whichever firm happened to own it.
+  const unbound = await assertRaises("CLR10", () => promoteAsRuntime(plan),
+    "the runtime lane promoting with no firm binding at all");
+  assert.equal(reasonOf(unbound), "promotion_firm_required");
+
+  // A BINDING THAT IS NOT THE PLAN'S FIRM is the no-existence-oracle refusal: absent and foreign
+  // answer alike, so the call cannot be used to discover that a plan id exists elsewhere.
+  await assertRaises("CLR11", () => promoteAsRuntime(plan, { firm: other.firm }),
+    "the runtime lane naming another firm");
+
+  // …and neither attempt wrote anything, in EITHER firm.
+  const none = await rootQuery(
+    "select count(*)::int as n from clara.knowledge_records where firm_id in ($1,$2)",
+    [w.firm, other.firm]);
+  assert.equal(none.rows[0].n, 0, "a refused promotion must leave no record behind");
+
+  // THE HUMAN LANE keeps its session firm and treats p_firm as a belt that must agree.
+  await assertRaises("CLR11", () => promoteAsHuman(w.admin, plan, { firm: other.firm }),
+    "an admin naming a firm that is not their own");
+
+  // The gate is a gate, not a wall: the correct binding promotes, and the human belt agrees.
+  const ok = await promoteAsRuntime(plan, { firm: w.firm });
+  assert.equal(ok.promoted.length, 2, JSON.stringify(ok));
+  const replay = await promoteAsHuman(w.admin, plan, { firm: w.firm });
+  assert.equal(replay.skipped.length, 2, JSON.stringify(replay));
 });
