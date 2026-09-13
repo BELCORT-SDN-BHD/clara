@@ -40,6 +40,17 @@
 //   4. A THIRD BELT PASS AFTER ALL OF THAT ADMITS NOTHING NEW. The occurrence row is the due
 //      event's identity whatever happened to its Work.
 //
+//   5. A REVERSING PLAN'S SECOND LEG WAITS FOR THE ACCRUAL'S ENTRY, THEN NAMES IT AND POSTS
+//      (review round 2, BLOCKER-1). Belt pass one admits the accrual; belt pass two admits NOTHING
+//      — an admitted accrual has posted nothing, and that is exactly the state in which the old
+//      rule admitted the reversal and left a Work to outlive the accrual's death. The accrual then
+//      runs through the ordinary lane, and the next belt pass admits the reversal carrying the
+//      accrual's own `entry_id` on the occurrence row AND in the basis. The reversal is then posted
+//      too, which is the only place the design's other half can be measured: `reverses_entry_id`
+//      sits OUTSIDE the canonical form `clara._journal_basis_canonical` hashes, so the run's echo
+//      of the basis still matches the digest admission stored. A unit cell cannot prove that; a
+//      real run through the frozen tool schema can.
+//
 // WHY THE SCRIPTED MODEL IS work-journal-serve.mjs's. A plan-initiated Work is an ordinary
 // `accounting_work` run: the same frozen bundle, the same envelope, the same admitted basis to be
 // echoed verbatim. Reusing that bootstrap is the point — if a plan-initiated run needed its own
@@ -176,6 +187,20 @@ ${(spawned.state.tail ?? []).join("")}`);
 `
     + (spawned?.state?.tail ?? []).join(""),
   );
+}
+
+/** Poll one Work until it reaches a terminal status, or fail loudly with the last one seen. The
+ *  e2e's own idiom, lifted out of leg 2+3 so leg 5 does not grow a second copy. */
+async function waitTerminal(id, readWork, timeoutMs) {
+  const TERMINAL = new Set(["completed", "refused", "failed", "cancelled", "expired"]);
+  const end = Date.now() + timeoutMs;
+  let row = null;
+  while (Date.now() < end) {
+    row = await readWork(id);
+    if (row && TERMINAL.has(row.status)) return row;
+    await sleep(500);
+  }
+  throw new Error(`Work ${id} never reached a terminal (last=${JSON.stringify(row?.status)})`);
 }
 
 async function main() {
@@ -387,6 +412,114 @@ ${(faulty.state.tail ?? []).join("")}`,
   assert.equal(occ3.length, 1, "the due event's identity is its occurrence row, whatever happened to its Work");
   assert.equal(await countEntries(client), entriesBefore + 1);
   console.log("[plan-e2e] PASS 4: a further belt pass admitted nothing new");
+
+
+  // =========================================================================
+  // 5. A REVERSING PLAN'S SECOND LEG WAITS FOR THE ACCRUAL'S ENTRY, THEN NAMES IT.
+  //
+  // Review round 2's BLOCKER-1, measured on the real World rather than argued: the reversal is NOT
+  // admissible while its accrual is merely admitted (that is precisely the state in which the old
+  // rule admitted it, leaving a reversal Work to outlive the accrual's death and post a leg
+  // reversing nothing). It becomes admissible the moment the accrual's own posting COMMITS, it
+  // names that journal entry, and the reversal then posts through the ordinary lane — which is
+  // also the only way to prove that the extra `reverses_entry_id` key on the basis does not break
+  // the digest the run's echo is bound to.
+  // =========================================================================
+  const monthEnd = await rig.rootQuery(
+    "select ((date_trunc('month', $1::date) + interval '1 month' - interval '1 day')::date)::text as d", [today]);
+  if (monthEnd.rows[0].d === today) {
+    console.log("[plan-e2e] PASS 5 SKIPPED — today is the month end, so a month-end reversing plan has no outstanding reversal leg");
+  } else {
+    const revBasis = {
+      posting_date: effectiveFrom,
+      memo: "monthly audit fee accrual (plan e2e, reversing)",
+      currency: "MYR",
+      lines: [
+        { account_code: "6100", debit_cents: 99000, credit_cents: 0, description: "accrued audit fee" },
+        { account_code: "1100", debit_cents: 0, credit_cents: 99000, description: "accrual" },
+      ],
+    };
+    const revCreated = await rig.humanQuery(owner,
+      `select clara.create_accounting_plan(
+          p_client => $1::uuid, p_kind => 'reversing_journal', p_purpose => $2::text,
+          p_authority_kind => 'explicit_instruction', p_authority_ref => $3::jsonb,
+          p_frequency => 'monthly', p_day_rule => 'last_day_of_month', p_day_of_month => null,
+          p_timezone => 'Asia/Kuala_Lumpur', p_effective_from => $4::date, p_effective_to => null,
+          p_basis => $5::jsonb, p_reversal_day_rule => 'next_period_first_day', p_op_key => $6::text) as r`,
+      [client, "Monthly audit fee accrual", JSON.stringify({ kind: "accounting_work", id: instructionWork }),
+        effectiveFrom, JSON.stringify(revBasis), rig.opk("revplan")]);
+    const revPlan = revCreated.rows[0].r.plan_id;
+
+    const beltOnce = () => rig.withActor({ role: "clara_runtime" }, (c) =>
+      reconcilePlanOccurrences(c, { limit: 50, log: () => {} }));
+
+    await beltOnce();
+    const r1 = await occurrencesOf(revPlan);
+    assert.equal(r1.length, 1, `the ACCRUAL is admitted first, got ${JSON.stringify(r1)}`);
+    assert.equal(r1[0].leg, "primary");
+    const accrualWork = r1[0].work_id;
+    assert.ok(accrualWork);
+    assert.equal(await countCommitted(accrualWork), 0, "…with nothing posted yet");
+
+    // THE WALL, on the real belt: an ADMITTED accrual is not a POSTED one.
+    await beltOnce();
+    const r2 = await occurrencesOf(revPlan);
+    assert.equal(r2.length, 1,
+      `a reversal must NOT be admitted while its accrual has posted nothing; got ${JSON.stringify(r2.map((x) => [x.due_date, x.leg]))}`);
+
+    const engine = spawnServe({ CLARA_WORK_TEST_SCRIPT: "post" });
+    try {
+      await waitReady(engine);
+      const accrualRow = await waitTerminal(accrualWork, readWork, 240000);
+      assert.equal(accrualRow.status, "completed",
+        `the accrual posted through the ordinary lane (error=${JSON.stringify(accrualRow.error)})`);
+      const entry = await rig.rootQuery(
+        "select effects->>'entry_id' as e from clara.operation_receipts where work_id=$1 and outcome='committed'",
+        [accrualWork]);
+      const accrualEntry = entry.rows[0]?.e;
+      assert.ok(accrualEntry, "the accrual's committed receipt names its journal entry");
+
+      // NOW the reversal is due, and it names that entry.
+      await beltOnce();
+      const r3 = await rig.rootQuery(
+        `select due_date::text as due_date, leg, work_id, reverses_entry_id
+           from clara.accounting_plan_occurrences where plan_id=$1 order by due_date`, [revPlan]);
+      assert.equal(r3.rows.length, 2,
+        `the reversal becomes due once its accrual has POSTED; got ${JSON.stringify(r3.rows)}`);
+      const reversal = r3.rows.find((x) => x.leg === "reversal");
+      assert.ok(reversal?.work_id, "the reversal is admitted");
+      assert.equal(reversal.reverses_entry_id, accrualEntry,
+        "…and the occurrence NAMES the entry it undoes");
+      const reversalWork = await readWork(reversal.work_id);
+      assert.ok(reversalWork.basis.memo.includes(accrualEntry),
+        `the basis the reversal is authorised to post names it too (memo=${JSON.stringify(reversalWork.basis.memo)})`);
+      assert.equal(reversalWork.basis.lines[0].credit_cents, revBasis.lines[0].debit_cents,
+        "the accrual's debit is the reversal's credit");
+      assert.equal(reversalWork.basis.lines[1].debit_cents, revBasis.lines[1].credit_cents,
+        "…and the credit is the debit");
+
+      // AND IT POSTS, WHICH IS WHY THIS LEG EXISTS. The entry id rides the MEMO — inside the
+      // canonical form the digest is taken over, and the one basis field that reaches
+      // `clara.journal_entries`. The first cut carried it as a new top-level basis key instead;
+      // the digest was indeed unaffected, but `journalBasisSchema` in the FROZEN
+      // claraWork.v1.tools.ts is `.strict()`, so the run's faithful echo failed validation and the
+      // Work settled `failed`/`no_effect`. This assertion is the one that caught it.
+      const reversalRow = await waitTerminal(reversal.work_id, readWork, 240000);
+      assert.equal(reversalRow.status, "completed",
+        `the reversal posted through the ordinary lane (error=${JSON.stringify(reversalRow.error)})`);
+      assert.equal(await countCommitted(reversal.work_id), 1, "one committed receipt for the reversal");
+      const postedMemo = await rig.rootQuery(
+        `select je.memo from clara.journal_entries je
+           join clara.operation_receipts rc on rc.effects->>'entry_id' = je.id::text
+          where rc.work_id = $1 and rc.outcome = 'committed'`, [reversal.work_id]);
+      assert.ok(postedMemo.rows[0]?.memo?.includes(accrualEntry),
+        `the POSTED reversal names the entry it reverses in the ledger itself (memo=${JSON.stringify(postedMemo.rows[0]?.memo)})`);
+      console.log(`[plan-e2e] PASS 5: the reversal waited for the accrual's entry (${accrualEntry}), named it, and posted`);
+    } finally {
+      engine.child.kill("SIGKILL");
+      await waitExit(engine.child).catch(() => {});
+    }
+  }
 
   console.log(`[plan-e2e] OK — plan=${plan} work=${work} firm=${firm}`);
   await rig.endPool?.();
