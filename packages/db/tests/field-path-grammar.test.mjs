@@ -16,9 +16,12 @@
 //
 // THE GRAMMAR IS CENSUSED, NOT INVENTED. The live producers emit numeric segments
 // (`pages.1.lines.0`, `rows.0`, `paragraphs.0`) and MIXED-CASE spreadsheet cell refs
-// (`sheets.0.A1` — `structured-worker.mjs:89` interpolates the XLSX `r=` attribute verbatim), so
-// a lowercase-only grammar would have refused the hot OCR and XLSX ingest paths on the first
-// real upload. The accepted shape is: dot-separated segments, each either an unsigned integer or
+// (`sheets.0.A1`), so a lowercase-only grammar would have refused the hot OCR and XLSX ingest
+// paths on the first real upload. The XLSX side meets the grammar halfway:
+// `structured-worker.mjs`'s normalizeCellRef clamps the workbook's `r=` to an A1 reference and
+// falls back to `cell_<ordinal>`, because an `r=` is whatever the file says it is and a merged
+// range (`A1:B1`) would otherwise refuse the persist and loop the lane
+// (packages/runtime/tests/structured-worker-cell-ref.test.mjs). The accepted shape is: dot-separated segments, each either an unsigned integer or
 // an identifier `[A-Za-z_][A-Za-z0-9_]*`, at most 12 segments, at most 128 characters, with the
 // FIRST segment drawn from the registered namespace roster.
 
@@ -41,9 +44,9 @@ const CENSUS = Object.freeze([
   // packages/runtime/lib/structured-worker.mjs:47,89,106 — the `structured_parse` lane.
   ["rows.0", "structured-worker.mjs parseCsv"],
   ["rows.19999", "structured-worker.mjs parseCsv at the MAX_ITEMS cap"],
-  ["sheets.0.A1", "structured-worker.mjs parseXlsx — the XLSX r= attribute, verbatim"],
+  ["sheets.0.A1", "structured-worker.mjs parseXlsx — an A1 r= attribute, kept as written"],
   ["sheets.11.AA128", "structured-worker.mjs parseXlsx, multi-sheet + two-letter column"],
-  ["sheets.0.C1", "structured-worker.mjs parseXlsx fallback ref when r= is absent"],
+  ["sheets.0.cell_1", "structured-worker.mjs normalizeCellRef — the fallback when r= is absent or is not an A1 reference"],
   ["paragraphs.0", "structured-worker.mjs parseDocx"],
   // packages/runtime/lib/myinvois.mjs:120-124 — the UBL identity pass.
   ["myinvois.supplier_tin", "myinvois.mjs parseUblIdentity"],
@@ -76,8 +79,13 @@ const CENSUS = Object.freeze([
   // packages/runtime/lib/myinvois.mjs mapFactsFields — the local_facts vocabulary.
   ["invoice.tax_breakdown", "myinvois.mjs mapFactsFields"],
   ["invoice.myinvois_uuid", "myinvois.mjs mapFactsFields"],
+  ["invoice.myinvois_longid", "persist_invoice_facts allowlist (0009:2096)"],
   ["invoice.contact_person", "invoice-customer-identity.mjs"],
-  ["invoice.grand_total", "invoice-totals-reader.mjs TOTALS_FIELD_PATHS"],
+  // NOT a producer path: f-a1-witness-unit.test.mjs:404 uses it as a citation deliberately
+  // OUTSIDE the closed eighteen, so it is a shape the boundary can be handed. It is censused
+  // because a test fixture is a real caller — the first cut of this list credited it to
+  // invoice-totals-reader.mjs's TOTALS_FIELD_PATHS, which does not contain it.
+  ["invoice.grand_total", "f-a1-witness-unit.test.mjs fixture — outside the closed allowlist"],
   // The statement vocabulary the web extract surface already labels.
   ["statement.closing_balance", "apps/web/lib/documents/extract-shape.ts"],
 ]);
