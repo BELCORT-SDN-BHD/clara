@@ -118,7 +118,16 @@ import type { SessionTokenAccessor } from "@/lib/session";
  *  order applicants arrived), unfiltered by applicant so the view's own
  *  OPERATOR arm is what decides how much comes back. See this file's header
  *  for why "unfiltered" is the correct read here, the mirror image of
- *  `loadRegistrationRequestsForApplicant`'s own explicit self-filter. */
+ *  `loadRegistrationRequestsForApplicant`'s own explicit self-filter.
+ *
+ *  NO APPLICATION CALLER SINCE #615, and recorded here rather than left to be
+ *  discovered: the operator destination reads the registration arm through
+ *  `clara.list_operator_support_queue` (0188 §2) instead, because that door
+ *  answers all three admission arms at once WITH the affected entity's current
+ *  state, which this view cannot supply. This helper is kept, not deleted — the
+ *  view it reads is still a live operator read with its own DB-side tests, and
+ *  `./doors.test.ts` still pins its wire shape — but nothing renders it today.
+ *  Retiring it (or giving it a caller) is its own change; see #615's follow-ups. */
 export function loadOperatorRegistrationQueue(
   session: SessionTokenAccessor,
   signal?: AbortSignal,

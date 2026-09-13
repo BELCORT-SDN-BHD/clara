@@ -155,12 +155,12 @@ const DETAIL_EXTRA = {
 /** Per-server-lifetime state. Safe ONLY because `playwright.config.ts` pins `workers: 1` — the
  *  same precondition `activity-mock.mjs` and `journal-work-mock.mjs` state for their own counters.
  *  `reset` below is the control surface every spec calls before it walks. */
-const state = { decided: null, resolveAttempts: 0, resolvedProblems: new Set(), capacity: { max_firms: null, reason: null } };
+const state = { decided: null, resolveAttempts: 0, resolvedProblems: new Map(), capacity: { max_firms: null, reason: null } };
 
 export function resetOperatorLane() {
   state.decided = null;
   state.resolveAttempts = 0;
-  state.resolvedProblems = new Set();
+  state.resolvedProblems = new Map();
   state.capacity = { max_firms: null, reason: null };
 }
 
@@ -172,8 +172,12 @@ function rowsFor(includeSettled) {
         firm_id: state.decided.firm_id ?? null };
     }
     if (row.case_id === OPERATOR.problem && state.resolvedProblems.has(OPERATOR.problem)) {
+      // The RECEIPT IS THE OPERATOR'S OWN TEXT, exactly as `clara.resolve_stripe_event_problem`
+      // stamps `resolution = p_resolution` (0160 §5). A hardcoded sentence here would let the walk
+      // pass while the app dropped what the person actually typed.
       return { ...row, settled: true, decided_by: OPERATOR.applicant,
-        decided_at: "2026-09-13T00:00:00+00:00", decided_reason: "Refunded through the provider." };
+        decided_at: "2026-09-13T00:00:00+00:00",
+        decided_reason: state.resolvedProblems.get(OPERATOR.problem) };
     }
     return row;
   });
@@ -266,7 +270,7 @@ export async function handleOperatorSupportSupabase(request, response, path, url
       sendJson(response, 400, clr("CLR09", "stripe event problem is already resolved"), cors);
       return true;
     }
-    state.resolvedProblems.add(OPERATOR.problem);
+    state.resolvedProblems.set(OPERATOR.problem, body.p_resolution);
     sendJson(response, 200, { problem_id: OPERATOR.problem, event_id: "evt_615_dup", resolved: true }, cors);
     return true;
   }
