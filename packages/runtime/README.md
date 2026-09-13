@@ -263,11 +263,11 @@ consumer roll back. #606 shipped in that consumer-first order.
 
 `GET /api/documents/:id/bytes` takes the ORDINARY order and depends on it: it calls
 `clara.get_document_for_human_read_v2`, which
-[`0185_document_download_door.sql`](../db/migrations/0185_document_download_door.sql) adds, so that
+[`0190_document_byte_door_v2.sql`](../db/migrations/0190_document_byte_door_v2.sql) adds, so that
 migration must be applied before this image is released. The migration replaces no live body and
 adds nothing any deployed image calls, so it is safe to apply ahead of the release and needs no
-writer quiescence of its own. Rolling the image back is safe with 0185 still applied: the previous
-image calls `clara.get_document_for_human_read` (v1), which 0185 leaves byte-identical and still
+writer quiescence of its own. Rolling the image back is safe with 0190 still applied: the previous
+image calls `clara.get_document_for_human_read` (v1), which 0190 leaves byte-identical and still
 granted to `clara_runtime` — and which `lib/seeding-parse.mjs` still calls today, so v1 is not
 retired by this change.
 

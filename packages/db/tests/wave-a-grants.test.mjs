@@ -38,9 +38,9 @@ const roleName = (tok) => ROLES[tok];
  *
  * MATCHED ON THE STABLE SUFFIX, NOT ON THE NUMBER (#620 review, F11). `right(version, length($1))
  * = $1` is a plain string comparison on the tail, so no LIKE metacharacter in the name can widen
- * it — `like '0185_%'` treated its own `_` as a single-character wildcard — and a merge-time
+ * it — `like '0190_%'` treated its own `_` as a single-character wildcard — and a merge-time
  * renumber of the very same migration cannot make the gate stop firing. Measured on a disposable
- * copy: with the ledger row renamed 0185→0186 and EXECUTE over-granted to clara_authenticated,
+ * copy: with the ledger row renamed 0190→0186 and EXECUTE over-granted to clara_authenticated,
  * the number-keyed form reported 6 pass / 0 fail plus "the door is not expected yet"; this form
  * fails on the over-grant.
  */

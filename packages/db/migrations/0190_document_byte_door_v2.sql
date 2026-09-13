@@ -1,4 +1,4 @@
--- 0185_document_download_door — #620 (以最小权限保管、查看和下载客户来源资料): THE SUCCESSOR
+-- 0190_document_byte_door_v2 — #620 (以最小权限保管、查看和下载客户来源资料): THE SUCCESSOR
 -- SOURCE-DOCUMENT BYTE DOOR.
 -- =====================================================================================
 -- Spec of record: issue #620 AC2/AC5 — "allowed own-client reads, denied cross-firm/client/object
@@ -93,17 +93,17 @@ begin
     from unnest(array['documents','document_filings','firm_memberships','clients','audit_log']) x
    where to_regclass('clara.' || x) is null;
   if v_missing <> '(none)' then
-    raise exception '0185 prestate: required relation(s) absent: %', v_missing using errcode = 'CLR10';
+    raise exception '0190 prestate: required relation(s) absent: %', v_missing using errcode = 'CLR10';
   end if;
 
   -- (b) The target must be WHOLLY absent. A partial cohort is refused, never extended.
   if to_regprocedure('clara.get_document_for_human_read_v2(uuid,uuid,uuid,text)') is not null then
-    raise exception '0185 prestate: the successor door already exists' using errcode = 'CLR10';
+    raise exception '0190 prestate: the successor door already exists' using errcode = 'CLR10';
   end if;
 
   -- (c) The helper this door CALLS must resolve by EXACT SIGNATURE (spelling is not identity).
   if to_regprocedure('clara._audit(uuid,uuid,uuid,text,text,uuid,jsonb)') is null then
-    raise exception '0185 prestate: clara._audit does not resolve by its exact signature'
+    raise exception '0190 prestate: clara._audit does not resolve by its exact signature'
       using errcode = 'CLR10';
   end if;
 
@@ -120,7 +120,7 @@ begin
       where c.table_schema = 'clara' and c.table_name = split_part(x, '.', 1)
         and c.column_name = split_part(x, '.', 2));
   if v_missing <> '(none)' then
-    raise exception '0185 prestate: projected column(s) absent: %', v_missing using errcode = 'CLR10';
+    raise exception '0190 prestate: projected column(s) absent: %', v_missing using errcode = 'CLR10';
   end if;
 
   -- (e) THE v1 DOOR IS THE ONE #620 AGREED NOT TO TOUCH. Pinned by prosrc sha AND by ACL, both
@@ -128,7 +128,7 @@ begin
   select encode(sha256(convert_to(p.prosrc, 'UTF8')), 'hex') into v_sha
     from pg_proc p where p.oid = 'clara.get_document_for_human_read(uuid,uuid)'::regprocedure;
   if v_sha is distinct from c_v1_sha then
-    raise exception '0185 prestate: v1 get_document_for_human_read prosrc is % (pinned %) — #620 adds a successor to THAT body and to no other', v_sha, c_v1_sha
+    raise exception '0190 prestate: v1 get_document_for_human_read prosrc is % (pinned %) — #620 adds a successor to THAT body and to no other', v_sha, c_v1_sha
       using errcode = 'CLR10';
   end if;
   select coalesce(string_agg(distinct coalesce(rr.rolname, 'PUBLIC'), ',' order by coalesce(rr.rolname, 'PUBLIC')), '(none)')
@@ -138,7 +138,7 @@ begin
    where p.oid = 'clara.get_document_for_human_read(uuid,uuid)'::regprocedure
      and acl.privilege_type = 'EXECUTE';
   if v_acl is distinct from c_v1_acl then
-    raise exception '0185 prestate: v1 door EXECUTE grantees are % (pinned %)', v_acl, c_v1_acl
+    raise exception '0190 prestate: v1 door EXECUTE grantees are % (pinned %)', v_acl, c_v1_acl
       using errcode = 'CLR10';
   end if;
   insert into _d620_prestate(k, v) values ('v1_sha', to_jsonb(v_sha)), ('v1_acl', to_jsonb(v_acl));
@@ -151,7 +151,7 @@ begin
       'clara_wake_proactive','clara_wake_bank','clara_wake_filing','clara_stripe_webhook']) r
    where to_regrole(r) is not null;
 
-  raise notice '0185 prestate: OK -- 5 relations resolve, the successor door is wholly absent, clara._audit resolves by exact signature, 16 projected columns present, and the v1 door is byte-identical to its pinned prosrc sha (%) with its pinned EXECUTE grantee set (%); % of 8 walled roles exist on this cluster and will be swept by the tail',
+  raise notice '0190 prestate: OK -- 5 relations resolve, the successor door is wholly absent, clara._audit resolves by exact signature, 16 projected columns present, and the v1 door is byte-identical to its pinned prosrc sha (%) with its pinned EXECUTE grantee set (%); % of 8 walled roles exist on this cluster and will be swept by the tail',
     left(c_v1_sha, 12), c_v1_acl,
     jsonb_array_length((select v from _d620_prestate where k = 'walled_roles'));
 end $pre$;
@@ -308,20 +308,20 @@ declare
 begin
   -- (1) IT LANDED, by EXACT SIGNATURE, owned by clara_fn_owner and SECURITY DEFINER.
   if to_regprocedure(v_sig) is null then
-    raise exception '0185 tail: % did not land', v_sig using errcode = 'CLR10';
+    raise exception '0190 tail: % did not land', v_sig using errcode = 'CLR10';
   end if;
   select coalesce(string_agg(p.oid::regprocedure::text, ','), '(none)') into v_bad
     from pg_proc p
    where p.oid = v_sig::regprocedure
      and (not p.prosecdef or p.proowner <> 'clara_fn_owner'::regrole or p.provolatile <> 'v');
   if v_bad <> '(none)' then
-    raise exception '0185 tail: % is not a VOLATILE clara_fn_owner-owned SECURITY DEFINER', v_bad
+    raise exception '0190 tail: % is not a VOLATILE clara_fn_owner-owned SECURITY DEFINER', v_bad
       using errcode = 'CLR10';
   end if;
   select count(*)::int into v_n from pg_proc p join pg_namespace n on n.oid = p.pronamespace
    where n.nspname = 'clara' and p.proname = 'get_document_for_human_read_v2';
   if v_n <> 1 then
-    raise exception '0185 tail: get_document_for_human_read_v2 has % overloads (want exactly 1)', v_n
+    raise exception '0190 tail: get_document_for_human_read_v2 has % overloads (want exactly 1)', v_n
       using errcode = 'CLR10';
   end if;
 
@@ -331,14 +331,14 @@ begin
   -- has — a chain that has not minted a wake role yet still passes, and a cluster that HAS one and
   -- granted it fails.
   if not pg_catalog.has_function_privilege('clara_runtime', v_sig, 'execute') then
-    raise exception '0185 tail: clara_runtime cannot execute % -- the route could not read a byte', v_sig
+    raise exception '0190 tail: clara_runtime cannot execute % -- the route could not read a byte', v_sig
       using errcode = 'CLR10';
   end if;
   foreach r in array array['clara_authenticated','clara_agent_ro','clara_freeform_ro',
       'clara_wake_interactive','clara_wake_proactive','clara_wake_bank','clara_wake_filing',
       'clara_stripe_webhook'] loop
     if to_regrole(r) is not null and pg_catalog.has_function_privilege(r, v_sig, 'execute') then
-      raise exception '0185 tail: % can execute % -- a storage_path must never be reachable from a browser, an agent or a wake lane', r, v_sig
+      raise exception '0190 tail: % can execute % -- a storage_path must never be reachable from a browser, an agent or a wake lane', r, v_sig
         using errcode = 'CLR10';
     end if;
   end loop;
@@ -350,7 +350,7 @@ begin
     left join pg_roles rr on rr.oid = acl.grantee
    where p.oid = v_sig::regprocedure and acl.privilege_type = 'EXECUTE';
   if v_acl <> 'clara_fn_owner,clara_runtime' then
-    raise exception '0185 tail: the successor door''s EXECUTE grantees are % (want clara_fn_owner,clara_runtime)', v_acl
+    raise exception '0190 tail: the successor door''s EXECUTE grantees are % (want clara_fn_owner,clara_runtime)', v_acl
       using errcode = 'CLR10';
   end if;
 
@@ -358,12 +358,12 @@ begin
   -- is catalog state, and reading it out of the body text would be satisfied by a comment.
   if not ('plan_cache_mode=force_custom_plan' = any (coalesce(
       (select p.proconfig from pg_proc p where p.oid = v_sig::regprocedure), '{}'::text[]))) then
-    raise exception '0185 tail: % does not pin plan_cache_mode=force_custom_plan -- without it the caller and the firm are planned at the per-firm average of a multi-tenant table', v_sig
+    raise exception '0190 tail: % does not pin plan_cache_mode=force_custom_plan -- without it the caller and the firm are planned at the per-firm average of a multi-tenant table', v_sig
       using errcode = 'CLR10';
   end if;
   if not ('search_path=clara, pg_temp' = any (coalesce(
       (select p.proconfig from pg_proc p where p.oid = v_sig::regprocedure), '{}'::text[]))) then
-    raise exception '0185 tail: % does not pin search_path=clara, pg_temp', v_sig using errcode = 'CLR10';
+    raise exception '0190 tail: % does not pin search_path=clara, pg_temp', v_sig using errcode = 'CLR10';
   end if;
 
   -- (4) THE BODY REALLY CALLS clara._audit. Comment-stripped, literal-aware.
@@ -396,25 +396,25 @@ begin
   -- unambiguously PROSE must be GONE, or the strip is a no-op and every probe below could be
   -- satisfied by a comment.
   if position('retry once intake finishes, or re-upload"}''' in v_out) = 0 then
-    raise exception '0185 tail: the comment strip is not literal-aware -- it cut inside a string literal, so every probe below is unsound'
+    raise exception '0190 tail: the comment strip is not literal-aware -- it cut inside a string literal, so every probe below is unsound'
       using errcode = 'CLR10';
   end if;
   if position('THE EGRESS RECEIPT, then the row' in v_out) > 0 then
-    raise exception '0185 tail: the comment strip left prose in the body -- every probe below could be satisfied by a sentence about the code'
+    raise exception '0190 tail: the comment strip left prose in the body -- every probe below could be satisfied by a sentence about the code'
       using errcode = 'CLR10';
   end if;
   if position('clara._audit(' in v_out) = 0 then
-    raise exception '0185 tail: % does not CALL clara._audit -- a served source document must be receipted', v_sig
+    raise exception '0190 tail: % does not CALL clara._audit -- a served source document must be receipted', v_sig
       using errcode = 'CLR10';
   end if;
   -- The three typed refusals are raised by the CODE, not described by it.
   foreach r in array array['''CLR10''', '''CLR11''', '''CLR13'''] loop
     if position(r in v_out) = 0 then
-      raise exception '0185 tail: % never raises errcode % in code', v_sig, r using errcode = 'CLR10';
+      raise exception '0190 tail: % never raises errcode % in code', v_sig, r using errcode = 'CLR10';
     end if;
   end loop;
   if position('retired_at is null' in v_out) = 0 then
-    raise exception '0185 tail: % does not read the ACTIVE filing (retired_at is null) in code', v_sig
+    raise exception '0190 tail: % does not read the ACTIVE filing (retired_at is null) in code', v_sig
       using errcode = 'CLR10';
   end if;
 
@@ -425,7 +425,7 @@ begin
     from pg_proc p where p.oid = 'clara.get_document_for_human_read(uuid,uuid)'::regprocedure;
   select v #>> '{}' into v_pre from _d620_prestate where k = 'v1_sha';
   if v_sha is distinct from v_pinned_sha or v_sha is distinct from v_pre then
-    raise exception '0185 tail: v1 get_document_for_human_read moved (pinned %, prestate %, now %)',
+    raise exception '0190 tail: v1 get_document_for_human_read moved (pinned %, prestate %, now %)',
       v_pinned_sha, v_pre, v_sha using errcode = 'CLR10';
   end if;
   select coalesce(string_agg(distinct coalesce(rr.rolname, 'PUBLIC'), ',' order by coalesce(rr.rolname, 'PUBLIC')), '(none)')
@@ -436,9 +436,9 @@ begin
      and acl.privilege_type = 'EXECUTE';
   select v #>> '{}' into v_pre from _d620_prestate where k = 'v1_acl';
   if v_acl is distinct from v_pinned_acl or v_acl is distinct from v_pre then
-    raise exception '0185 tail: v1 door EXECUTE grantees moved (pinned %, prestate %, now %)',
+    raise exception '0190 tail: v1 door EXECUTE grantees moved (pinned %, prestate %, now %)',
       v_pinned_acl, v_pre, v_acl using errcode = 'CLR10';
   end if;
 
-  raise notice '0185 tail: OK -- clara.get_document_for_human_read_v2(uuid,uuid,uuid,text) is the ONE new object in this file: a VOLATILE, clara_fn_owner-owned SECURITY DEFINER with exactly one overload, PUBLIC-revoked and granted to clara_runtime and to NOTHING else (clara_authenticated, both agent read roles, every wake lane and the webhook role are behaviourally denied, so a storage_path can never be reached from a browser, an agent or a wake lane); it pins search_path=clara, pg_temp and plan_cache_mode=force_custom_plan in proconfig; its COMMENT-STRIPPED, LITERAL-AWARE body really calls clara._audit, really raises CLR10/CLR11/CLR13 and really reads the ACTIVE filing (retired_at is null), with a two-sided vacuity control proving the strip neither mutilated a string literal nor left prose behind; and the v1 door clara.get_document_for_human_read(uuid,uuid) is byte-identical to its pinned prosrc sha with its pinned EXECUTE grantee set clara_fn_owner,clara_runtime -- so 0011''s own grant-matrix assertion and both test rosters stay true and v1''s retirement remains a later, deliberate migration. NO relation, column or row was created or altered and NO live body was replaced.';
+  raise notice '0190 tail: OK -- clara.get_document_for_human_read_v2(uuid,uuid,uuid,text) is the ONE new object in this file: a VOLATILE, clara_fn_owner-owned SECURITY DEFINER with exactly one overload, PUBLIC-revoked and granted to clara_runtime and to NOTHING else (clara_authenticated, both agent read roles, every wake lane and the webhook role are behaviourally denied, so a storage_path can never be reached from a browser, an agent or a wake lane); it pins search_path=clara, pg_temp and plan_cache_mode=force_custom_plan in proconfig; its COMMENT-STRIPPED, LITERAL-AWARE body really calls clara._audit, really raises CLR10/CLR11/CLR13 and really reads the ACTIVE filing (retired_at is null), with a two-sided vacuity control proving the strip neither mutilated a string literal nor left prose behind; and the v1 door clara.get_document_for_human_read(uuid,uuid) is byte-identical to its pinned prosrc sha with its pinned EXECUTE grantee set clara_fn_owner,clara_runtime -- so 0011''s own grant-matrix assertion and both test rosters stay true and v1''s retirement remains a later, deliberate migration. NO relation, column or row was created or altered and NO live body was replaced.';
 end $tail$;

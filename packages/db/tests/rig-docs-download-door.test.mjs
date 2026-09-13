@@ -1,5 +1,5 @@
 // #620 — THE SOURCE-DOCUMENT DOWNLOAD DOOR, for
-// migrations/0185_document_download_door.sql (clara.get_document_for_human_read_v2).
+// migrations/0190_document_byte_door_v2.sql (clara.get_document_for_human_read_v2).
 //
 // Design of record: issue #620 AC2 ("allowed own-client reads, denied cross-firm/client/object
 // access, revoked membership") and AC5 (bounded purpose / policy consistency with the artifact
@@ -23,7 +23,7 @@
 // own verdict.
 //
 // THE READINESS GATE IS MEASURED, NOT ASSUMED: the door resolves by EXACT SIGNATURE or the whole
-// file skips (a pre-0185 chain), so this file is bimodal-green on db-slice-frontiers legs.
+// file skips (a pre-0190 chain), so this file is bimodal-green on db-slice-frontiers legs.
 
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
@@ -39,7 +39,7 @@ import { mintWake } from "./rig-fixtures.mjs";
 
 const V2 = "clara.get_document_for_human_read_v2(uuid,uuid,uuid,text)";
 const V1 = "clara.get_document_for_human_read(uuid,uuid)";
-const MIGRATION = new URL("../migrations/0185_document_download_door.sql", import.meta.url);
+const MIGRATION = new URL("../migrations/0190_document_byte_door_v2.sql", import.meta.url);
 
 let ready = false;
 let world = null;
@@ -119,7 +119,7 @@ after(async () => { printLaneNotes("rig-docs-download-door"); await endPool(); }
 
 const skipHere = (t) => {
   if (ready) return false;
-  t.skip("#620: migration 0185 (clara.get_document_for_human_read_v2) is not applied on this database");
+  t.skip("#620: migration 0190 (clara.get_document_for_human_read_v2) is not applied on this database");
   return true;
 };
 
@@ -412,14 +412,14 @@ test("D8.3 — no wake lane reaches the door (an agent never receives raw source
 // =============================================================================================
 // D9 / D10 — THE FILE'S OWN PROMISES, re-read from the live catalog.
 // =============================================================================================
-test("D9 — v1 is UNTOUCHED: its prosrc matches the sha 0185 pins, and its grant row is unchanged", async (t) => {
+test("D9 — v1 is UNTOUCHED: its prosrc matches the sha 0190 pins, and its grant row is unchanged", async (t) => {
   if (skipHere(t)) return;
   // The pin is read out of the MIGRATION, not retyped here: a second, independent copy of the
   // same hex string is a copy that can rot. This cell proves the migration's own pin still
   // describes the live body.
   const sql = readFileSync(MIGRATION, "utf8");
   const pins = [...sql.matchAll(/c_v1_sha\s+constant text\s*:=\s*'([0-9a-f]{64})'/g)].map((m) => m[1]);
-  assert.equal(pins.length, 1, "0185 must pin v1's prosrc sha exactly once");
+  assert.equal(pins.length, 1, "0190 must pin v1's prosrc sha exactly once");
   const live = (await rootQuery(
     "select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') as sha from pg_proc p where p.oid=$1::regprocedure",
     [V1])).rows[0].sha;
@@ -453,17 +453,17 @@ test("D10 — the door pins plan_cache_mode=force_custom_plan and search_path in
 
 // =============================================================================================
 // D11 — THE TAIL IS RE-RUNNABLE. A self-checking tail that could only ever run once inside its
-// own migration transaction is a tail nobody can use as a live audit; this runs 0185's own block
+// own migration transaction is a tail nobody can use as a live audit; this runs 0190's own block
 // TWICE against the migrated database and requires both to pass.
 // =============================================================================================
-test("D11 — 0185's tail census is idempotent: its own block runs twice, green both times", async (t) => {
+test("D11 — 0190's tail census is idempotent: its own block runs twice, green both times", async (t) => {
   if (skipHere(t)) return;
   const sql = readFileSync(MIGRATION, "utf8");
   const start = sql.indexOf("do $tail$");
   const end = sql.indexOf("end $tail$;");
-  assert.ok(start > 0 && end > start, "0185 must carry exactly one do $tail$ ... end $tail$; block");
+  assert.ok(start > 0 && end > start, "0190 must carry exactly one do $tail$ ... end $tail$; block");
   const tail = sql.slice(start, end + "end $tail$;".length);
-  assert.ok(tail.includes("0185 tail: OK"), "the extracted block must be the tail census");
+  assert.ok(tail.includes("0190 tail: OK"), "the extracted block must be the tail census");
 
   await asRoot(async (c) => {
     // The tail reads the prestate table the migration built (on commit drop, so it is long gone).
@@ -482,7 +482,7 @@ test("D11 — 0185's tail census is idempotent: its own block runs twice, green 
           where p.oid = $1::regprocedure and acl.privilege_type='EXECUTE'`, [V1]);
       for (const pass of [1, 2]) {
         await c.query(tail); // throws with the tail's own CLR10 message on any drift
-        noteLane(`D11: 0185's tail census re-ran green (pass ${pass}/2)`);
+        noteLane(`D11: 0190's tail census re-ran green (pass ${pass}/2)`);
       }
     } finally {
       await c.query("drop table if exists _d620_prestate");

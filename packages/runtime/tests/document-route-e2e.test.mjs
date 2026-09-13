@@ -1,5 +1,5 @@
 // #620 — THE SOURCE-DOCUMENT BYTES ROUTE, end to end
-// (packages/runtime/src/documentRoutes.ts + migration 0185's clara.get_document_for_human_read_v2).
+// (packages/runtime/src/documentRoutes.ts + migration 0190's clara.get_document_for_human_read_v2).
 //
 // THE WHOLE ROUTE, OVER HTTP, AGAINST THE RIG. This mirrors
 // packages/runtime/tests/fs7-e2-artifact-route.test.mjs's HTTP layer: a real express server, a real
@@ -310,7 +310,7 @@ after(async () => {
   await endPools();
 });
 
-const skipHttp = () => (ready ? false : "#620 route: no rig target, or migration 0185 is not applied");
+const skipHttp = () => (ready ? false : "#620 route: no rig target, or migration 0190 is not applied");
 
 function get(id, token, query = "", init = {}) {
   return fetch(`${baseUrl}/api/documents/${id}/bytes${query}`,
