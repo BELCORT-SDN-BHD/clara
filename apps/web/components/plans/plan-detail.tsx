@@ -47,6 +47,11 @@ import { useAsyncRead } from "@/lib/firm/use-async-read";
 
 const PREVIEW_COUNT = 3;
 
+/** THE FOCUSABLE LANDMARK an accepted lifecycle decision returns focus to, when the trigger that
+ *  opened its dialog has unmounted with the status change. Declared beside the component that
+ *  renders it so the id and the `tabIndex={-1}` that makes it focusable cannot drift apart. */
+export const PLAN_HEADING_ID = "plan-detail-heading";
+
 export function PlanDetail({ clientId, planId }: { clientId: string; planId: string }) {
   const t = useTranslations("Plans");
   const plan = useAsyncRead(() => loadPlan(planId));
@@ -85,6 +90,7 @@ export function PlanDetail({ clientId, planId }: { clientId: string; planId: str
                   planId={row.plan_id}
                   purpose={row.purpose}
                   busy={plan.busy}
+                  returnFocusTo={PLAN_HEADING_ID}
                   onAct={(fn) => plan.act(async () => {
                     await fn();
                     await reloadAll();
@@ -96,6 +102,7 @@ export function PlanDetail({ clientId, planId }: { clientId: string; planId: str
                   planId={row.plan_id}
                   purpose={row.purpose}
                   busy={plan.busy}
+                  returnFocusTo={PLAN_HEADING_ID}
                   onAct={(fn) => plan.act(async () => {
                     await fn();
                     await reloadAll();
@@ -120,6 +127,7 @@ export function PlanDetail({ clientId, planId }: { clientId: string; planId: str
                   planId={row.plan_id}
                   purpose={row.purpose}
                   busy={plan.busy}
+                  returnFocusTo={PLAN_HEADING_ID}
                   onAct={(fn) => plan.act(async () => {
                     await fn();
                     await reloadAll();
@@ -207,7 +215,12 @@ function PlanIdentity({ clientId, row }: { clientId: string; row: PlanDetailRow 
   return (
     <section className="flex flex-col gap-2 rounded-lg border border-border bg-card p-4">
       <div className="flex flex-wrap items-center gap-3">
-        <h2 className="text-base font-medium text-card-foreground">{row.purpose}</h2>
+        {/* `tabIndex={-1}` makes it programmatically focusable WITHOUT adding it to the tab
+            order — the standard treatment for a destination focus is SENT to rather than tabbed
+            to. See plan-lifecycle-dialogs.tsx's `moveFocusTo` for what sends it. */}
+        <h2 id={PLAN_HEADING_ID} tabIndex={-1} className="text-base font-medium text-card-foreground">
+          {row.purpose}
+        </h2>
         <PlanStatusBadge status={row.status} />
         <span className="text-sm text-muted-foreground">{kindLabel(t, row.kind)}</span>
       </div>

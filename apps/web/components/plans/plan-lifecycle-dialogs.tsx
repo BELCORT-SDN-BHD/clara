@@ -39,6 +39,29 @@ import { validateCatchUpWindow, type CatchUpIssue } from "@/lib/plans/schedule";
 
 type ActRunner = (fn: () => Promise<void>) => Promise<boolean>;
 
+/**
+ * WHERE FOCUS GOES WHEN THE TRIGGER IS NOT THERE TO RETURN TO.
+ *
+ * Base UI returns focus to the control that opened the dialog, which is exactly right for a
+ * dismissal — and impossible after an ACCEPTED pause, resume or end, because the plan's status
+ * moves and `planControls` unmounts that very trigger with it. MEASURED in the browser walk: focus
+ * fell to `<body>` and a keyboard reader lost their place on the page, which is precisely what
+ * appendix C §4 forbids ("if the trigger disappears, move focus to the next logical element").
+ *
+ * The id names a focusable landmark — the plan's own heading, which carries `tabIndex={-1}` for
+ * this — and the `setTimeout(…, 0)` is load-bearing rather than decorative: Base UI performs its
+ * own focus restore while closing, so a synchronous move would be overwritten by it. This is
+ * `components/work/work-cancel-dialog.tsx`'s `returnFocusTo` mechanism, verbatim.
+ */
+function moveFocusTo(id: string | undefined): void {
+  if (id === undefined) return;
+  setTimeout(() => {
+    const doc: { getElementById?: (x: string) => { focus?: () => void } | null } | undefined =
+      typeof document === "undefined" ? undefined : document;
+    doc?.getElementById?.(id)?.focus?.();
+  }, 0);
+}
+
 /** A stable key per OPEN DECISION — see the header. */
 function useDecisionKey(): { key: () => string; renew: () => void } {
   const ref = useRef<string | null>(null);
@@ -68,8 +91,8 @@ function useDecisionDialog() {
 }
 
 export function PausePlanDialog({
-  planId, purpose, busy, onAct,
-}: { planId: string; purpose: string; busy: boolean; onAct: ActRunner }) {
+  planId, purpose, busy, onAct, returnFocusTo,
+}: { planId: string; purpose: string; busy: boolean; onAct: ActRunner; returnFocusTo?: string }) {
   const t = useTranslations("Plans");
   const dialog = useDecisionDialog();
   const [reason, setReason] = useState("");
@@ -103,7 +126,10 @@ export function PausePlanDialog({
               const ok = await onAct(async () => {
                 await pausePlan(planId, reason.trim() === "" ? null : reason.trim(), dialog.key());
               });
-              if (ok) dialog.setOpen(false);
+              if (ok) {
+                dialog.setOpen(false);
+                moveFocusTo(returnFocusTo);
+              }
             }}
           >
             {t("pauseConfirm")}
@@ -115,8 +141,8 @@ export function PausePlanDialog({
 }
 
 export function ResumePlanDialog({
-  planId, purpose, busy, onAct,
-}: { planId: string; purpose: string; busy: boolean; onAct: ActRunner }) {
+  planId, purpose, busy, onAct, returnFocusTo,
+}: { planId: string; purpose: string; busy: boolean; onAct: ActRunner; returnFocusTo?: string }) {
   const t = useTranslations("Plans");
   const dialog = useDecisionDialog();
   return (
@@ -135,7 +161,10 @@ export function ResumePlanDialog({
               const ok = await onAct(async () => {
                 await resumePlan(planId, dialog.key());
               });
-              if (ok) dialog.setOpen(false);
+              if (ok) {
+                dialog.setOpen(false);
+                moveFocusTo(returnFocusTo);
+              }
             }}
           >
             {t("resumeConfirm")}
@@ -147,8 +176,8 @@ export function ResumePlanDialog({
 }
 
 export function EndPlanDialog({
-  planId, purpose, busy, onAct,
-}: { planId: string; purpose: string; busy: boolean; onAct: ActRunner }) {
+  planId, purpose, busy, onAct, returnFocusTo,
+}: { planId: string; purpose: string; busy: boolean; onAct: ActRunner; returnFocusTo?: string }) {
   const t = useTranslations("Plans");
   const dialog = useDecisionDialog();
   const [reason, setReason] = useState("");
@@ -190,7 +219,10 @@ export function EndPlanDialog({
               const ok = await onAct(async () => {
                 await endPlan(planId, reason.trim(), dialog.key());
               });
-              if (ok) dialog.setOpen(false);
+              if (ok) {
+                dialog.setOpen(false);
+                moveFocusTo(returnFocusTo);
+              }
             }}
           >
             {t("endConfirm")}

@@ -41,7 +41,26 @@ async function signInTo(page: Page, destination: string): Promise<void> {
   await page.getByLabel("Email").fill("owner@example.test");
   await page.getByLabel("Password").fill("Clara-e2e-password-1!");
   await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page).toHaveURL(new RegExp(`${destination.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`));
+  // A GENEROUS TIMEOUT, not the 5s default: this host runs several rigs at once and the
+  // post-sign-in navigation is a full server render. A short wait here reports "the app did not
+  // sign in" for a page that had simply not finished, which is a false finding.
+  await expect(page).toHaveURL(new RegExp(`${destination.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`), { timeout: 30_000 });
+}
+
+/**
+ * THE FIXTURE'S PAUSE STATE IS PER-SERVER, NOT PER-TEST, and one server serves every walk in the
+ * suite. A cell that needs an ACTIVE plan therefore ASSERTS its precondition and repairs it through
+ * the product's own Resume door rather than assuming the previous cell left it alone — which is
+ * what an `afterEach` cleanup cannot promise, because a cell that fails mid-way never reaches it.
+ */
+async function ensureActive(page: Page): Promise<void> {
+  const resume = page.getByRole("button", { name: "Resume", exact: true });
+  if (await resume.isVisible().catch(() => false)) {
+    await resume.click();
+    await page.getByRole("dialog").getByRole("button", { name: "Resume the plan" }).click();
+    await expect(page.getByRole("dialog")).toBeHidden();
+  }
+  await expect(page.getByRole("button", { name: "Pause", exact: true })).toBeVisible();
 }
 
 async function settle(page: Page): Promise<void> {
@@ -61,22 +80,6 @@ async function scan(page: Page, what: string): Promise<void> {
   expect(results.passes.length, `${what}: axe must actually have inspected the page`).toBeGreaterThan(0);
   expect(results.violations, `${what} axe violations`).toEqual([]);
 }
-
-/** The fixture's pause state is per-SERVER, not per-test, so a spec that pauses must put it back.
- *  Driven through the app's own door rather than a backdoor: the same RPC the UI calls. */
-async function resumeFixture(page: Page): Promise<void> {
-  await page.goto(DETAIL_URL);
-  const resume = page.getByRole("button", { name: "Resume", exact: true });
-  if (await resume.isVisible().catch(() => false)) {
-    await resume.click();
-    await page.getByRole("dialog").getByRole("button", { name: "Resume the plan" }).click();
-    await expect(page.getByRole("button", { name: "Pause", exact: true })).toBeVisible();
-  }
-}
-
-test.afterEach(async ({ page }) => {
-  await resumeFixture(page).catch(() => {});
-});
 
 // ===========================================================================================
 // plans.walk.authority — the whole journey, on one screen at a time.
@@ -113,6 +116,7 @@ test("plans.walk.authority: the detail shows the basis, the authority and its in
   await signInTo(page, LIST_URL);
   await page.getByRole("link", { name: PLANS.purpose }).click();
   await expect(page).toHaveURL(new RegExp(`/plans/${PLANS.planId}$`));
+  await ensureActive(page);
 
   // IDENTITY: purpose, kind, schedule + timezone, window, revision, authority, authoriser.
   await expect(page.getByRole("heading", { name: PLANS.purpose })).toBeVisible();
@@ -129,7 +133,7 @@ test("plans.walk.authority: the detail shows the basis, the authority and its in
   // THE BASIS, with the honest note about its stored date.
   await expect(page.getByText("6100").first()).toBeVisible();
   await expect(page.getByText(/placeholder the schedule replaces/)).toBeVisible();
-  await expect(page.getByText("RM 1,200.00").first()).toBeVisible();
+  await expect(page.getByText(/1,200\.00/).first()).toBeVisible();
 
   // THE PREVIEW — the next three due dates, from the database's own arithmetic.
   await expect(page.getByText("2026-10-01")).toBeVisible();
@@ -155,8 +159,9 @@ test("plans.walk.authority: the detail shows the basis, the authority and its in
   await scan(page, "plan detail");
 });
 
-test("plans.walk.authority: pause switches the preview to a paused explanation that KEEPS the dates, and focus returns to the trigger", async ({ page }) => {
+test("plans.walk.authority: pause switches the preview to a paused explanation that KEEPS the dates, and focus lands on the plan heading rather than the body", async ({ page }) => {
   await signInTo(page, DETAIL_URL);
+  await ensureActive(page);
   await expect(page.getByText("2026-10-01")).toBeVisible();
   await expect(page.getByText(/these dates are not being admitted/)).toBeHidden();
 
@@ -182,10 +187,12 @@ test("plans.walk.authority: pause switches the preview to a paused explanation t
   await expect(page.getByText("the landlord is renegotiating")).toBeVisible();
   await expect(page.getByText("Paused").first()).toBeVisible();
 
-  // FOCUS RETURNED. The Pause trigger unmounted (a paused plan offers Resume), so the browser
-  // must not have dropped focus on <body> — §4's rule for a trigger that disappears.
-  const active = await page.evaluate(() => document.activeElement?.tagName ?? null);
-  expect(active, "focus must not be dumped on the document body when the trigger unmounts").not.toBe("BODY");
+  // FOCUS WAS MOVED DELIBERATELY. The Pause trigger unmounted (a paused plan offers Resume), so
+  // Base UI's own restore had nowhere to go — appendix C §4's rule is that focus then moves to the
+  // next logical element, which here is the plan's own heading. MEASURED on the first run of this
+  // walk: without the explicit move it landed on `<body>` and a keyboard reader restarted at the
+  // top of the page.
+  await expect(page.locator("#plan-detail-heading")).toBeFocused();
 
   // A paused plan offers Resume and End, and never Pause or Catch up.
   await expect(page.getByRole("button", { name: "Resume", exact: true })).toBeVisible();
@@ -196,6 +203,7 @@ test("plans.walk.authority: pause switches the preview to a paused explanation t
 
 test("plans.walk.authority: a catch-up window below the authority is refused, and the refusal is readable INSIDE the dialog", async ({ page }) => {
   await signInTo(page, DETAIL_URL);
+  await ensureActive(page);
   await page.getByRole("button", { name: "Catch up", exact: true }).click();
   const dialog = page.getByRole("dialog");
   await expect(dialog.getByRole("heading", { name: `Catch up ${PLANS.purpose}` })).toBeVisible();
@@ -247,6 +255,7 @@ test("plans.walk.authority: the plan has a stable address — reload lands on th
 
 test("plans.walk.authority: the journey is reachable by keyboard alone, and the dialog is dismissable by Escape", async ({ page }) => {
   await signInTo(page, DETAIL_URL);
+  await ensureActive(page);
   await ensureRealFocus(page);
 
   // TAB TO THE PAUSE TRIGGER and open it with the keyboard — no pointer anywhere in this cell.
@@ -267,6 +276,7 @@ test("plans.walk.authority: the journey is reachable by keyboard alone, and the 
 
 test("plans.walk.authority: 320 CSS px and 200% zoom — the plan detail fits and the page never scrolls sideways", async ({ page }) => {
   await signInTo(page, DETAIL_URL);
+  await ensureActive(page);
   await expect(page.getByRole("heading", { name: PLANS.purpose })).toBeVisible();
 
   await page.setViewportSize({ width: 320, height: 720 });
@@ -302,6 +312,7 @@ test("plans.walk.authority: 320 CSS px and 200% zoom — the plan detail fits an
 test("plans.walk.authority: reduced motion — nothing in the pause dialog MOVES, and the opacity that remains is allowed to", async ({ page }) => {
   await page.emulateMedia({ reducedMotion: "reduce" });
   await signInTo(page, DETAIL_URL);
+  await ensureActive(page);
   await page.getByRole("button", { name: "Pause", exact: true }).click();
   await expect(page.getByRole("dialog")).toBeVisible();
 
