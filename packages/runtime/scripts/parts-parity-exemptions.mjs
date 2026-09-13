@@ -51,6 +51,18 @@ const REVIEWED_OBJECT_SPREAD_SITES = [
   ["packages/runtime/lib/invoice-vendor-identity.mjs","readVendorIdentityFromLines","...opts","f3ed5ba9458357cb7c4c73a1d0dfd3ed2794b29c79acf80fc94088b29c782efb","0"],
   ["packages/runtime/lib/invoice-vendor-identity.mjs","note","...extra","95e756f54d07dd6aad9abc1013a84e8dbe2a5b0ef0dc875fb301d0b05f60548e","0"],
   ["packages/runtime/lib/invoice-vendor-identity.mjs","readVendorIdentityFromLines","...extent","69f5183515b3e333a07efced16057d748a218956024854f196bb197ae323ab55","0"],
+  // #644's knowledge pack reader, reviewed at WAVE-2 INTEGRATION rather than on its own branch:
+  // `knowledge.mjs` is new, the gate scans every module under packages/runtime, and CI runs it
+  // (.github/workflows/ci.yml:221) — so the branch was carrying a red gate nobody had run.
+  //
+  // WHY IT IS NOT A PART CONSTRUCTION. `unavailable(reason, extra)` builds the READER's own
+  // status envelope — `{status, reason, knowledge_version, records}` — and `extra` is a
+  // caller-supplied bag from exactly three call sites in this same file, each an object literal
+  // of diagnostic fields only: `{code, detail_reason, message}` on the governed refusal,
+  // `{code, message}` on a read failure, `{message}` on a malformed envelope. None carries a
+  // `type` discriminant, nothing here reaches a parts array, and the value never crosses the
+  // wire: `readKnowledgePack`'s answer is consumed as a context pack, not emitted as a part.
+  ["packages/runtime/lib/knowledge.mjs","unavailable","...extra","3355fdebe1a460252983373a2683034f469e0303a8d9f5b235af0b290d1f47cc","0"],
   ["packages/runtime/lib/leader.mjs","startLeaderLoop","...deps","49066b818c86b899f96fb154d4d209d82ba66ab32cda080df1a98955086e5c11","0"],
   ["packages/runtime/lib/local-facts.mjs","startLocalFactsLoop","...deps","3b9e8229f7c90ba3f1dfa279566ba51229284b34bea8f8cd97f4165076879792","0"],
   ["packages/runtime/lib/matcher.mjs","computeLaneTwo","...matchCandidates(inputs)","1974a767b2495bcc7826d833b8ee9c799a795732f9552f7acbd91159ef1517b3","0"],
