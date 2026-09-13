@@ -1695,6 +1695,33 @@ export const PERIODIC_ADJUSTMENTS_0194_COHORT = [
   ...PERIODIC_ADJUSTMENTS_0194_UNGRANTED_FNS,
 ];
 
+// #631 [0195, model egress obeys current purpose authorisation + the redacted execution trace] —
+// the WORK-EGRESS lane, its own cohort for the same "wholly present or wholly absent" reason
+// 0178's and 0194's carry.
+//
+//   the dispatch wrapper and the trace writer/prune — clara_runtime ONLY. The wake roles and
+//   clara_authenticated gain ZERO: a lane that could mint its own egress authorization, or write
+//   its own diagnostic row for another firm's Work, would be an agent deciding what it is
+//   authorised to do.
+const WORK_EGRESS_0195_RUNTIME_FNS = [
+  "prepare_work_egress_dispatch", "record_work_execution_trace", "prune_work_execution_traces",
+];
+//   the ONE read — clara_authenticated ONLY, bookkeeper-floored inside its own body. No agent,
+//   wake or runtime variant exists: the run writes the trace and never reads it back.
+const WORK_EGRESS_0195_HUMAN_FNS = ["get_work_execution_trace"];
+//   …and the UNGRANTED closure: the derived-activation predicate (reached only from the DEFINER
+//   clara.prepare_egress_dispatch, whose answer collapses every negative onto one indistinguishable
+//   unknown), the immutable run-binding fold both the dispatch wrapper and the posting core
+//   compute, and the trace relation's append-only trigger body.
+const WORK_EGRESS_0195_UNGRANTED_FNS = [
+  "_accounting_work_egress_live", "_work_egress_event_seq",
+  "_tf_work_execution_trace_append_only",
+];
+export const WORK_EGRESS_0195_COHORT = [
+  ...WORK_EGRESS_0195_RUNTIME_FNS, ...WORK_EGRESS_0195_HUMAN_FNS,
+  ...WORK_EGRESS_0195_UNGRANTED_FNS,
+];
+
 export const ALLOWED = {
   // Slice-4 governance writers (contract v2.1 §3.2/3.3/3.5): human lane only.
   [ROLES.authenticated]: new Set([
@@ -1851,6 +1878,7 @@ export const ALLOWED = {
     // ONLY, viewer-floored in its own body; clara_runtime, the agent role and both wake roles
     // gain ZERO.
     ...PERIODIC_ADJUSTMENTS_0194_HUMAN_FNS,
+    ...WORK_EGRESS_0195_HUMAN_FNS, // 0195 [#631] the redacted execution-trace read (bookkeeper floor)
   ]),
   // [S6 §9/C-11] agent lane loses the bare get_journal_entry(uuid) oracle; keeps the other
   // reads and gains the client-pinned S6 reads + get_journal_entry_for.
@@ -2005,6 +2033,7 @@ export const ALLOWED = {
     // clara.admit_journal_work sits in. Reached by a human through the runtime's own
     // authenticated route, never by PostgREST.
     ...PERIODIC_ADJUSTMENTS_0194_RUNTIME_FNS,
+    ...WORK_EGRESS_0195_RUNTIME_FNS, // 0195 [#631] the work-egress dispatch wrapper + trace writer/prune
     // [F-A2 PR-2, GM-10] the withdrawal re-admit door — clara_runtime ONLY (the consumer's
     // sole caller); proves the event->entry->attempt->task->filing chain then delegates to
     // 0053's one_click exception. Declared here so any wider grant FAILS the matrix.
@@ -2236,6 +2265,7 @@ export async function grantMatrixFailures() {
   failures.push(...cohortFailures("#728 0183 sweep attribution + spoken-for documents", WALK_FINDINGS_0183_COHORT, liveNames));
   failures.push(...cohortFailures("#630 0184 work-cancel/takeover lane", WORK_CANCEL_0184_COHORT, liveNames));
   failures.push(...cohortFailures("#643 0194 periodic-adjustment lane", PERIODIC_ADJUSTMENTS_0194_COHORT, liveNames));
+  failures.push(...cohortFailures("#631 0195 work-egress + execution-trace lane", WORK_EGRESS_0195_COHORT, liveNames));
   failures.push(...cohortFailures("wave F F-A1 PR-4 bank-statement witness cutover", STATEMENT_F_A1_PR4_COHORT, liveNames));
   // F-A6's cohort is bimodal: wholly present once PR-1 applies, wholly absent before it. Half a
   // cohort is a half-applied migration and is reported as one.

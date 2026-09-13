@@ -24,6 +24,7 @@ import {
   basis, REASON, CLR, CANCEL_REASON, CANCEL_ANSWER, assertPair, assertRaises, detailOf,
   rootQuery, humanQuery, roleQuery, opk, ROLES, insertUser, addMember,
 } from "./work-cancel-fixtures.mjs";
+import { authoriseWorkEgress } from "./work-journal-fixtures.mjs";
 import { getPool } from "./rig-helpers.mjs";
 
 let world = null;
@@ -366,6 +367,12 @@ test("wc.11 THE ORDERING BOUNDARY: a cancel that arrives while the posting trans
   const cred = await mintClientObo({ firm: FIRM_A(), obo: w.author, client: w.client });
   const before = await entryCount(w.client);
 
+  // #631 · a raw-SQL post needs the model-egress dispatch done by hand, with the SAME run id,
+  // BEFORE the boundary transaction opens (the dispatch runs outside the posting transaction, as
+  // `claraWork_v3` does). Inert below 0195.
+  const boundaryRun = opk("run");
+  await authoriseWorkEgress({ work: w.work_id, runId: boundaryRun });
+
   const holder = await getPool().connect();
   let cancelOut = null;
   let cancelErr = null;
@@ -377,7 +384,7 @@ test("wc.11 THE ORDERING BOUNDARY: a cancel that arrives while the posting trans
       `select clara.wake_record_journal_entry($1::uuid, $2::uuid, $3::text, $4::jsonb, $5::text,
                                              $6::text, $7::text) as r`,
       [w.client, w.work_id, w.logical_op_id, JSON.stringify(w.basis), "a".repeat(64),
-        opk("run"), "#630 boundary rig"]);
+        boundaryRun, "#630 boundary rig"]);
     assert.equal(posted.rows[0].r.posted, true, "wc.11 the operation was admitted inside the boundary");
 
     // The cancel now races the UNCOMMITTED posting. It must BLOCK on the Work row lock.
@@ -1289,7 +1296,7 @@ test("wc.34 a posting HOLDS the responsible human's membership row, so a revocat
     [FIRM_A(), solo])).rows[0].id;
 
   let gate = null; let poster = null; let revoker = null; let door = null;
-  let posted = null; let postErr = null; let racing = null;
+  let posted = null; let postErr = null; let racing = null; let membershipRun = null;
   let revoking = null; let revokeErr = null; let doorErr = null; let doorRacing = null;
   try {
     // THE GATE. An EXCLUSIVE table lock on clara.journal_entries conflicts with the ROW EXCLUSIVE
@@ -1297,6 +1304,10 @@ test("wc.34 a posting HOLDS the responsible human's membership row, so a revocat
     // Work lock, its firm lock and its membership FOR SHARE, and then stops with all three in
     // hand. That is the only window in which "the poster holds the membership row" is observable
     // at all: the core is one statement.
+    // #631 · the dispatch, by hand and with the SAME run id, before the gate closes.
+    membershipRun = opk("run");
+    await authoriseWorkEgress({ work: w.work_id, runId: membershipRun });
+
     gate = await rawClient();
     await gate.query("begin");
     await gate.query("lock table clara.journal_entries in exclusive mode");
@@ -1309,7 +1320,7 @@ test("wc.34 a posting HOLDS the responsible human's membership row, so a revocat
       `select clara.wake_record_journal_entry($1::uuid, $2::uuid, $3::text, $4::jsonb, $5::text,
                                              $6::text, $7::text) as r`,
       [w.client, w.work_id, w.logical_op_id, JSON.stringify(w.basis), "b".repeat(64),
-        opk("run"), "#630 membership rig"])
+        membershipRun, "#630 membership rig"])
       .then((r) => { posted = r.rows[0].r; }, (e) => { postErr = e; });
     assert.equal(await waitingOnLock(posterPid), true,
       "wc.34 the posting is parked on the gate, past its membership read");
