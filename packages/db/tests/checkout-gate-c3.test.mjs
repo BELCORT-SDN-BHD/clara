@@ -2146,6 +2146,17 @@ cell("c3.53 folded set equality -- the money-store body roster is closed; open_c
       order by proname`,
   );
   assert.deepEqual(refs.rows.map((r) => r.proname), [
+    // WIDENED BY #615 (0188_operator_support.sql), deliberately and with the reason recorded
+    // here, exactly as the C-6 widening below. `clara._operator_support_cases` is the ONE query
+    // behind the operator's two read doors (`list_operator_support_queue` /
+    // `get_operator_support_case`); it reads `clara.firm_registration_payments` and
+    // `clara.stripe_events` BY DESIGN — an unconsumed payment and an unresolved provider problem
+    // are two of the three case kinds the operator queue exists to surface, and those tables grant
+    // every application role nothing. It is a STABLE reader granted to NOBODY (0188 revokes it from
+    // public and grants no role; only the two DEFINER doors call it), writes nothing and consumes
+    // no payment — so it widens the roster without widening the money surface. Caught here on the
+    // merged wave-1 tree (PR #769, db-estate) because #615's own rig ran only its own battery.
+    "_operator_support_cases",
     "apply_stripe_events", "claim_paid_firm",
     // WIDENED BY FS-4 C-6 (#517), deliberately and with the reason recorded here rather than
     // discovered during a merge-prep conflict. `clara.get_own_checkout_progress` is C-6's
