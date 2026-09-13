@@ -122,6 +122,17 @@ const CLIENT_PRESENTATION: Record<ClientNavId, Presentation> = {
 
 const ACCOUNTING_PRESENTATION: Record<AccountingItemId, Presentation> = {
   journals: { id: "journals", keywords: ["journals", "entries", "je", "drafts"] },
+  // #643 — the words a preparer actually reaches for: the stock half ("stocktake", "closing
+  // stock", "inventory count") and the payroll half ("payroll", "epf", "socso", "statutory").
+  // Deliberately NOT "adjustments": that word belongs to the 0045 PLAN lane, which the `plans` row
+  // below already claims, and two rows answering one word is a palette that guesses.
+  periodicAdjustments: {
+    id: "periodicAdjustments",
+    keywords: [
+      "periodic adjustments", "stocktake", "stock count", "closing stock", "inventory count",
+      "payroll", "epf", "socso", "eis", "pcb", "hrdf", "statutory obligation",
+    ],
+  },
   bank: { id: "bank", keywords: ["bank", "reconciliation", "statement", "matching"] },
   receivables: { id: "registersAging", keywords: ["receivables", "payables", "aging", "ar", "ap", "registers"] },
   assets: { id: "registersAssets", keywords: ["fixed assets", "depreciation", "nbv", "registers"] },

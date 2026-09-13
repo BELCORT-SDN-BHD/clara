@@ -75,10 +75,12 @@
     },
     "clientLeaf": {
       "journalComposer": "Record journal entry",
+      "periodicAdjustment": "Record periodic adjustment",
       "workDetail": "Journal entry"
     },
     "accounting": {
       "journals": "Journals",
+      "periodicAdjustments": "Periodic adjustments",
       "bank": "Bank",
       "receivables": "Receivables & payables",
       "assets": "Assets",
@@ -896,6 +898,7 @@
         "knowledge": "Knowledge",
         "reports": "Reports",
         "journals": "Journals",
+        "periodicAdjustments": "Periodic adjustments",
         "bank": "Bank",
         "registersAging": "Receivables & payables",
         "registersAssets": "Assets register",
@@ -1010,6 +1013,115 @@
     "lost": {
       "title": "We could not confirm whether this was accepted",
       "body": "The connection dropped before an answer arrived, so this entry may or may not have been accepted. Trying again is safe: it carries the same identity, so it resolves the existing work rather than creating a second one."
+    }
+  },
+  "PeriodicAdjustment": {
+    "heading": "Record periodic adjustment",
+    "body": "Record a periodic stock adjustment or a supplied payroll or statutory obligation from the particulars your client gave you. Submitting admits durable work; the entry is posted by that work and appears on its own page. Nothing here computes a contribution rate or an employee calculation — every figure is the one you enter.",
+    "purpose": {
+      "label": "What are you recording?",
+      "help": "Switching keeps what you have already typed in the other one.",
+      "options": {
+        "periodic_stock_adjustment": "Periodic stock adjustment",
+        "payroll_obligation": "Supplied payroll or statutory obligation"
+      }
+    },
+    "periodStart": "Period from",
+    "periodEnd": "Period to",
+    "method": {
+      "label": "How was the movement established?",
+      "help": "Choose the counted figures when your client gave you an opening and a closing stock figure.",
+      "options": {
+        "opening_closing_count": "From an opening and closing count",
+        "explicit_adjustment": "From an instructed movement"
+      }
+    },
+    "openingCents": "Opening stock",
+    "closingCents": "Closing stock",
+    "adjustmentCents": "Movement",
+    "adjustmentCentsHelp": "Positive when stock rose, negative when it fell.",
+    "movementLabel": "Movement (closing less opening):",
+    "movementUnknown": "Movement: enter both figures to see it.",
+    "countedAt": "Counted on",
+    "countedAtHelp": "Optional. It must fall inside the period above.",
+    "countReference": "Count reference",
+    "inventoryAccountCode": "Inventory account",
+    "costAccountCode": "Cost of sales account",
+    "obligationKind": {
+      "label": "Obligation",
+      "help": "This names what the obligation is. It sets no rate and computes nothing.",
+      "options": {
+        "epf": "EPF (KWSP)",
+        "socso": "SOCSO (PERKESO)",
+        "eis": "EIS (SIP)",
+        "pcb_mtd": "PCB (MTD)",
+        "hrdf": "HRDF (HRD Corp) levy",
+        "salary": "Salaries and wages",
+        "other_supplied": "Other supplied obligation"
+      }
+    },
+    "amountCents": "Amount",
+    "amountCentsHelp": "Exactly as your client supplied it.",
+    "expenseAccountCode": "Expense account",
+    "liabilityAccountCode": "Liability account",
+    "paymentAccountCode": "Settled from",
+    "paymentAccountHelp": "Only when part of it was paid in the same entry.",
+    "settledCents": "Amount settled",
+    "advanceAccountCode": "Staff advance account",
+    "advanceAccountHelp": "Optional, and recorded as a particular only. Recovering an advance from this payroll needs the staff-advance register, which asks which advance is being discharged — this form does not decide that for you.",
+    "particularsSource": "Where these figures came from",
+    "particularsSourceHelp": "The payroll summary, message or document your client supplied.",
+    "instruction": "What you were asked to do",
+    "instructionHelp": "In your client's terms. This is the basis on the record.",
+    "accountPlaceholder": "Choose an account",
+    "accountNone": "None",
+    "defaultedHint": "Filled in from this client's chart. Change it if that is not the account you use.",
+    "preview": {
+      "heading": "The entry these particulars produce",
+      "body": "Derived from what you entered above and shown here so you can check it before submitting. The accounts and amounts follow the particulars; change them by changing the particulars."
+    },
+    "submit": "Submit",
+    "issues": {
+      "required": "Fill this in.",
+      "invalidDate": "Enter a real calendar date, as YYYY-MM-DD.",
+      "periodOrder": "The period ends before it starts.",
+      "accountRequired": "Choose an account.",
+      "accountUnknown": "This client's chart has no active account with that code.",
+      "accountsMustDiffer": "This must be a different account from the one above.",
+      "amountRequired": "This adjustment moves no money. Check the figures with your client.",
+      "amountNotExact": "Enter an exact amount in ringgit and sen.",
+      "derivedAmountMismatch": "This does not match the counted figures above.",
+      "countedOutsidePeriod": "The count was taken outside the period above, so it is not evidence about it.",
+      "overSettled": "More was settled than the obligation is.",
+      "settlementNeedsAccount": "Choose the account it was settled from.",
+      "paymentLegUnused": "Enter the amount settled, or clear the account above.",
+      "tooLong": "This is too long. Shorten it before submitting."
+    },
+    "rejected": {
+      "title": "The server did not accept these particulars",
+      "body": "Correct the highlighted field and submit again. Nothing was recorded."
+    },
+    "history": {
+      "heading": "Periodic adjustments",
+      "body": "Every periodic stock count and supplied payroll obligation recorded for this client, with the particulars behind it and the entry it produced.",
+      "newAction": "Record periodic adjustment",
+      "tableLabel": "Periodic adjustments",
+      "empty": "No periodic adjustment has been recorded for this client yet.",
+      "period": "Period",
+      "kind": "What was recorded",
+      "amount": "Amount",
+      "state": "Entry",
+      "live": "Posted",
+      "reversed": "Reversed",
+      "disclose": "Particulars and links",
+      "postingDate": "Posting date",
+      "entry": "Journal entry",
+      "work": "Work",
+      "receipt": "Operation receipt",
+      "logicalOpId": "Operation identity",
+      "source": "Source document",
+      "corrects": "Corrects",
+      "correctedBy": "Corrected by"
     }
   },
   "WorkDetail": {
@@ -1128,6 +1240,7 @@
     "noSections": "No accounting surfaces are available at your rank.",
     "purposes": {
       "journals": "Draft, review and post journal entries.",
+      "periodicAdjustments": "Periodic stock counts and supplied payroll obligations, with the entries they produced.",
       "bank": "Load statements, match lines and reconcile each account.",
       "receivables": "Open receivable and payable balances by counterparty and age.",
       "assets": "The fixed asset register, its cost, depreciation and net book value.",
@@ -4111,7 +4224,9 @@
       "withdrawn": "Withdrawn"
     },
     "workPurposes": {
-      "journal_entry": "Recorded a journal entry"
+      "journal_entry": "Recorded a journal entry",
+      "periodic_stock_adjustment": "Recorded a periodic stock adjustment",
+      "payroll_obligation": "Recorded a supplied payroll obligation"
     },
     "columnActor": "Actor",
     "columnClient": "Client",
@@ -4201,6 +4316,8 @@
       "receiptCopied": "Copied",
       "purpose": "Purpose",
       "purposeJournalEntry": "Journal entry",
+      "purposePeriodicStockAdjustment": "Periodic stock adjustment",
+      "purposePayrollObligation": "Supplied payroll obligation",
       "basisOrigin": "Basis",
       "basisUserDirect": "Typed by a person",
       "basisClaraInterpreted": "Interpreted by Clara",
@@ -4243,7 +4360,7 @@
   },
   "WorkCancel": {
     "cancelWork": "Cancel Work",
-    "cancelling": "Cancelling\u2026",
+    "cancelling": "Cancelling…",
     "dialogTitle": "Cancel this Work?",
     "dialogBody": "Anything already recorded stays recorded; nothing new will start. If an operation has already been accepted it will finish, and you will see its receipt here.",
     "keepRunning": "Keep it running",
@@ -4254,7 +4371,7 @@
     "cancelledBody": "Nothing was posted.",
     "cancelledSuperseded": "The run reported {outcome} as it stopped.",
     "completedAfterCancelTitle": "This Work completed before the cancellation reached it",
-    "completedAfterCancelBody": "The entry below was recorded and stays recorded. A cancel never reverses a posted entry \u2014 a correction is a separate, linked operation.",
+    "completedAfterCancelBody": "The entry below was recorded and stays recorded. A cancel never reverses a posted entry — a correction is a separate, linked operation.",
     "viewEntry": "View the entry",
     "alreadyTerminalTitle": "Nothing to cancel",
     "alreadyTerminalBody": "This Work had already finished when the request arrived. Its state below is the database's own.",
@@ -4263,21 +4380,21 @@
     "notFoundTitle": "We could not find this Work",
     "notFoundBody": "It may belong to another firm, or it may have been addressed wrongly.",
     "conflictTitle": "That could not be cancelled",
-    "conflictBody": "The database refused the request in the state it found. The Work's own row below is the answer \u2014 read it, then decide.",
+    "conflictBody": "The database refused the request in the state it found. The Work's own row below is the answer — read it, then decide.",
     "unavailableTitle": "We could not reach the runtime",
     "unavailableBody": "Nothing was cancelled. Try again in a moment.",
     "transientTitle": "That did not go through — try again",
     "transientBody": "Nothing changed. The database was busy with another change to this Work at the same moment, so the request never ran. Pressing again is the same decision, not a second one.",
     "lostTitle": "We did not hear back",
-    "lostBody": "The cancellation may or may not have been recorded. This page re-reads the Work below \u2014 that row is the answer, not this message.",
+    "lostBody": "The cancellation may or may not have been recorded. This page re-reads the Work below — that row is the answer, not this message.",
     "announcement": "Work status: {status}",
     "takeOver": "Take responsibility",
-    "takingOver": "Taking responsibility\u2026",
+    "takingOver": "Taking responsibility…",
     "takeOverHeading": "This Work is waiting for someone who can finish it",
     "takeOverBody": "The person who asked for it no longer holds the role needed to post it. A bookkeeper in this firm can take responsibility; the new attempt runs under their authority and records the same entry.",
     "takeOverConfirmTitle": "Take responsibility for this Work?",
     "takeOverConfirmBody": "Clara interpreted this basis from a conversation rather than being typed the figures. Read it below before you take responsibility for posting it.",
-    "takeOverConfirmAction": "I have read the basis \u2014 take responsibility",
+    "takeOverConfirmAction": "I have read the basis — take responsibility",
     "takeOverCancel": "Not now",
     "takeOverAcceptedTitle": "You are responsible for this Work",
     "takeOverAcceptedBody": "A new attempt is queued under your authority. The person who asked for it stays on the record.",
@@ -4286,15 +4403,15 @@
     "takeOverUnavailableTitle": "We could not reach the runtime",
     "takeOverUnavailableBody": "Nothing changed. Nobody was made responsible, and the Work is exactly as it was. Try again in a moment.",
     "takeOverLostTitle": "We did not hear back",
-    "takeOverLostBody": "The handover may or may not have been recorded. This page re-reads the Work below \u2014 that row is the answer, not this message.",
+    "takeOverLostBody": "The handover may or may not have been recorded. This page re-reads the Work below — that row is the answer, not this message.",
     "notTakeableTitle": "This Work is not available to take over",
     "notTakeableBody": "Its state changed while you were looking at it. The row below is the database's own.",
     "stopReply": "Stop reply",
-    "stopping": "Stopping\u2026",
+    "stopping": "Stopping…",
     "stoppedMarker": "Stopped",
     "responsibleNow": "Responsible now",
-    "stopReplyHint": "Stops this reply. Work that has already been accepted keeps running \u2014 use Cancel Work to stop that.",
-    "stopDenied": "Could not stop this reply \u2014 it is still running. Stopping a reply needs a bookkeeper role in this firm.",
+    "stopReplyHint": "Stops this reply. Work that has already been accepted keeps running — use Cancel Work to stop that.",
+    "stopDenied": "Could not stop this reply — it is still running. Stopping a reply needs a bookkeeper role in this firm.",
     "stopAlreadyFinished": "Nothing was stopped — this reply had already finished. What is above is the whole of it.",
     "stopUnreachable": "We could not reach the runtime, so nothing was stopped. The reply may still be running. Try again.",
     "stopRefused": "Could not stop this reply. The database refused the request in the state it found, so the reply may still be running. Try again, or reload to see where the turn got to.",

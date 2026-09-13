@@ -230,6 +230,10 @@ function staticNextLinkHrefs(roots: readonly string[]): string[] {
  */
 const REGISTRY_BUILT: ReadonlyArray<{ pattern: string; builder: string }> = [
   { pattern: "/clients/[clientId]/accounting/journal/new", builder: "journalComposerHref" },
+  // #643 — the periodic-adjustment form, an ACT for the SAME reason its journal sibling is: it is
+  // the primary action of the Periodic adjustments destination (which IS a ⌘K row), and a Go row
+  // for the form itself would put a write affordance in a list of read destinations at every rank.
+  { pattern: "/clients/[clientId]/accounting/adjustments/new", builder: "periodicAdjustmentHref" },
   { pattern: "/clients/[clientId]/work/[workId]", builder: "workDetailHref" },
 ];
 

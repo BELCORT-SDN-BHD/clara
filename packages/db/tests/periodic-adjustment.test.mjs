@@ -33,7 +33,7 @@ import {
   rootQuery, opk, workRow, receiptsForWork, entriesForClient, linesOf,
   entryCount, committedReceiptCount, AGENT_USER_ID,
   // #643
-  gatePa, PA_REASON, PA_PURPOSE, PACHART, PA_PERIOD, ensurePaChart, enrolAdvance, retireAdvance,
+  gatePa, PA_REASON, PA_PURPOSE, PACHART, ensurePaChart, retireAdvance,
   stockAdjustment, payrollObligation, basisForStock, basisForPayroll,
   admitPeriodicAdjustmentWork, listPeriodicAdjustments, reverseEntry,
   adjustmentsForClient, adjustmentRow, adjustmentCount, entryFlags, entryLinksFor,
