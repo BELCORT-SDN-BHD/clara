@@ -40,7 +40,18 @@ import { randomUUID } from "node:crypto";
 export const KNOWLEDGE_PACK_FN = "clara.get_knowledge_pack";
 export const CAPTURE_KNOWLEDGE_FOR_FN = "clara.capture_knowledge_for";
 
-const PACK_SQL = `select ${KNOWLEDGE_PACK_FN}($1, $2) as pack`;
+// THE PACK DOOR IS CALLED WITH NAMED ARGS, like the capture door and for the same reason: it
+// gained a defaulted parameter (`p_firm`) in the #644 review round, and positional binding to a
+// function whose arity moved is exactly how a silent mis-bind happens.
+//
+// `p_firm` IS THE TENANT BINDING, and this module does not invent it. The pack's machine lane
+// REQUIRES it (CLR10 `pack_firm_required`) and refuses CLR11 when the named firm does not own the
+// client, so a caller that omits it gets the door's own refusal rather than another firm's
+// knowledge. The guard is deliberately NOT duplicated here: this module decides nothing about
+// authority — the doors do — and a local "firmId is required" would be a second, drifting copy of
+// a rule the database already enforces.
+const PACK_SQL = `select ${KNOWLEDGE_PACK_FN}(
+  p_client => $1, p_purpose => $2, p_firm => $3) as pack`;
 
 // The runtime capture door, called with NAMED args (the estate's signature strategy: positional
 // binding to a function that gained a defaulted parameter is how a silent mis-bind happens).
@@ -82,13 +93,17 @@ function unavailable(reason, extra = {}) {
 /**
  * Read one client's knowledge pack. Never null, never throws.
  *
+ * `firmId` is the tenant the runtime lane MEANS. The door requires it of that lane and verifies
+ * it against the client; omitting it yields the door's own `refused`/`pack_firm_required`, never
+ * another firm's records.
+ *
  * @param {{query: (text: string, params?: unknown[]) => Promise<{rows: any[]}>}} sql
- * @param {{clientId: string|null|undefined, purpose: string}} args
+ * @param {{clientId: string|null|undefined, purpose: string, firmId?: string|null}} args
  * @returns {Promise<{status: 'ok'|'unavailable', reason?: string, code?: string|null,
  *                    message?: string, purpose?: string, client_id?: string,
  *                    knowledge_version: unknown, records: unknown[]}>}
  */
-export async function readKnowledgePack(sql, { clientId, purpose } = {}) {
+export async function readKnowledgePack(sql, { clientId, purpose, firmId } = {}) {
   const client = text(clientId);
   if (!client) return unavailable("no_client");
   const p = text(purpose);
@@ -96,7 +111,7 @@ export async function readKnowledgePack(sql, { clientId, purpose } = {}) {
 
   let pack;
   try {
-    const r = await sql.query(PACK_SQL, [client, p]);
+    const r = await sql.query(PACK_SQL, [client, p, text(firmId) || null]);
     pack = r?.rows?.[0]?.pack;
   } catch (err) {
     if (isGovernedRefusal(err)) {

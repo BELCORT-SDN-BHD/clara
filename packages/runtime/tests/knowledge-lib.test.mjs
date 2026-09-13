@@ -34,6 +34,8 @@ const clrError = (code, reason, message = "refused") => {
   return e;
 };
 
+const FIRM_ID = "44444444-4444-4444-8444-444444444444";
+
 const PACK = {
   status: "ok",
   client_id: "11111111-1111-4111-8111-111111111111",
@@ -76,7 +78,51 @@ test("kl.03 success returns the door's envelope with knowledge_version VERBATIM"
   assert.equal(out.purpose, "wiki_coding");
   assert.equal(sql.calls.length, 1);
   assert.match(sql.calls[0].text, /clara\.get_knowledge_pack/);
-  assert.deepEqual(sql.calls[0].params, [PACK.client_id, "wiki_coding"]);
+  assert.deepEqual(sql.calls[0].params, [PACK.client_id, "wiki_coding", null]);
+});
+
+test("kl.08 the TENANT BINDING rides through, by NAME — the pack never derives the firm from the client", async () => {
+  const sql = fakeSql(() => ({ rows: [{ pack: PACK }] }));
+  const out = await readKnowledgePack(sql, {
+    clientId: PACK.client_id, purpose: "wiki_coding", firmId: FIRM_ID,
+  });
+  assert.equal(out.status, "ok");
+  // NAMED, not positional: the door gained `p_firm` as a DEFAULTED parameter, and positional
+  // binding to a function whose arity moved is how a silent mis-bind happens (the same law this
+  // module already applies to capture_knowledge_for).
+  assert.match(sql.calls[0].text, /p_client => \$1/);
+  assert.match(sql.calls[0].text, /p_purpose => \$2/);
+  assert.match(sql.calls[0].text, /p_firm => \$3/);
+  assert.deepEqual(sql.calls[0].params, [PACK.client_id, "wiki_coding", FIRM_ID]);
+  // A blank binding is a NULL, not an empty string the door would have to interpret.
+  await readKnowledgePack(sql, { clientId: PACK.client_id, purpose: "wiki_coding", firmId: "  " });
+  assert.equal(sql.calls[1].params[2], null);
+});
+
+test("kl.09 an UNBOUND read is the DOOR's refusal, verbatim — never a silently unbound pack", async () => {
+  // This module decides nothing about authority: it does not pre-empt the door with a local
+  // "firmId is required", because that would be a second copy of a rule the database enforces
+  // and the two would drift. What it MUST do is carry the refusal back typed and unmistakable.
+  const sql = fakeSql(() => { throw clrError("CLR10", "pack_firm_required",
+    "the runtime knowledge pack names the firm it is reading"); });
+  const out = await readKnowledgePack(sql, { clientId: PACK.client_id, purpose: "wiki_coding" });
+  assert.equal(out.status, "unavailable");
+  assert.equal(out.reason, "refused");
+  assert.equal(out.code, "CLR10");
+  assert.equal(out.detail_reason, "pack_firm_required");
+  assert.deepEqual(out.records, [], "an unbound read must never look like a client with no knowledge");
+  assert.equal(out.knowledge_version, null);
+});
+
+test("kl.0a a WRONG binding is the door's CLR11, and still never throws or returns null", async () => {
+  const sql = fakeSql(() => { throw clrError("CLR11", null, "client not found"); });
+  const out = await readKnowledgePack(sql, {
+    clientId: PACK.client_id, purpose: "wiki_coding", firmId: FIRM_ID,
+  });
+  assert.notEqual(out, null);
+  assert.equal(out.status, "unavailable");
+  assert.equal(out.code, "CLR11");
+  assert.equal(out.message, "client not found", "the database's own sentence, never re-worded");
 });
 
 test("kl.04 a client-less turn never touches the database and says why", async () => {
