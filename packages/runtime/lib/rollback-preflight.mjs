@@ -361,6 +361,47 @@ export function taskIsStranded(supported, task) {
   return !classIsCarried(supported, task.workflowClass);
 }
 
+/**
+ * #637 review SHOULD-3 — THE REFUSAL FOOTER'S CLOSING LINES, exported for the same reason
+ * `taskIsStranded` is: the CLI's rendering must never disagree with what actually happened.
+ *
+ * `taskIsStranded` returns true for an UNPLACEABLE task (`known:false` — a `wake`/`close_prep` row
+ * whose event type has no enabled `clara.wake_engine_sources` row) regardless of `supported`. The
+ * two ways the runbook names — RETAIN every non-terminal bundle in the target, or DRAIN first — are
+ * both a promise about a NAMED body, and neither is reachable for a row this command could not even
+ * identify: you cannot retain or drain towards a class with no name. Printing the two-way footer
+ * unchanged for that row is not wrong about the verdict (it still refuses), only about the closing
+ * advice, which is exactly the shape a runbook must never get wrong.
+ *
+ * So: two ways forward when every stranding row NAMES a class the target could carry either way.
+ * A THIRD when at least one stranded row is unplaceable — register (or repair) the task's
+ * `clara.wake_engine_sources` row so it resolves to a body again, or retire the task if it is not
+ * meant to run. This changes NOTHING about the verdict or the exit code; it only makes the footer
+ * honest about which rows the two named ways can actually satisfy.
+ * @param {ReadonlyArray<string>} supported
+ * @param {{unbound:{tasks:ReadonlyArray<{table:string,id:string,kind:string|null,lane:string|null,status:string,workflowClass:string|null,needsWorkflow:boolean,known:boolean}>}}} result
+ * @returns {string[]}
+ */
+export function refusalFooterLines(supported, result) {
+  const stranding = result.unbound.tasks.filter((t) => taskIsStranded(supported, t));
+  const unplaceable = stranding.filter((t) => !t.known);
+  if (unplaceable.length === 0) {
+    return [
+      "\nThe two admissible ways forward are the ones the runbook names: RETAIN every non-terminal bundle in the target " +
+        "(ship a compatibility build that still exports these bodies while new admission points at the previous version), " +
+        "or DRAIN first and re-run this command until it allows. Elapsed time is not a drain.",
+    ];
+  }
+  const rows = unplaceable.map((t) => `${t.table} ${t.id}`).join(", ");
+  return [
+    `\nAt least one stranded task is UNPLACEABLE — this command could not identify a workflow class for it (${rows}). ` +
+      "For those rows the two admissible ways the runbook names do not apply: you cannot RETAIN or DRAIN towards a body " +
+      "with no name. The way forward for THOSE rows is a THIRD one — register (or repair) the task's " +
+      "`clara.wake_engine_sources` row so it resolves to a body again, or retire the task if it is not meant to run. " +
+      "Any OTHER stranded row above that DOES name a class can still be carried by RETAIN or cleared by DRAIN.",
+  ];
+}
+
 /** The verdict over ONE already-measured census pair. Pure: no database. */
 function verdictOver(supported, runs, unbound) {
   const outside = runs.filter((row) => !supported.includes(row.body));

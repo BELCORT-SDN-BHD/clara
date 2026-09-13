@@ -55,6 +55,7 @@ import {
   censusUnboundTasks,
   classOfBody,
   preflight,
+  refusalFooterLines,
   strandedBodyCensus,
   supportedBodiesFromBundle,
   taskIsStranded,
@@ -545,6 +546,32 @@ test("637.pf: the stranding predicate is ONE exported rule — the CLI's refusal
     true,
     "FAIL-CLOSED: an unidentifiable kind strands even against a target carrying everything",
   );
+});
+
+test("637.pf: SHOULD-3 — the refusal footer names a THIRD way forward when a stranded task is UNPLACEABLE", () => {
+  const supported = ["claraWork_v1"];
+  const placeable = { table: "clara.agent_tasks", id: "t1", kind: "chat_turn", lane: null, status: "queued", workflowClass: "chatTurn", needsWorkflow: true, known: true };
+  const unplaceable = { table: "clara.agent_tasks", id: "t2", kind: "wake", lane: null, status: "held", workflowClass: null, needsWorkflow: true, known: false };
+
+  // Every stranding row NAMES a class (claraWork_v1 is missing chatTurn) -> the ORIGINAL two-way footer, unchanged.
+  const twoWay = refusalFooterLines(supported, { unbound: { tasks: [placeable] } });
+  assert.equal(twoWay.length, 1);
+  assert.match(twoWay[0], /two admissible ways forward/);
+  assert.match(twoWay[0], /RETAIN every non-terminal bundle/);
+  assert.doesNotMatch(twoWay[0], /wake_engine_sources/, "the two-way footer never mentions the third way");
+
+  // A held wake task with no source row (known:false) is UNPLACEABLE for BOTH named ways -> the third way.
+  const threeWay = refusalFooterLines(supported, { unbound: { tasks: [placeable, unplaceable] } });
+  assert.equal(threeWay.length, 1);
+  assert.match(threeWay[0], /UNPLACEABLE/);
+  assert.match(threeWay[0], /clara\.agent_tasks t2/, "names the unplaceable row");
+  assert.match(threeWay[0], /wake_engine_sources/, "the concrete repair: register\\/repair the wake source row");
+  assert.match(threeWay[0], /retire the task/);
+  assert.doesNotMatch(threeWay[0], /clara\.agent_tasks t1/, "the placeable row is not named as unplaceable");
+
+  // A target that carries EVERY named class still owes the third way to the one row it cannot even identify.
+  const stillThreeWay = refusalFooterLines(["claraWork_v1", "chatTurn_v18", "closePrep_v1"], { unbound: { tasks: [unplaceable] } });
+  assert.match(stillThreeWay[0], /UNPLACEABLE/, "an unplaceable row strands the footer even against a target carrying everything named");
 });
 
 test("637.pf: N8 — a WORK-shaped scope narrows the RUN census too, with foreign parked runs present", { skip: SKIP }, async () => {

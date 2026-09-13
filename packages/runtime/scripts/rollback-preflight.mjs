@@ -61,7 +61,7 @@
 // `assertNoTargetSplit` fails closed if two present sources disagree.
 
 import { readFileSync } from "node:fs";
-import { preflight, supportedBodiesFromBundle, taskIsStranded, withWorldClient } from "../lib/rollback-preflight.mjs";
+import { preflight, refusalFooterLines, supportedBodiesFromBundle, taskIsStranded, withWorldClient } from "../lib/rollback-preflight.mjs";
 
 const argv = process.argv.slice(2);
 
@@ -241,11 +241,7 @@ async function main() {
         + "  of another class becomes a ReplayDivergenceError and a crash loop.",
     );
   }
-  console.error(
-    "\nThe two admissible ways forward are the ones the runbook names: RETAIN every non-terminal bundle in the target " +
-      "(ship a compatibility build that still exports these bodies while new admission points at the previous version), " +
-      "or DRAIN first and re-run this command until it allows. Elapsed time is not a drain.",
-  );
+  for (const line of refusalFooterLines(bodies, result)) console.error(line);
   process.exit(1);
 }
 
