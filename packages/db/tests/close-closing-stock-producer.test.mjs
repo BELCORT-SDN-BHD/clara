@@ -96,6 +96,10 @@ test("cs.gate.flips a goods trader's closing-stock gate fails without confessing
     + "and an attestation against this gate is once again a judgement about STOCK");
   assert.equal(g1.measured.closing_stock_adjustment_id, null,
     "gate.flips: …and it names no producer, because there is none yet");
+  assert.equal(Object.prototype.hasOwnProperty.call(g1.measured, "closing_stock_posted_on"), true,
+    "gate.flips: the marker's posting date is a KEY of the answer even when there is no marker — the "
+    + "gate's shape does not change with its state, or the digest would move for two reasons at once");
+  assert.equal(g1.measured.closing_stock_posted_on, null);
   const digestBefore = g1.measured_digest;
 
   // --- 2 · the firm ACCEPTS the exception, binding to THAT answer ---------------------------
@@ -148,6 +152,11 @@ test("cs.gate.flips a goods trader's closing-stock gate fails without confessing
   assert.equal(fresh.measured.closing_stock_work_id, admitted.work_id,
     "gate.flips: …and the Work that authorised it — not an anonymous balancing journal");
   assert.equal(fresh.measured.closing_stock_amount_cents, 180000);
+  // WHEN, TOO. `je.posting_date` was selected into the gate's row and never emitted (adversarial
+  // migration-safety review, N2); a close reviewer reads WHICH day inside the year the stock was
+  // declared without opening anything, and it costs no extra read.
+  assert.equal(fresh.measured.closing_stock_posted_on, fx.endsOn,
+    "gate.flips: …and the day the marker entry was posted");
   assert.equal(Object.prototype.hasOwnProperty.call(fresh.measured, "no_producer_verb"), false);
 
   // --- 5 · the DIGEST MOVED, so the interim attestation is no longer effective ---------------
