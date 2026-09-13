@@ -1434,10 +1434,16 @@ begin
            'revision', o.revision, 'intent_key', o.intent_key, 'work_id', o.work_id,
            'admitted_at', o.admitted_at, 'outcome', o.outcome, 'created_at', o.created_at,
            'work_status', w.status, 'work_error', w.error,
+           -- THE COMMITTED receipt only. `clara.operation_receipts` also holds `refused` rows
+           -- (0178 §B), and a refusal's id rendered as "the receipt" would tell an operator that
+           -- money moved. The entry id lives inside `effects`, which is where the posting core
+           -- puts it — there is no entry_id column on that table.
            'receipt_id', (select rc.id from clara.operation_receipts rc
-                           where rc.work_id = o.work_id order by rc.created_at limit 1),
-           'entry_id', (select rc.entry_id from clara.operation_receipts rc
-                         where rc.work_id = o.work_id order by rc.created_at limit 1))
+                           where rc.work_id = o.work_id and rc.outcome = 'committed'
+                           order by rc.created_at limit 1),
+           'entry_id', (select rc.effects->>'entry_id' from clara.operation_receipts rc
+                         where rc.work_id = o.work_id and rc.outcome = 'committed'
+                         order by rc.created_at limit 1))
          order by o.due_date desc), '[]'::jsonb) into v_rows
     from clara.accounting_plan_occurrences o
     left join clara.accounting_work w on w.id = o.work_id
