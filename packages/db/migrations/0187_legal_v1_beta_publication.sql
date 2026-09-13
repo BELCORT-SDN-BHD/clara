@@ -32,12 +32,14 @@
 --   2. terms: version 1 inserted directly as `published` with the beta sentence, a title, a source
 --      path in the same folder 0158 named for the DPA, and an effective_from of the decision date.
 --
--- IDEMPOTENCE AND OTHER CHAINS. A chain where a reviewed DPA was already published before 0185
--- (0185 carries such a row over as `published`) keeps that row: step 1 is skipped when a published
--- dpa already exists, and the placeholder draft is left as the draft it is. Step 2 refuses to run
--- if ANY terms row exists (there is none on any chain built from this repository, and a hosted
--- estate that published terms by hand must not be overwritten silently). The tail asserts the one
--- fact both steps must produce: exactly one published row per kind.
+-- IDEMPOTENCE AND OTHER CHAINS. ONE RULE FOR BOTH KINDS: the beta template is published only
+-- where NOTHING of that kind is published yet. A chain where a reviewed DPA was already published
+-- before 0185 (0185 carries such a row over as `published`) keeps that row and leaves the
+-- placeholder draft as the draft it is; a chain where terms were already published through the
+-- door keeps them, and the beta terms row is not inserted at all. Where terms rows exist but none
+-- is published, the beta text takes the next version number, as the door would. The tail asserts
+-- the one fact this file must leave behind on every chain: exactly one published row per kind,
+-- and any row this file itself published carries the beta bytes.
 --
 -- ROLLBACK. Append-only, as ever: a later migration may supersede these rows (publish version 2)
 -- or, to withdraw admission again, a new migration may move them published -> superseded with
@@ -67,12 +69,8 @@ begin
     raise exception '#621/#628 0187 prestate: expected exactly ONE dpa row carrying the 0158 placeholder digest, found %', v_n
       using errcode = 'CLR10';
   end if;
-  select count(*) into v_n from clara.legal_documents where kind = 'terms';
-  if v_n <> 0 then
-    raise exception '#621/#628 0187 prestate: % terms row(s) already exist -- this file publishes the first terms text only; publish reviewed wording through clara.publish_legal_document instead', v_n
-      using errcode = 'CLR10';
-  end if;
-  raise notice '#621/#628 0187 prestate: clean -- one placeholder dpa row, no terms row';
+  select count(*) into v_n from clara.legal_documents where kind = 'terms' and status = 'published';
+  raise notice '#621/#628 0187 prestate: clean -- one placeholder dpa row; % published terms row(s) before this file', v_n;
 end $prestate$;
 
 set role clara_fn_owner;
@@ -101,48 +99,60 @@ begin
   raise notice '#621/#628 0187 dpa: version 1 (the 0158 beta template) is now published';
 end $dpa$;
 
--- 2 · terms v1: inserted as published. The digest is derived by the CHECK from these exact bytes.
-insert into clara.legal_documents(
-  kind, version, status, title, body, body_sha256, source_path, effective_from, published_at, published_by)
-values (
-  'terms',
-  1,
-  'published',
-  'Terms of Service (Clara beta)',
-  'This is Clara''s beta terms of service, pending review by the owner''s lawyer before launch.',
-  encode(sha256(convert_to(
-    'This is Clara''s beta terms of service, pending review by the owner''s lawyer before launch.',
-    'UTF8')), 'hex'),
-  'docs/ops/legal/clara-beta-terms.md',
-  timestamptz '2026-09-13 00:00:00+08',
-  now(),
-  null
-);
+-- 2 · terms: the beta sentence, published as the next version (1 on every chain built from this
+--     repository), only when nothing of the kind is published yet. The digest is derived by the
+--     CHECK from these exact bytes.
+do $terms$
+declare
+  v_n integer;
+  v_version integer;
+  v_body text := 'This is Clara''s beta terms of service, pending review by the owner''s lawyer before launch.';
+begin
+  select count(*) into v_n from clara.legal_documents where kind = 'terms' and status = 'published';
+  if v_n = 1 then
+    raise notice '#621/#628 0187 terms: a published terms text already exists -- leaving it as it is';
+    return;
+  end if;
+  select coalesce(max(version), 0) + 1 into v_version from clara.legal_documents where kind = 'terms';
+  insert into clara.legal_documents(
+    kind, version, status, title, body, body_sha256, source_path, effective_from, published_at, published_by)
+  values (
+    'terms', v_version, 'published', 'Terms of Service (Clara beta)', v_body,
+    encode(sha256(convert_to(v_body, 'UTF8')), 'hex'),
+    'docs/ops/legal/clara-beta-terms.md', timestamptz '2026-09-13 00:00:00+08', now(), null);
+  raise notice '#621/#628 0187 terms: version % (the beta template) is now published', v_version;
+end $terms$;
 
 reset role;
 
 do $tail$
 declare
   v_n integer;
-  v_terms_sha text;
   v_dpa_version integer;
   v_terms_version integer;
+  v_beta_terms_sha text := encode(sha256(convert_to(
+    'This is Clara''s beta terms of service, pending review by the owner''s lawyer before launch.', 'UTF8')), 'hex');
+  v_beta_dpa_sha text := encode(sha256(convert_to(
+    'This is Clara''s beta data-processing agreement, pending review by the owner''s lawyer before launch.', 'UTF8')), 'hex');
 begin
-  select count(*) into v_n from clara.legal_documents where status = 'published';
-  if v_n <> 2 then
-    raise exception '#621/#628 0187 tail: expected exactly two published legal documents (one per kind), found %', v_n
-      using errcode = 'CLR10';
+  -- Exactly one published row per kind, whichever step ran.
+  select count(*) into v_n from clara.legal_documents where kind = 'dpa' and status = 'published';
+  if v_n <> 1 then
+    raise exception '#621/#628 0187 tail: expected exactly one published dpa, found %', v_n using errcode = 'CLR10';
+  end if;
+  select count(*) into v_n from clara.legal_documents where kind = 'terms' and status = 'published';
+  if v_n <> 1 then
+    raise exception '#621/#628 0187 tail: expected exactly one published terms, found %', v_n using errcode = 'CLR10';
   end if;
   select version into v_dpa_version from clara.legal_documents where kind = 'dpa' and status = 'published';
-  select version, body_sha256 into v_terms_version, v_terms_sha
-    from clara.legal_documents where kind = 'terms' and status = 'published';
-  if v_terms_version <> 1 then
-    raise exception '#621/#628 0187 tail: terms published version is %, expected 1', v_terms_version
+  select version into v_terms_version from clara.legal_documents where kind = 'terms' and status = 'published';
+  -- Any row THIS file published (published_at = this transaction's now()) carries the beta bytes.
+  select count(*) into v_n from clara.legal_documents
+   where status = 'published' and published_at = now()
+     and body_sha256 not in (v_beta_terms_sha, v_beta_dpa_sha);
+  if v_n <> 0 then
+    raise exception '#621/#628 0187 tail: % row(s) published by this file do not carry the beta bytes', v_n
       using errcode = 'CLR10';
-  end if;
-  if v_terms_sha <> encode(sha256(convert_to(
-       'This is Clara''s beta terms of service, pending review by the owner''s lawyer before launch.', 'UTF8')), 'hex') then
-    raise exception '#621/#628 0187 tail: the terms digest does not match the published bytes' using errcode = 'CLR10';
   end if;
   -- Every published row carries its publication instant (0185's CHECK), and no draft carries one.
   select count(*) into v_n from clara.legal_documents
@@ -152,6 +162,6 @@ begin
   end if;
   -- Acceptances are untouched: this file adds none and removes none.
   select count(*) into v_n from clara.legal_acceptances;
-  raise notice '#621/#628 0187 tail: OK -- published dpa version %, published terms version 1 (beta templates, pending the owner''s lawyer''s review, by the owner''s 2026-09-13 decision); % existing acceptance row(s) untouched; reviewed wording publishes as the next version through clara.publish_legal_document',
-    v_dpa_version, v_n;
+  raise notice '#621/#628 0187 tail: OK -- published dpa version %, published terms version % (beta templates where this file published them, pending the owner''s lawyer''s review, by the owner''s 2026-09-13 decision); % existing acceptance row(s) untouched; reviewed wording publishes as the next version through clara.publish_legal_document',
+    v_dpa_version, v_terms_version, v_n;
 end $tail$;

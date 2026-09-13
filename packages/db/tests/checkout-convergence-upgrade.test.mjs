@@ -55,20 +55,31 @@ function skipUnlessReset(t) {
   return false;
 }
 
-/** Copy every migration EXCEPT the one under test into a throwaway dir. Keyed on the STABLE STEM,
+/** Copy every migration BELOW the one under test into a throwaway dir. Keyed on the STABLE STEM,
  *  never on the number: numbers are claimed at merge (standing law), and a hard-coded `0186_`
- *  would silently stop excluding anything the day this file is renumbered. */
+ *  would silently stop excluding anything the day this file is renumbered. The file's NUMBER is
+ *  read from the stem match at run time, and every file numbered at or above it is left out too:
+ *  the runner refuses a lower number applied after a higher one ("late insertion below the
+ *  frontier", migrate.mjs), so a pre-state that had already applied a SUCCESSOR of 0186 could
+ *  never take 0186 afterwards -- the drill would red on the ledger rule, not on the backfill. */
 function exportPreConvergence() {
   const tmp = mkdtempSync(join(tmpdir(), "clara-pre0186-"));
-  let excluded = 0;
-  for (const f of readdirSync(MIG_DIR)) {
-    if (!/^\d{4}_.*\.sql$/.test(f)) continue;
-    if (/_checkout_convergence\.sql$/.test(f)) { excluded += 1; continue; }
-    copyFileSync(join(MIG_DIR, f), join(tmp, f));
-  }
-  assert.equal(excluded, 1,
+  const files = readdirSync(MIG_DIR).filter((f) => /^\d{4}_.*\.sql$/.test(f));
+  const underTest = files.filter((f) => /_checkout_convergence\.sql$/.test(f));
+  assert.equal(underTest.length, 1,
     "exactly one migration matches the checkout_convergence stem -- if this is 0, the drill would "
     + "apply the file under test in its own pre-state and prove nothing");
+  const cutoff = Number(underTest[0].slice(0, 4));
+  let successors = 0;
+  for (const f of files) {
+    const num = Number(f.slice(0, 4));
+    if (num === cutoff) continue;
+    if (num > cutoff) { successors += 1; continue; }
+    copyFileSync(join(MIG_DIR, f), join(tmp, f));
+  }
+  // Successors (0187 onwards) are applied by the SAME `migrate()` call that applies the file under
+  // test, from the real migrations dir, in order; the ledger assertion below still keys on the stem.
+  void successors;
   return tmp;
 }
 
