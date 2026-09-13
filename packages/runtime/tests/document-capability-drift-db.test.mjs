@@ -191,6 +191,113 @@ test("#624 the registry's OFX and CSV rows are the two verdicts above, written d
   assert.equal(csv.engine_id, "clara-statement-parse:v1");
 });
 
+// =======================================================================================
+// C-85 — "a read-only state RPC cannot supply missing consumption."
+//
+// The obligation is a WARNING about exactly the thing this ticket ships: a new read that
+// summarises a document's states could very easily start reporting egress consumption, and a
+// surface reading it would then believe a consent question had been answered when nothing had
+// consumed anything. The honest discharge is that `clara.get_document_state` is SILENT about
+// consumption — and silence is only evidence if something asserts it, because a future edit that
+// added a `consumed_at` to the payload would look like a helpful improvement.
+// =======================================================================================
+
+test("C-85 clara.get_document_state reports STATES, never egress consumption — the read cannot supply what nothing consumed", { skip }, async () => {
+  const src = (await fx.rootQuery(
+    "select prosrc from pg_proc where oid='clara.get_document_state(uuid,uuid)'::regprocedure")).rows[0].prosrc;
+  for (const forbidden of [
+    "egress_dispatch_authorizations",   // the single-use record of a client's data leaving
+    "consumed_at",
+    "client_egress_purpose_activations",
+    "client_egress_purpose_consents",
+  ]) {
+    assert.ok(!src.includes(forbidden),
+      `get_document_state reads ${forbidden} — a state RPC that reports consumption invites a surface to read it as consent (C-85)`);
+  }
+  // …and the positive half: the consent gates that ARE the authority are untouched by this
+  // slice, so the question stays where it was answered.
+  const gate = (await fx.rootQuery(
+    "select prosrc from pg_proc where oid='clara._enqueue_invoice_facts_core(uuid)'::regprocedure")).rows[0].prosrc;
+  assert.ok(gate.includes("document_processing_consent_inactive"),
+    "the enqueue-time consent gate is still the authority over whether a read may happen at all");
+});
+
+// =======================================================================================
+// C83.X2 — THE ACCEPTANCE DEFINITION for the two kinds this ticket owns, and the corpus
+// inventory it is defined against. A DEFINITION, explicitly labelled: no real-model evaluation
+// is performed here or anywhere in this slice, and no figure below is a measured recall.
+//
+// THE MEASURED INVENTORY (2026-09-13, this repository): `packages/runtime/tests/fixtures/` holds
+// exactly one directory, `classify/`, with three files — a manifest SHAPE with placeholder
+// identities, a pinned baseline prompt, and its README. There is NO real-document corpus in the
+// repository and there is deliberately not going to be one: that README records that real client
+// documents and labelled manifests stay outside it. So every figure from the historical C83.X2
+// row is discarded rather than restated, exactly as the obligation asks.
+//
+// THE ACCEPTANCE BAR, for `invoice` and `bank_statement`, stated so a later evaluation can be run
+// against it rather than invented alongside it:
+//
+//   1. REPRESENTATIVE means per-KIND and per-FORMAT, drawn from the registry: an invoice bar is
+//      meaningless unless it separates `pdf x invoice` (the witness pair) from `xml x
+//      e_invoice_xml` (the deterministic UBL reader), because those are different engines with
+//      different failure modes. The registry's own `supported` rows enumerate the slots that owe
+//      a measurement; nothing else does.
+//   2. THE UNIT OF ACCEPTANCE IS A PERSISTED FACT WITH ITS CHECK, not a field-level match rate.
+//      A document passes when its typed facts persist AND its named arithmetic check records
+//      `pass`; it fails when the check records `fail`; and it is NOT COUNTED when the check
+//      records `unmeasured` — a slot whose terms were never persisted cannot be scored either
+//      way, and folding it into either column is how a recall figure stops meaning anything.
+//   3. THE GATE IS NON-REGRESSION, NOT AN ABSOLUTE FLOOR. The classifier's own README already
+//      settled that shape for this estate ("per-kind non-regression against the baseline and no
+//      newly confident-wrong row that the baseline got right. No absolute recall floor has been
+//      chosen."), and inventing a number here would be the discarded-figures mistake again.
+//   4. A `fail` ROW IS A RESULT, NOT AN ERROR. Acceptance must be computable over a corpus that
+//      includes documents whose own arithmetic does not tie — real invoices do that — so the bar
+//      is about Clara agreeing with the document, never about the document being correct.
+//   5. THE EVALUATION IS OUT OF SCOPE HERE and needs a licensed corpus plus real model spend;
+//      this cell asserts only that the instruments the bar names EXIST, so the bar is runnable
+//      rather than aspirational.
+// =======================================================================================
+
+test("C83.X2 the acceptance bar's own instruments exist, and the in-repo corpus inventory is what the definition says it is", { skip }, async () => {
+  // (1) The slots that owe a measurement are enumerable from the registry, per kind AND format.
+  const slots = (await fx.rootQuery(
+    `select format, document_kind from clara.document_capabilities
+      where typed_facts='supported' and document_kind in ('invoice','bank_statement','e_invoice_xml')
+      order by document_kind, format`)).rows;
+  const byKind = new Map();
+  for (const s of slots) byKind.set(s.document_kind, [...(byKind.get(s.document_kind) ?? []), s.format]);
+  assert.deepEqual(byKind.get("invoice")?.sort(), ["heic", "jpeg", "pdf", "png", "tiff", "webp", "xml"],
+    "the invoice bar separates the six OCR formats from the deterministic XML reader");
+  assert.deepEqual(byKind.get("bank_statement")?.sort(), ["csv", "heic", "jpeg", "pdf", "png", "tiff", "webp"],
+    "the statement bar separates the OCR witness formats from the structured csv reader — and OFX is absent, as measured");
+
+  // (2) The unit of acceptance is a persisted fact WITH its named check, and all three checks
+  // this bar can score are real names the writers actually emit.
+  const checks = (await fx.rootQuery(
+    `select unnest(array['invoice.six_term_identity','statement.chain_closes','statement.printed_totals']) as name`)).rows;
+  const constraintDef = (await fx.rootQuery(
+    `select pg_get_constraintdef(oid) as d from pg_constraint
+      where conrelid='clara.document_fact_validations'::regclass and conname like '%outcome%'`)).rows[0]?.d ?? "";
+  for (const outcome of ["pass", "fail", "not_applicable", "unmeasured"]) {
+    assert.ok(constraintDef.includes(outcome), `the outcome vocabulary the bar scores over must admit '${outcome}'`);
+  }
+  assert.equal(checks.length, 3, "three named checks are scoreable for the two kinds");
+
+  // (3) The corpus inventory, measured rather than asserted. If a real corpus ever lands in the
+  // repository this goes red, and the bar above is then defined against something new — which is
+  // exactly when it should be revisited.
+  const { readdir } = await import("node:fs/promises");
+  const { join } = await import("node:path");
+  const root = new URL("./fixtures/", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1");
+  const dirs = await readdir(root, { withFileTypes: true });
+  assert.deepEqual(dirs.map((d) => d.name).sort(), ["classify"],
+    "the in-repo fixture inventory is one directory; real documents stay outside the repository by design");
+  const classify = await readdir(join(root, "classify"));
+  assert.deepEqual(classify.sort(), ["README.md", "baseline-prompt-2026-09-04.txt", "manifest.example.json"],
+    "…and it holds a manifest SHAPE, a pinned baseline prompt and its README — no labelled documents, no figures");
+});
+
 test("#624 C-37's OTHER half: XLSX intake is byte-extraction only — no facts lane routes it, for any kind", { skip }, async () => {
   const rows = (await fx.rootQuery(
     `select document_kind, byte_extraction, typed_facts
