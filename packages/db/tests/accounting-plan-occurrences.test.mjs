@@ -25,6 +25,7 @@ import {
   createAccountingPlan, pauseAccountingPlan, resumeAccountingPlan, reviseAccountingPlan,
   previewAccountingPlan, listPlanOccurrences, getWorkPlanOrigin, wakeDuePlanOccurrences,
   planRow, liveRevision, occurrenceRows, occurrenceCount, instructionRef,
+  occurrenceExtras, primaryEntryFor, postPlanWork,
   todayInPlanZone, todayDayOfMonth, shiftMonths, requestPlanCatchUp,
   CLR, PLAN_REASON, PLAN_KIND, TZ, PLAN_MODEL,
 } from "./accounting-plans-fixtures.mjs";
@@ -52,6 +53,17 @@ const SCAN_LIMIT = 100;
 
 /** The first day of the month `n` months back, as YYYY-MM-DD in the plan timezone. */
 const monthStart = (day) => `${day.slice(0, 7)}-01`;
+
+/** True when TODAY is the last day of its month — the one calendar shape in which a month-end
+ *  reversing plan's LATEST accrual is today's rather than last month's, so the two-legs-outstanding
+ *  scenario the reversal cells set up does not exist. A counted skip beats a cell that is only
+ *  green 30 days in 31. */
+async function isMonthEnd() {
+  const r = await rootQuery(
+    "select ((date_trunc('month', $1::date) + interval '1 month' - interval '1 day')::date)::text as d",
+    [today]);
+  return r.rows[0].d === today;
+}
 
 /** A plan on a FRESH client, authorised by a real instruction Work on that same client. Returns
  *  everything a cell needs to address it. */
@@ -319,15 +331,27 @@ test("p640.occ.pause_race — pause answers paused, leaves the in-flight Work ru
 });
 
 // ===========================================================================================
-// p640.occ.reversal — A REVERSING PLAN'S SECOND LEG IS ITS OWN DUE EVENT, WITH THE SIDES SWAPPED.
+// p640.occ.reversal — A REVERSING PLAN'S SECOND LEG REVERSES A POSTED ENTRY, AND NAMES IT.
+//
+// THE LAW THE SECOND REVIEW ROUND WROTE (BLOCKER-1). "Admitted" was never the fact a reversal
+// needs, and neither was "not a dead end": a `queued` accrual with zero receipts has posted
+// NOTHING, so a reversal admitted behind it is a swapped-sides entry waiting to reverse an entry
+// that may never exist — and when the accrual then dies (0184's cancel door, or a settle `failed`
+// on a locked period) nothing revokes the reversal Work and the naked leg reaches the ledger. The
+// wall is therefore a POSTED accrual: its Work carries a COMMITTED receipt whose journal entry is
+// still live, and the reversal's basis and occurrence row both NAME that entry id.
 // ===========================================================================================
 
-test("p640.occ.reversal — the accrual is admitted FIRST and its reversal only on the next scan, with every line's debit and credit exchanged", async (t) => {
+test("p640.occ.reversal — a reversal is admitted only once its accrual has POSTED, and it NAMES the entry it reverses (with every line's sides exchanged)", async (t) => {
   if (await gatePlans(t)) return;
+  if (await isMonthEnd()) {
+    t.skip("p640.occ.reversal needs a day that is not the month end, so this month's accrual is still in the future");
+    return;
+  }
   // A month-end accrual two months back. BOTH of the two events at or before today are
   // outstanding: last month's accrual (its month end) and the reversal of it (the first of this
-  // month). The ORDER is the whole claim of this cell — an accrual must exist before anything
-  // reverses it.
+  // month). The ORDER is the whole claim of this cell — an accrual must have POSTED before
+  // anything reverses it.
   const p = await plan({
     tag: "occrev", kind: PLAN_KIND.reversing, monthsBack: 2,
     dayRule: "last_day_of_month", dayOfMonth: null, purpose: "Monthly audit fee accrual",
@@ -339,17 +363,50 @@ test("p640.occ.reversal — the accrual is admitted FIRST and its reversal only 
   assert.equal(first[0].leg, "primary",
     "the ACCRUAL goes first: a reversal admitted ahead of its own accrual would post a swapped-sides entry reversing nothing");
   assert.ok(first[0].work_id, "and it is admitted");
+  assert.equal((await receiptsForWork(first[0].work_id)).length, 0, "but it has posted nothing yet");
+
+  // THE WALL. A scan while the accrual is merely QUEUED admits nothing: an admitted accrual is
+  // not a posted one.
+  await wakeDuePlanOccurrences({ limit: SCAN_LIMIT });
+  const second = await occurrenceRows(p.plan_id);
+  assert.equal(second.length, 1,
+    `a reversal is not due while its accrual has posted nothing; got ${JSON.stringify(second.map((x) => [x.due_date, x.leg]))}`);
+  assert.equal(await primaryEntryFor(p.plan_id, first[0].due_date), null,
+    "clara._plan_primary_entry answers NULL while the accrual holds no committed receipt");
+
+  // THE HAPPY PATH. The accrual posts; the very next scan admits its reversal, naming that entry.
+  const entry = await postPlanWork({ work: first[0].work_id, client: p.client, author: p.author, firm: FIRM_A() });
+  assert.equal(await primaryEntryFor(p.plan_id, first[0].due_date), entry,
+    "and names the entry once the accrual is on the books");
 
   await wakeDuePlanOccurrences({ limit: SCAN_LIMIT });
   const occ = await occurrenceRows(p.plan_id);
-  assert.equal(occ.length, 2, "the reversal becomes due once its accrual has been admitted");
+  assert.equal(occ.length, 2, "the reversal becomes due once its accrual has POSTED");
   const reversal = occ.find((x) => x.leg === "reversal");
   assert.ok(reversal, "the second event is the reversal");
   assert.equal(reversal.due_date, monthStart(today), "a reversal falls on the first of the month after its accrual");
   assert.equal(reversal.period_key, first[0].period_key,
     "the reversal is keyed to its ACCRUAL's period, not to the month it falls in");
 
+  // IT NAMES THE ENTRY — on the row, and in the basis the Work will post under, so the posted
+  // reversal is auditable against the entry it reverses.
+  const extras = await occurrenceExtras(p.plan_id);
+  assert.equal(extras.find((x) => x.leg === "reversal").reverses_entry_id, entry,
+    "the occurrence row names the entry this reversal undoes");
+  assert.equal(extras.find((x) => x.leg === "primary").reverses_entry_id, null,
+    "and an accrual names none: it reverses nothing");
+  const listed = await listPlanOccurrences(ALICE(), p.plan_id);
+  assert.equal(listed.occurrences.find((x) => x.leg === "reversal").reverses_entry_id, entry,
+    "the read surface carries it too");
+
   const w = await workRow(reversal.work_id);
+  // IN THE MEMO, which is the one part of the basis that reaches `clara.journal_entries` — and the
+  // one place a FROZEN `.strict()` tool schema lets an id travel (a new top-level basis key made
+  // the run's echo fail validation and the Work settle failed/no_effect; measured by
+  // packages/runtime/tests/plan-occurrence-e2e.mjs leg 5).
+  assert.ok(w.basis.memo.includes(entry),
+    `the BASIS the reversal posts under names the entry it reverses (memo=${JSON.stringify(w.basis.memo)})`);
+  assert.ok(w.basis.memo.startsWith(p.basis.memo), "…appended to the plan's own memo, never replacing it");
   const original = p.basis.lines;
   assert.equal(w.basis.lines.length, original.length);
   for (let i = 0; i < original.length; i++) {
@@ -361,10 +418,10 @@ test("p640.occ.reversal — the accrual is admitted FIRST and its reversal only 
 });
 
 // ===========================================================================================
-// p640.occ.reversal_before_primary — THE ORPHAN WALL (review finding B2).
+// p640.occ.reversal_before_primary — THE ORPHAN WALL (review finding B2, recut on BLOCKER-1's law).
 // ===========================================================================================
 
-test("p640.occ.reversal_before_primary — a leader that was down across an accrual admits the ACCRUAL, never its reversal standalone; the reversal follows on the next scan and the missed older period is left to catch-up", async (t) => {
+test("p640.occ.reversal_before_primary — a leader that was down across an accrual admits the ACCRUAL, never its reversal standalone; the reversal follows only once that accrual has POSTED", async (t) => {
   if (await gatePlans(t)) return;
   const dayNow = await todayDayOfMonth();
   if (dayNow > 27) {
@@ -397,12 +454,19 @@ test("p640.occ.reversal_before_primary — a leader that was down across an accr
     "no reversal Work exists yet: there was nothing admitted for it to reverse",
   );
 
+  // AN ADMITTED ACCRUAL IS STILL NOT A POSTED ONE.
+  await wakeDuePlanOccurrences({ limit: SCAN_LIMIT });
+  assert.equal((await occurrenceRows(p.plan_id)).length, 1,
+    "and an ADMITTED accrual does not make its reversal due either — only a posted one does");
+
+  const entry = await postPlanWork({ work: one[0].work_id, client: p.client, author: p.author, firm: FIRM_A() });
   await wakeDuePlanOccurrences({ limit: SCAN_LIMIT });
   const two = await occurrenceRows(p.plan_id);
-  assert.equal(two.length, 2, "once the accrual is admitted its reversal becomes due");
+  assert.equal(two.length, 2, "once the accrual has POSTED its reversal becomes due");
   const rev = two.find((x) => x.leg === "reversal");
   assert.equal(rev.due_date, reversal);
   assert.ok(rev.work_id, "and it is admitted");
+  assert.equal((await occurrenceExtras(p.plan_id)).find((x) => x.leg === "reversal").reverses_entry_id, entry);
 
   // NO BACKFILL, still. The OLDER period's accrual (two months back) and its reversal are left for
   // an explicit catch-up — the scan never walks back.
@@ -414,7 +478,7 @@ test("p640.occ.reversal_before_primary — a leader that was down across an accr
   assert.equal(await occurrenceCount(p.plan_id), 2, "and a third scan admits nothing further");
 });
 
-test("p640.occ.reversal_refusal — the DOOR refuses a reversal whose accrual is not admitted, records CLR13 reversal_before_primary on the occurrence, and the SAME row is admitted once the accrual lands", async (t) => {
+test("p640.occ.reversal_refusal — the DOOR refuses a reversal whose accrual has posted nothing, records CLR13 reversal_before_primary on the occurrence, and the SAME row is admitted once the accrual is on the books", async (t) => {
   if (await gatePlans(t)) return;
   const dayNow = await todayDayOfMonth();
   if (dayNow > 27) {
@@ -434,6 +498,8 @@ test("p640.occ.reversal_refusal — the DOOR refuses a reversal whose accrual is
   assert.equal(refused.events.length, 1, "the window named exactly one event");
   assert.equal(refused.events[0].reason, PLAN_REASON.reversalBeforePrimary);
   assert.equal(refused.events[0].code, CLR.conflict, "a typed CLR13, not a bare raise");
+  assert.equal(refused.events[0].primary_state, "no_occurrence",
+    "the refusal says WHICH of the ways the accrual fails to stand behind it");
 
   const occ = await occurrenceRows(p.plan_id);
   assert.equal(occ.length, 1, "the refused due event is RECORDED — legible, not silent");
@@ -448,32 +514,57 @@ test("p640.occ.reversal_refusal — the DOOR refuses a reversal whose accrual is
     "no Work carries the refused reversal's intent key",
   );
 
-  // AND THE SAME ROW BECOMES ADMISSIBLE once its accrual exists: a catch-up over the whole window
-  // walks oldest-first, so the accrual lands before the reversal is re-attempted.
+  // A CATCH-UP OVER THE WHOLE WINDOW ADMITS THE ACCRUALS AND STILL REFUSES THE REVERSALS: oldest
+  // first is not enough any more, because an accrual admitted one statement earlier has posted
+  // nothing.
   const whole = await requestPlanCatchUp(ALICE(), { plan: p.plan_id, from: p.effectiveFrom, to: today });
-  assert.ok(whole.admitted >= 3, `the accruals and the reversals in range are admitted (got ${whole.admitted})`);
   const after = await occurrenceRows(p.plan_id);
-  const reRead = after.find((x) => x.due_date === reversalDay);
+  const accruals = after.filter((x) => x.leg === "primary");
+  assert.ok(accruals.length >= 2 && accruals.every((x) => x.work_id !== null),
+    `every accrual in the window is admitted (got ${JSON.stringify(after.map((x) => [x.due_date, x.leg, x.work_id !== null]))})`);
+  const stillRefused = after.find((x) => x.due_date === reversalDay);
+  assert.equal(stillRefused.work_id, null,
+    `the reversal is STILL refused while its accrual holds no receipt; answer ${JSON.stringify(whole.events)}`);
+  assert.equal(stillRefused.outcome.reason, PLAN_REASON.reversalBeforePrimary);
+  assert.equal(stillRefused.outcome.primary_state, "not_posted",
+    "and now for the OTHER reason: the accrual exists and has posted nothing");
+
+  // AND THE SAME ROW BECOMES ADMISSIBLE once its accrual is on the books.
+  const lastMonth = await shiftMonths(today, -1);
+  const accrualDue = `${lastMonth.slice(0, 7)}-${String(dom).padStart(2, "0")}`;
+  const accrual = after.find((x) => x.due_date === accrualDue);
+  const entry = await postPlanWork({ work: accrual.work_id, client: p.client, author: p.author, firm: FIRM_A() });
+  const caught = await requestPlanCatchUp(ALICE(), { plan: p.plan_id, from: reversalDay, to: today });
+  assert.equal(caught.admitted, 1, `the reversal is admitted now that its accrual has posted; got ${JSON.stringify(caught.events)}`);
+  const reRead = (await occurrenceRows(p.plan_id)).find((x) => x.due_date === reversalDay);
   assert.ok(reRead.work_id, "the previously refused reversal is admitted on its OWN row, not a second one");
-  assert.equal(reRead.id, occ[0].id, "…the same row: the identity of a due event never moves");
+  assert.equal(reRead.id, stillRefused.id, "the same row: the identity of a due event never moves");
   assert.equal(reRead.outcome.state, "admitted");
-  assert.ok(after.every((x) => x.work_id !== null), "every occurrence in the window ended up admitted");
+  assert.equal((await occurrenceExtras(p.plan_id)).find((x) => x.id === reRead.id).reverses_entry_id, entry);
 });
 
-test("p640.occ.reversal_after_cancel — an accrual whose Work a human CANCELLED leaves nothing to reverse: neither the scan nor a catch-up admits its reversal until the accrual is re-attempted and stands", async (t) => {
+// ===========================================================================================
+// p640.occ.reversal_after_cancel — THE REVIEWER'S MEASURED SEQUENCE, END TO END (BLOCKER-1).
+//
+//   scan #1 -> the accrual is admitted: queued, zero receipts
+//   scan #2 -> the reversal must NOT be admitted. Before this round it WAS, and the Work it
+//              created outlived the accrual's death to post `Dr 1150 / Cr 6100` reversing nothing.
+//   cancel  -> the accrual is terminal with no receipt, and there is no reversal Work to revoke.
+// ===========================================================================================
+
+test("p640.occ.reversal_after_cancel — a reversal is never admitted behind an unposted accrual, so an accrual a human later CANCELS leaves no reversal Work behind to post a naked leg", async (t) => {
   if (await gatePlans(t)) return;
-  // The SAME shape as p640.occ.reversal — both of the two events at or before today are
-  // outstanding — but the accrual's Work is CANCELLED before the reversal comes up. "Admitted" is
-  // not the same fact as "stands": a cancelled Work is terminal with no committed receipt, so the
-  // accrual posted nothing and a reversal behind it would swap the sides of an entry that does not
-  // exist. This is the same defect review finding B2 named, reached through 0184's cancel door
-  // rather than through a leader outage.
+  if (await isMonthEnd()) {
+    t.skip("p640.occ.reversal_after_cancel needs a day that is not the month end");
+    return;
+  }
   const p = await plan({
     tag: "occrevcancel", kind: PLAN_KIND.reversing, monthsBack: 2,
     dayRule: "last_day_of_month", dayOfMonth: null, purpose: "Monthly accrued insurance",
   });
   const reversalDay = monthStart(today);
 
+  // SCAN #1 — the accrual, queued, nothing posted.
   await wakeDuePlanOccurrences({ limit: SCAN_LIMIT });
   const first = await occurrenceRows(p.plan_id);
   assert.equal(first.length, 1);
@@ -481,19 +572,33 @@ test("p640.occ.reversal_after_cancel — an accrual whose Work a human CANCELLED
   const accrualDue = first[0].due_date;
   const accrualWork = first[0].work_id;
   assert.ok(accrualWork);
+  assert.equal((await workRow(accrualWork)).status, "queued");
+  assert.equal((await receiptsForWork(accrualWork)).length, 0);
 
+  // SCAN #2 — THE STEP THAT USED TO ADMIT THE NAKED LEG. Nothing may be admitted: the accrual has
+  // posted nothing, so there is no entry for a reversal to name.
+  await wakeDuePlanOccurrences({ limit: SCAN_LIMIT });
+  const afterSecond = await occurrenceRows(p.plan_id);
+  assert.equal(afterSecond.length, 1,
+    `a reversal must not be admitted while its accrual is merely QUEUED; got ${JSON.stringify(afterSecond.map((x) => [x.due_date, x.leg]))}`);
+  assert.equal(
+    (await rootQuery("select count(*)::int n from clara.accounting_work w join clara.accounting_plan_occurrences o on o.work_id=w.id where o.plan_id=$1 and o.leg='reversal'", [p.plan_id])).rows[0].n,
+    0,
+    "no reversal Work exists to outlive the accrual's death",
+  );
+
+  // THE ACCRUAL DIES. There was no reversal Work to revoke, which is the whole point.
   await cancelAccountingWork({ work: accrualWork, author: ALICE() });
   assert.equal((await workRow(accrualWork)).status, "cancelled");
   assert.equal((await receiptsForWork(accrualWork)).length, 0, "nothing was posted for the accrual");
+  assert.equal(await primaryEntryFor(p.plan_id, accrualDue), null);
 
-  // THE SCAN MUST NOT SURFACE THE REVERSAL.
   await wakeDuePlanOccurrences({ limit: SCAN_LIMIT });
   const afterScan = await occurrenceRows(p.plan_id);
   assert.equal(afterScan.length, 1,
     `a reversal behind a cancelled accrual is not a due event; got ${JSON.stringify(afterScan.map((x) => [x.due_date, x.leg]))}`);
-  assert.equal(afterScan[0].leg, "primary");
 
-  // …AND NEITHER MAY THE HUMAN CATCH-UP DOOR, which is the other way to the naked leg.
+  // AND NEITHER MAY THE HUMAN CATCH-UP DOOR, which is the other way to the naked leg.
   const refused = await requestPlanCatchUp(ALICE(), { plan: p.plan_id, from: reversalDay, to: today });
   assert.equal(refused.admitted, 0, `nothing is admitted; got ${JSON.stringify(refused.events)}`);
   const reversalRow = (await occurrenceRows(p.plan_id)).find((x) => x.leg === "reversal");
@@ -502,7 +607,7 @@ test("p640.occ.reversal_after_cancel — an accrual whose Work a human CANCELLED
   assert.equal(reversalRow.outcome.reason, PLAN_REASON.reversalBeforePrimary);
   assert.equal(reversalRow.outcome.code, CLR.conflict);
 
-  // ONCE THE ACCRUAL IS RE-ATTEMPTED AND STANDS (review finding S7's own exit), the reversal
+  // ONCE THE ACCRUAL IS RE-ATTEMPTED **AND POSTED** (review finding S7's own exit), the reversal
   // becomes admissible again — on its own row, with no second row anywhere.
   const redo = await requestPlanCatchUp(ALICE(), { plan: p.plan_id, from: accrualDue, to: accrualDue });
   assert.equal(redo.admitted, 1, `the cancelled accrual is re-admitted; got ${JSON.stringify(redo.events)}`);
@@ -510,22 +615,116 @@ test("p640.occ.reversal_after_cancel — an accrual whose Work a human CANCELLED
   assert.equal(redone.attempt, 2);
   assert.notEqual(redone.work_id, accrualWork);
 
+  const stillNothing = await requestPlanCatchUp(ALICE(), { plan: p.plan_id, from: reversalDay, to: today });
+  assert.equal(stillNothing.admitted, 0,
+    "a RE-ADMITTED accrual is still not a posted one — the wall is the receipt, not the Work row");
+
+  const entry = await postPlanWork({ work: redone.work_id, client: p.client, author: p.author, firm: FIRM_A() });
+
   // THE SCAN STILL DOES NOT RETRY A RECORDED REFUSAL — that is §C's own law, and it holds here
-  // too: the reversal's row exists, so the picker passes over it and a human decides whether the
-  // period is still wanted.
+  // too: the reversal's row exists, so the picker passes over it and a human decides.
   await wakeDuePlanOccurrences({ limit: SCAN_LIMIT });
   const stillRefused = (await occurrenceRows(p.plan_id)).find((x) => x.leg === "reversal");
   assert.equal(stillRefused.work_id, null, "the scan does not re-attempt a refusal it already recorded");
 
   // AN EXPLICIT CATCH-UP DOES, and admits it on the row the refusal was recorded on.
   const caught = await requestPlanCatchUp(ALICE(), { plan: p.plan_id, from: reversalDay, to: today });
-  assert.equal(caught.admitted, 1, `the reversal is admitted now that its accrual stands again; got ${JSON.stringify(caught.events)}`);
+  assert.equal(caught.admitted, 1, `the reversal is admitted now that its accrual has posted; got ${JSON.stringify(caught.events)}`);
   const done = await occurrenceRows(p.plan_id);
   assert.equal(done.length, 2, "one accrual row and one reversal row, no more");
   const rev = done.find((x) => x.leg === "reversal");
   assert.equal(rev.id, reversalRow.id, "the reversal was admitted on the row its refusal was recorded on");
   assert.ok(rev.work_id);
   assert.equal(rev.due_date, reversalDay);
+  assert.equal((await occurrenceExtras(p.plan_id)).find((x) => x.id === rev.id).reverses_entry_id, entry,
+    "and it names the entry that finally exists to be reversed");
+});
+
+// ===========================================================================================
+// p640.occ.reversal_stopping — 0184's TRANSIENT `stopping` IS NOT A STANDING ACCRUAL (NOTE-2).
+// ===========================================================================================
+
+test("p640.occ.reversal_stopping — an accrual whose run is STOPPING has posted nothing, so it neither makes its reversal admissible nor is re-attemptable", async (t) => {
+  if (await gatePlans(t)) return;
+  if (await isMonthEnd()) {
+    t.skip("p640.occ.reversal_stopping needs a day that is not the month end");
+    return;
+  }
+  const p = await plan({
+    tag: "occrevstop", kind: PLAN_KIND.reversing, monthsBack: 2,
+    dayRule: "last_day_of_month", dayOfMonth: null, purpose: "Monthly accrued utilities",
+  });
+  const reversalDay = monthStart(today);
+
+  await wakeDuePlanOccurrences({ limit: SCAN_LIMIT });
+  const first = await occurrenceRows(p.plan_id);
+  assert.equal(first.length, 1);
+  const accrualWork = first[0].work_id;
+
+  // A LIVE run, then a cancel request: 0184 writes `stopping` rather than a terminal, because the
+  // run may still be holding the pen.
+  const w = await workRow(accrualWork);
+  await claimWorkRun({ task: w.current_task_id, runId: opk("p640-stop") });
+  await cancelAccountingWork({ work: accrualWork, author: ALICE() });
+  assert.equal((await workRow(accrualWork)).status, "stopping",
+    "0184 says `stopping` while an admitted run is still settling");
+  assert.equal((await receiptsForWork(accrualWork)).length, 0);
+
+  // NOT STANDING. `stopping` is on its way to cancelled and has posted nothing.
+  assert.equal(await primaryEntryFor(p.plan_id, first[0].due_date), null);
+  await wakeDuePlanOccurrences({ limit: SCAN_LIMIT });
+  assert.equal((await occurrenceRows(p.plan_id)).length, 1,
+    "a reversal behind a STOPPING accrual is not a due event");
+  const refused = await requestPlanCatchUp(ALICE(), { plan: p.plan_id, from: reversalDay, to: today });
+  assert.equal(refused.admitted, 0, `and the door refuses it too; got ${JSON.stringify(refused.events)}`);
+
+  // AND NEITHER IS IT RE-ATTEMPTABLE. A `stopping` Work is not terminal: re-admitting the period
+  // now could put two Works on one period, one of which may still post.
+  const redo = await requestPlanCatchUp(ALICE(), { plan: p.plan_id, from: first[0].due_date, to: first[0].due_date });
+  assert.equal(redo.admitted, 0, "a STOPPING accrual is not re-attempted");
+  assert.equal(redo.events[0].converged, true, "the catch-up converges on the Work already there");
+  assert.equal((await occurrenceRows(p.plan_id)).find((x) => x.leg === "primary").attempt, 1,
+    "and the attempt counter did not move");
+});
+
+// ===========================================================================================
+// p640.occ.reversal_entry_reversed — THE ACCRUAL'S ENTRY MUST STILL BE LIVE AT ADMISSION.
+// ===========================================================================================
+
+test("p640.occ.reversal_entry_reversed — an accrual entry that has itself been reversed is not something to reverse again", async (t) => {
+  if (await gatePlans(t)) return;
+  if (await isMonthEnd()) {
+    t.skip("p640.occ.reversal_entry_reversed needs a day that is not the month end");
+    return;
+  }
+  const p = await plan({
+    tag: "occreventry", kind: PLAN_KIND.reversing, monthsBack: 2,
+    dayRule: "last_day_of_month", dayOfMonth: null, purpose: "Monthly accrued licence fee",
+  });
+  const reversalDay = monthStart(today);
+
+  await wakeDuePlanOccurrences({ limit: SCAN_LIMIT });
+  const first = await occurrenceRows(p.plan_id);
+  const entry = await postPlanWork({ work: first[0].work_id, client: p.client, author: p.author, firm: FIRM_A() });
+  assert.equal(await primaryEntryFor(p.plan_id, first[0].due_date), entry);
+
+  // THE ESTATE'S OWN COLUMN, written directly: `clara.journal_entries.reversed_by` is what every
+  // correction lane in the estate sets when an entry is undone (0004/0007/0009/0027), and this
+  // battery has no correction door of its own to walk. A FIXTURE shortcut around an absent
+  // writer, stated as one.
+  await rootQuery(
+    "update clara.journal_entries set reversed_by=$1, reversal_reason='reversed by the rig' where id=$1",
+    [entry]);
+  assert.equal(await primaryEntryFor(p.plan_id, first[0].due_date), null,
+    "an entry that has itself been reversed is no longer a live accrual to reverse");
+
+  await wakeDuePlanOccurrences({ limit: SCAN_LIMIT });
+  assert.equal((await occurrenceRows(p.plan_id)).length, 1, "so the scan admits no reversal");
+  const refused = await requestPlanCatchUp(ALICE(), { plan: p.plan_id, from: reversalDay, to: today });
+  assert.equal(refused.admitted, 0, `and the door refuses it; got ${JSON.stringify(refused.events)}`);
+  assert.equal(refused.events[0].reason, PLAN_REASON.reversalBeforePrimary);
+  assert.equal(refused.events[0].primary_state, "entry_not_live",
+    "naming the third way an accrual can fail to stand behind its reversal");
 });
 
 test("p640.occ.final_reversal — a plan whose authority ends ON its last accrual still admits that accrual's reversal (review finding S6)", async (t) => {
@@ -547,14 +746,71 @@ test("p640.occ.final_reversal — a plan whose authority ends ON its last accrua
     effectiveFrom: from, effectiveTo: lastAccrual, basis: b,
     reversalDayRule: "next_period_first_day",
   });
+  // The accruals first — and then they must POST, because after BLOCKER-1 a reversal reverses an
+  // entry rather than an admission.
+  await requestPlanCatchUp(ALICE(), { plan: created.plan_id, from, to: today });
+  const admitted = await occurrenceRows(created.plan_id);
+  const finalAccrual = admitted.find((x) => x.leg === "primary" && x.due_date === lastAccrual);
+  assert.ok(finalAccrual?.work_id, `the final accrual is admitted (got ${JSON.stringify(admitted.map((x) => [x.due_date, x.leg]))})`);
+  const entry = await postPlanWork({ work: finalAccrual.work_id, client, author: ALICE(), firm: FIRM_A() });
+
   const caught = await requestPlanCatchUp(ALICE(), { plan: created.plan_id, from, to: today });
   const occ = await occurrenceRows(created.plan_id);
   const legs = occ.filter((x) => x.work_id !== null).map((x) => `${x.leg}@${x.due_date}`);
-  assert.ok(legs.includes(`primary@${lastAccrual}`), `the final accrual is admitted (got ${JSON.stringify(legs)})`);
   assert.ok(
     legs.includes(`reversal@${monthStart(today)}`),
     `the final accrual's REVERSAL is admitted too — an authority that ends on the last accrual must still let that accrual be undone (got ${JSON.stringify(legs)}, answer ${JSON.stringify(caught.events)})`,
   );
+  assert.equal(
+    (await occurrenceExtras(created.plan_id)).find((x) => x.leg === "reversal" && x.due_date === monthStart(today)).reverses_entry_id,
+    entry,
+    "and the final reversal names the entry it undoes",
+  );
+});
+
+// ===========================================================================================
+// p640.occ.attempts — EVERY ATTEMPT STAYS REACHABLE FROM THE PLAN (review finding SHOULD-2).
+// ===========================================================================================
+
+test("p640.occ.attempts — a superseded attempt's Work is still named by the occurrence and still resolves to its plan", async (t) => {
+  if (await gatePlans(t)) return;
+  const p = await plan({ tag: "occattempt", purpose: "Monthly software subscription" });
+  await wakeDuePlanOccurrences({ limit: SCAN_LIMIT });
+  const first = await occurrenceRows(p.plan_id);
+  const firstWork = first[0].work_id;
+  assert.ok(firstWork);
+
+  await cancelAccountingWork({ work: firstWork, author: ALICE() });
+  const caught = await requestPlanCatchUp(ALICE(), { plan: p.plan_id, from: first[0].due_date, to: first[0].due_date });
+  assert.equal(caught.admitted, 1);
+  const row = (await occurrenceRows(p.plan_id)).find((x) => x.id === first[0].id);
+  assert.equal(row.attempt, 2);
+  assert.notEqual(row.work_id, firstWork);
+
+  // THE LIST DOOR NAMES BOTH. Before this round the cancelled Work dropped out of the plan's view
+  // entirely and only clara.audit_log remembered it.
+  const listed = await listPlanOccurrences(ALICE(), p.plan_id);
+  const o = listed.occurrences.find((x) => x.occurrence_id === first[0].id);
+  assert.ok(Array.isArray(o.attempts), "the occurrence carries its attempts");
+  assert.equal(o.attempts.length, 2, `both admissions are named; got ${JSON.stringify(o.attempts)}`);
+  assert.equal(o.attempts[0].work_id, firstWork, "the FIRST attempt is the cancelled Work");
+  assert.equal(o.attempts[0].attempt, 1);
+  assert.equal(o.attempts[1].work_id, row.work_id, "the second is the live one");
+  assert.equal(o.attempts[1].attempt, 2);
+  assert.match(o.attempts[1].intent_key, /:a2$/);
+
+  // AND THE SUPERSEDED WORK STILL RESOLVES TO ITS PLAN. `get_work_plan_origin(old)` answered null
+  // before this round, so B3's Work detail could not say where a cancelled plan Work came from.
+  const old = await getWorkPlanOrigin(ALICE(), firstWork);
+  assert.ok(old, "a superseded attempt's Work still knows which plan created it");
+  assert.equal(old.plan_id, p.plan_id);
+  assert.equal(old.superseded, true, "and says it has been superseded");
+  assert.equal(old.attempt, 1);
+  assert.equal(old.work_id, row.work_id, "naming the attempt that replaced it");
+
+  const live = await getWorkPlanOrigin(ALICE(), row.work_id);
+  assert.equal(live.superseded, false);
+  assert.equal(live.attempt, 2);
 });
 
 // ===========================================================================================

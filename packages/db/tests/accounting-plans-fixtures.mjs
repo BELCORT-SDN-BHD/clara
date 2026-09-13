@@ -41,6 +41,7 @@ import { randomUUID } from "node:crypto";
 import assert from "node:assert/strict";
 import {
   ROLES, rootQuery, roleQuery, humanQuery, namedCall, opk, admitJournalWork,
+  workRow, claimWorkRun, settleWorkRun, mintClientObo, wakeRecordJournalEntry,
 } from "./work-cancel-fixtures.mjs";
 import { markSkip } from "./wave-a-helpers.mjs";
 
@@ -118,6 +119,7 @@ export const PLAN_REASON = {
   effectiveFromBeforeAuthority: "effective_from_before_authority",
   catchUpBeforeAuthority: "catch_up_before_authority",
   catchUpInFuture: "catch_up_in_future",
+  periodAlreadyCovered: "period_already_covered",
   invalidCatchUpWindow: "invalid_catch_up_window",
   noLiveRevision: "no_live_revision",
   operationInFlight: "operation_in_flight",
@@ -302,6 +304,41 @@ export async function occurrenceCount(plan) {
   const r = await rootQuery(
     "select count(*)::int as n from clara.accounting_plan_occurrences where plan_id=$1", [plan]);
   return r.rows[0].n;
+}
+
+/** The two columns the SECOND review round added to an occurrence: the entry a reversal names
+ *  (`reverses_entry_id`) and the append-only ledger of every admission this due event took
+ *  (`attempts`). Read separately from `occurrenceRows` ON PURPOSE — a database pinned below this
+ *  round has neither column, and folding them into the shared reader would red every cell in the
+ *  file instead of the ones that make a claim about them. */
+export async function occurrenceExtras(plan) {
+  const r = await rootQuery(
+    `select id, due_date::text as due_date, leg, work_id, reverses_entry_id, attempts
+       from clara.accounting_plan_occurrences where plan_id=$1 order by due_date`, [plan]);
+  return r.rows;
+}
+
+/** The LIVE journal entry a reversal of `p_due`'s accrual would name — 0193's own
+ *  `clara._plan_primary_entry`, probed directly so a cell can say "this is null" rather than
+ *  infer it from an admission that did not happen. */
+export async function primaryEntryFor(plan, due) {
+  const r = await rootQuery("select clara._plan_primary_entry($1::uuid, $2::date) as e", [plan, due]);
+  return r.rows[0].e;
+}
+
+/** POST a plan-admitted Work all the way to a committed receipt, through the estate's own lane:
+ *  claim the run, mint the client OBO credential, call the wake verb, settle completed. Returns
+ *  the journal entry id. This is what "the accrual STANDS" means after the second review round —
+ *  money on the books, not a queued Work. */
+export async function postPlanWork({ work, client, author, firm }) {
+  const w = await workRow(work);
+  if (w.status === "queued") await claimWorkRun({ task: w.current_task_id, runId: opk("p640-post") });
+  const obo = await mintClientObo({ firm, obo: author, client });
+  const posted = await wakeRecordJournalEntry(obo.secret, {
+    client, work, logicalOpId: w.logical_op_id, basis: w.basis,
+  });
+  await settleWorkRun({ task: w.current_task_id, outcome: "completed", result: { entry_id: posted.entry_id } });
+  return posted.entry_id;
 }
 
 /** Every Work this plan's occurrences admitted, oldest first. */

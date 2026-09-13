@@ -375,9 +375,14 @@ test("p640.revision — a revision supersedes its predecessor, keeps it readable
   assert.equal(before[0].revision, 1);
 
   const newBasis = basis({ postingDate: p.effectiveFrom, cents: 250000, memo: "revised rent" });
+  // THE NEW SCHEDULE STARTS AFTER THE PERIOD THAT HAS ALREADY RUN. A frequency change re-aligns
+  // every period key, so 0193 refuses one whose first period would cover a period this plan has
+  // already run (CLR10 `period_already_covered`, review finding SHOULD-1); that refusal is its own
+  // cell, and this one is about the revision MODEL.
+  const lawfulFrom = await shiftMonths(monthStart(today), 1);
   const revised = await reviseAccountingPlan(ALICE(), {
     plan: p.plan_id, frequency: "quarterly", dayRule: "last_day_of_month", dayOfMonth: null,
-    effectiveFrom: p.effectiveFrom, basis: newBasis,
+    effectiveFrom: lawfulFrom, basis: newBasis,
   });
   assert.equal(revised.revision, 2);
   assert.equal(revised.superseded_revision, 1);
@@ -759,4 +764,96 @@ test("p640.catchup.reattempt — a CANCELLED plan Work does not make its due dat
   assert.equal(again.admitted, 0, "a completed period is not re-admitted");
   assert.equal((await occurrenceRows(p.plan_id)).find((x) => x.id === first[0].id).attempt, 2,
     "…and the attempt counter did not move");
+});
+
+// ===========================================================================================
+// p640.revision.frequency_alignment — A FREQUENCY CHANGE CANNOT RE-COVER A PERIOD ALREADY RUN
+// (review finding SHOULD-1).
+//
+// `unique (plan_id, leg, period_key)` is exact PER ALIGNMENT and blind ACROSS alignments: the key
+// is computed from the live revision's frequency, so monthly `2026-09-01` and quarterly
+// `2026-08-01` are two different keys naming one September. Measured both directions by the
+// reviewer, through the plain scan and with no catch-up anywhere. The wall is arithmetic: a
+// revision that CHANGES the frequency must start after the last period this plan has already run.
+// ===========================================================================================
+
+test("p640.revision.frequency_alignment — a frequency change is refused while its first period would cover one the plan has already run, in BOTH directions, and is allowed the day after", async (t) => {
+  if (await gatePlans(t)) return;
+  const thisMonth = monthStart(today);
+  const nextMonth = await shiftMonths(thisMonth, 1);
+
+  // ---- MONTHLY -> QUARTERLY. The monthly plan has run September; a quarterly alignment anchored
+  // on the plan's own authority puts September inside its FIRST period, so September would take a
+  // second entry.
+  const m = await plan({ tag: "freqmq", monthsBack: 2, frequency: "monthly", dayOfMonth: 1 });
+  await wakeDuePlanOccurrences({ limit: SCAN_LIMIT });
+  const ran = await occurrenceRows(m.plan_id);
+  assert.equal(ran.length, 1, "the monthly plan has run its current period");
+  assert.equal(ran[0].due_date, thisMonth);
+
+  const mq = await assertPair(CLR.badRequest, PLAN_REASON.periodAlreadyCovered,
+    () => reviseAccountingPlan(ALICE(), {
+      plan: m.plan_id, frequency: "quarterly", dayRule: "day_of_month", dayOfMonth: 1,
+      effectiveFrom: thisMonth, basis: m.basis,
+    }),
+    "re-aligning a monthly plan onto quarters over a month it has already run");
+  assert.equal(mq.detail.period_start, m.effectiveFrom,
+    "the refusal NAMES the period the new alignment would cover again");
+  assert.ok(mq.detail.covered_through >= thisMonth, "and how far this plan has already run");
+  assert.equal(mq.detail.earliest_effective_from, nextMonth,
+    "and the first date the change would be lawful from");
+
+  // …and it is lawful from exactly that date.
+  const ok = await reviseAccountingPlan(ALICE(), {
+    plan: m.plan_id, frequency: "quarterly", dayRule: "day_of_month", dayOfMonth: 1,
+    effectiveFrom: mq.detail.earliest_effective_from, basis: m.basis,
+  });
+  assert.equal(ok.revision, 2, "a frequency change that starts after the covered periods is a legitimate revision");
+  await wakeDuePlanOccurrences({ limit: SCAN_LIMIT });
+  assert.equal(await occurrenceCount(m.plan_id), 1,
+    "and the re-aligned plan does not post the covered month a second time");
+
+  // ---- QUARTERLY -> MONTHLY. The quarterly plan has run the quarter that CONTAINS this month, so
+  // a monthly alignment starting inside that quarter would post this month again.
+  const q = await plan({ tag: "freqqm", monthsBack: 2, frequency: "quarterly", dayOfMonth: 1 });
+  await wakeDuePlanOccurrences({ limit: SCAN_LIMIT });
+  const qran = await occurrenceRows(q.plan_id);
+  assert.equal(qran.length, 1, "the quarterly plan has run its current period");
+  assert.equal(qran[0].due_date, q.effectiveFrom, "the quarter's own due day");
+
+  const qm = await assertPair(CLR.badRequest, PLAN_REASON.periodAlreadyCovered,
+    () => reviseAccountingPlan(ALICE(), {
+      plan: q.plan_id, frequency: "monthly", dayRule: "day_of_month", dayOfMonth: 1,
+      effectiveFrom: thisMonth, basis: q.basis,
+    }),
+    "re-aligning a quarterly plan onto months inside a quarter it has already run");
+  assert.equal(qm.detail.period_start, thisMonth,
+    "the refusal names the month the new alignment would cover again");
+  assert.ok(qm.detail.covered_through >= thisMonth,
+    "the quarter already run reaches at least to the end of this month");
+  assert.equal(qm.detail.earliest_effective_from, nextMonth,
+    "and the first date a monthly alignment would be lawful from is the day after the covered quarter");
+
+  const qok = await reviseAccountingPlan(ALICE(), {
+    plan: q.plan_id, frequency: "monthly", dayRule: "day_of_month", dayOfMonth: 1,
+    effectiveFrom: qm.detail.earliest_effective_from, basis: q.basis,
+  });
+  assert.equal(qok.revision, 2);
+  await wakeDuePlanOccurrences({ limit: SCAN_LIMIT });
+  assert.equal(await occurrenceCount(q.plan_id), 1,
+    "and no month inside the covered quarter is posted a second time");
+
+  // ---- AND THE WALL IS THE FREQUENCY CHANGE, NOT EVERY REVISION. A revision that keeps the
+  // frequency is governed by `unique (plan_id, leg, period_key)` and review finding B1's own
+  // refusal, which this cell must not have widened into a refusal of ordinary schedule edits.
+  const same = await plan({ tag: "freqsame", monthsBack: 2, frequency: "monthly", dayOfMonth: 1 });
+  await wakeDuePlanOccurrences({ limit: SCAN_LIMIT });
+  const kept = await reviseAccountingPlan(ALICE(), {
+    plan: same.plan_id, frequency: "monthly", dayRule: "day_of_month", dayOfMonth: 5,
+    effectiveFrom: same.effectiveFrom, basis: same.basis,
+  });
+  assert.equal(kept.revision, 2, "moving the due DAY inside the same frequency is still allowed");
+  await wakeDuePlanOccurrences({ limit: SCAN_LIMIT });
+  assert.equal(await occurrenceCount(same.plan_id), 1,
+    "and B1's period wall still keeps the already-run period from taking a second entry");
 });

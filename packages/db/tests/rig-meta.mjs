@@ -1690,13 +1690,16 @@ const ACCOUNTING_PLANS_0193_UNGRANTED_FNS = [
   "_plan_admit_occurrence", "_plan_door_ctx", "_assert_plan_schedule", "_plan_run_model",
   "_plan_due_nth", "_plan_due_index_on_or_before", "_plan_reversal_date", "_plan_due_events",
   "_plan_occurrence_basis", "_plan_overlap_warning",
-  // …and the six the adversarial review round added: the accrual a reversal undoes, whether that
-  // accrual STANDS (admitted and not cancelled/failed without a committed receipt), the anchored
-  // period start, the per-occurrence period key, the leg-aware window ceiling, and the PICKER the
-  // scan actually asks (which reads the occurrence rows, so it is stable rather than immutable).
-  // The pure-arithmetic `_plan_due_event_on_or_before` the picker replaced is gone with it: an
-  // unreachable body in a census of reachable ones is a claim nobody can check.
-  "_plan_primary_for_reversal", "_plan_primary_stands", "_plan_period_start",
+  // …and the ones the two adversarial review rounds added: the accrual a reversal undoes, the
+  // anchored period start, the per-occurrence period key, the leg-aware window ceiling, and the
+  // PICKER the scan actually asks (which reads the occurrence rows, so it is stable rather than
+  // immutable). The pure-arithmetic `_plan_due_event_on_or_before` the picker replaced is gone
+  // with it: an unreachable body in a census of reachable ones is a claim nobody can check — and
+  // so is `_plan_primary_stands`, whose "admitted and not yet a dead end" test round 2 replaced
+  // with `_plan_primary_entry` (the accrual's POSTED, still-live journal entry). `_plan_work_stands`
+  // is the one surviving Work-status test and `_plan_covered_through` is the alignment wall's ruler.
+  "_plan_primary_for_reversal", "_plan_primary_entry", "_plan_work_stands",
+  "_plan_covered_through", "_plan_period_start",
   "_plan_occurrence_period_key", "_plan_window_ceiling", "_plan_admissible_event",
   "_tf_accounting_plans_immutable", "_tf_plan_revisions_immutable",
   "_tf_plan_occurrences_append_only",
