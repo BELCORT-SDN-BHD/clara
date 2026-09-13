@@ -138,12 +138,7 @@ function interruptionRow() {
   };
 }
 
-async function readJson(request) {
-  const chunks = [];
-  for await (const chunk of request) chunks.push(chunk);
-  if (chunks.length === 0) return {};
-  try { return JSON.parse(Buffer.concat(chunks).toString("utf8")); } catch { return {}; }
-}
+import { readCachedJson as readJson } from "./mock-dispatch.mjs";
 
 async function drain(request) {
   for await (const _chunk of request) void _chunk;

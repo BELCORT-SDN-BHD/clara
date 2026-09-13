@@ -50,6 +50,8 @@
 
 import { createHash } from "node:crypto";
 
+import { matchVerb } from "./mock-dispatch.mjs";
+
 /** REAL body/hash pairs — each hash is sha256 of the exact bytes served.
  *  裁-90's byte-identity law is that `accept_legal_document` compares the
  *  SUBMITTED hash against the document's own, so a fixture whose hash could not
@@ -97,6 +99,35 @@ export const E2E_DPA_SHA = sha(E2E_DPA_BODY);
 function termsIsDraft(state) {
   return state.legalDraftTerms === true || String(state.email ?? "").startsWith("e2e-draft-");
 }
+
+/** F-05 (#619, #722) — THE EXACT NINE VERBS this lane's own dispatch (below) recognises, the
+ *  allow-list `matchVerb` guards `state.doorCalls.push(fn)` with.
+ *
+ *  MEASURED: `handleCheckoutMock` is hooked FIRST among every lane in `serve-built.mjs`'s
+ *  dispatch chain — before `handleActivitySupabase`, `handleJournalsTableSupabase`, and every
+ *  other lane's own RPC verbs — so EVERY `/rest/v1/rpc/` POST across the WHOLE suite reaches
+ *  `handleCheckoutDoors` first, not only FS-4 C-6's own nine doors. The old code recorded `fn`
+ *  onto `state.doorCalls` unconditionally, before any `fn === "…"` branch had run, so a verb
+ *  this lane does not own (`get_my_preferences`, fired by `MotionPreferenceSync` on EVERY
+ *  signed-in page — including every page the checkout walk visits) was recorded as a "door
+ *  call" anyway, polluting `checkout-gate-walk.spec.ts:561`'s
+ *  `expect(after.doorCalls).toEqual([])` — a refused request's own record could carry a verb
+ *  the checkout journey never dispatched at all.
+ *
+ *  THE FIX is the same shape `bank-close-registers-mock.mjs`'s `L7_RPC_VERBS` already proves:
+ *  the allow-list guards the RECORD (and, incidentally, the `readJson` reads inside each
+ *  branch) rather than gating on a per-branch `return false` that runs AFTER the push. */
+export const CHECKOUT_RPC_VERBS = new Set([
+  "get_current_legal_documents",
+  "accept_legal_document",
+  "open_checkout_intent",
+  "get_current_checkout_plan",
+  "record_checkout_session",
+  "get_own_checkout_intent_session",
+  "cancel_checkout_intent",
+  "get_own_checkout_progress",
+  "claim_paid_firm",
+]);
 
 /** The two rows the door returns, shaped exactly as `0185` declares them. */
 function legalDocuments(state) {
@@ -237,6 +268,12 @@ async function handleCheckoutDoors(ctx, { registrationId }) {
   const { request, response, path, cors, state, sendJson, readJson } = ctx;
   if (request.method !== "POST" || !path.startsWith("/rest/v1/rpc/")) return false;
   const fn = path.slice("/rest/v1/rpc/".length);
+  // F-05 — THE ALLOW-LIST GUARDS THE RECORD. A verb this lane does not own (any other lane's
+  // RPC, or `serve-built.mjs`'s own generic fixtures) returns `false` here, before
+  // `state.doorCalls` is ever touched — so the ledger below records only a verb this lane
+  // actually DISPATCHED to one of its own nine doors, never merely a verb that happened to
+  // reach this handler first because it is hooked first in `serve-built.mjs`'s chain.
+  if (!matchVerb(CHECKOUT_RPC_VERBS, fn)) return false;
   // Every door the app calls, in order. This is what lets a cell assert that a
   // refused request reached NO door — the property a status check alone cannot
   // give, and the one that matters on a surface that spends rate-wall budget

@@ -66,7 +66,7 @@ async function control(page: Page, body: Record<string, unknown>): Promise<void>
       });
       return res.status;
     },
-    { path: JOURNAL_WORK.controlPath, payload: { client: CLIENT, ...body } },
+    { path: `${JOURNAL_WORK.controlPath}?client=${encodeURIComponent(CLIENT)}`, payload: body },
   );
   expect(status, `the fixture control endpoint answered ${status}`).toBe(200);
 }

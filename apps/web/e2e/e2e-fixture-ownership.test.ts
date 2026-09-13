@@ -27,6 +27,8 @@ import { fileURLToPath } from "node:url";
 
 import { P6_5_SESSIONS } from "./agentic-finish-mock.mjs";
 import { handleL7Supabase, L7_RPC_VERBS } from "./bank-close-registers-mock.mjs";
+import { handleCheckoutMock } from "./fs4-checkout-mock.mjs";
+import { JOURNAL_WORK, handleJournalWorkRuntime } from "./journal-work-mock.mjs";
 
 const E2E_DIR = dirname(fileURLToPath(import.meta.url));
 const SERVE_BUILT = join(E2E_DIR, "serve-built.mjs");
@@ -552,7 +554,10 @@ test("N4 (L7) · the close-prep hold fixture's held_by IS the shared subject —
 
 test("N7 (L7) · the exact-verb allow-list runs BEFORE readJson, in source", () => {
   const source = readFileSync(join(E2E_DIR, "bank-close-registers-mock.mjs"), "utf8");
-  const guardAt = source.indexOf("if (!L7_RPC_VERBS.has(verb)) return false;");
+  // #722 — the guard now reads through the shared `matchVerb` helper (mock-dispatch.mjs)
+  // rather than a bare `L7_RPC_VERBS.has(verb)`; the SHAPE this cell protects (the guard runs
+  // before the read) is unchanged.
+  const guardAt = source.indexOf("if (!matchVerb(L7_RPC_VERBS, verb)) return false;");
   const readJsonCallAt = source.indexOf("const body = await readJson(request);");
   assert.ok(guardAt >= 0, "the allow-list guard must still exist in source");
   assert.ok(readJsonCallAt >= 0, "the readJson call it exists to protect must still exist");
@@ -592,4 +597,176 @@ test("N7 (L7) · a verb this lane does not own leaves the request body COMPLETEL
     0,
     "the request's stream must never even be OPENED — a later hook's own readJson(request) must see the full, undrained body",
   );
+});
+
+// ---------------------------------------------------------------------------
+// F-05 (#619) — `fs4-checkout-mock.mjs`'s door-call ledger records only a VERB IT ACTUALLY
+// DISPATCHED, not every `/rest/v1/rpc/` POST that reaches it.
+// ---------------------------------------------------------------------------
+//
+// MEASURED: `handleCheckoutMock` is hooked FIRST among every lane in `serve-built.mjs`'s
+// dispatch chain (`serve-built.mjs:339`), so EVERY `/rest/v1/rpc/` POST across the WHOLE
+// suite — not only FS-4 C-6's own nine doors — reaches `handleCheckoutDoors` before any other
+// lane's hook gets a look. The old code pushed `fn` onto `state.doorCalls` unconditionally, at
+// the top of that function, before any `fn === "…"` branch had run — so a verb this lane does
+// not own (`get_my_preferences`, fired by `MotionPreferenceSync` on EVERY signed-in page,
+// including every page the checkout walk visits) was recorded as a "door call" anyway. That
+// pollutes the ONE assertion `checkout-gate-walk.spec.ts` makes about a refused request having
+// reached NO door (`expect(after.doorCalls).toEqual([])`, `:561`) — the array could carry a
+// verb the checkout journey never dispatched at all.
+//
+// THE FIX is the same allow-list-BEFORE-recording shape `bank-close-registers-mock.mjs`
+// already uses for its own five verbs (N7 above): a verb this lane does not recognise returns
+// `false` before `state.doorCalls` is ever touched.
+
+test("F-05 · the checkout lane's door-call ledger records only a verb it actually DISPATCHED", async () => {
+  const state: { doorCalls: string[] } = { doorCalls: [] };
+  let responded = false;
+  const sendJson = () => {
+    responded = true;
+  };
+  // `get_my_preferences` — a REAL RPC verb, owned by `serve-built.mjs`'s own generic fixture
+  // (`serve-built.mjs:649`), and NOT one of FS-4 C-6's nine checkout doors. Chosen because it is
+  // the exact verb this ticket's brief measured firing on every signed-in page.
+  const request = { method: "POST" } as unknown as Parameters<typeof handleCheckoutMock>[0]["request"];
+  const handled = await handleCheckoutMock({
+    request,
+    response: {} as never,
+    path: "/rest/v1/rpc/get_my_preferences",
+    cors: {},
+    state: state as never,
+    sendJson: sendJson as never,
+    readJson: (async () => ({})) as never,
+    appOrigin: "https://127.0.0.1:3100",
+    accessToken: () => "token",
+    subject: "11111111-1111-1111-1111-111111111111",
+    registrationId: "22222222-2222-2222-2222-222222222222",
+    firmId: "33333333-3333-4333-8333-333333333333",
+    signupCode: "654321",
+  });
+
+  assert.equal(handled, false, "a verb this lane does not own must fall through unanswered");
+  assert.equal(responded, false, "and must never have sent a response");
+  assert.deepEqual(
+    state.doorCalls,
+    [],
+    "an unrecognised verb must never be recorded as a door call — it was never DISPATCHED to any door",
+  );
+});
+
+test("F-05 · a verb the checkout lane DOES own is still recorded — the fix narrows, it does not silence, the ledger", async () => {
+  const state = {
+    doorCalls: [] as string[],
+    legalAccepted: { terms: null, dpa: null },
+    legalDraftTerms: false,
+    email: "owner@example.test",
+  };
+  let sent: { status: number; body: unknown } | null = null;
+  const sendJson = (_response: unknown, status: number, body: unknown) => {
+    sent = { status, body };
+  };
+  const request = { method: "POST" } as unknown as Parameters<typeof handleCheckoutMock>[0]["request"];
+  const handled = await handleCheckoutMock({
+    request,
+    response: {} as never,
+    path: "/rest/v1/rpc/get_current_legal_documents",
+    cors: {},
+    state: state as never,
+    sendJson: sendJson as never,
+    readJson: (async () => ({})) as never,
+    appOrigin: "https://127.0.0.1:3100",
+    accessToken: () => "token",
+    subject: "11111111-1111-1111-1111-111111111111",
+    registrationId: "22222222-2222-2222-2222-222222222222",
+    firmId: "33333333-3333-4333-8333-333333333333",
+    signupCode: "654321",
+  });
+
+  assert.equal(handled, true, "a checkout door verb must still be handled");
+  assert.ok(sent, "and must still have sent a response");
+  assert.deepEqual(state.doorCalls, ["get_current_legal_documents"], "and IS still recorded on its own ledger");
+});
+
+// ---------------------------------------------------------------------------
+// #740 — `journal-work-mock.mjs`'s control leg declines a FOREIGN client via the QUERY
+// STRING, before it ever opens the request's own stream — the same N7 shape
+// `bank-close-registers-mock.mjs`'s allow-list guard already proves for a verb, applied here to
+// an id.
+// ---------------------------------------------------------------------------
+//
+// MEASURED (pre-fix, `journal-work-mock.mjs:643-648`): the control leg read the JSON body via
+// `readJson(request)` and THEN checked `body?.client !== JOURNAL_WORK.clientId`, falling
+// through on a mismatch — the drain-then-fall-through shape #727's review flagged in
+// `chat-parity-mock.mjs`, fixed there by moving the discriminant onto the query string
+// (`?thread=`, forwarded verbatim by the app's own same-origin proxy,
+// `app/api/runtime/[...path]/route.ts:53`). The same fix applies here: `?client=` is checked
+// BEFORE the body is ever read, so a request for a client this lane does not own returns
+// `false` with the stream fully intact for whichever hook `serve-built.mjs` calls next.
+
+test("#740 · the journal-work control leg declines a FOREIGN client via the query string, and NEVER opens the request's own stream", async () => {
+  let asyncIteratorCalls = 0;
+  const request: AsyncIterable<Buffer> & { method: string } = {
+    method: "POST",
+    [Symbol.asyncIterator]: (): AsyncIterator<Buffer> => {
+      asyncIteratorCalls += 1;
+      let delivered = false;
+      return {
+        async next() {
+          if (delivered) return { value: undefined, done: true };
+          delivered = true;
+          return { value: Buffer.from(JSON.stringify({ op: "reset" }), "utf8"), done: false };
+        },
+      };
+    },
+  };
+  // A client id that is NOT JOURNAL_WORK.clientId — a foreign lane's own control call, or a
+  // typo, must never be answered by this lane and must never touch this request's stream.
+  const url = new URL("https://example.test/api/e2e-journal-work/control?client=not-this-lanes-client");
+  let responded = false;
+  const send = () => {
+    responded = true;
+  };
+
+  const handled = await handleJournalWorkRuntime(
+    request as never,
+    { writeHead: send, end: send } as never,
+    url as never,
+  );
+
+  assert.equal(handled, false, "a foreign client's control call must fall through unanswered");
+  assert.equal(responded, false, "and must never have sent a response");
+  assert.equal(
+    asyncIteratorCalls,
+    0,
+    "the request's stream must never even be OPENED — control() must decide ownership from the query string alone",
+  );
+});
+
+test("#740 · the journal-work control leg still answers ITS OWN client, by query string", async () => {
+  const request: AsyncIterable<Buffer> & { method: string } = {
+    method: "POST",
+    [Symbol.asyncIterator]: (): AsyncIterator<Buffer> => {
+      let delivered = false;
+      return {
+        async next() {
+          if (delivered) return { value: undefined, done: true };
+          delivered = true;
+          return { value: Buffer.from(JSON.stringify({ op: "reset" }), "utf8"), done: false };
+        },
+      };
+    },
+  };
+  const url = new URL(`https://example.test/api/e2e-journal-work/control?client=${JOURNAL_WORK.clientId}`);
+  let sentBody: unknown = null;
+  const response = {
+    writeHead: () => undefined,
+    end: (body: string) => {
+      sentBody = JSON.parse(body);
+    },
+  };
+
+  const handled = await handleJournalWorkRuntime(request as never, response as never, url as never);
+
+  assert.equal(handled, true, "this lane's own client must still be answered");
+  assert.ok(sentBody, "and must still have sent a body");
 });

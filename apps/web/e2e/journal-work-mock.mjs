@@ -510,31 +510,9 @@ function basisFromWire(wire) {
   };
 }
 
-/**
- * The request body, PARSED ONCE AND CACHED ON THE REQUEST.
- *
- * MEASURED HAZARD, and `serve-built.mjs`'s own dispatch note names it: a node
- * request stream can be read exactly once, so the FIRST lane in the chain that
- * calls this for a `/rest/v1/rpc/` POST and then falls through leaves every
- * later lane reading `{}` — and a lane whose guard is "is this MY client's id"
- * then refuses its own walk's traffic. Two lanes now answer the SAME verb
- * (`list_entry_links`, one per fixture client), so falling through after a read
- * is unavoidable and the stream cannot be the thing they share.
- *
- * The cache key is deliberately the same string in both modules, so whichever
- * runs first pays for the parse and the other reads its answer.
- */
-async function readJson(request) {
-  if (request.__e2eParsedBody !== undefined) return request.__e2eParsedBody;
-  const chunks = [];
-  for await (const chunk of request) chunks.push(chunk);
-  let parsed = {};
-  if (chunks.length > 0) {
-    try { parsed = JSON.parse(Buffer.concat(chunks).toString("utf8")); } catch { parsed = {}; }
-  }
-  request.__e2eParsedBody = parsed;
-  return parsed;
-}
+// #722 - the shared cached body reader; see mock-dispatch.mjs's own header for why every
+// lane mock (this one included) reads a POST body through the SAME cache rather than its own.
+import { readCachedJson as readJson } from "./mock-dispatch.mjs";
 
 function send(response, status, body) {
   response.writeHead(status, { "content-type": "application/json" });
@@ -638,11 +616,22 @@ export async function handleJournalWorkRuntime(request, response, url) {
   // THE CONTROL ENDPOINT — this lane's own, the same idiom P6-5's `/e2e-p6-5/reset`
   // uses, except that it rides the RUNTIME leg so the browser can reach it through
   // the app's real proxy with the real session it already holds. It is SCOPED like
-  // every other handler here: a body that does not name this lane's client falls
+  // every other handler here: a request that does not name this lane's client falls
   // through, so it can never advance another lane's fixture.
+  //
+  // #740 — THE DISCRIMINANT IS ON THE WIRE, NOT IN THE BODY, and that is what makes the
+  // fall-through legal. `return false` means "someone else will read this request", so it may
+  // only be taken while the request is still READABLE — and `readJson` drains it. The client id
+  // therefore travels as a query parameter (`?client=`, the same idiom
+  // `chat-parity-mock.mjs`'s own control leg uses for `?thread=`; the app's real same-origin
+  // proxy forwards `nextUrl.search` verbatim, `app/api/runtime/[...path]/route.ts:53`), so this
+  // lane declines a foreign client's control call BEFORE it touches the stream, exactly as
+  // every other handler in this module declines on a path or an id it does not own. Before this
+  // fix the body was read FIRST and the client checked second — the drain-then-fall-through
+  // shape #727's review flagged in `chat-parity-mock.mjs` and fixed there the same way.
   if (request.method === "POST" && path === "/api/e2e-journal-work/control") {
+    if (url.searchParams.get("client") !== JOURNAL_WORK.clientId) return false;
     const body = await readJson(request);
-    if (body?.client !== JOURNAL_WORK.clientId) return false;
     send(response, 200, control(body));
     return true;
   }

@@ -60,6 +60,11 @@ import { handleD4Supabase } from "./tax-boundary-mock.mjs";
 // replacing) because the Activity page's client Select is this train's first consumer of the
 // UNFILTERED client register — see that export's own header in activity-mock.mjs.
 import { ACTIVITY_CLIENTS, handleActivitySupabase } from "./activity-mock.mjs";
+// #722 - the shared body-reading primitive every lane mock (and this file) now reads a POST
+// body through, so a body parsed by whichever hook runs first is served, unchanged, to every
+// later reader regardless of dispatch order. See that module's own header for the hazard this
+// closes and the four different per-file remedies it replaces.
+import { readCachedJson } from "./mock-dispatch.mjs";
 
 const e2eRoot = dirname(fileURLToPath(import.meta.url));
 const webRoot = resolve(e2eRoot, "..");
@@ -275,49 +280,29 @@ function publicLocation(location) {
   return location;
 }
 
-async function readJson(request) {
-  const chunks = [];
-  for await (const chunk of request) chunks.push(chunk);
-  if (chunks.length === 0) return {};
-  return JSON.parse(Buffer.concat(chunks).toString("utf8"));
-}
+// #722 — this file's own body reader is now the SHARED one (`mock-dispatch.mjs`), aliased
+// under its old name so every call site below (`/auth/v1/token`, `/auth/v1/signup`, the
+// control endpoints, …) is unchanged.
+const readJson = readCachedJson;
 
 async function handleSupabase(request, response, url) {
   const path = url.pathname.slice(supabasePrefix.length);
   console.log(`[e2e-mock] ${request.method} ${path}`);
 
-  // #627's OWN FIX for a hazard the L7 hook's header already named for a different verb,
-  // now hit by a SECOND lane on `list_review_queue`: `journals-table-mock.mjs`'s own handler
-  // for this verb reads the POST body via `readJson(request)` UNCONDITIONALLY (before it
-  // knows whether this call is even its own client), then falls through with `return false`
-  // when the client does not match — but Node's request stream can only be drained ONCE,
-  // so `tax-boundary-mock.mjs`'s own `readJson(request)` call after it (same verb, different
-  // client ids) silently saw `{}`, every one of its five branches missed, and every D4 client
-  // fell through to the generic empty-envelope default regardless of which state it asked
-  // for. Neither lane mock did anything wrong in isolation; two independent readers of ONE
-  // request stream is the actual defect, and the fix belongs here; where the dispatcher
-  // already owns the request, rather than teaching every current and future
-  // `list_review_queue` consumer to coordinate with each other.
+  // #627's OWN FIX for a hazard the L7 hook's header already named for a different verb, hit by
+  // a SECOND lane on `list_review_queue`: `journals-table-mock.mjs`'s own handler for this verb
+  // used to read the POST body via a lane-local, UNCACHED `readJson(request)` before it knew
+  // whether the call was even its own client, then fall through — and Node's request stream can
+  // only be drained ONCE, so `tax-boundary-mock.mjs`'s own read after it silently saw `{}`.
   //
-  // The fix: drain the body exactly ONCE, right here, before ANY lane hook runs, then
-  // re-install the stream's own async-iteration protocol so every later `for await (const
-  // chunk of request)` — every lane mock's own `readJson`, unchanged — sees the SAME bytes
-  // again, as many times as asked, in whatever order the hooks below call it.
-  if (request.method === "POST" && path === "/rest/v1/rpc/list_review_queue") {
-    const chunks = [];
-    for await (const chunk of request) chunks.push(chunk);
-    const rawBody = Buffer.concat(chunks);
-    request[Symbol.asyncIterator] = () => {
-      let delivered = false;
-      return {
-        async next() {
-          if (delivered) return { value: undefined, done: true };
-          delivered = true;
-          return { value: rawBody, done: false };
-        },
-      };
-    };
-  }
+  // #722 CLOSED THE ROOT CAUSE rather than adding a fourth ordering workaround here: every
+  // `list_review_queue` reader (`journals-table-mock.mjs`, `journal-work-mock.mjs`'s
+  // `handleJournalWorkRpc`, `tax-boundary-mock.mjs`) now reads through the SAME
+  // `readCachedJson` (`mock-dispatch.mjs`), which parses the body once and hands the identical
+  // parsed object to every later caller regardless of order — so the raw-byte stream-replay
+  // hack that used to live here (drain once, reinstall a replayable async iterator) is moot and
+  // is removed with it. Three claimants, one cache, no ordering left for THIS hazard to depend
+  // on — see `mock-dispatch.mjs`'s own header for the full account.
   if (request.method === "OPTIONS") {
     response.writeHead(204, {
       "access-control-allow-origin": appOrigin,
@@ -510,21 +495,16 @@ async function handleSupabase(request, response, url) {
     return;
   }
 
-  // #632's own lane runs FIRST OF ALL, and it has to: `bank-close-registers-mock.mjs`
-  // (handleL7Supabase, below) reads the request body on EVERY `/rest/v1/rpc/` POST before
-  // checking whether the verb is even one of its own, and does not restore it — the same
-  // measured hazard that lane's neighbouring comment already names for the documents lane.
-  // `readJson`'s `for await (const chunk of request)` drains the stream exactly once; a
-  // second reader (this lane's own `handleActivitySupabase`, running after L7's) sees zero
-  // chunks and silently gets back `{}`, which is indistinguishable from "no client filter,
-  // no kind filter" — every list_activity call answered the SAME unfiltered page 1
-  // regardless of what the browser actually asked for, and no error surfaced anywhere,
-  // because `{}`'s undefined fields all satisfy this lane's own permissive matches. MEASURED
-  // by running the kind-filter cell in isolation with server- and browser-side argument
-  // logging: the browser sent `p_kinds:["close"]`, the mock's own handler read back
-  // `body.p_kinds === undefined`. `list_activity`/`get_activity_event` are names no other
-  // lane's verb list contains, so running first costs every other lane nothing — this
-  // handler drains a body only inside its own two exact path checks.
+  // #722 — THE BODY-DRAIN HAZARD THIS BLOCK USED TO ARGUE AROUND IS CLOSED, and the reasoning
+  // is worth stating once rather than repeating (or, worse, silently going stale) beside each
+  // hook below. Every lane mock below, and this file's own remaining routes, now read a POST
+  // body through the SAME `readCachedJson` (`mock-dispatch.mjs`): the first caller parses it,
+  // every later caller — any lane, in any order — gets back the identical parsed object. So an
+  // ordering note that only ever argued "X must run before Y or Y's own `readJson` would drain
+  // a stream Z still needs" is now MOOT and has been removed. What remains below are the
+  // ordering notes that are still true for a DIFFERENT reason: one lane's read would otherwise
+  // be answered by another lane's ROW (a GET whose result shape or scope collides), not by a
+  // drained stream.
   if (await handleActivitySupabase(request, response, path, url, sendJson, cors)) return;
   // FIRST among the REMAINING hooks, and safe there because every branch inside is scoped
   // to the chat-parity ids and falls through otherwise (merge of origin/main `cea3da39` /
@@ -534,48 +514,12 @@ async function handleSupabase(request, response, url) {
   if (await handleJournalsTableSupabase(request, response, path, url, sendJson, cors)) return;
   if (await handleChatParitySupabase(request, response, path, url, sendJson, cors)) return;
   if (await handleP6_5Supabase(request, response, path, url, sendJson, cors)) return;
-  // #634's TWO governed doors, ordered HERE and not beside their own lane's
-  // PostgREST hook below. Measured hazard, the same one this file already
-  // records for the documents lane: `bank-close-registers-mock.mjs` reads the
-  // request body on EVERY `/rest/v1/rpc/` POST before it checks the verb, and
-  // `readJson` consumes the stream — so a lane ordered after it reads `{}` and
-  // its own id-scoped guards then refuse its own walk's traffic. This hook
-  // matches its two verbs by NAME first and reads the body only inside a match,
-  // so it starves nothing in the other direction either.
   if (await handleJournalWorkRpc(request, response, path, url, sendJson, cors)) return;
-  // THE DOCUMENTS LANE RUNS BEFORE L7's, and the reason is a measured hazard
-  // rather than a preference. `bank-close-registers-mock.mjs:204-246` parses the
-  // request body on EVERY `/rest/v1/rpc/` POST and then returns false for verbs
-  // that are not its own — and `readJson` consumes the stream, so every lane
-  // after it reads `{}` and its own id-scoped guards refuse its own walk's
-  // traffic. That is what turned this lane's confirm-and-file into "unhandled
-  // e2e Supabase route" the first time the two ran together.
-  //
-  // Ordering this lane first is safe in the other direction because it never
-  // does the same thing: it reads the body only INSIDE a matched verb (see its
-  // own note), and its four verbs are disjoint from L7's five. The underlying
-  // consume-then-fall-through in L7's module is reported separately — it still
-  // starves whatever lane is added after it.
   if (await handleDocumentsViewerSupabase(request, response, path, url, sendJson, cors)) return;
-  // #627's D4 lane. SAFE to run before L7's hook for the same reason the documents lane is:
-  // its ONE rpc verb (`list_review_queue`) reads the request body only INSIDE that verb's own
-  // match, never unconditionally on every `/rest/v1/rpc/` POST — so it never drains a stream a
-  // later lane still needs. Placed before `handleL7Supabase` on purpose (that lane's own note
-  // above: it consumes the body on every RPC POST before checking the verb, which would starve
-  // this lane's `list_review_queue` reads of theirs if this ran after it).
   if (await handleD4Supabase(request, response, path, url, sendJson, cors)) return;
-  // THE JOURNAL-WORK LANE, AND ITS POSITION IS MEASURED TWICE OVER.
-  //
-  // AHEAD OF L7 (#629): `handleJournalWorkSupabase` gained three `/rest/v1/rpc/` verbs
-  // (`get_work_question`, `get_work_pending_question`, `answer_work_question`), and L7's hook calls
-  // `readJson` on EVERY rpc POST before checking whether the verb is its own — so with this lane
-  // after it, all three read `{}`, fell through their own id guards, and the Work detail's question
-  // form never appeared. This lane reads a body only INSIDE a matched verb, so running it earlier
-  // starves nothing: its rpc paths are disjoint from every lane above and it falls through
-  // otherwise.
-  //
-  // AHEAD OF THE HOME BOARD (#623, and still true): `home-board-mock.mjs`'s `EMPTY_RELATIONS`
-  // answers `/rest/v1/coa_accounts` and `/rest/v1/agent_tasks_visible` with an honest `[]` for
+  // AHEAD OF THE HOME BOARD (#623, and still true — NOT a body-drain reason):
+  // `home-board-mock.mjs`'s `EMPTY_RELATIONS` answers `/rest/v1/coa_accounts` and
+  // `/rest/v1/agent_tasks_visible` with an honest `[]` for
   // EVERY subject (its own header names that as deliberate), so with this hook after it the journal
   // composer's account picker held nothing but its placeholder and the Work detail could never read
   // its run's task. Running first costs that lane nothing: every branch here is scoped to its own

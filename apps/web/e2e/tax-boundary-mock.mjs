@@ -46,16 +46,7 @@ function clientRow(id) {
   };
 }
 
-async function readJson(request) {
-  const chunks = [];
-  for await (const chunk of request) chunks.push(chunk);
-  if (chunks.length === 0) return {};
-  try {
-    return JSON.parse(Buffer.concat(chunks).toString("utf8"));
-  } catch {
-    return {};
-  }
-}
+import { readCachedJson as readJson } from "./mock-dispatch.mjs";
 
 const OK_ENVELOPE = () => ({
   watermark: "d4-ok",
