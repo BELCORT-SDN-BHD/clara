@@ -15,9 +15,10 @@
 -- A browser composing those from three reads would page them independently and could not sort
 -- the result; the join belongs in the database.
 --
--- ADDITIVE, PLUS ONE RECUT. Two new read doors, one new SECURITY DEFINER helper, and a recut of
--- `clara.save_my_preferences` (0179) that adds EXACTLY ONE enumerated `interface` key. Zero new
--- tables, zero altered tables, zero new RLS policies, zero widened table grants. In particular
+-- ADDITIVE, PLUS ONE RECUT. Two new read doors, one new SECURITY DEFINER helper, ONE new index
+-- (§0.5, the firm-wide ordering the list pages over), and a recut of `clara.save_my_preferences`
+-- (0179) that adds EXACTLY ONE enumerated `interface` key. Zero new tables, zero altered tables,
+-- zero new columns, zero new RLS policies, zero widened table grants. In particular
 -- this file adds NO parent/child columns: batch Work (#636) owns that schema, and a list that
 -- fabricated a child count from nothing would be the invented state #641 forbids.
 --
@@ -83,7 +84,12 @@
 --                                        100 ids against a second register read
 --   purpose, status                   -- 0178's own CHECK vocabularies, verbatim
 --   initiator, initiated_by,          -- #630's two facts: who it RUNS AS, and who ASKED
---   initiator_role                       (the admission-time authority snapshot, for display)
+--   initiator_role                       (the admission-time authority snapshot, for display).
+--                                        `p_initiator` filters `coalesce(initiated_by, initiator)`
+--                                        — WHO ASKED, the same expression the "Entered by" column
+--                                        renders — never the mutable run authority a Take-over
+--                                        moves, which would silently drop the very row whose
+--                                        column still names the person the caller picked.
 --   basis_origin                      -- 'user_direct' | 'clara_interpreted'. THIS is the answer
 --                                        to #629's finding that a chat-originated Work is
 --                                        reachable nowhere: it is listed like any other, and the
@@ -109,7 +115,8 @@
 -- THE KEYSET, AND WHY THE CURSOR IS OPAQUE.
 --
 -- `(created_at desc, id desc)` over `ix_accounting_work_client (client_id, created_at desc)`
--- (0178:377) for a client-scoped read, and over the same ordering firm-wide. The cursor is
+-- (0178:377) for a client-scoped read, and over `ix_accounting_work_firm_created
+-- (firm_id, created_at desc, id desc)` — THIS FILE'S ONE NEW INDEX, §0.5 — firm-wide. The cursor is
 -- base64 of `<created_at>|<id>` — the same encoding 0181 mints — and is round-tripped, never
 -- decoded, by a caller. `id` is a real uuid here (unlike 0181's three-source union, where an
 -- agent_receipt id is a `kind:id` pair), so the fence compares uuid to uuid rather than text to
@@ -203,10 +210,46 @@ end $pre$;
 set role clara_fn_owner;
 
 -- ==============================================================================================
+-- 0.5 THE FIRM-WIDE ORDERING INDEX. Additive, one index, no table altered.
+--
+-- MEASURED, not assumed (adversarial migration-safety review, 2026-09-14). Before this index
+-- `clara.accounting_work` carried only `ix_accounting_work_client (client_id, created_at desc)`
+-- (0178:367) and `uq_accounting_work_intent (firm_id, client_id, intent_key)` (0178:336). The
+-- CLIENT-scoped read is served by the first; the FIRM-WIDE read — which is what `/work` is, and
+-- the surface this ticket exists to build — had no ordered path at all: the planner bound the firm
+-- through `uq_accounting_work_intent`'s leading column and then TOP-N HEAPSORTED the firm's whole
+-- Work, on EVERY page, cursor or not. The keyset fence does not help there, because a fence still
+-- has to be sorted before it can be cut.
+--
+-- THE KEY TUPLE IS THE ORDER BY TUPLE, EXACTLY — `(firm_id, created_at desc, id desc)`. A
+-- `(firm_id, created_at desc)` cut would order the page but leave the id tie-break to a sort, and
+-- this door's own determinism cell (a whole page admitted in ONE transaction shares one
+-- `created_at` to the microsecond) is precisely the case where that tie-break decides the page.
+-- MEASURED on the rig with this index present, as `clara_authenticated`, with the firm's RLS
+-- predicate binding: `Limit -> Index Only Scan using ix_accounting_work_firm_created,
+-- Index Cond: (firm_id = clara.jwt_firm())` — no Sort node at all.
+--
+-- `if not exists` because the estate's merge order is not this file's to assume, and an index is
+-- the one object where "already there" is a lawful state rather than a drift. `clara_fn_owner`
+-- owns the table (the role this file has already assumed), so no ownership change is needed —
+-- 0183's own note for the same move — and it is built WITHOUT `concurrently`, which is what keeps
+-- this migration ONE transaction.
+-- ==============================================================================================
+create index if not exists ix_accounting_work_firm_created
+  on clara.accounting_work (firm_id, created_at desc, id desc);
+comment on index clara.ix_accounting_work_firm_created is
+  '#641 B3. The FIRM-WIDE keyset for clara.list_accounting_work: the key tuple is that door''s '
+  'ORDER BY tuple exactly -- (firm_id, created_at desc, id desc) -- so an unfiltered /work page is '
+  'an ordered index scan cut at p_limit+1 rather than a top-N heapsort over the firm''s whole '
+  'Work. The id column is part of the KEY, not a decoration: a page admitted in one transaction '
+  'shares one created_at to the microsecond, which is the case where the tie-break decides the '
+  'page. The client-scoped read keeps ix_accounting_work_client (0178:367).';
+
+-- ==============================================================================================
 -- 1. clara._work_run_attempts — the ONE fact the INVOKER doors cannot reach. See the header.
 -- ==============================================================================================
 create function clara._work_run_attempts(p_works uuid[])
-  returns table (work_id uuid, attempts int, current_run_status text, last_run_at timestamptz)
+  returns table (work_id uuid, attempts int, current_run_status text)
   language plpgsql stable security definer
   set search_path = clara, pg_temp
   set plan_cache_mode = force_custom_plan as $$
@@ -215,13 +258,24 @@ begin
   -- The doors' OWN floor, restated here because this helper is granted and therefore reachable
   -- directly. A caller `clara.list_accounting_work` would refuse can never reach it either.
   c := clara._human_ctx(clara.role_rank('bookkeeper'));
-  if p_works is null then return; end if;
+
+  -- THE PAGE BOUND IS ENFORCED, NOT MERELY DOCUMENTED (adversarial migration-safety review,
+  -- 2026-09-14). A leading underscore hides nothing from PostgREST (0181's own caveat) and this
+  -- helper is granted, so it is reachable directly with an array of ANY size: measured as a
+  -- bookkeeper, 1 000 ids cost 22 ms, 100 000 cost 820 ms and 1 000 000 cost 5 623 ms of server
+  -- CPU — for an answer no door would ever ask for. Both doors ask about at most `p_limit + 1`
+  -- Works (100 + 1 at the ceiling), so 101 is the whole legitimate range and anything past it is
+  -- a caller defect that must be NAMED rather than served. A null array is refused for the same
+  -- reason: neither door can produce one, so it is never the honest empty answer it looks like.
+  if p_works is null or coalesce(array_length(p_works, 1), 0) > 101 then
+    raise exception 'work id list must carry at most 101 ids' using errcode = 'CLR10',
+      detail = jsonb_build_object('reason', 'invalid_work_ids')::text;
+  end if;
 
   return query
     select w.id,
            count(t.id)::int,
-           max(t.status) filter (where t.id = w.current_task_id),
-           max(t.created_at)
+           max(t.status) filter (where t.id = w.current_task_id)
       from clara.accounting_work w
       left join clara.agent_tasks t on t.work_id = w.id
      where w.id = any(p_works)
@@ -235,8 +289,11 @@ comment on function clara._work_run_attempts(uuid[]) is
   'DEFINER because clara.agent_tasks carries no clara_authenticated grant at all (humans read the '
   'masked clara.agent_tasks_visible, which does not republish work_id) -- the same gap 0183 closed '
   'for clara.sweep_runs with the same shape. Floored at bookkeeper by clara._human_ctx and '
-  'self-scoped to clara.jwt_firm() inside the body, so no argument reaches another firm. Bounded '
-  'by the caller''s page (at most p_limit+1 ids). Pins plan_cache_mode = force_custom_plan.';
+  'self-scoped to clara.jwt_firm() inside the body, so no argument reaches another firm. BOUNDED '
+  'by the caller''s page and it ENFORCES that bound: a null array or more than 101 ids (the '
+  'doors'' own p_limit+1 ceiling) refuses CLR10 invalid_work_ids, because this helper is granted '
+  'and therefore PostgREST-reachable directly. Projects only what the two doors read (attempts + '
+  'the current run''s status). Pins plan_cache_mode = force_custom_plan.';
 
 -- ==============================================================================================
 -- 2. clara.list_accounting_work — the list. SECURITY INVOKER; see the header for why.
@@ -263,6 +320,7 @@ declare
   v_decoded text;
   v_pipe int;
   v_status text;
+  v_purpose text;
   v_status_f text[];
   v_purpose_f text[];
   v_q text;
@@ -298,12 +356,29 @@ begin
   v_status_f := case when array_length(p_status, 1) is null then null else p_status end;
   v_purpose_f := case when array_length(p_purpose, 1) is null then null else p_purpose end;
 
+  -- A NULL ELEMENT IS A CALLER DEFECT, NOT A FILTER (adversarial migration-safety review,
+  -- 2026-09-14). `v_status not in (…)` evaluates to NULL for a NULL element, so a bare
+  -- `if v_status not in (…)` fell through — and `= any(array[null])` then matches nothing, which
+  -- answered `rows=0`: the exact "`[]` looks like *no such Work*" failure the roster check exists
+  -- to refuse. `v_status is null or …` is the honest test. The same hazard reaches `p_purpose`,
+  -- whose VOCABULARY this door deliberately does not own (0178's CHECK does) — so its elements are
+  -- checked for being present at all, and for nothing else.
   if v_status_f is not null then
     foreach v_status in array v_status_f loop
-      if v_status not in ('queued','running','awaiting_input','stopping','completed','refused',
-                          'failed','cancelled','expired') then
-        raise exception 'unknown work status %', v_status using errcode = 'CLR10',
+      if v_status is null
+         or v_status not in ('queued','running','awaiting_input','stopping','completed','refused',
+                             'failed','cancelled','expired') then
+        raise exception 'unknown work status %', coalesce(v_status, '<null>') using errcode = 'CLR10',
           detail = jsonb_build_object('reason', 'invalid_status', 'status', v_status)::text;
+      end if;
+    end loop;
+  end if;
+
+  if v_purpose_f is not null then
+    foreach v_purpose in array v_purpose_f loop
+      if v_purpose is null then
+        raise exception 'a null purpose is not a filter' using errcode = 'CLR10',
+          detail = jsonb_build_object('reason', 'invalid_purpose')::text;
       end if;
     end loop;
   end if;
@@ -319,6 +394,14 @@ begin
       end if;
       v_cursor_ts := substr(v_decoded, 1, v_pipe - 1)::timestamptz;
       v_cursor_id := substr(v_decoded, v_pipe + 1)::uuid;
+      -- A NON-FINITE FENCE IS NOT A PAGE. `timestamptz` accepts the literals `infinity` and
+      -- `-infinity`, and `-infinity` compares below every real row — so a hand-edited `?cursor=`
+      -- carrying it answered a clean, well-formed EMPTY page, which is indistinguishable from
+      -- "there is no more Work". No `next_cursor` this door mints is ever non-finite (it is
+      -- `created_at`, a real clock reading), so this is a malformed cursor like any other.
+      if v_cursor_ts = '-infinity'::timestamptz or v_cursor_ts = 'infinity'::timestamptz then
+        raise exception 'non-finite cursor timestamp';
+      end if;
     exception when others then
       raise exception 'malformed work cursor' using errcode = 'CLR10',
         detail = jsonb_build_object('reason', 'invalid_cursor')::text;
@@ -333,7 +416,13 @@ begin
         from clara.accounting_work w
        where (p_client is null or w.client_id = p_client)
          and (v_status_f is null or w.status = any(v_status_f))
-         and (p_initiator is null or w.initiator = p_initiator)
+         -- THE FILTER MATCHES THE COLUMN THE LIST ACTUALLY SHOWS (spec review, 2026-09-14). The
+         -- "Entered by" column renders `initiated_by ?? initiator` — who ASKED, #630's frozen
+         -- historical fact — while `initiator` is the MUTABLE current run authority a Take-over
+         -- moves. Filtering the mutable one under the immutable one's label silently dropped the
+         -- taken-over Work whose column still reads the person the caller picked, and admitted
+         -- Work the new responsible never asked for. One expression, both places.
+         and (p_initiator is null or coalesce(w.initiated_by, w.initiator) = p_initiator)
          and (v_purpose_f is null or w.purpose = any(v_purpose_f))
          and (p_since is null or w.created_at >= p_since)
          and (p_until is null or w.created_at < p_until)
@@ -420,8 +509,11 @@ comment on function clara.list_accounting_work(uuid, text[], uuid, text[], times
   'text, newest first. SECURITY INVOKER over clara.accounting_work, clara.agent_interruptions and '
   'clara.clients (all three already clara_authenticated-granted with firm-scoped RLS); refuses '
   'CLR04 below bookkeeper before reading. p_status is the closed nine-member roster, refused '
-  'CLR10 invalid_status otherwise; p_purpose is NOT validated (0178''s CHECK owns that vocabulary '
-  'and concurrent lanes are widening it) so an unknown purpose matches nothing. p_q matches the '
+  'CLR10 invalid_status otherwise (a NULL element included); p_purpose''s VOCABULARY is NOT '
+  'validated (0178''s CHECK owns it and concurrent lanes are widening it) so an unknown purpose '
+  'matches nothing, but a NULL element is refused CLR10 invalid_purpose. p_initiator filters '
+  'coalesce(initiated_by, initiator) -- WHO ASKED, the expression the Entered-by column renders -- '
+  'not the mutable run authority a Take-over moves. p_q matches the '
   'basis memo by case-insensitive CONTAINMENT, never as a LIKE pattern. p_limit clamps 1..100. '
   'p_cursor is an opaque base64 pair minted by a previous page''s next_cursor; a malformed one '
   'refuses CLR10 invalid_cursor. Every row carries attempts + the pending question id/version so '
@@ -520,11 +612,14 @@ comment on function clara.get_accounting_work_row(uuid) is
 -- THE SHAPE IS VALIDATED, NOT MERELY TYPED. 0179's own guarantee is that "no key and no value
 -- reaches storage that is not named here"; a jsonb column would happily store a megabyte of
 -- anything. `workViews` is an ARRAY of at most 20 objects, each carrying EXACTLY `id`, `name` and
--- `query`, with a non-blank id (<=64 chars) unique across the array, a non-blank name (<=64) and
--- a query of at most 512 characters. A view whose id repeated would make "delete this view"
+-- `query` — ALL THREE PRESENT and all three strings — with a non-blank id (<=64 chars), unique
+-- across the array once trimmed, a non-blank name (<=64), neither carrying a control character,
+-- and a query of at most 512 characters. A view whose id repeated would make "delete this view"
 -- ambiguous; a view with an unknown key would be a field the write accepted and no reader knows
--- about. `reason` IS the field path (`interface.workViews`), the one-taxonomy rule 0179 states,
--- so the web's shared refusal parser can focus the control the refusal names.
+-- about; a view with no `query` would be a write that succeeded and a view that never appeared,
+-- because the web reader drops it. `reason` IS the field path (`interface.workViews`), the
+-- one-taxonomy rule 0179 states, so the web's shared refusal parser can focus the control the
+-- refusal names.
 -- ==============================================================================================
 create or replace function clara.save_my_preferences(p_expected_version int, p_patch jsonb, p_op_key text default null)
   returns jsonb
@@ -603,21 +698,34 @@ begin
         raise exception 'interface.workViews must be an array of at most 20 saved views'
           using errcode = 'CLR10', detail = jsonb_build_object('reason', 'interface.workViews')::text;
       end if;
+      -- ALL THREE KEYS ARE REQUIRED, `query` INCLUDED (adversarial migration-safety review,
+      -- 2026-09-14). The first cut accepted a view carrying no `query` key at all
+      -- (`coalesce(v_view->'query','""')`), which apps/web/lib/settings/preferences.ts's own
+      -- reader then dropped on the way out — a write that succeeded and a view that silently
+      -- never appeared. A saved view whose filters are absent is not a saved view.
+      --
+      -- AND THE ID IS COMPARED AS IT WILL BE USED. `"needs-rent"` and `" needs-rent "` are one
+      -- view to every person and two rows to a naive `=`, which makes "delete this view"
+      -- ambiguous in exactly the way the uniqueness rule exists to prevent; the dedupe is
+      -- therefore on the TRIMMED id. A control character in an id or a name is refused outright:
+      -- it is never something a person typed, it survives into a URL and a pill label, and no
+      -- reader downstream is obliged to sanitise it.
       v_ids := array[]::text[];
       for v_view in select * from jsonb_array_elements(v_val) loop
         if jsonb_typeof(v_view) <> 'object'
            or exists (select 1 from jsonb_object_keys(v_view) k where k not in ('id','name','query'))
            or jsonb_typeof(v_view->'id') is distinct from 'string'
            or jsonb_typeof(v_view->'name') is distinct from 'string'
-           or jsonb_typeof(coalesce(v_view->'query', '""'::jsonb)) is distinct from 'string'
+           or jsonb_typeof(v_view->'query') is distinct from 'string'
            or (v_view->>'id') ~ '^\s*$' or length(v_view->>'id') > 64
            or (v_view->>'name') ~ '^\s*$' or length(v_view->>'name') > 64
-           or length(coalesce(v_view->>'query', '')) > 512
-           or (v_view->>'id') = any(v_ids) then
+           or length(v_view->>'query') > 512
+           or (v_view->>'id') ~ '[[:cntrl:]]' or (v_view->>'name') ~ '[[:cntrl:]]'
+           or btrim(v_view->>'id') = any(v_ids) then
           raise exception 'unsupported value in interface.workViews' using errcode = 'CLR10',
             detail = jsonb_build_object('reason', 'interface.workViews')::text;
         end if;
-        v_ids := v_ids || (v_view->>'id');
+        v_ids := v_ids || btrim(v_view->>'id');
       end loop;
     else
       raise exception 'unsupported interface preference key' using errcode = 'CLR10',
@@ -676,7 +784,8 @@ end $$;
 comment on function clara.save_my_preferences(int, jsonb, text) is
   '#626 D1 (+#641 B3). PATCH semantics (jsonb || merge), full validation against the enumerated '
   'supported set — interface.motion, interface.sidebarDefault and #641''s interface.workViews '
-  '(an array of at most 20 {id,name,query} saved views, ids unique and non-blank) — with the '
+  '(an array of at most 20 saved views carrying EXACTLY id, name and query, all three present and '
+  'string-typed, ids non-blank, control-character-free and unique once trimmed) — with the '
   'field path as detail.reason, CLR06 on a stale p_expected_version, op_key replay via '
   '_reserve_op/_finish_op scoped by the caller''s current firm.';
 
@@ -699,7 +808,11 @@ reset role;
 -- 6. TAIL POSTCHECK.
 -- ==============================================================================================
 do $tail$
-declare v_n int; v_mode boolean; v_cfg text[];
+declare
+  v_n int; v_mode boolean; v_sig text; v_bad text;
+  -- The EXACT ACL every one of the four names must carry when this file is done. Asserted
+  -- literally rather than counted: see (5b) below.
+  v_acl constant text := 'clara_fn_owner=X/clara_fn_owner | clara_authenticated=X/clara_fn_owner';
 begin
   if to_regprocedure('clara.list_accounting_work(uuid,text[],uuid,text[],timestamptz,timestamptz,text,text,int)') is null then
     raise exception 'work_list_reads tail: clara.list_accounting_work is absent' using errcode = 'CLR10';
@@ -737,44 +850,77 @@ begin
       using errcode = 'CLR10';
   end if;
 
-  -- 0183's plan-cache rule on all three.
-  for v_n in 1..3 loop
-    select proconfig into v_cfg from pg_proc where oid = (case v_n
-      when 1 then 'clara.list_accounting_work(uuid,text[],uuid,text[],timestamptz,timestamptz,text,text,int)'
-      when 2 then 'clara.get_accounting_work_row(uuid)'
-      else 'clara._work_run_attempts(uuid[])' end)::regprocedure;
-    if not ('plan_cache_mode=force_custom_plan' = any(coalesce(v_cfg, array[]::text[]))) then
-      raise exception 'work_list_reads tail: function % does not pin plan_cache_mode = force_custom_plan', v_n
+  -- THE WHOLE POSTURE OF EACH NEW NAME, not just its plan-cache pin (0188 §5a's own shape,
+  -- adopted here after the migration-safety review found this tail thinner than the wave's idiom).
+  -- Owner, BOTH proconfig pins, and PUBLIC — a `search_path` that drifted off `clara, pg_temp`
+  -- would change which objects a SECURITY DEFINER body resolves, which is the whole reason the pin
+  -- exists, and nothing here was asserting it. Whitespace-insensitive, because PostgreSQL
+  -- NORMALISES a GUC list when it stores it (`set search_path = clara, pg_temp` comes back as
+  -- `search_path=clara, pg_temp`), so a literal comparison would be asserting the catalog's
+  -- formatting rather than the pin.
+  foreach v_sig in array array[
+    'clara.list_accounting_work(uuid,text[],uuid,text[],timestamptz,timestamptz,text,text,int)',
+    'clara.get_accounting_work_row(uuid)',
+    'clara._work_run_attempts(uuid[])'] loop
+    select case when pg_get_userbyid(p.proowner) <> 'clara_fn_owner'
+                  then 'owned by ' || pg_get_userbyid(p.proowner)
+                when replace(coalesce(array_to_string(p.proconfig, ','), ''), ' ', '')
+                       not like '%search_path=clara,pg_temp%'
+                  then 'search_path is not pinned'
+                when replace(coalesce(array_to_string(p.proconfig, ','), ''), ' ', '')
+                       not like '%plan_cache_mode=force_custom_plan%'
+                  then 'plan_cache_mode is not pinned (0183)'
+                else null end
+      into v_bad
+      from pg_proc p where p.oid = v_sig::regprocedure;
+    if v_bad is not null then
+      raise exception 'work_list_reads tail: % is %', v_sig, v_bad using errcode = 'CLR10';
+    end if;
+    if has_function_privilege('public', v_sig::regprocedure, 'execute') then
+      raise exception 'work_list_reads tail: PUBLIC still holds EXECUTE on %', v_sig
+        using errcode = 'CLR10';
+    end if;
+    if not has_function_privilege('clara_authenticated', v_sig::regprocedure, 'execute') then
+      raise exception 'work_list_reads tail: clara_authenticated cannot execute %', v_sig
         using errcode = 'CLR10';
     end if;
   end loop;
 
-  select count(*) into v_n from information_schema.routine_privileges
-   where routine_schema = 'clara'
-     and routine_name in ('list_accounting_work', 'get_accounting_work_row', '_work_run_attempts')
-     and grantee = 'PUBLIC';
-  if v_n <> 0 then
-    raise exception 'work_list_reads tail: PUBLIC holds an EXECUTE grant on a new work-list function'
-      using errcode = 'CLR10';
+  -- (5b) THE EXACT ACL, not a roster sweep (0188 §5b's own argument, copied). The previous shape
+  --      COUNTED `information_schema.role_routine_grants` rows whose grantee it happened to name,
+  --      which cannot see a grant to a role outside the names it enumerated — a `supabase_admin`,
+  --      an `anon`/`authenticated` from the hosted platform's own roster, or a future `belcort_*`.
+  --      The ACL array IS the complete answer to "who holds EXECUTE", so it is asserted literally:
+  --      two entries on each of the four names and nothing else. A NULL proacl (the create
+  --      default, where PUBLIC holds EXECUTE implicitly) fails this too, which is the point.
+  select string_agg(format('%s -> %s', t.sig, coalesce(array_to_string(p.proacl, ' | '), '(null)')),
+                    '; ' order by t.sig)
+    into v_bad
+    from (values ('clara.list_accounting_work(uuid,text[],uuid,text[],timestamptz,timestamptz,text,text,int)'),
+                 ('clara.get_accounting_work_row(uuid)'),
+                 ('clara._work_run_attempts(uuid[])'),
+                 ('clara.save_my_preferences(int,jsonb,text)')
+         ) t(sig)
+    join pg_proc p on p.oid = t.sig::regprocedure
+   where coalesce(array_to_string(p.proacl, ' | '), '(null)') is distinct from v_acl;
+  if v_bad is not null then
+    raise exception 'work_list_reads tail: an EXECUTE ACL is not exactly what this file granted: %',
+      v_bad using errcode = 'CLR10';
   end if;
 
-  select count(*) into v_n from information_schema.role_routine_grants
-   where routine_schema = 'clara'
-     and routine_name in ('list_accounting_work', 'get_accounting_work_row', '_work_run_attempts')
-     and grantee = 'clara_authenticated';
-  if v_n <> 3 then
-    raise exception 'work_list_reads tail: expected 3 clara_authenticated EXECUTE grants, found %', v_n
+  -- THE FIRM-WIDE ORDERING INDEX IS PRESENT, with the key tuple §0.5 argues for. Asserted from
+  -- `pg_get_indexdef` rather than from the name alone: an index of the right name over the wrong
+  -- columns would leave the firm-wide page on a top-N heapsort while this file claimed otherwise.
+  select pg_get_indexdef(c.oid) into v_bad
+    from pg_class c join pg_namespace n on n.oid = c.relnamespace
+   where n.nspname = 'clara' and c.relname = 'ix_accounting_work_firm_created';
+  if v_bad is null then
+    raise exception 'work_list_reads tail: clara.ix_accounting_work_firm_created is absent'
       using errcode = 'CLR10';
   end if;
-
-  -- No OTHER role gained anything on the three new names.
-  select count(*) into v_n from information_schema.role_routine_grants
-   where routine_schema = 'clara'
-     and routine_name in ('list_accounting_work', 'get_accounting_work_row', '_work_run_attempts')
-     and grantee not in ('clara_authenticated', 'clara_fn_owner');
-  if v_n <> 0 then
-    raise exception 'work_list_reads tail: a role other than clara_authenticated holds a new work-list grant'
-      using errcode = 'CLR10';
+  if replace(lower(v_bad), ' ', '') not like '%(firm_id,created_atdesc,iddesc)' then
+    raise exception 'work_list_reads tail: ix_accounting_work_firm_created is not (firm_id, created_at desc, id desc): %',
+      v_bad using errcode = 'CLR10';
   end if;
 
   -- THE RECUT KEPT EVERY 0179 ARM and gained exactly one. Probed against the live body's text so
@@ -787,15 +933,22 @@ begin
     raise exception 'work_list_reads tail: the save_my_preferences recut lost a 0179 arm or gained no workViews arm'
       using errcode = 'CLR10';
   end if;
-  if (select prosecdef from pg_proc where oid = 'clara.save_my_preferences(int,jsonb,text)'::regprocedure) is distinct from true
-     or (select proowner from pg_proc where oid = 'clara.save_my_preferences(int,jsonb,text)'::regprocedure) <> 'clara_fn_owner'::regrole then
-    raise exception 'work_list_reads tail: the save_my_preferences recut changed its security mode or owner'
+  -- THE RECUT ALSO REQUIRES A `query` KEY AND REFUSES A CONTROL CHARACTER IN AN ID — the two
+  -- shape faults 0179's arms never had to think about, probed as text for the same reason the arms
+  -- above are: a copy that dropped them would still carry the word `workViews`.
+  if position($q$jsonb_typeof(v_view->'query') is distinct from 'string'$q$
+              in (select prosrc from pg_proc where oid = 'clara.save_my_preferences(int,jsonb,text)'::regprocedure)) = 0
+     or position('[[:cntrl:]]' in (select prosrc from pg_proc where oid = 'clara.save_my_preferences(int,jsonb,text)'::regprocedure)) = 0 then
+    raise exception 'work_list_reads tail: the save_my_preferences recut lost a #641 workViews shape rule'
       using errcode = 'CLR10';
   end if;
-  select count(*) into v_n from information_schema.role_routine_grants
-   where routine_schema = 'clara' and routine_name = 'save_my_preferences' and grantee = 'clara_authenticated';
-  if v_n <> 1 then
-    raise exception 'work_list_reads tail: save_my_preferences lost its clara_authenticated grant' using errcode = 'CLR10';
+  if (select prosecdef from pg_proc where oid = 'clara.save_my_preferences(int,jsonb,text)'::regprocedure) is distinct from true
+     or (select proowner from pg_proc where oid = 'clara.save_my_preferences(int,jsonb,text)'::regprocedure) <> 'clara_fn_owner'::regrole
+     or replace(coalesce((select array_to_string(proconfig, ',') from pg_proc
+                           where oid = 'clara.save_my_preferences(int,jsonb,text)'::regprocedure), ''), ' ', '')
+          not like '%search_path=clara,pg_temp%' then
+    raise exception 'work_list_reads tail: the save_my_preferences recut changed its security mode, owner or search_path'
+      using errcode = 'CLR10';
   end if;
 
   -- NO TABLE ACL MOVED. This file grants on functions only.
@@ -806,5 +959,5 @@ begin
       using errcode = 'CLR10';
   end if;
 
-  raise notice 'work_list_reads tail: OK -- clara.list_accounting_work / clara.get_accounting_work_row are SECURITY INVOKER over already-granted, firm-scoped sources with an inline bookkeeper floor; clara._work_run_attempts is the ONE SECURITY DEFINER helper (bookkeeper-floored, firm self-scoped, page-bounded) that reaches clara.agent_tasks without widening its grant; all three pin plan_cache_mode = force_custom_plan, are PUBLIC-revoked and clara_authenticated-only; save_my_preferences keeps every 0179 arm and gains interface.workViews; no table altered, no table grant widened.';
+  raise notice 'work_list_reads tail: OK -- clara.list_accounting_work / clara.get_accounting_work_row are SECURITY INVOKER over already-granted, firm-scoped sources with an inline bookkeeper floor; clara._work_run_attempts is the ONE SECURITY DEFINER helper (bookkeeper-floored, firm self-scoped, and page-bounded BY ITS OWN BODY at 101 ids) that reaches clara.agent_tasks without widening its grant; all four names are clara_fn_owner-owned with search_path = clara, pg_temp pinned, the three new ones also pin plan_cache_mode = force_custom_plan, and every one carries EXACTLY the literal ACL {clara_fn_owner, clara_authenticated} -- asserted from proacl, not counted from a roster; ix_accounting_work_firm_created is present on (firm_id, created_at desc, id desc), which is the firm-wide door''s ORDER BY tuple exactly; save_my_preferences keeps every 0179 arm and gains interface.workViews with its query key required and control characters refused; no table altered, no table grant widened.';
 end $tail$;
