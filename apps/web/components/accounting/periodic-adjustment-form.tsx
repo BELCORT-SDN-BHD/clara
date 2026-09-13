@@ -31,6 +31,18 @@
 // changes which one is read, validated and submitted. A preparer who starts a stock adjustment,
 // realises it is a payroll accrual and switches back finds their figures where they left them.
 //
+// THE EVIDENCE CHOOSER IS THE COMPOSER'S OWN COMPONENT, not a second one. #643's third acceptance
+// line asks that this operation be reachable "from the direct Accounting entry point AND from an
+// upload/reference", and on this door the upload/reference entrance IS the chooser: the preparer
+// picks a document the client has already filed, it travels as `source_refs [{kind:'document'}]`
+// through `POST /api/work/periodic-adjustment` into `clara._admit_accounting_work_core`, and the
+// posting core re-reads it at commit and binds it to the entry through `clara.entry_evidence_links`
+// exactly as the journal lane does. The control, its two reads and their degradation rules live in
+// `components/accounting/evidence-chooser.tsx` and are MOUNTED here — one control, one set of ids,
+// one refusal vocabulary. What this form keeps is what the chooser deliberately does not decide:
+// which refusal is on screen (`stale_basis` / `not_filed` on a cited document that is no longer
+// filed, or the 409 when it already backs a posted entry) and what the next action is.
+//
 // THE LINE GRID IS A PREVIEW, NOT AN EDITOR, and that is the whole point of this journey. C-29
 // asks that closing stock not be simulated with a balancing journal, and migration 0194's
 // `clara._assert_adjustment_relationships` refuses an entry whose lines do not say what the
@@ -45,6 +57,7 @@ import Link from "next/link";
 import { useTranslations } from "next-intl";
 
 import { JournalBasisFields, fieldElementId, type FieldNode } from "@/components/accounting/journal-basis-fields";
+import { EvidenceChooser, useEvidenceReads } from "@/components/accounting/evidence-chooser";
 import { useFirmScope } from "@/components/firm-scope-provider";
 import { StateBanner } from "@/components/common/state";
 import { NativeSelect } from "@/components/common/native-select";
@@ -56,9 +69,10 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { listCoaAccounts } from "@/lib/journals/api";
 import { useAsyncRead } from "@/lib/firm/use-async-read";
-import { canOpenClientLeaf, workDetailHref, type NavigationScope } from "@/lib/navigation/tree";
+import { canOpenClientLeaf, journalEntryHref, workDetailHref, type NavigationScope } from "@/lib/navigation/tree";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
 import { submitPeriodicAdjustmentWork, type SubmitJournalWorkResult } from "@/lib/work/api";
+import { findEntryClient, type EvidenceDocument, type SpokenForDocumentRow } from "@/lib/work/evidence";
 import { fieldForServerPath, type JournalFieldId } from "@/lib/work/journal-basis";
 import {
   defaultDraftStorage,
@@ -99,6 +113,13 @@ import {
 import type { CoaAccountRow } from "@/lib/journals/types";
 import type { SessionTokenAccessor } from "@/lib/session";
 
+/** How long the form waits for the CLAIMANT of a `source_conflict` refusal before it stops
+ *  waiting. The refusal is already painted by then, so this bounds a cosmetic upgrade and nothing a
+ *  person is blocked on: when it fires, the banner keeps its sentence and simply offers no link.
+ *  The composer's own constant, and its reasoning (a `fetch` with neither signal nor timeout never
+ *  gives up), restated here rather than imported so neither form owns the other's clock. */
+const CLAIMANT_READ_TIMEOUT_MS = 5000;
+
 /** The DOM id of one particulars control. A separate namespace from the basis grid's
  *  (`journal-basis-…`) so the two vocabularies can never collide on one page. */
 export function adjustmentFieldId(field: AdjustmentFieldId): string {
@@ -114,6 +135,18 @@ type Phase =
   /** The lost-response resolution is in flight — the SAME intent key, re-sent. */
   | { kind: "checking" }
   | { kind: "conflict"; workId: string | null }
+  /** The chosen SOURCE DOCUMENT already backs a posted entry. A DIFFERENT arm from `conflict`
+   *  because the next action is the opposite one: this refusal opens impact or correction on the
+   *  entry that already stands there and must NEVER be resolved by rotating the intent key. */
+  | {
+      kind: "sourceConflict";
+      entryId: string | null;
+      /** The CLAIMANT client of `entryId` — not necessarily this one, because the evidence
+       *  invariant is firm-wide (`uq_entry_evidence_links_document` carries no client column).
+       *  Null means it could not be resolved, and then no link is offered. */
+      entryClientId: string | null;
+      entryClientName: string | null;
+    }
   | { kind: "denied" }
   | { kind: "notFound" }
   | { kind: "unavailable"; message: string }
@@ -145,6 +178,9 @@ export function PeriodicAdjustmentFormView({
   storage,
   session = sessionTokenAccessor,
   loadAccounts,
+  loadDocuments,
+  loadSpokenFor,
+  resolveEntryClient = findEntryClient,
 }: {
   clientId: string;
   scope: NavigationScope & { firm_id?: string; user_id?: string };
@@ -153,9 +189,16 @@ export function PeriodicAdjustmentFormView({
   storage?: DraftStorage | null;
   session?: SessionTokenAccessor;
   loadAccounts?: () => Promise<CoaAccountRow[]>;
+  /** The evidence chooser's two reads, injectable for the same reason `loadAccounts` is. */
+  loadDocuments?: () => Promise<EvidenceDocument[]>;
+  loadSpokenFor?: () => Promise<SpokenForDocumentRow[]>;
+  /** Names the CLAIMANT client of the entry a `source_conflict` refusal points at. */
+  resolveEntryClient?: typeof findEntryClient;
 }) {
   const t = useTranslations("PeriodicAdjustment");
   const tc = useTranslations("JournalComposer");
+  /** #634's evidence copy, which spans this door, the composer and the late-attachment dialog. */
+  const tmj = useTranslations("ManualJournal");
   const go = navigate;
 
   // THE DRAFT SCOPE, or null. A caller whose firm/user could not be read does NOT get a partial
@@ -178,6 +221,12 @@ export function PeriodicAdjustmentFormView({
   const [draft, setDraft] = useState<AdjustmentDraft>(() => restored?.draft ?? emptyAdjustmentDraft());
   const [postingDate, setPostingDate] = useState(() => restored?.postingDate ?? "");
   const [memo, setMemo] = useState(() => restored?.memo ?? "");
+  /** #634's OPTIONAL source document, on this door too. `null` is "no document", which is a CHOICE
+   *  this journey supports rather than a missing value — a stocktake is often evidenced by a count
+   *  sheet and a supplied obligation by a payroll summary, but neither is required by the door. It
+   *  rides the draft under the SAME key and the SAME intent key, so a reload — or a lost response
+   *  resolved by re-sending that key — carries the same evidence claim, never a different one. */
+  const [documentId, setDocumentId] = useState<string | null>(() => restored?.documentId ?? null);
   const [phase, setPhase] = useState<Phase>({ kind: "editing" });
   /** Issues are shown only AFTER a submit attempt — a form that reds every field before anyone has
    *  typed is telling a human off for not having started. */
@@ -186,6 +235,10 @@ export function PeriodicAdjustmentFormView({
   const accountsRead = useAsyncRead<CoaAccountRow[]>(() =>
     loadAccounts ? loadAccounts() : listCoaAccounts(session, clientId),
   );
+  // THE EVIDENCE READS, with the estate's degradation posture already applied — see
+  // `useEvidenceReads`' own note. Held here rather than inside the chooser because the
+  // `sourceConflict` arm below reads the RAW advisory rows to name the claimant for free.
+  const evidence = useEvidenceReads(clientId, { session, loadDocuments, loadSpokenFor });
   const accounts = accountsRead.data ?? [];
   /** `null` while the chart has not been read — the unknown-account rule is SKIPPED then rather
    *  than guessed (see `validateAdjustmentDraft`'s own note). */
@@ -227,8 +280,8 @@ export function PeriodicAdjustmentFormView({
       setKept(false);
       return;
     }
-    setKept(writeAdjustmentDraft(draftScope, { intentKey, draft, postingDate, memo }, store));
-  }, [draftScope, intentKey, draft, postingDate, memo, store]);
+    setKept(writeAdjustmentDraft(draftScope, { intentKey, draft, postingDate, memo, documentId }, store));
+  }, [draftScope, intentKey, draft, postingDate, memo, documentId, store]);
 
   const busy = phase.kind === "submitting" || phase.kind === "checking";
 
@@ -262,6 +315,34 @@ export function PeriodicAdjustmentFormView({
     const field = focusTarget.current;
     if (field !== null) fields.current.get(field)?.focus();
   }, [focusTick]);
+
+  /**
+   * THE CLAIMANT, RESOLVED AFTER THE REFUSAL IS ALREADY ON SCREEN — the composer's own effect, and
+   * its reasoning verbatim: the banner must not wait on this, and this must not outlive the banner.
+   * Bounded three ways (an `AbortSignal` the cleanup fires, a timeout that fires it anyway, and a
+   * re-check of the phase before the answer is written), and it runs ONLY when the advisory rows did
+   * not already answer, so the common path costs no read at all.
+   */
+  const conflictEntryId = phase.kind === "sourceConflict" ? phase.entryId : null;
+  const claimantUnresolved = phase.kind === "sourceConflict" && phase.entryClientId === null;
+  useEffect(() => {
+    if (!claimantUnresolved || conflictEntryId === null) return;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), CLAIMANT_READ_TIMEOUT_MS);
+    void (async () => {
+      const claimant = await resolveEntryClient(conflictEntryId, { session, signal: controller.signal })
+        .catch(() => null);
+      if (controller.signal.aborted || claimant === null) return;
+      setPhase((current) => (
+        current.kind === "sourceConflict" && current.entryId === conflictEntryId
+          ? { ...current, entryClientId: claimant.clientId, entryClientName: claimant.clientName }
+          : current));
+    })();
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [claimantUnresolved, conflictEntryId, resolveEntryClient, session]);
 
   const set = <K extends keyof AdjustmentDraft>(key: K, value: AdjustmentDraft[K]) => {
     setDraft((current) => ({ ...current, [key]: value }));
@@ -308,6 +389,27 @@ export function PeriodicAdjustmentFormView({
       setPhase({ kind: "conflict", workId: result.workId });
       return;
     }
+    if (result.kind === "source_conflict") {
+      // THE CHOICE IS PRESERVED, and the control is focused: the document the preparer picked stays
+      // picked so they can see WHICH one is spoken for, and the only forward moves are "open that
+      // entry" or "choose another document" — never a resubmit of this same intent.
+      //
+      // WHOSE ENTRY IT IS, WITHOUT WAITING FOR IT: the advisory rows this picker already holds
+      // answer for free when they name the same entry the refusal does; otherwise the effect above
+      // resolves it under an AbortSignal and a timeout. A refusal is never held back by a read of
+      // advisory grade.
+      const advisory = (evidence.spokenFor ?? []).find(
+        (r) => r.document_id === result.documentId && r.entry_id === result.entryId,
+      ) ?? null;
+      setPhase({
+        kind: "sourceConflict",
+        entryId: result.entryId,
+        entryClientId: advisory?.client_id ?? null,
+        entryClientName: advisory?.client_name ?? null,
+      });
+      focusField("evidence");
+      return;
+    }
     if (result.kind === "denied") {
       setPhase({ kind: "denied" });
       return;
@@ -335,7 +437,10 @@ export function PeriodicAdjustmentFormView({
         ...(l.description ? { description: l.description } : {}),
       })),
     };
-    const body = { clientId, intentKey, purpose: draft.purpose, basis, adjustment };
+    // OMITTED ENTIRELY when there is no document — the route reads an absent and an empty list
+    // identically (`toDbSourceRefs`), and sending `[]` would be the same request with more bytes.
+    const cited = documentId === null ? {} : { sourceRefs: [{ kind: "document" as const, documentId }] };
+    const body = { clientId, intentKey, purpose: draft.purpose, basis, adjustment, ...cited };
     setPhase({ kind: "submitting" });
     const first = await submit(session, body);
     if (first.kind !== "lost") {
@@ -352,6 +457,11 @@ export function PeriodicAdjustmentFormView({
   const onSubmit = (e: FormEvent) => {
     e.preventDefault();
     if (busy) return; // the local duplicate-submit guard; the server's idempotency is the real one
+    // …AND THE ONE REFUSAL THIS FORM MUST NEVER RE-SEND. The same intent with the same spoken-for
+    // document gets the same 409 for ever; the chooser's own onChange clears the phase, so a NEW
+    // choice is accepted in the tick it is made. The composer's guard, for the composer's reason:
+    // disabling the control leaves `onSubmit` reachable by any other route to the event.
+    if (phase.kind === "sourceConflict") return;
     setShowIssues(true);
     const found = validateAdjustmentDraft(draft, knownCodes);
     if (found.length > 0) {
@@ -398,12 +508,15 @@ export function PeriodicAdjustmentFormView({
     "aria-describedby": describedBy(field, hasHint),
   });
 
-  const moneyProps = (field: AdjustmentFieldId) => ({
+  // `hasHint` FOR THE SAME REASON `textProps` TAKES IT: a control whose hint is not in its
+  // `aria-describedby` has a hint only sighted readers get. Three money controls on this form carry
+  // one (the explicit movement, the supplied amount, and the settled figure's derivation note).
+  const moneyProps = (field: AdjustmentFieldId, hasHint = false) => ({
     id: adjustmentFieldId(field),
     ref: (node: FieldNode | null) => registerField(field, node),
     disabled: busy,
     "aria-invalid": issueFor(field) !== undefined || rejectedOn(field) ? (true as const) : undefined,
-    "aria-describedby": describedBy(field, false),
+    "aria-describedby": describedBy(field, hasHint),
   });
 
   return (
@@ -462,7 +575,7 @@ export function PeriodicAdjustmentFormView({
             </div>
           ) : (
             <Field field="adjustmentCents" errorText={errorFor("adjustmentCents")} label={t("adjustmentCents")} hint={t("adjustmentCentsHelp")}>
-              <MoneyInput {...moneyProps("adjustmentCents")} cents={draft.adjustmentCents} mode="signed"
+              <MoneyInput {...moneyProps("adjustmentCents", true)} cents={draft.adjustmentCents} mode="signed"
                 onValueChange={(c) => c.ok && set("adjustmentCents", c.cents ?? 0)} />
             </Field>
           )}
@@ -518,7 +631,7 @@ export function PeriodicAdjustmentFormView({
             </NativeSelect>
           </Field>
           <Field field="amountCents" errorText={errorFor("amountCents")} label={t("amountCents")} hint={t("amountCentsHelp")}>
-            <MoneyInput {...moneyProps("amountCents")} cents={draft.amountCents} mode="unsigned"
+            <MoneyInput {...moneyProps("amountCents", true)} cents={draft.amountCents} mode="unsigned"
               onValueChange={(c) => c.ok && set("amountCents", c.cents ?? 0)} />
           </Field>
           <div className="grid gap-3 sm:grid-cols-2">
@@ -539,8 +652,15 @@ export function PeriodicAdjustmentFormView({
                 accounts={accounts} props={textProps("paymentAccountCode", true)} onPick={(v) => set("paymentAccountCode", v)}
                 placeholder={t("accountNone")} />
             </Field>
-            <Field field="settledCents" errorText={errorFor("settledCents")} label={t("settledCents")}>
-              <MoneyInput {...moneyProps("settledCents")} cents={draft.settledCents} mode="unsigned"
+            {/* LABELLED AS A DERIVATION, because that is what it is (adversarial migration-safety
+                review, N3). 0194 has no `settled_cents` particular and the route has no such key:
+                this figure exists to shape the third and fourth DERIVED lines, and the split is
+                recoverable from the posted entry rather than from the record of the particulars.
+                Saying so on the control is the honest alternative to letting a preparer assume the
+                history will state it back. */}
+            <Field field="settledCents" errorText={errorFor("settledCents")} label={t("settledCents")}
+              hint={t("settledCentsHelp")}>
+              <MoneyInput {...moneyProps("settledCents", true)} cents={draft.settledCents} mode="unsigned"
                 onValueChange={(c) => c.ok && set("settledCents", c.cents ?? 0)} />
             </Field>
           </div>
@@ -569,6 +689,28 @@ export function PeriodicAdjustmentFormView({
           maxLength={INSTRUCTION_MAX_CHARS}
           onChange={(e) => set("instruction", e.target.value)} />
       </Field>
+
+      {/* THE UPLOAD/REFERENCE ENTRANCE — the composer's OWN chooser, mounted here. See this file's
+          header for why #643's third acceptance line is satisfied by this control rather than by a
+          second door. The refusal it can attract is named beside it: a cited document that is no
+          longer an active, byte-verified filing of this client comes back as a 400 whose `field` is
+          `sourceRefs[N]`, which `fieldForServerPath` maps onto THIS control. */}
+      <EvidenceChooser
+        clientId={clientId}
+        reads={evidence}
+        value={documentId}
+        disabled={busy}
+        invalid={phase.kind === "sourceConflict" || (phase.kind === "rejected" && phase.field === "evidence")}
+        errorText={phase.kind === "rejected" && phase.field === "evidence" ? tmj("evidence.invalid") : ""}
+        registerField={(node) => registerField("evidence", node)}
+        onChange={(next) => {
+          setDocumentId(next);
+          // A REFUSAL ABOUT THE OLD CHOICE IS RETIRED BY MAKING A NEW ONE.
+          if (phase.kind === "sourceConflict" || (phase.kind === "rejected" && phase.field === "evidence")) {
+            setPhase({ kind: "editing" });
+          }
+        }}
+      />
 
       {/* THE ENTRY THESE PARTICULARS PRODUCE. Rendered through the SAME line table the composer
           uses, and DISABLED: the database re-derives this relationship and refuses an entry whose
@@ -641,7 +783,14 @@ export function PeriodicAdjustmentFormView({
       <p className="text-xs text-muted-foreground">{kept ? tc("draftKept") : tc("draftNotKept")}</p>
 
       <div className="flex flex-wrap items-center gap-3">
-        <Button type="submit" disabled={busy}>{busy ? tc("submitting") : t("submit")}</Button>
+        {/* DISABLED WHILE A SOURCE CONFLICT STANDS, because the press cannot succeed: the same
+            intent with the same spoken-for document gets the same 409 for ever, and a control that
+            accepts the press is the product contradicting itself. The chooser's `onChange` clears
+            the phase, so choosing another document (or "No document") re-enables it in the same
+            tick the choice is made. */}
+        <Button type="submit" disabled={busy || phase.kind === "sourceConflict"}>
+          {busy ? tc("submitting") : t("submit")}
+        </Button>
         {/* A NAMED STATUS, not only a disabled button — §3's short-mutation rule; a live region
             because "Checking…" REPLACES "Submitting…" mid-flight. */}
         <span role="status" className="text-sm text-muted-foreground">
@@ -737,7 +886,49 @@ function AdjustmentPhaseBanner({
 }) {
   const t = useTranslations("PeriodicAdjustment");
   const tc = useTranslations("JournalComposer");
+  const tmj = useTranslations("ManualJournal");
+  const tWalk = useTranslations("WalkFindings728");
   if (phase.kind === "editing" || phase.kind === "submitting" || phase.kind === "checking") return null;
+
+  if (phase.kind === "sourceConflict") {
+    // NO "TRY AGAIN", AND NO NEW INTENT KEY. The document is spoken for; rotating the identity and
+    // pressing again is exactly the second effect the rule prevents. The only forward moves are to
+    // open the entry that already stands on it, or to choose another document in the chooser above.
+    //
+    // THE CLAIMANT LINE SITS OUTSIDE THE LIVE REGION, and that is the composer's measured shape
+    // (#728 delta review round 4, finding [7]): `StateBanner tone="error"` computes `role="alert"`,
+    // an assertive region that re-announces the WHOLE box on any mutation — so the alert carries the
+    // refusal and nothing else, and the late-arriving claimant line is a plain sibling with no role.
+    const elsewhere = phase.entryClientId !== null && phase.entryClientId !== clientId;
+    const claimantHref = phase.entryId === null || phase.entryClientId === null
+      ? null
+      : journalEntryHref(phase.entryClientId, phase.entryId);
+    return (
+      <div className="flex w-full max-w-prose flex-col items-start gap-1.5">
+        <StateBanner tone="error" title={tmj("sourceConflict.title")}>
+          {tmj("sourceConflict.body")}
+        </StateBanner>
+        {claimantHref === null ? null : (
+          <p className="text-sm text-muted-foreground">
+            {elsewhere ? (
+              <>
+                {tWalk("sourceConflictElsewhere", {
+                  client: phase.entryClientName ?? tWalk("evidenceSpokenForUnnamedClient"),
+                })}
+                {" "}
+              </>
+            ) : null}
+            <Link
+              href={claimantHref}
+              className="text-sm font-medium text-primary underline underline-offset-2"
+            >
+              {tmj("sourceConflict.link")}
+            </Link>
+          </p>
+        )}
+      </div>
+    );
+  }
 
   if (phase.kind === "rejected") {
     return (

@@ -163,10 +163,11 @@ export type JournalSourceRefWire = { kind: "document"; documentId: string };
  *
  * IT REUSES `SubmitJournalWorkResult` VERBATIM, and that is a claim rather than a convenience:
  * every outcome this door can produce is one of that lane's, in the same shape, because the two
- * routes share `workErrorResponse`. The one arm that cannot occur here is `source_conflict`
- * (evidence is optional on this door and this journey's form offers no chooser yet) — a union
- * member that is never returned is harmless; a second, nearly-identical union would be a second
- * place for a status to be classified differently.
+ * routes share `workErrorResponse` — `source_conflict` INCLUDED. That arm was unreachable while
+ * this journey's form had no chooser; it has one now (`components/accounting/evidence-chooser.tsx`,
+ * the same component the composer mounts), so a document already backing a posted entry comes back
+ * here as the 409 `source_already_posted` the shared response map builds, exactly as it does on the
+ * journal door.
  */
 export async function submitPeriodicAdjustmentWork(
   auth: SessionTokenAccessor,
@@ -176,6 +177,10 @@ export async function submitPeriodicAdjustmentWork(
     purpose: string;
     basis: JournalBasisWire;
     adjustment: Record<string, unknown>;
+    /** Omitted entirely for an evidenceless adjustment — the route reads an absent, null or empty
+     *  list identically (`toDbSourceRefs`), and sending `[]` would be the same request with more
+     *  bytes and one more shape for a reader to reason about. */
+    sourceRefs?: ReadonlyArray<JournalSourceRefWire>;
   },
   signal?: AbortSignal,
 ): Promise<SubmitJournalWorkResult> {
@@ -203,7 +208,14 @@ export async function submitPeriodicAdjustmentWork(
   }
   if (res.status === 401 || res.status === 403) return { kind: "denied" };
   if (res.status === 404) return { kind: "not_found" };
-  if (res.status === 409) return { kind: "conflict", workId: str(body.work_id) };
+  if (res.status === 409) {
+    // TWO CONFLICTS, TWO NEXT ACTIONS — `submitJournalWork`'s own note applies verbatim, and the
+    // two doors share the response map that builds both bodies (`workErrorResponse`).
+    if (str(body.error) === "source_already_posted") {
+      return { kind: "source_conflict", entryId: str(body.entry_id), documentId: str(body.document_id) };
+    }
+    return { kind: "conflict", workId: str(body.work_id) };
+  }
   return {
     kind: "unavailable",
     message: str(body.error) ?? str(body.message) ?? `the runtime answered ${res.status}`,

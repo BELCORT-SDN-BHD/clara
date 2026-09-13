@@ -455,11 +455,28 @@ export function toAdjustmentWire(
  * added; all of them render as a form-level message carrying the server's own reason, which is
  * honest — instead of focusing whichever control happened to share a prefix.
  */
+/**
+ * EVERY KEY HERE IS A KEY THE SERVER CAN ACTUALLY NAME, and that is the whole claim this Set makes.
+ * It is the intersection of `packages/runtime/src/workRoutes.ts`'s `ADJUSTMENT_STRINGS` /
+ * `ADJUSTMENT_CENTS` tables and migration 0194's `clara._assert_adjustment_basis` /
+ * `_assert_adjustment_relationships` field paths — measured, both halves, rather than mirrored from
+ * this form's own control list.
+ *
+ * `settledCents` IS DELIBERATELY ABSENT (adversarial migration-safety review, N3). It is a
+ * CLIENT-SIDE DERIVATION INPUT and nothing else: it shapes the third and fourth lines this form
+ * derives (`derivedLines`), and neither the route nor 0194 has a `settled_cents` particular, so no
+ * server refusal can ever carry that path. Listing it would be a claim with nothing behind it, and
+ * `fieldForAdjustmentPath` would be promising to focus a control for a refusal that cannot arrive.
+ * Its LOCAL validation still names it — `validateAdjustmentDraft` raises `settlementNeedsAccount` /
+ * `paymentLegUnused` / `overSettled` against `settledCents` and `firstInvalidAdjustmentField`
+ * focuses it — because that is this form's own rule about its own control, which is a different
+ * thing from a wire path.
+ */
 const ADJUSTMENT_FIELDS = new Set<string>([
   "periodStart", "periodEnd", "instruction", "method", "openingCents", "closingCents",
   "adjustmentCents", "countedAt", "countReference", "inventoryAccountCode", "costAccountCode",
   "obligationKind", "expenseAccountCode", "liabilityAccountCode", "advanceAccountCode",
-  "paymentAccountCode", "amountCents", "settledCents", "particularsSource",
+  "paymentAccountCode", "amountCents", "particularsSource",
 ]);
 
 export function fieldForAdjustmentPath(path: string | null): AdjustmentFieldId | null {

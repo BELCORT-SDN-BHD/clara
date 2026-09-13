@@ -43,6 +43,13 @@ export type StoredAdjustmentDraft = {
    *  restores an overridden memo rather than silently re-deriving one. */
   postingDate: string;
   memo: string;
+  /** #634's field, on this lane's door too — the OPTIONAL source document, or null for "no
+   *  document". It rides the draft under the SAME key as the particulars because it is part of the
+   *  same intent: `clara._admit_accounting_work_core` compares the canonical source refs alongside
+   *  the basis and particulars digests, so re-sending one intent key with a DIFFERENT document is a
+   *  typed conflict rather than a replay. A draft written before this field existed reads as null —
+   *  evidence is optional, so absence is a valid state and never a reason to discard the figures. */
+  documentId?: string | null;
 };
 
 const KEY_PREFIX = "clara:periodic-adjustment-draft";
@@ -96,6 +103,10 @@ function parseDraft(raw: string): StoredAdjustmentDraft | null {
     draft,
     postingDate: isString(stored.postingDate) ? stored.postingDate : "",
     memo: isString(stored.memo) ? stored.memo : "",
+    // UNTRUSTED INPUT, like every other field here: a stored document id that is not a non-empty
+    // string is DROPPED (the draft survives without it) rather than carried into a wire body the
+    // admission door would refuse by name. The identical reading `journal-draft.ts` gives it.
+    documentId: isString(stored.documentId) && stored.documentId.trim() !== "" ? stored.documentId : null,
   };
 }
 
