@@ -12,6 +12,7 @@ import { DocumentEntries } from "./document-entries";
 import { DocumentFilingsHistory } from "./document-filings-history";
 import { DocumentAdmin } from "./document-admin";
 import { DocumentExtractPanel } from "./document-extract-panel";
+import { DocumentStatePanel } from "./document-state-panel";
 import { CorrectionWizard } from "./correction-wizard";
 import { DoorFeedback } from "./door-feedback";
 import { SectionHeader } from "@/components/common/section-header";
@@ -68,6 +69,15 @@ export function DocumentDetail({
         tasks={data.processingTasks}
         onShowExtraction={() => setExtractOpen(true)}
       />
+
+      {/* #624 — the FOUR independent states, directly under the identity block and ABOVE
+          filings/evidence/entries. Placement is deliberate: a professional opening a document
+          asks "what has Clara done with this?" before they ask anything else, and the old answer
+          — one `extraction: {status}` badge in the block above — could say "done" about a
+          document nothing had been read from. Its own hydrated cell (one governed RPC that
+          resolves its own scope and can honestly answer null), so a states refresh never drags
+          five unrelated relation reads with it. */}
+      <DocumentStatePanel documentId={documentId} clientId={clientId} />
 
       <section className="flex flex-col gap-1">
         <SectionHeader level={4}>{t("filingsHeading")}</SectionHeader>

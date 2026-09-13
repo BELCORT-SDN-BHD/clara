@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useHydratedPart } from "@/lib/parts/hooks";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
@@ -23,9 +24,35 @@ import { CodingLanePanel } from "./coding-lane-panel";
  * `key`ed by `documentId` per lib/parts/hooks.ts's consumer contract (a card whose
  * captured id changes must unmount/remount, never rely on a loader swap alone).
  */
+/** The ONE search param this surface owns. #620 is adding the same param for the byte door; the
+ *  spelling is shared deliberately so the two changes merge as one line rather than two
+ *  competing conventions. */
+export const DOCUMENT_PARAM = "document";
+
 export function DocumentsWorkbench({ clientId }: { clientId: string }) {
   const t = useTranslations("ClientDocuments");
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+
+  /** #624 — THE SELECTED DOCUMENT LIVES IN THE URL, not in component state.
+   *
+   *  It used to be `useState<string | null>(null)`, which made the detail pane unaddressable:
+   *  a professional could not send a colleague the document they were looking at, a reload lost
+   *  the selection, and browser Back out of a detail went to the previous PAGE rather than back
+   *  to this tab's list. Appendix C's shared contract asks for a stable URL and a Back that
+   *  restores the list; a router param is the whole implementation of both.
+   *
+   *  `router.push` (not `replace`) on select, so Back returns to the list; `push` again on clear
+   *  so an explicit close is itself undoable. The param is dropped entirely when nothing is
+   *  selected — a bare `?document=` in the address bar would be a lie about state. */
+  const selectedId = searchParams.get(DOCUMENT_PARAM);
+  const setSelectedId = useCallback((id: string | null) => {
+    const next = new URLSearchParams(searchParams.toString());
+    if (id) next.set(DOCUMENT_PARAM, id); else next.delete(DOCUMENT_PARAM);
+    const query = next.toString();
+    router.push(query ? `${pathname}?${query}` : pathname);
+  }, [router, pathname, searchParams]);
 
   const filed = useHydratedPart(sessionTokenAccessor, () => loadFiledDocuments(clientId, t));
   const candidates = useHydratedPart(sessionTokenAccessor, () => loadOpenCandidates(clientId, t));

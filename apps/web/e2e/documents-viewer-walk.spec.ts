@@ -339,6 +339,117 @@ test.describe("documents viewer — the MIME gate, the page overlay and the CSP"
     await expect(page.getByText("Invoice total")).toBeVisible();
   });
 
+  // =====================================================================================
+  // #624 — THE FOUR INDEPENDENT STATES, in a real browser.
+  //
+  // The unit battery proves the panel's arithmetic over a mocked read. What only a browser can
+  // prove is the rest of the acceptance: that the four states render as four SEPARATE things on
+  // the real page, that the failing fact still links to its own region on a real pdf.js canvas,
+  // that the selection survives a URL and a Back, and that all of it stays usable at 320px and
+  // at 200% zoom.
+  // =====================================================================================
+
+  test("#624: the four states render INDEPENDENTLY, and a failed arithmetic check is named without hiding the fact", async ({ page }) => {
+    await signIn(page);
+    await page.goto(DOCUMENTS_URL);
+    await selectDocument(page, /invoice-april\.pdf/);
+
+    await expect(page.getByRole("heading", { name: "What Clara has done with this document" })).toBeVisible();
+
+    // FOUR SEPARATE STATES, each read by its OWN accessible name. This is the assertion the old
+    // single `extraction: done` badge could not satisfy: extraction succeeded AND the facts
+    // failed a check, at the same time, on the same document, and the page says both.
+    await expect(page.getByRole("group", { name: "Custody: Bytes verified" })).toBeVisible();
+    await expect(page.getByRole("group", { name: "Extraction: Done" })).toBeVisible();
+    await expect(page.getByRole("group", { name: "Facts: Failed a check" })).toBeVisible();
+    await expect(page.getByRole("group", { name: "Operation: Not coded yet" })).toBeVisible();
+
+    // The failing check is NAMED, and the facts are explicitly still readable.
+    await expect(page.getByText(/invoice totals identity/)).toBeVisible();
+    await expect(page.getByText(/stay readable below/)).toBeVisible();
+
+    // The source version travels with the facts, and the registry's own sentence explains the
+    // room they move in — verbatim, with its version.
+    await expect(page.getByText(/version 1 · 4 region/)).toBeVisible();
+    await expect(page.getByText(/capability registry v1/)).toBeVisible();
+    await expect(page.getByText(/Per-line invoice facts are planned/)).toBeVisible();
+
+    // …AND THE FACT STILL LINKS TO ITS SOURCE REGION. A document that failed a check must not
+    // lose its evidence trail — that is the half of acceptance 2 a state badge cannot carry.
+    await page.getByRole("button", { name: "Show page overlay" }).click();
+    await expect(page.locator("canvas").first()).toBeVisible({ timeout: 30_000 });
+    await page.getByRole("button", { name: "Invoice total" }).click();
+    await expect(page.locator("table tr[aria-selected='true']")).toContainText("Invoice total");
+  });
+
+  test("#624: a document with NO facts never borrows the other document's success wording", async ({ page }) => {
+    // The vacuity control on the cell above. Without it, "Failed a check" appearing on the PDF
+    // could be a string rendered unconditionally by the panel.
+    await signIn(page);
+    await page.goto(DOCUMENTS_URL);
+    await selectDocument(page, /myinvois-e-invoice\.xml/);
+
+    await expect(page.getByRole("group", { name: "Extraction: Stored, not parsed" })).toBeVisible();
+    await expect(page.getByRole("group", { name: "Facts: None recorded" })).toBeVisible();
+    await expect(page.getByText(/invoice totals identity/)).toHaveCount(0);
+    await expect(page.getByText(/Recorded and checked/)).toHaveCount(0);
+  });
+
+  test("#624: ?document= DEEP-LINKS the detail, and browser Back restores the list", async ({ page }) => {
+    await signIn(page);
+
+    // A cold navigation straight to the param — the shareable-link case. If the selection lived
+    // in component state this would render the empty detail pane.
+    await page.goto(`${DOCUMENTS_URL}?document=${DOCS.docPdf}`);
+    await expect(page.getByRole("heading", { name: "What Clara has done with this document" })).toBeVisible();
+    await expect(page.getByRole("group", { name: "Facts: Failed a check" })).toBeVisible();
+
+    // Selecting the OTHER document moves the URL, so the address bar is the state.
+    await selectDocument(page, /myinvois-e-invoice\.xml/);
+    await expect.poll(() => new URL(page.url()).searchParams.get("document")).toBe(DOCS.docXml);
+
+    // …and Back returns to the first document rather than leaving the page entirely.
+    await page.goBack();
+    await expect.poll(() => new URL(page.url()).searchParams.get("document")).toBe(DOCS.docPdf);
+    await expect(page.getByRole("group", { name: "Facts: Failed a check" })).toBeVisible();
+
+    // One more Back leaves the detail closed and the LIST intact — the recipe's own
+    // "Back control restores the list selection" requirement.
+    await page.goBack();
+    await expect.poll(() => new URL(page.url()).searchParams.get("document")).toBeNull();
+    await expect(page.getByText("Select a document to see its evidence, filings and doors.")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Filed to this client" })).toBeVisible();
+  });
+
+  test("#624: the four states stay readable at 320px and at 200% zoom, with no page-wide horizontal scroll", async ({ page }) => {
+    await signIn(page);
+    await page.setViewportSize({ width: 320, height: 720 });
+    await page.goto(`${DOCUMENTS_URL}?document=${DOCS.docPdf}`);
+
+    for (const name of ["Custody: Bytes verified", "Extraction: Done", "Facts: Failed a check", "Operation: Not coded yet"]) {
+      await expect(page.getByRole("group", { name })).toBeVisible();
+    }
+
+    // NO PAGE-WIDE HORIZONTAL TRAP (appendix C §4). A wide child may scroll inside its own
+    // labelled viewport; the document element may not.
+    const overflow = async () => page.evaluate(() => ({
+      scroll: document.documentElement.scrollWidth,
+      client: document.documentElement.clientWidth,
+    }));
+    const narrow = await overflow();
+    expect(narrow.scroll, `320px: ${narrow.scroll} > ${narrow.client}`).toBeLessThanOrEqual(narrow.client + 1);
+
+    // 200% ZOOM, expressed the way a browser actually does it: half the CSS viewport at the same
+    // device pixels. 640x360 is 1280x720 at 200%.
+    await page.setViewportSize({ width: 640, height: 360 });
+    for (const name of ["Facts: Failed a check", "Operation: Not coded yet"]) {
+      await expect(page.getByRole("group", { name })).toBeVisible();
+    }
+    await expect(page.getByText(/invoice totals identity/)).toBeVisible();
+    const zoomed = await overflow();
+    expect(zoomed.scroll, `200%: ${zoomed.scroll} > ${zoomed.client}`).toBeLessThanOrEqual(zoomed.client + 1);
+  });
+
   test("axe: the documents tab with the overlay open has no WCAG A/AA violations", async ({ page }) => {
     await signIn(page);
     await page.goto(DOCUMENTS_URL);

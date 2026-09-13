@@ -18,7 +18,9 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { createElement } from "react";
+import { createElement, useState } from "react";
+import { AppRouterContext } from "next/dist/shared/lib/app-router-context.shared-runtime";
+import { PathnameContext, SearchParamsContext } from "next/dist/shared/lib/hooks-client-context.shared-runtime";
 import { NextIntlClientProvider } from "next-intl";
 import { renderComponent, clickButton, textOf, setFieldValue } from "../../test/hookHarness";
 import { enableDomInspection } from "../../test/domInspect";
@@ -33,8 +35,38 @@ import messages from "../../messages/en.json";
 // out of React's act() — see test/domInspect.ts:435-460.
 enableDomInspection();
 
+const PATHNAME = "/clients/client-1/documents";
+
+/** A REAL, tiny router rather than a set of no-ops — #624 moved this workbench's selected
+ *  document into the URL (`?document=<id>`), so a stub whose `push` does nothing would leave
+ *  the detail panel permanently unmounted and every cell below asserting about a control that
+ *  never rendered. `push` parses the url it is handed and re-renders through
+ *  `SearchParamsContext`, which is precisely what Next does to a client component when only the
+ *  query changes. The `activity-feed.test.tsx` harness established the provider trio; this one
+ *  adds the state, because that feed reads the query while this workbench also WRITES it. */
+function Harness({ children }: { children: (search: URLSearchParams) => ReturnType<typeof createElement> }) {
+  const [search, setSearch] = useState(() => new URLSearchParams());
+  const router = {
+    push: (url: string) => setSearch(new URLSearchParams(url.split("?")[1] ?? "")),
+    replace: (url: string) => setSearch(new URLSearchParams(url.split("?")[1] ?? "")),
+    refresh: () => {}, back: () => {}, forward: () => {}, prefetch: () => {},
+  };
+  return createElement(
+    SearchParamsContext.Provider as never,
+    { value: search as never },
+    createElement(
+      AppRouterContext.Provider as never,
+      { value: router as never },
+      createElement(PathnameContext.Provider as never, { value: PATHNAME as never }, children(search) as never),
+    ),
+  );
+}
+
 function App(children: ReturnType<typeof createElement>) {
-  return createElement(NextIntlClientProvider, { locale: "en", messages, children });
+  return createElement(NextIntlClientProvider, {
+    locale: "en", messages,
+    children: createElement(Harness, { children: () => children }),
+  });
 }
 
 const CLIENT = "client-1";
@@ -75,6 +107,11 @@ function makeFetch(counts: Record<string, number>): typeof fetch {
         case "journal_entries": return [];
         case "coding_tasks_visible": return [];
         case "lint_findings": return [];
+        // #624's state panel. NULL is the RPC's own legitimate answer for a document this
+        // caller may not read under this client, and the panel renders an honest "not
+        // available" for it — which keeps this file's subject (read COUNTS after a filing act)
+        // free of a second fixture it does not need.
+        case "get_document_state": return null;
         case "retire_document_filing": return { ok: true };
         default: return [];
       }

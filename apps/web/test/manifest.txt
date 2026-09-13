@@ -93,6 +93,7 @@ components/documents/coding-lane-a11y.test.tsx
 components/documents/coding-lane-keyboard.test.tsx
 components/documents/document-facts-table.test.tsx
 components/documents/document-metadata-viewer-gate.test.tsx
+components/documents/document-state-panel.test.tsx
 components/documents/documents-a11y.test.tsx
 components/documents/documents-governance-a11y.test.tsx
 components/documents/documents-governance-keyboard.test.tsx
@@ -238,6 +239,7 @@ lib/command/do-actions.test.ts
 lib/command/routes.test.ts
 lib/documents/bytes.test.ts
 lib/documents/copy.test.ts
+lib/documents/document-state.test.ts
 lib/documents/doors.test.ts
 lib/documents/extract-shape.test.ts
 lib/documents/intake.test.ts

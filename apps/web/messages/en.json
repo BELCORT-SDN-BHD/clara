@@ -1327,7 +1327,7 @@
     "loading": "Loading…",
     "notBuiltYet": "Not built yet",
     "uploadHeading": "Upload",
-    "uploadHint": "Drop files here or pick — up to 20MB each; queued 2 at a time.",
+    "uploadHint": "Drop files here or pick — PDF, PNG, JPEG, WebP, TIFF, HEIC, XML, CSV, TSV, OFX/QFX, XLSX or DOCX, up to 20MB each; queued 2 at a time. Anything else is refused at upload. An admitted file is always stored and viewable; what Clara can read out of it depends on the file type and the document type, and each document's detail says which.",
     "uploadInputLabel": "Upload documents",
     "retry": "Retry",
     "remove": "Remove",
@@ -1495,7 +1495,66 @@
     "correctionAttestationPlaceholder": "Attestation (only used on the solo path)",
     "correctionApprove": "Approve + apply",
     "correctionDone": "Correction completed.",
-    "correctionClose": "Close"
+    "correctionClose": "Close",
+    "statesHeading": "What Clara has done with this document",
+    "statesLoading": "Reading this document’s custody, extraction, facts and operation states…",
+    "statesNotAvailable": "These states are not available for this document under this client.",
+    "stateCustodyLabel": "Custody",
+    "stateCustody": {
+      "held": "Held",
+      "verified": "Bytes verified",
+      "stored": "Stored"
+    },
+    "stateCustodyDetail": "sha256 {sha}… · retention {retention}",
+    "stateCustodyHoldReason": "Under legal hold: {reason}",
+    "stateExtractionLabel": "Extraction",
+    "stateExtraction": {
+      "notAttempted": "Not attempted",
+      "pending": "Pending",
+      "running": "Running",
+      "done": "Done",
+      "failed": "Failed",
+      "storedUnparsed": "Stored, not parsed"
+    },
+    "stateExtractionNoTasks": "No extraction task has ever been created for this document.",
+    "stateEngineUnknown": "engine not recorded",
+    "stateFactsLabel": "Facts",
+    "stateFacts": {
+      "unsupportedKind": "None for this type",
+      "unsupportedFormat": "Cannot be read from this file",
+      "pending": "Waiting for the type",
+      "none": "None recorded",
+      "partial": "Recorded, unchecked",
+      "validated": "Recorded and checked",
+      "invalid": "Failed a check"
+    },
+    "stateFactsVersion": "version {version} · {regions} region(s)",
+    "stateFactsFailedChecks": "Failed: {checks}. The recorded values stay readable below.",
+    "stateFactsUnmeasuredChecks": "Not measured: {checks}. The terms this check needs were never recorded.",
+    "stateFactsNoChecks": "No arithmetic check has been recorded against these facts.",
+    "stateOperationLabel": "Operation",
+    "stateOperation": {
+      "notApplicable": "Not applicable to this type",
+      "uncoded": "Not coded yet",
+      "coded": "Coded, draft",
+      "posted": "Posted",
+      "reconciled": "In the bank lane"
+    },
+    "stateOperationDetail": "{entries} journal entry/entries · {statements} statement(s)",
+    "stateOperationNotApplicableDetail": "Clara never posts an entry from this type of document.",
+    "capabilityRegistryVersion": "capability registry v{version}",
+    "capabilityLimit": {
+      "invoiceLineItems": "Per-line invoice facts are {level}: Clara records the header totals with their source regions, not the individual lines.",
+      "openingBalance": "The opening balance is {level} from this file format, so the statement’s own balance chain can never be closed.",
+      "reader": "Reader limit: {level}.",
+      "router": "Routing limit: {level}."
+    },
+    "capabilityLimitUnknown": "{name}: {level}",
+    "checkName": {
+      "invoiceSixTermIdentity": "invoice totals identity",
+      "statementChainCloses": "statement balance chain",
+      "statementPrintedTotals": "printed statement totals"
+    }
   },
   "ClientBank": {
     "heading": "Bank",
