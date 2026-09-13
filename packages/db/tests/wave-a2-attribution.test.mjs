@@ -183,15 +183,47 @@ test("P11 the two allowed supplier keys persist on a structured_parse task", asy
 test("P11 a %tin%/%ssm%/%account%-matching field_path OFF the allowlist REFUSES at persist (the #3 gate)", async (t) => {
   if (skip15(t)) return;
   const firm = await firmOf(world.clients.A1);
-  // Each matches a matcher pattern but is NOT myinvois.supplier_tin/supplier_brn.
-  const rogue = ["myinvois.buyer_tin", "rogue.company_ssm", "vendor.bank_account"];
-  for (const fp of rogue) {
+  // Matches a matcher pattern, is NOT myinvois.supplier_tin/supplier_brn, and is CANONICAL —
+  // so the only wall that can be refusing it is the #3 attribution gate.
+  //
+  // WHY THE CANONICALITY MATTERS (ticket 624 / C33.4): 0191 added an EARLIER wall at this same
+  // boundary — clara._assert_field_path, which refuses a path whose first segment is not a
+  // registered namespace. The two older rogues this cell carried, `rogue.company_ssm` and
+  // `vendor.bank_account`, are now caught by THAT wall and never reach the attribution gate at
+  // all. Both still raise CLR10, so leaving them here would have kept the cell green while it
+  // quietly stopped testing its own subject. They move to their own assertion below, which
+  // names the wall that catches them, and the #3 gate keeps a rogue it can actually refuse.
+  const task = await makeRunningTask({ firm, lane: "structured_parse", engineId: "clara-structured:v1" });
+  if (!task) { noteLane("no running structured_parse task — the #3 rogue cell is skipped"); return; }
+  let err = null;
+  try { await persistExtraction(task, [region("myinvois.buyer_tin", "9999")]); } catch (e) { err = e; }
+  assert.ok(err, "persisting a structured_parse region with a pattern-matching off-allowlist field_path REFUSES");
+  if (err && err.code !== "CLR10") noteLane(`write-gate refused myinvois.buyer_tin with ${err.code} (contract §3.1 / pin implies CLR10) — code assumption`);
+  if (err && err.detail) {
+    assert.match(String(err.detail), /attribution_field_not_allowed/,
+      "the ATTRIBUTION gate is what refused it — not the syntax wall in front of it");
+  }
+});
+
+test("[ticket 624] a NON-CANONICAL field_path is refused by the syntax wall BEFORE the attribution gate sees it", async (t) => {
+  if (skip15(t)) return;
+  const firm = await firmOf(world.clients.A1);
+  const grammarLive = (await rootQuery(
+    "select to_regprocedure('clara._assert_field_path(text)') is not null as ok")).rows[0].ok;
+  if (!grammarLive) { noteLane("clara._assert_field_path absent (pre-0191 frontier) — the syntax-wall cell is skipped"); return; }
+  // The two rogues the cell above used to carry. Neither names a registered namespace, so the
+  // boundary refuses them on SYNTAX, with its own reason, before any attribution question is
+  // asked. That ordering is deliberate: a malformed path must never spend the opening-fact
+  // derivation, and it must never be reported as an attribution finding it is not.
+  for (const fp of ["rogue.company_ssm", "vendor.bank_account"]) {
     const task = await makeRunningTask({ firm, lane: "structured_parse", engineId: "clara-structured:v1" });
     if (!task) continue;
     let err = null;
     try { await persistExtraction(task, [region(fp, "9999")]); } catch (e) { err = e; }
-    assert.ok(err, `persisting a structured_parse region with a pattern-matching off-allowlist field_path (${fp}) REFUSES`);
-    if (err && err.code !== "CLR10") noteLane(`write-gate refused ${fp} with ${err.code} (contract §3.1 / pin implies CLR10) — code assumption`);
+    assert.ok(err, `a non-canonical field_path (${fp}) must be refused`);
+    assert.equal(err.code, "CLR10", `${fp}: expected CLR10, got ${err.code}`);
+    assert.match(String(err.message), /not a registered namespace/,
+      `${fp}: the SYNTAX wall must be the one that refused it, and it must say so`);
   }
 });
 
@@ -209,6 +241,11 @@ test("P11 the OCR lane stays UNGATED — a %tin%-matching field_path persists on
   const firm = await firmOf(world.clients.A1);
   const task = await makeRunningTask({ firm, lane: "ocr", engineId: "azure-di:prebuilt-layout:4.0" });
   if (!task) { noteLane("no running OCR task — the OCR-untouched cell is skipped"); return; }
-  await assert.doesNotReject(() => persistExtraction(task, [region("buyer.tin", "9999")]),
+  // `myinvois.buyer_tin` rather than the `buyer.tin` this cell carried before ticket 624: the
+  // same %tin% match, the same off-allowlist status, now under a REGISTERED namespace so the
+  // 0191 syntax wall lets it through and the cell's own subject — that the #3 attribution gate
+  // is structured_parse-only — is the only thing being measured. The cell above proves the
+  // structured lane refuses this exact path, which is what makes this one discriminating.
+  await assert.doesNotReject(() => persistExtraction(task, [region("myinvois.buyer_tin", "9999")]),
     "the OCR lane is not gated by #3 — its verbatim-field_path trust model is unchanged (a named, recorded residual)");
 });
