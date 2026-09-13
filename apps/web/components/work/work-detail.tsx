@@ -534,13 +534,25 @@ export function WorkDetailView({
               words: a Work admitted on a person's own figures is a legitimate state, not a gap. */}
           <SectionHeader level={2}>{t("sourcesHeading")}</SectionHeader>
           <p className="max-w-prose text-sm text-muted-foreground">{t("sourcesNote")}</p>
+          {/* ITS OWN WORDS, never the identity block's. Reusing `noSourceDocument` here printed the
+              SAME sentence twice on one page — a second place to read the same fact, and a strict
+              locator collision that a walk caught within the hour. The block above answers
+              "is there a source"; this answers "what is in this view, and why is that all right". */}
           {work.source_refs === null || work.source_refs.length === 0 ? (
-            <p className="text-sm text-muted-foreground">{t("noSourceDocument")}</p>
+            <p className="max-w-prose text-sm text-muted-foreground">{t("sourcesEmpty")}</p>
           ) : (
             <ul className="flex flex-col gap-1 text-sm">
               {work.source_refs.map((ref, i) => (
                 <li key={`${ref.kind}-${i}`} className="text-foreground wrap-anywhere">
-                  {ref.kind === "clara_chat" ? t("fromClaraConversation") : t("sourceOther", { kind: ref.kind })}
+                  {/* ONE LINE PER REF, in its OWN words — again not the identity block's. The
+                      summary above answers "was there a source"; this names WHAT each one is, and
+                      the unknown arm prints the database's own `kind` token rather than inventing
+                      a label for a vocabulary this build has not learned. */}
+                  {ref.kind === "chat_task" || ref.kind === "clara_chat"
+                    ? t("sourceRefChat")
+                    : ref.kind === "document"
+                      ? t("sourceRefDocument")
+                      : t("sourceRefUnknown", { kind: ref.kind })}
                 </li>
               ))}
             </ul>

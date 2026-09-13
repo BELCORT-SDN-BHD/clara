@@ -548,7 +548,14 @@ test("a LOST acknowledgement resolves to the SAME Work, because the re-post carr
   await expect(list.getByText("Queued", { exact: true })).toHaveCount(1);
   // Newest first, so the row this cell admitted is the first one — and following
   // its own link is what proves the list addresses the same durable record.
-  await list.getByRole("link", { name: "Open" }).first().click();
+  //
+  // #641 — THE ROW LINK IS THE MEMO, not a separate "Open work" cell. The rebuilt list keeps the
+  // primary action VISIBLE on the row itself (appendix C §3: a primary next action never lives only
+  // inside an overflow menu) and the row's own text is what it names, so the address is reached by
+  // clicking what a person reads rather than a repeated verb in a trailing column.
+  // Both rows carry this memo (the seeded Work and the one this cell admitted were submitted with
+  // the same basis text), so `.first()` is the NEWEST — which is the row this cell is about.
+  await list.getByRole("link", { name: "Office rent paid from Maybank" }).first().click();
   await expect(page).toHaveURL(new RegExp(`/work/${workId}$`));
 });
 
