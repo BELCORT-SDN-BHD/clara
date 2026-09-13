@@ -131,8 +131,8 @@ export const REVIEWED_DYNAMIC_SQL_BARRIERS = new Map<string, ReviewedDynamicSqlB
   [
     "0191_document_capability_registry.sql",
     {
-      reason: "Reviewed pg_get_functiondef splice recuts ONE named function, clara.persist_document_extraction(uuid,text,integer,jsonb,jsonb,text,text,text), read by its exact regprocedure and re-installed with one `perform clara._assert_field_path(...)` inserted at a single counted anchor at the top of its region loop; it returns jsonb and emits no view definition, so neither P4 scope view is reachable. Its prestate pins the pre-image body sha256 and owner AND refuses the cutover while any stored document_regions.field_path would fail the new grammar; its postcheck pins the assertion's single occurrence, every pre-existing gate, the unchanged owner/ACL, SECURITY DEFINER and search_path. Every other object this file creates is static DDL the lexer inspects directly.",
-      sha256: "05527ae9153d486b22b4aa2ceeff73f7e078dd06a9124df4b38b43aaf9b2ffa4",
+      reason: "Reviewed pg_get_functiondef splice recuts ONE named function, clara.persist_document_extraction(uuid,text,integer,jsonb,jsonb,text,text,text), read by its exact regprocedure and re-installed with one `perform clara._assert_field_path(...)` inserted at a single counted anchor at the top of its region loop; it returns jsonb and emits no view definition, so neither P4 scope view is reachable. Its prestate pins the pre-image body sha256 and owner AND refuses the cutover while any stored document_regions.field_path would fail the new grammar; its postcheck pins the INSTALLED BODY's own sha256 as well as the assertion's single occurrence, every pre-existing gate, the unchanged owner/ACL, SECURITY DEFINER and search_path -- the substring probes say the splice did the right things, only the whole-body hash says it did nothing else. Every other object this file creates is static DDL the lexer inspects directly.",
+      sha256: "a230a03b68fa27a97e03dc8f39f930893fa8caddfc53c3dbdfb6b20d74172df6",
     },
   ],
 ]);
