@@ -197,6 +197,7 @@ components/reports/reports-snapshots-seeding-keyboard.test.tsx
 components/shell-responsive.test.tsx
 components/tax/tax-a11y.test.tsx
 components/tax/tax-boundary-states.test.tsx
+components/work/accounting-work-list.test.tsx
 components/work/attach-evidence-dialog.test.tsx
 components/work/work-cancel-dialog.test.tsx
 components/work/work-detail.test.tsx
@@ -327,6 +328,8 @@ lib/work/journal-draft.test.ts
 lib/work/question-fields.test.ts
 lib/work/questions.test.ts
 lib/work/reads.test.ts
+lib/work/work-list-url-state.test.ts
+lib/work/work-list.test.ts
 test/a11yRules.test.ts
 test/keyboardWalk.test.ts
 tests/apiLimitBanner.test.mjs

@@ -59,6 +59,7 @@ const LANE_MOCKS = [
   "journal-work-mock.mjs",
   "journals-table-mock.mjs",
   "tax-boundary-mock.mjs",
+  "work-list-mock.mjs",
 ] as const;
 
 /**
@@ -285,6 +286,12 @@ const LANE_DECLARATIONS: Record<string, { unscopeable: string[]; debt: string[] 
   // before it answers, and falls through otherwise — same shape as documents-viewer-mock.mjs
   // above, which is the state a lane mock should be in.
   "tax-boundary-mock.mjs": { unscopeable: [], debt: [] },
+  // #641's Work-list lane. `list_accounting_work`/`get_accounting_work_row` are brand-new RPCs no
+  // other lane calls, and each carries its own `return false;` fall-through — the list handler on
+  // an unmatched `p_client` (the firm-wide `null` read is deliberately answered, because this lane
+  // owns the only fixture Work the suite has), the row handler on an id it did not mint. Neither
+  // column has anything to declare, which is the state a lane mock should be in.
+  "work-list-mock.mjs": { unscopeable: [], debt: [] },
 };
 
 test("N5 · every lane handler either scopes by the request's own subject, or is a NAMED exception", () => {

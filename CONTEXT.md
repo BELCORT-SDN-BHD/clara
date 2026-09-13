@@ -60,6 +60,10 @@ _Avoid_: A single all-or-nothing accounting transaction.
 The view of work awaiting information or a decision from a person. Answering there continues the same work and question seen elsewhere.
 _Avoid_: A separate execution queue; every technical failure as a question for the user.
 
+**Saved view**:
+A named set of list filters a person keeps, stored against that person rather than the firm. It is a filter on one destination — the same URL, narrowed — never a second destination and never a position in a result set.
+_Avoid_: A separate route or tab; a remembered page of results; a shared firm-level configuration.
+
 **Activity**:
 An attributable history of work and accounting changes, linked to their outcomes and basis.
 _Avoid_: A substitute for outstanding questions or the current state of work.

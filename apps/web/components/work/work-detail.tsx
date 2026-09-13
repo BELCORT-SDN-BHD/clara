@@ -482,8 +482,17 @@ export function WorkDetailView({
         TABS AND NOT ROUTES (appendix C §4, appendix D row 58): these are adjacent views of ONE
         object at ONE address, not destinations. The state is LOCAL — a tab is not a filter, it
         does not change what the page is about, and writing it to the URL would put a display
-        preference in the address people share. Switching a tab invokes NO WRITE; the Activity
-        panel's own read is lazy, so opening Results costs nothing.
+        preference in the address people share. Switching a tab invokes NO WRITE.
+
+        TWO PANELS ARE `keepMounted`, THE THIRD IS NOT, AND THE SPLIT IS THE CONTRACT'S OWN.
+        Appendix C §3's draft rule: "Tabs and an explanatory Popover do not submit or discard it."
+        Results holds `AttachEvidenceDialog`, whose form a person can be part-way through; Sources
+        renders data this page has ALREADY loaded. Unmounting either on a tab press would throw
+        away an unsent draft and re-run nothing useful, so both stay in the DOM (hidden, and
+        therefore out of the accessibility tree) while they are not the current view. ACTIVITY is
+        the exception: it owns its OWN paged read, and mounting it eagerly would spend a request on
+        a panel nobody opened — so it mounts when it is first shown, which is what makes "opening
+        Results costs nothing" true.
       */}
       <Tabs defaultValue="results" className="gap-3">
         <TabsList variant="line" aria-label={t("tabsLabel")}>
@@ -492,14 +501,14 @@ export function WorkDetailView({
           <TabsTrigger value="activity">{t("tabActivity")}</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="results" className="flex flex-col gap-6">
+        <TabsContent value="results" keepMounted className="flex flex-col gap-6">
           {entry === null ? (
             <p className="max-w-prose text-sm text-muted-foreground">{t("noResultYet")}</p>
           ) : null}
           {renderPosted}
         </TabsContent>
 
-        <TabsContent value="sources" className="flex flex-col gap-2">
+        <TabsContent value="sources" keepMounted className="flex flex-col gap-2">
           <SectionHeader level={2}>{t("basisHeading")}</SectionHeader>
           <p className="max-w-prose text-sm text-muted-foreground">{t("basisNote")}</p>
           {work.basis === null ? (

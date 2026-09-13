@@ -60,6 +60,12 @@ import { handleD4Supabase } from "./tax-boundary-mock.mjs";
 // replacing) because the Activity page's client Select is this train's first consumer of the
 // UNFILTERED client register — see that export's own header in activity-mock.mjs.
 import { ACTIVITY_CLIENTS, handleActivitySupabase } from "./activity-mock.mjs";
+// #641's own lane (the B3 Work list walk). ID-scoped like its siblings, and it reads a request
+// body only INSIDE one of its own two matched verbs, so it starves no lane ordered after it. Its
+// `WORK_LIST_CLIENTS` are spliced into the shared `clients` array below (APPENDED, never
+// replacing) for the same reason `ACTIVITY_CLIENTS` are: the firm Work list's client Select reads
+// the UNFILTERED client register.
+import { WORK_LIST_CLIENTS, handleWorkListSupabase } from "./work-list-mock.mjs";
 
 const e2eRoot = dirname(fileURLToPath(import.meta.url));
 const webRoot = resolve(e2eRoot, "..");
@@ -167,6 +173,8 @@ const clients = [
   // #632's two fixture clients — see that lane's own ACTIVITY_CLIENTS header for why this array,
   // unlike `sessions`, needed a first lane-contribution at all.
   ...ACTIVITY_CLIENTS,
+  // #641's three — the same append shape, for the same reason.
+  ...WORK_LIST_CLIENTS,
 ];
 
 // #614 — Postgres `uuid` shape (`clara.clients.id`, 0003_books_core.sql:34-40), mirrored
@@ -526,6 +534,13 @@ async function handleSupabase(request, response, url) {
   // lane's verb list contains, so running first costs every other lane nothing — this
   // handler drains a body only inside its own two exact path checks.
   if (await handleActivitySupabase(request, response, path, url, sendJson, cors)) return;
+  // #641's lane, immediately after #632's and for the SAME measured reason: it owns two
+  // `/rest/v1/rpc/` verbs (`list_accounting_work`, `get_accounting_work_row`) that no other lane's
+  // verb list contains, and a lane ordered after `handleL7Supabase` would read `{}` for them
+  // (that module drains the body on every rpc POST before checking the verb). Running here costs
+  // every other lane nothing: this handler reads a body only inside its own two exact path checks,
+  // and falls through for every client id that is not its own.
+  if (await handleWorkListSupabase(request, response, path, url, sendJson, cors)) return;
   // FIRST among the REMAINING hooks, and safe there because every branch inside is scoped
   // to the chat-parity ids and falls through otherwise (merge of origin/main `cea3da39` /
   // #507 — see that module's own note). Running it after the generic fixtures below instead
@@ -655,6 +670,20 @@ async function handleSupabase(request, response, url) {
     // `page.route` for this same path, which Playwright's last-registered-wins order lets
     // override this default per test (personal-settings-walk.spec.ts does exactly that).
     sendJson(response, 200, { version: 0, interface: {}, notifications: {}, updated_at: null }, cors);
+    return;
+  }
+
+  if (request.method === "POST" && path === "/rest/v1/rpc/list_accounting_work") {
+    // #641 — the durable Work list now renders on BOTH `/work` and `/clients/:id/work`, so this
+    // call fires on every signed-in visit to either page across the whole suite, not only on
+    // work-list-walk.spec.ts's own. The SAME reasoning #626 records for `get_my_preferences`
+    // above: a generic, honest EMPTY page here keeps every other spec's page free of an
+    // unhandled-route 404 for a call it never asked about, and the lane that owns the answer
+    // (work-list-mock.mjs) claims the path earlier in the chain and never reaches this default.
+    //
+    // EMPTY IS HONEST HERE and it renders as the FIRST-USE Empty, not as an error: a successful
+    // read with no rows is exactly what a fixture client with no durable Work has.
+    sendJson(response, 200, { rows: [], next_cursor: null, truncated: false }, cors);
     return;
   }
 
