@@ -115,6 +115,11 @@ function tree({
 
 const FIRM_VIEWER = ["/", "/clients", "/work", "/settings"];
 const FIRM_BOOKKEEPER = ["/", "/clients", "/work", "/activity", "/settings"];
+// #615 — the operator support destination is firm-altitude, owner-floored AND operator-gated, so it
+// is the one row that separates an operator owner's sidebar from any other owner's. Written out in
+// full (never `[...FIRM_BOOKKEEPER, "/operator"]`) because the ORDER is the registry's, and a
+// spread would have put it after Settings where the registry puts it before.
+const FIRM_OPERATOR_OWNER = ["/", "/clients", "/work", "/activity", "/operator", "/settings"];
 
 // ── rank shaping ────────────────────────────────────────────────────────────
 
@@ -125,7 +130,11 @@ test("firm-scope rank shaping follows viewer < bookkeeper, and a NULL rank rende
     { name: "bookkeeper", scope: scopeOf(1, false, "bookkeeper"), expected: FIRM_BOOKKEEPER },
     { name: "admin", scope: scopeOf(2, false, "admin"), expected: FIRM_BOOKKEEPER },
     { name: "owner", scope: scopeOf(3), expected: FIRM_BOOKKEEPER },
-    { name: "operator owner", scope: scopeOf(3, true), expected: FIRM_BOOKKEEPER },
+    // The OPERATOR CONJUNCT, both halves: an owner of a non-operator firm is the row above and does
+    // NOT get /operator; an operator owner does. An operator ADMIN is below the owner floor, which
+    // is the other half and is asserted here too rather than left to the registry's own cells.
+    { name: "operator owner", scope: scopeOf(3, true), expected: FIRM_OPERATOR_OWNER },
+    { name: "operator admin", scope: scopeOf(2, true, "admin"), expected: FIRM_BOOKKEEPER },
   ];
 
   for (const fixture of cases) {

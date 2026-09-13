@@ -1,4 +1,7 @@
-// CB-AE2E-004 — THE CLASS CELL. Fifteen door-dialog wrappers shared one line:
+// CB-AE2E-004 — THE CLASS CELL. Fifteen door-dialog wrappers (#615 retired
+// components/admin/registrations-queue.tsx and replaced it with
+// components/operator/support-case-sheet.tsx — a straight swap, so the count holds) shared one
+// line:
 //
 //     const ran = await runOnce(guardRef.current, onConfirm);
 //     if (ran) setOpen(false);
@@ -21,7 +24,7 @@
 // family carries the sharpest instance (finalize's CLR41 close_self_attestation_required
 // names a field that lives INSIDE the dialog).
 //
-// review-549 MAJOR 2: mounting ONE wrapper does not pin fifteen. The first cut of this
+// review-549 MAJOR 2: mounting ONE wrapper does not pin the rest. The first cut of this
 // fix hand-copied the predicate into every file, and `outcome.ran` and
 // `outcome.value === true` both compile — so a wrapper quietly reverted to the wrong one
 // stayed green here, because this file can only mount one at a time. The predicate is now
@@ -256,9 +259,13 @@ function doorDialogWrappers(): string[] {
 }
 
 /**
- * The TWO importers that are not door dialogs, each named with its reason. Both use the guard
- * for a MENU action rather than a dialog confirm, so there is no dialog to close and no
- * outcome to read: `invite-dialog.tsx`'s resend and `member-row-menu.tsx`'s role pick.
+ * The THREE importers that are not door dialogs, each named with its reason. All three use the
+ * guard for a purpose OTHER than a dialog confirm, so there is no dialog to close and no outcome
+ * to read: `invite-dialog.tsx`'s resend, `member-row-menu.tsx`'s role pick, and (#615)
+ * `components/operator/admission-capacity-panel.tsx`'s save — a persistent Card with no
+ * open/close state at all, where the guard exists only to make a double-click on Save a no-op
+ * rather than a second write. Its sibling `components/operator/support-case-sheet.tsx` IS a real
+ * door dialog (a Sheet that calls `closeOnConfirmedOk`) and is correctly counted below.
  *
  * `SweepReceiptCard` and `V16ActCards` are deliberately NOT here. They call `actions.runOnce`
  * from `lib/parts/thread-action-coordinator.tsx` and never import the guard directly, so they
@@ -268,6 +275,7 @@ function doorDialogWrappers(): string[] {
 const NOT_DOOR_DIALOGS = [
   "components/admin/invite-dialog.tsx",
   "components/admin/member-row-menu.tsx",
+  "components/operator/admission-capacity-panel.tsx",
 ];
 
 test("MAJOR 2 census: every door-dialog wrapper calls the SHARED predicate — none re-implements it", () => {

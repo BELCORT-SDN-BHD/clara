@@ -195,3 +195,15 @@ _Avoid_: An instruction to initiate a payment; authority for a future bank manda
 **Control account**:
 A general-ledger account whose balance must reconcile with its identified detailed accounting records.
 _Avoid_: An unrestricted shortcut for changing the total without its supporting detail.
+
+**Operator support case**:
+One thing on the estate's admission surface that needs BELCORT's operator firm: an undecided firm registration with no payment against it, a registration payment that has not opened a firm, or a payment-provider event the estate could not act on. Each case names its affected entity and its current state.
+_Avoid_: Any view of another firm's books; a support ticket; a paid registration presented as awaiting an operator's approval.
+
+**Support receipt**:
+Who decided an operator support case, when, and the reason they gave — the registration's own decision or the provider problem's resolution stamp, read back through the same queue that offered the act.
+_Avoid_: The audit trail as a whole; a client-visible notification; proof that money moved.
+
+**Provider problem**:
+A recorded payment-provider event the estate's applier could not act on — an unsettled payment, absent metadata, an unknown or mismatched checkout intent, a duplicate payment, or a payment arriving after the checkout was already settled. It is a question for the operator, not a failure of the applicant.
+_Avoid_: A failed payment; a reason to re-charge; an error the applicant must resolve.

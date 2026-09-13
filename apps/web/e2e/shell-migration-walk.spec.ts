@@ -141,7 +141,11 @@ const REDIRECT_ROWS: readonly [string, string, string][] = [
   ["/admin/settings", "/settings/firm", "Firm settings"],
   ["/admin/compliance", "/settings/compliance", "Compliance register"],
   ["/admin/vendor-bindings", "/settings/vendor-bindings", "Vendor identity bindings"],
-  ["/admin/registrations", "/settings/registrations", "Firm registrations"],
+  // #615 — the registration queue moved a SECOND time, to the operator destination. BOTH old
+  // addresses name it directly: Next matches one redirect rule per request and never re-runs the
+  // table, so a chained hop would land on a `/settings/registrations` this train deleted.
+  ["/admin/registrations", "/operator", "Operator support"],
+  ["/settings/registrations", "/operator", "Operator support"],
 ];
 
 test.describe("D5: the legacy /admin and /needs-you addresses redirect to their new homes", () => {
@@ -772,7 +776,11 @@ test("D6: /settings is rank-shaped — bookkeeper, owner and operator owner see 
   await signInTo(page, "/", "owner@example.test");
   await page.goto("/settings");
   await expect(heading("Members")).toBeVisible();
-  await expect(heading("Firm registrations")).toBeVisible();
+  // #615 — the registration queue LEFT this hub for the operator destination, so an operator owner's
+  // settings hub is now exactly any other owner's. The operator-only half of the claim moved with
+  // it: `firm-navigation-walk.spec.ts` pins the sidebar's own Operator row for this persona and its
+  // absence for a bookkeeper, and `operator-support-walk.spec.ts` walks the destination itself.
+  await expect(heading("Firm registrations")).toHaveCount(0);
 });
 
 test("⌘K: typing a settings section or the saved view navigates straight to it", async ({ page }) => {

@@ -583,7 +583,12 @@ test("C-43: ⌘K's Go list is rank-shaped — a bookkeeper sees exactly what the
   await expect(page.getByRole("option", { name: "Vendor identity bindings" })).toBeVisible();
   // HIDDEN, matching the sidebar/hub. Before C-43 all three of these rendered.
   await expect(page.getByRole("option", { name: "Members", exact: true })).toHaveCount(0);
-  await expect(page.getByRole("option", { name: "Firm registrations" })).toHaveCount(0);
+  // #615 — "Firm registrations" is gone from the catalogue entirely (the queue moved to the
+  // operator destination), so asserting ITS absence would now be vacuous. The live property is the
+  // one this row states: the operator destination is owner+operator-floored, so a bookkeeper is not
+  // offered it here either. Its label carries the word "registrations" as a keyword, which is why
+  // the row above still finds nothing under the old name.
+  await expect(page.getByRole("option", { name: "Operator support" })).toHaveCount(0);
   // …AND THE LABEL AGREES TOO, not just the visibility. This is the half the
   // merge exposed: ⌘K kept its own catalogue and went on saying "Admin" while
   // the sidebar said "Firm" for the same href. Both halves of the agreement are

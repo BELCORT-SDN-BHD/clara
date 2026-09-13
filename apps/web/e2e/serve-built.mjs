@@ -65,6 +65,10 @@ import { ACTIVITY_CLIENTS, handleActivitySupabase } from "./activity-mock.mjs";
 // later reader regardless of dispatch order. See that module's own header for the hazard this
 // closes and the four different per-file remedies it replaces.
 import { readCachedJson } from "./mock-dispatch.mjs";
+// #615's own lane (the D3 operator-support walk). Verb-scoped like its siblings — its seven RPC
+// verbs are named by no other lane — and it reads a request body only INSIDE a matched verb, so it
+// starves nothing and needs no special ordering. It claims no relation at all.
+import { handleOperatorSupportSupabase } from "./operator-support-mock.mjs";
 
 const e2eRoot = dirname(fileURLToPath(import.meta.url));
 const webRoot = resolve(e2eRoot, "..");
@@ -506,6 +510,10 @@ async function handleSupabase(request, response, url) {
   // be answered by another lane's ROW (a GET whose result shape or scope collides), not by a
   // drained stream.
   if (await handleActivitySupabase(request, response, path, url, sendJson, cors)) return;
+  // #615's lane runs beside #632's and for the same reason: its verbs are names no other lane
+  // carries, and it reads a body only inside its own exact path checks — so it cannot be starved
+  // by L7's consume-then-fall-through (see that hook's note below) and costs no sibling anything.
+  if (await handleOperatorSupportSupabase(request, response, path, url, sendJson, cors)) return;
   // FIRST among the REMAINING hooks, and safe there because every branch inside is scoped
   // to the chat-parity ids and falls through otherwise (merge of origin/main `cea3da39` /
   // #507 — see that module's own note). Running it after the generic fixtures below instead

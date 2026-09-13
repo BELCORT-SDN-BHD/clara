@@ -479,9 +479,10 @@ const PLATFORM_SLOT = [
   "Metadata.description",
   "Brand.productName",
   "NotFound.body",
-  // #614 renamed the namespace with the surface: /admin became /settings, and
-  // `Admin` folded into `Settings`. The STRING is unchanged, and so is the claim.
-  "Settings.sections.registrations.purpose",
+  // #614 renamed the namespace with the surface (/admin became /settings); #615 moved the surface
+  // AGAIN, out of settings entirely and into the operator destination, so the settings-section
+  // slot is gone and `Operator.pageDescription` below is where the same claim now lives. The claim
+  // is unchanged: this copy names the PRODUCT, not the agent.
   "Members.inviteDialog.description",
   "Members.courier.recipient_has_account",
   "Login.description",
@@ -493,7 +494,10 @@ const PLATFORM_SLOT = [
   // "not built yet", C-6 built them, and design part 1 §2.1 removes a NotBuiltNote
   // when the thing exists rather than editing it to say less. Nothing rendered it —
   // `/pending` now carries the real controls — so this slot has no string to police.
-  "Registrations.pageDescription",
+  // #615 — `Registrations.pageDescription` STOOD HERE and moved with its surface: the namespace is
+  // retired and the operator destination's own page description carries the same platform claim.
+  "Operator.pageDescription",
+  "Operator.isolationBody",
 ] as const;
 
 test("R1: every platform-slot string names ClaraBook, never the agent", () => {

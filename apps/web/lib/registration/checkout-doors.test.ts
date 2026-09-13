@@ -206,27 +206,34 @@ test("#628 review — cancel_checkout_intent's own status is decoded the same wa
   }
 });
 
-test("#628's DB round — the web NEVER calls `get_admission_capacity`", () => {
-  // IT IS OPERATOR-ONLY. The applicant-facing verdict rides on
-  // `get_own_checkout_progress`'s `capacity_full` column, which is why the two
-  // pre-firm faces can refuse to offer a pay control the door would refuse
-  // anyway. A browser-side call to the operator read would be this app asking a
-  // question it has no standing to ask, and it would go RED at the door rather
-  // than in review — which is a refusal an applicant reads, on a money surface.
+test("#628's DB round — no APPLICANT-FACING lane calls `get_admission_capacity`", () => {
+  // IT IS OPERATOR-ONLY, and `firms_count` is business-confidential (0186 §C's own review S4).
+  // The applicant-facing verdict rides on `get_own_checkout_progress`'s `capacity_full` column,
+  // which is why the two pre-firm faces can refuse to offer a pay control the door would refuse
+  // anyway. A browser-side call to the operator read from an APPLICANT surface would be this app
+  // asking a question it has no standing to ask, and it would go RED at the door rather than in
+  // review — which is a refusal an applicant reads, on a money surface.
   //
-  // SCANNED AT THE SOURCE, not asserted about this module alone: the property
-  // is "no path in this app", and a roster that only watched its own file would
-  // miss the next one.
+  // NARROWED, NOT DELETED (#615). The original scan walked the WHOLE app, which was correct while
+  // there was no operator surface at all; #615 builds one, and its capacity panel
+  // (`components/operator/admission-capacity-panel.tsx`, via `lib/operator/doors.ts`) is that
+  // door's first and only legitimate caller — behind the same owner+operator-firm wall the door
+  // itself carries. The PROPERTY this cell exists for is unchanged and still mechanical: no
+  // APPLICANT lane may name it. The three roots below are exactly the lanes an unauthenticated or
+  // pre-firm applicant can reach — the `(entry)` route group (signup, checkout, pending, confirm),
+  // `lib/checkout`, and this module's own `lib/registration` — so a future applicant-facing path
+  // that reaches for the door is still caught here, while the operator's own lane is not asserted
+  // about by a cell that has no business judging it.
   const webRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
-  const skip = new Set(["node_modules", ".next", ".open-next", ".wrangler", ".git"]);
+  const APPLICANT_LANES = ["app/(entry)", "lib/checkout", "lib/registration"];
   const offenders: string[] = [];
   const walk = (dir: string): void => {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
-      if (entry.name.startsWith(".") || skip.has(entry.name)) continue;
+      if (entry.name.startsWith(".") || entry.name === "node_modules") continue;
       const abs = join(dir, entry.name);
       if (entry.isDirectory()) { walk(abs); continue; }
       // APPLICATION paths only. A cell (this one included) may name the door in
-      // a string; what must not exist is a shipped path that calls it.
+      // a string; what must not exist is a shipped applicant path that calls it.
       if (!/\.(ts|tsx|mjs|js)$/.test(entry.name) || /\.test\./.test(entry.name)) continue;
       // The QUOTED name — a door name as a `callDoor` argument or an RPC path.
       // Prose mentions (`get_admission_capacity()`, in this module's own
@@ -237,6 +244,13 @@ test("#628's DB round — the web NEVER calls `get_admission_capacity`", () => {
       }
     }
   };
-  walk(webRoot);
-  assert.deepEqual(offenders, [], "an application path names the operator-only capacity door");
+  for (const lane of APPLICANT_LANES) walk(join(webRoot, lane));
+  assert.deepEqual(offenders, [], "an applicant-facing path names the operator-only capacity door");
+
+  // THE POSITIVE CONTROL, so the narrowing above cannot quietly become vacuous: the three lanes
+  // scanned genuinely exist and genuinely contain files. A typo in a root name would otherwise
+  // turn this cell into an assertion about nothing.
+  for (const lane of APPLICANT_LANES) {
+    assert.ok(readdirSync(join(webRoot, lane)).length > 0, `${lane} is a real, non-empty lane`);
+  }
 });

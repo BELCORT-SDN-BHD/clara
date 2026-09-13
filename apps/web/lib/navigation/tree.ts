@@ -60,17 +60,17 @@ export type NavIconName =
   | "route"
   | "list"
   | "lock"
+  | "lifebuoy"
   | "receipt";
 
-export type FirmNavId = "home" | "clients" | "work" | "activity" | "settings";
+export type FirmNavId = "home" | "clients" | "work" | "activity" | "operator" | "settings";
 
 export type SettingsSectionId =
   | "account"
   | "firm"
   | "members"
   | "compliance"
-  | "vendorBindings"
-  | "registrations";
+  | "vendorBindings";
 
 export type ClientNavId =
   | "home"
@@ -187,14 +187,34 @@ export type AccountingItem = Floored & {
  *  - work: viewer. Its reads today are `list_review_queue` (`0016:4563`, viewer)
  *    and the agent-task queue; the durable Work records (#641) inherit this row.
  *  - activity: bookkeeper (`agent_receipts_visible`, `0103:410`).
+ *  - operator: owner AND the caller's own firm carries `is_operator`
+ *    (`clara.list_operator_support_queue`, `0188 §2` — the
+ *    `approve_firm_registration` predicate byte for byte). #615.
  *  - settings: viewer, because the parent performs no read of its own and every
  *    child is independently filtered below.
+ *
+ * THE OPERATOR ROW IS FIRM-ALTITUDE, NOT A SETTINGS CHILD, and that is the
+ * change #614's own provisional note anticipated. An operator's support queue is
+ * estate-wide work about OTHER people's admission — registrations, payments and
+ * provider problems — and it is not a property of the firm the operator happens
+ * to be a member of. Journey D3's own requirement is not to merge operator
+ * controls into normal client navigation, so it gets its own destination; the
+ * `settings/registrations` section it replaces is gone from this registry, and
+ * both old addresses 307 to `/operator` (`./legacy-routes.ts`).
  */
 export const FIRM_NAV: readonly FirmNavItem[] = [
   { id: "home", href: "/", labelKey: "firmNav.home", icon: "house", minimumRole: "viewer" },
   { id: "clients", href: "/clients", labelKey: "firmNav.clients", icon: "users", minimumRole: "viewer" },
   { id: "work", href: "/work", labelKey: "firmNav.work", icon: "inbox", minimumRole: "viewer" },
   { id: "activity", href: "/activity", labelKey: "firmNav.activity", icon: "activity", minimumRole: "bookkeeper" },
+  {
+    id: "operator",
+    href: "/operator",
+    labelKey: "firmNav.operator",
+    icon: "lifebuoy",
+    minimumRole: "owner",
+    operatorOnly: true,
+  },
   { id: "settings", href: "/settings", labelKey: "firmNav.settings", icon: "settings", minimumRole: "viewer" },
 ] as const;
 
@@ -214,12 +234,12 @@ export const WORK_NEEDS_YOU_VIEW = "needs-you";
  *  - compliance: viewer (`list_review_queue`, `0016:4563`).
  *  - vendorBindings: bookkeeper (`list_vendor_bindings` `0028:960`,
  *    `get_vendor_binding` `0028:1016`).
- *  - registrations: owner plus operator firm (`approve_firm_registration`,
- *    `0145:770,782`).
  *
- * REGISTRATIONS IS PROVISIONAL HERE. #615 builds the operator destination and may
- * relocate this row out of a firm's own settings entirely; leave the floor and
- * the `operatorOnly` conjunct alone until it does.
+ * REGISTRATIONS HAS LEFT THIS LIST (#615). It was provisional here from the day
+ * #614 moved it, with a note saying the operator destination might take it; it
+ * did. The queue is now one arm of `/operator`'s estate-wide support queue, at
+ * the same owner+operator floor it always had, and `/settings/registrations`
+ * 307s there.
  */
 export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
   {
@@ -262,15 +282,6 @@ export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
     icon: "fingerprint",
     minimumRole: "bookkeeper",
     legacy: true,
-  },
-  {
-    id: "registrations",
-    href: "/settings/registrations",
-    labelKey: "sections.registrations.title",
-    purposeKey: "sections.registrations.purpose",
-    icon: "clipboard",
-    minimumRole: "owner",
-    operatorOnly: true,
   },
 ] as const;
 

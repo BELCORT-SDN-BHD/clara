@@ -40,10 +40,6 @@ components/admin/members-dates.test.tsx
 components/admin/members-keyboard.test.tsx
 components/admin/members-single-fire.test.tsx
 components/admin/members-walls.test.tsx
-components/admin/registrations-a11y.test.tsx
-components/admin/registrations-keyboard-round2.test.tsx
-components/admin/registrations-keyboard-round5.test.tsx
-components/admin/registrations-keyboard.test.tsx
 components/app-shell/app-breadcrumb.test.tsx
 components/app-shell/app-sidebar.test.tsx
 components/app-shell/scope-switcher.test.tsx
@@ -155,6 +151,8 @@ components/journals/journals-governance-keyboard.test.tsx
 components/journals/journals-keyboard.test.tsx
 components/login-a11y.test.tsx
 components/login-keyboard.test.tsx
+components/operator/support-case-keyboard.test.tsx
+components/operator/support-queue-a11y.test.tsx
 components/parts/clarify-card.test.tsx
 components/parts/sweep-receipt-card.test.tsx
 components/parts/tool-call-status.test.tsx
@@ -288,6 +286,7 @@ lib/navigation/tree.test.ts
 lib/onboarding/answer-format.test.ts
 lib/onboarding/api.test.ts
 lib/onboarding/resolution-history.test.ts
+lib/operator/reads.test.ts
 lib/parts/bankPayload.test.ts
 lib/parts/catalog.test.tsx
 lib/parts/hooks.test.ts

@@ -178,7 +178,7 @@ const inputOf = (h: { find: (p: (n: Stub) => boolean) => Stub | null }) => {
 
 // ── GAP A: rank shaping ─────────────────────────────────────────────────────
 
-test("a BOOKKEEPER sees Activity but not Members or Firm registrations — the sidebar's own answer", async () => {
+test("a BOOKKEEPER sees Activity but not Members or Operator support — the sidebar's own answer", async () => {
   await withFetch(
     (url) => {
       if (url.includes("/rest/v1/caller_context")) return json(ctxRow("bookkeeper", 1));
@@ -191,11 +191,11 @@ test("a BOOKKEEPER sees Activity but not Members or Firm registrations — the s
         await settleUntil(h, () => h.text().includes("Firm activity"), "the Go rows", h.text);
         const text = h.text();
         // Bookkeeper (rank 1) is AT the activity floor and BELOW members (admin)
-        // and registrations (owner + operator).
+        // and the operator support destination (owner + operator firm, #615).
         assert.match(text, /Firm activity/);
         assert.match(text, /Vendor identity bindings/);
         assert.doesNotMatch(text, /Members/);
-        assert.doesNotMatch(text, /Firm registrations/);
+        assert.doesNotMatch(text, /Operator support/);
         // ABSENT, not disabled: a greyed row still asserts the room exists.
         assert.equal(findRowByText(h.container, "Members"), null);
       } finally {
@@ -287,7 +287,7 @@ test("the SAVED VIEW is its own Go row, and it points at /work?view=needs-you", 
   );
 });
 
-test("an OWNER on the OPERATOR firm sees every row, including the operator-only queue", async () => {
+test("an OWNER on the OPERATOR firm sees every row, including the operator-only support destination", async () => {
   await withFetch(
     (url) => {
       if (url.includes("/rest/v1/caller_context")) return json(ctxRow("owner", 3, true));
@@ -301,7 +301,9 @@ test("an OWNER on the OPERATOR firm sees every row, including the operator-only 
         const text = h.text();
         assert.match(text, /Firm activity/);
         assert.match(text, /Members/);
-        assert.match(text, /Firm registrations/);
+        // #615 — the registration queue moved out of settings into its own operator destination,
+        // and ⌘K follows the registry rather than carrying a second copy of the IA.
+        assert.match(text, /Operator support/);
         assert.match(text, /Firm settings/);
       } finally {
         await h.unmount();

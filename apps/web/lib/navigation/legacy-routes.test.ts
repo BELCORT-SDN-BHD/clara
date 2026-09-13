@@ -20,7 +20,7 @@ import { ACCOUNTING_ITEMS, CLIENT_NAV, FIRM_NAV, SETTINGS_SECTIONS, accountingHr
 const WEB_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const read = (path: string): string => readFileSync(join(WEB_ROOT, path), "utf8");
 
-test("every moved path redirects to its new home, and the matrix is exactly these seven rows", () => {
+test("every moved path redirects to its new home, and the matrix is exactly these eight rows", () => {
   assert.deepEqual(
     LEGACY_ROUTES.map((r) => [r.source, r.destination]),
     [
@@ -30,9 +30,24 @@ test("every moved path redirects to its new home, and the matrix is exactly thes
       ["/admin/settings", "/settings/firm"],
       ["/admin/compliance", "/settings/compliance"],
       ["/admin/vendor-bindings", "/settings/vendor-bindings"],
-      ["/admin/registrations", "/settings/registrations"],
+      // #615 — the registration queue moved a SECOND time, to the operator destination. Both old
+      // addresses name the new one directly; see the cell below for why neither may chain.
+      ["/admin/registrations", "/operator"],
+      ["/settings/registrations", "/operator"],
     ],
   );
+});
+
+test("#615 NO ROW CHAINS — Next matches ONE redirect rule per request and never re-runs the table", () => {
+  // `/admin/registrations -> /settings/registrations -> /operator` would land a visitor on a path
+  // whose `page.tsx` this train deleted, and the failure would be a 404 on an old bookmark rather
+  // than anything a type checker could see. The property is mechanical: no destination in this
+  // table is also a source in it.
+  const sources = new Set(LEGACY_ROUTES.map((r) => r.source));
+  const chained = LEGACY_ROUTES
+    .filter((r) => sources.has(r.destination.split("?")[0]!))
+    .map((r) => `${r.source} -> ${r.destination}`);
+  assert.deepEqual(chained, [], "a redirect destination is itself a redirect source");
 });
 
 test("every redirect is TEMPORARY — a 308 would be cached in every browser essentially forever", () => {

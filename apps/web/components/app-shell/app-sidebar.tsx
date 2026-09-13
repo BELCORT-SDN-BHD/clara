@@ -18,6 +18,7 @@ import {
   HouseIcon,
   InboxIcon,
   LandmarkIcon,
+  LifeBuoyIcon,
   ListIcon,
   LockIcon,
   ReceiptIcon,
@@ -128,6 +129,7 @@ const ICONS: Record<NavIconName, LucideIcon> = {
   route: RouteIcon,
   list: ListIcon,
   lock: LockIcon,
+  lifebuoy: LifeBuoyIcon,
   receipt: ReceiptIcon,
 };
 

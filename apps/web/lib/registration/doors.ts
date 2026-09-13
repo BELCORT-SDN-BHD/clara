@@ -32,8 +32,13 @@
 //   - CLR04 "insufficient role" — the caller is not owner+ in an
 //     `is_operator` firm. THE authority wall; never pre-empted here.
 //   - CLR10 "op_key is required" — cannot fire in practice, the caller
-//     (registrations-queue.tsx) always supplies one (its own per-request
-//     cache, never blank — see the FOLD note on each wrapper below).
+//     always supplies one. THE CALLER IS NOW components/operator/
+//     support-case-sheet.tsx (#615 moved the queue to /operator and retired
+//     components/admin/registrations-queue.tsx with it), and the mechanism
+//     changed with it: the key is minted by that file's `supportOpKey`, a
+//     PURE function of (case id, caller id, normalised text) — no per-request
+//     cache anywhere, because a deterministic key needs none. See the FOLD
+//     note on each wrapper below for why the key must not be random.
 //   - CLR10 "unknown registration request" — `p_request` does not exist.
 //   - CLR04 "cannot decide your own registration request" — the F7
 //     self-decision wall (0145:794-801/856-860): an operator may never
@@ -118,7 +123,16 @@ import type { SessionTokenAccessor } from "@/lib/session";
  *  order applicants arrived), unfiltered by applicant so the view's own
  *  OPERATOR arm is what decides how much comes back. See this file's header
  *  for why "unfiltered" is the correct read here, the mirror image of
- *  `loadRegistrationRequestsForApplicant`'s own explicit self-filter. */
+ *  `loadRegistrationRequestsForApplicant`'s own explicit self-filter.
+ *
+ *  NO APPLICATION CALLER SINCE #615, and recorded here rather than left to be
+ *  discovered: the operator destination reads the registration arm through
+ *  `clara.list_operator_support_queue` (0188 §2) instead, because that door
+ *  answers all three admission arms at once WITH the affected entity's current
+ *  state, which this view cannot supply. This helper is kept, not deleted — the
+ *  view it reads is still a live operator read with its own DB-side tests, and
+ *  `./doors.test.ts` still pins its wire shape — but nothing renders it today.
+ *  Retiring it (or giving it a caller) is its own change; see #615's follow-ups. */
 export function loadOperatorRegistrationQueue(
   session: SessionTokenAccessor,
   signal?: AbortSignal,
@@ -144,9 +158,11 @@ export function loadOperatorRegistrationQueue(
  *  HTTP response was lost, a retry minting a NEW key never finds the old
  *  receipt; it re-enters the door body fresh, the request is no longer
  *  'open', and the retry gets a spurious CLR09 instead of the original
- *  `{firm_id, plan_id}` replaying. The caller (registrations-queue.tsx) now
- *  holds ONE key per request until the mandatory re-read proves the row
- *  left the open queue — see that file's own header. */
+ *  `{firm_id, plan_id}` replaying. The caller — components/operator/
+ *  support-case-sheet.tsx since #615 — derives the key from (case id, caller
+ *  id) with `supportOpKey`, so a retry reproduces it BY CONSTRUCTION rather
+ *  than by remembering it; the cache the retired registrations panel kept for
+ *  the same purpose is gone with that file. */
 export function approveFirmRegistration(
   session: SessionTokenAccessor,
   requestId: string,
@@ -166,7 +182,8 @@ export function approveFirmRegistration(
  *  untouched, and a caller that bypassed the dialog gets the SAME CLR10 the
  *  DB would give anyone else.
  *
- *  FOLD (Codex HIGH-1): `opKey` is CALLER-OWNED, same reasoning as
+ *  FOLD (Codex HIGH-1): `opKey` is CALLER-OWNED — since #615 from
+ *  `supportOpKey` in components/operator/support-case-sheet.tsx — same reasoning as
  *  `approveFirmRegistration` above — reject's own hash additionally binds
  *  `reason` (0145:850-851), so the caller keys its cache on `(request,
  *  normalized reason)`: the SAME key replays a retry of the SAME reason, and
