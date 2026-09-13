@@ -95,7 +95,19 @@ export type WorkBasis = {
  *  is the whole point of this journey, so the UI says "no source document" for
  *  `[]` and never confuses it with "not read yet" (which is `null` data, a
  *  different state entirely). */
-export type WorkSourceRef = { kind: string; task_id?: string | null; session_id?: string | null };
+export type WorkSourceRef = {
+  kind: string;
+  task_id?: string | null;
+  session_id?: string | null;
+  /** THE DOCUMENT A `kind: "document"` REF NAMES. `clara._assert_journal_source_refs`
+   *  (0182_journal_work_evidence.sql) refuses a document ref without it, and
+   *  `clara._journal_source_document` reads exactly this key — so on a `document` ref it is
+   *  always present in the database. It stays OPTIONAL here because the same array also holds
+   *  `chat_task` refs, which carry no document, and because a row written before 0182 is not
+   *  this type's to assert away. A reader that finds a `document` ref without it says so
+   *  (#624 AC4, Work detail's Sources tab) rather than guessing. */
+  document_id?: string | null;
+};
 
 /** `accounting_work.bundle` — the run's own immutable identity, recorded by the
  *  workflow when it claims the run. Null until then. */

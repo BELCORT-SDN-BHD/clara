@@ -1118,6 +1118,7 @@
     "sourceRefChat": "A Clara conversation this work was started from",
     "sourceRefDocument": "A filed client document",
     "sourceRefUnknown": "A source recorded as {kind}, which this page has no name for",
+    "sourceDocumentUnidentified": "This source is recorded as a document, but it names no document Clara can read — so none of its states can be shown here.",
     "activityLoading": "Reading this work's activity…",
     "activityReadFailed": "This work's activity could not be read.",
     "activityEmptyTitle": "No activity recorded for this work yet",

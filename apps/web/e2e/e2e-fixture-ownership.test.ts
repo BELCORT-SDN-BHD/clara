@@ -940,6 +940,12 @@ function rpcVerbCensus(mocks: readonly string[] = LANE_MOCKS): Map<string, strin
 const SHARED_RPC_VERBS: Record<string, string[]> = {
   list_entry_links: ["journal-work-mock.mjs", "journals-table-mock.mjs"],
   list_review_queue: ["journal-work-mock.mjs", "journals-table-mock.mjs", "tax-boundary-mock.mjs"],
+  // #624 AC4 — `clara.get_document_state` is read from TWO surfaces by design: the Documents
+  // detail panel and the Work detail's Sources tab mount the SAME component over it, because the
+  // criterion is "Documents AND Work show the four states". Each lane answers only for the
+  // document ids IT minted and falls through otherwise, so the share is a declared one rather than
+  // a collision — which is exactly the distinction this census exists to force someone to make.
+  get_document_state: ["documents-viewer-mock.mjs", "work-list-mock.mjs"],
 };
 
 /** Every verb with 2+ claimants that is either UNDECLARED, or declared with a DIFFERENT set of

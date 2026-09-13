@@ -43,6 +43,11 @@ export const WORK_LIST = {
   // An id in THIS lane's own space that this lane deliberately did not mint — the addressed-row
   // door's CLR11 arm, which every walk needs and no fixture row may satisfy.
   missingWorkId: "c641c641-2222-4777-8777-c641c64109ff",
+  // #624 AC4 — the DOCUMENT the completed Work above cites as its source, and which
+  // `clara.get_document_state` answers four states for. It belongs to this lane's id space for the
+  // same reason every other id here does: `documents-viewer-mock.mjs` owns its own two documents
+  // and answers only for those, so an id from this space falls through to this lane.
+  sourceDocumentId: "c641c641-7777-4777-8777-c641c6410601",
 };
 
 /** This lane's id space. `get_accounting_work_row` is scoped by it rather than by a client id,
@@ -142,6 +147,10 @@ const ROWS = [
     memo: "Bank charges, August",
     entry_id: "c641c641-5555-4777-8777-c641c6410401",
     receipt_id: "c641c641-6666-4777-8777-c641c6410501",
+    // #624 AC4 — THE ONE ROW IN THIS LANE WITH A SOURCE DOCUMENT. The count here and the
+    // `source_refs` array `detailRow` builds below are the SAME fact seen from the list door and
+    // from the row read; a fixture where they disagreed would model a database that cannot exist.
+    source_ref_count: 1,
     created_at: "2026-09-06T09:00:00.000Z",
   }),
   workRow({
@@ -261,6 +270,70 @@ export async function handleWorkListSupabase(request, response, path, url, sendJ
     return false;
   }
 
+  // #624 AC4 — `clara.get_document_state` for the ONE document this lane's completed Work cites.
+  //
+  // THE SAME DOOR THE DOCUMENTS WORKBENCH READS, answered here because the Work detail's Sources
+  // tab mounts the SAME panel over it. Scoped to THIS lane's document id and falling through
+  // otherwise, so `documents-viewer-mock.mjs` keeps answering for its own two documents unchanged.
+  //
+  // THE ANSWER IS DELIBERATELY A FAILING ARITHMETIC CHECK on a facts-supported pair: it is the one
+  // shape where "extraction: done" and "the facts are trustworthy" come apart, which is the whole
+  // distinction #624 exists to draw — and a walk that only ever saw a clean document could not
+  // tell a build that drew it from one that printed four reassuring words.
+  if (request.method === "POST" && path === "/rest/v1/rpc/get_document_state") {
+    const body = await readJson(request);
+    if (body.p_document !== WORK_LIST.sourceDocumentId) return false;
+    sendJson(response, 200, {
+      document_id: WORK_LIST.sourceDocumentId,
+      document_kind: "invoice",
+      mime_type: "application/pdf",
+      format: "pdf",
+      capability: {
+        format: "pdf", document_kind: "invoice", mime_type: "application/pdf",
+        custody: "supported", byte_extraction: "supported",
+        typed_facts: "supported", business_operation: "supported",
+        engine_id: "llm-openai:gpt-5.6-terra:v2", engine_byte: "azure-di:prebuilt-layout:2024-11-30",
+        registry_version: 1,
+        basis: "Bytes are sealed at intake and read by azure-di:prebuilt-layout:2024-11-30. Typed facts are persisted with source regions by llm-openai:gpt-5.6-terra:v2. A filed document of this kind carries a business operation Clara can drive from those facts.",
+        limits: { invoice_line_items: "planned" }, known_pair: true, kind_known: true,
+      },
+      custody: {
+        state: "verified", sha256: "c".repeat(64), byte_size: 18432,
+        bytes_verified_at: "2026-09-05T00:00:01.000Z", legal_hold: false, legal_hold_reason: null,
+        retention_state: "unanchored", retain_until: null, capability: "supported",
+      },
+      byte_extraction: {
+        status: "done", page_count: 1, capability: "supported",
+        engine_id: "azure-di:prebuilt-layout:2024-11-30",
+        tasks: [{
+          id: "c641c641-8888-4777-8777-c641c6410701", lane: "ocr", status: "done",
+          engine_id: "azure-di:prebuilt-layout:2024-11-30", version_n: 1, attempt_count: 1,
+          error_code: null, finished_at: "2026-09-05T00:00:02.000Z",
+        }],
+      },
+      facts: {
+        capability: "supported", limits: { invoice_line_items: "planned" },
+        extractions: [{
+          id: "c641c641-9999-4777-8777-c641c6410801", engine_kind: "llm_text_facts",
+          engine_id: "llm-openai:gpt-5.6-terra:v2", version_n: 1, status: "done",
+          superseded_by: null, extracted_at: "2026-09-05T00:00:03.000Z", region_count: 4,
+        }],
+        validations: [{
+          check_name: "invoice.six_term_identity", outcome: "fail",
+          detail: { total_cents: 123450, total_excl_tax_cents: 116000, tax_total_cents: 6960, residual_cents: -490 },
+          extraction_id: "c641c641-9999-4777-8777-c641c6410801", statement_id: null,
+          engine_id: "llm-openai:gpt-5.6-terra:v2", evaluated_at: "2026-09-05T00:00:04.000Z",
+        }],
+      },
+      operation: { capability: "supported", codeable_kind: true, entries: [], statements: [] },
+      lineage: {
+        sha256: "c".repeat(64), intakes: [], corrections: [],
+        authoritative_extraction_id: null, filings: [],
+      },
+    }, cors);
+    return true;
+  }
+
   // ── the DETAIL page's own four relation reads ────────────────────────────────────────────
   //
   // The list links every row to `/clients/:id/work/:workId`, and that page reads
@@ -346,7 +419,12 @@ function detailRow(row) {
     },
     basis_digest: "a".repeat(64),
     basis_origin: row.basis_origin,
-    source_refs: row.basis_origin === "clara_interpreted" ? [{ kind: "clara_chat" }] : [],
+    // #624 AC4 — the completed row cites a real filed document; the chat-origin row cites the
+    // conversation it came from; everything else is the documentless case this journey is largely
+    // about. Three shapes, so the Sources tab is measured against all three rather than one.
+    source_refs: row.id === WORK_LIST.completedWorkId
+      ? [{ kind: "document", document_id: WORK_LIST.sourceDocumentId }]
+      : row.basis_origin === "clara_interpreted" ? [{ kind: "clara_chat" }] : [],
     current_task_id: row.current_task_id,
     bundle: null,
     result: null,

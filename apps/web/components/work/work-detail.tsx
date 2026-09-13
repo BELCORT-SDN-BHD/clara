@@ -32,6 +32,7 @@ import Link from "next/link";
 import { useTranslations } from "next-intl";
 
 import { AttachEvidenceDialog } from "@/components/work/attach-evidence-dialog";
+import { DocumentStatePanel } from "@/components/documents/document-state-panel";
 import {
   CancelOutcome,
   CancelWorkDialog,
@@ -541,20 +542,42 @@ export function WorkDetailView({
           {work.source_refs === null || work.source_refs.length === 0 ? (
             <p className="max-w-prose text-sm text-muted-foreground">{t("sourcesEmpty")}</p>
           ) : (
-            <ul className="flex flex-col gap-1 text-sm">
-              {work.source_refs.map((ref, i) => (
-                <li key={`${ref.kind}-${i}`} className="text-foreground wrap-anywhere">
-                  {/* ONE LINE PER REF, in its OWN words — again not the identity block's. The
-                      summary above answers "was there a source"; this names WHAT each one is, and
-                      the unknown arm prints the database's own `kind` token rather than inventing
-                      a label for a vocabulary this build has not learned. */}
-                  {ref.kind === "chat_task" || ref.kind === "clara_chat"
-                    ? t("sourceRefChat")
-                    : ref.kind === "document"
-                      ? t("sourceRefDocument")
-                      : t("sourceRefUnknown", { kind: ref.kind })}
-                </li>
-              ))}
+            <ul className="flex flex-col gap-4 text-sm">
+              {work.source_refs.map((ref, i) => {
+                // #624 AC4 — "Documents AND Work show the four states". A source document named
+                // here is the SAME document the Documents workbench shows, so it gets the SAME
+                // four named states from the SAME read: `DocumentStatePanel` over
+                // `clara.get_document_state` (lib/documents/reads.ts). NO NEW DOOR and no second
+                // vocabulary — a Work that cites a document Clara derived nothing from must not
+                // read differently here from how it reads on the Documents tab.
+                //
+                // THE ID IS SHAPE-CHECKED FIRST, the same guard this page already applies to its
+                // own `workId`: `p_document` is a `uuid` parameter, so a malformed value is a
+                // PostgREST 400/22P02 that throws out of the loader rather than an honest state.
+                // A `document` ref that names nothing usable therefore says so in words.
+                const documentId = ref.kind === "document" ? (ref.document_id ?? null) : null;
+                const readable = documentId !== null && isUuidShape(documentId);
+                return (
+                  <li key={`${ref.kind}-${i}`} className="flex flex-col gap-2 text-foreground wrap-anywhere">
+                    {/* ONE LINE PER REF, in its OWN words — again not the identity block's. The
+                        summary above answers "was there a source"; this names WHAT each one is, and
+                        the unknown arm prints the database's own `kind` token rather than inventing
+                        a label for a vocabulary this build has not learned. */}
+                    <span>
+                      {ref.kind === "chat_task" || ref.kind === "clara_chat"
+                        ? t("sourceRefChat")
+                        : ref.kind === "document"
+                          ? t("sourceRefDocument")
+                          : t("sourceRefUnknown", { kind: ref.kind })}
+                    </span>
+                    {ref.kind !== "document" ? null : readable ? (
+                      <DocumentStatePanel documentId={documentId!} clientId={clientId} session={session} />
+                    ) : (
+                      <p className="max-w-prose text-sm text-muted-foreground">{t("sourceDocumentUnidentified")}</p>
+                    )}
+                  </li>
+                );
+              })}
             </ul>
           )}
         </TabsContent>

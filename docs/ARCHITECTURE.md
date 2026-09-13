@@ -226,6 +226,14 @@ typed_facts（某条 facts lane 能为这一对落下带来源区域的类型化
 `clara.get_document_state(document, client)` 把四个状态、能力判定与 original／duplicate／refile／supersede lineage
 一次读出（准入与 `clara.get_document_extract` 完全一致），客户端 Documents 详情据此分别命名四个状态。
 
+**Work 的 Sources 页签呈现同一组四态（#624 AC4「Documents AND Work」，wave-2 集成，本地证据）。**
+一条 Work 的 `source_refs` 里 `kind='document'` 的来源，在 #641 的 Work 详情 Results｜Sources｜Activity
+页签中与 Documents 详情复用**同一个** `DocumentStatePanel` 与**同一个** `clara.get_document_state` 读门——
+没有新门、没有第二套措辞：同一份文件在 Work 上不得比在 Documents 上读起来更乐观。id 先做 uuid 形状检查
+（`p_document` 是 uuid 参数，畸形值会是 22P02 而不是一个诚实状态），门返回 SQL NULL（文件归属另一客户）
+渲染为"这些状态在此客户下不可用"，`document` 来源却没有可用 document id 时如实说明而不发请求。
+证据：`components/work/work-detail.test.tsx` 三个 cell 与 `e2e/work-list-walk.spec.ts` 的 #624 AC4 走查。
+
 **这次量到的两处诚实边界（C-37「不能只凭文件名承诺支持」）。** OFX 有读取器（`parseStatementOfx`），
 但格式本身不带期初余额，`parseStatementOfx` 因此按构造返回 `opening_cents: null`，而
 `statement-corroboration.mjs` 的 `missingHeaderFields` 把它算作必需表头字段——所以 `corroborateChain`

@@ -35,6 +35,7 @@ import { SectionHeader } from "@/components/common/section-header";
 import { EmptyState, LoadingState } from "@/components/common/state";
 import { useHydratedPart } from "@/lib/parts/hooks";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
+import type { SessionTokenAccessor } from "@/lib/session";
 import { getDocumentState } from "@/lib/documents/reads";
 import { activityJournalsHref } from "@/lib/firm/activity";
 import { businessDateTime } from "@/lib/business-date";
@@ -144,11 +145,19 @@ function StateRow({
   );
 }
 
-export function DocumentStatePanel({ documentId, clientId }: { documentId: string; clientId: string }) {
+/** `session` IS INJECTABLE and defaults to the app-wide accessor. The Documents workbench mounts
+ *  this panel under the global one, exactly as before; #624 AC4's second half mounts the SAME
+ *  panel inside Work detail's Sources tab, and that page threads an explicit `SessionTokenAccessor`
+ *  through every child it owns (`work-detail.tsx`'s `session` prop) so a cell can drive the page
+ *  with no ambient state. A child reaching past that prop for a module-level global would have
+ *  been the one read on the page that could not be driven. */
+export function DocumentStatePanel({
+  documentId, clientId, session = sessionTokenAccessor,
+}: { documentId: string; clientId: string; session?: SessionTokenAccessor }) {
   const t = useTranslations("ClientDocuments");
   const { data, loading, err, clr } = useHydratedPart<StateLoad>(
-    sessionTokenAccessor,
-    async () => ({ result: await getDocumentState(documentId, clientId) }),
+    session,
+    async () => ({ result: await getDocumentState(documentId, clientId, { session }) }),
   );
 
   return (
