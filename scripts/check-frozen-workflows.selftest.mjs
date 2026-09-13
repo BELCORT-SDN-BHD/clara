@@ -17,6 +17,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  checkManifestPaths,
   checkRegistryMonotonicity,
   checkRegistryViewIntegrity,
   checkEnqueueSites,
@@ -260,6 +261,86 @@ testCase("round-9 N2: an ES2022 STRING-LITERAL import alias (`import { \"evil\" 
 
 testCase("round-9 N5: P-D's own defeat (chatTurn_v13 impersonating chatTurn_v1) re-reached via a STRING-LITERAL import alias (`import { \"chatTurn_v13\" as chatTurn_v1 }`) -> REJECT (REGISTRY-EXPORTS-CLOSED-WORLD)", () => {
   expectCodes(checkRegistryViewIntegrity(fixture("registry-view-import-alias-n5.ts.txt")), ["REGISTRY-EXPORTS-CLOSED-WORLD"]);
+});
+
+// --- (g) #637 — the PROVENANCE exports' shape --------------------------------
+// `workflowBodies` / `workflowPins` are the registry's answer to "which bodies does this image
+// carry, and which one does each class dispatch to". They are read by the boot line, by
+// /api/build-info and by the rollback preflight, so they must be INERT, IMMUTABLE DATA: a frozen
+// literal of string literals and nothing else. The shape rule is what keeps them from quietly
+// becoming a second dynamic-dispatch view — which the enqueue-provenance law (e) would then
+// trust by import source alone, exactly the hazard MUST D was minted against.
+console.log("provenance-export shape (#637):");
+
+testCase("#637 correctly-shaped workflowBodies + workflowPins (frozen literals of STRING literals) -> OK", () => {
+  expectClean(checkRegistryViewIntegrity(fixture("registry-view-provenance-good.ts.txt")));
+});
+
+testCase("#637 provenance exports absent entirely (a pre-#637 registry shape) -> OK (genuinely N/A, not a skip)", () => {
+  expectClean(checkRegistryViewIntegrity(fixture("registry-view-good.ts.txt")));
+});
+
+testCase("#637 workflowBodies as a BARE (unfrozen) array literal -> REJECT (REGISTRY-PROVENANCE-EXPORTS)", () => {
+  expectCodes(checkRegistryViewIntegrity(fixture("registry-view-provenance-unfrozen.ts.txt")), ["REGISTRY-PROVENANCE-EXPORTS"]);
+});
+
+testCase("#637 workflowPins whose values are IDENTIFIERS (a second frozen dispatch table of real workflow functions) -> REJECT (REGISTRY-PROVENANCE-EXPORTS)", () => {
+  expectCodes(checkRegistryViewIntegrity(fixture("registry-view-provenance-nonliteral.ts.txt")), ["REGISTRY-PROVENANCE-EXPORTS"]);
+});
+
+testCase("#637 workflowBodies smuggled in as an ALIASED RE-EXPORT of a local array -> REJECT, never silently ignored because the const scanner cannot see it", () => {
+  expectCodes(checkRegistryViewIntegrity(fixture("registry-view-provenance-aliased.ts.txt")), [
+    "REGISTRY-PROVENANCE-EXPORTS",
+    "REGISTRY-EXPORTS-CLOSED-WORLD",
+  ]);
+});
+
+testCase("#637 REAL repo registry declares BOTH provenance exports, correctly shaped (canary — a deletion fails HERE, not in a rollback six weeks later)", () => {
+  const real = readFileSync(join(HERE, "..", "packages", "runtime", "workflows", "registry.ts"), "utf8");
+  expectClean(checkRegistryViewIntegrity(real, "registry@working-tree"));
+  for (const name of ["workflowBodies", "workflowPins"]) {
+    if (!/Object\.freeze\(/.test(real.slice(real.indexOf(`export const ${name}`)).split("\n")[0])) {
+      throw new Error(`the real registry.ts must declare \`export const ${name} = Object.freeze(...)\``);
+    }
+  }
+});
+
+// --- (h) C77.2 — a frozen-manifest key under a TEST path is REFUSED ----------
+// The manifest is the golden-hash ledger of DEPLOYED, immutable bodies. A `tests/` key registers
+// a file that ships in no image and that no parked run can ever resume into, and it would then
+// be hash-locked forever by the append-only rule — a permanent, unremovable entry minted by a
+// typo or a careless `--update`. `isTestPath` already existed; until #637 it was consulted only
+// for the enqueue-site scan, never for the manifest's own keys.
+console.log("manifest-key hygiene (C77.2):");
+
+testCase("C77.2 a manifest key under packages/runtime/tests/ -> REFUSED, naming the offending key (MANIFEST-TEST-PATH)", () => {
+  const violations = checkManifestPaths(["packages/runtime/tests/foo.test.mjs"]);
+  expectCodes(violations, ["MANIFEST-TEST-PATH"]);
+  if (!violations[0].includes("packages/runtime/tests/foo.test.mjs")) {
+    throw new Error(`the violation must NAME the offending key; got: ${violations[0]}`);
+  }
+});
+
+testCase("C77.2 the other test-ish shapes isTestPath recognises (a __tests__ directory, a .spec.ts file) -> REFUSED too", () => {
+  expectCodes(
+    checkManifestPaths(["packages/runtime/__tests__/x.ts", "packages/runtime/workflows/x.spec.ts"]),
+    ["MANIFEST-TEST-PATH"],
+  );
+});
+
+testCase("C77.2 POSITIVE CONTROL: a valid production registration is clean — the rule must not reject the real thing", () => {
+  expectClean(
+    checkManifestPaths([
+      "packages/runtime/workflows/claraWork.v2.ts",
+      "packages/runtime/workflows/claraWork.v2.impl.ts",
+      "packages/runtime/workflows/chatTurn.v18.ts",
+    ]),
+  );
+});
+
+testCase("C77.2 POSITIVE CONTROL: the REAL frozen manifest's every key passes (canary)", () => {
+  const manifest = JSON.parse(readFileSync(join(HERE, "..", "frozen-workflows.json"), "utf8"));
+  expectClean(checkManifestPaths(Object.keys(manifest.workflows ?? {})));
 });
 
 // --- (e) enqueue-site provenance --------------------------------------------

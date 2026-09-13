@@ -29,7 +29,14 @@ import { startClassifyLoop } from "../lib/classify.mjs";
 import { startWikiProjectionLoop } from "../lib/wiki-projection-ops.mjs";
 import { heartbeat } from "../lib/reconciler.mjs";
 import { start, getRun } from "workflow/api";
-import { workflows, workflowsByName } from "../workflows/registry.js";
+import { workflows, workflowsByName, workflowBodies, workflowPins } from "../workflows/registry.js";
+// #637 (C88.8 / C-70) — the ONE provenance line and the stranded-body census. Both live HERE
+// because this is the only module that is both (a) TypeScript, so it can import the registry's
+// roster, and (b) running at the moment the world becomes dispatchable.
+import { readMigrationFrontier } from "../lib/build-info.mjs";
+import { recordBodyCensus, recordBodyCensusFailure, recordWorldStartRefused } from "../lib/body-census.mjs";
+import { strandedBodyCensusOnWorld } from "../lib/rollback-preflight.mjs";
+import { sanitizedErrorCode } from "../lib/pool-error-contract.mjs";
 // #623 (C88.8): the serving bundle's own banner. Imported from the FROZEN bundle module so the
 // digest this process logs is, by construction, the digest its runs stamp onto every Work row and
 // every operation receipt — never a second copy that could disagree.
@@ -59,6 +66,98 @@ type SupervisorState = { shuttingDown: boolean; stops: Array<() => Promise<unkno
 // Vercel-world feature; against the self-hosted Postgres world the beat reflects the
 // world PROCESS's event-loop liveness — a crashed worker exits the process, a stuck
 // worker stalls this timer → the beat goes stale → /ready fails.)
+/**
+ * #637 — the ONE provenance line. git sha, migration frontier, body count and every class pin, in
+ * one grep-able string, emitted once at the moment the world becomes dispatchable. The same four
+ * facts `/api/build-info` serves, so a log line and an HTTP read can be compared without trusting
+ * either alone — which is the whole C88.8 posture, extended from the bundle digest to the image.
+ */
+async function emitProvenanceLine(): Promise<void> {
+  const sha = process.env.CLARA_BUILD_SHA ? String(process.env.CLARA_BUILD_SHA) : "<unset>";
+  const { frontier, frontier_reason } = await readMigrationFrontier();
+  const frontierText = frontier
+    ? `${frontier.max_version ?? "<empty-ledger>"}(${frontier.count})`
+    : `<unavailable: ${frontier_reason ?? "unknown"}>`;
+  const pins = Object.entries(workflowPins)
+    .map(([className, identifier]) => `${className}=${identifier}`)
+    .join(" ");
+  console.log(
+    `[clara-runtime] serving git_sha=${sha} frontier=${frontierText} bodies=${workflowBodies.length} pins ${pins}`,
+  );
+}
+
+/**
+ * #637 (D6) — WHICH BODIES ARE LIVE RUNS PARKED ON THAT THIS IMAGE DOES NOT CARRY.
+ *
+ * TAKEN BEFORE `getWorld().start()`, because after start is too late: the world's own boot
+ * re-enqueue is what raises `ReplayDivergenceError` on a run whose body this image does not
+ * export, and a census taken afterwards could only describe the crash. A non-zero census REFUSES
+ * to start the durable world — this function returns `{ mayStart: false }`, it never exits, so
+ * HTTP stays up and `/ready` answers 503 naming the stranded bodies (`checks.bodies
+ * .world_start_refused`) instead of the process going dark. `CLARA_ALLOW_STRANDED_BODIES=1`
+ * overrides on the operator's own authority (the world starts anyway and MAY crash on replay).
+ *
+ * The ONE fail-OPEN case is a census that could not even be TAKEN (the read itself throwing, not a
+ * nonzero result): that is not evidence of a stranded body, so the world starts and `/ready`
+ * reports `measured:false` plus a sanitized error code — a third answer, not a clean zero.
+ *
+ * Taken ONCE, here, rather than on every /ready call: lib/health.mjs must stay ~0ms and DB-free on
+ * that path (its storage-probe paragraph gives the reason — fly's 5s budget is already shared by
+ * two sequential bounded round trips).
+ *
+ * ACCEPTED RULING, OWNER CONFIRMATION PENDING. Refusing is database-WIDE: any non-terminal run of
+ * an unexported body — left by another lane, an interrupted test, or a killed rig fixture — blocks
+ * every later runtime process on that database until it is retired or the override is set. That
+ * blast radius is named in packages/runtime/README.md's boot-gate section and docs/ARCHITECTURE.md
+ * §10, and is still awaiting the owner's confirmation, not fixed here.
+ */
+async function censusStrandedBodies(): Promise<{ mayStart: boolean }> {
+  let census;
+  try {
+    census = await strandedBodyCensusOnWorld(workflowBodies);
+  } catch (err) {
+    // FAIL-OPEN ON THE READ, and only on the read. A census that could not be TAKEN is not
+    // evidence of a stranded body, and refusing to boot on it would turn a permission slip or a
+    // momentary connection failure into an outage. /ready reports it as unmeasured, which is its
+    // own third answer.
+    const code = sanitizedErrorCode(err);
+    recordBodyCensusFailure(code);
+    console.warn(
+      `[clara-runtime] stranded-body census FAILED (${code}) — this process cannot say whether any live run `
+        + `is parked on a body it does not carry. NOT fatal; the world starts and /ready reports it as unmeasured.`,
+    );
+    return { mayStart: true };
+  }
+
+  if (census.stranded === 0) {
+    recordBodyCensus(census);
+    console.log(`[clara-runtime] stranded bodies n=0 (every live run's body is carried by this image)`);
+    return { mayStart: true };
+  }
+
+  const override = process.env.CLARA_ALLOW_STRANDED_BODIES === "1";
+  if (override) {
+    recordBodyCensus(census);
+    console.warn(
+      `[clara-runtime] stranded bodies n=${census.stranded} names=${census.names.join(",")} `
+        + `— OVERRIDDEN by CLARA_ALLOW_STRANDED_BODIES=1. The world will start and MAY crash on replay `
+        + `(ReplayDivergenceError) when it re-enqueues one of these runs. This is an operator decision.`,
+    );
+    return { mayStart: true };
+  }
+
+  recordWorldStartRefused(census);
+  console.error(
+    `[clara-runtime] stranded bodies n=${census.stranded} names=${census.names.join(",")} `
+      + `— REFUSING TO START THE DURABLE WORLD. Those runs are parked on bodies this image does not `
+      + `export; starting the engine would re-enqueue them and raise ReplayDivergenceError, which takes `
+      + `this crash-only process down and Fly restarts it — a loop, not a park. HTTP STAYS UP so /ready `
+      + `and /api/build-info remain readable, and NO lane runs. Release an image that carries those bodies `
+      + `(a compatibility build), or drain them, then restart. CLARA_ALLOW_STRANDED_BODIES=1 overrides.`,
+  );
+  return { mayStart: false };
+}
+
 export default definePlugin(() => {
   if (process.env.CLARA_START_WORLD !== "1") {
     console.log("[clara-runtime] world NOT started (CLARA_START_WORLD != 1) — skeleton mode");
@@ -150,6 +249,17 @@ export default definePlugin(() => {
   };
 
   void (async () => {
+    // #637 — THE PROVENANCE LINE COMES FIRST, before anything can refuse or fail. It is the line
+    // an operator needs most at exactly the moment the next step might refuse: which commit, which
+    // schema, which bodies, which pins.
+    await emitProvenanceLine();
+
+    // #637 review S5 — AND THE STRANDED-BODY CENSUS COMES BEFORE THE WORLD, because after it is
+    // too late: the world's own boot re-enqueue is what raises ReplayDivergenceError on a run whose
+    // body this image does not export, and a census that ran afterwards could only describe the
+    // crash. A refusal RETURNS — it never exits — so HTTP stays up and /ready can be read.
+    if (!(await censusStrandedBodies()).mayStart) return;
+
     try {
       const { getWorld } = await import("workflow/runtime");
       await getWorld().start?.();
@@ -166,6 +276,14 @@ export default definePlugin(() => {
       // rollback preflight unable to tell, from the logs alone, which bodies this process
       // actually carries — which is the question C88.8's line exists to answer.
       console.log(CLARA_WORK_BUNDLE_V2_BANNER);
+      // #637 (C88.8 / C-70) — the ONE MORE LINE this comment used to promise here (which commit
+      // built this image, which schema it is talking to, which body each class dispatches to, and
+      // how many bodies it carries for parked runs) is `emitProvenanceLine()`, ABOVE, at the top of
+      // this boot sequence — not here. It moved earlier on purpose (#637 review S5): the provenance
+      // line must log before anything can refuse, so an operator reading the log sees it even when
+      // the stranded-body census below refuses to start the world. The two banners above stay
+      // byte-identical either way (tests/work-bundle.test.mjs pins v1's exact string);
+      // tests/body-census-guard-db.test.mjs pins that the provenance line is emitted FIRST.
     } catch (err) {
       console.error("[clara-runtime] durable world FAILED to start:", err instanceof Error ? err.message : String(err));
       process.exit(1); // crash-only: world-start failure is fatal (S4-D10)

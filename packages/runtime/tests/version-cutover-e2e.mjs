@@ -45,14 +45,19 @@
 // workflow.workflow_runs.name really is a chatTurn_v7 body (deriving the name from the ROW, never
 // hardcoding the WDK path+export format) — a wrong reference fails loud, never false-greens.
 //
-// Requires a BUILT server (.output/server/index.mjs → pnpm build) + the rig DB (17 migrations +
-// 0002 seed + the WDK world bootstrap) + WORKFLOW_POSTGRES_URL at that SAME DB.
+// Requires a BUILT server (.output/server/index.mjs → pnpm build) + the rig DB (the FULL migration
+// chain + seed + the WDK world bootstrap) + WORKFLOW_POSTGRES_URL at that SAME DB. The "17
+// migrations" this line used to name was a point-in-time count and went stale within weeks — the
+// requirement was always "whatever the chain currently is", and #637 replaced the number with it.
 
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { SignJWT } from "jose";
 import { ephemeralPort } from "./ephemeral-port.mjs";
+// #637 — the census this file used to open-code now lives in the runtime's own module, beside the
+// CLI an operator runs before a rollback. One implementation, two consumers.
+import { bodyIdentifierOf, preflight } from "../lib/rollback-preflight.mjs";
 
 // --- Fail-closed local gate (the intake-e2e precedent).
 const LOCAL_HOSTS = new Set(["127.0.0.1", "localhost"]);
@@ -176,24 +181,46 @@ async function deriveNewestChatTurnExport() {
 }
 
 /** The runbook §0/§8 preflight, executable: a version is rollback-'allowed' iff it has ZERO
- *  non-terminal runs (packages/runtime/README.md, 'Deployment and rollback'). */
+ *  non-terminal runs (packages/runtime/README.md, 'Deployment and rollback').
+ *
+ *  #637 — DELEGATED to packages/runtime/lib/rollback-preflight.mjs rather than restated here. This
+ *  file used to carry the only executable version of the runbook's census, which is precisely why
+ *  it never ran at the moment it exists for; the census is now a module and a CLI, and this e2e is
+ *  COVERAGE of it rather than a second implementation that could drift from it (review law 3: take
+ *  it by import, do not retype it). An empty supported set means "every run in scope is
+ *  unsupported", which is exactly the per-name question this helper asks. */
 async function rollbackPreflight(rig, name) {
-  const r = await rig.rootQuery(
-    "select count(*)::int n from workflow.workflow_runs where name=$1 and status not in ('completed','failed','cancelled')",
-    [name],
-  );
-  return Number(r.rows[0].n) === 0 ? "allowed" : "refused";
+  const out = await preflight({ query: (sql, params) => rig.rootQuery(sql, params), supported: [], scope: { nameLike: name } });
+  // #637 review B2 — the module now returns TWO verdicts: `verdict` is the GLOBAL one (what the
+  // CLI's exit code follows, because a parked run of another class strands just as hard) and
+  // `scoped.verdict` is the narrowed one. THIS helper asks a per-NAME question, so it must read
+  // the narrowed view; reading the global one here would make "closeExample has zero runs" answer
+  // `refused` because some other name has one — which is not what the line above it asserts.
+  return out.scoped.verdict;
 }
 
 /** The runbook's INVENTORY-shaped preflight: a real rollback doesn't ask "does THIS ONE name
  *  have zero runs" — it asks "is EVERYTHING currently in flight covered by the build I'm rolling
- *  back to". Refuse if ANY non-terminal run's name falls outside `supportedNames`. */
-async function rollbackPreflightInventory(rig, supportedNames) {
-  const r = await rig.rootQuery(
-    "select name, count(*)::int n from workflow.workflow_runs where status not in ('completed','failed','cancelled') group by name",
-  );
-  const outside = r.rows.filter((row) => !supportedNames.includes(row.name));
-  return { verdict: outside.length === 0 ? "allowed" : "refused", outside };
+ *  back to".
+ *
+ *  #708 — SCOPED to the runs THIS e2e staged. It used to count every non-terminal row in the
+ *  database, which is correct for a production rollback and wrong for a shared local rig: 20 parked
+ *  `chatTurn_v18` runs left by an earlier suite were measured making the "with v8's run completed,
+ *  rollback is now allowed" leg answer `refused` for reasons unrelated to the cutover under test.
+ *  CI runs each e2e on its own database, so only local rigs bit — which is exactly the class of
+ *  defect that survives CI indefinitely. The supported set is given as run NAMES here (this file's
+ *  own idiom) and mapped to BODY identifiers, which is what the module compares. */
+async function rollbackPreflightInventory(rig, supportedNames, runIds) {
+  const out = await preflight({
+    query: (sql, params) => rig.rootQuery(sql, params),
+    supported: supportedNames.map(bodyIdentifierOf),
+    scope: { runIds },
+  });
+  // The NARROWED view when this caller narrowed, the GLOBAL one when it did not — which is exactly
+  // the #708 line below: the same helper, called with and without the ids, must answer about
+  // different populations. `preflight` always measures both and never lets one stand in for the
+  // other, so the choice is made HERE and visibly.
+  return out.scoped ?? out;
 }
 
 async function answerClarify(rig, taskId, ownerSub, answerText, opKey) {
@@ -284,7 +311,8 @@ async function main() {
   assert.equal(await rollbackPreflight(rig, closeExampleName), "allowed", "a workflow with ZERO runs → rollback allowed");
   console.log("[cutover-e2e] preflight: v7 refused, v8 refused, closeExample (zero-run) allowed");
 
-  const inv1 = await rollbackPreflightInventory(rig, [v7RowName, closeExampleName]);
+  const stagedRunIds = [t7Parked.workflow_run_id, t8Parked.workflow_run_id];
+  const inv1 = await rollbackPreflightInventory(rig, [v7RowName, closeExampleName], stagedRunIds);
   assert.equal(inv1.verdict, "refused", "inventory against a v7-only supported set REFUSES while v8 is non-terminal");
   assert.ok(inv1.outside.some((r) => r.name === v8RowName), "the inventory refusal NAMES v8 as the unsupported non-terminal build");
   console.log(`[cutover-e2e] inventory preflight (v7-only supported set): refused, naming ${v8RowName}`);
@@ -318,9 +346,47 @@ async function main() {
 
   // With BOTH runs terminal, the SAME v7-only inventory (unchanged supported set) now allows —
   // proving the inventory tracks live state, not a snapshot taken at the refusal above.
-  const inv2 = await rollbackPreflightInventory(rig, [v7RowName, closeExampleName]);
+  const inv2 = await rollbackPreflightInventory(rig, [v7RowName, closeExampleName], stagedRunIds);
   assert.equal(inv2.verdict, "allowed", "with both runs terminal, the SAME v7-only inventory now ALLOWS");
   console.log("[cutover-e2e] inventory preflight (same v7-only supported set): now allowed");
+
+  // #708's own acceptance line, driven rather than described: the SAME allowed verdict survives a
+  // database pre-seeded with parked non-terminal runs of ANOTHER workflow name. Twenty of them was
+  // the measured shape (parked chatTurn_v18 runs left by an earlier suite on a shared rig). The
+  // name is deliberately one no registry entry claims, so the running engine has no job for these
+  // rows and can never be asked to replay them; they exist only to be counted, and they are
+  // removed in the same block.
+  {
+    const noiseIds = [];
+    const noiseName = "workflow//./workflows/notAWorkflow.v1//notAWorkflow_v1";
+    for (let i = 0; i < 20; i += 1) {
+      const id = `wrun_cutover_noise_${randomUUID().replace(/-/g, "")}`;
+      noiseIds.push(id);
+      await rig.rootQuery(
+        "insert into workflow.workflow_runs (id, deployment_id, status, name) values ($1,$2,'running'::workflow.status,$3)",
+        [id, "cutover-noise", noiseName],
+      );
+    }
+    try {
+      const unscoped = await rollbackPreflightInventory(rig, [v7RowName, closeExampleName], null);
+      assert.equal(unscoped.verdict, "refused", "UNSCOPED, the noise dominates the answer — which is the #708 defect, reproduced");
+      // The FULL result here, not the helper's narrowed view: this leg is about the two verdicts
+      // being reported SEPARATELY (#637 review B2). A scoped "allowed" must never be readable as a
+      // global one, so the module returns both and says which is which.
+      const full = await preflight({
+        query: (sql, params) => rig.rootQuery(sql, params),
+        supported: [v7RowName, closeExampleName].map(bodyIdentifierOf),
+        scope: { runIds: stagedRunIds },
+      });
+      assert.equal(full.scoped.verdict, "allowed", "#708: SCOPED to this e2e's own runs, 20 unrelated parked runs change nothing");
+      assert.equal(full.scope.given, true, "…and the result SAYS it was narrowed, so it can never be read as a global verdict");
+      assert.equal(full.verdict, "refused", "…while the GLOBAL verdict beside it still sees the noise — that is the one an exit code follows");
+      assert.ok(full.outside.some((row) => row.name === noiseName), "…and the global census names the noise it refused on");
+      console.log("[cutover-e2e] #708: with 20 unrelated parked runs present, the unscoped inventory refuses and the SCOPED one still allows");
+    } finally {
+      await rig.rootQuery("delete from workflow.workflow_runs where id = any($1::text[])", [noiseIds]);
+    }
+  }
 
   // -------------------------------------------------------------------------
   // Static freeze/registry invariants that make the pin real.

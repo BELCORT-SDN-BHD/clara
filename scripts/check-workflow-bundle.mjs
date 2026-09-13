@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-// Workflow-bundle gate — the POST-BUILD half of Appendix A, and the answer to a defect this
+// Workflow-bundle gate — the POST-BUILD half of the versioning law (docs/ARCHITECTURE.md §10 (#workflow-versioning-and-rollback)),
+// and the answer to a defect this
 // repo has already paid for twice.
 //
 // WHY THIS EXISTS. The WDK compiler can silently swallow a directive: the source reads
@@ -120,7 +121,7 @@ for (const [className, entry] of classes) {
 }
 
 // --- (3) RESUMABILITY: every EXPORTED body still ships -------------------------------------
-// Appendix A policy (c) and the README's rollback preflight: a parked run resumes into the body
+// Policy (c) of that law and the README's rollback preflight: a parked run resumes into the body
 // it left, so an export the registry still carries must be reachable IN THE IMAGE, not merely
 // in the repo. Nothing else in CI checks this.
 let resumable = 0;

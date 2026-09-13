@@ -18,6 +18,7 @@ import { _resetPoolErrorContractForTest, poolErrorHealth } from "../lib/pool-err
 import { withRead, endPools } from "../lib/pools.mjs";
 import { assertLaneDsnTlsPosture, _resetTlsPostureSnapshotForTest } from "../lib/tls-ca.mjs";
 import { _resetLeaderStateForTest } from "../lib/leader-state.mjs";
+import { _resetBodyCensusForTest, _setBodyCensusForTest } from "../lib/body-census.mjs";
 import { FACTS_GATE_CONSUMER, FACTS_GATE_MAX_ATTEMPTS } from "../lib/facts-gate.mjs";
 import {
   LANE_ROSTER,
@@ -60,6 +61,7 @@ after(async () => {
   await rig.endPool();
   await endPools(); // the lane pools this file's fault-injection cell opens
   _resetLeaderStateForTest();
+  _resetBodyCensusForTest();
   _resetTlsPostureSnapshotForTest();
   // Stop the storage probe's background interval before its scratch dir disappears below.
   _resetStorageProbeCacheForTest();
@@ -674,4 +676,212 @@ test("#617: checks.tls carries VARIABLE NAMES and counts only — never a DSN, n
     else process.env.CLARA_READ_DATABASE_URL = prevRead;
     _resetTlsPostureSnapshotForTest();
   }
+});
+
+// ---------------------------------------------------------------------------
+// #637 — checks.bodies. A parked run whose BODY this image no longer carries is a run this
+// process cannot resume, and until now no surface said so: `/workflows` names classes,
+// `/api/build-info` names what the image HAS, and nothing compared the two against live state.
+//
+// SUPERSEDED BY THE "#637 review S5" SECTION BELOW. This ruling was originally warning-only,
+// following `checks.leader` (`held:false` warns; the process keeps serving). A measurement
+// overturned it: an engine that re-enqueues a run whose body it does not export raises
+// `ReplayDivergenceError`, the crash-only supervisor exits, and Fly restarts it — a loop, not a
+// park. The shipped rule instead REFUSES to start the durable world (HTTP stays up, `/ready` is
+// 503 with the stranded bodies NAMED, `CLARA_ALLOW_STRANDED_BODIES=1` overrides, and a census
+// that could not be TAKEN — as opposed to one that found something — still fails open) — see the
+// S5 section below for that contract and its tests.
+//
+// The ONE cell in THIS section that still applies as written: a census reported with
+// `worldStartRefused: false` (the operator override, or a process that never took the refusing
+// path) stays a WARNING and `ready` stays true.
+// ---------------------------------------------------------------------------
+
+test("ready: checks.bodies reports stranded bodies as a WARNING — ready stays true", { skip }, async () => {
+  const prev = process.env.CLARA_START_WORLD;
+  delete process.env.CLARA_START_WORLD;
+  _setBodyCensusForTest({ measured: true, stranded: 3, names: ["claraWork_v2", "chatTurn_v18"], runs: [] });
+  try {
+    const r = await checkReadiness();
+    assert.equal(r.checks.bodies.measured, true);
+    assert.equal(r.checks.bodies.stranded, 3);
+    assert.deepEqual(r.checks.bodies.names, ["claraWork_v2", "chatTurn_v18"]);
+    assert.equal(r.ready, true, "a stranded body is a WARNING — the process keeps serving (the checks.leader precedent)");
+    assert.ok(
+      r.warnings.some((w) => w.includes("claraWork_v2") && w.includes("chatTurn_v18")),
+      `the warning NAMES the bodies; got ${JSON.stringify(r.warnings)}`,
+    );
+  } finally {
+    _resetBodyCensusForTest();
+    if (prev === undefined) delete process.env.CLARA_START_WORLD;
+    else process.env.CLARA_START_WORLD = prev;
+  }
+});
+
+test("ready: an UNMEASURED body census is reported as unmeasured, never as a clean zero", { skip }, async () => {
+  const prev = process.env.CLARA_START_WORLD;
+  delete process.env.CLARA_START_WORLD;
+  _resetBodyCensusForTest();
+  try {
+    const r = await checkReadiness();
+    assert.equal(r.checks.bodies.measured, false, "the boot census has not run in this process");
+    assert.equal(r.checks.bodies.stranded, null, "…so there is no count, and 0 would be a lie");
+    assert.ok(!("names" in r.checks.bodies) || r.checks.bodies.names === null || r.checks.bodies.names.length === 0);
+    assert.equal(r.ready, true);
+    assert.equal(
+      r.warnings.some((w) => w.toLowerCase().includes("stranded")),
+      false,
+      "an unmeasured census warns about nothing — absence of evidence is not evidence of a problem either way",
+    );
+  } finally {
+    if (prev === undefined) delete process.env.CLARA_START_WORLD;
+    else process.env.CLARA_START_WORLD = prev;
+  }
+});
+
+test("ready: a measured census with ZERO stranded bodies is a clean, silent green", { skip }, async () => {
+  const prev = process.env.CLARA_START_WORLD;
+  delete process.env.CLARA_START_WORLD;
+  _setBodyCensusForTest({ measured: true, stranded: 0, names: [], runs: [] });
+  try {
+    const r = await checkReadiness();
+    assert.equal(r.checks.bodies.measured, true);
+    assert.equal(r.checks.bodies.stranded, 0);
+    assert.equal(r.ready, true);
+    assert.equal(r.warnings.some((w) => w.toLowerCase().includes("stranded")), false);
+  } finally {
+    _resetBodyCensusForTest();
+    if (prev === undefined) delete process.env.CLARA_START_WORLD;
+    else process.env.CLARA_START_WORLD = prev;
+  }
+});
+
+test("ready: a census that FAILED to read says so — a failed read is not zero stranded bodies", { skip }, async () => {
+  const prev = process.env.CLARA_START_WORLD;
+  delete process.env.CLARA_START_WORLD;
+  _setBodyCensusForTest({ measured: false, error: "insufficient_privilege" });
+  try {
+    const r = await checkReadiness();
+    assert.equal(r.checks.bodies.measured, false);
+    assert.equal(r.checks.bodies.error, "insufficient_privilege");
+    assert.equal(r.ready, true, "fail-open: the census is an instrument, not a dependency");
+    assert.ok(
+      r.warnings.some((w) => w.includes("insufficient_privilege")),
+      `a failed census WARNS with its sanitized code; got ${JSON.stringify(r.warnings)}`,
+    );
+    const serialized = JSON.stringify(r);
+    assert.ok(!serialized.includes("postgres://"), "no DSN reaches the payload");
+  } finally {
+    _resetBodyCensusForTest();
+    if (prev === undefined) delete process.env.CLARA_START_WORLD;
+    else process.env.CLARA_START_WORLD = prev;
+  }
+});
+
+// ---------------------------------------------------------------------------
+// #637 review S5 — THE WORLD REFUSES TO START WHEN A BODY IS STRANDED.
+//
+// The brief's original ruling was warning-only. A measurement overturned it: an engine that
+// re-enqueues a run whose body it does not export raises `ReplayDivergenceError`, the crash-only
+// supervisor exits 1, and Fly restarts it — a loop, not a park. A warning on a process that is
+// about to die in a loop is not a reading anyone gets to act on.
+//
+// So the world lane is HARD and everything else stays up: HTTP keeps serving (an operator can read
+// /ready and /api/build-info, which is the whole point), the world is never started, no restart
+// loop happens, and `/ready` is 503 with the stranded bodies NAMED.
+// `CLARA_ALLOW_STRANDED_BODIES=1` is the explicit operator override.
+// ---------------------------------------------------------------------------
+
+test("ready: S5 — a REFUSED world start is a HARD readiness failure that NAMES the stranded bodies", { skip }, async () => {
+  const prev = process.env.CLARA_START_WORLD;
+  process.env.CLARA_START_WORLD = "1";
+  _setBodyCensusForTest({ measured: true, stranded: 2, names: ["claraWork_v2"], worldStartRefused: true });
+  try {
+    const r = await checkReadiness();
+    assert.equal(r.checks.bodies.world_start_refused, true, "the refusal is a reported FACT, not an inference from a missing heartbeat");
+    assert.equal(r.checks.bodies.stranded, 2);
+    assert.deepEqual(r.checks.bodies.names, ["claraWork_v2"]);
+    assert.equal(r.ready, false, "the world lane is HARD here — this process cannot run the estate's parked work");
+    assert.ok(
+      r.warnings.some((w) => w.includes("claraWork_v2") && /refus/i.test(w)),
+      `the failure NAMES the bodies and says the world was refused; got ${JSON.stringify(r.warnings)}`,
+    );
+    // Never a DSN, never raw database text — /ready is unauthenticated.
+    assert.ok(!JSON.stringify(r).includes("postgres://"));
+  } finally {
+    _resetBodyCensusForTest();
+    if (prev === undefined) delete process.env.CLARA_START_WORLD;
+    else process.env.CLARA_START_WORLD = prev;
+  }
+});
+
+test("ready: S5 — the refusal fails readiness even when a heartbeat from the PREVIOUS process is still fresh", { skip }, async () => {
+  const prev = process.env.CLARA_START_WORLD;
+  process.env.CLARA_START_WORLD = "1";
+  // The heartbeat row is shared estate state: a process that stopped seconds ago leaves a beat
+  // that is still inside the staleness window. If the refusal were inferred from `checks.world`
+  // alone, THIS is the window in which a refused process would report itself ready.
+  await setBeat("world", "now()");
+  await setBeat("control", "now()");
+  _setBodyCensusForTest({ measured: true, stranded: 1, names: ["claraWork_v2"], worldStartRefused: true });
+  try {
+    const r = await checkReadiness();
+    assert.equal(r.ready, false, "a fresh foreign heartbeat must not make a refused process look ready");
+    assert.equal(r.checks.bodies.world_start_refused, true);
+  } finally {
+    _resetBodyCensusForTest();
+    if (prev === undefined) delete process.env.CLARA_START_WORLD;
+    else process.env.CLARA_START_WORLD = prev;
+  }
+});
+
+test("ready: S5 — a census with stranded bodies but NO refusal (the operator override) stays a WARNING", { skip }, async () => {
+  const prev = process.env.CLARA_START_WORLD;
+  delete process.env.CLARA_START_WORLD;
+  _setBodyCensusForTest({ measured: true, stranded: 3, names: ["claraWork_v2"], worldStartRefused: false });
+  try {
+    const r = await checkReadiness();
+    assert.equal(r.checks.bodies.world_start_refused, false);
+    assert.equal(r.ready, true, "CLARA_ALLOW_STRANDED_BODIES=1 keeps the old warning-only posture, deliberately and visibly");
+    assert.ok(r.warnings.some((w) => w.includes("claraWork_v2")));
+  } finally {
+    _resetBodyCensusForTest();
+    if (prev === undefined) delete process.env.CLARA_START_WORLD;
+    else process.env.CLARA_START_WORLD = prev;
+  }
+});
+
+test("ready: S5 — plugins/startWorld.ts takes the census BEFORE it starts the world, and refuses rather than exiting", { skip }, async () => {
+  // A SOURCE-SHAPE cell, in this file because this file owns the world-lane contract. The ORDER is
+  // the whole fix: a census taken after `getWorld().start()` cannot prevent the boot re-enqueue
+  // that raises ReplayDivergenceError, which is exactly what the first cut of #637 did
+  // (fire-and-forget, after the start). No unit harness can boot a nitro plugin, so the order is
+  // pinned textually and the BEHAVIOUR is pinned by the three cells above plus the two-build e2e.
+  const { readFile } = await import("node:fs/promises");
+  const src = await readFile(new URL("../plugins/startWorld.ts", import.meta.url), "utf8");
+  const censusAt = src.indexOf("strandedBodyCensusOnWorld(workflowBodies)");
+  const startAt = src.indexOf("getWorld().start?.()");
+  assert.ok(censusAt > 0, "the plugin takes the stranded-body census");
+  assert.ok(startAt > 0, "…and starts the world");
+  assert.ok(censusAt < startAt, "THE CENSUS COMES FIRST — after the start it cannot prevent the re-enqueue it exists to prevent");
+  assert.match(src, /CLARA_ALLOW_STRANDED_BODIES/, "the explicit operator override exists");
+  assert.match(src, /recordWorldStartRefused/, "…and the refusal is RECORDED so /ready can report it");
+  // The refusal must NOT be a process exit: exiting is the restart loop this change removes. The
+  // span examined is the CENSUS FUNCTION'S OWN body — not everything between the census call and
+  // the world start, which now spans the whole plugin body and its unrelated `fatal()` helper
+  // (that one SHOULD exit: a component settling unexpectedly is a genuine fault).
+  const fnAt = src.indexOf("async function censusStrandedBodies");
+  const fnEnd = src.indexOf("export default definePlugin");
+  assert.ok(fnAt > 0 && fnEnd > fnAt, "the census is its own named function, above the plugin");
+  assert.equal(
+    /process\.exit/.test(src.slice(fnAt, fnEnd)),
+    false,
+    "the refusal returns; it never exits the process (HTTP must stay up to be readable)",
+  );
+  // …and the CALL SITE acts on it by returning out of the boot sequence rather than by exiting.
+  assert.match(
+    src,
+    /if \(!\(await censusStrandedBodies\(\)\)\.mayStart\) return;/,
+    "the boot sequence RETURNS on a refusal — no world, no lanes, HTTP still serving",
+  );
 });
