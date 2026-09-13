@@ -351,6 +351,7 @@ tests/invite-courier.test.ts
 tests/invite-mail-transport.test.ts
 tests/invite-verification.test.ts
 tests/journal-refusal-roster.test.ts
+tests/live-provider-auth.test.ts
 tests/parity-holes.test.ts
 tests/password-recovery-handler.test.ts
 tests/proxy-matcher.test.ts
