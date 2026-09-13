@@ -13,6 +13,7 @@ import type {
   AttemptRow, CandidateRow, ClientRow, DocumentExtractResult, DocumentRow, ExtractionRow,
   FilingRow, JournalEntryRow, RegionRow,
 } from "./types";
+import type { DocumentStateResult } from "./document-state";
 
 type Opts = { session?: SessionTokenAccessor; signal?: AbortSignal };
 
@@ -187,6 +188,32 @@ export async function getDocumentExtract(
   return callDoor<DocumentExtractResult | null>(
     "get_document_extract",
     { p_document: documentId, p_client: clientId, p_max_chars: maxChars },
+    opts,
+  );
+}
+
+// --- #624 --------------------------------------------------------------------------
+
+/** clara.get_document_state(p_document uuid, p_client uuid) -> jsonb, STABLE — read RPC
+ *  (transport via callDoor; not a governed act: no confirmation UI, no re-read-after
+ *  semantics).
+ *
+ *  The FOUR INDEPENDENT STATES — custody, byte extraction, facts, operation — plus the
+ *  capability registry's verdict for this (format, kind) and the document's original /
+ *  duplicate / refile / supersede lineage, read together. Before this read the workbench had
+ *  only `documents.extraction_status`, a single scalar describing the last task to settle, so
+ *  a done OCR pass on a kind Clara derives nothing from rendered as success.
+ *
+ *  RESOLVES NULL LEGITIMATELY, exactly like `getDocumentExtract`: the RPC's admission mirrors
+ *  `clara.get_document_extract`'s (unassigned, or actively filed to `clientId`), and a document
+ *  filed to a DIFFERENT client returns SQL NULL rather than a partial answer. The caller renders
+ *  an honest "not available" state; it must never assert that away. */
+export async function getDocumentState(
+  documentId: string, clientId: string | null, opts: Opts = {},
+): Promise<DocumentStateResult | null> {
+  return callDoor<DocumentStateResult | null>(
+    "get_document_state",
+    { p_document: documentId, p_client: clientId },
     opts,
   );
 }

@@ -86,6 +86,11 @@ function makeFetch(counts: Record<string, number>): typeof fetch {
         case "journal_entries": return [];
         case "coding_tasks_visible": return [];
         case "lint_findings": return [];
+        // #624's state panel. NULL is the RPC's own legitimate answer for a document this
+        // caller may not read under this client, and the panel renders an honest "not
+        // available" for it — which keeps this file's subject (read COUNTS after a filing act)
+        // free of a second fixture it does not need.
+        case "get_document_state": return null;
         case "retire_document_filing": return { ok: true };
         default: return [];
       }

@@ -145,6 +145,15 @@ export function documentsFetch(opts: {
         case "journal_entries": return [];
         case "coding_tasks_visible": return [];
         case "lint_findings": return [];
+        // #624 x #620 MERGE RESOLUTION. `get_document_state` is an RPC returning jsonb, and SQL
+        // NULL is its own legitimate answer (lib/documents/reads.ts: a document filed to another
+        // client). This stub is shared by the URL-addressing battery, whose subject is the
+        // `?document=` parameter and not the four states — the default `[]` below would hand the
+        // panel an array where it expects an object or null, which is a shape the real door cannot
+        // produce. The state panel renders its honest "not available" for null, and the cells that
+        // actually measure the four states bring their own fixture
+        // (components/documents/document-state-panel.test.tsx).
+        case "get_document_state": return null;
         default: return [];
       }
     })();
