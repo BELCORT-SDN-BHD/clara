@@ -231,7 +231,28 @@ hosted 发布也按同一顺序完成：先发布具备 extraction-completed 消
 修订、来源变化、完成工作和更正生成可去重事件，只更新受影响概念、引用、经验及索引。
 实质冲突触发共享问题；明确、范围充分的更正无需再次确认。相关变化使待执行 Work 重查，
 无关 KB 修订不阻塞全客户。投影失败不回滚已完成账务；已入账错误仍走会计更正流程。
-当前 facts、wiki、coding-pattern pack 和 UI 尚未统一，不能把此目标理解为现有接线。
+**已实现的 Knowledge 记录（#644 / `0192_client_knowledge_records.sql`，本地 PG17 全链验证，hosted 证据待补）：**
+`clara.knowledge_keys` 是代码填充的类型目录（`assertion｜extracted_fact｜preference｜policy`，
+带 `value_shape`／`validated_against`／`scope_default`／`authority_bearing`；0055 的五个 legacy fact key
+按值搬入，另加 A5／A6 访谈当前真实产出的八个 key）。`clara.knowledge_records` 一行一个修订：
+稳定 `record_id` + 单调 `revision_n`、`scope_kind ∈ (client|firm)`、jsonb `applies_when` 与其生成 digest、
+`effective_from/to`、指向 `documents`／`document_extractions`／`document_regions` 的四个同 firm 复合外键
+（提取事实是**链接**而非复制）、每 firm 单调的 `knowledge_version` 水位、以及"只 supersede 不 update"的历史。
+`trust` 由 `source_kind` **派生**，三重强制：表上内联 CASE CHECK（restore 时无需任何函数即生效）、
+目录 `authority_bearing` 触发器、门自身的拒绝——因此 imported bundle 自称的 "verified" 或模型推测
+永远不能成为 policy 或授权。`policy` 在本切片是**描述性**的：入账路径不读这些行。
+门：`capture_knowledge`／`correct_knowledge`／`withdraw_knowledge` 与三个 C13 读（仅 `clara_authenticated`）；
+`capture_knowledge_for`／`get_knowledge_pack`（仅 `clara_runtime`，前者校验被署名真人的在职与 rank，从不冒充）；
+`promote_plan_answers_to_knowledge` 是唯一双车道名字，把已 commit 的 onboarding 答案按
+`clara.knowledge_plan_item_map` 搬入同一记录（CB-AE2E-030）。`get_context_pack` **未** splice：
+`get_knowledge_pack` 是新函数，便于 #658 的渐进检索取代它而不动 spliced body。
+`clara.client_facts` 与 `clara.record_client_fact` 逐字未改，只被 `list_client_knowledge` 以
+`source_kind='legacy_client_fact'` 只读 UNION 进同一 register。
+`knowledge.captured`（ignore）／`knowledge.corrected`／`knowledge.withdrawn`（context_update）已注册，
+但**尚无消费者**——三个 wake-bound decision 都会铸出本切片无人执行的 held agent task，所以刻意不用。
+wiki、coding-pattern pack、渐进检索与投影仍未统一，仍由 #658／#663 承接；
+`packages/runtime/lib/knowledge.mjs` 已就位（`readKnowledgePack` 永不返回 null、永不抛出），
+但 chat 车道的捕获工具与诚实 pack 步骤要等下一个冻结的 `chatTurn` 版本才接线。
 
 <a id="close-reporting-and-tax"></a>
 
@@ -370,7 +391,7 @@ Web、runtime、DB frontier 和 renderer 分别记录发布身份；源代码通
 | Work 与控制 | tasks、interruptions、回执、SSE、租约已有；#623（0178）加入 `accounting_work`／`operation_receipts`、逻辑操作身份、client 范围的 intent 幂等、retry 保留身份、任务状态镜像、receipt-aware 结算与待答问题级联（本地 db suite 4152／4058 pass／0 fail／94 skip）；#629（0180）加入共享 Work question（`agent_interruptions` 上的 Work 链接、单调版本、类型化字段、依据 digest、回答归因、带时间戳的 delivery state；一个 Work 至多一个待答问题；首答闸门 `answer_work_question`；读门 `get_work_question`／`get_work_pending_question`；`list_review_queue` 的 `work_question` 行）与正确投递（claimant+租约条件的 delivered 戳、续租、HookNotFound 按真实 run 状态核对、`hook_missing` 静置 + 宽限 + 二次探测后才结算 `expired`、14 天期限的执行者）；本地 db suite 4208／4114 pass／0 fail／94 skip；CI 绿。取消排序仍由 #630 承接；chat 车道的 clarify 期限与 HookNotFound 假设未变（#720）；答案不能补全不完整的 basis（#721）。 | 统一业务 Work，共享问题与稳定操作身份，真实重启／竞争下保持完整结果。 |
 | 会计能力 | JE、subledger、结算、资产、close 基础存在；#623 的无附件手工分录已是完整 operation（`wake_record_journal_entry`：无 attestation 仪式、当前授权与硬约束在提交时重查、回执墙接受两种回执形态）；#634（0182）使该 operation 的凭据可选且可迟到而不改写已入账历史（`entry_evidence_links`、全事务所一份文件一条在世分录、冲销释放、`attach_entry_evidence`、`list_entry_links`；`admit_journal_work`／`_record_journal_entry_core` 全文重切，0178 各拒绝臂逐一保留并经文本 diff 核对；本地 db suite 4193／4099 pass／0 fail／94 skip，work-journal e2e 第 8 条腿；CI 待记录）；文件编码车道仍不回看凭据链接（#718）。其余入口能力及人工／agent 行为仍不一致。 | 全范围领域操作与必要关联影响；去掉普通入账额外仪式，保留实际权限与硬约束。 |
 | 文件 | 0177 与 extraction-aware facts_gate consumer 已合入 main 并在本地 PG17 全链验证：未知 kind 的 PDF／图片在成功提取前返回 awaiting_extraction；hosted 发布已由 #606 记录（consumer v76 先行、0177 落地 live DB（frontier 0177）、runtime v77，真实上传旅程中 classify 任务在 extraction 完成后 98 ms 创建）。 | 能力分层与 source／facts／operation 状态一致；提取失败不产生分类目前只有本地证据，hosted 证据仍待补。 |
-| Knowledge | facts、wiki 与 advisory pattern pack 分开；检索偏固定 priority／recency；部分 claim metadata 缺失，chat pack 错误会降为 null。 | 统一捕获、身份、版本、按需检索、纠正和投影；必需知识不可用时诚实暂停。 |
+| Knowledge | #644（0192）已合入分支并在本地 PG17 全链验证：`clara.knowledge_keys`（13 个 key：0055 五个 legacy fact key 按值搬入 + A5／A6 访谈真实产出的八个，其中两个 authority-bearing policy、一个 preference）、`clara.knowledge_plan_item_map`（10 行 item_key → knowledge_key，供 owner 批准）、`clara.knowledge_records`（稳定 record_id + 单调修订、client／firm scope、applicability digest、四个同 firm 来源外键、per-firm `knowledge_version`、只 supersede 不 update）与 `clara.knowledge_versions` 均为 forced RLS、零 DML 授权；`trust` 由 `source_kind` 派生并三重强制，policy／authority-bearing 只收 `asserted`；九个门按车道精确授权（六个人类、两个 runtime、一个双车道 promotion），wake／agent 角色一个都没有；C13 list／detail 已落地（类型筛选、scope／trust 徽章、applicability、来源链接、修订时间线、Correct／Withdraw），并区分"成功空读／筛选无结果／来源不可读／两条在世记录冲突／读失败"五种面貌；onboarding commit 之后调用 promotion 门（CB-AE2E-030）。本地证据：db 28 cells、runtime 13 cells、web unit 6+2 cells 全绿，rig-isolation 20 pass／1 skip（破坏性 reset cell 未跑）。**hosted 证据待补。** 仍未统一：wiki 与 advisory pattern pack 仍分开、检索仍偏固定 priority／recency（#658）、投影／wiki 视图未建（#663）、身份／alias 未纳入（#647）、chat 车道的捕获与诚实 pack 仍待下一个冻结 `chatTurn` 版本（`packages/runtime/lib/knowledge.mjs` 已就位并单测），`loadContextStepV10` 的 `catch { contextPack = null }` 尚未替换；`policy` 目前是描述性的，不改变入账行为；三个 knowledge 事件已注册但无消费者。 | 统一捕获、身份、版本、按需检索、纠正和投影；必需知识不可用时诚实暂停。 |
 | 自动计划与 close | 日常 reconciler／资产／调整机制已有；bank_agent／close_prep wake sources 默认关闭，生产／激活链路不完整。 | 显式授权计划到期产生 Work，普通自主执行含满足条件的 recon／close；技术开关不成为用户 opt-in。 |
 | 财务界面与输出 | 统一导航壳已实现（#614：注册表驱动的 Sidebar／scope switcher／Breadcrumb，Work／Settings／Accounting 目的地，旧链接 307 迁移；本地单元与浏览器证据，hosted：clara-web 版本 5dcee6d8（3f4c5f8b，含畸形 client id 的 not-found 守卫）已推广，登录 smoke、旧链接 307 矩阵与 owner 登录后的 shell 旅程在线验证）；#623 的 C3 composer／B3 Work detail／B6 Work 卡片已落地（本地：web unit 2923／2923、browser 152 passed／0 failed／7 fixture-gated skips；hosted 证据以 #623 记录为准）。#626 的 `/settings/account`（账户、界面与通知偏好）已落地：`clara.user_preferences`／`get_my_preferences`／`save_my_preferences`（0179_user_preferences.sql，PATCH 语义、CLR06 乐观并发、CLR10 校验、op_key 重放，own-row RLS）落库，界面偏好集刻意收窄为两个有真实消费者的项（motion 驱动 `data-motion` 属性叠加 OS `prefers-reduced-motion`；sidebarDefault 写回既有 `sidebar_state` cookie），通知偏好尚无消费者、页面如实呈现"尚未配置"而非死控件；本地 DB／单元／浏览器套件验证，hosted 证据未补；A Home 仪表、B Work 列表／详情与 Settings 其余分区仍是目标，由 #641／#650／#659／#635 承接。#629 的 B3／B4／B6 共享问题面、#632 的 `/activity` 事件流（CB-AE2E-018 已解除）与 #634 的 composer 凭据选择器／Attach evidence 对话框／Journals 表链接与筛选已落地（本地：web unit 3003／3003（#629）、3001／3002（#632，1 个已知负载 flake）、2995／2995（#634）；浏览器全套 186／1、183／3、182／1，失败项均为未触及的负载敏感 spec 并单独通过；各自的 walk 全绿；hosted 证据以各 ticket 记录为准）。Journals／Documents／Reports 的条目级深链接仍缺（#719）。工作台与 card readers 仍是旧形态；sealed renderer 已有，sandbox worker、完整管理模板和交付验证仍不齐。 | 完整旅程、统一 metric pack、可靠 AI UI、可复现且可下载的报表。 |
 | 准入与运行保障 | beta 准入；#621（0185）已合入版本化 Terms／DPA 接受机制与走墙的验证码重发；#628（0186）已合入 checkout intent 生命周期、四种 Stripe 事件、取消／续付、容量墙（本地 DB／runtime／web 套件与两集群 DR 往返证据；hosted 已于 2026-09-13 发布：frontier 181／0186、clara-runtime v82（refresh-98f6eec6）、clara-web 742b09e9，signed-out smoke 与 Stripe 四事件订阅均已核对；v1 法律文本由 0187 按 owner 决定以 beta 模板发布——正文自称待律师审阅，正式措辞将以 v2 取代——hosted 发布见 #621／#628 记录）；部分外发机制、备份工具、单机部署；/ready 已区分未测量／未配置／已配置失败，并按 lane 计连接错误、暴露 leader 与 TLS posture，附可执行恢复清单（#617，本地 PG17 全链验证，并已有 hosted 证据：clara-runtime v76／v77 在真实宿主上暴露该 readiness 面，七条 lane DSN 已全部改为对镜像所带 pooler CA 的 `verify-full`，`/ready` 的 `checks.tls` 报 pinned ×7、validated）；完整硬性 readiness 与恢复证据仍有边界，生产上的强制 lane 断连与 leader kill 演练尚未执行。 | 合同与实现一致的准入／外发、协调版本发布及代表性 hosted／restore 验证。 |

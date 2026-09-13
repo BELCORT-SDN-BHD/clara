@@ -86,7 +86,12 @@ _Avoid_: Chat history.
 
 **Client knowledge**:
 The client's facts, identities, aliases, durable preferences, policy information and source-linked accounting experience, with their sources and verification state. Explicit information may be saved automatically; an agent's inference is not automatically confirmed knowledge.
-_Avoid_: An unqualified bag of chat messages; a synonym for authority to post.
+Every governed record carries one of four **kinds** — a *stated fact* (what an identified person supplied), an *extracted fact* (read from a named source version), a *preference* (a durable instruction) or a *policy* (a decision about how the books are prepared) — and one of four **trust levels**, derived from where it came from and never supplied by the caller: *asserted*, *extracted*, *imported unverified* and *inferred*. A policy admits `asserted` alone.
+_Avoid_: An unqualified bag of chat messages; a synonym for authority to post; treating an imported bundle's own "verified" annotation, or a model's own confidence, as a trust level.
+
+**Knowledge revision**:
+One attributable version of a knowledge record. A capture is revision 1; a correction and a withdrawal each append a further revision naming its actor and its reason, and leave the revision they retire readable. A withdrawal is terminal for that record — a later statement of the same thing starts a new record with its own history.
+_Avoid_: Editing a knowledge value in place; a correction with no stated reason; presenting a withdrawal as the absence of a record.
 
 **Firm knowledge default**:
 An explicitly firm-scoped instruction or preference that applies across authorised clients while preserving their established exceptions.
