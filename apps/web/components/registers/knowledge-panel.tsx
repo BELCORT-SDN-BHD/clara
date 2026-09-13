@@ -134,11 +134,18 @@ function KnowledgeGroup({ clientId, knowledgeKey, rows }: {
 }) {
   const t = useTranslations("ClientKnowledge");
   const live = rows.filter((r) => r.state === "live");
-  // THE CONFLICT FACE. Two live records of one key contradict each other unless a
-  // reader can tell which applies — and 0192 guarantees they differ in exactly
-  // that (`uq_knowledge_live` is over the applicability digest). So the surface
-  // shows BOTH, says they conflict, and picks neither.
-  const conflicted = live.length > 1;
+  // THE CONFLICT FACE. Two live GOVERNED records of one key contradict each other
+  // unless a reader can tell which applies — and 0192 guarantees they differ in
+  // exactly that (`uq_knowledge_live` is over the applicability digest). So the
+  // surface shows BOTH, says they conflict, and picks neither.
+  //
+  // A LEGACY `client_facts` ROW BESIDE A KNOWLEDGE RECORD IS NOT THAT. It is never
+  // shadowed (0192's decision 1: the rest of Clara still READS clara.client_facts
+  // for all five carried keys), and it is not an undecided pair either — the legacy
+  // row is the one in force, and `KnowledgeRow`'s `authoritative` banner says so.
+  // Calling that a conflict would tell the reader nothing decides it when
+  // something does.
+  const conflicted = live.filter((r) => r.editable).length > 1;
 
   return (
     <li className="enter-content flex flex-col gap-2 rounded-lg border border-border bg-card p-3 text-sm">
@@ -176,6 +183,16 @@ function KnowledgeRow({ clientId, row }: { clientId: string; row: KnowledgeRecor
       <KnowledgeApplicability record={row} />
       <KnowledgeProvenance record={row} />
       <KnowledgeSourceBlock clientId={clientId} source={row.source} sourceKind={row.source_kind} />
+      {row.authoritative ? (
+        // THE LEGACY ROW IS THE ONE IN FORCE. clara.get_context_pack (0055:765), the closing-stock
+        // close gate (0056:1283), the name-only guard (0062:226) and the bank-registry ledger
+        // (0121:4797) all still read clara.client_facts, and 0192 does not dual-write — so a
+        // legacy row is never shadowed by a newer knowledge record and the surface has to say
+        // which of the two Clara actually acts on.
+        <StateBanner tone="warning" title={t("authoritativeTitle")}>
+          {t("authoritativeBody")}
+        </StateBanner>
+      ) : null}
       {row.editable ? (
         <Link
           className="w-fit text-xs underline underline-offset-4"

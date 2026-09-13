@@ -87,6 +87,7 @@ function rec(over) {
     superseded_at: null,
     state: "live",
     editable: true,
+    correctable: true,
     ...over,
   };
 }
@@ -130,6 +131,8 @@ function msicLive() {
       revision_id: `${KN.recordMsic}-rev-withdrawn`,
       revision_kind: "withdrawal",
       state: "withdrawn",
+      // DERIVED server-side in the real door: a withdrawal is terminal, so no control is offered.
+      correctable: false,
       revision_reason: withdrawal,
     };
   }
@@ -162,9 +165,13 @@ const CONFLICT_B = rec({
   key_description: "The SST registration status the interview recorded.",
 });
 
+// A legacy `client_facts` row is UNIONed in by clara.list_client_knowledge and is never
+// shadowed: the estate still reads that table for all five carried keys, so it carries
+// `authoritative: true` and the register says which of the two rows Clara acts on.
 const LEGACY = rec({
   record_id: KN.legacyFact, knowledge_key: "entity_type", value: "sdn_bhd",
-  source_kind: "legacy_client_fact", basis: "the SSM certificate", editable: false,
+  source_kind: "legacy_client_fact", basis: "the SSM certificate", editable: false, correctable: false,
+  authoritative: true,
   basis_kind: "owner_instruction",
   key_description: "The client's legal form.",
 });
@@ -189,7 +196,7 @@ function registerFor(clientId) {
   if (clientId === KN.clientSourceGone) {
     return { client_id: clientId, knowledge_version: "5", records: [SOURCE_GONE] };
   }
-  return { client_id: clientId, knowledge_version: 0, records: [] };
+  return { client_id: clientId, knowledge_version: "0", records: [] };
 }
 
 function recordById(id) {

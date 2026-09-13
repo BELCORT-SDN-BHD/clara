@@ -200,7 +200,16 @@ export async function cancelClientOnboarding(
 }
 
 /** clara.promote_plan_answers_to_knowledge(p_plan uuid, p_op_key text,
- *  p_promote_firm_scope boolean) — #644 / 0192, the missing half of A6.
+ *  p_promote_firm_scope boolean, p_firm uuid DEFAULT NULL) — #644 / 0192, the
+ *  missing half of A6.
+ *
+ *  `p_firm` IS DELIBERATELY NOT PASSED FROM HERE. The door picks its lane from the
+ *  caller: a session with claims is the HUMAN lane and takes its firm from the JWT
+ *  (a supplied `p_firm` is only a belt that must agree with it), while the MACHINE
+ *  lane — the runtime role, no claims — must name the firm it is promoting into and
+ *  is refused without it. The browser is always the human lane, so naming the firm
+ *  here would add a value the session already decides and the door would only
+ *  re-check.
  *
  *  WHY IT IS A SEPARATE CALL AND NOT PART OF THE COMMIT. 0017's
  *  `commit_client_onboarding` is a merged migration and a live ceremony with its

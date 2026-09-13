@@ -123,9 +123,10 @@ export type KnowledgeRecordRow = {
   asserted_by_name: string | null;
   recorded_via: "human_ui" | "clara_runtime";
   recorded_at: string;
-  /** A bigint on the wire — kept as the driver sent it (string OR number), never
-   *  coerced: this is the watermark a resumed run compares, and a lossy Number()
-   *  would make two different things look equal. */
+  /** A bigint, emitted by the doors as TEXT and kept as text here. The union with
+   *  `number` survives only for a pre-fix payload; nothing may coerce it, because
+   *  this is the watermark a resumed run compares and a lossy Number() past 2^53
+   *  would make two different versions look equal. */
   knowledge_version: string | number | null;
   revision_kind: "capture" | "correction" | "withdrawal";
   revision_reason: string | null;
@@ -133,9 +134,21 @@ export type KnowledgeRecordRow = {
   superseded_by: string | null;
   superseded_at: string | null;
   state: KnowledgeState;
-  /** False for a UNIONed legacy fact: there is no correct/withdraw door for it,
-   *  so the surface must not offer one. */
+  /** "This is a governed knowledge record with its own detail route and doors" —
+   *  true of every knowledge row, false only for a UNIONed legacy client_fact. */
   editable: boolean;
+  /** "A correction or a withdrawal would actually be admitted" — true only of the
+   *  CURRENT LIVE revision. A superseded revision is immutable at the table and a
+   *  withdrawal is terminal, so a control offered on either would be a promise the
+   *  database refuses. Two different questions; conflating them was the defect. */
+  correctable: boolean;
+  /** Legacy rows only, and TRUE on every one of them: `clara.client_facts` is
+   *  still the table the rest of the estate READS for all five carried keys
+   *  (get_context_pack 0055:765, the closing-stock gate 0056:1283, the name-only
+   *  guard 0062:226, the bank-registry ledger 0121:4797), and 0192 does not
+   *  dual-write. So a legacy row is never shadowed by a knowledge record of the
+   *  same key, and the surface says which of the two is in force. */
+  authoritative?: boolean;
   key_description?: string | null;
   value_shape?: string | null;
   validated_against?: string | null;
@@ -167,9 +180,11 @@ export type KnowledgeRecordDetail = {
 
 export type KnowledgeHistory = { record_id: string; revisions: KnowledgeRecordRow[] };
 
-/** clara.list_client_knowledge(p_client uuid) — viewer+, the C13 register. Client
- *  rows shadow firm defaults of the same key, and the legacy `client_facts` rows
- *  ride in with `source_kind='legacy_client_fact'`. */
+/** clara.list_client_knowledge(p_client uuid) — viewer+, the C13 register. A client
+ *  row shadows the firm default of the same key AND THE SAME APPLICABILITY (never
+ *  by key alone: a narrow client exception must not erase an unconditional firm
+ *  default), and the legacy `client_facts` rows ride in with
+ *  `source_kind='legacy_client_fact'` and are never shadowed at all. */
 export function loadClientKnowledge(
   clientId: string,
   opts: { session?: SessionTokenAccessor; signal?: AbortSignal } = {},

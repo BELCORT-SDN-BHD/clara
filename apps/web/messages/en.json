@@ -2236,7 +2236,9 @@
       "number": "This key holds a number.",
       "boolean": "This key holds true or false.",
       "json": "This key holds a JSON object, for example {\"seed\": \"manual\"}."
-    }
+    },
+    "authoritativeTitle": "This client fact is the one in force",
+    "authoritativeBody": "Clara still reads this client fact when it prepares this client's books. A Knowledge record of the same key is shown beside it and does not replace it."
   },
   "Auth": {
     "passwordPolicy": "Use at least {min} characters."

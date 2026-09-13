@@ -4,7 +4,7 @@
 // door wrappers, `useAsyncRead`'s hydrate-never-trust reload and the door
 // dialog's single-fire confirm. What is FAKE is the wire.
 //
-// THESE FOUR CELLS ARE THE PRODUCT CLAIMS #644 MAKES ABOUT THIS SURFACE:
+// THESE CELLS ARE THE PRODUCT CLAIMS #644 MAKES ABOUT THIS SURFACE:
 //   1. a corrected record shows its CURRENT value and a history that names the
 //      correcting actor and their reason — the revision is visible as a
 //      revision, not as a value that silently changed;
@@ -13,7 +13,10 @@
 //   3. Withdraw actually reaches `POST /rest/v1/rpc/withdraw_knowledge` with the
 //      typed reason — the control is the door, not a local state flip;
 //   4. two LIVE records of one key render BOTH, under a conflict alert; the
-//      surface never picks a winner.
+//      surface never picks a winner;
+//   5. a LEGACY `client_facts` row beside a knowledge record of the same key is
+//      never hidden, says it is the one in force, and is NOT called a conflict —
+//      because something DOES decide between those two, and it is the legacy row.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -83,6 +86,7 @@ function record(over: Partial<KnowledgeRecordRow> = {}): KnowledgeRecordRow {
     superseded_at: null,
     state: "live",
     editable: true,
+    correctable: true,
     key_description: "Five-digit MSIC industry code.",
     ...over,
   };
@@ -303,6 +307,60 @@ test("kd.04 two LIVE records of one key render BOTH under a conflict alert; noth
         // …and the conflict is announced, because a contradiction is news.
         const alert = h.find((n) => String((n as { getAttribute?: (k: string) => string | null }).getAttribute?.("role") ?? "") === "alert");
         assert.ok(alert, "the conflict must render in a live region, not as quiet prose");
+      } finally {
+        await h.unmount();
+        for (let i = 0; i < 3; i++) await h.settle();
+      }
+    },
+  );
+});
+
+// =============================================================================
+// 5 — the LEGACY row beside a governed record of the same key (review round, B2)
+// =============================================================================
+
+test("kd.07 a LEGACY fact is never hidden by a knowledge record of the same key, and says which one is in force", async () => {
+  // 0192 adds a register BESIDE clara.client_facts and does not dual-write, so the value the rest
+  // of Clara acts on for a carried key is still the LEGACY one (get_context_pack 0055:765, the
+  // closing-stock gate 0056:1283, the name-only guard 0062:226, the bank-registry ledger
+  // 0121:4797). Shadowing it would have this register report the new value while the books went
+  // on being prepared from the old one.
+  const legacy = record({
+    record_id: "legacy-1", revision_id: "legacy-1", revision_n: 1, knowledge_key: "entity_type",
+    value: "sdn_bhd", source_kind: "legacy_client_fact", basis: "the SSM certificate",
+    revision_kind: "capture", revision_reason: null, supersedes_id: null,
+    editable: false, correctable: false, authoritative: true,
+    key_description: "The client's legal form.",
+  });
+  const governed = record({
+    record_id: "rec-e", revision_id: "rev-e", revision_n: 1, knowledge_key: "entity_type",
+    value: "llp", revision_kind: "capture", revision_reason: null, supersedes_id: null,
+    basis: "the client converted to an LLP on 1 Jul",
+    key_description: "The client's legal form.",
+  });
+  await withMockedEnv(
+    (async (url: RequestInfo | URL) => {
+      const u = String(url);
+      if (u.includes("/rpc/list_client_knowledge")) {
+        return jsonResponse({ client_id: "c1", knowledge_version: "12", records: [governed, legacy] });
+      }
+      throw new Error(`unexpected fetch: ${u}`);
+    }) as typeof fetch,
+    async () => {
+      const h = await renderComponent(PanelApp());
+      try {
+        for (let i = 0; i < 6; i++) await h.settle();
+        const text = h.text();
+        assert.match(text, /sdn_bhd/, "the legacy value the estate still reads must stay on screen");
+        assert.match(text, /llp/, "…beside the newer governed record");
+        assert.match(text, /This client fact is the one in force/,
+          "the register must say which of the two Clara actually acts on");
+        // …and it is NOT the undecided conflict face: something DOES decide between these two.
+        assert.doesNotMatch(text, /These records disagree/,
+          "a legacy row beside its knowledge record is not a contradiction with no winner");
+        // The legacy row still offers no control the database has no door for.
+        assert.match(text, /Recorded before the Knowledge register existed/,
+          "a legacy row gets the no-door note, never an Open record link");
       } finally {
         await h.unmount();
         for (let i = 0; i < 3; i++) await h.settle();

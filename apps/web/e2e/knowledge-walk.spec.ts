@@ -57,10 +57,15 @@ test("an INFERRED record is badged unverified and never borrows a confirmed fact
   await expectAccessible(page, "knowledge register, unverified inference");
 });
 
-test("a LEGACY client fact rides the same register, with no control the database has no door for", async ({ page }) => {
+test("a LEGACY client fact rides the same register, says it is the one in force, and offers no control the database has no door for", async ({ page }) => {
   await signInTo(page, `/clients/${KN.clientOk}/knowledge`);
   await expect(page.getByText("Recorded as a client fact before the Knowledge register")).toBeVisible();
   await expect(page.getByText("Recorded before the Knowledge register existed", { exact: false })).toBeVisible();
+  // …and the register says which row Clara acts on. `clara.client_facts` is still what
+  // get_context_pack, the closing-stock gate, the name-only guard and the bank-registry ledger
+  // read, so the legacy row is never shadowed and never reads as merely historical.
+  const inForce = page.getByRole("alert").filter({ hasText: "This client fact is the one in force" });
+  await expect(inForce).toBeVisible();
 });
 
 // ---------------------------------------------------------------------------

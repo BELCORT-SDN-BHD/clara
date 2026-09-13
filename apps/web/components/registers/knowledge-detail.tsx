@@ -177,7 +177,11 @@ export function KnowledgeDetail({ clientId, recordId }: { clientId: string; reco
                 closing and the reload that always follows (doors.ts's law). */}
             {detail.error ? <ErrorMessage error={detail.error} /> : null}
 
-            {record.state === "withdrawn" ? null : (
+            {/* THE CONTROLS FOLLOW THE DATABASE'S OWN ANSWER. `correctable` is derived
+                server-side (state = 'live'), so this surface cannot offer a Correct or a
+                Withdraw on a revision the doors would refuse — a superseded one is immutable and
+                a withdrawal is terminal. */}
+            {record.correctable === false ? null : (
               <div className="flex flex-wrap gap-2">
                 <ArApCounterpartyDoorDialog
                   triggerLabel={t("correctTrigger")}
