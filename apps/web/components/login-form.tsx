@@ -3,8 +3,9 @@
 import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 
+import { useFocusOnFlag } from "@/hooks/use-focus-on-flag";
 import { resolveSameOriginPath } from "@/lib/safe-redirect";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
@@ -89,28 +90,31 @@ export function LoginForm({
   const t = useTranslations("Login");
   const router = useRouter();
   const searchParams = useSearchParams();
+  // #622 review round — the SAME return target this page's own success path
+  // already resolves through `resolveSameOriginPath` below is forwarded onto
+  // the "Forgot password?" link too, RAW and unvalidated at this hop
+  // (`app/(entry)/auth/recover/next-cookie.ts`'s own header carries the full
+  // journey). Validating twice with the same origin would answer identically
+  // either way, so consistent with how `proxy.ts` itself WRITES this same
+  // value unvalidated and leaves the wall to the READ side, this hop stays a
+  // plain forward too — the one place it is actually resolved is
+  // `password-reset-form.tsx`'s Continue link, at the end of the journey.
+  // Without it: a person blocked at `/work?view=needs-you` who clicked
+  // "Forgot password?" landed on Home after resetting — the link carried no
+  // `next` at all, so nothing downstream had anything to forward.
+  const rawNext = searchParams.get("next");
+  const forgotPasswordHref = rawNext !== null && rawNext.length > 0
+    ? `/forgot-password?next=${encodeURIComponent(rawNext)}`
+    : "/forgot-password";
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
 
   // FOCUS LANDS ON THE FAILURE BANNER (appendix D's pending-submit-identity
-  // gap; `signup-legal-stage.tsx`'s own header carries the underlying
-  // argument, restated in `password-recovery-form.tsx`'s identical addition).
-  // Disabling every input below while `isLoading` is true can drop the
-  // browser's focus onto `<body>` if the person was still focused in a field
-  // when the pending state committed; a failed sign-in must not leave a
-  // keyboard/screen-reader user stranded there. The banner cannot be focused
-  // from inside `handleLogin` itself — it does not exist until React commits
-  // the render that shows it — so the request is asked for as state and
-  // carried out in an effect.
-  const bannerRef = useRef<HTMLDivElement>(null);
-  const [focusBanner, setFocusBanner] = useState(false);
-  useEffect(() => {
-    if (!focusBanner) return;
-    bannerRef.current?.focus();
-    setFocusBanner(false);
-  }, [focusBanner]);
+  // gap) — `hooks/use-focus-on-flag.ts` owns the mechanism and the argument
+  // (#622 review round: this was a hand-copied triplet in three components).
+  const { ref: bannerRef, requestFocus } = useFocusOnFlag<HTMLDivElement>();
 
   async function handleLogin(event: React.FormEvent) {
     event.preventDefault();
@@ -126,7 +130,7 @@ export function LoginForm({
     if (signInError) {
       setError(signInError.message);
       setIsLoading(false);
-      setFocusBanner(true);
+      requestFocus();
       return;
     }
 
@@ -185,7 +189,7 @@ export function LoginForm({
           <Button type="submit" className="w-full" disabled={isLoading}>
             {isLoading ? t("submitting") : t("submit")}
           </Button>
-          <Link className="text-sm text-primary underline" href="/forgot-password">
+          <Link className="text-sm text-primary underline" href={forgotPasswordHref}>
             {t("forgotPassword")}
           </Link>
           {/* 裁-57 — the self-serve entrance, see this file's header. */}

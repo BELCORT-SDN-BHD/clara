@@ -2,8 +2,9 @@
 
 import Link from "next/link";
 import { useTranslations } from "next-intl";
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 
+import { useFocusOnFlag } from "@/hooks/use-focus-on-flag";
 import { StateBanner } from "@/components/common/state";
 import { PasswordRecoveryForm } from "@/components/entry/password-recovery-form";
 import { Button } from "@/components/ui/button";
@@ -11,6 +12,7 @@ import { Card, CardContent, CardDescription, CardHeader } from "@/components/ui/
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { PASSWORD_MIN_LENGTH } from "@/lib/auth/password-policy";
+import { resolveSameOriginPath } from "@/lib/safe-redirect";
 import { createClient } from "@/lib/supabase/client";
 
 export interface PasswordResetAuthClient {
@@ -41,8 +43,26 @@ function isRecoverySessionFailure(error: PasswordResetError): boolean {
 }
 
 export function PasswordResetForm({
+  /**
+   * #622 review round — the validated same-origin return target, carried
+   * through the WHOLE recovery journey (`login-form.tsx`'s "Forgot
+   * password?" link -> `/forgot-password?next=` -> a short-lived cookie ->
+   * `/auth/recover/handler.ts` reads it, clears it, and forwards it as this
+   * page's own `?next=` -> here) so a person blocked at, say,
+   * `/work?view=needs-you` lands back there after resetting instead of on
+   * Home. RAW and UNVALIDATED at this point — every hop above only carries
+   * the value along; this component is the ONE place it is actually
+   * resolved, via the SAME `resolveSameOriginPath` wall `login-form.tsx`
+   * itself reads `?next=` through, for the identical reason: a value that
+   * crossed this many hops (a cookie, a redirect, a query string) is
+   * exactly the shape review law 2 distrusts by default, so it is proved
+   * same-origin here rather than assumed safe because an earlier hop
+   * "should" have checked it.
+   */
+  next = null,
   createSupabaseClient = createClient,
 }: {
+  next?: string | null;
   createSupabaseClient?: () => PasswordResetAuthClient;
 }) {
   const t = useTranslations("PasswordReset");
@@ -54,19 +74,13 @@ export function PasswordResetForm({
   const [sessionInvalid, setSessionInvalid] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // FOCUS LANDS ON THE FAILURE BANNER — same rule and shape as
-  // `password-recovery-form.tsx`'s own (appendix D's pending-submit-identity
-  // gap; `signup-legal-stage.tsx`'s header owns the underlying argument).
+  // FOCUS LANDS ON THE FAILURE BANNER (appendix D's pending-submit-identity
+  // gap) — `hooks/use-focus-on-flag.ts` owns the mechanism and the argument
+  // (#622 review round: this was a hand-copied triplet in three components).
   // `sessionInvalid` is excluded on purpose: that fork replaces this whole
   // component with `PasswordRecoveryForm`, whose OWN mount is not something
-  // this effect should reach across into.
-  const bannerRef = useRef<HTMLDivElement>(null);
-  const [focusBanner, setFocusBanner] = useState(false);
-  useEffect(() => {
-    if (!focusBanner) return;
-    bannerRef.current?.focus();
-    setFocusBanner(false);
-  }, [focusBanner]);
+  // this hook should reach across into.
+  const { ref: bannerRef, requestFocus } = useFocusOnFlag<HTMLDivElement>();
 
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -83,7 +97,7 @@ export function PasswordResetForm({
       // refusal remains byte-for-byte visible instead of being reclassified here.
       setError(updateError.message);
       setSaving(false);
-      setFocusBanner(true);
+      requestFocus();
       return;
     }
     setSaved(true);
@@ -93,6 +107,17 @@ export function PasswordResetForm({
   if (sessionInvalid) return <PasswordRecoveryForm invalidLink />;
 
   if (saved) {
+    // `saved` starts `false` and is only ever flipped by a client-side
+    // `setSaved(true)` inside `submit` above, so this branch never renders
+    // during SSR — `window` is always available by the time it does, the
+    // same guarantee `login-form.tsx`'s own `handleLogin` relies on for the
+    // identical read. `new URL(window.location.href).origin`, not
+    // `window.location.origin` directly — the same idiom `password-recovery-
+    // form.tsx`'s own submit handler already uses to compute its
+    // `redirectTo` origin, and the one this component's own test harness
+    // (`test/hookHarness.ts`'s stub `window.location` carries only `href`,
+    // not `origin`) actually requires to exercise a real value end to end.
+    const continueTo = resolveSameOriginPath(next, new URL(window.location.href).origin);
     return (
       <Card>
         <CardHeader>
@@ -100,7 +125,7 @@ export function PasswordResetForm({
           <CardDescription>{t("savedDescription")}</CardDescription>
         </CardHeader>
         <CardContent>
-          <Link className="text-sm text-primary underline" href="/">{t("continue")}</Link>
+          <Link className="text-sm text-primary underline" href={continueTo}>{t("continue")}</Link>
         </CardContent>
       </Card>
     );

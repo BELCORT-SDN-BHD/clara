@@ -1,6 +1,7 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
+import { setRecoveryNextCookie } from "@/app/(entry)/auth/recover/next-cookie";
 import { AUTH_COOKIE_OPTIONS } from "@/lib/supabase/cookie-options";
 import {
   applyAuthState,
@@ -249,6 +250,19 @@ export async function updateSession(request: NextRequest) {
     // cookies forward desyncs the browser and server session state and can
     // terminate the user's session prematurely.
     response = NextResponse.next({ request });
+    // #622 — the ONE place a `/forgot-password?next=` visit can plant the
+    // recovery-next cookie: `forgot-password/page.tsx` is a Server Component
+    // render, which Next.js forbids from calling `cookies().set()` at all.
+    // `app/(entry)/auth/recover/next-cookie.ts`'s own header carries the
+    // full journey this cookie crosses and why it is a cookie rather than a
+    // query param on the Supabase-facing `redirectTo`. Scoped to exactly
+    // this pathname — `/login` already has its own, DIFFERENT `next`
+    // semantics (#698's redirect target above) and must not also gain this
+    // cookie merely for carrying a same-named param.
+    if (request.nextUrl.pathname === "/forgot-password") {
+      const rawNext = request.nextUrl.searchParams.get("next");
+      if (rawNext !== null) setRecoveryNextCookie(response, rawNext);
+    }
   }
 
   // F2 CORRECTION (fresh opus review, 2026-09-01): this block MUST run

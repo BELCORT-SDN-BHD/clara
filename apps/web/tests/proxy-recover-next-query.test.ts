@@ -118,3 +118,37 @@ describe("#698 — the unauthenticated redirect's `next` carries pathname + sear
     assert.deepEqual([...location.searchParams.keys()], ["next"], "the login redirect's query string must carry `next` and nothing else");
   });
 });
+
+// #622 review round — the return target used to be DROPPED through the
+// recovery path: `login-form.tsx`'s "Forgot password?" link carried no
+// `next`, so a person blocked at `/work?view=needs-you` landed on Home after
+// resetting. `app/(entry)/auth/recover/next-cookie.ts`'s own header carries
+// the full journey; this describes only the FIRST hop — proxy.ts is the one
+// place that can plant the cookie on a plain GET to `/forgot-password`
+// (`forgot-password/page.tsx` is a Server Component render, which Next.js
+// forbids from setting cookies at all).
+describe("#622 — /forgot-password?next= plants the recovery-next cookie", () => {
+  it("sets the cookie, httpOnly, carrying the encoded value", async () => {
+    const response = await runProxy("/forgot-password?next=%2Fwork%3Fview%3Dneeds-you");
+    assert.equal(response.status, 200, "control: /forgot-password is public and must pass through, not redirect");
+    const setCookie = response.headers.get("set-cookie") ?? "";
+    assert.match(setCookie, /clara-recovery-next=/, "the recovery-next cookie must be set");
+    assert.match(setCookie, /HttpOnly/i);
+    assert.match(setCookie, new RegExp(encodeURIComponent("/work?view=needs-you")));
+  });
+
+  it("sets nothing when there is no `next` to carry", async () => {
+    const response = await runProxy("/forgot-password");
+    const setCookie = response.headers.get("set-cookie") ?? "";
+    assert.doesNotMatch(setCookie, /clara-recovery-next=/);
+  });
+
+  it("does not plant the cookie on an unrelated public path merely because it has a `next` param", async () => {
+    // The rule is "on /forgot-password", not "wherever a `next` param
+    // happens to appear" — /login already has its OWN `next` semantics
+    // (#698's redirect target) and must not also gain this cookie.
+    const response = await runProxy("/login?next=%2Fwork%3Fview%3Dneeds-you");
+    const setCookie = response.headers.get("set-cookie") ?? "";
+    assert.doesNotMatch(setCookie, /clara-recovery-next=/);
+  });
+});

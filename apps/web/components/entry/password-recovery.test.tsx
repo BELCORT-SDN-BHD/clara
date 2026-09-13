@@ -186,6 +186,61 @@ describe("password recovery entry faces", () => {
   });
 
   // ---------------------------------------------------------------------
+  // #622 review round — the validated same-origin return target used to
+  // survive the DIRECT sign-in path but was DROPPED through recovery: the
+  // Continue link after a successful reset always pointed at `/`, no matter
+  // what a person was blocked at before starting the journey. `next-cookie.ts`'s
+  // own header carries the earlier hops; this is the FINAL one — the ACTUAL
+  // wall, through the SAME `resolveSameOriginPath` function `login-form.tsx`
+  // itself reads `?next=` through.
+  // ---------------------------------------------------------------------
+
+  async function saveAndReadContinueHref(next: string | null): Promise<string | null> {
+    const harness = await renderComponent(App(createElement(PasswordResetForm, {
+      next,
+      createSupabaseClient: () => ({ auth: { updateUser: async () => ({ error: null }) } }),
+    })));
+    try {
+      const password = find(harness.container as never, labelledInput(/New password/));
+      await harness.act(() => setFieldValue(password as never, "A-valid-password-123!"));
+      const form = find(harness.container as never, (node) => node.tagName === "FORM");
+      await harness.fireEvent(form as never, "submit");
+      for (let i = 0; i < 4; i++) await harness.settle();
+      const link = find(harness.container as never, (node) => node.tagName === "A") as unknown as Record<string, unknown> | null;
+      assert.ok(link, "the Continue link must render");
+      const propsKey = Object.keys(link).find((k) => k.startsWith("__reactProps"));
+      assert.ok(propsKey, "could not read the anchor's React props — the href probe is vacuous");
+      return (link[propsKey] as { href?: string }).href ?? null;
+    } finally { await harness.unmount(); }
+  }
+
+  it("the Continue link lands on a validated same-origin `next` when one was carried through the journey", async () => {
+    assert.equal(await saveAndReadContinueHref("/work?view=needs-you"), "/work?view=needs-you");
+  });
+
+  it("falls back to `/` when no `next` was carried — the pre-PR-622 behaviour, unchanged", async () => {
+    assert.equal(await saveAndReadContinueHref(null), "/");
+  });
+
+  it("falls back to `/` for a foreign-origin value — the SAME wall login-form.tsx's own `?next=` read uses, never trusted merely because it arrived via this many hops", async () => {
+    assert.equal(await saveAndReadContinueHref("https://evil.example/phish"), "/");
+  });
+
+  it("falls back to `/` for a protocol-relative value (the WHATWG-normalization open-redirect shape safe-redirect.ts's own header documents)", async () => {
+    assert.equal(await saveAndReadContinueHref("//evil.example"), "/");
+  });
+
+  it("renderPasswordResetRoute forwards its `next` argument down to PasswordResetForm as a plain prop", async () => {
+    const face = await renderPasswordResetRoute(async () => RECOVERY_SESSION, "/work?view=needs-you");
+    assert.equal((face.props as { next?: string | null }).next, "/work?view=needs-you");
+  });
+
+  it("renderPasswordResetRoute defaults `next` to null when the route was reached with none", async () => {
+    const face = await renderPasswordResetRoute(async () => RECOVERY_SESSION);
+    assert.equal((face.props as { next?: string | null }).next, null);
+  });
+
+  // ---------------------------------------------------------------------
   // #622 — the recovery-request's OWN rate limit, distinct from a generic
   // provider refusal. "Not walled; a Supabase `over_email_send_rate_limit`
   // surfaces as `sendError.message` in a generic banner" was the brief's own

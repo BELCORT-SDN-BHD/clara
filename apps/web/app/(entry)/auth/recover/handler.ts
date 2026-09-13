@@ -1,7 +1,11 @@
 import { NextResponse } from "next/server";
 
+import { clearRecoveryNextCookie, readRecoveryNextCookie } from "./next-cookie";
+import type { RecoveryLinkStatus } from "@/lib/auth/recovery-link-status";
 import { addressedPublicOrigin, readSameOriginConfig } from "@/lib/same-origin";
 import { createRouteClient } from "@/lib/supabase/server";
+
+export type { RecoveryLinkStatus };
 
 type ExchangeError = { message: string; code?: string; status?: number };
 
@@ -81,9 +85,16 @@ function redirect(origin: string, path: string): NextResponse {
  * that ONE code for both an expired and an already-used token — there is no
  * wire signal to split it, so PKCE's own two-way split is not something the
  * copy at `/forgot-password` may promise for that shape either.
+ *
+ * `RecoveryLinkStatus` itself is NOT declared here any more (#622 review
+ * round) — it is imported from `@/lib/auth/recovery-link-status`, the ONE
+ * shared vocabulary this WRITER and its two READERS
+ * (`forgot-password/page.tsx`, `password-recovery-form.tsx`) all reference,
+ * so a status renamed on one side cannot silently stop matching on the
+ * other. `tests/recovery-link-status.test.ts` drives this handler and pins
+ * that every status it actually emits is one that module's own parser
+ * accepts.
  */
-export type RecoveryLinkStatus = "expired" | "used_or_unknown" | "refused" | "rate_limited" | "invalid";
-
 const CODE_TO_STATUS: Readonly<Record<string, RecoveryLinkStatus>> = {
   flow_state_expired: "expired",
   otp_expired: "expired",
@@ -131,7 +142,30 @@ export async function handlePasswordRecovery(
   const result = await supabase.auth.exchangeCodeForSession(code);
   if (result.error !== null || !result.data.session?.access_token) {
     const status = classifyExchangeFailure(result.error);
+    // #622 review round — the recovery-next cookie is deliberately left
+    // UNTOUCHED on a failed exchange (`app/(entry)/auth/recover/next-
+    // cookie.ts`'s own header): a person who requests a fresh link after an
+    // `expired`/`used_or_unknown`/`refused`/`rate_limited` card still has
+    // their original `next` waiting, bounded by the cookie's own max-age,
+    // rather than losing it on the very first failed attempt.
     return sealResponse(redirect(origin, `/forgot-password?status=${status}`));
   }
-  return sealResponse(redirect(origin, "/auth/recover/password"));
+
+  // #622 review round — the ONE point this journey both READS and CLEARS
+  // the return-target cookie: a Route Handler is the natural boundary
+  // (unlike `password-reset-route.tsx`'s Server Component render, which can
+  // read a cookie but not clear one), and doing it ONLY on this success path
+  // is what lets a failed attempt above leave it alone for a retry. The
+  // value travels onward as THIS redirect's own `?next=` — an internal,
+  // server-constructed URL, never the Supabase-facing `redirectTo` — RAW and
+  // still unvalidated: `password-reset-form.tsx` is the one place it is
+  // actually resolved, through the same `resolveSameOriginPath` wall
+  // `login-form.tsx` itself reads `?next=` through.
+  const rawNext = readRecoveryNextCookie(request, env);
+  const target = new URL("/auth/recover/password", origin);
+  target.hash = "";
+  if (rawNext !== null) target.searchParams.set("next", rawNext);
+  const response = NextResponse.redirect(target, { status: 303 });
+  if (rawNext !== null) clearRecoveryNextCookie(response, env);
+  return sealResponse(response);
 }

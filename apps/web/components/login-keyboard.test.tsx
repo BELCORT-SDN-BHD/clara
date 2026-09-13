@@ -268,3 +268,46 @@ test("FOCUS LANDS ON THE FAILURE BANNER after a failed sign-in, never left on <b
     await h.unmount();
   }
 });
+
+// #622 review round — the validated same-origin return target used to
+// survive the DIRECT sign-in path (this file's own success cell above) but
+// was DROPPED the moment someone clicked "Forgot password?": the link had
+// no `next` at all, so a person blocked at `/work?view=needs-you` landed on
+// Home after resetting. The link now forwards it; `password-recovery.test.tsx`
+// and `tests/proxy-recover-next-query.test.ts`/`recovery-next-cookie.test.ts`
+// pin the rest of the journey.
+test("the Forgot-password link carries `next` onward, and stays plain when there is none to carry", async () => {
+  const router: Router = { pushed: [] };
+  const withNext = await renderComponent(
+    App(createElement(LoginForm, { createSupabaseClient: countingClient(null, { n: 0 }) }), router, "next=%2Fwork%3Fview%3Dneeds-you"),
+  );
+  try {
+    for (let i = 0; i < 3; i++) await withNext.settle();
+    const link = findIn(
+      withNext.container as never,
+      (n) => n.tagName === "A" && /Forgot your password\?/.test(textOf(n as never)),
+    ) as unknown as Record<string, unknown> | null;
+    assert.ok(link, "the Forgot-password link is missing");
+    const propsKey = Object.keys(link).find((k) => k.startsWith("__reactProps"));
+    assert.ok(propsKey, "could not read the anchor's React props — the href probe is vacuous");
+    assert.equal((link[propsKey] as { href?: string }).href, "/forgot-password?next=%2Fwork%3Fview%3Dneeds-you");
+  } finally {
+    await withNext.unmount();
+  }
+
+  const bare = await renderComponent(
+    App(createElement(LoginForm, { createSupabaseClient: countingClient(null, { n: 0 }) }), router, ""),
+  );
+  try {
+    for (let i = 0; i < 3; i++) await bare.settle();
+    const link = findIn(
+      bare.container as never,
+      (n) => n.tagName === "A" && /Forgot your password\?/.test(textOf(n as never)),
+    ) as unknown as Record<string, unknown> | null;
+    assert.ok(link, "the Forgot-password link is missing");
+    const propsKey = Object.keys(link).find((k) => k.startsWith("__reactProps"));
+    assert.equal((link[propsKey!] as { href?: string }).href, "/forgot-password", "with no next to carry, the link must stay exactly as before — no bare `?next=` with nothing after it");
+  } finally {
+    await bare.unmount();
+  }
+});

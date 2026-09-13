@@ -162,6 +162,49 @@ test("sign in from a `next=` with a query string lands on that exact destination
   await expect(page.getByRole("heading", { name: "Needs you", level: 2 })).toBeVisible();
 });
 
+// #622 review round — the validated same-origin return target used to
+// survive the DIRECT sign-in path (the cell above) but was DROPPED through
+// the recovery path entirely: the "Forgot password?" link carried no `next`
+// at all, so a person blocked at `/work?view=needs-you` landed on Home after
+// resetting. `app/(entry)/auth/recover/next-cookie.ts`'s own header carries
+// the full journey (a cookie planted on `/forgot-password?next=`, read and
+// cleared by `handler.ts` on a successful code exchange, forwarded as this
+// app's OWN `?next=` — never the Supabase-facing `redirectTo`).
+//
+// "CLICKING THE LINK IN THE EMAIL" IS SIMULATED, not mocked away: this test
+// never intercepts the recovery cookie or the code exchange. It plants the
+// SAME cookie a real "Forgot password?" click would (step 1-2), then
+// navigates the SAME browser context straight to `/auth/recover?code=…` —
+// exactly what the browser does the instant a person clicks the link in
+// their inbox, mail client rendering aside. The mock auth server
+// (`e2e/serve-built.mjs`) accepts ANY `grant_type=pkce` exchange
+// unconditionally (it does not validate a PKCE code_verifier), which is
+// what makes a fabricated `code` value sufficient here — the THING under
+// test is this app's OWN cookie-to-query-string relay, not GoTrue's code
+// validity, which is out of this repo's control to fake convincingly anyway.
+test("recovery preserves the return target end to end: forgot password -> reset -> lands on next (#622)", async ({ page }) => {
+  await page.goto("/login?next=%2Fwork%3Fview%3Dneeds-you");
+  await page.getByRole("link", { name: "Forgot your password?" }).click();
+  await expect(page).toHaveURL(/\/forgot-password\?next=%2Fwork%3Fview%3Dneeds-you$/);
+
+  await page.getByLabel("Email").fill("owner@example.test");
+  await page.getByRole("button", { name: "Send reset link" }).click();
+  await expect(page.getByRole("heading", { name: "Check your email" })).toBeVisible();
+
+  // The cookie planted on the `/forgot-password?next=` visit above is still
+  // in THIS browser context — the same one a real inbox click would carry.
+  await page.goto("/auth/recover?code=e2e-fake-recovery-code");
+  await expect(page).toHaveURL(/\/auth\/recover\/password\?next=%2Fwork%3Fview%3Dneeds-you$/);
+
+  await page.getByLabel("New password").fill("Clara-e2e-password-1!");
+  await page.getByRole("button", { name: "Save new password" }).click();
+  await expect(page.getByRole("heading", { name: "Password updated" })).toBeVisible();
+
+  await page.getByRole("link", { name: "Continue to ClaraBook" }).click();
+  await expect(page).toHaveURL(/\/work\?view=needs-you$/);
+  await expect(page.getByRole("link", { name: "Needs you" })).toHaveAttribute("aria-current", "page");
+});
+
 test("the signup face renders on the identity canvas with Create account open — no DPA gate on this step", async ({ page }) => {
   // FS-4 C-6: the DPA e-sign moved OFF this step (checkout-gate-design.md
   // §1.1) to a later one reached once a registration is open — #621's

@@ -27,6 +27,59 @@ describe("password recovery PKCE callback", () => {
     assert.equal(response.headers.get("location"), "https://internal.example/auth/recover/password");
   });
 
+  // #622 review round — the validated same-origin return target used to
+  // survive the DIRECT sign-in path but was DROPPED through recovery: the
+  // Forgot-password link carried no `next`, so nothing downstream had
+  // anything to forward. `app/(entry)/auth/recover/next-cookie.ts`'s own
+  // header carries the full journey; this handler is the read+clear+forward
+  // hop — the one Route Handler between the cookie being planted
+  // (`proxy.ts`, on `/forgot-password?next=`) and the final render
+  // (`password-reset-route.tsx`).
+  describe("#622 — the recovery-next cookie is forwarded onward on success, untouched on failure", () => {
+    it("a successful exchange forwards the cookie's value as this redirect's own `?next=`, and clears the cookie", async () => {
+      const stub = client({ data: { session: { access_token: "token" } }, error: null });
+      const response = await handlePasswordRecovery(
+        new Request("https://internal.example/auth/recover?code=one-time-code", {
+          headers: { cookie: `__Host-clara-recovery-next=${encodeURIComponent("/work?view=needs-you")}` },
+        }),
+        stub.create,
+        { NODE_ENV: "production" },
+      );
+      assert.equal(response.status, 303);
+      assert.equal(
+        response.headers.get("location"),
+        "https://internal.example/auth/recover/password?next=%2Fwork%3Fview%3Dneeds-you",
+      );
+      const setCookie = response.headers.get("set-cookie") ?? "";
+      assert.match(setCookie, /__Host-clara-recovery-next=;/, "the cookie must be cleared once its value has been spent");
+      assert.match(setCookie, /Max-Age=0/i);
+    });
+
+    it("a successful exchange with NO cookie present redirects exactly as before — no `next`, no Set-Cookie", async () => {
+      const stub = client({ data: { session: { access_token: "token" } }, error: null });
+      const response = await handlePasswordRecovery(
+        new Request("https://internal.example/auth/recover?code=one-time-code"),
+        stub.create,
+        { NODE_ENV: "production" },
+      );
+      assert.equal(response.headers.get("location"), "https://internal.example/auth/recover/password");
+      assert.equal(response.headers.get("set-cookie"), null);
+    });
+
+    it("a FAILED exchange leaves the cookie untouched — a retry after requesting a fresh link still has it", async () => {
+      const stub = client({ data: { session: null }, error: { message: "expired", code: "flow_state_expired", status: 422 } });
+      const response = await handlePasswordRecovery(
+        new Request("https://internal.example/auth/recover?code=old", {
+          headers: { cookie: `__Host-clara-recovery-next=${encodeURIComponent("/work?view=needs-you")}` },
+        }),
+        stub.create,
+        { NODE_ENV: "production" },
+      );
+      assert.equal(response.headers.get("location"), "https://internal.example/forgot-password?status=expired");
+      assert.equal(response.headers.get("set-cookie"), null, "a failed exchange must not spend the cookie — the person may still retry");
+    });
+  });
+
   it("fails closed to a fresh request for rejected or sessionless exchanges", async () => {
     for (const result of [
       { data: { session: null }, error: { message: "expired" } },
