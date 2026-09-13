@@ -122,7 +122,8 @@ test("the four register rows are ?tab= views of ONE workbench, and the object UR
   assert.equal(href("bank"), `/clients/${A}/bank`);
   assert.equal(href("receivables"), `/clients/${A}/registers?tab=aging`);
   assert.equal(href("assets"), `/clients/${A}/registers?tab=fixedAssets`);
-  assert.equal(href("plans"), `/clients/${A}/registers?tab=adjustments`);
+  // #640 — plans is its own route now, not a view of the registers workbench.
+  assert.equal(href("plans"), `/clients/${A}/plans`);
   assert.equal(href("accounts"), `/clients/${A}/registers?tab=accounts`);
   assert.equal(href("close"), `/clients/${A}/close`);
   assert.equal(href("tax"), `/clients/${A}/tax`);
@@ -187,7 +188,11 @@ test("resolveActive reads a client sub-path, and the registers workbench's own d
   assert.equal(at(`/clients/${A}/registers`).accountingItem, "receivables");
   assert.equal(at(`/clients/${A}/registers`, "tab=aging").accountingItem, "receivables");
   assert.equal(at(`/clients/${A}/registers`, "tab=fixedAssets").accountingItem, "assets");
-  assert.equal(at(`/clients/${A}/registers`, "tab=adjustments").accountingItem, "plans");
+  // #640 — the adjustments TAB is still reachable at its own URL, and the sidebar no longer
+  // names it, so nothing in the group is current there (the same shape as `opening` below).
+  assert.equal(at(`/clients/${A}/registers`, "tab=adjustments").accountingItem, null);
+  assert.equal(at(`/clients/${A}/plans`).accountingItem, "plans");
+  assert.equal(at(`/clients/${A}/plans/11111111-2222-4333-8444-555555555555`).accountingItem, "plans");
   assert.equal(at(`/clients/${A}/registers`, "tab=accounts").accountingItem, "accounts");
 
   // The two tabs the sidebar deliberately does not name: nothing is current, and

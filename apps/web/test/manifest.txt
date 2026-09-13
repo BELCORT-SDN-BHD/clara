@@ -162,6 +162,7 @@ components/parts/v16-cards-a11y.test.tsx
 components/parts/v16-read-cards.test.tsx
 components/parts/work-cards.test.tsx
 components/password-policy.test.tsx
+components/plans/plans-render-states.test.tsx
 components/registers/EnrolAccountDialog.test.ts
 components/registers/accounts-a11y.test.tsx
 components/registers/accounts-keyboard.test.tsx
@@ -290,6 +291,7 @@ lib/parts/hooks.test.ts
 lib/parts/single-fire-guard.test.ts
 lib/parts/thread-action-coordinator.test.ts
 lib/parts/toolStatus.test.ts
+lib/plans/schedule.test.ts
 lib/rate-wall-courier.test.ts
 lib/read.test.ts
 lib/registers/accounts.test.ts
