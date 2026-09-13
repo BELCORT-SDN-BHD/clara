@@ -18,6 +18,7 @@ import { _resetPoolErrorContractForTest, poolErrorHealth } from "../lib/pool-err
 import { withRead, endPools } from "../lib/pools.mjs";
 import { assertLaneDsnTlsPosture, _resetTlsPostureSnapshotForTest } from "../lib/tls-ca.mjs";
 import { _resetLeaderStateForTest } from "../lib/leader-state.mjs";
+import { _resetBodyCensusForTest, _setBodyCensusForTest } from "../lib/body-census.mjs";
 import { FACTS_GATE_CONSUMER, FACTS_GATE_MAX_ATTEMPTS } from "../lib/facts-gate.mjs";
 import {
   LANE_ROSTER,
@@ -60,6 +61,7 @@ after(async () => {
   await rig.endPool();
   await endPools(); // the lane pools this file's fault-injection cell opens
   _resetLeaderStateForTest();
+  _resetBodyCensusForTest();
   _resetTlsPostureSnapshotForTest();
   // Stop the storage probe's background interval before its scratch dir disappears below.
   _resetStorageProbeCacheForTest();
@@ -673,5 +675,96 @@ test("#617: checks.tls carries VARIABLE NAMES and counts only — never a DSN, n
     if (prevRead === undefined) delete process.env.CLARA_READ_DATABASE_URL;
     else process.env.CLARA_READ_DATABASE_URL = prevRead;
     _resetTlsPostureSnapshotForTest();
+  }
+});
+
+// ---------------------------------------------------------------------------
+// #637 — checks.bodies. A parked run whose BODY this image no longer carries is a run this
+// process cannot resume, and until now no surface said so: `/workflows` names classes,
+// `/api/build-info` names what the image HAS, and nothing compared the two against live state.
+//
+// WARNING-ONLY BY RULING, following `checks.leader` exactly (`held:false` warns; the process
+// keeps serving). Refusing to boot over runs that are PARKED rather than failing would take the
+// estate down to report a condition a re-release of the previous image fixes.
+// ---------------------------------------------------------------------------
+
+test("ready: checks.bodies reports stranded bodies as a WARNING — ready stays true", { skip }, async () => {
+  const prev = process.env.CLARA_START_WORLD;
+  delete process.env.CLARA_START_WORLD;
+  _setBodyCensusForTest({ measured: true, stranded: 3, names: ["claraWork_v2", "chatTurn_v18"], runs: [] });
+  try {
+    const r = await checkReadiness();
+    assert.equal(r.checks.bodies.measured, true);
+    assert.equal(r.checks.bodies.stranded, 3);
+    assert.deepEqual(r.checks.bodies.names, ["claraWork_v2", "chatTurn_v18"]);
+    assert.equal(r.ready, true, "a stranded body is a WARNING — the process keeps serving (the checks.leader precedent)");
+    assert.ok(
+      r.warnings.some((w) => w.includes("claraWork_v2") && w.includes("chatTurn_v18")),
+      `the warning NAMES the bodies; got ${JSON.stringify(r.warnings)}`,
+    );
+  } finally {
+    _resetBodyCensusForTest();
+    if (prev === undefined) delete process.env.CLARA_START_WORLD;
+    else process.env.CLARA_START_WORLD = prev;
+  }
+});
+
+test("ready: an UNMEASURED body census is reported as unmeasured, never as a clean zero", { skip }, async () => {
+  const prev = process.env.CLARA_START_WORLD;
+  delete process.env.CLARA_START_WORLD;
+  _resetBodyCensusForTest();
+  try {
+    const r = await checkReadiness();
+    assert.equal(r.checks.bodies.measured, false, "the boot census has not run in this process");
+    assert.equal(r.checks.bodies.stranded, null, "…so there is no count, and 0 would be a lie");
+    assert.ok(!("names" in r.checks.bodies) || r.checks.bodies.names === null || r.checks.bodies.names.length === 0);
+    assert.equal(r.ready, true);
+    assert.equal(
+      r.warnings.some((w) => w.toLowerCase().includes("stranded")),
+      false,
+      "an unmeasured census warns about nothing — absence of evidence is not evidence of a problem either way",
+    );
+  } finally {
+    if (prev === undefined) delete process.env.CLARA_START_WORLD;
+    else process.env.CLARA_START_WORLD = prev;
+  }
+});
+
+test("ready: a measured census with ZERO stranded bodies is a clean, silent green", { skip }, async () => {
+  const prev = process.env.CLARA_START_WORLD;
+  delete process.env.CLARA_START_WORLD;
+  _setBodyCensusForTest({ measured: true, stranded: 0, names: [], runs: [] });
+  try {
+    const r = await checkReadiness();
+    assert.equal(r.checks.bodies.measured, true);
+    assert.equal(r.checks.bodies.stranded, 0);
+    assert.equal(r.ready, true);
+    assert.equal(r.warnings.some((w) => w.toLowerCase().includes("stranded")), false);
+  } finally {
+    _resetBodyCensusForTest();
+    if (prev === undefined) delete process.env.CLARA_START_WORLD;
+    else process.env.CLARA_START_WORLD = prev;
+  }
+});
+
+test("ready: a census that FAILED to read says so — a failed read is not zero stranded bodies", { skip }, async () => {
+  const prev = process.env.CLARA_START_WORLD;
+  delete process.env.CLARA_START_WORLD;
+  _setBodyCensusForTest({ measured: false, error: "insufficient_privilege" });
+  try {
+    const r = await checkReadiness();
+    assert.equal(r.checks.bodies.measured, false);
+    assert.equal(r.checks.bodies.error, "insufficient_privilege");
+    assert.equal(r.ready, true, "fail-open: the census is an instrument, not a dependency");
+    assert.ok(
+      r.warnings.some((w) => w.includes("insufficient_privilege")),
+      `a failed census WARNS with its sanitized code; got ${JSON.stringify(r.warnings)}`,
+    );
+    const serialized = JSON.stringify(r);
+    assert.ok(!serialized.includes("postgres://"), "no DSN reaches the payload");
+  } finally {
+    _resetBodyCensusForTest();
+    if (prev === undefined) delete process.env.CLARA_START_WORLD;
+    else process.env.CLARA_START_WORLD = prev;
   }
 });

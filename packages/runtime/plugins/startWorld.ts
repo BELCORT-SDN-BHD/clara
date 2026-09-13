@@ -29,7 +29,14 @@ import { startClassifyLoop } from "../lib/classify.mjs";
 import { startWikiProjectionLoop } from "../lib/wiki-projection-ops.mjs";
 import { heartbeat } from "../lib/reconciler.mjs";
 import { start, getRun } from "workflow/api";
-import { workflows, workflowsByName } from "../workflows/registry.js";
+import { workflows, workflowsByName, workflowBodies, workflowPins } from "../workflows/registry.js";
+// #637 (C88.8 / C-70) — the ONE provenance line and the stranded-body census. Both live HERE
+// because this is the only module that is both (a) TypeScript, so it can import the registry's
+// roster, and (b) running at the moment the world becomes dispatchable.
+import { readMigrationFrontier } from "../lib/build-info.mjs";
+import { recordBodyCensus, recordBodyCensusFailure } from "../lib/body-census.mjs";
+import { strandedBodyCensusOnWorld } from "../lib/rollback-preflight.mjs";
+import { sanitizedErrorCode } from "../lib/pool-error-contract.mjs";
 // #623 (C88.8): the serving bundle's own banner. Imported from the FROZEN bundle module so the
 // digest this process logs is, by construction, the digest its runs stamp onto every Work row and
 // every operation receipt — never a second copy that could disagree.
@@ -59,6 +66,63 @@ type SupervisorState = { shuttingDown: boolean; stops: Array<() => Promise<unkno
 // Vercel-world feature; against the self-hosted Postgres world the beat reflects the
 // world PROCESS's event-loop liveness — a crashed worker exits the process, a stuck
 // worker stalls this timer → the beat goes stale → /ready fails.)
+/**
+ * #637 — the ONE provenance line. git sha, migration frontier, body count and every class pin, in
+ * one grep-able string, emitted once at the moment the world becomes dispatchable. The same four
+ * facts `/api/build-info` serves, so a log line and an HTTP read can be compared without trusting
+ * either alone — which is the whole C88.8 posture, extended from the bundle digest to the image.
+ */
+async function emitProvenanceLine(): Promise<void> {
+  const sha = process.env.CLARA_BUILD_SHA ? String(process.env.CLARA_BUILD_SHA) : "<unset>";
+  const { frontier, frontier_reason } = await readMigrationFrontier();
+  const frontierText = frontier
+    ? `${frontier.max_version ?? "<empty-ledger>"}(${frontier.count})`
+    : `<unavailable: ${frontier_reason ?? "unknown"}>`;
+  const pins = Object.entries(workflowPins)
+    .map(([className, identifier]) => `${className}=${identifier}`)
+    .join(" ");
+  console.log(
+    `[clara-runtime] serving git_sha=${sha} frontier=${frontierText} bodies=${workflowBodies.length} pins ${pins}`,
+  );
+}
+
+/**
+ * #637 (D6) — WHICH BODIES ARE LIVE RUNS PARKED ON THAT THIS IMAGE DOES NOT CARRY.
+ *
+ * WARNING-ONLY AND FAIL-OPEN, by ruling. A stranded body means this process cannot RESUME those
+ * runs — it does not mean it should stop serving the ones it can, and a re-release of an image
+ * that exports them fixes it while nothing is lost (the runs are PARKED, not failing). So a
+ * non-zero census logs loudly and boots; a census that cannot even be TAKEN records
+ * `measured:false` plus a sanitized code, which `/ready` reports as its own third answer rather
+ * than as a clean estate.
+ *
+ * Taken ONCE, here, rather than on every /ready call: lib/health.mjs must stay ~0ms and DB-free on
+ * that path (its storage-probe paragraph gives the reason — fly's 5s budget is already shared by
+ * two sequential bounded round trips).
+ */
+async function censusStrandedBodies(): Promise<void> {
+  try {
+    const census = await strandedBodyCensusOnWorld(workflowBodies);
+    recordBodyCensus(census);
+    if (census.stranded > 0) {
+      console.warn(
+        `[clara-runtime] stranded bodies n=${census.stranded} names=${census.names.join(",")} `
+          + `— live runs are parked on bodies this image does NOT export; it cannot resume them. `
+          + `Re-release an image that carries them, or drain. (WARNING: this process keeps serving.)`,
+      );
+    } else {
+      console.log(`[clara-runtime] stranded bodies n=0 (every live run's body is carried by this image)`);
+    }
+  } catch (err) {
+    const code = sanitizedErrorCode(err);
+    recordBodyCensusFailure(code);
+    console.warn(
+      `[clara-runtime] stranded-body census FAILED (${code}) — this process cannot say whether any live run `
+        + `is parked on a body it does not carry. NOT fatal; /ready reports it as unmeasured.`,
+    );
+  }
+}
+
 export default definePlugin(() => {
   if (process.env.CLARA_START_WORLD !== "1") {
     console.log("[clara-runtime] world NOT started (CLARA_START_WORLD != 1) — skeleton mode");
@@ -166,6 +230,21 @@ export default definePlugin(() => {
       // rollback preflight unable to tell, from the logs alone, which bodies this process
       // actually carries — which is the question C88.8's line exists to answer.
       console.log(CLARA_WORK_BUNDLE_V2_BANNER);
+      // #637 (C88.8 / C-70) — ONE MORE LINE, and it is the one an operator reading a log actually
+      // needs: WHICH COMMIT built this image, WHICH SCHEMA it is talking to, WHICH body each class
+      // dispatches to, and HOW MANY bodies it carries for parked runs. The two banners above stay
+      // byte-identical on purpose (tests/work-bundle.test.mjs pins v1's exact string); this is
+      // additive.
+      //
+      // NEVER A FABRICATED SHA. `<unset>` when CLARA_BUILD_SHA is not baked in, and
+      // `<unavailable: reason>` when the frontier read could not answer — the same honesty rung
+      // lib/build-info.mjs states for its own payload, because a believable wrong answer here is
+      // worse than an obvious absent one. `readMigrationFrontier` NEVER throws by construction.
+      await emitProvenanceLine();
+      // The stranded-body census. Fire-and-forget on purpose: it opens its own short-lived
+      // connection to the WORLD's database (clara_runtime has no USAGE on the `workflow` schema
+      // at all), and nothing about booting may wait on it.
+      void censusStrandedBodies();
     } catch (err) {
       console.error("[clara-runtime] durable world FAILED to start:", err instanceof Error ? err.message : String(err));
       process.exit(1); // crash-only: world-start failure is fatal (S4-D10)

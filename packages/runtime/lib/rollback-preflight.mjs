@@ -215,6 +215,7 @@ export async function preflight({ query, supported, scope = {}, unboundClass = "
  * say it loudly, keep serving. Fail-open on the READ too — a census that cannot run reports
  * `measured:false`, never a clean zero.
  * @param {{query:Function, carried:ReadonlyArray<string>}} args
+ * @returns {Promise<{measured:boolean, stranded:number, names:string[], runs:Array<{name:string, body:string, count:number, oldest:unknown}>}>}
  */
 export async function strandedBodyCensus({ query, carried }) {
   const runs = await censusNonTerminalRuns(query);
@@ -228,6 +229,23 @@ export async function strandedBodyCensus({ query, carried }) {
 }
 
 /**
+ * The boot-time census, taken on its OWN short-lived connection to the world's database.
+ *
+ * A named wrapper rather than an inline `withWorldClient(...)` at the call site, and the reason is
+ * a real one rather than tidiness: `plugins/startWorld.ts` is TYPESCRIPT importing this
+ * plain-ESM module, and a generic `@template T` does not survive that boundary (tsc resolves the
+ * result as `unknown`). An explicit `@returns` here gives the TS caller a concrete shape without
+ * a cast at the call site — and a cast is exactly the thing this estate's own freeze-lint
+ * comments call untraceable.
+ *
+ * @param {ReadonlyArray<string>} carried the body identifiers THIS image exports
+ * @returns {Promise<{measured:boolean, stranded:number, names:string[], runs:Array<{name:string, body:string, count:number, oldest:unknown}>}>}
+ */
+export async function strandedBodyCensusOnWorld(carried) {
+  return withWorldClient((query) => strandedBodyCensus({ query, carried }));
+}
+
+/**
  * Open ONE connection to the WORLD's database and hand a `query` to `fn`.
  *
  * `makeClient()` (lib/relay.mjs) resolves `DATABASE_URL || WORKFLOW_POSTGRES_URL` and fails
@@ -235,8 +253,9 @@ export async function strandedBodyCensus({ query, carried }) {
  * `clara_runtime` has no USAGE on the `workflow` schema at all (measured — the WDK world owns
  * it), so a preflight issued through the runtime pool would report a permission error, and a
  * permission error that got swallowed would read as an empty inventory.
- * @param {(query:(sql:string, params?:unknown[]) => Promise<{rows:Array<Record<string, unknown>>}>) => Promise<T>} fn
  * @template T
+ * @param {(query:(sql:string, params?:unknown[]) => Promise<{rows:Array<Record<string, unknown>>}>) => Promise<T>} fn
+ * @returns {Promise<T>}
  */
 export async function withWorldClient(fn) {
   const client = makeClient();
