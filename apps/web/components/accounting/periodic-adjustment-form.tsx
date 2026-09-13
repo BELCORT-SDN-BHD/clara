@@ -377,32 +377,12 @@ export function PeriodicAdjustmentFormView({
   const issueFor = (field: AdjustmentFieldId) => issues.find((i) => i.field === field);
   const rejectedOn = (field: AdjustmentFieldId) => phase.kind === "rejected" && phase.field === field;
 
-  /** One labelled control with its error slot, wired by `aria-describedby` so a screen reader
-   *  reads the rule WITH the field rather than in a list at the end of the form. */
-  const Field = ({
-    field,
-    label,
-    hint,
-    children,
-  }: {
-    field: AdjustmentFieldId;
-    label: string;
-    hint?: string;
-    children: React.ReactNode;
-  }) => {
-    const issue = issueFor(field);
-    return (
-      <div className="flex flex-col gap-1.5">
-        <Label htmlFor={adjustmentFieldId(field)}>{label}</Label>
-        {hint === undefined ? null : (
-          <p id={`${adjustmentFieldId(field)}-help`} className="text-xs text-muted-foreground">{hint}</p>
-        )}
-        {children}
-        <p id={`${adjustmentFieldId(field)}-error`} className="text-xs text-error" role="alert">
-          {issue ? t(`issues.${issue.code}`) : ""}
-        </p>
-      </div>
-    );
+  /** This render's message for one control, or "" — the only thing the field wrapper needs from
+   *  the form. `Field` itself is a TOP-LEVEL component (see its own note for the measured reason a
+   *  component declared inside a render body cannot be one). */
+  const errorFor = (f: AdjustmentFieldId): string => {
+    const issue = issueFor(f);
+    return issue === undefined ? "" : t(`issues.${issue.code}`);
   };
 
   const describedBy = (field: AdjustmentFieldId, hasHint: boolean) =>
@@ -431,7 +411,7 @@ export function PeriodicAdjustmentFormView({
       {/* THE TYPE SWITCH. A native select over two stable options: it is typeable, works at 320 px
           and at 200 % zoom, needs no portal and no focus trap, and it is the one control every
           assistive technology already knows (Appendix D's Native Select disposition). */}
-      <Field field="purpose" label={t("purpose.label")} hint={t("purpose.help")}>
+      <Field field="purpose" errorText={errorFor("purpose")} label={t("purpose.label")} hint={t("purpose.help")}>
         <NativeSelect
           {...textProps("purpose", true)}
           className="w-full"
@@ -445,11 +425,11 @@ export function PeriodicAdjustmentFormView({
       </Field>
 
       <div className="grid gap-3 sm:grid-cols-2">
-        <Field field="periodStart" label={t("periodStart")}>
+        <Field field="periodStart" errorText={errorFor("periodStart")} label={t("periodStart")}>
           <Input {...textProps("periodStart")} type="date" value={draft.periodStart}
             onChange={(e) => set("periodStart", e.target.value)} />
         </Field>
-        <Field field="periodEnd" label={t("periodEnd")}>
+        <Field field="periodEnd" errorText={errorFor("periodEnd")} label={t("periodEnd")}>
           <Input {...textProps("periodEnd")} type="date" value={draft.periodEnd}
             onChange={(e) => set("periodEnd", e.target.value)} />
         </Field>
@@ -457,7 +437,7 @@ export function PeriodicAdjustmentFormView({
 
       {draft.purpose === "periodic_stock_adjustment" ? (
         <>
-          <Field field="method" label={t("method.label")} hint={t("method.help")}>
+          <Field field="method" errorText={errorFor("method")} label={t("method.label")} hint={t("method.help")}>
             <NativeSelect
               {...textProps("method", true)}
               className="w-full"
@@ -471,17 +451,17 @@ export function PeriodicAdjustmentFormView({
           </Field>
           {draft.method === "opening_closing_count" ? (
             <div className="grid gap-3 sm:grid-cols-2">
-              <Field field="openingCents" label={t("openingCents")}>
+              <Field field="openingCents" errorText={errorFor("openingCents")} label={t("openingCents")}>
                 <MoneyInput {...moneyProps("openingCents")} cents={draft.openingCents} mode="unsigned"
                   onValueChange={(c) => c.ok && set("openingCents", c.cents ?? 0)} />
               </Field>
-              <Field field="closingCents" label={t("closingCents")}>
+              <Field field="closingCents" errorText={errorFor("closingCents")} label={t("closingCents")}>
                 <MoneyInput {...moneyProps("closingCents")} cents={draft.closingCents} mode="unsigned"
                   onValueChange={(c) => c.ok && set("closingCents", c.cents ?? 0)} />
               </Field>
             </div>
           ) : (
-            <Field field="adjustmentCents" label={t("adjustmentCents")} hint={t("adjustmentCentsHelp")}>
+            <Field field="adjustmentCents" errorText={errorFor("adjustmentCents")} label={t("adjustmentCents")} hint={t("adjustmentCentsHelp")}>
               <MoneyInput {...moneyProps("adjustmentCents")} cents={draft.adjustmentCents} mode="signed"
                 onValueChange={(c) => c.ok && set("adjustmentCents", c.cents ?? 0)} />
             </Field>
@@ -500,23 +480,23 @@ export function PeriodicAdjustmentFormView({
             )}
           </p>
           <div className="grid gap-3 sm:grid-cols-2">
-            <Field field="inventoryAccountCode" label={t("inventoryAccountCode")}>
+            <Field field="inventoryAccountCode" errorText={errorFor("inventoryAccountCode")} label={t("inventoryAccountCode")}>
               <AccountPicker field="inventoryAccountCode" value={draft.inventoryAccountCode}
                 accounts={accounts} props={textProps("inventoryAccountCode")} onPick={(v) => set("inventoryAccountCode", v)}
                 placeholder={t("accountPlaceholder")} />
             </Field>
-            <Field field="costAccountCode" label={t("costAccountCode")}>
+            <Field field="costAccountCode" errorText={errorFor("costAccountCode")} label={t("costAccountCode")}>
               <AccountPicker field="costAccountCode" value={draft.costAccountCode}
                 accounts={accounts} props={textProps("costAccountCode")} onPick={(v) => set("costAccountCode", v)}
                 placeholder={t("accountPlaceholder")} />
             </Field>
           </div>
           <div className="grid gap-3 sm:grid-cols-2">
-            <Field field="countedAt" label={t("countedAt")} hint={t("countedAtHelp")}>
+            <Field field="countedAt" errorText={errorFor("countedAt")} label={t("countedAt")} hint={t("countedAtHelp")}>
               <Input {...textProps("countedAt", true)} type="date" value={draft.countedAt}
                 onChange={(e) => set("countedAt", e.target.value)} />
             </Field>
-            <Field field="countReference" label={t("countReference")}>
+            <Field field="countReference" errorText={errorFor("countReference")} label={t("countReference")}>
               <Input {...textProps("countReference")} value={draft.countReference}
                 maxLength={COUNT_REFERENCE_MAX_CHARS}
                 onChange={(e) => set("countReference", e.target.value)} />
@@ -525,7 +505,7 @@ export function PeriodicAdjustmentFormView({
         </>
       ) : (
         <>
-          <Field field="obligationKind" label={t("obligationKind.label")} hint={t("obligationKind.help")}>
+          <Field field="obligationKind" errorText={errorFor("obligationKind")} label={t("obligationKind.label")} hint={t("obligationKind.help")}>
             <NativeSelect
               {...textProps("obligationKind", true)}
               className="w-full"
@@ -537,29 +517,29 @@ export function PeriodicAdjustmentFormView({
               ))}
             </NativeSelect>
           </Field>
-          <Field field="amountCents" label={t("amountCents")} hint={t("amountCentsHelp")}>
+          <Field field="amountCents" errorText={errorFor("amountCents")} label={t("amountCents")} hint={t("amountCentsHelp")}>
             <MoneyInput {...moneyProps("amountCents")} cents={draft.amountCents} mode="unsigned"
               onValueChange={(c) => c.ok && set("amountCents", c.cents ?? 0)} />
           </Field>
           <div className="grid gap-3 sm:grid-cols-2">
-            <Field field="expenseAccountCode" label={t("expenseAccountCode")} hint={t("defaultedHint")}>
+            <Field field="expenseAccountCode" errorText={errorFor("expenseAccountCode")} label={t("expenseAccountCode")} hint={t("defaultedHint")}>
               <AccountPicker field="expenseAccountCode" value={draft.expenseAccountCode}
                 accounts={accounts} props={textProps("expenseAccountCode", true)} onPick={(v) => set("expenseAccountCode", v)}
                 placeholder={t("accountPlaceholder")} />
             </Field>
-            <Field field="liabilityAccountCode" label={t("liabilityAccountCode")} hint={t("defaultedHint")}>
+            <Field field="liabilityAccountCode" errorText={errorFor("liabilityAccountCode")} label={t("liabilityAccountCode")} hint={t("defaultedHint")}>
               <AccountPicker field="liabilityAccountCode" value={draft.liabilityAccountCode}
                 accounts={accounts} props={textProps("liabilityAccountCode", true)} onPick={(v) => set("liabilityAccountCode", v)}
                 placeholder={t("accountPlaceholder")} />
             </Field>
           </div>
           <div className="grid gap-3 sm:grid-cols-2">
-            <Field field="paymentAccountCode" label={t("paymentAccountCode")} hint={t("paymentAccountHelp")}>
+            <Field field="paymentAccountCode" errorText={errorFor("paymentAccountCode")} label={t("paymentAccountCode")} hint={t("paymentAccountHelp")}>
               <AccountPicker field="paymentAccountCode" value={draft.paymentAccountCode}
                 accounts={accounts} props={textProps("paymentAccountCode", true)} onPick={(v) => set("paymentAccountCode", v)}
                 placeholder={t("accountNone")} />
             </Field>
-            <Field field="settledCents" label={t("settledCents")}>
+            <Field field="settledCents" errorText={errorFor("settledCents")} label={t("settledCents")}>
               <MoneyInput {...moneyProps("settledCents")} cents={draft.settledCents} mode="unsigned"
                 onValueChange={(c) => c.ok && set("settledCents", c.cents ?? 0)} />
             </Field>
@@ -571,12 +551,12 @@ export function PeriodicAdjustmentFormView({
               it is a live enrolment) and the recovery itself stays with the register that owns the
               allocation — #643's "do not invent missing settlement facts", said out loud rather
               than discovered at approve. */}
-          <Field field="advanceAccountCode" label={t("advanceAccountCode")} hint={t("advanceAccountHelp")}>
+          <Field field="advanceAccountCode" errorText={errorFor("advanceAccountCode")} label={t("advanceAccountCode")} hint={t("advanceAccountHelp")}>
             <AccountPicker field="advanceAccountCode" value={draft.advanceAccountCode}
               accounts={accounts} props={textProps("advanceAccountCode", true)} onPick={(v) => set("advanceAccountCode", v)}
               placeholder={t("accountNone")} />
           </Field>
-          <Field field="particularsSource" label={t("particularsSource")} hint={t("particularsSourceHelp")}>
+          <Field field="particularsSource" errorText={errorFor("particularsSource")} label={t("particularsSource")} hint={t("particularsSourceHelp")}>
             <Input {...textProps("particularsSource", true)} value={draft.particularsSource}
               maxLength={PARTICULARS_SOURCE_MAX_CHARS}
               onChange={(e) => set("particularsSource", e.target.value)} />
@@ -584,7 +564,7 @@ export function PeriodicAdjustmentFormView({
         </>
       )}
 
-      <Field field="instruction" label={t("instruction")} hint={t("instructionHelp")}>
+      <Field field="instruction" errorText={errorFor("instruction")} label={t("instruction")} hint={t("instructionHelp")}>
         <Textarea {...textProps("instruction", true)} rows={2} value={draft.instruction}
           maxLength={INSTRUCTION_MAX_CHARS}
           onChange={(e) => set("instruction", e.target.value)} />
@@ -669,6 +649,44 @@ export function PeriodicAdjustmentFormView({
         </span>
       </div>
     </form>
+  );
+}
+
+/**
+ * One labelled control with its error slot, wired by `aria-describedby` so a screen reader reads
+ * the rule WITH the field rather than in a list at the end of the form.
+ *
+ * IT IS A TOP-LEVEL COMPONENT, AND THAT IS A FIX RATHER THAN A STYLE CHOICE. MEASURED, in a real
+ * browser (this ticket's own walk, first cut): declared inside the form's render body it was a NEW
+ * component type on every render, so React unmounted and remounted its whole subtree on every
+ * keystroke — the focused input was replaced mid-typing, `registerField`'s ref churned, and every
+ * walk cell that typed into more than one control saw an empty form. The unit harness could not see
+ * it, because it settles between events and a remount between keystrokes looks like a working form.
+ */
+function Field({
+  field,
+  label,
+  hint,
+  errorText,
+  children,
+}: {
+  field: AdjustmentFieldId;
+  label: string;
+  hint?: string;
+  errorText: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="flex flex-col gap-1.5">
+      <Label htmlFor={adjustmentFieldId(field)}>{label}</Label>
+      {hint === undefined ? null : (
+        <p id={`${adjustmentFieldId(field)}-help`} className="text-xs text-muted-foreground">{hint}</p>
+      )}
+      {children}
+      <p id={`${adjustmentFieldId(field)}-error`} className="text-xs text-error" role="alert">
+        {errorText}
+      </p>
+    </div>
   );
 }
 
