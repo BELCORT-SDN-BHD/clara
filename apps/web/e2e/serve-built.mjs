@@ -55,6 +55,9 @@ import { JOURNAL_WORK_SESSIONS, handleJournalWorkRpc, handleJournalWorkRuntime, 
 // one per five/six-state read outcome — hooked in ONE place below, before `handleL7Supabase`
 // (see that hook's own note for why order matters here).
 import { handleD4Supabase } from "./tax-boundary-mock.mjs";
+// #644's own lane (the C13 Knowledge walk). ID-scoped like its siblings — four client ids, one
+// per read outcome, plus its own record/document ids — hooked in ONE place below.
+import { handleKnowledgeSupabase } from "./knowledge-mock.mjs";
 // #632's own lane (the attributable Activity feed walk). ID-scoped like its siblings; its ONE
 // exception is `ACTIVITY_CLIENTS`, spliced into the shared `clients` array below (APPENDED, never
 // replacing) because the Activity page's client Select is this train's first consumer of the
@@ -564,6 +567,10 @@ async function handleSupabase(request, response, url) {
   // above: it consumes the body on every RPC POST before checking the verb, which would starve
   // this lane's `list_review_queue` reads of theirs if this ran after it).
   if (await handleD4Supabase(request, response, path, url, sendJson, cors)) return;
+  // #644's Knowledge lane. SAFE here for the SAME reason D4 is: every one of its five rpc verbs
+  // reads the request body only INSIDE that verb's own match, so it never drains a stream a later
+  // lane still needs; and every branch is scoped to a #644 id, so it answers for nobody else.
+  if (await handleKnowledgeSupabase(request, response, path, url, sendJson, cors)) return;
   // THE JOURNAL-WORK LANE, AND ITS POSITION IS MEASURED TWICE OVER.
   //
   // AHEAD OF L7 (#629): `handleJournalWorkSupabase` gained three `/rest/v1/rpc/` verbs
