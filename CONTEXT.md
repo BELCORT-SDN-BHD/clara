@@ -195,3 +195,15 @@ _Avoid_: A balanced journal entry wearing a marker; an adjustment plan or its sc
 **Supplied obligation particulars**:
 The facts an accountant provides for a payroll or statutory obligation: what it is, for which period, how much, which expense and liability accounts it moves, any staff-advance or settlement account it touches, and the source those figures came from. The product records them and checks the relationships between them; it derives none of them.
 _Avoid_: A contribution rate or threshold; an employee-level calculation; a settlement allocation nobody stated.
+
+**Capability registry**:
+The server-owned catalogue of what a Clara run may exercise, and under what terms: each capability's purpose token, the class of data it moves, whether exercising it is an egress event at all, and the database surface it needs. A run's tool set is built from the hashed bundle's own roster and the registry names what those tools are FOR, so "which capability moved this client's data, under which purpose" is a lookup rather than a grep. It is documentation and a lookup; the database verbs are the only gate.
+_Avoid_: A permission; anything a prompt, a file, a wiki page or an imported record can add to; a list of tool names.
+
+**Purpose authorisation**:
+A single-use, time-bounded permission to send one client's data outside the estate for ONE named purpose, prepared as an intent and CONSUMED immediately before the act it authorises. Preparing is planning; only the consume is the dispatch, and a withdrawal committed between the two wins. For accounting Work the authority is DERIVED — the firm's current accepted Terms and DPA plus an active client — rather than switched on per client, and the accounting write re-verifies it independently of the human's own role and period checks.
+_Avoid_: A standing grant; a per-client "AI on" switch; a quota; a check performed only at planning time.
+
+**Execution trace**:
+The durable, payload-free record of what one Work run actually did: one row per step (dispatch, model call, tool call, settle) naming the versioned bundle, the capability, the purpose and the authorisation it spent, the input's digest, the revisions it observed, the timing and the outcome or typed refusal. It carries no prompt, no transcript and no client figures — the relation has no column for them — and there is no export route.
+_Avoid_: A log; a span with an attribute bag; anything that stores what was sent; evidence that an effect happened (a receipt is that).

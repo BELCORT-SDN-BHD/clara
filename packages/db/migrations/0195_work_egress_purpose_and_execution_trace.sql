@@ -194,7 +194,7 @@ begin
   end if;
   select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') into v_sha from pg_proc p
    where p.oid='clara._record_journal_entry_core(uuid,uuid,text,uuid,uuid,text,jsonb,text,text,text)'::regprocedure;
-  if v_sha <> 'bebee4e4f79f86102580a02d6316cc52de7d02c5cdfe47ae4c8df2677bb5761b' then
+  if v_sha <> 'eca58b99c45b53fe3c36dcd1b238a1d94b2b8c01a305e8debc4f0a6ca03d4ade' then
     raise exception '#631 prestate: clara._record_journal_entry_core has DRIFTED from the pinned 0194 body (sha %) -- re-derive the fourth recut against the live body before applying', v_sha
       using errcode='CLR10';
   end if;
@@ -1545,10 +1545,18 @@ begin
   end if;
   -- ---- #643 INSERTION 5 ends -------------------------------------------------------------
 
+  -- #643 · THE ANSWER SHAPE IS ONE SHAPE PER LANE, and the key is emitted only when there IS an
+  -- adjustment (adversarial migration-safety review, S2). Carried unconditionally, a fresh
+  -- `journal_entry` commit answered `"adjustment_id": null` while a REPLAYED pre-0194 one — whose
+  -- payload `clara._finish_op` stored before this migration existed — carried no such key at all:
+  -- two shapes for one lane, distinguishable only by whether the caller happened to replay. The
+  -- `||` fold is the same one `v_effects` above already uses for `document_id`, so the receipt,
+  -- the Work's result and the returned answer now agree on one rule: name the effect you had.
   update clara.accounting_work
      set result = jsonb_build_object('entry_id', v_entry, 'receipt_id', v_receipt,
-                                     'posted_at', now(), 'document_id', v_source_document,
-                                     'adjustment_id', v_adjustment)
+                                     'posted_at', now(), 'document_id', v_source_document)
+                  || case when v_adjustment is null then '{}'::jsonb
+                          else jsonb_build_object('adjustment_id', v_adjustment) end
    where id = p_work;
 
   perform clara._audit(p_firm, clara.agent_user_id(), p_obo, p_wake_kind,
@@ -1557,9 +1565,12 @@ begin
       'receipt', v_receipt, 'bundle_digest', p_bundle_digest, 'rationale', p_rationale,
       'document_id', v_source_document, 'purpose', w.purpose, 'adjustment_id', v_adjustment));
 
+  -- …AND THE RETURNED ANSWER FOLLOWS THE SAME RULE as the Work's `result` above (S2).
   v_result := jsonb_build_object('posted', true, 'entry_id', v_entry, 'revision_token', v_token,
     'receipt_id', v_receipt, 'logical_op_id', p_logical_op_id, 'work_id', p_work,
-    'document_id', v_source_document, 'adjustment_id', v_adjustment, 'replayed', false);
+    'document_id', v_source_document, 'replayed', false)
+    || case when v_adjustment is null then '{}'::jsonb
+            else jsonb_build_object('adjustment_id', v_adjustment) end;
   return clara._finish_op(p_firm, 'record_journal_entry', p_logical_op_id, v_result);
 end $$;
 revoke all on function clara._record_journal_entry_core(uuid,uuid,text,uuid,uuid,text,jsonb,text,text,text) from public;
