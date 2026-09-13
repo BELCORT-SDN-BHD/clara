@@ -17,7 +17,7 @@
 
 ## In Progress
 
-- None. No `awaiting-release`, `needs-triage`, `needs-info` or `ready-for-human` issue remains.
+- 2026-09-13/14 implementation wave on the 11 refresh tickets #615 #619 #620 #622 #624 #631 #637 #640 #641 #643 #644 (all assigned to the owner). Session ended on the weekly usage limit mid-wave; the full handoff — per-branch HEADs, open review findings, decisions, rig ports, owner confirmations, ordered next steps — is [docs/plan/active/refresh-wave-2026-09-14/HANDOFF.md](plan/active/refresh-wave-2026-09-14/HANDOFF.md) with the per-ticket briefs, WORK-ORDER.md, RIG.md and rig scripts beside it. State at handoff: `integration/wave-1` (worktree `clara-wtintegration`, d6a64207) = main + #622 + #620 + #619, typecheck/lint green; #615/#641/#643 finished but unmerged; #640/#644/#624/#637 in review-fix rounds with blockers listed; #631 just started on #643's tip; shared `chatTurn_v19` not started. Nothing pushed; main unchanged at 8f0de590.
 
 ## Known Issues
 
@@ -26,6 +26,7 @@
 
 ## Next Steps
 
-1. Next session: `/implement` on the wayfinder tickets the owner picks (#612 children, frontier per #597). Ready-for-agent riders by lane: web #732 #698 #715 #733 #734 #736 #741 #743 #746 #719 #760 #706 #740 #722 #755; db #692 #718 #720 #742 #744 #750 #709 #690; runtime tests #754 #756 #708 #745 #693 #707 #714; infra #691.
+0. Resume the refresh wave from the HANDOFF.md above (read it first; inspect every worktree before trusting a fix landed; restart the WSL clusters if WSL restarted).
+1. After the wave: `/implement` on the remaining wayfinder tickets the owner picks (#612 children, frontier per #597). Ready-for-agent riders by lane: web #732 #698 #715 #733 #734 #736 #741 #743 #746 #719 #760 #706 #740 #722 #755; db #692 #718 #720 #742 #744 #750 #709 #690; runtime tests #754 #756 #708 #745 #693 #707 #714; infra #691.
 2. When the lawyer-reviewed Terms/DPA wording arrives: publish it as v2 through `clara.publish_legal_document` (as the BELCORT owner) or a seed migration; the beta v1 rows become superseded.
 3. When the admission beta should stop taking firms: `set_admission_capacity` (BELCORT owner).
