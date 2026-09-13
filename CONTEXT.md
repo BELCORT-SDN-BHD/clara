@@ -187,3 +187,11 @@ _Avoid_: An instruction to initiate a payment; authority for a future bank manda
 **Control account**:
 A general-ledger account whose balance must reconcile with its identified detailed accounting records.
 _Avoid_: An unrestricted shortcut for changing the total without its supporting detail.
+
+**Periodic adjustment**:
+One completed accounting act that records a movement a period's own facts establish rather than a transaction: a periodic stock adjustment (from a supplied opening/closing count or an instructed movement) or a supplied payroll/statutory obligation. It carries typed particulars — the period, the method or obligation kind, the exact amount, the account each leg plays, where the figures came from and the instruction — and those particulars must agree with the posted entry's own lines.
+_Avoid_: A balanced journal entry wearing a marker; an adjustment plan or its scheduled occurrences; a rate, threshold or employee calculation the product worked out.
+
+**Supplied obligation particulars**:
+The facts an accountant provides for a payroll or statutory obligation: what it is, for which period, how much, which expense and liability accounts it moves, any staff-advance or settlement account it touches, and the source those figures came from. The product records them and checks the relationships between them; it derives none of them.
+_Avoid_: A contribution rate or threshold; an employee-level calculation; a settlement allocation nobody stated.
