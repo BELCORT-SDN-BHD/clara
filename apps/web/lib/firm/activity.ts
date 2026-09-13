@@ -207,7 +207,7 @@ export const ACTIVITY_DEFAULT_LIMIT = 25;
  *  timezone (Malaysia, `lib/business-date.ts`'s own `CLARA_BUSINESS_TIMEZONE`) carries no DST, so
  *  the `+08:00` offset is a literal rather than a computed one — see that module's own header for
  *  why the business day is not the browser's local day at all. */
-function businessDayStart(dateOnly: string): string {
+export function businessDayStart(dateOnly: string): string {
   return `${dateOnly}T00:00:00.000+08:00`;
 }
 
@@ -221,7 +221,7 @@ function businessDayStart(dateOnly: string): string {
  *  microsecond, with one comparison operator. Deliberately NOT named `businessDayEnd` returning an
  *  inclusive `23:59:59.999` literal — see 0181's own header, "P_SINCE IS INCLUSIVE... P_UNTIL IS
  *  EXCLUSIVE", for the fuller rationale this mirrors on the wire side. */
-function businessDayEnd(dateOnly: string): string {
+export function businessDayEnd(dateOnly: string): string {
   const parts = dateOnly.split("-").map(Number);
   const year = parts[0] ?? 0;
   const month = parts[1] ?? 0;

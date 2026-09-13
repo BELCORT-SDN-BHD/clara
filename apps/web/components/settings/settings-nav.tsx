@@ -21,9 +21,8 @@ import { resolveActive, visibleSettingsSections } from "@/lib/navigation/tree";
  * RANK-SHAPED from the same registry the hub and the palette read, so a section
  * this caller cannot open is ABSENT here as well.
  *
- * The pill markup itself lives in `components/common/nav-pills.tsx`, shared
- * with `components/work/work-views.tsx` — see that file for why the shared
- * piece is links, not tabs.
+ * The pill markup itself lives in `components/common/nav-pills.tsx` — see that file for why the
+ * shared piece is links, not tabs, and for why #641 left this as its only call site.
  */
 export function SettingsNav() {
   const t = useTranslations("Settings");

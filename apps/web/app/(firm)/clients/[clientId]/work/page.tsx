@@ -1,34 +1,29 @@
 import { getTranslations } from "next-intl/server";
 
-import { NotBuiltNote } from "@/components/common/not-built-note";
 import { PageHeader, PageShell } from "@/components/common/page-shell";
 import { AccountingWorkList } from "@/components/work/accounting-work-list";
 import { ClientWorkQueue } from "@/components/work/client-work-queue";
 
 /**
- * "/clients/:clientId/work" — the same question as `/work`, scoped to one client
- * (#614).
+ * "/clients/:clientId/work" — the same question as `/work`, scoped to one client (#614, #641).
  *
- * WHY IT EXISTS AT ALL, given the workspace home already shows this queue. The
- * home is a dashboard: the queue sits there as one card among the docs backlog,
- * the bank summary and the close summary, deliberately abbreviated. Work is the
- * destination you go to in order to SETTLE things, and the client level needs
- * the same door as the firm level or "Work" means two different things at two
- * altitudes.
+ * WHY IT EXISTS AT ALL, given the workspace home already shows this queue. The home is a
+ * dashboard: the queue sits there as one card among the docs backlog, the bank summary and the
+ * close summary, deliberately abbreviated. Work is the destination you go to in order to SETTLE
+ * things, and the client level needs the same door as the firm level or "Work" means two different
+ * things at two altitudes.
  *
- * IT IS THE SAME COMPONENT AS THE HOME'S SECTION C, given its own read — see
- * components/work/client-work-queue.tsx. One rendering of one queue.
+ * IT IS THE SAME LIST COMPONENT AS `/work`, given a client scope (#641). The route's own client id
+ * is what scopes the read — a hand-edited `?client=` cannot point this list at another client's
+ * books under this client's heading; see `components/work/accounting-work-list.tsx`.
  *
- * THE DURABLE WORK RECORDS LAND HERE FIRST. `AccountingWorkList` is this
- * client's `clara.accounting_work` rows — what has been asked of the agent and
- * how it ended — and each row links to its own address. It sits ABOVE the review
- * queue because the two answer different questions: this one is the record of an
- * operation, the queue below is what is waiting on a person. See that component's
- * own header for why they are not merged.
+ * THE FILTERS THE JOURNEY ASKS FOR ARE NOW HERE, which is why this page no longer carries a
+ * not-built note: visible and clearable filter controls (in a Sheet at narrow widths), server
+ * pagination over a keyset cursor, and an Empty state that tells "nothing matches these filters"
+ * apart from "this client has no Work yet".
  *
- * STILL HONESTLY PARTIAL, and the note still says so: the FILTERS the journey
- * asks for (a visible, clearable filter set, and an empty-with-filters state
- * distinct from an empty list) are not built here yet.
+ * The review queue stays BELOW the list: the two answer different questions, and merging them
+ * would lose both (that component's own header).
  */
 export default async function ClientWorkPage({
   params,
@@ -41,9 +36,8 @@ export default async function ClientWorkPage({
   return (
     <PageShell>
       <PageHeader title={t("clientHeading")} description={t("clientBody")} />
-      <AccountingWorkList clientId={clientId} />
+      <AccountingWorkList scope={{ kind: "client", clientId }} />
       <ClientWorkQueue clientId={clientId} />
-      <NotBuiltNote>{t("clientNotBuilt")}</NotBuiltNote>
     </PageShell>
   );
 }

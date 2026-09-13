@@ -1,41 +1,34 @@
 import { getTranslations } from "next-intl/server";
 
-import { NotBuiltNote } from "@/components/common/not-built-note";
 import { PageHeader, PageShell } from "@/components/common/page-shell";
 import { SectionHeader } from "@/components/common/section-header";
 import { AgentTasksPanel } from "@/components/firm/agent-tasks-panel";
 import { NeedsYouInbox } from "@/components/firm/needs-you-inbox";
-import { WorkViews } from "@/components/work/work-views";
+import { AccountingWorkList } from "@/components/work/accounting-work-list";
 import { WORK_NEEDS_YOU_VIEW } from "@/lib/navigation/tree";
 
 /**
- * "/work" — what is waiting on a person, across every client (#614, refresh spec
- * #612 §8).
+ * "/work" — every durable Work in the firm, plus what is waiting on a person (#614, #641;
+ * refresh spec #612 journey B3).
  *
- * WHAT IT REPLACED, AND WHY IT IS NOT JUST A RENAME OF /needs-you. The firm
- * level had two half-answers to one question: `/needs-you` held the cross-client
- * review queue, and `/activity` — an AUDIT TRAIL of what already happened — had
- * grown a live agent-task queue at the top of it, which is not a record of
- * anything and does not belong on a page about receipts. Between them a human
- * had to visit two pages to see what was outstanding, and one of those pages was
- * mostly about the past. Work is the one place that answers "what is open"; the
- * task queue moved here from /activity in the same commit, so /activity is an
- * audit trail again and nothing is duplicated.
+ * WHAT CHANGED HERE (#641). The page used to lead with two LIVE queues and a note saying the
+ * durable Work list was not built. It is now built: `AccountingWorkList` is the firm-wide
+ * server-backed list over `clara.list_accounting_work` — filterable, paged, URL-stable, with the
+ * Client column and client filter the firm altitude needs. The two live queues stay BELOW it
+ * because they answer different questions (see that component's own header): the Work list is
+ * "what has been asked of the agent, and how did it end"; Needs you is "what is waiting on a
+ * person"; the agent-task panel is "what is running right now".
  *
- * "NEEDS YOU" IS A SAVED VIEW OF THIS PAGE, not a route of its own —
- * `/work?view=needs-you`, which is where the old `/needs-you` redirects
- * (lib/navigation/legacy-routes.ts). A saved view is a filter on a destination:
- * it keeps ONE page, one back-button story and one thing to bookmark, instead of
- * two routes that each show a slice of the same queue.
+ * THE SAVED-VIEW STRIP MOVED INTO THE LIST. `?view=needs-you` — the address #614 minted and
+ * `lib/navigation/legacy-routes.ts` redirects the old `/needs-you` to — is now a BUILT-IN saved
+ * view of the durable list (status = awaiting_input), rendered by
+ * `components/work/work-saved-views.tsx` beside the caller's own saved views. One pill strip, not
+ * two, and the constant is unchanged.
  *
- * THE VIEW IS READ FROM THE SERVER'S OWN `searchParams`, not with
- * `useSearchParams` in a client child — the choice of view decides which
- * SECTIONS render, and a decision about markup belongs in the render that
- * produces it.
- *
- * HONESTLY PARTIAL, and the note on the page says so. The durable Work records
- * (#641) bring the filterable list and the detail view of a single item; today
- * this page composes the two live queues that already exist.
+ * THE VIEW IS STILL READ FROM THE SERVER'S OWN `searchParams` HERE, for the one decision that is
+ * genuinely about MARKUP rather than about data: the attention view does not render the
+ * running-agent-task panel, because that panel is about the present rather than about anything
+ * waiting on this person. Every other use of the view is the list's own, client-side.
  */
 export default async function WorkPage({
   searchParams,
@@ -51,19 +44,17 @@ export default async function WorkPage({
   return (
     <PageShell>
       <PageHeader title={t("heading")} description={t("body")} />
-      <WorkViews activeView={needsYouOnly ? WORK_NEEDS_YOU_VIEW : null} />
+
+      <AccountingWorkList scope={{ kind: "firm" }} />
 
       <section className="flex flex-col gap-3">
         <SectionHeader level={2}>{t("needsYouHeading")}</SectionHeader>
         <NeedsYouInbox />
       </section>
 
-      {/* The agent-task queue, moved here from /activity. It carries its OWN
-          level-2 heading ("Running agent tasks"), so wrapping it in a second one
-          would put two h2s over one list. */}
+      {/* The agent-task queue. It carries its OWN level-2 heading ("Running agent tasks"), so
+          wrapping it in a second one would put two h2s over one list. */}
       {needsYouOnly ? null : <AgentTasksPanel />}
-
-      <NotBuiltNote>{t("notBuilt")}</NotBuiltNote>
     </PageShell>
   );
 }

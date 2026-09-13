@@ -23,12 +23,38 @@ export function isSidebarDefaultPreference(value: unknown): value is SidebarDefa
   return value === "expanded" || value === "collapsed";
 }
 
+/**
+ * #641 — one saved Work-list view: a NAME and the filter query string it stands for.
+ *
+ * `query` is `workListStateQuery`'s canonical spelling (`lib/work/work-list-url-state.ts`) — the
+ * FILTERS only, never a cursor, so a view opens on the first page of what it describes rather than
+ * on a fence into a result set that has since changed. 0189 validates the whole shape on the way
+ * in (an array of at most 20 objects carrying exactly `id`/`name`/`query`, ids non-blank and
+ * unique), so a row read back here was validated by the database, not merely by this module.
+ */
+export type WorkSavedView = { id: string; name: string; query: string };
+
 /** Only EXPLICITLY saved overrides — an absent key means "the product
  *  default", never a stored sentinel (0179's own PATCH-semantics contract). */
 export type InterfacePreferences = {
   motion?: MotionPreference;
   sidebarDefault?: SidebarDefaultPreference;
+  /** #641 — absent (rather than `[]`) for a person who has never saved one. */
+  workViews?: WorkSavedView[];
 };
+
+/** A stored view, shape-checked on the way OUT as well as in. The database already validated
+ *  every element 0189 accepted, but a row saved by a FUTURE version of that door (or read from a
+ *  database ahead of this build) must degrade to "not a view this build understands" rather than
+ *  render `undefined` into a pill. */
+function toWorkSavedView(raw: unknown): WorkSavedView | null {
+  if (typeof raw !== "object" || raw === null) return null;
+  const v = raw as Record<string, unknown>;
+  if (typeof v.id !== "string" || v.id.trim() === "") return null;
+  if (typeof v.name !== "string" || v.name.trim() === "") return null;
+  if (typeof v.query !== "string") return null;
+  return { id: v.id, name: v.name, query: v.query };
+}
 
 /** notifications carries zero supported keys today (0179's header) — typed as
  *  a bag of unknowns so a FUTURE additive key the DB starts returning is
@@ -54,6 +80,10 @@ function toInterface(raw: Record<string, unknown>): InterfacePreferences {
   const out: InterfacePreferences = {};
   if (isMotionPreference(raw.motion)) out.motion = raw.motion;
   if (isSidebarDefaultPreference(raw.sidebarDefault)) out.sidebarDefault = raw.sidebarDefault;
+  if (Array.isArray(raw.workViews)) {
+    const views = raw.workViews.map(toWorkSavedView).filter((v): v is WorkSavedView => v !== null);
+    if (views.length > 0) out.workViews = views;
+  }
   return out;
 }
 
