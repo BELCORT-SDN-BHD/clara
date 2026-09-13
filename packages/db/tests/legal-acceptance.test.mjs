@@ -312,13 +312,19 @@ cell("la.6 the publish door's own refusals: identical_body, empty_body, invalid_
 // ------------------------------------------------------------------------------------------
 // C · THE ACCEPTANCE DOOR. The claim this file exists for is la.7.
 // ------------------------------------------------------------------------------------------
-cell("la.7 a DRAFT cannot be accepted -- placeholder text is presentable, never signable", async () => {
-  // The estate's own placeholder, carried over by 0185's backfill, is the real instance of this.
+cell("la.7 a DRAFT cannot be accepted -- a draft is presentable, never signable", async () => {
+  // The estate's own placeholder was carried over by 0185's backfill as a DRAFT and was the real
+  // instance of this claim until 0187 published it as dpa v1 at the owner's recorded decision
+  // (2026-09-13: the beta templates ARE the v1 texts, each saying on its face that it is pending
+  // the lawyer's review). After 0187 the row is `published`, or `superseded` once a later cell has
+  // published a successor through the door -- never `draft` again, and never rewritten (0185's
+  // transition trigger). The draft that carries this cell's claim is therefore PLANTED below.
   const placeholder = await rootQuery(
     "select kind,version,status,legacy_version,body from clara.legal_documents where body_sha256=$1",
     [sha256Hex(PLACEHOLDER_BODY)]);
   assert.equal(placeholder.rowCount, 1, "la.7 the 0158 placeholder carried over exactly once");
-  assert.equal(placeholder.rows[0].status, "draft", "la.7 the placeholder is a DRAFT");
+  assert.ok(["published", "superseded"].includes(placeholder.rows[0].status),
+    `la.7 after 0187 the placeholder is published or superseded, never a draft (got ${placeholder.rows[0].status})`);
   assert.equal(placeholder.rows[0].legacy_version, "clara-beta-2026-08-a",
     "la.7 its 0158 spelling is preserved");
 
