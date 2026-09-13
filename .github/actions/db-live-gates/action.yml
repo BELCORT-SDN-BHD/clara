@@ -54,7 +54,7 @@ runs:
     # clara_wave_b_ci (matches the guard's *_ci ephemeral pattern) with the WDK world bootstrap
     # (the SAME idempotent `bootstrap` bin the intake-e2e step runs); PGHOST/PGPORT/PGPASSWORD
     # come from the job env. Each e2e owns its lifecycle and exits.
-    - name: Wave-B rig-confined fault-gate e2es (Gate 3 + Gate 7 + #623 Work, isolated DB + world bootstrap)
+    - name: Wave-B rig-confined fault-gate e2es (Gate 3 + Gate 7 + #623 Work + #637 two-build cutover, isolated DB + world bootstrap)
       shell: bash -e {0}
       run: |
         # 2026-09-02 CI-shape ruling: this step's own PRISTINE cluster (postgres_c/PGC_PORT),
@@ -119,6 +119,28 @@ runs:
         RELAY_TEST_MODE=1 \
         WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGC_PORT/clara_wave_b_ci" \
           node tests/work-cancel-e2e.mjs
+        # #637 — the TWO-BUILD cutover e2e, LAST on this rig because it is the only step here that
+        # BUILDS A SECOND IMAGE. It copies the runtime package to <repo>/.scratch/two-build/previous,
+        # rewrites that copy's registry to pin the PREDECESSOR claraWork body, deletes the successor
+        # body file, and runs `nitro build` there — then spawns that image, admits Work to it, stops
+        # it, spawns THIS tree's build, admits Work to the successor, and resumes the first Work on
+        # its original body inside the second image. That is the one thing the single-process
+        # version-cutover-e2e above cannot show.
+        #
+        # MEASURED COST before wiring it (the orchestrator's condition): 82.6s for the scratch build
+        # and 3m25s for the whole file on the dev machine, against a ~6 minute budget. The copy MUST
+        # live outside packages/runtime — measured during the spike, a copy at
+        # packages/runtime/.scratch made the MAIN nitro build compile 98 workflows instead of 49.
+        #
+        # It REFUSES TO START (exit 1, named reason) if this database already carries live
+        # accounting-Work state, and it SKIPS CLEANLY (exit 0, printed reason) when migration 0180 is
+        # absent. Placed after work-cancel-e2e, which settles its own Works, so the inventory is
+        # clean by the time this runs.
+        PGPORT=$PGC_PORT \
+        PGDATABASE=clara_wave_b_ci \
+        RELAY_TEST_MODE=1 \
+        WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGC_PORT/clara_wave_b_ci" \
+          node tests/two-build-cutover-e2e.mjs
 
     - name: DR backup/restore self-test (ephemeral postgres:17)
       shell: bash -e {0}
