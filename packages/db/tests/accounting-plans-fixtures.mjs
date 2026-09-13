@@ -113,6 +113,9 @@ export const PLAN_REASON = {
   planKindUnsupported: "plan_kind_unsupported",
   timezoneUnsupported: "timezone_unsupported",
   reversalCollides: "reversal_collides_with_next_occurrence",
+  reversalBeforePrimary: "reversal_before_primary",
+  periodAlreadyAdmitted: "period_already_admitted",
+  effectiveFromBeforeAuthority: "effective_from_before_authority",
   catchUpBeforeAuthority: "catch_up_before_authority",
   catchUpInFuture: "catch_up_in_future",
   invalidCatchUpWindow: "invalid_catch_up_window",
@@ -132,6 +135,8 @@ export const SCAN_REASON = {
   outsideWindow: "outside_authority_window",
   noLiveRevision: "no_live_revision",
   planNotFound: "plan_not_found",
+  reversalBeforePrimary: "reversal_before_primary",
+  periodAlreadyAdmitted: "period_already_admitted",
 };
 
 export const PLAN_KIND = { recurring: "recurring_journal", reversing: "reversing_journal" };
@@ -210,6 +215,13 @@ export async function requestPlanCatchUp(sub, { plan, from, to, opKey = null }) 
   return r.rows[0].result;
 }
 
+/** Today's day-of-month in the plan timezone, as an integer — several cells shape their schedule
+ *  relative to it so the scenario holds on whatever day the battery runs. */
+export async function todayDayOfMonth() {
+  const r = await rootQuery("select extract(day from (now() at time zone $1))::int as d", [TZ]);
+  return r.rows[0].d;
+}
+
 export async function previewAccountingPlan(sub, { plan, count = 3 }) {
   const r = await humanQuery(sub, namedCall("preview_accounting_plan", [
     { name: "p_plan", cast: "uuid" }, { name: "p_count", cast: "int" },
@@ -280,7 +292,8 @@ export async function revisionRows(plan) {
 export async function occurrenceRows(plan) {
   const r = await rootQuery(
     `select id, firm_id, client_id, plan_id, revision, leg, due_date::text as due_date,
-            intent_key, work_id, admitted_at, outcome, created_at
+            period_key::text as period_key, attempt, intent_key, work_id, admitted_at, outcome,
+            created_at
        from clara.accounting_plan_occurrences where plan_id=$1 order by due_date`, [plan]);
   return r.rows;
 }
@@ -313,6 +326,16 @@ export async function planWorkRows(plan) {
 export async function instructionRef({ client, author }) {
   const w = await admitJournalWork({ client, author, intentKey: `p640-authority-${randomUUID()}` });
   return { kind: "accounting_work", id: w.work_id };
+}
+
+/** REACTIVATE a membership a cell revoked. `clara.add_member` refuses a user who already holds a
+ *  membership row in the firm, and the estate has no re-admit door, so this is a FIXTURE shortcut
+ *  around an absent writer — stated as one rather than hidden, exactly as `setClientStatus` below
+ *  and work-journal-fixtures.mjs's retired-account shortcut are. */
+export async function reactivateMember({ firm, user }) {
+  await rootQuery(
+    "update clara.firm_memberships set status='active' where firm_id=$1 and user_id=$2",
+    [firm, user]);
 }
 
 /** Deactivate a client through the estate's own column. `clara.clients` has no retire door in this

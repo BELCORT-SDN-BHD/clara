@@ -27,7 +27,8 @@ import {
   endAccountingPlan, requestPlanCatchUp, previewAccountingPlan, listAccountingPlans,
   getAccountingPlan, listPlanOccurrences, wakeDuePlanOccurrences,
   planRow, liveRevision, revisionRows, occurrenceRows, occurrenceCount, instructionRef,
-  todayInPlanZone, shiftMonths, setClientStatus, closeYearAround,
+  todayInPlanZone, todayDayOfMonth, shiftMonths, setClientStatus, closeYearAround,
+  cancelAccountingWork, reactivateMember,
   PLAN_KIND, PLAN_REASON, TZ,
 } from "./accounting-plans-fixtures.mjs";
 
@@ -423,8 +424,11 @@ test("p640.revision.immutable — a plan's identity and authority cannot be rewr
   await wakeDuePlanOccurrences({ limit: SCAN_LIMIT });
   const occ = (await occurrenceRows(p.plan_id))[0];
 
+  // `authority_from` is in this list because it is the FLOOR every revision and every catch-up
+  // window is measured against (review finding B3). A frozen column nobody tests is a promise.
   for (const [col, value] of [["purpose", "'something else'"], ["authorised_by", `'${BOB()}'::uuid`],
-    ["kind", "'reversing_journal'"], ["client_id", `'${world.clients.A1}'::uuid`]]) {
+    ["kind", "'reversing_journal'"], ["client_id", `'${world.clients.A1}'::uuid`],
+    ["authority_from", "date '2020-01-01'"]]) {
     const { detail } = await assertPair(CLR.immutable, PLAN_REASON.planImmutable,
       () => rootQuery(`update clara.accounting_plans set ${col}=${value} where id=$1`, [p.plan_id]),
       `rewriting accounting_plans.${col}`);
@@ -437,9 +441,22 @@ test("p640.revision.immutable — a plan's identity and authority cannot be rewr
   await assertPair(CLR.immutable, PLAN_REASON.occurrenceImmutable,
     () => rootQuery("update clara.accounting_plan_occurrences set due_date=due_date+1 where id=$1", [occ.id]),
     "moving an occurrence's due date");
+  // …AND ITS PERIOD, which is the other half of the identity after review finding B1: a period key
+  // that could be edited is a uniqueness law that can be walked around by one UPDATE.
+  await assertPair(CLR.immutable, PLAN_REASON.occurrenceImmutable,
+    () => rootQuery("update clara.accounting_plan_occurrences set period_key=period_key+1 where id=$1", [occ.id]),
+    "moving an occurrence's period key");
   await assertPair(CLR.immutable, "plan_occurrence_work_set_once",
     () => rootQuery("update clara.accounting_plan_occurrences set work_id=null where id=$1", [occ.id]),
     "un-naming an occurrence's Work");
+  // THE S7 EXIT IS NARROW, AND THE TRIGGER IS WHERE THAT NARROWNESS LIVES: re-pointing an
+  // occurrence at a different Work is refused while the Work it names is still LIVE, whatever
+  // attempt counter the writer offers.
+  await assertPair(CLR.immutable, "plan_occurrence_work_set_once",
+    () => rootQuery(
+      "update clara.accounting_plan_occurrences set work_id=$2, attempt=attempt+1 where id=$1",
+      [occ.id, p.ref.id]),
+    "re-pointing an occurrence at another Work while the one it names is still live");
 });
 
 // ===========================================================================================
@@ -557,4 +574,189 @@ test("p640.read.list — the plan list carries purpose, kind, schedule, timezone
   assert.equal(preview.occurrences.length, 24, "the preview honours its count, up to the cap");
   const capped = await previewAccountingPlan(BOB(), { plan: p.plan_id, count: 500 });
   assert.equal(capped.occurrences.length, 24, "…and the cap is 24, never a caller's number");
+});
+
+// ===========================================================================================
+// The adversarial round on 0193 (review findings B1, B3, S4, S5, S7).
+// ===========================================================================================
+
+test("p640.revision.no_double_post — a revision changes only FUTURE periods: the period already admitted is not admitted a second time under a new due day (review finding B1)", async (t) => {
+  if (await gatePlans(t)) return;
+  const dayNow = await todayDayOfMonth();
+  if (dayNow < 2) {
+    // The scenario needs TWO distinct due days at or before today inside one month.
+    t.skip("p640.revision.no_double_post needs a calendar day >= 2 for two due days this month");
+    return;
+  }
+  const dom = Math.min(dayNow, 28);
+  const p = await plan({ tag: "revdouble", monthsBack: 3, dayOfMonth: dom });
+
+  await wakeDuePlanOccurrences({ limit: SCAN_LIMIT });
+  const before = await occurrenceRows(p.plan_id);
+  assert.equal(before.length, 1, "this month's period is admitted once");
+  const admitted = before[0];
+
+  // THE REVISION MOVES THE DUE DAY INSIDE THE SAME MONTH, which is exactly the shape that used to
+  // produce a second Work for one period: a different due_date satisfies unique (plan_id, due_date)
+  // while naming the same accounting period and the same basis.
+  await reviseAccountingPlan(ALICE(), {
+    plan: p.plan_id, frequency: "monthly", dayRule: "day_of_month", dayOfMonth: dom - 1,
+    effectiveFrom: p.effectiveFrom, basis: p.basis,
+  });
+  assert.equal((await liveRevision(p.plan_id)).revision, 2);
+
+  await wakeDuePlanOccurrences({ limit: SCAN_LIMIT });
+  const after = await occurrenceRows(p.plan_id);
+  assert.equal(after.length, 1,
+    `the revision must not re-admit a period already run; got ${JSON.stringify(after.map((x) => [x.due_date, x.period_key]))}`);
+  assert.equal(after[0].id, admitted.id, "…and the occurrence that stands is the original one");
+
+  // THE DOOR HOLDS THE SAME WALL for the path a human can reach: a catch-up over the whole window
+  // admits the periods that never ran and refuses the one that did.
+  const caught = await requestPlanCatchUp(ALICE(), { plan: p.plan_id, from: p.effectiveFrom, to: today });
+  const rows = await occurrenceRows(p.plan_id);
+  const primaries = rows.filter((x) => x.leg === "primary");
+  const keys = primaries.map((x) => x.period_key);
+  assert.equal(new Set(keys).size, keys.length,
+    `one occurrence per period per leg, whatever the schedule was revised to; got ${JSON.stringify(primaries.map((x) => [x.due_date, x.period_key]))}`);
+  const refusedPeriods = caught.events.filter((e) => e.reason === PLAN_REASON.periodAlreadyAdmitted);
+  assert.equal(refusedPeriods.length, 1, `the already-run period is refused by name; got ${JSON.stringify(caught.events)}`);
+  const works = rows.filter((x) => x.work_id !== null).map((x) => x.work_id);
+  assert.equal(new Set(works).size, works.length, "no Work is named twice");
+});
+
+test("p640.revision.authority_floor — a revision cannot move the plan's authority backwards, so catch_up_before_authority cannot be dissolved (review finding B3)", async (t) => {
+  if (await gatePlans(t)) return;
+  const client = await freshWorkClient(ALICE(), "revfloor");
+  const ref = await instructionRef({ client, author: ALICE() });
+  const b = basis({ postingDate: today, memo: "authority floor" });
+  // Authority starts TODAY: nothing historical is authorised at all.
+  const created = await createAccountingPlan(ALICE(), {
+    client, authorityRef: ref, frequency: "monthly", dayRule: "day_of_month", dayOfMonth: 1,
+    effectiveFrom: today, basis: b,
+  });
+
+  const longAgo = "2020-01-15";
+  await assertPair(CLR.badRequest, PLAN_REASON.effectiveFromBeforeAuthority,
+    () => reviseAccountingPlan(ALICE(), {
+      plan: created.plan_id, frequency: "monthly", dayRule: "day_of_month", dayOfMonth: 1,
+      effectiveFrom: longAgo, basis: b,
+    }),
+    "a revision back-dating the authority");
+
+  // The floor is the PLAN's, not the live revision's, so moving it FORWARD is still allowed and
+  // does not lower the floor afterwards.
+  const forward = await shiftMonths(today, 1);
+  await reviseAccountingPlan(ALICE(), {
+    plan: created.plan_id, frequency: "monthly", dayRule: "day_of_month", dayOfMonth: 1,
+    effectiveFrom: forward, basis: b,
+  });
+  await assertPair(CLR.badRequest, PLAN_REASON.effectiveFromBeforeAuthority,
+    () => reviseAccountingPlan(ALICE(), {
+      plan: created.plan_id, frequency: "monthly", dayRule: "day_of_month", dayOfMonth: 1,
+      effectiveFrom: longAgo, basis: b,
+    }),
+    "a revision back-dating the authority after it had been moved forward");
+
+  // …and no historical catch-up became reachable.
+  await assertPair(CLR.badRequest, PLAN_REASON.catchUpBeforeAuthority,
+    () => requestPlanCatchUp(ALICE(), { plan: created.plan_id, from: longAgo, to: today }),
+    "a catch-up reaching back past the plan's own authority");
+  assert.equal(await occurrenceCount(created.plan_id), 0, "nothing historical was admitted");
+});
+
+test("p640.revision.end_race — an ENDED plan cannot gain a fresh live revision, and the test is made under the plan row lock (review finding S4)", async (t) => {
+  if (await gatePlans(t)) return;
+  const p = await plan({ tag: "revendrace" });
+  await endAccountingPlan(ALICE(), { plan: p.plan_id, reason: "the client cancelled it" });
+  await assertPair(CLR.badRequest, PLAN_REASON.planEnded,
+    () => reviseAccountingPlan(ALICE(), {
+      plan: p.plan_id, effectiveFrom: p.effectiveFrom, basis: p.basis,
+    }), "revising an ended plan");
+  const revs = await revisionRows(p.plan_id);
+  assert.equal(revs.length, 1, "no second revision exists");
+  assert.equal(revs[0].superseded_at, null, "…and the one revision was not superseded by the refused call");
+
+  // THE LOCK IS WHAT MAKES IT A RACE ANSWER RATHER THAN A LUCKY ONE: the refusal is decided on a
+  // re-read taken UNDER the plan row lock, which the body's own text is asserted to do.
+  const src = await rootQuery(
+    "select prosrc from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='clara' and p.proname='revise_accounting_plan'");
+  const body = src.rows[0].prosrc;
+  const lockAt = body.indexOf("for update");
+  const endTestAfterLock = body.indexOf("plan_ended", lockAt);
+  assert.ok(lockAt > 0, "revise takes the plan row lock");
+  assert.ok(endTestAfterLock > lockAt,
+    "the ended test is re-made AFTER the lock, not only on the unlocked read");
+});
+
+test("p640.occ.retry_intent_key — a refused occurrence re-attempted after a revision records the revision it actually ran under (review finding S5)", async (t) => {
+  if (await gatePlans(t)) return;
+  const client = await freshWorkClient(ALICE(), "retrykey");
+  // p640.auth.loss (above) revokes frank and the estate has no re-admit door, so this cell restores
+  // him first — the fixture shortcut is stated at its own definition.
+  await reactivateMember({ firm: FIRM_A(), user: frank });
+  // Frank authorises it, so deactivating him refuses the first attempt.
+  const p = await plan({ sub: frank, tag: "retrykey", client, monthsBack: 2 });
+  await deactivateMember(ALICE(), { firm: FIRM_A(), user: frank });
+  await wakeDuePlanOccurrences({ limit: SCAN_LIMIT });
+  const refused = await occurrenceRows(p.plan_id);
+  assert.equal(refused.length, 1);
+  assert.equal(refused[0].work_id, null);
+  assert.equal(refused[0].revision, 1);
+  assert.match(refused[0].intent_key, /:r1:/);
+
+  // Restore frank's authority and revise, then catch that period up.
+  await reactivateMember({ firm: FIRM_A(), user: frank });
+  await reviseAccountingPlan(ALICE(), {
+    plan: p.plan_id, frequency: "monthly", dayRule: "day_of_month", dayOfMonth: 1,
+    effectiveFrom: p.effectiveFrom, basis: p.basis,
+  });
+  await requestPlanCatchUp(ALICE(), { plan: p.plan_id, from: refused[0].due_date, to: refused[0].due_date });
+
+  const after = await occurrenceRows(p.plan_id);
+  const row = after.find((x) => x.id === refused[0].id);
+  assert.ok(row.work_id, "the re-attempt admitted on the same row");
+  assert.equal(row.revision, 2, "the occurrence records the revision it RAN under, not the one it first failed under");
+  assert.match(row.intent_key, /:r2:/, "…and its intent key says so too");
+  const w = await workRow(row.work_id);
+  assert.equal(w.intent_key, row.intent_key, "the Work and the occurrence agree on the key");
+});
+
+test("p640.catchup.reattempt — a CANCELLED plan Work does not make its due date permanently unpostable (review finding S7)", async (t) => {
+  if (await gatePlans(t)) return;
+  const p = await plan({ tag: "reattempt", monthsBack: 2 });
+  await wakeDuePlanOccurrences({ limit: SCAN_LIMIT });
+  const first = await occurrenceRows(p.plan_id);
+  assert.equal(first.length, 1);
+  const firstWork = first[0].work_id;
+  assert.ok(firstWork);
+
+  // A human cancels it — the Work is terminal with no committed receipt, so nothing was posted for
+  // this period and the period is still owed.
+  const cancelled = await cancelAccountingWork({ work: firstWork, author: ALICE() });
+  assert.ok(cancelled, "the cancel door answered");
+  assert.equal((await workRow(firstWork)).status, "cancelled");
+
+  const caught = await requestPlanCatchUp(ALICE(), { plan: p.plan_id, from: first[0].due_date, to: first[0].due_date });
+  assert.equal(caught.admitted, 1, `the cancelled period is re-admitted; got ${JSON.stringify(caught.events)}`);
+  const after = await occurrenceRows(p.plan_id);
+  const row = after.find((x) => x.id === first[0].id);
+  assert.notEqual(row.work_id, firstWork, "a NEW Work carries the re-attempt");
+  assert.equal(row.attempt, 2, "…and the occurrence counts the attempt");
+  assert.match(row.intent_key, /:a2$/, "a re-attempt takes a distinguishing intent key, so 0178 cannot replay the cancelled Work");
+  assert.equal((await workRow(row.work_id)).status, "queued");
+
+  // A COMPLETED Work is NOT re-attemptable: money is on the books and a second admission would be
+  // a second entry for one period.
+  const w = await workRow(row.work_id);
+  await claimWorkRun({ task: w.current_task_id, runId: opk("p640-reatt") });
+  const obo = await mintClientObo({ firm: FIRM_A(), obo: p.author, client: p.client });
+  const posted = await wakeRecordJournalEntry(obo.secret, {
+    client: p.client, work: row.work_id, logicalOpId: w.logical_op_id, basis: w.basis,
+  });
+  await settleWorkRun({ task: w.current_task_id, outcome: "completed", result: { entry_id: posted.entry_id } });
+  const again = await requestPlanCatchUp(ALICE(), { plan: p.plan_id, from: first[0].due_date, to: first[0].due_date });
+  assert.equal(again.admitted, 0, "a completed period is not re-admitted");
+  assert.equal((await occurrenceRows(p.plan_id)).find((x) => x.id === first[0].id).attempt, 2,
+    "…and the attempt counter did not move");
 });
