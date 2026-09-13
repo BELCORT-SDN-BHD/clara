@@ -185,7 +185,38 @@ const OFX_STATEMENT: DocumentStateResult = {
   facts: { capability: "unsupported", limits: { opening_balance: "absent_in_format" }, extractions: [], validations: [] },
 };
 
+/** The same invoice, coded and posted. Its operation row must offer a LINK, not a count. */
+const POSTED_INVOICE: DocumentStateResult = {
+  ...INVALID_INVOICE,
+  facts: {
+    ...INVALID_INVOICE.facts,
+    validations: [{
+      check_name: "invoice.six_term_identity", outcome: "pass", detail: { residual_cents: 0 },
+      extraction_id: "ext-1", statement_id: null,
+      engine_id: "llm-openai:gpt-5.6-terra:v2", evaluated_at: "2026-04-01T00:05:00Z",
+    }],
+  },
+  operation: {
+    capability: "supported", codeable_kind: true, statements: [],
+    entries: [{ entry_id: "11111111-2222-4333-8444-555555555555", status: "approved" }],
+  },
+};
+
 const SUCCESS_WORDS = /\bvalidated\b|\bverified facts\b|\bcomplete\b|\bsuccess\b/i;
+
+/** Every anchor's href, in document order. */
+function hrefs(root: Stub): string[] {
+  const out: string[] = [];
+  const walk = (n: Stub) => {
+    if (n.tagName === "A") {
+      const href = n.getAttribute?.("href");
+      if (href) out.push(href);
+    }
+    for (const c of n.childNodes ?? []) walk(c);
+  };
+  walk(root);
+  return out;
+}
 
 test("a payroll_summary PDF renders custody=verified, extraction=done, facts=none-for-this-type, operation=a person's — four SEPARATE states", async () => {
   await mount(PAYROLL, async (text) => {
@@ -247,6 +278,11 @@ test("a FAILED arithmetic check names the check, keeps the facts readable, and s
     assert.match(t, /version 3/, "the source extraction version is stated beside the facts");
     assert.match(t, /7 region/, "…with the region count that backs them");
     assert.match(t, /llm-openai:gpt-5\.6-terra:v2/, "…and the engine that produced them");
+    // H-23: a named population WITHOUT its freshness is the ambiguous unencoded count H-23
+    // exists to replace. The instant is rendered in the BUSINESS timezone (Asia/Kuala_Lumpur),
+    // so 2026-04-01T00:05:00Z reads as 1 April 08:05 for every viewer, wherever they are.
+    assert.match(t, /read 1 Apr 2026, 8:05 am/,
+      "the reading's own freshness must be stated, in the business timezone rather than the viewer's");
   });
 });
 
@@ -265,6 +301,27 @@ test("an OFX bank statement is honestly stored: extraction NOT ATTEMPTED, facts 
     assert.match(t, /Cannot be read from this file/, "the facts state distinguishes 'no lane' from 'wrong kind'");
     assert.match(t, /no opening balance/, "the registry's measured reason is rendered verbatim");
     assert.doesNotMatch(t, /Failed/, "nothing failed — presenting this as a failure would be a different lie");
+  });
+});
+
+test("a POSTED document offers a LINK to its journal entry, not merely a count of entries", async () => {
+  await mount(POSTED_INVOICE, async (text, container) => {
+    const t = text();
+    assert.match(t, /Posted/, "the operation state is Posted");
+    assert.match(t, /Recorded and checked/, "…and its facts passed their check, so this IS the success case");
+    // A count tells a professional that something was booked; only the link lets them read it.
+    assert.deepEqual(
+      hrefs(container),
+      ["/clients/client-1/journals?entry=11111111-2222-4333-8444-555555555555"],
+      "the posted entry must be addressable through the ONE journals link builder, not a second spelling",
+    );
+  });
+});
+
+test("an UNCODED document offers no entry link at all — never a control that goes nowhere", async () => {
+  await mount(INVALID_INVOICE, async (_text, container) => {
+    assert.deepEqual(hrefs(container), [],
+      "with no entry there is nothing to link to, and a dead link is worse than none");
   });
 });
 

@@ -1529,6 +1529,8 @@
       "invalid": "Failed a check"
     },
     "stateFactsVersion": "version {version} · {regions} region(s)",
+    "stateFactsReadAt": "read {at}",
+    "stateFactsReadAtUnknown": "read time not recorded",
     "stateFactsFailedChecks": "Failed: {checks}. The recorded values stay readable below.",
     "stateFactsUnmeasuredChecks": "Not measured: {checks}. The terms this check needs were never recorded.",
     "stateFactsNoChecks": "No arithmetic check has been recorded against these facts.",
@@ -1541,6 +1543,7 @@
       "reconciled": "In the bank lane"
     },
     "stateOperationDetail": "{entries} journal entry/entries · {statements} statement(s)",
+    "stateOperationEntryLink": "Open the {status} journal entry",
     "stateOperationNotApplicableDetail": "Clara never posts an entry from this type of document.",
     "capabilityRegistryVersion": "capability registry v{version}",
     "capabilityLimit": {

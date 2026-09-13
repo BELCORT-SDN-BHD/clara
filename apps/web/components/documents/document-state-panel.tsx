@@ -36,6 +36,8 @@ import { EmptyState, LoadingState } from "@/components/common/state";
 import { useHydratedPart } from "@/lib/parts/hooks";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
 import { getDocumentState } from "@/lib/documents/reads";
+import { activityJournalsHref } from "@/lib/firm/activity";
+import { businessDateTime } from "@/lib/business-date";
 import {
   capabilityLimits, custodyVerdict, extractionTone, extractionVerdict, factsTone, factsVerdict,
   failingChecks, landedFactsExtractions, operationVerdict, unmeasuredChecks,
@@ -154,13 +156,13 @@ export function DocumentStatePanel({ documentId, clientId }: { documentId: strin
       <SectionHeader level={4}>{t("statesHeading")}</SectionHeader>
       {loading && !data ? <LoadingState>{t("statesLoading")}</LoadingState> : null}
       {data && data.result === null ? <EmptyState>{t("statesNotAvailable")}</EmptyState> : null}
-      {data && data.result !== null ? <StateBody state={data.result} t={t} /> : null}
+      {data && data.result !== null ? <StateBody state={data.result} clientId={clientId} t={t} /> : null}
       <DoorFeedback err={err} clr={clr} />
     </section>
   );
 }
 
-function StateBody({ state, t }: { state: DocumentStateResult; t: Translate }) {
+function StateBody({ state, clientId, t }: { state: DocumentStateResult; clientId: string; t: Translate }) {
   const custody = custodyVerdict(state);
   const extraction = extractionVerdict(state);
   const facts = factsVerdict(state);
@@ -222,6 +224,15 @@ function StateBody({ state, t }: { state: DocumentStateResult; t: Translate }) {
                   <span className="font-medium text-foreground">{e.engine_kind}</span>
                   <span>{t("stateFactsVersion", { version: e.version_n ?? 0, regions: e.region_count })}</span>
                   <span className="wrap-anywhere">{e.engine_id ?? t("stateEngineUnknown")}</span>
+                  {/* SOURCE FRESHNESS (H-23). A named population without its freshness is the
+                      ambiguous unencoded count H-23 exists to replace: "7 regions" says nothing
+                      about WHEN they were read, and a professional comparing a document against
+                      the books needs to know whether this reading predates the last correction.
+                      `businessDateTime` rather than the viewer's locale, for the audit-trail
+                      reason lib/business-date.ts's own header records. */}
+                  {e.extracted_at
+                    ? <span>{t("stateFactsReadAt", { at: businessDateTime(e.extracted_at) })}</span>
+                    : <span>{t("stateFactsReadAtUnknown")}</span>}
                 </li>
               ))}
             </ul>
@@ -246,12 +257,28 @@ function StateBody({ state, t }: { state: DocumentStateResult; t: Translate }) {
         state={t(OPERATION_KEY[operation])}
         tone="neutral"
       >
-        {operation === "not_applicable"
-          ? t("stateOperationNotApplicableDetail")
-          : t("stateOperationDetail", {
-            entries: state.operation.entries.length,
-            statements: state.operation.statements.length,
-          })}
+        {operation === "not_applicable" ? t("stateOperationNotApplicableDetail") : (
+          <div className="flex flex-col gap-0.5">
+            <p>{t("stateOperationDetail", {
+              entries: state.operation.entries.length,
+              statements: state.operation.statements.length,
+            })}</p>
+            {/* THE POSTED ENTRY IS A LINK, not a count (the recipe's "posted entry link").
+                A count tells a professional that something was booked; only the link lets them
+                go and read it. Built through `activityJournalsHref`, the ONE builder for every
+                journal-entry destination in this app, so this surface does not invent a second
+                spelling of `?entry=`. */}
+            {state.operation.entries.map((e) => (
+              <a
+                key={e.entry_id}
+                href={activityJournalsHref(clientId, e.entry_id)}
+                className="w-fit underline underline-offset-2 hover:no-underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                {t("stateOperationEntryLink", { status: e.status })}
+              </a>
+            ))}
+          </div>
+        )}
       </StateRow>
 
       {/* THE CAPABILITY SENTENCE. Verbatim from the registry, never assembled here — it is the
