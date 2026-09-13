@@ -34,9 +34,27 @@ const RESET = `${APP_ORIGIN}/e2e-supabase/e2e-operator/reset`;
 // `playwright.config.ts` pins `workers: 1`, so ONE mock server serves this whole file and three of
 // the cells below genuinely decide a registration or resolve a problem. Each cell therefore starts
 // from the lane's own declared state rather than from whatever its predecessor left behind.
+//
+// THE RETRY RAISES THE WAIT, NEVER THE BAR (the same reasoning `checkout-gate-walk.spec.ts`'s own
+// header records for its raised `expect` timeouts): the control POST is a fresh TLS handshake
+// against this harness's self-signed local server, and on a loaded host one of thirteen handshakes
+// lost that race ONCE (measured 2026-09-14: the reduced-motion cell's `beforeEach` timed out at
+// 30 s while the same hook succeeded for the other twelve, with `net_error -202` handshake noise in
+// the server log). Each attempt still demands a genuine `ok()` — an exhausted loop FAILS LOUDLY
+// rather than letting a cell run against whatever the previous one left behind.
 test.beforeEach(async ({ page }) => {
-  const response = await page.request.post(RESET);
-  expect(response.ok(), "the operator lane's control endpoint answered").toBe(true);
+  let lastError: unknown = null;
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      const response = await page.request.post(RESET, { timeout: 10_000 });
+      expect(response.ok(), "the operator lane's control endpoint answered").toBe(true);
+      return;
+    } catch (error: unknown) {
+      lastError = error;
+    }
+  }
+  throw new Error(
+    `the operator lane's control endpoint did not answer in 3 attempts: ${String(lastError)}`);
 });
 
 async function signIn(page: Page, email: string): Promise<void> {
@@ -151,7 +169,7 @@ test("#615 AC2/AC4 — resolving a provider problem records an attributable rece
   await expect(dialog).toBeVisible();
   // The DB is the wall on content; the disabled Confirm is the courtesy that saves a round trip.
   await expect(page.getByRole("button", { name: "Record resolution" })).toBeDisabled();
-  await page.getByLabel("Reason").fill("Refunded through the provider dashboard.");
+  await page.getByLabel("Reason", { exact: true }).fill("Refunded through the provider dashboard.");
   await page.getByRole("button", { name: "Record resolution" }).click();
 
   await expect(page.getByText(/Provider event evt_615_dup is recorded as resolved/)).toBeVisible();
@@ -159,11 +177,14 @@ test("#615 AC2/AC4 — resolving a provider problem records an attributable rece
   await page.keyboard.press("Escape");
   await expect(page.getByText(OPERATOR.problemFirmName)).toHaveCount(0);
 
-  // …and the receipt is readable in the settled view, attributably.
+  // …and the receipt is readable in the settled view, attributably. Row-scoped: the settled view
+  // holds BOTH problem rows, so a bare `getByText("Resolved")` would match two and Playwright's
+  // strict mode would (correctly) refuse to guess which one this cell means.
   await page.getByRole("button", { name: "Include settled" }).click();
   await expect(page).toHaveURL(/settled=1/);
-  await expect(page.getByText(OPERATOR.problemFirmName)).toBeVisible();
-  await expect(page.getByText("Resolved")).toBeVisible();
+  const resolvedRow = page.getByRole("row", { name: new RegExp(OPERATOR.problemFirmName) });
+  await expect(resolvedRow).toBeVisible();
+  await expect(resolvedRow.getByText("Resolved")).toBeVisible();
 });
 
 test("#615 AC3/AC5 — a CONCURRENT provider event: a second resolution of the same case is refused as stale, verbatim, and repeats no effect", async ({ page }) => {
@@ -173,7 +194,7 @@ test("#615 AC3/AC5 — a CONCURRENT provider event: a second resolution of the s
   // First operator tab resolves it.
   await reviewRow(page, OPERATOR.problemFirmName).click();
   await page.getByRole("button", { name: "Resolve" }).click();
-  await page.getByLabel("Reason").fill("Refunded through the provider dashboard.");
+  await page.getByLabel("Reason", { exact: true }).fill("Refunded through the provider dashboard.");
   await page.getByRole("button", { name: "Record resolution" }).click();
   await expect(page.getByText(/recorded as resolved/)).toBeVisible();
   await page.keyboard.press("Escape");
@@ -222,7 +243,7 @@ test("the admission capacity panel writes the estate's limit and reads it back",
   await expect(page.getByText(/Limit: Unlimited/)).toBeVisible();
 
   await page.getByLabel("Firm limit").fill("12");
-  await page.getByLabel("Reason", { exact: true }).first().fill("Beta cohort cap.");
+  await page.getByLabel("Reason for the limit").fill("Beta cohort cap.");
   await page.getByRole("button", { name: "Save capacity" }).click();
 
   await expect(page.getByText(/Admission capacity is now 12/)).toBeVisible();

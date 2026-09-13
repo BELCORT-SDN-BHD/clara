@@ -4377,7 +4377,7 @@
     "capacityLimitLabel": "Firm limit",
     "capacityLimitHint": "Leave empty for unlimited. Zero closes admission entirely.",
     "capacityLimitInvalid": "Enter a whole number of firms, or leave it empty for unlimited.",
-    "capacityReasonLabel": "Reason",
+    "capacityReasonLabel": "Reason for the limit",
     "capacityReasonPlaceholder": "Why is the limit changing?",
     "capacitySave": "Save capacity",
     "capacityReceipt": "Admission capacity is now {limit}, with {count} firms admitted."

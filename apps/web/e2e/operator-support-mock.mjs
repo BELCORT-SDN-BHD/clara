@@ -38,6 +38,10 @@ export const OPERATOR = {
   firmName: "Rome Public Advisory",
   paidFirmName: "Kuala Lumpur Bookkeepers",
   problemFirmName: "Penang Advisory",
+  // A DISTINCT name for the already-settled case: in the settled view both problem rows are on
+  // screen at once, and two rows sharing a firm name make every row-scoped locator in the walk a
+  // strict-mode violation rather than an assertion.
+  settledFirmName: "Johor Ledger Partners",
 };
 
 async function readJson(request) {
@@ -106,7 +110,7 @@ const PROBLEM_ROW = base({
 const SETTLED_PROBLEM_ROW = base({
   case_kind: "problem",
   case_id: OPERATOR.settledProblem,
-  firm_name: OPERATOR.problemFirmName,
+  firm_name: OPERATOR.settledFirmName,
   occurred_at: "2026-09-09T02:00:00+00:00",
   problem_kind: "intent_mismatch",
   problem_noticed_at: "2026-09-09T02:00:00+00:00",
