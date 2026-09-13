@@ -32,8 +32,13 @@
 //   - CLR04 "insufficient role" — the caller is not owner+ in an
 //     `is_operator` firm. THE authority wall; never pre-empted here.
 //   - CLR10 "op_key is required" — cannot fire in practice, the caller
-//     (registrations-queue.tsx) always supplies one (its own per-request
-//     cache, never blank — see the FOLD note on each wrapper below).
+//     always supplies one. THE CALLER IS NOW components/operator/
+//     support-case-sheet.tsx (#615 moved the queue to /operator and retired
+//     components/admin/registrations-queue.tsx with it), and the mechanism
+//     changed with it: the key is minted by that file's `supportOpKey`, a
+//     PURE function of (case id, caller id, normalised text) — no per-request
+//     cache anywhere, because a deterministic key needs none. See the FOLD
+//     note on each wrapper below for why the key must not be random.
 //   - CLR10 "unknown registration request" — `p_request` does not exist.
 //   - CLR04 "cannot decide your own registration request" — the F7
 //     self-decision wall (0145:794-801/856-860): an operator may never
@@ -153,9 +158,11 @@ export function loadOperatorRegistrationQueue(
  *  HTTP response was lost, a retry minting a NEW key never finds the old
  *  receipt; it re-enters the door body fresh, the request is no longer
  *  'open', and the retry gets a spurious CLR09 instead of the original
- *  `{firm_id, plan_id}` replaying. The caller (registrations-queue.tsx) now
- *  holds ONE key per request until the mandatory re-read proves the row
- *  left the open queue — see that file's own header. */
+ *  `{firm_id, plan_id}` replaying. The caller — components/operator/
+ *  support-case-sheet.tsx since #615 — derives the key from (case id, caller
+ *  id) with `supportOpKey`, so a retry reproduces it BY CONSTRUCTION rather
+ *  than by remembering it; the cache the retired registrations panel kept for
+ *  the same purpose is gone with that file. */
 export function approveFirmRegistration(
   session: SessionTokenAccessor,
   requestId: string,
@@ -175,7 +182,8 @@ export function approveFirmRegistration(
  *  untouched, and a caller that bypassed the dialog gets the SAME CLR10 the
  *  DB would give anyone else.
  *
- *  FOLD (Codex HIGH-1): `opKey` is CALLER-OWNED, same reasoning as
+ *  FOLD (Codex HIGH-1): `opKey` is CALLER-OWNED — since #615 from
+ *  `supportOpKey` in components/operator/support-case-sheet.tsx — same reasoning as
  *  `approveFirmRegistration` above — reject's own hash additionally binds
  *  `reason` (0145:850-851), so the caller keys its cache on `(request,
  *  normalized reason)`: the SAME key replays a retry of the SAME reason, and

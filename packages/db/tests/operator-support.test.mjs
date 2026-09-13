@@ -37,7 +37,7 @@ import {
 } from "./operator-support-fixtures.mjs";
 
 const QUEUE_SIG = "clara.list_operator_support_queue(boolean)";
-const CASE_SIG = "clara.get_operator_support_case(text,uuid)";
+const CASE_SIG = "clara.get_operator_support_case(text,text)";
 /** The ONE query both doors delegate to (0188 §1) — granted to nobody, so it is asserted about
  *  rather than called. */
 const SHARED_SIG = "clara._operator_support_cases(boolean,text,uuid)";
@@ -335,6 +335,44 @@ cell("os.06 the case door answers ONE refusal for an unknown id, an unknown kind
       `kind=${kind} id=${id}`);
     assert.equal(detailOf(error)?.reason, SUPPORT_NOT_FOUND);
   }
+
+  // AN ID THAT IS NOT A UUID AT ALL takes the SAME path, and this is why `p_id` is declared `text`
+  // rather than `uuid` (0181's `get_activity_event` took the same decision, 0181:468-474). Declared
+  // `uuid`, PostgREST answers a hand-edited `?case=problem:xyz` with a raw HTTP 400 `22P02` BEFORE
+  // this body runs at all, and the console renders a banner carrying a database error code instead
+  // of the one not-found face. Every spelling below — a bare word, a truncated uuid, a uuid with a
+  // trailing character, SQL-looking text, an empty string — is ONE `support_case_not_found`.
+  for (const id of ["xyz", "not-a-uuid", world.problem.slice(0, 20),
+    `${world.problem}x`, "' or 1=1 --", "", "   "]) {
+    const error = await assertRaises(CLR.notFound,
+      () => supportCase(operator.owner, CASE_KIND.problem, id), `a non-uuid id ${JSON.stringify(id)}`);
+    assert.equal(detailOf(error)?.reason, SUPPORT_NOT_FOUND);
+    assert.equal(error.message, answers[0].message,
+      `a non-uuid id answers byte-identically to "${answers[0].label}"`);
+  }
+  // …and the two spellings PostgreSQL's OWN uuid parser accepts beyond the canonical one resolve
+  // the row rather than reading as malformed — the door delegates the grammar question to the
+  // database instead of to a second, stricter regex of its own.
+  for (const id of [world.problem.replaceAll("-", ""), `{${world.problem}}`]) {
+    const resolved = await supportCase(operator.owner, CASE_KIND.problem, id);
+    assert.equal(resolved.case_id, world.problem, `${id} is the same uuid to PostgreSQL`);
+  }
+
+  // THE POSITIVE CONTROL FOR THE SIGNATURE ITSELF, in two facts rather than one claim.
+  //
+  // (a) A `uuid`-typed parameter REFUSES this value, in PostgreSQL, before any function body runs —
+  //     which is precisely what PostgREST binds a `p_id uuid` argument as, and precisely why a
+  //     hand-edited `?case=problem:xyz` used to come back as a 400 the console could only render as
+  //     a banner carrying a database error code.
+  await assertRaises(PG.invalidText,
+    () => humanQuery(operator.owner, "select $1::uuid as forced", ["xyz"]),
+    "a uuid-typed parameter binding a non-uuid");
+  // (b) …and the signature this door actually carries answers the same value with the ONE
+  //     not-found face, asserted in the loop above. The door does not resolve at all under the
+  //     retired spelling, which is the other half of the same fact.
+  const retired = await rootQuery(
+    "select to_regprocedure('clara.get_operator_support_case(text,uuid)') is null as gone");
+  assert.equal(retired.rows[0].gone, true, "no uuid-typed overload of this door exists");
 });
 
 cell("os.07 the case door returns every queue field for its arm, plus that arm's own detail",

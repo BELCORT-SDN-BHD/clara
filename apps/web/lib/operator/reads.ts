@@ -11,12 +11,16 @@
 //        case_id desc)`. Over PostgREST a `returns table` RPC answers a JSON ARRAY, so `callDoor`
 //        resolves `SupportQueueRow[]` — the same shape `lib/coding/reads.ts` already relies on for
 //        `list_uncoded_filings`.
-//   clara.get_operator_support_case(p_kind text, p_id uuid)
+//   clara.get_operator_support_case(p_kind text, p_id text)
 //     -> jsonb: every queue field for that arm PLUS the arm's own detail (`note`, `intent_id`,
 //        `stripe_session_id`, `stripe_event_id`, `event_type`, `payment_status`, `livemode`,
 //        `consumed_firm_id`). NO existence oracle: an unknown id, a kind outside the closed three
 //        and a mismatched pair all answer ONE CLR11 `support_case_not_found`, byte-identical, so
-//        this module never tries to tell them apart either.
+//        this module never tries to tell them apart either. `p_id` is TEXT, not uuid (0181:468-474
+//        took the same decision for `get_activity_event`): a detail door is reached from a
+//        hand-edited deep link, and a uuid-typed parameter answers such a value with a raw
+//        PostgREST 400 `22P02` before the body runs — a database error code in a banner instead of
+//        the one not-found face. A NON-UUID id is a case that does not exist, and says so.
 //
 // AUTHORITY IS THE DB'S, NOT THIS FILE'S. Both doors carry
 // `clara.approve_firm_registration`'s own owner+operator-firm predicate, re-derived at call time
@@ -32,6 +36,7 @@
 // refuse.
 
 import { callDoor, isDoorError, isDoorRefusal } from "@/lib/doors";
+import { isUuidShape } from "@/lib/client-id";
 import type { SessionTokenAccessor } from "@/lib/session";
 
 // ── the closed case vocabulary ────────────────────────────────────────────────
@@ -126,8 +131,16 @@ export function formatCaseParam(kind: SupportCaseKind, id: string): string {
   return `${kind}:${id}`;
 }
 
-/** `null` for an absent, empty or unrecognised-kind param — never a thrown error: a stale or
- *  hand-edited URL is a "no case open" state, not a page crash. */
+/** `null` for an absent, empty, unrecognised-kind or non-uuid param — never a thrown error: a stale
+ *  or hand-edited URL is a "no case open" state, not a page crash.
+ *
+ *  THE ID IS SHAPE-CHECKED, and it is defence in depth rather than the wall.
+ *  `clara.get_operator_support_case` takes `p_id text` and answers the SAME
+ *  `support_case_not_found` for a non-uuid (0188 §3), so nothing breaks if a malformed id reaches
+ *  it. What this buys is that a hand-edited `?case=problem:xyz` costs no round trip and cannot be
+ *  the thing that renders a database error code in a banner — exactly the posture
+ *  `parseActivityUrlState` takes for `?client=` via the same `isUuidShape` predicate. The nil uuid
+ *  passes: it is syntactically a uuid that simply names no case, and the door says so. */
 export function parseCaseParam(raw: string | null | undefined): { kind: SupportCaseKind; id: string } | null {
   if (!raw) return null;
   const i = raw.indexOf(":");
@@ -135,6 +148,7 @@ export function parseCaseParam(raw: string | null | undefined): { kind: SupportC
   const kind = raw.slice(0, i);
   const id = raw.slice(i + 1);
   if (!isSupportCaseKind(kind)) return null;
+  if (!isUuidShape(id)) return null;
   return { kind, id };
 }
 

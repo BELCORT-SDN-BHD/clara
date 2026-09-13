@@ -212,6 +212,27 @@ test("the case param round-trips, and every malformed spelling degrades to NO ca
   }
 });
 
+test("#615 — a case param whose ID IS NOT A UUID opens no case, so the malformed value never reaches the door", () => {
+  // DEFENCE IN DEPTH, not the wall. `clara.get_operator_support_case` takes `p_id text` and answers
+  // the SAME `support_case_not_found` for a non-uuid (0188 §3; the DB battery's os.06 drives it), so
+  // nothing breaks if one of these reaches it. What this check buys is that a hand-edited
+  // `?case=problem:xyz` costs no round trip and, crucially, cannot be the thing that renders a
+  // database error code in a banner — the same posture `parseActivityUrlState` takes for `?client=`
+  // via `isClientIdShape`.
+  for (const id of ["xyz", "not-a-uuid", CASE_ID.slice(0, 20), `${CASE_ID}x`,
+    "' or 1=1 --", "00000000-0000-0000-0000-00000000000", "   "]) {
+    assert.equal(parseCaseParam(`problem:${id}`), null, `id ${JSON.stringify(id)} opens no case`);
+  }
+  // The nil uuid is SYNTACTICALLY a uuid and is admitted — it simply names no case, which the door
+  // answers honestly. A shape check that rejected it would be inventing a rule the database has not.
+  assert.deepEqual(parseCaseParam("problem:00000000-0000-0000-0000-000000000000"),
+    { kind: "problem", id: "00000000-0000-0000-0000-000000000000" });
+  // …and every kind still round-trips with a real uuid, so the guard cannot have closed the door.
+  for (const kind of SUPPORT_CASE_KINDS) {
+    assert.deepEqual(parseCaseParam(`${kind}:${CASE_ID}`), { kind, id: CASE_ID });
+  }
+});
+
 test("the URL state parses the three params, drops a stale kind, and folds a patch without touching the rest", () => {
   const params = new URLSearchParams(`kind=problem&settled=1&case=payment:${CASE_ID}&other=keep`);
   assert.deepEqual(parseOperatorUrlState(params), {

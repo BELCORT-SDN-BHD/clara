@@ -32,8 +32,7 @@ import { renderComponent, textOf, clickButton, setFieldValue } from "../../test/
 import { enableDomInspection, activeElement } from "../../test/domInspect";
 import { configureSessionTokenSource, resetSessionTokenSource } from "../../lib/session-accessor";
 import { OperatorSupportConsole } from "./support-queue";
-import { supportOpKey } from "./support-case-sheet";
-import { capacityOpKey } from "./admission-capacity-panel";
+import { capacityOpKey, supportOpKey } from "../../lib/operator/op-key";
 import messages from "../../messages/en.json";
 
 enableDomInspection();
@@ -221,16 +220,27 @@ test("ticket 615 AC4 — the op key is a PURE function of (case, caller, text): 
 
   // …and the capacity panel's own key binds the VALUE, because `set_admission_capacity` re-hashes
   // {max_firms, reason, actor}: the same change replays, a different limit does not.
-  assert.equal(capacityOpKey(CALLER_USER_ID, 10, "beta"), capacityOpKey(CALLER_USER_ID, 10, "beta"));
-  assert.notEqual(capacityOpKey(CALLER_USER_ID, 10, "beta"), capacityOpKey(CALLER_USER_ID, 11, "beta"));
-  assert.notEqual(capacityOpKey(CALLER_USER_ID, null, "beta"), capacityOpKey(CALLER_USER_ID, 0, "beta"),
+  assert.equal(await capacityOpKey(CALLER_USER_ID, 10, "beta"), await capacityOpKey(CALLER_USER_ID, 10, "beta"));
+  assert.notEqual(await capacityOpKey(CALLER_USER_ID, 10, "beta"), await capacityOpKey(CALLER_USER_ID, 11, "beta"));
+  assert.notEqual(await capacityOpKey(CALLER_USER_ID, null, "beta"), await capacityOpKey(CALLER_USER_ID, 0, "beta"),
     "unlimited and zero are different policies and must never share an operation identity");
   // The DISCRIMINATING case for the reason digest: two reasons of the SAME LENGTH are two different
   // operations. A key derived from `reason.length` (this function's first cut) shared one identity
   // between them, so editing only the wording met `op_key_conflict` instead of being accepted.
-  assert.notEqual(capacityOpKey(CALLER_USER_ID, 10, "beta cap"), capacityOpKey(CALLER_USER_ID, 10, "beta CAP"),
+  assert.notEqual(await capacityOpKey(CALLER_USER_ID, 10, "beta cap"), await capacityOpKey(CALLER_USER_ID, 10, "beta CAP"),
     "two same-length reasons are two different operations");
-  assert.notEqual(capacityOpKey(CALLER_USER_ID, 10, "abc"), capacityOpKey(CALLER_USER_ID, 10, "cba"));
+  assert.notEqual(await capacityOpKey(CALLER_USER_ID, 10, "abc"), await capacityOpKey(CALLER_USER_ID, 10, "cba"));
+  // A 32-BIT DIGEST COLLIDES, eventually, and the failure mode is bad: `_reserve_op` answers
+  // `op_key_conflict` and that triple can never be submitted, because a deterministic key offers no
+  // way to pick a different one. The length is carried ALONGSIDE the digest so a collision needs the
+  // two reasons to agree on BOTH — this pair is a real measured 32-bit FNV-1a collision
+  // ("costarring"/"liquid", from the widely-cited FNV collision list), so the cell is a genuine
+  // instrument rather than a hopeful one.
+  for (const [a, b] of [["costarring", "liquid"], ["declinate", "macallums"]] as const) {
+    assert.notEqual(
+      await capacityOpKey(CALLER_USER_ID, 10, a), await capacityOpKey(CALLER_USER_ID, 10, b),
+      `a known 32-bit FNV-1a collision (${a}/${b}) must still mint two distinct identities`);
+  }
 });
 
 // ── APPROVE: one press, one RPC, one re-read ─────────────────────────────────

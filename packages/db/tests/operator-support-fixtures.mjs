@@ -21,7 +21,7 @@
 //                  request_status, firm_id, intent_status, intent_status_at, intent_status_reason,
 //                  payment_recorded_at, payment_consumed_at, problem_kind, problem_noticed_at,
 //                  problem_detail, decided_by, decided_at, decided_reason, settled)
-//   clara.get_operator_support_case(p_kind text, p_id uuid)
+//   clara.get_operator_support_case(p_kind text, p_id text)
 //        -> jsonb — every queue field plus the arm's own detail; ONE CLR11
 //           `support_case_not_found` for an unknown id, an unknown kind and a mismatched pair.
 

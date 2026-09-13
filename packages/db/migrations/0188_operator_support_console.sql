@@ -29,7 +29,7 @@
 --
 --   clara._operator_support_cases(boolean, text, uuid)   the ONE query, granted to NOBODY.
 --   clara.list_operator_support_queue(boolean)           the queue.
---   clara.get_operator_support_case(text, uuid)          one case, no existence oracle.
+--   clara.get_operator_support_case(text, text)          one case, no existence oracle.
 --
 --   …plus a COMMENT recut on clara.get_admission_capacity, whose 0186 text asserts "no web lane
 --   calls this door at all". #615 gives that door its first web lane (the operator console's own
@@ -61,10 +61,14 @@
 --
 -- WHAT IS DELIBERATELY NOT HERE (scope, stated rather than silently omitted):
 --   * NO new recovery writer. The console offers exactly the acts the estate already governs —
---     approve/reject a registration, resolve a provider problem, set admission capacity. A state
---     with no supported act (an unconsumed payment whose applicant simply has not claimed yet, a
---     `metadata_missing` problem) is NAMED as having none rather than given a button that would
---     invent an ungoverned effect.
+--     approve/reject a registration, resolve a provider problem, set admission capacity. The ONE
+--     open state with no supported act is an UNCONSUMED PAYMENT: `clara.claim_paid_firm` is the
+--     applicant's own door and the estate has no operator-side writer that consumes a payment, so
+--     that case is NAMED as having none rather than given a button that would invent an ungoverned
+--     effect. Every OPEN problem, `metadata_missing` included, IS resolvable —
+--     `clara.resolve_stripe_event_problem` (0160 §5) accepts any unresolved problem, and resolving
+--     one records what a human did about the event rather than moving money — so the console offers
+--     it, and `apps/web/lib/operator/reads.ts`'s `supportedActionFor` says exactly that.
 --   * NO estate wake-source control (`clara.set_wake_source_enabled`, 0133). It is operator scope
 --     by PRD §7, and it is not admission support; it stays where it is.
 --   * NO legal-publication surface (`clara.publish_legal_document`, 0185 §E) — #635's.
@@ -138,6 +142,26 @@ begin
       using errcode = 'CLR10';
   end if;
 
+  -- THE TWO UNIQUE INDEXES THIS FILE'S "one row per case" DEPENDS ON, checked rather than assumed.
+  -- Arm 2 joins an intent by session id and arm 3 left-joins a payment by registration id; without
+  -- `uq_checkout_intents_session_id` (0158:229) and `uq_frp_registration` (0163:240) either join can
+  -- fan out and one support case reaches an operator as two identical rows with one decision between
+  -- them. `packages/db/tests/operator-support.test.mjs` os.12 asserts the absence of duplicates
+  -- behaviourally; this is the structural reason it holds.
+  select string_agg(t.n, ', ' order by t.n) into v_missing
+    from (values ('uq_checkout_intents_session_id'), ('uq_frp_registration')) t(n)
+   where not exists (
+     select 1
+       from pg_class c
+       join pg_index x on x.indexrelid = c.oid
+      where c.relname = t.n and c.relkind = 'i'
+        and c.relnamespace = 'clara'::regnamespace
+        and x.indisunique);
+  if v_missing is not null then
+    raise exception '#615 0188 prestate: required unique index/indexes absent: % -- an arm could fan out',
+      v_missing using errcode = 'CLR10';
+  end if;
+
   if exists (
     select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
      where n.nspname = 'clara'
@@ -148,8 +172,16 @@ begin
       using errcode = 'CLR10';
   end if;
 
+  -- RECORD clara.firms's table ACL so the tail can prove this file did not move it. A session GUC
+  -- rather than a temp table: both blocks run inside the ONE transaction the migration runner opens,
+  -- so a session-level `set_config` is visible to the tail and gone afterwards.
+  perform set_config('clara.x615_firms_acl',
+    coalesce((select array_to_string(c.relacl, ' | ') from pg_class c
+               where c.oid = 'clara.firms'::regclass), '(null)'), false);
+
   raise notice '#615 0188 prestate: clean -- the five admission relations and the reference '
-    'authority body are present, the problem vocabulary is 0186''s, and no support-console name resolves yet';
+    'authority body are present, the problem vocabulary is 0186''s, both fan-out-preventing unique '
+    'indexes exist, clara.firms''s ACL is recorded for the tail, and no support-console name resolves yet';
 end $prestate$;
 
 set role clara_fn_owner;
@@ -235,11 +267,17 @@ begin
                'stripe_event_id', null::text,
                'event_type', null::text)     as extra
         from clara.firm_registration_requests r
+        -- WHICH INTENT, when a registration has opened several over its life (0186 §C admits one
+        -- LIVE session at a time, not one intent ever)? The one that carries the MONEY first, then
+        -- the newest. A bare `opened_at desc` reported a superseded attempt's `cancelled` or
+        -- `expired` beside a registration whose earlier intent had actually been paid — and this arm
+        -- is what an operator reads before deciding, so a stale status here is a decision made on
+        -- the wrong fact. `paid` and `consumed` both count as carrying the money.
         left join lateral (
           select i.id, i.status, i.status_at, i.status_reason, i.session_id
             from clara.checkout_intents i
            where i.registration_id = r.id
-           order by i.opened_at desc, i.id desc
+           order by (i.status in ('paid', 'consumed')) desc, i.opened_at desc, i.id desc
            limit 1
         ) ci on true
        where (v_all or r.status = 'open')
@@ -353,7 +391,13 @@ begin
          c.request_status, c.firm_id, c.intent_status, c.intent_status_at, c.intent_status_reason,
          c.payment_recorded_at, c.payment_consumed_at, c.problem_kind, c.problem_noticed_at,
          c.problem_detail, c.decided_by, c.decided_at, c.decided_reason, c.settled
-    from clara._operator_support_cases(coalesce(p_include_settled, false), null, null) c;
+    from clara._operator_support_cases(coalesce(p_include_settled, false), null, null) c
+   -- RESTATED, not inherited. The shared body orders its own union, but a set-returning function in
+   -- a FROM clause carries no ordering guarantee to its caller: the planner may reorder rows freely
+   -- once the call is just another relation in this query. This door's contract IS the order (the
+   -- console renders it top to bottom and an operator reads "what needs me first" off it), so the
+   -- order is stated HERE, where it is SQL-guaranteed, rather than relied on as an accident.
+   order by c.occurred_at desc, c.case_id desc;
 end $$;
 
 revoke all on function clara.list_operator_support_queue(boolean) from public;
@@ -380,9 +424,17 @@ comment on function clara.list_operator_support_queue(boolean) is
 -- its receipt is exactly what an operator does after acting, and a detail door that refused a case
 -- the moment it was handled would make the receipt unreachable.
 -- =====================================================================================
+-- `p_id` IS text, NOT uuid, and that is the whole point of this signature — 0181's
+-- `clara.get_activity_event(text, text)` took the same decision for the same reason (0181:468-474).
+-- A detail door is reached from a hand-edited or stale deep link, so its id argument is UNTRUSTED
+-- TEXT: declared `uuid`, PostgREST answers `?case=problem:xyz` with a raw HTTP 400 `22P02`
+-- ("invalid input syntax for type uuid") BEFORE this body ever runs, and the app renders a banner
+-- carrying a database error code instead of the one not-found face this door exists to present.
+-- Taking text and answering the SAME CLR11 makes a malformed id exactly what it is: a case that
+-- does not exist.
 create function clara.get_operator_support_case(
   p_kind text,
-  p_id   uuid
+  p_id   text
 ) returns jsonb
   language plpgsql stable security definer
   set search_path = clara, pg_temp
@@ -390,26 +442,39 @@ create function clara.get_operator_support_case(
   as $$
 declare
   v_case jsonb;
+  v_id   uuid;
 begin
   perform clara._human_ctx(clara.role_rank('owner'));
   if not exists (select 1 from clara.firms f where f.id = clara.jwt_firm() and f.is_operator) then
     raise exception 'insufficient role' using errcode = 'CLR04', detail = '{"reason":"not_operator_firm"}';
   end if;
 
+  -- IS THIS TEXT A UUID AT ALL? Asked by ATTEMPTING THE CAST rather than by a second, driftable
+  -- regex: PostgreSQL's own uuid parser is the authority on its own grammar (it accepts the braced
+  -- and undashed spellings a hand-written pattern would reject), and anything it refuses is a case
+  -- id that cannot name a row. `v_id` stays NULL for those, and the guard below turns that into the
+  -- ONE not-found answer.
+  begin
+    v_id := p_id::uuid;
+  exception when invalid_text_representation then
+    v_id := null;
+  end;
+
   -- A NULL kind or a NULL id NEVER reaches the shared body, and that is a wall rather than a
   -- tidiness: in `clara._operator_support_cases` a NULL argument means "do not filter on this
   -- axis" (which is what the queue needs), so a caller passing `p_kind => null` with a real id
   -- would be handed whichever arm happens to own that id — an existence oracle over the whole
   -- admission estate, reachable from a hand-edited deep link. Caught by
-  -- packages/db/tests/operator-support.test.mjs os.06 before this file was merged.
+  -- packages/db/tests/operator-support.test.mjs os.06 before this file was merged. A NON-UUID id
+  -- takes the same path, for the same reason: `v_id` is NULL, so the body is never called.
   --
   -- `to_jsonb(c)` over the FROM-clause alias rather than over a plpgsql RECORD variable: the row
   -- type is known at parse time here, so the projection is checked when this body is created
   -- instead of on the first call that happens to find a row.
-  if p_kind is not null and p_id is not null then
+  if p_kind is not null and v_id is not null then
     select (to_jsonb(c) - 'extra') || coalesce(c.extra, '{}'::jsonb)
       into v_case
-      from clara._operator_support_cases(true, p_kind, p_id) c
+      from clara._operator_support_cases(true, p_kind, v_id) c
      limit 1;
   end if;
 
@@ -423,10 +488,10 @@ begin
   return v_case;
 end $$;
 
-revoke all on function clara.get_operator_support_case(text, uuid) from public;
-grant execute on function clara.get_operator_support_case(text, uuid) to clara_authenticated;
+revoke all on function clara.get_operator_support_case(text, text) from public;
+grant execute on function clara.get_operator_support_case(text, text) to clara_authenticated;
 
-comment on function clara.get_operator_support_case(text, uuid) is
+comment on function clara.get_operator_support_case(text, text) is
   '#615: ONE operator support case, addressed by (kind, id) -- every field '
   'clara.list_operator_support_queue returns for that arm, plus the arm''s own detail (the '
   'registration note, the checkout intent id, the Stripe session/event ids, the event type and '
@@ -478,7 +543,7 @@ begin
   --     same-named overload would satisfy while the callers below bound to something else.
   foreach v_sig in array array['clara._operator_support_cases(boolean,text,uuid)',
                                'clara.list_operator_support_queue(boolean)',
-                               'clara.get_operator_support_case(text,uuid)'] loop
+                               'clara.get_operator_support_case(text,text)'] loop
     if to_regprocedure(v_sig) is null then
       raise exception '#615 0188 tail: % is absent', v_sig using errcode = 'CLR10';
     end if;
@@ -527,7 +592,7 @@ begin
 
   -- (5) The two DOORS are clara_authenticated-only; the shared body is granted to NOBODY.
   foreach v_sig in array array['clara.list_operator_support_queue(boolean)',
-                               'clara.get_operator_support_case(text,uuid)'] loop
+                               'clara.get_operator_support_case(text,text)'] loop
     if not has_function_privilege('clara_authenticated', v_sig::regprocedure, 'execute') then
       raise exception '#615 0188 tail: clara_authenticated cannot execute %', v_sig using errcode = 'CLR10';
     end if;
@@ -544,9 +609,32 @@ begin
    where r.rolname like 'clara\_%'
      and r.rolname not in ('clara_fn_owner', 'clara_authenticated')
      and (has_function_privilege(r.rolname, 'clara.list_operator_support_queue(boolean)', 'execute')
-          or has_function_privilege(r.rolname, 'clara.get_operator_support_case(text,uuid)', 'execute'));
+          or has_function_privilege(r.rolname, 'clara.get_operator_support_case(text,text)', 'execute'));
   if v_bad is not null then
     raise exception '#615 0188 tail: a non-human role reaches a support door: %', v_bad
+      using errcode = 'CLR10';
+  end if;
+
+  -- (5b) THE EXACT ACL, not a roster sweep. Every check above walks roles matching `clara\_%`,
+  --      which cannot see a grant to a role named anything else — a `supabase_admin`, an
+  --      `anon`/`authenticated` from the hosted platform's own roster, or a future `belcort_*`. The
+  --      ACL array IS the complete answer to "who holds EXECUTE", so it is asserted literally: two
+  --      entries on each door, one on the shared body, and nothing else. A NULL proacl (the create
+  --      default, where PUBLIC holds EXECUTE implicitly) fails this too, which is the point.
+  select string_agg(format('%s -> %s', t.sig, coalesce(array_to_string(p.proacl, ' | '), '(null)')),
+                    '; ' order by t.sig)
+    into v_bad
+    from (values ('clara._operator_support_cases(boolean,text,uuid)',
+                  'clara_fn_owner=X/clara_fn_owner'),
+                 ('clara.list_operator_support_queue(boolean)',
+                  'clara_fn_owner=X/clara_fn_owner | clara_authenticated=X/clara_fn_owner'),
+                 ('clara.get_operator_support_case(text,text)',
+                  'clara_fn_owner=X/clara_fn_owner | clara_authenticated=X/clara_fn_owner')
+         ) t(sig, expected)
+    join pg_proc p on p.oid = t.sig::regprocedure
+   where coalesce(array_to_string(p.proacl, ' | '), '(null)') is distinct from t.expected;
+  if v_bad is not null then
+    raise exception '#615 0188 tail: an EXECUTE ACL is not exactly what this file granted: %', v_bad
       using errcode = 'CLR10';
   end if;
 
@@ -564,7 +652,7 @@ begin
       using errcode = 'CLR10';
   end if;
   foreach v_sig in array array['clara.list_operator_support_queue(boolean)',
-                               'clara.get_operator_support_case(text,uuid)'] loop
+                               'clara.get_operator_support_case(text,text)'] loop
     select regexp_replace(
              regexp_replace(
                regexp_replace(lower(p.prosrc), '/\*.*?\*/', '', 'gs'), '--[^\n]*', '', 'g'),
@@ -584,8 +672,10 @@ begin
 
   -- (7) NO TABLE ACL MOVED. Every relation this file reads carries the grant posture it had
   --     before: the five admission relations have NO table ACL at all (fn-fronted, forced RLS),
-  --     and clara.firms keeps whatever it had -- this file issues no grant or revoke on any
-  --     relation, and asserts that rather than claiming it.
+  --     and clara.firms carries EXACTLY the ACL the prestate block recorded a few statements ago
+  --     -- a real before/after comparison across this one transaction, not a claim. The firms check
+  --     is separate because that relation legitimately HAS an ACL (the shell's own scope reads it),
+  --     so "is it null" is the wrong question for it and "is it unchanged" is the right one.
   select string_agg(c.relname, ', ' order by c.relname) into v_bad
     from pg_class c
    where c.oid in ('clara.firm_registration_requests'::regclass,
@@ -609,6 +699,12 @@ begin
   if v_n <> 5 then
     raise exception '#615 0188 tail: % of 5 admission relations still force row level security', v_n
       using errcode = 'CLR10';
+  end if;
+  select coalesce(array_to_string(c.relacl, ' | '), '(null)') into v_bad
+    from pg_class c where c.oid = 'clara.firms'::regclass;
+  if v_bad is distinct from current_setting('clara.x615_firms_acl', true) then
+    raise exception '#615 0188 tail: clara.firms''s table ACL moved during this file (% -> %)',
+      current_setting('clara.x615_firms_acl', true), v_bad using errcode = 'CLR10';
   end if;
 
   -- (8) The recut comment no longer claims the capacity door has no web lane, and the DOOR ITSELF

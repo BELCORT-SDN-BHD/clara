@@ -59,6 +59,7 @@ import {
   rejectFirmRegistration,
   resolveStripeEventProblem,
 } from "@/lib/operator/doors";
+import { supportOpKey } from "@/lib/operator/op-key";
 import {
   classifySupportFailure,
   getOperatorSupportCase,
@@ -74,30 +75,6 @@ const REASON_MAX_LENGTH = 500;
 
 function codePointLength(s: string): number {
   return [...s].length;
-}
-
-/** SHA-256 via Web Crypto (native in every target browser and in `node --test`). The digest needs
- *  no cryptographic property here — this is a client-side DEDUPE key, not a boundary;
- *  `clara._reserve_op`'s stored `request_hash` is the real wall — but reusing the platform's own
- *  primitive is simpler than justifying a bespoke one. */
-async function sha256Hex(input: string): Promise<string> {
-  const bytes = new TextEncoder().encode(input);
-  const digest = await crypto.subtle.digest("SHA-256", bytes);
-  return Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, "0")).join("");
-}
-
-/** Deterministic, stateless, and exported for a direct unit test: the SAME (case, caller, text)
- *  always reproduces the SAME key — an A/A retry replays without any cache to remember it — while
- *  a genuinely edited text always reproduces a different one. */
-export async function supportOpKey(
-  verb: "approve" | "reject" | "resolve",
-  caseId: string,
-  callerId: string,
-  text?: string,
-): Promise<string> {
-  if (text === undefined) return `op-${verb}-${caseId}-${callerId}`;
-  const digest = await sha256Hex(text);
-  return `op-${verb}-${caseId}-${callerId}-${digest.slice(0, 16)}`;
 }
 
 export function SupportCaseSheet({

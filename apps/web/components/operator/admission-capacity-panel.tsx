@@ -30,32 +30,8 @@ import { LoadingState, StateBanner } from "@/components/common/state";
 import { createSingleFireGuard, runOnce } from "@/lib/parts/single-fire-guard";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
 import { getAdmissionCapacity, setAdmissionCapacity, type AdmissionCapacity } from "@/lib/operator/doors";
+import { capacityOpKey } from "@/lib/operator/op-key";
 import { classifySupportFailure } from "@/lib/operator/reads";
-
-/** A deterministic, synchronous digest of the reason text. NOT a cryptographic hash and it does not
- *  need to be: `clara._reserve_op`'s own stored `request_hash` is the wall (0004:46-60), and this
- *  is only the client-side key that decides whether a retry REPLAYS or mints a new operation. FNV-1a
- *  over code units, rendered base 36 — chosen over `reason.length` (the first cut) because two
- *  different reasons of the SAME length would then share a key and the second one would meet
- *  `op_key_conflict` instead of being the new operation it is. Synchronous, unlike the Sheet's
- *  Web-Crypto digest, so this key stays a pure function a test can call directly. */
-function reasonDigest(reason: string): string {
-  let hash = 0x811c9dc5;
-  for (let i = 0; i < reason.length; i += 1) {
-    hash ^= reason.charCodeAt(i);
-    hash = Math.imul(hash, 0x01000193) >>> 0;
-  }
-  return hash.toString(36);
-}
-
-/** The op key binds the VALUE and the reason, so a lost response replays the original receipt and
- *  a genuinely different change mints its own key — `clara._reserve_op` re-hashes
- *  `{max_firms, reason, actor}` (0186 §C), so a key that ignored either would meet
- *  `op_key_conflict` instead of replaying. `null` (unlimited) and `0` (admission closed) are
- *  SPELLED DIFFERENTLY on purpose: they are different policies and must never share an identity. */
-export function capacityOpKey(callerId: string, maxFirms: number | null, reason: string): string {
-  return `op-capacity-${callerId}-${maxFirms === null ? "unlimited" : maxFirms}-${reasonDigest(reason)}`;
-}
 
 export function AdmissionCapacityPanel({ callerId }: { callerId: string }) {
   const t = useTranslations("Operator");
@@ -97,7 +73,7 @@ export function AdmissionCapacityPanel({ callerId }: { callerId: string }) {
       try {
         const out = await setAdmissionCapacity(
           sessionTokenAccessor, parsed, trimmedReason,
-          capacityOpKey(callerId, parsed, trimmedReason));
+          await capacityOpKey(callerId, parsed, trimmedReason));
         setReceipt(t("capacityReceipt", {
           limit: out.max_firms === null ? t("capacityUnlimited") : String(out.max_firms),
           count: out.firms_count,
