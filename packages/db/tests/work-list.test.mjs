@@ -1,0 +1,842 @@
+// #641 — the B-style Work LIST battery for packages/db/migrations/0189_work_list_reads.sql.
+//
+// FRONTIER-GATED on the `work_list_reads$` stable stem (the work-journal-fixtures.mjs
+// workLaneReady()/gateWork() pattern, restated here for this migration's own stem so the
+// slice-frontier CI legs SKIP cleanly rather than red on a database pinned before 0189 lands).
+// A skip is not evidence; the green run that matters is the one on a chain that carries 0189.
+//
+// WHAT THIS FILE IS ABOUT. `clara.list_accounting_work` is the ONE server-backed read behind both
+// Work lists (`/work` firm-wide and `/clients/:id/work`): filterable, keyset-paged, newest first,
+// with the two CANONICAL signals the status LABELS are derived from carried on every row — the
+// number of runs the Work has had (`attempts`, which is what makes "Retrying" a fact rather than
+// a guess) and the pending question it is parked on. `clara.get_accounting_work_row` is the
+// addressed-row door: the #719 lesson, that a `?work=<id>` deep link must resolve a row which may
+// be nowhere near the current page window. And `clara.save_my_preferences` gains ONE new
+// enumerated interface key, `workViews`, so a saved filter set is durable per person.
+//
+// WHAT IT DELIBERATELY DOES NOT PROVE. Nothing here says anything about the BROWSER: the Empty
+// taxonomy, the filter bar, Pagination and the Tabs are proven by the web unit cells and
+// `apps/web/e2e/work-list-walk.spec.ts`. This file proves the door.
+
+import { test, before, after } from "node:test";
+import assert from "node:assert/strict";
+import {
+  ROLES, roleQuery, rootQuery, humanQuery, buildWorkWorld, freshWorkClient, endPool, opk,
+  assertRaises, admitJournalWork, retryAccountingWork, claimWorkRun, settleWorkRun, basis,
+  detailOf, printSkipCount, MODEL,
+} from "./work-journal-fixtures.mjs";
+// #630's lane exports the two world manipulations a TAKE-OVER needs (a throwaway member to
+// revoke, and the door that hands the Work on). Imported from there rather than restated here:
+// they are the same world (`work-cancel-fixtures.mjs` re-exports `work-journal-fixtures.mjs`
+// wholesale for exactly this reason), and a second spelling of a take-over would be a second
+// place for a divergence to hide. 0189 sits ABOVE 0184 on the chain, so this file's own gate
+// already implies that lane is present.
+import {
+  insertUser, addMember, deactivateMember, takeOverAccountingWork,
+} from "./work-cancel-fixtures.mjs";
+import { parkedWork } from "./work-question-fixtures.mjs";
+
+const CLR04 = "CLR04";
+const CLR06 = "CLR06";
+const CLR10 = "CLR10";
+const CLR11 = "CLR11";
+const STEM = "work_list_reads$";
+
+let _ready = null;
+async function workListReady() {
+  if (_ready === null) {
+    try {
+      const r = await rootQuery(
+        "select count(*)::int as n from clara.schema_migrations where version ~ $1", [STEM]);
+      _ready = r.rows[0].n > 0;
+    } catch {
+      _ready = false;
+    }
+  }
+  return _ready;
+}
+
+async function gate(t) {
+  if (await workListReady()) return false;
+  t.skip(`#641 work-list lane absent (no ${STEM} migration applied)`);
+  return true;
+}
+
+let world = null;
+before(async () => {
+  world = await buildWorkWorld();
+});
+after(async () => {
+  printSkipCount("work-list");
+  await endPool();
+});
+
+const ALICE = () => world.users.alice; // owner, firm A
+const BOB = () => world.users.bob;     // bookkeeper, firm A
+const CAROL = () => world.users.carol; // viewer, firm A
+const DAVE = () => world.users.dave;   // owner, firm B
+const CLIENT_B1 = () => world.clients.B1;
+
+// ===========================================================================================
+// Wrappers over the two new doors. NAMED arguments only — a divergence in a parameter name is a
+// real finding rather than a silent positional mismatch.
+// ===========================================================================================
+
+const LIST_CALL =
+  "select clara.list_accounting_work("
+  + "p_client => $1::uuid, p_status => $2::text[], p_initiator => $3::uuid, p_purpose => $4::text[],"
+  + "p_since => $5::timestamptz, p_until => $6::timestamptz, p_q => $7::text,"
+  + "p_cursor => $8::text, p_limit => $9::int) as result";
+
+async function listWork(sub, {
+  client = null, status = null, initiator = null, purpose = null,
+  since = null, until = null, q = null, cursor = null, limit = 25,
+} = {}) {
+  const r = await humanQuery(sub, LIST_CALL,
+    [client, status, initiator, purpose, since, until, q, cursor, limit]);
+  return r.rows[0].result;
+}
+
+async function getWorkRow(sub, workId) {
+  const r = await humanQuery(sub,
+    "select clara.get_accounting_work_row(p_work => $1::uuid) as result", [workId]);
+  return r.rows[0].result;
+}
+
+async function getPrefs(sub) {
+  const r = await humanQuery(sub, "select clara.get_my_preferences() as result");
+  return r.rows[0].result;
+}
+
+async function savePrefs(sub, { version, patch, opKey = null }) {
+  const r = await humanQuery(sub,
+    "select clara.save_my_preferences(p_expected_version => $1::int, p_patch => $2::jsonb,"
+    + " p_op_key => $3::text) as result",
+    [version, JSON.stringify(patch), opKey ?? opk("w641-prefs")]);
+  return r.rows[0].result;
+}
+
+const ids = (page) => page.rows.map((r) => r.id);
+
+/** Admit one Work and settle it to a named terminal, so a cell can build a roster of statuses
+ *  through the REAL verbs rather than by planting rows (a planted status would prove nothing
+ *  about what the estate can actually produce). */
+async function settledWork({ client, author = null, outcome, memo = "rent", errorCode = null, error = null }) {
+  const admitted = await admitJournalWork({
+    client, author: author ?? ALICE(), basis: basis({ memo }),
+  });
+  await claimWorkRun({ task: admitted.task_id, runId: opk("w641-run") });
+  await settleWorkRun({ task: admitted.task_id, outcome, errorCode, error });
+  return admitted;
+}
+
+// ===========================================================================================
+// wl.1 — THE FLOOR. A viewer is below bookkeeper and is refused CLR04 before any row is read.
+// ===========================================================================================
+test("wl.1 list_accounting_work floors at bookkeeper: a viewer is refused CLR04", async (t) => {
+  if (await gate(t)) return;
+  await assertRaises(CLR04, () => listWork(CAROL()), "viewer lists work");
+  await assertRaises(CLR04, () => getWorkRow(CAROL(), world.clients.A1), "viewer reads a work row");
+});
+
+// ===========================================================================================
+// wl.2 — A SHORT PAGE IS HONEST ABOUT BEING SHORT. `truncated=false`, `next_cursor=null`: the
+// caller must never be handed a cursor that names a page which does not exist, and must never
+// infer a total from one page (AC1's own line).
+// ===========================================================================================
+test("wl.2 a short page reports truncated=false and next_cursor=null", async (t) => {
+  if (await gate(t)) return;
+  const client = await freshWorkClient(ALICE(), "wl2");
+  await admitJournalWork({ client, author: ALICE(), basis: basis({ memo: "one" }) });
+
+  const page = await listWork(BOB(), { client, limit: 25 });
+  assert.equal(page.truncated, false, "a one-row answer under the limit is not truncated");
+  assert.equal(page.next_cursor, null, "a short page mints no cursor");
+  assert.equal(page.rows.length, 1);
+});
+
+// ===========================================================================================
+// wl.3 — THE KEYSET ROUND TRIP. Three Works, two statuses, limit 2: page 1 carries two rows and
+// a cursor; that cursor's page carries the third and closes the feed. No row appears twice and
+// none is skipped — the property a `limit/offset` pager loses the moment a row is inserted.
+// ===========================================================================================
+test("wl.3 a minted cursor round-trips to the next page in a stable, gapless order", async (t) => {
+  if (await gate(t)) return;
+  const client = await freshWorkClient(ALICE(), "wl3");
+  const a = await admitJournalWork({ client, author: ALICE(), basis: basis({ memo: "first" }) });
+  const b = await settledWork({ client, outcome: "completed", memo: "second" });
+  const c = await admitJournalWork({ client, author: ALICE(), basis: basis({ memo: "third" }) });
+
+  const page1 = await listWork(BOB(), { client, limit: 2 });
+  assert.equal(page1.rows.length, 2, "page 1 is exactly the limit");
+  assert.equal(page1.truncated, true, "a full page with more behind it says so");
+  assert.ok(typeof page1.next_cursor === "string" && page1.next_cursor.length > 0, "page 1 mints a cursor");
+
+  const page2 = await listWork(BOB(), { client, limit: 2, cursor: page1.next_cursor });
+  assert.equal(page2.rows.length, 1, "page 2 carries the remaining row");
+  assert.equal(page2.truncated, false);
+  assert.equal(page2.next_cursor, null);
+
+  const seen = [...ids(page1), ...ids(page2)];
+  assert.equal(new Set(seen).size, 3, "no row is paged twice");
+  assert.deepEqual(new Set(seen), new Set([c.work_id, b.work_id, a.work_id]), "no row is skipped");
+  // Newest first, by the door's own order.
+  assert.deepEqual(seen, [c.work_id, b.work_id, a.work_id], "the order is (created_at desc, id desc)");
+});
+
+// ===========================================================================================
+// wl.4 — CROSS-FIRM. A bookkeeper of ANOTHER firm reads zero rows for this firm's client, and
+// the addressed-row door gives the same no-oracle answer an unknown id gets.
+// ===========================================================================================
+test("wl.4 another firm's owner reads zero rows and gets no oracle on the row door", async (t) => {
+  if (await gate(t)) return;
+  const client = await freshWorkClient(ALICE(), "wl4");
+  const mine = await admitJournalWork({ client, author: ALICE(), basis: basis({ memo: "mine" }) });
+
+  const theirs = await listWork(DAVE(), { client });
+  assert.deepEqual(theirs.rows, [], "firm B sees none of firm A's Work");
+
+  const unfiltered = await listWork(DAVE(), {});
+  assert.ok(!ids(unfiltered).includes(mine.work_id), "nor through an unfiltered read");
+
+  await assertRaises(CLR11, () => getWorkRow(DAVE(), mine.work_id), "firm B addresses firm A's Work");
+  await assertRaises(CLR11, () => getWorkRow(BOB(), "00000000-0000-4000-8000-000000000000"),
+    "an id that never existed");
+});
+
+// ===========================================================================================
+// wl.5 — THE STATUS FILTER, and its closed roster. An unknown token is refused rather than
+// silently matching nothing: a status this build does not know is a caller defect, and a door
+// that answered `[]` for it would look exactly like "no such Work".
+// ===========================================================================================
+test("wl.5 the status filter returns only matching rows; an unknown status is refused CLR10", async (t) => {
+  if (await gate(t)) return;
+  const client = await freshWorkClient(ALICE(), "wl5");
+  const queued = await admitJournalWork({ client, author: ALICE(), basis: basis({ memo: "queued one" }) });
+  const done = await settledWork({ client, outcome: "completed", memo: "done one" });
+
+  const onlyCompleted = await listWork(BOB(), { client, status: ["completed"] });
+  assert.deepEqual(ids(onlyCompleted), [done.work_id]);
+
+  const both = await listWork(BOB(), { client, status: ["completed", "queued"] });
+  assert.equal(new Set(ids(both)).size, 2);
+  assert.ok(ids(both).includes(queued.work_id));
+
+  const none = await listWork(BOB(), { client, status: ["cancelled"] });
+  assert.deepEqual(none.rows, [], "a filter that matches nothing is an honest empty page");
+  assert.equal(none.truncated, false);
+
+  const err = await assertRaises(CLR10, () => listWork(BOB(), { client, status: ["not_a_status"] }),
+    "an unknown status token");
+  assert.equal(detailOf(err)?.reason, "invalid_status");
+});
+
+// ===========================================================================================
+// wl.6 — A MALFORMED CURSOR IS A TYPED REFUSAL, never a silent page 1. A caller following a
+// hand-edited `?cursor=` must be told, not quietly shown the top of the list as if it were the
+// page they asked for.
+// ===========================================================================================
+test("wl.6 a malformed cursor is refused CLR10 invalid_cursor", async (t) => {
+  if (await gate(t)) return;
+  const err = await assertRaises(CLR10, () => listWork(BOB(), { cursor: "not-a-cursor" }),
+    "a malformed cursor");
+  assert.equal(detailOf(err)?.reason, "invalid_cursor");
+});
+
+// ===========================================================================================
+// wl.7 — THE LIMIT IS CLAMPED, both ends. A caller asking for 10,000 rows gets the ceiling, not
+// the whole table; a caller asking for 0 or a negative gets one row rather than an empty page
+// that would read as "there is nothing here".
+// ===========================================================================================
+test("wl.7 p_limit clamps to 1..100", async (t) => {
+  if (await gate(t)) return;
+  const client = await freshWorkClient(ALICE(), "wl7");
+  for (const memo of ["a", "b", "c"]) {
+    await admitJournalWork({ client, author: ALICE(), basis: basis({ memo }) });
+  }
+  const zero = await listWork(BOB(), { client, limit: 0 });
+  assert.equal(zero.rows.length, 1, "limit 0 clamps up to 1");
+  assert.equal(zero.truncated, true, "and still says there is more");
+
+  const huge = await listWork(BOB(), { client, limit: 10_000 });
+  assert.equal(huge.rows.length, 3, "limit 10000 clamps to the ceiling, which this client is under");
+});
+
+// ===========================================================================================
+// wl.8 — THE PURPOSE AND INITIATOR FILTERS. Purpose carries one value on this estate today
+// (`journal_entry`, 0178's own CHECK) and other lanes are widening it; the door therefore filters
+// on it WITHOUT a second roster of its own, so an unknown purpose matches nothing rather than
+// raising against a list that has already drifted.
+// ===========================================================================================
+test("wl.8 the purpose and initiator filters narrow the page", async (t) => {
+  if (await gate(t)) return;
+  const client = await freshWorkClient(ALICE(), "wl8");
+  const byAlice = await admitJournalWork({ client, author: ALICE(), basis: basis({ memo: "alice" }) });
+  const byBob = await admitJournalWork({ client, author: BOB(), basis: basis({ memo: "bob" }) });
+
+  const journal = await listWork(BOB(), { client, purpose: ["journal_entry"] });
+  assert.equal(new Set(ids(journal)).size, 2, "both are journal_entry Work");
+
+  const nothing = await listWork(BOB(), { client, purpose: ["a_purpose_that_does_not_exist"] });
+  assert.deepEqual(nothing.rows, [], "an unknown purpose matches nothing and raises nothing");
+
+  const alicesOnly = await listWork(BOB(), { client, initiator: ALICE() });
+  assert.deepEqual(ids(alicesOnly), [byAlice.work_id]);
+  const bobsOnly = await listWork(BOB(), { client, initiator: BOB() });
+  assert.deepEqual(ids(bobsOnly), [byBob.work_id]);
+});
+
+// ===========================================================================================
+// wl.9 — FREE TEXT over the basis memo. Matched by CONTAINMENT rather than by a LIKE pattern
+// built from caller input, so a `%` or `_` a person types is a literal character they are
+// searching for and never a wildcard the door silently granted them.
+// ===========================================================================================
+test("wl.9 free text matches the basis memo by containment, case-insensitively", async (t) => {
+  if (await gate(t)) return;
+  const client = await freshWorkClient(ALICE(), "wl9");
+  const rent = await admitJournalWork({ client, author: ALICE(), basis: basis({ memo: "Quarterly RENT to Maybank" }) });
+  await admitJournalWork({ client, author: ALICE(), basis: basis({ memo: "Stationery purchase" }) });
+
+  const hit = await listWork(BOB(), { client, q: "rent" });
+  assert.deepEqual(ids(hit), [rent.work_id], "case-insensitive containment");
+
+  const literal = await listWork(BOB(), { client, q: "%" });
+  assert.deepEqual(literal.rows, [], "a percent sign is a literal, not a wildcard that matches everything");
+});
+
+// ===========================================================================================
+// wl.10 — THE DATE FENCE. `p_since` is inclusive and `p_until` is exclusive, so two adjacent
+// windows tile the timeline without double-counting the instant on their shared boundary.
+// ===========================================================================================
+test("wl.10 since is inclusive and until is exclusive", async (t) => {
+  if (await gate(t)) return;
+  const client = await freshWorkClient(ALICE(), "wl10");
+  const w = await admitJournalWork({ client, author: ALICE(), basis: basis({ memo: "fenced" }) });
+  const at = (await rootQuery("select created_at from clara.accounting_work where id=$1", [w.work_id]))
+    .rows[0].created_at;
+
+  const inclusive = await listWork(BOB(), { client, since: at });
+  assert.ok(ids(inclusive).includes(w.work_id), "p_since includes a row AT the boundary instant");
+
+  const exclusive = await listWork(BOB(), { client, until: at });
+  assert.ok(!ids(exclusive).includes(w.work_id), "p_until excludes a row AT the boundary instant");
+});
+
+// ===========================================================================================
+// wl.11 — THE RETRY SIGNAL IS A COUNT OF REAL RUNS, not a flag anybody set. A Work that has been
+// retried carries `attempts = 2`; a fresh one carries 1. This is the canonical fact the list's
+// "Retrying" LABEL is derived from — without it the UI would be inventing a state (#641's own
+// "never invent state" line).
+// ===========================================================================================
+test("wl.11 attempts counts the Work's real runs, so a retry is a fact and not a guess", async (t) => {
+  if (await gate(t)) return;
+  const client = await freshWorkClient(ALICE(), "wl11");
+  const fresh = await admitJournalWork({ client, author: ALICE(), basis: basis({ memo: "one run" }) });
+  const failed = await settledWork({
+    client, outcome: "failed", memo: "retried",
+    errorCode: "internal", error: { code: "CLR10", reason: "transient", message: "boom", recoverable: true },
+  });
+  await retryAccountingWork({ work: failed.work_id, author: ALICE() });
+
+  const page = await listWork(BOB(), { client, limit: 25 });
+  const byId = new Map(page.rows.map((r) => [r.id, r]));
+  assert.equal(byId.get(fresh.work_id).attempts, 1, "a Work admitted once has had one run");
+  assert.equal(byId.get(failed.work_id).attempts, 2, "a retried Work has had two");
+
+  const addressed = await getWorkRow(BOB(), failed.work_id);
+  assert.equal(addressed.attempts, 2, "the addressed-row door reports the same count");
+});
+
+// ===========================================================================================
+// wl.12 — THE PARKED QUESTION IS ON THE LIST ROW. "Needs you" is the label the list shows for
+// `awaiting_input`; the QUESTION's own identity travels with the row so the list can link
+// straight to the thing that is waiting rather than making a second read per row.
+// ===========================================================================================
+test("wl.12 a parked Work carries its pending question's id and version", async (t) => {
+  if (await gate(t)) return;
+  const client = await freshWorkClient(ALICE(), "wl12");
+  const parked = await parkedWork({ client, author: ALICE() });
+  const quiet = await admitJournalWork({ client, author: ALICE(), basis: basis({ memo: "not parked" }) });
+
+  const page = await listWork(BOB(), { client, limit: 25 });
+  const byId = new Map(page.rows.map((r) => [r.id, r]));
+  const row = byId.get(parked.workId);
+  assert.equal(row.status, "awaiting_input", "the mirror moved the Work");
+  assert.equal(row.pending_question_id, parked.questionId);
+  assert.equal(row.pending_question_version, parked.version);
+  assert.equal(byId.get(quiet.work_id).pending_question_id, null, "a Work parked on nothing carries null");
+
+  const onlyParked = await listWork(BOB(), { client, status: ["awaiting_input"] });
+  assert.deepEqual(ids(onlyParked), [parked.workId], "the Needs-you view is a status filter, not a second read");
+});
+
+// ===========================================================================================
+// wl.13 — THE ADDRESSED ROW LIVES OUTSIDE THE PAGE WINDOW (#719's own lesson). A deep link to a
+// Work that is three pages down must resolve; a list-only read would have shown a not-found for
+// a row the caller is perfectly entitled to see.
+// ===========================================================================================
+test("wl.13 get_accounting_work_row resolves a Work that page 1 does not contain", async (t) => {
+  if (await gate(t)) return;
+  const client = await freshWorkClient(ALICE(), "wl13");
+  const oldest = await admitJournalWork({ client, author: ALICE(), basis: basis({ memo: "oldest" }) });
+  for (const memo of ["n1", "n2", "n3", "n4"]) {
+    await admitJournalWork({ client, author: ALICE(), basis: basis({ memo }) });
+  }
+
+  const page1 = await listWork(BOB(), { client, limit: 2 });
+  assert.ok(!ids(page1).includes(oldest.work_id), "the oldest Work is genuinely off page 1");
+
+  const addressed = await getWorkRow(BOB(), oldest.work_id);
+  assert.equal(addressed.id, oldest.work_id);
+  assert.equal(addressed.memo, "oldest", "and carries the same projection a list row does");
+  assert.ok(typeof addressed.client_name === "string" && addressed.client_name.length > 0);
+});
+
+// ===========================================================================================
+// wl.14 — THE FIRM-WIDE READ CARRIES THE CLIENT. `/work` lists every client's Work in one table,
+// so the client NAME has to come from the door — a browser that resolved 100 ids against a
+// register read would be a second source of truth for whose books a row belongs to.
+// ===========================================================================================
+test("wl.14 the firm-wide read spans clients and names each row's client", async (t) => {
+  if (await gate(t)) return;
+  const c1 = await freshWorkClient(ALICE(), "wl14a");
+  const c2 = await freshWorkClient(ALICE(), "wl14b");
+  const w1 = await admitJournalWork({ client: c1, author: ALICE(), basis: basis({ memo: "in c1" }) });
+  const w2 = await admitJournalWork({ client: c2, author: ALICE(), basis: basis({ memo: "in c2" }) });
+
+  const firmWide = await listWork(BOB(), { limit: 100 });
+  const byId = new Map(firmWide.rows.map((r) => [r.id, r]));
+  assert.ok(byId.has(w1.work_id) && byId.has(w2.work_id), "one unfiltered read spans both clients");
+  assert.equal(byId.get(w1.work_id).client_id, c1);
+  assert.ok(typeof byId.get(w1.work_id).client_name === "string" && byId.get(w1.work_id).client_name.length > 0);
+
+  const scoped = await listWork(BOB(), { client: c2, limit: 100 });
+  assert.deepEqual(ids(scoped), [w2.work_id], "the client filter narrows the same door");
+});
+
+// ===========================================================================================
+// wl.15 — EVERY ORIGIN IS LISTED. A Work admitted from a Clara conversation is the SAME durable
+// record as one admitted from the composer, and #629's finding is that a chat-originated Work is
+// reachable nowhere else. The door therefore filters on NOTHING to do with origin, and the row
+// carries `basis_origin` so the list can SHOW where it came from.
+// ===========================================================================================
+test("wl.15 a clara_interpreted Work is listed beside a user_direct one, with its origin", async (t) => {
+  if (await gate(t)) return;
+  const client = await freshWorkClient(ALICE(), "wl15");
+  const direct = await admitJournalWork({
+    client, author: ALICE(), basis: basis({ memo: "typed by a person" }), origin: "user_direct",
+  });
+  const interpreted = await admitJournalWork({
+    client, author: ALICE(), basis: basis({ memo: "asked in chat" }), origin: "clara_interpreted",
+  });
+
+  const page = await listWork(BOB(), { client, limit: 25 });
+  const byId = new Map(page.rows.map((r) => [r.id, r]));
+  assert.equal(byId.get(direct.work_id).basis_origin, "user_direct");
+  assert.equal(byId.get(interpreted.work_id).basis_origin, "clara_interpreted");
+});
+
+// ===========================================================================================
+// wl.16 — SAVED VIEWS. `interface.workViews` is ONE new enumerated key on the preferences door
+// 0179 already owns; nothing about the shape is stored that the write did not validate.
+// ===========================================================================================
+test("wl.16 save_my_preferences accepts interface.workViews and get_my_preferences returns it", async (t) => {
+  if (await gate(t)) return;
+  const before = await getPrefs(BOB());
+  const views = [
+    { id: "needs-my-attention", name: "Needs my attention", query: "status=awaiting_input" },
+    { id: "failures", name: "Failures", query: "status=failed,refused" },
+  ];
+  const saved = await savePrefs(BOB(), { version: before.version, patch: { interface: { workViews: views } } });
+  assert.deepEqual(saved.interface.workViews, views);
+
+  const read = await getPrefs(BOB());
+  assert.deepEqual(read.interface.workViews, views, "the door round-trips the saved views");
+
+  // THE SHALLOW MERGE STILL HOLDS: saving a motion preference cannot clear the views.
+  const after = await savePrefs(BOB(), {
+    version: read.version, patch: { interface: { motion: "reduced" } },
+  });
+  assert.deepEqual(after.interface.workViews, views, "one save cannot clear an unrelated setting");
+  assert.equal(after.interface.motion, "reduced");
+});
+
+test("wl.17 an ill-shaped workViews patch is refused CLR10 with the field path as its reason", async (t) => {
+  if (await gate(t)) return;
+  const me = ALICE();
+  const cases = [
+    ["not an array", { workViews: { id: "x" } }],
+    ["an element that is not an object", { workViews: ["x"] }],
+    ["a blank id", { workViews: [{ id: "  ", name: "n", query: "" }] }],
+    ["a missing name", { workViews: [{ id: "x", query: "" }] }],
+    ["an unknown key inside a view", { workViews: [{ id: "x", name: "n", query: "", colour: "red" }] }],
+    ["duplicate ids", { workViews: [{ id: "x", name: "a", query: "" }, { id: "x", name: "b", query: "" }] }],
+  ];
+  for (const [label, iface] of cases) {
+    const prefs = await getPrefs(me);
+    const err = await assertRaises(CLR10,
+      () => savePrefs(me, { version: prefs.version, patch: { interface: iface } }), label);
+    assert.equal(detailOf(err)?.reason, "interface.workViews", `${label}: names the field path`);
+  }
+  // And the pre-existing guarantees are untouched: an unknown interface key still refuses under
+  // its own path, and a stale version still refuses CLR06.
+  const prefs = await getPrefs(me);
+  const unknown = await assertRaises(CLR10,
+    () => savePrefs(me, { version: prefs.version, patch: { interface: { nope: 1 } } }), "an unknown key");
+  assert.equal(detailOf(unknown)?.reason, "interface.nope");
+  await assertRaises(CLR06,
+    () => savePrefs(me, { version: prefs.version + 7, patch: { interface: { motion: "system" } } }),
+    "a stale expected version");
+});
+
+// ===========================================================================================
+// wl.18 — THE TERMINAL OUTCOME TRAVELS WITH THE ROW. A failed Work's typed error code/reason is
+// on the list row, so the list can say WHY without opening every item — and a completed Work's
+// posted entry id is there for the same reason.
+// ===========================================================================================
+test("wl.18 a settled Work carries its typed outcome on the list row", async (t) => {
+  if (await gate(t)) return;
+  const client = await freshWorkClient(ALICE(), "wl18");
+  const refused = await settledWork({
+    client, outcome: "refused", memo: "refused one",
+    errorCode: "internal", error: { code: "CLR13", reason: "period_locked", message: "the period is locked" },
+  });
+
+  const page = await listWork(BOB(), { client, limit: 25 });
+  const row = page.rows.find((r) => r.id === refused.work_id);
+  assert.equal(row.status, "refused");
+  assert.equal(row.error_reason, "period_locked");
+  assert.equal(row.error_code, "CLR13");
+});
+
+// ===========================================================================================
+// wl.19 — A CLIENT OF ANOTHER FIRM CANNOT BE USED AS A PROBE. Passing firm B's client id as
+// `p_client` from firm A answers an empty page, never a refusal that would confirm the id exists.
+// ===========================================================================================
+test("wl.19 a cross-firm p_client answers an empty page, not an oracle", async (t) => {
+  if (await gate(t)) return;
+  const page = await listWork(BOB(), { client: CLIENT_B1() });
+  assert.deepEqual(page.rows, []);
+  assert.equal(page.truncated, false);
+  assert.equal(page.next_cursor, null);
+});
+
+// ===========================================================================================
+// wl.20 — A NULL ELEMENT IN A FILTER ARRAY IS A CALLER DEFECT, NOT A FILTER. `v not in (…)` is
+// NULL for a NULL element, so the first cut of the roster check fell THROUGH it and
+// `= any(array[null])` then matched nothing: `rows=0`, no refusal — the exact "`[]` looks like
+// *no such Work*" failure the roster check exists to prevent. Measured by the adversarial
+// migration-safety review, 2026-09-14.
+// ===========================================================================================
+test("wl.20 a NULL element in p_status or p_purpose is refused CLR10, never answered as an empty page", async (t) => {
+  if (await gate(t)) return;
+  const client = await freshWorkClient(ALICE(), "wl20");
+  await admitJournalWork({ client, author: ALICE(), basis: basis({ memo: "present" }) });
+
+  const nullStatus = await assertRaises(CLR10, () => listWork(BOB(), { client, status: [null] }),
+    "a bare [null] status");
+  assert.equal(detailOf(nullStatus)?.reason, "invalid_status");
+
+  const mixed = await assertRaises(CLR10,
+    () => listWork(BOB(), { client, status: ["completed", null] }), "a null BESIDE a real token");
+  assert.equal(detailOf(mixed)?.reason, "invalid_status");
+
+  const nullPurpose = await assertRaises(CLR10, () => listWork(BOB(), { client, purpose: [null] }),
+    "a bare [null] purpose");
+  assert.equal(detailOf(nullPurpose)?.reason, "invalid_purpose");
+
+  // …and the honest neighbours still behave: an EMPTY array is "no filter on this axis", and a
+  // real unknown purpose still matches nothing without raising (0178's CHECK owns that roster).
+  const empty = await listWork(BOB(), { client, status: [], purpose: [] });
+  assert.equal(empty.rows.length, 1, "an empty array is no filter at all, not a refusal");
+  const unknown = await listWork(BOB(), { client, purpose: ["a_purpose_that_does_not_exist"] });
+  assert.deepEqual(unknown.rows, [], "an unknown purpose still matches nothing and raises nothing");
+});
+
+// ===========================================================================================
+// wl.21 — THE 100 CEILING, ON A CLIENT THAT IS ACTUALLY OVER IT. wl.7 clamps against a client
+// holding three Works, which proves the arithmetic and nothing about the ceiling: 10,000 and 3
+// both answer 3. This builds 105 Works in ONE statement (so they also share one `created_at` to
+// the microsecond, which is the case where the keyset's id tie-break is what orders the page)
+// and measures what the door actually hands back.
+// ===========================================================================================
+
+/** 105 admissions in ONE statement, through the REAL admission door — `select f(...) from
+ *  generate_series(...)`, so it is one transaction and one round trip rather than 105. */
+async function bulkAdmit({ client, author, n, tag }) {
+  await roleQuery(ROLES.runtime,
+    "select clara.admit_journal_work("
+    + "p_client => $1::uuid, p_author => $2::uuid, p_intent_key => $3::text || g::text,"
+    + "p_basis => $4::jsonb, p_basis_origin => 'user_direct', p_source_refs => '[]'::jsonb,"
+    + "p_model => $5::text) from generate_series(1, $6::int) g",
+    [client, author, `${tag}-${opk("wl641")}-`, JSON.stringify(basis({ memo: `${tag} bulk` })),
+      MODEL, n]);
+}
+
+test("wl.21 p_limit ceilings at 100 on a client that holds more, and a null p_limit is 25", async (t) => {
+  if (await gate(t)) return;
+  const client = await freshWorkClient(ALICE(), "wl21");
+  await bulkAdmit({ client, author: ALICE(), n: 105, tag: "wl21" });
+  const total = (await rootQuery(
+    "select count(*)::int as n from clara.accounting_work where client_id = $1", [client])).rows[0].n;
+  assert.equal(total, 105, "fixture: the client really does hold more than the ceiling");
+
+  for (const asked of [100, 101, 1_000_000_000, 2_147_483_647]) {
+    const page = await listWork(BOB(), { client, limit: asked });
+    assert.equal(page.rows.length, 100, `p_limit ${asked} answers the 100 ceiling`);
+    assert.equal(page.truncated, true, `p_limit ${asked} still says there is more`);
+    assert.ok(typeof page.next_cursor === "string" && page.next_cursor.length > 0,
+      `p_limit ${asked} mints a cursor`);
+  }
+
+  const defaulted = await listWork(BOB(), { client, limit: null });
+  assert.equal(defaulted.rows.length, 25, "a null p_limit is the door's own default of 25");
+  assert.equal(defaulted.truncated, true);
+
+  // The tie-break is real: every row admitted in one statement carries ONE created_at, so the
+  // page order is decided by `id desc` alone and must still be gapless.
+  const clock = (await rootQuery(
+    "select count(distinct created_at)::int as n from clara.accounting_work where client_id = $1",
+    [client])).rows[0].n;
+  assert.equal(clock, 1, "one statement, one clock reading — the id tie-break is what orders this");
+  const page1 = await listWork(BOB(), { client, limit: 100 });
+  const page2 = await listWork(BOB(), { client, limit: 100, cursor: page1.next_cursor });
+  const seen = [...ids(page1), ...ids(page2)];
+  assert.equal(seen.length, 105, "the walk carries every row");
+  assert.equal(new Set(seen).size, 105, "…each exactly once");
+});
+
+// ===========================================================================================
+// wl.22 — THE DEFINER HELPER, CALLED DIRECTLY. A leading underscore hides nothing from PostgREST
+// (0181's own caveat) and this helper is GRANTED, so it is a door in its own right: it answers
+// nothing for another firm, and it refuses an array bigger than any page the two real doors
+// could ever ask about (measured before the bound: 1,000,000 ids cost 5.6 s of server CPU).
+// ===========================================================================================
+test("wl.22 _work_run_attempts is firm-self-scoped and bounded at the doors' own page size", async (t) => {
+  if (await gate(t)) return;
+  const client = await freshWorkClient(ALICE(), "wl22");
+  const mine = await admitJournalWork({ client, author: ALICE(), basis: basis({ memo: "mine" }) });
+  const theirs = await admitJournalWork({
+    client: CLIENT_B1(), author: DAVE(), basis: basis({ memo: "theirs" }) });
+
+  const attempts = async (sub, works) => humanQuery(sub,
+    "select work_id::text as work_id, attempts from clara._work_run_attempts($1::uuid[])", [works]);
+
+  const crossFirm = await attempts(BOB(), [theirs.work_id]);
+  assert.deepEqual(crossFirm.rows, [], "firm B's Work answers nothing to a firm A bookkeeper");
+
+  const mixed = await attempts(BOB(), [theirs.work_id, mine.work_id]);
+  assert.deepEqual(mixed.rows.map((r) => r.work_id), [mine.work_id],
+    "an array naming both firms answers only for this one");
+
+  // The bound is p_limit + 1 = 101, which is the largest page either door can ask about.
+  const uuids = (n) => Array.from({ length: n }, (_, i) =>
+    `c641c641-0000-4000-8000-${String(i).padStart(12, "0")}`);
+  const ok = await attempts(BOB(), uuids(101));
+  assert.deepEqual(ok.rows, [], "101 unknown ids is a lawful call that simply matches nothing");
+
+  const tooMany = await assertRaises(CLR10, () => attempts(BOB(), uuids(102)), "102 ids");
+  assert.equal(detailOf(tooMany)?.reason, "invalid_work_ids");
+  const nulled = await assertRaises(CLR10, () => attempts(BOB(), null), "a null array");
+  assert.equal(detailOf(nulled)?.reason, "invalid_work_ids");
+
+  // …and the doors themselves are unaffected: the list still asks about its own page.
+  const page = await listWork(BOB(), { client, limit: 25 });
+  assert.equal(page.rows.find((r) => r.id === mine.work_id).attempts, 1);
+});
+
+// ===========================================================================================
+// wl.23 — NULL RANK. A REAL user who holds no membership anywhere has a valid JWT sub and a NULL
+// `clara.jwt_firm()`/`clara.actor_role_rank()`. wl.1 covers the viewer (rank 0, below the floor);
+// this is the other half — the actor the `coalesce(…, -1)` arm exists for, and the shape x42's
+// own ruling was written about (a null rank must REFUSE, never fall open).
+// ===========================================================================================
+test("wl.23 a real user with no membership at all is refused CLR04 by all three names", async (t) => {
+  if (await gate(t)) return;
+  const stranger = await insertUser(world.prefix, "wl23_stranger");
+  const claims = (await humanQuery(stranger,
+    "select clara.jwt_sub()::text as sub, clara.jwt_firm()::text as firm,"
+    + " clara.actor_role_rank() as rank")).rows[0];
+  assert.equal(claims.sub, stranger, "the credential is valid…");
+  assert.equal(claims.firm, null, "…and carries no firm");
+  assert.equal(claims.rank, null, "…and no rank at all");
+
+  await assertRaises(CLR04, () => listWork(stranger, {}), "a membership-less list");
+  await assertRaises(CLR04, () => getWorkRow(stranger, world.clients.A1),
+    "a membership-less addressed row");
+  await assertRaises(CLR04,
+    () => humanQuery(stranger, "select * from clara._work_run_attempts($1::uuid[])",
+      [[world.clients.A1]]),
+    "a membership-less helper call");
+});
+
+// ===========================================================================================
+// wl.24 — EVERY MALFORMED CURSOR SHAPE IS THE SAME TYPED REFUSAL. wl.6 covers one; a cursor is
+// the one parameter a person can hand-edit in the address bar, so the shapes are enumerated —
+// including the two that did NOT refuse before this round: a non-finite timestamp compares below
+// every real row and fabricated a clean, well-formed EMPTY page.
+// ===========================================================================================
+test("wl.24 malformed and non-finite cursors are all CLR10 invalid_cursor, never a silent page", async (t) => {
+  if (await gate(t)) return;
+  // This cell owns its own Work rather than leaning on a sibling's: the two CONTROL arms below
+  // (a blank cursor reads the first page; the table survived the SQL-shaped payload) are only
+  // meaningful against a list that has something in it, and a cell whose control depends on
+  // another cell having run first is a cell that passes for the wrong reason.
+  const client = await freshWorkClient(ALICE(), "wl24");
+  await admitJournalWork({ client, author: ALICE(), basis: basis({ memo: "fenced" }) });
+  const b64 = (s) => Buffer.from(s, "utf8").toString("base64");
+  const shapes = [
+    ["not base64 at all", "not-a-cursor!!"],
+    ["base64 with no pipe", b64("2026-09-01T00:00:00Z")],
+    ["a leading pipe", b64("|00000000-0000-4000-8000-000000000000")],
+    ["a trailing pipe", b64("2026-09-01T00:00:00Z|")],
+    ["a non-uuid id", b64("2026-09-01T00:00:00Z|not-a-uuid")],
+    // NOT `yesterday`, and the reason is worth recording: PostgreSQL's `timestamptz` input
+    // ACCEPTS the special literals `now`/`today`/`yesterday`/`epoch`, so a cursor carrying one of
+    // them casts to a real, finite instant and fences an honest page. It is a strange thing to
+    // find in an address bar and it is not malformed. `-infinity`/`infinity` below are the two
+    // that ARE, because no cursor this door mints can be non-finite and the fence they produce is
+    // a clean empty page that looks exactly like "there is no more Work".
+    ["a garbage timestamp", b64("2026-13-45T99:99:99Z|00000000-0000-4000-8000-000000000000")],
+    ["a non-timestamp word", b64("zzz|00000000-0000-4000-8000-000000000000")],
+    ["a 200 KB payload", b64(`${"x".repeat(200_000)}|00000000-0000-4000-8000-000000000000`)],
+    ["a SQL-shaped payload", b64("'; drop table clara.accounting_work; --|x")],
+    ["-infinity", b64("-infinity|00000000-0000-4000-8000-000000000000")],
+    ["infinity", b64("infinity|00000000-0000-4000-8000-000000000000")],
+  ];
+  for (const [label, cursor] of shapes) {
+    const err = await assertRaises(CLR10, () => listWork(BOB(), { client, cursor }), label);
+    assert.equal(detailOf(err)?.reason, "invalid_cursor", `${label}: names invalid_cursor`);
+  }
+  // A BLANK cursor is an absence, not a fault — the honest first page.
+  for (const blank of ["", "   "]) {
+    const page = await listWork(BOB(), { client, cursor: blank, limit: 1 });
+    assert.equal(page.rows.length, 1, "a blank cursor reads the first page like no cursor at all");
+  }
+  // The table is still there, which is what the SQL-shaped payload was asking about.
+  const alive = await rootQuery(
+    "select count(*)::int as n from clara.accounting_work where client_id = $1", [client]);
+  assert.equal(alive.rows[0].n, 1, "no payload above reached the planner as SQL");
+});
+
+// ===========================================================================================
+// wl.25 — THE workViews CAPS, not just its shapes. wl.17 proves the six shape faults; these are
+// the SIZE and IDENTITY rules, which are what stop a preferences row from becoming an unbounded
+// jsonb bucket — plus the two faults the first cut accepted: a view with no `query` key (which
+// the web reader then dropped silently — a write that succeeded and a view that never appeared)
+// and an id that differs from another only by whitespace or carries a control character.
+// ===========================================================================================
+test("wl.25 the workViews caps and identity rules are enforced, all under the one field path", async (t) => {
+  if (await gate(t)) return;
+  const me = CAROL(); // a viewer may hold preferences: 0179 floors this door at viewer.
+  const view = (over = {}) => ({ id: "v1", name: "View one", query: "status=failed", ...over });
+  const cases = [
+    ["21 views", { workViews: Array.from({ length: 21 }, (_, i) => view({ id: `v${i}`, name: `View ${i}` })) }],
+    ["a 513-character query", { workViews: [view({ query: "q".repeat(513) })] }],
+    ["a 10 MB query", { workViews: [view({ query: "q".repeat(10 * 1024 * 1024) })] }],
+    ["a non-string query", { workViews: [view({ query: 7 })] }],
+    ["a MISSING query key", { workViews: [{ id: "v1", name: "View one" }] }],
+    ["a 65-character id", { workViews: [view({ id: "i".repeat(65) })] }],
+    ["a 65-character name", { workViews: [view({ name: "n".repeat(65) })] }],
+    ["ids differing only by whitespace",
+      { workViews: [view({ id: "rent" }), view({ id: " rent ", name: "View two" })] }],
+    ["a control character in an id", { workViews: [view({ id: "re\nnt" })] }],
+    ["a control character in a name", { workViews: [view({ name: "View\u0007one" })] }],
+  ];
+  for (const [label, iface] of cases) {
+    const prefs = await getPrefs(me);
+    const err = await assertRaises(CLR10,
+      () => savePrefs(me, { version: prefs.version, patch: { interface: iface } }), label);
+    assert.equal(detailOf(err)?.reason, "interface.workViews", `${label}: names the field path`);
+  }
+
+  // THE CEILING ITSELF IS STORABLE: 20 views at the full 64/64/512 is what this door promises to
+  // accept, and a cap that refused its own ceiling would be a different cap.
+  const prefs = await getPrefs(me);
+  const full = Array.from({ length: 20 }, (_, i) => ({
+    id: `view-${String(i).padStart(2, "0")}${"x".repeat(50)}`,
+    name: `${"N".repeat(60)}${i}`,
+    query: "q".repeat(512),
+  }));
+  const saved = await savePrefs(me, { version: prefs.version, patch: { interface: { workViews: full } } });
+  assert.equal(saved.interface.workViews.length, 20, "the ceiling is accepted whole");
+  // …and put back, so no later cell inherits twenty views from this one.
+  const after = await getPrefs(me);
+  await savePrefs(me, { version: after.version, patch: { interface: { workViews: [] } } });
+});
+
+// ===========================================================================================
+// wl.26 — "ENTERED BY" MEANS WHO ASKED, AND THE FILTER SAYS THE SAME THING AS THE COLUMN. #630
+// split the two facts: `initiated_by` is who ASKED (frozen), `initiator` is who it currently RUNS
+// AS (a Take-over moves it). The list column renders `initiated_by ?? initiator`; before this
+// round the door filtered the mutable one, so filtering by the name the column SHOWS dropped the
+// very row it was showing — and filtering by the new responsible admitted Work they never asked
+// for. This cell is the one place both facts diverge, so it is the only place the bug is visible.
+// ===========================================================================================
+test("wl.26 after a Take-over the initiator filter follows WHO ASKED, exactly as the column does", async (t) => {
+  if (await gate(t)) return;
+  const client = await freshWorkClient(ALICE(), "wl26");
+
+  // Heidi asks for the Work; her run refuses `authority_lost`; her membership is then revoked, so
+  // the Work is orphaned and takeable. BOB picks it up. Every step is the estate's own door.
+  const heidi = await insertUser(world.prefix, "wl26_heidi");
+  await addMember(ALICE(), {
+    firm: world.firms.A, user: heidi, role: "bookkeeper", opKey: opk("wl641-mem") });
+  const handed = await admitJournalWork({ client, author: heidi, basis: basis({ memo: "handed over" }) });
+  await claimWorkRun({ task: handed.task_id, runId: opk("wl641-run") });
+  await settleWorkRun({
+    task: handed.task_id, outcome: "refused", errorCode: "tool_error",
+    error: { code: "CLR04", reason: "authority_lost", message: "no longer a member", recoverable: true },
+  });
+  await deactivateMember(ALICE(), { firm: world.firms.A, user: heidi });
+  const takeover = await takeOverAccountingWork({ work: handed.work_id, author: BOB() });
+  assert.equal(takeover.taken_over, true, "fixture: the take-over really happened");
+
+  // A second Work on the same client that BOB genuinely asked for, so "filter by Bob" has
+  // something lawful to return and the cell can tell inclusion from exclusion.
+  const bobs = await admitJournalWork({ client, author: BOB(), basis: basis({ memo: "bob asked" }) });
+
+  const page = await listWork(BOB(), { client, limit: 25 });
+  const row = page.rows.find((r) => r.id === handed.work_id);
+  assert.equal(row.initiated_by, heidi, "the row still records WHO ASKED");
+  assert.equal(row.initiator, BOB(), "…and who it now runs as — the two facts have diverged");
+
+  const asked = await listWork(BOB(), { client, initiator: heidi });
+  assert.deepEqual(ids(asked), [handed.work_id],
+    "filtering by the name the Entered-by column shows finds the row the column shows");
+
+  const bobsOnly = await listWork(BOB(), { client, initiator: BOB() });
+  assert.deepEqual(ids(bobsOnly), [bobs.work_id],
+    "…and the new responsible is not credited with Work they never asked for");
+});
+
+// ===========================================================================================
+// wl.27 — THE FIRM-WIDE PAGE IS AN ORDERED INDEX SCAN, not a top-N heapsort over the firm's whole
+// Work. `/work` IS that surface, and before §0.5's index the only firm-leading index was
+// `uq_accounting_work_intent (firm_id, client_id, intent_key)`, which binds the firm and orders
+// nothing — so every page, cursor or not, sorted the firm's entire history first. Measured
+// RLS-BOUND, as `clara_authenticated`, because the firm predicate is half of what the index
+// serves; an EXPLAIN as root would be a plan no caller ever runs.
+// ===========================================================================================
+test("wl.27 the firm-wide keyset has an index over its own ORDER BY tuple, and the planner uses it", async (t) => {
+  if (await gate(t)) return;
+  const def = (await rootQuery(
+    "select indexdef from pg_indexes where schemaname='clara' and tablename='accounting_work'"
+    + " and indexname='ix_accounting_work_firm_created'")).rows[0]?.indexdef;
+  assert.ok(def, "the firm-wide ordering index exists");
+  assert.match(def.replace(/\s+/g, " "),
+    /\(firm_id, created_at DESC, id DESC\)/,
+    "the key tuple IS the door's ORDER BY tuple — the id tie-break is part of the key");
+
+  await rootQuery("analyze clara.accounting_work");
+  const plan = (await humanQuery(BOB(),
+    "explain (format json) select w.id, w.created_at from clara.accounting_work w"
+    + " order by w.created_at desc, w.id desc limit 26")).rows[0]["QUERY PLAN"][0].Plan;
+  const rendered = JSON.stringify(plan);
+  assert.match(rendered, /ix_accounting_work_firm_created/,
+    `the firm-wide page must ride the new index; plan was ${rendered}`);
+  assert.match(rendered, /"Index Cond":"\(firm_id = clara\.jwt_firm\(\)\)"/,
+    `…bound by the caller's own firm, not by the table; plan was ${rendered}`);
+  assert.doesNotMatch(rendered, /"Node Type":"Sort"/,
+    `…and with no sort node at all; plan was ${rendered}`);
+});

@@ -14,7 +14,7 @@ import { cn } from "@/lib/utils";
  * UNDERLINE, not pills, is the resolved look. The muted pill belongs to
  * NAVIGATION — it was the client workspace's own tab strip when that existed,
  * and since #614 it is the settings nav and the Work saved-view strip
- * (`components/settings/settings-nav.tsx`, `components/work/work-views.tsx`) —
+ * (`components/settings/settings-nav.tsx`, `components/work/work-saved-views.tsx`) —
  * and a rung of pills directly above or below an in-page switcher flattens the
  * hierarchy. The filled-primary variant is worse still: `--primary` is the
  * interaction colour, and spending it on "which section am I reading" leaves

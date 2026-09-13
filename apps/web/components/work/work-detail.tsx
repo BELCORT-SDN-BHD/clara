@@ -62,8 +62,12 @@ import {
   type RetryWorkResult,
   type TakeOverWorkResult,
 } from "@/lib/work/api";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { WorkActivityView } from "@/components/work/work-activity-view";
 import { accountNames, type WorkDetailData } from "@/lib/work/reads";
 import { listEntryLinks, type EntryLinkRow } from "@/lib/work/evidence";
+import type { JournalEntryRow, JournalLineRow } from "@/lib/journals/types";
+import type { OperationReceiptRow } from "@/lib/work/types";
 import { useWorkDetail } from "@/lib/work/use-work-detail";
 import {
   defaultDraftStorage,
@@ -179,8 +183,9 @@ export function WorkDetailView({
   storage?: DraftStorage | null;
 }) {
   const t = useTranslations("WorkDetail");
-  /** #634's copy lives with the rest of the manual-JV journey's words. */
-  const tm = useTranslations("ManualJournal");
+  // #641 — #634's `ManualJournal` copy moved down into `PostedEntrySection` with the markup that
+  // uses it, now that the posted block lives inside the Results tab panel rather than in this
+  // render body.
   // A MALFORMED WORK ID IS A NOT-FOUND QUESTION, NOT A DATABASE ONE — the same
   // rule lib/client-id.ts states for the client segment, applied to this one.
   // Checked HERE as well as inside the reader: this is what stops the hook from
@@ -356,6 +361,26 @@ export function WorkDetailView({
     if (result.kind === "accepted") await state.reload();
   };
 
+  // #641 — the Results panel's content, built HERE so the posted section keeps reading the same
+  // page-level state it always did (`state.reload`, `session`, the links pair) while living
+  // inside a Tabs panel. `null` when the Work has posted nothing yet, which the panel says in
+  // words rather than rendering an empty region.
+  const renderPosted =
+    entry === null ? null : (
+      <PostedEntrySection
+        clientId={clientId}
+        entry={entry}
+        lines={lines}
+        names={names}
+        links={links}
+        linksUnavailable={linksUnavailable}
+        committed={committed}
+        reloadLinks={reloadLinks}
+        reloadWork={() => state.reload()}
+        session={session}
+      />
+    );
+
   return (
     <div className="flex flex-col gap-6">
       <WorkFacts work={work} taskStatus={task?.status ?? null} members={memberNames} />
@@ -444,6 +469,15 @@ export function WorkDetailView({
       <CancelOutcome result={cancelState} clientId={clientId} />
       <TakeOverOutcome result={takeOverState} />
 
+      {/*
+        THE BASIS STAYS OUTSIDE THE TABS, and #641 deliberately left it there rather than filing it
+        under "Sources". It is the REQUEST — what this Work was admitted with, frozen, the thing a
+        refusal has to be read against — so it belongs with the Work's identity rather than being
+        one of three alternative views of its outcome. Four walks already read it that way
+        (`journal-work-walk` alone asserts the exact cents in it on a queued Work, on a replayed
+        intent, on a rotated one and at both 320 px and 200 % zoom on a COMPLETED one), and putting
+        it behind a tab would have made every one of those readings conditional on opening a tab.
+      */}
       <section className="flex flex-col gap-2">
         <SectionHeader level={2}>{t("basisHeading")}</SectionHeader>
         <p className="max-w-prose text-sm text-muted-foreground">{t("basisNote")}</p>
@@ -454,7 +488,113 @@ export function WorkDetailView({
         )}
       </section>
 
-      {entry !== null ? (
+      {/*
+        #641 (journey B3) — THE THREE RELATED VIEWS OF THIS ONE WORK, and they sit HERE, BELOW
+        everything above, for the acceptance criterion's own reason: "Work detail keeps the current
+        question above Results/Sources/Activity views". The parked question is rendered by
+        `WorkOutcome` (its `awaiting_input` arm mounts `WorkQuestionPanel`), which is a sibling
+        ABOVE this element in DOM order — so a person reading down the page, and a screen reader
+        walking it, both meet the thing that is waiting BEFORE the three views of what has already
+        happened. A Tabs strip placed above the outcome band would bury a live question behind a tab
+        a person might never open.
+
+        TABS AND NOT ROUTES (appendix C §4, appendix D row 58): these are adjacent views of ONE
+        object at ONE address, not destinations. The state is LOCAL — a tab is not a filter, it
+        does not change what the page is about, and writing it to the URL would put a display
+        preference in the address people share. Switching a tab invokes NO WRITE.
+
+        TWO PANELS ARE `keepMounted`, THE THIRD IS NOT, AND THE SPLIT IS THE CONTRACT'S OWN.
+        Appendix C §3's draft rule: "Tabs and an explanatory Popover do not submit or discard it."
+        Results holds `AttachEvidenceDialog`, whose form a person can be part-way through; Sources
+        renders data this page has ALREADY loaded. Unmounting either on a tab press would throw
+        away an unsent draft and re-run nothing useful, so both stay in the DOM (hidden, and
+        therefore out of the accessibility tree) while they are not the current view. ACTIVITY is
+        the exception: it owns its OWN paged read, and mounting it eagerly would spend a request on
+        a panel nobody opened — so it mounts when it is first shown, which is what makes "opening
+        Results costs nothing" true.
+      */}
+      <Tabs defaultValue="results" className="gap-3">
+        <TabsList variant="line" aria-label={t("tabsLabel")}>
+          <TabsTrigger value="results">{t("tabResults")}</TabsTrigger>
+          <TabsTrigger value="sources">{t("tabSources")}</TabsTrigger>
+          <TabsTrigger value="activity">{t("tabActivity")}</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="results" keepMounted className="flex flex-col gap-6">
+          {entry === null ? (
+            <p className="max-w-prose text-sm text-muted-foreground">{t("noResultYet")}</p>
+          ) : null}
+          {renderPosted}
+        </TabsContent>
+
+        <TabsContent value="sources" keepMounted className="flex flex-col gap-2">
+          {/* THE SOURCES THEMSELVES, ENUMERATED — not the one-line "is there a source at all"
+              summary the identity block above already carries. `source_refs` is an ARRAY and an
+              EMPTY one is the documentless case this journey is largely about, so it says so in
+              words: a Work admitted on a person's own figures is a legitimate state, not a gap. */}
+          <SectionHeader level={2}>{t("sourcesHeading")}</SectionHeader>
+          <p className="max-w-prose text-sm text-muted-foreground">{t("sourcesNote")}</p>
+          {/* ITS OWN WORDS, never the identity block's. Reusing `noSourceDocument` here printed the
+              SAME sentence twice on one page — a second place to read the same fact, and a strict
+              locator collision that a walk caught within the hour. The block above answers
+              "is there a source"; this answers "what is in this view, and why is that all right". */}
+          {work.source_refs === null || work.source_refs.length === 0 ? (
+            <p className="max-w-prose text-sm text-muted-foreground">{t("sourcesEmpty")}</p>
+          ) : (
+            <ul className="flex flex-col gap-1 text-sm">
+              {work.source_refs.map((ref, i) => (
+                <li key={`${ref.kind}-${i}`} className="text-foreground wrap-anywhere">
+                  {/* ONE LINE PER REF, in its OWN words — again not the identity block's. The
+                      summary above answers "was there a source"; this names WHAT each one is, and
+                      the unknown arm prints the database's own `kind` token rather than inventing
+                      a label for a vocabulary this build has not learned. */}
+                  {ref.kind === "chat_task" || ref.kind === "clara_chat"
+                    ? t("sourceRefChat")
+                    : ref.kind === "document"
+                      ? t("sourceRefDocument")
+                      : t("sourceRefUnknown", { kind: ref.kind })}
+                </li>
+              ))}
+            </ul>
+          )}
+        </TabsContent>
+
+        <TabsContent value="activity" className="flex flex-col gap-2">
+          <WorkActivityView clientId={clientId} workId={work.id} />
+        </TabsContent>
+      </Tabs>
+    </div>
+  );
+}
+
+/** #641 — the posted-entry section, lifted out of the render body UNCHANGED so it can live inside
+ *  the Results tab panel without the tab strip's markup swallowing its own `<section>`. */
+function PostedEntrySection({
+  clientId,
+  entry,
+  lines,
+  names,
+  links,
+  linksUnavailable,
+  committed,
+  reloadLinks,
+  reloadWork,
+  session,
+}: {
+  clientId: string;
+  entry: JournalEntryRow;
+  lines: JournalLineRow[];
+  names: ReadonlyMap<string, string>;
+  links: EntryLinkRow | null;
+  linksUnavailable: boolean;
+  committed: OperationReceiptRow | null;
+  reloadLinks: () => Promise<unknown>;
+  reloadWork: () => Promise<unknown>;
+  session: SessionTokenAccessor;
+}) {
+  const t = useTranslations("WorkDetail");
+  const tm = useTranslations("ManualJournal");
+  return (
         <section className="flex flex-col gap-2">
           <SectionHeader
             level={2}
@@ -526,7 +666,7 @@ export function WorkDetailView({
                 entryId={entry.id}
                 expectedRevision={entry.revision_token ?? ""}
                 onAttached={async () => {
-                  await Promise.all([reloadLinks(), state.reload()]);
+                  await Promise.all([reloadLinks(), reloadWork()]);
                 }}
                 session={session}
               />
@@ -534,8 +674,6 @@ export function WorkDetailView({
           ) : null}
           <PostedLinesTable lines={lines} names={names} />
         </section>
-      ) : null}
-    </div>
   );
 }
 

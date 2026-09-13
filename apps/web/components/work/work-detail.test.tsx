@@ -16,7 +16,7 @@ import { test } from "node:test";
 import { createElement, type ReactElement } from "react";
 import { NextIntlClientProvider } from "next-intl";
 
-import { renderComponent } from "../../test/hookHarness";
+import { clickButton, renderComponent } from "../../test/hookHarness";
 import { enableDomInspection } from "../../test/domInspect";
 import { ReadError } from "../../lib/read";
 import { WORK_HEADING_ID, WorkDetailView } from "./work-detail";
@@ -1120,6 +1120,114 @@ test("630 the cancel control is OUTSIDE every status banner, so no status arm ow
     assert.ok(banner === null,
       "no status banner contains the destructive control — the banner says what the status MEANS, "
       + "and a control inside it is a control the next poll can destroy");
+  } finally {
+    await h.unmount();
+  }
+});
+
+// ===========================================================================================
+// #641 — the three related views of one Work, and the ORDER the acceptance criterion names.
+// ===========================================================================================
+
+/** Every node in document order, so a cell can assert that one element PRECEDES another rather
+ *  than merely that both exist. `h.text()` already concatenates text in document order, which is
+ *  what the DOM-order cell below measures against; this walks the element tree for the cells that
+ *  need the nodes themselves. */
+function inDocumentOrder(root: Stub): Stub[] {
+  const out: Stub[] = [];
+  const visit = (n: Stub) => {
+    out.push(n);
+    for (const c of ((n as { childNodes?: Stub[] }).childNodes ?? [])) visit(c);
+  };
+  visit(root);
+  return out;
+}
+
+test("641 the CURRENT QUESTION precedes the Results/Sources/Activity tabs in DOM order", async () => {
+  // AC3's own words: "Work detail keeps the current question above Results/Sources/Activity
+  // views". This is the structural half of that claim and the one that survives a later edit
+  // moving the tab strip: a question rendered BELOW a tab strip is a question a person may never
+  // open, on a page whose whole job is to surface what is waiting on them.
+  const h = await renderComponent(
+    App({
+      load: async () =>
+        data({
+          work: workRow({ status: "awaiting_input", current_task_id: TASK }),
+          interruption: parkedQuestion(),
+        }),
+    }),
+  );
+  try {
+    await h.settle();
+    const nodes = inDocumentOrder(h.container);
+    const questionIndex = nodes.findIndex((n) =>
+      String((n as { textContent?: string }).textContent ?? "").includes("Which bank account did the rent leave from?"));
+    const tablistIndex = nodes.findIndex((n) => {
+      const get = typeof n.getAttribute === "function" ? (n.getAttribute as (k: string) => string | null) : null;
+      return get?.("data-slot") === "tabs-list";
+    });
+    assert.ok(questionIndex >= 0, "the parked question is on the page");
+    assert.ok(tablistIndex >= 0, "the tab strip is on the page");
+    assert.ok(
+      questionIndex < tablistIndex,
+      `the question must precede the tab strip in DOM order (question @${questionIndex}, tabs @${tablistIndex})`,
+    );
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("641 switching a tab fires NO write and no further read of the Work", async () => {
+  // Appendix C §4: "Tab switching never invokes a write." Measured as the ABSENCE of both a
+  // mutating call and an extra load — a cell that only checked the writes would pass on a build
+  // that re-read the whole Work on every tab press.
+  let loads = 0;
+  let writes = 0;
+  const countWrite = async () => {
+    writes += 1;
+    return { kind: "accepted" } as never;
+  };
+  const h = await renderComponent(
+    App({
+      load: async () => {
+        loads += 1;
+        return data({ work: workRow({ status: "completed" }) });
+      },
+      retry: countWrite,
+      cancel: countWrite,
+      takeOver: countWrite,
+    }),
+  );
+  try {
+    await h.settle();
+    const loadsBefore = loads;
+    const sources = h.find((n) =>
+      n.tagName === "BUTTON" && String((n as { textContent?: string }).textContent ?? "").trim() === "Sources");
+    assert.ok(sources, "the Sources tab is a real control");
+    await clickButton(sources);
+    await h.settle();
+    assert.equal(writes, 0, "a tab press is not an act on the Work");
+    assert.equal(loads, loadsBefore, "and it does not re-read the Work either");
+    // The tab it revealed is genuinely the current one — asserted on the tab's own ARIA state
+    // rather than on text, because both non-Activity panels are `keepMounted` (so their text is in
+    // the DOM either way, hidden while they are not current).
+    assert.equal(
+      typeof sources.getAttribute === "function"
+        ? (sources.getAttribute as (k: string) => string | null)("aria-selected")
+        : null,
+      "true",
+      "the Sources tab is the selected one after the press",
+    );
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("641 the Results tab says so when nothing has been posted yet, rather than rendering an empty region", async () => {
+  const h = await renderComponent(App({ load: async () => data({ work: workRow({ status: "running" }) }) }));
+  try {
+    await h.settle();
+    assert.match(h.text(), /Nothing has been posted for this work yet/);
   } finally {
     await h.unmount();
   }

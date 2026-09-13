@@ -725,7 +725,7 @@ test("D5: /work?view=needs-you shows the review-queue rows and marks the saved v
   await expect(page.getByText(/Client: ?Rome Properties/)).toBeVisible();
 });
 
-test("D5/D6: plain /work also renders the agent-task panel and the not-built note; /activity has no Details button", async ({ page }) => {
+test("D5/D6: plain /work also renders the durable Work list and the agent-task panel; /activity has no Details button", async ({ page }) => {
   await page.route("**/e2e-supabase/rest/v1/rpc/list_review_queue", jsonRoute(EMPTY_QUEUE));
   await page.route("**/e2e-supabase/rest/v1/agent_tasks_visible**", jsonRoute([]));
   await page.route("**/e2e-supabase/rest/v1/agent_receipts_visible**", jsonRoute([]));
@@ -734,7 +734,13 @@ test("D5/D6: plain /work also renders the agent-task panel and the not-built not
 
   await expect(page.getByRole("heading", { name: "Work", level: 1 })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Running agent tasks", level: 2 })).toBeVisible();
-  await expect(page.getByText(/durable Work records/)).toBeVisible();
+  // #641 — the not-built note this cell used to pin is gone, because the thing it named is built:
+  // the durable Work list is now the page's own first section. This lane's fixtures answer
+  // `list_accounting_work` with serve-built's honest generic EMPTY (it owns no Work of its own),
+  // so what renders here is the FIRST-USE Empty — which is the right state for a firm with none,
+  // and is distinct from the filtered no-results copy (proved in work-list-walk.spec.ts).
+  await expect(page.getByRole("heading", { name: "Durable work", level: 2 })).toBeVisible();
+  await expect(page.getByText("No work yet")).toBeVisible();
 
   await page.goto("/activity");
   await expect(page.getByRole("button", { name: "Details", exact: true })).toHaveCount(0);

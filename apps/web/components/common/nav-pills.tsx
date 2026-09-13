@@ -12,12 +12,16 @@ export type NavPillItem = {
 };
 
 /**
- * The pill-link nav shared by the /work saved-view strip
- * (`components/work/work-views.tsx`) and the /settings section nav
- * (`components/settings/settings-nav.tsx`) — extracted (#614 code review) once
- * the two had drifted to the same `nav`/`ul`/`Link` markup and the same class
- * strings, one call site typing `current` as `id === activeView` and the other
- * as `resolveActive(pathname).settingsSection === section.id`.
+ * The pill-link nav — extracted (#614 code review) once the /work saved-view strip and the
+ * /settings section nav (`components/settings/settings-nav.tsx`) had drifted to the same
+ * `nav`/`ul`/`Link` markup and the same class strings, one call site typing `current` as
+ * `id === activeView` and the other as `resolveActive(pathname).settingsSection === section.id`.
+ *
+ * ONE CALL SITE REMAINS as of #641: the /work strip became the durable Work list's own saved-view
+ * strip (`components/work/work-saved-views.tsx`), which is a CLIENT component that rewrites the
+ * current URL's query rather than navigating between distinct routes, so it uses buttons with
+ * `aria-current` instead of these links. This component is left as it is for the settings nav,
+ * which is still a set of real destinations.
  *
  * WHY LINKS AND NOT `SectionTabs`. Every item is a distinct URL that
  * server-renders a different page or section, so selecting one is a real

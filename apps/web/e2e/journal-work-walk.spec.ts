@@ -252,7 +252,12 @@ test("C3 → B3: compose, refuse the invalid drafts, submit, and watch ONE Work 
   // header, the Work the fixture seeds for the B6 conversation cell, and the one
   // this cell composed.
   await page.goto(WORK_LIST_URL);
-  const list = page.getByRole("region", { name: "Accounting work" });
+  // #641 — the list on this page is now the server-backed durable Work list over
+  // `clara.list_accounting_work`, and its table region is named "Durable work" (it was "Accounting
+  // work" when the page read the table directly). `journal-work-mock.mjs`'s own
+  // `journalWorkListPage` projects the SAME live `state.works` Map this walk admits into, so the
+  // count below is still the count this lane actually minted.
+  const list = page.getByRole("region", { name: "Durable work" });
   await expect(list.getByRole("row")).toHaveCount(3);
   await expect(list.getByText("Completed", { exact: true })).toHaveCount(2);
 });
@@ -334,7 +339,7 @@ test("B3 recovery: a typed refusal renders VERBATIM, and Retry starts a NEW run 
   // operation. Three rows again: header, the seeded conversation Work, and this
   // cell's one.
   await page.goto(WORK_LIST_URL);
-  await expect(page.getByRole("region", { name: "Accounting work" }).getByRole("row")).toHaveCount(3);
+  await expect(page.getByRole("region", { name: "Durable work" }).getByRole("row")).toHaveCount(3);
 });
 
 test("a 400 focuses the control the SERVER named, and the wire's line index is ONE-BASED", async ({ page }) => {
@@ -537,13 +542,20 @@ test("a LOST acknowledgement resolves to the SAME Work, because the re-post carr
   // two rows here and the human looking at whichever the navigation picked.
   await expect(page.getByText("Queued", { exact: true })).toBeVisible();
   await page.goto(WORK_LIST_URL);
-  const list = page.getByRole("region", { name: "Accounting work" });
+  const list = page.getByRole("region", { name: "Durable work" });
   // Header, the seeded conversation Work, and ONE admitted Work — not two.
   await expect(list.getByRole("row")).toHaveCount(3);
   await expect(list.getByText("Queued", { exact: true })).toHaveCount(1);
   // Newest first, so the row this cell admitted is the first one — and following
   // its own link is what proves the list addresses the same durable record.
-  await list.getByRole("link", { name: "Open" }).first().click();
+  //
+  // #641 — THE ROW LINK IS THE MEMO, not a separate "Open work" cell. The rebuilt list keeps the
+  // primary action VISIBLE on the row itself (appendix C §3: a primary next action never lives only
+  // inside an overflow menu) and the row's own text is what it names, so the address is reached by
+  // clicking what a person reads rather than a repeated verb in a trailing column.
+  // Both rows carry this memo (the seeded Work and the one this cell admitted were submitted with
+  // the same basis text), so `.first()` is the NEWEST — which is the row this cell is about.
+  await list.getByRole("link", { name: "Office rent paid from Maybank" }).first().click();
   await expect(page).toHaveURL(new RegExp(`/work/${workId}$`));
 });
 

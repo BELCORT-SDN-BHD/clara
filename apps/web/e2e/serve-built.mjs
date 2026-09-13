@@ -50,7 +50,7 @@ import { handleHomeBoardSupabase } from "./home-board-mock.mjs";
 // unfiltered register, and its ONE chat thread is APPENDED to the shared `sessions` list
 // below rather than answered from a second one. Its runtime half owns `/api/work/*` and
 // one control path; see that module's header for what the walk does and does not prove.
-import { JOURNAL_WORK_SESSIONS, handleJournalWorkRpc, handleJournalWorkRuntime, handleJournalWorkSupabase } from "./journal-work-mock.mjs";
+import { JOURNAL_WORK_SESSIONS, handleJournalWorkRpc, handleJournalWorkRuntime, handleJournalWorkSupabase, journalWorkListPage } from "./journal-work-mock.mjs";
 // #627's own lane (the D4 tax-boundary walk). ID-scoped like its siblings — five client ids,
 // one per five/six-state read outcome — hooked in ONE place below, before `handleL7Supabase`
 // (see that hook's own note for why order matters here).
@@ -69,6 +69,14 @@ import { readCachedJson } from "./mock-dispatch.mjs";
 // verbs are named by no other lane — and it reads a request body only INSIDE a matched verb, so it
 // starves nothing and needs no special ordering. It claims no relation at all.
 import { handleOperatorSupportSupabase } from "./operator-support-mock.mjs";
+// #641's own lane (the B3 Work list walk). ID-scoped like its siblings, and it reads a request body
+// only INSIDE its own matched verb, so it starves no lane ordered after it. `answerWorkListPage` is
+// a PURE answerer rather than a handler, because TWO lanes now own durable Work and only one reader
+// may drain the body — see the dispatcher below and that function's own header. Its
+// `WORK_LIST_CLIENTS` are spliced into the shared `clients` array below (APPENDED, never replacing)
+// for the same reason `ACTIVITY_CLIENTS` are: the firm Work list's client Select reads the
+// UNFILTERED client register.
+import { WORK_LIST_CLIENTS, answerWorkListPage, handleWorkListSupabase } from "./work-list-mock.mjs";
 
 const e2eRoot = dirname(fileURLToPath(import.meta.url));
 const webRoot = resolve(e2eRoot, "..");
@@ -176,6 +184,8 @@ const clients = [
   // #632's two fixture clients — see that lane's own ACTIVITY_CLIENTS header for why this array,
   // unlike `sessions`, needed a first lane-contribution at all.
   ...ACTIVITY_CLIENTS,
+  // #641's three — the same append shape, for the same reason.
+  ...WORK_LIST_CLIENTS,
 ];
 
 // #614 — Postgres `uuid` shape (`clara.clients.id`, 0003_books_core.sql:34-40), mirrored
@@ -514,6 +524,31 @@ async function handleSupabase(request, response, url) {
   // carries, and it reads a body only inside its own exact path checks — so it cannot be starved
   // by L7's consume-then-fall-through (see that hook's note below) and costs no sibling anything.
   if (await handleOperatorSupportSupabase(request, response, path, url, sendJson, cors)) return;
+  // #641's lane, immediately after #632's and for the SAME measured reason: it owns two
+  // `/rest/v1/rpc/` verbs (`list_accounting_work`, `get_accounting_work_row`) that no other lane's
+  // verb list contains, and a lane ordered after `handleL7Supabase` would read `{}` for them
+  // (that module drains the body on every rpc POST before checking the verb). Running here costs
+  // every other lane nothing: this handler reads a body only inside its own two exact path checks,
+  // and falls through for every client id that is not its own.
+  // #641 — ONE READER FOR `list_accounting_work`, and it lives HERE rather than beside the generic
+  // fixtures below for the measured reason this file already records twice: `handleL7Supabase`
+  // drains the request body on EVERY `/rest/v1/rpc/` POST before it checks the verb, so anything
+  // ordered after it reads `{}`.
+  //
+  // TWO LANES OWN DURABLE WORK — #641's fixture roster and #623's runtime-minted rows — and
+  // `readJson` consumes the stream exactly once, so neither may read it. The body is parsed once
+  // here and offered to each lane's PURE answerer in turn; a client neither lane owns gets the
+  // honest empty page, which renders as the FIRST-USE Empty rather than as an error, and is the
+  // right answer for every other walk's client (they have no durable Work).
+  if (request.method === "POST" && path === "/rest/v1/rpc/list_accounting_work") {
+    const body = await readJson(request);
+    const answer = answerWorkListPage(body)
+      ?? journalWorkListPage(body)
+      ?? { status: 200, body: { rows: [], next_cursor: null, truncated: false } };
+    sendJson(response, answer.status, answer.body, cors);
+    return;
+  }
+  if (await handleWorkListSupabase(request, response, path, url, sendJson, cors)) return;
   // FIRST among the REMAINING hooks, and safe there because every branch inside is scoped
   // to the chat-parity ids and falls through otherwise (merge of origin/main `cea3da39` /
   // #507 — see that module's own note). Running it after the generic fixtures below instead

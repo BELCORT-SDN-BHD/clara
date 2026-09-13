@@ -1668,6 +1668,28 @@ const WALK_FINDINGS_0183_HUMAN_FNS = [
 ];
 export const WALK_FINDINGS_0183_COHORT = [...WALK_FINDINGS_0183_HUMAN_FNS];
 
+// #641 [0189, the B-style Work list] — the WORK-LIST lane, its own cohort for the same "wholly
+// present or wholly absent" reason 0178's list carries.
+//
+//   the TWO doors + the ONE helper — clara_authenticated ONLY. `list_accounting_work` and
+//   `get_accounting_work_row` are SECURITY INVOKER over three already-granted, firm-scoped
+//   sources (clara.accounting_work, clara.agent_interruptions, clara.clients) with their own
+//   inline bookkeeper floor; `_work_run_attempts` is the SECURITY DEFINER helper they need
+//   because `clara.agent_tasks` carries NO clara_authenticated grant at all (humans read the
+//   masked `clara.agent_tasks_visible`, which does not republish `work_id`) — the SAME gap, and
+//   the same remedy, 0183 recorded for `clara.sweep_runs`. It is GRANTED and therefore
+//   PostgREST-reachable despite the leading underscore (0181's own caveat), so it carries the
+//   doors' own floor (clara._human_ctx) and is self-scoped to the session firm inside its body.
+//   The agent role, both wake roles and clara_runtime gain ZERO: a Work LIST is a human read of
+//   a human's own queue, never something a model lane produces or consumes on its own.
+//   `clara.save_my_preferences` is 0179's SAME name at its SAME signature and grant
+//   (USER_PREFERENCES_0179_HUMAN_FNS above already covers it; 0189 only edits its BODY), so no
+//   roster change is owed for that name.
+const WORK_LIST_0189_HUMAN_FNS = [
+  "list_accounting_work", "get_accounting_work_row", "_work_run_attempts",
+];
+export const WORK_LIST_0189_COHORT = [...WORK_LIST_0189_HUMAN_FNS];
+
 // #630 [0184, settling admitted operations under cancel/revoke/lock-period races] — the
 // CANCEL-AND-TAKEOVER lane, its own cohort for the same "wholly present or wholly absent" reason
 // 0178's carries: folding these names into an older roster would red every database between the
@@ -1852,6 +1874,10 @@ export const ALLOWED = {
     // above. clara_authenticated ONLY; clara_runtime, the agent role and both wake roles gain
     // ZERO on either name.
     ...WALK_FINDINGS_0183_HUMAN_FNS,
+    // #641 0189 the Work list's two doors + its one SECURITY DEFINER helper — see the block
+    // above. clara_authenticated ONLY; clara_runtime, the agent role and both wake roles gain
+    // ZERO on any of the three names.
+    ...WORK_LIST_0189_HUMAN_FNS,
   ]),
   // [S6 §9/C-11] agent lane loses the bare get_journal_entry(uuid) oracle; keeps the other
   // reads and gains the client-pinned S6 reads + get_journal_entry_for.
@@ -2234,6 +2260,7 @@ export async function grantMatrixFailures() {
   failures.push(...cohortFailures("#634 0182 journal-evidence lane", JOURNAL_EVIDENCE_0182_COHORT, liveNames));
   failures.push(...cohortFailures("#728 0183 sweep attribution + spoken-for documents", WALK_FINDINGS_0183_COHORT, liveNames));
   failures.push(...cohortFailures("#630 0184 work-cancel/takeover lane", WORK_CANCEL_0184_COHORT, liveNames));
+  failures.push(...cohortFailures("#641 0189 work-list read lane", WORK_LIST_0189_COHORT, liveNames));
   failures.push(...cohortFailures("wave F F-A1 PR-4 bank-statement witness cutover", STATEMENT_F_A1_PR4_COHORT, liveNames));
   // F-A6's cohort is bimodal: wholly present once PR-1 applies, wholly absent before it. Half a
   // cohort is a half-applied migration and is reported as one.
