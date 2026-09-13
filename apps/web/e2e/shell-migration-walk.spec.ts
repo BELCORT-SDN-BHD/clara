@@ -776,7 +776,11 @@ test("D6: /settings is rank-shaped — bookkeeper, owner and operator owner see 
   await signInTo(page, "/", "owner@example.test");
   await page.goto("/settings");
   await expect(heading("Members")).toBeVisible();
-  await expect(heading("Firm registrations")).toBeVisible();
+  // #615 — the registration queue LEFT this hub for the operator destination, so an operator owner's
+  // settings hub is now exactly any other owner's. The operator-only half of the claim moved with
+  // it: `firm-navigation-walk.spec.ts` pins the sidebar's own Operator row for this persona and its
+  // absence for a bookkeeper, and `operator-support-walk.spec.ts` walks the destination itself.
+  await expect(heading("Firm registrations")).toHaveCount(0);
 });
 
 test("⌘K: typing a settings section or the saved view navigates straight to it", async ({ page }) => {
