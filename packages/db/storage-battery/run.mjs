@@ -45,6 +45,18 @@
 // Needs Docker and either a `supabase` CLI matching SUPABASE_CLI_VERSION on PATH (what CI's
 // `supabase/setup-cli` step provides) or network access for `npx --yes supabase@<version>`.
 // On a Windows dev box run it from WSL2 Ubuntu — see README.md.
+//
+// OR, against a stack you are ALREADY running (a `supabase start` of your own, a CI service
+// container, a disposable self-hosted stack) — no CLI and no Docker needed here, and this run
+// never stops a stack it did not start:
+//   CLARA_STORAGE_BATTERY_DB_URL=postgres://… \
+//   CLARA_STORAGE_BATTERY_API_URL=http://127.0.0.1:54321 \
+//   CLARA_STORAGE_BATTERY_JWT_SECRET=… [CLARA_STORAGE_BATTERY_ANON_KEY=sb_publishable_…] \
+//   node packages/db/storage-battery/run.mjs
+// With neither, `CLARA_STORAGE_BATTERY_ALLOW_SKIP=1` turns "cannot run here" into a NAMED skip
+// that exits 0. CI never sets it, so a runner that lost Docker goes red instead of green.
+// packages/db/storage-battery/stack.mjs decides this, and
+// packages/db/tests/storage-battery-contract.test.mjs measures the decision with no stack at all.
 
 import { spawnSync } from "node:child_process";
 import { createHash, createHmac, randomUUID } from "node:crypto";
@@ -56,6 +68,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import pg from "pg";
 
 import { absent, deniedWith, refusal, wikiWireStatus } from "./verdicts.mjs";
+import { resolveStackPlan } from "./stack.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const DB_PKG = resolve(HERE, "..");
@@ -234,20 +247,67 @@ function leftovers() {
   return String(res.stdout || "").split("\n").map((s) => s.trim()).filter(Boolean);
 }
 
+/**
+ * CAN THIS BOX BOOT A STACK? Answered only when no stack was named, and answered about the
+ * DAEMON rather than the client: `docker --version` prints happily with nothing running, and
+ * `supabase start` against a dead daemon fails minutes later with a worse message.
+ *
+ * `cli` is true when a PATH binary reports exactly the pinned version, OR when an `npx` exists to
+ * fetch it. npx's ability to actually REACH the registry is not probed — that costs a network
+ * round trip and would still be stale by the time `supabase start` runs; a fetch failure surfaces
+ * as a red run, which is the right answer for a box that has Docker and wanted to boot.
+ */
+function probeCapabilities() {
+  const daemon = spawnSync("docker", ["info", "--format", "{{.ServerVersion}}"], { encoding: "utf8" });
+  const docker = !daemon.error && daemon.status === 0;
+  const onPath = spawnSync("supabase", ["--version"], { encoding: "utf8" });
+  const pinned = !onPath.error && onPath.status === 0
+    && String(onPath.stdout || "").trim() === SUPABASE_CLI_VERSION;
+  const npx = spawnSync(NPX, ["--version"], { encoding: "utf8" });
+  return { docker, cli: pinned || (!npx.error && npx.status === 0) };
+}
+
 async function main() {
   console.log("=".repeat(78));
-  console.log("PROVIDER STACK (supabase start), local — #620 Storage grant/policy battery");
+  console.log("PROVIDER STACK — #620 Storage grant/policy battery");
   console.log("=".repeat(78));
-
-  CLI = resolveCli();
-  console.log(`cli:      ${CLI.source}`);
   console.log(`node:     ${process.version}  platform: ${process.platform}`);
-  const dockerVersion = spawnSync("docker", ["--version"], { encoding: "utf8" });
-  console.log(`docker:   ${dockerVersion.error ? "ABSENT" : String(dockerVersion.stdout || "").trim()}`);
   const psqlVersion = spawnSync(PSQL, ["--version"], { encoding: "utf8" });
   console.log(`psql:     ${psqlVersion.error ? "ABSENT" : String(psqlVersion.stdout || "").trim()}`);
   console.log(`ceremony: ${PROVISION_SQL}`);
   console.log(`door:     ${STORAGE_MJS}`);
+
+  // WHICH STACK, decided before anything is started, downloaded or connected to.
+  const plan = resolveStackPlan({ env: process.env, probe: probeCapabilities });
+  if (plan.mode === "skip") {
+    console.log(`\nSKIP — the Storage battery did not run on this box.\nreason:   ${plan.reason}`);
+    console.log("This run is NOT evidence about the Storage boundary. Cite it as skipped, by this reason.");
+    return;
+  }
+  if (plan.mode === "abort") throw new Error(plan.reason);
+  console.log(`stack:    ${plan.why}`);
+
+  if (plan.mode === "adopted") {
+    await runAgainstStack({
+      apiUrl: plan.stack.apiUrl,
+      dbUrl: plan.stack.dbUrl,
+      jwtSecret: plan.stack.jwtSecret,
+      // MINTED, NOT REQUIRED AS INPUT. On a self-hosted stack every legacy key is an HS256 JWT
+      // over the stack's own secret, so the privileged key B6/B11 need is derivable from the
+      // secret the caller already gave us — one variable instead of three, and no service-role
+      // key ever sits in anyone's shell history. (A stack that has moved to asymmetric keys is
+      // the documented limit of this mode: pass CLARA_STORAGE_BATTERY_ANON_KEY and expect the
+      // service-key cells to refuse.)
+      serviceKey: mintJwt(serviceClaims("service_role"), plan.stack.jwtSecret),
+      anonKey: plan.stack.anonKey ?? mintJwt(serviceClaims("anon"), plan.stack.jwtSecret),
+    });
+    return;
+  }
+
+  CLI = resolveCli();
+  console.log(`cli:      ${CLI.source}`);
+  const dockerVersion = spawnSync("docker", ["--version"], { encoding: "utf8" });
+  console.log(`docker:   ${dockerVersion.error ? "ABSENT" : String(dockerVersion.stdout || "").trim()}`);
 
   const before = leftovers();
   console.log(`preflight: containers named supabase_*_${PROJECT_ID} before start: ${before === null ? "(docker CLI unavailable — this run cannot assert a clean slate)" : before.length === 0 ? "none" : before.join(", ")}`);
@@ -283,8 +343,6 @@ async function main() {
   process.once("SIGINT", () => onSignal("SIGINT"));
   process.once("SIGTERM", () => onSignal("SIGTERM"));
 
-  const scratch = await mkdtemp(join(tmpdir(), "clara-620-fixtures-"));
-
   try {
     console.log("\n--- supabase start ---");
     const started = cli(["start", "--workdir", workdir, "-x", "imgproxy,postgres-meta"], {
@@ -295,13 +353,39 @@ async function main() {
     const status = cli(["status", "--workdir", workdir, "-o", "json"]);
     if (status.status !== 0) throw new Error(`supabase status failed (exit ${status.status})`);
     const stack = parseStatusJson(status.stdout);
-    const apiUrl = stack.API_URL;
-    const dbUrl = stack.DB_URL;
-    const serviceKey = stack.SERVICE_ROLE_KEY;
-    const jwtSecret = stack.JWT_SECRET;
-    if (!apiUrl || !dbUrl || !serviceKey || !jwtSecret) {
+    if (!stack.API_URL || !stack.DB_URL || !stack.SERVICE_ROLE_KEY || !stack.JWT_SECRET) {
       throw new Error("supabase status did not report API_URL / DB_URL / SERVICE_ROLE_KEY / JWT_SECRET");
     }
+    await runAgainstStack({
+      apiUrl: stack.API_URL,
+      dbUrl: stack.DB_URL,
+      serviceKey: stack.SERVICE_ROLE_KEY,
+      jwtSecret: stack.JWT_SECRET,
+      anonKey: stack.ANON_KEY ?? null,
+    });
+  } finally {
+    dispose(workdir);
+    if (!process.env.CLARA_STORAGE_BATTERY_WORKDIR) {
+      await rm(workdir, { recursive: true, force: true }).catch(() => {});
+    }
+  }
+}
+
+/** Claims for a stack-privileged legacy key, in the shape a self-hosted Supabase signs them. */
+function serviceClaims(role) {
+  const now = Math.floor(Date.now() / 1000);
+  return { role, iss: "supabase", sub: role, iat: now, exp: now + 3600 };
+}
+
+/**
+ * EVERY CELL, against a stack that is already up — booted by this run or adopted from the
+ * environment. Identical either way on purpose: the boundary this battery measures is the
+ * ceremony's, and a cell that behaved differently depending on who started the containers would
+ * be measuring the harness.
+ */
+async function runAgainstStack({ apiUrl, dbUrl, serviceKey, jwtSecret, anonKey }) {
+  const scratch = await mkdtemp(join(tmpdir(), "clara-620-fixtures-"));
+  try {
     console.log(`stack:    api=${apiUrl} db=${new URL(dbUrl).host} (keys read at runtime, never printed)`);
 
     // ---- the private buckets -------------------------------------------------
@@ -479,7 +563,19 @@ async function main() {
     // B8 -----------------------------------------------------------------------
     const b8notes = [];
     let b8ok = true;
-    for (const [label, jwt] of [["JWT B (role=authenticated)", jwtB], ["JWT C (expired)", jwtC]]) {
+    // THE ANON KEY IS THE THIRD CREDENTIAL, and the one an attacker actually has: it is published
+    // to every browser that loads the app. The vendor's own guidance is that it carries no
+    // privilege of its own and is governed entirely by RLS
+    // (https://supabase.com/docs/guides/api/api-keys), and `storage-provision.sql` writes its
+    // policies FOR `clara_storage_docs` only — so an anon request must be refused on both verbs.
+    // Taken from the adopted stack when it published one (a `sb_publishable_…` key is not
+    // derivable from the secret), minted over the stack's secret otherwise.
+    const anon = anonKey ?? mintJwt(serviceClaims("anon"), jwtSecret);
+    for (const [label, jwt] of [
+      ["JWT B (role=authenticated)", jwtB],
+      ["JWT C (expired)", jwtC],
+      ["the stack's ANON key (role=anon — the one the browser holds)", anon],
+    ]) {
       const saved = process.env.CLARA_STORAGE_ROLE_JWT;
       process.env.CLARA_STORAGE_ROLE_JWT = jwt;
       let doorVerdict = "ACCEPTED";
@@ -698,10 +794,6 @@ async function main() {
     }
   } finally {
     await rm(scratch, { recursive: true, force: true }).catch(() => {});
-    dispose(workdir);
-    if (!process.env.CLARA_STORAGE_BATTERY_WORKDIR) {
-      await rm(workdir, { recursive: true, force: true }).catch(() => {});
-    }
   }
 }
 

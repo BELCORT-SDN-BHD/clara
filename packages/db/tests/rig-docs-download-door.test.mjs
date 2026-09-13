@@ -409,6 +409,47 @@ test("D8.3 — no wake lane reaches the door (an agent never receives raw source
   }
 });
 
+test("D8.4 — OPEN-WORLD: on this whole cluster, EXACTLY clara_fn_owner + clara_runtime hold EXECUTE", async (t) => {
+  if (skipHere(t)) return;
+  // WHY A CLOSED LIST IS NOT ENOUGH, AND THIS CELL IS. D8.2 and D8.3 name the roles that exist
+  // TODAY. The estate mints new ones — the operator console lane (#615) is being built beside
+  // this ticket right now, and #672 (renderer) and #674 (backup) are queued to mint their own —
+  // and a named sweep says nothing about a role that did not exist when it was written. So this
+  // cell asks the catalog which roles there ARE and asserts the complement: every role on the
+  // cluster except the two the migration grants is EXECUTE-denied on the source byte door.
+  //
+  // A FUTURE OPERATOR ROLE THEREFORE FAILS HERE BY DEFAULT, which is the polarity #620 wants: an
+  // operator surface must not acquire raw source bytes as a side effect of being an operator. If
+  // some later ticket deliberately needs this grant, THIS assertion is where the argument has to
+  // be made and the roster edited — not somewhere a new role quietly inherits it.
+  //
+  // MEASURED, NOT ASSUMED (the non-vacuity control that makes the cell worth having): with
+  // `grant execute on function clara.get_document_for_human_read_v2(uuid,uuid,uuid,text) to
+  // clara_authenticated` applied by hand on rig620, this cell reported
+  //   "roles holding EXECUTE beyond the grant: clara_authenticated"
+  // and failed, while D8.2's behavioural probe also failed. Revoked, both are green again.
+  const ALLOWED = ["clara_fn_owner", "clara_runtime"];
+  const holders = await rootQuery(
+    `select r.rolname
+       from pg_roles r
+      where r.rolname like 'clara%'
+        and has_function_privilege(r.rolname, $1, 'execute')
+      order by 1`, [V2]);
+  const names = holders.rows.map((x) => x.rolname);
+  // The positive control first: a sweep that found NOTHING would also report "no extra holders".
+  for (const expected of ALLOWED) {
+    assert.ok(names.includes(expected),
+      `${expected} must hold EXECUTE — without it this open-world sweep is measuring an absent function`);
+  }
+  const extra = names.filter((n) => !ALLOWED.includes(n));
+  assert.deepEqual(extra, [],
+    `roles holding EXECUTE beyond the grant: ${extra.join(", ") || "(none)"} — a storage_path must be reachable from the byte route and from nothing else`);
+  // …and PUBLIC, which `has_function_privilege` would spread to every role at once.
+  const pub = await rootQuery("select has_function_privilege('public', $1, 'execute') as ok", [V2]);
+  assert.equal(pub.rows[0].ok, false, "PUBLIC must not hold EXECUTE on the byte door");
+  noteLane(`D8.4: swept ${(await rootQuery("select count(*)::int n from pg_roles where rolname like 'clara%'")).rows[0].n} clara% role(s) on this cluster; EXECUTE holders = ${names.join(", ")}`);
+});
+
 // =============================================================================================
 // D9 / D10 — THE FILE'S OWN PROMISES, re-read from the live catalog.
 // =============================================================================================

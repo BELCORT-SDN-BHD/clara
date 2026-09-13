@@ -99,8 +99,16 @@ jobs:
                 # conservative skip but a silent one: the leg's own `if:` turns storage=false into
                 # a skip, and the meta-gate's else-arm accepts `skipped` as lawful, so a PR
                 # touching only the composite would have merged without the battery ever running.
+                #
+                # THE AMENDMENT PAIR IS AN INPUT TOO. packages/db/deploy/storage-provision.sql is
+                # not the whole ceremony: wave-b-storage-update-amendment.sql granted UPDATE on
+                # storage.objects to the same role on 2026-07-26 and its -REVERT took it back, and
+                # cells B4/B10 assert exactly that privilege is absent. A diff that re-applied the
+                # amendment while the battery stayed unrun is the one change this leg exists to
+                # catch, so the glob covers every storage-* deploy artifact rather than the one
+                # file the battery happens to apply today.
                 case "$f" in
-                  packages/db/deploy/storage-provision.sql|packages/db/deploy/roles-bootstrap.sql|packages/db/storage-battery/*|packages/runtime/lib/storage.mjs|packages/runtime/lib/storage-probe.mjs|.github/workflows/ci.yml|.github/actions/*|pnpm-lock.yaml|package.json) STORAGE=true ;;
+                  packages/db/deploy/storage-*.sql|packages/db/deploy/wave-b-storage-*.sql|packages/db/deploy/roles-bootstrap.sql|packages/db/storage-battery/*|packages/db/tests/storage-battery-contract.test.mjs|packages/runtime/lib/storage.mjs|packages/runtime/lib/storage-probe.mjs|.github/workflows/ci.yml|.github/actions/*|pnpm-lock.yaml|package.json) STORAGE=true ;;
                 esac
               done <<< "$FILES"
             fi

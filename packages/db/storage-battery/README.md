@@ -113,11 +113,48 @@ PATH reports **exactly** the pinned version. A mismatched PATH binary is passed 
 trusted: a different vendor build is a different set of behaviours, and this battery asserts
 vendor response shapes.
 
+### Against a stack you are already running
+
+No CLI and no Docker needed here, and **this run never stops a stack it did not start**:
+
+```sh
+CLARA_STORAGE_BATTERY_DB_URL=postgres://postgres:pw@127.0.0.1:54322/postgres \
+CLARA_STORAGE_BATTERY_API_URL=http://127.0.0.1:54321 \
+CLARA_STORAGE_BATTERY_JWT_SECRET=<the stack's JWT secret> \
+node packages/db/storage-battery/run.mjs
+```
+
+All three or none: a **partly** configured target aborts, naming the missing variable, rather than
+booting a different stack behind your back or skipping green — two of the three set means somebody
+meant to point this battery somewhere, and answering a question nobody asked is the one outcome
+worth refusing. The privileged key cells B6/B11 need is **minted from the secret** (on a
+self-hosted stack every legacy key is an HS256 JWT over it), so no service-role key is ever asked
+for or kept; `CLARA_STORAGE_BATTERY_ANON_KEY` exists for a stack that has moved to the newer
+publishable-key format, which is not derivable from the secret.
+
+### When it cannot run at all
+
+`CLARA_STORAGE_BATTERY_ALLOW_SKIP=1` turns "no named stack and no way to boot one" into a **named
+SKIP that exits 0** — the reason states what was missing and what would let it run. Without the
+switch the same situation is a **red**, deliberately: CI never sets it, so a runner that lost
+Docker or a `supabase/setup-cli` step that silently failed goes red there, where a skipped-green
+battery is indistinguishable from a passing one.
+
+`stack.mjs` is the whole of that decision, and
+[`../tests/storage-battery-contract.test.mjs`](../tests/storage-battery-contract.test.mjs) measures
+it — together with `verdicts.mjs`'s denial vocabulary — **with no stack, no database and no
+network**, so the parts of AC4 that are ordinary deterministic code stay verified on every box
+while the wire stays the provider stack's job. The two are separate evidence and are labelled
+separately.
+
 ### In CI
 
 `.github/workflows/ci.yml`'s `storage-policy-battery` job. It is gated by the `changes` job's
-`storage` classifier output (true when the diff touches `storage-provision.sql`,
-`roles-bootstrap.sql`, `packages/db/storage-battery/**`, `packages/runtime/lib/storage.mjs`,
+`storage` classifier output (true when the diff touches any `deploy/storage-*.sql` or
+`deploy/wave-b-storage-*.sql` — the amendment pair that granted and revoked UPDATE on
+`storage.objects` is an input to B4/B10 exactly as the provisioning file is —
+`roles-bootstrap.sql`, `packages/db/storage-battery/**`, the contract test,
+`packages/runtime/lib/storage.mjs`,
 `packages/runtime/lib/storage-probe.mjs`, the workflow itself, `.github/actions/**`,
 `pnpm-lock.yaml` or the root `package.json` — the last three because the job runs
 `./.github/actions/setup-workspace` and imports `pg` from the frozen install, so they are inputs
