@@ -1749,6 +1749,46 @@ export const DOCUMENT_CAPABILITY_0191_COHORT = [
   ...DOCUMENT_CAPABILITY_0191_SHARED_FNS, ...DOCUMENT_CAPABILITY_0191_UNGRANTED_FNS,
 ];
 
+// #644 [0192, one governed Knowledge record] — the KNOWLEDGE lane, its own cohort for the same
+// "wholly present or wholly absent" reason 0178's carries: folding these names into an older
+// roster would red every database between the two frontiers, and `cohortFailures()` fails a
+// PARTIAL cohort by design.
+//
+//   the SIX human surfaces — clara_authenticated ONLY. Three writes (capture at a
+//   catalog-decided floor: bookkeeper+ for an assertion/preference, admin+ for a policy or any
+//   authority-bearing key, and admin+ for anything firm-scoped; correct and withdraw at the same
+//   floor as the key they revise) and the three C13 reads. The agent role holds EXECUTE on
+//   nothing here for 0057's B6 reason — a _human_ctx-gated read granted to a role that carries no
+//   JWT is a DARK grant — and both wake roles gain ZERO: which knowledge a client's books rest on
+//   is a judgement, and a wake credential makes none.
+const KNOWLEDGE_0192_HUMAN_FNS = [
+  "capture_knowledge", "correct_knowledge", "withdraw_knowledge",
+  "list_client_knowledge", "get_knowledge_record", "get_knowledge_history",
+];
+//   the TWO runtime surfaces — clara_runtime ONLY. `capture_knowledge_for` never impersonates:
+//   the caller names the human whose statement it is and the door verifies that person's live
+//   active membership and rank itself (the clara.update_onboarding_plan precedent, 0017:2661).
+//   `get_knowledge_pack` is the honest context read chatTurn's next frozen version will take.
+const KNOWLEDGE_0192_RUNTIME_FNS = ["capture_knowledge_for", "get_knowledge_pack"];
+//   …and the ONE two-lane name: the browser calls it straight after the onboarding commit it just
+//   made, the server calls it for a run that committed a plan. Declared in BOTH role sets below.
+const KNOWLEDGE_0192_SHARED_FNS = ["promote_plan_answers_to_knowledge"];
+//   …and the UNGRANTED closure every door shares: the catalog rule, the applicability and source
+//   validators, the trust map, the floor lookup, the one writer, the capture core, the read
+//   shaper, the live-revision lookup, the version allocator and the two trigger bodies. Listed so
+//   `cohortFailures` reports a half-applied 0192 rather than a silently narrower boundary.
+const KNOWLEDGE_0192_UNGRANTED_FNS = [
+  "_knowledge_assert_value", "_knowledge_assert_applies_when", "_knowledge_source_pins",
+  "_knowledge_trust_of", "_knowledge_applies_when_digest", "_knowledge_floor",
+  "_knowledge_insert_revision", "_knowledge_capture_core", "_knowledge_row_json",
+  "_knowledge_legacy_rows", "_knowledge_live_revision", "_next_knowledge_version",
+  "_tf_knowledge_records_supersede_only", "_tf_knowledge_authority",
+];
+export const KNOWLEDGE_0192_COHORT = [
+  ...KNOWLEDGE_0192_HUMAN_FNS, ...KNOWLEDGE_0192_RUNTIME_FNS, ...KNOWLEDGE_0192_SHARED_FNS,
+  ...KNOWLEDGE_0192_UNGRANTED_FNS,
+];
+
 export const ALLOWED = {
   // Slice-4 governance writers (contract v2.1 §3.2/3.3/3.5): human lane only.
   [ROLES.authenticated]: new Set([
@@ -1791,6 +1831,8 @@ export const ALLOWED = {
     // stays in SALES_LANE_0046_UNGRANTED_FNS above, expected false for every role.
     ...CLIENT_FACTS_0055_HUMAN_FNS, // 0055 [Wave E lane α] the client-facts door (admin floor;
     // agent + both wake roles gain ZERO — 0055's S7 tail asserts it in-migration)
+    ...KNOWLEDGE_0192_HUMAN_FNS, // #644 [0192] the three knowledge writes + the three C13 reads
+    ...KNOWLEDGE_0192_SHARED_FNS, // #644 [0192] the promotion door — the ONE two-lane name
     ...CLOSE_MODEL_0056_HUMAN_FNS, // 0056 [Wave E lane β] the close model (see the block above)
     ...REGISTRY_0057_HUMAN_FNS, // 0057 [Wave E lane γ] the period registry + month snapshots
     // (one door + three reads; agent/wake/runtime gain ZERO — see the block above)
@@ -2066,6 +2108,10 @@ export const ALLOWED = {
     // clara.retry_accounting_work sits in. Both are reached by a human through the runtime's own
     // authenticated route, never by PostgREST.
     ...WORK_CANCEL_0184_RUNTIME_FNS,
+    // [#644, 0192] the runtime knowledge lane: a capture attributed to a named, verified human
+    // and the context pack. Plus the shared promotion door (also clara_authenticated above).
+    ...KNOWLEDGE_0192_RUNTIME_FNS,
+    ...KNOWLEDGE_0192_SHARED_FNS,
     // [F-A2 PR-2, GM-10] the withdrawal re-admit door — clara_runtime ONLY (the consumer's
     // sole caller); proves the event->entry->attempt->task->filing chain then delegates to
     // 0053's one_click exception. Declared here so any wider grant FAILS the matrix.
@@ -2300,6 +2346,7 @@ export async function grantMatrixFailures() {
   failures.push(...cohortFailures("#630 0184 work-cancel/takeover lane", WORK_CANCEL_0184_COHORT, liveNames));
   failures.push(...cohortFailures("#641 0189 work-list read lane", WORK_LIST_0189_COHORT, liveNames));
   failures.push(...cohortFailures("#624 0191 document capability registry", DOCUMENT_CAPABILITY_0191_COHORT, liveNames));
+  failures.push(...cohortFailures("#644 0192 governed knowledge lane", KNOWLEDGE_0192_COHORT, liveNames));
   failures.push(...cohortFailures("wave F F-A1 PR-4 bank-statement witness cutover", STATEMENT_F_A1_PR4_COHORT, liveNames));
   // F-A6's cohort is bimodal: wholly present once PR-1 applies, wholly absent before it. Half a
   // cohort is a half-applied migration and is reported as one.

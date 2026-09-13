@@ -60,6 +60,7 @@ const LANE_MOCKS = [
   "home-board-mock.mjs",
   "journal-work-mock.mjs",
   "journals-table-mock.mjs",
+  "knowledge-mock.mjs",
   "operator-support-mock.mjs",
   "tax-boundary-mock.mjs",
   "work-list-mock.mjs",
@@ -316,6 +317,10 @@ const LANE_DECLARATIONS: Record<string, { unscopeable: string[]; debt: string[] 
   // through to whichever lane minted it. Neither column has anything to declare, which is the
   // state a lane mock should be in.
   "work-list-mock.mjs": { unscopeable: [], debt: [] },
+  // #644 — every handler checks a #644 id (a client id, a record id or the one missing document
+  // id) before it answers, and falls through otherwise; its five rpc verbs read the body only
+  // inside their own verb match. Nothing to declare.
+  "knowledge-mock.mjs": { unscopeable: [], debt: [] },
 };
 
 test("N5 · every lane handler either scopes by the request's own subject, or is a NAMED exception", () => {

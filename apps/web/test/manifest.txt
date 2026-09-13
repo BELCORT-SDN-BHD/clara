@@ -179,6 +179,7 @@ components/registers/fa-particulars-fields.test.tsx
 components/registers/fa-register-tie.test.tsx
 components/registers/fixed-assets-a11y.test.tsx
 components/registers/fixed-assets-keyboard.test.tsx
+components/registers/knowledge-detail.test.tsx
 components/registers/opening-a11y.test.tsx
 components/registers/opening-approve-guarantees.test.tsx
 components/registers/opening-i18n-keys.test.tsx

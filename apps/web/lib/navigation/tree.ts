@@ -108,7 +108,7 @@ export type AccountingItemId =
  * at all. Adding either to `CLIENT_NAV` would put a permanent row in the menu for
  * a page that is only ever reached with an intent.
  */
-export type ClientLeafId = "journalComposer" | "workDetail";
+export type ClientLeafId = "journalComposer" | "workDetail" | "knowledgeRecord";
 
 /** The `?tab=` values `components/registers/registers-workbench.tsx` accepts. */
 export type RegisterTab =
@@ -358,6 +358,10 @@ export const ACCOUNTING_ITEMS: readonly AccountingItem[] = [
 export const CLIENT_LEAVES: readonly ClientLeaf[] = [
   { id: "journalComposer", parent: "accounting", labelKey: "clientLeaf.journalComposer", minimumRole: "bookkeeper" },
   { id: "workDetail", parent: "work", labelKey: "clientLeaf.workDetail", minimumRole: "viewer" },
+  // #644 — /…/knowledge/:recordId names ONE knowledge record, so it is a leaf for the same
+  // reason workDetail is: a durable record cannot be a static menu row, and the breadcrumb has to
+  // name it rather than stopping at Knowledge and claiming the reader is on the register.
+  { id: "knowledgeRecord", parent: "knowledge", labelKey: "clientLeaf.knowledgeRecord", minimumRole: "viewer" },
 ] as const;
 
 export function clientLeaf(id: ClientLeafId): ClientLeaf {
@@ -381,6 +385,13 @@ export function journalComposerHref(clientId: string): string {
  *  malformed id becomes a malformed route. */
 export function workDetailHref(clientId: string, workId: string): string {
   return `${clientBase(clientId)}/work/${encodeURIComponent(workId)}`;
+}
+
+/** `/clients/:clientId/knowledge/:recordId` — ONE knowledge record's own address. The id is the
+ *  STABLE `record_id`, not a revision id, so the URL keeps meaning after a correction appends a
+ *  revision. Percent-encoded for the reason `workDetailHref` states. */
+export function knowledgeRecordHref(clientId: string, recordId: string): string {
+  return `${clientBase(clientId)}/knowledge/${encodeURIComponent(recordId)}`;
 }
 
 /** `/clients/:clientId/journals` — the posted-and-drafts surface. With an entry
@@ -508,6 +519,7 @@ function leafFor(parent: ClientNavId, rest: readonly string[]): ClientLeafId | n
     return "journalComposer";
   }
   if (parent === "work" && rest.length === 2) return "workDetail";
+  if (parent === "knowledge" && rest.length === 2) return "knowledgeRecord";
   return null;
 }
 

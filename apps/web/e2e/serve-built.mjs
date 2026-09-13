@@ -55,6 +55,9 @@ import { JOURNAL_WORK_SESSIONS, handleJournalWorkRpc, handleJournalWorkRuntime, 
 // one per five/six-state read outcome — hooked in ONE place below, before `handleL7Supabase`
 // (see that hook's own note for why order matters here).
 import { handleD4Supabase } from "./tax-boundary-mock.mjs";
+// #644's own lane (the C13 Knowledge walk). ID-scoped like its siblings — four client ids, one
+// per read outcome, plus its own record/document ids — hooked in ONE place below.
+import { handleKnowledgeSupabase } from "./knowledge-mock.mjs";
 // #632's own lane (the attributable Activity feed walk). ID-scoped like its siblings; its ONE
 // exception is `ACTIVITY_CLIENTS`, spliced into the shared `clients` array below (APPENDED, never
 // replacing) because the Activity page's client Select is this train's first consumer of the
@@ -560,6 +563,10 @@ async function handleSupabase(request, response, url) {
   if (await handleJournalWorkRpc(request, response, path, url, sendJson, cors)) return;
   if (await handleDocumentsViewerSupabase(request, response, path, url, sendJson, cors)) return;
   if (await handleD4Supabase(request, response, path, url, sendJson, cors)) return;
+  // #644's Knowledge lane. SAFE here for the SAME reason D4 is: every one of its five rpc verbs
+  // reads the request body only INSIDE that verb's own match, so it never drains a stream a later
+  // lane still needs; and every branch is scoped to a #644 id, so it answers for nobody else.
+  if (await handleKnowledgeSupabase(request, response, path, url, sendJson, cors)) return;
   // AHEAD OF THE HOME BOARD (#623, and still true — NOT a body-drain reason):
   // `home-board-mock.mjs`'s `EMPTY_RELATIONS` answers `/rest/v1/coa_accounts` and
   // `/rest/v1/agent_tasks_visible` with an honest `[]` for

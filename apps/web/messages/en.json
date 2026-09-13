@@ -76,7 +76,8 @@
     },
     "clientLeaf": {
       "journalComposer": "Record journal entry",
-      "workDetail": "Journal entry"
+      "workDetail": "Journal entry",
+      "knowledgeRecord": "Knowledge record"
     },
     "accounting": {
       "journals": "Journals",
@@ -2334,15 +2335,104 @@
   "ClientKnowledge": {
     "heading": "Knowledge",
     "body": "Durable facts recorded about this client.",
-    "subheading": "Durable facts recorded about this client — each with who recorded it, on what basis, and when. A document-attached evidence library lives on the Documents tab, not here.",
-    "empty": "No facts have been recorded for this client yet.",
+    "subheading": "Durable facts, preferences and policies recorded about this client — each with who supplied it, its source, how far it is verified, what it applies to and its full revision history.",
+    "empty": "No knowledge has been recorded for this client yet.",
     "columnFact": "Fact",
     "columnValue": "Value",
     "columnBasis": "Basis",
     "columnRecordedAt": "Recorded",
     "historyLabel": "{count} superseded version(s)",
     "showHistory": "Show history",
-    "hideHistory": "Hide history"
+    "hideHistory": "Hide history",
+    "emptyFiltered": "No records of that category. The other categories still hold records.",
+    "clearFilter": "Clear filter",
+    "filterLabel": "Category",
+    "filterAll": "All categories",
+    "versionLabel": "Knowledge version {version}",
+    "openRecord": "Open record",
+    "legacyNote": "Recorded before the Knowledge register existed — correct it through the client fact door.",
+    "withdrawnNotice": "Withdrawn",
+    "conflictTitle": "These records disagree",
+    "conflictBody": "{count} records of {key} are live at once with different conditions. Both are shown; nothing here decides between them.",
+    "appliesWhen": "Applies when",
+    "appliesAlways": "Always applies to this client",
+    "effectiveWindow": "Effective",
+    "effectiveOpenStart": "from the start",
+    "effectiveOpenEnd": "with no end date",
+    "assertedBy": "Supplied by",
+    "sourceHeading": "Source",
+    "sourceLoading": "Reading the source document…",
+    "sourceUnavailable": "This record names a source document ({id}) that your account cannot read right now. The record itself is unchanged.",
+    "sourceField": "Field {field}",
+    "detailHeading": "Knowledge record",
+    "detailSubheading": "The current value, where it came from, and every revision that produced it.",
+    "backToRegister": "Back to Knowledge",
+    "historyHeading": "Revisions",
+    "historyEmpty": "No revisions were returned for this record.",
+    "revisionLabel": "Revision {n}",
+    "revisionBy": "by {who} on {at}",
+    "revisionReason": "Reason: {reason}",
+    "withdrawnTitle": "This record was withdrawn",
+    "withdrawnBody": "{reason}",
+    "correctTrigger": "Correct",
+    "correctTitle": "Correct {key}",
+    "correctDescription": "A correction records a new revision. The current value stays readable in the history, attributed to whoever supplied it.",
+    "correctConfirm": "Record correction",
+    "correctValueLabel": "Corrected value",
+    "correctReasonLabel": "Why is it being corrected?",
+    "withdrawTrigger": "Withdraw",
+    "withdrawTitle": "Withdraw {key}",
+    "withdrawDescription": "A withdrawal is final for this record: the value stays readable in the history and nothing further can be recorded against it. A later statement starts a new record.",
+    "withdrawConfirm": "Withdraw record",
+    "withdrawReasonLabel": "Why is it being withdrawn?",
+    "kind": {
+      "assertion": "Stated fact",
+      "extracted_fact": "Extracted fact",
+      "preference": "Preference",
+      "policy": "Policy"
+    },
+    "scope": {
+      "client": "This client",
+      "firm": "Firm default"
+    },
+    "trust": {
+      "asserted": "Stated",
+      "extracted": "From a document",
+      "imported_unverified": "Imported, unverified",
+      "inferred": "Unverified inference"
+    },
+    "trustMeaning": {
+      "asserted": "An identified person supplied this. It has not been independently verified.",
+      "extracted": "Read from a specific source document, which this record links to.",
+      "imported_unverified": "Received in an imported bundle. Any verified label it carried is the sender's claim, not a check made here.",
+      "inferred": "Clara inferred this. It is advisory and cannot be used as policy or authority."
+    },
+    "sourceKind": {
+      "user_statement": "Stated by a user",
+      "interview": "Answered during setup",
+      "document_extraction": "Extracted from a document",
+      "registry_lookup": "From a registry lookup",
+      "imported_bundle": "From an imported bundle",
+      "model_inference": "Inferred by Clara",
+      "legacy_client_fact": "Recorded as a client fact before the Knowledge register"
+    },
+    "recordedVia": {
+      "human_ui": "entered in the app",
+      "clara_runtime": "recorded by Clara"
+    },
+    "revisionKind": {
+      "capture": "Captured",
+      "correction": "Corrected",
+      "withdrawal": "Withdrawn"
+    },
+    "valueError": {
+      "empty": "A value is required.",
+      "number": "This key holds a number.",
+      "boolean": "This key holds true or false.",
+      "json": "This key holds a JSON object, for example {\"seed\": \"manual\"}."
+    },
+    "authoritativeTitle": "This client fact is the one in force",
+    "authoritativeBody": "Clara still reads this client fact when it prepares this client's books. A Knowledge record of the same key is shown beside it and does not replace it."
   },
   "Auth": {
     "passwordPolicy": "Use at least {min} characters."
