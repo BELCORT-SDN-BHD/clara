@@ -141,6 +141,18 @@ runs:
         RELAY_TEST_MODE=1 \
         WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGC_PORT/clara_wave_b_ci" \
           node tests/two-build-cutover-e2e.mjs
+        # #637 review S5 — the WORLD GUARD, HERE rather than in the unit suite, and the reason is a
+        # false-green one: tests/body-census-guard-db.test.mjs SPAWNS the built image against a real
+        # Postgres World, so in db-estate-suite (PGDATABASE=clara_ci, no `.output`) its own hard gate
+        # SKIPS it — and a skip is not evidence. This job has both the build and the world, so it is
+        # where the cells actually run. LAST on this rig: it stages a run of a body no image exports,
+        # which is precisely the condition every step above refuses to start against. It cancels and
+        # deletes its own row on every exit path.
+        PGPORT=$PGC_PORT \
+        PGDATABASE=clara_wave_b_ci \
+        RELAY_TEST_MODE=1 \
+        WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGC_PORT/clara_wave_b_ci" \
+          node --test tests/body-census-guard-db.test.mjs
 
     - name: DR backup/restore self-test (ephemeral postgres:17)
       shell: bash -e {0}
