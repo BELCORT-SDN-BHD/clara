@@ -23,8 +23,8 @@ instructions. Source code and deployment evidence establish what is actually imp
 1. Ground to the codebase with `codebase-memory-mcp`. Use it to query anything for implementation or clarify.
 2. Use `grilling` to settle ambiguity that changes product scope or acceptance before a non-trivial
    build. Look up repository facts directly; ask the owner about unresolved product decisions.
-3. Check current official documentation, through Context7 or the vendor, before changing a stack
-   integration. Installed versions and lockfiles describe this repository's dependencies.
+3. Check current official documentation, through Context7 or the official docs, before going into coding or any      
+   exploration/planning.
 4. Verify the affected behaviour and update its existing source of truth in the same change.
    Keep the current task's unresolved work actionable and distinguish local tests from hosted evidence.
 5. After Wayfinder or to-spec settles a product or technical decision, update the relevant PRD or
