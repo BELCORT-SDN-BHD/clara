@@ -35,6 +35,7 @@ import {
   withdrawKnowledge,
   type KnowledgeRecordRow,
 } from "@/lib/registers/knowledge";
+import { toDialogRefusal } from "@/components/common/dialog-refusal";
 import { ArApCounterpartyDoorDialog } from "./ArApCounterpartyDoorDialog";
 import {
   KnowledgeApplicability,
@@ -137,7 +138,17 @@ export function KnowledgeDetail({ clientId, recordId }: { clientId: string; reco
         {t("backToRegister")}
       </Link>
 
-      <DataState loading={detail.loading} error={detail.error} isEmpty={false} emptyMessage={t("empty")}>
+      {/* `loading` ONLY while nothing is known yet. Measured, not stylistic: `act()`
+          reloads after every write, so a plain `detail.loading` blanked this whole
+          subtree on a REFUSAL — taking the open dialog, and the value the human had
+          just typed, with it (appendix C: "Refresh with known data: retain labelled
+          prior data"; CB-AE2E-004: the dialog must stay open on a refusal). */}
+      <DataState
+        loading={detail.loading && record === null}
+        error={record === null ? detail.error : null}
+        isEmpty={false}
+        emptyMessage={t("empty")}
+      >
         {record ? (
           <div className="flex flex-col gap-4">
             <section className="flex flex-col gap-2 rounded-lg border border-border bg-card p-3 text-sm">
@@ -175,6 +186,9 @@ export function KnowledgeDetail({ clientId, recordId }: { clientId: string; reco
                   confirmLabel={t("correctConfirm")}
                   busy={detail.busy}
                   confirmDisabled={reason.trim() === ""}
+                  // CB-AE2E-004: the page banner sits BEHIND the modal backdrop, so the
+                  // refusal the human must read has to travel into the dialog with them.
+                  refusal={toDialogRefusal(detail.error)}
                   onConfirm={runCorrection}
                 >
                   <div className="flex flex-col gap-2">
@@ -220,6 +234,7 @@ export function KnowledgeDetail({ clientId, recordId }: { clientId: string; reco
                   confirmVariant="destructive"
                   busy={detail.busy}
                   confirmDisabled={withdrawReason.trim() === ""}
+                  refusal={toDialogRefusal(detail.error)}
                   onConfirm={runWithdrawal}
                 >
                   <label className="flex flex-col gap-1 text-xs" htmlFor="knowledge-withdraw-reason">

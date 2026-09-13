@@ -231,6 +231,7 @@ function staticNextLinkHrefs(roots: readonly string[]): string[] {
 const REGISTRY_BUILT: ReadonlyArray<{ pattern: string; builder: string }> = [
   { pattern: "/clients/[clientId]/accounting/journal/new", builder: "journalComposerHref" },
   { pattern: "/clients/[clientId]/work/[workId]", builder: "workDetailHref" },
+  { pattern: "/clients/[clientId]/knowledge/[recordId]", builder: "knowledgeRecordHref" },
 ];
 
 function orphanedFirmPages(

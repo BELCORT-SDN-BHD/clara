@@ -75,7 +75,8 @@
     },
     "clientLeaf": {
       "journalComposer": "Record journal entry",
-      "workDetail": "Journal entry"
+      "workDetail": "Journal entry",
+      "knowledgeRecord": "Knowledge record"
     },
     "accounting": {
       "journals": "Journals",

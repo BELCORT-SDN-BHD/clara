@@ -42,6 +42,7 @@ import { DataState } from "@/components/firm/data-state";
 import { EmptyState, StateBanner } from "@/components/common/state";
 import { useAsyncRead } from "@/lib/firm/use-async-read";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
+import { knowledgeRecordHref } from "@/lib/navigation/tree";
 import { loadClientKnowledge, type KnowledgeRecordRow } from "@/lib/registers/knowledge";
 import {
   KnowledgeApplicability,
@@ -178,7 +179,7 @@ function KnowledgeRow({ clientId, row }: { clientId: string; row: KnowledgeRecor
       {row.editable ? (
         <Link
           className="w-fit text-xs underline underline-offset-4"
-          href={`/clients/${clientId}/knowledge/${row.record_id}`}
+          href={knowledgeRecordHref(clientId, row.record_id)}
         >
           {t("openRecord")}
         </Link>
