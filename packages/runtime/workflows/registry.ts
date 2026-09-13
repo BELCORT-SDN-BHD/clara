@@ -767,8 +767,10 @@ export const workflowNames: string[] = Object.keys(workflows);
 // tests/registry-view.test.mjs, which reads the REAL module namespace and fails if this roster
 // misses a body the file exports, if a pin is absent from the roster, or if a pin names a
 // different function from the one `workflows` dispatches. A successor version therefore needs
-// exactly two edits in this file and no edit anywhere else: its `export { x_vN }` line and its
-// entry here.
+// exactly FIVE edits in this file and no edit anywhere else, and registry-view.test.mjs reds on
+// each one left out: its `import { x_vN } from "./x.vN.js"` line, the `workflows.<className>`
+// dispatch entry repointed to it, its own `export { x_vN }` line, its entry in `workflowBodies`
+// below, and its `workflowPins.<className>` entry.
 export const workflowBodies: readonly string[] = Object.freeze([
   "closeExampleV1",
   "chatTurn_v1",

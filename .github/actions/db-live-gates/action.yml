@@ -127,9 +127,10 @@ runs:
         # its original body inside the second image. That is the one thing the single-process
         # version-cutover-e2e above cannot show.
         #
-        # MEASURED COST before wiring it (the orchestrator's condition): 82.6s for the scratch build
-        # and 3m25s for the whole file on the dev machine, against a ~6 minute budget. The copy MUST
-        # live outside packages/runtime — measured during the spike, a copy at
+        # MEASURED COST before wiring it (the orchestrator's condition): 78.0s for the scratch build
+        # and 124s for the whole file — Windows-host measurements, re-measured at the #637 fix-round
+        # closure review (superseding this comment's earlier 82.6s / 3m25s), against a ~6 minute
+        # budget. The copy MUST live outside packages/runtime — measured during the spike, a copy at
         # packages/runtime/.scratch made the MAIN nitro build compile 98 workflows instead of 49.
         #
         # It REFUSES TO START (exit 1, named reason) if this database already carries live

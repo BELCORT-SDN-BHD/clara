@@ -20,10 +20,23 @@
 // absence-is-served-as-evidence shape this estate has already paid for twice. A census that
 // FAILED carries `measured:false` plus a sanitized `error` code, which is a third answer again.
 //
-// WARNING-ONLY, ALWAYS. Nothing here decides anything. A stranded body means this process cannot
-// resume those runs; it does not mean this process should stop serving the ones it can. Refusing
-// to boot would take the estate down to report a condition that a re-release of the previous
-// image fixes and that harms nothing while it lasts — the runs are PARKED, not failing.
+// THE WORLD REFUSES, NOT WARNS (#637 review S5 — this superseded the module's original
+// warning-only design, below, before it ever shipped). `plugins/startWorld.ts` takes this census
+// BEFORE `getWorld().start()`, because after start is too late: the world's own boot re-enqueue is
+// what raises `ReplayDivergenceError` on a run whose body this image does not export, and a census
+// that ran afterwards could only describe the crash. A non-zero census REFUSES to start the durable
+// world — HTTP stays up, so `/ready` still answers 503 with `checks.bodies.world_start_refused` and
+// the stranded body names, and `/api/build-info` stays readable — but no lane runs until the image
+// is replaced or the operator sets `CLARA_ALLOW_STRANDED_BODIES=1`, which starts the world anyway on
+// the operator's own authority and may crash on replay. The ONE fail-OPEN case is a census that
+// could not even be TAKEN (the read itself failing, not a nonzero result): that is not evidence of
+// a stranded body, so the world starts and `/ready` reports `measured:false` rather than a false
+// clean zero.
+//
+// This is an accepted ruling, not a settled one: refusing is database-WIDE (any non-terminal run of
+// an unexported body blocks every later runtime process on that database, not only the one that
+// left it), and that blast radius is still pending the owner's confirmation (packages/runtime/
+// README.md's boot-gate section and docs/ARCHITECTURE.md §10 name it).
 
 const state = {
   measured: false,

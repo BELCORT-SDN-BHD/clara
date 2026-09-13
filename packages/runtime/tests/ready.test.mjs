@@ -683,9 +683,18 @@ test("#617: checks.tls carries VARIABLE NAMES and counts only — never a DSN, n
 // process cannot resume, and until now no surface said so: `/workflows` names classes,
 // `/api/build-info` names what the image HAS, and nothing compared the two against live state.
 //
-// WARNING-ONLY BY RULING, following `checks.leader` exactly (`held:false` warns; the process
-// keeps serving). Refusing to boot over runs that are PARKED rather than failing would take the
-// estate down to report a condition a re-release of the previous image fixes.
+// SUPERSEDED BY THE "#637 review S5" SECTION BELOW. This ruling was originally warning-only,
+// following `checks.leader` (`held:false` warns; the process keeps serving). A measurement
+// overturned it: an engine that re-enqueues a run whose body it does not export raises
+// `ReplayDivergenceError`, the crash-only supervisor exits, and Fly restarts it — a loop, not a
+// park. The shipped rule instead REFUSES to start the durable world (HTTP stays up, `/ready` is
+// 503 with the stranded bodies NAMED, `CLARA_ALLOW_STRANDED_BODIES=1` overrides, and a census
+// that could not be TAKEN — as opposed to one that found something — still fails open) — see the
+// S5 section below for that contract and its tests.
+//
+// The ONE cell in THIS section that still applies as written: a census reported with
+// `worldStartRefused: false` (the operator override, or a process that never took the refusing
+// path) stays a WARNING and `ready` stays true.
 // ---------------------------------------------------------------------------
 
 test("ready: checks.bodies reports stranded bodies as a WARNING — ready stays true", { skip }, async () => {

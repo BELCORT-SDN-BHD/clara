@@ -269,6 +269,15 @@ The fix for a refusal is the same as for a refused preflight: release an image t
 bodies (a compatibility build), or drain them. `node packages/runtime/scripts/rollback-preflight.mjs`
 answers the same question before you deploy, which is the cheaper place to learn it.
 
+**Blast radius (owner confirmation pending).** The refusal is database-WIDE, not process- or
+lane-scoped: any non-terminal run of an unexported body — left by another lane, an interrupted
+test, or a killed rig fixture — refuses every later runtime process that starts against that same
+database, until the body is retired or `CLARA_ALLOW_STRANDED_BODIES=1` is set. In CI, every step
+sharing one database (`db-live-gates` runs its four Wave-B steps against `clara_wave_b_ci`) is one
+interrupted step away from poisoning the rest of that job. This is the accepted ruling working as
+designed, not a bug; it is not yet confirmed by the owner and is written here so the runbook does
+not overstate what has been settled.
+
 ## Deployment and rollback
 
 The image builds and runs on Node 22 (`node:22-bookworm-slim`, both stages), the same line as

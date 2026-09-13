@@ -413,7 +413,12 @@ lane，`/ready` 为 503 且 `checks.bodies.world_start_refused: true` 并具名�
 `CLARA_ALLOW_STRANDED_BODIES=1` 是显式的操作者覆盖，恢复告警级姿态（world 启动、`/ready` 告警但 ready，
 进程随后**可能**在 replay 时崩溃——日志明说这是操作者的决定）。普查本身**读取失败时 fail-open**：读不到
 不等于有 stranded body，world 照常启动，`/ready` 以 `measured:false` + sanitized code 报告；未测量与读取
-失败各是一种答案，绝不报成干净的 0。两版本切换的可执行证据是
+失败各是一种答案，绝不报成干净的 0。**爆炸半径（待 owner 确认）**：该拒绝是**整库级**的，不分进程或
+lane——任何一个未导出 body 的非终态 run（无论是另一条 lane 留下的、被中断的测试，还是被杀掉的 rig
+fixture），都会拒绝该库上**之后每一个**启动的 runtime 进程，直到该 body 被清理或设置
+`CLARA_ALLOW_STRANDED_BODIES=1` 为止；CI 的 `db-live-gates` 四个 Wave-B 步骤共用同一个
+`clara_wave_b_ci`，一步被中断就可能拖垮同一 job 里其余的步骤。这是按设计生效的既定裁决，不是缺陷，但
+其影响范围尚未取得 owner 的确认，此处如实记录以免 runbook 声称此事已经落定。两版本切换的可执行证据是
 `packages/runtime/tests/two-build-cutover-e2e.mjs`（真正构建第二个镜像，本地全绿，已接入 per-PR
 `db-live-gates`）；hosted 的两次发布 + 一次故意回退仍待 owner 安排，证据未补。
 

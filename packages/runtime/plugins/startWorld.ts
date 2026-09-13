@@ -89,16 +89,27 @@ async function emitProvenanceLine(): Promise<void> {
 /**
  * #637 (D6) — WHICH BODIES ARE LIVE RUNS PARKED ON THAT THIS IMAGE DOES NOT CARRY.
  *
- * WARNING-ONLY AND FAIL-OPEN, by ruling. A stranded body means this process cannot RESUME those
- * runs — it does not mean it should stop serving the ones it can, and a re-release of an image
- * that exports them fixes it while nothing is lost (the runs are PARKED, not failing). So a
- * non-zero census logs loudly and boots; a census that cannot even be TAKEN records
- * `measured:false` plus a sanitized code, which `/ready` reports as its own third answer rather
- * than as a clean estate.
+ * TAKEN BEFORE `getWorld().start()`, because after start is too late: the world's own boot
+ * re-enqueue is what raises `ReplayDivergenceError` on a run whose body this image does not
+ * export, and a census taken afterwards could only describe the crash. A non-zero census REFUSES
+ * to start the durable world — this function returns `{ mayStart: false }`, it never exits, so
+ * HTTP stays up and `/ready` answers 503 naming the stranded bodies (`checks.bodies
+ * .world_start_refused`) instead of the process going dark. `CLARA_ALLOW_STRANDED_BODIES=1`
+ * overrides on the operator's own authority (the world starts anyway and MAY crash on replay).
+ *
+ * The ONE fail-OPEN case is a census that could not even be TAKEN (the read itself throwing, not a
+ * nonzero result): that is not evidence of a stranded body, so the world starts and `/ready`
+ * reports `measured:false` plus a sanitized error code — a third answer, not a clean zero.
  *
  * Taken ONCE, here, rather than on every /ready call: lib/health.mjs must stay ~0ms and DB-free on
  * that path (its storage-probe paragraph gives the reason — fly's 5s budget is already shared by
  * two sequential bounded round trips).
+ *
+ * ACCEPTED RULING, OWNER CONFIRMATION PENDING. Refusing is database-WIDE: any non-terminal run of
+ * an unexported body — left by another lane, an interrupted test, or a killed rig fixture — blocks
+ * every later runtime process on that database until it is retired or the override is set. That
+ * blast radius is named in packages/runtime/README.md's boot-gate section and docs/ARCHITECTURE.md
+ * §10, and is still awaiting the owner's confirmation, not fixed here.
  */
 async function censusStrandedBodies(): Promise<{ mayStart: boolean }> {
   let census;
@@ -265,12 +276,14 @@ export default definePlugin(() => {
       // rollback preflight unable to tell, from the logs alone, which bodies this process
       // actually carries — which is the question C88.8's line exists to answer.
       console.log(CLARA_WORK_BUNDLE_V2_BANNER);
-      // #637 (C88.8 / C-70) — ONE MORE LINE, and it is the one an operator reading a log actually
-      // needs: WHICH COMMIT built this image, WHICH SCHEMA it is talking to, WHICH body each class
-      // dispatches to, and HOW MANY bodies it carries for parked runs. The two banners above stay
-      // byte-identical on purpose (tests/work-bundle.test.mjs pins v1's exact string); this is
-      // additive.
-      //
+      // #637 (C88.8 / C-70) — the ONE MORE LINE this comment used to promise here (which commit
+      // built this image, which schema it is talking to, which body each class dispatches to, and
+      // how many bodies it carries for parked runs) is `emitProvenanceLine()`, ABOVE, at the top of
+      // this boot sequence — not here. It moved earlier on purpose (#637 review S5): the provenance
+      // line must log before anything can refuse, so an operator reading the log sees it even when
+      // the stranded-body census below refuses to start the world. The two banners above stay
+      // byte-identical either way (tests/work-bundle.test.mjs pins v1's exact string);
+      // tests/body-census-guard-db.test.mjs pins that the provenance line is emitted FIRST.
     } catch (err) {
       console.error("[clara-runtime] durable world FAILED to start:", err instanceof Error ? err.message : String(err));
       process.exit(1); // crash-only: world-start failure is fatal (S4-D10)
