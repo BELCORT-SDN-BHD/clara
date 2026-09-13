@@ -221,15 +221,24 @@ const HISTORY = [
   },
 ];
 
+/** THE PARSE IS CACHED ON THE REQUEST, and that is a correctness fix rather than a saving. MEASURED
+ *  on this lane's own walk: `serve-built.mjs` dispatches `handleJournalWorkSupabase` BEFORE this
+ *  module, and that lane reads the POST body of `/rest/v1/rpc/list_spoken_for_documents` to decide
+ *  whether the verb is its own — `for await (const chunk of request)` DRAINS the stream exactly
+ *  once, so an uncached re-read here saw `{}`, failed its own `p_client` check and fell through. The
+ *  evidence chooser then rendered every document as free: a document already backing a posted entry
+ *  was offered as available, which is the one thing the advisory read exists to prevent. Every lane
+ *  mock in this directory caches under the SAME key for the same reason; this one now does too. */
 async function readJson(request) {
+  if (request.__e2eParsedBody !== undefined) return request.__e2eParsedBody;
   const chunks = [];
   for await (const chunk of request) chunks.push(chunk);
-  if (chunks.length === 0) return {};
-  try {
-    return JSON.parse(Buffer.concat(chunks).toString("utf8"));
-  } catch {
-    return {};
+  let parsed = {};
+  if (chunks.length > 0) {
+    try { parsed = JSON.parse(Buffer.concat(chunks).toString("utf8")); } catch { parsed = {}; }
   }
+  request.__e2eParsedBody = parsed;
+  return parsed;
 }
 
 function send(response, status, body) {

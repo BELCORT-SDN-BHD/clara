@@ -52,6 +52,8 @@ function stored(over: Partial<StoredAdjustmentDraft> = {}): StoredAdjustmentDraf
     },
     postingDate: "2026-12-31",
     memo: "Periodic stock adjustment 2026-01-01 to 2026-12-31",
+    /** #643 fix round — the OPTIONAL cited document, part of the same intent as the figures. */
+    documentId: null,
     ...over,
   };
 }
@@ -74,6 +76,35 @@ test("643.draft: a round trip restores BOTH halves and the overridden basis fiel
   // …and it is not visible under another scope.
   assert.equal(readAdjustmentDraft({ ...SCOPE, clientId: "c-2" }, storage), null,
     "a scope change cannot carry a draft into another client's books");
+});
+
+test("643.draft: the CITED DOCUMENT rides the draft, and an unreadable one is dropped, not fatal", () => {
+  // THE CITATION IS PART OF THE SAME INTENT as the figures — `clara._admit_accounting_work_core`
+  // compares the canonical source refs alongside the basis and particulars digests, so one intent
+  // key re-sent with a DIFFERENT document is a typed conflict rather than a replay. It therefore
+  // travels under the SAME key, and a reload carries the same claim.
+  const storage = memoryStorage();
+  const cited = stored({ documentId: "d-1" });
+  assert.equal(writeAdjustmentDraft(SCOPE, cited, storage), true);
+  assert.deepEqual(readAdjustmentDraft(SCOPE, storage), cited);
+
+  // UNTRUSTED INPUT, like every other field here: a stored id that is not a non-empty string is
+  // DROPPED and the FIGURES SURVIVE — evidence is optional on this door, so absence is a valid
+  // state and never a reason to discard a draft somebody typed.
+  for (const bad of [42, "", "   ", null, undefined, { id: "d-1" }]) {
+    const raw = JSON.stringify({ ...stored(), documentId: bad });
+    const one = memoryStorage({ [adjustmentDraftKey(SCOPE)]: raw });
+    const back = readAdjustmentDraft(SCOPE, one);
+    assert.ok(back, `a malformed documentId must not discard the draft: ${JSON.stringify(bad)}`);
+    assert.equal(back.documentId, null);
+    assert.equal(back.draft.closingCents, 650_000, "…and every figure is still there");
+  }
+
+  // A DRAFT WRITTEN BEFORE THIS FIELD EXISTED reads as "no document", not as unreadable.
+  const legacy = JSON.stringify({ intentKey: "intent-1", draft: stored().draft, postingDate: "2026-12-31", memo: "m" });
+  const old = readAdjustmentDraft(SCOPE, memoryStorage({ [adjustmentDraftKey(SCOPE)]: legacy }));
+  assert.ok(old);
+  assert.equal(old.documentId, null);
 });
 
 test("643.draft: an unrecognised payload returns null rather than a partial form seed", () => {
