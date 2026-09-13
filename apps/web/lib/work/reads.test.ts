@@ -17,7 +17,6 @@ import {
   accountNames,
   getAccountingWork,
   getWorkTask,
-  listAccountingWork,
   listOperationReceipts,
   loadWorkDetail,
 } from "./reads";
@@ -110,35 +109,16 @@ test("A MALFORMED WORK ID FIRES NO REQUEST AT ALL", async () => {
       assert.equal(await loadWorkDetail(CLIENT, "not-a-work", { session }), null);
       assert.equal(await loadWorkDetail("not-a-client", WORK, { session }), null);
       assert.equal(await getWorkTask("not-a-task", { session }), null);
-      assert.equal((await listAccountingWork("not-a-client", { session })).rows.length, 0);
       assert.deepEqual(urls, [], "not one of these malformed addresses may reach the database");
     },
   );
 });
 
-test("the client list is newest first and asks for ONE MORE than it shows, so truncation is proven not guessed", async () => {
-  await withFetch(
-    () => json([workRow()]),
-    async (urls) => {
-      const bounded = await listAccountingWork(CLIENT, { session });
-      assert.equal(bounded.truncated, false);
-      assert.match(urls[0]!, new RegExp(`client_id=eq\\.${CLIENT}`));
-      assert.match(urls[0]!, /order=created_at\.desc/);
-      assert.match(urls[0]!, /limit=201/);
-    },
-  );
-
-  // A full answer at cap+1 is PROOF the table holds more — never a silent short
-  // list. The extra row is dropped from what is rendered.
-  await withFetch(
-    () => json(Array.from({ length: 201 }, (_, i) => workRow({ id: `w-${i}` }))),
-    async () => {
-      const bounded = await listAccountingWork(CLIENT, { session });
-      assert.equal(bounded.truncated, true);
-      assert.equal(bounded.rows.length, 200);
-    },
-  );
-});
+// #641 REMOVED THE CLIENT-LIST CELL that used to live here, with the reader it measured. The
+// `limit=201` filtered GET (`listAccountingWork`) was `/clients/:id/work`'s whole read; both Work
+// lists now go through `clara.list_accounting_work` and are measured by `lib/work/work-list.test.ts`
+// (the request the door is actually sent) and `packages/db/tests/work-list.test.mjs` (what it
+// answers). A test kept for a function nothing calls is a test that proves a dead path.
 
 test("the task is read off the MASKED human view, never the base table", async () => {
   await withFetch(

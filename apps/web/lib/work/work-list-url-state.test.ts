@@ -10,22 +10,26 @@ import { test } from "node:test";
 
 import {
   applyWorkListUrlState,
+  countWorkListFilters,
   hasWorkListFilters,
   parseWorkListUrlState,
   workListStateQuery,
+  EMPTY_WORK_LIST_FILTERS,
   EMPTY_WORK_LIST_STATE,
 } from "./work-list-url-state";
 
 const CLIENT = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const USER = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+const WORK = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
 
 const parse = (search: string) => parseWorkListUrlState(new URLSearchParams(search));
 
 test("a full query round-trips through parse and apply", () => {
   const search =
     `client=${CLIENT}&status=awaiting_input,failed&purpose=journal_entry&initiator=${USER}`
-    + "&since=2026-09-01&until=2026-09-30&q=rent&cursor=abc123";
+    + `&since=2026-09-01&until=2026-09-30&q=rent&cursor=abc123&work=${WORK}`;
   const state = parse(search);
+  assert.equal(state.work, WORK);
 
   assert.equal(state.client, CLIENT);
   assert.deepEqual(state.status, ["awaiting_input", "failed"]);
@@ -115,4 +119,42 @@ test("the canonical query sorts list values and omits the cursor", () => {
   assert.match(workListStateQuery(b), /status=awaiting_input%2Cfailed/);
   assert.doesNotMatch(workListStateQuery(b), /cursor/);
   assert.equal(workListStateQuery(parse("")), "");
+});
+
+// #641 fix round — THE ADDRESSED ROW (`?work=`). It is neither a filter nor a page, and every
+// cell below is about one of the three consequences of that.
+test("the addressed ?work= id is parsed, survives a filter change, and is never a saved view", () => {
+  // It is SHAPE-CHECKED, like the other two uuid axes: a non-uuid would be a raw PostgREST
+  // `22P02` on `get_accounting_work_row`'s uuid parameter rather than the door's honest CLR11.
+  assert.equal(parse(`work=${WORK}`).work, WORK);
+  assert.equal(parse("work=not-a-work").work, null);
+  assert.equal(parse("work=").work, null);
+  assert.equal(parse("").work, null);
+
+  // It is NOT a filter: it does not make an empty page read as "no results", and it does not
+  // count towards the narrow Sheet's "N applied" badge.
+  assert.equal(hasWorkListFilters(parse(`work=${WORK}`)), false);
+  assert.equal(countWorkListFilters(parse(`work=${WORK}`)), 0);
+  assert.equal(countWorkListFilters(parse("status=failed,queued&q=rent")), 2,
+    "three tokens on two axes is TWO filters, not three");
+
+  // A filter change drops the CURSOR (a fence into one result set) but KEEPS the addressed row:
+  // the person is still pointing at the Work they arrived pointing at.
+  const narrowed = applyWorkListUrlState(
+    new URLSearchParams(`work=${WORK}&cursor=page2&status=failed`),
+    { status: ["completed"] },
+  );
+  assert.equal(narrowed.get("work"), WORK);
+  assert.equal(narrowed.get("cursor"), null);
+
+  // …and Clear filters, the ONE shared patch, does the same: it clears the seven axes and the
+  // view label, and nothing else.
+  const cleared = applyWorkListUrlState(
+    new URLSearchParams(`work=${WORK}&cursor=page2&status=failed&q=rent&view=needs-you`),
+    EMPTY_WORK_LIST_FILTERS,
+  );
+  assert.equal(cleared.toString(), `work=${WORK}`);
+
+  // A saved view is a FILTER SET. A view that pointed at one record would be a bookmark.
+  assert.equal(workListStateQuery(parse(`work=${WORK}&q=rent`)), "q=rent");
 });

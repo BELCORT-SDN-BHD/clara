@@ -36,31 +36,14 @@ import {
 
 type Opts = { session?: SessionTokenAccessor; signal?: AbortSignal };
 
-/** The ceiling on a client's Work list. Same posture as lib/journals/api.ts's
- *  `FETCH_CAP`: request one MORE than the cap and treat a full answer as PROOF
- *  the list is incomplete, rather than letting PostgREST's own `db-max-rows`
- *  truncate silently. */
-const WORK_FETCH_CAP = 200;
-
-export type BoundedWork = { rows: AccountingWorkRow[]; truncated: boolean };
-
-/** Every Work for one client, newest first — the client Work queue's own read. */
-export async function listAccountingWork(
-  clientId: string,
-  opts: Opts = {},
-): Promise<BoundedWork> {
-  if (!isUuidShape(clientId)) return { rows: [], truncated: false };
-  const rows = await getRows<AccountingWorkRow>("accounting_work", {
-    select: ACCOUNTING_WORK_SELECT,
-    filters: { client_id: `eq.${clientId}` },
-    order: "created_at.desc",
-    limit: WORK_FETCH_CAP + 1,
-    ...opts,
-  });
-  return rows.length > WORK_FETCH_CAP
-    ? { rows: rows.slice(0, WORK_FETCH_CAP), truncated: true }
-    : { rows, truncated: false };
-}
+// THE CLIENT WORK LIST IS NOT HERE ANY MORE (#641). This module once exported `listAccountingWork`
+// — a `limit=201` filtered GET whose 201st row was the truncation proof — and it was the whole of
+// `/clients/:id/work`. Both Work lists now read `clara.list_accounting_work`
+// (`lib/work/work-list.ts`), which is server-filtered, keyset-paged, and carries the two canonical
+// signals a status LABEL is derived from; nothing in `apps/web` called the old reader except its
+// own test, so it is deleted rather than kept as a second, drifting answer to "what Work does this
+// client have". What REMAINS below is the DETAIL page's own reads, which are single-row and
+// client-addressed and have no door.
 
 /** ONE Work, addressed by BOTH its id and its client. Null when RLS admits no
  *  such row — the database's honest answer, never an error it did not raise. */

@@ -41,7 +41,10 @@ import type { ClientRow } from "@/lib/firm/reads";
 import { WORK_STATUS_FACETS } from "@/lib/work/work-list";
 import {
   applyWorkListUrlState,
+  countWorkListFilters,
   hasWorkListFilters,
+  EMPTY_WORK_LIST_FILTERS,
+  WORK_LIST_QUERY_MAX,
   type WorkListUrlState,
 } from "@/lib/work/work-list-url-state";
 
@@ -200,10 +203,15 @@ export function WorkListFilterControls({ state, clients, showClient, members }: 
           <Field className="w-full sm:w-56">
             <FieldLabel htmlFor="work-filter-q">{t("filterText")}</FieldLabel>
             <FieldContent>
+              {/* CAPPED WHERE IT IS TYPED, at the same 512 characters 0189 accepts for a saved
+                  view's whole query string. Without it a long paste became a `?q=` that saved
+                  fine and then refused the moment somebody tried to SAVE the view it produced —
+                  a refusal earned three controls away from the box that caused it. */}
               <Input
                 id="work-filter-q"
                 name="q"
                 type="search"
+                maxLength={WORK_LIST_QUERY_MAX}
                 defaultValue={state.q ?? ""}
                 key={state.q ?? ""}
                 placeholder={t("filterTextPlaceholder")}
@@ -243,12 +251,7 @@ export function WorkListFilterControls({ state, clients, showClient, members }: 
             type="button"
             variant="ghost"
             size="sm"
-            onClick={() =>
-              apply({
-                client: null, status: [], purpose: [], initiator: null,
-                since: null, until: null, q: null, view: null,
-              })
-            }
+            onClick={() => apply(EMPTY_WORK_LIST_FILTERS)}
           >
             {t("filterClear")}
           </Button>
@@ -260,7 +263,10 @@ export function WorkListFilterControls({ state, clients, showClient, members }: 
 
 export function WorkListFilterBar(props: WorkListFilterProps) {
   const t = useTranslations("WorkList");
-  const activeCount = countActive(props.state);
+  // The axis count comes from the ONE place the seven axes are enumerated — this file used to
+  // keep its own copy of the tuple, which is the fourth of the five hand-written copies the
+  // standards review found.
+  const activeCount = countWorkListFilters(props.state);
 
   return (
     <>
@@ -292,18 +298,4 @@ export function WorkListFilterBar(props: WorkListFilterProps) {
       </div>
     </>
   );
-}
-
-/** How many AXES are narrowing the list — not how many tokens. Three selected statuses are one
- *  filter on the status axis, and a badge that said "3" would overstate how narrow the view is. */
-function countActive(state: WorkListUrlState): number {
-  let n = 0;
-  if (state.client !== null) n += 1;
-  if (state.status.length > 0) n += 1;
-  if (state.purpose.length > 0) n += 1;
-  if (state.initiator !== null) n += 1;
-  if (state.since !== null) n += 1;
-  if (state.until !== null) n += 1;
-  if (state.q !== null) n += 1;
-  return n;
 }

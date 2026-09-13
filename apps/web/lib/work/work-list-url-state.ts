@@ -1,5 +1,13 @@
 // #641 (journey B3) — the Work list's URL-state model: `?view=&client=&status=&purpose=
-// &initiator=&since=&until=&q=&cursor=`.
+// &initiator=&since=&until=&q=&cursor=&work=`.
+//
+// THE SEVEN FILTER AXES ARE ENUMERATED ONCE, IN `WORK_LIST_FILTER_AXES`, and every question this
+// module and its two components ask about them is derived from that one list: is anything
+// narrowing the list, how many axes are, what the canonical saved-view spelling is, which keys a
+// patch must clear, and which keys drop the cursor. The first cut hand-wrote the tuple in five
+// places (including two byte-similar "clear everything" object literals in two components), which
+// is Fowler's Duplicated Code over a Data Clump and, more practically, five places to forget an
+// eighth axis. Adding one now is adding one line here.
 //
 // THE URL IS THE LIST'S STATE, ALL OF IT, AND THAT INCLUDES THE PAGE. This is the one place this
 // codebase deliberately departs from `lib/firm/activity.ts`, whose own header explains why the
@@ -25,7 +33,7 @@
 // explicit status of its own. An explicit `?status=` always wins — a person who narrowed the view
 // by hand has said something more specific than the pill they arrived through.
 
-import { isClientIdShape } from "@/lib/client-id";
+import { isClientIdShape, isUuidShape } from "@/lib/client-id";
 import { isDateOnly } from "@/lib/firm/activity";
 import { WORK_NEEDS_YOU_VIEW } from "@/lib/navigation/tree";
 import { WORK_STATUS_FACETS } from "./work-list";
@@ -41,12 +49,67 @@ export type WorkListUrlState = {
   until: string | null;
   q: string | null;
   cursor: string | null;
+  /**
+   * THE ADDRESSED WORK — `?work=<id>`, #719's own lesson.
+   *
+   * It is neither a filter nor a page: it names ONE Work the caller arrived pointing at, which
+   * may sit anywhere — three pages down, or excluded by the very filters this same URL carries.
+   * `clara.get_accounting_work_row` exists to resolve it OUTSIDE the page window, so this field
+   * survives a filter change (the addressed row is still the row they asked for) and is left out
+   * of a saved view's canonical query (a view is a filter set, not a pointer at one record).
+   */
+  work: string | null;
 };
 
-export const EMPTY_WORK_LIST_STATE: WorkListUrlState = {
-  view: null, client: null, status: [], purpose: [], initiator: null,
-  since: null, until: null, q: null, cursor: null,
+/** THE SEVEN FILTER AXES, in the canonical order a saved view is spelled in. `view` is not one of
+ *  them — it is a LABEL for a filter set, which is why it clears with them but does not count as
+ *  one — and neither `cursor` nor `work` is: a page and an address are not narrowings. */
+export const WORK_LIST_FILTER_AXES = [
+  "client", "status", "purpose", "initiator", "since", "until", "q",
+] as const;
+export type WorkListFilterAxis = (typeof WORK_LIST_FILTER_AXES)[number];
+
+/** The keys a patch may carry that mean "the filter set changed" — the seven axes plus the view
+ *  label they light. `applyWorkListUrlState` drops the cursor for any of them. */
+export const WORK_LIST_FILTER_KEYS = [...WORK_LIST_FILTER_AXES, "view"] as const;
+
+/** THE ONE "clear everything" PATCH, so the Empty's Clear-filters button and the filter bar's own
+ *  cannot drift apart. `cursor` is deliberately absent: `applyWorkListUrlState` already drops it
+ *  for any patch that touches a filter key, so naming it here would be a second statement of the
+ *  same rule — and the addressed `work` is not a filter, so clearing filters does not discard the
+ *  row the caller came here pointing at. */
+export const EMPTY_WORK_LIST_FILTERS: Pick<WorkListUrlState, WorkListFilterAxis | "view"> = {
+  client: null, status: [], purpose: [], initiator: null,
+  since: null, until: null, q: null, view: null,
 };
+
+/** The empty state is the empty FILTER set plus the two fields that are not filters, so the two
+ *  constants cannot describe different worlds. */
+export const EMPTY_WORK_LIST_STATE: WorkListUrlState = {
+  ...EMPTY_WORK_LIST_FILTERS, cursor: null, work: null,
+};
+
+/** An axis's value as the URL spells it, or null when the axis is not narrowing anything. List
+ *  axes are SORTED here, which is what makes the same filter set chosen in two orders one string:
+ *  this is the single definition every derived question below uses. */
+function axisValue(state: WorkListUrlState, axis: WorkListFilterAxis): string | null {
+  const raw = state[axis];
+  if (Array.isArray(raw)) return raw.length > 0 ? [...raw].sort().join(",") : null;
+  return raw;
+}
+
+/**
+ * 0189's OWN CAPS ON A SAVED VIEW, mirrored here so the browser can refuse what the door would
+ * refuse and say WHY — at the control that caused it, before a round trip.
+ *
+ * These are not this module's numbers: `clara.save_my_preferences`'s `interface.workViews` arm
+ * accepts an array of AT MOST 20 views, each with a `query` of at most 512 characters. The
+ * previous cut mirrored the door's SHAPES (a 64-character name, unique ids) but not its SIZES, so
+ * a 21st save and an over-long query both came back as the generic "That view could not be saved"
+ * banner — a refusal the person could not act on, for a rule nothing on screen had stated.
+ */
+export const WORK_LIST_MAX_SAVED_VIEWS = 20;
+export const WORK_LIST_QUERY_MAX = 512;
 
 /** The built-in views this build ships, and the filters each one stands for. A saved view a
  *  PERSON created lives in `interface.workViews` (0189) and carries its own query string; these
@@ -77,6 +140,7 @@ export function parseWorkListUrlState(params: Pick<URLSearchParams, "get">): Wor
   const until = params.get("until");
   const qRaw = params.get("q");
   const cursorRaw = params.get("cursor");
+  const workRaw = params.get("work");
 
   const explicitStatus = parseList(params.get("status")).filter(isKnownStatus);
   // The built-in view contributes its filters ONLY where the URL names no explicit status of its
@@ -94,6 +158,10 @@ export function parseWorkListUrlState(params: Pick<URLSearchParams, "get">): Wor
     until: until && isDateOnly(until) ? until : null,
     q: qRaw && qRaw.trim() !== "" ? qRaw : null,
     cursor: cursorRaw && cursorRaw.trim() !== "" ? cursorRaw : null,
+    // A non-uuid `?work=` is DROPPED here rather than sent to `clara.get_accounting_work_row`,
+    // where it would be a raw PostgREST 400 `22P02` on a uuid parameter instead of the honest
+    // not-found the door raises for an id that is merely absent or not this caller's.
+    work: workRaw && isUuidShape(workRaw) ? workRaw : null,
   };
 }
 
@@ -125,8 +193,7 @@ export function applyWorkListUrlState(
     setOrDelete(key, value.length > 0 ? value.join(",") : null);
   };
 
-  const FILTER_KEYS = ["client", "status", "purpose", "initiator", "since", "until", "q", "view"] as const;
-  const touchesFilter = FILTER_KEYS.some((k) => k in patch);
+  const touchesFilter = WORK_LIST_FILTER_KEYS.some((k) => k in patch);
 
   if ("view" in patch) setOrDelete("view", patch.view);
   if ("client" in patch) setOrDelete("client", patch.client);
@@ -137,6 +204,8 @@ export function applyWorkListUrlState(
   if ("until" in patch) setOrDelete("until", patch.until);
   if ("q" in patch) setOrDelete("q", patch.q);
 
+  if ("work" in patch) setOrDelete("work", patch.work);
+
   if ("cursor" in patch) setOrDelete("cursor", patch.cursor);
   else if (touchesFilter) next.delete("cursor");
 
@@ -144,19 +213,17 @@ export function applyWorkListUrlState(
 }
 
 /** TRUE when any filter axis is narrowing the list — the test the Empty state uses to tell
- *  "nothing matches these filters" from "this is your first Work". The CURSOR is not a filter and
- *  the VIEW counts only when it actually contributes one (a view whose filters the URL has since
- *  overridden is just a label). */
+ *  "nothing matches these filters" from "this is your first Work". The CURSOR is not a filter, the
+ *  addressed `work` is not a filter, and the VIEW counts only when it actually contributes one (a
+ *  view whose filters the URL has since overridden is just a label). */
 export function hasWorkListFilters(state: WorkListUrlState): boolean {
-  return (
-    state.client !== null
-    || state.status.length > 0
-    || state.purpose.length > 0
-    || state.initiator !== null
-    || state.since !== null
-    || state.until !== null
-    || state.q !== null
-  );
+  return WORK_LIST_FILTER_AXES.some((axis) => axisValue(state, axis) !== null);
+}
+
+/** How many AXES are narrowing the list — not how many tokens. Three selected statuses are ONE
+ *  filter on the status axis, and a badge that said "3" would overstate how narrow the view is. */
+export function countWorkListFilters(state: WorkListUrlState): number {
+  return WORK_LIST_FILTER_AXES.filter((axis) => axisValue(state, axis) !== null).length;
 }
 
 /**
@@ -165,16 +232,15 @@ export function hasWorkListFilters(state: WorkListUrlState): boolean {
  * chosen in two different orders saves and compares as one string rather than two.
  *
  * `cursor` is deliberately absent: a saved view is a set of FILTERS, and a view that remembered
- * page 4 of a result set that has since changed would open on a fence into nothing.
+ * page 4 of a result set that has since changed would open on a fence into nothing. The addressed
+ * `work` is absent for the same kind of reason — a view that pointed at ONE record would open on
+ * that record for ever, which is a bookmark, not a view.
  */
 export function workListStateQuery(state: WorkListUrlState): string {
   const out = new URLSearchParams();
-  if (state.client !== null) out.set("client", state.client);
-  if (state.status.length > 0) out.set("status", [...state.status].sort().join(","));
-  if (state.purpose.length > 0) out.set("purpose", [...state.purpose].sort().join(","));
-  if (state.initiator !== null) out.set("initiator", state.initiator);
-  if (state.since !== null) out.set("since", state.since);
-  if (state.until !== null) out.set("until", state.until);
-  if (state.q !== null) out.set("q", state.q);
+  for (const axis of WORK_LIST_FILTER_AXES) {
+    const value = axisValue(state, axis);
+    if (value !== null) out.set(axis, value);
+  }
   return out.toString();
 }
