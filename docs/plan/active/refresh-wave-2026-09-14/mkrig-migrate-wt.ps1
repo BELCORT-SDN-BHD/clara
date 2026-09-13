@@ -1,5 +1,5 @@
 param([string]$Name, [int]$Port, [string]$Db, [string]$Root)
-$sp = "/mnt/c/Users/zhant/AppData/Local/Temp/claude/C--Users-zhant-Desktop-clara-rebuild/44ef844d-9f8b-41a7-a79d-6ce16177a954/scratchpad"
+$sp = "/mnt/c/Users/zhant/Desktop/clara-rebuild/docs/plan/active/refresh-wave-2026-09-14"
 wsl -u root -- bash "$sp/mkrig.sh" $Name $Port
 $env:PATH = "C:\Users\zhant\AppData\Local\pnpm;" + $env:PATH
 Set-Location $Root
