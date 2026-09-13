@@ -135,6 +135,22 @@ runs:
         WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGC_PORT/clara_wave_b_ci" \
           node tests/periodic-adjustment-e2e.mjs
 
+        # #631 — the WORK-EGRESS e2e, LAST on the same rig, because it is the only leg whose
+        # subject is what happens BEFORE a model is called. It drives the three windows nothing
+        # else reaches: an authorised run leaves a complete `dispatch -> model_call -> tool_call ->
+        # settle` trace on one run id with its authorisation consumed exactly once; a withdrawal
+        # taken through `clara.revoke_client_egress_purpose` refuses the NEXT run at the prepare,
+        # so no model is called at all and a Retry refuses identically without naming a provider;
+        # and the world-e2e leak probe, widened to `clara.work_execution_traces`, finds none of the
+        # NRIC / bank account / email / phone / JWT / api-key / DSN literals the admitted basis
+        # carries. It SKIPS CLEANLY (exit 0, printed reason) when migration 0195 is absent, so it
+        # is safe to merge before the DB half lands.
+        PGPORT=$PGC_PORT \
+        PGDATABASE=clara_wave_b_ci \
+        RELAY_TEST_MODE=1 \
+        WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGC_PORT/clara_wave_b_ci" \
+          node tests/work-egress-e2e.mjs
+
     - name: DR backup/restore self-test (ephemeral postgres:17)
       shell: bash -e {0}
       run: pnpm --filter @clara/db dr:selftest

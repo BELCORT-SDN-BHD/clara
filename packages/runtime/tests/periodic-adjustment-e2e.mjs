@@ -12,7 +12,7 @@
 // WHAT IT PROVES, and every one of these needs a real Postgres World plus a real HTTP boundary:
 //   1. ADMIT -> RUN -> COMMIT, THROUGH THE UNCHANGED FROZEN BUNDLE. One POST to the new sibling
 //      route produces one Work whose purpose is `periodic_stock_adjustment`, one run served by the
-//      SAME `clara-work/v2` body a documentless journal entry is served by, one approved entry
+//      SAME `clara-work/v3` body a documentless journal entry is served by, one approved entry
 //      carrying the `closing_stock` marker the close gate reads, one `clara.operation_receipts`
 //      row whose purpose is the Work's and whose `effects` name the adjustment, and one
 //      `clara.periodic_adjustments` row with the exact signed movement. That the typed particulars
@@ -126,7 +126,9 @@ function spawnServe(extra = {}) {
   });
   child.stdout.setEncoding("utf8");
   child.stdout.on("data", (d) => {
-    const m = /\[clara-runtime\] bundle clara-work\/v2 digest=([0-9a-f]{64})/.exec(d);
+    // #631 · the SERVING banner is v3's. v1/v2 lines still print for the parked-run census;
+    // this capture is "which bundle is this image dispatching", which is the one the Work row records.
+    const m = /\[clara-runtime\] bundle clara-work\/v3 digest=([0-9a-f]{64})/.exec(d);
     if (m && !state.banner) state.banner = m[1];
   });
   child.stderr.setEncoding("utf8");
@@ -303,7 +305,7 @@ async function main() {
 
     const settled = await pollWork(workId, one.jwt, (b) => TERMINAL.has(b.work.status), "first commit");
     assert.equal(settled.work.status, "completed", `the run settles completed (got ${settled.work.status} / ${JSON.stringify(settled.work.error)})`);
-    assert.equal(settled.work.bundle?.id, "clara-work/v2",
+    assert.equal(settled.work.bundle?.id, "clara-work/v3",
       "…served by the UNCHANGED frozen bundle: nothing about this lane needed a new workflow version");
 
     assert.equal(await countEntries(one.client), 1, "exactly ONE journal entry");

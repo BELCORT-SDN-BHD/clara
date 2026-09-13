@@ -971,7 +971,13 @@ begin
      where ea.id = p_authorization_id and ea.firm_id = w.firm_id and ea.client_id = w.client_id;
   end if;
 
-  v_started := coalesce(p_started_at, now());
+  -- THE START INSTANT, AND WHY IT IS CLAMPED. A caller that supplies only an END instant (a settle
+  -- row, say) would otherwise be compared against the SERVER''s now() for its start, and a client
+  -- clock a millisecond behind the server''s violates ck_work_execution_traces_ended — dropping the
+  -- row, because every caller in the frozen closure swallows a trace failure by design. Measured on
+  -- the rig: the settle row was absent from every completed run in tests/work-egress-e2e.mjs''s
+  -- first cut. Clamping is the honest reading of "the step cannot have ended before it started".
+  v_started := coalesce(p_started_at, least(now(), coalesce(p_ended_at, now())));
   insert into clara.work_execution_traces(firm_id, client_id, work_id, task_id, run_id, seq, phase,
       capability_id, registry_version, bundle_id, bundle_digest, instructions_id, skills, tools_id,
       model_id, purpose, authorization_id, consent_ref, activation_ref, input_digest,

@@ -118,7 +118,9 @@ function spawnServe(port, extra = {}) {
   });
   child.stdout.setEncoding("utf8");
   child.stdout.on("data", (d) => {
-    const m = /\[clara-runtime\] bundle clara-work\/v2 digest=([0-9a-f]{64})/.exec(d);
+    // #631 · the SERVING banner is v3's. v1/v2 lines still print for the parked-run census;
+    // this capture is "which bundle is this image dispatching", which is the one the Work row records.
+    const m = /\[clara-runtime\] bundle clara-work\/v3 digest=([0-9a-f]{64})/.exec(d);
     if (m && !state.banner) state.banner = m[1];
   });
   child.stderr.setEncoding("utf8");
@@ -313,7 +315,7 @@ async function main() {
   try {
     await waitReady(PORT_A);
     assert.ok(a.state.banner, "C88.8: the world-start banner names the serving bundle digest");
-    console.log(`[wq-e2e] engine A ready on ${PORT_A}; serving clara-work/v2 digest=${a.state.banner}`);
+    console.log(`[wq-e2e] engine A ready on ${PORT_A}; serving clara-work/v3 digest=${a.state.banner}`);
 
     // ---- 1. the run asks -------------------------------------------------
     const one = await seedClient("wq-ask");

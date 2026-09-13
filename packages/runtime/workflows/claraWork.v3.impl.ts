@@ -427,7 +427,11 @@ export async function runWorkSegmentStepV3(
   const usageTokens = usage.totalTokens ?? (usage.inputTokens ?? 0) + (usage.outputTokens ?? 0);
   const modelEnded = new Date().toISOString();
 
+  // WRAPPED WHOLE, for the reason traceSafely is wrapped: the digest helper and the vocabulary
+  // filter live in the same module the writer does, and a module that would not load must not be
+  // able to fail a segment that has already posted.
   await pools().withRuntime(async (c: PgExec) => {
+    try {
     const { traceDigest, observedRevisions } = await import("../lib/work-trace.mjs");
     // THE INPUT DIGEST IS OVER THE ENVELOPE, REDACTED FIRST. A digest of the raw transcript would
     // be a perfect oracle for anyone holding a candidate secret; see lib/work-trace.mjs.
@@ -455,6 +459,9 @@ export async function runWorkSegmentStepV3(
         refusal: terminal ? { code: terminal.code, reason: terminal.reason, message: terminal.message } : null,
         receiptId: ledger.posted ? ledger.posted.receipt_id : null,
       }));
+    }
+    } catch {
+      /* a diagnostic row is not authority */
     }
   });
 
@@ -579,6 +586,7 @@ export async function settleWorkStepV3(
   args: SettleArgs,
 ): Promise<void> {
   "use step";
+  const settledAt = new Date().toISOString();
   await pools().withRuntime(async (c: PgExec) => {
     await c.query("select clara.settle_work_run($1::uuid, $2::text, $3::text, $4::jsonb, $5::jsonb) as r", [
       taskId,
@@ -599,7 +607,13 @@ export async function settleWorkStepV3(
       outcome,
       refusal: args.error ?? null,
       receiptId: (args.result as { receipt_id?: string } | null)?.receipt_id ?? null,
-      endedAt: new Date().toISOString(),
+      // BOTH INSTANTS, FROM ONE CLOCK. A row that supplied only an end instant would be compared
+      // against the DATABASE's now() for its start, and a settle whose JS clock trails the
+      // server's by a millisecond then violates ck_work_execution_traces_ended and the row is
+      // silently dropped by traceSafely. Measured on the rig: the settle row was absent from every
+      // completed run in tests/work-egress-e2e.mjs's first cut.
+      startedAt: settledAt,
+      endedAt: settledAt,
     }));
   });
 }
