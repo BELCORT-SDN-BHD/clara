@@ -28,7 +28,7 @@
 
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { rootQuery, endPool, opk, withActor, insertUser } from "./rig-fixtures.mjs";
+import { rootQuery, humanQuery, endPool, opk, withActor, insertUser, mintWake, ROLES } from "./rig-fixtures.mjs";
 import { seedVerifiedDocument } from "./rig-docs-fixtures.mjs";
 
 const CLR10 = "CLR10";
@@ -45,7 +45,7 @@ const CLOSING = [
 
 let live = false;
 let executed = 0;
-const EXPECTED_CELLS = 5;
+const EXPECTED_CELLS = 6;
 
 async function cohortApplied() {
   const r = await rootQuery(`select
@@ -272,4 +272,79 @@ cell("NO validation row on this database disagrees with the rows it cites", asyn
         and s.line_count <> (select count(*)::int from clara.bank_statement_lines l where l.statement_id = s.id)`)).rows;
   assert.deepEqual(statements.map((r) => `${r.id}: declares ${r.line_count}, carries ${r.actual}`), [],
     "a validated statement's declared line_count no longer matches the lines on file");
+});
+
+// ---------------------------------------------------------------------------------------------
+// 6. FIRM SCOPE, MEASURED ON BOTH LANES (#624 closure review, SHOULD 2).
+// ---------------------------------------------------------------------------------------------
+
+/** A firm with a human member and an interactive wake credential — the two SESSIONS 0191's two
+ *  read policies are written against (`jwt_firm()` for `clara_authenticated`,
+ *  `wake_firm()` for `clara_agent_ro`). Distinct users per firm, because
+ *  `uq_membership_active_user` admits one active membership per user, total. */
+async function firmSessions(firm, tag) {
+  const user = await insertUser(`belt_${tag}`, opk("u"));
+  await rootQuery(
+    "insert into clara.firm_memberships(firm_id, user_id, role, status) values ($1,$2,'owner','active')",
+    [firm, user]);
+  const cred = await mintWake({ kind: "interactive", firm });
+  return { user, secret: cred.secret };
+}
+
+const COUNT_FOR = "select count(*)::int n from clara.document_fact_validations where extraction_id = $1";
+
+const humanCount = (sub, extraction) =>
+  humanQuery(sub, COUNT_FOR, [extraction]).then((r) => r.rows[0].n);
+
+const agentCount = (secret, extraction) =>
+  withActor({ role: ROLES.agentRo, wakeSecret: secret, transaction: true },
+    (c) => c.query(COUNT_FOR, [extraction])).then((r) => r.rows[0].n);
+
+cell("a validation row is read FIRM-SCOPED on both lanes — a firm-B human and a firm-B agent each see none of firm A's", async () => {
+  // WHY THIS CELL EXISTS. The fix round moved these policies off `clara.actor_firm_id()` — which
+  // is `coalesce(wake_firm(), jwt_firm())` and which 0002:440-443 forbids as an AUTHORIZATION
+  // basis — onto the per-lane predicates. What pinned that afterwards was 0191's tail, and the
+  // tail counts POLICIES: three exist, so it is green. A predicate rewritten to `true`, or one
+  // lane's policy silently widened to the other's accessor, keeps the count at three and keeps
+  // the tail green. The closure review named that as the weak link in the whole boundary; this
+  // cell measures the ROWS instead, which is the only thing a count of policies cannot fake.
+  //
+  // BOTH DIRECTIONS ARE ASSERTED. A zero on its own is not evidence — an empty table, a broken
+  // grant, or a wake credential that resolves to nothing all produce it. So the positive control
+  // comes first: firm A's own two sessions must SEE the row before firm B's seeing none means
+  // anything.
+  const a = await seedFactsExtraction();
+  const sessionsA = await firmSessions(a.firm, "a");
+
+  const firmB = (await rootQuery("insert into clara.firms(name) values ($1) returning id",
+    [`belt_${opk("firm")}`])).rows[0].id;
+  const sessionsB = await firmSessions(firmB, "b");
+
+  const asRootCount = (await rootQuery(COUNT_FOR, [a.extraction])).rows[0].n;
+  assert.equal(asRootCount, 1, "the fixture must have produced exactly one validation row to scope");
+
+  // POSITIVE CONTROLS — the row is genuinely reachable from its OWN firm, on each lane.
+  assert.equal(await humanCount(sessionsA.user, a.extraction), 1,
+    "firm A's human cannot read firm A's own validation row — the grant or the human policy is broken, " +
+    "and the cross-firm zeros below would then prove nothing");
+  assert.equal(await agentCount(sessionsA.secret, a.extraction), 1,
+    "firm A's agent cannot read firm A's own validation row — the agent policy or the wake credential is broken");
+
+  // THE BOUNDARY ITSELF, one lane at a time. A validation row names an arithmetic outcome over
+  // another firm's documents; leaking one leaks both the existence of that firm's document and a
+  // judgement about its figures.
+  assert.equal(await humanCount(sessionsB.user, a.extraction), 0,
+    "a firm-B HUMAN session read firm A's validation rows — p_document_fact_validations_human is not jwt_firm()-scoped");
+  assert.equal(await agentCount(sessionsB.secret, a.extraction), 0,
+    "a firm-B AGENT session read firm A's validation rows — p_document_fact_validations_agent is not wake_firm()-scoped");
+
+  // AND NEITHER LANE FALLS BACK TO THE OTHER'S ACCESSOR — the property `actor_firm_id()` did not
+  // have. A wake secret in a HUMAN session must not become that session's firm: firm A's own
+  // credential exists on this database, and handing it to firm B's human must still read zero.
+  const borrowed = await withActor(
+    { role: ROLES.authenticated, jwtSub: sessionsB.user, wakeSecret: sessionsA.secret, transaction: true },
+    (c) => c.query(COUNT_FOR, [a.extraction]));
+  assert.equal(borrowed.rows[0].n, 0,
+    "a firm-A wake secret set in a firm-B HUMAN session exposed firm A's validation rows — " +
+    "the human policy is reading something other than jwt_firm()");
 });
