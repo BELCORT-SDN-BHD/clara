@@ -17,14 +17,19 @@
 -- onboarding-answer promotion that finally carries A5/A6 interview answers into the same record.
 --
 -- =====================================================================================
--- FIVE DECISIONS THIS FILE IMPLEMENTS, EACH ONE LOAD-BEARING.
+-- SIX DECISIONS THIS FILE IMPLEMENTS, EACH ONE LOAD-BEARING.
 --
 -- 1 · LEGACY IS READ, NEVER REWRITTEN. `clara.client_facts` (0055:386-424) and its door
 --     `clara.record_client_fact` (0055:499-669) are BYTE-UNTOUCHED. No dual write exists; no
---     backfill copies a legacy row into the new table. `clara.list_client_knowledge` UNIONs the
---     legacy live facts in as `source_kind='legacy_client_fact'` so the C13 surface shows one
---     register, and a legacy fact is NEVER SHADOWED: it rides in beside any knowledge record of
---     the same key, carrying `authoritative=true`. That is not caution, it is the literal state of
+--     backfill copies a legacy row into the new table. BOTH READS -- `clara.list_client_knowledge`
+--     for C13 and `clara.get_knowledge_pack` for a run -- UNION the legacy live facts in as
+--     `source_kind='legacy_client_fact'` through ONE expression (`clara._knowledge_legacy_rows`,
+--     §D.8), and a legacy fact is NEVER SHADOWED: it rides in beside any knowledge record of
+--     the same key, carrying `authoritative=true`. The pack carrying them is the second cut: the
+--     first shipped the union to C13 only, so the register showed the legacy `trade_nature`
+--     beside the newer record while a Work reading the pack saw only the record -- and would have
+--     coded on it while clara._close_gate_closing_stock went on gating on the legacy value. One
+--     register, one pack, one answer. That is not caution, it is the literal state of
 --     the estate -- every one of the five carried keys is still READ from clara.client_facts by
 --     code this file does not touch: entity_type and msic through 0055's own S6 splice into
 --     clara.get_context_pack (0055:765), trade_nature by clara._close_gate_closing_stock
@@ -72,6 +77,20 @@
 --     record; `correct_knowledge` and `withdraw_knowledge` append revisions 2..n and stamp the
 --     predecessor. `clara._tf_knowledge_records_supersede_only` (cloned from 0055:428-455) admits
 --     exactly one update — the supersession stamp — and delete/truncate are refused outright.
+--
+-- 6 · EVERY RUNTIME SURFACE NAMES THE TENANT IT MEANS, and the naming is checked BEFORE anything
+--     else is looked up. `clara.capture_knowledge_for` verifies the named human's live active
+--     membership; `clara.promote_plan_answers_to_knowledge` requires `p_firm` of its machine lane
+--     and fetches the plan INSIDE that firm; `clara.get_knowledge_pack` requires `p_firm` of its
+--     machine lane and looks the client up INSIDE it, with the human lane taking the session firm
+--     and treating a supplied `p_firm` as a belt. Deriving the tenant from the object id is not a
+--     tenancy check, it is the absence of one -- a wrong or model-influenced client id would
+--     otherwise put another firm's knowledge into a model's context.
+--     ORDER IS PART OF THE RULE. Both doors settle the lane and the floor BEFORE they look the
+--     object up: a plan fetched first let a below-floor caller tell a real foreign plan id (CLR04,
+--     the floor) from a random one (CLR11, not found) -- an existence oracle for a guessed id, and
+--     a row lock on another firm's plan on the way to refusing it. 0021's rule is that absent and
+--     foreign answer alike; it applies to the caller who was never admitted to ask, too.
 --
 -- =====================================================================================
 -- WHAT THIS FILE DELIBERATELY DOES NOT DO.
@@ -1017,6 +1036,49 @@ create function clara._knowledge_row_json(r clara.knowledge_records) returns jso
 $$;
 revoke all on function clara._knowledge_row_json(clara.knowledge_records) from public;
 
+-- D.8 — THE LEGACY UNION, in ONE expression. clara.client_facts is byte-untouched by this file
+-- and is still what the ESTATE reads for all five carried keys (header decision 1 names the four
+-- readers), so BOTH the C13 register and the runtime knowledge pack must carry those rows,
+-- read-only and flagged as the ones in force. Two hand-written copies of that object would drift
+-- the first time either read gained a field -- and the drift that actually happened was worse
+-- than a field: the pack simply did not have them at all, so C13 and a Work looking at the same
+-- client disagreed about which value governs. One function, called by both reads.
+--
+-- IT NEVER CONSULTS clara.knowledge_records, and that absence is the no-shadow rule made
+-- structural: there is nothing here that COULD hide a legacy fact behind a knowledge record of
+-- the same key. `knowledge_version` is null because a legacy fact has no knowledge revision to
+-- stamp, so unioning these rows cannot move either read's watermark.
+create function clara._knowledge_legacy_rows(p_firm uuid, p_client uuid) returns jsonb
+  language sql stable security definer set search_path = clara, pg_temp as $$
+  select coalesce(jsonb_agg(j order by fact_key), '[]'::jsonb)
+    from (
+      select jsonb_build_object(
+          'record_id', cf.id, 'revision_id', cf.id, 'revision_n', 1,
+          'scope_kind', 'client', 'client_id', cf.client_id, 'knowledge_key', cf.fact_key,
+          'kind', 'assertion', 'value', cf.fact_value, 'applies_when', '{}'::jsonb,
+          'applies_when_digest', null, 'effective_from', null, 'effective_to', null,
+          'source_kind', 'legacy_client_fact', 'trust', 'asserted',
+          'source', jsonb_build_object('document_id', cf.source_document_id, 'extraction_id', null,
+            'region_id', null, 'field_path', null, 'work_id', null),
+          'basis', cf.basis, 'asserted_by', cf.recorded_by, 'recorded_via', 'human_ui',
+          'recorded_at', cf.recorded_at, 'knowledge_version', null,
+          'revision_kind', 'capture', 'revision_reason', null, 'supersedes_id', null,
+          'superseded_by', null, 'superseded_at', null, 'state', 'live', 'editable', false,
+          'asserted_by_name', u.display_name, 'basis_kind', cf.basis_kind,
+          'key_description', kk.description,
+          -- THE LEGACY ROW IS THE ONE IN FORCE, unconditionally, and both surfaces say so. This
+          -- file adds a register BESIDE clara.client_facts and does not dual-write, so for every
+          -- one of the five carried keys the value the ESTATE acts on is still the legacy one.
+          'authoritative', true) as j,
+          cf.fact_key as fact_key
+        from clara.client_facts cf
+        left join clara.users u on u.id = cf.recorded_by
+        left join clara.knowledge_keys kk on kk.knowledge_key = cf.fact_key
+       where cf.client_id = p_client and cf.firm_id = p_firm and cf.superseded_at is null
+    ) l;
+$$;
+revoke all on function clara._knowledge_legacy_rows(uuid, uuid) from public;
+
 reset role;
 
 -- =====================================================================================
@@ -1300,36 +1362,12 @@ begin
                                   and o.knowledge_key = r.knowledge_key
                                   and o.applies_when_digest = r.applies_when_digest)))
     ) k;
-  -- THE LEGACY UNION, second and separate. `clara.client_facts` is byte-untouched by this file;
-  -- it is READ here so C13 shows one register, and NEVER shadowed -- decision 1 names the four
-  -- places the estate still reads that table for these five keys.
-  select v_rows || coalesce(jsonb_agg(j order by fact_key), '[]'::jsonb)
-    into v_rows
-    from (
-      select jsonb_build_object(
-          'record_id', cf.id, 'revision_id', cf.id, 'revision_n', 1,
-          'scope_kind', 'client', 'client_id', cf.client_id, 'knowledge_key', cf.fact_key,
-          'kind', 'assertion', 'value', cf.fact_value, 'applies_when', '{}'::jsonb,
-          'applies_when_digest', null, 'effective_from', null, 'effective_to', null,
-          'source_kind', 'legacy_client_fact', 'trust', 'asserted',
-          'source', jsonb_build_object('document_id', cf.source_document_id, 'extraction_id', null,
-            'region_id', null, 'field_path', null, 'work_id', null),
-          'basis', cf.basis, 'asserted_by', cf.recorded_by, 'recorded_via', 'human_ui',
-          'recorded_at', cf.recorded_at, 'knowledge_version', null,
-          'revision_kind', 'capture', 'revision_reason', null, 'supersedes_id', null,
-          'superseded_by', null, 'superseded_at', null, 'state', 'live', 'editable', false,
-          'asserted_by_name', u.display_name, 'basis_kind', cf.basis_kind,
-          'key_description', kk.description,
-          -- THE LEGACY ROW IS THE ONE IN FORCE, unconditionally, and the surface says so. This
-          -- file adds a register BESIDE clara.client_facts and does not dual-write, so for every
-          -- one of the five carried keys the value the ESTATE acts on is still the legacy one.
-          'authoritative', true) as j,
-          cf.fact_key as fact_key
-        from clara.client_facts cf
-        left join clara.users u on u.id = cf.recorded_by
-        left join clara.knowledge_keys kk on kk.knowledge_key = cf.fact_key
-       where cf.client_id = p_client and cf.firm_id = c.firm and cf.superseded_at is null
-    ) l;
+  -- THE LEGACY UNION, second and separate, through the ONE expression the runtime knowledge
+  -- pack also uses (§D.8). `clara.client_facts` is byte-untouched by this file; it is READ here
+  -- so C13 shows one register, and NEVER shadowed -- decision 1 names the four places the estate
+  -- still reads that table for these five keys. The helper cannot shadow one even by accident:
+  -- it never consults clara.knowledge_records.
+  v_rows := v_rows || clara._knowledge_legacy_rows(c.firm, p_client);
   return jsonb_build_object('client_id', p_client, 'knowledge_version', coalesce(v_version, 0)::text,
     'records', v_rows);
 end $read$;
@@ -1387,21 +1425,73 @@ revoke all on function clara.get_knowledge_history(uuid) from public;
 -- F.4 — clara.get_knowledge_pack — THE RUNTIME READ. A NEW function, deliberately (see the
 -- header): #658's progressive retrieval can supersede it without touching a spliced body.
 --
+-- IT NAMES THE TENANT IT READS. The first cut took `p_client` alone, looked the firm UP from the
+-- client and verified nothing -- so the only thing deciding whose knowledge reached a model's
+-- context was a client id, and a wrong or model-influenced one put another firm's records in
+-- front of the model. That is the same hole the promotion door closed, on the read side, and it
+-- is closed the same way: the MACHINE lane must NAME the firm (`p_firm`, REQUIRED) and a firm
+-- that does not own the client answers the no-existence-oracle refusal, absent and foreign alike
+-- (0021's rule). The HUMAN lane takes its firm from the session (clara.jwt_firm, through
+-- clara._human_ctx at the viewer floor -- the same floor clara.list_client_knowledge uses) and
+-- treats a supplied `p_firm` as a belt that must agree. Anything that is neither lane is CLR03,
+-- the authority class, rather than a fall-through to the cheaper arm.
+--
+-- THE HUMAN ARM HOLDS NO GRANT TODAY and that is deliberate, not an oversight: §H keeps this door
+-- clara_runtime-ONLY (a C13 surface reads clara.list_client_knowledge). The arm exists so that a
+-- later grant is a grant and not a second tenancy decision, and it is measured through the body.
+--
+-- IT CARRIES THE LEGACY FACTS THAT STILL GOVERN. clara.list_client_knowledge unions
+-- clara.client_facts in read-only and flags each row `authoritative` because those are the rows
+-- the estate actually reads (header decision 1 names the four readers). The pack did not, so the
+-- two reads disagreed about the same client: C13 showed the legacy trade_nature beside the newer
+-- knowledge record, while a Work reading the pack saw only the knowledge record and would have
+-- coded on it while clara._close_gate_closing_stock (0056:1283) went on gating on the legacy
+-- value. One register, one pack, one answer -- and ONE expression, clara._knowledge_legacy_rows,
+-- so the two can never drift apart again.
+--
 -- HONEST ABOUT ITS OWN LIMITS. `p_purpose` is RECORDED and echoed; it does not yet filter, and
 -- this comment is the product saying so rather than a surface implying a relevance model that
--- does not exist. `knowledge_version` is the greatest version stamp among the rows this call
--- actually emitted -- the number a resumed run re-checks.
-create function clara.get_knowledge_pack(p_client uuid, p_purpose text) returns jsonb
+-- does not exist. `knowledge_version` is the watermark over every knowledge REVISION in scope --
+-- the number a resumed run re-checks -- and the legacy union does not move it, because a legacy
+-- client_fact has no knowledge revision to stamp (its own row carries knowledge_version null,
+-- exactly as it does in the register).
+create function clara.get_knowledge_pack(p_client uuid, p_purpose text, p_firm uuid default null)
+  returns jsonb
   language plpgsql stable security definer set search_path = clara, pg_temp
   set plan_cache_mode = force_custom_plan as $read$
-declare v_firm uuid; v_rows jsonb; v_version bigint;
+declare c record; v_firm uuid; v_actor uuid; v_rows jsonb; v_version bigint;
 begin
   if nullif(btrim(coalesce(p_purpose, '')), '') is null then
     raise exception 'a knowledge pack is read for a stated purpose' using errcode = 'CLR10',
       detail = '{"reason":"knowledge_purpose_required"}';
   end if;
-  select cl.firm_id into v_firm from clara.clients cl where cl.id = p_client;
-  if v_firm is null then
+  -- THE LANE IS PICKED FROM THE CALLER, exactly as clara.promote_plan_answers_to_knowledge picks
+  -- it, and for the same measured reason: clara.jwt_sub() answers NULL for absent, unparseable
+  -- and non-uuid claims (0002:339-352), so "no claim" can never be read as "therefore the
+  -- runtime". `current_setting('role')` is the SET ROLE a pooled session actually took and
+  -- `clara_runtime_login` is the login packages/runtime/lib/pools.mjs checks out as; pg_has_role
+  -- is not used because the rig connects as postgres, a member of every role.
+  v_actor := clara.jwt_sub();
+  if v_actor is not null then
+    c := clara._human_ctx(clara.role_rank('viewer'));
+    if p_firm is not null and p_firm <> c.firm then
+      raise exception 'client not found' using errcode = 'CLR11';
+    end if;
+    v_firm := c.firm;
+  elsif coalesce(current_setting('role', true), 'none') = 'clara_runtime'
+        or session_user in ('clara_runtime', 'clara_runtime_login') then
+    if p_firm is null then
+      raise exception 'the runtime knowledge pack names the firm it is reading'
+        using errcode = 'CLR10', detail = '{"reason":"pack_firm_required"}';
+    end if;
+    v_firm := p_firm;
+  else
+    raise exception 'reading a knowledge pack needs an identified human or the runtime'
+      using errcode = 'CLR03', detail = '{"reason":"no_pack_context"}';
+  end if;
+  -- ONE refusal for absent and foreign alike: the client is looked up INSIDE the bound firm, so
+  -- "not this firm's" and "does not exist" are the same answer by construction.
+  if not exists (select 1 from clara.clients cl where cl.id = p_client and cl.firm_id = v_firm) then
     raise exception 'client not found' using errcode = 'CLR11';
   end if;
   -- The SAME watermark expression clara.list_client_knowledge uses — see its own note for why it
@@ -1427,10 +1517,12 @@ begin
                                   and o.knowledge_key = r.knowledge_key
                                   and o.applies_when_digest = r.applies_when_digest)))
     ) p;
+  -- THE LEGACY UNION, second and separate, through the one expression the register also uses.
+  v_rows := v_rows || clara._knowledge_legacy_rows(v_firm, p_client);
   return jsonb_build_object('status', 'ok', 'client_id', p_client, 'firm_id', v_firm,
     'purpose', p_purpose, 'knowledge_version', coalesce(v_version, 0)::text, 'records', v_rows);
 end $read$;
-revoke all on function clara.get_knowledge_pack(uuid, text) from public;
+revoke all on function clara.get_knowledge_pack(uuid, text, uuid) from public;
 
 -- =====================================================================================
 -- §G — clara.promote_plan_answers_to_knowledge — WHAT A5/A6 HAVE ALWAYS OWED.
@@ -1446,6 +1538,9 @@ revoke all on function clara.get_knowledge_pack(uuid, text) from public;
 -- must NAME the firm it is promoting into (`p_firm`) and this door verifies that name against the
 -- plan; without it, a plan id alone decided which tenant the promotion wrote into, which is the
 -- absence of a tenancy check rather than a lenient one. Anything that is neither lane is CLR03.
+-- AND THE LANE IS SETTLED BEFORE THE PLAN IS READ: the plan is then fetched INSIDE the firm the
+-- caller has proved, so a below-floor caller cannot tell a real foreign plan id from an absent
+-- one, and no foreign row is locked on the way to a refusal.
 --
 -- ATTRIBUTION IS THE ANSWERER'S, AUTHORITY IS THE PROMOTER'S. `asserted_by` is the person who
 -- answered the question (onboarding_plan_items.answered_by); the promoting actor is an admin (or
@@ -1472,20 +1567,26 @@ create function clara.promote_plan_answers_to_knowledge(
   set plan_cache_mode = force_custom_plan as $door$
 declare
   p record; c record; it record; v_dedupe jsonb; v_actor uuid; v_via text; v_auditor uuid;
+  v_firm uuid;
   v_promoted jsonb := '[]'::jsonb; v_skipped jsonb := '[]'::jsonb; v_withheld jsonb := '[]'::jsonb;
   v_one jsonb; v_scope text; v_client uuid; v_version bigint; v_reason text; v_detail text;
 begin
   if p_op_key is null or btrim(p_op_key) = '' then
     raise exception 'op_key is required' using errcode = 'CLR10';
   end if;
-  select * into p from clara.onboarding_plans where id = p_plan for update;
-  if not found then
-    raise exception 'onboarding plan not found' using errcode = 'CLR11';
-  end if;
+  -- THE LANE, ITS FLOOR AND ITS TENANT ARE DECIDED BEFORE ANY PLAN IS LOOKED UP, and the ORDER
+  -- is the fix. The first cut fetched the plan (`select … for update`) first and discriminated
+  -- afterwards, so a caller who could never promote anything still learned something from the
+  -- refusal it got: firm B's BOOKKEEPER naming firm A's REAL plan id got CLR04 (the admin floor),
+  -- while the same caller naming a random uuid got CLR11 (not found). That is an existence oracle
+  -- for a guessed id -- and on the way to refusing it also took a ROW LOCK on another firm's plan.
+  -- 0021's rule (absent and foreign answer alike) applies one level up: a refusal must not depend
+  -- on whether the object exists when the caller was never admitted to ask about it.
+  --
   -- THE TWO LANES, AND THE MACHINE LANE NEEDS A ROLE WITNESS — not merely an absent claim.
   --
   -- THE HOLE THIS CLOSES, verbatim: this door is granted to clara_authenticated, the plan is
-  -- fetched by id alone inside a clara_fn_owner definer, and the first cut read
+  -- fetched by id inside a clara_fn_owner definer, and the first cut read
   -- `clara.jwt_sub() is null` as "therefore the runtime". clara.jwt_sub() returns NULL for absent
   -- claims, unparseable claims and a non-uuid `sub` (0002:339-352), so ANY session on
   -- clara_authenticated whose claims were missing or malformed fell into the machine arm — which
@@ -1504,12 +1605,12 @@ begin
   -- is refused CLR03, the authority class, rather than falling through to the cheaper arm.
   v_actor := clara.jwt_sub();
   if v_actor is not null then
-    c := clara._human_ctx(clara.role_rank('admin'));
     -- The session's own firm decides, and a SUPPLIED p_firm is a belt that must agree with it.
-    if c.firm <> p.firm_id or (p_firm is not null and p_firm <> c.firm) then
+    c := clara._human_ctx(clara.role_rank('admin'));
+    if p_firm is not null and p_firm <> c.firm then
       raise exception 'onboarding plan not found' using errcode = 'CLR11';
     end if;
-    v_via := 'human_ui'; v_auditor := c.actor;
+    v_firm := c.firm; v_via := 'human_ui'; v_auditor := c.actor;
   elsif coalesce(current_setting('role', true), 'none') = 'clara_runtime'
         or session_user in ('clara_runtime', 'clara_runtime_login') then
     -- AND THE MACHINE LANE NAMES THE TENANT IT MEANS -- the SECOND half of B1, and a different
@@ -1522,23 +1623,31 @@ begin
     --
     -- clara.capture_knowledge_for is the shape this follows: the runtime lane NAMES its subject
     -- and the door verifies it. So p_firm is REQUIRED here, and a p_firm that is not the plan's
-    -- own firm answers the no-existence-oracle refusal (absent and foreign alike, 0021's rule).
+    -- own firm answers the no-existence-oracle refusal (absent and foreign alike, 0021's rule) --
+    -- which now falls out of the lookup itself rather than out of a comparison after it.
     --
     -- IT IS DELIBERATELY NOT IN THE OP HASH below: p_firm ASSERTS something about the plan rather
-    -- than choosing what the op does, and it is verified equal to p.firm_id before any effect, so
-    -- a replay that spells it differently still means the same act.
+    -- than choosing what the op does, and no effect happens outside that firm, so a replay that
+    -- spells it differently still means the same act.
     if p_firm is null then
       raise exception 'the runtime promotion lane names the firm it is promoting into'
         using errcode = 'CLR10', detail = '{"reason":"promotion_firm_required"}';
     end if;
-    if p_firm <> p.firm_id then
-      raise exception 'onboarding plan not found' using errcode = 'CLR11';
-    end if;
-    v_via := 'clara_runtime'; v_auditor := p.committed_by;
+    v_firm := p_firm; v_via := 'clara_runtime';
   else
     raise exception 'promoting onboarding answers needs an identified admin or the runtime'
       using errcode = 'CLR03', detail = '{"reason":"no_promotion_context"}';
   end if;
+  -- AND ONLY NOW THE PLAN, fetched INSIDE the tenant the caller has already proved. A plan id
+  -- from anywhere else is simply absent here, so "foreign" and "does not exist" are one answer
+  -- by construction rather than by a comparison someone could later drop.
+  select * into p from clara.onboarding_plans op
+   where op.id = p_plan and op.firm_id = v_firm
+   for update;
+  if not found then
+    raise exception 'onboarding plan not found' using errcode = 'CLR11';
+  end if;
+  if v_via = 'clara_runtime' then v_auditor := p.committed_by; end if;
   v_dedupe := clara._reserve_op(p.firm_id, 'promote_plan_answers_to_knowledge', p_op_key,
     clara._hash(jsonb_build_object('plan', p_plan, 'firm_scope', coalesce(p_promote_firm_scope, false))));
   if v_dedupe is not null then return v_dedupe; end if;
@@ -1646,7 +1755,7 @@ to clara_authenticated;
 
 grant execute on function
   clara.capture_knowledge_for(uuid, uuid, text, jsonb, text, text, text, jsonb, date, date, jsonb, text),
-  clara.get_knowledge_pack(uuid, text)
+  clara.get_knowledge_pack(uuid, text, uuid)
 to clara_runtime;
 
 -- The promotion door is the ONE name both lanes hold: the browser calls it right after the
@@ -1926,7 +2035,7 @@ begin
   select count(*)::int into v_n
     from unnest(array[
       'clara.capture_knowledge_for(uuid, uuid, text, jsonb, text, text, text, jsonb, date, date, jsonb, text)',
-      'clara.get_knowledge_pack(uuid, text)']) sig
+      'clara.get_knowledge_pack(uuid, text, uuid)']) sig
    where has_function_privilege('clara_runtime', sig::regprocedure, 'EXECUTE')
      and not has_function_privilege('clara_authenticated', sig::regprocedure, 'EXECUTE')
      and not has_function_privilege('clara_agent_ro', sig::regprocedure, 'EXECUTE');
@@ -1965,11 +2074,37 @@ begin
       using errcode='CLR10';
   end if;
   -- …AND IT NAMES THE TENANT IT WRITES INTO. The second half of B1: the machine arm must demand
-  -- an explicit p_firm and refuse one that is not the plan's own firm. Asserted from the BODY for
-  -- the same reason as the arm above -- a lost conjunct passes every happy-path cell.
+  -- an explicit p_firm, and the plan must be fetched INSIDE the firm the caller has proved rather
+  -- than by id alone. Asserted from the BODY for the same reason as the arm above -- a lost
+  -- conjunct passes every happy-path cell.
   if position('promotion_firm_required' in v_s) = 0
-     or position('p_firm <> p.firm_id' in v_s) = 0 then
+     or position('op.firm_id = v_firm' in v_s) = 0 then
     raise exception '#644 tail: the machine promotion lane does not require and verify an explicit firm binding'
+      using errcode='CLR10';
+  end if;
+  -- …AND THE FLOOR IS APPLIED BEFORE THE PLAN IS EVER LOOKED UP (SHOULD-1: no existence oracle
+  -- below the floor). Ordering, not presence, was the defect: a plan fetched first let a
+  -- below-floor caller tell a real foreign plan id (CLR04, the floor) from a random one (CLR11,
+  -- not found), and took a row lock on another firm's plan on the way. Measured as a POSITION
+  -- comparison because that is exactly what the property is.
+  if position('_human_ctx' in v_s) = 0
+     or position('from clara.onboarding_plans op' in v_s) = 0
+     or position('_human_ctx' in v_s) > position('from clara.onboarding_plans op' in v_s) then
+    raise exception '#644 tail: clara.promote_plan_answers_to_knowledge looks the plan up BEFORE it applies the admin floor -- a below-floor caller can tell a real foreign plan from an absent one'
+      using errcode='CLR10';
+  end if;
+  -- THE RUNTIME PACK NAMES ITS TENANT TOO (SHOULD-2). Same three properties, same reason: the
+  -- machine lane must require p_firm, the human lane must take the session firm, and neither
+  -- lane open by default.
+  select prosrc into v_s from pg_proc p2 join pg_namespace n2 on n2.oid=p2.pronamespace
+   where n2.nspname='clara' and p2.proname='get_knowledge_pack';
+  if position('pack_firm_required' in v_s) = 0
+     or position('current_setting(''role''' in v_s) = 0
+     or position('clara_runtime_login' in v_s) = 0
+     or position('_human_ctx' in v_s) = 0
+     or position('no_pack_context' in v_s) = 0
+     or position('cl.firm_id = v_firm' in v_s) = 0 then
+    raise exception '#644 tail: clara.get_knowledge_pack does not bind the tenant it reads -- a client id alone decides whose knowledge reaches the model'
       using errcode='CLR10';
   end if;
 
@@ -1992,15 +2127,30 @@ begin
   -- the estate still reads for all five carried keys, so the register may not hide a legacy row
   -- behind a knowledge record of the same key.
   select prosrc into v_s from pg_proc p2 join pg_namespace n2 on n2.oid=p2.pronamespace
-   where n2.nspname='clara' and p2.proname='list_client_knowledge';
-  if position('''authoritative'', true' in v_s) = 0 then
-    raise exception '#644 tail: the legacy union does not flag its rows as the ones in force'
+   where n2.nspname='clara' and p2.proname='_knowledge_legacy_rows';
+  if v_s is null or position('''authoritative'', true' in v_s) = 0
+     or position('''source_kind'', ''legacy_client_fact''' in v_s) = 0
+     or position('''editable'', false' in v_s) = 0 then
+    raise exception '#644 tail: the legacy union does not flag its rows as the read-only ones in force'
       using errcode='CLR10';
   end if;
-  if position('o.knowledge_key = cf.fact_key' in v_s) <> 0 then
-    raise exception '#644 tail: the legacy union still shadows a client_facts row behind a knowledge record'
+  -- THE NO-SHADOW RULE IS STRUCTURAL, not a conjunct someone can drop: the legacy expression
+  -- never consults clara.knowledge_records, so there is nothing in it that COULD hide a legacy
+  -- fact behind a knowledge record of the same key.
+  if position('knowledge_records' in v_s) <> 0 then
+    raise exception '#644 tail: the legacy union reads clara.knowledge_records -- it could shadow a client_fact'
       using errcode='CLR10';
   end if;
+  -- …AND BOTH READS TAKE IT FROM THAT ONE PLACE. The pack omitting the legacy rows is precisely
+  -- how C13 and a Work came to disagree about which value governs the same client.
+  foreach k in array array['list_client_knowledge','get_knowledge_pack'] loop
+    select prosrc into v_s from pg_proc p2 join pg_namespace n2 on n2.oid=p2.pronamespace
+     where n2.nspname='clara' and p2.proname=k;
+    if position('_knowledge_legacy_rows' in v_s) = 0 then
+      raise exception '#644 tail: clara.% does not carry the legacy client_facts that still govern', k
+        using errcode='CLR10';
+    end if;
+  end loop;
   -- …while the FIRM shadow survives in BOTH reads, and is per-applicability in both (the
   -- shadow-by-applicability finding: matching on the key alone let a narrow client row erase an
   -- unconditional firm default).
@@ -2014,6 +2164,6 @@ begin
   end loop;
 
 
-  raise notice '#644 tail: OK -- clara.knowledge_keys (13 keys: the 5 legacy fact keys carried BY VALUE from clara.client_fact_keys with their own validation vocabulary, plus the 8 the A5/A6 interview actually produces, of which 2 are authority-bearing policies and 1 a preference), clara.knowledge_plan_item_map (10 item_key -> knowledge_key rows, every one of them an item key the live interview emits today), clara.knowledge_records and clara.knowledge_versions all exist under FORCED row level security owned by clara_fn_owner, with ZERO insert/update/delete/truncate privilege for any application role and no grant of any kind on the version counter; the record carries a stable record_id with monotone revisions, a structural (scope_kind=client)=(client_id is not null) scope, a composite (client, firm) tenant FK, four firm-congruent SOURCE pins onto documents/document_extractions/document_regions plus a Work pin, a sha256(convert_to(jsonb_pretty(applies_when))) applicability digest STAMPED by the BEFORE INSERT trigger through clara._knowledge_applies_when_digest (not a generated column -- the estate digest is refused by a generation expression and the immutable-looking bytea cast raises 22P02 on a quoted value), key-order-insensitive and able to digest a quoted/escaped condition, a partial uq_knowledge_live over (scope, subject, key, applicability) whose race answers knowledge_already_live by name rather than a bare 23505, the four immutability belts and a trust level that is a FUNCTION of the source kind -- stated inline in ck_knowledge_records_trust so a restore enforces it with no function in sight, and agreeing with clara._knowledge_trust_of on all six source kinds -- with policy keys admitting `asserted` alone at THREE belts (the inline CHECK, the catalog trigger, the door) and authority-bearing keys of any other kind at TWO (a table CHECK cannot read the catalog); the five carried legacy keys keeping their own doors'' floors (admin+, and OWNER for customer_identity_policy) and NO legacy client_fact being shadowed at all -- each rides the register beside any knowledge row of the same key with authoritative=true, because clara.client_facts is still the table the estate READS for every one of the five (get_context_pack 0055:765, the close gate 0056:1283, the name-only guard 0062:226, the bank-registry ledger 0121:4797) and this file does not dual-write; both reads taking their knowledge_version watermark over EVERY revision in scope (so a withdrawal cannot move it backwards) and emitting it as TEXT (a bigint through a JSON number is a lossy claim); clara.capture_knowledge / correct_knowledge / withdraw_knowledge / list_client_knowledge / get_knowledge_record / get_knowledge_history are clara_authenticated-ONLY, clara.capture_knowledge_for / get_knowledge_pack are clara_runtime-ONLY, clara.promote_plan_answers_to_knowledge is the ONE two-lane name and picks its lane from the CALLER (an identified admin of the plan''s own firm, or the clara_runtime role witness -- which must additionally NAME the firm it promotes into through p_firm and is refused CLR11 when that is not the plan''s own firm; anything else is CLR03, so a claims-less clara_authenticated session can neither reach the machine arm nor, having reached it, choose the tenant it writes into), every one of the nine a PUBLIC-revoked fn_owner-owned SECURITY DEFINER with search_path and plan_cache_mode=force_custom_plan pinned, and NO wake or agent role holds EXECUTE on anything here; the three events are registered client-scoped and routed at the active taxonomy version (captured=ignore, corrected/withdrawn=context_update -- deliberately NOT one of the three wake-bound decisions, because each of those mints a held agent task that nothing in this slice would execute); and clara.record_client_fact still resolves at its exact 0055 signature with clara.client_facts carrying no trigger of this file and this file seeding ZERO knowledge records.';
+  raise notice '#644 tail: OK -- clara.knowledge_keys (13 keys: the 5 legacy fact keys carried BY VALUE from clara.client_fact_keys with their own validation vocabulary, plus the 8 the A5/A6 interview actually produces, of which 2 are authority-bearing policies and 1 a preference), clara.knowledge_plan_item_map (10 item_key -> knowledge_key rows, every one of them an item key the live interview emits today), clara.knowledge_records and clara.knowledge_versions all exist under FORCED row level security owned by clara_fn_owner, with ZERO insert/update/delete/truncate privilege for any application role and no grant of any kind on the version counter; the record carries a stable record_id with monotone revisions, a structural (scope_kind=client)=(client_id is not null) scope, a composite (client, firm) tenant FK, four firm-congruent SOURCE pins onto documents/document_extractions/document_regions plus a Work pin, a sha256(convert_to(jsonb_pretty(applies_when))) applicability digest STAMPED by the BEFORE INSERT trigger through clara._knowledge_applies_when_digest (not a generated column -- the estate digest is refused by a generation expression and the immutable-looking bytea cast raises 22P02 on a quoted value), key-order-insensitive and able to digest a quoted/escaped condition, a partial uq_knowledge_live over (scope, subject, key, applicability) whose race answers knowledge_already_live by name rather than a bare 23505, the four immutability belts and a trust level that is a FUNCTION of the source kind -- stated inline in ck_knowledge_records_trust so a restore enforces it with no function in sight, and agreeing with clara._knowledge_trust_of on all six source kinds -- with policy keys admitting `asserted` alone at THREE belts (the inline CHECK, the catalog trigger, the door) and authority-bearing keys of any other kind at TWO (a table CHECK cannot read the catalog); the five carried legacy keys keeping their own doors'' floors (admin+, and OWNER for customer_identity_policy) and NO legacy client_fact being shadowed at all -- each rides BOTH the register and the runtime pack, through the one clara._knowledge_legacy_rows expression, beside any knowledge row of the same key with authoritative=true, because clara.client_facts is still the table the estate READS for every one of the five (get_context_pack 0055:765, the close gate 0056:1283, the name-only guard 0062:226, the bank-registry ledger 0121:4797) and this file does not dual-write; both reads taking their knowledge_version watermark over EVERY revision in scope (so a withdrawal cannot move it backwards) and emitting it as TEXT (a bigint through a JSON number is a lossy claim); clara.capture_knowledge / correct_knowledge / withdraw_knowledge / list_client_knowledge / get_knowledge_record / get_knowledge_history are clara_authenticated-ONLY, clara.capture_knowledge_for / get_knowledge_pack are clara_runtime-ONLY (and the pack, like the promotion door, NAMES the firm it reads through a required p_firm, looks the client up inside it and refuses CLR03 to a session that is neither an identified human nor the runtime role), clara.promote_plan_answers_to_knowledge is the ONE two-lane name and picks its lane from the CALLER (an identified admin of the plan''s own firm, or the clara_runtime role witness -- which must additionally NAME the firm it promotes into through p_firm and is refused CLR11 when that is not the plan''s own firm; anything else is CLR03, so a claims-less clara_authenticated session can neither reach the machine arm nor, having reached it, choose the tenant it writes into), with BOTH doors settling the lane and its floor BEFORE the object is looked up so that a below-floor caller cannot tell a real foreign id from an absent one, every one of the nine a PUBLIC-revoked fn_owner-owned SECURITY DEFINER with search_path and plan_cache_mode=force_custom_plan pinned, and NO wake or agent role holds EXECUTE on anything here; the three events are registered client-scoped and routed at the active taxonomy version (captured=ignore, corrected/withdrawn=context_update -- deliberately NOT one of the three wake-bound decisions, because each of those mints a held agent task that nothing in this slice would execute); and clara.record_client_fact still resolves at its exact 0055 signature with clara.client_facts carrying no trigger of this file and this file seeding ZERO knowledge records.';
 end
 $w644_tail$;
