@@ -111,6 +111,14 @@
 -- somehow bypassed this file's occurrence row cannot admit two Works for one due event: the second
 -- admission replays the first (`replayed: true`) and the same `logical_op_id` owns the effect.
 --
+-- A RE-ATTEMPT TAKES A DISTINGUISHING SUFFIX, and it exists for one measured reason (review finding
+-- S7): a plan Work a human CANCELS is terminal with no committed receipt, so the period is still
+-- owed — and with `work_id` set once and the door converging on it, that due date was unpostable
+-- forever. `attempt` counts re-admissions, the key becomes `plan:<plan>:r<rev>:<due>:a<attempt>`
+-- from the second attempt on (the first keeps the spelling above), and only
+-- `clara.request_plan_catch_up` may ask for one — never the scan, and never over a Work that
+-- COMPLETED or that carries a committed receipt.
+--
 -- =====================================================================================
 -- THE CADENCE DECISION (C54.3): EVERY LEADER CYCLE, GATED IN THE DATABASE.
 --
@@ -122,22 +130,64 @@
 --   · a DAILY belt makes the worst-case latency between a due date arriving in Kuala Lumpur and
 --     the Work being admitted up to 24 hours, and the acceptance is about a due EVENT, not about a
 --     nightly batch;
---   · the cost of a cycle is ONE indexed query. `clara.wake_due_plan_occurrences` does not
---     evaluate anything per client: its candidate query is gated in SQL on
---     `due_date <= (now() at time zone <revision timezone>)::date`, served by the partial indexes
---     `ix_accounting_plans_active` (active plans only) and `ix_plan_revisions_live` (live
---     revisions only) and by `uq_plan_occurrences_plan_due`, and returns NO ROWS on a firm with
---     nothing due. An empty answer is the ordinary answer.
+--   · the cost of a cycle is ONE query whose row source is ACTIVE PLANS ONLY, and it is stated
+--     here as what it actually is rather than as "one indexed lookup" (the shape changed when the
+--     picker below stopped being pure arithmetic). `ix_accounting_plans_active` (active plans
+--     only) and `ix_plan_revisions_live` (live revisions only) bound that row source; for each
+--     such row `clara._plan_admissible_event` runs a handful of equality probes, every one of
+--     them served by `uq_plan_occurrences_plan_due` (plan + date) or `uq_plan_occurrences_period`
+--     (plan + leg + period) — no sequential scan of the occurrence table anywhere, and NO ROWS at
+--     all on an estate with no active plan. An empty answer is the ordinary answer. It is the
+--     `due_date <= (now() at time zone <revision timezone>)::date` gate that keeps it small, and
+--     that gate is inside the picker rather than in the outer WHERE.
 --   · the due ARITHMETIC is entirely DB-owned (the `_plan_due_*` helpers below). The runtime never
 --     re-derives a date, so there is no second implementation of "when is this due" to drift.
 --
--- THE SCAN NEVER BACKFILLS. It considers exactly ONE due event per plan per call — the LATEST one
--- at or before today in the revision's timezone — so a leader that was down for two months admits
--- the CURRENT period's occurrence and not the two it missed. Those are catch-up, and catch-up is
--- `clara.request_plan_catch_up`: explicit window, oldest-first, bounded, and refused outright when
--- the window starts before `effective_from` (CLR10 `catch_up_before_authority`). That is the
--- acceptance criterion "a future schedule never authorises historical runs" implemented as an
--- arithmetic property of the scan rather than as a promise about it.
+-- THE SCAN NEVER BACKFILLS. It considers exactly ONE due event per plan per call, and
+-- `clara._plan_admissible_event` is the whole of that choice:
+--
+--   · the PRIMARY candidate is the LATEST accrual at or before today in the revision's timezone,
+--     and only when nothing has been recorded for it. Still latest-only: a leader that was down for
+--     two months admits the CURRENT period and not the two it missed.
+--   · the REVERSAL candidate is the OLDEST reversal at or before today whose OWN period's accrual
+--     STANDS — admitted, and its Work not cancelled or failed without a committed receipt
+--     (`clara._plan_primary_stands`). That eligibility rule is the orphan wall, and it is a
+--     correctness fix rather than a refinement (review finding B2): a reversal is always in the
+--     month AFTER its accrual, so a picker that simply took the latest event surfaced period k's
+--     reversal the moment its date arrived — even on a plan whose accrual for k had never been
+--     admitted at all. A leader down from a plan's creation until the 3rd of the following month
+--     therefore posted a swapped-sides entry reversing NOTHING, with no refusal anywhere. And
+--     "admitted" alone was not enough either: an accrual whose Work a human CANCELLED posted
+--     nothing, so the same naked leg was reachable through 0184's cancel door. The TWO MOST RECENT
+--     periods are probed (k and k-1) — not because older ones cannot be outstanding, but because
+--     the scan never backfills: an older missed reversal is catch-up, exactly like an older missed
+--     accrual.
+--   · when both candidates exist the EARLIER date wins, which is the only order the books can take:
+--     last period's reversal before this period's accrual.
+--
+-- The missed periods are catch-up, and catch-up is `clara.request_plan_catch_up`: explicit window,
+-- oldest-first, bounded, and refused outright when the window starts before the LIVE REVISION's
+-- `effective_from` (CLR10 `catch_up_before_authority`) — which the authority floor below pins at or
+-- after `accounting_plans.authority_from`, so that wall can only ever be at or tighter than the
+-- plan's own authority, never looser. That is the acceptance criterion "a future
+-- schedule never authorises historical runs" implemented as an arithmetic property of the scan
+-- rather than as a promise about it.
+--
+-- A PERIOD IS THE IDENTITY, NOT ONLY A DATE (review finding B1). `unique (plan_id, due_date)` alone
+-- let a REVISION double-post: move a monthly plan's due day from the 15th to the 10th after the
+-- 15th has already run and the next scan finds an unoccupied due_date naming the SAME accounting
+-- period and the same basis, so one period took two entries. Every occurrence therefore also
+-- carries `period_key` — the first day of the step-aligned period it belongs to, anchored on the
+-- PLAN's own `authority_from` so it cannot move with a revision — under
+-- `unique (plan_id, leg, period_key)`. A reversal's period key is its ACCRUAL's, not the month the
+-- reversal falls in, so the two legs of one period share a key and differ only by `leg`.
+--
+-- THE AUTHORITY FLOOR IS THE PLAN'S, NOT THE LIVE REVISION'S (review finding B3).
+-- `accounting_plans.authority_from` is written once at creation and frozen; `revise` refuses an
+-- `effective_from` below it (CLR10 `effective_from_before_authority`). Without that floor a plan
+-- created with today's authority could be revised to 2020 and then "catch up" twelve back-dated
+-- Works — the catch-up wall reads the live revision, and the live revision was whatever the last
+-- caller said.
 --
 -- =====================================================================================
 -- THE LOCK ORDER GAINS A RUNG ABOVE 0184's.
@@ -239,6 +289,28 @@ begin
 end
 $w640_pre$;
 
+-- THE 0045 LANE, PINNED BY ITS LIVE BODIES RATHER THAN BY THIS FILE'S PROMISE NOT TO TOUCH IT
+-- (review finding S8: the tail used to CLAIM five untouched doors while counting three relations
+-- and zero doors). The digests are taken NOW, before this file creates anything, into a temp table
+-- that lives only for this transaction; §J re-reads the catalog and requires byte equality. A
+-- `create or replace` of any of the five anywhere below therefore reds the migration instead of
+-- being invisible.
+create temp table w640_adj_pin on commit drop as
+select p.proname, md5(p.prosrc) as digest
+  from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+ where n.nspname = 'clara'
+   and p.proname in ('propose_adjustment_template','sign_adjustment_template',
+                     'retire_adjustment_template','run_adjustment_occurrence','adjustment_run_due');
+do $w640_pin$
+declare v_n int;
+begin
+  select count(*)::int into v_n from w640_adj_pin;
+  if v_n <> 5 then
+    raise exception '#640 prestate: expected the five 0045 adjustment doors to pin, found %', v_n
+      using errcode='CLR10';
+  end if;
+end $w640_pin$;
+
 set role clara_fn_owner;
 
 -- =====================================================================================
@@ -268,6 +340,11 @@ create table clara.accounting_plans (
   authority_ref   jsonb       not null check (jsonb_typeof(authority_ref) = 'object'),
   authorised_by   uuid        not null references clara.users(id),
   authorised_at   timestamptz not null default now(),
+  -- THE AUTHORITY FLOOR, written once and frozen (review finding B3). Every revision's
+  -- `effective_from` must be at or after it, so the earliest period this plan can ever be asked to
+  -- run is fixed at the moment a human authorised it — and it is also the STABLE anchor
+  -- `period_key` is aligned on, which a revision must not be able to move either.
+  authority_from  date        not null,
   current_revision integer    not null check (current_revision >= 1),
   created_by      uuid        not null references clara.users(id),
   created_at      timestamptz not null default now(),
@@ -317,7 +394,8 @@ create function clara._tf_accounting_plans_immutable() returns trigger
   language plpgsql security definer set search_path = clara, pg_temp as $$
 declare
   v_frozen text[] := array['id','firm_id','client_id','kind','purpose','authority_kind',
-                           'authority_ref','authorised_by','authorised_at','created_by','created_at'];
+                           'authority_ref','authorised_by','authorised_at','authority_from',
+                           'created_by','created_at'];
   c text;
 begin
   if tg_op = 'DELETE' then
@@ -479,6 +557,13 @@ create table clara.accounting_plan_occurrences (
   revision    integer     not null,
   leg         text        not null check (leg in ('primary','reversal')),
   due_date    date        not null,
+  -- THE PERIOD this due event belongs to — the first day of its step-aligned period, anchored on
+  -- the plan's own `authority_from`. For a REVERSAL it is its ACCRUAL's period, not the month the
+  -- reversal falls in, so the two legs of one period share a key.
+  period_key  date        not null,
+  -- HOW MANY TIMES this due event has been admitted. 1 for every ordinary occurrence; bumped only
+  -- by `clara.request_plan_catch_up` over a Work that was CANCELLED or FAILED (review finding S7).
+  attempt     integer     not null default 1 check (attempt >= 1),
   intent_key  text        not null check (intent_key !~ '^\s*$'),
   work_id     uuid,
   admitted_at timestamptz,
@@ -486,6 +571,9 @@ create table clara.accounting_plan_occurrences (
   created_at  timestamptz not null default now(),
   -- THE IDENTITY LAW. One plan, one due date, one occurrence.
   constraint uq_plan_occurrences_plan_due unique (plan_id, due_date),
+  -- …AND ONE PERIOD PER LEG, which is the law a revision cannot walk around: a moved due day names
+  -- a new date but the same period, and one period takes one accrual and one reversal.
+  constraint uq_plan_occurrences_period unique (plan_id, leg, period_key),
   -- One Work is initiated by at most one occurrence.
   constraint uq_plan_occurrences_work unique (work_id),
   constraint uq_plan_occurrences_intent unique (firm_id, client_id, intent_key),
@@ -497,8 +585,10 @@ create table clara.accounting_plan_occurrences (
 );
 comment on table clara.accounting_plan_occurrences is
   '#640: one due event of one plan. unique (plan_id, due_date) is the convergence point for '
-  'duplicate scans; unique (work_id) makes "which plan created this Work" single-valued. '
-  'Append-only apart from work_id (set once), admitted_at and outcome.';
+  'duplicate scans, unique (plan_id, leg, period_key) is the law a revision cannot walk around, '
+  'and unique (work_id) makes "which plan created this Work" single-valued. Append-only apart from '
+  'outcome, admitted_at, and — while the row names no Work or names a cancelled/failed one — '
+  'revision, intent_key, attempt and work_id.';
 
 alter table clara.accounting_plan_occurrences enable row level security;
 alter table clara.accounting_plan_occurrences force row level security;
@@ -512,22 +602,49 @@ create index ix_plan_occurrences_client on clara.accounting_plan_occurrences(cli
 
 create function clara._tf_plan_occurrences_append_only() returns trigger
   language plpgsql security definer set search_path = clara, pg_temp as $$
+declare v_reattempt boolean := false;
 begin
   if tg_op = 'DELETE' then
     raise exception 'a plan occurrence is never deleted'
       using errcode='CLR08', detail='{"reason":"plan_occurrence_immutable","column":"*"}';
   end if;
-  if row(new.id,new.firm_id,new.client_id,new.plan_id,new.revision,new.leg,new.due_date,
-         new.intent_key,new.created_at)
+  -- THE IDENTITY IS THE PLAN, THE LEG, THE DATE AND THE PERIOD. `revision`, `intent_key` and
+  -- `attempt` are deliberately NOT in it (review finding S5): a due event that was refused and is
+  -- later re-attempted runs under whatever revision is live THEN, and a row that printed `r1`
+  -- while its Work was admitted under `r2` was a record of something that did not happen. They
+  -- move only while the row names no Work, so nothing about an admitted occurrence can be edited.
+  if row(new.id,new.firm_id,new.client_id,new.plan_id,new.leg,new.due_date,new.period_key,
+         new.created_at)
      is distinct from
-     row(old.id,old.firm_id,old.client_id,old.plan_id,old.revision,old.leg,old.due_date,
-         old.intent_key,old.created_at) then
+     row(old.id,old.firm_id,old.client_id,old.plan_id,old.leg,old.due_date,old.period_key,
+         old.created_at) then
     raise exception 'a plan occurrence''s identity is immutable'
       using errcode='CLR08', detail='{"reason":"plan_occurrence_immutable"}';
   end if;
-  if old.work_id is not null and new.work_id is distinct from old.work_id then
-    raise exception 'a plan occurrence names its accounting work exactly once'
-      using errcode='CLR08', detail='{"reason":"plan_occurrence_work_set_once"}';
+  -- WORK IS SET ONCE, WITH ONE NAMED EXIT (review finding S7). A Work a human CANCELLED, or one
+  -- that FAILED, posted nothing and leaves the period owed; a catch-up may re-admit it under a new
+  -- attempt, which is the ONLY move that also carries the revision, the key and the attempt with it
+  -- (they describe the admission, and a re-attempt is a new admission). A COMPLETED Work — or any
+  -- Work carrying a committed receipt — never moves: money is on the books and a second admission
+  -- would be a second entry for one period.
+  v_reattempt := old.work_id is not null and new.work_id is distinct from old.work_id;
+  if v_reattempt then
+    if not exists (select 1 from clara.accounting_work w
+                    where w.id = old.work_id and w.status in ('cancelled','failed'))
+       or exists (select 1 from clara.operation_receipts rc
+                   where rc.work_id = old.work_id and rc.outcome = 'committed') then
+      raise exception 'a plan occurrence names its accounting work exactly once'
+        using errcode='CLR08', detail='{"reason":"plan_occurrence_work_set_once"}';
+    end if;
+    if new.attempt <= old.attempt then
+      raise exception 'a re-admitted plan occurrence must count its attempt'
+        using errcode='CLR08', detail='{"reason":"plan_occurrence_attempt"}';
+    end if;
+  elsif old.work_id is not null
+        and row(new.revision,new.intent_key,new.attempt)
+            is distinct from row(old.revision,old.intent_key,old.attempt) then
+    raise exception 'an admitted plan occurrence''s revision, intent key and attempt are immutable'
+      using errcode='CLR08', detail='{"reason":"plan_occurrence_immutable"}';
   end if;
   return new;
 end $$;
@@ -630,28 +747,95 @@ begin
 end $$;
 revoke all on function clara._plan_due_events(date,text,text,int,boolean,date,date,int) from public;
 
--- THE LATEST due event at or before `p_on` — the ONE event a scan considers per plan per call.
--- NULL when the schedule has not produced an event yet. The scan deliberately does not walk back:
--- an earlier missed event is catch-up, and catch-up is explicit.
-create function clara._plan_due_event_on_or_before(p_from date, p_freq text, p_day_rule text,
-    p_dom int, p_auto_reverse boolean, p_on date)
-  returns jsonb language plpgsql immutable security definer set search_path = clara, pg_temp as $$
-declare v_k int; v_d date; v_r date;
+-- The ACCRUAL whose reversal falls on `p_reversal`, or NULL when no accrual of this schedule
+-- reverses on that day. A reversal is the first day of the month after its accrual, so the accrual
+-- is the latest one at or before the day before it — and the answer is CHECKED by recomputing the
+-- reversal rather than assumed from the arithmetic.
+create function clara._plan_primary_for_reversal(p_from date, p_freq text, p_day_rule text,
+    p_dom int, p_reversal date)
+  returns date language plpgsql immutable security definer set search_path = clara, pg_temp as $$
+declare v_k int; v_d date;
 begin
-  v_k := clara._plan_due_index_on_or_before(p_from, p_freq, p_day_rule, p_dom, p_on);
+  if p_reversal is null then return null; end if;
+  v_k := clara._plan_due_index_on_or_before(p_from, p_freq, p_day_rule, p_dom, p_reversal - 1);
   if v_k is null then return null; end if;
   v_d := clara._plan_due_nth(p_from, p_freq, p_day_rule, p_dom, v_k);
-  if p_auto_reverse then
-    v_r := clara._plan_reversal_date(v_d);
-    -- A reversal is always in the month AFTER its accrual, so when it has arrived it is the later
-    -- of the two events and therefore the one this call names.
-    if v_r <= p_on then
-      return jsonb_build_object('due_date', to_char(v_r,'YYYY-MM-DD'), 'leg', 'reversal', 'k', v_k);
-    end if;
-  end if;
-  return jsonb_build_object('due_date', to_char(v_d,'YYYY-MM-DD'), 'leg', 'primary', 'k', v_k);
+  if v_d is null or clara._plan_reversal_date(v_d) <> p_reversal then return null; end if;
+  return v_d;
 end $$;
-revoke all on function clara._plan_due_event_on_or_before(date,text,text,int,boolean,date) from public;
+revoke all on function clara._plan_primary_for_reversal(date,text,text,int,date) from public;
+
+-- DOES THIS PLAN'S ACCRUAL FOR `p_due` STILL STAND? "Admitted" and "stands" are not the same
+-- fact, and the difference is a live instance of review finding B2 reached through 0184's CANCEL
+-- door rather than through a leader outage: a Work a human CANCELLED, or one that FAILED, is
+-- terminal with NO committed receipt — it posted nothing — so a reversal behind it would swap the
+-- sides of an entry that does not exist. The eligibility test is therefore "an admitted accrual
+-- whose Work is not a dead end", never "an occurrence row with a work_id". It is deliberately the
+-- SAME predicate `clara._plan_admit_occurrence` re-attempts on (review finding S7): a period that
+-- posted nothing is a period still owed, and a period still owed has nothing to reverse yet.
+create function clara._plan_primary_stands(p_plan uuid, p_due date) returns boolean
+  language sql stable security definer set search_path = clara, pg_temp as $$
+  select exists (
+    select 1 from clara.accounting_plan_occurrences o
+      join clara.accounting_work w on w.id = o.work_id
+     where o.plan_id = p_plan and o.due_date = p_due and o.leg = 'primary'
+       and (w.status not in ('cancelled','failed')
+            or exists (select 1 from clara.operation_receipts rc
+                        where rc.work_id = w.id and rc.outcome = 'committed')));
+$$;
+revoke all on function clara._plan_primary_stands(uuid,date) from public;
+
+-- THE PERIOD a date belongs to, as the first day of that period's first month, aligned on the
+-- ANCHOR month rather than on the calendar: a quarterly plan anchored in February has periods
+-- Feb-Apr, May-Jul, … and `date_trunc('quarter', …)` would answer Jan, Apr, … instead. The anchor
+-- is the PLAN's `authority_from`, which a revision cannot move (review finding B1/B3).
+create function clara._plan_period_start(p_anchor date, p_freq text, p_on date) returns date
+  language plpgsql immutable security definer set search_path = clara, pg_temp as $$
+declare v_step int; v_anchor date; v_months int; v_k int;
+begin
+  if p_anchor is null or p_on is null then return null; end if;
+  v_step := case p_freq when 'monthly' then 1 when 'quarterly' then 3 when 'annual' then 12 else null end;
+  if v_step is null then return null; end if;
+  v_anchor := date_trunc('month', p_anchor::timestamp)::date;
+  v_months := (extract(year from p_on)::int - extract(year from v_anchor)::int) * 12
+            + (extract(month from p_on)::int - extract(month from v_anchor)::int);
+  -- FLOOR, not truncate-toward-zero: a date before the anchor belongs to an earlier period, and
+  -- PostgreSQL's integer division would pull it forward into the anchor's own.
+  v_k := case when v_months >= 0 then v_months / v_step
+              else -(((-v_months) + v_step - 1) / v_step) end;
+  return (v_anchor + ((v_k * v_step) * interval '1 month'))::date;
+end $$;
+revoke all on function clara._plan_period_start(date,text,date) from public;
+
+-- The period key ONE due event carries. For a reversal it is its ACCRUAL's period, so the two legs
+-- of one period share a key and `unique (plan_id, leg, period_key)` binds each of them once.
+create function clara._plan_occurrence_period_key(p_anchor date, p_from date, p_freq text,
+    p_day_rule text, p_dom int, p_due date, p_leg text)
+  returns date language plpgsql immutable security definer set search_path = clara, pg_temp as $$
+declare v_primary date;
+begin
+  if p_leg = 'reversal' then
+    v_primary := clara._plan_primary_for_reversal(p_from, p_freq, p_day_rule, p_dom, p_due);
+    -- A reversal whose accrual this schedule does not produce keys on its own date rather than on
+    -- nothing: the column is NOT NULL and a refusal must still be recordable.
+    return clara._plan_period_start(p_anchor, p_freq, coalesce(v_primary, p_due));
+  end if;
+  return clara._plan_period_start(p_anchor, p_freq, p_due);
+end $$;
+revoke all on function clara._plan_occurrence_period_key(date,date,text,text,int,date,text) from public;
+
+-- THE WINDOW CEILING ONE LEG MAY REACH (review finding S6). A reversing plan whose `effective_to`
+-- is its LAST ACCRUAL's own day had that accrual admitted and its reversal refused
+-- `outside_authority_window` forever: the reversal is always in the following month, so a ceiling
+-- of `effective_to` excludes it by construction. An authority that ends on the last accrual must
+-- still let that accrual be undone.
+create function clara._plan_window_ceiling(p_effective_to date, p_auto_reverse boolean) returns date
+  language sql immutable security definer set search_path = clara, pg_temp as $$
+  select case when p_effective_to is null then 'infinity'::date
+              when p_auto_reverse then clara._plan_reversal_date(p_effective_to)
+              else p_effective_to end;
+$$;
+revoke all on function clara._plan_window_ceiling(date,boolean) from public;
 
 -- The basis ONE occurrence posts: the revision's basis with this event's posting date, and — for a
 -- reversal leg — with every line's two sides EXCHANGED. Exchanging sides preserves the balance
@@ -677,6 +861,84 @@ create function clara._plan_occurrence_basis(p_basis jsonb, p_due date, p_leg te
     '{posting_date}', to_jsonb(to_char(p_due, 'YYYY-MM-DD')));
 $$;
 revoke all on function clara._plan_occurrence_basis(jsonb,date,text) from public;
+
+-- THE ONE EVENT A SCAN CONSIDERS, chosen against the plan's OWN occurrence rows. Pure arithmetic
+-- cannot make this choice: whether period k's reversal is admissible depends on whether period k's
+-- accrual was ADMITTED, and whether a due day is a new event at all depends on whether its PERIOD
+-- already ran under an earlier schedule. Both are facts in `clara.accounting_plan_occurrences`, so
+-- this function is STABLE and reads them; `clara._plan_due_event_on_or_before` stays the pure
+-- arithmetic it was and is no longer what the scan asks.
+--
+-- THE ORDER IS THE BOOKS' ORDER: when both an accrual and a reversal are outstanding the EARLIER
+-- date wins, so last period's reversal lands before this period's accrual.
+create function clara._plan_admissible_event(p_plan uuid) returns jsonb
+  language plpgsql stable security definer set search_path = clara, pg_temp as $$
+declare
+  r record; p record; v_today date; v_ceiling date; v_k int; v_kr int;
+  v_dp date; v_dr date; v_primary date; v_reversal date; v_reversal_k int;
+begin
+  select * into p from clara.accounting_plans where id = p_plan;
+  if not found then return null; end if;
+  select * into r from clara.accounting_plan_revisions
+   where plan_id = p_plan and superseded_at is null;
+  if not found then return null; end if;
+  v_today := (now() at time zone r.timezone)::date;
+  v_ceiling := least(v_today, clara._plan_window_ceiling(r.effective_to, r.auto_reverse));
+  v_k := clara._plan_due_index_on_or_before(r.effective_from, r.frequency, r.day_rule,
+           r.day_of_month, least(v_today, coalesce(r.effective_to, 'infinity'::date)));
+
+  -- THE PRIMARY CANDIDATE — the LATEST accrual at or before today, and only when neither its date
+  -- nor its PERIOD has an occurrence of that leg.
+  if v_k is not null then
+    v_dp := clara._plan_due_nth(r.effective_from, r.frequency, r.day_rule, r.day_of_month, v_k);
+    if v_dp is not null
+       and not exists (select 1 from clara.accounting_plan_occurrences o
+                        where o.plan_id = p_plan and o.due_date = v_dp)
+       and not exists (select 1 from clara.accounting_plan_occurrences o
+                        where o.plan_id = p_plan and o.leg = 'primary'
+                          and o.period_key = clara._plan_occurrence_period_key(
+                                p.authority_from, r.effective_from, r.frequency, r.day_rule,
+                                r.day_of_month, v_dp, 'primary')) then
+      v_primary := v_dp;
+    end if;
+  end if;
+
+  -- THE REVERSAL CANDIDATE — the OLDEST eligible one, probing k-1 before k. Only those two
+  -- periods can have a reversal at or before today, because a reversal falls in the month after its
+  -- accrual. ELIGIBLE means: its own accrual is ADMITTED (a refused accrual leaves nothing to
+  -- reverse), its date is free, and its period's reversal leg is free.
+  if r.auto_reverse and v_k is not null then
+    foreach v_kr in array (case when v_k > 0 then array[v_k - 1, v_k] else array[v_k] end) loop
+      v_dp := clara._plan_due_nth(r.effective_from, r.frequency, r.day_rule, r.day_of_month, v_kr);
+      continue when v_dp is null or v_dp < r.effective_from;
+      v_dr := clara._plan_reversal_date(v_dp);
+      continue when v_dr is null or v_dr > v_ceiling;
+      -- ELIGIBILITY IS "THE ACCRUAL STANDS", not "an occurrence names a Work": a cancelled or
+      -- failed accrual posted nothing, and a reversal behind it is the naked leg under another
+      -- name.
+      continue when not clara._plan_primary_stands(p_plan, v_dp);
+      continue when exists (select 1 from clara.accounting_plan_occurrences o
+                             where o.plan_id = p_plan and o.due_date = v_dr);
+      continue when exists (select 1 from clara.accounting_plan_occurrences o
+                             where o.plan_id = p_plan and o.leg = 'reversal'
+                               and o.period_key = clara._plan_occurrence_period_key(
+                                     p.authority_from, r.effective_from, r.frequency, r.day_rule,
+                                     r.day_of_month, v_dr, 'reversal'));
+      v_reversal := v_dr; v_reversal_k := v_kr;
+      exit;
+    end loop;
+  end if;
+
+  if v_primary is not null and (v_reversal is null or v_primary <= v_reversal) then
+    return jsonb_build_object('due_date', to_char(v_primary,'YYYY-MM-DD'), 'leg', 'primary', 'k', v_k);
+  end if;
+  if v_reversal is not null then
+    return jsonb_build_object('due_date', to_char(v_reversal,'YYYY-MM-DD'), 'leg', 'reversal',
+      'k', v_reversal_k);
+  end if;
+  return null;
+end $$;
+revoke all on function clara._plan_admissible_event(uuid) from public;
 
 -- The advisory overlap with the LIVE 0045 adjustment lane: every signed live template of this
 -- client whose line account codes intersect this basis's. Advisory, never a refusal (the header).
@@ -716,13 +978,16 @@ revoke all on function clara._plan_overlap_warning(uuid,jsonb) from public;
 --     reason), because one poisoned plan must not abort a scan that has other plans to serve.
 --     0178's own typed refusal is preserved verbatim on the occurrence's `outcome`.
 -- =====================================================================================
-create function clara._plan_admit_occurrence(p_plan uuid, p_due date, p_leg text, p_model text)
+create function clara._plan_admit_occurrence(p_plan uuid, p_due date, p_leg text, p_model text,
+    p_allow_reattempt boolean default false)
   returns jsonb language plpgsql security definer set search_path = clara, pg_temp as $$
 declare
   p record; r record; o record; v_existing boolean := false;
   v_basis jsonb; v_intent text; v_answer jsonb; v_occ uuid;
   v_client_status text; v_detail text; v_reason text;
   v_code text; v_message text; v_outcome jsonb;
+  v_period date; v_primary_due date; v_ceiling date; v_attempt int := 1;
+  v_old_work uuid; v_old_status text; v_reattempt boolean := false;
 begin
   -- RUNG 1.
   select * into p from clara.accounting_plans where id = p_plan for update;
@@ -745,13 +1010,19 @@ begin
   if not found then
     return jsonb_build_object('admitted', false, 'plan_id', p.id, 'reason', 'no_live_revision');
   end if;
-  if p_due < r.effective_from or (r.effective_to is not null and p_due > r.effective_to) then
-    -- The authority window, re-asserted at the moment of admission rather than trusted from the
-    -- caller's arithmetic. A future schedule never authorises a historical run and an ended
-    -- window never authorises a later one.
+  -- The authority window, re-asserted at the moment of admission rather than trusted from the
+  -- caller's arithmetic. A future schedule never authorises a historical run and an ended window
+  -- never authorises a later one — EXCEPT that a reversing plan's ceiling reaches the reversal of
+  -- its last accrual (review finding S6), because an authority that ends on the last accrual must
+  -- still let that accrual be undone.
+  v_ceiling := case when p_leg = 'reversal'
+                    then clara._plan_window_ceiling(r.effective_to, r.auto_reverse)
+                    else coalesce(r.effective_to, 'infinity'::date) end;
+  if p_due < r.effective_from or p_due > v_ceiling then
     return jsonb_build_object('admitted', false, 'plan_id', p.id, 'reason', 'outside_authority_window',
       'effective_from', to_char(r.effective_from,'YYYY-MM-DD'),
-      'effective_to', case when r.effective_to is null then null else to_char(r.effective_to,'YYYY-MM-DD') end);
+      'effective_to', case when r.effective_to is null then null else to_char(r.effective_to,'YYYY-MM-DD') end,
+      'leg_ceiling', case when v_ceiling = 'infinity'::date then null else to_char(v_ceiling,'YYYY-MM-DD') end);
   end if;
   if p_due > (now() at time zone r.timezone)::date then
     return jsonb_build_object('admitted', false, 'plan_id', p.id, 'reason', 'not_yet_due',
@@ -765,25 +1036,93 @@ begin
   -- FOUND is captured NOW rather than re-read below: plpgsql resets it on every SQL-bearing
   -- statement, and the second test is several statements away.
   v_existing := found;
+  v_period := clara._plan_occurrence_period_key(p.authority_from, r.effective_from, r.frequency,
+                r.day_rule, r.day_of_month, p_due, p_leg);
+
   if v_existing and o.work_id is not null then
-    return jsonb_build_object('admitted', false, 'converged', true, 'plan_id', p.id,
-      'occurrence_id', o.id, 'work_id', o.work_id, 'due_date', to_char(o.due_date,'YYYY-MM-DD'),
-      'leg', o.leg, 'revision', o.revision, 'intent_key', o.intent_key, 'outcome', o.outcome);
+    -- A RE-ATTEMPT IS THE ONE EXIT FROM CONVERGENCE (review finding S7), and only a human's
+    -- catch-up may ask for it: a Work the human CANCELLED, or one that FAILED, posted nothing and
+    -- leaves the period owed. A COMPLETED Work, or any Work carrying a committed receipt, converges
+    -- as before — money is on the books.
+    v_old_work := o.work_id;
+    select w.status into v_old_status from clara.accounting_work w where w.id = v_old_work;
+    v_reattempt := p_allow_reattempt
+      and v_old_status in ('cancelled','failed')
+      and not exists (select 1 from clara.operation_receipts rc
+                       where rc.work_id = v_old_work and rc.outcome = 'committed');
+    if not v_reattempt then
+      return jsonb_build_object('admitted', false, 'converged', true, 'plan_id', p.id,
+        'occurrence_id', o.id, 'work_id', o.work_id, 'due_date', to_char(o.due_date,'YYYY-MM-DD'),
+        'leg', o.leg, 'revision', o.revision, 'intent_key', o.intent_key, 'outcome', o.outcome);
+    end if;
+    v_attempt := o.attempt + 1;
+  end if;
+
+  -- ONE PERIOD, ONE LEG, ONE OCCURRENCE (review finding B1). A revision that moves the due day
+  -- names a NEW date for a period that already ran, and admitting it would post a second entry for
+  -- one period. Refused BEFORE any row is written, because a second row for the same period is not
+  -- a due event to record — it is the same event under a different spelling.
+  if not v_existing and exists (
+        select 1 from clara.accounting_plan_occurrences o2
+         where o2.plan_id = p.id and o2.leg = p_leg and o2.period_key = v_period) then
+    return jsonb_build_object('admitted', false, 'plan_id', p.id, 'reason', 'period_already_admitted',
+      'code', 'CLR13', 'due_date', to_char(p_due,'YYYY-MM-DD'), 'leg', p_leg,
+      'period_key', to_char(v_period,'YYYY-MM-DD'),
+      'occurrence_id', (select o2.id from clara.accounting_plan_occurrences o2
+                         where o2.plan_id = p.id and o2.leg = p_leg and o2.period_key = v_period
+                         limit 1));
   end if;
 
   v_basis := clara._plan_occurrence_basis(r.basis, p_due, p_leg);
-  v_intent := 'plan:' || p.id::text || ':r' || r.revision::text || ':' || to_char(p_due,'YYYY-MM-DD');
+  v_intent := 'plan:' || p.id::text || ':r' || r.revision::text || ':' || to_char(p_due,'YYYY-MM-DD')
+              || case when v_attempt > 1 then ':a' || v_attempt::text else '' end;
 
   if v_existing then
-    -- A previously REFUSED occurrence, re-attempted through catch-up. The identity stays; only the
-    -- outcome and (on success) the work id move.
+    -- A previously REFUSED occurrence, or a cancelled/failed one being re-attempted. The identity
+    -- stays; the revision, the key and the attempt move to what this admission actually runs under,
+    -- which is the whole of review finding S5 — a row printing `r1` beside a Work admitted under
+    -- `r2` was a record of something that did not happen.
+    --
+    -- A RE-ATTEMPT WRITES THEM WITH THE NEW WORK, IN ONE STATEMENT (below), because the row still
+    -- names the cancelled Work at this point and the identity trigger admits those three columns
+    -- moving only alongside a lawful `work_id` move.
     v_occ := o.id;
+    if not v_reattempt then
+      update clara.accounting_plan_occurrences
+         set revision = r.revision, intent_key = v_intent, attempt = v_attempt
+       where id = v_occ;
+    end if;
   else
     insert into clara.accounting_plan_occurrences(firm_id, client_id, plan_id, revision, leg,
-        due_date, intent_key, outcome)
-      values (p.firm_id, p.client_id, p.id, r.revision, p_leg, p_due, v_intent,
+        due_date, period_key, attempt, intent_key, outcome)
+      values (p.firm_id, p.client_id, p.id, r.revision, p_leg, p_due, v_period, v_attempt, v_intent,
         jsonb_build_object('state','pending','at', now()))
       returning id into v_occ;
+  end if;
+
+  -- THE ORPHAN WALL (review finding B2). A reversal exists to undo its OWN period's accrual, so
+  -- admitting one with no ADMITTED accrual behind it would put a swapped-sides entry in the ledger
+  -- reversing nothing. `clara._plan_admissible_event` never surfaces such an event, so this is the
+  -- door's own wall for the path a HUMAN can reach: a catch-up window naming only the reversal day.
+  -- Recorded on the occurrence rather than raised, so it is legible in the history — and the SAME
+  -- row becomes admissible once the accrual lands.
+  if p_leg = 'reversal' then
+    v_primary_due := clara._plan_primary_for_reversal(r.effective_from, r.frequency, r.day_rule,
+                       r.day_of_month, p_due);
+    if v_primary_due is null or not clara._plan_primary_stands(p.id, v_primary_due) then
+      v_outcome := jsonb_build_object('state','refused','code','CLR13',
+        'reason','reversal_before_primary',
+        'message','this reversal has no accrual standing behind it to reverse',
+        'primary_due_date', case when v_primary_due is null then null
+                                 else to_char(v_primary_due,'YYYY-MM-DD') end,
+        'at', now());
+      update clara.accounting_plan_occurrences set outcome = v_outcome where id = v_occ;
+      return jsonb_build_object('admitted', false, 'plan_id', p.id, 'occurrence_id', v_occ,
+        'due_date', to_char(p_due,'YYYY-MM-DD'), 'leg', p_leg, 'revision', r.revision,
+        'reason', 'reversal_before_primary', 'code', 'CLR13',
+        'primary_due_date', case when v_primary_due is null then null
+                                 else to_char(v_primary_due,'YYYY-MM-DD') end);
+    end if;
   end if;
 
   begin
@@ -812,7 +1151,8 @@ begin
                  'logical_op_id', v_answer->>'logical_op_id',
                  'replayed', coalesce((v_answer->>'replayed')::boolean, false), 'at', now());
   update clara.accounting_plan_occurrences
-     set work_id = (v_answer->>'work_id')::uuid, admitted_at = now(), outcome = v_outcome
+     set work_id = (v_answer->>'work_id')::uuid, admitted_at = now(), outcome = v_outcome,
+         revision = r.revision, intent_key = v_intent, attempt = v_attempt
    where id = v_occ;
 
   perform clara._audit(p.firm_id, p.authorised_by, null, null, 'plan_occurrence_admitted', null,
@@ -825,9 +1165,10 @@ begin
     'logical_op_id', v_answer->>'logical_op_id',
     'replayed', coalesce((v_answer->>'replayed')::boolean, false),
     'due_date', to_char(p_due,'YYYY-MM-DD'), 'leg', p_leg, 'revision', r.revision,
+    'attempt', v_attempt, 'period_key', to_char(v_period,'YYYY-MM-DD'),
     'intent_key', v_intent);
 end $$;
-revoke all on function clara._plan_admit_occurrence(uuid,date,text,text) from public;
+revoke all on function clara._plan_admit_occurrence(uuid,date,text,text,boolean) from public;
 
 -- The shared door preamble for every plan verb below: the plan, read under the human's own firm,
 -- with no existence oracle across firms.
@@ -953,9 +1294,9 @@ begin
 
   v_plan := gen_random_uuid();
   insert into clara.accounting_plans(id, firm_id, client_id, kind, status, purpose, authority_kind,
-      authority_ref, authorised_by, current_revision, created_by)
+      authority_ref, authorised_by, authority_from, current_revision, created_by)
     values (v_plan, v_firm, p_client, p_kind, 'active', btrim(p_purpose), p_authority_kind,
-      p_authority_ref, v_actor, 1, v_actor);
+      p_authority_ref, v_actor, p_effective_from, 1, v_actor);
   insert into clara.accounting_plan_revisions(plan_id, firm_id, client_id, plan_kind, revision,
       frequency, day_rule, day_of_month, timezone, effective_from, effective_to, basis,
       basis_digest, auto_reverse, reversal_day_rule, created_by)
@@ -1061,6 +1402,18 @@ begin
   end if;
   perform clara._assert_plan_schedule(p.kind, p_frequency, p_day_rule, p_day_of_month, p_timezone,
     p_effective_from, p_effective_to, p_reversal_day_rule);
+  -- THE AUTHORITY FLOOR (review finding B3). A revision changes the SCHEDULE; it cannot move the
+  -- day a human authorised this plan from. Without this, a plan created with today's authority
+  -- could be revised to 2020 and then "catch up" a decade of back-dated Work — the catch-up wall
+  -- reads the live revision, and the live revision was whatever the last caller said.
+  if p_effective_from < p.authority_from then
+    raise exception 'this plan was authorised from %; a revision cannot start earlier',
+      to_char(p.authority_from,'YYYY-MM-DD')
+      using errcode='CLR10',
+        detail=jsonb_build_object('reason','effective_from_before_authority',
+          'authority_from', to_char(p.authority_from,'YYYY-MM-DD'),
+          'requested_from', to_char(p_effective_from,'YYYY-MM-DD'))::text;
+  end if;
   perform clara._assert_journal_basis(p_basis);
   v_digest := clara._journal_basis_digest(p_basis);
   v_auto := (p.kind = 'reversing_journal');
@@ -1080,6 +1433,14 @@ begin
   -- RUNG 1, so a revision and a scan cannot interleave: the scan reads the live revision under
   -- this same lock and therefore sees exactly one of the two states.
   perform 1 from clara.accounting_plans where id = p_plan for update;
+  -- …AND THE STATUS IS RE-READ UNDER IT (review finding S4). The test above was made on an
+  -- UNLOCKED read, so an `end_accounting_plan` committing in the window between the two could hand
+  -- an ended plan a fresh live revision. pause/resume/end all re-read under this lock; so does this.
+  select * into p from clara.accounting_plans where id = p_plan;
+  if p.status = 'ended' then
+    raise exception 'an ended accounting plan cannot be revised' using errcode='CLR10',
+      detail='{"reason":"plan_ended"}';
+  end if;
   select * into cur from clara.accounting_plan_revisions where plan_id = p_plan and superseded_at is null;
   if not found then
     raise exception 'this plan has no live revision to supersede' using errcode='CLR13',
@@ -1286,10 +1647,17 @@ begin
 
   -- OLDEST FIRST, BOUNDED. `_plan_due_events` emits ascending and stops at the cap, so one call
   -- can never walk a decade of periods.
+  -- THE CEILING IS LEG-AWARE (review finding S6): a reversing plan's last accrual may sit ON
+  -- `effective_to`, and its reversal is in the following month. `least(p_to, …)` still holds the
+  -- human's own window, and `p_to` itself was already refused above if it reached past today.
   for e in select * from clara._plan_due_events(r.effective_from, r.frequency, r.day_rule,
              r.day_of_month, r.auto_reverse, greatest(p_from, r.effective_from),
-             least(p_to, coalesce(r.effective_to, p_to)), 12) loop
-    v_answer := clara._plan_admit_occurrence(p_plan, e.due_date, e.leg, clara._plan_run_model());
+             least(p_to, clara._plan_window_ceiling(r.effective_to, r.auto_reverse)), 12) loop
+    -- A CATCH-UP IS THE ONE CALLER ALLOWED TO RE-ATTEMPT a cancelled or failed period's Work
+    -- (review finding S7). The scan never is: an automatic re-admission of something a human
+    -- cancelled would be the lane overruling them.
+    v_answer := clara._plan_admit_occurrence(p_plan, e.due_date, e.leg, clara._plan_run_model(),
+                  p_allow_reattempt => true);
     v_admitted := v_admitted || jsonb_build_array(v_answer);
     if coalesce((v_answer->>'admitted')::boolean, false) then v_n := v_n + 1; end if;
   end loop;
@@ -1335,7 +1703,10 @@ begin
   v_end := (date_trunc('month', v_start::timestamp)
             + (((v_count + 2) * v_step) * interval '1 month')
             + interval '1 month' - interval '1 day')::date;
-  if r.effective_to is not null then v_end := least(v_end, r.effective_to); end if;
+  -- The leg-aware ceiling, so a reversing plan's final reversal appears in the preview too.
+  if r.effective_to is not null then
+    v_end := least(v_end, clara._plan_window_ceiling(r.effective_to, r.auto_reverse));
+  end if;
   select coalesce(jsonb_agg(jsonb_build_object(
            'due_date', to_char(e.due_date,'YYYY-MM-DD'), 'leg', e.leg,
            'basis', clara._plan_occurrence_basis(r.basis, e.due_date, e.leg)) order by e.due_date),
@@ -1409,6 +1780,7 @@ begin
     'plan_id', p.id, 'client_id', p.client_id, 'kind', p.kind, 'status', p.status,
     'purpose', p.purpose, 'authority_kind', p.authority_kind, 'authority_ref', p.authority_ref,
     'authorised_by', p.authorised_by, 'authorised_at', p.authorised_at,
+    'authority_from', to_char(p.authority_from,'YYYY-MM-DD'),
     'created_by', p.created_by, 'created_at', p.created_at,
     'paused_at', p.paused_at, 'paused_by', p.paused_by, 'paused_reason', p.paused_reason,
     'ended_at', p.ended_at, 'ended_by', p.ended_by, 'ended_reason', p.ended_reason,
@@ -1431,6 +1803,7 @@ begin
   v_actor := v_ctx.actor; v_firm := v_ctx.firm; p := v_ctx.pl;
   select coalesce(jsonb_agg(jsonb_build_object(
            'occurrence_id', o.id, 'due_date', to_char(o.due_date,'YYYY-MM-DD'), 'leg', o.leg,
+           'period_key', to_char(o.period_key,'YYYY-MM-DD'), 'attempt', o.attempt,
            'revision', o.revision, 'intent_key', o.intent_key, 'work_id', o.work_id,
            'admitted_at', o.admitted_at, 'outcome', o.outcome, 'created_at', o.created_at,
            'work_status', w.status, 'work_error', w.error,
@@ -1486,19 +1859,17 @@ begin
   v_limit := least(greatest(coalesce(p_limit, 20), 1), 100);
   v_model := coalesce(nullif(btrim(coalesce(p_model,'')),''), clara._plan_run_model());
   for c in
+    -- THE CANDIDATE IS `clara._plan_admissible_event`'s, not pure arithmetic's: it is the function
+    -- that knows a reversal needs an ADMITTED accrual behind it and that a moved due day does not
+    -- make an already-run period due again. The revision join stays so a plan with no live revision
+    -- is not a candidate at all (and `ix_plan_revisions_live` still serves the gate); every other
+    -- filter now lives inside the picker, which is the one place that choice is made.
     select p.id as plan_id, (x.e->>'due_date')::date as due_date, x.e->>'leg' as leg
       from clara.accounting_plans p
       join clara.accounting_plan_revisions r on r.plan_id = p.id and r.superseded_at is null
       join clara.clients cl on cl.id = p.client_id and cl.firm_id = p.firm_id
-      cross join lateral (
-        select clara._plan_due_event_on_or_before(r.effective_from, r.frequency, r.day_rule,
-                 r.day_of_month, r.auto_reverse,
-                 least((now() at time zone r.timezone)::date,
-                       coalesce(r.effective_to, 'infinity'::date))) as e
-      ) x
+      cross join lateral (select clara._plan_admissible_event(p.id) as e) x
      where p.status = 'active' and cl.status = 'active' and x.e is not null
-       and not exists (select 1 from clara.accounting_plan_occurrences o
-                        where o.plan_id = p.id and o.due_date = (x.e->>'due_date')::date)
      order by (x.e->>'due_date')::date, p.created_at, p.id
      limit v_limit
   loop
@@ -1670,28 +2041,120 @@ begin
   if clara._plan_reversal_date(date '2026-09-30') <> date '2026-10-01' then
     raise exception '#640 tail: reversal arithmetic is wrong' using errcode='CLR10';
   end if;
+  -- The accrual a reversal undoes, and the honest NULL for a day this schedule reverses nothing on.
+  if clara._plan_primary_for_reversal(date '2026-06-30','monthly','last_day_of_month',null,
+        date '2026-10-01') <> date '2026-09-30' then
+    raise exception '#640 tail: the accrual behind a reversal is computed wrong (got %)',
+      clara._plan_primary_for_reversal(date '2026-06-30','monthly','last_day_of_month',null, date '2026-10-01')
+      using errcode='CLR10';
+  end if;
+  if clara._plan_primary_for_reversal(date '2026-06-30','monthly','last_day_of_month',null,
+        date '2026-10-02') is not null then
+    raise exception '#640 tail: a day this schedule reverses nothing on must answer NULL'
+      using errcode='CLR10';
+  end if;
+  -- The period a date belongs to, ANCHORED rather than calendar-quartered: a quarterly plan
+  -- anchored in February has periods Feb-Apr, May-Jul, …
+  if clara._plan_period_start(date '2026-02-10','quarterly',date '2026-04-30') <> date '2026-02-01' then
+    raise exception '#640 tail: quarterly period alignment is wrong (got %)',
+      clara._plan_period_start(date '2026-02-10','quarterly',date '2026-04-30') using errcode='CLR10';
+  end if;
+  if clara._plan_period_start(date '2026-02-10','quarterly',date '2026-05-01') <> date '2026-05-01' then
+    raise exception '#640 tail: the next quarterly period does not start where it should' using errcode='CLR10';
+  end if;
+  if clara._plan_period_start(date '2026-02-10','monthly',date '2026-01-31') <> date '2026-01-01' then
+    raise exception '#640 tail: a date BEFORE the anchor must floor into its own earlier period'
+      using errcode='CLR10';
+  end if;
+  -- The reversing plan's leg ceiling reaches the reversal of its last accrual.
+  if clara._plan_window_ceiling(date '2026-09-30', true) <> date '2026-10-01'
+     or clara._plan_window_ceiling(date '2026-09-30', false) <> date '2026-09-30' then
+    raise exception '#640 tail: the leg-aware window ceiling is wrong' using errcode='CLR10';
+  end if;
   if clara._plan_due_index_on_or_before(date '2026-06-15','monthly','day_of_month',15,date '2026-06-14')
      is not null then
     raise exception '#640 tail: a schedule produced a due day before its own effective_from'
       using errcode='CLR10';
   end if;
-  if (clara._plan_due_event_on_or_before(date '2026-06-30','monthly','last_day_of_month',null,true,
-        date '2026-08-05') ->> 'due_date') <> '2026-08-01'
-     or (clara._plan_due_event_on_or_before(date '2026-06-30','monthly','last_day_of_month',null,true,
-        date '2026-08-05') ->> 'leg') <> 'reversal' then
-    raise exception '#640 tail: a reversing schedule''s latest event on 2026-08-05 is not the 2026-08-01 reversal (got %)',
-      clara._plan_due_event_on_or_before(date '2026-06-30','monthly','last_day_of_month',null,true, date '2026-08-05')
+  -- The reversing schedule really does put 2026-07-31's accrual's reversal on 2026-08-01, read
+  -- through the two functions the lane actually uses rather than through a retired helper.
+  if clara._plan_reversal_date(clara._plan_due_nth(date '2026-06-30','monthly','last_day_of_month',
+        null, 1)) <> date '2026-08-01' then
+    raise exception '#640 tail: a reversing schedule''s 2026-07-31 accrual does not reverse on 2026-08-01'
       using errcode='CLR10';
   end if;
 
-  -- 6 · nothing of 0045's was touched: the four template/run relations and the five live doors
-  --     this file deliberately leaves alone are still exactly where they were.
+  -- 6 · NOTHING OF 0045's WAS TOUCHED, and this is now PROVEN rather than claimed (review
+  --     finding S8: the comment used to say four relations and five doors while the code counted
+  --     three relations and zero doors). The three relations must still be present, and the five
+  --     doors must hash BYTE-IDENTICALLY to the digests §0 took before this file created anything.
   select count(*)::int into v_n from pg_class c join pg_namespace n on n.oid=c.relnamespace
    where n.nspname='clara' and c.relname in ('adjustment_templates','adjustment_runs','adjustment_pair_reversals');
   if v_n <> 3 then
     raise exception '#640 tail: the 0045 adjustment relations are not intact (found %)', v_n using errcode='CLR10';
   end if;
+  select coalesce(string_agg(x.proname, ',' order by x.proname), '(none)') into v_names
+    from w640_adj_pin x
+    left join (select p.proname, md5(p.prosrc) as digest
+                 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+                where n.nspname = 'clara') live on live.proname = x.proname
+   where live.digest is distinct from x.digest;
+  if v_names <> '(none)' then
+    raise exception '#640 tail: this file changed 0045 door body(ies): %', v_names using errcode='CLR10';
+  end if;
 
-  raise notice '#640 tail: OK -- three RLS-forced plan relations with no application ACL, unique (plan_id, due_date) and unique (work_id) present, one live revision per plan enforced by a partial unique index, 11 human doors on clara_authenticated and the scan on clara_runtime alone (browser and agent lanes hold none), the scan reads no operator enable flag, the due arithmetic answers correctly for monthly/quarterly/month-end/reversal, and the 0045 adjustment lane is untouched.';
+  -- 7 · THE TWO CLOSED ONE-MEMBER CHECKS AND THE DAY CEILING, read off pg_constraint rather than
+  --     trusted from the DDL above (review finding S8).
+  if not exists (select 1 from pg_constraint
+                  where conrelid='clara.accounting_plan_revisions'::regclass and contype='c'
+                    and pg_get_constraintdef(oid) like '%Asia/Kuala_Lumpur%') then
+    raise exception '#640 tail: the timezone CHECK is absent' using errcode='CLR10';
+  end if;
+  if not exists (select 1 from pg_constraint
+                  where conrelid='clara.accounting_plan_revisions'::regclass and contype='c'
+                    and pg_get_constraintdef(oid) like '%day_of_month%'
+                    and pg_get_constraintdef(oid) like '%28%') then
+    raise exception '#640 tail: the 1..28 day_of_month ceiling is absent' using errcode='CLR10';
+  end if;
+  if not exists (select 1 from pg_constraint
+                  where conrelid='clara.accounting_plan_occurrences'::regclass
+                    and conname='uq_plan_occurrences_period' and contype='u'
+                    and pg_get_constraintdef(oid) like '%plan_id%leg%period_key%') then
+    raise exception '#640 tail: unique (plan_id, leg, period_key) is absent or reshaped'
+      using errcode='CLR10';
+  end if;
+  if (select attnotnull from pg_attribute
+       where attrelid='clara.accounting_plans'::regclass and attname='authority_from') is not true then
+    raise exception '#640 tail: accounting_plans.authority_from is absent or nullable' using errcode='CLR10';
+  end if;
+
+  -- 8 · THE LOCK ORDER, asserted on the body rather than on the header that describes it: the plan
+  --     row is taken FOR UPDATE before anything reaches clara.admit_journal_work.
+  select p.prosrc into v_src from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+   where n.nspname='clara' and p.proname='_plan_admit_occurrence';
+  if position('for update' in v_src) = 0
+     or position('for update' in v_src) > position('admit_journal_work' in v_src) then
+    raise exception '#640 tail: the admission core does not take the plan row lock before the accounting_work rung'
+      using errcode='CLR10';
+  end if;
+  -- …and the picker really does consult the occurrence rows, which is what makes the orphan wall
+  -- and the period wall properties of the scan rather than of a comment.
+  select p.prosrc into v_src from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+   where n.nspname='clara' and p.proname='_plan_admissible_event';
+  if position('accounting_plan_occurrences' in v_src) = 0 or position('period_key' in v_src) = 0
+     or position('_plan_primary_stands' in v_src) = 0 then
+    raise exception '#640 tail: the picker does not read the occurrence rows, or does not test that a reversal''s accrual STANDS'
+      using errcode='CLR10';
+  end if;
+  -- …and the DOOR holds the same wall for the path a human reaches by catch-up, so the two are
+  -- one law rather than two that can drift.
+  select p.prosrc into v_src from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+   where n.nspname='clara' and p.proname='_plan_admit_occurrence';
+  if position('_plan_primary_stands' in v_src) = 0 then
+    raise exception '#640 tail: the admission door does not test that a reversal''s accrual stands'
+      using errcode='CLR10';
+  end if;
+
+  raise notice '#640 tail: OK -- three RLS-forced plan relations with no application ACL; unique (plan_id, due_date), unique (plan_id, leg, period_key) and unique (work_id) present; authority_from NOT NULL; one live revision per plan enforced by a partial unique index; 11 human doors on clara_authenticated and the scan on clara_runtime alone (browser and agent lanes hold none); the scan reads no operator enable flag; the admission core takes the plan row lock before the accounting_work rung and the picker reads the occurrence rows; the timezone CHECK, the 1..28 day ceiling and the period unique are read off pg_constraint; the due arithmetic answers correctly for monthly/quarterly/month-end/reversal, the accrual behind a reversal, anchored period alignment and the leg-aware window ceiling; and all FIVE 0045 adjustment doors hash byte-identically to the digests taken before this file created anything.';
 end
 $w640_tail$;

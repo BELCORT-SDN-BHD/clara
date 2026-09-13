@@ -1689,7 +1689,15 @@ const ACCOUNTING_PLANS_0193_RUNTIME_FNS = ["wake_due_plan_occurrences"];
 const ACCOUNTING_PLANS_0193_UNGRANTED_FNS = [
   "_plan_admit_occurrence", "_plan_door_ctx", "_assert_plan_schedule", "_plan_run_model",
   "_plan_due_nth", "_plan_due_index_on_or_before", "_plan_reversal_date", "_plan_due_events",
-  "_plan_due_event_on_or_before", "_plan_occurrence_basis", "_plan_overlap_warning",
+  "_plan_occurrence_basis", "_plan_overlap_warning",
+  // …and the six the adversarial review round added: the accrual a reversal undoes, whether that
+  // accrual STANDS (admitted and not cancelled/failed without a committed receipt), the anchored
+  // period start, the per-occurrence period key, the leg-aware window ceiling, and the PICKER the
+  // scan actually asks (which reads the occurrence rows, so it is stable rather than immutable).
+  // The pure-arithmetic `_plan_due_event_on_or_before` the picker replaced is gone with it: an
+  // unreachable body in a census of reachable ones is a claim nobody can check.
+  "_plan_primary_for_reversal", "_plan_primary_stands", "_plan_period_start",
+  "_plan_occurrence_period_key", "_plan_window_ceiling", "_plan_admissible_event",
   "_tf_accounting_plans_immutable", "_tf_plan_revisions_immutable",
   "_tf_plan_occurrences_append_only",
 ];
