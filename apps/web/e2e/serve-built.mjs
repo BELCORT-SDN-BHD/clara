@@ -620,7 +620,11 @@ async function handleSupabase(request, response, url) {
     return;
   }
 
-  sendJson(response, 404, { message: `unhandled e2e Supabase route: ${request.method} ${path}` }, cors);
+  // #619 — A TYPED CONTRACT, not a plain message string: `code` is a stable, machine-checkable
+  // marker (so a cell that means to assert "this route was never mocked" can match on it rather
+  // than parsing prose), and `method`/`path` name exactly what reached here unanswered — the
+  // same two facts the human-readable message already carried, now structured.
+  sendJson(response, 404, { code: "unmatched_e2e_route", method: request.method, path }, cors);
 }
 
 /** The shared chat legs, AS THE RUNTIME SEES THEM (the chat/SSE repoint): the ONE session

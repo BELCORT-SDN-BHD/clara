@@ -362,6 +362,30 @@ Web、runtime、DB frontier 和 renderer 分别记录发布身份；源代码通
 前端验证全部接受的旅程与键盘／窄屏／恢复；托管环境再验证真实依赖、来源和制品。
 单元测试、数据库证明、合成原型与 hosted journey 各自说明证据范围，不互相冒充。
 
+当前实现（#619，2026-09-13）：浏览器 walk 套件的 mock 层收敛到一份共享 dispatch 原语
+（`apps/web/e2e/mock-dispatch.mjs`）。`readCachedJson(request)` 把一个 POST body 解析一次并缓存
+在 request 对象上，取代此前七个 lane mock 各自维护、有的带缓存有的不带的 `readJson` 副本
+（#722）——一个 request 的 body 只能被 Node 的 async iterator 消费一次，先读的 lane 若在决定
+"这不是我的 verb"之前就读了 body，后读的 lane 只会看到 `{}`，且这个静默失败不产生任何错误。
+`matchVerb(verbSet, verb)` 是 `bank-close-registers-mock.mjs` 已有的"读 body 前先查 allow-list"
+写法的具名版本。此前 `serve-built.mjs` 里一段 raw-byte 的 stream-replay hack（专为三个 lane 共答
+`list_review_queue` 而写）以及大量仅靠注释维系的 hook 顺序说明，在每个 lane 都改用共享缓存之后
+不再是必要条件，已随之移除或改写为准确陈述。F-05：`fs4-checkout-mock.mjs` 的 `state.doorCalls`
+账本此前记录每一个到达它的 `/rest/v1/rpc/` verb（该 hook 排在 dispatch 链最前），而不只是
+FS-4 C-6 自己的九个门——加了 `CHECKOUT_RPC_VERBS` allow-list 后只记真正被本车道分派的 verb。
+`#740`：`journal-work-mock.mjs` 的控制端点此前先读 body 再判断 `client`，现改为判断
+`?client=` 查询串（`chat-parity-mock.mjs` 已有的 `?thread=` 写法的同型应用），判断在 body 被读
+之前完成。`e2e-fixture-ownership.test.ts` 新增跨车道 RPC verb 归属普查（两个车道声明同一个
+verb 必须被具名声明为有意共享，否则普查失败）与一个并发反例——两个身份争用
+`serve-built.mjs` 唯一共享的 `state.email` 字段，证明该字段没有按调用者区分——用以说明
+`playwright.config.ts` 的 `workers: 1` 目前是必要而非习惯；本 PR 不撤销该值，也不把十条车道
+重构为按 worker 隔离。表格覆盖模式（具名 `DataTableCard label`、scoped
+`getByRole("table", { name })`、人口／筛选或隔离／空态断言）应用到两张表：Journals 表补齐了
+分页边界、空人口与 `list_entry_links` 信封拒绝三种此前缺失的状态；Clients register 首次获得
+`label`（此前二十个左右调用点只有 Journals 表有）并新增人口／跨车道隔离／空事务所三个断言。
+本地：`node --test e2e/e2e-fixture-ownership.test.ts e2e/mock-dispatch.test.ts` 21／21 pass；
+`pnpm typecheck`／`pnpm --filter @clara/web lint` 绿；浏览器套件结果见 #619 的关闭评论。
+
 ## 11. 当前实现与已接受目标的分界
 
 | 领域 | 当前实现的事实／限制 | 已接受目标 |
@@ -372,7 +396,7 @@ Web、runtime、DB frontier 和 renderer 分别记录发布身份；源代码通
 | 文件 | 0177 与 extraction-aware facts_gate consumer 已合入 main 并在本地 PG17 全链验证：未知 kind 的 PDF／图片在成功提取前返回 awaiting_extraction；hosted 发布已由 #606 记录（consumer v76 先行、0177 落地 live DB（frontier 0177）、runtime v77，真实上传旅程中 classify 任务在 extraction 完成后 98 ms 创建）。 | 能力分层与 source／facts／operation 状态一致；提取失败不产生分类目前只有本地证据，hosted 证据仍待补。 |
 | Knowledge | facts、wiki 与 advisory pattern pack 分开；检索偏固定 priority／recency；部分 claim metadata 缺失，chat pack 错误会降为 null。 | 统一捕获、身份、版本、按需检索、纠正和投影；必需知识不可用时诚实暂停。 |
 | 自动计划与 close | 日常 reconciler／资产／调整机制已有；bank_agent／close_prep wake sources 默认关闭，生产／激活链路不完整。 | 显式授权计划到期产生 Work，普通自主执行含满足条件的 recon／close；技术开关不成为用户 opt-in。 |
-| 财务界面与输出 | 统一导航壳已实现（#614：注册表驱动的 Sidebar／scope switcher／Breadcrumb，Work／Settings／Accounting 目的地，旧链接 307 迁移；本地单元与浏览器证据，hosted：clara-web 版本 5dcee6d8（3f4c5f8b，含畸形 client id 的 not-found 守卫）已推广，登录 smoke、旧链接 307 矩阵与 owner 登录后的 shell 旅程在线验证）；#623 的 C3 composer／B3 Work detail／B6 Work 卡片已落地（本地：web unit 2923／2923、browser 152 passed／0 failed／7 fixture-gated skips；hosted 证据以 #623 记录为准）。#626 的 `/settings/account`（账户、界面与通知偏好）已落地：`clara.user_preferences`／`get_my_preferences`／`save_my_preferences`（0179_user_preferences.sql，PATCH 语义、CLR06 乐观并发、CLR10 校验、op_key 重放，own-row RLS）落库，界面偏好集刻意收窄为两个有真实消费者的项（motion 驱动 `data-motion` 属性叠加 OS `prefers-reduced-motion`；sidebarDefault 写回既有 `sidebar_state` cookie），通知偏好尚无消费者、页面如实呈现"尚未配置"而非死控件；本地 DB／单元／浏览器套件验证，hosted 证据未补；A Home 仪表、B Work 列表／详情与 Settings 其余分区仍是目标，由 #641／#650／#659／#635 承接。#629 的 B3／B4／B6 共享问题面、#632 的 `/activity` 事件流（CB-AE2E-018 已解除）与 #634 的 composer 凭据选择器／Attach evidence 对话框／Journals 表链接与筛选已落地（本地：web unit 3003／3003（#629）、3001／3002（#632，1 个已知负载 flake）、2995／2995（#634）；浏览器全套 186／1、183／3、182／1，失败项均为未触及的负载敏感 spec 并单独通过；各自的 walk 全绿；hosted 证据以各 ticket 记录为准）。Journals／Documents／Reports 的条目级深链接仍缺（#719）。工作台与 card readers 仍是旧形态；sealed renderer 已有，sandbox worker、完整管理模板和交付验证仍不齐。 | 完整旅程、统一 metric pack、可靠 AI UI、可复现且可下载的报表。 |
+| 财务界面与输出 | 统一导航壳已实现（#614：注册表驱动的 Sidebar／scope switcher／Breadcrumb，Work／Settings／Accounting 目的地，旧链接 307 迁移；本地单元与浏览器证据，hosted：clara-web 版本 5dcee6d8（3f4c5f8b，含畸形 client id 的 not-found 守卫）已推广，登录 smoke、旧链接 307 矩阵与 owner 登录后的 shell 旅程在线验证）；#623 的 C3 composer／B3 Work detail／B6 Work 卡片已落地（本地：web unit 2923／2923、browser 152 passed／0 failed／7 fixture-gated skips；hosted 证据以 #623 记录为准）。#626 的 `/settings/account`（账户、界面与通知偏好）已落地：`clara.user_preferences`／`get_my_preferences`／`save_my_preferences`（0179_user_preferences.sql，PATCH 语义、CLR06 乐观并发、CLR10 校验、op_key 重放，own-row RLS）落库，界面偏好集刻意收窄为两个有真实消费者的项（motion 驱动 `data-motion` 属性叠加 OS `prefers-reduced-motion`；sidebarDefault 写回既有 `sidebar_state` cookie），通知偏好尚无消费者、页面如实呈现"尚未配置"而非死控件；本地 DB／单元／浏览器套件验证，hosted 证据未补；A Home 仪表、B Work 列表／详情与 Settings 其余分区仍是目标，由 #641／#650／#659／#635 承接。#629 的 B3／B4／B6 共享问题面、#632 的 `/activity` 事件流（CB-AE2E-018 已解除）与 #634 的 composer 凭据选择器／Attach evidence 对话框／Journals 表链接与筛选已落地（本地：web unit 3003／3003（#629）、3001／3002（#632，1 个已知负载 flake）、2995／2995（#634）；浏览器全套 186／1、183／3、182／1，失败项均为未触及的负载敏感 spec 并单独通过；各自的 walk 全绿；hosted 证据以各 ticket 记录为准）。Journals／Documents／Reports 的条目级深链接仍缺（#719）。工作台与 card readers 仍是旧形态；sealed renderer 已有，sandbox worker、完整管理模板和交付验证仍不齐。#619 把 Journals 表的空人口／分页边界／`list_entry_links` 信封拒绝三态补齐，并给 Clients register 的 `DataTableCard` 第一次加上 `label`（此前二十个左右调用点仅 Journals 表有），新增人口／跨车道隔离／空事务所的浏览器断言；其余约十八个 `DataTableCard` 调用点仍未命名（该组件自身的 header 早已记录这一差距）。 | 完整旅程、统一 metric pack、可靠 AI UI、可复现且可下载的报表；每张数据表都有名字。 |
 | 准入与运行保障 | beta 准入；#621（0185）已合入版本化 Terms／DPA 接受机制与走墙的验证码重发；#628（0186）已合入 checkout intent 生命周期、四种 Stripe 事件、取消／续付、容量墙（本地 DB／runtime／web 套件与两集群 DR 往返证据；hosted 已于 2026-09-13 发布：frontier 181／0186、clara-runtime v82（refresh-98f6eec6）、clara-web 742b09e9，signed-out smoke 与 Stripe 四事件订阅均已核对；v1 法律文本由 0187 按 owner 决定以 beta 模板发布——正文自称待律师审阅，正式措辞将以 v2 取代——hosted 发布见 #621／#628 记录）；部分外发机制、备份工具、单机部署；/ready 已区分未测量／未配置／已配置失败，并按 lane 计连接错误、暴露 leader 与 TLS posture，附可执行恢复清单（#617，本地 PG17 全链验证，并已有 hosted 证据：clara-runtime v76／v77 在真实宿主上暴露该 readiness 面，七条 lane DSN 已全部改为对镜像所带 pooler CA 的 `verify-full`，`/ready` 的 `checks.tls` 报 pinned ×7、validated）；完整硬性 readiness 与恢复证据仍有边界，生产上的强制 lane 断连与 leader kill 演练尚未执行。 | 合同与实现一致的准入／外发、协调版本发布及代表性 hosted／restore 验证。 |
 
 以上是持续有效的架构分界，不是项目进度清单。具体切片、依赖、故障证据与完成状态由 GitHub
