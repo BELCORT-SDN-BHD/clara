@@ -215,6 +215,50 @@ hosted 发布也按同一顺序完成：先发布具备 extraction-completed 消
 真实上传旅程与逐项 hosted 证据由 #606 记录——classify 任务在 document.extraction_completed 之后 98 ms 才创建，
 一份文件一个 classify 任务，下游 facts 恰好一次。
 
+**能力目录已落地（#624 / 0191，本地证据）。** `clara.document_capabilities` 把「能不能」从四处函数体里搬成
+一张全局表：每个「受理格式 × 文件类型」一行，四个正交层级各自取值 `supported｜stored_only｜unsupported｜planned`——
+custody（字节已封存并可取回）、byte_extraction（入库时有读取器把字节变成可查的提取内容）、
+typed_facts（某条 facts lane 能为这一对落下带来源区域的类型化事实）、business_operation（这一对能驱动会计操作）。
+种子是**派生**的：类型取自 0165 的 `clara._document_kind_roster()`（documents_document_kind_check 的活定义，20 个），
+格式取自 runtime 入库允许表（12 个规范 mime），层级由路由规则算出而非手写 240 行；迁移 tail 双向拒绝名册不一致。
+`clara._document_capability(format, kind)` 是唯一读者，两个未知方向都取诚实默认：未受理的格式什么都不声称，
+尚未分类的文件如实公布 custody 与 byte_extraction 而对 facts／operation 一律 `unsupported` 并标 `kind_known:false`。
+`clara.get_document_state(document, client)` 把四个状态、能力判定与 original／duplicate／refile／supersede lineage
+一次读出（准入与 `clara.get_document_extract` 完全一致），客户端 Documents 详情据此分别命名四个状态。
+
+**这次量到的两处诚实边界（C-37「不能只凭文件名承诺支持」）。** OFX 有读取器（`parseStatementOfx`），
+但格式本身不带期初余额，`parseStatementOfx` 因此按构造返回 `opening_cents: null`，而
+`statement-corroboration.mjs` 的 `missingHeaderFields` 把它算作必需表头字段——所以 `corroborateChain`
+对**每一份** OFX 月结单都抛 `header_unreadable`，结构化 lane 之前也没有 continuity 回填。`ofx × bank_statement`
+因此是 custody supported／byte_extraction stored_only／typed_facts **unsupported**，并在 `limits` 里记下
+`opening_balance: absent_in_format`。同样地 XLSX／DOCX 的字节确实被结构化读取器读，但
+`clara._enqueue_invoice_facts_core` 没有 xlsx／docx 臂，任何类型都拿不到类型化事实；
+`text/tab-separated-values` 也不在 csv／ofx 臂里，所以 TSV 月结单终止于 `skipped_type`。
+
+**发票行项目（invoice line items）是本切片明确推迟的能力**，没有新的 `document_invoice_lines` 表：
+表头事实连同来源区域是真的，逐行事实不是，因此登记为 `limits: {"invoice_line_items": "planned"}` 而不是
+降低 typed_facts 层级——界面渲染这条限制，"facts recorded" 不能越过它读成完整。
+能力目录只说明 Clara **能做什么**，从不代表许可：外发同意闸门仍是唯一权威（#631）。
+
+**字段路径语法固定在唯一未校验的写边界（C33.4）。** `clara.document_regions` 有三个写者：
+`persist_invoice_facts`（0009，封闭七路）、`persist_witness_facts`（0095，封闭数组）——两者本就是闭集，本次
+**一字未改**——以及 `persist_document_extraction`（0123 活体），它一直逐字接受 `field_path`。0191 按 0177 仪式
+（pre-image sha 钉、单锚点 splice、owner／ACL／DEFINER 后置校验）在区域循环首行插入
+`perform clara._assert_field_path(elem->>'field_path')`。语法是**普查出来的**而非发明的：现存产出方会写
+`pages.1.lines.0`（Azure 版式）、`rows.0`／`paragraphs.0`、以及 `sheets.0.A1`（structured-worker 逐字插值 XLSX 的
+`r=` 属性），所以纯小写语法会在第一份真实上传时打断 OCR 与 XLSX 两条热路径。接受的形状是：点分段，
+每段为无符号整数或 `[A-Za-z_][A-Za-z0-9_]*`，至多 12 段、128 字符，首段取自十个已登记命名空间；NULL 通过。
+风险与对策一并写下：迁移 **prestate 会在任何已存 `field_path` 不合语法时直接拒绝切换**，
+`packages/db/deploy/0191-field-path-census.sql` 是发布前跑的只读普查；函数体替换落在热摄取路径上，
+必须在仓库既定的 writer-quiescence 窗口内应用，回滚同样先走新的 append-only 迁移。
+
+**算术校验已经落库。** `clara.document_fact_validations` 每个 facts extraction／银行月结单 × 具名检查一行，
+取值 `pass｜fail｜not_applicable｜unmeasured`，`detail` 带各项与残差。写入方是两个
+`DEFERRABLE INITIALLY DEFERRED` 约束触发器（提交时才跑，那时区域已齐），因此**没有任何一个在用的 persist
+函数体被重切**。`unmeasured` 刻意与 `pass` 区分：旧的 `persist_invoice_facts` 只为 total／amount_due／deposit
+落 cents，六项恒等式在那套体制下根本无法求值，记成通过就是本工单要消灭的 placeholder success。
+`fail` 不阻塞也不隐藏：`clara._invoice_fact_state` 仍是依赖工作的权威闸门，这张表只让原因可见。
+
 **Knowledge 目标：**一个受治理的服务和产品入口，下层保留 typed canonical facts、稳定身份、
 来源、声明、修订与依赖关系；wiki、搜索、索引和可读 OKF bundle 是可重建投影。
 采用维护中的 OKF v0.2 可读交换语义及 source → wiki → ingest/query/lint 的维护思路，
@@ -369,7 +413,7 @@ Web、runtime、DB frontier 和 renderer 分别记录发布身份；源代码通
 | Agent 与宿主 | #623 已合入：`claraWork_v1`（ToolLoopAgent + 冻结 bundle `clara-work/v1`）与 `chatTurn_v18`；本地证据：runtime suite 2211／2209 pass／1 fail（Windows-only EICAR）／1 skip，world／version-cutover／work-journal e2e 在真实 Postgres World 上通过（含 commit 后、checkpoint 前 SIGKILL 重放恰好一条分录一条回执，及真实 chatTurn_v18 回合准入同一 basis）；hosted 证据以 #623 记录为准。#629 已合入 `claraWork_v2`（registry 重指向；v1 保留；`claraWork.v2.errors.ts` 委托 v1 名册并覆盖 `(CLR13, source_conflict)`；冻结清单相对 main 仅追加 7 项；本地：runtime suite 2233／2226 pass／1 fail（EICAR）／6 skip，world／version-cutover／work-journal／work-question e2e 全部通过——后者 7 条腿含两个 worker 竞争一个过期租约、resume 前崩溃、commit 后 checkpoint 前崩溃、过期→Retry→版本 2、角色丢失；CI `db-live-gates` 绿）。其余仍是分散冻结流程；根／CI／runtime image 已统一 Node 22.23.2（#616 已关闭，本地 + hosted 证据：Linux runners CI 绿，image `refresh-10b99a73` 以 v76 发布于 `clara-runtime`，`/ready` 200 且镜像内 Node v22.23.2）；`packages/backup` 已随 #686 改为 `node:22-bookworm-slim`（镜像尚未部署），`packages/reporting-render` 仍按 digest 钉 Node 20 基底，属独立待决事项（#691）。 | 首个 ToolLoopAgent successor 与显式版本 bundle；保留旧运行。 |
 | Work 与控制 | tasks、interruptions、回执、SSE、租约已有；#623（0178）加入 `accounting_work`／`operation_receipts`、逻辑操作身份、client 范围的 intent 幂等、retry 保留身份、任务状态镜像、receipt-aware 结算与待答问题级联（本地 db suite 4152／4058 pass／0 fail／94 skip）；#629（0180）加入共享 Work question（`agent_interruptions` 上的 Work 链接、单调版本、类型化字段、依据 digest、回答归因、带时间戳的 delivery state；一个 Work 至多一个待答问题；首答闸门 `answer_work_question`；读门 `get_work_question`／`get_work_pending_question`；`list_review_queue` 的 `work_question` 行）与正确投递（claimant+租约条件的 delivered 戳、续租、HookNotFound 按真实 run 状态核对、`hook_missing` 静置 + 宽限 + 二次探测后才结算 `expired`、14 天期限的执行者）；本地 db suite 4208／4114 pass／0 fail／94 skip；CI 绿。取消排序仍由 #630 承接；chat 车道的 clarify 期限与 HookNotFound 假设未变（#720）；答案不能补全不完整的 basis（#721）。 | 统一业务 Work，共享问题与稳定操作身份，真实重启／竞争下保持完整结果。 |
 | 会计能力 | JE、subledger、结算、资产、close 基础存在；#623 的无附件手工分录已是完整 operation（`wake_record_journal_entry`：无 attestation 仪式、当前授权与硬约束在提交时重查、回执墙接受两种回执形态）；#634（0182）使该 operation 的凭据可选且可迟到而不改写已入账历史（`entry_evidence_links`、全事务所一份文件一条在世分录、冲销释放、`attach_entry_evidence`、`list_entry_links`；`admit_journal_work`／`_record_journal_entry_core` 全文重切，0178 各拒绝臂逐一保留并经文本 diff 核对；本地 db suite 4193／4099 pass／0 fail／94 skip，work-journal e2e 第 8 条腿；CI 待记录）；文件编码车道仍不回看凭据链接（#718）。其余入口能力及人工／agent 行为仍不一致。 | 全范围领域操作与必要关联影响；去掉普通入账额外仪式，保留实际权限与硬约束。 |
-| 文件 | 0177 与 extraction-aware facts_gate consumer 已合入 main 并在本地 PG17 全链验证：未知 kind 的 PDF／图片在成功提取前返回 awaiting_extraction；hosted 发布已由 #606 记录（consumer v76 先行、0177 落地 live DB（frontier 0177）、runtime v77，真实上传旅程中 classify 任务在 extraction 完成后 98 ms 创建）。 | 能力分层与 source／facts／operation 状态一致；提取失败不产生分类目前只有本地证据，hosted 证据仍待补。 |
+| 文件 | 0177 与 extraction-aware facts_gate consumer 已合入 main 并在本地 PG17 全链验证：未知 kind 的 PDF／图片在成功提取前返回 awaiting_extraction；hosted 发布已由 #606 记录（consumer v76 先行、0177 落地 live DB（frontier 0177）、runtime v77，真实上传旅程中 classify 任务在 extraction 完成后 98 ms 创建）。#624（0191）已落地能力分层的**实现**：全局 `clara.document_capabilities`（12 格式 × 20 类型 = 240 行，派生种子，双向 totality guard）、唯一读者 `clara._document_capability`（两个未知方向都取诚实默认）、`clara.get_document_state` 一次读出 custody／byte_extraction／facts／operation 四态加 lineage、`clara.document_fact_validations`（两个 deferred 约束触发器写入，不重切任何 persist 体，`unmeasured ≠ pass`）、以及 C33.4 的 `clara._assert_field_path`（普查得来的语法，按 0177 仪式 splice 进 `persist_document_extraction`，prestate 对已存不合规路径直接拒绝切换）。界面上客户端 Documents 详情把四态各自具名呈现并逐字渲染目录的 basis 句，上传提示改为点名实际受理的格式。量到的边界：`ofx × bank_statement` typed_facts **unsupported**（OFX 无期初余额，`corroborateChain` 恒抛 `header_unreadable`）、xlsx／docx 与 TSV 月结单没有任何 facts lane、发票行项目记为 `limits.invoice_line_items = planned`。证据全部为**本地**（PG17 全链、db／runtime／web 套件与 Playwright walk）；**hosted 证据待补**，发布必须先跑 `packages/db/deploy/0191-field-path-census.sql` 并在 writer-quiescence 窗口内应用。 | 能力分层与 source／facts／operation 状态一致；提取失败不产生分类目前只有本地证据，hosted 证据仍待补；发票行项目与真实模型 recall 基线仍是目标。 |
 | Knowledge | facts、wiki 与 advisory pattern pack 分开；检索偏固定 priority／recency；部分 claim metadata 缺失，chat pack 错误会降为 null。 | 统一捕获、身份、版本、按需检索、纠正和投影；必需知识不可用时诚实暂停。 |
 | 自动计划与 close | 日常 reconciler／资产／调整机制已有；bank_agent／close_prep wake sources 默认关闭，生产／激活链路不完整。 | 显式授权计划到期产生 Work，普通自主执行含满足条件的 recon／close；技术开关不成为用户 opt-in。 |
 | 财务界面与输出 | 统一导航壳已实现（#614：注册表驱动的 Sidebar／scope switcher／Breadcrumb，Work／Settings／Accounting 目的地，旧链接 307 迁移；本地单元与浏览器证据，hosted：clara-web 版本 5dcee6d8（3f4c5f8b，含畸形 client id 的 not-found 守卫）已推广，登录 smoke、旧链接 307 矩阵与 owner 登录后的 shell 旅程在线验证）；#623 的 C3 composer／B3 Work detail／B6 Work 卡片已落地（本地：web unit 2923／2923、browser 152 passed／0 failed／7 fixture-gated skips；hosted 证据以 #623 记录为准）。#626 的 `/settings/account`（账户、界面与通知偏好）已落地：`clara.user_preferences`／`get_my_preferences`／`save_my_preferences`（0179_user_preferences.sql，PATCH 语义、CLR06 乐观并发、CLR10 校验、op_key 重放，own-row RLS）落库，界面偏好集刻意收窄为两个有真实消费者的项（motion 驱动 `data-motion` 属性叠加 OS `prefers-reduced-motion`；sidebarDefault 写回既有 `sidebar_state` cookie），通知偏好尚无消费者、页面如实呈现"尚未配置"而非死控件；本地 DB／单元／浏览器套件验证，hosted 证据未补；A Home 仪表、B Work 列表／详情与 Settings 其余分区仍是目标，由 #641／#650／#659／#635 承接。#629 的 B3／B4／B6 共享问题面、#632 的 `/activity` 事件流（CB-AE2E-018 已解除）与 #634 的 composer 凭据选择器／Attach evidence 对话框／Journals 表链接与筛选已落地（本地：web unit 3003／3003（#629）、3001／3002（#632，1 个已知负载 flake）、2995／2995（#634）；浏览器全套 186／1、183／3、182／1，失败项均为未触及的负载敏感 spec 并单独通过；各自的 walk 全绿；hosted 证据以各 ticket 记录为准）。Journals／Documents／Reports 的条目级深链接仍缺（#719）。工作台与 card readers 仍是旧形态；sealed renderer 已有，sandbox worker、完整管理模板和交付验证仍不齐。 | 完整旅程、统一 metric pack、可靠 AI UI、可复现且可下载的报表。 |
