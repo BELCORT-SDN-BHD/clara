@@ -15,10 +15,12 @@
 // EVERY CYCLE, NOT DAILY — AND THAT IS THE CADENCE DECISION, NOT AN OVERSIGHT (#640's C54.3
 // obligation: "treat cadence as an authorised schedule product setting; do not inherit 1h as
 // current"). The four DAILY belts beside it (SST, lint, FA, adjustments) each re-derive per-client
-// arithmetic in the runtime or in a per-client DB probe, so running them every ~2s would be real
-// work. This one does not: ONE call, whose candidate query is gated IN SQL on
-// `due_date <= (now() at time zone <the revision's timezone>)::date` behind two partial indexes,
-// and which returns `scanned: 0` on an estate with nothing due. The shape it copies is therefore
+// arithmetic IN THE RUNTIME or in a per-client DB probe, so running them every ~2s would be real
+// work in this process. This one does not: ONE call, and everything it costs is inside that one
+// statement — a row source of ACTIVE PLANS ONLY (two partial indexes), a handful of equality
+// probes per such plan (all served by the occurrence table's two unique indexes), the
+// `due_date <= (now() at time zone <the revision's timezone>)::date` gate among them, and
+// `scanned: 0` on an estate with nothing due. The shape it copies is therefore
 // reconcileRenderDispatch (leader.mjs:225 — every cycle, latency is the feature), not
 // reconcileAdjustmentRuns. The cost of the daily shape would be up to 24 hours between a due date
 // arriving in Kuala Lumpur and the Work existing, and #640's acceptance is about a due EVENT.
