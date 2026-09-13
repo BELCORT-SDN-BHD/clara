@@ -32,6 +32,7 @@ const state = {
   runs: [],
   at: null,
   error: null,
+  worldStartRefused: false,
 };
 
 /**
@@ -45,6 +46,23 @@ export function recordBodyCensus(census) {
   state.runs = [...(census?.runs ?? [])];
   state.at = new Date().toISOString();
   state.error = null;
+  state.worldStartRefused = false;
+}
+
+/**
+ * The world was NOT started because live runs are parked on bodies this image does not export
+ * (#637 review S5). A distinct recorder rather than a flag on the one above, because this is a
+ * different fact: the census ran, it found something, AND the process acted on it.
+ * @param {{stranded:number, names:ReadonlyArray<string>, runs?:ReadonlyArray<object>}} census
+ */
+export function recordWorldStartRefused(census) {
+  state.measured = true;
+  state.stranded = Number(census?.stranded ?? 0);
+  state.names = [...(census?.names ?? [])];
+  state.runs = [...(census?.runs ?? [])];
+  state.at = new Date().toISOString();
+  state.error = null;
+  state.worldStartRefused = true;
 }
 
 /**
@@ -65,7 +83,8 @@ export function recordBodyCensusFailure(code) {
  * The /ready view. Names and counts only — `/ready` is unauthenticated (lib/health.mjs's opening
  * contract), so a body IDENTIFIER is admissible (it is a public fact about the image) and a run
  * id, a DSN or raw database text is not.
- * @returns {{measured:boolean, stranded:number|null, names:string[], at:string|null, error:string|null}}
+ * @returns {{measured:boolean, stranded:number|null, names:string[], at:string|null, error:string|null,
+ *            world_start_refused:boolean}}
  */
 export function bodyCensusHealth() {
   return {
@@ -74,6 +93,8 @@ export function bodyCensusHealth() {
     names: [...state.names],
     at: state.at,
     error: state.error,
+    // Snake_case on the wire, matching every other /ready field (`last_error_code`, `frontier_reason`).
+    world_start_refused: state.worldStartRefused,
   };
 }
 
@@ -85,6 +106,7 @@ export function _setBodyCensusForTest(next) {
   state.runs = [...(next?.runs ?? [])];
   state.at = next?.at ?? new Date().toISOString();
   state.error = next?.error ?? null;
+  state.worldStartRefused = Boolean(next?.worldStartRefused);
 }
 
 /** Test-only reset — cells must not leak into each other. */
@@ -95,4 +117,5 @@ export function _resetBodyCensusForTest() {
   state.runs = [];
   state.at = null;
   state.error = null;
+  state.worldStartRefused = false;
 }

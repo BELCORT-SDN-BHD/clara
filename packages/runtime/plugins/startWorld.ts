@@ -34,7 +34,7 @@ import { workflows, workflowsByName, workflowBodies, workflowPins } from "../wor
 // because this is the only module that is both (a) TypeScript, so it can import the registry's
 // roster, and (b) running at the moment the world becomes dispatchable.
 import { readMigrationFrontier } from "../lib/build-info.mjs";
-import { recordBodyCensus, recordBodyCensusFailure } from "../lib/body-census.mjs";
+import { recordBodyCensus, recordBodyCensusFailure, recordWorldStartRefused } from "../lib/body-census.mjs";
 import { strandedBodyCensusOnWorld } from "../lib/rollback-preflight.mjs";
 import { sanitizedErrorCode } from "../lib/pool-error-contract.mjs";
 // #623 (C88.8): the serving bundle's own banner. Imported from the FROZEN bundle module so the
@@ -100,27 +100,51 @@ async function emitProvenanceLine(): Promise<void> {
  * that path (its storage-probe paragraph gives the reason — fly's 5s budget is already shared by
  * two sequential bounded round trips).
  */
-async function censusStrandedBodies(): Promise<void> {
+async function censusStrandedBodies(): Promise<{ mayStart: boolean }> {
+  let census;
   try {
-    const census = await strandedBodyCensusOnWorld(workflowBodies);
-    recordBodyCensus(census);
-    if (census.stranded > 0) {
-      console.warn(
-        `[clara-runtime] stranded bodies n=${census.stranded} names=${census.names.join(",")} `
-          + `— live runs are parked on bodies this image does NOT export; it cannot resume them. `
-          + `Re-release an image that carries them, or drain. (WARNING: this process keeps serving.)`,
-      );
-    } else {
-      console.log(`[clara-runtime] stranded bodies n=0 (every live run's body is carried by this image)`);
-    }
+    census = await strandedBodyCensusOnWorld(workflowBodies);
   } catch (err) {
+    // FAIL-OPEN ON THE READ, and only on the read. A census that could not be TAKEN is not
+    // evidence of a stranded body, and refusing to boot on it would turn a permission slip or a
+    // momentary connection failure into an outage. /ready reports it as unmeasured, which is its
+    // own third answer.
     const code = sanitizedErrorCode(err);
     recordBodyCensusFailure(code);
     console.warn(
       `[clara-runtime] stranded-body census FAILED (${code}) — this process cannot say whether any live run `
-        + `is parked on a body it does not carry. NOT fatal; /ready reports it as unmeasured.`,
+        + `is parked on a body it does not carry. NOT fatal; the world starts and /ready reports it as unmeasured.`,
     );
+    return { mayStart: true };
   }
+
+  if (census.stranded === 0) {
+    recordBodyCensus(census);
+    console.log(`[clara-runtime] stranded bodies n=0 (every live run's body is carried by this image)`);
+    return { mayStart: true };
+  }
+
+  const override = process.env.CLARA_ALLOW_STRANDED_BODIES === "1";
+  if (override) {
+    recordBodyCensus(census);
+    console.warn(
+      `[clara-runtime] stranded bodies n=${census.stranded} names=${census.names.join(",")} `
+        + `— OVERRIDDEN by CLARA_ALLOW_STRANDED_BODIES=1. The world will start and MAY crash on replay `
+        + `(ReplayDivergenceError) when it re-enqueues one of these runs. This is an operator decision.`,
+    );
+    return { mayStart: true };
+  }
+
+  recordWorldStartRefused(census);
+  console.error(
+    `[clara-runtime] stranded bodies n=${census.stranded} names=${census.names.join(",")} `
+      + `— REFUSING TO START THE DURABLE WORLD. Those runs are parked on bodies this image does not `
+      + `export; starting the engine would re-enqueue them and raise ReplayDivergenceError, which takes `
+      + `this crash-only process down and Fly restarts it — a loop, not a park. HTTP STAYS UP so /ready `
+      + `and /api/build-info remain readable, and NO lane runs. Release an image that carries those bodies `
+      + `(a compatibility build), or drain them, then restart. CLARA_ALLOW_STRANDED_BODIES=1 overrides.`,
+  );
+  return { mayStart: false };
 }
 
 export default definePlugin(() => {
@@ -214,6 +238,17 @@ export default definePlugin(() => {
   };
 
   void (async () => {
+    // #637 — THE PROVENANCE LINE COMES FIRST, before anything can refuse or fail. It is the line
+    // an operator needs most at exactly the moment the next step might refuse: which commit, which
+    // schema, which bodies, which pins.
+    await emitProvenanceLine();
+
+    // #637 review S5 — AND THE STRANDED-BODY CENSUS COMES BEFORE THE WORLD, because after it is
+    // too late: the world's own boot re-enqueue is what raises ReplayDivergenceError on a run whose
+    // body this image does not export, and a census that ran afterwards could only describe the
+    // crash. A refusal RETURNS — it never exits — so HTTP stays up and /ready can be read.
+    if (!(await censusStrandedBodies()).mayStart) return;
+
     try {
       const { getWorld } = await import("workflow/runtime");
       await getWorld().start?.();
@@ -236,15 +271,6 @@ export default definePlugin(() => {
       // byte-identical on purpose (tests/work-bundle.test.mjs pins v1's exact string); this is
       // additive.
       //
-      // NEVER A FABRICATED SHA. `<unset>` when CLARA_BUILD_SHA is not baked in, and
-      // `<unavailable: reason>` when the frontier read could not answer — the same honesty rung
-      // lib/build-info.mjs states for its own payload, because a believable wrong answer here is
-      // worse than an obvious absent one. `readMigrationFrontier` NEVER throws by construction.
-      await emitProvenanceLine();
-      // The stranded-body census. Fire-and-forget on purpose: it opens its own short-lived
-      // connection to the WORLD's database (clara_runtime has no USAGE on the `workflow` schema
-      // at all), and nothing about booting may wait on it.
-      void censusStrandedBodies();
     } catch (err) {
       console.error("[clara-runtime] durable world FAILED to start:", err instanceof Error ? err.message : String(err));
       process.exit(1); // crash-only: world-start failure is fatal (S4-D10)
