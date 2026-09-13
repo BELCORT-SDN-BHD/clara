@@ -4396,6 +4396,7 @@
       "issueDayOfMonthRange": "Choose a day between 1 and 28.",
       "issueEffectiveFromRequired": "Name the day this plan's authority starts.",
       "issueEffectiveFromInvalid": "That is not a calendar date.",
+      "issueEffectiveFromBeforeAuthority": "This plan was authorised from {date}. A revision cannot start earlier.",
       "issueEffectiveToInvalid": "That is not a calendar date.",
       "issueEffectiveToBeforeFrom": "The authority cannot end before it starts.",
       "issueReversalCollides": "A monthly reversing plan cannot accrue on the 1st: its reversal would land on the next accrual's own day.",

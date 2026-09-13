@@ -111,6 +111,10 @@ export type PlanDetail = {
   authority_ref: PlanAuthorityRef;
   authorised_by: string;
   authorised_at: string;
+  /** THE PLAN'S OWN AUTHORITY FLOOR — the day a human authorised it, written once and frozen. No
+   *  revision may start earlier, so no catch-up window can reach past it. Distinct from the live
+   *  revision's `effective_from`, which a revision may move FORWARD. */
+  authority_from: string;
   created_by: string;
   created_at: string;
   paused_at: string | null;
@@ -154,6 +158,13 @@ export type PlanOccurrenceRow = {
   occurrence_id: string;
   due_date: string;
   leg: PlanLeg | string;
+  /** The step-aligned PERIOD this due event belongs to — a reversal carries its accrual's, not the
+   *  month it falls in. One period takes one occurrence per leg, whatever a revision moved the due
+   *  day to. */
+  period_key: string;
+  /** 1 for every ordinary occurrence; higher only where a catch-up re-admitted a period whose Work
+   *  was cancelled or failed. */
+  attempt: number;
   revision: number;
   intent_key: string;
   work_id: string | null;

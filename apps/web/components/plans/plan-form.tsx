@@ -126,7 +126,10 @@ export function PlanForm({
     [accounts.data],
   );
 
-  const scheduleIssues: PlanIssue[] = validatePlanSchedule(schedule, { requireAuthority: !revising });
+  // A REVISION CARRIES THE PLAN'S AUTHORITY FLOOR (0193's `effective_from_before_authority`); a
+  // CREATE is the act that SETS it, so there is nothing to be below.
+  const authorityFrom = revising && plan !== null ? plan.authority_from : null;
+  const scheduleIssues: PlanIssue[] = validatePlanSchedule(schedule, { requireAuthority: !revising, authorityFrom });
   const basisIssues: JournalIssue[] = validateJournalDraft(
     { postingDate: schedule.effectiveFrom, memo, lines },
     knownAccounts,
@@ -154,6 +157,7 @@ export function PlanForm({
       dayOfMonthRange: t("issueDayOfMonthRange"),
       effectiveFromRequired: t("issueEffectiveFromRequired"),
       effectiveFromInvalid: t("issueEffectiveFromInvalid"),
+      effectiveFromBeforeAuthority: t("issueEffectiveFromBeforeAuthority", { date: authorityFrom ?? "" }),
       effectiveToInvalid: t("issueEffectiveToInvalid"),
       effectiveToBeforeFrom: t("issueEffectiveToBeforeFrom"),
       reversalCollides: t("issueReversalCollides"),
@@ -163,7 +167,7 @@ export function PlanForm({
 
   const submit = async () => {
     setAttempted(true);
-    const s = validatePlanSchedule(schedule, { requireAuthority: !revising });
+    const s = validatePlanSchedule(schedule, { requireAuthority: !revising, authorityFrom });
     const b = validateJournalDraft({ postingDate: schedule.effectiveFrom, memo, lines }, knownAccounts);
     if (s.length > 0) {
       fields.current.get(`s:${firstInvalidPlanField(s)}`)?.focus();

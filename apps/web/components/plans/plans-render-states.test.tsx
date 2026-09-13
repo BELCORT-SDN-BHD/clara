@@ -118,6 +118,7 @@ const PLAN_DETAIL = {
   authority_ref: { kind: "accounting_work", id: WORK },
   authorised_by: "u1",
   authorised_at: "2026-09-01T00:00:00Z",
+  authority_from: "2026-07-01",
   created_by: "u1",
   created_at: "2026-09-01T00:00:00Z",
   paused_at: null, paused_by: null, paused_reason: null,
@@ -358,13 +359,13 @@ test("plans.detail — an occurrence row links its Work and its entry; a REFUSED
         plan_id: PLAN,
         occurrences: [
           {
-            occurrence_id: "o1", due_date: "2026-09-01", leg: "primary", revision: 1,
+            occurrence_id: "o1", due_date: "2026-09-01", leg: "primary", period_key: "2026-09-01", attempt: 1, revision: 1,
             intent_key: `plan:${PLAN}:r1:2026-09-01`, work_id: WORK, admitted_at: "2026-09-01T00:10:00Z",
             outcome: { state: "admitted" }, created_at: "2026-09-01T00:10:00Z",
             work_status: "completed", work_error: null, receipt_id: "r1", entry_id: "e1",
           },
           {
-            occurrence_id: "o2", due_date: "2026-08-01", leg: "primary", revision: 1,
+            occurrence_id: "o2", due_date: "2026-08-01", leg: "primary", period_key: "2026-08-01", attempt: 1, revision: 1,
             intent_key: `plan:${PLAN}:r1:2026-08-01`, work_id: null, admitted_at: null,
             outcome: { state: "refused", code: "CLR04", reason: "actor_not_active", message: "the author is not an active member of this firm" },
             created_at: "2026-08-01T00:10:00Z",

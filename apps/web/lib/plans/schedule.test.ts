@@ -48,6 +48,39 @@ test("the authority is required on CREATE and absent on a REVISION — a revisio
     "a revision does not carry an authority at all");
 });
 
+test("a REVISION cannot start before the plan's own authority floor, and a CREATE has no floor to be below", () => {
+  // 0193's `clara.revise_accounting_plan` refuses CLR10 `effective_from_before_authority` when a
+  // revision's `effective_from` falls below the plan's frozen `accounting_plans.authority_from`
+  // (review finding B3) — without that wall a plan authorised today could be revised to 2020 and
+  // then catch up a decade of back-dated Work. The form says so at the control instead of letting
+  // the door say it after a submit.
+  const floor = "2026-07-01";
+  assert.deepEqual(
+    validatePlanSchedule(draft({ effectiveFrom: "2020-01-15" }), { requireAuthority: false, authorityFrom: floor })
+      .map((i) => `${i.field}:${i.code}`),
+    ["effectiveFrom:effectiveFromBeforeAuthority"],
+  );
+  assert.deepEqual(
+    validatePlanSchedule(draft({ effectiveFrom: floor }), { requireAuthority: false, authorityFrom: floor }).map((i) => i.code),
+    [],
+    "the floor itself is admissible — the door's test is `<`, not `<=`",
+  );
+  assert.deepEqual(
+    validatePlanSchedule(draft({ effectiveFrom: "2027-03-01" }), { requireAuthority: false, authorityFrom: floor }).map((i) => i.code),
+    [],
+    "moving the schedule FORWARD is what a revision is for",
+  );
+  // A CREATE sets the floor; it cannot be below one.
+  assert.deepEqual(codes(draft({ effectiveFrom: "2020-01-15" })), [],
+    "creating a plan whose authority starts in the past is the human's own explicit scope, not a refusal");
+  // …and an INVALID date still reports as invalid rather than as "before the authority".
+  assert.deepEqual(
+    validatePlanSchedule(draft({ effectiveFrom: "2026-02-30" }), { requireAuthority: false, authorityFrom: floor })
+      .map((i) => i.code),
+    ["effectiveFromInvalid"],
+  );
+});
+
 test("every schedule rule 0193 enforces is mirrored, and each names its own control", () => {
   assert.deepEqual(codes(draft({ purpose: "   " })), ["purpose:purposeRequired"]);
   assert.deepEqual(codes(draft({ frequency: "weekly" })), ["frequency:frequencyInvalid"]);

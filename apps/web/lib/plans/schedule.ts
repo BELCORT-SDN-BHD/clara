@@ -52,6 +52,7 @@ export type PlanIssueCode =
   | "dayOfMonthRange"
   | "effectiveFromRequired"
   | "effectiveFromInvalid"
+  | "effectiveFromBeforeAuthority"
   | "effectiveToInvalid"
   | "effectiveToBeforeFrom"
   | "reversalCollides";
@@ -82,7 +83,18 @@ export { isCalendarDate };
  * Every schedule rule 0193's `clara._assert_plan_schedule` enforces, in the order a preparer
  * should read them. The list's order IS the focus order (`firstInvalidPlanField`).
  */
-export function validatePlanSchedule(draft: PlanScheduleDraft, opts: { requireAuthority: boolean }): PlanIssue[] {
+export function validatePlanSchedule(
+  draft: PlanScheduleDraft,
+  opts: {
+    requireAuthority: boolean;
+    /** THE PLAN'S OWN AUTHORITY FLOOR on a REVISION — `accounting_plans.authority_from`, written
+     *  once at creation and frozen. `clara.revise_accounting_plan` refuses an `effective_from`
+     *  below it (CLR10 `effective_from_before_authority`), because a revision that could move the
+     *  authority backwards would dissolve `catch_up_before_authority` with it. Null on CREATE,
+     *  where the draft's own `effective_from` IS the floor being set. */
+    authorityFrom?: string | null;
+  },
+): PlanIssue[] {
   const issues: PlanIssue[] = [];
 
   if (draft.purpose.trim() === "") issues.push({ field: "purpose", code: "purposeRequired" });
@@ -108,6 +120,15 @@ export function validatePlanSchedule(draft: PlanScheduleDraft, opts: { requireAu
 
   if (draft.effectiveFrom.trim() === "") issues.push({ field: "effectiveFrom", code: "effectiveFromRequired" });
   else if (!isCalendarDate(draft.effectiveFrom)) issues.push({ field: "effectiveFrom", code: "effectiveFromInvalid" });
+  // THE AUTHORITY FLOOR, mirrored (0193's `effective_from_before_authority`). ISO dates compare
+  // lexicographically exactly as they compare chronologically — the same test
+  // `validateCatchUpWindow` below makes against the catch-up window's own wall.
+  else if (
+    opts.authorityFrom !== undefined && opts.authorityFrom !== null
+    && draft.effectiveFrom < opts.authorityFrom
+  ) {
+    issues.push({ field: "effectiveFrom", code: "effectiveFromBeforeAuthority" });
+  }
 
   if (draft.effectiveTo.trim() !== "") {
     if (!isCalendarDate(draft.effectiveTo)) issues.push({ field: "effectiveTo", code: "effectiveToInvalid" });
