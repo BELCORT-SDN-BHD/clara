@@ -33,10 +33,14 @@ Work and never initiates a bank payment or a mandate.
 **Plan occurrence**:
 One due event of one plan. It is the identity of that event: one plan and one due date have exactly
 one occurrence, whatever happened to it. An admitted occurrence names the Accounting work it
-created; a refused one records the refusal and creates nothing, and re-attempting it is an explicit
-catch-up rather than the next scan's business.
+created — and every attempt it ever admitted, so a cancelled one stays reachable from the plan; a
+refused one records the refusal and creates nothing, and re-attempting it is an explicit catch-up
+rather than the next scan's business. A REVERSING occurrence also names the journal entry it undoes:
+it is admissible only once its own period's accrual has POSTED a still-live entry, never merely
+because that accrual was admitted.
 _Avoid_: The journal entry as a synonym; a second scan's answer as a second occurrence; treating a
-missed period as something the schedule will pick up on its own.
+missed period as something the schedule will pick up on its own; treating an admitted accrual as a
+posted one.
 
 **Plan catch-up**:
 Admitting due events that already passed, over a window a person names. Oldest first, bounded per
