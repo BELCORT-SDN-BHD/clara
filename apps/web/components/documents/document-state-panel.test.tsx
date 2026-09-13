@@ -268,7 +268,12 @@ test("a FAILED arithmetic check names the check, keeps the facts readable, and s
   await mount(INVALID_INVOICE, async (text) => {
     const t = text();
     assert.match(t, /Failed a check/, "the facts state says a check failed");
-    assert.match(t, /invoice totals identity/, "…and names WHICH check");
+    // "the invoice arithmetic tie" rather than "invoice totals identity", and the reason is a
+    // measured one: the browser walk's own pre-existing cells locate the facts table by
+    // `getByText("Invoice total")`, and a label containing that substring made two of them fail
+    // on a strict-mode violation — the panel's own sentence and the table cell both matched.
+    // A check label must not collide with the name of a field it judges.
+    assert.match(t, /the invoice arithmetic tie/, "…and names WHICH check");
     assert.match(t, /stay readable below/,
       // NOTE: ticket numbers are spelled without the hash inside a STRING here — the repo's
       // no-raw-colour rule reads `#624` as a three-digit hex literal in app/** and components/**

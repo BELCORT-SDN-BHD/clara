@@ -365,7 +365,7 @@ test.describe("documents viewer — the MIME gate, the page overlay and the CSP"
     await expect(page.getByRole("group", { name: "Operation: Not coded yet" })).toBeVisible();
 
     // The failing check is NAMED, and the facts are explicitly still readable.
-    await expect(page.getByText(/invoice totals identity/)).toBeVisible();
+    await expect(page.getByText(/the invoice arithmetic tie/)).toBeVisible();
     await expect(page.getByText(/stay readable below/)).toBeVisible();
 
     // The source version travels with the facts, and the registry's own sentence explains the
@@ -391,30 +391,45 @@ test.describe("documents viewer — the MIME gate, the page overlay and the CSP"
 
     await expect(page.getByRole("group", { name: "Extraction: Stored, not parsed" })).toBeVisible();
     await expect(page.getByRole("group", { name: "Facts: None recorded" })).toBeVisible();
-    await expect(page.getByText(/invoice totals identity/)).toHaveCount(0);
+    await expect(page.getByText(/the invoice arithmetic tie/)).toHaveCount(0);
     await expect(page.getByText(/Recorded and checked/)).toHaveCount(0);
   });
 
   test("#624: ?document= DEEP-LINKS the detail, and browser Back restores the list", async ({ page }) => {
     await signIn(page);
 
-    // A cold navigation straight to the param — the shareable-link case. If the selection lived
-    // in component state this would render the empty detail pane.
+    // (1) A COLD navigation straight to the param — the shareable-link case. If the selection
+    // lived in component state this would render the empty detail pane.
     await page.goto(`${DOCUMENTS_URL}?document=${DOCS.docPdf}`);
     await expect(page.getByRole("heading", { name: "What Clara has done with this document" })).toBeVisible();
     await expect(page.getByRole("group", { name: "Facts: Failed a check" })).toBeVisible();
 
-    // Selecting the OTHER document moves the URL, so the address bar is the state.
+    // (2) A fresh arrival at the tab with NO param: the list is there and the detail is empty.
+    // Reached by navigating rather than by pressing Back twice from (1) — the honest reason is
+    // that (1) was a `goto`, so the entry BEFORE it is the login redirect, not this tab. A cell
+    // that pressed Back twice would have left the documents page entirely and then asserted
+    // about it, which is how the first cut of this cell failed.
+    await page.goto(DOCUMENTS_URL);
+    await expect(page.getByRole("heading", { name: "Filed to this client" })).toBeVisible();
+    await expect(page.getByText("Select a document to see its evidence, filings and doors.")).toBeVisible();
+
+    // (3) Selecting a document moves the URL — the address bar IS the state.
+    await selectDocument(page, /invoice-april\.pdf/);
+    await expect.poll(() => new URL(page.url()).searchParams.get("document")).toBe(DOCS.docPdf);
+    await expect(page.getByRole("group", { name: "Facts: Failed a check" })).toBeVisible();
+
+    // (4) Selecting the OTHER document moves it again, so two selections are two history entries
+    // rather than one replaced one.
     await selectDocument(page, /myinvois-e-invoice\.xml/);
     await expect.poll(() => new URL(page.url()).searchParams.get("document")).toBe(DOCS.docXml);
 
-    // …and Back returns to the first document rather than leaving the page entirely.
+    // (5) Back returns to the FIRST document, not out of the page.
     await page.goBack();
     await expect.poll(() => new URL(page.url()).searchParams.get("document")).toBe(DOCS.docPdf);
     await expect(page.getByRole("group", { name: "Facts: Failed a check" })).toBeVisible();
 
-    // One more Back leaves the detail closed and the LIST intact — the recipe's own
-    // "Back control restores the list selection" requirement.
+    // (6) …and one more Back RESTORES THE LIST with the detail closed — the recipe's own
+    // "a Back control restores the list selection and position" requirement.
     await page.goBack();
     await expect.poll(() => new URL(page.url()).searchParams.get("document")).toBeNull();
     await expect(page.getByText("Select a document to see its evidence, filings and doors.")).toBeVisible();
@@ -422,9 +437,15 @@ test.describe("documents viewer — the MIME gate, the page overlay and the CSP"
   });
 
   test("#624: the four states stay readable at 320px and at 200% zoom, with no page-wide horizontal scroll", async ({ page }) => {
+    // SIGN IN AT DESKTOP WIDTH, then narrow. Two reasons, and the second is load-bearing: a
+    // person does not sign in at 320px to read a document — they narrow (or rotate) while already
+    // in the workspace — and #732 is an OPEN, unrelated defect in the shell's own narrow-viewport
+    // hydration, which a sign-in performed at 320px walks straight into. This cell's subject is
+    // the four states' readability, so it must not be gated on that.
     await signIn(page);
-    await page.setViewportSize({ width: 320, height: 720 });
     await page.goto(`${DOCUMENTS_URL}?document=${DOCS.docPdf}`);
+    await expect(page.getByRole("heading", { name: "What Clara has done with this document" })).toBeVisible();
+    await page.setViewportSize({ width: 320, height: 720 });
 
     for (const name of ["Custody: Bytes verified", "Extraction: Done", "Facts: Failed a check", "Operation: Not coded yet"]) {
       await expect(page.getByRole("group", { name })).toBeVisible();
@@ -445,7 +466,7 @@ test.describe("documents viewer — the MIME gate, the page overlay and the CSP"
     for (const name of ["Facts: Failed a check", "Operation: Not coded yet"]) {
       await expect(page.getByRole("group", { name })).toBeVisible();
     }
-    await expect(page.getByText(/invoice totals identity/)).toBeVisible();
+    await expect(page.getByText(/the invoice arithmetic tie/)).toBeVisible();
     const zoomed = await overflow();
     expect(zoomed.scroll, `200%: ${zoomed.scroll} > ${zoomed.client}`).toBeLessThanOrEqual(zoomed.client + 1);
   });

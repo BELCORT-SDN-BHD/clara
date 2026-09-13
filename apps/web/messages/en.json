@@ -1554,7 +1554,7 @@
     },
     "capabilityLimitUnknown": "{name}: {level}",
     "checkName": {
-      "invoiceSixTermIdentity": "invoice totals identity",
+      "invoiceSixTermIdentity": "the invoice arithmetic tie",
       "statementChainCloses": "statement balance chain",
       "statementPrintedTotals": "printed statement totals"
     }
