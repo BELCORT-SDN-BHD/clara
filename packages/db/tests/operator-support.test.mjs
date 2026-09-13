@@ -536,6 +536,20 @@ cell("os.12 the arms are exactly three, and a foreign relation cannot enter thro
   await applyEvents(500);
   const rows = await supportQueue(operator.owner, { includeSettled: true });
   assert.ok(rows.length > 0, "the estate this battery built is not empty");
+
+  // ONE ROW PER CASE, and it is a join question rather than a vocabulary one. Every outward join in
+  // the three arms is to a relation with a UNIQUE index on the joined column
+  // (`uq_checkout_intents_session_id`, `uq_frp_registration`, the registration primary key) or is a
+  // `limit 1` lateral, so a fan-out is structurally impossible today — asserted anyway, because the
+  // day one of those joins gains a second matching row the duplicate would reach an operator as two
+  // identical cases with one decision between them.
+  const seen = new Map();
+  for (const row of rows) {
+    const key = `${row.case_kind}:${row.case_id}`;
+    assert.equal(seen.get(key), undefined, `${key} appears more than once — a join fanned out`);
+    seen.set(key, true);
+  }
+
   const kinds = [...new Set(rows.map((r) => r.case_kind))].sort();
   for (const kind of kinds) {
     assert.ok(Object.values(CASE_KIND).includes(kind), `case_kind ${kind} is one of the closed three`);
