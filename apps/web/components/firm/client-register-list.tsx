@@ -215,7 +215,12 @@ export function ClientRegisterList() {
             row-hover. It sits inside a Card because every other panel-level
             block on a page does; a bare table floating on the shell grey was
             the one surface with no edge at all. */}
-        <DataTableCard>
+        {/* #619 (裁-190's table-coverage pattern, applied here) — a `label`, so this
+            table is announced by name rather than as an anonymous table two
+            landmarks under the page's own <h1>. Nineteen of ~twenty DataTableCard
+            call sites still omit one (that module's own header note); this is the
+            second to gain it, after the journals table. */}
+        <DataTableCard label={t("tableLabel")}>
           <TableHeader>
             <TableRow>
               <TableHead>{t("columnName")}</TableHead>

@@ -259,12 +259,7 @@ function json(sendJson, response, body, cors) {
   return true;
 }
 
-async function readJson(request) {
-  const chunks = [];
-  for await (const chunk of request) chunks.push(chunk);
-  if (chunks.length === 0) return {};
-  try { return JSON.parse(Buffer.concat(chunks).toString("utf8")); } catch { return {}; }
-}
+import { readCachedJson as readJson } from "./mock-dispatch.mjs";
 
 /** The uuid prefix every document id in this lane shares (see DOCS above). It is what scopes the
  *  `/rest/v1/documents` handler by SUBJECT rather than by "did I happen to have a row" — a request

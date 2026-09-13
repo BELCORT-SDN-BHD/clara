@@ -44,6 +44,13 @@ async function openPostedTab(page: Page): Promise<void> {
   await expect(page.getByRole("table", { name: "Journal entries" })).toBeVisible();
 }
 
+/** #619 — the SAME click, without the table-visible assertion: a client with no journal
+ *  entries at all renders the empty state INSTEAD of a table, so `openPostedTab`'s own
+ *  post-condition would fail for the one cell that means to reach exactly that state. */
+async function openPostedTabAllowingEmpty(page: Page): Promise<void> {
+  await page.getByRole("tab", { name: "Posted" }).click();
+}
+
 test("the Posted tab is a real table, sorted by POSTING date and not by the read's own order", async ({ page }) => {
   await signInTo(page, JOURNALS_URL);
   // #614 removed the layout's own "Client: <name>" heading — the CB-AE2E-019
@@ -213,4 +220,60 @@ test("t634: an expanded posted row discloses its Work, its receipt and its sourc
   const fromDocument = page.locator("table tbody tr").filter({ hasText: "RECENT April utilities" }).first();
   await fromDocument.getByRole("button", { name: "View" }).click();
   await expect(page.getByText("Coded from the document", { exact: true })).toBeVisible();
+});
+
+// ---------------------------------------------------------------------------
+// #619 (AC2) — journals' three missing table states: the Posted tab's pagination boundary
+// (present but inert on the fixture's single page), an honest empty-population state (no
+// entries at all, not an empty table), and a stale/refused `list_entry_links` envelope (the
+// evidence read fails; the database's own figures still render).
+// ---------------------------------------------------------------------------
+
+test("the Posted tab's pagination controls are present and correctly INERT on the fixture's one page", async ({ page }) => {
+  await signInTo(page, JOURNALS_URL);
+  await openPostedTab(page);
+
+  // Three approved rows (the default Posted filter), and PAGE_SIZES' smallest step is 25 — so
+  // this fixture can never reach a SECOND page without inflating it well past what the other
+  // cells in this file depend on (first/last row ordering, a 3-of-4 filtered count). The
+  // reachable, honest state today is the BOUNDARY: exactly one page, and both navigation
+  // controls correctly disabled rather than merely absent.
+  await expect(page.getByText("Page 1 of 1 · 3 entries")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Previous" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Next" })).toBeDisabled();
+});
+
+test("a client with no journal entries at all shows the honest empty state, never an empty table", async ({ page }) => {
+  await page.route("**/e2e-supabase/rest/v1/journal_entries**", (route) =>
+    route.fulfill({ status: 200, contentType: "application/json", body: "[]" }));
+  await page.route("**/e2e-supabase/rest/v1/journal_lines**", (route) =>
+    route.fulfill({ status: 200, contentType: "application/json", body: "[]" }));
+
+  await signInTo(page, JOURNALS_URL);
+  await openPostedTabAllowingEmpty(page);
+
+  await expect(page.getByText("No posted entries yet.")).toBeVisible();
+  await expect(page.getByRole("table", { name: "Journal entries" })).toHaveCount(0);
+});
+
+test("t634: a stale or refused list_entry_links envelope is said out loud, and the database's own figures still render", async ({ page }) => {
+  await page.route("**/e2e-supabase/rest/v1/rpc/list_entry_links", (route) =>
+    route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ message: "e2e: links read refused" }) }));
+
+  await signInTo(page, JOURNALS_URL);
+  await openPostedTab(page);
+
+  // SAID OUT LOUD, above the table — "we could not read it" is a different fact from "there is
+  // none", and journal-entries-table.tsx's own header says why the two must never render the
+  // same way.
+  await expect(
+    page.getByText(
+      "We could not read the Work, receipt and source links for these entries. The amounts and dates below are still the database's own.",
+    ),
+  ).toBeVisible();
+  // THE DEGRADATION IS NARROW: the refusal fails only the evidence columns. The database's OWN
+  // figures — every row, in the right order — still render exactly as the happy-path cell above
+  // asserts them.
+  await expect(firstRow(page)).toContainText("RECENT April utilities");
+  await expect(page.locator("table tbody tr").last()).toContainText("BACKDATED January rent");
 });

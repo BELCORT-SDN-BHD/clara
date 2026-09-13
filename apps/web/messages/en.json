@@ -285,6 +285,7 @@
   "ClientsRegister": {
     "heading": "Clients",
     "body": "Every client this firm serves.",
+    "tableLabel": "Clients",
     "emptyMessage": "No clients are visible to this firm yet.",
     "columnName": "Client",
     "columnStatus": "Status",

@@ -333,3 +333,57 @@ test("/work opens the agent-task drawer and logs NO MISSING_MESSAGE", async ({ p
     .poll(() => consoleText.filter((line) => /MISSING_MESSAGE/.test(line)).length)
     .toBeGreaterThan(0);
 });
+
+// ---------------------------------------------------------------------------
+// #619 (AC2) — the client register is a NAMED, scoped table: population, isolation from a
+// sibling lane's own fixtures, and an honest empty state. `client-register-list.tsx`'s
+// `DataTableCard` had no `label` before this ticket (the journals table was the only one of
+// ~twenty call sites that did) — a screen reader announced it as an unnamed table two
+// landmarks under the page's own <h1>, which is exactly the gap 裁-190's own header names.
+// ---------------------------------------------------------------------------
+
+test("the client register is a named table whose population is EXACTLY this firm's own clients — no sibling lane's client leaks in", async ({ page }) => {
+  await signIn(page, "owner@example.test");
+  await page.goto("/clients");
+
+  // NAMED — a screen reader announces this table by what it holds, not as an anonymous
+  // region two landmarks under the page's own <h1> (which reads "Clients" too, so a scoped
+  // selector is the only way to tell the table from the page).
+  const table = page.getByRole("table", { name: "Clients" });
+  await expect(table).toBeVisible();
+
+  // POPULATION — exactly the shared mock's own unfiltered register (`serve-built.mjs`'s
+  // `clients` array): CLIENT_A, CLIENT_B, and #632's two ACTIVITY_CLIENTS, appended to that
+  // SAME array. Four rows, no more and no fewer.
+  await expect(table.locator("tbody tr")).toHaveCount(4);
+  await expect(table.getByRole("link", { name: "Rome Properties" })).toBeVisible();
+  await expect(table.getByRole("link", { name: "Bee Creative Solution" })).toBeVisible();
+  await expect(table.getByRole("link", { name: "Activity Feed Fixture" })).toBeVisible();
+  await expect(table.getByRole("link", { name: "Activity Permission-Flip Fixture" })).toBeVisible();
+
+  // ISOLATION — every OTHER lane mock's own client exists only behind that lane's own
+  // ID-SCOPED handler (`e2e-fixture-ownership.test.ts`'s N4/N5 rule: the UNFILTERED
+  // `/rest/v1/clients` read is the register every walk shares, and a lane fixture that
+  // answered it would replace this one). None of these names was ever spliced into the
+  // shared register, so none may appear on the ONE page that reads it unfiltered.
+  await expect(page.getByText("L7 CLOSE FIXTURE")).toHaveCount(0);
+  await expect(page.getByText("PENANG SPICE TRADING")).toHaveCount(0);
+  await expect(page.getByText("ROME PUBLIC ADVISORY")).toHaveCount(0);
+
+  const result = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
+  expect(result.violations, "/clients, populated").toEqual([]);
+});
+
+test("an empty firm's client register shows the labelled empty state, never an empty table", async ({ page }) => {
+  await page.route("**/e2e-supabase/rest/v1/clients**", (route) =>
+    route.fulfill({ status: 200, contentType: "application/json", body: "[]" }));
+
+  await signIn(page, "owner@example.test");
+  await page.goto("/clients");
+
+  await expect(page.getByText("No clients are visible to this firm yet.")).toBeVisible();
+  await expect(page.getByRole("table", { name: "Clients" })).toHaveCount(0);
+
+  const result = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
+  expect(result.violations, "/clients, empty firm").toEqual([]);
+});

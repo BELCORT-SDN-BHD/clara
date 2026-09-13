@@ -40,7 +40,16 @@ async function signInTo(page: Page, destination: string): Promise<void> {
 }
 
 /** Drive the fixture through the app's OWN proxy, with the real session — see journal-work-walk's
- *  own note on why this is not an app-origin backdoor. */
+ *  own note on why this is not an app-origin backdoor.
+ *
+ *  #740 — THE CLIENT ID RIDES IN THE QUERY STRING, not the body: the same fix
+ *  `journal-work-walk.spec.ts`'s own `control()` carries, applied here too. This file
+ *  hard-coded the control path (`"/api/runtime/e2e-journal-work/control"`, no `?client=`)
+ *  rather than reading `JOURNAL_WORK.controlPath`, and was therefore missed by the first
+ *  pass of that fix — MEASURED, not theoretical: with the control leg's own discriminant
+ *  moved onto `?client=`, every `control()` call in this file sent `client` in the BODY
+ *  only, `url.searchParams.get("client")` read `null`, the handler fell through unanswered,
+ *  and this file's own cells failed. */
 async function control(page: Page, body: Record<string, unknown>): Promise<Record<string, unknown>> {
   return await page.evaluate(
     async (call: { path: string; payload: Record<string, unknown> }) => {
@@ -51,7 +60,7 @@ async function control(page: Page, body: Record<string, unknown>): Promise<Recor
       });
       return (await res.json()) as Record<string, unknown>;
     },
-    { path: "/api/runtime/e2e-journal-work/control", payload: { client: CLIENT, ...body } },
+    { path: `${JOURNAL_WORK.controlPath}?client=${encodeURIComponent(CLIENT)}`, payload: body },
   );
 }
 

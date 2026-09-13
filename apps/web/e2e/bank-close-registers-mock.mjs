@@ -47,22 +47,16 @@ export function l7AbandonAttempts() {
 }
 
 /** The ONLY five RPC verbs this lane's own dispatch chain (below) recognises — the allow-list
- *  `readJson`'s own call site guards on (review finding 10). Exported so a unit can drive the
- *  handler with a verb NOT in this set and assert the request body is left untouched. */
+ *  `matchVerb` guards the `readJson` call site with (review finding 10). Exported so a unit can
+ *  drive the handler with a verb NOT in this set and assert the request body is left untouched. */
 export const L7_RPC_VERBS = new Set([
   "list_fiscal_years", "get_close_plan", "get_close_readiness", "list_agent_act_receipts", "abandon_close",
 ]);
 
-async function readJson(request) {
-  const chunks = [];
-  for await (const chunk of request) chunks.push(chunk);
-  if (chunks.length === 0) return {};
-  try {
-    return JSON.parse(Buffer.concat(chunks).toString("utf8"));
-  } catch {
-    return {};
-  }
-}
+// #722 — the shared body-reading primitive AND the shared allow-list-guard idiom this lane's
+// own `L7_RPC_VERBS` check pioneered. See mock-dispatch.mjs's own header for the hazard this
+// closes.
+import { matchVerb, readCachedJson as readJson } from "./mock-dispatch.mjs";
 
 const CLIENT = () => ({
   id: L7.clientId,
@@ -225,7 +219,7 @@ export async function handleL7Supabase(request, response, path, url, sendJson, c
   // lane's fix) — but the actual defect is HERE: an exact-verb allow-list check, guarding
   // `readJson` itself, so a verb this lane does not recognise returns false WITHOUT ever touching
   // the stream, leaving it fully intact for whichever hook runs next, in ANY order.
-  if (!L7_RPC_VERBS.has(verb)) return false;
+  if (!matchVerb(L7_RPC_VERBS, verb)) return false;
   const body = await readJson(request);
 
   if (verb === "list_fiscal_years") {

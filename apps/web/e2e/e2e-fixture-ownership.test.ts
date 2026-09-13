@@ -27,6 +27,8 @@ import { fileURLToPath } from "node:url";
 
 import { P6_5_SESSIONS } from "./agentic-finish-mock.mjs";
 import { handleL7Supabase, L7_RPC_VERBS } from "./bank-close-registers-mock.mjs";
+import { handleCheckoutMock } from "./fs4-checkout-mock.mjs";
+import { JOURNAL_WORK, handleJournalWorkRuntime } from "./journal-work-mock.mjs";
 
 const E2E_DIR = dirname(fileURLToPath(import.meta.url));
 const SERVE_BUILT = join(E2E_DIR, "serve-built.mjs");
@@ -552,7 +554,10 @@ test("N4 (L7) · the close-prep hold fixture's held_by IS the shared subject —
 
 test("N7 (L7) · the exact-verb allow-list runs BEFORE readJson, in source", () => {
   const source = readFileSync(join(E2E_DIR, "bank-close-registers-mock.mjs"), "utf8");
-  const guardAt = source.indexOf("if (!L7_RPC_VERBS.has(verb)) return false;");
+  // #722 — the guard now reads through the shared `matchVerb` helper (mock-dispatch.mjs)
+  // rather than a bare `L7_RPC_VERBS.has(verb)`; the SHAPE this cell protects (the guard runs
+  // before the read) is unchanged.
+  const guardAt = source.indexOf("if (!matchVerb(L7_RPC_VERBS, verb)) return false;");
   const readJsonCallAt = source.indexOf("const body = await readJson(request);");
   assert.ok(guardAt >= 0, "the allow-list guard must still exist in source");
   assert.ok(readJsonCallAt >= 0, "the readJson call it exists to protect must still exist");
@@ -592,4 +597,375 @@ test("N7 (L7) · a verb this lane does not own leaves the request body COMPLETEL
     0,
     "the request's stream must never even be OPENED — a later hook's own readJson(request) must see the full, undrained body",
   );
+});
+
+// ---------------------------------------------------------------------------
+// F-05 (#619) — `fs4-checkout-mock.mjs`'s door-call ledger records only a VERB IT ACTUALLY
+// DISPATCHED, not every `/rest/v1/rpc/` POST that reaches it.
+// ---------------------------------------------------------------------------
+//
+// MEASURED: `handleCheckoutMock` is hooked FIRST among every lane in `serve-built.mjs`'s
+// dispatch chain (`serve-built.mjs:339`), so EVERY `/rest/v1/rpc/` POST across the WHOLE
+// suite — not only FS-4 C-6's own nine doors — reaches `handleCheckoutDoors` before any other
+// lane's hook gets a look. The old code pushed `fn` onto `state.doorCalls` unconditionally, at
+// the top of that function, before any `fn === "…"` branch had run — so a verb this lane does
+// not own (`get_my_preferences`, fired by `MotionPreferenceSync` on EVERY signed-in page,
+// including every page the checkout walk visits) was recorded as a "door call" anyway. That
+// pollutes the ONE assertion `checkout-gate-walk.spec.ts` makes about a refused request having
+// reached NO door (`expect(after.doorCalls).toEqual([])`, `:561`) — the array could carry a
+// verb the checkout journey never dispatched at all.
+//
+// THE FIX is the same allow-list-BEFORE-recording shape `bank-close-registers-mock.mjs`
+// already uses for its own five verbs (N7 above): a verb this lane does not recognise returns
+// `false` before `state.doorCalls` is ever touched.
+
+test("F-05 · the checkout lane's door-call ledger records only a verb it actually DISPATCHED", async () => {
+  const state: { doorCalls: string[] } = { doorCalls: [] };
+  let responded = false;
+  const sendJson = () => {
+    responded = true;
+  };
+  // `get_my_preferences` — a REAL RPC verb, owned by `serve-built.mjs`'s own generic fixture
+  // (`serve-built.mjs:649`), and NOT one of FS-4 C-6's nine checkout doors. Chosen because it is
+  // the exact verb this ticket's brief measured firing on every signed-in page.
+  const request = { method: "POST" } as unknown as Parameters<typeof handleCheckoutMock>[0]["request"];
+  const handled = await handleCheckoutMock({
+    request,
+    response: {} as never,
+    path: "/rest/v1/rpc/get_my_preferences",
+    cors: {},
+    state: state as never,
+    sendJson: sendJson as never,
+    readJson: (async () => ({})) as never,
+    appOrigin: "https://127.0.0.1:3100",
+    accessToken: () => "token",
+    subject: "11111111-1111-1111-1111-111111111111",
+    registrationId: "22222222-2222-2222-2222-222222222222",
+    firmId: "33333333-3333-4333-8333-333333333333",
+    signupCode: "654321",
+  });
+
+  assert.equal(handled, false, "a verb this lane does not own must fall through unanswered");
+  assert.equal(responded, false, "and must never have sent a response");
+  assert.deepEqual(
+    state.doorCalls,
+    [],
+    "an unrecognised verb must never be recorded as a door call — it was never DISPATCHED to any door",
+  );
+});
+
+test("F-05 · a verb the checkout lane DOES own is still recorded — the fix narrows, it does not silence, the ledger", async () => {
+  const state = {
+    doorCalls: [] as string[],
+    legalAccepted: { terms: null, dpa: null },
+    legalDraftTerms: false,
+    email: "owner@example.test",
+  };
+  let sent: { status: number; body: unknown } | null = null;
+  const sendJson = (_response: unknown, status: number, body: unknown) => {
+    sent = { status, body };
+  };
+  const request = { method: "POST" } as unknown as Parameters<typeof handleCheckoutMock>[0]["request"];
+  const handled = await handleCheckoutMock({
+    request,
+    response: {} as never,
+    path: "/rest/v1/rpc/get_current_legal_documents",
+    cors: {},
+    state: state as never,
+    sendJson: sendJson as never,
+    readJson: (async () => ({})) as never,
+    appOrigin: "https://127.0.0.1:3100",
+    accessToken: () => "token",
+    subject: "11111111-1111-1111-1111-111111111111",
+    registrationId: "22222222-2222-2222-2222-222222222222",
+    firmId: "33333333-3333-4333-8333-333333333333",
+    signupCode: "654321",
+  });
+
+  assert.equal(handled, true, "a checkout door verb must still be handled");
+  assert.ok(sent, "and must still have sent a response");
+  assert.deepEqual(state.doorCalls, ["get_current_legal_documents"], "and IS still recorded on its own ledger");
+});
+
+// ---------------------------------------------------------------------------
+// #740 — `journal-work-mock.mjs`'s control leg declines a FOREIGN client via the QUERY
+// STRING, before it ever opens the request's own stream — the same N7 shape
+// `bank-close-registers-mock.mjs`'s allow-list guard already proves for a verb, applied here to
+// an id.
+// ---------------------------------------------------------------------------
+//
+// MEASURED (pre-fix, `journal-work-mock.mjs:643-648`): the control leg read the JSON body via
+// `readJson(request)` and THEN checked `body?.client !== JOURNAL_WORK.clientId`, falling
+// through on a mismatch — the drain-then-fall-through shape #727's review flagged in
+// `chat-parity-mock.mjs`, fixed there by moving the discriminant onto the query string
+// (`?thread=`, forwarded verbatim by the app's own same-origin proxy,
+// `app/api/runtime/[...path]/route.ts:53`). The same fix applies here: `?client=` is checked
+// BEFORE the body is ever read, so a request for a client this lane does not own returns
+// `false` with the stream fully intact for whichever hook `serve-built.mjs` calls next.
+
+test("#740 · the journal-work control leg declines a FOREIGN client via the query string, and NEVER opens the request's own stream", async () => {
+  let asyncIteratorCalls = 0;
+  const request: AsyncIterable<Buffer> & { method: string } = {
+    method: "POST",
+    [Symbol.asyncIterator]: (): AsyncIterator<Buffer> => {
+      asyncIteratorCalls += 1;
+      let delivered = false;
+      return {
+        async next() {
+          if (delivered) return { value: undefined, done: true };
+          delivered = true;
+          return { value: Buffer.from(JSON.stringify({ op: "reset" }), "utf8"), done: false };
+        },
+      };
+    },
+  };
+  // A client id that is NOT JOURNAL_WORK.clientId — a foreign lane's own control call, or a
+  // typo, must never be answered by this lane and must never touch this request's stream.
+  const url = new URL("https://example.test/api/e2e-journal-work/control?client=not-this-lanes-client");
+  let responded = false;
+  const send = () => {
+    responded = true;
+  };
+
+  const handled = await handleJournalWorkRuntime(
+    request as never,
+    { writeHead: send, end: send } as never,
+    url as never,
+  );
+
+  assert.equal(handled, false, "a foreign client's control call must fall through unanswered");
+  assert.equal(responded, false, "and must never have sent a response");
+  assert.equal(
+    asyncIteratorCalls,
+    0,
+    "the request's stream must never even be OPENED — control() must decide ownership from the query string alone",
+  );
+});
+
+test("#740 · the journal-work control leg still answers ITS OWN client, by query string", async () => {
+  const request: AsyncIterable<Buffer> & { method: string } = {
+    method: "POST",
+    [Symbol.asyncIterator]: (): AsyncIterator<Buffer> => {
+      let delivered = false;
+      return {
+        async next() {
+          if (delivered) return { value: undefined, done: true };
+          delivered = true;
+          return { value: Buffer.from(JSON.stringify({ op: "reset" }), "utf8"), done: false };
+        },
+      };
+    },
+  };
+  const url = new URL(`https://example.test/api/e2e-journal-work/control?client=${JOURNAL_WORK.clientId}`);
+  let sentBody: unknown = null;
+  const response = {
+    writeHead: () => undefined,
+    end: (body: string) => {
+      sentBody = JSON.parse(body);
+    },
+  };
+
+  const handled = await handleJournalWorkRuntime(request as never, response as never, url as never);
+
+  assert.equal(handled, true, "this lane's own client must still be answered");
+  assert.ok(sentBody, "and must still have sent a body");
+});
+
+// ---------------------------------------------------------------------------
+// #619 AC1 — THE CONCURRENCY COUNTER-EXAMPLE, the DETECTOR the brief asks for rather than a
+// permanent `workers: 1` taken on faith.
+// ---------------------------------------------------------------------------
+//
+// WHAT THIS IS NOT: a fix. AC1's binding scope for this ticket is the DETECTOR plus the two
+// named fixes (F-05, #740) plus the shared dispatch helper — NOT a rearchitecture of all ten
+// lanes for per-worker isolation, and NOT flipping `playwright.config.ts`'s `workers: 1`. This
+// section proves WHY that config value is load-bearing today, mechanically, rather than by
+// assertion — so a future change that lifts it inherits a measured reason to redesign the
+// fixture first, not a guess.
+//
+// THE MECHANISM. `serve-built.mjs` runs ONE Node HTTPS process for the WHOLE suite, and its
+// identity state — `state.email` (`serve-built.mjs:120-124`) — is ONE mutable field with no
+// per-connection or per-caller key. `POST /auth/v1/token` (and `/auth/v1/signup`) write it
+// UNCONDITIONALLY from the request body (`serve-built.mjs:339,354`:
+// `if (typeof body.email === "string") state.email = body.email;`), and `confirmedUser()`
+// (`serve-built.mjs:228-238`) reads it back with the same lack of scoping
+// (`email: state.email`). Node is single-threaded, but an `async` handler YIELDS at every
+// `await` — including the `await readJson(request)` both handlers open with — and it is
+// EXACTLY at that yield point that a second, unrelated request's own handler can run to
+// completion first. Two callers signing in as two different identities, interleaved across
+// that yield, therefore do not get two answers — they get ONE shared slot, and whichever
+// caller's write landed LAST is what EVERY caller's next read sees.
+//
+// THE REPRODUCTION BELOW is not a strawman: it is the same two operations
+// (`write-after-await`, then `read`) against the same kind of plain mutable object, driven with
+// a REAL microtask yield between the write and the read — not a hand-waved "and now assume a
+// race". The structural assertions first pin that the real source still has the shape the
+// reproduction models; the executable test after them is the counter-example itself.
+
+test("concurrency counter-example structural pin · state.email is ONE unscoped mutable field, written and read with no per-caller key", () => {
+  const source = readFileSync(SERVE_BUILT, "utf8");
+  assert.match(
+    source,
+    /email: "holding@example\.test",/,
+    "state.email must still be a single field on the ONE shared `state` object serve-built.mjs declares",
+  );
+  const tokenWrites = [...source.matchAll(/if \(typeof body\.email === "string"\) state\.email = body\.email;/g)];
+  assert.ok(
+    tokenWrites.length >= 2,
+    "both /auth/v1/signup and /auth/v1/token must still write state.email UNCONDITIONALLY from the body — no per-connection key, which is the property this counter-example depends on",
+  );
+  assert.match(
+    source,
+    /function confirmedUser\(\) \{[\s\S]{0,200}email: state\.email,/,
+    "confirmedUser() must still read the SAME shared field back, with no request-scoped identity threaded through it",
+  );
+});
+
+test("concurrency counter-example · two identities racing the SAME shared mutable slot produce an ATTRIBUTABLE LEAK (worker B's email visible in A's read)", async () => {
+  // A FAITHFUL, MINIMAL MODEL of `serve-built.mjs`'s own two operations — not the real module
+  // (which cannot be imported here: importing it spawns openssl, an HTTPS server and a `next
+  // start` child process as a SIDE EFFECT of the import itself). Same shape: one shared mutable
+  // object, a write that happens AFTER an `await` (exactly where `await readJson(request)`
+  // yields in the real handler), and a read with no per-caller key.
+  const state = { email: "holding@example.test" };
+
+  async function signIn(email: string): Promise<void> {
+    await Promise.resolve(); // the SAME yield point `await readJson(request)` is in production
+    state.email = email; // serve-built.mjs:339 / :354, verbatim shape
+  }
+  function whoAmI(): string {
+    return state.email; // serve-built.mjs:228-238's confirmedUser(), verbatim shape
+  }
+
+  // Caller A starts signing in first…
+  const a = signIn("alice@example.test");
+  // …but caller B's OWN sign-in — a completely unrelated request, on the SAME shared server —
+  // is issued before A's has resolved, exactly as two genuinely concurrent HTTP requests would
+  // both be mid-flight on ONE Node process.
+  const b = signIn("bob@example.test");
+  await Promise.all([a, b]);
+
+  // THE LEAK: caller A asked to become alice, and the NEXT read this shared server can give
+  // anyone — including a handler still working on A's own original request — is bob's email.
+  // There is no way, from this state object alone, for A to tell its own identity from B's.
+  const observedByA = whoAmI();
+  assert.equal(
+    observedByA,
+    "bob@example.test",
+    "worker B's identity must be observable through the ONE shared slot — this IS the property " +
+      "that makes concurrent, per-worker-isolated fixtures unsafe on today's architecture, and " +
+      "why playwright.config.ts keeps workers: 1 rather than this PR lifting it on faith",
+  );
+  assert.notEqual(
+    observedByA,
+    "alice@example.test",
+    "and it must NOT be attributable back to caller A's own request — the leak is the point",
+  );
+});
+
+// ---------------------------------------------------------------------------
+// #619 / #722 — THE RPC VERB-OWNERSHIP CENSUS, generalising N5's per-lane SCOPING rule (does a
+// handler fall through on a foreign id?) with a cross-lane OWNERSHIP rule: does more than one
+// lane mock answer the SAME RPC verb at all, and if so, is that INTENTIONAL?
+// ---------------------------------------------------------------------------
+//
+// N5 already proves every RPC handler in this suite scopes by the request's own client/id and
+// falls through otherwise — which is exactly what makes TWO lanes answering the same verb SAFE
+// (whichever one's id matches answers; the other falls through). But "safe when intentional" is
+// not "safe when accidental": a NEW lane that happens to pick a verb name another lane already
+// answers is silently protected by the SAME discipline today, with nothing recording that the
+// name is now shared. This census reads every lane mock's own RPC dispatch — `fn === "…"`,
+// `verb === "…"`, or a literal `path === "/rest/v1/rpc/…"` (the three shapes this suite's lanes
+// actually use, confirmed against real source below) — and fails when a verb has two or more
+// claimants that are not a NAMED, declared share.
+
+const RPC_VERB_OPENER = /(?:verb === "([a-z0-9_]+)"|fn === "([a-z0-9_]+)"|path === "\/rest\/v1\/rpc\/([a-z0-9_]+)")/g;
+
+/** verb -> every lane mock (sorted) whose own dispatch recognises it. */
+function rpcVerbCensus(mocks: readonly string[] = LANE_MOCKS): Map<string, string[]> {
+  const owners = new Map<string, Set<string>>();
+  for (const mock of mocks) {
+    const source = readFileSync(join(E2E_DIR, mock), "utf8");
+    for (const m of source.matchAll(RPC_VERB_OPENER)) {
+      const verb = m[1] ?? m[2] ?? m[3]!;
+      const set = owners.get(verb) ?? new Set<string>();
+      set.add(mock);
+      owners.set(verb, set);
+    }
+  }
+  return new Map([...owners].map(([verb, set]) => [verb, [...set].sort()]));
+}
+
+/**
+ * The ONLY verbs more than one lane mock may answer, and EXACTLY which lanes — checked
+ * pairwise, so a THIRD, undeclared claimant of an already-shared verb still fails. Both entries
+ * below are REAL, measured shares (not hypothetical): `journals-table-mock.mjs`'s own header
+ * names `list_entry_links` as answered by it and `journal-work-mock.mjs`, one per fixture
+ * client; `serve-built.mjs`'s import-block comments (and #627's own note in this file's history)
+ * name `list_review_queue` as answered by three lanes, each gated on its own client/scope. Each
+ * is safe for the SAME reason N5 proves generally: every handler that answers it falls through
+ * on a foreign id, so there is no "winner" — only "whoever's id matched first, in whatever order
+ * `serve-built.mjs`'s dispatch chain happens to run them", which the concurrency counter-example
+ * above already establishes is not a property to lean on beyond what N5 already buys.
+ */
+const SHARED_RPC_VERBS: Record<string, string[]> = {
+  list_entry_links: ["journal-work-mock.mjs", "journals-table-mock.mjs"],
+  list_review_queue: ["journal-work-mock.mjs", "journals-table-mock.mjs", "tax-boundary-mock.mjs"],
+};
+
+/** Every verb with 2+ claimants that is either UNDECLARED, or declared with a DIFFERENT set of
+ *  claimants than reality — the two ways this gate can fail. Pure and synchronous so the real
+ *  test and its positive control below share one implementation. */
+function verbCollisions(census: ReadonlyMap<string, string[]>, declared: Record<string, string[]>): string[] {
+  const problems: string[] = [];
+  for (const [verb, files] of census) {
+    if (files.length <= 1) continue;
+    const expected = declared[verb] ? [...declared[verb]].sort() : undefined;
+    if (!expected) {
+      problems.push(`${verb} is answered by ${files.join(", ")} with no SHARED_RPC_VERBS declaration`);
+      continue;
+    }
+    if (JSON.stringify(files) !== JSON.stringify(expected)) {
+      problems.push(`${verb}'s actual claimants (${files.join(", ")}) do not match its declaration (${expected.join(", ")})`);
+    }
+  }
+  return problems;
+}
+
+test("verb-ownership census · every RPC verb answered by two or more lane mocks is a NAMED, declared share", () => {
+  const census = rpcVerbCensus();
+  const shared = [...census].filter(([, files]) => files.length > 1);
+  console.log(`  ${census.size} distinct RPC verb(s) censused; ${shared.length} answered by more than one lane mock:`);
+  for (const [verb, files] of shared) console.log(`    ${verb}: ${files.join(", ")}`);
+
+  assert.deepEqual(verbCollisions(census, SHARED_RPC_VERBS), []);
+
+  // Neither declaration may rot into documentation of something no longer true: a verb that
+  // stopped colliding (a lane dropped it, or renamed it) must leave SHARED_RPC_VERBS.
+  for (const [verb, expected] of Object.entries(SHARED_RPC_VERBS)) {
+    const actual = census.get(verb) ?? [];
+    assert.ok(actual.length > 1, `${verb} is declared shared but only ${actual.length} lane(s) answer it now — drop the declaration`);
+    assert.deepEqual(actual, [...expected].sort(), `${verb}'s declared claimants no longer match its real ones`);
+  }
+
+  // THE POSITIVE CONTROL ON THE READER ITSELF, over the REAL files: a verb this suite's fixture
+  // headers say is genuinely single-owner must census as exactly one file, or the regex above is
+  // over- or under-matching.
+  assert.deepEqual(census.get("abandon_close"), ["bank-close-registers-mock.mjs"]);
+  assert.ok(census.size >= 30, `the census recognised only ${census.size} distinct RPC verbs across ${LANE_MOCKS.length} lane mocks — it is not reading the files`);
+});
+
+test("verb-ownership census POSITIVE CONTROL · two undeclared claimants of list_entry_links ARE caught", () => {
+  // SYNTHETIC lanes, not the real files: two names that never appear anywhere in
+  // SHARED_RPC_VERBS's declared claimant list for `list_entry_links`, proving the gate actually
+  // FIRES on a collision rather than only ever finding the two it already knows about.
+  const synthetic = new Map<string, string[]>([
+    ["list_entry_links", ["fake-lane-a-mock.mjs", "fake-lane-b-mock.mjs"]],
+    // A genuinely single-owner verb must NOT be flagged — the control's other half.
+    ["abandon_close", ["bank-close-registers-mock.mjs"]],
+  ]);
+  const problems = verbCollisions(synthetic, SHARED_RPC_VERBS);
+  assert.equal(problems.length, 1, `expected exactly one collision, saw: ${problems.join(" | ")}`);
+  assert.match(problems[0]!, /list_entry_links/);
+  assert.match(problems[0]!, /fake-lane-a-mock\.mjs/);
 });
