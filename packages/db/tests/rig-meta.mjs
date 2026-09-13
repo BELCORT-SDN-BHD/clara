@@ -434,6 +434,18 @@ export const F_A5B_PR1_COHORT = [...F_A5B_PR1_WAKE_FNS, ...F_A5B_PR1_RUNTIME_FNS
 // expected-false sweep is the second, independent proof of the same fact.
 const FS7_E2_DOWNLOAD_RUNTIME_FNS = ["get_artifact_for_human_read"];
 const FS7_E2_DOWNLOAD_HUMAN_FNS = ["list_downloadable_artifacts"];
+// #620 [0190, the SUCCESSOR source-document byte door]: ONE granted name, on the same lane and for
+// the same reason as v1 (WAVE_A_RUNTIME_FNS' get_document_for_human_read, above) and as the
+// artifact byte door one line up — it returns `storage_path`, so clara_runtime holds EXECUTE and
+// no browser, agent or wake role ever does.
+//
+// IT SITS BESIDE v1 AND NOT INSTEAD OF IT, deliberately. #620 adds a successor rather than
+// recutting clara.get_document_for_human_read(uuid,uuid), whose exact ACL row is pinned inside
+// migration 0011's own tail (0011:4238) and rostered here and in wave-a-helpers.mjs. Both names are
+// runtime-granted until the route has been on v2 in production and a later migration retires v1;
+// a roster that swapped them would make this file disagree with 0011 in the meantime.
+const DOC_DOWNLOAD_0190_RUNTIME_FNS = ["get_document_for_human_read_v2"];
+export const DOC_DOWNLOAD_0190_COHORT = [...DOC_DOWNLOAD_0190_RUNTIME_FNS];
 // F-A5b CARD 1 [Wave-F Track A, the substitution seam]: TWO grant tiers, and no human one — card 1
 // mints no new human door. The wake tier is the stage-(b) preview composer; the runtime tier is the
 // sandbox job family's claim/dispatch/reap quartet, which PR-1 deliberately did not ship (its own
@@ -2015,6 +2027,8 @@ export const ALLOWED = {
     // BYTE door over BOTH artifact families, the get_document_for_human_read idiom: the resolved
     // principal comes IN and the live active membership decides. clara_runtime ONLY, so a
     // storage_key never crosses to a browser (see the block above)
+    ...DOC_DOWNLOAD_0190_RUNTIME_FNS, // [#620, 0190] get_document_for_human_read_v2 — the SUCCESSOR
+    // source-document byte door, beside v1 and not instead of it (see the block above)
   ]),
 };
 // RLS policy helpers are legitimately callable broadly (a policy expression runs

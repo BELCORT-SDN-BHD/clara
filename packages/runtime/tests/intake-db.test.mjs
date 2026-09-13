@@ -1,15 +1,16 @@
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
-import { join } from "node:path";
+import { existsSync } from "node:fs";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import { Readable } from "node:stream";
 import { tmpdir } from "node:os";
 import * as rig from "./rig.mjs";
 import { beginDocumentIntake, finalizeDocumentIntake, recoverPendingDocumentIntakes, uploadDocumentBytes } from "../lib/intake.mjs";
 import { reconcileDocumentIntakes } from "../lib/reconciler.mjs";
-import { localObjectExists } from "../lib/storage.mjs";
-import { readIntakeMeta, writeIntakeMeta } from "../lib/spool.mjs";
+import { localObjectExists, StorageError } from "../lib/storage.mjs";
+import { intakePaths, readIntakeMeta, writeIntakeMeta } from "../lib/spool.mjs";
 
 const READY = await rig.documentPipelineReady();
 const skip = READY ? false : "Slice-5 (0007) document pipeline surface absent";
@@ -233,4 +234,173 @@ test("DB-first reconciler expires an intake and refunds its reservation without 
   );
   assert.equal(reservation.rows[0].state, "refunded");
   assert.equal(reservation.rows[0].refund_reason, "expired");
+});
+
+// =============================================================================================
+// #620 AC3 — CUSTODY DURABILITY AT THE STORAGE SEAM, and H-53's consent-evidence exemption.
+//
+// AC3's rule, ratified rather than discovered: a custody failure BEFORE the canonical write —
+// INCLUDING a transient storage_error — leaves NO clara.documents row, a terminal and typed
+// user-visible failed intake, and no reliance on the serving process's spool for recovery. The
+// recovery is a re-upload. `intake.mjs`'s failure branch deletes the local spool whenever
+// `canonicalReached` is false, which means a transient Storage fault costs the reader their bytes;
+// that is the accepted behaviour and these cells PIN it, so a later "improvement" that retained the
+// spool for storage_error is a deliberate change with a red test, not an accident.
+//
+// THE SEAM IS THE SHIPPED ONE. `globalThis.__claraStorageForTest` is the injection point
+// packages/runtime/lib/storage.mjs already reads under RELAY_TEST_MODE (putCanonical reads
+// `injected.put`, responseFor reads `injected.get`) — no module is stubbed and no production
+// branch is bypassed.
+// =============================================================================================
+
+/** Run `fn` with the shipped storage shim replaced, and ALWAYS put the previous one back — a
+ *  leaked shim would silently reroute every later cell in this file. */
+async function withStorageShim(shim, fn) {
+  const previous = globalThis.__claraStorageForTest;
+  globalThis.__claraStorageForTest = shim;
+  try {
+    return await fn();
+  } finally {
+    if (previous === undefined) delete globalThis.__claraStorageForTest;
+    else globalThis.__claraStorageForTest = previous;
+  }
+}
+
+async function beginAndUpload(owner, firm, bytes, filename = "custody.pdf") {
+  const begun = await rig.asRuntime((client) =>
+    beginDocumentIntake(client, { sub: owner, firmId: firm }, {
+      filename, mime: "application/pdf", declared_bytes: bytes.length, origin: "documents_tab",
+    }),
+  );
+  await uploadDocumentBytes({
+    withRuntime, intakeId: begun.intake_id, token: begun.upload_token, readable: Readable.from([bytes]),
+  });
+  return begun;
+}
+
+const documentsWithSha = async (firm, sha) => (await rig.rootQuery(
+  "select count(*)::int n from clara.documents where firm_id=$1 and sha256=$2", [firm, sha])).rows[0].n;
+
+test("AC3 a FAILED putCanonical leaves no document, a terminal typed intake, and no spool", { skip }, async () => {
+  const { owner, firm } = await rig.buildFirm("intake-put-fail");
+  const bytes = Buffer.from(`%PDF-1.7\n1 0 obj << /Type /Page >> endobj\n% ac3 put ${randomUUID()}\nstartxref\n0\n%%EOF\n`);
+  const sha = createHash("sha256").update(bytes).digest("hex");
+  const begun = await beginAndUpload(owner, firm, bytes);
+
+  await withStorageShim({
+    put: async () => {
+      throw new StorageError("storage_error", "Storage upload failed (503) injected", 502, "unavailable");
+    },
+  }, async () => {
+    await assert.rejects(
+      finalizeDocumentIntake({
+        withRuntime, intakeId: begun.intake_id, token: begun.upload_token,
+        enqueue: async () => { throw new Error("a failed custody write must never enqueue"); },
+      }),
+      (err) => err.code === "storage_error",
+    );
+  });
+
+  // 1. NO DURABLE ROW. The document row is written by clara.finalize_document_intake and nothing
+  // else, and the canonical write never succeeded — so there is nothing for a reader to open, and
+  // no half-document a later verify could "repair".
+  assert.equal(await documentsWithSha(firm, sha), 0, "a pre-canonical failure must create no document");
+
+  // 2. A TERMINAL, TYPED, USER-VISIBLE FAILURE. `storage_error` is on the 0007 failure_code
+  // allowlist, so the client reads a word rather than a stack.
+  const intake = await rig.readDocumentIntake(begun.intake_id);
+  assert.equal(intake.status, "failed");
+  assert.equal(intake.failure_code, "storage_error");
+
+  // 3. THE SPOOL IS GONE — both halves. This is the clause AC3 warns about: recovery must not
+  // depend on a serving process's temporary bytes, and here it structurally cannot, because they
+  // are deleted. Re-upload IS the recovery.
+  assert.equal(await readIntakeMeta(begun.intake_id), null, "the sidecar must be gone");
+  assert.equal(existsSync(intakePaths(begun.intake_id).bytes), false, "the spooled BYTES must be gone");
+  assert.equal(await localObjectExists(`firms/${firm}/docs/${sha}.pdf`), false, "no canonical object");
+
+  // 4. A REPLAY OF THE SAME INTAKE answers the estate's existing typed shape, never a 500 and never
+  // a second attempt at custody: with the sidecar gone the capability cannot be re-presented, and
+  // the durable replay path only re-issues a receipt for a FINALIZED or ADOPTED intake.
+  await assert.rejects(
+    finalizeDocumentIntake({
+      withRuntime, intakeId: begun.intake_id, token: begun.upload_token,
+      enqueue: async () => { throw new Error("a replay must never enqueue"); },
+    }),
+    (err) => err.status === 404 && err.code === "not_found",
+  );
+  assert.equal(await documentsWithSha(firm, sha), 0, "the replay must not have created one either");
+});
+
+test("AC3 a verifyCanonical MISMATCH is refused before any document row exists", { skip }, async () => {
+  const { owner, firm } = await rig.buildFirm("intake-verify-fail");
+  const bytes = Buffer.from(`%PDF-1.7\n1 0 obj << /Type /Page >> endobj\n% ac3 verify ${randomUUID()}\nstartxref\n0\n%%EOF\n`);
+  const sha = createHash("sha256").update(bytes).digest("hex");
+  const begun = await beginAndUpload(owner, firm, bytes);
+
+  // The shim ACCEPTS the write and stores DIFFERENT bytes at the same content address — the
+  // substituted-object case the read-back verify exists to catch. `get` is left undefined on
+  // purpose so verifyCanonical reads through the SHIPPED local-store path, not through the shim.
+  await withStorageShim({
+    put: async (_filePath, key) => {
+      const dest = join(process.env.CLARA_TEST_STORAGE_DIR, ...key.split("/"));
+      await mkdir(dirname(dest), { recursive: true });
+      await writeFile(dest, Buffer.from("not the bytes that were hashed"));
+      return { created: true, existed: false };
+    },
+  }, async () => {
+    await assert.rejects(
+      finalizeDocumentIntake({
+        withRuntime, intakeId: begun.intake_id, token: begun.upload_token,
+        enqueue: async () => { throw new Error("an unverified object must never enqueue"); },
+      }),
+      (err) => err.code === "checksum_mismatch",
+    );
+  });
+
+  assert.equal(await documentsWithSha(firm, sha), 0,
+    "the read-back verify runs BEFORE the first DB call that learns the key — so no row can exist");
+  const intake = await rig.readDocumentIntake(begun.intake_id);
+  assert.equal(intake.status, "failed");
+  assert.equal(intake.failure_code, "checksum_mismatch");
+  assert.equal(await readIntakeMeta(begun.intake_id), null);
+});
+
+test("H-53 a consent_evidence document keeps its durable custody row and produces NO coding-lane task", { skip }, async () => {
+  const { owner, firm, client } = await rig.buildFirm("intake-consent-evidence");
+  const bytes = Buffer.from(`%PDF-1.7\n1 0 obj << /Type /Page >> endobj\n% h53 consent ${randomUUID()}\nstartxref\n0\n%%EOF\n`);
+  const { finalized } = await transport(owner, firm, bytes, { filename: "signed-consent.pdf" });
+  const documentId = finalized.document_id;
+
+  // THE STAMP COMES FROM THE PRODUCT'S OWN VERB, not from an UPDATE: clara.grant_client_egress is
+  // what turns a cited document into consent evidence (migration 0014), and its own refusals are
+  // the reason a coded invoice can never be re-labelled this way.
+  await rig.humanQuery(owner,
+    "select clara.grant_client_egress(p_client=>$1,p_evidence_document=>$2,p_scope_note=>$3,p_op_key=>$4) as r",
+    [client, documentId, "h53 rig consent - the signed letter itself", rig.opk("h53consent")]);
+
+  // 1. THE CUSTODY ROW IS DURABLE AND UNCHANGED. Being routed out of the bookkeeping pipeline must
+  // not cost the document its bytes: it is the legal artifact the consent RESTS on.
+  const document = await rig.readDocument(documentId);
+  assert.equal(document.document_kind, "consent_evidence");
+  assert.ok(document.bytes_verified_at, "the custody bond stays stamped");
+  assert.equal(document.storage_path, `firms/${firm}/docs/${document.sha256}.pdf`);
+  assert.equal(await localObjectExists(document.storage_path), true, "the bytes are still in custody");
+
+  // 2. NO CODING-LANE TASK, EVER. clara.coding_tasks is the bookkeeping lane's own queue; a consent
+  // letter owes no journal entry, and it is never filed to a client, so nothing enqueues one.
+  const coding = await rig.rootQuery(
+    "select count(*)::int n from clara.coding_tasks where document_id=$1", [documentId]);
+  assert.equal(coding.rows[0].n, 0, "a consent letter is not bookkeeping work");
+
+  // 3. …and the STRUCTURAL egress exemption is forced rather than assumed (0014 §4): the facts
+  // lane's own verb refuses this document by KIND, before it looks at the mime type.
+  const enqueued = await rig.asRuntime((c) =>
+    c.query("select clara.enqueue_invoice_facts($1) as r", [documentId]));
+  assert.equal(enqueued.rows[0].r.status, "skipped_consent_evidence",
+    "the signed consent letter must never be facts-extracted - that would egress it");
+  const facts = await rig.rootQuery(
+    "select count(*)::int n from clara.document_processing_tasks where document_id=$1 and lane='invoice_facts'",
+    [documentId]);
+  assert.equal(facts.rows[0].n, 0, "…and no invoice_facts task may be left behind");
 });

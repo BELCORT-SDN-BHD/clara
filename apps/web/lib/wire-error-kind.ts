@@ -32,12 +32,31 @@
 //                          (the only path that reaches here with a 2xx status
 //                          — a real HTTP failure never carries one).
 //   - "unexpected"      — any other status (e.g. a raw 400 with no CLR body).
+//
+// TWO KINDS ARE BODY-DERIVED, NOT STATUS-DERIVED, and they are the only two
+// (the source-custody lane's byte door, `lib/documents/bytes.ts`):
+//   - "custody_pending" — HTTP 409 carrying the door's own `custody_pending`
+//                          token: the row exists and the caller may read it,
+//                          but its bytes are not yet durably verified. A plain
+//                          `kindForStatus(409)` says "unexpected", which is a
+//                          lie about a state the estate models explicitly.
+//   - "integrity"       — HTTP 502 carrying `checksum_mismatch`: the object was
+//                          served, and its bytes do not hash to the sha256 the
+//                          record pins. NOT a "server_error": retrying reads the
+//                          same wrong bytes, so the two must not share a kind or
+//                          they would share a recovery affordance.
+// `kindForStatus` therefore does NOT produce either — a status alone cannot tell
+// a `checksum_mismatch` 502 from a `storage_error` 502. The classifier that reads
+// the door's typed body does (bytes.ts's `requestDocumentBytes`), which is why
+// this file's own tests are untouched by the addition.
 
 export type WireErrorKind =
   | "no_session"
   | "unauthenticated"
   | "forbidden"
   | "not_found"
+  | "custody_pending"
+  | "integrity"
   | "server_error"
   | "transport"
   | "malformed"

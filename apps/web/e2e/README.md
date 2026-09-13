@@ -30,7 +30,7 @@ On PowerShell, set those environment variables before running the command.
 
 ## Coverage map
 
-The checked-in suite currently contains 22 specs:
+The checked-in suite currently contains 25 specs:
 
 | Spec | What it exercises |
 |---|---|
@@ -46,7 +46,7 @@ The checked-in suite currently contains 22 specs:
 | `chat-parity-walk.spec.ts` | Clarifications, attachments, thread creation/switching, stream proxying, and typed cards; a clarify answered IN PLACE while a 900-delta stream is still arriving (the timer census is taken over a window 200 DECODED deltas wide, never a fixed wait) and the turn clock is counting (the live view must not be replaced by a send error, and no React nested-update or hydration fault may reach the console), at 320 CSS px, plus reduced motion counted as MOVEMENT on the clarify group |
 | `agentic-finish-walk.spec.ts` | Capability-shaped commands, task reattachment, onboarding receipt states, and chart apply |
 | `journals-table-walk.spec.ts` | Journal tables, filters, disclosure, approval, clarifications, and accessibility. #634 review round: an expanded POSTED row discloses its purpose, its Work link, its operation receipt with a working copy control, and its source — "No document" for a Work-recorded entry and the named lane for a document-coded one |
-| `documents-viewer-walk.spec.ts` | Safe document viewing, evidence overlays, extraction hierarchy, CSP reporting, and accessibility |
+| `documents-viewer-walk.spec.ts` | Safe document viewing, evidence overlays, extraction hierarchy, CSP reporting, and accessibility. #620 adds source custody at the face: the original downloaded with `disposition=attachment` and its object URL released, a viewable original still opening its own tab while an un-previewable one is never offered it, the six refusals (denied, not-found, storage-unavailable, custody-pending, expired session, integrity) rendering DISTINCTLY, Retry reaching the wire a second time and clearing the failure, `?document=` surviving a reload with the browser's own Back closing the detail and an unshowable id clearing the parameter, and a keyboard-only pass — open with Enter, focus landing in what was opened, back out, download — whose F9 cell samples focus ACROSS the read (vacuity control first: the busy window must appear in the samples before their focus values mean anything; on `disabled={busy !== null}` it measured `BODY×12`), at 320 CSS px, 200% zoom, under reduced motion, with axe run on a document open beside a standing refusal |
 | `bank-close-registers-walk.spec.ts` | Refusal-preserving dialogs, close restart, and human-readable close holds |
 | `money-input.spec.ts` | Exact-cent input and ambiguous-input refusal |
 | `interview-walk.spec.ts` | Real-stack onboarding interview and Tax route reachability when its fixture is supplied |

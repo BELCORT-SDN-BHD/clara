@@ -12,6 +12,7 @@ Product boundaries and the intended architecture live in [ARCHITECTURE](../../do
 | `lib/` | Connection resolution and destructive-operation guards |
 | `scripts/` | Migration, seed, reset, backup, restore and verification entry points |
 | `deploy/` | Role, login, Storage and platform configuration outside the migration runner |
+| [storage-battery/](storage-battery/README.md) | Allowed/denied battery for `deploy/storage-provision.sql` against a real Supabase Storage service |
 | [tests/README.md](tests/README.md) | Database test prerequisites and isolation |
 
 Run from the repository root:
@@ -96,6 +97,27 @@ A full replay creates login shells as NOLOGIN; restore the intended LOGIN state 
 afterward and probe every configured runtime lane. Existing platform roles can also collide
 with historical migration census assertions. A green local chain does not prove that a live
 cluster can be replayed without a target-specific preflight.
+
+## Storage grant/policy battery
+
+[deploy/storage-provision.sql](deploy/storage-provision.sql) cannot run against the local rig —
+there is no `storage` schema there — so its posture used to be ceremony-tested only.
+[storage-battery/](storage-battery/README.md) closes that: `node packages/db/storage-battery/run.mjs`
+boots a real, disposable Supabase stack with the vendor's pinned CLI, applies that file to it, and
+measures the boundary through the runtime's own door (`putCanonical`/`verifyCanonical`/
+`downloadCanonical`), dropping to raw HTTP only for verbs the runtime never calls. It proves what
+the ceremony **produces** — create, duplicate-as-existed, read-back verify, upsert/PUT/DELETE
+refused, non-conforming and cross-bucket keys refused, a non-designated and an expired credential
+refused, no escalation bit and no admin inheritance on `clara_storage_docs`, exactly two policies —
+and it asserts two limits positively rather than by omission: a conforming key in **another firm's**
+namespace is allowed (Storage RLS here is key-shaped, not tenant-shaped; firm isolation rests on
+the definer door), and a conforming **wiki** key is refused because this ceremony creates no wiki
+policy pair. It proves nothing about what the **live** project currently carries — whether
+[deploy/wave-b-storage-update-amendment-REVERT.sql](deploy/wave-b-storage-update-amendment-REVERT.sql)
+was ever applied, or whether an out-of-band wiki/reports policy exists — because both that
+amendment and its revert are manual ceremony scripts with no applied/pending ledger; the ledger
+above covers `migrations/` only. `storage-battery/hosted-probe.sql` is the read-only probe that
+answers those against the live estate, and its output is hosted evidence, recorded separately.
 
 ## Operation-contract census
 

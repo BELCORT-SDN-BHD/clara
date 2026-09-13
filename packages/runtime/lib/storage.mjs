@@ -4,19 +4,35 @@ import { mkdir, open, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { pipeline } from "node:stream/promises";
 
+/**
+ * A typed Storage failure.
+ *
+ * `reason` (#620) IS THE FOURTH FIELD AND IT IS OPTIONAL BY DESIGN. `code` says which FAMILY of
+ * failure this is (`storage_error` vs `checksum_mismatch`) and `status` says what HTTP answer it
+ * deserves; neither can tell an operator — or a reader's UI — whether the object is MISSING, the
+ * CREDENTIAL was refused, the service is DOWN, or the runtime was never configured. Those four
+ * outcomes want four different human answers ("re-upload", "rotate the JWT", "retry", "fix the
+ * deployment") and a bare 502 gives them one. Every existing construction site that does not pass
+ * a reason keeps its exact previous shape — `reason` is simply `null` there — so nothing that
+ * reads `code`/`status`/`message` today changes behaviour.
+ */
 export class StorageError extends Error {
-  constructor(code, message, status = 502) {
+  constructor(code, message, status = 502, reason = null) {
     super(message);
     this.name = "StorageError";
     this.code = code;
     this.status = status;
+    this.reason = reason;
   }
 }
 
 function safeKey(key) {
   const value = String(key || "");
   if (!/^firms\/[0-9a-f-]{36}\/docs\/[0-9a-f]{64}\.[a-z0-9]{1,12}$/i.test(value)) {
-    throw new StorageError("storage_error", "canonical storage key is invalid");
+    // NOT one of the four GET-side reasons below: this refusal happens BEFORE any request, and it
+    // means the key the caller handed in is not a canonical docs address at all — a row whose
+    // storage_path drifted, never a Storage outcome.
+    throw new StorageError("storage_error", "canonical storage key is invalid", 502, "invalid_key");
   }
   return value;
 }
@@ -50,11 +66,18 @@ function localPath(key) {
  */
 export function localOpenFailure(err, what) {
   const code = err?.code;
+  // #620 — THE REASON IS THE SAME VOCABULARY THE DEPLOYED PATH USES, and it has to be, because
+  // every storage-touching local test runs through here while production runs through
+  // `classifyGetFailure`. If the local arm answered a different word for "the object is not
+  // there", the route battery would be measuring a classification production never emits. The
+  // MESSAGES are byte-identical to what this function has always returned.
   if (code === "ENOENT" || code === "ENOTDIR") {
-    return new StorageError("storage_error", `${what} storage read failed (object absent)`);
+    return new StorageError("storage_error", `${what} storage read failed (object absent)`,
+      502, "object_missing");
   }
   return new StorageError("storage_error",
-    `${what} storage read failed (${code || "open failed, no errno"})`);
+    `${what} storage read failed (${code || "open failed, no errno"})`,
+    502, code === "EACCES" || code === "EPERM" ? "credential_refused" : "unavailable");
 }
 
 /**
@@ -104,23 +127,59 @@ function realConfig() {
   const jwt = process.env.CLARA_STORAGE_ROLE_JWT;
   const designatedRole = process.env.CLARA_STORAGE_ROLE
     || (process.env.RELAY_TEST_MODE === "1" ? "clara_storage_docs" : "");
+  // #620 — ALL FOUR OF THESE ARE `unconfigured`, and they keep their 503. They are not failures of
+  // a request: no request was made. An operator reading `unavailable` would go looking at Supabase;
+  // `unconfigured` sends them to the deployment's own environment, which is where the fault is.
   if (!base || !jwt || !designatedRole) {
-    throw new StorageError("storage_error", "Storage custom-role configuration is missing", 503);
+    throw new StorageError("storage_error", "Storage custom-role configuration is missing", 503, "unconfigured");
   }
   if (["anon", "authenticated", "service_role"].includes(designatedRole)) {
-    throw new StorageError("storage_error", "Storage designated role must be a dedicated custom role", 503);
+    throw new StorageError("storage_error", "Storage designated role must be a dedicated custom role", 503, "unconfigured");
   }
   const claims = decodeJwtClaims(jwt);
   const exp = Number(claims?.exp);
   if (!Number.isFinite(exp) || exp * 1000 <= Date.now() + 30_000) {
-    throw new StorageError("storage_error", "Storage role credential is expired or malformed", 503);
+    throw new StorageError("storage_error", "Storage role credential is expired or malformed", 503, "unconfigured");
   }
   if (typeof claims?.role !== "string"
       || ["anon", "authenticated", "service_role"].includes(claims.role)
       || claims.role !== designatedRole) {
-    throw new StorageError("storage_error", "Storage credential does not assume the designated custom-role", 503);
+    throw new StorageError("storage_error", "Storage credential does not assume the designated custom-role", 503, "unconfigured");
   }
   return { base: base.replace(/\/+$/, ""), jwt };
+}
+
+/**
+ * IS THIS FAILED UPLOAD THE PROVIDER SAYING "that object is already there"?
+ *
+ * ONE PREDICATE FOR FOUR WRITERS, because the answer is a property of the PROVIDER, not of a key
+ * family. Supabase's storage-api puts its real status INSIDE the body: a duplicate arrives as
+ * **HTTP 400** carrying `{"statusCode":"409","error":"Duplicate",…}`, so `response.status === 409`
+ * is never true against the hosted service (found 2026-07-26 by re-uploading an already-ingested
+ * document — the ordinary case — and the diagnosis cost a day; the captured envelope is in
+ * packages/runtime/tests/intake-unit.test.mjs:285-325).
+ *
+ * FOR A CONTENT-ADDRESSED KEY A DUPLICATE IS IDEMPOTENT SUCCESS, never an error: the key IS the
+ * sha256, so a second write puts the same bytes at the same address. That is what makes an
+ * at-least-once writer safe, and it is why every one of the four families uploads with
+ * `x-upsert:false` and then treats the refusal as "existed".
+ *
+ * WHY IT IS EXTRACTED (#620 review, F5). The docs, report and sandbox families each carried this
+ * test inline and the WIKI family did not — it tested the transport status alone, so the hosted
+ * wrapped-409 was a fatal `StorageError("wiki storage upload failed (400)")` and
+ * wiki-projection.mjs's idempotent redrive (:434) died on the ordinary re-projection. Three copies
+ * and one divergence is the shape a bug hides in; one helper cannot diverge. The predicate is the
+ * three siblings' own, character for character, so their behaviour is unchanged — the vendor also
+ * documents a symbolic `ResourceAlreadyExists` for 409, which this repository has never captured
+ * and which is therefore NOT read here rather than guessed at.
+ *
+ * @param {number} status the transport status
+ * @param {string} body   the response body, already read once (every caller needs it for the log)
+ */
+function isDuplicateUpload(status, body) {
+  let inner = null;
+  try { inner = JSON.parse(body ?? ""); } catch { /* not JSON — the transport status is all there is */ }
+  return status === 409 || String(inner?.statusCode) === "409" || inner?.error === "Duplicate";
 }
 
 function objectUrl(base, key) {
@@ -161,17 +220,73 @@ export async function putCanonical(filePath, key, mime) {
   // a human re-dropping a file they already sent. Read the body ONCE and branch on what it says.
   if (response.ok) return { created: true, existed: false };
   const body = await response.text().catch(() => "");
-  let inner = null;
-  try { inner = JSON.parse(body); } catch { /* not JSON — fall through to the raw body */ }
-  if (response.status === 409 || String(inner?.statusCode) === "409" || inner?.error === "Duplicate") {
-    return { created: false, existed: true };
-  }
+  if (isDuplicateUpload(response.status, body)) return { created: false, existed: true };
   // Carry the BODY, not just the HTTP status: `(400)` alone cannot distinguish a duplicate from
   // a permission denial from a bad key, and discarding it cost a full day of diagnosis.
   throw new StorageError(
     "storage_error",
     `Storage upload failed (${response.status})${body ? ` ${body.slice(0, 200)}` : ""}`,
   );
+}
+
+/**
+ * #620 — THE GET SIDE'S CLASSIFIER. Turn one failed Storage read into a typed `reason`.
+ *
+ * THE WRAPPED STATUS IS THE WHOLE REASON THIS EXISTS. Supabase's storage-api returns its own
+ * status INSIDE the body — a duplicate upload arrives as **HTTP 400** carrying
+ * `{"statusCode":"409","error":"Duplicate",...}` — which is the 2026-07-26 incident `putCanonical`
+ * above documents at length: `response.status === 409` was never true, every duplicate became a
+ * fatal error, and the diagnosis cost a day. That parsing has lived on the UPLOAD side only. The
+ * READ side had one arm — `Storage read failed (<http status>)` — so a 400-wrapped 404 (the object
+ * is gone) and a 400-wrapped 403 (the JWT lost its role) were the same sentence, and a route could
+ * only ever answer "502, something went wrong".
+ *
+ * TWO ENVELOPE SHAPES ARE IN THE WILD, AND BOTH ARE READ HERE.
+ *   · `{"statusCode":"409","error":"Duplicate","message":"…"}` — the shape this repository has
+ *     CAPTURED VERBATIM against live storage (packages/runtime/tests/intake-unit.test.mjs:285-325,
+ *     observed 2026-07-26), and the one `putCanonical` above already parses.
+ *   · `{"code":"NoSuchKey","message":"The specified key does not exist."}` — the shape the vendor
+ *     documents today at https://supabase.com/docs/guides/storage/debugging/error-codes (fetched
+ *     2026-09-12), which also states that older responses may carry `httpStatusCode` beside
+ *     `code`/`message`, and pins NoSuchKey=404, InvalidJWT=401, AccessDenied=403.
+ * A numeric status inside the body wins; then the symbolic code; then the transport status. The
+ * hosted capture of the GET side is still outstanding — packages/runtime/tests/
+ * storage-read-contract.test.mjs says so in its own header rather than implying it has one.
+ *
+ * FOUR REASONS, AND NO FIFTH. `object_missing` (the row points at bytes that are not there —
+ * re-upload), `credential_refused` (the custody JWT was rejected — rotate), `unavailable` (5xx,
+ * network, timeout — retry), and `unconfigured` (realConfig never let a request happen — fix the
+ * deployment, and that one is raised in realConfig itself with its 503).
+ *
+ * @param {number} status the HTTP status
+ * @param {string} body   the response body, already read (it is discarded either way)
+ * @returns {{reason: string, status: number}}
+ */
+export function classifyGetFailure(status, body) {
+  let inner = null;
+  try { inner = JSON.parse(body ?? ""); } catch { /* not JSON — the HTTP status is all there is */ }
+  const wrapped = Number(inner?.statusCode ?? inner?.httpStatusCode);
+  // The BODY's status wins when it is present and plausible: that is the service's own word about
+  // what happened, and the transport status is the envelope it arrived in.
+  if (Number.isFinite(wrapped) && wrapped >= 100 && wrapped <= 599) {
+    return { reason: reasonForStatus(wrapped), status: 502 };
+  }
+  // THE SYMBOLIC CODE IS READ TOO, and matched case-insensitively against the documented names
+  // rather than by substring: `NoSuchBucket` and `NoSuchKey` mean the same thing to a reader (the
+  // bytes are not there) but a `includes("NoSuchKey")` test would also match a message that merely
+  // QUOTED the code back, which is how a classifier starts agreeing with prose.
+  const code = typeof inner?.code === "string" ? inner.code.toLowerCase() : null;
+  if (code === "nosuchkey" || code === "nosuchbucket") return { reason: "object_missing", status: 502 };
+  if (code === "invalidjwt" || code === "accessdenied" || code === "unauthorized") {
+    return { reason: "credential_refused", status: 502 };
+  }
+  return { reason: reasonForStatus(status), status: 502 };
+}
+
+function reasonForStatus(status) {
+  if (status === 404 || status === 410) return "object_missing";
+  if (status === 401 || status === 403) return "credential_refused";
+  return "unavailable";
 }
 
 async function responseFor(key) {
@@ -181,11 +296,29 @@ async function responseFor(key) {
     return openLocalStream(localPath(key), "canonical");
   }
   const { base, jwt } = realConfig();
-  const response = await fetch(objectUrl(base, key), {
-    headers: { authorization: `Bearer ${jwt}`, apikey: jwt },
-  });
-  if (!response.ok || !response.body) throw new StorageError("storage_error", `Storage read failed (${response.status})`);
-  return response.body;
+  let response;
+  try {
+    response = await fetch(objectUrl(base, key), {
+      headers: { authorization: `Bearer ${jwt}`, apikey: jwt },
+    });
+  } catch (err) {
+    // A REJECTED FETCH IS `unavailable`, NEVER `object_missing`. DNS failure, a refused connection
+    // and an aborted timeout all land here, and none of them is evidence about the object. The
+    // cause's own message is carried for the operator; it never reaches a client (the route
+    // answers `{error:"storage_error", reason}` and nothing else).
+    throw new StorageError("storage_error",
+      `Storage read failed (network: ${String(err?.message ?? err).slice(0, 200)})`, 502, "unavailable");
+  }
+  if (response.ok && response.body) return response.body;
+  // An `ok` response with no body is a broken read, not a missing object — it falls through to the
+  // classifier as its own transport status, which is `unavailable` for a 2xx.
+  const body = await response.text().catch(() => "");
+  const { reason, status } = classifyGetFailure(response.status, body);
+  // THE BODY IS CARRIED, CAPPED AT 200 CHARACTERS — the same discipline `putCanonical` adopted
+  // after discarding it cost a full day of diagnosis, and the same cap, so a vendor error page can
+  // never become the bulk of a log line. It stays server-side.
+  throw new StorageError("storage_error",
+    `Storage read failed (${response.status})${body ? ` ${body.slice(0, 200)}` : ""}`, status, reason);
 }
 
 export async function hashCanonical(key) {
@@ -282,9 +415,18 @@ export async function putWikiCanonical(filePath, key, mime = "text/markdown") {
     body: createReadStream(filePath),
     duplex: "half",
   });
-  if (response.status === 409) return { created: false, existed: true };
-  if (!response.ok) throw new StorageError("storage_error", `wiki storage upload failed (${response.status})`);
-  return { created: true, existed: false };
+  if (response.ok) return { created: true, existed: false };
+  // THE SHARED PREDICATE, not a local one. This arm used to test `response.status === 409` alone,
+  // which the hosted service never returns for a duplicate (it wraps 409 inside an HTTP 400), so a
+  // re-projection of an unchanged page — the ordinary redrive at wiki-projection.mjs:434 — was a
+  // fatal error. The body is read once and carried in the log line for the same reason the docs
+  // family carries it: `(400)` alone cannot tell a duplicate from a permission denial.
+  const body = await response.text().catch(() => "");
+  if (isDuplicateUpload(response.status, body)) return { created: false, existed: true };
+  throw new StorageError(
+    "storage_error",
+    `wiki storage upload failed (${response.status})${body ? ` ${body.slice(0, 200)}` : ""}`,
+  );
 }
 
 async function wikiResponseFor(key) {
@@ -374,16 +516,12 @@ export async function putReportCanonical(filePath, key, mime = "application/pdf"
     duplex: "half",
   });
   if (response.ok) return { created: true, existed: false };
-  // Supabase wraps its real status inside the BODY (the 2026-07-26 finding the docs family
-  // documents above): a duplicate comes back as HTTP 400 with {"statusCode":"409",...}. Read the
-  // body once and branch on what it says — a duplicate report object is idempotent SUCCESS, and
-  // treating it as a fatal error is exactly what would make an at-least-once render unsafe.
+  // `isDuplicateUpload` is the shared reading of Supabase's wrapped status (the 2026-07-26 finding
+  // the helper's own header records): a duplicate comes back as HTTP 400 with
+  // {"statusCode":"409",...}, and a duplicate report object is idempotent SUCCESS — treating it as
+  // fatal is exactly what would make an at-least-once render unsafe.
   const body = await response.text().catch(() => "");
-  let inner = null;
-  try { inner = JSON.parse(body); } catch { /* not JSON — fall through to the raw body */ }
-  if (response.status === 409 || String(inner?.statusCode) === "409" || inner?.error === "Duplicate") {
-    return { created: false, existed: true };
-  }
+  if (isDuplicateUpload(response.status, body)) return { created: false, existed: true };
   throw new StorageError(
     "storage_error",
     `report storage upload failed (${response.status})${body ? ` ${body.slice(0, 200)}` : ""}`,
@@ -542,11 +680,7 @@ export async function putSandboxCanonical(filePath, key, mime = "application/pdf
   });
   if (response.ok) return { created: true, existed: false };
   const raw = await response.text().catch(() => "");
-  let inner = null;
-  try { inner = JSON.parse(raw); } catch { /* not JSON — fall through to the raw body */ }
-  if (response.status === 409 || String(inner?.statusCode) === "409" || inner?.error === "Duplicate") {
-    return { created: false, existed: true };
-  }
+  if (isDuplicateUpload(response.status, raw)) return { created: false, existed: true };
   throw new StorageError(
     "storage_error",
     `sandbox storage upload failed (${response.status})${raw ? ` ${raw.slice(0, 200)}` : ""}`,

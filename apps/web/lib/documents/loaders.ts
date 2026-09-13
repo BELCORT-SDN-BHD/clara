@@ -14,7 +14,7 @@ import {
 } from "./reads";
 import { listProcessingTasksForDocument } from "./intake";
 import { readErrorKey } from "./copy";
-import { isReadError } from "@/lib/read";
+import { isReadError, ReadError } from "@/lib/read";
 import type {
   CandidateRow, ClientRow, DocumentRow, ExtractionRow, FilingRow, JournalEntryRow,
   ProcessingTaskRow, RegionRow,
@@ -40,7 +40,14 @@ async function withHonestReadKinds<T>(t: Translator, fn: () => Promise<T>): Prom
   try {
     return await fn();
   } catch (e) {
-    if (isReadError(e)) throw new Error(t(readErrorKey(e.kind)));
+    // STILL A `ReadError`, carrying its KIND — it used to be flattened into a bare `Error` holding
+    // only the translated sentence, and that is why no failed read on this whole surface could
+    // offer a recovery control: by the time the banner saw it, the one fact that decides whether
+    // retrying can honestly answer differently was gone. `useHydratedPart`'s own `applyFailure`
+    // treats a `WireError` exactly as it treated a plain `Error` (message in `err`, `clr` null), so
+    // nothing about what renders changes; what changes is that `useReadErrKind` can now capture the
+    // kind on its way past (components/documents/document-detail.tsx).
+    if (isReadError(e)) throw new ReadError(t(readErrorKey(e.kind)), { status: e.status, pgCode: e.pgCode, kind: e.kind });
     throw e;
   }
 }

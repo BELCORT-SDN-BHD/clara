@@ -130,6 +130,14 @@ export const WA_GRANTS = {
   get_entry_diff: ["authenticated", "agentRo"],
   get_doc_entry_diff: ["authenticated", "agentRo"],
   get_document_for_human_read: ["runtime"],
+  // [#620, 0190] THE SUCCESSOR source-document byte door. Same lane as v1 and for the same reason:
+  // it returns `storage_path`, so clara_runtime holds it and no browser, agent or wake role ever
+  // does. Listed BESIDE v1, never instead of it — #620 adds a successor and leaves 0011's own
+  // grant-matrix assertion (0011:4238) true; v1's retirement is a later, deliberate migration.
+  // FRONTIER-GATED through WA_GRANTS_SINCE below: `db-slice-frontiers` runs this battery against
+  // databases pinned BELOW 0190, where an unconditional entry would fail as "absent" while saying
+  // nothing about grants.
+  get_document_for_human_read_v2: ["runtime"],
   // human writers
   add_counterparty_alias: ["authenticated"],
   retire_counterparty_alias: ["authenticated"],
@@ -153,6 +161,36 @@ export const WA_GRANTS = {
   list_autodraft_candidates: ["runtime"],
   list_document_autodraft_candidates: ["runtime"], // PIN-ADD-1 — the event-path resolver
 };
+
+/**
+ * WA_GRANTS members that a chain WITHOUT a given migration cannot have yet: name -> the STABLE
+ * SUFFIX of the `clara.schema_migrations.version` that mints it.
+ *
+ * WHY THE GATE IS A ROSTER AND NOT A `noteLane` INSIDE THE LOOP. The §13 cell's whole value is
+ * that a missing name is `assert.fail`, not a note — an absent door is exactly the drift it exists
+ * to catch. Softening the loop for one late arrival would soften it for every genuine loss too. So
+ * the expectation stays EXACT in both directions and the LEDGER decides which direction applies:
+ * without the named migration the name is not expected at all, with it the full grant matrix is
+ * asserted. This is the `has0046` shape wave-a-grants.test.mjs already carries for
+ * settle_autodraft_task's ratified second arity, keyed on the ledger for the same reason.
+ *
+ * THE SUFFIX, NEVER THE NUMBER (#620 review, F11). A migration's number is claimed at MERGE and
+ * renumbered whenever `main` moves under the branch; its name is the identity that survives.
+ * Keyed on `"0190_"` this gate was silently self-disabling: renumber the same migration to 0186
+ * and the ledger no longer matched, so the door was "not expected yet", the §13 matrix was skipped
+ * for it, and an over-grant of EXECUTE to clara_authenticated passed 6/0 with a note — measured,
+ * not feared. Matching the suffix is the same `migname` identity
+ * .github/actions/frontier-leg/action.yml:14-15 calls "the STABLE migration suffix (survives
+ * merge-time renumbers)", and the convention the siblings in this package already follow
+ * (wave-a-shape.test.mjs's `version ~ 'f_a2_posting_grants$'`, x42-s5-helpers.mjs's applied-stem
+ * roster, f-a2-post-fixtures.mjs). A `like` pattern would ALSO be wrong for a second reason: `_`
+ * is a single-character wildcard in LIKE, so `like '0190_%'` matched more than it looked like it
+ * matched.
+ */
+export const WA_GRANTS_SINCE = Object.freeze({
+  // [#620] the successor source-document byte door — 0190_document_byte_door_v2 as merged.
+  get_document_for_human_read_v2: "document_byte_door_v2",
+});
 
 /** Ungranted internal cores 0011 adds (companion §8/§13: granted to NO app role). */
 export const WA_UNGRANTED_FNS = ["_open_question_blocks"];

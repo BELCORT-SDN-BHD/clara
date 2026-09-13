@@ -1,10 +1,25 @@
 // C-07 / 裁-175 — the viewer gate AT THE FACE.
 //
-// `lib/documents/open-in-new-tab.test.ts` proves the library refuses. This
-// proves the human is told the truth about it: a neutral, honest reason naming
-// the type, NOT the red "could not open this document" failure banner — nothing
-// failed — and a control that takes them to the view which CAN show the
-// content. A gate that refuses correctly and then lies about why is half a fix.
+// `lib/documents/open-in-new-tab.test.ts` proves the LIBRARY refuses a type a browser tab cannot
+// show inertly, and that library gate is the security wall (a `blob:` URL inherits this app's
+// origin, so a script-bearing type navigated into one runs as the firm member). This file proves
+// what the face does about it.
+//
+// WHAT CHANGED WITH THE SOURCE-CUSTODY PASS, and why these cells now assert the ABSENCE of a
+// control rather than the refusal that followed pressing one. Before it, "Open document" rendered
+// for every type and an XML's refusal appeared only AFTER a click — the person was told about the
+// wall by being walked into it, and the only other thing on offer was "read the extraction
+// instead", which is true and is not the same thing as being given the file. Now:
+//
+//   · the Open control is OFFERED only for a type the wall admits (the row's own `mime_type`);
+//   · the honest reason for every other type STANDS on the page, before anybody presses anything;
+//   · "Download original" is there for all of them, which is the actual answer to "I need this
+//     file" and is what the C-07 refusal never had.
+//
+// THE WALL ITSELF IS UNTOUCHED and is still measured — by the library's own suite, where it
+// belongs, and by the drift cell in `lib/documents/bytes.test.ts` that pins the viewer list
+// against the fetch list and against the runtime's intake table. A gate enforced in a component
+// is a gate a second caller bypasses; these cells are about the OFFER, not about the wall.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -19,6 +34,8 @@ import type { DocumentRow } from "../../lib/documents/types";
 function App(children: ReturnType<typeof createElement>) {
   return createElement(NextIntlClientProvider, { locale: "en", messages, children });
 }
+
+const CLIENT = "c11e0000-1111-4111-8111-111111111111";
 
 const DOCUMENT: DocumentRow = {
   id: "doc-1", sha256: "abc123", original_filename: "e-invoice.xml", mime_type: "application/xml",
@@ -85,30 +102,33 @@ function installWindowOpen(tab: FakeTab): () => void {
   return () => { if (had) win.open = previous; else delete win.open; };
 }
 
-test("[the defect] an XML document's Open is REFUSED at the face — the honest reason renders, the tab is never navigated", async () => {
+const findButton = (h: { find: (p: (n: { tagName?: string }) => boolean) => unknown }, label: string) =>
+  h.find((n) => (n as { tagName?: string }).tagName === "BUTTON" && textOf(n as never).includes(label));
+
+test("[the defect] an XML document is NEVER OFFERED the tab — the control is absent and the honest reason stands without a click", async () => {
   let shown = 0;
   await withOpenEnv("application/xml", async (tab) => {
     const h = await renderComponent(App(createElement(DocumentMetadata, {
-      document: DOCUMENT, tasks: [], onShowExtraction: () => { shown += 1; },
+      document: DOCUMENT, tasks: [], clientId: CLIENT, onShowExtraction: () => { shown += 1; },
     })));
     const undo = installWindowOpen(tab);
     try {
       await h.settle();
-      const open = h.find((n) => n.tagName === "BUTTON" && textOf(n).includes("Open document"));
-      assert.ok(open, "the open control must render");
-      await clickButton(open!);
-      for (let i = 0; i < 6; i++) await h.settle();
 
-      // THE DISCRIMINATING POST-CONDITION. On the pre-gate code this href IS
-      // "blob:fake-url" — a same-origin document carrying the user's session.
+      // THE DISCRIMINATING POST-CONDITION, and it is stronger than the one this cell used to
+      // carry: on the pre-gate code the control existed and its click set `tab.location.href` to
+      // a same-origin blob carrying the user's session. There is now no control to press at all.
+      assert.equal(findButton(h, "Open original"), null, "a type the wall refuses must not be offered a tab");
       assert.equal(tab.hrefSet, null, "no tab may ever be navigated to a non-viewable document's blob URL");
-      assert.equal(tab.closedCalled, true, "the about:blank tab opened for the click is closed again");
 
       const text = h.text();
       assert.match(text, /can't be shown in a browser tab/, "the human is told what actually happened");
       assert.match(text, /application\/xml/, "…and the type is named verbatim, not guessed at");
-      assert.doesNotMatch(text, /Could not open this document/, "this is NOT a failure — the red banner would misname the cause");
+      assert.doesNotMatch(text, /Could not open this document/, "this is NOT a failure — a red banner would misname the cause");
       assert.doesNotMatch(text, /blocked the new tab/, "…and it is NOT a pop-up problem, which would send the human to fix the wrong setting");
+
+      // AND THE THING THE REFUSAL NEVER HAD: the file itself is still obtainable.
+      assert.ok(findButton(h, "Download original"), "an un-previewable document must still be downloadable — that is the whole point of the second affordance");
     } finally {
       undo();
       await h.unmount();
@@ -117,21 +137,18 @@ test("[the defect] an XML document's Open is REFUSED at the face — the honest 
   assert.equal(shown, 0, "control: the alternative is offered, not auto-triggered");
 });
 
-test("the refusal OFFERS the structured view, and the control actually opens it", async () => {
+test("the standing reason OFFERS the structured view, and the control actually opens it", async () => {
   let shown = 0;
   await withOpenEnv("application/xml", async (tab) => {
     const h = await renderComponent(App(createElement(DocumentMetadata, {
-      document: DOCUMENT, tasks: [], onShowExtraction: () => { shown += 1; },
+      document: DOCUMENT, tasks: [], clientId: CLIENT, onShowExtraction: () => { shown += 1; },
     })));
     const undo = installWindowOpen(tab);
     try {
       await h.settle();
-      await clickButton(h.find((n) => n.tagName === "BUTTON" && textOf(n).includes("Open document"))!);
-      for (let i = 0; i < 6; i++) await h.settle();
-
-      const alt = h.find((n) => n.tagName === "BUTTON" && textOf(n).includes("Show what was extracted"));
-      assert.ok(alt, "a refusal that names an alternative must render the control for it, not just describe it");
-      await clickButton(alt!);
+      const alt = findButton(h, "Show what was extracted");
+      assert.ok(alt, "a reason that names an alternative must render the control for it, not just describe it");
+      await clickButton(alt as never);
       await h.settle();
       assert.equal(shown, 1, "the control opens the structured extraction view on the same panel");
     } finally {
@@ -143,15 +160,13 @@ test("the refusal OFFERS the structured view, and the control actually opens it"
 
 test("with NO alternative wired, the reason renders alone — never a control that does nothing", async () => {
   await withOpenEnv("application/xml", async (tab) => {
-    const h = await renderComponent(App(createElement(DocumentMetadata, { document: DOCUMENT, tasks: [] })));
+    const h = await renderComponent(App(createElement(DocumentMetadata, { document: DOCUMENT, tasks: [], clientId: CLIENT })));
     const undo = installWindowOpen(tab);
     try {
       await h.settle();
-      await clickButton(h.find((n) => n.tagName === "BUTTON" && textOf(n).includes("Open document"))!);
-      for (let i = 0; i < 6; i++) await h.settle();
       assert.match(h.text(), /can't be shown in a browser tab/);
       assert.equal(
-        h.find((n) => n.tagName === "BUTTON" && textOf(n).includes("Show what was extracted")),
+        findButton(h, "Show what was extracted"),
         null,
         "a caller with no structured view must not render a dead button",
       );
@@ -163,16 +178,19 @@ test("with NO alternative wired, the reason renders alone — never a control th
 });
 
 test("VACUITY CONTROL: a PDF still opens — the gate refuses a TYPE, it does not break the feature", async () => {
-  // Without this every cell above passes against a component whose Open button
-  // was simply removed, or whose gate refuses everything.
+  // Without this every cell above passes against a component whose Open button was simply
+  // removed, or whose offer predicate refuses everything.
   await withOpenEnv("application/pdf", async (tab) => {
     const h = await renderComponent(App(createElement(DocumentMetadata, {
-      document: { ...DOCUMENT, mime_type: "application/pdf", original_filename: "invoice.pdf" }, tasks: [],
+      document: { ...DOCUMENT, mime_type: "application/pdf", original_filename: "invoice.pdf" },
+      tasks: [], clientId: CLIENT,
     })));
     const undo = installWindowOpen(tab);
     try {
       await h.settle();
-      await clickButton(h.find((n) => n.tagName === "BUTTON" && textOf(n).includes("Open document"))!);
+      const open = findButton(h, "Open original");
+      assert.ok(open, "a viewable type must be offered the tab");
+      await clickButton(open as never);
       for (let i = 0; i < 6; i++) await h.settle();
       assert.equal(tab.hrefSet, "blob:fake-url", "a PDF must still reach the tab");
       assert.doesNotMatch(h.text(), /can't be shown in a browser tab/);
@@ -183,25 +201,31 @@ test("VACUITY CONTROL: a PDF still opens — the gate refuses a TYPE, it does no
   });
 });
 
-test("[found by the browser leg] a genuine byte-fetch failure renders its sentence ONCE, not nested inside itself", async () => {
-  // The page read "Could not open this document: Could not open this document:
-  // document bytes failed" — `openError` already held the finished sentence and
-  // the banner wrapped it in its own template a second time. The count is the
-  // assertion: a `toContain` check would have passed on the doubled string.
+test("[found by the browser leg] a genuine byte-read failure renders its sentence ONCE, not nested inside itself", async () => {
+  // The page once read "Could not open this document: Could not open this document: document
+  // bytes failed" — the error held a finished sentence and the banner wrapped it in its own
+  // template a second time. The template is gone entirely now (the state ladder owns one sentence
+  // per state), so the count is what keeps that class closed: a `toContain` check would pass on a
+  // doubled string.
   const originalFetch = globalThis.fetch;
   const originalCreate = URL.createObjectURL;
   URL.createObjectURL = () => "blob:fake-url";
   globalThis.fetch = (async () => new Response("nope", { status: 500 })) as typeof fetch;
   configureSessionTokenSource(async () => "tok");
   const tab = fakeTab();
-  const h = await renderComponent(App(createElement(DocumentMetadata, { document: DOCUMENT, tasks: [] })));
+  const h = await renderComponent(App(createElement(DocumentMetadata, {
+    document: { ...DOCUMENT, mime_type: "application/pdf", original_filename: "invoice.pdf" },
+    tasks: [], clientId: CLIENT,
+  })));
   const undo = installWindowOpen(tab);
   try {
-    await clickButton(h.find((n) => n.tagName === "BUTTON" && textOf(n).includes("Open document"))!);
+    await clickButton(findButton(h, "Open original") as never);
     for (let i = 0; i < 6; i++) await h.settle();
     const text = h.text();
-    const occurrences = text.split("Could not open this document").length - 1;
+    const sentence = "The server had a problem sending this file";
+    const occurrences = text.split(sentence).length - 1;
     assert.equal(occurrences, 1, `the failure sentence must appear exactly once, not nested — saw ${occurrences} in: ${text}`);
+    assert.doesNotMatch(text, /nope/, "the runtime's own body text must never reach the page");
   } finally {
     undo();
     await h.unmount();

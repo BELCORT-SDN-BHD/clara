@@ -1,0 +1,5 @@
+# Supabase CLI scratch state. `run.mjs` copies config.toml into a disposable workdir and never
+# runs the CLI here, but CI's always() teardown step and any hand-run `supabase stop --workdir
+# packages/db/storage-battery` do write here — and check-leaks.mjs scans untracked files.
+.temp/
+.branches/

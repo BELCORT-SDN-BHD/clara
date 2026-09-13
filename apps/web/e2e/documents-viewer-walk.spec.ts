@@ -4,11 +4,12 @@
 // Four things are proven here that no unit test can prove, because each of them
 // is a property of the real browser rather than of a function:
 //
-//   1. C-07 / 裁-175 — an XML document's "Open document" opens NO tab. The unit
-//      test proves the library returns `not_viewable`; only a browser can prove
-//      that the browsing context count does not grow and that nothing is ever
-//      navigated to a `blob:` URL in this origin.
-//   2. A PDF's "Open document" DOES open one — the vacuity control on (1),
+//   1. C-07 / 裁-175 — an XML document is never OFFERED a tab, and no browsing
+//      context appears while it is open. The unit test proves the library
+//      returns `not_viewable`; only a browser can prove that the context count
+//      does not grow and that nothing is ever navigated to a `blob:` URL in
+//      this origin.
+//   2. A PDF's "Open original" DOES open one — the vacuity control on (1),
 //      without which every assertion above passes against a broken button.
 //   3. D2 — the page overlay renders real polygons over a real pdf.js-painted
 //      canvas, and clicking a fact in the table highlights its own region.
@@ -52,81 +53,61 @@ async function signIn(page: Page): Promise<void> {
 }
 
 test.describe("documents viewer — the MIME gate, the page overlay and the CSP", () => {
-  test("C-07: an XML document is REFUSED at the viewer gate — no tab opens, and the reason is honest", async ({ page, context }) => {
+  test("C-07: an XML document is never OFFERED a tab — the reason stands, and no browsing context appears", async ({ page, context }) => {
     await signIn(page);
     await page.goto(DOCUMENTS_URL);
 
     await expect(page.getByRole("heading", { name: "Filed to this client" })).toBeVisible();
     await selectDocument(page, /myinvois-e-invoice\.xml/);
 
-    await expect(page.getByRole("button", { name: "Open document" })).toBeVisible();
-
-    // THE MEASUREMENT: how many browsing contexts survive the click.
-    //
-    // N2, AND WHAT KILLING IT TAUGHT. The first cut also asserted that no popup
-    // was ever navigated to a `blob:` URL, collecting `p.url()` at the `page`
-    // event — vacuous, because a `window.open("about:blank")` popup reads
-    // "about:blank" there and the blob assignment happens afterwards. The
-    // second cut moved to `framenavigated` on the main frame, which looked
-    // right. A POSITIVE CONTROL on the PDF path — where a blob navigation
-    // certainly happens — then measured ZERO blob URLs there too: Chromium
-    // does not surface a navigation event for a `location.href = "blob:…"`
-    // assignment into an `about:blank` popup, so NO collector of that shape can
-    // discriminate, and an assertion over it is unfalsifiable however it is
-    // written.
-    //
-    // So the URL assertion is gone rather than rewritten a third time. What is
-    // left is the pair that genuinely discriminates, and it is the behavioural
-    // difference the gate actually creates: on a refusal the tab is CLOSED, so
-    // the context count returns to baseline (asserted here); on an admitted
-    // type it SURVIVES (asserted in the PDF cell below). Those two cells fail
-    // in opposite directions if the gate breaks either way.
-    const pagesBefore = context.pages().length;
-
-    await page.getByRole("button", { name: "Open document" }).click();
-
+    // THE OFFER, NOT THE CLICK. Before the source-custody pass this control rendered for every
+    // type and an XML's refusal appeared only AFTER pressing it — the person was told about the
+    // wall by being walked into it. The wall itself (`VIEWABLE_IN_NEW_TAB`, enforced inside
+    // `openDocumentInNewTab` against the RESPONSE's content-type) is unchanged and is measured by
+    // `lib/documents/open-in-new-tab.test.ts`; what this cell measures is that the face agrees
+    // with it before anybody presses anything.
+    await expect(page.getByTestId("document-open-original")).toHaveCount(0);
     await expect(page.getByText(/can't be shown in a browser tab/)).toBeVisible();
     await expect(page.getByText(/application\/xml/)).toBeVisible();
 
-    // Give a popup that WOULD have opened time to appear and navigate. Without
-    // this the assertion could pass simply because the click had not finished.
+    // THE MEASUREMENT: no browsing context appears at all. The XML row is now selected and the
+    // only controls on the panel are the download and the extraction link — neither may open a tab.
+    const pagesBefore = context.pages().length;
     await page.waitForTimeout(1000);
+    expect(context.pages().length, "nothing on this panel may open a browsing context for an un-previewable type").toBe(pagesBefore);
 
-    expect(context.pages().length, "no browsing context may survive a refused open").toBe(pagesBefore);
-    // …and the refusal must not masquerade as either of the two failures it is not.
+    // …and the standing reason must not masquerade as either of the two failures it is not.
     await expect(page.getByText(/Could not open this document/)).toHaveCount(0);
     await expect(page.getByText(/blocked the new tab/)).toHaveCount(0);
+
+    // THE FILE IS STILL OBTAINABLE, which is what the old refusal never had: an e-invoice XML is a
+    // document a person legitimately needs the bytes of and can never be shown one of.
+    await expect(page.getByTestId("document-download-original")).toBeVisible();
 
     // The honest alternative is a real control, and it opens the structured view.
     await page.getByRole("button", { name: "Show what was extracted" }).click();
     await expect(page.getByRole("button", { name: "Hide extraction text" })).toBeVisible();
   });
 
-  test("VACUITY CONTROL: a PDF still opens in a new tab — the gate refuses a TYPE, not the feature", async ({ page, context }) => {
+  test("VACUITY CONTROL: a PDF still opens in a new tab — the offer refuses a TYPE, not the feature", async ({ page, context }) => {
     await signIn(page);
     await page.goto(DOCUMENTS_URL);
     await selectDocument(page, /invoice-april\.pdf/);
-    await expect(page.getByRole("button", { name: "Open document" })).toBeVisible();
+    await expect(page.getByTestId("document-open-original")).toBeVisible();
 
     const pagesBefore = context.pages().length;
     const popupPromise = context.waitForEvent("page", { timeout: 15_000 });
-    await page.getByRole("button", { name: "Open document" }).click();
+    await page.getByTestId("document-open-original").click();
     const popup = await popupPromise;
 
-    // THE DISCRIMINATING PROPERTY IS THAT THE TAB SURVIVES, not what its URL
-    // string reads. `openDocumentInNewTab` navigates by assigning
-    // `tab.location.href`, and Chromium's reported URL for a popup navigated
-    // that way to a `blob:` PDF stays "about:blank" in headless — measured, and
-    // asserting on it made this control flaky rather than strict. What the
-    // refused path does that this one must not is CLOSE the tab
-    // (open-in-new-tab.ts's not_viewable branch), so the surviving context is
-    // the exact behavioural difference between the two, and it is what the
-    // XML cell above asserts the negative of.
+    // THE DISCRIMINATING PROPERTY IS THAT THE TAB SURVIVES, not what its URL string reads.
+    // `openDocumentInNewTab` navigates by assigning `tab.location.href`, and Chromium's reported
+    // URL for a popup navigated that way to a `blob:` PDF stays "about:blank" in headless —
+    // measured, and asserting on it made this control flaky rather than strict.
     await page.waitForTimeout(1000);
-    expect(popup.isClosed(), "a viewable document's tab must NOT be closed — that is what the refusal does").toBe(false);
+    expect(popup.isClosed(), "a viewable document's tab must NOT be closed").toBe(false);
     expect(context.pages().length, "the opened tab must still be there").toBe(pagesBefore + 1);
     await expect(page.getByText(/can't be shown in a browser tab/)).toHaveCount(0);
-    await expect(page.getByText(/Could not open this document/)).toHaveCount(0);
     await popup.close();
   });
 
@@ -369,6 +350,468 @@ test.describe("documents viewer — the MIME gate, the page overlay and the CSP"
     // The OTHER violation this scan found was this train's own and was fixed
     // here: `filed-document-list.tsx` put `aria-selected` on a `role="button"`
     // row (aria-allowed-attr, CRITICAL) — now `aria-current`.
+    expect(results.violations, JSON.stringify(results.violations, null, 2)).toEqual([]);
+  });
+});
+
+// ============================================================================================
+// #620 — THE SOURCE-CUSTODY JOURNEY: preview, download, and the state ladder.
+//
+// WHAT THIS BLOCK IS EVIDENCE OF, said plainly: the JOURNEY and this app's own wire code against a
+// MOCK runtime (`documents-viewer-mock.mjs` serves every response shape the route contract names).
+// It is NOT evidence that Postgres would admit any of these reads, that the door's membership or
+// filing predicate holds, or that Storage's grants are what they claim. Those are permission
+// claims and they belong to the db/runtime battery, not to a browser walk against a fake.
+// What only a browser can prove, and what these cells therefore exist for:
+//   · a download is a real `fetch` + object URL + synthetic click, with `disposition=attachment` on
+//     the wire and the URL released afterwards — none of which a unit test can observe end to end
+//     through a built bundle and a real same-origin proxy;
+//   · six refusals rendering DISTINCTLY on one page, with the right recovery control on each;
+//   · `?document=` surviving a real reload and the real browser Back button;
+//   · no horizontal page scroll at 320px and at 200% zoom, measured from layout rather than
+//     asserted about CSS.
+// ============================================================================================
+
+/** Installs an object-URL recorder BEFORE any app script runs, so a download's whole lifecycle is
+ *  observable from the page. The sandbox blocks a real save — Playwright's `download` event needs a
+ *  navigation the harness does not allow for a blob anchor — so the measurable facts are the ones
+ *  that matter anyway: the request that went out, the anchor's `download` attribute, and whether
+ *  the object URL was released. A cell that only asserted "no error appeared" would pass against a
+ *  button that does nothing. */
+async function instrumentDownloads(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const w = window as unknown as {
+      __claraDownloads: { created: string[]; revoked: string[]; anchors: string[] };
+    };
+    w.__claraDownloads = { created: [], revoked: [], anchors: [] };
+    const createObjectURL = URL.createObjectURL.bind(URL);
+    const revokeObjectURL = URL.revokeObjectURL.bind(URL);
+    URL.createObjectURL = (obj: Blob | MediaSource) => {
+      const url = createObjectURL(obj as Blob);
+      w.__claraDownloads.created.push(url);
+      return url;
+    };
+    URL.revokeObjectURL = (url: string) => {
+      w.__claraDownloads.revoked.push(url);
+      revokeObjectURL(url);
+    };
+    // The anchor a download synthesises is appended, clicked and removed within a tick, so it can
+    // never be found by a selector — its `download` attribute is captured at click time instead.
+    const click = HTMLAnchorElement.prototype.click;
+    HTMLAnchorElement.prototype.click = function patched(this: HTMLAnchorElement) {
+      if (this.download) {
+        w.__claraDownloads.anchors.push(this.download);
+        return; // the sandbox cannot complete the save; the intent is what is measured
+      }
+      return click.call(this);
+    };
+  });
+}
+
+function downloadState(page: Page) {
+  return page.evaluate(() => (window as unknown as {
+    __claraDownloads: { created: string[]; revoked: string[]; anchors: string[] };
+  }).__claraDownloads);
+}
+
+type FocusSample = { focus: string; busy: string | null };
+type FocusWatch = { samples: FocusSample[]; stop: () => void };
+
+/** WHERE KEYBOARD FOCUS IS, CONTINUOUSLY, across a source read — the one thing no unit harness can
+ *  answer, because there is no focus manager in a stub DOM and "disabled elements cannot hold
+ *  focus" is a browser rule rather than a React one.
+ *
+ *  TWO INSTRUMENTS, on purpose. A 10ms poll can in principle straddle a very fast read and see
+ *  nothing; a `MutationObserver` on the panel's own `aria-busy`/`aria-disabled`/`disabled`
+ *  attributes fires as a microtask at the exact instant the press takes effect, which is precisely
+ *  when a natively-disabled control blurs. Each sample also records the pressed control's
+ *  `aria-busy`, so a cell can prove it actually OBSERVED the in-flight window rather than passing
+ *  because it sampled nothing. Install immediately before the keypress; read back with
+ *  `focusSamples`, which stops both. */
+async function watchSourceFocus(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const w = window as unknown as { __claraFocus: FocusWatch };
+    const label = () => {
+      const el = document.activeElement;
+      if (!el || el === document.body || el === document.documentElement) return "BODY";
+      return el.getAttribute("data-testid") ?? el.tagName;
+    };
+    const read = () => {
+      const button = document.querySelector('[data-testid="document-download-original"]');
+      return { focus: label(), busy: button ? button.getAttribute("aria-busy") : null };
+    };
+    const samples: FocusSample[] = [];
+    const timer = window.setInterval(() => samples.push(read()), 10);
+    const observer = new MutationObserver(() => samples.push(read()));
+    const panel = document.querySelector('[data-testid="document-source-actions"]');
+    if (panel) {
+      observer.observe(panel, { attributes: true, subtree: true, attributeFilter: ["aria-busy", "aria-disabled", "disabled"] });
+    }
+    w.__claraFocus = { samples, stop: () => { window.clearInterval(timer); observer.disconnect(); } };
+  });
+}
+
+/** The samples as one run-line: `label×count` in the order observed, with how many of them caught
+ *  the control mid-read. RECORDED IN THE RUN'S OUTPUT, the way the CSP cell records its own
+ *  measurement, because "BODY×12" is the shape this defect had and a reviewer should be able to
+ *  read the before and after off two logs rather than re-deriving them. */
+function summariseFocus(samples: FocusSample[]): string {
+  const runs: string[] = [];
+  for (const s of samples) {
+    const last = runs[runs.length - 1];
+    if (last && last.startsWith(`${s.focus}×`)) runs[runs.length - 1] = `${s.focus}×${Number(last.split("×")[1]) + 1}`;
+    else runs.push(`${s.focus}×1`);
+  }
+  return `${runs.join(",")} | samples=${samples.length} while-busy=${samples.filter((s) => s.busy === "true").length}`;
+}
+
+async function focusSamples(page: Page): Promise<FocusSample[]> {
+  return page.evaluate(() => {
+    const w = window as unknown as { __claraFocus: FocusWatch };
+    w.__claraFocus.stop();
+    return w.__claraFocus.samples;
+  });
+}
+
+/** The widest any element extends past the viewport, and the document's own scroll width. Measured
+ *  from the browser's layout rather than reasoned about from CSS — a `max-w` class that is beaten
+ *  by an inline width or by an unbreakable string looks correct in source and scrolls in fact. */
+async function horizontalOverflow(page: Page) {
+  return page.evaluate(() => ({
+    docScrollWidth: document.documentElement.scrollWidth,
+    docClientWidth: document.documentElement.clientWidth,
+    widest: [...document.querySelectorAll("body *")]
+      .map((el) => {
+        const r = el.getBoundingClientRect();
+        return { tag: el.tagName, cls: (el.className || "").toString().slice(0, 60), right: Math.round(r.right) };
+      })
+      .filter((e) => e.right > document.documentElement.clientWidth + 1)
+      .sort((a, b) => b.right - a.right)
+      .slice(0, 5),
+  }));
+}
+
+test.describe("#620 — source custody: preview, download and the state ladder (journey evidence against a mock, never permission evidence)", () => {
+  test("DOWNLOAD: the original is fetched with disposition=attachment, handed to a save, and the object URL released", async ({ page }) => {
+    const requests: string[] = [];
+    page.on("request", (r) => { if (r.url().includes("/api/runtime/documents/")) requests.push(r.url()); });
+    await instrumentDownloads(page);
+    await signIn(page);
+    await page.goto(DOCUMENTS_URL);
+    await selectDocument(page, /invoice-april\.pdf/);
+
+    const download = page.getByTestId("document-download-original");
+    await expect(download).toBeVisible();
+    await download.click();
+
+    // THE REQUEST IS THE PIN. `disposition=attachment` is what the runtime maps onto the door's
+    // `p_purpose='download'`, which is what the audit line records — remove the parameter and this
+    // cell goes red while every visual assertion below still passes (that is the red-on-old-
+    // definition proof this lane owes).
+    await expect
+      .poll(() => requests.filter((u) => u.includes("disposition=attachment")).length, { timeout: 15_000 })
+      .toBeGreaterThan(0);
+    const attachmentUrl = requests.find((u) => u.includes("disposition=attachment"))!;
+    expect(attachmentUrl, "the page's own client scope must travel with the read").toContain(`client=${DOCS.clientId}`);
+    expect(attachmentUrl).toContain(`/api/runtime/documents/${DOCS.docPdf}/bytes`);
+    // SAME-ORIGIN: the app's own origin, never a storage host.
+    expect(new URL(attachmentUrl).origin).toBe(new URL(page.url()).origin);
+
+    await expect.poll(async () => (await downloadState(page)).anchors.length, { timeout: 15_000 }).toBe(1);
+    const saved = await downloadState(page);
+    expect(saved.anchors[0], "the server's own derived filename must be what is offered to the person").toBe("invoice-april.pdf");
+    expect(saved.created.length, "the bytes must be blobbed, not linked").toBeGreaterThan(0);
+
+    // THE REVOKE, one tick after the click. Without it every download leaks an object URL for the
+    // lifetime of the tab — invisible in a screenshot and real in a long session.
+    await expect.poll(async () => (await downloadState(page)).revoked.length, { timeout: 10_000 }).toBeGreaterThan(0);
+
+    // …and nothing failed: no state banner appeared beside the control.
+    await expect(page.getByTestId("document-source-retry")).toHaveCount(0);
+    await expect(page.getByText(/couldn't be reached|no longer matches the record|isn't available in this client/)).toHaveCount(0);
+  });
+
+  test("PREVIEW: a viewable original still opens its own tab, and an un-previewable one is never offered it", async ({ page, context }) => {
+    await signIn(page);
+    await page.goto(DOCUMENTS_URL);
+
+    await selectDocument(page, /invoice-april\.pdf/);
+    const pagesBefore = context.pages().length;
+    const popupPromise = context.waitForEvent("page", { timeout: 15_000 });
+    await page.getByTestId("document-open-original").click();
+    const popup = await popupPromise;
+    await page.waitForTimeout(500);
+    expect(popup.isClosed(), "a viewable document's tab must survive").toBe(false);
+    expect(context.pages().length).toBe(pagesBefore + 1);
+    await popup.close();
+
+    // The XML: no Open control at all, the standing reason, and the download beside it.
+    await selectDocument(page, /myinvois-e-invoice\.xml/);
+    await expect(page.getByTestId("document-open-original")).toHaveCount(0);
+    await expect(page.getByText(/can't be shown in a browser tab/)).toBeVisible();
+    await expect(page.getByTestId("document-download-original")).toBeVisible();
+  });
+
+  test("THE LADDER: denied, not-found, storage-unavailable, custody-pending, expired session and integrity render DISTINCTLY", async ({ page }) => {
+    await signIn(page);
+    await page.goto(DOCUMENTS_URL);
+
+    const cases = [
+      { file: /denied-membership\.pdf/, text: /no longer have access to this firm's documents/, retry: false, reauth: false },
+      { file: /not-in-this-client\.pdf/, text: /isn't available in this client/, retry: false, reauth: false },
+      { file: /store-unavailable\.pdf/, text: /document store couldn't be reached/, retry: true, reauth: false },
+      { file: /custody-pending\.pdf/, text: /still verifying this file's stored copy/, retry: true, reauth: false },
+      { file: /session-expired\.pdf/, text: /Your session expired while this file was being read/, retry: false, reauth: true },
+      { file: /checksum-mismatch\.pdf/, text: /no longer matches the record Clara holds/, retry: false, reauth: false },
+    ];
+
+    const seen: string[] = [];
+    for (const c of cases) {
+      await selectDocument(page, c.file);
+      await page.getByTestId("document-download-original").click();
+      await expect(page.getByText(c.text)).toBeVisible({ timeout: 15_000 });
+
+      // THE RECOVERY CONTROL IS PART OF THE STATE, not decoration beside it. A Retry next to a
+      // checksum mismatch is a button that cannot work; its absence next to an unreachable store
+      // strands a reader on a failure that fixes itself.
+      await expect(page.getByTestId("document-source-retry")).toHaveCount(c.retry ? 1 : 0);
+      await expect(page.getByTestId("document-source-reauthenticate")).toHaveCount(c.reauth ? 1 : 0);
+
+      seen.push((await page.getByTestId("document-source-actions").innerText()).replace(/\s+/g, " ").trim());
+    }
+
+    // THE CONTROL ON ALL SIX. Each assertion above passes against a surface that renders one
+    // constant sentence per document so long as each constant matches its own regex; six distinct
+    // rendered panels is what says the ladder did not collapse.
+    expect(new Set(seen).size, `six refusals must read six different ways:\n${seen.join("\n---\n")}`).toBe(6);
+  });
+
+  test("RETRY restores the read: the second attempt reaches the wire and the failure clears", async ({ page }) => {
+    const byteReads: string[] = [];
+    page.on("request", (r) => { if (/\/api\/runtime\/documents\/[^/]+\/bytes/.test(r.url())) byteReads.push(r.url()); });
+    await instrumentDownloads(page);
+    await signIn(page);
+    await page.goto(DOCUMENTS_URL);
+    await selectDocument(page, /recovers-on-retry\.pdf/);
+
+    await page.getByTestId("document-download-original").click();
+    await expect(page.getByText(/document store couldn't be reached/)).toBeVisible({ timeout: 15_000 });
+    const readsAfterFailure = byteReads.length;
+    expect(readsAfterFailure).toBeGreaterThan(0);
+
+    await page.getByTestId("document-source-retry").click();
+
+    // A SECOND REQUEST, not a repaint of the first outcome.
+    await expect.poll(() => byteReads.length, { timeout: 15_000 }).toBeGreaterThan(readsAfterFailure);
+    await expect(page.getByText(/document store couldn't be reached/)).toHaveCount(0);
+    await expect.poll(async () => (await downloadState(page)).anchors.length, { timeout: 15_000 }).toBe(1);
+    expect((await downloadState(page)).anchors[0]).toBe("recovers-on-retry.pdf");
+  });
+
+  test("URL: ?document= survives a reload, and the browser's own Back button closes the detail", async ({ page }) => {
+    await signIn(page);
+    await page.goto(DOCUMENTS_URL);
+    await expect(page.getByText("Select a document to see its evidence")).toBeVisible();
+
+    await selectDocument(page, /invoice-april\.pdf/);
+    await expect(page).toHaveURL(new RegExp(`\\?document=${DOCS.docPdf}$`));
+
+    // A REAL RELOAD — the property React state could never have had.
+    await page.reload();
+    await expect(page).toHaveURL(new RegExp(`\\?document=${DOCS.docPdf}$`));
+    await expect(page.getByRole("heading", { name: "invoice-april.pdf" })).toBeVisible({ timeout: 20_000 });
+
+    // THE BROWSER'S OWN BACK BUTTON, not the in-page control. `page.goBack()` pops the entry the
+    // row click pushed; an implementation that used `replace` would leave this on /login or on the
+    // previous page entirely, which is the defect this parameter exists to fix.
+    await page.goBack();
+    await expect(page).toHaveURL(new RegExp(`${DOCUMENTS_URL}$`));
+    await expect(page.getByText("Select a document to see its evidence")).toBeVisible({ timeout: 15_000 });
+
+    // FOCUS IS NOT STRANDED on <body> after the pop — the row that opened the detail takes it back.
+    await expect.poll(async () => page.evaluate(() => {
+      const el = document.activeElement;
+      if (!el || el === document.body || el === document.documentElement) return "stranded";
+      return (el.textContent ?? "").includes("invoice-april.pdf") ? "row" : el.tagName;
+    }), { timeout: 10_000 }).toBe("row");
+  });
+
+  test("URL: a well-formed id this client cannot show renders the not-available state and CLEARS the parameter", async ({ page }) => {
+    await signIn(page);
+    await page.goto(`${DOCUMENTS_URL}?document=${DOCS.docUnknown}`);
+    await expect(page.getByTestId("document-not-available")).toBeVisible({ timeout: 20_000 });
+    await expect(page).toHaveURL(new RegExp(`${DOCUMENTS_URL}$`), { timeout: 15_000 });
+
+    // A MALFORMED id takes the same answer — a hand-edited or stale link is a not-found question,
+    // never a database one (a non-uuid on a uuid column is a 400 the page would render as its own
+    // error boundary).
+    await page.goto(`${DOCUMENTS_URL}?document=not-a-uuid`);
+    await expect(page.getByTestId("document-not-available")).toBeVisible({ timeout: 20_000 });
+    await expect(page).toHaveURL(new RegExp(`${DOCUMENTS_URL}$`), { timeout: 15_000 });
+  });
+
+  test("KEYBOARD ONLY: open a document, read it, go back, and download — without a mouse", async ({ page }) => {
+    await signIn(page);
+    await page.goto(DOCUMENTS_URL);
+    await ensureRealFocus(page);
+
+    // The row is a real keyboard control (`role="button"`, `tabIndex=0`) — activated with Enter.
+    const row = page.getByRole("button", { name: /invoice-april\.pdf/ });
+    await row.focus();
+    await page.keyboard.press("Enter");
+    await expect(page).toHaveURL(new RegExp(`\\?document=${DOCS.docPdf}$`));
+    await expect(page.getByRole("heading", { name: "invoice-april.pdf" })).toBeVisible({ timeout: 20_000 });
+
+    // FOCUS LANDED IN WHAT WAS OPENED, not still on the row behind it.
+    await expect.poll(async () => page.evaluate(() => document.activeElement?.id ?? ""), { timeout: 10_000 })
+      .toBe("document-detail-heading");
+
+    // Back out with the in-page control, reached by the keyboard.
+    await page.getByTestId("document-detail-close").focus();
+    await page.keyboard.press("Enter");
+    await expect(page.getByText("Select a document to see its evidence")).toBeVisible({ timeout: 15_000 });
+
+    // …and the download is reachable and operable from the keyboard too.
+    await instrumentDownloads(page);
+    await page.goto(`${DOCUMENTS_URL}?document=${DOCS.docPdf}`);
+    const download = page.getByTestId("document-download-original");
+    await download.focus();
+    await expect(download).toBeFocused();
+    await watchSourceFocus(page);
+    await page.keyboard.press("Enter");
+    await expect.poll(async () => (await downloadState(page)).anchors.length, { timeout: 15_000 }).toBe(1);
+
+    // FOCUS SURVIVES THE PRESS, and this is the assertion the cell was missing.
+    //
+    // `disabled={busy !== null}` put the NATIVE `disabled` attribute on both controls while a read
+    // was in flight, and a natively-disabled element cannot hold focus — so the browser blurred it
+    // to <body> the instant the press took effect and nothing brought it back. Measured on that
+    // code: `FOCUS SAMPLES WHILE BUSY: BODY×12`, `FOCUS AFTER FAILURE SETTLES: BODY`. A keyboard
+    // reader was left with no position at all: the sr-only status region announced a control the
+    // browser no longer considered focused, and the Retry that appears beside it on a failure had
+    // to be reached by re-entering the page's tab order.
+    //
+    // THE VACUITY CONTROL COMES FIRST. An assertion that focus was "never on <body>" is trivially
+    // true if the sampler never ran while the read was in flight, so the busy window itself must
+    // appear in the samples before their focus values mean anything.
+    const successSamples = await focusSamples(page);
+    console.log(`[#620 F9] FOCUS ACROSS A SUCCEEDING READ: ${summariseFocus(successSamples)}`);
+    expect(
+      successSamples.some((s) => s.busy === "true"),
+      `control: the sampler never observed the read in flight — ${JSON.stringify(successSamples.slice(0, 40))}`,
+    ).toBe(true);
+    expect(
+      successSamples.filter((s) => s.focus === "BODY"),
+      "keyboard focus must never fall to <body> while a source read is in flight",
+    ).toEqual([]);
+    await expect(download, "…and it is still on the control that was pressed once the read settles").toBeFocused();
+
+    // THE SAME PROPERTY ON A FAILING READ, which is the case that actually matters: this is where a
+    // recovery control appears beside the one just pressed, so this is where losing the position
+    // costs the reader something.
+    await page.goto(`${DOCUMENTS_URL}?document=${DOCS.docUnavailable}`);
+    const failing = page.getByTestId("document-download-original");
+    await expect(failing).toBeVisible({ timeout: 20_000 });
+    await failing.focus();
+    await expect(failing).toBeFocused();
+    await watchSourceFocus(page);
+    await page.keyboard.press("Enter");
+    await expect(page.getByText(/document store couldn't be reached/)).toBeVisible({ timeout: 15_000 });
+
+    const failureSamples = await focusSamples(page);
+    console.log(`[#620 F9] FOCUS ACROSS A REFUSED READ: ${summariseFocus(failureSamples)}`);
+    expect(
+      failureSamples.some((s) => s.busy === "true"),
+      `control: the sampler never observed the failing read in flight — ${JSON.stringify(failureSamples.slice(0, 40))}`,
+    ).toBe(true);
+    expect(
+      failureSamples.filter((s) => s.focus === "BODY"),
+      "keyboard focus must never fall to <body> across a REFUSED source read either",
+    ).toEqual([]);
+    await expect(failing, "after the refusal settles, focus is still on the control the reader pressed").toBeFocused();
+
+    // DELIBERATELY NOT ASSERTED HERE: "how many Tab presses to reach Retry". Measured on the
+    // defective code, a live Tab from the blurred position reached Retry in ONE press anyway —
+    // Chromium keeps a sequential-navigation anchor where the removed element was — so that count
+    // passes in both directions and would be an assertion that cannot fail. The cost this cell
+    // pins is the real one: no position at all for the whole read, and a live region announcing a
+    // control the browser no longer considers focused.
+  });
+
+  test("RESPONSIVE: no horizontal page scroll at 320px, nor at 200% zoom, with a document open", async ({ page }) => {
+    await signIn(page);
+
+    await page.setViewportSize({ width: 320, height: 720 });
+    await page.goto(`${DOCUMENTS_URL}?document=${DOCS.docPdf}`);
+    await expect(page.getByRole("heading", { name: "invoice-april.pdf" })).toBeVisible({ timeout: 20_000 });
+    const narrow = await horizontalOverflow(page);
+    expect(
+      narrow.docScrollWidth,
+      `the page scrolls sideways at 320px. Widest offenders: ${JSON.stringify(narrow.widest, null, 2)}`,
+    ).toBeLessThanOrEqual(narrow.docClientWidth + 1);
+
+    // 200% ZOOM, emulated the way the spec means it: the CSS viewport halves while the layout keeps
+    // its own rules. 1280x800 at 200% is a 640x400 CSS viewport.
+    await page.setViewportSize({ width: 640, height: 400 });
+    await page.reload();
+    await expect(page.getByRole("heading", { name: "invoice-april.pdf" })).toBeVisible({ timeout: 20_000 });
+    const zoomed = await horizontalOverflow(page);
+    expect(
+      zoomed.docScrollWidth,
+      `the page scrolls sideways at 200% zoom. Widest offenders: ${JSON.stringify(zoomed.widest, null, 2)}`,
+    ).toBeLessThanOrEqual(zoomed.docClientWidth + 1);
+
+    // BOTH CONTROLS ARE STILL REACHABLE at the narrow width — "no horizontal scroll" achieved by
+    // pushing the primary action off the page would be a worse failure than the scroll.
+    await expect(page.getByTestId("document-download-original")).toBeVisible();
+    await expect(page.getByTestId("document-open-original")).toBeVisible();
+  });
+
+  test("REDUCED MOTION: the source panel moves nothing when the OS asks it not to", async ({ browser }) => {
+    // MOVEMENT ONLY. A colour or opacity transition under reduced motion is not what the preference
+    // is about; a control that slides, grows or repositions is. Two samples a frame apart around
+    // the click, and the assertion is that no measured box CHANGED POSITION.
+    const context = await browser.newContext({ reducedMotion: "reduce", ignoreHTTPSErrors: true });
+    const page = await context.newPage();
+    try {
+      await instrumentDownloads(page);
+      await signIn(page);
+      await page.goto(`${DOCUMENTS_URL}?document=${DOCS.docUnavailable}`);
+      await expect(page.getByTestId("document-download-original")).toBeVisible({ timeout: 20_000 });
+
+      const boxes = () => page.evaluate(() => {
+        const panel = document.querySelector('[data-testid="document-source-actions"]');
+        if (!panel) return null;
+        return [...panel.querySelectorAll("button")].map((b) => {
+          const r = b.getBoundingClientRect();
+          return { x: Math.round(r.x), y: Math.round(r.y) };
+        });
+      });
+
+      await page.getByTestId("document-download-original").click();
+      await expect(page.getByText(/document store couldn't be reached/)).toBeVisible({ timeout: 15_000 });
+
+      const first = await boxes();
+      await page.waitForTimeout(120); // longer than the panel motion token's own duration
+      const second = await boxes();
+      expect(first).not.toBeNull();
+      expect(second, "nothing in the source panel may still be moving after the outcome has settled").toEqual(first);
+
+      // …and the reduced-motion run still reaches the same honest state, controls included.
+      await expect(page.getByTestId("document-source-retry")).toBeVisible();
+    } finally {
+      await context.close();
+    }
+  });
+
+  test("axe: the documents tab with a document open and a refusal standing has no WCAG A/AA violations", async ({ page }) => {
+    await signIn(page);
+    await page.goto(`${DOCUMENTS_URL}?document=${DOCS.docIntegrity}`);
+    await expect(page.getByTestId("document-download-original")).toBeVisible({ timeout: 20_000 });
+    await page.getByTestId("document-download-original").click();
+    await expect(page.getByText(/no longer matches the record Clara holds/)).toBeVisible({ timeout: 15_000 });
+
+    const results = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]).analyze();
     expect(results.violations, JSON.stringify(results.violations, null, 2)).toEqual([]);
   });
 });

@@ -83,6 +83,20 @@ export async function getDocumentForHumanRead({ document, user }) {
   return r.rows[0].r;
 }
 
+/** [#620, 0190] get_document_for_human_read_v2(p_document, p_user, p_client, p_purpose) — the
+ *  SUCCESSOR byte door, called the way packages/runtime/src/documentRoutes.ts calls it: as
+ *  clara_runtime, with the RESOLVED principal. `client` and `purpose` are omitted from the named
+ *  call when undefined, so the defaults (null / 'preview') are the function's own. */
+export async function getDocumentForHumanReadV2({ document, user, client, purpose }) {
+  const specs = ["p_document => $1", "p_user => $2"];
+  const params = [document, user];
+  if (client !== undefined) { params.push(client); specs.push(`p_client => $${params.length}::uuid`); }
+  if (purpose !== undefined) { params.push(purpose); specs.push(`p_purpose => $${params.length}::text`); }
+  const r = await roleQuery(ROLES.runtime,
+    `select clara.get_document_for_human_read_v2(${specs.join(", ")}) as r`, params);
+  return r.rows[0].r;
+}
+
 // ---------------------------------------------------------------------------
 // Root readbacks for the new tables (superuser bypasses RLS, sees every firm).
 // ---------------------------------------------------------------------------

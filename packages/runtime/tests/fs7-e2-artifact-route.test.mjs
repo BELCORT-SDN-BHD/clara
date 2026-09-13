@@ -15,7 +15,7 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID, createHash } from "node:crypto";
-import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 
@@ -243,8 +243,28 @@ after(async () => {
 
 const skipHttp = () => (ready ? false : "FS-7 e2 route: no rig target, no download door, or no ratified watermark policy row");
 
-const get = (id, token) => fetch(`${baseUrl}/api/artifacts/${id}/bytes`,
-  token ? { headers: { authorization: `Bearer ${token}` } } : {});
+const get = (id, token, init = {}) => fetch(`${baseUrl}/api/artifacts/${id}/bytes`,
+  token ? { ...init, headers: { authorization: `Bearer ${token}` } } : init);
+
+const tempFiles = () => readdirSync(tmpdir()).filter((f) => f.startsWith("clara-artifactbytes-"));
+
+/**
+ * The per-request spools this route created since `baseline`, after giving the SERVER time to
+ * finish its own `finally`. The route removes the file in a `finally` that runs after the response
+ * stream settles, so the client's last byte legitimately arrives BEFORE the unlink — a bare
+ * synchronous check measures the race, not the cleanup. Bounded and loud: an unremoved file still
+ * fails, three seconds later. (documentRoutes' sibling battery carries the same helper for the
+ * same reason, and the two prefixes keep the two files from measuring each other.)
+ */
+async function tempLeak(baseline, { timeoutMs = 3000 } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const leaked = tempFiles().filter((f) => !baseline.has(f));
+    if (leaked.length === 0) return [];
+    if (Date.now() >= deadline) return leaked;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+}
 
 test("R3.1 — a member of the firm downloads the real bytes as an ATTACHMENT", async (t) => {
   if (skipHttp()) return t.skip(skipHttp());
@@ -321,6 +341,34 @@ test("R3.7 — an UNFINISHED export is 409 carrying the door's own typed reason,
   const body = await res.json();
   assert.equal(body.error, "not_downloadable");
   assert.equal(body.reason, "sandbox_export_not_complete", "the DATABASE's word reaches the client verbatim");
+});
+
+test("R3.9 — a client that ABORTS mid-stream leaves no spooled copy of the artifact behind", async (t) => {
+  if (skipHttp()) return t.skip(skipHttp());
+  // THE MIRROR of document-route-e2e.test.mjs's E2.13, on the byte-identical streaming block this
+  // route carries (reportRoutes.ts). Same mechanism, same consequence: the route spools the whole
+  // sealed artifact to os.tmpdir() to verify its content address before a byte reaches the wire,
+  // so a stream promise that never settles on a client abort leaves an unowned copy of a
+  // watermarked client export on the serving host, with no sweeper anywhere.
+  //
+  // 8 MiB so the abort lands mid-pipe: a small export is flushed in one turn and the stream ends
+  // before any client could abort, which would let this cell pass on broken code.
+  const big = Buffer.alloc(8 * 1024 * 1024, 0x42);
+  big.write("%PDF-1.7\nfs7 abort\n");
+  const bulky = await seedSandboxExport(big);
+  if (!bulky) return t.skip("no ratified watermark policy row");
+  const before_ = new Set(tempFiles());
+  const ac = new AbortController();
+  const res = await get(bulky.exportId, await mint(world.owner), { signal: ac.signal });
+  assert.equal(res.status, 200);
+  const reader = res.body.getReader();
+  const first = await reader.read();
+  assert.ok((first.value?.length ?? 0) > 0, "the stream must have STARTED before the abort");
+  assert.ok(first.value.length < big.length, "the abort must land mid-transfer, not after the end");
+  ac.abort();
+  await reader.cancel().catch(() => {});
+  assert.deepEqual(await tempLeak(before_), [],
+    "an aborted download must not leave the sealed artifact spooled in os.tmpdir()");
 });
 
 test("R3.8 — a MISSING object is a 502, not a truncated 200 the browser would save", async (t) => {

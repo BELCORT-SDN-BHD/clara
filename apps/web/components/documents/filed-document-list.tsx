@@ -16,11 +16,17 @@ import { cn } from "@/lib/utils";
  * (extraction_status, basis) — never a fabricated summary.
  */
 export function FiledDocumentList({
-  entries, selectedId, onSelect,
+  entries, selectedId, onSelect, rowRef,
 }: {
   entries: FiledDocumentEntry[];
   selectedId: string | null;
   onSelect: (documentId: string) => void;
+  /** Registers each row's own element with the caller, keyed by document id, so focus can be
+   *  RETURNED here when the detail closes (#719's Back path; the same Map-of-rows idiom
+   *  components/firm/activity/activity-feed.tsx uses). Called with `null` on unmount so a row that
+   *  was filtered away or re-sorted is treated as gone rather than guessed at. Optional: a caller
+   *  that never opens a detail has nothing to return focus to. */
+  rowRef?: (documentId: string, el: HTMLTableRowElement | null) => void;
 }) {
   const t = useTranslations("ClientDocuments");
 
@@ -41,6 +47,7 @@ export function FiledDocumentList({
         {entries.map(({ filing, document }) => (
           <TableRow
             key={filing.id}
+            ref={rowRef ? (el) => rowRef(document.id, el) : undefined}
             role="button"
             tabIndex={0}
             // `aria-current`, NOT `aria-selected` — found by this train's own

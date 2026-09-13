@@ -1,0 +1,109 @@
+# Supabase CLI project config for the #620 Storage grant/policy battery.
+#
+# THIS IS NOT A DEVELOPMENT STACK. It exists so `run.mjs` can boot a REAL, throwaway
+# Supabase Storage service (`storage-api` in front of a real Postgres with a real
+# `storage` schema), apply `packages/db/deploy/storage-provision.sql` against it, and
+# measure the grant/policy boundary through the vendor's own HTTP API. Everything the
+# battery does not need is switched off here, because every extra container is extra
+# image-pull surface, extra boot latency and extra flake on a per-PR leg.
+#
+# `run.mjs` never runs the CLI in this directory: it COPIES this file into a disposable
+# workdir and passes `--workdir`, so a crashed run leaves no `.temp/` state in the repo
+# and no migrations/seed directory is ever mounted into the containers.
+#
+# WHAT STAYS ON, and why each one is load-bearing:
+#   [db]       the Postgres the storage schema, the role and the RLS policies live in.
+#   [storage]  the service under test.
+#   [api]      Kong — `storage-api` is only reachable through the API gateway's
+#              /storage/v1 route, which is the URL shape `CLARA_STORAGE_URL` names in
+#              production (packages/runtime/.env.example:75-79).
+#   [auth]     GoTrue. Storage's API executes as `authenticator` and SET ROLEs to the
+#              JWT's `role` claim (storage-provision.sql:57-59); the auth stack is what
+#              provisions that surface on a CLI stack. PostgREST comes up with it and is
+#              left alone rather than excluded, so the stack stays a shape the vendor
+#              actually ships and tests.
+#
+# `project_id` is FIXED (not derived from the workdir name) so teardown can always name
+# the containers — `supabase stop --project-id clara-storage-battery --no-backup` works
+# even if the disposable workdir is already gone.
+project_id = "clara-storage-battery"
+
+[api]
+enabled = true
+port = 54321
+# The battery talks to /storage/v1 only. Exposing no application schema over PostgREST
+# keeps the Data API surface of this throwaway stack as small as the CLI allows.
+schemas = ["public"]
+extra_search_path = ["public"]
+max_rows = 1000
+
+[api.tls]
+enabled = false
+
+[db]
+port = 54322
+shadow_port = 54320
+health_timeout = "2m"
+# 17 matches the estate (packages/db/README.md:47-49, `.github/workflows/ci.yml`'s
+# postgres:17 services). The battery asserts catalog facts, so the major must not drift.
+major_version = 17
+
+[db.pooler]
+enabled = false
+
+# No migrations and no seed: this stack is NOT the clara estate. The only DDL it ever
+# receives is `packages/db/deploy/storage-provision.sql`, applied by run.mjs, which is
+# the exact artifact under test.
+[db.migrations]
+enabled = false
+schema_paths = []
+
+[db.seed]
+enabled = false
+sql_paths = []
+
+[realtime]
+enabled = false
+
+[studio]
+enabled = false
+
+# Mail testing server (the container the CLI still calls `inbucket`).
+[local_smtp]
+enabled = false
+
+[storage]
+enabled = true
+file_size_limit = "50MiB"
+
+# The battery drives the object REST API, never the S3 protocol. Static S3 access keys
+# bypass RLS entirely (https://supabase.com/docs/guides/storage/s3/authentication), so
+# a stack that cannot speak S3 at all is the honest shape for a least-privilege battery.
+[storage.s3_protocol]
+enabled = false
+
+[storage.analytics]
+enabled = false
+
+[storage.vector]
+enabled = false
+
+[auth]
+enabled = true
+site_url = "http://127.0.0.1:3000"
+additional_redirect_urls = []
+jwt_expiry = 3600
+# No human ever signs in to this stack; the battery mints its own HS256 role JWTs
+# against the stack's own throwaway JWT secret, read from `supabase status -o json`.
+enable_signup = false
+
+[auth.email]
+enable_signup = false
+enable_confirmations = false
+
+[edge_runtime]
+enabled = false
+
+# Turning analytics off is what keeps `logflare` and `vector` out of the stack.
+[analytics]
+enabled = false

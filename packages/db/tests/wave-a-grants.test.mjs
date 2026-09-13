@@ -9,7 +9,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import {
   ROLES, rootQuery, endPool, printLaneNotes, noteLane, printSkipCount, skipUnready,
-  waveAEnsureReady, buildWorld, WA_GRANTS, WA_UNGRANTED_FNS,
+  waveAEnsureReady, buildWorld, WA_GRANTS, WA_GRANTS_SINCE, WA_UNGRANTED_FNS,
   firmOf, recordRuleResolution, seedVerifiedDocument, seedExtraction, seedRegion, addClientIdentifier,
 } from "./wave-a-fixtures.mjs";
 
@@ -28,9 +28,38 @@ const roleName = (tok) => ROLES[tok];
 // §13 grant matrix — every new fn holds EXACTLY its lane grants (companion §13).
 // ===========================================================================
 
+/**
+ * Is the migration that mints a late WA_GRANTS member on this database's LEDGER?
+ *
+ * The ledger, never a `to_regprocedure` probe: asking the catalog whether the function exists and
+ * then asserting its grants only if it does would make the §13 cell vacuous for exactly the name a
+ * lost door would remove. Asking the ledger asks a different question — "should this database have
+ * it at all" — and a database that HAS applied the migration is then held to the full matrix.
+ *
+ * MATCHED ON THE STABLE SUFFIX, NOT ON THE NUMBER (#620 review, F11). `right(version, length($1))
+ * = $1` is a plain string comparison on the tail, so no LIKE metacharacter in the name can widen
+ * it — `like '0190_%'` treated its own `_` as a single-character wildcard — and a merge-time
+ * renumber of the very same migration cannot make the gate stop firing. Measured on a disposable
+ * copy: with the ledger row renamed 0190→0186 and EXECUTE over-granted to clara_authenticated,
+ * the number-keyed form reported 6 pass / 0 fail plus "the door is not expected yet"; this form
+ * fails on the over-grant.
+ */
+async function mintedHere(fn) {
+  const since = WA_GRANTS_SINCE[fn];
+  if (since === undefined) return true;
+  const r = await rootQuery(
+    "select count(*)::int as n from clara.schema_migrations where right(version, length($1)) = $1",
+    [since]);
+  return r.rows[0].n > 0;
+}
+
 test("§13 the new granted fns hold EXACTLY their lane grants; every other app role is denied", async (t) => {
   if (skipUnready(t, ready)) return;
   for (const [fn, tokens] of Object.entries(WA_GRANTS)) {
+    if (!(await mintedHere(fn))) {
+      noteLane(`${fn}: no applied migration ends in '${WA_GRANTS_SINCE[fn]}' — the door is not expected on this chain yet`);
+      continue;
+    }
     const present = await rootQuery(
       "select 1 from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='clara' and p.proname=$1 limit 1", [fn]);
     if (!present.rowCount) { assert.fail(`clara.${fn} is ABSENT (PINS §2 / companion §13 names it — finding)`); }
