@@ -1,0 +1,46 @@
+# Brief: #641 — B-style Work list and detail
+
+## Orchestrator decisions (binding)
+- Migration number: **0189** (`0189_work_list_reads.sql`). Only a read door + the `user_preferences.interface.workViews` extension; NO parent/child columns (batch schema belongs to #636).
+- AC4 (95/5 batch) is DESCOPED honestly: no batch producer exists (#636). Render child counts only from canonical rows when they exist; do not fabricate a Batch tab. State this in the PR body and in the ticket comment the orchestrator will post.
+- Every `clara.accounting_work` row is listed regardless of origin (chat, composer, plan); `basis_origin` is shown as the origin column. That answers the "#629 finding" (chat-originated Work reachable) without a product question.
+- Status roster: render the canonical nine DB statuses; map the ticket's words as LABELS derived from canonical state (`queued`→Queued, `running`→Executing, `awaiting_input`→Needs you, `stopping`→Stopping, `completed`, `refused`, `failed`, `cancelled`, `expired`); "technically retrying"/"blocked"/"partial"/"runnable" are only shown when a canonical signal exists (e.g. a run with `attempt > 1` → "Retrying"); never invent state.
+- Install `pagination` and `empty` via the shadcn CLI from the registry configured in `apps/web/components.json` (Base UI / base-nova style); record the command and provenance in the PR body. No other installs.
+- Filters are visible inline (Input/Select) on wide layouts and inside a Sheet at narrow widths; URL-stable via the `parseXUrlState`/`applyXUrlState` pattern in `lib/firm/activity.ts:339-392`.
+- Addressed-row fetch: a `?work=<id>` (or the detail route) must fetch the addressed row outside the page window (#719 lesson).
+- C77.12: reviewed no-gap; cite `WORK_POLL_MS`/`WORK_STALE_AFTER_MS` (`lib/work/use-work-detail.ts:41-42`) as the shared contract; extend, never duplicate.
+- #640 (plans) will later add `list_accounting_plan_occurrences`; do not build plan awareness here.
+
+## 1. Current state
+Firm list `/work` (`apps/web/app/(firm)/work/page.tsx:40-69`): `NeedsYouInbox` + `AgentTasksPanel`; no durable `accounting_work` list (`NotBuiltNote` line 66). Only "saved view" is `?view=needs-you` (`lib/navigation/tree.ts:201-204`, `components/work/work-views.tsx`).
+Client list `/clients/:id/work` (`app/(firm)/clients/[clientId]/work/page.tsx:33-49`): `AccountingWorkList` (`components/work/accounting-work-list.tsx`, plain `Table`, purpose/status Badge/submitted/open; loading/error/empty; truncation flag) above `ClientWorkQueue`; header says filters are partial (29-31). Data: `lib/work/reads.ts` `listAccountingWork()` — direct PostgREST GET on `clara.accounting_work` by `client_id`, `order=created_at.desc`, `limit=201` (`WORK_FETCH_CAP=200`); no read RPC; 0178 grants SELECT to `clara_authenticated`/`clara_runtime` with the client-scoping predicate.
+Detail `/clients/:id/work/:workId` (`components/work/work-detail.tsx`, 925 lines): status Badge, identity block (544-663), `WorkOutcome` band (666-913: refused/failed-expired/awaiting_input with inline `WorkQuestionPanel`/cancelled/completed/stopping/queued-running), Basis table, posted entry section with `AttachEvidenceDialog`, `PostedLinesTable`. No Tabs; no Sources/Activity view; this Work's own history only on `/activity`. Cancel/Retry/Take-over wired (`lib/work/api.ts`).
+Status roster: `accounting_work.status` CHECK = `queued, running, awaiting_input, stopping, completed, refused, failed, cancelled, expired` (0178:306-307; matrix 613-651); web transcribes (`lib/work/types.ts:22-33`, `work-detail.tsx:92-95`, `messages/en.json WorkDetail.status`). `purpose` CHECK `in ('journal_entry')` (0178:304). No parent/child columns.
+Deep link/Back: `/clients/:id/work/:workId` stable (`workDetailHref`, `tree.ts:371-373`), hydrated by `use-work-detail.ts` (ref-guarded poll `WORK_POLL_MS=3000`, `WORK_STALE_AFTER_MS=60000`); breadcrumb label is a static constant (`tree.ts:337-345`). No narrow list-to-detail.
+Saved views: `clara.user_preferences` (0179) — `save_my_preferences` rejects top-level keys other than `interface`/`notifications` (196-199).
+Tests: `lib/work/reads.test.ts`, `components/work/work-detail.test.tsx` (1126 lines), `work-cancel-dialog.test.tsx`, `work-question-form.test.tsx`; e2e `journal-work-walk.spec.ts`, `work-cancel-walk.spec.ts`, `work-question-walk.spec.ts`. None cover list filters/pagination/saved views.
+Installed primitives: table, badge, skeleton, select, input, dropdown-menu, sheet, tabs (`components/ui/*`); NOT installed: pagination, empty (appendix D rows 21/27/42).
+Activity precedent: `clara.list_activity` (0181:219-266, 441-448) SECURITY INVOKER keyset cursor, opaque base64 cursor, clamped limit, `truncated`/`next_cursor` envelope; filters inline `activity-filters.tsx`; URL state `lib/firm/activity.ts:339-392`; `activity-feed-walk.spec.ts` proves filter-URL + Sheet detail + Back.
+
+## 2. Gaps / rows
+AC1 gap (both lists). AC2 gap (labels from canonical). AC3 partial (question precedes; no Tabs; correction chain not on detail). AC4 descoped (#636). AC5 partial (single deep link ok; filter Back-restore and narrow list-to-detail gap). AC6 list-side gap. AC7 Pagination/Empty missing.
+Rows: UI-02..06, UI-12, H-26, H-28 to build; C-45 verify-only; C08.6 verify-only (Badge carries the status word); C51.2 to build (only `journal_entry` today — expose purpose as a filter and label); C51.8 out of scope (#631); C77.12 reviewed no-gap (see decisions).
+
+## 3. Slice (one PR)
+DB `0189_work_list_reads.sql`: `clara.list_accounting_work(p_client uuid, p_status text[], p_initiator uuid, p_purpose text[], p_since timestamptz, p_until timestamptz, p_q text, p_cursor text, p_limit int)` modelled on `list_activity` (SECURITY INVOKER, keyset on `(created_at desc, id desc)`, opaque cursor, clamped limit, `truncated`/`next_cursor`, joined current-run attempt count and pending-question flag so labels derive from canonical state); `clara.get_accounting_work_row(p_work uuid)` if needed for the addressed row; saved views via `user_preferences.interface.workViews` (reuse `get_my_preferences`/`save_my_preferences`; extend the CLR10 shape validation to the new sub-object). Tail assertions per house style; frontier-gate + `rig-meta.mjs` roster entries.
+Web: replace `AccountingWorkList` with a Data Table composition over the door on BOTH `/work` (firm, with client column + client filter) and `/clients/:id/work`; visible Input/Select filters (status facets, client [firm only], purpose, since/until, free text), Dropdown Menu row actions, Badge status, Pagination on the keyset cursor, Empty distinguishing first-use/no-results/denied; URL-stable `?status=&client=&purpose=&since=&until=&q=&cursor=`; saved views (Needs-you preserved as a built-in view; user-saved views via preferences); narrow: Sheet for filters, list-to-detail restoring list URL on Back. Detail: keep the current question ABOVE new `Tabs` (Results | Sources | Activity — Activity = `list_activity` filtered to this Work); child counts only from canonical rows. Follow `use-work-detail.ts`'s ref-based loader pattern for every new hook (#746 class).
+Tests: `packages/db/tests/work-list.test.mjs` (filters, cursor round-trip, role scoping, empty vs no-match, addressed row outside window); `apps/web/lib/work/reads.test.ts` (filter params, distinct no-match signal); `components/work/accounting-work-list.test.tsx` (Empty variants with Clear filters); `lib/work/work-list-url-state.test.ts`; `components/work/work-detail.test.tsx` (question above Tabs by DOM order; tab switch triggers no write); e2e `apps/web/e2e/work-list-walk.spec.ts` + `work-list-mock.mjs` (deep link filtered list; Back restores filter query and position; 320 px; 200% zoom; keyboard; reduced motion) — register the lane in `serve-built.mjs` with a minimal hook (#619 is reworking dispatch concurrently; put your body parsing in your own module).
+Docs: ARCHITECTURE §9 (replace the #641 "not built" sentence), §11 rows; CONTEXT if a new term (Saved view) is introduced.
+
+## 4. TDD seams (red first)
+1. `packages/db/tests/work-list.test.mjs` — short page `truncated=false`, `next_cursor=null`; minted cursor round-trips to the next page in stable order for a client with 3 works across 2 statuses; a bookkeeper of another firm reads zero rows.
+2. `apps/web/lib/work/reads.test.ts` — status filter returns only matching rows; "no filter matches" signal distinct from "empty client".
+3. `components/work/accounting-work-list.test.tsx` — Empty with "Clear filters" on zero filtered rows vs first-use Empty copy.
+4. `lib/work/work-list-url-state.test.ts` — round-trip of status/purpose/date/cursor; unknown tokens dropped without throwing.
+5. `components/work/work-detail.test.tsx` — question panel precedes the Tabs element in DOM order; tab click fires no mutating call.
+6. `e2e/work-list-walk.spec.ts` — `/work?status=awaiting_input&client=<id>` renders the filtered list; Back from detail restores the identical query.
+
+## 5. Risks
+#719 lesson (addressed row outside page); #698 (query string in auth wall — being fixed by #622 concurrently; do not duplicate); #744 (keep the door narrow: accounting_work + minimal joins); #746 (ref pattern).
+
+## 6. Effort: L. Rig: PG cluster (assigned), web unit + Playwright. No Workflow world.
