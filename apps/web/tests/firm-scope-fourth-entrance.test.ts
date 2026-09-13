@@ -203,6 +203,25 @@ describe("WALL 1 — every layout-adjacent special file classifies, or this suit
         "by the leaf census.",
     },
     {
+      path: "app/(entry)/auth/recover/next-cookie.ts",
+      reason:
+        "NOT A ROUTER FILE. #622 review round: the return-target cookie that lets a " +
+        "person blocked at a same-origin ?next= land back there after resetting their " +
+        "password rather than on Home. Typed exports only " +
+        "(`recoveryNextCookie`, `setRecoveryNextCookie`, `readRecoveryNextCookie`, " +
+        "`clearRecoveryNextCookie`, `RECOVERY_NEXT_MAX_AGE_SECONDS`) — the WRITE side " +
+        "is called from `lib/supabase/proxy.ts` (the only place that can set a " +
+        "cookie on a plain GET to /forgot-password; a Server Component render " +
+        "cannot), and the READ+CLEAR side from the sibling `handler.ts` above (a " +
+        "real Route Handler, the one boundary in this journey that can both read " +
+        "and clear a cookie). It exports no page, route, or HTTP-method surface, " +
+        "its basename matches no LEAF or SPECIAL_FILE pattern, and Next.js never " +
+        "routes to it or auto-imports it. Colocated beside handler.ts for the same " +
+        "reason handler.ts is colocated with route.ts: the real entrance " +
+        "`firm-scope-surfaces.test.ts` governs is route.ts's GET export, which this " +
+        "module sits one call behind.",
+    },
+    {
       path: "app/(entry)/auth/confirm/verify/handler.ts",
       reason:
         "NOT A ROUTER FILE. This is the extracted POST-handler body for the sibling " +
