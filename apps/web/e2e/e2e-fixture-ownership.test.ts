@@ -58,6 +58,7 @@ const LANE_MOCKS = [
   "home-board-mock.mjs",
   "journal-work-mock.mjs",
   "journals-table-mock.mjs",
+  "operator-support-mock.mjs",
   "tax-boundary-mock.mjs",
 ] as const;
 
@@ -201,6 +202,23 @@ const LANE_DECLARATIONS: Record<string, { unscopeable: string[]; debt: string[] 
   // calls, and each still carries its own `return false;` fall-through on an unmatched
   // `p_client`/`p_source`+`p_id` — the journals lane's shape, declaring neither list.
   "activity-mock.mjs": { unscopeable: [], debt: [] },
+  // #615's own lane. Its five id-carrying verbs (`get_operator_support_case`,
+  // approve/reject/resolve) each carry their own `return false;` fall-through on an id this lane
+  // did not mint. THREE cannot be scoped and say so here rather than pretending:
+  // `list_operator_support_queue` is ESTATE-WIDE by construction — its only argument is a boolean,
+  // there is no subject in the request to key on, and "the whole estate's open cases" is what the
+  // door means; `get_admission_capacity` takes no arguments at all and
+  // `set_admission_capacity` writes the estate's ONE configuration row. All three are measured to
+  // have no other caller anywhere in `apps/web/e2e`, and all three answer CLR04 to the bookkeeper
+  // persona, so an unowned caller is REFUSED rather than served someone else's fixture.
+  "operator-support-mock.mjs": {
+    unscopeable: [
+      "/rest/v1/rpc/list_operator_support_queue",
+      "/rest/v1/rpc/get_admission_capacity",
+      "/rest/v1/rpc/set_admission_capacity",
+    ],
+    debt: [],
+  },
   "agentic-finish-mock.mjs": {
     unscopeable: ["/rest/v1/rpc/list_coa_templates", "/rest/v1/rpc/begin_client_onboarding"],
     debt: [],

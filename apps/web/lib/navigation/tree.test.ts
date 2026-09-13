@@ -66,40 +66,53 @@ const params = (query = ""): URLSearchParams => new URLSearchParams(query);
 
 // ── rank shaping ─────────────────────────────────────────────────────────────
 
-test("firm nav is rank-shaped: Activity floors at bookkeeper, everything else is viewer", () => {
+test("firm nav is rank-shaped: Activity floors at bookkeeper, Operator at owner+operator, everything else is viewer", () => {
   const ids = (s: NavigationScope) => visibleFirmNav(s).map((i) => i.id);
   assert.deepEqual(ids(VIEWER), ["home", "clients", "work", "settings"]);
   assert.deepEqual(ids(BOOKKEEPER), ["home", "clients", "work", "activity", "settings"]);
   assert.deepEqual(ids(ADMIN), ["home", "clients", "work", "activity", "settings"]);
   assert.deepEqual(ids(OWNER), ["home", "clients", "work", "activity", "settings"]);
+  // #615 — and ONLY for an owner of the operator firm; the cell below drives both halves.
+  assert.deepEqual(ids(OPERATOR_OWNER), ["home", "clients", "work", "activity", "operator", "settings"]);
   // A NULL / unreadable rank fails closed out of the WHOLE nav, mirroring the
   // DB's own `coalesce(rank, -1)`. Asserted rather than assumed: this is the arm
   // a caller with no membership takes, and it must render no destinations at all.
   assert.deepEqual(ids(UNKNOWN), []);
 });
 
-test("settings sections are rank-shaped: members at admin, vendor bindings at bookkeeper, registrations at owner+operator", () => {
+test("settings sections are rank-shaped: members at admin, vendor bindings at bookkeeper — and registrations is no longer one of them (#615)", () => {
   const ids = (s: NavigationScope) => visibleSettingsSections(s).map((i) => i.id);
   assert.deepEqual(ids(VIEWER), ["account", "firm", "compliance"]);
   assert.deepEqual(ids(BOOKKEEPER), ["account", "firm", "compliance", "vendorBindings"]);
   assert.deepEqual(ids(ADMIN), ["account", "firm", "members", "compliance", "vendorBindings"]);
   assert.deepEqual(ids(OWNER), ["account", "firm", "members", "compliance", "vendorBindings"]);
+  // #615 moved the registration queue OUT of a firm's own settings and into the operator
+  // destination, so an operator owner now sees exactly what any other owner sees here.
   assert.deepEqual(ids(OPERATOR_OWNER), SETTINGS_SECTIONS.map((s) => s.id));
+  assert.deepEqual(ids(OPERATOR_OWNER), ids(OWNER));
   assert.deepEqual(ids(UNKNOWN), []);
+  assert.equal(SETTINGS_SECTIONS.some((s) => s.href.includes("registrations")), false,
+    "no settings section addresses the registration queue any more");
 });
 
-test("the operator conjunct is a CONJUNCT — an owner on a non-operator firm is refused the queue", () => {
-  // The discriminating half. Without it, "an operator owner sees everything"
-  // passes just as happily on the day `operatorOnly` stops being read at all.
-  assert.equal(
-    visibleSettingsSections(OWNER).some((s) => s.id === "registrations"),
-    false,
-  );
-  assert.equal(
-    visibleSettingsSections(scope(2, true)).some((s) => s.id === "registrations"),
-    false,
-    "an operator ADMIN is below the owner floor and must not see the queue either",
-  );
+test("#615 the operator destination is firm-altitude and its operator flag is a CONJUNCT, not a substitute for rank", () => {
+  const operatorRow = FIRM_NAV.find((i) => i.id === "operator");
+  assert.ok(operatorRow, "the registry carries the operator destination");
+  assert.equal(operatorRow.href, "/operator");
+  assert.equal(operatorRow.minimumRole, "owner");
+  assert.equal(operatorRow.operatorOnly, true);
+
+  const ids = (s: NavigationScope) => visibleFirmNav(s).map((i) => i.id);
+  // The POSITIVE control first: a wall nobody can pass is not a wall.
+  assert.ok(ids(OPERATOR_OWNER).includes("operator"), "an operator-firm owner is offered it");
+  // …and both halves of the conjunction, separately. Without these two, "an operator owner sees
+  // it" passes just as happily on the day `operatorOnly` stops being read at all.
+  assert.equal(ids(OWNER).includes("operator"), false,
+    "an owner of a NON-operator firm is not offered the operator destination");
+  assert.equal(ids(scope(2, true)).includes("operator"), false,
+    "an operator-firm ADMIN is below the owner floor and is not offered it either");
+  assert.equal(ids(scope(1, true)).includes("operator"), false);
+  assert.equal(ids(UNKNOWN).includes("operator"), false);
 });
 
 test("client nav and accounting children are viewer-floored, and still fail closed on an unknown rank", () => {

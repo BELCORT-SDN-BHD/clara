@@ -23,6 +23,9 @@ test("operator owner sees the full sidebar and reaches Members in two navigation
   await expect(nav.getByRole("link", { name: "Clients", exact: true })).toBeVisible();
   await expect(nav.getByRole("link", { name: "Work", exact: true })).toBeVisible();
   await expect(nav.getByRole("link", { name: "Activity", exact: true })).toBeVisible();
+  // #615 — the operator support destination is firm-altitude and owner+operator-floored, so THIS
+  // persona (and only this one) is offered it; the bookkeeper cell below drives the absence.
+  await expect(nav.getByRole("link", { name: "Operator", exact: true })).toBeVisible();
   // "Needs you" is no longer a sidebar destination of its own — #614 folded it
   // into Work as a saved view (/work?view=needs-you), reached from Work's own
   // view strip rather than from a second sidebar row.
@@ -30,7 +33,7 @@ test("operator owner sees the full sidebar and reaches Members in two navigation
 
   await nav.getByRole("link", { name: "Settings", exact: true }).click();
   await expect(page).toHaveURL(/\/settings$/);
-  // The six settings sections are now cards on the hub, not sidebar rows — the
+  // The settings sections are cards on the hub, not sidebar rows — the
   // sidebar's Settings entry is one destination, and its sections are the
   // CONTENTS of that destination (components/settings/settings-hub.tsx).
   // Asserted on each card's own `<h2>`, not the wrapping `<Link>` — the link's
@@ -43,7 +46,8 @@ test("operator owner sees the full sidebar and reaches Members in two navigation
   // "Firm settings"). "Members" is unchanged.
   const heading = (name: string) => page.getByRole("heading", { name, exact: true, level: 2 });
   await expect(heading("Members")).toBeVisible();
-  await expect(heading("Firm registrations")).toBeVisible();
+  // #615 — "Firm registrations" is no longer a settings card: the queue moved to /operator.
+  await expect(heading("Firm registrations")).toHaveCount(0);
   await expect(heading("Compliance register")).toBeVisible();
   await expect(heading("Vendor identity bindings")).toBeVisible();
   await expect(heading("Firm settings")).toBeVisible();
@@ -73,6 +77,9 @@ test("bookkeeper sidebar shows viewer/bookkeeper reads and hides admin- and owne
   await expect(nav.getByRole("link", { name: "Settings", exact: true })).toBeVisible();
   await expect(nav.getByRole("link", { name: "Admin", exact: true })).toHaveCount(0);
   await expect(nav.getByRole("link", { name: "Firm", exact: true })).toHaveCount(0);
+  // #615 — ABSENT, not disabled: a bookkeeper is below the owner floor AND outside the operator
+  // conjunct, and a greyed row would still assert the destination exists.
+  await expect(nav.getByRole("link", { name: "Operator", exact: true })).toHaveCount(0);
 
   await nav.getByRole("link", { name: "Settings", exact: true }).click();
   await expect(page).toHaveURL(/\/settings$/);
@@ -87,7 +94,6 @@ test("bookkeeper sidebar shows viewer/bookkeeper reads and hides admin- and owne
   await expect(sectionHeading("Vendor identity bindings")).toBeVisible();
   await expect(sectionHeading("Firm settings")).toBeVisible();
   await expect(sectionHeading("Members")).toHaveCount(0);
-  await expect(sectionHeading("Firm registrations")).toHaveCount(0);
 });
 
 // ---------------------------------------------------------------------------

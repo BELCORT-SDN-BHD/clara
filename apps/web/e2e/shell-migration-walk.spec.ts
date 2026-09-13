@@ -141,7 +141,11 @@ const REDIRECT_ROWS: readonly [string, string, string][] = [
   ["/admin/settings", "/settings/firm", "Firm settings"],
   ["/admin/compliance", "/settings/compliance", "Compliance register"],
   ["/admin/vendor-bindings", "/settings/vendor-bindings", "Vendor identity bindings"],
-  ["/admin/registrations", "/settings/registrations", "Firm registrations"],
+  // #615 — the registration queue moved a SECOND time, to the operator destination. BOTH old
+  // addresses name it directly: Next matches one redirect rule per request and never re-runs the
+  // table, so a chained hop would land on a `/settings/registrations` this train deleted.
+  ["/admin/registrations", "/operator", "Operator support"],
+  ["/settings/registrations", "/operator", "Operator support"],
 ];
 
 test.describe("D5: the legacy /admin and /needs-you addresses redirect to their new homes", () => {

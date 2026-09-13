@@ -96,6 +96,13 @@ const FIRM_PRESENTATION: Record<FirmNavId, Presentation> = {
   clients: { id: "clientRegister", keywords: ["clients", "register", "book of clients"] },
   work: { id: "firmWork", keywords: ["work", "queue", "tasks", "in progress"] },
   activity: { id: "firmActivity", keywords: ["activity", "receipts", "open register", "audit"] },
+  // #615 — the operator support destination. `registrations` stays among its keywords on purpose:
+  // the surface a person is looking for when they type that word MOVED here, and ⌘K is exactly
+  // where a moved destination has to be findable by its old name as well as its new one.
+  operator: {
+    id: "operatorSupport",
+    keywords: ["operator", "support", "registrations", "approvals", "payments", "admission", "capacity", "queue"],
+  },
   settings: { id: "settings", keywords: ["settings", "firm controls", "admin", "members", "compliance"] },
 };
 
@@ -108,7 +115,6 @@ const SETTINGS_PRESENTATION: Record<SettingsSectionId, Presentation> = {
     id: "settingsVendorBindings",
     keywords: ["vendor", "binding", "identity", "propose", "sign", "revoke", "legacy"],
   },
-  registrations: { id: "settingsRegistrations", keywords: ["registrations", "approvals", "operator", "queue"] },
 };
 
 const CLIENT_PRESENTATION: Record<ClientNavId, Presentation> = {

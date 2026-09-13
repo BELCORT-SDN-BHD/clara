@@ -30,7 +30,7 @@ import { randomUUID } from "node:crypto";
 import {
   CASE_KIND, CLR, PG, ROLES, SUPPORT_NOT_FOUND, applyEvents, approveRegistration, assertRaises,
   caseOf, claimPaidFirm, clearOperator, detailOf, endPool, ensureOperatorOwner, firmWithBooks,
-  gateOperatorSupport, getCapacity, humanQuery, namedCall, normalizedBody, openProblem,
+  gateOperatorSupport, getCapacity, humanQuery, normalizedBody, openProblem,
   operatorFirmBookkeeper, operatorSupportLaneReady, opk, ordinaryFirm, paidUnclaimed, paymentRow,
   problemRow, registrationRow, rejectRegistration, releaseCapacity, resolveProblemWithKey,
   roleQuery, rootQuery, setCapacity, supportCase, supportQueue, undecidedRegistration, insertUser,

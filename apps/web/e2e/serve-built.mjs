@@ -60,6 +60,10 @@ import { handleD4Supabase } from "./tax-boundary-mock.mjs";
 // replacing) because the Activity page's client Select is this train's first consumer of the
 // UNFILTERED client register — see that export's own header in activity-mock.mjs.
 import { ACTIVITY_CLIENTS, handleActivitySupabase } from "./activity-mock.mjs";
+// #615's own lane (the D3 operator-support walk). Verb-scoped like its siblings — its seven RPC
+// verbs are named by no other lane — and it reads a request body only INSIDE a matched verb, so it
+// starves nothing and needs no special ordering. It claims no relation at all.
+import { handleOperatorSupportSupabase } from "./operator-support-mock.mjs";
 
 const e2eRoot = dirname(fileURLToPath(import.meta.url));
 const webRoot = resolve(e2eRoot, "..");
@@ -526,6 +530,10 @@ async function handleSupabase(request, response, url) {
   // lane's verb list contains, so running first costs every other lane nothing — this
   // handler drains a body only inside its own two exact path checks.
   if (await handleActivitySupabase(request, response, path, url, sendJson, cors)) return;
+  // #615's lane runs beside #632's and for the same reason: its verbs are names no other lane
+  // carries, and it reads a body only inside its own exact path checks — so it cannot be starved
+  // by L7's consume-then-fall-through (see that hook's note below) and costs no sibling anything.
+  if (await handleOperatorSupportSupabase(request, response, path, url, sendJson, cors)) return;
   // FIRST among the REMAINING hooks, and safe there because every branch inside is scoped
   // to the chat-parity ids and falls through otherwise (merge of origin/main `cea3da39` /
   // #507 — see that module's own note). Running it after the generic fixtures below instead

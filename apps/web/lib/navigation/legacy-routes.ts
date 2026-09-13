@@ -10,10 +10,18 @@
  *
  * `permanent: false` (HTTP 307), deliberately, and it is not timidity. A 308 is
  * cached by the browser essentially forever — reverting one means asking every
- * user to clear their cache. These moves are one train old and #615 may yet
- * relocate `/settings/registrations` to the operator console, so the redirects
- * stay temporary until the IA has been lived in. Revisit when the refresh
- * milestone closes.
+ * user to clear their cache. #615 is the reason that caution has already paid
+ * for itself: `/settings/registrations` DID move again, to `/operator`, one
+ * train after it arrived. The redirects stay temporary until the IA has been
+ * lived in. Revisit when the refresh milestone closes.
+ *
+ * TWO HOPS ARE WRITTEN AS TWO ROWS, NEVER CHAINED (#615). Next's `redirects()`
+ * matches ONE rule per request and does not re-run the table against its own
+ * destination, so `/admin/registrations -> /settings/registrations ->
+ * /operator` would land a visitor on a `/settings/registrations` that no longer
+ * has a page. BOTH old addresses therefore name `/operator` directly, and
+ * `./legacy-routes.test.ts` asserts that no destination in this table is also a
+ * source in it.
  *
  * QUERY STRINGS PASS THROUGH. Next appends the original query to the destination
  * for a `redirects()` entry with no query matching, so `/admin/members?invite=1`
@@ -43,7 +51,8 @@ export const LEGACY_ROUTES: readonly LegacyRoute[] = [
   { source: "/admin/settings", destination: "/settings/firm" },
   { source: "/admin/compliance", destination: "/settings/compliance" },
   { source: "/admin/vendor-bindings", destination: "/settings/vendor-bindings" },
-  { source: "/admin/registrations", destination: "/settings/registrations" },
+  { source: "/admin/registrations", destination: "/operator" },
+  { source: "/settings/registrations", destination: "/operator" },
 ] as const;
 
 /**

@@ -85,7 +85,10 @@ test("SettingsPage's own composition has ordered headings and named links for ev
     assert.match(bodyText, /Members/, "the hub link to /settings/members must render with its real label");
     assert.match(bodyText, /Compliance register/, "the hub link to /settings/compliance must render with its real label");
     assert.match(bodyText, /Vendor identity bindings/, "the hub link to /settings/vendor-bindings must render with its real label");
-    assert.match(bodyText, /Firm registrations/, "the hub link to /settings/registrations must render with its real label");
+    // #615 — the registration queue left the settings hub for its own operator destination, so the
+    // hub must NOT still advertise it: a card pointing at a page this train deleted is a 404 a
+    // type checker cannot see.
+    assert.doesNotMatch(bodyText, /Firm registrations/, "the settings hub no longer carries the registration queue");
     assert.match(bodyText, /Legacy/, "the vendor-bindings card must carry its Legacy mark");
     assert.match(bodyText, /Usage summaries, plan details, and billing management are not available yet\./, "the hub must explain which billing capabilities are unavailable");
     const violations = checkAccessibility(h.container as never);
@@ -101,7 +104,9 @@ test("Settings hub keyboard walk reaches every visible card link in DOM order", 
     const links = focusableElements(h.container as never).filter(
       (node) => (node as { tagName?: string }).tagName === "A",
     );
-    assert.equal(links.length, 6, "the operator owner hub exposes all six built settings destinations");
+    // FIVE since #615: the registration queue moved out of settings, so an operator owner's hub is
+    // now exactly any other owner's hub.
+    assert.equal(links.length, 5, "the operator owner hub exposes all five built settings destinations");
     assert.deepEqual(checkKeyboardWalk(h.container as never), []);
     for (const link of links) {
       (link as { focus: () => void }).focus();
