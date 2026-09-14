@@ -1106,6 +1106,27 @@ const ACCOUNTING_PLANS_0193_CLOCK_NAMES = [
   "pause_accounting_plan", "revise_accounting_plan",
 ];
 
+// #631 [0195] -- model egress authority and the redacted execution trace. EXACTLY ONE name, and
+// every other body in the migration is measured out rather than omitted.
+// `record_work_execution_trace` defaults the trace row's START INSTANT when the caller supplies
+// none: `v_started := coalesce(p_started_at, least(now(), coalesce(p_ended_at, now())))`. Both
+// reads are the same sample of an INSTANT into a timestamptz column -- the `least()` exists because
+// a client-supplied `ended_at` must never precede a server-defaulted `started_at` -- and there is
+// no date anywhere in a trace tuple for an assignment cast to reach. That is arm (D)'s exempt
+// shape, the same one `_knowledge_insert_revision` (0192) and `publish_legal_document` (0185)
+// carry.
+//
+// The rest add nothing, measured on the live catalog rather than read off the file: over the full
+// 0001..0195 chain the arm-(D) census returns exactly this one name out of 0195, and a direct
+// per-body probe of all seven other 0195 functions -- `prepare_work_egress_dispatch`,
+// `prune_work_execution_traces`, `restore_client_egress_purpose`, `_accounting_work_egress_live`,
+// `_work_egress_event_seq`, `get_work_execution_trace` and
+// `_tf_work_execution_trace_append_only` -- finds NO clock read of any kind. The prune's retention
+// window arrives as an interval argument; the trace relation's `recorded_at` is a column DEFAULT,
+// which lives in pg_attrdef and not in any prosrc (the same reason the 0185 and 0192 notes give);
+// the read door and the predicate are projections; and the append-only trigger compares tuples.
+const WORK_EGRESS_0195_CLOCK_NAMES = ["record_work_execution_trace"];
+
 // #624 [0191] and #643 [0194] add NO name, and that is MEASURED rather than assumed: the live
 // arm-(D) census over 0001..0194 returns nothing out of either file. 0191's three constraint
 // triggers derive their verdicts from stored terms and stamp `evaluated_at` through a column
@@ -1218,6 +1239,7 @@ export async function s5BareTokenRoster(query) {
   if (await appliedStem("checkout_convergence$")) names.push(...CHECKOUT_CONVERGENCE_0186_CLOCK_NAMES);
   if (await appliedStem("client_knowledge_records$")) names.push(...KNOWLEDGE_RECORDS_0192_CLOCK_NAMES);
   if (await appliedStem("accounting_plans$")) names.push(...ACCOUNTING_PLANS_0193_CLOCK_NAMES);
+  if (await appliedStem("work_egress_purpose_and_execution_trace$")) names.push(...WORK_EGRESS_0195_CLOCK_NAMES);
   return names.sort();
 }
 
