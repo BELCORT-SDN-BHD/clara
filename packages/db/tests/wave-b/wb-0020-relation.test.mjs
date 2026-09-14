@@ -79,25 +79,60 @@ test("[0020 §1.1/§1.2 — THE separate-relation negative]: the LEGACY clara.cl
   assert.ok(/where\s*\(?revoked_at is null\)?/i.test(idx), `…partial on revoked_at is null (got ${idx})`);
 });
 
-test("[0020 §1.2]: clara.client_egress_purpose_consents — purpose NON-NULL and closed to wiki_synthesis, evidence NON-NULL, scope_note non-blank, the 0011 paired revocation CHECK", async () => {
+test("[0020 §1.2 / 0195 §1,§3 (#631)]: clara.client_egress_purpose_consents — purpose NON-NULL (admits SIX purposes as of 0195, wiki_synthesis among them), evidence NON-NULL for the five document-tied purposes and NULL exactly for accounting_work (0195's derived-purpose arm, authority = legal_acceptance_id), scope_note non-blank, the 0011 paired revocation CHECK", async () => {
   fail0020(live);
+  const { users, firms, clients } = w;
   const purposeCol = await rootQuery(
     "select is_nullable from information_schema.columns where table_schema='clara' and table_name=$1 and column_name='purpose'",
     [TYPED_CONSENT_TABLE]);
   assert.equal(purposeCol.rows[0]?.is_nullable, "NO", "purpose is NOT NULL");
+
+  // 0195 (#631) DROPPED the column-level NOT NULL on evidence_document_id — the sixth purpose,
+  // accounting_work, is DERIVED from the firm's legal acceptance and carries no document at all.
+  // The mandatory-evidence rule for the five ORIGINAL purposes did not loosen; it moved from a
+  // blanket column constraint onto the purpose-discriminated
+  // ck_client_egress_purpose_consents_evidence CHECK, which pairs with the new nullable
+  // legal_acceptance_id column (0195 §3). Both halves are asserted structurally below, then
+  // behaviourally by name.
   const evCol = await rootQuery(
     "select is_nullable from information_schema.columns where table_schema='clara' and table_name=$1 and column_name='evidence_document_id'",
     [TYPED_CONSENT_TABLE]);
-  assert.equal(evCol.rows[0]?.is_nullable, "NO",
-    "evidence_document_id is NOT NULL (§1.3 — mandatory; the 0012 owner-declaration path is NOT available for typed consent)");
+  assert.equal(evCol.rows[0]?.is_nullable, "YES",
+    "evidence_document_id is column-nullable as of 0195 (#631) — the NOT NULL rule for the five "
+    + "document-tied purposes now lives in the purpose-discriminated evidence CHECK, not the column");
 
   const defs = await checkDefs(TYPED_CONSENT_TABLE);
   assert.ok(/purpose/.test(defs) && /'wiki_synthesis'/.test(defs),
-    `the purpose CHECK is closed to wiki_synthesis (got ${defs})`);
+    `the purpose CHECK still admits wiki_synthesis (got ${defs})`);
+  assert.ok(/'accounting_work'/.test(defs),
+    `the purpose CHECK admits the sixth, 0195 (#631) purpose accounting_work (got ${defs})`);
+  assert.ok(/legal_acceptance_id/.test(defs),
+    `the evidence CHECK names legal_acceptance_id — accounting_work's derived-consent basis (got ${defs})`);
   assert.ok(/scope_note/.test(defs) && /btrim/i.test(defs),
     `scope_note carries the 0011 non-blank CHECK (got ${defs})`);
   assert.ok(/revoked_at/.test(defs) && /revoked_by/.test(defs) && /revoke_reason/.test(defs),
     "the paired revocation CHECK names all three revoke columns");
+
+  // BEHAVIOURAL half 1: a document-tied purpose with NULL evidence is STILL refused — the
+  // relaxed column did not loosen the rule for the five purposes that keep it.
+  await assertRaises(PG.checkViolation, () => rootQuery(
+    `insert into clara.${TYPED_CONSENT_TABLE}
+       (firm_id, client_id, purpose, scope_note, evidence_document_id, legal_acceptance_id, granted_by)
+       values ($1,$2,'wiki_synthesis','census NULL-evidence probe',null,null,$3)`,
+    [firms.A, clients.A1, users.alice]),
+    "a NULL-evidence wiki_synthesis row is still refused by the purpose-discriminated evidence CHECK");
+
+  // BEHAVIOURAL half 2: accounting_work is the mirror image — evidence_document_id must be NULL
+  // and legal_acceptance_id must carry the derived basis; naming a real document instead is
+  // refused by the SAME CHECK (0195 §3, ck_client_egress_purpose_consents_evidence).
+  const ev = await consentEvidenceDoc(users.alice, { firm: firms.A });
+  await assertRaises(PG.checkViolation, () => rootQuery(
+    `insert into clara.${TYPED_CONSENT_TABLE}
+       (firm_id, client_id, purpose, scope_note, evidence_document_id, legal_acceptance_id, granted_by)
+       values ($1,$2,'accounting_work','census evidenced-accounting_work probe',$3,null,$4)`,
+    [firms.A, clients.A1, ev.documentId, users.alice]),
+    "an accounting_work row that names evidence_document_id (instead of legal_acceptance_id) is "
+    + "refused — its authority is the firm's legal acceptance, never a document");
 });
 
 test("[0020 §1.2]: the three uniqueness surfaces — (id,firm,client), (id,firm,client,purpose) and the PARTIAL one-live-per-(client,purpose)", async () => {
