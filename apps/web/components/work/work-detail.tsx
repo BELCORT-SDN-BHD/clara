@@ -45,6 +45,7 @@ import { WorkQuestionPanel } from "@/components/work/work-question-panel";
 import { SectionHeader } from "@/components/common/section-header";
 import { MemberName } from "@/components/common/member-name";
 import { useFirmScope } from "@/components/firm-scope-provider";
+import { WorkPlanOriginRow } from "@/components/plans/work-plan-origin";
 import { roleRankOf } from "@/lib/identity/caller-context";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -745,6 +746,9 @@ function WorkFacts({
             page said "Periodic stock adjustment" in one place and `periodic_stock_adjustment` in
             another about the same row. */}
         <dd className="text-foreground">{purposeLabel(work.purpose, tm, "links.purpose")}</dd>
+        {/* #640 — "From plan <purpose>", and ONLY when this Work was initiated by an accounting
+            plan's due event. The component renders nothing otherwise; see its own header. */}
+        <WorkPlanOriginRow clientId={work.client_id} workId={work.id} />
         <dt className="text-muted-foreground">{t("submittedAt")}</dt>
         <dd className="text-foreground">{work.created_at === null ? "—" : businessDateTime(work.created_at)}</dd>
         <dt className="text-muted-foreground">{t("initiatorRole")}</dt>

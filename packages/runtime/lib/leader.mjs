@@ -94,6 +94,16 @@ const ADJ_RECONCILE_MS = Number.isFinite(ADJ_RECONCILE_MS_ENV) && ADJ_RECONCILE_
 // the migration itself.
 const RENDER_ENQUEUE_MS_ENV = Number(process.env.CLARA_RENDER_ENQUEUE_MS);
 const RENDER_ENQUEUE_MS = Number.isFinite(RENDER_ENQUEUE_MS_ENV) && RENDER_ENQUEUE_MS_ENV > 0 ? RENDER_ENQUEUE_MS_ENV : 24 * 3600000;
+// #640 (0193) THE ACCOUNTING-PLAN DUE SCAN HAS NO CADENCE KNOB HERE, AND ITS ABSENCE IS THE
+// DECISION RATHER THAN AN OMISSION (C54.3: "treat cadence as an authorised schedule product
+// setting; do not inherit 1h as current"). `reconcilePlanOccurrences` is registered
+// UNCONDITIONALLY inside runReconcilerSweep — every cycle, the reconcileRenderDispatch shape, not
+// the SST/lint/FA/adjustment daily shape — because its whole cost is ONE call whose candidate
+// query is gated in SQL on `due_date <= (now() at time zone <the revision's timezone>)::date`
+// behind two partial indexes, and because a daily belt would put up to 24 hours between a due date
+// arriving in Kuala Lumpur and the Work existing. There is therefore no `lastPlanRun` below and no
+// `planOk` cadence advance: a failed scan simply runs again on the next cycle, seconds later.
+// packages/runtime/lib/plan-occurrences.mjs carries the argument in full.
 
 /** True iff the daily SST compliance-watch repair belt is due (pure — the since-last-run
  *  guard; lastRunMs=0 makes the first cycle after (re)boot run it immediately, which is

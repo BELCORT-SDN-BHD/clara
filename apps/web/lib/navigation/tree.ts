@@ -329,7 +329,14 @@ export const ACCOUNTING_ITEMS: readonly AccountingItem[] = [
   { id: "bank", segment: "bank", labelKey: "accounting.bank", icon: "bank", minimumRole: "viewer" },
   { id: "receivables", segment: "registers", tab: "aging", labelKey: "accounting.receivables", icon: "scale", minimumRole: "viewer" },
   { id: "assets", segment: "registers", tab: "fixedAssets", labelKey: "accounting.assets", icon: "boxes", minimumRole: "viewer" },
-  { id: "plans", segment: "registers", tab: "adjustments", labelKey: "accounting.plans", icon: "route", minimumRole: "viewer" },
+  // #640 — REPOINTED from `registers?tab=adjustments` to its own route. Plans are no longer a
+  // view of the registers workbench: `/clients/:id/plans` is the C9 list and
+  // `/clients/:id/plans/:planId` is one plan's own durable address (a schedule, its authority,
+  // its preview and its occurrence history is a detail destination, not a tab). The adjustment
+  // register stays exactly where it was, reachable at `registers?tab=adjustments` through the
+  // workbench's own SectionTabs — this row simply stops being the sidebar's name for it, which
+  // is why the two tabs the sidebar already does not name keep working the same way.
+  { id: "plans", segment: "plans", labelKey: "accounting.plans", icon: "route", minimumRole: "viewer" },
   { id: "accounts", segment: "registers", tab: "accounts", labelKey: "accounting.accounts", icon: "list", minimumRole: "viewer" },
   { id: "close", segment: "close", labelKey: "accounting.close", icon: "lock", minimumRole: "viewer" },
   { id: "tax", segment: "tax", labelKey: "accounting.tax", icon: "receipt", minimumRole: "viewer", beta: true },
@@ -426,6 +433,32 @@ export function journalEntryHref(clientId: string, entryId?: string | null): str
 
 export function clientNavHref(clientId: string, item: ClientNavItem): string {
   return item.segment === "" ? clientBase(clientId) : `${clientBase(clientId)}/${item.segment}`;
+}
+
+/** `/clients/:clientId/plans` — the C9 plan list (#640). */
+export function plansHref(clientId: string): string {
+  return `${clientBase(clientId)}/plans`;
+}
+
+/** `/clients/:clientId/plans/new` — the create form. A ROUTE rather than a Dialog because a plan
+ *  carries a schedule, an authority and a full journal basis, and appendix C §4 sends a
+ *  multi-section accounting form to a detail destination rather than an overlay. */
+export function planCreateHref(clientId: string): string {
+  return `${clientBase(clientId)}/plans/new`;
+}
+
+/** `/clients/:clientId/plans/:planId/revise` — the same form, superseding the live revision. */
+export function planReviseHref(clientId: string, planId: string): string {
+  return `${planDetailHref(clientId, planId)}/revise`;
+}
+
+/** `/clients/:clientId/plans/:planId` — one accounting plan's own address (#640). A plan's
+ *  schedule, authority, next-occurrence preview and occurrence history is durable detail, so it
+ *  is a ROUTE rather than a Sheet: Back works, the link in an occurrence row and the link from a
+ *  Work's identity block are the same URL, and a reload lands on the same plan. The id is
+ *  percent-encoded for the reason `workDetailHref` states. */
+export function planDetailHref(clientId: string, planId: string): string {
+  return `${clientBase(clientId)}/plans/${encodeURIComponent(planId)}`;
 }
 
 export function accountingHref(clientId: string, item: AccountingItem): string {

@@ -236,6 +236,13 @@ const REGISTRY_BUILT: ReadonlyArray<{ pattern: string; builder: string }> = [
   { pattern: "/clients/[clientId]/accounting/adjustments/new", builder: "periodicAdjustmentHref" },
   { pattern: "/clients/[clientId]/work/[workId]", builder: "workDetailHref" },
   { pattern: "/clients/[clientId]/knowledge/[recordId]", builder: "knowledgeRecordHref" },
+  // #640's three plan destinations. Each is reached from a surface that HOLDS the plan (the list
+  // row, the detail's own Revise control, the Work identity block's "From plan"), so the href is
+  // built from an id at render time and there is no literal to find — the same shape
+  // workDetailHref already has.
+  { pattern: "/clients/[clientId]/plans/new", builder: "planCreateHref" },
+  { pattern: "/clients/[clientId]/plans/[planId]", builder: "planDetailHref" },
+  { pattern: "/clients/[clientId]/plans/[planId]/revise", builder: "planReviseHref" },
 ];
 
 function orphanedFirmPages(

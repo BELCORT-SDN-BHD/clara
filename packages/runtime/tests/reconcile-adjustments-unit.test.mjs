@@ -351,12 +351,17 @@ test("runReconcilerSweep runs the adjustment belt ONLY when the leader flags it 
   const sweptDue = await runReconcilerSweep(due, { ...sweepDeps, adjRuns: true });
   assert.equal(sweptDue.adjOk, true);
   assert.equal(sweptDue.adjExamined, 1);
-  assert.ok(due.queries.some((q) => /to_regprocedure/.test(q.sql)), "due → the feature-detect probe runs");
+  // THIS BELT'S OWN PROBE, named by the door it detects rather than by `to_regprocedure` alone:
+  // the sweep gained an UNCONDITIONAL sibling (#640's plan belt, migration 0193) whose own
+  // feature-detect is also a `to_regprocedure` read, and a bare match on that keyword would make
+  // this cell assert about whichever belt happened to probe last.
+  const adjProbe = (q) => /adjustment_run_due/.test(q.sql);
+  assert.ok(due.queries.some(adjProbe), "due → the adjustment belt's feature-detect probe runs");
 
   const notDue = recordingClient({ ids: ["c1"] });
   const sweptNotDue = await runReconcilerSweep(notDue, { ...sweepDeps });
   assert.equal(sweptNotDue.adjOk, undefined, "not due → no adjustment receipt in the sweep result");
-  assert.ok(!notDue.queries.some((q) => /to_regprocedure/.test(q.sql)), "not due → not invoked at all");
+  assert.ok(!notDue.queries.some(adjProbe), "not due → not invoked at all");
 });
 
 test("an adjustment discovery failure never blocks the rest of the sweep (the sweep resolves, adjOk:false)", async () => {

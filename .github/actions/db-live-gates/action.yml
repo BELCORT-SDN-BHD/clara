@@ -119,12 +119,13 @@ runs:
         RELAY_TEST_MODE=1 \
         WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGC_PORT/clara_wave_b_ci" \
           node tests/work-cancel-e2e.mjs
-        # WAVE-2 INTEGRATION ORDER. #643's step is placed AHEAD of #637's two below, and the
-        # ordering is each side's own stated requirement rather than a preference: #643 admits
-        # and settles Work on this rig, and #637's two-build cutover REFUSES TO START when the
-        # database still carries live accounting-Work state. Every Work-admitting step therefore
-        # runs before it, and #637's world guard stays LAST because it deliberately stages a run
-        # of a body no image exports — the one condition every step above refuses to start against.
+        # WAVE-2 INTEGRATION ORDER — five steps, and the order is each side's own stated
+        # requirement rather than a preference. #643 and #640 both ADMIT AND SETTLE Work on this
+        # rig; #637's two-build cutover REFUSES TO START (exit 1, named reason) while the
+        # database still carries live accounting-Work state, so both settle cleanly around it —
+        # #643 ahead of it and #640 after it, each leaving no live Work behind. #637's world
+        # guard stays LAST because it deliberately stages a run of a body no image exports,
+        # which is precisely the condition every step above refuses to start against.
         # #643 — the PERIODIC-ADJUSTMENT e2e, AFTER its three siblings and on the same rig. It
         # drives the one window the unit and DB cells cannot: a run that COMMITS three rows in one
         # transaction (the marked entry, the operation receipt and the clara.periodic_adjustments
@@ -163,6 +164,22 @@ runs:
         RELAY_TEST_MODE=1 \
         WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGC_PORT/clara_wave_b_ci" \
           node tests/two-build-cutover-e2e.mjs
+        # #640 — the accounting-PLAN occurrence e2e, AFTER its three siblings and on the same rig.
+        # It drives the two things only a real world can show about a scheduled occurrence: two
+        # belt passes issued CONCURRENTLY on two clara_runtime connections leave exactly one
+        # occurrence and one Work (the plan row lock plus `unique (plan_id, due_date)`, measured
+        # through the real belt), and a plan-admitted Work — which has no post-commit enqueue at
+        # all, because the admission happens inside a database function — is dispatched by the
+        # reconciler's accounting_work arm, crashed by CLARA_WORK_TEST_FAULT=exit_after_commit
+        # between the commit and the checkpoint, and replayed onto the same logical identity, so
+        # the estate ends with one entry, one receipt and one occurrence. It SKIPS CLEANLY
+        # (exit 0, printed reason) when migration 0193 is absent, so it is safe to merge before
+        # the DB half lands.
+        PGPORT=$PGC_PORT \
+        PGDATABASE=clara_wave_b_ci \
+        RELAY_TEST_MODE=1 \
+        WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGC_PORT/clara_wave_b_ci" \
+          node tests/plan-occurrence-e2e.mjs
         # #637 review S5 — the WORLD GUARD, HERE rather than in the unit suite, and the reason is a
         # false-green one: tests/body-census-guard-db.test.mjs SPAWNS the built image against a real
         # Postgres World, so in db-estate-suite (PGDATABASE=clara_ci, no `.output`) its own hard gate
