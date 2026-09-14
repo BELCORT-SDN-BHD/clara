@@ -19,6 +19,10 @@
 //   clara.record_work_execution_trace(...)                  -> uuid
 //   clara.get_work_execution_trace(p_work)                  -> jsonb[]
 //   clara.prune_work_execution_traces(p_before, p_limit)    -> {pruned_before, traces_deleted}
+//   clara.restore_client_egress_purpose(p_client, p_purpose, p_op_key)
+//                                                           -> {consent_id, activation_id, status}
+//   clara.grant_client_egress_purpose(..., 'accounting_work', ...)
+//                                                           -> CLR10 purpose_derived_not_grantable
 //
 // THE ACTIVATION BASIS THIS MODULE MATERIALISES (the #631 ASSUMPTION the owner must confirm):
 // there is NO per-client "AI on" switch. Model egress authority for `accounting_work` is derived
@@ -31,6 +35,10 @@ import { randomUUID } from "node:crypto";
 import {
   rootQuery, humanQuery, roleQuery, namedCall, opk, ROLES, noteLane,
 } from "./work-journal-fixtures.mjs";
+import { withActor, PG } from "./rig-helpers.mjs";
+
+/** The standard SQLSTATEs this battery asserts directly (42501 for the table-read probe). */
+export { PG };
 import { markSkip } from "./wave-a-helpers.mjs";
 
 export * from "./work-journal-fixtures.mjs";
@@ -198,29 +206,80 @@ export async function authoriseWorkRun({ task, runId }) {
   return { prepared, consumed };
 }
 
-export async function recordWorkExecutionTrace({
+/** The writer's parameter spec, spelled ONCE: the plain wrapper and the BOUNDED (lock-probe)
+ *  variant must present the same call or the probe would prove something else. */
+const TRACE_WRITER_SPEC = [
+  { name: "p_task", cast: "uuid" }, { name: "p_run", cast: "text" },
+  { name: "p_seq", cast: "integer" }, { name: "p_phase", cast: "text" },
+  { name: "p_capability_id", cast: "text" }, { name: "p_registry_version", cast: "text" },
+  { name: "p_bundle_id", cast: "text" }, { name: "p_bundle_digest", cast: "text" },
+  { name: "p_instructions_id", cast: "text" }, { name: "p_skills", cast: "jsonb" },
+  { name: "p_tools_id", cast: "text" }, { name: "p_model_id", cast: "text" },
+  { name: "p_purpose", cast: "text" }, { name: "p_authorization_id", cast: "uuid" },
+  { name: "p_input_digest", cast: "text" }, { name: "p_observed_revisions", cast: "jsonb" },
+  { name: "p_started_at", cast: "timestamptz" }, { name: "p_ended_at", cast: "timestamptz" },
+  { name: "p_outcome", cast: "text" }, { name: "p_refusal", cast: "jsonb" },
+  { name: "p_receipt_id", cast: "uuid" },
+];
+
+function traceWriterArgs({
   task, runId, seq, phase, capabilityId = null, registryVersion = null, bundleId = null,
   bundleDigest = null, instructionsId = null, skills = [], toolsId = null, modelId = null,
   purpose = null, authorizationId = null, inputDigest = null, observedRevisions = {},
   startedAt = null, endedAt = null, outcome = "ok", refusal = null, receiptId = null,
 }) {
-  const r = await roleQuery(RUNTIME, namedCall("record_work_execution_trace", [
-    { name: "p_task", cast: "uuid" }, { name: "p_run", cast: "text" },
-    { name: "p_seq", cast: "integer" }, { name: "p_phase", cast: "text" },
-    { name: "p_capability_id", cast: "text" }, { name: "p_registry_version", cast: "text" },
-    { name: "p_bundle_id", cast: "text" }, { name: "p_bundle_digest", cast: "text" },
-    { name: "p_instructions_id", cast: "text" }, { name: "p_skills", cast: "jsonb" },
-    { name: "p_tools_id", cast: "text" }, { name: "p_model_id", cast: "text" },
-    { name: "p_purpose", cast: "text" }, { name: "p_authorization_id", cast: "uuid" },
-    { name: "p_input_digest", cast: "text" }, { name: "p_observed_revisions", cast: "jsonb" },
-    { name: "p_started_at", cast: "timestamptz" }, { name: "p_ended_at", cast: "timestamptz" },
-    { name: "p_outcome", cast: "text" }, { name: "p_refusal", cast: "jsonb" },
-    { name: "p_receipt_id", cast: "uuid" },
-  ]), [task, runId, seq, phase, capabilityId, registryVersion, bundleId, bundleDigest,
+  return [task, runId, seq, phase, capabilityId, registryVersion, bundleId, bundleDigest,
     instructionsId, JSON.stringify(skills), toolsId, modelId, purpose, authorizationId,
     inputDigest, JSON.stringify(observedRevisions), startedAt, endedAt, outcome,
-    refusal === null ? null : JSON.stringify(refusal), receiptId]);
+    refusal === null ? null : JSON.stringify(refusal), receiptId];
+}
+
+/** Write ONE trace row through the DEFINER door, as the runtime. RAW: it presents exactly what
+ *  the caller hands it, so this is the positive control for the DATABASE's own field grammars —
+ *  `packages/runtime/lib/work-trace.mjs` conforms its values first and would never reach them. */
+export async function recordWorkExecutionTrace(args) {
+  const r = await roleQuery(RUNTIME, namedCall("record_work_execution_trace", TRACE_WRITER_SPEC),
+    traceWriterArgs(args));
   return r.rows[0].result;
+}
+
+/** The same call under a hard `statement_timeout`, so a cell that expects NOT to block can fail
+ *  with 57014 instead of hanging the battery behind a lock somebody else holds. */
+export async function recordWorkExecutionTraceBounded(args, { timeoutMs = 3000 } = {}) {
+  return withActor({ role: RUNTIME }, async (c) => {
+    await c.query(`set statement_timeout = ${Number(timeoutMs)}`);
+    const r = await c.query(namedCall("record_work_execution_trace", TRACE_WRITER_SPEC),
+      traceWriterArgs(args));
+    return r.rows[0].result;
+  });
+}
+
+/**
+ * Hold `clara.accounting_work`'s row lock on ONE Work — the exact lock
+ * `clara._record_journal_entry_core` holds for the length of a posting transaction — on a SECOND
+ * connection, run `fn()` against it, then release. This is the shape of the review's measurement:
+ * with a composite FK on the trace relation the insert took `FOR KEY SHARE` and waited behind
+ * this lock; without one it does not.
+ */
+export async function withWorkRowLocked(work, fn) {
+  let release = null;
+  const held = new Promise((resolve) => { release = resolve; });
+  let locked = null;
+  const ready = new Promise((resolve) => { locked = resolve; });
+  const holder = withActor({ role: ROLES.fnOwner }, async (c) => {
+    await c.query("begin");
+    await c.query("select 1 from clara.accounting_work where id=$1 for update", [work]);
+    locked();
+    await held;
+    await c.query("rollback");
+  });
+  await ready;
+  try {
+    return await fn();
+  } finally {
+    release();
+    await holder;
+  }
 }
 
 export async function getWorkExecutionTrace(sub, { work }) {
@@ -284,6 +343,71 @@ export async function revokeWorkEgress(sub, { client, reason = "#631 rig: withdr
     { name: "p_reason", cast: "text" }, { name: "p_op_key", cast: "text" },
   ]), [client, WORK_EGRESS_PURPOSE, reason, opKey ?? opk("w631-revoke")]);
   return r.rows[0].result;
+}
+
+/** Restore a WITHDRAWN derived accounting_work consent through the OWNER door (#631 S1). The
+ *  revoked consent stays standing as history; a FRESH consent+activation pair is minted from the
+ *  firm's CURRENT accepted legal texts, so the next dispatch grants again. */
+export async function restoreWorkEgress(sub, { client, purpose = WORK_EGRESS_PURPOSE, opKey = null }) {
+  const r = await humanQuery(sub, namedCall("restore_client_egress_purpose", [
+    { name: "p_client", cast: "uuid" }, { name: "p_purpose", cast: "text" },
+    { name: "p_op_key", cast: "text" },
+  ]), [client, purpose, opKey ?? opk("w631-restore")]);
+  return r.rows[0].result;
+}
+
+/** The MANUAL grant door, for the cells that prove it refuses the DERIVED purpose by name. */
+export async function grantEgressPurpose(sub, {
+  client, purpose, evidenceDocument = null, scopeNote = "#631 rig", opKey = null,
+}) {
+  const r = await humanQuery(sub, namedCall("grant_client_egress_purpose", [
+    { name: "p_client", cast: "uuid" }, { name: "p_purpose", cast: "text" },
+    { name: "p_evidence_document", cast: "uuid" }, { name: "p_scope_note", cast: "text" },
+    { name: "p_op_key", cast: "text" },
+  ]), [client, purpose, evidenceDocument, scopeNote, opKey ?? opk("w631-grant")]);
+  return r.rows[0].result;
+}
+
+/** Every consent row for a client and purpose, oldest first — a restore leaves TWO. */
+export async function consentRows(client, purpose = WORK_EGRESS_PURPOSE) {
+  const r = await rootQuery(
+    `select id, evidence_document_id, legal_acceptance_id, granted_by, granted_at, revoked_at,
+            revoke_reason
+       from clara.client_egress_purpose_consents
+      where client_id=$1 and purpose=$2 order by granted_at, id`, [client, purpose]);
+  return r.rows;
+}
+
+/** How many audit rows this firm carries for one fn name. */
+export async function auditCount(firm, fn) {
+  const r = await rootQuery(
+    "select count(*)::int as n from clara.audit_log where firm_id=$1 and fn=$2", [firm, fn]);
+  return r.rows[0].n;
+}
+
+/** The domain events of one type for one client, oldest first. */
+export async function eventsOfType(firm, type, client = null) {
+  const r = await rootQuery(
+    `select seq, event_type, client_id, actor, payload from clara.domain_events
+      where firm_id=$1 and event_type=$2 and ($3::uuid is null or client_id=$3)
+      order by seq`, [firm, type, client]);
+  return r.rows;
+}
+
+/** The prune ledger 0006 owns, newest first. */
+export async function tracePruneLog(relation = "work_execution_traces") {
+  const r = await rootQuery(
+    "select pruned_before, spans_deleted, relation from clara.trace_prune_log where relation=$1 order by id desc",
+    [relation]);
+  return r.rows;
+}
+
+/** Read the trace RELATION directly as a human — the PostgREST-shaped probe. No application role
+ *  holds a privilege on it, so this must raise 42501 for every human, whatever their role. */
+export async function readTraceTableAs(sub, work) {
+  const r = await humanQuery(sub,
+    "select id, model_id, refusal from clara.work_execution_traces where work_id=$1", [work]);
+  return r.rows;
 }
 
 /** Set a client inactive at the root — the estate has no "deactivate client" door in this lane,

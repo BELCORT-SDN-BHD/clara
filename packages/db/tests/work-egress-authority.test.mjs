@@ -39,6 +39,11 @@ import {
   authoriseWorkRun, authorizationRow, authorizationsFor, synthesisedConsent,
   revokeWorkEgress, deactivateClient, reactivateClient, expireAuthorization,
   WORK_EGRESS_PURPOSE, WORK_EGRESS_EVENT_TYPE, EGRESS_REASON,
+  // the review round: the restore door, the audited mint, the retroactive withdrawal and the
+  // trace relation's own walls.
+  restoreWorkEgress, grantEgressPurpose, consentRows, auditCount, eventsOfType, tracePruneLog,
+  readTraceTableAs, recordWorkExecutionTrace, recordWorkExecutionTraceBounded, withWorkRowLocked,
+  pruneWorkExecutionTraces, getWorkExecutionTrace, traceCount, assertRaises, PG,
 } from "./work-egress-fixtures.mjs";
 
 let world = null;
@@ -361,4 +366,318 @@ test("w631.write.authorised the ordinary authorised run posts, and its authoriza
   assert.equal(rows[0].id, prepared.authorization_id);
   assert.ok(rows[0].consumed_at, "write.authorised: …consumed");
   assert.equal(rows[0].invalidated_at, null);
+});
+
+// ===========================================================================================
+// 5 · THE WAY BACK ON — the review's S1. A withdrawal that cannot be undone is not a control.
+// ===========================================================================================
+
+test("w631.grant.derived_refused the MANUAL grant door refuses accounting_work by NAME", async (t) => {
+  if (await gateEgress(t)) return;
+  await acceptLegalNow(ALICE());
+  const client = await freshWorkClient(ALICE(), "grantref");
+
+  // The refusal is about the PURPOSE, and it lands before the evidence rule: the same call shape
+  // with a document-evidenced purpose gets the EVIDENCE refusal instead, which is what proves the
+  // arm fired on the purpose rather than on the missing document.
+  await assertPair(CLR.badRequest, "purpose_derived_not_grantable",
+    () => grantEgressPurpose(ALICE(), { client, purpose: WORK_EGRESS_PURPOSE }),
+    "grant.derived_refused: accounting_work authority is DERIVED, never granted with evidence");
+  await assertPair("CLR28", "evidence_mismatch",
+    () => grantEgressPurpose(ALICE(), { client, purpose: "document_processing" }),
+    "grant.derived_refused: …and every other purpose keeps its own evidence rule, untouched");
+  assert.equal(await synthesisedConsent(client), null,
+    "grant.derived_refused: the refused grant wrote nothing");
+});
+
+test("w631.restore.round_trip revoke → unknown → grant refuses → RESTORE → granted again", async (t) => {
+  if (await gateEgress(t)) return;
+  await acceptLegalNow(ALICE());
+  const client = await freshWorkClient(ALICE(), "restore");
+  assert.equal((await prepareEgressDispatch({ firm: FIRM_A(), client, eventSeq: 61n })).verdict,
+    "granted", "restore.round_trip: mandatory setup — the derived basis authorises");
+
+  await revokeWorkEgress(ALICE(), { client });
+  assert.deepEqual(await prepareEgressDispatch({ firm: FIRM_A(), client, eventSeq: 62n }), UNKNOWN,
+    "restore.round_trip: the withdrawal is STICKY — no dispatch re-mints over it");
+  await assertPair(CLR.badRequest, "purpose_derived_not_grantable",
+    () => grantEgressPurpose(ALICE(), { client, purpose: WORK_EGRESS_PURPOSE }),
+    "restore.round_trip: and the grant door is NOT the way back — it refuses this purpose");
+
+  const out = await restoreWorkEgress(ALICE(), { client });
+  assert.equal(out.status, "live", "restore.round_trip: the owner door restores it");
+  assert.ok(out.consent_id && out.activation_id);
+
+  const rows = await consentRows(client);
+  assert.equal(rows.length, 2, "restore.round_trip: the revoked consent STAYS as history");
+  assert.ok(rows[0].revoked_at, "restore.round_trip: …revoked…");
+  assert.equal(rows[1].revoked_at, null, "restore.round_trip: …beside a fresh live one");
+  assert.equal(rows[1].evidence_document_id, null);
+  assert.ok(rows[1].legal_acceptance_id,
+    "restore.round_trip: the fresh consent names the acceptance it was RE-derived from");
+
+  assert.equal((await prepareEgressDispatch({ firm: FIRM_A(), client, eventSeq: 63n })).verdict,
+    "granted", "restore.round_trip: and the next dispatch grants again");
+
+  // …and it is audited and announced, exactly as the revoke it undoes is.
+  const events = await eventsOfType(FIRM_A(), "egress.purpose_consent_restored", client);
+  assert.equal(events.length, 1, "restore.round_trip: ONE restore event");
+  assert.equal(events[0].payload.consent_id, out.consent_id);
+  assert.equal(events[0].payload.restored_over, rows[0].id,
+    "restore.round_trip: …naming the consent it restored over");
+  assert.equal(await auditCount(FIRM_A(), "restore_client_egress_purpose") >= 1, true);
+});
+
+test("w631.restore.floor restoring is an OWNER act, and only for the DERIVED purpose", async (t) => {
+  if (await gateEgress(t)) return;
+  await acceptLegalNow(ALICE());
+  const client = await freshWorkClient(ALICE(), "restorefloor");
+  await prepareEgressDispatch({ firm: FIRM_A(), client, eventSeq: 71n });
+  await revokeWorkEgress(ALICE(), { client });
+
+  await assertRaises(CLR.authz, () => restoreWorkEgress(world.users.carol, { client }),
+    "restore.floor: a VIEWER cannot restore model egress");
+  await assertRaises(CLR.authz, () => restoreWorkEgress(BOB(), { client }),
+    "restore.floor: …nor a bookkeeper — the revoke door's floor, read forward");
+  await assertPair(CLR.badRequest, "purpose_not_restorable",
+    () => restoreWorkEgress(ALICE(), { client, purpose: "document_processing" }),
+    "restore.floor: the five document-evidenced purposes keep their own grant door");
+  assert.deepEqual(await prepareEgressDispatch({ firm: FIRM_A(), client, eventSeq: 72n }), UNKNOWN,
+    "restore.floor: none of those refusals restored anything");
+});
+
+test("w631.restore.foreign another firm's client is NOT FOUND, and a live one is refused", async (t) => {
+  if (await gateEgress(t)) return;
+  await acceptLegalNow(ALICE());
+  await assertRaises(CLR.notFound, () => restoreWorkEgress(ALICE(), { client: B1() }),
+    "restore.foreign: the credential must not become an existence oracle for another firm");
+  await assertRaises(CLR.notFound,
+    () => restoreWorkEgress(ALICE(), { client: "00000000-0000-4000-8000-000000000000" }),
+    "restore.foreign: …and an absent client answers the same code");
+
+  const live = await freshWorkClient(ALICE(), "restorelive");
+  await prepareEgressDispatch({ firm: FIRM_A(), client: live, eventSeq: 81n });
+  await assertPair("CLR28", "already_live", () => restoreWorkEgress(ALICE(), { client: live }),
+    "restore.foreign: restoring what was never withdrawn is a refusal, not a second consent");
+
+  const never = await freshWorkClient(ALICE(), "restorenever");
+  await assertPair("CLR28", "nothing_to_restore", () => restoreWorkEgress(ALICE(), { client: never }),
+    "restore.foreign: …and neither is restoring a client that never dispatched");
+});
+
+test("w631.restore.basis an owner cannot restore an authority the FIRM does not hold", async (t) => {
+  if (await gateEgress(t)) return;
+  await acceptLegalNow(ALICE());
+  const client = await freshWorkClient(ALICE(), "restorebasis");
+  await prepareEgressDispatch({ firm: FIRM_A(), client, eventSeq: 91n });
+  await revokeWorkEgress(ALICE(), { client });
+  await deactivateClient(client);
+
+  await assertPair("CLR28", "derived_basis_not_live", () => restoreWorkEgress(ALICE(), { client }),
+    "restore.basis: an ARCHIVED client has no derived basis to restore");
+  await reactivateClient(client);
+  assert.equal((await restoreWorkEgress(ALICE(), { client })).status, "live",
+    "restore.basis: …and once the basis is live again, the restore lands");
+});
+
+// ===========================================================================================
+// 6 · THE DERIVED MINT IS AUDITED — the review's S4. A consent minted in an owner's name with
+//     no ledger row is a consent nobody can answer for.
+// ===========================================================================================
+
+test("w631.derive.audited the synthesis writes ONE audit row and ONE event, naming the basis", async (t) => {
+  if (await gateEgress(t)) return;
+  await acceptLegalNow(ALICE());
+  const client = await freshWorkClient(ALICE(), "derived");
+  const auditBefore = await auditCount(FIRM_A(), "derive_client_egress_purpose");
+
+  const v = await prepareEgressDispatch({ firm: FIRM_A(), client, eventSeq: 101n });
+  assert.equal(v.verdict, "granted");
+
+  assert.equal(await auditCount(FIRM_A(), "derive_client_egress_purpose"), auditBefore + 1,
+    "derive.audited: the mint leaves exactly one audit row");
+  const events = await eventsOfType(FIRM_A(), "egress.purpose_consent_derived", client);
+  assert.equal(events.length, 1, "derive.audited: …and one domain event");
+  const consent = await synthesisedConsent(client);
+  assert.equal(events[0].payload.consent_id, consent.id);
+  assert.equal(events[0].payload.legal_acceptance_id, consent.legal_acceptance_id,
+    "derive.audited: the event NAMES the legal acceptance the authority was derived from");
+  assert.equal(events[0].client_id, client, "derive.audited: …and the client");
+  assert.equal(events[0].actor, consent.granted_by,
+    "derive.audited: …and the owner in whose name it was minted");
+  assert.ok(Number(events[0].payload.dpa_version) >= 1);
+
+  // A SECOND dispatch for the same client mints nothing, so it says nothing either.
+  await prepareEgressDispatch({ firm: FIRM_A(), client, eventSeq: 102n });
+  assert.equal(await auditCount(FIRM_A(), "derive_client_egress_purpose"), auditBefore + 1,
+    "derive.audited: the mint is once per (firm, client), and so is its ledger row");
+  assert.equal((await eventsOfType(FIRM_A(), "egress.purpose_consent_derived", client)).length, 1);
+});
+
+// ===========================================================================================
+// 7 · A WITHDRAWAL IS RETROACTIVE TO AN ALREADY-CONSUMED DISPATCH — the review's S5.
+// ===========================================================================================
+
+test("w631.write.withdrawn_after_consume a revoke AFTER the consume still stops the books moving", async (t) => {
+  if (await gateEgress(t)) return;
+  await acceptLegalNow(ALICE());
+  const client = await freshWorkClient(ALICE(), "afterconsume");
+  const a = await armedUnauthorised({ client });
+  const { consumed } = await authoriseWorkRun({ task: a.task_id, runId: a.runId });
+  assert.equal(consumed.verdict, "granted",
+    "write.withdrawn_after_consume: mandatory setup — the dispatch was authorised and SPENT");
+
+  await revokeWorkEgress(ALICE(), { client });
+
+  const entriesBefore = await entryCount(client);
+  await assertPair(CLR.conflict, EGRESS_REASON.notAuthorized, () => postRaw(a),
+    "write.withdrawn_after_consume: authority must be LIVE when the books move, not merely when the model was called");
+  assert.equal(await entryCount(client), entriesBefore, "write.withdrawn_after_consume: no entry");
+  const reserved = await rootQuery(
+    "select count(*)::int as n from clara.op_receipts where fn='record_journal_entry' and op_key=$1",
+    [a.logical_op_id]);
+  assert.equal(reserved.rows[0].n, 0,
+    "write.withdrawn_after_consume: the identity is UNSPENT — the refusal is before _reserve_op");
+
+  // The consumed authorization is untouched — 0020 permits ONE terminal transition, so the gate
+  // reads the CONSENT behind it rather than re-terminating the row.
+  const auth = (await authorizationsFor(client))[0];
+  assert.ok(auth.consumed_at, "write.withdrawn_after_consume: …still consumed…");
+  assert.equal(auth.invalidated_at, null, "write.withdrawn_after_consume: …and NOT invalidated");
+
+  // THE WAY BACK. A restore plus a NEW run posts; the OLD run stays refused, because no later act
+  // re-grants a withdrawn authority retroactively either.
+  await restoreWorkEgress(ALICE(), { client });
+  await assertPair(CLR.conflict, EGRESS_REASON.notAuthorized, () => postRaw(a),
+    "write.withdrawn_after_consume: the withdrawn run stays refused after the restore");
+  const retry = await armedUnauthorised({ client });
+  assert.equal((await authoriseWorkRun({ task: retry.task_id, runId: retry.runId })).consumed.verdict,
+    "granted");
+  assert.equal((await postRaw(retry)).posted, true,
+    "write.withdrawn_after_consume: …and a NEW run, dispatched under the restored consent, posts");
+});
+
+// ===========================================================================================
+// 8 · THE TRACE RELATION'S OWN WALLS — the review's S2, S3, N2 and N3.
+// ===========================================================================================
+
+test("w631.trace.no_table_read NO human reads the relation; the DOOR is the only way in", async (t) => {
+  if (await gateEgress(t)) return;
+  await acceptLegalNow(ALICE());
+  const a = await armedUnauthorised();
+  await recordWorkExecutionTrace({
+    task: a.task_id, runId: a.runId, seq: 1, phase: "model_call",
+    capabilityId: "accounting_work.model_segment", modelId: "gpt-5.6-terra",
+    refusal: { code: "CLR13", reason: "egress_not_authorized" }, outcome: "refused" });
+
+  for (const [who, label] of [[world.users.carol, "a viewer"], [BOB(), "a bookkeeper"],
+                              [ALICE(), "the owner"]]) {
+    await assertRaises(PG.insufficientPrivilege, () => readTraceTableAs(who, a.work_id),
+      `trace.no_table_read: ${label} cannot read clara.work_execution_traces off the table — PostgREST serves this schema`);
+  }
+  await assertRaises(CLR.authz, () => getWorkExecutionTrace(world.users.carol, { work: a.work_id }),
+    "trace.no_table_read: and the DOOR keeps its bookkeeper floor for the viewer");
+  const rows = await getWorkExecutionTrace(BOB(), { work: a.work_id });
+  assert.equal(rows.length, 1, "trace.no_table_read: …while a bookkeeper gets the rows through it");
+  assert.equal(rows[0].model_id, "gpt-5.6-terra");
+});
+
+test("w631.trace.grammar a payload-shaped value is REFUSED by field, never stored", async (t) => {
+  if (await gateEgress(t)) return;
+  await acceptLegalNow(ALICE());
+  const a = await armedUnauthorised();
+  // Assembled from pieces for the same reason the runtime battery does it: `scripts/check-leaks.mjs`
+  // cannot tell a positive-control fixture from a real leaked key. The VALUES are byte-identical.
+  const j = (...p) => p.join("");
+  const PII = {
+    nric: j("880214", "-08-", "5531"),
+    bank: j("5141", "8822", "9310", "7742"),
+    email: j("siti.rahmah", "@", "example.com.my"),
+    phone: j("+60 ", "12-345 ", "6789"),
+    jwt: j("ey", "JhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9", ".", "ey", "JzdWIiOiIxMjM0NSJ9"),
+    bearer: j("Bearer ", "abcdefghijklmnopqrstuvwxyz123456"),
+    dsn: j("postgres", "://", "clara", ":", "hunter2", "@db.internal:5432/books"),
+    apiKey: j("sk", "-proj-", "ZH4kQ9maRuntimeSecretValue1234"),
+  };
+  const base = { task: a.task_id, runId: a.runId, seq: 1, phase: "model_call", outcome: "ok" };
+  let seq = 1;
+  const planted = [];
+  for (const [name, literal] of Object.entries(PII)) {
+    planted.push(
+      [`capability_id/${name}`, { capabilityId: literal }],
+      [`registry_version/${name}`, { registryVersion: literal }],
+      [`bundle_id/${name}`, { bundleId: literal }],
+      [`instructions_id/${name}`, { instructionsId: literal }],
+      [`tools_id/${name}`, { toolsId: literal }],
+      [`model_id/${name}`, { modelId: literal }],
+      [`skills/${name}`, { skills: [literal] }],
+      [`observed/${name}`, { observedRevisions: { books_version: literal } }],
+      [`refusal.message/${name}`, { refusal: { code: "CLR13", message: literal } }],
+      [`refusal.detail/${name}`, { refusal: { code: "CLR13", detail: literal } }],
+    );
+  }
+  for (const [label, over] of planted) {
+    seq += 1;
+    await assertPair(CLR.badRequest, "invalid_trace",
+      () => recordWorkExecutionTrace({ ...base, seq, ...over }),
+      `trace.grammar: ${label} must be REFUSED, never stored`);
+  }
+  // A key outside the refusal's CLOSED shape is refused too — that is the payload slot the
+  // "no payload column" claim was really about.
+  await assertPair(CLR.badRequest, "invalid_trace",
+    () => recordWorkExecutionTrace({ ...base, seq: 900, refusal: { transcript: "the whole run" } }),
+    "trace.grammar: an unknown refusal key is a payload slot");
+  assert.equal(await traceCount(a.work_id), 0, "trace.grammar: NOTHING was written");
+
+  // …and the values the runtime actually sends are ADMITTED, or the grammar would drop every
+  // diagnostic instead of every secret.
+  const id = await recordWorkExecutionTrace({
+    ...base, seq: 1,
+    capabilityId: "accounting_work.model_segment", registryVersion: "clara-capability-registry/v1",
+    bundleId: "clara-work/v3", bundleDigest: "a".repeat(64),
+    instructionsId: "clara-work-instructions/v3", skills: ["journal-entry/v3"],
+    toolsId: "clara-work-tools/v3", modelId: "gpt-5.6-terra",
+    observedRevisions: { books_version: "2026-09-01", basis_digest: "b".repeat(64) },
+    refusal: { code: "CLR13", reason: "egress_not_authorized", message: "nothing was sent", recoverable: true },
+  });
+  assert.ok(id, "trace.grammar: the ordinary row lands");
+});
+
+test("w631.trace.no_lock_wait a trace insert does NOT wait behind a posting lock", async (t) => {
+  if (await gateEgress(t)) return;
+  await acceptLegalNow(ALICE());
+  const a = await armedUnauthorised();
+  // The review measured the first cut BLOCKED 4001 ms here and was then cancelled — silently,
+  // because every caller in the frozen closure swallows a trace failure. The relation carries no
+  // foreign key to clara.accounting_work precisely so this cell can pass.
+  const started = Date.now();
+  const id = await withWorkRowLocked(a.work_id, () => recordWorkExecutionTraceBounded({
+    task: a.task_id, runId: a.runId, seq: 1, phase: "dispatch",
+    capabilityId: "accounting_work.model_segment", outcome: "ok" }, { timeoutMs: 4000 }));
+  const elapsed = Date.now() - started;
+  assert.ok(id, "trace.no_lock_wait: the row was written while another connection held the Work");
+  assert.ok(elapsed < 3000,
+    `trace.no_lock_wait: it took ${elapsed} ms — a wait means an FK is taking FOR KEY SHARE again`);
+  noteLane(`trace.no_lock_wait: insert completed in ${elapsed} ms under a held Work lock`);
+});
+
+test("w631.trace.prune_logged the retention sweep leaves a row on 0006's own ledger", async (t) => {
+  if (await gateEgress(t)) return;
+  await acceptLegalNow(ALICE());
+  const a = await armedUnauthorised();
+  const old = new Date(Date.now() - 120 * 24 * 3600 * 1000).toISOString();
+  await recordWorkExecutionTrace({
+    task: a.task_id, runId: a.runId, seq: 1, phase: "dispatch",
+    capabilityId: "accounting_work.model_segment", outcome: "ok", startedAt: old });
+
+  const before = (await tracePruneLog()).length;
+  const out = await pruneWorkExecutionTraces({
+    before: new Date(Date.now() - 90 * 24 * 3600 * 1000).toISOString(), limit: 1000 });
+  assert.ok(Number(out.traces_deleted) >= 1, "trace.prune_logged: the sweep pruned the old row");
+
+  const log = await tracePruneLog();
+  assert.equal(log.length, before + 1, "trace.prune_logged: …and left EXACTLY one ledger row");
+  assert.equal(log[0].relation, "work_execution_traces",
+    "trace.prune_logged: named to the relation, beside 0006's own trace_spans rows");
+  assert.ok(Number(log[0].spans_deleted) >= 1);
 });

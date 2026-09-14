@@ -7,10 +7,24 @@
 // run uses, and then scan what LANDED IN THE DATABASE for the literals. A leak is a substring
 // match, not a missing assertion.
 //
-// AND THE STRUCTURAL HALF IS ASSERTED TOO. `clara.work_execution_traces` HAS NO PAYLOAD COLUMN, so
-// the strongest statement this file can make is not "the redaction caught it" but "there was
-// nowhere for it to go". The scan below reads EVERY column of every row as text — so a payload
-// column somebody adds later, with or without redaction in front of it, reds this cell.
+// AND THE STRUCTURAL HALF IS ASSERTED TOO. `clara.work_execution_traces` has NO FREE PAYLOAD
+// COLUMN, so the strongest statement this file can make is not "the redaction caught it" but
+// "there was nowhere for it to go". The scan below reads EVERY column of every row as text — so a
+// payload column somebody adds later, with or without redaction in front of it, reds this cell.
+//
+// THE REVIEW ROUND WIDENED THAT. "No payload column" was true about the SHAPE of the relation and
+// false about what could be STORED in it: the adversarial review put an NRIC, a bank run, an
+// email, a phone, a JWT, a bearer header and a DSN into `refusal`, `skills`, an
+// `observed_revisions` VALUE and seven id/text columns through one ordinary call. So this file now
+// asserts BOTH walls, separately, because they fail differently:
+//
+//   * THE WRITER conforms every value it sends (`631.trace.grammar_writer`) — the row LANDS,
+//     redacted, and the diagnostic survives.
+//   * THE DOOR refuses a raw one (`631.trace.grammar_door`) with CLR10 `invalid_trace` naming the
+//     field — the wall a caller that skips this module meets.
+//
+// Every DATABASE-vocabulary cell therefore calls the door RAW, through `recordTraceRaw` below,
+// because `recordTrace` would conform the value first and the cell would prove nothing.
 //
 // Gated on a POSITIVE catalog probe for 0195, never on a version number.
 
@@ -20,10 +34,30 @@ import { randomUUID } from "node:crypto";
 
 import * as rig from "./rig.mjs";
 import {
-  MAX_DEPTH, OBSERVED_REVISION_KEYS, observedRevisions, recordTrace, redactDeep, redactString,
-  traceDigest,
+  MAX_DEPTH, OBSERVED_REVISION_KEYS, REFUSAL_KEYS, boundedText, normaliseRefusal, normaliseSkills,
+  observedRevisions, recordTrace, redactDeep, redactString, traceDigest, traceIdOf, traceModelOf,
+  traceRevisionOf, traceTokenOf,
 } from "../lib/work-trace.mjs";
-import { CAPABILITY_REGISTRY, CAPABILITY_REGISTRY_VERSION, capabilityIds, isModelBound, purposeFor } from "../lib/capability-registry.mjs";
+import {
+  CAPABILITY_REGISTRY, CAPABILITY_REGISTRY_VERSION, DATA_CLASSES, capabilityIds, isModelBound,
+  purposeFor,
+} from "../lib/capability-registry.mjs";
+
+/** `clara.record_work_execution_trace`, called with EXACTLY what the caller hands it. The positive
+ *  control for the DATABASE's own vocabularies and field grammars — `recordTrace` conforms its
+ *  arguments first and would never reach them. */
+const RAW_TRACE_SQL = `select clara.record_work_execution_trace($1::uuid,$2::text,$3::int,$4::text,
+  $5::text,$6::text,$7::text,$8::text,$9::text,$10::jsonb,$11::text,$12::text,$13::text,
+  $14::uuid,$15::text,$16::jsonb,$17::timestamptz,$18::timestamptz,$19::text,$20::jsonb,
+  $21::uuid) as id`;
+const recordTraceRaw = (c, o) => c.query(RAW_TRACE_SQL, [
+  o.taskId, o.runId, o.seq, o.phase, o.capabilityId ?? null, o.registryVersion ?? null,
+  o.bundleId ?? null, o.bundleDigest ?? null, o.instructionsId ?? null,
+  JSON.stringify(o.skills ?? []), o.toolsId ?? null, o.modelId ?? null, o.purpose ?? null,
+  o.authorizationId ?? null, o.inputDigest ?? null, JSON.stringify(o.observed ?? {}),
+  o.startedAt ?? null, o.endedAt ?? null, o.outcome ?? "ok",
+  o.refusal == null ? null : JSON.stringify(o.refusal), o.receiptId ?? null,
+]).then((r) => r.rows[0]?.id ?? null);
 
 async function traceLaneReady() {
   try {
@@ -223,6 +257,12 @@ test("631.registry: every capability declares a purpose-or-null, a data class an
   assert.equal(purposeFor("accounting_work.model_segment"), "accounting_work");
   assert.equal(purposeFor("accounting_work.ask_question"), null);
   assert.equal(CAPABILITY_REGISTRY_VERSION, "clara-capability-registry/v1");
+  // EVERY declared data class is USED. The first cut declared `"public"` and no capability moved
+  // public data — a vocabulary token nobody has had to think about, which the standards review
+  // called out. A token earns its place when a capability needs it.
+  const used = new Set(Object.values(CAPABILITY_REGISTRY).map((c) => c.dataClass));
+  assert.deepEqual(DATA_CLASSES.slice().sort(), [...used].sort(),
+    "registry: DATA_CLASSES declares exactly the classes the table uses");
 });
 
 test("631.observed: the closed vocabulary filter keeps its own keys and drops everything else", () => {
@@ -292,11 +332,12 @@ test("631.trace.vocabulary: an out-of-vocabulary observed-revision key is REFUSE
   const w = await armedWork("trace-vocab");
   let err = null;
   try {
-    await rig.asRuntime((c) => recordTrace(c, {
+    // RAW, and deliberately so: `recordTrace` filters an out-of-vocabulary key out before the call
+    // (that is cell `631.trace.grammar_writer`), so only the raw door can prove the DATABASE's own
+    // closed vocabulary — the wall a caller that skips `lib/work-trace.mjs` meets.
+    await rig.asRuntime((c) => recordTraceRaw(c, {
       taskId: w.task_id, runId: w.runId, seq: 1, phase: "dispatch",
       capabilityId: "accounting_work.model_segment",
-      // NOT filtered through `observedRevisions` on purpose: this cell is the positive control for
-      // the DATABASE's own closed vocabulary, which is the wall a careless caller meets.
       observed: { knowledge_version: "7", transcript: "the whole conversation" },
       outcome: "ok",
     }));
@@ -415,6 +456,153 @@ test("631.trace.prune: retention is bounded, and only the prune may delete", { s
   const left = await rig.rootQuery(
     "select seq from clara.work_execution_traces where work_id=$1 order by seq", [w.work_id]);
   assert.deepEqual(left.rows.map((r) => Number(r.seq)), [2], "trace.prune: …and the recent one stayed");
+
+  // AND IT LEFT A LEDGER ROW, on 0006's own `clara.trace_prune_log`. A retention sweep that empties
+  // the one relation whose purpose is leaving a trace, while leaving no trace of itself, is the
+  // review's N3.
+  const log = await rig.rootQuery(
+    "select spans_deleted, relation from clara.trace_prune_log where relation='work_execution_traces' order by id desc limit 1");
+  assert.equal(log.rows.length, 1, "trace.prune: the sweep is audited");
+  assert.ok(Number(log.rows[0].spans_deleted) >= 1);
+});
+
+// ===========================================================================================
+// 3 · THE TWO WALLS, SEPARATELY — the review's S2 and S3.
+// ===========================================================================================
+
+/** Every planted literal, in every field the writer sends, as a list of overrides. */
+function plantedFields() {
+  const out = [];
+  for (const [name, literal] of Object.entries(SECRETS)) {
+    out.push(
+      [`capability_id/${name}`, { capabilityId: literal }],
+      [`registry_version/${name}`, { registryVersion: literal }],
+      [`bundle_id/${name}`, { bundleId: literal }],
+      [`instructions_id/${name}`, { instructionsId: literal }],
+      [`tools_id/${name}`, { toolsId: literal }],
+      [`model_id/${name}`, { modelId: literal }],
+      [`skills/${name}`, { skills: [literal] }],
+      [`observed/${name}`, { observed: { books_version: literal } }],
+      [`refusal.message/${name}`, { refusal: { code: "CLR13", message: literal } }],
+      [`refusal.detail/${name}`, { refusal: { code: "CLR13", detail: literal } }],
+    );
+  }
+  return out;
+}
+
+test("631.trace.grammar_writer: every planted literal is DROPPED or MASKED before the call", { skip: SKIP }, async () => {
+  const w = await armedWork("grammar-writer");
+  const planted = plantedFields();
+  let seq = 0;
+  for (const [label, over] of planted) {
+    seq += 1;
+    const id = await rig.asRuntime((c) => recordTrace(c, {
+      taskId: w.task_id, runId: w.runId, seq, phase: "model_call",
+      capabilityId: "accounting_work.model_segment", outcome: "ok", ...over,
+    }));
+    assert.ok(id, `grammar_writer: ${label} — the row still LANDS, so the diagnostic survives`);
+  }
+  const stored = await storedTraceText(w.work_id);
+  for (const literal of everyLiteral()) {
+    assert.equal(stored.includes(literal), false,
+      `grammar_writer: ${JSON.stringify(literal)} reached clara.work_execution_traces`);
+  }
+  assert.equal(await rig.rootQuery(
+    "select count(*)::int as n from clara.work_execution_traces where work_id=$1", [w.work_id])
+    .then((r) => r.rows[0].n), planted.length,
+    "grammar_writer: every planted call wrote its row — conforming is not refusing");
+});
+
+test("631.trace.grammar_door: the same literal sent RAW is REFUSED, never stored", { skip: SKIP }, async () => {
+  const w = await armedWork("grammar-door");
+  let seq = 0;
+  for (const [label, over] of plantedFields()) {
+    seq += 1;
+    let err = null;
+    try {
+      await rig.asRuntime((c) => recordTraceRaw(c, {
+        taskId: w.task_id, runId: w.runId, seq, phase: "model_call",
+        capabilityId: "accounting_work.model_segment", outcome: "ok", ...over,
+      }));
+    } catch (e) {
+      err = e;
+    }
+    assert.ok(err, `grammar_door: ${label} was ADMITTED by the database`);
+    assert.equal(err.code, "CLR10", `grammar_door: ${label} raised ${err.code}`);
+    const detail = typeof err.detail === "string" ? JSON.parse(err.detail) : err.detail;
+    assert.equal(detail.reason, "invalid_trace",
+      `grammar_door: ${label} must name the reason a caller can act on`);
+    assert.ok(detail.field, `grammar_door: ${label} must NAME the field`);
+  }
+  // An unknown key under `refusal` is the payload slot the claim was really about.
+  await assert.rejects(
+    () => rig.asRuntime((c) => recordTraceRaw(c, {
+      taskId: w.task_id, runId: w.runId, seq: 900, phase: "settle",
+      refusal: { transcript: "the whole run" }, outcome: "refused" })),
+    (e) => e.code === "CLR10", "grammar_door: an unknown refusal key is refused");
+  assert.equal(await rig.rootQuery(
+    "select count(*)::int as n from clara.work_execution_traces where work_id=$1", [w.work_id])
+    .then((r) => r.rows[0].n), 0, "grammar_door: NOTHING was written");
+});
+
+test("631.trace.no_table_grant: no application role can read the relation off the table", { skip: SKIP }, async () => {
+  const w = await armedWork("no-table-grant");
+  await rig.asRuntime((c) => recordTrace(c, {
+    taskId: w.task_id, runId: w.runId, seq: 1, phase: "model_call",
+    capabilityId: "accounting_work.model_segment", modelId: rig.DEFAULT_MODEL, outcome: "ok" }));
+
+  // PostgREST serves `clara` (packages/runtime/scripts/run-live-walk.mjs), so a table grant IS a
+  // live REST endpoint. The DEFINER door does not need one.
+  await assert.rejects(
+    () => rig.asHuman(w.owner, (c) =>
+      c.query("select model_id, refusal from clara.work_execution_traces where work_id=$1", [w.work_id])),
+    (e) => e.code === "42501",
+    "no_table_grant: clara_authenticated must hold NO privilege on clara.work_execution_traces");
+  const grants = await rig.rootQuery(`
+    select count(*)::int as n from (
+      select unnest(array['clara_authenticated','clara_runtime','clara_agent_ro',
+                          'clara_wake_interactive','clara_wake_proactive']) as r) g
+     where has_table_privilege(g.r,'clara.work_execution_traces','SELECT')
+        or has_table_privilege(g.r,'clara.work_execution_traces','INSERT')
+        or has_table_privilege(g.r,'clara.work_execution_traces','UPDATE')
+        or has_table_privilege(g.r,'clara.work_execution_traces','DELETE')`);
+  assert.equal(grants.rows[0].n, 0, "no_table_grant: …and neither does any other application role");
+
+  // …and the DOOR still answers, which is what makes the revocation safe to make.
+  const rows = await rig.asHuman(w.owner, (c) =>
+    c.query("select clara.get_work_execution_trace($1::uuid) as r", [w.work_id])).then((r) => r.rows[0].r);
+  assert.equal(rows.length, 1, "no_table_grant: the door is the way in, and it works");
+});
+
+test("631.conform: the writer's field grammars mirror 0195 SECTION 7B", () => {
+  // The ids, the model and the revision values the runtime actually sends.
+  assert.equal(traceIdOf("accounting_work.model_segment"), "accounting_work.model_segment");
+  assert.equal(traceIdOf("clara-capability-registry/v1"), "clara-capability-registry/v1");
+  assert.equal(traceModelOf("gpt-5.6-terra"), "gpt-5.6-terra");
+  assert.equal(traceTokenOf("egress_not_authorized"), "egress_not_authorized");
+  assert.equal(traceRevisionOf("2026-09-01"), "2026-09-01");
+  assert.equal(traceRevisionOf("b".repeat(64)), "b".repeat(64));
+  assert.equal(traceRevisionOf(7), 7);
+  // …and every planted shape is refused rather than conformed into something storable.
+  for (const literal of everyLiteral()) {
+    assert.equal(traceIdOf(literal), null, `conform: ${JSON.stringify(literal)} is not an id`);
+    assert.equal(traceRevisionOf(literal), null, `conform: ${JSON.stringify(literal)} is not a revision`);
+  }
+  assert.deepEqual(normaliseSkills(["journal-entry/v3", SECRETS.nric, SECRETS.email]),
+    ["journal-entry/v3"], "conform: a skill list is IDS, and a planted literal is dropped");
+  assert.deepEqual(REFUSAL_KEYS.slice().sort(),
+    ["code", "detail", "message", "reason", "recoverable"]);
+  const refusal = normaliseRefusal({
+    code: "CLR13", reason: "egress_not_authorized", recoverable: true,
+    message: `refused for ${SECRETS.email}`, transcript: "the whole run",
+  });
+  assert.deepEqual(Object.keys(refusal).sort(), ["code", "message", "reason", "recoverable"],
+    "conform: an unknown refusal key is DROPPED, not carried");
+  assert.equal(refusal.message.includes(SECRETS.email), false);
+  assert.equal(refusal.message.includes("[redacted:email]"), true,
+    "conform: …and the diagnosis survives the masking");
+  assert.equal(boundedText("x".repeat(900)).length <= 500, true, "conform: free text is capped");
+  assert.equal(boundedText(`acct ${SECRETS.bankPlain}`).includes(SECRETS.bankPlain), false);
 });
 
 test("631.trace.leak_probe: the WHOLE estate is scanned for the planted literals", { skip: SKIP }, async () => {
