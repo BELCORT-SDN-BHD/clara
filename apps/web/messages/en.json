@@ -844,8 +844,8 @@
         "keyLabel": "fact",
         "actLabel": "act",
         "versionLabel": "knowledge version",
-        "actCapture": "recorded",
-        "actCorrection": "corrected",
+        "actCapture": "first record",
+        "actCorrection": "correction",
         "note": "Clara recorded this against the client's knowledge register on your authority. Its own page keeps the value, where it came from and the full revision history.",
         "link": "Open this record"
       },
