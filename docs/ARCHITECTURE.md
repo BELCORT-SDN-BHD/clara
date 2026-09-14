@@ -614,6 +614,38 @@ B8 的三枚凭据——`role=authenticated` 的 JWT、过期 JWT、以及这一
 
 **当前 chat 冻结版本账（2026-09-14）：`chatTurn_v19` 取代 `chatTurn_v18`。** v1..v18 全部保留导出（法条 (c)），v18 是回退目标，也是切换时停靠在 v18 clarify hook 上的 run 恢复进入的 body。registry 的五处改动（import、`workflows.chatTurn` 重指向、`export`、`workflowBodies`、`workflowPins`）由 `tests/registry-view.test.mjs` 逐条把关；冻结清单经 `node scripts/check-frozen-workflows.mjs --update`（本地行为，CI 下被拒）新增 8 项并相对 `origin/main` 仅追加，**未** deploy-lock（发布仪式才跑 `--lock-deployed`）。`check-workflow-bundle.mjs` 是版本推导式的，因此无需改动即断言产物里有 `runModelSegmentStepV19` 的 step directive 与 `chatturn-v19` 的计量印记。**部署顺序只欠一个方向**：migration 0192 与 0194 必须先于本镜像服务任何一个回合；否则三处各自抛 `undefined_function`（42883），两处被工具的类型化拒绝收敛、第三处按构造收敛（`readKnowledgePack` 归类为 `read_failed`，块如实渲染为不可用），因此错序不会损坏任何东西，只会让 Clara 拒绝它刚提出的事。反方向是免费的。**回退到 v18** 会停止提供这两个工具、停止读 Knowledge pack，不改动数据库；已写入的 Work 与 knowledge 记录各自保有自己的持久面。**一个被实测到的硬约束**：冻结闭包的传递 import 会把 `lib/periodic-adjustment-basis.ts` 与 `lib/knowledge.mjs` 一并冻结，而 WDK 把该闭包编译进一个没有 `require` 的 VM —— `lib/knowledge.mjs` 原本的 `import { randomUUID } from "node:crypto"` 让 `nitro build` 通过而第一个真实回合以 `USER_ERROR / ReferenceError: require is not defined` 死在 workflow 内部（由 `chat-turn-v19-e2e.mjs` 实测）；该 import 已移除，`claraWork.v1.bundle.ts` 因同一理由自行实现 SHA-256。
 
+> **未决阻断（wave-3 集成实测，2026-09-14）：0195 上线后，停靠在 `claraWork_v1`／`claraWork_v2`
+> 上的 Work 永远无法过账。** 这不是回退问题——#631 已记录「0195 在世时回退不免费」——而是**正向切换**
+> 的问题，是 #637 的双镜像演练第一次以 v2→v3 跑起来时量到的，此前没有任何一条证据覆盖过它。
+>
+> 机制：Work 车道的 `clara.prepare_work_egress_dispatch`／`clara.consume_egress_dispatch` 调用点**只
+> 存在于冻结的 `workflows/claraWork.v3.impl.ts:280,291`**（全仓 grep，非测试代码只有这一处）；0195 重铸
+> 的 `clara._record_journal_entry_core` 在 client 检查之后、`_reserve_op` 之前要求该 run 自己持有一条
+> **已消耗**的 `accounting_work` 授权，否则抛 CLR13 `egress_not_authorized`（该拒绝本身由
+> `work-journal-post.test.mjs` 的 `w631.write.refused` 钉住，本次在 rigw3 上 32／32 绿）。v1／v2 的 body
+> 无法产生那条授权，于是它们的写入必然被拒。
+>
+> 实测（rigw3 :55458/`clara_rt_test`，链 0001…0195，`node tests/two-build-cutover-e2e.mjs`）：W1 由镜像 A
+> 以 `claraWork_v2` 准入并停靠，在镜像 B 内**恢复进了自己的 body**（run name 不变——法条 (c) 的镜像层面
+> 仍然成立），随后在写入处被拒：task `failed`／`error_code='internal'`、Work `error =
+> {code:"no_effect", reason:"no_receipt"}`、`clara.operation_receipts` **0 行**、该 run 的
+> `clara.work_execution_traces` **0 行**；同一次运行里 v3 的 run 各写 4 行 trace 并铸出了唯一的一条
+> consent 与唯一的一条 dispatch authorization。作为对照，同一支演练在 0194 的链上以 v1→v2 跑是 ALL PASS
+> （wave-2 的 CI 与 #637 关闭复核），所以唯一的变量是 0195。
+>
+> 两个次生事实，一并记下：拒绝**没有**作为诚实的 egress 面出现——v1／v2 的错误名册里没有
+> `(CLR13, egress_not_authorized)` 这一对（#631 只给 v3 的名册加了它），所以用户看到的是 `internal`；
+> 而 `rollback-preflight` 对这种 Work 会答 **ALLOWED**，因为它数的是「镜像是否带着这个 body」，而这里
+> 拒绝的是**数据库**。
+>
+> 因此这不是集成能修的东西，需要 owner 裁决，三条路各自完整：**(1)** 发布顺序改为
+> 「先把 Work 车道 drain 干净（`rollback-preflight` 的非终态普查归零），再上 0195 与 v3 镜像」——这比 #815
+> 现在写的「0195 与 v3 镜像一起发」更强；**(2)** 一个后续 migration 给 v3 之前的 bundle 留一条 grandfather
+> 臂，代价是这些 run 的模型外发不再受当期授权约束；**(3)** 接受停靠的 v1／v2 run 作为一次性损失，并至少
+> 给它们一条诚实的拒绝面（把 `(CLR13, egress_not_authorized)` 加进一个**新的** v2 后继名册——v2 自身是冻结的）。
+> 在裁决之前，`db-live-gates` 的 two-build 这一步会红，这正是它该有的信号。
+
+
 Workflow registry 决定新接收的版本，旧非终态运行继续拥有其原 body 与相容依赖。
 目前 frozen closure 有 hash 检查；目标进一步固定 instruction／skill／tool registry manifest、
 schema 和依赖解析。发布新 successor 时保留旧导出，rollback 也必须支持全部非终态 bundle 或先验证 drain。

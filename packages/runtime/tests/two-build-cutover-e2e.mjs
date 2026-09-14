@@ -16,18 +16,26 @@
 // copy may not live under packages/runtime).
 //
 // THE PAIR IS DERIVED, NEVER HARDCODED. `deriveVersionPair` reads registry.ts's live
-// `claraWork: claraWork_vN` pin and its retained `export { claraWork_vM }` roster. Today the drill
-// is v1 -> v2; when a successor lands it becomes v2 -> v3 with no edit in this file.
+// `claraWork: claraWork_vN` pin and its retained `export { claraWork_vM }` roster. The drill was
+// written at v1 -> v2 and #631's `claraWork_v3` made it v2 -> v3.
 //
-// THE PAIR IS ASYMMETRIC, AND THAT IS ACCEPTED RATHER THAN PAPERED OVER. The two bodies do not
-// park the same way, and the drill is honest about driving two different mechanisms:
-//   · claraWork_v1 parks a BARE clarify (`openInterruptionStep`, claraWork.v1.ts:141-142) and is
-//     answered through `clara.answer_interruption`.
-//   · claraWork_v2 parks a typed WORK QUESTION (`openWorkQuestionStep`, claraWork.v2.ts:176-183)
-//     and is answered through `clara.answer_work_question`.
-// What the drill measures is NOT that the two park identically — they do not — but that each run
-// stays bound to the body it was admitted under, resumes into that body, and settles through its
-// OWN receipt carrying that body's OWN bundle digest.
+// AND SO IS EVERYTHING ELSE ABOUT THE PAIR — the wave-3 correction, recorded because the earlier
+// claim ("it becomes v2 -> v3 with no edit in this file") was measured FALSE on the first real
+// re-run: the pair derived perfectly and the drill then failed on a hardcoded string. Two families
+// of literal have been removed.
+//   · THE BUNDLE IDS. `clara-work/vN` is a function of `claraWork_vN`, so it is computed from the
+//     pair (`bundleIdOf`) rather than spelled.
+//   · THE PARKING SHAPE. The pair IS asymmetric and that is still accepted rather than papered
+//     over, but the asymmetry is a fact about VERSIONS, not about cutovers:
+//       · claraWork_v1 parks a BARE clarify (`openInterruptionStep`, claraWork.v1.ts:141-142),
+//         answered through `clara.answer_interruption`;
+//       · claraWork_v2 and every successor park a typed WORK QUESTION (`openWorkQuestionStep`,
+//         claraWork.v2.ts:176-183), answered through `clara.answer_work_question`.
+//     `parksBareClarify(version)` is that rule, so a v2 -> v3 drill drives the typed door on BOTH
+//     sides and a later v3 -> v4 will too.
+// What the drill measures is NOT that the two park identically — at v1 -> v2 they do not — but that
+// each run stays bound to the body it was admitted under, resumes into that body, and settles
+// through its OWN receipt carrying that body's OWN bundle digest.
 //
 // ONE FIDELITY LIMIT, STATED BECAUSE IT IS REAL. Only `registry.ts` is rewritten in the scratch
 // copy (the orchestrator's ruling, and the smallest rewrite that isolates the variable), so build A
@@ -465,6 +473,24 @@ async function main() {
   // =========================================================================
   const built = await buildPreviousVersionImage({ log: (m) => console.log(m) });
   const pair = built.pair;
+  // THE BUNDLE IDS ARE DERIVED TOO (wave-3, the first real re-run of this drill). The pair above
+  // was always derived, but three `"clara-work/v1"` / two `"clara-work/v2"` LITERALS survived in
+  // the assertions below, and the file's own header claimed the whole drill needed no edit at a
+  // cutover. The first v2 -> v3 re-run proved that claim false in the loudest possible way — the
+  // pair derived correctly and the drill then failed on a string. A bundle id is `clara-work/vN`
+  // for `claraWork_vN` (claraWork.vN.bundle.ts's own constant), so it is a function of the pair.
+  const bundleIdOf = (identifier) => `clara-work/v${/_v(\d+)$/.exec(identifier)?.[1] ?? "?"}`;
+  const prevBundleId = bundleIdOf(pair.previous);
+  const pinnedBundleId = bundleIdOf(pair.pinned);
+  // AND SO IS THE PARKING SHAPE. The header calls the pair "asymmetric" and that was a v1-vs-v2
+  // fact, not a property of cutovers: claraWork_v1 parks a BARE clarify (`openInterruptionStep`,
+  // answered through `clara.answer_interruption`) and EVERY successor from v2 on parks a TYPED
+  // Work question (`openWorkQuestionStep`, answered through `clara.answer_work_question`). So the
+  // rule is derived from the version rather than written down once: v1 is the bare-clarify body,
+  // v2+ are the typed ones. A drill on a v3 -> v4 pair will drive the typed door on both sides and
+  // still measure what this file exists to measure — that each run stays bound to the body it was
+  // admitted under, resumes into it, and settles through its own receipt and digest.
+  const parksBareClarify = (version) => version === 1;
   console.log(
     `[tb-e2e] drill pair derived from registry.ts: ${pair.previous} (build A) -> ${pair.pinned} (build B)`
       + `${built.reused ? " [REUSED scratch artifact]" : ` [built in ${(built.buildMs / 1000).toFixed(1)}s]`}`,
@@ -527,12 +553,22 @@ async function main() {
     );
     const work1 = await readWork(w1.work_id);
     v1Digest = work1.bundle?.digest;
-    assert.equal(work1.bundle?.id, "clara-work/v1", `W1's Work row records the predecessor bundle id (got ${work1.bundle?.id})`);
+    assert.equal(work1.bundle?.id, prevBundleId, `W1's Work row records the predecessor bundle id ${prevBundleId} (got ${work1.bundle?.id})`);
     assert.match(String(v1Digest), /^[0-9a-f]{64}$/, "…with its digest");
-    // Decision (a): the predecessor parks a BARE clarify — no typed fields, no reason.
-    assert.equal((q1.fields ?? []).length, 0, `${pair.previous} parks a BARE clarify: ZERO typed fields (the asymmetric pair, stated in this file's header)`);
-    assert.equal(q1.reason, null, "…and no reason column either — 0180 added both for the successor, and the predecessor fills neither");
-    console.log(`[tb-e2e] W1 parked on ${pair.previous} (bare clarify), bundle ${work1.bundle?.id} ${String(v1Digest).slice(0, 12)}…`);
+    // Decision (a), now DERIVED from the predecessor's version rather than written down: v1 parks a
+    // BARE clarify (no typed fields, no reason — 0180 added both, and v1 fills neither); every
+    // successor from v2 on parks a TYPED Work question.
+    if (parksBareClarify(pair.previousVersion)) {
+      assert.equal((q1.fields ?? []).length, 0, `${pair.previous} parks a BARE clarify: ZERO typed fields`);
+      assert.equal(q1.reason, null, "…and no reason column either — 0180 added both for the successor, and the predecessor fills neither");
+    } else {
+      assert.ok(Array.isArray(q1.fields) && q1.fields.length > 0, `${pair.previous} parks a TYPED Work question (got fields=${JSON.stringify(q1.fields)})`);
+      assert.ok(q1.reason, "…carrying the REASON the model gave");
+    }
+    console.log(
+      `[tb-e2e] W1 parked on ${pair.previous} (${parksBareClarify(pair.previousVersion) ? "bare clarify" : `typed Work question, ${(q1.fields ?? []).length} fields`}),`
+        + ` bundle ${work1.bundle?.id} ${String(v1Digest).slice(0, 12)}…`,
+    );
 
     // --- PREFLIGHT while only W1 is live ----------------------------------
     // Rolling FORWARD to B is fine: B carries the predecessor. Rolling back to an image that does
@@ -560,14 +596,14 @@ async function main() {
     // THE WINDOW THIS DRILL CREATES ITSELF: A was beating into this database one second ago, so the
     // /ready above can be — and on run 34796679822 was — answered by A's residue. Wait for B's own
     // boot lines, including the two banners asserted immediately below.
-    const bootWindowB = await waitBooted(imageB, { banners: ["clara-work/v1", "clara-work/v2"] });
+    const bootWindowB = await waitBooted(imageB, { banners: [prevBundleId, pinnedBundleId] });
     assert.ok(imageB.state.serving, "build B emitted the provenance boot line");
     assert.match(imageB.state.serving, new RegExp(`claraWork=${pair.pinned}\\b`), `build B pins claraWork to ${pair.pinned}`);
     assert.match(imageB.state.serving, new RegExp(`bodies=${bodiesB.length}\\b`), "…and carries one more body than A");
     // Both bundle banners, byte-identical to their frozen constants, stay on B.
-    assert.ok(imageB.state.banners.some((b) => b.id === "clara-work/v1"), "B logs the predecessor bundle banner");
-    assert.ok(imageB.state.banners.some((b) => b.id === "clara-work/v2"), "B logs the successor bundle banner");
-    v2Digest = imageB.state.banners.find((b) => b.id === "clara-work/v2")?.digest ?? null;
+    assert.ok(imageB.state.banners.some((b) => b.id === prevBundleId), `B logs the predecessor bundle banner ${prevBundleId}`);
+    assert.ok(imageB.state.banners.some((b) => b.id === pinnedBundleId), `B logs the successor bundle banner ${pinnedBundleId}`);
+    v2Digest = imageB.state.banners.find((b) => b.id === pinnedBundleId)?.digest ?? null;
     assert.match(String(v2Digest), /^[0-9a-f]{64}$/, "the successor digest is readable from B's own log");
     console.log(`[tb-e2e] B ready: ${imageB.state.serving}`);
     console.log(
@@ -625,12 +661,24 @@ async function main() {
     console.log(`[tb-e2e] preflight B2: scoped-to-W1 ALLOWED while the global verdict REFUSES, naming ${pair.pinned}`);
 
     // --- RESUME W1 on its ORIGINAL body, inside build B --------------------
-    // The bare clarify's own door. B carries the predecessor body, so the hook resumes into it.
-    await rig.humanQuery(ctxA.owner, "select clara.answer_interruption(p_id=>$1, p_answer=>$2::jsonb, p_op_key=>$3)", [
-      q1.id,
-      JSON.stringify(ANSWER),
-      `tb-w1-${randomUUID()}`,
-    ]);
+    // THE PREDECESSOR'S OWN DOOR, chosen by its version for the reason stated where the pair is
+    // derived: v1's bare clarify is answered through `clara.answer_interruption`, a typed Work
+    // question through `clara.answer_work_question`. B carries the predecessor body either way, so
+    // the hook resumes into it.
+    if (parksBareClarify(pair.previousVersion)) {
+      await rig.humanQuery(ctxA.owner, "select clara.answer_interruption(p_id=>$1, p_answer=>$2::jsonb, p_op_key=>$3)", [
+        q1.id,
+        JSON.stringify(ANSWER),
+        `tb-w1-${randomUUID()}`,
+      ]);
+    } else {
+      await rig.humanQuery(ctxA.owner, "select clara.answer_work_question($1::uuid,$2::int,$3::jsonb,$4::text) as r", [
+        q1.id,
+        q1.question_version ?? 1,
+        JSON.stringify(ANSWER),
+        `tb-w1-${randomUUID()}`,
+      ]);
+    }
     const t1Done = await pollTask(w1.task_id, (t) => ["completed", "failed", "cancelled"].includes(t.status), "W1 settles inside build B", 120000);
     assert.equal(t1Done.status, "completed", `W1 completed (got ${t1Done.status}/${t1Done.error_code})`);
     const run1After = await pollRun(
@@ -721,6 +769,20 @@ async function main() {
       // clara.accounting_work is immutable by trigger.
       await rig.rootQuery("update clara.agent_tasks set status = 'cancelled' where id = $1", [orphan.task_id]);
     }
+  } catch (err) {
+    // THE FAILING IMAGE'S OWN LOG, printed once, before the cleanup below kills it (wave-3).
+    // Every assertion in this file is about what a RUNTIME PROCESS did, and the first v2 -> v3
+    // re-run failed on `W1 completed (got failed/internal)` with no way to see WHY from this
+    // file's output — the child's stdout was captured into `state.stdout` and then discarded.
+    // A drill whose failure cannot be read is a drill someone will re-run rather than diagnose.
+    for (const img of [imageA, imageB]) {
+      if (!img) continue;
+      const tail = (img.state.stdout ?? "").split("\n").slice(-40).join("\n");
+      const errTail = (img.state.stderr ?? "").split("\n").slice(-20).join("\n");
+      if (tail.trim()) console.error(`\n[tb-e2e] --- image ${img.state.label} stdout (last 40 lines) ---\n${tail}`);
+      if (errTail.trim()) console.error(`[tb-e2e] --- image ${img.state.label} stderr (last 20 lines) ---\n${errTail}`);
+    }
+    throw err;
   } finally {
     // Kill any image still up FIRST: a running engine would re-create what the cleanup below
     // settles.
