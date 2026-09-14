@@ -138,8 +138,8 @@
 --     them served by `uq_plan_occurrences_plan_due` (plan + date) or `uq_plan_occurrences_period`
 --     (plan + leg + period) — no sequential scan of the occurrence table anywhere, and NO ROWS at
 --     all on an estate with no active plan. An empty answer is the ordinary answer. It is the
---     `due_date <= (now() at time zone <revision timezone>)::date` gate that keeps it small, and
---     that gate is inside the picker rather than in the outer WHERE.
+--     `due_date <= clara._book_today()` gate that keeps it small, and that gate is inside the
+--     picker rather than in the outer WHERE.
 --   · the due ARITHMETIC is entirely DB-owned (the `_plan_due_*` helpers below). The runtime never
 --     re-derives a date, so there is no second implementation of "when is this due" to drift.
 --
@@ -265,9 +265,19 @@
 -- against `pg_timezone_names` would be a promise that the rest of the estate (period locks,
 -- posting dates, the close calendar) also honours a per-client zone, which it does not. The
 -- column EXISTS rather than being implied so that widening it later is an additive CHECK change
--- and every row already carries the zone its dates were computed in. The date arithmetic really
--- does read it: `(now() at time zone r.timezone)::date` is what "today" means to a schedule, and
--- a UTC-based comparison would fire a Kuala Lumpur 1st-of-the-month occurrence eight hours late.
+-- and every row already carries the zone its dates were computed in.
+--
+-- THE ARITHMETIC DOES NOT SPELL THE ZONE: every "today" in this file is clara._book_today()
+-- (0042 S5.20), the one body in the estate that owns the house legal date -- literally
+-- `(statement_timestamp() at time zone 'Asia/Kuala_Lumpur')::date`. The one-member CHECK and the
+-- authority therefore hold the SAME zone by construction, and a UTC-based comparison (which would
+-- fire a Kuala Lumpur 1st-of-the-month occurrence eight hours late) is unreachable from here.
+-- The first cut spelled `(now() at time zone r.timezone)::date` at five sites; that was a second
+-- body owning one house fact, and it also pinned "today" to the TRANSACTION's start rather than
+-- the statement's -- round-7 finding C, which the authority exists to have settled once.
+-- clara._assert_plan_schedule still names the zone, because the value a caller SENDS has to be
+-- checked against the lane's closed vocabulary and refused by name; the authority answers what
+-- day it is, not which zone a caller may write down.
 --
 -- =====================================================================================
 -- SCOPE, NAMED RATHER THAN IMPLIED. `kind` admits `recurring_journal` and `reversing_journal`
@@ -1075,7 +1085,14 @@ begin
   select * into r from clara.accounting_plan_revisions
    where plan_id = p_plan and superseded_at is null;
   if not found then return null; end if;
-  v_today := (now() at time zone r.timezone)::date;
+  -- THE HOUSE LEGAL DATE, FROM THE ONE BODY THAT OWNS IT (0042 S5.20). clara._book_today() IS
+  -- `(statement_timestamp() at time zone 'Asia/Kuala_Lumpur')::date`, and `revisions.timezone`
+  -- is a one-member CHECK holding that same zone, so this answers exactly what the spelled
+  -- `(now() at time zone r.timezone)::date` answered -- with two differences, both wanted:
+  -- the authority samples per STATEMENT rather than per transaction (round-7 finding C: a scan
+  -- that opened before MYT midnight must not go on calling yesterday "today"), and there is now
+  -- one body owning the conversion instead of a second copy in this lane.
+  v_today := clara._book_today();
   v_ceiling := least(v_today, clara._plan_window_ceiling(r.effective_to, r.auto_reverse));
   v_k := clara._plan_due_index_on_or_before(r.effective_from, r.frequency, r.day_rule,
            r.day_of_month, least(v_today, coalesce(r.effective_to, 'infinity'::date)));
@@ -1218,7 +1235,9 @@ begin
       'effective_to', case when r.effective_to is null then null else to_char(r.effective_to,'YYYY-MM-DD') end,
       'leg_ceiling', case when v_ceiling = 'infinity'::date then null else to_char(v_ceiling,'YYYY-MM-DD') end);
   end if;
-  if p_due > (now() at time zone r.timezone)::date then
+  -- THE DUE GATE, on the house legal date (see clara._plan_admissible_event above). A plan due
+  -- TOMORROW in Kuala Lumpur is not admitted today, whatever zone the session opened in.
+  if p_due > clara._book_today() then
     return jsonb_build_object('admitted', false, 'plan_id', p.id, 'reason', 'not_yet_due',
       'due_date', to_char(p_due,'YYYY-MM-DD'));
   end if;
@@ -1893,7 +1912,7 @@ begin
           'effective_from', to_char(r.effective_from,'YYYY-MM-DD'),
           'requested_from', to_char(p_from,'YYYY-MM-DD'))::text;
   end if;
-  v_today := (now() at time zone r.timezone)::date;
+  v_today := clara._book_today();  -- the house legal date (0042 S5.20), not the session's
   if p_to > v_today then
     raise exception 'a catch-up cannot reach into the future (today is % in %)', to_char(v_today,'YYYY-MM-DD'), r.timezone
       using errcode='CLR10',
@@ -1979,7 +1998,7 @@ begin
     from clara._plan_due_events(r.effective_from, r.frequency, r.day_rule, r.day_of_month,
            r.auto_reverse, v_start, v_end, v_count) e;
   return jsonb_build_object('plan_id', p_plan, 'status', p.status, 'revision', r.revision,
-    'timezone', r.timezone, 'today', to_char((now() at time zone r.timezone)::date,'YYYY-MM-DD'),
+    'timezone', r.timezone, 'today', to_char(clara._book_today(),'YYYY-MM-DD'),
     'from_date', to_char(v_start,'YYYY-MM-DD'),
     -- A PAUSED plan still previews its schedule, and says the schedule is not being admitted. An
     -- empty preview would read as "there is nothing scheduled", which is a different fact.
@@ -2012,7 +2031,7 @@ begin
             greatest(r.effective_from, coalesce(
               (select max(o.due_date) + 1 from clara.accounting_plan_occurrences o where o.plan_id = p.id),
               r.effective_from)),
-            coalesce(r.effective_to, (greatest(r.effective_from, (now() at time zone r.timezone)::date) + 3650)),
+            coalesce(r.effective_to, (greatest(r.effective_from, clara._book_today()) + 3650)),
             1) e limit 1),
         'occurrence_count', (select count(*)::int from clara.accounting_plan_occurrences o where o.plan_id = p.id)
       ) as x
