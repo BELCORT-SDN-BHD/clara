@@ -89,35 +89,49 @@ const ADMITTED = { work_id: WORK_ID, task_id: "99999999-9999-4999-8999-999999999
 
 // --- 1. the pin ------------------------------------------------------------
 
-test("623.v18: the registry pins chatTurn at v18 and adds claraWork as a NEW class", () => {
-  assert.equal(registry.workflows.chatTurn, registry.chatTurn_v18, "chatTurn: routes to the v18 body");
+// #643 + #644's SHARED SUCCESSOR repointed `chatTurn:` v18 -> v19. This cell's subject is
+// unchanged — the pin routes to the newest body, `claraWork` is a dispatchable class of its own,
+// and every predecessor stays EXPORTED under policy (c) — so the pin's name follows the registry
+// and v18 joins the retained-export ladder beside v17.
+test("623.v18: the registry pins chatTurn at v19 and keeps claraWork a class of its own", () => {
+  assert.equal(registry.workflows.chatTurn, registry.chatTurn_v19, "chatTurn: routes to the newest body");
   assert.ok(typeof registry.workflows.claraWork === "function", "claraWork: is registered");
   assert.ok(registry.workflowNames.includes("claraWork"), "the class name is dispatchable by string too");
   // #623 ADDED `claraWork` AS A NEW CLASS; #629 THEN REPOINTED IT v1 -> v2 (the typed shared
   // question). The claim this cell was written for is unchanged and still asserted — the key is
   // dispatchable, chatTurn is untouched by the Work lane's own cutover, and every predecessor
   // stays EXPORTED under policy (c) — so the pin is updated rather than the cell deleted.
-  assert.match(REGISTRY_SRC, /claraWork: claraWork_v2/);
+  // …and #631 repointed it again, v2 -> v3 (the egress gate and the execution trace), which is the
+  // same motion once more: the Work lane's cutover still does not touch chatTurn, and v1 and v2
+  // both stay exported.
+  assert.match(REGISTRY_SRC, /claraWork: claraWork_v3/);
   assert.ok(typeof registry.claraWork_v1 === "function", "v1 is still exported for parked runs and rollback");
-  assert.ok(typeof registry.claraWork_v2 === "function", "…and the pinned body is exported too");
-  assert.match(REGISTRY_SRC, /chatTurn: chatTurn_v18/);
-  // v17 stays EXPORTED (policy (c)) so a parked run resumes and a rollback has a target.
+  assert.ok(typeof registry.claraWork_v2 === "function", "…and so is v2, v3's rollback target");
+  assert.ok(typeof registry.claraWork_v3 === "function", "…and the pinned body is exported too");
+  assert.match(REGISTRY_SRC, /chatTurn: chatTurn_v19/);
+  // v18 and v17 stay EXPORTED (policy (c)) so a parked run resumes and a rollback has a target.
+  assert.ok(typeof registry.chatTurn_v18 === "function", "#623's body is still exported — it is v19's rollback target");
   assert.ok(typeof registry.chatTurn_v17 === "function", "v17 is still exported");
 });
 
 test("623.v18: the registry comment states the deploy order in the direction that is owed", () => {
-  const paragraph = /#623 \(THE FIRST PERSISTENT CLARA SUCCESSOR\)[\s\S]*?chatTurn: chatTurn_v18/.exec(REGISTRY_SRC)?.[0];
+  const paragraph = /#623 \(THE FIRST PERSISTENT CLARA SUCCESSOR\)[\s\S]*?chatTurn: chatTurn_v19/.exec(REGISTRY_SRC)?.[0];
   assert.ok(paragraph, "the repoint carries its own note");
   const flat = paragraph.replace(/\s*\n\s*\/\/\s?/g, " ");
   assert.match(flat, /MIGRATION 0178 MUST BE LIVE ON THE DATABASE BEFORE THIS IMAGE ADMITS ANY WORK/, "it names the migration and the direction plainly");
   assert.match(flat, /REVERSE order is\s+free/, "and says the reverse order costs nothing");
+  // …and the successor's own note owes the same thing for ITS migrations.
+  assert.match(flat, /MIGRATIONS 0192 AND 0194 MUST BE LIVE BEFORE THIS\s+IMAGE SERVES A TURN/, "v19 names its own two migrations and the direction");
 });
 
 // --- 2. the predecessors did not move --------------------------------------
 
-test("623.v18: every chatTurn v1..v17 body still hashes to its recorded frozen value", () => {
+// v18 JOINED THIS SET when v19 superseded it: "a frozen body is immutable once a successor
+// exists" is exactly the claim this cell holds, and the set it holds over is every body that is
+// no longer the pin.
+test("623.v18: every chatTurn v1..v18 body still hashes to its recorded frozen value", () => {
   const chatEntries = Object.entries(MANIFEST.workflows).filter(([path]) =>
-    /^packages\/runtime\/workflows\/chatTurn\.(?:v(?:[1-9]|1[0-7])\b|impl|prompt)/.test(path),
+    /^packages\/runtime\/workflows\/chatTurn\.(?:v(?:[1-9]|1[0-8])\b|impl|prompt)/.test(path),
   );
   assert.ok(chatEntries.length >= 60, `control: the manifest carries the chat closures (found ${chatEntries.length})`);
   for (const [path, entry] of chatEntries) {

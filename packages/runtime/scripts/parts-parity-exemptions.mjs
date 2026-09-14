@@ -89,7 +89,12 @@ const REVIEWED_OBJECT_SPREAD_SITES = [
   // discriminant the web reader would have to cover. Each fingerprint was computed with the gate's
   // own `describeParitySite`, so it invalidates itself if that statement changes.
   ["packages/runtime/lib/periodic-adjustment-basis.ts","stockAdjustmentInputSchema","...sharedShape","52d22c26ca6a15398f14db2dedc7b33b9b46ffc502cc882c8e94e061b06d10a9","0"],
-  ["packages/runtime/lib/periodic-adjustment-basis.ts","payrollObligationInputSchema","...sharedShape","ebf767eb914a6e2ca0b867f17cce2206f98f1702b72470f911f885d89cdc3ddc","0"],
+  // #796 RE-FINGERPRINTED this one tuple: `payrollObligationInputSchema` gained
+  // `advance_account_code` + `advance_cents` when chatTurn_v19 was authored, so the STATEMENT sha
+  // moved. The spread itself is unchanged — the same shared Zod field map, reviewed at its
+  // original landing — and re-pinning rather than widening keeps the ledger's property: a tuple
+  // invalidates itself when its statement changes.
+  ["packages/runtime/lib/periodic-adjustment-basis.ts","payrollObligationInputSchema","...sharedShape","b073cca542a14ee8d90315361879600559a1c2290a2dbcfcb99a49c9da9b961e","0"],
   ["packages/runtime/lib/periodic-adjustment-basis.ts","refuse","...extra","352b4ea7be368a6fcdc4292b6cc8caa29d79ef1be773541fde5b61d7c7283df7","0"],
   ["packages/runtime/lib/periodic-adjustment-basis.ts","adjustmentFromInput","...shared","76c15665f7232df94199ede36f6b443d4fb354641be4f7f4c168c218603f2a4c","0"],
   ["packages/runtime/lib/periodic-adjustment-basis.ts","adjustmentFromInput","...shared","1e92d27b7c90eec878b28a3b0d3668ac486d4fe43abf6c4086adf46fd3d47940","0"],
@@ -330,6 +335,15 @@ const REVIEWED_NON_PART_LITERAL_SITES = [
   ["packages/runtime/workflows/chatTurn.v18.ts","chatTurn_v18","type: \"tool-call\" as const","605a2ce2c56362daa10832de5544a306ed4a7e723652815de7512da1bd0e965a","0"],
   ["packages/runtime/workflows/chatTurn.v18.ts","chatTurn_v18","type: \"tool-result\"","d9a1e7e7ba7ef26ad1d853f0d072b1070eb7ce7f2a1da36d9edb1db6f7ed4f94","0"],
   ["packages/runtime/workflows/chatTurn.v18.ts","chatTurn_v18","type: \"json\"","d9a1e7e7ba7ef26ad1d853f0d072b1070eb7ce7f2a1da36d9edb1db6f7ed4f94","0"],
+  // chatTurn_v19 — the park/resume message. IDENTICAL in kind to v18's three sites above, and
+  // two of the three fingerprints are BYTE-IDENTICAL to v18's, which is the evidence that the
+  // park/resume statements were carried over rather than rewritten. `tool-call`, `tool-result`
+  // and `json` are the AI SDK's OWN message-content discriminants, not Clara transcript part
+  // kinds: they are constructed here to replay the parked clarify call and to feed the human's
+  // answer back to the model as that tool's result.
+  ["packages/runtime/workflows/chatTurn.v19.ts","chatTurn_v19","type: \"tool-call\" as const","605a2ce2c56362daa10832de5544a306ed4a7e723652815de7512da1bd0e965a","0"],
+  ["packages/runtime/workflows/chatTurn.v19.ts","chatTurn_v19","type: \"tool-result\"","d9a1e7e7ba7ef26ad1d853f0d072b1070eb7ce7f2a1da36d9edb1db6f7ed4f94","0"],
+  ["packages/runtime/workflows/chatTurn.v19.ts","chatTurn_v19","type: \"json\"","d9a1e7e7ba7ef26ad1d853f0d072b1070eb7ce7f2a1da36d9edb1db6f7ed4f94","0"],
   ["packages/runtime/workflows/claraWork.v1.ts","claraWork_v1","type: \"tool-result\"","949cfa52033fb6adf9605ce405396ddd472391484c772120b41d70e51bbcf6b6","0"],
   ["packages/runtime/workflows/claraWork.v1.ts","claraWork_v1","type: \"json\"","949cfa52033fb6adf9605ce405396ddd472391484c772120b41d70e51bbcf6b6","0"],
   // #629 — claraWork_v2's resume message. IDENTICAL in kind to v1's two sites above: `tool-result`
@@ -339,6 +353,14 @@ const REVIEWED_NON_PART_LITERAL_SITES = [
   // attributed fields where v1's carried the bare answer; the discriminants are unchanged.
   ["packages/runtime/workflows/claraWork.v2.ts","claraWork_v2","type: \"tool-result\"","1ff8c47b56ef6c6a6032191a826c154196074fde72563aee78f09b8fc3ec931c","0"],
   ["packages/runtime/workflows/claraWork.v2.ts","claraWork_v2","type: \"json\"","1ff8c47b56ef6c6a6032191a826c154196074fde72563aee78f09b8fc3ec931c","0"],
+  // #631 — claraWork_v3's resume message. IDENTICAL in kind to v1's and v2's sites above:
+  // `tool-result` and `json` are the AI SDK's OWN message-content discriminants, not Clara
+  // transcript part kinds, and they are constructed here for the same reason the two predecessors
+  // construct them — feeding the human's attributed answer back to the model as the
+  // `ask_question` tool's result. v3's object is v2's four attributed fields, unchanged; only the
+  // enclosing function moved.
+  ["packages/runtime/workflows/claraWork.v3.ts","claraWork_v3","type: \"tool-result\"","5d48ab5cb7e0ddaaa4d0ed79741bfc26d45985a488b6e89349f2459a6bb14b31","0"],
+  ["packages/runtime/workflows/claraWork.v3.ts","claraWork_v3","type: \"json\"","5d48ab5cb7e0ddaaa4d0ed79741bfc26d45985a488b6e89349f2459a6bb14b31","0"],
   ["packages/runtime/workflows/chatTurn.v2.ts","chatTurn_v2","type: \"tool-result\"","5ba4b1880782c05cba19a02e2f87618198baacbd3de71c7bdbbef0fed121b0ac","0"],
   ["packages/runtime/workflows/chatTurn.v2.ts","chatTurn_v2","type: \"json\"","5ba4b1880782c05cba19a02e2f87618198baacbd3de71c7bdbbef0fed121b0ac","0"],
   ["packages/runtime/workflows/chatTurn.v3.ts","chatTurn_v3","type: \"tool-call\" as const","605a2ce2c56362daa10832de5544a306ed4a7e723652815de7512da1bd0e965a","0"],

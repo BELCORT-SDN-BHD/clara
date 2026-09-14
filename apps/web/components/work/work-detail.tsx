@@ -33,6 +33,7 @@ import { useTranslations } from "next-intl";
 
 import { AttachEvidenceDialog } from "@/components/work/attach-evidence-dialog";
 import { DocumentStatePanel } from "@/components/documents/document-state-panel";
+import { WorkDiagnostics } from "@/components/work/work-diagnostics";
 import {
   CancelOutcome,
   CancelWorkDialog,
@@ -588,8 +589,17 @@ export function WorkDetailView({
           )}
         </TabsContent>
 
-        <TabsContent value="activity" className="flex flex-col gap-2">
+        <TabsContent value="activity" className="flex flex-col gap-6">
           <WorkActivityView clientId={clientId} workId={work.id} />
+          {/* #631 — THE DIAGNOSTICS SECTION, mounted in ONE line. Everything it does lives in
+              components/work/work-diagnostics.tsx; #631 wrote the mount beneath the identity block
+              because #641 was restructuring this file into Tabs on another branch at the same time,
+              and said in that comment that integration moves it inside the Activity tab. This is
+              that move: "what actually ran" belongs beside the Work's own activity log, not above
+              the outcome band. The tab is NOT `keepMounted`, so the trace read fires when a reader
+              opens Activity and not on every Work detail visit — and a tab switch is still a READ,
+              never a write. */}
+          <WorkDiagnostics workId={work.id} session={session} />
         </TabsContent>
       </Tabs>
     </div>
@@ -928,6 +938,21 @@ function WorkOutcome({
 
   if (work.status === "refused") {
     const error = work.error ?? {};
+    // #631 — THE ONE REFUSAL WITH ITS OWN FACE, and the reason it has one is that the database's
+    // own sentence is addressed to the wrong person. Every other refusal on this screen names a
+    // constraint a PREPARER can act on (a closed period, an absent account, a control leg). This
+    // one names a firm-level authority: Clara is not currently authorised to use a model on this
+    // client's books, and only an OWNER can restore it — by accepting the current Terms and Data
+    // Processing Agreement, and by making sure the client is active.
+    //
+    // IT NAMES NO PROVIDER, and that is the acceptance line rather than a style choice: "revoked,
+    // exhausted or wrong-purpose authorization yields a typed non-retryable Work state WITHOUT
+    // provider disclosure". No vendor, no model id, no internal token beyond the typed reason the
+    // banner already shows as its `code`.
+    //
+    // THE DATABASE'S MESSAGE IS STILL SHOWN, underneath, because a refusal is a receipt and this
+    // lane never replaces one with a paraphrase. What the face adds is WHO can fix it.
+    const egressRefused = error.reason === "egress_not_authorized";
     return (
       <div className="flex flex-col gap-2">
         {/* #630 — THE ONE REFUSAL A COLLEAGUE CAN RESCUE. Above the refusal rather than inside it:
@@ -949,7 +974,7 @@ function WorkOutcome({
         ) : null}
         <StateBanner
           tone="error"
-          title={t("refused.title")}
+          title={egressRefused ? t("egressNotAuthorized.title") : t("refused.title")}
           code={[error.code, error.reason].filter((v): v is string => typeof v === "string" && v !== "").join(" · ") || undefined}
           action={
             <div className="flex flex-wrap items-center gap-3">
@@ -958,9 +983,13 @@ function WorkOutcome({
             </div>
           }
         >
-          {/* The DATABASE'S OWN words, verbatim. A refusal is a receipt; it is
-              never re-worded, and the fallback sentence appears only when the
-              row genuinely carries no message. */}
+          {/* #631 · WHO CAN FIX IT, first, for the one refusal whose audience is not the person
+              reading the page. Then the DATABASE'S OWN words, verbatim: a refusal is a receipt; it
+              is never re-worded, and the fallback sentence appears only when the row genuinely
+              carries no message. */}
+          {egressRefused ? (
+            <span className="block">{t("egressNotAuthorized.body")}</span>
+          ) : null}
           {error.message ?? t("refused.body")}
         </StateBanner>
         {retryNotice}

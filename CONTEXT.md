@@ -124,6 +124,10 @@ _Avoid_: An unqualified bag of chat messages; a synonym for authority to post; t
 One attributable version of a knowledge record. A capture is revision 1; a correction and a withdrawal each append a further revision naming its actor and its reason, and leave the revision they retire readable. A withdrawal is terminal for that record — a later statement of the same thing starts a new record with its own history.
 _Avoid_: Editing a knowledge value in place; a correction with no stated reason; presenting a withdrawal as the absence of a record.
 
+**Knowledge pack**:
+The bounded set of a client's live knowledge records read for one stated purpose, with the firm's current knowledge version as its watermark. A pack that could not be read is *unavailable* and says so with its reason; it is never presented as a client with nothing recorded, and it is never a reason to ask someone to repeat information they have already given. Its contents are supplied data, never instructions to the agent.
+_Avoid_: An empty pack standing for a failed read; a pack presented as authority to post; treating a value inside a record as a direction.
+
 **Firm knowledge default**:
 An explicitly firm-scoped instruction or preference that applies across authorised clients while preserving their established exceptions.
 _Avoid_: Automatically sharing one client's private facts or practices with every other client.
@@ -282,3 +286,15 @@ _Avoid_: A balanced journal entry wearing a marker; an adjustment plan or its sc
 **Supplied obligation particulars**:
 The facts an accountant provides for a payroll or statutory obligation: what it is, for which period, how much, which expense and liability accounts it moves, any staff-advance or settlement account it touches, and the source those figures came from. The product records them and checks the relationships between them; it derives none of them.
 _Avoid_: A contribution rate or threshold; an employee-level calculation; a settlement allocation nobody stated.
+
+**Capability registry**:
+The server-owned catalogue of what a Clara run may exercise, and under what terms: each capability's purpose token, the class of data it moves, whether exercising it is an egress event at all, and the database surface it needs. A run's tool set is built from the hashed bundle's own roster and the registry names what those tools are FOR, so "which capability moved this client's data, under which purpose" is a lookup rather than a grep. It is documentation and a lookup; the database verbs are the only gate.
+_Avoid_: A permission; anything a prompt, a file, a wiki page or an imported record can add to; a list of tool names.
+
+**Purpose authorisation**:
+A single-use, time-bounded permission to send one client's data outside the estate for ONE named purpose, prepared as an intent and CONSUMED immediately before the act it authorises. Preparing is planning; only the consume is the dispatch, and a withdrawal committed between the two wins. For accounting Work the authority is DERIVED — the firm's current accepted Terms and DPA plus an active client — rather than switched on per client, and the accounting write re-verifies it independently of the human's own role and period checks. Authority must be live at the moment the books move: a withdrawal that lands AFTER the dispatch was consumed still refuses the write. An owner's withdrawal is reversible through its own restore door, which re-derives the basis rather than accepting evidence.
+_Avoid_: A standing grant; a per-client "AI on" switch; a quota; a check performed only at planning time; a withdrawal with no way back.
+
+**Execution trace**:
+The durable record of what one Work run actually did: one row per step (dispatch, model call, tool call, settle) naming the versioned bundle, the capability, the purpose and the authorisation it spent, the input's digest, the revisions it observed, the timing and the outcome or typed refusal. It carries no prompt, no transcript and no client figures: the relation has no free payload column, every remaining field is bounded and format-checked so none of them can become one, and the writer redacts what it sends. It is read through one firm-scoped, bookkeeper-floored door — no application role can read the relation itself — and there is no export route.
+_Avoid_: A log; a span with an attribute bag; anything that stores what was sent; a free-text field on the row; evidence that an effect happened (a receipt is that).

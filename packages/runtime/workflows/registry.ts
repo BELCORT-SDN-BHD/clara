@@ -28,8 +28,10 @@ import { chatTurn_v15 } from "./chatTurn.v15.js";
 import { chatTurn_v16 } from "./chatTurn.v16.js";
 import { chatTurn_v17 } from "./chatTurn.v17.js";
 import { chatTurn_v18 } from "./chatTurn.v18.js";
+import { chatTurn_v19 } from "./chatTurn.v19.js";
 import { claraWork_v1 } from "./claraWork.v1.js";
 import { claraWork_v2 } from "./claraWork.v2.js";
+import { claraWork_v3 } from "./claraWork.v3.js";
 import { documentIngest_v1 } from "./documentIngest.v1.js";
 import { documentIngest_v2 } from "./documentIngest.v2.js";
 import { invoiceFacts_v1 } from "./invoiceFacts.v1.js";
@@ -114,7 +116,31 @@ export const workflows = {
   // already admitted keep their queued tasks, and a v17 image carries no `claraWork` export to
   // run them — so a rollback PARKS the lane rather than losing it, and that is the honest
   // description to put in a runbook, not "rollback is free".
-  chatTurn: chatTurn_v18,
+  //
+  // #643 + #644 (THE SHARED SUCCESSOR): REPOINTED v18 -> v19. v19 adds exactly TWO tools
+  // (`start_periodic_adjustment_work`, `remember_client_information`), exactly ONE wire kind
+  // (`knowledge_receipt`), and one new STEP — the honest knowledge-pack context read that renders
+  // an unreadable pack as "unavailable" instead of as a client with nothing recorded (#603).
+  // Everything else is byte-carried from v18 by import, including v10's own frozen context step.
+  // ONE successor rather than two because both tickets shipped their non-frozen halves ready for
+  // it and a frozen version is expensive to mint twice.
+  //
+  // THE DEPLOY ORDER IS OWED IN ONE DIRECTION: MIGRATIONS 0192 AND 0194 MUST BE LIVE BEFORE THIS
+  // IMAGE SERVES A TURN. `start_periodic_adjustment_work` calls
+  // `clara.admit_periodic_adjustment_work` (0194); `remember_client_information` calls
+  // `clara.capture_knowledge_for` and the context step calls `clara.get_knowledge_pack` (both
+  // 0192). Against a database without them each raises `undefined_function` (42883). Two of the
+  // three failures are CONTAINED by a typed tool refusal and the third by construction —
+  // `readKnowledgePack` classifies it `read_failed` and the block says the knowledge could not be
+  // read — so a wrong order corrupts nothing; it makes Clara refuse what it just offered. The
+  // REVERSE order is FREE: 0192 and 0194 against a v18 image add tables and verbs nothing calls.
+  //
+  // THE READER PARITY HOLD APPLIES AGAIN: apps/web must declare `knowledge_receipt` before this
+  // image can merge — the CI `build` job runs `check-parts-parity.mjs` and refuses while the
+  // reader trails the declarers. A rollback to v18 stops offering the two tools and stops reading
+  // the knowledge pack, without changing the database; Work and knowledge records already written
+  // keep their own durable surfaces. That is the honest runbook line, not "rollback is free".
+  chatTurn: chatTurn_v19,
   // #623 — A NEW CLASS, never a repoint. `accounting_work` tasks are dispatched here by
   // src/workRoutes.ts's post-commit enqueue and by the reconciler's own `accounting_work`
   // re-enqueue arm (lib/reconciler-work.mjs); both resolve the body through THIS object, which
@@ -146,7 +172,37 @@ export const workflows = {
   // surfaces will not offer a form for. Work already parked on a v2 question stays answerable
   // (the door and the read doors are the database's, not the image's) and its run resumes under
   // whichever image is live. That is the honest runbook line, not "rollback is free".
-  claraWork: claraWork_v2,
+  //
+  // #631 (MODEL EGRESS OBEYS CURRENT PURPOSE AUTHORISATION): REPOINTED v2 -> v3. v3 adds NO tool
+  // and NO wire kind. What it adds is a GATE and a RECORD: every segment prepares and CONSUMES a
+  // single-use `accounting_work` egress authorisation immediately before `agent.generate` (the
+  // wiki lane's own two-phase shape), and every step writes a redacted row to
+  // `clara.work_execution_traces`. It also carries `client_id` on the `work_status` part (#738)
+  // and three error-roster pairs (#737). v1 and v2 stay frozen, built and EXPORTED below.
+  //
+  // THE DEPLOY ORDER IS OWED IN ONE DIRECTION AND IT IS NOT OPTIONAL: MIGRATION 0195 MUST BE LIVE
+  // BEFORE THIS IMAGE RUNS ANY WORK. `claraWork_v3` calls `clara.prepare_work_egress_dispatch` and
+  // `clara.record_work_execution_trace`, neither of which exists before 0195. Against a pre-0195
+  // database the DISPATCH raises `undefined_function` (42883) — which this closure treats as a
+  // refusal, not an assumption of consent — so every Work would settle `refused` with
+  // `egress_not_authorized` and post nothing. CONTAINED, not corrupting, but it makes Clara refuse
+  // the thing it offered to do. Deploy 0195 first. The REVERSE order is NOT free in the usual
+  // sense: 0195 against a v2 image makes the POSTING CORE demand a consumed authorisation that a
+  // v2 run never prepares, so every v2 Work settles refused. The two halves of #631 ship together.
+  //
+  // THE READER PARITY HOLD APPLIES, and #631 moves the DECLARER SET rather than adding to it:
+  // `claraWork.v3.parts.ts` replaces `claraWork.v1.parts.ts` in
+  // `packages/runtime/scripts/check-parts-parity.mjs`, because `work_status` gains a field and a
+  // discriminant may be declared in exactly one scanned file. The v3 shape is a strict SUPERSET of
+  // v1's, so a reader transcribed from it reads a parked v1 run's parts correctly, with
+  // `client_id` absent — which is why the reader declares that field optional and says so.
+  //
+  // ROLLBACK TO v2 IS THE STANDING PARKED-RUN PREFLIGHT AND THEN A REPOINT — AND IT IS NOT FREE
+  // WHILE 0195 IS LIVE, for the reason above. The honest runbook line is: roll the image back only
+  // together with a migration that relaxes the posting core's egress arm, or accept that the Work
+  // lane refuses until the image rolls forward again. Work already parked on a v2 question stays
+  // answerable (the doors are the database's, not the image's).
+  claraWork: claraWork_v3,
   documentIngest: documentIngest_v2,
   invoiceFacts: invoiceFacts_v1,
   // F-A2 WINDOW B (the statement ACTIVATION): REPOINTED. PR-4 shipped statementFacts_v2 built,
@@ -709,12 +765,22 @@ export { chatTurn_v17 };
 // target and the body any run parked at cutover resumes into — and the pinned v18 body is
 // exported too so the rollback preflight can use the same uniform census for every version.
 export { chatTurn_v18 };
+// #643 + #644 repointed `chatTurn:` v18 -> v19. v18 remains exported by policy (c) — it is the
+// rollback target and the body any run parked on a v18 clarify hook resumes into at cutover — and
+// the pinned v19 body is exported too so the rollback preflight can use the same uniform census
+// for every version.
+export { chatTurn_v19 };
 // #629 repointed `claraWork:` v1 -> v2. v1 remains exported by policy (c) — it is the rollback
 // target and the body any Work parked on a v1 clarify hook resumes into at cutover — and the
 // pinned v2 body is exported too so the rollback preflight can use the same uniform census for
 // every version.
 export { claraWork_v1 };
 export { claraWork_v2 };
+// #631 repointed `claraWork:` v2 -> v3. v2 remains exported by policy (c) — it is the rollback
+// target and the body any Work parked on a v2 question hook resumes into at cutover — and the
+// pinned v3 body is exported too so the rollback preflight can use the same uniform census for
+// every version.
+export { claraWork_v3 };
 export { documentIngest_v1 };
 export { autoDraft_v1 };
 export { autoDraft_v2 };
@@ -791,8 +857,10 @@ export const workflowBodies: readonly string[] = Object.freeze([
   "chatTurn_v16",
   "chatTurn_v17",
   "chatTurn_v18",
+  "chatTurn_v19",
   "claraWork_v1",
   "claraWork_v2",
+  "claraWork_v3",
   "documentIngest_v1",
   "documentIngest_v2",
   "invoiceFacts_v1",
@@ -829,8 +897,8 @@ export const workflowBodies: readonly string[] = Object.freeze([
  *  preflight has to enumerate. */
 export const workflowPins: Readonly<Record<string, string>> = Object.freeze({
   closeExample: "closeExampleV1",
-  chatTurn: "chatTurn_v18",
-  claraWork: "claraWork_v2",
+  chatTurn: "chatTurn_v19",
+  claraWork: "claraWork_v3",
   documentIngest: "documentIngest_v2",
   invoiceFacts: "invoiceFacts_v1",
   statementFacts: "statementFacts_v3",

@@ -134,14 +134,42 @@ export const RATIONALE = "#623 rig: the accountant asked for this exact posting"
 // 3 · The world.
 // ===========================================================================================
 
-/** Build the shared world and the classed chart both clients need. */
+/** Build the shared world and the classed chart both clients need.
+ *
+ *  #631 · AND THE DERIVED MODEL-EGRESS BASIS. From 0195, `clara._record_journal_entry_core`
+ *  refuses a posting whose run holds no consumed `accounting_work` egress authorization, and that
+ *  authority is DERIVED from the firm owner's acceptance of the CURRENT published Terms and DPA
+ *  (there is no per-client switch). A rig world whose owners had accepted nothing would therefore
+ *  refuse every posting for a reason that has nothing to do with the cell under test — so each
+ *  firm's owner accepts, through the estate's OWN door, exactly as a real one does. Tolerant of a
+ *  pre-0185/0187 database: a chain with no published legal text simply has nothing to accept. */
 export async function buildWorkWorld() {
   const world = await buildWorld();
   for (const [key, client] of [["A1", world.clients.A1], ["A2", world.clients.A2]]) {
     await ensureWorkChart(world.users.alice, client, key);
   }
   await ensureWorkChart(world.users.dave, world.clients.B1, "B1");
+  for (const owner of [world.users.alice, world.users.dave, world.users.erin]) {
+    await acceptPublishedLegal(owner);
+  }
   return world;
+}
+
+/** Accept BOTH published legal documents as `sub`, through `clara.accept_legal_document`.
+ *  Idempotent by (user, kind, version); silent on a chain that publishes neither. */
+export async function acceptPublishedLegal(sub) {
+  try {
+    const docs = await rootQuery(
+      "select kind, version, body_sha256 from clara.legal_documents where status='published'");
+    for (const d of docs.rows) {
+      await humanQuery(sub, namedCall("accept_legal_document", [
+        { name: "p_kind", cast: "text" }, { name: "p_version", cast: "integer" },
+        { name: "p_body_sha256", cast: "text" }, { name: "p_op_key", cast: "text" },
+      ]), [d.kind, d.version, d.body_sha256, opk("w631-legal")]);
+    }
+  } catch (e) {
+    noteLane(`acceptPublishedLegal raised ${e.code}: ${e.message}`);
+  }
 }
 
 /** A brand-new client of the author's firm, carrying this battery's chart. Used where a cell
@@ -235,10 +263,32 @@ export async function claimWorkRun({ task, runId, bundle = null }) {
   return r.rows[0].result;
 }
 
+/** The manifest a claim stamps on the Work row, shaped exactly as `claraWorkRunManifestV3`
+ *  (workflows/claraWork.v3.bundle.ts) shapes it — with a fixture digest, because no db cell
+ *  hashes a bundle.
+ *
+ *  #631 WAVE-3 · THE ID IS `clara-work/v3`, AND IT IS LOAD-BEARING RATHER THAN DECORATION.
+ *  0195's recut `_record_journal_entry_core` GRANDFATHERS a run whose Work row records a PRE-v3
+ *  bundle id (`clara-work/v1`, `clara-work/v2`) past the egress wall — those bodies are frozen
+ *  and can never call `prepare_work_egress_dispatch`. This default therefore has to name the
+ *  bundle the CURRENT body stamps, or every cell in the estate would silently post through the
+ *  grandfather arm and the wall would be tested by nothing. The cells that mean to exercise the
+ *  grandfather pass an explicit `bundle` instead (tests/work-egress-authority.test.mjs §4b). */
 export const defaultBundle = () => ({
-  id: "clara-work/v1", digest: BUNDLE_DIGEST,
-  instructions: "clara-work-instructions/v1", tools: "clara-work-tools/v1",
-  skills: ["journal-entry/v1"],
+  id: "clara-work/v3", digest: BUNDLE_DIGEST,
+  instructions: "clara-work-instructions/v3", tools: "clara-work-tools/v3",
+  skills: ["journal-entry/v3"],
+  budgets: { segments: 4, modelCalls: 8, toolCalls: 12, replans: 2, transientRetries: 3 },
+  model: MODEL,
+});
+
+/** A predecessor's manifest, for the cells that exercise 0195's grandfather arm. `version` is
+ *  the bundle VERSION (1, 2, 3, 4…): the id shape is `clara-work/vN` and the three registry ids
+ *  follow it, exactly as claraWork.vN.bundle.ts spells them. */
+export const bundleForVersion = (version) => ({
+  id: `clara-work/v${version}`, digest: BUNDLE_DIGEST,
+  instructions: `clara-work-instructions/v${version}`, tools: `clara-work-tools/v${version}`,
+  skills: [`journal-entry/v${version}`],
   budgets: { segments: 4, modelCalls: 8, toolCalls: 12, replans: 2, transientRetries: 3 },
   model: MODEL,
 });
@@ -273,19 +323,59 @@ export async function mintClientObo({ firm, obo, client, kind = "interactive_cli
   return { credentialId: r.rows[0].credential_id, secret: r.rows[0].secret };
 }
 
+/** #631 · THE DISPATCH THE RUN PERFORMS BEFORE IT CALLS THE MODEL, as a fixture step.
+ *
+ *  From 0195 the accounting write requires a CONSUMED, non-invalidated `accounting_work` egress
+ *  authorization bound to (work, run). `claraWork_v3` prepares and consumes one immediately before
+ *  `agent.generate`; a db cell that posts without doing the same would be testing the egress gate
+ *  rather than the arithmetic. This helper is that dispatch, and every caller of
+ *  `wakeRecordJournalEntry` gets it unless it passes `egress: false` — which the #631 refusal
+ *  cells do, deliberately.
+ *
+ *  INERT BELOW 0195 (`undefined_function`), so `db-slice-frontiers` legs pinned earlier are
+ *  unaffected. */
+export async function authoriseWorkEgress({ work, runId }) {
+  try {
+    const t = await rootQuery(
+      "select current_task_id from clara.accounting_work where id=$1", [work]);
+    const task = t.rows[0]?.current_task_id ?? null;
+    if (task === null) return null;
+    const p = await roleQuery(RUNTIME, namedCall("prepare_work_egress_dispatch", [
+      { name: "p_task", cast: "uuid" }, { name: "p_run", cast: "text" },
+    ]), [task, runId]);
+    const prepared = p.rows[0].result;
+    if (prepared?.verdict !== "granted") {
+      noteLane(`authoriseWorkEgress: prepare returned ${JSON.stringify(prepared)} for work ${work}`);
+      return prepared;
+    }
+    const c = await roleQuery(RUNTIME, namedCall("consume_egress_dispatch", [
+      { name: "p_firm", cast: "uuid" }, { name: "p_authorization", cast: "uuid" },
+      { name: "p_client", cast: "uuid" }, { name: "p_purpose", cast: "text" },
+      { name: "p_event_seq", cast: "bigint" }, { name: "p_event_type", cast: "text" },
+      { name: "p_document_sha256", cast: "text" },
+    ]), [prepared.firm_id, prepared.authorization_id, prepared.client_id, prepared.purpose,
+      String(prepared.event_seq), prepared.event_type, null]);
+    return { prepared, consumed: c.rows[0].result };
+  } catch (e) {
+    if (e.code !== "42883") noteLane(`authoriseWorkEgress raised ${e.code}: ${e.message}`);
+    return null;
+  }
+}
+
 /** Call the wake verb under `clara_wake_interactive` + a txn-local wake secret — the exact
  *  posture `withWriteWakeScoped` gives it in the runtime. */
 export async function wakeRecordJournalEntry(secret, {
   client, work, logicalOpId, basis: b, bundleDigest = BUNDLE_DIGEST,
-  runId = null, rationale = RATIONALE,
+  runId = null, rationale = RATIONALE, egress = true,
 }) {
+  const run = runId ?? `run-${randomUUID()}`;
+  if (egress) await authoriseWorkEgress({ work, runId: run });
   const r = await wakeQuery(ROLES.wakeInteractive, secret, namedCall("wake_record_journal_entry", [
     { name: "p_client", cast: "uuid" }, { name: "p_work", cast: "uuid" },
     { name: "p_logical_op_id", cast: "text" }, { name: "p_basis", cast: "jsonb" },
     { name: "p_bundle_digest", cast: "text" }, { name: "p_run_id", cast: "text" },
     { name: "p_rationale", cast: "text" },
-  ]), [client, work, logicalOpId, JSON.stringify(b), bundleDigest,
-    runId ?? `run-${randomUUID()}`, rationale]);
+  ]), [client, work, logicalOpId, JSON.stringify(b), bundleDigest, run, rationale]);
   return r.rows[0].result;
 }
 

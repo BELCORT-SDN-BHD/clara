@@ -203,7 +203,10 @@ test("work_accepted renders the operation identity and links to the WORK'S OWN p
       await h.settle();
       const text = h.text();
       assert.match(text, /Accounting work accepted/);
-      assert.match(text, /journal_entry/, "the DB's own purpose token, verbatim");
+      // #643/#644 (wave-3 integration) — the purpose is now LABELLED, through the one mapping in
+      // lib/work/purpose-label.ts, rather than rendered as the column's own token. The raw token
+      // still appears on this card, but only inside the logical operation identity below.
+      assert.match(text, /Journal entry/, "the purpose reads as a label");
       assert.match(text, /work-1/);
       // The logical operation identity is what makes a replayed commit resolve the
       // ORIGINAL receipt. A professional can match it against the Work page.
@@ -211,6 +214,60 @@ test("work_accepted renders the operation identity and links to the WORK'S OWN p
       assert.deepEqual(hrefs(h.container), ["/clients/client-1/work/work-1"]);
       assert.ok(!text.includes(FALLBACK_UNSUPPORTED_PREFIX), "the branch exists — this is not the unsupported chip");
       assert.equal(byTestId(h.container, "work-question-fallback"), null, "no panel when the Work read admits none");
+    } finally {
+      await h.unmount();
+    }
+  } finally {
+    backend.restore();
+  }
+});
+
+// #643/#644 (wave-3 integration, v19 review NOTE-3) — THE PURPOSE LABEL ON THIS CARD.
+//
+// WHAT WENT WRONG WITHOUT IT. chatTurn_v19's `start_periodic_adjustment_work` admits Work whose
+// purpose is `periodic_stock_adjustment` or `payroll_obligation` (migration 0194). This card
+// rendered `part.purpose` raw, so the SAME Work read "payroll_obligation" in the transcript and
+// "Supplied payroll obligation" on its own detail page and on the journals row — the exact defect
+// `lib/work/purpose-label.ts`'s header was written to prevent, arriving through a surface that
+// module had no caller on.
+//
+// AND THE RULE THE MODULE KEEPS: an UNKNOWN purpose renders VERBATIM. A build that has not learned
+// a value shows the value rather than crashing on a missing key or inventing a label — the posture
+// `basis_origin` takes on the same pages. That half is asserted here too, because it is the half a
+// naive `t(\`purpose${camel(p)}\`)` would have broken.
+test("work_accepted labels EVERY purpose 0194 admits, and renders an unknown one verbatim", async () => {
+  const cases: ReadonlyArray<readonly [string, string]> = [
+    ["journal_entry", "Journal entry"],
+    ["periodic_stock_adjustment", "Periodic stock adjustment"],
+    ["payroll_obligation", "Supplied payroll obligation"],
+  ];
+  for (const [purpose, label] of cases) {
+    const backend = stubBackend((call) => (call.fn === "accounting_work" ? { status: 200, body: [] } : { status: 404, body: {} }));
+    try {
+      const h = await renderComponent(App({ ...ACCEPTED, purpose, logical_op_id: `work:work-1:${purpose}:1` } as ClaraPart));
+      try {
+        await settleUntil(h, () => backend.calls.some((c) => c.fn === "accounting_work"), "the Work status was read");
+        await h.settle();
+        assert.match(h.text(), new RegExp(label), `${purpose} reads as "${label}"`);
+      } finally {
+        await h.unmount();
+      }
+    } finally {
+      backend.restore();
+    }
+  }
+
+  // …AND THE FOURTH VALUE THIS BUILD HAS NOT LEARNED. `clara.accounting_work.purpose`'s CHECK can
+  // widen before this file does; when it does, the reader sees the database's word, not a crash.
+  const backend = stubBackend((call) => (call.fn === "accounting_work" ? { status: 200, body: [] } : { status: 404, body: {} }));
+  try {
+    const h = await renderComponent(
+      App({ ...ACCEPTED, purpose: "some_future_purpose", logical_op_id: "work:work-1:some_future_purpose:1" } as ClaraPart),
+    );
+    try {
+      await settleUntil(h, () => backend.calls.some((c) => c.fn === "accounting_work"), "the Work status was read");
+      await h.settle();
+      assert.match(h.text(), /some_future_purpose/, "an unregistered purpose renders verbatim");
     } finally {
       await h.unmount();
     }

@@ -1876,6 +1876,41 @@ export const ACCOUNTING_PLANS_0193_COHORT = [
   ...ACCOUNTING_PLANS_0193_UNGRANTED_FNS,
 ];
 
+// #631 [0195, model egress obeys current purpose authorisation + the redacted execution trace] —
+// the WORK-EGRESS lane, its own cohort for the same "wholly present or wholly absent" reason
+// 0178's and 0194's carry.
+//
+//   the dispatch wrapper and the trace writer/prune — clara_runtime ONLY. The wake roles and
+//   clara_authenticated gain ZERO: a lane that could mint its own egress authorization, or write
+//   its own diagnostic row for another firm's Work, would be an agent deciding what it is
+//   authorised to do.
+const WORK_EGRESS_0195_RUNTIME_FNS = [
+  "prepare_work_egress_dispatch", "record_work_execution_trace", "prune_work_execution_traces",
+];
+//   the ONE read — clara_authenticated ONLY, bookkeeper-floored inside its own body. No agent,
+//   wake or runtime variant exists: the run writes the trace and never reads it back.
+//   ...and the OWNER door the review round added: `clara.restore_client_egress_purpose`, the way
+//   back on after an owner withdraws the DERIVED accounting_work purpose. Owner-floored in its own
+//   body, clara_authenticated ONLY — the runtime must never be able to restore an authority a
+//   human took away.
+const WORK_EGRESS_0195_HUMAN_FNS = ["get_work_execution_trace", "restore_client_egress_purpose"];
+//   …and the UNGRANTED closure: the derived-activation predicate (reached only from the DEFINER
+//   clara.prepare_egress_dispatch, whose answer collapses every negative onto one indistinguishable
+//   unknown), the immutable run-binding fold both the dispatch wrapper and the posting core
+//   compute, and the trace relation's append-only trigger body.
+//   ...and the FIVE field grammars the trace relation CHECKs with (0195 SECTION 7B). They are
+//   IMMUTABLE predicates reached only from the relation's own constraints and the DEFINER writer,
+//   both of which run as clara_fn_owner: no application role may execute one.
+const WORK_EGRESS_0195_UNGRANTED_FNS = [
+  "_accounting_work_egress_live", "_work_egress_event_seq",
+  "_tf_work_execution_trace_append_only",
+  "_work_trace_secret_shaped", "_work_trace_text_ok", "_work_trace_skills_ok",
+  "_work_trace_revisions_ok", "_work_trace_refusal_ok",
+];
+export const WORK_EGRESS_0195_COHORT = [
+  ...WORK_EGRESS_0195_RUNTIME_FNS, ...WORK_EGRESS_0195_HUMAN_FNS,
+  ...WORK_EGRESS_0195_UNGRANTED_FNS,
+];
 // #718 [0197, the document-coding lane's evidence-link lookback] — its own cohort for the same
 // "wholly present or wholly absent" reason 0182's carries, and a cohort of THREE UNGRANTED names
 // only: this file adds no door and changes no grant, so it earns no row in ALLOWED below.
@@ -2071,6 +2106,7 @@ export const ALLOWED = {
     // #640 [0193] the eleven accounting-plan doors — see the block above. clara_authenticated
     // ONLY; clara_runtime holds only the scan, and the agent role and both wake roles gain ZERO.
     ...ACCOUNTING_PLANS_0193_HUMAN_FNS,
+    ...WORK_EGRESS_0195_HUMAN_FNS, // 0195 [#631] the redacted execution-trace read (bookkeeper floor)
   ]),
   // [S6 §9/C-11] agent lane loses the bare get_journal_entry(uuid) oracle; keeps the other
   // reads and gains the client-pinned S6 reads + get_journal_entry_for.
@@ -2233,6 +2269,7 @@ export const ALLOWED = {
     // clara.admit_journal_work sits in. Reached by a human through the runtime's own
     // authenticated route, never by PostgREST.
     ...PERIODIC_ADJUSTMENTS_0194_RUNTIME_FNS,
+    ...WORK_EGRESS_0195_RUNTIME_FNS, // 0195 [#631] the work-egress dispatch wrapper + trace writer/prune
     // [F-A2 PR-2, GM-10] the withdrawal re-admit door — clara_runtime ONLY (the consumer's
     // sole caller); proves the event->entry->attempt->task->filing chain then delegates to
     // 0053's one_click exception. Declared here so any wider grant FAILS the matrix.
@@ -2473,6 +2510,7 @@ export async function grantMatrixFailures() {
   failures.push(...cohortFailures("#644 0192 governed knowledge lane", KNOWLEDGE_0192_COHORT, liveNames));
   failures.push(...cohortFailures("#643 0194 periodic-adjustment lane", PERIODIC_ADJUSTMENTS_0194_COHORT, liveNames));
   failures.push(...cohortFailures("#640 0193 accounting-plan lane", ACCOUNTING_PLANS_0193_COHORT, liveNames));
+  failures.push(...cohortFailures("#631 0195 work-egress + execution-trace lane", WORK_EGRESS_0195_COHORT, liveNames));
   // #718 [0197] — the coding lane's evidence-link lookback. A PARTIAL cohort here is a reopened
   // race, not a narrower boundary (see the block where the roster is declared).
   failures.push(...cohortFailures("#718 0197 coding-lane evidence-link wall", CODING_LANE_LINK_0197_COHORT, liveNames));

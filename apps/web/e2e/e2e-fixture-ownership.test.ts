@@ -977,6 +977,14 @@ const SHARED_RPC_VERBS: Record<string, string[]> = {
   // periodic-adjustment-mock.mjs:320) and falls through otherwise, so neither can answer for the
   // other's walk — which is the distinction between a declared share and a collision.
   list_spoken_for_documents: ["journal-work-mock.mjs", "periodic-adjustment-mock.mjs"],
+  // #640 x #631 — `clara.get_work_plan_origin` is read by `<WorkPlanOriginRow>`, which #640 mounts
+  // on the SHARED Work detail page, so every lane whose walk opens a Work detail now issues it.
+  // Declared at WAVE-3 INTEGRATION: #640's own walk had the only Work detail that reached this row
+  // when that branch was cut, and #631's `journal-work` walk (whose #727 hydration cell counts
+  // every 4xx among this route's own data reads) is what found the gap. The two lanes answer
+  // OPPOSITE facts and each gates on its own Work id first: `plans-mock.mjs` answers a real origin
+  // for its plan-admitted Work, `journal-work-mock.mjs` answers the door's own SQL NULL for a Work
+  // a human composed by hand. Neither can answer for the other's walk.
   // #727 — `clara.get_work_plan_origin`, the Work detail identity block's "From plan <purpose>"
   // row. `plans-mock.mjs` answers it for its own C9 fixture Work (`PLANS.workId`);
   // `journal-work-mock.mjs` answers NULL for its own two Works (`seededWorkId`,

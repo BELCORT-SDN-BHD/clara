@@ -33,12 +33,24 @@ const DEFAULT_DECLARER = "packages/runtime/workflows/chatTurn.v16.parts.ts";
 const DEFAULT_DECLARERS = [
   DEFAULT_DECLARER,
   "packages/runtime/workflows/chatTurn.v18.parts.ts",
-  "packages/runtime/workflows/claraWork.v1.parts.ts",
+  // #631: claraWork_v3's parts module REPLACES v1's here, and the swap is forced rather than
+  // chosen. #738 widens `work_status` with `client_id`; `claraWork.v1.parts.ts` is frozen and
+  // deployed so its text may not move, and `declaredPartShapesAcross` below hard-throws on a
+  // discriminant declared in two scanned files — so the kind's CURRENT declaration has to live in
+  // exactly one place, and that place is the closure the registry serves. v1's file is untouched,
+  // still built and still exported for parked runs; the v3 shape is a strict SUPERSET of v1's, so
+  // a reader transcribed from it reads a v1 run's parts with `client_id` absent.
+  "packages/runtime/workflows/claraWork.v3.parts.ts",
   // #629: claraWork_v2 declares ONE new kind (`work_question`) and re-exports v1's two BY IMPORT
   // rather than re-declaring them, so this file adds exactly one discriminant to the merged map —
   // `declaredPartShapesAcross` refuses a discriminant declared in two files, and a re-declaration
   // would have tripped it.
   "packages/runtime/workflows/claraWork.v2.parts.ts",
+  // #643 + #644: chatTurn_v19 declares ONE new kind (`knowledge_receipt`) and re-uses v18's
+  // `work_accepted` BY REFERENCE rather than re-declaring it — a widened PURPOSE through
+  // `Omit<…> & { purpose: … }`, which `declaredPartShapes` does not read as a declaration, because
+  // a discriminant declared in two files is a hard throw here and would be two copies of one shape.
+  "packages/runtime/workflows/chatTurn.v19.parts.ts",
 ];
 const DEFAULT_READER = "apps/web/lib/parts/types.ts";
 const DEFAULT_RUNTIME_ROOT = "packages/runtime";

@@ -12,7 +12,7 @@
 // WHAT IT PROVES, and every one of these needs a real Postgres World plus a real HTTP boundary:
 //   1. ADMIT -> RUN -> COMMIT, THROUGH THE UNCHANGED FROZEN BUNDLE. One POST to the new sibling
 //      route produces one Work whose purpose is `periodic_stock_adjustment`, one run served by the
-//      SAME `clara-work/v2` body a documentless journal entry is served by, one approved entry
+//      SAME `clara-work/v3` body a documentless journal entry is served by, one approved entry
 //      carrying the `closing_stock` marker the close gate reads, one `clara.operation_receipts`
 //      row whose purpose is the Work's and whose `effects` name the adjustment, and one
 //      `clara.periodic_adjustments` row with the exact signed movement. That the typed particulars
@@ -135,7 +135,10 @@ function spawnServe(extra = {}) {
   // across two. A per-chunk regex reads a banner cut by a chunk boundary as never logged — see
   // docs/plan/active/refresh-wave-2026-09-14/reports/wave2-ci-two-build-banner.md.
   const ingest = (line) => {
-    const m = /\[clara-runtime\] bundle clara-work\/v2 digest=([0-9a-f]{64})/.exec(line);
+    // #631 REPOINTED IT AGAIN, v2 -> v3 (the egress gate and the execution trace), so the SERVING
+    // banner is v3's. v1 and v2 still print for the parked-run census; this captures the one the
+    // image DISPATCHES, which is the digest the Work row and the receipt record.
+    const m = /\[clara-runtime\] bundle clara-work\/v3 digest=([0-9a-f]{64})/.exec(line);
     if (m && !state.banner) state.banner = m[1];
     if (!state.serving) {
       const serving = /\[clara-runtime\] serving .*/.exec(line);
@@ -154,6 +157,7 @@ function spawnServe(extra = {}) {
   child.stdout.on("end", () => {
     if (pending) ingest(pending);
     pending = "";
+
   });
   child.stderr.setEncoding("utf8");
   child.stderr.on("data", (d) => {
@@ -392,7 +396,7 @@ async function main() {
 
     const settled = await pollWork(workId, one.jwt, (b) => TERMINAL.has(b.work.status), "first commit");
     assert.equal(settled.work.status, "completed", `the run settles completed (got ${settled.work.status} / ${JSON.stringify(settled.work.error)})`);
-    assert.equal(settled.work.bundle?.id, "clara-work/v2",
+    assert.equal(settled.work.bundle?.id, "clara-work/v3",
       "…served by the UNCHANGED frozen bundle: nothing about this lane needed a new workflow version");
 
     assert.equal(await countEntries(one.client), 1, "exactly ONE journal entry");

@@ -72,6 +72,19 @@ async function control(page: Page, body: Record<string, unknown>): Promise<void>
 }
 
 /**
+ * #631 · OPEN THE ACTIVITY TAB, which is where the Diagnostics section lives after wave-3
+ * integration. #631 wrote the mount beneath the identity block because #641 was turning this
+ * page into Tabs on another branch at the same time; the integrator moved it inside Activity,
+ * exactly as #631's own mount comment said it would. The tab is NOT `keepMounted`, so the trace
+ * read fires HERE and not on every visit to a Work detail — which is also why every cell below
+ * opens the tab before asserting anything about the trace.
+ */
+async function openDiagnostics(page: Page): Promise<void> {
+  await page.getByRole("tab", { name: "Activity" }).click();
+  await expect(page.getByRole("tab", { name: "Activity" })).toHaveAttribute("aria-selected", "true");
+}
+
+/**
  * #760 — the settle-then-scan instrument moved to `./helpers` (`settleForScan`),
  * where its measured rationale now lives for every walk instead of this one. The
  * pointer park that used to open it is gone with it: `hover:bg-primary/80` was the
@@ -693,6 +706,141 @@ test("focus: the heading takes focus on arrival, and a background update never t
  * served by `next start`, so the server render, the shipped bundle and the browser's own
  * parser are all the production ones.
  */
+
+// ===========================================================================================
+// #631 · THE DIAGNOSTICS SECTION AND THE EGRESS REFUSAL FACE.
+//
+// WHY THESE NEED A BROWSER. The unit cells over `WorkDiagnostics` prove the five faces against an
+// injected reader. What only a browser holds is the REAL door — `callDoor` posting
+// `/rest/v1/rpc/get_work_execution_trace` through the real fetch, the real session and the real
+// refusal parser — plus real layout at 320 CSS px (a six-column table inside a page that must not
+// scroll sideways), real focus, and a real `prefers-reduced-motion` query over the loading
+// skeleton's own animation.
+// ===========================================================================================
+
+test("#631 B3: Diagnostics says WHICH bundle ran, under WHICH purpose, and keeps the steps behind a disclosure", async ({ page }) => {
+  await page.goto(`/clients/${CLIENT}/work/${JOURNAL_WORK.seededWorkId}`);
+  await openDiagnostics(page);
+
+  // The SUMMARY first: the one-line answer a reviewer opens this section for, before any table.
+  await expect(page.getByRole("heading", { name: "Diagnostics" })).toBeVisible();
+  await expect(
+    page.getByText("A model was called for this client under an authorisation consumed for this run."),
+  ).toBeVisible();
+  await expect(page.getByText("This run has not settled yet.")).toHaveCount(0);
+
+  // THE STEPS ARE BEHIND A LABELLED DISCLOSURE, not dumped on the page: a Work detail is a
+  // bookkeeper's screen, and four rows of capability ids are a diagnostic, not the headline.
+  const disclosure = page.getByRole("button", { name: /Show \d+ steps/ });
+  await expect(disclosure).toHaveAttribute("aria-expanded", "false");
+  await disclosure.click();
+  await expect(page.getByRole("button", { name: "Hide steps" })).toHaveAttribute("aria-expanded", "true");
+
+  // THE VERSIONED IDENTITY, which is the whole point: which bundle, which capability, which
+  // purpose. The digest is shown as a comparable prefix with the full value in the title.
+  const table = page.getByRole("region", { name: "Execution trace steps" });
+  await expect(table.getByText("accounting_work.model_segment").first()).toBeVisible();
+  await expect(table.getByText("accounting_work.record_journal_entry")).toBeVisible();
+  await expect(table.getByText("clara-work/v3 · 345f2a38c3c8…").first()).toBeVisible();
+  await expect(table.getByText("accounting_work", { exact: true }).first()).toBeVisible();
+
+  // NO PAYLOAD, and this is the browser-level control for it: the relation has no payload column,
+  // so no prompt, no transcript and no admitted figure may appear in this section.
+  const section = page.locator("section", { has: page.getByRole("heading", { name: "Diagnostics" }) });
+  const diagnosticsText = (await section.first().innerText()).toLowerCase();
+  expect(diagnosticsText).not.toContain("office rent");
+  expect(diagnosticsText).not.toContain("120,000");
+  expect(diagnosticsText).not.toContain("1,200.00");
+});
+
+test("#631 B3: a Work with no steps, and a viewer who may not read them, are DIFFERENT answers", async ({ page }) => {
+  // A Work that has recorded nothing yet is a REAL state (a queued run), and it must not read as
+  // "you may not see this" — the refresh spec's Empty row ("distinguish … unavailable capability").
+  await page.goto(COMPOSER_URL);
+  await fillBalancedBasis(page);
+  await page.getByRole("button", { name: "Submit" }).click();
+  await expect(page).toHaveURL(/\/work\/[0-9a-f-]{36}$/);
+  await openDiagnostics(page);
+  await expect(page.getByText("No steps have been recorded for this Work yet.")).toBeVisible();
+  await expect(page.getByText("You do not have access to diagnostics")).toHaveCount(0);
+
+  try {
+    await control(page, { op: "trace_denied" });
+    await page.goto(`/clients/${CLIENT}/work/${JOURNAL_WORK.seededWorkId}`);
+    await openDiagnostics(page);
+    await expect(page.getByText("You do not have access to diagnostics")).toBeVisible();
+    await expect(page.getByText("Diagnostics are available to bookkeepers and above.")).toBeVisible();
+    await expect(page.getByText("No steps have been recorded for this Work yet.")).toHaveCount(0);
+    // …and the rest of the page is UNAFFECTED: a denied diagnostic is not a denied Work.
+    await expect(page.getByText("Completed", { exact: true }).first()).toBeVisible();
+  } finally {
+    await control(page, { op: "reset" }).catch(() => {});
+  }
+});
+
+test("#631 B3: an egress refusal names the AGREEMENT and no provider, and its trace shows no model call", async ({ page }) => {
+  await page.goto(`/clients/${CLIENT}/work/${JOURNAL_WORK.seededWorkId}`);
+  try {
+    await control(page, { op: "egress_refused" });
+    await page.goto(`/clients/${CLIENT}/work/${JOURNAL_WORK.egressRefusedWorkId}`);
+
+    // THE OWNER-FACING FACE, above the database's own words.
+    await expect(
+      page.getByText("Clara is not authorised to use a model on this client's books"),
+    ).toBeVisible();
+    await expect(
+      page.getByText("An owner can restore it by accepting the current Terms and Data Processing Agreement"),
+    ).toBeVisible();
+    // THE TYPED PAIR is still on screen as the refusal's code — a receipt, not a paraphrase.
+    await expect(page.getByText("CLR13 · egress_not_authorized")).toBeVisible();
+
+    // …and the Diagnostics section is OPENED BEFORE the vendor scan below, so the scan covers the
+    // trace's own rendered text too rather than only the outcome band.
+    await openDiagnostics(page);
+
+    // NO PROVIDER DISCLOSURE, asserted over the WHOLE rendered page rather than one element.
+    const body = (await page.locator("body").innerText()).toLowerCase();
+    for (const vendor of ["openai", "anthropic", "azure", "gemini", "gpt-", "claude-"]) {
+      expect(body, `the refused Work detail names ${vendor}`).not.toContain(vendor);
+    }
+
+    // AND THE DURABLE EVIDENCE THAT NOTHING WAS SENT: a dispatch row, refused, and no model call.
+    await expect(page.getByText("No model was called: the run stopped before anything was sent.")).toBeVisible();
+    await page.getByRole("button", { name: /Show \d+ steps/ }).click();
+    const table = page.getByRole("region", { name: "Execution trace steps" });
+    await expect(table.getByText("Model call")).toHaveCount(0);
+    await expect(table.getByText("egress_not_authorized").first()).toBeVisible();
+  } finally {
+    await control(page, { op: "reset" }).catch(() => {});
+  }
+});
+
+test("#631 B3: at 320 CSS px the step table scrolls inside its OWN viewport, and the page does not", async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 720 });
+  await page.goto(`/clients/${CLIENT}/work/${JOURNAL_WORK.seededWorkId}`);
+  await openDiagnostics(page);
+  await page.getByRole("button", { name: /Show \d+ steps/ }).click();
+  // #760 moved this walk's settle instrument to `./helpers` as `settleForScan`; #631's B3 cell was
+  // written against the local `settle` that lived here, and means the same wait.
+  await settleForScan(page);
+
+  const region = page.getByRole("region", { name: "Execution trace steps" });
+  await expect(region).toBeVisible();
+  // ITS OWN labelled horizontal viewport (appendix C §4): the region scrolls, the document does
+  // not. A section that widened the page would push the amount and the status off screen.
+  const scrolls = await region.evaluate((el) => el.scrollWidth > el.clientWidth);
+  expect(scrolls, "the step table must have its own horizontal viewport at 320 px").toBe(true);
+  const pageScrolls = await page.evaluate(
+    () => document.documentElement.scrollWidth > document.documentElement.clientWidth + 1,
+  );
+  expect(pageScrolls, "the PAGE must not scroll sideways at 320 CSS px").toBe(false);
+
+  // AXE, on this face at this width — the section introduces a table, a caption and a focusable
+  // region, all of which are ordinary a11y failure sites.
+  const results = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
+  expect(results.violations.map((v) => `${v.id}: ${v.nodes.length}`)).toEqual([]);
+});
+
 test("#727: the Work detail route hydrates with no React fault in the console", async ({ page }) => {
   const collector = watchReactFaults(page);
   // The same walk also reported ONE `Failed to load resource: 400` on this route with no

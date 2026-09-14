@@ -113,6 +113,22 @@ export const payrollObligationInputSchema = z
       .min(0)
       .optional()
       .describe("Integer cents settled through payment_account_code. The liability takes the remainder."),
+    // #796 — THE STAFF-ADVANCE PARTICULAR, and it is a PAIR for the same reason
+    // `payment_account_code` is: 0194's `_assert_adjustment_relationships` refuses a NAMED leg the
+    // entry never touches (`advance_leg`), so an account code with no amount beside it could only
+    // ever be admitted into a refusal. The code is a DATABASE particular (0194 validates it is a
+    // live `clara.staff_advance_accounts` enrolment — `advance_not_enrolled`); the cents are a
+    // DERIVATION INPUT ONLY and never enter `p_adjustment`, exactly as `settled_cents` does not
+    // (#643's adversarial N3: no server refusal can name a key 0194 has no particular for).
+    advance_account_code: accountCode
+      .optional()
+      .describe("Only when part of the obligation is carried on an enrolled staff-advance account."),
+    advance_cents: z
+      .number()
+      .int()
+      .min(0)
+      .optional()
+      .describe("Integer cents carried on advance_account_code. Ask the human; never derive it from a rate."),
   })
   .strict();
 
@@ -238,6 +254,39 @@ export function localAdjustmentRefusal(input: StartPeriodicAdjustmentWorkInput):
       "The settled part cannot exceed the obligation; check the figures with the human.",
       { constraint: "over_settled" });
   }
+  // #796 — the advance pair, mirroring the payment pair above AND 0194's own `advance_leg` and
+  // `distinct` rules. Asking for the missing half by NAME is the #721 shape: the tool says which
+  // particular it still needs BEFORE admission, rather than admitting a Work whose basis a later
+  // question could not repair.
+  const advance = input.advance_cents ?? 0;
+  if (advance > 0 && input.advance_account_code === undefined) {
+    return refuse("invalid_adjustment", "adjustment.advance_account_code",
+      "An advanced amount needs the staff-advance account it sits on.",
+      "Ask which enrolled staff-advance account carries it.", { constraint: "present" });
+  }
+  if (input.advance_account_code !== undefined && advance === 0) {
+    return refuse("adjustment_lines_mismatch", "adjustment.advance_cents",
+      "A staff-advance account is named but nothing is carried on it.",
+      "Ask the human how much of this obligation sits on that advance, in exact cents.",
+      { constraint: "advance_leg" });
+  }
+  if (input.advance_account_code !== undefined
+      && (input.advance_account_code.trim() === input.expense_account_code.trim()
+        || input.advance_account_code.trim() === input.liability_account_code.trim()
+        || input.advance_account_code.trim() === (input.payment_account_code ?? "").trim())) {
+    return refuse("invalid_adjustment", "adjustment.advance_account_code",
+      "The advance leg repeats another named account.",
+      "Name the staff-advance account separately from the expense, liability and payment accounts.",
+      { constraint: "distinct" });
+  }
+  // The liability leg takes the remainder, and 0194 refuses a named leg carrying nothing — so a
+  // remainder of zero is a refusal here rather than an admitted basis the database will reject.
+  if (settled + advance >= input.amount_cents) {
+    return refuse("adjustment_lines_mismatch", "adjustment.liability_account_code",
+      `The settled (${settled}) and advanced (${advance}) parts leave nothing owed on the liability account.`,
+      "Check the split with the human: the liability leg carries what is still owed.",
+      { constraint: "liability_leg" });
+  }
   return null;
 }
 
@@ -287,6 +336,11 @@ export function adjustmentFromInput(
     particulars_source: particularsSource ?? input.instruction,
   };
   if (input.payment_account_code !== undefined) out.payment_account_code = input.payment_account_code.trim();
+  // #796. `advance_account_code` IS a 0194 particular (`_assert_adjustment_basis` reads it and
+  // `_assert_adjustment_relationships` checks the enrolment); `advance_cents` is NOT, so it stays
+  // out of the stored object for the reason `settled_cents` does — a key the database never reads
+  // could carry no refusal and would be a figure nobody can be held to.
+  if (input.advance_account_code !== undefined) out.advance_account_code = input.advance_account_code.trim();
   return out;
 }
 
@@ -342,6 +396,7 @@ export function basisFromAdjustment(
   }
 
   const settled = input.settled_cents ?? 0;
+  const advance = input.advance_cents ?? 0;
   const lines: Array<Record<string, unknown>> = [
     {
       account_code: input.expense_account_code.trim(),
@@ -352,10 +407,21 @@ export function basisFromAdjustment(
     {
       account_code: input.liability_account_code.trim(),
       debit_cents: 0,
-      credit_cents: input.amount_cents - settled,
+      credit_cents: input.amount_cents - settled - advance,
       description: "obligation",
     },
   ];
+  // #796 — the advance leg, before the settlement leg, so the derived order reads the way an
+  // accountant states it: what is owed, what is carried on the advance, what was paid. 0194 only
+  // requires each NAMED leg to carry something; the order is this module's own.
+  if (advance > 0 && input.advance_account_code !== undefined) {
+    lines.push({
+      account_code: input.advance_account_code.trim(),
+      debit_cents: 0,
+      credit_cents: advance,
+      description: "staff advance",
+    });
+  }
   if (settled > 0 && input.payment_account_code !== undefined) {
     lines.push({
       account_code: input.payment_account_code.trim(),
@@ -373,6 +439,31 @@ export function basisFromAdjustment(
 }
 
 // ---------------------------------------------------------------------------------------------
+// THIS MODULE IS NOW FROZEN BY IMPORT, and that is a consequence worth stating where a later
+// hand will meet it. `chatTurn.v19.tools.ts` imports it, and `scripts/check-frozen-workflows.mjs`
+// freezes the transitive relative-import closure of every frozen workflow — so every byte below
+// is hash-locked in `frozen-workflows.json` from the moment v19 entered the manifest. A change to
+// a rule here is a change to a deployed body: it ships as a NEW module beside this one, wired by
+// a NEW chatTurn version, exactly as a frozen workflow file does. (The same thing happened to
+// `lib/work-trace.mjs` and `lib/capability-registry.mjs` when #631's claraWork_v3 imported them.)
+//
+// ---------------------------------------------------------------------------------------------
+// WHAT `chatTurn.v19` WIRED — recorded as done rather than owed. The list below was the
+// specification; `packages/runtime/workflows/chatTurn.v19.tools.ts` is the implementation and
+// `packages/runtime/tests/chat-turn-v19-tools.test.mjs` is the proof, including a rig arm that
+// hands the built `p_adjustment` and `p_basis` to `clara._assert_adjustment_basis` and
+// `clara._assert_adjustment_relationships` themselves.
+//
+// #796 CLOSED HERE: `payrollObligationInputSchema` gained `advance_account_code` (a 0194
+// particular, emitted into `p_adjustment`) AND `advance_cents` (a derivation input only, never
+// emitted — `settled_cents`'s own rule). The pair is the honest shape: 0194 refuses a NAMED leg
+// the entry never touches (`advance_leg`), so a code with no amount beside it could only ever be
+// admitted into a refusal, and `localAdjustmentRefusal` now asks for the missing half by name.
+// NOTE for whoever owns the direct form next: `apps/web/lib/work/periodic-adjustment.ts`'s
+// `derivedLines` still derives NO advance leg while the form offers the control, so a preparer
+// who picks a staff-advance account there gets 0194's `advance_leg` refusal at admission. That is
+// #643's, not v19's, and it is filed rather than silently fixed from this branch.
+//
 // WHAT `chatTurn.v19` MUST WIRE, and nothing more.
 //
 //   1. `tool({ inputSchema: startPeriodicAdjustmentWorkInputSchema, execute })` under the name

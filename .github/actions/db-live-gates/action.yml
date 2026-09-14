@@ -171,6 +171,40 @@ runs:
         RELAY_TEST_MODE=1 \
         WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGC_PORT/clara_wave_b_ci" \
           node tests/periodic-adjustment-e2e.mjs
+        # #631 — the WORK-EGRESS e2e, BEFORE the two builds below, because it is the only leg whose
+        # subject is what happens BEFORE a model is called. It drives the three windows nothing
+        # else reaches: an authorised run leaves a complete `dispatch -> model_call -> tool_call ->
+        # settle` trace on one run id with its authorisation consumed exactly once; a withdrawal
+        # taken through `clara.revoke_client_egress_purpose` refuses the NEXT run at the prepare,
+        # so no model is called at all and a Retry refuses identically without naming a provider;
+        # and the world-e2e leak probe, widened to `clara.work_execution_traces`, finds none of the
+        # NRIC / bank account / email / phone / JWT / api-key / DSN literals the admitted basis
+        # carries. It SKIPS CLEANLY (exit 0, printed reason) when migration 0195 is absent, so it
+        # is safe to merge before the DB half lands. It runs on the SHARED clara_wave_b_ci and leaves it
+        # clean, so the two-build drill (its own pristine clara_rt_test) and the world guard still
+        # come last.
+        PGPORT=$PGC_PORT \
+        PGDATABASE=clara_wave_b_ci \
+        RELAY_TEST_MODE=1 \
+        WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGC_PORT/clara_wave_b_ci" \
+          node tests/work-egress-e2e.mjs
+        # chatTurn_v19 (#643 + #644's shared successor) — the CHAT lane, after every Work-lane leg
+        # above (#631's egress leg included) and still before the two builds and the world guard. It drives the one path no unit cell can reach: a
+        # real HTTP chat session, a real HTTP turn, the FROZEN chatTurn_v19 body, its two new frozen
+        # tools, and then the reconciler's accounting_work arm — which is the only thing that can
+        # dispatch a chat-admitted Work, because a frozen file may not import the registry to call
+        # `start()`. Four legs: the periodic-adjustment Work admitted from conversation and run to a
+        # posted entry; that run served by the UNCHANGED clara-work/v2 bundle with the typed
+        # particulars never reaching its prompt (measured inside the model, not asserted about it);
+        # one governed knowledge record readable through the HUMAN door `clara.list_client_knowledge`;
+        # and both cards durable in `clara.chat_messages.parts`. It settles its own Work, so the
+        # inventory is clean for the guard below. It SKIPS CLEANLY (exit 0, printed reason) when
+        # migration 0194 or 0192 is absent.
+        PGPORT=$PGC_PORT \
+        PGDATABASE=clara_wave_b_ci \
+        RELAY_TEST_MODE=1 \
+        WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGC_PORT/clara_wave_b_ci" \
+          node tests/chat-turn-v19-e2e.mjs
         # #637 — the TWO-BUILD cutover e2e, LAST on this rig because it is the only step here that
         # BUILDS A SECOND IMAGE. It copies the runtime package to <repo>/.scratch/two-build/previous,
         # rewrites that copy's registry to pin the PREDECESSOR claraWork body, deletes the successor

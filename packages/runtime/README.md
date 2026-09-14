@@ -419,7 +419,16 @@ same will eventually ship on the second one. The database target comes from the 
 (`DATABASE_URL` / `WORKFLOW_POSTGRES_URL`, else libpq `PG*`), and a split between two present
 sources fails closed.
 
-It counts **two** things, because it is two questions. Non-terminal `workflow.workflow_runs`,
+It counts **three** things, because it is three questions. The third is the DATABASE's own vote,
+and it is the one no census can see: from `0195_work_egress_purpose_and_execution_trace` on, a
+target that does not carry `claraWork_v3` is REFUSED with reason `frontier_requires_body`,
+however clean the estate is — 0195's posting core requires a consumed `accounting_work` egress
+authorisation, no other body can obtain one, and 0195 grandfathers pre-v3 bundles past that wall,
+so a pre-v3 image would run the whole Work lane with the wall in force and nothing subject to it.
+The rule table lives in `lib/rollback-preflight.mjs` (`FRONTIER_BODY_RULES`), it is global — no
+`--scope` clears it — and it is not drainable: ship a target that carries the named body.
+
+The other two are the censuses. Non-terminal `workflow.workflow_runs`,
 grouped by name with the parked body derived from the row itself; **and** live tasks bound to NO
 run, across both tables that carry that shape. The second is invisible to a run census by
 construction — a task exists from the moment its admission commits and the run only exists once a

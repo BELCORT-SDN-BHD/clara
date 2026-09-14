@@ -270,6 +270,18 @@ test("[0020 §8]: the four purpose-discriminated event types are registered — 
   const betaApplied = (await rootQuery(
     "select count(*)::int as n from clara.schema_migrations where version ~ 'f_a7_beta_filing_verb$'"
   )).rows[0].n === 1;
+  // [0195 / #631] widens the same closed set a third way: the SIXTH typed purpose,
+  // accounting_work, is DERIVED (not evidenced), so its lifecycle needs its own two names rather
+  // than reusing egress.purpose_consent_granted/revoked, which the 0020 payload shape ties to an
+  // evidence document — egress.purpose_consent_derived (the model-egress authority minted from
+  // the firm's legal acceptance) and egress.purpose_consent_restored (an owner's
+  // clara.restore_client_egress_purpose re-deriving a withdrawn one). Same gating discipline as
+  // gamma/beta above: keyed on the migration's STABLE STEM so a pre-#631 frontier leg
+  // (`db-slice-frontiers`) still sees the closed set as it stood before 0195, rather than reding
+  // on a two-name diff that says nothing about 0020's own closed-set claim.
+  const w631Applied = (await rootQuery(
+    "select count(*)::int as n from clara.schema_migrations where version ~ 'work_egress_purpose_and_execution_trace$'"
+  )).rows[0].n === 1;
   const expected = [
     "egress.consent_granted", "egress.consent_revoked",
     ...(gammaApplied ? [
@@ -278,12 +290,20 @@ test("[0020 §8]: the four purpose-discriminated event types are registered — 
     ] : []),
     ...(betaApplied ? ["egress.misrouted"] : []),
     "egress.purpose_activated", "egress.purpose_consent_granted",
+    ...(w631Applied ? ["egress.purpose_consent_derived", "egress.purpose_consent_restored"] : []),
     "egress.purpose_consent_revoked", "egress.purpose_deactivated",
   ].sort();
   assert.deepEqual(egress, expected,
     `the two legacy + four 0020 typed${gammaApplied ? " + four F-A7-gamma firm-narrow" : ""}`
-    + `${betaApplied ? " + one F-A7-beta egress.misrouted" : ""} egress event types (got ${egress.join(",")})`);
+    + `${betaApplied ? " + one F-A7-beta egress.misrouted" : ""}`
+    + `${w631Applied ? " + two #631/0195 derived-purpose (purpose_consent_derived/restored)" : ""}`
+    + ` egress event types (got ${egress.join(",")})`);
   for (const n of PURPOSE_EVENT_TYPES) assert.ok(egress.includes(n), `${n} registered`);
+  if (w631Applied) {
+    for (const n of ["egress.purpose_consent_derived", "egress.purpose_consent_restored"]) {
+      assert.ok(egress.includes(n), `${n} registered — 0195 (#631)'s derived-purpose lifecycle name`);
+    }
+  }
 });
 
 // ===========================================================================

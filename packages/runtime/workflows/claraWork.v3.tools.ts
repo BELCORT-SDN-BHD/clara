@@ -1,0 +1,309 @@
+// @frozen
+//
+// FROZEN — part of the claraWork_v3 closure (#631). THE SERVER-OWNED TOOL SET, v3.
+//
+// THE ROSTER IS AC1's OWN SUBJECT, AND IT IS A FIXED OBJECT LITERAL. `buildClaraWorkToolsV3` at
+// the foot of this file returns three keys, and the three names come from the HASHED BUNDLE's own
+// roster (`CLARA_WORK_TOOL_NAMES`, re-exported from v1's prompt module where the string literals
+// are declared). There is no path — none — by which a string arriving from a basis, an answer, a
+// source reference, a wiki page, a Knowledge record or the model's own output can add a key to
+// that object, widen one of these zod schemas, or change which database door a tool reaches. That
+// is the STRUCTURAL half of "prompt, file, wiki and imported OKF content cannot register tools,
+// widen scope or grant authority"; `packages/runtime/lib/capability-registry.mjs` is the
+// declarative half, and the negative cell in tests/work-bundle.test.mjs drives a tool-shaped JSON
+// declaration through a basis and proves the roster does not move.
+//
+// THE CHART READ IS v1's, REACHED BY IMPORT — `runListAccounts`, its credential path, its bounded
+// transient retry, its budget ledger and its "a failed required read is TERMINAL, never
+// `{accounts: []}`" posture — for the reason v2's header gives: importing a frozen implementation
+// keeps one body for one act.
+//
+// THE RECORDING TOOL IS COPIED, AND THE COPY IS FORCED RATHER THAN CHOSEN, for exactly the reason
+// v2's header states at length: the bundle digest this tool hands to
+// `clara.wake_record_journal_entry` is a CONSTANT read from its own bundle module, and a v3 run
+// calling v2's body would write v2's digest into `clara.operation_receipts.bundle_digest` while
+// `clara.accounting_work.bundle` said v3 — two records of one fact, disagreeing, in the two places
+// an auditor would look. Everything else about the body is byte-carried: the one wake wrapper, the
+// prior-refusal gate, the classifier routing (now v3's, which is v2's plus three pairs) and the
+// crash barrier.
+//
+// `ask_question` CARRIES NO `execute`, exactly as v1's and v2's do not: calling this tool IS the
+// act. The segment stops on the tool CALL and the WORKFLOW opens the shared question and parks the
+// run on a WDK hook. A tool with an `execute` would let the model open a question inside the model
+// loop, where the workflow could not park on it.
+//
+// WHAT IS NOT HERE, DELIBERATELY: the egress dispatch. Preparing and consuming the
+// `accounting_work` authorisation is the SEGMENT's act, not a tool's — it happens in
+// `claraWork.v3.impl.ts` immediately before `agent.generate`, where the model cannot reach it, ask
+// for it, or be told it succeeded when it did not (the wiki-projection precedent,
+// lib/wiki-projection.mjs:484-505).
+
+import { tool } from "ai";
+import { z } from "zod";
+import type { PgExec } from "./chatTurn.v15.infra.js";
+import { classifyWorkError } from "./claraWork.v3.errors.js";
+import type { ClaraWorkBudgets } from "./claraWork.v1.bundle.js";
+// The three tool NAMES come from v1's PROMPT module, where the string literals are declared —
+// never from v1's tools module, which merely re-exports them. The parts-parity census resolves a
+// computed key by following the import to a literal and refuses a chain it cannot follow, so the
+// re-export hop is the difference between a classifiable `[LIST_ACCOUNTS_TOOL]:` key and a refused
+// one. Measured, not stylistic.
+import {
+  ASK_QUESTION_TOOL,
+  LIST_ACCOUNTS_TOOL,
+  RECORD_JOURNAL_ENTRY_TOOL,
+} from "./claraWork.v1.prompt.js";
+import {
+  listAccountsInputSchema,
+  recordJournalEntryInputSchema,
+  routeWriteFailure,
+  runListAccounts,
+  workScoped,
+  workTestFault,
+  type PostedEffect,
+  type RecordJournalEntryInput,
+  type RecordJournalEntryResult,
+  type WorkBudgetLedger,
+  type WorkToolCtx,
+} from "./claraWork.v1.tools.js";
+import { CLARA_WORK_BUNDLE_V3_DIGEST } from "./claraWork.v3.bundle.js";
+
+export {
+  ASK_QUESTION_TOOL, LIST_ACCOUNTS_TOOL, RECORD_JOURNAL_ENTRY_TOOL,
+  listAccountsInputSchema, recordJournalEntryInputSchema,
+};
+export type { RecordJournalEntryInput, WorkBudgetLedger, WorkToolCtx };
+
+/** The field kinds a work question may declare. THE SAME FIVE `clara._assert_work_question_fields`
+ *  admits, spelled here so the model is refused before a round trip rather than after one. */
+export const WORK_FIELD_KINDS = ["text", "money", "date", "choice", "account"] as const;
+
+/** ONE option of a `choice` field. Both halves are required and neither may be blank: an option
+ *  with no label is a radio button with no name, and an option with no value is one the answer
+ *  door can never match. */
+export const workQuestionOptionSchema = z
+  .object({
+    value: z.string().trim().min(1).max(200).describe("The value the answer must carry for this option."),
+    label: z.string().trim().min(1).max(200).describe("What a human reads on the control."),
+  })
+  .strict();
+
+/**
+ * ONE typed field of a work question.
+ *
+ * `key` IS `^[a-z][a-z0-9_]{0,63}$`, AND IT IS THE SAME REGEX THE DATABASE ENFORCES. It is the
+ * answer object's own key, the web form's control name, and the path a validation refusal names
+ * (`detail.field`) so the browser can focus the first invalid control. A key that differed between
+ * the two implementations would make that focus land on nothing.
+ *
+ * `options` is required for `choice` and forbidden for everything else, expressed as a refinement
+ * rather than a discriminated union: the model writes ONE object shape, and a union would make its
+ * failure message name a branch rather than a field.
+ */
+export const workQuestionFieldSchema = z
+  .object({
+    key: z.string().regex(/^[a-z][a-z0-9_]{0,63}$/).describe("The answer key: lower snake_case, unique within this question."),
+    label: z.string().trim().min(1).max(200).describe("The question this one field asks, as a human reads it."),
+    kind: z.enum(WORK_FIELD_KINDS).describe("text | money (integer cents) | date (YYYY-MM-DD) | choice | account (a code from this client's chart)."),
+    required: z.boolean().optional().describe("Defaults to true. Mark a field optional only when you can finish without it."),
+    options: z.array(workQuestionOptionSchema).min(2).max(20).optional().describe("Required for kind='choice', forbidden otherwise."),
+    unit: z.string().trim().min(1).max(40).optional().describe("A unit shown beside the control, e.g. 'MYR cents'."),
+  })
+  .strict()
+  .superRefine((field, ctx) => {
+    if (field.kind === "choice" && field.options === undefined) {
+      ctx.addIssue({ code: "custom", path: ["options"], message: "a choice field must declare its options" });
+    }
+    if (field.kind !== "choice" && field.options !== undefined) {
+      ctx.addIssue({ code: "custom", path: ["options"], message: "only a choice field may declare options" });
+    }
+  });
+
+/**
+ * v2's `ask_question` input.
+ *
+ * ONE TO SIX FIELDS. The lower bound is what makes the shared form possible at all — a question
+ * with no fields is prose, and prose cannot be answered from Needs-you or from a Clara card. The
+ * upper bound is what keeps the bounded stepper bounded: six related facts is already a long walk
+ * for a person who came to look at one Work, and a seventh is a sign the run should have asked a
+ * narrower question.
+ *
+ * `reason` IS REQUIRED, and it is the one thing v2 asks the model for that v1 did not. #629 asks
+ * every surface to render "the missing fact, reason and supporting source"; a reason the model did
+ * not supply is a reason no surface can show, and "the agent needs more information" is not one.
+ */
+/**
+ * WHERE THE MISSING FACT WAS SUPPOSED TO BE — the "supporting source" #629 asks every surface to
+ * render beside the question and the reason.
+ *
+ * THREE KINDS, CLOSED, because they are the only three a Work run can actually be looking at: the
+ * DOCUMENT it was admitted against, the CHAT TASK that started it, or a LINE of the admitted basis.
+ * An open-ended string would be a place for the model to write prose that no surface could resolve
+ * to anything; a closed kind plus an optional id is a thing a person can be shown and, later, a
+ * thing a surface can link to.
+ *
+ * OPTIONAL, and honestly so: a question about a fact that simply is not in the basis has no source,
+ * and inventing one would be worse than an absent field. The database stores it as an opaque jsonb
+ * object (0180's `source_ref` column, CHECKed to be an object or null) and neither validates the
+ * kind nor resolves the id — this schema is the wall, and the column is the record.
+ */
+export const workQuestionSourceRefSchema = z
+  .object({
+    kind: z.enum(["document", "chat_task", "basis_line"]).describe("What kind of thing supports this question."),
+    id: z.string().trim().min(1).max(200).optional().describe("Its identifier, where you have one (a document id, a task id, a line number)."),
+  })
+  .strict();
+
+export const askQuestionInputSchemaV3 = z
+  .object({
+    question: z.string().trim().min(1).max(2000).describe("The single decision or fact you need a human to supply."),
+    reason: z.string().trim().min(1).max(2000).describe("WHY you cannot proceed without it, naming what you already read or were given."),
+    context: z.string().max(4000).optional().describe("What you already know, so the human is not asked to repeat it."),
+    source_ref: workQuestionSourceRefSchema.optional().describe("The document, chat task or basis line this question is about, where there is one."),
+    fields: z.array(workQuestionFieldSchema).min(1).max(6).describe("One to six typed fields the answer must fill."),
+  })
+  .strict();
+
+export type AskQuestionInputV3 = z.infer<typeof askQuestionInputSchemaV3>;
+
+// ---------------------------------------------------------------------------
+// The recording tool, restated with THIS bundle's digest (see this file's header).
+// ---------------------------------------------------------------------------
+
+const TRANSIENT_BACKOFF_MS = [120, 360, 900];
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** v1's `withTransientRetry`, restated because v1 does not export it. Same ledger, same bound: at
+ *  most `budgets.transientRetries` retries across the WHOLE segment, so three tool calls cannot
+ *  each spend three. Every non-transient classification is rethrown for the caller to route. */
+async function withTransientRetry<T>(ledger: WorkBudgetLedger, budgets: ClaraWorkBudgets, fn: () => Promise<T>): Promise<T> {
+  for (;;) {
+    try {
+      return await fn();
+    } catch (error) {
+      const classification = classifyWorkError(error);
+      if (classification.kind !== "transient") throw error;
+      if (ledger.transientRetries >= budgets.transientRetries) throw error;
+      const attempt = ledger.transientRetries;
+      ledger.transientRetries += 1;
+      await sleep(TRANSIENT_BACKOFF_MS[Math.min(attempt, TRANSIENT_BACKOFF_MS.length - 1)] ?? 900);
+    }
+  }
+}
+
+/** THE ONE WRITE. Exactly one wake wrapper call; the database decides everything. Byte-carried
+ *  from v1 except for the bundle digest, which is v2's. */
+export async function runRecordJournalEntryV3(
+  ctx: WorkToolCtx,
+  ledger: WorkBudgetLedger,
+  budgets: ClaraWorkBudgets,
+  input: RecordJournalEntryInput,
+): Promise<RecordJournalEntryResult> {
+  if (ledger.toolCalls >= budgets.toolCalls) {
+    ledger.exhausted = "toolCalls";
+    if (ledger.terminal === null) ledger.terminal = { kind: "budget_exhausted", detail: "toolCalls" };
+    return { ok: false, terminal: true, refusal: { code: "budget_exhausted", reason: "toolCalls", message: "This Work reached its tool-call budget before recording the entry." } };
+  }
+  ledger.toolCalls += 1;
+
+  // A refusal or a conflict already ended this run. The model does not get a second attempt with
+  // mutated parameters — spec §4, and the reason this check is here rather than only in the stop
+  // condition: a single model step can emit two tool calls, and a stop condition only runs BETWEEN
+  // steps.
+  if (ledger.terminal !== null && (ledger.terminal.kind === "refusal" || ledger.terminal.kind === "conflict")) {
+    const prior = ledger.refusal ?? { code: "CLR10", reason: null, message: "This operation was already refused." };
+    return { ok: false, terminal: true, refusal: prior };
+  }
+
+  let receipt: Record<string, unknown> | null;
+  try {
+    receipt = await withTransientRetry(ledger, budgets, () =>
+      workScoped(ctx, (c: PgExec) =>
+        c
+          .query(
+            `select clara.wake_record_journal_entry($1::uuid, $2::uuid, $3::text, $4::jsonb,
+               $5::text, $6::text, $7::text) as r`,
+            [
+              ctx.clientId,
+              ctx.workId,
+              ctx.logicalOpId,
+              JSON.stringify(input.basis),
+              CLARA_WORK_BUNDLE_V3_DIGEST,
+              ctx.runId,
+              input.rationale,
+            ],
+          )
+          .then((r) => (r.rows[0]?.r ?? null) as Record<string, unknown> | null),
+      ),
+    );
+  } catch (error) {
+    return routeWriteFailure(ledger, budgets, classifyWorkError(error));
+  }
+
+  if (!receipt || receipt.posted !== true) {
+    const classification = classifyWorkError({ code: "internal", message: "the recording verb returned no receipt" });
+    ledger.terminal = { kind: "refusal", detail: classification };
+    ledger.refusal = { code: classification.code, reason: classification.reason, message: classification.message };
+    return { ok: false, terminal: true, refusal: ledger.refusal };
+  }
+
+  const posted: PostedEffect = {
+    entry_id: String(receipt.entry_id ?? ""),
+    receipt_id: String(receipt.receipt_id ?? ""),
+    revision_token: receipt.revision_token == null ? null : String(receipt.revision_token),
+    logical_op_id: String(receipt.logical_op_id ?? ctx.logicalOpId),
+    replayed: receipt.replayed === true,
+  };
+  ledger.posted = posted;
+  ledger.terminal = { kind: "posted", detail: posted };
+
+  // THE CRASH BARRIER (test mode only). The database has COMMITTED; the WDK step has not
+  // checkpointed. Exiting here is the only way to produce that window deterministically.
+  if (workTestFault() === "exit_after_commit") {
+    console.error(`[clara-runtime] CLARA_WORK_TEST_FAULT=exit_after_commit — exiting after commit, before checkpoint (work=${ctx.workId})`);
+    process.exit(137);
+  }
+
+  return { ok: true, posted, replayed: posted.replayed };
+}
+
+/** Build the closed tool set for ONE v3 segment. The names come from the hashed bundle's own
+ *  roster, so a tool this file could build but the bundle does not name cannot exist. */
+export function buildClaraWorkToolsV3(ctx: WorkToolCtx, ledger: WorkBudgetLedger, budgets: ClaraWorkBudgets) {
+  return {
+    [LIST_ACCOUNTS_TOOL]: tool({
+      description:
+        "Read this client's chart of accounts with their current approved debit and credit totals. " +
+        "Call this FIRST. It is a required read: if it fails, stop and report that the chart could not be read — " +
+        "never continue as though the chart were empty.",
+      inputSchema: listAccountsInputSchema,
+      execute: () => runListAccounts(ctx, ledger, budgets),
+    }),
+    [RECORD_JOURNAL_ENTRY_TOOL]: tool({
+      description:
+        "Record the admitted journal entry. Echo the basis you were given VERBATIM — the database re-derives its " +
+        "digest and refuses a changed one. The database rechecks the initiating human's current role and client " +
+        "access, the posting period, every account code, the control-account rule and the exact-cent balance AT " +
+        "COMMIT, then returns the entry id and the operation receipt. A refusal is final for this run: report the " +
+        "named reason and stop, never call this tool again with different figures.",
+      inputSchema: recordJournalEntryInputSchema,
+      execute: (input: RecordJournalEntryInput) => runRecordJournalEntryV3(ctx, ledger, budgets, input),
+    }),
+    // NO `execute`, exactly as v1's has none: calling this tool is the ACT. The segment stops on
+    // the call, the workflow opens the shared question through clara.open_work_question and parks
+    // the run on a WDK hook until a human answers it, it expires, or the Work is cancelled.
+    [ASK_QUESTION_TOOL]: tool({
+      description:
+        "Ask the human for the ONE fact or decision you are missing, instead of guessing. Give the question, the " +
+        "REASON it blocks you, the SUPPORTING SOURCE where there is one (the document, chat task or basis line " +
+        "this is about), and one to six TYPED fields the answer must fill (text, money in integer cents, " +
+        "date, choice with options, or an account code from this client's chart). This parks the Work; the answer " +
+        "is rechecked against the authority that is current when they answer. Do not use this to confirm figures " +
+        "you were already given.",
+      inputSchema: askQuestionInputSchemaV3,
+    }),
+  };
+}

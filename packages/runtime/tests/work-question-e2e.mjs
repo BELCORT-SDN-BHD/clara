@@ -181,7 +181,10 @@ function spawnServe(port, extra = {}) {
   // across two. A per-chunk regex reads a banner cut by a chunk boundary as never logged — see
   // docs/plan/active/refresh-wave-2026-09-14/reports/wave2-ci-two-build-banner.md.
   const ingest = (line) => {
-    const m = /\[clara-runtime\] bundle clara-work\/v2 digest=([0-9a-f]{64})/.exec(line);
+    // #631 REPOINTED IT AGAIN, v2 -> v3 (the egress gate and the execution trace), so the SERVING
+    // banner is v3's. v1 and v2 still print for the parked-run census; this captures the one the
+    // image DISPATCHES, which is the digest the Work row and the receipt record.
+    const m = /\[clara-runtime\] bundle clara-work\/v3 digest=([0-9a-f]{64})/.exec(line);
     if (m && !state.banner) state.banner = m[1];
     if (!state.serving) {
       const serving = /\[clara-runtime\] serving .*/.exec(line);
@@ -213,6 +216,7 @@ function spawnServe(port, extra = {}) {
   child.stdout.on("end", () => {
     if (pending) ingest(pending);
     pending = "";
+
   });
   child.stderr.setEncoding("utf8");
   child.stderr.on("data", (d) => {
@@ -451,7 +455,7 @@ async function main() {
   try {
     await waitReady(PORT_A, 60000, a);
     assert.ok(a.state.banner, "C88.8: the world-start banner names the serving bundle digest");
-    console.log(`[wq-e2e] engine A ready on ${PORT_A}; serving clara-work/v2 digest=${a.state.banner}`);
+    console.log(`[wq-e2e] engine A ready on ${PORT_A}; serving clara-work/v3 digest=${a.state.banner}`);
 
     // ---- 1. the run asks -------------------------------------------------
     const one = await seedClient("wq-ask");
