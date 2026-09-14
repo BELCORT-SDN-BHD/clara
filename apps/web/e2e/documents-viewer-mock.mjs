@@ -204,6 +204,98 @@ const FILINGS = [
  *  still open. `confirm_attribution_candidate` disposes it, and the walk's
  *  confirm-and-file leg asserts the "Needs your confirmation" cell re-read and
  *  lost the row — the D1 half. */
+/** #624 — `clara.get_document_state`'s own answer for each of this lane's two documents.
+ *
+ *  THE TWO ARE DELIBERATELY OPPOSITE, and that is what makes the walk discriminate:
+ *
+ *    * the PDF is a facts-SUPPORTED pair whose six-term identity FAILED. It proves that a
+ *      failing arithmetic check names itself, leaves the facts readable, and leaves the other
+ *      three axes untouched — extraction is still `done`, custody is still verified.
+ *    * the XML is an e-invoice whose bytes were stored but never parsed. It proves the opposite
+ *      corner: a document with no facts at all must never borrow the PDF's success wording.
+ *
+ *  Shaped from the REAL RPC's jsonb (packages/db/migrations/0191_document_capability_registry.sql
+ *  section S8), not invented: every key here exists in that body's `jsonb_build_object`. */
+const DOCUMENT_STATES = {
+  [DOCS.docPdf]: {
+    document_id: DOCS.docPdf, document_kind: "invoice", mime_type: "application/pdf", format: "pdf",
+    capability: {
+      format: "pdf", document_kind: "invoice", mime_type: "application/pdf",
+      custody: "supported", byte_extraction: "supported",
+      typed_facts: "supported", business_operation: "supported",
+      engine_id: "llm-openai:gpt-5.6-terra:v2", engine_byte: "azure-di:prebuilt-layout:2024-11-30",
+      registry_version: 1,
+      basis: "Bytes are sealed at intake and read by azure-di:prebuilt-layout:2024-11-30. Typed facts are persisted with source regions by llm-openai:gpt-5.6-terra:v2. A filed document of this kind carries a business operation Clara can drive from those facts.",
+      limits: { invoice_line_items: "planned" }, known_pair: true, kind_known: true,
+    },
+    custody: {
+      state: "verified", sha256: "a".repeat(64), byte_size: 20480,
+      bytes_verified_at: "2026-04-01T00:00:01.000Z", legal_hold: false, legal_hold_reason: null,
+      retention_state: "unanchored", retain_until: null, capability: "supported",
+    },
+    byte_extraction: {
+      status: "done", page_count: 1, capability: "supported",
+      engine_id: "azure-di:prebuilt-layout:2024-11-30",
+      tasks: [{
+        id: `task-${DOCS.docPdf}`, lane: "ocr", status: "done",
+        engine_id: "azure-di:prebuilt-layout:2024-11-30", version_n: 1, attempt_count: 1,
+        error_code: null, finished_at: "2026-04-01T00:00:02.000Z",
+      }],
+    },
+    facts: {
+      capability: "supported", limits: { invoice_line_items: "planned" },
+      extractions: [{
+        id: DOCS.extraction, engine_kind: "llm_text_facts", engine_id: "llm-openai:gpt-5.6-terra:v2",
+        version_n: 1, status: "done", superseded_by: null,
+        extracted_at: "2026-04-01T00:00:02.000Z", region_count: 4,
+      }],
+      validations: [{
+        check_name: "invoice.six_term_identity", outcome: "fail",
+        detail: { total_cents: 123450, total_excl_tax_cents: 116000, tax_total_cents: 6960, residual_cents: -490 },
+        extraction_id: DOCS.extraction, statement_id: null,
+        engine_id: "llm-openai:gpt-5.6-terra:v2", evaluated_at: "2026-04-01T00:00:03.000Z",
+      }],
+    },
+    operation: { capability: "supported", codeable_kind: true, entries: [], statements: [] },
+    lineage: {
+      sha256: "a".repeat(64), intakes: [], corrections: [], authoritative_extraction_id: null,
+      filings: [{
+        id: DOCS.filingPdf, client_id: DOCS.clientId, filed_at: "2026-04-02T09:00:00.000Z",
+        basis: "human", retired_at: null, retirement_reason: null, correction_id: null,
+      }],
+    },
+  },
+  [DOCS.docXml]: {
+    document_id: DOCS.docXml, document_kind: "e_invoice_xml", mime_type: "application/xml", format: "xml",
+    capability: {
+      format: "xml", document_kind: "e_invoice_xml", mime_type: "application/xml",
+      custody: "supported", byte_extraction: "supported",
+      typed_facts: "supported", business_operation: "supported",
+      engine_id: "clara-myinvois:v1", engine_byte: "clara-myinvois:v1", registry_version: 1,
+      basis: "Bytes are sealed at intake and read by clara-myinvois:v1. Typed facts are persisted with source regions by clara-myinvois:v1. A filed document of this kind carries a business operation Clara can drive from those facts.",
+      limits: { invoice_line_items: "planned" }, known_pair: true, kind_known: true,
+    },
+    custody: {
+      state: "verified", sha256: "b".repeat(64), byte_size: 4096,
+      bytes_verified_at: "2026-04-02T00:00:01.000Z", legal_hold: false, legal_hold_reason: null,
+      retention_state: "unanchored", retain_until: null, capability: "supported",
+    },
+    byte_extraction: {
+      status: "stored_unparsed", page_count: null, capability: "supported",
+      engine_id: "clara-myinvois:v1", tasks: [],
+    },
+    facts: { capability: "supported", limits: { invoice_line_items: "planned" }, extractions: [], validations: [] },
+    operation: { capability: "supported", codeable_kind: true, entries: [], statements: [] },
+    lineage: {
+      sha256: "b".repeat(64), intakes: [], corrections: [], authoritative_extraction_id: null,
+      filings: [{
+        id: DOCS.filingXml, client_id: DOCS.clientId, filed_at: "2026-04-03T09:00:00.000Z",
+        basis: "human", retired_at: null, retirement_reason: null, correction_id: null,
+      }],
+    },
+  },
+};
+
 const state = { candidateOpen: true, recoveringReads: 0 };
 
 export function resetDocumentsViewer() {
@@ -436,6 +528,13 @@ export async function handleDocumentsViewerSupabase(request, response, path, url
         regions: REGIONS,
         max_chars: body.p_max_chars ?? 20000,
       }, cors);
+    }
+
+    if (verb === "get_document_state") {
+      const body = await readJson(request);
+      const state624 = DOCUMENT_STATES[body.p_document];
+      if (!state624) return false;
+      return json(sendJson, response, state624, cors);
     }
 
     if (verb === "confirm_attribution_candidate") {

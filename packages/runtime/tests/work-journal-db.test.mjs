@@ -539,7 +539,11 @@ async function reachableCodes() {
        from walk w join pg_proc p on p.oid = w.fn`,
     // #630 widens the seed to the two new doors on the same surface: the census's claim is
     // "every code the Work ROUTES can raise has an HTTP status", and there are now four routes.
-    [["admit_journal_work", "retry_accounting_work", "cancel_accounting_work", "take_over_accounting_work"]],
+    // #643 adds the fifth: `POST /api/work/periodic-adjustment` reaches
+    // `clara.admit_periodic_adjustment_work`, whose own call graph raises the closed-period
+    // CLR19 at admission — a code no earlier door on this surface could reach before a run.
+    [["admit_journal_work", "retry_accounting_work", "cancel_accounting_work", "take_over_accounting_work",
+      "admit_periodic_adjustment_work"]],
   );
   const triggers = await rig.rootQuery(
     `select distinct p.oid::regprocedure::text as fn, p.prosrc

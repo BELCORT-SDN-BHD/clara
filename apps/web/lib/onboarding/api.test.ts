@@ -12,6 +12,7 @@ import {
   resolveOnboardingPlanItem,
   commitClientOnboarding,
   cancelClientOnboarding,
+  promotePlanAnswersToKnowledge,
   isDoorRefusal,
 } from "./api";
 import type { SessionTokenAccessor } from "@/lib/session";
@@ -228,6 +229,46 @@ test("cancelClientOnboarding's CLR10 not-open refusal surfaces verbatim", async 
         assert.ok(isDoorRefusal(e));
         assert.equal((e as import("./api").DoorRefusal).code, "CLR10");
         assert.equal((e as import("./api").DoorRefusal).message, "client onboarding is not open");
+        return true;
+      },
+    );
+  });
+});
+
+// #644 / 0192 — the promotion door. The client-plan caller (OnboardingChecklistCard,
+// straight after the commit it just made) must never ask for FIRM scope: a firm-wide
+// default is an explicit admin act on a FIRM plan, and the door refuses
+// `firm_scope_not_applicable` for a client plan that asks.
+test("promotePlanAnswersToKnowledge posts the plan, a fresh op_key and firm scope FALSE by default", async () => {
+  const { impl, seen } = captureFetch({
+    plan_id: "p1", scope_kind: "client", client_id: "c1",
+    promoted: [{ item_key: "msic", knowledge_key: "msic", record_id: "r1" }],
+    skipped: [], withheld: [], knowledge_version: 4,
+  });
+  await withMockedFetch(impl, async () => {
+    const out = await promotePlanAnswersToKnowledge("p1", { session: fakeSession() });
+    assert.equal(out.promoted.length, 1, "the receipt must reach the caller unchanged");
+    assert.equal(out.knowledge_version, 4);
+  });
+  const s = seen.first();
+  assert.equal(s.fn, "promote_plan_answers_to_knowledge");
+  assert.equal(s.body.p_plan, "p1");
+  assert.equal(s.body.p_promote_firm_scope, false, "a client-plan caller never asks for firm scope");
+  assert.match(String(s.body.p_op_key), /^[0-9a-f-]{36}$/, "a fresh UUID op_key per attempt");
+});
+
+test("promotePlanAnswersToKnowledge's refusal survives VERBATIM — a projection failure is news, not a swallowed silence", async () => {
+  const { impl } = captureFetch(
+    { code: "CLR10", message: "only a committed onboarding plan promotes its answers", details: '{"reason":"plan_not_committed"}' },
+    400,
+  );
+  await withMockedFetch(impl, async () => {
+    await assert.rejects(
+      () => promotePlanAnswersToKnowledge("p1", { session: fakeSession() }),
+      (e: unknown) => {
+        assert.ok(isDoorRefusal(e), "a CLR refusal must arrive as a DoorRefusal");
+        assert.equal((e as { code: string }).code, "CLR10");
+        assert.match((e as { message: string }).message, /only a committed onboarding plan/);
         return true;
       },
     );

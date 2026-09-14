@@ -51,6 +51,9 @@
 // entry waiting to be found.
 
 import ts from "typescript";
+// #637 — `isTestPath` is re-exported below for consumers, but a `export { x } from` clause
+// creates NO local binding; checkManifestPaths needs the real one in scope.
+import { isTestPath } from "./freeze-lint-enqueue.mjs";
 import { blankSource, REGISTRY_REL } from "./freeze-lint-lex.mjs";
 
 export { blankSource, REGISTRY_REL };
@@ -298,6 +301,166 @@ const SAFE_WORKFLOWS_DERIVATIONS = new Set([
   "Object.entries(workflows)",
 ]);
 
+/**
+ * #637 (capability (g)) — THE PROVENANCE EXPORTS, and the ONE shape each may take.
+ *
+ * `workflowBodies` (which bodies does this image carry) and `workflowPins` (which body does
+ * each class dispatch to) are read by three surfaces that must never disagree: the single boot
+ * line in plugins/startWorld.ts, `/api/build-info`'s `bodies`/`pins`, and the rollback
+ * preflight. They exist because `workflowNames` only ever answered "which CLASSES", which is
+ * not a question a cutover or a rollback asks.
+ *
+ * They must be INERT DATA — `Object.freeze` over a literal whose leaves are STRING literals —
+ * and the rule is not decoration. A frozen, class-keyed table of real workflow FUNCTIONS would
+ * be a SECOND dynamic-dispatch view of the registry, and capability (e) trusts any identifier
+ * imported from registry.ts by name alone; that trust is sound only because exactly one such
+ * view exists and is provably `workflows` itself (MUST D, above). Strings add nothing to that
+ * surface. FAIL-CLOSED throughout: a wrong shape, a non-literal leaf, a spread, a computed key,
+ * a shorthand property, or the name arriving through any export shape OTHER than
+ * `export const <name> = ...` is a violation, never a skip. ABSENCE is not a violation (a
+ * pre-#637 registry is genuinely N/A) — presence in the real file is pinned by the selftest's
+ * own canary and by tests/registry-view.test.mjs.
+ */
+const PROVENANCE_EXPORTS = new Map([
+  ["workflowBodies", "array"],
+  ["workflowPins", "object"],
+]);
+
+/** `Object.freeze(<arg>)` and nothing else — returns the single argument node, or null. */
+function frozenLiteralArgument(initializer) {
+  if (!initializer || !ts.isCallExpression(initializer)) return null;
+  const callee = initializer.expression;
+  if (!ts.isPropertyAccessExpression(callee)) return null;
+  if (!ts.isIdentifier(callee.expression) || callee.expression.text !== "Object") return null;
+  if (!ts.isIdentifier(callee.name) || callee.name.text !== "freeze") return null;
+  if (initializer.arguments.length !== 1) return null;
+  return initializer.arguments[0];
+}
+
+/**
+ * Capability (g). Pure, HEAD-only. Returns violation strings.
+ * @param {string|null} headSrc
+ * @param {{consts:Array<{name:string,initializerText:string}>, reexports:Array<{exported:string}>}|null} [parsedIn]
+ * @param {string} [label]
+ */
+export function checkRegistryProvenanceExports(headSrc, parsedIn = null, label = "registry@HEAD") {
+  const violations = [];
+  if (headSrc == null) return violations;
+  const parsed = parsedIn ?? parseRegistryExports(headSrc, label);
+  const sourceFile = ts.createSourceFile("registry.ts", headSrc, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+
+  // Every top-level `export const <provenance name> = ...` declarator, by name, with its own
+  // initializer NODE (parseRegistryExports keeps only the initializer TEXT, and a shape rule
+  // cannot be enforced on text without becoming the regex-vs-TypeScript arms race this module's
+  // own header retired twice).
+  const declared = new Map();
+  for (const stmt of sourceFile.statements) {
+    if (!ts.isVariableStatement(stmt)) continue;
+    if (!hasModifier(stmt, ts.SyntaxKind.ExportKeyword)) continue;
+    for (const decl of stmt.declarationList.declarations) {
+      if (!ts.isIdentifier(decl.name)) continue;
+      if (!PROVENANCE_EXPORTS.has(decl.name.text)) continue;
+      declared.set(decl.name.text, decl);
+    }
+  }
+
+  for (const [name, kind] of PROVENANCE_EXPORTS) {
+    // The name reaching the export surface through ANY other shape (an aliased re-export, a
+    // bare re-export of a local) is rejected the same fail-closed way `workflowsByName` is:
+    // the shape rule below cannot see those, and "cannot see" must never read as "fine".
+    const surfaceOccurrences =
+      parsed.consts.filter((e) => e.name === name).length + parsed.reexports.filter((e) => e.exported === name).length;
+    const decl = declared.get(name);
+    if (surfaceOccurrences === 0) continue; // genuinely absent — a pre-#637 registry
+    if (!decl) {
+      violations.push(
+        `REGISTRY-PROVENANCE-EXPORTS  ${label}: "${name}" appears in this file's own export surface (${surfaceOccurrences} occurrence(s)) but NOT as a recognized \`export const ${name} = ...\` declaration — an aliased or bare re-export carrying that name is REJECTED, never silently trusted (fail-closed).`,
+      );
+      continue;
+    }
+    if (surfaceOccurrences > 1) {
+      violations.push(
+        `REGISTRY-PROVENANCE-EXPORTS  ${label}: "${name}" is exported ${surfaceOccurrences} times — exactly ONE declaration is ever read; a duplicate is REJECTED rather than resolved by ordering luck.`,
+      );
+      continue;
+    }
+    const arg = frozenLiteralArgument(decl.initializer);
+    if (arg === null) {
+      violations.push(
+        `REGISTRY-PROVENANCE-EXPORTS  ${label}: "${name}" must be declared as \`Object.freeze(<literal>)\` — found \`${(decl.initializer ? decl.initializer.getText(sourceFile) : "(no initializer)").trim().slice(0, 120)}\`. An unfrozen roster can be mutated in-process after boot, so what a later reader sees is no longer what the image carries.`,
+      );
+      continue;
+    }
+    if (kind === "array") {
+      if (!ts.isArrayLiteralExpression(arg)) {
+        violations.push(
+          `REGISTRY-PROVENANCE-EXPORTS  ${label}: "${name}" must freeze an ARRAY LITERAL of string literals — found \`${arg.getText(sourceFile).trim().slice(0, 120)}\`.`,
+        );
+        continue;
+      }
+      for (const el of arg.elements) {
+        if (!ts.isStringLiteral(el)) {
+          violations.push(
+            `REGISTRY-PROVENANCE-EXPORTS  ${label}: "${name}" contains a non-string-literal element \`${el.getText(sourceFile).trim().slice(0, 60)}\` — the roster is inert DATA (identifier NAMES), never workflow function references; a function reference here would be a second, unverified dispatch view of the registry.`,
+          );
+        }
+      }
+      continue;
+    }
+    if (!ts.isObjectLiteralExpression(arg)) {
+      violations.push(
+        `REGISTRY-PROVENANCE-EXPORTS  ${label}: "${name}" must freeze an OBJECT LITERAL whose every value is a string literal — found \`${arg.getText(sourceFile).trim().slice(0, 120)}\`.`,
+      );
+      continue;
+    }
+    for (const prop of arg.properties) {
+      if (!ts.isPropertyAssignment(prop)) {
+        violations.push(
+          `REGISTRY-PROVENANCE-EXPORTS  ${label}: "${name}" carries a property that is not a plain \`key: "value"\` assignment (\`${prop.getText(sourceFile).trim().slice(0, 60)}\`) — a shorthand, a spread, a method or a getter is REJECTED, fail-closed rather than guessed at.`,
+        );
+        continue;
+      }
+      if (!ts.isIdentifier(prop.name) && !ts.isStringLiteral(prop.name)) {
+        violations.push(
+          `REGISTRY-PROVENANCE-EXPORTS  ${label}: "${name}" carries a computed or otherwise non-literal key (\`${prop.name.getText(sourceFile).trim().slice(0, 60)}\`) — REJECTED.`,
+        );
+        continue;
+      }
+      if (!ts.isStringLiteral(prop.initializer)) {
+        violations.push(
+          `REGISTRY-PROVENANCE-EXPORTS  ${label}: "${name}.${prop.name.text}" is \`${prop.initializer.getText(sourceFile).trim().slice(0, 60)}\`, not a string literal — the pins are identifier NAMES, never workflow function references; a frozen class-keyed table of real functions is exactly the alternate dispatch view MUST D exists to refuse.`,
+        );
+      }
+    }
+  }
+  return violations;
+}
+
+/**
+ * C77.2 — a frozen-manifest key under a TEST path is REFUSED.
+ *
+ * The manifest is the golden-hash ledger of DEPLOYED, immutable bodies, and the append-only
+ * rule makes every key permanent: once registered, an entry can never be removed (that is the
+ * H1 bypass it was minted against). A `tests/` key therefore mints a forever-hash-locked entry
+ * for a file that ships in no image and that no parked run can ever resume into — a test file
+ * frozen by accident, unfixable by design. `isTestPath` has existed since the enqueue-site scan;
+ * until #637 nothing consulted it for the manifest's OWN keys.
+ *
+ * Pure: keys in, violation strings out.
+ * @param {ReadonlyArray<string>} paths
+ * @param {string} [label]
+ */
+export function checkManifestPaths(paths, label = "frozen-workflows.json") {
+  const violations = [];
+  for (const rel of paths ?? []) {
+    if (typeof rel !== "string" || !isTestPath(rel)) continue;
+    violations.push(
+      `MANIFEST-TEST-PATH  ${label}: "${rel}" is a TEST path — the frozen manifest records deployed, immutable workflow bodies and their import closures, and its append-only rule would hash-lock this entry permanently. A test file ships in no image and no parked run can resume into it; remove the entry rather than freezing it.`,
+    );
+  }
+  return violations;
+}
+
 const WORKFLOWS_DIR = REGISTRY_REL.replace(/\/[^/]+$/, ""); // "packages/runtime/workflows"
 
 /** Pure path resolution (no fs) — resolves `spec` (a relative import specifier) against
@@ -527,6 +690,11 @@ export function checkRegistryViewIntegrity(headSrc, label = "registry@HEAD") {
   // at all and must still be caught).
   for (const e of parsed.consts) {
     if (e.name === "workflows" || e.name === "workflowsByName") continue;
+    // #637 — the two PROVENANCE exports are NOT exempt; they are held to a STRICTER, structural
+    // rule (checkRegistryProvenanceExports, appended below) that a fixed set of collapsed
+    // initializer strings could never express. Skipping them here and running that rule
+    // unconditionally is what keeps the union fail-closed.
+    if (PROVENANCE_EXPORTS.has(e.name)) continue;
     const collapsed = e.initializerText.replace(/\s+/g, "");
     if (!SAFE_WORKFLOWS_DERIVATIONS.has(collapsed)) {
       violations.push(
@@ -536,6 +704,7 @@ export function checkRegistryViewIntegrity(headSrc, label = "registry@HEAD") {
   }
 
   violations.push(...checkRegistryExportsClosedWorld(headSrc, parsed, label));
+  violations.push(...checkRegistryProvenanceExports(headSrc, parsed, label)); // #637, capability (g)
 
   return violations;
 }

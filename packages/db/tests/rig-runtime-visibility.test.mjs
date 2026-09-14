@@ -189,7 +189,33 @@ test("§6 agent lane: clara_agent_ro has ZERO access to every new table (42501, 
   // real grant could be waved through silently, which is the whole failure mode these cells exist
   // to prevent. Each name below must therefore actually BE granted; an entry that is stale, or one
   // added to quiet a failure rather than to record a sanctioned grant, now fails here by name.
-  for (const tbl of deltaAgentCatalogReads) {
+  // [#624 / #644, migrations 0191 + 0192] FOUR MORE SANCTIONED AGENT READS, and every one of them
+  // is a read the lane has NO DOOR for — which is the test each of these had to pass, because the
+  // fifth table of the same wave FAILED it. clara.document_capabilities (0191's global registry)
+  // was granted to the agent lane too and is NOT here: 0191 EXECUTE-grants it
+  // clara._document_capability / clara._document_format / clara.get_document_state, all three
+  // SECURITY DEFINER, so the table grant was a second way in with nothing behind it and 0191 now
+  // revokes it — 0165's own ruling for that registry's twin, clara.document_kind_codeability.
+  //
+  //   · document_fact_validations (0191) — FIRM-SCOPED agent SELECT by design, the same shape
+  //     counterparties/entry_evidence carry above: p_document_fact_validations_agent is
+  //     `wake_firm()`-scoped and its sibling p_document_fact_validations_human is
+  //     `jwt_firm()`-scoped, deliberately split so neither lane can fall back on the other's
+  //     accessor (0002:440-443 forbids clara.actor_firm_id() as an authorization basis). The
+  //     predicate is measured ROW-WISE, not merely counted, by cell 8 of
+  //     document-fact-validation-belt.test.mjs (a firm-B agent reads ZERO of firm A's).
+  //   · knowledge_records (0192) — FIRM-SCOPED agent SELECT under p_knowledge_records_agent
+  //     (`firm_id = clara.wake_firm()`). 0192 §H is explicit that this table grant IS the agent
+  //     lane's path and that granting it the READ DOORS instead would be the defect: those doors
+  //     are `_human_ctx`-gated, and a human-gated read granted to a role that carries no JWT is a
+  //     dark grant (0057's ruling). There is therefore no door to route this one through.
+  //   · knowledge_keys, knowledge_plan_item_map (0192) — GLOBAL product vocabulary with no tenant
+  //     column, the δ-nine shape above: the agent may read WHICH knowledge keys exist and which
+  //     onboarding item each answers when it narrates. No figure and no client value is in either.
+  const wave2AgentReads = new Set([
+    "document_fact_validations", "knowledge_records", "knowledge_keys", "knowledge_plan_item_map",
+  ]);
+  for (const tbl of [...deltaAgentCatalogReads, ...wave2AgentReads]) {
     assert.equal(
       (await rootQuery("select has_table_privilege($1,$2,'SELECT') ok", [ROLES.agentRo, `clara.${tbl}`])).rows[0].ok,
       true,
@@ -197,7 +223,8 @@ test("§6 agent lane: clara_agent_ro has ZERO access to every new table (42501, 
     );
   }
   for (const tbl of tables) {
-    if (slice5AgentReads.has(tbl) || s6AgentReads.has(tbl) || deltaAgentCatalogReads.has(tbl)) continue;
+    if (slice5AgentReads.has(tbl) || s6AgentReads.has(tbl) || deltaAgentCatalogReads.has(tbl)
+        || wave2AgentReads.has(tbl)) continue;
     await assertRaises(
       PG.insufficientPrivilege,
       () => roleQuery(ROLES.agentRo, `select count(*) from clara.${tbl}`),

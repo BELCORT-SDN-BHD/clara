@@ -60,7 +60,10 @@ const LANE_MOCKS = [
   "home-board-mock.mjs",
   "journal-work-mock.mjs",
   "journals-table-mock.mjs",
+  "knowledge-mock.mjs",
   "operator-support-mock.mjs",
+  "periodic-adjustment-mock.mjs",
+  "plans-mock.mjs",
   "tax-boundary-mock.mjs",
   "work-list-mock.mjs",
 ] as const;
@@ -316,6 +319,25 @@ const LANE_DECLARATIONS: Record<string, { unscopeable: string[]; debt: string[] 
   // through to whichever lane minted it. Neither column has anything to declare, which is the
   // state a lane mock should be in.
   "work-list-mock.mjs": { unscopeable: [], debt: [] },
+  // #644 — every handler checks a #644 id (a client id, a record id or the one missing document
+  // id) before it answers, and falls through otherwise; its five rpc verbs read the body only
+  // inside their own verb match. Nothing to declare.
+  "knowledge-mock.mjs": { unscopeable: [], debt: [] },
+  // #643 — every handler is scoped to this lane's own client id (`PA.clientId`) and falls through
+  // otherwise: the PostgREST reads (clients, coa_accounts, document_filings, list_spoken_for_documents
+  // by `p_client`; documents by ids this module minted), the RUNTIME admission route by `body.clientId`,
+  // and the CONTROL ENDPOINT by `body.client` — that last one is a fix rather than a restatement. A
+  // standards review measured this declaration ahead of the code: the control endpoint's five ops
+  // (`refuse_next`, `seed_intent`, `received`, `empty_history`, `reset`) mutated shared fixture state
+  // for ANY body at all, which is a lane claiming a shared endpoint — the exact shape this census
+  // exists to prevent — while this comment said it did not. It now carries `journal-work-mock.mjs`'s
+  // own guard (`if (body?.client !== PA.clientId) return false;`) and the walk's `control()` helper
+  // names the lane on every call. The state a walk injects is this lane's alone.
+  "periodic-adjustment-mock.mjs": { unscopeable: [], debt: [] },
+  // #640's C9 lane. Every handler names this lane's own client id or plan id before it answers
+  // and falls through otherwise, including all nine RPC verbs — the shape a new lane mock should
+  // aim for, declaring neither list.
+  "plans-mock.mjs": { unscopeable: [], debt: [] },
 };
 
 test("N5 · every lane handler either scopes by the request's own subject, or is a NAMED exception", () => {
@@ -940,6 +962,21 @@ function rpcVerbCensus(mocks: readonly string[] = LANE_MOCKS): Map<string, strin
 const SHARED_RPC_VERBS: Record<string, string[]> = {
   list_entry_links: ["journal-work-mock.mjs", "journals-table-mock.mjs"],
   list_review_queue: ["journal-work-mock.mjs", "journals-table-mock.mjs", "tax-boundary-mock.mjs"],
+  // #624 AC4 — `clara.get_document_state` is read from TWO surfaces by design: the Documents
+  // detail panel and the Work detail's Sources tab mount the SAME component over it, because the
+  // criterion is "Documents AND Work show the four states". Each lane answers only for the
+  // document ids IT minted and falls through otherwise, so the share is a declared one rather than
+  // a collision — which is exactly the distinction this census exists to force someone to make.
+  get_document_state: ["documents-viewer-mock.mjs", "work-list-mock.mjs"],
+  // #643 x #634/#728 — `clara.list_spoken_for_documents` is the EVIDENCE CHOOSER's advisory read,
+  // and #643's whole AC3 is that the periodic-adjustment form mounts the composer's own chooser
+  // component, so of course the two lanes both answer it. Declared at WAVE-2 INTEGRATION rather
+  // than on #643's branch because this census did not exist there — SHARED_RPC_VERBS arrived with
+  // wave 1, after #643 branched, so its worker had nothing to declare into.
+  // Each lane gates on its OWN client before answering (journal-work-mock.mjs:1624,
+  // periodic-adjustment-mock.mjs:320) and falls through otherwise, so neither can answer for the
+  // other's walk — which is the distinction between a declared share and a collision.
+  list_spoken_for_documents: ["journal-work-mock.mjs", "periodic-adjustment-mock.mjs"],
 };
 
 /** Every verb with 2+ claimants that is either UNDECLARED, or declared with a DIFFERENT set of

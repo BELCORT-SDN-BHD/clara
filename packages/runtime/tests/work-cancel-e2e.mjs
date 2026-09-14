@@ -124,15 +124,35 @@ function childEnv(port, extra = {}) {
 
 function spawnServe(port, extra = {}) {
   const child = spawn(process.execPath, [serveScript], { env: childEnv(port, extra), stdio: ["ignore", "pipe", "pipe"] });
-  const state = { exited: false, exitInfo: null, banner: null, stderr: "" };
+  const state = { exited: false, exitInfo: null, banner: null, serving: null, stdout: "", stderr: "" };
   child.on("exit", (code, signal) => {
     state.exited = true;
     state.exitInfo = { code, signal };
   });
+  // READ LINE BY LINE, NOT CHUNK BY CHUNK. A `data` event is a slice of a pipe, not a promise of a
+  // whole line: several console.log calls can arrive in one event, and one line can arrive split
+  // across two. A per-chunk regex reads a banner cut by a chunk boundary as never logged — see
+  // docs/plan/active/refresh-wave-2026-09-14/reports/wave2-ci-two-build-banner.md.
+  const ingest = (line) => {
+    const m = /\[clara-runtime\] bundle clara-work\/v2 digest=([0-9a-f]{64})/.exec(line);
+    if (m && !state.banner) state.banner = m[1];
+    if (!state.serving) {
+      const serving = /\[clara-runtime\] serving .*/.exec(line);
+      if (serving) state.serving = serving[0];
+    }
+  };
+  let pending = "";
   child.stdout.setEncoding("utf8");
   child.stdout.on("data", (d) => {
-    const m = /\[clara-runtime\] bundle clara-work\/v2 digest=([0-9a-f]{64})/.exec(d);
-    if (m && !state.banner) state.banner = m[1];
+    state.stdout = `${state.stdout}${d}`.slice(-8000);
+    pending += d;
+    const lines = pending.split("\n");
+    pending = lines.pop() ?? "";
+    for (const line of lines) ingest(line);
+  });
+  child.stdout.on("end", () => {
+    if (pending) ingest(pending);
+    pending = "";
   });
   child.stderr.setEncoding("utf8");
   child.stderr.on("data", (d) => {
@@ -140,6 +160,39 @@ function spawnServe(port, extra = {}) {
     if (/FATAL|Error:|exit_after_commit|hold released|\[wc-serve\] (branch|tool-result)/.test(d)) process.stderr.write(`[child:${port}] ${d}`);
   });
   return { child, state, port };
+}
+
+/**
+ * WAIT FOR *THIS* ENGINE'S OWN BOOT — the thing `/ready` does not prove. `/ready`'s world conjunct
+ * reads `clara.runtime_heartbeats`, one row per component for the WHOLE ESTATE, inside a 30s
+ * staleness window (packages/runtime/lib/health.mjs:50,492-500): a freshly spawned engine on a
+ * database a PREVIOUS engine was just serving can be answered 200 by that predecessor's beat before
+ * it has printed a line of its own. The provenance line and the bundle banner are both logged only
+ * after `await getWorld().start?.()` (plugins/startWorld.ts), so a raced assertion on either is a
+ * false failure about a fine engine, not evidence anything is wrong — see
+ * docs/plan/active/refresh-wave-2026-09-14/reports/wave2-ci-two-build-banner.md and
+ * tests/two-build-cutover-e2e.mjs's `waitBooted`, whose idiom this mirrors for a single-bundle engine.
+ *
+ * WAITING IS NOT WEAKENING: every fact this file asserted about the engine before, it still asserts
+ * — only after the process could actually have logged it. An engine whose world never starts still
+ * fails this wait, bounded, with its own stdout/stderr attached.
+ */
+async function waitBooted(engine, deadlineMs = 30000) {
+  const end = Date.now() + deadlineMs;
+  while (Date.now() < end) {
+    if (engine.state.serving && engine.state.banner) return;
+    if (engine.state.exited) break;
+    await sleep(100);
+  }
+  throw new Error(
+    `engine on ${engine.port} answered /ready but never finished its OWN boot within ${deadlineMs}ms`
+    + ` (/ready's world check is an estate-wide heartbeat — a predecessor stopped seconds ago satisfies it)`
+    + `\n  provenance line: ${engine.state.serving ?? "(never logged)"}`
+    + `\n  bundle banner:   ${engine.state.banner ?? "(never logged)"}`
+    + `\n  exit: ${JSON.stringify(engine.state.exitInfo)}`
+    + `\n--- child stdout (tail) ---\n${engine.state.stdout || "(none)"}`
+    + `\n--- child stderr (tail) ---\n${engine.state.stderr || "(none)"}`,
+  );
 }
 
 function waitExit(child, timeoutMs = 40000) {
@@ -162,7 +215,10 @@ async function waitReady(port, deadlineMs = 90000, engine = null) {
       if (!healthy && (await fetch(`${base}/health`, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) })).ok) healthy = true;
       if (healthy) {
         const r = await fetch(`${base}/ready`, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
-        if (r.status === 200) return;
+        if (r.status === 200) {
+          if (engine) await waitBooted(engine);
+          return;
+        }
       }
     } catch {
       /* booting */

@@ -157,6 +157,72 @@ function admissionOf(body: Record<string, unknown>): WorkAdmission | null {
 export type JournalSourceRefWire = { kind: "document"; documentId: string };
 
 /**
+ * #643 — ADMIT ONE PERIODIC ADJUSTMENT. A SIBLING of `submitJournalWork`, not a widened version of
+ * it, and the reason is the runtime route's own: the two doors take different payloads and one of
+ * them is named by a frozen chat tool whose signature may not move.
+ *
+ * IT REUSES `SubmitJournalWorkResult` VERBATIM, and that is a claim rather than a convenience:
+ * every outcome this door can produce is one of that lane's, in the same shape, because the two
+ * routes share `workErrorResponse` — `source_conflict` INCLUDED. That arm was unreachable while
+ * this journey's form had no chooser; it has one now (`components/accounting/evidence-chooser.tsx`,
+ * the same component the composer mounts), so a document already backing a posted entry comes back
+ * here as the 409 `source_already_posted` the shared response map builds, exactly as it does on the
+ * journal door.
+ */
+export async function submitPeriodicAdjustmentWork(
+  auth: SessionTokenAccessor,
+  input: {
+    clientId: string;
+    intentKey: string;
+    purpose: string;
+    basis: JournalBasisWire;
+    adjustment: Record<string, unknown>;
+    /** Omitted entirely for an evidenceless adjustment — the route reads an absent, null or empty
+     *  list identically (`toDbSourceRefs`), and sending `[]` would be the same request with more
+     *  bytes and one more shape for a reader to reason about. */
+    sourceRefs?: ReadonlyArray<JournalSourceRefWire>;
+  },
+  signal?: AbortSignal,
+): Promise<SubmitJournalWorkResult> {
+  const token = await auth.getAccessToken();
+  if (!token) return { kind: "denied" };
+
+  let res: Response;
+  try {
+    res = await runtimePost(`${WORK_BASE}/periodic-adjustment`, token, input, signal);
+  } catch (err) {
+    // A network failure, a timeout, an aborted socket: NO answer was observed.
+    return { kind: "lost", message: (err as Error).message };
+  }
+  if (res.type === "opaqueredirect") return { kind: "denied" };
+
+  const body = (await readBody(res)) ?? {};
+  if (res.status === 202) {
+    const admission = admissionOf(body);
+    return admission === null
+      ? { kind: "lost", message: "the runtime accepted the work without naming it" }
+      : { kind: "accepted", ...admission };
+  }
+  if (res.status === 400) {
+    return { kind: "invalid_basis", field: str(body.field), reason: str(body.reason) };
+  }
+  if (res.status === 401 || res.status === 403) return { kind: "denied" };
+  if (res.status === 404) return { kind: "not_found" };
+  if (res.status === 409) {
+    // TWO CONFLICTS, TWO NEXT ACTIONS — `submitJournalWork`'s own note applies verbatim, and the
+    // two doors share the response map that builds both bodies (`workErrorResponse`).
+    if (str(body.error) === "source_already_posted") {
+      return { kind: "source_conflict", entryId: str(body.entry_id), documentId: str(body.document_id) };
+    }
+    return { kind: "conflict", workId: str(body.work_id) };
+  }
+  return {
+    kind: "unavailable",
+    message: str(body.error) ?? str(body.message) ?? `the runtime answered ${res.status}`,
+  };
+}
+
+/**
  * Admit ONE journal Work, with or without a source document.
  *
  * `intentKey` IS THE CALLER'S IDENTITY FOR THIS INTENT, minted once when the

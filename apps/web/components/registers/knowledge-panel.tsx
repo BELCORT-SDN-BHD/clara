@@ -1,120 +1,211 @@
 "use client";
 
-// The client Knowledge tab (lib/registers/knowledge.ts) — clara.client_facts,
-// grouped by fact_key, live fact first with its superseded history collapsible.
-// Every fact carries its own basis/basis_kind/recorded_by/recorded_at verbatim —
-// this panel never infers a fact, and a client with no facts recorded shows that
-// honestly rather than a fabricated default.
+// The client Knowledge register — C13's list half (#644, migration
+// 0192_client_knowledge_records.sql).
 //
-// N12 (independent review, 2026-08-27): loadClientFactKeys (the global vocabulary,
-// clara.client_fact_keys) is now CONSUMED — each fact group shows the catalog's
-// own `description` (what the key means, and for `msic` specifically, the
-// honest "format-only, no official registry checked" caveat the DB itself
-// records) rather than the raw fact_key alone. A key absent from the catalog
-// (should not happen — client_facts has a foreign key onto client_fact_keys —
-// but this read is a SEPARATE query, so the two can race or one can fail
-// independently) degrades to showing the raw key with no description, never a
-// thrown error over the whole panel.
-// N11: timestamps render in the business timezone explicitly.
+// WHAT CHANGED, AND WHY THE OLD PANEL COULD NOT STAY. The previous version read
+// `clara.client_facts` directly and grouped it by `fact_key`: five global keys,
+// one flat shape, no kind, no scope, no trust, no applicability, and no way to
+// correct anything. #644 asks for a register that distinguishes a user
+// assertion from an extracted fact, a preference and a policy; that shows whose
+// statement it is and how far it is verified; that shows what it applies to and
+// when; and that offers a correction and a withdrawal. That is a different
+// surface, not a bigger version of the old one.
+//
+// ONE REGISTER, TWO SOURCES. `clara.list_client_knowledge` UNIONs the legacy
+// `client_facts` rows in with `source_kind='legacy_client_fact'` and
+// `editable:false` — so a firm that recorded facts before 0192 sees them here,
+// beside the new records, with no control the database has no door for.
+//
+// THE FOUR FACES this surface owes (#644 AC5), each from a DIFFERENT fact:
+//   successful empty   — the read SUCCEEDED and returned no records. `DataState`'s
+//                        EmptyState, never a caught error mapped to [].
+//   no results         — the read returned records and the CATEGORY FILTER hid
+//                        them all. Its own state, keeping the filter and offering
+//                        to clear it (appendix C: "No results preserves the
+//                        user's query/filter and offers Clear filters").
+//   contradictory      — TWO live records of one key with different applicability.
+//                        Both are rendered, under a conflict alert; the surface
+//                        never picks one.
+//   failed read        — `DataState`'s ErrorMessage, which distinguishes signed
+//                        out / forbidden / not found / failed by the error's
+//                        typed kind, never by its message text.
+// The fifth — an inaccessible SOURCE — belongs to the row, and lives in
+// `KnowledgeSourceBlock` (knowledge-shared.tsx).
 
 import { useState } from "react";
 import { useTranslations } from "next-intl";
-import { useAsyncRead } from "@/lib/firm/use-async-read";
-import { loadClientFacts, loadClientFactKeys, type ClientFactRow } from "@/lib/registers/knowledge";
-import { businessDateTime } from "@/lib/business-date";
-import { sessionTokenAccessor } from "@/lib/session-accessor";
+import Link from "next/link";
 import { Button } from "@/components/ui/button";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { DataState } from "@/components/firm/data-state";
+import { EmptyState, StateBanner } from "@/components/common/state";
+import { useAsyncRead } from "@/lib/firm/use-async-read";
+import { sessionTokenAccessor } from "@/lib/session-accessor";
+import { knowledgeRecordHref } from "@/lib/navigation/tree";
+import { loadClientKnowledge, type KnowledgeRecordRow } from "@/lib/registers/knowledge";
+import {
+  KnowledgeApplicability,
+  KnowledgeBadges,
+  KnowledgeProvenance,
+  KnowledgeSourceBlock,
+  knowledgeValueText,
+} from "./knowledge-shared";
 
-function groupByFactKey(rows: ClientFactRow[]): Map<string, ClientFactRow[]> {
-  const groups = new Map<string, ClientFactRow[]>();
+const KINDS = ["assertion", "extracted_fact", "preference", "policy"] as const;
+const ALL = "all";
+
+/** Group by key so a contradiction (two LIVE rows of one key, differing only in
+ *  applicability — `uq_knowledge_live` makes an identical pair impossible) is a
+ *  property of the group rather than something the reader must spot. */
+function groupByKey(rows: KnowledgeRecordRow[]): [string, KnowledgeRecordRow[]][] {
+  const groups = new Map<string, KnowledgeRecordRow[]>();
   for (const row of rows) {
-    const list = groups.get(row.fact_key) ?? [];
+    const list = groups.get(row.knowledge_key) ?? [];
     list.push(row);
-    groups.set(row.fact_key, list);
+    groups.set(row.knowledge_key, list);
   }
-  return groups;
+  return [...groups.entries()];
 }
 
 export function KnowledgePanel({ clientId }: { clientId: string }) {
   const t = useTranslations("ClientKnowledge");
-  const facts = useAsyncRead(() => loadClientFacts(sessionTokenAccessor, clientId));
-  // A SEPARATE, independent read (N12) — its own failure never blanks the facts
-  // themselves, only the descriptive labels degrade to the raw key.
-  const keys = useAsyncRead(() => loadClientFactKeys(sessionTokenAccessor));
-  const rows = facts.data ?? [];
-  const groups = groupByFactKey(rows);
-  const descriptions = new Map((keys.data ?? []).map((k) => [k.fact_key, k.description]));
+  const [kind, setKind] = useState<string>(ALL);
+  const knowledge = useAsyncRead(() => loadClientKnowledge(clientId, { session: sessionTokenAccessor }));
+
+  const all = knowledge.data?.records ?? [];
+  const shown = kind === ALL ? all : all.filter((r) => r.kind === kind);
+  const groups = groupByKey(shown);
+  // FILTERED-TO-NOTHING IS NOT EMPTY. `isEmpty` is about the READ; a filter that
+  // hides everything gets its own state below, with the filter intact.
+  const readIsEmpty = all.length === 0;
 
   return (
-    // `subheading` moved into the page header (the knowledge route) — one
-    // place for a surface's orientation line, product-wide.
     <div className="flex flex-col gap-4">
-      <DataState loading={facts.loading} error={facts.error} isEmpty={groups.size === 0} emptyMessage={t("empty")}>
-        <ul className="flex flex-col gap-3">
-          {[...groups.entries()].map(([factKey, versions]) => (
-            <FactGroup key={factKey} factKey={factKey} versions={versions} description={descriptions.get(factKey) ?? null} />
-          ))}
-        </ul>
+      <div className="flex flex-wrap items-end gap-3">
+        <div className="flex flex-col gap-1">
+          <span className="text-xs text-muted-foreground" id="knowledge-filter-label">{t("filterLabel")}</span>
+          <Select value={kind} onValueChange={(v) => setKind(v ?? ALL)}>
+            <SelectTrigger aria-label={t("filterLabel")}><SelectValue placeholder={t("filterAll")} /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value={ALL}>{t("filterAll")}</SelectItem>
+              {KINDS.map((k) => (
+                <SelectItem key={k} value={k}>{t(`kind.${k}` as "kind.assertion")}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        {knowledge.data ? (
+          <p className="text-xs text-muted-foreground">
+            {t("versionLabel", { version: String(knowledge.data.knowledge_version ?? 0) })}
+          </p>
+        ) : null}
+      </div>
+
+      <DataState
+        loading={knowledge.loading}
+        error={knowledge.error}
+        isEmpty={readIsEmpty}
+        emptyMessage={t("empty")}
+      >
+        {groups.length === 0 ? (
+          <EmptyState>
+            <span className="flex flex-col items-start gap-2">
+              <span>{t("emptyFiltered")}</span>
+              <Button variant="outline" size="xs" onClick={() => setKind(ALL)}>{t("clearFilter")}</Button>
+            </span>
+          </EmptyState>
+        ) : (
+          <ul className="flex flex-col gap-3">
+            {groups.map(([key, rows]) => (
+              <KnowledgeGroup key={key} clientId={clientId} knowledgeKey={key} rows={rows} />
+            ))}
+          </ul>
+        )}
       </DataState>
     </div>
   );
 }
 
-function FactGroup({
-  factKey,
-  versions,
-  description,
-}: {
-  factKey: string;
-  versions: ClientFactRow[];
-  description: string | null;
+function KnowledgeGroup({ clientId, knowledgeKey, rows }: {
+  clientId: string;
+  knowledgeKey: string;
+  rows: KnowledgeRecordRow[];
 }) {
   const t = useTranslations("ClientKnowledge");
-  const [showHistory, setShowHistory] = useState(false);
-  const live = versions.find((v) => v.superseded_at === null) ?? versions[0];
-  // groupByFactKey only ever creates a non-empty array for a key it inserts, but
-  // `noUncheckedIndexedAccess` cannot see that invariant through `versions[0]` —
-  // an explicit guard rather than a non-null assertion.
-  if (!live) return null;
-  const history = versions.filter((v) => v.id !== live.id);
+  const live = rows.filter((r) => r.state === "live");
+  // THE CONFLICT FACE. Two live GOVERNED records of one key contradict each other
+  // unless a reader can tell which applies — and 0192 guarantees they differ in
+  // exactly that (`uq_knowledge_live` is over the applicability digest). So the
+  // surface shows BOTH, says they conflict, and picks neither.
+  //
+  // A LEGACY `client_facts` ROW BESIDE A KNOWLEDGE RECORD IS NOT THAT. It is never
+  // shadowed (0192's decision 1: the rest of Clara still READS clara.client_facts
+  // for all five carried keys), and it is not an undecided pair either — the legacy
+  // row is the one in force, and `KnowledgeRow`'s `authoritative` banner says so.
+  // Calling that a conflict would tell the reader nothing decides it when
+  // something does.
+  const conflicted = live.filter((r) => r.editable).length > 1;
 
   return (
     <li className="enter-content flex flex-col gap-2 rounded-lg border border-border bg-card p-3 text-sm">
-      <div className="flex flex-wrap items-baseline gap-3">
-        <span className="font-medium text-card-foreground">{factKey}</span>
-        <span className="text-card-foreground">{String(live.fact_value)}</span>
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <span className="font-medium text-card-foreground">{knowledgeKey}</span>
+        {rows[0]?.key_description ? (
+          <span className="text-xs text-muted-foreground">{rows[0].key_description}</span>
+        ) : null}
       </div>
-      {description ? <p className="text-xs text-muted-foreground">{description}</p> : null}
-      <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs text-muted-foreground">
-        <dt>{t("columnBasis")}</dt>
-        <dd>{live.basis} ({live.basis_kind})</dd>
-        <dt>{t("columnRecordedAt")}</dt>
-        <dd>{businessDateTime(live.recorded_at)}</dd>
-      </dl>
-      {history.length > 0 ? (
-        <div className="flex flex-col gap-1">
-          <Button
-            type="button"
-            variant="link"
-            size="xs"
-            className="self-start px-0"
-            aria-expanded={showHistory}
-            onClick={() => setShowHistory((s) => !s)}
-          >
-            {showHistory ? t("hideHistory") : t("historyLabel", { count: history.length })}
-          </Button>
-          {showHistory ? (
-            <ul className="flex flex-col gap-1 border-t border-border pt-1 text-xs text-muted-foreground">
-              {history.map((h) => (
-                <li key={h.id}>
-                  {String(h.fact_value)} — {h.basis} ({businessDateTime(h.recorded_at)})
-                </li>
-              ))}
-            </ul>
-          ) : null}
-        </div>
+      {conflicted ? (
+        <StateBanner tone="warning" title={t("conflictTitle")}>
+          {t("conflictBody", { count: live.length, key: knowledgeKey })}
+        </StateBanner>
       ) : null}
+      <ul className="flex flex-col gap-3">
+        {rows.map((row) => (
+          <KnowledgeRow key={row.revision_id} clientId={clientId} row={row} />
+        ))}
+      </ul>
+    </li>
+  );
+}
+
+function KnowledgeRow({ clientId, row }: { clientId: string; row: KnowledgeRecordRow }) {
+  const t = useTranslations("ClientKnowledge");
+  return (
+    <li className="flex flex-col gap-2 border-t border-border pt-2 first:border-t-0 first:pt-0">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-card-foreground">{knowledgeValueText(row.value)}</span>
+        <KnowledgeBadges record={row} />
+        {row.state === "withdrawn" ? (
+          <span className="text-xs text-muted-foreground">{t("withdrawnNotice")}</span>
+        ) : null}
+      </div>
+      <KnowledgeApplicability record={row} />
+      <KnowledgeProvenance record={row} />
+      <KnowledgeSourceBlock clientId={clientId} source={row.source} sourceKind={row.source_kind} />
+      {row.authoritative ? (
+        // THE LEGACY ROW IS THE ONE IN FORCE. clara.get_context_pack (0055:765), the closing-stock
+        // close gate (0056:1283), the name-only guard (0062:226) and the bank-registry ledger
+        // (0121:4797) all still read clara.client_facts, and 0192 does not dual-write — so a
+        // legacy row is never shadowed by a newer knowledge record and the surface has to say
+        // which of the two Clara actually acts on.
+        <StateBanner tone="warning" title={t("authoritativeTitle")}>
+          {t("authoritativeBody")}
+        </StateBanner>
+      ) : null}
+      {row.editable ? (
+        <Link
+          className="w-fit text-xs underline underline-offset-4"
+          href={knowledgeRecordHref(clientId, row.record_id)}
+        >
+          {t("openRecord")}
+        </Link>
+      ) : (
+        // A LEGACY fact has no correction door (0055 supersedes by recording a new
+        // value through its own admin door), so this surface offers no detail
+        // route for it and says why rather than rendering a dead link.
+        <span className="text-xs text-muted-foreground">{t("legacyNote")}</span>
+      )}
     </li>
   );
 }

@@ -15,6 +15,11 @@
 // pool lanes (H-48) and the relay pool's background-error counters (裁-149) join that same
 // class. Everything is bounded + sanitized: /ready must never hang and never leak raw DB text.
 //
+// #637 adds ONE more to that same WARN-only class and CHANGES NO FAILURE CONDITION:
+// `checks.bodies` — the bodies live runs are parked on that THIS image does not carry. A
+// stranded body means this process cannot RESUME those runs; it does not mean it should stop
+// serving the ones it can, and a re-release of the previous image fixes it while nothing is lost.
+//
 // #617 added FOUR readings to that WARN-only class and CHANGED NO FAILURE CONDITION: the
 // per-lane pool-error counters (`checks.pool_errors`), the relay leader's own state
 // (`checks.leader`), the boot TLS posture (`checks.tls`), and a storage verdict that finally
@@ -38,6 +43,7 @@ import { storageProbeHealth } from "./storage-probe.mjs";
 import { poolErrorHealth, relayPoolHealth, sanitizedErrorCode } from "./pool-error-contract.mjs";
 import { laneProbeHealth, READINESS_CRITICAL_LANE } from "./lane-probe.mjs";
 import { leaderStateHealth } from "./leader-state.mjs";
+import { bodyCensusHealth } from "./body-census.mjs";
 import { tlsPostureHealth } from "./tls-ca.mjs";
 
 const READY_DEADLINE_MS = Number(process.env.CLARA_READY_DEADLINE_MS || 5000);
@@ -468,6 +474,45 @@ export async function checkReadiness() {
     );
   }
 
+  // #637 — STRANDED BODIES. The census itself is taken ONCE, at world start, by
+  // plugins/startWorld.ts (the only place that can import the TypeScript registry to learn which
+  // bodies this image carries) and recorded in lib/body-census.mjs. Read here, synchronously,
+  // ~0ms — the SAME posture `checks.leader`, `checks.tls` and the storage/lane probes take, and
+  // for the reason those paragraphs give: this call path already shares fly's 5s /ready budget
+  // with two sequential bounded round trips, and a verdict that cannot change the status code
+  // must never spend any of it.
+  //
+  // THREE ANSWERS. `measured:false` with no error means the boot census has not run here (a
+  // world-off skeleton, a health-only test process) — not the same fact as "ran and found
+  // nothing", and it warns about nothing because it knows nothing. `measured:false` WITH an
+  // error means the read failed, which warns: a failed census must never be readable as a clean
+  // estate. A measured census warns only when something is actually stranded, and NAMES the
+  // bodies — a count alone sends the reader back to the logs this field exists to replace.
+  const bodies = bodyCensusHealth();
+  checks.bodies = bodies;
+  if (bodies.world_start_refused) {
+    // #637 review S5 — THE ONE HARD ARM of this check, and the only failure condition this
+    // file has gained since #617. It is not inferred from a missing heartbeat: the heartbeat row
+    // is shared estate state, and a process that stopped seconds ago leaves a beat still inside
+    // the staleness window — precisely the window in which a refused process would otherwise
+    // report itself ready. The refusal is a fact this process recorded about itself.
+    warnings.push(
+      `the durable world was REFUSED at boot: ${bodies.stranded} live run(s) are parked on `
+        + `${bodies.names.length} body(ies) this image does NOT export (${bodies.names.join(", ")}). `
+        + "Starting it would re-enqueue them and crash on replay, so this process serves HTTP and runs no lanes. "
+        + "Release an image that carries those bodies, or drain, then restart. CLARA_ALLOW_STRANDED_BODIES=1 overrides.",
+    );
+  } else if (!bodies.measured && bodies.error) {
+    warnings.push(
+      `the stranded-body census FAILED (${bodies.error}) — this process cannot say whether any live run is parked on a body it does not carry`,
+    );
+  } else if (bodies.measured && bodies.stranded > 0) {
+    warnings.push(
+      `${bodies.stranded} live workflow run(s) are parked on ${bodies.names.length} body(ies) this image does NOT carry: `
+        + `${bodies.names.join(", ")} — this process cannot resume them; re-release an image that exports them, or drain first`,
+    );
+  }
+
   // #617 — the TLS posture this process actually booted with. `assertLaneDsnTlsPosture` has
   // always computed it and then thrown it away into a log line; an operator asking "did the
   // verify-full ceremony take on this machine?" had to find that boot line, and a machine
@@ -550,6 +595,10 @@ export async function checkReadiness() {
   const failed =
     checks.db?.ok === false ||
     runtimeLaneFailed ||
+    // #637 S5 — a refused world start is its OWN conjunct rather than a consequence of a missing
+    // heartbeat, for the reason the warning above gives: a fresh beat from the previous process
+    // would otherwise mask it for a whole staleness window.
+    bodies.world_start_refused === true ||
     (worldEnabled() && (checks.world?.ok === false || checks.control?.ok === false || checks.taxonomy?.ok === false));
 
   return { ready: !failed, checks, warnings };

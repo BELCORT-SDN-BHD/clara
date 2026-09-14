@@ -198,3 +198,50 @@ export async function cancelClientOnboarding(
     opts,
   );
 }
+
+/** clara.promote_plan_answers_to_knowledge(p_plan uuid, p_op_key text,
+ *  p_promote_firm_scope boolean, p_firm uuid DEFAULT NULL) — #644 / 0192, the
+ *  missing half of A6.
+ *
+ *  `p_firm` IS DELIBERATELY NOT PASSED FROM HERE. The door picks its lane from the
+ *  caller: a session with claims is the HUMAN lane and takes its firm from the JWT
+ *  (a supplied `p_firm` is only a belt that must agree with it), while the MACHINE
+ *  lane — the runtime role, no claims — must name the firm it is promoting into and
+ *  is refused without it. The browser is always the human lane, so naming the firm
+ *  here would add a value the session already decides and the door would only
+ *  re-check.
+ *
+ *  WHY IT IS A SEPARATE CALL AND NOT PART OF THE COMMIT. 0017's
+ *  `commit_client_onboarding` is a merged migration and a live ceremony with its
+ *  own maker-checker rules; 0192 is append-only and does not splice it. So the
+ *  commit stays exactly what it was, and this door — idempotent three ways (an
+ *  exact op_key replays, an already-live record SKIPS, and the whole act is safe
+ *  to repeat) — carries the answers over immediately afterwards.
+ *
+ *  A FAILURE HERE MUST NOT UNDO A COMMIT. The client is already active and the
+ *  plan is already committed when this runs; the caller therefore treats a
+ *  refusal as a follow-up to surface, never as a reason to claim the commit
+ *  failed (#603: "a KB projection failure does not roll back a valid committed
+ *  accounting result").
+ *
+ *  `p_promote_firm_scope` stays FALSE here: a firm-wide default is an explicit
+ *  admin act on a FIRM plan, and this caller only ever promotes a client plan. */
+export async function promotePlanAnswersToKnowledge(
+  planId: string,
+  opts: Opts & { promoteFirmScope?: boolean } = {},
+): Promise<{
+  plan_id: string;
+  scope_kind: "client" | "firm";
+  client_id: string | null;
+  promoted: { item_key: string; knowledge_key: string; record_id: string }[];
+  skipped: { item_key: string; knowledge_key: string; record_id: string }[];
+  withheld: { item_key: string; knowledge_key: string; reason: string }[];
+  knowledge_version: number | string;
+}> {
+  const { promoteFirmScope, ...rest } = opts;
+  return callDoor(
+    "promote_plan_answers_to_knowledge",
+    { p_plan: planId, p_op_key: opKey(), p_promote_firm_scope: promoteFirmScope ?? false },
+    rest,
+  );
+}

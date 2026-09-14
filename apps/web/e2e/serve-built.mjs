@@ -51,10 +51,19 @@ import { handleHomeBoardSupabase } from "./home-board-mock.mjs";
 // below rather than answered from a second one. Its runtime half owns `/api/work/*` and
 // one control path; see that module's header for what the walk does and does not prove.
 import { JOURNAL_WORK_SESSIONS, handleJournalWorkRpc, handleJournalWorkRuntime, handleJournalWorkSupabase, journalWorkListPage } from "./journal-work-mock.mjs";
+// #643's own lane — the periodic-adjustment form, its evidence chooser, its refusals and its
+// history. Its PostgREST hook runs beside the journal-work lane's and is scoped to its own client
+// id; its RUNTIME hook answers the one admission route and its own control endpoint, and THAT ONE
+// is scoped too (it takes `client` and falls through otherwise — the sibling lane's shape, adopted
+// after a standards review found the declaration ahead of the code). See periodic-adjustment-mock.mjs.
+import { handlePeriodicAdjustmentRuntime, handlePeriodicAdjustmentSupabase } from "./periodic-adjustment-mock.mjs";
 // #627's own lane (the D4 tax-boundary walk). ID-scoped like its siblings — five client ids,
 // one per five/six-state read outcome — hooked in ONE place below, before `handleL7Supabase`
 // (see that hook's own note for why order matters here).
 import { handleD4Supabase } from "./tax-boundary-mock.mjs";
+// #644's own lane (the C13 Knowledge walk). ID-scoped like its siblings — four client ids, one
+// per read outcome, plus its own record/document ids — hooked in ONE place below.
+import { handleKnowledgeSupabase } from "./knowledge-mock.mjs";
 // #632's own lane (the attributable Activity feed walk). ID-scoped like its siblings; its ONE
 // exception is `ACTIVITY_CLIENTS`, spliced into the shared `clients` array below (APPENDED, never
 // replacing) because the Activity page's client Select is this train's first consumer of the
@@ -77,6 +86,10 @@ import { handleOperatorSupportSupabase } from "./operator-support-mock.mjs";
 // for the same reason `ACTIVITY_CLIENTS` are: the firm Work list's client Select reads the
 // UNFILTERED client register.
 import { WORK_LIST_CLIENTS, answerWorkListPage, handleWorkListSupabase } from "./work-list-mock.mjs";
+// #640's C9 lane — the accounting-plan doors. Every handler is id-scoped and its RPC half
+// guards `readJson` on an exact-verb allow-list, so it drains no other lane's request stream and
+// can run anywhere in the chain below.
+import { handlePlansSupabase } from "./plans-mock.mjs";
 
 const e2eRoot = dirname(fileURLToPath(import.meta.url));
 const webRoot = resolve(e2eRoot, "..");
@@ -560,6 +573,10 @@ async function handleSupabase(request, response, url) {
   if (await handleJournalWorkRpc(request, response, path, url, sendJson, cors)) return;
   if (await handleDocumentsViewerSupabase(request, response, path, url, sendJson, cors)) return;
   if (await handleD4Supabase(request, response, path, url, sendJson, cors)) return;
+  // #644's Knowledge lane. SAFE here for the SAME reason D4 is: every one of its five rpc verbs
+  // reads the request body only INSIDE that verb's own match, so it never drains a stream a later
+  // lane still needs; and every branch is scoped to a #644 id, so it answers for nobody else.
+  if (await handleKnowledgeSupabase(request, response, path, url, sendJson, cors)) return;
   // AHEAD OF THE HOME BOARD (#623, and still true — NOT a body-drain reason):
   // `home-board-mock.mjs`'s `EMPTY_RELATIONS` answers `/rest/v1/coa_accounts` and
   // `/rest/v1/agent_tasks_visible` with an honest `[]` for
@@ -569,6 +586,12 @@ async function handleSupabase(request, response, url) {
   // client (or to an id it minted) and falls through otherwise, so the honest empties still answer
   // every other walk.
   if (await handleJournalWorkSupabase(request, response, path, url, sendJson, cors)) return;
+  // #643, BESIDE the journal-work lane and AHEAD of the home board for the same reason it is:
+  // `home-board-mock.mjs`'s EMPTY_RELATIONS answers `/rest/v1/coa_accounts` with an honest `[]` for
+  // every subject, so with this hook after it the periodic-adjustment form's account pickers would
+  // hold nothing but their placeholder. Every branch here is scoped to this lane's own client and
+  // falls through otherwise, so the honest empties still answer every other walk.
+  if (await handlePeriodicAdjustmentSupabase(request, response, path, url, sendJson, cors)) return;
   if (await handleL7Supabase(request, response, path, url, sendJson, cors)) return;
   // LAST among the lane hooks, and still BEFORE the generic fixtures — see home-board-mock.mjs's
   // header. It has to precede the generic `/rest/v1/clients` branch below to serve its ONE
@@ -576,6 +599,11 @@ async function handleSupabase(request, response, url) {
   // through for every other id, so the unfiltered register stays exactly as this file has it.
   // The home board is LAST because the journal-work lane must precede it (see that lane's own
   // note above, which carries the measurement).
+  // #640's C9 lane. Position is not load-bearing: every branch is scoped to this lane's own
+  // client or plan ids and falls through otherwise, and its RPC verbs are disjoint from every
+  // lane above. Placed before the home board for the same reason the journal-work lane is — that
+  // lane answers `/rest/v1/clients` with an honest id-scoped row and this one must reach its own.
+  if (await handlePlansSupabase(request, response, path, url, sendJson, cors)) return;
   if (await handleHomeBoardSupabase(request, response, path, url, sendJson, cors)) return;
 
   if (request.method === "GET" && path === "/rest/v1/clients") {
@@ -889,6 +917,9 @@ const mockRuntime = startMockRuntime(mockRuntimePort, async (request, response, 
   // while `handleChat` claims the whole `/api/chat/sessions/…/messages` shape and would
   // otherwise serve this lane's thread a canned text message with no Work cards in it.
   if (await handleJournalWorkRuntime(request, response, url)) return true;
+  // #643, on the same footing: one admission route and one control endpoint, both scoped to this
+  // lane's own client id, so nothing another walk owns can reach it.
+  if (await handlePeriodicAdjustmentRuntime(request, response, url)) return true;
   if (await handleChat(request, response, url)) return true;
   return handleAuthWallMock({
     request, response, path: url.pathname, cors: {}, state,

@@ -1,0 +1,21 @@
+// Fixture: #637 — `workflowPins` whose values are IDENTIFIERS rather than string literals. This
+// is the shape the whole rule exists to refuse: it is a second, frozen, class-keyed table of
+// real workflow FUNCTIONS — an alternate dynamic-dispatch view that the enqueue-provenance law
+// (capability (e)) would trust by import source alone, and that nothing proves aliases the real
+// registry. REJECTED (REGISTRY-PROVENANCE-EXPORTS).
+// (.ts.txt so the repo's eslint/tsc sweeps never parse fixture code — DATA.)
+import { closeExampleV1 } from "./closeExample.v1.js";
+
+export const workflows = {
+  closeExample: closeExampleV1,
+} as const;
+
+export const workflowsByName: Readonly<Record<string, (input: any) => Promise<unknown>>> = Object.freeze(workflows);
+
+export { closeExampleV1 };
+
+export const workflowBodies: readonly string[] = Object.freeze(["closeExampleV1"]);
+
+export const workflowPins = Object.freeze({
+  closeExample: closeExampleV1,
+});

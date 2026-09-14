@@ -47,6 +47,7 @@ import {
   getOnboardingClient,
   hasFinalizedOpeningSeed,
   listOnboardingPlanItems,
+  promotePlanAnswersToKnowledge,
   resolveOnboardingPlanItem,
 } from "@/lib/onboarding/api";
 import { clientRecordChanged } from "@/lib/command/bus";
@@ -411,6 +412,28 @@ function ClientOnboardingCard({ clientId, session }: { clientId: string; session
                       { clientId, planId: plan.id, expectedPlanRevision: plan.revision_token, attestation: attestation.trim() || null },
                       { session },
                     );
+                    // #644 / CB-AE2E-030 — THE ANSWERS BECOME KNOWLEDGE, HERE.
+                    //
+                    // `commit_client_onboarding` writes nothing into any fact
+                    // register (0017:2751-2842, and 0192 does not splice it), so
+                    // until this call an interview answer was a rendered card and
+                    // a plan item, never saved Knowledge. `promote_plan_answers_to_
+                    // knowledge` is idempotent three ways, so a repeated press or a
+                    // second entry point cannot duplicate a record.
+                    //
+                    // DELIBERATELY SWALLOWED, and only this one. The client is
+                    // already ACTIVE and the plan already COMMITTED by the line
+                    // above; a projection failure must not present itself as a
+                    // failed commit (#603: "a KB projection failure does not roll
+                    // back a valid committed accounting result"). The promotion is
+                    // safe to repeat, so the recovery is simply the next press —
+                    // and the Knowledge register is the surface that shows whether
+                    // it landed, rather than a toast nobody can re-read.
+                    try {
+                      await promotePlanAnswersToKnowledge(plan.id, { session });
+                    } catch {
+                      // intentionally not rethrown — see above.
+                    }
                   },
                   // H-50 — the client's own record just changed (`status='active'`,
                   // 0017:2825) and the surfaces that render it live in a different React

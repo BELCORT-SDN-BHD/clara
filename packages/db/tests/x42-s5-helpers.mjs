@@ -1057,6 +1057,60 @@ const CHECKOUT_CONVERGENCE_0186_CLOCK_NAMES = [
   "apply_stripe_events", "set_admission_capacity",
 ];
 
+// #644 [0192] -- governed client Knowledge. EXACTLY ONE name, and every other body in the
+// migration is measured out rather than omitted.
+// `_knowledge_insert_revision` stamps `knowledge_records.superseded_at = now()` on the row a new
+// revision supersedes and repeats that same instant in the revision's own `recorded_at` provenance
+// object. Both are INSTANTS into timestamptz, never a date derived from one -- the property arm (D)
+// exists to protect -- and there is no date anywhere in a knowledge tuple for an assignment cast to
+// reach.
+//
+// The rest add nothing, measured on the live catalog rather than read off the file: the live
+// arm-(D) census over 0001..0194 returns exactly this one name out of 0192.
+// `knowledge_records.created_at`, `knowledge_keys.created_at` and the map's own stamps are column
+// DEFAULTS, which live in pg_attrdef and not in any prosrc -- the same reason the 0185 note above
+// gives for `legal_acceptances.accepted_at`. The read doors (`get_knowledge_pack`,
+// `list_client_knowledge`, `get_knowledge_record`, `get_knowledge_history`) are projections, and
+// every write door delegates its stamp to this one core.
+const KNOWLEDGE_RECORDS_0192_CLOCK_NAMES = ["_knowledge_insert_revision"];
+
+// #640 [0193] -- authorised recurring accounting plans. FIVE names, and the five that are NOT here
+// are the point of the entry.
+//
+// EVERY NAME HERE STAMPS AN INSTANT AND DERIVES NO DATE FROM ONE:
+//   * `_tf_accounting_plans_immutable` writes `new.updated_at := now()` -- the BEFORE UPDATE stamp
+//     wall, the same shape `_tf_checkout_intents_session_stamp` (0186) carries and for the same
+//     reason: no caller may move a plan's state without moving its instant.
+//   * `end_accounting_plan` (`ended_at`), `pause_accounting_plan` (`paused_at`) and
+//     `revise_accounting_plan` (`superseded_at`, on the revision it supersedes) each sample now()
+//     ONCE into a timestamptz column, exactly as `publish_legal_document` (0185) does.
+//   * `_plan_admit_occurrence` keeps SIX now() reads and not one of them is a date: `admitted_at`,
+//     plus the five `'at', now()` entries of the append-only `attempts` jsonb ledger (SHOULD-2).
+//     Its one DATE question -- "is this due event due yet?" -- goes through clara._book_today().
+//
+// THE FIVE THAT LEFT. `_plan_admissible_event`, `_plan_admit_occurrence`'s due gate,
+// `request_plan_catch_up`, `preview_accounting_plan` and `list_accounting_plans` each spelled
+// `(now() at time zone r.timezone)::date` for the house legal date. That is a second body owning
+// one house fact AND a transaction-pinned clock (round-7 finding C), so the fix was the migration's
+// rather than this roster's: all five now call clara._book_today(), and four of those names carry
+// no bare clock token at all any more. The measurement, not the intention, is what this entry
+// records -- the live arm-(D) census over 0001..0194 returns exactly these five out of 0193.
+//
+// The rest add nothing. `create_accounting_plan`, `resume_accounting_plan`,
+// `list_accounting_plan_occurrences`, `get_work_plan_origin`, `wake_due_plan_occurrences` and the
+// whole `_plan_*` due-arithmetic family read NO clock: the arithmetic is pure (dates in, dates out)
+// and every `created_at` on the three plan relations is a column DEFAULT in pg_attrdef.
+const ACCOUNTING_PLANS_0193_CLOCK_NAMES = [
+  "_plan_admit_occurrence", "_tf_accounting_plans_immutable", "end_accounting_plan",
+  "pause_accounting_plan", "revise_accounting_plan",
+];
+
+// #624 [0191] and #643 [0194] add NO name, and that is MEASURED rather than assumed: the live
+// arm-(D) census over 0001..0194 returns nothing out of either file. 0191's three constraint
+// triggers derive their verdicts from stored terms and stamp `evaluated_at` through a column
+// DEFAULT; 0194's `_adj_*` bodies either sit on this roster already (`_adj_run_occurrence_core`)
+// or take their dates from the period arithmetic they are handed.
+
 /** The arm (D) roster for the database under test, sorted as the catalog sorts it. */
 export async function s5BareTokenRoster(query) {
   const applied = async (pat) => (await query(
@@ -1161,6 +1215,8 @@ export async function s5BareTokenRoster(query) {
   if (await appliedStem("work_cancel_ordering$")) names.push(...WORK_CANCEL_0184_CLOCK_NAMES);
   if (await appliedStem("legal_acceptance$")) names.push(...LEGAL_ACCEPTANCE_0185_CLOCK_NAMES);
   if (await appliedStem("checkout_convergence$")) names.push(...CHECKOUT_CONVERGENCE_0186_CLOCK_NAMES);
+  if (await appliedStem("client_knowledge_records$")) names.push(...KNOWLEDGE_RECORDS_0192_CLOCK_NAMES);
+  if (await appliedStem("accounting_plans$")) names.push(...ACCOUNTING_PLANS_0193_CLOCK_NAMES);
   return names.sort();
 }
 
@@ -1218,6 +1274,34 @@ const KL_ROSTER_F_A4_PR1A = ["_close_gate_undated"];
 // agreement by construction: the name is expected on this roster precisely when the body exists.
 const KL_ROSTER_DBA_BANK_ENROLMENT = ["_bank_enrolled_fy_months"];
 
+// #640 [0193] -- clara._assert_plan_schedule. THE ONE NAME 0193 ADDS HERE, and it is on this
+// roster for a reason arm (B)'s own standing advice cannot serve.
+//
+// IT DERIVES NO DATE. Measured: the body is a VALIDATOR -- it compares the `frequency`, `day_rule`,
+// `day_of_month`, `timezone`, `effective_from`/`effective_to` and `reversal_day_rule` a CALLER sent
+// against the plan lane's closed vocabularies and raises a typed CLR10 naming the field the form
+// must focus. The timezone arm spells `Asia/Kuala_Lumpur` twice -- once as the comparison and once
+// in the sentence the professional reads -- because `accounting_plan_revisions.timezone` is a
+// one-member CHECK and this is where a caller is told so BY NAME. Arm (B)'s law is that a new name
+// is a second body owning the house legal DATE; this body owns no date, and the detector
+// (`like '%asia/kuala_lumpur%'`) cannot tell a spelled CONVERSION from a spelled ZONE NAME.
+//
+// IT CANNOT CALL clara._book_today() INSTEAD: the authority answers "what MYT date is today", while
+// this body asks "is the zone this caller wrote down the house's" -- a question about a NAME, which
+// the authority answers not at all. That is the identical shape that put _close_gate_undated and
+// _bank_enrolled_fy_months on this roster rather than through the authority (see their own blocks
+// above). Declared cost, not drift.
+//
+// AND THE ARITHMETIC WENT THE OTHER WAY, which is what makes this pin narrow rather than a
+// widening: 0193's first cut ALSO spelled `(now() at time zone r.timezone)::date` at five sites for
+// the house legal date. Those WERE a second body owning one house fact, so they were recut to
+// clara._book_today() rather than rostered. 0193 now spells the zone in exactly one body, and that
+// body computes nothing.
+//
+// GATED ON THE MIGRATION'S STABLE STEM, never its number -- numbers are claimed at merge, and
+// `db-slice-frontiers` runs this battery against chains that predate the plan lane.
+const KL_ROSTER_0193_PLANS = ["_assert_plan_schedule"];
+
 /** The arm (B) duplication roster for the database under test, sorted as the catalog sorts it. */
 export async function s5KlDuplicationRoster(query) {
   const applied = async (pat) => (await query(
@@ -1237,5 +1321,6 @@ export async function s5KlDuplicationRoster(query) {
     "select (to_regprocedure('clara._bank_enrolled_fy_months(uuid,date,date)') is not null) as ok"
   )).rows[0].ok;
   if (bankEnrolment) names.push(...KL_ROSTER_DBA_BANK_ENROLMENT);
+  if (await appliedStem("accounting_plans$")) names.push(...KL_ROSTER_0193_PLANS);
   return names.sort().join(" ");
 }

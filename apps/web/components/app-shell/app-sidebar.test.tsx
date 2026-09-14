@@ -215,12 +215,15 @@ test("Accounting is OPEN when one of its children is current, and its eight chil
   );
   try {
     const rendered = hrefs(h.container);
+    // #640 moved the Plans child off the registers workbench and onto its own durable route
+    // (`/clients/:id/plans`); `registers?tab=adjustments` stays reachable at its own URL with no
+    // redirect, it is simply no longer what the sidebar points at.
     assert.deepEqual(rendered.filter((href) => href.includes("/registers")), [
       `/clients/${CLIENT}/registers?tab=aging`,
       `/clients/${CLIENT}/registers?tab=fixedAssets`,
-      `/clients/${CLIENT}/registers?tab=adjustments`,
       `/clients/${CLIENT}/registers?tab=accounts`,
     ]);
+    assert.equal(rendered.includes(`/clients/${CLIENT}/plans`), true, "the Plans child is the C9 plan list");
     assert.equal(rendered.includes(`/clients/${CLIENT}/journals`), true);
     assert.equal(rendered.includes(`/clients/${CLIENT}/tax`), true);
     // The Beta mark on the one surface whose page states an inactive boundary.

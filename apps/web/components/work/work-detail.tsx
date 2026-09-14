@@ -32,6 +32,7 @@ import Link from "next/link";
 import { useTranslations } from "next-intl";
 
 import { AttachEvidenceDialog } from "@/components/work/attach-evidence-dialog";
+import { DocumentStatePanel } from "@/components/documents/document-state-panel";
 import {
   CancelOutcome,
   CancelWorkDialog,
@@ -44,6 +45,7 @@ import { WorkQuestionPanel } from "@/components/work/work-question-panel";
 import { SectionHeader } from "@/components/common/section-header";
 import { MemberName } from "@/components/common/member-name";
 import { useFirmScope } from "@/components/firm-scope-provider";
+import { WorkPlanOriginRow } from "@/components/plans/work-plan-origin";
 import { roleRankOf } from "@/lib/identity/caller-context";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -65,6 +67,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { WorkActivityView } from "@/components/work/work-activity-view";
 import { accountNames, type WorkDetailData } from "@/lib/work/reads";
+import { purposeLabel } from "@/lib/work/purpose-label";
 import { listEntryLinks, type EntryLinkRow } from "@/lib/work/evidence";
 import type { JournalEntryRow, JournalLineRow } from "@/lib/journals/types";
 import type { OperationReceiptRow } from "@/lib/work/types";
@@ -545,20 +548,42 @@ export function WorkDetailView({
           {work.source_refs === null || work.source_refs.length === 0 ? (
             <p className="max-w-prose text-sm text-muted-foreground">{t("sourcesEmpty")}</p>
           ) : (
-            <ul className="flex flex-col gap-1 text-sm">
-              {work.source_refs.map((ref, i) => (
-                <li key={`${ref.kind}-${i}`} className="text-foreground wrap-anywhere">
-                  {/* ONE LINE PER REF, in its OWN words — again not the identity block's. The
-                      summary above answers "was there a source"; this names WHAT each one is, and
-                      the unknown arm prints the database's own `kind` token rather than inventing
-                      a label for a vocabulary this build has not learned. */}
-                  {ref.kind === "chat_task" || ref.kind === "clara_chat"
-                    ? t("sourceRefChat")
-                    : ref.kind === "document"
-                      ? t("sourceRefDocument")
-                      : t("sourceRefUnknown", { kind: ref.kind })}
-                </li>
-              ))}
+            <ul className="flex flex-col gap-4 text-sm">
+              {work.source_refs.map((ref, i) => {
+                // #624 AC4 — "Documents AND Work show the four states". A source document named
+                // here is the SAME document the Documents workbench shows, so it gets the SAME
+                // four named states from the SAME read: `DocumentStatePanel` over
+                // `clara.get_document_state` (lib/documents/reads.ts). NO NEW DOOR and no second
+                // vocabulary — a Work that cites a document Clara derived nothing from must not
+                // read differently here from how it reads on the Documents tab.
+                //
+                // THE ID IS SHAPE-CHECKED FIRST, the same guard this page already applies to its
+                // own `workId`: `p_document` is a `uuid` parameter, so a malformed value is a
+                // PostgREST 400/22P02 that throws out of the loader rather than an honest state.
+                // A `document` ref that names nothing usable therefore says so in words.
+                const documentId = ref.kind === "document" ? (ref.document_id ?? null) : null;
+                const readable = documentId !== null && isUuidShape(documentId);
+                return (
+                  <li key={`${ref.kind}-${i}`} className="flex flex-col gap-2 text-foreground wrap-anywhere">
+                    {/* ONE LINE PER REF, in its OWN words — again not the identity block's. The
+                        summary above answers "was there a source"; this names WHAT each one is, and
+                        the unknown arm prints the database's own `kind` token rather than inventing
+                        a label for a vocabulary this build has not learned. */}
+                    <span>
+                      {ref.kind === "chat_task" || ref.kind === "clara_chat"
+                        ? t("sourceRefChat")
+                        : ref.kind === "document"
+                          ? t("sourceRefDocument")
+                          : t("sourceRefUnknown", { kind: ref.kind })}
+                    </span>
+                    {ref.kind !== "document" ? null : readable ? (
+                      <DocumentStatePanel documentId={documentId!} clientId={clientId} session={session} />
+                    ) : (
+                      <p className="max-w-prose text-sm text-muted-foreground">{t("sourceDocumentUnidentified")}</p>
+                    )}
+                  </li>
+                );
+              })}
             </ul>
           )}
         </TabsContent>
@@ -631,15 +656,15 @@ function PostedEntrySection({
             </dd>
             {/* #634 — WHAT KIND OF WORK THIS WAS. `accounting_work.purpose` is
                 read on every one of this journey's surfaces and was rendered on
-                none of them; the vocabulary is one value today (`journal_entry`)
-                and an unknown one renders VERBATIM rather than crashing on a
-                missing message key, exactly as `basis_origin` does above. */}
+                none of them. #643 widened the vocabulary to three, so the
+                mapping moved into `lib/work/purpose-label.ts` and is shared with
+                the journals row; an unknown one still renders VERBATIM rather
+                than crashing on a missing message key, exactly as `basis_origin`
+                does above. */}
             {links?.purpose == null ? null : (
               <>
                 <dt className="text-muted-foreground">{tm("links.purpose")}</dt>
-                <dd className="text-foreground">
-                  {links.purpose === "journal_entry" ? tm("links.purposeJournalEntry") : links.purpose}
-                </dd>
+                <dd className="text-foreground">{purposeLabel(links.purpose, tm, "links.purpose")}</dd>
               </>
             )}
             {committed === null ? null : (
@@ -695,6 +720,9 @@ function WorkFacts({
   const t = useTranslations("WorkDetail");
   /** #630 — the handover row's own word. */
   const tc = useTranslations("WorkCancel");
+  /** #643 — the purpose's own noun, read from the SAME namespace the result block reads it from
+   *  so one page cannot label one row two ways. */
+  const tm = useTranslations("ManualJournal");
   const documentless = Array.isArray(work.source_refs) && work.source_refs.length === 0;
   const chatRef = (work.source_refs ?? []).find((ref) => ref.kind === "chat_task") ?? null;
   const bundleId = work.bundle?.id ?? null;
@@ -718,7 +746,13 @@ function WorkFacts({
       </div>
       <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
         <dt className="text-muted-foreground">{t("purpose")}</dt>
-        <dd className="text-foreground">{work.purpose}</dd>
+        {/* #643 — THE SAME LABEL THE RESULT BLOCK SHOWS. It rendered the raw column value, so one
+            page said "Periodic stock adjustment" in one place and `periodic_stock_adjustment` in
+            another about the same row. */}
+        <dd className="text-foreground">{purposeLabel(work.purpose, tm, "links.purpose")}</dd>
+        {/* #640 — "From plan <purpose>", and ONLY when this Work was initiated by an accounting
+            plan's due event. The component renders nothing otherwise; see its own header. */}
+        <WorkPlanOriginRow clientId={work.client_id} workId={work.id} />
         <dt className="text-muted-foreground">{t("submittedAt")}</dt>
         <dd className="text-foreground">{work.created_at === null ? "—" : businessDateTime(work.created_at)}</dd>
         <dt className="text-muted-foreground">{t("initiatorRole")}</dt>

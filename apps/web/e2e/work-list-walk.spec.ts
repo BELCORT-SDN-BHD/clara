@@ -277,6 +277,41 @@ test("the Work detail keeps the current question ABOVE the Results/Sources/Activ
   expect(order, "the current question precedes the tab strip in DOM order").toBe(true);
 });
 
+test("#624 AC4: the Sources tab names the source document's four states, and the failing check", async ({ page }) => {
+  // "Documents AND Work show the four states" — the WORK half. The Documents half has its own walk
+  // (`documents-viewer-walk.spec.ts`); this cell exists because the criterion is about BOTH, and a
+  // build that shipped the panel on one surface only would pass every cell that existed before it.
+  //
+  // THE FIXTURE IS A FACTS-SUPPORTED DOCUMENT WHOSE ARITHMETIC CHECK FAILED, which is the shape
+  // where "the OCR finished" and "the figures can be trusted" come apart. A cell that asserted
+  // only that four words appeared would pass on a build that printed four reassuring ones.
+  await signIn(page);
+  await page.goto(`/clients/${WORK_LIST.clientId}/work?status=completed`);
+  await rowLink(page, "Bank charges, August").click();
+  await expect(page).toHaveURL(new RegExp(`/work/${WORK_LIST.completedWorkId}$`));
+
+  const sources = page.getByRole("tab", { name: "Sources" });
+  await sources.click();
+  await expect(sources).toHaveAttribute("aria-selected", "true");
+
+  // The ref is named in words FIRST — the states hang off a source the reader can identify.
+  await expect(page.getByText("A filed client document")).toBeVisible();
+
+  // FOUR SEPARATE TRUE THINGS, each announced by its own name — the same `role="group"` labels the
+  // Documents walk asserts, from the same panel over the same door.
+  for (const name of [
+    "Custody: Bytes verified",
+    "Extraction: Done",
+    "Facts: Failed a check",
+    "Operation: Not coded yet",
+  ]) {
+    await expect(page.getByRole("group", { name })).toBeVisible();
+  }
+
+  // AND THE FAILING CHECK IS NAMED. "invalid" with no name is an accusation, not a finding.
+  await expect(page.getByText(/the invoice arithmetic tie/)).toBeVisible();
+});
+
 test("/work is axe-clean at 320px with the list rendered", async ({ page }) => {
   await page.setViewportSize({ width: 320, height: 720 });
   await signIn(page);

@@ -374,13 +374,26 @@ test("the bounded wait RE-READS THE SERVER, then stops and says so", async () =>
   // through the INJECTED bound so the shipped constants are never the values
   // under test — the same discipline `stripe-session.ts` applies to its own
   // deadline.
+  //
+  // THE INJECTED BUDGET IS 400 ms RATHER THAN 30, AND THAT IS A MEASUREMENT (#643).
+  // The "before the budget" assertion below runs AFTER two `h.settle()` cycles, so the
+  // budget has to outlast the mount-and-settle cost of the harness itself — and that
+  // cost is not a constant: it grows with `messages/en.json`, which every ticket that
+  // ships user-facing copy makes bigger. At 30 ms the cell was already marginal, and
+  // #643's message block (+139 lines, ~3.5 %) tipped it over deterministically on a
+  // Windows dev host — the notice was on screen before the assertion ran, so a poll
+  // that had behaved correctly was reported as a defect. Bisected by swapping ONLY
+  // en.json for main's and re-running: 25/25 green with main's, 24/25 with the branch's.
+  // The PROPERTY is unchanged — it re-reads the server several times, then stops and
+  // says so — and every ratio below still holds. Only the clock is now wide enough that
+  // this measures the component rather than the harness.
   const refreshes = { count: 0 };
   const h = await renderComponent(
     App(
       createElement(CheckoutWaitingRefresh, {
         registration: REGISTRATION,
-        intervalMs: 5,
-        budgetMs: 30,
+        intervalMs: 20,
+        budgetMs: 400,
       }),
       refreshes,
     ),
@@ -390,7 +403,7 @@ test("the bounded wait RE-READS THE SERVER, then stops and says so", async () =>
     // BEFORE the budget: nothing is said, because nothing has gone wrong.
     assert.equal(textOf(h.container as never).trim(), "", "the waiting notice appeared before the budget ran out");
 
-    await new Promise((resolve) => setTimeout(resolve, 120));
+    await new Promise((resolve) => setTimeout(resolve, 600));
     for (let i = 0; i < 3; i++) await h.settle();
 
     assert.ok(refreshes.count >= 2, `the server was re-read ${refreshes.count} times`);
@@ -403,7 +416,7 @@ test("the bounded wait RE-READS THE SERVER, then stops and says so", async () =>
 
     // AND IT REALLY STOPPED — not "rendered a notice and kept going".
     const afterStop = refreshes.count;
-    await new Promise((resolve) => setTimeout(resolve, 60));
+    await new Promise((resolve) => setTimeout(resolve, 100));
     assert.equal(refreshes.count, afterStop, "the poll kept running after it said it had stopped");
   } finally {
     await h.unmount();

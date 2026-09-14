@@ -1,0 +1,16 @@
+// Fixture: #637 — `workflowBodies` declared as a BARE array literal, with no `Object.freeze`.
+// The roster is served to /api/build-info and read by the rollback preflight; an unfrozen one
+// can be mutated in-process after boot, so what a later reader sees is no longer what the image
+// carries. REJECTED (REGISTRY-PROVENANCE-EXPORTS), never trusted because it "looks right".
+// (.ts.txt so the repo's eslint/tsc sweeps never parse fixture code — DATA.)
+import { closeExampleV1 } from "./closeExample.v1.js";
+
+export const workflows = {
+  closeExample: closeExampleV1,
+} as const;
+
+export const workflowsByName: Readonly<Record<string, (input: any) => Promise<unknown>>> = Object.freeze(workflows);
+
+export { closeExampleV1 };
+
+export const workflowBodies: readonly string[] = ["closeExampleV1"];

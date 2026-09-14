@@ -277,7 +277,13 @@ test("the identity block names the purpose, the source ABSENCE and the role AS A
   try {
     await h.settle();
     const text = h.text();
-    assert.match(text, /journal_entry/);
+    // #643 — THE LABEL, not the raw column value. The identity block used to render
+    // `accounting_work.purpose` verbatim while the result block a screen below showed "Journal
+    // entry" for the same row, which is one page saying two things about one fact. Both now read
+    // the ONE mapping (`lib/work/purpose-label.ts`); an unknown purpose still renders itself.
+    assert.match(text, /PurposeJournal entry/);
+    assert.doesNotMatch(text, /journal_entry/,
+      "the raw token is gone from the rendered page — it is a database value, not a reader's word");
     // The whole point of this journey: an operation with no document behind it.
     assert.match(text, /No source document — user-supplied basis/);
     // The role is HISTORY, and must never read as a current permission.
@@ -1231,4 +1237,238 @@ test("641 the Results tab says so when nothing has been posted yet, rather than 
   } finally {
     await h.unmount();
   }
+});
+
+// ── #624 AC4, the WORK half ────────────────────────────────────────────────────────────────────
+//
+// "Documents AND Work show the four states" is ONE acceptance criterion across TWO surfaces.
+// #624 shipped the Documents half on its own branch (`components/documents/document-state-panel.tsx`
+// inside `document-detail.tsx`); the Work half could not be built there because #641's Sources tab
+// did not exist yet on that branch, so it is a wave-2 integration and these cells are what turn it
+// into a claim. The SAME panel over the SAME read (`clara.get_document_state`) — a Work that cites
+// a document Clara derived nothing from must not read differently here than it does on Documents.
+
+const SOURCE_DOC = "0c0c0c0c-0c0c-4c0c-8c0c-0c0c0c0c0c0c";
+
+/** `clara.get_document_state`'s own jsonb, in the shape `lib/documents/document-state.ts`
+ *  narrows — every key below exists in 0191's `jsonb_build_object`, so a fixture drift shows up
+ *  as a type error rather than as a green cell about a shape the door cannot return. */
+function documentState(over: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    document_id: SOURCE_DOC,
+    document_kind: "invoice",
+    mime_type: "application/pdf",
+    format: "pdf",
+    capability: {
+      format: "pdf", document_kind: "invoice", mime_type: "application/pdf",
+      custody: "supported", byte_extraction: "supported",
+      typed_facts: "supported", business_operation: "supported",
+      engine_id: "llm-openai:gpt-5.6-terra:v2", engine_byte: "azure-di:prebuilt-layout:2024-11-30",
+      registry_version: 1,
+      basis: "Bytes are sealed at intake and read by azure-di:prebuilt-layout:2024-11-30.",
+      limits: {}, known_pair: true, kind_known: true,
+    },
+    custody: {
+      state: "verified", sha256: "a".repeat(64), byte_size: 20480,
+      bytes_verified_at: "2026-09-01T00:00:01.000Z", legal_hold: false, legal_hold_reason: null,
+      retention_state: "unanchored", retain_until: null, capability: "supported",
+    },
+    byte_extraction: {
+      status: "done", page_count: 1, capability: "supported",
+      engine_id: "azure-di:prebuilt-layout:2024-11-30",
+      tasks: [{
+        id: "0c0c0c0c-0c0c-4c0c-8c0c-0c0c0c0cff01", lane: "ocr", status: "done",
+        engine_id: "azure-di:prebuilt-layout:2024-11-30", version_n: 1, attempt_count: 1,
+        error_code: null, finished_at: "2026-09-01T00:00:02.000Z",
+      }],
+    },
+    facts: {
+      capability: "supported", limits: {},
+      extractions: [{
+        id: "0c0c0c0c-0c0c-4c0c-8c0c-0c0c0c0cee01", engine_kind: "llm_text_facts",
+        engine_id: "llm-openai:gpt-5.6-terra:v2", version_n: 1, status: "done",
+        superseded_by: null, extracted_at: "2026-09-01T00:00:03.000Z", region_count: 4,
+      }],
+      validations: [{
+        check_name: "invoice.six_term_identity", outcome: "pass", detail: {},
+        extraction_id: "0c0c0c0c-0c0c-4c0c-8c0c-0c0c0c0cee01", statement_id: null,
+        engine_id: "llm-openai:gpt-5.6-terra:v2", evaluated_at: "2026-09-01T00:00:04.000Z",
+      }],
+    },
+    operation: { capability: "supported", codeable_kind: true, entries: [], statements: [] },
+    lineage: {
+      sha256: "a".repeat(64), intakes: [], corrections: [],
+      authoritative_extraction_id: null, filings: [],
+    },
+    ...over,
+  };
+}
+
+type DoorCall = { url: string; method: string };
+
+/** Stubs `fetch` for the ONE door this half adds, and hands the cell every call it saw.
+ *
+ *  IT ROUTES BY URL rather than answering everything with the same payload, and that is not
+ *  tidiness: the page also mounts `useMemberNames`, whose read expects an ARRAY, so a blanket stub
+ *  made every one of these cells fail inside the member resolver — i.e. red for a reason that has
+ *  nothing to do with the states this file is measuring. Every other request gets the honest empty
+ *  answer its reader can handle. */
+async function withStateDoor(answer: unknown, run: (calls: DoorCall[]) => Promise<void>): Promise<void> {
+  const calls: DoorCall[] = [];
+  const originalFetch = globalThis.fetch;
+  const originalUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  process.env.NEXT_PUBLIC_SUPABASE_URL = "https://example.supabase.co";
+  globalThis.fetch = (async (input: unknown, init?: { method?: string }) => {
+    const url = String(input);
+    calls.push({ url, method: String(init?.method ?? "GET").toUpperCase() });
+    const body = url.includes("/rest/v1/rpc/get_document_state") ? answer : [];
+    return new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
+  }) as typeof fetch;
+  try {
+    await run(calls);
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalUrl === undefined) delete process.env.NEXT_PUBLIC_SUPABASE_URL;
+    else process.env.NEXT_PUBLIC_SUPABASE_URL = originalUrl;
+  }
+}
+
+function stateDoorCalls(calls: DoorCall[]): DoorCall[] {
+  return calls.filter((c) => c.url.includes("/rest/v1/rpc/get_document_state"));
+}
+
+/** The four states are announced BY NAME — `role="group"` with an `aria-label` of
+ *  "<axis>: <state>" — which is what a listener hears instead of eight adjacent fragments. A cell
+ *  that matched the rendered TEXT would pass on a build that printed the four words with no
+ *  pairing at all, so every assertion below is on the label. */
+function groupLabelled(h: { find: (p: (n: Stub) => boolean) => Stub | null }, label: string): Stub | null {
+  return h.find((n) => {
+    const get = (n as { getAttribute?: (k: string) => string | null }).getAttribute;
+    return typeof get === "function" && get.call(n, "aria-label") === label;
+  });
+}
+
+test("624 AC4: a Work's SOURCE DOCUMENT shows the same four named states the Documents tab shows", async () => {
+  await withStateDoor(documentState(), async (calls) => {
+    const h = await renderComponent(App({
+      load: async () => data({
+        work: workRow({ status: "completed", source_refs: [{ kind: "document", document_id: SOURCE_DOC }] }),
+      }),
+    }));
+    try {
+      await settleUntil(h, () => groupLabelled(h, "Custody: Bytes verified") !== null,
+        "the source document's custody state to render in the Sources tab");
+
+      // FOUR SEPARATE TRUE THINGS, each by its own name. "Facts: Recorded and checked" is the one
+      // that carries the ticket: this document has a landed extraction AND a passing arithmetic
+      // check, which is a different claim from "extraction: done" and is the distinction #624
+      // exists to make.
+      for (const label of [
+        "Custody: Bytes verified",
+        "Extraction: Done",
+        "Facts: Recorded and checked",
+        "Operation: Not coded yet",
+      ]) {
+        assert.ok(groupLabelled(h, label), `the Sources tab must announce ${label}`);
+      }
+
+      // THE CAPABILITY SENTENCE, VERBATIM FROM THE REGISTRY — the one line a professional can
+      // argue with, and never a sentence this surface assembled.
+      assert.match(h.text(), /Bytes are sealed at intake and read by azure-di/);
+
+      // NO NEW DOOR. It is the Documents workbench's own read, called with this Work's client.
+      const doors = stateDoorCalls(calls);
+      assert.equal(doors.length, 1, "exactly one get_document_state read for one source document");
+      assert.equal(doors[0]!.method, "POST", "the RPC is a POST, as every door on this app is");
+      assert.equal(
+        calls.filter((c) => c.url.includes("/rest/v1/rpc/") && !c.url.includes("get_document_state")).length,
+        0,
+        "the Sources tab opens no other door",
+      );
+    } finally {
+      await h.unmount();
+    }
+  });
+});
+
+test("624 AC4: a source document Clara cannot read says so, and one that names no document is never asked about", async () => {
+  // ARM 1 — THE DOOR'S OWN LEGITIMATE NULL. `clara.get_document_state` answers SQL NULL for a
+  // document filed to another client rather than a partial answer, and the honest face for that is
+  // "not available", never a fabricated set of four states.
+  await withStateDoor(null, async (calls) => {
+    const h = await renderComponent(App({
+      load: async () => data({
+        work: workRow({ status: "completed", source_refs: [{ kind: "document", document_id: SOURCE_DOC }] }),
+      }),
+    }));
+    try {
+      await settleUntil(h, () => /These states are not available for this document/.test(h.text()),
+        "the honest not-available face for a document this client cannot read");
+      assert.equal(groupLabelled(h, "Custody: Bytes verified"), null, "and no state is invented for it");
+      assert.equal(stateDoorCalls(calls).length, 1, "the read was actually attempted");
+    } finally {
+      await h.unmount();
+    }
+  });
+
+  // ARM 2 — A `document` REF THAT NAMES NOTHING USABLE. `p_document` is a uuid parameter, so a
+  // malformed or absent id must never reach it (a 22P02 would throw out of the loader and render
+  // an error where a state belongs). The page says what it has instead, and fires NO read.
+  await withStateDoor(documentState(), async (calls) => {
+    const h = await renderComponent(App({
+      load: async () => data({
+        work: workRow({ status: "completed", source_refs: [{ kind: "document", document_id: "not-a-uuid" }] }),
+      }),
+    }));
+    try {
+      await settleUntil(h, () => /names no document Clara can read/.test(h.text()),
+        "the honest unidentified-source sentence");
+      assert.equal(stateDoorCalls(calls).length, 0, "a malformed document id must never reach the uuid door");
+    } finally {
+      await h.unmount();
+    }
+  });
+});
+
+test("624 AC4: switching to Sources fires no write and no SECOND state read", async () => {
+  // #641's own tab cell already proves a tab press is not an act on the Work. This one extends it
+  // to the door this integration added: the four states are a READ, and a panel that re-read on
+  // every tab press would spend a request per press on a surface people switch between freely.
+  let writes = 0;
+  const countWrite = async () => {
+    writes += 1;
+    return { kind: "accepted" } as never;
+  };
+  await withStateDoor(documentState(), async (calls) => {
+    const h = await renderComponent(App({
+      load: async () => data({
+        work: workRow({ status: "completed", source_refs: [{ kind: "document", document_id: SOURCE_DOC }] }),
+      }),
+      retry: countWrite,
+      cancel: countWrite,
+      takeOver: countWrite,
+    }));
+    try {
+      await settleUntil(h, () => groupLabelled(h, "Custody: Bytes verified") !== null,
+        "the source document's states to render");
+      const doorsBefore = stateDoorCalls(calls).length;
+
+      const sources = h.find((n) =>
+        n.tagName === "BUTTON" && String((n as { textContent?: string }).textContent ?? "").trim() === "Sources");
+      assert.ok(sources, "the Sources tab is a real control");
+      await clickButton(sources);
+      await h.settle();
+      await h.settle();
+
+      assert.equal(writes, 0, "a tab press is not an act on the Work");
+      assert.equal(stateDoorCalls(calls).length, doorsBefore, "and it does not re-read the document's states");
+      assert.equal(
+        calls.filter((c) => c.method !== "GET" && !c.url.includes("get_document_state")).length,
+        0,
+        "no mutating request of any kind left this page",
+      );
+    } finally {
+      await h.unmount();
+    }
+  });
 });

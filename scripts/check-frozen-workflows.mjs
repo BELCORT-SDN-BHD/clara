@@ -42,6 +42,12 @@
 //   (f) REGISTRY-VIEW-INTEGRITY (Gate G1 MUST D) — (e) trusts any registry.ts export
 //       by name alone, so `workflowsByName` must be exactly `Object.freeze(workflows)`
 //       and no other export may alias `workflows`. All three checks fail CLOSED.
+//   (g) PROVENANCE-EXPORT SHAPE (#637) — `workflowBodies`/`workflowPins`, the roster the
+//       boot line, /api/build-info and the rollback preflight read, must be `Object.freeze`
+//       over a literal of STRING literals: inert data, never a second dispatch view.
+//   (h) MANIFEST-KEY HYGIENE (C77.2, #637) — a manifest key under a TEST path is REFUSED.
+//       The append-only rule makes every key permanent, so freezing a test file by accident
+//       is unfixable by design; a test file ships in no image and no parked run resumes into it.
 //   Self-test: node scripts/check-frozen-workflows.selftest.mjs (fixtures under
 //   scripts/freeze-lint-fixtures/ — stored as .txt so eslint/tsc never parse them).
 // Usage:
@@ -53,7 +59,8 @@
 // `--update` is REFUSED under CI/GITHUB_ACTIONS — a re-baseline is a deliberate
 // local act, and CI's append-only-vs-base check is what actually gates a PR.
 //
-// DEPLOY-LOCK (Appendix A's actual boundary): `deployed: true` = shipped in a
+// DEPLOY-LOCK (the versioning law's actual boundary — docs/ARCHITECTURE.md §10 (#workflow-versioning-and-rollback)):
+// `deployed: true` = shipped in a
 // LIVE image — hash immutable vs base forever, flag MONOTONIC (an unlock is the
 // bypass this blocks). A merged-but-UNDEPLOYED entry (the pre-ceremony window)
 // may re-baseline via --update: immutability binds at DEPLOY (parked runs only
@@ -68,7 +75,7 @@ import { readFileSync, existsSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, resolve, extname } from "node:path";
 import { execFileSync } from "node:child_process";
 // Pure sibling checkers let selftests inject simulated base/head source pairs.
-import { checkRegistryMonotonicity, checkRegistryViewIntegrity, checkEnqueueSites, isTestPath, REGISTRY_REL } from "./freeze-lint-checks.mjs";
+import { checkManifestPaths, checkRegistryMonotonicity, checkRegistryViewIntegrity, checkEnqueueSites, isTestPath, REGISTRY_REL } from "./freeze-lint-checks.mjs";
 import { runFrozenManifestCompareCli } from "./frozen-manifest-compare.mjs";
 import { FROZEN_WORKFLOW_FAILURE_GUIDANCE } from "./frozen-workflow-guidance.mjs";
 const COMPARE_BASE_INDEX = process.argv.indexOf("--compare-base");
@@ -378,7 +385,7 @@ function main() {
     const actual = hashFile(join(REPO_ROOT, rel));
     if (actual !== entry.sha256) {
       violations.push(
-        `BODY CHANGED  ${rel}\n    expected ${entry.sha256}\n    actual   ${actual}\n    -> a frozen workflow/step body must not change; ship the change as a new _vN export (Appendix A).`,
+        `BODY CHANGED  ${rel}\n    expected ${entry.sha256}\n    actual   ${actual}\n    -> a frozen workflow/step body must not change; ship the change as a new _vN export (docs/ARCHITECTURE.md §10 (#workflow-versioning-and-rollback)).`,
       );
     }
   }
@@ -398,6 +405,13 @@ function main() {
       );
     }
   }
+
+  // 2a. MANIFEST-KEY HYGIENE (C77.2, #637). Checks 1 and 2 both ask questions about the
+  // FILES the manifest points at; this asks the one question about the KEYS themselves. It is
+  // separate from `isTestPath`'s long-standing use in the enqueue-site scan below (an
+  // exclusion there, a refusal here) and runs on the manifest as loaded, so a key whose file
+  // does not even exist is still reported by its own rule rather than only as MISSING.
+  violations.push(...checkManifestPaths(Object.keys(manifest.workflows), MANIFEST_REL));
 
   // 2b. IMPORT-ESCAPE (finding 11): every frozen file must reach its first-party
   // code through RELATIVE imports so the closure can follow + hash it. A
@@ -483,7 +497,7 @@ function main() {
   violations.push(...checkEnqueueSites(enqueueEntries));
 
   if (violations.length > 0) {
-    console.error("freeze-lint: FAIL — frozen workflow policy violated (ARCHITECTURE.md Appendix A):\n");
+    console.error("freeze-lint: FAIL — frozen workflow policy violated (docs/ARCHITECTURE.md §10 (#workflow-versioning-and-rollback)):\n");
     for (const v of violations) console.error("  - " + v);
     console.error(
       `\n${violations.length} violation(s). ${FROZEN_WORKFLOW_FAILURE_GUIDANCE}`,

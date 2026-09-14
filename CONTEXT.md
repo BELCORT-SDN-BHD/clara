@@ -20,6 +20,33 @@ _Avoid_: Chat session, chat message, journal entry as synonyms for the whole job
 Stopping the remaining work while retaining outcomes already completed. Reversing or correcting a posted outcome is a separate accounting action.
 _Avoid_: Rollback, reversal as synonyms for cancellation.
 
+**Accounting plan**:
+An explicitly authorised schedule for future accounting. It records what it posts, the schedule it
+follows, the calendar days that schedule produces in a named timezone, the window its authority
+covers, and the instruction that authorised it — a row this database holds, not a remembered
+sentence. It can be revised (a new version, the predecessor kept), paused (future due events stop;
+work already admitted is untouched) and ended (terminal).
+_Avoid_: A recurring adjustment template as a synonym; a preference, a calculation policy or a
+repeated bank debit as a source of authority; an instruction to move money — a plan creates journal
+Work and never initiates a bank payment or a mandate.
+
+**Plan occurrence**:
+One due event of one plan. It is the identity of that event: one plan and one due date have exactly
+one occurrence, whatever happened to it. An admitted occurrence names the Accounting work it
+created — and every attempt it ever admitted, so a cancelled one stays reachable from the plan; a
+refused one records the refusal and creates nothing, and re-attempting it is an explicit catch-up
+rather than the next scan's business. A REVERSING occurrence also names the journal entry it undoes:
+it is admissible only once its own period's accrual has POSTED a still-live entry, never merely
+because that accrual was admitted.
+_Avoid_: The journal entry as a synonym; a second scan's answer as a second occurrence; treating a
+missed period as something the schedule will pick up on its own; treating an admitted accrual as a
+posted one.
+
+**Plan catch-up**:
+Admitting due events that already passed, over a window a person names. Oldest first, bounded per
+request, and never reaching back past the date the plan's authority starts.
+_Avoid_: An automatic backfill; a future schedule read as authority over history.
+
 **Ordering boundary**:
 The `clara.accounting_work` row lock. Admitting an accounting operation and cancelling that Work serialise on it: exactly one side wins; the loser creates no effect and returns a typed refusal.
 _Avoid_: An AbortSignal or in-process flag as a substitute; a guarantee that holds only when nothing races.
@@ -90,7 +117,12 @@ _Avoid_: Chat history.
 
 **Client knowledge**:
 The client's facts, identities, aliases, durable preferences, policy information and source-linked accounting experience, with their sources and verification state. Explicit information may be saved automatically; an agent's inference is not automatically confirmed knowledge.
-_Avoid_: An unqualified bag of chat messages; a synonym for authority to post.
+Every governed record carries one of four **kinds** — a *stated fact* (what an identified person supplied), an *extracted fact* (read from a named source version), a *preference* (a durable instruction) or a *policy* (a decision about how the books are prepared) — and one of four **trust levels**, derived from where it came from and never supplied by the caller: *asserted*, *extracted*, *imported unverified* and *inferred*. A policy admits `asserted` alone.
+_Avoid_: An unqualified bag of chat messages; a synonym for authority to post; treating an imported bundle's own "verified" annotation, or a model's own confidence, as a trust level.
+
+**Knowledge revision**:
+One attributable version of a knowledge record. A capture is revision 1; a correction and a withdrawal each append a further revision naming its actor and its reason, and leave the revision they retire readable. A withdrawal is terminal for that record — a later statement of the same thing starts a new record with its own history.
+_Avoid_: Editing a knowledge value in place; a correction with no stated reason; presenting a withdrawal as the absence of a record.
 
 **Firm knowledge default**:
 An explicitly firm-scoped instruction or preference that applies across authorised clients while preserving their established exceptions.
@@ -107,6 +139,22 @@ _Avoid_: Every change to product or accounting state.
 **Work run**:
 One execution attempt of an Accounting work: the durable task and workflow run that claims the work, runs Clara's bundle and settles an outcome. A retry is a new run under the same work and the same logical operation identity.
 _Avoid_: A new piece of work; a reason to post the same effect twice.
+
+**Workflow body**:
+One immutable, deployed version of a workflow class — the code a run executes and stays bound to for its whole life. A class names its newest body (its **pin**); every earlier body an image still carries is **retained**, because a run parked on one resumes into exactly the body it left.
+_Avoid_: Workflow class as a synonym; a version number in a name as proof the code is present in an image.
+
+**Body roster**:
+Which bodies a running image can actually execute, as a readable fact rather than an inference: the registry's pins plus every retained body, reported in one boot line, on `/api/build-info`, and derivable from the built bundle's own WDK directives. It answers "can this image run that parked run", which a list of workflow class names cannot.
+_Avoid_: The registry's class list; the repository's source tree as evidence about a deployed image.
+
+**Stranded body**:
+A body that live, non-terminal runs are parked on and that the image now serving does not carry. Those runs are parked rather than lost — a release of an image that carries the body resumes them — but the serving process cannot advance them, and an engine asked to replay one can crash rather than wait.
+_Avoid_: A failed run; a reason to treat the Work as cancelled; a condition safe to discover after a rollback.
+
+**Rollback preflight**:
+The check run before releasing an earlier image: does that target carry every body live runs are parked on, and every class an already-admitted Work still needs. A refusal has two admissible answers — retain the bodies in a compatibility build, or complete a verified drain — and elapsed time is neither.
+_Avoid_: Rollback points as a substitute for it; "nothing looked busy" as a drain.
 
 **Operation receipt**:
 The record that one logical operation identity committed its business effect: which run and bundle produced it, which human authority it acted for, and which objects it created. At most one committed receipt exists per logical operation identity; a replay returns it and a changed payload under that identity is refused.
@@ -168,6 +216,22 @@ _Avoid_: An internal task name or private model reasoning; a pending question (W
 A `sweep.run_completed` event whose run drafted or posted at least one item, and so remains in the Activity feed as an attributed agent act. A run that changed nothing is excluded rather than shown as unattributed noise.
 _Avoid_: Every sweep run; a refusal or a skip counted as "effect".
 
+**Document capability**:
+What Clara can actually do with an admitted upload, stated per (file format × document type) on four independent levels: custody (the bytes are sealed and retrievable), byte extraction (a reader turned them into stored, inspectable content), typed facts (a lane can persist typed values with their source regions) and business operation (the pair can drive an accounting operation). Each level is `supported`, `stored_only`, `unsupported` or `planned`, and a level is published with the reason for it.
+_Avoid_: "Supported" as one word about a file type; a promise inferred from a filename or an extension; permission — an egress consent gate remains the authority over whether a read may happen at all.
+
+**Typed fact**:
+A value Clara read out of a document and persisted with its exact source: the document's own version, the page/region it was read from, the field path naming it, and the engine and model version that produced it. A typed fact is a reading of a source, never a confirmed fact about the client. Client Knowledge LINKS to a typed fact — by extraction, region and field path — and never copies it: a document fact becomes a client fact only through Knowledge's own confirmation, with its own actor, scope and status.
+_Avoid_: Client Knowledge; a duplicated copy of an extraction value living in Knowledge; a value shown without its source version and region; a fact that failed or skipped its arithmetic check presented as validated.
+
+**Field path**:
+The canonical name of one value inside an extraction — dot-separated segments under a registered namespace, such as `invoice.total`, `myinvois.supplier_tin` or `pages.1.lines.0`. It is validated at the one write boundary that owns it, so a region can always be traced back to what it claims to be.
+_Avoid_: A free-text label; a display name; a path invented by a surface rather than written by a producer.
+
+**Arithmetic validation**:
+A named check run over persisted typed facts — the invoice totals identity, a statement's balance chain, its printed totals — recorded with its outcome and its terms. `unmeasured` means the terms the check needs were never persisted, and is deliberately not a pass.
+_Avoid_: Treating an unmeasured or not-applicable check as a pass; treating a failed check as a reason to hide the facts, which stay readable and block only dependent work.
+
 **Accounting operation**:
 A business action, such as recording an acquisition or settling an invoice, with its required journal effects and related accounting records. Its meaning is the same whether initiated by a person or Clara.
 _Avoid_: An arbitrary collection of journal lines as a complete description of every action.
@@ -211,3 +275,10 @@ _Avoid_: The audit trail as a whole; a client-visible notification; proof that m
 **Provider problem**:
 A recorded payment-provider event the estate's applier could not act on — an unsettled payment, absent metadata, an unknown or mismatched checkout intent, a duplicate payment, or a payment arriving after the checkout was already settled. It is a question for the operator, not a failure of the applicant.
 _Avoid_: A failed payment; a reason to re-charge; an error the applicant must resolve.
+**Periodic adjustment**:
+One completed accounting act that records a movement a period's own facts establish rather than a transaction: a periodic stock adjustment (from a supplied opening/closing count or an instructed movement) or a supplied payroll/statutory obligation. It carries typed particulars — the period, the method or obligation kind, the exact amount, the account each leg plays, where the figures came from and the instruction — and those particulars must agree with the posted entry's own lines.
+_Avoid_: A balanced journal entry wearing a marker; an adjustment plan or its scheduled occurrences; a rate, threshold or employee calculation the product worked out.
+
+**Supplied obligation particulars**:
+The facts an accountant provides for a payroll or statutory obligation: what it is, for which period, how much, which expense and liability accounts it moves, any staff-advance or settlement account it touches, and the source those figures came from. The product records them and checks the relationships between them; it derives none of them.
+_Avoid_: A contribution rate or threshold; an employee-level calculation; a settlement allocation nobody stated.

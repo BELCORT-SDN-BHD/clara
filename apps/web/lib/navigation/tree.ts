@@ -82,6 +82,7 @@ export type ClientNavId =
 
 export type AccountingItemId =
   | "journals"
+  | "periodicAdjustments"
   | "bank"
   | "receivables"
   | "assets"
@@ -108,7 +109,7 @@ export type AccountingItemId =
  * at all. Adding either to `CLIENT_NAV` would put a permanent row in the menu for
  * a page that is only ever reached with an intent.
  */
-export type ClientLeafId = "journalComposer" | "workDetail";
+export type ClientLeafId = "journalComposer" | "periodicAdjustment" | "workDetail" | "knowledgeRecord";
 
 /** The `?tab=` values `components/registers/registers-workbench.tsx` accepts. */
 export type RegisterTab =
@@ -317,10 +318,25 @@ export const CLIENT_NAV: readonly ClientNavItem[] = [
  */
 export const ACCOUNTING_ITEMS: readonly AccountingItem[] = [
   { id: "journals", segment: "journals", labelKey: "accounting.journals", icon: "ledger", minimumRole: "viewer" },
+  // #643 — the periodic stock adjustments and supplied payroll obligations this client has
+  // recorded, with their particulars, their posted entry and their correction chain. It is its OWN
+  // destination under `accounting/adjustments`, deliberately NOT `registers?tab=adjustments`: that
+  // tab is the 0045 PLAN lane (templates, schedules, occurrences), and a periodic count has no
+  // schedule and no template. One prefix for two unrelated lanes would make every later reader
+  // guess which one a row belongs to — the same reason migration 0194 is `clara.periodic_adjustments`
+  // and not `clara.adjustment_*`.
+  { id: "periodicAdjustments", segment: "accounting/adjustments", labelKey: "accounting.periodicAdjustments", icon: "boxes", minimumRole: "viewer" },
   { id: "bank", segment: "bank", labelKey: "accounting.bank", icon: "bank", minimumRole: "viewer" },
   { id: "receivables", segment: "registers", tab: "aging", labelKey: "accounting.receivables", icon: "scale", minimumRole: "viewer" },
   { id: "assets", segment: "registers", tab: "fixedAssets", labelKey: "accounting.assets", icon: "boxes", minimumRole: "viewer" },
-  { id: "plans", segment: "registers", tab: "adjustments", labelKey: "accounting.plans", icon: "route", minimumRole: "viewer" },
+  // #640 — REPOINTED from `registers?tab=adjustments` to its own route. Plans are no longer a
+  // view of the registers workbench: `/clients/:id/plans` is the C9 list and
+  // `/clients/:id/plans/:planId` is one plan's own durable address (a schedule, its authority,
+  // its preview and its occurrence history is a detail destination, not a tab). The adjustment
+  // register stays exactly where it was, reachable at `registers?tab=adjustments` through the
+  // workbench's own SectionTabs — this row simply stops being the sidebar's name for it, which
+  // is why the two tabs the sidebar already does not name keep working the same way.
+  { id: "plans", segment: "plans", labelKey: "accounting.plans", icon: "route", minimumRole: "viewer" },
   { id: "accounts", segment: "registers", tab: "accounts", labelKey: "accounting.accounts", icon: "list", minimumRole: "viewer" },
   { id: "close", segment: "close", labelKey: "accounting.close", icon: "lock", minimumRole: "viewer" },
   { id: "tax", segment: "tax", labelKey: "accounting.tax", icon: "receipt", minimumRole: "viewer", beta: true },
@@ -357,7 +373,17 @@ export const ACCOUNTING_ITEMS: readonly AccountingItem[] = [
  */
 export const CLIENT_LEAVES: readonly ClientLeaf[] = [
   { id: "journalComposer", parent: "accounting", labelKey: "clientLeaf.journalComposer", minimumRole: "bookkeeper" },
+  // #643 — BOOKKEEPER, for `journalComposer`'s own reason: the write door behind it
+  // (`clara.admit_periodic_adjustment_work`, bookkeeper+) can only ever refuse a viewer, and
+  // offering a control that can only refuse is 裁-187's rule. The route still renders for a viewer
+  // as the DENIED state rather than as a form. The HISTORY row above it is viewer, because reading
+  // the client's own adjustments is the same class of act as reading their journals.
+  { id: "periodicAdjustment", parent: "accounting", labelKey: "clientLeaf.periodicAdjustment", minimumRole: "bookkeeper" },
   { id: "workDetail", parent: "work", labelKey: "clientLeaf.workDetail", minimumRole: "viewer" },
+  // #644 — /…/knowledge/:recordId names ONE knowledge record, so it is a leaf for the same
+  // reason workDetail is: a durable record cannot be a static menu row, and the breadcrumb has to
+  // name it rather than stopping at Knowledge and claiming the reader is on the register.
+  { id: "knowledgeRecord", parent: "knowledge", labelKey: "clientLeaf.knowledgeRecord", minimumRole: "viewer" },
 ] as const;
 
 export function clientLeaf(id: ClientLeafId): ClientLeaf {
@@ -375,12 +401,24 @@ export function journalComposerHref(clientId: string): string {
   return `${clientBase(clientId)}/accounting/journal/new`;
 }
 
+/** `/clients/:clientId/accounting/adjustments/new` — the C8/C11 periodic-adjustment form. */
+export function periodicAdjustmentHref(clientId: string): string {
+  return `${clientBase(clientId)}/accounting/adjustments/new`;
+}
+
 /** `/clients/:clientId/work/:workId` — one durable Work record's own address.
  *  The id is percent-encoded here even though every caller holds a uuid: this
  *  function builds a URL, and a URL builder that trusts its input is how a
  *  malformed id becomes a malformed route. */
 export function workDetailHref(clientId: string, workId: string): string {
   return `${clientBase(clientId)}/work/${encodeURIComponent(workId)}`;
+}
+
+/** `/clients/:clientId/knowledge/:recordId` — ONE knowledge record's own address. The id is the
+ *  STABLE `record_id`, not a revision id, so the URL keeps meaning after a correction appends a
+ *  revision. Percent-encoded for the reason `workDetailHref` states. */
+export function knowledgeRecordHref(clientId: string, recordId: string): string {
+  return `${clientBase(clientId)}/knowledge/${encodeURIComponent(recordId)}`;
 }
 
 /** `/clients/:clientId/journals` — the posted-and-drafts surface. With an entry
@@ -395,6 +433,32 @@ export function journalEntryHref(clientId: string, entryId?: string | null): str
 
 export function clientNavHref(clientId: string, item: ClientNavItem): string {
   return item.segment === "" ? clientBase(clientId) : `${clientBase(clientId)}/${item.segment}`;
+}
+
+/** `/clients/:clientId/plans` — the C9 plan list (#640). */
+export function plansHref(clientId: string): string {
+  return `${clientBase(clientId)}/plans`;
+}
+
+/** `/clients/:clientId/plans/new` — the create form. A ROUTE rather than a Dialog because a plan
+ *  carries a schedule, an authority and a full journal basis, and appendix C §4 sends a
+ *  multi-section accounting form to a detail destination rather than an overlay. */
+export function planCreateHref(clientId: string): string {
+  return `${clientBase(clientId)}/plans/new`;
+}
+
+/** `/clients/:clientId/plans/:planId/revise` — the same form, superseding the live revision. */
+export function planReviseHref(clientId: string, planId: string): string {
+  return `${planDetailHref(clientId, planId)}/revise`;
+}
+
+/** `/clients/:clientId/plans/:planId` — one accounting plan's own address (#640). A plan's
+ *  schedule, authority, next-occurrence preview and occurrence history is durable detail, so it
+ *  is a ROUTE rather than a Sheet: Back works, the link in an occurrence row and the link from a
+ *  Work's identity block are the same URL, and a reload lands on the same plan. The id is
+ *  percent-encoded for the reason `workDetailHref` states. */
+export function planDetailHref(clientId: string, planId: string): string {
+  return `${clientBase(clientId)}/plans/${encodeURIComponent(planId)}`;
 }
 
 export function accountingHref(clientId: string, item: AccountingItem): string {
@@ -507,7 +571,11 @@ function leafFor(parent: ClientNavId, rest: readonly string[]): ClientLeafId | n
   if (parent === "accounting" && rest.length === 3 && rest[1] === "journal" && rest[2] === "new") {
     return "journalComposer";
   }
+  if (parent === "accounting" && rest.length === 3 && rest[1] === "adjustments" && rest[2] === "new") {
+    return "periodicAdjustment";
+  }
   if (parent === "work" && rest.length === 2) return "workDetail";
+  if (parent === "knowledge" && rest.length === 2) return "knowledgeRecord";
   return null;
 }
 
@@ -562,8 +630,15 @@ export function resolveActive(pathname: string, params: ReadonlyParams = EMPTY_P
 
   const rest = clientSubPath(pathname, clientId);
   const segment = rest[0] ?? "";
+  // #643 — ONE accounting row sits two segments deep (`accounting/adjustments`), so the match is
+  // against the joined pair as well as the first segment. EXACTLY two, never a prefix: a deeper
+  // path under it is that row's own LEAF (`…/adjustments/new`), and marking the history row
+  // current there would both lose the leaf's breadcrumb and put `aria-current` on a page the human
+  // is not on.
+  const segment2 = rest.length === 2 ? `${rest[0]}/${rest[1]}` : "";
 
-  const accounting = ACCOUNTING_ITEMS.filter((item) => item.segment === segment);
+  const accounting = ACCOUNTING_ITEMS.filter(
+    (item) => item.segment === segment || (segment2 !== "" && item.segment === segment2));
   if (accounting.length > 0) {
     if (segment !== "registers") {
       return {

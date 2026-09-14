@@ -1718,6 +1718,153 @@ export const WORK_CANCEL_0184_COHORT = [
   ...WORK_CANCEL_0184_RUNTIME_FNS, ...WORK_CANCEL_0184_UNGRANTED_FNS,
 ];
 
+// #624 [0191, the document capability registry] — the four READERS this slice publishes, one
+// cohort for the same "wholly present or wholly absent" reason 0178's roster carries: folding these
+// names into an older cohort would red every database between the two frontiers, and
+// `cohortFailures()` fails a PARTIAL cohort by design.
+//
+//   the FOUR shared readers — clara_authenticated AND clara_agent_ro, and the second half is the
+//   point rather than a convenience: the capability registry exists so that neither lane can infer
+//   from a filename what Clara can do with a file, and an agent that could not read the registry
+//   would be exactly the lane most likely to guess. None of the four writes anything;
+//   `get_document_state` resolves its own scope through the SAME dual-lane wake/human context
+//   clara.get_document_extract uses (0090:1558-1584) and returns NULL for a document the caller
+//   may not read, so the coarse grant is a door, never the authority.
+//     _document_capability · the registry's one reader (honest defaults in both directions)
+//     _document_format     · a stored documents.mime_type -> the detector's format token
+//     _assert_field_path   · the canonical field_path grammar (C33.4), enforced at the persist
+//                            boundary; granted so a surface can pre-validate a path it will cite
+//     get_document_state   · custody / byte extraction / facts / operation, read independently
+const DOCUMENT_CAPABILITY_0191_SHARED_FNS = [
+  "_document_capability", "_document_format", "_assert_field_path", "get_document_state",
+];
+//   …and the UNGRANTED closure: the two deferrable constraint-trigger bodies that record the
+//   arithmetic validations at commit. Listed so `cohortFailures` reports a half-applied 0191
+//   rather than a silently narrower boundary, and so a future accidental grant on a trigger body
+//   FAILS instead of passing quietly.
+const DOCUMENT_CAPABILITY_0191_UNGRANTED_FNS = [
+  "_tf_document_fact_validate", "_tf_bank_statement_validate",
+];
+export const DOCUMENT_CAPABILITY_0191_COHORT = [
+  ...DOCUMENT_CAPABILITY_0191_SHARED_FNS, ...DOCUMENT_CAPABILITY_0191_UNGRANTED_FNS,
+];
+
+// #644 [0192, one governed Knowledge record] — the KNOWLEDGE lane, its own cohort for the same
+// "wholly present or wholly absent" reason 0178's carries: folding these names into an older
+// roster would red every database between the two frontiers, and `cohortFailures()` fails a
+// PARTIAL cohort by design.
+//
+//   the SIX human surfaces — clara_authenticated ONLY. Three writes (capture at a
+//   catalog-decided floor: bookkeeper+ for an assertion/preference, admin+ for a policy or any
+//   authority-bearing key, and admin+ for anything firm-scoped; correct and withdraw at the same
+//   floor as the key they revise) and the three C13 reads. The agent role holds EXECUTE on
+//   nothing here for 0057's B6 reason — a _human_ctx-gated read granted to a role that carries no
+//   JWT is a DARK grant — and both wake roles gain ZERO: which knowledge a client's books rest on
+//   is a judgement, and a wake credential makes none.
+const KNOWLEDGE_0192_HUMAN_FNS = [
+  "capture_knowledge", "correct_knowledge", "withdraw_knowledge",
+  "list_client_knowledge", "get_knowledge_record", "get_knowledge_history",
+];
+//   the TWO runtime surfaces — clara_runtime ONLY. `capture_knowledge_for` never impersonates:
+//   the caller names the human whose statement it is and the door verifies that person's live
+//   active membership and rank itself (the clara.update_onboarding_plan precedent, 0017:2661).
+//   `get_knowledge_pack` is the honest context read chatTurn's next frozen version will take.
+const KNOWLEDGE_0192_RUNTIME_FNS = ["capture_knowledge_for", "get_knowledge_pack"];
+//   …and the ONE two-lane name: the browser calls it straight after the onboarding commit it just
+//   made, the server calls it for a run that committed a plan. Declared in BOTH role sets below.
+const KNOWLEDGE_0192_SHARED_FNS = ["promote_plan_answers_to_knowledge"];
+//   …and the UNGRANTED closure every door shares: the catalog rule, the applicability and source
+//   validators, the trust map, the floor lookup, the one writer, the capture core, the read
+//   shaper, the live-revision lookup, the version allocator and the two trigger bodies. Listed so
+//   `cohortFailures` reports a half-applied 0192 rather than a silently narrower boundary.
+const KNOWLEDGE_0192_UNGRANTED_FNS = [
+  "_knowledge_assert_value", "_knowledge_assert_applies_when", "_knowledge_source_pins",
+  "_knowledge_trust_of", "_knowledge_applies_when_digest", "_knowledge_floor",
+  "_knowledge_insert_revision", "_knowledge_capture_core", "_knowledge_row_json",
+  "_knowledge_legacy_rows", "_knowledge_live_revision", "_next_knowledge_version",
+  "_tf_knowledge_records_supersede_only", "_tf_knowledge_authority",
+];
+export const KNOWLEDGE_0192_COHORT = [
+  ...KNOWLEDGE_0192_HUMAN_FNS, ...KNOWLEDGE_0192_RUNTIME_FNS, ...KNOWLEDGE_0192_SHARED_FNS,
+  ...KNOWLEDGE_0192_UNGRANTED_FNS,
+];
+
+// #643 [0194, periodic stock adjustments + supplied payroll obligations] — the PERIODIC-ADJUSTMENT
+// lane, its own cohort for the same "wholly present or wholly absent" reason 0178's carries:
+// folding these names into an older roster would red every database between the two frontiers, and
+// `cohortFailures()` fails a PARTIAL cohort by design.
+//
+//   the ONE admission door — clara_runtime ONLY, mirroring clara.admit_journal_work's own grant
+//   (0178:1032 / 0182). The wake roles and clara_authenticated gain ZERO: a lane that could admit
+//   its own accounting work would be an agent deciding what it is authorised to do, and the
+//   browser reaches this door through the runtime's authenticated route, never through PostgREST.
+const PERIODIC_ADJUSTMENTS_0194_RUNTIME_FNS = ["admit_periodic_adjustment_work"];
+//   the ONE read — clara_authenticated ONLY, viewer-floored inside its own body (the same class as
+//   clara.list_journal_entries / clara.get_close_readiness). No agent, wake or runtime variant
+//   exists: the run is told its effect by the wake verb's answer and never reads this history.
+const PERIODIC_ADJUSTMENTS_0194_HUMAN_FNS = ["list_periodic_adjustments"];
+//   …and the UNGRANTED closure: the admission core 0194 EXTRACTS from clara.admit_journal_work (so
+//   the journal door and the periodic-adjustment door cannot drift apart), the particulars'
+//   predicates that admission and commit share, the two total readers the canonical form is built
+//   from, and the append-only trigger body. Listed so `cohortFailures` reports a half-applied 0194
+//   rather than a silently narrower boundary.
+const PERIODIC_ADJUSTMENTS_0194_UNGRANTED_FNS = [
+  "_admit_accounting_work_core",
+  "_assert_adjustment_basis", "_assert_adjustment_relationships", "_assert_adjustment_account",
+  "_adjustment_basis_canonical", "_adjustment_amount_cents", "_adjustment_net_cents",
+  "_adjustment_cents", "_adjustment_cents_value", "_adjustment_date", "_adjustment_text",
+  "_tf_periodic_adjustment_append_only",
+];
+export const PERIODIC_ADJUSTMENTS_0194_COHORT = [
+  ...PERIODIC_ADJUSTMENTS_0194_RUNTIME_FNS, ...PERIODIC_ADJUSTMENTS_0194_HUMAN_FNS,
+  ...PERIODIC_ADJUSTMENTS_0194_UNGRANTED_FNS,
+];
+
+// #640 [0193, explicitly authorised recurring/reversing accounting plans] — its own cohort for the
+// same "wholly present or wholly absent" reason 0178's and 0184's carry.
+//
+//   the ELEVEN human doors — clara_authenticated ONLY. Every write is bookkeeper+ inside its own
+//   body and every read is viewer+ and firm-predicated; the agent and wake lanes gain NOTHING,
+//   because a lane that could author its own future authority would be the agent deciding what it
+//   is allowed to do.
+const ACCOUNTING_PLANS_0193_HUMAN_FNS = [
+  "create_accounting_plan", "revise_accounting_plan", "pause_accounting_plan",
+  "resume_accounting_plan", "end_accounting_plan", "request_plan_catch_up",
+  "preview_accounting_plan", "list_accounting_plans", "get_accounting_plan",
+  "list_accounting_plan_occurrences", "get_work_plan_origin",
+];
+//   …and the ONE runtime verb: the leader's every-cycle due scan, clara_runtime ONLY — the same
+//   lane clara.admit_journal_work sits in (0178). The browser lane holds none of it: a plan scan
+//   reachable from a session would be a second admission path into the lane whose whole point is
+//   that one ordering boundary decides everything.
+const ACCOUNTING_PLANS_0193_RUNTIME_FNS = ["wake_due_plan_occurrences"];
+//   …and the UNGRANTED closure: the shared admission core, the door preamble, the schedule
+//   validator, the model constant, the five date helpers, the two basis/overlap projections and
+//   the three immutability triggers. Listed so cohortFailures reports a half-applied 0193 rather
+//   than a silently narrower boundary.
+const ACCOUNTING_PLANS_0193_UNGRANTED_FNS = [
+  "_plan_admit_occurrence", "_plan_door_ctx", "_assert_plan_schedule", "_plan_run_model",
+  "_plan_due_nth", "_plan_due_index_on_or_before", "_plan_reversal_date", "_plan_due_events",
+  "_plan_occurrence_basis", "_plan_overlap_warning",
+  // …and the ones the two adversarial review rounds added: the accrual a reversal undoes, the
+  // anchored period start, the per-occurrence period key, the leg-aware window ceiling, and the
+  // PICKER the scan actually asks (which reads the occurrence rows, so it is stable rather than
+  // immutable). The pure-arithmetic `_plan_due_event_on_or_before` the picker replaced is gone
+  // with it: an unreachable body in a census of reachable ones is a claim nobody can check — and
+  // so is `_plan_primary_stands`, whose "admitted and not yet a dead end" test round 2 replaced
+  // with `_plan_primary_entry` (the accrual's POSTED, still-live journal entry). `_plan_work_stands`
+  // is the one surviving Work-status test and `_plan_covered_through` is the alignment wall's ruler.
+  "_plan_primary_for_reversal", "_plan_primary_entry", "_plan_work_stands",
+  "_plan_covered_through", "_plan_period_start",
+  "_plan_occurrence_period_key", "_plan_window_ceiling", "_plan_admissible_event",
+  "_tf_accounting_plans_immutable", "_tf_plan_revisions_immutable",
+  "_tf_plan_occurrences_append_only",
+];
+export const ACCOUNTING_PLANS_0193_COHORT = [
+  ...ACCOUNTING_PLANS_0193_HUMAN_FNS, ...ACCOUNTING_PLANS_0193_RUNTIME_FNS,
+  ...ACCOUNTING_PLANS_0193_UNGRANTED_FNS,
+];
+
 export const ALLOWED = {
   // Slice-4 governance writers (contract v2.1 §3.2/3.3/3.5): human lane only.
   [ROLES.authenticated]: new Set([
@@ -1760,6 +1907,8 @@ export const ALLOWED = {
     // stays in SALES_LANE_0046_UNGRANTED_FNS above, expected false for every role.
     ...CLIENT_FACTS_0055_HUMAN_FNS, // 0055 [Wave E lane α] the client-facts door (admin floor;
     // agent + both wake roles gain ZERO — 0055's S7 tail asserts it in-migration)
+    ...KNOWLEDGE_0192_HUMAN_FNS, // #644 [0192] the three knowledge writes + the three C13 reads
+    ...KNOWLEDGE_0192_SHARED_FNS, // #644 [0192] the promotion door — the ONE two-lane name
     ...CLOSE_MODEL_0056_HUMAN_FNS, // 0056 [Wave E lane β] the close model (see the block above)
     ...REGISTRY_0057_HUMAN_FNS, // 0057 [Wave E lane γ] the period registry + month snapshots
     // (one door + three reads; agent/wake/runtime gain ZERO — see the block above)
@@ -1878,6 +2027,16 @@ export const ALLOWED = {
     // above. clara_authenticated ONLY; clara_runtime, the agent role and both wake roles gain
     // ZERO on any of the three names.
     ...WORK_LIST_0189_HUMAN_FNS,
+    // #624 0191 the document capability registry's four readers — see the block above. BOTH
+    // application read lanes hold these; the agent half is listed on the agent row below.
+    ...DOCUMENT_CAPABILITY_0191_SHARED_FNS,
+    // #643 0194 the periodic-adjustment history read — see the block above. clara_authenticated
+    // ONLY, viewer-floored in its own body; clara_runtime, the agent role and both wake roles
+    // gain ZERO.
+    ...PERIODIC_ADJUSTMENTS_0194_HUMAN_FNS,
+    // #640 [0193] the eleven accounting-plan doors — see the block above. clara_authenticated
+    // ONLY; clara_runtime holds only the scan, and the agent role and both wake roles gain ZERO.
+    ...ACCOUNTING_PLANS_0193_HUMAN_FNS,
   ]),
   // [S6 §9/C-11] agent lane loses the bare get_journal_entry(uuid) oracle; keeps the other
   // reads and gains the client-pinned S6 reads + get_journal_entry_for.
@@ -1885,7 +2044,11 @@ export const ALLOWED = {
     // [DB-A, H-53] the agent lane reads clara.list_uncoded_filings (0011:4080's own grant, and
     // 0011:4271's ACL census pins it), and that reader is SECURITY INVOKER — so the agent role
     // must hold the predicate it calls, or the agent's coding-lane read 42501s.
-    ...DBA_CODEABILITY_SHARED_FNS]),
+    ...DBA_CODEABILITY_SHARED_FNS,
+    // #624 0191: the capability registry and the four states exist precisely so that neither
+    // lane infers from a filename what Clara can do with a file. An agent that could not read
+    // the registry would be the lane most likely to guess, so all four readers are shared.
+    ...DOCUMENT_CAPABILITY_0191_SHARED_FNS]),
   [ROLES.wakeInteractive]: new Set(["wake_draft_entry", "wake_record_client_resolution", "wake_record_notification", ...WAVE_A_WAKE_INTERACTIVE_FNS, ...BINDING_PROPOSAL_PR1_WAKE_FNS, ...AUTHORING_0077_WAKE_FNS, ...POSTING_F_A2_WAKE_FNS, ...F_A5_PR2_WAKE_FNS, ...F_A5B_PR1_WAKE_FNS, ...CARD1_SEAM_WAKE_FNS,
     // [Wave-F Track A, F-A5b card 1] wake_compose_metric_preview_v2 -- 'interactive' ONLY,
     // permanently (CD-16), beside its untouched v1 twin in AUTHORING_0077_WAKE_FNS.
@@ -2028,6 +2191,14 @@ export const ALLOWED = {
     // clara.retry_accounting_work sits in. Both are reached by a human through the runtime's own
     // authenticated route, never by PostgREST.
     ...WORK_CANCEL_0184_RUNTIME_FNS,
+    // [#644, 0192] the runtime knowledge lane: a capture attributed to a named, verified human
+    // and the context pack. Plus the shared promotion door (also clara_authenticated above).
+    ...KNOWLEDGE_0192_RUNTIME_FNS,
+    ...KNOWLEDGE_0192_SHARED_FNS,
+    // [#643, 0194] the periodic-adjustment admission door — clara_runtime ONLY, the same lane
+    // clara.admit_journal_work sits in. Reached by a human through the runtime's own
+    // authenticated route, never by PostgREST.
+    ...PERIODIC_ADJUSTMENTS_0194_RUNTIME_FNS,
     // [F-A2 PR-2, GM-10] the withdrawal re-admit door — clara_runtime ONLY (the consumer's
     // sole caller); proves the event->entry->attempt->task->filing chain then delegates to
     // 0053's one_click exception. Declared here so any wider grant FAILS the matrix.
@@ -2079,6 +2250,9 @@ export const ALLOWED = {
     // storage_key never crosses to a browser (see the block above)
     ...DOC_DOWNLOAD_0190_RUNTIME_FNS, // [#620, 0190] get_document_for_human_read_v2 — the SUCCESSOR
     // source-document byte door, beside v1 and not instead of it (see the block above)
+    // [#640, 0193] the leader's every-cycle plan due scan — clara_runtime ONLY, the same lane
+    // clara.admit_journal_work sits in. The browser lane holds none of it.
+    ...ACCOUNTING_PLANS_0193_RUNTIME_FNS,
   ]),
 };
 // RLS policy helpers are legitimately callable broadly (a policy expression runs
@@ -2261,6 +2435,10 @@ export async function grantMatrixFailures() {
   failures.push(...cohortFailures("#728 0183 sweep attribution + spoken-for documents", WALK_FINDINGS_0183_COHORT, liveNames));
   failures.push(...cohortFailures("#630 0184 work-cancel/takeover lane", WORK_CANCEL_0184_COHORT, liveNames));
   failures.push(...cohortFailures("#641 0189 work-list read lane", WORK_LIST_0189_COHORT, liveNames));
+  failures.push(...cohortFailures("#624 0191 document capability registry", DOCUMENT_CAPABILITY_0191_COHORT, liveNames));
+  failures.push(...cohortFailures("#644 0192 governed knowledge lane", KNOWLEDGE_0192_COHORT, liveNames));
+  failures.push(...cohortFailures("#643 0194 periodic-adjustment lane", PERIODIC_ADJUSTMENTS_0194_COHORT, liveNames));
+  failures.push(...cohortFailures("#640 0193 accounting-plan lane", ACCOUNTING_PLANS_0193_COHORT, liveNames));
   failures.push(...cohortFailures("wave F F-A1 PR-4 bank-statement witness cutover", STATEMENT_F_A1_PR4_COHORT, liveNames));
   // F-A6's cohort is bimodal: wholly present once PR-1 applies, wholly absent before it. Half a
   // cohort is a half-applied migration and is reported as one.

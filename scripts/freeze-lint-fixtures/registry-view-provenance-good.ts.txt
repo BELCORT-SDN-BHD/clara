@@ -1,0 +1,24 @@
+// Fixture: #637 — the two PROVENANCE exports in their ONLY admissible shape. `workflowBodies`
+// is `Object.freeze` over an array literal of STRING literals; `workflowPins` is `Object.freeze`
+// over an object literal whose every value is a STRING literal. Inert data: no function
+// reference, therefore no second dynamic-dispatch view for the enqueue-provenance law to have
+// to trust. The pre-existing `workflowsByName`/`workflowNames` shapes sit beside them unchanged
+// and must not be flagged either.
+// (.ts.txt so the repo's eslint/tsc sweeps never parse fixture code — DATA.)
+import { closeExampleV1 } from "./closeExample.v1.js";
+
+export const workflows = {
+  closeExample: closeExampleV1,
+} as const;
+
+export const workflowsByName: Readonly<Record<string, (input: any) => Promise<unknown>>> = Object.freeze(workflows);
+
+export { closeExampleV1 };
+
+export const workflowNames: string[] = Object.keys(workflows);
+
+export const workflowBodies: readonly string[] = Object.freeze(["closeExampleV1"]);
+
+export const workflowPins: Readonly<Record<string, string>> = Object.freeze({
+  closeExample: "closeExampleV1",
+});

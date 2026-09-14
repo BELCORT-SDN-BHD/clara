@@ -63,6 +63,45 @@ test("CB-035: the workflow list is a COPY — a caller cannot mutate the registr
 });
 
 // ---------------------------------------------------------------------------
+// 1b. #637 — BODIES and PINS. `workflows` has always named the registry's CLASSES, which is
+// not a question a cutover or a rollback asks. `bodies` answers "which bodies can this image
+// run" and `pins` answers "which one does each class dispatch to" — the two readings the
+// rollback preflight compares a target image against.
+// ---------------------------------------------------------------------------
+
+test("#637: bodies and pins are carried verbatim onto the payload", async () => {
+  const out = await buildInfo({
+    env: {},
+    names: ["chatTurn", "claraWork"],
+    bodies: ["chatTurn_v18", "claraWork_v1", "claraWork_v2"],
+    pins: { chatTurn: "chatTurn_v18", claraWork: "claraWork_v2" },
+    withRuntime: runWith(async () => ({ rows: [{ frontier: null }] })),
+  });
+  assert.deepEqual(out.bodies, ["chatTurn_v18", "claraWork_v1", "claraWork_v2"]);
+  assert.deepEqual(out.pins, { chatTurn: "chatTurn_v18", claraWork: "claraWork_v2" });
+  // The distinction is the point: a class list cannot tell a reader that this image STILL
+  // carries the superseded v1 body a parked Work resumes into.
+  assert.deepEqual(out.workflows, ["chatTurn", "claraWork"], "the pre-existing class list is untouched");
+});
+
+test("#637: an image that passes neither reports empty, never a missing key", async () => {
+  const out = await buildInfo({ env: {}, names: [], withRuntime: runWith(async () => ({ rows: [{ frontier: null }] })) });
+  assert.deepEqual(out.bodies, [], "absent must read as 'none passed', not as an absent field");
+  assert.deepEqual(out.pins, {});
+  assert.ok("bodies" in out && "pins" in out, "both keys are always present on the payload");
+});
+
+test("#637: bodies/pins are COPIES — a caller cannot mutate the registry's frozen roster through the response", async () => {
+  const bodies = ["claraWork_v1", "claraWork_v2"];
+  const pins = { claraWork: "claraWork_v2" };
+  const out = await buildInfo({ env: {}, names: [], bodies, pins, withRuntime: runWith(async () => ({ rows: [{ frontier: null }] })) });
+  out.bodies.push("injected_v99");
+  out.pins.claraWork = "injected_v99";
+  assert.deepEqual(bodies, ["claraWork_v1", "claraWork_v2"], "the registry's own array is untouched");
+  assert.deepEqual(pins, { claraWork: "claraWork_v2" }, "the registry's own pin object is untouched");
+});
+
+// ---------------------------------------------------------------------------
 // 2. The frontier read can never fail the route, and says WHICH failure it was.
 // ---------------------------------------------------------------------------
 
@@ -148,8 +187,8 @@ test("CB-035: the route is mounted under /api and takes the same authenticate ga
   assert.ok(gateAt > 0 && payloadAt > gateAt, "the gate precedes the payload in the executed order");
   // lib/build-info.mjs cannot import the TS registry, so the ROUTE must pass the names in.
   // Without this the payload would report `workflows: []`, which reads as "none registered".
-  assert.match(src, /import \{ workflowNames \} from "\.\.\/workflows\/registry\.js"/, "the route imports the registry");
-  assert.match(src, /buildInfo\(\{ names: workflowNames/, "and passes its names into the payload");
+  assert.match(src, /import \{[^}]*\bworkflowNames\b[^}]*\} from "\.\.\/workflows\/registry\.js"/, "the route imports the registry");
+  assert.match(src, /names: workflowNames/, "and passes its names into the payload");
   // #623 / C88.8 — the serving bundle identity rides the SAME import-here-pass-in shape, and for
   // the same reason: lib/build-info.mjs is plain-Node .mjs and cannot import a TS module.
   assert.match(src, /import \{ claraWorkBundleIdentity \} from "\.\.\/workflows\/claraWork\.v1\.bundle\.js"/, "the route imports the bundle identity");
@@ -159,6 +198,13 @@ test("CB-035: the route is mounted under /api and takes the same authenticate ga
   // read, which bodies this image actually carries — the question this route exists for.
   assert.match(src, /import \{ claraWorkBundleIdentityV2 \} from "\.\.\/workflows\/claraWork\.v2\.bundle\.js"/, "the route imports the v2 bundle identity too");
   assert.match(src, /bundles: \[claraWorkBundleIdentityV2\(\), claraWorkBundleIdentity\(\)\]/, "...and passes BOTH into the payload, pinned first, so one read answers which bundles this image serves");
+  // #637 — the SAME import-here-pass-in shape for the registry's provenance exports. Without
+  // these two the payload could name the bundles but not the BODIES, and a rollback preflight
+  // reading a target image's /api/build-info would have nothing to compare a parked run against.
+  assert.match(src, /workflowBodies/, "the route imports the body roster");
+  assert.match(src, /workflowPins/, "…and the class pins");
+  assert.match(src, /bodies: workflowBodies/, "…and passes the roster into the payload");
+  assert.match(src, /pins: workflowPins/, "…and the pins too");
 });
 
 test("CB-035: index.ts mounts the router, and the three ROOT endpoints stay ungated and build-free", () => {
