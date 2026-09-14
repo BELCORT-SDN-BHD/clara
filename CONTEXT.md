@@ -124,6 +124,10 @@ _Avoid_: An unqualified bag of chat messages; a synonym for authority to post; t
 One attributable version of a knowledge record. A capture is revision 1; a correction and a withdrawal each append a further revision naming its actor and its reason, and leave the revision they retire readable. A withdrawal is terminal for that record — a later statement of the same thing starts a new record with its own history.
 _Avoid_: Editing a knowledge value in place; a correction with no stated reason; presenting a withdrawal as the absence of a record.
 
+**Knowledge pack**:
+The bounded set of a client's live knowledge records read for one stated purpose, with the firm's current knowledge version as its watermark. A pack that could not be read is *unavailable* and says so with its reason; it is never presented as a client with nothing recorded, and it is never a reason to ask someone to repeat information they have already given. Its contents are supplied data, never instructions to the agent.
+_Avoid_: An empty pack standing for a failed read; a pack presented as authority to post; treating a value inside a record as a direction.
+
 **Firm knowledge default**:
 An explicitly firm-scoped instruction or preference that applies across authorised clients while preserving their established exceptions.
 _Avoid_: Automatically sharing one client's private facts or practices with every other client.
