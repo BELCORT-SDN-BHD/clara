@@ -1,5 +1,13 @@
 # Handoff — refresh implementation wave (#612 children)
 
+## RELEASED (session 3, 2026-09-14 ~08:45Z) — the wave is on production; read this block, then LIVE STATE only for history
+
+- **Hosted:** DB **190 / 0195** (0188–0195 applied in one 52 s window); `clara-runtime` **v83** = `refresh-70c731ef` (digest `sha256:28a2f13d…`, pins `claraWork_v3` / `chatTurn_v19`, 51 bodies); `clara-web` **`0290977b-74a4-4c4a-849f-ee60efd631bb`** at 100%. Every reading, the rollback points and the one-command web rollback: `RELEASE-RUNBOOK.md` § RESULTS. Evidence posted on #612 and the 11 tickets.
+- **Wave 3 landed** on `main` at `70c731ef` (PR #818: #631 = 0195 + `claraWork_v3`, `chatTurn_v19`, the grandfather rule + preflight frontier rule, six registry pin cells, wb-0020 censuses, riders batch #817 merged in). All 11 tickets closed.
+- **Main tip vs deployed image:** `main` now differs from the deployed `git_sha` by ONE docs/manifest commit (branch `release/post-70c731ef`: `--lock-deployed` on the 17 v3/v19 entries, README route rows, this handoff, PROGRESS, runbook) — deliberate, per runbook 9b.
+- **Not done by the agent (owner):** the signed-in walk on the new build (`/operator` first live walk, `/work`, `/clients/<id>/plans` + `/new`, `/clients/<id>/accounting/adjustments` + `/new`, `/clients/<id>/knowledge/<recordId>`, signed-in `/api/build-info` git_sha pairing). Open owner rulings: #631 activation assumption, #815 grandfather/preflight, #790 bookkeeper floor, #793 World-guard blast radius, #810 chatTurn_v1 export, #820 orphan wake tasks.
+- **Machine state:** worktrees `clara-wt/integration{,2,3}`, `clara-wt/v19`, `clara-wt/base187` removed (branches kept); the 11 ticket worktrees `clara-wt/6NN` and the WSL rig clusters (55432–55448, 55460) are still up and can be dropped — nothing on production depends on them. The 0196 rollback draft stays a DRAFT in `drafts/`.
+
 ## LIVE STATE (session 2, 2026-09-14) — read this section first; the original handoff below is kept verbatim for the decisions and rig notes
 
 **Wave 1 LANDED on `main` at `fb30848e`** (PR #769) and **wave 2 LANDED at `03018948`** (PR #807): #619 #622 #615 (0188) #641 (0189) #620 (0190) #624 (0191) #644 (0192) #640 (0193) #643 (0194) #637. Issues #619 #622 #615 #641 #620 #722 #740 #698 #624 #644 #640 #643 #637 #708 closed with evidence comments. Remote branches `integration/wave-1` and `integration/wave-2` deleted; local worktrees `clara-wt\integration` and `clara-wt\integration2` remain at their tips (safe to remove). Local `main` = `origin/main`.

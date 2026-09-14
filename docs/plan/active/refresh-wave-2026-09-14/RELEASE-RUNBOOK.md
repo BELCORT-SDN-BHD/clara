@@ -1,6 +1,6 @@
 # Hosted release ceremony — 0188…0195 + claraWork_v3/chatTurn_v19 image + web (owner-authorised in session; runbook revised after the six-verifier panel)
 
-Release SHA `<SHA>` = main after wave 3 lands (b963edb8 + the pin fix). Label `refresh-<sha8>`.
+RELEASE_SHA = `70c731ef` (full `70c731ef` + `git rev-parse`; main after wave 3 landed via PR #818, includes the riders batch #817). Label `refresh-70c731ef`. IMAGE PUSHED 2026-09-14: `registry.fly.io/clara-runtime:refresh-70c731ef` = manifest digest `sha256:28a2f13d6819517fcaab98aaa7850e07bdd9b3c149f50f96ec1d96432b12bdba` (265 MB, built with `--build-arg CLARA_BUILD_SHA=<full sha>`); release by `registry.fly.io/clara-runtime@sha256:28a2f13d6819517fcaab98aaa7850e07bdd9b3c149f50f96ec1d96432b12bdba`.
 Rollback points BEFORE: DB 182 / 0187 (re-read live), runtime v82 = `registry.fly.io/clara-runtime:refresh-98f6eec6`, web `742b09e9`.
 Secrets rule: the fly token and the DSN are only ever substituted INLINE inside one pipeline; never assigned to a shell variable, never echoed, never in argv. The two web public vars come from `apps/web/.env.local` via an export loop, never echoed.
 
@@ -50,7 +50,7 @@ cd /home/runner/clara-deploy && git fetch origin main && git checkout --detach <
 corepack pnpm install --frozen-lockfile
 while IFS= read -r line; do export "$line"; done < <(grep -E '^(NEXT_PUBLIC_SUPABASE_URL|NEXT_PUBLIC_SUPABASE_ANON_KEY)=' /mnt/c/Users/zhant/Desktop/clara-rebuild/apps/web/.env.local)
 CLARA_BUILD_SHA=<SHA> corepack pnpm --filter @clara/web cf:build
-corepack pnpm --dir apps/web exec wrangler versions upload --tag refresh-<sha8>   → <web-version-id> (not promoted yet)
+corepack pnpm --dir apps/web exec wrangler versions upload --tag refresh-70c731ef   → DONE 2026-09-14: Worker Version ID 0290977b-74a4-4c4a-849f-ee60efd631bb (67 assets, check-public-key accepted legacy-anon-jwt; built at 70c731ef, dirty=0) — not promoted yet
 ```
 
 ## 6. Writer quiescence → migrate (0189/0191/0194/0195 recut live bodies — 0189 recuts save_my_preferences; 0194 takes ACCESS EXCLUSIVE on accounting_work with no lock_timeout)
@@ -73,3 +73,23 @@ Preferred: the v82 bundle extracted in step 3e2 (`scratchpad/v82/index.mjs`) →
 
 ## 10. Record + close
 Rollback points AFTER (from the ledger): DB 190 / 0195; runtime `refresh-<sha8>` (vN, digest); web <id>. Post hosted evidence on #612 (the open summary issue, in full) and one line on each closed ticket saying it is the hosted completion of a locally-closed ticket (#631 #643 #644 #640 #624 #637 #615 #641 #620 #622 #619); the web rollback command and the runtime/database asymmetry go into PROGRESS Current State; update PROGRESS.md Current State + Known Issues; memory `awaiting-release-ceremony` gains: 0187-checksum check, census self-identify + WSLENV pipe, post-stop re-census, release by digest, `--build-arg CLARA_BUILD_SHA`, probe destroyed before deploy, the ledger-driven failure branch, the lock-deployed step; fix `apps/web/README.md:17` redirect row. Destroy any scratch container; `flyctl machine list` final.
+
+## RESULTS — executed 2026-09-14 (UTC), one session, owner-authorised
+
+| Step | Reading |
+|---|---|
+| 0 rehearsal | pristine 0187 chain (rig187, 55460): 8 new · 190 total; wall time T recorded above |
+| 3 (probe `7845745fed2058`, old image, world off) | ledger 182 / 0187, checksum `5fc28e38…` MATCH; all recut-body pins MATCH (7 named + 0195's five-set 5/5); data pre-states 0 / 5 / 0 / 0; grant probe ok over all seven relations; pre-images dumped; v82 bundle extracted (`index.mjs` sha `6adef601…`) |
+| 3f backup | full dump 213,322,157 bytes + globals, 95 s, from WSL through `WSLENV` (invocation recorded in step 3f) |
+| 4 image | `registry.fly.io/clara-runtime:refresh-70c731ef` = `sha256:28a2f13d6819517fcaab98aaa7850e07bdd9b3c149f50f96ec1d96432b12bdba`, `--build-arg CLARA_BUILD_SHA=70c731efb87a06c82e747af2ad562acdc268d2ea` |
+| 5 web | version `0290977b-74a4-4c4a-849f-ee60efd631bb` uploaded (tag `refresh-70c731ef`), not promoted until step 8 |
+| 6a stop | `48ee715b763048` stopped 08:42:51Z; probe destroyed before the deploy |
+| 6b re-census | no non-idle runtime session; `accounting_work` non-terminal 0; `agent_interruptions` pending 0; one stale `clientOnboarding_v4` run (harmless); ten orphan held `wake` tasks (no `wake_engine_sources` row) — untouched, filed as #820 |
+| 6c migrate | **8 new migration(s) applied · 190 total** in 52 s; ledger re-read 190 / `0195_work_egress_purpose_and_execution_trace` |
+| 7 release | deploy by digest → **v83** → machine start 08:44:42Z → `/ready` 200 `bodies {measured:true, stranded:0, world_start_refused:false}`, `leader.held:true`, `world.ok:true`; logs: `serving git_sha=70c731efb87a06c82e747af2ad562acdc268d2ea frontier=0195_…(190) bodies=51 pins closeExample=closeExampleV1 chatTurn=chatTurn_v19 claraWork=claraWork_v3`; banners v1/v2/v3; `stranded bodies n=0` BEFORE `durable world started`; `CONTROL listening`; `LEADER acquired`. `flyctl machine list`: one machine, image = the digest |
+| 8 promote | `versions view` six secrets + four bindings present → `versions deploy …@100% --yes` SUCCESS 08:46:31Z. Signed-out smoke all as expected: `/login` `/favicon.ico` `/icon.png` 200; `/pending` `/api/build-info` `/operator` `/work` 307→`/login?next=…`; x-origin POST `/auth/confirm/resend` 403; `/checkout/cancel` 307; `/settings/registrations` and `/admin/registrations` 307→`/operator`. **Signed-in walk NOT done by the agent** (no signed-in browser session; the agent never enters credentials) — owner's step, listed in PROGRESS Next Steps |
+| 9 preflight demo | v82 bundle through the LIVE machine's DSN → `rollback-preflight: REFUSED (global)`, exit 1, BOTH reasons: `frontier_requires_body` (`0195_… requires claraWork_v3, which the target does NOT carry`) and `unbound_task` ×10 (#820). Nothing rolled back |
+| 9b lock | `--lock-deployed` locked exactly the 17 unlocked entries (claraWork.v3.* ×7, chatTurn.v19.* ×6, capability-registry, knowledge, periodic-adjustment-basis, work-trace); 281/281 deploy-locked; plain freeze-lint OK; lands on branch `release/post-70c731ef` with this runbook, the README route rows, PROGRESS and HANDOFF |
+| 10 evidence | posted on #612 (full) and one line on each of #615 #619 #620 #622 #624 #631 #637 #640 #641 #643 #644 |
+
+**Rollback points AFTER (from the ledger):** DB **190 / 0195** (below 0195 only via the drafted `drafts/0196_restore_pre_0195_bodies.sql` + a compatibility image that still carries `claraWork_v3`; v82 is not a legal boot target — proven in step 9). Runtime **v83** = `refresh-70c731ef` = `sha256:28a2f13d6819517fcaab98aaa7850e07bdd9b3c149f50f96ec1d96432b12bdba` (previous: v82 `refresh-98f6eec6`, only with 0196 + compat). Web **`0290977b-74a4-4c4a-849f-ee60efd631bb`** (previous `742b09e9-4637-4706-954a-5922f8266dfc`; one command: `pnpm --dir apps/web exec wrangler versions deploy 742b09e9-4637-4706-954a-5922f8266dfc@100% --yes`).

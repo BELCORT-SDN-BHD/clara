@@ -2,13 +2,17 @@
 
 ## Current State
 
-- `main` at `c90ab2ba` (2026-09-14): wave 2 of the refresh implementation (PR #807, after wave 1's PR #769), then the **riders batch** (PR #817 + docs PR #819, merged by another operator while wave 3 was in review; no migration); migrations end at **0194_periodic_adjustments** (0188 operator support, 0189 work list reads, 0190 document byte door v2, 0191 document capability registry, 0192 client knowledge records, 0193 accounting plans, 0194 periodic adjustments). Local `main` is `origin/main` plus docs-only commits (the wave reports and the hosted release runbook); the wave's reports, PROGRESS and HANDOFF ride into the wave-3 PR.
-- Hosted (unchanged since 2026-09-13): DB frontier **182 / 0187**; `clara-runtime` **v82** = image `refresh-98f6eec6`; `clara-web` **742b09e9**. 0188–0194 are NOT released (0195 + `claraWork_v3` follow in wave 3 and must ship together, #815): the release ceremony (`awaiting-release-ceremony` memory; 0191's read-only field-path census `packages/db/deploy/0191-field-path-census.sql` first; #637's rollback preflight as a required step; writer quiescence for 0194's recut of a live body) is a separate owner-scheduled step.
+- `main` at `70c731ef` + one docs/manifest commit (2026-09-14): wave 3 of the refresh implementation (PR #818: #631 = 0195 + `claraWork_v3`, `chatTurn_v19`, the pre-v3 grandfather rule + preflight frontier rule) over wave 2 (PR #807), wave 1 (PR #769) and the riders batch (PRs #817/#819). All 11 refresh tickets (#615 #619 #620 #622 #624 #631 #637 #640 #641 #643 #644) are closed with local AND hosted evidence (#612 carries the hosted evidence). The post-release commit (branch `release/post-70c731ef`) deploy-locks the 17 `claraWork.v3.*`/`chatTurn.v19.*`/lib entries in `frozen-workflows.json`, so `main`'s tip deliberately differs from the deployed image's `git_sha` by that one commit.
+- **Hosted (released 2026-09-14 ~08:45Z, one 52 s writer-quiescence window):** DB frontier **190 / 0195** (0188–0195 applied); `clara-runtime` **v83** = image `refresh-70c731ef` (digest `sha256:28a2f13d…`, `git_sha 70c731ef`, 51 bodies, pins `claraWork_v3` / `chatTurn_v19`); `clara-web` **`0290977b-74a4-4c4a-849f-ee60efd631bb`** at 100%. Every reading and the rollback points: `docs/plan/active/refresh-wave-2026-09-14/RELEASE-RUNBOOK.md` § RESULTS. **Runtime/database asymmetry:** the DB at 0195 forbids the previous image (v82 lacks `claraWork_v3`; the rollback preflight REFUSES it — demonstrated read-only on 2026-09-14), so the only honest runtime rollback below 0195 is the drafted `0196_restore_pre_0195_bodies.sql` (`drafts/`, NOT applied) plus a compatibility image that still carries `claraWork_v3`. Web rollback is one command: `pnpm --dir apps/web exec wrangler versions deploy 742b09e9-4637-4706-954a-5922f8266dfc@100% --yes`.
 - Legal texts: Terms v1 and DPA v1 are the beta templates (0187); reviewed wording publishes as v2 through `clara.publish_legal_document`.
 - Stripe: test-mode endpoint subscribed to all four checkout events; `CLARA_STRIPE_LIVEMODE=test`; admission capacity unlimited.
 - Test firm kept in production at the owner's decision: "Walk Test 0913" (`c5616f91`).
 
 ## Completed
+
+- **Hosted release 2026-09-14** of the whole refresh wave: pristine-0187 rehearsal → probe machine reads (ledger 182/0187, 0187 checksum match, every recut body at its pre-state pin, data pre-states 0/5/0/0) → 213 MB full dump → image by digest with `--build-arg CLARA_BUILD_SHA` → web upload from WSL → machine stop → post-stop re-census → `migrate.mjs` 8 new · 190 total → deploy by digest → start (`stranded bodies n=0` before `durable world started`; `/ready` `bodies.measured:true stranded:0`) → web promote + signed-out smoke → #637's hosted half read-only (v82 preflight REFUSED: `frontier_requires_body` + #820's ten orphan `unbound_task`s; no rollback) → `--lock-deployed`. Evidence on #612 and the 11 tickets. Filed #820 (orphan held wake tasks).
+
+- 2026-09-14 wave 3 of the refresh implementation landed on `main` via PR #818 (fast-forward after `ci` green): #631 (0195 + `claraWork_v3` egress-purpose consume before the model call, execution trace rows, restore door) and the shared `chatTurn_v19` (#643's `start_periodic_adjustment_work`, #644's knowledge tools); the wave-3 integration fixes (grandfather rule for Work claimed under a pre-v3 bundle, rollback-preflight frontier rule `0195 ⇒ claraWork_v3`, six registry pin cells, wb-0020 consent/event censuses, riders-batch merge with §11 rows unioned) — reports under `docs/plan/active/refresh-wave-2026-09-14/reports/wave3-*.md`.
 
 - **Riders batch 2026-09-14** (this Mac, PR #817 → `main` 6375cc68, merged over wave 2): #736 #733 #743 #715 #741 #734 #719 #746 #742 #744 #709 #690 #755 #707 #754 #756 #708 #745 #760 #691 closed with local evidence on their tickets (db 4450/0 fail on a fresh cluster, runtime 2447/0 fail, web unit 3693/0 fail, browser 337 passed with `main`'s own #641/#640 fixture reds filed as #816, root lint green on macOS). Blueprint sync: ARCHITECTURE §4 (#744 ruling), §9 (shell hydration / rail / cookie / time zone / stream faults / deep links / attribution rules), §11 (renderer on Node 22, EICAR skip); `packages/db/README.md` (`interactive_client`); one repo-wide dead-citation guard on the root lint ladder.
 
@@ -22,49 +26,20 @@
 
 ## In Progress
 
-- 2026-09-14 wave 3 of the refresh implementation, assembling on `integration/wave-3` (worktree `clara-wt\integration3`, from the wave-2 tip): #631 (0195 + `claraWork_v3`; three-axis review + fix round + closure re-check, MERGEABLE, `reports/631-*.md`) and the shared `chatTurn_v19` (`impl/v19-chat-turn`; spec + frozen-law reviews MERGEABLE, `reports/v19-*.md`); the integration worker merges both, moves #631's Diagnostics into #641's Activity tab, fills the 17 new frozen-manifest notes with deploy order, labels the two new purposes on chat Work cards, and re-runs #637's two-build drill registry-derived for v2→v3. Then the runtime suite on `rigw3`, the PR, `ci`, fast-forward, close #631 and #796. Live state and next steps: [docs/plan/active/refresh-wave-2026-09-14/HANDOFF.md](plan/active/refresh-wave-2026-09-14/HANDOFF.md).
+- Nothing in flight. The post-release docs/manifest commit is on PR from `release/post-70c731ef` (fast-forward after `ci`).
 
 ## Known Issues
 
+- The signed-in walk on the released build has NOT been done (the agent had no signed-in browser session and never enters credentials): `/operator` (first live walk of #615), `/work`, `/clients/<id>/plans` + `/new`, `/clients/<id>/accounting/adjustments` + `/new`, `/clients/<id>/knowledge/<recordId>`, and signed-in `GET /api/build-info` pairing `git_sha 70c731ef…` with the runtime. Owner's step.
+- #820: ten orphan held `wake` tasks (no `wake_engine_sources` row; event types `open_question.opened` ×8, `account.chart_applied`, `compliance.watch_transition`) make EVERY rollback preflight refuse with `unbound_task` (unplaceable) — retire or repair before the next rollback drill. Untouched by the release.
+- Owner rulings still open (recorded, not blockers): #631 activation assumption (model egress authority for `accounting_work`); #815 pre-v3 grandfather + preflight frontier rule (shipped in 0195 on the orchestrator's ruling); #790 bookkeeper floor; #793 World-guard blast radius; #810 `chatTurn_v1` export.
 - #732: every narrow-viewport first load logs React #418 and re-renders the tree on the client (functionally recovers; performance and console noise). `ready-for-agent`, web lane.
 - The 24 h expired-session face and a delayed async (FPX-style) confirmation were not walkable in one sitting; those arms are proven by the db/runtime cells and the subscribed events.
 
 ## Next Steps
 
-0. Resume the refresh wave from the HANDOFF.md above (read it first; inspect every worktree before trusting a fix landed; restart the WSL clusters if WSL restarted).
-1. After the wave: `/implement` on the remaining wayfinder tickets the owner picks (#612 children, frontier per #597). Riders: the 2026-09-14 batch (PR #817 → `main` 6375cc68, no migration) closed 20 of the ready-for-agent riders and left #732 (`awaiting-release`: hosted repro), #714 (three green `db-estate` runs on a runtime-free PR), #706 (new family members on the issue) and #693 (Windows confirmation) open on named evidence; still ready-for-agent and migration-bearing: db #692 #718 #720 (unblocked now that 0191–0194 are on `main`), #750 #721 (after #631's 0195).
+0. Owner: the signed-in walk on the released build (Known Issues, first bullet); then decide #631's activation assumption and #815. Machine hygiene: the 11 ticket worktrees `clara-wt/6NN` and the WSL rig clusters (55432–55448, 55460) can be dropped — nothing on production depends on them.
+1. `/implement` on the remaining wayfinder tickets the owner picks (#612 children, frontier per #597). Riders: the 2026-09-14 batch (PR #817 → `main` 6375cc68, no migration) closed 20 of the ready-for-agent riders and left #732 (`awaiting-release`: hosted repro), #714 (three green `db-estate` runs on a runtime-free PR), #706 (new family members on the issue) and #693 (Windows confirmation) open on named evidence; still ready-for-agent and migration-bearing: db #692 #718 #720 (unblocked now that 0191–0194 are on `main`), #750 #721 (after #631's 0195).
 2. When the lawyer-reviewed Terms/DPA wording arrives: publish it as v2 through `clara.publish_legal_document` (as the BELCORT owner) or a seed migration; the beta v1 rows become superseded.
 3. When the admission beta should stop taking firms: `set_admission_capacity` (BELCORT owner).
-4. **#637's hosted half — the two-release + deliberate-rollback ceremony (owner-scheduled; local and CI
-   evidence are in, hosted evidence is pending).** #637 ships no migration and no frozen closure, so the
-   DB is not in the order. Steps, in this order:
-   1. Release the #637 image normally (build-only + push, record the immutable reference, then release
-      that same reference). Read the new boot line in `fly logs`: `[clara-runtime] serving git_sha=…
-      frontier=…(…) bodies=49 pins … claraWork=claraWork_v2 …`. The two `bundle clara-work/v1|v2
-      digest=` banners must be unchanged, and `stranded bodies n=0` must PRECEDE `durable world
-      started` — the census is a gate that runs before the world, so its line comes first.
-   2. Confirm the same four facts over HTTP: signed-in `GET /api/build-info` must report the same
-      `git_sha`, `pins.claraWork`, and a `bodies` array of 49 — and `/ready` must carry
-      `checks.bodies.measured: true` with `stranded: 0`.
-   3. Park real Work on the CURRENT body, then release the NEXT image (the #631 successor when it
-      lands). Confirm the parked Work resumes on its ORIGINAL body: its `operation_receipts.bundle_digest`
-      must be the OLD bundle's digest while newly admitted Work records the new one.
-   4. THE ROLLBACK, deliberately, and only through the gate. Run
-      `node packages/runtime/scripts/rollback-preflight.mjs --target-bundle <previous image bundle>`
-      (or pipe the previous image's `/api/build-info`) BEFORE `fly deploy --image <previous>`. Expect
-      exit 1 while anything is parked on a body that image lacks, and record the named bodies. Then
-      either drain and re-run until exit 0, or release a compatibility build that retains them.
-      **Do not roll back on a non-zero preflight**: measured in #637, an engine that boots against a
-      non-terminal run whose body it does not export raises `ReplayDivergenceError` and the crash-only
-      supervisor exits 1 — a crash loop, not a quiet park. Read the GLOBAL verdict, not a scoped one:
-      `--scope*` narrows the report and never the exit code, precisely because a parked run of another
-      class strands just as hard.
-   5. After the rollback, read `/ready` `checks.bodies` on the rolled-back image. Since #637's review
-      the boot census is a GATE, not a warning: if anything is stranded the image **refuses to start
-      the durable world**, `/ready` is 503 with `checks.bodies.world_start_refused: true` and the
-      bodies named, and HTTP stays up so you can read exactly that. Nothing is lost — the runs are
-      parked — and the fix is to release an image that carries those bodies. `fly logs` carries the
-      same line: `[clara-runtime] stranded bodies n=… names=… — REFUSING TO START THE DURABLE WORLD`.
-      Do NOT reach for `CLARA_ALLOW_STRANDED_BODIES=1` to get past it during the drill: it starts the
-      world anyway and the process may then crash-loop on replay, which is the condition being
-      demonstrated. The expected ceremony reading is the refusal itself.
+4. #637's hosted half — DONE read-only on 2026-09-14 (runbook § RESULTS step 9): the preflight against the v82 bundle REFUSED (exit 1, `frontier_requires_body` + `unbound_task`), nothing was rolled back. What was NOT exercised on production: the park-Work-then-release-next-image resume proof (step 3 of the old plan) and a real rollback through the gate (steps 4–5) — those stay local/CI evidence (#637's two-build drill) until a future release pair; when a real rollback below 0195 is ever needed, it is 0196 (`drafts/`) + a compatibility image, never a bare `fly deploy --image v82`. Do NOT reach for `CLARA_ALLOW_STRANDED_BODIES=1` on production.
