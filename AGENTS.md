@@ -26,8 +26,7 @@ instructions. Source code and deployment evidence establish what is actually imp
    exploration/planning.
 4. Verify the affected behaviour and update its existing source of truth in the same change. For an
    implementation ticket that source of truth is the module's README, `CONTEXT.md` and the ticket's own
-   evidence — never the PRD or Architecture. Keep the current task's unresolved work actionable and
-   distinguish local tests from hosted evidence.
+   evidence — never the PRD or Architecture.
 5. PRD and Architecture are blueprints, refreshed only after Wayfinder or to-spec settles a product or
    technical decision and before to-tickets: overwrite the affected section (never append ticket
    history), keep each file's maintenance frame in its header, and mark accepted technical targets
