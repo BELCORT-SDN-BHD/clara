@@ -11,7 +11,9 @@ description: >-
   Roles are Postgres cluster-global; migration 0154 (merged, immutable) pins an absolute
   clara-role count at its position in the chain, which breaks the moment a SECOND
   from-scratch migrate shares a cluster with a first one that already minted a role a
-  later migration adds. Separate clusters avoid ordering as a hidden precondition.
+  later migration adds. Separate clusters avoid ordering as a hidden precondition, and a step
+  that needs a SECOND pristine database on a cluster whose chain has already completed takes a
+  TEMPLATE COPY of the pristine one instead of migrating again (#637's two-build drill, below).
 runs:
   using: composite
   steps:
@@ -65,6 +67,28 @@ runs:
         PGPORT=$PGC_PORT \
         WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGC_PORT/clara_wave_b_ci" \
           pnpm --filter @clara/runtime exec bootstrap
+        # #637 — THE TWO-BUILD DRILL'S OWN DATABASE, cut HERE and nowhere else, because this is the
+        # only moment clara_wave_b_ci is provably pristine: all 189 migrations, both seeds and the
+        # WDK world schemas are on it, and no e2e below has run a single Work against it yet. Every
+        # command above has exited, so nothing is connected to the template — which is exactly what
+        # CREATE DATABASE ... TEMPLATE requires.
+        #
+        # A TEMPLATE COPY rather than the intake step's create/migrate/seed/bootstrap idiom, for the
+        # reason this action's own header states: migration 0154 pins an ABSOLUTE, cluster-global
+        # clara-role count (14) at its position in the chain, and a SECOND from-scratch migrate on
+        # this cluster would reach that assertion with the roles the first chain's LATER migrations
+        # (0160's clara_stripe_webhook/_login) already minted, and abort. The clone is a file-level
+        # copy measured in seconds; migrate+seed+bootstrap measured 139s + 0.8s + ~4s for
+        # clara_wave_b_ci on this same cluster in run 34793833626.
+        #
+        # The NAME is not free. tests/two-build-cutover-e2e.mjs THROWS, and
+        # tests/body-census-guard-db.test.mjs SKIPS (and a skip is not evidence), unless PGDATABASE
+        # is one of {clara_rt_test, clara_wave_b_ci} — their fail-closed loopback gates — so the
+        # drill's own database has to be the OTHER sanctioned throwaway name. clara_rt_test also
+        # matches the destructive guard's ephemeral pattern (packages/db/lib/guard.mjs EPHEMERAL_DB,
+        # the `*_test` arm), and nothing else under .github/ uses that name.
+        PGPORT=$PGC_PORT PGDATABASE=postgres psql -v ON_ERROR_STOP=1 \
+          -c 'create database clara_rt_test template clara_wave_b_ci'
         cd packages/runtime
         PGPORT=$PGC_PORT \
         PGDATABASE=clara_wave_b_ci \
@@ -119,13 +143,19 @@ runs:
         RELAY_TEST_MODE=1 \
         WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGC_PORT/clara_wave_b_ci" \
           node tests/work-cancel-e2e.mjs
-        # WAVE-2 INTEGRATION ORDER — five steps, and the order is each side's own stated
-        # requirement rather than a preference. #643 and #640 both ADMIT AND SETTLE Work on this
-        # rig; #637's two-build cutover REFUSES TO START (exit 1, named reason) while the
-        # database still carries live accounting-Work state, so both settle cleanly around it —
-        # #643 ahead of it and #640 after it, each leaving no live Work behind. #637's world
-        # guard stays LAST because it deliberately stages a run of a body no image exports,
-        # which is precisely the condition every step above refuses to start against.
+        # WAVE-2 INTEGRATION ORDER — five steps, unchanged: #643, then #637's two-build cutover,
+        # then #640, then #637's world guard LAST. What changed is WHY it holds. Ordering used to
+        # BE the isolation argument for the drill ("placed after work-cancel-e2e, which settles its
+        # own Works, so the inventory is clean by the time this runs"), and run 34793833626
+        # disproved it: every e2e above passed on clara_wave_b_ci and the drill still printed
+        # `TWO-BUILD CUTOVER E2E: REFUSING TO START — this database already carries live state a
+        # two-build drill cannot tell from its own: 1 non-terminal run(s) of claraWork_v2` and
+        # exited 1. A drill that cannot tell another leg's parked run from its own must not share a
+        # database with legs that park runs, so BOTH #637 steps now run on clara_rt_test (cut
+        # above) and this order is no longer load-bearing for them. #643 and #640 keep it on their
+        # own terms: both ADMIT AND SETTLE Work on this rig and each leaves no live Work behind.
+        # #637's world guard stays LAST because it deliberately stages a run of a body no image
+        # exports, which is precisely the condition every step above refuses to start against.
         # #643 — the PERIODIC-ADJUSTMENT e2e, AFTER its three siblings and on the same rig. It
         # drives the one window the unit and DB cells cannot: a run that COMMITS three rows in one
         # transaction (the marked entry, the operation receipt and the clara.periodic_adjustments
@@ -154,15 +184,20 @@ runs:
         # closure review (superseding this comment's earlier 82.6s / 3m25s), against a ~6 minute
         # budget. The copy MUST live outside packages/runtime — measured during the spike, a copy at
         # packages/runtime/.scratch made the MAIN nitro build compile 98 workflows instead of 49.
+        # Its DATABASE costs the template copy above — a file-level clone, seconds — and not the
+        # ~2m20s a from-scratch migrate+seed+bootstrap measures on this runner.
         #
-        # It REFUSES TO START (exit 1, named reason) if this database already carries live
+        # It REFUSES TO START (exit 1, named reason) if THIS database already carries live
         # accounting-Work state, and it SKIPS CLEANLY (exit 0, printed reason) when migration 0180 is
-        # absent. Placed after work-cancel-e2e, which settles its own Works, so the inventory is
-        # clean by the time this runs.
+        # absent. So it runs on clara_rt_test — its OWN pristine copy, cut above before any sibling
+        # e2e had touched the rig — and never on the shared clara_wave_b_ci, whose parked
+        # claraWork_v2 run is what failed this step in run 34793833626. It cleans up after itself on
+        # every exit path (its own tasks cancelled, its own runs marked cancelled), which is what
+        # lets the world guard below reuse the same database.
         PGPORT=$PGC_PORT \
-        PGDATABASE=clara_wave_b_ci \
+        PGDATABASE=clara_rt_test \
         RELAY_TEST_MODE=1 \
-        WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGC_PORT/clara_wave_b_ci" \
+        WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGC_PORT/clara_rt_test" \
           node tests/two-build-cutover-e2e.mjs
         # #640 — the accounting-PLAN occurrence e2e, AFTER its three siblings and on the same rig.
         # It drives the two things only a real world can show about a scheduled occurrence: two
@@ -184,13 +219,19 @@ runs:
         # false-green one: tests/body-census-guard-db.test.mjs SPAWNS the built image against a real
         # Postgres World, so in db-estate-suite (PGDATABASE=clara_ci, no `.output`) its own hard gate
         # SKIPS it — and a skip is not evidence. This job has both the build and the world, so it is
-        # where the cells actually run. LAST on this rig: it stages a run of a body no image exports,
-        # which is precisely the condition every step above refuses to start against. It cancels and
-        # deletes its own row on every exit path.
+        # where the cells actually run. LAST, and on the DRILL'S database rather than the shared
+        # one, for two reasons that point the same way: it stages a run of a body no image exports —
+        # precisely the condition every step above refuses to start against — so it must be the last
+        # thing to touch whatever database it runs on; and its third cell is a CONTROL that asserts
+        # `stranded bodies n=0` and a 200 from /ready on a clean estate, which is the one assertion
+        # the shared clara_wave_b_ci cannot be trusted to satisfy. The drill retires everything it
+        # parks (its own `finally` cancels its tasks and runs; the closure review measured the rig
+        # left clean), so clara_rt_test reaches this line clean. It cancels and deletes its own row
+        # on every exit path.
         PGPORT=$PGC_PORT \
-        PGDATABASE=clara_wave_b_ci \
+        PGDATABASE=clara_rt_test \
         RELAY_TEST_MODE=1 \
-        WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGC_PORT/clara_wave_b_ci" \
+        WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGC_PORT/clara_rt_test" \
           node --test tests/body-census-guard-db.test.mjs
 
     - name: DR backup/restore self-test (ephemeral postgres:17)

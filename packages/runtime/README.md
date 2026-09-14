@@ -298,11 +298,15 @@ answers the same question before you deploy, which is the cheaper place to learn
 **Blast radius (owner confirmation pending).** The refusal is database-WIDE, not process- or
 lane-scoped: any non-terminal run of an unexported body — left by another lane, an interrupted
 test, or a killed rig fixture — refuses every later runtime process that starts against that same
-database, until the body is retired or `CLARA_ALLOW_STRANDED_BODIES=1` is set. In CI, every step
-sharing one database (`db-live-gates` runs its four Wave-B steps against `clara_wave_b_ci`) is one
-interrupted step away from poisoning the rest of that job. This is the accepted ruling working as
-designed, not a bug; it is not yet confirmed by the owner and is written here so the runbook does
-not overstate what has been settled.
+database, until the body is retired or `CLARA_ALLOW_STRANDED_BODIES=1` is set. In CI, every leg
+sharing one database is one interrupted leg away from poisoning the rest of that job — measured,
+not predicted: `db-live-gates` ran its Wave-B e2es against `clara_wave_b_ci`, they all passed, and a
+parked `claraWork_v2` run one of them left behind then refused the two-build drill outright (run
+34793833626). The two legs that cannot tolerate another's parked run — the two-build drill and this
+guard's own cells — therefore run on `clara_rt_test`, a template copy of `clara_wave_b_ci` cut
+before any e2e touches it, and the drill retires everything it parks so the guard inherits a clean
+estate. This is the accepted ruling working as designed, not a bug; it is not yet confirmed by the
+owner and is written here so the runbook does not overstate what has been settled.
 
 ## Deployment and rollback
 
