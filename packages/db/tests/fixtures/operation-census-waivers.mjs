@@ -54,6 +54,46 @@ export const WAIVERS = new Map([
   // REVIEWED 2026-09-09. A REAL, UNFIXABLE-HERE DEFECT, waived so it is stated rather than
   // silently green — see the report on #618 for the routing note.
   //
+  // RE-REVIEWED 2026-09-14 when chatTurn_v19 landed, because the wave asked whether a new chat
+  // successor could retire this. IT CANNOT, and the reason is structural rather than a matter of
+  // effort. The census resolves a CALL SITE IN SOURCE, not the pinned version: the bare reader's
+  // only caller is chatTurn_v1's own frozen tools body, which stays in the tree — and stays
+  // EXPORTED from registry.ts — under versioning policy (c), so a run parked on v1 has a body to
+  // resume into. v19 could only have retired it by deleting that file, which is the one thing the
+  // policy forbids. Measured both ways on rig rigv19 (55455/clara_v19, frontier 189): with this
+  // waiver present the census is 10/10; with it deleted, `opcen.1` reds naming
+  // `clara.get_journal_entry(p_entry uuid) ... call sites:
+  // packages/runtime/workflows/chatTurn.impl.ts:112 [alias:read]` — a LIVE finding, not a dead
+  // exemption. The current closure is clean: chatTurn.v10.tools.ts:477 (which v11..v19 all carry
+  // by import) reads `clara.get_journal_entry_for`, and so do claraWork v1/v2. Retiring this needs
+  // a ruling that v1 may stop being exported, not another successor.
+  //
+  // THE ONE ALTERNATIVE THAT WAS PUT TO ME, ANSWERED RATHER THAN IGNORED: could the census scope
+  // its READ-pool check to the ENQUEUED (registry-pinned) bodies, the way #637 derived provenance,
+  // and let this waiver retire? NO — it would be a weakening, on three separate grounds, and each
+  // is checkable:
+  //   1. THE CALLER IS REACHABLE TODAY. A superseded frozen body is not dead code: policy (c)
+  //      keeps it exported precisely so a PARKED run can resume into it, and
+  //      `scripts/check-workflow-bundle.mjs` asserts every one of them SHIPS IN THE IMAGE ("50
+  //      superseded body(ies) still ship for parked runs", measured on this branch). A parked
+  //      chatTurn_v1 run that resumes executes this exact tool and gets 42501. A census that
+  //      stopped reporting it would be reporting on a program that is not the one running.
+  //   2. IT WOULD BE A BLANKET EXEMPTION WEARING A SCOPE'S CLOTHES. The exclusion could not be
+  //      narrowed to this call site: it would drop EVERY call site in EVERY superseded body —
+  //      dozens of files across chatTurn v1..v18, autoDraft v1..v9, statementFacts, witnessFacts,
+  //      clientOnboarding, firmInterview — from the caller side in one line. This fixture's own
+  //      header refuses exactly that shape: "There is no function-level blanket exemption and no
+  //      wildcard."
+  //   3. IT WOULD MAKE packages/db DEPEND ON packages/runtime's REGISTRY to decide what counts as
+  //      a call site, so a repoint (a routine act, several per wave) would silently change what the
+  //      SQL boundary census reports. The census's own header says it never infers the caller side
+  //      from anything but the repository's sources.
+  // So the waiver stays, and what it suppresses stays visible in its own reason. THE FOLLOW-UP IT
+  // NEEDS is not another chatTurn successor — it is a ruling that chatTurn_v1 may stop being
+  // exported (a drain proof: zero non-terminal runs on that body, which
+  // `scripts/rollback-preflight.mjs` can already count), after which the file leaves the tree and
+  // this entry becomes a DEAD exemption the census itself reports.
+  //
   // packages/runtime/workflows/chatTurn.impl.ts:112 (chatTurn_v1's read tool) calls
   // `clara.get_journal_entry($1)` on the READ pool, which SET ROLEs to clara_agent_ro.
   // Migration 0009 (S6 §9/C-11) retired the bare same-firm entry oracle from the agent lane —
@@ -71,10 +111,11 @@ export const WAIVERS = new Map([
     reason:
       "chatTurn_v1 (workflows/chatTurn.impl.ts:112, FROZEN per frozen-workflows.json) is the "
       + "last caller of the bare reader 0009 retired from clara_agent_ro; every later version "
-      + "uses get_journal_entry_for, registry.ts binds chatTurn to v18, and #623's new "
-      + "claraWork_v1 closure uses get_journal_entry_for as well — no successor keeps the bare "
-      + "reader. Real defect, unfixable in a frozen artifact — reported for routing, not "
-      + "silently absorbed.",
+      + "uses get_journal_entry_for, registry.ts binds chatTurn to v19, and both #623's "
+      + "claraWork_v1 and #643/#644's chatTurn_v19 use get_journal_entry_for as well — three "
+      + "successors have come and gone without a reason to keep the bare reader. Real defect, "
+      + "unfixable in a frozen artifact that policy (c) requires to stay exported — reported for "
+      + "routing, not silently absorbed.",
   }],
 ]);
 

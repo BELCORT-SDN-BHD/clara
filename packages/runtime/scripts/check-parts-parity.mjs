@@ -46,6 +46,11 @@ const DEFAULT_DECLARERS = [
   // `declaredPartShapesAcross` refuses a discriminant declared in two files, and a re-declaration
   // would have tripped it.
   "packages/runtime/workflows/claraWork.v2.parts.ts",
+  // #643 + #644: chatTurn_v19 declares ONE new kind (`knowledge_receipt`) and re-uses v18's
+  // `work_accepted` BY REFERENCE rather than re-declaring it — a widened PURPOSE through
+  // `Omit<…> & { purpose: … }`, which `declaredPartShapes` does not read as a declaration, because
+  // a discriminant declared in two files is a hard throw here and would be two copies of one shape.
+  "packages/runtime/workflows/chatTurn.v19.parts.ts",
 ];
 const DEFAULT_READER = "apps/web/lib/parts/types.ts";
 const DEFAULT_RUNTIME_ROOT = "packages/runtime";

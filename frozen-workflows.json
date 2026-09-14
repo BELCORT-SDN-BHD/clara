@@ -40,10 +40,18 @@
       "sha256": "db98138aa47832da8a31a8f9a51d31ab503d6bb61ab899da2706051b68218c0a",
       "note": ""
     },
+    "packages/runtime/lib/knowledge.mjs": {
+      "sha256": "746ac773aed84cc56d6103b3a1deff162598c896d11163fc1ebb361a98f35cef",
+      "note": ""
+    },
     "packages/runtime/lib/malaysian-registration.mjs": {
       "sha256": "49f8a2672577b5d567ddeddadc1d7207a6519126a330100cc821cde919ba74e8",
       "note": "",
       "deployed": true
+    },
+    "packages/runtime/lib/periodic-adjustment-basis.ts": {
+      "sha256": "9670d5b96365a1c7613e25846069ad569be9bce95fc0865c7795f1b5220b6a5a",
+      "note": ""
     },
     "packages/runtime/lib/work-trace.mjs": {
       "sha256": "96c7e7b51a648c753de3d8d1ac745d39f6015d312f269a1408a8e04330d320d6",
@@ -698,6 +706,30 @@
       "sha256": "585dd97b11a0d0cfebcae223636a400480070b7e1834bdd9e1ed0b966f55f94d",
       "note": "#623 — part of the chatTurn_v18 closure (the first persistent Clara successor, chat half); registry.ts points chatTurn: here. v17 stays frozen and exported (policy (c)). DEPLOY ORDER: migration 0178 must be live BEFORE this image admits any Work. NOT deploy-locked yet — the ceremony stamps `deployed: true` after the image is live.",
       "deployed": true
+    },
+    "packages/runtime/workflows/chatTurn.v19.impl.ts": {
+      "sha256": "c540ae14217052db27758a5304fc26622e02c9ea0ade3b43bf13dcbec0205587",
+      "note": ""
+    },
+    "packages/runtime/workflows/chatTurn.v19.parts.ts": {
+      "sha256": "decb982c985fe661f65a3e523f99897d15961273ee3b20cb4bcb339418bb49f0",
+      "note": ""
+    },
+    "packages/runtime/workflows/chatTurn.v19.prompt.ts": {
+      "sha256": "fe0f786c0f079a0685de959e88e44cc91e9b9d05544ba9ec652fe1fdbacf3d50",
+      "note": ""
+    },
+    "packages/runtime/workflows/chatTurn.v19.tools.ts": {
+      "sha256": "8a977d917680ab6b6918f93db9cbad16e56d4069d098ef8cfb98e4afea5846b6",
+      "note": ""
+    },
+    "packages/runtime/workflows/chatTurn.v19.ts": {
+      "sha256": "6817db64db307647808c5e389428852ef7039d9bab159038994ea8d98c35ed05",
+      "note": ""
+    },
+    "packages/runtime/workflows/chatTurn.v19.usage.ts": {
+      "sha256": "2690f68ed419838f3bf759b8853bd0f385f6e8127ac65d1a78e342d4abca65c8",
+      "note": ""
     },
     "packages/runtime/workflows/chatTurn.v2.errors.ts": {
       "sha256": "b88e5124a5df2e9000f9a64ea408dae6c05cf9ee47d4a528c426af3a7391e4b5",

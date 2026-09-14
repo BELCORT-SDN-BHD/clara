@@ -386,9 +386,48 @@ export type WorkQuestionPart = {
   status: string;
 };
 
-/** The canonical transcript wire union: 30 live members (9 base + 4 Wave-A +
+// --- The governed-knowledge kind (#644, chatTurn_v19) -------------------------
+// Declared by `packages/runtime/workflows/chatTurn.v19.parts.ts` and transcribed
+// field for field from it. Like the durable-Work three above, the runtime is the
+// DECLARER and this module is the READER;
+// `packages/runtime/scripts/check-parts-parity.mjs` holds the two in step.
+//
+// THIS ONE IS DURABLE, unlike two of those three: it is minted by a CHAT TURN
+// (the moment `remember_client_information` lands a revision), so it is written
+// into `clara.chat_messages.parts` and replays on every later read of the
+// transcript. Its subject has a durable surface of its own — the C13 register
+// and `/clients/:clientId/knowledge/:recordId` — which is what the card links to.
+
+/** ONE governed knowledge record, captured from a conversation.
+ *
+ *  `record_id` IS THE STABLE IDENTITY, not the revision. Migration 0192 sets
+ *  `record_id = id` on revision 1 and carries it through every correction, so
+ *  this addresses the THING; a revision id would address a row a later
+ *  correction supersedes and the link would land on history rather than on what
+ *  is in force.
+ *
+ *  `knowledge_version` IS A STRING CARRYING A BIGINT, for the same reason
+ *  `freeform_result`'s `read_id` is: a part is persisted to jsonb and re-parsed
+ *  by a browser, and a bigint round-tripped through a JS number can come back
+ *  wrong. The card prints it and never does arithmetic on it.
+ *
+ *  NO VALUE, NO TRUST, NO STATE. All three move — a correction or a withdrawal
+ *  changes them while this message stays on screen forever — and the record's
+ *  own page reads them live. A card that remembered them would be wrong the
+ *  moment somebody used the doors this product exists to offer. */
+export type KnowledgeReceiptPart = {
+  type: "knowledge_receipt";
+  record_id: string;
+  client_id: string;
+  knowledge_key: string;
+  knowledge_version: string;
+  revision_kind: string;
+};
+
+/** The canonical transcript wire union: 31 live members (9 base + 4 Wave-A +
  *  1 Wave-C-c + 2 Wave-D-a + 2 Wave-D-b + 4 chatTurn_v14 + 4 chatTurn_v16 +
- *  4 durable-Work, the fourth being #629's `work_question`). Adding a member here without a matching ./catalog.ts entry
+ *  4 durable-Work, the fourth being #629's `work_question`, + 1 governed-knowledge,
+ *  chatTurn_v19's `knowledge_receipt`). Adding a member here without a matching ./catalog.ts entry
  *  fails `tsc` — see catalog.ts's AllCovered/NoExtra guard. */
 export type ClaraPart =
   | { type: "text"; text: string }
@@ -420,4 +459,5 @@ export type ClaraPart =
   | WorkAcceptedPart
   | WorkStatusPart
   | WorkResultPart
-  | WorkQuestionPart;
+  | WorkQuestionPart
+  | KnowledgeReceiptPart;

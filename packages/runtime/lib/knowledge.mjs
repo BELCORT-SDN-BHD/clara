@@ -34,7 +34,15 @@
 //                 advising as though the client had no knowledge at all.
 // =============================================================================================
 
-import { randomUUID } from "node:crypto";
+// NO `node:` IMPORT LIVES IN THIS FILE, AND THAT IS A HARD CONSTRAINT RATHER THAN A PREFERENCE.
+// chatTurn_v19 imports this module, which puts it inside a FROZEN WORKFLOW'S IMPORT CLOSURE — and
+// the Workflow DevKit compiles that closure into a VM script where `require` is undefined. The
+// failure is a RUN-TIME one, not a build-time one, and it was measured on the real World before
+// this note was written: with `import { randomUUID } from "node:crypto"` at the top of this file,
+// `nitro build` succeeded and the first chat turn died
+// `USER_ERROR / ReferenceError: require is not defined at lib/knowledge.mjs` — inside the workflow,
+// before the tool it was carrying ever ran. `claraWork.v1.bundle.ts` open-codes SHA-256 for
+// exactly the same reason and says so in its own header.
 
 /** The door's own name, in one place, so a rename is one edit rather than a grep. */
 export const KNOWLEDGE_PACK_FN = "clara.get_knowledge_pack";
@@ -63,21 +71,48 @@ const CAPTURE_SQL = `select ${CAPTURE_KNOWLEDGE_FOR_FN}(
 
 const text = (v) => (typeof v === "string" ? v.trim() : "");
 
+let opKeySeq = 0;
+
+/**
+ * A fallback op key for a caller that supplied none — Web Crypto's `randomUUID` where the host
+ * exposes it (Node 18+ and every browser), a time + counter + random composite otherwise.
+ *
+ * NEITHER FORM IS THE IDEMPOTENCY STORY, and a reader must not mistake it for one. A caller inside
+ * a DURABLE RUN must supply its own deterministic key — chatTurn_v19 passes `stableOpKey(taskId,
+ * tool, input)` — because a WDK step that re-executes would mint a different fallback here and
+ * write a SECOND revision where the whole point was one. This exists only so that a one-shot
+ * caller which genuinely does not care cannot collide with another.
+ */
+function fallbackOpKey() {
+  const uuid = globalThis.crypto?.randomUUID?.();
+  if (typeof uuid === "string" && uuid !== "") return `kn_${uuid}`;
+  opKeySeq += 1;
+  return `kn_${Date.now().toString(36)}_${opKeySeq.toString(36)}_${Math.random().toString(36).slice(2, 12)}`;
+}
+
 /** A governed refusal is a CLR SQLSTATE; anything else is a transport or programming failure.
  *  Spelling is not identity: this reads the DRIVER's `code`, never the message text. */
 function isGovernedRefusal(err) {
   return typeof err?.code === "string" && /^CLR\d{2}$/.test(err.code);
 }
 
-/** The DETAIL discriminant the doors attach, when they attach one. Never invented. */
-function refusalReason(err) {
-  if (typeof err?.detail !== "string") return null;
+/** The whole DETAIL payload the doors attach, when they attach one. Never invented, never
+ *  re-worded. Returns `{}` for an absent or unparseable detail so a caller can fold it without a
+ *  null check. */
+function refusalDetail(err) {
+  if (typeof err?.detail !== "string") return {};
   try {
     const parsed = JSON.parse(err.detail);
-    return typeof parsed?.reason === "string" ? parsed.reason : null;
+    return parsed !== null && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
   } catch {
-    return null;
+    return {};
   }
+}
+
+/** The DETAIL discriminant the doors attach, when they attach one. Never invented. */
+function refusalReason(err) {
+  const parsed = refusalDetail(err);
+  return typeof parsed?.reason === "string" ? parsed.reason : null;
 }
 
 function unavailable(reason, extra = {}) {
@@ -186,7 +221,7 @@ export async function captureKnowledgeFor(sql, args = {}) {
     // A SUPPLIED op_key is used VERBATIM — that is what makes a retried tool call idempotent
     // rather than a second record. An absent one is minted here, so a caller that does not care
     // still cannot collide with another turn.
-    text(args.opKey) || `kn_${randomUUID()}`,
+    text(args.opKey) || fallbackOpKey(),
     text(args.sourceKind) || "user_statement",
     JSON.stringify(args.appliesWhen ?? {}),
     args.effectiveFrom ?? null,
@@ -200,14 +235,20 @@ export async function captureKnowledgeFor(sql, args = {}) {
     return { ok: true, receipt: r?.rows?.[0]?.receipt ?? null };
   } catch (err) {
     if (isGovernedRefusal(err)) {
+      // `detail` CARRIES EVERYTHING THE DOOR SAID BESIDES THE REASON, and it is here because the
+      // chat lane needs it: 0192's trust and value refusals name the `knowledge_key` they are
+      // about, and a tool that dropped that would hand a model a sentence where the database had
+      // handed it a diagnosis (chatTurn.v11.tools.ts's `authoringRefusal` states the same rule for
+      // the authoring lane). Additive: `reason` is unchanged and is still the discriminant.
       return {
         ok: false,
         kind: "refusal",
         code: err.code,
         reason: refusalReason(err),
+        detail: refusalDetail(err),
         message: String(err?.message ?? ""),
       };
     }
-    return { ok: false, kind: "unavailable", code: null, reason: null, message: String(err?.message ?? err) };
+    return { ok: false, kind: "unavailable", code: null, reason: null, detail: {}, message: String(err?.message ?? err) };
   }
 }

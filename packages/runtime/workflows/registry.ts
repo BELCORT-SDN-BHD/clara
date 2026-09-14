@@ -28,6 +28,7 @@ import { chatTurn_v15 } from "./chatTurn.v15.js";
 import { chatTurn_v16 } from "./chatTurn.v16.js";
 import { chatTurn_v17 } from "./chatTurn.v17.js";
 import { chatTurn_v18 } from "./chatTurn.v18.js";
+import { chatTurn_v19 } from "./chatTurn.v19.js";
 import { claraWork_v1 } from "./claraWork.v1.js";
 import { claraWork_v2 } from "./claraWork.v2.js";
 import { claraWork_v3 } from "./claraWork.v3.js";
@@ -115,7 +116,31 @@ export const workflows = {
   // already admitted keep their queued tasks, and a v17 image carries no `claraWork` export to
   // run them — so a rollback PARKS the lane rather than losing it, and that is the honest
   // description to put in a runbook, not "rollback is free".
-  chatTurn: chatTurn_v18,
+  //
+  // #643 + #644 (THE SHARED SUCCESSOR): REPOINTED v18 -> v19. v19 adds exactly TWO tools
+  // (`start_periodic_adjustment_work`, `remember_client_information`), exactly ONE wire kind
+  // (`knowledge_receipt`), and one new STEP — the honest knowledge-pack context read that renders
+  // an unreadable pack as "unavailable" instead of as a client with nothing recorded (#603).
+  // Everything else is byte-carried from v18 by import, including v10's own frozen context step.
+  // ONE successor rather than two because both tickets shipped their non-frozen halves ready for
+  // it and a frozen version is expensive to mint twice.
+  //
+  // THE DEPLOY ORDER IS OWED IN ONE DIRECTION: MIGRATIONS 0192 AND 0194 MUST BE LIVE BEFORE THIS
+  // IMAGE SERVES A TURN. `start_periodic_adjustment_work` calls
+  // `clara.admit_periodic_adjustment_work` (0194); `remember_client_information` calls
+  // `clara.capture_knowledge_for` and the context step calls `clara.get_knowledge_pack` (both
+  // 0192). Against a database without them each raises `undefined_function` (42883). Two of the
+  // three failures are CONTAINED by a typed tool refusal and the third by construction —
+  // `readKnowledgePack` classifies it `read_failed` and the block says the knowledge could not be
+  // read — so a wrong order corrupts nothing; it makes Clara refuse what it just offered. The
+  // REVERSE order is FREE: 0192 and 0194 against a v18 image add tables and verbs nothing calls.
+  //
+  // THE READER PARITY HOLD APPLIES AGAIN: apps/web must declare `knowledge_receipt` before this
+  // image can merge — the CI `build` job runs `check-parts-parity.mjs` and refuses while the
+  // reader trails the declarers. A rollback to v18 stops offering the two tools and stops reading
+  // the knowledge pack, without changing the database; Work and knowledge records already written
+  // keep their own durable surfaces. That is the honest runbook line, not "rollback is free".
+  chatTurn: chatTurn_v19,
   // #623 — A NEW CLASS, never a repoint. `accounting_work` tasks are dispatched here by
   // src/workRoutes.ts's post-commit enqueue and by the reconciler's own `accounting_work`
   // re-enqueue arm (lib/reconciler-work.mjs); both resolve the body through THIS object, which
@@ -740,6 +765,11 @@ export { chatTurn_v17 };
 // target and the body any run parked at cutover resumes into — and the pinned v18 body is
 // exported too so the rollback preflight can use the same uniform census for every version.
 export { chatTurn_v18 };
+// #643 + #644 repointed `chatTurn:` v18 -> v19. v18 remains exported by policy (c) — it is the
+// rollback target and the body any run parked on a v18 clarify hook resumes into at cutover — and
+// the pinned v19 body is exported too so the rollback preflight can use the same uniform census
+// for every version.
+export { chatTurn_v19 };
 // #629 repointed `claraWork:` v1 -> v2. v1 remains exported by policy (c) — it is the rollback
 // target and the body any Work parked on a v1 clarify hook resumes into at cutover — and the
 // pinned v2 body is exported too so the rollback preflight can use the same uniform census for
@@ -827,6 +857,7 @@ export const workflowBodies: readonly string[] = Object.freeze([
   "chatTurn_v16",
   "chatTurn_v17",
   "chatTurn_v18",
+  "chatTurn_v19",
   "claraWork_v1",
   "claraWork_v2",
   "claraWork_v3",
@@ -866,7 +897,7 @@ export const workflowBodies: readonly string[] = Object.freeze([
  *  preflight has to enumerate. */
 export const workflowPins: Readonly<Record<string, string>> = Object.freeze({
   closeExample: "closeExampleV1",
-  chatTurn: "chatTurn_v18",
+  chatTurn: "chatTurn_v19",
   claraWork: "claraWork_v3",
   documentIngest: "documentIngest_v2",
   invoiceFacts: "invoiceFacts_v1",

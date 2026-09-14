@@ -39,6 +39,9 @@ export const CHAT_PARITY = {
   question: "Which client owns this invoice?",
   bankAccountId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
   matchId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+  // chatTurn_v19 (#644) — the governed-knowledge receipt this lane renders on the settled
+  // thread. Its own id, like every other id here, so the lane stays ID-SCOPED.
+  knowledgeRecordId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
 };
 
 /** The settled transcript's parts, built from the LIVE emitter's own shapes:
@@ -64,6 +67,18 @@ const SETTLED_PARTS = [
     subject_id: "line-e2e",
     op_key: "bank-match_bank_line:task-e2e:0:{}",
     result: { match_id: CHAT_PARITY.matchId, status: "live" },
+  },
+  // chatTurn_v19's governed-knowledge receipt, in the emitter's own shape
+  // (packages/runtime/workflows/chatTurn.v19.parts.ts). It belongs on the SETTLED thread and
+  // nowhere else: unlike the two live-stream Work kinds, this one is minted by a chat turn into
+  // `clara.chat_messages.parts`, so a transcript read days later still carries it.
+  {
+    type: "knowledge_receipt",
+    record_id: CHAT_PARITY.knowledgeRecordId,
+    client_id: CHAT_PARITY.clientId,
+    knowledge_key: "trade_nature",
+    knowledge_version: "7",
+    revision_kind: "capture",
   },
 ];
 
