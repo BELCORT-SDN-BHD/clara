@@ -42,6 +42,7 @@ import { sanitizedErrorCode } from "../lib/pool-error-contract.mjs";
 // every operation receipt — never a second copy that could disagree.
 import { CLARA_WORK_BUNDLE_V1_BANNER } from "../workflows/claraWork.v1.bundle.js";
 import { CLARA_WORK_BUNDLE_V2_BANNER } from "../workflows/claraWork.v2.bundle.js";
+import { CLARA_WORK_BUNDLE_V3_BANNER } from "../workflows/claraWork.v3.bundle.js";
 import { makeDocumentServices, recoverPendingDocumentIntakes } from "../lib/intake.mjs";
 import { makeInvoiceFactsServices } from "../workflows/invoiceFacts.v1.services.mjs";
 import { makeStatementFactsServices } from "../workflows/statementFacts.v1.services.mjs";
@@ -276,12 +277,18 @@ export default definePlugin(() => {
       // rollback preflight unable to tell, from the logs alone, which bodies this process
       // actually carries — which is the question C88.8's line exists to answer.
       console.log(CLARA_WORK_BUNDLE_V2_BANNER);
+      // #631 — THE THIRD LINE, for the reason #629 gave for the second: v3 is what
+      // `workflows.claraWork` now dispatches, and v1/v2 are still carried for parked runs.
+      // A rollback preflight reads these three lines to know which bodies this process has,
+      // and the pinned digest is the SAME constant /api/build-info serves and
+      // `clara.claim_work_run` writes onto every Work row.
+      console.log(CLARA_WORK_BUNDLE_V3_BANNER);
       // #637 (C88.8 / C-70) — the ONE MORE LINE this comment used to promise here (which commit
       // built this image, which schema it is talking to, which body each class dispatches to, and
       // how many bodies it carries for parked runs) is `emitProvenanceLine()`, ABOVE, at the top of
       // this boot sequence — not here. It moved earlier on purpose (#637 review S5): the provenance
       // line must log before anything can refuse, so an operator reading the log sees it even when
-      // the stranded-body census below refuses to start the world. The two banners above stay
+      // the stranded-body census below refuses to start the world. The three banners above stay
       // byte-identical either way (tests/work-bundle.test.mjs pins v1's exact string);
       // tests/body-census-guard-db.test.mjs pins that the provenance line is emitted FIRST.
     } catch (err) {

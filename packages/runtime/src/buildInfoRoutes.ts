@@ -38,6 +38,7 @@ import { workflowBodies, workflowNames, workflowPins } from "../workflows/regist
 // resolve a TypeScript module without a build.
 import { claraWorkBundleIdentity } from "../workflows/claraWork.v1.bundle.js";
 import { claraWorkBundleIdentityV2 } from "../workflows/claraWork.v2.bundle.js";
+import { claraWorkBundleIdentityV3 } from "../workflows/claraWork.v3.bundle.js";
 
 export function buildInfoRoutes(): express.Router {
   const router = express.Router();
@@ -62,7 +63,7 @@ export function buildInfoRoutes(): express.Router {
         names: workflowNames,
         bodies: workflowBodies,
         pins: workflowPins,
-        bundles: [claraWorkBundleIdentityV2(), claraWorkBundleIdentity()],
+        bundles: [claraWorkBundleIdentityV3(), claraWorkBundleIdentityV2(), claraWorkBundleIdentity()],
       }),
     );
   });

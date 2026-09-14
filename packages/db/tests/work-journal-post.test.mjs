@@ -23,6 +23,7 @@ import {
   basis, WCHART, REASON, CLR, BUNDLE_DIGEST, assertPair, assertRaises,
   rootQuery, humanQuery, opk, workRow, receiptsForWork, entriesForClient, linesOf,
   entryCount, committedReceiptCount, AGENT_USER_ID, ROLES, roleQuery, withTxnOrNull,
+  authoriseWorkEgress,
 } from "./work-journal-fixtures.mjs";
 
 let world = null;
@@ -204,6 +205,12 @@ test("w623.wall.fires the widened receipt wall ABORTS a #623 post whose operatio
   // cell records which it saw rather than accepting any error.
   const a = await armed();
   const before = await entryCount(A1());
+  // #631 · this cell posts through RAW SQL inside its own transaction, so the model-egress
+  // dispatch the shared wrapper performs has to be done by hand, with the SAME run id the post
+  // names. Without it the core answers CLR13 `egress_not_authorized` and the wall under test is
+  // never reached.
+  const wallRun = opk("run");
+  await authoriseWorkEgress({ work: a.work_id, runId: wallRun });
   const out = await withTxnOrNull(async (c) => {
     await c.query("set role clara_wake_interactive");
     await c.query("select set_config('clara.wake_secret',$1,true)", [a.cred.secret]);
@@ -212,7 +219,7 @@ test("w623.wall.fires the widened receipt wall ABORTS a #623 post whose operatio
       + "p_logical_op_id => $3::text, p_basis => $4::jsonb, p_bundle_digest => $5::text, "
       + "p_run_id => $6::text, p_rationale => $7::text)",
       [a.client, a.work_id, a.logical_op_id, JSON.stringify(a.basis), BUNDLE_DIGEST,
-        opk("run"), "wall.fires"]);
+        wallRun, "wall.fires"]);
     await c.query("reset role");
     await c.query("delete from clara.operation_receipts where logical_op_id=$1", [a.logical_op_id]);
     return "deleted";

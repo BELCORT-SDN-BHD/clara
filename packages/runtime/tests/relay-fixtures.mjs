@@ -398,14 +398,37 @@ export async function seedAdmission(note = "relay rig admission") {
   return token;
 }
 
-/** Build one firm with an owner and one client. Returns { prefix, owner, firm, client }. */
+/** Build one firm with an owner and one client. Returns { prefix, owner, firm, client }.
+ *
+ *  #631 · THE OWNER ACCEPTS THE PUBLISHED LEGAL TEXTS, through the estate's own door. From
+ *  migration 0195 the model-egress authority for `accounting_work` is DERIVED from exactly that
+ *  fact plus an active client — there is no per-client switch — and `clara.claim_paid_firm` is the
+ *  real path that guarantees it, which this fixture short-circuits. A rig firm without it would
+ *  refuse every Work run for a reason unrelated to the cell under test. Idempotent by
+ *  (user, kind, version); silent on a chain that publishes no legal text (pre-0185/0187). */
 export async function buildFirm(label = "f") {
   const prefix = `rly_${Date.now().toString(36)}_${randomUUID().slice(0, 6)}_${label}`;
   const owner = await insertUser(prefix, "owner");
   const token = await seedAdmission();
   const firm = await createFirm(owner, { name: `${prefix}_firm`, token, opKey: opk("firm") });
   const client = await createClient(owner, { name: `${prefix}_client`, opKey: opk("cli") });
+  await acceptPublishedLegal(owner);
   return { prefix, owner, firm, client };
+}
+
+/** Accept BOTH published legal documents as `sub`, through `clara.accept_legal_document`. */
+export async function acceptPublishedLegal(sub) {
+  try {
+    const docs = await rootQuery(
+      "select kind, version, body_sha256 from clara.legal_documents where status = 'published'");
+    for (const d of docs.rows) {
+      await asHuman(sub, (c) =>
+        c.query("select clara.accept_legal_document($1::text,$2::int,$3::text,$4::text)",
+          [d.kind, d.version, d.body_sha256, `legal_${randomUUID()}`]));
+    }
+  } catch {
+    /* a chain with no legal relations (pre-0185) has nothing to accept */
+  }
 }
 
 /**

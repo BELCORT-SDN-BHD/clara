@@ -99,9 +99,38 @@ const cancelWork = (work, author) =>
 const readWork = (id) =>
   rig.rootQuery("select * from clara.accounting_work where id=$1", [id]).then((r) => r.rows[0] ?? null);
 
+/** #631 · prepare + consume ONE `accounting_work` egress authorisation for (work, run), exactly as
+ *  `claraWork.v3.impl.ts` does — through the TASK-bound wrapper, so the runtime chooses neither the
+ *  firm, the client, the purpose nor the event seq. Silent on a pre-0195 chain. */
+async function authoriseWorkEgress({ workId, runId }) {
+  try {
+    const task = await rig
+      .rootQuery("select current_task_id from clara.accounting_work where id = $1", [workId])
+      .then((r) => r.rows[0]?.current_task_id ?? null);
+    if (task === null) return;
+    const prepared = await rig
+      .asRuntime((c) => c.query("select clara.prepare_work_egress_dispatch($1::uuid,$2::text) as v", [task, runId]))
+      .then((r) => r.rows[0].v);
+    if (prepared?.verdict !== "granted") return;
+    await rig.asRuntime((c) =>
+      c.query("select clara.consume_egress_dispatch($1::uuid,$2::uuid,$3::uuid,$4::text,$5::bigint,$6::text,$7::text)", [
+        prepared.firm_id, prepared.authorization_id, prepared.client_id, prepared.purpose,
+        String(prepared.event_seq), prepared.event_type, null,
+      ]));
+  } catch (err) {
+    if (err?.code !== "42883") throw err;
+  }
+}
+
 /** Plant a committed receipt the honest way: run the real posting core under a real
  *  `interactive_client` credential minted OBO the Work's responsible human. */
 async function postEntry({ firm, owner, client, workId, logicalOpId, runId }) {
+  // #631 · THE DISPATCH THE RUN PERFORMS BEFORE IT CALLS THE MODEL. From migration 0195 the
+  // accounting write requires a CONSUMED, un-withdrawn `accounting_work` egress authorisation bound
+  // to (work, run); `claraWork_v3` prepares and consumes one immediately before `agent.generate`,
+  // and a fixture that posts without doing the same would be testing the egress gate rather than
+  // the cancel-ordering law this file is about. INERT below 0195 (`undefined_function`).
+  await authoriseWorkEgress({ workId, runId });
   const cred = await rig.rootQuery(
     "select credential_id, secret from clara.mint_wake_credential($1,$2,$3,$4::interval,$5)",
     ["interactive_client", firm, owner, "15 minutes", client]).then((r) => r.rows[0]);

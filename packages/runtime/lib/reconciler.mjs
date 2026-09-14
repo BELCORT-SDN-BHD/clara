@@ -129,7 +129,29 @@ export async function pruneTraces(client, opts = {}) {
     pruned += n;
     if (n < batch) break; // caught up
   }
-  return { pruned };
+  // #631 · THE WORK EXECUTION TRACE RIDES THIS LANE. Same window, same batch bound, same audited
+  // definer verb shape (migration 0195's clara.prune_work_execution_traces mirrors 0006's
+  // clara.prune_trace_spans). It is a SEPARATE relation with its own retention sweep rather than a
+  // second column on trace_spans, and it runs here rather than on a timer of its own so "bounded
+  // retention" is one pass an operator can reason about. Inert below 0195: an undefined_function
+  // is swallowed, exactly as a missing lane is elsewhere in this module.
+  let prunedWorkTraces = 0;
+  for (let i = 0; i < maxBatches; i++) {
+    let n = 0;
+    try {
+      const r = await client.query(
+        "select (clara.prune_work_execution_traces((now() - ($1 || ' days')::interval), $2) ->> 'traces_deleted')::bigint as n",
+        [String(days), batch],
+      );
+      n = Number(r.rows[0]?.n ?? 0);
+    } catch (err) {
+      if (err?.code !== '42883') throw err;
+      break;
+    }
+    prunedWorkTraces += n;
+    if (n < batch) break;
+  }
+  return { pruned, prunedWorkTraces };
 }
 
 // ---------------------------------------------------------------------------

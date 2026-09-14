@@ -339,6 +339,14 @@ const REVIEWED_NON_PART_LITERAL_SITES = [
   // attributed fields where v1's carried the bare answer; the discriminants are unchanged.
   ["packages/runtime/workflows/claraWork.v2.ts","claraWork_v2","type: \"tool-result\"","1ff8c47b56ef6c6a6032191a826c154196074fde72563aee78f09b8fc3ec931c","0"],
   ["packages/runtime/workflows/claraWork.v2.ts","claraWork_v2","type: \"json\"","1ff8c47b56ef6c6a6032191a826c154196074fde72563aee78f09b8fc3ec931c","0"],
+  // #631 — claraWork_v3's resume message. IDENTICAL in kind to v1's and v2's sites above:
+  // `tool-result` and `json` are the AI SDK's OWN message-content discriminants, not Clara
+  // transcript part kinds, and they are constructed here for the same reason the two predecessors
+  // construct them — feeding the human's attributed answer back to the model as the
+  // `ask_question` tool's result. v3's object is v2's four attributed fields, unchanged; only the
+  // enclosing function moved.
+  ["packages/runtime/workflows/claraWork.v3.ts","claraWork_v3","type: \"tool-result\"","5d48ab5cb7e0ddaaa4d0ed79741bfc26d45985a488b6e89349f2459a6bb14b31","0"],
+  ["packages/runtime/workflows/claraWork.v3.ts","claraWork_v3","type: \"json\"","5d48ab5cb7e0ddaaa4d0ed79741bfc26d45985a488b6e89349f2459a6bb14b31","0"],
   ["packages/runtime/workflows/chatTurn.v2.ts","chatTurn_v2","type: \"tool-result\"","5ba4b1880782c05cba19a02e2f87618198baacbd3de71c7bdbbef0fed121b0ac","0"],
   ["packages/runtime/workflows/chatTurn.v2.ts","chatTurn_v2","type: \"json\"","5ba4b1880782c05cba19a02e2f87618198baacbd3de71c7bdbbef0fed121b0ac","0"],
   ["packages/runtime/workflows/chatTurn.v3.ts","chatTurn_v3","type: \"tool-call\" as const","605a2ce2c56362daa10832de5544a306ed4a7e723652815de7512da1bd0e965a","0"],

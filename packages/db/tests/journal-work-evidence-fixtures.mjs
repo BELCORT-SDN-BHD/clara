@@ -13,7 +13,7 @@
 //   clara.attach_entry_evidence(p_entry, p_document, p_expected_revision, p_op_key) -> jsonb
 //   clara.list_entry_links(p_client, p_entries uuid[])  -> jsonb array
 
-import { rootQuery, humanQuery, opk, BUNDLE_DIGEST, RATIONALE } from "./work-journal-fixtures.mjs";
+import { rootQuery, humanQuery, opk, BUNDLE_DIGEST, RATIONALE, authoriseWorkEgress } from "./work-journal-fixtures.mjs";
 import { getPool } from "./rig-helpers.mjs";
 import { markSkip } from "./wave-a-helpers.mjs";
 
@@ -236,13 +236,17 @@ export async function holdThenContend({ a, b }) {
 /** `wake_record_journal_entry` on a CALLER-SUPPLIED client (the race sides own their txn). The
  *  named-argument call is the same one `wakeRecordJournalEntry` builds. */
 export async function recordJournalEntryOn(client, { client: cli, work, logicalOpId, basis: b,
-  bundleDigest = BUNDLE_DIGEST, runId = null, rationale = RATIONALE }) {
+  bundleDigest = BUNDLE_DIGEST, runId = null, rationale = RATIONALE, egress = true }) {
+  const run = runId ?? opk("w634-race-run");
+  // #631 · the accounting write requires a CONSUMED model-egress authorization bound to (work,
+  // run). This helper owns its own connection and its own run id, so it performs the dispatch
+  // itself — outside the caller's transaction, exactly as `claraWork_v3` does. Inert below 0195.
+  if (egress) await authoriseWorkEgress({ work, runId: run });
   const r = await client.query(
     "select clara.wake_record_journal_entry(p_client => $1::uuid, p_work => $2::uuid,"
     + " p_logical_op_id => $3::text, p_basis => $4::jsonb, p_bundle_digest => $5::text,"
     + " p_run_id => $6::text, p_rationale => $7::text) as result",
-    [cli, work, logicalOpId, JSON.stringify(b), bundleDigest, runId ?? opk("w634-race-run"),
-      rationale]);
+    [cli, work, logicalOpId, JSON.stringify(b), bundleDigest, run, rationale]);
   return r.rows[0].result;
 }
 

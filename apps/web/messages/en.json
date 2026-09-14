@@ -1123,10 +1123,64 @@
       "correctedBy": "Corrected by"
     }
   },
+  "WorkDiagnostics": {
+    "title": "Diagnostics",
+    "lede": "What actually ran for this Work: the versioned bundle, the capability each step used, the purpose it was authorised under, and how long it took. No prompts, no transcripts and no client figures are recorded here.",
+    "loading": "Reading the execution trace",
+    "reread": "Re-read trace",
+    "empty": "No steps have been recorded for this Work yet.",
+    "tableLabel": "Execution trace steps",
+    "denied": {
+      "title": "You do not have access to diagnostics",
+      "body": "Diagnostics are available to bookkeepers and above. Everything about the Work's result and its sources is on this page."
+    },
+    "unreadable": {
+      "title": "The execution trace could not be read",
+      "body": "This says nothing about the Work itself \u2014 the result above is still the authoritative record. Try reading the trace again."
+    },
+    "run": {
+      "latest": "Latest run",
+      "earlier": "Earlier run {n}",
+      "id": "run {id}"
+    },
+    "summary": {
+      "calledModel": "A model was called for this client under an authorisation consumed for this run.",
+      "noModel": "No model was called: the run stopped before anything was sent.",
+      "stoppedAt": "It stopped at the {phase} step.",
+      "stillRunning": "This run has not settled yet."
+    },
+    "showSteps": "Show {n} steps",
+    "hideSteps": "Hide steps",
+    "phase": {
+      "dispatch": "Dispatch",
+      "modelCall": "Model call",
+      "toolCall": "Tool call",
+      "settle": "Settle"
+    },
+    "outcome": {
+      "ok": "Completed",
+      "refused": "Refused",
+      "failed": "Failed",
+      "cancelled": "Cancelled",
+      "skipped": "Not needed"
+    },
+    "col": {
+      "step": "Step",
+      "capability": "Capability",
+      "purpose": "Purpose",
+      "bundle": "Bundle",
+      "duration": "Duration",
+      "outcome": "Outcome"
+    }
+  },
   "WorkDetail": {
     "fromPlanLabel": "Scheduled by",
     "fromPlan": "From plan: {purpose}",
     "fromPlanLink": "Open the plan",
+    "egressNotAuthorized": {
+      "title": "Clara is not authorised to use a model on this client's books",
+      "body": "This Work was stopped before anything was sent, and nothing was posted. An owner can restore it by accepting the current Terms and Data Processing Agreement for the firm, and by making sure this client is active."
+    },
     "heading": "Journal entry",
     "body": "One durable accounting work record: what was asked, what ran, and what it recorded.",
     "loading": "Reading this work record…",

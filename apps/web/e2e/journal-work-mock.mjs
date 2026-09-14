@@ -112,6 +112,15 @@ export const JOURNAL_WORK = {
   // ever come back `not_filed`: the chooser must not offer it at all.
   unverifiedDocumentId: "d2306003-d230-4d23-8d23-d230d2306003",
   unverifiedDocumentName: "unverified-upload.pdf",
+  /** #631 — the execution trace of the seeded Work's ONE run: four steps, one run id. The
+   *  Diagnostics section reads it through `clara.get_work_execution_trace`. */
+  seededRunId: "wrun_6230900162309001",
+  /** #631 — a Work REFUSED at the dispatch, so the walk can see the owner-facing
+   *  `egress_not_authorized` face AND a trace whose `model_call` row is absent. Minted by the
+   *  control endpoint (`op: "egress_refused"`), never seeded, so no other cell trips over it. */
+  egressRefusedWorkId: "62309003-6230-4623-8623-623062309003",
+  egressRefusedTaskId: "72309003-7230-4723-8723-723072309003",
+  egressRefusedRunId: "wrun_6230900362309003",
   /** The control endpoint, as the BROWSER addresses it: the same-origin proxy
    *  maps `/api/runtime/<p>` onto the runtime's `/api/<p>`. */
   controlPath: "/api/runtime/e2e-journal-work/control",
@@ -191,7 +200,11 @@ const FILINGS = DOCUMENTS.map((doc, i) => ({
   revision_token: `rev-filing-${i + 1}`,
 }));
 
-const BUNDLE = { id: "clara-work/v1", digest: "9f2b7c1d4e6a8b0c2d4e6f8a0b2c4d6e8f0a2b4c6d8e0f2a4b6c8d0e2f4a6b8c" };
+// #631 — THE SERVING BUNDLE. It said `clara-work/v1` while the registry served v2 and now v3; a
+// Work row and its execution trace disagreeing about which body ran is exactly the audit defect
+// claraWork.v2.tools.ts's header describes, so the fixture carries the REAL v3 identity that
+// packages/runtime/tests/work-bundle.test.mjs pins.
+const BUNDLE = { id: "clara-work/v3", digest: "345f2a38c3c8e128300fdf6af47d615285c8c278aea6db47283f5d85505d5bc4" };
 
 /** The one basis the seeded Work was admitted with — RM 1,200 office rent paid
  *  from Maybank, which is journey B6's own worked example. */
@@ -205,6 +218,41 @@ function seededBasis() {
       { account_code: JOURNAL_WORK.bankAccount, debit_cents: 0, credit_cents: 120_000, description: null },
     ],
   };
+}
+
+/** #631 — one run's worth of `clara.get_work_execution_trace` rows, field for field as the door's
+ *  own `row_to_json` projection returns them. THERE IS NO PAYLOAD FIELD, because the relation has
+ *  no payload column: a fixture that invented one would let a surface that rendered a payload pass
+ *  a browser walk. */
+function traceRun(runId, steps) {
+  const base = Date.parse("2026-09-14T02:00:00.000Z");
+  return steps.map((step, index) => ({
+    id: `${runId}-${step.seq}`,
+    run_id: runId,
+    seq: step.seq,
+    phase: step.phase,
+    capability_id: step.capability,
+    registry_version: "clara-capability-registry/v1",
+    bundle_id: "clara-work/v3",
+    bundle_digest: "345f2a38c3c8e128300fdf6af47d615285c8c278aea6db47283f5d85505d5bc4",
+    instructions_id: "clara-work-instructions/v3",
+    skills: ["journal-entry/v3"],
+    tools_id: "clara-work-tools/v3",
+    model_id: "gpt-5.6-terra",
+    purpose: step.phase === "settle" ? null : "accounting_work",
+    authorization_id: step.phase === "settle" ? null : "a1111111-a111-4a11-8a11-a111a1111111",
+    consent_ref: step.phase === "settle" ? null : "c1111111-c111-4c11-8c11-c111c1111111",
+    activation_ref: step.phase === "settle" ? null : "e1111111-e111-4e11-8e11-e111e1111111",
+    input_digest: step.phase === "model_call" ? "b".repeat(64) : null,
+    observed_revisions: step.phase === "model_call" ? { books_version: "2026-09-01" } : {},
+    started_at: new Date(base + index * 2000).toISOString(),
+    ended_at: new Date(base + index * 2000 + step.ms).toISOString(),
+    duration_ms: step.ms,
+    outcome: step.outcome,
+    refusal: step.refusal ?? null,
+    receipt_id: step.receipt ?? null,
+    task_id: JOURNAL_WORK.seededTaskId,
+  }));
 }
 
 /** This lane's mutable fixture state. It lives for the server's lifetime, which
@@ -227,6 +275,13 @@ const state = {
    *  DOCUMENT (`uq_entry_evidence_links_document`) — both invariants are modelled
    *  here, because the walk's whole point is that they hold end to end. */
   links: new Map(),
+  /** #631 — `clara.work_execution_traces`, keyed by WORK id. A Work with no entry here has
+   *  recorded no steps yet, which is a REAL state (a queued Work) and not an absence to paper
+   *  over: the Diagnostics section's empty face is a different answer from its denied one. */
+  traces: new Map(),
+  /** #631 — when true, the trace read answers the door's own CLR04 instead of rows: the face a
+   *  VIEWER meets. Armed per cell, because a browser cannot demote its own session. */
+  traceDenied: false,
   /** #630 — WHICH answer the next cancel gives: "act" (the door acts and the Work reads
    *  `stopping`), "already_completed" (the admitted operation won the race) or "denied". Armed per
    *  cell because the last two are races the browser cannot produce for itself. */
@@ -327,6 +382,8 @@ function seed() {
   state.nextAnswerRefusal = null;
   state.showQuestionCard = false;
   state.links.clear();
+  state.traces.clear();
+  state.traceDenied = false;
   state.showParkedCard = false;
   state.spokenForBroken = false;
   // #630 — the cancel lane's own seed. `act` is the ordinary arm (the door acts); the two others
@@ -343,6 +400,15 @@ function seed() {
     sourceRefs: [{ kind: "chat_task", task_id: JOURNAL_WORK.seededTaskId, session_id: JOURNAL_WORK.threadId }],
   });
   state.works.set(work.id, work);
+  // #631 — THE SEEDED WORK'S OWN TRACE. Four steps of ONE run, in the order migration 0195's
+  // writer records them, with the bundle identity a v3 run actually stamps. Every value is a shape
+  // the door really returns; nothing here is invented to make a cell green.
+  state.traces.set(work.id, traceRun(JOURNAL_WORK.seededRunId, [
+    { seq: 1, phase: "dispatch", capability: "accounting_work.model_segment", outcome: "ok", ms: 40 },
+    { seq: 3, phase: "model_call", capability: "accounting_work.model_segment", outcome: "ok", ms: 1240 },
+    { seq: 4, phase: "tool_call", capability: "accounting_work.record_journal_entry", outcome: "ok", ms: 180, receipt: JOURNAL_WORK.seededReceiptId },
+    { seq: 14, phase: "settle", capability: "accounting_work.settle", outcome: "ok", ms: 12 },
+  ]));
   // #629 (B6) — THE QUESTION THE SEEDED TRANSCRIPT'S `work_question` PART NAMES, already ANSWERED.
   // A card mounted on a settled record IS the "answered elsewhere" convergence: the transcript is
   // replayed long after somebody answered the question from the Work detail or from Needs-you, and
@@ -815,6 +881,50 @@ function control(body) {
     state.spokenForBroken = true;
     return { spokenForBroken: true };
   }
+  // #631 — THE VIEWER'S FACE. A browser cannot demote its own session, so the door's own CLR04 is
+  // armed here and spent by the next trace read. One direction only; `reset` is the way back.
+  if (body.op === "trace_denied") {
+    state.traceDenied = true;
+    return { traceDenied: true };
+  }
+  // #631 — A WORK REFUSED AT THE DISPATCH. Minted on demand rather than seeded, so no other cell
+  // in this lane trips over a refused Work it did not ask for. Its trace is the shape that matters:
+  // a dispatch row that says REFUSED and NO `model_call` row at all, which is the durable evidence
+  // that nothing was sent.
+  if (body.op === "egress_refused") {
+    const refused = newWorkRow({
+      id: JOURNAL_WORK.egressRefusedWorkId,
+      taskId: JOURNAL_WORK.egressRefusedTaskId,
+      intentKey: "e2e-egress-refused",
+      basis: seededBasis(),
+      origin: "user_direct",
+      sourceRefs: [],
+    });
+    refused.status = "refused";
+    refused.bundle = BUNDLE;
+    // The payload `claraWork.v3.errors.ts`'s `egressRefusalPayload()` settles with, verbatim: the
+    // typed reason, and a message that names the AGREEMENT rather than any provider.
+    refused.error = {
+      code: "CLR13",
+      reason: "egress_not_authorized",
+      message:
+        "Clara is not currently authorised to use a model on this client's books, so this Work was "
+        + "stopped before anything was sent and nothing was posted. An owner can restore it by "
+        + "accepting the current Terms and Data Processing Agreement for the firm, and by making "
+        + "sure this client is active.",
+      recoverable: true,
+    };
+    state.works.set(refused.id, refused);
+    state.traces.set(refused.id, traceRun(JOURNAL_WORK.egressRefusedRunId, [
+      { seq: 1, phase: "dispatch", capability: "accounting_work.model_segment", outcome: "ok", ms: 30 },
+      {
+        seq: 2, phase: "dispatch", capability: "accounting_work.model_segment", outcome: "refused", ms: 25,
+        refusal: { reason: "egress_not_authorized" },
+      },
+      { seq: 14, phase: "settle", capability: "accounting_work.settle", outcome: "refused", ms: 9 },
+    ]));
+    return { workId: refused.id };
+  }
   // #634 — MOVE THE ROW UNDER AN OPEN DIALOG. The late door's CLR06 is a race:
   // the caller read a revision, something else changed the entry, and the door
   // must refuse rather than write against a view that is no longer current. The
@@ -1282,6 +1392,29 @@ export async function handleJournalWorkSupabase(request, response, path, url, se
       })),
       next_cursor: null,
     }, cors);
+    return true;
+  }
+
+  // #631 — THE DIAGNOSTICS READ. `callDoor` posts to `/rest/v1/rpc/<fn>`, so this is the exact
+  // wire shape `lib/work/diagnostics.ts` speaks. SCOPED to this lane's own Works: a body naming a
+  // Work this lane does not hold falls through, so the handler never replaces another lane's.
+  if (request.method === "POST" && path === "/rest/v1/rpc/get_work_execution_trace") {
+    const body = await readJson(request);
+    const workId = String(body?.p_work ?? "");
+    const work = state.works.get(workId);
+    if (work === undefined) return false;
+    if (state.traceDenied) {
+      // The door's OWN refusal for a caller below the bookkeeper floor — the shape PostgREST
+      // returns for a raise, which is what `DoorRefusal` parses.
+      sendJson(response, 400, {
+        code: "CLR04",
+        message: "insufficient role",
+        details: null,
+        hint: null,
+      }, cors);
+      return true;
+    }
+    sendJson(response, 200, state.traces.get(workId) ?? [], cors);
     return true;
   }
 

@@ -206,6 +206,7 @@ components/work/accounting-work-list.test.tsx
 components/work/attach-evidence-dialog.test.tsx
 components/work/work-cancel-dialog.test.tsx
 components/work/work-detail.test.tsx
+components/work/work-diagnostics.test.tsx
 components/work/work-question-form.test.tsx
 components/work/work-saved-views.test.tsx
 e2e/e2e-fixture-ownership.test.ts
@@ -332,6 +333,7 @@ lib/settings/preference-state.test.ts
 lib/settings/preferences.test.ts
 lib/wire.test.ts
 lib/work/api.test.ts
+lib/work/diagnostics.test.ts
 lib/work/evidence.test.ts
 lib/work/journal-basis.test.ts
 lib/work/journal-draft.test.ts

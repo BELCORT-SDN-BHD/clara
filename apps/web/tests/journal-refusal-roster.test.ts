@@ -258,6 +258,87 @@ describe("#634 — the composer's refusal roster is BOUND to its producers", () 
   });
 });
 
+
+// ===========================================================================================
+// #631 · E · THE EGRESS REFUSAL, BOUND END TO END.
+//
+// `egress_not_authorized` is the one refusal on this screen whose audience is not the person
+// reading it: a preparer cannot open a period, add an account or fix a figure to make it go away —
+// only an OWNER can, by accepting the current agreements or reactivating the client. So it has its
+// own face, and a face is exactly the kind of thing that rots by citation: the migration renames a
+// reason token, the classifier stops mapping the pair, or the message key is removed, and the
+// browser quietly falls back to a generic banner that tells nobody anything.
+//
+// FOUR PRODUCERS, ONE CONSUMER, asserted against the files themselves:
+//   1. migration 0195 RAISES the token;
+//   2. `claraWork.v3.errors.ts` CLASSIFIES the pair as a refusal (not the CLR13 `state_changed`
+//      default, which would buy the model up to `budgets.replans` further turns);
+//   3. `claraWork.v3.errors.ts`'s own dispatch payload carries the SAME token, for the case where
+//      no database error exists at all because no call was made;
+//   4. `work-detail.tsx` branches on it and renders the owner-facing face.
+// …and the face NAMES NO PROVIDER, which is the acceptance line rather than a style choice.
+// ===========================================================================================
+
+const MIGRATION_0195 = join(
+  REPO, "packages", "db", "migrations", "0195_work_egress_purpose_and_execution_trace.sql",
+);
+const V3_ERRORS = join(REPO, "packages", "runtime", "workflows", "claraWork.v3.errors.ts");
+const WORK_DETAIL = join(
+  dirname(fileURLToPath(import.meta.url)), "..", "components", "work", "work-detail.tsx",
+);
+
+describe("#631 the egress refusal is bound to the surface that renders it", () => {
+  it("1 · migration 0195 raises `egress_not_authorized` from the posting core", () => {
+    const sql = readFileSync(MIGRATION_0195, "utf8");
+    assert.ok(sql.includes("egress_not_authorized"),
+      "0195 no longer raises the token this face is built on");
+    assert.ok(/detail='\{"reason":"egress_not_authorized"\}'/.test(sql),
+      "…and it must still be a TYPED detail.reason, which is what the runtime classifier keys on");
+  });
+
+  it("2 · claraWork_v3 classifies (CLR13, egress_not_authorized) as a REFUSAL", () => {
+    const { code } = readCode(V3_ERRORS);
+    assert.ok(code.includes('["CLR13", EGRESS_NOT_AUTHORIZED, "refusal"]'),
+      "the pair is not in v3's override table: the inherited CLR13 default is `state_changed`, "
+      + "which hands the model further turns under an authority it no longer has");
+    assert.ok(code.includes('EGRESS_NOT_AUTHORIZED = "egress_not_authorized"'),
+      "the token is spelled once, in the classifier, so the three surfaces cannot drift");
+  });
+
+  it("3 · …and the dispatch-refusal payload carries the same token with NO provider named", () => {
+    const { code } = readCode(V3_ERRORS);
+    assert.ok(code.includes("egressRefusalPayload"),
+      "a refused dispatch has no database error to classify, so it needs its own payload");
+    for (const vendor of ["OpenAI", "Anthropic", "Azure", "Gemini", "gpt-", "claude-"]) {
+      assert.ok(!code.includes(vendor), `the refusal payload names the vendor ${vendor}`);
+    }
+  });
+
+  it("4 · work-detail renders an OWNER-facing face for it, and only for it", () => {
+    const { code } = readCode(WORK_DETAIL);
+    assert.ok(code.includes('error.reason === "egress_not_authorized"'),
+      "the page does not branch on the token: the refusal would render as a generic banner "
+      + "addressed to a preparer who cannot act on it");
+    assert.ok(code.includes('t("egressNotAuthorized.title")') && code.includes('t("egressNotAuthorized.body")'),
+      "…and it must use the dedicated message pair rather than re-wording the database");
+    assert.ok(code.includes("error.message ?? t(\"refused.body\")"),
+      "the DATABASE's own words must still be shown underneath — a refusal is a receipt");
+  });
+
+  it("5 · the face's own copy names the AGREEMENT, and no provider", () => {
+    const en = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "messages", "en.json"), "utf8"));
+    const face = en?.WorkDetail?.egressNotAuthorized;
+    assert.ok(face && typeof face.title === "string" && typeof face.body === "string",
+      "WorkDetail.egressNotAuthorized is missing from messages/en.json");
+    const copy = `${face.title} ${face.body}`;
+    assert.match(copy, /Terms and Data Processing Agreement/,
+      "the face must name the thing an owner can actually do");
+    for (const vendor of ["OpenAI", "Anthropic", "Azure", "Gemini", "GPT", "Claude", "vendor", "provider"]) {
+      assert.ok(!copy.includes(vendor), `the face names ${vendor} — the acceptance line is "without provider disclosure"`);
+    }
+  });
+});
+
 /** Swap `fetch` for one canned answer, and restore it unconditionally. */
 async function withStubbedFetch<T>(
   status: number,

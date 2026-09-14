@@ -131,7 +131,9 @@ function spawnServe(port, extra = {}) {
   });
   child.stdout.setEncoding("utf8");
   child.stdout.on("data", (d) => {
-    const m = /\[clara-runtime\] bundle clara-work\/v2 digest=([0-9a-f]{64})/.exec(d);
+    // #631 · the SERVING banner is v3's. v1/v2 lines still print for the parked-run census;
+    // this capture is "which bundle is this image dispatching", which is the one the Work row records.
+    const m = /\[clara-runtime\] bundle clara-work\/v3 digest=([0-9a-f]{64})/.exec(d);
     if (m && !state.banner) state.banner = m[1];
   });
   child.stderr.setEncoding("utf8");
