@@ -415,16 +415,28 @@ async function withLeaseRenewal(client, row, { listenerId, leaseSeconds, maxLeas
 // ---------------------------------------------------------------------------
 
 /**
- * Move past-due WORK questions to `expired` through `clara.expire_due_interruptions` (0180), so the
- * parked run is resumed with `{kind:'expired'}` and settles its Work recoverably.
+ * Move past-due clarifications — WORK questions AND CHAT clarifications alike — to `expired`
+ * through `clara.expire_due_interruptions`, so the parked run is resumed with `{kind:'expired'}`:
+ * a Work settles recoverably, a chat turn records a `clarify_closed` part and settles `expired`,
+ * releasing its session's one live-turn slot.
  *
  * MEASURED FINDING, not a design flourish: before 0180 nothing in packages/db or packages/runtime
  * ever moved a past-due `clara.agent_interruptions` row out of `pending`. A Work parked on a
  * question nobody answered stayed `awaiting_input` for ever — the question unanswerable (the answer
  * door refuses past its deadline), the run parked on a live hook, and no surface able to say so.
  *
- * A clean no-op on a database without 0180: the verb does not exist there, and the probe says so
- * before any statement naming it is parsed.
+ * 0180 GAVE THAT ENFORCER TO THE WORK LANE ONLY, and #720 Half 1 (migration 0198) extended the SQL
+ * predicate to the chat lane on the owner's 2026-09-13 ruling. THE LANE SPLIT LIVES IN SQL AND NOT
+ * HERE: this wrapper has never named a lane and does not start now — it calls the one verb, which
+ * decides what is due. So a runtime image running ahead of 0198 sweeps Work questions only and one
+ * running behind it sweeps both, with nothing on this side to keep in step.
+ *
+ * STILL A CLEAN NO-OP on a database without 0180: the verb does not exist there, and the probe says
+ * so before any statement naming it is parsed.
+ *
+ * WHAT THIS DOES NOT DO (#764, Half 2): a swept CHAT row whose engine hook turns out to be gone is
+ * still stamped DELIVERED by `deliverInterruptions` rather than rested at `hook_missing` — the chat
+ * lane has no reconciler to pick such a row back up, so resting it there would strand it for ever.
  */
 export async function expirePastDueInterruptions(client, deps = {}) {
   const { batchSize = 50, onlyFirm = null, log = () => {} } = deps;
@@ -432,7 +444,7 @@ export async function expirePastDueInterruptions(client, deps = {}) {
   try {
     const r = await client.query("select clara.expire_due_interruptions($1::int, $2::uuid) as r", [batchSize, onlyFirm]);
     const out = r.rows[0]?.r ?? { expired: 0 };
-    if ((out.expired ?? 0) > 0) log(`[control] expired ${out.expired} past-due work question(s)`);
+    if ((out.expired ?? 0) > 0) log(`[control] expired ${out.expired} past-due clarification(s)`);
     return out;
   } catch (err) {
     log(`[control] expiry sweep failed: ${err?.message ?? err}`);

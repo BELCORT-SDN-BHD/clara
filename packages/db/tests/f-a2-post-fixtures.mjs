@@ -519,6 +519,35 @@ export const JOURNAL_EVIDENCE_JE_TRIGGER = {
 };
 
 /**
+ * #718 [0197] — the TWO triggers the document-coding lane's evidence-link lookback adds to
+ * `journal_entries`, one per event (a BEFORE INSERT trigger's WHEN clause may not reference OLD,
+ * so the INSERT and UPDATE conditions cannot be one trigger).
+ *
+ * TIER C, and the census is the place that says so. Both are PLAIN, NON-DEFERRED BEFORE ROW
+ * triggers, which is deliberate and is exactly what puts them in Tier C beside `t_period_wall`
+ * and `t_je_immutable`: the refusal (CLR13 `source_already_posted`, when a LIVE
+ * `clara.entry_evidence_links` row already names the entry's document) fires INSIDE the
+ * statement, so an exception block can catch and convert it, and it is raised while the wall
+ * holds its `clara.documents` row lock — which is the serialization point #718 exists to add.
+ * A deferred constraint trigger would fire at COMMIT, outside any subtransaction AND after the
+ * lock window that makes the two-session race resolve, so it would be both uncatchable and
+ * unserialized.
+ *
+ * They sort AFTER `t_je_immutable` and `t_period_wall` on purpose (PostgreSQL fires same-timing
+ * row triggers in NAME order), so every refusal those two already own keeps its exact spelling.
+ */
+export const CODING_LINK_JE_TRIGGERS = [
+  {
+    tgname: "t_source_binding_wall_ins", deferrable: false, initdeferred: false,
+    tier: "C — (CLR13, source_already_posted); catchable, and it holds the document lock while it asks",
+  },
+  {
+    tgname: "t_source_binding_wall_upd", deferrable: false, initdeferred: false,
+    tier: "C — (CLR13, source_already_posted); the draft→approved arm the coding lane actually takes",
+  },
+];
+
+/**
  * The pinned census for THIS database's frontier.
  *
  * FRONTIER-GATED, for the reason the 0042 clock roster's own header gives: `db-slice-frontiers`
@@ -532,5 +561,12 @@ export async function jeTriggerPins() {
   const r = await rootQuery(
     "select count(*)::int as n from clara.schema_migrations where version ~ 'journal_work_evidence$'");
   if (r.rows[0].n > 0) pins.push(JOURNAL_EVIDENCE_JE_TRIGGER);
+  // #718 [0197] — gated on ITS OWN stem for the same reason 0182's is gated on 0182's: a leg
+  // pinned below this migration carries neither wall, and an unconditional pin would report both
+  // MISSING there.
+  const w = await rootQuery(
+    "select count(*)::int as n from clara.schema_migrations where version ~ 'coding_lane_evidence_link$'");
+  if (w.rows[0].n > 0) pins.push(...CODING_LINK_JE_TRIGGERS);
+  // #718 END
   return pins;
 }

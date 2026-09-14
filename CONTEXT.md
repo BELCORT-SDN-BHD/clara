@@ -165,7 +165,7 @@ One persistent question a running Accounting work is parked on: the missing fact
 _Avoid_: A chat message; an approval gate; a separate question per surface; a way to change what the Work already recorded.
 
 **Chat clarification**:
-One question Clara asks inside a conversation while a turn is still running, answered in that same conversation. It lives only on the run's live stream — settling the turn cancels it in the same statement sequence that writes the assistant message — so it is answerable during the turn or, after a reload, from the row the run is parked on; it has no expiry enforcer (#720).
+One question Clara asks inside a conversation while a turn is still running, answered in that same conversation. It lives only on the run's live stream — settling the turn cancels it in the same statement sequence that writes the assistant message — so it is answerable during the turn or, after a reload, from the row the run is parked on; its 14-day deadline is enforced by the runtime's expiry sweep, which moves a past-due clarification to expired so the parked turn settles and the conversation is usable again (#720 Half 1); what remains open is that an unreachable chat resume is still recorded as delivered (#764).
 _Avoid_: A Work question as a synonym; an approval gate; a chat message that merely mentions a question.
 
 **Delivery state**:

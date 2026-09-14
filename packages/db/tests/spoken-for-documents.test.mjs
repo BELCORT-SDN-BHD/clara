@@ -45,6 +45,29 @@ async function gate(t) {
   return true;
 }
 
+// #718 [0197] — sfd.11's PREMISE is frontier-dependent, so the cell asks which world it is in.
+// Below 0197 the document-coding lane could post on a document the evidence lane had already
+// bound, and sfd.11 asserted the read's RANKING over that double claim. 0197 closes the double
+// claim at its source (a BEFORE trigger on the transition into `approved`, so even sfd.11's raw
+// root fixture is refused). The ranking claim is unchanged and still asserted either way; what
+// moves with the frontier is whether the second claimant can be created at all.
+const CODING_LINK_STEM = "coding_lane_evidence_link$";
+let _wall = null;
+async function codingLinkWallReady() {
+  if (_wall === null) {
+    try {
+      const r = await rootQuery(
+        "select count(*)::int as n from clara.schema_migrations where version ~ $1",
+        [CODING_LINK_STEM]);
+      _wall = r.rows[0].n > 0;
+    } catch {
+      _wall = false;
+    }
+  }
+  return _wall;
+}
+// #718 END
+
 let world = null;
 before(async () => {
   world = await buildWorkWorld();
@@ -346,19 +369,42 @@ test("sfd.11 a document claimed by BOTH lanes is reported ONCE, by the live evid
   await attachEntryEvidence(BOB(), {
     entry: posted.entryId, document: doc.documentId, expectedRevision: posted.revisionToken,
   });
-  // …and a coding-lane entry on the SAME document. #718 records that the coding lane can still
-  // post on a document this lane has already bound (not this ticket's to fix), so the double
-  // claim is a state the read must answer DETERMINISTICALLY rather than one it may assume away.
-  const coded = await codedEntry({
-    client: cli, documentId: doc.documentId, filingId: doc.filingId, sha256: doc.sha256,
-  });
+  // …and a coding-lane entry on the SAME document.
+  //
+  // #718 [0197] CLOSED THIS AT ITS SOURCE. Below that frontier the coding lane could still post
+  // on a document this lane had already bound (0183 recorded it as "not this ticket's to fix"),
+  // and the double claim was a state the read had to answer DETERMINISTICALLY. At 0197 the
+  // coding lane's approval refuses CLR13 `source_already_posted` against a live evidence link,
+  // and because the wall is a TRIGGER on the transition into `approved`, this fixture's raw root
+  // UPDATE is refused exactly as clara.approve_entry is. So the second claimant can no longer be
+  // created — asserted here rather than assumed, because "the estate refuses it now" is the only
+  // reason this cell may stop building it.
+  let coded = null;
+  if (await codingLinkWallReady()) {
+    await assertRaises("CLR13", () => codedEntry({
+      client: cli, documentId: doc.documentId, filingId: doc.filingId, sha256: doc.sha256,
+    }), "sfd.11 #718: the coding lane may no longer claim a document the evidence lane holds");
+  } else {
+    coded = await codedEntry({
+      client: cli, documentId: doc.documentId, filingId: doc.filingId, sha256: doc.sha256,
+    });
+  }
 
+  // THE RANKING CLAIM IS UNCHANGED IN BOTH WORLDS. Below 0197 it is measured over a live double
+  // claim; at 0197 and above over the one claimant that survives — either way the read reports
+  // ONE row per document and the LIVE EVIDENCE LINK is the reason it gives.
   const rows = await listSpokenFor(BOB(), cli);
   assert.equal(rows.length, 1, "sfd.11 ONE row per document — a picker option carries one reason, not two");
   assert.equal(rows[0].entry_id, posted.entryId,
     "sfd.11 the LIVE evidence link wins, exactly as clara._document_posting_entry ranks it (0182:581-590)");
   assert.equal(rows[0].via, "evidence_link");
-  assert.notEqual(rows[0].entry_id, coded, "sfd.11 …and not the coding-lane entry");
+  // #718: below 0197 there IS a coding-lane claimant and this is the assertion that it lost the
+  // ranking. At 0197 there is none, and a `notEqual(x, null)` would be a cell passing on nothing
+  // — so the claim is made only where there is something to make it about.
+  if (coded !== null) {
+    assert.notEqual(rows[0].entry_id, coded, "sfd.11 …and not the coding-lane entry");
+  }
+  // #718 END
 });
 
 test("sfd.12 a document of ANOTHER client, spoken for and never filed to this one, is not this client's business", async (t) => {
