@@ -69,15 +69,23 @@ function isGovernedRefusal(err) {
   return typeof err?.code === "string" && /^CLR\d{2}$/.test(err.code);
 }
 
-/** The DETAIL discriminant the doors attach, when they attach one. Never invented. */
-function refusalReason(err) {
-  if (typeof err?.detail !== "string") return null;
+/** The whole DETAIL payload the doors attach, when they attach one. Never invented, never
+ *  re-worded. Returns `{}` for an absent or unparseable detail so a caller can fold it without a
+ *  null check. */
+function refusalDetail(err) {
+  if (typeof err?.detail !== "string") return {};
   try {
     const parsed = JSON.parse(err.detail);
-    return typeof parsed?.reason === "string" ? parsed.reason : null;
+    return parsed !== null && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
   } catch {
-    return null;
+    return {};
   }
+}
+
+/** The DETAIL discriminant the doors attach, when they attach one. Never invented. */
+function refusalReason(err) {
+  const parsed = refusalDetail(err);
+  return typeof parsed?.reason === "string" ? parsed.reason : null;
 }
 
 function unavailable(reason, extra = {}) {
@@ -200,14 +208,20 @@ export async function captureKnowledgeFor(sql, args = {}) {
     return { ok: true, receipt: r?.rows?.[0]?.receipt ?? null };
   } catch (err) {
     if (isGovernedRefusal(err)) {
+      // `detail` CARRIES EVERYTHING THE DOOR SAID BESIDES THE REASON, and it is here because the
+      // chat lane needs it: 0192's trust and value refusals name the `knowledge_key` they are
+      // about, and a tool that dropped that would hand a model a sentence where the database had
+      // handed it a diagnosis (chatTurn.v11.tools.ts's `authoringRefusal` states the same rule for
+      // the authoring lane). Additive: `reason` is unchanged and is still the discriminant.
       return {
         ok: false,
         kind: "refusal",
         code: err.code,
         reason: refusalReason(err),
+        detail: refusalDetail(err),
         message: String(err?.message ?? ""),
       };
     }
-    return { ok: false, kind: "unavailable", code: null, reason: null, message: String(err?.message ?? err) };
+    return { ok: false, kind: "unavailable", code: null, reason: null, detail: {}, message: String(err?.message ?? err) };
   }
 }
