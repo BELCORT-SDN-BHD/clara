@@ -175,6 +175,54 @@ test("t643 the type switch keeps both halves and submits only the active one", a
   await expect(field(page, "countReference")).toHaveValue("STOCKTAKE-2026-12");
 });
 
+test("t643 an advance account derives its leg — the SAME lines the chat lane would produce", async ({ page }) => {
+  // Named, not fixed, by the refresh wave's v19 report: the form offered `advanceAccountCode`
+  // but derived no leg for it, so a preparer who picked one earned 0194's `advance_leg` refusal at
+  // admission. This walk proves the browser-visible half of the fix — the db battery and the
+  // runtime world e2e own whether Postgres itself agrees.
+  await page.goto(FORM_URL);
+  await field(page, "purpose").selectOption("payroll_obligation");
+  await field(page, "periodStart").fill("2026-08-01");
+  await field(page, "periodEnd").fill("2026-08-31");
+  await field(page, "amountCents").fill("1300.00");
+  await field(page, "particularsSource").fill("Payroll summary for August 2026 from the HR officer");
+  await field(page, "instruction").fill("Book the employer EPF contribution for August 2026.");
+
+  // THE CONTROL IS HIDDEN UNTIL AN ACCOUNT IS CHOSEN — an amount with nothing to carry it could
+  // never be posted.
+  await expect(field(page, "advanceCents")).toHaveCount(0);
+  await field(page, "advanceAccountCode").selectOption(PA.bank);
+  await expect(field(page, "advanceCents")).toBeVisible();
+  await field(page, "advanceCents").fill("400.00");
+
+  // THE THIRD DERIVED LINE, ON SCREEN before anything is submitted — the same rung C-29 asks for:
+  // the liability leg takes the remainder (RM 1,300.00 - RM 400.00 = RM 900.00) and the advance
+  // account carries what was named. Read off the line grid's own controls, not the totals row —
+  // debits and credits both total RM 1,300.00 regardless of the split between legs.
+  await expect(page.getByLabel("Account, line 3")).toHaveValue(PA.bank);
+  await expect(page.getByLabel("Credit, line 2")).toHaveValue("900.00");
+  await expect(page.getByLabel("Credit, line 3")).toHaveValue("400.00");
+  const lines = page.getByRole("table", { name: "Journal entry lines" });
+  await expect(lines).toContainText("RM 1,300.00");
+  await scan(page, "periodic-adjustment form, payroll half with an advance leg");
+
+  await page.getByRole("button", { name: "Submit" }).click();
+  await expect(page).toHaveURL(new RegExp(`/work/${PA.workId}$`), { timeout: 20_000 });
+
+  const received = (await control(page, { op: "received" })) as {
+    received: Array<{ purpose: string; adjustment: Record<string, unknown>; basis: { lines: unknown[] } }>;
+  };
+  expect(received.received.length, "exactly one admission").toBe(1);
+  const sent = received.received[0]!;
+  expect(sent.purpose).toBe("payroll_obligation");
+  // THE PARTICULAR CROSSED THE WIRE; THE DERIVATION INPUT DID NOT — `advanceCents` is a
+  // client-side figure only, exactly `settledCents`'s own N3 rule, so no `p_adjustment` key can
+  // ever carry it.
+  expect(sent.adjustment.advanceAccountCode).toBe(PA.bank);
+  expect("advanceCents" in sent.adjustment).toBe(false);
+  expect(sent.basis.lines).toHaveLength(3);
+});
+
 test("t643 a CITED DOCUMENT crosses the wire with the particulars, and the history discloses it", async ({ page }) => {
   await page.goto(FORM_URL);
   await fillStocktake(page);

@@ -88,7 +88,9 @@ function parseDraft(raw: string): StoredAdjustmentDraft | null {
   // CENTS MUST BE SAFE INTEGERS EVEN COMING OUT OF STORAGE. A JSON payload can carry 12.5 or
   // "1200"; seeding a money field from either is the floating-point coercion this lane forbids
   // outright.
-  const money = ["openingCents", "closingCents", "adjustmentCents", "amountCents", "settledCents"] as const;
+  const money = [
+    "openingCents", "closingCents", "adjustmentCents", "amountCents", "settledCents", "advanceCents",
+  ] as const;
   for (const key of money) if (!isCents(d[key])) return null;
 
   const draft: AdjustmentDraft = { ...emptyAdjustmentDraft() };
