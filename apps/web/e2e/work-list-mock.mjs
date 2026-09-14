@@ -2,11 +2,19 @@
 // consulted by `serve-built.mjs` through ONE hook. Every branch below is scoped to THIS lane's
 // own client ids and falls through otherwise (e2e-fixture-ownership.test.ts's own discipline).
 //
-// IT READS THE REQUEST BODY ONLY INSIDE A MATCHED VERB. `readJson`'s `for await (const chunk of
-// request)` drains the stream exactly once, so a lane that parses on EVERY `/rest/v1/rpc/` POST
-// starves every lane ordered after it — the measured hazard `serve-built.mjs` records twice
-// against `bank-close-registers-mock.mjs`. This module never does that: the two path checks come
-// first, and only then is a body read.
+// IT READS THE REQUEST BODY ONLY INSIDE A MATCHED VERB, and through the SHARED reader. The path
+// checks come first, and only then is a body read — the measured hazard `serve-built.mjs` records
+// twice against `bank-close-registers-mock.mjs`.
+//
+// WAVE-2 INTEGRATION replaced this file's own copy of `readJson` with `mock-dispatch.mjs`'s
+// `readCachedJson` (#722). The local one DRAINED the stream, which was harmless only while every
+// verb it read a body for was a verb no other lane answered. #624 AC4 ended that: the Work
+// detail's Sources tab reads `get_document_state`, which `documents-viewer-mock.mjs` also answers
+// and which is dispatched AFTER this lane (serve-built.mjs:564 vs :574). A `p_document` this lane
+// does not own therefore fell through with the body already consumed, the documents lane read
+// `{}` and fell through too, nobody answered — and all four of #624's walk cells went red for a
+// reason nowhere in their own diff. The cached reader parses once and serves the same object to
+// every later lane, in any dispatch order.
 //
 // WHAT IS REAL AND WHAT IS FAKE. The browser, the built Next bundle and every line of
 // `components/work/*`/`lib/work/work-list*.ts` under test are REAL. What is faked is PostgREST:
@@ -25,6 +33,8 @@
 //   WORK_LIST.emptyClient — a client with no Work at all: the FIRST-USE Empty, which must read
 //                           differently from the filtered one above.
 //   WORK_LIST.deniedClient— every read refuses CLR04, for the permission-loss cell.
+
+import { readCachedJson as readJson } from "./mock-dispatch.mjs";
 
 export const WORK_LIST = {
   clientId: "c641c641-1111-4777-8777-c641c6410001",
@@ -72,17 +82,6 @@ export const WORK_LIST_CLIENTS = [
   clientRow(WORK_LIST.emptyClient, WORK_LIST.emptyClientName),
   clientRow(WORK_LIST.deniedClient, WORK_LIST.deniedClientName),
 ];
-
-async function readJson(request) {
-  const chunks = [];
-  for await (const chunk of request) chunks.push(chunk);
-  if (chunks.length === 0) return {};
-  try {
-    return JSON.parse(Buffer.concat(chunks).toString("utf8"));
-  } catch {
-    return {};
-  }
-}
 
 function workRow(over) {
   return {
