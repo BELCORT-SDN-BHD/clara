@@ -17,7 +17,7 @@ Minimal session state. Everything durable lives on GitHub (issues, PRs, the #597
 - Open owner decisions (`needs-info`): #825 (#631's activation basis for the `accounting_work` egress authority) and #826 (the pre-v3 grandfather + rollback-preflight frontier rule) — answer before any ticket that touches egress or the Work lane; #790 (bookkeeper floor), #793 (World-guard blast radius), #810 (`chatTurn_v1` export) can wait for #683's sweep.
 - #820 (`needs-triage`): ten orphan held `wake` tasks make every rollback preflight refuse (`unbound_task`) — retire or repair before the next rollback drill.
 - The refresh follow-ups (#770–#821, `needs-triage`) await `/triage` at the owner's pace; #764 is #720's Half 2 (chat-lane `hook_missing`).
-- Deferred product promises are marked inline in `docs/PRD.md` with their tickets (#636 batch progress, #648 firm-scope promotion caller, #658/#663 reassessment consumer, #764).
+- Deferred product promises are marked inline in `docs/PRD.md` with their tickets (#636 batch progress, #654 firm-scope promotion — its caller lands in #648's setup route, #658/#663 reassessment consumer, #764).
 - Machine: the local rig recipe (WSL Node 22 + corepack pnpm, PG17 clusters per chain, worktrees per ticket, web uploads from WSL) lives in the agent's memory, not in git; all rig clusters and ticket worktrees were dropped on 2026-09-14.
 
 ## Next Steps

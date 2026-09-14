@@ -1,24 +1,46 @@
-# Clara — 技术架构蓝图
+# Clara — 技术蓝图（Architecture）
 
-本文是 Clara 持续维护的最高层技术蓝图：解释技术栈及选择原因、系统边界、模块职责、依赖、
-主要数据流，以及保证会计正确性、可恢复性和隔离性的技术取舍。
-[PRD](PRD.md) 定义产品为何存在、服务谁、应如何工作；[Context](../CONTEXT.md) 统一领域用语。
-具体 API、表结构和函数以源码为准，codebase-memory-mcp 帮助定位；包级 README 负责运行与部署操作。
+> **维护约定（供未来的 wayfinder / to-spec session）**：本文件是技术蓝图，只在 wayfinder 或 to-spec 敲定新的技术决定后刷新；刷新时**覆盖旧内容而不是追加**，保持简洁。不记录 ticket 编号、"哪张票做了什么"或逐条测试证据——那些在 GitHub issue、代码、各模块 README 和 `docs/plan/` 的 runbook／report 里。已实现与已接受但未实现的目标要分开标记。每次刷新只回答：**技术栈及选择原因、系统边界、模块职责（含各模块 README 索引）、依赖关系、主要数据流、关键技术取舍**。
 
-本文同时记录**当前实现**和**已接受、尚待实现的目标**，不能把设计决定写成上线事实。
-明确标注目标的部分尚未完整交付；其余当前结构以 2026-09-09 的仓库源码为依据，
-不代表已逐项复核线上部署。文末集中说明主要迁移差距。
-当前目标来源于已接受的 [Clara refresh spec](https://github.com/BELCORT-SDN-BHD/clara/issues/612)。
-Spec 保存一次建设的验收合同；本文持续反映仍然有效的技术方向，不随那次建设结束而失效。
-Wayfinder／spec 接受技术方向变化时更新目标及理由；实现变化时同步更新当前边界和迁移说明。
+[PRD](PRD.md) 定义产品为何存在、服务谁、应如何工作；[CONTEXT](../CONTEXT.md) 统一领域用语；
+本文只回答"技术上怎么成立"。精确 API、表结构与函数以源码为准（`codebase-memory-mcp` 帮助定位），
+运行与部署操作以各模块 README 为准。标注 **[已实现]** 的部分可在仓库中逐条核对；
+标注 **[目标]** 的部分是已接受的技术方向，尚未完整交付，集中列在 §7。
 
-## 1. 系统形态与部署边界
+---
+
+## 1. 技术栈及选择原因
+
+| 层 | 当前选择 | 对 Clara 的作用与取舍 |
+|---|---|---|
+| Web | Next.js 16、React 19、TypeScript 5；OpenNext 部署 Cloudflare Workers（wrangler） | 统一路由、服务端会话与交互界面；边缘部署减少自维护面，代价是 OpenNext／Workers 的兼容边界要自己验证。[已实现] `apps/web/package.json` |
+| UI | Tailwind 4、Base UI、shadcn、next-intl | 以可维护的组件源码与共享 tokens 构建密集会计界面；装上组件不等于完成业务状态、无障碍与恢复交互。[已实现] `apps/web/package.json` |
+| 数据与身份 | Supabase Postgres + PostgREST + Auth + Storage（`@supabase/ssr`、`@supabase/supabase-js`） | 在一套数据库内完成事务、RLS 隔离、版本与审计；**受控函数承担业务边界**，因此 SQL、grants 与迁移是承重结构而非附属品。[已实现] |
+| Agent | Vercel AI SDK 7（`ai`、`@ai-sdk/openai`）、zod 4 | 模型调用与业务领域分离：模型提出行动，受控工具执行，模型拿不到数据库任意写权限。[已实现] `packages/runtime/package.json` |
+| 持久执行 | Workflow 4 + `@workflow/world-postgres` 4 | 把步骤、等待、重试与持久 stream 落在自管 Postgres 里；宿主、并发与恢复边界须自行验证，不是托管服务。[已实现] |
+| Runtime 宿主 | Node 22、Nitro 3 构建、Express 5、Fly.io 常驻机器 | 承担长时执行、事件消费者、扫描与恢复；与 Web 独立发布，后台工作不绑定浏览器请求生命周期。[已实现] `packages/runtime/package.json`、`packages/runtime/fly.toml` |
+| 报表 | 版本化计算定义 + 独立确定性渲染服务 | 从固定数据生成可复现的数字与文件；增加版本／制品管理，但避免模型重写正式金额。[服务已实现，覆盖面与首次部署见 §7] `packages/reporting-render/` |
+| 备份 | 独立批处理任务，age 加密后上传 Cloudflare R2 | 异地副本与恢复清单独立于主运行路径。[代码已实现，部署与恢复证明见 §7] `packages/backup/README.md` |
+| 工程 | pnpm 10 workspace、GitHub Actions 单一 `ci.yml`、renderer／backup 独立镜像 | 应用与数据接口一起验证，同时隔离渲染与备份的依赖生命周期。[已实现] `pnpm-workspace.yaml`、`.github/workflows/ci.yml` |
+
+**版本钉在 manifest，不钉在本文。** 精确依赖由 `package.json`（根）、`apps/web/package.json`、
+`packages/runtime/package.json` 与 `pnpm-lock.yaml` 固定；本文只解释选择理由。
+Node 版本本身是承重约束，由根 `engines`（`>=22.11 <23`）与 `apps/web` 的 `devEngines.runtime`（22.23.2）共同限定。
+
+`packages/backup` 与 `packages/reporting-render` 被 `pnpm-workspace.yaml` 以 `!` **刻意排除**在
+workspace 之外：它们是各自独立成像、独立部署的批处理应用，依赖装在自己的 Docker 镜像里；
+排除后 CI 首步的 `pnpm install --frozen-lockfile` 不会因为一个没有 lockfile 条目的 importer 而红。
+
+---
+
+## 2. 系统边界<a id="admission-and-operator-support"></a>
 
 ```mermaid
 flowchart LR
   Person[事务所成员] --> Web[Web：Next.js / Cloudflare Workers]
   Web -->|用户 JWT：读取与受控 RPC| DB[Supabase Postgres / PostgREST]
   Web -->|同源代理：对话、上传、SSE| Runtime[Runtime：Node / Fly]
+  Plans[授权计划到期] --> Runtime
   Runtime -->|分角色连接、领域操作| DB
   Runtime --> Engine[Workflow：Postgres World]
   Engine --> DB
@@ -32,740 +54,291 @@ flowchart LR
   Backup --> R2[Cloudflare R2：加密备份]
 ```
 
-Postgres 保存账务、身份、权限、业务回执和持久运行记录；Storage 保存原始证据与生成文件。
-浏览器、Clara 和报表读取同一套会计状态，不各自维护一本账。
-Web 的请求生命周期与会计工作的生命周期分开，关闭页面不会终止后台执行。
+**事实归属。** Postgres 保存账务、身份、权限、业务回执与持久运行记录；Storage 保存原始证据与生成文件。
+浏览器、Clara 与报表读取同一套会计状态，不各自维护一本账。
+Web 的请求生命周期与会计工作的生命周期分开——关闭页面不会终止后台执行。
 尚未加入事务所的申请人处于独立准入域，不能假设其已具有 firm 身份。
 
-当前部署配置是一台持续运行的 Fly machine，使用本地临时上传 spool；这不是高可用部署。
-数据库持久化能支持恢复，但本身不能证明多机分发、spool 转移和恢复流程已可用。
+**四个部署单元的形态。** 状态逐行标注，当前线上版本见 `docs/PROGRESS.md`：
 
-## 2. 技术栈与选择理由
+| 单元 | 形态 | 关键约束 | 状态 |
+|---|---|---|---|
+| `clara-web` | Cloudflare Worker（`apps/web/wrangler.jsonc`） | 非机密配置在 `vars` 里提交（`CLARA_RUNTIME_URL`、`CLARA_PUBLIC_ORIGINS`、`CLARA_STRIPE_LIVEMODE`、`CLARA_TRUSTED_CLIENT_IP_HEADER` 共四项——最后一项是一堵墙的输入，只能取边缘自己写的头，绝不能取客户端可写的 `X-Forwarded-For`）；凭据是 Worker secret；当前未声明任何 KV／R2／D1／service binding | [已实现并部署] |
+| `clara-runtime` | Fly app，`sin`，**单台常驻机器**（`min_machines_running = 1`、`auto_stop_machines = false`） | 挂载本地 spool 卷；`/ready`（依赖就绪）与 `/health`（存活）分离；secrets 由 `fly secrets set` 带入，不进文件 | [已实现并部署] |
+| `clara-render` | Fly batch app，`sin`，无 HTTP 监听 | 由 runtime 的 `packages/runtime/lib/reconciler-render.mjs` 按需启动 | [配置已就位、镜像未部署，见 §7] |
+| `clara-backup` | Fly batch app，`sin`，无 HTTP 服务 | 定时任务，以 dead-man switch 监控而非健康端点监控 | [配置已就位、镜像未部署，见 §7] |
 
-| 层 | 当前选择 | 对 Clara 的作用与取舍 |
-|---|---|---|
-| Web | Next.js 16、React 19、TypeScript；OpenNext 部署 Cloudflare Workers | 统一路由、服务端会话和交互界面；需要验证 OpenNext／Workers 兼容性及独立部署的接口兼容性。 |
-| UI | Tailwind 4、Base UI、shadcn、next-intl | 用可维护的组件源码、交互基础和共享 tokens 构建密集会计界面；安装组件不等于完成业务状态、无障碍或恢复交互。 |
-| 数据与身份 | Supabase Postgres、PostgREST、Auth、Storage | 在一套数据库内完成事务、RLS 隔离、版本和审计；受控函数承担业务边界，需要认真维护 SQL、grants 与迁移。 |
-| Agent | Vercel AI SDK 7.0.77，当前流程使用显式 model/tool loop | 模型调用与业务领域分离；模型提出行动，通过受控工具执行，不能直接取得数据库任意写权限。 |
-| 持久执行 | Workflow 4.8.4、Postgres World 4.3.4 | 将步骤、等待、重试和流持久化在自管 Postgres；需自行验证宿主、运行版本、并发与恢复边界。 |
-| Runtime 宿主 | Node、Nitro 构建、Fly 常驻进程 | 承担长时间执行、事件消费者、扫描与恢复；与 Web 独立发布，避免把后台工作绑定到浏览器请求。 |
-| 报表 | 版本化计算定义、独立渲染服务 | 从固定数据生成可复现的数字和文件；增加版本／制品管理，但避免模型重写正式金额。 |
-| 工程 | pnpm workspace、GitHub Actions、独立 renderer／backup images | 应用与数据接口一起验证，同时隔离渲染和备份的依赖生命周期。 |
+**明确不是高可用。** 当前部署是一台持续运行的 Fly machine + 本地临时上传 spool；
+`packages/runtime/fly.toml` 自己写明不得扩容或挂第二台机器。
+数据库持久化能支持恢复，但本身不能证明多机分发、spool 转移与恢复流程已可用。[已实现的限制，见 §7]
 
-精确依赖由 [根 manifest](../package.json)、[Web manifest](../apps/web/package.json)、
-[Runtime manifest](../packages/runtime/package.json) 与 [lockfile](../pnpm-lock.yaml) 固定。
-根 engine（`>=22.11 <23`）、`.nvmrc`、CI toolchain 与 runtime Docker 两个 stage 现已统一为 Node 22.23.2；
-Web 通过 `devEngines.runtime` 声明同一版本。Node 20 已于 2026-04-30 停止维护。
-当前 Workflow 4.8.4、Postgres World 4.3.4、AI SDK 7.0.77 组合在 Node 22 上完成本地 typecheck、
-Nitro build、全量 DB／runtime 测试与持久 World e2e；Linux image 与 hosted 证据以 #616 记录为准。
+---
 
-**已接受目标：**以该 Node 22 宿主与同一组依赖构建首个 ToolLoopAgent successor。
-选择这条路线是沿用已调查的数据库和执行基础，并减少手写 loop 的职责；没有宣称它是所有产品的最优栈。
-WorkflowAgent v1 能与 Workflow 4 配合，但其精确的较旧 AI 依赖和 stream retry 维护是已记录的取舍。
-Workflow 5 是另一组需整体验证的候选依赖，本次目标未采用；换路线需要更新架构决定及等价验证。
-
-## 3. 模块职责、依赖与事实所有权
+## 3. 模块职责
 
 | 模块 | 负责 | 不应承担 |
 |---|---|---|
-| `apps/web` | 会话与 scope、导航、业务读取、受控提交、实时消息和对象详情 | 在浏览器重建账务规则、预测已入账金额、持有后台服务密钥。 |
-| `packages/runtime` | 接收工作、构建上下文、模型／工具协调、Workflow 接入、外发、事件和恢复 | 通过 prompt 自创权限，或把一次模型回复当作会计提交记录。 |
-| `packages/db` | 会计状态、租户隔离、当前授权、事务、幂等、回执、事件和持久业务控制 | 持有 UI 临时布局状态，或把知识叙述当作可执行授权。 |
-| `packages/reporting-render` | 领取任务、读取封存数据、生成并保存制品、结算渲染状态 | 修改账本或自行推断正式报表数字。 |
-| `packages/backup` | 生成加密异地备份及恢复所需清单 | 用备份成功消息替代实际恢复证明。 |
+| `apps/web` | 会话与 scope、导航、业务读取、受控提交、实时消息与对象详情 | 在浏览器重建账务规则、预测已入账金额、持有后台服务密钥 |
+| `packages/runtime` | 接收工作、构建上下文、模型／工具协调、Workflow 接入、外发、事件与恢复 | 通过 prompt 自创权限，或把一次模型回复当作会计提交记录 |
+| `packages/db` | 会计状态、租户隔离、当前授权、事务、幂等、回执、事件与持久业务控制 | 持有 UI 临时布局状态，或把知识叙述当作可执行授权 |
+| `packages/reporting-render` | 领取任务、读取封存数据、生成并保存制品、结算渲染状态 | 修改账本或自行推断正式报表数字 |
+| `packages/backup` | 生成加密异地备份及恢复所需清单 | 用"备份成功"消息替代实际恢复证明 |
 
-**目标领域模型**明确区分以下记录；现有 task／chat／interruption 是迁移基础，并不已等同于完整 Work 模型。
+<a id="frontend-and-identity-boundary"></a>**`apps/web`** 是唯一的人机面。它以用户自身 JWT 直连 PostgREST 做读取与受控 RPC；
+需要长时执行的能力（对话、上传、SSE）一律经同源代理 `apps/web/app/api/runtime/[...path]/route.ts`
+转发到 runtime——这是一条请求期路由并显式 allowlist 转发头，不是构建期 rewrite，
+因此 runtime 源在配置里可见可换，Web 也不必持有 runtime 的服务凭据。
+生成式界面是"服务器注册的 typed part schema × Web reader"的协议；web 与 runtime 是两个独立发布单元，
+因此字段与版本的兼容是一项发布义务而非同仓假设——当前 parity 校验主要比对 kind，完整协议兼容仍未实现（§7）。
+README：`apps/web/README.md`。
 
-| 记录 | 保存的事实 |
+**`packages/runtime`** 是长时执行的宿主：durable workflow、文件入库、agent 执行、HTTP/SSE。
+它按用途分角色连接数据库（§4），驱动 Postgres World 引擎，写 Storage 的私有原件，
+并在按用途授权下调用外部 OCR／模型提供方。单 leader 负责路由、drain 与 reconcile。
+README：`packages/runtime/README.md`。
+
+**`packages/db`** 是会计权威：迁移链、合成种子、DB 测试、备份／恢复工具。
+表默认 FORCE RLS，应用角色不能直接触达；一切写入经固定 `search_path`、按角色授权的
+SECURITY DEFINER 领域函数。迁移是**追加式**的：文件名为 `NNNN_name.sql`，已应用字节不可变，
+当前 frontier 只能从 `clara.schema_migrations` 账本读出——绿色 exit 或 `OK` notice 都不等于已落地。
+README：`packages/db/README.md`。
+
+**`packages/reporting-render`** 是独立成像的批处理 worker，读封存数据生成确定性 PDF；
+它直接读 DB 与 Storage，不经 runtime 的请求路径，也从不安装进 `@clara/runtime`。
+README：`packages/reporting-render/README.md`。
+
+**`packages/backup`** 是独立成像的定时任务：从 DB 取转储、以 age 加密、上传 R2，并留下恢复所需清单。
+**文件对象镜像**是增量的（additive），快照过期由 R2 生命周期规则处理而不是由它删除，
+默认滚动 DR 窗口 30 天。它不建立法定保存期，也不证明一份备份可被恢复。
+README：`packages/backup/README.md`。
+
+**目标领域模型 [目标]。** 蓝图区分以下记录；现有 task／chat／interruption 表是迁移基础，
+尚不等同于完整 Work 模型：Accounting Work（客户归属、业务意图、发起人与授权依据、来源、依赖、问题、结果与回执）、
+Conversation（对话及上下文边界，多段对话可讨论同一 Work）、Workflow run（某执行版本的一次运行）、
+Question／answer（需要的事实或决定、问题与依据版本、被接受的回答与回答者）、
+Accounting operation／receipt（一次逻辑业务行动及其已提交的完整影响）、
+JE 与领域对象（JE 保存总账金额，open items／allocations／assets／plans／periods 保存额外业务关系）、
+Knowledge 与 source（可追溯的事实、身份、偏好、政策、经验及来源版本）。
+Firm workspace 可查询获准客户并组织批量工作，但**每一笔会计执行仍绑定一个明确客户**；
+portfolio 不是合并账本，未能确定客户的输入可先持久接收为待归属请求，不能猜造 client ID。
+
+### README 索引
+
+| 路径 | 负责说明 |
 |---|---|
-| Accounting Work | 客户归属、业务意图、发起人与授权依据、来源、依赖、问题、结果和回执。 |
-| Conversation | 普通对话及上下文边界；多段对话可讨论同一 Work。 |
-| Workflow run | 某个执行版本的一次运行；同一 Work 可有多次运行或恢复尝试。 |
-| Question／answer | 需要的事实或决定、问题与依据版本、被接受的回答、回答者。 |
-| Accounting operation／receipt | 一次逻辑业务行动及其已提交的完整影响；区别于工具调用尝试。 |
-| JE 与领域对象 | JE 保存总账金额；open items、allocations、assets、plans、periods 保存额外业务关系。 |
-| Knowledge 与 source | 可追溯的事实、身份、偏好、政策、经验及来源版本；搜索和 wiki 可重建。 |
-
-Firm workspace 可以查询获准客户并组织批量工作；每一笔会计执行仍绑定一个明确客户。
-Portfolio 不是合并账本。未能确定客户的输入可以先持久接收为待归属请求，不能猜造 client ID。
-
-<a id="database-authority-and-accounting"></a>
-
-## 4. 数据库、会计与权限边界
-
-应用通过明确的领域函数执行会计操作。当前已有人工 RPC、agent posting core、
-`wake_post_entry`、结算、资产和关账函数；agent 调用保留其身份与 model/version 归因。
-目标是让人工入口、上传和对话共享业务含义及必要影响，而不是为每个 UI 再实现一份会计引擎。
-
-关键约束位于可信服务和数据库边界：
-
-- firm RLS、client 归属、当前 membership／delegation 和 operation scope 必须成立。
-  UI capability 只控制交互；旧 JWT、旧上下文或用户回答不能维持已撤销的权限。
-- 人工与 agent 的会计写入只经授予的领域函数；human、agent read/write、freeform、bank、webhook、auth-wall
-  连接按职责分权。Definer 函数的 owner、search path、grants 与参数校验共同组成边界。
-- 金额使用整数最小货币单位，执行余额、舍入、期间及关联对象检查。
-  大整数经过 JSON 和前端时必须保留精度；已有 freeform 路径的精度差距仍需修复。
-- 来源、所审修订、当前账本依据与合法身份共同决定操作是否可接受；schema 正确不代表会计解释正确。
-  用户明确提供的事实也是目标接受的依据，但不得伪造文件或声称独立核实。
-- 已入账历史不可原地改写。更正是有来源关联的冲销／替代操作，还必须修正受影响的分配和明细。
-
-**完整影响是事务边界。**确认一张发票需要相应总账和 open item；收款分配必须维护余额；
-购置资产要同时保留资产记录。当前 `_subledger_on_approve` 等机制已承担部分耦合影响。
-增加一个科目或配置计划可能不产生 JE；把已记录付款分配给发票也不能再创造现金分录。
-同一 Work 的独立步骤可以分别提交，必须一起成立的账务关系在同一事务内成立。
-
-**重试语义的目标：**服务器分配稳定的逻辑 operation identity，绑定 firm／client／Work／intent；
-请求 payload、依据修订和执行 bundle digest 另行记录。未产生效果前可以受控重算；提交后更换参数
-不能得到第二次效果。恢复返回获准读取的原回执或冲突，更正另建关联操作。
-现有幂等函数是基础，wrapper 的 actor／key 约定尚未完全统一。
-#623 首次落地了这个形状：`clara.accounting_work` 在准入时分配 `logical_op_id = work:<id>:journal_entry:1`，`intent_key` 以 (firm, client) 为幂等范围；`clara.wake_record_journal_entry` 只允许 client-pinned、OBO 发起人本人的 `interactive_client` 凭证调用，提交时重读发起人当前 membership、client 状态、期间锁、科目与 generic 分录禁止控制科目 leg，以 draft→approved 的常规转换写入普通 `journal_entries`（maker／checker 为 agent identity，origin `agent`），同一事务写入一条 `clara.operation_receipts`（每个逻辑身份至多一条 committed 回执），同 key 同 payload 重放原回执、同 key 不同 payload 是类型化 conflict；agent-post 回执墙已扩展为接受两种回执形态之一；`settle_work_run` 在已有 committed 回执时强制结算为 completed（取消／失败不能覆盖已入账事实）并级联取消待答问题。
-#634（0182）在此形状上加了可选与迟到的凭据：一次 Work 可以在准入时指定至多一份已归档到该客户、字节已核实的文件（`source_refs` 的 `document` 元素，逐元素校验并给出 1-based `field`；重放分支先于可变的归档检查），提交时再读一次（`source_conflict`）；凭据落在新的仅追加关系 `clara.entry_evidence_links`，而不是 `journal_entries.document_id`——已入账分录不可原地改写（`clara._tf_entry_immutable` 的 approved→approved 白名单只有 `{reversed_by, reversal_reason, updated_at}`），且该列属于文件编码车道的 `ck_je_doc_pair`／`ck_je_document_filing_pair` 三元组。一份文件在全事务所范围内至多支撑一条**在世**的已过账分录（`released_at is null` 的部分唯一索引；冲销由 `t_entry_evidence_release` 释放链接，更正分录可再引用同一文件）；重复指定在准入即 CLR13 `source_already_posted`（附冲突分录 id），提交时为 `source_conflict`，并发插入也重抛同一类型化拒绝而非裸 23505。迟到指定走人工门 `clara.attach_entry_evidence`（bookkeeper+，op_key 幂等，`p_expected_revision` 只作过期闸——触发器禁止推进 revision，无任何财务效果，不写 `operation_receipts`，因该表结构上是 agent run 回执）；`clara.list_entry_links` 为 Journals 表提供 purpose／basis origin／来源／Work／回执／冲销链。意图幂等的载荷比较扩展为「basis digest + 规范化 source refs」两半（basis digest 公式不变；chat 车道的 refs 规范化为 `{"kind":"chat_task"}`）。该单向缺口已由 #718（0197）关上：编码车道的批准过渡在 `journal_entries` 的 BEFORE ROW 墙里回看凭据链接，与凭据车道共用 `clara.documents` 行锁串行化，两种到达顺序都只剩一条在世已过账分录；`_draft_entry_core` 本身未重切。期初余额车道（一份 tie 文件绑多条 opening item）以 `is_opening_balance` 排除在编码墙之外，因此「凭据链接在先、期初项在后」这一方向仍未关上，由 #821 承接。 #692（0196，随 0197／0198 于 2026-09-14 17:44Z 发布）让 `firm_document_limits` 的更新触发器改为逐列合并（`coalesce(new.<col>, old.<col>)`），并去掉四个限额列的表默认值，修掉此前一次只改一个限额就把其余三个静默重置为默认值的缺陷；纯行为修复，未加表／列／policy，hosted 证据见 #692。
-#728（0183）让 Activity 摘掉 sweep 心跳的噪音同时保住可核查性：一条 `sweep.run_completed` 回执若其 run 未产生任何效果（`drafted_count + posted_count = 0`；`refused_count`／`skipped_count` 各自已有可归因面，刻意不计入"效果"）即整条从该 firm 的 Activity 摘除，保留的回执改标 `kind='agent'`、actor 置空，web 端渲染为"Clara (system)"。排除判定是一次集合读而非逐行判定：`clara._sweep_events_with_effect()`（feed 用，取该 firm 有效果的回执 id 全集）与 `clara._sweep_event_has_effect(uuid)`（detail 门用，单条判定）——两个 SECURITY DEFINER 函数、bookkeeper 门槛内置、按 firm 双向校验（含 run 自身归属的 firm）、对 `payload->>'run_id'` 不做 uuid cast（一行脏数据只匹配不到任何行，不拖垮整个 firm 的 feed）。两函数各自恰好一种固定查询形状，且连同两扇门 `list_activity`／`get_activity_event` 在函数级声明 `set plan_cache_mode = force_custom_plan`——这是本次立下的估值规则而非枝节：plpgsql 语句在会话内第 6 次执行起会换成 generic plan，而 generic plan 把多租户表上的 firm 谓词估成"每 firm 平均值"；第一版（一条带 `x is null or …` 谓词、两个调用方共用的语句）实测调用 1–5 约 18–46 ms、调用 6–10 骤降为 13.5–16.4 秒，拆成两个固定形状的函数后 helper 仍因 `c.firm` 参数在第 6 次翻转（0.5–3 秒），最后门自身也翻转（30,000 条 operation_receipts 时 145 ms → 2.0–2.8 秒；0181 继承的位点）；四个函数钉住 custom plan 后十次连续调用全程持平，由 0183 的 tail 拒绝缺钉、`activity-feed.test.mjs` af.20／af.23 以自植 1,500-firm 偏斜的十次序列钉住。PostgREST 长连接池意味着这类翻转在生产里表现为"用一会儿就变慢、换个连接又好了"。成本以 KEPT 集为界而非 firm 的 sweep 历史：`ix_sweep_runs_firm_effect`（`firm_id`，限定 `drafted_count+posted_count>0`）驱动、复合 partial index `ix_domain_events_sweep_run`（`(firm_id, payload->>'run_id')`，限定 `sweep.run_completed`）逐条探测、LATERAL 子查询以 `offset 0` 作优化栅栏（无栅栏 planner 会把探测拍平成对全历史的 Merge Join）——1,000／6,000／30,000 条历史下均为 1.6–1.9 ms。KEPT 集本身仍随 kept 历史线性增长（每千条约 3.8 ms，30,000 条时每页 187–231 ms，无断崖）。裁定（#744，owner 2026-09-13，选项 c）：接受这个线性成本，不加约束、不加索引、不改查询。三点记录在案：（1）sweep run 的 `finalized_at` 与其 `sweep.run_completed` 事件的 `created_at` 一致，只是今天唯一写者 `clara.reconcile_sweep_runs`（0011）在同一事务里同时写两者的构造结果，feed 刻意不依赖它——`list_activity`／`_sweep_events_with_effect` 只按事件的 `created_at` 排序与开窗；（2）在 `sweep_runs.finalized_at` 上加 driver 侧时间下界只会加速带 `since`／`until` 的读取，默认首页的成本不变；（3）重新审视的触发条件是某家真实事务所 kept 历史很大且**日期过滤**读取实测变慢，而不是 kept 计数本身。`activity-feed.test.mjs` af.24 从目录读出"恰好一个函数体写 `finalized_at`、恰好一个追加 `sweep.run_completed`"，并以回滚事务内的临时第二写者证明它会变红。深链到一条被排除心跳的详情，与其它拒绝共用同一个无存在预言的 `activity_event_not_found`。`clara.list_spoken_for_documents(p_client)` 是新增的 bookkeeper+ ADVISORY 读：归并一份文件在全 firm 范围内的两种在世绑定（0182 的 `entry_evidence_links` 在世链接 rank 0，文件编码车道已过账未冲销的绑定 rank 1，同文件取并列时链接优先），返回 claimant client；composer／late-attach 的选择器据此在选项上禁用该文件并链接到 claimant 的分录，`source_conflict`／`source_already_posted` 的门槛拒绝不因这个建议性读而改变或放松。
-#630（0184）把 `accounting_work.initiator` 拆成两列：`initiated_by`（谁提出，不可变，加入冻结集）与 `initiator`（Work 当前以谁的实时权限执行——deploy-lock 的 claraWork 闭包按这一列铸取凭据，所以交接只能移动它）。移动被不可变触发器设墙：只能交给本事务所在职的 bookkeeper+，否则 CLR04 `responsible_not_authorised`。`clara.take_over_accounting_work`（story 29）是唯一的移动者：负责人已失权（实时重读 membership）的终态 Work 可被在职同事接手；已复职的负责人保有其 Work（CLR13 `not_takeable`）；`clara_interpreted` 的 basis 必须回带 digest 确认（CLR10 `basis_confirmation_required`，UI 内渲染 basis 供确认）；新 run 由同一个 `clara.retry_accounting_work` 创建，交接不复制一份第二套起跑逻辑；写入 `work.taken_over` 时间线事件；`get_activity_event` 同时投影 `initiated_by`。凭据铸造对失权负责人的拒绝类型化为 `authority_lost`（`mint_wake_credential` 重切，与 `claraWork.v2` 的 `recheckAuthorityStep` 用同一个词）。撤权后的读取由既有的 `clara.jwt_firm()`（只认在职 membership，本次未改策略）封闭：被撤权者对本所 `accounting_work` 读到零行，`work-cancel.test.mjs` §A6 在活的策略上实测。
-#643（0194）把这个形状从一种 purpose 扩到三种，而不是为每种再实现一份会计引擎：`accounting_work.purpose` 与 `operation_receipts.purpose` 的 CHECK 加入 `periodic_stock_adjustment` 与 `payroll_obligation`，逻辑身份随之写成 `work:<id>:<purpose>:1`（0178 的 schema 本就留了这个位置，且每个消费者比较的是整串）。**类型化 particulars 不进 `basis`**：`basis` 是 run 回带的那半，会经过语言模型和 deploy-lock 的 `claraWork.v1.tools.ts` 严格 zod schema，所以期间、计数、科目角色落在新的冻结列 `accounting_work.adjustment_basis`（null iff purpose 为 `journal_entry`，加入不可变触发器的冻结集），提交核心直接从 Work 行读取——因此 claraWork v1/v2 与 chatTurn v18 的冻结正文一字未动，一笔定期调整由与无附件分录完全相同的 serving bundle 执行。`clara._journal_basis_digest` 公式不变（0182 对 `source_refs` 立的规矩再用一次）；意图载荷比较加上第三半 `clara._adjustment_basis_canonical`——同样的行、同样的 digest、不同的期间／方法／义务种类／科目角色是类型化 conflict，不是把改动悄悄丢掉的 replay。
-准入侧把 0182 的 `admit_journal_work` 正文抽成私有核心 `clara._admit_accounting_work_core`（公开门保持 7 参签名与 grant，正文只剩一句委派，tail 逐字重读），新门 `clara.admit_periodic_adjustment_work` 与之并列而非把它加宽——冻结的 chat 工具点名那个签名，不能移动。提交侧 `clara._record_journal_entry_core` 第三次全文重切，五处插入点各有 `#643` 注释界定：purpose 过滤放宽、particulars 形状与关系断言、draft INSERT 上盖 `flags`、新的仅追加关系 `clara.periodic_adjustments` 在同一事务写入并进入回执 `effects`；journal 车道的预留载荷字节不变，因此估中的每一条 `op_receipts` 与回执都不会被重算。
-**关系必须成立，marker 单独不算 producer。**`clara._assert_adjustment_relationships` 要求过账明细说出 particulars 说的事：存货调整恰好两条腿、方向由带符号的变动决定、金额等于其绝对值；工资义务的每条腿都必须落在被点名的科目上、费用腿净额等于所供金额、被点名的负债／预支／结算腿都必须真的被用到。这正是 C-29 拒绝的「用一张配平分录模拟缺失的存货」。世界侧另有 `adjustment_account_relationship`（科目在世且类别匹配）、`advance_not_enrolled`（`clara.staff_advance_accounts` 无在世登记）、`scope_overbroad`（期间跨年或越过财年末）、`stale_basis`（盘点日落在自称的期间之外）、三个 `correction_target_*` 与 CLR19 `write_into_closed_period` 的类型化前置检查（`t_period_wall` 仍是真正的法）。预支腿的**分配**刻意不由本车道决定：`clara._adv_on_approve`（0043）拒绝一条说不清在冲抵哪笔预支的贷记（CLR40，补救是 `clara.book_staff_advance_application`），而一笔缺失的结算事实按 #643 自己的边界不得凭空发明——所以本车道只断言控制关系，登记簿仍是权威。更正是关联的新 Work：先 `clara.reverse_entry`，再以 `corrects_adjustment_id` 准入，两行以 `corrects`／`corrected_by` 双向相连（后者是仅追加表唯一放行的一次 null→值 盖章，`uq_periodic_adjustments_corrects` 保证一个目标只有一次更正）。**不发明任何税率、门槛或员工计算**：唯一的算术是 `closing_cents - opening_cents`，且只用来核对会计师自己供的变动；负债／预支／结算科目是供给的 particulars，chart 模板一字未改（表单把五类法定义务默认到 2100–2140、把 salary／other_supplied 默认到 2020 Accruals，默认值渲染出来且可改——表单里的默认是一种提议，模板行会是一种主张）。
-**AC3 的「上传／引用」入口就是凭据选择器。**#643 要求这个操作既能从直接会计入口到达，也能从一次上传／引用到达；在这道门上，后者是**引用**：表单挂载的是 composer 自己的那个组件（`apps/web/components/accounting/evidence-chooser.tsx`，#634／#728 的控件连同它的两次读与降级规则一起抽出来，两道门共用一份，不是复制一份），选中的文件以 `source_refs [{kind:'document'}]` 随 `POST /api/work/periodic-adjustment` 进入 `clara._admit_accounting_work_core`，提交时由过账核心重读并写入 `clara.entry_evidence_links`，`clara.periodic_adjustments.source_document_id` 留下它，历史面把它作为「来源」披露。因此文件一旦不再是本客户在世且校验过的归档，拒绝仍是估中已有的那两个名字（准入 CLR10 `invalid_source_ref`／`not_filed`、提交 CLR13 `source_conflict`），由 `fieldForServerPath` 落到同一个控件上——没有第二套词汇，也没有第二个入口。三处审阅修正一并记在这里：`clara.periodic_adjustments` 对分录／回执／文件的引用都改成携带租户列的复合外键（分录与回执用三列，文件用 `clara.documents` 仅有的 firm 两列；为此给 `clara.operation_receipts` 补了一条纯追加的 `unique (id, firm_id, client_id)`），一行因此在结构上就不可能引用他所的分录；提交核心只有在**确实存在**调整行时才发出 `adjustment_id` 键，journal 车道因此只有一种答案形状；而 INSERTION 2（载荷形状却排在 `_reserve_op` 之后）是对 0182 排序规则的**具名例外**，理由与代价写在 0194 §F 的段首（它必须跟在 5b 的回带墙之后，否则漂移的回带会被诊断成关系失败而不是 `basis_mismatch`；而预留与它同在一个事务，抛出即回滚，身份并未消耗）。
-
-**AC3 的第三个入口（对话）由 `chatTurn_v19` 补齐。** 冻结工具 `start_periodic_adjustment_work` 与 `start_journal_work` 并列，调用同一扇 `clara.admit_periodic_adjustment_work`（9 参），chat 车道固定 `p_basis_origin='clara_interpreted'`、`p_source_refs=[{kind:'chat_task',task_id,session_id}]`（session 读自任务行，绝不取自模型参数）、`p_intent_key=stableOpKey(taskId, tool, input)`——同 task 同输入得同一把钥匙，因此重放的 segment 落回同一个 Work 而不是第二个。类型化 particulars 与派生分录明细由非冻结模块 `packages/runtime/lib/periodic-adjustment-basis.ts` 构造（0194 的 `_assert_adjustment_basis` 与 `_assert_adjustment_relationships` 在准入与提交各重查一次，本地那一半只是更早、更易读的同一条规则）。**#721 的诚实形状**：缺失的 particular 在准入**之前**由具名字段的本地拒绝退回（`adjustment.opening_cents`、`adjustment.advance_cents`…），绝不先准入再指望一个 Work question 补齐——basis 在准入即固定，事后的问题修不了它。#796 一并关闭：payroll 分支加上 `advance_account_code`（0194 的真 particular，进 `p_adjustment`）与 `advance_cents`（只是派生输入，与 `settled_cents` 同规矩不进 `p_adjustment`），因此 chat 车道能说出直接表单能说的同一件事，而不是说出一个必被 `advance_leg` 拒绝的半句。**不铸新 claraWork bundle**：一笔对话发起的定期调整由既有冻结 `clara-work/v2` 正文逐字节执行，`adjustment_basis` 那一列 run 从不读取——`chat-turn-v19-e2e.mjs` 第 2 腿在真实 World 上以模型内部的探针实测（run 的 prompt 里从未出现 particulars 的字段名），并比对 Work 记录的 bundle digest 与进程启动横幅的同一个值。
-
-普通人工入账仍有历史 maker/checker 和 attestation 分支；已接受目标移除这些默认额外仪式，
-保留实际角色与会计约束（#623 的无附件分录 operation 已按此形状实现：无 attestation，无第二人，只重查当前授权与硬约束；旧 journals 工作台的 compose 仪式已由 #634 删除——伪造的 client resolution 与第二人 attestation 不再存在，Journals 页的主行动指向唯一的 C3 路由；文件来源的 autodraft 审阅队列不变）。人类专属法律签署、close evidence exception 不能由 agent 冒充完成。
-当前 reconciliation 完成路径每事务只支持一个 reconciliation；未来批量操作不能直接假设可复用该形状。
-
-## 5. 一个 Clara，分层负责推理与执行
-
-**目标**是一个对外一致的 Clara，共享指令、会计能力、工具与澄清合同；内部仍可以有提取、
-检索、计算、渲染等专门模块。减少用户面对的碎片化，不意味着把所有代码和数据塞进一个 prompt。
-
-```mermaid
-flowchart TD
-  Input[对话 / 文件 / Accounting 操作 / 授权计划到期] --> Admit[持久接收、归属与 Work]
-  Admit --> Context[读取当前权限、账本、来源与相关 Knowledge]
-  Context --> Agent[ToolLoopAgent：判断、选工具、有限修复]
-  Agent --> Domain[受控领域 operation]
-  Domain --> Commit[原子账务影响、回执与 outbox]
-  Commit --> Result[Work 结果 / 对象刷新 / 后续投影]
-  Agent --> Question[共享问题：等待必要信息或决定]
-  Question --> Recheck[接受当前版本回答，重查依据与权限]
-  Recheck --> Context
-```
-
-这张图描述目标统一入口。当前 registry 选择 chatTurn v19、claraWork v3、autoDraft、facts、bank、close 等流程。
-#629 把 `claraWork` 重指向 `claraWork_v2`（`packages/runtime/workflows/claraWork.v2.*`，冻结的新闭包，v1 保留给在途 run）：`ask_question` 带 reason、1..6 个类型化 fields（text／money／date／choice／account）与可选 supporting source，经 `clara.open_work_question` 停靠；答案以「answer + 回答者角色 + 时间 + question_version」作为工具结果回到同一 segment，续跑前 `recheckAuthorityStep` 重读发起人当前 membership／角色与 client 状态（失去授权结算为不可恢复的 `refused/authority_lost`；Work 行不可读则可恢复）。v2 自带错误表 `claraWork.v2.errors.ts`——委托 v1 名册并只覆盖具名的 (errcode, reason) 对，把 0182 在提交时抛出的 `(CLR13, source_conflict)` 归类为终态可恢复 refusal——这是一个冻结闭包在不改动已部署闭包的前提下学会新拒绝对的方式。bundle `clara-work/v2` 的 digest 与 v1 一样由单元测试钉死并写入 world 启动日志。
-#623 落地了首个持久 successor：`claraWork_v1`（`packages/runtime/workflows/claraWork.v1.*`）在一个 `"use step"` 内运行 AI SDK 7.0.77 `ToolLoopAgent`，显式加载冻结的 bundle `clara-work/v1`（instructions、skill、server-owned tools `list_accounts`／`record_journal_entry`／`ask_question`，有限的 segment／model／tool／replan／retry 预算；canonical-JSON sha256 digest 由单元测试钉死，记录在 Work 的 bundle 清单、回执、world 启动日志与 `/api/build-info`）。错误按 0178 的 (errcode, detail.reason) 名册分类为 invalid_input／state_changed／conflict／transient／refusal／cancelled／invariant，refusal 与 conflict 对模型是终态（不得改参重试），预算耗尽结算为可恢复的 `failed/limit`。`chatTurn_v18` 只增加 `start_journal_work` 工具与 `work_accepted` part。其余流程仍是手工版本化注册。
-#631 把 `claraWork` 重指向 `claraWork_v3`（bundle `clara-work/v3`，digest 由 `packages/runtime/tests/work-bundle.test.mjs` 钉死并写入 world 启动日志与 `/api/build-info`；v1／v2 保留给在途 run）。v3 的三个工具名与 v1／v2 逐字节相同——AC1 的「server-owned tool set」说的是谁可以**注册**工具，#631 一个也没有新增：`buildClaraWorkToolsV3` 返回固定的对象字面量，basis、答案、source ref、wiki 或 Knowledge 文本都没有任何路径能往里加一个键或放宽一个 zod schema（负向 cell：`work-bundle.test.mjs` 把一段伪装成工具声明的 JSON 塞进 basis 与行摘要，roster 不动、schema 仍拒绝多余键）。**统一能力目录已经为 Work lane 落地**：`packages/runtime/lib/capability-registry.mjs` 以 capability id 为键记录 purpose、data class、是否 model-bound 与所需 scope，版本号 `clara-capability-registry/v1` 写入每一行执行轨迹。它是文档与查表，**从不是授权**——授权只由数据库动词判定。其他 lane（documents、bank、close）尚未纳入该目录。
-#643 与 #644 共用一个 successor `chatTurn_v19`（`packages/runtime/workflows/chatTurn.v19.*`，冻结的新闭包，v18 保留给在途 run与回退），一次而不是两次付冻结版本的代价：两张票都把各自的非冻结一半先行交付，正是为了合并到这里。v19 相对 v18 只有三件事。**两个工具**——`start_periodic_adjustment_work`（§4）与 `remember_client_information`（§7）；工具名册是本模块内的固定字面量，`Object.assign` 叠在 v18 的名册上，因此新读入的 Knowledge 文本无论写着什么都无法加一个工具（`chat-turn-v19-tools.test.mjs` 在 pack 里植入一个工具形状的 JSON 并断言名册不动）。**一个 wire kind** `knowledge_receipt`（record_id／client_id／knowledge_key／knowledge_version／revision_kind，identifier-only；值、trust、state 都会变，由记录自己的页面实时读）。**一个新 step** `loadKnowledgeContextStepV19`，与 v10 冻结的 `loadContextStepV10` 并列而不是把它加宽——后者是已部署的 body，加宽就是原地改写。C-19 终态集不变：`hasCodingIntent_v19` 对 `start_periodic_adjustment_work` 为真（其终态卡片 `work_accepted` 自 v18 起已在集内），对 `remember_client_information` 为假（记住一件事不是动账）。**#796 的作用范围，待 owner 批准（wave-3 集成记录）**：v19 的 `start_periodic_adjustment_work` 把 #796 一并实现了——`advance_account_code`（0194 的一个 particular，会发出）与 `advance_cents`（只作推导输入，永不发出，沿用 `settled_cents` 自己的规则）进入 `packages/runtime/lib/periodic-adjustment-basis.ts` 的 payroll schema，三条本地拒绝臂镜像 0194 的 `advance_leg`／`distinct`／`liability_leg`，parity 指纹据此重新钉过。这不在 `reports/643-final.md` 列出的「chatTurn_v19 必须接的东西」里，因此是**一次范围扩张，不是一次交付确认**：#796 在 GitHub 上仍是 OPEN／`needs-triage`，owner 需要在合并时批准并关闭它。随之而来的一个行为变化也一并记在这里：`settled + advance >= amount_cents` 现在在**本地**就被拒（#721 的形状——在准入之前按字段名拒绝），所以一笔**已完全结清**的义务在对话车道是不可表达的；这与 0194 自己给出的结果相同，只是提前发生。集成未改这一实现，只记录它需要批准。
-
-#637 把「版本切换」从一次具体的 v1→v2 事件提炼为一个通用机制，且机制本身不认识任何具体版本号。
-registry 除 `workflows`／`workflowsByName`／`workflowNames` 外再导出两份**惰性数据**（冻结的字符串
-字面量，绝不是函数引用，因此不构成第二个动态派发视图，freeze-lint 的 REGISTRY-PROVENANCE-EXPORTS
-以 AST 结构强制这一形状）：`workflowBodies`（这个镜像**能运行**的全部 body 标识符，wave-3 合并后 51 个，恰好等于
-WDK manifest 注册的数量）与 `workflowPins`（class → body 标识符）。三个面读同一份数据且不得互相矛盾：
-world 启动时的一行 provenance 日志（git sha、migration frontier、body 数、每个 class 的 pin；未烘入 sha
-时写 `<unset>`，frontier 读不到时写 `<unavailable: reason>`，绝不编造）、`/api/build-info` 的
-`bodies`／`pins`、以及 rollback preflight。同一份名册还是**启动闸门**的输入：world 启动前的
-stranded-body 普查把它与在世 run 停靠的 body 相比，发现缺口即拒绝启动 durable world（见 §10）。
-切换演练（`tests/two-build-cutover-e2e.mjs`）从 registry 的
-活 pin 与保留导出名册**推导**版本对，因此下一个 successor 落地时演练自动变成 vN→vN+1，无需改动演练代码；
-演练自身有两道门（`tests/built-bundle-gate.mjs`：产物必须是真实且不过期的构建，且其 WDK directive 名册与
-`registry.ts` 一致；以及 preflight 自身的库存普查），因为一个缺失或过期的 bundle 会让整场演练对着没人发布的
-代码全绿通过。
-
-产品 agent 的 instructions、accounting skills、tool schemas／implementations、context builder、
-model 和预算组成显式加载、可追溯的版本 bundle。仓库给编程 agent 的 AGENTS.md／skills 不会自动
-进入 Clara 的上下文。工具集合由服务器按实际能力与 scope 提供，文件内容不能注册工具或扩权。
-
-ToolLoopAgent 管理模型／工具／修复循环；Workflow 管理 checkpoint、等待 hook、重试与持久 stream；
-Clara 数据库决定业务接收、答案、取消顺序、授权和已提交事实。不可序列化的客户端在服务器重新获取。
-一个 segment 可以重跑，因此模型结果和副作用不能仅靠内存去重。
-
-保留确定性代码，是为了独立保证金额恒等式、身份、授权、重放及报表可复现；
-classifier 用于识别证据形态和选能力。重复判断或过时 gate 可以淘汰，但要确认其独立保证有正确归属。
-不能因为 LLM 能生成合法 JSON，就去掉数据库的业务检查。
-
-修复按原因分流：格式或选择错误可在预算内改正；可安全重算的状态冲突重新读取；基础设施失败有限退避；
-缺事实或决定才问用户。权限、锁期或业务拒绝不能靠换参数无限尝试。内部不变量失败成为可见故障。
-每段模型／工具／重算／重试预算有限且被记录，耗尽后保留可恢复状态；必要 Knowledge 读取失败不能伪装为空。
-
-## 6. Work、澄清、取消与对话生命周期
-
-目标接收边界先幂等地持久化请求，再确认已接收；若在 enqueue／绑定引擎 run 前崩溃，由恢复机制补齐。
-Work 成功由完整业务结果决定，不能按工具调用数、stream 结束或任务表的一个状态猜测。
-批次记录每个子项与依赖：95 份可独立处理的文件继续，5 份缺资料的文件及其依赖等待。
-
-当前实现（#623）：第一个持久 Accounting Work 记录 `clara.accounting_work`（purpose、client、initiator 与准入时角色快照、`intent_key`、`logical_op_id`、canonical basis 与 digest、`basis_origin`=user_direct／clara_interpreted、`source_refs`、当前 run、bundle 清单、result／error）与 `clara.operation_receipts`；`agent_tasks` 新增 kind `accounting_work` 并以 `work_id` 双向绑定，任务状态镜像到 Work（running／awaiting_input），终态由 `settle_work_run` 写回；同一 Work 可有多次 run（retry 保留逻辑身份）。入口：`POST /api/work/journal`（C3 composer）与 `chatTurn_v18` 的 `start_journal_work`（B6），两者产生同一 basis digest；reconciler 为该 kind 提供 re-enqueue 与按 kind 分派的 cancel-settle；`GET /api/tasks/:id/stream` 对 accounting_work 任务按 firm 成员放行。取消排序的当前实现见下文（#630）。
-
-共享问题具有稳定身份和问题／依据版本。Work 详情、Needs you、chat rail 展示并回答同一个问题。
-数据库只接受当前获准的第一份答案；重复提交回放同一结果，旧版本或竞争失败的回答看到当前状态。
-当前实现（#629，0180）：一个 Work question 是 `clara.agent_interruptions` 上的一行（新增 `work_id`／`client_id`、单调的 `question_version`、提问时的 `basis_digest`、类型化 `fields`、`reason`、`source_ref`、回答归因与 `delivery_state`／`delivery_state_at`），一个 Work 同时至多一个待答问题（work 范围线性化 + Work 行锁 + `(work_id, question_version)` 部分唯一索引，冲突重抛类型化 CLR13）；第二条不可变触发器冻结问题身份与内容，并在结算后锁定答案。`clara.answer_work_question` 是首答闸门：`_reserve_op` 先于任何效果、先锁行再比对期限、按字段种类校验（money 为整数分、date 为 ISO 日期、choice 属选项、account 属客户科目表）、重读客户状态与角色，类型化的 converge 拒绝（already_answered／stale_question／expired／cancelled／basis_changed／state_changed）携带 `detail.current` 让失败方看到权威记录；`get_work_question`／`get_work_pending_question` 是 B3／B4／B6 共同渲染的唯一记录；`list_review_queue` 以追加拼接（0146／0168 惯例，非重切——其在世函数体早已被 0017…0168 拼接）获得 `work_question` 行种类。bookkeeper 门槛只是人体工学：0006 的 firm 可见 select 策略让 viewer 也能直接读同一行。
-
-答案接收与向 Workflow hook 投递是两回事。投递只使用数据库接受的 payload，允许至少一次尝试；
-结算必须绑定有效 claimant／lease token，崩溃后核对真实 hook／run 状态。
-当前实现（#629）：control listener 的 delivered 戳以 `claimed_by = me and claim_lease_until > now()` 为条件，慢投递按半租期续租并有上限；Work question 的 `HookNotFound` 不再视为已投递——按 task／run 的真实状态核对，run 已推进则戳 delivered，否则停在 `delivery_state='hook_missing'`，由 Work reconciler 在宽限期之后、再探测一次（task 仍停靠、问题仍不可达、run 仍在途）才结算为可恢复的 `expired/question_unreachable`（hook 被消费与 `markRunningStep` 之间的窗口是真实的）；`expire_due_interruptions` 首次让 14 天期限对 Work question 生效（Retry 产生新 run、再问一次、版本 +1）。chat 车道的 clarify 自 #720 Half 1（0198）起同样受 14 天期限约束——同一次 sweep 把逾期的 chat clarification 移到 expired，listener 以 {kind:'expired'} 恢复停靠的 turn，turn 记下 clarify_closed 并结算 expired，释放会话唯一的 live-turn 名额；仅剩 HookNotFound 仍被当作已投递这一处不对称，由 #764 承接。技术 hook 过期不是业务 Work 自动完成或消失的理由。
-
-取消与新的业务操作在共享数据库边界确定先后。取消获准后不得接收新的会计行动；此前已接收的原子操作
-结算并保留回执，界面在最终边界明确前显示正在停止。取消不冲销已入账结果。
-当前实现（#630，0184）：`clara.accounting_work` 的行锁是准入与取消的唯一排序边界。`clara._record_journal_entry_core` 以 `for update` 读取 Work 并在 `_reserve_op` 之前按名拒绝 `work_cancelled`／`work_settled`（CLR13），但当该 Work 已持有 committed receipt 时整段跳过（崩溃后的重放必须仍能取回自己的回执）；同一事务内先以 `for key share` 持有 firm 行、再以 `for share` 持有负责人的 membership 行（顺序与撤权写入的顺序对齐，实测把原本 40P01 可达的死锁变成决定好的先后），使撤权与入账在提交时串行化（C79.2）。全局取锁顺序 **accounting_work → agent_tasks → agent_interruptions**（#640／0193 在其上增加一级：**accounting_plans → accounting_work → agent_tasks → agent_interruptions**；计划侧每个可能触达 Work 的写入都先取计划行 `for update`，且 0184 的写入者从不触碰 `clara.accounting_plans`，因此不可能构成环），由 `cancel_accounting_work`、`take_over_accounting_work`、`settle_work_run`、`claim_work_run`、`_record_journal_entry_core`，以及本轮重切为遵守同一顺序的 `cancel_agent_task`（0133）与 `open_work_question`（0180）对 accounting-work 任务统一遵守（此前两门先锁 task 后锁 Work，方向相反，会把一次 /activity 取消与一次 Work 级取消实测撞成裸 40P01/500）；`40P01`／`40001` 到达 web 时是类型化的 transient 409，不是裸 500。`clara.cancel_accounting_work` 是 Work 级取消门（runtime 车道、bookkeeper+、op_key 幂等、无存在性预言），依锁定顺序依次判定：已有 committed receipt → `already_completed`（带 receipt 与 entry id；取消永不冲销已入账分录，仍请求引擎中止）；Work 已终态、或 run 已终态但 Work 未及听闻（经 `_converge_work_terminal` 收敛后回答）→ `already_terminal`；已在停止中 → `already_stopping`（不重复 NOTIFY，不覆盖首个请求者）；否则真正发起取消——run 为 `queued`／`held` 或压根没有 run，经 `settle_work_run` 直接终结为 `cancelled`；run 存活则把 task 置 `cancel_requested`、Work 状态镜像为新引入的 `stopping`，并发 `clara_runtime_ctl` NOTIFY。`clara.settle_work_run` 在数据库侧做取消翻译：一个 `cancel_requested` 且无回执的 run，无论请求结果是 `failed`／`refused`／`expired`，一律结算为 `cancelled`，原请求保留在 `error.superseded`；已有回执的情形仍压过取消翻译，强制结算为 `completed`。翻译放在数据库而非 runtime，是因为 `claraWork.v1/v2.errors.ts` 已 deploy-lock——两者把 0184 才出现的 CLR13 `work_cancelled` 归类为未识别对的默认兜底 `state_changed`；教会闭包这一对新词只能等下一个 successor（`claraWork_v3`，#631 承接；此前记为 #737）。一个终态 run 永远不会把在世的 Work 搁浅：状态镜像、取消门与 `_converge_work_terminal` 共享同一条回执法则，且只对**当前** run 生效——被 retry 或 takeover 换下的旧 run 的迟到重放，`current_task_id` 已不指向它，什么都不写（`settle_work_run` 回答 `stale_task`）。同一轮把 `clara.cancel_agent_task`（chat-turn 任务的取消门）的答案加上 `changed`／`transition`（`cancel_requested`／`cancelled`／`already_terminal`／`already_requested`）判别——对一个还在 `queued` 的回合，"刚刚终结它"与"它早已终态"的 `status` 字面相同，界面不得再从 `status` 推断"这条回复早已结束"。Rail 的 Stop reply 是一台显式状态机（`idle → pending → stopped | failed{denied|finished|refused|transport}`）：`pending` 不宣告 Stopped；被拒绝的 stop 不清空实时缓冲并重新接上读取；回合时钟随回合一起退场；连续三次读不到 run 行时进入有界的 "lost sight" 状态（撤下控件与时钟，保留 task id、缓冲与待答问题，一次成功读取即清除），而不是把"行不可见"当作"回合已结束"。
-
-新对话清空对话上下文；归档改变历史可见性；真正删除普通文字必须传播到可搜索投影和恢复上下文。
-只保留必要、可读的工作依据、明确声明、被接受的答案、来源引用与回执，不能把完整旧 transcript 改名保留。
-Knowledge 撤回、证据生命周期、Work 取消和账务更正各有独立语义；备份保留边界需如实说明。
-
-SSE 传递解释和状态，不拥有执行。当前 stream 会在轮询时重新检查访问权。
-目标重连使用稳定 run／attempt／part 身份，合并持久结果、替换未完成段落，避免重复消息或重复成果。
-最终会计结论来自回执与当前对象读取；停止回复生成与取消 Work 是不同操作。
-
-<a id="documents-and-knowledge"></a>
-
-## 7. 文件、来源与 Client Knowledge
-
-文件流先验证媒体、扫描、建立私有保管和 source hash，再提取字节／文字与坐标。
-目标要求依赖文本的分类在提取成功后执行，随后生成该类型的结构化事实并交给适用 operation。
-发票／账单、银行月结单、员工报销等有各自 schema，银行 lines 不应被强行走通用发票 posting 路径。
-保管、提取、事实校验、Work 与入账状态正交；能够上传不代表能够理解或完成会计执行。
-
-当前发票／月结单的 witness lane 使用 OCR 文本与原始文件视觉两路读取，保留来源 hash、
-模型版本和一致性／算术校验；已有 Azure／结构化路径并存，并非所有输入统一经过 witness。
-UBL XML 已有结构化路径，CSV／OFX 及其他格式的业务覆盖程度不同。
-已接受目标用能力目录明确每一层支持程度，并补齐范围内缺失 executor，不能用 placeholder 缩减产品承诺。
-原件版本、字段来源区域、duplicate／refile／supersede 关系必须保留，改来源后重新评估受影响工作。
-异步 gate 的迁移必须保持消费契约：0177（成功提取后才进入 classify lane）要求先部署具备
-extraction-completed 消费能力的 facts_gate consumer 再切换 gate；回退先用新的 append-only 迁移恢复相容数据库行为，
-再回退 consumer，避免完成事件被忽略并推进 checkpoint 后永久漏处理。0177 已在本地 PG17 全链验证并合入 main；
-hosted 发布也按同一顺序完成：先发布具备 extraction-completed 消费能力的 consumer，再把 0177 落到线上数据库（frontier 0177），
-真实上传旅程与逐项 hosted 证据由 #606 记录——classify 任务在 document.extraction_completed 之后 98 ms 才创建，
-一份文件一个 classify 任务，下游 facts 恰好一次。
-
-**能力目录已落地（#624 / 0191，本地证据）。** `clara.document_capabilities` 把「能不能」从四处函数体里搬成
-一张全局表：每个「受理格式 × 文件类型」一行，四个正交层级各自取值 `supported｜stored_only｜unsupported｜planned`——
-custody（字节已封存并可取回）、byte_extraction（入库时有读取器把字节变成可查的提取内容）、
-typed_facts（某条 facts lane 能为这一对落下带来源区域的类型化事实）、business_operation（这一对能驱动会计操作）。
-种子是**派生**的：类型取自 0165 的 `clara._document_kind_roster()`（documents_document_kind_check 的活定义，20 个），
-格式取自 runtime 入库允许表（12 个规范 mime），层级由路由规则算出而非手写 240 行；迁移 tail 双向拒绝名册不一致。
-`clara._document_capability(format, kind)` 是唯一读者，两个未知方向都取诚实默认：未受理的格式什么都不声称，
-尚未分类的文件如实公布 custody 与 byte_extraction 而对 facts／operation 一律 `unsupported` 并标 `kind_known:false`。
-`clara.get_document_state(document, client)` 把四个状态、能力判定与 original／duplicate／refile／supersede lineage
-一次读出（准入与 `clara.get_document_extract` 完全一致），客户端 Documents 详情据此分别命名四个状态。
-**目录本身只有人类车道持表授权**：`clara_agent_ro` 在 `clara.document_capabilities` 上不持任何表权限，
-只经三个 SECURITY DEFINER 门（`clara._document_capability`／`clara._document_format`／`clara.get_document_state`）
-读它——与 0165 对其孪生表 `clara.document_kind_codeability` 的裁定同形（0191 tail 双向断言：表授权被恢复、
-或门被撤走，都直接拒绝应用）。首切曾同时授予两条车道，但目录是全局词汇、agent 侧谓词只能是 `using (true)`，
-那条授权既不划范围也没有读者，只是同一份内容的第二条入口。`clara.document_fact_validations` 不同：它是
-firm-scoped，两条车道各有自己的谓词（`jwt_firm()`／`wake_firm()`），agent 侧授权按设计保留。
-
-**Work 的 Sources 页签呈现同一组四态（#624 AC4「Documents AND Work」，wave-2 集成，本地证据）。**
-一条 Work 的 `source_refs` 里 `kind='document'` 的来源，在 #641 的 Work 详情 Results｜Sources｜Activity
-页签中与 Documents 详情复用**同一个** `DocumentStatePanel` 与**同一个** `clara.get_document_state` 读门——
-没有新门、没有第二套措辞：同一份文件在 Work 上不得比在 Documents 上读起来更乐观。id 先做 uuid 形状检查
-（`p_document` 是 uuid 参数，畸形值会是 22P02 而不是一个诚实状态），门返回 SQL NULL（文件归属另一客户）
-渲染为"这些状态在此客户下不可用"，`document` 来源却没有可用 document id 时如实说明而不发请求。
-证据：`components/work/work-detail.test.tsx` 三个 cell 与 `e2e/work-list-walk.spec.ts` 的 #624 AC4 走查。
-
-**这次量到的两处诚实边界（C-37「不能只凭文件名承诺支持」）。** OFX 有读取器（`parseStatementOfx`），
-但格式本身不带期初余额，`parseStatementOfx` 因此按构造返回 `opening_cents: null`，而
-`statement-corroboration.mjs` 的 `missingHeaderFields` 把它算作必需表头字段——所以 `corroborateChain`
-对**每一份** OFX 月结单都抛 `header_unreadable`，结构化 lane 之前也没有 continuity 回填。`ofx × bank_statement`
-因此是 custody supported／byte_extraction stored_only／typed_facts **unsupported**，并在 `limits` 里记下
-`opening_balance: absent_in_format`。同样地 XLSX／DOCX 的字节确实被结构化读取器读，但
-`clara._enqueue_invoice_facts_core` 没有 xlsx／docx 臂，任何类型都拿不到类型化事实；
-`text/tab-separated-values` 也不在 csv／ofx 臂里，所以 TSV 月结单终止于 `skipped_type`。
-
-**发票行项目（invoice line items）是本切片明确推迟的能力**，没有新的 `document_invoice_lines` 表：
-表头事实连同来源区域是真的，逐行事实不是，因此登记为 `limits: {"invoice_line_items": "planned"}` 而不是
-降低 typed_facts 层级——界面渲染这条限制，"facts recorded" 不能越过它读成完整。
-能力目录只说明 Clara **能做什么**，从不代表许可：外发同意闸门仍是唯一权威（#631）。
-
-**字段路径语法固定在唯一未校验的写边界（C33.4）。** `clara.document_regions` 有三个写者：
-`persist_invoice_facts`（0009，封闭七路）、`persist_witness_facts`（0095，封闭数组）——两者本就是闭集，本次
-**一字未改**——以及 `persist_document_extraction`（0123 活体），它一直逐字接受 `field_path`。0191 按 0177 仪式
-（pre-image sha 钉、单锚点 splice、owner／ACL／DEFINER 后置校验）在区域循环首行插入
-`perform clara._assert_field_path(elem->>'field_path')`。语法是**普查出来的**而非发明的：现存产出方会写
-`pages.1.lines.0`（Azure 版式）、`rows.0`／`paragraphs.0`、以及 `sheets.0.A1`（XLSX 单元格地址），
-所以纯小写语法会在第一份真实上传时打断 OCR 与 XLSX 两条热路径。反过来，XLSX 产出方也向语法靠拢：
-`r=` 属性是文件说什么就是什么（合并区 `A1:B1`、手改的 `$A$1`、实体转义或纯垃圾值），逐字插值会让 persist
-抛 CLR10、整笔回滚、任务停在 `running`，摄取 lane 于是反复重试同一份工作簿直到烧完重试上限——
-所以 `structured-worker.mjs` 的 `normalizeCellRef` 在**路径产生的那一点**把 `r=` 夹到 A1 形状
-（`^[A-Za-z]{1,3}[0-9]{1,7}$`），不合格就回退到 `cell_<序号>`（下划线是 A1 地址不可能有的字符，因此回退值
-永远不会和同一张表里别的单元格声明的地址撞车），原始属性保留在区域 locator 的 `declared_ref` 里，不丢证据。
-接受的形状是：点分段，
-每段为无符号整数或 `[A-Za-z_][A-Za-z0-9_]*`，至多 12 段、128 字符，首段取自十个已登记命名空间；NULL 通过。
-风险与对策一并写下：迁移 **prestate 会在任何已存 `field_path` 不合语法时直接拒绝切换**，
-`packages/db/deploy/0191-field-path-census.sql` 是发布前跑的只读普查；函数体替换落在热摄取路径上，
-必须在仓库既定的 writer-quiescence 窗口内应用，回滚同样先走新的 append-only 迁移。
-
-**算术校验已经落库。** `clara.document_fact_validations` 每个 facts extraction／银行月结单 × 具名检查 ×
-**修订号（`revision`）**一行，取值 `pass｜fail｜not_applicable｜unmeasured`，`detail` 带各项与残差。
-`revision = 1` 由表头侧的 `DEFERRABLE INITIALLY DEFERRED` 约束触发器在提交时写入（那时区域已齐），
-因此**没有任何一个在用的 persist 函数体被重切**。`unmeasured` 刻意与 `pass` 区分：旧的
-`persist_invoice_facts` 只为 total／amount_due／deposit 落 cents，六项恒等式在那套体制下根本无法求值，
-记成通过就是本工单要消灭的 placeholder success。
-`fail` 不阻塞也不隐藏：`clara._invoice_fact_state` 仍是依赖工作的权威闸门，这张表只让原因可见。
-记录必须一直**描述它引用的行**：只挂在表头表上的触发器对「晚一个事务单独插入子行」是结构性失明的，
-所以 `clara.document_regions` 也带一条子表侧的 belt——它在提交时重新求值：**与已记录裁决相同就什么都不写；
-不同就为该 (extraction, check) 追加下一个 revision**，既不 UPDATE 也不 DELETE，append-only 因此原样保留，
-读取方（`clara.get_document_state`）取最高 revision。它**不再拒绝任何写入**：首版曾以 CLR10
-`fact_validation_would_go_stale` 拒绝一切「晚到的区域」，wave-2 集成时实测这条规则红掉 291 个 db cell 与
-7 个 runtime cell，其中包括重新求值结果与已记录裁决**完全相同**的用例——拒绝一个自己也同意的写入，
-守的是写入顺序的约定，不是记录本身。belt 只为构成恒等式的七个 `field_path` 排队，
-因此五万格的 XLSX 摄取不会把五万个条目压进延迟触发器队列。月结单那一半由 0038 自己挂在
-`clara.bank_statement_lines` 上的 belt 保证（line_count 一致性）：那一侧**保留更严格的 CLR10 拒绝**，
-因为月结单申报的 line_count 是单据本身的一部分而非派生裁决；0038 是已合入的迁移，0191 只断言它仍在。
-
-**Knowledge 目标：**一个受治理的服务和产品入口，下层保留 typed canonical facts、稳定身份、
-来源、声明、修订与依赖关系；wiki、搜索、索引和可读 OKF bundle 是可重建投影。
-采用维护中的 OKF v0.2 可读交换语义及 source → wiki → ingest/query/lint 的维护思路，
-不引入独立 Google Knowledge Catalog 产品，不把外部文件标注的“verified”视作认证事实。
-
-明确的长期资料／偏好自动保存，注明 actor、scope 和有效条件；提取事实绑定具体来源版本；
-模型假设和历史经验保持 advisory。一次成功或反复出现不能升级为政策，也不能授权未来分录计划。
-默认局限于当前客户，明确且有权限时才推广 firm default，并保留客户例外及不同 AR／AP 角色。
-
-身份不再要求人先手动 binding；Clara 从证据维护身份与 alias，但保留稳定 counterparty ID 和历史引用。
-**已实现的 runtime 对话车道（`chatTurn_v19`，本地验证；hosted 已于 2026-09-14 随 runtime v83 发布，证据见 #612／#644）。** 捕获工具 `remember_client_information` 经非冻结的 `packages/runtime/lib/knowledge.mjs` `captureKnowledgeFor` 调 `clara.capture_knowledge_for`：key 必须是服务器持有的 `knowledge_keys` 注册行（模型自造的 key 得到具名的 `knowledge_key_unknown`），`p_asserted_by` 是这场对话的真人、由门重查其在职与该 key 的 rank 下限（工具从不冒充），`source_kind` 只开放一个 chat 回合诚实说得出口的两个（`user_statement`／`model_inference`），trust 仍由数据库从 source_kind 派生——因此模型把自己的推论写进 policy key 会被 `knowledge_trust_insufficient` 拒绝，即便发问的是事务所 owner。op_key 是确定性的 `stableOpKey`，重放的 step 落回同一条修订。0192 的 source 袋是封闭的五个键，chat 没有可放进去的东西，所以对话本身的出处走 `basis` 文本与门自己盖的 `recorded_via='clara_runtime'`。
-**诚实的 pack context step 补上了 #603 的缺口。** `loadContextStepV10` 的 `catch { contextPack = null }` 让「读不到」与「没有」是同一个值；v19 并列的 `loadKnowledgeContextStepV19` 不能这样——`readKnowledgePack` 从不抛、从不回 null，`status:'ok'` 渲染为有界、封闭、逐行标注 trust 与 source_kind 的块（legacy `client_fact` 行标为 in force，因为那五个 key estate 今天仍直接读 `clara.client_facts`），`status:'unavailable'` 渲染为「client knowledge unavailable: <reason>」并明说这不是「这个客户没有记录」——绝不是一个空 pack。machine 车道的 `p_firm` 绑定由这一步传入（0192 经 #644 第二轮修复后 **要求**它：缺失是 CLR10 `pack_firm_required`，指错 firm 是 CLR11），块本身有记录条数与单值长度两个硬上限且截断会说出来，并在块首写明其内容是**供给的数据、从来不是指令**。`knowledge_version` 水位以 TEXT 原样带回该回合，供 #631 的执行轨迹记录「这次推理读的是哪一版」。
-改名不改身份，merge 保留来源及原始引用；没有历史 lineage 时不承诺任意 unmerge。
-按客户、期间和工作目的渐进检索，记录实际使用的版本，并提供读取具体来源和账务对象的工具。
-
-修订、来源变化、完成工作和更正生成可去重事件，只更新受影响概念、引用、经验及索引。
-实质冲突触发共享问题；明确、范围充分的更正无需再次确认。相关变化使待执行 Work 重查，
-无关 KB 修订不阻塞全客户。投影失败不回滚已完成账务；已入账错误仍走会计更正流程。
-**已实现的 Knowledge 记录（#644 / `0192_client_knowledge_records.sql`，本地 PG17 全链验证；hosted 已于 2026-09-14 随 runtime v83／frontier 0195 发布，见 #612／#644）：**
-`clara.knowledge_keys` 是代码填充的类型目录（`assertion｜extracted_fact｜preference｜policy`，
-带 `value_shape`／`validated_against`／`scope_default`／`authority_bearing`；0055 的五个 legacy fact key
-按值搬入，另加 A5／A6 访谈当前真实产出的八个 key）。`clara.knowledge_records` 一行一个修订：
-稳定 `record_id` + 单调 `revision_n`、`scope_kind ∈ (client|firm)`、jsonb `applies_when` 与其生成 digest、
-`effective_from/to`、指向 `documents`／`document_extractions`／`document_regions` 的四个同 firm 复合外键
-（提取事实是**链接**而非复制）、每 firm 单调的 `knowledge_version` 水位、以及"只 supersede 不 update"的历史。
-`trust` 由 `source_kind` **派生**，三重强制：表上内联 CASE CHECK（restore 时无需任何函数即生效）、
-目录 `authority_bearing` 触发器、门自身的拒绝——因此 imported bundle 自称的 "verified" 或模型推测
-永远不能成为 policy 或授权。`policy` 在本切片是**描述性**的：入账路径不读这些行。
-门：`capture_knowledge`／`correct_knowledge`／`withdraw_knowledge` 与三个 C13 读（仅 `clara_authenticated`）；
-`capture_knowledge_for`／`get_knowledge_pack`（仅 `clara_runtime`，前者校验被署名真人的在职与 rank，从不冒充）；
-`promote_plan_answers_to_knowledge` 是唯一双车道名字，把已 commit 的 onboarding 答案按
-`clara.knowledge_plan_item_map` 搬入同一记录（CB-AE2E-030）；车道由**调用者**决定——
-带 claims 的真人须是该 plan 所属 firm 的 admin，机器车道须是 `clara_runtime` 角色见证**并**
-显式传入 `p_firm`（与 plan 自身 firm 不符即 CLR11），两者皆不满足是 CLR03，因此
-claims 缺失或畸形的 `clara_authenticated` 会话既进不了机器车道，也无法选择写入哪个租户。
-`get_context_pack` **未** splice：
-`get_knowledge_pack` 是新函数，便于 #658 的渐进检索取代它而不动 spliced body。
-`clara.client_facts` 与 `clara.record_client_fact` 逐字未改，只被 `list_client_knowledge` 以
-`source_kind='legacy_client_fact'` 只读 UNION 进同一 register，且**从不被同 key 的 knowledge 记录遮蔽**：
-五个 legacy key 至今仍由本文件未触及的代码直接读 `clara.client_facts`——entity_type／msic 经 0055 S6
-splice 进 `get_context_pack`（0055:765）、trade_nature 经 `_close_gate_closing_stock`（0056:1283）、
-customer_identity_policy 经 0062 name-only guard（0062:226）、banking_arrangement 经 0121:4797——
-且本切片不做 dual-write，所以 legacy 行带 `authoritative=true` 与新记录并列显示，界面说明 Clara 实际据以行事的是哪一行。
-同理，client 行遮蔽 firm 默认值是**按 applicability**（`applies_when_digest`）而非按 key，窄条件的 client 例外不会抹掉无条件的 firm 默认值。
-`knowledge.captured`（ignore）／`knowledge.corrected`／`knowledge.withdrawn`（context_update）已注册，
-但**尚无消费者**——三个 wake-bound decision 都会铸出本切片无人执行的 held agent task，所以刻意不用。
-wiki、coding-pattern pack、渐进检索与投影仍未统一，仍由 #658／#663 承接；
-`packages/runtime/lib/knowledge.mjs` 已就位（`readKnowledgePack` 永不返回 null、永不抛出），
-但 chat 车道的捕获工具与诚实 pack 步骤要等下一个冻结的 `chatTurn` 版本才接线。
-
-#620（0190）给来源文件字节加了保管与最小权限的第二道门。写路径的凭据形状是 vendor 已文档化模式（Storage
-JWT 的 `role` claim 携一枚专用 Postgres 角色）的严格子集：`clara_storage_docs` 是 `nologin noinherit`，
-部署脚本对每一个升级位取反断言、任一为真即整段中止（storage-provision.sql:39-55），仅被 `grant` 给
-`authenticator` 以满足 Storage 自身对 JWT `role` claim 的 `SET ROLE`（:60），只 `grant select, insert on
-storage.objects`（:62-64），两条策略都以 `bucket_id='firm-docs'` 加内容寻址 key 正则收口（:67-80），
-UPDATE／DELETE 永不授予（:82-83）。边界因此是两段而非一段，storage-battery 也照此分两半断言：vendor 明
-载 Postgres 先判表级 grant、再套 RLS，两种失败形状不同（缺 grant 报权限错误、策略不匹配返回空集；
-supabase.com/docs/guides/getting-started/api-keys §"Postgres roles and Row Level Security"，2026-09-13
-经 Context7 复核），所以 B10 既断言 `has_table_privilege` 矩阵（insert／select 为真，update／delete／
-truncate／references／trigger 为假），也断言 `pg_policy` 上恰好那两条策略的谓词文本。同一页也是排除
-`service_role` 的依据：它带 `BYPASSRLS`，策略对它根本不生效，用它做保管凭据等于没有边界。vendor 配方里的 `grant anon to <role>` 被省略，但这是纵深防御的卫生
-做法，不是防线本身——`clara_storage_docs` 本已 `NOLOGIN NOINHERIT`，真正拒绝该角色继承 anon 更宽权限的
-是这个角色属性，缺那条 grant 与之无关（角色成员的 INHERIT 未指定时取新成员自身的继承属性，不取被继承角
-色的）。2026-07-26 有一次可作前车之鉴的误诊：把一次用 **PUT**（Storage 的 replace／UPDATE 端点，
-`putCanonical` 从不调用的动词）探测到的 403 误读为需要授予 UPDATE，当日回退（wave-b-storage-update-
-amendment-REVERT.sql:3-24），真正根因是 Cloudflare Pages 构建缺 `NEXT_PUBLIC_CLARA_RUNTIME_URL`；此后任
-何"该不该多给这枚角色一点权限"的判断都必须先用运行时实际调用的动词重放，而不是重读一段可信但未必对的注
-释。端读侧维持代理、拒绝 signed URL：后者一经签出、到期前不可吊销，代理换来的是逐请求重读 live
-membership 的即时吊销（authz.mjs:146-152，无缓存）；"expired link"因此被定义为会话 JWT 中途过期，而非
-某种链接机制。0190 新增的 successor 门 `clara.get_document_for_human_read_v2(uuid,uuid,uuid,text)`
-（0190_document_byte_door_v2.sql:176-269）在 v1 的 firm-membership 谓词之外加了三样：可选 `p_client`
-只认该文件在同一 firm 下 `retired_at is null` 的 ACTIVE filing，未命中并入与"不存在"相同的 CLR11 形状，
-不新增 existence oracle（:214-239）；`storage_path`／`bytes_verified_at` 任一为空答 CLR13
-`custody_pending`——唯一被允许与"不存在"区分的拒绝，因为文件确实是调用者自己的（:246-249）；每次成功在
-返回前写一行 `clara._audit`（:256-257），这是 v1 从未做、而 0162 的 artifact 门一直做的对称。**刻意没
-有加第四样：职级门槛。** 来源字节的读取门槛仍是"该 firm 在职成员"，与 v1 一致——viewer 读得到，
-`rig-docs-download-door.test.mjs` D1.2 正面钉住这一点。这是一次明确的裁定而非疏漏：本票据把范围收在
-firm＋client 两层，per-user 的文件 ACL 属另一张票，而把 bookkeeper+ 悄悄装进一扇读门会让"谁能看见这份
-文件"变成两套互不知情的规则。若日后要收紧，改动点就是这句话与 D1.2。函数钉
-`plan_cache_mode=force_custom_plan`（0183 纪律，从 proconfig 断言而非 prosrc，:357-363），只 `grant
-execute` 给 `clara_runtime`（:284-285），尾部对 8 条 walled role 逐一反向断言不可执行，v1 的函数体与
-EXECUTE 授权都以运行本迁移前 pin 的字面量 sha／ACL 核对未变（:126-143,421-441）。AC3『versioned』
-条款在此裁定为默认值（owner 可重新裁定）：对来源字节而言，『versioned』＝内容寻址不可变性——不同字节即
-不同对象、写路径 `x-upsert:false`（storage.mjs:178）、UPDATE／DELETE 永不授予（见上，storage-
-provision.sql:82-83）、`clara._tf_documents_immutable` 只放行 `storage_path`／`bytes_verified_at`
-同时改变恰好一次（0007_document_pipeline.sql:923-949）——叠加 `clara.document_filings`
-（0007_document_pipeline.sql:63-98）与 `document_extractions.superseded_by` 的更正链
-（0007_document_pipeline.sql:190,663-674）；schema 级别的单文档版本表不在 #620 范围内，留给后续
-ticket。路由
-`GET /api/documents/:id/bytes`（documentRoutes.ts）以 `?client=<uuid>`（可选）与
-`?disposition=inline|attachment`（默认 inline）为 query，顺序是 JWT（401 `unauthenticated`，零次 DB
-往返）→ id／client 形状（404，同一不存在形状，故意不用 400 以免把"文件 id 合法"泄成第二种信号）→
-disposition（400 `invalid_input`）→ 一次 `clara_runtime` 事务内的 v2 门读（:161-231）；门的三种拒绝映射
-404 `not_found`（CLR11/CLR03）、409 `custody_pending`（CLR13）、400 `invalid_input`（CLR10），Storage 侧
-再分出 `object_missing`／`credential_refused`／`unavailable`／`unconfigured` 四种 reason
-（storage.mjs:236-261）与独立的 502 `checksum_mismatch`；成功响应的 `ETag` 是内容地址本身的 sha256、
-`Content-Disposition` 为 `inline` 或按 RFC 5987 转义的 `attachment; filename*=UTF-8''…`、
-`Cache-Control: private, no-store`（documentRoutes.ts:241-252），同源代理已把 `etag` 补进响应头白名单
-以配合（route.ts:113-120）。Web 侧的状态梯子不与 coarse wire kind 混同，`?document=<uuid>` 以 Activity
-的 push／replace 历史纪律定址并在关闭时把焦点交回触发行（url-state.ts；#719 的 Documents 半并入此处一并
-解决）：
-
-- `unauthenticated`（会话中途过期，指向重新登录，不是某种链接机制）
-- `denied`（403 no_membership，不重试）
-- `not_found`（404，absent／跨 firm／跨 client 同一形状，不重试）
-- `custody_pending`（409，调用者自己的文件，字节尚未核实，可重试）
-- `storage_unavailable`（502/503 `storage_error`，可重试）
-- `integrity`（502 `checksum_mismatch`，不重试——下一次读到的仍是错的字节）
-- `malformed`／`transport`／`server_error`（响应形状或传输本身的失败，后两者可重试）
-
-（bytes.ts:122-155）诚实的局限：Storage RLS 只按 bucket 加 key 形状收口，从不比较调用者与 key 里的 firm
-UUID，因此这枚凭据能读到任何 firm 名下合规 key 的对象——firm 隔离完全压在这一枚 definer 函数上。这不是推
-测，是 storage-battery 用真实 Supabase Storage 正面证明的：B9 断言另一 firm 命名空间下的合规 key 对这枚
-凭据可写可读（packages/db/storage-battery/README.md:31,54-60）。这枚凭据也不止一个消费者：
-reporting-render 的字体／logo 读取复用同一 docs key family 与同一 credential，明确设计为"no new storage
-role"（fonts.mjs:22-31）；backup 持有 service_role（BYPASSRLS，Supabase 最宽凭据），其"firm-docs
-LIST/READ"边界目前只是注释约定而非授权（storage-mirror.mjs:15,31）；runtime 自身还有第三个此前未被列
-出的消费者——reconciler 的粗粒度完整性巡检用同一凭据下载并重新哈希最多 10 份文件，不做任何 firm／
-membership 检查（reconciler-documents.mjs:37,498-503）。#620 不在本票据内为这两个卫星重新铸造角色，把
-追踪结论记在此处作为书面风险接受，移交给已把这两枚角色列为自己范围的 #672（renderer，issue 明文
-Blocked by #620）与 #674（backup，AC1 明文列 roles and ACLs）。
-
-<a id="close-reporting-and-tax"></a>
-
-## 8. 计划、关账、指标与正式报表
-
-目标 Accounting plan 保存金额／计算依据、时间区、有效期、频率、授权和版本，occurrence 记录独立执行。
-到期事件启动 Work，产生的分录仍经过当前权限与期间检查；重复扫描不能重复入账。
-新计划及历史补提需要明确授权范围，暂停／结束阻止未来接收。观察到重复扣款不自动创建计划，
-也不代表产品具有发起银行付款或管理 mandate 的权限。
-
-当前实现（#640，0193）：`clara.accounting_plans`（kind 仅 `recurring_journal`／`reversing_journal`，status active／paused／ended，purpose，`authority_kind` 单值 `explicit_instruction`，`authority_ref` 指向本库中的 `clara.accounting_work` 或 `clara.agent_tasks` 一行并在开门时**解析**——Knowledge 偏好、计算政策或重复扣款都解析不到，按名拒绝 CLR10 `authority_ref_unresolved`；`authority_rule` 亦按名拒绝 `authority_rule_unsupported`，留待后续加法式放宽）、`clara.accounting_plan_revisions`（frequency monthly／quarterly／annual，day_rule day_of_month(1–28)／last_day_of_month，timezone 单值 `Asia/Kuala_Lumpur`，effective_from／to，basis + digest，auto_reverse 与 `next_period_first_day`；一行写定后只能被 supersede，`(plan_id) where superseded_at is null` 部分唯一索引保证「一个在世版本」）与 `clara.accounting_plan_occurrences`（**`unique (plan_id, due_date)`** 是重复扫描的收敛点，`unique (plan_id, leg, period_key)` 是修订绕不过去的那条法则——把每月 15 日改成 10 日之后，新的日期指向的仍是同一个会计期间，仅靠日期唯一会让一个期间入两笔账（review B1）；`unique (work_id)` 使「哪个计划创建了这个 Work」单值；identity 只追加，`work_id` 一次写定，唯一出口是人工补提对一个被**取消或失败**且无 committed receipt 的 Work 重新接收（`attempt` 计数，第二次起 intent key 追加 `:a<attempt>`，review S7；0184 的过渡态 `stopping` 不在此列——它正在走向 cancelled，`clara._plan_work_stands` 按名把它当作「不成立」，review NOTE-2）。被换下的那次尝试不再从计划视野里消失：`attempts` 是一列只追加的 jsonb 台账，每次接收记一行 `{attempt, work_id, intent_key, revision, admitted_at}`，`list_accounting_plan_occurrences` 投影它，`get_work_plan_origin` 经 GIN 索引的包含探针把**旧** Work 也解析回本计划并答 `superseded`／`attempt`（review SHOULD-2：此前旧 Work 只剩 `clara.audit_log` 记得）。`accounting_plans.authority_from` 是写定即冻结的授权下界：修订不得把 `effective_from` 移到它之前（CLR10 `effective_from_before_authority`，review B3），它同时是 `period_key` 对齐所用的锚点。**改频率的修订另有一堵墙**：`unique (plan_id, leg, period_key)` 在同一对齐下精确、跨对齐则完全失灵——period key 由在世版本的 frequency 算出，月度的 `2026-09-01` 与季度的 `2026-08-01` 是指向同一个九月的两个 key，于是改频率之后同一个期间又被入了一次账（双向实测）。`clara.revise_accounting_plan` 因此在 frequency 发生变化时，以 `clara._plan_covered_through`（该计划已跑过、且 Work 仍成立的最后一个期间之末）为尺，拒绝新对齐首个期间落在其当日或之前的修订：CLR10 `period_already_covered`，并指名那个期间与最早可行的 `effective_from`；frequency 不变则对齐不变，仍由 B1 的 `period_already_admitted` 约束被挪动的到期日（review SHOULD-1）。转回 leg 的窗口上界延伸到 `_plan_reversal_date(effective_to)`，否则授权正好结束在最后一次计提当天时，那笔计提永远无法被冲销（review S6）。转回的准入条件是本期计提**已经入账**（`clara._plan_primary_entry`：该计提的 Work 持有 committed receipt，且该 receipt 所指的 `clara.journal_entries` 行仍然在世——已 approved 且未被 `reversed_by` 冲销），并把那个 `entry_id` 写到 occurrence 行的 `reverses_entry_id`（对 `clara.journal_entries` 的真实外键）与该次转回 basis 的 **memo** 上——memo 在 `_journal_basis_canonical` 的规范形内、随 digest 一起被绑定，且是 basis 中唯一会落到 `clara.journal_entries` 的字段，因此落账的转回在**账上**就指名自己冲销的那笔分录。写 memo 而不是加一个 basis 顶层键，是实测结果而非风格：`claraWork.v1.tools.ts` 的 `journalBasisSchema` 是 **frozen 且 `.strict()`** 的，多一个键会让 run 忠实回显的 basis 过不了校验，Work 直接 `failed`／`no_effect`（`packages/runtime/tests/plan-occurrence-e2e.mjs` leg 5 测到并改正）；memo 超过 4000 字上限时不追加，结构化链接仍在 occurrence 行上。上一轮的「仍然成立」（已接收、且 Work 不是死局）不够：它只在**接收那一刻**判一次，而一个 `queued`、零回执的计提满足它——实测扫描一：计提接收；扫描二：转回接收；随后 `cancel_accounting_work` 杀死计提，却没有任何东西撤销那张转回 Work，它照常 claim／post／settle，账上落下 `2026-09-01 Dr 1150 99000 / Cr 6100 99000` 一笔什么都没冲销的分录（review round 2 BLOCKER-1）；计提在锁期上结算 `failed` 时同形，且不需要任何人动手。改判到「已入账」把窗口关在计划唯一能控制的时刻：一个持有 committed receipt 的 Work 不可能再被取消成空（0184 的 `settle_work_run` 会强制 `completed`）。`ck_plan_occurrences_reversal_entry` 让「已接收却不指名分录的转回」成为这张表存不下的一行，而不只是某个函数的拒绝。**本切片仍未关上的一格**：转回接收之后、落账之前，有人经 0004／0007／0009／0027 的更正车道把计提那笔分录本身冲销掉——准入时重读在世性，所以窗口恰好是这段间隙；要关它需要在 `clara._record_journal_entry_core` 内加墙，而 0193 不得重切该函数体（0194／0195 以 sha256 钉住它），另立后续项。三张表不授予任何应用角色权限，全部经 definer 门到达。到期事件通过 0178 自己的 `clara.admit_journal_work` 以计划授权人身份接收，intent key 为 `plan:<plan>:r<rev>:<due_date>`——因此即使绕过 occurrence 行也无法接收第二个 Work。人类门：create／revise／pause／resume／end／`request_plan_catch_up`／preview／list／get／list_occurrences／`get_work_plan_origin`（clara_authenticated），运行时门仅 `clara.wake_due_plan_occurrences(int,text)`（clara_runtime）。暂停只阻止未来接收，从不取消已接收的 Work（取消是 0184 的 `cancel_accounting_work`）；结束为终态。
-
-cadence 决定（C54.3）：计划到期扫描**每个 leader cycle 跑一次**，而不是像 SST／lint／FA／adjustment 那样的日更皮带——其成本是一次以**活跃计划**为行源的查询：`ix_accounting_plans_active`、`ix_plan_revisions_live` 两个部分索引界定行源，每个这样的计划再由 `clara._plan_admissible_event` 跑数个等值探针，全部由 `uq_plan_occurrences_plan_due`（plan+日期）与 `uq_plan_occurrences_period`（plan+leg+期间）承担，occurrence 表上没有任何顺序扫描；`due_date <= clara._book_today()` 的闸门在该 picker 内部而不在外层 WHERE（0042 S5.20 的**唯一**房屋法定日期，`(statement_timestamp() at time zone 'Asia/Kuala_Lumpur')::date`；首切在五处自行拼写 `(now() at time zone r.timezone)::date`，那是同一个房屋事实的第二个持有者，而且把「今天」钉在**事务**开始而非语句——round-7 finding C；`revisions.timezone` 的单值 CHECK 与该权威持有同一个时区，故语义不变），空库返回零行；日更会让吉隆坡的到期日与 Work 之间出现最多 24 小时延迟，而验收讲的是「到期事件」。扫描每个计划每次只取**一个**到期事件，取法由 `clara._plan_admissible_event` 决定（它读取该计划自己的 occurrence 行，因此是 STABLE 而非纯算术）：primary 候选是当天或之前**最近**的一次计提，且其日期与其**期间**都尚无该 leg 的 occurrence；reversal 候选是当天或之前**最早**的、其本期计提**已经入账且该分录仍在世**的一次转回（只探最近的 k 与 k-1 两期——不是因为更早的期间不可能未结，而是扫描从不回填：更早的漏转回与更早的漏计提一样归补提）；两者皆有时取**较早**的日期——上期转回先于本期计提，这是账面唯一可接受的顺序。转回必须等自己的计提**落账**，是一条正确性规则而非优化：否则 leader 停机跨过一次计提后，转回日一到就会单独入账一笔借贷互换、却什么都没冲销的分录，且无任何拒绝（review B2 与 round 2 的 BLOCKER-1；门侧同一堵墙以 CLR13 `reversal_before_primary` 记录在 occurrence 上，`primary_state` 区分 `no_occurrence`／`not_posted`／`entry_not_live` 三种事实，供人工补提这一路径）。错过的期间一律归显式补提：`request_plan_catch_up` 给定窗口、最早优先、每次至多 12 个，窗口早于 `effective_from` 按名拒绝 CLR10 `catch_up_before_authority`。到期算术全部在数据库（`clara._plan_due_*`），runtime 皮带 `packages/runtime/lib/plan-occurrences.mjs` 不自行推导任何日期，也不读任何 operator 开关——不存在「全局开启自动执行」开关，0193 的 tail census 对该函数在世函数体断言了这一点。折旧、预付摊销与关账适配器不在本切片，按名拒绝 `plan_kind_unsupported`；0045 的 adjustment_templates 车道原样保留，仅在创建计划时以 `overlap_warning` 提示账户重叠（advisory，不拒绝），两条车道的收敛另行立项。
-
-Close 按客户及期间组织准备、证据覆盖、恒等式、最终检查和锁定。
-目标区分不可豁免的会计恒等式、人可明确接受的某项缺证据例外和 advisory 信息；
-尚未测量的检查保持 pending。按时开始不等于准备完成，Clara 不能自行豁免证据或硬约束。
-当前 beginning-close 会冻结期间，银行结算须在该边界前完成；close 按年度顺序串行，carry-forward 幂等。
-目标自动执行须明确接入现有 period／authority 约束；迟到资料的重开或后续期间调整仍依赖用户决定。
-**关账检查 `closing_stock_present` 自 #643（0194）起有了真正的 producer。**该闸门从 0056 起就测量 `journal_entries.flags ? 'closing_stock'`，并在答案旁附 `no_producer_verb: true`——因为全估无任何写者设过这个 flag，对它的 attestation 因此是对一件**缺失工具**的临时接受，闸门自己也这么写着（"Drop this key when the producer verb ships"）。0194 重切该 evaluator：那句自白去掉，答案改为点名产出它的 `clara.periodic_adjustments` 行、Work、分录与它的过账日（`closing_stock_posted_on`——该列此前被选进 evaluator 的行里却从未发出），并保留旧的 marker 合同（一条没有调整行的 marker 分录照旧通过，只是点名不到 producer，所以 #643 之前的真实账册不会被追溯判负）。这会移动 `measured_digest`，因此绑在旧答案上的 attestation 不再生效——这是刻意且对用户可见的：事务所接受的是一件不存在的工具，而那件工具现在存在了。在世判定不变（冲销的原件与其镜像都不是成立的申报），`close-closing-stock-producer.test.mjs` 在活的 evaluator 上钉住这四件事。
-
-首页数字来自一致数据库视图下的 versioned metric pack，携带 unit／currency、period／as-of、
-computed-at、定义版本、source watermark 和 coverage；无权限、缺覆盖、失败不能变成零。
-金额计算与 AR／AP 归桶在可信数据层定义，chart 和表格读取相同账务范围与金额，不各自重算。
-Work 的 attention 计数独立于财务期间选择，图表可追到其账务来源。该统一指标合同是目标建设。
-
-正式报表遵循 open → evaluate → seal → render：封存输入和定义，确定性计算数字，
-数值占位符绑定记录的 cell，renderer 使用已确定的 display text，不让模型重打金额。
-模板／框架、版本、权限和文件 hash 支持复现；封存快照及生成 bytes 不可静默替换。
-目标更正流程使受影响报告过时或被替代，保留原 basis 与文件，并在授权下生成新版。
-探索性分析可以使用模型，但必须与正式制品区分，不能越过 seal 链。
-SST watch、税务期间与计算基础已存在部分 SQL 能力；beta Tax 仍未激活，不能把基础表等同于可用申报服务。
-税率、阈值和法律文字是有生效日期的外部输入，在实现或启用相应能力时验证，不固化为架构常量。
-
-<a id="frontend-and-identity-boundary"></a>
-
-## 9. 前端和 Agent UI 的技术合同
-
-Web 路由区分入门／认证、firm、client 与独立全屏对象；`components` 承担界面，`lib` 承担 scope、
-领域适配和读写边界，`messages` 管理文案，`app/globals.css` 管理共享语义 tokens。
-`getRows` 使用用户会话读取 PostgREST，`callDoor` 提交受控 RPC；提交后重新读取权威对象，
-表单草稿可以保存在本地，但金融结果不能乐观伪造。Runtime 通过同源 allowlisted-header proxy 访问。
-
-目标采用 A Home 的轻量玻璃与财务布局、B Work 的列表／详情；Sidebar 组织主导航，
-Accounting 分组业务对象，Work 展示执行，Reports 展示输出。稳定 URL、返回行为和 scope 都是合同。
-共享 Shell、字段、金额、日期、空／忙／错状态及 typed parts 供各旅程复用，页面拥有自己的业务组合。
-Sheet／Dialog／Tabs 等只承担适合的交互，不能把完整对象生命周期塞进无地址的临时弹层。
-
-现行实现（#614）：`app/(firm)/layout.tsx` 渲染唯一的导航面——shadcn／Base UI Sidebar（桌面停靠、
-窄屏为一个 Sheet）、sidebar 头部的 scope switcher 与顶栏 Breadcrumb；全部目的地、角色下限、当前项解析、
-面包屑祖先与切换客户时"保留目的地种类"都来自 `lib/navigation/tree.ts` 一份注册表，⌘K 的 Go 行由同一注册表派生。
-Firm 层为 Home／Clients／Work／Activity／Operator／Settings（Needs you 是 `/work?view=needs-you` 的保存视图，
-运行中的 agent task 也在 Work，Activity 自 #632 起是可过滤的归因事件流，Operator 自 #615 起是 operator 事务所 owner 专属的准入支持目的地），Client 层为 Home／Work／Documents／Accounting
-（Journals／Bank／应收应付／Assets／Plans／Accounts／Close／Tax，后四者深链接到 Registers 的 `?tab=`）／Knowledge／Reports；
-客户对象 URL 保持稳定，旧 `/needs-you` 与 `/admin/*` 以 307 迁移到 `/work`／`/settings/*`（#615 起 `/admin/registrations` 与 `/settings/registrations` 都直接指向 `/operator`——Next 每个请求只匹配一条规则、不会对自己的 destination 再跑一遍表，所以两跳写成两行而非串联）
-（`lib/navigation/legacy-routes.ts` 经 `next.config.ts` 挂载），不可见或错 scope 的客户在壳内显示明确的
-not-found 而非跳回首页。client epoch／remount 边界不变；未发送的 Clara 草稿按 (altitude, thread) 存在
-threadStore，切换客户或关闭 rail 不会丢失也不会跨客户携带。A Home 仪表与 Settings 各分区的真实内容仍是目标，由 #650／#659／#626／#635 承接（B Work 列表／详情已由 #641 落地，见下）；这里的证据是本地单元与浏览器套件，hosted 证据以 #614 记录为准。#623 增加了 `/clients/:id/accounting/journal/new`（C3 composer：精确分位、平衡校验、首个无效字段聚焦、memo／description 上限、草稿按 user／firm／client 保存并携带 intentKey、丢失应答后同 key 重放、409 链接到已存在的 Work）、`/clients/:id/work/:workId`（B3 Work detail：queued／running／awaiting_input（显示待答问题）／completed／refused／failed／unavailable／denied／not-found，basis 来源、bundle 版本、60 秒延迟提示、Retry 保留逻辑身份、"Edit as new draft" 以新 intentKey 预填）与 `work_accepted`／`work_status`／`work_result` 卡片（B6）；`work_status`／`work_result` 目前只在 run 的 live stream 上，持久面是 `accounting_work.result` 的轮询读取。
-#629 让同一个 Work question 在三处以同一记录、同一表单、同一道门出现：B3 Work detail 在 `awaiting_input` 时内联渲染 `WorkQuestionPanel`（`get_work_pending_question` 按 Work 取记录；单一事实用 Field，2..6 个字段用本地分步的 stepper——shadcn AI Questionnaire 在此 Base UI 项目中不可安装，故以项目自身 Field 组合；money 走唯一的 `parseAmountToCents`／`MoneyInput`，date 为 ISO 输入，choice 为 RadioGroup，account 为客户科目表的 Select；草稿按 user／firm／client／question／version 保存；converge 状态重读权威记录并保留草稿；`operation_in_flight` 是暂态而非收敛；已接受答案按字段种类格式化后替代表单），B4 Needs-you 以第十种 row kind `work_question` 内联同一表单（回答后焦点落到区段标题而非 body），B6 的 `work_question` 卡片与 `work_status`（awaiting_input）卡片以 `announce="none"` 挂载同一表单（一个 announcement owner——transcript）。`work_question` part 与其它两种一样只在 live stream 上（#641 议题）。
-#632 让 `/activity` 成为真实的事件流：`clara.list_activity`（0181，SECURITY INVOKER 的三源 union——`firm_timeline_visible`／`agent_receipts_visible`／`operation_receipts`——inline bookkeeper 门槛、封闭的 kind 集合 documents／journal／close／report／agent／work、按 `(occurred_at desc, id desc)` 的不透明 keyset cursor 与逐臂 top-k 合并、`until` 为排他上界）与 `get_activity_event`（无 oracle 的详情）；页面把筛选写入 URL（`?client=&kinds=&since=&until=&event=<source>:<id>`，client 经形状守卫），Sheet 详情由 `?event=` 定址（Title／初始焦点／Escape／Back 保留筛选与位置），loading／首次为空／筛选无结果／更多可加载／刷新保留旧行的 stale／首次读取失败／denied（含 401）／去重 八种状态各自独立，corrections 双向链接到 Journals 的 `?entry=`；coverage note 由未接线的 receipt-kind 名册驱动（report 尚无生产者，#672）。
-#634 让 C3 composer 有可选「Evidence」选择器（客户已核实归档的文件，显式 "No document"，选择随草稿在同一 intentKey 下持久化；`source_already_posted` 为带链接的持久 Alert，主 Submit 在该相位禁用），B3 Work detail 有「Attach evidence」对话框（每个已观测结果一个 op_key、Escape 归还焦点、`linksUnavailable` 与 "No document" 是不同状态）并显示 purpose，Journals 表暴露 Recorded by／Evidence／Memo 筛选、`?tab=`／`?entry=` 定址、行内 purpose／basis origin／来源与绑定车道／Work／回执（可复制）／冲销链；旧 compose Dialog 已删除。三者的证据都是本地单元／DB／浏览器套件 + CI；hosted 证据以各 ticket 记录为准。
-
-#641 让 B 风格的 Work 列表成为两个高度上的同一份真实清单：`clara.list_accounting_work`（0189，SECURITY INVOKER 覆盖三个已授予 `clara_authenticated` 且带 firm-scoped RLS 的来源——`accounting_work`／`agent_interruptions`／`clients`——inline bookkeeper 门槛、按 `(created_at desc, id desc)` 的不透明 base64 keyset cursor、`p_limit` 钳制 1..100、`{rows,next_cursor,truncated}` 信封；筛选轴为 client／status／initiator／purpose／`[since,until)`／自由文本。`p_status` 校验封闭的九值 roster（越界为 CLR10 `invalid_status`），`p_purpose` 刻意不校验——那份 CHECK 由 0178 拥有且 #643／#631 正在扩宽，此处再写一份 roster 只会漂移；`p_q` 以 `position(lower(q) in lower(memo))` 的包含匹配，绝不用调用方输入拼 LIKE 模式，否则一个 `%` 就成了通配符）。两条状态标签所依据的规范信号随每一行返回：`attempts`（该 Work 真实跑过几次）与它停在哪个待答问题上——这让「Retrying」是事实而非杜撰，「Needs you」直接链到在等的那件事。`attempts` 需要 `clara.agent_tasks`，而该表对 `clara_authenticated` 完全无授权（人只读掩码视图 `agent_tasks_visible`，且它不重新发布 `work_id`），于是 0189 用与 0183 对 `sweep_runs` 完全相同的形状补上：一个 `clara._work_run_attempts(uuid[])` 的 SECURITY DEFINER 助手，自带 `_human_ctx` bookkeeper 门槛、在函数体内自锁到会话 firm、并以调用方当前页的 id 数组为界；三个新函数都按 0183 的规矩钉住 `plan_cache_mode = force_custom_plan`。`clara.get_accounting_work_row(uuid)` 是 #719 的教训：深链所指的行可能落在任何已加载页之外，这道门按 id 单独取回同一投影，缺失／他所／不可读一律同一条 CLR11（无 oracle）——并且它是被接线的，不只是存在：列表面读 URL 上的 `?work=<id>`，若该行不在当前页（翻页之外或被同一 URL 的筛选排除），就调这道门把它取回来、在表格上方以带标签的区域渲染并把焦点落上去；CLR11 则如实渲染"没有这件 work，或它不是你的"，绝不静默丢弃。`p_initiator` 筛选的是 `coalesce(initiated_by, initiator)`——即"谁提的"，与 Entered by 列显示的是同一个表达式——而不是 Take-over 会搬动的当前运行授权，否则按列上显示的名字筛选反而会漏掉那一行。0189 另加一条 additive 索引 `ix_accounting_work_firm_created (firm_id, created_at desc, id desc)`：键元组与门的 ORDER BY 元组逐字相同，firm-wide 的 `/work` 每页因此是有序索引扫描而非对该 firm 全部 Work 的 top-N heapsort（RLS 绑定下以 `clara_authenticated` 实测：`Index Only Scan using ix_accounting_work_firm_created`，`Index Cond: (firm_id = clara.jwt_firm())`，无 Sort 节点）。`clara.save_my_preferences` 在 0179 的正文上重切一次（以 sha 钉住前态），只多出一个枚举键 `interface.workViews`——至多 20 条 `{id,name,query}` 的保存视图，三个键都必须在场且为字符串，id 非空、不含控制字符、去空白后唯一，query 至多 512 字符；这两条容量上限在浏览器侧也照同一数字先行拦截，并给出可行动的句子而非通用的"保存失败"横幅。列表行上没有任何金额：门不投影，页面也不渲染——一份操作清单不是账簿。
-
-前端两个面用同一个组件（`components/work/accounting-work-list.tsx`）：`/work` firm-wide（带 Client 列与 client 筛选）与 `/clients/:id/work`（路由自身的 client 胜过 URL 里手改的 `?client=`）。五种状态按读取的真实结果区分，而不是把捕获的错误映射成空数组：首读的 Skeleton（配一句 sr-only 的 `role=status`，因为骨架说不出在读什么）、权限丢失（清空行、说明访问状态、不提供只会被拒的控件）、首读失败（Alert＋Retry，绝不是 Empty）、首次使用的 Empty、以及带筛选无匹配的 Empty（保留筛选并就地提供 Clear filters）。筛选在 `md` 及以上可见成排，在其下同一套控件进 Sheet（两者绝不同时挂载）；Pagination 走 keyset 的 Previous／Next，不声明任何总数（附录 D 第 42 行）。URL 是列表状态的全部，包括 `cursor`——这一点刻意与 Activity feed 相反（那边是 append 式滚动，书签一个 `?cursor=` 会指向没有第 1 页的第 N 页），而 Work 列表一次一页，于是 Back 天然回到同一页；筛选变更一律清掉 cursor（一个 cursor 只围栏一个有序结果集）。`/work?view=needs-you`（#614 的常量、旧 `/needs-you` 的 307 去处）保留为内置保存视图，与本人的保存视图并排渲染为带 `aria-current` 的链接 pills。B3 Work detail 在当前问题之下新增 Results｜Sources｜Activity 的 Tabs（DOM 顺序上问题必须在 Tabs 之前，切换 Tab 不触发任何写；Results 与 Sources `keepMounted` 以免丢弃未提交的草稿，Activity 因为自带分页读取而延迟挂载）。已知界限：Activity 视图按 client 读 `clara.list_activity` 再在浏览器侧按 `work_id` 过滤——这条门没有 `p_work` 参数，而 #728／#630 已两次重切过它的正文，因此本次不再切第三遍；视图如实说明它翻查了最近多少条事件，并提供「再往前找」与整条 feed 的入口。AC4（95/5 批次）如实降级：估算批次的生产者尚不存在（#636），本次不伪造 Batch 标签页，子项计数只在规范行真的存在时才渲染。
-
-#727 把实时回合的时钟定为一条身份法则：任何以默认参数注入的时钟／加载器／会话（`now`／`load`／`session`）都必须经 ref 读取，绝不直接进入 hook 依赖——默认参数每次渲染都产生新身份，若该身份既是 effect 依赖又在 effect 体内 setState，流式回合的每个 delta 都会重新排一次更新，直到 React 的 nested-update 上限抛出 #185；该抛出发生在 `claraThreadStore.emit()`（`applyStreamEvent` 内）→ `runClaraTaskStream` 的 `onEvent` 内（`lib/clara/stream.ts:376`，无 catch），抛出使 stream promise 被拒绝，`useClaraThread` 的 `.catch` 记为 `markSendFailed("stream error: …")`，把一次纯渲染故障误报成"发送失败"（该误报路径已钉住到 stream 的拒绝为止；最后一环——把这类渲染故障与真实发送失败分开呈现——由 #734 跟进）。现行实现：`TurnProgress` 一个回合只装一个计时器，由 `thread-live-stream-stability.test.tsx`（单元）与 `chat-parity-walk.spec.ts` 的浏览器计时器计数（fix 前实测 536，fix 后钉在 ≤1）钉住；Work detail 路由的 hydration 由 `journal-work-walk.spec.ts` 的 console／pageerror 采集器钉住（空存储与带上次访问状态两种面）；hosted 曾读到的三次 `React #418`（hydration 不匹配）本地未复现，记为未结（#727 保持打开只为此项）。
-
-#728 在 Activity 之上补了三处观测缺口：`ActivityActorLine`（`components/firm/activity/activity-actor-line.tsx`，row 与 Sheet 复用同一组件）在 actor 为空的已留存 sweep 回执上渲染"Clara (system)"，而非把空 actor 与"Clara on behalf of <name>"混同；Attach evidence 对话框的迟到指定成功后把焦点交回 B3 Work detail 的"What was recorded"地标，拒绝或悬空时把焦点交回选择器本身，不再掉到 `<body>`；Activity Sheet 的 Back 依来源（页内点击 vs 直接深链）回到发起行或 feed 标题，而不是一概离开应用。
-
-#630 把 Work 取消／交接接入现有 workRoutes 类型化映射：`POST /api/work/:workId/cancel`（200，取消门的 jsonb 原样透出）与 `POST /api/work/:workId/take-over`（202，新 run 同一逻辑身份）；`basis_confirmation_required` 映射 400（带 digest），`not_takeable`／`work_cancelled`／`work_settled` 映射 409（带 status），`40P01`／`40001` 映射 409 `transient`（`sendAdmissionError` 统一处理，不再是裸 500）。Web 侧：B3 Work detail 的 Cancel Work（`work-cancel-dialog.tsx`，确认 Dialog、`stopping` 面、superseded 原因展示、完成后的回执链接、bookkeeper+ 门槛）与 Take responsibility 走同一取消／交接 API；B6 卡片轮询同一状态直至终态。B7 rail 的 **Stop reply** 与 Cancel Work 是两个不同的操作：Stop reply 只中止这次 SSE 读取并取消 chat-turn 的 `agent_tasks` 行（`idle → pending → stopped｜failed` 的显式状态机，`pending` 是意图而非结局，绝不在 pending 期间宣称"Stopped"）；两者落在不同的 `agent_tasks` 行且数据库不建立级联（实测），关闭 rail 两者都不触发。
-
-2026-09-14 的 rider 批次在壳与页面合同上钉了几条法则。**#732**：壳的宽度变体绝不在水合期间切换——`Sidebar` 同时渲染停靠臂与 Sheet 臂由 CSS 选择，`useIsMobile` 先给出服务端渲染的停靠答案再在 `startTransition` 里翻转，于是布局里的 `<Suspense>` 边界（它们在根部跑完 effect 之后才水合）遇到的始终是服务端送来的那棵树（实测 375 px 冷加载的 React #418 从 2 降到 0）。**#736**（owner 选项 C）：`lg` 以下 Clara rail 是只由明确人为动作打开的覆盖层——从宽跨入窄时它自行关闭只留 launcher，跨回宽什么都不做，窄屏下的客户端导航保留人留下的状态；规则住在拥有覆盖臂的 rail chrome（`matchMedia` change 监听，宿主无 `matchMedia` 时不订阅），thread store 不感知断点也不持久化。**#733**：Server Component 要读的值住在普通模块（`lib/navigation/sidebar-cookie.ts` 承载 `sidebar_state` cookie 名），绝不作为 `"use client"` 模块的普通值导出——那种导出在服务端一律编译成会抛错的 client reference，`cookies().get(SIDEBAR_COOKIE_NAME)` 曾因此永远读不到 cookie。**#741**：产品级显示时区唯一——`i18n/request.ts` 返回 `timeZone: CLARA_BUSINESS_TIMEZONE`（Asia/Kuala_Lumpur，直接读 `lib/business-date.ts` 的常量），next-intl 格式化的每个瞬间在服务端与浏览器落在同一个墙上时钟并与记账时区一致；`FormattedDate` 保留显式 UTC（`date` 列没有瞬间），`FormattedDateTime` 改为继承产品时区；每所事务所各自的时区不在范围内。**#734**：`runClaraTaskStream` 经 `deliverEvent` 分发事件，订阅者自身的抛出被捕获并经 `onSubscriberFault` 上报、读取继续，stream promise 只因传输故障拒绝；`useClaraThread` 据此区分渲染故障（`markRenderFault`，不动 `sendStatus`／`activeTaskId`／回合时钟，横幅说"消息已发出，只是这个标签页没能显示部分回复"）与真正的发送失败。**#715**：`/settings/account` 保存成功后 `data-motion` 立即生效——保存路径发布 `clara:motion-preference`，长驻的 `MotionPreferenceSync` 重跑自己的 `recompute`，属性仍只有唯一写者且 OS 的 `prefers-reduced-motion` 永远是下限。**#719**：对象面可按条目寻址——Journals 的 `?entry=` 若指向 1,000 行浏览读取之外的分录，`getJournalEntryById` 以同样的两次 RLS 表读单独取回并合并展开（不存在、他所或不可读一律无行、无存在预言；同所他客户的分录不合并），"不在本页"的诚实状态只留给读取已作答的情形，Back 清掉参数也清掉表的定址过滤；Reports 由服务端路由读 `?report=` 打开唯一制品；Documents 沿用既有的 `?document=`；Activity 的链接构造器携带条目 id。**#742**：`document.extraction_completed`／`document.classified`／`document.invoice_facts_completed` 与流水线自己的 `open_question.opened` 在 actor 为空时渲染为 "Clara (system)"（`isSystemActorRow` 把 0183 的 sweep 规则扩到这四种类型；人工 `set_document_kind` 带 actor，所以无需 payload 标记）。
-
-生成式界面是服务器注册的 typed part schema 与 Web reader 的协议，关联 Work／question／object／receipt。
-目标让历史 hydration 与实时渲染复用同一合同，独立发布时验证字段、版本和旧 reader 的处理方式。
-当前 parts parity 主要检查 kind，部分 reader 只有 ID；完整协议兼容仍未实现。
-shadcn 核心组件、AI helpers 与外部 registry 分别记录来源；Message／Questionnaire／Attachment／shimmer
-等组件只能呈现真实状态，不能替代持久对话、答案接收或执行控制。
-
-目标保留阅读位置、jump-to-latest、单一 transcript announcement、键盘与焦点返回；支持窄屏、200% zoom、
-reduced motion 和 chart 可访问数值。所有业务页都要有适用的 partial／stale／denied／retry／recovery 状态。
-共用组件检查和单页视觉原型不能代替完整旅程的真实数据与恢复验证。
-
-## 10. 安全、发布、恢复与验证
-
-Supabase SSR 会话与实时 membership 检查共同处理身份。服务密钥只存在服务端；`NEXT_PUBLIC_*`
-不能装秘密。受限 freeform 读是单独授权的只读能力，不能通过 `SELECT` 包装写函数得到写权限。
-托管 Supabase 的 provider-owned `pg_catalog` ACL 不完全由项目控制；notification、advisory lock、
-sleep、XML helper 等残余能力需要独立限制和验证，不能仅凭 public schema grants 宣称全部封闭。
-
-文件、OCR、KB 和外部内容都是不可信数据，不能改变系统指令或权限。
-外发需要 client／firm、purpose activation 与 dispatch authorisation；准备授权和实际消耗是不同边界。
-wiki 与 **accounting Work** 两条路径都在模型调用前消耗绑定授权；documents／statement／witness 仍在enqueue 与 dispatch 两处各自把关，尚未完全统一。Vendor trace export 当前关闭（按**缺席**关闭：没有导出动词、没有路由，0195 的 tail 断言这一点）。
-
-**#631（migration 0195）：`accounting_work` 是第六个 typed client egress purpose，也是第一个授权由推导而来、而非人工授予的 purpose。**
-
-> **激活假设（ACTIVATION ASSUMPTION — 需要 owner 确认）。** 对某个 client 账本的模型外发权限 = （a）事务所**当前**已接受的 Terms 与 DPA——即该事务所一位**在任 owner** 对 `clara.legal_documents` 中**当前已发布**版本（0185／0187）的两类文本各持有一条 `clara.legal_acceptances`——**且**（b）该 client 为 active。**撤销** = 发布了更新版本而事务所尚未接受；client 变为 inactive／archived；owner 通过既有的 `clara.revoke_client_egress_purpose` 显式撤回；或在账务写入时发起人失去事务所成员资格（0178／0184 原有的检查）。「exhausted」≡ 已消耗或 TTL 过期，本切片**没有配额**。**没有 per-client 的「AI 开关」**（UI-28／UI-29 是 REPLACED，不是实现），正常路径也**不需要**任何人工 grant／activate 调用。purpose token 只有一个粗粒度的 `accounting_work`；per-operation token 记为后续工作。
-
-`clara.prepare_egress_dispatch` 的 accounting_work 分支在首次 dispatch 时**按法律接受记录合成**一对 consent／activation（`legal_acceptance_id` 记录依据，`evidence_document_id` 为空——放宽是按 purpose 逐项写的 CHECK，其余五个 purpose 仍必须有 bytes-verified 的 consent_evidence 文档），并且**永不在已存在的 consent 行上重铸**——这正是 owner 的显式撤回能「粘住」的原因。**这一次合成是有据可查的**：它写一条 `audit_log`（`fn = 'derive_client_egress_purpose'`）并追加一条 `egress.purpose_consent_derived` 域事件，点名法律接受 id、两类文本的已发布版本与 client；每个 (firm, client) 只发生一次，所以账本上也只有一行。`clara.consume_egress_dispatch` 逐字节未改动：单次使用、120 秒 TTL、六项 re-binding 照旧。run 绑定由 `clara._work_egress_event_seq(work, run)` 推导，`clara.prepare_work_egress_dispatch(task, run)` 与账务核心各算一次，因此兄弟 run 花掉的授权不能算作本 run 的。`clara._record_journal_entry_core` 在 client 状态检查之后、`_reserve_op` 之前，要求本 run 持有一条**已消耗且未失效**的授权，**并且该授权背后的 consent 未被撤回、activation 未被停用**，否则抛 CLR13 `egress_not_authorized`——不写分录、不写回执、逻辑操作身份不被消耗。已提交回执的 replay 跳过该检查（与 0184 的 cancel 检查同样条件），否则一次崩溃后的 replay 会被中途撤回的授权拒掉，把已记账的影响变成读不出来的。
-
-> **撤回是可逆的，而且是 OWNER 的动作。** 首版把 owner 的 `revoke_client_egress_purpose('accounting_work')` 做成了**单向的**杀掉开关：prepare 永不重铸，而唯一被点名的恢复路径 `grant_client_egress_purpose` 会撞上 §3 的 CHECK（`23514 ck_client_egress_purpose_consents_evidence`），恢复只能靠再写一个 migration。0195 修正两侧：`clara.grant_client_egress_purpose` 对 `accounting_work` 抛类型化的 CLR10 `purpose_derived_not_grantable`（点名这是**推导**而来的授权，不是带证据授予的），另开 `clara.restore_client_egress_purpose(client, purpose, op_key)`——owner 起步、firm 范围、op_key 幂等，只接受这一个推导 purpose；它**重新推导**一次基础（法律接受 + client active），推导不成立时抛 CLR28 `derived_basis_not_live`，成立时铸一对**全新的** consent／activation（被撤回的那一行原样留作历史），写 `audit_log` 并追加 `egress.purpose_consent_restored`。下一次 dispatch 便重新 granted。
-
-> **撤回对已经消耗的 dispatch 是追溯的。**规则一句话：**授权必须在账本真正移动的那一刻仍然有效**。首版只是前瞻的——实测 consume → revoke → post 仍然成功——而 owner 点「撤回」时期待的是保守读法。实现落在账务核心自己的门上（多两个 join：授权背后的 consent 与 activation），而**不是**把已消耗的授权行标成 invalidated：0020 的 `ck_egress_dispatch_authorizations_one_terminal` 与 `_tf_egress_dispatch_authorization_update` 让「既消耗又失效」在这张五个 purpose 共用的表上根本无法表示，改它是另一个 migration 的事。已提交回执的 replay 仍然跳过，所以撤回不会把已记账的影响变成读不出来的；恢复之后，人的 Retry 会铸一个**新 run**、重新 prepare／consume 并入账，而**旧 run 保持被拒**——没有任何动作会追溯地把授权还给它。
-
-
-**执行轨迹（C88.12／C88.18）。** `clara.work_execution_traces` 每个 run 每步一行（dispatch／model_call／tool_call／settle）。这张表的保证，说准确了是三层，而不是首版那句「没有 payload 列」：**没有自由 payload 列；其余每一列都是有界、按文法校验的；写入方再做尽力脱敏。**对抗性复核实测过首版那句话的边界——`refusal` 与 `skills` 是自由 jsonb、一个 observed_revisions 的**值**是自由文本、七个 id／text 列没有任何约束，于是一次普通的 `record_work_execution_trace` 调用就把 NRIC、银行账号、email、马来西亚电话、JWT、`Bearer` 头与 `postgres://` DSN 原样存了进去，并能从人读门读回来。现在：(1) **结构**——没有 payload／input／output／attributes／content／prompt／messages／basis／transcript 列，migration 的 tail 从 catalog 重新读一遍来证明；(2) **约束**——0195 SECTION 7B 给每一列一套文法（id 列是小写 token，email／电话／JWT／bearer／DSN／裸数字串都过不去；`model_id`、`run_id` 各自有界；`purpose` 限于六个词；`skills` 是 ≤ 32 个 id 的数组；`observed_revisions` 的**值**必须是 digest、数字或短 token；`refusal` 是 code／reason／message／detail／recoverable 的**封闭五键**，两个自由文本半边限长 500 且带有 PII 形状时**拒绝**），`clara.record_work_execution_trace` 先按同一套文法抛类型化的 CLR10 `invalid_trace`（点名字段），表上的 CHECK 再拦一次；(3) **卫生**——`packages/runtime/lib/work-trace.mjs` 把它送出的**每一个**值先脱敏（id、model、skills、observed revisions 与 refusal，不再只是 refusal），所以正常路径是**脱敏后写入**而不是被拒，诊断不会整行消失。这一层是 best-effort 并如此声明；前两层才是保证。行里只有标识、digest、时间与结果：capability／registry 版本、bundle／instructions／skills／tools／model id、purpose 与它花掉的 authorization（consent／activation 由数据库从授权行反查，调用方无法自称），input **digest**（对**脱敏后**的形态取 sha256，因此 digest 不能当作猜测 oracle），封闭词表的 observed_revisions，以及 outcome 与 typed refusal。**任何应用角色对这张表都没有任何权限**——不只是没有 DML，**SELECT 也没有**：首版把 SELECT 授予了 `clara_authenticated`，而 PostgREST 对外服务 `clara` schema，于是一个 viewer 可以绕过门的 bookkeeper 底线直接读到 `model_id` 与整个 `refusal`；授权与那条 firm 范围的 SELECT policy 一并撤掉（FORCE RLS + 没有 policy ⇒ 将来误授也读不到，失败是关闭的）。这张表也**没有指向 `clara.accounting_work` 的外键**：外键会对被引用行取 `FOR KEY SHARE`，而账务核心在整个过账事务期间持有同一行的 `FOR UPDATE`，复核实测一次 trace 插入因此阻塞 4001 ms 后被取消——而每个冻结闭包里的调用方都会吞掉 trace 失败，于是恰恰在过账慢的时候静默丢诊断。绑定没有丢：写入方是 DEFINER，firm／client／work 一律由 `agent_tasks → accounting_work` 的正向 join 推出，从不取自参数。写入方 `clara.record_work_execution_trace` 仅授予 clara_runtime，按 (work, run, seq) replay 幂等；人读入口 `clara.get_work_execution_trace` 是 bookkeeper 起步、firm 范围、上限 500 行；保留期沿用既有 prune lane（`clara.prune_work_execution_traces` 与 reconciler 的同一趟），并且**在 0006 自己的 `clara.trace_prune_log` 上留一行**（该表新增 `relation` 列，历史行默认 `trace_spans`）——一趟能清空「专门用来留痕的表」的保留期扫描，自己不留痕是说不过去的。runtime 侧四行里只有 settle 那一行写在 settle **事务内**（`settleWorkStepV3` 用一个显式 BEGIN／COMMIT 包住 `clara.settle_work_run` 与 trace 插入，插入本身放在 SAVEPOINT 里，所以一条被拒的诊断永远回滚不掉一次 settle）；其余三行都在过账事务之外、runtime 连接池上写。
-
-**C-20（记录，未实现）。** firm-narrow 家族（0123）能 mint 却**没有 consume 动词**：`clara.consume_firm_egress_dispatch` 不存在，`clara.prepare_firm_egress_dispatch` 铸出的授权因此永远不会被消耗，也就没有 dispatch linearization point。这是 0123 起就存在的真实缺口，#631 只做记录与follow-up，不在本切片实现。
-
-**冻结闭包的裁定（记录在案）。** `packages/runtime/lib/capability-registry.mjs` 与 `packages/runtime/lib/work-trace.mjs` 都由**冻结**的 `claraWork_v3` body 以动态 `import(...)` 抵达，而 `scripts/check-frozen-workflows.mjs` 的 import-closure 扫描同样匹配动态 import，所以两者都登记在 `frozen-workflows.json` 里、被该闸门哈希锁定。等 #637 的 `--lock-deployed` 仪式跑过之后，它们就与一个 workflow body 一样永久不可变：再加固一条脱敏规则、加一个 capability、加一个 observed key，都只能**随新的冻结版本**（`claraWork_v4`）或放在非冻结基础设施里发布，不能原地改。这正是上面第 (2) 层要落在数据库里的原因——迁移可以在不做一次 runtime cutover 的前提下收紧它。
-
-<a id="admission-and-operator-support"></a>
-
-准入使用版本化法律内容／签署、rate events、checkout intents 和 Stripe 验签 webhook；
-firm claim 在事务内完成。Supabase Auth 负责 signup／recovery 邮件，staff invite 使用服务端 Resend courier。
-Operator 仅有获准的注册／支付支持和 estate wake-source 管理，不因此取得其他事务所账本；该边界自 #615 起在 `/operator` 上被明写在屏幕上，而不只是迁移里为真。
-Beta test Checkout、已有 DPA 签署不能证明付费计量、完整法律接受或生产邮件送达已完成。
-当前实现（#621，0185）：法律接受是一套不带正式文本的版本化机制。`clara.legal_documents`（kind `terms`／`dpa`，status `draft`／`published`／`superseded`，整数 version 按 kind 递增，`body_sha256` 由 CHECK 重算）与仅追加的 `clara.legal_acceptances`（user、kind、version、hash、accepted_at、op_key；复合外键指向精确字节）取代 0158 的 `dpa_documents`／`dpa_signatures`（旧表降为只读历史，已有签名按原 id 迁入；`sign_dpa`／`get_current_dpa_document`／`get_own_dpa_signature` 保留为委托包装，供迁移与 web 发布之间的旧版 web 使用）。只有 `published` 的文本可以被接受：`clara.accept_legal_document` 对草稿拒绝 CLR09 `not_published`、对非当前版本拒绝 `stale_version`、哈希不符拒绝 CLR10 `hash_mismatch`，按 (user, kind, version) 与 op_key 双重幂等并回放原 `accepted_at`；`clara.publish_legal_document`（operator 事务所的 owner）在 per-kind advisory lock 下分配下一个版本并取代当前发布版；`open_checkout_intent` 在同一把 per-kind 锁下要求两种文本都已按当前发布版接受（CLR09 `legal_not_accepted` 带 `missing`），并把 `terms_version`／`dpa_version` 一起钉在 intent 上；`claim_paid_firm` 按钉住的版本复查（0185 之前已 stamp 的 intent 其 `terms_version` 为 NULL，仍可认领，避免线上中途的申请人搁浅）。0158 的占位 DPA（正文自称待律师审阅）在迁移中降为 `draft`，因此在 owner 通过 door 或后续迁移发布 v1 文本之前，`/signup` 的法律阶段把两份文本显示为"尚未最终"且不可继续——正式措辞是明确的外部发布输入，仓库不 seed 任何法律文本；发布文本的操作界面由 #615／#635 承接。验证码重发经 web 的 `POST /auth/confirm/resend` 转 runtime 的 `POST /api/auth-wall/resend`，与验证尝试共用同一 C1／C2 预算（每次重发结算为一次 rejected 尝试，界面如实说明），浏览器从不直接调用 Supabase 发信；web 的验证码输入接受粘贴并归一化。
-当前实现（#622）：登录、密码恢复请求与恢复链接失败现在读 Supabase Auth 的 `error.code`／`error.status`（对照 Context7 `/supabase/auth` 的错误目录核对，2026-09-13），不再把不同原因摊平成一句话。`app/(entry)/auth/recover/handler.ts` 把 PKCE `exchangeCodeForSession` 的失败分成四种，各自落到 `/forgot-password?status=` 自己的值：`flow_state_expired`／`otp_expired`（422）→ `expired`；`flow_state_not_found`（404——GoTrue 在兑换的同一刻销毁 flow state，"已用"与"从未签发"是同一条线上形态，没有信号可分，因此归一桶而非硬造区分）→ `used_or_unknown`；`bad_code_verifier`（400，验证器不匹配——打开链接的浏览器和兑换的浏览器不是同一个）→ `refused`；`over_request_rate_limit`（429，共享的按端点墙）→ `rate_limited`；未识别的错误与缺失 `code` 查询参数仍落既有的 `invalid` 桶。`components/entry/password-recovery-form.tsx` 为这四种状态各渲染自己的文案，不再共享一句"链接无效或已过期"；`password-reset-form.tsx` 自身的缺席恢复会话分支（`AuthSessionMissingError`／401／`session_not_found`／`refresh_token_*`／`bad_jwt`）不变，仍落回同一个通用 `invalidLink` 文案——这是浏览器会话缺失，不是链接兑换分类失败，两者刻意保持独立，不合并成一种状态。恢复请求（`resetPasswordForEmail`）本身**没有**像验证码重发那样经 runtime 的 C1／C2 墙——这是浏览器对 Supabase 的直接调用；orchestrator 的裁决是读 `error.code === "over_email_send_rate_limit"` 渲染一个独立的限速状态，解析 GoTrue 自身消息里携带的等待秒数（"For security purposes, you can only request this after N seconds."），套用 `wait-seconds.ts`（#621 已有，本轮扩到第三个消费者）的 clamp-and-flag（`atLeast`）展示习惯；本轮没有新增运行时墙或尝试预算表，与验证码重发的墙不对称，如实记录而非假装对齐。`lib/supabase/proxy.ts`（#698，随本轮一起合入）：未认证重定向的 `next` 现在带 `pathname ＋ search`（从不带 hash——浏览器本就不把 fragment 发到服务端），修复了签出访客点开一个带查询串的保存视图链接（如 `/work?view=needs-you`）登录后落到裸路由、丢失所选视图的缺陷；`lib/safe-redirect.ts` 的读侧校验未变。登录、密码恢复请求与设置新密码三个表单现在在等待期间禁用全部输入（不只是提交按钮）、在 `<form>` 上置 `aria-busy`，失败后把焦点移到失败横幅而不是留在被禁用控件释放到的 `<body>` 上——`signup-legal-stage.tsx`"焦点落在回执上"规则的同一形状，用于三处新增。H-40 的 HIBP（Have I Been Pwned）半段与 C-78（magiclink）保持外部所有者输入，本轮未触碰、未构建；本地证据：apps/web 单元套件（含新增的 `password-recovery.test.tsx`／`password-recovery-handler.test.ts`／`proxy-recover-next-query.test.ts`／`login-keyboard.test.tsx`／`recovery-faces-a11y.test.tsx`）与 `e2e/entry-faces-walk.spec.ts` 的 `#698` 往返走通；`tests/live-provider-auth.test.ts` 是环境变量门控的真实 Supabase 项目验证（`CLARA_LIVE_SUPABASE_AUTH_URL`／`CLARA_LIVE_SUPABASE_AUTH_ANON_KEY`），本地未配置故跳过并打印跳过原因，配置后路径未经本会话验证；hosted：2026-09-14 随 runtime v83 发布，owner 已在生产 Sign in 登录走通（见 #612／#622；live-provider 路径仍未在本地验证）。
-当前实现（#628，0186）：checkout 收敛到一个持久的 intent 生命周期。`clara.checkout_intents` 增加 `status`（`open`／`session_created`／`processing`／`paid`／`consumed`／`expired`／`payment_failed`／`cancelled`）、`status_at`、`status_reason`，由同一个触发器作为唯一的转换权威（INSERT 只允许 `open`，UPDATE 只允许列举的转换，`status_at` 由触发器写入，caller 无法伪造）；`record_checkout_session` 不变，session 戳与 `open→session_created` 由触发器一并完成。`clara.apply_stripe_events` 处理四种事件：`checkout.session.completed` 只有在 `payment_status in ('paid','no_payment_required')` 时才算结清（0160 的"subscription 模式且 session complete 即结清"放宽已退役——Clara 所有 Session 都是 subscription 模式，FPX 等延迟通知支付的 `completed` 事件带 `unpaid`，按旧规则会把未付款铸成可认领的 firm），否则 intent 进入 `processing` 而不再是问题行；`async_payment_succeeded` 结清；`async_payment_failed` → `payment_failed` 并记录 `last_payment_error`（runtime 投影只取 `decline_code`／`code`，不含任何 PII）；`expired` → `expired`（已付后到达则记问题 `expired_after_paid`）。钱是权威：结清事件落在 `expired`／`cancelled`／`payment_failed` 上仍记录付款并翻到 `paid`，同时记问题 `paid_after_terminal` 给 operator；`processing` 超过 24 小时（Checkout Session 的寿命）由同一个 sweep 转为 `expired`（`processing_timeout`，记问题），申请人得以重新付款；每个已处理事件在仅追加的 `clara.stripe_event_applications` 留痕，与问题行、付款行一起构成三重排除，重放同一 `event_id` 不产生第二次效果。`clara.cancel_checkout_intent`（申请人本人，`open`／`session_created`／`payment_failed` 可取消，`processing` 拒绝 `payment_in_flight`，已付拒绝 `already_paid`，不存在与他人的 intent 同答 `not_your_intent`）；`open_checkout_intent` 对已有 `session_created`／`processing` 的注册拒绝 `checkout_in_progress`（一个注册同时只有一个在世 Stripe Session，web 据此续付或取消），并在 origin 限速墙之前做容量预检；容量是单行表 `clara.admission_capacity`（`max_firms`，NULL 为不限），`set_admission_capacity`／`get_admission_capacity` 仅 operator 事务所 owner，`claim_paid_firm` 在 `admission-capacity` advisory lock 下计数非 operator 事务所并把容量作为最后一道墙（付款与法律前提之后），两笔并发认领最后一个名额只产生一个 firm，输家的付款保持未消费、注册保持 open，容量放开后再次认领即消费；锁序为 intent → registration，与 applier（intent 锁 → 付款行对注册的 KEY SHARE）一致，避免 40P01。web：`/checkout/success` 与 `/pending` 按门的事实渲染 claimable／processing／awaiting／failed／expired／cancelled／capacity-full 六种面（成功页有 5 秒一次、2 分钟封顶的重读，绝不从浏览器跳转推断已付）；`POST /checkout/cancel` 先过门再尽力让 Stripe 过期 Session；续付由服务端取回在世 Session 的 URL（仅接受 stripe.com 的 https）；`payments_misconfigured`（模式／密钥类别不符）与 `stripe_unavailable`（提供方故障）是两张不同的卡；测试模式徽章来自服务端声明的 `CLARA_STRIPE_LIVEMODE`；丢失应答的重试在两条路由上钉住为同一结果、不铸第二个 Session 或 firm。
-当前实现（0187，2026-09-13）：owner 裁定以 beta 模板作为两种法律文本的 v1——dpa v1 即 0158 的占位正文由 draft 转为 published（字节不变，仍自称待律师审阅），terms v1 以同样措辞的一句话发布；两者均为 beta 模板而非律师审阅稿，接受 v1 即接受 beta 模板，正式措辞通过 `clara.publish_legal_document` 以 v2 发布并取代之。0187 只写两行数据、不改任何函数体，因而不占写入静默窗口。hosted：0185／0186 已于 2026-09-13 发布（frontier 181／0186、runtime v82、web 742b09e9）；0187 已于 2026-09-13 11:05Z 在 runtime 运行中套用（frontier 182／0187），随后 owner 在 hosted 完整走通 A1／A2（注册→验证码→重发计入一次尝试→接受 Terms v1／DPA v1→刷新保留→checkout→取消再开→0.00 沙盒订阅以 no_payment_required 结清→认领开出事务所），证据记录在 #621／#628 的关闭评论。
-当前实现（#615，0188）：operator 的准入支持有了自己的目的地 `/operator`（firm 层导航行，floor 为 owner 且 `operatorOnly`——`clara.approve_firm_registration` 的 owner+operator 事务所判定，调用时重新推导）。0188 只加两个读门、不加表、不加 RLS policy、不加写门、不动任何关系的 grant：`clara._operator_support_cases(boolean,text,uuid)`（唯一的查询体，谁都没有 EXECUTE，两个门都委托给它，因此队列与详情不可能对"什么是一个 case"产生分歧）、`clara.list_operator_support_queue(boolean)`（三条臂各一行——没有付款行的未决注册、未消费的注册付款、未解决的 Stripe 事件问题；按 `(occurred_at desc, case_id desc)`；`p_include_settled` 把每条臂放宽到已决／已消费／已解决行，并以 `decided_by`／`decided_at`／`decided_reason` 作为同一套支持回执）与 `clara.get_operator_support_case(text,uuid)`（按 (kind, id) 取一个 case，无 existence oracle：未知 id、封闭三值之外的 kind 与不匹配的配对都答同一条 CLR11 `support_case_not_found`，字节相同；NULL kind／id 在门内自己那唯一的 raise 点被拦，否则共享体会把 NULL 读成"此轴不过滤"而变成整个准入估值的存在性预言——这是本文件合入前由 os.06 抓到的真实缺陷）。已付款的注册**不**出现在审批臂：认领是申请人自己的门，operator 批准会为同一个人铸出第二个事务所，所以它只作为付款 case 出现一次。三条臂只触及五个准入关系与 `clara.stripe_events`，0188 的 tail 对三个函数体做账本关系与动态 SQL 的普查，`packages/db/tests/operator-support.test.mjs` 的 os.11 再用一个真有 client／document／分录／Work 行的第二事务所在行为上证同一件事。界面：`/operator` 只暴露估值已治理的动作——未决注册的 Approve／Reject（理由必填）、未解决问题的 Resolve（说明必填）、以及准入容量（`get_admission_capacity`／`set_admission_capacity`，本次是该读门的第一条 web 车道，0188 §4 据此重切其注释）；没有受支持动作的状态（未消费的付款、已结案的 case）如实写出"no supported action for this state"及其原因，而不是给一个门会拒的按钮。六种读状态（loading／denied／首次读取失败／刷新失败保留旧行的 stale／首次为空／筛选无结果）与五种动作失败（denied／duplicate／stale／notFound／providerUnavailable）各自是独立的带标签区域，`lib/operator/reads.ts` 的 `operatorQueueOutcome` 是那条判断唯一的实现并单独有 cell——CLR04 的拒绝永远不会被渲染成空队列。筛选与打开的 case 都在 URL（`?kind=&settled=&case=<kind>:<id>`），Sheet 的 Title／初始焦点／Escape／Back 保留筛选与行焦点沿用 `/activity` 的先例；每个 op_key 都是 (case, caller, 规范化文本) 的纯函数，丢失应答后同 key 重放原回执而不重复效果。`/settings/registrations` 与 `/admin/registrations` 都 307 到 `/operator`，旧的 settings 分区与其面板一并退役。证据：本地 DB battery 14／14（真实最小权限角色、frontier 0188）、web unit（`lib/operator/reads.test.ts` 13／13、两个 operator 组件 cell 文件）与浏览器 walk `apps/web/e2e/operator-support-walk.spec.ts`；hosted 证据：2026-09-14 随 runtime v83 发布，owner 已在 `/operator` 上实地走通（容量 Unlimited、4 家事务所、队列为空），见 #612／#615。
-
-业务提交同事务写事件及 outbox；消费者用 checkpoint、去重、重试／dead letter 推进投影。
-LISTEN 是及时通知，持久队列与轮询保证可恢复扫描。投影记录 lag，不能把已提交账务和界面刷新混为一件事。
-`/health` 表达进程存活，`/ready` 表达配置依赖和消费者状况；缺少可选配置与已配置但失败必须区分。
-现行实现（#617）把每项检查读成三种以上答案而不是两种：已测量健康、已测量失败、尚未测量
-（`pending`／`measured:false`／`unavailable:true`／`firmsUncheckpointed`），以及未配置
-（`skipped`）。存储探测的冷启动不再报 `ok:true`；未配置存储与已配置但失败是不同字段和不同告警。
-消费者健康另外分出 `deadLetters.exhausted`（超过该消费者自身重试上限、只能靠 redrive 清除）
-与 `stranded`（卡在 running 超过该 lane 自身阈值），与 lag、pending 分开计数；健康查询本身抛错
-会给出显式 `unavailable` 条目而不是缺键。/ready 只输出变量名与经过清洗的标识符码，不含 DSN、
-证书路径或原始数据库文本。
-
-连接故障的现行契约（as built）：Idle pool errors log/recycle connections;
-relay-pool counters surface warnings. 每条专用 login lane 的后台连接错误也按 lane 计数
-（`checks.pool_errors`），未构造的 lazy pool 表示为缺席而不是零。The leader's dedicated session
-detects failure, releases its advisory lock and reconnects；其 acquire／lost／re-acquire 与
-halt 记录在 `checks.leader`（halt 在调用 onHalt 之前写入），held:false 是告警，halt 使该项
-`ok:false`，但都不改变 /ready 的硬失败集合。启动时的 DSN TLS posture 以变量名形式出现在
-`checks.tls`，未运行该断言时报 `measured:false`。Lane probes are asynchronous:
-`pending` 表示尚未测量，`stalled` 是警告；不可把尚未完成的探测当成健康证明。
-所有已配置连接通道和存储的完整硬性 readiness 检查仍未完成；上述新增读数全部是告警级别。裁-61 要求的、
-覆盖全部已配置连接通道与存储的硬性 readiness 门仍是已接受但未完成的目标（其 PR #460 已关闭未合并）；
-#620 未改变这一点——`/ready` 的存储探测继续维持 pending／not-configured／measured 三态、告警级别
-（packages/runtime/lib/storage-probe.mjs），硬门何时启用仍由 owner 裁定。
-
-#620 补的 storage-policy-battery（packages/db/storage-battery/run.mjs）是这个仓库第一次真的 touch
-`storage.objects` RLS 与 Storage HTTP API：用 vendor 自己的 `supabase start` 起一次性可丢弃栈，通过仓库
-自身的生产门 `putCanonical`／`verifyCanonical`／`downloadCanonical`（未改一行）配真实凭据跑 B1–B11，正
-面证明 INSERT／SELECT 允许、PUT／UPDATE／DELETE 拒绝、错 bucket／错 key 形状（含大小写扩展名、路径穿越）
-拒绝、过期或非 designated-role JWT 双向拒绝、逃逸位缺席、清理后两个 bucket 归零；它明确不证明的两件事各
-自记为 LIMIT：B9 断言另一 firm 命名空间下的合规 key 对这枚凭据可写可读（firm 隔离压在 definer 一层，
-不在 Storage RLS）；B12 断言一个合规的 wiki key 被这套 ceremony 拒绝（wiki 自己的策略对只以内联注释形式
-存在于 `wave-b-0017-ceremony.sql`，从未被任何脚本执行过，live 项目是否另有一对策略是 hosted-pending）；
-一次性栈同样无法回答 2026-07-26 的 UPDATE 授权是否确已从线上撤回。这些留给 `hosted-probe.sql`，由发布
-会话在真实项目上以只读方式运行、结果标为 hosted 证据，与本地 provider-stack 证据分开报告
-（packages/db/storage-battery/README.md）。
-
-已实测（2026-09-13，Windows 宿主的 WSL2 Ubuntu，docker 29.7.2 + `npx supabase@2.117.0`，栈随即
-`supabase stop --no-backup` 归零、exit 0）：**PASS 10 / LIMIT 2 / FAIL 0**，LIMIT 恰为上述 B9 与 B12。
-B8 的三枚凭据——`role=authenticated` 的 JWT、过期 JWT、以及这一栈自己发布的 **anon key（浏览器实际持有
-的那一枚）**——POST 均得包体 403、GET 均得包体 403／404，运行时 `realConfig()` 在上线前就先拒了它们
-（storage_error/503）。这是 provider 证据，不是 hosted 证据：它说明本 ceremony 从零建出的边界是什么，
-不说明 live 项目今天携带什么。battery 该指向哪个栈由 `packages/db/storage-battery/stack.mjs` 单独决定
-（adopted／boot／具名 skip），该决定本身由 `packages/db/tests/storage-battery-contract.test.mjs` 在
-无栈、无库、无网络的条件下逐条断言，因而在每台机器上都有证据，与上面那次 wire 证据分列。
+| `apps/web/README.md` | Web 应用的安装、本地运行与 Cloudflare 部署；应用地图与关账／银行操作顺序 |
+| `apps/web/e2e/live-stack/README.md` | 以真实一次性 Postgres／PostgREST／runtime 栈跑生产 web bundle 的两个 runner；对非一次性目标有拒绝闸门 |
+| `packages/runtime/README.md` | 结构、本地命令、连接与服务配置、健康与 TLS、恢复清单、启动普查、部署与回退、评测 |
+| `packages/db/README.md` | 迁移与部署行为、连接与破坏性操作、`interactive_client` wake kind、Storage grant/policy battery、operation-contract census、备份与恢复 |
+| `packages/db/tests/README.md` | DB 测试套件：迁移链、租户隔离、审计写入者、会计约束、文件处理、准入、关账／报表、运维工具 |
+| `packages/db/storage-battery/README.md` | 针对 `deploy/storage-provision.sql` 的允许／拒绝电池，跑在真实 Supabase Storage 上 |
+| `packages/reporting-render/README.md` | 独立 Fly batch worker：确定性封存报表 PDF；排除在 pnpm workspace 之外 |
+| `packages/backup/README.md` | 独立 Fly batch app：加密异地 DR 副本；排除在 pnpm workspace 之外 |
+
+---
+
+## 4. 依赖关系<a id="database-authority-and-accounting"></a>
+
+**调用方向。** [已实现]
+
+- `apps/web` → `packages/db`：用户 JWT 经 PostgREST 做读取与受控 RPC。Web 不向 runtime 要业务数据。
+- `apps/web` → `packages/runtime`：只经同源代理（对话、上传、SSE）。
+- `packages/runtime` → `packages/db`：按用途分角色的登录连接，执行领域操作。
+- `packages/runtime` → Workflow／Postgres World 引擎；引擎自身也写同一个数据库。
+- `packages/runtime` → Supabase Storage（私有原件与内容寻址对象）、→ 外部 OCR／模型提供方（按用途授权）。
+- `packages/reporting-render` → `packages/db` + Storage，**不经** runtime。
+- `packages/backup` → `packages/db`（读）+ Cloudflare R2（写）。
+- `apps/web` → Stripe（服务端 Checkout）；Stripe → `packages/runtime`（验签 webhook）。
+
+**连接按职责分权，不共用一个应用角色。** `packages/db/deploy/roles-bootstrap.sql`（DR 角色重建仪式，
+其头部登记了对应的迁移来源）给出当前角色册：11 个 NOLOGIN 组角色
+（`clara_fn_owner`、`clara_authenticated`、`clara_agent_ro`、`clara_wake_interactive`、`clara_wake_proactive`、
+`clara_runtime`、`clara_freeform_ro`、`clara_wake_bank`、`clara_wake_filing`、`clara_stripe_webhook`、`clara_auth_wall`），
+7 个登录壳（`clara_runtime_login`、`clara_agent_read_login`、`clara_wake_write_login`、`clara_freeform_login`、
+`clara_wake_bank_login`、`clara_stripe_webhook_login`、`clara_auth_wall_login`；在仓库与 DR 仪式里是 NOLOGIN，
+只在实际集群上带外翻成 LOGIN），外加一个只做存储的凭据 `clara_storage_docs`
+（NOINHERIT，只授予 `authenticator` 供 Storage 自己 `SET ROLE`，对 `storage.objects` 只有 select+insert，
+范围由 `packages/db/deploy/storage-provision.sql` 的 RLS 策略限定，UPDATE／DELETE 从未授予）。
+人工与 agent 的会计写入只经被授予的领域函数；definer 函数的 owner、`search_path`、grants
+与参数校验共同组成这道边界。
+
+**跨表写入的全局取锁顺序**是 **accounting_plans → accounting_work → agent_tasks → agent_interruptions**，
+任何新门都必须按这个方向取锁——方向相反的两扇门会把一次任务级取消与一次 Work 级取消撞成实测可达的死锁。
+`40P01`／`40001` 到达 web 时是类型化的 transient 409，不是裸 500。[已实现]
+
+**版本钉子。** 运行侧的"这镜像能跑什么"由 `packages/runtime/workflows/registry.ts` 单一来源决定：
+`workflowBodies`（本镜像能运行的全部 body 标识符，当前 51 个）与 `workflowPins`（class → body）
+都是冻结的字符串字面量，不是函数引用；当前 pin 为 `chatTurn → chatTurn_v19`、`claraWork → claraWork_v3`。
+同一份名册被三个面读取且不得互相矛盾：world 启动的 provenance 日志、`/api/build-info`、
+以及回退预检 `packages/runtime/lib/rollback-preflight.mjs`。
+
+---
+
+## 5. 主要数据流
+
+### A. 文件入库 → 类型化事实 → 会计工作 → 过账 → 关账 → 报表<a id="documents-and-knowledge"></a>
+
+上传先落 runtime 本地 spool，检查媒体类型与恶意软件，再写成不可变私有对象并按内容 hash 建立保管。
+保管提交前的任何失败（含 Storage 瞬时故障）不留 `clara.documents` 行、把 intake 终态化为失败、
+删除已 spool 的字节——重新上传是唯一恢复路径，没有半成品。[已实现]
+
+OCR／结构化抽取对发票与月结单走文本 + 图像双 witness，保留来源 hash、模型版本与一致性／算术校验；
+不同格式的覆盖程度不同，由数据库里的能力目录 `clara.document_capabilities` 如实声明
+（custody / byte_extraction / typed_facts / business_operation 四个正交轴，全局而非按租户，
+未知方向取诚实默认而不是乐观默认）。[已实现，覆盖面见 §7]
+
+金额一律是**整数最小货币单位**（DB 侧 bigint `*_cents`），余额、舍入、期间与关联对象检查都在这个单位上执行；
+大整数穿过 JSON 与前端时必须保留精度——freeform 读路径已知的精度缺口仍未修（§7）。[已实现]
+
+类型化事实进入 Accounting Work：准入分配稳定的逻辑操作身份（绑定 firm／client／Work／intent），
+run 在冻结 bundle 下执行，调用受控领域 operation，**在同一事务内**提交完整会计影响 +
+`clara.operation_receipts` + outbox。"完整影响是事务边界"是核心约束：确认一张发票需要相应总账与 open item，
+收款分配必须维护余额，购置资产要同时保留资产记录。已入账历史不可原地改写——更正是有来源关联的
+冲销／替代操作。同 key 同 payload 重放取回原回执，同 key 不同 payload 是类型化 conflict。[已实现]
+
+<a id="close-reporting-and-tax"></a>关账按年度顺序串行，carry-forward 幂等，beginning-close 冻结期间内银行结算须先完成。
+报表走 open → evaluate → seal → render：确定性计算、封存快照、独立渲染服务出文件，模型不重打金额。
+指标携带 unit／currency、period／as-of、computed-at、定义版本、source watermark 与 coverage；
+**无权限、缺覆盖、读取失败都必须如实表达，不能读成零**。探索性分析可以使用模型，
+但必须与正式制品区分开，不得越过 seal 链。[部分已实现，见 §7]
+
+### B. Chat turn（含澄清与知识捕获）
+
+`chatTurn` class 在 registry 里始终指向最新 body（当前 `chatTurn_v19`），每次演进以新 `_vN` 交付
+（v19 相对 v18 加了两个工具、一个 wire kind 与一个**并列的**新 step，而不是加宽一个已部署的旧 step），
+旧版本保留导出供在途 run。对话可以发起会计 Work（与直接表单走同一扇准入门，不是第二套会计引擎），
+也可以捕获客户知识——知识以服务器登记的 key 写入，trust 由来源种类派生，
+对话车道只开放"用户陈述"与"模型推断"两档，读不到知识与没有知识必须被区分开。[已实现]
+
+共享问题有稳定身份与问题／依据版本：一个 Work 同时至多一个待答问题，数据库只接受当前获准的第一份答案，
+重复提交回放同一结果；期限到期后问题失效而不是 Work 静默完成。
+Work 详情、Needs you 与 chat rail 展示并回答**同一个**问题记录。[已实现]
+
+**模型侧的修复与预算合同**由每个 successor 重新实现，不随冻结正文自动继承：错误按 (errcode, reason)
+名册分为 invalid_input／state_changed／conflict／transient／refusal／cancelled／invariant 七档；
+**refusal 与 conflict 对模型是终态，不得改参重试**；可安全重算的状态冲突重读，基础设施失败有限退避，
+缺事实或决定才提问；每段模型／工具／重算／重试预算有限且被记录，耗尽结算为可恢复的 `failed/limit`。
+具体名册以 `packages/runtime/workflows/claraWork.v*.errors.ts` 为准。[已实现]
+
+### C. Wake／控制循环与心跳
+
+控制监听器以 `LISTEN clara_runtime_ctl` + 轮询双保险，租约式投递澄清（exactly-once-or-provably-delivered），
+取消走 abort-then-settle（取锁顺序见 §4），崩溃由 reconciler 修复
+（`packages/runtime/lib/control.mjs`、`lib/reconciler*.mjs`）。
+单一 leader 负责路由／drain／reconcile；`world` 心跳由**独立计时器**写入、从不由 leader 写，
+因此 leader 状态不闸 `/ready`（`packages/runtime/plugins/startWorld.ts`）。
+wake 任务的 workflow class 由数据库逐行决定而非静态硬编码，因此启停某条心跳是数据决定而非发版决定。
+`/health`（存活）与 `/ready`（依赖与配置就绪）分离，且就绪读数是三态加"未配置"第四态——
+"没测过"不得被读成"健康"。[已实现]
+
+### D. 授权计划到期 → Work
+
+计划授权是**库内可解析的显式指令**：计划行指向本库中一条 Work 或任务作为授权依据，开门时必须真的解析到——
+Knowledge 偏好、计算政策与"观察到的重复扣款"都解析不到，按名拒绝。计划的三张关系不授予任何应用角色权限，
+人类门（建立／修订／暂停／恢复／结束／补提／读取）与**唯一**的 runtime 扫描门分开授予；
+术语见 [CONTEXT](../CONTEXT.md)。[已实现]
+
+到期扫描**每个 leader cycle 跑一次**，每个计划每次只取一个到期事件；"计划 + 到期日"与
+"计划 + leg + 会计期间"两条唯一键共同收敛重复扫描与改期修订，转回必须等本期计提**已入账**且该分录仍在世。
+暂停只阻止未来接收，从不取消已接收的 Work；错过的期间一律走显式补提，扫描从不回填。
+runtime 皮带不自行推导任何日期，也不读任何 operator 开关——**不存在"全局开启自动执行"开关**，
+迁移尾部的普查对在世函数体断言了这一点。[已实现]
+
+### E. 模型外发（按用途授权 + 执行轨迹）
+
+外发是类型化的 client 用途家族：prepare／consume 两阶段、单次使用、短 TTL、多项重绑定检查。
+**Work 车道**的授权不是一个 per-client 开关，而是**推导**出来的：事务所当前接受的 Terms + DPA
+且该 client 在世活跃；撤销可逆，且对已消耗的 dispatch 是追溯的——账务核心在提交时会再读一次授权是否仍在世。
+其余五个 typed purpose 仍走人工 grant + activation（`clara.grant_client_egress_purpose`／
+`activate_client_egress_purpose`），两套并存尚未统一。[已实现]
+
+执行轨迹表没有 payload 列、每列有文法校验、写入方做脱敏，且任何应用角色对它连 SELECT 都没有
+（FORCE RLS + 无 policy）。承担轨迹与能力目录这两件事的模块随冻结版本一起锁定：
+`packages/runtime/lib/work-trace.mjs` 是冻结正文的动态 import 入口，
+`lib/capability-registry.mjs` 由它静态 import 带入闭包，两者都在闭包哈希内。
+（`lib/egress.mjs` **不**在冻结闭包里：它是 OCR 提供方的适配器，兼一张 purpose 查表——
+按它自己的注释是文档与查表、从不是授权；授权只由数据库动词判定。）[已实现]
+
+### F. 发布与回退
+
+迁移运行器用会话连接 + 会话级 advisory lock + 每迁移一事务；已应用字节不可变，只能追加后继迁移；
+部分迁移会**倒转**默认顺序（先部署 consumer 再迁移），该义务写在迁移文件头部。
+唯一权威是 `clara.schema_migrations` 账本。[已实现，`packages/db/README.md`]
 
 <a id="workflow-versioning-and-rollback"></a>
+**版本、冻结与回退。** `scripts/check-frozen-workflows.mjs` 对冻结正文及其相对 import 闭包做 append-only
+哈希校验；deploy-lock 是发布之后单独的一次仪式，与代码合并分开。法条三句：
+**(a)** 已部署的 body 不可变，行为变更以新的 `_vN` 导出发布；**(b)** 入队站点经 registry 解析，
+因此永远指向当前 pin；**(c)** 带在途 run 的导出不可改名或删除。
+历史上冻结的 body 在自己的文件头引用"ARCHITECTURE Appendix A"；本仓库没有、也不会有 Appendix A——
+那些文件是冻结的，**其引用永远不能被修改**，所以取代它的不是一次改名，而是本小节这个锚点
+`#workflow-versioning-and-rollback`：任何读到该引用的人应当读这里（freeze-lint 失败时打印给人看的也是这一行）。[已实现]
 
-**版本、冻结与回退（supersession pointer）。** 历史上冻结的 workflow body 在自己的文件头引用
-“ARCHITECTURE Appendix A”。本仓库没有、也不会有 Appendix A——那些文件是冻结的，**其引用永远不能被修改**，
-所以取代它的不是一次改名，而是本小节这个锚点：`#workflow-versioning-and-rollback`。任何读到
-“ARCHITECTURE Appendix A”的人应当读这里。可编辑的引用方（`workflows/registry.ts`、
-`scripts/check-frozen-workflows.mjs`、`scripts/check-workflow-bundle.mjs`）已在 #637 改为引用本锚点；
-仍指向 Appendix A 的文件全部是冻结闭包成员（以及 `nitro.config.ts`／`lib/malaysian-registration.mjs`
-两处待清理的旁注）。法条本身三句：(a) 已部署的 body 不可变，行为变更以新的 `_vN` 导出发布；
-(b) 入队站点通过 registry 解析，因此永远指向当前 pin；(c) 带在途 run 的导出不可改名或删除。
+回退预检 `packages/runtime/lib/rollback-preflight.mjs` 回答三问：(1) 非终态 run 的 body 普查；
+(2) 绑不到 run 的在世任务普查（未知 kind fail-closed）；(3) 数据库自身对目标镜像的 body 要求
+（某些迁移之后，目标镜像必须携带指定 body，且这一条不能靠 drain 清除）。该 frontier 规则已实现并上线，
+但它本身仍是待裁定语义（§7）。World 启动前另有一道 stranded-body 普查闸门：发现缺口即拒绝启动 durable world
+（HTTP 仍服务，`/ready` 503），只能由显式操作者覆盖。[已实现]
 
-**当前 chat 冻结版本账（2026-09-14）：`chatTurn_v19` 取代 `chatTurn_v18`。** v1..v18 全部保留导出（法条 (c)），v18 是回退目标，也是切换时停靠在 v18 clarify hook 上的 run 恢复进入的 body。registry 的五处改动（import、`workflows.chatTurn` 重指向、`export`、`workflowBodies`、`workflowPins`）由 `tests/registry-view.test.mjs` 逐条把关；冻结清单经 `node scripts/check-frozen-workflows.mjs --update`（本地行为，CI 下被拒）新增 8 项并相对 `origin/main` 仅追加，**未** deploy-lock（发布仪式才跑 `--lock-deployed`）。`check-workflow-bundle.mjs` 是版本推导式的，因此无需改动即断言产物里有 `runModelSegmentStepV19` 的 step directive 与 `chatturn-v19` 的计量印记。**部署顺序只欠一个方向**：migration 0192 与 0194 必须先于本镜像服务任何一个回合；否则三处各自抛 `undefined_function`（42883），两处被工具的类型化拒绝收敛、第三处按构造收敛（`readKnowledgePack` 归类为 `read_failed`，块如实渲染为不可用），因此错序不会损坏任何东西，只会让 Clara 拒绝它刚提出的事。反方向是免费的。**回退到 v18** 会停止提供这两个工具、停止读 Knowledge pack，不改动数据库；已写入的 Work 与 knowledge 记录各自保有自己的持久面。**一个被实测到的硬约束**：冻结闭包的传递 import 会把 `lib/periodic-adjustment-basis.ts` 与 `lib/knowledge.mjs` 一并冻结，而 WDK 把该闭包编译进一个没有 `require` 的 VM —— `lib/knowledge.mjs` 原本的 `import { randomUUID } from "node:crypto"` 让 `nitro build` 通过而第一个真实回合以 `USER_ERROR / ReferenceError: require is not defined` 死在 workflow 内部（由 `chat-turn-v19-e2e.mjs` 实测）；该 import 已移除，`claraWork.v1.bundle.ts` 因同一理由自行实现 SHA-256。
+发布仪式的实际形状（写前备份 → probe 机器只读预检 → 按 digest 发布 runtime → 发布 web → 静默窗口内迁移 →
+校验启动日志顺序 → smoke → 只读演示回退预检 → 事后单独锁定冻结清单）记在
+`docs/plan/active/refresh-wave-2026-09-14/RELEASE-RUNBOOK.md`，不在本文。
 
-> **已裁决（wave-3 orchestrator，2026-09-14 —— OWNER 仍须确认）：在 v3 之前的 bundle 下认领的 run
-> 被 GRANDFATHER，放行过 0195 的外发墙；反方向由 rollback preflight 把关。** 裁决原文，与
-> `packages/db/migrations/0195_…sql` 的文件头逐字一致：
->
-> > A Work whose run was claimed under a PRE-v3 bundle (`accounting_work.bundle->>'id'` is
-> > `clara-work/v1` or `clara-work/v2` — the frozen manifest stamped at claim) is GRANDFATHERED:
-> > `_record_journal_entry_core` does not require a consumed `accounting_work` authorization for it,
-> > and the trace (if any) records `authorization_id = null`. The wall applies in full to every run
-> > claimed under `clara-work/v3` or later. A rollback to a pre-v3 image under 0195 would therefore
-> > run the Work lane without the egress wall — so the rollback preflight REFUSES any target image
-> > that does not carry `claraWork_v3` once the database frontier is at or past 0195, regardless of
-> > parked runs. Forward cutover: parked v1/v2 runs finish honestly; backward: the preflight is the
-> > gate (#815 stays: ship 0195 with the v3 image).
->
-> **它在裁决什么——这是实测出来的，不是担心出来的。** Work 车道的
-> `clara.prepare_work_egress_dispatch`／`clara.consume_egress_dispatch` 调用点**只存在于冻结的
-> `workflows/claraWork.v3.impl.ts:280,291`**（全仓 grep，非测试代码只此一处），而 v1／v2 是冻结 body，
-> 永远不可能获得这个调用。所以 0195 应用的那一刻，所有已经停靠在 `claraWork_v1`／`claraWork_v2` 上的
-> Work（一个没被回答的提问、一段跑到一半的 run）都会**永久无法过账**：它在新镜像里恢复进自己的 body
-> （run name 不变——法条 (c) 的镜像层面成立），走到 0195 重铸的 `clara._record_journal_entry_core`，在写入处
-> 被拒 CLR13 `egress_not_authorized`。这不是 #631 已记录的回退代价，而是**正向切换**的代价，由 #637 的
-> 双镜像演练在 v2→v3 上实测：task `failed`／`error_code='internal'`、Work
-> `error={code:"no_effect", reason:"no_receipt"}`、`clara.operation_receipts` **0 行**、该 run 的
-> `clara.work_execution_traces` **0 行**；同一次运行里 v3 的 run 各写 4 行 trace 并铸出唯一的一条 consent
-> 与唯一的一条 dispatch authorization。对照：同一支演练在 0194 链上以 v1→v2 跑是 ALL PASS（wave-2 CI 与
-> #637 关闭复核），唯一变量是 0195。拒绝甚至没有以自己的面目到达用户：v1／v2 的**部署锁定**错误名册里
-> 没有 `(CLR13, egress_not_authorized)` 这一对，所以它显示为 `internal`。
->
-> **三条路，以及为什么取 (2) 并且写进 0195 本身。** **(1) 先 drain 再上 0195** —— 纯发布仪式，不写代码；
-> 被否决为首选，因为它把 schema 的安全性押在「操作者记得先清空队列」上：一个停靠的 Work 就能把一次例行
-> migration 变成静默的数据损失，apply 时刻没有任何 gate 能证明 drain 发生过，而且它救不了已经应用了 0195
-> 的 estate。**(2) 在核心自己的门里 grandfather v3 之前的 bundle** —— 采纳。代价直说：v1／v2 下认领的 run
-> 在**没有当期外发授权**的情况下过账，因为它的 body 根本无从取得授权；这是诚实而非放松——这些 run 是在
-> 0195 之前的契约下调用模型的，而它们要被墙掉的是**写入**，模型外发早已发生。**(3) 接受损失并给一条诚实的
-> 拒绝面**（把这一对加进一个**新的** v2 后继名册）—— 被否决：它为注定要被销毁的工作换来一句措辞更好的失败，
-> 而且需要一个新的冻结 body 来承载名册，也就是一次新的切换——正是会搁浅下一批 run 的那件事。
-> 写进 0195 而不是 0196，是因为 **0195 尚未合并**，从未应用到本 wave 的 rig 之外的任何数据库：规则可以是这堵墙的
-> **一个子句**，而不是事后补的一块补丁；对 0194 body 的 prestate 钉子（SECTION 0）不受影响。
->
-> **它按 fail-closed 收口，且集合封闭于二。** 被 grandfather 的集合正好是两个冻结 manifest 声明的两个 id：
-> `clara-work/v1`（`workflows/claraWork.v1.bundle.ts`）与 `clara-work/v2`（`claraWork.v2.bundle.ts`）。
-> **没有** bundle 印记的 Work（从未被认领，列为 null）、本文件没听说过的 id、以及 `clara-work/v3` 起的每一个
-> id，一律**被墙**。0195 的 tail census 重新读取已提交的 body，拒绝在那个集合里留下第三个 id。
->
-> **反方向由 preflight 把关，这是同一条裁决的另一半。** `packages/runtime/lib/rollback-preflight.mjs` 新增
-> **frontier 规则**：读数据库自己的 `max(clara.schema_migrations.version)`，当 frontier ≥ `0195` 而目标镜像的
-> body 名册里没有 `claraWork_v3` 时，verdict 为 **REFUSED**，理由 `frontier_requires_body`，同时点名 0195 与
-> `claraWork_v3`，CLI 退出码 1。它是**全局**的——任何 `--scope` 都清不掉它，因为它一行都不数——也**不可 drain**：
-> 这是已应用 schema 里的一条规则，不是队列里的一行。规则表是**数据**
-> （`FRONTIER_BODY_RULES = [{ migration, requires }]`），以后再有同形状的切换是加一行，不是改代码。
-> 两个 censuses 看不见它：Work 车道完全排空时它们都是干净的，而那正是有人会按下回退的时刻。
-> #815 维持原样：0195 与 v3 镜像一起发。
+---
 
+## 6. 关键技术取舍
 
-Workflow registry 决定新接收的版本，旧非终态运行继续拥有其原 body 与相容依赖。
-目前 frozen closure 有 hash 检查；目标进一步固定 instruction／skill／tool registry manifest、
-schema 和依赖解析。发布新 successor 时保留旧导出，rollback 也必须支持全部非终态 bundle 或先验证 drain。
-SQL 迁移是有顺序、校验和的追加输入；回退使用相容发布或新迁移，不改写历史 migration。
+- **追加式迁移 + prestate 钉子 + tail 普查。** 已应用文件字节不可变，行为变化只加新迁移；
+  被**重切**的受控函数须在同一迁移的 prestate 里以 **pre-image sha256** 钉住其在世函数体（漂移即拒绝应用），
+  tail 再重读 owner／SECURITY DEFINER／固定 `search_path`／逐字 ACL 证明"没动别的"。
+  取舍：牺牲编辑便利换可审计与可回退，代价是必须守 writer-quiescence 窗口纪律。
+- **FORCE RLS + 受治理的 SECURITY DEFINER 门。** 应用角色不能直连表，一切经固定 `search_path`、
+  按角色授权的门；`packages/db/scripts/operation-census.mjs` 对整个 `clara` schema 的 owner／definer／ACL／
+  错误码／调用点做交叉校验。取舍：新增能力必须走门，开发成本更高，换来**"应用角色不能直连 clara 表"
+  这一条**能被机器证明——可被证明的也只是这一条：托管 Supabase 的 provider-owned `pg_catalog` ACL
+  不完全由项目控制，notification／advisory lock／sleep／XML helper 等残余能力经 PUBLIC grant 到达，
+  逐角色 `REVOKE EXECUTE` 实测无效（唯一有效的关法需要 pg_catalog 所有权，属 owner 仪式而非迁移），
+  因此不能仅凭 public schema grants 宣称全部封闭。受限 freeform 读是单独授权的**只读**能力，
+  不能通过 `SELECT` 包装写函数取得写权限。
+- **冻结不可变 workflow body + 钉住的 registry。** 入队点只解析 registry；行为变化发新 `_vN`。
+  取舍：body 数量单调增长（当前 51 个），换来 replay 安全与可控回退。
+- **单台 Fly machine + 常驻 Postgres World + 单 leader。** leader 崩溃即整进程退出由 Fly 重启（crash-only）。
+  取舍：简单与成本优先，代价是没有多机分发与 spool 转移的证明。
+- **Web 经 OpenNext 部署 Cloudflare Workers，且从不持有 runtime 服务凭据。** 读走用户自己的 JWT，
+  长时能力走同源 allowlisted-header 代理。取舍：边缘部署减小自维护面，但 OpenNext／Workers 的兼容边界仍需自验。
+- **文件字节读取只用代理，不用签名 URL。** 代价是每次请求重读在世 membership，换来即时可撤销性。
+- **刻意不做的事：**
+  - 没有 per-client 的 AI 开关（Work 车道的外发授权由事务所级 Terms／DPA 接受与 client 活跃状态推导）；
+  - 没有"全局开启自动执行"开关；观察到重复扣款不自动创建计划，也不代表产品具有发起银行付款或管理 mandate 的权限；
+  - 不承诺高可用；
+  - 不发明税率、门槛或员工计算——税率、阈值与法律文字是**有生效日期的外部输入**，
+    在实现或启用相应能力时验证，不固化为架构常量；算术只用来核对会计师自己供的数字；
+  - 不把知识叙述当作可执行授权（知识记录里的 policy 是描述性的，不改变入账行为）；
+  - 法律文本签署与 close evidence exception 是**人类专属动作**，结构上只对 `clara_authenticated` 开门，
+    agent 车道永远取不到——收紧或放宽都要同时改这句话与对应的 grant。
 
-当前实现（#637）：上一句的 rollback 前提从散文变成了**一个带退出码的命令**。
-`packages/runtime/scripts/rollback-preflight.mjs`（逻辑在 `packages/runtime/lib/rollback-preflight.mjs`）
-在 `fly deploy --image <previous>` 之前运行，数出两件事而不是一件：非终态
-`workflow.workflow_runs`（按 name 分组，停靠的 body 从行本身推导，绝不硬编码版本字面量），**以及**
-「在世但未绑定 run 的任务」——后者按构造对 run 普查不可见（任务在其准入提交时就存在，run 只在 worker
-认领后才存在），因此只数 run 会在已接收的工作正等着目标镜像没有的 body 时报告「干净」。第二项覆盖
-**每一种能变成 run 的任务**，不只 `accounting_work`：`clara.agent_tasks` 的五个 kind（`chat_turn`／
-`autodraft`／`accounting_work` 静态解析到 registry class；`wake`／`close_prep` 的 class 是**数据库事实**，
-按 `lib/wake-engine.mjs` 的分发方式从 `clara.wake_engine_sources.workflow_export` 逐行读出——`wake` 按其
-起源事件的 event_type，`direct_queue` 按 task_kind，并采用 `reconciler-wake.mjs` 同一套
-`enabled desc, created_at desc, source_key desc` 定序），以及 `clara.document_processing_tasks` 的九个
-lane（七个映射到 class，`classify`／`local_facts` 显式标注为「不需要 workflow」）。`held` 计为在世
-（wake 任务出生即 held），`cancel_requested` 不计（reconciler 直接终结、不需要 body）。kind／lane／status
-三套词表由 `tests/rollback-preflight.test.mjs` 对着关系自身的 CHECK 约束校验，新增成员会让测试变红而不是
-悄悄落在普查之外；无法归类的 kind／lane **fail-closed**（计为 stranding）。目标镜像支持的 body 集合取自
-**目标产物**：扫描其已构建 bundle 的 WDK body directive，或读它自己的 `/api/build-info` `bodies`（两种推导
-在当前构建上完全一致，均为 49）。退出码 0 允许、1 拒绝（列出具名 body）、2 无法回答——1 与 2 刻意不同：
-把「我拒绝」和「我看不到」当成同一件事的发布脚本，终将在第二种情况下发车。`--scope`（run id／name 过滤／
-work id／task id）是显式且默认关闭的窄化，解决 #708（共享 rig 上他人留下的停靠 run 会让判决与被测切换
-无关）；但**两份判决分开返回**：全局判决（退出码依据）永远照常测量，`scoped` 只是并列的窄化视图。窄化
-只能缩小问题，绝不能放大答案——`--scope-name claraWork` 不得掩盖另一个 class 的停靠 run。
+---
 
-拒绝只有两个可接受的出路，**经过的时间不是其中之一**：保留全部非终态 bundle（发布一个仍导出这些 body、
-但把新接收指向上一版本的兼容构建），或先完成**经过验证的 drain** 再重跑 preflight。并且「回退只是让车道
-停靠」这一说法过于温和：#637 的实测是，引擎在启动时对一个自己不导出 body 的非终态 run 做 re-enqueue 会抛
-`ReplayDivergenceError`，crash-only supervisor 随即 exit 1——在 Fly 上是崩溃循环而不是安静停靠。这正是
-preflight 必须是闸门而不是备注的原因。基于同一实测，启动时的 stranded-body 普查在 `getWorld().start()`
-**之前**运行，并在发现 stranded body 时**拒绝启动 durable world**（#637 review S5，取代原先的告警级
-决定）：HTTP 继续服务（`/health`／`/ready`／`/api/build-info` 可读，这正是拒绝的意义所在），不启动任何
-lane，`/ready` 为 503 且 `checks.bodies.world_start_refused: true` 并具名列出 body。该硬失败是**独立合取项**
-而非从心跳推断：心跳行是共享状态，刚停止的进程留下的心跳在整个 staleness 窗口内仍是「新鲜」的。
-`CLARA_ALLOW_STRANDED_BODIES=1` 是显式的操作者覆盖，恢复告警级姿态（world 启动、`/ready` 告警但 ready，
-进程随后**可能**在 replay 时崩溃——日志明说这是操作者的决定）。普查本身**读取失败时 fail-open**：读不到
-不等于有 stranded body，world 照常启动，`/ready` 以 `measured:false` + sanitized code 报告；未测量与读取
-失败各是一种答案，绝不报成干净的 0。**爆炸半径（待 owner 确认）**：该拒绝是**整库级**的，不分进程或
-lane——任何一个未导出 body 的非终态 run（无论是另一条 lane 留下的、被中断的测试，还是被杀掉的 rig
-fixture），都会拒绝该库上**之后每一个**启动的 runtime 进程，直到该 body 被清理或设置
-`CLARA_ALLOW_STRANDED_BODIES=1` 为止；CI 的 `db-live-gates` 各 Wave-B e2e 共用同一个
-`clara_wave_b_ci`，一步被中断就可能拖垮同一 job 里其余的步骤——run 34793833626 实测：上游 e2e 全绿，
-但其中一条留下的 `claraWork_v2` 非终态 run 直接让 two-build 演练拒绝启动并 exit 1。因此 #637 的两个步骤
-（two-build 演练与 world guard）改在 `clara_rt_test` 上跑，该库是在任何 e2e 触碰之前从 `clara_wave_b_ci`
-复制出来的 template copy。这是按设计生效的既定裁决，不是缺陷，但
-其影响范围尚未取得 owner 的确认，此处如实记录以免 runbook 声称此事已经落定。两版本切换的可执行证据是
-`packages/runtime/tests/two-build-cutover-e2e.mjs`（真正构建第二个镜像，本地全绿，已接入 per-PR
-`db-live-gates`）；hosted 的两次发布 + 一次故意回退仍待 owner 安排，证据未补。
+## 7. 已接受但未实现的目标
 
-Web、runtime、DB frontier 和 renderer 分别记录发布身份；源代码通过不能替代已部署版本证据。
-备份需要账务／schema、角色与 ACL、对象清单和可解密制品，且必须实际恢复并核对账与重渲染结果。
-现有单机与本地 spool 约束不能由一次 Postgres restart 测试推导出 HA。
+各项的交付范围、依赖与完成证据由 GitHub 上的 delivery spec 与票承接；本表只记"与当前实现的差别"。
+两项**待 owner 裁定**的语义单独标出：未裁定前，它们已上线的实现不应被当作已敲定的架构。
 
-主要验证入口是“用户发起 Accounting Work → 完整业务结果”，辅以真实 DB／Workflow 的竞争、
-重启、权限变化、答案投递、取消及两版本迁移验证。数字使用可核对的 exact-cent fixtures；
-前端验证全部接受的旅程与键盘／窄屏／恢复；托管环境再验证真实依赖、来源和制品。
-单元测试、数据库证明、合成原型与 hosted journey 各自说明证据范围，不互相冒充。
-
-当前实现（#619，2026-09-13）：浏览器 walk 套件的 mock 层收敛到一份共享 dispatch 原语
-（`apps/web/e2e/mock-dispatch.mjs`）。`readCachedJson(request)` 把一个 POST body 解析一次并缓存
-在 request 对象上，取代此前七个 lane mock 各自维护、有的带缓存有的不带的 `readJson` 副本
-（#722）——一个 request 的 body 只能被 Node 的 async iterator 消费一次，先读的 lane 若在决定
-"这不是我的 verb"之前就读了 body，后读的 lane 只会看到 `{}`，且这个静默失败不产生任何错误。
-`matchVerb(verbSet, verb)` 是 `bank-close-registers-mock.mjs` 已有的"读 body 前先查 allow-list"
-写法的具名版本。此前 `serve-built.mjs` 里一段 raw-byte 的 stream-replay hack（专为三个 lane 共答
-`list_review_queue` 而写）以及大量仅靠注释维系的 hook 顺序说明，在每个 lane 都改用共享缓存之后
-不再是必要条件，已随之移除或改写为准确陈述。F-05：`fs4-checkout-mock.mjs` 的 `state.doorCalls`
-账本此前记录每一个到达它的 `/rest/v1/rpc/` verb（该 hook 排在 dispatch 链最前），而不只是
-FS-4 C-6 自己的九个门——加了 `CHECKOUT_RPC_VERBS` allow-list 后只记真正被本车道分派的 verb。
-`#740`：`journal-work-mock.mjs` 的控制端点此前先读 body 再判断 `client`，现改为判断
-`?client=` 查询串（`chat-parity-mock.mjs` 已有的 `?thread=` 写法的同型应用），判断在 body 被读
-之前完成。`e2e-fixture-ownership.test.ts` 新增跨车道 RPC verb 归属普查（两个车道声明同一个
-verb 必须被具名声明为有意共享，否则普查失败）与一个并发反例——两个身份争用
-`serve-built.mjs` 唯一共享的 `state.email` 字段，证明该字段没有按调用者区分——用以说明
-`playwright.config.ts` 的 `workers: 1` 目前是必要而非习惯；本 PR 不撤销该值，也不把十条车道
-重构为按 worker 隔离。表格覆盖模式（具名 `DataTableCard label`、scoped
-`getByRole("table", { name })`、人口／筛选或隔离／空态断言）应用到两张表：Journals 表补齐了
-分页边界、空人口与 `list_entry_links` 信封拒绝三种此前缺失的状态；Clients register 首次获得
-`label`（此前二十个左右调用点只有 Journals 表有）并新增人口／跨车道隔离／空事务所三个断言。
-本地：`node --test e2e/e2e-fixture-ownership.test.ts e2e/mock-dispatch.test.ts` 21／21 pass；
-`pnpm typecheck`／`pnpm --filter @clara/web lint` 绿；浏览器套件结果见 #619 的关闭评论。
-
-## 11. 当前实现与已接受目标的分界
-
-| 领域 | 当前实现的事实／限制 | 已接受目标 |
-|---|---|---|
-| Agent 与宿主 | #623 已合入：`claraWork_v1`（ToolLoopAgent + 冻结 bundle `clara-work/v1`）与 `chatTurn_v18`；本地证据：runtime suite 2211／2209 pass／1 fail（Windows-only EICAR）／1 skip，world／version-cutover／work-journal e2e 在真实 Postgres World 上通过（含 commit 后、checkpoint 前 SIGKILL 重放恰好一条分录一条回执，及真实 chatTurn_v18 回合准入同一 basis）；hosted 证据以 #623 记录为准。#629 已合入 `claraWork_v2`（registry 重指向；v1 保留；`claraWork.v2.errors.ts` 委托 v1 名册并覆盖 `(CLR13, source_conflict)`；冻结清单相对 main 仅追加 7 项；本地：runtime suite 2233／2226 pass／1 fail（EICAR）／6 skip，world／version-cutover／work-journal／work-question e2e 全部通过——后者 7 条腿含两个 worker 竞争一个过期租约、resume 前崩溃、commit 后 checkpoint 前崩溃、过期→Retry→版本 2、角色丢失；CI `db-live-gates` 绿）。其余仍是分散冻结流程；根／CI／runtime image 已统一 Node 22.23.2（#616 已关闭，本地 + hosted 证据：Linux runners CI 绿，image `refresh-10b99a73` 以 v76 发布于 `clara-runtime`，`/ready` 200 且镜像内 Node v22.23.2）；`packages/backup` 已随 #686 改为 `node:22-bookworm-slim`（镜像尚未部署）；`packages/reporting-render` 已随 #691 改为 Node 22.23.2 bookworm-slim，digest 于 2026-09-14 就 tag `22.23.2-bookworm-slim` 新解析（镜像尚未部署；本地无 Docker，构建与确定性 drill 以 CI `render-drill` 为证据，drill 不执行容器内的 Node 运行时）。该渲染器的部署时验收门槛——真实排队任务完成、内容哈希与已存 PDF 一致、manifest 记录实际使用的镜像、替换前保留前一镜像以支持可复现重渲染——仍是待兑现义务，绑定于其首次真实部署。自 #693 起，上文两处计为 1 fail 的 Windows-only EICAR 单元在 Defender 隔离夹具时按原因跳过（`eicar-fixture.mjs` 探针），不再是失败。#637 已合入版本切换的**通用机制**（无新 migration、无新冻结闭包）：registry 的 `workflowBodies`／`workflowPins` 惰性数据（freeze-lint 新增 capability (g) 以 AST 强制其形状，(h) 拒绝 `tests/` 下的冻结清单键，C77.2）、一行 provenance 启动日志（git sha／frontier／body 数／每个 class 的 pin）、`/api/build-info` 的 `bodies`／`pins`、**启动闸门**（world 启动前普查 stranded body，发现即拒绝启动 world；HTTP 仍在，`/ready` 503 且 `checks.bodies.world_start_refused` 具名，`CLARA_ALLOW_STRANDED_BODIES=1` 为显式覆盖；普查读取失败则 fail-open）、以及可执行的 rollback preflight（`lib/rollback-preflight.mjs` + `scripts/rollback-preflight.mjs`，退出码 0／1／2，同时数非终态 run 与**每一种**未绑定 run 的在世任务——`clara.agent_tasks` 五个 kind（`wake`／`close_prep` 的 class 逐行读自 `clara.wake_engine_sources`）与 `clara.document_processing_tasks` 九个 lane，词表对着 CHECK 约束校验、无法归类者 fail-closed；`--scope` 解决 #708 且**全局判决与窄化判决分开返回**，退出码只跟全局）。本地证据：`tests/two-build-cutover-e2e.mjs` **真正构建第二个镜像**并全绿（本轮实测 scratch nitro build 54.6s、整个文件 1m43s）——A 固定 `claraWork_v1`（48 body）接收 W1 并停靠 bare clarify，A 停止，B 固定 `claraWork_v2`（49 body）接收 W2 并停靠类型化 Work question，回退到 A 被拒绝并具名 `claraWork_v2`，scoped-to-W1 允许而同一次读取的全局判决拒绝（B2），W1 在 B 内**恢复到原 body**（run name 不变）并以 v1 digest 结出唯一回执，W2 以 v2 digest 结出唯一回执（两个不同 digest、各一条分录），两者终态后同一 A 目标转为允许，未绑定 Work 独立拒绝；`tests/version-cutover-e2e.mjs` ALL PASS（含 #708 的 20 条噪声 run 验收腿）、`tests/rollback-preflight.test.mjs` 24／24、`tests/body-census-guard-db.test.mjs` 4／4（真实 Postgres World：停靠一个镜像不导出的 body → world 被拒、`/ready` 503 具名、进程存活；覆盖开关 → 仅告警且 world 启动）、`tests/ready.test.mjs` 24／24、`tests/built-bundle-gate.test.mjs` 7／7、freeze-lint 与三个 selftest 全绿；CI 已接入 `db-live-gates`（记录待 PR）。**实测发现**：回退到缺少某 body 的镜像不止是「车道停靠」——引擎在启动 re-enqueue 时抛 `ReplayDivergenceError`，crash-only supervisor exit 1（Fly 上是崩溃循环）；这是 preflight 必须是闸门、启动普查必须是拒绝的理由。hosted 证据（两次发布 + 一次故意回退）未补。 #631 已把 `claraWork` 重指向 `claraWork_v3`（bundle `clara-work/v3`，digest `345f2a38c3c8e128300fdf6af47d615285c8c278aea6db47283f5d85505d5bc4`；v1／v2 保留）：每个 segment 在 `agent.generate` 之前 prepare + consume 一次性的 `accounting_work` 外发授权，每一步写一行无 payload 列的执行轨迹，#737 的三对错误名册与 #738 的 `work_status.client_id`，并新增 server-owned 能力目录 `lib/capability-registry.mjs`。复核后的修正轮另加：能力目录去掉了没人用的 `public` data class，并在两个模块头与 §10 记下**它们已被 `check-frozen-workflows.mjs` 的 import-closure 哈希锁定**（#637 的 `--lock-deployed` 之后，改动只能随 `claraWork_v4` 发布）；`settleWorkStepV3` 现在用一个显式事务把 settle 与它的 trace 行包在一起（插入放在 SAVEPOINT 内）；`lib/work-trace.mjs` 改为对**送出的每一个值**脱敏，而不只是 refusal。本地证据：`work-egress-authority.test.mjs` 28／28、`work-trace-redaction.test.mjs` 21／21、`work-bundle.test.mjs` 16／16、`work-egress-e2e.mjs` 3 条腿在真实 Postgres World 上 PASS（授权 run 留下 dispatch→model_call→tool_call→settle 且授权恰好消耗一次；撤回后 prepare 拒绝、**没有 model_call 行**、Retry 同样被拒且不点名任何供应商；植入的 NRIC／账号／email／电话／JWT／api key／DSN 没有一个进入轨迹）。hosted 证据：2026-09-14 随 runtime v83／frontier 0195 发布，见 #612／#631。 #643＋#644 的共用 successor `chatTurn_v19` 已合入本分支（registry 由 v18 重指向 v19，v1..v18 全部保留导出；冻结清单 `--update` 新增 8 项、相对 origin/main 仅追加、未 deploy-lock）：两个冻结工具（`start_periodic_adjustment_work`／`remember_client_information`）、一个 wire kind `knowledge_receipt`、一个与 v10 冻结 context step 并列的诚实 Knowledge pack step。本地证据（rigv19 55455/clara_v19，frontier 189）：`chat-turn-v19-tools.test.mjs` 17/17（含把构造出的 `p_adjustment`／`p_basis` 交给 0194 的 `_assert_adjustment_basis` 与 `_assert_adjustment_relationships` 自己判的 rig 腿）、`chat-turn-v19-knowledge-context.test.mjs` 11/11、`chat-turn-v19-e2e.mjs` 在真实 Postgres World 上 4 腿全过（对话准入的定期调整 Work 5.5 秒内由 reconciler 跑到已过账分录、bundle digest 与启动横幅一致且 particulars 从未进入 run 的 prompt、一条经人类门 `list_client_knowledge` 可读的 knowledge 记录、两张卡片持久落在 `chat_messages.parts`）、check-frozen-workflows（272 项）＋两个 selftest、check-parts-parity、check-workflow-bundle（chatTurn pinned at v19，含 step directive 与 `chatturn-v19` 印记）、check-worker-paths 全绿。**实测的硬约束**：冻结闭包的传递 import 把 `lib/periodic-adjustment-basis.ts` 与 `lib/knowledge.mjs` 一并冻结，后者原有的 `node:crypto` import 让构建通过而第一个真实回合在 workflow VM 内以 `require is not defined` 死亡；已移除。**wave-3 合并后的实际计数（集成时实测，取代上面两条各自的分支内计数）**：`frozen-workflows.json` 共 **281** 项，`--compare-base origin/main` 为 **264 项未变、17 项新增**（#631 九项＋v19 八项），`"use workflow"` 模块 **51** 个；`workflowBodies` 51 个、`workflowPins` 的 `chatTurn` 与 `claraWork` 分别钉在 `chatTurn_v19` 与 `claraWork_v3`；两套新清单条目的 `note` 已在集成时补齐（各自的 provenance 与 DEPLOY ORDER），`--lock-deployed` 已随 2026-09-14 的发布仪式跑过（`frozen-workflows.json` 281 项全部 `deployed:true`）；hosted 证据见 #612。 | 首个 ToolLoopAgent successor 与显式版本 bundle；保留旧运行。 |
-| Work 与控制 | tasks、interruptions、回执、SSE、租约已有；#623（0178）加入 `accounting_work`／`operation_receipts`、逻辑操作身份、client 范围的 intent 幂等、retry 保留身份、任务状态镜像、receipt-aware 结算与待答问题级联（本地 db suite 4152／4058 pass／0 fail／94 skip）；#629（0180）加入共享 Work question（`agent_interruptions` 上的 Work 链接、单调版本、类型化字段、依据 digest、回答归因、带时间戳的 delivery state；一个 Work 至多一个待答问题；首答闸门 `answer_work_question`；读门 `get_work_question`／`get_work_pending_question`；`list_review_queue` 的 `work_question` 行）与正确投递（claimant+租约条件的 delivered 戳、续租、HookNotFound 按真实 run 状态核对、`hook_missing` 静置 + 宽限 + 二次探测后才结算 `expired`、14 天期限的执行者）；本地 db suite 4208／4114 pass／0 fail／94 skip；CI 绿。取消排序仍由 #630 承接；chat 车道的 clarify 期限已由 #720 Half 1（0198）补上执行者（同一个 expire_due_interruptions，删掉 work_id is not null 一个谓词）；仅 HookNotFound 假设未变（#764）；本地证据：`packages/db/tests/chat-clarify-expiry.test.mjs` 10/10 pass，runtime `control-work-question` 含停靠 turn 端到端恢复与无 resume 风暴两 cell；hosted 证据：2026-09-14 17:44Z 随 0198 发布，§R sweep 前后历史 chat 积压数均为 0，记录于 #720／#764；答案不能补全不完整的 basis（#721）。 | 统一业务 Work，共享问题与稳定操作身份，真实重启／竞争下保持完整结果。 |
-| 会计能力 | JE、subledger、结算、资产、close 基础存在；#623 的无附件手工分录已是完整 operation（`wake_record_journal_entry`：无 attestation 仪式、当前授权与硬约束在提交时重查、回执墙接受两种回执形态）；#634（0182）使该 operation 的凭据可选且可迟到而不改写已入账历史（`entry_evidence_links`、全事务所一份文件一条在世分录、冲销释放、`attach_entry_evidence`、`list_entry_links`；`admit_journal_work`／`_record_journal_entry_core` 全文重切，0178 各拒绝臂逐一保留并经文本 diff 核对；本地 db suite 4193／4099 pass／0 fail／94 skip，work-journal e2e 第 8 条腿；CI 待记录）；#718（0197）关上了该缺口：文件编码车道的批准路径现在回看凭据链接——`clara.journal_entries` 上 draft→approved 过渡的两个 BEFORE ROW 墙先取 `clara.documents` 行锁（`_lock_document_binding`）再问 0182 自己的 `_document_posting_entry`，命中在世 `entry_evidence_links` 行即拒 CLR13 `source_already_posted` 并具名冲突分录（与 `admit_journal_work`／`attach_entry_evidence` 同一拼写，不新增词汇）；`entry_evidence_links` 上的镜像 BEFORE INSERT 墙取同一把锁，使两条车道的「先读后写」成为一次串行化行为，两种到达顺序下都只剩一条已入账分录（`wait_event_type='Lock'` 与 `pg_blocking_pids` 在 cell 中实证）。本文件不重切任何函数正文（`_document_posting_entry` 按 sha 复核未动，`_draft_entry_core` 仍只有自己的 CLR21 `double_coded` 臂）；期初余额车道按设计一份 tie 文件绑多条 opening item，以 `is_opening_balance` 显式排除在编码墙之外（凭据墙不排除，否则会削弱 0182）；由此残余的「凭据链接在先、期初项在后」方向未关，由 #821 承接。本地证据：`packages/db/tests/coding-lane-evidence-link.test.mjs` 7/7 pass，两条链 `#718 prestate/tail` 均洁净，回归约 2700 cells 0 fail；hosted：2026-09-14 17:44Z 随 0197 发布，生产上 legacy double claims 为 0，见 #718。#643（0194）把同一形状扩到定期存货调整与已提供的工资／法定义务：两个新 purpose、冻结列 `adjustment_basis`（类型化 particulars，run 不读不回带，因此冻结 workflow 正文一字未动）、仅追加的 `clara.periodic_adjustments`（强制 RLS、仅 `clara_authenticated` 可读、零应用角色 DML、除一次性 `corrected_by` 盖章外只追加、每个逻辑身份一行、每个目标一次更正）、从 `admit_journal_work` 抽出的 `_admit_accounting_work_core` 与并列新门、过账核心第三次全文重切（marker flag、关系断言、调整行与回执 effects）、以及 `_close_gate_closing_stock` 摘掉 `no_producer_verb` 并点名 producer。本地证据（Windows 11、Node 22.23.2、PG17 rig643b :55447，0001→0194 全新链，183 迁移）：periodic-adjustment 19／19、close-closing-stock-producer 4／4、0 skip，邻近既有十块电池（work-journal-admission、work-journal-post、journal-work-evidence、work-cancel、work-question、work-question-reads、x56-rest-h、er9-gates-boundaries、er9-close-lifecycle、operation-census）208／208／0 skip——过账核心第三次重切没有移动 journal 车道，runtime periodic-adjustment-e2e 六条腿全过（含 commit 后 checkpoint 前崩溃后重放恰好一条分录、一条回执、一行调整，以及第六条：一份被引用的文件从准入走到提交后的 `entry_evidence_links` 与 `source_document_id`，未归档的引用则是点名 `sourceRefs[1]`／`not_filed` 的 400）。审阅修正已落在同一份迁移里：三条引用改为携带租户列的复合外键（并为此给 `clara.operation_receipts` 补一条纯追加的 `unique (id, firm_id, client_id)`）、`adjustment_id` 仅在确有调整行时发出（journal 车道因此只有一种答案形状）、关账闸门发出它选了却从未发出的过账日，以及 tail 把 18 个新建／重切函数的 owner、SECURITY DEFINER、固定 `search_path` 与**逐字 ACL**（连授予者一起）一并重读。hosted 证据：2026-09-14 随 runtime v83／frontier 0195 发布，见 #612／#643。预支腿的分配仍属 `clara.book_staff_advance_application`（0043 的 CLR40 是活的墙，本车道只断言控制关系）；chart 模板未改，法定科目是供给的 particulars。其余入口能力及人工／agent 行为仍不一致。 #643 的 AC3 第三入口（对话）已由 `chatTurn_v19` 补齐：冻结工具 `start_periodic_adjustment_work` 与 `start_journal_work` 并列，走同一扇 `admit_periodic_adjustment_work`（`clara_interpreted` + `chat_task` source ref + 确定性 intent key），不铸新 claraWork bundle（真实 World 实测：同一 `clara-work/v2` digest，run 的 prompt 里从未出现 particulars 字段名）；缺失 particular 在准入前以具名字段本地拒绝（#721 的诚实形状）。#796 已关闭：payroll 分支加 `advance_account_code`（真 particular）与 `advance_cents`（仅派生输入）。已知遗留（非本次范围）：直接表单的 `derivedLines` 仍不派生预支腿，因此在表单里选一个 staff-advance 科目会在准入拿到 0194 的 `advance_leg` 拒绝——属 #643 的面，已具名未修。 | 全范围领域操作与必要关联影响；去掉普通入账额外仪式，保留实际权限与硬约束。 |
-| 文件 | 0177 与 extraction-aware facts_gate consumer 已合入 main 并在本地 PG17 全链验证：未知 kind 的 PDF／图片在成功提取前返回 awaiting_extraction；hosted 发布已由 #606 记录（consumer v76 先行、0177 落地 live DB（frontier 0177）、runtime v77，真实上传旅程中 classify 任务在 extraction 完成后 98 ms 创建）。#620（0190）已合入来源文件字节的第二道保管门：`clara.get_document_for_human_read_v2` 的 firm-membership＋active-filing 客户范围与 `custody_pending` 类型化拒绝、每次成功读的 `clara._audit` 回执、`GET /api/documents/:id/bytes` 的七种类型化拒绝与下载头、Documents 工作台的九态状态梯与 `?document=` 定址（#719 的 Documents 半已一并解决；Journals／Reports 的条目级深链接仍缺）、以及针对 `storage-provision.sql` 的首个 Storage grant/policy battery（`supabase start` 一次性栈，B1–B12，B9／B12 为记录在案的 LIMIT；2026-09-13 在 WSL2 Ubuntu 上实测 PASS 10／LIMIT 2／FAIL 0，栈已归零）均已落地；证据是本地 DB／runtime／web 套件、浏览器 walk 与 provider-stack battery。hosted 证据未补：凭据的 role claim／`SET ROLE` 是否仍如 2026-07-19 ceremony-proven 那样成立、2026-07-26 的 UPDATE 授权是否确已从线上撤回、真实登录会话下的预览／下载／denied 走查、renderer／backup 凭据的线上范围，均待发布会话用 `hosted-probe.sql` 及签入的浏览器 walk 补齐。#624（0191）已落地能力分层的**实现**：全局 `clara.document_capabilities`（12 格式 × 20 类型 = 240 行，派生种子，双向 totality guard）、唯一读者 `clara._document_capability`（两个未知方向都取诚实默认）、`clara.get_document_state` 一次读出 custody／byte_extraction／facts／operation 四态加 lineage、`clara.document_fact_validations`（三个 deferred 约束触发器写入：两个表头侧记录者写 `revision = 1`，区域侧 belt 在晚到区域改变裁决时追加下一个 revision、不改不删也不拒绝，读取方取最高 revision；不重切任何 persist 体，`unmeasured ≠ pass`）、以及 C33.4 的 `clara._assert_field_path`（普查得来的语法，按 0177 仪式 splice 进 `persist_document_extraction`，含 pre-image 与 post-image 两个 sha 钉，prestate 对已存不合规路径直接拒绝切换）；产出方一侧 `structured-worker.mjs` 把 XLSX 的 `r=` 夹到 A1 形状（回退 `cell_<序号>`，原值留在 locator），使语法与热摄取路径互不打断。界面上客户端 Documents 详情把四态各自具名呈现并逐字渲染目录的 basis 句，上传提示改为点名实际受理的格式。量到的边界：`ofx × bank_statement` typed_facts **unsupported**（OFX 无期初余额，`corroborateChain` 恒抛 `header_unreadable`）、xlsx／docx 与 TSV 月结单没有任何 facts lane、发票行项目记为 `limits.invoice_line_items = planned`。证据全部为**本地**（PG17 全链、db／runtime／web 套件与 Playwright walk）；加 **hosted**：`0191-field-path-census.sql` 已作为 2026-09-14 发布仪式第 3c 步跑过，随 runtime v83／frontier 0195 发布，见 #612／#624。 | 能力分层与 source／facts／operation 状态一致；提取失败不产生分类目前只有本地证据，hosted 证据仍待补；发票行项目与真实模型 recall 基线仍是目标。#620 的 storage 凭据、successor 门与 web 状态梯同样只有本地证据。 |
-| Knowledge | #644（0192）已合入分支并在本地 PG17 全链验证：`clara.knowledge_keys`（13 个 key：0055 五个 legacy fact key 按值搬入 + A5／A6 访谈真实产出的八个，其中两个 authority-bearing policy、一个 preference）、`clara.knowledge_plan_item_map`（10 行 item_key → knowledge_key，供 owner 批准）、`clara.knowledge_records`（稳定 record_id + 单调修订、client／firm scope、applicability digest、四个同 firm 来源外键、per-firm `knowledge_version`、只 supersede 不 update）与 `clara.knowledge_versions` 均为 forced RLS、零 DML 授权；`trust` 由 `source_kind` 派生并三重强制，policy／authority-bearing 只收 `asserted`；九个门按车道精确授权（六个人类、两个 runtime、一个双车道 promotion），wake／agent 角色一个都没有；C13 list／detail 已落地（类型筛选、scope／trust 徽章、applicability、来源链接、修订时间线、Correct／Withdraw），并区分"成功空读／筛选无结果／来源不可读／两条在世记录冲突／读失败"五种面貌；onboarding commit 之后调用 promotion 门（CB-AE2E-030）。legacy `client_facts` 行从不被遮蔽并标注 `authoritative`（五个 legacy key 仍被 estate 直接读取），firm 默认值的遮蔽按 applicability 而非按 key；promotion 机器车道须显式传入并校验 `p_firm`。本地证据（rig644b，0001–0192 全链重建）：db 37 cells（knowledge-records 25 + promotion 12）、runtime 13 cells、web unit 7+2 cells 全绿，operation-census 10 pass、rig-isolation 20 pass／1 skip（破坏性 reset cell 未跑）。**hosted：2026-09-14 随 runtime v83／frontier 0195 发布，见 #612／#644。** 仍未统一：wiki 与 advisory pattern pack 仍分开、检索仍偏固定 priority／recency（#658）、投影／wiki 视图未建（#663）、身份／alias 未纳入（#647）、chat 车道的捕获与诚实 pack 仍待下一个冻结 `chatTurn` 版本（`packages/runtime/lib/knowledge.mjs` 已就位并单测），`loadContextStepV10` 的 `catch { contextPack = null }` 尚未替换；`policy` 目前是描述性的，不改变入账行为；三个 knowledge 事件已注册但无消费者。 chat 车道的捕获与诚实 pack 已由 `chatTurn_v19` 落地（本行上文那句「仍待下一个冻结 chatTurn 版本」到此为止）：`remember_client_information` 经 `lib/knowledge.mjs` `captureKnowledgeFor` 写一条修订（服务器持有的 key 注册表、被署名真人的在职与 rank、trust 仍由 source_kind 派生，chat 只开放 `user_statement`／`model_inference`），`loadKnowledgeContextStepV19` 以 `readKnowledgePack` + `p_firm` 绑定读 pack 并把 `unavailable` 如实渲染为不可用而不是空 pack（#603）。`loadContextStepV10` 的 `catch { contextPack = null }` 本身仍未替换——它是冻结 body，v19 是在它**旁边**加了一步，而不是改写它。本地证据：runtime 11+17 cells、World e2e 第 3 腿经人类门读回该记录、web `knowledge-cards.test.tsx` 5/5。**hosted 证据：2026-09-14 随 runtime v83／frontier 0195 发布，见 #612／#644。** | 统一捕获、身份、版本、按需检索、纠正和投影；必需知识不可用时诚实暂停。 |
-| 自动计划与 close | 日常 reconciler／资产／调整机制已有；bank_agent／close_prep wake sources 默认关闭，生产／激活链路不完整。#640（0193）已合入**显式授权的经常性／转回会计计划**：三张 force-RLS 关系（plans／revisions／occurrences，零应用角色授权）、11 个人类门 + 1 个 runtime 扫描门、`unique (plan_id, due_date)` 与 `unique (plan_id, leg, period_key)` 的 occurrence 身份（后者使修订移动到期日不再给同一期间入第二笔账）、冻结的 `authority_from` 授权下界、**转回只准入在已落账且仍在世的本期计提之后并指名那笔分录**（occurrence 上 `reverses_entry_id` 外键 + CHECK，memo 里写进账本；review round 2 BLOCKER-1）、改频率的修订以 `period_already_covered` 拒绝重复覆盖已跑期间（SHOULD-1）、每次接收记入只追加的 `attempts` 台账使被换下的 Work 仍可从计划解析（SHOULD-2）、经 0178 `admit_journal_work` 以授权人身份接收、锁序新增 `accounting_plans` 一级、暂停只阻未来接收、补提显式且有界（每次 12，窗口不得早于 `effective_from`）、每 leader cycle 扫描且不读任何 operator 开关；runtime 皮带 `lib/plan-occurrences.mjs` 以 feature-detect 方式在 0193 之前静默；web `/clients/:id/plans` 四条路由（list／new／detail／revise）承载 C9，侧栏 Plans 由 `registers?tab=adjustments` 改指该路由而 0045 调整登记簿原样保留。本地证据（第二轮对抗性复核后在全新集群 rig640c 重测）：db 批次 35／35 pass、0 skip（`accounting-plan-occurrences.test.mjs` 15 格含屏障下的双扫描收敛、pause-race、转回需已落账计提、`stopping` 不成立、计提分录被冲销后不得再转回、attempts 可解析；`accounting-plans.test.mjs` 20 格含撤权、锁期、修订不重复入账、授权下界、改频率对齐墙、ended 竞态与补提重试），邻接批次 operation-census／rig-isolation／x40-wave-c-c-tieout／work-cancel 118 中 117 pass、1 skip（rig-isolation 的破坏性格，未设 `CLARA_RIG_ALLOW_RESET`），runtime 单元 74／74，runtime `plan-occurrence-e2e.mjs`（真实 Postgres World）OK——其 leg 5 实测出「把 entry id 作为 basis 顶层新键」会被 frozen 的 `.strict()` 工具 schema 判废、Work 直接 failed，因而改走 memo；浏览器 walk 见 #640 记录；折旧／预付摊销／关账适配器按名排除，0045 与本车道的收敛另立后续项；hosted 证据：2026-09-14 随 runtime v83／frontier 0193 发布并由 owner 在 `/clients/<id>/plans` 走通，见 #612／#640。 | 显式授权计划到期产生 Work，普通自主执行含满足条件的 recon／close；技术开关不成为用户 opt-in。 |
-| 财务界面与输出 | 统一导航壳已实现（#614：注册表驱动的 Sidebar／scope switcher／Breadcrumb，Work／Settings／Accounting 目的地，旧链接 307 迁移；本地单元与浏览器证据，hosted：clara-web 版本 5dcee6d8（3f4c5f8b，含畸形 client id 的 not-found 守卫）已推广，登录 smoke、旧链接 307 矩阵与 owner 登录后的 shell 旅程在线验证）；#623 的 C3 composer／B3 Work detail／B6 Work 卡片已落地（本地：web unit 2923／2923、browser 152 passed／0 failed／7 fixture-gated skips；hosted 证据以 #623 记录为准）。#626 的 `/settings/account`（账户、界面与通知偏好）已落地：`clara.user_preferences`／`get_my_preferences`／`save_my_preferences`（0179_user_preferences.sql，PATCH 语义、CLR06 乐观并发、CLR10 校验、op_key 重放，own-row RLS）落库，界面偏好集刻意收窄为两个有真实消费者的项（motion 驱动 `data-motion` 属性叠加 OS `prefers-reduced-motion`；sidebarDefault 写回既有 `sidebar_state` cookie），通知偏好尚无消费者、页面如实呈现"尚未配置"而非死控件；本地 DB／单元／浏览器套件验证，hosted 证据未补；A Home 仪表与 Settings 其余分区仍是目标，由 #650／#659／#635 承接。#641 的 B3 Work 列表／详情已落地：`clara.list_accounting_work`／`get_accounting_work_row`／`_work_run_attempts`（0189）与 `interface.workViews` 落库，`/work` 与 `/clients/:id/work` 换成同一份服务端分页、URL 可寻址、可见可清除筛选的 Data Table，Work detail 在当前问题之下加了 Results｜Sources｜Activity 的 Tabs；本地 DB battery（`packages/db/tests/work-list.test.mjs`，27 cells，27 pass／0 fail／0 skip，rig641b @ 0189）、web unit（`accounting-work-list.test.tsx` 14、`work-saved-views.test.tsx` 3、`work-list-url-state.test.ts` 8、`work-list.test.ts` 9、`reads.test.ts` 12）与 `work-list-walk` 浏览器证据（17／17），hosted 证据：2026-09-14 随 runtime v83／frontier 0195 发布并由 owner 在 `/work`／`/clients` 走通，见 #612／#641。AC4（批次子项）与 Activity 视图的 `p_work` 门侧筛选如实留作后续。#629 的 B3／B4／B6 共享问题面、#632 的 `/activity` 事件流（CB-AE2E-018 已解除）与 #634 的 composer 凭据选择器／Attach evidence 对话框／Journals 表链接与筛选已落地（本地：web unit 3003／3003（#629）、3001／3002（#632，1 个已知负载 flake）、2995／2995（#634）；浏览器全套 186／1、183／3、182／1，失败项均为未触及的负载敏感 spec 并单独通过；各自的 walk 全绿；hosted 证据以各 ticket 记录为准）。#643 的定期调整表单（`/clients/:id/accounting/adjustments/new`，bookkeeper 门槛）与结果／历史面（`…/accounting/adjustments`，viewer）已落地：一个持有两半的草稿（切换类型不丢已输入的另一半）、particulars 推导出的分录以**只读预览**渲染在 journal 车道同一张明细表里（数据库会拒绝与 particulars 不符的明细，所以让人改它等于提供一个门无法受理的动作）、法定负债／费用科目默认值渲染可改、预支科目旁明说分配属于 staff-advance 登记簿、服务器 `field` 路径两种拼写都落到控件上、历史行按 disclosure 展开完整 particulars 与 Work／JE／回执链接并双向标注更正链。purpose→标签的映射收敛为一个模块（此前 Work detail 的身份块渲染原始列值，同一页下方的结果块渲染标签，一页对同一事实说了两种话）。**AC3 的第二个入口是凭据选择器**：表单挂载的是 composer 自己的那个组件（#634／#728 的控件连同它的两次读一起抽到 `components/accounting/evidence-chooser.tsx`，两道门共用一份），选中的文件以 `source_refs` 随准入过去，提交时进 `entry_evidence_links` 与 `periodic_adjustments.source_document_id`，历史行以「来源」披露；已被在世分录占用的文件照旧**列出但禁用**并说明理由（advisory 读失败时不禁用任何一项），`source_already_posted` 的 409 不给「再试一次」也不轮换 intent key，只给「打开那条分录」或「另选一份」。本地证据：web unit periodic-adjustment-form 18／18、lib 15／15、draft 6／6、journal-composer 39／39（抽出后逐字不变），浏览器 walk `periodic-adjustment-walk.spec.ts` 12／12 passed（含 320 px、200% 缩放、键盘与焦点、reduced motion、稳定 URL 与 Back、草稿留存、成功空态，丢失应答由同一 intent key 解决而不是第二个 Work，以及引用一份文件后其 `sourceRefs` 原样过线、历史行把它作为来源披露），apps/web 全套单元 3413／3413、0 fail、0 skip。Journals／Reports 的条目级深链接仍缺（#719）；Documents 的条目级深链接（`?document=` 寻址）已由 #620 落地。工作台与 card readers 仍是旧形态；sealed renderer 已有，sandbox worker、完整管理模板和交付验证仍不齐。#619 把 Journals 表的空人口／分页边界／`list_entry_links` 信封拒绝三态补齐，并给 Clients register 的 `DataTableCard` 第一次加上 `label`（此前二十个左右调用点仅 Journals 表有），新增人口／跨车道隔离／空事务所的浏览器断言；其余约十八个 `DataTableCard` 调用点仍未命名（该组件自身的 header 早已记录这一差距）。 | 完整旅程、统一 metric pack、可靠 AI UI、可复现且可下载的报表；每张数据表都有名字。 |
-| 准入与运行保障 | beta 准入；#615（0188）已合入 operator 的准入支持目的地 `/operator`：两个只读门（`list_operator_support_queue`／`get_operator_support_case`，共享唯一查询体、byte-copy 的 owner+operator 判定、plan_cache 钉住、无 existence oracle）把未决注册／未消费付款／未解决 provider 问题聚成一条队列与一个详情，界面只暴露既有写门（approve／reject／resolve／set_admission_capacity）并如实命名没有受支持动作的状态；边界在屏幕上明写，并由 0188 tail 的账本关系普查与 os.11 的行为 cell 双重钉住；`/settings/registrations`／`/admin/registrations` 都 307 到新址（本地：DB battery 14／14 在真实最小权限角色与 frontier 0188 上、web unit 与浏览器 walk 全绿；hosted 已于 2026-09-14 随 runtime v83 发布并由 owner 在 `/operator` 走通，见 #612／#615）；#621（0185）已合入版本化 Terms／DPA 接受机制与走墙的验证码重发；#622 已合入登录／密码恢复请求／恢复链接失败的 Supabase Auth `error.code`／`error.status` 分类（四种链接失败状态、独立的恢复请求限速状态、三处表单的等待期间禁用输入＋`aria-busy`＋失败聚焦）与 #698 的 `next=` 查询串保留修复（本地 web 单元套件与 `e2e/entry-faces-walk.spec.ts` 的登录往返走通；env-gated 的 `tests/live-provider-auth.test.ts` 在本会话未配置真实项目，跳过；hosted：2026-09-14 随 runtime v83 发布，owner 已在生产登录走通，见 #612／#622；H-40 的 HIBP 半段与 C-78 magiclink 仍是外部所有者输入，未构建）；#628（0186）已合入 checkout intent 生命周期、四种 Stripe 事件、取消／续付、容量墙（本地 DB／runtime／web 套件与两集群 DR 往返证据；hosted 已于 2026-09-13 发布：frontier 181／0186、clara-runtime v82（refresh-98f6eec6）、clara-web 742b09e9，signed-out smoke 与 Stripe 四事件订阅均已核对；v1 法律文本由 0187 按 owner 决定以 beta 模板发布——正文自称待律师审阅，正式措辞将以 v2 取代——hosted 发布见 #621／#628 记录）；部分外发机制、备份工具、单机部署；/ready 已区分未测量／未配置／已配置失败，并按 lane 计连接错误、暴露 leader 与 TLS posture，附可执行恢复清单（#617，本地 PG17 全链验证，并已有 hosted 证据：clara-runtime v76／v77 在真实宿主上暴露该 readiness 面，七条 lane DSN 已全部改为对镜像所带 pooler CA 的 `verify-full`，`/ready` 的 `checks.tls` 报 pinned ×7、validated）；完整硬性 readiness 与恢复证据仍有边界，生产上的强制 lane 断连与 leader kill 演练尚未执行。 #631（0195）已合入 accounting Work 的外发授权与执行轨迹：`accounting_work` 成为第六个 typed client egress purpose，授权由事务所当前已接受的 Terms＋DPA 与 client active **推导**（见 §10 的激活假设，**待 owner 确认**），consume 动词逐字节未动，账务核心在 client 检查之后、`_reserve_op` 之前第二次独立复核，拒绝时抛 CLR13 `egress_not_authorized` 且不留任何痕迹；轨迹表没有 payload 列，导出按缺席关闭，保留期沿用既有 prune lane。C-20（firm-narrow 家族缺 consume 动词）已在 §10 记录，未实现。对抗性复核后的修正轮（同一个 0195）另加：owner 的撤回**可逆**了（`clara.restore_client_egress_purpose`，只接受这一个推导 purpose；`grant_client_egress_purpose` 对它抛 CLR10 `purpose_derived_not_grantable`），推导出来的 consent 现在写 `audit_log` 并追加 `egress.purpose_consent_derived`，撤回对**已消耗**的 dispatch 变为**追溯**（账务核心再读一次 consent／activation 是否在世），轨迹表对所有应用角色**连 SELECT 都没有**、每列都有文法约束、不再有指向 `accounting_work` 的外键（否则 trace 插入会排在过账锁后面），保留期扫描在 `clara.trace_prune_log` 留一行。本地证据见上一行；hosted：2026-09-14 随 runtime v83／frontier 0195 发布，见 #612／#631。 | 合同与实现一致的准入／外发、协调版本发布及代表性 hosted／restore 验证。 |
-
-以上是持续有效的架构分界，不是项目进度清单。具体切片、依赖、故障证据与完成状态由 GitHub
-spec／implementation issues 承担；技术目标变化后维护本文件，不能让历史 spec 覆盖已接受的新方向。
+| 目标 | 与当前实现的差别 |
+|---|---|
+| 完整 Accounting Work 领域模型（Work／Conversation／run／Q&A／receipt／JE 与领域对象／Knowledge） | `clara.accounting_work` + `operation_receipts` 已是该形状的首个持久化实现，但 Conversation 与 Knowledge 侧仍部分依赖既有 task／chat／interruption 表 |
+| 统一能力目录覆盖全部 lane | `packages/runtime/lib/capability-registry.mjs` 已为 Work lane 落地并写入执行轨迹；documents／bank／close 三条 lane 尚未纳入 |
+| 按操作粒度的外发 token 与配额 | 当前只有一个粗粒度的 `accounting_work` 用途 token，没有配额；firm-narrow 外发家族还缺 consume 动词 |
+| 外发授权推导的**激活假设**由 owner 确认（#825 待裁定） | 推导规则已实现并上线，但"何时算激活"这一条仍是待确认假设 |
+| pre-v3 grandfather 与 rollback-preflight **frontier 规则**的最终裁定（#826 待裁定） | 规则已实现并上线（§5 F），语义待 owner 确认 |
+| 全量硬性 readiness 门（覆盖所有已配置连接通道与存储） | `/ready` 已分离依赖检查并支持三态读数，但尚未对每条已配置通道强制闸门 |
+| 报表 metric pack 与 chart／表格读同一定义 | 渲染服务与封存流程存在；"金额／AR-AP 归桶在受信数据层统一定义"尚未全面落地 |
+| typed part 的完整协议兼容（字段与版本，不只 kind） | web 与 runtime 是两个独立发布单元，当前 parity 校验主要比对 kind，部分 reader 只有 ID |
+| freeform 读路径的大整数精度 | 金额在 DB 与领域函数里是整数最小货币单位；freeform 只读路径经 JSON 到前端的精度缺口仍未修 |
+| 发票行项目（line items）的类型化事实 | 能力目录中显式标为 planned，当前不抽取行项目 |
+| 批次 Work（95/5 部分推进）的完整 UI | 目标是"95 份可独立处理的继续、5 份等待"；生产者尚不存在时 UI 如实降级，不伪造 Batch 标签页 |
+| SST／税务申报服务 | 税务期间与 watch 的基础结构存在，beta Tax 未激活；参考表不等于可用申报服务 |
+| 异地备份的首次真实部署与恢复演练 | 脚本、age 加密与清单已实现，镜像未部署，restore 从未被证明（`packages/backup/README.md` 自己写明这一点） |
+| 渲染器首次真实部署的验收门槛 | 镜像已统一 Node 22 并有确定性 drill，但"真实排队任务完成、内容哈希一致、manifest 记录实际镜像、替换前保留前一镜像"仍是待兑现义务 |
+| 多机部署、spool 转移与恢复演练 | 当前明确是单机 + 本地 spool；数据库持久化能支持恢复，但流程未被证明可用 |
+| 若干已知的单向缺口（期初余额车道的凭据绑定方向、chat 车道 `HookNotFound` 的投递语义） | 两处的主路径都已串行化或已覆盖，各剩一个方向／一个状态未收口，由 GitHub 票承接 |

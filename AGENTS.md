@@ -21,15 +21,18 @@ instructions. Source code and deployment evidence establish what is actually imp
 ## Working protocol
 
 1. Ground to the codebase with `codebase-memory-mcp`. Use it to query anything for implementation or clarify.
-2. Use `grilling` to settle ambiguity that changes product scope or acceptance before a non-trivial
-   build. Look up repository facts directly; ask the owner about unresolved product decisions.
+2. Use `grilling` to settle any ambiguity.
 3. Check current official documentation, through Context7 or the official docs, before going into coding or any      
    exploration/planning.
-4. Verify the affected behaviour and update its existing source of truth in the same change.
-   Keep the current task's unresolved work actionable and distinguish local tests from hosted evidence.
-5. After Wayfinder or to-spec settles a product or technical decision, update the relevant PRD or
-   Architecture section before to-tickets. Mark accepted technical targets separately from current
-   implementation. Resolve contradictions explicitly; keep detailed acceptance in the delivery spec.
+4. Verify the affected behaviour and update its existing source of truth in the same change. For an
+   implementation ticket that source of truth is the module's README, `CONTEXT.md` and the ticket's own
+   evidence — never the PRD or Architecture. Keep the current task's unresolved work actionable and
+   distinguish local tests from hosted evidence.
+5. PRD and Architecture are blueprints, refreshed only after Wayfinder or to-spec settles a product or
+   technical decision and before to-tickets: overwrite the affected section (never append ticket
+   history), keep each file's maintenance frame in its header, and mark accepted technical targets
+   separately from current implementation. Resolve contradictions explicitly; keep detailed acceptance
+   in the delivery spec.
 6. Push back with real examples: When you push back or recommend, include one real practice close to the case — a 
    company, product, or method you actually know (Linear, Shape Up, Figma), or better, one you can point to (a Mobbin 
    screenshot, a documentation link). Never invent or embellish one: if you know no close example, say so and argue 
