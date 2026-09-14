@@ -1613,6 +1613,21 @@ export async function handleJournalWorkRpc(request, response, path, url, sendJso
     return true;
   }
 
+  // #727 — clara.get_work_plan_origin, the Work detail identity block's "From plan <purpose>"
+  // row (components/plans/work-plan-origin.tsx). Answered NULL for both of this lane's own
+  // Works: neither `seededWorkId` nor `parkedCardWorkId` was ever admitted by an accounting
+  // plan, and `WorkPlanOriginRow` already renders nothing on a null row — the database's
+  // honest answer for a Work nobody scheduled, never a fabricated origin. SHARED with
+  // plans-mock.mjs's own get_work_plan_origin handler (declared in
+  // e2e-fixture-ownership.test.ts's `SHARED_RPC_VERBS`): that lane answers only for its own
+  // `PLANS.workId`, this one only for its own two ids, and each falls through otherwise.
+  if (path === "/rest/v1/rpc/get_work_plan_origin") {
+    const body = await readJson(request);
+    if (body?.p_work !== JOURNAL_WORK.seededWorkId && body?.p_work !== JOURNAL_WORK.parkedCardWorkId) return false;
+    sendJson(response, 200, null, cors);
+    return true;
+  }
+
   // #728 finding 5 — clara.list_spoken_for_documents, the evidence pickers' advisory read.
   // Derived from the SAME `state.links`/`state.entries` this mock already keeps for
   // list_entry_links/attach_entry_evidence, rather than a separate fixture that could drift from

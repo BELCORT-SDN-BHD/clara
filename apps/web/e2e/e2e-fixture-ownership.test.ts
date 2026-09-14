@@ -977,6 +977,12 @@ const SHARED_RPC_VERBS: Record<string, string[]> = {
   // periodic-adjustment-mock.mjs:320) and falls through otherwise, so neither can answer for the
   // other's walk — which is the distinction between a declared share and a collision.
   list_spoken_for_documents: ["journal-work-mock.mjs", "periodic-adjustment-mock.mjs"],
+  // #727 — `clara.get_work_plan_origin`, the Work detail identity block's "From plan <purpose>"
+  // row. `plans-mock.mjs` answers it for its own C9 fixture Work (`PLANS.workId`);
+  // `journal-work-mock.mjs` answers NULL for its own two Works (`seededWorkId`,
+  // `parkedCardWorkId`), neither of which originated from a plan. Each lane gates on its own
+  // work ids and falls through otherwise, so this is a declared share, not a collision.
+  get_work_plan_origin: ["journal-work-mock.mjs", "plans-mock.mjs"],
 };
 
 /** Every verb with 2+ claimants that is either UNDECLARED, or declared with a DIFFERENT set of
