@@ -61,6 +61,19 @@
 // (`waitBooted`) on top of `/ready`, and never asserts a log line the process has not yet been
 // given the chance to print.
 //
+// AND THE LAW IT MEASURES SURVIVED A REAL CUTOVER RATHER THAN A DRILLED ONE. The first v2 -> v3
+// run of this file found that W1 — parked on the predecessor before build B ever served — could
+// not POST inside build B: 0195's recut posting core requires a consumed `accounting_work` egress
+// authorisation, and `prepare_work_egress_dispatch`/`consume_egress_dispatch` are called only from
+// `claraWork.v3.impl.ts`, which a frozen predecessor can never gain. The drill was left RED and
+// the finding went to the owner, because "a parked predecessor is expected to be refused" is a
+// ruling, not a test's to make. The ruling came back the other way — a run claimed under a PRE-v3
+// bundle is GRANDFATHERED past that wall (0195's header carries it verbatim, and
+// docs/ARCHITECTURE.md §10) — so W1 RESUMES AND POSTS here, which is what this file always said a
+// cutover means. The other half of that ruling is the frontier rule, and this drill asserts it
+// too: once the database is at 0195, `rollback-preflight` REFUSES a target that does not carry
+// `claraWork_v3`, with the Work lane fully drained and both censuses clean.
+//
 // WHAT IT DELIBERATELY DOES NOT ASSERT: a `(CLR13, work_cancelled)` classification. Nothing here
 // cancels, and the frozen v1/v2 error tables map that pair to `state_changed` — asserting a
 // "correct" classification in a drill that does not exercise it would be a claim about a table
@@ -99,7 +112,7 @@ import { SignJWT } from "jose";
 import { ephemeralPort } from "./ephemeral-port.mjs";
 import { buildPreviousVersionImage, removeScratchTree } from "./scratch-image.mjs";
 import { RUNTIME_SOURCE_ROOTS, assertBuiltBundleFresh } from "./built-bundle-gate.mjs";
-import { bodyIdentifierOf, preflight, supportedBodiesFromBundle } from "../lib/rollback-preflight.mjs";
+import { bodyIdentifierOf, preflight, readMigrationFrontier, supportedBodiesFromBundle } from "../lib/rollback-preflight.mjs";
 
 if (process.env.CLARA_SKIP_WORK_E2E === "1") {
   console.log("[tb-e2e] skipped (CLARA_SKIP_WORK_E2E=1)");
@@ -334,6 +347,29 @@ function basisFor(memo) {
 
 const ANSWER = { posting_date: POSTING_DATE, amount_cents: CENTS };
 
+/**
+ * Run the rollback-preflight CLI as a real child process and return `{code, stdout, stderr}`.
+ *
+ * BY SUBPROCESS rather than by import, and only for the frontier leg: every other verdict in this
+ * file is read from the module because the drill needs the OBJECT. The frontier rule's whole point
+ * is that an operator typing this command before `fly deploy --image <previous>` is stopped, so
+ * what has to be measured is the EXIT CODE and the text on stderr — the two things a release
+ * script actually reads. It inherits this process's environment, which is the same loopback DSN
+ * the gate at the top of this file already parsed and refused to run without.
+ */
+function runPreflightCli(args) {
+  const script = fileURLToPath(new URL("../scripts/rollback-preflight.mjs", import.meta.url));
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [script, ...args], { env: process.env, stdio: ["ignore", "pipe", "pipe"] });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (d) => { stdout += d.toString(); });
+    child.stderr.on("data", (d) => { stderr += d.toString(); });
+    child.on("error", reject);
+    child.on("exit", (code) => resolve({ code, stdout, stderr }));
+  });
+}
+
 async function main() {
   const rig = await import("./rig.mjs");
   if (!(await rig.runtimeReady())) throw new Error("the 0006 runtime surface is absent — migrate the target first");
@@ -499,6 +535,10 @@ async function main() {
   // STATIC PROOF that A is a genuine rollback target, read off the ARTIFACT rather than the source.
   const bodiesA = supportedBodiesFromBundle(readFileSync(built.serverEntry, "utf8"));
   const bodiesB = supportedBodiesFromBundle(readFileSync(runtimeBundle, "utf8"));
+  // The database's own frontier, read ONCE and printed, so the frontier-rule leg below reads as a
+  // fact about THIS chain rather than as an assertion about a constant.
+  const frontierVersion = await readMigrationFrontier(query);
+  console.log(`[tb-e2e] database frontier: ${frontierVersion}`);
   assert.ok(bodiesA.includes(pair.previous), `build A's bundle registers ${pair.previous}`);
   assert.equal(bodiesA.includes(pair.pinned), false, `build A's bundle does NOT register ${pair.pinned} — it cannot run the successor at all`);
   assert.ok(bodiesB.includes(pair.previous), `build B's bundle STILL registers ${pair.previous} (policy (c): a parked run is never stranded)`);
@@ -724,6 +764,70 @@ async function main() {
     const drained = await preflight({ query, supported: bodiesA, scope: { workIds: [w1.work_id, w2.work_id] } });
     assert.equal(drained.scoped.verdict, "allowed", "with BOTH Works terminal, the SAME build-A target now ALLOWS — the inventory tracks live state, not a snapshot");
     console.log("[tb-e2e] preflight: with both Works settled, rollback to A is now ALLOWED");
+
+    // --- …AND THE DATABASE STILL REFUSES IT. THE FRONTIER RULE (wave-3, #815) ----
+    // This is the leg neither census can see, and the drained state above is what makes it
+    // legible: the run census is clean, no task is unbound, the SCOPED verdict just said
+    // ALLOWED — and the GLOBAL verdict still refuses, because the DATABASE is at 0195 and build
+    // A does not carry the body 0195's rule requires. The same ruling that lets W1 post above is
+    // what makes this refusal necessary: 0195 grandfathers PRE-v3 bundles, so an image without
+    // the successor would run the whole Work lane through that grandfather arm — the egress wall
+    // in force in the schema, and nothing at all subject to it.
+    //
+    // AND IT IS MEASURED BY DIFFERENCE, not by demanding a pristine estate. This drill runs on a
+    // shared rig and deliberately tolerates foreign live rows (#708, and its own door refuses only
+    // on non-terminal runs and unbound `accounting_work` tasks) — a `held` wake task left by an
+    // earlier suite strands against EVERY target, so "the global verdict refuses" alone would not
+    // prove the frontier rule did it. The pair of verdicts below differs in exactly ONE body, at
+    // the same instant on the same database, so whatever else the estate is carrying cancels out.
+    assert.deepEqual(drained.outside, [], "frontier leg: the RUN census is clean — nothing is parked outside build A");
+    assert.deepEqual(
+      drained.unbound.tasks.filter((t) => t.kind === "accounting_work"),
+      [],
+      "frontier leg: …and the Work lane itself is fully drained, which is the state a rollback would be taken in",
+    );
+    assert.equal(drained.frontier.version, frontierVersion, "the preflight read the database's OWN frontier");
+    assert.equal(drained.verdict, "refused",
+      `the GLOBAL verdict refuses a drained rollback to A (reasons ${JSON.stringify(drained.reasons)})`);
+    assert.ok(drained.reasons.includes("frontier_requires_body"),
+      `…on the frontier rule (reasons ${JSON.stringify(drained.reasons)})`);
+    assert.ok(
+      drained.frontier.violations.some((v) => v.body === pair.pinned && v.migration.startsWith("0195_")),
+      `…naming 0195 and ${pair.pinned}; got ${JSON.stringify(drained.frontier.violations)}`,
+    );
+    // THE CONTROL: the same question, the same instant, ONE body added — the frontier reason is gone
+    // and nothing else about the answer moved. That is the rule isolated.
+    const withPinned = await preflight({ query, supported: [...bodiesA, pair.pinned], scope: { workIds: [w1.work_id, w2.work_id] } });
+    assert.deepEqual(withPinned.frontier.violations, [], `adding ${pair.pinned} satisfies the applied schema's rule`);
+    assert.equal(withPinned.reasons.includes("frontier_requires_body"), false, "…so the reason is gone");
+    assert.deepEqual(
+      drained.reasons.filter((r) => r !== "frontier_requires_body"),
+      withPinned.reasons,
+      "…and NOTHING else about the verdict moved: the two answers differ in exactly that one reason",
+    );
+    console.log(`[tb-e2e] preflight frontier rule: database at ${drained.frontier.version} REFUSES build A — ${pair.pinned} required, not carried; adding it clears the reason`);
+
+    // THE COMMAND ITSELF, because the rule exists for the moment an operator types it before
+    // `fly deploy --image <previous>`: what has to be true is the EXIT CODE and the text on stderr.
+    // `--target-bundle` is the strongest of the three doors — it reads build A's actual artifact,
+    // the same file `bodiesA` came from.
+    const cliA = await runPreflightCli(["--target-bundle", built.serverEntry]);
+    assert.equal(cliA.code, 1, `rollback-preflight --target-bundle <A> must exit 1 (got ${cliA.code})\n${cliA.stdout}\n${cliA.stderr}`);
+    assert.match(cliA.stderr, /frontier_requires_body/, "…naming the reason");
+    assert.match(cliA.stderr, /0195_work_egress_purpose_and_execution_trace/, "…the migration whose rule is in force");
+    assert.match(cliA.stderr, new RegExp(pair.pinned), "…and the body the target does not carry");
+    // THE POSITIVE CONTROL, through the same command: build B's own bundle carries the body, so the
+    // frontier leg passes. Its EXIT CODE is deliberately not asserted, for the reason above — a
+    // foreign stranded row on a shared rig is exactly what this drill refuses to let decide its
+    // assertions — so the leg is read out of `--json` instead of out of the process's status.
+    const cliB = await runPreflightCli(["--target-bundle", runtimeBundle, "--json"]);
+    // The CLI prints the JSON object and THEN its one-line verdict banner, so the payload is taken
+    // from the first `{` to the last line-initial `}` rather than by parsing the whole stream.
+    const cliBJson = JSON.parse(/^\{[\s\S]*^\}/m.exec(cliB.stdout)?.[0] ?? cliB.stdout);
+    assert.deepEqual(cliBJson.frontier.violations, [], "the CLI's own answer for build B: the applied schema's rule is satisfied");
+    assert.equal(cliBJson.reasons.includes("frontier_requires_body"), false);
+    assert.equal(cliBJson.frontier.version, frontierVersion, "…read from the same database");
+    console.log(`[tb-e2e] preflight CLI: --target-bundle A exits ${cliA.code} naming frontier_requires_body; --target-bundle B carries ${pair.pinned} and clears the rule`);
 
     // --- STOP B, then the UNBOUND-WORK leg --------------------------------
     // With no engine running, an admitted Work's task never acquires a workflow run — the state
