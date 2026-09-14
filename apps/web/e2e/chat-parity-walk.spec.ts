@@ -25,6 +25,8 @@ const THREAD_ID = "66666666-6666-4666-8666-666666666666";
 /** C6 — this lane's SETTLED thread; its ids mirror `CHAT_PARITY` in chat-parity-mock.mjs. */
 const PARTS_THREAD_ID = "66666666-6666-4666-8666-666666666667";
 const MATCH_ID = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+/** chatTurn_v19 (#644) — the governed-knowledge record this lane's settled transcript names. */
+const KNOWLEDGE_RECORD_ID = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
 const DOCUMENT_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const TASK_ID = "77777777-7777-4777-8777-777777777777";
 const QUESTION = "Which client owns this invoice?";
@@ -271,6 +273,17 @@ test("C6: a settled transcript renders the bank act's ledger fields, the pack's 
   // they DIFFER is the discriminating one.
   await expect(page.getByText("get_bank_pack · done")).toBeVisible();
   await expect(page.getByText("trial_balance · failed")).toBeVisible();
+
+  // (d) chatTurn_v19's GOVERNED-KNOWLEDGE RECEIPT. It renders the key, the act and the
+  // watermark — and NOT the value, which is correctable and withdrawable while this transcript
+  // stays on screen forever (components/parts/KnowledgeCards.tsx states the rule). The link is a
+  // real in-app path to the record's own page, which is where the value is read live.
+  await expect(page.getByText("Client information recorded")).toBeVisible();
+  await expect(page.getByText("trade_nature", { exact: true })).toBeVisible();
+  await expect(page.getByText("first record", { exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Open this record" }))
+    .toHaveAttribute("href", `/clients/${CLIENT_ID}/knowledge/${KNOWLEDGE_RECORD_ID}`);
+  await expect(page.getByText("services", { exact: true })).toHaveCount(0);
 
   await scan(page, "settled transcript face");
 });
