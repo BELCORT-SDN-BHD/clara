@@ -95,10 +95,18 @@ test("§3.6 firm_document_limits carries docs_per_day / pages_per_day / ocr_conc
 // C-26 [#618] — THE PARTIAL-UPDATE HAZARD IS UNREACHABLE FROM THE BOUNDARY.
 //
 // THE HAZARD, stated in migration 0090's own SECTION 4 header and NOT fixed there:
-// `clara._tf_firm_document_limits_upsert` (0007:545-556) is a BEFORE-INSERT pseudo-upsert
-// with a HARDCODED column list — it rewrites docs_per_day, pages_per_day and ocr_concurrency
-// on every INSERT against an existing firm row. An INSERT naming only ONE limit therefore
-// silently resets the other two to their table defaults.
+// `clara._tf_firm_document_limits_upsert` (0007:545-556) was a BEFORE-INSERT pseudo-upsert
+// with a HARDCODED column list — it rewrote docs_per_day, pages_per_day and ocr_concurrency
+// on every INSERT against an existing firm row, so an INSERT naming only ONE limit silently
+// reset the other two to their table defaults.
+//
+// IT IS CLOSED AT 0196 (#692), and this cell is about the BOUNDARY, not the body, so nothing
+// here moved: the trigger now coalesces every limit column against the existing row, the four
+// limit columns carry NO table default at all, and the trigger itself supplies 100 / 1000 / 2 / 2
+// on a firm's FIRST insert and only there. `packages/db/tests/firm-document-limits.test.mjs` owns
+// that behaviour. What this cell owns — that no application role can reach the writer — is the
+// same claim before and after, and is worth keeping precisely because it is what made the hazard
+// latent rather than live for as long as it stood.
 //
 // WHY THERE IS NOTHING TO FIX AT THE OPERATION BOUNDARY, and this cell is the proof rather
 // than the claim: there is no public writer to reach the trigger through. `clara.firm_document_limits`
@@ -169,9 +177,11 @@ test("C-26 §3.6 no application role can write firm_document_limits, and the roo
   );
 
   // (d) THE FIXTURE NAMES ALL THREE, EVERY TIME. First a fully-specified row, then a call that
-  //     names ONE limit: the other two come back as the FIXTURE's defaults (100/2), never as
-  //     the previous call's values — which is what "always writes all three columns" means, and
-  //     simultaneously demonstrates the trigger's rewrite that makes it necessary.
+  //     names ONE limit: the other two come back as the FIXTURE's own parameter defaults (100/2),
+  //     never as the previous call's values — which is what "always writes all three columns"
+  //     means. Post-0196 the trigger would PRESERVE a column the statement omitted, so this
+  //     result is the fixture's doing and nothing else's; the discipline still matters, because a
+  //     cell reasoning about docs_per_day would otherwise be reading a value nobody chose.
   await setDocLimits(firm, { docsPerDay: 7, pagesPerDay: 11, ocrConcurrency: 1 });
   const first = (await rootQuery(
     "select docs_per_day, pages_per_day, ocr_concurrency from clara.firm_document_limits where firm_id=$1", [firm],
@@ -184,8 +194,8 @@ test("C-26 §3.6 no application role can write firm_document_limits, and the roo
   assert.deepEqual(
     [second.docs_per_day, second.pages_per_day, second.ocr_concurrency],
     [100, 13, 2],
-    "setDocLimits left a limit column unnamed — the trigger would then reset it to the TABLE default and a "
-    + "cell reasoning about docs_per_day/ocr_concurrency would be reading a value nobody chose",
+    "setDocLimits did not name all three limits — a cell reasoning about docs_per_day/ocr_concurrency "
+    + "would then be reading whatever an earlier call left there rather than a value it chose",
   );
   noteLane("C-26: firm_document_limits has no public writer; the 0090 partial-update hazard is owner-only (no fix at the boundary)");
 });

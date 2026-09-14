@@ -140,7 +140,7 @@
 -- =====================================================================================
 
 set local statement_timeout = '5min';
-set local lock_timeout = '15s';
+set local lock_timeout = '5s';
 
 -- =====================================================================================
 -- 0. PRESTATE. Every premise this file rests on, measured before the replacement.

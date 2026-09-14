@@ -23,6 +23,7 @@ import { withTxn } from "./rig-txn.mjs";
 
 const CLR04 = "CLR04";
 const CLR11 = "CLR11";
+const CLR13 = "CLR13";
 const STEM = "activity_sweep_attribution$";
 
 let _ready = null;
@@ -381,7 +382,7 @@ test("sfd.11 a document claimed by BOTH lanes is reported ONCE, by the live evid
   // reason this cell may stop building it.
   let coded = null;
   if (await codingLinkWallReady()) {
-    await assertRaises("CLR13", () => codedEntry({
+    await assertRaises(CLR13, () => codedEntry({
       client: cli, documentId: doc.documentId, filingId: doc.filingId, sha256: doc.sha256,
     }), "sfd.11 #718: the coding lane may no longer claim a document the evidence lane holds");
   } else {

@@ -150,9 +150,17 @@
 --     entry and every other item of the same seed, and `clara._approve_opening_entry` (0037:2410)
 --     approves each of them in turn against that one `document_id`. Measured on a from-scratch
 --     rig, those entries are `origin='manual'`, `is_opening_balance = true`, and a first cut of
---     this file WITHOUT the carve-out refused the second item of the seed
---     (`packages/db/tests/x42-s5-residuals.test.mjs` cell x42.s5.2c, CLR13 raised from inside
---     `_approve_opening_entry`'s own status flip). "One document, one posted entry" was never a
+--     this file WITHOUT the carve-out refused the second item of the seed. THE OBSERVATION, STATED
+--     AS WHAT IT IS: on the from-scratch chain built during #718's own construction, the seed that
+--     `packages/db/tests/x42-s5-residuals.test.mjs` cell x42.s5.2c plants passes through
+--     `clara._approve_opening_entry`, and without the carve-out that cell RED with CLR13 raised
+--     from inside that approver's own status flip. It is a build-time observation about where the
+--     carve-out bites, not a claim about what x42.s5.2c is FOR — that cell's own subject is
+--     fixed-asset lineage depth (CLR37 `fa_lineage_too_deep`), and it is cited here only because
+--     NO cell of this file's own battery
+--     (`packages/db/tests/coding-lane-evidence-link.test.mjs`) plants an opening seed, so the
+--     carve-out has no behavioural cell of its own — only the structural one (`cle.wall`) that
+--     reads the WHEN clauses off the catalog. "One document, one posted entry" was never a
 --     claim about that lane — an opening TIE document is a tie-out, not a source an entry is
 --     coded FROM — so the CODING wall's two WHEN clauses carry `new.is_opening_balance = false`,
 --     and the discriminator is the column the opening lane's own approver already requires to be
@@ -179,6 +187,9 @@
 -- period refusal, not a CLR13. The `t_je_` prefix would have sorted this file's wall in FRONT of
 -- them and silently re-spelled refusals nobody asked about.
 -- =====================================================================================
+
+set local statement_timeout = '5min';   -- runner rule: statement_timeout is the first executable statement
+set local lock_timeout = '5s';
 
 -- =====================================================================================
 -- §A  PRESTATE. What this file assumes about the world, measured rather than remembered.
@@ -306,6 +317,14 @@ set role clara_fn_owner;
 -- A DOCUMENT THAT DOES NOT EXIST LOCKS NOTHING AND RAISES NOTHING. That is not a hole: the probe
 -- that follows would answer NULL for it anyway, and the FK on each lane's own write is what says
 -- the document is real.
+--
+-- AND THE LOCK CAN SEE THE ROW IT IS LOCKING, which is a premise and therefore measured. `clara.
+-- documents` is under FORCE ROW LEVEL SECURITY (0003:512), and `clara_fn_owner` is NOT BYPASSRLS
+-- (0002:10-12) — so a definer running as that owner is subject to RLS here like anyone else, and
+-- what exempts it is the PERMISSIVE OWNER POLICY the same loop creates: `p_documents_owner ON
+-- clara.documents FOR ALL TO clara_fn_owner USING (true) WITH CHECK (true)` (0003:513). Without
+-- it the `for update` below would lock ZERO rows and serialize nothing, silently. §F 1b re-reads
+-- that policy from the catalog.
 -- =====================================================================================
 create function clara._lock_document_binding(p_document uuid) returns void
   language plpgsql security definer set search_path = clara, pg_temp as $$
@@ -423,16 +442,19 @@ comment on function clara._tf_evidence_link_binding_wall() is
 create trigger t_entry_evidence_links_binding_wall before insert on clara.entry_evidence_links
   for each row execute function clara._tf_evidence_link_binding_wall();
 
-reset role;
-
 -- =====================================================================================
 -- §E  LOCKDOWN. PostgreSQL grants EXECUTE to PUBLIC on every new function; ALTER DEFAULT
 -- PRIVILEGES is a confirmed no-op for that hardwired default (rig-isolation T17b). All three
 -- bodies are reachable ONLY from this file's own triggers, so the revoke is the whole ACL.
+-- INSIDE the `set role clara_fn_owner` block, as 0196 and 0198 do: the revoke is the owner's own
+-- act on the owner's own function, and a session role that changed under it would change who is
+-- asking.
 -- =====================================================================================
 revoke all on function clara._lock_document_binding(uuid) from public;
 revoke all on function clara._tf_source_binding_wall() from public;
 revoke all on function clara._tf_evidence_link_binding_wall() from public;
+
+reset role;
 
 -- =====================================================================================
 -- §F  TAIL CENSUS. Everything above, re-read from the catalog.
@@ -467,6 +489,23 @@ begin
       end if;
     end loop;
   end loop;
+
+  -- 1b · THE LOCK'S VISIBILITY PREMISE, MEASURED. `clara.documents` is FORCE RLS (0003:512) and
+  -- `clara_fn_owner` is NOT BYPASSRLS (0002:10-12), so `clara._lock_document_binding`'s `for
+  -- update` sees the row ONLY through the permissive owner policy the same 0003 loop creates. If
+  -- that policy were ever dropped or narrowed, the lock would quietly match zero rows and BOTH
+  -- walls would stop serializing while every other assertion in this file stayed green.
+  select count(*)::int into v_n from pg_policy p
+   where p.polrelid = 'clara.documents'::regclass
+     and p.polname = 'p_documents_owner'
+     and p.polpermissive
+     and p.polcmd = '*'
+     and 'clara_fn_owner'::regrole = any (p.polroles)
+     and pg_get_expr(p.polqual, p.polrelid) = 'true';
+  if v_n <> 1 then
+    raise exception '#718 tail: clara.documents no longer carries the permissive p_documents_owner ALL policy (using true) for clara_fn_owner -- clara._lock_document_binding would lock NOTHING under FORCE RLS and both walls would stop serializing'
+      using errcode='CLR10';
+  end if;
 
   -- 2 · THE THREE TRIGGERS: on the right relations, BEFORE ROW, on the right events.
   select count(*)::int into v_n from pg_trigger
@@ -519,7 +558,8 @@ begin
 
   -- 4 · THE TRIGGER NAMES SORT AFTER BOTH EXISTING BEFORE ROW WALLS, which is what keeps a
   -- closed-period refusal a period refusal. Asserted as a comparison, not as a claim in prose.
-  if not ('t_source_binding_wall_ins' > 't_period_wall'
+  if not ('t_source_binding_wall_ins' > 't_je_immutable'
+          and 't_source_binding_wall_ins' > 't_period_wall'
           and 't_source_binding_wall_upd' > 't_je_immutable'
           and 't_source_binding_wall_upd' > 't_period_wall') then
     raise exception '#718 tail: the wall trigger names no longer sort after t_je_immutable / t_period_wall'

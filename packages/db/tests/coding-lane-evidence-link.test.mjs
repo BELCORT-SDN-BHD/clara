@@ -25,7 +25,7 @@ import {
   WCHART, CLR, basis, assertPair, assertRaises, ROLES,
   admitJournalWork, claimWorkRun, mintClientObo, wakeRecordJournalEntry,
   evidenceDocument, docRef, EVIDENCE_REASON, attachEntryEvidence, attachEntryEvidenceOn,
-  linksForDocument, linkCount, reverseEntry,
+  linksForDocument, linkCount, reverseEntry, holdThenContend, recordJournalEntryOn,
   // #718
   gateCodingLink, codedDraftOnDocument, approveCodedEntry, approveCodedEntryOn,
   postedEntriesOnDocument, entryStatus, wallCatalog, humanHoldThenContend,
@@ -298,6 +298,76 @@ test("cle.race.coding_then_link the coded approval holds; the evidence attachmen
   assert.equal(standing[0].id, coded.entry_id, "race.coding_then_link: …the coded one, which won");
   assert.equal((await linksForDocument(doc.documentId)).length, 0,
     "race.coding_then_link: and no link was written");
+});
+
+test("cle.race.coding_then_work_commit the coded approval holds; the WORK COMMIT blocks on it and loses source_conflict/already_posted", async (t) => {
+  if (await gateCodingLink(t)) return;
+  // THE WORK_COMMIT ARM IS THE LOAD-BEARING ONE, and every cell above reaches the evidence wall
+  // through `attach_entry_evidence` — i.e. its LATE_ATTACHMENT arm. Until this cell the
+  // `work_commit` arm was only probed as a LITERAL in the migration's own tail census, which
+  // proves the branch is written, never that it is reached or that it answers. The door that
+  // reaches it is the one #634 runs in production: `wake_record_journal_entry`, whose link is the
+  // only one in the estate that carries `attached_via = 'work_commit'` (0182:1009-1012).
+  const doc = await evidenceDocument(ALICE(), { firm: FIRM_A(), client: A1() });
+
+  // THE WORK IS ARMED FIRST, WHILE THE DOCUMENT IS STILL FREE. 0182's admission arm refuses a
+  // Work whose source already backs a posted entry, so a coded entry that was already APPROVED
+  // would be refused one statement earlier and this cell would test admission instead. Arming
+  // before the approval is the race, not a way around it.
+  const b = basis({ cents: 58000, memo: `#718 work-commit race ${opk("memo")}` });
+  const work = await admitJournalWork({
+    client: A1(), author: BOB(), basis: b, sourceRefs: [docRef(doc.documentId)] });
+  await claimWorkRun({ task: work.task_id, runId: opk("w718-wc-run") });
+  const cred = await mintClientObo({ firm: FIRM_A(), obo: BOB(), client: A1() });
+  const coded = await codedDraftOnDocument(BOB(),
+    { firm: FIRM_A(), client: A1(), chart: WCHART, document: doc });
+
+  // 0182's OWN driver, because this race is wake-credential-on-one-side: `humanHoldThenContend`
+  // enters both sides as signed-in humans and has no `wakeSecret` to give the commit door.
+  const out = await holdThenContend({
+    a: {
+      role: ROLES.authenticated, jwtSub: ALICE(),
+      run: (c) => approveCodedEntryOn(c, { entry: coded.entry_id,
+        expectedRevision: coded.revision_token, opKey: opk("w718-wc-approve") }),
+    },
+    b: {
+      role: ROLES.wakeInteractive, wakeSecret: cred.secret,
+      run: (c) => recordJournalEntryOn(c, { client: A1(), work: work.work_id,
+        logicalOpId: work.logical_op_id, basis: b }),
+    },
+  });
+
+  assert.equal(out.a.ok, true, `race.work_commit: the holder approved (${JSON.stringify(out.a)})`);
+  assert.equal(out.provedBlocked, true,
+    "race.work_commit: the commit must WAIT on the holder's document lock — holdThenContend "
+    + "reports true only for wait_event_type='Lock' AND pg_blocking_pids naming the holder's "
+    + "backend, and a schedule that never blocked proves nothing about a race");
+  assert.equal(out.b.ok, false, "race.work_commit: the commit loses");
+  assert.equal(out.b.code, CLR.conflict,
+    `race.work_commit: …CLR13, never a raw 23505 (got ${out.b.code}: ${out.b.message})`);
+  assert.equal(out.b.detail.reason, EVIDENCE_REASON.sourceConflict,
+    "race.work_commit: …IN THE VOICE OF THE DOOR THAT REACHED IT — source_conflict, the commit "
+    + "path's own token, and NOT the late door's source_already_posted; an inverted arm would "
+    + "deliver exactly that other spelling here");
+  assert.equal(out.b.detail.constraint, "already_posted",
+    "race.work_commit: …with the constraint name clara._agent_post_entry_core's own "
+    + "unique_violation handler carries (0182:1014) — the late-attachment spelling carries none");
+  assert.equal(out.b.detail.entry_id, coded.entry_id,
+    "race.work_commit: …naming the coded entry that won the document");
+
+  const standing = await postedEntriesOnDocument(doc.documentId);
+  assert.equal(standing.length, 1,
+    `race.work_commit: EXACTLY ONE posted entry (got ${JSON.stringify(standing)})`);
+  assert.equal(standing[0].id, coded.entry_id, "race.work_commit: …the coded one, which won");
+  // VACUITY CONTROL, and it is what lets this cell name the ARM rather than only the pair:
+  // `uq_entry_evidence_links_document`'s own handler raises the SAME (source_conflict,
+  // already_posted) pair (0182:1012-1018), so the assertions above would also pass if the index
+  // had refused. NO link ever stood on this document — the winner is a CODED entry, which writes
+  // none — so the index cannot have fired, and the only remaining producer of that pair is the
+  // wall's work_commit branch.
+  assert.equal((await linksForDocument(doc.documentId)).length, 0,
+    "race.work_commit: no link was ever written on this document, so uq_entry_evidence_links_"
+    + "document cannot be what refused — the refusal is the wall's work_commit arm");
 });
 
 // ===========================================================================================

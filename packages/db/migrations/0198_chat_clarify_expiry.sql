@@ -249,7 +249,11 @@ reset role;
 --          min(expires_at) as oldest_deadline,
 --          count(distinct firm_id)::int as firms_touched
 --     from clara.agent_interruptions
---    where status = 'pending' and work_id is null and expires_at < now();
+--    where status = 'pending' and work_id is null and expires_at < clock_timestamp();
+--
+-- `clock_timestamp()`, NOT `now()`, and the distinction is this file's own (see :29-30): `now()`
+-- is the transaction's start instant, so a release session that held one transaction open while it
+-- read would be counting against a cutoff the sweep itself does not use.
 --
 -- AFTER the first sweep, the same rows are countable from the audit log, which is the durable
 -- witness rather than a before/after subtraction:
@@ -259,6 +263,25 @@ reset role;
 --    where fn = 'expire_due_interruptions'
 --      and args->>'work' is null
 --      and at >= '<the deploy instant>'::timestamptz;
+--
+-- AND THEN THE ONE NUMBER #764 NEEDS, counted in the same release session because it is only
+-- observable right after that first cycle:
+--
+--   select count(*)::int as chat_rows_delivered_onto_a_still_parked_turn
+--     from clara.agent_interruptions i
+--     join clara.agent_tasks t on t.id = i.task_id
+--    where i.work_id is null
+--      and i.status = 'expired'
+--      and i.delivery_state = 'delivered'
+--      and t.status = 'awaiting_input';
+--
+-- These are the historical conversations whose ENGINE RUN is already gone: the control listener
+-- meets HookNotFound, and because the chat lane has no `hook_missing` resting state (the
+-- asymmetry §G′ names as deliberately out of scope), it stamps the row DELIVERED without any
+-- resume having happened — so the task never leaves `awaiting_input` and the session's live-turn
+-- slot (`uq_agent_task_one_live_turn`, 0006:165) stays held, which is the very condition this
+-- recut exists to clear. #764's reconciler arm must therefore key on THIS state as well as on
+-- `delivery_state = 'hook_missing'`, and the count above is recorded on #764 at release.
 -- =====================================================================================
 
 -- =====================================================================================

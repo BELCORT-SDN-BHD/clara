@@ -29,11 +29,15 @@
 // two halves cannot drift apart silently.
 //
 // THE RED-ON-OLD PROOF (cell 9) restores the 0007 body inside a transaction it rolls back, and
-// shows what the recut removes: the old body cannot express preservation in EITHER spelling (both
-// the naive omission and the explicit NULL die on NOT NULL, now that nothing fills those columns
-// but the trigger), it silently DROPS a write to llm_witness_concurrency even when every column is
-// supplied, and it wipes updated_by. Without it these cells would prove the schema is in some
-// state, not that this migration put it there.
+// shows what the recut removes. It has two arms, because the defect has two halves. FIRST it also
+// restores the four table DEFAULTS, rebuilding the HISTORICAL world whole — and there the naive
+// one-column upsert SUCCEEDS and silently resets the limits it did not name over the operator's
+// own, which is the data loss #692 was actually filed about. THEN it drops the defaults again, to
+// the world 0196 leaves, and shows that the old body cannot express preservation in EITHER
+// spelling there (both the naive omission and the explicit NULL die on NOT NULL, now that nothing
+// fills those columns but the trigger), that it silently DROPS a write to llm_witness_concurrency
+// even when every column is supplied, and that it wipes updated_by. Without this cell the others
+// would prove the schema is in some state, not that this migration put it there.
 
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
@@ -149,6 +153,14 @@ async function upsert(values, { actorId = null } = {}) {
      values ($1, $2, $3, $4, $5, $6)`, params);
 }
 
+/** The OTHER spelling of the same intent, and the one #692 was actually filed about: the column
+ *  being moved is NAMED and every other limit is left OUT of the statement. `column` is always a
+ *  member of LIMITS — a literal of this file, never caller input. */
+async function upsertOmitting(column, value) {
+  return rootQuery(
+    `insert into clara.firm_document_limits (firm_id, ${column}) values ($1, $2)`, [firm, value]);
+}
+
 // ---------------------------------------------------------------------------------------------
 // FIRST INSERT — observably unchanged by #692, but for a different reason than before: the four
 // limit columns no longer carry a table default, and the TRIGGER supplies 100 / 1000 / 2 / 2.
@@ -215,26 +227,35 @@ cell("a first insert that names ONE limit takes it and fills the other three fro
 // ---------------------------------------------------------------------------------------------
 
 for (const target of LIMITS) {
-  cell(`an upsert that moves only ${target} leaves the other three limit columns exactly as they were`, async () => {
-    const before0 = await baseline();
-    const moved = BASE[target] + 50; // shares no value with any default or any other baseline value
-    await upsert({ [target]: moved });
-    const after0 = await readRow();
+  cell(`an upsert that moves only ${target} leaves the other three limit columns exactly as they were, in BOTH spellings`, async () => {
+    // TWO SPELLINGS, ONE RULE, EVERY COLUMN. "An upsert that names one column leaves the others
+    // as they were" (#692's Agent Brief) is a claim about the statement a writer actually types,
+    // and there are two of those: the explicit NULL a generated writer emits, and the OMISSION
+    // the ticket was filed about. They reach the trigger identically ONLY because 0196 dropped
+    // the four table defaults, so neither may stand in for the other.
+    for (const spelling of ["explicit-NULL", "omitted"]) {
+      const before0 = await baseline();
+      const moved = BASE[target] + 50; // shares no value with any default or any other baseline value
+      if (spelling === "explicit-NULL") await upsert({ [target]: moved });
+      else await upsertOmitting(target, moved);
+      const after0 = await readRow();
 
-    assert.equal(after0[target], moved, `${target} did not take the value the upsert named`);
-    for (const other of LIMITS.filter((c) => c !== target)) {
-      assert.equal(
-        after0[other], before0[other],
-        `${other} was rewritten to ${after0[other]} by an upsert that only named ${target} `
-        + `(it was ${before0[other]}) — the 0007 hardcoded column list is back`,
-      );
+      assert.equal(after0[target], moved,
+        `${spelling}: ${target} did not take the value the upsert named`);
+      for (const other of LIMITS.filter((c) => c !== target)) {
+        assert.equal(
+          after0[other], before0[other],
+          `${spelling}: ${other} was rewritten to ${after0[other]} by an upsert that only named `
+          + `${target} (it was ${before0[other]}) — the 0007 hardcoded column list is back`,
+        );
+      }
+      // The actor the upsert did not name survives (the one rule, applied to updated_by too), and
+      // the write stamp moved because the row really did move.
+      assert.equal(after0.updated_by, before0.updated_by,
+        `${spelling}: updated_by was wiped by an upsert that named no actor`);
+      assert.ok(after0.updated_at > before0.updated_at,
+        `${spelling}: updated_at did not move for an upsert that really changed a limit`);
     }
-    // The actor the upsert did not name survives (the one rule, applied to updated_by too), and
-    // the write stamp moved because the row really did move.
-    assert.equal(after0.updated_by, before0.updated_by,
-      "updated_by was wiped by an upsert that named no actor");
-    assert.ok(after0.updated_at > before0.updated_at,
-      "updated_at did not move for an upsert that really changed a limit");
   });
 }
 
@@ -303,7 +324,16 @@ begin
   return new;
 end $$;`;
 
-cell("RED ON OLD: the 0007 body cannot preserve in either spelling, silently drops a llm_witness_concurrency write, and wipes updated_by", async () => {
+/** The four table DEFAULTS 0196 dropped (0007:366-368 and 0090:298), restored so the RED-ON-OLD
+ *  cell can rebuild the HISTORICAL world whole — the 0007 body alone is only half of it. */
+const DEFAULTS_0007 = LIMITS.map(
+  (c) => `alter table clara.firm_document_limits alter column ${c} set default ${DEFAULTS[c]};`).join("\n");
+/** …and 0196's own relocation (0196:289-292), re-applied inside the same transaction so the
+ *  NOT-NULL arm below is measured against the world this migration actually leaves behind. */
+const DROP_DEFAULTS_0196 = LIMITS.map(
+  (c) => `alter table clara.firm_document_limits alter column ${c} drop default;`).join("\n");
+
+cell("RED ON OLD: with the 0007 defaults back the old body silently resets the columns it was not given, and without them it cannot preserve in either spelling", async () => {
   const before0 = await baseline();
 
   const losses = await asRoot(async (c) => {
@@ -322,6 +352,27 @@ cell("RED ON OLD: the 0007 body cannot preserve in either spelling, silently dro
         }
       };
 
+      // (0) THE DEFECT AS FILED, which needs the HISTORICAL world and not merely the historical
+      //     body: the 0007 trigger AND the four table defaults 0196 moved off the columns. Here
+      //     the naive one-column upsert SUCCEEDS — and that is the loss. Postgres fills the three
+      //     unnamed limits with 100 / 1000 / 2 before the trigger sees the row, the hardcoded
+      //     UPDATE writes them over the operator's own 11 / 22 / 3, and nothing anywhere reports
+      //     it. Probes (1)-(3) below then drop the defaults again and measure the OTHER half.
+      await c.query(DEFAULTS_0007);
+      const historic = await probe(
+        "insert into clara.firm_document_limits (firm_id, pages_per_day) values ($1, 13)", [firm]);
+      const afterHistoric = (await c.query(
+        `select ${COLS} from clara.firm_document_limits where firm_id = $1`, [firm])).rows[0];
+
+      // Back to the world 0196 leaves, and back to the baseline row, so the arms below measure the
+      // post-relocation body-only defect rather than the wreckage of the arm above.
+      await c.query(DROP_DEFAULTS_0196);
+      await c.query(
+        `update clara.firm_document_limits set docs_per_day=$2, pages_per_day=$3,
+           ocr_concurrency=$4, llm_witness_concurrency=$5, updated_by=$6 where firm_id=$1`,
+        [firm, BASE.docs_per_day, BASE.pages_per_day, BASE.ocr_concurrency,
+          BASE.llm_witness_concurrency, actor]);
+
       // (1) THE NAIVE ONE-COLUMN UPSERT. With 0196's default relocation in place and the 0007 body
       //     back, the three NOT NULL limits reach the heap as the NULLs they now arrive as: the
       //     old body writes NEW straight through, so it cannot even complete the statement.
@@ -335,18 +386,41 @@ cell("RED ON OLD: the 0007 body cannot preserve in either spelling, silently dro
 
       // (3) THE SILENT LOSS, with EVERY column supplied so nothing can die on NOT NULL: the 0007
       //     UPDATE has no llm_witness_concurrency arm at all, so that write is dropped, and it
-      //     takes updated_by from NEW, so an upsert naming no actor wipes it.
+      //     takes updated_by from NEW, so an upsert naming no actor wipes it. The three supplied
+      //     values SHARE NO VALUE WITH ANY TABLE DEFAULT (this file's own rule, :49-52), so
+      //     "the body wrote what it was handed" cannot be confused with "a default landed".
       await c.query(
         `insert into clara.firm_document_limits
            (firm_id, docs_per_day, pages_per_day, ocr_concurrency, llm_witness_concurrency)
-         values ($1, 100, 1000, 2, 9)`, [firm]);
+         values ($1, 71, 72, 7, 9)`, [firm]);
       const after0 = (await c.query(
         `select ${COLS} from clara.firm_document_limits where firm_id = $1`, [firm])).rows[0];
-      return { naive, explicit, after0 };
+      return { historic, afterHistoric, naive, explicit, after0 };
     } finally {
       await c.query("rollback");
     }
   });
+
+  assert.equal(losses.historic, null,
+    "the HISTORICAL world refused the naive one-column upsert — then this arm is not reproducing "
+    + "the defect #692 was filed about, which is a write that SUCCEEDS and loses data");
+  assert.deepEqual(
+    { docs_per_day: losses.afterHistoric.docs_per_day,
+      pages_per_day: losses.afterHistoric.pages_per_day,
+      ocr_concurrency: losses.afterHistoric.ocr_concurrency,
+      llm_witness_concurrency: losses.afterHistoric.llm_witness_concurrency },
+    { docs_per_day: DEFAULTS.docs_per_day, pages_per_day: 13,
+      ocr_concurrency: DEFAULTS.ocr_concurrency,
+      llm_witness_concurrency: BASE.llm_witness_concurrency },
+    "THE FILED DEFECT: under the 0007 body with the 0007 defaults, an upsert that named only "
+    + `pages_per_day must reset docs_per_day to ${DEFAULTS.docs_per_day} and ocr_concurrency to `
+    + `${DEFAULTS.ocr_concurrency} over the operator's own ${BASE.docs_per_day} / `
+    + `${BASE.ocr_concurrency}, and leave llm_witness_concurrency at ${BASE.llm_witness_concurrency} `
+    + "because the hardcoded UPDATE never carried that column at all — the rewrite and the "
+    + "omission are the same bug seen from its two ends",
+  );
+  assert.equal(losses.afterHistoric.updated_by, null,
+    "…and it wipes updated_by, which is the same loss applied to the actor column");
 
   assert.equal(losses.naive, "23502",
     "the 0007 body completed a naive one-column upsert — this cell is no longer exercising the "
@@ -361,17 +435,27 @@ cell("RED ON OLD: the 0007 body cannot preserve in either spelling, silently dro
   assert.deepEqual(
     { docs_per_day: losses.after0.docs_per_day, pages_per_day: losses.after0.pages_per_day,
       ocr_concurrency: losses.after0.ocr_concurrency },
-    { docs_per_day: 100, pages_per_day: 1000, ocr_concurrency: 2 },
+    { docs_per_day: 71, pages_per_day: 72, ocr_concurrency: 7 },
     "the 0007 body did not write the three limits it was handed — the probe is not reaching it",
   );
   assert.equal(losses.after0.updated_by, null,
     "the 0007 body did not wipe updated_by for an upsert that named no actor");
 
-  // THE ROLLBACK HELD: the live body is the recut one again, and it still preserves.
+  // THE ROLLBACK HELD: the live body is the recut one again, the four defaults are gone again,
+  // and the recut still preserves. The DEFAULT half is asserted explicitly because arm (0) above
+  // put them back — a rollback that failed to take them away would leave this database in the
+  // pre-0196 world with every other cell in this file quietly passing on table defaults.
   const src = (await rootQuery(
     "select prosrc from pg_proc where oid = 'clara._tf_firm_document_limits_upsert()'::regprocedure")).rows[0].prosrc;
   assert.ok(src.includes("coalesce(new.llm_witness_concurrency, v_old.llm_witness_concurrency)"),
     "the 0007 body survived the rollback — the live trigger is no longer the 0196 recut");
+  const defsAfter = (await rootQuery(
+    `select column_name, column_default from information_schema.columns
+      where table_schema = 'clara' and table_name = 'firm_document_limits'
+        and column_name = any($1::text[]) order by column_name`, [LIMITS])).rows;
+  assert.deepEqual(defsAfter.filter((c) => c.column_default !== null), [],
+    "a limit column still carries a table DEFAULT after the rollback — arm (0)'s restoration "
+    + "escaped its transaction and this database is no longer the one 0196 left");
   const restored = await readRow();
   assert.deepEqual(restored, before0, "the rolled-back transaction left the row changed");
   await upsert({ docs_per_day: 77 });

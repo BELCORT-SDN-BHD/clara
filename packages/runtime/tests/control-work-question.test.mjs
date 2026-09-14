@@ -58,7 +58,20 @@ const SKIP_CHAT = CHAT_READY ? false : "migration 0198 (#720 chat-clarify expiry
  *  version re-exports. Restated rather than imported because this file is plain ESM and the prompt
  *  module is TypeScript; the cell `expire.chat.source` below pins the restatement. */
 const CLARIFY_FRAMING = "This question and its answer are visible to your firm.";
-const V18_SRC = readFileSync(new URL("../workflows/chatTurn.v18.ts", import.meta.url), "utf8");
+
+/** The chatTurn body THE IMAGE ACTUALLY RUNS, resolved through the single source of truth that
+ *  names it: `workflows/registry.ts`'s `chatTurn:` entry (registry.ts:117 today, `chatTurn_v18`).
+ *  Read from the registry's SOURCE rather than imported, because this file is plain ESM and
+ *  importing the registry pulls every workflow body with it; `tests/built-bundle-gate.mjs` reads
+ *  the same file the same way. A hard-coded `chatTurn.v18.ts` would go on asserting about a
+ *  superseded body the day the pin moves, and say nothing about the one being deployed. */
+const REGISTRY_SRC = readFileSync(new URL("../workflows/registry.ts", import.meta.url), "utf8");
+const CHAT_TURN_PIN = REGISTRY_SRC.match(/^\s*chatTurn:\s*chatTurn_(v\d+),/m)?.[1];
+if (!CHAT_TURN_PIN) {
+  throw new Error("workflows/registry.ts no longer spells its chatTurn pin as `chatTurn: chatTurn_vN,`");
+}
+const PINNED_CHAT_TURN_SRC = readFileSync(
+  new URL(`../workflows/chatTurn.${CHAT_TURN_PIN}.ts`, import.meta.url), "utf8");
 
 after(async () => {
   await rig.endPool();
@@ -424,8 +437,13 @@ test("expire.chat: a swept chat row whose engine run is already gone is stamped 
   const chatId = await rig.insertInterruption({ task: task_id, expiresInDays: -1 });
   await rig.asRuntime((c) => expirePastDueInterruptions(c, { onlyFirm: firm }));
 
+  // THE FIXTURE MATCHES THE TITLE: a TERMINAL run status is what "the engine run is already gone"
+  // looks like to `getRun`. Behaviour here is unchanged either way — `deliverInterruptions` returns
+  // at `if (!row.work_id) { stampDelivered; }` (lib/control.mjs:292-295) BEFORE it ever calls
+  // `resumeAlreadyLanded`, so a CHAT row never consults getRun at all — which is precisely why the
+  // fixture must not quietly say the opposite of the sentence above it.
   const cycle1 = await rig.asRuntime((c) =>
-    deliverInterruptions(c, { resumeHook: hookNotFound, getRun: runStatus("running"), onlyFirm: firm }));
+    deliverInterruptions(c, { resumeHook: hookNotFound, getRun: runStatus("completed"), onlyFirm: firm }));
   assert.equal(cycle1.leased, 1);
   assert.equal(cycle1.delivered, 1, "expire.chat: HookNotFound on a CHAT row is still delivery (the pre-0180 assumption)");
   assert.equal(cycle1.hookMissing, 0,
@@ -435,22 +453,22 @@ test("expire.chat: a swept chat row whose engine run is already gone is stamped 
   assert.equal(row.delivery_state, "delivered");
 
   const cycle2 = await rig.asRuntime((c) =>
-    deliverInterruptions(c, { resumeHook: hookNotFound, getRun: runStatus("running"), onlyFirm: firm }));
+    deliverInterruptions(c, { resumeHook: hookNotFound, getRun: runStatus("completed"), onlyFirm: firm }));
   assert.equal(cycle2.leased, 0,
     "expire.chat: NO RESUME STORM — a delivered row is never leased again, so the backlog the first "
     + "hosted sweep expires cannot become a per-poll retry loop");
 });
 
-test("expire.chat.source: chatTurn_v18's `expired` branch is exactly what the cell above replays", { skip: false }, () => {
+test("expire.chat.source: the registry-pinned chatTurn's `expired` branch is exactly what the cell above replays", () => {
   assert.ok(
-    V18_SRC.includes('createHook<{ kind: "answer" | "expired" | "cancelled"; answer?: unknown }>'),
+    PINNED_CHAT_TURN_SRC.includes('createHook<{ kind: "answer" | "expired" | "cancelled"; answer?: unknown }>'),
     "expire.chat.source: the parked hook is typed for `expired` — #720 invented no new resolution",
   );
   assert.ok(
-    V18_SRC.includes('pushPart(allParts, { type: "clarify_closed", reason: resolution.kind, framing: CLARIFY_FRAMING });'),
+    PINNED_CHAT_TURN_SRC.includes('pushPart(allParts, { type: "clarify_closed", reason: resolution.kind, framing: CLARIFY_FRAMING });'),
     "expire.chat.source: the expired branch records a clarification-closed part",
   );
-  assert.ok(V18_SRC.includes("outcome = resolution.kind;") && V18_SRC.includes("await settle(outcome, null);"),
+  assert.ok(PINNED_CHAT_TURN_SRC.includes("outcome = resolution.kind;") && PINNED_CHAT_TURN_SRC.includes("await settle(outcome, null);"),
     "expire.chat.source: …and settles the turn with the resolution's own kind");
   const promptSrc = readFileSync(new URL("../workflows/chatTurn.v10.prompt.ts", import.meta.url), "utf8");
   assert.ok(promptSrc.includes(`export const CLARIFY_FRAMING = ${JSON.stringify(CLARIFY_FRAMING)};`),
