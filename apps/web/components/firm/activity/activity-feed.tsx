@@ -42,12 +42,18 @@ import { ActivityRow } from "./activity-row";
 import { ActivityEventSheet } from "./activity-event-sheet";
 import { useActivityFeed } from "./use-activity-feed";
 import { nextPaint } from "@/components/firm/work-question-affordance";
+import { ACTIVITY_HEADING_ID } from "@/lib/navigation/heading-ids";
 
 /** #728 finding 4 — the `<h1>` id this page's `PageHeader` carries (app/(firm)/activity/page.tsx),
  *  the SAME `headingId` idiom `WORK_HEADING_ID` (components/work/work-detail.tsx) already
  *  established for "the ONE surface that has to move focus to it" — read by id rather than a ref
- *  because the heading is rendered by the server component above this one. */
-export const ACTIVITY_HEADING_ID = "activity-feed-heading";
+ *  because the heading is rendered by the server component above this one.
+ *
+ *  DECLARED IN A PLAIN MODULE (#733's sweep), re-exported here so every existing importer of this
+ *  component keeps its one spelling: the server page must NOT take a plain value across this
+ *  file's `"use client"` boundary — see `lib/navigation/heading-ids.ts` for what the bundler
+ *  actually hands the server when it does. */
+export { ACTIVITY_HEADING_ID } from "@/lib/navigation/heading-ids";
 
 export function ActivityFeed() {
   const t = useTranslations("Activity");

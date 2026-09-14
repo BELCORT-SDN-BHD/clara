@@ -36,6 +36,17 @@
 // repository) + a static freeze-lint — never an executable rig test with parked runs across a
 // version cutover.
 //
+// #708: the preflight helpers below are scoped to only the runs THIS file stages
+// (STAGED_RUN_IDS), so a rig pre-seeded with unrelated parked runs is tolerated BY DESIGN — and
+// that tolerance is proven IN-RUN, not just by hand: before the rollback-preflight legs, this
+// file plants a batch of foreign-scope non-terminal `workflow.workflow_runs` rows directly in
+// SQL (see "THE PREFLIGHT'S SCOPE" and "#708 SELF-PROOF" below) and cleans them up before
+// exiting. Like every standalone runtime e2e (interview, version-cutover, work-journal,
+// work-question, work-cancel — see packages/runtime/README.md, 'Standalone e2es'), this file
+// still must not share a host with another suite WHILE it runs — the #708 scoping tolerates a
+// rig that carries an EARLIER suite's leftovers, not a suite hammering the same rows
+// concurrently.
+//
 // Reference note (recorded deviation): a standalone plain-node e2e cannot DIRECT-import the
 // frozen chatTurn_v7 "use workflow" proxy — the workflowId-bearing proxy is produced by the
 // nitro/WDK build transform (unavailable under tsx or plain node), and the built proxy is not
@@ -191,6 +202,14 @@ async function deriveNewestChatTurnExport() {
 // against a supported-name set — is untouched; only the universe it reads is. The verdicts the
 // cutover legs assert therefore depend solely on this e2e's own state, on a fresh database and a
 // populated one alike.
+//
+// That last claim used to rest on a MANUAL proof only (a worker pre-seeding 25 parked
+// foreign-name runs into a shared rig by hand and watching this file still pass) — never
+// executable coverage. It now proves itself: before the rollback-preflight legs run, this file
+// plants its own batch of foreign-scope non-terminal rows directly in SQL, asserts the OLD
+// global shape WOULD have counted them (unscoped count > scoped count), and asserts every
+// scoped helper below reaches the SAME verdict with the plants sitting in the table as without
+// them — see the "#708 SELF-PROOF" block in main().
 // ---------------------------------------------------------------------------
 /** Every `workflow.workflow_runs.id` this e2e staged. Filled by `stageRun` as each leg parks.
  *  The WDK's own column is `varchar` (world-postgres 0000_cultured_the_anarchist.sql:36), NOT a
@@ -307,57 +326,134 @@ async function main() {
   console.log(`[cutover-e2e] CUTOVER: new admission → ${newestExportName} (${v8RowName})`);
 
   // -------------------------------------------------------------------------
-  // ROLLBACK PREFLIGHT (executable): both parked → both REFUSED (per-name),
-  // AND the inventory-shaped preflight against a v7-only supported set (the
-  // build being rolled back to — it never registered the newest export)
-  // REFUSES BY NAME.
+  // #708 SELF-PROOF: a prior worker proved BY HAND that the scoped preflight below still
+  // reaches the right verdicts on a rig pre-seeded with 25 parked runs of an unrelated
+  // workflow name — but a manual proof isn't executable coverage. Reproduce it here instead
+  // of merely asserting a scope filter exists: plant a batch of non-terminal
+  // `workflow.workflow_runs` rows this e2e never staged — 24 of a wholly FOREIGN workflow
+  // name, plus (matching the manual proof) ONE more that carries the SAME NAME as the newest
+  // chatTurn's own parked run (v8RowName) but a DIFFERENT id — a name collision without an id
+  // collision, so a helper that scoped by name alone (instead of by id) would be caught here
+  // too. All 25 are 'running' — the WDK's own in-flight run status; 'paused' doesn't exist
+  // any more (world-postgres migration 0004_remove_run_pause_status.sql folded it into
+  // 'cancelled'), so 'running' is the realistic non-terminal status for a parked run's row.
   // -------------------------------------------------------------------------
-  assert.equal(await rollbackPreflight(rig, v7RowName), "refused", "v7 has a non-terminal run → rollback refused");
-  assert.equal(await rollbackPreflight(rig, v8RowName), "refused", "the newest version has a non-terminal run → rollback refused");
-  // The zero-run control (asserted directly, not inferred): a registered-but-unused version
-  // passes. Under the #708 scope this is "a version with no run among the ones this e2e staged",
-  // which is what makes it a control at all — the two refusals immediately above come from the
-  // SAME scope and the SAME helper, so a helper that could only ever say `refused` is caught here.
-  assert.equal(await rollbackPreflight(rig, closeExampleName), "allowed", "a workflow with ZERO runs → rollback allowed");
-  console.log("[cutover-e2e] preflight: v7 refused, v8 refused, closeExample (zero-run) allowed");
+  const FOREIGN_WORKFLOW_NAME = "someOtherFirmsWorkflow_v1";
+  const PLANTED_RUN_IDS = [];
+  try {
+    for (let i = 0; i < 24; i++) {
+      const id = `planted-708-foreign-${randomUUID()}`;
+      await rig.rootQuery(
+        `insert into workflow.workflow_runs (id, deployment_id, status, name, input)
+         values ($1, 'planted-708-proof', 'running', $2, '{}'::jsonb)`,
+        [id, FOREIGN_WORKFLOW_NAME],
+      );
+      PLANTED_RUN_IDS.push(id);
+    }
+    {
+      const id = `planted-708-samename-${randomUUID()}`;
+      await rig.rootQuery(
+        `insert into workflow.workflow_runs (id, deployment_id, status, name, input)
+         values ($1, 'planted-708-proof', 'running', $2, '{}'::jsonb)`,
+        [id, v8RowName],
+      );
+      PLANTED_RUN_IDS.push(id);
+    }
+    console.log(
+      `[cutover-e2e] #708 planted ${PLANTED_RUN_IDS.length} foreign non-terminal runs ` +
+        `(24x "${FOREIGN_WORKFLOW_NAME}", 1x same-name-as-v8/different-id) — none in STAGED_RUN_IDS`,
+    );
 
-  const inv1 = await rollbackPreflightInventory(rig, [v7RowName, closeExampleName]);
-  assert.equal(inv1.verdict, "refused", "inventory against a v7-only supported set REFUSES while v8 is non-terminal");
-  assert.ok(inv1.outside.some((r) => r.name === v8RowName), "the inventory refusal NAMES v8 as the unsupported non-terminal build");
-  console.log(`[cutover-e2e] inventory preflight (v7-only supported set): refused, naming ${v8RowName}`);
+    // (i) the OLD global shape WOULD have counted them: the unscoped census must exceed the
+    // scoped one now that 25 rows outside this e2e's own scope exist.
+    const unscoped = await rig.rootQuery(
+      `select count(*)::int n from workflow.workflow_runs where status not in ('completed','failed','cancelled')`,
+    );
+    const scoped = await rig.rootQuery(
+      `select count(*)::int n from workflow.workflow_runs
+        where id = any($1::text[]) and status not in ('completed','failed','cancelled')`,
+      [STAGED_RUN_IDS],
+    );
+    assert.ok(
+      Number(unscoped.rows[0].n) > Number(scoped.rows[0].n),
+      `#708: the OLD global shape (${unscoped.rows[0].n} non-terminal runs) must count MORE than the ` +
+        `scoped inventory (${scoped.rows[0].n}, this e2e's own ${STAGED_RUN_IDS.length} staged runs) ` +
+        `now that foreign rows are planted`,
+    );
+    console.log(`[cutover-e2e] #708: unscoped=${unscoped.rows[0].n} > scoped=${scoped.rows[0].n} — the old global shape WOULD have counted the plants`);
 
-  // -------------------------------------------------------------------------
-  // RESUME v7 on its ORIGINAL body → completes; the name column NEVER migrates to v8.
-  // -------------------------------------------------------------------------
-  await answerClarify(rig, t7, owner, "Acme Sdn Bhd", "cutover-ans-v7");
-  const t7Done = await pollTask(rig, t7, (t) => ["completed", "failed", "cancelled"].includes(t.status), "T7 settles", 40000);
-  assert.equal(t7Done.status, "completed", `the parked v7 run completed (got ${t7Done.status}/${t7Done.error_code})`);
-  assert.equal(t7Done.error_code, null, "v7 completed with no error_code");
-  const v7RunAfter = await pollRun(rig, t7Parked.workflow_run_id, (r) => ["completed", "failed", "cancelled"].includes(r.status), "v7 run terminal");
-  // PIN: the name column is INVARIANT — the retained v7 body completed the run, never migrated.
-  assert.equal(v7RunAfter.name, v7RowName, "PIN: the run's name column stayed chatTurn_v7 across completion (never migrated to v8)");
-  assert.equal(v7RunAfter.status, "completed", "the v7 run is completed");
+    // -------------------------------------------------------------------------
+    // ROLLBACK PREFLIGHT (executable): both parked → both REFUSED (per-name),
+    // AND the inventory-shaped preflight against a v7-only supported set (the
+    // build being rolled back to — it never registered the newest export)
+    // REFUSES BY NAME. Asserted WHILE the #708 plants above sit in the table: (ii) the scoped
+    // helpers below must reach these SAME verdicts regardless of the 25 foreign rows.
+    // -------------------------------------------------------------------------
+    assert.equal(await rollbackPreflight(rig, v7RowName), "refused", "v7 has a non-terminal run → rollback refused");
+    assert.equal(await rollbackPreflight(rig, v8RowName), "refused", "the newest version has a non-terminal run → rollback refused");
+    // The zero-run control (asserted directly, not inferred): a registered-but-unused version
+    // passes. Under the #708 scope this is "a version with no run among the ones this e2e staged",
+    // which is what makes it a control at all — the two refusals immediately above come from the
+    // SAME scope and the SAME helper, so a helper that could only ever say `refused` is caught here.
+    assert.equal(await rollbackPreflight(rig, closeExampleName), "allowed", "a workflow with ZERO runs → rollback allowed");
+    console.log("[cutover-e2e] preflight: v7 refused, v8 refused, closeExample (zero-run) allowed");
 
-  // v7 is now retirable (zero non-terminal v7 runs); v8 STILL has its parked run → still refused.
-  assert.equal(await rollbackPreflight(rig, v7RowName), "allowed", "with v7's only run completed, rollback is now allowed");
-  assert.equal(await rollbackPreflight(rig, v8RowName), "refused", "v8 remains refused (its run is still parked)");
-  console.log("[cutover-e2e] RESUME v7: completed on v7 body (name-invariant); v7 now allowed, v8 still refused");
+    const inv1 = await rollbackPreflightInventory(rig, [v7RowName, closeExampleName]);
+    assert.equal(inv1.verdict, "refused", "inventory against a v7-only supported set REFUSES while v8 is non-terminal");
+    assert.ok(inv1.outside.some((r) => r.name === v8RowName), "the inventory refusal NAMES v8 as the unsupported non-terminal build");
+    assert.ok(
+      inv1.outside.every((r) => r.name !== FOREIGN_WORKFLOW_NAME),
+      "#708: the scoped inventory never SEES the planted foreign name at all — the plants are outside its universe, not merely tolerated",
+    );
+    console.log(`[cutover-e2e] inventory preflight (v7-only supported set): refused, naming ${v8RowName}; #708 plants invisible to it`);
 
-  // -------------------------------------------------------------------------
-  // RESUME v8 → completes; now v8 is retirable too.
-  // -------------------------------------------------------------------------
-  await answerClarify(rig, t8, owner, "Acme Sdn Bhd", "cutover-ans-v8");
-  const t8Done = await pollTask(rig, t8, (t) => ["completed", "failed", "cancelled"].includes(t.status), "T8 settles", 40000);
-  assert.equal(t8Done.status, "completed", `the v8 run completed (got ${t8Done.status}/${t8Done.error_code})`);
-  await pollRun(rig, t8Parked.workflow_run_id, (r) => r.status === "completed", "v8 run completed");
-  assert.equal(await rollbackPreflight(rig, v8RowName), "allowed", "with v8's run completed, rollback is now allowed");
-  console.log("[cutover-e2e] RESUME v8: completed; v8 now allowed");
+    // -------------------------------------------------------------------------
+    // RESUME v7 on its ORIGINAL body → completes; the name column NEVER migrates to v8.
+    // -------------------------------------------------------------------------
+    await answerClarify(rig, t7, owner, "Acme Sdn Bhd", "cutover-ans-v7");
+    const t7Done = await pollTask(rig, t7, (t) => ["completed", "failed", "cancelled"].includes(t.status), "T7 settles", 40000);
+    assert.equal(t7Done.status, "completed", `the parked v7 run completed (got ${t7Done.status}/${t7Done.error_code})`);
+    assert.equal(t7Done.error_code, null, "v7 completed with no error_code");
+    const v7RunAfter = await pollRun(rig, t7Parked.workflow_run_id, (r) => ["completed", "failed", "cancelled"].includes(r.status), "v7 run terminal");
+    // PIN: the name column is INVARIANT — the retained v7 body completed the run, never migrated.
+    assert.equal(v7RunAfter.name, v7RowName, "PIN: the run's name column stayed chatTurn_v7 across completion (never migrated to v8)");
+    assert.equal(v7RunAfter.status, "completed", "the v7 run is completed");
 
-  // With BOTH runs terminal, the SAME v7-only inventory (unchanged supported set) now allows —
-  // proving the inventory tracks live state, not a snapshot taken at the refusal above.
-  const inv2 = await rollbackPreflightInventory(rig, [v7RowName, closeExampleName]);
-  assert.equal(inv2.verdict, "allowed", "with both runs terminal, the SAME v7-only inventory now ALLOWS");
-  console.log("[cutover-e2e] inventory preflight (same v7-only supported set): now allowed");
+    // v7 is now retirable (zero non-terminal v7 runs); v8 STILL has its parked run → still refused.
+    assert.equal(await rollbackPreflight(rig, v7RowName), "allowed", "with v7's only run completed, rollback is now allowed");
+    assert.equal(await rollbackPreflight(rig, v8RowName), "refused", "v8 remains refused (its run is still parked)");
+    console.log("[cutover-e2e] RESUME v7: completed on v7 body (name-invariant); v7 now allowed, v8 still refused");
+
+    // -------------------------------------------------------------------------
+    // RESUME v8 → completes; now v8 is retirable too.
+    // -------------------------------------------------------------------------
+    await answerClarify(rig, t8, owner, "Acme Sdn Bhd", "cutover-ans-v8");
+    const t8Done = await pollTask(rig, t8, (t) => ["completed", "failed", "cancelled"].includes(t.status), "T8 settles", 40000);
+    assert.equal(t8Done.status, "completed", `the v8 run completed (got ${t8Done.status}/${t8Done.error_code})`);
+    await pollRun(rig, t8Parked.workflow_run_id, (r) => r.status === "completed", "v8 run completed");
+    assert.equal(await rollbackPreflight(rig, v8RowName), "allowed", "with v8's run completed, rollback is now allowed");
+    console.log("[cutover-e2e] RESUME v8: completed; v8 now allowed");
+
+    // With BOTH runs terminal, the SAME v7-only inventory (unchanged supported set) now allows —
+    // proving the inventory tracks live state, not a snapshot taken at the refusal above. The
+    // #708 plants (still sitting in the table) remain outside its universe throughout.
+    const inv2 = await rollbackPreflightInventory(rig, [v7RowName, closeExampleName]);
+    assert.equal(inv2.verdict, "allowed", "with both runs terminal, the SAME v7-only inventory now ALLOWS");
+    console.log("[cutover-e2e] inventory preflight (same v7-only supported set): now allowed, #708 plants still ignored");
+  } finally {
+    // #708: clean up regardless of pass/fail, and even on a re-run against the SAME database —
+    // these are this leg's own rows (not append-only estate data), so a plain DELETE by the ids
+    // we planted is the correct shape, and it must not accumulate across repeated local runs.
+    if (PLANTED_RUN_IDS.length > 0) {
+      const del = await rig.rootQuery(`delete from workflow.workflow_runs where id = any($1::text[])`, [PLANTED_RUN_IDS]);
+      assert.equal(
+        del.rowCount,
+        PLANTED_RUN_IDS.length,
+        "#708: cleanup deleted exactly the planted rows — no trigger silently refused or short-counted the delete",
+      );
+      console.log(`[cutover-e2e] #708 cleanup: deleted ${del.rowCount} planted rows`);
+    }
+  }
 
   // -------------------------------------------------------------------------
   // Static freeze/registry invariants that make the pin real.

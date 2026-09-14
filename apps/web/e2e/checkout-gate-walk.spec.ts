@@ -1,6 +1,8 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Browser, type Page } from "@playwright/test";
 
+import { settleForScan } from "./helpers";
+
 // Read from the environment, matching `signup-confirm-pending.spec.ts` and the
 // Playwright config. A hardcoded origin here silently defeats the lane's
 // assigned port range: the browser follows `baseURL` and passes, while this
@@ -119,6 +121,10 @@ async function scan(page: Page, label: string) {
   // to #3460dc = 5.451:1, pinned by `scripts/check-token-contrast.mjs`'s
   // `primary-foreground-on-primary-hover` row). Removing the workaround is the
   // point: a scan that dodges the hover state cannot catch the next one.
+  //
+  // WHAT IS WAITED FOR INSTEAD (#760): the arrival fade, through `settleForScan` — the
+  // transition, not the pointer, was the artefact worth removing from the measurement.
+  await settleForScan(page);
   const results = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
   expect(results.violations, `${label} has a11y violations`).toEqual([]);
 }

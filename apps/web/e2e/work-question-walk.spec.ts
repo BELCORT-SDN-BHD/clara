@@ -1,6 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
+import { settleForScan } from "./helpers";
 import { JOURNAL_WORK } from "./journal-work-mock.mjs";
 
 /**
@@ -58,19 +59,8 @@ async function control(page: Page, body: Record<string, unknown>): Promise<void>
   expect(status, `the fixture control endpoint answered ${status}`).toBe(200);
 }
 
-async function settle(page: Page): Promise<void> {
-  await page.mouse.move(0, 0);
-  await page.waitForFunction(() =>
-    document.getAnimations().every((a) => {
-      if (a.playState !== "running") return true;
-      const iterations = a.effect?.getComputedTiming().iterations ?? 1;
-      return iterations === Infinity;
-    }),
-  );
-}
-
 async function scan(page: Page, what: string): Promise<void> {
-  await settle(page);
+  await settleForScan(page);
   const results = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
   expect(results.passes.length, `${what}: axe must actually have inspected the page`).toBeGreaterThan(0);
   expect(results.violations.map((v) => `${v.id}: ${v.nodes.length}`), what).toEqual([]);
@@ -231,7 +221,7 @@ test("320 CSS px and 200% zoom keep the question, its controls and its actions u
   await parkOnQuestion(page);
 
   await page.setViewportSize({ width: 320, height: 720 });
-  await settle(page);
+  await settleForScan(page);
   await expect(page.getByTestId("work-question-text")).toBeVisible();
   await expect(page.getByLabel(/Posting date/)).toBeVisible();
   await expect(page.getByTestId("work-question-next")).toBeVisible();
@@ -246,7 +236,7 @@ test("320 CSS px and 200% zoom keep the question, its controls and its actions u
   // 200% ZOOM, modelled the way every sibling walk models it: half the CSS viewport at the same
   // device pixels is what a browser's 200% actually produces.
   await page.setViewportSize({ width: 640, height: 512 });
-  await settle(page);
+  await settleForScan(page);
   await expect(page.getByTestId("work-question-text")).toBeVisible();
   await expect(page.getByTestId("work-question-next")).toBeVisible();
   await scan(page, "work question at 200% zoom");
@@ -358,7 +348,7 @@ test("B4: the inbox row's own form stays usable at 320 CSS px and under reduced 
   await page.getByTestId("needs-you-work-question-toggle").click();
   await expect(page.getByTestId("work-question-form")).toBeVisible({ timeout: 15_000 });
   await page.setViewportSize({ width: 320, height: 720 });
-  await settle(page);
+  await settleForScan(page);
 
   await expect(page.getByTestId("work-question-text")).toBeVisible();
   await expect(page.getByLabel(/Posting date/)).toBeVisible();

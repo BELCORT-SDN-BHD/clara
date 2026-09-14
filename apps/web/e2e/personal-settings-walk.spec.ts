@@ -1,6 +1,8 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page, type Route } from "@playwright/test";
 
+import { cellBudgetMs, ensureRealFocus } from "./helpers";
+
 // #626 (refresh spec #612, journey D1) — `/settings/account`'s real content.
 // Mocks are installed with `page.route`, per firm-navigation-walk.spec.ts's own
 // convention ("the shared mock is a merge surface every lane in this sprint
@@ -57,6 +59,9 @@ const motionRadio = (page: Page, label: RegExp) => page.getByRole("radio", { nam
 const saveButton = (page: Page) => page.getByRole("button", { name: "Save changes", exact: true });
 
 test("loaded -> dirty -> save -> reload persists", async ({ page }) => {
+  // #706 — a form sign-in, a save round trip, a reload and a full-page axe scan in one flat 30 s
+  // budget, which another suite sharing the host turned into a timeout that reads as a defect.
+  test.setTimeout(cellBudgetMs({ signIns: 1, scans: 1 }));
   await installStatefulPreferences(page, envelope(0));
   await signIn(page);
   await page.goto("/settings/account");
@@ -149,6 +154,9 @@ test("concurrent change (CLR06) shows 'changed elsewhere' and Reload-and-keep-my
 });
 
 test("denied: a signed-out read renders the honest denied state, never a crash", async ({ page }) => {
+  // #706 — a form sign-in and a full-page axe scan, sized for the host rather than left on the
+  // flat 30 s default that failed here as a timeout under concurrent load.
+  test.setTimeout(cellBudgetMs({ signIns: 1, scans: 1 }));
   await page.route("**/e2e-supabase/rest/v1/rpc/get_my_preferences", (route) =>
     fulfillJson(route, 401, { code: "PGRST301", message: "JWT expired" }));
 
@@ -171,6 +179,9 @@ test("notifications section is honest about having no supported control yet", as
 });
 
 test("a saved 'always reduce motion' sets data-motion=reduced regardless of the OS setting", async ({ page }) => {
+  // #706 — a form sign-in and a full-page axe scan, sized for the host rather than left on the
+  // flat 30 s default that failed here as a timeout under concurrent load.
+  test.setTimeout(cellBudgetMs({ signIns: 1, scans: 1 }));
   await page.emulateMedia({ reducedMotion: "no-preference" });
   await installStatefulPreferences(page, envelope(1, { motion: "reduced" }));
   await signIn(page);
@@ -217,11 +228,22 @@ test("OS-level reduced motion alone still applies with no saved preference", asy
 });
 
 test("keyboard-complete: reach the motion field, choose an option and save without a mouse", async ({ page }) => {
+  // #706 — a form sign-in plus a bounded keyboard walk; no axe scan, so one sign-in's headroom.
+  test.setTimeout(cellBudgetMs({ signIns: 1 }));
   await installStatefulPreferences(page, envelope(0));
   await signIn(page);
   await page.goto("/settings/account");
 
-  await motionRadio(page, /Match my system setting/).focus();
+  // #706 — THE FIRST KEYPRESS AFTER A NAVIGATION IS THE RACE `ensureRealFocus` exists for (see its
+  // own doc in ./helpers): a native roving-selection key is a ONE-SHOT browser action, so if it is
+  // dispatched against a document that has not yet been granted focus it is swallowed with nothing
+  // left for `toBeChecked()` to retry, and the cell fails on "received: inactive" after the full
+  // window. The `.focus()` below is not enough on its own — it moves the ACTIVE ELEMENT inside a
+  // document that may still be unfocused, which is the state `ensureRealFocus` waits out.
+  const systemRadio = motionRadio(page, /Match my system setting/);
+  await systemRadio.focus();
+  await expect.poll(async () => systemRadio.evaluate((el) => el === document.activeElement)).toBe(true);
+  await ensureRealFocus(page);
   await page.keyboard.press("ArrowDown"); // native radio-group roving selection
   await expect(motionRadio(page, /Always reduce motion/)).toBeChecked();
   await expect(page.getByText("Unsaved")).toBeVisible();
@@ -241,6 +263,9 @@ test("keyboard-complete: reach the motion field, choose an option and save witho
 });
 
 test("narrow settings navigation (320px) stays usable and axe-clean", async ({ page }) => {
+  // #706 — a form sign-in and a full-page axe scan at 320px, sized for the host rather than left
+  // on the flat 30 s default that failed here as a timeout under concurrent load.
+  test.setTimeout(cellBudgetMs({ signIns: 1, scans: 1 }));
   await page.setViewportSize({ width: 320, height: 720 });
   await installStatefulPreferences(page, envelope(0));
   await signIn(page);

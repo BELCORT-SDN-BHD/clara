@@ -147,7 +147,7 @@ const SIDEBAR_KEYBOARD_SHORTCUT = "b"
 // starts" preference, which writes THIS SAME cookie (same name, same max-age) on
 // save, keeps importing both from the component module it already reads and
 // cannot drift onto a second spelling.
-export { SIDEBAR_COOKIE_NAME, SIDEBAR_COOKIE_MAX_AGE, SIDEBAR_WIDTH }
+export { SIDEBAR_WIDTH }
 
 type SidebarContextProps = {
   state: "expanded" | "collapsed"

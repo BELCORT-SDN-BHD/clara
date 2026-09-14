@@ -311,6 +311,22 @@ test("#719: an entry the browse read never returned is fetched by id, merged int
   await expect(page.getByText(/could not be found for this client/)).toHaveCount(0);
 });
 
+test("#719: the ACTIVITY FEED's own href shape — a bare ?entry= with no ?tab= — opens Posted, expanded", async ({ page }) => {
+  // THE SHAPE THE FEED ACTUALLY EMITS. `activityJournalsHref` (lib/firm/activity.ts:470) writes
+  // `/clients/:id/journals?entry=<id>` and NO `?tab=`; every other cell in this block addresses
+  // `?tab=posted&entry=`, so the one URL a real reader arrives on was the one URL nothing walked.
+  // It opened on Drafts (the workbench's `useState` default), the addressed read lives in
+  // `PostedPanel` and is rendered only on the posted tab, so the link changed tabs and did nothing
+  // else. `openingJournalsTab` (components/journals/journals-workbench.tsx) is the rule; this is
+  // the proof it reaches a real screen.
+  await signInTo(page, `${JOURNALS_URL}?entry=${JOURNALS.archived}`);
+
+  await expect(page.getByRole("table", { name: "Journal entries" })).toBeVisible();
+  await expect(firstRow(page)).toContainText("ARCHIVED June rent");
+  await expect(firstRow(page).getByRole("button", { name: "Hide" })).toBeVisible();
+  await expect(page.getByText("Showing the entry you were sent to")).toBeVisible();
+});
+
 test("#719: a bogus or foreign ?entry= keeps the honest state — never a silent 'no matches'", async ({ page }) => {
   await signInTo(page, postedEntryUrl(JOURNALS.missing));
 

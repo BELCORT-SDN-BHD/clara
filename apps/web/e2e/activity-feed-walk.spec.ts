@@ -2,6 +2,7 @@ import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
 import { ACTIVITY } from "./activity-mock.mjs";
+import { settleForScan } from "./helpers";
 
 /**
  * #632 (refresh spec #612, journey B5) — the attributable Activity feed's real content:
@@ -36,6 +37,12 @@ test("initial read: representative rows carry actor, client, the DB's own senten
   await page.goto("/activity");
 
   await expect(page.getByRole("heading", { name: "Activity", level: 1 })).toBeVisible();
+  // #733's sweep — THE SERVER-RENDERED `<h1>` CARRIES THE LITERAL ID, which only a browser can
+  // say: the page is a Server Component and the id used to be imported across a `"use client"`
+  // boundary, where the RSC bundler hands the server a client reference rather than the string
+  // (`lib/navigation/heading-ids.ts`). The feed focuses this id by `getElementById` after a filter
+  // change, so a wrong or absent id is a silently dead focus move, not a visible fault.
+  await expect(page.locator("h1#activity-feed-heading")).toBeVisible();
   await expect(documentRowButton(page)).toBeVisible();
   await expect(page.getByText("A fiscal period close was begun.")).toBeVisible();
   await expect(page.getByText("Recorded a journal entry")).toBeVisible();
@@ -198,6 +205,9 @@ test("320px stays usable with no page-wide horizontal scroll, and is axe-clean",
   const clientWidth = await page.evaluate(() => document.documentElement.clientWidth);
   expect(scrollWidth, "no page-wide horizontal scroll at 320px").toBeLessThanOrEqual(clientWidth + 1);
 
+  // #760 — the row `enter-content` fade settles before axe looks: mid-fade this scan read
+  // the resting muted-foreground pair as #6a7373 on #f5f6f4 (4.49:1), a transition artefact.
+  await settleForScan(page);
   const result = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
   expect(result.violations, "/activity at 320px").toEqual([]);
 });
@@ -301,6 +311,20 @@ test("#719: an entry row's object link lands on the ENTRY, and a correction's tw
     "href",
     `/clients/${ACTIVITY.clientId}/journals?entry=${ACTIVITY.entryOriginalId}`,
   );
+
+  // AND NO `?tab=`, stated as its own claim rather than left implicit in the string above. That
+  // absence is the whole defect this cell now fences: the workbench opened on Drafts unless `?tab=`
+  // said otherwise, the addressed read lives on the POSTED tab, so this link used to land a reader
+  // on a tab that never looked at the id they arrived with. `openingJournalsTab`
+  // (components/journals/journals-workbench.tsx) makes a bare `?entry=` open Posted.
+  //
+  // WHERE THE LANDING ITSELF IS WALKED: `journals-table-walk.spec.ts`, "#719: the ACTIVITY FEED's
+  // own href shape …". This lane's fixture (`activity-mock.mjs`) answers `list_activity` and
+  // `get_activity_event` only — it has no journal entries for `ACTIVITY.clientId`, so clicking
+  // through from here would measure a loading banner, not the tab rule.
+  for (const name of ["View in books", "Links to the entry that replaced it."]) {
+    await expect(original.getByRole("link", { name })).not.toHaveAttribute("href", /[?&]tab=/);
+  }
 });
 
 test("#719: a report-kind row now offers a link at all — the Reports tab, which is all this feed can name", async ({ page }) => {

@@ -28,6 +28,31 @@ pnpm --filter @clara/web e2e
 
 On PowerShell, set those environment variables before running the command.
 
+## One worker, one host (#706)
+
+The harness is single-worker by construction and it must not share a machine with another test suite while it runs.
+
+`playwright.config.ts` fixes `workers: 1`, `retries: 0` and `reuseExistingServer: false`, and the mock server keeps mutable fixture state for the life of the process — so two Playwright runs on one host are not merely slow, they read and write each other's fixtures. Beyond that, every measured browser flake in this repository so far has been a cell running out of wall-clock budget while another suite (`packages/db`, `packages/runtime`, or a second web build) competed for the same CPU. CI does not run Playwright, so a local run is the only browser evidence this repository has, and it is only worth having if it is trustworthy: **run the browser suite alone, and sequence heavy suites one at a time.**
+
+### Per-cell timeout policy
+
+The config sets no per-test timeout, so Playwright's flat 30 s applies to every cell regardless of how much work it does. A cell that does measurably more than that states its own budget, built from the named units in [`helpers.ts`](helpers.ts):
+
+| Unit | Budget | What it pays for |
+|---|---|---|
+| `CELL_BUDGET.base` | 30 s | Playwright's own default, kept as every cell's floor |
+| `CELL_BUDGET.poll` | 15 s | one fixture-driven state change awaited with a `{ timeout: 15_000 }`-shaped poll |
+| `CELL_BUDGET.scan` | 35 s | one full-page `AxeBuilder.analyze()` — measured at 14.4 s alone and 33 s under load |
+| `CELL_BUDGET.signIn` | 20 s | one form sign-in: a real round trip through the mock auth server plus a server-rendered redirect |
+
+Use `test.setTimeout(cellBudgetMs({ polls, scans, signIns }))` at the top of a cell whose work is visible from the cell, and `grantCellBudget(CELL_BUDGET.x)` inside a shared helper (`signIn()`, `scan()`) whose cost depends on how many times the cell calls it — that form ADDS to whatever the cell already set, so a cell that signs in three times gets three times the headroom.
+
+Three rules the budgets do not replace:
+
+- **A budget is a ceiling, never a wait.** Nothing here makes a passing cell slower; the per-assertion timeouts are what actually bound each step.
+- **Never spend a budget where a condition will do.** Wait for the state — `expect.poll` on the element that must become `document.activeElement`, on the animation count, on the row that must appear — not for a number of milliseconds. Use [`settleForScan`](helpers.ts) before every `AxeBuilder.analyze()` and [`ensureRealFocus`](helpers.ts) before the first key press after any navigation.
+- **Read a lone red as timing only when the budget says so.** A cell that exceeds a budget sized like the table above has stalled; it is not evidence that the host was busy.
+
 ## Coverage map
 
 The checked-in suite currently contains 25 specs:

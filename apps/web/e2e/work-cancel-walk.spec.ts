@@ -1,7 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
-import { ensureRealFocus } from "./helpers";
+import { ensureRealFocus, settleForScan } from "./helpers";
 import { JOURNAL_WORK } from "./journal-work-mock.mjs";
 
 /**
@@ -64,19 +64,8 @@ async function control(page: Page, body: Record<string, unknown>): Promise<Recor
   );
 }
 
-async function settle(page: Page): Promise<void> {
-  await page.mouse.move(0, 0);
-  await page.waitForFunction(() =>
-    document.getAnimations().every((a) => {
-      if (a.playState !== "running") return true;
-      const iterations = a.effect?.getComputedTiming().iterations ?? 1;
-      return iterations === Infinity;
-    }),
-  );
-}
-
 async function scan(page: Page, what: string): Promise<void> {
-  await settle(page);
+  await settleForScan(page);
   const results = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
   expect(results.passes.length, `${what}: axe must actually have inspected the page`).toBeGreaterThan(0);
   expect(results.violations, `${what} axe violations`).toEqual([]);

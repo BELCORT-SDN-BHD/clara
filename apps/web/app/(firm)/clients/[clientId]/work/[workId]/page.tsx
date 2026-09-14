@@ -1,7 +1,8 @@
 import { getTranslations } from "next-intl/server";
 
 import { PageHeader, PageShell } from "@/components/common/page-shell";
-import { WORK_HEADING_ID, WorkDetail } from "@/components/work/work-detail";
+import { WorkDetail } from "@/components/work/work-detail";
+import { WORK_HEADING_ID } from "@/lib/navigation/heading-ids";
 
 /**
  * "/clients/:clientId/work/:workId" — journey B3's durable detail.

@@ -112,7 +112,7 @@ runs:
         # database. Measured: `-r --filter '!@clara/runtime'` selects clara/@clara/db/@clara/web;
         # adding `--filter '!clara'` selects @clara/db + @clara/web, which is exactly what the
         # old `pnpm -r --if-present test` ran minus the runtime package.
-        ( set -o pipefail; pnpm --filter '!@clara/runtime' --filter '!clara' --if-present test 2>&1 | sed 's/^/[estate] /' ) &
+        ( set -o pipefail; pnpm -r --filter '!@clara/runtime' --filter '!clara' --if-present test 2>&1 | sed 's/^/[estate] /' ) &
         estate_pid=$!
         ( set -o pipefail; PGDATABASE="$RUNTIME_DB" pnpm --filter @clara/runtime --if-present test 2>&1 | sed 's/^/[runtime] /' ) &
         runtime_pid=$!

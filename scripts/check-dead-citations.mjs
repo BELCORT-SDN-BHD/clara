@@ -45,14 +45,21 @@ const DEAD_NAMES = [
   { id: "db-tests.md", test: (text) => /db-tests\.md/.test(text) },
 ];
 
-/** Every git-tracked file under `packages/` and `apps/`, relative to `REPO_ROOT`,
- *  excluding any path with an EXCLUDE_DIR_SEGMENTS component (defensive — git ls-files
- *  already omits gitignored paths, but this keeps the scan honest if that ever changes).
+/** The guard's own two files name both dead names by necessity; they are the ONLY paths
+ *  skipped by name, so moving or symlinking the guard elsewhere would make it fail against
+ *  itself rather than silently widen the skip (review 2026-09-14). */
+const SELF_PATHS = new Set(["scripts/check-dead-citations.mjs", "scripts/check-dead-citations.selftest.mjs"]);
+
+/** Every git-tracked file in the repository (docs/, scripts/, .github/ and the root docs
+ *  included — a dead name in a governing document is exactly what #755 was about), relative
+ *  to `REPO_ROOT`, excluding the guard's own two files and any path with an
+ *  EXCLUDE_DIR_SEGMENTS component (defensive — git ls-files already omits gitignored paths,
+ *  but this keeps the scan honest if that ever changes).
  * @param {string} repoRoot
  * @returns {string[]}
  */
 export function trackedFiles(repoRoot) {
-  return execFileSync("git", ["ls-files", "--", "packages", "apps"], {
+  return execFileSync("git", ["ls-files"], {
     cwd: repoRoot,
     encoding: "utf8",
     maxBuffer: 64 * 1024 * 1024,
@@ -60,6 +67,7 @@ export function trackedFiles(repoRoot) {
     .split("\n")
     .map((s) => s.trim())
     .filter(Boolean)
+    .filter((rel) => !SELF_PATHS.has(rel))
     .filter((rel) => !rel.split("/").some((seg) => EXCLUDE_DIR_SEGMENTS.has(seg)));
 }
 
@@ -90,7 +98,7 @@ export function main() {
   const hits = findDeadNameCitations(trackedFiles(REPO_ROOT), REPO_ROOT);
 
   if (hits.length === 0) {
-    console.log("[check-dead-citations] clean — no citation of apps/web/AGENTS.md or db-tests.md under packages/ or apps/.");
+    console.log("[check-dead-citations] clean — no citation of apps/web/AGENTS.md or db-tests.md anywhere in the repository.");
     return 0;
   }
 

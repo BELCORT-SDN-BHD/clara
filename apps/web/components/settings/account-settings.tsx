@@ -57,7 +57,7 @@ import { InterfaceSection, type InterfaceFieldViewState } from "@/components/set
 import { NotificationsSection } from "@/components/settings/notifications-section";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { SIDEBAR_COOKIE_MAX_AGE, SIDEBAR_COOKIE_NAME } from "@/components/ui/sidebar";
+import { SIDEBAR_COOKIE_MAX_AGE, SIDEBAR_COOKIE_NAME } from "@/lib/navigation/sidebar-cookie";
 import { Toaster, toast } from "@/components/ui/toast";
 import { isDoorError } from "@/lib/doors";
 import { useHydratedPart } from "@/lib/parts/hooks";

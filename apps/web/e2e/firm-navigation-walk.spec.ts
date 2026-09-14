@@ -1,9 +1,15 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
+import { CELL_BUDGET, grantCellBudget } from "./helpers";
+
 const WCAG_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"];
 
 async function signIn(page: Page, email: string): Promise<void> {
+  // #706 — a real round trip through the mock auth server plus a server-rendered redirect. The
+  // grant is here rather than on each cell so a cell that signs in twice gets twice the headroom
+  // and one that never signs in gets none.
+  grantCellBudget(CELL_BUDGET.signIn);
   await page.goto("/login");
   await page.getByLabel("Email").fill(email);
   await page.getByLabel("Password").fill("Clara-e2e-password-1!");

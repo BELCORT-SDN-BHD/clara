@@ -1,6 +1,8 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page, type Route } from "@playwright/test";
 
+import { cellBudgetMs } from "./helpers";
+
 // The Home boards' browser leg (裁-86): Firm Home -> a tile -> the surface that owns it -> back,
 // then the client board for an ACTIVE and an ONBOARDING client, each at 1440 and at 1024 with
 // the Clara rail open, with axe on both faces.
@@ -186,6 +188,9 @@ test("the client board lifts ONBOARDING progress for a client mid-interview", as
 });
 
 test("both boards reflow on the CONTAINER query at 1440 and at 1024 with the rail open, with no horizontal scroll", async ({ page }) => {
+  // #706 — TWO sign-ins and FOUR `settled()` passes (a `networkidle` wait plus an animation poll
+  // each), which is well past a flat 30 s on a host running another suite.
+  test.setTimeout(cellBudgetMs({ signIns: 2, polls: 4 }));
   for (const [face, url] of [["firm home", "/"], [`client home`, `/clients/${CLIENT_ACTIVE}`]] as const) {
     await signInTo(page, url);
     for (const width of [1440, 1024]) {
@@ -216,6 +221,9 @@ test("both boards reflow on the CONTAINER query at 1440 and at 1024 with the rai
 // #546's escalation card, whose own `<h2>` sat above the `<h1>` this train moved into the
 // identity band. A face that no scan mounts is a face with no a11y coverage at all.
 test("all three boards are clean under the full WCAG 2.1 AA scan", async ({ page }) => {
+  // #706 — THREE sign-ins, three `networkidle` settles and three full-page axe scans in one cell.
+  // This is the shape the flat 30 s default was never sized for; the budget says so out loud.
+  test.setTimeout(cellBudgetMs({ signIns: 3, polls: 3, scans: 3 }));
   const FACES = [
     ["firm home", "/"],
     ["client home (active)", `/clients/${CLIENT_ACTIVE}`],

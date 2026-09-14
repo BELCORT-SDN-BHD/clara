@@ -108,6 +108,36 @@ async function mount() {
   return { h, body };
 }
 
+/**
+ * Settle until `condition` holds — BOUNDED BY PASSES, NEVER BY THE CLOCK (#706).
+ *
+ * WHAT IT REPLACES. This file drove the card with fixed tick counts (`for (i < 6) await
+ * h.settle()`) and asserted immediately afterwards. Each `settle()` is one `act()`-wrapped
+ * macrotask flush, so a tick count is a GUESS about how many flushes the mount/door chain takes —
+ * green while the guess holds, red the moment a chain grows a link or a loaded host reorders the
+ * work. Polling the condition removes the guess in both directions: it stops the instant the state
+ * is there, and keeps going when one more pass was needed.
+ *
+ * The bound is on WORK, not on wall-clock time, so a red here means the state never arrived — it
+ * is never a statement about how busy the machine was. Post-unmount drains below keep their fixed
+ * counts deliberately: there is no condition to wait for when the point is to let pending work
+ * finish before the next mount.
+ */
+const MAX_SETTLE_PASSES = 200;
+
+async function settleUntil(
+  h: { settle: () => Promise<void> },
+  condition: () => boolean,
+  label: string,
+): Promise<void> {
+  for (let pass = 0; pass < MAX_SETTLE_PASSES; pass += 1) {
+    if (condition()) return;
+    await h.settle();
+  }
+  if (condition()) return;
+  throw new Error(`${label} never arrived within ${MAX_SETTLE_PASSES} settle passes (a bound on WORK, not on wall-clock time — read a red here as a stall, never as a slow host)`);
+}
+
 /** Builds the standard onboarding read mock, tracking every commit-door call
  *  into `commitCalls` — the shared "door-call counter" F2's fixtures assert
  *  against. `commitResponse` is a `() => Response` so a caller can wire a
@@ -151,7 +181,11 @@ test("COMMIT refusal: a real click on Confirm (clickButton) closes the dialog, a
       assert.ok(trigger, "the Commit-onboarding trigger must render");
       assert.equal((trigger as unknown as { disabled: boolean }).disabled, false, "the gate passes for this fixture — Confirm must be reachable");
       await h.fireEvent(trigger!, "click");
-      for (let i = 0; i < 6; i++) await h.settle();
+      await settleUntil(
+        h,
+        () => findIn(body as never, (n) => n.tagName === "BUTTON" && textOf(n as never) === "Commit onboarding" && (n as unknown) !== (trigger as unknown)) !== null,
+        "the commit dialog's own Confirm control",
+      );
 
       // The trigger and the dialog's own Confirm share the SAME label
       // ("Commit onboarding") — exclude the trigger by identity, or `findIn`
@@ -169,8 +203,9 @@ test("COMMIT refusal: a real click on Confirm (clickButton) closes the dialog, a
       await h.act(() => clickButton(confirmButton as never));
       // The failure path awaits a full reload (4 sequential getRows calls,
       // now including opening_seed_registry) before settling — more
-      // macrotask hops than a plain success path.
-      for (let i = 0; i < 18; i++) await h.settle();
+      // macrotask hops than a plain success path — which is exactly why this waits for the CALL
+      // rather than for a tick count that had to be tuned to the longest chain (#706).
+      await settleUntil(h, () => commitCalls.length >= 1, "the governed commit call");
 
       assert.equal(commitCalls.length, 1, "exactly one governed call — never a batch, never zero");
 
@@ -212,7 +247,7 @@ test("CANCEL-onboarding dialog: clickButton on the dialog's own DialogClose cont
       assert.ok(trigger, "the Cancel-onboarding trigger must render");
       assert.ok(focusableElements(h.container as never).includes(trigger as never), "the trigger must be keyboard-reachable");
       await h.fireEvent(trigger!, "click");
-      for (let i = 0; i < 6; i++) await h.settle();
+      await settleUntil(h, () => findIn(body as never, (n) => n.tagName === "TEXTAREA") !== null, "the cancel dialog's own reason field");
 
       // "Reason for cancelling" is the field's aria-label/placeholder, not
       // rendered text content — the real proof the reason field is reachable
@@ -226,7 +261,11 @@ test("CANCEL-onboarding dialog: clickButton on the dialog's own DialogClose cont
       assert.deepEqual(checkKeyboardWalk(body as never), [], "no tabindex-order/focus-visible violations while the dialog is open");
 
       await h.act(() => clickButton(dialogCloseButton as never));
-      for (let i = 0; i < 6; i++) await h.settle();
+      await settleUntil(
+        h,
+        () => findIn(body as never, (n) => n.tagName === "BUTTON" && textOf(n as never) === "Cancel") === null,
+        "the dialog's own DialogClose control going away with the dialog",
+      );
 
       // Discriminating post-condition (F5-class, per the counterparty-hygiene
       // precedent): the dialog's own Confirm control ("Cancel onboarding",
@@ -277,7 +316,7 @@ test("RESOLVE refusal: the typed resolution SURVIVES a refusal — only a SUCCES
       const trigger = h.find((n) => n.tagName === "BUTTON" && textOf(n) === "Resolve");
       assert.ok(trigger, "the Resolve trigger must render for the pending item");
       await h.fireEvent(trigger!, "click");
-      for (let i = 0; i < 6; i++) await h.settle();
+      await settleUntil(h, () => findIn(body as never, (n) => n.tagName === "TEXTAREA") !== null, "the resolve dialog's own resolution field");
 
       const textarea = findIn(body as never, (n) => n.tagName === "TEXTAREA");
       assert.ok(textarea, "the resolution field must be reachable");
@@ -289,7 +328,7 @@ test("RESOLVE refusal: the typed resolution SURVIVES a refusal — only a SUCCES
       );
       assert.ok(confirmButton, "the dialog's own Confirm control must render, distinct from the trigger");
       await h.act(() => clickButton(confirmButton as never));
-      for (let i = 0; i < 18; i++) await h.settle();
+      await settleUntil(h, () => /CLR04/.test(textOf(body as never)), "the door's own CLR04 refusal");
 
       const bodyText = textOf(body as never);
       assert.match(bodyText, /CLR04/, "the refusal must render verbatim (this half already worked before the fix)");
@@ -340,11 +379,12 @@ async function openCommitDialog(h: Awaited<ReturnType<typeof mount>>["h"], body:
   const trigger = h.find((n) => n.tagName === "BUTTON" && textOf(n) === "Commit onboarding");
   assert.ok(trigger, "the Commit trigger must still RENDER (gating shapes, never hides)");
   await h.fireEvent(trigger!, "click");
-  for (let i = 0; i < 6; i++) await h.settle();
-  const confirmButton = findIn(
+  const dialogConfirm = () => findIn(
     body,
     (n) => n.tagName === "BUTTON" && textOf(n as never) === "Commit onboarding" && (n as unknown) !== (trigger as unknown),
   );
+  await settleUntil(h, () => dialogConfirm() !== null, "the commit dialog's own Confirm control");
+  const confirmButton = dialogConfirm();
   assert.ok(confirmButton, "the dialog's own Confirm control must render, distinct from the trigger");
   return { trigger: trigger as Node, confirmButton: confirmButton as Node };
 }
@@ -449,7 +489,7 @@ test("COMMIT gate — POSITIVE CONTROL: all four conjuncts pass -> Confirm is re
       const { confirmButton } = await openCommitDialog(h, body as never);
       assert.equal((confirmButton as unknown as { disabled: boolean }).disabled, false, "with every conjunct satisfied, the dialog's own Confirm must be reachable — read live, not inferred");
       await h.act(() => clickButton(confirmButton as never));
-      for (let i = 0; i < 18; i++) await h.settle();
+      await settleUntil(h, () => commitCalls.length >= 1, "the governed commit call");
 
       assert.equal(commitCalls.length, 1, "the counter must count exactly once when the gate genuinely passes — proves the counter mechanism itself works");
     } finally {

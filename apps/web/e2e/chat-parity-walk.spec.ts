@@ -18,7 +18,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
-import { watchReactFaults } from "./helpers";
+import { settleForScan, watchReactFaults } from "./helpers";
 
 const CLIENT_ID = "55555555-5555-4555-8555-555555555555";
 const THREAD_ID = "66666666-6666-4666-8666-666666666666";
@@ -38,6 +38,9 @@ const QUESTION = "Which client owns this invoice?";
 const WCAG_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"];
 
 async function scan(page: Page, what: string): Promise<void> {
+  // #760 — the mount fade settles BEFORE axe looks, through the one shared instrument, so
+  // this scan measures resting colours rather than a frame nobody ever fails on.
+  await settleForScan(page);
   const results = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
   // A positive control on the instrument itself: an empty `violations` array proves
   // nothing unless the scan actually looked at this page (entry-faces-walk.spec.ts's
@@ -215,17 +218,9 @@ test("a document attached from the composer rides the sent turn as its document 
 
   // The mock reopens the SAME clarify on every turn (chat-parity-mock.mjs's `resetPark()`),
   // so this turn incidentally mounts a second live ClarifyCard this test does not otherwise
-  // touch. Its `enter-content` wrapper fades opacity 0->1 over `--motion-duration-standard`
-  // (160 ms, globals.css) on mount, and axe measures whatever frame it lands on: a scan
-  // mid-fade read the resting muted-foreground/card pair (4.636:1) as #727a7a on white
-  // (4.39:1) — a transition artefact, not a colour. Measured 2026-09-12: the same spec on the
-  // same tree failed and passed on consecutive runs with zero changes; it became frequent once
-  // e2e/run.mjs stopped forwarding the `--` separator and this spec ran standalone. Wait for
-  // the fade to settle so the scan measures RESTING colours.
-  const clarifyGroup = page.locator(".enter-content").first();
-  if (await clarifyGroup.count()) {
-    await expect(clarifyGroup).toHaveCSS("opacity", "1");
-  }
+  // touch, whose `enter-content` fade is what made this scan flake. PR #757 waited for that
+  // ONE wrapper's opacity here; #760 moved the wait into `scan()` itself (`settleForScan`),
+  // so the per-spec patch is gone and EVERY scan in this file is guarded, not just this one.
   await scan(page, "composer attachment face");
 });
 

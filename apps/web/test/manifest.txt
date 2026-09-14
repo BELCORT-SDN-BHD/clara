@@ -151,6 +151,7 @@ components/journals/journals-clarifications.test.tsx
 components/journals/journals-governance-a11y.test.tsx
 components/journals/journals-governance-keyboard.test.tsx
 components/journals/journals-keyboard.test.tsx
+components/journals/journals-workbench.test.tsx
 components/login-a11y.test.tsx
 components/login-keyboard.test.tsx
 components/operator/support-case-keyboard.test.tsx
@@ -287,6 +288,7 @@ lib/journals/use-entry-rows.test.ts
 lib/journals/use-journals-workbench.test.ts
 lib/members/members-doors.test.ts
 lib/members/use-member-names.test.ts
+lib/navigation/heading-ids.test.ts
 lib/navigation/legacy-routes.test.ts
 lib/navigation/tree.test.ts
 lib/onboarding/answer-format.test.ts

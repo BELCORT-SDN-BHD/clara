@@ -132,11 +132,41 @@ function commitDialogConfirm(h: { container: unknown }): unknown {
 
 /** Opens the Commit dialog and returns its own Confirm control, distinct from the trigger by
  *  IDENTITY (the exclusion idiom the keyboard battery already uses: both carry the same text). */
+/**
+ * Settle until `condition` holds — BOUNDED BY PASSES, NEVER BY THE CLOCK (#706).
+ *
+ * WHAT IT REPLACES. This file drove the card with fixed tick counts (`for (i < 6) await
+ * h.settle()`) and asserted immediately afterwards. Each `settle()` is one `act()`-wrapped
+ * macrotask flush, so a tick count is a GUESS about how many flushes the mount/door chain takes —
+ * green while the guess holds, red the moment a chain grows a link or a loaded host reorders the
+ * work. Polling the condition removes the guess in both directions: it stops the instant the state
+ * is there, and keeps going when one more pass was needed.
+ *
+ * The bound is on WORK, not on wall-clock time, so a red here means the state never arrived — it
+ * is never a statement about how busy the machine was. Post-unmount drains below keep their fixed
+ * counts deliberately: there is no condition to wait for when the point is to let pending work
+ * finish before the next mount.
+ */
+const MAX_SETTLE_PASSES = 200;
+
+async function settleUntil(
+  h: { settle: () => Promise<void> },
+  condition: () => boolean,
+  label: string,
+): Promise<void> {
+  for (let pass = 0; pass < MAX_SETTLE_PASSES; pass += 1) {
+    if (condition()) return;
+    await h.settle();
+  }
+  if (condition()) return;
+  throw new Error(`${label} never arrived within ${MAX_SETTLE_PASSES} settle passes (a bound on WORK, not on wall-clock time — read a red here as a stall, never as a slow host)`);
+}
+
 async function openCommitDialog(h: { container: unknown; settle: () => Promise<void> }): Promise<unknown> {
   const trigger = buttonsLabelled(h.container, "Commit onboarding")[0];
   assert.ok(trigger, "the Commit trigger must still RENDER on a live plan (gating shapes, never hides)");
   await clickButton(trigger as never);
-  for (let i = 0; i < 4; i++) await h.settle();
+  await settleUntil(h, () => commitDialogConfirm(h) !== null && commitDialogConfirm(h) !== undefined, "the commit dialog's own Confirm control");
   const confirm = commitDialogConfirm(h);
   assert.ok(confirm, "the dialog's own Confirm control must render, distinct from the trigger");
   return confirm;
@@ -296,7 +326,7 @@ test("CB-AE2E-023 — the settled receipt COLLAPSES the item list behind a discl
       const resolveTrigger = buttonsLabelled(h.container, "Resolve")[0];
       assert.ok(resolveTrigger, "every row still renders its Resolve trigger — gating shapes, never hides");
       await clickButton(resolveTrigger as never);
-      for (let i = 0; i < 3; i++) await h.settle();
+      await settleUntil(h, () => /The onboarding plan is no longer open/.test(textOf(document.body as never)), "the closed-plan sentence in the Resolve dialog");
       const dialogText = textOf(document.body as never);
       assert.match(dialogText, /The onboarding plan is no longer open/, `the closed-plan sentence; got: ${dialogText}`);
       assert.doesNotMatch(dialogText, /use Amend resolution/, `must not point at a control that is not on the screen; got: ${dialogText}`);
@@ -426,7 +456,7 @@ test("裁-187 — a CLR05 'self_attestation' refusal REVEALS the field beside th
       try {
         const confirm = await openCommitDialog(h);
         await clickButton(confirm as never);
-        for (let i = 0; i < 6; i++) await h.settle();
+        await settleUntil(h, () => /solo onboarding commit requires an attestation/.test(h.text()), "the door's own refusal text");
         // The refusal renders VERBATIM either way — that half never depended on the token.
         assert.match(h.text(), /solo onboarding commit requires an attestation/, `got: ${h.text()}`);
         // MERGE-FORWARD, #549 x #546: this cell used to RE-OPEN the dialog here, because on main
@@ -470,7 +500,11 @@ test("H-50 — a SUCCESSFUL commit announces CLIENT_RECORD_CHANGED exactly once,
       try {
         const confirm = await openCommitDialog(h);
         await clickButton(confirm as never);
-        for (let i = 0; i < 6; i++) await h.settle();
+        // The SUCCESS arm has a condition to wait for — the announcement itself. The REFUSED arm
+        // is an assertion of ABSENCE, which no condition poll can express, so it keeps a bounded
+        // drain: the point there is to let every pending flush finish and then find nothing.
+        if (expected === 1) await settleUntil(h, () => seen.length === 1, "the CLIENT_RECORD_CHANGED announcement");
+        else for (let i = 0; i < 6; i++) await h.settle();
         assert.deepEqual(seen, expected === 1 ? ["c1"] : [], `${outcome}: expected ${expected} announcement(s), saw ${JSON.stringify(seen)}`);
       } finally {
         window.removeEventListener(CLIENT_RECORD_CHANGED_EVENT, listener);

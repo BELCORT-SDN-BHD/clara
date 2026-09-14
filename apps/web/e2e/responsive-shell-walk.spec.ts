@@ -1,7 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
-import { ensureRealFocus, watchReactFaults } from "./helpers";
+import { cellBudgetMs, ensureRealFocus, watchReactFaults } from "./helpers";
 
 /**
  * CB-AE2E-019 · H-31 · C-43 — THE BROWSER LEG (裁-86).
@@ -245,6 +245,9 @@ test("at lg and above the rail is STILL open by default — the narrow default i
 });
 
 test("below lg the Clara rail is an OVERLAY: it covers the workbench instead of shrinking it", async ({ page }) => {
+  // #706 — a sign-in, two `dock-panel` entrance settles and a keyboard round trip through the
+  // rail's own focus hand-off, all inside the flat 30 s default before this.
+  test.setTimeout(cellBudgetMs({ signIns: 1, polls: 2 }));
   await page.setViewportSize(NARROW);
   await signInTo(page, `/clients/${CLIENT_A}`);
 
@@ -275,16 +278,28 @@ test("below lg the Clara rail is an OVERLAY: it covers the workbench instead of 
   expect(await rail.evaluate((el) => getComputedStyle(el.parentElement!).position)).toBe("fixed");
 
   // CLOSE BY KEYBOARD, from inside the rail, and it goes away.
+  //
+  // #706 — `toBeFocused()` on this walk's launcher was measured returning "inactive" under host
+  // load. That reading is about the DOCUMENT, not the element: the page had not been granted
+  // renderer focus yet, and a native key press dispatched into an unfocused document is a one-shot
+  // action with nothing left to retry (see `ensureRealFocus`'s own doc in ./helpers). So each
+  // keyboard step below waits for its own condition deterministically — the element becoming
+  // `document.activeElement`, which is true whether or not the document itself is focused yet —
+  // and `ensureRealFocus` closes the document half before the key that depends on it.
   const collapse = page.getByRole("button", { name: "Collapse Clara" });
   await collapse.focus();
+  await expect.poll(async () => collapse.evaluate((el) => el === document.activeElement)).toBe(true);
+  await ensureRealFocus(page);
   await expect(collapse).toBeFocused();
   await page.keyboard.press("Enter");
   await expect(rail).toHaveCount(0);
 
   // …focus lands on the launcher rather than on <body>, and the launcher REOPENS
-  // it by keyboard, closing the loop.
+  // it by keyboard, closing the loop. The hand-off is an EFFECT the rail runs as it unmounts, so
+  // the poll below is on the condition itself rather than on a timer.
   const launcher = page.locator("[data-clara-rail-launcher]");
   await expect(launcher).toBeVisible();
+  await expect.poll(async () => launcher.evaluate((el) => el === document.activeElement)).toBe(true);
   await expect(launcher).toBeFocused();
   await page.keyboard.press("Enter");
   await expect(rail).toBeVisible();
@@ -781,6 +796,20 @@ test("#732: /pending hydrates with no React fault at 375 px and at 1280 px", asy
   await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
   expect(collector.faults(), "/pending at 375px must hydrate with no React fault").toEqual([]);
 
+  // #732 AC3 — "the narrow shell still ends in the same state it has today"
+  // read against THIS route's own today: `/pending` is `app/(entry)/pending`,
+  // under `app/(entry)/layout.tsx`, not `app/(firm)/layout.tsx` — the firm
+  // shell that owns the docked sidebar (`components/ui/sidebar.tsx`) and the
+  // Clara rail launcher (`components/clara/rail-launcher.tsx`, mounted only
+  // by `RailMount` in the firm layout) never mounts here at any width. So the
+  // narrow "same state" claim for this face is that it stays exactly what it
+  // is today — the identity card, nothing from the firm shell — rather than
+  // picking up either sidebar arm by accident.
+  await expect(page.locator('[data-slot="sidebar"]')).toHaveCount(0);
+  await expect(page.locator("[data-clara-rail-launcher]")).toHaveCount(0);
+  await expect(page.getByText("ClaraBook", { exact: true })).toBeVisible();
+  await expect(page.locator('[data-slot="card"]').first()).toBeVisible();
+
   // 1280 IS THE CONTROL, and it is reached by a FULL document load rather than a
   // second sign-in: `goto` is what produces a fresh server render for the first
   // client render to disagree with, and the session is already in the jar.
@@ -788,6 +817,13 @@ test("#732: /pending hydrates with no React fault at 375 px and at 1280 px", asy
   await page.goto("/pending");
   await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
   expect(collector.faults(), "/pending at 1280px must hydrate with no React fault").toEqual([]);
+
+  // The control width must land on the identical entry-shell state, not just
+  // an identical fault count: this route has no responsive shell to diverge.
+  await expect(page.locator('[data-slot="sidebar"]')).toHaveCount(0);
+  await expect(page.locator("[data-clara-rail-launcher]")).toHaveCount(0);
+  await expect(page.getByText("ClaraBook", { exact: true })).toBeVisible();
+  await expect(page.locator('[data-slot="card"]').first()).toBeVisible();
 
   await page.evaluate(() => console.error("e2e-732-pending-collector-probe"));
   expect(collector.seen(), "the console collector must actually be receiving errors").toContain(

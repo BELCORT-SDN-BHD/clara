@@ -82,12 +82,24 @@ that same database, and the WDK world bootstrap
 [`db-live-gates/action.yml`](../../.github/actions/db-live-gates/action.yml) for the exact
 sequence.
 
-`tests/version-cutover-e2e.mjs` **does not require a fresh database.** Its rollback preflight — per-name
-and inventory-shaped alike — is scoped to the `workflow.workflow_runs` rows the e2e itself stages,
-so parked non-terminal runs left by another suite on a shared local rig no longer change its
-verdicts (#708). Only the runs it staged are in the preflight's universe; the runbook's own
-preflight stays global, and the README's "Deployment and rollback" section below is the contract
-that describes it.
+This is a general rule, not per-file guidance: none of the five standalone e2es
+(`tests/interview-e2e.mjs`, `tests/version-cutover-e2e.mjs`, `tests/work-journal-e2e.mjs`,
+`tests/work-question-e2e.mjs`, `tests/work-cancel-e2e.mjs`) may share a host with another suite
+WHILE it is actually running. `db-live-gates` runs each battery alone — one at a time on the same
+rig, never concurrently with anything else that could touch the same rows or steal the same lease
+clock. Running one locally while another suite hammers the same database at the same time is the
+one setup CI does not reproduce and these e2es do not defend against.
+
+`tests/version-cutover-e2e.mjs` is the one exception to needing a *clean* rig, not to the rule
+above: its rollback preflight — per-name and inventory-shaped alike — is scoped to the
+`workflow.workflow_runs` rows the e2e itself stages, so a rig pre-seeded with parked non-terminal
+runs left by an earlier, already-finished suite is tolerated BY DESIGN (#708). That tolerance is
+proven inside the e2e itself, not merely asserted: before its rollback-preflight legs, the file
+plants its own batch of foreign-scope non-terminal rows directly in SQL, asserts the old
+(unscoped) shape would have counted them, and asserts its scoped helpers reach the same verdicts
+regardless — then deletes the rows it planted. Only the runs it staged are ever in the
+preflight's universe; the runbook's own preflight stays global, and the README's "Deployment and
+rollback" section below is the contract that describes it.
 
 `tests/work-question-e2e.mjs` derives each leg's settle budget rather than pinning a constant
 (#745): **budget = (control lease + one control poll interval) × the number of leases the leg must
@@ -95,8 +107,8 @@ wait out + a stated slack.** The battery gives every engine it spawns — faulte
 short `CLARA_CTL_LEASE_SECONDS=2` lease, so the wait is two seconds rather than `control.mjs`'s
 60-second default, and the slack is headroom for the resume itself rather than for lease-waiting.
 The engines' `[control]` lines are kept in the captured output, so a failing leg names the arm that
-ran. **CI runs this battery alone**; do not share a host with another suite when running it
-locally, and expect the lease-timing legs (3 and 5) to be the first to overrun if you do.
+ran; expect the lease-timing legs (3 and 5) to be the first to overrun if this battery ends up
+sharing a host with another suite despite the rule above.
 
 ## Connection and service configuration
 

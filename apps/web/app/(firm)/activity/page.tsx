@@ -1,6 +1,7 @@
 import { getTranslations } from "next-intl/server";
 import { PageHeader, PageShell } from "@/components/common/page-shell";
-import { ACTIVITY_HEADING_ID, ActivityFeed } from "@/components/firm/activity/activity-feed";
+import { ActivityFeed } from "@/components/firm/activity/activity-feed";
+import { ACTIVITY_HEADING_ID } from "@/lib/navigation/heading-ids";
 import { UNWIRED_AGENT_RECEIPT_KINDS } from "@/lib/firm/receipt-kinds";
 
 /**
