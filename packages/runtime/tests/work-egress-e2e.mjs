@@ -111,21 +111,78 @@ function childEnv(extra = {}) {
 
 function spawnServe(extra = {}) {
   const child = spawn(process.execPath, [serveScript], { env: childEnv(extra), stdio: ["ignore", "pipe", "pipe"] });
-  const state = { exited: false, banner: null };
+  const state = { exited: false, banner: null, serving: null, stdout: "", stderr: "" };
   child.on("exit", () => { state.exited = true; });
+  // LINE-BUFFERED, never per chunk — see waitBooted's header for why.
+  const ingest = (line) => {
+    // The SERVING bundle is v3's (#631 repointed claraWork v2 -> v3). v1 and v2 still print for the
+    // parked-run census; this captures the one the image dispatches, which is the digest the Work
+    // row, the receipt and every trace row record.
+    const m = /\[clara-runtime\] bundle clara-work\/v3 digest=([0-9a-f]{64})/.exec(line);
+    if (m && !state.banner) state.banner = m[1];
+    if (!state.serving) {
+      const serving = /\[clara-runtime\] serving .*/.exec(line);
+      if (serving) state.serving = serving[0];
+    }
+  };
+  let pending = "";
   child.stdout.setEncoding("utf8");
   child.stdout.on("data", (d) => {
-    const m = /\[clara-runtime\] bundle clara-work\/v3 digest=([0-9a-f]{64})/.exec(d);
-    if (m && !state.banner) state.banner = m[1];
+    state.stdout = `${state.stdout}${d}`.slice(-8000);
+    pending += d;
+    const lines = pending.split("\n");
+    pending = lines.pop() ?? "";
+    for (const line of lines) ingest(line);
+  });
+  child.stdout.on("end", () => {
+    if (pending) ingest(pending);
+    pending = "";
   });
   child.stderr.setEncoding("utf8");
   child.stderr.on("data", (d) => {
+    state.stderr = `${state.stderr}${d}`.slice(-8000);
     if (/FATAL|Error:/.test(d)) process.stderr.write(`[child] ${d}`);
   });
   return { child, state };
 }
 
-async function waitReady(deadlineMs = 90000) {
+/**
+ * THE ENGINE'S OWN BOOT, on top of `/ready` — the wave-2 CI boot race, applied here too.
+ *
+ * `/ready`'s world and control conjuncts are HEARTBEAT ROWS, and `clara.runtime_heartbeats` carries
+ * one row per component for the WHOLE ESTATE inside a 30s staleness window (lib/health.mjs), so an
+ * engine spawned onto a database a sibling leg was beating into answers 200 on the PREDECESSOR's
+ * beats. In `db-live-gates` every Wave-B leg shares one database and they run back to back, which
+ * is exactly that condition. Measured red-first in reports/wave2-ci-boot-race.md: an unfixed
+ * `/ready` returned 200 in 1124ms while the banner had never been logged.
+ *
+ * A per-CHUNK regex has the second half of the same defect: several console.log calls arrive in one
+ * event and one line can arrive split across two, so a banner cut by a chunk boundary reads as never
+ * logged. stdout is line-buffered below for that reason.
+ *
+ * WAITING IS NOT WEAKENING: every fact asserted about the engine before is still asserted — only
+ * after the process could actually have logged it. An engine whose world never starts still fails
+ * this wait, bounded, with its own stdout/stderr attached.
+ */
+async function waitBooted(engine, deadlineMs = 30000) {
+  const end = Date.now() + deadlineMs;
+  while (Date.now() < end) {
+    if (engine.state.serving && engine.state.banner) return;
+    if (engine.state.exited) break;
+    await sleep(100);
+  }
+  throw new Error(
+    `engine answered /ready but never finished its OWN boot within ${deadlineMs}ms`
+    + ` (/ready's world check is an estate-wide heartbeat — a predecessor stopped seconds ago satisfies it)`
+    + `\n  provenance line: ${engine.state.serving ?? "(never logged)"}`
+    + `\n  bundle banner:   ${engine.state.banner ?? "(never logged)"}`
+    + `\n--- child stdout (tail) ---\n${engine.state.stdout || "(none)"}`
+    + `\n--- child stderr (tail) ---\n${engine.state.stderr || "(none)"}`,
+  );
+}
+
+
+async function waitReady(deadlineMs = 90000, engine = null) {
   const end = Date.now() + deadlineMs;
   let healthy = false;
   while (Date.now() < end) {
@@ -133,7 +190,10 @@ async function waitReady(deadlineMs = 90000) {
       if (!healthy && (await fetch(`${BASE}/health`, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) })).ok) healthy = true;
       if (healthy) {
         const r = await fetch(`${BASE}/ready`, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
-        if (r.status === 200) return;
+        if (r.status === 200) {
+          if (engine) await waitBooted(engine);
+          return;
+        }
       }
     } catch {
       /* booting */
@@ -247,7 +307,7 @@ async function main() {
 
   const engine = spawnServe();
   try {
-    await waitReady();
+    await waitReady(90000, engine);
     assert.ok(engine.state.banner, "the world-start banner names the SERVING bundle digest");
     console.log(`[egress-e2e] engine ready; serving clara-work/v3 digest=${engine.state.banner}`);
 

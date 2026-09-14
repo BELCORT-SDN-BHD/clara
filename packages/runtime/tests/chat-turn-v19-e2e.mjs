@@ -20,7 +20,9 @@
 //      session, and typed particulars on `adjustment_basis`; the run posts one approved entry with
 //      the derived lines, one committed receipt, and one `clara.periodic_adjustments` row.
 //
-//   2. IT RUNS THE EXISTING `clara-work/v2` BODY BYTE FOR BYTE. Two independent measurements. The
+//   2. IT MINTS NO claraWork BUNDLE OF ITS OWN — it runs whatever body the IMAGE pins, byte for
+//      byte (written at `clara-work/v2`; `clara-work/v3` since #631 repointed the class in wave 3,
+//      and the assertions read the banner rather than a version). Two independent measurements. The
 //      Work's own `bundle.digest` equals the digest the process logged at world start — the same
 //      bundle a documentless journal entry is served by, no v3, no new closure. AND the run's
 //      model never saw the particulars: the child scans every run prompt for `adjustment_basis`,
@@ -129,27 +131,86 @@ function childEnv(extra = {}) {
 
 function spawnServe(extra = {}) {
   const child = spawn(process.execPath, [serveScript], { env: childEnv(extra), stdio: ["ignore", "pipe", "pipe"] });
-  const state = { exited: false, banner: null, particularsLeaked: false };
+  const state = { exited: false, banner: null, serving: null, particularsLeaked: false, stdout: "", stderr: "" };
   child.on("exit", () => {
     state.exited = true;
   });
+  // LINE-BUFFERED, never per chunk — see waitBooted's header for why.
+  const ingest = (line) => {
+    // THE SERVING BUNDLE, which at this tip is v3: #631 repointed `workflows.claraWork` v2 -> v3 in
+    // the same wave that merged this file. The claim the legs below make is UNCHANGED — a chat-
+    // admitted Work runs on the image's OWN claraWork bundle, whatever version that is, and the
+    // typed particulars never reach its prompt — so the digest is read from the banner rather than
+    // pinned to a version here.
+    const m = /\[clara-runtime\] bundle clara-work\/v3 digest=([0-9a-f]{64})/.exec(line);
+    if (m && !state.banner) state.banner = m[1];
+    if (!state.serving) {
+      const serving = /\[clara-runtime\] serving .*/.exec(line);
+      if (serving) state.serving = serving[0];
+    }
+    if (line.includes(PARTICULARS_LEAK_LINE)) {
+      state.particularsLeaked = true;
+      process.stderr.write(`[child] ${line}\n`);
+    }
+  };
+  let pending = "";
   child.stdout.setEncoding("utf8");
   child.stdout.on("data", (d) => {
-    const m = /\[clara-runtime\] bundle clara-work\/v2 digest=([0-9a-f]{64})/.exec(d);
-    if (m && !state.banner) state.banner = m[1];
-    if (d.includes(PARTICULARS_LEAK_LINE)) {
-      state.particularsLeaked = true;
-      process.stderr.write(`[child] ${d}`);
-    }
+    state.stdout = `${state.stdout}${d}`.slice(-8000);
+    pending += d;
+    const lines = pending.split("\n");
+    pending = lines.pop() ?? "";
+    for (const line of lines) ingest(line);
+  });
+  child.stdout.on("end", () => {
+    if (pending) ingest(pending);
+    pending = "";
   });
   child.stderr.setEncoding("utf8");
   child.stderr.on("data", (d) => {
+    state.stderr = `${state.stderr}${d}`.slice(-8000);
     if (/FATAL|Error:/.test(d)) process.stderr.write(`[child] ${d}`);
   });
   return { child, state };
 }
 
-async function waitReady(deadlineMs = 45000) {
+/**
+ * THE ENGINE'S OWN BOOT, on top of `/ready` — the wave-2 CI boot race, applied here too.
+ *
+ * `/ready`'s world and control conjuncts are HEARTBEAT ROWS, and `clara.runtime_heartbeats` carries
+ * one row per component for the WHOLE ESTATE inside a 30s staleness window (lib/health.mjs), so an
+ * engine spawned onto a database a sibling leg was beating into answers 200 on the PREDECESSOR's
+ * beats. In `db-live-gates` every Wave-B leg shares one database and they run back to back, which
+ * is exactly that condition. Measured red-first in reports/wave2-ci-boot-race.md: an unfixed
+ * `/ready` returned 200 in 1124ms while the banner had never been logged.
+ *
+ * A per-CHUNK regex has the second half of the same defect: several console.log calls arrive in one
+ * event and one line can arrive split across two, so a banner cut by a chunk boundary reads as never
+ * logged. stdout is line-buffered below for that reason.
+ *
+ * WAITING IS NOT WEAKENING: every fact asserted about the engine before is still asserted — only
+ * after the process could actually have logged it. An engine whose world never starts still fails
+ * this wait, bounded, with its own stdout/stderr attached.
+ */
+async function waitBooted(engine, deadlineMs = 30000) {
+  const end = Date.now() + deadlineMs;
+  while (Date.now() < end) {
+    if (engine.state.serving && engine.state.banner) return;
+    if (engine.state.exited) break;
+    await sleep(100);
+  }
+  throw new Error(
+    `engine answered /ready but never finished its OWN boot within ${deadlineMs}ms`
+    + ` (/ready's world check is an estate-wide heartbeat — a predecessor stopped seconds ago satisfies it)`
+    + `\n  provenance line: ${engine.state.serving ?? "(never logged)"}`
+    + `\n  bundle banner:   ${engine.state.banner ?? "(never logged)"}`
+    + `\n--- child stdout (tail) ---\n${engine.state.stdout || "(none)"}`
+    + `\n--- child stderr (tail) ---\n${engine.state.stderr || "(none)"}`,
+  );
+}
+
+
+async function waitReady(deadlineMs = 45000, engine = null) {
   const end = Date.now() + deadlineMs;
   let healthy = false;
   while (Date.now() < end) {
@@ -157,7 +218,10 @@ async function waitReady(deadlineMs = 45000) {
       if (!healthy && (await fetch(`${BASE}/health`, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) })).ok) healthy = true;
       if (healthy) {
         const r = await fetch(`${BASE}/ready`, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
-        if (r.status === 200) return;
+        if (r.status === 200) {
+          if (engine) await waitBooted(engine);
+          return;
+        }
       }
     } catch {
       /* booting */
@@ -268,7 +332,7 @@ async function main() {
     CLARA_V19_KNOWLEDGE: JSON.stringify(KNOWLEDGE_INPUT),
   });
   try {
-    await waitReady();
+    await waitReady(45000, engine);
     assert.ok(engine.state.banner, "the world-start banner names the serving bundle digest");
     console.log(`[v19-e2e] engine ready; serving bundle digest=${engine.state.banner}`);
 
@@ -352,13 +416,14 @@ async function main() {
     assert.equal(String(adjustment.rows[0].entry_id), String(done.work.result.entry_id), "and naming the entry beside it");
     console.log(`[v19-e2e] PASS 1: a real chatTurn_v19 turn admitted a periodic-adjustment Work and the reconciler ran it to a posted entry in ${latencyMs}ms`);
 
-    // ---- 2. the EXISTING clara-work/v2 body, byte for byte ---------------
+    // ---- 2. the IMAGE's OWN claraWork body, byte for byte (v2 when written, v3 now) ----------
     assert.equal(done.work.bundle?.digest, engine.state.banner,
-      "the Work records the digest the process logged — the SAME bundle a documentless journal entry runs on, no v3");
+      "the Work records the digest the process logged — the SAME claraWork bundle a documentless journal entry"
+      + " runs on, read from the banner rather than pinned to a version (wave-3: that bundle is now v3)");
     assert.equal(engine.state.particularsLeaked, false,
       "the run's model NEVER saw adjustment_basis, particulars_source, count_reference, inventory_account_code or obligation_kind "
       + "— the particulars ride a column the run does not read (the posted entry above is the positive control that the BASIS did reach it)");
-    console.log("[v19-e2e] PASS 2: the periodic-adjustment Work ran the unchanged clara-work/v2 bundle, and its particulars never reached the run's prompt");
+    console.log(`[v19-e2e] PASS 2: the periodic-adjustment Work ran the image's own unchanged claraWork bundle (${engine.state.banner.slice(0, 12)}…), and its particulars never reached the run's prompt`);
 
     // ---- 3. the governed capture, read through the HUMAN door ------------
     let records = [];
