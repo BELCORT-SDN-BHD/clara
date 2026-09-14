@@ -381,8 +381,12 @@ test("…and the chat lane settles on that transcript, not on a derived outcome 
 // (`work_accepted`), joins that kind to the C-19 terminal set, and still reaches v10's
 // byte-untouched body through the same import chain. Only the pin assertion moves, and v17 joins
 // the policy (c) roster.
-test("registry.ts pins chatTurn_v18 and still exports superseded v17/v16/v15/v14/v13/v12/v11/v10/v9/v8 (policy (c))", () => {
-  assert.equal(registryMod.workflows.chatTurn.name, "chatTurn_v18");
+// ...and v18 -> v19 at #643 + #644's shared successor. v19's body still reaches v10's
+// byte-untouched body through the same import chain. Only the pin assertion moves, and v18 joins
+// the policy (c) roster.
+test("registry.ts pins chatTurn_v19 and still exports superseded v18/v17/v16/v15/v14/v13/v12/v11/v10/v9/v8 (policy (c))", () => {
+  assert.equal(registryMod.workflows.chatTurn.name, "chatTurn_v19");
+  assert.equal(typeof registryMod.chatTurn_v18, "function");
   assert.equal(typeof registryMod.chatTurn_v17, "function");
   assert.equal(typeof registryMod.chatTurn_v16, "function");
   assert.equal(typeof registryMod.chatTurn_v15, "function");

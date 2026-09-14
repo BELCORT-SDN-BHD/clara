@@ -26,6 +26,7 @@ const entryChatTurnV15 = await import("../workflows/chatTurn.v15.ts");
 const entryChatTurnV16 = await import("../workflows/chatTurn.v16.ts");
 const entryChatTurnV17 = await import("../workflows/chatTurn.v17.ts");
 const entryChatTurnV18 = await import("../workflows/chatTurn.v18.ts");
+const entryChatTurnV19 = await import("../workflows/chatTurn.v19.ts");
 const entryAutoDraftV8 = await import("../workflows/autoDraft.v8.ts");
 const entryAutoDraftV7 = await import("../workflows/autoDraft.v7.ts");
 const entryAutoDraftV6 = await import("../workflows/autoDraft.v6.ts");
@@ -71,9 +72,16 @@ test("policy (c): autoDraft_v9 is still exported and reachable after the H-17 re
 // F-A6 PR-2 (the audited freeform read) has now moved the chatTurn pin again — v14 -> v15,
 // autoDraft untouched — and v14's own assertion becomes a policy (c) assertion in its turn.
 // P6-1 (Q8's four-card wire bump) moves it once more, v15 -> v16, autoDraft STILL untouched, and
-// v15 joins the policy (c) roster below on the same terms.
-test("registry pins chatTurn to the v18 export", () => {
-  assert.equal(registry.workflows.chatTurn, entryChatTurnV18.chatTurn_v18);
+// v15 joins the policy (c) roster below on the same terms. #623, and then #643 + #644's shared
+// successor, move it further still — v16 -> v17 -> v18 -> v19, autoDraft untouched throughout —
+// and v17/v18 each join the policy (c) roster in their turn.
+test("registry pins chatTurn to the v19 export", () => {
+  assert.equal(registry.workflows.chatTurn, entryChatTurnV19.chatTurn_v19);
+});
+
+test("registry still EXPORTS chatTurn_v18 so no parked v18 run is stranded (Appendix A policy (c))", () => {
+  assert.equal(typeof registry.chatTurn_v18, "function");
+  assert.equal(registry.chatTurn_v18, entryChatTurnV18.chatTurn_v18);
 });
 
 test("registry still EXPORTS chatTurn_v17 so no parked v17 run is stranded (Appendix A policy (c))", () => {
