@@ -28,7 +28,7 @@ let live = false;
 /** Run `fn` inside ONE transaction that is ALWAYS rolled back, so adversarial DDL against a
  *  shared view/table never leaks between cells or out of the suite (f-a7-pi.test.mjs's own
  *  idiom, reproduced locally — not exported from the shared fixtures). `rollback` → `reset
- *  role` → `reset all` before release (db-tests.md): one cell below does `SET ROLE` inside the
+ *  role` → `reset all` before release: one cell below does `SET ROLE` inside the
  *  transaction, and while ROLLBACK undoes a transactional SET ROLE on its own, resetting
  *  explicitly too is the house belt against a pooled client returning still impersonating. */
 async function inRolledBackTx(fn) {
@@ -497,8 +497,8 @@ test("debt-ATTACK2 (LOW-6) · agent_tasks_visible: the SAME probe leaks a firm-A
   // afterward -- a rollback discards that side effect along with anything else in the same
   // transaction. Both attack halves below run on ONE raw client, GUCs/role/claims set
   // SESSION-scoped (no wrapping BEGIN, so each statement autocommits and the witness INSERT
-  // genuinely persists), reset via the estate's own recipe (`reset role` -> `reset all`,
-  // db-tests.md) before the client is released back to the pool.
+  // genuinely persists), reset via the estate's own recipe (`reset role` -> `reset all`)
+  // before the client is released back to the pool.
   async function attackAgentTasksVisibleAsDave() {
     const client = await getPool().connect();
     try {

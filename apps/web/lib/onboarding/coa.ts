@@ -45,7 +45,7 @@
 //   `clara.list_coa_templates()`                 0150:1273 — platform + own-firm templates
 //
 // A read-flavoured RPC still rides `callDoor` as TRANSPORT but is NOT a governed act — each
-// is LABELLED as a read at its call site below, per apps/web/AGENTS.md's own rule.
+// is LABELLED as a read at its call site below, per the house's own rule.
 
 import { callDoor } from "@/lib/doors";
 import type { SessionTokenAccessor } from "@/lib/session";

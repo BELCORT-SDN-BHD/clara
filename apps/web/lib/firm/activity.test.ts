@@ -9,6 +9,7 @@ import {
   ACTIVITY_KINDS,
   agentReceiptKindOf,
   activityDocumentsHref,
+  activityReportsHref,
   activityJournalsHref,
   activityWorkHref,
   applyActivityUrlState,
@@ -314,11 +315,19 @@ test("activityWorkHref: the durable Work record's own address", () => {
   assert.equal(activityWorkHref("c1", "w1"), "/clients/c1/work/w1");
 });
 
-test("activityJournalsHref/activityDocumentsHref: the stable tab by default, and an `?entry=` deep link when an entry id is given", () => {
+test("activityJournalsHref/activityDocumentsHref/activityReportsHref: the stable tab by default, and the ITEM parameter when an id is given", () => {
   assert.equal(activityJournalsHref("c1"), "/clients/c1/journals");
   assert.equal(activityJournalsHref("c1", "e1"), "/clients/c1/journals?entry=e1");
   assert.equal(activityJournalsHref("c1", null), "/clients/c1/journals", "a null entry id is the same as none");
+  // #719 — Documents reads `?document=` (lib/documents/url-state.ts's DOCUMENT_PARAM), so the link
+  // that used to land on the tab now opens the row.
   assert.equal(activityDocumentsHref("c1"), "/clients/c1/documents");
+  assert.equal(activityDocumentsHref("c1", "d1"), "/clients/c1/documents?document=d1");
+  assert.equal(activityDocumentsHref("c1", null), "/clients/c1/documents");
+  // #719 — Reports reads `?report=`; no caller passes an id today (this feed carries no artifact
+  // id), which is why the builder degrades to the tab rather than fabricating one.
+  assert.equal(activityReportsHref("c1"), "/clients/c1/reports");
+  assert.equal(activityReportsHref("c1", "r1"), "/clients/c1/reports?report=r1");
 });
 
 test("primaryActivityHref: prefers the Work link over an object link when both are present", () => {
@@ -333,7 +342,24 @@ test("primaryActivityHref: falls back to the object's tab when there is no Work,
   );
   assert.equal(
     primaryActivityHref({ client_id: "c1", work_id: null, object_kind: "document", object_id: "d1" }),
+    "/clients/c1/documents?document=d1",
+  );
+  // A document-kind row the door left without an object_id still lands on the tab.
+  assert.equal(
+    primaryActivityHref({ client_id: "c1", work_id: null, object_kind: "document", object_id: null }),
     "/clients/c1/documents",
+  );
+});
+
+test("#719 — primaryActivityHref: a `report`-kind row links to the Reports tab, the only destination the feed can name for it", () => {
+  assert.equal(
+    primaryActivityHref({ client_id: "c1", work_id: null, object_kind: null, object_id: null, kind: "report" }),
+    "/clients/c1/reports",
+  );
+  // Still nothing without a client to scope it to.
+  assert.equal(
+    primaryActivityHref({ client_id: null, work_id: null, object_kind: null, object_id: null, kind: "report" }),
+    null,
   );
 });
 

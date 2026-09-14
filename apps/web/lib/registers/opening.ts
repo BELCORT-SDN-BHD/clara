@@ -1,6 +1,6 @@
 // Opening balances & carry-down — T2. Reads plus the one read-flavoured RPC
 // (`get_opening_dryrun`, transport via `callDoor` but NOT a governed act —
-// apps/web/AGENTS.md's own carve-out). Governed writes live in
+// a read-flavoured-RPC carve-out). Governed writes live in
 // ./opening-doors.ts; shared types in ./opening-types.ts. Every table read
 // below is a plain firm-scoped relation with a direct `clara_authenticated`
 // SELECT policy (census-confirmed via `pg_policy`, not assumed) — no bespoke
@@ -157,7 +157,7 @@ export function buildEntryRevisionsMap(rows: OpeningEntryRevisionRow[]): Record<
 }
 
 /** clara.get_opening_dryrun(p_seed) — viewer+. Read-flavoured RPC (labelled
- *  as a read at this call site, per apps/web/AGENTS.md). */
+ *  as a read at this call site). */
 export function getOpeningDryrun(session: SessionTokenAccessor, seedId: string): Promise<OpeningDryrun> {
   return callDoor<OpeningDryrun>("get_opening_dryrun", { p_seed: seedId }, { session });
 }

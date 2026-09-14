@@ -374,7 +374,7 @@ export async function handleCheckoutPost(
         return await resumeCheckout(liveSession, proof.origin, deps, env);
       }
       // Every other refusal: the DB's own considered answer, carried verbatim —
-      // code and sentence untouched, never retried (apps/web/AGENTS.md).
+      // code and sentence untouched, never retried.
       return checkoutRefusal(proof.origin, {
         kind: "refused",
         code: err.code ?? "CLR",

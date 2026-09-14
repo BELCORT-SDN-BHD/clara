@@ -77,7 +77,7 @@ export type DoDispatchResult =
  * and the caller navigates to that client's real workspace; the interview start returns the
  * runtime's own run id and the caller opens the rail, where the run renders itself. A
  * refusal is NOT caught here — `callDoor`'s `DoorRefusal` propagates to the palette, which
- * renders it verbatim (apps/web/AGENTS.md).
+ * renders it verbatim.
  */
 export async function runDoAction(
   spec: DoActionSpec,

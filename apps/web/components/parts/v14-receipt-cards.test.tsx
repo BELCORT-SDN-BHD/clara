@@ -12,8 +12,8 @@
 // renders the chip plus some incidental text would otherwise still match.
 //
 // It also asserts what must NOT appear: a fabricated figure, a broken link, or the
-// literal "null"/"undefined" from a nullable wire field. apps/web/AGENTS.md — "the
-// UI never invents a number, verb, receipt, or link."
+// literal "null"/"undefined" from a nullable wire field — "the UI never
+// invents a number, verb, receipt, or link."
 //
 // INSTRUMENT: test/hookHarness.ts's `renderComponent` (a real react-dom/client
 // mount) plus test/domInspect.ts, which is what makes `getAttribute("href")`

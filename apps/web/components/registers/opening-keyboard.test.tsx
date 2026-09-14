@@ -1,7 +1,7 @@
 // GATE (c) — keyboard-walk tests for T2's opening-seed door dialogs (owner
 // ruling Q7). Uses CancelOpeningSeedDialog as the drive vehicle (the
 // smallest complete door dialog this train ships — one required Textarea) to
-// prove the two laws apps/web/AGENTS.md's dialog-testing section names: a
+// prove the two dialog-testing laws: a
 // real refusal surfaces in the PERSISTENT banner OUTSIDE the dialog after it
 // closes (never retried, never shown only inside the now-closed dialog), and
 // Cancel via DialogClose removes the dialog from `document.body` entirely

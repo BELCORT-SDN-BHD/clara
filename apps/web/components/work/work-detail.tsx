@@ -90,8 +90,12 @@ import {
 } from "@/lib/work/types";
 import type { AgentInterruptionRow } from "@/lib/journals/types";
 import type { SessionTokenAccessor } from "@/lib/session";
+import { WORK_HEADING_ID } from "@/lib/navigation/heading-ids";
 
-export const WORK_HEADING_ID = "work-detail-heading";
+/** Declared in a plain module (#733's sweep) and re-exported here: the server page renders this
+ *  id and this client component focuses it, so a plain value must not cross the boundary above.
+ *  See `lib/navigation/heading-ids.ts`. */
+export { WORK_HEADING_ID } from "@/lib/navigation/heading-ids";
 
 /** The status words `clara.accounting_work.status` commits to. A checked lookup,
  *  never an interpolated `t()` key: a status outside this set renders through the

@@ -59,11 +59,15 @@ import { AdmissionCapacityPanel } from "./admission-capacity-panel";
 import { IsolationBanner } from "./isolation-banner";
 import { SupportCaseSheet } from "./support-case-sheet";
 import { useOperatorQueue } from "./use-operator-queue";
+import { OPERATOR_HEADING_ID } from "@/lib/navigation/heading-ids";
 
 /** The `<h1>` id `app/(firm)/operator/page.tsx` renders — the focus fallback when the row a Sheet
  *  was opened from is gone by the time it closes (the `WORK_HEADING_ID`/`ACTIVITY_HEADING_ID`
- *  idiom, read by id because the heading belongs to the server component above this one). */
-export const OPERATOR_HEADING_ID = "operator-support-heading";
+ *  idiom, read by id because the heading belongs to the server component above this one).
+ *
+ *  Declared in a plain module (#733's sweep) and re-exported here — see
+ *  `lib/navigation/heading-ids.ts`. */
+export { OPERATOR_HEADING_ID } from "@/lib/navigation/heading-ids";
 
 export function OperatorSupportConsole() {
   const t = useTranslations("Operator");

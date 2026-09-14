@@ -1,7 +1,7 @@
 // T7 reads — the coding-lane surface's own read set. Every read-flavoured RPC
 // (coding_lane/list_coding_lanes/list_uncoded_filings/get_lint_finding/
-// get_open_question) rides `callDoor` as TRANSPORT ONLY per apps/web/AGENTS.md
-// ("a read-flavoured RPC still rides callDoor... but is NOT a governed act") —
+// get_open_question) rides `callDoor` as TRANSPORT ONLY ("a read-flavoured
+// RPC still rides callDoor... but is NOT a governed act") —
 // no confirmation UI, no sticky-refusal semantics; every table/view read rides
 // `getRows` per the house convention. See lib/coding/types.ts for the full
 // grounding citations (2026-08-28 census).
@@ -87,7 +87,7 @@ export function getOpenQuestionDetail(questionId: string, opts: Opts = {}): Prom
  *  human-reachable read of a sweep run at all: neither `sweep_runs` nor
  *  `sweep_run_items` carries a human SELECT policy (types.ts's own
  *  `clara.sweep_runs` block). Rides `callDoor` as TRANSPORT ONLY — a read, never
- *  a governed act (apps/web/AGENTS.md), so no confirmation UI and no
+ *  a governed act, so no confirmation UI and no
  *  sticky-refusal semantics attach to it; the ACT half on this run is
  *  `acknowledgeSweepRun` in ./doors.ts.
  *

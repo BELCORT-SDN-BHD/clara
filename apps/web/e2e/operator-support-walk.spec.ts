@@ -96,6 +96,11 @@ test("the queue carries all three arms, each with its own state, under a VISIBLE
   await expect(page.getByText(OPERATOR.problemFirmName)).toBeVisible();
   await expect(page.getByText("Needs operator attention")).toBeVisible();
 
+  // #733's sweep — the server-rendered `<h1>` carries the literal id the console falls back to
+  // when a Sheet closes onto a row that is gone. See `lib/navigation/heading-ids.ts` for why a
+  // plain value must not cross the `"use client"` boundary to get here.
+  await expect(page.locator("h1#operator-support-heading")).toBeVisible();
+
   // The operator's own estate-policy control rides the same destination and the same wall.
   await expect(page.getByRole("heading", { name: "Admission capacity" })).toBeVisible();
   await expect(page.getByText(/Limit: Unlimited/)).toBeVisible();

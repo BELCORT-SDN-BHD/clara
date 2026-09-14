@@ -84,8 +84,8 @@ export function ScopeSwitcher({
    *  stands in, never the id. */
   clientName: string | null;
   firmName: string;
-  /** The blessed singleton by default (apps/web/AGENTS.md's session-accessor
-   *  law); a cell may inject its own. Never a per-render object literal. */
+  /** The blessed singleton by default; a cell may inject its own. Never a
+   *  per-render object literal (the session-accessor law). */
   session?: SessionTokenAccessor;
   /**
    * OPTIONALLY CONTROLLED, the same shape `components/ui/sidebar.tsx`'s own

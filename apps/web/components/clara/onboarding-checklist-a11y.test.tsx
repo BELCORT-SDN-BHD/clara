@@ -88,6 +88,36 @@ function App() {
   });
 }
 
+/**
+ * Settle until `condition` holds — BOUNDED BY PASSES, NEVER BY THE CLOCK (#706).
+ *
+ * WHAT IT REPLACES. This file drove the card with fixed tick counts (`for (i < 6) await
+ * h.settle()`) and asserted immediately afterwards. Each `settle()` is one `act()`-wrapped
+ * macrotask flush, so a tick count is a GUESS about how many flushes the mount/door chain takes —
+ * green while the guess holds, red the moment a chain grows a link or a loaded host reorders the
+ * work. Polling the condition removes the guess in both directions: it stops the instant the state
+ * is there, and keeps going when one more pass was needed.
+ *
+ * The bound is on WORK, not on wall-clock time, so a red here means the state never arrived — it
+ * is never a statement about how busy the machine was. Post-unmount drains below keep their fixed
+ * counts deliberately: there is no condition to wait for when the point is to let pending work
+ * finish before the next mount.
+ */
+const MAX_SETTLE_PASSES = 200;
+
+async function settleUntil(
+  h: { settle: () => Promise<void> },
+  condition: () => boolean,
+  label: string,
+): Promise<void> {
+  for (let pass = 0; pass < MAX_SETTLE_PASSES; pass += 1) {
+    if (condition()) return;
+    await h.settle();
+  }
+  if (condition()) return;
+  throw new Error(`${label} never arrived within ${MAX_SETTLE_PASSES} settle passes (a bound on WORK, not on wall-clock time — read a red here as a stall, never as a slow host)`);
+}
+
 test("the REAL full-screen thread route (card + Commit door dialog OPEN) has zero a11y violations, including heading-order", async () => {
   await withMockedEnv(
     async (u) => {
@@ -106,7 +136,7 @@ test("the REAL full-screen thread route (card + Commit door dialog OPEN) has zer
       const body = (globalThis as unknown as { document: { body: { appendChild: (c: unknown) => void } } }).document.body;
       body.appendChild(h.container);
       try {
-        for (let i = 0; i < 5; i++) await h.settle();
+        await settleUntil(h, () => /Commit onboarding/.test(h.text()), "the plan loading far enough to show the commit door");
         assert.match(h.text(), /Commit onboarding/, "the plan must have loaded far enough to show the commit door");
 
         const collapsedViolations = checkAccessibility(body as never);
@@ -119,7 +149,7 @@ test("the REAL full-screen thread route (card + Commit door dialog OPEN) has zer
         const trigger = h.find((n) => n.tagName === "BUTTON" && textOf(n) === "Commit onboarding");
         assert.ok(trigger, "the Commit-onboarding dialog trigger must render");
         await h.fireEvent(trigger!, "click");
-        for (let i = 0; i < 6; i++) await h.settle();
+        await settleUntil(h, () => findIn(body as never, (n) => n.tagName === "TEXTAREA") !== null, "the open dialog's own attestation field");
 
         // N4 fix: the discriminating "did it actually open" proof — the
         // attestation field only exists inside the OPEN dialog's children.

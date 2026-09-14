@@ -16,6 +16,44 @@ function applyAttribute(effectiveReduced: boolean): void {
   document.documentElement.setAttribute(MOTION_DATA_ATTRIBUTE, motionAttributeValue(effectiveReduced));
 }
 
+/** #715 — THE ONE CHANNEL a successful save tells the mounted sync about itself on.
+ *
+ *  The attribute this component owns was applied at MOUNT and never again, so
+ *  `/settings/account`'s Save wrote the durable row, the person saw "Preferences
+ *  saved" — and the product kept animating exactly as before until the next
+ *  navigation. The obvious repair (have the section write `data-motion` itself)
+ *  would have put a SECOND writer on the attribute, and the second writer would
+ *  have had to re-derive "…unless the OS is already asking for reduced motion",
+ *  which is the one rule this pair exists to keep in one place
+ *  (`resolveEffectiveReducedMotion`). So the section publishes the VALUE it just
+ *  saved and this component — still mounted, still holding the live `matchMedia`
+ *  handle — recomputes, exactly as it does when the OS setting changes.
+ *
+ *  A `window` event rather than a module-level callback because the two live in
+ *  different trees: the sync is mounted once in `app/layout.tsx`, the section is
+ *  rendered by a route far below it, and neither can hold a ref to the other. */
+export const MOTION_PREFERENCE_EVENT = "clara:motion-preference";
+
+/** Announce a preference that has just been SAVED (never a draft — the attribute
+ *  must not follow a radio the person may still reset). A no-op wherever there is
+ *  no window; the mount-time read is always the authority underneath it. */
+export function publishMotionPreference(preference: MotionPreference): void {
+  if (typeof window === "undefined" || typeof window.dispatchEvent !== "function") return;
+  window.dispatchEvent(new CustomEvent<MotionPreference>(MOTION_PREFERENCE_EVENT, { detail: preference }));
+}
+
+/** The same paint cache the mount-time read writes — see this component's header
+ *  for why it is a cache and never the authority. `undefined` (no row ever saved)
+ *  clears it, exactly as "system" does: both mean "the OS query alone". */
+function cachePreference(preference: MotionPreference | undefined): void {
+  try {
+    if (preference === "reduced") window.localStorage.setItem(MOTION_LOCAL_STORAGE_KEY, "reduced");
+    else window.localStorage.removeItem(MOTION_LOCAL_STORAGE_KEY);
+  } catch {
+    // Best-effort cache only.
+  }
+}
+
 /**
  * Mounted ONCE in the root layout (app/layout.tsx), beside
  * `<SessionTokenBridge />` — see that component's own header for why a small,
@@ -80,15 +118,7 @@ export function MotionPreferenceSync(): null {
         const prefs = await getMyPreferences();
         if (cancelled) return;
         storedPreferenceRef.current = prefs.interface.motion;
-        try {
-          if (prefs.interface.motion === "reduced") {
-            window.localStorage.setItem(MOTION_LOCAL_STORAGE_KEY, "reduced");
-          } else {
-            window.localStorage.removeItem(MOTION_LOCAL_STORAGE_KEY);
-          }
-        } catch {
-          // Best-effort cache only.
-        }
+        cachePreference(prefs.interface.motion);
         recompute();
       } catch {
         // No session, no saved row, or a transport failure — "system" (the
@@ -97,9 +127,22 @@ export function MotionPreferenceSync(): null {
       }
     })();
 
+    // #715 — A SAVED PREFERENCE APPLIES NOW, not on the next navigation. Same
+    // `recompute`, so the OS query still wins the way it always did: publishing
+    // "system" while the OS asks for reduced motion leaves the attribute reduced.
+    const onPublished = (evt: Event) => {
+      const next = (evt as CustomEvent<MotionPreference>).detail;
+      if (next !== "system" && next !== "reduced") return;
+      storedPreferenceRef.current = next;
+      cachePreference(next);
+      recompute();
+    };
+    window.addEventListener(MOTION_PREFERENCE_EVENT, onPublished);
+
     return () => {
       cancelled = true;
       mql.removeEventListener("change", recompute);
+      window.removeEventListener(MOTION_PREFERENCE_EVENT, onPublished);
     };
   }, []);
 

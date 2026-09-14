@@ -278,7 +278,7 @@ test("WALL: an ADMIN inviting an owner gets invite_member's CLR04 verbatim, and 
 
       // THE PORTAL-CAPABLE HELPER, not `h.fireEvent`: an open Base UI dialog's
       // content is portalled to `document.body`, a delegation root `fireEvent`
-      // never reaches (apps/web/AGENTS.md's first dialog law). `setFieldValue`
+      // never reaches (Base UI's first dialog law). `setFieldValue`
       // invokes the live React `onChange` on the real node.
       const email = findIn(body, (n) => n.tagName === "INPUT" && attrOf(n, "type") === "email");
       const select = findIn(body, (n) => n.tagName === "SELECT");

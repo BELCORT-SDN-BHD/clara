@@ -20,7 +20,7 @@ export async function tableApplied() {
 
 /** Run `fn` inside ONE transaction that is ALWAYS rolled back (f-a7-pi.test.mjs's / the debt
  *  read-surfaces suite's own idiom) -- adversarial DDL/DML against a shared table never leaks
- *  between cells. `rollback` -> `reset role` -> `reset all` before release (db-tests.md). */
+ *  between cells. `rollback` -> `reset role` -> `reset all` before release. */
 export async function inRolledBackTx(fn) {
   const client = await getPool().connect();
   try {

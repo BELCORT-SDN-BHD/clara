@@ -4,8 +4,13 @@
 # Credentials are supplied at runtime; the root .dockerignore excludes local secrets.
 #
 # Pin the base, extractor and engine; retain the finished image by digest for replay.
-# Base: node:20-bookworm-slim. The digest below selects the actual image.
-FROM node@sha256:2cf067cfed83d5ea958367df9f966191a942351a2df77d6f0193e162b5febfc0 AS runner
+# Base: node:22.23.2-bookworm-slim, matching the estate's Node 22 line (#616, #686).
+# Digest resolved fresh on 2026-09-14 against the official node image via the registry
+# API, from tag 22.23.2-bookworm-slim (#691 — Node 20 reached end-of-life 2026-04-30).
+# Debian stays bookworm-slim under both Node majors, so the poppler-utils/xz-utils pins
+# below were re-checked against the current bookworm archive (main + bookworm-security)
+# on the same date; both still resolve unchanged.
+FROM node@sha256:83f487e0a63425e5b4d146fb5e5be574bcbe1b7b843d3ebafdd95eaf7767a7e5 AS runner
 ENV NODE_ENV=production
 WORKDIR /app
 

@@ -135,7 +135,7 @@ export type InviteMailContent = { subject: string; html: string };
  * The mail body. English only and deliberately NOT routed through next-intl:
  * this string is composed on the server for a recipient who has no session, no
  * locale cookie and — by definition — no account yet, so there is no locale to
- * read. next-intl binds the app's rendered UI (apps/web/AGENTS.md); it is not a
+ * read. next-intl binds the app's rendered UI; it is not a
  * mail templating system, and pretending the courier can pick the invitee's
  * language would be inventing a fact. Recorded here so a later i18n sweep reads
  * this as a known, reasoned boundary rather than a miss.

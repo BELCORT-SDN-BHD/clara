@@ -7,7 +7,7 @@
 // Mounts the REAL surfaces (renderComponent, fetch mocked only) — never
 // renderToStaticMarkup for anything that self-fetches via useHydratedPart.
 // Every dialog interaction rides `clickButton`/`setFieldValue` from
-// test/hookHarness.ts (apps/web/AGENTS.md's two dialog-testing laws) —
+// test/hookHarness.ts (the two dialog-testing laws) —
 // `h.fireEvent` never touches anything inside an open dialog's portal here.
 
 import { test } from "node:test";

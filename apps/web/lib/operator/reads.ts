@@ -4,7 +4,7 @@
 // (`?kind=&settled=&case=<kind>:<id>`), and the two pure judgements the surface is built on: WHICH
 // state a read outcome is, and WHICH act (if any) the estate actually supports for a case.
 //
-// GROUNDING, at the LIVE bodies (apps/web/AGENTS.md: "a migration citation must chase the LIVE
+// GROUNDING, at the LIVE bodies ("a migration citation must chase the LIVE
 // body"), 0188 §1-§3:
 //   clara.list_operator_support_queue(p_include_settled boolean default false)
 //     -> SETOF the twenty columns `SupportQueueRow` names below, ordered `(occurred_at desc,

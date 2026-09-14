@@ -4,7 +4,7 @@
 // `clara._fa_asset_json` — cost/accumulated/NBV are DB-projected as-of TODAY (hard
 // constraint 2: never recomputed here).
 //
-// T3 (port wave, verb census at the live 0140 catalog — apps/web/AGENTS.md's "chase
+// T3 (port wave, verb census at the live 0140 catalog — the "chase
 // the LIVE body" rule): the write surface this file was missing. Every door below is
 // bookkeeper+ (`clara._human_ctx(clara.role_rank('bookkeeper'))`), takes a required
 // `p_op_key` (CLR10 if blank), and returns the same `clara._finish_op` envelope shape

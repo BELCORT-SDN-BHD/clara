@@ -192,6 +192,13 @@ function attachClaraStream(
             .catch((err: unknown) => claraThreadStore.hydrateFailed(threadId, (err as Error).message));
         }
       },
+      // #734 — THE SECOND CLASSIFICATION, and the reason this hook can make one at all.
+      // Everything this callback receives arrived intact and was refused by THIS TAB's
+      // own rendering, so it is recorded as a render fault and nothing else: the send is
+      // not marked failed, the turn is not retired, and the read goes on (the stream
+      // never stopped — see `deliverEvent` in ./stream.ts). What still reaches the
+      // `.catch` arms below is what it always should have been: a transport failure.
+      onSubscriberFault: () => claraThreadStore.markRenderFault(threadId),
       onReconnectAttempt: ({ attempt }) => claraThreadStore.markReconnectAttempt(threadId, attempt),
       onStreamEndedUnexpectedly: () => claraThreadStore.markStreamEndedUnexpectedly(threadId),
       onGiveUp: () => claraThreadStore.markConnectionLost(threadId),

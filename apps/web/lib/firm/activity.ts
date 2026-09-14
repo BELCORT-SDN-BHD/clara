@@ -33,24 +33,29 @@
 // page incorrectly without ever being wrong about one row. `callDoor` is the transport, exactly as
 // a read-flavoured RPC always rides it (AGENTS.md).
 //
-// THE OBJECT LINK BUILDERS ARE HONEST ABOUT WHAT THEY CAN NAME. `workDetailHref` names ONE durable
-// Work record — that route genuinely exists (lib/navigation/tree.ts). Journals and Documents have
-// NO per-object or per-tab URL parameter today (measured: neither
-// components/journals/journals-workbench.tsx nor the Documents page reads
-// `useSearchParams`/`searchParams` at all) — so an entry/document link below lands on the STABLE
-// OBJECT PAGE, not the specific row, and says so in its own name (`activityJournalsHref`, not
-// `activityEntryHref`). Inventing a query parameter neither page consumes would be a link that
-// silently does nothing; this module does not do that. There is no `activityReportsHref`:
+// THE OBJECT LINK BUILDERS ARE HONEST ABOUT WHAT THEY CAN NAME, and since #719 what they can name
+// is the ITEM. `workDetailHref` names ONE durable Work record — that route genuinely exists
+// (lib/navigation/tree.ts). Journals reads `?entry=` (#634) and Documents reads `?document=`
+// (#719's Documents half, lib/documents/url-state.ts), so an entry/document link below now lands on
+// the ROW, not merely the tab. That is a change of fact, not of posture: this module still refuses
+// to mint a parameter no page consumes, and each builder still degrades to the stable tab when the
+// feed carries no id for the row.
+//
+// `activityReportsHref` NAMES THE TAB, AND CAN NAME AN ITEM THE DAY THE FEED CARRIES ONE. Reports
+// reads `?report=<artifact id>` since #719. What the feed does not carry is an ARTIFACT id:
 // `object_kind` (the only field `primaryActivityHref` branches on below `work_id`) is one of
-// `'entry' | 'document' | 'resolution' | null` — never `'report'` — so a report-object link
-// builder would have no caller that could ever reach it; `report` is a FILTER kind on the union
-// (`report_agent` receipts), not an object kind this feed can address a specific row of.
+// `'entry' | 'document' | 'resolution' | null` — never `'report'` — and a `report`-kind row is an
+// agent receipt whose `receipt_id` is a receipt, not an artifact. So the builder takes the id as an
+// OPTIONAL argument and its one caller passes none: the link is honest about landing on the tab,
+// and nothing here fabricates an artifact id to make it look better than it is.
 
 import { callDoor } from "@/lib/doors";
 import { isKnownWorkPurpose } from "@/lib/work/purpose-label";
 import type { SessionTokenAccessor } from "@/lib/session";
 import { isClientIdShape } from "@/lib/client-id";
 import { isKnownAgentReceiptKind } from "@/lib/firm/receipt-kinds";
+import { DOCUMENT_PARAM } from "@/lib/documents/url-state";
+import { REPORT_PARAM } from "@/lib/reports/url-state";
 import {
   ACCOUNTING_ITEMS,
   CLIENT_NAV,
@@ -134,6 +139,48 @@ export function isKnownActivityStatus(value: string): value is ActivityStatus {
  *  keeps labelling a row a future migration stopped calling an agent act. */
 export function isSweepReceiptRow(row: Pick<ActivityRow, "source" | "event_type" | "kind">): boolean {
   return row.source === "event" && row.event_type === "sweep.run_completed" && row.kind === "agent";
+}
+
+/** #742 — THE DOCUMENT PIPELINE'S OWN FOUR EVENT TYPES, whose machine writers pass NO actor.
+ *
+ *  Measured at the writers, not guessed: `_append_event`'s fourth argument IS the actor, and all
+ *  four of these pass null — `document.extraction_completed` (persist_document_extraction),
+ *  `document.classified` and the pipeline's own `open_question.opened` (classify_document), and
+ *  `document.invoice_facts_completed` (the witness writer). The result is a timeline row the web
+ *  rendered as "—", which fails C77.3 (attribution present on every row) for events that DID have
+ *  an author — Clara.
+ *
+ *  THE DISCRIMINATOR IS THE NULL ACTOR, AND IT IS SUFFICIENT. The same four types can also be
+ *  written by a HUMAN — `set_document_kind` is the human door for a classification, and it passes
+ *  the acting member AND marks its payload `source: 'human'`. This feed never carries `payload` on
+ *  the wire (see this file's header), so the payload marker is unreadable here — but it is also
+ *  unnecessary: the human door's row carries a real actor, so `actor === null` already separates
+ *  the two arms exactly. Nothing below invents a uuid, and no migration is needed.
+ *
+ *  WHY NOT `kind` TOO (the belt `isSweepReceiptRow` wears). A kept sweep row's whole recognition
+ *  rests on 0183 having RELABELLED it to `kind='agent'`, so checking the label it was given is a
+ *  real second signal there. These four carry no such recut: they sit under the door's ordinary
+ *  'documents' grouping alongside human-written document events, so `kind` would exclude nothing
+ *  and would only add a second thing to break. */
+export const PIPELINE_SYSTEM_EVENT_TYPES: readonly string[] = [
+  "document.extraction_completed",
+  "document.classified",
+  "document.invoice_facts_completed",
+  "open_question.opened",
+];
+
+export function isPipelineSystemRow(row: Pick<ActivityRow, "source" | "event_type">): boolean {
+  return row.source === "event" && row.event_type !== null && PIPELINE_SYSTEM_EVENT_TYPES.includes(row.event_type);
+}
+
+/** THE ONE SYSTEM-MARKER RULE the actor cell asks (#728 finding 1, extended by #742). A row is
+ *  Clara's own act when the door left `actor` null AND the row is one of the shapes whose writer is
+ *  known to be a machine. The null check is INSIDE this predicate rather than left to each caller:
+ *  it is the half that makes the claim true, and a caller that forgot it would mislabel a
+ *  human-written `document.classified` row as the system. */
+export function isSystemActorRow(row: Pick<ActivityRow, "source" | "event_type" | "kind" | "actor">): boolean {
+  if (row.actor !== null) return false;
+  return isSweepReceiptRow(row) || isPipelineSystemRow(row);
 }
 
 /** `clara.get_activity_event`'s return: the same shape, plus the detail-only fields the door adds
@@ -428,11 +475,25 @@ export function activityJournalsHref(clientId: string, entryId?: string | null):
   return entryId ? `${base}?entry=${entryId}` : base;
 }
 
-/** `/clients/:clientId/documents` — the Documents tab; see the Journals link's own note. */
-export function activityDocumentsHref(clientId: string): string {
+/** `/clients/:clientId/documents`, or `/clients/:clientId/documents?document=<id>` when a document
+ *  is named — the Documents tab, and since #719 the document itself: the workbench reads that
+ *  parameter and opens the row's detail on arrival (lib/documents/url-state.ts, which owns the
+ *  parameter's NAME and its shape-check; this builder writes the same key rather than a second
+ *  spelling of it). No id ⇒ the stable tab, exactly as before. */
+export function activityDocumentsHref(clientId: string, documentId?: string | null): string {
   const item = CLIENT_NAV.find((i) => i.id === "documents");
   if (!item) throw new Error("activityDocumentsHref: the documents client-nav item is missing from the registry");
-  return clientNavHref(clientId, item);
+  const base = clientNavHref(clientId, item);
+  return documentId ? `${base}?${DOCUMENT_PARAM}=${documentId}` : base;
+}
+
+/** `/clients/:clientId/reports`, or `/clients/:clientId/reports?report=<artifact id>` when one is
+ *  named — see this file's header for why no caller passes an id today. */
+export function activityReportsHref(clientId: string, reportId?: string | null): string {
+  const item = CLIENT_NAV.find((i) => i.id === "reports");
+  if (!item) throw new Error("activityReportsHref: the reports client-nav item is missing from the registry");
+  const base = clientNavHref(clientId, item);
+  return reportId ? `${base}?${REPORT_PARAM}=${reportId}` : base;
 }
 
 /** Resolve the ONE primary link a row should offer, honouring the priority the spec's own
@@ -442,12 +503,19 @@ export function activityDocumentsHref(clientId: string): string {
  *  (`object_id`), the same `?entry=` shape the correction-chain links use, so a plain posting and
  *  a corrected one deep-link the same way. */
 export function primaryActivityHref(
-  row: Pick<ActivityRow, "client_id" | "work_id" | "object_kind" | "object_id">,
+  row: Pick<ActivityRow, "client_id" | "work_id" | "object_kind" | "object_id"> & { kind?: ActivityKind },
 ): string | null {
   if (!row.client_id) return null;
   if (row.work_id) return activityWorkHref(row.client_id, row.work_id);
   if (row.object_kind === "entry") return activityJournalsHref(row.client_id, row.object_id);
-  if (row.object_kind === "document") return activityDocumentsHref(row.client_id);
+  // #719 — the document's own id, the same way the entry arm names the entry's. A document-kind row
+  // whose `object_id` is null (the door can leave it so) still lands on the tab.
+  if (row.object_kind === "document") return activityDocumentsHref(row.client_id, row.object_id);
+  // #719 — a `report`-kind row is the one group with no object arm at all (it is an agent receipt
+  // over the report lane), so before this it offered no link whatsoever. The Reports tab is the
+  // honest destination: it is where the thing the receipt is about lives, and the builder above
+  // says plainly that it is naming the tab rather than an artifact.
+  if (row.kind === "report") return activityReportsHref(row.client_id);
   return null;
 }
 

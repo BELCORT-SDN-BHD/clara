@@ -28,7 +28,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 /** Poll (bounded) until backend `pid` is observably WAITING on a lock held by `blockerPid`, and
  *  return the wait_event that proves WHICH lock. The house idiom (p4t2-approval.test.mjs,
  *  work-cancel.test.mjs), copied locally rather than cross-imported from another area's helper —
- *  db-tests.md: "never a sleep, which proves nothing about whether the block actually happened". */
+ *  never a sleep, which proves nothing about whether the block actually happened. */
 async function waitBlockedByOrThrow(pid, blockerPid, timeoutMs = 10_000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {

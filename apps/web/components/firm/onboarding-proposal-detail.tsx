@@ -72,7 +72,7 @@ export function OnboardingProposalDetail({
           the tree). An `onboarding_proposed` question exists precisely because the document
           has NO client yet, so there is no owning tab to link to. A `/documents/<id>` href
           would be a link to Next's 404, and "the UI never invents a link"
-          (apps/web/AGENTS.md) — so the row says where the document is instead. */}
+          — so the row says where the document is instead. */}
       <p className="text-xs text-muted-foreground">{t("documentNotAddressable")}</p>
       <div className="flex flex-wrap gap-2">
         {/* 裁-17 ④ — "ask Clara about this", carrying THIS row's context into the rail. The

@@ -14,7 +14,7 @@
 // `clara.caller_context` from two Server Component layouts and one Route Handler.
 //
 // WHY NOT THE BLESSED SINGLETON — and why this is not a house-law exception.
-// `apps/web/AGENTS.md` says the session token comes ONLY from the blessed
+// The house rule is that the session token comes ONLY from the blessed
 // `sessionTokenAccessor` singleton (lib/session-accessor.ts). That singleton is
 // the BROWSER lane's: its `tokenFn` is installed exactly once, by
 // `components/session-token-bridge.tsx` — a Client Component mounted in the root

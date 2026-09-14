@@ -83,7 +83,7 @@ function App(props: {
 
 /** Depth-first search over an arbitrary stub root — an open Base UI dialog's
  *  content is PORTALLED to `document.body`, a delegation root `h.find` (which
- *  walks only the mount container) never reaches. apps/web/AGENTS.md's first
+ *  walks only the mount container) never reaches — the house's first
  *  dialog law, and the members-walls precedent. */
 function findIn(root: Stub, predicate: (n: Stub) => boolean): Stub | null {
   if (predicate(root)) return root;

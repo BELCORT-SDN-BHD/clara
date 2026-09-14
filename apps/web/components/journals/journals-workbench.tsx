@@ -23,6 +23,22 @@ import { listEntryLinks, type EntryLinkRow } from "@/lib/work/evidence";
 
 type Tab = "drafts" | "posted" | "clarifications";
 
+/**
+ * WHICH TAB A VISITOR OPENS ON (#719/#634 fold).
+ *
+ * `?tab=` wins whenever it is given — it is the reader's own explicit request.
+ * With no `?tab=`, an `?entry=` is itself a statement about the destination: the
+ * Activity feed's entry links (`activityJournalsHref`, lib/firm/activity.ts:470)
+ * emit `?entry=<id>` alone, and every entry they can name is a POSTED one (the
+ * feed reports entries that were recorded, and `PostedPanel` owns the addressed
+ * read). Defaulting those to Drafts landed the reader on a tab that never looks
+ * at `initialEntryId`, so the addressed read never fired and the link silently
+ * did nothing but change tabs.
+ */
+export function openingJournalsTab(initialTab: Tab | undefined, initialEntryId: string): Tab {
+  return initialTab ?? (initialEntryId ? "posted" : "drafts");
+}
+
 export function JournalsWorkbench({
   clientId,
   initialTab,
@@ -38,7 +54,7 @@ export function JournalsWorkbench({
 }) {
   const t = useTranslations("JournalsWorkbench");
   const workbench = useJournalsWorkbench(clientId);
-  const [tab, setTab] = useState<Tab>(initialTab ?? "drafts");
+  const [tab, setTab] = useState<Tab>(openingJournalsTab(initialTab, initialEntryId));
   /** #634 — the Work / receipt / source / correction facts for the entries this
    *  tab has read. Fetched HERE rather than inside the panel, because this
    *  component owns the tab's ONE hydration and a panel that fetched on its own

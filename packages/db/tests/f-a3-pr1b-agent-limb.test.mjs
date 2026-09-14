@@ -232,7 +232,7 @@ test("f31b.h the negative twin: the deferred wall aborts an agent-checked entry 
   const firm = await firmOf(world.clients.A1);
   // A plain draft entry, approved DIRECTLY by _approve_entry_core with is_agent=true, bypassing
   // the receipt-writing caller -- proves the wall (t_je_agent_post_receipt), not the convenience.
-  // Fixture + the approve call in ONE transaction (db-tests.md's withTxn rule).
+  // Fixture + the approve call in ONE transaction (withTxn's rule).
   const err = await caught(() => inTxn(async (c) => {
     const draft = await c.query(
       `insert into clara.journal_entries(client_id, status, posting_date, memo, origin, maker_actor)

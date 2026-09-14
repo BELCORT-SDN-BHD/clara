@@ -11,7 +11,7 @@
 // acts on, which is journey D3's own shape ("queue and detail → permitted support action →
 // receipt").
 //
-// THE DISCRIMINATING POST-CONDITION (apps/web/AGENTS.md's dialog law): an act is proven by
+// THE DISCRIMINATING POST-CONDITION (the dialog law): an act is proven by
 // something true only AFTER it — here, that the queue is RE-READ (hydrate-never-trust: the write's
 // own answer is a report, never the new truth) and that the receipt names what the door returned.
 // RED-BEFORE, recorded: deleting the `onActed()` call in `SupportCaseSheet.perform`'s `finally`

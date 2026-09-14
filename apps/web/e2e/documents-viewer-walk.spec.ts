@@ -810,7 +810,24 @@ test.describe("#620 — source custody: preview, download and the state ladder (
     await instrumentDownloads(page);
     await page.goto(`${DOCUMENTS_URL}?document=${DOCS.docPdf}`);
     const download = page.getByTestId("document-download-original");
-    await download.focus();
+    // #706 — A NAVIGATION RACES THIS `focus()`, and the race is the product working. Measured on
+    // an IDLE host (full browser suite, 2026-09-14): `toBeFocused()` here returned "inactive", and
+    // once that was replaced by an `activeElement` poll the poll itself timed out — so the control
+    // was never focused at all. The cause is the `goto` two lines up: the detail panel moves focus
+    // to its own heading on arrival (the very property this cell asserts for the FIRST navigation,
+    // `document-detail-heading` above), and when that effect lands after the test's `focus()` it
+    // takes the focus straight back. A human never meets it — they tab after the page has arrived —
+    // so the instrument, not the product, is what has to wait. `focus()` INSIDE the poll retries
+    // until it sticks: a wait on the condition, with no fixed timer and no guess about which side
+    // of the arrival effect this line falls on. `ensureRealFocus` then closes the DOCUMENT half
+    // that `toBeFocused()` is really asserting (see its own doc in ./helpers).
+    await expect
+      .poll(async () => {
+        await download.focus();
+        return download.evaluate((el) => el === document.activeElement);
+      })
+      .toBe(true);
+    await ensureRealFocus(page);
     await expect(download).toBeFocused();
     await watchSourceFocus(page);
     await page.keyboard.press("Enter");
@@ -847,7 +864,14 @@ test.describe("#620 — source custody: preview, download and the state ladder (
     await page.goto(`${DOCUMENTS_URL}?document=${DOCS.docUnavailable}`);
     const failing = page.getByTestId("document-download-original");
     await expect(failing).toBeVisible({ timeout: 20_000 });
-    await failing.focus();
+    // #706 — same navigation, same arrival-focus race, same guard as the succeeding arm above.
+    await expect
+      .poll(async () => {
+        await failing.focus();
+        return failing.evaluate((el) => el === document.activeElement);
+      })
+      .toBe(true);
+    await ensureRealFocus(page);
     await expect(failing).toBeFocused();
     await watchSourceFocus(page);
     await page.keyboard.press("Enter");

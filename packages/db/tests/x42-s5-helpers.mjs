@@ -880,8 +880,7 @@ const COA_TEMPLATE_PR_A_CLOCK_NAMES = ["publish_coa_template", "retire_coa_templ
 // additive door, the five reads, the four INVOKER helpers and the plant loop.
 //
 // THE GATE IS STILL A PAIR (the succession pattern in packages/db/README.md, "Migration and
-// deployment behavior" — the `.claude/rules/db-tests.md` this cited is not in this repository: a
-// migration STEM
+// deployment behavior": a migration STEM
 // witness OR a catalog witness, post-armed if EITHER says applied), but the STEM IS NOW THE
 // PRIMARY ARM: the migration is numbered (`0156_coa_apply_template.sql`, claimed at #479's
 // merge), so `coa_apply_template$` is a real, permanent schema_migrations row on any database

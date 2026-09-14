@@ -66,7 +66,7 @@ const MDRW_MIGRATION = "0157_member_door_rank_walls.sql";
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /** Poll pg_stat_activity until `pid` is OBSERVABLY blocked on `blockerPid`'s lock, or throw.
- *  db-tests.md: "never a sleep, which proves nothing about whether the block actually happened."
+ *  Never a sleep, which proves nothing about whether the block actually happened.
  *  Same shape as coa-template-pr-a-helpers.mjs's waitBlockedByOrThrow, kept local to this file. */
 async function waitBlockedByOrThrow(pid, blockerPid, timeoutMs = 8000) {
   const deadline = Date.now() + timeoutMs;
@@ -522,8 +522,8 @@ test("mdrw.race: set_member_role -- F-C1 (Codex adversarial leg, HIGH): an actor
 
     // Do NOT sleep-and-hope: PROVE the racer is genuinely blocked on the holder's own lock before
     // releasing it, or this cell would only ever exercise whichever side of the race happened to
-    // win on this run (db-tests.md: "wait with waitBlockedByOrThrow ... never a sleep, which
-    // proves nothing about whether the block actually happened").
+    // win on this run (wait with waitBlockedByOrThrow ... never a sleep, which
+    // proves nothing about whether the block actually happened).
     await waitBlockedByOrThrow(racerPid, holderPid);
 
     // Release the lock: the holder's demotion COMMITS, then the racer's blocked call resumes and

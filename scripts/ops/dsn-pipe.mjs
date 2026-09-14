@@ -20,7 +20,7 @@
 
 import { spawn } from "node:child_process";
 import { X509Certificate } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { readFileSync, realpathSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -269,5 +269,34 @@ function main() {
   });
 }
 
-const isMain = process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
-if (isMain) main();
+/**
+ * True when THIS module is the process entry point — the guard that keeps `main()` from firing
+ * when the selftests `import()` this file for its pure functions.
+ *
+ * IT COMPARES FILES, NOT SPELLINGS (#756). `process.argv[1]` is whatever the caller typed,
+ * resolved LEXICALLY; `import.meta.url` is the module's REALPATH, because Node's ESM loader
+ * resolves symlinks before it records the URL. On stock macOS `os.tmpdir()` is under `/var`,
+ * which is a symlink to `/private/var`, so a copy of this script staged in a temp directory
+ * compared UNEQUAL: `main()` never ran, the process exited 0 having done nothing, and the
+ * selftest's "a missing CA FAILS CLOSED" cell read that 0 as a FAIL — turning the root
+ * `pnpm lint` ladder red on every Mac while Linux CI stayed green. Realpathing both sides
+ * makes the guard answer the question it means to ask.
+ *
+ * A side that cannot be realpathed (a script unlinked between spawn and now) falls back to its
+ * lexical form rather than throwing: the guard must never be the reason this tool fails to run.
+ *
+ * Exported so the selftest can pin BOTH outcomes directly, without staging a process per case.
+ */
+export function isEntryPoint(argv1, moduleUrl) {
+  if (!argv1) return false;
+  const real = (p) => {
+    try {
+      return realpathSync(p);
+    } catch {
+      return p;
+    }
+  };
+  return real(resolve(argv1)) === real(fileURLToPath(moduleUrl));
+}
+
+if (isEntryPoint(process.argv[1], import.meta.url)) main();

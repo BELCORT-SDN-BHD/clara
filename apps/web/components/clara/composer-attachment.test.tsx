@@ -119,7 +119,7 @@ test("firm altitude gets an HONEST NOTE, not a silently missing button — the w
         assert.match(
           h.text(),
           /Open a client's workspace to attach a document/,
-          "an absent control must SAY it is absent and why (apps/web/AGENTS.md: never a fake control, never a silent one)",
+          "an absent control must SAY it is absent and why (never a fake control, never a silent one)",
         );
       } finally {
         await h.unmount();

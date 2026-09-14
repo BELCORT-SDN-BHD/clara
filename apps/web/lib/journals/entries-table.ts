@@ -115,10 +115,24 @@ export type EntryTableRow = {
   link: EntryLinkRow | null;
 };
 
+/** #746 — THE ONE "no links" VALUE, frozen and shared.
+ *
+ *  `links = []` as a default parameter mints a NEW array on every evaluation, and both callers of
+ *  this function feed that value straight into a `useMemo` dependency list — so a component that
+ *  never received a `links` prop recomputed its whole row model on every single render, for a
+ *  dependency that had not changed by any meaning a reader would recognise. One frozen module-level
+ *  array gives the absent case a STABLE identity (and `Object.freeze` is not decoration: a shared
+ *  default that anything could push onto would be a cross-component data leak).
+ *
+ *  It lives HERE, beside the only function that reads a links array, rather than being declared
+ *  once per component — two `Object.freeze([])` literals in two files are two values, which is the
+ *  identity bug again one level up. */
+export const NO_ENTRY_LINKS: readonly EntryLinkRow[] = Object.freeze([]);
+
 export function buildEntryRows(
   entries: JournalEntryRow[],
   lines: JournalLineRow[],
-  links: readonly EntryLinkRow[] = [],
+  links: readonly EntryLinkRow[] = NO_ENTRY_LINKS,
 ): EntryTableRow[] {
   const linkByEntry = new Map(links.map((row) => [row.entry_id, row]));
   const byEntry = new Map<string, { debit: number; credit: number }>();

@@ -1,7 +1,7 @@
 // MEMBERS — the two masked read surfaces behind /admin/members, plus their
 // wire-shape pins.
 //
-// RUNG-0 CENSUS, at the LIVE body (apps/web/AGENTS.md: "a migration citation
+// RUNG-0 CENSUS, at the LIVE body ("a migration citation
 // must chase the LIVE body — never cite a migration's first CREATE without
 // checking what superseded it"). Censused 2026-08-30 across every file in
 // `packages/db/migrations/`: each of these two views is created EXACTLY ONCE,

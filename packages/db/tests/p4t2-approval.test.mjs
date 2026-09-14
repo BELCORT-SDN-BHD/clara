@@ -16,8 +16,8 @@ after(clearOperator);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /** Poll (bounded) until backend `pid` is observably WAITING (wait_event_type='Lock') on a lock
- *  held by `blockerPid`. Mirrors p4t1-add-member-regression.test.mjs's own local copy (db-tests.md:
- *  "never a sleep, which proves nothing about whether the block actually happened") -- copied
+ *  held by `blockerPid`. Mirrors p4t1-add-member-regression.test.mjs's own local copy
+ *  (never a sleep, which proves nothing about whether the block actually happened) -- copied
  *  locally rather than cross-imported from another test area's own helper module. */
 async function waitBlockedByOrThrow(pid, blockerPid, timeoutMs = 5000) {
   const deadline = Date.now() + timeoutMs;

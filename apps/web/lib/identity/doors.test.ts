@@ -134,7 +134,7 @@ test("acceptInvite: a 401 is NEVER classified as a governed refusal (status befo
 });
 
 // ===========================================================================
-// THE MEMBERSHIP READ — a READ, not a door (apps/web/AGENTS.md).
+// THE MEMBERSHIP READ — a READ, not a door.
 //
 // Codex MEDIUM-1: the first version resolved `rows[0] ?? null`, so an HTTP 200
 // carrying `[{}]`, two rows, or a well-shaped row belonging to somebody ELSE

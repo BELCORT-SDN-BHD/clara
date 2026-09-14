@@ -11,6 +11,9 @@
 
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
+import { readdirSync, readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   rootQuery, humanQuery, endPool, printLaneNotes, noteLane, printSkipCount, markSkip,
   waveAEnsureReady, opk,
@@ -285,19 +288,15 @@ test("A19g(ii) a 1-cent-diverging opening seed is REFUSED, drawer 1, naming the 
 
 test("A19g the HOW: approve_opening_seed is a harvested SPLICE (never a from-file rewrite); its two 0018 guards are still present; it calls the NEW pin-tie assertion", async (t) => {
   if (skip56(t)) return;
-  // A repo-wide search for a from-scratch rewrite -- the cell's own method.
-  const { execFileSync } = await import("node:child_process");
-  let grepHit = "";
-  try {
-    grepHit = execFileSync(
-      "grep", ["-rl", "--include=*.sql", "create or replace function clara.approve_opening_seed", "packages/db/migrations"],
-      { cwd: process.cwd().endsWith("db") ? "../.." : process.cwd(), encoding: "utf8" },
-    ).trim();
-  } catch (e) {
-    // grep exits 1 (and throws) when there are zero matches -- that IS the pass.
-    grepHit = e.status === 1 ? "" : (() => { throw e; })();
-  }
-  assert.equal(grepHit, "", "no migration file contains a from-scratch CREATE OR REPLACE for approve_opening_seed -- its live body is 0017's text as spliced");
+  // An in-process search for a from-scratch rewrite -- the cell's own method (no `grep`
+  // shell-out: #707, the only Windows-red in an otherwise green suite). Same pattern, same
+  // expected count (zero) as the grep it replaces.
+  const migDir = join(dirname(fileURLToPath(import.meta.url)), "..", "migrations");
+  const rewriteHits = readdirSync(migDir)
+    .filter((f) => f.endsWith(".sql"))
+    .filter((f) => readFileSync(join(migDir, f), "utf8").includes("create or replace function clara.approve_opening_seed"))
+    .map((f) => join("packages/db/migrations", f));
+  assert.equal(rewriteHits.join("\n"), "", "no migration file contains a from-scratch CREATE OR REPLACE for approve_opening_seed -- its live body is 0017's text as spliced");
 
   const body = (await rootQuery(
     "select pg_get_functiondef('clara.approve_opening_seed(uuid,uuid,text,jsonb,text,text)'::regprocedure) as def",

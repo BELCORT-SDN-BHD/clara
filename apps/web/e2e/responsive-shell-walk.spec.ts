@@ -1,7 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
-import { ensureRealFocus } from "./helpers";
+import { cellBudgetMs, ensureRealFocus, watchReactFaults } from "./helpers";
 
 /**
  * CB-AE2E-019 · H-31 · C-43 — THE BROWSER LEG (裁-86).
@@ -245,6 +245,9 @@ test("at lg and above the rail is STILL open by default — the narrow default i
 });
 
 test("below lg the Clara rail is an OVERLAY: it covers the workbench instead of shrinking it", async ({ page }) => {
+  // #706 — a sign-in, two `dock-panel` entrance settles and a keyboard round trip through the
+  // rail's own focus hand-off, all inside the flat 30 s default before this.
+  test.setTimeout(cellBudgetMs({ signIns: 1, polls: 2 }));
   await page.setViewportSize(NARROW);
   await signInTo(page, `/clients/${CLIENT_A}`);
 
@@ -275,16 +278,28 @@ test("below lg the Clara rail is an OVERLAY: it covers the workbench instead of 
   expect(await rail.evaluate((el) => getComputedStyle(el.parentElement!).position)).toBe("fixed");
 
   // CLOSE BY KEYBOARD, from inside the rail, and it goes away.
+  //
+  // #706 — `toBeFocused()` on this walk's launcher was measured returning "inactive" under host
+  // load. That reading is about the DOCUMENT, not the element: the page had not been granted
+  // renderer focus yet, and a native key press dispatched into an unfocused document is a one-shot
+  // action with nothing left to retry (see `ensureRealFocus`'s own doc in ./helpers). So each
+  // keyboard step below waits for its own condition deterministically — the element becoming
+  // `document.activeElement`, which is true whether or not the document itself is focused yet —
+  // and `ensureRealFocus` closes the document half before the key that depends on it.
   const collapse = page.getByRole("button", { name: "Collapse Clara" });
   await collapse.focus();
+  await expect.poll(async () => collapse.evaluate((el) => el === document.activeElement)).toBe(true);
+  await ensureRealFocus(page);
   await expect(collapse).toBeFocused();
   await page.keyboard.press("Enter");
   await expect(rail).toHaveCount(0);
 
   // …focus lands on the launcher rather than on <body>, and the launcher REOPENS
-  // it by keyboard, closing the loop.
+  // it by keyboard, closing the loop. The hand-off is an EFFECT the rail runs as it unmounts, so
+  // the poll below is on the condition itself rather than on a timer.
   const launcher = page.locator("[data-clara-rail-launcher]");
   await expect(launcher).toBeVisible();
+  await expect.poll(async () => launcher.evaluate((el) => el === document.activeElement)).toBe(true);
   await expect(launcher).toBeFocused();
   await page.keyboard.press("Enter");
   await expect(rail).toBeVisible();
@@ -638,4 +653,185 @@ test("the narrow shell stays clean under the full WCAG 2.1 AA scan, drawer open 
     .toBe(0);
   const open = await new AxeBuilder({ page }).withTags(tags).analyze();
   expect(open.violations, "narrow firm home, drawer open").toEqual([]);
+});
+
+/**
+ * #736 — THE RAIL LEAVES WHEN THE VIEWPORT BECOMES NARROW (the owner's option C).
+ *
+ * WHAT WAS WRONG. The rail-open flag defaults to open with no persistence, and a
+ * single mount-time check closed it when the document LOADED narrow. It never
+ * re-ran, so a rail opened at a wide viewport stayed open through a resize, a
+ * rotation or a zoom that crossed `lg` — and at 320px an 85vw panel plus its
+ * full-viewport scrim sat over the page's own controls. `work-cancel-walk.spec.ts`
+ * had to open its confirm dialog wide and narrow afterwards to reach a button at
+ * all; that workaround is retired in the same change as this cell.
+ *
+ * WHY A BROWSER. A crossing is a real `matchMedia` event produced by real layout.
+ * The node cells beside the component (`components/clara/rail-chrome.test.tsx`)
+ * drive the rule's three discriminating cases against a stub; only this leg can
+ * say that a genuine 1280 -> 320 resize, and a genuine 200% zoom, produce one.
+ */
+test("#736: crossing from wide into narrow closes the rail by itself, through its own exit", async ({ page }) => {
+  await page.setViewportSize(WIDE);
+  await signInTo(page, `/clients/${CLIENT_A}`);
+  const rail = page.locator("[data-clara-rail]");
+  await expect(rail).toBeVisible();
+  await expect(page.locator("[data-clara-rail-launcher]")).toHaveCount(0);
+
+  // THE EXIT IS WATCHED, NOT INFERRED. `useRailPresence` keeps the panel MOUNTED
+  // for one `--motion-duration-panel` after the flag goes false and flips
+  // `data-state` to "closed" for that window — which IS the transition. A cell
+  // that only asserted the panel had gone would pass just as happily for a rail
+  // that vanished between frames, which is the thing the presence latch exists
+  // to prevent. The observer is armed BEFORE the resize because the whole window
+  // is 200ms long.
+  const exited = page.evaluate(
+    () =>
+      new Promise<boolean>((resolve) => {
+        const aside = document.querySelector("[data-clara-rail]");
+        if (aside === null) return resolve(false);
+        const observer = new MutationObserver(() => {
+          if (aside.getAttribute("data-state") === "closed" && aside.isConnected) {
+            observer.disconnect();
+            resolve(true);
+          }
+        });
+        observer.observe(aside, { attributes: true, attributeFilter: ["data-state"] });
+        setTimeout(() => { observer.disconnect(); resolve(false); }, 5_000);
+      }),
+  );
+  await page.setViewportSize({ width: 320, height: 720 });
+  expect(await exited, "the rail was removed without ever entering its closing state").toBe(true);
+
+  await expect(rail).toHaveCount(0);
+  await expect(page.locator("[data-clara-rail-launcher]")).toBeVisible();
+  // …and the workbench is operable: the page's own chrome takes the click that
+  // the open panel used to intercept.
+  await page.getByRole("button", { name: "Toggle navigation" }).click();
+  await expect(page.locator("[data-slot=sheet-content]")).toBeVisible();
+});
+
+test("#736: 200% zoom is a crossing too — the rail closes at 640 CSS px", async ({ page }) => {
+  // WCAG 2.2 SC 1.4.10's own case, spelled the way THIS FILE's header already
+  // spells it: "200% browser zoom is EXACTLY a halving of the CSS viewport: the
+  // page lays out at 640 CSS px". It is not spelled as `documentElement.style.zoom`,
+  // and that is a measurement rather than a preference — a first cut of this cell
+  // applied 200% CSS `zoom` to a 1280px window and then asked the page
+  // `matchMedia("(width < 64rem)").matches`, which answered FALSE (Chromium
+  // 1234/Playwright 1.62.1, 2026-09-14). CSS `zoom` scales the rendering; it does
+  // not move the media-query viewport, so a cell built on it would have proved
+  // nothing about the arm it claims to cross.
+  await page.setViewportSize(WIDE);
+  await signInTo(page, `/clients/${CLIENT_A}`);
+  await expect(page.locator("[data-clara-rail]")).toBeVisible();
+
+  await page.setViewportSize(NARROW);
+  // THE MECHANISM, ASSERTED BEFORE THE BEHAVIOUR. `(width < 64rem)` is
+  // `components/clara/rail-chrome.tsx`'s own `NARROW_QUERY`; if a future change
+  // moved the rail's breakpoint, the rail assertion below would go red with no
+  // hint why.
+  expect(
+    await page.evaluate(() => window.matchMedia("(width < 64rem)").matches),
+    "640 CSS px is not below the lg boundary the rail keys on",
+  ).toBe(true);
+  await expect(page.locator("[data-clara-rail]")).toHaveCount(0);
+  await expect(page.locator("[data-clara-rail-launcher]")).toBeVisible();
+
+  // CROSSING BACK TO WIDE NEITHER OPENS NOR CLOSES IT — the docked arm keeps
+  // whatever state the human was left with, which is the half that keeps this
+  // rule from being "the rail is closed below lg, always".
+  await page.setViewportSize(WIDE);
+  await expect(page.locator("[data-clara-rail]")).toHaveCount(0);
+  await expect(page.locator("[data-clara-rail-launcher]")).toBeVisible();
+});
+
+test("#736: a rail opened by the human at a narrow width survives a client-side navigation", async ({ page }) => {
+  await page.setViewportSize(NARROW);
+  await signInTo(page, "/");
+  await page.locator("[data-clara-rail-launcher]").click();
+  const rail = page.locator("[data-clara-rail]");
+  await expect(rail).toBeVisible();
+
+  // ⌘K IS THE ONE CLIENT-SIDE NAVIGATION AVAILABLE WITH THE RAIL OPEN, and that
+  // is not a convenience: the rail's scrim covers the viewport while it is open,
+  // so every in-page link is behind it by construction. The palette is a modal
+  // above the scrim, and selecting a client Go row is a real router push — the
+  // same navigation C-43 walks at the wide viewport.
+  await ensureRealFocus(page);
+  await page.keyboard.press("Control+K");
+  await page.getByPlaceholder("Search or ask Clara…").fill("bee creative");
+  await page.getByRole("option", { name: "Bee Creative Solution" }).click();
+  await expect(page).toHaveURL(new RegExp(`/clients/${CLIENT_B}$`));
+
+  // STILL OPEN. `RailMount` sits outside the client key and the chrome mounts
+  // once per document, so nothing about a route change re-runs the narrow rule —
+  // and a rule that closed the rail here would be taking away something the
+  // human opened.
+  await expect(rail).toBeVisible();
+  await expect(page.locator("[data-clara-rail-launcher]")).toHaveCount(0);
+});
+
+/**
+ * #732 — THE ENTRY FACES HYDRATE CLEAN AT A NARROW VIEWPORT TOO.
+ *
+ * The owner's 2026-09-13 reproduction read `Minified React error #418` on every
+ * narrow load of the Work detail route AND "on at least one of the signup /
+ * pending / firm-home loads in the same narrow pane", which is what identified
+ * the SHELL rather than the page as the subject. `journal-work-walk.spec.ts`
+ * owns the firm-shell half (it has the Work fixture); this cell owns the entry
+ * half, whose only shared ancestor with it is `app/layout.tsx`.
+ *
+ * `/pending` NEEDS A SESSION WITHOUT A FIRM, which is exactly what the fixture's
+ * default persona is (`e2e/serve-built.mjs`'s `holding@example.test`): a member
+ * is redirected off this route to `/`. The cell signs back in as the owner at the
+ * end so the shared fixture is left as it was found.
+ */
+test("#732: /pending hydrates with no React fault at 375 px and at 1280 px", async ({ page }) => {
+  const collector = watchReactFaults(page);
+  // THE VIEWPORT IS SET BEFORE THE NAVIGATION, which is the whole point: a
+  // mismatch is a property of the FIRST client render, so a resize afterwards
+  // measures a tree React has already reconciled and can never reproduce one.
+  await page.setViewportSize({ width: 375, height: 812 });
+  await signInTo(page, "/pending", "holding@example.test");
+  await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+  expect(collector.faults(), "/pending at 375px must hydrate with no React fault").toEqual([]);
+
+  // #732 AC3 — "the narrow shell still ends in the same state it has today"
+  // read against THIS route's own today: `/pending` is `app/(entry)/pending`,
+  // under `app/(entry)/layout.tsx`, not `app/(firm)/layout.tsx` — the firm
+  // shell that owns the docked sidebar (`components/ui/sidebar.tsx`) and the
+  // Clara rail launcher (`components/clara/rail-launcher.tsx`, mounted only
+  // by `RailMount` in the firm layout) never mounts here at any width. So the
+  // narrow "same state" claim for this face is that it stays exactly what it
+  // is today — the identity card, nothing from the firm shell — rather than
+  // picking up either sidebar arm by accident.
+  await expect(page.locator('[data-slot="sidebar"]')).toHaveCount(0);
+  await expect(page.locator("[data-clara-rail-launcher]")).toHaveCount(0);
+  await expect(page.getByText("ClaraBook", { exact: true })).toBeVisible();
+  await expect(page.locator('[data-slot="card"]').first()).toBeVisible();
+
+  // 1280 IS THE CONTROL, and it is reached by a FULL document load rather than a
+  // second sign-in: `goto` is what produces a fresh server render for the first
+  // client render to disagree with, and the session is already in the jar.
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.goto("/pending");
+  await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+  expect(collector.faults(), "/pending at 1280px must hydrate with no React fault").toEqual([]);
+
+  // The control width must land on the identical entry-shell state, not just
+  // an identical fault count: this route has no responsive shell to diverge.
+  await expect(page.locator('[data-slot="sidebar"]')).toHaveCount(0);
+  await expect(page.locator("[data-clara-rail-launcher]")).toHaveCount(0);
+  await expect(page.getByText("ClaraBook", { exact: true })).toBeVisible();
+  await expect(page.locator('[data-slot="card"]').first()).toBeVisible();
+
+  await page.evaluate(() => console.error("e2e-732-pending-collector-probe"));
+  expect(collector.seen(), "the console collector must actually be receiving errors").toContain(
+    "e2e-732-pending-collector-probe",
+  );
+  // The fixture's signed-in persona is SERVER-side state shared by every later
+  // cell (`e2e/serve-built.mjs` keys `caller_context` off the last sign-in), and
+  // this is the one cell in the suite that signs in as anybody but the owner. Put
+  // it back rather than leaving the next file to discover it.
+  await signInTo(page, "/");
 });

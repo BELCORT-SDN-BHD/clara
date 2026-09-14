@@ -1,6 +1,8 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Locator, type Page } from "@playwright/test";
 
+import { CELL_BUDGET, grantCellBudget, settleForScan } from "./helpers";
+
 /**
  * P6-6's 裁-86 browser leg — the identity finish, walked in a real browser
  * against the BUILT app: the Ledger Fold mark on every entry face (R1), the
@@ -21,6 +23,11 @@ const LEDGER_FOLD = "/brand/logo/clarabook-ledger-fold-brand-ink-v1.0.png";
 const MASCOT = "/brand/clara/clara-quiet-clerk-neutral-v1.0.png";
 
 async function scan(page: Page, face: string): Promise<void> {
+  // #706 — this walk scans SEVEN entry faces from one cell, so the budget grows with the number
+  // of scans that actually run rather than being guessed at the top of each test.
+  grantCellBudget(CELL_BUDGET.scan);
+  // #760 — settle the arrival fade before measuring colour; see `settleForScan`.
+  await settleForScan(page);
   const result = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
   expect(result.violations, `${face} axe violations`).toEqual([]);
 }
@@ -147,6 +154,10 @@ test("nothing on an entry face loops: the mark carries no animation at all", asy
 // ---------------------------------------------------------------------------
 
 async function signIn(page: Page): Promise<void> {
+  // #706 — a real round trip through the mock auth server plus a server-rendered redirect. The
+  // grant is here rather than on each cell so a cell that signs in twice gets twice the headroom
+  // and one that never signs in gets none.
+  grantCellBudget(CELL_BUDGET.signIn);
   await page.goto("/login");
   await page.getByLabel("Email").fill("owner@example.test");
   await page.getByLabel("Password").fill("Clara-e2e-password-1!");

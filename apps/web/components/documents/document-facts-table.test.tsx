@@ -180,6 +180,35 @@ test("an empty facts list renders the honest empty state, never an empty table",
   }
 });
 
+/**
+ * Settle until `condition` holds — bounded by PASSES, never by the clock (#706).
+ *
+ * WHY THE [N1] CELL NEEDED THIS. It drove the overlay with fixed tick counts (`for (i < 4)
+ * settle()`, then a single `settle()` after each click) and asserted straight afterwards. That is
+ * a guess about how many act()-flushes the overlay's mount chain takes, and the guess is the only
+ * thing standing between the cell and a red: it failed once under three-way host load on
+ * "control: clicking a fact must select its row", and passed alone every time. Polling the
+ * CONDITION removes the guess in both directions — it stops as soon as the state is there, and
+ * keeps going when a pass was not enough.
+ *
+ * Each pass is one macrotask flush, a fixed amount of work, so the bound says nothing about the
+ * host's speed: a red here means the state never arrived.
+ */
+const MAX_SETTLE_PASSES = 200;
+
+async function settleUntil(
+  h: { settle: () => Promise<void> },
+  condition: () => boolean,
+  label: string,
+): Promise<void> {
+  for (let pass = 0; pass < MAX_SETTLE_PASSES; pass += 1) {
+    if (condition()) return;
+    await h.settle();
+  }
+  if (condition()) return;
+  throw new Error(`${label} never arrived within ${MAX_SETTLE_PASSES} settle passes (a bound on WORK, not on wall-clock time — read a red here as a stall, never as a slow host)`);
+}
+
 test("[N1] clearing the highlight passes NULL, and the overlay ends with no row selected", async () => {
   // The overlay's "Clear the highlight" control used to call `onSelect("")`,
   // because the prop was typed `(id: string) => void` and there was no way to
@@ -210,38 +239,38 @@ test("[N1] clearing the highlight passes NULL, and the overlay ends with no row 
     clientId: "c1111111-1111-4111-8111-111111111111",
     mimeType: "application/pdf",
   })));
+  const selectedRow = () =>
+    h.find((n) => n.tagName === "TR" && (n as { getAttribute?: (k: string) => unknown }).getAttribute?.("aria-selected") === "true");
+  const clearControl = () => h.find((n) => n.tagName === "BUTTON" && textOf(n).includes("Clear the highlight"));
   try {
-    for (let i = 0; i < 4; i++) await h.settle();
+    await settleUntil(
+      h,
+      () => h.find((n) => n.tagName === "BUTTON" && textOf(n).includes("Invoice total")) !== null,
+      "the overlay's facts table offering selectable rows",
+    );
 
     const fact = h.find((n) => n.tagName === "BUTTON" && textOf(n).includes("Invoice total"));
     assert.ok(fact, "the overlay's facts table must offer selectable rows");
     await clickButton(fact!);
-    await h.settle();
-    assert.ok(
-      h.find((n) => n.tagName === "TR" && (n as { getAttribute?: (k: string) => unknown }).getAttribute?.("aria-selected") === "true"),
+    await settleUntil(
+      h,
+      () => selectedRow() !== null,
       "control: clicking a fact must select its row, or the clear below proves nothing",
     );
 
-    const clear = h.find((n) => n.tagName === "BUTTON" && textOf(n).includes("Clear the highlight"));
+    const clear = clearControl();
     assert.ok(clear, "a standing selection must offer a way out of it");
     await clickButton(clear!);
-    await h.settle();
-    assert.equal(
-      h.find((n) => n.tagName === "TR" && (n as { getAttribute?: (k: string) => unknown }).getAttribute?.("aria-selected") === "true"),
-      null,
-      "after clearing, no row may remain marked",
-    );
+    await settleUntil(h, () => selectedRow() === null, "the row's selection mark clearing");
+    assert.equal(selectedRow(), null, "after clearing, no row may remain marked");
 
     // AND THE CONTROL ITSELF RETIRES. This is the half that discriminates: the
     // clear button renders on `selectedId !== null`, so an empty-string
     // sentinel leaves it standing forever — a control offering to clear a
     // selection that is already gone. The aria half above cannot see the
     // sentinel (no region id is ever ""), but this can.
-    assert.equal(
-      h.find((n) => n.tagName === "BUTTON" && textOf(n).includes("Clear the highlight")),
-      null,
-      "the clear control must retire with the selection it clears",
-    );
+    await settleUntil(h, () => clearControl() === null, "the clear control retiring with its selection");
+    assert.equal(clearControl(), null, "the clear control must retire with the selection it clears");
   } finally {
     await h.unmount();
   }

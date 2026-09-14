@@ -331,7 +331,7 @@ export function CheckoutSuccessCard({
 
         {state.kind === "refused" && (
           // The door's OWN sentence and code, verbatim — never re-worded and
-          // never retried (apps/web/AGENTS.md).
+          // never retried.
           <StateBanner tone="error" code={state.code}>
             {state.message}
           </StateBanner>

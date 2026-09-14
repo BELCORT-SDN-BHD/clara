@@ -277,8 +277,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /**
  * Poll (bounded) until backend `pid` is observably WAITING on a lock held by `blockerPid`.
- * db-tests.md: "Wait with waitBlockedByOrThrow (it reads pg_blocking_pids), never a sleep,
- * which proves nothing about whether the block actually happened." Copied locally rather than
+ * Wait with waitBlockedByOrThrow (it reads pg_blocking_pids), never a sleep,
+ * which proves nothing about whether the block actually happened. Copied locally rather than
  * cross-imported from another test area's helper, the p4t1/p4t2 convention.
  */
 export async function waitBlockedByOrThrow(pid, blockerPid, timeoutMs = 8000) {

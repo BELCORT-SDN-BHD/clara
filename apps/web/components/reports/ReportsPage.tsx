@@ -16,15 +16,26 @@ import { SnapshotRegistryPanel } from "./SnapshotRegistryPanel";
 import { RenderJobQueuePanel } from "./RenderJobQueuePanel";
 import { SeedingBatchesPanel } from "./SeedingBatchesPanel";
 import { WikiCurationPanel } from "./WikiCurationPanel";
+import type { ReportUrlSelection } from "@/lib/reports/url-state";
 
-export function ReportsPage({ clientId }: { clientId: string }) {
+export function ReportsPage({
+  clientId,
+  addressedReport = { kind: "none" },
+}: {
+  clientId: string;
+  /** #719 — `?report=<artifact id>`, parsed on the server route above. Only the sealed statutory
+   *  archive can be addressed by id, so only that panel receives it: the sandbox history, the
+   *  freeform read log and the internal-processing group are LISTS of their own kinds of record,
+   *  and handing them an artifact id would make four panels answer a question about one. */
+  addressedReport?: ReportUrlSelection;
+}) {
   const t = useTranslations("ClientReports");
   const ti = useTranslations("ReportsSnapshotsSeeding");
 
   return (
     <PageShell>
       <PageHeader title={t("heading")} description={t("body")} />
-      <StatutoryReportsPanel clientId={clientId} session={sessionTokenAccessor} />
+      <StatutoryReportsPanel clientId={clientId} session={sessionTokenAccessor} addressed={addressedReport} />
       <SandboxExportsPanel clientId={clientId} session={sessionTokenAccessor} />
       <FreeformReadsPanel clientId={clientId} session={sessionTokenAccessor} />
       {/* T9 (port-wave): snapshots is a report artifact, so it stays above —

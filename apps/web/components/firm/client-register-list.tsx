@@ -157,7 +157,7 @@ function AddClientControl({ onCreated }: { onCreated: () => void }) {
             if (result.kind === "navigated") router.push(result.href);
             return true;
           } catch (err) {
-            // A DoorRefusal renders VERBATIM and is never retried (apps/web/AGENTS.md).
+            // A DoorRefusal renders VERBATIM and is never retried.
             if (isDoorRefusal(err)) setRefusal({ message: err.message, code: err.code });
             else setRefusal({ message: err instanceof Error ? err.message : String(err), code: null });
             return false;

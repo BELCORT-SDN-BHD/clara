@@ -1,6 +1,6 @@
 // P6-5 — THE RAIL'S STRUCTURAL CLIENT BOUNDARY, driven through the REAL mount point.
 //
-// `apps/web/AGENTS.md`'s house law existed because `<RailMount />` is a sibling of
+// This house law existed because `<RailMount />` is a sibling of
 // `{children}` in `app/(firm)/layout.tsx` while `ClientScopeProvider` lives one layout down —
 // so the rail never remounted on a client switch, and every new piece of client-owned rail
 // state had to ship its own reset. This proves the boundary that replaces that discipline.

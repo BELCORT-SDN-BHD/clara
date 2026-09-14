@@ -1,7 +1,7 @@
 // clara.caller_context — the typed read behind the scope spine, plus the
 // wire-shape pin that keeps this projection tied to the DB's own declaration.
 //
-// RUNG-0 CENSUS, at the LIVE body (apps/web/AGENTS.md: "a migration citation must
+// RUNG-0 CENSUS, at the LIVE body ("a migration citation must
 // chase the LIVE body — never cite a migration's first CREATE without checking
 // what superseded it"). Censused 2026-08-30 across every file in
 // packages/db/migrations/: exactly ONE `create view clara.caller_context` exists,

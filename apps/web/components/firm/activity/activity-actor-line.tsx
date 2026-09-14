@@ -14,16 +14,20 @@
 //     name fragments landed glued together with nothing but a CSS margin between them — invisible
 //     to a screen reader and to anyone copying the row's text. The `{" "}` below is a real
 //     character, not a stylistic gap.
-//   * the system marker — a KEPT sweep-heartbeat row (0183 excludes the zero-effect ones; a row
-//     that survives the door drafted something, per finding 1) carries `actor = null`, which is
-//     the TRUTH the door output rather than a fabricated actor — this cell recognises exactly that
-//     shape (`isSweepReceiptRow`, lib/firm/activity.ts) and labels it "Clara (system)" rather than
-//     the honest-but-useless em dash `<MemberName>` would otherwise render for a null id.
+//   * the system marker — a row Clara wrote herself carries `actor = null`, which is the TRUTH the
+//     door output rather than a fabricated actor. `isSystemActorRow` (lib/firm/activity.ts) names
+//     every shape that is true of and labels it "Clara (system)" rather than the honest-but-useless
+//     em dash `<MemberName>` would otherwise render for a null id: the KEPT sweep heartbeat (#728
+//     finding 1 — 0183 excludes the zero-effect ones, so a row that survives the door drafted
+//     something) and, since #742, the document pipeline's own four machine-written event types.
+//     Those four were 7 of the live feed's first 25 rows rendering "—": a C77.3 miss on events that
+//     did have an author. A HUMAN-written row of the same four types keeps its person's name,
+//     because the human door passes the actor and the predicate refuses any row that has one.
 
 import { useTranslations } from "next-intl";
 
 import { MemberName } from "@/components/common/member-name";
-import { isSweepReceiptRow, type ActivityRow as ActivityRowData } from "@/lib/firm/activity";
+import { isSystemActorRow, type ActivityRow as ActivityRowData } from "@/lib/firm/activity";
 import type { MemberNameResolver } from "@/lib/members/use-member-names";
 
 export type ActivityActorLineRow = Pick<ActivityRowData, "source" | "event_type" | "kind" | "actor" | "on_behalf_of">;
@@ -37,10 +41,11 @@ export function ActivityActorLine({
 }) {
   const t = useTranslations("Activity");
   const tWalk = useTranslations("WalkFindings728");
-  // A system marker only ever applies when the door left `actor` null — a defensive AND rather
-  // than trusting `isSweepReceiptRow` alone, so a future row shape that reused
-  // kind=agent/event_type=sweep.run_completed WITH a real actor could never be mislabelled.
-  const isSystem = row.actor === null && isSweepReceiptRow(row);
+  // A system marker only ever applies when the door left `actor` null — the check lives inside
+  // `isSystemActorRow` so neither this cell nor any future caller can forget it: a row that reused
+  // one of the recognised event types WITH a real actor (the human classification door does
+  // exactly that) must render that person, never the system label.
+  const isSystem = isSystemActorRow(row);
 
   return (
     <>

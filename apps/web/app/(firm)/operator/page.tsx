@@ -1,7 +1,8 @@
 import { getTranslations } from "next-intl/server";
 
 import { PageHeader, PageShell } from "@/components/common/page-shell";
-import { OPERATOR_HEADING_ID, OperatorSupportConsole } from "@/components/operator/support-queue";
+import { OperatorSupportConsole } from "@/components/operator/support-queue";
+import { OPERATOR_HEADING_ID } from "@/lib/navigation/heading-ids";
 
 /**
  * "/operator" — the operator support destination (#615, refresh spec #612 journey D3).

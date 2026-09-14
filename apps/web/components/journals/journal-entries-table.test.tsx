@@ -392,21 +392,133 @@ test("a LATER ?entry= re-opens the table on the newly addressed entry", async ()
   }
 });
 
-test("an ADDRESSED entry outside the read's page is a named state, not 'no matches'", async () => {
-  // `?entry=` filters in memory over the newest-1000 read, so a link to an older
-  // entry lands on an empty table. "Nothing matched your filters" reads as "that
-  // entry does not exist" about an entry the database has.
-  const h = await renderComponent(
-    App(createElement(PostedPanel, {
-      clientId: "c1", entries: [RECENT], lines: LINES, linesTruncated: false,
-      entriesTruncated: true, accounts: ACCOUNTS, busy: false, err: null, clr: null,
-      actingId: null, onReverse: () => {}, links: [], linksUnavailable: false,
-      initialEntryId: "f0000000-0000-4000-8000-00000000ffff",
-    })),
-  );
+// ---------------------------------------------------------------------------
+// #719 — THE ADDRESSED ENTRY IS FETCHED, not merely filtered for.
+//
+// `?entry=` used to filter IN MEMORY over the workbench's newest-1,000 browse read
+// (lib/journals/api.ts's FETCH_CAP, unchanged), so a correction or conflict link to an older entry
+// landed on "that entry is not in this page" — an honest sentence about an entry the database has
+// and this caller may read. The panel now reads that one entry beside the browse read and merges
+// it. Every cell below injects the loader (`loadAddressedEntry`); production reads
+// clara.journal_entries by id.
+// ---------------------------------------------------------------------------
+
+/** An entry the BROWSE read never returned — older than the 1,000-row page. */
+const ARCHIVED = entry({ id: "e0000000-0000-4000-8000-00000000aaaa", posting_date: "2019-06-30", memo: "ARCHIVED june" });
+const ARCHIVED_LINES: JournalLineRow[] = [
+  { id: "al1", entry_id: ARCHIVED.id, line_no: 1, account_code: "1000", debit_cents: 5_000, credit_cents: 0, description: "old", counterparty_id: null },
+];
+
+function addressedPanel(initialEntryId: string, load: (id: string) => Promise<{ entry: JournalEntryRow; lines: JournalLineRow[] } | null>) {
+  return App(createElement(PostedPanel, {
+    clientId: "c1", entries: [RECENT], lines: LINES, linesTruncated: false,
+    entriesTruncated: true, accounts: ACCOUNTS, busy: false, err: null, clr: null,
+    actingId: null, onReverse: () => {}, links: [], linksUnavailable: false,
+    initialEntryId, loadAddressedEntry: load,
+  }));
+}
+
+test("719 — BACK out of an ?entry= deep link returns the whole list, not a URL that disagrees with the table", async () => {
+  // The parameter going away is the address MOVING. Before this, Back cleared the URL and left the
+  // table filtered and expanded on the entry it had named.
+  const h = await renderComponent(App(createElement(PostedPanel, {
+    clientId: "c1", entries: [BACKDATED, RECENT], lines: LINES, linesTruncated: false,
+    entriesTruncated: false, accounts: ACCOUNTS, busy: false, err: null, clr: null,
+    actingId: null, onReverse: () => {}, links: [], linksUnavailable: false,
+    initialEntryId: RECENT.id,
+  })));
   try {
     for (let i = 0; i < 2; i++) await h.settle();
-    assert.match(h.text(), /not in this page of the journal/);
+    assert.doesNotMatch(h.text(), /BACKDATED january/, "the address opened the table on ONE entry");
+
+    await h.rerender(App(createElement(PostedPanel, {
+      clientId: "c1", entries: [BACKDATED, RECENT], lines: LINES, linesTruncated: false,
+      entriesTruncated: false, accounts: ACCOUNTS, busy: false, err: null, clr: null,
+      actingId: null, onReverse: () => {}, links: [], linksUnavailable: false,
+      initialEntryId: "",
+    })));
+    for (let i = 0; i < 2; i++) await h.settle();
+    assert.match(h.text(), /BACKDATED january/, "Back returns to the list");
+    assert.match(h.text(), /RECENT april/);
+    assert.doesNotMatch(h.text(), /Showing the entry you were sent to/, "the address banner goes with the address");
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("719 — an addressed entry OLDER than the browse page is fetched, merged and expanded", async () => {
+  let asked: string | null = null;
+  const h = await renderComponent(addressedPanel(ARCHIVED.id, async (id) => {
+    asked = id;
+    return { entry: ARCHIVED, lines: ARCHIVED_LINES };
+  }));
+  try {
+    for (let i = 0; i < 4; i++) await h.settle();
+    assert.equal(asked, ARCHIVED.id, "the addressed id is read independently of the browse page");
+    assert.match(h.text(), /ARCHIVED june/, "the fetched entry is merged into the table's rows");
+    // Its OWN lines came with it — the browse read's line page sorts by entry_id and can miss them.
+    assert.match(h.text(), /old/, "the addressed entry's lines are merged too");
+    assert.doesNotMatch(h.text(), /could not be found for this client/);
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("719 — an entry already ON the browse page is NOT fetched again", async () => {
+  let calls = 0;
+  const h = await renderComponent(addressedPanel(RECENT.id, async () => {
+    calls += 1;
+    return null;
+  }));
+  try {
+    for (let i = 0; i < 4; i++) await h.settle();
+    assert.equal(calls, 0, "a record the page is already holding must not become a second source of truth");
+    assert.match(h.text(), /RECENT april/);
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("719 — a BOGUS or foreign id keeps the honest 'outside this page' state", async () => {
+  const h = await renderComponent(addressedPanel("f0000000-0000-4000-8000-00000000ffff", async () => null));
+  try {
+    for (let i = 0; i < 4; i++) await h.settle();
+    assert.match(h.text(), /could not be found for this client/);
+    assert.doesNotMatch(h.text(), /ARCHIVED june/);
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("719 — an id belonging to ANOTHER CLIENT of the same firm is never merged into this table", async () => {
+  // RLS scopes by FIRM, so a by-id read resolves a sibling client's entry perfectly well. Merging
+  // it would put another client's figures on this client's page.
+  const h = await renderComponent(addressedPanel(ARCHIVED.id, async () => ({
+    entry: { ...ARCHIVED, client_id: "c2" }, lines: ARCHIVED_LINES,
+  })));
+  try {
+    for (let i = 0; i < 4; i++) await h.settle();
+    assert.doesNotMatch(h.text(), /ARCHIVED june/, "a foreign client's entry must not appear here");
+    assert.match(h.text(), /could not be found for this client/);
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("719 — while the addressed read is in flight the table says so, never 'not found'", async () => {
+  let release: (() => void) | null = null;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  const h = await renderComponent(addressedPanel(ARCHIVED.id, async () => {
+    await gate;
+    return { entry: ARCHIVED, lines: ARCHIVED_LINES };
+  }));
+  try {
+    for (let i = 0; i < 2; i++) await h.settle();
+    assert.match(h.text(), /Looking up the entry this link names/);
+    assert.doesNotMatch(h.text(), /could not be found for this client/, "'we are looking' and 'it is not there' are different claims");
+    release!();
+    for (let i = 0; i < 4; i++) await h.settle();
+    assert.match(h.text(), /ARCHIVED june/);
   } finally {
     await h.unmount();
   }

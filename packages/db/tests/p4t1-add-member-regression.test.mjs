@@ -11,8 +11,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /** Poll (bounded) until backend `pid` is observably WAITING (wait_event_type='Lock') on a
  *  lock held by `blockerPid`. Mirrors rig-runtime-race.mjs's waitBlockedBy / wb-calls.mjs's
- *  waitBlockedByOrThrow convention (db-tests.md: "never a sleep, which proves nothing about
- *  whether the block actually happened"), copied locally rather than cross-imported from
+ *  waitBlockedByOrThrow convention (never a sleep, which proves nothing about
+ *  whether the block actually happened), copied locally rather than cross-imported from
  *  another test area's own helper module. */
 async function waitBlockedByOrThrow(pid, blockerPid, timeoutMs = 5000) {
   const deadline = Date.now() + timeoutMs;

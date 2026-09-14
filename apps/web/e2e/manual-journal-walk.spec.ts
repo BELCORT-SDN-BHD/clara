@@ -1,7 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
-import { ensureRealFocus } from "./helpers";
+import { ensureRealFocus, settleForScan } from "./helpers";
 import { JOURNAL_WORK } from "./journal-work-mock.mjs";
 
 /**
@@ -58,22 +58,8 @@ async function control(page: Page, body: Record<string, unknown>): Promise<void>
   expect(status, `the fixture control endpoint answered ${status}`).toBe(200);
 }
 
-/** Wait for every FINITE animation before measuring colour or geometry — see
- *  `journal-work-walk.spec.ts`'s own note for why this is a measurement rule
- *  rather than hygiene. Infinite animations (a Skeleton's pulse) are excluded. */
-async function settle(page: Page): Promise<void> {
-  await page.mouse.move(0, 0);
-  await page.waitForFunction(() =>
-    document.getAnimations().every((a) => {
-      if (a.playState !== "running") return true;
-      const iterations = a.effect?.getComputedTiming().iterations ?? 1;
-      return iterations === Infinity;
-    }),
-  );
-}
-
 async function scan(page: Page, what: string): Promise<void> {
-  await settle(page);
+  await settleForScan(page);
   const results = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
   expect(results.passes.length, `${what}: axe must actually have inspected the page`).toBeGreaterThan(0);
   expect(results.violations, `${what} axe violations`).toEqual([]);
@@ -399,7 +385,7 @@ test("t634 renders at 320 px, at 200 % zoom, by keyboard, and with reduced motio
 
   // NARROW: no horizontal scroll of the page itself. A table of money may scroll
   // inside its own container; the page may not.
-  await settle(page);
+  await settleForScan(page);
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   expect(overflow, "the composer must not scroll horizontally at 320 px").toBeLessThanOrEqual(1);
   await expect(evidence(page)).toBeVisible();
@@ -412,7 +398,7 @@ test("t634 renders at 320 px, at 200 % zoom, by keyboard, and with reduced motio
   // 200 % ZOOM, which the product models as a halved CSS viewport.
   await page.setViewportSize({ width: 640, height: 512 });
   await page.goto(COMPOSER_URL);
-  await settle(page);
+  await settleForScan(page);
   await expect(evidence(page)).toBeVisible();
   const zoomOverflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   expect(zoomOverflow, "the composer must not scroll horizontally at 200 % zoom").toBeLessThanOrEqual(1);

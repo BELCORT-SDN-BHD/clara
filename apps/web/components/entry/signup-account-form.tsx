@@ -75,7 +75,7 @@ import { StateBanner } from "@/components/common/state";
  * READ FROM THE DATABASE there, not authored as a checkbox label here
  * (`signup-legal-stage.tsx`, rendered by `signup-step.tsx`'s third fork). A
  * checkbox on THIS screen that recorded nothing was already the fake receipt
- * `apps/web/AGENTS.md` forbids; moving the gate to where a real acceptance can
+ * this house forbids outright; moving the gate to where a real acceptance can
  * be recorded is the fix, not a smaller version of the same checkbox. This
  * form now gates on nothing but the ordinary field validation every signup
  * form has.

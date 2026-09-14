@@ -11,7 +11,7 @@
 // for anything that self-fetches via useHydratedPart, per this file's own
 // house precedent (close-a11y.test.tsx's header). Every dialog interaction
 // rides `clickButton`/`setFieldValue` from test/hookHarness.ts
-// (apps/web/AGENTS.md's two dialog-testing laws) — `h.fireEvent` never
+// (the two dialog-testing laws) — `h.fireEvent` never
 // touches anything inside an open dialog's portal in this file.
 
 import { test } from "node:test";

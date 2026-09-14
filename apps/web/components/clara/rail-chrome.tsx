@@ -110,8 +110,9 @@ export function ClaraRailChrome({
   const wrapperRef = React.useRef<HTMLDivElement | null>(null);
   const wasOpen = React.useRef(open);
 
-  // BELOW `lg`, THE RAIL DOES NOT OPEN ITSELF — and this is a defect the browser
-  // leg caught, not a preference.
+  // BELOW `lg`, THE RAIL DOES NOT OPEN ITSELF, AND IT LEAVES WHEN THE VIEWPORT
+  // BECOMES NARROW — and the first half is a defect the browser leg caught, not
+  // a preference; the second is #736, the owner's option C.
   //
   // `claraThreadStore` initialises `railOpen: true` with no persistence, so
   // every full page load opens the rail. In the DOCKED arm that is a 320px
@@ -124,22 +125,56 @@ export function ClaraRailChrome({
   // wall. The launcher is right there, and the audit's own open question named
   // this exact case ("Defaulting open on a phone hides the workbench entirely").
   //
-  // ONE FULL PAGE LOAD, ONCE. `RailMount` is outside the client key, so this
-  // component mounts once per document and this effect does not re-run on a
-  // client-side navigation or a client switch — a rail the human opened at this
-  // width STAYS open while they move around. Nothing here touches the store's
-  // default or the docked arm.
+  // ONE FULL PAGE LOAD, ONCE, AND THEN EVERY CROSSING INTO NARROW (#736). This
+  // effect used to be the first half alone — a single mount-time check with an
+  // empty dependency list — and #736 is the hole that left: a rail open at a wide
+  // viewport STAYED open through a resize, a rotation or a zoom that reached this
+  // breakpoint, and at 320px the 85vw panel then sat over the page's own controls.
+  // The Work-cancellation walk had to open its confirm dialog wide and narrow
+  // afterwards to reach "Cancel Work" at all, and said so in a comment that is now
+  // retired. The rule the owner chose (2026-09-13, option C) is the mount check
+  // generalised rather than a second mechanism: WHENEVER the viewport crosses from
+  // wide into narrow, the rail closes and leaves its launcher.
+  //
+  // A `change` EVENT IS EXACTLY A CROSSING, which is why this needs no previous
+  // value of its own to compare against: `matchMedia` fires only when `matches`
+  // FLIPS, so `matches === true` inside the handler means "we have just arrived
+  // at a narrow width" and `matches === false` means "we have just left one".
+  // Crossing back to wide therefore falls through and changes nothing — the
+  // docked arm keeps whatever state the human left it in, which is AC 4.
+  //
+  // WHAT STILL DOES NOT CLOSE THE RAIL. `RailMount` is outside the client key, so
+  // this component mounts once per document and neither arm of this effect re-runs
+  // on a client-side navigation or a client switch — a rail the human opened at a
+  // narrow width STAYS open while they move around, which is AC 3 and was the
+  // reason the mount check was written `[]` in the first place. Nothing here
+  // touches the store's default, and nothing here fires at or above `lg`.
   //
   // THE SLIDE-OUT ON A NARROW FIRST LOAD IS DELIBERATE AND RECORDED. The server
   // renders the rail open (it cannot know the viewport), so the close happens
   // one effect later and the panel takes its normal 200ms exit. That reads as
   // "Clara is here, and has stepped aside", which is a truer first frame than a
   // panel that was never there — and it is the same 200ms the panel uses
-  // everywhere else, not a special case.
+  // everywhere else, not a special case. A resize-driven close takes the SAME
+  // exit, for the same reason: it is the same store write, through the same
+  // presence latch (`lib/clara/useRailPresence.ts`), so reduced motion suppresses
+  // it exactly where it already did.
+  //
+  // GUARDED ON THE METHOD, not on `window` — the same one-line check the two
+  // handlers below use, and for the same measured reason: a partial `window` stub
+  // (the node test harness) has the object and not the method, and reaching
+  // straight through throws out of a passive effect where the honest answer is
+  // "this host cannot tell me the arm, so do nothing".
   React.useEffect(() => {
     if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
-    if (!window.matchMedia(NARROW_QUERY).matches) return;
-    if (claraThreadStore.isRailOpen()) claraThreadStore.setRailOpen(false);
+    const narrow = window.matchMedia(NARROW_QUERY);
+    const closeIfNarrow = () => {
+      if (!narrow.matches) return;
+      if (claraThreadStore.isRailOpen()) claraThreadStore.setRailOpen(false);
+    };
+    closeIfNarrow();
+    narrow.addEventListener("change", closeIfNarrow);
+    return () => narrow.removeEventListener("change", closeIfNarrow);
   }, []);
 
   React.useEffect(() => {

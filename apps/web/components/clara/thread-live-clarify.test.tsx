@@ -137,12 +137,31 @@ function withFetch(impl: (url: string, init?: RequestInit) => Promise<Response> 
   });
 }
 
+/**
+ * Settle until `condition` holds — BOUNDED BY PASSES, NEVER BY THE CLOCK (#706).
+ *
+ * THIS USED TO CARRY `Date.now() + 8_000`, and that wall clock is the whole defect. Each pass is
+ * one `act()`-wrapped macrotask flush: a FIXED amount of work that does not change with the host.
+ * What changed with the host was how much of that fixed work fitted inside eight seconds — so on
+ * a machine running three suites at once the loop ran out of clock while the component was still
+ * making normal progress, and the cell failed with "timed out waiting for the one answer control"
+ * (seen in four separate full runs, 2/2 alone every time). Counting passes instead makes this
+ * cell's verdict identical on a quiet host and a loaded one.
+ *
+ * WHY 400. The longest chain here is mount -> messages read -> turn POST -> stream open -> parked
+ * frame -> interruptions read -> render, which settles in well under twenty passes; 400 is two
+ * orders of magnitude of headroom and still returns in about a second when something is genuinely
+ * stuck, so the failure message below means "this never happened", not "this host was busy".
+ */
+const MAX_SETTLE_PASSES = 400;
+
 async function settleUntil(h: { settle: () => Promise<void> }, condition: () => boolean, label: string): Promise<void> {
-  const deadline = Date.now() + 8_000;
-  while (!condition()) {
-    if (Date.now() >= deadline) throw new Error(`timed out waiting for ${label}`);
+  for (let pass = 0; pass < MAX_SETTLE_PASSES; pass += 1) {
+    if (condition()) return;
     await h.settle();
   }
+  if (condition()) return;
+  throw new Error(`${label} never arrived within ${MAX_SETTLE_PASSES} settle passes (a bound on WORK, not on wall-clock time — read a red here as a stall, never as a slow host)`);
 }
 
 const buttonNamed = (name: string) => (node: Stub) => node.tagName === "BUTTON" && textOf(node).trim() === name;

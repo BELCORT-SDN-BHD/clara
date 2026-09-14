@@ -48,6 +48,12 @@ export interface ClaraThreadUiState {
    *  shipped was silence: the poll stopped asking and wrote nothing, so the Stop control and the
    *  clock stayed mounted for the life of the mount over a turn nothing could observe. */
   turnLostSight: boolean;
+  /** #734 — TRUE once something in THIS TAB threw while rendering a stream event that
+   *  arrived perfectly well. It is a fact about the tab's own paint, never about the
+   *  turn: the message was accepted, the run is live, and `sendStatus` is deliberately
+   *  left alone (a render fault that set it to "error" is precisely the mis-attribution
+   *  this flag exists to end — see `markRenderFault`). */
+  renderFault: boolean;
   stream: ClaraStreamState;
 }
 
@@ -69,6 +75,7 @@ const emptyThreadState: ClaraThreadUiState = {
   turnStatus: null,
   parkedClarify: null,
   turnLostSight: false,
+  renderFault: false,
   stream: initialClaraStreamState,
 };
 
@@ -232,7 +239,20 @@ export const claraThreadStore = {
   },
 
   beginSend(threadId: string): void {
-    setThread(threadId, { sendStatus: "sending", sendError: null, pendingUserParts: null });
+    setThread(threadId, { sendStatus: "sending", sendError: null, pendingUserParts: null, renderFault: false });
+  },
+
+  /** #734 — A RENDER FAULT IS NOT A FAILED SEND, and this is the whole difference
+   *  between the two writers. `markSendFailed` below says the message never got
+   *  through and clears the turn with it; this says the message DID get through and
+   *  this tab could not draw part of it. Nothing about the turn is touched —
+   *  `activeTaskId`, the clock and the stream all stand, because the run is still
+   *  going and `runClaraTaskStream` is still reading it (stream.ts's `deliverEvent`).
+   *
+   *  Cleared by the next `beginSend`: a fault belongs to the turn it happened on, and
+   *  a person who sends again has already decided what to do about it. */
+  markRenderFault(threadId: string): void {
+    setThread(threadId, { renderFault: true });
   },
 
   markAccepted(threadId: string, taskId: string): void {

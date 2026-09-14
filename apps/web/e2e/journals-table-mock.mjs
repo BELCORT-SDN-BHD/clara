@@ -63,6 +63,13 @@ export const JOURNALS = {
   // #634 — the Work and the operation receipt behind the `backdated` entry.
   workId: "cafe0001-cafe-4caf-8caf-cafecafe0001",
   receiptId: "cafe0002-cafe-4caf-8caf-cafecafe0002",
+  // #719 — THE ENTRY THE BROWSE READ NEVER RETURNS. The real cap is 1,000 newest by `created_at`
+  // and this fixture cannot hold a thousand rows, so the cap is modelled where it actually bites:
+  // `archived` is ABSENT from the client-scoped `journal_entries` answer below and PRESENT from the
+  // by-id one, which is exactly the shape a person following a link to an older entry meets.
+  archived: "f1f1f1f1-9999-4999-8999-999999999991",
+  // A lane-owned id that resolves to NOTHING — the honest "outside this page" state's own address.
+  missing: "f1f1f1f1-9999-4999-8999-999999999992",
 };
 
 const CLIENT = {
@@ -93,6 +100,12 @@ const ENTRIES = [
   entry({ id: JOURNALS.march, posting_date: "2026-03-03", memo: "MARCH bank charges", created_at: "2026-03-03T00:00:00.000Z" }),
   entry({ id: JOURNALS.draft, posting_date: "2026-04-10", memo: "DRAFT office supplies", status: "draft", approved_at: null, created_at: "2026-04-10T00:00:00.000Z" }),
 ];
+
+/** #719 — the addressed entry and its own lines, reachable ONLY by id. */
+const ARCHIVED = entry({
+  id: JOURNALS.archived, posting_date: "2019-06-30", memo: "ARCHIVED June rent",
+  created_at: "2019-06-30T00:00:00.000Z", approved_at: "2019-06-30T00:00:00.000Z",
+});
 
 function pair(entryId, cents, n) {
   return [
@@ -186,12 +199,36 @@ export async function handleJournalsTableSupabase(request, response, path, url, 
   }
 
   if (request.method === "GET" && path === "/rest/v1/journal_entries") {
+    // #719 — THE BY-ID READ, scoped to this lane's OWN two addressed ids (never a bare "any id
+    // with no client_id" branch, which would answer for every other lane's by-id read too —
+    // e2e-fixture-ownership.test.ts's whole discipline). `archived` resolves; `missing` resolves to
+    // nothing, which is what an id that never existed, a foreign firm's id and an unreadable id all
+    // look like through RLS.
+    const byId = url.searchParams.get("id");
+    if (byId === `eq.${JOURNALS.archived}`) {
+      sendJson(response, 200, [ARCHIVED], cors);
+      return true;
+    }
+    if (byId === `eq.${JOURNALS.missing}`) {
+      sendJson(response, 200, [], cors);
+      return true;
+    }
     if (client !== ours) return false;
+    // THE BROWSE READ DOES NOT CARRY `archived` — see JOURNALS.archived's own note.
     sendJson(response, 200, ENTRIES, cors);
     return true;
   }
 
   if (request.method === "GET" && path === "/rest/v1/journal_lines") {
+    const byEntry = url.searchParams.get("entry_id");
+    if (byEntry === `eq.${JOURNALS.archived}`) {
+      sendJson(response, 200, pair(JOURNALS.archived, 310_000, "archived rent"), cors);
+      return true;
+    }
+    if (byEntry === `eq.${JOURNALS.missing}`) {
+      sendJson(response, 200, [], cors);
+      return true;
+    }
     if (client !== ours) return false;
     sendJson(response, 200, LINES, cors);
     return true;

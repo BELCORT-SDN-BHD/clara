@@ -6,8 +6,8 @@
 // apps/dashboard/app/accounts/api.ts:17-22 is the measured precedent for both the
 // relation name and its column list.
 //
-// T4 (port wave) rung-0 census, 2026-08-28, live 0140 catalog (apps/web/AGENTS.md's
-// "chase the LIVE body" rule): `clara.upsert_account` is the ONLY write door onto this
+// T4 (port wave) rung-0 census, 2026-08-28, live 0140 catalog (the "chase
+// the LIVE body" rule): `clara.upsert_account` is the ONLY write door onto this
 // table — census-confirmed by a direct grant read: clara_authenticated holds SELECT on
 // clara.coa_accounts but no INSERT/UPDATE, even though the table's own RLS policy would
 // structurally allow it; the write path is exclusively this SECURITY DEFINER door. It is

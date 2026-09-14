@@ -45,7 +45,7 @@ function firstString(...values: unknown[]): string | null {
  *  `framing` is left EMPTY on purpose. The runtime's own `CLARIFY_FRAMING`
  *  (packages/runtime/workflows/chatTurn.v10.prompt.ts:190) is English text that a
  *  PERSISTED part carries for itself; a live-assembled part has none, and apps/web
- *  routes every string it authors through next-intl (apps/web/AGENTS.md) rather than
+ *  routes every string it authors through next-intl rather than
  *  hard-coding a second copy of the runtime's sentence here. The card supplies the
  *  translated fallback when this is blank. */
 export function foldLiveClarifyParts(chunks: readonly unknown[]): LiveClarifyPart[] {

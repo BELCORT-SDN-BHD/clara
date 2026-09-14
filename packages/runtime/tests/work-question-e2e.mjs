@@ -22,7 +22,8 @@
 //      returns a receipt for the post-answer segment. On respawn the WDK re-executes the step, the
 //      tool call REPLAYS onto the same logical identity, and one entry / one receipt exist.
 //   5. LEASE EXPIRY WITH TWO WORKERS. Worker A holds a question past its own lease WITHOUT renewing
-//      (`stall_deliver`, `CLARA_CTL_LEASE_SECONDS=2`); worker B re-leases and delivers. Exactly one
+//      (`stall_deliver`; every engine this battery spawns carries `CLARA_CTL_LEASE_SECONDS=2` —
+//      see the timing contract below); worker B re-leases and delivers. Exactly one
 //      resume wins, one entry and one receipt exist, and A never stamps B's delivery as its own.
 //   6. EXPIRY IS RECOVERABLE. A past-due question is expired, delivered as `{kind:'expired'}`, the
 //      Work settles `expired` (recoverable), and a Retry makes a NEW run that asks AGAIN — as a
@@ -94,6 +95,47 @@ const mint = (sub) =>
     .setExpirationTime("30m")
     .sign(key);
 
+// ---------------------------------------------------------------------------
+// THE BATTERY'S TIMING CONTRACT (#745).
+//
+// EVERY ENGINE GETS THE SHORT LEASE, faulted ones included. This file used to DELETE
+// CLARA_CTL_LEASE_SECONDS from the child env and hand "2" only to the engine that recovers, so
+// the FAULTED engine in leg 3 claimed with control.mjs's 60-second default — and a claim already
+// committed cannot be shortened afterwards. Measured on a passing run (2026-09-12, the database
+// polled once a second): leased at 10:11:25.1 with the lease running to 10:12:24.194, attempt 2
+// delivered 10:12:25.35, running 10:12:26.5, completed 10:12:27.66. Sixty of the leg's ninety
+// seconds were lease-waiting; the resume itself took 2.3 s. Under host load the remaining thirty
+// overran and the leg timed out on a path that was working. Two seconds everywhere returns that
+// headroom to the thing the leg actually measures.
+//
+// AND EVERY LEG'S BUDGET IS DERIVED FROM IT — see `settleBudgetMs` below — rather than being a
+// bare constant nobody can check against the lease it is supposed to cover.
+const CTL_LEASE_SECONDS = 2;
+const CTL_POLL_MS = 2000; // control.mjs's own CLARA_CTL_POLL_MS default; the battery does not move it
+
+/**
+ * A leg's settle budget: one lease plus one control poll for every lease the leg must WAIT OUT,
+ * plus a stated slack for the work itself.
+ *
+ *   budget = leaseWaits × (lease + poll) + slack
+ *
+ * `leaseWaits` is a property of the leg, not a guess: leg 3 waits out exactly one lease (the
+ * faulted engine's, before the respawned one may re-lease); leg 5 waits out two (worker A's
+ * stalled lease, then the re-lease that worker B has to observe expire). The slack is the only
+ * judgement call, and it is stated rather than folded invisibly into a round number: the resume
+ * itself was measured at 2.3 s on a quiet host, so DEFAULT_SLACK_MS is roughly twenty-five times
+ * the measured work — headroom for a loaded host, not for lease arithmetic. A timeout that
+ * reports this budget is therefore a TIMING statement about the host, not a verdict on the
+ * lease/resume path.
+ */
+const DEFAULT_SLACK_MS = 60_000;
+// Leg 5 is the only place two full engines are up at once, on a host that is already running
+// one; its slack is doubled for that reason alone.
+const TWO_ENGINE_SLACK_MS = 110_000;
+function settleBudgetMs({ leaseWaits, slackMs = DEFAULT_SLACK_MS }) {
+  return leaseWaits * (CTL_LEASE_SECONDS * 1000 + CTL_POLL_MS) + slackMs;
+}
+
 function childEnv(port, extra = {}) {
   const base = Object.assign({}, process.env, {
     PORT: String(port),
@@ -103,15 +145,33 @@ function childEnv(port, extra = {}) {
     SUPABASE_JWT_ISSUER: ISSUER,
     SUPABASE_JWT_AUD: AUD,
     SUPABASE_JWT_SECRET: jwtSecret,
+    // #745 — set, not deleted. See the timing contract above.
+    CLARA_CTL_LEASE_SECONDS: String(CTL_LEASE_SECONDS),
   });
   delete base.CLARA_WORK_TEST_FAULT;
-  delete base.CLARA_CTL_LEASE_SECONDS;
   return Object.assign(base, extra);
+}
+
+/** How many `[control]` lines each engine keeps for a failure message. A control cycle is quiet
+ *  on the happy path (control.mjs logs only edges), so this is generous for a whole leg. */
+const CONTROL_LINES_KEPT = 200;
+
+/** Every engine this battery has spawned, so a failing leg can quote the control arms that ran. */
+const ENGINES = [];
+
+/** The `[control]` lines of every engine spawned so far, newest engine last — the artefact #745
+ *  asks for. Appended to a failing leg's error so the arm is in the captured output, not only in
+ *  a terminal someone was watching. */
+function controlTranscript() {
+  const parts = ENGINES.filter((e) => e.state.control.length > 0).map(
+    (e) => `--- [control] from the engine on port ${e.port} ---\n${e.state.control.join("\n")}`,
+  );
+  return parts.length === 0 ? "(no [control] lines were emitted by any engine)" : parts.join("\n");
 }
 
 function spawnServe(port, extra = {}) {
   const child = spawn(process.execPath, [serveScript], { env: childEnv(port, extra), stdio: ["ignore", "pipe", "pipe"] });
-  const state = { exited: false, exitInfo: null, banner: null, serving: null, stdout: "" };
+  const state = { exited: false, exitInfo: null, banner: null, serving: null, stdout: "", control: [] };
   child.on("exit", (code, signal) => {
     state.exited = true;
     state.exitInfo = { code, signal };
@@ -130,6 +190,19 @@ function spawnServe(port, extra = {}) {
       const serving = /\[clara-runtime\] serving .*/.exec(line);
       if (serving) state.serving = serving[0];
     }
+    // THE ENGINE'S `[control]` LINES ARE KEPT (#745). This handler used to read the banner out of
+    // stdout and drop the rest, and the rest is where control.mjs says which arm it took. On the
+    // one failing run that was traced, `clara.agent_interruptions` showed the answer DELIVERED
+    // while the Work stayed `awaiting_input` — and whether the resume hook fired and the WDK run
+    // then stalled, or the "already landed" belt was a false positive that stranded the Work,
+    // is exactly the distinction those lines carry. Forwarded live (so an interactive run shows
+    // them in order) AND retained on `state` (so a failure message can quote them). It rides the
+    // SAME line ingester as the boot lines above, so the line-boundary buffering below is the one
+    // buffer both diagnostics depend on.
+    if (!line.includes("[control]") && !line.includes("CONTROL listening")) return;
+    state.control.push(line);
+    if (state.control.length > CONTROL_LINES_KEPT) state.control.shift();
+    process.stdout.write(`[child:${port} control] ${line}\n`);
   };
   let pending = "";
   child.stdout.setEncoding("utf8");
@@ -153,7 +226,9 @@ function spawnServe(port, extra = {}) {
     state.stderr = `${state.stderr ?? ""}${d}`.slice(-8000);
     if (/FATAL|Error:|exit_before_deliver|exit_after_commit|stall_deliver|lease lost/.test(d)) process.stderr.write(`[child:${port}] ${d}`);
   });
-  return { child, state, port };
+  const engine = { child, state, port };
+  ENGINES.push(engine);
+  return engine;
 }
 
 /**
@@ -307,7 +382,7 @@ async function main() {
   }
 
   /** Wait for a Work to reach a state, over the REAL read route. */
-  async function pollWork(port, workId, jwt, pred, label, deadlineMs = 90000) {
+  async function pollWork(port, workId, jwt, pred, label, deadlineMs = settleBudgetMs({ leaseWaits: 1 })) {
     const end = Date.now() + deadlineMs;
     let last = null;
     while (Date.now() < end) {
@@ -316,7 +391,14 @@ async function main() {
       if (r.status === 200 && pred(r.body)) return r.body;
       await sleep(250);
     }
-    throw new Error(`pollWork timeout (${label}); last=${JSON.stringify(last)}`);
+    // The budget is spelled out, and the control transcript attached, so this red can be READ:
+    // a lease that never expired, an arm that ran and stalled, or simply a host too loaded to
+    // finish 2.3 s of work inside the stated slack are three different failures (#745).
+    throw new Error(
+      `pollWork timeout (${label}) after ${deadlineMs}ms `
+      + `[budget = leaseWaits × (${CTL_LEASE_SECONDS}s lease + ${CTL_POLL_MS}ms poll) + stated slack]; `
+      + `last=${JSON.stringify(last)}\n${controlTranscript()}`,
+    );
   }
 
   /** Wait for the run to PARK on a question, read from the database. */
@@ -561,10 +643,16 @@ async function main() {
     assert.ok(afterCrash.delivery_attempts >= 1, "…with the attempt counted");
     assert.equal(await countEntries(ctx.client), 0, "and nothing posted");
 
-    const recovered = spawnServe(PORT_B, { CLARA_CTL_LEASE_SECONDS: "2" });
+    const recovered = spawnServe(PORT_B);
     try {
       await waitReady(PORT_B, 60000, recovered);
-      const settled = await pollWork(PORT_B, workId, ctx.jwt, (b) => TERMINAL.has(b.work.status), "leg 3 settles");
+      // ONE lease to wait out: the faulted engine's, which must expire before this engine may
+      // re-lease the row. Both engines carry the short lease (see the timing contract), so that
+      // wait is two seconds rather than control.mjs's sixty-second default.
+      const settled = await pollWork(
+        PORT_B, workId, ctx.jwt, (b) => TERMINAL.has(b.work.status), "leg 3 settles",
+        settleBudgetMs({ leaseWaits: 1 }),
+      );
       assert.equal(settled.work.status, "completed", `the respawned engine completes the Work (got ${settled.work.status})`);
       assert.equal(await countEntries(ctx.client), 1, "EXACTLY ONE entry after the crash and the retry");
       assert.equal(await countReceipts(workId), 1, "EXACTLY ONE committed receipt");
@@ -645,16 +733,22 @@ async function main() {
     // then prove only "two processes, one entry", which is true of one process too. Starting A and
     // letting one control cycle elapse makes A the FIRST claimant deterministically; B then finds
     // a live lease, waits it out, and re-leases when A's two seconds expire without a renewal.
-    const workerA = spawnServe(PORT_D, { CLARA_WORK_TEST_FAULT: "stall_deliver", CLARA_CTL_LEASE_SECONDS: "2" });
+    const workerA = spawnServe(PORT_D, { CLARA_WORK_TEST_FAULT: "stall_deliver" });
     let workerB = null;
     try {
       await waitReady(PORT_D, 90000, workerA);
       await sleep(3500);
-      workerB = spawnServe(PORT_E, { CLARA_CTL_LEASE_SECONDS: "2" });
+      workerB = spawnServe(PORT_E);
       // A SECOND full engine on a machine that is already running one takes longer to boot than a
       // first, and this leg is the only place two are up at once.
       await waitReady(PORT_E, 150000, workerB);
-      const settled = await pollWork(PORT_E, workId, ctx.jwt, (b) => TERMINAL.has(b.work.status), "leg 5 settles", 120000);
+      // TWO leases to wait out: worker A's stalled one, and the window in which B observes it
+      // expire before re-leasing. Two full engines are up on this host, which is what the larger
+      // stated slack is for — not the lease arithmetic.
+      const settled = await pollWork(
+        PORT_E, workId, ctx.jwt, (b) => TERMINAL.has(b.work.status), "leg 5 settles",
+        settleBudgetMs({ leaseWaits: 2, slackMs: TWO_ENGINE_SLACK_MS }),
+      );
       assert.equal(settled.work.status, "completed", `one of the two workers delivered (got ${settled.work.status})`);
       assert.equal(await countEntries(ctx.client), 1, "EXACTLY ONE entry, with two workers racing the same answer");
       assert.equal(await countReceipts(workId), 1, "EXACTLY ONE committed receipt");

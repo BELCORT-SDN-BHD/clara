@@ -1,5 +1,7 @@
 import { getRequestConfig } from "next-intl/server";
 
+import { CLARA_BUSINESS_TIMEZONE } from "@/lib/business-date";
+
 /**
  * P1 foundation: a single static locale, no locale-prefixed routing.
  *
@@ -55,12 +57,44 @@ import { getRequestConfig } from "next-intl/server";
  * copy belongs there) is not required to use its assigned block instead —
  * the assignment exists so a train that DOES need fresh keys never has to
  * pick an insertion point another train might also pick.
+ *
+ * ONE PRODUCT-WIDE DISPLAY TIME ZONE (#741, owner ruling 2026-09-13). Left
+ * unset, next-intl resolves the zone from whatever environment the formatter
+ * happens to run in — workerd's on the hosted server (UTC), the viewer's own
+ * browser on the client — so one instant could render as two different wall
+ * clocks either side of hydration, and every server-side format emitted the
+ * library's own "There is no `timeZone` configured" environment-fallback
+ * error. The zone is pinned here instead, and it is `lib/business-date.ts`'s
+ * `CLARA_BUSINESS_TIMEZONE` READ, never a second spelling of the same string:
+ * Clara's scope is Malaysian accounting firms, `clara._book_today()` books in
+ * that zone, and a displayed instant that disagreed with the day the ledger
+ * recorded it on would be the "two machines, two days" hazard that module
+ * exists to prevent, arriving on the READ side.
+ *
+ * A CALL SITE MAY STILL OVERRIDE IT, and exactly one does:
+ * `components/journals/formatted-date.tsx`'s `FormattedDate` pins UTC, because
+ * a `date` column carries no instant and any zone at all could shift the
+ * calendar day the database recorded (that component's own header argues it).
+ * Its `FormattedDateTime` twin inherits this pin.
+ *
+ * PER-FIRM TIME ZONES ARE OUT OF SCOPE. If one is ever needed it becomes a firm
+ * setting that overrides this pin; nothing today asks for one.
  */
-export default getRequestConfig(async () => {
+/** The factory itself, exported so a unit cell can READ what this app configures.
+ *  `getRequestConfig` below is `next-intl/server`, whose client-condition build
+ *  returns a function that throws "not supported in Client Components" — under the
+ *  node test runner that is the only build resolvable, so the default export can be
+ *  imported but never called. A cell that asserted the pin any other way (a source
+ *  regex, a re-declared constant) would be asserting a copy of this rule instead of
+ *  this rule. */
+export async function claraRequestConfig() {
   const locale = "en";
 
   return {
     locale,
+    timeZone: CLARA_BUSINESS_TIMEZONE,
     messages: (await import(`../messages/${locale}.json`)).default,
   };
-});
+}
+
+export default getRequestConfig(claraRequestConfig);

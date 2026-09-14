@@ -38,6 +38,23 @@ const LEAK_DSN = ["postgres:/", "/", LEAK_TOKENS[0], ":", LEAK_TOKENS[1], "@", L
 // fly.toml's own /ready check timeout — the number the MAJOR-1 cells defend. Kept as a named
 // constant so a reader sees WHICH budget the assertion is about, not a bare 5000.
 const FLY_READY_TIMEOUT_MS = 5000;
+
+// #706 — the two numbers that used to be bare constants inside the timing-sensitive cells, named
+// here with the reason each exists, so a CI red on either is readable as timing rather than as a
+// lane defect.
+//
+// How much SLOWER than a settling-lane control a black-holed lane may make /ready look. This is
+// scheduler noise on a loaded host, not the cost of a lane: the defect the MAJOR-1 cell pins adds
+// a whole sequential bounded() deadline (health.mjs's READY_DEADLINE_MS, 5000ms), so there is an
+// order of magnitude between "noise" and "the bug is back".
+const BLACK_HOLE_SLACK_MS = 750;
+// How long a lane verdict may take to CONVERGE. One `_waitForLaneProbeSettleForTest()` is one
+// cycle, and one cycle only suffices when every lane answers inside CLARA_LANE_PROBE_TIMEOUT_MS
+// (3s). Under load a healthy lane misses that bound, the cycle records ok:false for a lane that is
+// fine, and a cell asserting on a single cycle reds on a working recovery path — measured in CI on
+// PR #723, a web+db-only diff that touched no runtime file. Polling for the CONDITION makes the
+// assertion about the behaviour and the budget about the host.
+const LANE_SETTLE_BUDGET_MS = 60_000;
 const READY = await rig.runtimeReady();
 const skip = READY ? false : "Slice-4 (0006) surface absent";
 
@@ -253,14 +270,42 @@ test("ready MAJOR-1: a BLACK-HOLED lane leaves /ready far inside fly's 5s timeou
   try {
     await setBeat("world", "now()");
     await setBeat("control", "now()");
+    // THE MARGIN IS MEASURED AGAINST A CONTROL ON THIS HOST, NOT AGAINST A BARE CONSTANT (#706).
+    // The margin assertion used to read `elapsed < 2000`, which is a statement about the MACHINE
+    // as much as about the code: under host load (another suite on the same box, a loaded CI
+    // runner) a correct /ready overran it, and the red read as a lane defect. This control —
+    // one checkReadiness() with an instantly-settling probe — costs whatever /ready costs on
+    // this host right now, so comparing against it measures the only thing the cell is about:
+    // that the BLACK-HOLED lane adds nothing. The defect being pinned would add a whole
+    // sequential bounded() deadline (health.mjs's READY_DEADLINE_MS, 5s) — orders of magnitude
+    // more than the slack below — so the comparison stays discriminating.
+    _setLaneProbeForTest(async (d) => ({ lane: d.lane, ok: true, latency_ms: 1 }));
+    await _waitForLaneProbeSettleForTest();
+    const c0 = Date.now();
+    await checkReadiness();
+    const controlMs = Date.now() - c0;
+
+    _resetLaneProbeCacheForTest();
+    await setBeat("world", "now()");
+    await setBeat("control", "now()");
     _setLaneProbeForTest(() => new Promise(() => {})); // black hole: never resolves, never rejects
 
     const t0 = Date.now();
     const r = await checkReadiness();
     const elapsed = Date.now() - t0;
 
-    assert.ok(elapsed < FLY_READY_TIMEOUT_MS, `/ready must settle inside fly's ${FLY_READY_TIMEOUT_MS}ms (was ${elapsed}ms)`);
-    assert.ok(elapsed < 2000, `and with real margin, not merely inside it (was ${elapsed}ms)`);
+    assert.ok(
+      elapsed < FLY_READY_TIMEOUT_MS,
+      `/ready must settle inside fly's ${FLY_READY_TIMEOUT_MS}ms (was ${elapsed}ms). `
+        + `If this is the ONLY assertion that failed, read it as host timing: the margin check below passed.`,
+    );
+    assert.ok(
+      elapsed <= controlMs + BLACK_HOLE_SLACK_MS,
+      `the black-holed lane must cost /ready nothing beyond a settling one ON THIS HOST — `
+        + `control ${controlMs}ms, black-holed ${elapsed}ms, stated slack ${BLACK_HOLE_SLACK_MS}ms. `
+        + `The defect this cell pins would add a whole bounded() deadline (~5000ms); a red only a few `
+        + `hundred ms over the control is timing, not a lane on the request path.`,
+    );
     assert.equal(r.ready, true, "an UNMEASURED lane never 503s a healthy machine");
     assert.deepEqual(
       r.checks.pools,
@@ -429,6 +474,33 @@ test("ready: world ON with a STALE control beat FAILS (control listener dead)", 
 // changes add is a new chance to spill one.
 // ===========================================================================
 
+/**
+ * Poll the background lane probe until a lane's verdict satisfies `pred`, or the stated budget
+ * expires (#706).
+ *
+ * A single `_waitForLaneProbeSettleForTest()` awaits ONE cycle, and one cycle carries a correct
+ * verdict only when every lane answered inside CLARA_LANE_PROBE_TIMEOUT_MS. Under host load that
+ * is not a safe assumption, and a cell that asserts on one cycle is asserting on a stopwatch. This
+ * polls for the CONDITION instead — so the assertion is about convergence, which is what the
+ * recovery half actually claims, and the budget is about the host, which is what a red here then
+ * means. The failure message says so explicitly.
+ */
+async function settleLaneUntil(pred, what, budgetMs = LANE_SETTLE_BUDGET_MS) {
+  const deadline = Date.now() + budgetMs;
+  let last = null;
+  for (;;) {
+    await _waitForLaneProbeSettleForTest();
+    last = await checkReadiness();
+    if (pred(last)) return last;
+    if (Date.now() >= deadline) {
+      throw new Error(
+        `the lane probe never converged on ${what} within ${budgetMs}ms — TIMING, unless the verdict below is `
+          + `stably wrong rather than late: ${JSON.stringify(last.checks.pools)} warnings=${JSON.stringify(last.warnings)}`,
+      );
+    }
+  }
+}
+
 /** Every cell's closing assertion: no DSN component, in checks or in any warning line. */
 function assertNoDsnLeak(r) {
   const payload = JSON.stringify(r);
@@ -451,8 +523,12 @@ test("#617 fault: a lane DISCONNECTS -> ok:false with a sanitized code -> RECOVE
     await setBeat("control", "now()");
 
     process.env.CLARA_READ_DATABASE_URL = LEAK_DSN; // points at a host that is not there
-    await _waitForLaneProbeSettleForTest();
-    const down = await checkReadiness();
+    // Converge, don't snapshot (#706) — see settleLaneUntil. A `.invalid` host usually answers in
+    // one cycle; under load it may not, and that is timing rather than a probe that cannot fail.
+    const down = await settleLaneUntil(
+      (r) => Array.isArray(r.checks.pools) && r.checks.pools.find((l) => l.lane === "read")?.ok === false,
+      "the disconnected READ lane reporting ok:false",
+    );
     const downLane = down.checks.pools.find((l) => l.lane === "read");
     assert.equal(downLane.ok, false, "the disconnected lane reports a failure");
     assert.match(downLane.error, /^[A-Za-z0-9_]{1,32}$/, "and only a sanitized code — never raw DB text");
@@ -463,8 +539,14 @@ test("#617 fault: a lane DISCONNECTS -> ok:false with a sanitized code -> RECOVE
     if (prevRead === undefined) delete process.env.CLARA_READ_DATABASE_URL;
     else process.env.CLARA_READ_DATABASE_URL = prevRead;
     _resetLaneProbeCacheForTest();
-    await _waitForLaneProbeSettleForTest();
-    const back = await checkReadiness();
+    // THE HALF THAT WENT RED IN CI (#706, PR #723 — a web+db-only diff). One cycle is not a
+    // recovery: a real lane coming back must beat CLARA_LANE_PROBE_TIMEOUT_MS on a loaded runner
+    // to be recorded healthy in that ONE cycle, and when it does not, a working recovery path
+    // reads as a latched failure. Converge instead.
+    const back = await settleLaneUntil(
+      (r) => Array.isArray(r.checks.pools) && r.checks.pools.find((l) => l.lane === "read")?.ok === true,
+      "the restored READ lane reporting ok:true again",
+    );
     const backLane = back.checks.pools.find((l) => l.lane === "read");
     assert.equal(backLane.ok, true, `the lane must report healthy again once it is (${JSON.stringify(backLane)})`);
     assert.ok(

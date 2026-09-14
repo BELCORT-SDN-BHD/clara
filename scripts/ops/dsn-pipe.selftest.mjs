@@ -29,9 +29,9 @@
 // of dsn-pipe.mjs itself). On Linux, a missing `openssl` FAILS this battery rather than
 // skipping it — the CI runners are Linux and always carry it (review D5).
 
-import { mkdirSync, writeFileSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { mkdirSync, writeFileSync, readFileSync, readdirSync, rmSync, symlinkSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { createServer as createTlsServer } from "node:tls";
 import {
   createHarness, freshDir, fakeDsn, runDsnPipe, assertCleanRefusal,
@@ -49,7 +49,7 @@ const { testCase, asyncTestCase, skipHere, reportFail, reportSkip, summarize } =
 // ---------------------------------------------------------------------------
 console.log("unit level -- withVerifyFull / buildChildEnv / splitArgv:");
 
-const { withVerifyFull, buildChildEnv, splitArgv, nodeDebugEnablesChildProcess, DEFAULT_CA_PATH } = await import("./dsn-pipe.mjs");
+const { withVerifyFull, buildChildEnv, splitArgv, nodeDebugEnablesChildProcess, isEntryPoint, DEFAULT_CA_PATH } = await import("./dsn-pipe.mjs");
 
 testCase("withVerifyFull forces sslmode=verify-full even when the input carries a different mode", () => {
   const out = withVerifyFull(fakeDsn({ hostport: "h:5432", query: "sslmode=require" }));
@@ -288,6 +288,81 @@ await asyncTestCase("a missing CA file FAILS CLOSED cleanly before ever attempti
   assertCleanRefusal(r);
   if (r.stdout.includes("MUST-NOT-RUN")) throw new Error("the child must never start when the CA is missing (fail-closed, not fail-open)");
 });
+// ---------------------------------------------------------------------------
+// THE ENTRY GUARD (#756). The cell above stages a COPY of the script in a temp directory, and
+// on stock macOS `os.tmpdir()` is under `/var` -> a symlink to `/private/var`. The old guard
+// compared a LEXICALLY resolved `process.argv[1]` against `import.meta.url`, which Node's ESM
+// loader has already REALPATHED — so the two strings differed, `main()` never ran, the child
+// exited 0 having done nothing, and the fail-closed cell read that 0 as a FAIL. Root `pnpm lint`
+// was red on every Mac while Linux CI and Windows stayed green. Both outcomes are pinned here:
+// directly on the exported predicate (cheap, deterministic, every platform), and once end-to-end
+// through a genuinely symlinked staging directory.
+// ---------------------------------------------------------------------------
+console.log("\nentry guard (#756 -- realpath-robust, not spelling-robust):");
+
+testCase("(#756) isEntryPoint says YES when argv[1] reaches the module through a SYMLINKED directory", () => {
+  const root = freshDir("dsnpipe-guard-yes-");
+  try {
+    const realDir = join(root, "real");
+    mkdirSync(realDir, { recursive: true });
+    const script = join(realDir, "dsn-pipe.mjs");
+    writeFileSync(script, "// staged copy\n");
+    let link;
+    try {
+      link = join(root, "link");
+      symlinkSync(realDir, link, "dir");
+    } catch (err) {
+      skipHere(`this platform refused to create a directory symlink (${err.code ?? err.message}) — on Windows this needs Developer Mode or an elevated shell`);
+    }
+    // argv[1] as the caller typed it (through the link) vs the module URL as Node records it
+    // (realpathed, through `real`) — the EXACT shape that used to answer NO.
+    const viaLink = join(link, "dsn-pipe.mjs");
+    if (!isEntryPoint(viaLink, pathToFileURL(script).href)) {
+      throw new Error(`the guard must recognise ${viaLink} as the entry point for ${script} — it compares FILES, not spellings`);
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+testCase("(#756) positive control: isEntryPoint still says NO for a genuinely different file, and for no argv[1] at all", () => {
+  const root = freshDir("dsnpipe-guard-no-");
+  try {
+    const a = join(root, "a.mjs");
+    const b = join(root, "b.mjs");
+    writeFileSync(a, "// a\n");
+    writeFileSync(b, "// b\n");
+    if (isEntryPoint(a, pathToFileURL(b).href)) {
+      throw new Error("the guard said YES for two DIFFERENT files — it cannot say NO, so its YES proves nothing");
+    }
+    if (isEntryPoint(undefined, pathToFileURL(b).href)) throw new Error("no argv[1] at all must never count as being the entry point");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+await asyncTestCase("(#756) a missing CA FAILS CLOSED even when the script is reached through a SYMLINKED directory", async () => {
+  const root = freshDir("dsnpipe-symlink-noca-");
+  const realScriptsDir = join(root, "real", "scripts", "ops");
+  mkdirSync(realScriptsDir, { recursive: true });
+  writeFileSync(join(realScriptsDir, "dsn-pipe.mjs"), readFileSync(DSN_PIPE_SRC, "utf8"));
+  const link = join(root, "link");
+  try {
+    symlinkSync(join(root, "real"), link, "dir");
+  } catch (err) {
+    rmSync(root, { recursive: true, force: true });
+    skipHere(`this platform refused to create a directory symlink (${err.code ?? err.message}) — on Windows this needs Developer Mode or an elevated shell`);
+  }
+  const r = await runDsnPipe({
+    scriptPath: join(link, "scripts", "ops", "dsn-pipe.mjs"),
+    dsn: SYNTHETIC_DSN,
+    args: ["--", "node", "-e", "console.log('MUST-NOT-RUN')"],
+  });
+  rmSync(root, { recursive: true, force: true });
+  assertCleanRefusal(r);
+  if (r.stdout.includes("MUST-NOT-RUN")) throw new Error("the child must never start when the CA is missing (fail-closed, not fail-open)");
+});
+
 await asyncTestCase("the child's own exit code passes through untouched (a SUCCESS path, not a refusal)", async () => {
   const r = await runDsnPipe({ scriptPath: DSN_PIPE_SRC, dsn: SYNTHETIC_DSN, args: ["--", "node", "-e", "process.exit(37)"] });
   if (r.spawnError || r.timedOut || r.signal !== null) throw new Error(`expected a clean pass-through, got ${JSON.stringify(r)}`);

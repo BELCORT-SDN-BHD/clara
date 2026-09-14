@@ -52,7 +52,7 @@ async function stageSuggestedDraft({ client, proposer, line, rule }) {
   const lineRow = (await rootQuery(
     "select entry_date from clara.bank_statement_lines where id = $1", [line],
   )).rows[0];
-  // ONE transaction (db-tests.md's withTxn rule): t_jl_balance is DEFERRABLE INITIALLY
+  // ONE transaction (withTxn's rule): t_jl_balance is DEFERRABLE INITIALLY
   // DEFERRED, but a pooled query() outside an explicit begin is its OWN autocommitting
   // transaction, so the entry insert alone would commit -- and get checked -- before any line
   // exists (the exact "unbalanced debit=0 credit=0" trap this rule warns about).

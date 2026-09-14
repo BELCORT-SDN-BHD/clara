@@ -1,6 +1,6 @@
 // MEMBERS — the five governed doors behind /admin/members.
 //
-// RUNG-0 CENSUS, every one at its LIVE body (apps/web/AGENTS.md; the P4 order's
+// RUNG-0 CENSUS, every one at its LIVE body (the P4 order's
 // §0.2: "census your doors at the LIVE body, never at a migration's first
 // CREATE"). Censused 2026-08-30 by reading every `create [or replace] function
 // clara.<name>` across `packages/db/migrations/`, then checking that no later
@@ -49,7 +49,7 @@
 //    active' on both membership doors.
 //
 // EVERY ACT RE-READS. `lib/parts/hooks.ts`'s `act()` reloads unconditionally after
-// every call, success or failure. No optimistic update, ever (apps/web/AGENTS.md).
+// every call, success or failure. No optimistic update, ever.
 
 import { callDoor, DoorRefusal } from "../doors";
 import { RefusalError } from "../wire";
@@ -205,7 +205,7 @@ export function revokeInvite(
  * would need a user picker over people outside the firm, and no relation offers
  * one. Shipping the control anyway — a uuid text box, or a picker over the people
  * who are ALREADY members — would be a fake control, which
- * `apps/web/AGENTS.md` forbids outright. The honest path into a firm is the
+ * this house forbids outright. The honest path into a firm is the
  * invite journey (`invite_member` → `accept_invite`), which is what this surface
  * ships.
  *

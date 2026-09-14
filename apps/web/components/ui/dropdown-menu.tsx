@@ -12,7 +12,7 @@
 // ONE DEVIATION FROM THE CLI'S OUTPUT, and the only hand edit in this file:
 // `DropdownMenuItem`'s class string shipped
 // `dark:data-[variant=destructive]:focus:bg-destructive/20`. STRIPPED — this app
-// is light-theme-only (owner ruling Q4; apps/web/AGENTS.md: "no `dark:`"), and
+// is light-theme-only (owner ruling Q4: "no `dark:`"), and
 // every other vendored primitive here carries none. Nothing replaces it: the
 // non-`dark:` sibling on the same line already paints the destructive focus
 // state.

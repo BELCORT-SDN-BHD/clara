@@ -344,7 +344,15 @@ test("#1 (round-6, Codex): redrive() takes the SAME wake_coalesce advisory lock 
   await redrivePidPromise;
 
   let blocked = false;
-  const deadline = Date.now() + 5000;
+  // #706 — a LOAD-AWARE budget, stated. `redrive()` has to reach the lock acquisition before
+  // `pg_stat_activity` can show it waiting, and on a contended host (another suite on the machine,
+  // a loaded CI runner) the five seconds this used to allow were spent before the connection got
+  // that far — so a correctly-blocked redrive read as one that raced straight through, which is
+  // the exact defect this cell exists to catch and therefore the worst possible false red. The
+  // poll is a CONDITION poll, so the budget changes no assertion's meaning: on the happy path it
+  // exits in milliseconds, and a timeout is a statement about the host.
+  const BLOCKED_WAIT_BUDGET_MS = 60_000;
+  const deadline = Date.now() + BLOCKED_WAIT_BUDGET_MS;
   while (Date.now() < deadline) {
     const r = await fx.rootQuery(
       "select count(*)::int as n from pg_stat_activity where pid = $1 and wait_event_type = 'Lock' and $2 = any(pg_blocking_pids(pid))",
@@ -362,7 +370,14 @@ test("#1 (round-6, Codex): redrive() takes the SAME wake_coalesce advisory lock 
   c1.release();
   const result = await redrivePromise;
 
-  assert.equal(blocked, true, "#1 (round-6): THE CORE ASSERTION — redrive() must be observably BLOCKED behind the JS-side's own held wake_coalesce lock; if the two literals ever desync, this call would race straight through instead");
+  assert.equal(
+    blocked,
+    true,
+    "#1 (round-6): THE CORE ASSERTION — redrive() must be observably BLOCKED behind the JS-side's own held "
+      + `wake_coalesce lock; if the two literals ever desync, this call would race straight through instead. `
+      + `(Not observed within ${BLOCKED_WAIT_BUDGET_MS}ms — if redrive() nonetheless COMPLETED only after the `
+      + `lock released, read this as host timing, not as a desync: #706.)`,
+  );
   assert.equal(redriveDone, true, "mandatory: once the lock released, redrive() actually completed");
   assert.equal(result.resolved, true, "mandatory setup: this dead-letter's own event type IS covered (wake-bound), so redrive resolves it — proving the lock acquisition happens before EITHER branch, not just the reopen one");
 });

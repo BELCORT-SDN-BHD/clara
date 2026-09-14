@@ -7,8 +7,9 @@ import { CommandKProvider } from "@/components/command";
 import { FirmScopeProvider } from "@/components/firm-scope-provider";
 import { RailMount } from "@/components/clara/rail-mount";
 import { SkipLink } from "@/components/common/skip-link";
-import { SidebarInset, SidebarProvider, SIDEBAR_COOKIE_NAME } from "@/components/ui/sidebar";
+import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { SIDEBAR_COOKIE_NAME } from "@/lib/navigation/sidebar-cookie";
 import { requireFirmScope } from "@/lib/require-firm-scope";
 
 /**
@@ -70,6 +71,15 @@ export default async function FirmLayout({
   // The sidebar's own persistence, read on the SERVER so a collapsed sidebar
   // does not paint open and then snap shut on hydration. Absent cookie means
   // open, which is the right default for a first visit.
+  //
+  // #733 — THE NAME COMES FROM A PLAIN MODULE, and that is the whole fix. It
+  // used to be imported from `components/ui/sidebar.tsx` on the line above,
+  // which opens with `"use client"`: the CLIENT COMPONENTS on that import line
+  // work (that is what client references are for), but a plain string constant
+  // carries no such reference and resolved to `undefined` HERE, on the server —
+  // so this read was `cookies().get(undefined)` and found nothing, whatever the
+  // request actually carried. See `lib/navigation/sidebar-cookie.ts` for the
+  // measurement.
   const sidebarOpen = (await cookies()).get(SIDEBAR_COOKIE_NAME)?.value !== "false";
 
   return (

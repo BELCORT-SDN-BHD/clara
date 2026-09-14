@@ -1,7 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
-import { ensureRealFocus, watchReactFaults } from "./helpers";
+import { cellBudgetMs, ensureRealFocus, settleForScan, watchReactFaults } from "./helpers";
 import { JOURNAL_WORK } from "./journal-work-mock.mjs";
 import { MOTION_LOCAL_STORAGE_KEY } from "../lib/settings/motion-preference";
 
@@ -85,51 +85,15 @@ async function openDiagnostics(page: Page): Promise<void> {
 }
 
 /**
- * Wait for every FINITE animation to finish before measuring anything about
- * colour or geometry.
- *
- * THIS IS NOT HYGIENE, IT IS THE DIFFERENCE BETWEEN A MEASUREMENT AND A GHOST.
- * Measured on the first run of this walk: axe reported 4 `color-contrast`
- * violations on the composer, the first of them the Submit button at
- * "#ffffff on #4a71e0". There is no such token — #4a71e0 is `--primary`
- * (#1d4ed8) composited over white at exactly 0.8 alpha, i.e. the content
- * column's own arrival fade caught mid-flight. A scan that runs during a
- * transition measures a frame nobody ever fails on, and would have been
- * "fixed" by weakening a token that was never wrong.
- *
- * INFINITE animations are EXCLUDED rather than waited for: `animate-pulse` on a
- * Skeleton never ends by design, and waiting for it would hang instead of
- * measure.
+ * #760 — the settle-then-scan instrument moved to `./helpers` (`settleForScan`),
+ * where its measured rationale now lives for every walk instead of this one. The
+ * pointer park that used to open it is gone with it: `hover:bg-primary/80` was the
+ * real AA shortfall behind it and is fixed at source (`components/ui/button.tsx`,
+ * `components/ui/badge.tsx`, `/90` = 5.451:1), so the scans measure the hover state
+ * for real rather than dodging it.
  */
-async function settle(page: Page): Promise<void> {
-  // AND TAKE THE POINTER OFF WHATEVER IT WAS LAST CLICKING, so this measures the
-  // RESTING page it claims to measure. `fill()` never moves the mouse, so a cell
-  // that clicked Submit and then kept typing leaves that button in `:hover` for
-  // the rest of the test, and which element is hovered then depends on nothing
-  // but the last click's coordinates.
-  //
-  // THE AA SHORTFALL THIS NOTE USED TO RECORD IS FIXED, and the record is
-  // corrected rather than left standing: `hover:bg-primary/80` composited to
-  // #4a71e0 under white 14px text = 4.440:1, below AA, product-wide. The #621
-  // review round raised it to `/90` in `components/ui/button.tsx` and
-  // `components/ui/badge.tsx` (#3460dc = 5.451:1) and pinned the hovered pair
-  // in `scripts/check-token-contrast.mjs`
-  // (`primary-foreground-on-primary-hover`). This line is therefore a
-  // MEASUREMENT-STABILITY choice now, not a workaround for a known failure —
-  // `e2e/checkout-gate-walk.spec.ts` and `e2e/signup-confirm-pending.spec.ts`
-  // dropped their copies of it and scan the hover state for real.
-  await page.mouse.move(0, 0);
-  await page.waitForFunction(() =>
-    document.getAnimations().every((a) => {
-      if (a.playState !== "running") return true;
-      const iterations = a.effect?.getComputedTiming().iterations ?? 1;
-      return iterations === Infinity;
-    }),
-  );
-}
-
 async function scan(page: Page, what: string): Promise<void> {
-  await settle(page);
+  await settleForScan(page);
   const results = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
   // A positive control on the instrument itself: an empty `violations` array
   // proves nothing unless the scan actually looked at this page.
@@ -165,6 +129,11 @@ test.beforeEach(async ({ page }) => {
 });
 
 test("C3 → B3: compose, refuse the invalid drafts, submit, and watch ONE Work run to a posted entry", async ({ page }) => {
+  // #706 — TWO fixture-driven status polls (Queued→Running, Running→Completed) and TWO full-page
+  // axe scans (the balanced draft, then the completed detail — the step measured at 33 s under
+  // load against 14.4 s alone). The flat 30 s default turned that into a timeout that read as a
+  // product defect.
+  test.setTimeout(cellBudgetMs({ polls: 2, scans: 2 }));
   // THE HUB'S PRIMARY ACT. Everything else on Accounting is a card that takes
   // you somewhere to look; this is the one thing a bookkeeper comes there to DO.
   await page.goto(`/clients/${CLIENT}/accounting`);
@@ -314,6 +283,9 @@ test("a restored draft carries its own figures, and an account the chart does no
 });
 
 test("B3 recovery: a typed refusal renders VERBATIM, and Retry starts a NEW run of the SAME Work", async ({ page }) => {
+  // #706 — THREE 15 s fixture polls (Refused, then Queued after Retry, then Completed) plus a
+  // full-page axe scan of the refused detail, all sharing one flat 30 s budget before this.
+  test.setTimeout(cellBudgetMs({ polls: 3, scans: 1 }));
   await page.goto(COMPOSER_URL);
   await fillBalancedBasis(page);
   await page.getByRole("button", { name: "Submit" }).click();
@@ -913,7 +885,7 @@ test("#727: the Work detail route hydrates with no React fault in the console", 
     const rail = page.locator("[data-clara-rail]");
     await expect(rail).toBeVisible();
     await expect(rail.getByText("Accounting work accepted")).toBeVisible();
-    await settle(page);
+    await settleForScan(page);
 
     // And the PARKED face, which mounts the question panel and its form — the subtree #629
     // added to this route, and the one that reads a `localStorage` draft in a lazy state
@@ -923,7 +895,7 @@ test("#727: the Work detail route hydrates with no React fault in the console", 
     await control(page, { op: "park_card" });
     await page.goto(`/clients/${CLIENT}/work/${JOURNAL_WORK.parkedCardWorkId}`);
     await expect(page.getByText("Waiting for an answer").first()).toBeVisible({ timeout: 15_000 });
-    await settle(page);
+    await settleForScan(page);
 
     expect(
       collector.faults(),
@@ -1061,36 +1033,45 @@ test("#727: the Work detail route hydrates clean for a browser carrying a PRIOR 
       .filter((c) => c.name === "sidebar_state")
       .map((c) => c.value);
     expect(jarred, "the collapsed-sidebar cookie must be on the request that produced this render").toEqual(["false"]);
-    // THE SHELL ITSELF STAYS EXPANDED, RE-MEASURED (a fix-round review's own claim here
-    // used to say the cookie "did not reach `defaultOpen`" — TRUE in its symptom, wrong
-    // about the mechanism, and worth re-measuring rather than trusting). `defaultOpen`
-    // never receives this cookie's value AT ALL: `app/(firm)/layout.tsx:10` imports
-    // `SIDEBAR_COOKIE_NAME` from `components/ui/sidebar.tsx`, which opens with `"use
-    // client"` (sidebar.tsx:1). A Server Component may import a CLIENT COMPONENT from a
-    // `"use client"` module and render it (that is the whole mechanism — `SidebarProvider`/
-    // `SidebarInset`, imported the same line, work exactly this way) — but a PLAIN VALUE
-    // export from that same module carries no such reference; the RSC bundler has no
-    // client-reference machinery for a bare string constant, so the server-side import
-    // resolves to `undefined`. `layout.tsx:73`'s `cookies().get(SIDEBAR_COOKIE_NAME)` is
-    // therefore always `cookies().get(undefined)` on THIS server, which finds nothing
-    // regardless of what the request's cookie jar holds — MEASURED by sending the raw SSR
-    // request (bypassing the browser and its own cookie jar entirely) with an EXPLICIT
-    // `sidebar_state=false` header and then again with `sidebar_state=true`: both render
-    // `data-state="expanded"`, byte-identical, which is what a name that never reaches the
-    // read looks like (a genuine parse of "false" would tell the two apart). This is a
-    // real product defect — the cookie the client sets on every toggle is silently inert
-    // on the very layout that reads it back — but it is not a HYDRATION fault (server and
-    // client agree, both wrongly, on "expanded") and repairing the `"use client"` boundary
-    // is its own ticket, not #727's. What this cell can assert honestly is today's actual,
-    // measured behaviour.
-    await expect(page.locator("[data-slot=sidebar]").first()).toHaveAttribute("data-state", "expanded");
-    await settle(page);
+    // …AND THE SHELL HONOURS IT NOW (#733). This cell used to record the OPPOSITE,
+    // with a long note: `app/(firm)/layout.tsx` imported `SIDEBAR_COOKIE_NAME`
+    // from `components/ui/sidebar.tsx`, which opens with `"use client"`. A Server
+    // Component may import a CLIENT COMPONENT from such a module and render it
+    // (`SidebarProvider`/`SidebarInset`, on the same import line, work exactly
+    // that way), but a plain string constant carries no client reference, so the
+    // server-side import never produced the cookie's name and
+    // `cookies().get(...)` found nothing whatever the request carried — measured
+    // by sending the raw SSR request with `sidebar_state=false` and again with
+    // `=true` and getting byte-identical `data-state="expanded"` back. #733 moved
+    // both constants to `lib/navigation/sidebar-cookie.ts`, a plain module with no
+    // client boundary for the value to fail to cross, and the client module
+    // re-exports them so nothing else had to move.
+    //
+    // THE RAW SSR REQUEST IS THE DISCRIMINATING HALF, and it is why this cell no
+    // longer stops at the rendered DOM. `data-state` on the hydrated page would
+    // also read "collapsed" if the SERVER still rendered it open and the client
+    // corrected it one frame later — which is precisely the open-then-snap the
+    // server-side read exists to prevent. So the HTML is fetched through the
+    // context's own request API (same cookie jar, same session, no browser
+    // render) and asserted before any script has run.
+    const ssr = await page.context().request.get(`/clients/${CLIENT}/work/${JOURNAL_WORK.parkedCardWorkId}`);
+    expect(ssr.status(), "the raw SSR request must be served, not redirected to a login").toBe(200);
+    const html = await ssr.text();
+    const sidebarTag = /<[^>]*data-slot="sidebar"[^>]*>/.exec(html);
+    expect(sidebarTag, "the server rendered no [data-slot=sidebar] at all").not.toBeNull();
+    expect(
+      sidebarTag![0],
+      "SSR with sidebar_state=false must render the sidebar collapsed — the cookie is the server's to read",
+    ).toContain('data-state="collapsed"');
+    // …and the hydrated page agrees, which is the half that proves no snap-shut.
+    await expect(page.locator("[data-slot=sidebar]").first()).toHaveAttribute("data-state", "collapsed");
+    await settleForScan(page);
 
     // The COMPLETED face too, under the same carried state: a different subtree of this
     // route (facts, basis table, posted entry) inside the same hydration pass.
     await page.goto(`/clients/${CLIENT}/work/${JOURNAL_WORK.seededWorkId}`);
     await expect(page.getByText("Completed", { exact: true }).first()).toBeVisible();
-    await settle(page);
+    await settleForScan(page);
 
     expect(
       collector.faults(),
@@ -1098,6 +1079,92 @@ test("#727: the Work detail route hydrates clean for a browser carrying a PRIOR 
     ).toEqual([]);
     await page.evaluate(() => console.error("e2e-727-seeded-collector-probe"));
     expect(collector.seen(), "the console collector must actually be receiving errors").toContain("e2e-727-seeded-collector-probe");
+  } finally {
+    await control(page, { op: "reset" }).catch(() => {});
+  }
+});
+
+/**
+ * #732 — THE SHELL HYDRATES CLEAN AT A NARROW VIEWPORT, NOT ONLY AT THE DEFAULT ONE.
+ *
+ * WHY THE TWO CELLS ABOVE WERE NOT ENOUGH, and the reading that makes this one
+ * necessary. Both of them run at Playwright's `Desktop Chrome` default viewport
+ * (1280×720), which is ABOVE every breakpoint this shell has: the sidebar is
+ * docked (`md`, 768) and the Clara rail is docked (`lg`, 1024). They therefore
+ * proved the hydration of ONE arm of a shell that has two, and the owner's
+ * 2026-09-13 reproduction on `clara-web` 742b09e9 is what named the other: the
+ * same route logged `Minified React error #418` on every load at 800 px and at
+ * 375 px and none at all at 1280 px. The width decides it, and the width these
+ * cells never varied.
+ *
+ * BOTH WIDTHS, IN ONE CELL, AND THE WIDE ONE IS THE CONTROL. A narrow-only cell
+ * would go green just as happily if the whole shell stopped rendering; the wide
+ * pass is what keeps "no #418 at 375" from being a claim about a page that
+ * renders nothing.
+ *
+ * THE VIEWPORT IS SET BEFORE THE `goto`, which is the entire point: a hydration
+ * mismatch is a property of the FIRST client render, so a resize afterwards
+ * measures a tree React has already reconciled and can never reproduce it.
+ */
+const HYDRATION_WIDTHS = [
+  { label: "375 px — the width the owner reproduced #418 at", size: { width: 375, height: 812 } },
+  { label: "1280 px — the docked arm, the control", size: { width: 1280, height: 900 } },
+] as const;
+
+test("#732: the Work detail route hydrates clean at 375 px as well as at 1280 px", async ({ page }) => {
+  const collector = watchReactFaults(page);
+  try {
+    await control(page, { op: "park_card" });
+    for (const width of HYDRATION_WIDTHS) {
+      await page.setViewportSize(width.size);
+      await page.goto(`/clients/${CLIENT}/work/${JOURNAL_WORK.seededWorkId}`);
+      await expect(page.getByText("Completed", { exact: true }).first()).toBeVisible();
+      await settleForScan(page);
+      // The parked face too — the subtree that reads a `localStorage` draft in a
+      // lazy state initialiser, walked at BOTH widths for the same reason the
+      // completed face is.
+      await page.goto(`/clients/${CLIENT}/work/${JOURNAL_WORK.parkedCardWorkId}`);
+      await expect(page.getByText("Waiting for an answer").first()).toBeVisible({ timeout: 15_000 });
+      await settleForScan(page);
+
+      // #732 AC3 — a clean hydration is not the only thing this shell owes the
+      // narrow arm: it must still END where it did before the fix, i.e. the
+      // docked/launcher split `components/ui/sidebar.tsx` and
+      // `components/clara/rail-launcher.tsx` already drew must not have moved
+      // under #732's construction change (both arms now render together; CSS,
+      // not an early return, decides which is seen — sidebar.tsx:312-343).
+      const dockedSidebar = page.locator('[data-slot="sidebar"]');
+      const railLauncher = page.locator("[data-clara-rail-launcher]");
+      // ONE docked container at every width — #732's whole point is that this
+      // element is never conditionally absent; only its own `hidden md:block`
+      // class decides whether it paints.
+      await expect(dockedSidebar).toHaveCount(1);
+      // The Sheet arm (`SheetContent`, `data-slot="sheet-content"`) renders
+      // nothing while closed (sidebar.tsx:337) — asserting its absence is what
+      // rules out "the mobile drawer opened itself", not just "some sidebar
+      // exists".
+      await expect(page.locator('[data-slot="sheet-content"]')).toHaveCount(0);
+      if (width.size.width === 375) {
+        // Below `md` (768): the docked column is in the DOM but `display: none`.
+        await expect(dockedSidebar.first()).toBeHidden();
+        // Below `lg` (1024, `rail-chrome.tsx`'s `NARROW_QUERY`): the rail's own
+        // mount-time effect closes it, so the launcher — the narrow shell's
+        // entry point back into Clara — is what a person actually sees.
+        await expect(railLauncher).toBeVisible();
+      } else {
+        // At 1280 the docked column is the visible arm and the rail defaults
+        // open on a fresh load, so there is no launcher to find.
+        await expect(dockedSidebar.first()).toBeVisible();
+        await expect(railLauncher).toHaveCount(0);
+      }
+
+      expect(
+        collector.faults(),
+        `${width.label}: the shell and the Work detail route must hydrate with no React fault`,
+      ).toEqual([]);
+    }
+    await page.evaluate(() => console.error("e2e-732-collector-probe"));
+    expect(collector.seen(), "the console collector must actually be receiving errors").toContain("e2e-732-collector-probe");
   } finally {
     await control(page, { op: "reset" }).catch(() => {});
   }

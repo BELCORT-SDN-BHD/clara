@@ -14,7 +14,7 @@
 // serves a DIFFERENT row on the reload, and the cell asserts the settled facts
 // that could not have been on screen beforehand. A test that matched a word
 // already present before the click would survive deleting the very component it
-// exists to prove (apps/web/AGENTS.md's own law).
+// exists to prove.
 //
 // AND THE DOOR'S ARGUMENTS ARE READ OFF THE REQUEST BODY, never inferred from
 // what the screen did afterwards: a card can re-render plausibly having called

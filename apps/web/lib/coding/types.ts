@@ -2,7 +2,7 @@
 // signals"). Every field name and enum member below is transcribed from the
 // LIVE catalog on an instance-unique throwaway rig (migrate 0001..0140,
 // `pg_get_functiondef`/`\d` pulls, 2026-08-28) — never a migration file's
-// first `CREATE` (apps/web/AGENTS.md's "chase the LIVE body" rule). This
+// first `CREATE` (the "chase the LIVE body" rule). This
 // module carries no logic.
 
 // --- clara.list_uncoded_filings(p_client uuid) -> SETOF jsonb ---------------

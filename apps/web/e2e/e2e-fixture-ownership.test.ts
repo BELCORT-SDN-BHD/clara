@@ -985,6 +985,11 @@ const SHARED_RPC_VERBS: Record<string, string[]> = {
   // OPPOSITE facts and each gates on its own Work id first: `plans-mock.mjs` answers a real origin
   // for its plan-admitted Work, `journal-work-mock.mjs` answers the door's own SQL NULL for a Work
   // a human composed by hand. Neither can answer for the other's walk.
+  // #727 — `clara.get_work_plan_origin`, the Work detail identity block's "From plan <purpose>"
+  // row. `plans-mock.mjs` answers it for its own C9 fixture Work (`PLANS.workId`);
+  // `journal-work-mock.mjs` answers NULL for its own two Works (`seededWorkId`,
+  // `parkedCardWorkId`), neither of which originated from a plan. Each lane gates on its own
+  // work ids and falls through otherwise, so this is a declared share, not a collision.
   get_work_plan_origin: ["journal-work-mock.mjs", "plans-mock.mjs"],
 };
 

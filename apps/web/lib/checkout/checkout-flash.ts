@@ -22,8 +22,8 @@
 //
 // THE REFUSAL TEXT IS THE DOOR'S OWN. `message` is a `DoorRefusal`'s verbatim
 // sentence and `code` its CLR SQLSTATE — never re-worded here and never
-// re-worded by the renderer (apps/web/AGENTS.md: "a `DoorRefusal` renders
-// VERBATIM (code + message), never retried"). The bounded `kind` set is what
+// re-worded by the renderer ("a `DoorRefusal` renders VERBATIM (code +
+// message), never retried"). The bounded `kind` set is what
 // chooses the CARD; the door's sentence is what the person reads inside it.
 
 import { isLegalKind, type LegalKind } from "@/lib/registration/legal-reads";

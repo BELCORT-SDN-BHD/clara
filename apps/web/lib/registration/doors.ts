@@ -5,7 +5,7 @@
 // the OPERATOR-scope queue read design §4 B / §5 ask 8 describe. P4-2's file
 // is not edited — its wire-shape pin stays that module's own to own.
 //
-// RUNG-0 CENSUS, at the LIVE bodies (apps/web/AGENTS.md: "a migration
+// RUNG-0 CENSUS, at the LIVE bodies ("a migration
 // citation must chase the LIVE body"). Censused 2026-08-30 across every file
 // in packages/db/migrations/: `approve_firm_registration`,
 // `reject_firm_registration` and `firm_registration_requests_visible` are

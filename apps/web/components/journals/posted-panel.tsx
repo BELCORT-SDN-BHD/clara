@@ -27,8 +27,20 @@
 // `withdrawn` entries had no surface anywhere in the product before this: the
 // drafts queue carries only `row_kind === 'draft'` rows and this panel used to
 // filter to `approved` and stop.
+//
+// #719 — AND IT IS THE ONE PLACE THE ADDRESSED ENTRY IS MERGED. `?entry=<id>` can name an entry
+// older than the workbench's 1,000-row browse page (lib/journals/api.ts's `FETCH_CAP`), which the
+// table could only ever filter, never fetch. `useAddressedEntry` reads that one entry beside the
+// browse read and this panel folds it into the rows the table receives — so "composition, and it
+// fetches nothing of its own" is no longer quite true of this file, and the reason is stated rather
+// than left to be discovered. The merge happens HERE rather than in the workbench above because the
+// address is this panel's prop and the table below is its only consumer; the browse read, the cap
+// and every filter are untouched.
+
+import { useMemo } from "react";
 
 import { JournalEntriesTable } from "@/components/journals/journal-entries-table";
+import { useAddressedEntry, type AddressedEntry } from "@/lib/journals/use-addressed-entry";
 import type { CoaAccountRow, JournalEntryRow, JournalLineRow } from "@/lib/journals/types";
 import type { EntryLinkRow } from "@/lib/work/evidence";
 import type { PartClr } from "@/lib/parts/hooks";
@@ -45,13 +57,18 @@ export function PostedPanel({
   clr,
   actingId,
   onReverse,
-  links = [],
+  links,
   linksUnavailable = false,
   initialEntryId = "",
+  loadAddressedEntry,
 }: {
   clientId: string;
   /** #634 — read by the workbench above (one hydration per tab), passed through
-   *  here: this panel is composition, and it fetches nothing of its own. */
+   *  here: this panel is composition, and it fetches nothing of its own.
+   *
+   *  #746 — and passed through UNDEFAULTED. This used to be `links = []`, a fresh array per
+   *  render handed to a child that feeds it into a `useMemo` dependency; the absent case is
+   *  resolved once, in `useEntryRows`, against the one frozen `NO_ENTRY_LINKS`. */
   links?: readonly EntryLinkRow[];
   linksUnavailable?: boolean;
   initialEntryId?: string;
@@ -72,12 +89,40 @@ export function PostedPanel({
   /** FIX-2 / N1: which entry's busy/err/clr this render belongs to. */
   actingId: string | null;
   onReverse: (entryId: string, reason: string, onOk: () => void) => void;
+  /** Injected by the cells; production reads `clara.journal_entries` by id. */
+  loadAddressedEntry?: (entryId: string) => Promise<AddressedEntry | null>;
 }) {
+  // Already on the page ⇒ nothing to fetch. `entries` is the whole browse read (every status), so
+  // this is "did the read see it", not "is it currently visible through the filters".
+  const onPage = initialEntryId !== "" && entries.some((e) => e.id === initialEntryId);
+  const addressed = useAddressedEntry({
+    entryId: initialEntryId === "" ? null : initialEntryId,
+    skip: onPage,
+    load: loadAddressedEntry,
+  });
+
+  // THE FOREIGN-CLIENT CHECK LIVES HERE, not in the read: the read is by primary key and RLS scopes
+  // by FIRM, so an id that belongs to a DIFFERENT client of the same firm resolves happily — and
+  // merging it into this client's table would put another client's figures on this page. It is
+  // treated exactly like an id that does not exist (the honest "outside this page" state), which is
+  // also the only answer this surface can defend.
+  const merged = addressed.addressed?.entry.client_id === clientId ? addressed.addressed : null;
+  const foreign = addressed.addressed !== null && merged === null;
+
+  const mergedEntries = useMemo(
+    () => (merged ? [merged.entry, ...entries] : entries),
+    [merged, entries],
+  );
+  const mergedLines = useMemo(
+    () => (merged ? [...merged.lines, ...lines] : lines),
+    [merged, lines],
+  );
+
   return (
     <JournalEntriesTable
       clientId={clientId}
-      entries={entries}
-      lines={lines}
+      entries={mergedEntries}
+      lines={mergedLines}
       linesTruncated={linesTruncated}
       entriesTruncated={entriesTruncated}
       accounts={accounts}
@@ -89,6 +134,8 @@ export function PostedPanel({
       links={links}
       linksUnavailable={linksUnavailable}
       initialEntryId={initialEntryId}
+      addressedLoading={addressed.loading}
+      addressedUnreachable={addressed.notFound || foreign || addressed.error !== null}
       defaultStatus="approved"
     />
   );

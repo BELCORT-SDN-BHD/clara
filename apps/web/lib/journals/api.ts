@@ -108,6 +108,58 @@ export async function listJournalLines(
   });
 }
 
+/** #719 — ONE ENTRY, ADDRESSED BY ID, read INDEPENDENTLY of the capped browse page.
+ *
+ *  WHY THIS EXISTS. `listJournalEntries` above is the BROWSE read: the 1,000 newest by
+ *  `created_at`, `FETCH_CAP`. A `?entry=<id>` link — a correction chain, a conflict refusal, an
+ *  Activity row — names ONE entry that may be far older than that page, and the table could only
+ *  ever filter what the browse read already held. The result was a link landing on "that entry is
+ *  outside this page" for an entry the database has and this caller may read: an honest sentence
+ *  about the wrong thing. The cap and the browse read are UNCHANGED; this is a second, narrow read
+ *  beside them.
+ *
+ *  NO NEW DOOR AND NO NEW VIEW. It is the SAME two RLS-scoped table reads the workbench already
+ *  makes (`clara.journal_entries` / `clara.journal_lines`, 0003_books_core.sql:101-128 and
+ *  137-151), addressed by primary key instead of by client. RLS scopes by FIRM, so an id belonging
+ *  to another firm — and an id that never existed — both come back as ZERO rows, which is the same
+ *  answer this function returns for both: `null`. That is deliberate rather than lossy, and it is
+ *  the same no-oracle posture `clara.get_accounting_work_row`'s CLR11 takes for the Work list
+ *  (lib/work/use-addressed-work.ts's header) — telling a caller "this exists but is not yours"
+ *  would be the oracle neither layer offers.
+ *
+ *  `client_id` IS STILL CHECKED, by the caller rather than here: the surface merges this entry into
+ *  ONE client's table, so an id that resolves to a DIFFERENT client of the same firm must not be
+ *  merged. `p_client` is not a filter on the read (the id is already unique) — see the caller. */
+export async function getJournalEntryById(
+  session: SessionTokenAccessor,
+  entryId: string,
+  signal?: AbortSignal,
+): Promise<{ entry: JournalEntryRow; lines: JournalLineRow[] } | null> {
+  const [entries, lines] = await Promise.all([
+    getRows<JournalEntryRow>("journal_entries", {
+      select: ENTRY_SELECT,
+      filters: { id: `eq.${entryId}` },
+      limit: 1,
+      session,
+      signal,
+    }),
+    // The entry's OWN lines, by `entry_id` rather than by client — the browse read's own
+    // `FETCH_CAP` truncation sorts by `entry_id`, so an addressed entry's lines can be missing from
+    // it even when the entry itself is present. Bounded the same way every other read here is.
+    getRows<JournalLineRow>("journal_lines", {
+      select: LINE_SELECT,
+      filters: { entry_id: `eq.${entryId}` },
+      order: "line_no.asc",
+      limit: FETCH_CAP,
+      session,
+      signal,
+    }),
+  ]);
+  const entry = entries[0];
+  if (!entry) return null;
+  return { entry, lines };
+}
+
 /** clara.coa_accounts, 0003_books_core.sql:47-59 (+account_class, 0009:763).
  *  Every account (active and retired) — a retired code can still appear on an
  *  old line, and hiding its name would be a worse-than-honest degrade. */

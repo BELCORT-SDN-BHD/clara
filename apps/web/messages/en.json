@@ -605,6 +605,7 @@
       "loading": "Loading the conversation…",
       "loadError": "Could not load the conversation: {message}",
       "sendError": "Could not send that message: {message}",
+      "renderFault": "Your message was sent and Clara is still working on it — this tab just failed to display part of the reply. Reload the page to see it.",
       "responding": "Clara is responding…",
       "reconnecting": "Reconnecting…",
       "reconnectingWithAttempt": "Reconnecting… (attempt {attempt})",
@@ -2340,6 +2341,9 @@
       "sha256Label": "sha256",
       "bytesLabel": "bytes",
       "byteSizeInvalid": "Byte size must be a whole number of bytes (digits only).",
+      "addressedHeading": "Showing the one report this link names.",
+      "addressedShowAll": "Show all report artifacts",
+      "addressedNotFound": "The report this link names is not in this client's archive. It may belong to another client, or it may not have been sealed yet.",
       "issue": {
         "trigger": "Issue for approval",
         "title": "Issue this pack for approval",
@@ -4684,7 +4688,8 @@
       "sourceWithout": "No source document",
       "memo": "Memo contains",
       "highlighted": "Showing the entry you were sent to. Clear the filters to see the rest.",
-      "addressedOutsidePage": "That entry is not in this page of the journal. This client has more entries than one read returns, so the one you were sent to may be older than the newest page. Clear the filters and narrow by posting date to reach it."
+      "addressedLoading": "Looking up the entry this link names…",
+      "addressedOutsidePage": "The entry this link names could not be found for this client. It may belong to another client, or it may no longer exist. Clear the filters to see this client's journal."
     }
   },
   "WalkFindings728": {

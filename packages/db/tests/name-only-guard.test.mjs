@@ -89,8 +89,7 @@ after(async () => {
  * absent; only the gated package-wide sweep skips. Before this existed the battery skipped
  * unconditionally, so a migration that was never applied, was misnumbered, or was silently
  * reverted read as GREEN -- the exact false-green `packages/db/tests/README.md` warns about
- * ("a skipped preintegration suite is not evidence that its feature passed"); the
- * `.claude/rules/db-tests.md` this line used to cite is not in this repository.
+ * ("a skipped preintegration suite is not evidence that its feature passed").
  */
 function requirePresent(t, present, what) {
   if (ready && present) return false;
@@ -198,9 +197,8 @@ test("NOG-6 an UNFLAGGED client's customer CAN be enriched -- the scope is the f
 // every UPDATE of these columns, for every client ... no product verb can reach this path -- that
 // is the finding, not a shortcut." BOTH halves of that have now changed, and they changed BY
 // DESIGN rather than by drift, which is why the cells move with them (packages/db/README.md,
-// "Migration and deployment behavior" — the `.claude/rules/db-tests.md` this cited is not in
-// this repository: a floor pinned to a catalog object a later migration retires is trued IN THE
-// SAME PR):
+// "Migration and deployment behavior": a floor pinned to a catalog object a later migration
+// retires is trued IN THE SAME PR):
 //   * the non-merge whitelist widened a SECOND time -- exactly the possibility the old comment
 //     itself flagged -- and now admits registration_no / registration_normalized / tin, so the
 //     0011 immutability wall no longer refuses these UPDATEs for an unflagged client;

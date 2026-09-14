@@ -11,7 +11,7 @@
 // THIS CALLER'S acceptance of THAT version. A kind may be absent entirely
 // (nothing seeded), and that is a legitimate answer, not a read failure.
 //
-// A READ THAT RIDES `callDoor`, LABELLED AS ONE (apps/web/AGENTS.md: "a
+// A READ THAT RIDES `callDoor`, LABELLED AS ONE ("a
 // read-flavoured RPC still rides `callDoor` as transport but is NOT a governed
 // act — label it as a read at the call site"). Nothing here treats the answer
 // as a receipt; the only receipt on this journey is `accept_legal_document`'s,

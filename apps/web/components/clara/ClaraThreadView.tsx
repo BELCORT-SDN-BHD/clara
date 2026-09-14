@@ -561,6 +561,15 @@ export function ClaraThreadView({
         {state.sendStatus === "error" && state.sendError && (
           <StateBanner tone="error">{t("sendError", { message: state.sendError })}</StateBanner>
         )}
+        {/* #734 — THIS TAB'S OWN RENDERING FAILED, and that is a different sentence from
+            the one above. A subscriber that threw while drawing a stream event used to
+            reject the stream promise, which this hook could only read as a failed send:
+            "Could not send that message" was printed over a message that had been
+            accepted and a run that was still going, and it sent the owner looking in the
+            wrong place. `warning`, not `error`: nothing the person asked for was lost. */}
+        {state.renderFault && (
+          <StateBanner tone="warning">{t("renderFault")}</StateBanner>
+        )}
       </div>
       {/* The honest note the firm altitude gets INSTEAD of the affordance. The intake
           wall itself would allow a firm-altitude chat intake (origin "chat" is

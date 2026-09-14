@@ -349,7 +349,7 @@ begin
   -- SUCCESSION-AWARE (2026-08-30, 裁-18b PR-1 fold, N-6 / FOLD-3). clara.execute_rule_post was
   -- DROPPED by 0118_f_a2_cutover_retirement (its S1 drop list), so on any chain past 0118 the
   -- regprocedure cast below raises `undefined_function` and takes the whole file with it. The
-  -- db-tests.md succession pattern applies: run the legacy probe only where the body still
+  -- succession pattern applies: run the legacy probe only where the body still
   -- exists, and otherwise WITNESS the retirement positively -- the 0118 stem present in the
   -- ledger AND the exact signature absent -- rather than skipping on an unexplained absence.
   -- An absence alone is not evidence (review law 2); an absence beside the migration that caused

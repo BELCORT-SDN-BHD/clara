@@ -65,7 +65,7 @@ type Translate = (key: string) => string;
  *  comment admitted it: "the ten summary titles above are still hardcoded
  *  English, an older debt this change does not silently widen and does not
  *  pretend to have paid." It violated the next-intl house law
- *  (apps/web/AGENTS.md, "every string routes through next-intl") and it is what
+ *  ("every string routes through next-intl") and it is what
  *  would have redded the Q5 hardcoded-string lint the day that lint landed.
  *  裁-3's fixed-as-found tier says a debt already inside a file you are editing
  *  is paid now, not deferred — so all of it routes through `Clara.parts.summary`,

@@ -98,6 +98,46 @@ afterward and probe every configured runtime lane. Existing platform roles can a
 with historical migration census assertions. A green local chain does not prove that a live
 cluster can be replayed without a target-specific preflight.
 
+## The `interactive_client` wake kind
+
+`clara.wake_fn_allowlist` rows for the `interactive_client` wake kind are not "structurally
+incapable of posting" — that claim, stated in
+[0107_f_a2_posting_grants.sql](migrations/0107_f_a2_posting_grants.sql)'s header and quoted in
+the frozen `packages/runtime/workflows/chatTurn.v13.post.ts` header, was superseded at 0129 (four
+of the thirteen mirrored bank verbs post) and again at 0178 (`wake_record_journal_entry`, the
+accounting-work commit door). Both citations are historical wording: applied migration bytes and
+the frozen v13 closure are each immutable, so neither is edited — this paragraph is the
+correction. What the kind actually guarantees is the CLIENT PIN, which every verb allowlisted
+for `interactive_client` enforces unconditionally, keeping a chat session's authority scoped to
+the one client its credential names.
+
+The live `interactive_client` allowlist rows, and the migration whose statement inserted each
+(the asserted source of truth is
+[tests/fixtures/wake-allowlist-roster.mjs](tests/fixtures/wake-allowlist-roster.mjs)'s
+`WAKE_ALLOWLIST_ROSTER.interactive_client`; the census cells in `f-a2-grants.test.mjs` and
+`f-a2-chat-limb.test.mjs` compare it against the live catalog and fail the moment this list
+drifts):
+
+- `wake_open_question` — [0107_f_a2_posting_grants.sql](migrations/0107_f_a2_posting_grants.sql)
+- `wake_freeform_read` — [0131_f_a6_freeform_read.sql](migrations/0131_f_a6_freeform_read.sql)
+- thirteen mirrored bank verbs (`wake_add_bank_account`, `wake_complete_bank_reconciliation`,
+  `wake_get_bank_pack`, `wake_match_bank_line`, `wake_propose_bank_identifier_promotion`,
+  `wake_propose_bank_line_exception`, `wake_resolve_and_book_bank_line`,
+  `wake_resolve_bank_line_exception`, `wake_settle_from_bank_line`, `wake_unmatch_bank_match`,
+  `wake_upsert_account`, `wake_void_bank_reconciliation`, `wake_void_bank_statement`) —
+  [0129_f_a3_pr3_retirement_parity_doors.sql](migrations/0129_f_a3_pr3_retirement_parity_doors.sql)
+- twelve close-prep verbs (`wake_list_fiscal_years`, `wake_get_close_plan`,
+  `wake_get_close_readiness`, `wake_verify_close`, `wake_snapshot_state`,
+  `wake_dry_run_close_readiness`, `wake_open_fiscal_year`, `wake_begin_close`,
+  `wake_abandon_close`, `wake_propose_close`, `wake_run_depreciation_catchup`,
+  `wake_mint_month_snapshot`) —
+  [0159_f_a4_pr_2c_close_chat_lane.sql](migrations/0159_f_a4_pr_2c_close_chat_lane.sql)
+- `wake_record_journal_entry` —
+  [0178_accounting_work_journal_successor.sql](migrations/0178_accounting_work_journal_successor.sql)
+
+Twenty-eight rows in total, as of this writing. The next migration that touches this allowlist
+repeats this correction in its own header rather than leaving a reader to rediscover it.
+
 ## Storage grant/policy battery
 
 [deploy/storage-provision.sql](deploy/storage-provision.sql) cannot run against the local rig —

@@ -487,8 +487,8 @@ test("T14 the mirror's FALSE branch: a closing entry born in the pre-Fix-A shape
   // the entry naming a receipt id before that receipt row exists either). Two separate
   // autocommitting rootQuery() calls would each close their own one-statement transaction and
   // trip the deferred check at that statement's own end, before the second row exists -- so
-  // the whole synthetic pair goes through ONE explicit transaction (db-tests.md: "a fixture
-  // built from several statements needs withTxn()"), exactly mirroring how the real writer
+  // the whole synthetic pair goes through ONE explicit transaction (a fixture
+  // built from several statements needs withTxn()), exactly mirroring how the real writer
   // gets away with the same forward reference: one PL/pgSQL call, one transaction.
   // t_period_wall / t_period_wall_lines (0056:711-756) refuse an approved-class touch on
   // journal_entries, and ANY journal_lines write, once the entry's own posting_date falls in

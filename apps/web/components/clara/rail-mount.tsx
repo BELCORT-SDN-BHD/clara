@@ -25,7 +25,7 @@ import { FIRM_ALTITUDE } from "@/lib/clara/useActiveThread";
 // nothing left for a pathname guard here to suppress (Q2's "remove-the-rail"
 // requirement is now satisfied structurally, by which layout wraps which route, not
 // by a runtime check — see `app/(full)/layout.tsx`'s own header for the mechanism).
-// P6-5 — THE RAIL'S STRUCTURAL CLIENT BOUNDARY (apps/web/AGENTS.md's house law).
+// P6-5 — THE RAIL'S STRUCTURAL CLIENT BOUNDARY (house law).
 //
 // THE PROBLEM THIS KEY IS. `<RailMount />` is a SIBLING of `{children}` in
 // `app/(firm)/layout.tsx`, while `ClientScopeProvider` lives one layout down in
