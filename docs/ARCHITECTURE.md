@@ -314,6 +314,13 @@ pre-v3 grandfather arm 已实现并上线；owner 于 2026-09-15 裁定（#826�
   取舍：body 数量单调增长（当前 51 个），换来 replay 安全与可控回退。
 - **单台 Fly machine + 常驻 Postgres World + 单 leader。** leader 崩溃即整进程退出由 Fly 重启（crash-only）。
   取舍：简单与成本优先，代价是没有多机分发与 spool 转移的证明。
+  连接故障的现行契约（as built，裁-149；`l9-pool-contract-lane-probe.test.mjs` 钉住下面的措辞）：
+  Idle pool errors log/recycle connections; relay-pool counters surface warnings（每条专用 login lane 的
+  后台连接错误按 lane 计入 `checks.pool_errors`，未构造的 lazy pool 表示为缺席而不是零）。
+  The leader's dedicated session detects failure, releases its advisory lock and reconnects——不是 crash-loud；
+  其 acquire／lost／re-acquire 与 halt 记录在 `checks.leader`，held:false 是告警，halt 使该项 `ok:false`，
+  但都不改变 `/ready` 的硬失败集合。Lane probes are asynchronous: `pending` 表示尚未测量，`stalled` 是警告，
+  不可把尚未完成的探测当成健康证明。[已实现]
 - **Web 经 OpenNext 部署 Cloudflare Workers，且从不持有 runtime 服务凭据。** 读走用户自己的 JWT，
   长时能力走同源 allowlisted-header 代理。取舍：边缘部署减小自维护面，但 OpenNext／Workers 的兼容边界仍需自验。
 - **文件字节读取只用代理，不用签名 URL。** 代价是每次请求重读在世 membership，换来即时可撤销性。
