@@ -266,12 +266,23 @@ test("runReconcilerSweep runs the FA belt ONLY when the leader flags it due (the
   const sweptDue = await runReconcilerSweep(due, { ...sweepDeps, faRuns: true });
   assert.equal(sweptDue.faOk, true);
   assert.equal(sweptDue.faExamined, 1);
-  assert.ok(due.queries.some((q) => /to_regprocedure/.test(q.sql)), "due → the feature-detect probe runs");
+  // THIS BELT'S OWN DOOR, named — never `to_regprocedure` alone. The sweep gained an
+  // UNCONDITIONAL sibling (#640's plan belt, migration 0193) whose own per-cycle feature-detect
+  // is also a `to_regprocedure` catalog read, so a bare match on that keyword counts a SIBLING
+  // belt's probe as this one's and reads a correctly-gated sweep as an ungated one. Measured on
+  // the not-due sweep: the only `to_regprocedure` query issued names
+  // `clara.wake_due_plan_occurrences(integer,text)`, and `faOk` is undefined — the FA belt really
+  // was not invoked. `run_depreciation_period` is the FA belt's door and appears in BOTH its
+  // feature-detect probe and its run verb, so the negative below is the stronger claim: not one
+  // FA query of any kind. (reconcile-adjustments-unit.test.mjs:349 carries the same repair for
+  // the D-b twin, made when that sibling landed; this is the D-a twin it missed.)
+  const faProbe = (q) => /run_depreciation_period/.test(q.sql);
+  assert.ok(due.queries.some(faProbe), "due → the FA belt's own feature-detect probe runs");
 
   const notDue = recordingClient({ ids: ["c1"] });
   const sweptNotDue = await runReconcilerSweep(notDue, { ...sweepDeps });
   assert.equal(sweptNotDue.faOk, undefined, "not due → no FA receipt in the sweep result");
-  assert.ok(!notDue.queries.some((q) => /to_regprocedure/.test(q.sql)), "not due → not invoked at all");
+  assert.ok(!notDue.queries.some(faProbe), "not due → not invoked at all");
 });
 
 test("an FA discovery failure never blocks the rest of the sweep (the sweep resolves, faOk:false)", async () => {
