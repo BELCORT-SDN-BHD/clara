@@ -101,9 +101,13 @@ test("623.v18: the registry pins chatTurn at v19 and keeps claraWork a class of 
   // question). The claim this cell was written for is unchanged and still asserted — the key is
   // dispatchable, chatTurn is untouched by the Work lane's own cutover, and every predecessor
   // stays EXPORTED under policy (c) — so the pin is updated rather than the cell deleted.
-  assert.match(REGISTRY_SRC, /claraWork: claraWork_v2/);
+  // …and #631 repointed it again, v2 -> v3 (the egress gate and the execution trace), which is the
+  // same motion once more: the Work lane's cutover still does not touch chatTurn, and v1 and v2
+  // both stay exported.
+  assert.match(REGISTRY_SRC, /claraWork: claraWork_v3/);
   assert.ok(typeof registry.claraWork_v1 === "function", "v1 is still exported for parked runs and rollback");
-  assert.ok(typeof registry.claraWork_v2 === "function", "…and the pinned body is exported too");
+  assert.ok(typeof registry.claraWork_v2 === "function", "…and so is v2, v3's rollback target");
+  assert.ok(typeof registry.claraWork_v3 === "function", "…and the pinned body is exported too");
   assert.match(REGISTRY_SRC, /chatTurn: chatTurn_v19/);
   // v18 and v17 stay EXPORTED (policy (c)) so a parked run resumes and a rollback has a target.
   assert.ok(typeof registry.chatTurn_v18 === "function", "#623's body is still exported — it is v19's rollback target");
