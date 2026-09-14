@@ -68,6 +68,32 @@ export const WAIVERS = new Map([
   // by import) reads `clara.get_journal_entry_for`, and so do claraWork v1/v2. Retiring this needs
   // a ruling that v1 may stop being exported, not another successor.
   //
+  // THE ONE ALTERNATIVE THAT WAS PUT TO ME, ANSWERED RATHER THAN IGNORED: could the census scope
+  // its READ-pool check to the ENQUEUED (registry-pinned) bodies, the way #637 derived provenance,
+  // and let this waiver retire? NO — it would be a weakening, on three separate grounds, and each
+  // is checkable:
+  //   1. THE CALLER IS REACHABLE TODAY. A superseded frozen body is not dead code: policy (c)
+  //      keeps it exported precisely so a PARKED run can resume into it, and
+  //      `scripts/check-workflow-bundle.mjs` asserts every one of them SHIPS IN THE IMAGE ("50
+  //      superseded body(ies) still ship for parked runs", measured on this branch). A parked
+  //      chatTurn_v1 run that resumes executes this exact tool and gets 42501. A census that
+  //      stopped reporting it would be reporting on a program that is not the one running.
+  //   2. IT WOULD BE A BLANKET EXEMPTION WEARING A SCOPE'S CLOTHES. The exclusion could not be
+  //      narrowed to this call site: it would drop EVERY call site in EVERY superseded body —
+  //      dozens of files across chatTurn v1..v18, autoDraft v1..v9, statementFacts, witnessFacts,
+  //      clientOnboarding, firmInterview — from the caller side in one line. This fixture's own
+  //      header refuses exactly that shape: "There is no function-level blanket exemption and no
+  //      wildcard."
+  //   3. IT WOULD MAKE packages/db DEPEND ON packages/runtime's REGISTRY to decide what counts as
+  //      a call site, so a repoint (a routine act, several per wave) would silently change what the
+  //      SQL boundary census reports. The census's own header says it never infers the caller side
+  //      from anything but the repository's sources.
+  // So the waiver stays, and what it suppresses stays visible in its own reason. THE FOLLOW-UP IT
+  // NEEDS is not another chatTurn successor — it is a ruling that chatTurn_v1 may stop being
+  // exported (a drain proof: zero non-terminal runs on that body, which
+  // `scripts/rollback-preflight.mjs` can already count), after which the file leaves the tree and
+  // this entry becomes a DEAD exemption the census itself reports.
+  //
   // packages/runtime/workflows/chatTurn.impl.ts:112 (chatTurn_v1's read tool) calls
   // `clara.get_journal_entry($1)` on the READ pool, which SET ROLEs to clara_agent_ro.
   // Migration 0009 (S6 §9/C-11) retired the bare same-firm entry oracle from the agent lane —
