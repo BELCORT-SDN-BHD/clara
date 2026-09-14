@@ -37,7 +37,7 @@
       "deployed": true
     },
     "packages/runtime/lib/knowledge.mjs": {
-      "sha256": "18927f18602d7172ba24ab79db91959b88f137cdd7526e48c1c2d7e07d888764",
+      "sha256": "746ac773aed84cc56d6103b3a1deff162598c896d11163fc1ebb361a98f35cef",
       "note": ""
     },
     "packages/runtime/lib/malaysian-registration.mjs": {
