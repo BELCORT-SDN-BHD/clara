@@ -48,28 +48,61 @@ export async function seedFiledDocument({ firm, uploadedBy, client }) {
   return r.rows[0].r.document_id;
 }
 
+/** Header + regions in ONE transaction — the shape every in-repo writer produces. Each of
+ *  `clara.persist_document_extraction`, `clara.persist_invoice_facts` and
+ *  `clara.persist_witness_facts` inserts the extraction AND its regions inside one function
+ *  body, so both land in one transaction; there is no in-repo writer that lands a region in a
+ *  LATER transaction than its header (censused #624, re-censused at wave-2 integration: outside
+ *  packages/db/migrations the only `insert into clara.document_regions` sites in the repo are
+ *  test fixtures).
+ *
+ *  This is load-bearing rather than tidy. 0191's region-side belt
+ *  (`clara._tf_document_region_fact_validate`) REFUSES a region carrying one of the seven
+ *  identity terms when it arrives after the extraction's own COMMIT, with CLR10
+ *  `fact_validation_would_go_stale`: the invoice-identity verdict is recorded at the header's
+ *  COMMIT and the validation row is append-only, so a later region would leave the record
+ *  describing regions that are no longer the regions on file. Seeding through three separate
+ *  `fx.rootQuery` autocommits made this rig a writer path the product does not have, and the
+ *  belt was right to refuse it. Inside one transaction both triggers are queued together and
+ *  see the identical region set, so the belt is inert either way round (0191:930-975).
+ *
+ *  `withActor`'s finally rolls back when anything throws before COMMIT; its `rollback` after a
+ *  successful COMMIT finds no open transaction and is a no-op. `clock_timestamp()` still
+ *  advances statement by statement inside a transaction (unlike `now()`), so the vision/text
+ *  pair below keeps the distinct `extracted_at` the cross-regime cells read. */
+async function rootTx(fn) {
+  return fx.asRoot(async (c) => {
+    await c.query("begin");
+    const out = await fn(c);
+    await c.query("commit");
+    return out;
+  });
+}
+
 /** A legacy `invoice_facts` generation: one extraction + an `invoice.total` region (real
  *  geometry + confidence) + an `invoice.currency` region — the shape autoDraft.v7/chatTurn.v10
  *  already read, unwidened. `extractedAt` lets a cell pin the cross-regime clock explicitly. */
 export async function seedLegacyInvoiceFacts({ firm, document, versionN = 3, totalCents = 100000, confidence = 0.99, extractedAt = null }) {
-  const extraction = (await fx.rootQuery(
-    `insert into clara.document_extractions(firm_id,document_id,engine_id,engine_kind,version_n,status,page_count,extracted_at)
-       values($1,$2,'azure-di:prebuilt-invoice:4.0','invoice_facts',$3,'done',1,coalesce($4::timestamptz,clock_timestamp()))
-       returning id`,
-    [firm, document, versionN, extractedAt],
-  )).rows[0].id;
   const total = `RM ${(totalCents / 100).toFixed(2)}`;
-  await fx.rootQuery(
-    `insert into clara.document_regions(firm_id,extraction_id,locator_kind,locator,field_path,text_content,engine_confidence,monetary_raw,monetary_cents)
-       values($1,$2,'page_polygon','{"page":1,"polygon":[0,0,1,1]}','invoice.total',$3,$4,$3,$5)`,
-    [firm, extraction, total, confidence, totalCents],
-  );
-  await fx.rootQuery(
-    `insert into clara.document_regions(firm_id,extraction_id,locator_kind,locator,field_path,text_content,engine_confidence)
-       values($1,$2,'page_polygon','{"page":1,"polygon":[0,0,1,1]}','invoice.currency','MYR',$3)`,
-    [firm, extraction, confidence],
-  );
-  return extraction;
+  return rootTx(async (c) => {
+    const extraction = (await c.query(
+      `insert into clara.document_extractions(firm_id,document_id,engine_id,engine_kind,version_n,status,page_count,extracted_at)
+         values($1,$2,'azure-di:prebuilt-invoice:4.0','invoice_facts',$3,'done',1,coalesce($4::timestamptz,clock_timestamp()))
+         returning id`,
+      [firm, document, versionN, extractedAt],
+    )).rows[0].id;
+    await c.query(
+      `insert into clara.document_regions(firm_id,extraction_id,locator_kind,locator,field_path,text_content,engine_confidence,monetary_raw,monetary_cents)
+         values($1,$2,'page_polygon','{"page":1,"polygon":[0,0,1,1]}','invoice.total',$3,$4,$3,$5)`,
+      [firm, extraction, total, confidence, totalCents],
+    );
+    await c.query(
+      `insert into clara.document_regions(firm_id,extraction_id,locator_kind,locator,field_path,text_content,engine_confidence)
+         values($1,$2,'page_polygon','{"page":1,"polygon":[0,0,1,1]}','invoice.currency','MYR',$3)`,
+      [firm, extraction, confidence],
+    );
+    return extraction;
+  });
 }
 
 /** A witness PAIR: `llm_vision_facts` (no regions, §3.1) + `llm_text_facts` (carries the
@@ -78,31 +111,33 @@ export async function seedLegacyInvoiceFacts({ firm, document, versionN = 3, tot
  *  text row. `extractedAt` lets a cell pin the clock explicitly for the cross-regime cells. */
 export async function seedWitnessPair({ firm, document, versionN = 1, totalCents = 100000, extractedAt = null }) {
   const eid = `llm-openai:gpt-witness:${fx.opk("w")}`;
-  const visionId = (await fx.rootQuery(
-    `insert into clara.document_extractions(firm_id,document_id,engine_id,engine_kind,version_n,status,page_count,envelope,extracted_at)
-       values($1,$2,$3,'llm_vision_facts',$4,'done',1,'{"witness":{"channel":"vision","answers":{}}}'::jsonb,coalesce($5::timestamptz,clock_timestamp()))
-       returning id`,
-    [firm, document, eid, versionN, extractedAt],
-  )).rows[0].id;
-  const textId = (await fx.rootQuery(
-    `insert into clara.document_extractions(firm_id,document_id,engine_id,engine_kind,version_n,status,page_count,envelope,extracted_at)
-       values($1,$2,$3,'llm_text_facts',$4,'done',1,'{"witness":{"channel":"text","answers":{}}}'::jsonb,coalesce($5::timestamptz,clock_timestamp()))
-       returning id`,
-    [firm, document, eid, versionN, extractedAt],
-  )).rows[0].id;
   const total = `RM ${(totalCents / 100).toFixed(2)}`;
-  // engine_confidence = NULL by design (§3.4) — never set on a witness region.
-  await fx.rootQuery(
-    `insert into clara.document_regions(firm_id,extraction_id,locator_kind,locator,field_path,text_content,engine_confidence,monetary_raw,monetary_cents)
-       values($1,$2,'page_polygon','{"page":1,"polygon":[10,10,50,20]}','invoice.total',$3,null,$3,$4)`,
-    [firm, textId, total, totalCents],
-  );
-  await fx.rootQuery(
-    `insert into clara.document_regions(firm_id,extraction_id,locator_kind,locator,field_path,text_content,engine_confidence)
-       values($1,$2,'page_polygon','{"page":1,"polygon":[1,1,2,2]}','invoice.currency','MYR',null)`,
-    [firm, textId],
-  );
-  return { textId, visionId, engineId: eid };
+  return rootTx(async (c) => {
+    const visionId = (await c.query(
+      `insert into clara.document_extractions(firm_id,document_id,engine_id,engine_kind,version_n,status,page_count,envelope,extracted_at)
+         values($1,$2,$3,'llm_vision_facts',$4,'done',1,'{"witness":{"channel":"vision","answers":{}}}'::jsonb,coalesce($5::timestamptz,clock_timestamp()))
+         returning id`,
+      [firm, document, eid, versionN, extractedAt],
+    )).rows[0].id;
+    const textId = (await c.query(
+      `insert into clara.document_extractions(firm_id,document_id,engine_id,engine_kind,version_n,status,page_count,envelope,extracted_at)
+         values($1,$2,$3,'llm_text_facts',$4,'done',1,'{"witness":{"channel":"text","answers":{}}}'::jsonb,coalesce($5::timestamptz,clock_timestamp()))
+         returning id`,
+      [firm, document, eid, versionN, extractedAt],
+    )).rows[0].id;
+    // engine_confidence = NULL by design (§3.4) — never set on a witness region.
+    await c.query(
+      `insert into clara.document_regions(firm_id,extraction_id,locator_kind,locator,field_path,text_content,engine_confidence,monetary_raw,monetary_cents)
+         values($1,$2,'page_polygon','{"page":1,"polygon":[10,10,50,20]}','invoice.total',$3,null,$3,$4)`,
+      [firm, textId, total, totalCents],
+    );
+    await c.query(
+      `insert into clara.document_regions(firm_id,extraction_id,locator_kind,locator,field_path,text_content,engine_confidence)
+         values($1,$2,'page_polygon','{"page":1,"polygon":[1,1,2,2]}','invoice.currency','MYR',null)`,
+      [firm, textId],
+    );
+    return { textId, visionId, engineId: eid };
+  });
 }
 
 /** The REAL clara.get_document_extract(document, client) RPC — called on the HUMAN lane (a
