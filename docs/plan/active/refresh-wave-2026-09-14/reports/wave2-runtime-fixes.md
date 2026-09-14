@@ -1,98 +1,125 @@
-# Wave-2 runtime-suite fixes — #624 belt red, #640 sweep red
+# Wave-2 fixes — 0191's belt law, #640's FA due gate, and the three CI-only reds
 
 Branch `integration/wave-2`, worktree `C:\Users\zhant\Desktop\clara-wt\integration2`.
-Two commits on top of `193bddf2`; worktree CLEAN; nothing pushed, no PR, no migration edited.
+Four commits on `193bddf2`; worktree CLEAN; nothing pushed, no PR.
 
 ```
+9f01e8b4 docs(runtime): the PR-3a testkit says why one transaction still matters after the belt changed
+d296fdc7 fix(db):      #624 — 0191's region belt APPENDS a revision instead of refusing a late region
 6664a6c6 fix(runtime): #640 — the plan belt's probe no longer trips the FA due gate
 eab88531 test(runtime): #624 — the legacy invoice-facts testkit seeds through the supported writer path
 ```
 
-## Regression 1 — cells 312–318, `f-a1-pr3a-consumers.test.mjs`
+Rig **rigw2b** `127.0.0.1:55456/clara_w2`, dropped and rebuilt from scratch on the FINAL 0191
+(`migrate: 189 new migration(s) applied · 189 total`, 170 s). rigw2 never reset; no reset/role-sweep
+flag set.
 
-**Cause.** `packages/runtime/tests/f-a1-pr3a-testkit.mjs` (pre-fix lines 55–72 `seedLegacyInvoiceFacts`,
-79–106 `seedWitnessPair`). Each `fx.rootQuery` is its own pool checkout and its own autocommit
-(`relay-fixtures.mjs:41-68`), so the extraction header committed alone, its recorder trigger wrote
-the invoice-identity verdict against **zero** regions, and the `invoice.total` region then arrived in
-a LATER transaction. 0191's region-side belt (`0191_document_capability_registry.sql:964-993`,
-`clara._tf_document_region_fact_validate`) refused it: CLR10 `fact_validation_would_go_stale`,
-`(unmeasured -> unmeasured)` — outcome equal, `detail` moved (`no_total_persisted` →
-`net_or_tax_not_persisted`). All seven DB cells died in the seeders, not in what they assert.
+## Regression 1 — the belt (scope changed by the orchestrator's ruling)
 
-**Is a production path affected? No.** Re-censused every writer of `clara.document_regions`:
-`git grep "insert into clara.document_regions" -- packages apps scripts` outside
-`packages/db/migrations` returns **only** test fixtures (9 files, all `packages/runtime/tests`).
-`packages/runtime/lib` and `packages/runtime/workflows` contain no direct region INSERT at all —
-they call the doors, and each door inserts header **and** regions in one function body, so one
-transaction: `persist_invoice_facts` (`0026_lane_widen.sql:709` header, `:769` regions),
-`persist_witness_facts` (`0095_f_a1_writer.sql:469/486` headers, `:572/612` regions),
-`persist_document_extraction`. The belt is right; the testkit was the unsupported writer.
+**What I found first (correct, but not the whole picture).** `f-a1-pr3a-testkit.mjs` seeded through
+three separate `fx.rootQuery` autocommits (`relay-fixtures.mjs:41-68` — one pool checkout each), so
+the `invoice.total` region landed in a LATER transaction than the header whose commit recorded the
+verdict. I censused every writer of `clara.document_regions`: outside `packages/db/migrations` the
+only INSERT sites in the repo are test fixtures, and each production door inserts header **and**
+regions in one function body — `persist_invoice_facts` (`0026_lane_widen.sql:709` / `:769`),
+`persist_witness_facts` (`0095_f_a1_writer.sql:469`/`486` / `:572`/`612`),
+`persist_document_extraction`. **No production path writes a late region.**
 
-**Fix.** Both seeders now run header + regions in ONE transaction via a local `rootTx` helper —
-the shape `packages/db/tests/document-fact-validation-belt.test.mjs:85`'s own positive control uses.
-Same rows, same order (vision before text), same NULL `engine_confidence`; `clock_timestamp()` still
-advances per statement inside a transaction, so the cross-regime cells keep distinct `extracted_at`.
-0191 untouched.
+**Why that was not enough.** CI 34793833626 shows the refusal's real blast radius: **291 db cells**
+red, **289** of them carrying `not a supported writer path` (binding-proposal-pr-1 94,
+f-a1-predicate 32, f-a1-dispatch 9, the f-a2-* family ~150), plus the 7 runtime cells. Among them
+are cells whose **re-derived verdict was identical** to the recorded one (`unmeasured -> unmeasured`)
+— refused because the trigger asked "did this arrive late?" before "did anything change?". A writer
+census is the wrong thing to build a wall from: it turns a sequencing convention of the writers into
+a law for the whole estate.
 
-**Sibling sweep.** The other eight runtime fixtures that insert regions cannot trip the belt: they
-insert either against an `ocr` extraction (no validation row is ever recorded — the recorder returns
-early for kinds outside `invoice_facts`/`llm_text_facts`) or under non-guarded field paths
-(`pages.N.lines.M`, `tin`, `body`, `line`, `opening_tb.line`, `prior_gl.line`); the `f-a1-witness-*`
-and `document-facts-validation-db` batteries go through the real `persist_witness_facts` door. Ran
-them anyway: **77/77, 0 fail** (`classify-consumer`, `facts-gate-consumer`, `matcher-ab3-adjacency`,
-`matcher-attribution`, `s6-matcher-readers`, `statement-layout-supersede`,
-`document-facts-validation-db`, `wave-b-opening-parse`, `wave-b-seeding-prepare`).
+**Fix, per the ruling (0191 is absent from main — `git cat-file -e main:…` fails — so this edits an
+unmerged file of this wave, not a merged migration).**
+`clara._tf_document_region_fact_validate` re-derives at COMMIT and: verdict **unchanged** → writes
+nothing, raises nothing; verdict **changed** → **appends the next `revision`** for that
+(extraction, check_name). Nothing updated, nothing deleted. `clara.document_fact_validations` gains
+`revision int not null default 1 check (revision >= 1)`, which **joins** both unique indexes (a
+replayed persist still collides at revision 1), and `clara.get_document_state` takes the highest
+revision per (subject, check) — **projected shape unchanged**, so no door reader and no web type
+changed. The `when` clause is untouched. The statement side keeps 0038's stricter CLR10 refusal
+(merged migration; a declared `line_count` is part of the document as filed, not a derived verdict).
+0191's tail now pins the law on the trigger's **own body** (no `raise exception`; must carry the
+append) and on `revision`'s place in both unique indexes. ARCHITECTURE §7 + the §11 文件 row
+restate it; `firm-scope-db-pins.corpus.ts`'s 0191 sha256 recut to `a370f6cf…`.
 
-**Evidence.** `node --test tests/f-a1-pr3a-consumers.test.mjs` (PG env, rigw2/clara_w2) → **9 tests,
-9 pass, 0 fail, 0 skip** (7 DB cells + 2 source cells). The belt's own battery, exact 27 gate flags
-from `packages/db/package.json`: `document-fact-validation-belt` **6/6**, including cell 2's CLR10
-refusal of a lone later region and cell 5's estate sweep ("no validation row disagrees with the rows
-it cites") — still green after the run seeded new rows.
+**Battery rewritten to the new law — 8 cells, all green:** revision 1 on the supported path; an
+unchanged later verdict (`invoice.delivery` = "FREE", no normalisable cents) writes nothing; a
+changed one (`invoice.discount` 50.00) appends exactly one revision with the earlier row identical
+and the **door** showing only the new one; a non-identity path is not queued; three identity regions
+in ONE transaction collapse to ONE revision; the statement refusal; an estate sweep over the
+**current** revision plus a 1..n contiguity sweep; firm scope on both lanes. Two fixture premises
+were wrong and are now measured, not assumed: `delivery = 0` *does* move `detail` (`delivery_cents:
+0` joins it, so it correctly appends), and the discount residual is **−5000** (computed − total).
 
-## Regression 2 — `reconcile-fa-unit.test.mjs:264`
+**Evidence, rigw2b, exact 27 gate flags from `packages/db/package.json`:**
+`document-fact-validation-belt` **8/8** · `binding-proposal-pr-1` **111/111** · `f-a1-predicate`
+**33/33** · `f-a1-dispatch` **11/11** · all 18 `f-a2-*` **241: 238 pass / 0 fail / 3 skip** ·
+`document-capability-registry` + `field-path-grammar` + `document-filing-conflict` +
+`accounting-plans` + `accounting-plan-occurrences` + `operation-census` + `knowledge-records` +
+`periodic-adjustment` **119/119**. Runtime (PG env): `f-a1-pr3a-consumers` **9/9**, and with
+`document-facts-validation-db` + `document-capability-drift-db` + the three `f-a1-witness-*`
+**52: 51 pass / 1 pre-existing skip**; `structured-worker-cell-ref` **8/8**. Web
+`firm-scope-db-pins` **22/22**.
 
-**Cause.** The cell's own spy, not the wiring. It matched a bare `/to_regprocedure/`
-(`reconcile-fa-unit.test.mjs:270,274` pre-fix). #640 registered `reconcilePlanOccurrences`
-UNCONDITIONALLY in the sweep (`packages/runtime/lib/reconciler.mjs:721`) and its per-cycle
-feature-detect (`plan-occurrences.mjs:79-84`) is also a `to_regprocedure` catalog read — so the
-keyword match counted a sibling belt's probe as the FA belt's.
+**Production impact:** none for existing writers — the belt stays a silent no-op when header and
+regions share a transaction. What changes is that an unknown or future writer landing a late
+identity region now gets a new measurement instead of a failed write, and the door shows the current
+one.
 
-**Measured, not assumed.** Driving `runReconcilerSweep` with the cell's own mock and no `faRuns`
-flag: `faOk: undefined`, `beltErrors: []`, and the only `to_regprocedure` query issued names
-`clara.wake_due_plan_occurrences(integer,text)`. The FA belt genuinely is not invoked; the due gate
-(`reconciler.mjs:717`) is intact.
+**The testkit change stands** (eab88531 + 9f01e8b4): it is now about fidelity, not permission. The
+old seeding would no longer fail, but it would leave the rig a two-revision history (revision 1
+`unmeasured/no_total_persisted`, revision 2 once the first region lands) that no production persist
+can produce.
 
-**Fix.** The cell now matches `run_depreciation_period` — the FA belt's own door, present in both its
-feature-detect (`reconciler-fa.mjs:56`) and its run verb — so the negative is stronger than before:
-not one FA query of any kind. Identical to the repair `reconcile-adjustments-unit.test.mjs:349`
-already carries for the D-b twin; the D-a twin was missed. **No production code changed**, no belt
-behaviour changed.
+## Regression 2 — `reconcile-fa-unit.test.mjs:264` (unchanged by the ruling)
 
-**Evidence.** `reconcile-fa-unit` **17/17**. #640's four neighbours
-(`reconcile-adjustments-unit`, `reconcile-belt-isolation-unit`, `reconcile-work-unit`, `reconcile`)
-**74/74, 0 fail, 0 skip** — the same 74 that were green on `impl/640-accounting-plans`.
-db side: `accounting-plans` + `accounting-plan-occurrences` + `document-capability-registry` +
-`field-path-grammar` + the belt battery → **64/64**.
+**Cause: the cell's spy, not the wiring.** It matched a bare `/to_regprocedure/`. #640 registered
+`reconcilePlanOccurrences` unconditionally (`reconciler.mjs:721`) and its feature-detect
+(`plan-occurrences.mjs:79-84`) is also a `to_regprocedure` read. Measured on the not-due sweep with
+the cell's own mock: `faOk: undefined`, `beltErrors: []`, and the only `to_regprocedure` query names
+`clara.wake_due_plan_occurrences(integer,text)`. The due gate (`reconciler.mjs:717`) is intact.
 
-## Suite-level
+**Fix:** the cell matches `run_depreciation_period` — the FA belt's own door, in both its probe and
+its run verb, so the negative is stronger than before. Identical to the repair
+`reconcile-adjustments-unit.test.mjs:349` already carried for the D-b twin. **No production code
+changed.** `reconcile-fa-unit` **17/17**; #640's four neighbours **74/74** (its own branch count);
+with `ready` **115/115**.
 
-- `node --test` over `tests/reconcile*.test.mjs` + `tests/f-a1-*.test.mjs` + `tests/ready.test.mjs`
-  (15 files, PG env): **207 tests, 206 pass, 0 fail, 1 skip**. The skip is pre-existing
-  (`f-a1.pr2.e2 B1 fallback` — "post-0097 the absence window this cell guards is closed"), the same
-  one in the orchestrator's own suite log.
-- `pnpm typecheck` Done (apps/web + packages/runtime). `pnpm lint` **exit 0**.
-- apps/web suite not run: no web file changed.
+## The three CI-only runtime reds — NOT the belt
 
-## Observations (not fixed, no cell asserts on them)
+`c5cv.12` CLR09 "the required legal agreements are not accepted" · `c5cv.13` CLR09 "that terms
+version is no longer the published one" · `c5db.5` 23505 on `uq_legal_documents_published`. The db
+suite's `cc.10` (`checkout-convergence.test.mjs`) carries the same CLR09 — 3 × CLR09 in the log.
 
-1. The pure FA/adjustment mocks answer **any** `to_regprocedure` with `surface: true`, so the
-   unconditional plan belt lights up inside them and, getting no rows for its scan, returns
-   `planOk:false` (contained — `beltErrors` stays empty, `log` is a no-op). A mock artefact of a
-   fixture that predates the sibling; the #640 worker left the same shape in the adjustment twin, and
-   I kept them consistent rather than widening the change. Worth a follow-up if a third belt lands.
-2. Every `to_regprocedure` spy in a sweep-level unit test is now vulnerable to the next unconditional
-   belt in the same way. Both twins are repaired; a house rule ("spy on your belt's own door") would
-   close it for the next one.
+**Diagnosis: a cross-package concurrency race on global legal state — not Linux, not network.**
+`clara.legal_documents` has **no firm_id**, and `uq_legal_documents_published`
+(`0185_legal_acceptance.sql:259`) is a partial unique index on `(kind) where status='published'` —
+one published Terms/DPA per **database**. Six test files across two packages publish into it
+(`checkout-gate-c1`, `checkout-gate-c3`, `legal-acceptance`, `web-reads-and-doors`,
+`c5-stripe-convergence-db`, `c5-stripe-webhook-db`), each doing `update … set status='superseded'`
+then `insert … 'published'` in **separate autocommits** (e.g. `c5-stripe-webhook-db.test.mjs:325-345`).
+`.github/actions/db-estate-suite/action.yml:57` runs `pnpm -r --if-present test` against one
+`clara_ci`, and the log shows `packages/db test:`, `packages/runtime test:` and `apps/web test:`
+output interleaved within the same second (log lines 7255-7262). Two publishers racing give exactly
+the three shapes: 23505 between the supersede and the insert; CLR09 when another suite supersedes
+the version this fixture just accepted. The action's own comment ("pollution-proof by construction
+— they stage their own fixtures") is true of firm-scoped fixtures and **false** of this table.
 
-**Unverified:** anything hosted. All counts above are local, against rigw2
-(`127.0.0.1:55453/clara_w2`); the rig was never reset and no reset/role-sweep flag was set.
+**Not fixed, and why it is not bounded.** An advisory lock around supersede+publish would close the
+23505 but not the CLR09s — there the accepted version genuinely stops being current. The real fixes
+are CI-shaped: serialise the packages (`--workspace-concurrency=1`) or give each package its own
+database. Both change every package's CI runtime and touch CI wiring another worker is working in,
+so I left them. Worth its own issue.
+
+## Gates
+
+`pnpm typecheck` Done (apps/web + packages/runtime) · `pnpm lint` **exit 0** · worktree clean.
+apps/web suite not run (no web source change; only the corpus sha pin, covered by
+`firm-scope-db-pins` 22/22).
+
+**Unverified:** anything hosted. Every count is local against rigw2b.
