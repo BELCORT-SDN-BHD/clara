@@ -668,14 +668,36 @@ export function PeriodicAdjustmentFormView({
               `clara._adv_on_approve` refuses a credit on an enrolled staff-advance account that
               does not say WHICH advance it discharges, and `book_staff_advance_application` is the
               door that does. So this field records the control relationship (the database checks
-              it is a live enrolment) and the recovery itself stays with the register that owns the
-              allocation — #643's "do not invent missing settlement facts", said out loud rather
-              than discovered at approve. */}
-          <Field field="advanceAccountCode" errorText={errorFor("advanceAccountCode")} label={t("advanceAccountCode")} hint={t("advanceAccountHelp")}>
-            <AccountPicker field="advanceAccountCode" value={draft.advanceAccountCode}
-              accounts={accounts} props={textProps("advanceAccountCode", true)} onPick={(v) => set("advanceAccountCode", v)}
-              placeholder={t("accountNone")} />
-          </Field>
+              it is a live enrolment) and the ALLOCATION — which advance this discharges — stays
+              with the register that owns it: #643's "do not invent missing settlement facts", said
+              out loud rather than discovered at approve.
+
+              THE AMOUNT CARRIED ON IT IS NOT the same kind of gap: `advanceCents` shapes the
+              derived advance leg below exactly as `settledCents` shapes the payment leg, so a
+              preparer who names this account sees the split it produces instead of meeting 0194's
+              `advance_leg` refusal at admission. The control is offered only once an account is
+              chosen — an amount with no account to carry it could never be posted. */}
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Field field="advanceAccountCode" errorText={errorFor("advanceAccountCode")} label={t("advanceAccountCode")} hint={t("advanceAccountHelp")}>
+              <AccountPicker field="advanceAccountCode" value={draft.advanceAccountCode}
+                accounts={accounts} props={textProps("advanceAccountCode", true)}
+                onPick={(v) => {
+                  set("advanceAccountCode", v);
+                  // Clearing the account clears the figure that rides on it — the same rule as
+                  // clearing the field itself, so no stale amount survives a control that is about
+                  // to disappear.
+                  if (v.trim() === "") set("advanceCents", 0);
+                }}
+                placeholder={t("accountNone")} />
+            </Field>
+            {draft.advanceAccountCode.trim() !== "" && (
+              <Field field="advanceCents" errorText={errorFor("advanceCents")} label={t("advanceCents")}
+                hint={t("advanceCentsHelp")}>
+                <MoneyInput {...moneyProps("advanceCents", true)} cents={draft.advanceCents} mode="unsigned"
+                  onValueChange={(c) => c.ok && set("advanceCents", c.cents ?? 0)} />
+              </Field>
+            )}
+          </div>
           <Field field="particularsSource" errorText={errorFor("particularsSource")} label={t("particularsSource")} hint={t("particularsSourceHelp")}>
             <Input {...textProps("particularsSource", true)} value={draft.particularsSource}
               maxLength={PARTICULARS_SOURCE_MAX_CHARS}

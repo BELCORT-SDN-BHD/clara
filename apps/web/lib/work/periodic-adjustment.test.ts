@@ -108,6 +108,14 @@ test("643.web: every rule mirrors one the database enforces, and names the contr
     [payrollDraft({ particularsSource: "  " }), "particularsSource", "required"],
     [payrollDraft({ particularsSource: "x".repeat(PARTICULARS_SOURCE_MAX_CHARS + 1) }), "particularsSource", "tooLong"],
     [payrollDraft({ advanceAccountCode: "9999" }), "advanceAccountCode", "accountUnknown"],
+    // `_assert_adjustment_relationships`'s `distinct`: the advance leg repeats another named
+    // account (0194: `v_adv in (v_exp, v_liab)`).
+    [payrollDraft({ advanceAccountCode: "2100" }), "advanceAccountCode", "accountsMustDiffer"],
+    [payrollDraft({ advanceAccountCode: "6010" }), "advanceAccountCode", "accountsMustDiffer"],
+    // `_assert_adjustment_relationships`'s `advance_leg`: an account is named but the entry would
+    // carry nothing on it — the SAME shape `paymentLegUnused` mirrors for the payment leg.
+    [payrollDraft({ advanceAccountCode: "1185" }), "advanceCents", "advanceLegUnused"],
+    [payrollDraft({ advanceAccountCode: "1185", advanceCents: 999_999 }), "advanceCents", "overAdvanced"],
   ];
   for (const [draft, field, code] of cases) {
     const issues = validateAdjustmentDraft(draft, CHART);
@@ -168,15 +176,44 @@ test("643.web: the payroll expense leg carries the whole obligation and the liab
     "every derived basis balances to the cent");
 });
 
-test("643.web: a staff-advance recovery is NOT derived — the register owns the allocation", () => {
-  // `clara._adv_on_approve` refuses a credit on an enrolled staff-advance account that does not
-  // say WHICH advance it discharges; `clara.book_staff_advance_application` is that door. So the
-  // advance account rides as a PARTICULAR and never appears as a derived credit leg — a form that
-  // invented one would be fabricating a missing settlement fact.
-  const lines = derivedLines(payrollDraft({ advanceAccountCode: "1185" }));
-  assert.equal(lines.some((l) => l.account_code === "1185"), false);
-  const wire = toAdjustmentWire(payrollDraft({ advanceAccountCode: "1185" }), CHART);
-  assert.equal(wire?.advanceAccountCode, "1185", "…while the particular itself is still recorded");
+test("643.web: choosing an advance account derives its leg — the gap named, not fixed, by v19", () => {
+  // v19's report (`docs/plan/active/refresh-wave-2026-09-14/reports/v19-final.md`) named this
+  // exactly: the form offered `advanceAccountCode` but `derivedLines` derived no leg for it, so a
+  // preparer who picked one earned 0194's `advance_leg` refusal at admission. The fix mirrors the
+  // chat lane's `basisFromAdjustment` (`packages/runtime/lib/periodic-adjustment-basis.ts`): the
+  // liability leg's credit is `amount - settled - advance`, and the advance leg rides its own line,
+  // BEFORE the settlement leg — the SAME three (or four) lines for the SAME particulars.
+  const lines = derivedLines(payrollDraft({ advanceAccountCode: "1185", advanceCents: 40_000 }));
+  assert.deepEqual(lines.map((l) => [l.account_code, l.debit_cents, l.credit_cents]),
+    [["6010", 130_000, 0], ["2100", 0, 90_000], ["1185", 0, 40_000]]);
+  assert.equal(
+    lines.reduce((n, l) => n + l.debit_cents, 0),
+    lines.reduce((n, l) => n + l.credit_cents, 0),
+    "every derived basis balances to the cent");
+
+  const wire = toAdjustmentWire(payrollDraft({ advanceAccountCode: "1185", advanceCents: 40_000 }), CHART);
+  assert.equal(wire?.advanceAccountCode, "1185", "the particular itself is recorded");
+  assert.equal("advanceCents" in (wire ?? {}), false,
+    "advanceCents is a DERIVATION INPUT ONLY, exactly settledCents's own N3 rule — no server "
+    + "particular can ever carry it, so the wire body never does either");
+
+  // ADVANCE, SETTLEMENT AND PAYMENT TOGETHER — all four legs, in the chat lane's own order.
+  const both = derivedLines(payrollDraft({
+    advanceAccountCode: "1185", advanceCents: 40_000, paymentAccountCode: "1150", settledCents: 30_000,
+  }));
+  assert.deepEqual(both.map((l) => [l.account_code, l.debit_cents, l.credit_cents]),
+    [["6010", 130_000, 0], ["2100", 0, 60_000], ["1185", 0, 40_000], ["1150", 0, 30_000]]);
+});
+
+test("643.web: an advance account named with nothing carried on it is refused LOCALLY, not at admission", () => {
+  // The exact gap v19 named: choosing the control with no `advanceCents` must never reach the
+  // wire, because 0194's `_assert_adjustment_relationships` would refuse it `advance_leg` (a named
+  // leg carrying nothing) at admission. `toAdjustmentWire` returns null for an invalid draft for
+  // the same reason it does for any other local refusal.
+  const draft = payrollDraft({ advanceAccountCode: "1185" }); // advanceCents left at its default, 0
+  const issues = validateAdjustmentDraft(draft, CHART);
+  assert.ok(issues.some((i) => i.field === "advanceCents" && i.code === "advanceLegUnused"));
+  assert.equal(toAdjustmentWire(draft, CHART), null);
 });
 
 // ===========================================================================================
@@ -244,6 +281,12 @@ test("643.web: a server field path lands on a control in BOTH spellings of one p
   assert.equal(fieldForAdjustmentPath("adjustment.settled_cents"), null,
     "no DB particular, no server path — the roster claims only what the server can name");
   assert.equal(fieldForAdjustmentPath("adjustment.settledCents"), null);
+  // `advanceCents` IS THE SAME SHAPE OF ABSENCE, for the chat lane's own stated reason
+  // (`packages/runtime/lib/periodic-adjustment-basis.ts`'s `advance_cents` never enters
+  // `p_adjustment`): a derivation input, never a wire path, so no refusal can ever name it.
+  // `advanceAccountCode` stays mapped above — it IS a 0194 particular.
+  assert.equal(fieldForAdjustmentPath("adjustment.advance_cents"), null);
+  assert.equal(fieldForAdjustmentPath("adjustment.advanceCents"), null);
   assert.equal(fieldForAdjustmentPath("adjustment"), null);
   assert.equal(fieldForAdjustmentPath("lines[1].account_code"), null, "the basis keeps its own mapper");
   assert.equal(fieldForAdjustmentPath(null), null);

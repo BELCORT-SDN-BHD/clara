@@ -439,6 +439,102 @@ test("a DEFAULT is an offer: a code NO default names is never overwritten by a k
   }
 });
 
+// ===========================================================================================
+// THE ADVANCE LEG (#643, named not fixed by v19's own report) — a preparer who picks a
+// staff-advance account must see the SAME derived leg the chat lane's `basisFromAdjustment`
+// would produce, never 0194's `advance_leg` refusal thirty seconds later at admission.
+// ===========================================================================================
+
+test("choosing an advance account derives its leg, and BOTH particulars reach the wire", async () => {
+  const sent: Submitted[] = [];
+  const h = await renderComponent(App({ submit: recorder(sent) }));
+  try {
+    await h.settle();
+    await fillPayroll(h);
+    // THE CONTROL IS HIDDEN UNTIL AN ACCOUNT IS CHOSEN — an amount with nothing to carry it could
+    // never be posted.
+    assert.equal(maybeId(h, F("advanceCents")), null, "advanceCents is not offered with no account named");
+    await h.fireEvent(byId(h, F("advanceAccountCode")), "change", (n) => setFieldValue(n, "1150"));
+    await h.settle();
+    assert.ok(maybeId(h, F("advanceCents")), "the control appears once an account is chosen");
+    await h.fireEvent(byId(h, F("advanceCents")), "change", (n) => setFieldValue(n, "400.00"));
+    await submitForm(h);
+    assert.equal(sent.length, 1, `expected one submit, got ${JSON.stringify(sent)}`);
+    const body = sent[0]!;
+    assert.equal(body.adjustment.advanceAccountCode, "1150", "the particular is recorded");
+    assert.equal("advanceCents" in body.adjustment, false,
+      "a derivation input only, exactly settledCents's own N3 rule — never a wire key");
+    // THE THREE DERIVED LINES — expense Dr the whole amount, liability Cr the remainder, the
+    // advance account Cr what is carried on it. The SAME split the chat lane's own
+    // `basisFromAdjustment` produces for the same particulars.
+    assert.deepEqual(
+      body.basis.lines.map((l) => [l.accountCode, l.debitCents, l.creditCents]),
+      [["6010", 130_000, 0], ["2100", 0, 90_000], ["1150", 0, 40_000]]);
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("an advance account named with nothing carried on it is refused LOCALLY, on the control", async () => {
+  let calls = 0;
+  const h = await renderComponent(App({ submit: async () => { calls += 1; return { kind: "denied" }; } }));
+  try {
+    await h.settle();
+    await fillPayroll(h);
+    await h.fireEvent(byId(h, F("advanceAccountCode")), "change", (n) => setFieldValue(n, "1150"));
+    await h.settle();
+    // advanceCents is left at its default, 0 — the control appeared but nothing was entered.
+    await submitForm(h);
+    assert.equal(calls, 0, "the runtime is never asked to refuse what the form can see");
+    assert.equal(focusedId(), F("advanceCents"));
+    assert.match(h.text(), /Enter the amount carried on this account, or clear it above\./);
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("an advance account that repeats the liability account is refused as DISTINCT", async () => {
+  let calls = 0;
+  const h = await renderComponent(App({ submit: async () => { calls += 1; return { kind: "denied" }; } }));
+  try {
+    await h.settle();
+    await fillPayroll(h);
+    // "2100" is this draft's own liability account (EPF's statutory default) — 0194's
+    // `_assert_adjustment_relationships` refuses `v_adv in (v_exp, v_liab)` under this exact name.
+    await h.fireEvent(byId(h, F("advanceAccountCode")), "change", (n) => setFieldValue(n, "2100"));
+    await h.settle();
+    await submitForm(h);
+    assert.equal(calls, 0);
+    assert.equal(focusedId(), F("advanceAccountCode"));
+    assert.match(h.text(), /This must be a different account from the one above\./);
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("clearing the advance account clears the figure that rode on it", async () => {
+  const sent: Submitted[] = [];
+  const h = await renderComponent(App({ submit: recorder(sent) }));
+  try {
+    await h.settle();
+    await fillPayroll(h);
+    await h.fireEvent(byId(h, F("advanceAccountCode")), "change", (n) => setFieldValue(n, "1150"));
+    await h.settle();
+    await h.fireEvent(byId(h, F("advanceCents")), "change", (n) => setFieldValue(n, "400.00"));
+    await h.fireEvent(byId(h, F("advanceAccountCode")), "change", (n) => setFieldValue(n, ""));
+    await h.settle();
+    assert.equal(maybeId(h, F("advanceCents")), null, "the control is gone, and takes its stale figure with it");
+    await submitForm(h);
+    assert.equal(sent.length, 1, `expected one submit, got ${JSON.stringify(sent)}`);
+    assert.equal("advanceAccountCode" in sent[0]!.adjustment, false, "no account named, nothing to record");
+    assert.deepEqual(
+      sent[0]!.basis.lines.map((l) => [l.accountCode, l.debitCents, l.creditCents]),
+      [["6010", 130_000, 0], ["2100", 0, 130_000]], "no advance leg — the stale figure did not survive");
+  } finally {
+    await h.unmount();
+  }
+});
+
 test("the draft is filed under its own scope, with its identity, and retired only on acceptance", async () => {
   const storage = memoryStorage();
   const h = await renderComponent(App({

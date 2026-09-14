@@ -90,6 +90,11 @@ export type AdjustmentDraft = {
   expenseAccountCode: string;
   liabilityAccountCode: string;
   advanceAccountCode: string;
+  // THE ADVANCE LEG'S OWN `settled_cents`. A DERIVATION INPUT ONLY, never a stored particular —
+  // this module's N3 rule, restated: it shapes the derived advance leg (`derivedLines`) and
+  // nothing else, and it is deliberately absent from `ADJUSTMENT_FIELDS` below for the identical
+  // reason `settledCents` is.
+  advanceCents: number;
   paymentAccountCode: string;
   amountCents: number;
   settledCents: number;
@@ -114,6 +119,7 @@ export function emptyAdjustmentDraft(): AdjustmentDraft {
     expenseAccountCode: OBLIGATION_EXPENSE_DEFAULTS.epf,
     liabilityAccountCode: STATUTORY_LIABILITY_DEFAULTS.epf,
     advanceAccountCode: "",
+    advanceCents: 0,
     paymentAccountCode: "",
     amountCents: 0,
     settledCents: 0,
@@ -146,6 +152,7 @@ export type AdjustmentFieldId =
   | "expenseAccountCode"
   | "liabilityAccountCode"
   | "advanceAccountCode"
+  | "advanceCents"
   | "paymentAccountCode"
   | "amountCents"
   | "settledCents"
@@ -168,6 +175,11 @@ export type AdjustmentIssueCode =
   | "overSettled"
   | "settlementNeedsAccount"
   | "paymentLegUnused"
+  // THE ADVANCE LEG'S OWN PAIR, mirroring 0194's `advance_leg` (a staff-advance account named
+  // with nothing carried on it) and its own `≤ amount` bound — `overSettled`'s rule, restated for
+  // the advance leg rather than the payment one.
+  | "advanceLegUnused"
+  | "overAdvanced"
   | "tooLong";
 
 export type AdjustmentIssue = { field: AdjustmentFieldId; code: AdjustmentIssueCode };
@@ -298,6 +310,25 @@ export function validateAdjustmentDraft(
     } else if (exact(draft.amountCents) && draft.settledCents > draft.amountCents) {
       issues.push({ field: "settledCents", code: "overSettled" });
     }
+    // THE ADVANCE LEG, MIRRORED. `advanceCents` is a DERIVATION INPUT ONLY (this module's own N3
+    // rule, exactly `settledCents`'s) and the control that holds it is shown only once an advance
+    // account is chosen, so these two rules are 0194's own `_assert_adjustment_relationships`
+    // arm for the payroll case, restated for the figure that never reaches the wire:
+    //   `distinct`     — the advance leg repeats the expense or liability account (0194:
+    //                     `v_adv in (v_exp, v_liab)`).
+    //   `advance_leg`  — a staff-advance account is named but the entry would carry nothing on
+    //                     it (0194: `_adjustment_net_cents(p_lines, v_adv) = 0`).
+    if (draft.advanceAccountCode.trim() !== ""
+        && (draft.advanceAccountCode.trim() === draft.expenseAccountCode.trim()
+          || draft.advanceAccountCode.trim() === draft.liabilityAccountCode.trim())) {
+      issues.push({ field: "advanceAccountCode", code: "accountsMustDiffer" });
+    }
+    if (!exact(draft.advanceCents)) issues.push({ field: "advanceCents", code: "amountNotExact" });
+    else if (draft.advanceCents === 0 && draft.advanceAccountCode.trim() !== "") {
+      issues.push({ field: "advanceCents", code: "advanceLegUnused" });
+    } else if (exact(draft.amountCents) && draft.advanceCents > draft.amountCents) {
+      issues.push({ field: "advanceCents", code: "overAdvanced" });
+    }
     if (draft.particularsSource.trim() === "") issues.push({ field: "particularsSource", code: "required" });
     else if (draft.particularsSource.trim().length > PARTICULARS_SOURCE_MAX_CHARS) {
       issues.push({ field: "particularsSource", code: "tooLong" });
@@ -328,12 +359,18 @@ export function firstInvalidAdjustmentField(issues: readonly AdjustmentIssue[]):
  * is its mirror. Nothing is rounded — the movement is already exact cents.
  *
  * THE PAYROLL SPLIT IS THE ACCOUNTANT'S: the expense leg carries the whole obligation, and the
- * credit side is the liability less whatever was settled through the payment account. A
- * STAFF-ADVANCE RECOVERY IS NOT DERIVED and cannot be — `clara._adv_on_approve` refuses a credit
- * on an enrolled staff-advance account that does not say WHICH advance it discharges, and
- * `clara.book_staff_advance_application` is the door that does. An allocation is a missing
- * settlement fact, so the form records the advance account as a particular and leaves the
- * allocation to the register that owns it.
+ * credit side is the liability less whatever was carried on the staff-advance account and less
+ * whatever was settled through the payment account.
+ *
+ * THE ADVANCE LEG'S AMOUNT IS DERIVED; ITS ALLOCATION IS NOT, AND CANNOT BE — the same split the
+ * chat lane's `basisFromAdjustment` (`packages/runtime/lib/periodic-adjustment-basis.ts`) makes,
+ * for the SAME reason: `clara._adv_on_approve` refuses a credit on an enrolled staff-advance
+ * account that does not say WHICH advance it discharges, and `clara.book_staff_advance_application`
+ * is the door that does. That is an ALLOCATION — a missing settlement fact this form does not
+ * invent. The AMOUNT carried on the account is not: it is the same accountant's split that already
+ * governs the payment leg, and a form that offers the account control without deriving what it
+ * carries is exactly the gap `clara._assert_adjustment_relationships`'s `advance_leg` refusal
+ * catches at admission (#643, named in the refresh wave's v19 report and closed here).
  */
 export function derivedLines(draft: AdjustmentDraft): JournalDraftLine[] {
   if (draft.purpose === "periodic_stock_adjustment") {
@@ -356,6 +393,7 @@ export function derivedLines(draft: AdjustmentDraft): JournalDraftLine[] {
     ];
   }
   const settled = Number.isSafeInteger(draft.settledCents) ? draft.settledCents : 0;
+  const advance = Number.isSafeInteger(draft.advanceCents) ? draft.advanceCents : 0;
   const amount = Number.isSafeInteger(draft.amountCents) ? draft.amountCents : 0;
   const lines: JournalDraftLine[] = [
     {
@@ -367,10 +405,23 @@ export function derivedLines(draft: AdjustmentDraft): JournalDraftLine[] {
     {
       account_code: draft.liabilityAccountCode.trim(),
       debit_cents: 0,
-      credit_cents: amount - settled,
+      credit_cents: amount - settled - advance,
       description: "obligation",
     },
   ];
+  // THE ADVANCE LEG, BEFORE THE SETTLEMENT LEG — the order the chat lane's own
+  // `basisFromAdjustment` derives them in, so the two lanes produce the SAME lines for the SAME
+  // particulars. 0194 only requires each NAMED leg to carry something; the order is this pair's
+  // own, read the way an accountant states it: what is owed, what is carried on the advance, what
+  // was paid.
+  if (advance > 0 && draft.advanceAccountCode.trim() !== "") {
+    lines.push({
+      account_code: draft.advanceAccountCode.trim(),
+      debit_cents: 0,
+      credit_cents: advance,
+      description: "staff advance",
+    });
+  }
   if (settled > 0 && draft.paymentAccountCode.trim() !== "") {
     lines.push({
       account_code: draft.paymentAccountCode.trim(),
@@ -462,15 +513,22 @@ export function toAdjustmentWire(
  * `_assert_adjustment_relationships` field paths — measured, both halves, rather than mirrored from
  * this form's own control list.
  *
- * `settledCents` IS DELIBERATELY ABSENT (adversarial migration-safety review, N3). It is a
- * CLIENT-SIDE DERIVATION INPUT and nothing else: it shapes the third and fourth lines this form
- * derives (`derivedLines`), and neither the route nor 0194 has a `settled_cents` particular, so no
- * server refusal can ever carry that path. Listing it would be a claim with nothing behind it, and
- * `fieldForAdjustmentPath` would be promising to focus a control for a refusal that cannot arrive.
- * Its LOCAL validation still names it — `validateAdjustmentDraft` raises `settlementNeedsAccount` /
- * `paymentLegUnused` / `overSettled` against `settledCents` and `firstInvalidAdjustmentField`
- * focuses it — because that is this form's own rule about its own control, which is a different
- * thing from a wire path.
+ * `settledCents` AND `advanceCents` ARE BOTH DELIBERATELY ABSENT (adversarial migration-safety
+ * review, N3 — the second pair closes #643's own named gap: the chat lane's
+ * `packages/runtime/lib/periodic-adjustment-basis.ts` keeps `advance_cents` out of the stored
+ * `p_adjustment` for the identical reason). Each is a CLIENT-SIDE DERIVATION INPUT and nothing
+ * else: `settledCents` shapes the third line, `advanceCents` the third or fourth
+ * (`derivedLines`), and neither the route nor 0194 has a `settled_cents` or `advance_cents`
+ * particular, so no server refusal can ever carry either path. Listing either would be a claim
+ * with nothing behind it, and `fieldForAdjustmentPath` would be promising to focus a control for a
+ * refusal that cannot arrive. Their LOCAL validation still names them — `validateAdjustmentDraft`
+ * raises `settlementNeedsAccount` / `paymentLegUnused` / `overSettled` against `settledCents` and
+ * `advanceLegUnused` / `overAdvanced` against `advanceCents`, and `firstInvalidAdjustmentField`
+ * focuses whichever fires — because that is this form's own rule about its own control, which is a
+ * different thing from a wire path. `advanceAccountCode` stays IN this Set: unlike the cents, it
+ * IS a 0194 particular (`_assert_adjustment_basis` reads it, `_assert_adjustment_relationships`
+ * checks the staff-advance enrolment), so a server refusal naming it must still land on this
+ * control.
  */
 const ADJUSTMENT_FIELDS = new Set<string>([
   "periodStart", "periodEnd", "instruction", "method", "openingCents", "closingCents",

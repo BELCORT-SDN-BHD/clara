@@ -1064,6 +1064,8 @@
     "settledCentsHelp": "Shapes the entry below; it is not stored as a particular of its own — the split is readable from the posted lines.",
     "advanceAccountCode": "Staff advance account",
     "advanceAccountHelp": "Optional, and recorded as a particular only. Recovering an advance from this payroll needs the staff-advance register, which asks which advance is being discharged — this form does not decide that for you.",
+    "advanceCents": "Amount advanced",
+    "advanceCentsHelp": "Shapes the entry below; it is not stored as a particular of its own — the split is readable from the posted lines.",
     "particularsSource": "Where these figures came from",
     "particularsSourceHelp": "The payroll summary, message or document your client supplied.",
     "instruction": "What you were asked to do",
@@ -1090,6 +1092,8 @@
       "overSettled": "More was settled than the obligation is.",
       "settlementNeedsAccount": "Choose the account it was settled from.",
       "paymentLegUnused": "Enter the amount settled, or clear the account above.",
+      "advanceLegUnused": "Enter the amount carried on this account, or clear it above.",
+      "overAdvanced": "More was advanced than the obligation is.",
       "tooLong": "This is too long. Shorten it before submitting."
     },
     "rejected": {
