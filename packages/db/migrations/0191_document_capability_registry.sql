@@ -692,38 +692,59 @@ end $dcr_splice_post$;
 -- regions are all present in the same transaction the persist ran in. One object per family,
 -- every writer covered, and not one line of a live persist body touched.
 --
--- APPEND-ONLY. A validation is a measurement taken at a moment; it is never updated or deleted.
--- The unique key is (extraction_id, check_name) for the invoice family and
--- (statement_id, check_name) for the statement family, so a replayed persist cannot double-write.
+-- APPEND-ONLY, AND REVISIONED. A validation is a measurement taken at a moment; it is never
+-- updated or deleted. The unique key is (extraction_id, check_name, revision) for the invoice
+-- family and (statement_id, check_name, revision) for the statement family, so a replayed persist
+-- still collides at revision 1 and is collapsed, while a later child row that genuinely moves the
+-- verdict APPENDS revision n+1 (S7a-bis) instead of updating the row or being refused. Readers
+-- take the highest revision per subject and check; every earlier measurement stays on file.
 -- No application role holds INSERT, UPDATE or DELETE on this table at all: the only writers are
 -- the definer trigger bodies below. There is no trigger forbidding an OWNER-level UPDATE, which
 -- is stated here rather than implied by the word "append-only".
 --
--- THE WRITE-PATH INVARIANT THIS RESTS ON, STATED because the triggers alone do not imply it:
--- VALIDATION IS COMPUTED AT COMMIT FROM THE HEADER INSERT. A lone later insert into the CHILD
--- table -- clara.document_regions, or clara.bank_statement_lines -- against a header committed in
--- an EARLIER transaction is NOT a supported writer path. Every in-repo writer
+-- THE WRITE-PATH LAW THIS RESTS ON, STATED because the triggers alone do not imply it:
+-- REVISION 1 IS COMPUTED AT COMMIT FROM THE HEADER INSERT. Every in-repo facts writer
 -- (clara.persist_document_extraction, clara.persist_invoice_facts, clara.persist_witness_facts,
 -- clara.persist_statement_facts*) inserts the header AND its children inside ONE transaction, so
--- the deferred triggers always see a complete child set.
+-- the deferred recorder always sees a complete child set, and for them that first measurement is
+-- the whole story.
 --
--- BOTH SIDES ENFORCE IT, and neither is left to the invariant's good name (the 0038:2300-2305
--- lesson: a belt that fires only on the parent is structurally blind to the child):
---   * STATEMENTS -- already enforced, and not by this file. 0038's own `_tf_bank_statement_belt`
---     is attached to clara.bank_statement_lines as well as to clara.bank_statements, and it
---     re-derives line_count congruence, so a lone later line is refused CLR10. Measured on the
---     PG17 rig (2026-09-14): a chain-NEUTRAL pair of later lines -- which would have slipped past
---     a chain-only check while still moving the printed-totals sums -- was refused with
---     "statement % declares % line(s) but carries %" (0038's own wording). Nothing is owed here;
---     packages/db/tests/document-fact-validation-belt.test.mjs cell 4 records it.
---   * REGIONS -- NOT previously enforced, measured, and closed by S7a-bis below. A lone later
---     region was ACCEPTED and left the recorded verdict describing regions that no longer
---     matched, because `_tf_append_only` on clara.document_regions is UPDATE/DELETE-only.
+-- A LATER CHILD ROW IS NOT AN ERROR; A STALE RECORD IS. The first cut of this file REFUSED a
+-- region arriving after its extraction's own commit (CLR10 `fact_validation_would_go_stale`), on
+-- the reasoning that no in-repo writer produces one. That reasoning was correct about the WRITERS
+-- and wrong about the ESTATE: it put a wall across every fixture, harness and future back-fill
+-- that assembles a document in more than one transaction. Measured at wave-2 integration (CI run
+-- 34793833626): 291 db cells and 7 runtime cells red on it -- among them cells whose re-derived
+-- verdict was IDENTICAL to the recorded one, refused anyway because the trigger compared before it
+-- asked whether anything had actually changed. A belt that refuses writes it AGREES with is not
+-- protecting the record; it is enforcing a sequencing convention.
+--
+-- SO THE REGION SIDE APPENDS INSTEAD OF REFUSING (S7a-bis below):
+--   * the re-derived verdict EQUALS the recorded one -- nothing happens. No row, no error. This is
+--     the supported path, and it is also the common later-region case;
+--   * it DIFFERS -- a NEW REVISION is appended for that (extraction, check_name). The earlier row
+--     is never updated and never deleted, so the append-only property the surfaces and the runtime
+--     battery both rely on is preserved exactly; readers take the highest revision, and what Clara
+--     believed, and when, stays on file.
+-- The record therefore cannot go stale -- which is what the refusal was for -- and the cost is one
+-- extra row rather than a failed write.
+--
+-- THE STATEMENT SIDE IS DIFFERENT, AND DELIBERATELY LEFT ALONE. 0038's own
+-- `_tf_bank_statement_belt` is attached to clara.bank_statement_lines as well as to
+-- clara.bank_statements and re-derives line_count congruence, so a lone later line is refused
+-- CLR10 -- by a MERGED migration, for a reason of its own: a statement's declared `line_count` is
+-- part of the statement as filed, not a verdict derived from it, so a line that contradicts it is
+-- a bad write rather than new information. Measured on the PG17 rig (2026-09-14): a chain-NEUTRAL
+-- pair of later lines -- which would have slipped past a chain-only check while still moving the
+-- printed-totals sums -- was refused with "statement % declares % line(s) but carries %" (0038's
+-- own wording). This file neither duplicates nor relaxes it, and
+-- packages/db/tests/document-fact-validation-belt.test.mjs records both behaviours side by side so
+-- the asymmetry is visible rather than surprising.
 --
 -- BLOCKING IS NOT THIS TABLE'S JOB. A `fail` row does not stop the facts from being readable and
 -- does not by itself stop anything: clara._invoice_fact_state's own verdict already governs what
--- dependent work may proceed. This table makes the reason VISIBLE. (The region-side belt's
--- refusal is a different thing entirely: it refuses a WRITE nobody supports, never a fact.)
+-- dependent work may proceed. This table makes the reason VISIBLE. The region-side belt does not
+-- block either -- it refuses nothing at all now, it only keeps the record current by appending.
 -- =====================================================================================
 set role clara_fn_owner;
 
@@ -737,6 +758,7 @@ create table clara.document_fact_validations (
   outcome       text        not null check (outcome in ('pass','fail','not_applicable','unmeasured')),
   engine_id     text,
   detail        jsonb       not null default '{}'::jsonb check (jsonb_typeof(detail) = 'object'),
+  revision      int         not null default 1 check (revision >= 1),
   evaluated_at  timestamptz not null default now(),
   constraint ck_document_fact_validations_subject
     check ((extraction_id is not null) <> (statement_id is not null)),
@@ -744,15 +766,27 @@ create table clara.document_fact_validations (
     foreign key (document_id, firm_id) references clara.documents(id, firm_id) on delete cascade
 );
 
+-- ONE ROW PER (subject, check_name, REVISION). `revision` JOINS the key rather than loosening it:
+-- a replayed persist still collides at revision 1 and is collapsed by the recorders' own
+-- `on conflict do nothing`, and the only way to get a second row for one check is to APPEND the
+-- next revision through S7a-bis, which happens only when the re-derived verdict actually differs.
+-- The btree is ordered (subject, check_name, revision), so "the current verdict" is a one-row
+-- index read (`order by revision desc limit 1`) and needs no second index.
+-- Only the invoice family has an appender today; the statement family's child-side belt (0038's
+-- own, on clara.bank_statement_lines) refuses a lone later line outright, so its rows never leave
+-- revision 1. The key is shaped the same on both sides so that fact is a property of the WRITERS
+-- rather than of the schema, and a future statement-side appender needs no DDL.
 create unique index uq_document_fact_validations_extraction
-  on clara.document_fact_validations(extraction_id, check_name) where extraction_id is not null;
+  on clara.document_fact_validations(extraction_id, check_name, revision) where extraction_id is not null;
 create unique index uq_document_fact_validations_statement
-  on clara.document_fact_validations(statement_id, check_name) where statement_id is not null;
+  on clara.document_fact_validations(statement_id, check_name, revision) where statement_id is not null;
 create index ix_document_fact_validations_document
   on clara.document_fact_validations(firm_id, document_id, evaluated_at desc);
 
 comment on table clara.document_fact_validations is
-  'One append-only row per (facts extraction | bank statement) x named arithmetic check: pass / fail / not_applicable / unmeasured, with the terms in `detail`. Written by two deferrable constraint triggers at commit, so no live persist body was recut to record them. A fail row does NOT block: clara._invoice_fact_state remains the authority over dependent work; this table makes the reason visible on the document surface (#624).';
+  'Append-only measurements: one row per (facts extraction | bank statement) x named arithmetic check x revision. pass / fail / not_applicable / unmeasured, with the terms in `detail`. Revision 1 is written by a deferrable constraint trigger at the header''s own commit, so no live persist body was recut to record it; a later region that genuinely moves the invoice identity APPENDS the next revision rather than updating the row or being refused, and readers take the highest revision per subject and check. A fail row does NOT block: clara._invoice_fact_state remains the authority over dependent work; this table makes the reason visible on the document surface (#624).';
+comment on column clara.document_fact_validations.revision is
+  'Monotonic per (extraction_id | statement_id, check_name), starting at 1. The CURRENT verdict is the highest revision; every lower one is the measurement that stood before it and is never updated or deleted. Only clara._tf_document_region_fact_validate appends above 1, and only when a later identity region changes the re-derived verdict.';
 comment on column clara.document_fact_validations.outcome is
   'pass = the check ran and held. fail = it ran and did not. not_applicable = the check cannot apply to this source (a format with no printed totals). unmeasured = the terms the check needs were not all persisted, so no verdict is possible -- deliberately distinct from pass.';
 
@@ -919,7 +953,7 @@ create constraint trigger t_document_extractions_fact_validate
   for each row execute function clara._tf_document_fact_validate();
 
 -- ------------------------------------------------------------------------------------
--- S7a-bis -- THE REGION-SIDE BELT, and why it is a REFUSAL rather than a second recorder.
+-- S7a-bis -- THE REGION-SIDE BELT: it keeps the record CURRENT by appending, and refuses nothing.
 --
 -- THE BLIND SPOT, measured rather than reasoned about (PG17 rig, 2026-09-14). A trigger that
 -- fires only on clara.document_extractions is STRUCTURALLY BLIND to a lone
@@ -934,68 +968,112 @@ create constraint trigger t_document_extractions_fact_validate
 -- the SAME belt on the child table. This is that answer, applied here -- with one deliberate
 -- difference in what the child-side trigger DOES.
 --
--- IT REFUSES; IT DOES NOT RE-RECORD, and the reason is the table's own contract. A validation is
--- a measurement taken at a moment, append-only, one row per (extraction, check) -- so a
--- child-side recorder would have to either UPDATE the row (destroying the append-only property
--- the surfaces and the runtime battery both rely on) or silently lose its recomputation to the
--- unique key's `on conflict do nothing`, which is the stale row again wearing a fix. Refusing is
--- the honest third option: the recorded verdict cannot go stale because the write that would
--- have staled it cannot commit.
+-- IT APPENDS; IT NEITHER REFUSES NOR OVERWRITES. The first cut of this trigger RAISED CLR10
+-- (`fact_validation_would_go_stale`) on any later identity region, reasoning that no in-repo
+-- writer produces one and that the only alternatives were an UPDATE -- which would destroy the
+-- append-only property -- or a recomputation silently lost to `on conflict do nothing`. That was
+-- a false trichotomy. The third option is to append a NEW REVISION of the same
+-- (extraction, check_name), which is append-only BY CONSTRUCTION: the earlier measurement is
+-- untouched and still readable, and the reader takes the highest revision. Measured at wave-2
+-- integration (CI run 34793833626), the refusal cost 291 db cells and 7 runtime cells, INCLUDING
+-- cells whose re-derived verdict was identical to the recorded one -- refused anyway, because the
+-- trigger asked "did this arrive late?" before it asked "did anything actually change?". A belt
+-- that refuses a write it AGREES with is enforcing a sequencing convention, not protecting a
+-- record. The property that mattered -- a recorded verdict never describes regions that are not
+-- on file -- is exactly what the append preserves, and it now holds for writers this file does
+-- not know about instead of only for the ones it censused.
 --
 -- IT IS QUEUED FOR SEVEN PATHS ONLY. The verdict is a function of the seven identity terms, so
 -- the trigger carries a `when` naming them -- see the trigger's own comment for why that is a
--- cost argument on the hot ingest path rather than a narrowing of what is protected.
+-- cost argument on the hot ingest path rather than a narrowing of what is protected. UNCHANGED by
+-- the move from refusal to append: a region outside those seven cannot move the verdict, so it
+-- has no revision to append either.
 --
--- IT IS A NO-OP ON THE SUPPORTED PATH, and that is the whole design. Every in-repo writer --
+-- IT IS SILENT ON THE SUPPORTED PATH, and that is still the whole design. Every in-repo writer --
 -- clara.persist_document_extraction, clara.persist_invoice_facts, clara.persist_witness_facts --
 -- inserts the extraction AND its regions inside ONE transaction, so both triggers are queued
 -- together and see the identical region set. Whichever fires first: if the belt runs before the
--- recorder there is no row yet and it returns; if after, it re-derives through the same reader
--- and agrees by construction. A region arriving in a LATER transaction is the one case that
--- differs, and it is the case with no supported writer.
+-- recorder there is no row yet and it returns; if after, it re-derives through the same reader,
+-- agrees by construction, and writes NOTHING. A supported persist therefore still produces
+-- exactly one row per check, at revision 1.
 --
--- THE INVARIANT, STATED so a future reader does not have to re-derive it: validation is computed
--- at COMMIT from the header insert; a lone later insert into clara.document_regions or
--- clara.bank_statement_lines is NOT a supported writer path. The statement side already enforces
--- that (0038's own belt on clara.bank_statement_lines re-derives line_count congruence and
--- refuses a lone later line with CLR10 -- measured, and celled in
--- packages/db/tests/document-fact-validation-belt.test.mjs). This trigger gives the region side
--- the same property.
+-- SEVERAL LATER REGIONS IN ONE TRANSACTION COLLAPSE CORRECTLY, stated because it is the one place
+-- the append could have multiplied rows. Each queued region fires its own trigger; the first to
+-- find a changed verdict appends revision n+1, and every later one in that same commit re-reads
+-- THAT row -- a deferred trigger's SELECT sees rows written by an earlier deferred trigger in the
+-- same transaction -- re-derives the same verdict and returns. One transaction that moves the
+-- identity adds exactly one revision, never one per region.
+--
+-- THE LAW, STATED so a future reader does not have to re-derive it: revision 1 is computed at
+-- COMMIT from the header insert; a later insert into clara.document_regions that MOVES the invoice
+-- identity appends the next revision, and one that does not move it writes nothing at all. The
+-- statement side keeps the older, stricter answer for a reason of its own -- 0038's belt on
+-- clara.bank_statement_lines re-derives line_count congruence and REFUSES a lone later line with
+-- CLR10, because a statement's declared line_count is part of the statement as filed rather than a
+-- verdict derived from it. That is a MERGED migration and not this file's to relax;
+-- packages/db/tests/document-fact-validation-belt.test.mjs cells both behaviours side by side so
+-- the asymmetry is visible rather than surprising.
 -- ------------------------------------------------------------------------------------
 create function clara._tf_document_region_fact_validate() returns trigger
   language plpgsql security definer set search_path = clara, pg_temp as $fn$
-declare v_recorded record; v_now record;
+declare v_recorded record; v_now record; v_e record;
 begin
-  select v.outcome, v.detail
+  -- THE CURRENT VERDICT is the HIGHEST revision, never "the row": once this trigger can append,
+  -- a second later region in a second later transaction must compare against what the FIRST one
+  -- left behind, not against revision 1. The unique index is ordered (extraction_id, check_name,
+  -- revision), so this is a one-row index read.
+  select v.outcome, v.detail, v.revision
     into v_recorded
     from clara.document_fact_validations v
    where v.extraction_id = new.extraction_id
-     and v.check_name = 'invoice.six_term_identity';
+     and v.check_name = 'invoice.six_term_identity'
+   order by v.revision desc
+   limit 1;
   -- No recorded verdict yet: either this extraction owes none, or the recorder is queued behind
-  -- this trigger in the SAME commit and will write it. Either way there is nothing to protect.
+  -- this trigger in the SAME commit and will write it. Either way there is nothing to keep current.
   if not found then return null; end if;
 
   select * into v_now from clara._invoice_identity_verdict(new.extraction_id);
 
-  -- COMPARE THE WHOLE `detail`, not just the outcome. Two later regions can leave the outcome
-  -- alone while moving the terms under it (an added `invoice.discount` that happens to keep the
-  -- residual at zero; a duplicated term that flips the reason). jsonb equality is key-order
-  -- independent, so this is a value comparison rather than a text one.
-  if v_now.outcome is distinct from v_recorded.outcome
-     or v_now.detail is distinct from v_recorded.detail then
-    raise exception 'a lone later region insert would change extraction %''s recorded invoice identity (% -> %) -- the validation row is append-only and this is not a supported writer path',
-      new.extraction_id, v_recorded.outcome, v_now.outcome
-      using errcode = 'CLR10', detail = '{"reason":"fact_validation_would_go_stale"}';
+  -- COMPARE THE WHOLE `detail`, not just the outcome, and ASK THIS FIRST. Two later regions can
+  -- leave the outcome alone while moving the terms under it (an added `invoice.discount` that
+  -- happens to keep the residual at zero; a duplicated term that flips the reason), so `detail` is
+  -- part of the verdict. jsonb equality is key-order independent, so this is a value comparison
+  -- rather than a text one. NOTHING CHANGED => NOTHING HAPPENS: no row, no error, no log. This is
+  -- the supported path (the recorder already saw these regions) and it is also the common
+  -- later-region case, and the previous cut of this trigger refused it -- which is what made a
+  -- correct write fail for a reason the caller could do nothing about.
+  if v_now.outcome is not distinct from v_recorded.outcome
+     and v_now.detail is not distinct from v_recorded.detail then
+    return null;
   end if;
+
+  -- THE VERDICT MOVED. Append the next revision; never update the row that stood before it, never
+  -- delete it. The subject columns are re-read from the extraction rather than carried on the
+  -- region, so a row this trigger writes is scoped exactly like the one the recorder wrote.
+  select e.firm_id, e.document_id, e.engine_id
+    into v_e from clara.document_extractions e where e.id = new.extraction_id;
+  if not found then return null; end if; -- the extraction went away in this same transaction
+
+  -- `on conflict do nothing` is load-bearing, not decoration: several identity regions queued in
+  -- ONE transaction each fire this trigger, and although each re-reads the revision the previous
+  -- one appended (a later command sees an earlier deferred trigger's write) and normally returns
+  -- at the equality gate above, the insert is made idempotent at the key so no ordering assumption
+  -- is doing safety work.
+  insert into clara.document_fact_validations(firm_id, document_id, extraction_id, check_name,
+      outcome, engine_id, detail, revision)
+  values (v_e.firm_id, v_e.document_id, new.extraction_id, 'invoice.six_term_identity',
+    v_now.outcome, v_e.engine_id, v_now.detail, v_recorded.revision + 1)
+  on conflict do nothing;
   return null;
 end $fn$;
 revoke all on function clara._tf_document_region_fact_validate() from public;
 alter function clara._tf_document_region_fact_validate() owner to clara_fn_owner;
 comment on function clara._tf_document_region_fact_validate() is
-  'Deferred constraint-trigger body on clara.document_regions: the region-side BELT. A region arriving in a LATER transaction than its extraction would silently stale the recorded invoice-identity verdict, so it is REFUSED (CLR10) rather than re-recorded -- the validation row is append-only. Queued only for the seven field_paths the verdict is a function of (the trigger''s own `when`), and inert on the supported path, where extraction and regions land in one transaction (0038:2300-2305''s blind-spot lesson, #624).';
+  'Deferred constraint-trigger body on clara.document_regions: the region-side BELT. A region arriving in a LATER transaction than its extraction would silently stale the recorded invoice-identity verdict, so the verdict is RE-DERIVED at commit: unchanged => nothing is written; changed => the NEXT REVISION is appended for that (extraction, check_name), leaving every earlier measurement on file. It refuses nothing. Queued only for the seven field_paths the verdict is a function of (the trigger''s own `when`), and silent on the supported path, where extraction and regions land in one transaction (0038:2300-2305''s blind-spot lesson, #624).';
 
 -- THE `when` CLAUSE IS LOAD-BEARING, and it is a cost argument rather than a correctness one.
--- The verdict this belt protects is a function of SEVEN field_paths and nothing else (see
+-- The verdict this belt keeps current is a function of SEVEN field_paths and nothing else (see
 -- clara._invoice_identity_verdict), so no other region can stale it. Without the clause the
 -- trigger would be queued for EVERY region row: packages/runtime/lib/structured-worker.mjs caps
 -- a spreadsheet at MAX_ITEMS = 50,000 cells, so one ordinary XLSX ingest would put fifty thousand
@@ -1005,7 +1083,8 @@ comment on function clara._tf_document_region_fact_validate() is
 -- false (CREATE TRIGGER, "the evaluation of the WHEN condition is not deferred"), which is
 -- exactly the property needed here -- and `new.field_path` is fixed at insert, so immediate
 -- evaluation and deferred evaluation would agree anyway. Verified on the PG17 rig: a lone later
--- `pages.1.lines.0` region is admitted, a lone later `invoice.discount` region is refused
+-- `pages.1.lines.0` region is not queued at all and appends nothing, while a lone later
+-- `invoice.discount` region appends the next revision
 -- (packages/db/tests/document-fact-validation-belt.test.mjs).
 create constraint trigger t_document_regions_fact_validate
   after insert on clara.document_regions
@@ -1182,13 +1261,27 @@ begin
         where e.document_id = d.id and e.firm_id = d.firm_id
           and e.engine_kind in ('invoice_facts','llm_text_facts','llm_vision_facts','statement_facts')),
         '[]'::jsonb),
+      -- THE CURRENT VERDICT PER (subject, check), never the whole history. Rows are append-only
+      -- and REVISIONED (S7a-bis appends a revision when a later identity region moves the
+      -- verdict), so an unfiltered read would show a document two contradicting rows for one
+      -- check and leave the surface to guess. `distinct on` takes the highest revision; the
+      -- earlier measurements stay on file and are still readable by anything that wants the
+      -- history. NULLs group as equal in `distinct on`, which is exactly right here: a row has
+      -- either an extraction_id or a statement_id (ck_document_fact_validations_subject), so the
+      -- pair identifies the subject. The projected shape is UNCHANGED -- no `revision` key -- so
+      -- no reader of this door had to change for the revision to exist.
       'validations', coalesce((select jsonb_agg(jsonb_build_object(
           'check_name', v.check_name, 'outcome', v.outcome, 'detail', v.detail,
           'extraction_id', v.extraction_id, 'statement_id', v.statement_id,
           'engine_id', v.engine_id, 'evaluated_at', v.evaluated_at)
           order by v.check_name, v.evaluated_at)
-        from clara.document_fact_validations v
-        where v.document_id = d.id and v.firm_id = d.firm_id), '[]'::jsonb)),
+        from (select distinct on (fv.extraction_id, fv.statement_id, fv.check_name)
+                     fv.check_name, fv.outcome, fv.detail, fv.extraction_id, fv.statement_id,
+                     fv.engine_id, fv.evaluated_at
+                from clara.document_fact_validations fv
+               where fv.document_id = d.id and fv.firm_id = d.firm_id
+               order by fv.extraction_id, fv.statement_id, fv.check_name, fv.revision desc) v),
+        '[]'::jsonb)),
 
     -- OPERATION. What the books actually did with it, and whether they could.
     'operation', jsonb_build_object(
@@ -1244,7 +1337,7 @@ do $dcr_tail$
 declare
   v_kinds text[]; v_rows int; v_formats int; v_expected int;
   v_missing text[]; v_extra text[];
-  v_pol int; v_forced boolean; v_enabled boolean; v_role text; v_priv text;
+  v_pol int; v_forced boolean; v_enabled boolean; v_role text; v_priv text; v_ix text;
   v_path text; v_bad text[]; v_survivors text[]; v_census int := 0; v_refused int := 0;
   v_cap jsonb;
   v_probe record;
@@ -1416,6 +1509,13 @@ begin
   -- invoice in the estate -- a silently wrong answer, which is the worst kind. The THIRD is the
   -- region-side belt: parent-only would be structurally blind to a lone later child insert
   -- (0038:2300-2305), which was measured as ACCEPTED before this file closed it.
+  --
+  -- AND THE BELT REFUSES NOTHING, pinned on its own body rather than on its name. S7a-bis appends
+  -- a revision where the first cut of this file raised CLR10 `fact_validation_would_go_stale`; a
+  -- future edit that reinstated the refusal would pass every other assertion in this tail while
+  -- turning a correct write back into a failure, so the body is read: it must carry no
+  -- `raise exception` at all, and it must carry the append. `revision` and its place in the unique
+  -- key are pinned with it, because the append is meaningless without them.
   for v_probe in select * from (values
       ('t_document_extractions_fact_validate', 'clara.document_extractions'),
       ('t_bank_statements_fact_validate',      'clara.bank_statements'),
@@ -1427,6 +1527,32 @@ begin
         using errcode = 'CLR10';
     end if;
   end loop;
+  if (select p.prosrc from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+       where n.nspname = 'clara' and p.proname = '_tf_document_region_fact_validate')
+      ~ 'raise\s+exception' then
+    raise exception 'dcr tail: clara._tf_document_region_fact_validate raises -- the region-side belt APPENDS a revision, it never refuses a write (the refusal cost 291 db cells at wave-2 integration)'
+      using errcode = 'CLR10';
+  end if;
+  if (select p.prosrc from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+       where n.nspname = 'clara' and p.proname = '_tf_document_region_fact_validate')
+      !~ 'insert into clara\.document_fact_validations' then
+    raise exception 'dcr tail: clara._tf_document_region_fact_validate no longer appends -- a later region that moves the invoice identity would leave the recorded verdict stale'
+      using errcode = 'CLR10';
+  end if;
+  if not exists (select 1 from pg_attribute a
+                  where a.attrelid = 'clara.document_fact_validations'::regclass
+                    and a.attname = 'revision' and a.attnum > 0 and not a.attisdropped) then
+    raise exception 'dcr tail: clara.document_fact_validations has no `revision` column -- the append-only revision law has nothing to stand on'
+      using errcode = 'CLR10';
+  end if;
+  foreach v_ix in array array['uq_document_fact_validations_extraction',
+                              'uq_document_fact_validations_statement'] loop
+    if pg_catalog.pg_get_indexdef(('clara.' || v_ix)::regclass) not like '%revision%' then
+      raise exception 'dcr tail: % does not carry `revision` -- an appended revision would collide with the measurement it supersedes', v_ix
+        using errcode = 'CLR10';
+    end if;
+  end loop;
+
   -- …and the statement side's own child-table belt, which this file RELIES ON rather than
   -- duplicating: 0038 attached `_tf_bank_statement_belt` to clara.bank_statement_lines, and that
   -- is what makes a lone later line impossible. If it ever leaves, the invariant this file's
@@ -1448,6 +1574,6 @@ begin
     raise exception 'dcr tail: a new reader is not executable by the lanes that must reach it' using errcode = 'CLR10';
   end if;
 
-  raise notice 'dcr tail: OK -- clara.document_capabilities holds % rows, TOTAL over % derived kinds x % canonical intake formats in BOTH directions, one mime/custody/byte-engine per format, one registry_version. ofx x bank_statement reads byte_extraction=stored_only and typed_facts<>supported (the measured OFX finding); csv x bank_statement reads supported; a skipped_kind pair never reads operation-supported; consent_evidence is unsupported everywhere. clara._assert_field_path accepts all % censused producer paths and NULL, refuses % malformed shapes, and is spliced into clara.persist_document_extraction ONCE with owner/ACL/DEFINER/search_path and every pre-existing gate carried verbatim. clara.document_fact_validations is append-only behind THREE DEFERRABLE INITIALLY DEFERRED constraint triggers (two recorders on the header tables plus the region-side belt that refuses a lone later child insert), so no live persist body was recut; 0038''s own belt on clara.bank_statement_lines is asserted present because the statement half of that invariant rests on it. Both new tables are forced-RLS with exactly two policies and no application write grant. No table in workflow/graphile_worker/spike touched.',
+  raise notice 'dcr tail: OK -- clara.document_capabilities holds % rows, TOTAL over % derived kinds x % canonical intake formats in BOTH directions, one mime/custody/byte-engine per format, one registry_version. ofx x bank_statement reads byte_extraction=stored_only and typed_facts<>supported (the measured OFX finding); csv x bank_statement reads supported; a skipped_kind pair never reads operation-supported; consent_evidence is unsupported everywhere. clara._assert_field_path accepts all % censused producer paths and NULL, refuses % malformed shapes, and is spliced into clara.persist_document_extraction ONCE with owner/ACL/DEFINER/search_path and every pre-existing gate carried verbatim. clara.document_fact_validations is append-only and REVISIONED behind THREE DEFERRABLE INITIALLY DEFERRED constraint triggers (two recorders on the header tables plus the region-side belt, which re-derives at commit and APPENDS the next revision when a later identity region moves the verdict -- it raises nothing, asserted on its own body -- while readers take the highest revision), so no live persist body was recut; 0038''s own belt on clara.bank_statement_lines is asserted present because the statement half of that law, which keeps the stricter refusal, rests on it. Both new tables are forced-RLS with exactly two policies and no application write grant. No table in workflow/graphile_worker/spike touched.',
     v_rows, coalesce(array_length(v_kinds, 1), 0), v_formats, v_census, v_refused;
 end $dcr_tail$;
