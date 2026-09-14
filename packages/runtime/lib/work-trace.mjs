@@ -1,21 +1,43 @@
 // THE WORK EXECUTION TRACE WRITER, and the HARDENED redaction in front of it (#631 AC3/AC4).
 //
-// TWO LAYERS, AND THE FIRST ONE IS THE REAL CONTROL.
+// THREE LAYERS, AND THIS MODULE IS ONLY THE THIRD.
 //
-//   1. STRUCTURE. `clara.work_execution_traces` (migration 0195) HAS NO PAYLOAD COLUMN. Not a
-//      redacted one, not a truncated one, not an `attributes` bag. A relation with nowhere to put
-//      a payload cannot leak one however this module is called, which is the only version of
-//      "sensitive fields do not reach the trace" that survives a future careless caller. Contrast
-//      `clara.trace_spans` (0006), which has an `attributes` jsonb and a best-effort `redact()` in
-//      front of it — and whose own header calls that hygiene rather than a guarantee (S4-ND8).
+//   1. STRUCTURE. `clara.work_execution_traces` (migration 0195) has NO FREE PAYLOAD COLUMN — no
+//      payload, input, output, `attributes`, content, prompt, messages, basis or transcript
+//      column. A relation with nowhere to put a transcript cannot leak one however this module is
+//      called.
 //
-//   2. HYGIENE. What this module still sends is a DIGEST of the input and a small closed-key
-//      object of observed revisions. `traceDigest` hashes the REDACTED form, so a digest can never
-//      be inverted against a known secret, and `redactDeep` below is the hardened successor to
-//      `lib/tracing.mjs`'s `redact`: the same cycle-guarded, array-aware walk with a wider key
+//   2. CONSTRAINT, IN THE DATABASE. Structure alone was not the claim the first cut made, and the
+//      adversarial review proved it: `refusal` and `skills` were free jsonb, an
+//      `observed_revisions` VALUE was free text and seven id/text columns were unconstrained, so
+//      ONE ordinary call stored an NRIC, a bank run, an email, a phone, a JWT, a `Bearer` header
+//      and a `postgres://` DSN verbatim. 0195 SECTION 7B now gives every remaining column a
+//      grammar — a lowercase token for the ids, a bounded vendor token for the model, an array of
+//      ≤ 32 ids for `skills`, a digest-or-token for each observed revision, and a CLOSED five-key
+//      shape for `refusal` whose free-text halves are capped and refused outright when they carry
+//      a secret-shaped literal. `clara.record_work_execution_trace` raises CLR10 `invalid_trace`
+//      naming the field; the CHECK constraints refuse it again whatever the writer does.
+//
+//   3. HYGIENE, HERE. This module REDACTS EVERY VALUE IT SENDS before the call — the ids, the
+//      model, the skills, the observed revisions and the refusal, not only the refusal as the
+//      first cut did — so the ordinary path is redacted rather than refused, and a diagnostic
+//      survives instead of vanishing. `traceDigest` hashes the REDACTED form, so a digest can
+//      never be inverted against a known secret, and `redactDeep` below is the hardened successor
+//      to `lib/tracing.mjs`'s `redact`: the same cycle-guarded, array-aware walk with a wider key
 //      denylist, SIX Malaysian-shaped PII patterns, and a depth cap that emits `[truncated]`
-//      instead of recursing. It is still BEST-EFFORT and this comment says so; layer 1 is what
-//      makes the claim structural.
+//      instead of recursing. Layer 3 is BEST-EFFORT and this comment says so; layers 1 and 2 are
+//      what make the claim hold when a future caller is careless.
+//
+// Contrast `clara.trace_spans` (0006), which has an `attributes` jsonb and a best-effort
+// `redact()` in front of it — and whose own header calls that hygiene rather than a guarantee
+// (S4-ND8). Layer 2 is the difference.
+//
+// THIS FILE IS HASH-LOCKED. It is reached from the FROZEN `claraWork_v3` body by dynamic
+// `import(...)`, which `scripts/check-frozen-workflows.mjs`'s import-closure scan matches, so it
+// is registered in `frozen-workflows.json`. After #637's `--lock-deployed` ceremony a change here
+// ships as a NEW frozen version (`claraWork_v4`) or in non-frozen infrastructure, never as an
+// edit — which is exactly why layer 2 lives in the database, where a later migration can tighten
+// it without a runtime cutover. Recorded in docs/ARCHITECTURE.md §10 and in 0195's header.
 //
 // IT NEVER DECIDES ANYTHING. A trace is a diagnostic. `recordTrace` THROWS on a database refusal —
 // so `packages/runtime/tests/work-trace-redaction.test.mjs` can see the closed-vocabulary refusal —
@@ -23,9 +45,12 @@
 // its diagnostic row would not write would be the diagnostic deciding the accounting.
 //
 // DEADLOCK DISCIPLINE (ARCHITECTURE §6, 0184). Every row except the settle row is written OUTSIDE
-// the posting transaction, on the runtime pool, and the writer takes no lock on
-// `clara.accounting_work` or `clara.agent_tasks` beyond the FK key-share its own insert needs. The
-// lock order accounting_work → agent_tasks → agent_interruptions is untouched.
+// the posting transaction, on the runtime pool; the SETTLE row is written INSIDE the settle
+// transaction, in a SAVEPOINT, so a refused diagnostic can never roll back a settle. The insert
+// takes NO lock on `clara.accounting_work`: 0195's relation carries no foreign key to it, because
+// an FK takes `FOR KEY SHARE` against the posting core's `FOR UPDATE` and the review measured a
+// trace insert waiting 4001 ms behind a posting lock and then dying silently. The lock order
+// accounting_work → agent_tasks → agent_interruptions is untouched.
 
 import { CAPABILITY_REGISTRY_VERSION, capability } from "./capability-registry.mjs";
 
@@ -69,6 +94,125 @@ const VALUE_PATTERNS = Object.freeze([
 
 const REDACTED = "[redacted]";
 const TRUNCATED = "[truncated]";
+
+// ---------------------------------------------------------------------------
+// 1b. THE FIELD GRAMMARS, mirrored from migration 0195 SECTION 7B.
+//
+// The DATABASE is the wall: `clara.record_work_execution_trace` raises CLR10 `invalid_trace` and
+// the relation's CHECK constraints refuse the row again. These mirrors exist so the ORDINARY path
+// never meets that wall — a value this module cannot conform is DROPPED (the column goes null)
+// rather than sent, because a trace row missing one id is a usable diagnostic and a refused row is
+// none at all. Keep them in step with 0195 SECTION 7B; the tail census asserts the SQL half by
+// value, and `tests/work-trace-redaction.test.mjs` asserts this half against the same literals.
+// ---------------------------------------------------------------------------
+
+const ID_RE = /^[a-z0-9][a-z0-9_./-]{0,127}$/;
+const MODEL_RE = /^[A-Za-z0-9][A-Za-z0-9_.:/@-]{0,127}$/;
+const RUN_RE = /^[A-Za-z0-9][A-Za-z0-9_.:/-]{0,200}$/;
+const TOKEN_RE = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$/;
+const REV_RE = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/;
+const DIGEST_RE = /^[0-9a-f]{64}$/;
+const LONG_DIGITS = /[0-9]{8,}/;
+const FREE_MAX = 500;
+
+/** The secret shapes 0195's `clara._work_trace_secret_shaped` refuses, spelled the same way. */
+const SECRET_SHAPED = [
+  /[0-9]{6}-[0-9]{2}-[0-9]{4}/,
+  /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/,
+  /eyJ[A-Za-z0-9._-]{10,}/,
+  /\bbearer\s/i,
+  /(postgres|postgresql|mysql|mongodb|redis|amqp)s?:\/\//i,
+  /\b(sk|pk|rk|ak)[-_](live|test|proj|ant|or)?[-_]?[A-Za-z0-9]{16,}/i,
+  /\b(password|passphrase|secret|api[-_]?key|access[-_]?token|token)\s*[=:]/i,
+];
+
+const secretShaped = (s) => SECRET_SHAPED.some((re) => re.test(s));
+
+function conform(value, re, { digits = true } = {}) {
+  if (value === null || value === undefined) return null;
+  const s = String(value).trim();
+  if (s === "") return null;
+  if (!re.test(s)) return null;
+  if (digits && LONG_DIGITS.test(s)) return null;
+  if (secretShaped(s)) return null;
+  return s;
+}
+
+/** A capability / registry / bundle / instructions / tools / skill id, or null. */
+export const traceIdOf = (v) => conform(v, ID_RE);
+/** A vendor model id, or null. */
+export const traceModelOf = (v) => conform(v, MODEL_RE);
+/** A short code / reason token, or null. */
+export const traceTokenOf = (v) => conform(v, TOKEN_RE);
+/** A workflow run id, or null. NOT applied to the value this module SENDS — see `recordTrace`
+ *  — but exported so a caller (and the battery) can ask what the database asks. */
+export const traceRunOf = (v) => conform(v, RUN_RE, { digits: false });
+/** An observed-revision VALUE: a sha256 digest, a finite number, a short token, or null. */
+export function traceRevisionOf(v) {
+  if (typeof v === "number") return Number.isFinite(v) ? v : null;
+  if (v === null || v === undefined) return null;
+  const s = String(v).trim();
+  if (DIGEST_RE.test(s)) return s;
+  return conform(s, REV_RE);
+}
+
+/**
+ * A bounded, redacted, control-character-free diagnostic string — the only free text this module
+ * sends. `redactString` first (so a known shape becomes a MASK rather than a refusal), then the
+ * residual long digit runs that `redactString`'s bounded patterns do not reach, then the cap.
+ */
+export function boundedText(value, max = FREE_MAX) {
+  let out = redactString(String(value ?? ""));
+  // Control characters, without a control-character regex (eslint no-control-regex): a refusal
+  // message carrying a newline would be refused by 0195's `free` grammar and the row dropped.
+  out = Array.from(out)
+    .map((ch) => { const cp = ch.codePointAt(0); return cp < 0x20 || cp === 0x7f ? " " : ch; })
+    .join("");
+  out = out.replace(/[0-9]{10,}/g, "[redacted:digits]");
+  out = out.replace(/\s+/g, " ").trim();
+  if (out.length > max) out = `${out.slice(0, max - 1)}…`;
+  return secretShaped(out) ? REDACTED : out;
+}
+
+/** The CLOSED key set `clara.work_execution_traces.refusal` admits. The estate's own refusal
+ *  payloads (`workErrorPayload`, `egressRefusalPayload`, `budgetExhaustedPayload`) are exactly
+ *  these five keys, which is why the closed set is five and not three. */
+export const REFUSAL_KEYS = Object.freeze(["code", "reason", "message", "detail", "recoverable"]);
+
+/**
+ * Conform any refusal-shaped value to the closed shape. An unknown key is DROPPED rather than
+ * carried: a `{transcript: …}` bag under a refusal is exactly the payload slot layer 1 removed.
+ */
+export function normaliseRefusal(input) {
+  if (input === null || input === undefined) return null;
+  if (typeof input !== "object" || Array.isArray(input)) return { message: boundedText(input) };
+  const out = {};
+  for (const key of REFUSAL_KEYS) {
+    if (!Object.prototype.hasOwnProperty.call(input, key)) continue;
+    const v = input[key];
+    if (v === null || v === undefined) continue;
+    if (key === "recoverable") { out.recoverable = v === true; continue; }
+    if (key === "code" || key === "reason") {
+      const token = traceTokenOf(v);
+      if (token !== null) out[key] = token;
+      continue;
+    }
+    out[key] = boundedText(typeof v === "string" ? v : JSON.stringify(redactDeep(v)));
+  }
+  return out;
+}
+
+/** At most 32 skill IDS. Anything that is not one is dropped. */
+export function normaliseSkills(input) {
+  if (!Array.isArray(input)) return [];
+  const out = [];
+  for (const item of input) {
+    const id = traceIdOf(item);
+    if (id !== null) out.push(id);
+    if (out.length === 32) break;
+  }
+  return out;
+}
 
 /** The depth at which the walk STOPS and emits `[truncated]`. Seven, not eight, because #631's
  *  positive control plants a secret at depth 7 inside arrays of objects and a cap that admitted it
@@ -141,17 +285,19 @@ export const OBSERVED_REVISION_KEYS = Object.freeze([
   "source_sha256", "question_version",
 ]);
 
-/** Keep only the keys the vocabulary carries, and redact the values (they are ids and digests, so
- *  redaction is a no-op in the ordinary case and a wall in the careless one). A caller that wants
- *  the database's refusal — the positive control — passes its object straight to `recordTrace`. */
+/** Keep only the keys the vocabulary carries, and conform each VALUE to the revision grammar — a
+ *  digest, a number or a short token. The first cut only redacted the value, which left an
+ *  observed revision as a free-text slot the database would still store (measured by the review);
+ *  a value that is not a revision is now DROPPED. A caller that wants the database's refusal —
+ *  the positive control — passes its object straight to `recordTrace`. */
 export function observedRevisions(input) {
   const out = {};
   if (input === null || typeof input !== "object" || Array.isArray(input)) return out;
   for (const key of OBSERVED_REVISION_KEYS) {
     if (!Object.prototype.hasOwnProperty.call(input, key)) continue;
-    const v = input[key];
-    if (v === null || v === undefined) continue;
-    out[key] = typeof v === "string" ? redactString(v) : redactDeep(v);
+    const v = traceRevisionOf(input[key]);
+    if (v === null) continue;
+    out[key] = v;
   }
   return out;
 }
@@ -184,6 +330,14 @@ export async function recordTrace(exec, {
   startedAt = null, endedAt = null, outcome = "ok", refusal = null, receiptId = null,
 }) {
   const cap = capabilityId === null ? null : capability(capabilityId);
+  // EVERY VALUE THIS CALL SENDS IS CONFORMED FIRST — not only the refusal, as the first cut did.
+  // `runId` is the exception and deliberately so: it is the WDK's own run identifier and it is
+  // half of the `(work_id, run_id, seq)` replay identity, so a mangled one would double-trace a
+  // re-executed step. It is machine-generated, never derived from client content, and 0195's `run`
+  // grammar refuses a malformed one at the door.
+  const safeSkills = normaliseSkills(skills);
+  const safeObserved = observedRevisions(observed ?? {});
+  const safeRefusal = normaliseRefusal(refusal);
   const r = await exec.query(
     `select clara.record_work_execution_trace($1::uuid,$2::text,$3::int,$4::text,
        $5::text,$6::text,$7::text,$8::text,$9::text,$10::jsonb,$11::text,$12::text,$13::text,
@@ -191,17 +345,18 @@ export async function recordTrace(exec, {
        $21::uuid) as id`,
     [
       taskId, runId, seq, phase,
-      capabilityId, registryVersion,
-      bundleId, bundleDigest, instructionsId, JSON.stringify(skills ?? []), toolsId,
-      modelId,
+      traceIdOf(capabilityId), traceIdOf(registryVersion),
+      traceIdOf(bundleId), bundleDigest, traceIdOf(instructionsId), JSON.stringify(safeSkills),
+      traceIdOf(toolsId),
+      traceModelOf(modelId),
       // The purpose defaults to the REGISTRY's answer for this capability, so a caller cannot
       // quietly record a different one. The database overrides it again from the authorization row
       // when one is named.
-      purpose === undefined ? (cap?.purpose ?? null) : purpose,
+      traceTokenOf(purpose === undefined ? (cap?.purpose ?? null) : purpose),
       authorizationId,
-      inputDigest, JSON.stringify(observed ?? {}),
+      inputDigest, JSON.stringify(safeObserved),
       startedAt, endedAt, outcome,
-      refusal === null || refusal === undefined ? null : JSON.stringify(redactDeep(refusal)),
+      safeRefusal === null ? null : JSON.stringify(safeRefusal),
       receiptId,
     ],
   );

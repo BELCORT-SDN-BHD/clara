@@ -37,7 +37,7 @@
       "deployed": true
     },
     "packages/runtime/lib/capability-registry.mjs": {
-      "sha256": "a4c3d4c48a1816456e971303f58fbf47b2002b4a141ce56b0a18ba9ba1dca8ba",
+      "sha256": "db98138aa47832da8a31a8f9a51d31ab503d6bb61ab899da2706051b68218c0a",
       "note": ""
     },
     "packages/runtime/lib/malaysian-registration.mjs": {
@@ -46,7 +46,7 @@
       "deployed": true
     },
     "packages/runtime/lib/work-trace.mjs": {
-      "sha256": "b928ee7bea8172e85fcef7e7d22e5c1f9427377b1a84ef5ad72212b7631df7dc",
+      "sha256": "96c7e7b51a648c753de3d8d1ac745d39f6015d312f269a1408a8e04330d320d6",
       "note": ""
     },
     "packages/runtime/workflows/autoDraft.v1.errors.ts": {
@@ -1018,7 +1018,7 @@
       "note": ""
     },
     "packages/runtime/workflows/claraWork.v3.impl.ts": {
-      "sha256": "03405d49369efa09eae1cfa27212d46b35e5c6464abf81f7d0526bb7b411868c",
+      "sha256": "f61e64f26df633cbdfde060f354e9e299e107d2309848c288bdda771f9e6c81b",
       "note": ""
     },
     "packages/runtime/workflows/claraWork.v3.parts.ts": {

@@ -26,12 +26,22 @@
 // THE VERSION IS PART OF THE ANSWER. Every execution-trace row records `registry_version` beside
 // `capability_id`, so "which registry decided this" is a recorded fact rather than an assumption
 // about which image was live. Bump it in the SAME commit as any change to the table below.
+//
+// THIS FILE IS HASH-LOCKED. It is reached from the FROZEN `claraWork_v3` body by dynamic
+// `import(...)`, which `scripts/check-frozen-workflows.mjs`'s import-closure scan matches, so it
+// is registered in `frozen-workflows.json`. After #637's `--lock-deployed` ceremony a change here
+// — a new capability, a changed purpose, a bumped version — ships as a NEW frozen version
+// (`claraWork_v4`) or in non-frozen infrastructure, never as an edit. Recorded in
+// docs/ARCHITECTURE.md §10 and in migration 0195's header.
 
 /** The registry's own version. Recorded on every `clara.work_execution_traces` row. */
 export const CAPABILITY_REGISTRY_VERSION = "clara-capability-registry/v1";
 
-/** The data classes a capability may move. Closed. */
-export const DATA_CLASSES = Object.freeze(["client_confidential", "firm_internal", "public"]);
+/** The data classes a capability may move. Closed, and every member is USED by the table below:
+ *  a vocabulary with an unused token is a vocabulary nobody has had to think about. `"public"` was
+ *  declared by the first cut and used by nothing; when a capability that genuinely moves public
+ *  data arrives, it arrives with its own review. */
+export const DATA_CLASSES = Object.freeze(["client_confidential", "firm_internal"]);
 
 /**
  * THE TABLE. Keyed by capability id — a stable string that is NOT a tool name, because one

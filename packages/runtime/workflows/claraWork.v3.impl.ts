@@ -25,12 +25,16 @@
 //                          keys (#737), so a Work that was TAKEN OVER says whose authority it is
 //                          running under.
 //   settleWorkStepV3       v1's settle plus the `settle` trace row — THE ONE ROW WRITTEN INSIDE
-//                          the settle's own call path rather than beside it.
+//                          the settle's own TRANSACTION (one explicit BEGIN/COMMIT around
+//                          `clara.settle_work_run` and the trace insert, the insert itself behind
+//                          a SAVEPOINT so a refused diagnostic cannot roll the settle back).
 //
 // DEADLOCK DISCIPLINE (ARCHITECTURE §6, 0184). Every trace row except the settle row is written on
-// the runtime pool OUTSIDE any posting transaction, and the writer takes no lock on
-// `clara.accounting_work` or `clara.agent_tasks` beyond the FK key-share its own insert needs. The
-// lock order accounting_work → agent_tasks → agent_interruptions is untouched by this closure.
+// the runtime pool OUTSIDE any posting transaction. The insert takes NO lock on
+// `clara.accounting_work`: 0195's relation carries no foreign key to it, because an FK takes
+// `FOR KEY SHARE` against the posting core's `FOR UPDATE` and the review measured a trace insert
+// waiting 4001 ms behind a posting lock and then dying silently inside `traceSafely`. The lock
+// order accounting_work → agent_tasks → agent_interruptions is untouched by this closure.
 //
 // A TRACE NEVER DECIDES ANYTHING. Every `recordTrace` call here is wrapped: a Work that failed to
 // post because its diagnostic row would not write would be the diagnostic deciding the accounting.
@@ -130,11 +134,37 @@ async function traceSafely(exec: PgExec, row: Record<string, unknown>): Promise<
   try {
     const { recordTrace } = await import("../lib/work-trace.mjs");
     // The module is untyped .mjs; the row is built by `traceRow` above and validated AGAIN by the
-    // database's own closed vocabularies, which is where a wrong field is actually caught.
+    // database's own closed vocabularies and field grammars, which is where a wrong field is
+    // actually caught.
     const write = recordTrace as unknown as (e: unknown, r: Record<string, unknown>) => Promise<unknown>;
     await write(exec, row);
   } catch {
     /* a diagnostic row is not authority; the Work's record is the database row it posted */
+  }
+}
+
+/**
+ * The same write, INSIDE a caller's open transaction, behind a SAVEPOINT.
+ *
+ * WHY THE SAVEPOINT IS THE WHOLE POINT. `traceSafely` swallows a refusal, and inside a transaction
+ * swallowing is not enough: a failed statement poisons the transaction, so the caller's COMMIT
+ * would become a ROLLBACK and the SETTLE would be lost — the diagnostic deciding the accounting,
+ * in the one place where it would decide it silently. Rolling back to a savepoint returns the
+ * transaction to the state the settle left it in and the commit stands.
+ */
+async function traceSafelyInTransaction(exec: PgExec, row: Record<string, unknown>): Promise<void> {
+  try {
+    await exec.query("savepoint clara_work_trace");
+  } catch {
+    return;
+  }
+  try {
+    const { recordTrace } = await import("../lib/work-trace.mjs");
+    const write = recordTrace as unknown as (e: unknown, r: Record<string, unknown>) => Promise<unknown>;
+    await write(exec, row);
+    await exec.query("release savepoint clara_work_trace");
+  } catch {
+    await exec.query("rollback to savepoint clara_work_trace").catch(() => {});
   }
 }
 
@@ -588,33 +618,45 @@ export async function settleWorkStepV3(
   "use step";
   const settledAt = new Date().toISOString();
   await pools().withRuntime(async (c: PgExec) => {
-    await c.query("select clara.settle_work_run($1::uuid, $2::text, $3::text, $4::jsonb, $5::jsonb) as r", [
-      taskId,
-      args.outcome,
-      args.errorCode,
-      args.error == null ? null : JSON.stringify(args.error),
-      args.result == null ? null : JSON.stringify(args.result),
-    ]);
-    const outcome =
-      args.outcome === "completed" ? "ok"
-        : args.outcome === "refused" ? "refused"
-          : args.outcome === "cancelled" ? "cancelled"
-            : args.outcome === "expired" ? "cancelled"
-              : "failed";
-    await traceSafely(c, traceRow(null, {
-      taskId, runId, seq, phase: "settle",
-      capabilityId: "accounting_work.settle",
-      outcome,
-      refusal: args.error ?? null,
-      receiptId: (args.result as { receipt_id?: string } | null)?.receipt_id ?? null,
-      // BOTH INSTANTS, FROM ONE CLOCK. A row that supplied only an end instant would be compared
-      // against the DATABASE's now() for its start, and a settle whose JS clock trails the
-      // server's by a millisecond then violates ck_work_execution_traces_ended and the row is
-      // silently dropped by traceSafely. Measured on the rig: the settle row was absent from every
-      // completed run in tests/work-egress-e2e.mjs's first cut.
-      startedAt: settledAt,
-      endedAt: settledAt,
-    }));
+    // ONE TRANSACTION FOR THE SETTLE AND ITS TRACE ROW. 0195's header says the settle row is the
+    // one row written INSIDE the settle transaction; the first cut wrote it beside, on the same
+    // autocommit connection, so a crash between the two left a settled Work with no settle row and
+    // the header said otherwise. The explicit BEGIN/COMMIT is `dispatchEgress`'s own shape, and
+    // the trace write sits in a SAVEPOINT so a refused diagnostic can never roll the settle back.
+    await c.query("begin");
+    try {
+      await c.query("select clara.settle_work_run($1::uuid, $2::text, $3::text, $4::jsonb, $5::jsonb) as r", [
+        taskId,
+        args.outcome,
+        args.errorCode,
+        args.error == null ? null : JSON.stringify(args.error),
+        args.result == null ? null : JSON.stringify(args.result),
+      ]);
+      const outcome =
+        args.outcome === "completed" ? "ok"
+          : args.outcome === "refused" ? "refused"
+            : args.outcome === "cancelled" ? "cancelled"
+              : args.outcome === "expired" ? "cancelled"
+                : "failed";
+      await traceSafelyInTransaction(c, traceRow(null, {
+        taskId, runId, seq, phase: "settle",
+        capabilityId: "accounting_work.settle",
+        outcome,
+        refusal: args.error ?? null,
+        receiptId: (args.result as { receipt_id?: string } | null)?.receipt_id ?? null,
+        // BOTH INSTANTS, FROM ONE CLOCK. A row that supplied only an end instant would be compared
+        // against the DATABASE's now() for its start, and a settle whose JS clock trails the
+        // server's by a millisecond then violates ck_work_execution_traces_ended and the row is
+        // silently dropped. Measured on the rig: the settle row was absent from every completed
+        // run in tests/work-egress-e2e.mjs's first cut.
+        startedAt: settledAt,
+        endedAt: settledAt,
+      }));
+      await c.query("commit");
+    } catch (error) {
+      await c.query("rollback").catch(() => {});
+      throw error;
+    }
   });
 }
 
