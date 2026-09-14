@@ -1418,6 +1418,26 @@ export async function handleJournalWorkSupabase(request, response, path, url, se
     return true;
   }
 
+  // #640 (wave-3 integration) — THE PLAN-ORIGIN READ. #640 mounts `<WorkPlanOriginRow>` on Work
+  // detail, so EVERY Work this lane shows now issues `clara.get_work_plan_origin`, including the
+  // hand-composed ones that no plan authorised. Without this handler the mock's catch-all 404s and
+  // the #727 hydration cell reds on "no read this route issues may be refused by the server" —
+  // which is that cell working exactly as designed: a 4xx among this route's own data reads is the
+  // defect it exists to catch.
+  //
+  // THE ANSWER IS THE DOOR'S OWN SQL NULL, not an invented plan. `clara.get_work_plan_origin`
+  // answers NULL for a Work nobody scheduled (`components/plans/work-plan-origin.tsx:5`), and a
+  // journal composed by a human in this lane is precisely that Work. `plans-mock.mjs` owns the
+  // positive shape for its own plan-admitted Work; this lane has no plan-admitted Work at all, so
+  // inventing one here would make two mocks disagree about the same verb.
+  if (request.method === "POST" && path === "/rest/v1/rpc/get_work_plan_origin") {
+    const body = await readJson(request);
+    const work = state.works.get(String(body?.p_work ?? ""));
+    if (work === undefined) return false;
+    sendJson(response, 200, null, cors);
+    return true;
+  }
+
   if (request.method === "POST" && path === "/rest/v1/rpc/get_work_pending_question") {
     const body = await readJson(request);
     const work = state.works.get(String(body?.p_work ?? ""));
