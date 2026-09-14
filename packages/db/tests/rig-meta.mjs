@@ -1708,14 +1708,23 @@ const WORK_EGRESS_0195_RUNTIME_FNS = [
 ];
 //   the ONE read — clara_authenticated ONLY, bookkeeper-floored inside its own body. No agent,
 //   wake or runtime variant exists: the run writes the trace and never reads it back.
-const WORK_EGRESS_0195_HUMAN_FNS = ["get_work_execution_trace"];
+//   ...and the OWNER door the review round added: `clara.restore_client_egress_purpose`, the way
+//   back on after an owner withdraws the DERIVED accounting_work purpose. Owner-floored in its own
+//   body, clara_authenticated ONLY — the runtime must never be able to restore an authority a
+//   human took away.
+const WORK_EGRESS_0195_HUMAN_FNS = ["get_work_execution_trace", "restore_client_egress_purpose"];
 //   …and the UNGRANTED closure: the derived-activation predicate (reached only from the DEFINER
 //   clara.prepare_egress_dispatch, whose answer collapses every negative onto one indistinguishable
 //   unknown), the immutable run-binding fold both the dispatch wrapper and the posting core
 //   compute, and the trace relation's append-only trigger body.
+//   ...and the FIVE field grammars the trace relation CHECKs with (0195 SECTION 7B). They are
+//   IMMUTABLE predicates reached only from the relation's own constraints and the DEFINER writer,
+//   both of which run as clara_fn_owner: no application role may execute one.
 const WORK_EGRESS_0195_UNGRANTED_FNS = [
   "_accounting_work_egress_live", "_work_egress_event_seq",
   "_tf_work_execution_trace_append_only",
+  "_work_trace_secret_shaped", "_work_trace_text_ok", "_work_trace_skills_ok",
+  "_work_trace_revisions_ok", "_work_trace_refusal_ok",
 ];
 export const WORK_EGRESS_0195_COHORT = [
   ...WORK_EGRESS_0195_RUNTIME_FNS, ...WORK_EGRESS_0195_HUMAN_FNS,

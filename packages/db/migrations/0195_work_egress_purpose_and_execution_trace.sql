@@ -43,7 +43,32 @@
 -- from the legal acceptance, on the first dispatch for a (firm, client) — and NEVER re-mints over
 -- a consent row that already exists. That last clause is what makes an owner's explicit
 -- `revoke_client_egress_purpose` STICKY: a deliberate withdrawal is not undone by the next
--- dispatch. Restoring it is an owner act with evidence, through the door that already exists.
+-- dispatch.
+--
+-- AND THERE IS A WAY BACK ON. The first cut said "restoring it is an owner act through the door
+-- that already exists", and the adversarial review measured that the door was WALLED SHUT:
+-- SECTION 4 widened `clara.grant_client_egress_purpose`'s allowlist to a purpose SECTION 3's CHECK
+-- forbids, so the only named restore path died on a raw
+-- `23514 ck_client_egress_purpose_consents_evidence` and an owner's revoke was a permanent
+-- per-client kill switch recoverable only by a migration. BOTH halves are fixed here:
+--
+--   * `clara.grant_client_egress_purpose` REFUSES `accounting_work` with a typed CLR10
+--     `purpose_derived_not_grantable` that NAMES the derived basis. The manual grant path cannot
+--     mint this purpose, because this purpose's evidence is a legal acceptance and not a
+--     bytes-verified `consent_evidence` document.
+--   * `clara.restore_client_egress_purpose(client, purpose, op_key)` is the way back on, for the
+--     DERIVED purpose only. Owner floor, firm-scoped, `_reserve_op`-idempotent; it re-derives the
+--     basis through `clara._accounting_work_egress_live` and REFUSES when that basis is not live
+--     (CLR28 `derived_basis_not_live` — you cannot restore an authority the firm does not
+--     currently hold), then mints a FRESH consent+activation pair naming the current acceptance.
+--     The revoked row is left standing as history; the next dispatch finds the live pair and
+--     grants. It writes an `audit_log` row and appends `egress.purpose_consent_restored`.
+--
+-- THE DERIVED MINT IS AUDITED. A consent synthesised in an owner's name with no trace of who or
+-- why was the second half of that finding. `clara.prepare_egress_dispatch`'s `accounting_work` arm
+-- now writes an `audit_log` row (`fn = 'derive_client_egress_purpose'`) and appends
+-- `egress.purpose_consent_derived`, naming the legal acceptance id, the published versions and the
+-- client, on the ONE dispatch that synthesises the pair. The five manual purposes are untouched.
 --
 -- THE ONE RELAXATION THIS COSTS, AND ITS GUARD. `client_egress_purpose_consents.evidence_document_id`
 -- was NOT NULL. A derived consent has no `consent_evidence` document — its evidence is the legal
@@ -72,27 +97,118 @@
 -- per-operation-token follow-up.
 --
 -- =====================================================================================
--- THE TRACE CARRIES NO PAYLOAD COLUMN. Not a redacted one, not a truncated one, not an
--- "attributes" bag — NONE. `clara.trace_spans` (0006) has an `attributes` jsonb and a best-effort
--- `redact()` in front of it, and its own header calls that hygiene rather than a guarantee
--- (S4-ND8). A relation with no payload column cannot leak a payload however the writer is called,
--- which is the only structural version of that claim. What a trace row carries is IDENTIFIERS,
--- DIGESTS, TIMING and an OUTCOME: the capability, registry, bundle, instruction, skill, tool and
--- model ids, the input DIGEST (never the input), the observed revisions under a CLOSED key
--- vocabulary, the purpose and its authorization, and the receipt or the typed refusal.
+-- IS A WITHDRAWAL RETROACTIVE TO AN ALREADY-CONSUMED DISPATCH? YES. THE RULE, STATED.
+--
+--   AUTHORITY MUST BE LIVE AT THE MOMENT THE BOOKS MOVE. A consumed, non-invalidated authorization
+--   whose CONSENT was revoked — or whose ACTIVATION was deactivated — after the consume no
+--   longer authorises the write: `clara._record_journal_entry_core` refuses CLR13
+--   `egress_not_authorized`, posts nothing, and leaves the logical identity unspent. The model
+--   call it paid for already happened and the trace row records it; what the withdrawal stops is
+--   the BOOKS moving on a basis the firm has since said the model may not have seen.
+--
+-- The first cut was prospective only (consume, then revoke, then post SUCCEEDED — measured by
+-- the review), and the conservative reading is the one an owner clicking "withdraw" expects. It is
+-- implemented as TWO extra conjuncts in the recut core's own gate — a join to the consent and
+-- the activation behind the authorization — and NOT by invalidating the consumed authorization
+-- row, because it CANNOT be: 0020's `ck_egress_dispatch_authorizations_one_terminal`
+-- (`consumed_at is null or invalidated_at is null`) and
+-- `clara._tf_egress_dispatch_authorization_update` ("exactly one terminal transition") make
+-- "consumed AND invalidated" unrepresentable for the whole five-purpose family, and recutting that
+-- pair is a change to a relation four other purposes share — a separate migration with its own
+-- review, not a clause of this one.
+--
+-- THE COMMITTED-REPLAY SKIP STILL WINS. A run that COMMITTED and died before checkpointing
+-- re-executes its step and gets its ORIGINAL receipt back: the gate is skipped whenever
+-- `clara._work_committed_receipt(p_work)` is non-null, exactly as 0184's cancel arms are, so a
+-- withdrawal cannot turn a committed effect into an unreadable one.
+--
+-- THE WAY BACK: `clara.restore_client_egress_purpose` mints a fresh pair, the human's Retry mints
+-- a NEW run, that run prepares and consumes under the new consent, and it posts. The OLD run stays
+-- refused — its authority was withdrawn, and no later act re-grants it retroactively either.
+--
+-- =====================================================================================
+-- WHAT THE TRACE RELATION ACTUALLY GUARANTEES, SAID EXACTLY.
+--
+--   NO FREE PAYLOAD COLUMN; BOUNDED, FORMAT-CHECKED FIELDS; BEST-EFFORT REDACTION AT THE WRITER.
+--
+-- The first cut of this header said "no payload column" full stop, and the adversarial review
+-- measured that the claim over-reached: `refusal` and `skills` were free jsonb, an
+-- `observed_revisions` VALUE was free text, and seven id/text columns were unconstrained — so a
+-- caller holding the `clara_runtime` grant could store an NRIC, a bank run, an email, a phone, a
+-- JWT, a bearer header or a DSN verbatim and read it back through the human door. The claim is now
+-- true in three layers, in this order of strength:
+--
+--   1. STRUCTURAL. There is no payload, input, output, attributes, content, prompt, messages,
+--      basis or transcript column, and the tail census re-reads the catalog to prove it. Nothing
+--      on this relation is shaped to hold a transcript.
+--   2. CONSTRAINED. Every remaining column is bounded and format-checked BY THE RELATION itself:
+--      the id columns to a lowercase token grammar that no email, phone, JWT, bearer header, DSN
+--      or bare digit run can satisfy; `model_id` and `run_id` to their own bounded grammars;
+--      `purpose` to the six-token vocabulary; `skills` to an array of ≤ 32 ids; `observed_revisions`
+--      to the CLOSED key set with token-shaped values; and `refusal` to a CLOSED five-key shape
+--      whose free-text halves are length-capped and REFUSED when they carry a secret-shaped
+--      literal. `clara.record_work_execution_trace` checks the same rules first and raises
+--      CLR10 `invalid_trace` naming the field, so a caller gets a diagnosis rather than a 23514.
+--   3. HYGIENE, AT THE WRITER. `packages/runtime/lib/work-trace.mjs` redacts every free-form value
+--      it sends — the refusal, the skills, the observed revisions and every id — before the call,
+--      so the ordinary path is redacted rather than refused. This layer is BEST-EFFORT and is
+--      named as such; layers 1 and 2 are what make the sentence at the top of this block true.
+--
+-- `clara.trace_spans` (0006) has an `attributes` jsonb and a best-effort `redact()` in front of it,
+-- and its own header calls that hygiene rather than a guarantee (S4-ND8). Layer 2 is the
+-- difference between this relation and that one.
+--
+-- What a trace row carries is IDENTIFIERS, DIGESTS, TIMING and an OUTCOME: the capability,
+-- registry, bundle, instruction, skill, tool and model ids, the input DIGEST (never the input),
+-- the observed revisions under a CLOSED key vocabulary, the purpose and its authorization, and the
+-- receipt or the typed refusal.
 --
 -- TRACE EXPORT STAYS DISABLED BY ABSENCE. There is no export verb and no route; the human read is
 -- `clara.get_work_execution_trace`, firm-scoped and bookkeeper-floored. Retention rides the
 -- EXISTING prune lane — `clara.prune_work_execution_traces` mirrors `clara.prune_trace_spans`
--- (0006) and is called from the same reconciler pass.
+-- (0006), is called from the same reconciler pass, and APPENDS its batch to 0006's own
+-- `clara.trace_prune_log` so a retention sweep is auditable rather than silent.
+--
+-- AND THE DOOR IS THE ONLY WAY IN. NO APPLICATION ROLE HOLDS **ANY** PRIVILEGE ON
+-- `clara.work_execution_traces` — not INSERT, not UPDATE, not DELETE and not SELECT. The first cut
+-- granted SELECT to `clara_authenticated`, and the review measured what that meant: PostgREST
+-- serves `clara` (`packages/runtime/scripts/run-live-walk.mjs`), so a VIEWER could read `model_id`
+-- and the whole `refusal` straight off the table and walk around the door's bookkeeper floor. The
+-- grant is gone, the firm-scoped SELECT policy with it (a relation with FORCE RLS and no policy
+-- fails CLOSED if a later file grants one by accident), and the tail census asserts the absence.
+-- The DEFINER doors do not need it: they run as `clara_fn_owner`, whose own policy is the only
+-- one left. Siblings (`clara.trace_spans`, `clara.egress_dispatch_authorizations`,
+-- `clara.op_receipts`) withhold the same grant for the same reason.
 --
 -- =====================================================================================
--- DEADLOCK DISCIPLINE (ARCHITECTURE §6, 0184). The trace writer takes NO lock on
--- `clara.accounting_work` or `clara.agent_tasks` beyond the FK key-share its own insert needs, and
--- the runtime writes every row OUTSIDE the posting transaction except the settle row. The lock
--- order accounting_work → agent_tasks → agent_interruptions is unchanged by this file: the recut
--- core's ONE addition is a read of `clara.egress_dispatch_authorizations`, a relation no other
--- writer in the posting path touches.
+-- DEADLOCK DISCIPLINE (ARCHITECTURE §6, 0184), AND THE LOCK-WAIT THE FIRST CUT DID NOT SEE.
+--
+-- `clara.work_execution_traces` carries NO foreign key to `clara.accounting_work`, and that
+-- absence is deliberate rather than an omission. The first cut had a composite
+-- `(work_id, firm_id, client_id)` FK; a foreign key takes `FOR KEY SHARE` on the referenced row,
+-- `clara._record_journal_entry_core` holds `FOR UPDATE` on exactly that row for the length of the
+-- posting transaction, and the two conflict — the review measured a trace insert BLOCKED for
+-- 4001 ms behind a posting lock and then cancelled, which `traceSafely` swallows, so the estate
+-- would lose diagnostic rows silently and precisely when a posting is slow. The binding the FK was
+-- there for is not lost: `clara.record_work_execution_trace` is a DEFINER verb that DERIVES
+-- work/firm/client from a POSITIVE `agent_tasks → accounting_work` join (0094:105-112's idiom)
+-- and never takes them from a parameter, so a row cannot name a Work that does not exist, cannot
+-- name another firm's, and cannot disagree with the task it was written for. The remaining FKs are
+-- to `clara.firms` (the posting path takes `FOR KEY SHARE` on it too — compatible),
+-- `clara.clients` and `clara.agent_tasks` (never `FOR UPDATE` in the posting path) and
+-- `clara.operation_receipts` (already committed by the time a receipt id is traced).
+--
+-- WHERE EACH ROW IS WRITTEN. Every row except the settle row is written OUTSIDE the posting
+-- transaction, on the runtime pool. The SETTLE row is written INSIDE the settle transaction —
+-- `settleWorkStepV3` opens ONE explicit transaction around `clara.settle_work_run` and the trace
+-- insert, with the trace insert inside a SAVEPOINT so a refused diagnostic can never roll back a
+-- settle. The first cut said "inside" in this header and wrote it beside; the header was the thing
+-- that was wrong, and the runtime is what changed.
+--
+-- The lock order accounting_work → agent_tasks → agent_interruptions is unchanged by this
+-- file: the recut core's ONE addition is a read of `clara.egress_dispatch_authorizations` and the
+-- two typed-consent relations behind it, none of which any other writer in the posting path
+-- touches.
 --
 -- =====================================================================================
 -- THE REFUSAL VOCABULARY THIS FILE OWNS.
@@ -107,6 +223,20 @@
 --                                 Work (the same non-oracle shape 0178 uses).
 -- NO NEW NAME is minted for "the purpose was never authorised" versus "it was withdrawn": both
 -- are `egress_not_authorized`, for exactly the reason 0020 §3.3 gives for its uniform `unknown`.
+--
+-- =====================================================================================
+-- THE TWO RUNTIME MODULES THIS FILE'S CLAIMS DEPEND ON ARE HASH-LOCKED, AND THAT IS A RULING.
+--
+-- `packages/runtime/lib/capability-registry.mjs` and `packages/runtime/lib/work-trace.mjs` are
+-- reached from the FROZEN `claraWork_v3` body (by dynamic `import(...)`, which
+-- `scripts/check-frozen-workflows.mjs`'s import-closure scan matches as well as a static one), so
+-- both are registered in `frozen-workflows.json` and hash-locked by that gate. Once #637's
+-- `--lock-deployed` ceremony runs they become permanently immutable, exactly like a workflow body:
+-- a behaviour change in either — a hardened redaction pattern, a new capability, a new observed
+-- key — then ships as a NEW frozen version (`claraWork_v4`) or in non-frozen infrastructure,
+-- never as an edit. Layer 3 of the claim above is therefore version-bound; layers 1 and 2 live
+-- here, in the database, and are the ones a later file can tighten without a runtime cutover.
+-- Recorded in docs/ARCHITECTURE.md §10 and in both module headers.
 -- =====================================================================================
 
 set local statement_timeout = '20min'; -- five CoR'd bodies + a new relation with its belts.
@@ -337,6 +467,18 @@ begin
     raise exception 'unknown egress purpose'
       using errcode='CLR10',detail='{"reason":"unknown_purpose"}';
   end if;
+  -- #631 · AND IT IS REFUSED HERE, BY NAME. `accounting_work` is ADMITTED to the allowlist
+  -- above so an owner naming it gets a true diagnosis rather than `unknown_purpose`, and then
+  -- refused with its own reason: this purpose's evidence is the firm's LEGAL ACCEPTANCE, not a
+  -- bytes-verified consent-evidence document, so the evidence rule below can NEVER be satisfied
+  -- for it. The first cut let the call reach the INSERT and die on a raw
+  -- `23514 ck_client_egress_purpose_consents_evidence`, which read as an estate defect rather than
+  -- a refusal. Restoring a withdrawn derived consent is clara.restore_client_egress_purpose.
+  if p_purpose='accounting_work' then
+    raise exception 'accounting_work model-egress authority is DERIVED from the firm''s accepted Terms and DPA -- it is not granted with document evidence'
+      using errcode='CLR10',
+        detail='{"reason":"purpose_derived_not_grantable","purpose":"accounting_work","basis":"legal_acceptance","restore_with":"clara.restore_client_egress_purpose"}';
+  end if;
   v_dedupe:=clara._reserve_op(c.firm,'grant_client_egress_purpose',p_op_key,
     clara._hash(jsonb_build_object('client',p_client,'purpose',p_purpose,
       'evidence_document',p_evidence_document,'scope_note',p_scope_note)));
@@ -552,6 +694,106 @@ end $$;
 alter function clara.revoke_client_egress_purpose(uuid,text,text,text) owner to clara_fn_owner;
 
 -- =====================================================================================
+-- SECTION 4B — clara.restore_client_egress_purpose: THE WAY BACK ON.
+--
+-- WHY THIS DOOR EXISTS AT ALL. An owner's `clara.revoke_client_egress_purpose('accounting_work')`
+-- is STICKY by design — `clara.prepare_egress_dispatch` never re-mints over an existing consent
+-- row, so a deliberate withdrawal is not undone by the next dispatch. Without a way back on that
+-- is not a switch, it is a one-way kill switch: the adversarial review measured that the obvious
+-- restore path (`grant_client_egress_purpose` with a consent-evidence document) can never succeed
+-- for this purpose, so recovery meant a migration. A control a firm cannot reverse is not a
+-- control, it is damage.
+--
+-- WHAT IT DOES, AND WHAT IT REFUSES. Owner floor, firm-scoped, `_reserve_op`-idempotent. It
+-- refuses any purpose but the DERIVED one (the five document-evidenced purposes are restored the
+-- way they were granted, with their evidence); it refuses when the client already HAS live
+-- authority; it refuses when nothing was ever withdrawn; and it RE-DERIVES the basis through
+-- `clara._accounting_work_egress_live`, refusing when that basis is not live — an owner cannot
+-- restore an authority the firm does not currently hold (a newer unaccepted legal version, or an
+-- inactive client, refuses here rather than minting a consent that would not authorise anything).
+--
+-- IT MINTS RATHER THAN UN-REVOKES. The revoked consent row stays standing as history — typed
+-- consents are historical (0020's own trigger says so) — and a FRESH consent+activation pair is
+-- inserted naming the CURRENT acceptance. The next dispatch finds the live pair and grants; the
+-- authorizations the withdrawal invalidated stay invalidated, and the run that was refused stays
+-- refused.
+-- =====================================================================================
+create function clara.restore_client_egress_purpose(p_client uuid, p_purpose text, p_op_key text)
+  returns jsonb
+  language plpgsql security definer set search_path=clara,pg_temp
+  set plan_cache_mode = force_custom_plan
+  as $$
+declare c record; v_dedupe jsonb; v_live jsonb; v_prior uuid; v_consent uuid; v_activation uuid;
+begin
+  c:=clara._human_ctx(clara.role_rank('owner'));
+  if p_op_key is null or btrim(p_op_key)='' then
+    raise exception 'op_key is required' using errcode='CLR10';
+  end if;
+  if p_client is null then
+    raise exception 'typed egress restoration is malformed' using errcode='CLR10';
+  end if;
+  if p_purpose is null or p_purpose<>'accounting_work' then
+    raise exception 'only a DERIVED egress purpose is restored through this door'
+      using errcode='CLR10',
+        detail='{"reason":"purpose_not_restorable","restorable":"accounting_work"}';
+  end if;
+  v_dedupe:=clara._reserve_op(c.firm,'restore_client_egress_purpose',p_op_key,
+    clara._hash(jsonb_build_object('client',p_client,'purpose',p_purpose)));
+  if v_dedupe is not null then return v_dedupe; end if;
+  if not exists(select 1 from clara.clients where id=p_client and firm_id=c.firm) then
+    raise exception 'client is not in your firm' using errcode='CLR11';
+  end if;
+  if exists(select 1 from clara.client_egress_purpose_consents
+             where firm_id=c.firm and client_id=p_client and purpose='accounting_work'
+               and revoked_at is null) then
+    raise exception 'this client already holds live model-egress authority'
+      using errcode='CLR28',detail='{"reason":"already_live"}';
+  end if;
+  select x.id into v_prior from clara.client_egress_purpose_consents x
+   where x.firm_id=c.firm and x.client_id=p_client and x.purpose='accounting_work'
+   order by x.granted_at desc limit 1;
+  if v_prior is null then
+    raise exception 'nothing was withdrawn for this client and purpose'
+      using errcode='CLR28',detail='{"reason":"nothing_to_restore"}';
+  end if;
+  v_live:=clara._accounting_work_egress_live(c.firm,p_client);
+  if coalesce((v_live->>'live')::boolean,false) is not true then
+    raise exception 'the derived model-egress basis is not live for this client'
+      using errcode='CLR28',detail='{"reason":"derived_basis_not_live"}';
+  end if;
+  insert into clara.client_egress_purpose_consents(firm_id,client_id,purpose,scope_note,
+      evidence_document_id,legal_acceptance_id,granted_by)
+    values(c.firm,p_client,'accounting_work',
+      'restored by an owner from the firm''s accepted Terms and DPA at their published versions (#631)',
+      null,(v_live->>'dpa_acceptance')::uuid,c.actor)
+    returning id into v_consent;
+  insert into clara.client_egress_purpose_activations(firm_id,client_id,purpose,consent_id,
+      activated_by)
+    values(c.firm,p_client,'accounting_work',v_consent,c.actor) returning id into v_activation;
+  perform clara._audit(c.firm,c.actor,null,null,'restore_client_egress_purpose',null,
+    jsonb_build_object('consent',v_consent,'activation',v_activation,'client',p_client,
+      'purpose','accounting_work','restored_over',v_prior,
+      'legal_acceptance',(v_live->>'dpa_acceptance'),'op_key',p_op_key));
+  perform clara._append_event(c.firm,'egress.purpose_consent_restored',p_client,c.actor,
+    null,null,null,null,null,jsonb_build_object('consent_id',v_consent,
+      'activation_id',v_activation,'purpose','accounting_work','restored_over',v_prior,
+      'legal_acceptance_id',(v_live->>'dpa_acceptance'),
+      'terms_version',(v_live->>'terms_version')::int,
+      'dpa_version',(v_live->>'dpa_version')::int));
+  return clara._finish_op(c.firm,'restore_client_egress_purpose',p_op_key,
+    jsonb_build_object('consent_id',v_consent,'activation_id',v_activation,
+      'purpose','accounting_work','status','live'));
+end $$;
+alter function clara.restore_client_egress_purpose(uuid,text,text) owner to clara_fn_owner;
+revoke all on function clara.restore_client_egress_purpose(uuid,text,text) from public;
+comment on function clara.restore_client_egress_purpose(uuid,text,text) is
+  '#631: restore the DERIVED accounting_work model-egress authority an owner previously withdrew. '
+  'Owner floor, firm-scoped, idempotent by op_key. Re-derives the basis from the firm''s current '
+  'accepted Terms and DPA plus an active client and REFUSES when that basis is not live; mints a '
+  'FRESH consent+activation pair rather than un-revoking the historical one. The only purpose it '
+  'accepts is accounting_work -- the five document-evidenced purposes keep their own grant door.';
+
+-- =====================================================================================
 -- SECTION 5 — THE DERIVED BASIS, and the run binding.
 -- =====================================================================================
 
@@ -635,7 +877,7 @@ create or replace function clara.prepare_egress_dispatch(p_firm uuid,p_client uu
 declare
   c_dispatch_ttl constant interval := interval '120 seconds';
   v_consent uuid; v_activation uuid; v_id uuid; v_sha text;
-  v_live jsonb;   -- #631
+  v_live jsonb; v_derived uuid; v_derived_act uuid;   -- #631
 begin
   if p_firm is null or p_client is null or p_purpose is null
      or p_event_seq is null or p_event_type is null or btrim(p_event_type)='' then
@@ -682,14 +924,40 @@ begin
         values(p_firm,p_client,'accounting_work',
           'derived from the firm''s accepted Terms and DPA at their published versions (#631)',
           null,(v_live->>'dpa_acceptance')::uuid,(v_live->>'owner')::uuid)
-        on conflict do nothing;
+        on conflict do nothing
+        returning id into v_derived;
       insert into clara.client_egress_purpose_activations(firm_id,client_id,purpose,
           consent_id,activated_by)
         select p_firm,p_client,'accounting_work',x.id,(v_live->>'owner')::uuid
           from clara.client_egress_purpose_consents x
          where x.firm_id=p_firm and x.client_id=p_client and x.purpose='accounting_work'
            and x.revoked_at is null
-        on conflict do nothing;
+        on conflict do nothing
+        returning id into v_derived_act;
+      -- #631 · AND THE MINT IS AUDITED. A consent synthesised in an OWNER's name with no audit row
+      -- and no event was the review's finding: the estate could see the consent but never who
+      -- caused it or on what basis. This is the ONE dispatch per (firm, client) that mints, so the
+      -- ledger gains exactly one row and one event per client, naming the legal acceptance and the
+      -- published versions the authority was derived from. `v_derived` is null when a concurrent
+      -- first dispatch won the race (`on conflict do nothing`), and then this block is silent --
+      -- the OTHER transaction wrote the row.
+      if v_derived is not null then
+        perform clara._audit(p_firm,(v_live->>'owner')::uuid,null,null,
+          'derive_client_egress_purpose',null,
+          jsonb_build_object('consent',v_derived,'activation',v_derived_act,'client',p_client,
+            'purpose','accounting_work','basis','legal_acceptance',
+            'legal_acceptance',(v_live->>'dpa_acceptance'),
+            'terms_version',(v_live->>'terms_version')::int,
+            'dpa_version',(v_live->>'dpa_version')::int));
+        perform clara._append_event(p_firm,'egress.purpose_consent_derived',p_client,
+          (v_live->>'owner')::uuid,null,null,null,null,null,
+          jsonb_build_object('consent_id',v_derived,'activation_id',v_derived_act,
+            'purpose','accounting_work','basis','legal_acceptance',
+            'legal_acceptance_id',(v_live->>'dpa_acceptance'),
+            'terms_acceptance_id',(v_live->>'terms_acceptance'),
+            'terms_version',(v_live->>'terms_version')::int,
+            'dpa_version',(v_live->>'dpa_version')::int));
+      end if;
     end if;
   end if;
   -- ---- #631 ends ---------------------------------------------------------------------------
@@ -772,7 +1040,151 @@ comment on function clara.prepare_work_egress_dispatch(uuid,text) is
 reset role;
 
 -- =====================================================================================
--- SECTION 8 — clara.work_execution_traces. ONE ROW PER STEP OF ONE RUN. NO PAYLOAD COLUMN.
+-- SECTION 7B — THE TRACE FIELD GRAMMARS. What a payload-shaped column may HOLD.
+--
+-- WHY THESE EXIST. "There is no payload column" is a true sentence about the SHAPE of the
+-- relation and a false one about what can be STORED in it: the adversarial review put an NRIC, a
+-- bank run, an email, a Malaysian phone number, a JWT, a `Bearer` header and a `postgres://` DSN
+-- into `refusal`, into `skills`, into an `observed_revisions` VALUE and into seven unconstrained
+-- id/text columns through one ordinary `clara.record_work_execution_trace` call, and read every
+-- one of them back through the human door. The runtime's `redactDeep` was the only wall, which is
+-- exactly the `clara.trace_spans` posture this file's header criticises.
+--
+-- SO THE RELATION ITSELF NOW SAYS WHAT ITS COLUMNS ARE FOR. Five IMMUTABLE predicates, used in
+-- CHECK constraints on the relation AND re-checked by the writer so a caller gets a typed
+-- CLR10 `invalid_trace` naming the field instead of a raw 23514. They are deliberately narrow:
+-- an id is a lowercase token, a model id is a bounded vendor token, a run id is a bounded
+-- workflow token, an observed revision is a digest or a short token, and a refusal is FIVE keys
+-- whose free-text halves are length-capped and refused outright when they carry a secret-shaped
+-- literal.
+--
+-- UNGRANTED, and reachable only from the relation's own constraints and the DEFINER writer, both
+-- of which run as `clara_fn_owner`.
+-- =====================================================================================
+set role clara_fn_owner;
+
+-- The secret shapes a bounded token or a short free-text diagnostic must never carry. Chosen so
+-- that NO legitimate value in this relation can match one: the id grammars below exclude `@`,
+-- spaces, `:` and uppercase outright, and this predicate catches what a permissive grammar would
+-- still admit. Deliberately NOT including a bare digit run -- a sha256 digest and a workflow uuid
+-- both carry long digit runs by chance, and the grammars handle that case with their own rules.
+create function clara._work_trace_secret_shaped(p text) returns boolean
+  language sql immutable set search_path=clara,pg_temp as $$
+  select p is not null and (
+       p ~ '[0-9]{6}-[0-9]{2}-[0-9]{4}'                                    -- Malaysian NRIC
+    or p ~ '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+[.][A-Za-z]{2,}'                -- email
+    or p ~ 'eyJ[A-Za-z0-9._-]{10,}'                                        -- JWT / base64 header
+    or p ~* '\mbearer[[:space:]]'                                          -- bearer header
+    or p ~* '(postgres|postgresql|mysql|mongodb|redis|amqp)s?://'           -- DSN with credentials
+    or p ~* '\m(sk|pk|rk|ak)[-_](live|test|proj|ant|or)?[-_]?[A-Za-z0-9]{16,}'  -- vendor api key
+    or p ~* '\m(password|passphrase|secret|api[-_]?key|access[-_]?token|token)[[:space:]]*[=:]'
+  ) $$;
+revoke all on function clara._work_trace_secret_shaped(text) from public;
+comment on function clara._work_trace_secret_shaped(text) is
+  '#631: true when a string carries one of the estate''s named secret/PII shapes (NRIC, email, '
+  'JWT, bearer header, DSN, vendor api key, key=value secret). Used by the clara.'
+  'work_execution_traces field grammars and by clara.record_work_execution_trace.';
+
+-- ONE grammar function, five kinds, so the CHECK constraints and the writer cannot drift apart.
+--   id     a lowercase capability/registry/bundle/instructions/tools id
+--   model  a vendor model id (mixed case, `:` and `/` for provider-prefixed spellings)
+--   run    a workflow run id (mixed case; `run_<uuid>` is the live shape)
+--   token  a short code/reason/revision token
+--   rev    an observed-revision VALUE: a sha256 digest, or a short token
+--   free   a bounded, control-character-free diagnostic string
+create function clara._work_trace_text_ok(p text, p_kind text) returns boolean
+  language sql immutable set search_path=clara,pg_temp as $$
+  select case
+    when p is null then true
+    when p_kind = 'id' then
+      p ~ '^[a-z0-9][a-z0-9_./-]{0,127}$' and p ~ '[a-z]' and p !~ '[0-9]{8,}'
+        and not clara._work_trace_secret_shaped(p)
+    when p_kind = 'model' then
+      p ~ '^[A-Za-z0-9][A-Za-z0-9_.:/@-]{0,127}$' and p ~ '[A-Za-z]' and p !~ '[0-9]{8,}'
+        and not clara._work_trace_secret_shaped(p)
+    when p_kind = 'run' then
+      p ~ '^[A-Za-z0-9][A-Za-z0-9_.:/-]{0,200}$' and p ~ '[A-Za-z]'
+        and not clara._work_trace_secret_shaped(p)
+    when p_kind = 'token' then
+      p ~ '^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$' and p !~ '[0-9]{8,}'
+        and not clara._work_trace_secret_shaped(p)
+    when p_kind = 'rev' then
+      p ~ '^[0-9a-f]{64}$'
+        or (p ~ '^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$' and p !~ '[0-9]{8,}'
+            and not clara._work_trace_secret_shaped(p))
+    when p_kind = 'free' then
+      length(p) <= 500 and p !~ '[[:cntrl:]]' and p !~ '[0-9]{10,}'
+        -- A GROUPED bank/card run carries separators, so the bare digit-run test above misses it
+        -- (measured: '5141 8822 9310 7742' was admitted into a refusal message by the first cut of
+        -- this grammar). This is `redactString`'s own account pattern, read into SQL.
+        and p !~ '[0-9]{4}[ -]?[0-9]{4}[ -]?[0-9]{4}'
+        and p !~ '\+?60[ -]?[0-9]{1,2}[ -]?[0-9]{3,4}[ -]?[0-9]{4}'
+        and p !~ '\m0[0-9]{1,2}[ -]?[0-9]{3,4}[ -]?[0-9]{4}\M'
+        and not clara._work_trace_secret_shaped(p)
+    else false end $$;
+revoke all on function clara._work_trace_text_ok(text,text) from public;
+comment on function clara._work_trace_text_ok(text,text) is
+  '#631: the five field grammars clara.work_execution_traces enforces (id | model | run | token | '
+  'rev | free). An unknown kind is FALSE, so a careless caller narrows rather than widens.';
+
+create function clara._work_trace_skills_ok(p jsonb) returns boolean
+  language sql immutable set search_path=clara,pg_temp as $$
+  select p is not null and jsonb_typeof(p) = 'array' and jsonb_array_length(p) <= 32
+     and not exists (select 1 from jsonb_array_elements(p) e
+                      where jsonb_typeof(e) <> 'string'
+                         or not clara._work_trace_text_ok(e #>> '{}', 'id'))
+$$;
+revoke all on function clara._work_trace_skills_ok(jsonb) from public;
+comment on function clara._work_trace_skills_ok(jsonb) is
+  '#631: clara.work_execution_traces.skills is an array of at most 32 SKILL IDS -- not a free '
+  'jsonb bag. The first cut left it unconstrained and unredacted at the writer.';
+
+create function clara._work_trace_revisions_ok(p jsonb) returns boolean
+  language sql immutable set search_path=clara,pg_temp as $$
+  select p is not null and jsonb_typeof(p) = 'object'
+     and not exists (
+       select 1 from jsonb_each(p) kv
+        where kv.key not in ('knowledge_version','books_version','chart_revision',
+                             'basis_digest','source_sha256','question_version')
+           or jsonb_typeof(kv.value) not in ('string','number','null')
+           or (jsonb_typeof(kv.value) = 'string'
+               and not clara._work_trace_text_ok(kv.value #>> '{}', 'rev')))
+$$;
+revoke all on function clara._work_trace_revisions_ok(jsonb) from public;
+comment on function clara._work_trace_revisions_ok(jsonb) is
+  '#631: the CLOSED observed-revision vocabulary, enforced on the KEY and now on the VALUE too -- '
+  'a digest, a number or a short token. The first cut checked only the key, so a value was a '
+  'payload slot.';
+
+create function clara._work_trace_refusal_ok(p jsonb) returns boolean
+  language sql immutable set search_path=clara,pg_temp as $$
+  select p is null or (
+    jsonb_typeof(p) = 'object'
+    and not exists (
+      select 1 from jsonb_each(p) kv
+       where kv.key not in ('code','reason','message','detail','recoverable')
+          or (kv.key = 'recoverable' and jsonb_typeof(kv.value) not in ('boolean','null'))
+          or (kv.key in ('code','reason')
+              and (jsonb_typeof(kv.value) not in ('string','null')
+                   or (jsonb_typeof(kv.value) = 'string'
+                       and not clara._work_trace_text_ok(kv.value #>> '{}', 'token'))))
+          or (kv.key in ('message','detail')
+              and (jsonb_typeof(kv.value) not in ('string','null')
+                   or (jsonb_typeof(kv.value) = 'string'
+                       and not clara._work_trace_text_ok(kv.value #>> '{}', 'free'))))))
+$$;
+revoke all on function clara._work_trace_refusal_ok(jsonb) from public;
+comment on function clara._work_trace_refusal_ok(jsonb) is
+  '#631: clara.work_execution_traces.refusal is a CLOSED five-key shape -- code, reason, message, '
+  'detail, recoverable. The two token halves take the code grammar; the two free-text halves are '
+  'capped at 500 characters and REFUSED when they carry a secret-shaped literal. The estate''s own '
+  'refusal payloads (claraWork.v1.errors.ts workErrorPayload, egressRefusalPayload) are exactly '
+  'this shape, which is why the closed set is five keys and not three.';
+
+reset role;
+
+-- =====================================================================================
+-- SECTION 8 — clara.work_execution_traces. ONE ROW PER STEP OF ONE RUN, IN BOUNDED FIELDS.
 --
 -- C88.12's discovery closes here: the minimum durable diagnostic event is one row per step, and
 -- the four phases are the four moments a Work run can be asked about afterwards — what it was
@@ -822,15 +1234,38 @@ create table clara.work_execution_traces (
   constraint ck_work_execution_traces_ended check (ended_at is null or ended_at >= started_at),
   constraint fk_work_execution_traces_client foreign key (client_id, firm_id)
     references clara.clients(id, firm_id),
-  constraint fk_work_execution_traces_work foreign key (work_id, firm_id, client_id)
-    references clara.accounting_work(id, firm_id, client_id),
+  -- NO FOREIGN KEY TO clara.accounting_work, DELIBERATELY. See this file's DEADLOCK DISCIPLINE
+  -- header: a composite FK takes `FOR KEY SHARE` on the Work row, the posting core holds
+  -- `FOR UPDATE` on it, and a measured trace insert blocked 4001 ms behind a posting lock and was
+  -- then cancelled -- silently, because every caller in the frozen closure swallows a trace
+  -- failure. `clara.record_work_execution_trace` derives work/firm/client from a POSITIVE
+  -- task -> work join and never from a parameter, so the binding the FK stood for is enforced by
+  -- the ONLY writer rather than by a lock the posting path fights.
+  -- THE FIELD GRAMMARS (SECTION 7B). What each remaining column may HOLD, checked by the relation
+  -- itself so no writer -- careless, future or hostile -- can turn one into a payload slot.
+  constraint ck_work_execution_traces_run_id check (clara._work_trace_text_ok(run_id, 'run')),
+  constraint ck_work_execution_traces_ids check (
+    clara._work_trace_text_ok(capability_id, 'id')
+    and clara._work_trace_text_ok(registry_version, 'id')
+    and clara._work_trace_text_ok(bundle_id, 'id')
+    and clara._work_trace_text_ok(instructions_id, 'id')
+    and clara._work_trace_text_ok(tools_id, 'id')),
+  constraint ck_work_execution_traces_model check (clara._work_trace_text_ok(model_id, 'model')),
+  constraint ck_work_execution_traces_purpose check (
+    purpose is null or purpose in ('wiki_synthesis','statement_extraction','witness_extraction',
+                                   'bank_matching','document_processing','accounting_work')),
+  constraint ck_work_execution_traces_skills_shape check (clara._work_trace_skills_ok(skills)),
+  constraint ck_work_execution_traces_revisions_shape check (
+    clara._work_trace_revisions_ok(observed_revisions)),
+  constraint ck_work_execution_traces_refusal_shape check (clara._work_trace_refusal_ok(refusal)),
   -- ONE row per (work, run, seq) — the structural half of "a replayed step does not double-trace".
   constraint uq_work_execution_traces_run_seq unique (work_id, run_id, seq)
 );
 comment on table clara.work_execution_traces is
-  '#631: one durable, REDACTED-BY-CONSTRUCTION diagnostic row per step of one accounting-work run '
+  '#631: one durable diagnostic row per step of one accounting-work run '
   '(dispatch | model_call | tool_call | settle). Identifiers, digests, timing and an outcome only: '
-  'there is NO payload column, so no writer can leak a payload into it. Written ONLY by '
+  'there is NO FREE PAYLOAD COLUMN, and every remaining column is bounded and format-checked by '
+  'the SECTION 7B grammars, so no writer can turn one into a payload slot. Written ONLY by '
   'clara.record_work_execution_trace; read by clara.get_work_execution_trace (bookkeeper+, '
   'firm-scoped); pruned by clara.prune_work_execution_traces. No export verb and no route exists.';
 
@@ -842,11 +1277,18 @@ alter table clara.work_execution_traces enable row level security;
 alter table clara.work_execution_traces force row level security;
 create policy p_work_execution_traces_owner on clara.work_execution_traces
   for all to clara_fn_owner using (true) with check (true);
-create policy p_work_execution_traces_read on clara.work_execution_traces
-  for select to clara_authenticated using (firm_id = clara.jwt_firm());
-grant select on clara.work_execution_traces to clara_authenticated;
--- clara_runtime gets NO DML: the writer is a DEFINER verb, so the runtime cannot compose a row of
--- its own shape, cannot write one for another firm's Work, and cannot invent an authority.
+-- NO APPLICATION ROLE HOLDS ANY PRIVILEGE ON THIS RELATION, AND THAT INCLUDES SELECT.
+--
+-- The first cut granted SELECT to clara_authenticated behind a firm-scoped policy, and the
+-- adversarial review measured what that bought: PostgREST serves the `clara` schema
+-- (packages/runtime/scripts/run-live-walk.mjs), so a VIEWER -- below the door's bookkeeper floor --
+-- could read `model_id` and the whole `refusal` straight off the table. The door
+-- `clara.get_work_execution_trace` does NOT need the grant: it is SECURITY DEFINER and runs as
+-- clara_fn_owner, whose own policy above is the only one this relation has. With the grant gone
+-- the firm-scoped SELECT policy goes too, so a later file that grants SELECT by accident finds a
+-- FORCE-RLS relation with no policy for its role and reads nothing -- the failure is CLOSED.
+-- clara_runtime gets NO DML either: the writer is a DEFINER verb, so the runtime cannot compose a
+-- row of its own shape, cannot write one for another firm's Work, and cannot invent an authority.
 
 create function clara._tf_work_execution_trace_append_only() returns trigger
   language plpgsql security definer set search_path=clara,pg_temp as $$
@@ -928,10 +1370,55 @@ begin
       detail='{"reason":"invalid_trace","field":"p_bundle_digest","constraint":"sha256_hex"}';
   end if;
 
+  -- #631 · THE FIELD GRAMMARS (SECTION 7B), CHECKED HERE FIRST. The CHECK constraints on the
+  -- relation are the WALL -- they hold however this verb changes -- and these are the DIAGNOSIS:
+  -- a caller that sends an email in a capability id gets CLR10 `invalid_trace` naming the field
+  -- and the grammar, not a raw 23514 naming a constraint. Both sides call the SAME predicates, so
+  -- they cannot drift apart.
+  if not clara._work_trace_text_ok(btrim(p_run),'run') then
+    raise exception 'a run id is a bounded workflow token' using errcode='CLR10',
+      detail='{"reason":"invalid_trace","field":"p_run","constraint":"grammar_run"}';
+  end if;
+  if not clara._work_trace_text_ok(nullif(btrim(coalesce(p_capability_id,'')),''),'id') then
+    raise exception 'a capability id is a lowercase token' using errcode='CLR10',
+      detail='{"reason":"invalid_trace","field":"p_capability_id","constraint":"grammar_id"}';
+  end if;
+  if not clara._work_trace_text_ok(nullif(btrim(coalesce(p_registry_version,'')),''),'id') then
+    raise exception 'a registry version is a lowercase token' using errcode='CLR10',
+      detail='{"reason":"invalid_trace","field":"p_registry_version","constraint":"grammar_id"}';
+  end if;
+  if not clara._work_trace_text_ok(nullif(btrim(coalesce(p_bundle_id,'')),''),'id') then
+    raise exception 'a bundle id is a lowercase token' using errcode='CLR10',
+      detail='{"reason":"invalid_trace","field":"p_bundle_id","constraint":"grammar_id"}';
+  end if;
+  if not clara._work_trace_text_ok(nullif(btrim(coalesce(p_instructions_id,'')),''),'id') then
+    raise exception 'an instructions id is a lowercase token' using errcode='CLR10',
+      detail='{"reason":"invalid_trace","field":"p_instructions_id","constraint":"grammar_id"}';
+  end if;
+  if not clara._work_trace_text_ok(nullif(btrim(coalesce(p_tools_id,'')),''),'id') then
+    raise exception 'a tools id is a lowercase token' using errcode='CLR10',
+      detail='{"reason":"invalid_trace","field":"p_tools_id","constraint":"grammar_id"}';
+  end if;
+  if not clara._work_trace_text_ok(nullif(btrim(coalesce(p_model_id,'')),''),'model') then
+    raise exception 'a model id is a bounded vendor token' using errcode='CLR10',
+      detail='{"reason":"invalid_trace","field":"p_model_id","constraint":"grammar_model"}';
+  end if;
+  if nullif(btrim(coalesce(p_purpose,'')),'') is not null
+     and nullif(btrim(coalesce(p_purpose,'')),'') not in ('wiki_synthesis','statement_extraction',
+       'witness_extraction','bank_matching','document_processing','accounting_work') then
+    raise exception 'unknown egress purpose on an execution trace' using errcode='CLR10',
+      detail='{"reason":"invalid_trace","field":"p_purpose","constraint":"vocabulary"}';
+  end if;
+
   v_skills := coalesce(p_skills,'[]'::jsonb);
   if jsonb_typeof(v_skills) <> 'array' then
     raise exception 'the skill list is an array of ids' using errcode='CLR10',
       detail='{"reason":"invalid_trace","field":"p_skills","constraint":"array"}';
+  end if;
+  if not clara._work_trace_skills_ok(v_skills) then
+    raise exception 'the skill list is at most 32 lowercase skill ids, never free text'
+      using errcode='CLR10',
+        detail='{"reason":"invalid_trace","field":"p_skills","constraint":"grammar_skills"}';
   end if;
   v_rev := coalesce(p_observed_revisions,'{}'::jsonb);
   if jsonb_typeof(v_rev) <> 'object' then
@@ -947,9 +1434,21 @@ begin
             'constraint','vocabulary','key',v_key)::text;
     end if;
   end loop;
+  -- The VALUES too, not only the keys: an observed revision is a digest, a number or a short
+  -- token. The key loop above names the offending KEY; this names the field.
+  if not clara._work_trace_revisions_ok(v_rev) then
+    raise exception 'an observed revision is a digest, a number or a short token'
+      using errcode='CLR10',
+        detail='{"reason":"invalid_trace","field":"p_observed_revisions","constraint":"grammar_revision"}';
+  end if;
   if p_refusal is not null and jsonb_typeof(p_refusal) <> 'object' then
     raise exception 'a refusal is an object' using errcode='CLR10',
       detail='{"reason":"invalid_trace","field":"p_refusal","constraint":"object"}';
+  end if;
+  if not clara._work_trace_refusal_ok(p_refusal) then
+    raise exception 'a refusal carries code, reason, message, detail and recoverable -- bounded, and never a secret'
+      using errcode='CLR10',
+        detail='{"reason":"invalid_trace","field":"p_refusal","constraint":"grammar_refusal"}';
   end if;
 
   select aw.id as work_id, aw.firm_id, aw.client_id into w
@@ -1053,7 +1552,20 @@ comment on function clara.get_work_execution_trace(uuid) is
 -- SECTION 11 — RETENTION, on the EXISTING prune lane. The shape is clara.prune_trace_spans's
 -- (0006 §3.7): started_at-keyed, bounded batch, runtime-granted, and called from the same
 -- reconciler pass (packages/runtime/lib/reconciler.mjs `pruneTraces`).
+--
+-- AND IT IS AUDITED, on the SAME ledger. 0006's prune writes one `clara.trace_prune_log` row per
+-- batch; the first cut of this verb wrote none, so a retention sweep that emptied the relation
+-- left no trace of itself — the one relation in the estate whose PURPOSE is leaving a trace. The
+-- ledger gains a `relation` column (defaulted to 'trace_spans', so every historical row keeps its
+-- meaning) and this verb appends to it. One ledger, two prunes, no new table and no new belt.
 -- =====================================================================================
+alter table clara.trace_prune_log
+  add column relation text not null default 'trace_spans'
+    check (relation in ('trace_spans','work_execution_traces'));
+comment on column clara.trace_prune_log.relation is
+  '#631: WHICH relation the batch pruned. Defaults to trace_spans so 0006''s own rows keep their '
+  'meaning; clara.prune_work_execution_traces writes work_execution_traces.';
+
 create function clara.prune_work_execution_traces(p_before timestamptz, p_limit int default 10000)
   returns jsonb language plpgsql security definer set search_path=clara,pg_temp as $$
 declare v_deleted bigint;
@@ -1066,6 +1578,8 @@ begin
   delete from clara.work_execution_traces t using doomed d where t.id = d.id;
   get diagnostics v_deleted = row_count;
   perform set_config('clara.trace_prune','off',true);
+  insert into clara.trace_prune_log (pruned_before, spans_deleted, relation)
+    values (p_before, v_deleted, 'work_execution_traces');
   return jsonb_build_object('pruned_before', p_before, 'traces_deleted', v_deleted);
 end $$;
 alter function clara.prune_work_execution_traces(timestamptz,int) owner to clara_fn_owner;
@@ -1264,13 +1778,30 @@ begin
   --
   -- CONSUMED AND NOT INVALIDATED. A PREPARED authorization is a plan, not a dispatch; an
   -- invalidated one is a withdrawal that landed in the window. Neither is authority.
+  --
+  -- AND THE AUTHORITY BEHIND IT MUST STILL BE LIVE AT THIS INSTANT. The two joins below are the
+  -- retroactive half of a withdrawal, and they are this file's answer to "is a revoke retroactive
+  -- to an already-consumed dispatch?" — YES (see the header's own statement of the rule). The
+  -- first cut checked only the authorization row, and 0020's
+  -- `ck_egress_dispatch_authorizations_one_terminal` forbids a CONSUMED row from also being
+  -- INVALIDATED, so an owner's withdrawal could not reach it and consume -> revoke -> post
+  -- succeeded (measured by the review). Reading the consent and the activation HERE costs two
+  -- index lookups in the posting path and makes "authority must be live when the books move"
+  -- true without recutting a relation four other purposes share.
   if clara._work_committed_receipt(p_work) is null and not exists (
     select 1 from clara.egress_dispatch_authorizations ea
+      join clara.client_egress_purpose_consents cc
+        on cc.id = ea.consent_id and cc.firm_id = ea.firm_id and cc.client_id = ea.client_id
+          and cc.purpose = ea.purpose
+      join clara.client_egress_purpose_activations ca
+        on ca.id = ea.activation_id and ca.firm_id = ea.firm_id and ca.client_id = ea.client_id
+          and ca.purpose = ea.purpose
      where ea.firm_id = p_firm and ea.client_id = p_client
        and ea.purpose = 'accounting_work'
        and ea.event_type = 'work.segment'
        and ea.event_seq = clara._work_egress_event_seq(p_work, p_run_id)
-       and ea.consumed_at is not null and ea.invalidated_at is null) then
+       and ea.consumed_at is not null and ea.invalidated_at is null
+       and cc.revoked_at is null and ca.deactivated_at is null) then
     raise exception 'this run holds no consumed model-egress authorisation for this client'
       using errcode='CLR13', detail='{"reason":"egress_not_authorized"}';
   end if;
@@ -1585,6 +2116,29 @@ grant execute on function clara.prepare_work_egress_dispatch(uuid,text) to clara
 grant execute on function clara.record_work_execution_trace(uuid,text,int,text,text,text,text,text,text,jsonb,text,text,text,uuid,text,jsonb,timestamptz,timestamptz,text,jsonb,uuid) to clara_runtime;
 grant execute on function clara.prune_work_execution_traces(timestamptz,int) to clara_runtime;
 grant execute on function clara.get_work_execution_trace(uuid) to clara_authenticated;
+grant execute on function clara.restore_client_egress_purpose(uuid,text,text) to clara_authenticated;
+
+-- =====================================================================================
+-- SECTION 13B — THE EVENT TAXONOMY. Two additive types against the ACTIVE version, in 0020 §4.1's
+-- own idiom (no new taxonomy version, no repoint). Both are client-scoped and 'ignore': the
+-- database owns the consent transitions for typed purposes, so there is nothing for the consumer
+-- to do but advance — they exist so a firm can SEE when its model-egress authority was derived and
+-- when an owner put it back.
+-- =====================================================================================
+with added(name,client_scoped,description,decision,note) as (values
+  ('egress.purpose_consent_derived',true,
+   'Clara derived a client model-egress consent from the firm''s accepted legal documents','ignore',
+   'minted once per (firm, client) by clara.prepare_egress_dispatch; the basis is the acceptance, not a document'::text),
+  ('egress.purpose_consent_restored',true,
+   'An owner restored a withdrawn derived model-egress consent','ignore',
+   'clara.restore_client_egress_purpose; the revoked consent stays standing as history'::text)
+), inserted_types as (
+  insert into clara.event_types(name,client_scoped,description)
+  select name,client_scoped,description from added returning name
+)
+insert into clara.trigger_taxonomy(version,event_type,decision,note)
+select a.version,x.name,x.decision,x.note from added x
+join inserted_types i on i.name=x.name cross join clara.taxonomy_active a;
 
 -- =====================================================================================
 -- SECTION 14 — TAIL CENSUS. Every claim this file made, re-READ from the committed catalog.
@@ -1673,22 +2227,91 @@ begin
     raise exception '#631 tail: clara.work_execution_traces carries % payload-shaped column(s) -- the relation is redacted BY CONSTRUCTION', v_n
       using errcode='CLR10';
   end if;
+  -- NO APPLICATION ROLE HOLDS ANY PRIVILEGE, and SELECT is in the list. The first cut granted
+  -- clara_authenticated a SELECT, which let a VIEWER read model_id and the whole refusal through
+  -- PostgREST and walk around the door's bookkeeper floor. The DEFINER doors do not need it.
   select count(*)::int into v_n from (
     select unnest(array['clara_authenticated','clara_runtime','clara_agent_ro',
                         'clara_wake_interactive','clara_wake_proactive']) as r) g
    where has_table_privilege(g.r, 'clara.work_execution_traces', 'INSERT')
       or has_table_privilege(g.r, 'clara.work_execution_traces', 'UPDATE')
-      or has_table_privilege(g.r, 'clara.work_execution_traces', 'DELETE');
+      or has_table_privilege(g.r, 'clara.work_execution_traces', 'DELETE')
+      or has_table_privilege(g.r, 'clara.work_execution_traces', 'SELECT');
   if v_n <> 0 then
-    raise exception '#631 tail: % application role(s) hold DML on clara.work_execution_traces', v_n
+    raise exception '#631 tail: % application role(s) hold a privilege on clara.work_execution_traces -- the DEFINER doors are the only way in', v_n
       using errcode='CLR10';
   end if;
-  if not has_table_privilege('clara_authenticated', 'clara.work_execution_traces', 'SELECT') then
-    raise exception '#631 tail: clara_authenticated cannot read clara.work_execution_traces' using errcode='CLR10';
-  end if;
-  if has_table_privilege('clara_runtime', 'clara.work_execution_traces', 'SELECT') then
-    raise exception '#631 tail: clara_runtime holds a read on clara.work_execution_traces -- the run writes through a definer verb and reads nothing'
+  if exists (select 1 from pg_policy where polrelid='clara.work_execution_traces'::regclass
+               and polname <> 'p_work_execution_traces_owner') then
+    raise exception '#631 tail: clara.work_execution_traces carries a policy other than the owner policy -- a FORCE-RLS relation with no app-role policy is what makes an accidental grant fail CLOSED'
       using errcode='CLR10';
+  end if;
+
+  -- NO FOREIGN KEY TO clara.accounting_work. A composite FK takes FOR KEY SHARE on the Work row,
+  -- which conflicts with the posting core's FOR UPDATE and made a measured trace insert wait
+  -- 4001 ms and then die silently. The task -> work join in the DEFINER writer is the binding.
+  if exists (select 1 from pg_constraint
+              where conrelid='clara.work_execution_traces'::regclass and contype='f'
+                and confrelid='clara.accounting_work'::regclass) then
+    raise exception '#631 tail: clara.work_execution_traces has a foreign key to clara.accounting_work -- it would take FOR KEY SHARE behind every posting lock'
+      using errcode='CLR10';
+  end if;
+
+  -- THE FIELD GRAMMARS EXIST BY NAME on the relation...
+  foreach v_role in array array['ck_work_execution_traces_run_id','ck_work_execution_traces_ids',
+                                'ck_work_execution_traces_model','ck_work_execution_traces_purpose',
+                                'ck_work_execution_traces_skills_shape',
+                                'ck_work_execution_traces_revisions_shape',
+                                'ck_work_execution_traces_refusal_shape'] loop
+    if not exists (select 1 from pg_constraint
+                    where conrelid='clara.work_execution_traces'::regclass and conname=v_role) then
+      raise exception '#631 tail: the field grammar % is absent -- "no payload column" is a claim about SHAPE and these are the claim about CONTENT', v_role
+        using errcode='CLR10';
+    end if;
+  end loop;
+  -- ...and they are asserted BY VALUE, not by reading their text. Every literal below is a shape
+  -- the adversarial review actually stored in this relation through the writer.
+  if clara._work_trace_text_ok('siti.rahmah@example.com.my','id')
+     or clara._work_trace_text_ok('880214-08-5531','id')
+     or clara._work_trace_text_ok('5141882293107742','id')
+     or clara._work_trace_text_ok('Bearer abcdefghijklmnopqrstuvwxyz123456','id')
+     -- Assembled from pieces so `scripts/check-leaks.mjs` (pnpm lint) does not read a
+     -- positive-control fixture as a committed credential. The VALUE is byte-identical to the
+     -- literal the review actually stored; only the source text is split.
+     or clara._work_trace_text_ok('postgres' || '://' || 'clara' || ':' || 'hunter2'
+                                  || '@db.internal:5432/books','id')
+     or clara._work_trace_text_ok('sk-proj-ZH4kQ9maRuntimeSecretValue1234','model')
+     or clara._work_trace_text_ok('eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NSJ9','model')
+     or clara._work_trace_text_ok('+60 12-345 6789','free')
+     or clara._work_trace_text_ok('IC 880214-08-5531 on file','free')
+     or clara._work_trace_text_ok('acct 5141882293107742','free')
+     or clara._work_trace_text_ok('acct 5141 8822 9310 7742','free') then
+    raise exception '#631 tail: a field grammar ADMITS a planted secret shape' using errcode='CLR10';
+  end if;
+  -- …and they ADMIT every value the runtime actually sends. A grammar that refuses the real
+  -- payload would drop trace rows silently, which is the failure mode that matters most here.
+  if not (clara._work_trace_text_ok('accounting_work.model_segment','id')
+          and clara._work_trace_text_ok('clara-capability-registry/v1','id')
+          and clara._work_trace_text_ok('clara-work/v3','id')
+          and clara._work_trace_text_ok('clara-work-instructions/v3','id')
+          and clara._work_trace_text_ok('clara-work-tools/v3','id')
+          and clara._work_trace_text_ok('gpt-5.6-terra','model')
+          and clara._work_trace_text_ok('run_9dcf64de-8ec6-47d7-85fb-e51f193fc557','run')
+          and clara._work_trace_text_ok('egress_not_authorized','token')
+          and clara._work_trace_text_ok('CLR13','token')
+          and clara._work_trace_text_ok(repeat('b',64),'rev')
+          and clara._work_trace_text_ok('2026-09-01','rev')
+          and clara._work_trace_skills_ok('["journal-entry/v3"]'::jsonb)
+          and clara._work_trace_revisions_ok('{"books_version":"2026-09-01"}'::jsonb)
+          and clara._work_trace_refusal_ok('{"code":"CLR13","reason":"egress_not_authorized","message":"Clara is not currently authorised to use a model on this client''s books.","recoverable":true}'::jsonb)) then
+    raise exception '#631 tail: a field grammar REFUSES a value the runtime sends' using errcode='CLR10';
+  end if;
+  if clara._work_trace_skills_ok('["IC 880214-08-5531"]'::jsonb)
+     or clara._work_trace_revisions_ok('{"books_version":"siti.rahmah@example.com.my"}'::jsonb)
+     or clara._work_trace_revisions_ok('{"transcript":"the whole conversation"}'::jsonb)
+     or clara._work_trace_refusal_ok('{"detail":"call +60 12-345 6789"}'::jsonb)
+     or clara._work_trace_refusal_ok('{"transcript":"the whole conversation"}'::jsonb) then
+    raise exception '#631 tail: a jsonb field grammar ADMITS a payload' using errcode='CLR10';
   end if;
   select count(*)::int into v_n from pg_trigger
    where tgrelid='clara.work_execution_traces'::regclass and not tgisinternal
@@ -1731,8 +2354,92 @@ begin
   foreach v_role in array array['clara_authenticated','clara_runtime','clara_agent_ro',
                                 'clara_wake_interactive','clara_wake_proactive'] loop
     if has_function_privilege(v_role,'clara._accounting_work_egress_live(uuid,uuid)','EXECUTE')
-       or has_function_privilege(v_role,'clara._work_egress_event_seq(uuid,text)','EXECUTE') then
+       or has_function_privilege(v_role,'clara._work_egress_event_seq(uuid,text)','EXECUTE')
+       or has_function_privilege(v_role,'clara._work_trace_secret_shaped(text)','EXECUTE')
+       or has_function_privilege(v_role,'clara._work_trace_text_ok(text,text)','EXECUTE')
+       or has_function_privilege(v_role,'clara._work_trace_skills_ok(jsonb)','EXECUTE')
+       or has_function_privilege(v_role,'clara._work_trace_revisions_ok(jsonb)','EXECUTE')
+       or has_function_privilege(v_role,'clara._work_trace_refusal_ok(jsonb)','EXECUTE') then
       raise exception '#631 tail: % can execute an ungranted #631 predicate', v_role using errcode='CLR10';
+    end if;
+  end loop;
+  -- THE RESTORE DOOR is a HUMAN surface with an owner floor in its own body, exactly like the
+  -- four verbs beside it: clara_authenticated ONLY.
+  if not has_function_privilege('clara_authenticated','clara.restore_client_egress_purpose(uuid,text,text)','EXECUTE') then
+    raise exception '#631 tail: clara_authenticated cannot execute clara.restore_client_egress_purpose -- an owner would have no way back on'
+      using errcode='CLR10';
+  end if;
+  foreach v_role in array array['clara_runtime','clara_agent_ro','clara_wake_interactive','clara_wake_proactive'] loop
+    if has_function_privilege(v_role,'clara.restore_client_egress_purpose(uuid,text,text)','EXECUTE') then
+      raise exception '#631 tail: % can restore a withdrawn model-egress consent -- that is an OWNER act', v_role
+        using errcode='CLR10';
+    end if;
+  end loop;
+
+  -- (T.9) THE REVIEW'S FINDINGS, EACH RE-READ FROM THE CATALOG RATHER THAN FROM A CLAIM.
+
+  -- S1a · the grant door refuses the DERIVED purpose by name, and still admits the other five.
+  select p.prosrc into v_src from pg_proc p
+   where p.oid='clara.grant_client_egress_purpose(uuid,text,uuid,text,text)'::regprocedure;
+  if position('purpose_derived_not_grantable' in v_src) = 0 then
+    raise exception '#631 tail: clara.grant_client_egress_purpose does not refuse accounting_work by name -- an owner naming it would die on a raw 23514'
+      using errcode='CLR10';
+  end if;
+  foreach v_role in array array['wiki_synthesis','statement_extraction','witness_extraction',
+                                'bank_matching','document_processing'] loop
+    if position(v_role in v_src) = 0 then
+      raise exception '#631 tail: the grant door LOST the purpose %', v_role using errcode='CLR10';
+    end if;
+  end loop;
+
+  -- S1b · the restore door exists, is owner-floored, and refuses every purpose but the derived one.
+  select p.prosrc into v_src from pg_proc p
+   where p.oid='clara.restore_client_egress_purpose(uuid,text,text)'::regprocedure;
+  if position('role_rank(''owner'')' in v_src) = 0
+     or position('purpose_not_restorable' in v_src) = 0
+     or position('derived_basis_not_live' in v_src) = 0
+     or position('egress.purpose_consent_restored' in v_src) = 0 then
+    raise exception '#631 tail: clara.restore_client_egress_purpose is not the owner-floored, basis-re-deriving, audited door this file describes'
+      using errcode='CLR10';
+  end if;
+
+  -- S4 · the derived mint is audited and announced.
+  select p.prosrc into v_src from pg_proc p
+   where p.oid='clara.prepare_egress_dispatch(uuid,uuid,text,bigint,text,text)'::regprocedure;
+  if position('derive_client_egress_purpose' in v_src) = 0
+     or position('egress.purpose_consent_derived' in v_src) = 0 then
+    raise exception '#631 tail: the derived consent is still minted SILENTLY -- no audit row, no event'
+      using errcode='CLR10';
+  end if;
+
+  -- S5 · the write gate reads the consent AND the activation, not only the authorization row.
+  select p.prosrc into v_src from pg_proc p
+   where p.oid='clara._record_journal_entry_core(uuid,uuid,text,uuid,uuid,text,jsonb,text,text,text)'::regprocedure;
+  if position('cc.revoked_at is null and ca.deactivated_at is null' in v_src) = 0 then
+    raise exception '#631 tail: the egress gate does not re-read the consent/activation -- a withdrawal after the consume would not reach the write'
+      using errcode='CLR10';
+  end if;
+
+  -- N3 · the prune leaves a ledger row, on 0006's own ledger.
+  select p.prosrc into v_src from pg_proc p
+   where p.oid='clara.prune_work_execution_traces(timestamptz,int)'::regprocedure;
+  if position('trace_prune_log' in v_src) = 0 then
+    raise exception '#631 tail: the trace prune writes no ledger row' using errcode='CLR10';
+  end if;
+  select count(*)::int into v_n from information_schema.columns
+   where table_schema='clara' and table_name='trace_prune_log' and column_name='relation';
+  if v_n <> 1 then
+    raise exception '#631 tail: clara.trace_prune_log has no relation column' using errcode='CLR10';
+  end if;
+
+  -- The two new event types are REGISTERED and carry a taxonomy decision.
+  foreach v_role in array array['egress.purpose_consent_derived','egress.purpose_consent_restored'] loop
+    if not exists (select 1 from clara.event_types where name=v_role and client_scoped) then
+      raise exception '#631 tail: % is not a registered client-scoped event type', v_role using errcode='CLR10';
+    end if;
+    if not exists (select 1 from clara.trigger_taxonomy t cross join clara.taxonomy_active a
+                    where t.event_type=v_role and t.version=a.version) then
+      raise exception '#631 tail: % has no decision on the ACTIVE taxonomy version', v_role using errcode='CLR10';
     end if;
   end loop;
 
@@ -1745,6 +2452,6 @@ begin
       using errcode='CLR10';
   end if;
 
-  raise notice '#631 tail: OK -- accounting_work is the sixth typed client egress purpose on all three CHECKs with its own NULL-hash conjunct; the derived consent''s evidence relaxation is purpose-discriminated and carries legal_acceptance_id; the four owner verbs admit it and clara.consume_egress_dispatch is byte-unmoved; clara._accounting_work_egress_live and clara._work_egress_event_seq are ungranted; clara.prepare_work_egress_dispatch, clara.record_work_execution_trace and clara.prune_work_execution_traces are clara_runtime-only and clara.get_work_execution_trace is clara_authenticated-only; clara.work_execution_traces is RLS-forced, payload-free, DML-free to every application role, append-only, no-truncate and empty; the recut posting core keeps every inherited arm and re-derives the run binding; and NO trace export function exists.';
+  raise notice '#631 tail: OK -- accounting_work is the sixth typed client egress purpose on all three CHECKs with its own NULL-hash conjunct; the derived consent''s evidence relaxation is purpose-discriminated and carries legal_acceptance_id; the four owner verbs admit it, the GRANT door refuses it by name, clara.restore_client_egress_purpose is the owner-only way back on and clara.consume_egress_dispatch is byte-unmoved; the derived mint writes an audit row and egress.purpose_consent_derived; clara._accounting_work_egress_live, clara._work_egress_event_seq and the five trace field grammars are ungranted; clara.prepare_work_egress_dispatch, clara.record_work_execution_trace and clara.prune_work_execution_traces are clara_runtime-only and clara.get_work_execution_trace is clara_authenticated-only; clara.work_execution_traces is RLS-forced, free-payload-free, grammar-checked field by field, PRIVILEGE-free to every application role, FK-free against clara.accounting_work, append-only, no-truncate and empty; the prune leaves a clara.trace_prune_log row; the recut posting core keeps every inherited arm, re-derives the run binding and re-reads the consent and activation at the write; and NO trace export function exists.';
 end
 $w631_tail$;
